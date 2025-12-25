@@ -1,0 +1,105 @@
+services:
+  caddy:
+    image: caddy:2.8
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - supabase-network
+
+  db:
+    container_name: supabase-db
+    image: supabase/postgres:15.1.1.78
+    healthcheck:
+      test: pg_isready -U postgres -h localhost
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    command:
+      - postgres
+      - -c
+      - config_file=/etc/postgresql/postgresql.conf
+      - -c
+      - log_min_messages=fatal
+    restart: unless-stopped
+    ports:
+      # Expose DB port for Manager and Projects to connect
+      - "5432:5432"
+    environment:
+      POSTGRES_HOST: /var/run/postgresql
+      PGPORT: 5432
+      POSTGRES_PORT: 5432
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: ${POSTGRES_DB}
+      POSTGRES_DB: ${POSTGRES_DB}
+      jwt_secret: ${JWT_SECRET}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXP: ${JWT_EXP}
+    volumes:
+      - ./volumes/db/realtime.sql:/docker-entrypoint-initdb.d/migrations/99-realtime.sql:Z
+      - ./volumes/db/logs.sql:/docker-entrypoint-initdb.d/migrations/99-logs.sql:Z
+      - ./volumes/db/webhooks.sql:/docker-entrypoint-initdb.d/migrations/98-webhooks.sql:Z
+      - ./volumes/db/roles.sql:/docker-entrypoint-initdb.d/migrations/99-roles.sql:Z
+      - ./volumes/db/jwt.sql:/docker-entrypoint-initdb.d/migrations/99-jwt.sql:Z
+      - ./volumes/db/data:/var/lib/postgresql/data
+      - ./volumes/db/init:/docker-entrypoint-initdb.d
+    networks:
+      - supabase-network
+
+  garage:
+    image: dxflrs/garage:v0.9
+    container_name: garage
+    restart: unless-stopped
+    ports:
+      - "3900:3900"
+      - "3901:3901"
+      - "3902:3902"
+      - "3903:3903" # Admin API
+    volumes:
+      - ./volumes/garage/meta:/var/lib/garage/meta
+      - ./volumes/garage/data:/var/lib/garage/data
+      - ./volumes/garage/config:/etc/garage
+    environment:
+      - RUST_LOG=info
+    networks:
+      - supabase-network
+
+  garage-web:
+    image: khairul169/garage-webui:latest
+    container_name: garage-web
+    restart: unless-stopped
+    ports:
+      - "3909:3000"
+    environment:
+      API_BASE_URL: http://garage:3903
+      API_ADMIN_KEY: replace_me_admin_token
+    networks:
+      - supabase-network
+
+  garage-init:
+    image: dxflrs/garage:v0.9
+    container_name: garage-init
+    depends_on:
+      garage:
+        condition: service_healthy
+    volumes:
+      - ./volumes/garage/config:/etc/garage
+      - ./volumes/garage/init-garage.sh:/init-garage.sh
+    entrypoint: [ "/bin/sh", "/init-garage.sh" ]
+    networks:
+      - supabase-network
+
+networks:
+  supabase-network:
+    external: true
+
+volumes:
+  caddy_data:
+  caddy_config:

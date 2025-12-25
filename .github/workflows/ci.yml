@@ -1,0 +1,37 @@
+
+name: SupaCloud CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Setup Bun
+      uses: oven-sh/setup-bun@v1
+      with:
+        bun-version: latest
+
+    - name: Install Dependencies (Manager)
+      working-directory: ./manager
+      run: bun install
+
+    - name: Run Tests (Manager)
+      working-directory: ./manager
+      run: bun test
+
+    - name: Install Dependencies (Bun Auth)
+      working-directory: ./templates/project/packages/bun-auth
+      run: bun install
+
+    - name: Run Tests (Bun Auth)
+      working-directory: ./templates/project/packages/bun-auth
+      run: bun test
