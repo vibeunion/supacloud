@@ -1,0 +1,184 @@
+services:
+  kong:
+    image: library/kong:2.8.1
+    restart: unless-stopped
+    ports:
+      # Internal ports, mapped by Caddy
+      - "${KONG_HTTP_PORT}:8000/tcp"
+    environment:
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /var/lib/kong/kong.yml
+      KONG_DNS_ORDER: LAST,A,CNAME
+      KONG_PLUGINS: request-transformer,correlation-id,cors,key-auth,hmac-auth,jwt,acl
+      KONG_NGINX_WORKER_PROCESSES: 1
+    volumes:
+      - ./config/kong.yml:/var/lib/kong/kong.yml:ro
+    networks:
+      - supabase-network
+
+  auth:
+    image: supabase/gotrue:v2.132.3
+    depends_on:
+      - db-check
+    restart: unless-stopped
+    environment:
+      GOTRUE_API_HOST: 0.0.0.0
+      GOTRUE_API_PORT: 9999
+      API_EXTERNAL_URL: ${API_EXTERNAL_URL}
+
+      # Connect to Global DB
+      GOTRUE_DB_DRIVER: postgres
+      GOTRUE_DB_DATABASE_URL: postgres://supabase_auth_admin:${POSTGRES_PASSWORD}@supabase-db:5432/${POSTGRES_DB}
+
+      GOTRUE_SITE_URL: ${SITE_URL}
+      GOTRUE_URI_ALLOW_LIST: ${ADDITIONAL_REDIRECT_URLS}
+      GOTRUE_JWT_SECRET: ${JWT_SECRET}
+      GOTRUE_JWT_EXP: ${JWT_EXP}
+      GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
+      GOTRUE_JWT_ADMIN_ROLES: service_role
+
+      GOTRUE_EXTERNAL_EMAIL_ENABLED: ${ENABLE_EMAIL_SIGNUP}
+      GOTRUE_MAILER_AUTOCONFIRM: ${ENABLE_EMAIL_AUTOCONFIRM}
+      GOTRUE_SMTP_ADMIN_EMAIL: ${SMTP_ADMIN_EMAIL}
+      GOTRUE_SMTP_HOST: ${SMTP_HOST}
+      GOTRUE_SMTP_PORT: ${SMTP_PORT}
+      GOTRUE_SMTP_USER: ${SMTP_USER}
+      GOTRUE_SMTP_PASS: ${SMTP_PASS}
+      GOTRUE_SMTP_SENDER_NAME: ${SMTP_SENDER_NAME}
+      GOTRUE_MAILER_URLPATHS_INVITE: ${MAILER_URLPATHS_INVITE}
+      GOTRUE_MAILER_URLPATHS_CONFIRMATION: ${MAILER_URLPATHS_CONFIRMATION}
+      GOTRUE_MAILER_URLPATHS_RECOVERY: ${MAILER_URLPATHS_RECOVERY}
+      GOTRUE_MAILER_URLPATHS_EMAIL_CHANGE: ${MAILER_URLPATHS_EMAIL_CHANGE}
+      GOTRUE_EXTERNAL_PHONE_ENABLED: ${ENABLE_PHONE_SIGNUP}
+      GOTRUE_SMS_AUTOCONFIRM: ${ENABLE_PHONE_AUTOCONFIRM}
+    networks:
+      - supabase-network
+
+  rest:
+    image: postgrest/postgrest:v12.0.1
+    depends_on:
+      - db-check
+    restart: unless-stopped
+    environment:
+      PGRST_DB_URI: postgres://authenticator:${POSTGRES_PASSWORD}@supabase-db:5432/${POSTGRES_DB}
+      PGRST_DB_SCHEMAS: ${PGRST_DB_SCHEMAS}
+      PGRST_DB_ANON_ROLE: anon
+      PGRST_JWT_SECRET: ${JWT_SECRET}
+      PGRST_DB_USE_LEGACY_GUC_VAR: "true"
+    networks:
+      - supabase-network
+
+  realtime:
+    image: supabase/realtime:v2.25.22
+    depends_on:
+      - db-check
+    restart: unless-stopped
+    environment:
+      PORT: 4000
+      DB_HOST: supabase-db
+      DB_PORT: 5432
+      DB_USER: supabase_admin
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+      DB_NAME: ${POSTGRES_DB}
+      DB_AFTER_CONNECT_QUERY: 'SET search_path TO _realtime'
+      DB_ENC_KEY: ${REALTIME_DB_ENC_KEY}
+      API_JWT_SECRET: ${JWT_SECRET}
+      FLY_ALLOC_ID: fly_alloc_id
+      FLY_APP_NAME: realtime
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE}
+      ERL_AFLAGS: -proto_dist inet_tcp
+      ENABLE_TAILSCALE: false
+      DNS_NODES: "''"
+    networks:
+      - supabase-network
+
+  storage:
+    image: supabase/storage-api:v1.11.13
+    depends_on:
+      - db-check
+      - rest
+    restart: unless-stopped
+    environment:
+      ANON_KEY: ${ANON_KEY}
+      SERVICE_KEY: ${SERVICE_ROLE_KEY}
+      POSTGREST_URL: http://rest:3000
+      PGRST_JWT_SECRET: ${JWT_SECRET}
+      DATABASE_URL: postgres://supabase_storage_admin:${POSTGRES_PASSWORD}@supabase-db:5432/${POSTGRES_DB}
+      FILE_SIZE_LIMIT: 52428800
+      STORAGE_BACKEND: s3
+      FILE_STORAGE_BACKEND_PATH: /var/lib/storage
+      TENANT_ID: stub
+      REGION: us-east-1
+      Global_S3_BUCKET: ${S3_BUCKET}
+
+      # Garage S3 Config
+      STORAGE_S3_REGION: us-east-1
+      GLOBAL_S3_BUCKET: ${S3_BUCKET}
+      AWS_ACCESS_KEY_ID: ${GARAGE_ACCESS_KEY}
+      AWS_SECRET_ACCESS_KEY: ${GARAGE_SECRET_KEY}
+      AWS_S3_ENDPOINT: http://garage:3900
+      AWS_Use_Path_Style_Endpoint: 'true'
+    networks:
+      - supabase-network
+
+  meta:
+    image: supabase/postgres-meta:v0.84.2
+    depends_on:
+      - db-check
+    restart: unless-stopped
+    environment:
+      PG_META_PORT: 8080
+      PG_META_DB_HOST: supabase-db
+      PG_META_DB_PORT: 5432
+      PG_META_DB_NAME: ${POSTGRES_DB}
+      PG_META_DB_USER: supabase_admin
+      PG_META_DB_PASSWORD: ${POSTGRES_PASSWORD}
+    networks:
+      - supabase-network
+
+  studio:
+    image: supabase/studio:20241223-2895244
+    restart: unless-stopped
+    ports:
+      - "${STUDIO_PORT}:3000"
+    environment:
+      STUDIO_PG_META_URL: http://meta:8080
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+
+      SUPABASE_URL: http://kong:8000
+      SUPABASE_PUBLIC_URL: ${SUPABASE_PUBLIC_URL}
+      SUPABASE_ANON_KEY: ${ANON_KEY}
+      SUPABASE_SERVICE_KEY: ${SERVICE_ROLE_KEY}
+
+      LOGFLARE_API_KEY: ${LOGFLARE_API_KEY}
+      LOGFLARE_URL: http://analytics:5432
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+    networks:
+      - supabase-network
+
+  # Helper to ensure Global DB is reachable
+  db-check:
+    image: busybox
+    command: sh -c "echo 'Waiting for Global DB...'; until nc -z supabase-db 5432; do sleep 1; done; echo 'DB Ready!'"
+    networks:
+      - supabase-network
+
+  bun-auth:
+    image: oven/bun:1
+    working_dir: /app
+    command: [ "bun", "run", "index.ts" ]
+    volumes:
+      - ./packages/bun-auth:/app
+    environment:
+      SUPABASE_URL: http://kong:8000
+      SUPABASE_SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY}
+      SUPABASE_DB_URL: postgres://postgres:${POSTGRES_PASSWORD}@supabase-db:5432/${POSTGRES_DB}
+      JWT_SECRET: ${JWT_SECRET}
+      WECHAT_MINIAPP_APPID: ${WECHAT_MINIAPP_APPID}
+      WECHAT_MINIAPP_SECRET: ${WECHAT_MINIAPP_SECRET}
+    networks:
+      - supabase-network
+
+networks:
+  supabase-network:
+    external: true

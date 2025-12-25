@@ -1,0 +1,43 @@
+_format_version: "2.1"
+_transform: true
+
+services:
+  - name: supabase-api
+    url: http://auth:9999
+    routes:
+      - name: auth-v1
+        paths:
+          - /auth/v1/
+        strip_path: false
+
+  - name: supabase-rest
+    url: http://rest:3000
+    routes:
+      - name: rest-v1
+        paths:
+          - /rest/v1/
+        strip_path: false
+
+  - name: supabase-realtime
+    url: http://realtime:4000
+    routes:
+      - name: realtime-v1
+        paths:
+          - /realtime/v1/
+        strip_path: false
+
+  - name: supabase-storage
+    url: http://storage:5000
+    routes:
+      - name: storage-v1
+        paths:
+          - /storage/v1/
+        strip_path: false
+
+  - name: bun-auth
+    url: http://bun-auth:9000
+    routes:
+      - name: bun-auth-wechat
+        paths:
+          - /auth/wechat
+        strip_path: false

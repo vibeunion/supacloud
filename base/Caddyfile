@@ -1,0 +1,8 @@
+{
+    # email {$SSL_EMAIL}
+    # debug
+}
+
+:80 {
+    respond "SupaCloud Gateway is running." 200
+}
