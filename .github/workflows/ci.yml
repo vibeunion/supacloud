@@ -20,6 +20,25 @@ jobs:
       with:
         bun-version: latest
 
+    - name: Start Docker Services
+      working-directory: ./base
+      env:
+        POSTGRES_PASSWORD: postgres
+        POSTGRES_DB: postgres
+        JWT_SECRET: super-secret-jwt-token-with-at-least-32-characters-length
+        JWT_EXP: 3600
+      run: |
+        docker network create supabase-network || true
+        echo "POSTGRES_PASSWORD=$POSTGRES_PASSWORD" > .env
+        echo "POSTGRES_DB=$POSTGRES_DB" >> .env
+        echo "JWT_SECRET=$JWT_SECRET" >> .env
+        echo "JWT_EXP=$JWT_EXP" >> .env
+        docker compose up -d
+        
+        echo "Waiting for services to be healthy..."
+        timeout 60s bash -c 'until docker compose ps | grep "healthy"; do sleep 5; done' || docker compose ps -a
+        docker compose ps
+
     - name: Install Dependencies (Manager)
       working-directory: ./manager
       run: bun install

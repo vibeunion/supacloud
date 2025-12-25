@@ -54,7 +54,7 @@ services:
       - supabase-network
 
   garage:
-    image: dxflrs/garage:v0.9
+    image: dxflrs/garage:v0.9.4
     container_name: garage
     restart: unless-stopped
     ports:
@@ -68,6 +68,11 @@ services:
       - ./volumes/garage/config:/etc/garage
     environment:
       - RUST_LOG=info
+    healthcheck:
+      test: [ "CMD", "wget", "-q", "--spider", "http://localhost:3903/health" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
     networks:
       - supabase-network
 
@@ -84,7 +89,7 @@ services:
       - supabase-network
 
   garage-init:
-    image: dxflrs/garage:v0.9
+    image: dxflrs/garage:v0.9.4
     container_name: garage-init
     depends_on:
       garage:
