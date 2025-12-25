@@ -69,11 +69,35 @@ describe("Manager Service Coverage", () => {
         mockShellExec.mockClear();
 
         // Default behaviors
+        // Default behaviors for simple mocks
         mockReaddir.mockResolvedValue([]);
         mockWrite.mockResolvedValue(undefined as never);
         mockFileExists.mockResolvedValue(false);
         mockFileText.mockResolvedValue("");
         mockSpawn.mockReturnValue({ exited: Promise.resolve(0) } as any);
+
+        // Reset Shell Exec to default success behavior
+        mockShellExec.mockImplementation((strings, ...values) => {
+            let outputText = "OK";
+            const cmdString = strings.join(" ");
+            if (cmdString.includes("key info")) {
+                outputText = "Key ID: GK123456\nSecret key: 1234567890abcdef";
+            }
+            const result = {
+                exitCode: 0,
+                stdout: new TextEncoder().encode(outputText),
+                stderr: new Uint8Array(0),
+                text: () => Promise.resolve(outputText),
+                json: () => Promise.resolve({})
+            };
+            return {
+                then: (onfulfilled: any, onrejected: any) => Promise.resolve(result).then(onfulfilled, onrejected),
+                catch: (onrejected: any) => Promise.resolve(result).catch(onrejected),
+                finally: (onfinally: any) => Promise.resolve(result).finally(onfinally),
+                text: result.text,
+                json: result.json
+            } as any;
+        });
     });
 
     test("getNextPorts (Empty)", async () => {
