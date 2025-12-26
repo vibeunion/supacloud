@@ -97,6 +97,29 @@ async function createProject(name: string) {
     const dbName = `db_${name}`;
     const bucketName = `${name}-storage`;
 
+    // Optional Features
+    // Generic Extension Port for custom protocols (MQTT, gRPC, TCP, UDP, etc)
+    // Users can use this port for any non-HTTP service their project needs.
+    const extPort = 9000 + offset;
+    const extPortConfig = `\n# Custom Protocol Port (MQTT/TCP/UDP)\nEXT_PORT=${extPort}\n`;
+
+
+
+    // 4. Provision Garage Bucket & Key (Automated) ... (omitted for brevity, unchanged)
+    // ... (Keep existing garage logic, re-read file if needed or assume unchanged context)
+    // Actually I need to be careful not to delete the intervening code.
+    // Since I cannot see all code here, I will use a targeted replacement for the beginning of function 
+    // and another for the env string.
+
+    // Wait, replace_file_content works on blocks. 
+    // I will split this into two edits to be safe and precise.
+    // Edit 1: Function signature and variable setup.
+    // Edit 2: Env string injection.
+
+    // Let's restart the thought process for the Tool Call to be safe.
+    // I will use two replace calls.
+
+
     // 2. Create DB
     await createDatabase(dbName);
 
@@ -182,6 +205,10 @@ async function createProject(name: string) {
 
     // TODO: Use actual JWT signing if possible.
 
+    // 4. Provision Garage Bucket & Key (Automated) ... (lines 111-173 omitted for brevity, logic remains same)
+
+
+
     const envContent = `
 POSTGRES_DB=${dbName}
 POSTGRES_PASSWORD=your-super-secret-and-long-postgres-password
@@ -191,6 +218,8 @@ POSTGRES_PORT=5432
 
 KONG_HTTP_PORT=${kongPort}
 STUDIO_PORT=${studioPort}
+${extPortConfig}
+
 S3_BUCKET=${bucketName}
 
 # Auth
@@ -200,7 +229,6 @@ ANON_KEY=${anonKey}
 SERVICE_ROLE_KEY=${serviceKey}
 SITE_URL=http://localhost:${studioPort}
 
-# Garage Keys (Automated Per-Project)
 # Garage Keys (Automated Per-Project)
 GARAGE_ACCESS_KEY=${garageAccessKey}
 GARAGE_SECRET_KEY=${garageSecretKey}
@@ -263,11 +291,62 @@ export const handler = async (req: Request) => {
     return new Response("Not Found", { status: 404 });
 };
 
+// 6. Auto-Initialize Manager (Zero Config)
+async function initManager() {
+    const configDir = join(BASE_DIR, "base", "volumes", "garage", "config");
+    const configPath = join(configDir, "garage.toml");
+
+    if (await exists(configPath)) {
+        console.log("Manager: Found existing garage.toml, skipping auto-init.");
+        return;
+    }
+
+    console.log("Manager: No garage.toml found. Auto-initializing...");
+
+    await deps.mkdir(configDir, { recursive: true });
+
+    const rpcSecret = crypto.randomUUID().replace(/-/g, '') + crypto.randomUUID().replace(/-/g, '');
+    const adminToken = crypto.randomUUID().replace(/-/g, '');
+
+    const tomlContent = `
+metadata_dir = "/var/lib/garage/meta"
+data_dir = "/var/lib/garage/data"
+db_engine = "sqlite"
+
+replication_mode = "none"
+
+rpc_bind_addr = "[::]:3901"
+rpc_public_addr = "127.0.0.1:3901"
+rpc_secret = "${rpcSecret}"
+
+[s3_api]
+s3_region = "us-east-1"
+api_bind_addr = "[::]:3900"
+root_domain = ".s3.localhost"
+
+[s3_web]
+bind_addr = "[::]:3902"
+root_domain = ".web.localhost"
+index = "index.html"
+
+[admin]
+api_bind_addr = "[::]:3903"
+admin_token = "${adminToken}"
+`;
+
+    await deps.write(configPath, tomlContent);
+    console.log("✅ Manager: Generated garage.toml with secure secrets.");
+    console.log(`   RPC Secret: ${rpcSecret.substring(0, 8)}...`);
+    console.log(`   Admin Token: ${adminToken}`);
+    console.log("⚠️  IMPORTANT: Please restart your Base services (docker compose restart garage) to apply these changes!");
+}
+
 // Export functions for testing
-export { createProject, getNextPorts, exists, createDatabase };
+export { createProject, getNextPorts, exists, createDatabase, initManager };
 
 // Start Server if main
 if (import.meta.main) {
+    await initManager();
     const server = deps.serve({
         port: 8888,
         fetch: handler,
