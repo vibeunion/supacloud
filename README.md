@@ -24,27 +24,37 @@ Unlike traditional deployments that waste GBs of RAM per project, SupaCloud enab
 
 ### 🚀 Quick Start
 
-#### 1. Initialize & Start
+#### 1. Installation
+
+**Linux & macOS**
 ```bash
-cd manager
-bun install
-bun run setup
-# This generates all secrets and configs automatically.
-
-cd ../base
-docker compose up -d
-# Wait for postgres and garage to be healthy
-
-cd ../manager
-bun run start
+curl -fsSL https://raw.githubusercontent.com/zuohuadong/supacloud/main/scripts/install.sh | bash
 ```
-Dashboard: http://localhost:8888
+
+**Windows (PowerShell)**
+```powershell
+iwr https://raw.githubusercontent.com/zuohuadong/supacloud/main/scripts/install.ps1 -useb | iex
+```
+
+#### 2. Initialize & Start
+After installation, you can initialize a workspace anywhere.
+
+```bash
+mkdir my-cloud && cd my-cloud
+supacloud init
+supacloud start
+```
 
 #### 3. Create Project
-1. Open Dashboard.
-2. Enter project name (e.g., `shop`).
-3. Click "Create".
-   - **Done!** Access your Studio at the assigned port (e.g., `http://localhost:3010`).
+```bash
+supacloud create shop
+```
+*   **Studio**: `http://shop.studio.localhost`
+*   **API**: `http://shop.localhost`
+
+#### 4. Commands
+*   `supacloud status` - Check platform status and logs.
+*   `supacloud help` - Show all commands.
 
 ### 📂 Architecture
 
@@ -75,27 +85,46 @@ Dashboard: http://localhost:8888
 
 ### 🚀 快速开始
 
-#### 1. 初始化与启动
+#### 1. 一键安装
+
+**Linux & macOS (使用国内加速)**
+```bash
+curl -fsSL https://ghproxy.net/https://raw.githubusercontent.com/zuohuadong/supacloud/main/scripts/install.sh | bash -s cn
+```
+
+**Windows (PowerShell - 使用国内加速)**
+```powershell
+$env:SUPACLOUD_CN=1; iwr https://ghproxy.net/https://raw.githubusercontent.com/zuohuadong/supacloud/main/scripts/install.ps1 -useb | iex
+```
+
+#### 2. 初始化与启动
+安装完成后，你可以在任意目录初始化一个新的云平台。
+
+```bash
+mkdir my-cloud && cd my-cloud
+supacloud init
+supacloud start
+```
+
+#### 3. 创建项目
+```bash
+supacloud create shop
+```
+*   **Studio**: `http://shop.studio.localhost`
+*   **API**: `http://shop.localhost`
+
+#### 4. 常用命令
+*   `supacloud status` - 查看平台状态和访问入口
+*   `supacloud help` - 查看所有命令
+
+#### (可选) 从源码构建
+如果你需要修改 Manager 逻辑或重新编译：
 ```bash
 cd manager
 bun install
-bun run setup
-# 这一步会自动生成所有密钥并配置环境
-
-cd ../base
-docker compose up -d
-# 等待 postgres 和 garage 进入健康状态
-
-cd ../manager
-bun run start
+bun run build
+# 输出: bin/supacloud (或 .exe)
 ```
-管理面板：http://localhost:8888
-
-#### 3. 创建项目
-1. 打开面板。
-2. 输入项目名（例如 `shop`）。
-3. 点击 "Create"。
-   - **完成！** 访问分配的 Studio 端口 (例如 `http://localhost:3010`)。
 
 ### 📂 架构设计
 

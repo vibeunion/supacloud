@@ -1,17 +1,21 @@
 services:
   caddy:
     image: caddy:2.8
+    container_name: supabase-gateway
     restart: always
     ports:
       - "80:80"
       - "443:443"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile
+      - ./volumes/caddy/sites:/etc/caddy/sites
 
       - caddy_data:/data
       - caddy_config:/config
     networks:
       - supabase-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
   db:
     container_name: supabase-db
@@ -92,6 +96,54 @@ services:
       - ./volumes/garage/config:/etc/garage
       - ./volumes/garage/init-garage.sh:/init-garage.sh
     entrypoint: [ "/bin/sh", "/init-garage.sh" ]
+    networks:
+      - supabase-network
+
+  dozzle:
+    container_name: dozzle
+    image: amir20/dozzle:latest
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - supabase-network
+
+  backup:
+    image: postgres:15-alpine
+    container_name: backup-service
+    depends_on:
+      - db
+      - garage
+    restart: unless-stopped
+    environment:
+      POSTGRES_HOST: supabase-db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      AWS_ACCESS_KEY_ID: ${GARAGE_ACCESS_KEY}
+      AWS_SECRET_ACCESS_KEY: ${GARAGE_SECRET_KEY}
+      AWS_DEFAULT_REGION: us-east-1
+      S3_ENDPOINT: http://garage:3900
+      BACKUP_BUCKET: sys-backups
+    volumes:
+      - ./utils/backup.sh:/backup.sh
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        apk add --no-cache aws-cli
+        chmod +x /backup.sh
+        
+        echo "Waiting for Garage..."
+        sleep 10
+        
+        # Create bucket if not exists
+        aws --endpoint-url $$S3_ENDPOINT s3 mb s3://$$BACKUP_BUCKET || true
+        
+        echo "Starting Backup Daemon (Daily)..."
+        while true; do
+          /backup.sh || echo "Backup failed!"
+          echo "Sleeping for 24h..."
+          sleep 86400
+        done
     networks:
       - supabase-network
 
