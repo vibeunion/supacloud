@@ -68,11 +68,6 @@ services:
       - ./volumes/garage/config:/etc/garage
     environment:
       - RUST_LOG=info
-    healthcheck:
-      test: [ "CMD", "curl", "-f", "-s", "http://127.0.0.1:3903/health" ]
-      interval: 10s
-      timeout: 5s
-      retries: 10
     networks:
       - supabase-network
 
@@ -92,8 +87,7 @@ services:
     image: dxflrs/garage:v0.9.4
     container_name: garage-init
     depends_on:
-      garage:
-        condition: service_healthy
+      - garage
     volumes:
       - ./volumes/garage/config:/etc/garage
       - ./volumes/garage/init-garage.sh:/init-garage.sh
