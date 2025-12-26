@@ -171,11 +171,82 @@ describe("Manager Service Coverage", () => {
     });
 
     test("Handler - Create Project Route", async () => {
+        // Mock Auth header
+        const authHeader = `Basic ${btoa("admin:test-password")}`;
+        
+        // Mock global ADMIN_PASSWORD
+        // Since ADMIN_PASSWORD is a module-level variable in index.ts that is set via initManager
+        // we might need to rely on the fact that initManager sets it.
+        // However, initManager reads from file.
+        // Let's mock the file read for AUTH_FILE (which is handled by mockFileText in beforeEach)
+        
+        // Update mock for AUTH_FILE
+        mockFileText.mockResolvedValue("test-password");
+        
+        // We need to trigger initManager to load the password?
+        // Actually, initManager isn't exported to be called here easily without side effects?
+        // It is exported! Let's import it.
+        const { initManager } = await import("../index");
+        
+        // Mock exists for AUTH_FILE to be true
+        mockFileExists.mockImplementation((path: any) => {
+            if (path && typeof path === 'object' && path.toString) {
+                 // Bun File object
+                 // If the path name ends with .manager_auth, return true
+                 // Note: bun file objects might be tricky to inspect in mocks if not proxied well
+                 // But let's assume our mock setup (spyOn deps.file) returns an object where we can control .exists()
+                 // Wait, deps.file returns an object with .exists() which is OUR mockFileExists function.
+                 // So 'path' here is actually NOT the path string, but.. wait.
+                 // spyOn(deps, "file").mockImplementation((path) => ...)
+                 // The implementation returns { exists: mockFileExists, ... }
+                 // So when code calls file(path).exists(), it calls mockFileExists().
+                 // But mockFileExists() receives NO arguments usually if called as file.exists().
+                 // Ah! deps.file(path).exists() -> exists() is called.
+                 // We need to capture the path from the deps.file call, not the exists call!
+            }
+            return Promise.resolve(false);
+        });
+        
+        // Correct approach:
+        // We need to customize deps.file to return a specific exists mock based on the path
+        spyOn(deps, "file").mockImplementation((path) => {
+            const pathStr = String(path);
+            return {
+                exists: () => {
+                     if (pathStr.endsWith(".manager_auth")) return Promise.resolve(true);
+                     return Promise.resolve(false);
+                },
+                text: () => {
+                     if (pathStr.endsWith(".manager_auth")) return Promise.resolve("test-password");
+                     return Promise.resolve("");
+                },
+                write: mockWrite
+            } as any;
+        });
+
+        await initManager();
+
         const req = new Request("http://localhost:8888/projects", {
             method: "POST",
+            headers: {
+                "Authorization": authHeader
+            },
             body: JSON.stringify({ name: "api-test" })
         });
+        
         const res = await handler(req);
+        
+        // Debugging output if status is not 200 (Clone first)
+        if (res.status !== 200) {
+            console.error("Handler failed with status:", res.status);
+            try {
+                const clone = res.clone();
+                console.error("Response text:", await clone.text());
+            } catch (e) {
+                console.error("Could not read response body:", e);
+            }
+        }
+
         const data = await res.json();
         expect(data.success).toBe(true);
     });
