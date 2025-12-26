@@ -84,7 +84,7 @@ services:
       - supabase-network
 
   garage-init:
-    image: dxflrs/garage:v0.9.4
+    image: alpine:latest
     container_name: garage-init
     depends_on:
       - garage

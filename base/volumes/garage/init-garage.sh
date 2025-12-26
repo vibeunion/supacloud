@@ -1,7 +1,15 @@
 #!/bin/bash
 set -e
 
-GARAGE_BIN="/garage -r garage:3901"
+# Install dependencies
+apk add --no-cache curl
+
+# Download Garage Binary
+echo "Downloading Garage CLI..."
+curl -L -o /bin/garage https://garagehq.deuxfleurs.fr/_releases/v0.9.4/x86_64-unknown-linux-musl/garage
+chmod +x /bin/garage
+
+GARAGE_BIN="/bin/garage -r garage:3901"
 
 echo "waiting for garage..."
 until curl -s http://garage:3900/health > /dev/null; do
