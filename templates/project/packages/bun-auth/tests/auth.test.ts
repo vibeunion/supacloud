@@ -127,7 +127,57 @@ describe("Auth Service Coverage", () => {
         const res = await handler(req);
         expect(res.status).toBe(500);
         const data = await res.json();
-        expect(data.error).toContain("WeChat Error");
+        expect(data.error).toContain("WeChat MiniApp Error");
+    });
+
+    test("WeChat Web Login Redirect", async () => {
+        const req = new Request("http://localhost:9000/auth/wechat/web/login?redirect_url=http://client.com", {
+            method: "GET"
+        });
+        const res = await handler(req);
+        expect(res.status).toBe(302);
+        const location = res.headers.get("Location");
+        expect(location).toContain("open.weixin.qq.com/connect/oauth2/authorize");
+        expect(location).toContain("redirect_uri=");
+    });
+
+    test("WeChat Web Callback Success", async () => {
+        // Mock fetch to handle sequential calls: 1. access_token, 2. userinfo
+        deps.fetch = mock(async (url: string | URL) => {
+            const urlStr = url.toString();
+            if (urlStr.includes("access_token")) {
+                return new Response(JSON.stringify({
+                    access_token: "web-access-token",
+                    openid: "web-openid",
+                    scope: "snsapi_userinfo"
+                }));
+            }
+            if (urlStr.includes("userinfo")) {
+                return new Response(JSON.stringify({
+                    openid: "web-openid",
+                    nickname: "Web User",
+                    headimgurl: "http://img.com/1.jpg",
+                    unionid: "web-unionid"
+                }));
+            }
+            return new Response("Error", { status: 404 });
+        });
+
+        const req = new Request("http://localhost:9000/auth/wechat/web/callback?code=web-code&target=http://client.com/app", {
+            method: "GET"
+        });
+
+        const res = await handler(req);
+        // Expect Redirect
+        expect(res.status).toBe(302);
+        const location = res.headers.get("Location");
+        expect(location).toContain("http://client.com/app");
+        expect(location).toContain("#access_token=");
+
+        // Check if token is valid broadly by checking email claim presence
+        const tokenPart = location!.split("#access_token=")[1].split("&")[0];
+        const decoded = jwt.decode(tokenPart) as any;
+        expect(decoded.email).toBe("web-openid@wechat_web.com");
     });
 
     test("404 Not Found", async () => {
