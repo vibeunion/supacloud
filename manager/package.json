@@ -7,7 +7,8 @@
     },
     "scripts": {
         "setup": "bun run setup.ts",
-        "start": "bun run index.ts"
+        "start": "bun run index.ts",
+        "build": "bun build --compile --minify --sourcemap index.ts --outfile ../bin/supacloud"
     },
     "devDependencies": {
         "@types/bun": "latest"

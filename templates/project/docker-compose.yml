@@ -11,6 +11,11 @@ services:
       KONG_DNS_ORDER: LAST,A,CNAME
       KONG_PLUGINS: request-transformer,correlation-id,cors,key-auth,hmac-auth,jwt,acl
       KONG_NGINX_WORKER_PROCESSES: 1
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
     volumes:
       - ./config/kong.yml:/var/lib/kong/kong.yml:ro
     networks:
@@ -21,6 +26,11 @@ services:
     depends_on:
       - db-check
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
     environment:
       GOTRUE_API_HOST: 0.0.0.0
       GOTRUE_API_PORT: 9999
@@ -59,6 +69,11 @@ services:
     depends_on:
       - db-check
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
     environment:
       PGRST_DB_URI: postgres://authenticator:${POSTGRES_PASSWORD}@supabase-db:5432/${POSTGRES_DB}
       PGRST_DB_SCHEMAS: ${PGRST_DB_SCHEMAS}
@@ -73,6 +88,11 @@ services:
     depends_on:
       - db-check
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
     environment:
       PORT: 4000
       DB_HOST: supabase-db
@@ -98,6 +118,11 @@ services:
       - db-check
       - rest
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
     environment:
       ANON_KEY: ${ANON_KEY}
       SERVICE_KEY: ${SERVICE_ROLE_KEY}
@@ -141,6 +166,11 @@ services:
     restart: unless-stopped
     ports:
       - "${STUDIO_PORT}:3000"
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
     environment:
       STUDIO_PG_META_URL: http://meta:8080
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}

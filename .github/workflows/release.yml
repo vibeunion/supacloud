@@ -1,0 +1,62 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    name: Build and Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: latest
+
+      - name: Install Dependencies
+        working-directory: ./manager
+        run: bun install
+
+      - name: Build Binaries
+        working-directory: ./manager
+        run: |
+          mkdir -p ../dist
+          
+          echo "Building for Linux (x64)..."
+          bun build --compile ./index.ts --outfile ../dist/supacloud-linux-x64 --target bun-linux-x64
+          
+          echo "Building for Linux (ARM64)..."
+          bun build --compile ./index.ts --outfile ../dist/supacloud-linux-arm64 --target bun-linux-arm64
+          
+          echo "Building for macOS (x64)..."
+          bun build --compile ./index.ts --outfile ../dist/supacloud-darwin-x64 --target bun-darwin-x64
+          
+          echo "Building for macOS (ARM64)..."
+          bun build --compile ./index.ts --outfile ../dist/supacloud-darwin-arm64 --target bun-darwin-arm64
+          
+          echo "Building for Windows (x64)..."
+          bun build --compile ./index.ts --outfile ../dist/supacloud-windows-x64.exe --target bun-windows-x64
+          
+          # Note: Bun might not fully support windows-arm64 compile target yet, checking docs is recommended.
+          # We'll skip windows-arm64 for now to avoid build failures if not supported, or user can request it.
+          # Update: Bun 1.1+ added experimental support, but let's stick to x64 for Windows stability unless requested.
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: |
+            dist/supacloud-linux-x64
+            dist/supacloud-linux-arm64
+            dist/supacloud-darwin-x64
+            dist/supacloud-darwin-arm64
+            dist/supacloud-windows-x64.exe
+          generate_release_notes: true
