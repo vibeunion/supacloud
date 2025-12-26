@@ -69,7 +69,7 @@ services:
     environment:
       - RUST_LOG=info
     healthcheck:
-      test: [ "CMD", "wget", "-q", "--spider", "http://127.0.0.1:3903/health" ]
+      test: [ "CMD", "curl", "-f", "-s", "http://127.0.0.1:3903/health" ]
       interval: 10s
       timeout: 5s
       retries: 10

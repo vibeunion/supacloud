@@ -1,10 +1,10 @@
 #!/bin/bash
 set -e
 
-GARAGE_BIN="/garage"
+GARAGE_BIN="/garage -r garage:3901"
 
 echo "waiting for garage..."
-until curl -s http://localhost:3900/health > /dev/null; do
+until curl -s http://garage:3900/health > /dev/null; do
   sleep 1
 done
 echo "garage started."
