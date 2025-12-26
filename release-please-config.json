@@ -1,0 +1,15 @@
+{
+    "packages": {
+        ".": {
+            "release-type": "simple",
+            "package-name": "supacloud",
+            "extra-files": [
+                {
+                    "type": "json",
+                    "path": "manager/package.json",
+                    "jsonpath": "$.version"
+                }
+            ]
+        }
+    }
+}
