@@ -1,5 +1,6 @@
 {
     "name": "supabase-manager",
+    "version": "0.0.0",
     "module": "index.ts",
     "type": "module",
     "dependencies": {
