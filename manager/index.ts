@@ -171,6 +171,8 @@ async function createProject(name: string) {
     const j2 = crypto.randomUUID().replace(/-/g, '');
     const jwtSecret = j1 + j2;
 
+    const mcpApiKey = crypto.randomUUID().replace(/-/g, '');
+
     const anonKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNjEyNTM2ODAwLCJleHAiOjE5MjgwMzY4MDB9.SIGNATURE_PLACEHOLDER";
     const serviceKey = "[REDACTED_SUPABASE_SERVICE_KEY]";
 
@@ -210,7 +212,11 @@ FUNCTION_COMMAND=bun run index.ts
 
 # For Deno Mode:
 # FUNCTION_IMAGE=denoland/deno:2.1.4
+# FUNCTION_IMAGE=denoland/deno:2.1.4
 # FUNCTION_COMMAND=deno run -A index.deno.ts
+
+# MCP Server
+MCP_API_KEY=${mcpApiKey}
   `;
 
     await deps.write(join(projectDir, ".env"), envContent);
@@ -228,6 +234,10 @@ FUNCTION_COMMAND=bun run index.ts
     const caddyFileContent = `
 ${name}.${rootDomain} {
     reverse_proxy host.docker.internal:${kongPort}
+}
+
+mcp.${name}.${rootDomain} {
+    reverse_proxy host.docker.internal:3001
 }
 
 ${name}.studio.${rootDomain} {

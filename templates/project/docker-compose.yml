@@ -209,6 +209,19 @@ services:
     networks:
       - supabase-network
 
+  mcp:
+    image: oven/bun:1
+    working_dir: /app
+    command: [ "bun", "run", "index.ts" ]
+    volumes:
+      - ./packages/mcp:/app
+    environment:
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD}@supabase-db:5432/${POSTGRES_DB}
+      MCP_API_KEY: ${MCP_API_KEY}
+      PORT: 3001
+    networks:
+      - supabase-network
+
 networks:
   supabase-network:
     external: true
