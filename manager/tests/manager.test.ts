@@ -189,24 +189,6 @@ describe("Manager Service Coverage", () => {
         const { initManager } = await import("../index");
         
         // Mock exists for AUTH_FILE to be true
-        mockFileExists.mockImplementation((path: any) => {
-            if (path && typeof path === 'object' && path.toString) {
-                 // Bun File object
-                 // If the path name ends with .manager_auth, return true
-                 // Note: bun file objects might be tricky to inspect in mocks if not proxied well
-                 // But let's assume our mock setup (spyOn deps.file) returns an object where we can control .exists()
-                 // Wait, deps.file returns an object with .exists() which is OUR mockFileExists function.
-                 // So 'path' here is actually NOT the path string, but.. wait.
-                 // spyOn(deps, "file").mockImplementation((path) => ...)
-                 // The implementation returns { exists: mockFileExists, ... }
-                 // So when code calls file(path).exists(), it calls mockFileExists().
-                 // But mockFileExists() receives NO arguments usually if called as file.exists().
-                 // Ah! deps.file(path).exists() -> exists() is called.
-                 // We need to capture the path from the deps.file call, not the exists call!
-            }
-            return Promise.resolve(false);
-        });
-        
         // Correct approach:
         // We need to customize deps.file to return a specific exists mock based on the path
         spyOn(deps, "file").mockImplementation((path) => {
