@@ -194,9 +194,9 @@ services:
       - supabase-network
 
   bun-auth:
-    image: oven/bun:1
+    image: ${FUNCTION_IMAGE:-oven/bun:1}
     working_dir: /app
-    command: [ "bun", "run", "index.ts" ]
+    command: ${FUNCTION_COMMAND:-bun run index.ts}
     volumes:
       - ./packages/bun-auth:/app
     environment:

@@ -20,6 +20,7 @@ Unlike traditional deployments that waste GBs of RAM per project, SupaCloud enab
     *   **Auto S3**: Automatically provisions Garage Buckets & Keys.
     *   **Auto Networking**: Manages internal ports and routing automatically.
 *   **China Ready**: Built-in `bun-auth` service for each project, supporting **WeChat MiniApp** login out-of-the-box.
+*   **Dual Runtime Cloud Functions**: Supports both **Bun.js** and **Deno** for project-level functions. Switch runtimes instantly via CLI.
 *   **Modern Stack**: Powered by Bun 1.2+ Native SQL & HTTP. Zero legacy dependencies.
 
 ### 🚀 Quick Start
@@ -54,6 +55,7 @@ supacloud create shop
 
 #### 4. Commands
 *   `supacloud status` - Check platform status and logs.
+*   `supacloud runtime <name> <bun|deno>` - Switch project runtime (Bun/Deno).
 *   `supacloud help` - Show all commands.
 
 ### 📂 Architecture
@@ -81,6 +83,7 @@ supacloud create shop
     *   **自动 S3**：自动分配 Garage Bucket 和 Access Key。
     *   **自动网络**：自动管理内部端口映射。
 *   **中国特供**：每个项目内置 `bun-auth` 服务，开箱即支持**微信小程序**一键登录。
+*   **双运行时云函数**：支持 **Bun.js** 和 **Deno** 双模式。通过 CLI 一键切换项目运行时，灵活适配。
 *   **现代技术**：基于 Bun 1.2+ 原生 SQL 构建。零历史包袱。
 
 ### 🚀 快速开始
@@ -115,6 +118,7 @@ supacloud create shop
 
 #### 4. 常用命令
 *   `supacloud status` - 查看平台状态和访问入口
+*   `supacloud runtime <name> <bun|deno>` - 切换项目运行时 (Bun/Deno)
 *   `supacloud help` - 查看所有命令
 
 #### (可选) 从源码构建

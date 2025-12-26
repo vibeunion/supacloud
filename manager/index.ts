@@ -198,9 +198,19 @@ SITE_URL=http://localhost:${studioPort}
 GARAGE_ACCESS_KEY=${garageAccessKey}
 GARAGE_SECRET_KEY=${garageSecretKey}
 
+
 # WeChat MiniApp (Optional - Fill if needed)
 WECHAT_MINIAPP_APPID=
 WECHAT_MINIAPP_SECRET=
+
+# Cloud Function Runtime
+# Options: bun (default), deno
+FUNCTION_IMAGE=oven/bun:1
+FUNCTION_COMMAND=bun run index.ts
+
+# For Deno Mode:
+# FUNCTION_IMAGE=denoland/deno:2.1.4
+# FUNCTION_COMMAND=deno run -A index.deno.ts
   `;
 
     await deps.write(join(projectDir, ".env"), envContent);
@@ -445,10 +455,10 @@ async function showStatus() {
         console.log("No projects found.");
     } else {
         for (const p of projects) {
-             console.log(`- ${p} (http://${p}.localhost)`);
+            console.log(`- ${p} (http://${p}.localhost)`);
         }
     }
-    
+
     console.log("\n--- Access Points ---");
     console.log(`Manager: http://localhost:8888`);
     console.log(`Logs:    http://logs.localhost`);
@@ -457,15 +467,15 @@ async function showStatus() {
 // New Helper: Install
 async function installCLI() {
     console.log("Installing SupaCloud CLI...");
-    
+
     // Determine the actual root of the SupaCloud repo/installation
     // If running compiled binary: process.execPath is '.../bin/supacloud.exe'
     // If running script: process.cwd() or import.meta.dir
-    
+
     // Heuristic: If we are running 'install', we assume the current binary/script is in the correct workspace.
     // import.meta.dir in compiled binary points to the folder containing the binary.
     const currentRoot = join(import.meta.dir, "..");
-    
+
     console.log(`\n1. Configuring Workspace Root: ${currentRoot}`);
     try {
         await deps.write(RC_FILE, `SUPACLOUD_HOME=${currentRoot}`);
@@ -483,7 +493,7 @@ async function installCLI() {
         console.log(`\n   ${binDir}\n`);
         console.log(`   Command to verify installation:`);
         console.log(`   supacloud status`);
-        
+
         // Optional: Attempt PowerShell magic
         try {
             console.log("   Attempting to add to PATH via PowerShell...");
@@ -498,12 +508,12 @@ async function installCLI() {
             `;
             const proc = deps.spawn(["powershell", "-Command", setPathScript], { stdout: "pipe" });
             const output = await new Response(proc.stdout).text();
-            
+
             if (output.includes("SUCCESS")) {
-                 console.log("   ✅ Successfully added to User PATH.");
-                 console.log("   ⚠️  Restart your terminal to use 'supacloud' command.");
+                console.log("   ✅ Successfully added to User PATH.");
+                console.log("   ⚠️  Restart your terminal to use 'supacloud' command.");
             } else if (output.includes("EXISTS")) {
-                 console.log("   ✅ Already in PATH.");
+                console.log("   ✅ Already in PATH.");
             }
         } catch (e) { }
 
@@ -511,7 +521,7 @@ async function installCLI() {
         // Linux/Mac
         const target = "/usr/local/bin/supacloud";
         const src = join(binDir, "supacloud");
-        
+
         try {
             // Check if we have sudo access or write access
             await deps.$`ln -sf ${src} ${target}`;
@@ -531,7 +541,7 @@ export { createProject, getNextPorts, exists, createDatabase, initManager };
 async function initProject(targetDir?: string) {
     const dir = targetDir || ".";
     const fullPath = join(process.cwd(), dir);
-    
+
     console.log(`Initializing SupaCloud in ${fullPath}...`);
 
     if (await exists(join(fullPath, "base", "docker-compose.yml"))) {
@@ -545,30 +555,88 @@ async function initProject(targetDir?: string) {
         // Download main branch zip
         const url = "https://github.com/zuohuadong/supacloud/archive/refs/heads/main.zip";
         const proxyUrl = `https://ghproxy.net/${url}`;
-        
+
         console.log(`Downloading source from ${proxyUrl}...`);
-        
+
         const zipPath = join(fullPath, "supacloud.zip");
         await deps.$`curl -L "${proxyUrl}" -o "${zipPath}"`;
-        
+
         console.log("Extracting...");
         // Use bun to unzip if possible, or unzip command
         // Simple unzip via shell
         await deps.$`unzip -q -o "${zipPath}" -d "${fullPath}"`;
-        
+
         // Move contents from supacloud-main to root
         const extractedDir = join(fullPath, "supacloud-main");
         await deps.$`cp -r ${extractedDir}/* ${fullPath}/`;
         await deps.$`rm -rf ${extractedDir} ${zipPath}`;
-        
+
         // Set SUPACLOUD_HOME
         await deps.write(RC_FILE, `SUPACLOUD_HOME=${fullPath}`);
-        
+
         console.log("✅ Initialization complete!");
         console.log(`\nRun 'supacloud start' to launch the platform.`);
-        
+
     } catch (e) {
         console.error("❌ Failed to initialize:", e);
+    }
+}
+
+// 8. Runtime Switcher (Bun <-> Deno)
+async function switchRuntime(name: string, runtime: string) {
+    const projectDir = join(INSTANCES_DIR, name);
+    if (!(await exists(projectDir))) {
+        console.log(`❌ Project '${name}' not found in ${INSTANCES_DIR}`);
+        return;
+    }
+
+    if (runtime !== "bun" && runtime !== "deno") {
+        console.log("❌ Invalid runtime. Allowed: 'bun', 'deno'");
+        return;
+    }
+
+    console.log(`Switching ${name} to ${runtime} runtime...`);
+
+    const envPath = join(projectDir, ".env");
+    let envContent = await deps.file(envPath).text();
+
+    let image = "";
+    let command = "";
+
+    if (runtime === "bun") {
+        image = "oven/bun:1";
+        command = "bun run index.ts";
+    } else {
+        image = "denoland/deno:2.1.4";
+        command = "deno run -A index.deno.ts";
+    }
+
+    const replaceOrAppend = (text: string, key: string, value: string) => {
+        const regex = new RegExp(`^${key}=.*$`, 'm');
+        if (regex.test(text)) {
+            return text.replace(regex, `${key}=${value}`);
+        } else {
+            return text + `\n${key}=${value}`;
+        }
+    };
+
+    envContent = replaceOrAppend(envContent, "FUNCTION_IMAGE", image);
+    envContent = replaceOrAppend(envContent, "FUNCTION_COMMAND", command);
+
+    await deps.write(envPath, envContent);
+    console.log("✅ Updated .env configuration.");
+
+    // Restart the service
+    console.log("🔄 Restarting bun-auth service...");
+    try {
+        const proc = deps.spawn([...COMPOSE_CMD, "-p", name, "up", "-d", "--force-recreate", "bun-auth"], {
+            cwd: projectDir,
+            stdio: ["ignore", "inherit", "inherit"]
+        });
+        await proc.exited;
+        console.log(`✅ Successfully switched ${name} to ${runtime}!`);
+    } catch (e) {
+        console.error("❌ Failed to restart service:", e);
     }
 }
 
@@ -592,6 +660,7 @@ if (import.meta.main) {
         console.log("  init [dir]    Initialize a new SupaCloud workspace");
         console.log("  start         Start the SupaCloud platform (Base + Manager)");
         console.log("  create <name> Create a new Supabase project");
+        console.log("  runtime <name> <bun|deno>  Switch project runtime");
         console.log("  status        Show platform status and projects");
         console.log("  install       Install CLI to system (PATH)");
         console.log("  help          Show this help message");
@@ -612,7 +681,7 @@ if (import.meta.main) {
             });
             console.log(`Manager listening on http://localhost:${server.port}`);
             break;
-            
+
         case "create":
             const name = cmdArgs[0];
             if (!name) {
@@ -630,11 +699,23 @@ if (import.meta.main) {
             process.exit(0);
             break;
 
+        case "runtime":
+        case "set-runtime":
+            const projName = cmdArgs[0];
+            const mode = cmdArgs[1];
+            if (!projName || !mode) {
+                console.error("Usage: supacloud runtime <project_name> <bun|deno>");
+                process.exit(1);
+            }
+            await switchRuntime(projName, mode);
+            process.exit(0);
+            break;
+
         case "status":
             await showStatus();
             process.exit(0);
             break;
-            
+
         case "install":
             await installCLI();
             process.exit(0);
