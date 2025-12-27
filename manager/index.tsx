@@ -1,6 +1,6 @@
 
 import { serve, file as bunFile, write as bunWrite, spawn as bunSpawn, Glob as BunGlob } from "bun";
-import { readdir, mkdir } from "node:fs/promises";
+import { readdir, mkdir, rename } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { homedir } from "node:os";
 import { $ } from "bun";
@@ -19,7 +19,8 @@ export const deps = {
     spawn: bunSpawn,
     Glob: BunGlob,
     readdir,
-    mkdir
+    mkdir,
+    rename
 };
 
 // --- Configuration & Constants ---
@@ -1135,13 +1136,29 @@ async function upgradeManager() {
 
         console.log(`🚀 New version found: v${latestVersion}`);
 
-        // Determine asset name based on platform (assuming Linux x64 for server)
-        // Ideally checking process.platform/arch
-        const assetName = "supacloud-linux-x64";
+
+        const targetMap: Record<string, string> = {
+            "linux-x64": "supacloud-linux-x64",
+            "linux-arm64": "supacloud-linux-arm64",
+            "darwin-x64": "supacloud-darwin-x64",
+            "darwin-arm64": "supacloud-darwin-arm64",
+            "win32-x64": "supacloud-windows-x64.exe"
+        };
+
+        const key = `${process.platform}-${process.arch}`;
+        const assetName = targetMap[key];
+
+        if (!assetName) {
+            console.error(`❌ Auto-upgrade not supported for platform: ${process.platform} (${process.arch})`);
+            console.log("Supported targets:", Object.keys(targetMap).join(", "));
+            return;
+        }
+
         const asset = release.assets.find((a: any) => a.name === assetName);
 
         if (!asset) {
             console.error(`❌ No compatible asset '${assetName}' found in release v${latestVersion}`);
+            console.log("Available assets:", release.assets.map((a: any) => a.name).join(", "));
             return;
         }
 
@@ -1157,21 +1174,32 @@ async function upgradeManager() {
 
         // Write new binary
         await deps.write(tmpPath, new Uint8Array(buffer));
-        await deps.$`chmod +x ${tmpPath}`;
+
+        if (process.platform !== "win32") {
+            await deps.$`chmod +x ${tmpPath}`;
+        }
 
         // Atomic replacement
         console.log("📦 Installing update...");
         try {
             // Backup current
-            await deps.$`mv ${binPath} ${backupPath}`;
+            await deps.rename(binPath, backupPath);
             // Move new to current
-            await deps.$`mv ${tmpPath} ${binPath}`;
-            // Clean backup (optional, keeping it explicitly might be safer for rollback)
-            // await deps.$`rm ${backupPath}`; 
+            await deps.rename(tmpPath, binPath);
+
+            // On Windows, specific cleanup might be tricky if process handles linger, 
+            // but rename is generally safe for running executables.
+            // We leave backupPath there just in case.
         } catch (err) {
             console.error("Failed to replace binary:", err);
             // Try to restore
-            await deps.$`mv ${backupPath} ${binPath}`;
+            try {
+                if (await exists(backupPath)) {
+                    await deps.rename(backupPath, binPath);
+                }
+            } catch (restoreErr) {
+                console.error("Failed to restore backup:", restoreErr);
+            }
             throw err;
         }
 
