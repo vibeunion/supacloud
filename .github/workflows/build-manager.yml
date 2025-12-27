@@ -26,16 +26,30 @@ jobs:
         cd manager
         bun install
 
-    - name: Build Binary (Linux x64)
+    - name: Build Binaries
       run: |
         cd manager
+        # Linux x64
         bun build --compile --minify --sourcemap --target=bun-linux-x64 index.tsx --outfile ../bin/supacloud-linux-x64
+        # Linux arm64
+        bun build --compile --minify --sourcemap --target=bun-linux-arm64 index.tsx --outfile ../bin/supacloud-linux-arm64
+        # MacOS x64 (Intel)
+        bun build --compile --minify --sourcemap --target=bun-darwin-x64 index.tsx --outfile ../bin/supacloud-darwin-x64
+        # MacOS arm64 (Apple Silicon)
+        bun build --compile --minify --sourcemap --target=bun-darwin-arm64 index.tsx --outfile ../bin/supacloud-darwin-arm64
+        # Windows x64
+        bun build --compile --minify --sourcemap --target=bun-windows-x64 index.tsx --outfile ../bin/supacloud-windows-x64.exe
 
-    - name: Upload Artifact
+    - name: Upload Artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: supacloud-linux-x64
-        path: bin/supacloud-linux-x64
+        name: supacloud-binaries
+        path: |
+          bin/supacloud-linux-x64
+          bin/supacloud-linux-arm64
+          bin/supacloud-darwin-x64
+          bin/supacloud-darwin-arm64
+          bin/supacloud-windows-x64.exe
 
     - name: Update Latest Release
       uses: marvinpinto/action-automatic-releases@latest
@@ -46,3 +60,7 @@ jobs:
         title: "Latest Build"
         files: |
           bin/supacloud-linux-x64
+          bin/supacloud-linux-arm64
+          bin/supacloud-darwin-x64
+          bin/supacloud-darwin-arm64
+          bin/supacloud-windows-x64.exe

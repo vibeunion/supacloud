@@ -46,19 +46,19 @@ jobs:
           mkdir -p ../dist
           
           echo "Building for Linux (x64)..."
-          bun build --compile ./index.ts --outfile ../dist/supacloud-linux-x64 --target bun-linux-x64
+          bun build --compile --minify --sourcemap ./index.tsx --outfile ../dist/supacloud-linux-x64 --target bun-linux-x64
           
           echo "Building for Linux (ARM64)..."
-          bun build --compile ./index.ts --outfile ../dist/supacloud-linux-arm64 --target bun-linux-arm64
+          bun build --compile --minify --sourcemap ./index.tsx --outfile ../dist/supacloud-linux-arm64 --target bun-linux-arm64
           
           echo "Building for macOS (x64)..."
-          bun build --compile ./index.ts --outfile ../dist/supacloud-darwin-x64 --target bun-darwin-x64
+          bun build --compile --minify --sourcemap ./index.tsx --outfile ../dist/supacloud-darwin-x64 --target bun-darwin-x64
           
           echo "Building for macOS (ARM64)..."
-          bun build --compile ./index.ts --outfile ../dist/supacloud-darwin-arm64 --target bun-darwin-arm64
+          bun build --compile --minify --sourcemap ./index.tsx --outfile ../dist/supacloud-darwin-arm64 --target bun-darwin-arm64
           
           echo "Building for Windows (x64)..."
-          bun build --compile ./index.ts --outfile ../dist/supacloud-windows-x64.exe --target bun-windows-x64
+          bun build --compile --minify --sourcemap ./index.tsx --outfile ../dist/supacloud-windows-x64.exe --target bun-windows-x64
 
       - name: Upload Release Artifacts
         uses: softprops/action-gh-release@v1
