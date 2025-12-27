@@ -513,6 +513,11 @@ app.post('/projects', async (c) => {
 
     const res = await createProject(name);
     if (res.success) {
+        // Support JSON for API clients/tests
+        const accept = c.req.header('Accept');
+        if (accept && accept.includes('application/json')) {
+            return c.json(res);
+        }
         // Return just the row HTML for HTMX to inject
         return c.html(<ProjectRow name={name} />);
     } else {

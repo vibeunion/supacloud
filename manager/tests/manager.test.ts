@@ -173,21 +173,21 @@ describe("Manager Service Coverage", () => {
     test("Handler - Create Project Route", async () => {
         // Mock Auth header
         const authHeader = `Basic ${btoa("admin:test-password")}`;
-        
+
         // Mock global ADMIN_PASSWORD
         // Since ADMIN_PASSWORD is a module-level variable in index.ts that is set via initManager
         // we might need to rely on the fact that initManager sets it.
         // However, initManager reads from file.
         // Let's mock the file read for AUTH_FILE (which is handled by mockFileText in beforeEach)
-        
+
         // Update mock for AUTH_FILE
         mockFileText.mockResolvedValue("test-password");
-        
+
         // We need to trigger initManager to load the password?
         // Actually, initManager isn't exported to be called here easily without side effects?
         // It is exported! Let's import it.
         const { initManager } = await import("../index");
-        
+
         // Mock exists for AUTH_FILE to be true
         // Correct approach:
         // We need to customize deps.file to return a specific exists mock based on the path
@@ -195,12 +195,12 @@ describe("Manager Service Coverage", () => {
             const pathStr = String(path);
             return {
                 exists: () => {
-                     if (pathStr.endsWith(".manager_auth")) return Promise.resolve(true);
-                     return Promise.resolve(false);
+                    if (pathStr.endsWith(".manager_auth")) return Promise.resolve(true);
+                    return Promise.resolve(false);
                 },
                 text: () => {
-                     if (pathStr.endsWith(".manager_auth")) return Promise.resolve("test-password");
-                     return Promise.resolve("");
+                    if (pathStr.endsWith(".manager_auth")) return Promise.resolve("test-password");
+                    return Promise.resolve("");
                 },
                 write: mockWrite
             } as any;
@@ -211,13 +211,14 @@ describe("Manager Service Coverage", () => {
         const req = new Request("http://localhost:8888/projects", {
             method: "POST",
             headers: {
-                "Authorization": authHeader
+                "Authorization": authHeader,
+                "Accept": "application/json"
             },
             body: JSON.stringify({ name: "api-test" })
         });
-        
+
         const res = await handler(req);
-        
+
         // Debugging output if status is not 200 (Clone first)
         if (res.status !== 200) {
             console.error("Handler failed with status:", res.status);
