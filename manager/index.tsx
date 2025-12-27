@@ -496,6 +496,24 @@ const ProjectRow = ({ name }: { name: string }) => (
         </div>
         <div className="col-span-2 text-right opacity-0 group-hover:opacity-100 transition-opacity flex justify-end gap-2">
             <button
+                hx-get={`/projects/${name}/logs`}
+                hx-target="body"
+                hx-swap="beforeend"
+                title="Logs"
+                className="text-slate-400 hover:bg-white/10 hover:text-white px-3 py-1.5 rounded text-xs font-medium transition-colors"
+            >
+                Logs
+            </button>
+            <button
+                hx-get={`/projects/${name}/config`}
+                hx-target="body"
+                hx-swap="beforeend"
+                title="Config"
+                className="text-slate-400 hover:bg-white/10 hover:text-white px-3 py-1.5 rounded text-xs font-medium transition-colors"
+            >
+                Config
+            </button>
+            <button
                 hx-post={`/projects/${name}/restart`}
                 hx-swap="none"
                 title="Restart"
@@ -554,9 +572,110 @@ app.post('/projects/:name/restart', async (c) => {
     }
 });
 
-app.delete('/projects/:name', async (c) => {
+// ... Upgrade Logic ...
+
+// --- Helpers ---
+
+async function getProjectLogs(name: string) {
+    const projectDir = join(INSTANCES_DIR, name);
+    if (!(await exists(projectDir))) return { success: false, message: "Project not found" };
+    try {
+        // Use docker compose logs
+        const output = await deps.$`docker compose -p ${name} logs --tail=100`.cwd(projectDir).text();
+        return { success: true, logs: output };
+    } catch (e) {
+        return { success: false, message: String(e) };
+    }
+}
+
+async function getProjectConfig(name: string) {
+    const projectDir = join(INSTANCES_DIR, name);
+    try {
+        const envPath = join(projectDir, ".env");
+        if (!(await exists(envPath))) return { success: false, message: "Config not found" };
+        const content = await deps.file(envPath).text();
+        return { success: true, config: content };
+    } catch (e) {
+        return { success: false, message: String(e) };
+    }
+}
+
+async function updateProjectConfig(name: string, content: string) {
+    const projectDir = join(INSTANCES_DIR, name);
+    try {
+        const envPath = join(projectDir, ".env");
+        await deps.write(envPath, content);
+        return { success: true };
+    } catch (e) {
+        return { success: false, message: String(e) };
+    }
+}
+
+// ... Routes ...
+
+app.get('/projects/:name/logs', async (c) => {
     const name = c.req.param('name');
-    await deleteProject(name);
+    const res = await getProjectLogs(name);
+    if (!res.success) return c.text(res.message || "Error", 500);
+
+    return c.html(
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-4" id="modal-container">
+            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" {...{ "hx-on:click": "document.getElementById('modal-container').remove()" }}></div>
+            <div className="glass rounded-xl p-6 w-full max-w-4xl max-h-[80vh] flex flex-col relative z-10 shadow-2xl animate-fade-in-up">
+                <div className="flex justify-between items-center mb-4">
+                    <h3 className="text-xl font-bold flex items-center gap-2">
+                        <svg className="w-5 h-5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                        Logs: {name}
+                    </h3>
+                    <button {...{ "hx-on:click": "document.getElementById('modal-container').remove()" }} className="text-slate-400 hover:text-white">
+                        <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                    </button>
+                </div>
+                <pre className="flex-1 overflow-auto bg-slate-950 p-4 rounded-lg text-xs font-mono text-slate-300 whitespace-pre-wrap border border-slate-800">
+                    {res.logs}
+                </pre>
+            </div>
+        </div>
+    );
+});
+
+app.get('/projects/:name/config', async (c) => {
+    const name = c.req.param('name');
+    const res = await getProjectConfig(name);
+    if (!res.success) return c.text(res.message || "Error", 500);
+
+    const isDeno = res.config?.includes("deno");
+
+    return c.html(
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-4" id="modal-container">
+            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" {...{ "hx-on:click": "document.getElementById('modal-container').remove()" }}></div>
+            <div className="glass rounded-xl p-6 w-full max-w-2xl relative z-10 shadow-2xl animate-fade-in-up">
+                <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
+                    <svg className="w-5 h-5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                    Configuration: {name}
+                </h3>
+                <form hx-post={`/projects/${name}/config`} hx-target="#modal-container" hx-swap="delete">
+                    <div className="mb-4">
+                        <textarea name="config" className="w-full h-64 bg-slate-950 border border-slate-700 rounded-lg p-4 font-mono text-xs text-slate-300 focus:outline-none focus:border-emerald-500">{res.config}</textarea>
+                    </div>
+                    <div className="flex justify-between items-center">
+                        <span className="text-xs text-yellow-500/80 bg-yellow-500/10 px-2 py-1 rounded border border-yellow-500/20">Restart required after saving</span>
+                        <div className="flex gap-3">
+                            <button type="button" {...{ "hx-on:click": "document.getElementById('modal-container').remove()" }} className="px-4 py-2 hover:bg-slate-800 rounded-lg transition-colors text-sm">Cancel</button>
+                            <button type="submit" className="bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-2 rounded-lg font-medium transition-colors text-sm">Save Changes</button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+    );
+});
+
+app.post('/projects/:name/config', async (c) => {
+    const name = c.req.param('name');
+    const body = await c.req.parseBody();
+    const config = body['config'] as string;
+    await updateProjectConfig(name, config);
     return c.body(null, 200);
 });
 
