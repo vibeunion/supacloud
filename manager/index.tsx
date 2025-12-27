@@ -527,7 +527,8 @@ app.delete('/projects/:name', async (c) => {
 });
 
 // Export functions for testing
-export { createProject, getNextPorts, exists, createDatabase, initManager };
+const handler = app.fetch;
+export { createProject, getNextPorts, exists, createDatabase, initManager, handler };
 
 // Main Entry Point
 if (import.meta.main) {
