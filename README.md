@@ -13,6 +13,8 @@ Unlike traditional deployments that waste GBs of RAM per project, SupaCloud enab
 
 ### 🌟 Key Features
 
+*   **Web Dashboard**: Built-in beautiful, dark-themed management UI powered by **Hono** & **Alpine.js**. Access at `http://localhost:8888`.
+*   **Auto Upgrade**: Keep your SupaCloud up-to-date with a single command `supacloud upgrade`.
 *   **Extreme Efficiency**: Uses a **Shared Resource Architecture**. 10 projects consume only ~1 Postgres & ~1 Garage instance.
 *   **Instant Provisioning**: One-click to spin up a full stack (Kong, GoTrue, Studio, API) in seconds.
 *   **Fully Automated**:
@@ -76,6 +78,8 @@ supacloud create shop
 
 ### 🌟 核心特性
 
+*   **Web 控制台**：内置精美的暗黑风格管理界面，基于 **Hono** & **Alpine.js** 构建。访问地址：`http://localhost:8888`。
+*   **自动升级**：通过指令 `supacloud upgrade` 一键在线升级到最新版本。
 *   **极致轻量**：采用**资源共享架构**。10 个项目仅占用 1 个 Postgres 和 1 个 Garage 实例。
 *   **秒级交付**：一键拉起全套服务 (Kong, GoTrue, Studio, API)，无需等待。
 *   **全自动化**：
