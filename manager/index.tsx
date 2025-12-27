@@ -494,7 +494,15 @@ const ProjectRow = ({ name }: { name: string }) => (
             </a>
             <a href={`http://${name}.${ROOT_DOMAIN}`} target="_blank" className="text-xs text-slate-400 hover:text-slate-200 transaction-colors">API Endpoint</a>
         </div>
-        <div className="col-span-2 text-right opacity-0 group-hover:opacity-100 transition-opacity">
+        <div className="col-span-2 text-right opacity-0 group-hover:opacity-100 transition-opacity flex justify-end gap-2">
+            <button
+                hx-post={`/projects/${name}/restart`}
+                hx-swap="none"
+                title="Restart"
+                className="text-slate-400 hover:bg-white/10 hover:text-white px-3 py-1.5 rounded text-xs font-medium transition-colors"
+            >
+                Restart
+            </button>
             <button
                 hx-delete={`/projects/${name}`}
                 hx-target="closest div.grid"
@@ -509,8 +517,16 @@ const ProjectRow = ({ name }: { name: string }) => (
 );
 
 app.post('/projects', async (c) => {
-    const body = await c.req.parseBody();
-    const name = body['name'] as string;
+    let name: string;
+    const contentType = c.req.header('Content-Type');
+
+    if (contentType && contentType.includes('application/json')) {
+        const json = await c.req.json();
+        name = json['name'];
+    } else {
+        const body = await c.req.parseBody();
+        name = body['name'] as string;
+    }
 
     if (!name) return c.json({ error: 'Name required' }, 400);
 
@@ -528,11 +544,37 @@ app.post('/projects', async (c) => {
     }
 });
 
+app.post('/projects/:name/restart', async (c) => {
+    const name = c.req.param('name');
+    const res = await restartProject(name);
+    if (res.success) {
+        return c.body(null, 204);
+    } else {
+        return c.text(res.message || "Failed", 500);
+    }
+});
+
 app.delete('/projects/:name', async (c) => {
     const name = c.req.param('name');
     await deleteProject(name);
     return c.body(null, 200);
 });
+
+// ...
+
+async function restartProject(name: string) {
+    const projectDir = join(INSTANCES_DIR, name);
+    if (!(await exists(projectDir))) return { success: false, message: "Project not found" };
+
+    console.log(`Restarting project ${name}...`);
+    try {
+        const proc = deps.spawn([...COMPOSE_CMD, "-p", name, "restart"], { cwd: projectDir });
+        await proc.exited;
+        return { success: true };
+    } catch (e) {
+        return { success: false, message: String(e) };
+    }
+}
 
 // Upgrade Logic
 const CURRENT_VERSION = "0.1.0";
