@@ -506,8 +506,16 @@ const ProjectRow = ({ name }: { name: string }) => (
 );
 
 app.post('/projects', async (c) => {
-    const body = await c.req.parseBody();
-    const name = body['name'] as string;
+    let name: string;
+    const contentType = c.req.header('Content-Type');
+
+    if (contentType && contentType.includes('application/json')) {
+        const json = await c.req.json();
+        name = json['name'];
+    } else {
+        const body = await c.req.parseBody();
+        name = body['name'] as string;
+    }
 
     if (!name) return c.json({ error: 'Name required' }, 400);
 
