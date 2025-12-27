@@ -33,3 +33,13 @@ jobs:
       with:
         name: supacloud-linux-x64
         path: bin/supacloud-linux-x64
+
+    - name: Update Latest Release
+      uses: marvinpinto/action-automatic-releases@latest
+      with:
+        repo_token: "${{ secrets.GITHUB_TOKEN }}"
+        automatic_release_tag: "latest"
+        prerelease: false
+        title: "Latest Build"
+        files: |
+          bin/supacloud-linux-x64
