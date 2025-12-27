@@ -526,6 +526,9 @@ app.delete('/projects/:name', async (c) => {
     return c.body(null, 200);
 });
 
+// Export functions for testing
+export { createProject, getNextPorts, exists, createDatabase, initManager };
+
 // Main Entry Point
 if (import.meta.main) {
     const argOffset = 2; // Approximate
