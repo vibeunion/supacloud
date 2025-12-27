@@ -126,18 +126,20 @@ services:
       BACKUP_BUCKET: sys-backups
     volumes:
       - ./utils/backup.sh:/backup.sh
-    entrypoint: ["/bin/sh", "-c"]
+      - ./utils/restore.sh:/restore.sh
+    entrypoint: [ "/bin/sh", "-c" ]
     command:
       - |
         apk add --no-cache aws-cli
         chmod +x /backup.sh
-        
+        chmod +x /restore.sh
+
         echo "Waiting for Garage..."
         sleep 10
-        
+
         # Create bucket if not exists
         aws --endpoint-url $$S3_ENDPOINT s3 mb s3://$$BACKUP_BUCKET || true
-        
+
         echo "Starting Backup Daemon (Daily)..."
         while true; do
           /backup.sh || echo "Backup failed!"
