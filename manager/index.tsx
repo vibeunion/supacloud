@@ -526,9 +526,91 @@ app.delete('/projects/:name', async (c) => {
     return c.body(null, 200);
 });
 
+// Upgrade Logic
+const CURRENT_VERSION = "0.1.0";
+const REPO = "zuohuadong/supacloud";
+
+async function upgradeManager() {
+    // Safety check: Don't upgrade if running as source (using bun interpreter)
+    if (process.execPath.endsWith("bun") || process.execPath.endsWith("bun.exe")) {
+        console.log("⚠️  Running in interpreter mode. Please use 'git pull' to upgrade source code.");
+        return;
+    }
+
+    console.log(`Checking for updates... (Current: v${CURRENT_VERSION})`);
+    try {
+        const res = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`);
+        if (!res.ok) {
+            if (res.status === 404) {
+                console.log("No releases found.");
+                return;
+            }
+            throw new Error(`GitHub API Error: ${res.statusText}`);
+        }
+
+        const release = await res.json();
+        const latestVersion = release.tag_name.replace(/^v/, '');
+
+        if (latestVersion === CURRENT_VERSION) {
+            console.log("✅ You are already on the latest version.");
+            return;
+        }
+
+        console.log(`🚀 New version found: v${latestVersion}`);
+
+        // Determine asset name based on platform (assuming Linux x64 for server)
+        // Ideally checking process.platform/arch
+        const assetName = "supacloud-linux-x64";
+        const asset = release.assets.find((a: any) => a.name === assetName);
+
+        if (!asset) {
+            console.error(`❌ No compatible asset '${assetName}' found in release v${latestVersion}`);
+            return;
+        }
+
+        console.log(`⬇️  Downloading ${asset.browser_download_url}...`);
+
+        const dlRes = await fetch(asset.browser_download_url);
+        if (!dlRes.ok) throw new Error("Download failed");
+
+        const buffer = await dlRes.arrayBuffer();
+        const binPath = process.execPath;
+        const tmpPath = binPath + ".new";
+        const backupPath = binPath + ".old";
+
+        // Write new binary
+        await deps.write(tmpPath, new Uint8Array(buffer));
+        await deps.$`chmod +x ${tmpPath}`;
+
+        // Atomic replacement
+        console.log("📦 Installing update...");
+        try {
+            // Backup current
+            await deps.$`mv ${binPath} ${backupPath}`;
+            // Move new to current
+            await deps.$`mv ${tmpPath} ${binPath}`;
+            // Clean backup (optional, keeping it explicitly might be safer for rollback)
+            // await deps.$`rm ${backupPath}`; 
+        } catch (err) {
+            console.error("Failed to replace binary:", err);
+            // Try to restore
+            await deps.$`mv ${backupPath} ${binPath}`;
+            throw err;
+        }
+
+        console.log(`✅ Successfully upgraded to v${latestVersion}`);
+        console.log("Please restart the service to apply changes.");
+        process.exit(0);
+
+    } catch (e) {
+        console.error("❌ Upgrade failed:", e);
+        process.exit(1);
+    }
+}
+
 // Export functions for testing
 const handler = app.fetch;
-export { createProject, getNextPorts, exists, createDatabase, initManager, handler };
+export { createProject, getNextPorts, exists, createDatabase, initManager, handler, upgradeManager };
 
 // Main Entry Point
 if (import.meta.main) {
@@ -550,6 +632,8 @@ if (import.meta.main) {
         // CLI Create
         const name = process.argv[argOffset + 1];
         if (name) await createProject(name);
+    } else if (command === "upgrade") {
+        await upgradeManager();
     }
     // ... Other CLI commands (status, help) mapped similarly if needed
     // For now we focus on the Web UI
