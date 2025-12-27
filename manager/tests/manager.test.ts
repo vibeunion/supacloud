@@ -212,8 +212,7 @@ describe("Manager Service Coverage", () => {
             method: "POST",
             headers: {
                 "Authorization": authHeader,
-                "Accept": "application/json",
-                "Content-Type": "application/json"
+                "Accept": "application/json"
             },
             body: JSON.stringify({ name: "api-test" })
         });
