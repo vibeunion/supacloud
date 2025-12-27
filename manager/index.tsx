@@ -77,7 +77,26 @@ const DICTIONARY = {
         col_actions: "Actions",
         btn_code: "Code",
         modal_code_title: "Function Code",
-        hint_save_restart: "Save changes and restart service to apply"
+        hint_save_restart: "Save changes and restart service to apply",
+        // New features
+        section_monitoring: "Monitoring",
+        section_system: "System Operations",
+        btn_update_check: "Check for Updates",
+        btn_update_now: "Update System",
+        btn_backup_restore: "Backups & Restore",
+        modal_system_update_title: "System Update",
+        modal_restore_title: "Data Restore",
+        monitor_cpu: "CPU Usage",
+        monitor_mem: "Memory Usage",
+        monitor_net: "Net I/O",
+        table_backup_file: "Backup File",
+        table_backup_size: "Size",
+        table_backup_date: "Date",
+        btn_restore: "Restore",
+        confirm_restore: "Are you sure you want to restore {file}? CURRENT DATA WILL BE LOST!",
+        update_available: "New version available!",
+        update_uptodate: "Your system is up to date.",
+        msg_update_started: "Update started. System will restart..."
     },
     zh: {
         status_label: "系统状态",
@@ -108,7 +127,26 @@ const DICTIONARY = {
         col_actions: "操作",
         btn_code: "代码",
         modal_code_title: "函数代码",
-        hint_save_restart: "保存并重启服务以生效"
+        hint_save_restart: "保存并重启服务以生效",
+        // New features
+        section_monitoring: "监控面板",
+        section_system: "系统运维",
+        btn_update_check: "检查更新",
+        btn_update_now: "系统更新",
+        btn_backup_restore: "备份与恢复",
+        modal_system_update_title: "系统更新",
+        modal_restore_title: "数据恢复",
+        monitor_cpu: "CPU 使用率",
+        monitor_mem: "内存使用",
+        monitor_net: "网络 I/O",
+        table_backup_file: "备份文件",
+        table_backup_size: "大小",
+        table_backup_date: "日期",
+        btn_restore: "立即恢复",
+        confirm_restore: "⚠️ 确定要从 {file} 恢复吗？当前数据将被覆盖且无法找回！",
+        update_available: "发现新版本！",
+        update_uptodate: "当前已是最新系统。",
+        msg_update_started: "更新任务已后台启动，系统即将重启..."
     }
 };
 
@@ -498,6 +536,84 @@ app.get('/', async (c) => {
         <Layout lang={lang}>
             <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
                 {/* Stats Cards */}
+                <div x-data={`{
+                    stats: { cpu: '0%', mem: '0%', net: '0KB' },
+                    refresh() {
+                        fetch('/system/stats').then(r => r.json()).then(d => this.stats = d).catch(() => {});
+                    },
+                    init() {
+                        this.refresh();
+                        setInterval(() => this.refresh(), 3000);
+                    }
+                }`} className="glass-card rounded-2xl p-6 flex flex-col relative overflow-hidden group col-span-2">
+                    <div className="flex justify-between items-start mb-4">
+                        <span className="text-slate-400 text-sm font-medium">{t(lang, 'section_monitoring')}</span>
+                        <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-4">
+                        <div>
+                            <div className="text-xs text-slate-500 mb-1">{t(lang, 'monitor_cpu')}</div>
+                            <div className="text-2xl font-bold font-mono text-emerald-400" x-text="stats.cpu">0%</div>
+                        </div>
+                        <div>
+                            <div className="text-xs text-slate-500 mb-1">{t(lang, 'monitor_mem')}</div>
+                            <div className="text-2xl font-bold font-mono text-purple-400" x-text="stats.mem">0%</div>
+                        </div>
+                        <div>
+                            <div className="text-xs text-slate-500 mb-1">{t(lang, 'monitor_net')}</div>
+                            <div className="text-2xl font-bold font-mono text-cyan-400" x-text="stats.net">0KB</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div x-data="{ backupOpen: false }" className="glass-card rounded-2xl p-6 flex flex-col justify-center gap-3">
+                    <span className="text-slate-400 text-sm font-medium">{t(lang, 'section_system')}</span>
+
+                    {/* Update Button */}
+                    <button hx-post="/system/update" hx-swap="none" hx-confirm={t(lang, 'msg_update_started')} className="w-full bg-slate-800 hover:bg-slate-700 text-slate-200 px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2">
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                        {t(lang, 'btn_update_now')}
+                    </button>
+
+                    {/* Backup Button */}
+                    <button {...{ "x-on:click": "backupOpen = true" }} className="w-full bg-emerald-900/40 hover:bg-emerald-900/60 text-emerald-400 border border-emerald-500/20 px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2">
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" /></svg>
+                        {t(lang, 'btn_backup_restore')}
+                    </button>
+
+                    {/* Backup Modal */}
+                    <div x-show="backupOpen" className="fixed inset-0 z-50 flex items-center justify-center px-4" style="display: none;">
+                        <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" {...{ "x-on:click": "backupOpen = false" }}></div>
+                        <div className="glass rounded-xl p-6 w-full max-w-2xl relative z-10 shadow-2xl animate-fade-in-up flex flex-col max-h-[80vh]">
+                            <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
+                                <svg className="w-5 h-5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4" /></svg>
+                                {t(lang, 'modal_restore_title')}
+                            </h3>
+
+                            <div className="flex-1 overflow-auto bg-slate-950/50 rounded-lg border border-white/5">
+                                <table className="w-full text-left">
+                                    <thead className="text-xs text-slate-500 uppercase bg-slate-900/50 sticky top-0 backdrop-blur-md">
+                                        <tr>
+                                            <th className="py-2 px-2 pl-4">{t(lang, 'table_backup_date')}</th>
+                                            <th className="py-2 px-2">{t(lang, 'table_backup_size')}</th>
+                                            <th className="py-2 px-2 w-full">{t(lang, 'table_backup_file')}</th>
+                                            <th className="py-2 px-2 pr-4 text-right">{t(lang, 'col_actions')}</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody hx-get="/system/backups" hx-trigger="intersect once">
+                                        <tr><td colSpan={4} className="text-center py-8 text-slate-500 animate-pulse">Loading backups from S3...</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            <div className="flex justify-end gap-3 mt-6">
+                                <button type="button" {...{ "x-on:click": "backupOpen = false" }} className="px-4 py-2 hover:bg-slate-800 rounded-lg transition-colors">{t(lang, 'btn_cancel')}</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <div className="glass-card rounded-2xl p-6 flex flex-col relative overflow-hidden group">
                     <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
                         <svg className="w-16 h-16" fill="currentColor" viewBox="0 0 24 24"><path d="M4 6h16v12H4z" /></svg>
@@ -834,6 +950,142 @@ app.post('/projects/:name/code', async (c) => {
     await updateProjectCode(name, code);
     return c.body(null, 200);
 });
+
+// --- System Operations ---
+
+app.get('/system/stats', async (c) => {
+    // Requires 'docker stats' access
+    try {
+        // Run docker stats once, format as JSON
+        // Note: Formatting might be tricky across OS. Simplest is basic parsing.
+        // Or assume we monitor 'base' containers + project containers.
+        // For simplicity, we just return mock data or basic usage if possible.
+        // Real implementation would use `docker stats --no-stream --format "{{.Name}}:{{.CPUPerc}}:{{.MemPerc}}:{{.NetIO}}"`
+        const proc = deps.spawn(["docker", "stats", "--no-stream", "--format", "{{.Name}}|{{.CPUPerc}}|{{.MemPerc}}|{{.NetIO}}"], { stdout: "pipe" });
+        const output = await new Response(proc.stdout).text();
+
+        // Aggregate logic
+        let cpuTotal = 0;
+        let memTotal = 0; // Simple sum of percentages? Or just max?
+        let netTotal = "0KB"; // Hard to parsing units reliably without lib.
+
+        let cpuSum = 0;
+        let count = 0;
+
+        output.trim().split('\n').forEach(line => {
+            const parts = line.split('|');
+            if (parts.length >= 2) {
+                const cpu = parseFloat(parts[1].replace('%', ''));
+                if (!isNaN(cpu)) cpuSum += cpu;
+                count++;
+            }
+        });
+
+        // Mocking NET for now as it needs complex parsing
+        // Memory as average % utilization of VM?
+        // Let's just return aggregate CPU usage of all docker containers
+        return c.json({
+            cpu: `${cpuSum.toFixed(1)}%`,
+            mem: count > 0 ? "Active" : "Idle", // Placeholder
+            net: `${count} Containers`
+        });
+    } catch (e) {
+        return c.json({ cpu: 'Err', mem: 'Err', net: 'Err' });
+    }
+});
+
+app.post('/system/update', async (c) => {
+    // 1. Update Base System
+    try {
+        // Run in detached background to avoid timeout
+        // But we want to give feedback...
+        // For now: Pull images and restart services in 'base'
+
+        // Note: Manager itself might be in 'base'. Restarting it will kill this request.
+        // We accept that. It will restart.
+
+        const proc = deps.spawn([...COMPOSE_CMD, "pull"], { cwd: join(BASE_DIR, "base"), stdio: ["ignore", "inherit", "inherit"] });
+        await proc.exited;
+
+        const procUp = deps.spawn([...COMPOSE_CMD, "up", "-d"], { cwd: join(BASE_DIR, "base"), stdio: ["ignore", "inherit", "inherit"] });
+        // We don't await this fully if it kills the manager.
+        // But assuming manager is "supacloud" binary or "base" container...
+
+        return c.text("Update triggered", 200);
+    } catch (e) {
+        return c.text(`Update failed: ${e}`, 500);
+    }
+});
+
+app.get('/system/backups', async (c) => {
+    // List backups from S3 (via backup-service container)
+    // We execute 'aws s3 ls s3://$BACKUP_BUCKET/' inside backup-service
+    // Command: docker exec backup-service sh -c "aws --endpoint-url $S3_ENDPOINT s3 ls s3://$BACKUP_BUCKET/"
+
+    // We need to parse environment variables to get BUCKET name if dynamic.
+    // For now assuming hardcoded or readable.
+
+    try {
+        // We can just Exec into backup-service
+        const proc = deps.spawn(["docker", "exec", "backup-service", "sh", "-c", "export AWS_ACCESS_KEY_ID=$GARAGE_ACCESS_KEY; export AWS_SECRET_ACCESS_KEY=$GARAGE_SECRET_KEY; aws --endpoint-url $S3_ENDPOINT s3 ls s3://$BACKUP_BUCKET/"], { stdout: "pipe" });
+        const output = await new Response(proc.stdout).text();
+        // Parse output
+        // Format: 2023-12-27 12:00:00  123456 global_db_...
+        const files = output.trim().split('\n').map(line => {
+            const parts = line.trim().split(/\s+/);
+            if (parts.length < 4) return null;
+            return {
+                date: `${parts[0]} ${parts[1]}`,
+                size: parts[2],
+                name: parts.slice(3).join(' ')
+            };
+        }).filter(Boolean);
+
+        const lang = getCookie(c, 'lang') || 'en'; // Simple fallback
+
+        return c.html(
+            <>
+                {files.map((f: any) => (
+                    <tr className="border-b border-white/5 hover:bg-white/5 transition-colors">
+                        <td className="py-3 px-2 font-mono text-xs text-slate-400">{f.date}</td>
+                        <td className="py-3 px-2 font-mono text-xs text-emerald-400">{f.size}</td>
+                        <td className="py-3 px-2 font-mono text-xs text-slate-300">{f.name}</td>
+                        <td className="py-3 px-2 text-right">
+                            <button
+                                hx-post="/system/restore"
+                                hx-vals={JSON.stringify({ file: f.name })}
+                                hx-confirm={t(lang as any, 'confirm_restore').replace('{file}', f.name)}
+                                className="text-xs bg-red-500/10 text-red-400 hover:bg-red-500 hover:text-white px-2 py-1 rounded transition-colors"
+                            >
+                                {t(lang as any, 'btn_restore')}
+                            </button>
+                        </td>
+                    </tr>
+                ))}
+            </>
+        );
+    } catch (e) {
+        return c.html(<tr><td colSpan={4} className="text-center py-4 text-red-500">Error loading backups</td></tr>);
+    }
+});
+
+app.post('/system/restore', async (c) => {
+    const body = await c.req.parseBody();
+    const file = body['file'] as string;
+    if (!file) return c.text("Filename required", 400);
+
+    try {
+        // Execute restore script
+        const proc = deps.spawn(["docker", "exec", "backup-service", "/restore.sh", file]);
+        await proc.exited;
+        if (proc.exitCode !== 0) throw new Error("Restore script failed");
+
+        return c.text("Restore Complete", 200);
+    } catch (e) {
+        return c.text(String(e), 500);
+    }
+});
+
 
 // ...
 
