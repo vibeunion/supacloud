@@ -1,15 +1,16 @@
 {
     "name": "supabase-manager",
     "version": "0.0.0",
-    "module": "index.ts",
+    "module": "index.tsx",
     "type": "module",
     "dependencies": {
+        "hono": "^4.11.3",
         "jsonwebtoken": "^9.0.2"
     },
     "scripts": {
         "setup": "bun run setup.ts",
-        "start": "bun run index.ts",
-        "build": "bun build --compile --minify --sourcemap index.ts --outfile ../bin/supacloud"
+        "start": "bun run index.tsx",
+        "build": "bun build --compile --minify --sourcemap index.tsx --outfile ../bin/supacloud"
     },
     "devDependencies": {
         "@types/bun": "latest"

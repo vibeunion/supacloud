@@ -1,0 +1,35 @@
+name: Build Manager
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - 'manager/**'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Setup Bun
+      uses: oven-sh/setup-bun@v1
+      with:
+        bun-version: latest
+
+    - name: Install Dependencies
+      run: |
+        cd manager
+        bun install
+
+    - name: Build Binary (Linux x64)
+      run: |
+        cd manager
+        bun build --compile --minify --sourcemap --target=bun-linux-x64 index.tsx --outfile ../bin/supacloud-linux-x64
+
+    - name: Upload Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: supacloud-linux-x64
+        path: bin/supacloud-linux-x64
