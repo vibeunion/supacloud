@@ -43,7 +43,10 @@ const TEMPLATE_DIR = join(BASE_DIR, "templates", "project");
 const BASE_COMPOSE = join(BASE_DIR, "base", "docker-compose.yml");
 let COMPOSE_CMD = ["docker", "compose"];
 let ADMIN_PASSWORD = "";
+const ROOT_DOMAIN = process.env.ROOT_DOMAIN || "localhost";
 const AUTH_FILE = join(BASE_DIR, ".manager_auth");
+
+
 
 // --- Helper Functions ---
 async function exists(path: string) {
@@ -434,7 +437,7 @@ app.get('/', async (c) => {
                                         name="name"
                                         type="text"
                                         required
-                                        pattern="[a-z0-9-]+"
+                                        pattern="[a-z0-9\-]+"
                                         placeholder="e.g. my-awesome-app"
                                         className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all font-mono text-sm"
                                     />
@@ -485,11 +488,11 @@ const ProjectRow = ({ name }: { name: string }) => (
             </span>
         </div>
         <div className="col-span-3 flex flex-col gap-1">
-            <a href={`http://${name}.studio.localhost`} target="_blank" className="text-xs text-cyan-400 hover:underline flex items-center gap-1">
+            <a href={`http://${name}.studio.${ROOT_DOMAIN}`} target="_blank" className="text-xs text-cyan-400 hover:underline flex items-center gap-1">
                 Studio
                 <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
             </a>
-            <a href={`http://${name}.localhost`} target="_blank" className="text-xs text-slate-400 hover:text-slate-200 transaction-colors">API Endpoint</a>
+            <a href={`http://${name}.${ROOT_DOMAIN}`} target="_blank" className="text-xs text-slate-400 hover:text-slate-200 transaction-colors">API Endpoint</a>
         </div>
         <div className="col-span-2 text-right opacity-0 group-hover:opacity-100 transition-opacity">
             <button
@@ -506,16 +509,8 @@ const ProjectRow = ({ name }: { name: string }) => (
 );
 
 app.post('/projects', async (c) => {
-    let name: string;
-    const contentType = c.req.header('Content-Type');
-
-    if (contentType && contentType.includes('application/json')) {
-        const json = await c.req.json();
-        name = json['name'];
-    } else {
-        const body = await c.req.parseBody();
-        name = body['name'] as string;
-    }
+    const body = await c.req.parseBody();
+    const name = body['name'] as string;
 
     if (!name) return c.json({ error: 'Name required' }, 400);
 
