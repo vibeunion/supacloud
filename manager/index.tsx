@@ -437,7 +437,7 @@ app.get('/', async (c) => {
                                         name="name"
                                         type="text"
                                         required
-                                        pattern="[a-z0-9\-]+"
+                                        pattern="[-a-z0-9]+"
                                         placeholder="e.g. my-awesome-app"
                                         className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all font-mono text-sm"
                                     />
