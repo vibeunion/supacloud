@@ -30,15 +30,15 @@ jobs:
       run: |
         cd manager
         # Linux x64
-        bun build --compile --minify --sourcemap --target=bun-linux-x64 index.tsx --outfile ../bin/supacloud-linux-x64
+        bun build --compile --minify --sourcemap --define "process.env.GIT_SHA='\"${{ github.sha }}\"'" --target=bun-linux-x64 index.tsx --outfile ../bin/supacloud-linux-x64
         # Linux arm64
-        bun build --compile --minify --sourcemap --target=bun-linux-arm64 index.tsx --outfile ../bin/supacloud-linux-arm64
+        bun build --compile --minify --sourcemap --define "process.env.GIT_SHA='\"${{ github.sha }}\"'" --target=bun-linux-arm64 index.tsx --outfile ../bin/supacloud-linux-arm64
         # MacOS x64 (Intel)
-        bun build --compile --minify --sourcemap --target=bun-darwin-x64 index.tsx --outfile ../bin/supacloud-darwin-x64
+        bun build --compile --minify --sourcemap --define "process.env.GIT_SHA='\"${{ github.sha }}\"'" --target=bun-darwin-x64 index.tsx --outfile ../bin/supacloud-darwin-x64
         # MacOS arm64 (Apple Silicon)
-        bun build --compile --minify --sourcemap --target=bun-darwin-arm64 index.tsx --outfile ../bin/supacloud-darwin-arm64
+        bun build --compile --minify --sourcemap --define "process.env.GIT_SHA='\"${{ github.sha }}\"'" --target=bun-darwin-arm64 index.tsx --outfile ../bin/supacloud-darwin-arm64
         # Windows x64
-        bun build --compile --minify --sourcemap --target=bun-windows-x64 index.tsx --outfile ../bin/supacloud-windows-x64.exe
+        bun build --compile --minify --sourcemap --define "process.env.GIT_SHA='\"${{ github.sha }}\"'" --target=bun-windows-x64 index.tsx --outfile ../bin/supacloud-windows-x64.exe
 
     - name: Upload Artifacts
       uses: actions/upload-artifact@v4

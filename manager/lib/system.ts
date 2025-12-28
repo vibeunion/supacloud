@@ -90,7 +90,8 @@ export async function startBase() {
 }
 
 // Upgrade Logic
-const CURRENT_VERSION = "0.1.0";
+import packageJson from "../package.json";
+const CURRENT_VERSION = packageJson.version;
 const REPO = "zuohuadong/supacloud";
 
 export async function upgradeManager() {
@@ -114,9 +115,23 @@ export async function upgradeManager() {
         const release = await res.json();
         const latestVersion = release.tag_name.replace(/^v/, '');
 
-        if (latestVersion === CURRENT_VERSION) {
-            console.log("✅ You are already on the latest version.");
-            return;
+        // 1. Check Git SHA (for rolling/latest releases)
+        // @ts-ignore defined at build time
+        const localSha = process.env.GIT_SHA;
+        const remoteSha = release.target_commitish;
+
+        if (localSha && remoteSha) {
+            if (localSha === remoteSha) {
+                console.log(`✅ You are already on the latest commit (${localSha.substring(0, 7)}).`);
+                return;
+            }
+            console.log(`🔍 New commit found: ${remoteSha.substring(0, 7)} (Local: ${localSha.substring(0, 7)})`);
+        } else {
+            // 2. Fallback to SemVer Check
+            if (latestVersion === CURRENT_VERSION && release.tag_name !== "latest") {
+                console.log("✅ You are already on the latest version.");
+                return;
+            }
         }
 
         console.log(`🚀 New version found: v${latestVersion}`);

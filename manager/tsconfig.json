@@ -11,6 +11,8 @@
         "jsxImportSource": "hono/jsx",
         "allowImportingTsExtensions": true,
         "moduleResolution": "bundler",
+        "resolveJsonModule": true,
+        "esModuleInterop": true,
         "noEmit": true,
         "strict": true,
         "skipLibCheck": true
