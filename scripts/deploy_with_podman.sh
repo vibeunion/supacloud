@@ -56,7 +56,7 @@ fi
 # 4. Install Docker Compose (Standalone Binary)
 echo ">>> Installing Docker Compose..."
 COMPOSE_VERSION="v2.29.1"
-COMPOSE_URL="https://ghproxy.net/https://github.com/docker/compose/releases/download/${COMPOSE_VERSION}/docker-compose-linux-x86_64"
+COMPOSE_URL="https://mirror.ghproxy.com/https://github.com/docker/compose/releases/download/${COMPOSE_VERSION}/docker-compose-linux-x86_64"
 
 curl -SL "${COMPOSE_URL}" -o /usr/local/bin/docker-compose
 chmod +x /usr/local/bin/docker-compose
@@ -72,7 +72,7 @@ fi
 # 5. Install SupaCloud CLI
 echo ">>> Installing SupaCloud CLI..."
 export SUPACLOUD_CN=1
-curl -fsSL https://ghproxy.net/https://raw.githubusercontent.com/zuohuadong/supacloud/main/scripts/install.sh | bash -s cn
+curl -fsSL https://mirror.ghproxy.com/https://raw.githubusercontent.com/zuohuadong/supacloud/main/scripts/install.sh | bash -s cn
 
 # 6. Initialize and Start SupaCloud
 echo ">>> Initializing SupaCloud Workspace..."
