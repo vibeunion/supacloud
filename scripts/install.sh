@@ -9,8 +9,8 @@ API_URL="https://api.github.com"
 
 # Proxy support
 if [ "$1" == "cn" ]; then
-    echo "Using ghproxy.net for faster download in China..."
-    GITHUB_URL="https://ghproxy.net/https://github.com"
+    echo "Using mirror.ghproxy.com for faster download in China..."
+    GITHUB_URL="https://mirror.ghproxy.com/https://github.com"
 fi
 
 OS="$(uname -s)"

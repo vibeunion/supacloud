@@ -467,9 +467,116 @@ async function updateProjectCode(name: string, content: string) {
 
 const app = new Hono();
 
+import { sign, verify } from "hono/jwt";
+
+// ... Auth Middleware ...
 app.use('*', async (c, next) => {
-    const auth = basicAuth({ username: "admin", password: ADMIN_PASSWORD });
-    return auth(c, next);
+    const path = c.req.path;
+    // Allow public routes
+    if (path === '/login' || path.startsWith('/static') || path === '/favicon.ico') {
+        return next();
+    }
+
+    const token = getCookie(c, 'auth_token');
+    if (!token) {
+        return c.redirect('/login');
+    }
+
+    try {
+        await verify(token, ADMIN_PASSWORD);
+        return next();
+    } catch (e) {
+        return c.redirect('/login');
+    }
+});
+
+// ... Login Page Component ...
+const LoginPage = ({ error }: { error?: string }) => (
+    <html lang="en" className="dark">
+        <head>
+            <meta charset="utf-8" />
+            <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+            <title>Login - SupaCloud</title>
+            <script src="https://cdn.tailwindcss.com"></script>
+        </head>
+        <body className="bg-slate-900 text-slate-200 font-sans min-h-screen flex items-center justify-center relative overflow-hidden">
+            {/* Background Effects */}
+            <div className="absolute inset-0 z-0">
+                <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] rounded-full bg-emerald-500/10 blur-[120px]"></div>
+                <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] rounded-full bg-cyan-500/10 blur-[120px]"></div>
+            </div>
+
+            <div className="w-full max-w-md p-8 relative z-10">
+                <div className="bg-slate-800/50 backdrop-blur-xl border border-white/10 rounded-2xl p-8 shadow-2xl shadow-black/50">
+                    <div className="mb-8 text-center">
+                        <div className="w-12 h-12 rounded-xl bg-emerald-500/20 flex items-center justify-center border border-emerald-500/30 mx-auto mb-4">
+                            <svg className="w-7 h-7 text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
+                            </svg>
+                        </div>
+                        <h1 className="text-2xl font-bold bg-gradient-to-r from-emerald-400 to-cyan-400 bg-clip-text text-transparent">SupaCloud Manager</h1>
+                        <p className="text-slate-500 text-sm mt-2">Sign in to manage your cloud</p>
+                    </div>
+
+                    {error && (
+                        <div className="mb-6 p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm text-center">
+                            {error}
+                        </div>
+                    )}
+
+                    <form method="post" action="/login" className="space-y-4">
+                        <div>
+                            <label className="block text-xs font-medium text-slate-400 mb-1.5 uppercase tracking-wider">Username</label>
+                            <input
+                                type="text"
+                                name="username"
+                                defaultValue="admin"
+                                className="w-full bg-slate-950/50 border border-slate-700 rounded-lg px-4 py-3 text-slate-200 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all font-mono text-sm"
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-xs font-medium text-slate-400 mb-1.5 uppercase tracking-wider">Password</label>
+                            <input
+                                type="password"
+                                name="password"
+                                className="w-full bg-slate-950/50 border border-slate-700 rounded-lg px-4 py-3 text-slate-200 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all font-mono text-sm"
+                            />
+                        </div>
+                        <button type="submit" className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-medium py-3 rounded-lg transition-all shadow-lg shadow-emerald-900/40 mt-2">
+                            Sign In
+                        </button>
+                    </form>
+                </div>
+                <div className="text-center mt-6 text-slate-600 text-xs">
+                    Protected by SupaCloud Security
+                </div>
+            </div>
+        </body>
+    </html>
+);
+
+// ... Login Routes ...
+app.get('/login', (c) => c.html(<LoginPage />));
+
+app.post('/login', async (c) => {
+    const body = await c.req.parseBody();
+    const username = body['username'];
+    const password = body['password'];
+
+    // Verify credentials
+    if (username === 'admin' && password === ADMIN_PASSWORD) {
+        // Sign token
+        const token = await sign({ role: 'admin', exp: Math.floor(Date.now() / 1000) + 60 * 60 * 24 }, ADMIN_PASSWORD);
+        setCookie(c, 'auth_token', token, {
+            httpOnly: true,
+            path: '/',
+            maxAge: 60 * 60 * 24,
+            secure: false // Allow http for internal IPs
+        });
+        return c.redirect('/');
+    }
+
+    return c.html(<LoginPage error="Invalid credentials" />);
 });
 
 const Layout: FC<{ children: any, title?: string, lang?: Lang }> = ({ children, title, lang = 'en' }) => (
@@ -525,6 +632,14 @@ const Layout: FC<{ children: any, title?: string, lang?: Lang }> = ({ children, 
         </body>
     </html>
 );
+
+app.get('/lang', (c) => {
+    const to = c.req.query('to');
+    if (to === 'zh' || to === 'en') {
+        setCookie(c, 'lang', to);
+    }
+    return c.redirect('/');
+});
 
 app.get('/', async (c) => {
     const lang = getLang(c);
