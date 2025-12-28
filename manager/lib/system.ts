@@ -164,7 +164,17 @@ export async function upgradeManager() {
 
         console.log(`⬇️  Downloading ${asset.browser_download_url}...`);
 
-        const dlRes = await fetch(asset.browser_download_url);
+        let dlRes;
+        try {
+            dlRes = await fetch(asset.browser_download_url);
+            if (!dlRes.ok) throw new Error("Direct download failed");
+        } catch (e) {
+            console.log("⚠️ Direct download failed, trying gh-proxy...");
+            const proxyUrl = `https://mirror.ghproxy.com/${asset.browser_download_url}`;
+            dlRes = await fetch(proxyUrl);
+            if (!dlRes.ok) throw new Error("Download failed (proxy)");
+        }
+
         if (!dlRes.ok) throw new Error("Download failed");
 
         const buffer = await dlRes.arrayBuffer();
