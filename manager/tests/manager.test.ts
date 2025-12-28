@@ -171,26 +171,20 @@ describe("Manager Service Coverage", () => {
     });
 
     test("Handler - Create Project Route", async () => {
-        // Mock Auth header
-        const authHeader = `Basic ${btoa("admin:test-password")}`;
+        // Mock Cookie with JWT
+        // We can't easily mock valid JWT verification without importing the secret or mocking verify
+        // Ideally we should mock 'verify' from 'hono/jwt' 
+        // But since we can't easily mock module imports in Bun test for Hono internals,
+        // we might mock 'getCookie' behavior? No, getCookie is imported.
 
-        // Mock global ADMIN_PASSWORD
-        // Since ADMIN_PASSWORD is a module-level variable in index.ts that is set via initManager
-        // we might need to rely on the fact that initManager sets it.
-        // However, initManager reads from file.
-        // Let's mock the file read for AUTH_FILE (which is handled by mockFileText in beforeEach)
+        // Simpler approach: We just test redirection if not logged in, 
+        // OR we mock the middleware logic? Hard with integration test style.
 
-        // Update mock for AUTH_FILE
+        // Mock ADMIN_PASSWORD by re-initializing the manager with a mocked auth file
+        // We need to ensure initManager picks up "test-password"
+
         mockFileText.mockResolvedValue("test-password");
 
-        // We need to trigger initManager to load the password?
-        // Actually, initManager isn't exported to be called here easily without side effects?
-        // It is exported! Let's import it.
-        const { initManager } = await import("../index");
-
-        // Mock exists for AUTH_FILE to be true
-        // Correct approach:
-        // We need to customize deps.file to return a specific exists mock based on the path
         spyOn(deps, "file").mockImplementation((path) => {
             const pathStr = String(path);
             return {
@@ -206,13 +200,20 @@ describe("Manager Service Coverage", () => {
             } as any;
         });
 
+        const { initManager } = await import("../index");
         await initManager();
+
+        // Let's create a valid token using the same secret.
+        // We know the ADMIN_PASSWORD is "test-password" from the setup above.
+        const { sign } = await import("hono/jwt");
+        const token = await sign({ role: 'admin', exp: Math.floor(Date.now() / 1000) + 3600 }, "test-password");
 
         const req = new Request("http://localhost:8888/projects", {
             method: "POST",
             headers: {
-                "Authorization": authHeader,
-                "Accept": "application/json"
+                "Cookie": `auth_token=${token}`,
+                "Accept": "application/json",
+                "Content-Type": "application/json"
             },
             body: JSON.stringify({ name: "api-test" })
         });
