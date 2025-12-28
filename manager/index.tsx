@@ -1,6 +1,6 @@
 
 import { serve, file as bunFile, write as bunWrite, spawn as bunSpawn, Glob as BunGlob } from "bun";
-import { readdir, mkdir, rename, rm } from "node:fs/promises";
+import { readdir, mkdir, rename, rm, stat } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { homedir } from "node:os";
 import { $ } from "bun";
@@ -69,7 +69,7 @@ const DICTIONARY = {
         input_name_placeholder: "e.g. my-awesome-app",
         input_hint: "Only lowercase letters, numbers, and hyphens.",
         modal_logs_title: "Logs",
-        modal_config_title: "Configuration",
+        modal_config_title: "Environment Variables",
         hint_restart: "Restart required after saving",
         confirm_delete: "Are you sure you want to delete {name}? This cannot be undone.",
         link_studio: "Studio",
@@ -81,6 +81,10 @@ const DICTIONARY = {
         col_actions: "Actions",
         btn_code: "Code",
         modal_code_title: "Function Code",
+        btn_add_func: "New Function",
+        btn_delete_func: "Delete",
+        placeholder_func_name: "index.ts",
+        title_env_vars: "Environment Variables",
         hint_save_restart: "Save changes and restart service to apply",
         // New features
         section_monitoring: "Monitoring",
@@ -137,6 +141,10 @@ const DICTIONARY = {
         col_actions: "操作",
         btn_code: "代码",
         modal_code_title: "函数代码",
+        btn_add_func: "新建函数",
+        btn_delete_func: "删除",
+        placeholder_func_name: "index.ts",
+        title_env_vars: "环境变量",
         hint_save_restart: "保存并重启服务以生效",
         // New features
         section_monitoring: "监控面板",
@@ -193,8 +201,12 @@ function t(lang: Lang, key: keyof typeof DICTIONARY['en'], params?: Record<strin
 
 // --- Helper Functions ---
 async function exists(path: string) {
-    const file = deps.file(path);
-    return await file.exists();
+    try {
+        await stat(path);
+        return true;
+    } catch {
+        return false;
+    }
 }
 
 async function createDatabase(dbName: string) {
@@ -464,22 +476,50 @@ async function startBase() {
 
 // --- Hono App & UI ---
 
-async function getProjectCode(name: string) {
+async function ensureFunctionsDir(name: string) {
+    const dir = join(INSTANCES_DIR, name, 'packages', 'bun-auth', 'functions');
+    if (!(await exists(dir))) {
+        await deps.mkdir(dir, { recursive: true });
+    }
+    return dir;
+}
+
+async function listFunctions(name: string) {
     try {
-        const codePath = join(INSTANCES_DIR, name, 'packages', 'bun-auth', 'index.ts');
-        const file = deps.file(codePath);
-        if (!(await file.exists())) return { success: false, message: "Functions file not found" };
-        const code = await file.text();
-        return { success: true, code };
+        const dir = await ensureFunctionsDir(name);
+        const files = await deps.readdir(dir);
+        return { success: true, files: files.filter(f => f.endsWith('.ts') || f.endsWith('.js')) };
     } catch (e: any) {
         return { success: false, message: e.message };
     }
 }
 
-async function updateProjectCode(name: string, content: string) {
+async function getFunction(name: string, filename: string) {
     try {
-        const codePath = join(INSTANCES_DIR, name, 'packages', 'bun-auth', 'index.ts');
-        await deps.write(codePath, content);
+        const dir = await ensureFunctionsDir(name);
+        const path = join(dir, filename);
+        const file = deps.file(path);
+        if (!(await file.exists())) return { success: false, message: "File not found" };
+        return { success: true, code: await file.text() };
+    } catch (e: any) {
+        return { success: false, message: e.message };
+    }
+}
+
+async function saveFunction(name: string, filename: string, content: string) {
+    try {
+        const dir = await ensureFunctionsDir(name);
+        await deps.write(join(dir, filename), content);
+        return { success: true };
+    } catch (e: any) {
+        return { success: false, message: e.message };
+    }
+}
+
+async function deleteFunction(name: string, filename: string) {
+    try {
+        const dir = await ensureFunctionsDir(name);
+        await deps.rm(join(dir, filename));
         return { success: true };
     } catch (e: any) {
         return { success: false, message: e.message };
@@ -1160,42 +1200,133 @@ app.post('/projects/:name/config', async (c) => {
 
 app.get('/projects/:name/code', async (c) => {
     const lang = getLang(c);
-        const name = c.req.param('name');
-        const res = await getProjectCode(name);
-        if (!res.success) return c.text(res.message || "Error", 500);
-
-        return c.html(
-        <div className="fixed inset-0 z-50 flex items-center justify-center px-4" id="modal-container">
-            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" {...{ "hx-on:click": "document.getElementById('modal-container').remove()" }}></div>
-            <div className="glass rounded-xl p-6 w-full max-w-4xl relative z-10 shadow-2xl animate-fade-in-up flex flex-col h-[80vh]">
-                <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
-                    <svg className="w-5 h-5 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="16" y1="13" x2="8" y2="13" /><line x1="16" y1="17" x2="8" y2="17" /><polyline points="10 9 9 9 8 9" /></svg>
-                    {t(lang, 'modal_code_title')}: {name}
-                </h3>
-                <form hx-post={`/projects/${name}/code`} hx-target="#modal-container" hx-swap="delete" className="flex-1 flex flex-col min-h-0">
-                    <div className="flex-1 mb-4 min-h-0 bg-slate-950 border border-slate-700 rounded-lg overflow-hidden">
-                        <textarea name="code" className="w-full h-full bg-slate-950 p-4 font-mono text-xs text-slate-300 focus:outline-none focus:border-emerald-500 resize-none" spellCheck="false">{res.code}</textarea>
-                    </div>
-                    <div className="flex justify-between items-center shrink-0">
-                        <span className="text-xs text-yellow-500/80 bg-yellow-500/10 px-2 py-1 rounded border border-yellow-500/20">{t(lang, 'hint_save_restart')}</span>
-                        <div className="flex gap-3">
-                            <button type="button" {...{ "hx-on:click": "document.getElementById('modal-container').remove()" }} className="px-4 py-2 hover:bg-slate-800 rounded-lg transition-colors text-sm">{t(lang, 'btn_cancel')}</button>
-                            <button type="submit" className="bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-2 rounded-lg font-medium transition-colors text-sm">{t(lang, 'btn_save')}</button>
-                        </div>
-                    </div>
-                </form>
-            </div>
-        </div>
-        );
-});
-
-app.post('/projects/:name/code', async (c) => {
     const name = c.req.param('name');
-        const body = await c.req.parseBody();
-        const code = body['code'] as string;
-        await updateProjectCode(name, code);
-        return c.body(null, 200);
+    const listRes = await listFunctions(name);
+    const files = listRes.success ? listRes.files || [] : [];
+    
+    // Default to first file if exists, else empty
+    const selectedFile = c.req.query('file') || (files.length > 0 ? files[0] : '');
+    let fileContent = '';
+    
+    if (selectedFile) {
+        const fileRes = await getFunction(name, selectedFile);
+        if (fileRes.success) {
+            fileContent = fileRes.code || '';
+        }
+    }
+
+    return c.html(
+    <div className="fixed inset-0 z-50 flex items-center justify-center px-4" id="modal-container">
+        <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" {...{ "hx-on:click": "document.getElementById('modal-container').remove()" }}></div>
+        <div className="glass rounded-xl w-full max-w-5xl relative z-10 shadow-2xl animate-fade-in-up flex h-[80vh] overflow-hidden" x-data={`{
+            currentFile: '${selectedFile}',
+            isNew: ${!selectedFile},
+            content: \`${fileContent.replace(/`/g, '\\`')}\`,
+            files: ${JSON.stringify(files)},
+            loadFile(file) {
+                this.currentFile = file;
+                this.isNew = false;
+                fetch(\`/projects/${name}/code/\${file}\`).then(r => r.text()).then(t => this.content = t);
+            },
+            newFile() {
+                this.currentFile = '';
+                this.isNew = true;
+                this.content = '';
+            },
+            async save() {
+                if (!this.currentFile) return;
+                await fetch(\`/projects/${name}/code/\${this.currentFile}\`, {
+                    method: 'POST',
+                    body: this.content
+                });
+                // Simple reload to refresh list if needed
+                htmx.ajax('GET', \`/projects/${name}/code?file=\${this.currentFile}\`, '#modal-container');
+            },
+            async del() {
+                if (!confirm('${t(lang, 'confirm_delete').replace('{name}', "' + this.currentFile + '")}')) return;
+                await fetch(\`/projects/${name}/code/\${this.currentFile}\`, { method: 'DELETE' });
+                htmx.ajax('GET', \`/projects/${name}/code\`, '#modal-container');
+            }
+        }`}>
+            {/* Sidebar */}
+            <div className="w-1/4 bg-slate-950/50 border-r border-slate-800 flex flex-col">
+                <div className="p-4 border-b border-white/5 flex justify-between items-center">
+                    <h3 className="font-bold text-slate-300">{t(lang, 'modal_code_title')}</h3>
+                    <button x-on:click="newFile()" className="text-emerald-400 hover:text-emerald-300 text-xs bg-emerald-500/10 px-2 py-1 rounded border border-emerald-500/20 transition-colors">
+                        + {t(lang, 'btn_add_func')}
+                    </button>
+                </div>
+                <div className="flex-1 overflow-auto p-2 space-y-1">
+                    <template x-for="file in files">
+                        <button 
+                            x-on:click="loadFile(file)"
+                            {...{ ":class": "currentFile === file ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'text-slate-400 hover:bg-white/5 hover:text-slate-200 border-transparent'" }}
+                            className="w-full text-left px-3 py-2 rounded text-sm font-mono border transition-all truncate"
+                            x-text="file"
+                        ></button>
+                    </template>
+                </div>
+            </div>
+
+            {/* Editor Area */}
+            <div className="flex-1 flex flex-col bg-slate-900/50">
+                <div className="p-4 border-b border-white/5 flex items-center gap-4 bg-slate-900/30">
+                    <div className="flex-1">
+                        <input 
+                            type="text" 
+                            x-model="currentFile" 
+                            {...{ ":disabled": "!isNew" }}
+                            placeholder={t(lang, 'placeholder_func_name')}
+                            className="bg-transparent text-slate-200 font-mono text-sm focus:outline-none w-full placeholder-slate-600"
+                        />
+                    </div>
+                    <div className="flex gap-2">
+                        <button x-show="!isNew" x-on:click="del()" className="text-red-400 hover:bg-red-500/10 px-3 py-1.5 rounded text-xs transition-colors">{t(lang, 'btn_delete_func')}</button>
+                        <button x-on:click="save()" className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-1.5 rounded text-xs font-medium transition-colors">{t(lang, 'btn_save')}</button>
+                    </div>
+                </div>
+                <textarea 
+                    x-model="content"
+                    className="flex-1 w-full bg-slate-950 p-4 font-mono text-xs text-slate-300 focus:outline-none resize-none" 
+                    spellCheck="false"
+                ></textarea>
+                 <div className="p-2 bg-slate-950 border-t border-slate-800 text-right">
+                    <span className="text-xs text-yellow-500/80">{t(lang, 'hint_save_restart')}</span>
+                </div>
+            </div>
+            
+            {/* Close Button */}
+            <button {...{ "hx-on:click": "document.getElementById('modal-container').remove()" }} className="absolute top-2 right-2 text-slate-500 hover:text-white transition-colors">
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+            </button>
+        </div>
+    </div>
+    );
 });
+
+app.get('/projects/:name/code/:file', async (c) => {
+    const name = c.req.param('name');
+    const file = c.req.param('file');
+    const res = await getFunction(name, file);
+    return c.text(res.success ? (res.code || '') : '');
+});
+
+app.post('/projects/:name/code/:file', async (c) => {
+    const name = c.req.param('name');
+    const file = c.req.param('file');
+    const content = await c.req.text();
+    await saveFunction(name, file, content);
+    return c.body(null, 200);
+});
+
+app.delete('/projects/:name/code/:file', async (c) => {
+    const name = c.req.param('name');
+    const file = c.req.param('file');
+    await deleteFunction(name, file);
+    return c.body(null, 200);
+});
+
+
 
 // --- System Operations ---
 
