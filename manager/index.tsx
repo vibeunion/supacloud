@@ -55,6 +55,8 @@ const DICTIONARY = {
         projects_title: "Projects",
         btn_new: "New Project",
         btn_restart: "Restart",
+        btn_start: "Start",
+        btn_stop: "Stop",
         btn_logs: "Logs",
         btn_config: "Config",
         btn_delete: "Delete",
@@ -97,7 +99,11 @@ const DICTIONARY = {
         confirm_restore: "Are you sure you want to restore {file}? CURRENT DATA WILL BE LOST!",
         update_available: "New version available!",
         update_uptodate: "Your system is up to date.",
-        msg_update_started: "Update started. System will restart..."
+        msg_update_started: "Update started. System will restart...",
+        msg_checking_update: "Checking for updates...",
+        msg_update_found: "New version found: v{version}",
+        msg_no_update: "You are on the latest version.",
+        btn_skip_update: "Skip"
     },
     zh: {
         status_label: "系统状态",
@@ -105,6 +111,8 @@ const DICTIONARY = {
         projects_title: "项目管理",
         btn_new: "新建项目",
         btn_restart: "重启服务",
+        btn_start: "启动服务",
+        btn_stop: "停止服务",
         btn_logs: "查看日志",
         btn_config: "修改配置",
         btn_delete: "删除项目",
@@ -147,15 +155,27 @@ const DICTIONARY = {
         confirm_restore: "⚠️ 确定要从 {file} 恢复吗？当前数据将被覆盖且无法找回！",
         update_available: "发现新版本！",
         update_uptodate: "当前已是最新系统。",
-        msg_update_started: "更新任务已后台启动，系统即将重启..."
+        msg_update_started: "更新任务已后台启动，系统即将重启...",
+        msg_checking_update: "正在检查更新...",
+        msg_update_found: "发现新版本: v{version}",
+        msg_no_update: "当前已是最新版本",
+        btn_skip_update: "暂不更新"
     }
 };
 
 type Lang = 'en' | 'zh';
 
 function getLang(c: Context): Lang {
-    const cookieLang = getCookie(c, 'lang') as Lang;
-    return (cookieLang === 'zh' || cookieLang === 'en') ? cookieLang : 'en';
+    const cookieLang = getCookie(c, 'lang');
+    if (cookieLang === 'zh' || cookieLang === 'en') return cookieLang;
+
+    // Auto-detect from Accept-Language header
+    const acceptLang = c.req.header('Accept-Language');
+    if (acceptLang && acceptLang.toLowerCase().includes('zh')) {
+        return 'zh';
+    }
+
+    return 'en';
 }
 
 function t(lang: Lang, key: keyof typeof DICTIONARY['en'], params?: Record<string, string>) {
@@ -491,8 +511,8 @@ app.use('*', async (c, next) => {
 });
 
 // ... Login Page Component ...
-const LoginPage = ({ error }: { error?: string }) => (
-    <html lang="en" className="dark">
+const LoginPage = ({ error, lang = 'en' }: { error?: string, lang?: Lang }) => (
+    <html lang={lang} className="dark">
         <head>
             <meta charset="utf-8" />
             <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -510,7 +530,7 @@ const LoginPage = ({ error }: { error?: string }) => (
                 <div className="bg-slate-800/50 backdrop-blur-xl border border-white/10 rounded-2xl p-8 shadow-2xl shadow-black/50">
                     <div className="mb-8 text-center">
                         <div className="w-12 h-12 rounded-xl bg-emerald-500/20 flex items-center justify-center border border-emerald-500/30 mx-auto mb-4">
-                            <svg className="w-7 h-7 text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <svg className="w-7 h-7 text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                                 <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
                             </svg>
                         </div>
@@ -555,8 +575,7 @@ const LoginPage = ({ error }: { error?: string }) => (
     </html>
 );
 
-// ... Login Routes ...
-app.get('/login', (c) => c.html(<LoginPage />));
+app.get('/login', (c) => c.html(<LoginPage lang={getLang(c)} />));
 
 app.post('/login', async (c) => {
     const body = await c.req.parseBody();
@@ -576,19 +595,19 @@ app.post('/login', async (c) => {
         return c.redirect('/');
     }
 
-    return c.html(<LoginPage error="Invalid credentials" />);
+    return c.html(<LoginPage error="Invalid credentials" lang={getLang(c)} />);
 });
 
-const Layout: FC<{ children: any, title?: string, lang?: Lang }> = ({ children, title, lang = 'en' }) => (
-    <html lang={lang} className="dark">
-        <head>
-            <meta charset="utf-8" />
-            <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-            <title>{title ? `${title} - SupaCloud` : 'SupaCloud Manager'}</title>
-            <script src="https://cdn.tailwindcss.com"></script>
-            <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.13.3/dist/cdn.min.js"></script>
-            <script src="https://unpkg.com/htmx.org@1.9.10"></script>
-            <style>{`
+        const Layout: FC<{ children: any, title?: string, lang?: Lang }> = ({children, title, lang = 'en'}) => (
+        <html lang={lang} className="dark">
+            <head>
+                <meta charset="utf-8" />
+                <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+                <title>{title ? `${title} - SupaCloud` : 'SupaCloud Manager'}</title>
+                <script src="https://cdn.tailwindcss.com"></script>
+                <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.13.3/dist/cdn.min.js"></script>
+                <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+                <style>{`
                 .glass {
                     background: rgba(30, 41, 59, 0.7);
                     backdrop-filter: blur(12px);
@@ -601,54 +620,54 @@ const Layout: FC<{ children: any, title?: string, lang?: Lang }> = ({ children, 
                     border: 1px solid rgba(255, 255, 255, 0.05);
                 }
             `}</style>
-        </head>
-        <body className="bg-slate-900 text-slate-200 font-sans min-h-screen flex flex-col">
-            <nav className="glass sticky top-0 z-50 px-6 py-4 flex justify-between items-center shadow-lg shadow-black/20">
-                <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-lg bg-emerald-500/20 flex items-center justify-center border border-emerald-500/30">
-                        <svg className="w-5 h-5 text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
-                        </svg>
+            </head>
+            <body className="bg-slate-900 text-slate-200 font-sans min-h-screen flex flex-col">
+                <nav className="glass sticky top-0 z-50 px-6 py-4 flex justify-between items-center shadow-lg shadow-black/20">
+                    <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-lg bg-emerald-500/20 flex items-center justify-center border border-emerald-500/30">
+                            <svg className="w-5 h-5 text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
+                            </svg>
+                        </div>
+                        <span className="font-bold text-xl tracking-tight bg-gradient-to-r from-emerald-400 to-cyan-400 bg-clip-text text-transparent">
+                            SupaCloud
+                        </span>
+                        <span className="text-xs font-mono bg-slate-800 px-2 py-0.5 rounded text-slate-400 border border-slate-700">v0.1.0</span>
                     </div>
-                    <span className="font-bold text-xl tracking-tight bg-gradient-to-r from-emerald-400 to-cyan-400 bg-clip-text text-transparent">
-                        SupaCloud
-                    </span>
-                    <span className="text-xs font-mono bg-slate-800 px-2 py-0.5 rounded text-slate-400 border border-slate-700">v0.1.0</span>
-                </div>
-                <div className="flex gap-4 text-sm font-medium items-center">
-                    <a href={`/lang?to=${lang === 'en' ? 'zh' : 'en'}`} className="hover:text-emerald-400 transition-colors">
-                        {t(lang, 'lang_switch')}
-                    </a>
-                </div>
-            </nav>
+                    <div className="flex gap-4 text-sm font-medium items-center">
+                        <a href={`/lang?to=${lang === 'en' ? 'zh' : 'en'}`} className="hover:text-emerald-400 transition-colors">
+                            {t(lang, 'lang_switch')}
+                        </a>
+                    </div>
+                </nav>
 
-            <main className="flex-1 container mx-auto px-4 py-8 max-w-6xl">
-                {children}
-            </main>
+                <main className="flex-1 container mx-auto px-4 py-8 max-w-6xl">
+                    {children}
+                </main>
 
-            <footer className="text-center py-6 text-slate-600 text-sm border-t border-slate-800/50 mt-12">
-                <p>Powered by SupaCloud \u2022 Open Source</p>
-            </footer>
-        </body>
-    </html>
-);
+                <footer className="text-center py-6 text-slate-600 text-sm border-t border-slate-800/50 mt-12">
+                    <p>Powered by SupaCloud \u2022 Open Source</p>
+                </footer>
+            </body>
+        </html>
+        );
 
 app.get('/lang', (c) => {
     const to = c.req.query('to');
-    if (to === 'zh' || to === 'en') {
-        setCookie(c, 'lang', to);
+        if (to === 'zh' || to === 'en') {
+            setCookie(c, 'lang', to);
     }
-    return c.redirect('/');
+        return c.redirect('/');
 });
 
 app.get('/', async (c) => {
     const lang = getLang(c);
-    let projects: string[] = [];
-    try {
-        projects = await deps.readdir(INSTANCES_DIR);
+        let projects: string[] = [];
+        try {
+            projects = await deps.readdir(INSTANCES_DIR);
     } catch { }
 
-    return c.html(
+        return c.html(
         <Layout lang={lang}>
             <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
                 {/* Stats Cards */}
@@ -683,14 +702,65 @@ app.get('/', async (c) => {
                     </div>
                 </div>
 
-                <div x-data="{ backupOpen: false }" className="glass-card rounded-2xl p-6 flex flex-col justify-center gap-3">
+                <div x-data={`{
+                    backupOpen: false,
+                    updateStatus: 'idle', // idle, checking, found, uptodate
+                    newVersion: '',
+                    checkUpdate() {
+                        this.updateStatus = 'checking';
+                        fetch('/system/check-update')
+                            .then(r => r.json())
+                            .then(data => {
+                                if (data.hasUpdate) {
+                                    this.updateStatus = 'found';
+                                    this.newVersion = data.version;
+                                } else {
+                                    this.updateStatus = 'uptodate';
+                                    setTimeout(() => this.updateStatus = 'idle', 3000);
+                                }
+                            })
+                            .catch(() => this.updateStatus = 'idle');
+                    }
+                }`} className="glass-card rounded-2xl p-6 flex flex-col justify-center gap-3">
                     <span className="text-slate-400 text-sm font-medium">{t(lang, 'section_system')}</span>
 
-                    {/* Update Button */}
-                    <button hx-post="/system/update" hx-swap="none" hx-confirm={t(lang, 'msg_update_started')} className="w-full bg-slate-800 hover:bg-slate-700 text-slate-200 px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2">
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
-                        {t(lang, 'btn_update_now')}
-                    </button>
+                    {/* Update Section */}
+                    <div className="w-full">
+                        <template x-if="updateStatus === 'idle' || updateStatus === 'uptodate' || updateStatus === 'checking'">
+                            <button
+                                x-on:click="checkUpdate()"
+                                disabled={false}
+                                className="w-full bg-slate-800 hover:bg-slate-700 text-slate-200 px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2"
+                            >
+                                <span x-show="updateStatus === 'checking'" className="animate-spin w-4 h-4 border-2 border-slate-400 border-t-white rounded-full"></span>
+                                <span x-show="updateStatus === 'idle'">{t(lang, 'btn_update_check')}</span>
+                                <span x-show="updateStatus === 'checking'">{t(lang, 'msg_checking_update')}</span>
+                                <span x-show="updateStatus === 'uptodate'" className="text-emerald-400">{t(lang, 'update_uptodate')}</span>
+                            </button>
+                        </template>
+
+                        <template x-if="updateStatus === 'found'">
+                            <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-lg p-3">
+                                <p className="text-xs text-emerald-400 mb-2 text-center" x-text="'" + t(lang, 'msg_update_found').replace('{version}', '') + "' + newVersion"></p>
+                                <div className="flex gap-2">
+                                    <button
+                                        hx-post="/system/update"
+                                        hx-swap="none"
+                                        hx-confirm={t(lang, 'msg_update_started')}
+                                        className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs py-1.5 rounded transition-colors"
+                                    >
+                                        {t(lang, 'btn_update_now')}
+                                    </button>
+                                    <button
+                                        x-on:click="updateStatus = 'idle'"
+                                        className="px-3 bg-slate-700 hover:bg-slate-600 text-slate-300 text-xs py-1.5 rounded transition-colors"
+                                    >
+                                        {t(lang, 'btn_skip_update')}
+                                    </button>
+                                </div>
+                            </div>
+                        </template>
+                    </div>
 
                     {/* Backup Button */}
                     <button {...{ "x-on:click": "backupOpen = true" }} className="w-full bg-emerald-900/40 hover:bg-emerald-900/60 text-emerald-400 border border-emerald-500/20 px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2">
@@ -698,10 +768,10 @@ app.get('/', async (c) => {
                         {t(lang, 'btn_backup_restore')}
                     </button>
 
-                    {/* Backup Modal */}
+                    {/* Backup Modal - Expanded Size */}
                     <div x-show="backupOpen" className="fixed inset-0 z-50 flex items-center justify-center px-4" style="display: none;">
                         <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" {...{ "x-on:click": "backupOpen = false" }}></div>
-                        <div className="glass rounded-xl p-6 w-full max-w-2xl relative z-10 shadow-2xl animate-fade-in-up flex flex-col max-h-[80vh]">
+                        <div className="glass rounded-xl p-6 w-full max-w-5xl relative z-10 shadow-2xl animate-fade-in-up flex flex-col max-h-[85vh]">
                             <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
                                 <svg className="w-5 h-5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4" /></svg>
                                 {t(lang, 'modal_restore_title')}
@@ -805,87 +875,107 @@ app.get('/', async (c) => {
                 </div>
             </div>
         </Layout >
-    );
+        );
 });
 
-const ProjectRow = ({ name, lang = 'en' }: { name: string, lang?: Lang }) => (
-    <div className="grid grid-cols-12 gap-4 p-4 items-center hover:bg-white/5 transition-colors group">
-        <div className="col-span-4 flex items-center gap-3">
-            <div className="w-10 h-10 rounded bg-gradient-to-br from-slate-700 to-slate-800 flex items-center justify-center font-bold text-slate-300 font-mono text-lg border border-white/5">
-                {name.substring(0, 2).toUpperCase()}
+        const ProjectRow = ({name, lang = 'en'}: {name: string, lang?: Lang }) => (
+        <div className="grid grid-cols-12 gap-4 p-4 items-center hover:bg-white/5 transition-colors group">
+            <div className="col-span-4 flex items-center gap-3">
+                <div className="w-10 h-10 rounded bg-gradient-to-br from-slate-700 to-slate-800 flex items-center justify-center font-bold text-slate-300 font-mono text-lg border border-white/5">
+                    {name.substring(0, 2).toUpperCase()}
+                </div>
+                <div>
+                    <div className="font-semibold text-slate-200">{name}</div>
+                    <div className="text-xs text-slate-500">Postgres 15 \u2022 2 Services</div>
+                </div>
             </div>
-            <div>
-                <div className="font-semibold text-slate-200">{name}</div>
-                <div className="text-xs text-slate-500">Postgres 15 \u2022 2 Services</div>
+            <div className="col-span-3">
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                    {t(lang, 'status_ok')}
+                </span>
+            </div>
+            <div className="col-span-3 flex flex-col gap-1">
+                <a href={`http://${name}.studio.${ROOT_DOMAIN}`} target="_blank" className="text-xs text-cyan-400 hover:underline flex items-center gap-1">
+                    {t(lang, 'link_studio')}
+                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                </a>
+                <a href={`http://${name}.${ROOT_DOMAIN}`} target="_blank" className="text-xs text-slate-400 hover:text-slate-200 transaction-colors">{t(lang, 'link_api')}</a>
+            </div>
+            <div className="col-span-2 text-right opacity-0 group-hover:opacity-100 transition-opacity flex justify-end gap-2">
+                {/* Start/Stop Buttons */}
+                <button
+                    hx-post={`/projects/${name}/stop`}
+                    hx-swap="none"
+                    className="text-amber-400 hover:bg-white/10 hover:text-amber-300 px-3 py-1.5 rounded text-xs font-medium transition-colors"
+                    title={t(lang, 'btn_stop')}
+                    onClick="setTimeout(() => window.location.reload(), 2000)"
+                >
+                    {t(lang, 'btn_stop')}
+                </button>
+                <button
+                    hx-post={`/projects/${name}/start`}
+                    hx-swap="none"
+                    className="text-emerald-400 hover:bg-white/10 hover:text-emerald-300 px-3 py-1.5 rounded text-xs font-medium transition-colors"
+                    title={t(lang, 'btn_start')}
+                    onClick="setTimeout(() => window.location.reload(), 2000)"
+                >
+                    {t(lang, 'btn_start')}
+                </button>
+
+                <button
+                    hx-get={`/projects/${name}/logs`}
+                    hx-target="body"
+                    hx-swap="beforeend"
+                    title={t(lang, 'btn_logs')}
+                    className="text-slate-400 hover:bg-white/10 hover:text-white px-3 py-1.5 rounded text-xs font-medium transition-colors"
+                >
+                    {t(lang, 'btn_logs')}
+                </button>
+                <button
+                    hx-get={`/projects/${name}/config`}
+                    hx-target="body"
+                    hx-swap="beforeend"
+                    title={t(lang, 'btn_config')}
+                    className="text-slate-400 hover:bg-white/10 hover:text-white px-3 py-1.5 rounded text-xs font-medium transition-colors"
+                >
+                    {t(lang, 'btn_config')}
+                </button>
+                <button
+                    hx-get={`/projects/${name}/code`}
+                    hx-target="body"
+                    hx-swap="beforeend"
+                    title={t(lang, 'btn_code')}
+                    className="text-slate-400 hover:bg-white/10 hover:text-white px-3 py-1.5 rounded text-xs font-medium transition-colors"
+                >
+                    {t(lang, 'btn_code')}
+                </button>
+                <button
+                    hx-post={`/projects/${name}/restart`}
+                    hx-swap="none"
+                    title={t(lang, 'btn_restart')}
+                    className="text-slate-400 hover:bg-white/10 hover:text-white px-3 py-1.5 rounded text-xs font-medium transition-colors"
+                >
+                    {t(lang, 'btn_restart')}
+                </button>
+                <button
+                    hx-delete={`/projects/${name}`}
+                    hx-target="closest div.grid"
+                    hx-swap="outerHTML"
+                    hx-confirm={t(lang, 'confirm_delete', { name })}
+                    className="text-red-400 hover:bg-red-500/10 hover:text-red-300 px-3 py-1.5 rounded text-xs font-medium transition-colors"
+                >
+                    {t(lang, 'btn_delete')}
+                </button>
             </div>
         </div>
-        <div className="col-span-3">
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-                {t(lang, 'status_ok')}
-            </span>
-        </div>
-        <div className="col-span-3 flex flex-col gap-1">
-            <a href={`http://${name}.studio.${ROOT_DOMAIN}`} target="_blank" className="text-xs text-cyan-400 hover:underline flex items-center gap-1">
-                {t(lang, 'link_studio')}
-                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
-            </a>
-            <a href={`http://${name}.${ROOT_DOMAIN}`} target="_blank" className="text-xs text-slate-400 hover:text-slate-200 transaction-colors">{t(lang, 'link_api')}</a>
-        </div>
-        <div className="col-span-2 text-right opacity-0 group-hover:opacity-100 transition-opacity flex justify-end gap-2">
-            <button
-                hx-get={`/projects/${name}/logs`}
-                hx-target="body"
-                hx-swap="beforeend"
-                title={t(lang, 'btn_logs')}
-                className="text-slate-400 hover:bg-white/10 hover:text-white px-3 py-1.5 rounded text-xs font-medium transition-colors"
-            >
-                {t(lang, 'btn_logs')}
-            </button>
-            <button
-                hx-get={`/projects/${name}/config`}
-                hx-target="body"
-                hx-swap="beforeend"
-                title={t(lang, 'btn_config')}
-                className="text-slate-400 hover:bg-white/10 hover:text-white px-3 py-1.5 rounded text-xs font-medium transition-colors"
-            >
-                {t(lang, 'btn_config')}
-            </button>
-            <button
-                hx-get={`/projects/${name}/code`}
-                hx-target="body"
-                hx-swap="beforeend"
-                title={t(lang, 'btn_code')}
-                className="text-slate-400 hover:bg-white/10 hover:text-white px-3 py-1.5 rounded text-xs font-medium transition-colors"
-            >
-                {t(lang, 'btn_code')}
-            </button>
-            <button
-                hx-post={`/projects/${name}/restart`}
-                hx-swap="none"
-                title={t(lang, 'btn_restart')}
-                className="text-slate-400 hover:bg-white/10 hover:text-white px-3 py-1.5 rounded text-xs font-medium transition-colors"
-            >
-                {t(lang, 'btn_restart')}
-            </button>
-            <button
-                hx-delete={`/projects/${name}`}
-                hx-target="closest div.grid"
-                hx-swap="outerHTML"
-                hx-confirm={t(lang, 'confirm_delete', { name })}
-                className="text-red-400 hover:bg-red-500/10 hover:text-red-300 px-3 py-1.5 rounded text-xs font-medium transition-colors"
-            >
-                {t(lang, 'btn_delete')}
-            </button>
-        </div>
-    </div>
-);
+        );
 
 app.post('/projects', async (c) => {
-    let name: string;
-    const contentType = c.req.header('Content-Type');
+            let name: string;
+        const contentType = c.req.header('Content-Type');
 
-    if (contentType && contentType.includes('application/json')) {
+        if (contentType && contentType.includes('application/json')) {
         const json = await c.req.json();
         name = json['name'];
     } else {
@@ -893,10 +983,10 @@ app.post('/projects', async (c) => {
         name = body['name'] as string;
     }
 
-    if (!name) return c.json({ error: 'Name required' }, 400);
+        if (!name) return c.json({error: 'Name required' }, 400);
 
-    const res = await createProject(name);
-    if (res.success) {
+        const res = await createProject(name);
+        if (res.success) {
         // Support JSON for API clients/tests
         const accept = c.req.header('Accept');
         if (accept && accept.includes('application/json')) {
@@ -909,9 +999,9 @@ app.post('/projects', async (c) => {
     }
 });
 
-app.post('/projects/:name/restart', async (c) => {
+app.post('/projects/:name/start', async (c) => {
     const name = c.req.param('name');
-    const res = await restartProject(name);
+    const res = await startProject(name);
     if (res.success) {
         return c.body(null, 204);
     } else {
@@ -919,42 +1009,62 @@ app.post('/projects/:name/restart', async (c) => {
     }
 });
 
-// ... Upgrade Logic ...
+app.post('/projects/:name/stop', async (c) => {
+    const name = c.req.param('name');
+    const res = await stopProject(name);
+    if (res.success) {
+        return c.body(null, 204);
+    } else {
+        return c.text(res.message || "Failed", 500);
+    }
+});
 
-// --- Helpers ---
+app.post('/projects/:name/restart', async (c) => {
+    const name = c.req.param('name');
+        const res = await restartProject(name);
+        if (res.success) {
+        return c.body(null, 204);
+    } else {
+        return c.text(res.message || "Failed", 500);
+    }
+});
 
-async function getProjectLogs(name: string) {
+        // ... Upgrade Logic ...
+
+        // --- Helpers ---
+
+        async function getProjectLogs(name: string) {
     const projectDir = join(INSTANCES_DIR, name);
-    if (!(await exists(projectDir))) return { success: false, message: "Project not found" };
-    try {
+        if (!(await exists(projectDir))) return {success: false, message: "Project not found" };
+        try {
         // Use docker compose logs
         const output = await deps.$`docker compose -p ${name} logs --tail=100`.cwd(projectDir).text();
-        return { success: true, logs: output };
+        return {success: true, logs: output };
     } catch (e) {
-        return { success: false, message: String(e) };
+        return {success: false, message: String(e) };
     }
 }
 
-async function getProjectConfig(name: string) {
+        async function getProjectConfig(name: string) {
     const projectDir = join(INSTANCES_DIR, name);
-    try {
+        try {
         const envPath = join(projectDir, ".env");
-        if (!(await exists(envPath))) return { success: false, message: "Config not found" };
+        if (!(await exists(envPath))) return {success: false, message: "Config not found" };
         const content = await deps.file(envPath).text();
-        return { success: true, config: content };
+        return {success: true, config: content };
     } catch (e) {
-        return { success: false, message: String(e) };
+        return {success: false, message: String(e) };
     }
 }
 
-async function updateProjectConfig(name: string, content: string) {
+        async function updateProjectConfig(name: string, content: string) {
     const projectDir = join(INSTANCES_DIR, name);
-    try {
+        try {
         const envPath = join(projectDir, ".env");
         await deps.write(envPath, content);
-        return { success: true };
+        return {success: true };
     } catch (e) {
-        return { success: false, message: String(e) };
+        return {success: false, message: String(e) };
     }
 }
 
@@ -962,11 +1072,11 @@ async function updateProjectConfig(name: string, content: string) {
 
 app.get('/projects/:name/logs', async (c) => {
     const lang = getLang(c);
-    const name = c.req.param('name');
-    const res = await getProjectLogs(name);
-    if (!res.success) return c.text(res.message || "Error", 500);
+        const name = c.req.param('name');
+        const res = await getProjectLogs(name);
+        if (!res.success) return c.text(res.message || "Error", 500);
 
-    return c.html(
+        return c.html(
         <div className="fixed inset-0 z-50 flex items-center justify-center px-4" id="modal-container">
             <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" {...{ "hx-on:click": "document.getElementById('modal-container').remove()" }}></div>
             <div className="glass rounded-xl p-6 w-full max-w-4xl max-h-[80vh] flex flex-col relative z-10 shadow-2xl animate-fade-in-up">
@@ -984,18 +1094,18 @@ app.get('/projects/:name/logs', async (c) => {
                 </pre>
             </div>
         </div>
-    );
+        );
 });
 
 app.get('/projects/:name/config', async (c) => {
     const lang = getLang(c);
-    const name = c.req.param('name');
-    const res = await getProjectConfig(name);
-    if (!res.success) return c.text(res.message || "Error", 500);
+        const name = c.req.param('name');
+        const res = await getProjectConfig(name);
+        if (!res.success) return c.text(res.message || "Error", 500);
 
-    const isDeno = res.config?.includes("deno");
+        const isDeno = res.config?.includes("deno");
 
-    return c.html(
+        return c.html(
         <div className="fixed inset-0 z-50 flex items-center justify-center px-4" id="modal-container">
             <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" {...{ "hx-on:click": "document.getElementById('modal-container').remove()" }}></div>
             <div className="glass rounded-xl p-6 w-full max-w-2xl relative z-10 shadow-2xl animate-fade-in-up">
@@ -1017,24 +1127,24 @@ app.get('/projects/:name/config', async (c) => {
                 </form>
             </div>
         </div>
-    );
+        );
 });
 
 app.post('/projects/:name/config', async (c) => {
     const name = c.req.param('name');
-    const body = await c.req.parseBody();
-    const config = body['config'] as string;
-    await updateProjectConfig(name, config);
-    return c.body(null, 200);
+        const body = await c.req.parseBody();
+        const config = body['config'] as string;
+        await updateProjectConfig(name, config);
+        return c.body(null, 200);
 });
 
 app.get('/projects/:name/code', async (c) => {
     const lang = getLang(c);
-    const name = c.req.param('name');
-    const res = await getProjectCode(name);
-    if (!res.success) return c.text(res.message || "Error", 500);
+        const name = c.req.param('name');
+        const res = await getProjectCode(name);
+        if (!res.success) return c.text(res.message || "Error", 500);
 
-    return c.html(
+        return c.html(
         <div className="fixed inset-0 z-50 flex items-center justify-center px-4" id="modal-container">
             <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" {...{ "hx-on:click": "document.getElementById('modal-container').remove()" }}></div>
             <div className="glass rounded-xl p-6 w-full max-w-4xl relative z-10 shadow-2xl animate-fade-in-up flex flex-col h-[80vh]">
@@ -1056,18 +1166,37 @@ app.get('/projects/:name/code', async (c) => {
                 </form>
             </div>
         </div>
-    );
+        );
 });
 
 app.post('/projects/:name/code', async (c) => {
     const name = c.req.param('name');
-    const body = await c.req.parseBody();
-    const code = body['code'] as string;
-    await updateProjectCode(name, code);
-    return c.body(null, 200);
+        const body = await c.req.parseBody();
+        const code = body['code'] as string;
+        await updateProjectCode(name, code);
+        return c.body(null, 200);
 });
 
 // --- System Operations ---
+
+app.get('/system/check-update', async (c) => {
+    try {
+        const res = await fetch("https://api.github.com/repos/zuohuadong/supacloud/releases/latest", {
+            headers: { "User-Agent": "SupaCloud-Manager" }
+        });
+        if (!res.ok) throw new Error("Failed to fetch release info");
+        const data = await res.json() as any;
+        const latestVersion = data.tag_name || "v0.0.0";
+        // Simple version check (string comparison for now)
+        // Ideally parse semver
+        const currentVersion = "v0.1.0"; 
+        const hasUpdate = latestVersion !== currentVersion && latestVersion !== "0.1.0";
+
+        return c.json({ hasUpdate, version: latestVersion });
+    } catch (e) {
+        return c.json({ hasUpdate: false, error: String(e) });
+    }
+});
 
 app.get('/system/stats', async (c) => {
     // Requires 'docker stats' access
@@ -1076,8 +1205,8 @@ app.get('/system/stats', async (c) => {
         // Note: Formatting might be tricky across OS. Simplest is basic parsing.
         // Or assume we monitor 'base' containers + project containers.
         // For simplicity, we just return mock data or basic usage if possible.
-        // Real implementation would use `docker stats --no-stream --format "{{.Name}}:{{.CPUPerc}}:{{.MemPerc}}:{{.NetIO}}"`
-        const proc = deps.spawn(["docker", "stats", "--no-stream", "--format", "{{.Name}}|{{.CPUPerc}}|{{.MemPerc}}|{{.NetIO}}"], { stdout: "pipe" });
+        // Real implementation would use `docker stats --no-stream --format "{{.Name }}:{{.CPUPerc }}:{{.MemPerc }}:{{.NetIO }}"`
+        const proc = deps.spawn(["docker", "stats", "--no-stream", "--format", "{{.Name }}|{{.CPUPerc }}|{{.MemPerc }}|{{.NetIO }}"], {stdout: "pipe" });
         const output = await new Response(proc.stdout).text();
 
         // Aggregate logic
@@ -1092,8 +1221,8 @@ app.get('/system/stats', async (c) => {
             const parts = line.split('|');
             if (parts.length >= 2) {
                 const cpu = parseFloat(parts[1].replace('%', ''));
-                if (!isNaN(cpu)) cpuSum += cpu;
-                count++;
+        if (!isNaN(cpu)) cpuSum += cpu;
+        count++;
             }
         });
 
@@ -1103,10 +1232,10 @@ app.get('/system/stats', async (c) => {
         return c.json({
             cpu: `${cpuSum.toFixed(1)}%`,
             mem: count > 0 ? "Active" : "Idle", // Placeholder
-            net: `${count} Containers`
+        net: `${count} Containers`
         });
     } catch (e) {
-        return c.json({ cpu: 'Err', mem: 'Err', net: 'Err' });
+        return c.json({cpu: 'Err', mem: 'Err', net: 'Err' });
     }
 });
 
@@ -1120,10 +1249,10 @@ app.post('/system/update', async (c) => {
         // Note: Manager itself might be in 'base'. Restarting it will kill this request.
         // We accept that. It will restart.
 
-        const proc = deps.spawn([...COMPOSE_CMD, "pull"], { cwd: join(BASE_DIR, "base"), stdio: ["ignore", "inherit", "inherit"] });
+        const proc = deps.spawn([...COMPOSE_CMD, "pull"], {cwd: join(BASE_DIR, "base"), stdio: ["ignore", "inherit", "inherit"] });
         await proc.exited;
 
-        const procUp = deps.spawn([...COMPOSE_CMD, "up", "-d"], { cwd: join(BASE_DIR, "base"), stdio: ["ignore", "inherit", "inherit"] });
+        const procUp = deps.spawn([...COMPOSE_CMD, "up", "-d"], {cwd: join(BASE_DIR, "base"), stdio: ["ignore", "inherit", "inherit"] });
         // We don't await this fully if it kills the manager.
         // But assuming manager is "supacloud" binary or "base" container...
 
@@ -1143,42 +1272,42 @@ app.get('/system/backups', async (c) => {
 
     try {
         // We can just Exec into backup-service
-        const proc = deps.spawn(["docker", "exec", "backup-service", "sh", "-c", "export AWS_ACCESS_KEY_ID=$GARAGE_ACCESS_KEY; export AWS_SECRET_ACCESS_KEY=$GARAGE_SECRET_KEY; aws --endpoint-url $S3_ENDPOINT s3 ls s3://$BACKUP_BUCKET/"], { stdout: "pipe" });
+        const proc = deps.spawn(["docker", "exec", "backup-service", "sh", "-c", "export AWS_ACCESS_KEY_ID=$GARAGE_ACCESS_KEY; export AWS_SECRET_ACCESS_KEY=$GARAGE_SECRET_KEY; aws --endpoint-url $S3_ENDPOINT s3 ls s3://$BACKUP_BUCKET/"], {stdout: "pipe" });
         const output = await new Response(proc.stdout).text();
         // Parse output
         // Format: 2023-12-27 12:00:00  123456 global_db_...
         const files = output.trim().split('\n').map(line => {
             const parts = line.trim().split(/\s+/);
-            if (parts.length < 4) return null;
-            return {
-                date: `${parts[0]} ${parts[1]}`,
-                size: parts[2],
-                name: parts.slice(3).join(' ')
+        if (parts.length < 4) return null;
+        return {
+            date: `${parts[0]} ${parts[1]}`,
+        size: parts[2],
+        name: parts.slice(3).join(' ')
             };
         }).filter(Boolean);
 
         const lang = getCookie(c, 'lang') || 'en'; // Simple fallback
 
         return c.html(
-            <>
-                {files.map((f: any) => (
-                    <tr className="border-b border-white/5 hover:bg-white/5 transition-colors">
-                        <td className="py-3 px-2 font-mono text-xs text-slate-400">{f.date}</td>
-                        <td className="py-3 px-2 font-mono text-xs text-emerald-400">{f.size}</td>
-                        <td className="py-3 px-2 font-mono text-xs text-slate-300">{f.name}</td>
-                        <td className="py-3 px-2 text-right">
-                            <button
-                                hx-post="/system/restore"
-                                hx-vals={JSON.stringify({ file: f.name })}
-                                hx-confirm={t(lang as any, 'confirm_restore').replace('{file}', f.name)}
-                                className="text-xs bg-red-500/10 text-red-400 hover:bg-red-500 hover:text-white px-2 py-1 rounded transition-colors"
-                            >
-                                {t(lang as any, 'btn_restore')}
-                            </button>
-                        </td>
-                    </tr>
-                ))}
-            </>
+        <>
+            {files.map((f: any) => (
+                <tr className="border-b border-white/5 hover:bg-white/5 transition-colors">
+                    <td className="py-3 px-2 font-mono text-xs text-slate-400">{f.date}</td>
+                    <td className="py-3 px-2 font-mono text-xs text-emerald-400">{f.size}</td>
+                    <td className="py-3 px-2 font-mono text-xs text-slate-300">{f.name}</td>
+                    <td className="py-3 px-2 text-right">
+                        <button
+                            hx-post="/system/restore"
+                            hx-vals={JSON.stringify({ file: f.name })}
+                            hx-confirm={t(lang as any, 'confirm_restore').replace('{file}', f.name)}
+                            className="text-xs bg-red-500/10 text-red-400 hover:bg-red-500 hover:text-white px-2 py-1 rounded transition-colors"
+                        >
+                            {t(lang as any, 'btn_restore')}
+                        </button>
+                    </td>
+                </tr>
+            ))}
+        </>
         );
     } catch (e) {
         return c.html(<tr><td colSpan={4} className="text-center py-4 text-red-500">Error loading backups</td></tr>);
@@ -1187,10 +1316,10 @@ app.get('/system/backups', async (c) => {
 
 app.post('/system/restore', async (c) => {
     const body = await c.req.parseBody();
-    const file = body['file'] as string;
-    if (!file) return c.text("Filename required", 400);
+        const file = body['file'] as string;
+        if (!file) return c.text("Filename required", 400);
 
-    try {
+        try {
         // Execute restore script
         const proc = deps.spawn(["docker", "exec", "backup-service", "/restore.sh", file]);
         await proc.exited;
@@ -1203,42 +1332,68 @@ app.post('/system/restore', async (c) => {
 });
 
 
-// ...
+        // ...
 
-async function restartProject(name: string) {
+        async function startProject(name: string) {
     const projectDir = join(INSTANCES_DIR, name);
     if (!(await exists(projectDir))) return { success: false, message: "Project not found" };
 
-    console.log(`Restarting project ${name}...`);
     try {
-        const proc = deps.spawn([...COMPOSE_CMD, "-p", name, "restart"], { cwd: projectDir });
+        const proc = deps.spawn([...COMPOSE_CMD, "-p", name, "start"], { cwd: projectDir });
         await proc.exited;
         return { success: true };
-    } catch (e) {
-        return { success: false, message: String(e) };
+    } catch (e: any) {
+        return { success: false, message: e.message };
     }
 }
 
-// Upgrade Logic
-const CURRENT_VERSION = "0.1.0";
-const REPO = "zuohuadong/supacloud";
+async function stopProject(name: string) {
+    const projectDir = join(INSTANCES_DIR, name);
+    if (!(await exists(projectDir))) return { success: false, message: "Project not found" };
 
-async function upgradeManager() {
+    try {
+        const proc = deps.spawn([...COMPOSE_CMD, "-p", name, "stop"], { cwd: projectDir });
+        await proc.exited;
+        return { success: true };
+    } catch (e: any) {
+        return { success: false, message: e.message };
+    }
+}
+
+async function restartProject(name: string) {
+    const projectDir = join(INSTANCES_DIR, name);
+        if (!(await exists(projectDir))) return {success: false, message: "Project not found" };
+
+        console.log(`Restarting project ${name}...`);
+        try {
+        const proc = deps.spawn([...COMPOSE_CMD, "-p", name, "restart"], {cwd: projectDir });
+        await proc.exited;
+        return {success: true };
+    } catch (e) {
+        return {success: false, message: String(e) };
+    }
+}
+
+        // Upgrade Logic
+        const CURRENT_VERSION = "0.1.0";
+        const REPO = "zuohuadong/supacloud";
+
+        async function upgradeManager() {
     // Safety check: Don't upgrade if running as source (using bun interpreter)
     if (process.execPath.endsWith("bun") || process.execPath.endsWith("bun.exe")) {
-        console.log("⚠️  Running in interpreter mode. Please use 'git pull' to upgrade source code.");
+            console.log("⚠️  Running in interpreter mode. Please use 'git pull' to upgrade source code.");
         return;
     }
 
-    console.log(`Checking for updates... (Current: v${CURRENT_VERSION})`);
-    try {
+        console.log(`Checking for updates... (Current: v${CURRENT_VERSION})`);
+        try {
         const res = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`);
         if (!res.ok) {
             if (res.status === 404) {
-                console.log("No releases found.");
-                return;
+            console.log("No releases found.");
+        return;
             }
-            throw new Error(`GitHub API Error: ${res.statusText}`);
+        throw new Error(`GitHub API Error: ${res.statusText}`);
         }
 
         const release = await res.json();
@@ -1246,7 +1401,7 @@ async function upgradeManager() {
 
         if (latestVersion === CURRENT_VERSION) {
             console.log("✅ You are already on the latest version.");
-            return;
+        return;
         }
 
         console.log(`🚀 New version found: v${latestVersion}`);
@@ -1254,10 +1409,10 @@ async function upgradeManager() {
 
         const targetMap: Record<string, string> = {
             "linux-x64": "supacloud-linux-x64",
-            "linux-arm64": "supacloud-linux-arm64",
-            "darwin-x64": "supacloud-darwin-x64",
-            "darwin-arm64": "supacloud-darwin-arm64",
-            "win32-x64": "supacloud-windows-x64.exe"
+        "linux-arm64": "supacloud-linux-arm64",
+        "darwin-x64": "supacloud-darwin-x64",
+        "darwin-arm64": "supacloud-darwin-arm64",
+        "win32-x64": "supacloud-windows-x64.exe"
         };
 
         const key = `${process.platform}-${process.arch}`;
@@ -1265,8 +1420,8 @@ async function upgradeManager() {
 
         if (!assetName) {
             console.error(`❌ Auto-upgrade not supported for platform: ${process.platform} (${process.arch})`);
-            console.log("Supported targets:", Object.keys(targetMap).join(", "));
-            return;
+        console.log("Supported targets:", Object.keys(targetMap).join(", "));
+        return;
         }
 
         const asset = release.assets.find((a: any) => a.name === assetName);
@@ -1274,7 +1429,7 @@ async function upgradeManager() {
         if (!asset) {
             console.error(`❌ No compatible asset '${assetName}' found in release v${latestVersion}`);
             console.log("Available assets:", release.assets.map((a: any) => a.name).join(", "));
-            return;
+        return;
         }
 
         console.log(`⬇️  Downloading ${asset.browser_download_url}...`);
@@ -1299,23 +1454,23 @@ async function upgradeManager() {
         try {
             // Backup current
             await deps.rename(binPath, backupPath);
-            // Move new to current
-            await deps.rename(tmpPath, binPath);
+        // Move new to current
+        await deps.rename(tmpPath, binPath);
 
             // On Windows, specific cleanup might be tricky if process handles linger, 
             // but rename is generally safe for running executables.
             // We leave backupPath there just in case.
         } catch (err) {
             console.error("Failed to replace binary:", err);
-            // Try to restore
-            try {
+        // Try to restore
+        try {
                 if (await exists(backupPath)) {
-                    await deps.rename(backupPath, binPath);
+            await deps.rename(backupPath, binPath);
                 }
             } catch (restoreErr) {
-                console.error("Failed to restore backup:", restoreErr);
+            console.error("Failed to restore backup:", restoreErr);
             }
-            throw err;
+        throw err;
         }
 
         console.log(`✅ Successfully upgraded to v${latestVersion}`);
@@ -1323,29 +1478,29 @@ async function upgradeManager() {
         process.exit(0);
 
     } catch (e) {
-        console.error("❌ Upgrade failed:", e);
+            console.error("❌ Upgrade failed:", e);
         process.exit(1);
     }
 }
 
-// Export functions for testing
-const handler = app.fetch;
-export { createProject, getNextPorts, exists, createDatabase, initManager, handler, upgradeManager };
+        // Export functions for testing
+        const handler = app.fetch;
+        export {createProject, getNextPorts, exists, createDatabase, initManager, handler, upgradeManager};
 
-// Main Entry Point
-if (import.meta.main) {
+        // Main Entry Point
+        if (import.meta.main) {
     const argOffset = 2; // Approximate
-    const command = process.argv[argOffset] || "help";
+        const command = process.argv[argOffset] || "help";
 
-    await initManager();
-    await checkAndInstallDockerCompose();
+        await initManager();
+        await checkAndInstallDockerCompose();
 
-    if (command === "start") {
-        await startBase();
+        if (command === "start") {
+            await startBase();
         console.log("Starting Manager API...");
         serve({
             fetch: app.fetch,
-            port: 8888,
+        port: 8888,
         });
         console.log(`Manager listening on http://localhost:8888`);
     } else if (command === "create") {
@@ -1353,7 +1508,7 @@ if (import.meta.main) {
         const name = process.argv[argOffset + 1];
         if (name) await createProject(name);
     } else if (command === "upgrade") {
-        await upgradeManager();
+            await upgradeManager();
     }
     // ... Other CLI commands (status, help) mapped similarly if needed
     // For now we focus on the Web UI
