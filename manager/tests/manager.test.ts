@@ -8,6 +8,15 @@ const mockWrite = spyOn(deps, "write");
 const mockFileExists = mock(() => Promise.resolve(false));
 const mockFileText = mock(() => Promise.resolve(""));
 const mockSpawn = spyOn(deps, "spawn");
+const mockStat = spyOn(deps, "stat");
+
+// Mock deps.stat to behave like file existence check
+// If we want it to NOT exist, we reject. If exist, we resolve.
+mockStat.mockImplementation(async (path: any) => {
+    const exists = await mockFileExists();
+    if (!exists) throw new Error("File not found");
+    return {} as any;
+});
 
 // Mock Bun.file
 spyOn(deps, "file").mockImplementation((path) => ({
@@ -185,19 +194,24 @@ describe("Manager Service Coverage", () => {
 
         mockFileText.mockResolvedValue("test-password");
 
+        const authPathCheck = (path: any) => String(path).endsWith(".manager_auth");
+
         spyOn(deps, "file").mockImplementation((path) => {
             const pathStr = String(path);
             return {
-                exists: () => {
-                    if (pathStr.endsWith(".manager_auth")) return Promise.resolve(true);
-                    return Promise.resolve(false);
-                },
+                exists: () => Promise.resolve(authPathCheck(pathStr)),
                 text: () => {
                     if (pathStr.endsWith(".manager_auth")) return Promise.resolve("test-password");
                     return Promise.resolve("");
                 },
                 write: mockWrite
             } as any;
+        });
+
+        // Also mock stat for the auth file check in initManager
+        mockStat.mockImplementation(async (path: any) => {
+            if (authPathCheck(path)) return {} as any;
+            throw new Error("File not found");
         });
 
         const { initManager } = await import("../index");
