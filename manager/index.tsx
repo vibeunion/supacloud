@@ -1,6 +1,6 @@
 
 import { serve, file as bunFile, write as bunWrite, spawn as bunSpawn, Glob as BunGlob } from "bun";
-import { readdir, mkdir, rename } from "node:fs/promises";
+import { readdir, mkdir, rename, rm } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { homedir } from "node:os";
 import { $ } from "bun";
@@ -20,7 +20,8 @@ export const deps = {
     Glob: BunGlob,
     readdir,
     mkdir,
-    rename
+    rename,
+    rm
 };
 
 // --- Configuration & Constants ---
@@ -669,6 +670,7 @@ app.get('/', async (c) => {
 
         return c.html(
         <Layout lang={lang}>
+            <div className="flex flex-col gap-8">
             <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
                 {/* Stats Cards */}
                 <div x-data={`{
@@ -741,7 +743,7 @@ app.get('/', async (c) => {
 
                         <template x-if="updateStatus === 'found'">
                             <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-lg p-3">
-                                <p className="text-xs text-emerald-400 mb-2 text-center" x-text="'" + t(lang, 'msg_update_found').replace('{version}', '') + "' + newVersion"></p>
+                                <p className="text-xs text-emerald-400 mb-2 text-center" x-text="'Found new version: v' + newVersion"></p>
                                 <div className="flex gap-2">
                                     <button
                                         hx-post="/system/update"
@@ -777,7 +779,7 @@ app.get('/', async (c) => {
                                 {t(lang, 'modal_restore_title')}
                             </h3>
 
-                            <div className="flex-1 overflow-auto bg-slate-950/50 rounded-lg border border-white/5">
+                            <div className="flex-1 overflow-auto bg-slate-950/50 rounded-lg border border-white/5 min-h-[300px]">
                                 <table className="w-full text-left">
                                     <thead className="text-xs text-slate-500 uppercase bg-slate-900/50 sticky top-0 backdrop-blur-md">
                                         <tr>
@@ -845,7 +847,7 @@ app.get('/', async (c) => {
                                         name="name"
                                         type="text"
                                         required
-                                        pattern="[-a-z0-9]+"
+                                        pattern="^[a-z0-9-]+$"
                                         placeholder={t(lang, 'input_name_placeholder')}
                                         className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all font-mono text-sm"
                                     />
@@ -873,6 +875,7 @@ app.get('/', async (c) => {
                 <div id="project-list" className="divide-y divide-white/5">
                     {projects.map(name => <ProjectRow name={name} lang={lang} />)}
                 </div>
+            </div>
             </div>
         </Layout >
         );
@@ -909,7 +912,7 @@ app.get('/', async (c) => {
                     hx-swap="none"
                     className="text-amber-400 hover:bg-white/10 hover:text-amber-300 px-3 py-1.5 rounded text-xs font-medium transition-colors"
                     title={t(lang, 'btn_stop')}
-                    onClick="setTimeout(() => window.location.reload(), 2000)"
+                    onclick="setTimeout(() => window.location.reload(), 2000)"
                 >
                     {t(lang, 'btn_stop')}
                 </button>
@@ -918,7 +921,7 @@ app.get('/', async (c) => {
                     hx-swap="none"
                     className="text-emerald-400 hover:bg-white/10 hover:text-emerald-300 px-3 py-1.5 rounded text-xs font-medium transition-colors"
                     title={t(lang, 'btn_start')}
-                    onClick="setTimeout(() => window.location.reload(), 2000)"
+                    onclick="setTimeout(() => window.location.reload(), 2000)"
                 >
                     {t(lang, 'btn_start')}
                 </button>
@@ -1021,11 +1024,28 @@ app.post('/projects/:name/stop', async (c) => {
 
 app.post('/projects/:name/restart', async (c) => {
     const name = c.req.param('name');
-        const res = await restartProject(name);
-        if (res.success) {
+    const res = await restartProject(name);
+    if (res.success) {
         return c.body(null, 204);
     } else {
         return c.text(res.message || "Failed", 500);
+    }
+});
+
+app.delete('/projects/:name', async (c) => {
+    const name = c.req.param('name');
+    const projectDir = join(INSTANCES_DIR, name);
+
+    if (!(await exists(projectDir))) return c.text("Project not found", 404);
+
+    try {
+        const proc = deps.spawn([...COMPOSE_CMD, "-p", name, "down"], { cwd: projectDir, stdio: ["ignore", "ignore", "ignore"] });
+        await proc.exited;
+
+        await deps.rm(projectDir, { recursive: true, force: true });
+        return c.body(null, 200);
+    } catch (e: any) {
+        return c.text(e.message, 500);
     }
 });
 
@@ -1290,6 +1310,9 @@ app.get('/system/backups', async (c) => {
 
         return c.html(
         <>
+            {files.length === 0 && (
+                <tr><td colSpan={4} className="text-center py-8 text-slate-500">No backups found</td></tr>
+            )}
             {files.map((f: any) => (
                 <tr className="border-b border-white/5 hover:bg-white/5 transition-colors">
                     <td className="py-3 px-2 font-mono text-xs text-slate-400">{f.date}</td>
