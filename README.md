@@ -96,12 +96,12 @@ supacloud create shop
 
 **Linux & macOS (使用国内加速)**
 ```bash
-curl -fsSL https://ghproxy.net/https://raw.githubusercontent.com/zuohuadong/supacloud/main/scripts/install.sh | bash -s cn
+curl -fsSL https://mirror.ghproxy.com/https://raw.githubusercontent.com/zuohuadong/supacloud/main/scripts/install.sh | bash -s cn
 ```
 
 **Windows (PowerShell - 使用国内加速)**
 ```powershell
-$env:SUPACLOUD_CN=1; iwr https://ghproxy.net/https://raw.githubusercontent.com/zuohuadong/supacloud/main/scripts/install.ps1 -useb | iex
+$env:SUPACLOUD_CN=1; iwr https://mirror.ghproxy.com/https://raw.githubusercontent.com/zuohuadong/supacloud/main/scripts/install.ps1 -useb | iex
 ```
 
 #### 2. 初始化与启动
