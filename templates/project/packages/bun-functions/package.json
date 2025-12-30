@@ -1,0 +1,15 @@
+{
+    "name": "supabase-bun-functions",
+    "version": "1.0.0",
+    "description": "Bun Edge Functions - Compatible with Supabase Functions API",
+    "scripts": {
+        "start": "bun run index.ts",
+        "dev": "bun run --watch index.ts"
+    },
+    "dependencies": {
+        "hono": "^4.0.0"
+    },
+    "devDependencies": {
+        "@types/bun": "latest"
+    }
+}
