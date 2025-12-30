@@ -222,6 +222,40 @@ services:
     networks:
       - supabase-network
 
+  # Bun Edge Functions - Alternative to Deno edge-runtime
+  # Set EDGE_RUNTIME=bun to enable
+  # Image: zuohuadong/supabase-bun-function
+  bun-functions:
+    image: ${BUN_FUNCTIONS_IMAGE:-zuohuadong/supabase-bun-function:latest}
+    # Uncomment below to build locally instead of using pre-built image
+    # build:
+    #   context: ./packages/bun-functions
+    #   dockerfile: Dockerfile
+    container_name: ${PROJECT_NAME:-supabase}-bun-functions
+    restart: unless-stopped
+    profiles:
+      - bun # Only start when using --profile bun
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+    environment:
+      PORT: 9001
+      JWT_SECRET: ${JWT_SECRET}
+      ANON_KEY: ${ANON_KEY}
+      SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY}
+      SUPABASE_URL: http://kong:8000
+    volumes:
+      - ./packages/bun-functions/functions:/app/functions:ro
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:9001/health" ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - supabase-network
+
 networks:
   supabase-network:
     external: true
