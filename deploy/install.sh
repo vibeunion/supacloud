@@ -951,6 +951,87 @@ manual_start_supabase() {
     fi
 }
 
+# ========== 部署 MCP Function ==========
+deploy_mcp_function() {
+    log_step "部署 MCP Edge Function..."
+    
+    # 1. index.ts
+    MCP_INDEX_TS=$(cat << 'EOF'
+// Setup type definitions for built-in Supabase Runtime APIs
+import 'jsr:@supabase/functions-js/edge-runtime.d.ts'
+
+import { McpServer } from 'npm:@modelcontextprotocol/sdk/server/mcp.js'
+import { StreamableHTTPTransport } from 'npm:@hono/mcp'
+import { Hono } from 'npm:hono'
+import { z } from 'npm:zod'
+
+// Create Hono app
+const app = new Hono()
+
+// Create your MCP server
+const server = new McpServer({
+  name: 'mcp',
+  version: '0.1.0',
+})
+
+// Register a simple addition tool
+server.registerTool(
+  'add',
+  {
+    title: 'Addition Tool',
+    description: 'Add two numbers together',
+    inputSchema: { a: z.number(), b: z.number() },
+  },
+  ({ a, b }) => ({
+    content: [{ type: 'text', text: String(a + b) }],
+  })
+)
+
+// Handle MCP requests at the root path
+app.all('/', async (c) => {
+  const transport = new StreamableHTTPTransport()
+  await server.connect(transport)
+  return transport.handleRequest(c)
+})
+
+Deno.serve(app.fetch)
+EOF
+)
+
+    # 2. deno.json
+    MCP_DENO_JSON=$(cat << 'EOF'
+{
+  "imports": {
+    "@hono/mcp": "npm:@hono/mcp@^0.1.1",
+    "@modelcontextprotocol/sdk": "npm:@modelcontextprotocol/sdk@^1.24.3",
+    "hono": "npm:hono@^4.9.2",
+    "zod": "npm:zod@^4.1.13"
+  }
+}
+EOF
+)
+
+    # 部署目标路径
+    # 如果是 Deno (Pigsty 默认)
+    DENO_FUNC_DIR=~/pigsty/app/supabase/volumes/functions/mcp
+    mkdir -p "$DENO_FUNC_DIR"
+    echo "$MCP_INDEX_TS" > "$DENO_FUNC_DIR/index.ts"
+    echo "$MCP_DENO_JSON" > "$DENO_FUNC_DIR/deno.json"
+    log_info "已部署 MCP Function 到 Deno 运行时: $DENO_FUNC_DIR"
+    
+    # 如果已配置 Bun
+    if [[ -n "$BUN_FUNCTIONS_DIR" ]]; then
+        BUN_FUNC_ROOT="/opt/supabase/${BUN_FUNCTIONS_DIR}/functions"
+        if [[ -d "$BUN_FUNC_ROOT" ]]; then
+            BUN_MCP_DIR="$BUN_FUNC_ROOT/mcp"
+            mkdir -p "$BUN_MCP_DIR"
+            echo "$MCP_INDEX_TS" > "$BUN_MCP_DIR/index.ts"
+            echo "$MCP_DENO_JSON" > "$BUN_MCP_DIR/deno.json"
+            log_info "已部署 MCP Function 到 Bun 运行时: $BUN_MCP_DIR"
+        fi
+    fi
+}
+
 # ========== 显示完成信息 ==========
 show_completion() {
     log_step "安装完成！"
@@ -997,6 +1078,7 @@ main() {
     install_s3_storage
     configure_edge_runtime
     install_pigsty
+    deploy_mcp_function
     show_completion
 }
 
