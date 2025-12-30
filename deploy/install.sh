@@ -38,16 +38,51 @@ check_config() {
     
     source "$CONFIG_FILE"
     
-    # 验证必填项
+    # 1. 验证/获取 INTERNAL_IP
     if [[ -z "$INTERNAL_IP" || "$INTERNAL_IP" == "10.6.0.9" ]]; then
-        log_warn "INTERNAL_IP 未修改，使用默认值或自动检测"
-        INTERNAL_IP=$(hostname -I | awk '{print $1}')
-        log_info "自动检测到内网 IP: $INTERNAL_IP"
+        log_info "检查内网 IP..."
+        # 获取所有非回环 IP
+        IPS=($(hostname -I 2>/dev/null))
+        
+        if [[ ${#IPS[@]} -eq 0 ]]; then
+            log_warn "无法自动检测到 IP 地址"
+            while [[ -z "$INTERNAL_IP" || "$INTERNAL_IP" == "10.6.0.9" ]]; do
+                read -p "请输入服务器内网 IP: " INTERNAL_IP
+            done
+        elif [[ ${#IPS[@]} -eq 1 ]]; then
+            INTERNAL_IP="${IPS[0]}"
+            log_info "自动检测到内网 IP: $INTERNAL_IP"
+        else
+            log_warn "检测到多个 IP 地址，请选择:"
+            for i in "${!IPS[@]}"; do
+                echo "  [$((i+1))] ${IPS[$i]}"
+            done
+            
+            while true; do
+                read -p "请输入序号 (1-${#IPS[@]}) 或直接输入 IP: " selection
+                if [[ "$selection" =~ ^[0-9]+$ ]] && (( selection >= 1 && selection <= ${#IPS[@]} )); then
+                    INTERNAL_IP="${IPS[$((selection-1))]}"
+                    break
+                elif [[ -n "$selection" ]]; then
+                    INTERNAL_IP="$selection"
+                    break
+                fi
+            done
+        fi
+        log_info "已设置内网 IP: $INTERNAL_IP"
+    else
+        log_info "使用配置的内网 IP: $INTERNAL_IP"
     fi
     
+    # 2. 验证/获取 SUPABASE_DOMAIN
     if [[ -z "$SUPABASE_DOMAIN" || "$SUPABASE_DOMAIN" == "supa.example.com" ]]; then
-        log_error "请在 config.env 中设置 SUPABASE_DOMAIN"
-        exit 1
+        log_warn "未配置域名 (SUPABASE_DOMAIN)"
+        while [[ -z "$SUPABASE_DOMAIN" || "$SUPABASE_DOMAIN" == "supa.example.com" ]]; do
+            read -p "请输入 Supabase 对外域名 (例如 supa.example.com): " SUPABASE_DOMAIN
+        done
+        log_info "已设置域名: $SUPABASE_DOMAIN"
+    else
+        log_info "使用配置的域名: $SUPABASE_DOMAIN"
     fi
     
     # 自动生成 JWT 密钥
@@ -522,13 +557,26 @@ install_garage() {
         *) log_error "不支持的架构: $GARAGE_ARCH"; exit 1 ;;
     esac
     
-    GARAGE_URL="https://garagehq.deuxfleurs.fr/_releases/${GARAGE_VERSION}/garage-${GARAGE_ARCH}-unknown-linux-musl"
+    # 优先使用配置中的自定义下载地址
+    if [[ -n "$GARAGE_DOWNLOAD_URL" ]]; then
+        GARAGE_URL="$GARAGE_DOWNLOAD_URL"
+    else
+        GARAGE_URL="https://garagehq.deuxfleurs.fr/_releases/${GARAGE_VERSION}/${GARAGE_ARCH}-unknown-linux-musl/garage"
+    fi
     
     # 下载 Garage
     if [[ ! -f /usr/local/bin/garage ]]; then
         log_info "下载 Garage ${GARAGE_VERSION}..."
-        curl -L "$GARAGE_URL" -o /usr/local/bin/garage
-        chmod +x /usr/local/bin/garage
+        log_info "下载地址: $GARAGE_URL"
+        
+        if curl -L --progress-bar "$GARAGE_URL" -o /usr/local/bin/garage; then
+            chmod +x /usr/local/bin/garage
+            log_info "Garage 下载成功"
+        else
+            log_error "Garage 下载失败"
+            rm -f /usr/local/bin/garage
+            exit 1
+        fi
     fi
     
     # 创建配置目录
@@ -584,7 +632,9 @@ EOF
     systemctl enable --now garage
     
     # 等待启动
-    sleep 3
+    # 等待启动
+    log_info "等待 Garage 启动 (5s)..."
+    sleep 5
     
     # 初始化集群
     log_info "初始化 Garage 集群..."
