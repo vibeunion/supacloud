@@ -74,23 +74,47 @@ check_config() {
         log_info "使用配置的内网 IP: $INTERNAL_IP"
     fi
     
-    # 2. 验证/获取 SUPABASE_DOMAIN
-    if [[ -z "$SUPABASE_DOMAIN" || "$SUPABASE_DOMAIN" == "supa.example.com" ]]; then
-        log_warn "未配置域名 (SUPABASE_DOMAIN)"
-        while [[ -z "$SUPABASE_DOMAIN" || "$SUPABASE_DOMAIN" == "supa.example.com" ]]; do
-            read -p "请输入 Supabase 对外域名 (例如 supa.example.com): " SUPABASE_DOMAIN
-        done
-        log_info "已设置域名: $SUPABASE_DOMAIN"
-    else
-        log_info "使用配置的域名: $SUPABASE_DOMAIN"
+    # 2. 验证/获取 域名配置
+    # 兼容旧配置
+    if [[ -n "$SUPABASE_DOMAIN" && -z "$SUPABASE_PUBLIC_DOMAIN" ]]; then
+        SUPABASE_PUBLIC_DOMAIN="$SUPABASE_DOMAIN"
     fi
+
+    # 获取 Public Domain
+    if [[ -z "$SUPABASE_PUBLIC_DOMAIN" || "$SUPABASE_PUBLIC_DOMAIN" == "supa.example.com" ]]; then
+        log_warn "未配置 API/对外域名 (SUPABASE_PUBLIC_DOMAIN)"
+        while [[ -z "$SUPABASE_PUBLIC_DOMAIN" || "$SUPABASE_PUBLIC_DOMAIN" == "supa.example.com" ]]; do
+            read -p "请输入 Supabase API 域名 (例如 supa.example.com): " SUPABASE_PUBLIC_DOMAIN
+        done
+    fi
+    log_info "API 域名: $SUPABASE_PUBLIC_DOMAIN"
+
+    # 获取 Studio Domain
+    if [[ -z "$SUPABASE_STUDIO_DOMAIN" ]]; then
+        # 默认建议 studio.xxx 或使用 api 域名
+        DEFAULT_STUDIO_DOMAIN="studio.${SUPABASE_PUBLIC_DOMAIN#supa.}" # 简单的 supa.xxx -> studio.xxx 猜测
+        if [[ "$SUPABASE_PUBLIC_DOMAIN" != *"supa"* ]]; then
+            DEFAULT_STUDIO_DOMAIN="studio.${SUPABASE_PUBLIC_DOMAIN}"
+        fi
+        
+        log_info "配置 Studio 域名 (可选)"
+        read -p "请输入 Studio 域名 [默认为 $DEFAULT_STUDIO_DOMAIN]: " INPUT_STUDIO_DOMAIN
+        
+        if [[ -n "$INPUT_STUDIO_DOMAIN" ]]; then
+            SUPABASE_STUDIO_DOMAIN="$INPUT_STUDIO_DOMAIN"
+        else
+            SUPABASE_STUDIO_DOMAIN="$DEFAULT_STUDIO_DOMAIN"
+        fi
+    fi
+    log_info "Studio 域名: $SUPABASE_STUDIO_DOMAIN"
     
     # 自动生成 JWT 密钥
     generate_jwt_keys
     
     log_info "配置验证通过"
     log_info "  内网 IP: $INTERNAL_IP"
-    log_info "  域名: $SUPABASE_DOMAIN"
+    log_info "  API 域名: $SUPABASE_PUBLIC_DOMAIN"
+    log_info "  Studio 域名: $SUPABASE_STUDIO_DOMAIN"
 }
 
 # ========== 生成 JWT 密钥 ==========
@@ -332,6 +356,36 @@ install_podman() {
     fi
 }
 
+# ========== 配置 Podman 镜像加速 ==========
+configure_podman_mirrors() {
+    log_info "配置 Podman 镜像加速..."
+    
+    mkdir -p /etc/containers
+    
+    cat > /etc/containers/registries.conf << EOF
+unqualified-search-registries = ["docker.io"]
+
+[[registry]]
+prefix = "docker.io"
+location = "mirror.ccs.tencentyun.com"
+insecure = true
+
+[[registry.mirror]]
+location = "docker.m.ixdev.cn"
+insecure = true
+
+[[registry.mirror]]
+location = "docker.1panel.live"
+insecure = true
+
+[[registry.mirror]]
+location = "hub-mirror.c.163.com"
+insecure = true
+EOF
+
+    log_info "Podman 镜像加速配置完成"
+}
+
 # ========== 配置 Podman Socket ==========
 setup_podman_socket() {
     log_info "配置 Podman socket..."
@@ -345,6 +399,9 @@ setup_podman_socket() {
     if [[ -S /run/podman/podman.sock ]] && [[ ! -e /var/run/docker.sock ]]; then
         ln -sf /run/podman/podman.sock /var/run/docker.sock
     fi
+     
+    # 配置镜像加速
+    configure_podman_mirrors
 }
 
 # ========== 安装 Docker Compose ==========
@@ -819,14 +876,30 @@ update_pigsty_config() {
     PIGSTY_YML=~/pigsty/pigsty.yml
     
     # 更新域名配置
-    sed -i "s|SITE_URL: https://supa.pigsty|SITE_URL: https://${SUPABASE_DOMAIN}|g" "$PIGSTY_YML"
-    sed -i "s|API_EXTERNAL_URL: https://supa.pigsty|API_EXTERNAL_URL: https://${SUPABASE_DOMAIN}|g" "$PIGSTY_YML"
-    sed -i "s|SUPABASE_PUBLIC_URL: https://supa.pigsty|SUPABASE_PUBLIC_URL: https://${SUPABASE_DOMAIN}|g" "$PIGSTY_YML"
-    sed -i "s|domain: supa.pigsty|domain: ${SUPABASE_DOMAIN}|g" "$PIGSTY_YML"
-    sed -i "s|certbot: supa.pigsty|certbot: ${SUPABASE_DOMAIN}|g" "$PIGSTY_YML"
+    # 更新域名配置
+    # SITE_URL -> Studio (Dashboard)
+    sed -i "s|SITE_URL: https://supa.pigsty|SITE_URL: https://${SUPABASE_STUDIO_DOMAIN}|g" "$PIGSTY_YML"
     
-    # 更新 /etc/hosts 配置
-    sed -i "s|supa.pigsty|${SUPABASE_DOMAIN}|g" "$PIGSTY_YML"
+    # API URL -> Public Domain (API Gateway)
+    sed -i "s|API_EXTERNAL_URL: https://supa.pigsty|API_EXTERNAL_URL: https://${SUPABASE_PUBLIC_DOMAIN}|g" "$PIGSTY_YML"
+    sed -i "s|SUPABASE_PUBLIC_URL: https://supa.pigsty|SUPABASE_PUBLIC_URL: https://${SUPABASE_PUBLIC_DOMAIN}|g" "$PIGSTY_YML"
+    
+    # Nginx 域名和证书配置
+    # 注意: Pigsty 简单模式下 'domain' 变量通常控制主服务器名。
+    # 为了支持两个域名，我们需要确保 certbot 申请两个域名通过逗号分隔
+    # 并且 Nginx 配置监听这两个域名。
+    # 这里我们修改 domain 为 Public Domain (作为主域名)
+    sed -i "s|domain: supa.pigsty|domain: ${SUPABASE_PUBLIC_DOMAIN}|g" "$PIGSTY_YML"
+    
+    # 修改 certbot 申请列表，同时包含 Public 和 Studio 域名
+    if [[ "$SUPABASE_PUBLIC_DOMAIN" != "$SUPABASE_STUDIO_DOMAIN" ]]; then
+        sed -i "s|certbot: supa.pigsty|certbot: ${SUPABASE_PUBLIC_DOMAIN},${SUPABASE_STUDIO_DOMAIN}|g" "$PIGSTY_YML"
+    else
+        sed -i "s|certbot: supa.pigsty|certbot: ${SUPABASE_PUBLIC_DOMAIN}|g" "$PIGSTY_YML"
+    fi
+    
+    # 更新 /etc/hosts 配置 (仅作为占位符替换，实际 DNS 由用户配置)
+    sed -i "s|supa.pigsty|${SUPABASE_PUBLIC_DOMAIN}|g" "$PIGSTY_YML"
     
     # 更新密码配置
     if [[ -n "$DASHBOARD_PASSWORD" && "$DASHBOARD_PASSWORD" != "your-strong-password" ]]; then
