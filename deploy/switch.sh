@@ -241,6 +241,16 @@ switch_to_garage() {
     # 停止其他 S3 服务
     systemctl stop rustfs 2>/dev/null || true
     
+    # 尝试停止 MinIO (如果存在)
+    log_info "检查 MinIO 容器..."
+    if command -v docker &> /dev/null; then
+        docker stop minio 2>/dev/null || true
+        docker rm minio 2>/dev/null || true
+    elif command -v podman &> /dev/null; then
+        podman stop minio 2>/dev/null || true
+        podman rm minio 2>/dev/null || true
+    fi
+    
     # 检查 Garage 是否已安装
     if ! command -v garage &> /dev/null; then
         log_warn "Garage 未安装，正在安装..."
@@ -251,12 +261,24 @@ switch_to_garage() {
     
     # 启动 Garage
     systemctl enable --now garage
+    systemctl restart garage
+    
+    # 等待 Garage 启动
+    log_info "等待 Garage 启动..."
+    sleep 5
+    if ! systemctl is-active --quiet garage; then
+        log_error "Garage 启动失败，请检查日志: journalctl -u garage -n 20"
+        exit 1
+    fi
+    
+    # 获取内网 IP
+    INTERNAL_IP=$(hostname -I | awk '{print $1}')
     
     # 更新 Supabase 配置
-    update_supabase_s3_config "garage" "http://localhost:3900" "garage"
+    update_supabase_s3_config "garage" "http://${INTERNAL_IP}:3900" "garage"
     
     log_info "已切换到 Garage S3"
-    log_info "S3 端点: http://localhost:3900"
+    log_info "S3 端点: http://${INTERNAL_IP}:3900"
     log_info "凭据: /etc/garage/s3-credentials.env"
 }
 
