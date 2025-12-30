@@ -827,6 +827,132 @@ configure_external_s3() {
 }
 
 # ========== 安装 Pigsty ==========
+# ========== 操作系统全兼容 OpenResty 劫持逻辑 ==========
+install_enhanced_gateway() {
+    log_step "正在安装 OpenResty (全兼容模式)..."
+
+    # 识别操作系统
+    if [[ -f /etc/os-release ]]; then
+        source /etc/os-release
+        DISTRO_ID="${ID,,}"
+    fi
+
+    log_info "检测到系统类型: $DISTRO_ID"
+
+    case "$DISTRO_ID" in
+        # RHEL 系列 (Rocky, Alma, OpenCloudOS, CentOS, RHEL, Anolis)
+        rocky|almalinux|opencloudos|centos|rhel|anolis|tencentos)
+            log_info "配置 RHEL 系 OpenResty 仓库..."
+            if command -v dnf &> /dev/null; then
+                dnf install -y yum-utils
+                dnf config-manager --add-repo https://openresty.org/package/centos/openresty.repo
+                dnf install -y openresty openresty-resty socat luarocks openssl-devel gcc
+            else
+                yum install -y yum-utils
+                yum-config-manager --add-repo https://openresty.org/package/centos/openresty.repo
+                yum install -y openresty openresty-resty socat luarocks openssl-devel gcc
+            fi
+            ;;
+        
+        # Debian/Ubuntu 系列
+        debian|ubuntu)
+            log_info "配置 Debian 系 OpenResty 仓库..."
+            apt-get update
+            apt-get install -y wget gnupg2 software-properties-common
+            wget -qO - https://openresty.org/package/pubkey.gpg | apt-key add -
+            add-apt-repository -y "deb http://openresty.org/package/$(lsb_release -sc) $(lsb_release -sc) main"
+            apt-get update
+            apt-get install -y openresty socat luarocks libssl-dev gcc
+            ;;
+        
+        *)
+            log_error "不支持的操作系统: $DISTRO_ID"
+            exit 1
+            ;;
+    esac
+
+    # 1. 安装自动 SSL 核心模块
+    log_info "安装 lua-resty-auto-ssl..."
+    luarocks install lua-resty-auto-ssl
+
+    # 2. 建立证书存储目录
+    mkdir -p /etc/resty-auto-ssl
+    # 根据运行用户赋权 (OpenResty 默认可能是 nobody)
+    chown -R nobody:nobody /etc/resty-auto-ssl 2>/dev/null || true
+
+    # 3. 核心劫持：将 OpenResty 伪装成 Nginx
+    log_info "执行网关劫持..."
+    systemctl stop nginx 2>/dev/null || true
+    systemctl disable nginx 2>/dev/null || true
+
+    # 软链接 OpenResty 二进制到 Nginx 标准路径
+    # 这让 Pigsty 的 Ansible 脚本运行 `nginx` 命令时调用的实际上是 openresty
+    if [[ -f /usr/local/openresty/bin/openresty ]]; then
+        ln -sf /usr/local/openresty/bin/openresty /usr/sbin/nginx
+    fi
+    
+    # 模拟 Nginx 的配置布局
+    mkdir -p /etc/nginx/conf.d
+    # 让 OpenResty 能够通过标准路径引用 LuaRocks 安装的库
+    ln -sf /usr/local/share/lua/5.1/resty /usr/local/openresty/lualib/resty 2>/dev/null || true
+
+    log_info "网关环境准备完成"
+}
+
+# ========== 注入 Lua 自动 SSL 逻辑到 Pigsty 模板 ==========
+inject_lua_config() {
+    log_step "正在向 Pigsty 模板注入 Lua 逻辑..."
+    
+    # 定义 Pigsty 模板路径
+    NGINX_CONF_J2=~/pigsty/roles/nginx/templates/nginx.conf.j2
+    
+    if [[ ! -f "$NGINX_CONF_J2" ]]; then
+        log_warn "未找到模板 $NGINX_CONF_J2，请检查系统安装路径"
+        return
+    fi
+
+    # 检查是否已经注入过
+    if grep -q "SupaCloud Auto SSL Start" "$NGINX_CONF_J2"; then
+        log_info "Lua 逻辑已存在，跳过注入"
+        return
+    fi
+
+    # 在 http 块中注入 init 逻辑
+    sed -i '/http {/a \
+\
+    # --- SupaCloud Auto SSL Start --- \
+    init_by_lua_block { \
+        auto_ssl = require("resty.auto-ssl").new() \
+        auto_ssl:set("allow_domain", function(domain) \
+            return true \
+        end) \
+        auto_ssl:init() \
+    } \
+    init_worker_by_lua_block { \
+        auto_ssl:init_worker() \
+    } \
+    server { \
+        listen 127.0.0.1:8999; \
+        location / { \
+            content_by_lua_block { \
+                auto_ssl:hook_server() \
+            } \
+        } \
+    } \
+    # --- SupaCloud Auto SSL End ---' "$NGINX_CONF_J2"
+
+    # 针对 Pigsty 默认站点注入 ACME 验证回调
+    DEFAULT_SITE_J2=~/pigsty/roles/nginx/templates/sites/default.conf.j2
+    if [[ -f "$DEFAULT_SITE_J2" ]]; then
+        sed -i '/location \/ {/i \
+        location /.well-known/acme-challenge/ { \
+            content_by_lua_block { \
+                auto_ssl:challenge_server() \
+            } \
+        }' "$DEFAULT_SITE_J2"
+    fi
+}
+
 install_pigsty() {
     log_step "安装 Pigsty..."
     
@@ -849,6 +975,9 @@ install_pigsty() {
     # 使用 Supabase 配置模板
     log_info "配置 Supabase 模板..."
     ./configure -i "$INTERNAL_IP" -c app/supa
+    
+    # 注入 Lua 逻辑到模板
+    inject_lua_config
     
     # 修改配置文件
     update_pigsty_config
@@ -1146,6 +1275,10 @@ main() {
     check_config
     check_system
     setup_swap
+    
+    # 升级网关为 OpenResty (带自动 SSL)
+    install_enhanced_gateway
+    
     install_container_runtime
     install_docker_compose
     install_s3_storage
