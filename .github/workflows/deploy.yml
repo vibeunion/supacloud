@@ -54,8 +54,58 @@ jobs:
           echo "Config generated:"
           cat deploy/config.env
 
+      - name: Setup Local SSH (Required for Ansible)
+        run: |
+          # 1. 生成 keys
+          ssh-keygen -t rsa -N "" -f ~/.ssh/id_rsa
+          
+          # 2. 配置 authorized_keys
+          cat ~/.ssh/id_rsa.pub >> ~/.ssh/authorized_keys
+          chmod 600 ~/.ssh/authorized_keys
+          
+          # 3. 确保已知 host (避免首次连接的 yes/no 提示)
+          ssh-keyscan -H localhost >> ~/.ssh/known_hosts
+          ssh-keyscan -H 127.0.0.1 >> ~/.ssh/known_hosts
+          ssh-keyscan -H $(hostname -I | awk '{print $1}') >> ~/.ssh/known_hosts
+          
+          # 4. 配置 SSH 服务 (GitHub Runner 可能默认禁用了 root 登录或者没配好)
+          # 对于 CI Runner，通常用户是 'runner'，但我们后续是用 sudo ./install.sh
+          # Pigsty 默认用 root 或带有 sudo 的用户。
+          # 我们需要让当前用户能 ssh localhost
+          
+          echo "Testing SSH connection..."
+          ssh -o StrictHostKeyChecking=no $(whoami)@localhost "echo SSH Connection OK"
+          
+          # 5. 特殊处理：Pigsty 运行在 sudo 下，会尝试 ssh root@ip
+          # 必须允许 root 通过 SSH 登录
+          
+          # 把 key 复制到 root 的 ssh 目录
+          sudo mkdir -p /root/.ssh
+          sudo cp ~/.ssh/authorized_keys /root/.ssh/authorized_keys
+          sudo chmod 600 /root/.ssh/authorized_keys
+          sudo chown root:root /root/.ssh/authorized_keys
+          
+          # 修改 sshd_config 允许 root 登录
+          sudo sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config
+          sudo sed -i 's/#PermitRootLogin yes/PermitRootLogin yes/' /etc/ssh/sshd_config
+          # 有些系统默认是 no，强制改为 yes (prohibit-password 也可以，只要我们要用 key)
+          # 最稳妥的是：PermitRootLogin without-password (只允许 key) 或 yes
+          
+          # 如果没有 PermitRootLogin 这一行，追加
+          if ! grep -q "PermitRootLogin" /etc/ssh/sshd_config; then
+            echo "PermitRootLogin yes" | sudo tee -a /etc/ssh/sshd_config
+          fi
+          
+          # 重启 sshd
+          sudo systemctl restart ssh || sudo service ssh restart
+          
+          echo "Testing Root SSH connection..."
+          sudo ssh -o StrictHostKeyChecking=no -i /root/.ssh/id_rsa root@localhost "echo ROOT SSH OK" || echo "Root SSH Failed"
+          sudo ssh -o StrictHostKeyChecking=no -i /root/.ssh/id_rsa root@$(hostname -I | awk '{print $1}') "echo ROOT IP SSH OK" || echo "Root IP SSH Failed"
+
       - name: Run Install Script
         working-directory: ./deploy
+
         run: |
           # 赋予执行权限
           chmod +x install.sh
