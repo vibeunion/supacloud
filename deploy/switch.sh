@@ -75,7 +75,7 @@ show_status() {
     
     if systemctl is-active --quiet garage 2>/dev/null; then
         echo -e "  当前: ${GREEN}Garage${NC}"
-        echo "  端口: 3900"
+        echo "  端口: 9000"
     elif systemctl is-active --quiet rustfs 2>/dev/null; then
         echo -e "  当前: ${GREEN}RustFS${NC}"
         echo "  端口: 9000"
@@ -275,10 +275,10 @@ switch_to_garage() {
     INTERNAL_IP=$(hostname -I | awk '{print $1}')
     
     # 更新 Supabase 配置
-    update_supabase_s3_config "garage" "http://${INTERNAL_IP}:3900" "garage"
+    update_supabase_s3_config "garage" "http://${INTERNAL_IP}:9000" "garage"
     
     log_info "已切换到 Garage S3"
-    log_info "S3 端点: http://${INTERNAL_IP}:3900"
+    log_info "S3 端点: http://${INTERNAL_IP}:9000"
     log_info "凭据: /etc/garage/s3-credentials.env"
 }
 
