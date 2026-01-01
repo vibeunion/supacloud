@@ -870,7 +870,7 @@ install_enhanced_gateway() {
             fi
             
             apt-get update
-            apt-get install -y openresty socat luarocks libssl-dev gcc
+            apt-get install -y openresty socat luarocks libssl-dev gcc psmisc
             ;;
         
         *)
@@ -895,8 +895,12 @@ install_enhanced_gateway() {
     # 确保 OpenResty 服务是停止的，避免占用端口
     systemctl stop openresty 2>/dev/null || true
     systemctl disable openresty 2>/dev/null || true
-
-    log_info "OpenResty 软件包安装完成 (等待 Pigsty 安装后进行劫持)"
+    
+    # 暴力清理端口占用 (防止 zombie 进程导致 Pigsty Nginx 启动失败)
+    fuser -k 80/tcp 2>/dev/null || true
+    fuser -k 443/tcp 2>/dev/null || true
+    
+    log_info "OpenResty 软件包安装完成 (已释放 80/443 端口)"
     
     # 4. 生成 Auto-SSL Fallback 证书 (提前准备)
     if [[ ! -f /etc/resty-auto-ssl/resty-auto-ssl-fallback.crt ]]; then
@@ -1006,6 +1010,15 @@ http {
         auto_ssl:set("allow_domain", function(domain)
             return true 
         end)
+        
+        -- 启用 ECC (ECDSA) 证书支持
+        -- 注意：这需要较新版本的 lua-resty-auto-ssl，如果不支持会自动忽略或报错。
+        -- 大多数现代环境建议使用 prime256v1
+        -- auto_ssl:set("server_key_type", "EC") -- 强制 ECC
+        
+        -- 配置 CA (Let's Encrypt 生产环境)
+        auto_ssl:set("ca", "https://acme-v02.api.letsencrypt.org/directory")
+        
         auto_ssl:init()
     }
     
