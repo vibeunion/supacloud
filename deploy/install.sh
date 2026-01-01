@@ -656,7 +656,7 @@ rpc_secret = "${GARAGE_RPC_SECRET}"
 
 [s3_api]
 s3_region = "garage"
-api_bind_addr = "[::]:3900"
+api_bind_addr = "[::]:9000"
 root_domain = ".s3.garage.localhost"
 
 [s3_web]
@@ -713,15 +713,15 @@ EOF
     
     # 保存密钥信息
     echo "# Garage S3 配置" > /etc/garage/s3-credentials.env
-    echo "S3_ENDPOINT=http://${INTERNAL_IP}:3900" >> /etc/garage/s3-credentials.env
+    echo "S3_ENDPOINT=http://${INTERNAL_IP}:9000" >> /etc/garage/s3-credentials.env
     garage -c /etc/garage/garage.toml key info supabase-key 2>/dev/null | grep -E "Key ID|Secret key" >> /etc/garage/s3-credentials.env || true
     
     # 设置环境变量供后续使用
-    S3_ENDPOINT="http://${INTERNAL_IP}:3900"
+    S3_ENDPOINT="http://${INTERNAL_IP}:9000"
     S3_REGION="garage"
     
     log_info "Garage 安装完成"
-    log_info "  端点: http://${INTERNAL_IP}:3900"
+    log_info "  端点: http://${INTERNAL_IP}:9000"
     log_info "  密钥信息: /etc/garage/s3-credentials.env"
 }
 
@@ -1196,7 +1196,7 @@ configure_s3_in_pigsty() {
                 S3_ACCESS_KEY=$(garage -c /etc/garage/garage.toml key info supabase-key 2>/dev/null | grep "Key ID" | awk '{print $3}' || echo "")
                 S3_SECRET_KEY=$(garage -c /etc/garage/garage.toml key info supabase-key 2>/dev/null | grep "Secret key" | awk '{print $3}' || echo "")
             fi
-            S3_ENDPOINT="http://${INTERNAL_IP}:3900"
+            S3_ENDPOINT="http://${INTERNAL_IP}:9000"
             S3_REGION="garage"
             ;;
         rustfs)
