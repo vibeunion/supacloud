@@ -90,6 +90,12 @@ supacloud create shop
 *   **双运行时云函数**：支持 **Bun.js** 和 **Deno** 双模式。通过 CLI 一键切换项目运行时，灵活适配。
 *   **现代技术**：基于 Bun 1.2+ 原生 SQL 构建。零历史包袱。
 
+### 🖥️ 服务器环境部署 (Infrastructure)
+
+如果你需要在一台全新的 Linux 服务器上部署 SupaCloud 所需的底层基础设施（包含 Pigsty/Postgres、Gateway、S3 等），请参考 Deploy 模块。它提供了一键脚本来初始化整个运行环境。
+
+👉 **[点击查看：生产环境部署指南](./deploy/README.md)**
+
 ### 🚀 快速开始
 
 #### 1. 一键安装
