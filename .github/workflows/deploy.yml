@@ -79,19 +79,20 @@ jobs:
           # 5. 特殊处理：Pigsty 运行在 sudo 下，会尝试 ssh root@ip
           # 必须允许 root 通过 SSH 登录
           
-          # 把 key 复制到 root 的 ssh 目录
+          # 关键：目录权限必须是 700，否则 SSH 会拒绝使用 Key
           sudo mkdir -p /root/.ssh
+          sudo chmod 700 /root/.ssh
+          
           sudo cp ~/.ssh/authorized_keys /root/.ssh/authorized_keys
+          sudo cp ~/.ssh/id_rsa /root/.ssh/id_rsa
           sudo chmod 600 /root/.ssh/authorized_keys
-          sudo chown root:root /root/.ssh/authorized_keys
+          sudo chmod 600 /root/.ssh/id_rsa
+          sudo chown -R root:root /root/.ssh
           
           # 修改 sshd_config 允许 root 登录
           sudo sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config
           sudo sed -i 's/#PermitRootLogin yes/PermitRootLogin yes/' /etc/ssh/sshd_config
-          # 有些系统默认是 no，强制改为 yes (prohibit-password 也可以，只要我们要用 key)
-          # 最稳妥的是：PermitRootLogin without-password (只允许 key) 或 yes
           
-          # 如果没有 PermitRootLogin 这一行，追加
           if ! grep -q "PermitRootLogin" /etc/ssh/sshd_config; then
             echo "PermitRootLogin yes" | sudo tee -a /etc/ssh/sshd_config
           fi
@@ -102,6 +103,13 @@ jobs:
           echo "Testing Root SSH connection..."
           sudo ssh -o StrictHostKeyChecking=no -i /root/.ssh/id_rsa root@localhost "echo ROOT SSH OK" || echo "Root SSH Failed"
           sudo ssh -o StrictHostKeyChecking=no -i /root/.ssh/id_rsa root@$(hostname -I | awk '{print $1}') "echo ROOT IP SSH OK" || echo "Root IP SSH Failed"
+          
+          # 设置 Ansible 变量
+          echo "ANSIBLE_HOST_KEY_CHECKING=False" >> $GITHUB_ENV
+          echo "ANSIBLE_PRIVATE_KEY_FILE=/root/.ssh/id_rsa" >> $GITHUB_ENV
+          # 注意：sudo 会重置环境变量，所以我们需要在 sudo 命令中显式传递，或者配置 sudoers
+          # 更简单的是在 sudo install.sh 时 -E 保留环境
+
 
       - name: Run Install Script
         working-directory: ./deploy
