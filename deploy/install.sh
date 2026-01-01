@@ -860,7 +860,15 @@ install_enhanced_gateway() {
             apt-get update
             apt-get install -y wget gnupg2 software-properties-common
             wget -qO - https://openresty.org/package/pubkey.gpg | apt-key add -
-            add-apt-repository -y "deb http://openresty.org/package/$(lsb_release -sc) $(lsb_release -sc) main"
+            
+            # 修正：Ubuntu 使用 /package/ubuntu 路径
+            if [[ "$DISTRO_ID" == "ubuntu" ]]; then
+                add-apt-repository -y "deb http://openresty.org/package/ubuntu $(lsb_release -sc) main"
+            else
+                # Debian 使用 /package/debian 路径 (假设是debian)
+                add-apt-repository -y "deb http://openresty.org/package/debian $(lsb_release -sc) openresty"
+            fi
+            
             apt-get update
             apt-get install -y openresty socat luarocks libssl-dev gcc
             ;;
