@@ -888,25 +888,17 @@ install_enhanced_gateway() {
     # 根据运行用户赋权 (OpenResty 默认可能是 nobody)
     chown -R nobody:nobody /etc/resty-auto-ssl 2>/dev/null || true
 
-    # 3. 核心劫持：将 OpenResty 伪装成 Nginx
-    log_info "执行网关劫持..."
-    systemctl stop nginx 2>/dev/null || true
-    systemctl disable nginx 2>/dev/null || true
-
-    # 软链接 OpenResty 二进制到 Nginx 标准路径
-    # 这让 Pigsty 的 Ansible 脚本运行 `nginx` 命令时调用的实际上是 openresty
-    if [[ -f /usr/local/openresty/bin/openresty ]]; then
-        ln -sf /usr/local/openresty/bin/openresty /usr/sbin/nginx
-    fi
+    # 3. 核心劫持：将 OpenResty 伪装成 Nginx (改为仅安装包，不立即劫持)
+    # 之前我们在这里直接劫持，导致 Pigsty 安装 Nginx 包时发生冲突或覆盖。
+    # 现在我们只做环境准备，劫持操作移到 Pigsty 安装之后。
     
-    # 模拟 Nginx 的配置布局
-    mkdir -p /etc/nginx/conf.d
-    # 让 OpenResty 能够通过标准路径引用 LuaRocks 安装的库
-    ln -sf /usr/local/share/lua/5.1/resty /usr/local/openresty/lualib/resty 2>/dev/null || true
+    # 确保 OpenResty 服务是停止的，避免占用端口
+    systemctl stop openresty 2>/dev/null || true
+    systemctl disable openresty 2>/dev/null || true
 
-    log_info "网关环境准备完成"
+    log_info "OpenResty 软件包安装完成 (等待 Pigsty 安装后进行劫持)"
     
-    # 4. 生成 Auto-SSL Fallback 证书
+    # 4. 生成 Auto-SSL Fallback 证书 (提前准备)
     if [[ ! -f /etc/resty-auto-ssl/resty-auto-ssl-fallback.crt ]]; then
         log_info "生成 Auto-SSL Fallback 证书..."
         mkdir -p /etc/resty-auto-ssl
@@ -920,6 +912,7 @@ install_enhanced_gateway() {
 }
 
 
+
 # ========== 注入 Lua 自动 SSL 逻辑到 Pigsty 模板 (已弃用) ==========
 inject_lua_config() {
     log_info "跳过模板注入，将在安装后直接应用最终配置..."
@@ -927,8 +920,44 @@ inject_lua_config() {
     return 0
 }
 
+# ========== 执行 Nginx 二进制劫持 ==========
+perform_nginx_hijack() {
+    log_step "正在执行 Nginx -> OpenResty 二进制劫持..."
+    
+    # 停止当前的 Nginx (Pigsty 安装的标准版)
+    systemctl stop nginx 2>/dev/null || true
+    
+    # 备份原版 Nginx
+    if [[ -f /usr/sbin/nginx && ! -L /usr/sbin/nginx ]]; then
+        mv /usr/sbin/nginx /usr/sbin/nginx.orig.$(date +%s)
+    fi
+    
+    # 建立软链接
+    if [[ -f /usr/local/openresty/bin/openresty ]]; then
+        ln -sf /usr/local/openresty/bin/openresty /usr/sbin/nginx
+        log_info "已将 /usr/sbin/nginx 指向 OpenResty"
+    else
+        log_error "找不到 OpenResty 二进制文件！劫持失败"
+        return 1
+    fi
+    
+    # 链接 Lua 库
+    mkdir -p /usr/local/openresty/lualib/resty
+    if [[ -d /usr/local/share/lua/5.1/resty ]]; then
+        # 注意：这里可能会有重名文件冲突，使用 -n 或检查
+        cp -rn /usr/local/share/lua/5.1/resty/* /usr/local/openresty/lualib/resty/ 2>/dev/null || true
+        # 或者增加 LUA_PATH 环境变量，但软链或复制最简单
+    fi
+    
+    # 确保 /etc/nginx 目录结构适合 OpenResty (虽然 Pigsty 可能已经建好了)
+    mkdir -p /etc/nginx/conf.d
+}
+
 # ========== 应用最终 OpenResty 配置 ==========
 apply_openresty_config() {
+    # 先执行劫持
+    perform_nginx_hijack
+    
     log_step "应用最终 OpenResty 配置 (包含 Auto-SSL 和路由修复)..."
     
     # 定义 Nginx 配置路径 (OpenResty 默认)
@@ -1071,14 +1100,18 @@ http {
 EOF
 
     log_info "验证 OpenResty 配置..."
-    if /usr/local/openresty/nginx/sbin/nginx -t; then
-        log_info "配置验证通过，重载服务..."
-        systemctl reload openresty || systemctl restart openresty
+    # 使用劫持后的 /usr/sbin/nginx (即 OpenResty) 进行测试
+    if /usr/sbin/nginx -t; then
+        log_info "配置验证通过，重启 Nginx 服务..."
+        # 我们使用 nginx 服务名，因为 Pigsty 监控的是这个
+        systemctl restart nginx
     else
-        log_error "OpenResty 配置验证失败！请检查 $NGINX_CONF"
-        # 不退出，以免中断整个流程，但提示错误
+        log_error "OpenResty 配置验证失败！"
+        # 尝试回滚或查看日志
+        /usr/sbin/nginx -t 
     fi
 }
+
 
 install_pigsty() {
     log_step "安装 Pigsty..."
