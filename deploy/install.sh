@@ -828,49 +828,68 @@ configure_external_s3() {
 
 # ========== 安装 Pigsty ==========
 # ========== 操作系统全兼容 OpenResty 劫持逻辑 ==========
-install_enhanced_gateway() {
-    log_step "正在安装 OpenResty (全兼容模式)..."
+# ========== 安装 Nginx Mainline (带 ACME 模块) ==========
+install_nginx_mainline() {
+    log_step "正在安装 Nginx Mainline (带 ACME 模块)..."
 
     # 识别操作系统
     if [[ -f /etc/os-release ]]; then
         source /etc/os-release
         DISTRO_ID="${ID,,}"
+        DISTRO_CODENAME="${VERSION_CODENAME}"
+        DISTRO_VERSION_ID="${VERSION_ID%%.*}"
     fi
 
-    log_info "检测到系统类型: $DISTRO_ID"
+    log_info "检测到系统: $DISTRO_ID $DISTRO_VERSION_ID"
 
     case "$DISTRO_ID" in
-        # RHEL 系列 (Rocky, Alma, OpenCloudOS, CentOS, RHEL, Anolis)
+        # RHEL 系列
         rocky|almalinux|opencloudos|centos|rhel|anolis|tencentos)
-            log_info "配置 RHEL 系 OpenResty 仓库..."
+            log_info "配置 Nginx Mainline 仓库 (RHEL/CentOS)..."
+            
+            # 创建 repo 文件
+            cat > /etc/yum.repos.d/nginx.repo << EOF
+[nginx-mainline]
+name=nginx mainline repo
+baseurl=http://nginx.org/packages/mainline/centos/\$releasever/\$basearch/
+gpgcheck=1
+enabled=1
+gpgkey=https://nginx.org/keys/nginx_signing.key
+module_hotfixes=true
+EOF
+            
+            log_info "安装 Nginx 和 ACME 模块..."
             if command -v dnf &> /dev/null; then
-                dnf install -y yum-utils
-                dnf config-manager --add-repo https://openresty.org/package/centos/openresty.repo
-                dnf install -y openresty openresty-resty socat luarocks openssl-devel gcc
+                dnf install -y nginx nginx-module-acme
             else
-                yum install -y yum-utils
-                yum-config-manager --add-repo https://openresty.org/package/centos/openresty.repo
-                yum install -y openresty openresty-resty socat luarocks openssl-devel gcc
+                yum install -y nginx nginx-module-acme
             fi
             ;;
         
         # Debian/Ubuntu 系列
         debian|ubuntu)
-            log_info "配置 Debian 系 OpenResty 仓库..."
-            apt-get update
-            apt-get install -y wget gnupg2 software-properties-common
-            wget -qO - https://openresty.org/package/pubkey.gpg | apt-key add -
+            log_info "配置 Nginx Mainline 仓库 (Debian/Ubuntu)..."
             
-            # 修正：Ubuntu 使用 /package/ubuntu 路径
-            if [[ "$DISTRO_ID" == "ubuntu" ]]; then
-                add-apt-repository -y "deb http://openresty.org/package/ubuntu $(lsb_release -sc) main"
-            else
-                # Debian 使用 /package/debian 路径 (假设是debian)
-                add-apt-repository -y "deb http://openresty.org/package/debian $(lsb_release -sc) openresty"
-            fi
-            
+            # 安装依赖
             apt-get update
-            apt-get install -y openresty socat luarocks libssl-dev gcc psmisc
+            apt-get install -y curl gnupg2 ca-certificates lsb-release ubuntu-keyring
+
+            # 添加 Key
+            curl https://nginx.org/keys/nginx_signing.key | gpg --dearmor \
+                | tee /usr/share/keyrings/nginx-archive-keyring.gpg >/dev/null
+
+            # 添加源
+            echo "deb [signed-by=/usr/share/keyrings/nginx-archive-keyring.gpg] \
+            http://nginx.org/packages/mainline/${DISTRO_ID} \
+            $(lsb_release -cs) nginx" \
+            | tee /etc/apt/sources.list.d/nginx.list
+
+            # 设置优先级 (确保安装官方包而非系统包)
+            echo -e "Package: *\nPin: origin nginx.org\nPin-Priority: 900\n" \
+                | tee /etc/apt/preferences.d/99nginx
+
+            apt-get update
+            apt-get install -y nginx nginx-module-acme
             ;;
         
         *)
@@ -879,40 +898,10 @@ install_enhanced_gateway() {
             ;;
     esac
 
-    # 1. 安装自动 SSL 核心模块
-    log_info "安装 lua-resty-auto-ssl..."
-    luarocks install lua-resty-auto-ssl
-
-    # 2. 建立证书存储目录
-    mkdir -p /etc/resty-auto-ssl
-    # 根据运行用户赋权 (OpenResty 默认可能是 nobody)
-    chown -R nobody:nobody /etc/resty-auto-ssl 2>/dev/null || true
-
-    # 3. 核心劫持：将 OpenResty 伪装成 Nginx (改为仅安装包，不立即劫持)
-    # 之前我们在这里直接劫持，导致 Pigsty 安装 Nginx 包时发生冲突或覆盖。
-    # 现在我们只做环境准备，劫持操作移到 Pigsty 安装之后。
+    # 启用 Nginx
+    systemctl enable nginx
     
-    # 确保 OpenResty 服务是停止的，避免占用端口
-    systemctl stop openresty 2>/dev/null || true
-    systemctl disable openresty 2>/dev/null || true
-    
-    # 暴力清理端口占用 (防止 zombie 进程导致 Pigsty Nginx 启动失败)
-    fuser -k 80/tcp 2>/dev/null || true
-    fuser -k 443/tcp 2>/dev/null || true
-    
-    log_info "OpenResty 软件包安装完成 (已释放 80/443 端口)"
-    
-    # 4. 生成 Auto-SSL Fallback 证书 (提前准备)
-    if [[ ! -f /etc/resty-auto-ssl/resty-auto-ssl-fallback.crt ]]; then
-        log_info "生成 Auto-SSL Fallback 证书..."
-        mkdir -p /etc/resty-auto-ssl
-        openssl req -new -newkey rsa:2048 -days 3650 -nodes -x509 \
-            -subj '/CN=fallback' \
-            -keyout /etc/resty-auto-ssl/resty-auto-ssl-fallback.key \
-            -out /etc/resty-auto-ssl/resty-auto-ssl-fallback.crt
-        chmod 644 /etc/resty-auto-ssl/resty-auto-ssl-fallback.crt
-        chmod 600 /etc/resty-auto-ssl/resty-auto-ssl-fallback.key
-    fi
+    log_info "Nginx 安装完成"
 }
 
 
@@ -920,110 +909,76 @@ install_enhanced_gateway() {
 # ========== 注入 Lua 自动 SSL 逻辑到 Pigsty 模板 (已弃用) ==========
 inject_lua_config() {
     log_info "跳过模板注入，将在安装后直接应用最终配置..."
-    # 我们改用 apply_openresty_config 直接覆盖配置，更加稳健
+    log_info "跳过模板注入，将在安装后直接应用最终配置..."
+    # 我们改用 apply_nginx_acme_config 直接覆盖配置，更加稳健
     return 0
 }
 
 # ========== 执行 Nginx 二进制劫持 ==========
-perform_nginx_hijack() {
-    log_step "正在执行 Nginx -> OpenResty 二进制劫持..."
+# ========== 应用 Nginx ACME 配置 ==========
+apply_nginx_acme_config() {
+    log_step "应用 Nginx 配置 (原生 ACME 模块)..."
     
-    # 停止当前的 Nginx (Pigsty 安装的标准版)
-    systemctl stop nginx 2>/dev/null || true
+    # 确保 modules 目录存在 (防止某些发行版路径差异)
+    # 通常在 /usr/lib/nginx/modules 或 /etc/nginx/modules
     
-    # 备份原版 Nginx
-    if [[ -f /usr/sbin/nginx && ! -L /usr/sbin/nginx ]]; then
-        mv /usr/sbin/nginx /usr/sbin/nginx.orig.$(date +%s)
-    fi
-    
-    # 建立软链接
-    if [[ -f /usr/local/openresty/bin/openresty ]]; then
-        ln -sf /usr/local/openresty/bin/openresty /usr/sbin/nginx
-        log_info "已将 /usr/sbin/nginx 指向 OpenResty"
-    else
-        log_error "找不到 OpenResty 二进制文件！劫持失败"
-        return 1
-    fi
-    
-    # 链接 Lua 库
-    mkdir -p /usr/local/openresty/lualib/resty
-    if [[ -d /usr/local/share/lua/5.1/resty ]]; then
-        # 注意：这里可能会有重名文件冲突，使用 -n 或检查
-        cp -rn /usr/local/share/lua/5.1/resty/* /usr/local/openresty/lualib/resty/ 2>/dev/null || true
-        # 或者增加 LUA_PATH 环境变量，但软链或复制最简单
-    fi
-    
-    # 确保 /etc/nginx 目录结构适合 OpenResty (虽然 Pigsty 可能已经建好了)
-    mkdir -p /etc/nginx/conf.d
-}
-
-# ========== 应用最终 OpenResty 配置 ==========
-apply_openresty_config() {
-    # 先执行劫持
-    perform_nginx_hijack
-    
-    log_step "应用最终 OpenResty 配置 (包含 Auto-SSL 和路由修复)..."
-    
-    # 定义 Nginx 配置路径 (OpenResty 默认)
-    NGINX_CONF="/usr/local/openresty/nginx/conf/nginx.conf"
+    NGINX_CONF="/etc/nginx/nginx.conf"
     
     # 备份旧配置
     if [[ -f "$NGINX_CONF" ]]; then
         cp "$NGINX_CONF" "${NGINX_CONF}.bak.$(date +%s)"
     fi
+
+    # 查找 ACME 模块路径
+    ACME_MODULE_PATH=$(find /usr/lib/nginx/modules /usr/lib64/nginx/modules /etc/nginx/modules -name "ngx_http_acme_module.so" 2>/dev/null | head -1)
     
-    # 确保 mime.types 路径正确
-    MIME_TYPES="/usr/local/openresty/nginx/conf/mime.types"
-    if [[ ! -f "$MIME_TYPES" ]]; then
-        # 尝试查找并链接
-        FOUND_MIME=$(find /usr/local/openresty -name mime.types | head -1)
-        if [[ -n "$FOUND_MIME" ]]; then
-            MIME_TYPES="$FOUND_MIME"
-        else
-            MIME_TYPES="mime.types" # Fallback to relative
-        fi
+    if [[ -z "$ACME_MODULE_PATH" ]]; then
+        # 如果找不到，尝试直接引用文件名，指望它在默认路径
+        ACME_MODULE_PATH="ngx_http_acme_module.so"
+        log_warn "未找到 ngx_http_acme_module.so 绝对路径，尝试直接加载..."
+    else
+        log_info "发现 ACME 模块: $ACME_MODULE_PATH"
     fi
 
     # 生成最终的 nginx.conf
-    # 注意: 这里使用 cat 写入，变量会被解析
     cat > "$NGINX_CONF" << EOF
-user nobody;
-worker_processes 1;
+user nginx;
+worker_processes auto;
+error_log /var/log/nginx/error.log notice;
+pid /var/run/nginx.pid;
+
+# 加载 ACME 模块
+load_module "$ACME_MODULE_PATH";
+
 events {
     worker_connections 1024;
 }
 
 http {
-    include       ${MIME_TYPES};
+    include       /etc/nginx/mime.types;
     default_type  application/octet-stream;
     
+    log_format  main  '\$remote_addr - \$remote_user [\$time_local] "\$request" '
+                      '\$status \$body_bytes_sent "\$http_referer" '
+                      '"\$http_user_agent" "\$http_x_forwarded_for"';
+
+    access_log  /var/log/nginx/access.log  main;
+
     sendfile        on;
     keepalive_timeout  65;
 
-    # --- Auto-SSL 基础配置 ---
-    resolver 8.8.8.8;
-    lua_shared_dict auto_ssl 1m;
-    lua_shared_dict auto_ssl_settings 64k;
+    # --- ACME 全局配置 ---
+    resolver 8.8.8.8 1.1.1.1 valid=300s;
     
-    init_by_lua_block {
-        auto_ssl = (require "resty.auto-ssl").new()
-        auto_ssl:set("allow_domain", function(domain)
-            return true 
-        end)
+    acme_issuer letsencrypt {
+        uri https://acme-v02.api.letsencrypt.org/directory;
+        # uri https://acme-staging-v02.api.letsencrypt.org/directory; # 测试用
         
-        -- 启用 ECC (ECDSA) 证书支持
-        -- 注意：这需要较新版本的 lua-resty-auto-ssl，如果不支持会自动忽略或报错。
-        -- 大多数现代环境建议使用 prime256v1
-        -- auto_ssl:set("server_key_type", "EC") -- 强制 ECC
+        # 必须配置 ecdsa (ECC) 密钥，支持 256/384
+        account_key ecdsa:256;
         
-        -- 配置 CA (Let's Encrypt 生产环境)
-        auto_ssl:set("ca", "https://acme-v02.api.letsencrypt.org/directory")
-        
-        auto_ssl:init()
-    }
-    
-    init_worker_by_lua_block {
-        auto_ssl:init_worker()
+        # 使用 HTTP-01 验证 (Nginx 原生支持)
+        challenge http-01;
     }
 
     # 后端定义
@@ -1035,17 +990,14 @@ http {
         server 127.0.0.1:8000;
     }
 
-    # HTTP 重定向 (ACME Challenge)
+    # HTTP Server (Redirect + ACME Challenge)
     server {
         listen 80;
         server_name ${SUPABASE_STUDIO_DOMAIN} ${SUPABASE_PUBLIC_DOMAIN};
         
-        location /.well-known/acme-challenge/ {
-            content_by_lua_block {
-                auto_ssl:challenge_server()
-            }
-        }
-
+        # ACME 模块会自动处理 /.well-known/acme-challenge/
+        # 无需手动配置 location
+        
         location / {
             return 301 https://\$host\$request_uri;
         }
@@ -1056,13 +1008,16 @@ http {
         listen 443 ssl;
         server_name ${SUPABASE_STUDIO_DOMAIN};
         
-        ssl_certificate_by_lua_block {
-            auto_ssl:ssl_certificate()
-        }
+        # 启用 ACME 证书管理
+        acme_certificate letsencrypt;
         
-        # Fallback cert
-        ssl_certificate /etc/resty-auto-ssl/resty-auto-ssl-fallback.crt;
-        ssl_certificate_key /etc/resty-auto-ssl/resty-auto-ssl-fallback.key;
+        # 使用变量引用生成的证书
+        ssl_certificate     \$acme_certificate;
+        ssl_certificate_key \$acme_certificate_key;
+        
+        # 推荐的 SSL 设置
+        ssl_protocols TLSv1.2 TLSv1.3;
+        ssl_ciphers HIGH:!aNULL:!MD5;
         
         location / {
             proxy_pass http://studio_backend;
@@ -1080,12 +1035,9 @@ http {
         listen 443 ssl;
         server_name ${SUPABASE_PUBLIC_DOMAIN};
         
-        ssl_certificate_by_lua_block {
-            auto_ssl:ssl_certificate()
-        }
-        
-        ssl_certificate /etc/resty-auto-ssl/resty-auto-ssl-fallback.crt;
-        ssl_certificate_key /etc/resty-auto-ssl/resty-auto-ssl-fallback.key;
+        acme_certificate letsencrypt;
+        ssl_certificate     \$acme_certificate;
+        ssl_certificate_key \$acme_certificate_key;
         
         location / {
             proxy_pass http://kong_backend;
@@ -1097,31 +1049,20 @@ http {
             proxy_set_header Connection "upgrade";
         }
     }
-    
-    # 内部管理端口 (Auto-SSL hook)
-    server {
-        listen 127.0.0.1:8999;
-        client_body_buffer_size 128k;
-        client_max_body_size 128k;
-        location / {
-            content_by_lua_block {
-                auto_ssl:hook_server()
-            }
-        }
-    }
 }
 EOF
 
-    log_info "验证 OpenResty 配置..."
-    # 使用劫持后的 /usr/sbin/nginx (即 OpenResty) 进行测试
-    if /usr/sbin/nginx -t; then
+    log_info "验证 Nginx 配置..."
+    if nginx -t; then
         log_info "配置验证通过，重启 Nginx 服务..."
-        # 我们使用 nginx 服务名，因为 Pigsty 监控的是这个
         systemctl restart nginx
+        
+        # 等待 ACME 证书申请 (首次启动可能需要一点时间)
+        log_info "Nginx 已启动，正在后台自动申请证书..."
     else
-        log_error "OpenResty 配置验证失败！"
-        # 尝试回滚或查看日志
-        /usr/sbin/nginx -t 
+        log_error "Nginx 配置验证失败！"
+        nginx -t
+        exit 1
     fi
 }
 
@@ -1449,8 +1390,8 @@ main() {
     check_system
     setup_swap
     
-    # 升级网关为 OpenResty (带自动 SSL)
-    install_enhanced_gateway
+    # 安装 Nginx Mainline + ACME 模块
+    install_nginx_mainline
     
     install_container_runtime
     install_docker_compose
@@ -1460,7 +1401,7 @@ main() {
     deploy_mcp_function
     
     # 在所有安装完成后，应用最终的网关路由和 SSL 配置
-    apply_openresty_config
+    apply_nginx_acme_config
     
     show_completion
 }
