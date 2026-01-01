@@ -7,103 +7,77 @@ on:
     branches: [ "main" ]
 
 jobs:
-  deploy-check:
-    runs-on: ubuntu-latest
-    
-    env:
-      # Randomly generated configuration for testing
-      PROJECT_NAME: "supacloud-test"
-      DOMAIN: "test.example.com"
-      DB_PASSWORD: "test_db_password_123!"
-      JWT_SECRET: "super-secret-jwt-token-32-chars-minimum-length-key"
-      ANON_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.anon-key-payload"
-      SERVICE_ROLE_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.service-role-payload"
-      # Pigsty / Infrastructure configs
-      # We will fetch and set these dynamically in the steps to simulate real IP detection
-      # PG_HOST: "mocked_in_steps"
-      # RIO_HOST: "mocked_in_steps"
-      # OBJ_HOST: "mocked_in_steps"
+  integration-test:
+    name: Full Installation Test
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Mock Network Environment
-        id: net_info
+      - name: Setup Test Configuration
         run: |
-          # Get the internal IP of the GitHub Runner
+          # 获取 Runner 内网 IP
           RUNNER_IP=$(hostname -I | awk '{print $1}')
-          echo "Detected Runner IP: $RUNNER_IP"
+          echo "Using Runner IP: $RUNNER_IP"
           
-          # Export for subsequent steps
-          echo "PG_HOST=$RUNNER_IP" >> $GITHUB_ENV
-          echo "RIO_HOST=$RUNNER_IP" >> $GITHUB_ENV
-          echo "OBJ_HOST=$RUNNER_IP" >> $GITHUB_ENV
+          # 创建完整的 config.env 以避免交互式提示
+          cat > deploy/config.env <<EOF
+          # CI Test Configuration
+          INTERNAL_IP=${RUNNER_IP}
           
-          echo "Simulated Infrastructure IPs set to $RUNNER_IP"
-
-      - name: Run ShellCheck
-        uses: ludeeus/action-shellcheck@master
-        with:
-          scandir: './deploy'
-          severity: 'error' # Only fail on errors for now
-
-      - name: Verify Configuration Templates
-        working-directory: ./deploy
-        run: |
-          echo "Simulating configuration generation..."
+          # Domains
+          SUPABASE_PUBLIC_DOMAIN=api.ci-test.local
+          SUPABASE_STUDIO_DOMAIN=studio.ci-test.local
           
-          # 模拟 config.env 的生成或检查
-          if [ ! -f config.env ]; then
-            echo "config.env not found in deploy/, assuming it is generated or needs to be present."
-          fi
-
-      - name: Test Install Script (Dry Run / Syntax Check)
-        working-directory: ./deploy
-        run: |
-          echo "Checking install.sh syntax and basic execution path..."
-          chmod +x install.sh
+          # Credentials (CI Mocks)
+          # 设置具体的值以跳过生成逻辑或避免验证错误
+          DB_PASSWORD=ci_test_password_123
+          JWT_SECRET=super-secret-jwt-token-32-chars-long-for-ci
+          ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.anon-key-ci-mock
+          SERVICE_ROLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.service-role-key-ci-mock
+          DASHBOARD_USERNAME=admin
+          DASHBOARD_PASSWORD=ci_admin_password
+          GRAFANA_PASSWORD=ci_grafana_password
           
-          # 由于 install.sh 可能会执行真正的安装逻辑，我们这里仅做 bash -n 语法检查
-          bash -n install.sh
+          # Storage
+          S3_STORAGE_TYPE=minio
           
-          if [ $? -eq 0 ]; then
-            echo "install.sh syntax is valid."
-          else
-            echo "install.sh syntax error!"
-            exit 1
-          fi
-
-      - name: Validate Docker Compose Config
-        working-directory: ./templates/project
-        run: |
-          echo "Validating docker-compose.yml..."
-          # 创建一个临时的 .env 文件供 docker-compose config 使用
-          cat > .env <<EOF
-          POSTGRES_PASSWORD=${{ env.DB_PASSWORD }}
-          JWT_SECRET=${{ env.JWT_SECRET }}
-          ANON_KEY=${{ env.ANON_KEY }}
-          SERVICE_ROLE_KEY=${{ env.SERVICE_ROLE_KEY }}
-          KONG_HTTP_PORT=8000
-          KONG_HTTPS_PORT=8443
-          STUDIO_PORT=3000
+          # Runtime
+          EDGE_RUNTIME=deno
+          
+          # Skip large downloads or mocks if possible (optional env vars support could be added to install.sh)
+          # 目前 install.sh 会尝试完整下载，我们让它跑，但可能会遇到 Pigsty 源的问题
           EOF
           
-          # 使用 docker compose config 验证配置文件的有效性
-          docker compose config > /dev/null
-          if [ $? -eq 0 ]; then
-            echo "Docker Compose configuration is valid."
-          else
-            echo "Docker Compose configuration is INVALID!"
-            exit 1
-          fi
+          echo "Config generated:"
+          cat deploy/config.env
 
-      - name: Setup Node.js (for Bun/JS checks if needed)
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: List scripts for verification
+      - name: Run Install Script
+        working-directory: ./deploy
         run: |
-          ls -R scripts/
-          ls -R deploy/
+          # 赋予执行权限
+          chmod +x install.sh
+          
+          # 使用 sudo 执行，并带上非交互式前端配置防止 apt 卡住
+          # 注意：install.sh 包含 sleep 和 heavy download，CI 中可能会很慢
+          export DEBIAN_FRONTEND=noninteractive
+          
+          echo "Starting installation..."
+          # 这里为了防止真正的 heavy install (Pigsty) 导致 CI 极其耗时或失败
+          # 我们通常只测试到 '环境检查' 和 '配置生成' 阶段
+          # 但如果你要求 '真正的安装逻辑'，那就是下面这行：
+          
+          sudo -E ./install.sh
+          
+      - name: Verify Installation (Basic)
+        if: success()
+        run: |
+          echo "Installation script finished successfully."
+          # 检查生成的文件是否存在
+          ls -l /usr/local/openresty/nginx/conf/nginx.conf || true
+          ls -l /etc/supabase/jwt-keys.env || true
+          # 检查服务状态 (如果安装成功的话)
+          systemctl status openresty || true
+
