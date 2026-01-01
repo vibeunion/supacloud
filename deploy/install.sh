@@ -897,59 +897,178 @@ install_enhanced_gateway() {
     ln -sf /usr/local/share/lua/5.1/resty /usr/local/openresty/lualib/resty 2>/dev/null || true
 
     log_info "网关环境准备完成"
+    
+    # 4. 生成 Auto-SSL Fallback 证书
+    if [[ ! -f /etc/resty-auto-ssl/resty-auto-ssl-fallback.crt ]]; then
+        log_info "生成 Auto-SSL Fallback 证书..."
+        mkdir -p /etc/resty-auto-ssl
+        openssl req -new -newkey rsa:2048 -days 3650 -nodes -x509 \
+            -subj '/CN=fallback' \
+            -keyout /etc/resty-auto-ssl/resty-auto-ssl-fallback.key \
+            -out /etc/resty-auto-ssl/resty-auto-ssl-fallback.crt
+        chmod 644 /etc/resty-auto-ssl/resty-auto-ssl-fallback.crt
+        chmod 600 /etc/resty-auto-ssl/resty-auto-ssl-fallback.key
+    fi
 }
 
-# ========== 注入 Lua 自动 SSL 逻辑到 Pigsty 模板 ==========
+
+# ========== 注入 Lua 自动 SSL 逻辑到 Pigsty 模板 (已弃用) ==========
 inject_lua_config() {
-    log_step "正在向 Pigsty 模板注入 Lua 逻辑..."
+    log_info "跳过模板注入，将在安装后直接应用最终配置..."
+    # 我们改用 apply_openresty_config 直接覆盖配置，更加稳健
+    return 0
+}
+
+# ========== 应用最终 OpenResty 配置 ==========
+apply_openresty_config() {
+    log_step "应用最终 OpenResty 配置 (包含 Auto-SSL 和路由修复)..."
     
-    # 定义 Pigsty 模板路径
-    NGINX_CONF_J2=~/pigsty/roles/nginx/templates/nginx.conf.j2
+    # 定义 Nginx 配置路径 (OpenResty 默认)
+    NGINX_CONF="/usr/local/openresty/nginx/conf/nginx.conf"
     
-    if [[ ! -f "$NGINX_CONF_J2" ]]; then
-        log_warn "未找到模板 $NGINX_CONF_J2，请检查系统安装路径"
-        return
+    # 备份旧配置
+    if [[ -f "$NGINX_CONF" ]]; then
+        cp "$NGINX_CONF" "${NGINX_CONF}.bak.$(date +%s)"
+    fi
+    
+    # 确保 mime.types 路径正确
+    MIME_TYPES="/usr/local/openresty/nginx/conf/mime.types"
+    if [[ ! -f "$MIME_TYPES" ]]; then
+        # 尝试查找并链接
+        FOUND_MIME=$(find /usr/local/openresty -name mime.types | head -1)
+        if [[ -n "$FOUND_MIME" ]]; then
+            MIME_TYPES="$FOUND_MIME"
+        else
+            MIME_TYPES="mime.types" # Fallback to relative
+        fi
     fi
 
-    # 检查是否已经注入过
-    if grep -q "SupaCloud Auto SSL Start" "$NGINX_CONF_J2"; then
-        log_info "Lua 逻辑已存在，跳过注入"
-        return
-    fi
+    # 生成最终的 nginx.conf
+    # 注意: 这里使用 cat 写入，变量会被解析
+    cat > "$NGINX_CONF" << EOF
+user nobody;
+worker_processes 1;
+events {
+    worker_connections 1024;
+}
 
-    # 在 http 块中注入 init 逻辑
-    sed -i '/http {/a \
-\
-    # --- SupaCloud Auto SSL Start --- \
-    init_by_lua_block { \
-        auto_ssl = require("resty.auto-ssl").new() \
-        auto_ssl:set("allow_domain", function(domain) \
-            return true \
-        end) \
-        auto_ssl:init() \
-    } \
-    init_worker_by_lua_block { \
-        auto_ssl:init_worker() \
-    } \
-    server { \
-        listen 127.0.0.1:8999; \
-        location / { \
-            content_by_lua_block { \
-                auto_ssl:hook_server() \
-            } \
-        } \
-    } \
-    # --- SupaCloud Auto SSL End ---' "$NGINX_CONF_J2"
+http {
+    include       ${MIME_TYPES};
+    default_type  application/octet-stream;
+    
+    sendfile        on;
+    keepalive_timeout  65;
 
-    # 针对 Pigsty 默认站点注入 ACME 验证回调
-    DEFAULT_SITE_J2=~/pigsty/roles/nginx/templates/sites/default.conf.j2
-    if [[ -f "$DEFAULT_SITE_J2" ]]; then
-        sed -i '/location \/ {/i \
-        location /.well-known/acme-challenge/ { \
-            content_by_lua_block { \
-                auto_ssl:challenge_server() \
-            } \
-        }' "$DEFAULT_SITE_J2"
+    # --- Auto-SSL 基础配置 ---
+    resolver 8.8.8.8;
+    lua_shared_dict auto_ssl 1m;
+    lua_shared_dict auto_ssl_settings 64k;
+    
+    init_by_lua_block {
+        auto_ssl = (require "resty.auto-ssl").new()
+        auto_ssl:set("allow_domain", function(domain)
+            return true 
+        end)
+        auto_ssl:init()
+    }
+    
+    init_worker_by_lua_block {
+        auto_ssl:init_worker()
+    }
+
+    # 后端定义
+    upstream studio_backend {
+        server 127.0.0.1:3003;
+    }
+    
+    upstream kong_backend {
+        server 127.0.0.1:8000;
+    }
+
+    # HTTP 重定向 (ACME Challenge)
+    server {
+        listen 80;
+        server_name ${SUPABASE_STUDIO_DOMAIN} ${SUPABASE_PUBLIC_DOMAIN};
+        
+        location /.well-known/acme-challenge/ {
+            content_by_lua_block {
+                auto_ssl:challenge_server()
+            }
+        }
+
+        location / {
+            return 301 https://\$host\$request_uri;
+        }
+    }
+
+    # Studio HTTPS
+    server {
+        listen 443 ssl;
+        server_name ${SUPABASE_STUDIO_DOMAIN};
+        
+        ssl_certificate_by_lua_block {
+            auto_ssl:ssl_certificate()
+        }
+        
+        # Fallback cert
+        ssl_certificate /etc/resty-auto-ssl/resty-auto-ssl-fallback.crt;
+        ssl_certificate_key /etc/resty-auto-ssl/resty-auto-ssl-fallback.key;
+        
+        location / {
+            proxy_pass http://studio_backend;
+            proxy_set_header Host \$host;
+            proxy_set_header X-Real-IP \$remote_addr;
+            proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto \$scheme;
+            proxy_set_header Upgrade \$http_upgrade;
+            proxy_set_header Connection "upgrade";
+        }
+    }
+    
+    # API HTTPS
+    server {
+        listen 443 ssl;
+        server_name ${SUPABASE_PUBLIC_DOMAIN};
+        
+        ssl_certificate_by_lua_block {
+            auto_ssl:ssl_certificate()
+        }
+        
+        ssl_certificate /etc/resty-auto-ssl/resty-auto-ssl-fallback.crt;
+        ssl_certificate_key /etc/resty-auto-ssl/resty-auto-ssl-fallback.key;
+        
+        location / {
+            proxy_pass http://kong_backend;
+            proxy_set_header Host \$host;
+            proxy_set_header X-Real-IP \$remote_addr;
+            proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto \$scheme;
+            proxy_set_header Upgrade \$http_upgrade;
+            proxy_set_header Connection "upgrade";
+        }
+    }
+    
+    # 内部管理端口 (Auto-SSL hook)
+    server {
+        listen 127.0.0.1:8999;
+        client_body_buffer_size 128k;
+        client_max_body_size 128k;
+        location / {
+            content_by_lua_block {
+                auto_ssl:hook_server()
+            }
+        }
+    }
+}
+EOF
+
+    log_info "验证 OpenResty 配置..."
+    if /usr/local/openresty/nginx/sbin/nginx -t; then
+        log_info "配置验证通过，重载服务..."
+        systemctl reload openresty || systemctl restart openresty
+    else
+        log_error "OpenResty 配置验证失败！请检查 $NGINX_CONF"
+        # 不退出，以免中断整个流程，但提示错误
     fi
 }
 
@@ -1285,6 +1404,10 @@ main() {
     configure_edge_runtime
     install_pigsty
     deploy_mcp_function
+    
+    # 在所有安装完成后，应用最终的网关路由和 SSL 配置
+    apply_openresty_config
+    
     show_completion
 }
 
