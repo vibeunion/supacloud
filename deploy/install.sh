@@ -41,8 +41,19 @@ check_config() {
     # 1. 验证/获取 INTERNAL_IP
     if [[ -z "$INTERNAL_IP" || "$INTERNAL_IP" == "10.6.0.9" ]]; then
         log_info "检查内网 IP..."
-        # 获取所有非回环 IP
-        IPS=($(hostname -I 2>/dev/null))
+        # 获取所有非回环 IP，优先选择 IPv4（过滤掉包含冒号的 IPv6 地址）
+        ALL_IPS=($(hostname -I 2>/dev/null))
+        IPS=()
+        for ip in "${ALL_IPS[@]}"; do
+            # 只保留 IPv4 地址（不包含冒号）
+            if [[ ! "$ip" =~ : ]]; then
+                IPS+=("$ip")
+            fi
+        done
+        # 如果没有 IPv4，则使用所有 IP
+        if [[ ${#IPS[@]} -eq 0 ]]; then
+            IPS=("${ALL_IPS[@]}")
+        fi
         
         if [[ ${#IPS[@]} -eq 0 ]]; then
             log_warn "无法自动检测到 IP 地址"
@@ -107,8 +118,25 @@ check_config() {
         fi
     fi
     log_info "Studio 域名: $SUPABASE_STUDIO_DOMAIN"
+
+    # 3. 检查并生成随机密码 (如果使用默认值)
+    if [[ -z "$POSTGRES_PASSWORD" || "$POSTGRES_PASSWORD" == "DBUser.Supa" ]]; then
+        log_info "检测到默认数据库密码，正在生成随机强密码..."
+        POSTGRES_PASSWORD=$(openssl rand -base64 24 | tr -dc 'a-zA-Z0-9' | head -c 16)
+        log_info "已生成数据库密码"
+    fi
+
+    if [[ -z "$DASHBOARD_PASSWORD" || "$DASHBOARD_PASSWORD" == "supacloud" ]]; then
+        log_info "检测到默认 Studio 密码，正在生成随机强密码..."
+        DASHBOARD_PASSWORD=$(openssl rand -base64 24 | tr -dc 'a-zA-Z0-9' | head -c 16)
+        log_info "已生成 Studio 密码"
+    fi
     
-    # 自动生成 JWT 密钥
+    if [[ -z "$GRAFANA_PASSWORD" || "$GRAFANA_PASSWORD" == "supacloud" ]]; then
+        log_info "检测到默认 Grafana 密码，正在生成随机强密码..."
+        GRAFANA_PASSWORD=$(openssl rand -base64 24 | tr -dc 'a-zA-Z0-9' | head -c 16)
+        log_info "已生成 Grafana 密码"
+    fi
     generate_jwt_keys
     
     log_info "配置验证通过"
@@ -425,12 +453,13 @@ install_docker_compose() {
     COMPOSE_VERSION="v2.32.3"
     COMPOSE_URL="https://github.com/docker/compose/releases/download/${COMPOSE_VERSION}/docker-compose-$(uname -s)-$(uname -m)"
     
-    # 尝试使用代理
-    if curl -s --connect-timeout 5 https://github.com &> /dev/null; then
-        curl -L "$COMPOSE_URL" -o /usr/local/bin/docker-compose
+    # 优先使用 gh-proxy.net 代理加速下载
+    log_info "使用 gh-proxy.net 代理加速下载..."
+    if curl -L --progress-bar "https://gh-proxy.net/$COMPOSE_URL" -o /usr/local/bin/docker-compose; then
+        log_info "代理下载成功"
     else
-        log_info "使用代理下载..."
-        curl -L "https://gh-proxy.net/$COMPOSE_URL" -o /usr/local/bin/docker-compose
+        log_warn "代理下载失败，尝试直接下载..."
+        curl -L --progress-bar "$COMPOSE_URL" -o /usr/local/bin/docker-compose
     fi
     
     chmod +x /usr/local/bin/docker-compose
@@ -741,11 +770,16 @@ install_rustfs() {
     
     RUSTFS_URL="https://github.com/RustFS/rustfs/releases/download/${RUSTFS_VERSION}/rustfs-${RUSTFS_ARCH}.tar.gz"
     
-    # 下载 RustFS
+    # 下载 RustFS（使用代理加速）
     if [[ ! -f /usr/local/bin/rustfs ]]; then
-        log_info "下载 RustFS ${RUSTFS_VERSION}..."
+        log_info "下载 RustFS ${RUSTFS_VERSION}（使用 gh-proxy.net 加速）..."
         cd /tmp
-        curl -L "$RUSTFS_URL" -o rustfs.tar.gz
+        if curl -L --progress-bar "https://gh-proxy.net/$RUSTFS_URL" -o rustfs.tar.gz; then
+            log_info "代理下载成功"
+        else
+            log_warn "代理下载失败，尝试直接下载..."
+            curl -L --progress-bar "$RUSTFS_URL" -o rustfs.tar.gz
+        fi
         tar -xzf rustfs.tar.gz
         mv rustfs /usr/local/bin/
         chmod +x /usr/local/bin/rustfs
@@ -1117,6 +1151,11 @@ update_pigsty_config() {
     log_step "更新 Pigsty 配置..."
     
     PIGSTY_YML=~/pigsty/pigsty.yml
+    
+    # 强制替换默认 IP (修复可能未替换的 Bug)
+    if [[ -n "$INTERNAL_IP" ]]; then
+        sed -i "s|10.6.0.9|${INTERNAL_IP}|g" "$PIGSTY_YML"
+    fi
     
     # 更新域名配置
     # 更新域名配置
