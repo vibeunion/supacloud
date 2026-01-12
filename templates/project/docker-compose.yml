@@ -11,6 +11,7 @@ services:
       KONG_DNS_ORDER: LAST,A,CNAME
       KONG_PLUGINS: request-transformer,correlation-id,cors,key-auth,hmac-auth,jwt,acl
       KONG_NGINX_WORKER_PROCESSES: 1
+    container_name: supabase-kong
     deploy:
       resources:
         limits:
@@ -22,6 +23,7 @@ services:
       - supabase-network
 
   auth:
+    container_name: supabase-auth
     image: supabase/gotrue:v2.132.3
     depends_on:
       - db-check
@@ -61,10 +63,17 @@ services:
       GOTRUE_MAILER_URLPATHS_EMAIL_CHANGE: ${MAILER_URLPATHS_EMAIL_CHANGE}
       GOTRUE_EXTERNAL_PHONE_ENABLED: ${ENABLE_PHONE_SIGNUP}
       GOTRUE_SMS_AUTOCONFIRM: ${ENABLE_PHONE_AUTOCONFIRM}
+      GOTRUE_EXTERNAL_WECHAT_TIMEOUT: 10s
+    healthcheck:
+      test: [ "CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9999/health" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     networks:
       - supabase-network
 
   rest:
+    container_name: supabase-rest
     image: postgrest/postgrest:v12.0.1
     depends_on:
       - db-check
@@ -80,10 +89,16 @@ services:
       PGRST_DB_ANON_ROLE: anon
       PGRST_JWT_SECRET: ${JWT_SECRET}
       PGRST_DB_USE_LEGACY_GUC_VAR: "true"
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:3000/" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     networks:
       - supabase-network
 
   realtime:
+    container_name: supabase-realtime
     image: supabase/realtime:v2.25.22
     depends_on:
       - db-check
@@ -109,10 +124,16 @@ services:
       ERL_AFLAGS: -proto_dist inet_tcp
       ENABLE_TAILSCALE: false
       DNS_NODES: "''"
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:4000/health" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     networks:
       - supabase-network
 
   storage:
+    container_name: supabase-storage
     image: supabase/storage-api:v1.11.13
     depends_on:
       - db-check
@@ -143,10 +164,16 @@ services:
       AWS_SECRET_ACCESS_KEY: ${GARAGE_SECRET_KEY}
       AWS_S3_ENDPOINT: http://garage:3900
       AWS_Use_Path_Style_Endpoint: 'true'
+    healthcheck:
+      test: [ "CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:5000/status" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     networks:
       - supabase-network
 
   meta:
+    container_name: supabase-meta
     image: supabase/postgres-meta:v0.84.2
     depends_on:
       - db-check
@@ -162,6 +189,7 @@ services:
       - supabase-network
 
   studio:
+    container_name: supabase-studio
     image: supabase/studio:20241223-2895244
     restart: unless-stopped
     ports:
@@ -194,6 +222,7 @@ services:
       - supabase-network
 
   bun-auth:
+    container_name: supabase-bun-auth
     image: ${FUNCTION_IMAGE:-oven/bun:1}
     working_dir: /app
     command: ${FUNCTION_COMMAND:-bun run index.ts}
