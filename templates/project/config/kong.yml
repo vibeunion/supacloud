@@ -3,7 +3,7 @@ _transform: true
 
 services:
   - name: supabase-api
-    url: http://auth:9999
+    url: http://supabase-auth:9999
     routes:
       - name: auth-v1
         paths:
@@ -11,7 +11,7 @@ services:
         strip_path: false
 
   - name: supabase-rest
-    url: http://rest:3000
+    url: http://supabase-rest:3000
     routes:
       - name: rest-v1
         paths:
@@ -19,7 +19,7 @@ services:
         strip_path: false
 
   - name: supabase-realtime
-    url: http://realtime:4000
+    url: http://supabase-realtime:4000
     routes:
       - name: realtime-v1
         paths:
@@ -27,7 +27,7 @@ services:
         strip_path: false
 
   - name: supabase-storage
-    url: http://storage:5000
+    url: http://supabase-storage:5000
     routes:
       - name: storage-v1
         paths:
@@ -35,7 +35,7 @@ services:
         strip_path: false
 
   - name: bun-auth
-    url: http://bun-auth:9000
+    url: http://supabase-bun-auth:9000
     routes:
       - name: bun-auth-wechat
         paths:
@@ -43,7 +43,7 @@ services:
         strip_path: false
 
   - name: mcp
-    url: http://studio:3000/api/mcp
+    url: http://supabase-studio:3000/api/mcp
     routes:
       - name: mcp
         strip_path: true
