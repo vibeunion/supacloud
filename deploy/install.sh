@@ -1387,6 +1387,90 @@ EOF
     fi
 }
 
+# ========== 配置 PG HBA 白名单 ==========
+configure_pg_hba() {
+    log_step "配置数据库访问白名单 (pg_hba.conf)..."
+
+    # 1. 识别容器网络网段
+    # 尝试检测 cni-podman0 (Podman) 或 docker0 (Docker)
+    CONTAINER_NET=""
+    
+    if ip addr show cni-podman0 &> /dev/null; then
+        CONTAINER_NET=$(ip -o -4 addr show cni-podman0 | awk '{print $4}')
+        log_info "发现 Podman 网络: ${CONTAINER_NET}"
+    elif ip addr show docker0 &> /dev/null; then
+        CONTAINER_NET=$(ip -o -4 addr show docker0 | awk '{print $4}')
+        log_info "发现 Docker 网络: ${CONTAINER_NET}"
+    else
+        # 尝试智能猜测，查找 10.88/16, 10.89/24 等常见网段
+        CONTAINER_NET=$(ip route | grep "link src" | grep -E "10\.(88|89)\." | awk '{print $1}' | head -1)
+    fi
+
+    if [[ -z "$CONTAINER_NET" ]]; then
+        # 兜底：默认 Podman 网段
+        CONTAINER_NET="10.88.0.0/16" 
+        log_warn "未检测到容器网络，使用默认值: ${CONTAINER_NET}"
+    fi
+
+    # 2. 定位 pg_hba.conf
+    # Pigsty 默认路径
+    PG_HBA="/pg/data/pg_hba.conf"
+    
+    if [[ ! -f "$PG_HBA" ]]; then
+        log_warn "未找到 $PG_HBA，试图查找其他位置..."
+        # 尝试查找 Debian/Ubuntu 或 RHEL 默认路径
+        POSSIBLE_PATHS=(
+            "/var/lib/postgresql/data/pg_hba.conf"
+            "/var/lib/pgsql/data/pg_hba.conf"
+            "/etc/postgresql/14/main/pg_hba.conf"
+            "/etc/postgresql/15/main/pg_hba.conf"
+        )
+        for path in "${POSSIBLE_PATHS[@]}"; do
+            if [[ -f "$path" ]]; then
+                PG_HBA="$path"
+                log_info "找到 pg_hba.conf: $PG_HBA"
+                break
+            fi
+        done
+    fi
+
+    if [[ ! -f "$PG_HBA" ]]; then
+        log_warn "最终未找到 pg_hba.conf，跳过配置"
+        return
+    fi
+    
+    # 3. 添加规则
+    # host all all <CIDR> scram-sha-256
+    CONFIG_LINE="host all all ${CONTAINER_NET} scram-sha-256"
+    
+    if grep -qF "$CONTAINER_NET" "$PG_HBA"; then
+        log_info "规则已存在: $CONFIG_LINE"
+    else
+        log_info "添加规则: $CONFIG_LINE"
+        # 备份
+        cp "$PG_HBA" "${PG_HBA}.bak.$(date +%s)"
+        # 添加到文件末尾
+        echo "$CONFIG_LINE" >> "$PG_HBA"
+        
+        # 4. 重载配置
+        log_info "重载 PostgreSQL 配置..."
+        if command -v pg_ctl &> /dev/null; then
+             # 需要切换到 postgres 用户执行
+             su - postgres -c "pg_ctl reload -D $(dirname "$PG_HBA")"
+        elif systemctl is-active --quiet postgresql; then
+             systemctl reload postgresql
+        elif systemctl is-active --quiet patroni; then
+             systemctl reload patroni
+        elif pgrep -u postgres postgres > /dev/null; then
+             # 尝试发送 SIGHUP
+             pkill -HUP -u postgres postgres
+             log_info "已发送 SIGHUP 信号给 postgres 进程"
+        else
+             log_warn "无法自动重载 PostgreSQL，请手动执行重载命令生效"
+        fi
+    fi
+}
+
 # ========== 显示完成信息 ==========
 show_completion() {
     log_step "安装完成！"
@@ -1438,6 +1522,7 @@ main() {
     configure_edge_runtime
     install_pigsty
     deploy_mcp_function
+    configure_pg_hba
     
     # 在所有安装完成后，应用最终的网关路由和 SSL 配置
     apply_nginx_acme_config
