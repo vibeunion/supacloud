@@ -20,7 +20,7 @@ Unlike traditional deployments that waste GBs of RAM per project, SupaCloud enab
 *   **Instant Provisioning**: One-click to spin up a full stack (Kong, GoTrue, Studio, API) in seconds.
 *   **Fully Automated**:
     *   **Auto DB**: Automatically creates isolated logical databases.
-    *   **Auto S3**: Automatically provisions Garage Buckets & Keys.
+    *   **Auto S3**: Automatically provisions S3 Buckets & Keys.
     *   **Auto Networking**: Manages internal ports and routing automatically.
 *   **China Ready**: Built-in `bun-auth` service for each project, supporting **WeChat MiniApp** login out-of-the-box.
 *   **Dual Runtime Cloud Functions**: Supports both **Bun.js** and **Deno** for project-level functions. Switch runtimes instantly via CLI.
@@ -33,13 +33,16 @@ Unlike traditional deployments that waste GBs of RAM per project, SupaCloud enab
 
 **Linux & macOS**
 ```bash
-curl -fsSL https://raw.githubusercontent.com/zuohuadong/supacloud/main/scripts/install.sh | bash
+git clone https://github.com/zuohuadong/supacloud.git
+cd supacloud
+# Edit configuration if needed
+vim config.env
+# Install dependencies and setup environment
+sudo ./install.sh
 ```
 
-**Windows (PowerShell)**
-```powershell
-iwr https://raw.githubusercontent.com/zuohuadong/supacloud/main/scripts/install.ps1 -useb | iex
-```
+**Windows (WSL2 Recommended)**
+Please use WSL2 to run the Linux installation steps above.
 
 #### 2. Initialize & Start
 After installation, you can initialize a workspace anywhere.
@@ -66,7 +69,8 @@ supacloud create shop
 
 ### 📂 Architecture
 
-*   `deploy/`: Infrastructure scripts (Pigsty, Gateway, S3 setup).
+*   `install.sh`: One-click installation script.
+*   `config.env`: Environment configuration.
 *   `manager/`: The Brain (Bun Orchestrator & Web Dashboard).
 *   `packages/`: Shared Components (MCP, bun-auth, bun-functions).
 *   `templates/base/`: Core Infrastructure (Global Postgres, RustFS S3, Caddy Gateway).
@@ -90,69 +94,129 @@ supacloud create shop
 *   **秒级交付**：一键拉起全套服务 (Kong, GoTrue, Studio, API)，无需等待。
 *   **全自动化**：
     *   **自动建库**：自动创建逻辑隔离的数据库。
-    *   **自动 S3**：自动分配 Garage Bucket 和 Access Key。
+    *   **自动 S3**：自动分配 S3 Bucket 和 Access Key。
     *   **自动网络**：自动管理内部端口映射。
 *   **中国特供**：每个项目内置 `bun-auth` 服务，开箱即支持**微信小程序**一键登录。
 *   **双运行时云函数**：支持 **Bun.js** 和 **Deno** 双模式。通过 CLI 一键切换项目运行时，灵活适配。
 *   **灵活分析**：支持 **Postgres** 轻量级日志存储，或标准 ClickHouse 模式。低配机器可完全禁用以节省内存。
 *   **现代技术**：基于 Bun 1.2+ 原生 SQL 构建。零历史包袱。
 
-### 🖥️ 服务器环境部署 (Infrastructure)
+### 💻 系统要求
 
-如果你需要在一台全新的 Linux 服务器上部署 SupaCloud 所需的底层基础设施（包含 Pigsty/Postgres、Gateway、S3 等），请参考 Deploy 模块。它提供了一键脚本来初始化整个运行环境。
-
-👉 **[点击查看：生产环境部署指南](./deploy/README.md)**
+| 项目 | 最低配置 | 推荐配置 |
+|------|----------|----------|
+| CPU | 2 核 | 4 核+ |
+| 内存 | 2GB (自动开启 Swap) | 4GB+ |
+| 磁盘 | 40GB | 100GB+ SSD |
+| 系统 | Rocky/AlmaLinux 8/9, Ubuntu 22/24, Debian 12 | Rocky Linux 9 |
 
 ### 🚀 快速开始
 
-#### 1. 一键安装
-
-**Linux & macOS (使用国内加速)**
-```bash
-curl -fsSL https://mirror.ghproxy.com/https://raw.githubusercontent.com/zuohuadong/supacloud/main/scripts/install.sh | bash -s cn
-```
-
-**Windows (PowerShell - 使用国内加速)**
-```powershell
-$env:SUPACLOUD_CN=1; iwr https://mirror.ghproxy.com/https://raw.githubusercontent.com/zuohuadong/supacloud/main/scripts/install.ps1 -useb | iex
-```
-
-#### 2. 初始化与启动
-安装完成后，你可以在任意目录初始化一个新的云平台。
+#### 1. 安装与配置
 
 ```bash
-mkdir my-cloud && cd my-cloud
-supacloud init
+# 1. 下载代码
+git clone https://github.com/zuohuadong/supacloud.git
+cd supacloud
+
+# 2. 编辑配置 (可选)
+# 默认配置已适用于大多数场景，如需修改端口或域名请编辑 config.env
+vim config.env
+
+# 3. 运行安装脚本
+sudo ./install.sh
+```
+
+**`config.env` 关键配置项说明：**
+
+| 参数 | 说明 | 必填 |
+|------|------|------|
+| `INTERNAL_IP` | 服务器内网 IP (脚本会自动检测) | ✅ |
+| `SUPABASE_DOMAIN` | 对外访问域名 (如 `supa.example.com`) | ✅ |
+| `DASHBOARD_PASSWORD` | Studio 登录密码 | ✅ |
+| `JWT_SECRET` | JWT 密钥 (生产环境建议修改) | ⚠️ |
+| `S3_STORAGE_TYPE` | S3 存储类型 (minio/rustfs/external) | |
+
+#### 2. 启动平台
+
+安装完成后，Manager 和基础服务将自动准备就绪。
+
+```bash
+# 进入 Manager 目录启动 (开发模式)
+cd manager
+bun install
+bun run start
+```
+或者如果已构建二进制文件：
+```bash
 supacloud start
 ```
 
 #### 3. 创建项目
+
 ```bash
 supacloud create shop
 ```
 *   **Studio**: `http://shop.studio.localhost`
 *   **API**: `http://shop.localhost`
 
-> **项目命名规则**：3-32 个字符，必须以小写字母开头，可包含小写字母、数字和连字符，必须以字母或数字结尾。不能使用 `postgres`、`admin`、`supabase` 等保留名称。
+> **项目命名规则**：3-32 个字符，必须以小写字母开头，可包含小写字母、数字和连字符，必须以字母或数字结尾。
 
-#### 4. 常用命令
-*   `supacloud status` - 查看平台状态和访问入口
-*   `supacloud runtime <name> <bun|deno>` - 切换项目运行时 (Bun/Deno)
-*   `supacloud help` - 查看所有命令
+### 🔧 高级配置与运维
 
-#### (可选) 从源码构建
-如果你需要修改 Manager 逻辑或重新编译：
+#### DNS 配置
+将域名的 A 记录指向服务器公网 IP：
+```
+supa.yourdomain.com  →  服务器公网IP
+```
+
+#### 运行时切换
+使用根目录下的 `switch.sh` 脚本切换 Edge Functions 运行时或 S3 存储类型：
+
 ```bash
-cd manager
-bun install
-bun run build
-# 输出: bin/supacloud (或 .exe)
+# 切换到 Bun 运行时 (高性能)
+sudo ./switch.sh runtime bun
+
+# 切换到 Deno 运行时 (官方默认)
+sudo ./switch.sh runtime deno
+
+# 切换 S3 存储后端 (minio / rustfs / external)
+sudo ./switch.sh storage rustfs
+```
+
+#### 故障排查
+
+**服务无法启动**
+```bash
+# 检查日志
+podman logs supabase-analytics --tail 50
+
+# 检查数据库连接
+podman exec -it supabase-analytics env | grep POSTGRES
+```
+
+**Docker Compose 问题**
+如果遇到 Docker Compose 版本问题，脚本会自动尝试安装最新版本。你也可以手动更新：
+```bash
+curl -L "https://github.com/docker/compose/releases/download/v2.32.3/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+chmod +x /usr/local/bin/docker-compose
 ```
 
 ### 📂 架构设计
 
-*   `deploy/`: 基础设施脚本 (Pigsty、Gateway、S3 初始化)。
-*   `manager/`: 大脑 (Bun 编排器 & Web 控制台)。
+*   `install.sh`: 一键部署脚本 (环境初始化)。
+*   `config.env`: 全局配置文件。
+*   `switch.sh`: 运行时/存储切换工具。
+*   `manager/`: 核心管控服务 (Bun 编排器 & Web 控制台)。
 *   `packages/`: 共享组件库 (MCP、bun-auth、bun-functions)。
-*   `templates/base/`: 核心基座 (Global Postgres、RustFS S3、Caddy 网关)。
-*   `instances/`: 运行中的项目 (租户配置 & 函数)。
+*   `templates/base/`: 基础设施模板 (Global Postgres、RustFS S3、Caddy 网关)。
+*   `instances/`: 租户实例数据。
+
+### 参考文档
+
+- [Pigsty 官方文档](https://pigsty.cc/)
+- [Supabase 自托管文档](https://supabase.com/docs/guides/self-hosting)
+
+## License
+
+MIT

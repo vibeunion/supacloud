@@ -24,50 +24,6 @@ export async function checkAndInstallDockerCompose() {
 }
 
 export async function initManager() {
-    // 1. Garage Config
-    const configDir = join(BASE_DIR, "base", "volumes", "garage", "config");
-    const configPath = join(configDir, "garage.toml");
-
-    if (!(await exists(configPath))) {
-        console.log("Manager: No garage.toml found. Auto-initializing...");
-
-        await deps.mkdir(configDir, { recursive: true });
-
-        const rpcSecret = crypto.randomUUID().replace(/-/g, '') + crypto.randomUUID().replace(/-/g, '');
-        const adminToken = crypto.randomUUID().replace(/-/g, '') + crypto.randomUUID().replace(/-/g, '');
-
-        const tomlContent = `
-metadata_dir = "/garage/meta"
-data_dir = "/garage/data"
-db_engine = "sqlite"
-
-[replication]
-mode = "none"
-
-[rpc]
-bind_addr = "[::]:3901"
-secret = "${rpcSecret}"
-
-[s3_api]
-s3_region = "us-east-1"
-api_bind_addr = "[::]:3900"
-root_domain = ".web.localhost"
-index = "index.html"
-
-[admin]
-api_bind_addr = "[::]:3903"
-admin_token = "${adminToken}"
-`;
-
-        await deps.write(configPath, tomlContent);
-        console.log("✅ Manager: Generated garage.toml with secure secrets.");
-        console.log(`   RPC Secret: ${rpcSecret.substring(0, 8)}...`);
-        console.log(`   Admin Token: ${adminToken}`);
-        console.log("⚠️  IMPORTANT: Please restart your Base services (docker compose restart garage) to apply these changes!");
-    } else {
-        console.log("Manager: Found existing garage.toml, skipping auto-init.");
-    }
-
     // 2. Manager Auth
     if (await exists(AUTH_FILE)) {
         ADMIN_PASSWORD = (await deps.file(AUTH_FILE).text()).trim();

@@ -100,26 +100,8 @@ uiApp.get('/projects/:name/code', async (c) => {
 uiApp.get('/system/backups', async (c) => {
     try {
         // We can just Exec into backup-service
-        // ENV variables might not be available here directly if they are inside container context.
         // The original code executed a shell command inside 'backup-service'.
-        // We should check what environment variables 'backup-service' has.
-        // Assuming it has AWS_ACCESS_KEY_ID et al from garage_keys.env or similar passing.
-        // Wait, the original code injected enviroment variables in the exec command:
-        // "export AWS_ACCESS_KEY_ID=$GARAGE_ACCESS_KEY; ..."
-        // But where do THESE variables come from in the Node process?
-        // They came from process.env in the monolithic app?
-        // Actually the original code had:
-        // `docker exec backup-service sh -c "export AWS_ACCESS_KEY_ID=$GARAGE_ACCESS_KEY; ..."` inside calls?
-        // Let's re-read the original View File output for /system/backups.
-
-        // It was:
-        // const proc = deps.spawn(["docker", "exec", "backup-service", "sh", "-c", "export AWS_ACCESS_KEY_ID=$GARAGE_ACCESS_KEY; export AWS_SECRET_ACCESS_KEY=$GARAGE_SECRET_KEY; aws --endpoint-url $S3_ENDPOINT s3 ls s3://$BACKUP_BUCKET/"], {stdout: "pipe" });
-        // The $GARAGE_ACCESS_KEY syntax suggests these are environment variables INSIDE the container shell session?
-        // OR they are meant to be interpolated from the host process? 
-        // If they are $VAR, the shell evaluates them. If the backup-service container already has them, then great.
-        // But usually `docker exec` doesn't inherit container env vars for the command line unless the shell inside sources them or they are already exported.
-        // If these variables are set in the `environment` section of docker-compose for backup-service, they are available.
-        // Let's assume they are available in the container environment.
+        // We assume S3_ENDPOINT, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY are available in the container environment.
 
         const proc = deps.spawn(["docker", "exec", "backup-service", "sh", "-c", "aws --endpoint-url $S3_ENDPOINT s3 ls s3://$BACKUP_BUCKET/"], { stdout: "pipe" });
         const output = await new Response(proc.stdout).text();

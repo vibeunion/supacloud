@@ -90,8 +90,8 @@ export async function createProject(name: string) {
     // We utilize the global S3 credentials found in the system.
     // In a future version, we should implement a proper S3 Client to create buckets/users via API.
 
-    let garageAccessKey = "";
-    let garageSecretKey = "";
+    let s3AccessKey = "";
+    let s3SecretKey = "";
 
     try {
         console.log(`Configuring S3 for ${name}...`);
@@ -101,36 +101,27 @@ export async function createProject(name: string) {
             const keysContent = await deps.$`cat /etc/rustfs-credentials.env`.text();
             const accessMatch = keysContent.match(/S3_ACCESS_KEY=(.*)/);
             const secretMatch = keysContent.match(/S3_SECRET_KEY=(.*)/);
-            if (accessMatch) garageAccessKey = accessMatch[1].trim();
-            if (secretMatch) garageSecretKey = secretMatch[1].trim();
+            if (accessMatch) s3AccessKey = accessMatch[1].trim();
+            if (secretMatch) s3SecretKey = secretMatch[1].trim();
         } catch {
             // Fallback to Env vars if passed to Manager
-            if (process.env.S3_ACCESS_KEY) garageAccessKey = process.env.S3_ACCESS_KEY;
-            if (process.env.S3_SECRET_KEY) garageSecretKey = process.env.S3_SECRET_KEY;
-        }
-
-        // If still empty, check for old garage credentials just in case or MinIO
-        if (!garageAccessKey) {
-            const keysContent = await deps.$`cat /etc/garage/s3-credentials.env`.text();
-            const accessMatch = keysContent.match(/S3_ACCESS_KEY=(.*)/);
-            const secretMatch = keysContent.match(/S3_SECRET_KEY=(.*)/);
-            if (accessMatch) garageAccessKey = accessMatch[1].trim();
-            if (secretMatch) garageSecretKey = secretMatch[1].trim();
+            if (process.env.S3_ACCESS_KEY) s3AccessKey = process.env.S3_ACCESS_KEY;
+            if (process.env.S3_SECRET_KEY) s3SecretKey = process.env.S3_SECRET_KEY;
         }
 
     } catch (e) {
         console.warn("Could not load S3 credentials:", e);
     }
 
-    if (!garageAccessKey) {
+    if (!s3AccessKey) {
         console.warn("No S3 credentials found. Using placeholders.");
-        garageAccessKey = "placeholder";
-        garageSecretKey = "placeholder";
+        s3AccessKey = "placeholder";
+        s3SecretKey = "placeholder";
     }
 
     // For RustFS/MinIO, we might need to assume the bucket is created or use a single shared bucket.
     // For now, we point to a project-specific bucket name.
-    console.log(`Using S3 Credentials: ${garageAccessKey.substring(0, 5)}...`);
+    console.log(`Using S3 Credentials: ${s3AccessKey.substring(0, 5)}...`);
 
     const j1 = crypto.randomUUID().replace(/-/g, '');
     const j2 = crypto.randomUUID().replace(/-/g, '');
@@ -157,8 +148,8 @@ JWT_EXP=3600
 ANON_KEY=${anonKey}
 SERVICE_ROLE_KEY=${serviceKey}
 SITE_URL=http://localhost:${studioPort}
-S3_ACCESS_KEY=${garageAccessKey}
-S3_SECRET_KEY=${garageSecretKey}
+S3_ACCESS_KEY=${s3AccessKey}
+S3_SECRET_KEY=${s3SecretKey}
 S3_STORAGE_TYPE=${s3StorageType}
 ENABLE_ANALYTICS=${enableAnalytics}
 LOGFLARE_API_KEY=${crypto.randomUUID().replace(/-/g, '')}
