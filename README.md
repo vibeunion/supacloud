@@ -7,7 +7,7 @@
 <a name="english"></a>
 ## 🇬🇧 English
 
-**SupaCloud** is a next-generation, ultra-lightweight PaaS specifically designed for self-hosting Supabase. It reimagines the multi-project architecture using **Bun.js**, **Garage S3**, and **Global Postgres**.
+**SupaCloud** is a next-generation, ultra-lightweight PaaS specifically designed for self-hosting Supabase. It reimagines the multi-project architecture using **Bun.js**, **RustFS**, and **Global Postgres**.
 
 Unlike traditional deployments that waste GBs of RAM per project, SupaCloud enables you to run **dozens of isolated Supabase projects** on a single $5 VPS.
 
@@ -15,7 +15,7 @@ Unlike traditional deployments that waste GBs of RAM per project, SupaCloud enab
 
 *   **Web Dashboard**: Built-in beautiful, dark-themed management UI powered by **Hono** & **Alpine.js**. Access at `http://localhost:8888`.
 *   **Auto Upgrade**: Keep your SupaCloud up-to-date with a single command `supacloud upgrade`.
-*   **Extreme Efficiency**: Uses a **Shared Resource Architecture**. 10 projects consume only ~1 Postgres & ~1 Garage instance.
+*   **Extreme Efficiency**: Uses a **Shared Resource Architecture**. 10 projects consume only ~1 Postgres & ~1 RustFS instance.
 *   **Instant Provisioning**: One-click to spin up a full stack (Kong, GoTrue, Studio, API) in seconds.
 *   **Fully Automated**:
     *   **Auto DB**: Automatically creates isolated logical databases.
@@ -23,6 +23,7 @@ Unlike traditional deployments that waste GBs of RAM per project, SupaCloud enab
     *   **Auto Networking**: Manages internal ports and routing automatically.
 *   **China Ready**: Built-in `bun-auth` service for each project, supporting **WeChat MiniApp** login out-of-the-box.
 *   **Dual Runtime Cloud Functions**: Supports both **Bun.js** and **Deno** for project-level functions. Switch runtimes instantly via CLI.
+*   **Flexible Analytics**: Supports **Postgres-based** lightweight logging or standard ClickHouse. Can be fully disabled for low-resource environments.
 *   **Modern Stack**: Powered by Bun 1.2+ Native SQL & HTTP. Zero legacy dependencies.
 
 ### 🚀 Quick Start
@@ -62,7 +63,7 @@ supacloud create shop
 
 ### 📂 Architecture
 
-*   `base/`: The Core (Global Postgres 15, Garage S3, Gateway).
+*   `base/`: The Core (Global Postgres 15, RustFS S3, Gateway).
 *   `templates/`: The Cell (Lightweight Project Template).
 *   `instances/`: Running Cells (Your Projects).
 *   `manager/`: The Brain (Bun Orchestrator).
@@ -72,7 +73,7 @@ supacloud create shop
 <a name="chinese"></a>
 ## 🇨🇳 中文
 
-**SupaCloud** 是为 Supabase 私有化部署打造的下一代超轻量级 PaaS 平台。它基于 **Bun.js**、**Garage S3** 和 **Global Postgres** 重构了多租户架构。
+**SupaCloud** 是为 Supabase 私有化部署打造的下一代超轻量级 PaaS 平台。它基于 **Bun.js**、**RustFS** 和 **Global Postgres** 重构了多租户架构。
 
 打破传统部署“一个项目一套重型架构”的资源浪费，SupaCloud 让你可以**在一台 5美元的 VPS 上流畅运行数十个隔离的 Supabase 项目**。
 
@@ -80,7 +81,7 @@ supacloud create shop
 
 *   **Web 控制台**：内置精美的暗黑风格管理界面，基于 **Hono** & **Alpine.js** 构建。访问地址：`http://localhost:8888`。
 *   **自动升级**：通过指令 `supacloud upgrade` 一键在线升级到最新版本。
-*   **极致轻量**：采用**资源共享架构**。10 个项目仅占用 1 个 Postgres 和 1 个 Garage 实例。
+*   **极致轻量**：采用**资源共享架构**。10 个项目仅占用 1 个 Postgres 和 1 个 RustFS 实例。
 *   **秒级交付**：一键拉起全套服务 (Kong, GoTrue, Studio, API)，无需等待。
 *   **全自动化**：
     *   **自动建库**：自动创建逻辑隔离的数据库。
@@ -88,6 +89,7 @@ supacloud create shop
     *   **自动网络**：自动管理内部端口映射。
 *   **中国特供**：每个项目内置 `bun-auth` 服务，开箱即支持**微信小程序**一键登录。
 *   **双运行时云函数**：支持 **Bun.js** 和 **Deno** 双模式。通过 CLI 一键切换项目运行时，灵活适配。
+*   **灵活分析**：支持 **Postgres** 轻量级日志存储，或标准 ClickHouse 模式。低配机器可完全禁用以节省内存。
 *   **现代技术**：基于 Bun 1.2+ 原生 SQL 构建。零历史包袱。
 
 ### 🖥️ 服务器环境部署 (Infrastructure)
@@ -142,7 +144,7 @@ bun run build
 
 ### 📂 架构设计
 
-*   `base/`: 核心基座 (Global Postgres 15, Garage S3, Gateway)。
+*   `base/`: 核心基座 (Global Postgres 15, RustFS S3, Gateway)。
 *   `templates/`: 细胞模板 (轻量级项目单元)。
 *   `instances/`: 运行中的细胞 (你的项目)。
 *   `manager/`: 大脑 (Bun 编排器)。
