@@ -1033,24 +1033,78 @@ install_pigsty() {
     find app/supabase -name "docker-compose.yml" -o -name "docker-compose.yaml" | xargs -r sed -i 's/condition: service_healthy/condition: service_started/g'
     
     # 精简 Analytics 服务 (如果未启用)
-    if [[ "${ENABLE_ANALYTICS:-off}" != "on" ]]; then
-        log_info "正在精简/优化 Analytics 服务 (模式: ${ENABLE_ANALYTICS:-off})..."
+    # 默认为 off，但为了用户体验，我们建议生产环境使用 postgres
+    # 这里我们严格遵循 env 中的定义，如果没有定义则默认为 "postgres" (保持与 config.env 一致)
+    local analytics_mode="${ENABLE_ANALYTICS:-postgres}"
+    
+    if [[ "$analytics_mode" != "on" ]]; then
+        log_info "正在精简/优化 Analytics 服务 (模式: ${analytics_mode})..."
         find app/supabase -name "docker-compose.yml" -o -name "docker-compose.yaml" | while read -r f; do
-            # 始终移除 ClickHouse (analytics服务)
-            # 1. 移除 analytics 服务定义块
-            sed -i '/analytics:/,/^[a-zA-Z]/ { /analytics:/d; /^[a-zA-Z]/!d }' "$f"
-            # 2. 移除 depends_on 中的 analytics 引用 (包括可能的多种格式)
-            sed -i '/- analytics/d' "$f"
-            sed -i '/analytics: service/d' "$f"
+            # 使用 Python 脚本安全地移除服务 (比 sed/perl 更可靠)
+            # 创建临时 Python 脚本
+            cat << 'EOF' > /tmp/cleanup_compose.py
+import yaml
+import sys
+
+try:
+    with open(sys.argv[1], 'r') as f:
+        data = yaml.safe_load(f)
+
+    if 'services' in data:
+        # 要移除的服务列表
+        services_to_remove = ['analytics', 'logflare', 'vector']
+        
+        # 1. 移除服务定义
+        for svc in services_to_remove:
+            if svc in data['services']:
+                del data['services'][svc]
+        
+        # 2. 移除 depends_on 中的引用
+        for svc_name, svc_conf in data['services'].items():
+            if 'depends_on' in svc_conf:
+                deps = svc_conf['depends_on']
+                # 处理 depends_on 是列表的情况
+                if isinstance(deps, list):
+                    svc_conf['depends_on'] = [d for d in deps if d not in services_to_remove]
+                    if not svc_conf['depends_on']:
+                        del svc_conf['depends_on']
+                # 处理 depends_on 是字典的情况 (long syntax)
+                elif isinstance(deps, dict):
+                    for rm_svc in services_to_remove:
+                        if rm_svc in deps:
+                            del deps[rm_svc]
+                    if not deps:
+                        del svc_conf['depends_on']
+
+    # 回写文件
+    with open(sys.argv[1], 'w') as f:
+        yaml.dump(data, f, default_flow_style=False, sort_keys=False)
+except Exception as e:
+    print(f"Error cleanup yaml: {e}")
+    sys.exit(1)
+EOF
             
-            # 3. 检查是否有空的 depends_on，如果有则移除
-            # 使用 sed 读取下一行 (N)，如果下一行是属性名 (以字母开头)，说明 depends_on 是空的
-            sed -i '/depends_on:[[:space:]]*$/ {
-                N
-                /^[[:space:]]*[a-z]/ {
-                    s/.*depends_on:[[:space:]]*\n//
-                }
-            }' "$f"
+            # 执行 Python 清理脚本 (前提是系统有 python3 和 pyyaml，如果没有则回退到原来的 sed)
+            if command -v python3 &> /dev/null && python3 -c "import yaml" &> /dev/null; then
+                python3 /tmp/cleanup_compose.py "$f"
+            else
+                # 回退方案：如果环境依然没有 yaml 库，我们尝试只能用 sed 做最简单的处理
+                # 这里假设用户环境可能没有 pyyaml
+                log_warn "未检测到 python3-yaml，回退到 sed 清理模式 (可能存在语法风险)..."
+                
+                # 简单的 sed 清理 (仅移除行)
+                sed -i '/analytics:/,/^[a-zA-Z]/ { /analytics:/d; /^[a-zA-Z]/!d }' "$f"
+                sed -i '/- analytics/d' "$f"
+                sed -i '/analytics: service/d' "$f"
+                
+                # 移除空的 depends_on (sed 方案)
+                sed -i '/depends_on:[[:space:]]*$/ {
+                    N
+                    /^[[:space:]]*[a-z]/ {
+                        s/.*depends_on:[[:space:]]*\n//
+                    }
+                }' "$f"
+            fi
             
             if [[ "${ENABLE_ANALYTICS}" == "postgres" ]]; then
                 log_info "配置轻量级 Postgres 日志存储 (Studio 兼容性处理)..."
@@ -1095,21 +1149,26 @@ sinks:
       max_events: 50
 EOF
             else
-                # 完全移除 Logflare 和 Vector
-                sed -i '/logflare:/,/^[a-zA-Z]/ { /logflare:/d; /^[a-zA-Z]/!d }' "$f"
-                sed -i '/vector:/,/^[a-zA-Z]/ { /vector:/d; /^[a-zA-Z]/!d }' "$f"
-                
-                sed -i '/- logflare/d' "$f"
-                sed -i '/logflare: service/d' "$f"
+                # 如果是 python 脚本模式，上面已经处理了移除逻辑
+                # 如果是回退 sed 模式，这里补充移除 logflare
+                 if ! command -v python3 &> /dev/null || ! python3 -c "import yaml" &> /dev/null; then
+                    sed -i '/logflare:/,/^[a-zA-Z]/ { /logflare:/d; /^[a-zA-Z]/!d }' "$f"
+                    sed -i '/vector:/,/^[a-zA-Z]/ { /vector:/d; /^[a-zA-Z]/!d }' "$f"
+                    
+                    sed -i '/- logflare/d' "$f"
+                    sed -i '/logflare: service/d' "$f"
+                    
+                    # 二次清理空的 depends_on (针对 logflare 移除后的情况)
+                    sed -i '/depends_on:[[:space:]]*$/ {
+                        N
+                        /^[[:space:]]*[a-z]/ {
+                            s/.*depends_on:[[:space:]]*\n//
+                        }
+                    }' "$f"
+                 fi
             fi
             
-            # 二次清理空的 depends_on (针对 logflare 移除后的情况)
-            sed -i '/depends_on:[[:space:]]*$/ {
-                N
-                /^[[:space:]]*[a-z]/ {
-                    s/.*depends_on:[[:space:]]*\n//
-                }
-            }' "$f"
+            rm -f /tmp/cleanup_compose.py
         done
         log_info "Analytics 服务精简完成 (${ENABLE_ANALYTICS})"
     fi
@@ -1226,7 +1285,7 @@ update_pigsty_config() {
         sed -i "s|SERVICE_ROLE_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.*|SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY}|g" "$PIGSTY_YML"
     fi
     
-    if [[ "${S3_STORAGE_TYPE:-minio}" != "minio" ]]; then
+    if [[ "${S3_STORAGE_TYPE:-rustfs}" != "minio" ]]; then
         configure_s3_in_pigsty
     fi
     
@@ -1237,7 +1296,32 @@ update_pigsty_config() {
         # 生成一个随机 Key
         local lf_key=$(openssl rand -hex 16)
         # 追加到文件末尾 (或者替换如果存在但为空)
-        echo "LOGFLARE_API_KEY: ${lf_key}" >> "$PIGSTY_YML"
+        # 尝试插入到 pigsty.yml 的 global vars 区域
+        # 假设文件里有 'pg_version:' 这样的全局变量
+        if grep -q "pg_version:" "$PIGSTY_YML"; then
+             # 仅当文件中不存在该 key 时才插入，防止重复
+             if ! grep -q "LOGFLARE_API_KEY:" "$PIGSTY_YML"; then
+                 sed -i "s|pg_version:|LOGFLARE_API_KEY: ${lf_key}\n    pg_version:|g" "$PIGSTY_YML"
+             fi
+        else
+             # 如果找不到 pg_version，则追加到最后，但尝试添加 vars 头部(如果有必要)
+             # 对于 Pigsty v4，这通常是可以接受的，或者我们直接写到 infra.yml 参数
+             if ! grep -q "LOGFLARE_API_KEY:" "$PIGSTY_YML"; then
+                echo "LOGFLARE_API_KEY: ${lf_key}" >> "$PIGSTY_YML"
+             fi
+        fi
+        # 注意: 如果是在 vars 部分，应该缩进。Pigsty 的结构通常是 all: vars: ...
+        # 简单追加到文件末尾可能导致 Ansible 解析为 group 错误
+        # 更好的做法是找到 'all:' 下的 'vars:' 块并插入
+        # 这里为了稳妥，尝试用 ansible 能够识别的变量文件方式，或者插入到合适位置
+        # 临时修复：不直接追加到末尾，而是尝试替换一个已知变量行的下一行
+        # 或者追加到 infra.yml 使用的 extra-vars 文件中 (如果有)
+        
+        # 尝试插入到 pigsty.yml 的 global vars 区域
+        # 假设文件里有 'pg_version:' 这样的全局变量
+        if grep -q "pg_version:" "$PIGSTY_YML"; then
+             sed -i "s|pg_version:|LOGFLARE_API_KEY: ${lf_key}\n    pg_version:|g" "$PIGSTY_YML"
+        fi
         
         # 同时更新 Supabase .env (如果存在)
         if [[ -f ~/pigsty/app/supabase/.env ]]; then
