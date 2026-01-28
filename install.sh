@@ -1362,10 +1362,15 @@ configure_analytics() {
             
             # 确保 Postgres 连接信息正确 (通常复用 POSTGRES_URL)
             # Logflare 需要 DB 连接字符串
+            # 使用 Pigsty 的 DBUser.Supa 默认密码或生成的密码
+            # 注意: 如果 POSTGRES_PASSWORD 是默认值 'DBUser.Supa'，需要确保它被正确设置
+            LOGFLARE_DB_URL="postgresql://postgres:${POSTGRES_PASSWORD}@${INTERNAL_IP}:5432/postgres"
+            
             if ! grep -q "LOGFLARE_DATABASE_URL" "$SUPABASE_ENV"; then
-                 echo "LOGFLARE_DATABASE_URL=postgresql://postgres:${POSTGRES_PASSWORD}@${INTERNAL_IP}:5432/postgres" >> "$SUPABASE_ENV"
+                 echo "LOGFLARE_DATABASE_URL=${LOGFLARE_DB_URL}" >> "$SUPABASE_ENV"
             else
-                 sed -i "s|LOGFLARE_DATABASE_URL=.*|LOGFLARE_DATABASE_URL=postgresql://postgres:${POSTGRES_PASSWORD}@${INTERNAL_IP}:5432/postgres|g" "$SUPABASE_ENV"
+                 # 使用 | 作为分隔符，避免 url 中的 / 冲突
+                 sed -i "s|LOGFLARE_DATABASE_URL=.*|LOGFLARE_DATABASE_URL=${LOGFLARE_DB_URL}|g" "$SUPABASE_ENV"
             fi
             
         elif [[ "${ANALYTICS_BACKEND}" == "bigquery" ]]; then
