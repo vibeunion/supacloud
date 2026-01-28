@@ -1037,8 +1037,20 @@ install_pigsty() {
         log_info "正在精简/优化 Analytics 服务 (模式: ${ENABLE_ANALYTICS:-off})..."
         find app/supabase -name "docker-compose.yml" -o -name "docker-compose.yaml" | while read -r f; do
             # 始终移除 ClickHouse (analytics服务)
+            # 1. 移除 analytics 服务定义块
             sed -i '/analytics:/,/^[a-zA-Z]/ { /analytics:/d; /^[a-zA-Z]/!d }' "$f"
+            # 2. 移除 depends_on 中的 analytics 引用 (包括可能的多种格式)
             sed -i '/- analytics/d' "$f"
+            sed -i '/analytics: service/d' "$f"
+            
+            # 3. 检查是否有空的 depends_on，如果有则移除
+            # 使用 sed 读取下一行 (N)，如果下一行是属性名 (以字母开头)，说明 depends_on 是空的
+            sed -i '/depends_on:[[:space:]]*$/ {
+                N
+                /^[[:space:]]*[a-z]/ {
+                    s/.*depends_on:[[:space:]]*\n//
+                }
+            }' "$f"
             
             if [[ "${ENABLE_ANALYTICS}" == "postgres" ]]; then
                 log_info "配置轻量级 Postgres 日志存储 (Studio 兼容性处理)..."
@@ -1086,8 +1098,18 @@ EOF
                 # 完全移除 Logflare 和 Vector
                 sed -i '/logflare:/,/^[a-zA-Z]/ { /logflare:/d; /^[a-zA-Z]/!d }' "$f"
                 sed -i '/vector:/,/^[a-zA-Z]/ { /vector:/d; /^[a-zA-Z]/!d }' "$f"
+                
                 sed -i '/- logflare/d' "$f"
+                sed -i '/logflare: service/d' "$f"
             fi
+            
+            # 二次清理空的 depends_on (针对 logflare 移除后的情况)
+            sed -i '/depends_on:[[:space:]]*$/ {
+                N
+                /^[[:space:]]*[a-z]/ {
+                    s/.*depends_on:[[:space:]]*\n//
+                }
+            }' "$f"
         done
         log_info "Analytics 服务精简完成 (${ENABLE_ANALYTICS})"
     fi
