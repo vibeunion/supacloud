@@ -124,16 +124,6 @@ check_config() {
         log_info "检测到默认数据库密码，正在生成随机强密码..."
         POSTGRES_PASSWORD=$(openssl rand -base64 24 | tr -dc 'a-zA-Z0-9' | head -c 16)
         log_info "已生成数据库密码"
-        
-        # 保存数据库密码到文件，防止丢失
-        mkdir -p /etc/supabase
-        cat > /etc/supabase/db-credentials.env << EOF
-# Supabase Database Credentials - 自动生成于 $(date)
-POSTGRES_USER=postgres
-POSTGRES_PASSWORD="${POSTGRES_PASSWORD}"
-EOF
-        chmod 600 /etc/supabase/db-credentials.env
-        log_info "数据库密码已保存到: /etc/supabase/db-credentials.env"
     fi
 
     if [[ -z "$DASHBOARD_PASSWORD" || "$DASHBOARD_PASSWORD" == "supacloud" ]]; then
@@ -743,6 +733,10 @@ EOF
     # 创建访问密钥
     log_info "创建 Garage 访问密钥..."
     GARAGE_KEY_OUTPUT=$(garage -c /etc/garage/garage.toml key create supabase-key 2>/dev/null || true)
+    
+    # 提取 Access Key 和 Secret Key 到变量 (用于统一凭据保存)
+    S3_ACCESS_KEY=$(garage -c /etc/garage/garage.toml key info supabase-key 2>/dev/null | grep "Key ID" | awk '{print $3}')
+    S3_SECRET_KEY=$(garage -c /etc/garage/garage.toml key info supabase-key 2>/dev/null | grep "Secret key" | awk '{print $3}')
     
     # 创建 bucket
     garage -c /etc/garage/garage.toml bucket create supabase-storage || true
@@ -1490,6 +1484,56 @@ configure_pg_hba() {
     fi
 }
 
+# ========== 保存所有凭据 ==========
+save_all_credentials() {
+    log_step "保存统一凭据文件..."
+    
+    CREDENTIALS_FILE="/etc/supabase/supacloud-credentials.env"
+    mkdir -p /etc/supabase
+    
+    cat > "$CREDENTIALS_FILE" << EOF
+# SupaCloud Unified Credentials
+# Generated at $(date)
+
+# ========== Network ==========
+INTERNAL_IP=${INTERNAL_IP}
+PUBLIC_DOMAIN=${SUPABASE_PUBLIC_DOMAIN}
+STUDIO_DOMAIN=${SUPABASE_STUDIO_DOMAIN}
+
+# ========== Supabase Dashboard ==========
+DASHBOARD_USERNAME=${DASHBOARD_USERNAME:-supabase}
+DASHBOARD_PASSWORD=${DASHBOARD_PASSWORD:-pigsty}
+
+# ========== Database ==========
+POSTGRES_HOST=${INTERNAL_IP}
+POSTGRES_PORT=5432
+POSTGRES_DB=postgres
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+
+# ========== Grafana ==========
+GRAFANA_URL=http://${INTERNAL_IP}:3000
+GRAFANA_USER=admin
+GRAFANA_PASSWORD=${GRAFANA_PASSWORD:-pigsty}
+
+# ========== JWT Keys ==========
+JWT_SECRET=${JWT_SECRET}
+ANON_KEY=${ANON_KEY}
+SERVICE_ROLE_KEY=${SERVICE_ROLE_KEY}
+
+# ========== S3 Storage ==========
+S3_STORAGE_TYPE=${S3_STORAGE_TYPE}
+S3_ENDPOINT=${S3_ENDPOINT}
+S3_REGION=${S3_REGION}
+S3_ACCESS_KEY=${S3_ACCESS_KEY}
+S3_SECRET_KEY=${S3_SECRET_KEY}
+
+EOF
+
+    chmod 600 "$CREDENTIALS_FILE"
+    log_info "所有凭据已保存至: $CREDENTIALS_FILE"
+}
+
 # ========== 显示完成信息 ==========
 show_completion() {
     log_step "安装完成！"
@@ -1501,16 +1545,16 @@ show_completion() {
     echo ""
     echo "访问地址:"
     echo "  Supabase Studio: http://${INTERNAL_IP}:8000"
-    echo "  Supabase Studio: https://${SUPABASE_DOMAIN} (需配置 DNS 和 HTTPS)"
+    echo "  Supabase Studio: https://${SUPABASE_STUDIO_DOMAIN} (需配置 DNS 和 HTTPS)"
     echo "  Grafana 监控:    http://${INTERNAL_IP}:3000"
     echo ""
-    echo "登录凭据:"
-    echo "  Supabase: ${DASHBOARD_USERNAME:-supabase} / ${DASHBOARD_PASSWORD:-pigsty}"
-    echo "  Grafana:  admin / ${GRAFANA_PASSWORD:-pigsty}"
-    echo "  Database: postgres / ${POSTGRES_PASSWORD} (已保存至 /etc/supabase/db-credentials.env)"
+    echo "所有登录凭据已统一保存至:"
+    echo -e "${YELLOW}  /etc/supabase/supacloud-credentials.env${NC}"
+    echo ""
+    echo "请妥善保管此文件！"
     echo ""
     echo "下一步操作:"
-    echo "  1. 将域名 ${SUPABASE_DOMAIN} 的 DNS A 记录指向服务器公网 IP"
+    echo "  1. 将域名 ${SUPABASE_PUBLIC_DOMAIN} 的 DNS A 记录指向服务器公网 IP"
     echo "  2. 运行 'cd ~/pigsty && make cert' 申请 HTTPS 证书"
     echo ""
     echo "常用命令:"
@@ -1546,6 +1590,9 @@ main() {
     
     # 在所有安装完成后，应用最终的网关路由和 SSL 配置
     apply_nginx_acme_config
+    
+    # 保存所有凭据
+    save_all_credentials
     
     show_completion
 }
