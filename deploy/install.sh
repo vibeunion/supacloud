@@ -1333,10 +1333,13 @@ manual_start_supabase() {
     sed -i "s|POSTGRES_HOST=10.10.10.10|POSTGRES_HOST=${INTERNAL_IP}|g" .env
     
     # 启动服务
-    if command -v docker-compose &> /dev/null; then
+    if docker compose version &> /dev/null; then
+        docker compose up -d
+    elif command -v docker-compose &> /dev/null; then
         docker-compose up -d
     else
-        /usr/local/bin/docker-compose up -d
+        log_error "未找到 docker compose 或 docker-compose 命令，无法启动 Supabase"
+        return 1
     fi
 }
 
