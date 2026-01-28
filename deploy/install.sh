@@ -922,8 +922,24 @@ EOF
             echo -e "Package: *\nPin: origin nginx.org\nPin-Priority: 900\n" \
                 | tee /etc/apt/preferences.d/99nginx
 
-            apt-get update
-            apt-get install -y nginx nginx-module-acme
+            # 增加重试逻辑，防止 nginx.org 连接失败
+            local retry_count=0
+            local max_retries=3
+            while [ $retry_count -lt $max_retries ]; do
+                if apt-get update && apt-get install -y nginx nginx-module-acme; then
+                    log_info "Nginx 安装成功"
+                    break
+                else
+                    retry_count=$((retry_count + 1))
+                    log_warn "Nginx 仓库更新失败，正在进行第 $retry_count 次重试..."
+                    sleep 5
+                fi
+                if [ $retry_count -eq $max_retries ]; then
+                    log_error "Nginx 仓库 $(lsb_release -cs) 无法连接，请检查网络或 nginx.org 状态"
+                    log_warn "尝试跳过仓库更新，使用系统默认仓库继续（可能缺少 ACME 模块）..."
+                    apt-get install -y nginx || true
+                fi
+            done
             ;;
         
         *)
@@ -1132,18 +1148,27 @@ install_pigsty() {
     
     # 安装 Pigsty
     log_info "安装 Pigsty (这可能需要 10-20 分钟)..."
-    ./install.yml
+    if [[ -f "install.yml" ]]; then
+        ansible-playbook install.yml
+    else
+        log_error "找不到 install.yml，路径: $(pwd)"
+        exit 1
+    fi
     
     # 安装 Docker
     log_info "配置 Docker..."
-    ./docker.yml || true
+    if [[ -f "docker.yml" ]]; then
+        ansible-playbook docker.yml || true
+    fi
     
     # 启动 Supabase
     log_info "启动 Supabase..."
-    ./app.yml || {
-        log_warn "app.yml 失败，尝试手动启动..."
-        manual_start_supabase
-    }
+    if [[ -f "app.yml" ]]; then
+        ansible-playbook app.yml || {
+            log_warn "app.yml 失败，尝试手动启动..."
+            manual_start_supabase
+        }
+    fi
 }
 
 # ========== 更新 Pigsty 配置 ==========
@@ -1422,25 +1447,12 @@ install_manager() {
     cp "$BIN_SOURCE" "$INSTALL_DIR/bin/supacloud"
     chmod +x "$INSTALL_DIR/bin/supacloud"
 
-    # 复制 templates 和 base (Manager 需要它们来创建新项目)
-    # 注意：base 目录包含了很多 pigsty 的东西，我们只需要 docker-compose.yml 和必要的 config
-    # 但为了简单起见，复制整个 template 和 base 结构比较稳妥，或者只复制需要的
-    
-    # 确保 templates 存在
+    # 复制 templates (包含 project 和 base 模板)
     if [[ -d "$REPO_ROOT/templates" ]]; then
         rm -rf "$INSTALL_DIR/templates"
         cp -r "$REPO_ROOT/templates" "$INSTALL_DIR/"
     else
         log_error "找不到 templates 目录！"
-        return 1
-    fi
-
-    # 复制 base (Manager 可能会读取 base/docker-compose.yml 或 volumes/garage 配置)
-    if [[ -d "$REPO_ROOT/base" ]]; then
-        rm -rf "$INSTALL_DIR/base"
-        cp -r "$REPO_ROOT/base" "$INSTALL_DIR/"
-    else
-        log_error "找不到 base 目录！"
         return 1
     fi
 
