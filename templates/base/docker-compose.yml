@@ -57,48 +57,6 @@ services:
     networks:
       - supabase-network
 
-  garage:
-    image: dxflrs/garage:v0.9.4
-    container_name: garage
-    restart: unless-stopped
-    ports:
-      - "3900:3900"
-      - "3901:3901"
-      - "3902:3902"
-      - "3903:3903" # Admin API
-    volumes:
-      - ./volumes/garage/meta:/var/lib/garage/meta
-      - ./volumes/garage/data:/var/lib/garage/data
-      - ./volumes/garage/config:/etc/garage
-    environment:
-      - RUST_LOG=info
-    networks:
-      - supabase-network
-
-  garage-web:
-    image: khairul169/garage-webui:latest
-    container_name: garage-web
-    restart: unless-stopped
-    ports:
-      - "3909:3000"
-    environment:
-      API_BASE_URL: http://garage:3903
-      API_ADMIN_KEY: replace_me_admin_token
-    networks:
-      - supabase-network
-
-  garage-init:
-    image: alpine:latest
-    container_name: garage-init
-    depends_on:
-      - garage
-    volumes:
-      - ./volumes/garage/config:/etc/garage
-      - ./volumes/garage/init-garage.sh:/init-garage.sh
-    entrypoint: [ "/bin/sh", "/init-garage.sh" ]
-    networks:
-      - supabase-network
-
   dozzle:
     container_name: dozzle
     image: amir20/dozzle:latest
@@ -113,16 +71,13 @@ services:
     container_name: backup-service
     depends_on:
       - db
-      - garage
     restart: unless-stopped
     environment:
       POSTGRES_HOST: supabase-db
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      AWS_ACCESS_KEY_ID: ${GARAGE_ACCESS_KEY}
-      AWS_SECRET_ACCESS_KEY: ${GARAGE_SECRET_KEY}
       AWS_DEFAULT_REGION: us-east-1
-      S3_ENDPOINT: http://garage:3900
+      S3_ENDPOINT: http://host.docker.internal:9000
       BACKUP_BUCKET: sys-backups
     volumes:
       - ./utils/backup.sh:/backup.sh
@@ -133,9 +88,6 @@ services:
         apk add --no-cache aws-cli
         chmod +x /backup.sh
         chmod +x /restore.sh
-
-        echo "Waiting for Garage..."
-        sleep 10
 
         # Create bucket if not exists
         aws --endpoint-url $$S3_ENDPOINT s3 mb s3://$$BACKUP_BUCKET || true
