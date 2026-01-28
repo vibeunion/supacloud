@@ -4,16 +4,41 @@ import { deps, exists } from "./deps";
 import { BASE_DIR, INSTANCES_DIR, TEMPLATE_DIR, COMPOSE_CMD } from "./config";
 
 // Database operations
-export async function createDatabase(dbName: string) {
-    console.log(`Creating database: ${dbName}`);
+export async function createDatabase(dbName: string, dbUser: string, dbPass: string) {
+    console.log(`Creating database: ${dbName} with user: ${dbUser}`);
     try {
+        // 1. Check if DB exists
         const check = await deps.$`docker exec supabase-db psql -U postgres -tAc "SELECT 1 FROM pg_database WHERE datname='${dbName}'"`.text();
         if (check.trim() === "1") {
             console.log(`Database ${dbName} already exists.`);
             return;
         }
-        await deps.$`docker exec supabase-db psql -U postgres -c "CREATE DATABASE ${dbName};"`;
+
+        // 2. Create User
+        // Check if user exists first to avoid error
+        const userCheck = await deps.$`docker exec supabase-db psql -U postgres -tAc "SELECT 1 FROM pg_roles WHERE rolname='${dbUser}'"`.text();
+        if (userCheck.trim() !== "1") {
+             await deps.$`docker exec supabase-db psql -U postgres -c "CREATE USER ${dbUser} WITH PASSWORD '${dbPass}';"`;
+             // Apply Resource Limits (Prevent noisy neighbors)
+             await deps.$`docker exec supabase-db psql -U postgres -c "ALTER USER ${dbUser} SET statement_timeout = '60s';"`; 
+             await deps.$`docker exec supabase-db psql -U postgres -c "ALTER USER ${dbUser} SET connection_limit = 100;"`; 
+             console.log(`User ${dbUser} created with resource limits.`);
+        }
+
+        // 3. Create Database
+        await deps.$`docker exec supabase-db psql -U postgres -c "CREATE DATABASE ${dbName} WITH OWNER ${dbUser};"`;
         console.log(`Database ${dbName} created.`);
+
+        // 4. Grant Privileges
+        // Grant usage on extensions schema (usually 'extensions' or 'public') to the new user if needed, 
+        // but owning the DB is usually enough for the public schema. 
+        // We also need to ensure this user can be used by Supabase services (effectively acting as admin for this DB)
+        
+        // Grant standard Supabase roles to this user so it can use extensions/features
+        await deps.$`docker exec supabase-db psql -U postgres -c "GRANT anon, authenticated, service_role TO ${dbUser};"`;
+        // Also grant admin roles from logical replication or storage if needed (optional, but safer to have)
+        await deps.$`docker exec supabase-db psql -U postgres -c "GRANT supabase_admin TO ${dbUser};"`;
+
     } catch (e) {
         console.error("Failed to create DB:", e);
         throw e;
@@ -55,7 +80,10 @@ export async function createProject(name: string) {
     const extPort = 9000 + offset;
     const extPortConfig = `\n# Custom Protocol Port (MQTT/TCP/UDP)\nEXT_PORT=${extPort}\n`;
 
-    await createDatabase(dbName);
+    const dbUser = `owner_${name.replace(/-/g, '_')}`;
+    const dbPass = crypto.randomUUID().replace(/-/g, '') + crypto.randomUUID().replace(/-/g, ''); // Long random password
+
+    await createDatabase(dbName, dbUser, dbPass);
     await deps.$`cp -r ${TEMPLATE_DIR} ${projectDir}`;
 
     let garageAccessKey = "";
@@ -104,9 +132,10 @@ export async function createProject(name: string) {
 
     const envContent = `
 POSTGRES_DB=${dbName}
-POSTGRES_PASSWORD=your-super-secret-and-long-postgres-password
+POSTGRES_PASSWORD=${dbPass}
 POSTGRES_HOST=supabase-db
 POSTGRES_PORT=5432
+POSTGRES_USER=${dbUser}
 KONG_HTTP_PORT=${kongPort}
 STUDIO_PORT=${studioPort}
 ${extPortConfig}
