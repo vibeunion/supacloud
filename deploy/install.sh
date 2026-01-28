@@ -1128,6 +1128,12 @@ install_pigsty() {
         curl -fsSL https://repo.pigsty.cc/get | bash
     else
         log_info "Pigsty 目录已存在"
+        # 简单校验 v4
+        if [[ ! -f "$HOME/pigsty/infra.yml" ]]; then
+             log_warn "Pigsty 目录存在但缺少 infra.yml，尝试重新下载..."
+             rm -rf "$HOME/pigsty"
+             curl -fsSL https://repo.pigsty.cc/get | bash
+        fi
     fi
     
     cd ~/pigsty
@@ -1148,10 +1154,13 @@ install_pigsty() {
     
     # 安装 Pigsty
     log_info "安装 Pigsty (这可能需要 10-20 分钟)..."
-    if [[ -f "install.yml" ]]; then
-        ansible-playbook install.yml
+    # 安装 Pigsty v4 基础设置
+    log_info "安装 Pigsty Infra (v4)..."
+    if [[ -f "infra.yml" ]]; then
+        ansible-playbook infra.yml
     else
-        log_error "找不到 install.yml，路径: $(pwd)"
+        log_error "找不到 infra.yml (Pigsty v4 核心 Playbook)，路径: $(pwd)"
+        ls -la
         exit 1
     fi
     
