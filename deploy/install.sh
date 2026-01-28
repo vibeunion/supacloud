@@ -608,12 +608,9 @@ EOF
 install_s3_storage() {
     log_step "配置 S3 存储 (${S3_STORAGE_TYPE:-minio})..."
     
-    case "${S3_STORAGE_TYPE:-minio}" in
+    case "${S3_STORAGE_TYPE:-rustfs}" in
         minio)
             log_info "使用 Pigsty 内置 MinIO，无需额外安装"
-            ;;
-        garage)
-            install_garage
             ;;
         rustfs)
             install_rustfs
@@ -630,129 +627,7 @@ install_s3_storage() {
 }
 
 # ========== 安装 Garage ==========
-install_garage() {
-    log_step "安装 Garage S3..."
-    
-    GARAGE_VERSION="v1.0.1"
-    GARAGE_ARCH=$(uname -m)
-    
-    # 架构映射
-    case "$GARAGE_ARCH" in
-        x86_64) GARAGE_ARCH="x86_64" ;;
-        aarch64) GARAGE_ARCH="aarch64" ;;
-        *) log_error "不支持的架构: $GARAGE_ARCH"; exit 1 ;;
-    esac
-    
-    # 优先使用配置中的自定义下载地址
-    if [[ -n "$GARAGE_DOWNLOAD_URL" ]]; then
-        GARAGE_URL="$GARAGE_DOWNLOAD_URL"
-    else
-        GARAGE_URL="https://garagehq.deuxfleurs.fr/_releases/${GARAGE_VERSION}/${GARAGE_ARCH}-unknown-linux-musl/garage"
-    fi
-    
-    # 下载 Garage
-    if [[ ! -f /usr/local/bin/garage ]]; then
-        log_info "下载 Garage ${GARAGE_VERSION}..."
-        log_info "下载地址: $GARAGE_URL"
-        
-        if curl -L --progress-bar "$GARAGE_URL" -o /usr/local/bin/garage; then
-            chmod +x /usr/local/bin/garage
-            log_info "Garage 下载成功"
-        else
-            log_error "Garage 下载失败"
-            rm -f /usr/local/bin/garage
-            exit 1
-        fi
-    fi
-    
-    # 创建配置目录
-    mkdir -p /etc/garage /var/lib/garage
-    
-    # 生成配置文件
-    GARAGE_SECRET=$(openssl rand -hex 32)
-    GARAGE_RPC_SECRET=$(openssl rand -hex 32)
-    
-    cat > /etc/garage/garage.toml << EOF
-metadata_dir = "/var/lib/garage/meta"
-data_dir = "/var/lib/garage/data"
-db_engine = "lmdb"
-
-replication_factor = 1
-
-rpc_bind_addr = "[::]:3901"
-rpc_public_addr = "${INTERNAL_IP}:3901"
-rpc_secret = "${GARAGE_RPC_SECRET}"
-
-[s3_api]
-s3_region = "garage"
-api_bind_addr = "[::]:9000"
-root_domain = ".s3.garage.localhost"
-
-[s3_web]
-bind_addr = "[::]:3902"
-root_domain = ".web.garage.localhost"
-
-[admin]
-api_bind_addr = "[::]:3903"
-admin_token = "${GARAGE_SECRET}"
-EOF
-    
-    # 创建 systemd 服务
-    cat > /etc/systemd/system/garage.service << EOF
-[Unit]
-Description=Garage S3-compatible object storage
-After=network.target
-
-[Service]
-Type=simple
-ExecStart=/usr/local/bin/garage -c /etc/garage/garage.toml server
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-EOF
-    
-    # 启动服务
-    systemctl daemon-reload
-    systemctl enable --now garage
-    
-    # 等待启动
-    # 等待启动
-    log_info "等待 Garage 启动 (5s)..."
-    sleep 5
-    
-    # 初始化集群
-    log_info "初始化 Garage 集群..."
-    GARAGE_NODE_ID=$(garage -c /etc/garage/garage.toml node id -q 2>/dev/null | head -1)
-    if [[ -n "$GARAGE_NODE_ID" ]]; then
-        garage -c /etc/garage/garage.toml layout assign -z dc1 -c 1G "$GARAGE_NODE_ID" || true
-        garage -c /etc/garage/garage.toml layout apply --version 1 || true
-    fi
-    
-    # 创建访问密钥
-    log_info "创建 Garage 访问密钥..."
-    GARAGE_KEY_OUTPUT=$(garage -c /etc/garage/garage.toml key create supabase-key 2>/dev/null || true)
-    
-    # 创建 bucket
-    garage -c /etc/garage/garage.toml bucket create supabase-storage || true
-    garage -c /etc/garage/garage.toml bucket create pgsql || true
-    garage -c /etc/garage/garage.toml bucket allow --read --write supabase-storage --key supabase-key || true
-    garage -c /etc/garage/garage.toml bucket allow --read --write pgsql --key supabase-key || true
-    
-    # 保存密钥信息
-    echo "# Garage S3 配置" > /etc/garage/s3-credentials.env
-    echo "S3_ENDPOINT=http://${INTERNAL_IP}:9000" >> /etc/garage/s3-credentials.env
-    garage -c /etc/garage/garage.toml key info supabase-key 2>/dev/null | grep -E "Key ID|Secret key" >> /etc/garage/s3-credentials.env || true
-    
-    # 设置环境变量供后续使用
-    S3_ENDPOINT="http://${INTERNAL_IP}:9000"
-    S3_REGION="garage"
-    
-    log_info "Garage 安装完成"
-    log_info "  端点: http://${INTERNAL_IP}:9000"
-    log_info "  密钥信息: /etc/garage/s3-credentials.env"
-}
+# ========== 安装 Garage (已移除) ==========
 
 # ========== 安装 RustFS ==========
 install_rustfs() {
@@ -1299,16 +1174,6 @@ configure_s3_in_pigsty() {
     
     # 根据存储类型获取凭据
     case "$S3_STORAGE_TYPE" in
-        garage)
-            if [[ -f /etc/garage/s3-credentials.env ]]; then
-                source /etc/garage/s3-credentials.env 2>/dev/null || true
-                # 从 Garage 获取密钥
-                S3_ACCESS_KEY=$(garage -c /etc/garage/garage.toml key info supabase-key 2>/dev/null | grep "Key ID" | awk '{print $3}' || echo "")
-                S3_SECRET_KEY=$(garage -c /etc/garage/garage.toml key info supabase-key 2>/dev/null | grep "Secret key" | awk '{print $3}' || echo "")
-            fi
-            S3_ENDPOINT="http://${INTERNAL_IP}:9000"
-            S3_REGION="garage"
-            ;;
         rustfs)
             if [[ -f /etc/rustfs-credentials.env ]]; then
                 source /etc/rustfs-credentials.env
@@ -1368,6 +1233,18 @@ manual_start_supabase() {
     
     # 修复 .env 中的 IP
     sed -i "s|POSTGRES_HOST=10.10.10.10|POSTGRES_HOST=${INTERNAL_IP}|g" .env
+    
+    # 确保 LOGFLARE_API_KEY 存在 (再次检查)
+    if ! grep -q "LOGFLARE_API_KEY" .env; then
+         echo "LOGFLARE_API_KEY=$(openssl rand -hex 16)" >> .env
+    fi
+    
+    # 放宽 Supabase 启动时的健康检查限制 (防止 Analytics/Logflare 阻塞所有服务)
+    # 将所有 condition: service_healthy 替换为 condition: service_started
+    if [[ -f docker-compose.yml ]]; then
+        log_info "放宽 docker-compose.yml 健康检查限制..."
+        sed -i 's/condition: service_healthy/condition: service_started/g' docker-compose.yml
+    fi
     
     # 启动服务
     if docker compose version &> /dev/null; then
