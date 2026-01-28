@@ -1,0 +1,12 @@
+{
+  "name": "@supacloud/mcp",
+  "version": "0.1.0",
+  "description": "Model Context Protocol service for Supacloud",
+  "type": "module",
+  "main": "index.ts",
+  "scripts": {
+    "dev": "bun run --watch index.ts",
+    "start": "bun run index.ts"
+  },
+  "dependencies": {}
+}

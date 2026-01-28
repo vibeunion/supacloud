@@ -16,6 +16,7 @@ Unlike traditional deployments that waste GBs of RAM per project, SupaCloud enab
 *   **Web Dashboard**: Built-in beautiful, dark-themed management UI powered by **Hono** & **Alpine.js**. Access at `http://localhost:8888`.
 *   **Auto Upgrade**: Keep your SupaCloud up-to-date with a single command `supacloud upgrade`.
 *   **Extreme Efficiency**: Uses a **Shared Resource Architecture**. 10 projects consume only ~1 Postgres & ~1 RustFS instance.
+*   **Project Isolation**: Each project has its own database, JWT keys, and S3 bucket - fully isolated at the logical level.
 *   **Instant Provisioning**: One-click to spin up a full stack (Kong, GoTrue, Studio, API) in seconds.
 *   **Fully Automated**:
     *   **Auto DB**: Automatically creates isolated logical databases.
@@ -56,6 +57,8 @@ supacloud create shop
 *   **Studio**: `http://shop.studio.localhost`
 *   **API**: `http://shop.localhost`
 
+> **Project Naming Rules**: 3-32 characters, must start with a lowercase letter, can contain lowercase letters, numbers, and hyphens, must end with a letter or number. Reserved names like `postgres`, `admin`, `supabase` are not allowed.
+
 #### 4. Commands
 *   `supacloud status` - Check platform status and logs.
 *   `supacloud runtime <name> <bun|deno>` - Switch project runtime (Bun/Deno).
@@ -63,25 +66,27 @@ supacloud create shop
 
 ### 📂 Architecture
 
-*   `base/`: The Core (Global Postgres 15, RustFS S3, Gateway).
-*   `templates/`: The Cell (Lightweight Project Template).
-*   `instances/`: Running Cells (Your Projects).
-*   `manager/`: The Brain (Bun Orchestrator).
+*   `deploy/`: Infrastructure scripts (Pigsty, Gateway, S3 setup).
+*   `manager/`: The Brain (Bun Orchestrator & Web Dashboard).
+*   `packages/`: Shared Components (MCP, bun-auth, bun-functions).
+*   `templates/base/`: Core Infrastructure (Global Postgres, RustFS S3, Caddy Gateway).
+*   `instances/`: Running Projects (Tenant configs & functions).
 
 ---
 
 <a name="chinese"></a>
 ## 🇨🇳 中文
 
-**SupaCloud** 是为 Supabase 私有化部署打造的下一代超轻量级 PaaS 平台。它基于 **Bun.js**、**RustFS** 和 **Global Postgres** 重构了多租户架构。
+**SupaCloud** 是为 Supabase 私有化部署打造的下一代超轻量级 PaaS 平台。它基于 **Bun.js**、**RustFS** 和 **Global Postgres** 重构了多项目架构。
 
-打破传统部署“一个项目一套重型架构”的资源浪费，SupaCloud 让你可以**在一台 5美元的 VPS 上流畅运行数十个隔离的 Supabase 项目**。
+打破传统部署"一个项目一套重型架构"的资源浪费，SupaCloud 让你可以**在一台 5美元的 VPS 上流畅运行数十个隔离的 Supabase 项目**。
 
 ### 🌟 核心特性
 
 *   **Web 控制台**：内置精美的暗黑风格管理界面，基于 **Hono** & **Alpine.js** 构建。访问地址：`http://localhost:8888`。
 *   **自动升级**：通过指令 `supacloud upgrade` 一键在线升级到最新版本。
 *   **极致轻量**：采用**资源共享架构**。10 个项目仅占用 1 个 Postgres 和 1 个 RustFS 实例。
+*   **项目隔离**：每个项目拥有独立的数据库、JWT 密钥和 S3 存储桶，逻辑层面完全隔离。
 *   **秒级交付**：一键拉起全套服务 (Kong, GoTrue, Studio, API)，无需等待。
 *   **全自动化**：
     *   **自动建库**：自动创建逻辑隔离的数据库。
@@ -128,6 +133,8 @@ supacloud create shop
 *   **Studio**: `http://shop.studio.localhost`
 *   **API**: `http://shop.localhost`
 
+> **项目命名规则**：3-32 个字符，必须以小写字母开头，可包含小写字母、数字和连字符，必须以字母或数字结尾。不能使用 `postgres`、`admin`、`supabase` 等保留名称。
+
 #### 4. 常用命令
 *   `supacloud status` - 查看平台状态和访问入口
 *   `supacloud runtime <name> <bun|deno>` - 切换项目运行时 (Bun/Deno)
@@ -144,7 +151,8 @@ bun run build
 
 ### 📂 架构设计
 
-*   `base/`: 核心基座 (Global Postgres 15, RustFS S3, Gateway)。
-*   `templates/`: 细胞模板 (轻量级项目单元)。
-*   `instances/`: 运行中的细胞 (你的项目)。
-*   `manager/`: 大脑 (Bun 编排器)。
+*   `deploy/`: 基础设施脚本 (Pigsty、Gateway、S3 初始化)。
+*   `manager/`: 大脑 (Bun 编排器 & Web 控制台)。
+*   `packages/`: 共享组件库 (MCP、bun-auth、bun-functions)。
+*   `templates/base/`: 核心基座 (Global Postgres、RustFS S3、Caddy 网关)。
+*   `instances/`: 运行中的项目 (租户配置 & 函数)。
