@@ -1137,12 +1137,23 @@ install_pigsty() {
     # 安装 Pigsty
     log_info "安装 Pigsty (这可能需要 10-20 分钟)..."
     if [[ -f "./install.yml" ]]; then
-        ./install.yml
+        # 尝试检测 ansible-playbook
+        if command -v ansible-playbook &> /dev/null; then
+            ansible-playbook install.yml
+        else
+            log_warn "未找到 ansible-playbook，尝试直接运行 ./install.yml"
+            ./install.yml
+        fi
     elif [[ -f "install.yml" ]]; then
         ansible-playbook install.yml
     else
         log_warn "未找到 install.yml，尝试使用 make install"
-        make install
+        if make -n install &> /dev/null; then
+             make install
+        else
+             log_error "未找到有效的安装入口 (install.yml 或 make install)"
+             exit 1
+        fi
     fi
     
     # 安装 Docker
