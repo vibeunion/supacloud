@@ -1387,6 +1387,194 @@ EOF
     fi
 }
 
+# ========== 部署 Supacloud Manager ==========
+install_manager() {
+    log_step "安装 Supacloud Manager..."
+
+    # 1. 确定安装源和目标
+    REPO_ROOT="$(dirname "$SCRIPT_DIR")"
+    INSTALL_DIR="/opt/supacloud"
+    BIN_SOURCE="$REPO_ROOT/bin/supacloud-linux-x64"
+
+    # 检查二进制文件是否存在
+    if [[ ! -f "$BIN_SOURCE" ]]; then
+        log_warn "未找到 Manager二进制文件: $BIN_SOURCE"
+        log_warn "尝试自动构建 (需要 Bun)..."
+        
+        if command -v bun &> /dev/null; then
+             cd "$REPO_ROOT/manager"
+             bun install
+             bun run build
+             cd -
+        else
+            log_error "未找到 Bun，且没有预编译的二进制文件。跳过 Manager 安装。"
+            return 1
+        fi
+    fi
+
+    # 2. 准备目录
+    mkdir -p "$INSTALL_DIR/bin"
+    mkdir -p "$INSTALL_DIR/instances"
+    mkdir -p "$INSTALL_DIR/run" # PID file etc
+
+    # 3. 复制文件
+    log_info "复制文件到 $INSTALL_DIR..."
+    cp "$BIN_SOURCE" "$INSTALL_DIR/bin/supacloud"
+    chmod +x "$INSTALL_DIR/bin/supacloud"
+
+    # 复制 templates 和 base (Manager 需要它们来创建新项目)
+    # 注意：base 目录包含了很多 pigsty 的东西，我们只需要 docker-compose.yml 和必要的 config
+    # 但为了简单起见，复制整个 template 和 base 结构比较稳妥，或者只复制需要的
+    
+    # 确保 templates 存在
+    if [[ -d "$REPO_ROOT/templates" ]]; then
+        rm -rf "$INSTALL_DIR/templates"
+        cp -r "$REPO_ROOT/templates" "$INSTALL_DIR/"
+    else
+        log_error "找不到 templates 目录！"
+        return 1
+    fi
+
+    # 复制 base (Manager 可能会读取 base/docker-compose.yml 或 volumes/garage 配置)
+    if [[ -d "$REPO_ROOT/base" ]]; then
+        rm -rf "$INSTALL_DIR/base"
+        cp -r "$REPO_ROOT/base" "$INSTALL_DIR/"
+    else
+        log_error "找不到 base 目录！"
+        return 1
+    fi
+
+    # 4. 创建 Systemd 服务
+    cat > /etc/systemd/system/supacloud-manager.service << EOF
+[Unit]
+Description=Supacloud Multi-tenant Manager
+After=network.target docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=$INSTALL_DIR
+Environment="SUPACLOUD_HOME=$INSTALL_DIR"
+Environment="NODE_ENV=production"
+Environment="PORT=8888"
+# 如果使用 bun 运行源码:
+# ExecStart=/usr/local/bin/bun run $INSTALL_DIR/manager/index.tsx
+# 使用编译后的二进制:
+ExecStart=$INSTALL_DIR/bin/supacloud start
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    # 5. 启动服务
+    systemctl daemon-reload
+    systemctl enable --now supacloud-manager
+    
+    # 等待启动并检查
+    sleep 3
+    if systemctl is-active --quiet supacloud-manager; then
+        log_info "Supacloud Manager 已启动 (端口 8888)"
+    else
+        log_error "Supacloud Manager 启动失败，请检查: systemctl status supacloud-manager"
+    fi
+}
+
+# ========== 配置 WAL 日志监控与自动清理 ==========
+setup_wal_monitor() {
+    log_step "配置 WAL 日志监控与预防机制..."
+    
+    # 1. 创建自动清理脚本
+    cat > /usr/local/bin/clean_inactive_wal_slots.sh << 'EOF'
+#!/bin/bash
+# 自动清理 PostgreSQL 无效复制槽以防止 WAL 爆满
+# 由 install.sh 自动生成，支持 Pigsty 本地部署和 Docker 容器部署
+
+LOG_FILE="/var/log/wal_cleaner.log"
+
+# 定义执行 SQL 的函数
+run_sql() {
+    local sql="$1"
+    
+    # 1. 尝试 Pigsty / 本地 Postgres 用户方式
+    if id "postgres" &>/dev/null && pgrep -u postgres postgres &>/dev/null; then
+        su - postgres -c "psql -d postgres -t -c \"$sql\"" 2>>"$LOG_FILE"
+        return $?
+    fi
+    
+    # 2. 尝试 Docker 容器
+    if command -v docker &>/dev/null && docker ps | grep -q "supabase-db"; then
+        docker exec supabase-db psql -U postgres -d postgres -t -c "$sql" 2>>"$LOG_FILE"
+        return $?
+    fi
+    
+    # 3. 尝试 Podman 容器
+    if command -v podman &>/dev/null && podman ps | grep -q "supabase-db"; then
+        podman exec supabase-db psql -U postgres -d postgres -t -c "$sql" 2>>"$LOG_FILE"
+        return $?
+    fi
+    
+    echo "Error: No database connection method found." >> "$LOG_FILE"
+    return 1
+}
+
+# 获取无效且长期未活动的槽位 (active=f)
+SLOTS=$(run_sql "SELECT slot_name FROM pg_replication_slots WHERE active = 'f';")
+
+for slot in $SLOTS; do
+    # 去除空格和换行
+    slot=$(echo "$slot" | xargs)
+    if [[ -n "$slot" ]]; then
+        echo "$(date '+%Y-%m-%d %H:%M:%S') [WARN] 发现不活动复制槽: $slot，正在删除..." >> "$LOG_FILE"
+        
+        # 删除命令需要转义引号，稍微复杂一点，直接再次调用 run_sql
+        if run_sql "SELECT pg_drop_replication_slot('$slot');"; then
+             echo "$(date '+%Y-%m-%d %H:%M:%S') [INFO] 成功删除复制槽: $slot" >> "$LOG_FILE"
+             # 触发检查点以立即释放空间
+             run_sql "CHECKPOINT;"
+        else
+             echo "$(date '+%Y-%m-%d %H:%M:%S') [ERROR] 删除复制槽失败: $slot" >> "$LOG_FILE"
+        fi
+    fi
+done
+EOF
+
+    chmod +x /usr/local/bin/clean_inactive_wal_slots.sh
+    
+    # 2. 添加定时任务 (Cron) - 每小时执行一次
+    if command -v crontab &> /dev/null; then
+        if ! crontab -l 2>/dev/null | grep -q "clean_inactive_wal_slots.sh"; then
+            (crontab -l 2>/dev/null; echo "0 * * * * /usr/local/bin/clean_inactive_wal_slots.sh") | crontab -
+            log_info "已添加定时任务: 每小时清理无效复制槽"
+        else
+            log_info "定时任务已存在，通过检查"
+        fi
+    else
+        log_warn "未找到 crontab，无法配置自动清理任务，请手动安装 cronie"
+    fi
+    
+    # 3. 预防性配置: max_slot_wal_keep_size (PostgreSQL 13+)
+    log_info "配置 PostgreSQL max_slot_wal_keep_size 防护 (异步执行)..."
+    
+    (
+        sleep 60
+        # 尝试配置，支持本地和容器
+        CONFIG_SQL="ALTER SYSTEM SET max_slot_wal_keep_size = '10GB'; SELECT pg_reload_conf();"
+        
+        if id "postgres" &>/dev/null; then
+            su - postgres -c "psql -c \"$CONFIG_SQL\""
+        elif command -v docker &>/dev/null && docker ps | grep -q "supabase-db"; then
+            docker exec supabase-db psql -U postgres -c "$CONFIG_SQL"
+        elif command -v podman &>/dev/null && podman ps | grep -q "supabase-db"; then
+            podman exec supabase-db psql -U postgres -c "$CONFIG_SQL"
+        fi
+        
+        echo "Postgres WAL protection configured." >> /var/log/wal_cleaner.log
+    ) > /dev/null 2>&1 &
+}
+
 # ========== 配置 PG HBA 白名单 ==========
 configure_pg_hba() {
     log_step "配置数据库访问白名单 (pg_hba.conf)..."
@@ -1522,6 +1710,8 @@ main() {
     configure_edge_runtime
     install_pigsty
     deploy_mcp_function
+    install_manager
+    setup_wal_monitor
     configure_pg_hba
     
     # 在所有安装完成后，应用最终的网关路由和 SSL 配置

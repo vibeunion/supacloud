@@ -26,7 +26,8 @@ services:
     container_name: supabase-auth
     image: supabase/gotrue:v2.132.3
     depends_on:
-      - db-check
+      db-check:
+        condition: service_completed_successfully
     restart: unless-stopped
     deploy:
       resources:
@@ -40,7 +41,7 @@ services:
 
       # Connect to Global DB
       GOTRUE_DB_DRIVER: postgres
-      GOTRUE_DB_DATABASE_URL: postgres://supabase_auth_admin:${POSTGRES_PASSWORD}@supabase-db:5432/${POSTGRES_DB}
+      GOTRUE_DB_DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@supabase-db:5432/${POSTGRES_DB}
 
       GOTRUE_SITE_URL: ${SITE_URL}
       GOTRUE_URI_ALLOW_LIST: ${ADDITIONAL_REDIRECT_URLS}
@@ -76,7 +77,8 @@ services:
     container_name: supabase-rest
     image: postgrest/postgrest:v12.0.1
     depends_on:
-      - db-check
+      db-check:
+        condition: service_completed_successfully
     restart: unless-stopped
     deploy:
       resources:
@@ -84,7 +86,7 @@ services:
           cpus: '1.0'
           memory: 1G
     environment:
-      PGRST_DB_URI: postgres://authenticator:${POSTGRES_PASSWORD}@supabase-db:5432/${POSTGRES_DB}
+      PGRST_DB_URI: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@supabase-db:5432/${POSTGRES_DB}
       PGRST_DB_SCHEMAS: ${PGRST_DB_SCHEMAS}
       PGRST_DB_ANON_ROLE: anon
       PGRST_JWT_SECRET: ${JWT_SECRET}
@@ -101,7 +103,8 @@ services:
     container_name: supabase-realtime
     image: supabase/realtime:v2.25.22
     depends_on:
-      - db-check
+      db-check:
+        condition: service_completed_successfully
     restart: unless-stopped
     deploy:
       resources:
@@ -112,7 +115,7 @@ services:
       PORT: 4000
       DB_HOST: supabase-db
       DB_PORT: 5432
-      DB_USER: supabase_admin
+      DB_USER: ${POSTGRES_USER}
       DB_PASSWORD: ${POSTGRES_PASSWORD}
       DB_NAME: ${POSTGRES_DB}
       DB_AFTER_CONNECT_QUERY: 'SET search_path TO _realtime'
@@ -136,8 +139,10 @@ services:
     container_name: supabase-storage
     image: supabase/storage-api:v1.11.13
     depends_on:
-      - db-check
-      - rest
+      db-check:
+        condition: service_completed_successfully
+      rest:
+        condition: service_started
     restart: unless-stopped
     deploy:
       resources:
@@ -149,7 +154,7 @@ services:
       SERVICE_KEY: ${SERVICE_ROLE_KEY}
       POSTGREST_URL: http://rest:3000
       PGRST_JWT_SECRET: ${JWT_SECRET}
-      DATABASE_URL: postgres://supabase_storage_admin:${POSTGRES_PASSWORD}@supabase-db:5432/${POSTGRES_DB}
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@supabase-db:5432/${POSTGRES_DB}
       FILE_SIZE_LIMIT: 52428800
       STORAGE_BACKEND: s3
       FILE_STORAGE_BACKEND_PATH: /var/lib/storage
@@ -176,14 +181,15 @@ services:
     container_name: supabase-meta
     image: supabase/postgres-meta:v0.84.2
     depends_on:
-      - db-check
+      db-check:
+        condition: service_completed_successfully
     restart: unless-stopped
     environment:
       PG_META_PORT: 8080
       PG_META_DB_HOST: supabase-db
       PG_META_DB_PORT: 5432
       PG_META_DB_NAME: ${POSTGRES_DB}
-      PG_META_DB_USER: supabase_admin
+      PG_META_DB_USER: ${POSTGRES_USER}
       PG_META_DB_PASSWORD: ${POSTGRES_PASSWORD}
     networks:
       - supabase-network
@@ -193,7 +199,7 @@ services:
     image: supabase/studio:20241223-2895244
     restart: unless-stopped
     ports:
-      - "${STUDIO_PORT}:3000"
+      - "${STUDIO_PORT:-8082}:3000"
     deploy:
       resources:
         limits:
@@ -216,8 +222,9 @@ services:
 
   # Helper to ensure Global DB is reachable
   db-check:
-    image: busybox
-    command: sh -c "echo 'Waiting for Global DB...'; until nc -z supabase-db 5432; do sleep 1; done; echo 'DB Ready!'"
+    image: alpine:latest
+    command: >
+      sh -c "apk add --no-cache postgresql-client && echo 'Waiting for Global DB...' && until pg_isready -h supabase-db -p 5432; do sleep 2; done; echo 'DB Ready!'"
     networks:
       - supabase-network
 
@@ -231,7 +238,7 @@ services:
     environment:
       SUPABASE_URL: http://kong:8000
       SUPABASE_SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY}
-      SUPABASE_DB_URL: postgres://postgres:${POSTGRES_PASSWORD}@supabase-db:5432/${POSTGRES_DB}
+      SUPABASE_DB_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@supabase-db:5432/${POSTGRES_DB}
       JWT_SECRET: ${JWT_SECRET}
       WECHAT_MINIAPP_APPID: ${WECHAT_MINIAPP_APPID}
       WECHAT_MINIAPP_SECRET: ${WECHAT_MINIAPP_SECRET}
@@ -245,7 +252,7 @@ services:
     volumes:
       - ./packages/mcp:/app
     environment:
-      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD}@supabase-db:5432/${POSTGRES_DB}
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@supabase-db:5432/${POSTGRES_DB}
       MCP_API_KEY: ${MCP_API_KEY}
       PORT: 3001
     networks:
