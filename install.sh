@@ -445,6 +445,14 @@ install_docker_compose() {
     # 检查 docker compose (plugin 形式)
     if docker compose version &> /dev/null 2>&1; then
         log_info "Docker Compose (plugin) 已安装"
+        if ! command -v docker-compose &> /dev/null; then
+            mkdir -p /usr/local/bin
+            cat > /usr/local/bin/docker-compose << 'EOF'
+#!/bin/sh
+exec docker compose "$@"
+EOF
+            chmod +x /usr/local/bin/docker-compose
+        fi
         return
     fi
     
@@ -1172,6 +1180,7 @@ install_pigsty() {
     fi
 
     log_info "启动 Supabase..."
+    install_docker_compose
     if [[ -x "./app.yml" ]]; then
         ./app.yml || {
             log_warn "app.yml 失败，尝试手动启动..."
@@ -1405,9 +1414,14 @@ manual_start_supabase() {
     sed -i "s|POSTGRES_HOST=10.10.10.10|POSTGRES_HOST=${INTERNAL_IP}|g" .env
     
     # 启动服务
-    if command -v docker-compose &> /dev/null; then
+    if docker compose version &> /dev/null 2>&1; then
+        docker compose up -d
+    elif command -v docker-compose &> /dev/null; then
         docker-compose up -d
+    elif [[ -x /usr/local/bin/docker-compose ]]; then
+        /usr/local/bin/docker-compose up -d
     else
+        install_docker_compose
         /usr/local/bin/docker-compose up -d
     fi
 }
