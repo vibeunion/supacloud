@@ -33,13 +33,14 @@ show_help() {
     echo ""
     echo "存储类型:"
     echo "  minio                  使用 MinIO (Pigsty 默认)"
+    echo "  garage                 使用 Garage S3"
     echo "  rustfs                 使用 RustFS"
     echo "  external               使用外部 S3 (需要额外配置)"
     echo ""
     echo "示例:"
     echo "  $0 runtime bun         切换到 Bun 运行时"
     echo "  $0 runtime deno        切换到 Deno 运行时"
-    echo "  $0 storage rustfs      切换到 RustFS"
+    echo "  $0 storage garage      切换到 Garage S3"
     echo "  $0 status              显示当前状态"
     echo ""
 }
@@ -72,7 +73,10 @@ show_status() {
         source /etc/supabase/bun-functions.env 2>/dev/null || true
     fi
     
-    if systemctl is-active --quiet rustfs 2>/dev/null; then
+    if systemctl is-active --quiet garage 2>/dev/null; then
+        echo -e "  当前: ${GREEN}Garage${NC}"
+        echo "  端口: 9000"
+    elif systemctl is-active --quiet rustfs 2>/dev/null; then
         echo -e "  当前: ${GREEN}RustFS${NC}"
         echo "  端口: 9000"
     elif systemctl is-active --quiet minio 2>/dev/null; then
@@ -85,6 +89,7 @@ show_status() {
     # 显示凭据位置
     echo "配置文件位置:"
     echo "  JWT 密钥: /etc/supabase/jwt-keys.env"
+    [[ -f /etc/garage/s3-credentials.env ]] && echo "  Garage 凭据: /etc/garage/s3-credentials.env"
     [[ -f /etc/rustfs-credentials.env ]] && echo "  RustFS 凭据: /etc/rustfs-credentials.env"
     echo ""
 }
@@ -196,6 +201,9 @@ switch_storage() {
         minio)
             switch_to_minio
             ;;
+        garage)
+            switch_to_garage
+            ;;
         rustfs)
             switch_to_rustfs
             ;;
@@ -204,7 +212,7 @@ switch_storage() {
             ;;
         *)
             log_error "未知的存储类型: $storage_type"
-            log_info "支持的类型: minio, rustfs, external"
+            log_info "支持的类型: minio, garage, rustfs, external"
             exit 1
             ;;
     esac
@@ -215,6 +223,7 @@ switch_to_minio() {
     log_step "切换到 MinIO..."
     
     # 停止其他 S3 服务
+    systemctl stop garage 2>/dev/null || true
     systemctl stop rustfs 2>/dev/null || true
     
     # MinIO 通常由 Pigsty 管理
@@ -225,12 +234,60 @@ switch_to_minio() {
     log_info "已切换到 MinIO"
 }
 
+# 切换到 Garage
+switch_to_garage() {
+    log_step "切换到 Garage S3..."
+    
+    # 停止其他 S3 服务
+    systemctl stop rustfs 2>/dev/null || true
+    
+    # 尝试停止 MinIO (如果存在)
+    log_info "检查 MinIO 容器..."
+    if command -v docker &> /dev/null; then
+        docker stop minio 2>/dev/null || true
+        docker rm minio 2>/dev/null || true
+    elif command -v podman &> /dev/null; then
+        podman stop minio 2>/dev/null || true
+        podman rm minio 2>/dev/null || true
+    fi
+    
+    # 检查 Garage 是否已安装
+    if ! command -v garage &> /dev/null; then
+        log_warn "Garage 未安装，正在安装..."
+        # 这里可以调用安装函数，或者提示用户重新运行安装脚本
+        log_info "请运行: S3_STORAGE_TYPE=garage ./install.sh"
+        exit 1
+    fi
+    
+    # 启动 Garage
+    systemctl enable --now garage
+    systemctl restart garage
+    
+    # 等待 Garage 启动
+    log_info "等待 Garage 启动..."
+    sleep 5
+    if ! systemctl is-active --quiet garage; then
+        log_error "Garage 启动失败，请检查日志: journalctl -u garage -n 20"
+        exit 1
+    fi
+    
+    # 获取内网 IP
+    INTERNAL_IP=$(hostname -I | awk '{print $1}')
+    
+    # 更新 Supabase 配置
+    update_supabase_s3_config "garage" "http://${INTERNAL_IP}:9000" "garage"
+    
+    log_info "已切换到 Garage S3"
+    log_info "S3 端点: http://${INTERNAL_IP}:9000"
+    log_info "凭据: /etc/garage/s3-credentials.env"
+}
 
 # 切换到 RustFS
 switch_to_rustfs() {
     log_step "切换到 RustFS..."
     
     # 停止其他 S3 服务
+    systemctl stop garage 2>/dev/null || true
     
     # 检查 RustFS 是否已安装
     if ! command -v rustfs &> /dev/null; then
@@ -278,6 +335,7 @@ EOF
     chmod 600 /etc/supabase/external-s3.env
     
     # 停止本地 S3 服务
+    systemctl stop garage 2>/dev/null || true
     systemctl stop rustfs 2>/dev/null || true
     
     # 更新 Supabase 配置
@@ -332,7 +390,7 @@ main() {
             ;;
         storage)
             if [[ -z "$2" ]]; then
-                log_error "请指定存储类型: minio, rustfs, external"
+                log_error "请指定存储类型: minio, garage, rustfs, external"
                 exit 1
             fi
             switch_storage "$2"
