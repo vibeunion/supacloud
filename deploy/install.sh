@@ -1222,10 +1222,29 @@ update_pigsty_config() {
         sed -i "s|DASHBOARD_PASSWORD: pigsty|DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD}|g" "$PIGSTY_YML"
     fi
     
-    if [[ -n "$POSTGRES_PASSWORD" && "$POSTGRES_PASSWORD" != "DBUser.Supa" ]]; then
-        sed -i "s|POSTGRES_PASSWORD: DBUser.Supa|POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}|g" "$PIGSTY_YML"
+    # 更新密码配置
+    if [[ -n "$DASHBOARD_PASSWORD" && "$DASHBOARD_PASSWORD" != "your-strong-password" ]]; then
+        sed -i "s|DASHBOARD_PASSWORD: pigsty|DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD}|g" "$PIGSTY_YML"
     fi
     
+    # 自动生成 Postgres 密码 (如果未设置)
+    if [[ -z "$POSTGRES_PASSWORD" || "$POSTGRES_PASSWORD" == "DBUser.Supa" ]]; then
+        log_info "自动生成 PostgreSQL 强密码..."
+        POSTGRES_PASSWORD=$(openssl rand -base64 16 | tr -dc 'a-zA-Z0-9')
+        log_info "生成的 Postgres 密码: ${POSTGRES_PASSWORD}"
+        
+        # 保存到 install.conf (如果有的话) 或输出到文件以便后续查看
+        echo "POSTGRES_PASSWORD=${POSTGRES_PASSWORD}" >> ~/supacloud_credentials.env
+    fi
+
+    # 更新 Pigsty 配置文件中的 Postgres 密码
+    sed -i "s|POSTGRES_PASSWORD: DBUser.Supa|POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}|g" "$PIGSTY_YML"
+    
+    # 同时更新 Supabase .env (如果存在)
+    if [[ -f ~/pigsty/app/supabase/.env ]]; then
+         sed -i "s|POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=${POSTGRES_PASSWORD}|g" ~/pigsty/app/supabase/.env
+    fi
+
     if [[ -n "$GRAFANA_PASSWORD" && "$GRAFANA_PASSWORD" != "pigsty" ]]; then
         sed -i "s|grafana_admin_password: pigsty|grafana_admin_password: ${GRAFANA_PASSWORD}|g" "$PIGSTY_YML"
     fi
@@ -1245,9 +1264,27 @@ update_pigsty_config() {
         sed -i "s|SERVICE_ROLE_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.*|SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY}|g" "$PIGSTY_YML"
     fi
     
-    # 配置非 MinIO S3 存储
     if [[ "${S3_STORAGE_TYPE:-minio}" != "minio" ]]; then
         configure_s3_in_pigsty
+    fi
+    
+    # 修复 Analytics (Logflare) 健康检查失败问题
+    # Logflare 需要 LOGFLARE_API_KEY 才能正常启动
+    if ! grep -q "LOGFLARE_API_KEY:" "$PIGSTY_YML"; then
+        log_info "注入 LOGFLARE_API_KEY 以修复 Analytics 启动..."
+        # 生成一个随机 Key
+        local lf_key=$(openssl rand -hex 16)
+        # 追加到文件末尾 (或者替换如果存在但为空)
+        echo "LOGFLARE_API_KEY: ${lf_key}" >> "$PIGSTY_YML"
+        
+        # 同时更新 Supabase .env (如果存在)
+        if [[ -f ~/pigsty/app/supabase/.env ]]; then
+             sed -i "s|LOGFLARE_API_KEY=.*|LOGFLARE_API_KEY=${lf_key}|g" ~/pigsty/app/supabase/.env
+             # 如果 .env 中没有这个变量，追加它
+             if ! grep -q "LOGFLARE_API_KEY" ~/pigsty/app/supabase/.env; then
+                 echo "LOGFLARE_API_KEY=${lf_key}" >> ~/pigsty/app/supabase/.env
+             fi
+        fi
     fi
     
     log_info "配置更新完成"
