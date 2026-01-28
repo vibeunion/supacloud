@@ -50,3 +50,22 @@ $$;
 -- 4. Ensure Extensions
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp" WITH SCHEMA extensions;
 CREATE EXTENSION IF NOT EXISTS "pg_net" WITH SCHEMA extensions;
+
+-- 5. Lightweight Analytics (Postgres Alternative)
+CREATE SCHEMA IF NOT EXISTS logs;
+
+-- Standard Suapbase log metadata structure
+CREATE TABLE IF NOT EXISTS logs.entries (
+  id bigserial PRIMARY KEY,
+  timestamp timestamptz DEFAULT now(),
+  level text DEFAULT 'info',
+  event_message text,
+  metadata jsonb DEFAULT '{}'::jsonb
+);
+
+CREATE INDEX IF NOT EXISTS entries_timestamp_idx ON logs.entries (timestamp DESC);
+CREATE INDEX IF NOT EXISTS entries_metadata_idx ON logs.entries USING GIN (metadata);
+
+-- Grant privileges for backend logging
+GRANT USAGE ON SCHEMA logs TO postgres, supabase_admin;
+GRANT ALL ON ALL TABLES IN SCHEMA logs TO postgres, supabase_admin;
