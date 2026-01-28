@@ -5,7 +5,7 @@ import { t } from "../lib/i18n";
 import type { Lang } from "../lib/i18n";
 import { BackupModal } from "./BackupModal";
 
-export const Dashboard = ({ projects, lang = 'en' }: { projects: string[], lang?: Lang }) => (
+export const Dashboard = ({ projects, lang = 'en' }: { projects: { name: string, runtime: string }[], lang?: Lang }) => (
     <Layout lang={lang}>
         <div className="flex flex-col gap-8">
             <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
@@ -182,7 +182,7 @@ export const Dashboard = ({ projects, lang = 'en' }: { projects: string[], lang?
                     <div className="col-span-2 text-right">{t(lang, 'col_actions')}</div>
                 </div>
                 <div id="project-list" className="divide-y divide-white/5">
-                    {projects.map(name => <ProjectRow name={name} lang={lang} />)}
+                    {projects.map(({ name, runtime }) => <ProjectRow name={name} runtime={runtime} lang={lang} />)}
                 </div>
             </div>
         </div>

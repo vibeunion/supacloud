@@ -8,7 +8,7 @@ import { LogsModal } from "../components/LogsModal";
 import { ConfigModal } from "../components/ConfigModal";
 import { FunctionModal } from "../components/FunctionModal";
 import { BackupList } from "../components/BackupList";
-import { getProjectConfig, listFunctions, getFunction } from "../lib/projects";
+import { getProjectConfig, listFunctions, getFunction, getProjectRuntime } from "../lib/projects";
 import { join } from "node:path";
 import { setCookie } from "hono/cookie";
 
@@ -22,7 +22,12 @@ uiApp.get('/', async (c) => {
         projects = await deps.readdir(INSTANCES_DIR);
     } catch { }
 
-    return c.html(<Dashboard projects={projects} lang={lang} />);
+    const projectData = await Promise.all(projects.map(async name => {
+        const runtime = await getProjectRuntime(name);
+        return { name, runtime };
+    }));
+
+    return c.html(<Dashboard projects={projectData} lang={lang} />);
 });
 
 // Language Switcher

@@ -18,13 +18,12 @@ export const RC_FILE = join(homedir(), ".supacloudrc");
 // Let's assume standard behavior for now to avoid complexity in this file.
 // We'll read process.env.SUPACLOUD_HOME or default relative.
 export let BASE_DIR = process.env.SUPACLOUD_HOME || join(import.meta.dir, "..", "..");
-// Note: import.meta.dir in 'lib/config.ts' is 'manager/lib', so '..' is 'manager', '../..' is root. 
-// Original was 'join(import.meta.dir, "..")' inside 'manager/index.tsx', so it was root (workspace/supacloud).
-// So 'manager/lib/../..' -> 'workspace/supacloud'. Correct.
+// Note: In development, BASE_DIR is project root. 
+// In production (/opt/supacloud), BASE_DIR is /opt/supacloud.
 
 export const INSTANCES_DIR = join(BASE_DIR, "instances");
 export const TEMPLATE_DIR = join(BASE_DIR, "templates", "project");
-export const BASE_COMPOSE = join(BASE_DIR, "base", "docker-compose.yml");
+export const BASE_COMPOSE = join(BASE_DIR, "templates", "base", "docker-compose.yml");
 export const AUTH_FILE = join(BASE_DIR, ".manager_auth");
 
 // We can export a function to update BASE_DIR if RC file is found later
