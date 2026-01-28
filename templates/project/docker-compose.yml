@@ -258,6 +258,20 @@ services:
     networks:
       - supabase-network
 
+  functions:
+    container_name: ${PROJECT_NAME:-supabase}-edge-runtime
+    image: supabase/edge-runtime:v1.22.4
+    restart: unless-stopped
+    profiles:
+      - deno
+    environment:
+      JWT_SECRET: ${JWT_SECRET}
+      SUPABASE_URL: http://kong:8000
+    volumes:
+      - ./functions:/home/deno/functions:ro
+    networks:
+      - supabase-network
+
   # Bun Edge Functions - Alternative to Deno edge-runtime
   # Set EDGE_RUNTIME=bun to enable
   # Image: zuohuadong/supabase-bun-function
