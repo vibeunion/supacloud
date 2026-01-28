@@ -1,7 +1,8 @@
 
 import { join } from "node:path";
-import { deps, exists } from "./deps";
-import { BASE_DIR, INSTANCES_DIR, TEMPLATE_DIR, COMPOSE_CMD } from "./config";
+import { deps, exists, validateProjectName } from "./deps";
+import { BASE_DIR, INSTANCES_DIR } from "./config";
+import jwt from "jsonwebtoken";
 
 // Database operations
 export async function createDatabase(dbName: string, dbUser: string, dbPass: string) {
@@ -45,24 +46,73 @@ export async function createDatabase(dbName: string, dbUser: string, dbPass: str
     }
 }
 
-// Port management
-export async function getNextPorts() {
-    const glob = new deps.Glob("*");
-    let projectCount = 0;
+// Drop database and user for a project
+export async function dropDatabase(dbName: string, dbUser: string) {
+    console.log(`Dropping database: ${dbName} and user: ${dbUser}`);
     try {
-        for await (const file of glob.scan(INSTANCES_DIR)) {
-            const fullPath = join(INSTANCES_DIR, file);
-            if (await deps.file(fullPath).exists()) projectCount++;
+        // 1. Terminate existing connections
+        await deps.$`docker exec supabase-db psql -U postgres -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='${dbName}' AND pid <> pg_backend_pid();"`;
+
+        // 2. Drop database
+        const dbCheck = await deps.$`docker exec supabase-db psql -U postgres -tAc "SELECT 1 FROM pg_database WHERE datname='${dbName}'"`.text();
+        if (dbCheck.trim() === "1") {
+            await deps.$`docker exec supabase-db psql -U postgres -c "DROP DATABASE ${dbName};"`;
+            console.log(`Database ${dbName} dropped.`);
+        }
+
+        // 3. Drop user
+        const userCheck = await deps.$`docker exec supabase-db psql -U postgres -tAc "SELECT 1 FROM pg_roles WHERE rolname='${dbUser}'"`.text();
+        if (userCheck.trim() === "1") {
+            await deps.$`docker exec supabase-db psql -U postgres -c "DROP USER ${dbUser};"`;
+            console.log(`User ${dbUser} dropped.`);
+        }
+    } catch (e) {
+        console.error("Failed to drop DB:", e);
+        // Don't throw - allow deletion to continue even if DB cleanup fails
+    }
+}
+
+// Port management - scan existing projects to find used ports and allocate next available
+export async function getNextPorts() {
+    const usedOffsets = new Set<number>();
+
+    try {
+        const glob = new deps.Glob("*/.env");
+        for await (const envFile of glob.scan(INSTANCES_DIR)) {
+            try {
+                const envPath = join(INSTANCES_DIR, envFile);
+                const content = await deps.file(envPath).text();
+                const kongMatch = content.match(/KONG_HTTP_PORT=(\d+)/);
+                if (kongMatch) {
+                    const kongPort = parseInt(kongMatch[1], 10);
+                    const offset = kongPort - 8000;
+                    if (offset > 0) usedOffsets.add(offset);
+                }
+            } catch {
+                // Skip files that can't be read
+            }
         }
     } catch (e) {
         console.warn(`Could not scan INSTANCES_DIR: ${e}`);
-        projectCount = 0;
     }
-    return { offset: (projectCount + 1) * 10 };
+
+    // Find first available offset (starting from 10, incrementing by 10)
+    let offset = 10;
+    while (usedOffsets.has(offset)) {
+        offset += 10;
+    }
+
+    return { offset };
 }
 
 // Project Core Operations
 export async function createProject(name: string) {
+    // Validate project name
+    const validation = validateProjectName(name);
+    if (!validation.valid) {
+        return { success: false, message: validation.error };
+    }
+
     const projectDir = join(INSTANCES_DIR, name);
 
     if (await exists(projectDir)) {
@@ -84,7 +134,8 @@ export async function createProject(name: string) {
     const dbPass = crypto.randomUUID().replace(/-/g, '') + crypto.randomUUID().replace(/-/g, ''); // Long random password
 
     await createDatabase(dbName, dbUser, dbPass);
-    await deps.$`cp -r ${TEMPLATE_DIR} ${projectDir}`;
+    // In the new architecture, we manage per-project databases/users directly in the host database
+    // instead of creating project-specific directories with local docker-compose.
 
     // Provisioning S3 (Simplified for RustFS/MinIO/Global)
     // We utilize the global S3 credentials found in the system.
@@ -136,8 +187,17 @@ export async function createProject(name: string) {
     const j2 = crypto.randomUUID().replace(/-/g, '');
     const jwtSecret = j1 + j2;
     const mcpApiKey = crypto.randomUUID().replace(/-/g, '');
-    const anonKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNjEyNTM2ODAwLCJleHAiOjE5MjgwMzY4MDB9.SIGNATURE_PLACEHOLDER";
-    const serviceKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoic2VydmljZV9yb2xlIiwiaXNzIjoic3VwYWJhc2UiLCJpYXQiOjE2MTI1MzY4MDAsImV4cCI6MTkyODAzNjgwMH0.SIGNATURE_PLACEHOLDER";
+
+    const anonKey = jwt.sign(
+        { role: "anon", iss: "supabase", iat: 1612536800, exp: 1928036800 },
+        jwtSecret,
+        { algorithm: "HS256" }
+    );
+    const serviceKey = jwt.sign(
+        { role: "service_role", iss: "supabase", iat: 1612536800, exp: 1928036800 },
+        jwtSecret,
+        { algorithm: "HS256" }
+    );
 
     const enableAnalytics = process.env.ENABLE_ANALYTICS || "postgres";
     const s3StorageType = process.env.S3_STORAGE_TYPE || "rustfs";
@@ -168,37 +228,15 @@ FUNCTION_COMMAND=bun run index.ts
 MCP_API_KEY=${mcpApiKey}
 `;
 
+    // Ensure project directory exists
+    await deps.mkdir(projectDir, { recursive: true });
+
     await deps.write(join(projectDir, ".env"), envContent);
 
-    // Apply Analytics Stripping if needed
-    if (enableAnalytics !== "on") {
-        console.log(`Optimizing docker-compose for ${name} (Analytics: ${enableAnalytics})...`);
-        const composePath = join(projectDir, "docker-compose.yml");
-        if (await exists(composePath)) {
-            // 1. Remove analytics related services
-            await deps.$`sed -i '/analytics:/,/^[a-zA-Z]/ { /analytics:/d; /^[a-zA-Z]/!d }' ${composePath}`;
+    // In the new Pigsty-centric architecture, we don't copy templates or start local containers.
+    // Instead, we just ensure the DB, User, and Ingress are ready.
 
-            if (enableAnalytics === "off") {
-                await deps.$`sed -i '/logflare:/,/^[a-zA-Z]/ { /logflare:/d; /^[a-zA-Z]/!d }' ${composePath}`;
-                await deps.$`sed -i '/vector:/,/^[a-zA-Z]/ { /vector:/d; /^[a-zA-Z]/!d }' ${composePath}`;
-                await deps.$`sed -i '/- logflare/d' ${composePath}`;
-            } else if (enableAnalytics === "postgres") {
-                // Map Logflare to Postgres (Simplified alignment)
-                await deps.$`sed -i 's/LOGFLARE_URL: http:\\/\\/analytics:5432/LOGFLARE_URL: http:\\/\\/supabase-db:5432/g' ${composePath}`;
-            }
-
-            // 2. Remove dependencies
-            await deps.$`sed -i '/- analytics/d' ${composePath}`;
-            await deps.$`sed -i '/analytics: service/d' ${composePath}`;
-
-            // 3. Cleanup empty depends_on
-            await deps.$`sed -i '/depends_on:[[:space:]]*$/ { N; /^[[:space:]]*[a-z]/ { s/.*depends_on:[[:space:]]*\\n// } }' ${composePath}`;
-        }
-    }
-
-    console.log(`Starting project ${name}...`);
-    const proc = deps.spawn([...COMPOSE_CMD, "-p", name, "up", "-d"], { cwd: projectDir });
-    await proc.exited;
+    console.log(`Project ${name} created in shared infrastructure.`);
 
     console.log("Configuring Ingress...");
     const rootDomain = process.env.ROOT_DOMAIN || "localhost";
@@ -232,13 +270,10 @@ export async function deleteProject(name: string) {
 
     console.log(`Deleting project ${name}...`);
     try {
-        // Stop containers
-        // Changed stdio to fix previous TS type error implicitly if used in spawn option
-        const proc = deps.spawn([...COMPOSE_CMD, "-p", name, "down", "-v"], {
-            cwd: projectDir,
-            stdio: ["ignore", "ignore", "ignore"]
-        });
-        await proc.exited;
+        // Clean up database and user
+        const dbName = `db_${name}`;
+        const dbUser = `owner_${name.replace(/-/g, '_')}`;
+        await dropDatabase(dbName, dbUser);
 
         // Remove files
         await deps.rm(projectDir, { recursive: true, force: true });
@@ -256,24 +291,18 @@ export async function deleteProject(name: string) {
 }
 
 export async function startProject(name: string) {
-    const projectDir = join(INSTANCES_DIR, name);
-    const proc = deps.spawn([...COMPOSE_CMD, "-p", name, "up", "-d"], { cwd: projectDir });
-    const exitCode = await proc.exited;
-    return { success: exitCode === 0 };
+    console.log(`Starting project ${name} (logical)`);
+    return { success: true };
 }
 
 export async function stopProject(name: string) {
-    const projectDir = join(INSTANCES_DIR, name);
-    const proc = deps.spawn([...COMPOSE_CMD, "-p", name, "stop"], { cwd: projectDir });
-    const exitCode = await proc.exited;
-    return { success: exitCode === 0 };
+    console.log(`Stopping project ${name} (logical)`);
+    return { success: true };
 }
 
 export async function restartProject(name: string) {
-    const projectDir = join(INSTANCES_DIR, name);
-    const proc = deps.spawn([...COMPOSE_CMD, "-p", name, "restart"], { cwd: projectDir });
-    const exitCode = await proc.exited;
-    return { success: exitCode === 0 };
+    console.log(`Restarting project ${name} (logical)`);
+    return { success: true };
 }
 
 // Config & Functions Management
@@ -373,20 +402,8 @@ export async function setProjectRuntime(name: string, runtime: "bun" | "deno") {
 
     await updateProjectConfig(name, content);
 
-    // Restart with specific profiles
-    console.log(`Switching project ${name} to runtime: ${runtime}...`);
-
-    // Stop old runtime containers specifically if needed, 
-    // but 'up -d' with changed profiles often handles it.
-    // However, to be sure we switch correctly:
-    const profiles = runtime === "bun" ? ["bun"] : ["deno"];
-
-    // Using --profile flag with docker compose
-    const proc = deps.spawn([...COMPOSE_CMD, "-p", name, "--profile", runtime, "up", "-d", "--remove-orphans"], {
-        cwd: projectDir
-    });
-
-    const exitCode = await proc.exited;
-    return { success: exitCode === 0 };
+    // No longer restarting containers via Docker Compose.
+    // The Manager handles runtime logic via shared profiles or labels in the future.
+    return { success: true };
 }
 
