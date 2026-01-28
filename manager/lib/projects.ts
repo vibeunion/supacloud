@@ -139,6 +139,9 @@ export async function createProject(name: string) {
     const anonKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNjEyNTM2ODAwLCJleHAiOjE5MjgwMzY4MDB9.SIGNATURE_PLACEHOLDER";
     const serviceKey = "[REDACTED_SUPABASE_SERVICE_KEY]";
 
+    const enableAnalytics = process.env.ENABLE_ANALYTICS || "postgres";
+    const s3StorageType = process.env.S3_STORAGE_TYPE || "rustfs";
+
     const envContent = `
 POSTGRES_DB=${dbName}
 POSTGRES_PASSWORD=${dbPass}
@@ -156,8 +159,9 @@ SERVICE_ROLE_KEY=${serviceKey}
 SITE_URL=http://localhost:${studioPort}
 S3_ACCESS_KEY=${garageAccessKey}
 S3_SECRET_KEY=${garageSecretKey}
-WECHAT_MINIAPP_APPID=
-WECHAT_MINIAPP_SECRET=
+S3_STORAGE_TYPE=${s3StorageType}
+ENABLE_ANALYTICS=${enableAnalytics}
+LOGFLARE_API_KEY=${crypto.randomUUID().replace(/-/g, '')}
 EDGE_RUNTIME=deno
 FUNCTION_IMAGE=oven/bun:1
 FUNCTION_COMMAND=bun run index.ts
@@ -165,6 +169,32 @@ MCP_API_KEY=${mcpApiKey}
 `;
 
     await deps.write(join(projectDir, ".env"), envContent);
+
+    // Apply Analytics Stripping if needed
+    if (enableAnalytics !== "on") {
+        console.log(`Optimizing docker-compose for ${name} (Analytics: ${enableAnalytics})...`);
+        const composePath = join(projectDir, "docker-compose.yml");
+        if (await exists(composePath)) {
+            // 1. Remove analytics related services
+            await deps.$`sed -i '/analytics:/,/^[a-zA-Z]/ { /analytics:/d; /^[a-zA-Z]/!d }' ${composePath}`;
+
+            if (enableAnalytics === "off") {
+                await deps.$`sed -i '/logflare:/,/^[a-zA-Z]/ { /logflare:/d; /^[a-zA-Z]/!d }' ${composePath}`;
+                await deps.$`sed -i '/vector:/,/^[a-zA-Z]/ { /vector:/d; /^[a-zA-Z]/!d }' ${composePath}`;
+                await deps.$`sed -i '/- logflare/d' ${composePath}`;
+            } else if (enableAnalytics === "postgres") {
+                // Map Logflare to Postgres (Simplified alignment)
+                await deps.$`sed -i 's/LOGFLARE_URL: http:\\/\\/analytics:5432/LOGFLARE_URL: http:\\/\\/supabase-db:5432/g' ${composePath}`;
+            }
+
+            // 2. Remove dependencies
+            await deps.$`sed -i '/- analytics/d' ${composePath}`;
+            await deps.$`sed -i '/analytics: service/d' ${composePath}`;
+
+            // 3. Cleanup empty depends_on
+            await deps.$`sed -i '/depends_on:[[:space:]]*$/ { N; /^[[:space:]]*[a-z]/ { s/.*depends_on:[[:space:]]*\\n// } }' ${composePath}`;
+        }
+    }
 
     console.log(`Starting project ${name}...`);
     const proc = deps.spawn([...COMPOSE_CMD, "-p", name, "up", "-d"], { cwd: projectDir });
