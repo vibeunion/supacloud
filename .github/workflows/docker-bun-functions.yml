@@ -6,14 +6,14 @@ on:
       - main
     paths:
       # 仅当 Dockerfile 或相关文件变动时触发
-      - 'templates/project/packages/bun-functions/Dockerfile'
-      - 'templates/project/packages/bun-functions/index.ts'
-      - 'templates/project/packages/bun-functions/package.json'
+      - 'packages/bun-functions/Dockerfile'
+      - 'packages/bun-functions/index.ts'
+      - 'packages/bun-functions/package.json'
   pull_request:
     branches:
       - main
     paths:
-      - 'templates/project/packages/bun-functions/Dockerfile'
+      - 'packages/bun-functions/Dockerfile'
   workflow_dispatch:
     inputs:
       tag:
@@ -77,8 +77,8 @@ jobs:
         id: build
         uses: docker/build-push-action@v5
         with:
-          context: ./templates/project/packages/bun-functions
-          file: ./templates/project/packages/bun-functions/Dockerfile
+          context: ./packages/bun-functions
+          file: ./packages/bun-functions/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}

@@ -3,7 +3,9 @@
     "allow": [
       "Bash(xargs:*)",
       "Bash(cat:*)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nrefactor: reorganize project structure and replace Python with Bun\n\n- Restructure directories for Pigsty-centric shared architecture:\n  - Add top-level `packages/` for shared components \\(mcp, bun-auth, bun-functions\\)\n  - Add `templates/base/volumes/db/init/` for global DB initialization\n  - Add `templates/base/volumes/caddy/sites/` for dynamic tenant routing\n  - Simplify functions path to `instances/<project>/functions/`\n\n- Replace Python YAML cleanup with Bun script in install.sh:\n  - Move `ensure_bun_installed` before `install_pigsty`\n  - Remove Python/pyyaml dependency and sed fallback\n  - Add `deploy/scripts/cleanup-compose.ts` for reusable YAML processing\n  - Net reduction of 42 lines with cleaner logic\n\n- Update GitHub Actions:\n  - Fix docker-bun-functions.yml paths for new structure\n\n- Update documentation:\n  - Revise architecture section in README \\(EN/CN\\)\n\n- Update .gitignore:\n  - Add `instances/` for tenant runtime data\n  - Add `templates/base/volumes/caddy/sites/*.caddy` for generated configs\n  - Add `templates/base/volumes/db/data/` for database data\n\n🤖 Generated with [Claude Code]\\(https://claude.com/claude-code\\)\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")"
     ]
   }
 }

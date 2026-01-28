@@ -100,3 +100,12 @@ dist
 
 # SupaCloud Binaries
 bin/
+
+# SupaCloud Runtime Data (tenant instances)
+instances/
+
+# Runtime generated Caddy configs
+templates/base/volumes/caddy/sites/*.caddy
+
+# Runtime database data
+templates/base/volumes/db/data/
