@@ -1113,7 +1113,11 @@ install_pigsty() {
     # 下载 Pigsty
     if [[ ! -d ~/pigsty ]]; then
         log_info "下载 Pigsty..."
-        curl -fsSL https://repo.pigsty.cc/get | bash
+        if [[ -n "${PIGSTY_VERSION:-}" && "${PIGSTY_VERSION}" != "latest" ]]; then
+            curl -fsSL https://repo.pigsty.io/get | bash -s "${PIGSTY_VERSION}"
+        else
+            curl -fsSL https://repo.pigsty.io/get | bash
+        fi
     else
         log_info "Pigsty 目录已存在"
     fi
@@ -1143,10 +1147,10 @@ install_pigsty() {
     fi
 
     if [[ -n "$PIGSTY_ENTRYPOINT" ]]; then
-        if command -v ansible-playbook &> /dev/null; then
-            ansible-playbook "$PIGSTY_ENTRYPOINT"
-        elif [[ -x "./$PIGSTY_ENTRYPOINT" ]]; then
+        if [[ -x "./$PIGSTY_ENTRYPOINT" ]]; then
             "./$PIGSTY_ENTRYPOINT"
+        elif command -v ansible-playbook &> /dev/null; then
+            ansible-playbook "$PIGSTY_ENTRYPOINT"
         else
             log_error "未找到 ansible-playbook，且 $PIGSTY_ENTRYPOINT 不可执行"
             exit 1
@@ -1158,31 +1162,29 @@ install_pigsty() {
         exit 1
     fi
 
-    if [[ "$PIGSTY_ENTRYPOINT" != "deploy.yml" ]]; then
-        log_info "配置 Docker..."
-        if [[ -f "./docker.yml" ]]; then
-            ./docker.yml || true
-        elif [[ -f "docker.yml" ]]; then
-            ansible-playbook docker.yml || true
-        else
-            log_warn "未找到 docker.yml，跳过 Docker 配置"
-        fi
+    log_info "配置 Docker..."
+    if [[ -x "./docker.yml" ]]; then
+        ./docker.yml || true
+    elif [[ -f "docker.yml" ]] && command -v ansible-playbook &> /dev/null; then
+        ansible-playbook docker.yml || true
+    else
+        log_warn "未找到 docker.yml，跳过 Docker 配置"
+    fi
 
-        log_info "启动 Supabase..."
-        if [[ -f "./app.yml" ]]; then
-            ./app.yml || {
-                log_warn "app.yml 失败，尝试手动启动..."
-                manual_start_supabase
-            }
-        elif [[ -f "app.yml" ]]; then
-            ansible-playbook app.yml || {
-                log_warn "app.yml 失败，尝试手动启动..."
-                manual_start_supabase
-            }
-        else
-            log_warn "未找到 app.yml，尝试手动启动..."
+    log_info "启动 Supabase..."
+    if [[ -x "./app.yml" ]]; then
+        ./app.yml || {
+            log_warn "app.yml 失败，尝试手动启动..."
             manual_start_supabase
-        fi
+        }
+    elif [[ -f "app.yml" ]] && command -v ansible-playbook &> /dev/null; then
+        ansible-playbook app.yml || {
+            log_warn "app.yml 失败，尝试手动启动..."
+            manual_start_supabase
+        }
+    else
+        log_warn "未找到 app.yml，尝试手动启动..."
+        manual_start_supabase
     fi
 }
 
@@ -1591,6 +1593,9 @@ INTERNAL_IP=${INTERNAL_IP}
 PUBLIC_DOMAIN=${SUPABASE_PUBLIC_DOMAIN}
 STUDIO_DOMAIN=${SUPABASE_STUDIO_DOMAIN}
 
+# ========== Pigsty ==========
+PIGSTY_VERSION=${PIGSTY_VERSION:-latest}
+
 # ========== Supabase Dashboard ==========
 DASHBOARD_USERNAME=${DASHBOARD_USERNAME:-supabase}
 DASHBOARD_PASSWORD=${DASHBOARD_PASSWORD:-pigsty}
@@ -1611,6 +1616,10 @@ GRAFANA_PASSWORD=${GRAFANA_PASSWORD:-pigsty}
 JWT_SECRET=${JWT_SECRET}
 ANON_KEY=${ANON_KEY}
 SERVICE_ROLE_KEY=${SERVICE_ROLE_KEY}
+
+# ========== Analytics ==========
+ENABLE_ANALYTICS=${ENABLE_ANALYTICS:-true}
+ANALYTICS_BACKEND=${ANALYTICS_BACKEND:-postgres}
 
 # ========== S3 Storage ==========
 S3_STORAGE_TYPE=${S3_STORAGE_TYPE}
