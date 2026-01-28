@@ -124,6 +124,16 @@ check_config() {
         log_info "检测到默认数据库密码，正在生成随机强密码..."
         POSTGRES_PASSWORD=$(openssl rand -base64 24 | tr -dc 'a-zA-Z0-9' | head -c 16)
         log_info "已生成数据库密码"
+        
+        # 保存数据库密码到文件，防止丢失
+        mkdir -p /etc/supabase
+        cat > /etc/supabase/db-credentials.env << EOF
+# Supabase Database Credentials - 自动生成于 $(date)
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD="${POSTGRES_PASSWORD}"
+EOF
+        chmod 600 /etc/supabase/db-credentials.env
+        log_info "数据库密码已保存到: /etc/supabase/db-credentials.env"
     fi
 
     if [[ -z "$DASHBOARD_PASSWORD" || "$DASHBOARD_PASSWORD" == "supacloud" ]]; then
@@ -1497,6 +1507,7 @@ show_completion() {
     echo "登录凭据:"
     echo "  Supabase: ${DASHBOARD_USERNAME:-supabase} / ${DASHBOARD_PASSWORD:-pigsty}"
     echo "  Grafana:  admin / ${GRAFANA_PASSWORD:-pigsty}"
+    echo "  Database: postgres / ${POSTGRES_PASSWORD} (已保存至 /etc/supabase/db-credentials.env)"
     echo ""
     echo "下一步操作:"
     echo "  1. 将域名 ${SUPABASE_DOMAIN} 的 DNS A 记录指向服务器公网 IP"
