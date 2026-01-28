@@ -1036,87 +1036,63 @@ install_pigsty() {
     # 默认为 off，但为了用户体验，我们建议生产环境使用 postgres
     # 这里我们严格遵循 env 中的定义，如果没有定义则默认为 "postgres" (保持与 config.env 一致)
     local analytics_mode="${ENABLE_ANALYTICS:-postgres}"
-    
+
     if [[ "$analytics_mode" != "on" ]]; then
         log_info "正在精简/优化 Analytics 服务 (模式: ${analytics_mode})..."
-        find app/supabase -name "docker-compose.yml" -o -name "docker-compose.yaml" | while read -r f; do
-            # 使用 Python 脚本安全地移除服务 (比 sed/perl 更可靠)
-            # 创建临时 Python 脚本
-            cat << 'EOF' > /tmp/cleanup_compose.py
-import yaml
-import sys
 
-try:
-    with open(sys.argv[1], 'r') as f:
-        data = yaml.safe_load(f)
-
-    if 'services' in data:
-        # 要移除的服务列表
-        services_to_remove = ['analytics', 'logflare', 'vector']
-        
-        # 1. 移除服务定义
-        for svc in services_to_remove:
-            if svc in data['services']:
-                del data['services'][svc]
-        
-        # 2. 移除 depends_on 中的引用
-        for svc_name, svc_conf in data['services'].items():
-            if 'depends_on' in svc_conf:
-                deps = svc_conf['depends_on']
-                # 处理 depends_on 是列表的情况
-                if isinstance(deps, list):
-                    svc_conf['depends_on'] = [d for d in deps if d not in services_to_remove]
-                    if not svc_conf['depends_on']:
-                        del svc_conf['depends_on']
-                # 处理 depends_on 是字典的情况 (long syntax)
-                elif isinstance(deps, dict):
-                    for rm_svc in services_to_remove:
-                        if rm_svc in deps:
-                            del deps[rm_svc]
-                    if not deps:
-                        del svc_conf['depends_on']
-
-    # 回写文件
-    with open(sys.argv[1], 'w') as f:
-        yaml.dump(data, f, default_flow_style=False, sort_keys=False)
-except Exception as e:
-    print(f"Error cleanup yaml: {e}")
-    sys.exit(1)
-EOF
-            
-            # 执行 Python 清理脚本 (前提是系统有 python3 和 pyyaml，如果没有则回退到原来的 sed)
-            if command -v python3 &> /dev/null && python3 -c "import yaml" &> /dev/null; then
-                python3 /tmp/cleanup_compose.py "$f"
-            else
-                # 回退方案：如果环境依然没有 yaml 库，我们尝试只能用 sed 做最简单的处理
-                # 这里假设用户环境可能没有 pyyaml
-                log_warn "未检测到 python3-yaml，回退到 sed 清理模式 (可能存在语法风险)..."
-                
-                # 简单的 sed 清理 (仅移除行)
-                sed -i '/analytics:/,/^[a-zA-Z]/ { /analytics:/d; /^[a-zA-Z]/!d }' "$f"
-                sed -i '/- analytics/d' "$f"
-                sed -i '/analytics: service/d' "$f"
-                
-                # 移除空的 depends_on (sed 方案)
-                sed -i '/depends_on:[[:space:]]*$/ {
-                    N
-                    /^[[:space:]]*[a-z]/ {
-                        s/.*depends_on:[[:space:]]*\n//
+        # 复制 Bun 清理脚本到临时目录
+        local cleanup_script="/tmp/cleanup-compose.ts"
+        cat << 'BUNEOF' > "$cleanup_script"
+import { parse, stringify } from "yaml";
+const file = Bun.argv[2];
+const mode = Bun.argv[3] || "off";
+if (!file) process.exit(1);
+try {
+    const content = await Bun.file(file).text();
+    const data = parse(content) as any;
+    if (!data.services) process.exit(0);
+    const toRemove = mode === "off" ? ["analytics", "logflare", "vector"] : ["analytics"];
+    for (const svc of toRemove) {
+        if (data.services[svc]) { delete data.services[svc]; console.log(`Removed: ${svc}`); }
+    }
+    for (const [_, conf] of Object.entries(data.services) as [string, any][]) {
+        if (!conf.depends_on) continue;
+        if (Array.isArray(conf.depends_on)) {
+            conf.depends_on = conf.depends_on.filter((d: string) => !toRemove.includes(d));
+            if (!conf.depends_on.length) delete conf.depends_on;
+        } else if (typeof conf.depends_on === "object") {
+            for (const svc of toRemove) { if (svc in conf.depends_on) delete conf.depends_on[svc]; }
+            if (!Object.keys(conf.depends_on).length) delete conf.depends_on;
+        }
+    }
+    if (mode === "postgres") {
+        for (const [_, conf] of Object.entries(data.services) as [string, any][]) {
+            if (conf.environment) {
+                if (Array.isArray(conf.environment)) {
+                    conf.environment = conf.environment.map((e: string) =>
+                        e.includes("LOGFLARE_URL") && e.includes("analytics") ? e.replace(/analytics:\d+/, "supabase-db:5432") : e);
+                } else {
+                    for (const [k, v] of Object.entries(conf.environment)) {
+                        if (k === "LOGFLARE_URL" && typeof v === "string" && v.includes("analytics"))
+                            conf.environment[k] = v.replace(/analytics:\d+/, "supabase-db:5432");
                     }
-                }' "$f"
-            fi
-            
-            if [[ "${ENABLE_ANALYTICS}" == "postgres" ]]; then
-                log_info "配置轻量级 Postgres 日志存储 (Studio 兼容性处理)..."
-                # 调整 Logflare 环境以使用 Postgres (如果支持) 
-                # 或者在 Studio 中设置 LOGFLARE_URL 为模拟端点
-                # 这里简单处理：保留 Logflare 容器但禁用其对 ClickHouse 的依赖
-                sed -i 's/LOGFLARE_URL: http:\/\/analytics:5432/LOGFLARE_URL: http:\/\/supabase-db:5432/g' "$f"
-                
+                }
+            }
+        }
+    }
+    await Bun.write(file, stringify(data, { lineWidth: 0 }));
+} catch (e) { console.error(e); process.exit(1); }
+BUNEOF
+
+        find app/supabase -name "docker-compose.yml" -o -name "docker-compose.yaml" | while read -r f; do
+            log_info "清理: $f"
+            bun run "$cleanup_script" "$f" "$analytics_mode"
+
+            if [[ "${analytics_mode}" == "postgres" ]]; then
                 # 配置 Vector 将日志写入 Postgres
                 local vector_cfg_path="$(dirname "$f")/vector/vector.yaml"
                 mkdir -p "$(dirname "$vector_cfg_path")"
-                
+
                 log_info "注入 Vector Postgres Sink 配置: $vector_cfg_path"
                 cat > "$vector_cfg_path" << EOF
 sources:
@@ -1148,29 +1124,11 @@ sinks:
     batch:
       max_events: 50
 EOF
-            else
-                # 如果是 python 脚本模式，上面已经处理了移除逻辑
-                # 如果是回退 sed 模式，这里补充移除 logflare
-                 if ! command -v python3 &> /dev/null || ! python3 -c "import yaml" &> /dev/null; then
-                    sed -i '/logflare:/,/^[a-zA-Z]/ { /logflare:/d; /^[a-zA-Z]/!d }' "$f"
-                    sed -i '/vector:/,/^[a-zA-Z]/ { /vector:/d; /^[a-zA-Z]/!d }' "$f"
-                    
-                    sed -i '/- logflare/d' "$f"
-                    sed -i '/logflare: service/d' "$f"
-                    
-                    # 二次清理空的 depends_on (针对 logflare 移除后的情况)
-                    sed -i '/depends_on:[[:space:]]*$/ {
-                        N
-                        /^[[:space:]]*[a-z]/ {
-                            s/.*depends_on:[[:space:]]*\n//
-                        }
-                    }' "$f"
-                 fi
             fi
-            
-            rm -f /tmp/cleanup_compose.py
         done
-        log_info "Analytics 服务精简完成 (${ENABLE_ANALYTICS})"
+
+        rm -f "$cleanup_script"
+        log_info "Analytics 服务精简完成 (${analytics_mode})"
     fi
     
     # 安装 Pigsty
@@ -1839,17 +1797,17 @@ main() {
     check_config
     check_system
     setup_swap
-    
+
     # 安装 Nginx Mainline + ACME 模块
     install_nginx_mainline
-    
+
     install_container_runtime
     install_docker_compose
+    ensure_bun_installed        # 提前安装 Bun，后续脚本需要用到
     install_s3_storage
     configure_edge_runtime
     install_pigsty
     deploy_mcp_function
-    ensure_bun_installed
     install_manager
     setup_wal_monitor
     configure_pg_hba
