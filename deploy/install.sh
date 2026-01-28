@@ -1509,6 +1509,33 @@ EOF
     fi
 }
 
+# ========== 确保安装 Bun ==========
+ensure_bun_installed() {
+    log_step "检查 Bun 运行时..."
+    if command -v bun &> /dev/null; then
+        log_info "Bun 已安装: $(bun --version)"
+    else
+        log_warn "未检测到 Bun，正在尝试自动安装..."
+        # 安装 Bun (官方脚本)
+        # 注意: 某些国内服务器可能需要镜像，这里先尝试官方
+        curl -fsSL https://bun.sh/install | bash || {
+            log_error "Bun 官方安装脚本执行失败"
+            return 1
+        }
+        
+        # 将 Bun 路径添加到当前会话
+        export BUN_INSTALL="$HOME/.bun"
+        export PATH="$BUN_INSTALL/bin:$PATH"
+        
+        if command -v bun &> /dev/null; then
+            log_info "Bun 安装成功: $(bun --version)"
+        else
+            log_error "Bun 安装后仍无法识别，请手动安装 Bun 后重试"
+            return 1
+        fi
+    fi
+}
+
 # ========== 部署 Supacloud Manager ==========
 install_manager() {
     log_step "安装 Supacloud Manager..."
@@ -1819,6 +1846,7 @@ main() {
     configure_edge_runtime
     install_pigsty
     deploy_mcp_function
+    ensure_bun_installed
     install_manager
     setup_wal_monitor
     configure_pg_hba
