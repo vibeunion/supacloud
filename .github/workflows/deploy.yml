@@ -23,7 +23,7 @@ jobs:
           echo "Using Runner IP: $RUNNER_IP"
           
           # 创建完整的 config.env 以避免交互式提示
-          cat > deploy/config.env <<EOF
+          cat > config.env <<EOF
           # CI Test Configuration
           INTERNAL_IP=${RUNNER_IP}
           
@@ -52,7 +52,7 @@ jobs:
           EOF
           
           echo "Config generated:"
-          cat deploy/config.env
+          cat config.env
 
       - name: Setup Local SSH (Required for Ansible)
         run: |
@@ -112,8 +112,6 @@ jobs:
 
 
       - name: Run Install Script
-        working-directory: ./deploy
-
         run: |
           # 赋予执行权限
           chmod +x install.sh
