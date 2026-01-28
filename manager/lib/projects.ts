@@ -86,42 +86,51 @@ export async function createProject(name: string) {
     await createDatabase(dbName, dbUser, dbPass);
     await deps.$`cp -r ${TEMPLATE_DIR} ${projectDir}`;
 
+    // Provisioning S3 (Simplified for RustFS/MinIO/Global)
+    // We utilize the global S3 credentials found in the system.
+    // In a future version, we should implement a proper S3 Client to create buckets/users via API.
+
     let garageAccessKey = "";
     let garageSecretKey = "";
 
     try {
-        console.log(`Provisioning Garage S3 for ${name}...`);
-        try { await deps.$`docker exec garage garage bucket create ${bucketName}`; } catch { }
-        try { await deps.$`docker exec garage garage garage key create ${name}`; } catch { }
-        await deps.$`docker exec garage garage garage bucket allow ${bucketName} --read --write --key ${name}`;
+        console.log(`Configuring S3 for ${name}...`);
 
-        const keyInfo = await deps.$`docker exec garage garage garage key info ${name}`.text();
-        const accessMatch = keyInfo.match(/Key ID:\s+(GK[a-f0-9]+)/i);
-        const secretMatch = keyInfo.match(/Secret key:\s+([a-f0-9]+)/i);
+        // Try to read RustFS credentials first (Default)
+        try {
+            const keysContent = await deps.$`cat /etc/rustfs-credentials.env`.text();
+            const accessMatch = keysContent.match(/S3_ACCESS_KEY=(.*)/);
+            const secretMatch = keysContent.match(/S3_SECRET_KEY=(.*)/);
+            if (accessMatch) garageAccessKey = accessMatch[1].trim();
+            if (secretMatch) garageSecretKey = secretMatch[1].trim();
+        } catch {
+            // Fallback to Env vars if passed to Manager
+            if (process.env.S3_ACCESS_KEY) garageAccessKey = process.env.S3_ACCESS_KEY;
+            if (process.env.S3_SECRET_KEY) garageSecretKey = process.env.S3_SECRET_KEY;
+        }
 
-        if (accessMatch && secretMatch) {
-            garageAccessKey = accessMatch[1];
-            garageSecretKey = secretMatch[1];
-        } else {
-            throw new Error("Could not parse Garage key info");
+        // If still empty, check for old garage credentials just in case or MinIO
+        if (!garageAccessKey) {
+            const keysContent = await deps.$`cat /etc/garage/s3-credentials.env`.text();
+            const accessMatch = keysContent.match(/S3_ACCESS_KEY=(.*)/);
+            const secretMatch = keysContent.match(/S3_SECRET_KEY=(.*)/);
+            if (accessMatch) garageAccessKey = accessMatch[1].trim();
+            if (secretMatch) garageSecretKey = secretMatch[1].trim();
         }
 
     } catch (e) {
-        console.warn("Falling back to global keys check...");
-        try {
-            const keysPath = join(BASE_DIR, "templates", "base", "volumes", "garage", "config", "garage_keys.env");
-            const keysContent = await deps.file(keysPath).text();
-            const accessMatch = keysContent.match(/GARAGE_ACCESS_KEY=(.*)/);
-            const secretMatch = keysContent.match(/GARAGE_SECRET_KEY=(.*)/);
-            if (accessMatch) garageAccessKey = accessMatch[1].trim();
-            if (secretMatch) garageSecretKey = secretMatch[1].trim();
-        } catch { }
+        console.warn("Could not load S3 credentials:", e);
     }
 
     if (!garageAccessKey) {
+        console.warn("No S3 credentials found. Using placeholders.");
         garageAccessKey = "placeholder";
         garageSecretKey = "placeholder";
     }
+
+    // For RustFS/MinIO, we might need to assume the bucket is created or use a single shared bucket.
+    // For now, we point to a project-specific bucket name.
+    console.log(`Using S3 Credentials: ${garageAccessKey.substring(0, 5)}...`);
 
     const j1 = crypto.randomUUID().replace(/-/g, '');
     const j2 = crypto.randomUUID().replace(/-/g, '');
@@ -145,8 +154,8 @@ JWT_EXP=3600
 ANON_KEY=${anonKey}
 SERVICE_ROLE_KEY=${serviceKey}
 SITE_URL=http://localhost:${studioPort}
-GARAGE_ACCESS_KEY=${garageAccessKey}
-GARAGE_SECRET_KEY=${garageSecretKey}
+S3_ACCESS_KEY=${garageAccessKey}
+S3_SECRET_KEY=${garageSecretKey}
 WECHAT_MINIAPP_APPID=
 WECHAT_MINIAPP_SECRET=
 EDGE_RUNTIME=deno
