@@ -6,7 +6,7 @@ import { apiApp } from "./routes/api";
 import { authApp, authMiddleware } from "./routes/auth";
 import { initManager, checkAndInstallDockerCompose, startBase, upgradeManager } from "./lib/system";
 import { deps, exists } from "./lib/deps";
-import { createProject, getNextPorts, createDatabase } from "./lib/projects";
+import { createProject, getNextPorts, createDatabase, setProjectRuntime } from "./lib/projects";
 
 // --- Main App ---
 const app = new Hono();
@@ -56,6 +56,15 @@ if (import.meta.main) {
         // CLI Create
         const name = process.argv[argOffset + 1];
         if (name) await createProject(name);
+    } else if (command === "runtime") {
+        const name = process.argv[argOffset + 1];
+        const runtime = process.argv[argOffset + 2] as "bun" | "deno";
+        if (name && (runtime === "bun" || runtime === "deno")) {
+            const res = await setProjectRuntime(name, runtime);
+            console.log(res.success ? `✅ Runtime for ${name} set to ${runtime}` : `❌ Failed: ${res.message}`);
+        } else {
+            console.log("Usage: supacloud runtime <project-name> <bun|deno>");
+        }
     } else if (command === "upgrade") {
         await upgradeManager();
     }

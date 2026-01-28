@@ -9,7 +9,9 @@ import {
     updateProjectConfig,
     saveFunction,
     deleteFunction,
-    ensureFunctionsDir
+    ensureFunctionsDir,
+    getProjectRuntime,
+    setProjectRuntime
 } from "../lib/projects";
 import { upgradeManager } from "../lib/system";
 import { deps } from "../lib/deps";
@@ -68,11 +70,19 @@ apiApp.post('/projects/:name/stop', async (c) => {
     return c.body(null, 200);
 });
 
-apiApp.post('/projects/:name/restart', async (c) => {
+apiApp.get('/projects/:name/runtime', async (c) => {
     const name = c.req.param('name');
-    const res = await restartProject(name);
-    if (!res.success) return c.text("Failed to restart", 500);
-    return c.body(null, 200);
+    const runtime = await getProjectRuntime(name);
+    return c.json({ runtime });
+});
+
+apiApp.post('/projects/:name/runtime', async (c) => {
+    const name = c.req.param('name');
+    const body = await c.req.parseBody();
+    const runtime = body['runtime'] as "bun" | "deno";
+    const res = await setProjectRuntime(name, runtime);
+    if (!res.success) return c.text(res.message || "Error", 500);
+    return c.json({ success: true, runtime });
 });
 
 // Config & Code

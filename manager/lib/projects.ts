@@ -18,11 +18,11 @@ export async function createDatabase(dbName: string, dbUser: string, dbPass: str
         // Check if user exists first to avoid error
         const userCheck = await deps.$`docker exec supabase-db psql -U postgres -tAc "SELECT 1 FROM pg_roles WHERE rolname='${dbUser}'"`.text();
         if (userCheck.trim() !== "1") {
-             await deps.$`docker exec supabase-db psql -U postgres -c "CREATE USER ${dbUser} WITH PASSWORD '${dbPass}';"`;
-             // Apply Resource Limits (Prevent noisy neighbors)
-             await deps.$`docker exec supabase-db psql -U postgres -c "ALTER USER ${dbUser} SET statement_timeout = '60s';"`; 
-             await deps.$`docker exec supabase-db psql -U postgres -c "ALTER USER ${dbUser} SET connection_limit = 100;"`; 
-             console.log(`User ${dbUser} created with resource limits.`);
+            await deps.$`docker exec supabase-db psql -U postgres -c "CREATE USER ${dbUser} WITH PASSWORD '${dbPass}';"`;
+            // Apply Resource Limits (Prevent noisy neighbors)
+            await deps.$`docker exec supabase-db psql -U postgres -c "ALTER USER ${dbUser} SET statement_timeout = '60s';"`;
+            await deps.$`docker exec supabase-db psql -U postgres -c "ALTER USER ${dbUser} SET connection_limit = 100;"`;
+            console.log(`User ${dbUser} created with resource limits.`);
         }
 
         // 3. Create Database
@@ -33,7 +33,7 @@ export async function createDatabase(dbName: string, dbUser: string, dbPass: str
         // Grant usage on extensions schema (usually 'extensions' or 'public') to the new user if needed, 
         // but owning the DB is usually enough for the public schema. 
         // We also need to ensure this user can be used by Supabase services (effectively acting as admin for this DB)
-        
+
         // Grant standard Supabase roles to this user so it can use extensions/features
         await deps.$`docker exec supabase-db psql -U postgres -c "GRANT anon, authenticated, service_role TO ${dbUser};"`;
         // Also grant admin roles from logical replication or storage if needed (optional, but safer to have)
@@ -109,7 +109,7 @@ export async function createProject(name: string) {
     } catch (e) {
         console.warn("Falling back to global keys check...");
         try {
-            const keysPath = join(BASE_DIR, "base", "volumes", "garage", "config", "garage_keys.env");
+            const keysPath = join(BASE_DIR, "templates", "base", "volumes", "garage", "config", "garage_keys.env");
             const keysContent = await deps.file(keysPath).text();
             const accessMatch = keysContent.match(/GARAGE_ACCESS_KEY=(.*)/);
             const secretMatch = keysContent.match(/GARAGE_SECRET_KEY=(.*)/);
@@ -149,6 +149,7 @@ GARAGE_ACCESS_KEY=${garageAccessKey}
 GARAGE_SECRET_KEY=${garageSecretKey}
 WECHAT_MINIAPP_APPID=
 WECHAT_MINIAPP_SECRET=
+EDGE_RUNTIME=deno
 FUNCTION_IMAGE=oven/bun:1
 FUNCTION_COMMAND=bun run index.ts
 MCP_API_KEY=${mcpApiKey}
@@ -173,7 +174,7 @@ ${name}.studio.${rootDomain} {
     reverse_proxy host.docker.internal:${studioPort}
 }
 `;
-    const caddySitesDir = join(BASE_DIR, "base", "volumes", "caddy", "sites");
+    const caddySitesDir = join(BASE_DIR, "templates", "base", "volumes", "caddy", "sites");
     await deps.mkdir(caddySitesDir, { recursive: true });
     await deps.write(join(caddySitesDir, `${name}.caddy`), caddyFileContent);
 
@@ -204,7 +205,7 @@ export async function deleteProject(name: string) {
         await deps.rm(projectDir, { recursive: true, force: true });
 
         // Remove Caddy config
-        const caddyFile = join(BASE_DIR, "base", "volumes", "caddy", "sites", `${name}.caddy`);
+        const caddyFile = join(BASE_DIR, "templates", "base", "volumes", "caddy", "sites", `${name}.caddy`);
         await deps.$`rm -f ${caddyFile}`;
         await deps.$`docker exec supabase-gateway caddy reload --config /etc/caddy/Caddyfile`;
 
@@ -309,3 +310,44 @@ export async function deleteFunction(name: string, filename: string) {
         return { success: false, message: e.message };
     }
 }
+
+export async function getProjectRuntime(name: string) {
+    const config = await getProjectConfig(name);
+    if (!config.success || !config.config) return "deno";
+    const match = config.config.match(/EDGE_RUNTIME=(.*)/);
+    return match ? match[1].trim() : "deno";
+}
+
+export async function setProjectRuntime(name: string, runtime: "bun" | "deno") {
+    const projectDir = join(INSTANCES_DIR, name);
+    const configRes = await getProjectConfig(name);
+    if (!configRes.success || !configRes.config) {
+        return { success: false, message: "Project config not found" };
+    }
+
+    let content = configRes.config;
+    if (content.includes("EDGE_RUNTIME=")) {
+        content = content.replace(/EDGE_RUNTIME=.*/, `EDGE_RUNTIME=${runtime}`);
+    } else {
+        content += `\nEDGE_RUNTIME=${runtime}\n`;
+    }
+
+    await updateProjectConfig(name, content);
+
+    // Restart with specific profiles
+    console.log(`Switching project ${name} to runtime: ${runtime}...`);
+
+    // Stop old runtime containers specifically if needed, 
+    // but 'up -d' with changed profiles often handles it.
+    // However, to be sure we switch correctly:
+    const profiles = runtime === "bun" ? ["bun"] : ["deno"];
+
+    // Using --profile flag with docker compose
+    const proc = deps.spawn([...COMPOSE_CMD, "-p", name, "--profile", runtime, "up", "-d", "--remove-orphans"], {
+        cwd: projectDir
+    });
+
+    const exitCode = await proc.exited;
+    return { success: exitCode === 0 };
+}
+

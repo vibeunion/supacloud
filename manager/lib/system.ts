@@ -82,7 +82,7 @@ admin_token = "${adminToken}"
 export async function startBase() {
     console.log("Starting Base Platform...");
     const proc = deps.spawn([...COMPOSE_CMD, "up", "-d"], {
-        cwd: join(BASE_DIR, "base"),
+        cwd: join(BASE_DIR, "templates", "base"),
         stdio: ["ignore", "inherit", "inherit"]
     });
     await proc.exited;
