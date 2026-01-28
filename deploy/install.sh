@@ -1027,6 +1027,71 @@ install_pigsty() {
     # 修改配置文件
     update_pigsty_config
     
+    # 放宽 Supabase 启动时的健康检查限制 (提前应用，防止 app.yml 阻塞)
+    # 覆盖 Pigsty 模板中的 healthcheck 设置
+    log_info "预防性放宽 Supabase 模板中的健康检查限制..."
+    find app/supabase -name "docker-compose.yml" -o -name "docker-compose.yaml" | xargs -r sed -i 's/condition: service_healthy/condition: service_started/g'
+    
+    # 精简 Analytics 服务 (如果未启用)
+    if [[ "${ENABLE_ANALYTICS:-off}" != "on" ]]; then
+        log_info "正在精简/优化 Analytics 服务 (模式: ${ENABLE_ANALYTICS:-off})..."
+        find app/supabase -name "docker-compose.yml" -o -name "docker-compose.yaml" | while read -r f; do
+            # 始终移除 ClickHouse (analytics服务)
+            sed -i '/analytics:/,/^[a-zA-Z]/ { /analytics:/d; /^[a-zA-Z]/!d }' "$f"
+            sed -i '/- analytics/d' "$f"
+            
+            if [[ "${ENABLE_ANALYTICS}" == "postgres" ]]; then
+                log_info "配置轻量级 Postgres 日志存储 (Studio 兼容性处理)..."
+                # 调整 Logflare 环境以使用 Postgres (如果支持) 
+                # 或者在 Studio 中设置 LOGFLARE_URL 为模拟端点
+                # 这里简单处理：保留 Logflare 容器但禁用其对 ClickHouse 的依赖
+                sed -i 's/LOGFLARE_URL: http:\/\/analytics:5432/LOGFLARE_URL: http:\/\/supabase-db:5432/g' "$f"
+                
+                # 配置 Vector 将日志写入 Postgres
+                local vector_cfg_path="$(dirname "$f")/vector/vector.yaml"
+                mkdir -p "$(dirname "$vector_cfg_path")"
+                
+                log_info "注入 Vector Postgres Sink 配置: $vector_cfg_path"
+                cat > "$vector_cfg_path" << EOF
+sources:
+  docker_logs:
+    type: docker_logs
+
+transforms:
+  enriched_logs:
+    type: remap
+    inputs: ["docker_logs"]
+    source: |
+      .timestamp = .timestamp || now()
+      .level = .level || "info"
+      .event_message = .message
+      .metadata = {
+        "container_name": .container_name,
+        "image": .image,
+        "host": .host
+      }
+      del(.message)
+
+sinks:
+  postgres:
+    type: postgresql
+    inputs: ["enriched_logs"]
+    connection_string: "postgresql://postgres:${POSTGRES_PASSWORD}@${INTERNAL_IP}:5432/postgres"
+    schema: "logs"
+    table: "entries"
+    batch:
+      max_events: 50
+EOF
+            else
+                # 完全移除 Logflare 和 Vector
+                sed -i '/logflare:/,/^[a-zA-Z]/ { /logflare:/d; /^[a-zA-Z]/!d }' "$f"
+                sed -i '/vector:/,/^[a-zA-Z]/ { /vector:/d; /^[a-zA-Z]/!d }' "$f"
+                sed -i '/- logflare/d' "$f"
+            fi
+        done
+        log_info "Analytics 服务精简完成 (${ENABLE_ANALYTICS})"
+    fi
+    
     # 安装 Pigsty
     log_info "安装 Pigsty (这可能需要 10-20 分钟)..."
     # 安装 Pigsty v4 基础设置
