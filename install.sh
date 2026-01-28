@@ -1136,18 +1136,41 @@ install_pigsty() {
     
     # 安装 Pigsty
     log_info "安装 Pigsty (这可能需要 10-20 分钟)..."
-    ./install.yml
+    if [[ -f "./install.yml" ]]; then
+        ./install.yml
+    elif [[ -f "install.yml" ]]; then
+        ansible-playbook install.yml
+    else
+        log_warn "未找到 install.yml，尝试使用 make install"
+        make install
+    fi
     
     # 安装 Docker
     log_info "配置 Docker..."
-    ./docker.yml || true
+    if [[ -f "./docker.yml" ]]; then
+        ./docker.yml || true
+    elif [[ -f "docker.yml" ]]; then
+        ansible-playbook docker.yml || true
+    else
+        log_warn "未找到 docker.yml，跳过 Docker 配置"
+    fi
     
     # 启动 Supabase
     log_info "启动 Supabase..."
-    ./app.yml || {
-        log_warn "app.yml 失败，尝试手动启动..."
+    if [[ -f "./app.yml" ]]; then
+        ./app.yml || {
+            log_warn "app.yml 失败，尝试手动启动..."
+            manual_start_supabase
+        }
+    elif [[ -f "app.yml" ]]; then
+        ansible-playbook app.yml || {
+            log_warn "app.yml 失败，尝试手动启动..."
+            manual_start_supabase
+        }
+    else
+        log_warn "未找到 app.yml，尝试手动启动..."
         manual_start_supabase
-    }
+    fi
 }
 
 # ========== 更新 Pigsty 配置 ==========
