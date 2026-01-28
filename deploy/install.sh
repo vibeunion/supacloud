@@ -1543,7 +1543,7 @@ install_manager() {
     # 1. 确定安装源和目标
     REPO_ROOT="$(dirname "$SCRIPT_DIR")"
     INSTALL_DIR="/opt/supacloud"
-    BIN_SOURCE="$REPO_ROOT/bin/supacloud-linux-x64"
+    BIN_SOURCE="$REPO_ROOT/bin/supacloud"
 
     # 检查二进制文件是否存在
     if [[ ! -f "$BIN_SOURCE" ]]; then
@@ -1594,6 +1594,9 @@ WorkingDirectory=$INSTALL_DIR
 Environment="SUPACLOUD_HOME=$INSTALL_DIR"
 Environment="NODE_ENV=production"
 Environment="PORT=8888"
+Environment="INTERNAL_IP=${INTERNAL_IP}"
+Environment="S3_STORAGE_TYPE=${S3_STORAGE_TYPE:-rustfs}"
+Environment="ENABLE_ANALYTICS=${ENABLE_ANALYTICS:-postgres}"
 # 如果使用 bun 运行源码:
 # ExecStart=/usr/local/bin/bun run $INSTALL_DIR/manager/index.tsx
 # 使用编译后的二进制:
