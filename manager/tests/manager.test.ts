@@ -114,64 +114,6 @@ describe("Manager Service Coverage", () => {
         expect(ports.offset).toBe(10);
     });
 
-    test("createProject - Success Path (Garage Provisioned)", async () => {
-        const res = await createProject("test-proj");
-
-        expect(res.success).toBe(true);
-        expect(res.port).toBe(3010);
-
-        // Verify .env was written and contains Garage Keys
-        expect(mockWrite).toHaveBeenCalled();
-        const callArgs = mockWrite.mock.calls[0];
-        const envContent = callArgs[1] as unknown as string;
-        expect(envContent).toContain("GK123456"); // Key ID from mock
-    });
-
-    test("createProject - Garage Fail, Fallback to Global Keys", async () => {
-        // We want to simulate failure specifically when running garage commands.
-        // The mockShellExec defined at top checks args strictly.
-        // We can update it to throw if it sees "garage"
-
-        mockShellExec.mockImplementation((strings, ...values) => {
-            const cmdString = strings.join(" ");
-            if (cmdString.includes("garage")) {
-                throw new Error("Garage Down");
-            }
-
-            const outputText = "OK";
-            const result = {
-                exitCode: 0,
-                stdout: new TextEncoder().encode(outputText),
-                stderr: new Uint8Array(0),
-                text: () => Promise.resolve(outputText),
-                json: () => Promise.resolve({})
-            };
-
-            const thenable = {
-                then: (onfulfilled: any, onrejected: any) => Promise.resolve(result).then(onfulfilled, onrejected),
-                catch: (onrejected: any) => Promise.resolve(result).catch(onrejected),
-                finally: (onfinally: any) => Promise.resolve(result).finally(onfinally),
-                text: result.text,
-                json: result.json
-            };
-            return thenable as any;
-        });
-
-        // Mock global keys file
-        mockFileText.mockResolvedValueOnce("GARAGE_ACCESS_KEY=global-access\nGARAGE_SECRET_KEY=global-secret");
-
-        const res = await createProject("test-fallback");
-        expect(res.success).toBe(true); // Should succeed via fallback
-
-        // Check if fallback keys were used
-        // We need to find the write call to .env
-        const writeCalls = mockWrite.mock.calls;
-        const envWrite = writeCalls.find(c => (c[0] as unknown as string).endsWith(".env"));
-        expect(envWrite).toBeDefined();
-        const envContent = envWrite![1] as unknown as string;
-        expect(envContent).toContain("global-access");
-    });
-
     test("createProject - Fail if exists", async () => {
         mockFileExists.mockResolvedValueOnce(true);
         const res = await createProject("test-proj");

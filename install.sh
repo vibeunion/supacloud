@@ -736,7 +736,6 @@ configure_external_s3() {
 }
 
 # ========== 安装 Pigsty ==========
-# ========== 操作系统全兼容 OpenResty 劫持逻辑 ==========
 # ========== 安装 Nginx Mainline (带 ACME 模块) ==========
 install_nginx_mainline() {
     log_step "正在安装 Nginx Mainline (带 ACME 模块)..."
@@ -831,15 +830,6 @@ EOF
 
 
 
-# ========== 注入 Lua 自动 SSL 逻辑到 Pigsty 模板 (已弃用) ==========
-inject_lua_config() {
-    log_info "跳过模板注入，将在安装后直接应用最终配置..."
-    log_info "跳过模板注入，将在安装后直接应用最终配置..."
-    # 我们改用 apply_nginx_acme_config 直接覆盖配置，更加稳健
-    return 0
-}
-
-# ========== 执行 Nginx 二进制劫持 ==========
 # ========== 应用 Nginx ACME 配置 ==========
 apply_nginx_acme_config() {
     log_step "应用 Nginx 配置 (原生 ACME 模块)..."
@@ -1020,9 +1010,6 @@ install_pigsty() {
     # 使用 Supabase 配置模板
     log_info "配置 Supabase 模板..."
     ./configure -i "$INTERNAL_IP" -c app/supa
-    
-    # 注入 Lua 逻辑到模板
-    inject_lua_config
     
     # 修改配置文件
     update_pigsty_config
