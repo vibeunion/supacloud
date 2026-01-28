@@ -1,0 +1,103 @@
+name: Mirror Garage Binaries
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Garage version to mirror (e.g., v1.0.1)'
+        required: true
+        default: 'v1.0.1'
+
+permissions:
+  contents: write
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check if release exists
+        id: check_release
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          TAG_NAME="garage-${VERSION}"
+          
+          echo "Checking if release $TAG_NAME exists..."
+          
+          if gh release view "$TAG_NAME" >/dev/null 2>&1; then
+            echo "Release $TAG_NAME already exists. Skipping."
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "Release $TAG_NAME does not exist. Proceeding."
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Download Binaries
+        if: steps.check_release.outputs.exists == 'false'
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          # Garage official URL includes 'v' in the path, e.g., /_releases/v1.0.1/...
+          # So we use VERSION as is (assuming input has 'v')
+          
+          mkdir -p dist
+          
+          # Map arch names if necessary, but Garage uses standard names in URL
+          ARCHS=("x86_64" "aarch64" "i686" "armv6")
+          
+          for ARCH in "${ARCHS[@]}"; do
+            URL="https://garagehq.deuxfleurs.fr/_releases/${VERSION}/${ARCH}-unknown-linux-musl/garage"
+            FILENAME="garage-${VERSION}-linux-${ARCH}"
+            
+            # Special case for x86_64 -> amd64 naming convention if desired, 
+            # but user sample kept "linux-${ARCH}".
+            # However, in install.sh, we might look for specific names.
+            # Let's stick to the user's sample output name format: garage-${VERSION}-linux-${ARCH}
+            # Note: install.sh usually expects specific names. 
+            # Let's check install.sh logic later. For now, use user's naming.
+            
+            # Correction: x86_64 is usually amd64 in many scripts.
+            # User sample: FILENAME="garage-${VERSION}-linux-${ARCH}" (where ARCH is x86_64)
+            # install.sh uses: GARAGE_MIRROR_URL=".../garage-${VERSION}-linux-${GARAGE_ARCH_SUFFIX}"
+            # where suffix is amd64 for x86_64.
+            # So we should rename x86_64 to amd64, aarch64 to arm64 to match install.sh expectations if we want to be helpful.
+            # But the user specifically provided a script snippet. I will stick to their snippet BUT
+            # I will modify the FILENAME to match what typical install scripts (and likely his) expect, 
+            # OR I will keep his script and ensure install.sh matches it.
+            # The user provided: FILENAME="garage-${VERSION}-linux-${ARCH}"
+            # And then: GARAGE_DOWNLOAD_URL=".../garage-v1.0.1-linux-amd64"
+            # So he expects 'amd64' not 'x86_64' in the final filename!
+            
+            SUFFIX="${ARCH}"
+            if [ "$ARCH" == "x86_64" ]; then SUFFIX="amd64"; fi
+            if [ "$ARCH" == "aarch64" ]; then SUFFIX="arm64"; fi
+            
+            FILENAME="garage-${VERSION}-linux-${SUFFIX}"
+            
+            echo "Downloading ${ARCH} from ${URL}..."
+            echo "Saving as ${FILENAME}"
+            
+            curl -L --fail "$URL" -o "dist/${FILENAME}"
+            chmod +x "dist/${FILENAME}"
+            
+            # Simple verification
+            file "dist/${FILENAME}"
+          done
+          
+          ls -lh dist/
+
+      - name: Create Release and Upload
+        if: steps.check_release.outputs.exists == 'false'
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: garage-${{ github.event.inputs.version }}
+          name: Garage ${{ github.event.inputs.version }} Mirror
+          body: |
+            Mirror of Garage ${{ github.event.inputs.version }} binaries.
+            Source: https://garagehq.deuxfleurs.fr/_releases/${{ github.event.inputs.version }}/
+          files: dist/*
+          draft: false
+          prerelease: false
