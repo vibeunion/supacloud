@@ -1336,6 +1336,56 @@ configure_s3_in_pigsty() {
     log_info "  端点: ${S3_ENDPOINT}"
 }
 
+# ========== 配置 Analytics ==========
+configure_analytics() {
+    log_step "配置 Analytics (Logflare)..."
+    
+    SUPABASE_ENV=~/pigsty/app/supabase/.env
+    
+    if [[ "${ENABLE_ANALYTICS:-true}" == "true" ]]; then
+        log_info "启用 Analytics..."
+        
+        # 确保 .env 文件存在
+        if [[ ! -f "$SUPABASE_ENV" ]]; then
+            log_warn "未找到 Supabase .env 文件，跳过 Analytics 配置"
+            return
+        fi
+        
+        # 启用 Logflare 容器
+        sed -i "s|ENABLE_ANALYTICS=.*|ENABLE_ANALYTICS=true|g" "$SUPABASE_ENV" 2>/dev/null || echo "ENABLE_ANALYTICS=true" >> "$SUPABASE_ENV"
+        
+        # 配置后端
+        if [[ "${ANALYTICS_BACKEND:-postgres}" == "postgres" ]]; then
+            log_info "配置 Analytics 后端为 Postgres (轻量级)..."
+            # 设置 Logflare 后端类型
+            sed -i "s|LOGFLARE_BACKEND_TYPE=.*|LOGFLARE_BACKEND_TYPE=postgres|g" "$SUPABASE_ENV" 2>/dev/null || echo "LOGFLARE_BACKEND_TYPE=postgres" >> "$SUPABASE_ENV"
+            
+            # 确保 Postgres 连接信息正确 (通常复用 POSTGRES_URL)
+            # Logflare 需要 DB 连接字符串
+            if ! grep -q "LOGFLARE_DATABASE_URL" "$SUPABASE_ENV"; then
+                 echo "LOGFLARE_DATABASE_URL=postgresql://postgres:${POSTGRES_PASSWORD}@${INTERNAL_IP}:5432/postgres" >> "$SUPABASE_ENV"
+            else
+                 sed -i "s|LOGFLARE_DATABASE_URL=.*|LOGFLARE_DATABASE_URL=postgresql://postgres:${POSTGRES_PASSWORD}@${INTERNAL_IP}:5432/postgres|g" "$SUPABASE_ENV"
+            fi
+            
+        elif [[ "${ANALYTICS_BACKEND}" == "bigquery" ]]; then
+            log_info "配置 Analytics 后端为 BigQuery..."
+            sed -i "s|LOGFLARE_BACKEND_TYPE=.*|LOGFLARE_BACKEND_TYPE=bigquery|g" "$SUPABASE_ENV"
+            # BigQuery 需要额外的凭据配置，这里假设用户会手动补充或通过其他方式注入
+            log_warn "使用 BigQuery 需要配置 Google Cloud 凭据，请检查 .env 文件"
+        fi
+        
+    else
+        log_info "禁用 Analytics (Logflare)..."
+        # 在 .env 中禁用
+        sed -i "s|ENABLE_ANALYTICS=.*|ENABLE_ANALYTICS=false|g" "$SUPABASE_ENV" 2>/dev/null || echo "ENABLE_ANALYTICS=false" >> "$SUPABASE_ENV"
+        
+        # 如果是 docker-compose，可能需要注释掉服务 (取决于模板实现)
+        # 简单起见，我们只设置环境变量，假设 docker-compose.yml 有对应的条件启动逻辑
+        # 或者在启动后手动停止容器
+    fi
+}
+
 # ========== 手动启动 Supabase ==========
 manual_start_supabase() {
     log_step "手动启动 Supabase..."
@@ -1620,6 +1670,7 @@ main() {
     configure_edge_runtime
     install_pigsty
     deploy_mcp_function
+    configure_analytics
     configure_pg_hba
     
     # 在所有安装完成后，应用最终的网关路由和 SSL 配置
