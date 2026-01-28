@@ -1134,53 +1134,55 @@ install_pigsty() {
     # 修改配置文件
     update_pigsty_config
     
-    # 安装 Pigsty
     log_info "安装 Pigsty (这可能需要 10-20 分钟)..."
-    if [[ -f "./install.yml" ]]; then
-        # 尝试检测 ansible-playbook
-        if command -v ansible-playbook &> /dev/null; then
-            ansible-playbook install.yml
-        else
-            log_warn "未找到 ansible-playbook，尝试直接运行 ./install.yml"
-            ./install.yml
-        fi
+    PIGSTY_ENTRYPOINT=""
+    if [[ -f "deploy.yml" ]]; then
+        PIGSTY_ENTRYPOINT="deploy.yml"
     elif [[ -f "install.yml" ]]; then
-        ansible-playbook install.yml
-    else
-        log_warn "未找到 install.yml，尝试使用 make install"
-        if make -n install &> /dev/null; then
-             make install
+        PIGSTY_ENTRYPOINT="install.yml"
+    fi
+
+    if [[ -n "$PIGSTY_ENTRYPOINT" ]]; then
+        if command -v ansible-playbook &> /dev/null; then
+            ansible-playbook "$PIGSTY_ENTRYPOINT"
+        elif [[ -x "./$PIGSTY_ENTRYPOINT" ]]; then
+            "./$PIGSTY_ENTRYPOINT"
         else
-             log_error "未找到有效的安装入口 (install.yml 或 make install)"
-             exit 1
+            log_error "未找到 ansible-playbook，且 $PIGSTY_ENTRYPOINT 不可执行"
+            exit 1
         fi
-    fi
-    
-    # 安装 Docker
-    log_info "配置 Docker..."
-    if [[ -f "./docker.yml" ]]; then
-        ./docker.yml || true
-    elif [[ -f "docker.yml" ]]; then
-        ansible-playbook docker.yml || true
     else
-        log_warn "未找到 docker.yml，跳过 Docker 配置"
+        log_error "未找到 Pigsty 安装入口 (deploy.yml / install.yml)"
+        log_info "当前 Pigsty 目录内容:"
+        ls -la
+        exit 1
     fi
-    
-    # 启动 Supabase
-    log_info "启动 Supabase..."
-    if [[ -f "./app.yml" ]]; then
-        ./app.yml || {
-            log_warn "app.yml 失败，尝试手动启动..."
+
+    if [[ "$PIGSTY_ENTRYPOINT" != "deploy.yml" ]]; then
+        log_info "配置 Docker..."
+        if [[ -f "./docker.yml" ]]; then
+            ./docker.yml || true
+        elif [[ -f "docker.yml" ]]; then
+            ansible-playbook docker.yml || true
+        else
+            log_warn "未找到 docker.yml，跳过 Docker 配置"
+        fi
+
+        log_info "启动 Supabase..."
+        if [[ -f "./app.yml" ]]; then
+            ./app.yml || {
+                log_warn "app.yml 失败，尝试手动启动..."
+                manual_start_supabase
+            }
+        elif [[ -f "app.yml" ]]; then
+            ansible-playbook app.yml || {
+                log_warn "app.yml 失败，尝试手动启动..."
+                manual_start_supabase
+            }
+        else
+            log_warn "未找到 app.yml，尝试手动启动..."
             manual_start_supabase
-        }
-    elif [[ -f "app.yml" ]]; then
-        ansible-playbook app.yml || {
-            log_warn "app.yml 失败，尝试手动启动..."
-            manual_start_supabase
-        }
-    else
-        log_warn "未找到 app.yml，尝试手动启动..."
-        manual_start_supabase
+        fi
     fi
 }
 
