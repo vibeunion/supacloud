@@ -608,9 +608,12 @@ EOF
 install_s3_storage() {
     log_step "配置 S3 存储 (${S3_STORAGE_TYPE:-minio})..."
     
-    case "${S3_STORAGE_TYPE:-rustfs}" in
+    case "${S3_STORAGE_TYPE:-minio}" in
         minio)
             log_info "使用 Pigsty 内置 MinIO，无需额外安装"
+            ;;
+        garage)
+            install_garage
             ;;
         rustfs)
             install_rustfs
@@ -627,7 +630,129 @@ install_s3_storage() {
 }
 
 # ========== 安装 Garage ==========
-# ========== 安装 Garage (已移除) ==========
+install_garage() {
+    log_step "安装 Garage S3..."
+    
+    GARAGE_VERSION="v1.0.1"
+    GARAGE_ARCH=$(uname -m)
+    
+    # 架构映射
+    case "$GARAGE_ARCH" in
+        x86_64) GARAGE_ARCH="x86_64" ;;
+        aarch64) GARAGE_ARCH="aarch64" ;;
+        *) log_error "不支持的架构: $GARAGE_ARCH"; exit 1 ;;
+    esac
+    
+    # 优先使用配置中的自定义下载地址
+    if [[ -n "$GARAGE_DOWNLOAD_URL" ]]; then
+        GARAGE_URL="$GARAGE_DOWNLOAD_URL"
+    else
+        GARAGE_URL="https://garagehq.deuxfleurs.fr/_releases/${GARAGE_VERSION}/${GARAGE_ARCH}-unknown-linux-musl/garage"
+    fi
+    
+    # 下载 Garage
+    if [[ ! -f /usr/local/bin/garage ]]; then
+        log_info "下载 Garage ${GARAGE_VERSION}..."
+        log_info "下载地址: $GARAGE_URL"
+        
+        if curl -L --progress-bar "$GARAGE_URL" -o /usr/local/bin/garage; then
+            chmod +x /usr/local/bin/garage
+            log_info "Garage 下载成功"
+        else
+            log_error "Garage 下载失败"
+            rm -f /usr/local/bin/garage
+            exit 1
+        fi
+    fi
+    
+    # 创建配置目录
+    mkdir -p /etc/garage /var/lib/garage
+    
+    # 生成配置文件
+    GARAGE_SECRET=$(openssl rand -hex 32)
+    GARAGE_RPC_SECRET=$(openssl rand -hex 32)
+    
+    cat > /etc/garage/garage.toml << EOF
+metadata_dir = "/var/lib/garage/meta"
+data_dir = "/var/lib/garage/data"
+db_engine = "lmdb"
+
+replication_factor = 1
+
+rpc_bind_addr = "[::]:3901"
+rpc_public_addr = "${INTERNAL_IP}:3901"
+rpc_secret = "${GARAGE_RPC_SECRET}"
+
+[s3_api]
+s3_region = "garage"
+api_bind_addr = "[::]:9000"
+root_domain = ".s3.garage.localhost"
+
+[s3_web]
+bind_addr = "[::]:3902"
+root_domain = ".web.garage.localhost"
+
+[admin]
+api_bind_addr = "[::]:3903"
+admin_token = "${GARAGE_SECRET}"
+EOF
+    
+    # 创建 systemd 服务
+    cat > /etc/systemd/system/garage.service << EOF
+[Unit]
+Description=Garage S3-compatible object storage
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/garage -c /etc/garage/garage.toml server
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    
+    # 启动服务
+    systemctl daemon-reload
+    systemctl enable --now garage
+    
+    # 等待启动
+    # 等待启动
+    log_info "等待 Garage 启动 (5s)..."
+    sleep 5
+    
+    # 初始化集群
+    log_info "初始化 Garage 集群..."
+    GARAGE_NODE_ID=$(garage -c /etc/garage/garage.toml node id -q 2>/dev/null | head -1)
+    if [[ -n "$GARAGE_NODE_ID" ]]; then
+        garage -c /etc/garage/garage.toml layout assign -z dc1 -c 1G "$GARAGE_NODE_ID" || true
+        garage -c /etc/garage/garage.toml layout apply --version 1 || true
+    fi
+    
+    # 创建访问密钥
+    log_info "创建 Garage 访问密钥..."
+    GARAGE_KEY_OUTPUT=$(garage -c /etc/garage/garage.toml key create supabase-key 2>/dev/null || true)
+    
+    # 创建 bucket
+    garage -c /etc/garage/garage.toml bucket create supabase-storage || true
+    garage -c /etc/garage/garage.toml bucket create pgsql || true
+    garage -c /etc/garage/garage.toml bucket allow --read --write supabase-storage --key supabase-key || true
+    garage -c /etc/garage/garage.toml bucket allow --read --write pgsql --key supabase-key || true
+    
+    # 保存密钥信息
+    echo "# Garage S3 配置" > /etc/garage/s3-credentials.env
+    echo "S3_ENDPOINT=http://${INTERNAL_IP}:9000" >> /etc/garage/s3-credentials.env
+    garage -c /etc/garage/garage.toml key info supabase-key 2>/dev/null | grep -E "Key ID|Secret key" >> /etc/garage/s3-credentials.env || true
+    
+    # 设置环境变量供后续使用
+    S3_ENDPOINT="http://${INTERNAL_IP}:9000"
+    S3_REGION="garage"
+    
+    log_info "Garage 安装完成"
+    log_info "  端点: http://${INTERNAL_IP}:9000"
+    log_info "  密钥信息: /etc/garage/s3-credentials.env"
+}
 
 # ========== 安装 RustFS ==========
 install_rustfs() {
@@ -736,6 +861,7 @@ configure_external_s3() {
 }
 
 # ========== 安装 Pigsty ==========
+# ========== 操作系统全兼容 OpenResty 劫持逻辑 ==========
 # ========== 安装 Nginx Mainline (带 ACME 模块) ==========
 install_nginx_mainline() {
     log_step "正在安装 Nginx Mainline (带 ACME 模块)..."
@@ -796,24 +922,8 @@ EOF
             echo -e "Package: *\nPin: origin nginx.org\nPin-Priority: 900\n" \
                 | tee /etc/apt/preferences.d/99nginx
 
-            # 增加重试逻辑，防止 nginx.org 连接失败
-            local retry_count=0
-            local max_retries=3
-            while [ $retry_count -lt $max_retries ]; do
-                if apt-get update && apt-get install -y nginx nginx-module-acme; then
-                    log_info "Nginx 安装成功"
-                    break
-                else
-                    retry_count=$((retry_count + 1))
-                    log_warn "Nginx 仓库更新失败，正在进行第 $retry_count 次重试..."
-                    sleep 5
-                fi
-                if [ $retry_count -eq $max_retries ]; then
-                    log_error "Nginx 仓库 $(lsb_release -cs) 无法连接，请检查网络或 nginx.org 状态"
-                    log_warn "尝试跳过仓库更新，使用系统默认仓库继续（可能缺少 ACME 模块）..."
-                    apt-get install -y nginx || true
-                fi
-            done
+            apt-get update
+            apt-get install -y nginx nginx-module-acme
             ;;
         
         *)
@@ -830,6 +940,15 @@ EOF
 
 
 
+# ========== 注入 Lua 自动 SSL 逻辑到 Pigsty 模板 (已弃用) ==========
+inject_lua_config() {
+    log_info "跳过模板注入，将在安装后直接应用最终配置..."
+    log_info "跳过模板注入，将在安装后直接应用最终配置..."
+    # 我们改用 apply_nginx_acme_config 直接覆盖配置，更加稳健
+    return 0
+}
+
+# ========== 执行 Nginx 二进制劫持 ==========
 # ========== 应用 Nginx ACME 配置 ==========
 apply_nginx_acme_config() {
     log_step "应用 Nginx 配置 (原生 ACME 模块)..."
@@ -993,12 +1112,6 @@ install_pigsty() {
         curl -fsSL https://repo.pigsty.cc/get | bash
     else
         log_info "Pigsty 目录已存在"
-        # 简单校验 v4
-        if [[ ! -f "$HOME/pigsty/infra.yml" ]]; then
-             log_warn "Pigsty 目录存在但缺少 infra.yml，尝试重新下载..."
-             rm -rf "$HOME/pigsty"
-             curl -fsSL https://repo.pigsty.cc/get | bash
-        fi
     fi
     
     cd ~/pigsty
@@ -1011,139 +1124,26 @@ install_pigsty() {
     log_info "配置 Supabase 模板..."
     ./configure -i "$INTERNAL_IP" -c app/supa
     
+    # 注入 Lua 逻辑到模板
+    inject_lua_config
+    
     # 修改配置文件
     update_pigsty_config
     
-    # 放宽 Supabase 启动时的健康检查限制 (提前应用，防止 app.yml 阻塞)
-    # 覆盖 Pigsty 模板中的 healthcheck 设置
-    log_info "预防性放宽 Supabase 模板中的健康检查限制..."
-    find app/supabase -name "docker-compose.yml" -o -name "docker-compose.yaml" | xargs -r sed -i 's/condition: service_healthy/condition: service_started/g'
-    
-    # 精简 Analytics 服务 (如果未启用)
-    # 默认为 off，但为了用户体验，我们建议生产环境使用 postgres
-    # 这里我们严格遵循 env 中的定义，如果没有定义则默认为 "postgres" (保持与 config.env 一致)
-    local analytics_mode="${ENABLE_ANALYTICS:-postgres}"
-
-    if [[ "$analytics_mode" != "on" ]]; then
-        log_info "正在精简/优化 Analytics 服务 (模式: ${analytics_mode})..."
-
-        # 复制 Bun 清理脚本到临时目录
-        local cleanup_script="/tmp/cleanup-compose.ts"
-        cat << 'BUNEOF' > "$cleanup_script"
-import { parse, stringify } from "yaml";
-const file = Bun.argv[2];
-const mode = Bun.argv[3] || "off";
-if (!file) process.exit(1);
-try {
-    const content = await Bun.file(file).text();
-    const data = parse(content) as any;
-    if (!data.services) process.exit(0);
-    const toRemove = mode === "off" ? ["analytics", "logflare", "vector"] : ["analytics"];
-    for (const svc of toRemove) {
-        if (data.services[svc]) { delete data.services[svc]; console.log(`Removed: ${svc}`); }
-    }
-    for (const [_, conf] of Object.entries(data.services) as [string, any][]) {
-        if (!conf.depends_on) continue;
-        if (Array.isArray(conf.depends_on)) {
-            conf.depends_on = conf.depends_on.filter((d: string) => !toRemove.includes(d));
-            if (!conf.depends_on.length) delete conf.depends_on;
-        } else if (typeof conf.depends_on === "object") {
-            for (const svc of toRemove) { if (svc in conf.depends_on) delete conf.depends_on[svc]; }
-            if (!Object.keys(conf.depends_on).length) delete conf.depends_on;
-        }
-    }
-    if (mode === "postgres") {
-        for (const [_, conf] of Object.entries(data.services) as [string, any][]) {
-            if (conf.environment) {
-                if (Array.isArray(conf.environment)) {
-                    conf.environment = conf.environment.map((e: string) =>
-                        e.includes("LOGFLARE_URL") && e.includes("analytics") ? e.replace(/analytics:\d+/, "supabase-db:5432") : e);
-                } else {
-                    for (const [k, v] of Object.entries(conf.environment)) {
-                        if (k === "LOGFLARE_URL" && typeof v === "string" && v.includes("analytics"))
-                            conf.environment[k] = v.replace(/analytics:\d+/, "supabase-db:5432");
-                    }
-                }
-            }
-        }
-    }
-    await Bun.write(file, stringify(data, { lineWidth: 0 }));
-} catch (e) { console.error(e); process.exit(1); }
-BUNEOF
-
-        find app/supabase -name "docker-compose.yml" -o -name "docker-compose.yaml" | while read -r f; do
-            log_info "清理: $f"
-            bun run "$cleanup_script" "$f" "$analytics_mode"
-
-            if [[ "${analytics_mode}" == "postgres" ]]; then
-                # 配置 Vector 将日志写入 Postgres
-                local vector_cfg_path="$(dirname "$f")/vector/vector.yaml"
-                mkdir -p "$(dirname "$vector_cfg_path")"
-
-                log_info "注入 Vector Postgres Sink 配置: $vector_cfg_path"
-                cat > "$vector_cfg_path" << EOF
-sources:
-  docker_logs:
-    type: docker_logs
-
-transforms:
-  enriched_logs:
-    type: remap
-    inputs: ["docker_logs"]
-    source: |
-      .timestamp = .timestamp || now()
-      .level = .level || "info"
-      .event_message = .message
-      .metadata = {
-        "container_name": .container_name,
-        "image": .image,
-        "host": .host
-      }
-      del(.message)
-
-sinks:
-  postgres:
-    type: postgresql
-    inputs: ["enriched_logs"]
-    connection_string: "postgresql://postgres:${POSTGRES_PASSWORD}@${INTERNAL_IP}:5432/postgres"
-    schema: "logs"
-    table: "entries"
-    batch:
-      max_events: 50
-EOF
-            fi
-        done
-
-        rm -f "$cleanup_script"
-        log_info "Analytics 服务精简完成 (${analytics_mode})"
-    fi
-    
     # 安装 Pigsty
     log_info "安装 Pigsty (这可能需要 10-20 分钟)..."
-    # 安装 Pigsty v4 基础设置
-    log_info "安装 Pigsty Infra (v4)..."
-    if [[ -f "infra.yml" ]]; then
-        ansible-playbook infra.yml
-    else
-        log_error "找不到 infra.yml (Pigsty v4 核心 Playbook)，路径: $(pwd)"
-        ls -la
-        exit 1
-    fi
+    ./install.yml
     
     # 安装 Docker
     log_info "配置 Docker..."
-    if [[ -f "docker.yml" ]]; then
-        ansible-playbook docker.yml || true
-    fi
+    ./docker.yml || true
     
     # 启动 Supabase
     log_info "启动 Supabase..."
-    if [[ -f "app.yml" ]]; then
-        ansible-playbook app.yml || {
-            log_warn "app.yml 失败，尝试手动启动..."
-            manual_start_supabase
-        }
-    fi
+    ./app.yml || {
+        log_warn "app.yml 失败，尝试手动启动..."
+        manual_start_supabase
+    }
 }
 
 # ========== 更新 Pigsty 配置 ==========
@@ -1188,29 +1188,10 @@ update_pigsty_config() {
         sed -i "s|DASHBOARD_PASSWORD: pigsty|DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD}|g" "$PIGSTY_YML"
     fi
     
-    # 更新密码配置
-    if [[ -n "$DASHBOARD_PASSWORD" && "$DASHBOARD_PASSWORD" != "your-strong-password" ]]; then
-        sed -i "s|DASHBOARD_PASSWORD: pigsty|DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD}|g" "$PIGSTY_YML"
+    if [[ -n "$POSTGRES_PASSWORD" && "$POSTGRES_PASSWORD" != "DBUser.Supa" ]]; then
+        sed -i "s|POSTGRES_PASSWORD: DBUser.Supa|POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}|g" "$PIGSTY_YML"
     fi
     
-    # 自动生成 Postgres 密码 (如果未设置)
-    if [[ -z "$POSTGRES_PASSWORD" || "$POSTGRES_PASSWORD" == "DBUser.Supa" ]]; then
-        log_info "自动生成 PostgreSQL 强密码..."
-        POSTGRES_PASSWORD=$(openssl rand -base64 16 | tr -dc 'a-zA-Z0-9')
-        log_info "生成的 Postgres 密码: ${POSTGRES_PASSWORD}"
-        
-        # 保存到 install.conf (如果有的话) 或输出到文件以便后续查看
-        echo "POSTGRES_PASSWORD=${POSTGRES_PASSWORD}" >> ~/supacloud_credentials.env
-    fi
-
-    # 更新 Pigsty 配置文件中的 Postgres 密码
-    sed -i "s|POSTGRES_PASSWORD: DBUser.Supa|POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}|g" "$PIGSTY_YML"
-    
-    # 同时更新 Supabase .env (如果存在)
-    if [[ -f ~/pigsty/app/supabase/.env ]]; then
-         sed -i "s|POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=${POSTGRES_PASSWORD}|g" ~/pigsty/app/supabase/.env
-    fi
-
     if [[ -n "$GRAFANA_PASSWORD" && "$GRAFANA_PASSWORD" != "pigsty" ]]; then
         sed -i "s|grafana_admin_password: pigsty|grafana_admin_password: ${GRAFANA_PASSWORD}|g" "$PIGSTY_YML"
     fi
@@ -1230,52 +1211,18 @@ update_pigsty_config() {
         sed -i "s|SERVICE_ROLE_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.*|SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY}|g" "$PIGSTY_YML"
     fi
     
-    if [[ "${S3_STORAGE_TYPE:-rustfs}" != "minio" ]]; then
-        configure_s3_in_pigsty
+    # 配置 PostgreSQL WAL 日志限制 (max_wal_size = 2GB)
+    # 解决日志占满磁盘问题
+    if ! grep -q "max_wal_size" "$PIGSTY_YML"; then
+        log_info "配置 PostgreSQL WAL 日志限制 (2GB)..."
+        # 在 DASHBOARD_PASSWORD 下方插入 patroni 配置
+        # 使用 sed 保持缩进
+        sed -i 's/^\([[:space:]]*\)DASHBOARD_PASSWORD:.*$/&\n\1patroni:\n\1  postgresql:\n\1    parameters:\n\1      max_wal_size: 2GB\n\1      min_wal_size: 1GB/' "$PIGSTY_YML"
     fi
     
-    # 修复 Analytics (Logflare) 健康检查失败问题
-    # Logflare 需要 LOGFLARE_API_KEY 才能正常启动
-    if ! grep -q "LOGFLARE_API_KEY:" "$PIGSTY_YML"; then
-        log_info "注入 LOGFLARE_API_KEY 以修复 Analytics 启动..."
-        # 生成一个随机 Key
-        local lf_key=$(openssl rand -hex 16)
-        # 追加到文件末尾 (或者替换如果存在但为空)
-        # 尝试插入到 pigsty.yml 的 global vars 区域
-        # 假设文件里有 'pg_version:' 这样的全局变量
-        if grep -q "pg_version:" "$PIGSTY_YML"; then
-             # 仅当文件中不存在该 key 时才插入，防止重复
-             if ! grep -q "LOGFLARE_API_KEY:" "$PIGSTY_YML"; then
-                 sed -i "s|pg_version:|LOGFLARE_API_KEY: ${lf_key}\n    pg_version:|g" "$PIGSTY_YML"
-             fi
-        else
-             # 如果找不到 pg_version，则追加到最后，但尝试添加 vars 头部(如果有必要)
-             # 对于 Pigsty v4，这通常是可以接受的，或者我们直接写到 infra.yml 参数
-             if ! grep -q "LOGFLARE_API_KEY:" "$PIGSTY_YML"; then
-                echo "LOGFLARE_API_KEY: ${lf_key}" >> "$PIGSTY_YML"
-             fi
-        fi
-        # 注意: 如果是在 vars 部分，应该缩进。Pigsty 的结构通常是 all: vars: ...
-        # 简单追加到文件末尾可能导致 Ansible 解析为 group 错误
-        # 更好的做法是找到 'all:' 下的 'vars:' 块并插入
-        # 这里为了稳妥，尝试用 ansible 能够识别的变量文件方式，或者插入到合适位置
-        # 临时修复：不直接追加到末尾，而是尝试替换一个已知变量行的下一行
-        # 或者追加到 infra.yml 使用的 extra-vars 文件中 (如果有)
-        
-        # 尝试插入到 pigsty.yml 的 global vars 区域
-        # 假设文件里有 'pg_version:' 这样的全局变量
-        if grep -q "pg_version:" "$PIGSTY_YML"; then
-             sed -i "s|pg_version:|LOGFLARE_API_KEY: ${lf_key}\n    pg_version:|g" "$PIGSTY_YML"
-        fi
-        
-        # 同时更新 Supabase .env (如果存在)
-        if [[ -f ~/pigsty/app/supabase/.env ]]; then
-             sed -i "s|LOGFLARE_API_KEY=.*|LOGFLARE_API_KEY=${lf_key}|g" ~/pigsty/app/supabase/.env
-             # 如果 .env 中没有这个变量，追加它
-             if ! grep -q "LOGFLARE_API_KEY" ~/pigsty/app/supabase/.env; then
-                 echo "LOGFLARE_API_KEY=${lf_key}" >> ~/pigsty/app/supabase/.env
-             fi
-        fi
+    # 配置非 MinIO S3 存储
+    if [[ "${S3_STORAGE_TYPE:-minio}" != "minio" ]]; then
+        configure_s3_in_pigsty
     fi
     
     log_info "配置更新完成"
@@ -1290,6 +1237,16 @@ configure_s3_in_pigsty() {
     
     # 根据存储类型获取凭据
     case "$S3_STORAGE_TYPE" in
+        garage)
+            if [[ -f /etc/garage/s3-credentials.env ]]; then
+                source /etc/garage/s3-credentials.env 2>/dev/null || true
+                # 从 Garage 获取密钥
+                S3_ACCESS_KEY=$(garage -c /etc/garage/garage.toml key info supabase-key 2>/dev/null | grep "Key ID" | awk '{print $3}' || echo "")
+                S3_SECRET_KEY=$(garage -c /etc/garage/garage.toml key info supabase-key 2>/dev/null | grep "Secret key" | awk '{print $3}' || echo "")
+            fi
+            S3_ENDPOINT="http://${INTERNAL_IP}:9000"
+            S3_REGION="garage"
+            ;;
         rustfs)
             if [[ -f /etc/rustfs-credentials.env ]]; then
                 source /etc/rustfs-credentials.env
@@ -1350,26 +1307,11 @@ manual_start_supabase() {
     # 修复 .env 中的 IP
     sed -i "s|POSTGRES_HOST=10.10.10.10|POSTGRES_HOST=${INTERNAL_IP}|g" .env
     
-    # 确保 LOGFLARE_API_KEY 存在 (再次检查)
-    if ! grep -q "LOGFLARE_API_KEY" .env; then
-         echo "LOGFLARE_API_KEY=$(openssl rand -hex 16)" >> .env
-    fi
-    
-    # 放宽 Supabase 启动时的健康检查限制 (防止 Analytics/Logflare 阻塞所有服务)
-    # 将所有 condition: service_healthy 替换为 condition: service_started
-    if [[ -f docker-compose.yml ]]; then
-        log_info "放宽 docker-compose.yml 健康检查限制..."
-        sed -i 's/condition: service_healthy/condition: service_started/g' docker-compose.yml
-    fi
-    
     # 启动服务
-    if docker compose version &> /dev/null; then
-        docker compose up -d
-    elif command -v docker-compose &> /dev/null; then
+    if command -v docker-compose &> /dev/null; then
         docker-compose up -d
     else
-        log_error "未找到 docker compose 或 docker-compose 命令，无法启动 Supabase"
-        return 1
+        /usr/local/bin/docker-compose up -d
     fi
 }
 
@@ -1452,211 +1394,6 @@ EOF
             log_info "已部署 MCP Function 到 Bun 运行时: $BUN_MCP_DIR"
         fi
     fi
-}
-
-# ========== 确保安装 Bun ==========
-ensure_bun_installed() {
-    log_step "检查 Bun 运行时..."
-    if command -v bun &> /dev/null; then
-        log_info "Bun 已安装: $(bun --version)"
-    else
-        log_warn "未检测到 Bun，正在尝试自动安装..."
-        # 安装 Bun (官方脚本)
-        # 注意: 某些国内服务器可能需要镜像，这里先尝试官方
-        curl -fsSL https://bun.sh/install | bash || {
-            log_error "Bun 官方安装脚本执行失败"
-            return 1
-        }
-        
-        # 将 Bun 路径添加到当前会话
-        export BUN_INSTALL="$HOME/.bun"
-        export PATH="$BUN_INSTALL/bin:$PATH"
-        
-        if command -v bun &> /dev/null; then
-            log_info "Bun 安装成功: $(bun --version)"
-        else
-            log_error "Bun 安装后仍无法识别，请手动安装 Bun 后重试"
-            return 1
-        fi
-    fi
-}
-
-# ========== 部署 Supacloud Manager ==========
-install_manager() {
-    log_step "安装 Supacloud Manager..."
-
-    # 1. 确定安装源和目标
-    REPO_ROOT="$(dirname "$SCRIPT_DIR")"
-    INSTALL_DIR="/opt/supacloud"
-    BIN_SOURCE="$REPO_ROOT/bin/supacloud"
-
-    # 检查二进制文件是否存在
-    if [[ ! -f "$BIN_SOURCE" ]]; then
-        log_warn "未找到 Manager二进制文件: $BIN_SOURCE"
-        log_warn "尝试自动构建 (需要 Bun)..."
-        
-        if command -v bun &> /dev/null; then
-             cd "$REPO_ROOT/manager"
-             bun install
-             bun run build
-             cd -
-        else
-            log_error "未找到 Bun，且没有预编译的二进制文件。跳过 Manager 安装。"
-            return 1
-        fi
-    fi
-
-    # 2. 准备目录
-    mkdir -p "$INSTALL_DIR/bin"
-    mkdir -p "$INSTALL_DIR/instances"
-    mkdir -p "$INSTALL_DIR/run" # PID file etc
-
-    # 3. 复制文件
-    log_info "复制文件到 $INSTALL_DIR..."
-    cp "$BIN_SOURCE" "$INSTALL_DIR/bin/supacloud"
-    chmod +x "$INSTALL_DIR/bin/supacloud"
-
-    # 复制 templates (包含 project 和 base 模板)
-    if [[ -d "$REPO_ROOT/templates" ]]; then
-        rm -rf "$INSTALL_DIR/templates"
-        cp -r "$REPO_ROOT/templates" "$INSTALL_DIR/"
-    else
-        log_error "找不到 templates 目录！"
-        return 1
-    fi
-
-    # 4. 创建 Systemd 服务
-    cat > /etc/systemd/system/supacloud-manager.service << EOF
-[Unit]
-Description=Supacloud Multi-tenant Manager
-After=network.target docker.service
-Requires=docker.service
-
-[Service]
-Type=simple
-User=root
-WorkingDirectory=$INSTALL_DIR
-Environment="SUPACLOUD_HOME=$INSTALL_DIR"
-Environment="NODE_ENV=production"
-Environment="PORT=8888"
-Environment="INTERNAL_IP=${INTERNAL_IP}"
-Environment="S3_STORAGE_TYPE=${S3_STORAGE_TYPE:-rustfs}"
-Environment="ENABLE_ANALYTICS=${ENABLE_ANALYTICS:-postgres}"
-# 如果使用 bun 运行源码:
-# ExecStart=/usr/local/bin/bun run $INSTALL_DIR/manager/index.tsx
-# 使用编译后的二进制:
-ExecStart=$INSTALL_DIR/bin/supacloud start
-Restart=always
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-    # 5. 启动服务
-    systemctl daemon-reload
-    systemctl enable --now supacloud-manager
-    
-    # 等待启动并检查
-    sleep 3
-    if systemctl is-active --quiet supacloud-manager; then
-        log_info "Supacloud Manager 已启动 (端口 8888)"
-    else
-        log_error "Supacloud Manager 启动失败，请检查: systemctl status supacloud-manager"
-    fi
-}
-
-# ========== 配置 WAL 日志监控与自动清理 ==========
-setup_wal_monitor() {
-    log_step "配置 WAL 日志监控与预防机制..."
-    
-    # 1. 创建自动清理脚本
-    cat > /usr/local/bin/clean_inactive_wal_slots.sh << 'EOF'
-#!/bin/bash
-# 自动清理 PostgreSQL 无效复制槽以防止 WAL 爆满
-# 由 install.sh 自动生成，支持 Pigsty 本地部署和 Docker 容器部署
-
-LOG_FILE="/var/log/wal_cleaner.log"
-
-# 定义执行 SQL 的函数
-run_sql() {
-    local sql="$1"
-    
-    # 1. 尝试 Pigsty / 本地 Postgres 用户方式
-    if id "postgres" &>/dev/null && pgrep -u postgres postgres &>/dev/null; then
-        su - postgres -c "psql -d postgres -t -c \"$sql\"" 2>>"$LOG_FILE"
-        return $?
-    fi
-    
-    # 2. 尝试 Docker 容器
-    if command -v docker &>/dev/null && docker ps | grep -q "supabase-db"; then
-        docker exec supabase-db psql -U postgres -d postgres -t -c "$sql" 2>>"$LOG_FILE"
-        return $?
-    fi
-    
-    # 3. 尝试 Podman 容器
-    if command -v podman &>/dev/null && podman ps | grep -q "supabase-db"; then
-        podman exec supabase-db psql -U postgres -d postgres -t -c "$sql" 2>>"$LOG_FILE"
-        return $?
-    fi
-    
-    echo "Error: No database connection method found." >> "$LOG_FILE"
-    return 1
-}
-
-# 获取无效且长期未活动的槽位 (active=f)
-SLOTS=$(run_sql "SELECT slot_name FROM pg_replication_slots WHERE active = 'f';")
-
-for slot in $SLOTS; do
-    # 去除空格和换行
-    slot=$(echo "$slot" | xargs)
-    if [[ -n "$slot" ]]; then
-        echo "$(date '+%Y-%m-%d %H:%M:%S') [WARN] 发现不活动复制槽: $slot，正在删除..." >> "$LOG_FILE"
-        
-        # 删除命令需要转义引号，稍微复杂一点，直接再次调用 run_sql
-        if run_sql "SELECT pg_drop_replication_slot('$slot');"; then
-             echo "$(date '+%Y-%m-%d %H:%M:%S') [INFO] 成功删除复制槽: $slot" >> "$LOG_FILE"
-             # 触发检查点以立即释放空间
-             run_sql "CHECKPOINT;"
-        else
-             echo "$(date '+%Y-%m-%d %H:%M:%S') [ERROR] 删除复制槽失败: $slot" >> "$LOG_FILE"
-        fi
-    fi
-done
-EOF
-
-    chmod +x /usr/local/bin/clean_inactive_wal_slots.sh
-    
-    # 2. 添加定时任务 (Cron) - 每小时执行一次
-    if command -v crontab &> /dev/null; then
-        if ! crontab -l 2>/dev/null | grep -q "clean_inactive_wal_slots.sh"; then
-            (crontab -l 2>/dev/null; echo "0 * * * * /usr/local/bin/clean_inactive_wal_slots.sh") | crontab -
-            log_info "已添加定时任务: 每小时清理无效复制槽"
-        else
-            log_info "定时任务已存在，通过检查"
-        fi
-    else
-        log_warn "未找到 crontab，无法配置自动清理任务，请手动安装 cronie"
-    fi
-    
-    # 3. 预防性配置: max_slot_wal_keep_size (PostgreSQL 13+)
-    log_info "配置 PostgreSQL max_slot_wal_keep_size 防护 (异步执行)..."
-    
-    (
-        sleep 60
-        # 尝试配置，支持本地和容器
-        CONFIG_SQL="ALTER SYSTEM SET max_slot_wal_keep_size = '10GB'; SELECT pg_reload_conf();"
-        
-        if id "postgres" &>/dev/null; then
-            su - postgres -c "psql -c \"$CONFIG_SQL\""
-        elif command -v docker &>/dev/null && docker ps | grep -q "supabase-db"; then
-            docker exec supabase-db psql -U postgres -c "$CONFIG_SQL"
-        elif command -v podman &>/dev/null && podman ps | grep -q "supabase-db"; then
-            podman exec supabase-db psql -U postgres -c "$CONFIG_SQL"
-        fi
-        
-        echo "Postgres WAL protection configured." >> /var/log/wal_cleaner.log
-    ) > /dev/null 2>&1 &
 }
 
 # ========== 配置 PG HBA 白名单 ==========
@@ -1784,19 +1521,16 @@ main() {
     check_config
     check_system
     setup_swap
-
+    
     # 安装 Nginx Mainline + ACME 模块
     install_nginx_mainline
-
+    
     install_container_runtime
     install_docker_compose
-    ensure_bun_installed        # 提前安装 Bun，后续脚本需要用到
     install_s3_storage
     configure_edge_runtime
     install_pigsty
     deploy_mcp_function
-    install_manager
-    setup_wal_monitor
     configure_pg_hba
     
     # 在所有安装完成后，应用最终的网关路由和 SSL 配置
