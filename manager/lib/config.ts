@@ -22,7 +22,18 @@ export let BASE_DIR = process.env.SUPACLOUD_HOME || join(import.meta.dir, "..", 
 // In production (/opt/supacloud), BASE_DIR is /opt/supacloud.
 
 export const INSTANCES_DIR = join(BASE_DIR, "instances");
+export const TEMPLATE_DIR = join(BASE_DIR, "templates", "project");
 export const BASE_COMPOSE = join(BASE_DIR, "templates", "base", "docker-compose.yml");
 export const AUTH_FILE = join(BASE_DIR, ".manager_auth");
+
+// We can export a function to update BASE_DIR if RC file is found later
+export function setBaseDir(path: string) {
+    BASE_DIR = path;
+}
+
+export let COMPOSE_CMD = ["docker", "compose"];
+export function setComposeCmd(cmd: string[]) {
+    COMPOSE_CMD = cmd;
+}
 
 export const ROOT_DOMAIN = process.env.ROOT_DOMAIN || "localhost";
