@@ -3,6 +3,7 @@ import { jwtService } from "./jwt.service";
 import { databaseService } from "./database.service";
 import { storageService } from "./storage.service";
 import { routerService } from "./router.service";
+import { shellService } from "./shell.service";
 import type { Project, ProjectStatus } from "../db";
 
 export interface CreateProjectRequest {
@@ -277,6 +278,52 @@ export class ProjectService {
       anon_key: project.anon_key,
       service_role_key: project.service_role_key,
     };
+  }
+
+  // --- 环境变量 (Secrets) 管理 ---
+
+  async getSecrets(ref: string): Promise<any[] | null> {
+    const project = await projectRepository.findByRef(ref);
+    if (!project) return null;
+    return await databaseService.getSecrets(ref);
+  }
+
+  async upsertSecrets(ref: string, secrets: { name: string; value: string }[]): Promise<boolean> {
+    const project = await projectRepository.findByRef(ref);
+    if (!project) return false;
+
+    for (const secret of secrets) {
+      const success = await databaseService.upsertSecret(ref, secret.name, secret.value);
+      if (!success) return false;
+    }
+
+    // 更新完成后，可触发 Runtime 重启逻辑
+    return true;
+  }
+
+  async deleteSecret(ref: string, name: string): Promise<boolean> {
+    const project = await projectRepository.findByRef(ref);
+    if (!project) return false;
+    return await databaseService.deleteSecret(ref, name);
+  }
+
+  // --- 在线编辑 (Functions) 管理 ---
+
+  async getFunctionCode(ref: string, slug: string): Promise<string | null> {
+    const project = await projectRepository.findByRef(ref);
+    if (!project) return null;
+
+    const result = await shellService.execute("function_manager.sh", ["read", ref, slug]);
+    if (!result.success) return null;
+    return result.output;
+  }
+
+  async deployFunction(ref: string, slug: string, code: string): Promise<boolean> {
+    const project = await projectRepository.findByRef(ref);
+    if (!project) return false;
+
+    const result = await shellService.execute("function_manager.sh", ["deploy", ref, slug, code]);
+    return result.success;
   }
 
   // 转换为响应格式
