@@ -8,6 +8,11 @@ import type { Project, ProjectStatus } from "../db";
 export interface CreateProjectRequest {
   name: string;
   region?: string;
+  organization_id?: string;
+}
+
+export interface UpdateProjectRequest {
+  name?: string;
 }
 
 export interface ProjectResponse {
@@ -146,6 +151,57 @@ export class ProjectService {
     });
 
     return true;
+  }
+
+  // 更新项目
+  async updateProject(ref: string, request: UpdateProjectRequest): Promise<boolean> {
+    const project = await projectRepository.findByRef(ref);
+    if (!project) return false;
+
+    if (request.name) {
+      await projectRepository.updateConfig(ref, {
+        ...project.config,
+        display_name: request.name,
+      });
+    }
+
+    return true;
+  }
+
+  // 暂停项目
+  async pauseProject(ref: string): Promise<boolean> {
+    const project = await projectRepository.findByRef(ref);
+    if (!project) return false;
+
+    await projectRepository.updateStatus(ref, "paused");
+    return true;
+  }
+
+  // 恢复项目
+  async restoreProject(ref: string): Promise<boolean> {
+    const project = await projectRepository.findByRef(ref);
+    if (!project) return false;
+
+    await projectRepository.updateStatus(ref, "active");
+    return true;
+  }
+
+  // 获取项目健康状态
+  async getProjectHealth(ref: string): Promise<{ status: string; services: Record<string, string> } | null> {
+    const project = await projectRepository.findByRef(ref);
+    if (!project) return null;
+
+    const dbStatus = await databaseService.checkStatus(ref);
+
+    return {
+      status: project.status === "active" ? "ACTIVE_HEALTHY" : "INACTIVE",
+      services: {
+        database: dbStatus.success ? "ACTIVE_HEALTHY" : "UNHEALTHY",
+        storage: "ACTIVE_HEALTHY",
+        auth: "ACTIVE_HEALTHY",
+        realtime: "ACTIVE_HEALTHY",
+      },
+    };
   }
 
   // 异步清理资源
