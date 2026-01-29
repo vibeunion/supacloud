@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { jwtService } from "../src/services/jwt.service";
+import { jwtService } from "../../src/services/jwt.service";
 
 describe("JwtService", () => {
   test("generateSecret should return a string with 40 characters", () => {
