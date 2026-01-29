@@ -239,4 +239,106 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
         ref: t.String(),
       }),
     }
+  )
+
+  // 获取环境变量 (Secrets)
+  .get(
+    "/:ref/secrets",
+    async ({ params, set }) => {
+      const secrets = await projectService.getSecrets(params.ref);
+      if (!secrets) {
+        set.status = 404;
+        return { error: "Project not found" };
+      }
+      return secrets;
+    },
+    {
+      params: t.Object({
+        ref: t.String(),
+      }),
+    }
+  )
+
+  // 设置环境变量
+  .post(
+    "/:ref/secrets",
+    async ({ params, body, set }) => {
+      const success = await projectService.upsertSecrets(params.ref, body as any);
+      if (!success) {
+        set.status = 500;
+        return { error: "Failed to update secrets" };
+      }
+      return { success: true };
+    },
+    {
+      params: t.Object({
+        ref: t.String(),
+      }),
+      body: t.Array(
+        t.Object({
+          name: t.String(),
+          value: t.String(),
+        })
+      ),
+    }
+  )
+
+  // 删除环境变量
+  .delete(
+    "/:ref/secrets/:name",
+    async ({ params, set }) => {
+      const success = await projectService.deleteSecret(params.ref, params.name);
+      if (!success) {
+        set.status = 500;
+        return { error: "Failed to delete secret" };
+      }
+      return { success: true };
+    },
+    {
+      params: t.Object({
+        ref: t.String(),
+        name: t.String(),
+      }),
+    }
+  )
+
+  // 获取函数代码
+  .get(
+    "/:ref/functions/:slug",
+    async ({ params, set }) => {
+      const code = await projectService.getFunctionCode(params.ref, params.slug);
+      if (code === null) {
+        set.status = 404;
+        return { error: "Function not found" };
+      }
+      return { code };
+    },
+    {
+      params: t.Object({
+        ref: t.String(),
+        slug: t.String(),
+      }),
+    }
+  )
+
+  // 部署函数代码
+  .post(
+    "/:ref/functions/:slug",
+    async ({ params, body, set }) => {
+      const success = await projectService.deployFunction(params.ref, params.slug, body.code);
+      if (!success) {
+        set.status = 500;
+        return { error: "Failed to deploy function" };
+      }
+      return { success: true };
+    },
+    {
+      params: t.Object({
+        ref: t.String(),
+        slug: t.String(),
+      }),
+      body: t.Object({
+        code: t.String(),
+      }),
+    }
   );

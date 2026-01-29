@@ -207,12 +207,12 @@ jobs:
 
       - name: Install Dependencies
         run: |
-          cd manager
+          cd packages/management-api
           bun install
 
       - name: Run Management API Tests
         run: |
-          cd manager
+          cd packages/management-api
           # Start the server in the background
           export SUPACLOUD_MASTER_TOKEN=ci-test-token
           export DATABASE_URL=postgres://postgres:postgres_password@localhost:5432/supacloud_meta
@@ -228,10 +228,8 @@ jobs:
             -H "Content-Type: application/json" \
             -d '{
               "name": "CI Test Project",
-              "database_name": "ci_project_db",
-              "database_user": "ci_user",
-              "s3_bucket": "ci-bucket"
-            }' | grep "success"
+              "region": "local"
+            }' | grep "CI Test Project"
           
           # Test: List Projects
           echo "Testing Project Listing..."
@@ -239,7 +237,7 @@ jobs:
             -H "Authorization: Bearer ci-test-token" | grep "CI Test Project"
           
           # Test: API Keys
-          PROJECT_ID=$(curl -s -X GET http://localhost:9090/v1/projects -H "Authorization: Bearer ci-test-token" | bun -e "console.log(JSON.parse(await Bun.stdin.text())[0].id)")
+          PROJECT_ID=$(curl -s -X GET http://localhost:9090/v1/projects -H "Authorization: Bearer ci-test-token" | bun -e "console.log(JSON.parse(await Bun.stdin.text())[0].ref)")
           echo "Testing API Keys for $PROJECT_ID..."
           curl -X GET http://localhost:9090/v1/projects/$PROJECT_ID/api-keys \
             -H "Authorization: Bearer ci-test-token" | grep "anon"
