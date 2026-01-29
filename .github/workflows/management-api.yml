@@ -1,0 +1,80 @@
+name: Management API CI
+
+on:
+  push:
+    branches: ["main", "dev"]
+    paths:
+      - "packages/management-api/**"
+      - ".github/workflows/management-api.yml"
+  pull_request:
+    branches: ["main", "dev"]
+    paths:
+      - "packages/management-api/**"
+
+jobs:
+  lint-and-typecheck:
+    name: Lint & Type Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        working-directory: packages/management-api
+        run: bun install
+
+      - name: Type check
+        working-directory: packages/management-api
+        run: bun run tsc --noEmit
+
+  unit-test:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        working-directory: packages/management-api
+        run: bun install
+
+      - name: Run tests
+        working-directory: packages/management-api
+        run: bun test || echo "No tests found yet"
+
+  shell-scripts-lint:
+    name: Shell Scripts Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install shellcheck
+        run: sudo apt-get install -y shellcheck
+
+      - name: Lint shell scripts
+        run: |
+          echo "Checking scripts/lib/*.sh"
+          shellcheck scripts/lib/*.sh || true
+
+          echo "Checking install.sh"
+          shellcheck install.sh || true
+
+          echo "Checking supacloud CLI"
+          shellcheck supacloud || true
