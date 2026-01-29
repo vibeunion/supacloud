@@ -171,8 +171,8 @@ Kong 根据 `Host` Header 动态验证不同项目的 JWT 密钥。
 **响应**:
 ```json
 {
-  "anon_key": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-  "service_role_key": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+  "anon_key": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.REDACTED_EXAMPLE",
+  "service_role_key": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.REDACTED_EXAMPLE"
 }
 ```
 
