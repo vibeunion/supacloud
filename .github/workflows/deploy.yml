@@ -166,50 +166,45 @@ jobs:
       - name: Initialize Metadata Database
         run: |
           # Create schema that matches the actual code
-          cat > metadata_schema.sql <<'EOF'
-CREATE TABLE IF NOT EXISTS projects (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    ref VARCHAR(20) UNIQUE NOT NULL,
-    name VARCHAR(100) NOT NULL,
-    db_name VARCHAR(63) NOT NULL,
-    db_user VARCHAR(63) NOT NULL,
-    db_password VARCHAR(100) NOT NULL,
-    jwt_secret VARCHAR(100) NOT NULL,
-    anon_key TEXT NOT NULL,
-    service_role_key TEXT NOT NULL,
-    s3_bucket VARCHAR(63) NOT NULL,
-    s3_access_key VARCHAR(100),
-    s3_secret_key VARCHAR(100),
-    region VARCHAR(50) DEFAULT 'local',
-    status VARCHAR(20) DEFAULT 'creating',
-    config JSONB DEFAULT '{}',
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW(),
-    deleted_at TIMESTAMPTZ
-);
-
-CREATE INDEX IF NOT EXISTS idx_projects_ref ON projects(ref);
-CREATE INDEX IF NOT EXISTS idx_projects_status ON projects(status);
-EOF
+          cat > metadata_schema.sql <<'SQLEOF'
+          CREATE TABLE IF NOT EXISTS projects (
+              id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+              ref VARCHAR(20) UNIQUE NOT NULL,
+              name VARCHAR(100) NOT NULL,
+              db_name VARCHAR(63) NOT NULL,
+              db_user VARCHAR(63) NOT NULL,
+              db_password VARCHAR(100) NOT NULL,
+              jwt_secret VARCHAR(100) NOT NULL,
+              anon_key TEXT NOT NULL,
+              service_role_key TEXT NOT NULL,
+              s3_bucket VARCHAR(63) NOT NULL,
+              s3_access_key VARCHAR(100),
+              s3_secret_key VARCHAR(100),
+              region VARCHAR(50) DEFAULT 'local',
+              status VARCHAR(20) DEFAULT 'creating',
+              config JSONB DEFAULT '{}',
+              created_at TIMESTAMPTZ DEFAULT NOW(),
+              updated_at TIMESTAMPTZ DEFAULT NOW(),
+              deleted_at TIMESTAMPTZ
+          );
+          CREATE INDEX IF NOT EXISTS idx_projects_ref ON projects(ref);
+          CREATE INDEX IF NOT EXISTS idx_projects_status ON projects(status);
+          SQLEOF
           PGPASSWORD=postgres_password psql -h localhost -U postgres -d supacloud_meta -f metadata_schema.sql
 
       - name: Setup Mock Libraries
         run: |
-          # Create scripts/lib directory for shell script mocks
           mkdir -p scripts/lib
-          # Create mock script that returns success
-          cat > scripts/lib/mock.sh <<'EOF'
-#!/bin/bash
-# Mock script for CI testing - always succeeds
-echo "Mock: $0 $@"
-if [[ "$1" == "create" ]]; then
-  echo "ACCESS_KEY=mock_access_key"
-  echo "SECRET_KEY=mock_secret_key"
-fi
-exit 0
-EOF
+          cat > scripts/lib/mock.sh <<'SHEOF'
+          #!/bin/bash
+          echo "Mock: $0 $@"
+          if [[ "$1" == "create" ]]; then
+            echo "ACCESS_KEY=mock_access_key"
+            echo "SECRET_KEY=mock_secret_key"
+          fi
+          exit 0
+          SHEOF
           chmod +x scripts/lib/mock.sh
-          # Link all manager scripts to mock
           cp scripts/lib/mock.sh scripts/lib/db_manager.sh
           cp scripts/lib/mock.sh scripts/lib/s3_manager.sh
           cp scripts/lib/mock.sh scripts/lib/router_manager.sh
