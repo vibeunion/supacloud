@@ -46,30 +46,11 @@ jobs:
           mkdir -p dist
           
           # Map arch names if necessary, but Garage uses standard names in URL
-          ARCHS=("x86_64" "aarch64" "i686" "armv6")
+          # Available architectures vary by version
+          ARCHS=("x86_64" "aarch64" "i686")
           
           for ARCH in "${ARCHS[@]}"; do
             URL="https://garagehq.deuxfleurs.fr/_releases/${VERSION}/${ARCH}-unknown-linux-musl/garage"
-            FILENAME="garage-${VERSION}-linux-${ARCH}"
-            
-            # Special case for x86_64 -> amd64 naming convention if desired, 
-            # but user sample kept "linux-${ARCH}".
-            # However, in install.sh, we might look for specific names.
-            # Let's stick to the user's sample output name format: garage-${VERSION}-linux-${ARCH}
-            # Note: install.sh usually expects specific names. 
-            # Let's check install.sh logic later. For now, use user's naming.
-            
-            # Correction: x86_64 is usually amd64 in many scripts.
-            # User sample: FILENAME="garage-${VERSION}-linux-${ARCH}" (where ARCH is x86_64)
-            # install.sh uses: GARAGE_MIRROR_URL=".../garage-${VERSION}-linux-${GARAGE_ARCH_SUFFIX}"
-            # where suffix is amd64 for x86_64.
-            # So we should rename x86_64 to amd64, aarch64 to arm64 to match install.sh expectations if we want to be helpful.
-            # But the user specifically provided a script snippet. I will stick to their snippet BUT
-            # I will modify the FILENAME to match what typical install scripts (and likely his) expect, 
-            # OR I will keep his script and ensure install.sh matches it.
-            # The user provided: FILENAME="garage-${VERSION}-linux-${ARCH}"
-            # And then: GARAGE_DOWNLOAD_URL=".../garage-v1.0.1-linux-amd64"
-            # So he expects 'amd64' not 'x86_64' in the final filename!
             
             SUFFIX="${ARCH}"
             if [ "$ARCH" == "x86_64" ]; then SUFFIX="amd64"; fi
@@ -77,14 +58,15 @@ jobs:
             
             FILENAME="garage-${VERSION}-linux-${SUFFIX}"
             
-            echo "Downloading ${ARCH} from ${URL}..."
-            echo "Saving as ${FILENAME}"
-            
-            curl -L --fail "$URL" -o "dist/${FILENAME}"
-            chmod +x "dist/${FILENAME}"
-            
-            # Simple verification
-            file "dist/${FILENAME}"
+            echo "Checking ${ARCH} at ${URL}..."
+            if curl -L --head --fail "$URL" >/dev/null 2>&1; then
+              echo "Downloading ${ARCH}..."
+              curl -L --fail "$URL" -o "dist/${FILENAME}"
+              chmod +x "dist/${FILENAME}"
+              file "dist/${FILENAME}"
+            else
+              echo "Architecture ${ARCH} not found at ${URL}. Skipping."
+            fi
           done
           
           ls -lh dist/
