@@ -1,0 +1,256 @@
+import { projectRepository } from "../repositories/project.repository";
+import { jwtService } from "./jwt.service";
+import { databaseService } from "./database.service";
+import { storageService } from "./storage.service";
+import { routerService } from "./router.service";
+import type { Project, ProjectStatus } from "../db";
+
+export interface CreateProjectRequest {
+  name: string;
+  region?: string;
+}
+
+export interface ProjectResponse {
+  id: string;
+  ref: string;
+  name: string;
+  status: ProjectStatus;
+  region: string;
+  created_at: Date;
+  database: {
+    host: string;
+    name: string;
+    user: string;
+  };
+  api: {
+    url: string;
+  };
+}
+
+export interface ProjectDetailResponse extends ProjectResponse {
+  config: Record<string, unknown>;
+  updated_at: Date;
+}
+
+export class ProjectService {
+  // 获取所有项目
+  async listProjects(): Promise<ProjectResponse[]> {
+    const projects = await projectRepository.findAll();
+    return projects.map((p) => this.toResponse(p));
+  }
+
+  // 获取项目详情
+  async getProject(ref: string): Promise<ProjectDetailResponse | null> {
+    const project = await projectRepository.findByRef(ref);
+    if (!project) return null;
+    return this.toDetailResponse(project);
+  }
+
+  // 创建项目
+  async createProject(request: CreateProjectRequest): Promise<ProjectResponse> {
+    const projectRef = jwtService.generateProjectRef();
+
+    // 生成所有必要的凭据
+    const dbPassword = databaseService.generatePassword();
+    const { jwtSecret, anonKey, serviceRoleKey } = await jwtService.generateKeySet();
+
+    const dbName = `supa_${projectRef}`;
+    const dbUser = `role_${projectRef}`;
+    const s3Bucket = `supa-${projectRef}`;
+
+    // 1. 在数据库中创建项目记录 (status: creating)
+    const project = await projectRepository.create({
+      ref: projectRef,
+      name: request.name,
+      db_name: dbName,
+      db_user: dbUser,
+      db_password: dbPassword,
+      jwt_secret: jwtSecret,
+      anon_key: anonKey,
+      service_role_key: serviceRoleKey,
+      s3_bucket: s3Bucket,
+      region: request.region || "local",
+    });
+
+    // 2. 异步执行资源创建 (后台进行)
+    this.provisionResources(projectRef, dbPassword).catch((error) => {
+      console.error(`Failed to provision resources for ${projectRef}:`, error);
+    });
+
+    return this.toResponse(project);
+  }
+
+  // 异步创建资源
+  private async provisionResources(projectRef: string, dbPassword: string): Promise<void> {
+    try {
+      // 创建数据库
+      const dbResult = await databaseService.createDatabase(projectRef, dbPassword);
+      if (!dbResult.success) {
+        console.error(`Database creation failed for ${projectRef}:`, dbResult.error);
+        await projectRepository.updateStatus(projectRef, "paused");
+        return;
+      }
+
+      // 创建 S3 Bucket
+      const s3Result = await storageService.createBucket(projectRef);
+      if (!s3Result.success) {
+        console.error(`S3 bucket creation failed for ${projectRef}:`, s3Result.error);
+        // 回滚数据库
+        await databaseService.deleteDatabase(projectRef);
+        await projectRepository.updateStatus(projectRef, "paused");
+        return;
+      }
+
+      // 更新 S3 凭据
+      if (s3Result.accessKey && s3Result.secretKey) {
+        const project = await projectRepository.findByRef(projectRef);
+        if (project) {
+          await projectRepository.updateConfig(projectRef, {
+            ...project.config,
+            s3_access_key: s3Result.accessKey,
+            s3_secret_key: s3Result.secretKey,
+          });
+        }
+      }
+
+      // 配置路由
+      const routeResult = await routerService.addRoute(projectRef);
+      if (!routeResult.success) {
+        console.error(`Router configuration failed for ${projectRef}:`, routeResult.error);
+        // 继续，路由可以稍后手动配置
+      }
+
+      // 重载 Nginx
+      await routerService.reload();
+
+      // 更新状态为 active
+      await projectRepository.updateStatus(projectRef, "active");
+      console.log(`Project ${projectRef} provisioned successfully`);
+    } catch (error) {
+      console.error(`Provisioning error for ${projectRef}:`, error);
+      await projectRepository.updateStatus(projectRef, "paused");
+    }
+  }
+
+  // 删除项目
+  async deleteProject(ref: string): Promise<boolean> {
+    const project = await projectRepository.findByRef(ref);
+    if (!project) return false;
+
+    // 软删除数据库记录
+    await projectRepository.softDelete(ref);
+
+    // 异步清理资源
+    this.cleanupResources(ref).catch((error) => {
+      console.error(`Failed to cleanup resources for ${ref}:`, error);
+    });
+
+    return true;
+  }
+
+  // 异步清理资源
+  private async cleanupResources(projectRef: string): Promise<void> {
+    try {
+      // 删除路由
+      await routerService.removeRoute(projectRef);
+      await routerService.reload();
+
+      // 删除 S3 Bucket
+      await storageService.deleteBucket(projectRef);
+
+      // 删除数据库
+      await databaseService.deleteDatabase(projectRef);
+
+      console.log(`Resources cleaned up for ${projectRef}`);
+    } catch (error) {
+      console.error(`Cleanup error for ${projectRef}:`, error);
+    }
+  }
+
+  // 获取项目状态
+  async getProjectStatus(ref: string): Promise<{ status: ProjectStatus; database: string; storage: string } | null> {
+    const project = await projectRepository.findByRef(ref);
+    if (!project) return null;
+
+    const dbStatus = await databaseService.checkStatus(ref);
+
+    return {
+      status: project.status,
+      database: dbStatus.success ? "healthy" : "unhealthy",
+      storage: "unknown", // TODO: 实现存储健康检查
+    };
+  }
+
+  // 重启项目服务
+  async restartProject(ref: string): Promise<boolean> {
+    const project = await projectRepository.findByRef(ref);
+    if (!project) return false;
+
+    // TODO: 实现服务重启逻辑
+    // 当前仅重载路由
+    await routerService.reload();
+    return true;
+  }
+
+  // 获取项目设置
+  async getProjectSettings(ref: string): Promise<Record<string, unknown> | null> {
+    const project = await projectRepository.findByRef(ref);
+    if (!project) return null;
+    return project.config;
+  }
+
+  // 更新项目设置
+  async updateProjectSettings(ref: string, config: Record<string, unknown>): Promise<Record<string, unknown> | null> {
+    const project = await projectRepository.findByRef(ref);
+    if (!project) return null;
+
+    const updated = await projectRepository.updateConfig(ref, {
+      ...project.config,
+      ...config,
+    });
+
+    return updated?.config || null;
+  }
+
+  // 获取项目 API 密钥
+  async getApiKeys(ref: string): Promise<{ anon_key: string; service_role_key: string } | null> {
+    const project = await projectRepository.findByRef(ref);
+    if (!project) return null;
+
+    return {
+      anon_key: project.anon_key,
+      service_role_key: project.service_role_key,
+    };
+  }
+
+  // 转换为响应格式
+  private toResponse(project: Project): ProjectResponse {
+    return {
+      id: project.id,
+      ref: project.ref,
+      name: project.name,
+      status: project.status,
+      region: project.region,
+      created_at: project.created_at,
+      database: {
+        host: "localhost",
+        name: project.db_name,
+        user: project.db_user,
+      },
+      api: {
+        url: routerService.getProjectApiUrl(project.ref),
+      },
+    };
+  }
+
+  // 转换为详细响应格式
+  private toDetailResponse(project: Project): ProjectDetailResponse {
+    return {
+      ...this.toResponse(project),
+      config: project.config,
+      updated_at: project.updated_at,
+    };
+  }
+}
+
+export const projectService = new ProjectService();

@@ -1642,10 +1642,119 @@ S3_REGION=${S3_REGION}
 S3_ACCESS_KEY=${S3_ACCESS_KEY}
 S3_SECRET_KEY=${S3_SECRET_KEY}
 
+# ========== Management API ==========
+MANAGEMENT_API_URL=http://${INTERNAL_IP}:9090
+MANAGEMENT_API_TOKEN=${MASTER_TOKEN:-}
+
 EOF
 
     chmod 600 "$CREDENTIALS_FILE"
     log_info "所有凭据已保存至: $CREDENTIALS_FILE"
+}
+
+# ========== 安装 Management API ==========
+install_management_api() {
+    log_step "安装 SupaCloud Management API..."
+
+    # 检查 Bun 是否安装
+    if ! command -v bun &>/dev/null; then
+        log_info "安装 Bun 运行时..."
+        curl -fsSL https://bun.sh/install | bash
+        export PATH="$HOME/.bun/bin:$PATH"
+        # 添加到系统 PATH
+        if [[ -f /etc/profile.d/bun.sh ]]; then
+            source /etc/profile.d/bun.sh
+        else
+            echo 'export PATH="$HOME/.bun/bin:$PATH"' > /etc/profile.d/bun.sh
+        fi
+    fi
+
+    # 复制 Management API 代码
+    local API_INSTALL_DIR="/opt/supacloud/management-api"
+    local SCRIPTS_INSTALL_DIR="/opt/supacloud/scripts/lib"
+
+    mkdir -p "$API_INSTALL_DIR"
+    mkdir -p "$SCRIPTS_INSTALL_DIR"
+    mkdir -p /etc/nginx/sites-enabled/supa-tenants
+
+    # 复制 API 代码
+    if [[ -d "${SCRIPT_DIR}/packages/management-api" ]]; then
+        cp -r "${SCRIPT_DIR}/packages/management-api/"* "$API_INSTALL_DIR/"
+        log_info "Management API 代码已复制到 ${API_INSTALL_DIR}"
+    fi
+
+    # 复制管理脚本
+    if [[ -d "${SCRIPT_DIR}/scripts/lib" ]]; then
+        cp -r "${SCRIPT_DIR}/scripts/lib/"* "$SCRIPTS_INSTALL_DIR/"
+        chmod +x "$SCRIPTS_INSTALL_DIR"/*.sh
+        log_info "管理脚本已复制到 ${SCRIPTS_INSTALL_DIR}"
+    fi
+
+    # 安装依赖
+    cd "$API_INSTALL_DIR"
+    bun install
+
+    # 生成 Master Token
+    MASTER_TOKEN=$(openssl rand -hex 32)
+
+    # 创建配置文件
+    cat > /etc/supabase/management-api.env <<EOF
+# SupaCloud Management API Configuration
+# Generated: $(date)
+
+PORT=9090
+DATABASE_URL=postgresql://postgres:${POSTGRES_PASSWORD}@localhost:5432/supacloud_meta
+MASTER_TOKEN=${MASTER_TOKEN}
+SCRIPTS_PATH=${SCRIPTS_INSTALL_DIR}
+PIGSTY_PATH=${HOME}/pigsty
+NGINX_SITES_PATH=/etc/nginx/sites-enabled/supa-tenants
+S3_ENDPOINT=${S3_ENDPOINT:-http://localhost:9000}
+S3_REGION=${S3_REGION:-us-east-1}
+BASE_DOMAIN=${SUPABASE_PUBLIC_DOMAIN}
+EOF
+
+    chmod 600 /etc/supabase/management-api.env
+
+    # 保存 Master Token
+    cat > /etc/supabase/master-token.env <<EOF
+# SupaCloud Master Token
+# Generated: $(date)
+# Use this token to authenticate with the Management API
+MASTER_TOKEN=${MASTER_TOKEN}
+EOF
+    chmod 600 /etc/supabase/master-token.env
+
+    # 初始化数据库
+    log_info "初始化 Management API 数据库..."
+    cd "$API_INSTALL_DIR"
+    bun run db:init || log_warn "数据库初始化可能需要稍后手动执行"
+
+    # 安装 Systemd 服务
+    if [[ -f "${SCRIPT_DIR}/scripts/supacloud-api.service" ]]; then
+        cp "${SCRIPT_DIR}/scripts/supacloud-api.service" /etc/systemd/system/
+        systemctl daemon-reload
+        systemctl enable supacloud-api
+        systemctl start supacloud-api || log_warn "Management API 服务启动失败，请检查日志"
+        log_info "Management API 服务已安装并启动"
+    fi
+
+    # 安装 CLI 工具
+    if [[ -f "${SCRIPT_DIR}/supacloud" ]]; then
+        cp "${SCRIPT_DIR}/supacloud" /usr/local/bin/supacloud
+        chmod +x /usr/local/bin/supacloud
+        log_info "CLI 工具已安装: supacloud"
+    fi
+
+    # 安装健康检查脚本
+    if [[ -f "${SCRIPT_DIR}/scripts/health_check.sh" ]]; then
+        cp "${SCRIPT_DIR}/scripts/health_check.sh" "$SCRIPTS_INSTALL_DIR/"
+        chmod +x "$SCRIPTS_INSTALL_DIR/health_check.sh"
+    fi
+
+    log_info "Management API 安装完成"
+    log_info "  API 地址: http://localhost:9090"
+    log_info "  Swagger 文档: http://localhost:9090/swagger"
+    log_info "  Master Token 保存于: /etc/supabase/master-token.env"
 }
 
 # ========== 显示完成信息 ==========
@@ -1660,6 +1769,8 @@ show_completion() {
     echo "访问地址:"
     echo "  Supabase Studio: http://${INTERNAL_IP}:8000"
     echo "  Supabase Studio: https://${SUPABASE_STUDIO_DOMAIN} (需配置 DNS 和 HTTPS)"
+    echo "  Management API:  http://${INTERNAL_IP}:9090"
+    echo "  Swagger 文档:    http://${INTERNAL_IP}:9090/swagger"
     echo "  Grafana 监控:    http://${INTERNAL_IP}:3000"
     echo ""
     echo "所有登录凭据已统一保存至:"
@@ -1675,6 +1786,13 @@ show_completion() {
     echo "  查看容器状态: podman ps 或 docker ps"
     echo "  查看日志: podman logs <container_name>"
     echo "  重启服务: cd ~/pigsty/app/supabase && docker-compose restart"
+    echo ""
+    echo "多租户管理:"
+    echo "  supacloud list              - 列出所有项目"
+    echo "  supacloud create <name>     - 创建新项目"
+    echo "  supacloud info <ref>        - 查看项目详情"
+    echo "  supacloud keys <ref>        - 获取 API 密钥"
+    echo "  supacloud health            - 健康检查"
     echo ""
 }
 
@@ -1706,9 +1824,12 @@ main() {
     # 在所有安装完成后，应用最终的网关路由和 SSL 配置
     apply_nginx_acme_config
     
+    # 安装 Management API
+    install_management_api
+
     # 保存所有凭据
     save_all_credentials
-    
+
     show_completion
 }
 
