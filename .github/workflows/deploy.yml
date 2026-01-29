@@ -2,9 +2,9 @@ name: Deployment Test
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "main", "dev" ]
   pull_request:
-    branches: [ "main" ]
+    branches: [ "main", "dev" ]
 
 jobs:
   integration-test:
@@ -136,4 +136,111 @@ jobs:
           ls -l /etc/supabase/jwt-keys.env || true
           # 检查服务状态 (如果安装成功的话)
           systemctl status nginx || true
+
+  management-test:
+    name: Management API Integration Test
+    runs-on: ubuntu-22.04
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres_password
+          POSTGRES_DB: supacloud_meta
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: latest
+
+      - name: Initialize Metadata Database
+        run: |
+          # Use the schema from artifacts (copied to a local file for CI)
+          # In a real repo, this might be in migrations/
+          # For CI, we can use the file we just created or a copy of it
+          # Assuming the schema file is in the workspace
+          PGPASSWORD=postgres_password psql -h localhost -U postgres -d supacloud_meta -f C:/Users/zhd/.gemini/antigravity/brain/76c9e5cf-63c0-4678-bc72-68f84dc5e3eb/metadata_schema.sql || true
+          # Fallback: if absolute path fails in CI, use a local copy
+          if [ ! -f metadata_schema.sql ]; then
+             cat > metadata_schema.sql <<'EOF'
+          CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+          CREATE TYPE project_status AS ENUM ('provisioning', 'active', 'error', 'deleted');
+          CREATE TABLE IF NOT EXISTS projects (
+              id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+              name TEXT NOT NULL,
+              database_name TEXT NOT NULL UNIQUE,
+              database_user TEXT NOT NULL,
+              jwt_secret TEXT NOT NULL,
+              anon_key TEXT NOT NULL,
+              service_role_key TEXT NOT NULL,
+              s3_bucket TEXT NOT NULL UNIQUE,
+              status project_status DEFAULT 'provisioning',
+              config JSONB DEFAULT '{}'::jsonb,
+              created_at TIMESTAMPTZ DEFAULT now(),
+              updated_at TIMESTAMPTZ DEFAULT now(),
+              deleted_at TIMESTAMPTZ
+          );
+          EOF
+          fi
+          PGPASSWORD=postgres_password psql -h localhost -U postgres -d supacloud_meta -f metadata_schema.sql
+
+      - name: Setup Mock Libraries
+        run: |
+          # Create lib directory if it doesn't exist (it should exist in repo)
+          mkdir -p lib
+          # Copy mock script to all manager dependencies
+          cp .github/scripts/mock-lib.sh lib/db_manager.sh
+          cp .github/scripts/mock-lib.sh lib/s3_manager.sh
+          cp .github/scripts/mock-lib.sh lib/router_manager.sh
+          cp .github/scripts/mock-lib.sh lib/key_manager.sh
+          chmod +x lib/*.sh
+
+      - name: Install Dependencies
+        run: |
+          cd manager
+          bun install
+
+      - name: Run Management API Tests
+        run: |
+          cd manager
+          # Start the server in the background
+          export SUPACLOUD_MASTER_TOKEN=ci-test-token
+          export DATABASE_URL=postgres://postgres:postgres_password@localhost:5432/supacloud_meta
+          bun run src/index.ts &
+          
+          # Wait for server to start
+          sleep 5
+          
+          # Test: Create Project
+          echo "Testing Project Creation..."
+          curl -X POST http://localhost:9090/v1/projects \
+            -H "Authorization: Bearer ci-test-token" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "name": "CI Test Project",
+              "database_name": "ci_project_db",
+              "database_user": "ci_user",
+              "s3_bucket": "ci-bucket"
+            }' | grep "success"
+          
+          # Test: List Projects
+          echo "Testing Project Listing..."
+          curl -X GET http://localhost:9090/v1/projects \
+            -H "Authorization: Bearer ci-test-token" | grep "CI Test Project"
+          
+          # Test: API Keys
+          PROJECT_ID=$(curl -s -X GET http://localhost:9090/v1/projects -H "Authorization: Bearer ci-test-token" | bun -e "console.log(JSON.parse(await Bun.stdin.text())[0].id)")
+          echo "Testing API Keys for $PROJECT_ID..."
+          curl -X GET http://localhost:9090/v1/projects/$PROJECT_ID/api-keys \
+            -H "Authorization: Bearer ci-test-token" | grep "anon"
 
