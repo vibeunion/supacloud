@@ -1,7 +1,21 @@
 import { Elysia, t } from "elysia";
 import { projectService } from "../services";
 
+// 可用区域列表
+const AVAILABLE_REGIONS = [
+  { code: "local", name: "Local", continent: "local" },
+  { code: "us-east-1", name: "US East (N. Virginia)", continent: "americas" },
+  { code: "us-west-1", name: "US West (N. California)", continent: "americas" },
+  { code: "eu-west-1", name: "EU (Ireland)", continent: "emea" },
+  { code: "ap-southeast-1", name: "Asia Pacific (Singapore)", continent: "apac" },
+];
+
 export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
+  // 获取可用区域
+  .get("/available-regions", () => {
+    return AVAILABLE_REGIONS;
+  })
+
   // 获取所有项目
   .get("/", async () => {
     const projects = await projectService.listProjects();
@@ -11,14 +25,16 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
   // 创建新项目
   .post(
     "/",
-    async ({ body }) => {
+    async ({ body, set }) => {
       const project = await projectService.createProject(body);
+      set.status = 201;
       return project;
     },
     {
       body: t.Object({
         name: t.String({ minLength: 1, maxLength: 100 }),
         region: t.Optional(t.String()),
+        organization_id: t.Optional(t.String()),
       }),
     }
   )
@@ -36,7 +52,28 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     },
     {
       params: t.Object({
+        ref: t.String({ minLength: 1, maxLength: 20 }),
+      }),
+    }
+  )
+
+  // 更新项目 (PATCH)
+  .patch(
+    "/:ref",
+    async ({ params, body, set }) => {
+      const updated = await projectService.updateProject(params.ref, body);
+      if (!updated) {
+        set.status = 404;
+        return { error: "Project not found" };
+      }
+      return { ref: params.ref };
+    },
+    {
+      params: t.Object({
         ref: t.String(),
+      }),
+      body: t.Object({
+        name: t.Optional(t.String({ minLength: 1, maxLength: 100 })),
       }),
     }
   )
@@ -50,7 +87,7 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
         set.status = 404;
         return { error: "Project not found" };
       }
-      return { success: true, message: "Project deletion initiated" };
+      return { ref: params.ref };
     },
     {
       params: t.Object({
@@ -59,7 +96,61 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     }
   )
 
-  // 获取项目状态
+  // 暂停项目
+  .post(
+    "/:ref/pause",
+    async ({ params, set }) => {
+      const paused = await projectService.pauseProject(params.ref);
+      if (!paused) {
+        set.status = 404;
+        return { error: "Project not found" };
+      }
+      return { ref: params.ref, status: "paused" };
+    },
+    {
+      params: t.Object({
+        ref: t.String(),
+      }),
+    }
+  )
+
+  // 恢复项目
+  .post(
+    "/:ref/restore",
+    async ({ params, set }) => {
+      const restored = await projectService.restoreProject(params.ref);
+      if (!restored) {
+        set.status = 404;
+        return { error: "Project not found" };
+      }
+      return { ref: params.ref, status: "active" };
+    },
+    {
+      params: t.Object({
+        ref: t.String(),
+      }),
+    }
+  )
+
+  // 获取项目健康状态
+  .get(
+    "/:ref/health",
+    async ({ params, set }) => {
+      const health = await projectService.getProjectHealth(params.ref);
+      if (!health) {
+        set.status = 404;
+        return { error: "Project not found" };
+      }
+      return health;
+    },
+    {
+      params: t.Object({
+        ref: t.String(),
+      }),
+    }
+  )
+
+  // 获取项目状态 (兼容旧接口)
   .get(
     "/:ref/status",
     async ({ params, set }) => {
@@ -86,7 +177,7 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
         set.status = 404;
         return { error: "Project not found" };
       }
-      return { success: true, message: "Project restart initiated" };
+      return { ref: params.ref, message: "Project restart initiated" };
     },
     {
       params: t.Object({
