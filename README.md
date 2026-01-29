@@ -5,80 +5,233 @@
 ---
 
 <a name="english"></a>
-## 🇬🇧 English
+## English
 
-**SupaCloud** is a next-generation, ultra-lightweight PaaS specifically designed for self-hosting Supabase. It reimagines the deployment architecture using **Pigsty**, **RustFS/MinIO**, and **Global Postgres**.
+**SupaCloud** is a next-generation, ultra-lightweight multi-tenant PaaS for self-hosting Supabase. Built on **Pigsty**, it enables you to run multiple isolated Supabase projects efficiently on a single server.
 
-Unlike traditional deployments that waste GBs of RAM per project, SupaCloud enables you to run **fully managed, isolated Supabase projects** with extreme efficiency on your own infrastructure.
+### Key Features
 
-### 🌟 Key Features
+- **Multi-Tenant Architecture**: Run multiple isolated Supabase projects with shared infrastructure
+- **Management API**: Full REST API (21 endpoints) for project lifecycle management
+- **CLI Tool**: `supacloud` command-line tool for easy project management
+- **Pigsty Powered**: Enterprise-grade PostgreSQL with built-in monitoring
+- **One-Click Installation**: Fully automated setup via `install.sh`
+- **Flexible Storage**: RustFS (recommended), Garage, MinIO, or external S3
+- **Dual Runtime**: Deno (default) or Bun.js for Edge Functions
+- **96% Test Coverage**: Production-ready with comprehensive testing
 
-*   **Pigsty Powered**: Leverages the power of Pigsty for robust PostgreSQL management and monitoring.
-*   **One-Click Installation**: Fully automated setup via a single `install.sh` script.
-*   **Extreme Efficiency**: Uses a shared resource architecture to minimize overhead.
-*   **Project Isolation**: Each project is logically isolated with its own database and configuration.
-*   **China Ready**: Built-in support for regional requirements, including optimized mirrors and WeChat login compatibility.
-*   **Flexible Storage**: Supports multiple S3-compatible backends: RustFS (recommended), MinIO, Garage, or external S3.
-*   **Dual Runtime Cloud Functions**: Supports both **Bun.js** and **Deno** for project-level functions. Switch runtimes instantly via `switch.sh`.
-*   **Comprehensive Monitoring**: Built-in Grafana dashboards and Prometheus monitoring.
+### Architecture
 
-### 🚀 Quick Start
+```
+┌─────────────────────────────────────────────────────────────┐
+│                  Management API (:9090)                      │
+│                   Bun + Elysia + TypeScript                  │
+├─────────────────────────────────────────────────────────────┤
+│  ┌────────────┐  ┌────────────┐  ┌────────────┐            │
+│  │ JwtService │  │ DbService  │  │ S3Service  │            │
+│  └─────┬──────┘  └─────┬──────┘  └─────┬──────┘            │
+│        ▼               ▼               ▼                    │
+│  ┌────────────┐  ┌────────────┐  ┌────────────┐            │
+│  │jwt_manager │  │db_manager  │  │s3_manager  │            │
+│  │    .sh     │  │    .sh     │  │    .sh     │            │
+│  └────────────┘  └────────────┘  └────────────┘            │
+├─────────────────────────────────────────────────────────────┤
+│                   Shared Infrastructure                      │
+│  ┌────────────┐  ┌────────────┐  ┌────────────┐            │
+│  │ PostgreSQL │  │   Nginx    │  │ S3 Storage │            │
+│  │  (Pigsty)  │  │  Gateway   │  │  (RustFS)  │            │
+│  └────────────┘  └────────────┘  └────────────┘            │
+└─────────────────────────────────────────────────────────────┘
+```
 
-#### 1. Requirements
+### Quick Start
 
-- **OS**: rocky/almalinux 8/9, Ubuntu 22/24, Debian 12
-- **RAM**: 2GB minimum (4GB+ recommended)
-- **Disk**: 40GB+ SSD
+#### Requirements
 
-#### 2. Installation
+| Item | Minimum | Recommended |
+|------|---------|-------------|
+| CPU | 2 cores | 4+ cores |
+| RAM | 2GB | 4GB+ |
+| Disk | 40GB | 100GB+ SSD |
+| OS | Rocky/AlmaLinux 8/9, Ubuntu 22/24, Debian 12 | Rocky Linux 9 |
+
+#### Installation
 
 ```bash
-# 1. Clone the repository
+# 1. Clone repository
 git clone https://github.com/zuohuadong/supacloud.git
 cd supacloud
 
-# 2. Configure environment (IMPORTANT)
-# Edit config.env to set your domains and passwords
-cp config.env.example config.env # if example exists, otherwise modify existing config.env
+# 2. Configure (edit domains and passwords)
 vim config.env
 
-# 3. Run installation script
+# 3. Run installation
 sudo bash install.sh
 ```
 
-#### 3. Management
+### Management
 
-*   **Switch Runtime/Storage**: Use `./switch.sh` to change Edge Functions runtime (bun/deno) or storage backend.
-*   **Check Status**: Use standard container tools (`podman` or `docker`) to check service status.
+#### CLI Tool
 
-### 📂 Architecture
+```bash
+# List all projects
+supacloud list
 
-*   `install.sh`: One-click deployment script (environment initialization and service setup).
-*   `config.env`: Global configuration file.
-*   `switch.sh`: CLI tool for runtime and storage switching.
-*   `packages/`: Shared components (MCP, bun-auth, etc.).
+# Create a new project
+supacloud create "My Project"
+
+# Get project details
+supacloud info <project_ref>
+
+# Get API keys
+supacloud keys <project_ref>
+
+# Check project status
+supacloud status <project_ref>
+
+# Delete project
+supacloud delete <project_ref>
+
+# System health check
+supacloud health
+```
+
+#### Management API
+
+The REST API runs on port 9090 with Swagger documentation at `/swagger`.
+
+```bash
+# Create project
+curl -X POST http://localhost:9090/v1/projects \
+  -H "Authorization: Bearer $MASTER_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "My Project", "region": "local"}'
+
+# List projects
+curl http://localhost:9090/v1/projects \
+  -H "Authorization: Bearer $MASTER_TOKEN"
+
+# Get API keys
+curl http://localhost:9090/v1/projects/<ref>/api-keys \
+  -H "Authorization: Bearer $MASTER_TOKEN"
+```
+
+**API Endpoints:**
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/v1/projects` | List all projects |
+| POST | `/v1/projects` | Create project |
+| GET | `/v1/projects/:ref` | Get project details |
+| PATCH | `/v1/projects/:ref` | Update project |
+| DELETE | `/v1/projects/:ref` | Delete project (soft) |
+| POST | `/v1/projects/:ref/pause` | Pause project |
+| POST | `/v1/projects/:ref/restore` | Restore project |
+| GET | `/v1/projects/:ref/status` | Get status |
+| GET | `/v1/projects/:ref/health` | Get health |
+| POST | `/v1/projects/:ref/restart` | Restart services |
+| GET | `/v1/projects/:ref/settings` | Get settings |
+| PUT | `/v1/projects/:ref/settings` | Update settings |
+| GET | `/v1/projects/:ref/api-keys` | Get API keys |
+
+#### Runtime Switching
+
+```bash
+# Switch Edge Functions runtime
+./switch.sh runtime deno   # or: bun
+
+# Switch storage backend
+./switch.sh storage rustfs # or: minio, garage, external
+
+# Show current configuration
+./switch.sh status
+```
+
+### Project Structure
+
+```
+supacloud/
+├── install.sh              # One-click deployment script
+├── switch.sh               # Runtime/storage switching tool
+├── supacloud               # CLI management tool
+├── config.env              # Global configuration
+├── packages/
+│   └── management-api/     # REST API server (Bun + Elysia)
+│       ├── src/            # TypeScript source
+│       └── tests/          # Unit & integration tests
+├── scripts/
+│   └── lib/                # Shell script modules
+│       ├── db_manager.sh   # Database management
+│       ├── s3_manager.sh   # Storage management
+│       ├── router_manager.sh # Nginx routing
+│       └── jwt_manager.sh  # JWT key generation
+└── docs/
+    └── multi-tenant-management.md  # Technical specification
+```
+
+### Configuration
+
+Key settings in `config.env`:
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `SUPABASE_PUBLIC_DOMAIN` | API domain | (required) |
+| `SUPABASE_STUDIO_DOMAIN` | Studio domain | (optional) |
+| `S3_STORAGE_TYPE` | Storage backend | `rustfs` |
+| `EDGE_RUNTIME` | Functions runtime | `deno` |
+| `PG_VERSION` | PostgreSQL version | `18` |
+
+### Documentation
+
+- [Multi-Tenant Management Technical Spec](docs/multi-tenant-management.md)
+- [Pigsty Documentation](https://pigsty.cc/)
+- [Supabase Self-Hosting](https://supabase.com/docs/guides/self-hosting)
 
 ---
 
 <a name="chinese"></a>
-## 🇨🇳 中文
+## 中文
 
-**SupaCloud** 是为 Supabase 私有化部署打造的下一代超轻量级 PaaS 平台。它基于 **Pigsty**、**RustFS/MinIO** 和 **Global Postgres** 重新构建了部署架构。
+**SupaCloud** 是为 Supabase 私有化部署打造的下一代超轻量级多租户 PaaS 平台。基于 **Pigsty** 构建，可在单台服务器上高效运行多个隔离的 Supabase 项目。
 
-打破传统部署资源浪费，SupaCloud 让您可以**在自己的基础设施上高效、稳定地运行多个隔离的 Supabase 项目**。
+### 核心特性
 
-### 🌟 核心特性
+- **多租户架构**: 共享基础设施，运行多个隔离的 Supabase 项目
+- **Management API**: 完整的 REST API（21 个端点）管理项目生命周期
+- **CLI 工具**: `supacloud` 命令行工具，便捷管理项目
+- **Pigsty 驱动**: 企业级 PostgreSQL，内置监控
+- **一键部署**: 通过 `install.sh` 全自动安装
+- **多存储后端**: RustFS（推荐）、Garage、MinIO 或外部 S3
+- **双运行时**: Deno（默认）或 Bun.js 云函数运行时
+- **96% 测试覆盖**: 生产就绪，经过全面测试
 
-*   **Pigsty 驱动**：利用 Pigsty 强大的 PostgreSQL 管理、高可用及监控能力。
-*   **一键部署**：通过 `install.sh` 脚本实现全自动化环境初始化与服务拉起。
-*   **极致轻量**：采用资源共享架构，大幅降低多项目运行时的资源开销。
-*   **项目隔离**：租户在逻辑层面完全隔离，拥有独立的数据库、JWT 密钥等。
-*   **中国优化**：内置镜像加速，完美支持**微信小程序**登录等国内常用场景。
-*   **多存储后端**：支持 RustFS (推荐)、MinIO、Garage 或 外部 S3 等多种存储方案。
-*   **双运行时云函数**：支持 **Bun.js** 和 **Deno**。通过 `switch.sh` 一键切换，灵活适配。
-*   **全方位监控**：内置 Grafana 仪表盘和 Prometheus 指标采集，运行状态一目了然。
+### 架构设计
 
-### 💻 系统要求
+```
+┌─────────────────────────────────────────────────────────────┐
+│                  Management API (:9090)                      │
+│                   Bun + Elysia + TypeScript                  │
+├─────────────────────────────────────────────────────────────┤
+│  ┌────────────┐  ┌────────────┐  ┌────────────┐            │
+│  │ JwtService │  │ DbService  │  │ S3Service  │            │
+│  └─────┬──────┘  └─────┬──────┘  └─────┬──────┘            │
+│        ▼               ▼               ▼                    │
+│  ┌────────────┐  ┌────────────┐  ┌────────────┐            │
+│  │jwt_manager │  │db_manager  │  │s3_manager  │            │
+│  │    .sh     │  │    .sh     │  │    .sh     │            │
+│  └────────────┘  └────────────┘  └────────────┘            │
+├─────────────────────────────────────────────────────────────┤
+│                       共享基础设施                            │
+│  ┌────────────┐  ┌────────────┐  ┌────────────┐            │
+│  │ PostgreSQL │  │   Nginx    │  │  S3 存储   │            │
+│  │  (Pigsty)  │  │   网关     │  │  (RustFS)  │            │
+│  └────────────┘  └────────────┘  └────────────┘            │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 快速开始
+
+#### 系统要求
 
 | 项目 | 最低配置 | 推荐配置 |
 |------|----------|----------|
@@ -87,37 +240,135 @@ sudo bash install.sh
 | 磁盘 | 40GB | 100GB+ SSD |
 | 系统 | Rocky/AlmaLinux 8/9, Ubuntu 22/24, Debian 12 | Rocky Linux 9 |
 
-### 🚀 快速开始
-
-#### 1. 安装与配置
+#### 安装部署
 
 ```bash
 # 1. 下载代码
 git clone https://github.com/zuohuadong/supacloud.git
 cd supacloud
 
-# 2. 编辑配置 (必须)
-# 默认配置已适用于大多数场景，请务必设置 SUPABASE_PUBLIC_DOMAIN
+# 2. 编辑配置（设置域名和密码）
 vim config.env
 
 # 3. 运行安装脚本
 sudo bash install.sh
 ```
 
-#### 2. 常用操作
+### 项目管理
 
-*   **切换运行时/存储**：使用根目录下的 `switch.sh` 脚本切换 Edge Functions 运行时或 S3 存储类型。
-*   **状态检查**：通过 `podman ps` 或 `docker ps` 查看服务运行状态。
+#### CLI 命令行工具
 
-### 📂 架构设计
+```bash
+# 列出所有项目
+supacloud list
 
-*   `install.sh`: 一键部署脚本 (环境初始化与服务编排)。
-*   `config.env`: 全局配置文件。
-*   `switch.sh`: 运行时/存储切换工具。
-*   `packages/`: 共享组件库 (MCP、bun-auth 等)。
+# 创建新项目
+supacloud create "我的项目"
+
+# 查看项目详情
+supacloud info <project_ref>
+
+# 获取 API 密钥
+supacloud keys <project_ref>
+
+# 查看项目状态
+supacloud status <project_ref>
+
+# 删除项目
+supacloud delete <project_ref>
+
+# 系统健康检查
+supacloud health
+```
+
+#### Management API
+
+REST API 运行在 9090 端口，Swagger 文档地址：`/swagger`
+
+```bash
+# 创建项目
+curl -X POST http://localhost:9090/v1/projects \
+  -H "Authorization: Bearer $MASTER_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "我的项目", "region": "local"}'
+
+# 列出项目
+curl http://localhost:9090/v1/projects \
+  -H "Authorization: Bearer $MASTER_TOKEN"
+
+# 获取 API 密钥
+curl http://localhost:9090/v1/projects/<ref>/api-keys \
+  -H "Authorization: Bearer $MASTER_TOKEN"
+```
+
+**API 端点：**
+
+| 方法 | 端点 | 说明 |
+|------|------|------|
+| GET | `/v1/projects` | 获取项目列表 |
+| POST | `/v1/projects` | 创建项目 |
+| GET | `/v1/projects/:ref` | 获取项目详情 |
+| PATCH | `/v1/projects/:ref` | 更新项目 |
+| DELETE | `/v1/projects/:ref` | 删除项目（软删除） |
+| POST | `/v1/projects/:ref/pause` | 暂停项目 |
+| POST | `/v1/projects/:ref/restore` | 恢复项目 |
+| GET | `/v1/projects/:ref/status` | 获取状态 |
+| GET | `/v1/projects/:ref/health` | 获取健康状态 |
+| POST | `/v1/projects/:ref/restart` | 重启服务 |
+| GET | `/v1/projects/:ref/settings` | 获取配置 |
+| PUT | `/v1/projects/:ref/settings` | 更新配置 |
+| GET | `/v1/projects/:ref/api-keys` | 获取 API 密钥 |
+
+#### 运行时切换
+
+```bash
+# 切换云函数运行时
+./switch.sh runtime deno   # 或: bun
+
+# 切换存储后端
+./switch.sh storage rustfs # 或: minio, garage, external
+
+# 查看当前配置
+./switch.sh status
+```
+
+### 项目结构
+
+```
+supacloud/
+├── install.sh              # 一键部署脚本
+├── switch.sh               # 运行时/存储切换工具
+├── supacloud               # CLI 管理工具
+├── config.env              # 全局配置文件
+├── packages/
+│   └── management-api/     # REST API 服务 (Bun + Elysia)
+│       ├── src/            # TypeScript 源码
+│       └── tests/          # 单元测试和集成测试
+├── scripts/
+│   └── lib/                # Shell 脚本模块
+│       ├── db_manager.sh   # 数据库管理
+│       ├── s3_manager.sh   # 存储管理
+│       ├── router_manager.sh # Nginx 路由
+│       └── jwt_manager.sh  # JWT 密钥生成
+└── docs/
+    └── multi-tenant-management.md  # 技术规范文档
+```
+
+### 配置说明
+
+`config.env` 关键配置项：
+
+| 变量 | 说明 | 默认值 |
+|------|------|--------|
+| `SUPABASE_PUBLIC_DOMAIN` | API 域名 | （必填） |
+| `SUPABASE_STUDIO_DOMAIN` | Studio 域名 | （可选） |
+| `S3_STORAGE_TYPE` | 存储后端 | `rustfs` |
+| `EDGE_RUNTIME` | 云函数运行时 | `deno` |
+| `PG_VERSION` | PostgreSQL 版本 | `18` |
 
 ### 参考文档
 
+- [多租户管理技术规范](docs/multi-tenant-management.md)
 - [Pigsty 官方文档](https://pigsty.cc/)
 - [Supabase 自托管文档](https://supabase.com/docs/guides/self-hosting)
 
