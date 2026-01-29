@@ -165,80 +165,136 @@ jobs:
 
       - name: Initialize Metadata Database
         run: |
-          # Use the schema from artifacts (copied to a local file for CI)
-          # In a real repo, this might be in migrations/
-          # For CI, we can use the file we just created or a copy of it
-          # Assuming the schema file is in the workspace
-          PGPASSWORD=postgres_password psql -h localhost -U postgres -d supacloud_meta -f C:/Users/zhd/.gemini/antigravity/brain/76c9e5cf-63c0-4678-bc72-68f84dc5e3eb/metadata_schema.sql || true
-          # Fallback: if absolute path fails in CI, use a local copy
-          if [ ! -f metadata_schema.sql ]; then
-             cat > metadata_schema.sql <<'EOF'
-          CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-          CREATE TYPE project_status AS ENUM ('provisioning', 'active', 'error', 'deleted');
-          CREATE TABLE IF NOT EXISTS projects (
-              id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-              name TEXT NOT NULL,
-              database_name TEXT NOT NULL UNIQUE,
-              database_user TEXT NOT NULL,
-              jwt_secret TEXT NOT NULL,
-              anon_key TEXT NOT NULL,
-              service_role_key TEXT NOT NULL,
-              s3_bucket TEXT NOT NULL UNIQUE,
-              status project_status DEFAULT 'provisioning',
-              config JSONB DEFAULT '{}'::jsonb,
-              created_at TIMESTAMPTZ DEFAULT now(),
-              updated_at TIMESTAMPTZ DEFAULT now(),
-              deleted_at TIMESTAMPTZ
-          );
-          EOF
-          fi
+          # Create schema that matches the actual code
+          cat > metadata_schema.sql <<'EOF'
+CREATE TABLE IF NOT EXISTS projects (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ref VARCHAR(20) UNIQUE NOT NULL,
+    name VARCHAR(100) NOT NULL,
+    db_name VARCHAR(63) NOT NULL,
+    db_user VARCHAR(63) NOT NULL,
+    db_password VARCHAR(100) NOT NULL,
+    jwt_secret VARCHAR(100) NOT NULL,
+    anon_key TEXT NOT NULL,
+    service_role_key TEXT NOT NULL,
+    s3_bucket VARCHAR(63) NOT NULL,
+    s3_access_key VARCHAR(100),
+    s3_secret_key VARCHAR(100),
+    region VARCHAR(50) DEFAULT 'local',
+    status VARCHAR(20) DEFAULT 'creating',
+    config JSONB DEFAULT '{}',
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    deleted_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_projects_ref ON projects(ref);
+CREATE INDEX IF NOT EXISTS idx_projects_status ON projects(status);
+EOF
           PGPASSWORD=postgres_password psql -h localhost -U postgres -d supacloud_meta -f metadata_schema.sql
 
       - name: Setup Mock Libraries
         run: |
-          # Create lib directory if it doesn't exist (it should exist in repo)
-          mkdir -p lib
-          # Copy mock script to all manager dependencies
-          cp .github/scripts/mock-lib.sh lib/db_manager.sh
-          cp .github/scripts/mock-lib.sh lib/s3_manager.sh
-          cp .github/scripts/mock-lib.sh lib/router_manager.sh
-          cp .github/scripts/mock-lib.sh lib/key_manager.sh
-          chmod +x lib/*.sh
+          # Create scripts/lib directory for shell script mocks
+          mkdir -p scripts/lib
+          # Create mock script that returns success
+          cat > scripts/lib/mock.sh <<'EOF'
+#!/bin/bash
+# Mock script for CI testing - always succeeds
+echo "Mock: $0 $@"
+if [[ "$1" == "create" ]]; then
+  echo "ACCESS_KEY=mock_access_key"
+  echo "SECRET_KEY=mock_secret_key"
+fi
+exit 0
+EOF
+          chmod +x scripts/lib/mock.sh
+          # Link all manager scripts to mock
+          cp scripts/lib/mock.sh scripts/lib/db_manager.sh
+          cp scripts/lib/mock.sh scripts/lib/s3_manager.sh
+          cp scripts/lib/mock.sh scripts/lib/router_manager.sh
+          cp scripts/lib/mock.sh scripts/lib/key_manager.sh
+          cp scripts/lib/mock.sh scripts/lib/function_manager.sh
+          chmod +x scripts/lib/*.sh
 
       - name: Install Dependencies
         run: |
           cd packages/management-api
           bun install
 
-      - name: Run Management API Tests
+      - name: Run Unit Tests
+        run: |
+          cd packages/management-api
+          bun test --coverage
+
+      - name: Run E2E Integration Tests
         run: |
           cd packages/management-api
           # Start the server in the background
-          export SUPACLOUD_MASTER_TOKEN=ci-test-token
+          export MASTER_TOKEN=ci-test-token
           export DATABASE_URL=postgres://postgres:postgres_password@localhost:5432/supacloud_meta
+          export SCRIPTS_PATH=${{ github.workspace }}/scripts/lib
           bun run src/index.ts &
-          
+          SERVER_PID=$!
+
           # Wait for server to start
-          sleep 5
-          
+          echo "Waiting for server to start..."
+          for i in {1..30}; do
+            if curl -s http://localhost:9090/health > /dev/null 2>&1; then
+              echo "Server is ready!"
+              break
+            fi
+            sleep 1
+          done
+
+          # Test: Health Check
+          echo "Testing Health Check..."
+          curl -sf http://localhost:9090/health | tee /tmp/health.json
+
           # Test: Create Project
+          echo ""
           echo "Testing Project Creation..."
-          curl -X POST http://localhost:9090/v1/projects \
+          RESPONSE=$(curl -sf -X POST http://localhost:9090/v1/projects \
             -H "Authorization: Bearer ci-test-token" \
             -H "Content-Type: application/json" \
-            -d '{
-              "name": "CI Test Project",
-              "region": "local"
-            }' | grep "CI Test Project"
-          
+            -d '{"name": "CI Test Project", "region": "local"}')
+          echo "$RESPONSE" | tee /tmp/create.json
+          echo "$RESPONSE" | grep -q "CI Test Project" || (echo "Failed: name not found" && exit 1)
+          echo "$RESPONSE" | grep -q '"ref"' || (echo "Failed: ref not found" && exit 1)
+
+          # Extract project ref
+          PROJECT_REF=$(echo "$RESPONSE" | bun -e "console.log(JSON.parse(await Bun.stdin.text()).ref)")
+          echo "Created project ref: $PROJECT_REF"
+
           # Test: List Projects
+          echo ""
           echo "Testing Project Listing..."
-          curl -X GET http://localhost:9090/v1/projects \
-            -H "Authorization: Bearer ci-test-token" | grep "CI Test Project"
-          
+          curl -sf -X GET http://localhost:9090/v1/projects \
+            -H "Authorization: Bearer ci-test-token" | tee /tmp/list.json
+
+          # Test: Get Project Details
+          echo ""
+          echo "Testing Project Details..."
+          curl -sf -X GET "http://localhost:9090/v1/projects/$PROJECT_REF" \
+            -H "Authorization: Bearer ci-test-token" | tee /tmp/details.json
+
           # Test: API Keys
-          PROJECT_ID=$(curl -s -X GET http://localhost:9090/v1/projects -H "Authorization: Bearer ci-test-token" | bun -e "console.log(JSON.parse(await Bun.stdin.text())[0].ref)")
-          echo "Testing API Keys for $PROJECT_ID..."
-          curl -X GET http://localhost:9090/v1/projects/$PROJECT_ID/api-keys \
-            -H "Authorization: Bearer ci-test-token" | grep "anon"
+          echo ""
+          echo "Testing API Keys..."
+          curl -sf -X GET "http://localhost:9090/v1/projects/$PROJECT_REF/api-keys" \
+            -H "Authorization: Bearer ci-test-token" | tee /tmp/keys.json
+          grep -q "anon_key" /tmp/keys.json || (echo "Failed: anon_key not found" && exit 1)
+          grep -q "service_role_key" /tmp/keys.json || (echo "Failed: service_role_key not found" && exit 1)
+
+          # Test: Project Health
+          echo ""
+          echo "Testing Project Health..."
+          curl -sf -X GET "http://localhost:9090/v1/projects/$PROJECT_REF/health" \
+            -H "Authorization: Bearer ci-test-token" | tee /tmp/health_proj.json
+
+          # Cleanup: Kill server
+          kill $SERVER_PID 2>/dev/null || true
+
+          echo ""
+          echo "All E2E tests passed!"
 
