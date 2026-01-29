@@ -109,3 +109,6 @@ templates/base/volumes/caddy/sites/*.caddy
 
 # Runtime database data
 templates/base/volumes/db/data/
+
+# Bun lockfile
+bun.lock
