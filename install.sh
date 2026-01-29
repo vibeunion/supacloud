@@ -1254,12 +1254,12 @@ update_pigsty_config() {
     
     if [[ -n "$ANON_KEY" ]]; then
         # 更新 ANON_KEY
-        sed -i "s|ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.*|ANON_KEY: ${ANON_KEY}|g" "$PIGSTY_YML"
+        sed -i "s|ANON_KEY: .*|ANON_KEY: ${ANON_KEY}|g" "$PIGSTY_YML"
     fi
     
     if [[ -n "$SERVICE_ROLE_KEY" ]]; then
         # 更新 SERVICE_ROLE_KEY
-        sed -i "s|SERVICE_ROLE_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.*|SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY}|g" "$PIGSTY_YML"
+        sed -i "s|SERVICE_ROLE_KEY: .*|SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY}|g" "$PIGSTY_YML"
     fi
     
     # 配置 PostgreSQL WAL 日志限制 (max_wal_size = 2GB)
