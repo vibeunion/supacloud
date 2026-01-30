@@ -31,6 +31,9 @@ export interface ProjectResponse {
   api: {
     url: string;
   };
+  studio: {
+    url: string;
+  };
 }
 
 export interface ProjectDetailResponse extends ProjectResponse {
@@ -342,6 +345,9 @@ export class ProjectService {
       },
       api: {
         url: routerService.getProjectApiUrl(project.ref),
+      },
+      studio: {
+        url: routerService.getProjectStudioUrl(project.ref),
       },
     };
   }

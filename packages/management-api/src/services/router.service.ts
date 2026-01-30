@@ -30,6 +30,11 @@ export class RouterService {
   getProjectApiUrl(projectRef: string): string {
     return `https://${projectRef}.api.${config.baseDomain}`;
   }
+
+  // 获取项目 Studio URL
+  getProjectStudioUrl(projectRef: string): string {
+    return `https://studio-${projectRef}.${config.baseDomain}`;
+  }
 }
 
 export const routerService = new RouterService();
