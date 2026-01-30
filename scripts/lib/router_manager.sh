@@ -58,10 +58,10 @@ server {
     listen 443 ssl;
     server_name ${api_domain};
 
-    # ACME 自动证书 (如果已安装 acme 模块)
-    # acme_certificate ${api_domain};
-    # ssl_certificate     \$acme_certificate;
-    # ssl_certificate_key \$acme_certificate_key;
+    # ACME 自动证书 (Pigsty 4.x 原生支持)
+    acme_certificate letsencrypt;
+    ssl_certificate     $acme_certificate;
+    ssl_certificate_key $acme_certificate_key;
 
     # 安全头
     add_header X-Project-Ref ${PROJECT_REF} always;
@@ -132,11 +132,22 @@ server {
     listen 443 ssl;
     server_name ${custom_domain};
 
-    # ACME 联动占位
-    # ssl_certificate /etc/nginx/ssl/live/${custom_domain}/fullchain.pem;
-    # ssl_certificate_key /etc/nginx/ssl/live/${custom_domain}/privkey.pem;
+    # 优先检查是否存在静态证书 (由 SecurityService/ACME.sh 申请)
+    # 如果路径存在，则使用静态证书；否则回退到 Nginx ACME 动态申请
+    if [ -f "/etc/pigsty/cert/${custom_domain}.pem" ]; then
+        cat >> "$config_file" <<EOF
+    ssl_certificate     /etc/pigsty/cert/${custom_domain}.pem;
+    ssl_certificate_key /etc/pigsty/cert/${custom_domain}.key;
+EOF
+    else
+        cat >> "$config_file" <<EOF
+    acme_certificate letsencrypt;
+    ssl_certificate     \$acme_certificate;
+    ssl_certificate_key \$acme_certificate_key;
+EOF
+    fi
 
-    location / {
+    cat >> "$config_file" <<EOF
         proxy_pass http://${KONG_INTERNAL};
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
