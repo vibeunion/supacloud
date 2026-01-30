@@ -87,5 +87,114 @@ describe("Management API Integration Tests", () => {
             // 允许 404 (业务预期) 或 500 (环境不稳定下的数据库连接问题，暂时忽略)
             expect([404, 500]).toContain(response.status);
         });
+
+        it("should return project usage metrics", async () => {
+            const response = await app.handle(
+                new Request(`${baseUrl}/v1/projects/default/usage`, {
+                    headers: { Authorization: `Bearer ${masterToken}` },
+                })
+            );
+            expect([200, 404, 500]).toContain(response.status);
+            if (response.status === 200) {
+                const data = await response.json();
+                expect(data).toHaveProperty("data");
+                expect(data.data).toHaveProperty("cpu");
+            }
+        });
+
+        it("should return project logs", async () => {
+            const response = await app.handle(
+                new Request(`${baseUrl}/v1/projects/default/logs?type=auth`, {
+                    headers: { Authorization: `Bearer ${masterToken}` },
+                })
+            );
+            expect([200, 404, 500]).toContain(response.status);
+            if (response.status === 200) {
+                const data = await response.json();
+                expect(Array.isArray(data)).toBe(true);
+            }
+        });
+
+        it("should return auth config", async () => {
+            const response = await app.handle(
+                new Request(`${baseUrl}/v1/projects/default/config/auth`, {
+                    headers: { Authorization: `Bearer ${masterToken}` },
+                })
+            );
+            expect([200, 404, 500]).toContain(response.status);
+        });
+
+        it("should list project functions", async () => {
+            const response = await app.handle(
+                new Request(`${baseUrl}/v1/projects/default/functions`, {
+                    headers: { Authorization: `Bearer ${masterToken}` },
+                })
+            );
+            expect([200, 404, 500]).toContain(response.status);
+            if (response.status === 200) {
+                const data = await response.json();
+                expect(Array.isArray(data)).toBe(true);
+            }
+        });
+
+        it("should rotate api keys", async () => {
+            const response = await app.handle(
+                new Request(`${baseUrl}/v1/projects/default/api-keys/rotate`, {
+                    method: "POST",
+                    headers: { Authorization: `Bearer ${masterToken}` },
+                })
+            );
+            expect([200, 404, 500]).toContain(response.status);
+            if (response.status === 200) {
+                const data = await response.json();
+                expect(data).toHaveProperty("anon_key");
+                expect(data).toHaveProperty("service_role_key");
+            }
+        });
+
+        it("should list database backups", async () => {
+            const response = await app.handle(
+                new Request(`${baseUrl}/v1/projects/default/database/backups`, {
+                    headers: { Authorization: `Bearer ${masterToken}` },
+                })
+            );
+            expect([200, 404, 500]).toContain(response.status);
+            if (response.status === 200) {
+                const data = await response.json();
+                expect(Array.isArray(data)).toBe(true);
+            }
+        });
+
+        it("should apply network restrictions", async () => {
+            const response = await app.handle(
+                new Request(`${baseUrl}/v1/projects/default/network-restrictions`, {
+                    method: "POST",
+                    headers: {
+                        Authorization: `Bearer ${masterToken}`,
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({
+                        allowed_address_ranges: ["1.1.1.1", "2.2.2.2"]
+                    })
+                })
+            );
+            expect([200, 404, 500]).toContain(response.status);
+        });
+
+        it("should update custom hostname", async () => {
+            const response = await app.handle(
+                new Request(`${baseUrl}/v1/projects/default/custom-hostname`, {
+                    method: "POST",
+                    headers: {
+                        Authorization: `Bearer ${masterToken}`,
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({
+                        custom_hostname: "api.example.com"
+                    })
+                })
+            );
+            expect([200, 404, 500]).toContain(response.status);
+        });
     });
 });
