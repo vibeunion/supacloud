@@ -1,13 +1,10 @@
-import { describe, test, expect, beforeEach, spyOn } from "bun:test";
-import { StorageService } from "../../src/services/storage.service";
+import { describe, test, expect, spyOn } from "bun:test";
+import { storageService, StorageService } from "../../src/services/storage.service";
 import { shellService } from "../../src/services/shell.service";
 
 describe("StorageService", () => {
-  let storageService: StorageService;
-
-  beforeEach(() => {
-    storageService = new StorageService();
-  });
+  // 保持现有测试结构，但使用 storageService 实例
+  const service = storageService;
 
   describe("createBucket", () => {
     test("should return result object", async () => {
@@ -165,6 +162,27 @@ describe("StorageService", () => {
       expect(result.success).toBe(true);
       expect(result.accessKey).toBe("key1");
       expect(result.secretKey).toBe("key2");
+      spy.mockRestore();
+    });
+  });
+
+  describe("JuiceFS Methods", () => {
+    test("getStatus should return parsed status", async () => {
+      const spy = spyOn(shellService, "execute").mockResolvedValue({
+        success: true,
+        output: JSON.stringify({ status: "mounted", size: "1T", used: "100G" })
+      });
+      const result = await service.getStatus();
+      expect(result.status).toBe("mounted");
+      expect(result.size).toBe("1T");
+      spy.mockRestore();
+    });
+
+    test("startMigration should trigger async sync", async () => {
+      const spy = spyOn(shellService, "execute").mockResolvedValue({ success: true, output: "" });
+      const result = await service.startMigration("s3://bucket", { access_key: "ak", secret_key: "sk", endpoint: "ep" });
+      expect(result.message).toContain("已启动");
+      expect(spy).toHaveBeenCalled();
       spy.mockRestore();
     });
   });
