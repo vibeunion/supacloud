@@ -4,3 +4,4 @@ export { userRoutes } from "./user";
 export { backupRoutes } from "./backups";
 export { monitorRoutes } from "./monitor";
 export { maintenanceRoutes } from "./maintenance";
+export { extensionRoutes } from "./extensions";
