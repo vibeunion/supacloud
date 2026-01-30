@@ -12,7 +12,7 @@ export class StorageService {
   /**
    * 获取存储状态 (JuiceFS)
    */
-  async getStatus(): Promise<StorageStatus> {
+  static async getStatus(): Promise<StorageStatus> {
     const { success, output, error } = await shellService.execute('storage_manager.sh', ['status']);
     if (!success) {
       console.error('Failed to get storage status:', error);
@@ -28,7 +28,7 @@ export class StorageService {
   /**
    * 启动迁移任务 (JuiceFS -> S3)
    */
-  async startMigration(s3Url: string, credentials: { access_key: string, secret_key: string, endpoint: string }): Promise<{ message: string }> {
+  static async startMigration(s3Url: string, credentials: { access_key: string, secret_key: string, endpoint: string }): Promise<{ message: string }> {
     const options = JSON.stringify(credentials);
     shellService.execute('storage_manager.sh', ['migrate_to_s3', s3Url, options]).catch(err => {
       console.error('Async migration task failed:', err);
@@ -39,7 +39,7 @@ export class StorageService {
   /**
    * 兼容旧版：创建 S3 Bucket (Garage/MinIO/RustFS)
    */
-  async createBucket(projectRef: string): Promise<{ success: boolean; accessKey?: string; secretKey?: string; error?: string }> {
+  static async createBucket(projectRef: string): Promise<{ success: boolean; accessKey?: string; secretKey?: string; error?: string }> {
     const { success, output, error } = await shellService.execute('s3_manager.sh', ['create', projectRef]);
     if (!success) return { success: false, error };
 
@@ -51,7 +51,7 @@ export class StorageService {
   /**
    * 兼容旧版：删除 S3 Bucket
    */
-  async deleteBucket(projectRef: string): Promise<{ success: boolean; error?: string }> {
+  static async deleteBucket(projectRef: string): Promise<{ success: boolean; error?: string }> {
     const { success, error } = await shellService.execute('s3_manager.sh', ['delete', projectRef]);
     return { success, error };
   }
@@ -59,7 +59,7 @@ export class StorageService {
   /**
    * 兼容旧版：获取 S3 凭据
    */
-  async getCredentials(projectRef: string): Promise<{ success: boolean; accessKey?: string; secretKey?: string; error?: string }> {
+  static async getCredentials(projectRef: string): Promise<{ success: boolean; accessKey?: string; secretKey?: string; error?: string }> {
     const { success, output, error } = await shellService.execute('s3_manager.sh', ['credentials', projectRef]);
     if (!success) return { success: false, error };
 
@@ -69,4 +69,4 @@ export class StorageService {
   }
 }
 
-export const storageService = new StorageService();
+export const storageService = StorageService;
