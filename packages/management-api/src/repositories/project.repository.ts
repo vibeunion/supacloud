@@ -1,13 +1,25 @@
 import { sql, type Project, type CreateProjectInput, type ProjectStatus } from "../db";
 
 export class ProjectRepository {
-  // 获取所有未删除的项目
   async findAll(): Promise<Project[]> {
-    return await sql`
-      SELECT * FROM projects
-      WHERE deleted_at IS NULL
-      ORDER BY created_at DESC
-    `;
+    let retries = 3;
+    while (retries > 0) {
+      try {
+        return await sql`
+          SELECT * FROM projects
+          WHERE deleted_at IS NULL
+          ORDER BY created_at DESC
+        `;
+      } catch (err: any) {
+        if (err.message.includes("closed") && retries > 1) {
+          retries--;
+          await new Promise(resolve => setTimeout(resolve, 100));
+          continue;
+        }
+        throw err;
+      }
+    }
+    return [];
   }
 
   // 根据 ref 查找项目
