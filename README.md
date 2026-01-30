@@ -57,7 +57,13 @@
 
 #### Installation
 
+**One-Click Installation (Recommended)**
+
 ```bash
+curl -fsSL https://gh-proxy.net/https://raw.githubusercontent.com/zuohuadong/supacloud/main/setup.sh | sudo bash
+```
+
+**Standard Installation**
 # 1. Clone repository
 git clone https://github.com/zuohuadong/supacloud.git
 cd supacloud
@@ -242,7 +248,13 @@ Key settings in `config.env`:
 
 #### 安装部署
 
+**一键安装（推荐）**
+
 ```bash
+curl -fsSL https://gh-proxy.net/https://raw.githubusercontent.com/zuohuadong/supacloud/main/setup.sh | sudo bash
+```
+
+**手动安装**
 # 1. 下载代码
 git clone https://github.com/zuohuadong/supacloud.git
 cd supacloud
