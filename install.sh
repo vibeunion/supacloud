@@ -1105,6 +1105,10 @@ http {
             proxy_set_header Connection "upgrade";
         }
     }
+
+    # --- 租户路由包含 (SupaCloud Tenants) ---
+    # 允许动态通过外部文件增加路由，且不干扰主配置
+    include /etc/nginx/sites-enabled/supa-tenants/*.conf;
 }
 EOF
 
