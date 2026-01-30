@@ -645,9 +645,10 @@ install_garage() {
     GARAGE_ARCH=$(uname -m)
     
     # 架构映射
+    GARAGE_ARCH_SUFFIX=""
     case "$GARAGE_ARCH" in
-        x86_64) GARAGE_ARCH="x86_64" ;;
-        aarch64) GARAGE_ARCH="aarch64" ;;
+        x86_64) GARAGE_ARCH_SUFFIX="amd64" ;;
+        aarch64) GARAGE_ARCH_SUFFIX="arm64" ;;
         *) log_error "不支持的架构: $GARAGE_ARCH"; exit 1 ;;
     esac
     
@@ -655,22 +656,31 @@ install_garage() {
     if [[ -n "$GARAGE_DOWNLOAD_URL" ]]; then
         GARAGE_URL="$GARAGE_DOWNLOAD_URL"
     else
-        GARAGE_URL="https://garagehq.deuxfleurs.fr/_releases/${GARAGE_VERSION}/${GARAGE_ARCH}-unknown-linux-musl/garage"
+        # 使用 GitHub 镜像分发，支持多架构
+        GARAGE_URL="https://github.com/zuohuadong/supacloud/releases/download/garage-${GARAGE_VERSION}/garage-${GARAGE_VERSION}-linux-${GARAGE_ARCH_SUFFIX}"
     fi
     
     # 下载 Garage
     if [[ ! -f /usr/local/bin/garage ]]; then
-        log_info "下载 Garage ${GARAGE_VERSION}..."
-        log_info "下载地址: $GARAGE_URL"
+        log_info "下载 Garage ${GARAGE_VERSION} ..."
         
-        if curl -L --progress-bar "$GARAGE_URL" -o /usr/local/bin/garage; then
-            chmod +x /usr/local/bin/garage
-            log_info "Garage 下载成功"
+        # 尝试使用镜像加速
+        MIRROR_GARAGE_URL="https://gh-proxy.net/${GARAGE_URL}"
+        log_info "尝试从镜像下载: $MIRROR_GARAGE_URL"
+        
+        if curl -L --progress-bar "$MIRROR_GARAGE_URL" -o /usr/local/bin/garage; then
+            log_info "通过镜像下载成功"
         else
-            log_error "Garage 下载失败"
-            rm -f /usr/local/bin/garage
-            exit 1
+            log_warn "镜像下载失败，尝试直接下载: $GARAGE_URL"
+            if curl -L --progress-bar "$GARAGE_URL" -o /usr/local/bin/garage; then
+                log_info "常规下载成功"
+            else
+                log_error "Garage 下载失败"
+                rm -f /usr/local/bin/garage
+                exit 1
+            fi
         fi
+        chmod +x /usr/local/bin/garage
     fi
     
     # 创建配置目录
