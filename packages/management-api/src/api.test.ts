@@ -1,15 +1,16 @@
-import { describe, it, expect, beforeAll } from "bun:test";
+import { describe, it, expect } from "bun:test";
 import { app } from "../src/index";
 
 describe("Management API Integration Tests", () => {
     const baseUrl = "http://localhost";
+    const masterToken = "dev-master-token";
 
     describe("Organizations", () => {
         it("should list organizations", async () => {
             const response = await app.handle(
                 new Request(`${baseUrl}/v1/organizations`, {
                     headers: {
-                        Authorization: "Bearer dev-master-token", // 假设 authMiddleware 在开发环境/测试环境有特定处理或简单绕过
+                        Authorization: `Bearer ${masterToken}`,
                     },
                 })
             );
@@ -27,7 +28,7 @@ describe("Management API Integration Tests", () => {
             const response = await app.handle(
                 new Request(`${baseUrl}/v1/profile`, {
                     headers: {
-                        Authorization: "Bearer dev-master-token",
+                        Authorization: `Bearer ${masterToken}`,
                     },
                 })
             );
@@ -42,7 +43,7 @@ describe("Management API Integration Tests", () => {
             const response = await app.handle(
                 new Request(`${baseUrl}/v1/me`, {
                     headers: {
-                        Authorization: "Bearer dev-master-token",
+                        Authorization: `Bearer ${masterToken}`,
                     },
                 })
             );
@@ -58,7 +59,7 @@ describe("Management API Integration Tests", () => {
             const response = await app.handle(
                 new Request(`${baseUrl}/v1/projects`, {
                     headers: {
-                        Authorization: "Bearer dev-master-token",
+                        Authorization: `Bearer ${masterToken}`,
                     },
                 })
             );
@@ -69,10 +70,11 @@ describe("Management API Integration Tests", () => {
         });
 
         it("should return 404 for non-existent project", async () => {
+            // 注意：如果数据库查询在测试环境中返回了意料之外的结果，请检查此处
             const response = await app.handle(
-                new Request(`${baseUrl}/v1/projects/non-existent`, {
+                new Request(`${baseUrl}/v1/projects/non_existent_ref_123`, {
                     headers: {
-                        Authorization: "Bearer dev-master-token",
+                        Authorization: `Bearer ${masterToken}`,
                     },
                 })
             );
