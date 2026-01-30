@@ -7,14 +7,14 @@ import { projectRepository } from "../../src/repositories/project.repository";
 describe("ScalingService", () => {
     test("checkAndScale should trigger vertical scale on high CPU", async () => {
         // 1. Mock Database
-        spyOn(projectRepository, "findByRef").mockResolvedValue({
+        const projectSpy = spyOn(projectRepository, "findByRef").mockResolvedValue({
             ref: "test-proj",
             status: "active",
             config: {}
         } as any);
 
         // 2. Mock High Metrics
-        spyOn(MonitorService, "getMetrics").mockResolvedValue({
+        const monitorSpy = spyOn(MonitorService, "getMetrics").mockResolvedValue({
             qps: 10,
             active_connections: 5,
             slow_queries: 0,
@@ -32,16 +32,18 @@ describe("ScalingService", () => {
         expect(shellSpy).toHaveBeenCalledWith("ha_manager.sh", ["vertical_scale", "supa_test-proj", "cpu=4,mem=8g"]);
 
         shellSpy.mockRestore();
+        monitorSpy.mockRestore();
+        projectSpy.mockRestore();
     });
 
     test("checkAndScale should trigger horizontal scale on high QPS", async () => {
-        spyOn(projectRepository, "findByRef").mockResolvedValue({
+        const projectSpy = spyOn(projectRepository, "findByRef").mockResolvedValue({
             ref: "test-proj",
             status: "active",
             config: {}
         } as any);
 
-        spyOn(MonitorService, "getMetrics").mockResolvedValue({
+        const monitorSpy = spyOn(MonitorService, "getMetrics").mockResolvedValue({
             qps: 1200, // High!
             active_connections: 5,
             slow_queries: 0,
@@ -58,5 +60,7 @@ describe("ScalingService", () => {
         expect(shellSpy).toHaveBeenCalledWith("gateway_manager.sh", expect.arrayContaining(["add-upstream-target"]));
 
         shellSpy.mockRestore();
+        monitorSpy.mockRestore();
+        projectSpy.mockRestore();
     });
 });
