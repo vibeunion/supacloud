@@ -183,7 +183,7 @@ Key settings in `config.env`:
 |----------|-------------|---------|
 | `SUPABASE_PUBLIC_DOMAIN` | API domain | (required) |
 | `SUPABASE_STUDIO_DOMAIN` | Studio domain | (optional) |
-| `S3_STORAGE_TYPE` | Storage backend | `rustfs` |
+| `S3_STORAGE_TYPE` | Storage backend | `garage` |
 | `EDGE_RUNTIME` | Functions runtime | `deno` |
 | `PG_VERSION` | PostgreSQL version | `18` |
 
@@ -374,7 +374,7 @@ supacloud/
 |------|------|--------|
 | `SUPABASE_PUBLIC_DOMAIN` | API 域名 | （必填） |
 | `SUPABASE_STUDIO_DOMAIN` | Studio 域名 | （可选） |
-| `S3_STORAGE_TYPE` | 存储后端 | `rustfs` |
+| `S3_STORAGE_TYPE` | 存储后端 | `garage` |
 | `EDGE_RUNTIME` | 云函数运行时 | `deno` |
 | `PG_VERSION` | PostgreSQL 版本 | `18` |
 
