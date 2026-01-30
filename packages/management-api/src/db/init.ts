@@ -29,11 +29,23 @@ async function initDatabase() {
   const sql = new SQL({ url: config.databaseUrl });
 
   try {
+    // 创建 organizations 表
+    await sql`
+      CREATE TABLE IF NOT EXISTS organizations (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        name VARCHAR(100) NOT NULL,
+        slug VARCHAR(100) UNIQUE NOT NULL,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `;
+
     // 创建 projects 表
     await sql`
       CREATE TABLE IF NOT EXISTS projects (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         ref VARCHAR(20) UNIQUE NOT NULL,
+        organization_id UUID REFERENCES organizations(id),
         name VARCHAR(100) NOT NULL,
         db_name VARCHAR(63) NOT NULL,
         db_user VARCHAR(63) NOT NULL,
