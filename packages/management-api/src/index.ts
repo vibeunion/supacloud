@@ -3,7 +3,7 @@ import { swagger } from "@elysiajs/swagger";
 import { cors } from "@elysiajs/cors";
 import { config } from "./config";
 import { authMiddleware } from "./middleware/auth";
-import { projectRoutes } from "./routes/projects";
+import { projectRoutes, organizationRoutes, userRoutes } from "./routes";
 
 const app = new Elysia()
   // Swagger 文档
@@ -17,6 +17,8 @@ const app = new Elysia()
         },
         tags: [
           { name: "projects", description: "Project management endpoints" },
+          { name: "organizations", description: "Organization management endpoints" },
+          { name: "user", description: "User profile endpoints" },
         ],
         components: {
           securitySchemes: {
@@ -46,6 +48,8 @@ const app = new Elysia()
   // 需要认证的路由
   .use(authMiddleware)
   .use(projectRoutes)
+  .use(organizationRoutes)
+  .use(userRoutes)
 
   // 错误处理
   .onError(({ code, error, set }) => {

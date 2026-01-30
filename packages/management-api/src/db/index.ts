@@ -11,11 +11,22 @@ export const sql = new SQL({
 // 项目状态类型
 export type ProjectStatus = "creating" | "active" | "paused" | "deleted";
 
+// 组织类型定义
+export interface Organization {
+  id: string;
+  name: string;
+  slug: string;
+  created_at: Date;
+  updated_at: Date;
+}
+
 // 项目类型定义
 export interface Project {
   id: string;
   ref: string;
+  organization_id: string; // 关联组织
   name: string;
+  // ... 其他保持不变
   db_name: string;
   db_user: string;
   db_password: string;
