@@ -43,6 +43,8 @@ export class MonitorService {
             qps: `sum(rate(pg_stat_database_xact_commit{instance=~"${nodeIp}:.*"}[5m]))`,
             connections: `sum(pg_stat_activity_count{instance=~"${nodeIp}:.*"})`,
             slow_queries: `sum(pg_slow_queries_count{instance=~"${nodeIp}:.*"})`,
+            cpu_usage: `sum(rate(node_cpu_seconds_total{mode!="idle",instance=~"${nodeIp}:.*"}[5m])) / count(node_cpu_seconds_total{mode="idle",instance=~"${nodeIp}:.*"}) * 100`,
+            mem_usage: `(node_memory_MemTotal_bytes{instance=~"${nodeIp}:.*"} - node_memory_MemAvailable_bytes{instance=~"${nodeIp}:.*"}) / node_memory_MemTotal_bytes{instance=~"${nodeIp}:.*"} * 100`,
         };
 
         try {
@@ -60,6 +62,8 @@ export class MonitorService {
                 qps: metricsMap.qps,
                 active_connections: metricsMap.connections,
                 slow_queries: metricsMap.slow_queries,
+                cpu_usage: metricsMap.cpu_usage,
+                mem_usage: metricsMap.mem_usage,
             };
         } catch (error) {
             console.error('Failed to fetch metrics from VictoriaMetrics:', error);
