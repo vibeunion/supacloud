@@ -52,6 +52,21 @@ case $COMMAND in
         log_info "Replica initialization started"
         ;;
 
+    vertical_scale)
+        # 垂直扩容 (调整资源限制)
+        # TARGET 为集群名, OPTIONS 为资源参数 (例如: "cpu=2 mem=4g")
+        CLUSTER=${TARGET:-"db-main"}
+        LIMITS=$OPTIONS
+        if [ -z "$LIMITS" ]; then
+            log_error "Resource limits are required (e.g., cpu=2 mem=4g)"
+            exit 1
+        fi
+        log_info "Vertical scaling cluster $CLUSTER to $LIMITS"
+        # 假设 pig pgsql edit 支持通过命令行传入资源参数
+        pig pgsql edit "$CLUSTER" -e "$LIMITS"
+        log_info "Resource limits updated"
+        ;;
+
     *)
         echo "Usage: $0 {switchover|reload|add_replica} [target] [options]"
         exit 1

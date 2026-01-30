@@ -1,7 +1,4 @@
-import { exec } from 'child_process';
-import path from 'path';
-
-const HA_MANAGER_PATH = path.resolve(process.cwd(), '../../scripts/lib/ha_manager.sh');
+import { shellService } from './shell.service';
 
 export class MaintenanceService {
     /**
@@ -10,16 +7,14 @@ export class MaintenanceService {
      * @param candidate 目标节点 (可选)
      */
     static async switchover(cluster: string = 'db-main', candidate?: string): Promise<{ message: string }> {
-        return new Promise((resolve, reject) => {
-            const cmd = `bash ${HA_MANAGER_PATH} switchover ${cluster} ${candidate || ''}`;
-            exec(cmd, (error, stdout, stderr) => {
-                if (error) {
-                    console.error('Switchover failed:', stderr);
-                    return reject(new Error('主从切换指令发送失败'));
-                }
-                resolve({ message: '主从切换操作已下发成功' });
-            });
-        });
+        const { success, error } = await shellService.execute('ha_manager.sh', ['switchover', cluster, candidate || '']);
+
+        if (!success) {
+            console.error('Switchover failed:', error);
+            throw new Error('主从切换指令发送失败');
+        }
+
+        return { message: '主从切换操作已下发成功' };
     }
 
     /**
@@ -27,16 +22,14 @@ export class MaintenanceService {
      * @param nodeIp 节点 IP
      */
     static async reloadConfig(nodeIp: string): Promise<{ message: string }> {
-        return new Promise((resolve, reject) => {
-            const cmd = `bash ${HA_MANAGER_PATH} reload ${nodeIp}`;
-            exec(cmd, (error, stdout, stderr) => {
-                if (error) {
-                    console.error('Reload failed:', stderr);
-                    return reject(new Error('配置重载失败'));
-                }
-                resolve({ message: '配置重载指令已发送' });
-            });
-        });
+        const { success, error } = await shellService.execute('ha_manager.sh', ['reload', nodeIp]);
+
+        if (!success) {
+            console.error('Reload failed:', error);
+            throw new Error('配置重载失败');
+        }
+
+        return { message: '配置重载指令已发送' };
     }
 
     /**
@@ -45,7 +38,10 @@ export class MaintenanceService {
      */
     static async addReplica(ip: string): Promise<{ message: string }> {
         // 扩容是极长任务，不等待完成，直接返回
-        exec(`bash ${HA_MANAGER_PATH} add_replica ${ip}`);
+        shellService.execute('ha_manager.sh', ['add_replica', ip]).catch(err => {
+            console.error('Async add_replica task failed:', err);
+        });
+
         return { message: `已启动节点 ${ip} 的只读副本扩容任务` };
     }
 }
