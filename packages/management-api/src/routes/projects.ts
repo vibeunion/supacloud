@@ -56,7 +56,7 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     },
     {
       params: t.Object({
-        ref: t.String({ minLength: 1, maxLength: 20 }),
+        ref: t.String({ minLength: 1 }),
       }),
     }
   )

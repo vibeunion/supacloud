@@ -4,9 +4,9 @@ import { config } from "../config";
 // 创建数据库连接
 export const sql = new SQL({
   url: config.databaseUrl,
-  max: 50, // 进一步增加连接数
-  idleTimeout: 60,
-  connectTimeout: 20000, // 增加超时容忍
+  max: 100, // 高负载下保持更多连接
+  idleTimeout: 300, // 增加空闲超时
+  connectTimeout: 30000,
 });
 
 // 项目状态类型
