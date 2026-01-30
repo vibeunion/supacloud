@@ -3,7 +3,7 @@ import { swagger } from "@elysiajs/swagger";
 import { cors } from "@elysiajs/cors";
 import { config } from "./config";
 import { authMiddleware } from "./middleware/auth";
-import { projectRoutes, organizationRoutes, userRoutes, backupRoutes } from "./routes";
+import { projectRoutes, organizationRoutes, userRoutes, backupRoutes, monitorRoutes } from "./routes";
 
 const app = new Elysia({ strictPath: false })
   // Swagger 文档
@@ -20,6 +20,7 @@ const app = new Elysia({ strictPath: false })
           { name: "organizations", description: "Organization management endpoints" },
           { name: "user", description: "User profile endpoints" },
           { name: "backups", description: "Database backup and restore endpoints" },
+          { name: "monitor", description: "Database monitoring and health endpoints" },
         ],
         components: {
           securitySchemes: {
@@ -52,6 +53,7 @@ const app = new Elysia({ strictPath: false })
   .use(organizationRoutes)
   .use(userRoutes)
   .use(backupRoutes)
+  .use(monitorRoutes)
 
   // 错误处理
   .onError(({ code, error, set }) => {
