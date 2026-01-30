@@ -321,6 +321,34 @@ export class ProjectService {
     return result.output;
   }
 
+  async listFunctions(ref: string): Promise<any[]> {
+    const project = await projectRepository.findByRef(ref);
+    if (!project) return [];
+
+    const result = await shellService.execute("function_manager.sh", ["list", ref]);
+    if (!result.success) return [];
+    try {
+      const slugs = JSON.parse(result.output);
+      return slugs.map((slug: string) => ({
+        id: slug,
+        slug: slug,
+        name: slug,
+        status: "ACTIVE",
+        created_at: new Date().toISOString(),
+      }));
+    } catch {
+      return [];
+    }
+  }
+
+  async deleteFunction(ref: string, slug: string): Promise<boolean> {
+    const project = await projectRepository.findByRef(ref);
+    if (!project) return false;
+
+    const result = await shellService.execute("function_manager.sh", ["delete", ref, slug]);
+    return result.success;
+  }
+
   async deployFunction(ref: string, slug: string, code: string): Promise<boolean> {
     const project = await projectRepository.findByRef(ref);
     if (!project) return false;
@@ -352,13 +380,110 @@ export class ProjectService {
     };
   }
 
-  // 转换为详细响应格式
+  // 获取详细响应格式
   private toDetailResponse(project: Project): ProjectDetailResponse {
     return {
       ...this.toResponse(project),
       config: project.config,
       updated_at: project.updated_at,
     };
+  }
+
+  // --- 日志管理 ---
+
+  async queryLogs(ref: string, type: string = "all"): Promise<any[]> {
+    const project = await projectRepository.findByRef(ref);
+    if (!project) return [];
+
+    // 模拟日志数据，激活 Studio Logs Explorer
+    const now = new Date();
+    return [
+      {
+        id: "log-1",
+        timestamp: new Date(now.getTime() - 1000).toISOString(),
+        event_message: `Project ${ref} received a request to ${type} logs.`,
+        metadata: { severity: "info", source: "management-api" },
+      },
+      {
+        id: "log-2",
+        timestamp: now.toISOString(),
+        event_message: `Successfully retrieved ${type} logs for ${project.name}.`,
+        metadata: { severity: "success", source: "management-api" },
+      }
+    ];
+  }
+
+  // --- API 密钥管理 ---
+
+  async rotateApiKeys(ref: string): Promise<{ anon_key: string, service_role_key: string } | null> {
+    const project = await projectRepository.findByRef(ref);
+    if (!project) return null;
+
+    // 1. 生成新的密钥集
+    const { jwtSecret, anonKey, serviceRoleKey } = await jwtService.generateKeySet();
+
+    // 2. 更新数据库
+    await projectRepository.updateApiKeys(ref, {
+      jwt_secret: jwtSecret,
+      anon_key: anonKey,
+      service_role_key: serviceRoleKey,
+    });
+
+    // 3. TODO: 此处后续可以增加通知路由器重载的逻辑
+
+    return {
+      anon_key: anonKey,
+      service_role_key: serviceRoleKey,
+    };
+  }
+
+  // --- 备份管理 ---
+
+  async listBackups(ref: string): Promise<any[]> {
+    const project = await projectRepository.findByRef(ref);
+    if (!project) return [];
+
+    const result = await shellService.execute("backup_manager.sh", ["list", ref]);
+    if (!result.success) return [];
+    try {
+      return JSON.parse(result.output);
+    } catch {
+      return [];
+    }
+  }
+
+  async restoreBackup(ref: string, backupId: string): Promise<boolean> {
+    const project = await projectRepository.findByRef(ref);
+    if (!project) return false;
+
+    const result = await shellService.execute("backup_manager.sh", ["restore", ref, backupId]);
+    return result.success;
+  }
+
+  // --- 网络限制 ---
+
+  async updateNetworkRestrictions(ref: string, allowedIps: string[]): Promise<boolean> {
+    const project = await projectRepository.findByRef(ref);
+    if (!project) return false;
+
+    const result = await shellService.execute("router_manager.sh", ["update-restrictions", ref, allowedIps.join(",")]);
+    if (result.success) {
+      await routerService.reload();
+    }
+    return result.success;
+  }
+
+  // --- 自定义域名 ---
+
+  async addCustomDomain(ref: string, domain: string): Promise<boolean> {
+    const project = await projectRepository.findByRef(ref);
+    if (!project) return false;
+
+    const result = await shellService.execute("router_manager.sh", ["add-custom-domain", ref, domain]);
+    if (result.success) {
+      await routerService.reload();
+    }
+    return result.success;
   }
 }
 
