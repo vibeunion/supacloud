@@ -58,7 +58,7 @@ describe("Management API Integration Tests", () => {
             const response = await app.handle(
                 new Request(`${baseUrl}/v1/projects`, {
                     headers: {
-                        Authorization: "Bearer test-token",
+                        Authorization: "Bearer dev-master-token",
                     },
                 })
             );
@@ -72,7 +72,7 @@ describe("Management API Integration Tests", () => {
             const response = await app.handle(
                 new Request(`${baseUrl}/v1/projects/non-existent`, {
                     headers: {
-                        Authorization: "Bearer test-token",
+                        Authorization: "Bearer dev-master-token",
                     },
                 })
             );
