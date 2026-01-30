@@ -90,6 +90,21 @@ export class ProjectRepository {
     return project || null;
   }
 
+  // 更新 API 密钥
+  async updateApiKeys(ref: string, keys: { jwt_secret: string, anon_key: string, service_role_key: string }): Promise<Project | null> {
+    const [project] = await sql`
+      UPDATE projects
+      SET 
+        jwt_secret = ${keys.jwt_secret},
+        anon_key = ${keys.anon_key},
+        service_role_key = ${keys.service_role_key},
+        updated_at = NOW()
+      WHERE ref = ${ref} AND deleted_at IS NULL
+      RETURNING *
+    `;
+    return project || null;
+  }
+
   // 软删除项目
   async softDelete(ref: string): Promise<Project | null> {
     const [project] = await sql`
