@@ -172,6 +172,32 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     }
   )
 
+  // 获取项目健康状态
+  .get(
+    "/:ref/usage",
+    async ({ params, set }) => {
+      const project = await projectService.getProject(params.ref);
+      if (!project) {
+        set.status = 404;
+        return { error: "Project not found" };
+      }
+      // 返回模拟的基础指标，使 Studio 仪表盘动起来
+      return {
+        data: {
+          database: { usage: 10, limit: 500, unit: "MB" },
+          storage: { usage: 5, limit: 1000, unit: "MB" },
+          cpu: { usage: Math.floor(Math.random() * 20), limit: 100, unit: "percent" },
+          ram: { usage: 256, limit: 1024, unit: "MB" },
+        },
+      };
+    },
+    {
+      params: t.Object({
+        ref: t.String(),
+      }),
+    }
+  )
+
   // 重启项目
   .post(
     "/:ref/restart",
@@ -245,6 +271,163 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     }
   )
 
+  // 轮换 API 密钥
+  .post(
+    "/:ref/api-keys/rotate",
+    async ({ params, set }) => {
+      const keys = await projectService.rotateApiKeys(params.ref);
+      if (!keys) {
+        set.status = 404;
+        return { error: "Project not found" };
+      }
+      return keys;
+    },
+    {
+      params: t.Object({
+        ref: t.String(),
+      }),
+    }
+  )
+
+  // 获取日志
+  .get(
+    "/:ref/logs",
+    async ({ params, query, set }) => {
+      const logs = await projectService.queryLogs(params.ref, query.type);
+      return logs;
+    },
+    {
+      params: t.Object({
+        ref: t.String(),
+      }),
+      query: t.Object({
+        type: t.Optional(t.String()),
+      }),
+    }
+  )
+
+  // 获取备份列表
+  .get(
+    "/:ref/database/backups",
+    async ({ params, set }) => {
+      const backups = await projectService.listBackups(params.ref);
+      return backups;
+    },
+    {
+      params: t.Object({
+        ref: t.String(),
+      }),
+    }
+  )
+
+  // 还原备份
+  .post(
+    "/:ref/database/backups/restore",
+    async ({ params, body, set }) => {
+      const success = await projectService.restoreBackup(params.ref, body.backup_id);
+      if (!success) {
+        set.status = 500;
+        return { error: "Failed to restore backup" };
+      }
+      return { success: true };
+    },
+    {
+      params: t.Object({
+        ref: t.String(),
+      }),
+      body: t.Object({
+        backup_id: t.String(),
+      }),
+    }
+  )
+
+  // 更新网络限制
+  .post(
+    "/:ref/network-restrictions",
+    async ({ params, body, set }) => {
+      const success = await projectService.updateNetworkRestrictions(params.ref, body.allowed_address_ranges);
+      if (!success) {
+        set.status = 500;
+        return { error: "Failed to update network restrictions" };
+      }
+      return { success: true };
+    },
+    {
+      params: t.Object({
+        ref: t.String(),
+      }),
+      body: t.Object({
+        allowed_address_ranges: t.Array(t.String()),
+      }),
+    }
+  )
+
+  // 添加自定义域名
+  .post(
+    "/:ref/custom-hostname",
+    async ({ params, body, set }) => {
+      const success = await projectService.addCustomDomain(params.ref, body.custom_hostname);
+      if (!success) {
+        set.status = 500;
+        return { error: "Failed to add custom hostname" };
+      }
+      return { success: true };
+    },
+    {
+      params: t.Object({
+        ref: t.String(),
+      }),
+      body: t.Object({
+        custom_hostname: t.String(),
+      }),
+    }
+  )
+
+  // 获取 Auth 配置
+  .get(
+    "/:ref/config/auth",
+    async ({ params, set }) => {
+      const settings = await projectService.getProjectSettings(params.ref);
+      if (!settings) {
+        set.status = 404;
+        return { error: "Project not found" };
+      }
+      // 这里的逻辑可以根据实际存储结构进一步细化映射
+      return settings.auth || {};
+    },
+    {
+      params: t.Object({
+        ref: t.String(),
+      }),
+    }
+  )
+
+  // 修改 Auth 配置
+  .patch(
+    "/:ref/config/auth",
+    async ({ params, body, set }) => {
+      const settings = await projectService.getProjectSettings(params.ref);
+      if (!settings) {
+        set.status = 404;
+        return { error: "Project not found" };
+      }
+      const updated = await projectService.updateProjectSettings(params.ref, {
+        ...settings,
+        auth: {
+          ...(settings.auth as any || {}),
+          ...body,
+        },
+      });
+      return updated?.auth || {};
+    },
+    {
+      params: t.Object({
+        ref: t.String(),
+      }),
+      body: t.Record(t.String(), t.Unknown()),
+    }
+  )
+
   // 获取环境变量 (Secrets)
   .get(
     "/:ref/secrets",
@@ -306,6 +489,20 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     }
   )
 
+  // 获取函数列表
+  .get(
+    "/:ref/functions",
+    async ({ params, set }) => {
+      const functions = await projectService.listFunctions(params.ref);
+      return functions;
+    },
+    {
+      params: t.Object({
+        ref: t.String(),
+      }),
+    }
+  )
+
   // 获取函数代码
   .get(
     "/:ref/functions/:slug",
@@ -343,6 +540,25 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
       }),
       body: t.Object({
         code: t.String(),
+      }),
+    }
+  )
+
+  // 删除函数代码
+  .delete(
+    "/:ref/functions/:slug",
+    async ({ params, set }) => {
+      const success = await projectService.deleteFunction(params.ref, params.slug);
+      if (!success) {
+        set.status = 500;
+        return { error: "Failed to delete function" };
+      }
+      return { success: true };
+    },
+    {
+      params: t.Object({
+        ref: t.String(),
+        slug: t.String(),
       }),
     }
   );
