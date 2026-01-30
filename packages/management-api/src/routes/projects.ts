@@ -21,6 +21,10 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     const projects = await projectService.listProjects();
     return projects;
   })
+  .get("", async () => {
+    const projects = await projectService.listProjects();
+    return projects;
+  })
 
   // 创建新项目
   .post(
