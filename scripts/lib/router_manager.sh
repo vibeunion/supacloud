@@ -41,6 +41,7 @@ ensure_directory() {
 add_route() {
     local project_domain="${DOMAIN:-${PROJECT_REF}.${BASE_DOMAIN}}"
     local api_domain="${PROJECT_REF}.api.${BASE_DOMAIN}"
+    local studio_domain="studio-${PROJECT_REF}.${BASE_DOMAIN}"
     local config_file="${NGINX_SITES_DIR}/${PROJECT_REF}.conf"
 
     ensure_directory
@@ -51,19 +52,19 @@ add_route() {
 # SupaCloud tenant: ${PROJECT_REF}
 # Generated: $(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
+# --- API Endpoint ---
 server {
+    listen 80;
     listen 443 ssl;
     server_name ${api_domain};
 
-    # ACME 自动证书
-    acme_certificate ${api_domain};
-    ssl_certificate     \$acme_certificate;
-    ssl_certificate_key \$acme_certificate_key;
+    # ACME 自动证书 (如果已安装 acme 模块)
+    # acme_certificate ${api_domain};
+    # ssl_certificate     \$acme_certificate;
+    # ssl_certificate_key \$acme_certificate_key;
 
     # 安全头
     add_header X-Project-Ref ${PROJECT_REF} always;
-    add_header X-Frame-Options DENY always;
-    add_header X-Content-Type-Options nosniff always;
 
     location / {
         proxy_pass http://${KONG_INTERNAL};
@@ -81,9 +82,33 @@ server {
         proxy_send_timeout 86400;
     }
 }
+
+# --- Studio Endpoint ---
+server {
+    listen 80;
+    listen 443 ssl;
+    server_name ${studio_domain};
+
+    # 安全头
+    add_header X-Project-Ref ${PROJECT_REF} always;
+
+    location / {
+        # 转发到 Supabase Studio (通常在 8000 端口)
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        
+        # 只要带上这个端点，Studio 就能识别项目
+        # 注意：这里可能需要额外的 Header 或配置来让 Studio 自动切换项目
+    }
+}
 EOF
 
-    echo "Route added for ${api_domain} -> Kong (${KONG_INTERNAL})"
+    echo "Route added for ${PROJECT_REF}:"
+    echo "  - API:    ${api_domain}"
+    echo "  - Studio: ${studio_domain}"
 }
 
 # 移除项目路由
