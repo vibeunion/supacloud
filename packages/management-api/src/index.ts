@@ -5,7 +5,7 @@ import { config } from "./config";
 import { authMiddleware } from "./middleware/auth";
 import { projectRoutes, organizationRoutes, userRoutes } from "./routes";
 
-const app = new Elysia()
+const app = new Elysia({ strictPath: false })
   // Swagger 文档
   .use(
     swagger({
