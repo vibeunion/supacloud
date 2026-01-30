@@ -1,5 +1,6 @@
 import { Elysia, t } from "elysia";
 import { projectService } from "../services";
+import { GatewayService } from "../services/gateway.service";
 
 // 可用区域列表
 const AVAILABLE_REGIONS = [
@@ -560,5 +561,34 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
         ref: t.String(),
         slug: t.String(),
       }),
+    }
+  )
+
+  // 更新网关配置 (限流, CORS, JWT)
+  .post(
+    "/:ref/gateway/config",
+    async ({ params, body, set }) => {
+      const result = await GatewayService.applyConfig(params.ref, {
+        rateLimitTier: body.rate_limit_tier as any,
+        corsOrigins: body.cors_origins,
+        jwtEnabled: body.jwt_enabled,
+        jwtSecret: body.jwt_secret
+      });
+      if (!result.success) {
+        set.status = 500;
+        return { error: result.message };
+      }
+      return result;
+    },
+    {
+      params: t.Object({
+        ref: t.String()
+      }),
+      body: t.Object({
+        rate_limit_tier: t.Optional(t.Union([t.Literal('free'), t.Literal('pro'), t.Literal('enterprise')])),
+        cors_origins: t.Optional(t.String()),
+        jwt_enabled: t.Optional(t.Boolean()),
+        jwt_secret: t.Optional(t.String())
+      })
     }
   );

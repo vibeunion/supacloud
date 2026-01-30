@@ -6,3 +6,4 @@ export { monitorRoutes } from "./monitor";
 export { maintenanceRoutes } from "./maintenance";
 export { extensionRoutes } from "./extensions";
 export { securityRoutes } from "./security";
+export { storageRoutes } from "./storage";
