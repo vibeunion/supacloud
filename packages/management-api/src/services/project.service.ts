@@ -4,6 +4,7 @@ import { databaseService } from "./database.service";
 import { storageService } from "./storage.service";
 import { routerService } from "./router.service";
 import { shellService } from "./shell.service";
+import { GatewayService } from "./gateway.service";
 import type { Project, ProjectStatus } from "../db";
 
 export interface CreateProjectRequest {
@@ -131,6 +132,15 @@ export class ProjectService {
 
       // 重载 Nginx
       await routerService.reload();
+
+      // 初始化 Kong 网关配置 (JWT, Rate Limit, CORS)
+      const project = await projectRepository.findByRef(projectRef);
+      if (project) {
+        await GatewayService.setupProject(projectRef, project.jwt_secret);
+        await GatewayService.setRateLimit(projectRef, "free"); // 默认免费额度
+        await GatewayService.setCors(projectRef, "*");        // 默认全开放
+        await GatewayService.enableJwtAuth(projectRef);       // 开启网关鉴权
+      }
 
       // 更新状态为 active
       await projectRepository.updateStatus(projectRef, "active");
@@ -429,7 +439,10 @@ export class ProjectService {
       service_role_key: serviceRoleKey,
     });
 
-    // 3. TODO: 此处后续可以增加通知路由器重载的逻辑
+    // 3. 同步到 Kong 网关
+    await GatewayService.setupProject(ref, jwtSecret);
+
+    // 4. TODO: 此处后续可以增加通知路由器重载的逻辑
 
     return {
       anon_key: anonKey,
