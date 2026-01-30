@@ -1,10 +1,5 @@
-import { exec } from 'child_process';
-import { promisify } from 'util';
+import { shellService } from './shell.service';
 import { BackupInfo, RestoreRequest } from '../types/backup';
-import path from 'path';
-
-const execAsync = promisify(exec);
-const BACKUP_MANAGER_PATH = path.resolve(process.cwd(), '../../scripts/lib/backup_manager.sh');
 
 export class BackupService {
     /**
@@ -12,9 +7,15 @@ export class BackupService {
      * @param stanza 库名/实例名，默认为 db-main
      */
     static async listBackups(stanza: string = 'db-main'): Promise<BackupInfo[]> {
+        const { success, output, error } = await shellService.execute('backup_manager.sh', ['list', stanza]);
+
+        if (!success) {
+            console.error('Failed to list backups:', error);
+            throw new Error('无法读取备份列表');
+        }
+
         try {
-            const { stdout } = await execAsync(`bash ${BACKUP_MANAGER_PATH} list ${stanza}`);
-            const rawData = JSON.parse(stdout);
+            const rawData = JSON.parse(output);
 
             // 解析 pgBackRest 的 JSON 输出
             if (!Array.isArray(rawData) || rawData.length === 0) return [];
@@ -30,9 +31,9 @@ export class BackupService {
                 size: b.info.size.backup,
                 database: rawData[0].name,
             }));
-        } catch (error) {
-            console.error('Failed to list backups:', error);
-            throw new Error('无法读取备份列表');
+        } catch (e) {
+            console.error('Failed to parse backup list:', e);
+            throw new Error('解析备份列表失败');
         }
     }
 
@@ -42,15 +43,13 @@ export class BackupService {
      * @param type 备份类型: full, incr, diff
      */
     static async createBackup(stanza: string = 'db-main', type: 'full' | 'incr' | 'diff' = 'incr'): Promise<{ message: string }> {
-        try {
-            // 备份是耗时操作，通常建议异步处理或流式输出
-            // 这里简单返回启动成功的消息，实际可以结合 Task 系统
-            exec(`bash ${BACKUP_MANAGER_PATH} create ${stanza} ${type}`);
-            return { message: `已启动 ${type} 备份任务` };
-        } catch (error) {
-            console.error('Failed to create backup:', error);
-            throw new Error('触发备份失败');
-        }
+        // 备份是耗时操作，通常建议异步处理
+        // shellService.execute 是 await 的，但为了不阻塞 API，我们可以异步调用
+        shellService.execute('backup_manager.sh', ['create', stanza, type]).catch(err => {
+            console.error('Async backup task failed:', err);
+        });
+
+        return { message: `已启动 ${type} 备份任务` };
     }
 
     /**
@@ -58,13 +57,11 @@ export class BackupService {
      * @param request 包含目标时间或 LSN
      */
     static async restore(request: RestoreRequest): Promise<{ message: string }> {
-        try {
-            // PITR 是危险且耗时的操作
-            exec(`bash ${BACKUP_MANAGER_PATH} restore "${request.target}"`);
-            return { message: `已启动点对点恢复 (PITR) 任务，目标: ${request.target}` };
-        } catch (error) {
-            console.error('Failed to initiate restore:', error);
-            throw new Error('恢复操作启动失败');
-        }
+        // PITR 是危险且耗时的操作
+        shellService.execute('backup_manager.sh', ['restore', request.target]).catch(err => {
+            console.error('Async restore task failed:', err);
+        });
+
+        return { message: `已启动点对点恢复 (PITR) 任务，目标: ${request.target}` };
     }
 }

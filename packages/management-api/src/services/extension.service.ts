@@ -1,9 +1,4 @@
-import { exec } from 'child_process';
-import { promisify } from 'util';
-import path from 'path';
-
-const execAsync = promisify(exec);
-const EXTENSION_MANAGER_PATH = path.resolve(process.cwd(), '../../scripts/lib/extension_manager.sh');
+import { shellService } from './shell.service';
 
 export interface ExtensionInfo {
     name: string;
@@ -20,12 +15,18 @@ export class ExtensionService {
      */
     static async listExtensions(projectRef: string): Promise<ExtensionInfo[]> {
         const dbName = `supa_${projectRef}`;
-        try {
-            const { stdout } = await execAsync(`bash ${EXTENSION_MANAGER_PATH} list ${dbName}`);
-            return JSON.parse(stdout || '[]');
-        } catch (error) {
+        const { success, output, error } = await shellService.execute('extension_manager.sh', ['list', dbName]);
+
+        if (!success) {
             console.error(`Failed to list extensions for ${projectRef}:`, error);
             throw new Error('无法获取插件列表');
+        }
+
+        try {
+            return JSON.parse(output || '[]');
+        } catch (e) {
+            console.error(`Failed to parse extensions for ${projectRef}:`, e);
+            throw new Error('解析插件列表失败');
         }
     }
 
@@ -34,13 +35,14 @@ export class ExtensionService {
      */
     static async enableExtension(projectRef: string, extension: string): Promise<{ message: string }> {
         const dbName = `supa_${projectRef}`;
-        try {
-            await execAsync(`bash ${EXTENSION_MANAGER_PATH} enable ${dbName} "${extension}"`);
-            return { message: `插件 ${extension} 已成功启用` };
-        } catch (error) {
+        const { success, error } = await shellService.execute('extension_manager.sh', ['enable', dbName, extension]);
+
+        if (!success) {
             console.error(`Failed to enable extension ${extension}:`, error);
             throw new Error(`启用插件 ${extension} 失败`);
         }
+
+        return { message: `插件 ${extension} 已成功启用` };
     }
 
     /**
@@ -48,12 +50,13 @@ export class ExtensionService {
      */
     static async disableExtension(projectRef: string, extension: string): Promise<{ message: string }> {
         const dbName = `supa_${projectRef}`;
-        try {
-            await execAsync(`bash ${EXTENSION_MANAGER_PATH} disable ${dbName} "${extension}"`);
-            return { message: `插件 ${extension} 已成功禁用` };
-        } catch (error) {
+        const { success, error } = await shellService.execute('extension_manager.sh', ['disable', dbName, extension]);
+
+        if (!success) {
             console.error(`Failed to disable extension ${extension}:`, error);
             throw new Error(`禁用插件 ${extension} 失败`);
         }
+
+        return { message: `插件 ${extension} 已成功禁用` };
     }
 }
