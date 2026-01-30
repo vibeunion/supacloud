@@ -12,37 +12,36 @@
 ### Key Features
 
 - **Multi-Tenant Architecture**: Run multiple isolated Supabase projects with shared infrastructure
-- **Management API**: Full REST API (21 endpoints) for project lifecycle management
+- **Management API**: Full REST API (25+ endpoints) for project lifecycle management
 - **CLI Tool**: `supacloud` command-line tool for easy project management
 - **Pigsty Powered**: Enterprise-grade PostgreSQL with built-in monitoring
 - **One-Click Installation**: Fully automated setup via `install.sh`
-- **Flexible Storage**: RustFS (recommended), Garage, MinIO, or external S3
+- **JuiceFS Storage**: Powered by PostgreSQL Large Objects (LO) for ultra-thin metadata
+- **Kong API Gateway**: Dynamic rate limiting, CORS, and per-project JWT validation
+- **Auto-scaling Engine**: Rule-based vertical and horizontal scaling based on real-time metrics
 - **Dual Runtime**: Deno (default) or Bun.js for Edge Functions
-- **96% Test Coverage**: Production-ready with comprehensive testing
+- **40+ Comprehensive Tests**: High reliability with unit and integration coverage
 
 ### Architecture
 
-```
 ┌─────────────────────────────────────────────────────────────┐
 │                  Management API (:9090)                      │
-│                   Bun + Elysia + TypeScript                  │
+│            Bun + Elysia + TypeScript + Auto-scaling          │
 ├─────────────────────────────────────────────────────────────┤
 │  ┌────────────┐  ┌────────────┐  ┌────────────┐            │
-│  │ JwtService │  │ DbService  │  │ S3Service  │            │
+│  │ JwtService │  │ DbService  │  │ StorageSvc │            │
 │  └─────┬──────┘  └─────┬──────┘  └─────┬──────┘            │
 │        ▼               ▼               ▼                    │
 │  ┌────────────┐  ┌────────────┐  ┌────────────┐            │
-│  │jwt_manager │  │db_manager  │  │s3_manager  │            │
-│  │    .sh     │  │    .sh     │  │    .sh     │            │
+│  │ GatewaySvc │  │ ScalingSvc │  │ BackupSvc  │            │
 │  └────────────┘  └────────────┘  └────────────┘            │
 ├─────────────────────────────────────────────────────────────┤
 │                   Shared Infrastructure                      │
 │  ┌────────────┐  ┌────────────┐  ┌────────────┐            │
-│  │ PostgreSQL │  │   Nginx    │  │ S3 Storage │            │
-│  │  (Pigsty)  │  │  Gateway   │  │  (RustFS)  │            │
+│  │ PostgreSQL │  │   Kong     │  │  JuiceFS   │            │
+│  │  (Pigsty)  │  │  Gateway   │  │  (PG-LO)   │            │
 │  └────────────┘  └────────────┘  └────────────┘            │
 └─────────────────────────────────────────────────────────────┘
-```
 
 ### Quick Start
 
@@ -203,34 +202,35 @@ Key settings in `config.env`:
 ### 核心特性
 
 - **多租户架构**: 共享基础设施，运行多个隔离的 Supabase 项目
-- **Management API**: 完整的 REST API（21 个端点）管理项目生命周期
+- **Management API**: 完整的 REST API（25+ 个端点）管理项目生命周期
 - **CLI 工具**: `supacloud` 命令行工具，便捷管理项目
 - **Pigsty 驱动**: 企业级 PostgreSQL，内置监控
 - **一键部署**: 通过 `install.sh` 全自动安装
-- **多存储后端**: RustFS（推荐）、Garage、MinIO 或外部 S3
+- **JuiceFS 存储**: 基于 PostgreSQL Large Objects (LO) 后端，极致轻量
+- **Kong 深度集成**: 支持项目级限流 (Rate Limit)、CORS 及统一鉴权
+- **自动扩缩容**: 基于负载指标的垂直提升与水平副本扩展
 - **双运行时**: Deno（默认）或 Bun.js 云函数运行时
-- **96% 测试覆盖**: 生产就绪，经过全面测试
+- **40+ 单元测试**: 生产就绪，经过全面测试
 
 ### 架构设计
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                  Management API (:9090)                      │
-│                   Bun + Elysia + TypeScript                  │
+│            Bun + Elysia + TypeScript + 自动扩缩容            │
 ├─────────────────────────────────────────────────────────────┤
 │  ┌────────────┐  ┌────────────┐  ┌────────────┐            │
-│  │ JwtService │  │ DbService  │  │ S3Service  │            │
+│  │ JwtService │  │ DbService  │  │ StorageSvc │            │
 │  └─────┬──────┘  └─────┬──────┘  └─────┬──────┘            │
 │        ▼               ▼               ▼                    │
 │  ┌────────────┐  ┌────────────┐  ┌────────────┐            │
-│  │jwt_manager │  │db_manager  │  │s3_manager  │            │
-│  │    .sh     │  │    .sh     │  │    .sh     │            │
+│  │ GatewaySvc │  │ ScalingSvc │  │ BackupSvc  │            │
 │  └────────────┘  └────────────┘  └────────────┘            │
 ├─────────────────────────────────────────────────────────────┤
 │                       共享基础设施                            │
 │  ┌────────────┐  ┌────────────┐  ┌────────────┐            │
-│  │ PostgreSQL │  │   Nginx    │  │  S3 存储   │            │
-│  │  (Pigsty)  │  │   网关     │  │  (RustFS)  │            │
+│  │ PostgreSQL │  │    Kong    │  │  JuiceFS   │            │
+│  │  (Pigsty)  │  │    网关    │  │  (PG-LO)   │            │
 │  └────────────┘  └────────────┘  └────────────┘            │
 └─────────────────────────────────────────────────────────────┘
 ```
