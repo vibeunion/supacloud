@@ -112,3 +112,4 @@ templates/base/volumes/db/data/
 
 # Bun lockfile
 bun.lock
+config.env.deploy
