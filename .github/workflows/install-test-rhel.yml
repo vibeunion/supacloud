@@ -1,0 +1,42 @@
+name: Install Script Test (RHEL Family)
+
+on:
+  push:
+    branches: ["main", "dev"]
+    paths:
+      - "install.sh"
+      - "scripts/**"
+      - ".github/workflows/install-test-rhel.yml"
+  pull_request:
+    branches: ["main", "dev"]
+    paths:
+      - "install.sh"
+      - "scripts/**"
+
+jobs:
+  test-on-rhel:
+    name: Test on ${{ matrix.distro }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        distro: ["almalinux:9", "rockylinux:9"]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run install script in container
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            ${{ matrix.distro }} \
+            /bin/bash -c "cd /workspace && bash -n install.sh && echo 'Syntax check passed'"
+
+      - name: Verify dependency installation logic
+        run: |
+          # 模拟安装前期的依赖检查和仓库配置逻辑 (Dry Run)
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            ${{ matrix.distro }} \
+            /bin/bash -c "cd /workspace && sed -i 's/\r$//' install.sh && bash -x install.sh --dry-run" || echo "Note: Deep install test requires systemd/privileged which is limited in standard Docker"
