@@ -224,6 +224,50 @@ check_system() {
     log_info "系统架构: $ARCH"
 }
 
+# ========== 安装基础依赖 (针对最小化安装环境) ==========
+install_base_dependencies() {
+    log_step "检查并安装基础系统依赖..."
+
+    local PACKAGES=""
+    
+    # 检测包管理器
+    if command -v dnf &> /dev/null; then
+        # RHEL/Alma/Rocky/OpenCloudOS
+        # 基础镜像可能缺失: openssl, jq, bc, procps-ng
+        # 注意：最小化镜像通常已有 tar/curl/sudo，若无则由管理员自行处理
+        log_info "使用 dnf 检查扩展工具..."
+        
+        # 检查并添加缺失的包
+        ! command -v openssl &> /dev/null && PACKAGES="$PACKAGES openssl"
+        ! command -v bc &> /dev/null && PACKAGES="$PACKAGES bc"
+        ! command -v jq &> /dev/null && PACKAGES="$PACKAGES jq"
+        # 某些极简镜像也没有 procps-ng (ps, top)
+        ! command -v ps &> /dev/null && PACKAGES="$PACKAGES procps-ng"
+
+        if [[ -n "$PACKAGES" ]]; then
+            log_info "正在安装缺失的扩展包: $PACKAGES"
+            dnf install -y $PACKAGES
+        else
+            log_info "基础扩展依赖检查通过"
+        fi
+        
+    elif command -v apt-get &> /dev/null; then
+        # Debian/Ubuntu
+        log_info "使用 apt 检查扩展工具..."
+        PACKAGES=""
+        ! command -v bc &> /dev/null && PACKAGES="$PACKAGES bc"
+        ! command -v jq &> /dev/null && PACKAGES="$PACKAGES jq"
+        ! command -v ps &> /dev/null && PACKAGES="$PACKAGES procps"
+
+        if [[ -n "$PACKAGES" ]]; then
+            log_info "正在安装缺失的基础包: $PACKAGES"
+            apt-get update
+            apt-get install -y $PACKAGES
+        else
+            log_info "基础依赖检查通过"
+        fi
+    fi
+
 # ========== 检查并配置 Swap ==========
 setup_swap() {
     log_step "检查内存和 Swap..."
@@ -1880,6 +1924,7 @@ main() {
     
     check_config
     check_system
+    install_base_dependencies  # 新增：确保 sudo, tar, ssh 等基础工具存在
     setup_swap
     
     # 安装 Nginx Mainline + ACME 模块
