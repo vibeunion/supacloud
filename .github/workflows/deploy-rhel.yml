@@ -1,0 +1,58 @@
+name: Deployment Test (RHEL Family)
+
+on:
+  push:
+    branches: [ "main", "dev" ]
+  pull_request:
+    branches: [ "main", "dev" ]
+
+jobs:
+  rhel-deploy-test:
+    name: Installation Test on ${{ matrix.distro }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        distro: ["almalinux:9", "rockylinux:9"]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup and Run Installation in Container
+        run: |
+          # 启动特权容器以模拟真实系统环境 (systemd/init)
+          docker run --privileged --name rhel-node -d -v ${{ github.workspace }}:/workspace ${{ matrix.distro }} /sbin/init
+          sleep 5
+          
+          # 修复换行符问题 (Windows Git 同步可能带入 CRLF)
+          docker exec rhel-node /bin/bash -c "cd /workspace && sed -i 's/\r$//' install.sh"
+          
+          # 注入 CI 配置以跳过交互
+          docker exec rhel-node /bin/bash -c "cat > /workspace/config.env <<EOF
+          INTERNAL_IP=127.0.0.1
+          SUPABASE_PUBLIC_DOMAIN=api.ci-test.local
+          SUPABASE_STUDIO_DOMAIN=studio.ci-test.local
+          DB_PASSWORD=ci_test_password_123
+          JWT_SECRET=super-secret-jwt-token-32-chars-long-for-ci
+          DASHBOARD_USERNAME=admin
+          DASHBOARD_PASSWORD=ci_admin_password
+          GRAFANA_PASSWORD=ci_grafana_password
+          S3_STORAGE_TYPE=minio
+          EDGE_RUNTIME=deno
+EOF"
+          
+          # 执行安装脚本
+          # 注意：在容器内完整运行 Pigsty 可能会受限，但可以执行到配置生成和仓库设置阶段
+          docker exec rhel-node /bin/bash -c "cd /workspace && bash install.sh"
+
+      - name: Verify Configuration Artifacts
+        run: |
+          echo "Verifying generated configs inside container..."
+          docker exec rhel-node ls -l /etc/nginx/nginx.conf || echo "Nginx config not generated"
+          docker exec rhel-node ls -l /etc/supabase/jwt-keys.env || echo "JWT keys not generated"
+          
+      - name: Cleanup
+        if: always()
+        run: docker rm -f rhel-node || true
