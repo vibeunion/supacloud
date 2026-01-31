@@ -30,7 +30,7 @@ jobs:
           docker exec rhel-node /bin/bash -c "cd /workspace && sed -i 's/\r$//' install.sh"
           
           # 注入 CI 配置以跳过交互
-          docker exec rhel-node /bin/bash -c "cat > /workspace/config.env <<EOF
+          docker exec rhel-node /bin/bash -c "cat > /workspace/config.env <<INNEREOF
           INTERNAL_IP=127.0.0.1
           SUPABASE_PUBLIC_DOMAIN=api.ci-test.local
           SUPABASE_STUDIO_DOMAIN=studio.ci-test.local
@@ -41,7 +41,7 @@ jobs:
           GRAFANA_PASSWORD=ci_grafana_password
           S3_STORAGE_TYPE=minio
           EDGE_RUNTIME=deno
-EOF"
+          INNEREOF"
           
           # 执行安装脚本
           # 注意：在容器内完整运行 Pigsty 可能会受限，但可以执行到配置生成和仓库设置阶段
