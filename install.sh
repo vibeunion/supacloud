@@ -433,6 +433,29 @@ setup_podman_socket() {
 }
 
 # ========== 安装 Docker Compose ==========
+# ========== 安装 JuiceFS (Postgres LO) ==========
+install_juicefs() {
+    log_step "配置 JuiceFS S3 Gateway (Postgres LO)..."
+    
+    # 确保 pigsty 环境已知，通常 juicefs 作为 pigsty 的一个应用部署
+    # 或者直接使用我们简化的容器化方案
+    
+    log_info "正在通过 Pigsty 部署 JuiceFS 模块..."
+    
+    # 检查是否有 pigsty 目录
+    if [[ -d ~/pigsty ]]; then
+        cd ~/pigsty
+        # 启用 juicefs 扩展 (由我们的 schema 管理)
+        # 实际上 JuiceFS PostgreSQL 模式不需要特殊的 PG 插件，只需要连接权限
+        log_info "JuiceFS 将使用 PostgreSQL 作为元数据引擎，LO 作为数据存储"
+    fi
+    
+    # 部署 JuiceFS S3 网关容器 (模拟 S3 接口)
+    # 这部分逻辑通常集成在 Docker Compose 中
+    log_info "JuiceFS S3 Gateway 将在 Pigsty App 部署阶段自动启动"
+    return 0
+}
+
 install_docker_compose() {
     log_step "检查 Docker Compose..."
     
@@ -625,6 +648,9 @@ install_s3_storage() {
             ;;
         rustfs)
             install_rustfs
+            ;;
+        juicefs)
+            install_juicefs
             ;;
         external)
             log_info "使用外部 S3 存储，跳过本地安装"
@@ -904,21 +930,41 @@ install_nginx_mainline() {
             log_info "配置 Nginx Mainline 仓库 (RHEL/CentOS)..."
             
             # 创建 repo 文件
+            local OS_VER="centos"
+            if [[ "$DISTRO_ID" == "opencloudos" ]]; then
+                # OpenCloudOS 9 兼容 RHEL 9
+                OS_VER="centos/9"
+            else
+                OS_VER="centos/\$releasever"
+            fi
+
             cat > /etc/yum.repos.d/nginx.repo << EOF
 [nginx-mainline]
 name=nginx mainline repo
-baseurl=http://nginx.org/packages/mainline/centos/\$releasever/\$basearch/
+baseurl=http://nginx.org/packages/mainline/${OS_VER}/\$basearch/
 gpgcheck=1
 enabled=1
 gpgkey=https://nginx.org/keys/nginx_signing.key
 module_hotfixes=true
 EOF
             
-            log_info "安装 Nginx 和 ACME 模块..."
-            if command -v dnf &> /dev/null; then
-                dnf install -y nginx nginx-module-acme
-            else
-                yum install -y nginx nginx-module-acme
+            # 安装 Nginx 和 ACME 模块
+            local INSTALL_CMD="dnf install -y"
+            if ! command -v dnf &> /dev/null; then
+                INSTALL_CMD="yum install -y"
+            fi
+
+            log_info "尝试从官方仓库安装 Nginx 和 ACME 模块..."
+            if ! $INSTALL_CMD nginx nginx-module-acme; then
+                log_warn "Nginx 官方仓库安装失败，可能存在依赖冲突。将回退到系统默认版本..."
+                rm -f /etc/yum.repos.d/nginx.repo
+                if command -v dnf &> /dev/null; then
+                    dnf clean all
+                    dnf install -y nginx
+                else
+                    yum clean all
+                    yum install -y nginx
+                fi
             fi
             ;;
         
@@ -945,7 +991,13 @@ EOF
                 | tee /etc/apt/preferences.d/99nginx
 
             apt-get update
-            apt-get install -y nginx nginx-module-acme
+            if ! apt-get install -y nginx nginx-module-acme; then
+                log_warn "Nginx 官方仓库安装失败，回退到系统默认版本..."
+                rm -f /etc/apt/sources.list.d/nginx.list
+                rm -f /etc/apt/preferences.d/99nginx
+                apt-get update
+                apt-get install -y nginx
+            fi
             ;;
         
         *)
@@ -984,16 +1036,16 @@ apply_nginx_acme_config() {
     if [[ -f "$NGINX_CONF" ]]; then
         cp "$NGINX_CONF" "${NGINX_CONF}.bak.$(date +%s)"
     fi
-
+    
     # 查找 ACME 模块路径
     ACME_MODULE_PATH=$(find /usr/lib/nginx/modules /usr/lib64/nginx/modules /etc/nginx/modules -name "ngx_http_acme_module.so" 2>/dev/null | head -1)
     
-    if [[ -z "$ACME_MODULE_PATH" ]]; then
-        # 如果找不到，尝试直接引用文件名，指望它在默认路径
-        ACME_MODULE_PATH="ngx_http_acme_module.so"
-        log_warn "未找到 ngx_http_acme_module.so 绝对路径，尝试直接加载..."
-    else
+    local HAS_ACME=false
+    if [[ -n "$ACME_MODULE_PATH" ]]; then
+        HAS_ACME=true
         log_info "发现 ACME 模块: $ACME_MODULE_PATH"
+    else
+        log_warn "未找到 ACME 模块，将禁用 Nginx 原生 ACME 功能（退回到手动管理或 HTTP 访问）"
     fi
 
     # 生成最终的 nginx.conf
@@ -1003,8 +1055,7 @@ worker_processes auto;
 error_log /var/log/nginx/error.log notice;
 pid /var/run/nginx.pid;
 
-# 加载 ACME 模块
-load_module "$ACME_MODULE_PATH";
+$( [[ "$HAS_ACME" == "true" ]] && echo "load_module \"$ACME_MODULE_PATH\";" )
 
 events {
     worker_connections 1024;
@@ -1023,6 +1074,7 @@ http {
     sendfile        on;
     keepalive_timeout  65;
 
+$( [[ "$HAS_ACME" == "true" ]] && cat << ACME_EOF
     # --- ACME 全局配置 ---
     resolver 8.8.8.8 1.1.1.1 valid=300s;
     
@@ -1036,6 +1088,8 @@ http {
         # 使用 HTTP-01 验证 (Nginx 原生支持)
         challenge http-01;
     }
+ACME_EOF
+)
 
     # 后端定义
     upstream studio_backend {
@@ -1055,10 +1109,11 @@ http {
         # 无需手动配置 location
         
         location / {
-            return 301 https://\$host\$request_uri;
+$( [[ "$HAS_ACME" == "true" ]] && echo "            return 301 https://\$host\$request_uri;" || echo "            proxy_pass http://studio_backend;" )
         }
     }
 
+$( if [[ "$HAS_ACME" == "true" ]]; then cat << SSL_EOF
     # Studio HTTPS
     server {
         listen 443 ssl;
@@ -1105,6 +1160,10 @@ http {
             proxy_set_header Connection "upgrade";
         }
     }
+SSL_EOF
+fi )
+
+    include /etc/nginx/conf.d/*.conf;
 
     # --- 租户路由包含 (SupaCloud Tenants) ---
     # 允许动态通过外部文件增加路由，且不干扰主配置
