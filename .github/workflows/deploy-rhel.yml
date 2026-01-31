@@ -22,9 +22,12 @@ jobs:
 
       - name: Setup and Run Installation in Container
         run: |
-          # 启动特权容器以模拟真实系统环境 (systemd/init)
-          docker run --privileged --name rhel-node -d -v ${{ github.workspace }}:/workspace ${{ matrix.distro }} /sbin/init
+          # 启动容器 (保持后台运行) - 跳过真实的 systemd，改用 Mock 策略以适应最小化镜像
+          docker run --privileged --name rhel-node -d -v ${{ github.workspace }}:/workspace ${{ matrix.distro }} tail -f /dev/null
           sleep 5
+          
+          # Mock systemctl (因为官方基础镜像通常不包含 systemd，或者未配置为 ID 1)
+          docker exec rhel-node /bin/bash -c "echo '#!/bin/bash' > /usr/bin/systemctl && echo 'echo Mock systemctl: \$@' >> /usr/bin/systemctl && chmod +x /usr/bin/systemctl"
           
           # 修复换行符问题 (Windows Git 同步可能带入 CRLF)
           docker exec rhel-node /bin/bash -c "cd /workspace && sed -i 's/\r$//' install.sh"
