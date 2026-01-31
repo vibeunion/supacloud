@@ -31,9 +31,30 @@ check_config() {
     log_step "检查配置文件..."
     
     if [[ ! -f "$CONFIG_FILE" ]]; then
-        log_error "配置文件不存在: $CONFIG_FILE"
-        log_info "请先复制并编辑配置文件: cp config.env.example config.env"
-        exit 1
+        # 增强逻辑：如果环境变量中存在关键配置，则自动生成 config.env
+        if [[ -n "$INTERNAL_IP" || -n "$SUPABASE_PUBLIC_DOMAIN" ]]; then
+             log_info "检测到环境变量，自动生成配置文件..."
+             cat > "$CONFIG_FILE" << EOF
+# 自动生成的配置 - $(date)
+INTERNAL_IP=${INTERNAL_IP}
+SUPABASE_PUBLIC_DOMAIN=${SUPABASE_PUBLIC_DOMAIN}
+SUPABASE_STUDIO_DOMAIN=${SUPABASE_STUDIO_DOMAIN:-$SUPABASE_PUBLIC_DOMAIN}
+DB_PASSWORD=${DB_PASSWORD:-DBUser.Supa}
+JWT_SECRET=${JWT_SECRET}
+ANON_KEY=${ANON_KEY}
+SERVICE_ROLE_KEY=${SERVICE_ROLE_KEY}
+DASHBOARD_USERNAME=${DASHBOARD_USERNAME:-admin}
+DASHBOARD_PASSWORD=${DASHBOARD_PASSWORD:-pigsty}
+GRAFANA_PASSWORD=${GRAFANA_PASSWORD:-pigsty}
+S3_STORAGE_TYPE=${S3_STORAGE_TYPE:-minio}
+EDGE_RUNTIME=${EDGE_RUNTIME:-deno}
+EOF
+             log_info "配置文件已生成: $CONFIG_FILE"
+        else
+            log_error "配置文件不存在: $CONFIG_FILE"
+            log_info "请先复制并编辑配置文件: cp config.env.example config.env"
+            exit 1
+        fi
     fi
     
     source "$CONFIG_FILE"
@@ -84,6 +105,46 @@ check_config() {
     else
         log_info "使用配置的内网 IP: $INTERNAL_IP"
     fi
+}
+
+# ========== 自动配置本机 SSH (Ansible 依赖) ==========
+setup_local_ssh() {
+    log_step "配置本机免密 SSH (Ansible 依赖)..."
+    
+    # 确保 .ssh 目录存在
+    mkdir -p ~/.ssh
+    chmod 700 ~/.ssh
+    
+    # 如果没有私钥，生成一个
+    if [[ ! -f ~/.ssh/id_rsa ]]; then
+        log_info "生成 SSH 密钥对..."
+        ssh-keygen -t rsa -N "" -f ~/.ssh/id_rsa
+    fi
+    
+    # 将公钥添加到授权列表
+    local PUB_KEY=$(cat ~/.ssh/id_rsa.pub)
+    if ! grep -q "$PUB_KEY" ~/.ssh/authorized_keys 2>/dev/null; then
+        log_info "添加公钥到 authorized_keys..."
+        cat ~/.ssh/id_rsa.pub >> ~/.ssh/authorized_keys
+        chmod 600 ~/.ssh/authorized_keys
+    fi
+    
+    # 添加到已知主机 (避免首次连接询问 yes/no)
+    if ! grep -q "localhost" ~/.ssh/known_hosts 2>/dev/null; then
+        ssh-keyscan -H localhost 127.0.0.1 ::1 >> ~/.ssh/known_hosts 2>/dev/null || true
+    fi
+    
+    # 验证 SSH 连接
+    # 注意：在极端精简容器里 ssh 客户端可能刚装好，sshd 可能没开，尝试启动 sshd
+    if ! pgrep -x sshd >/dev/null; then
+        if command -v systemctl &> /dev/null; then
+            systemctl start sshd || log_warn "无法启动 sshd，Ansible 可能会失败"
+        else
+            # 尝试直接启动 (容器环境)
+            /usr/sbin/sshd || log_warn "尝试直接启动 sshd 失败"
+        fi
+    fi
+}
     
     # 2. 验证/获取 域名配置
     # 兼容旧配置
@@ -1925,6 +1986,7 @@ main() {
     check_config
     check_system
     install_base_dependencies  # 新增：确保 sudo, tar, ssh 等基础工具存在
+    setup_local_ssh            # 新增：确保本机 SSH 免密 (Ansible 需要)
     setup_swap
     
     # 安装 Nginx Mainline + ACME 模块
