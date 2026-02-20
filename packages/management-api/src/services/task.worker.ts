@@ -1,0 +1,159 @@
+import { taskRepository } from "../repositories/task.repository";
+import { projectRepository } from "../repositories/project.repository";
+import { databaseService } from "./database.service";
+import { storageService } from "./storage.service";
+import { routerService } from "./router.service";
+import { GatewayService } from "./gateway.service";
+import type { ProjectTask } from "../db";
+
+export class TaskWorker {
+    private isRunning = false;
+    private intervalId?: Timer;
+
+    start(intervalMs = 3000) {
+        if (this.isRunning) return;
+        this.isRunning = true;
+        console.log("Starting Task Worker...");
+        this.intervalId = setInterval(() => this.poll(), intervalMs);
+    }
+
+    stop() {
+        this.isRunning = false;
+        if (this.intervalId) {
+            clearInterval(this.intervalId);
+        }
+        console.log("Task Worker stopped.");
+    }
+
+    private async poll() {
+        try {
+            const task = await taskRepository.claimNextTask();
+            if (!task) return; // No pending tasks
+
+            console.log(`[TaskWorker] Processing task: ${task.id} (${task.task_type}) for project ${task.project_ref}`);
+
+            const success = await this.executeTask(task);
+
+            if (success) {
+                await taskRepository.updateStatus(task.id, "completed");
+                await this.handleTaskCompletion(task);
+            } else {
+                await taskRepository.updateStatus(task.id, "failed", "Task execution failed");
+                await this.handleTaskFailure(task);
+            }
+        } catch (err: any) {
+            console.error(`[TaskWorker] Error processing task:`, err);
+        }
+    }
+
+    private async executeTask(task: ProjectTask): Promise<boolean> {
+        const { project_ref, task_type, payload } = task;
+        const project = await projectRepository.findByRef(project_ref);
+        if (!project) {
+            console.error(`[TaskWorker] Project ${project_ref} not found for task ${task.id}`);
+            return false;
+        }
+
+        try {
+            switch (task_type) {
+                case "provision_db": {
+                    const res = await databaseService.createDatabase(project_ref, project.db_password);
+                    return res.success;
+                }
+
+                case "provision_s3": {
+                    const res = await storageService.createBucket(project_ref);
+                    if (res.success && res.accessKey && res.secretKey) {
+                        await projectRepository.updateConfig(project_ref, {
+                            ...project.config,
+                            s3_access_key: res.accessKey,
+                            s3_secret_key: res.secretKey,
+                        });
+                    }
+                    return res.success;
+                }
+
+                case "provision_router": {
+                    const res = await routerService.addRoute(project_ref);
+                    await routerService.reload();
+                    return res.success;
+                }
+
+                case "provision_gateway": {
+                    await GatewayService.setupProject(project_ref, project.jwt_secret);
+                    await GatewayService.setRateLimit(project_ref, "free");
+                    await GatewayService.setCors(project_ref, "*");
+                    await GatewayService.enableJwtAuth(project_ref);
+                    return true;
+                }
+
+                case "cleanup_db": {
+                    const res = await databaseService.deleteDatabase(project_ref);
+                    return res.success;
+                }
+
+                case "cleanup_s3": {
+                    await storageService.deleteBucket(project_ref);
+                    return true;
+                }
+
+                case "cleanup_router": {
+                    await routerService.removeRoute(project_ref);
+                    await routerService.reload();
+                    return true;
+                }
+
+                default:
+                    console.warn(`[TaskWorker] Unknown task type: ${task_type}`);
+                    return false;
+            }
+        } catch (err: any) {
+            console.error(`[TaskWorker] Error executing ${task_type} for ${project_ref}:`, err);
+            return false;
+        }
+    }
+
+    private async handleTaskCompletion(task: ProjectTask) {
+        const { project_ref, task_type } = task;
+
+        // Workflow orchestration: queue the next task upon completion
+        if (task_type === "provision_db") {
+            await taskRepository.createTask(project_ref, "provision_s3");
+        } else if (task_type === "provision_s3") {
+            await taskRepository.createTask(project_ref, "provision_router");
+        } else if (task_type === "provision_router") {
+            await taskRepository.createTask(project_ref, "provision_gateway");
+        } else if (task_type === "provision_gateway") {
+            // Final step completed, activate project
+            await projectRepository.updateStatus(project_ref, "active");
+            console.log(`[TaskWorker] Project ${project_ref} fully provisioned and activated.`);
+        } else if (task_type === "cleanup_db") {
+            // Deletion cleanups
+            console.log(`[TaskWorker] Cleanup for ${project_ref} db done.`);
+        }
+    }
+
+    private async handleTaskFailure(task: ProjectTask) {
+        const { project_ref, task_type } = task;
+        console.error(`[TaskWorker] Saga compensation triggered for ${project_ref} failed at ${task_type}`);
+
+        // Mark project as paused/error
+        await projectRepository.updateStatus(project_ref, "paused");
+
+        // Saga Compensation Logic
+        if (task_type === "provision_s3") {
+            // If S3 failed, we need to rollback DB
+            console.log(`[TaskWorker] Rolling back DB for ${project_ref}`);
+            await taskRepository.createTask(project_ref, "cleanup_db");
+        } else if (task_type === "provision_router" || task_type === "provision_gateway") {
+            // If router/gateway failed, we might want to clean up both DB and S3, or leave it paused for manual intervention
+            // For full safety, queue both:
+            await taskRepository.createTasks([
+                { ref: project_ref, type: "cleanup_s3" },
+                { ref: project_ref, type: "cleanup_db" }
+            ]);
+        }
+    }
+}
+
+export const taskWorker = new TaskWorker();
