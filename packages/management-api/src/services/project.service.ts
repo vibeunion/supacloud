@@ -5,6 +5,7 @@ import { storageService } from "./storage.service";
 import { routerService } from "./router.service";
 import { shellService } from "./shell.service";
 import { GatewayService } from "./gateway.service";
+import { taskRepository } from "../repositories/task.repository";
 import type { Project, ProjectStatus } from "../db";
 
 export interface CreateProjectRequest {
@@ -90,63 +91,14 @@ export class ProjectService {
     return this.toResponse(project);
   }
 
-  // 异步创建资源
+  // 异步创建资源 (Saga Orcherstrator)
   private async provisionResources(projectRef: string, dbPassword: string): Promise<void> {
     try {
-      // 创建数据库
-      const dbResult = await databaseService.createDatabase(projectRef, dbPassword);
-      if (!dbResult.success) {
-        console.error(`Database creation failed for ${projectRef}:`, dbResult.error);
-        await projectRepository.updateStatus(projectRef, "paused");
-        return;
-      }
-
-      // 创建 S3 Bucket
-      const s3Result = await storageService.createBucket(projectRef);
-      if (!s3Result.success) {
-        console.error(`S3 bucket creation failed for ${projectRef}:`, s3Result.error);
-        // 回滚数据库
-        await databaseService.deleteDatabase(projectRef);
-        await projectRepository.updateStatus(projectRef, "paused");
-        return;
-      }
-
-      // 更新 S3 凭据
-      if (s3Result.accessKey && s3Result.secretKey) {
-        const project = await projectRepository.findByRef(projectRef);
-        if (project) {
-          await projectRepository.updateConfig(projectRef, {
-            ...project.config,
-            s3_access_key: s3Result.accessKey,
-            s3_secret_key: s3Result.secretKey,
-          });
-        }
-      }
-
-      // 配置路由
-      const routeResult = await routerService.addRoute(projectRef);
-      if (!routeResult.success) {
-        console.error(`Router configuration failed for ${projectRef}:`, routeResult.error);
-        // 继续，路由可以稍后手动配置
-      }
-
-      // 重载 Nginx
-      await routerService.reload();
-
-      // 初始化 Kong 网关配置 (JWT, Rate Limit, CORS)
-      const project = await projectRepository.findByRef(projectRef);
-      if (project) {
-        await GatewayService.setupProject(projectRef, project.jwt_secret);
-        await GatewayService.setRateLimit(projectRef, "free"); // 默认免费额度
-        await GatewayService.setCors(projectRef, "*");        // 默认全开放
-        await GatewayService.enableJwtAuth(projectRef);       // 开启网关鉴权
-      }
-
-      // 更新状态为 active
-      await projectRepository.updateStatus(projectRef, "active");
-      console.log(`Project ${projectRef} provisioned successfully`);
+      // 通过入队第一个任务来启动 Saga
+      await taskRepository.createTask(projectRef, "provision_db", { dbPassword });
+      console.log(`[Saga] Initiated resource provisioning for project ${projectRef}`);
     } catch (error) {
-      console.error(`Provisioning error for ${projectRef}:`, error);
+      console.error(`Failed to initiate saga for ${projectRef}:`, error);
       await projectRepository.updateStatus(projectRef, "paused");
     }
   }
@@ -218,22 +170,13 @@ export class ProjectService {
     };
   }
 
-  // 异步清理资源
+  // 异步清理资源 (Saga)
   private async cleanupResources(projectRef: string): Promise<void> {
     try {
-      // 删除路由
-      await routerService.removeRoute(projectRef);
-      await routerService.reload();
-
-      // 删除 S3 Bucket
-      await storageService.deleteBucket(projectRef);
-
-      // 删除数据库
-      await databaseService.deleteDatabase(projectRef);
-
-      console.log(`Resources cleaned up for ${projectRef}`);
+      await taskRepository.createTask(projectRef, "cleanup_router");
+      console.log(`[Saga] Initiated resource cleanup for project ${projectRef}`);
     } catch (error) {
-      console.error(`Cleanup error for ${projectRef}:`, error);
+      console.error(`Cleanup saga initiation error for ${projectRef}:`, error);
     }
   }
 
