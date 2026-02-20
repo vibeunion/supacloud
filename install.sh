@@ -610,7 +610,7 @@ configure_edge_runtime() {
     
     case "${EDGE_RUNTIME:-deno}" in
         deno)
-            log_info "使用 Supabase 官方 Deno 运行时"
+            install_deno_runtime
             ;;
         bun)
             install_bun_runtime
@@ -621,7 +621,34 @@ configure_edge_runtime() {
     esac
 }
 
-# ========== 安装 Bun 运行时 (Docker Hub 镜像) ==========
+# ========== 安装 Deno 运行时 (默认优先) ==========
+install_deno_runtime() {
+    log_step "初始化 Deno 运行时（默认官方 Edge Functions）..."
+    
+    # 定义函数目录 (Pigsty Supabase 默认挂载点)
+    DENO_FUNCTIONS_DIR=~/pigsty/app/supabase/volumes/functions
+    
+    # 清理旧有的 Bun 标记，确保系统以 Deno 为主
+    rm -f /etc/supabase/.use_bun_runtime
+    
+    # 创建基本目录
+    mkdir -p "$DENO_FUNCTIONS_DIR"
+    mkdir -p /etc/supabase
+    
+    # 输出环境说明信息，方便用户查阅
+    cat > /etc/supabase/deno-functions.env << EOF
+# Deno Edge Functions 配置
+# 运行时由 Pigsty 的 docker-compose (supabase-edge-functions 容器) 管理 
+EDGE_FUNCTIONS_DIR="${DENO_FUNCTIONS_DIR}"
+API_ENDPOINT="http://${INTERNAL_IP}:9000/functions/v1/"
+EOF
+    
+    log_info "使用官方 Deno 环境，由 Pigsty Compose 统一管理生命周期。"
+    log_info "函数资源挂载点: ${DENO_FUNCTIONS_DIR}"
+    log_info "Deno 路由 API: http://${INTERNAL_IP}:9000/functions/v1/"
+}
+
+# ========== 安装 Bun 运行时 (Docker Hub 镜像可选) ==========
 install_bun_runtime() {
     log_step "安装 Bun.js 运行时（Docker Hub 镜像）..."
     
