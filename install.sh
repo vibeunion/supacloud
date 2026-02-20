@@ -105,15 +105,6 @@ EOF
     else
         log_info "使用配置的内网 IP: $INTERNAL_IP"
     fi
-    fi
-    
-    # 兼容旧配置
-    if [[ -n "$SUPABASE_DOMAIN" && -z "$SUPABASE_PUBLIC_DOMAIN" ]]; then
-        SUPABASE_PUBLIC_DOMAIN="$SUPABASE_DOMAIN"
-    fi
-
-    # 获取 Public Domain
-    
     # 确保 .ssh 目录存在
     mkdir -p ~/.ssh
     chmod 700 ~/.ssh
@@ -146,7 +137,6 @@ EOF
             /usr/sbin/sshd || log_warn "尝试直接启动 sshd 失败"
         fi
     fi
-}
     
     # 2. 验证/获取 域名配置
     # 兼容旧配置
@@ -330,6 +320,7 @@ install_base_dependencies() {
             log_info "基础依赖检查通过"
         fi
     fi
+}
 
 # ========== 检查并配置 Swap ==========
 setup_swap() {
