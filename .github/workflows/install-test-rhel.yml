@@ -87,10 +87,10 @@ jobs:
 
               echo ""
               echo "=== Function Definition Check ==="
-              # 提取 main() 中调用的函数名
-              CALLED=$(sed -n "/^main()/,/^}/p" install.sh | grep -oE "^[[:space:]]+[a-z_]+" | tr -d " " | sort -u)
+              # 提取 main() 中调用的函数名 (支持含数字的函数名如 install_s3_storage)
+              CALLED=$(sed -n "/^main()/,/^}/p" install.sh | grep -oE "^[[:space:]]+[a-z_][a-z0-9_]*" | tr -d " " | sort -u)
               # 提取所有定义的函数名
-              DEFINED=$(grep -oE "^[a-z_]+\(\)" install.sh | tr -d "()" | sort -u)
+              DEFINED=$(grep -oE "^[a-z_][a-z0-9_]*\(\)" install.sh | tr -d "()" | sort -u)
 
               MISSING=""
               for fn in $CALLED; do
