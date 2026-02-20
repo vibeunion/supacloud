@@ -1330,16 +1330,18 @@ install_pigsty() {
     
     cd ~
     
-    # 下载 Pigsty
-    if [[ ! -d ~/pigsty ]]; then
+    # 下载 Pigsty (判断 bootstrap 文件而非目录，避免 mkdir -p 提前创建空目录导致跳过)
+    if [[ ! -f ~/pigsty/bootstrap ]]; then
         log_info "下载 Pigsty..."
+        # 清理可能被提前创建的空目录
+        rm -rf ~/pigsty
         if [[ -n "${PIGSTY_VERSION:-}" && "${PIGSTY_VERSION}" != "latest" ]]; then
             curl -fsSL https://repo.pigsty.io/get | bash -s "${PIGSTY_VERSION}"
         else
             curl -fsSL https://repo.pigsty.io/get | bash
         fi
     else
-        log_info "Pigsty 目录已存在"
+        log_info "Pigsty 已安装 (bootstrap 存在)"
     fi
     
     cd ~/pigsty
