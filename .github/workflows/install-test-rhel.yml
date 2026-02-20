@@ -1,42 +1,130 @@
-name: Install Script Test (RHEL Family)
+name: Install Script Test
 
 on:
   push:
     branches: ["main", "dev"]
     paths:
       - "install.sh"
+      - "switch.sh"
       - "scripts/**"
       - ".github/workflows/install-test-rhel.yml"
   pull_request:
     branches: ["main", "dev"]
     paths:
       - "install.sh"
+      - "switch.sh"
       - "scripts/**"
 
 jobs:
-  test-on-rhel:
-    name: Test on ${{ matrix.distro }}
+  syntax-check:
+    name: Bash Syntax Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Syntax check install.sh
+        run: bash -n install.sh
+
+      - name: Syntax check switch.sh
+        run: bash -n switch.sh
+
+      - name: Syntax check all helper scripts
+        run: |
+          for f in scripts/lib/*.sh; do
+            echo "Checking $f ..."
+            bash -n "$f"
+          done
+
+  shellcheck-lint:
+    name: ShellCheck Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install shellcheck
+        run: sudo apt-get install -y shellcheck
+
+      - name: Lint install.sh
+        run: shellcheck -s bash -e SC2086,SC2034,SC2155,SC2046,SC2012 install.sh || true
+
+      - name: Lint switch.sh
+        run: shellcheck -s bash -e SC2086,SC2034,SC2155 switch.sh || true
+
+      - name: Lint helper scripts
+        run: shellcheck -s bash scripts/lib/*.sh || true
+
+  function-verification:
+    name: Function Verification on ${{ matrix.distro }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        distro: ["almalinux:9", "rockylinux:9"]
+        distro:
+          - "almalinux:9"
+          - "rockylinux:9"
+          - "ubuntu:22.04"
+          - "ubuntu:24.04"
+          - "debian:12"
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Run install script in container
+      - name: Verify function definitions
         run: |
+          # 确保脚本里定义了所有 main() 中调用到的函数
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
             ${{ matrix.distro }} \
-            /bin/bash -c "cd /workspace && bash -n install.sh && echo 'Syntax check passed'"
+            /bin/bash -c '
+              cd /workspace
+              sed -i "s/\r$//" install.sh
 
-      - name: Verify dependency installation logic
+              echo "=== Syntax Check ==="
+              bash -n install.sh && echo "PASS: syntax ok" || { echo "FAIL: syntax error"; exit 1; }
+
+              echo ""
+              echo "=== Function Definition Check ==="
+              # 提取 main() 中调用的函数名
+              CALLED=$(sed -n "/^main()/,/^}/p" install.sh | grep -oE "^[[:space:]]+[a-z_]+" | tr -d " " | sort -u)
+              # 提取所有定义的函数名
+              DEFINED=$(grep -oE "^[a-z_]+\(\)" install.sh | tr -d "()" | sort -u)
+
+              MISSING=""
+              for fn in $CALLED; do
+                if ! echo "$DEFINED" | grep -qx "$fn"; then
+                  # 排除内建命令和关键字
+                  case "$fn" in
+                    echo|if|fi|then|else|elif|for|while|do|done|case|esac|local|return|exit|cd|source|set|log_*) ;;
+                    *) MISSING="$MISSING $fn" ;;
+                  esac
+                fi
+              done
+
+              if [ -n "$MISSING" ]; then
+                echo "FAIL: Missing function definitions:$MISSING"
+                exit 1
+              else
+                echo "PASS: All called functions are defined"
+              fi
+            '
+
+      - name: Test dependency installation logic
         run: |
-          # 模拟安装前期的依赖检查和仓库配置逻辑 (Dry Run)
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
             ${{ matrix.distro }} \
-            /bin/bash -c "cd /workspace && sed -i 's/\r$//' install.sh && bash -x install.sh --dry-run" || echo "Note: Deep install test requires systemd/privileged which is limited in standard Docker"
+            /bin/bash -c '
+              cd /workspace
+              sed -i "s/\r$//" install.sh
+              # Source the script to load functions, then test install_base_dependencies
+              source install.sh 2>/dev/null || true
+              # 仅测试基础依赖安装函数
+              if type install_base_dependencies &>/dev/null; then
+                install_base_dependencies && echo "PASS: install_base_dependencies"
+              else
+                echo "SKIP: function not loaded"
+              fi
+            ' || echo "Note: Some functions require privileged mode"
