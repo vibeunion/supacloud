@@ -293,11 +293,11 @@ install_base_dependencies() {
     # 检测包管理器
     if command -v dnf &> /dev/null; then
         # RHEL/Alma/Rocky/OpenCloudOS
-        # 基础镜像可能缺失: openssl, jq, bc, procps-ng
-        # 注意：最小化镜像通常已有 tar/curl/sudo，若无则由管理员自行处理
+        # 基础镜像可能缺失: sudo, openssl, jq, bc, procps-ng, ssh
         log_info "使用 dnf 检查扩展工具..."
         
         # 检查并添加缺失的包
+        ! command -v sudo &> /dev/null && PACKAGES="$PACKAGES sudo"
         ! command -v openssl &> /dev/null && PACKAGES="$PACKAGES openssl"
         ! command -v bc &> /dev/null && PACKAGES="$PACKAGES bc"
         ! command -v jq &> /dev/null && PACKAGES="$PACKAGES jq"
@@ -318,6 +318,7 @@ install_base_dependencies() {
         # Debian/Ubuntu
         log_info "使用 apt 检查扩展工具..."
         PACKAGES=""
+        ! command -v sudo &> /dev/null && PACKAGES="$PACKAGES sudo"
         ! command -v bc &> /dev/null && PACKAGES="$PACKAGES bc"
         ! command -v jq &> /dev/null && PACKAGES="$PACKAGES jq"
         ! command -v ps &> /dev/null && PACKAGES="$PACKAGES procps"
