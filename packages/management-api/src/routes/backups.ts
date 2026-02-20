@@ -15,4 +15,13 @@ export const backupRoutes = (app: any) =>
             .post('/restore', async ({ body }: any) => {
                 return await BackupService.restore(body as RestoreRequest);
             })
+            // --- 租户级逻辑备份路由 ---
+            .post('/logical/:projectRef', async ({ params: { projectRef } }: any) => {
+                return await BackupService.createLogicalBackup(projectRef);
+            })
+            .post('/logical/:projectRef/restore', async ({ params: { projectRef }, body }: any) => {
+                const { backupId } = body as { backupId: string };
+                if (!backupId) throw new Error("backupId is required");
+                return await BackupService.restoreLogicalBackup(projectRef, backupId);
+            })
     );

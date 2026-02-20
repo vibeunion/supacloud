@@ -83,6 +83,9 @@ const app = new Elysia({ strictPath: false })
 
   .listen(config.port);
 
+import { taskWorker } from "./services/task.worker";
+taskWorker.start();
+
 console.log(`
 ╔═══════════════════════════════════════════════════════════╗
 ║          SupaCloud Management API                         ║
