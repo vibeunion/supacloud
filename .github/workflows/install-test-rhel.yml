@@ -155,7 +155,6 @@ jobs:
             '
 
       - name: Test Pigsty download and bootstrap
-        continue-on-error: true
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
@@ -179,17 +178,7 @@ jobs:
               echo "PASS: Pigsty downloaded"
               ls -la ~/pigsty/bootstrap
 
-              # bootstrap 在标准 Docker 中可能因缺少 EPEL/ansible 而失败 (exit 20)，属于预期
-              cd ~/pigsty && ./bootstrap || {
-                EC=$?
-                if [ $EC -eq 20 ]; then
-                  echo "NOTE: bootstrap exit 20 (ansible not in repo) - expected in Docker CI"
-                  exit 0
-                else
-                  echo "FAIL: unexpected exit code $EC"
-                  exit $EC
-                fi
-              }
+              # 运行 bootstrap — 必须完全通过
+              cd ~/pigsty && ./bootstrap
               echo "PASS: Pigsty bootstrap completed"
             '
-
