@@ -59,11 +59,13 @@ show_status() {
         elif command -v docker &> /dev/null; then
             docker ps --filter "name=bun-functions" --format "  容器状态: {{.Status}}" 2>/dev/null || echo "  容器状态: 未运行"
         fi
+        echo "  配置项: /etc/supabase/bun-functions.env"
     else
         echo -e "  当前: ${GREEN}Deno${NC} (官方默认)"
         if command -v podman &> /dev/null; then
             podman ps --filter "name=edge-functions" --format "  容器状态: {{.Status}}" 2>/dev/null || echo "  容器状态: 未运行"
         fi
+        [[ -f /etc/supabase/deno-functions.env ]] && echo "  配置项: /etc/supabase/deno-functions.env"
     fi
     echo ""
     
@@ -129,6 +131,18 @@ switch_to_deno() {
     # 移除 Bun 标记
     rm -f /etc/supabase/.use_bun_runtime
     
+    # 获取 IP 用于写入环境
+    INTERNAL_IP=$(hostname -I | awk '{print $1}')
+    DENO_FUNCTIONS_DIR=~/pigsty/app/supabase/volumes/functions
+    
+    # 显示输出环境信息
+    cat > /etc/supabase/deno-functions.env << EOF
+# Deno Edge Functions 配置
+# 运行时由 Pigsty 的 docker-compose (supabase-edge-functions 容器) 管理 
+EDGE_FUNCTIONS_DIR="${DENO_FUNCTIONS_DIR}"
+API_ENDPOINT="http://${INTERNAL_IP}:9000/functions/v1/"
+EOF
+    
     # 重启 Supabase 容器以使用默认 Deno edge-runtime
     cd ~/pigsty/app/supabase
     if command -v docker-compose &> /dev/null; then
@@ -138,7 +152,8 @@ switch_to_deno() {
     fi
     
     log_info "已切换到 Deno 运行时"
-    log_info "Edge Functions API: http://localhost:9000/functions/v1/{function}"
+    log_info "函数资源挂载点: ${DENO_FUNCTIONS_DIR}"
+    log_info "Edge Functions API: http://${INTERNAL_IP}:9000/functions/v1/{function}"
 }
 
 # 切换到 Bun
