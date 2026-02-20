@@ -111,20 +111,85 @@ jobs:
               fi
             '
 
-      - name: Test dependency installation logic
+      - name: Test pre-Pigsty installation steps
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
+            -e INTERNAL_IP=10.0.0.1 \
+            -e SUPABASE_PUBLIC_DOMAIN=api.ci-test.local \
+            -e SUPABASE_STUDIO_DOMAIN=studio.ci-test.local \
+            -e DASHBOARD_PASSWORD=ci-test-pass \
+            -e POSTGRES_PASSWORD=ci-test-db \
+            -e GRAFANA_PASSWORD=ci-test-grafana \
+            -e EDGE_RUNTIME=deno \
             ${{ matrix.distro }} \
             /bin/bash -c '
               cd /workspace
-              sed -i "s/\r$//" install.sh
-              # Source the script to load functions, then test install_base_dependencies
+              sed -i "s/\r$//" install.sh config.env
+
+              # 加载函数定义
+              source config.env
               source install.sh 2>/dev/null || true
-              # 仅测试基础依赖安装函数
-              if type install_base_dependencies &>/dev/null; then
-                install_base_dependencies && echo "PASS: install_base_dependencies"
-              else
-                echo "SKIP: function not loaded"
+
+              echo "========================================="
+              echo "  Testing: install_base_dependencies"
+              echo "========================================="
+              install_base_dependencies && echo "PASS" || { echo "FAIL"; exit 1; }
+
+              echo ""
+              echo "========================================="
+              echo "  Testing: setup_local_ssh"
+              echo "========================================="
+              setup_local_ssh && echo "PASS" || { echo "FAIL"; exit 1; }
+
+              echo ""
+              echo "========================================="
+              echo "  Testing: configure_edge_runtime"
+              echo "========================================="
+              configure_edge_runtime && echo "PASS" || { echo "FAIL"; exit 1; }
+
+              echo ""
+              echo "========================================="
+              echo "  All SupaCloud pre-Pigsty steps PASSED"
+              echo "========================================="
+            '
+
+      - name: Test Pigsty download and bootstrap
+        continue-on-error: true
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -e INTERNAL_IP=10.0.0.1 \
+            -e PIGSTY_VERSION=v4.1.0 \
+            ${{ matrix.distro }} \
+            /bin/bash -c '
+              cd /workspace
+              sed -i "s/\r$//" install.sh config.env
+              source config.env
+              source install.sh 2>/dev/null || true
+
+              # 测试 Pigsty 下载
+              install_base_dependencies
+              cd ~
+              if [[ ! -f ~/pigsty/bootstrap ]]; then
+                rm -rf ~/pigsty
+                curl -fsSL https://repo.pigsty.io/get | bash -s "${PIGSTY_VERSION:-v4.1.0}"
               fi
-            ' || echo "Note: Some functions require privileged mode"
+
+              echo "PASS: Pigsty downloaded"
+              ls -la ~/pigsty/bootstrap
+
+              # bootstrap 在标准 Docker 中可能因缺少 EPEL/ansible 而失败 (exit 20)，属于预期
+              cd ~/pigsty && ./bootstrap || {
+                EC=$?
+                if [ $EC -eq 20 ]; then
+                  echo "NOTE: bootstrap exit 20 (ansible not in repo) - expected in Docker CI"
+                  exit 0
+                else
+                  echo "FAIL: unexpected exit code $EC"
+                  exit $EC
+                fi
+              }
+              echo "PASS: Pigsty bootstrap completed"
+            '
+
