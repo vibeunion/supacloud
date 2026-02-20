@@ -105,38 +105,6 @@ EOF
     else
         log_info "使用配置的内网 IP: $INTERNAL_IP"
     fi
-    # 确保 .ssh 目录存在
-    mkdir -p ~/.ssh
-    chmod 700 ~/.ssh
-    
-    # 如果没有私钥，生成一个
-    if [[ ! -f ~/.ssh/id_rsa ]]; then
-        log_info "生成 SSH 密钥对..."
-        ssh-keygen -t rsa -N "" -f ~/.ssh/id_rsa
-    fi
-    
-    # 将公钥添加到授权列表
-    local PUB_KEY=$(cat ~/.ssh/id_rsa.pub)
-    if ! grep -q "$PUB_KEY" ~/.ssh/authorized_keys 2>/dev/null; then
-        log_info "添加公钥到 authorized_keys..."
-        cat ~/.ssh/id_rsa.pub >> ~/.ssh/authorized_keys
-        chmod 600 ~/.ssh/authorized_keys
-    fi
-    
-    # 添加到已知主机 (避免首次连接询问 yes/no)
-    if ! grep -q "localhost" ~/.ssh/known_hosts 2>/dev/null; then
-        ssh-keyscan -H localhost 127.0.0.1 ::1 >> ~/.ssh/known_hosts 2>/dev/null || true
-    fi
-    
-    # 验证 SSH 连接
-    # 注意：在极端精简容器里 ssh 客户端可能刚装好，sshd 可能没开，尝试启动 sshd
-    if ! pgrep -x sshd >/dev/null; then
-        if command -v systemctl &> /dev/null; then
-            systemctl start sshd || log_warn "无法启动 sshd，Ansible 可能会失败"
-            # 尝试直接启动 (容器环境)
-            /usr/sbin/sshd || log_warn "尝试直接启动 sshd 失败"
-        fi
-    fi
     
     # 2. 验证/获取 域名配置
     # 兼容旧配置
@@ -275,6 +243,45 @@ check_system() {
         exit 1
     fi
     log_info "系统架构: $ARCH"
+}
+
+# ========== 设置本机 SSH 免密 (Ansible 需要) ==========
+setup_local_ssh() {
+    log_step "配置本机 SSH 免密登录..."
+    
+    # 确保 .ssh 目录存在
+    mkdir -p ~/.ssh
+    chmod 700 ~/.ssh
+    
+    # 如果没有私钥，生成一个
+    if [[ ! -f ~/.ssh/id_rsa ]]; then
+        log_info "生成 SSH 密钥对..."
+        ssh-keygen -t rsa -N "" -f ~/.ssh/id_rsa
+    fi
+    
+    # 将公钥添加到授权列表
+    local PUB_KEY=$(cat ~/.ssh/id_rsa.pub)
+    if ! grep -q "$PUB_KEY" ~/.ssh/authorized_keys 2>/dev/null; then
+        log_info "添加公钥到 authorized_keys..."
+        cat ~/.ssh/id_rsa.pub >> ~/.ssh/authorized_keys
+        chmod 600 ~/.ssh/authorized_keys
+    fi
+    
+    # 添加到已知主机 (避免首次连接询问 yes/no)
+    if ! grep -q "localhost" ~/.ssh/known_hosts 2>/dev/null; then
+        ssh-keyscan -H localhost 127.0.0.1 ::1 >> ~/.ssh/known_hosts 2>/dev/null || true
+    fi
+    
+    # 验证 SSH 连接
+    if ! pgrep -x sshd >/dev/null; then
+        if command -v systemctl &> /dev/null; then
+            systemctl start sshd || log_warn "无法启动 sshd，Ansible 可能会失败"
+        fi
+        # 尝试直接启动 (容器环境)
+        /usr/sbin/sshd 2>/dev/null || log_warn "尝试直接启动 sshd 失败"
+    fi
+    
+    log_info "本机 SSH 免密配置完成"
 }
 
 # ========== 安装基础依赖 (针对最小化安装环境) ==========
