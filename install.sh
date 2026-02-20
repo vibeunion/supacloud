@@ -290,11 +290,13 @@ install_base_dependencies() {
 
     local PACKAGES=""
     
-    # 如果以 root 运行，确保 sudo 能无密码工作 (Docker 最小化镜像常缺 PAM 配置)
-    if [[ "$(id -u)" -eq 0 ]]; then
-        mkdir -p /etc/sudoers.d
-        echo "root ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/root-nopasswd
-        chmod 440 /etc/sudoers.d/root-nopasswd
+    # 如果以 root 运行且系统不存在 sudo，直接创建一个简单的 /usr/bin/sudo 软垫，直接执行传入的命令。
+    # 这避免了在 Docker 最小化镜像中安装真实的 sudo 导致由于未配置 PAM 引发的 PAM account management error。
+    if [[ "$(id -u)" -eq 0 ]] && ! command -v sudo &> /dev/null; then
+        log_info "以 root 运行且不存在 sudo，创建轻量化 /usr/bin/sudo 软垫以避免 PAM 错误..."
+        echo '#!/bin/bash' > /usr/bin/sudo
+        echo 'exec "$@"' >> /usr/bin/sudo
+        chmod +x /usr/bin/sudo
     fi
     
     # 检测包管理器
