@@ -105,11 +105,14 @@ EOF
     else
         log_info "使用配置的内网 IP: $INTERNAL_IP"
     fi
-}
+    fi
+    
+    # 兼容旧配置
+    if [[ -n "$SUPABASE_DOMAIN" && -z "$SUPABASE_PUBLIC_DOMAIN" ]]; then
+        SUPABASE_PUBLIC_DOMAIN="$SUPABASE_DOMAIN"
+    fi
 
-# ========== 自动配置本机 SSH (Ansible 依赖) ==========
-setup_local_ssh() {
-    log_step "配置本机免密 SSH (Ansible 依赖)..."
+    # 获取 Public Domain
     
     # 确保 .ssh 目录存在
     mkdir -p ~/.ssh
@@ -139,7 +142,6 @@ setup_local_ssh() {
     if ! pgrep -x sshd >/dev/null; then
         if command -v systemctl &> /dev/null; then
             systemctl start sshd || log_warn "无法启动 sshd，Ansible 可能会失败"
-        else
             # 尝试直接启动 (容器环境)
             /usr/sbin/sshd || log_warn "尝试直接启动 sshd 失败"
         fi
@@ -833,7 +835,7 @@ rpc_public_addr = "${INTERNAL_IP}:3901"
 rpc_secret = "${GARAGE_RPC_SECRET}"
 
 [s3_api]
-s3_region = "garage"
+s3_region = "us-east-1"
 api_bind_addr = "[::]:9000"
 root_domain = ".s3.garage.localhost"
 
@@ -896,11 +898,12 @@ EOF
     # 保存密钥信息
     echo "# Garage S3 配置" > /etc/garage/s3-credentials.env
     echo "S3_ENDPOINT=http://${INTERNAL_IP}:9000" >> /etc/garage/s3-credentials.env
+    echo "S3_REGION=us-east-1" >> /etc/garage/s3-credentials.env
     garage -c /etc/garage/garage.toml key info supabase-key 2>/dev/null | grep -E "Key ID|Secret key" >> /etc/garage/s3-credentials.env || true
     
     # 设置环境变量供后续使用
     S3_ENDPOINT="http://${INTERNAL_IP}:9000"
-    S3_REGION="garage"
+    S3_REGION="us-east-1"
     
     log_info "Garage 安装完成"
     log_info "  端点: http://${INTERNAL_IP}:9000"
