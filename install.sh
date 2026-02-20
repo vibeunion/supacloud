@@ -303,6 +303,9 @@ install_base_dependencies() {
         ! command -v jq &> /dev/null && PACKAGES="$PACKAGES jq"
         # 某些极简镜像也没有 procps-ng (ps, top)
         ! command -v ps &> /dev/null && PACKAGES="$PACKAGES procps-ng"
+        # SSH 工具 (ssh-keygen, sshd) — Ansible 必需
+        ! command -v ssh-keygen &> /dev/null && PACKAGES="$PACKAGES openssh-clients"
+        ! command -v sshd &> /dev/null && PACKAGES="$PACKAGES openssh-server"
 
         if [[ -n "$PACKAGES" ]]; then
             log_info "正在安装缺失的扩展包: $PACKAGES"
@@ -318,6 +321,9 @@ install_base_dependencies() {
         ! command -v bc &> /dev/null && PACKAGES="$PACKAGES bc"
         ! command -v jq &> /dev/null && PACKAGES="$PACKAGES jq"
         ! command -v ps &> /dev/null && PACKAGES="$PACKAGES procps"
+        # SSH 工具 — Ansible 必需
+        ! command -v ssh-keygen &> /dev/null && PACKAGES="$PACKAGES openssh-client"
+        ! command -v sshd &> /dev/null && PACKAGES="$PACKAGES openssh-server"
 
         if [[ -n "$PACKAGES" ]]; then
             log_info "正在安装缺失的基础包: $PACKAGES"
