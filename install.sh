@@ -290,6 +290,13 @@ install_base_dependencies() {
 
     local PACKAGES=""
     
+    # 如果以 root 运行，确保 sudo 能无密码工作 (Docker 最小化镜像常缺 PAM 配置)
+    if [[ "$(id -u)" -eq 0 ]]; then
+        mkdir -p /etc/sudoers.d
+        echo "root ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/root-nopasswd
+        chmod 440 /etc/sudoers.d/root-nopasswd
+    fi
+    
     # 检测包管理器
     if command -v dnf &> /dev/null; then
         # RHEL/Alma/Rocky/OpenCloudOS
@@ -312,6 +319,12 @@ install_base_dependencies() {
             dnf install -y $PACKAGES
         else
             log_info "基础扩展依赖检查通过"
+        fi
+
+        # 确保 EPEL 仓库可用 (Pigsty bootstrap 需要从 EPEL 安装 ansible)
+        if ! rpm -q epel-release &> /dev/null; then
+            log_info "安装 EPEL 仓库..."
+            dnf install -y epel-release
         fi
         
     elif command -v apt-get &> /dev/null; then
