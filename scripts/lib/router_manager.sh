@@ -124,30 +124,26 @@ add_custom_domain() {
 
     echo "Adding custom domain ${custom_domain} for ${PROJECT_REF}..."
 
-    # 这里的 acme_certificate 语法假设用户使用了带有 acme 插件的 nginx (如 openresty + lua-resty-acme)
-    # 或者是在宿主机上集成了 acme.sh 的自动化逻辑
+    # 根据是否存在静态证书决定 SSL 配置
+    local ssl_config
+    if [ -f "/etc/pigsty/cert/${custom_domain}.pem" ]; then
+        ssl_config="    ssl_certificate     /etc/pigsty/cert/${custom_domain}.pem;
+    ssl_certificate_key /etc/pigsty/cert/${custom_domain}.key;"
+    else
+        ssl_config='    acme_certificate letsencrypt;
+    ssl_certificate     $acme_certificate;
+    ssl_certificate_key $acme_certificate_key;'
+    fi
+
     cat > "$config_file" <<EOF
 server {
     listen 80;
     listen 443 ssl;
     server_name ${custom_domain};
 
-    # 优先检查是否存在静态证书 (由 SecurityService/ACME.sh 申请)
-    # 如果路径存在，则使用静态证书；否则回退到 Nginx ACME 动态申请
-    if [ -f "/etc/pigsty/cert/${custom_domain}.pem" ]; then
-        cat >> "$config_file" <<EOF
-    ssl_certificate     /etc/pigsty/cert/${custom_domain}.pem;
-    ssl_certificate_key /etc/pigsty/cert/${custom_domain}.key;
-EOF
-    else
-        cat >> "$config_file" <<EOF
-    acme_certificate letsencrypt;
-    ssl_certificate     \$acme_certificate;
-    ssl_certificate_key \$acme_certificate_key;
-EOF
-    fi
+${ssl_config}
 
-    cat >> "$config_file" <<EOF
+    location / {
         proxy_pass http://${KONG_INTERNAL};
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
