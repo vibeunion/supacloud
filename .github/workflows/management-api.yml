@@ -54,7 +54,7 @@ jobs:
 
       - name: Run tests
         working-directory: packages/management-api
-        run: bun test || echo "No tests found yet"
+        run: bun test
 
   shell-scripts-lint:
     name: Shell Scripts Lint
@@ -70,11 +70,15 @@ jobs:
 
       - name: Lint shell scripts
         run: |
-          echo "Checking scripts/lib/*.sh"
-          shellcheck scripts/lib/*.sh || true
+          echo "=== Checking scripts/lib/*.sh ==="
+          shellcheck -s bash scripts/lib/*.sh || true
 
-          echo "Checking install.sh"
-          shellcheck install.sh || true
+          echo "=== Checking install.sh ==="
+          shellcheck -s bash -e SC2086,SC2034,SC2155,SC2046,SC2012 install.sh || true
 
-          echo "Checking supacloud CLI"
-          shellcheck supacloud || true
+          echo "=== Checking switch.sh ==="
+          shellcheck -s bash -e SC2086,SC2034,SC2155 switch.sh || true
+
+          echo "=== Checking supacloud CLI ==="
+          shellcheck -s bash supacloud || true
+
