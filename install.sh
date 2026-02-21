@@ -292,46 +292,53 @@ setup_local_ssh() {
         ssh-keyscan -H localhost 127.0.0.1 ::1 >> ~/.ssh/known_hosts 2>/dev/null || true
     fi
     
-    # 验证 SSH 连接
-    if ! pgrep -x sshd >/dev/null; then
-        if command -v systemctl &> /dev/null; then
-            systemctl start sshd 2>/dev/null || true
-        fi
-        
-        # 如果 systemctl 没有成功启动 sshd，尝试直接启动 (容器环境)
-        if ! pgrep -x sshd >/dev/null; then
-            log_info "尝试在容器环境中直接启动 sshd..."
-            mkdir -p /run/sshd /var/run/sshd /var/empty/sshd /etc/ssh
-            chmod 755 /var/empty/sshd
-            # 生成主机密钥 (Docker 容器通常缺失)
-            ssh-keygen -A 2>/dev/null || true
-            if [[ ! -f /etc/ssh/ssh_host_rsa_key ]]; then
-                ssh-keygen -t rsa -f /etc/ssh/ssh_host_rsa_key -N "" -q 2>/dev/null || true
-            fi
-            if [[ ! -f /etc/ssh/ssh_host_ed25519_key ]]; then
-                ssh-keygen -t ed25519 -f /etc/ssh/ssh_host_ed25519_key -N "" -q 2>/dev/null || true
-            fi
-            if [[ ! -f /etc/ssh/ssh_host_ecdsa_key ]]; then
-                ssh-keygen -t ecdsa -f /etc/ssh/ssh_host_ecdsa_key -N "" -q 2>/dev/null || true
-            fi
-            # 最小化容器中通常不配置 PAM 等安全机制，因此在测试环境显式覆盖安全与权限校验
-            # RHEL 9 默认在 sshd_config 顶部 Include /etc/ssh/sshd_config.d/*.conf，放在 00 优先级最高
-            mkdir -p /etc/ssh/sshd_config.d
-            cat > /etc/ssh/sshd_config.d/00-supacloud-test.conf << 'EOF'
+    # 确保 sshd 基础环境就绪（密钥 + 宽松配置）
+    # 无论 sshd 是否已在运行，都需要确保配置正确
+    mkdir -p /run/sshd /var/run/sshd /var/empty/sshd /etc/ssh /etc/ssh/sshd_config.d
+    chmod 755 /var/empty/sshd
+    
+    # 生成主机密钥 (Docker 容器通常缺失)
+    ssh-keygen -A 2>/dev/null || true
+    if [[ ! -f /etc/ssh/ssh_host_rsa_key ]]; then
+        ssh-keygen -t rsa -f /etc/ssh/ssh_host_rsa_key -N "" -q 2>/dev/null || true
+    fi
+    if [[ ! -f /etc/ssh/ssh_host_ed25519_key ]]; then
+        ssh-keygen -t ed25519 -f /etc/ssh/ssh_host_ed25519_key -N "" -q 2>/dev/null || true
+    fi
+    if [[ ! -f /etc/ssh/ssh_host_ecdsa_key ]]; then
+        ssh-keygen -t ecdsa -f /etc/ssh/ssh_host_ecdsa_key -N "" -q 2>/dev/null || true
+    fi
+    
+    # 覆盖 sshd 配置：允许 root 登录、禁用 PAM、宽松模式
+    # RHEL 9 默认在 sshd_config 顶部 Include /etc/ssh/sshd_config.d/*.conf，00 前缀确保最高优先级
+    cat > /etc/ssh/sshd_config.d/00-supacloud-test.conf << 'EOF'
 UsePAM no
 PermitRootLogin yes
 StrictModes no
 PubkeyAuthentication yes
 PasswordAuthentication yes
 EOF
-            
-            /usr/sbin/sshd -E /var/log/sshd.log 2>/dev/null || log_warn "直接启动 sshd 失败，Ansible 可能会报错"
+    
+    # 启动/重启 sshd 以应用新配置
+    if command -v systemctl &>/dev/null && systemctl is-system-running &>/dev/null; then
+        # systemd 环境：安装并重启 sshd
+        systemctl restart sshd 2>/dev/null || systemctl start sshd 2>/dev/null || true
+    else
+        # 非 systemd 环境（或 systemd 未就绪）：直接启动
+        if pgrep -x sshd >/dev/null; then
+            # 已有 sshd 运行，kill 后重启以应用新配置
+            pkill -x sshd 2>/dev/null || true
             sleep 1
         fi
+        /usr/sbin/sshd -E /var/log/sshd.log 2>/dev/null || log_warn "直接启动 sshd 失败，Ansible 可能会报错"
     fi
+    sleep 1
+    
+    # 重新扫描 host keys（sshd 可能刚重启，key 可能变了）
+    ssh-keyscan -H localhost 127.0.0.1 ::1 > ~/.ssh/known_hosts 2>/dev/null || true
     
     # 最后进行一次真实的本地握手测试，如果失败抛出详细日志
-    if ! ssh -o BatchMode=yes -o ConnectTimeout=5 root@127.0.0.1 "echo SSH_OK" &>/dev/null; then
+    if ! ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no root@127.0.0.1 "echo SSH_OK" &>/dev/null; then
         log_warn "本地 SSH 连通性测试失败！这可能会导致之后的 Ansible 部署奔溃。"
         log_warn "---------- SSHD Config 检查 (-T) ----------"
         /usr/sbin/sshd -T 2>/dev/null | grep -E "permitrootlogin|strictmodes|usepam|pubkey" || true
@@ -1627,7 +1634,7 @@ update_pigsty_config() {
     fi
     # 容器/CI 环境检测：如果没有 systemd 作为 PID 1，说明在容器中运行
     # 此时禁用 Pigsty 本地 REPO 构建（容器中没有离线包缓存）
-    if [[ "$(cat /proc/1/comm 2>/dev/null)" != "systemd" ]] || [[ -f /.dockerenv ]]; then
+    if [[ "$(cat /proc/1/comm 2>/dev/null)" != "systemd" ]] && [[ -f /.dockerenv ]]; then
         log_info "检测到容器/CI 环境，禁用 Pigsty 本地 REPO 构建..."
         # 在 all: 下的 vars: 块中插入 repo_enabled: false
         sed -i 's/^    nginx_enabled: true/    repo_enabled: false\n    node_repo_modules: infra\n    nginx_enabled: true/' "$PIGSTY_YML" 2>/dev/null || true
