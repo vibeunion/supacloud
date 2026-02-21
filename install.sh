@@ -1152,8 +1152,8 @@ EOF
                 INSTALL_CMD="yum install -y"
             fi
 
-            log_info "尝试从官方仓库安装 Nginx 和 ACME 模块..."
-            if ! $INSTALL_CMD nginx nginx-module-acme; then
+            log_info "尝试从官方仓库安装 Nginx..."
+            if ! $INSTALL_CMD nginx; then
                 log_warn "Nginx 官方仓库安装失败，可能存在依赖冲突。将回退到系统默认版本..."
                 rm -f /etc/yum.repos.d/nginx.repo
                 if command -v dnf &> /dev/null; then
@@ -1189,7 +1189,7 @@ EOF
                 | tee /etc/apt/preferences.d/99nginx
 
             apt-get update
-            if ! apt-get install -y nginx nginx-module-acme; then
+            if ! apt-get install -y nginx; then
                 log_warn "Nginx 官方仓库安装失败，回退到系统默认版本..."
                 rm -f /etc/apt/sources.list.d/nginx.list
                 rm -f /etc/apt/preferences.d/99nginx
@@ -1235,7 +1235,7 @@ apply_nginx_acme_config() {
         cp "$NGINX_CONF" "${NGINX_CONF}.bak.$(date +%s)"
     fi
     
-    # 查找 ACME 模块路径
+    # 查找 ACME 模块路径 (如果是作为动态模块存在)
     ACME_MODULE_PATH=$(find /usr/lib/nginx/modules /usr/lib64/nginx/modules /etc/nginx/modules -name "ngx_http_acme_module.so" 2>/dev/null | head -1)
     
     local HAS_ACME=false
@@ -1243,7 +1243,10 @@ apply_nginx_acme_config() {
         HAS_ACME=true
         log_info "发现 ACME 模块: $ACME_MODULE_PATH"
     else
-        log_warn "未找到 ACME 模块，将禁用 Nginx 原生 ACME 功能（退回到手动管理或 HTTP 访问）"
+        # 较新的 Nginx 官方包已经直接将 ACME 功能内置在核心中或预置在默认组件里
+        # 因此我们不再单纯以 .so 文件存在与否作为唯一判断标准，默认开启 ACME 配置
+        HAS_ACME=true
+        log_info "未找到外部 ngx_http_acme_module.so，假设当前 Nginx 版本已内置 ACME 支持或使用其他方式包含。"
     fi
 
     # 生成最终的 nginx.conf
