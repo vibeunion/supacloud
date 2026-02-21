@@ -304,27 +304,43 @@ setup_local_ssh() {
             mkdir -p /run/sshd /var/run/sshd /var/empty/sshd /etc/ssh
             chmod 755 /var/empty/sshd
             # 生成主机密钥 (Docker 容器通常缺失)
+            ssh-keygen -A 2>/dev/null || true
             if [[ ! -f /etc/ssh/ssh_host_rsa_key ]]; then
-                ssh-keygen -t rsa -f /etc/ssh/ssh_host_rsa_key -N "" 2>/dev/null || true
+                ssh-keygen -t rsa -f /etc/ssh/ssh_host_rsa_key -N "" -q 2>/dev/null || true
             fi
             if [[ ! -f /etc/ssh/ssh_host_ed25519_key ]]; then
-                ssh-keygen -t ed25519 -f /etc/ssh/ssh_host_ed25519_key -N "" 2>/dev/null || true
+                ssh-keygen -t ed25519 -f /etc/ssh/ssh_host_ed25519_key -N "" -q 2>/dev/null || true
             fi
-            if command -v ssh-keygen &> /dev/null; then
-                ssh-keygen -A 2>/dev/null || true
+            if [[ ! -f /etc/ssh/ssh_host_ecdsa_key ]]; then
+                ssh-keygen -t ecdsa -f /etc/ssh/ssh_host_ecdsa_key -N "" -q 2>/dev/null || true
             fi
-            # 最小化容器中通常不配置 PAM，因此在测试环境直接关闭 PAM 以防 sshd 崩溃或拒绝连接
-            if grep -q "^UsePAM yes" /etc/ssh/sshd_config 2>/dev/null; then
-                sed -i 's/^UsePAM yes/UsePAM no/' /etc/ssh/sshd_config
-            elif ! grep -q "^UsePAM " /etc/ssh/sshd_config 2>/dev/null; then
-                echo "UsePAM no" >> /etc/ssh/sshd_config
-            fi
-            # 放行 Root 与 StrictModes (防容器目录权限报错)
-            sed -i 's/^#PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config 2>/dev/null || true
-            sed -i 's/^#StrictModes.*/StrictModes no/' /etc/ssh/sshd_config 2>/dev/null || true
+            # 最小化容器中通常不配置 PAM 等安全机制，因此在测试环境显式覆盖安全与权限校验
+            # RHEL 9 默认在 sshd_config 顶部 Include /etc/ssh/sshd_config.d/*.conf，放在 00 优先级最高
+            mkdir -p /etc/ssh/sshd_config.d
+            cat > /etc/ssh/sshd_config.d/00-supacloud-test.conf << 'EOF'
+UsePAM no
+PermitRootLogin yes
+StrictModes no
+PubkeyAuthentication yes
+PasswordAuthentication yes
+EOF
             
-            /usr/sbin/sshd 2>/dev/null || log_warn "直接启动 sshd 失败，Ansible 可能会报错"
+            /usr/sbin/sshd -E /var/log/sshd.log 2>/dev/null || log_warn "直接启动 sshd 失败，Ansible 可能会报错"
+            sleep 1
         fi
+    fi
+    
+    # 最后进行一次真实的本地握手测试，如果失败抛出详细日志
+    if ! ssh -o BatchMode=yes -o ConnectTimeout=5 root@127.0.0.1 "echo SSH_OK" &>/dev/null; then
+        log_warn "本地 SSH 连通性测试失败！这可能会导致之后的 Ansible 部署奔溃。"
+        log_warn "---------- SSHD Config 检查 (-T) ----------"
+        /usr/sbin/sshd -T 2>/dev/null | grep -E "permitrootlogin|strictmodes|usepam|pubkey" || true
+        log_warn "---------- SSHD 启动错误日志 ----------"
+        cat /var/log/sshd.log 2>/dev/null || true
+        log_warn "---------- ~/.ssh 目录权限 ----------"
+        ls -la ~/.ssh 2>/dev/null || true
+    else
+        log_info "本地 SSH Loopback 测试成功。"
     fi
     
     log_info "本机 SSH 免密配置完成"
@@ -1161,17 +1177,20 @@ EOF
                 INSTALL_CMD="yum install -y"
             fi
 
-            log_info "尝试从官方仓库安装 Nginx..."
-            if ! $INSTALL_CMD nginx; then
-                log_warn "Nginx 官方仓库安装失败，可能存在依赖冲突。将回退到系统默认版本..."
-                rm -f /etc/yum.repos.d/nginx.repo
-                if command -v dnf &> /dev/null; then
-                    dnf clean all
-                    dnf install -y nginx
-                else
-                    yum clean all
-                    yum install -y nginx
-                fi
+            log_info "尝试从官方仓库安装 Nginx + ACME 模块..."
+            if ! $INSTALL_CMD nginx nginx-module-acme; then
+                log_warn "安装 nginx + nginx-module-acme 失败，尝试单独安装 nginx..."
+                $INSTALL_CMD nginx || {
+                    log_warn "Nginx 官方仓库安装失败，可能存在依赖冲突。将回退到系统默认版本..."
+                    rm -f /etc/yum.repos.d/nginx.repo
+                    if command -v dnf &> /dev/null; then
+                        dnf clean all
+                        dnf install -y nginx
+                    else
+                        yum clean all
+                        yum install -y nginx
+                    fi
+                }
             fi
             ;;
         
@@ -1198,12 +1217,15 @@ EOF
                 | tee /etc/apt/preferences.d/99nginx
 
             apt-get update
-            if ! apt-get install -y nginx; then
-                log_warn "Nginx 官方仓库安装失败，回退到系统默认版本..."
-                rm -f /etc/apt/sources.list.d/nginx.list
-                rm -f /etc/apt/preferences.d/99nginx
-                apt-get update
-                apt-get install -y nginx
+            if ! apt-get install -y nginx nginx-module-acme; then
+                log_warn "安装 nginx + nginx-module-acme 失败，尝试单独安装 nginx..."
+                apt-get install -y nginx || {
+                    log_warn "Nginx 官方仓库安装失败，回退到系统默认版本..."
+                    rm -f /etc/apt/sources.list.d/nginx.list
+                    rm -f /etc/apt/preferences.d/99nginx
+                    apt-get update
+                    apt-get install -y nginx
+                }
             fi
             ;;
         
