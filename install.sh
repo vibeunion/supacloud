@@ -1222,9 +1222,8 @@ EOF
         case "$DISTRO_ID" in
             rocky|almalinux|centos|rhel|opencloudos|anolis|tencentos)
                 if command -v dnf &> /dev/null; then
-                    dnf install -y dnf-plugins-core
-                    dnf copr enable getpagespeed/nginx-module-acme -y
-                    dnf install -y nginx-module-acme || log_warn "未能成功安装 nginx-module-acme"
+                    dnf install -y epel-release || true
+                    dnf install -y nginx-mod-http-acme nginx-module-acme || log_warn "未能成功从源安装 Nginx ACME 模块"
                 fi
                 ;;
             ubuntu)
@@ -1237,8 +1236,9 @@ EOF
                 ;;
             debian)
                 apt-get update && apt-get install -y lsb-release ca-certificates apt-transport-https software-properties-common curl
-                curl -sSLo /usr/share/keyrings/deb.sury.org-nginx.gpg https://packages.sury.org/nginx-mainline/apt.gpg
-                echo "deb [signed-by=/usr/share/keyrings/deb.sury.org-nginx.gpg] https://packages.sury.org/nginx-mainline/ $(lsb_release -sc) main" > /etc/apt/sources.list.d/nginx-sury.list
+                curl -sSLo /tmp/debsuryorg-archive-keyring.deb https://packages.sury.org/debsuryorg-archive-keyring.deb
+                dpkg -i /tmp/debsuryorg-archive-keyring.deb || true
+                echo "deb [signed-by=/usr/share/keyrings/debsuryorg-archive-keyring.gpg] https://packages.sury.org/nginx/ $(lsb_release -sc) main" > /etc/apt/sources.list.d/nginx-sury.list
                 apt-get update
                 apt-get install -y libnginx-mod-http-acme || apt-get install -y nginx-module-acme || log_warn "未能成功安装 Nginx ACME 模块"
                 ;;
