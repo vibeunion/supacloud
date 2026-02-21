@@ -1621,6 +1621,13 @@ update_pigsty_config() {
     if [[ "${S3_STORAGE_TYPE:-minio}" != "minio" ]]; then
         configure_s3_in_pigsty
     fi
+    # 容器/CI 环境检测：如果没有 systemd 作为 PID 1，说明在容器中运行
+    # 此时禁用 Pigsty 本地 REPO 构建（容器中没有离线包缓存）
+    if [[ "$(cat /proc/1/comm 2>/dev/null)" != "systemd" ]] || [[ -f /.dockerenv ]]; then
+        log_info "检测到容器/CI 环境，禁用 Pigsty 本地 REPO 构建..."
+        # 在 all: 下的 vars: 块中插入 repo_enabled: false
+        sed -i 's/^    nginx_enabled: true/    repo_enabled: false\n    node_repo_modules: infra\n    nginx_enabled: true/' "$PIGSTY_YML" 2>/dev/null || true
+    fi
     
     log_info "配置更新完成"
 }
