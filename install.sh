@@ -117,20 +117,26 @@ EOF
         if [ -t 0 ]; then
             log_warn "未配置 API/对外域名 (SUPABASE_PUBLIC_DOMAIN)"
             while [[ -z "$SUPABASE_PUBLIC_DOMAIN" || "$SUPABASE_PUBLIC_DOMAIN" == "supa.example.com" ]]; do
-                read -p "请输入 Supabase API 域名 (例如 supa.example.com): " SUPABASE_PUBLIC_DOMAIN
+                read -p "请输入 Supabase API 域名 [留空使用 api.${INTERNAL_IP}.nip.io]: " INPUT_DOMAIN
+                if [[ -z "$INPUT_DOMAIN" ]]; then
+                    SUPABASE_PUBLIC_DOMAIN="api.${INTERNAL_IP}.nip.io"
+                else
+                    SUPABASE_PUBLIC_DOMAIN="$INPUT_DOMAIN"
+                fi
             done
         else
-            log_warn "检测到非交互环境，使用默认 API 域名: api.supacloud.local"
-            SUPABASE_PUBLIC_DOMAIN="api.supacloud.local"
+            SUPABASE_PUBLIC_DOMAIN="api.${INTERNAL_IP}.nip.io"
+            log_warn "检测到非交互环境，使用默认 API 域名: $SUPABASE_PUBLIC_DOMAIN"
         fi
     fi
     log_info "API 域名: $SUPABASE_PUBLIC_DOMAIN"
 
     # 获取 Studio Domain
     if [[ -z "$SUPABASE_STUDIO_DOMAIN" ]]; then
-        # 默认建议 studio.xxx 或使用 api 域名
-        DEFAULT_STUDIO_DOMAIN="studio.${SUPABASE_PUBLIC_DOMAIN#supa.}" # 简单的 supa.xxx -> studio.xxx 猜测
-        if [[ "$SUPABASE_PUBLIC_DOMAIN" != *"supa"* ]]; then
+        # 默认建议 studio.xxx 
+        DEFAULT_STUDIO_DOMAIN="studio.${SUPABASE_PUBLIC_DOMAIN#api.}"
+        # 如果前缀不是 api.，降级处理
+        if [[ "$SUPABASE_PUBLIC_DOMAIN" != *"api."* ]]; then
             DEFAULT_STUDIO_DOMAIN="studio.${SUPABASE_PUBLIC_DOMAIN}"
         fi
         
@@ -144,8 +150,8 @@ EOF
                 SUPABASE_STUDIO_DOMAIN="$DEFAULT_STUDIO_DOMAIN"
             fi
         else
-            log_warn "检测到非交互环境，使用默认 Studio 域名: $DEFAULT_STUDIO_DOMAIN"
             SUPABASE_STUDIO_DOMAIN="$DEFAULT_STUDIO_DOMAIN"
+            log_warn "检测到非交互环境，使用默认 Studio 域名: $SUPABASE_STUDIO_DOMAIN"
         fi
     fi
     log_info "Studio 域名: $SUPABASE_STUDIO_DOMAIN"
