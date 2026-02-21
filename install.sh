@@ -1512,12 +1512,19 @@ install_pigsty() {
     fi
 
     if [[ -n "$PIGSTY_ENTRYPOINT" ]]; then
-        if [[ -x "./$PIGSTY_ENTRYPOINT" ]]; then
+        # 检测是否在容器中：容器无本地离线包，需跳过 REPO 角色
+        local EXTRA_ARGS=""
+        if [[ -f /.dockerenv ]] || grep -q "docker\|lxc\|containerd" /proc/1/cgroup 2>/dev/null; then
+            log_info "容器环境检测成功，将跳过 Pigsty REPO 角色 (使用在线源)..."
+            EXTRA_ARGS="--skip-tags repo"
+        fi
+        
+        if command -v ansible-playbook &> /dev/null; then
+            ansible-playbook "$PIGSTY_ENTRYPOINT" $EXTRA_ARGS
+        elif [[ -x "./$PIGSTY_ENTRYPOINT" ]] && [[ -z "$EXTRA_ARGS" ]]; then
             "./$PIGSTY_ENTRYPOINT"
-        elif command -v ansible-playbook &> /dev/null; then
-            ansible-playbook "$PIGSTY_ENTRYPOINT"
         else
-            log_error "未找到 ansible-playbook，且 $PIGSTY_ENTRYPOINT 不可执行"
+            log_error "未找到 ansible-playbook，且需要跳过 repo 角色"
             exit 1
         fi
     else
