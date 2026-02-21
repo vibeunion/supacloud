@@ -269,17 +269,21 @@ setup_local_ssh() {
     mkdir -p ~/.ssh
     chmod 700 ~/.ssh
     
-    # 如果没有私钥，生成一个
-    if [[ ! -f ~/.ssh/id_rsa ]]; then
-        log_info "生成 SSH 密钥对..."
-        ssh-keygen -t rsa -N "" -f ~/.ssh/id_rsa
+    # 如果没有私钥，生成一个 (使用 ed25519 绕过 RHEL 9 的严格 RSA 安全策略)
+    if [[ ! -f ~/.ssh/id_ed25519 && ! -f ~/.ssh/id_rsa ]]; then
+        log_info "生成 SSH 密钥对(ed25519)..."
+        ssh-keygen -t ed25519 -N "" -f ~/.ssh/id_ed25519
     fi
     
+    # 尝试读取公钥 (优先 ed25519, 兼顾可能存在的 rsa)
+    local PUB_KEY=""
+    [[ -f ~/.ssh/id_ed25519.pub ]] && PUB_KEY=$(cat ~/.ssh/id_ed25519.pub)
+    [[ -z "$PUB_KEY" && -f ~/.ssh/id_rsa.pub ]] && PUB_KEY=$(cat ~/.ssh/id_rsa.pub)
+    
     # 将公钥添加到授权列表
-    local PUB_KEY=$(cat ~/.ssh/id_rsa.pub)
-    if ! grep -q "$PUB_KEY" ~/.ssh/authorized_keys 2>/dev/null; then
+    if [[ -n "$PUB_KEY" ]] && ! grep -q "$PUB_KEY" ~/.ssh/authorized_keys 2>/dev/null; then
         log_info "添加公钥到 authorized_keys..."
-        cat ~/.ssh/id_rsa.pub >> ~/.ssh/authorized_keys
+        echo "$PUB_KEY" >> ~/.ssh/authorized_keys
         chmod 600 ~/.ssh/authorized_keys
     fi
     
@@ -1364,6 +1368,9 @@ fi )
     include /etc/nginx/sites-enabled/supa-tenants/*.conf;
 }
 EOF
+
+    # 提前创建租户路由目录，防止 nginx -t 校验因目录不存在而失败
+    mkdir -p /etc/nginx/sites-enabled/supa-tenants
 
     log_info "验证 Nginx 配置..."
     if nginx -t; then
