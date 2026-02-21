@@ -27,9 +27,10 @@ jobs:
           docker run \
             --privileged \
             --cgroupns=host \
-            --tmpfs /tmp \
+            --tmpfs /tmp:exec \
             --tmpfs /run \
             -v /sys/fs/cgroup:/sys/fs/cgroup:rw \
+            -e ANSIBLE_REMOTE_TMP=/root/.ansible/tmp \
             --name rhel-node -d \
             -v ${{ github.workspace }}:/workspace \
             ${{ matrix.distro }} \
