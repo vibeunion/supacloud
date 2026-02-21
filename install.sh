@@ -1297,16 +1297,23 @@ apply_nginx_acme_config() {
         cp "$NGINX_CONF" "${NGINX_CONF}.bak.$(date +%s)"
     fi
     
-    # 查找 ACME 模块路径 (如果是作为动态模块存在)
+    # 查找 ACME 模块路径
     ACME_MODULE_PATH=$(find /usr/lib/nginx/modules /usr/lib64/nginx/modules /etc/nginx/modules -name "ngx_http_acme_module.so" 2>/dev/null | head -1)
     
-    local HAS_ACME=false
     if [[ -n "$ACME_MODULE_PATH" ]]; then
-        HAS_ACME=true
         log_info "发现 ACME 模块: $ACME_MODULE_PATH"
     else
-        log_warn "未找到外部 ngx_http_acme_module.so，将禁用 Nginx 原生 ACME 功能（退回到手动管理或 HTTP 访问）。"
-        HAS_ACME=false
+        log_error "未找到 ngx_http_acme_module.so！ACME 模块是必需的。"
+        log_error "---------- 诊断信息 ----------"
+        log_error "已安装的 Nginx 版本:"
+        nginx -v 2>&1 || true
+        log_error "已安装的 Nginx 相关包:"
+        (dpkg -l | grep nginx 2>/dev/null || rpm -qa | grep nginx 2>/dev/null) || true
+        log_error "Nginx 模块目录内容:"
+        ls -la /usr/lib/nginx/modules/ 2>/dev/null || true
+        ls -la /usr/lib64/nginx/modules/ 2>/dev/null || true
+        ls -la /etc/nginx/modules/ 2>/dev/null || true
+        exit 1
     fi
 
     # 生成最终的 nginx.conf
@@ -1316,7 +1323,7 @@ worker_processes auto;
 error_log /var/log/nginx/error.log notice;
 pid /var/run/nginx.pid;
 
-$( [[ "$HAS_ACME" == "true" ]] && echo "load_module \"$ACME_MODULE_PATH\";" )
+load_module "$ACME_MODULE_PATH";
 
 events {
     worker_connections 1024;
@@ -1335,7 +1342,6 @@ http {
     sendfile        on;
     keepalive_timeout  65;
 
-$( [[ "$HAS_ACME" == "true" ]] && cat << ACME_EOF
     # --- ACME 全局配置 ---
     resolver 8.8.8.8 1.1.1.1 valid=300s;
     
@@ -1349,8 +1355,6 @@ $( [[ "$HAS_ACME" == "true" ]] && cat << ACME_EOF
         # 使用 HTTP-01 验证 (Nginx 原生支持)
         challenge http-01;
     }
-ACME_EOF
-)
 
     # 后端定义
     upstream studio_backend {
@@ -1370,11 +1374,10 @@ ACME_EOF
         # 无需手动配置 location
         
         location / {
-$( [[ "$HAS_ACME" == "true" ]] && echo "            return 301 https://\$host\$request_uri;" || echo "            proxy_pass http://studio_backend;" )
+            return 301 https://\$host\$request_uri;
         }
     }
 
-$( if [[ "$HAS_ACME" == "true" ]]; then cat << SSL_EOF
     # Studio HTTPS
     server {
         listen 443 ssl;
@@ -1421,8 +1424,6 @@ $( if [[ "$HAS_ACME" == "true" ]]; then cat << SSL_EOF
             proxy_set_header Connection "upgrade";
         }
     }
-SSL_EOF
-fi )
 
     include /etc/nginx/conf.d/*.conf;
 
@@ -1436,7 +1437,10 @@ EOF
     mkdir -p /etc/nginx/sites-enabled/supa-tenants
 
     log_info "验证 Nginx 配置..."
-    if nginx -t; then
+    log_info "---------- 生成的 nginx.conf ----------"
+    cat "$NGINX_CONF"
+    log_info "---------- nginx -t 输出 ----------"
+    if nginx -t 2>&1; then
         log_info "配置验证通过，重启 Nginx 服务..."
         systemctl restart nginx
         
@@ -1444,7 +1448,8 @@ EOF
         log_info "Nginx 已启动，正在后台自动申请证书..."
     else
         log_error "Nginx 配置验证失败！"
-        nginx -t
+        log_error "---------- 详细错误 ----------"
+        nginx -t 2>&1 || true
         exit 1
     fi
 }
