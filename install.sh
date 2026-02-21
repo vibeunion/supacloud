@@ -287,10 +287,10 @@ setup_local_ssh() {
         chmod 600 ~/.ssh/authorized_keys
     fi
     
-    # 添加到已知主机 (避免首次连接询问 yes/no)
-    if ! grep -q "localhost" ~/.ssh/known_hosts 2>/dev/null; then
-        ssh-keyscan -H localhost 127.0.0.1 ::1 >> ~/.ssh/known_hosts 2>/dev/null || true
-    fi
+    # 添加到已知主机 (避免首次连接询问 yes/no)，包括所有本地 IP
+    local ALL_LOCAL_IPS
+    ALL_LOCAL_IPS=$(hostname -I 2>/dev/null || echo "")
+    ssh-keyscan -H localhost 127.0.0.1 ::1 $ALL_LOCAL_IPS >> ~/.ssh/known_hosts 2>/dev/null || true
     
     # 确保 sshd 基础环境就绪（密钥 + 宽松配置）
     # 无论 sshd 是否已在运行，都需要确保配置正确
@@ -1512,19 +1512,12 @@ install_pigsty() {
     fi
 
     if [[ -n "$PIGSTY_ENTRYPOINT" ]]; then
-        # 检测是否在容器中：容器无本地离线包，需跳过 REPO 角色
-        local EXTRA_ARGS=""
-        if [[ -f /.dockerenv ]] || grep -q "docker\|lxc\|containerd" /proc/1/cgroup 2>/dev/null; then
-            log_info "容器环境检测成功，将跳过 Pigsty REPO 角色 (使用在线源)..."
-            EXTRA_ARGS="--skip-tags repo"
-        fi
-        
         if command -v ansible-playbook &> /dev/null; then
-            ansible-playbook "$PIGSTY_ENTRYPOINT" $EXTRA_ARGS
-        elif [[ -x "./$PIGSTY_ENTRYPOINT" ]] && [[ -z "$EXTRA_ARGS" ]]; then
+            ansible-playbook "$PIGSTY_ENTRYPOINT"
+        elif [[ -x "./$PIGSTY_ENTRYPOINT" ]]; then
             "./$PIGSTY_ENTRYPOINT"
         else
-            log_error "未找到 ansible-playbook，且需要跳过 repo 角色"
+            log_error "未找到 ansible-playbook，且 $PIGSTY_ENTRYPOINT 不可执行"
             exit 1
         fi
     else
@@ -1567,9 +1560,27 @@ update_pigsty_config() {
     
     PIGSTY_YML=~/pigsty/pigsty.yml
     
-    # 强制替换默认 IP (修复可能未替换的 Bug)
+    # 强制替换所有默认 IP 为 INTERNAL_IP
     if [[ -n "$INTERNAL_IP" ]]; then
+        # 替换各版本模板中可能出现的默认 IP
         sed -i "s|10.6.0.9|${INTERNAL_IP}|g" "$PIGSTY_YML"
+        sed -i "s|10.10.10.10|${INTERNAL_IP}|g" "$PIGSTY_YML"
+        
+        # Pigsty configure 可能自动检测容器桥接 IP 而忽略 -i 参数
+        # 检测实际 IP 并替换
+        local DETECTED_IP
+        DETECTED_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
+        if [[ -n "$DETECTED_IP" && "$DETECTED_IP" != "$INTERNAL_IP" ]]; then
+            log_info "检测到 Pigsty 使用了自动 IP ($DETECTED_IP)，替换为 INTERNAL_IP ($INTERNAL_IP)..."
+            sed -i "s|${DETECTED_IP}|${INTERNAL_IP}|g" "$PIGSTY_YML"
+        fi
+    fi
+    
+    # 显式设置 Python 解释器（避免容器中 Ansible 自动发现失败）
+    if ! grep -q "ansible_python_interpreter" "$PIGSTY_YML"; then
+        local PYTHON_PATH
+        PYTHON_PATH=$(command -v python3 2>/dev/null || echo "/usr/bin/python3")
+        sed -i "s|^all:|all:\n  vars:\n    ansible_python_interpreter: ${PYTHON_PATH}|" "$PIGSTY_YML" 2>/dev/null || true
     fi
     
     # 更新域名配置
