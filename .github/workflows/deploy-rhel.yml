@@ -20,15 +20,37 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup and Run Installation in Container
+      - name: Start systemd-enabled container
         run: |
-          # 启动容器 (保持后台运行) - 跳过真实的 systemd，改用 Mock 策略以适应最小化镜像
-          docker run --privileged --name rhel-node -d -v ${{ github.workspace }}:/workspace ${{ matrix.distro }} tail -f /dev/null
-          sleep 5
+          # 启动带 systemd 的特权容器 (用 /usr/sbin/init 作为 PID 1)
+          # 这样 Ansible 模块、sshd、nginx 等服务都能正常工作
+          docker run \
+            --privileged \
+            --cgroupns=host \
+            --tmpfs /tmp \
+            --tmpfs /run \
+            -v /sys/fs/cgroup:/sys/fs/cgroup:rw \
+            --name rhel-node -d \
+            -v ${{ github.workspace }}:/workspace \
+            ${{ matrix.distro }} \
+            /usr/sbin/init
           
-          # Mock systemctl (因为官方基础镜像通常不包含 systemd，或者未配置为 ID 1)
-          docker exec rhel-node /bin/bash -c "echo '#!/bin/bash' > /usr/bin/systemctl && echo 'echo Mock systemctl: \$@' >> /usr/bin/systemctl && chmod +x /usr/bin/systemctl"
+          # 等待 systemd 完全启动
+          echo "等待 systemd 初始化..."
+          for i in $(seq 1 30); do
+            if docker exec rhel-node systemctl is-system-running --wait 2>/dev/null | grep -qE "running|degraded"; then
+              echo "systemd 已就绪 (${i}s)"
+              break
+            fi
+            sleep 1
+          done
           
+          # 验证 systemd 状态
+          docker exec rhel-node systemctl is-system-running || true
+          docker exec rhel-node cat /proc/1/comm
+
+      - name: Prepare environment
+        run: |
           # 修复换行符问题 (Windows Git 同步可能带入 CRLF)
           docker exec rhel-node /bin/bash -c "cd /workspace && sed -i 's/\r$//' install.sh"
           
@@ -45,17 +67,22 @@ jobs:
           S3_STORAGE_TYPE=minio
           EDGE_RUNTIME=deno
           INNEREOF"
-          
-          # 执行安装脚本
-          # 注意：在容器内完整运行 Pigsty 可能会受限，但可以执行到配置生成和仓库设置阶段
+
+      - name: Run Install Script
+        run: |
+          # 在 systemd 容器中执行完整的安装脚本
           docker exec rhel-node /bin/bash -c "cd /workspace && bash install.sh"
 
       - name: Verify Configuration Artifacts
+        if: always()
         run: |
-          echo "Verifying generated configs inside container..."
+          echo "=== Verifying generated configs ==="
           docker exec rhel-node ls -l /etc/nginx/nginx.conf || echo "Nginx config not generated"
           docker exec rhel-node ls -l /etc/supabase/jwt-keys.env || echo "JWT keys not generated"
-          
+          docker exec rhel-node nginx -v 2>&1 || echo "Nginx not installed"
+          docker exec rhel-node ls -la /usr/lib64/nginx/modules/ 2>/dev/null || echo "No modules dir"
+          docker exec rhel-node cat /root/pigsty/pigsty.yml 2>/dev/null | head -30 || echo "Pigsty config not generated"
+
       - name: Cleanup
         if: always()
         run: docker rm -f rhel-node || true
