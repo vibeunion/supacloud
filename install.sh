@@ -1199,32 +1199,30 @@ EOF
         debian|ubuntu)
             log_info "配置 Nginx Mainline 仓库 (Debian/Ubuntu)..."
             
-            # 安装依赖
+            # 安装依赖 (Debian 和 Ubuntu 的 keyring 包名不同)
             apt-get update
-            apt-get install -y curl gnupg2 ca-certificates lsb-release ubuntu-keyring
+            if [[ "$DISTRO_ID" == "ubuntu" ]]; then
+                apt-get install -y curl gnupg2 ca-certificates lsb-release ubuntu-keyring
+            else
+                apt-get install -y curl gnupg2 ca-certificates lsb-release debian-archive-keyring
+            fi
 
-            # 添加 Key
-            curl https://nginx.org/keys/nginx_signing.key | gpg --dearmor \
+            # 添加 nginx.org 官方签名密钥
+            curl -fsSL https://nginx.org/keys/nginx_signing.key | gpg --dearmor \
                 | tee /usr/share/keyrings/nginx-archive-keyring.gpg >/dev/null
 
-            # 添加源
+            # 添加 mainline 源
             echo "deb [signed-by=/usr/share/keyrings/nginx-archive-keyring.gpg] \
             http://nginx.org/packages/mainline/${DISTRO_ID} \
             $(lsb_release -cs) nginx" \
             | tee /etc/apt/sources.list.d/nginx.list
 
             # 设置优先级 (确保安装官方包而非系统包)
-            echo -e "Package: *\nPin: origin nginx.org\nPin-Priority: 900\n" \
+            echo -e "Package: *\nPin: origin nginx.org\nPin: release o=nginx\nPin-Priority: 900\n" \
                 | tee /etc/apt/preferences.d/99nginx
 
             apt-get update
-            if ! apt-get install -y nginx; then
-                log_warn "Nginx 官方仓库安装失败，回退到系统默认版本..."
-                rm -f /etc/apt/sources.list.d/nginx.list
-                rm -f /etc/apt/preferences.d/99nginx
-                apt-get update
-                apt-get install -y nginx
-            fi
+            apt-get install -y nginx
             
             # 单独安装 ACME 模块（依赖 nginx，必须在 nginx 安装后）
             log_info "安装 nginx-module-acme..."
