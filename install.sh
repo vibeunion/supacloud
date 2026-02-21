@@ -114,10 +114,15 @@ EOF
 
     # 获取 Public Domain
     if [[ -z "$SUPABASE_PUBLIC_DOMAIN" || "$SUPABASE_PUBLIC_DOMAIN" == "supa.example.com" ]]; then
-        log_warn "未配置 API/对外域名 (SUPABASE_PUBLIC_DOMAIN)"
-        while [[ -z "$SUPABASE_PUBLIC_DOMAIN" || "$SUPABASE_PUBLIC_DOMAIN" == "supa.example.com" ]]; do
-            read -p "请输入 Supabase API 域名 (例如 supa.example.com): " SUPABASE_PUBLIC_DOMAIN
-        done
+        if [ -t 0 ]; then
+            log_warn "未配置 API/对外域名 (SUPABASE_PUBLIC_DOMAIN)"
+            while [[ -z "$SUPABASE_PUBLIC_DOMAIN" || "$SUPABASE_PUBLIC_DOMAIN" == "supa.example.com" ]]; do
+                read -p "请输入 Supabase API 域名 (例如 supa.example.com): " SUPABASE_PUBLIC_DOMAIN
+            done
+        else
+            log_warn "检测到非交互环境，使用默认 API 域名: api.supacloud.local"
+            SUPABASE_PUBLIC_DOMAIN="api.supacloud.local"
+        fi
     fi
     log_info "API 域名: $SUPABASE_PUBLIC_DOMAIN"
 
@@ -129,12 +134,17 @@ EOF
             DEFAULT_STUDIO_DOMAIN="studio.${SUPABASE_PUBLIC_DOMAIN}"
         fi
         
-        log_info "配置 Studio 域名 (可选)"
-        read -p "请输入 Studio 域名 [默认为 $DEFAULT_STUDIO_DOMAIN]: " INPUT_STUDIO_DOMAIN
-        
-        if [[ -n "$INPUT_STUDIO_DOMAIN" ]]; then
-            SUPABASE_STUDIO_DOMAIN="$INPUT_STUDIO_DOMAIN"
+        if [ -t 0 ]; then
+            log_info "配置 Studio 域名 (可选)"
+            read -p "请输入 Studio 域名 [默认为 $DEFAULT_STUDIO_DOMAIN]: " INPUT_STUDIO_DOMAIN
+            
+            if [[ -n "$INPUT_STUDIO_DOMAIN" ]]; then
+                SUPABASE_STUDIO_DOMAIN="$INPUT_STUDIO_DOMAIN"
+            else
+                SUPABASE_STUDIO_DOMAIN="$DEFAULT_STUDIO_DOMAIN"
+            fi
         else
+            log_warn "检测到非交互环境，使用默认 Studio 域名: $DEFAULT_STUDIO_DOMAIN"
             SUPABASE_STUDIO_DOMAIN="$DEFAULT_STUDIO_DOMAIN"
         fi
     fi
@@ -275,10 +285,19 @@ setup_local_ssh() {
     # 验证 SSH 连接
     if ! pgrep -x sshd >/dev/null; then
         if command -v systemctl &> /dev/null; then
-            systemctl start sshd || log_warn "无法启动 sshd，Ansible 可能会失败"
+            systemctl start sshd 2>/dev/null || true
         fi
-        # 尝试直接启动 (容器环境)
-        /usr/sbin/sshd 2>/dev/null || log_warn "尝试直接启动 sshd 失败"
+        
+        # 如果 systemctl 没有成功启动 sshd，尝试直接启动 (容器环境)
+        if ! pgrep -x sshd >/dev/null; then
+            log_info "尝试在容器环境中直接启动 sshd..."
+            mkdir -p /run/sshd /var/run/sshd
+            # 生成主机密钥 (Docker 容器通常缺失)
+            if command -v ssh-keygen &> /dev/null; then
+                ssh-keygen -A 2>/dev/null || true
+            fi
+            /usr/sbin/sshd 2>/dev/null || log_warn "直接启动 sshd 失败，Ansible 可能会报错"
+        fi
     fi
     
     log_info "本机 SSH 免密配置完成"
