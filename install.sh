@@ -1231,7 +1231,7 @@ EOF
                 if ! command -v add-apt-repository &> /dev/null; then
                     apt-get update && apt-get install -y software-properties-common
                 fi
-                add-apt-repository ppa:ondrej/nginx-mainline -y
+                add-apt-repository ppa:ondrej/nginx -y
                 apt-get update
                 apt-get install -y libnginx-mod-http-acme || apt-get install -y nginx-module-acme || log_warn "未能成功安装 Nginx ACME 模块"
                 ;;
