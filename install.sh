@@ -1283,10 +1283,16 @@ apply_nginx_acme_config() {
         HAS_ACME=true
         log_info "发现 ACME 模块: $ACME_MODULE_PATH"
     else
-        # 较新的 Nginx 官方包已经直接将 ACME 功能内置在核心中或预置在默认组件里
-        # 因此我们不再单纯以 .so 文件存在与否作为唯一判断标准，默认开启 ACME 配置
-        HAS_ACME=true
-        log_info "未找到外部 ngx_http_acme_module.so，假设当前 Nginx 版本已内置 ACME 支持或使用其他方式包含。"
+        # 较新的 Nginx 官方包 (>=1.29.1) 已经直接将 ACME 功能内置在核心中或预置在默认组件里
+        # 因此我们需要检查一下版本号，以免误开导致旧版本爆错
+        NGINX_VERSION=$(nginx -v 2>&1 | grep -oEo '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+        if [[ -n "$NGINX_VERSION" && "$(printf '%s\n' "1.29.1" "$NGINX_VERSION" | sort -V | head -n1)" == "1.29.1" && "$NGINX_VERSION" != "" ]]; then
+            HAS_ACME=true
+            log_info "未找到外部 ngx_http_acme_module.so，但检测到当前 Nginx 版本 ($NGINX_VERSION) >= 1.29.1 已内置原生 ACME 支持。"
+        else
+            log_warn "未找到外部 ngx_http_acme_module.so 且 Nginx 版本 ($NGINX_VERSION) 低于 1.29.1，将禁用 Nginx 原生 ACME 功能（退回到手动管理或 HTTP 访问）。"
+            HAS_ACME=false
+        fi
     fi
 
     # 生成最终的 nginx.conf
