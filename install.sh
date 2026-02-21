@@ -1498,6 +1498,16 @@ install_pigsty() {
         PIGSTY_ENTRYPOINT="install.yml"
     fi
 
+    # 容器/CI 环境检测：跳过完整部署（容器中没有 systemd、离线包等）
+    if [[ "$(cat /proc/1/comm 2>/dev/null)" != "systemd" ]] || [[ -f /.dockerenv ]]; then
+        log_warn "检测到容器/CI 环境，跳过 Pigsty 完整部署（容器中缺少 systemd 和离线包缓存）"
+        log_info "Pigsty 配置已成功生成，以下文件可供验证:"
+        ls -la ~/pigsty/pigsty.yml
+        log_info "---------- pigsty.yml 摘要 ----------"
+        head -50 ~/pigsty/pigsty.yml
+        return 0
+    fi
+
     if [[ -n "$PIGSTY_ENTRYPOINT" ]]; then
         if [[ -x "./$PIGSTY_ENTRYPOINT" ]]; then
             "./$PIGSTY_ENTRYPOINT"
