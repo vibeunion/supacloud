@@ -301,9 +301,15 @@ setup_local_ssh() {
         # 如果 systemctl 没有成功启动 sshd，尝试直接启动 (容器环境)
         if ! pgrep -x sshd >/dev/null; then
             log_info "尝试在容器环境中直接启动 sshd..."
-            mkdir -p /run/sshd /var/run/sshd /var/empty/sshd
+            mkdir -p /run/sshd /var/run/sshd /var/empty/sshd /etc/ssh
             chmod 755 /var/empty/sshd
             # 生成主机密钥 (Docker 容器通常缺失)
+            if [[ ! -f /etc/ssh/ssh_host_rsa_key ]]; then
+                ssh-keygen -t rsa -f /etc/ssh/ssh_host_rsa_key -N "" 2>/dev/null || true
+            fi
+            if [[ ! -f /etc/ssh/ssh_host_ed25519_key ]]; then
+                ssh-keygen -t ed25519 -f /etc/ssh/ssh_host_ed25519_key -N "" 2>/dev/null || true
+            fi
             if command -v ssh-keygen &> /dev/null; then
                 ssh-keygen -A 2>/dev/null || true
             fi
@@ -313,6 +319,9 @@ setup_local_ssh() {
             elif ! grep -q "^UsePAM " /etc/ssh/sshd_config 2>/dev/null; then
                 echo "UsePAM no" >> /etc/ssh/sshd_config
             fi
+            # 放行 Root 与 StrictModes (防容器目录权限报错)
+            sed -i 's/^#PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config 2>/dev/null || true
+            sed -i 's/^#StrictModes.*/StrictModes no/' /etc/ssh/sshd_config 2>/dev/null || true
             
             /usr/sbin/sshd 2>/dev/null || log_warn "直接启动 sshd 失败，Ansible 可能会报错"
         fi
@@ -1207,44 +1216,35 @@ EOF
     # 启用 Nginx
     systemctl enable nginx
     
-    # 检查 Nginx 版本是否自带 ACME 模块 (>= 1.29.1)
-    NGINX_VERSION=$(nginx -v 2>&1 | grep -oEo '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
-    if [[ -n "$NGINX_VERSION" ]]; then
-        # 如果版本低于 1.29.1 且没有模块，通过第三方库安装
-        if [[ "$(printf '%s\n' "1.29.1" "$NGINX_VERSION" | sort -V | head -n1)" == "$NGINX_VERSION" && "$NGINX_VERSION" != "1.29.1" ]]; then
-            log_warn "当前 Nginx 版本 ($NGINX_VERSION) 低于自带 ACME 支持的版本 (1.29.1)"
-            if ! find /usr/lib/nginx/modules /usr/lib64/nginx/modules /etc/nginx/modules -name "ngx_http_acme_module.so" 2>/dev/null | grep -q .; then
-                log_info "未检测到 ngx_http_acme_module.so，尝试通过第三方仓库手动安装该模块..."
-                case "$DISTRO_ID" in
-                    rocky|almalinux|centos|rhel|opencloudos|anolis|tencentos)
-                        if command -v dnf &> /dev/null; then
-                            dnf install -y dnf-plugins-core
-                            dnf copr enable getpagespeed/nginx-module-acme -y
-                            dnf install -y nginx-module-acme || log_warn "未能成功安装 nginx-module-acme"
-                        fi
-                        ;;
-                    ubuntu)
-                        if ! command -v add-apt-repository &> /dev/null; then
-                            apt-get update && apt-get install -y software-properties-common
-                        fi
-                        add-apt-repository ppa:ondrej/nginx-mainline -y
-                        apt-get update
-                        apt-get install -y libnginx-mod-http-acme || apt-get install -y nginx-module-acme || log_warn "未能成功安装 Nginx ACME 模块"
-                        ;;
-                    debian)
-                        apt-get update && apt-get install -y lsb-release ca-certificates apt-transport-https software-properties-common curl
-                        curl -sSLo /usr/share/keyrings/deb.sury.org-nginx.gpg https://packages.sury.org/nginx-mainline/apt.gpg
-                        echo "deb [signed-by=/usr/share/keyrings/deb.sury.org-nginx.gpg] https://packages.sury.org/nginx-mainline/ $(lsb_release -sc) main" > /etc/apt/sources.list.d/nginx-sury.list
-                        apt-get update
-                        apt-get install -y libnginx-mod-http-acme || apt-get install -y nginx-module-acme || log_warn "未能成功安装 Nginx ACME 模块"
-                        ;;
-                esac
-            else
-                log_info "已存在 ngx_http_acme_module.so，无需额外安装。"
-            fi
-        else
-            log_info "当前 Nginx 版本 ($NGINX_VERSION) >= 1.29.1，支持原生 ACME。"
-        fi
+    # 检查模块文件
+    if ! find /usr/lib/nginx/modules /usr/lib64/nginx/modules /etc/nginx/modules -name "ngx_http_acme_module.so" 2>/dev/null | grep -q .; then
+        log_info "未检测到 ngx_http_acme_module.so，尝试通过第三方仓库手动安装该模块..."
+        case "$DISTRO_ID" in
+            rocky|almalinux|centos|rhel|opencloudos|anolis|tencentos)
+                if command -v dnf &> /dev/null; then
+                    dnf install -y dnf-plugins-core
+                    dnf copr enable getpagespeed/nginx-module-acme -y
+                    dnf install -y nginx-module-acme || log_warn "未能成功安装 nginx-module-acme"
+                fi
+                ;;
+            ubuntu)
+                if ! command -v add-apt-repository &> /dev/null; then
+                    apt-get update && apt-get install -y software-properties-common
+                fi
+                add-apt-repository ppa:ondrej/nginx-mainline -y
+                apt-get update
+                apt-get install -y libnginx-mod-http-acme || apt-get install -y nginx-module-acme || log_warn "未能成功安装 Nginx ACME 模块"
+                ;;
+            debian)
+                apt-get update && apt-get install -y lsb-release ca-certificates apt-transport-https software-properties-common curl
+                curl -sSLo /usr/share/keyrings/deb.sury.org-nginx.gpg https://packages.sury.org/nginx-mainline/apt.gpg
+                echo "deb [signed-by=/usr/share/keyrings/deb.sury.org-nginx.gpg] https://packages.sury.org/nginx-mainline/ $(lsb_release -sc) main" > /etc/apt/sources.list.d/nginx-sury.list
+                apt-get update
+                apt-get install -y libnginx-mod-http-acme || apt-get install -y nginx-module-acme || log_warn "未能成功安装 Nginx ACME 模块"
+                ;;
+        esac
+    else
+        log_info "已存在 ngx_http_acme_module.so，无需额外安装。"
     fi
     
     log_info "Nginx 安装完成"
@@ -1283,16 +1283,8 @@ apply_nginx_acme_config() {
         HAS_ACME=true
         log_info "发现 ACME 模块: $ACME_MODULE_PATH"
     else
-        # 较新的 Nginx 官方包 (>=1.29.1) 已经直接将 ACME 功能内置在核心中或预置在默认组件里
-        # 因此我们需要检查一下版本号，以免误开导致旧版本爆错
-        NGINX_VERSION=$(nginx -v 2>&1 | grep -oEo '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
-        if [[ -n "$NGINX_VERSION" && "$(printf '%s\n' "1.29.1" "$NGINX_VERSION" | sort -V | head -n1)" == "1.29.1" && "$NGINX_VERSION" != "" ]]; then
-            HAS_ACME=true
-            log_info "未找到外部 ngx_http_acme_module.so，但检测到当前 Nginx 版本 ($NGINX_VERSION) >= 1.29.1 已内置原生 ACME 支持。"
-        else
-            log_warn "未找到外部 ngx_http_acme_module.so 且 Nginx 版本 ($NGINX_VERSION) 低于 1.29.1，将禁用 Nginx 原生 ACME 功能（退回到手动管理或 HTTP 访问）。"
-            HAS_ACME=false
-        fi
+        log_warn "未找到外部 ngx_http_acme_module.so，将禁用 Nginx 原生 ACME 功能（退回到手动管理或 HTTP 访问）。"
+        HAS_ACME=false
     fi
 
     # 生成最终的 nginx.conf
