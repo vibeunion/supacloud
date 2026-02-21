@@ -297,11 +297,19 @@ setup_local_ssh() {
         # 如果 systemctl 没有成功启动 sshd，尝试直接启动 (容器环境)
         if ! pgrep -x sshd >/dev/null; then
             log_info "尝试在容器环境中直接启动 sshd..."
-            mkdir -p /run/sshd /var/run/sshd
+            mkdir -p /run/sshd /var/run/sshd /var/empty/sshd
+            chmod 755 /var/empty/sshd
             # 生成主机密钥 (Docker 容器通常缺失)
             if command -v ssh-keygen &> /dev/null; then
                 ssh-keygen -A 2>/dev/null || true
             fi
+            # 最小化容器中通常不配置 PAM，因此在测试环境直接关闭 PAM 以防 sshd 崩溃或拒绝连接
+            if grep -q "^UsePAM yes" /etc/ssh/sshd_config 2>/dev/null; then
+                sed -i 's/^UsePAM yes/UsePAM no/' /etc/ssh/sshd_config
+            elif ! grep -q "^UsePAM " /etc/ssh/sshd_config 2>/dev/null; then
+                echo "UsePAM no" >> /etc/ssh/sshd_config
+            fi
+            
             /usr/sbin/sshd 2>/dev/null || log_warn "直接启动 sshd 失败，Ansible 可能会报错"
         fi
     fi
@@ -331,6 +339,9 @@ install_base_dependencies() {
         log_info "使用 dnf 检查扩展工具..."
         
         # 检查并添加缺失的包
+        ! command -v curl &> /dev/null && PACKAGES="$PACKAGES curl"
+        ! command -v tar &> /dev/null && PACKAGES="$PACKAGES tar"
+        ! command -v gzip &> /dev/null && PACKAGES="$PACKAGES gzip"
         ! command -v sudo &> /dev/null && PACKAGES="$PACKAGES sudo"
         ! command -v openssl &> /dev/null && PACKAGES="$PACKAGES openssl"
         ! command -v bc &> /dev/null && PACKAGES="$PACKAGES bc"
@@ -358,6 +369,9 @@ install_base_dependencies() {
         # Debian/Ubuntu
         log_info "使用 apt 检查扩展工具..."
         PACKAGES=""
+        ! command -v curl &> /dev/null && PACKAGES="$PACKAGES curl"
+        ! command -v tar &> /dev/null && PACKAGES="$PACKAGES tar"
+        ! command -v gzip &> /dev/null && PACKAGES="$PACKAGES gzip"
         ! command -v sudo &> /dev/null && PACKAGES="$PACKAGES sudo"
         ! command -v bc &> /dev/null && PACKAGES="$PACKAGES bc"
         ! command -v jq &> /dev/null && PACKAGES="$PACKAGES jq"
