@@ -1177,21 +1177,22 @@ EOF
                 INSTALL_CMD="yum install -y"
             fi
 
-            log_info "尝试从官方仓库安装 Nginx + ACME 模块..."
-            if ! $INSTALL_CMD nginx nginx-module-acme; then
-                log_warn "安装 nginx + nginx-module-acme 失败，尝试单独安装 nginx..."
-                $INSTALL_CMD nginx || {
-                    log_warn "Nginx 官方仓库安装失败，可能存在依赖冲突。将回退到系统默认版本..."
-                    rm -f /etc/yum.repos.d/nginx.repo
-                    if command -v dnf &> /dev/null; then
-                        dnf clean all
-                        dnf install -y nginx
-                    else
-                        yum clean all
-                        yum install -y nginx
-                    fi
-                }
+            log_info "尝试从官方仓库安装 Nginx..."
+            if ! $INSTALL_CMD nginx; then
+                log_warn "Nginx 官方仓库安装失败，回退到系统默认版本..."
+                rm -f /etc/yum.repos.d/nginx.repo
+                if command -v dnf &> /dev/null; then
+                    dnf clean all
+                    dnf install -y nginx
+                else
+                    yum clean all
+                    yum install -y nginx
+                fi
             fi
+            
+            # 单独安装 ACME 模块（依赖 nginx，必须在 nginx 安装后）
+            log_info "安装 nginx-module-acme..."
+            $INSTALL_CMD nginx-module-acme || log_warn "nginx-module-acme 安装失败，稍后将尝试第三方源"
             ;;
         
         # Debian/Ubuntu 系列
@@ -1217,16 +1218,17 @@ EOF
                 | tee /etc/apt/preferences.d/99nginx
 
             apt-get update
-            if ! apt-get install -y nginx nginx-module-acme; then
-                log_warn "安装 nginx + nginx-module-acme 失败，尝试单独安装 nginx..."
-                apt-get install -y nginx || {
-                    log_warn "Nginx 官方仓库安装失败，回退到系统默认版本..."
-                    rm -f /etc/apt/sources.list.d/nginx.list
-                    rm -f /etc/apt/preferences.d/99nginx
-                    apt-get update
-                    apt-get install -y nginx
-                }
+            if ! apt-get install -y nginx; then
+                log_warn "Nginx 官方仓库安装失败，回退到系统默认版本..."
+                rm -f /etc/apt/sources.list.d/nginx.list
+                rm -f /etc/apt/preferences.d/99nginx
+                apt-get update
+                apt-get install -y nginx
             fi
+            
+            # 单独安装 ACME 模块（依赖 nginx，必须在 nginx 安装后）
+            log_info "安装 nginx-module-acme..."
+            apt-get install -y nginx-module-acme || log_warn "nginx-module-acme 安装失败，稍后将尝试第三方源"
             ;;
         
         *)
