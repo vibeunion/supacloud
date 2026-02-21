@@ -1442,7 +1442,13 @@ EOF
     log_info "---------- nginx -t 输出 ----------"
     if nginx -t 2>&1; then
         log_info "配置验证通过，重启 Nginx 服务..."
-        systemctl restart nginx
+        if command -v systemctl &>/dev/null && systemctl is-system-running &>/dev/null; then
+            systemctl restart nginx
+        else
+            # CI/容器环境可能没有 systemd，直接启动 nginx
+            nginx -s stop 2>/dev/null || true
+            nginx
+        fi
         
         # 等待 ACME 证书申请 (首次启动可能需要一点时间)
         log_info "Nginx 已启动，正在后台自动申请证书..."
@@ -1496,16 +1502,6 @@ install_pigsty() {
         PIGSTY_ENTRYPOINT="deploy.yml"
     elif [[ -f "install.yml" ]]; then
         PIGSTY_ENTRYPOINT="install.yml"
-    fi
-
-    # 容器/CI 环境检测：跳过完整部署（容器中没有 systemd、离线包等）
-    if [[ "$(cat /proc/1/comm 2>/dev/null)" != "systemd" ]] || [[ -f /.dockerenv ]]; then
-        log_warn "检测到容器/CI 环境，跳过 Pigsty 完整部署（容器中缺少 systemd 和离线包缓存）"
-        log_info "Pigsty 配置已成功生成，以下文件可供验证:"
-        ls -la ~/pigsty/pigsty.yml
-        log_info "---------- pigsty.yml 摘要 ----------"
-        head -50 ~/pigsty/pigsty.yml
-        return 0
     fi
 
     if [[ -n "$PIGSTY_ENTRYPOINT" ]]; then
