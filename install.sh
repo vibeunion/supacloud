@@ -1513,7 +1513,12 @@ install_pigsty() {
 
     if [[ -n "$PIGSTY_ENTRYPOINT" ]]; then
         if command -v ansible-playbook &> /dev/null; then
-            ansible-playbook "$PIGSTY_ENTRYPOINT"
+            # 在容器/CI环境中添加详细日志以便调试 MODULE FAILURE
+            local EXTRA_ARGS=""
+            if [[ -f /.dockerenv ]] || grep -q "docker\|lxc\|containerd" /proc/1/cgroup 2>/dev/null; then
+                EXTRA_ARGS="-vvv"
+            fi
+            ansible-playbook "$PIGSTY_ENTRYPOINT" $EXTRA_ARGS
         elif [[ -x "./$PIGSTY_ENTRYPOINT" ]]; then
             "./$PIGSTY_ENTRYPOINT"
         else
