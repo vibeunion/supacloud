@@ -1207,6 +1207,46 @@ EOF
     # 启用 Nginx
     systemctl enable nginx
     
+    # 检查 Nginx 版本是否自带 ACME 模块 (>= 1.29.1)
+    NGINX_VERSION=$(nginx -v 2>&1 | grep -oEo '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+    if [[ -n "$NGINX_VERSION" ]]; then
+        # 如果版本低于 1.29.1 且没有模块，通过第三方库安装
+        if [[ "$(printf '%s\n' "1.29.1" "$NGINX_VERSION" | sort -V | head -n1)" == "$NGINX_VERSION" && "$NGINX_VERSION" != "1.29.1" ]]; then
+            log_warn "当前 Nginx 版本 ($NGINX_VERSION) 低于自带 ACME 支持的版本 (1.29.1)"
+            if ! find /usr/lib/nginx/modules /usr/lib64/nginx/modules /etc/nginx/modules -name "ngx_http_acme_module.so" 2>/dev/null | grep -q .; then
+                log_info "未检测到 ngx_http_acme_module.so，尝试通过第三方仓库手动安装该模块..."
+                case "$DISTRO_ID" in
+                    rocky|almalinux|centos|rhel|opencloudos|anolis|tencentos)
+                        if command -v dnf &> /dev/null; then
+                            dnf install -y dnf-plugins-core
+                            dnf copr enable getpagespeed/nginx-module-acme -y
+                            dnf install -y nginx-module-acme || log_warn "未能成功安装 nginx-module-acme"
+                        fi
+                        ;;
+                    ubuntu)
+                        if ! command -v add-apt-repository &> /dev/null; then
+                            apt-get update && apt-get install -y software-properties-common
+                        fi
+                        add-apt-repository ppa:ondrej/nginx-mainline -y
+                        apt-get update
+                        apt-get install -y libnginx-mod-http-acme || apt-get install -y nginx-module-acme || log_warn "未能成功安装 Nginx ACME 模块"
+                        ;;
+                    debian)
+                        apt-get update && apt-get install -y lsb-release ca-certificates apt-transport-https software-properties-common curl
+                        curl -sSLo /usr/share/keyrings/deb.sury.org-nginx.gpg https://packages.sury.org/nginx-mainline/apt.gpg
+                        echo "deb [signed-by=/usr/share/keyrings/deb.sury.org-nginx.gpg] https://packages.sury.org/nginx-mainline/ $(lsb_release -sc) main" > /etc/apt/sources.list.d/nginx-sury.list
+                        apt-get update
+                        apt-get install -y libnginx-mod-http-acme || apt-get install -y nginx-module-acme || log_warn "未能成功安装 Nginx ACME 模块"
+                        ;;
+                esac
+            else
+                log_info "已存在 ngx_http_acme_module.so，无需额外安装。"
+            fi
+        else
+            log_info "当前 Nginx 版本 ($NGINX_VERSION) >= 1.29.1，支持原生 ACME。"
+        fi
+    fi
+    
     log_info "Nginx 安装完成"
 }
 
