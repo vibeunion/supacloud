@@ -54,7 +54,7 @@
 | CPU | 2 cores | 4+ cores |
 | RAM | 2GB | 4GB+ |
 | Disk | 40GB | 100GB+ SSD |
-| OS | CentOS 8/9, Ubuntu 22/24, Debian 12 | CentOS 9 |
+| OS | CentOS 9, Ubuntu 22/24, Debian 12 | CentOS 9 |
 
 #### Installation
 
@@ -246,7 +246,7 @@ Key settings in `config.env`:
 | CPU | 2 核 | 4 核+ |
 | 内存 | 2GB | 4GB+ |
 | 磁盘 | 40GB | 100GB+ SSD |
-| 系统 | CentOS 8/9, Ubuntu 22/24, Debian 12 | CentOS 9 |
+| 系统 | CentOS 9, Ubuntu 22/24, Debian 12 | CentOS 9 |
 
 #### 安装部署
 

@@ -6,7 +6,7 @@
 #   1. 编辑 config.env 配置文件
 #   2. 运行: sudo bash install.sh
 #
-# 支持系统: CentOS 8/9, Ubuntu 22.04/24.04, Debian 12
+# 支持系统: CentOS 9, Ubuntu 22.04/24.04, Debian 12
 # ============================================================
 
 set -e
@@ -363,10 +363,10 @@ install_base_dependencies() {
     
     # 检测包管理器
     if command -v dnf &> /dev/null; then
-        # RHEL/Alma/Rocky/OpenCloudOS
+        # RHEL/Alma/Rocky/OpenCloudOS/CentOS
         # 基础镜像可能缺失: sudo, openssl, jq, bc, procps-ng, ssh
         log_info "使用 dnf 检查扩展工具..."
-        
+
         # 检查并添加缺失的包
         ! command -v curl &> /dev/null && PACKAGES="$PACKAGES curl"
         ! command -v tar &> /dev/null && PACKAGES="$PACKAGES tar"
