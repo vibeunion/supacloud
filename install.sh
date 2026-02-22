@@ -623,6 +623,10 @@ configure_podman_mirrors() {
     cat > /etc/containers/registries.conf << EOF
 unqualified-search-registries = ["docker.io"]
 
+[[registry]]
+prefix = "docker.io"
+location = "docker.io"
+
 [[registry.mirror]]
 location = "docker.m.ixdev.cn"
 insecure = true
