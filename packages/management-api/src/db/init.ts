@@ -74,6 +74,25 @@ async function initDatabase() {
       CREATE INDEX IF NOT EXISTS idx_projects_status ON projects(status)
     `;
 
+    // 创建 project_tasks 表
+    await sql`
+      CREATE TABLE IF NOT EXISTS project_tasks (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        project_ref VARCHAR(20) REFERENCES projects(ref) ON DELETE CASCADE,
+        task_type VARCHAR(50) NOT NULL,
+        status VARCHAR(20) DEFAULT 'pending',
+        payload JSONB DEFAULT '{}',
+        error TEXT,
+        retries INTEGER DEFAULT 0,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `;
+
+    await sql`
+      CREATE INDEX IF NOT EXISTS idx_project_tasks_status ON project_tasks(status)
+    `;
+
     console.log("Database initialized successfully!");
   } catch (error) {
     console.error("Failed to initialize database:", error);
