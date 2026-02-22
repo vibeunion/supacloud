@@ -160,7 +160,7 @@ jobs:
             -e INTERNAL_IP=10.0.0.1 \
             -e PIGSTY_VERSION=v4.1.0 \
             -e ENABLE_ANALYTICS=true \
-            -e LOGFLARE_ERL_FLAGS='+P 16384 +Q 2048 +S 1:1 +hms 32 +L' \
+            -e LOGFLARE_ERL_FLAGS='+P 32768 +Q 4096 +S 2:2 +hms 64 +hmbs 64 +e 128 +L' \
             ${{ matrix.distro }} \
             /bin/bash -c '
               cd /workspace
