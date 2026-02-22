@@ -431,12 +431,41 @@ export class ProjectService {
 
   // --- 自定义域名 ---
 
+  async getCustomDomain(ref: string): Promise<{ custom_hostname: string, status: string } | null> {
+    const project = await projectRepository.findByRef(ref);
+    if (!project) return null;
+
+    const domain = project.config?.custom_domain as string | undefined;
+    if (domain) {
+      return { custom_hostname: domain, status: "active" };
+    }
+    return { custom_hostname: "", status: "not_configured" };
+  }
+
   async addCustomDomain(ref: string, domain: string): Promise<boolean> {
     const project = await projectRepository.findByRef(ref);
     if (!project) return false;
 
     const result = await shellService.execute("router_manager.sh", ["add-custom-domain", ref, domain]);
     if (result.success) {
+      await projectRepository.updateConfig(ref, { ...project.config, custom_domain: domain });
+      await routerService.reload();
+    }
+    return result.success;
+  }
+
+  async deleteCustomDomain(ref: string): Promise<boolean> {
+    const project = await projectRepository.findByRef(ref);
+    if (!project) return false;
+
+    const domain = project.config?.custom_domain as string | undefined;
+    if (!domain) return true; // 未配置过视为删除成功
+
+    const result = await shellService.execute("router_manager.sh", ["remove-custom-domain", ref, domain]);
+    if (result.success) {
+      const newConfig = { ...project.config };
+      delete newConfig.custom_domain;
+      await projectRepository.updateConfig(ref, newConfig);
       await routerService.reload();
     }
     return result.success;

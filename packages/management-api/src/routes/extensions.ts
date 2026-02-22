@@ -1,17 +1,15 @@
+import { Elysia } from "elysia";
 import { ExtensionService } from '../services/extension.service';
 
-export const extensionRoutes = (app: any) =>
-    app.group('/extensions', (app: any) =>
-        app
-            .get('/:project_ref', async ({ params }: any) => {
-                return await ExtensionService.listExtensions(params.project_ref);
-            })
-            .post('/:project_ref/enable', async ({ params, body }: any) => {
-                const { extension } = body as { extension: string };
-                return await ExtensionService.enableExtension(params.project_ref, extension);
-            })
-            .post('/:project_ref/disable', async ({ params, body }: any) => {
-                const { extension } = body as { extension: string };
-                return await ExtensionService.disableExtension(params.project_ref, extension);
-            })
-    );
+export const extensionRoutes = new Elysia({ prefix: "/v1/projects/:ref/extensions" })
+    .get('/', async ({ params }: any) => {
+        return await ExtensionService.listExtensions(params.ref);
+    })
+    .post('/enable', async ({ params, body }: any) => {
+        const extension = body.extension;
+        return await ExtensionService.enableExtension(params.ref, extension);
+    })
+    .post('/disable', async ({ params, body }: any) => {
+        const extension = body.extension;
+        return await ExtensionService.disableExtension(params.ref, extension);
+    });
