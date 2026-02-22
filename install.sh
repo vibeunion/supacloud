@@ -1528,7 +1528,7 @@ install_pigsty() {
                 # 在命令行动理中注入容器特殊变量，避免修改 pigsty.yml 产生重复的 vars 键并防止 /etc/hosts 冲突
                 local PYTHON_PATH
                 PYTHON_PATH=$(command -v python3 2>/dev/null || echo "/usr/bin/python3")
-                EXTRA_ARGS="$EXTRA_ARGS -e ansible_python_interpreter=$PYTHON_PATH -e repo_enabled=false -e node_write_etc_hosts=false -e node_repo_modules=infra"
+                EXTRA_ARGS="$EXTRA_ARGS -e ansible_python_interpreter=$PYTHON_PATH -e repo_enabled=false -e node_write_etc_hosts=false -e node_dns_method=none -e node_repo_modules=infra"
                 log_info "以容器模式调用 Ansible: 附加参数 $EXTRA_ARGS"
             fi
             ansible-playbook "$PIGSTY_ENTRYPOINT" $EXTRA_ARGS
