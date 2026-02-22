@@ -14,7 +14,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        distro: ["almalinux:9", "rockylinux:9"]
+        distro: ["quay.io/centos/centos:stream8", "quay.io/centos/centos:stream9"]
 
     steps:
       - name: Checkout code

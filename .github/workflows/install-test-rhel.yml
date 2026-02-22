@@ -62,8 +62,8 @@ jobs:
       fail-fast: false
       matrix:
         distro:
-          - "almalinux:9"
-          - "rockylinux:9"
+          - "quay.io/centos/centos:stream8"
+          - "quay.io/centos/centos:stream9"
           - "ubuntu:22.04"
           - "ubuntu:24.04"
           - "debian:12"
