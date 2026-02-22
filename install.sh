@@ -394,6 +394,17 @@ install_base_dependencies() {
             dnf install -y epel-release
         fi
         
+        # 对于 RHEL/CentOS 8 启用 PowerTools，对于 9 启用 CRB，这是安装很多 EPEL 依赖包如 libmemcached 所必需的
+        log_info "检查是否需要启用 CRB/PowerTools 仓库..."
+        dnf install -y dnf-plugins-core 2>/dev/null || true
+        if grep -qEi "release 8|Stream 8|VERSION_ID=\"8" /etc/os-release /etc/redhat-release /etc/centos-release 2>/dev/null; then
+            log_info "检测到 EL8，启用 powertools 仓库..."
+            dnf config-manager --set-enabled powertools 2>/dev/null || dnf config-manager --set-enabled PowerTools 2>/dev/null || true
+        elif grep -qEi "release 9|Stream 9|VERSION_ID=\"9" /etc/os-release /etc/redhat-release /etc/centos-release 2>/dev/null; then
+            log_info "检测到 EL9，启用 crb 仓库..."
+            dnf config-manager --set-enabled crb 2>/dev/null || true
+        fi
+        
     elif command -v apt-get &> /dev/null; then
         # Debian/Ubuntu
         log_info "使用 apt 检查扩展工具..."
