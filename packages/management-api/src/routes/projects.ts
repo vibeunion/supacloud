@@ -363,6 +363,24 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     }
   )
 
+  // 获取自定义域名
+  .get(
+    "/:ref/custom-hostname",
+    async ({ params, set }) => {
+      const domainInfo = await projectService.getCustomDomain(params.ref);
+      if (!domainInfo) {
+        set.status = 404;
+        return { error: "Project not found" };
+      }
+      return domainInfo;
+    },
+    {
+      params: t.Object({
+        ref: t.String(),
+      }),
+    }
+  )
+
   // 添加自定义域名
   .post(
     "/:ref/custom-hostname",
@@ -384,6 +402,24 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     }
   )
 
+  // 删除自定义域名
+  .delete(
+    "/:ref/custom-hostname",
+    async ({ params, set }) => {
+      const success = await projectService.deleteCustomDomain(params.ref);
+      if (!success) {
+        set.status = 500;
+        return { error: "Failed to delete custom hostname" };
+      }
+      return { success: true };
+    },
+    {
+      params: t.Object({
+        ref: t.String(),
+      }),
+    }
+  )
+
   // 获取 Auth 配置
   .get(
     "/:ref/config/auth",
@@ -393,7 +429,6 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
         set.status = 404;
         return { error: "Project not found" };
       }
-      // 这里的逻辑可以根据实际存储结构进一步细化映射
       return settings.auth || {};
     },
     {
@@ -403,7 +438,7 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     }
   )
 
-  // 修改 Auth 配置
+  // 修改 Auth 配置（支持第三方 Providers 深拷贝覆盖）
   .patch(
     "/:ref/config/auth",
     async ({ params, body, set }) => {
@@ -412,11 +447,15 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
         set.status = 404;
         return { error: "Project not found" };
       }
+
+      const currentAuth = (settings.auth as any) || {};
+      const newAuth = typeof body === "object" ? body : {};
+
       const updated = await projectService.updateProjectSettings(params.ref, {
         ...settings,
         auth: {
-          ...(settings.auth as any || {}),
-          ...body,
+          ...currentAuth,
+          ...newAuth,
         },
       });
       return updated?.auth || {};
