@@ -628,15 +628,19 @@ prefix = "docker.io"
 location = "docker.io"
 
 [[registry.mirror]]
-location = "docker.m.ixdev.cn"
-insecure = true
-
-[[registry.mirror]]
 location = "docker.1panel.live"
 insecure = true
 
 [[registry.mirror]]
-location = "hub-mirror.c.163.com"
+location = "hub.rat.dev"
+insecure = true
+
+[[registry.mirror]]
+location = "docker.xuanyuan.me"
+insecure = true
+
+[[registry.mirror]]
+location = "dockerproxy.net"
 insecure = true
 EOF
 
@@ -1775,6 +1779,15 @@ configure_analytics() {
         
         # 启用 Logflare 容器
         sed -i "s|ENABLE_ANALYTICS=.*|ENABLE_ANALYTICS=true|g" "$SUPABASE_ENV" 2>/dev/null || echo "ENABLE_ANALYTICS=true" >> "$SUPABASE_ENV"
+        
+        # 配置 BEAM VM 内存优化参数 (降低 Logflare 内存占用)
+        # 默认: +P 32768 +Q 4096 +S 2:2 +hms 64 +hmbs 64 +e 128 +L
+        # 预计内存占用: 400-600MB (默认 2GB+)
+        if [[ -n "${LOGFLARE_ERL_FLAGS:-}" ]]; then
+            log_info "配置 Logflare BEAM VM 内存优化参数..."
+            sed -i "s|ERL_AFLAGS=.*|ERL_AFLAGS=${LOGFLARE_ERL_FLAGS}|g" "$SUPABASE_ENV" 2>/dev/null || echo "ERL_AFLAGS=${LOGFLARE_ERL_FLAGS}" >> "$SUPABASE_ENV"
+            log_info "  ERL_AFLAGS: ${LOGFLARE_ERL_FLAGS}"
+        fi
         
         # 配置后端
         if [[ "${ANALYTICS_BACKEND:-postgres}" == "postgres" ]]; then
