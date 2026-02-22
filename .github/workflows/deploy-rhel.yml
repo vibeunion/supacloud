@@ -34,7 +34,7 @@ jobs:
             --name rhel-node -d \
             -v ${{ github.workspace }}:/workspace \
             ${{ matrix.distro }} \
-            /usr/sbin/init
+            /bin/bash -c "if [ ! -f /usr/sbin/init ]; then dnf install -y systemd; fi; exec /usr/sbin/init"
           
           # 等待 systemd 完全启动
           echo "等待 systemd 初始化..."
