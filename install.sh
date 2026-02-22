@@ -309,10 +309,10 @@ setup_local_ssh() {
         ssh-keygen -t ecdsa -f /etc/ssh/ssh_host_ecdsa_key -N "" -q 2>/dev/null || true
     fi
     
-    # 覆盖 sshd 配置：允许 root 登录、禁用 PAM、宽松模式
+    # 覆盖 sshd 配置：允许 root 登录、使用 PAM、宽松模式
     # RHEL 9 默认在 sshd_config 顶部 Include /etc/ssh/sshd_config.d/*.conf，00 前缀确保最高优先级
     cat > /etc/ssh/sshd_config.d/00-supacloud-test.conf << 'EOF'
-UsePAM no
+UsePAM yes
 PermitRootLogin yes
 StrictModes no
 PubkeyAuthentication yes
@@ -430,6 +430,14 @@ install_base_dependencies() {
                 log_info "容器环境：调整 sudo PAM 配置以避免 Authentication service cannot retrieve info 错误..."
                 sed -i 's/^account.*include.*system-auth/account  sufficient pam_permit.so/' /etc/pam.d/sudo 2>/dev/null || true
                 sed -i 's/^session.*include.*system-auth/session  sufficient pam_permit.so/' /etc/pam.d/sudo 2>/dev/null || true
+            fi
+            
+            if [[ -f /etc/pam.d/sshd ]]; then
+                log_info "容器环境：调整 sshd PAM 配置以绕过严格校验..."
+                sed -i 's/^account.*include.*password-auth/account  sufficient pam_permit.so/' /etc/pam.d/sshd 2>/dev/null || true
+                sed -i 's/^session.*include.*password-auth/session  sufficient pam_permit.so/' /etc/pam.d/sshd 2>/dev/null || true
+                sed -i 's/^account.*include.*system-auth/account  sufficient pam_permit.so/' /etc/pam.d/sshd 2>/dev/null || true
+                sed -i 's/^session.*include.*system-auth/session  sufficient pam_permit.so/' /etc/pam.d/sshd 2>/dev/null || true
             fi
         fi
     fi
