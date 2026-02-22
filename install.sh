@@ -2226,5 +2226,7 @@ main() {
     show_completion
 }
 
-# 运行主函数
-main "$@"
+# 如果是直接运行脚本，则执行主函数；如果是被 source 则只加载函数
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    main "$@"
+fi
