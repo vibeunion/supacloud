@@ -620,12 +620,19 @@ configure_podman_mirrors() {
     
     mkdir -p /etc/containers
     
+    # 基础配置，只使用官方源
     cat > /etc/containers/registries.conf << EOF
 unqualified-search-registries = ["docker.io"]
 
 [[registry]]
 prefix = "docker.io"
 location = "docker.io"
+EOF
+
+    # 仅当明确启用中国区代理时，才追加极不稳定的第三方加速器
+    if [[ "${USE_CHINA_MIRROR:-false}" == "true" ]]; then
+        log_info "检测到 USE_CHINA_MIRROR=true，注入第三方加速代理..."
+        cat >> /etc/containers/registries.conf << EOF
 
 [[registry.mirror]]
 location = "docker.1panel.live"
@@ -643,6 +650,9 @@ insecure = true
 location = "dockerproxy.net"
 insecure = true
 EOF
+    else
+        log_info "跳过中国区镜像代理配置 (防止因反代封锁导致拉取失败)"
+    fi
 
     log_info "Podman 镜像加速配置完成"
 }
