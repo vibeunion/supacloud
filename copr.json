@@ -1,0 +1,222 @@
+
+<!doctype html>
+<html>
+<head>
+  <title>Copr Build System – Page Not Found</title>
+  <link rel="stylesheet" href="/system_static/jquery-ui/jquery-ui.min.css" />
+  <link rel="shortcut icon" href="/static/favicon.ico" type="image/vnd.microsoft.icon">
+  <link rel="shortcut icon" href="/static/favicon.ico" type="image/x-icon">
+  <link href="/system_static/patternfly/css/patternfly.min.css" rel="stylesheet" media="screen, print">
+  <link rel="stylesheet" href="/system_static/patternfly/css/patternfly-additions.min.css">
+  <link href="/static/css/custom-styles.css" rel="stylesheet" media="screen, print">
+  <script src="/system_static/jquery/3/jquery.min.js"></script>
+  <script src="/system_static/jquery-ui/jquery-ui.min.js"></script>
+  <script src="/system_static/bootstrap_scss/js/bootstrap.min.js"></script>
+  <script src="/system_static/datatables/js/jquery.dataTables.min.js"></script>
+  <script src="/system_static/patternfly/js/patternfly.min.js"></script>
+
+  <script src="/static/copr.js"></script>
+  <link rel=stylesheet type=text/css href="/static/copr.css">
+  <link rel=stylesheet type=text/css href="/static/css/style-overwrite.css">
+  <link rel=stylesheet type=text/css href="/static/css/copr-flavor.css">
+</head>
+
+<body>
+  <!-- BANNER -->
+
+  <!-- MAIN MENU -->
+  <nav class="" id="main-bar">
+    <div class="container">
+      <div class="row">
+        <div class="col-md-8 col-sm-7 col-xs-6">
+          <a href="/coprs/">
+            <img id="logo" src="/static/copr_logo.png" alt="Copr Build System">
+          </a>
+        </div>
+        <div class="col-md-4 col-sm-5 col-xs-6">
+          <div id="login-menu" class="text-right">
+
+          <a href="/oidc_login/">OIDC login</a>
+|          <a href="/api_3/gssapi_login/web-ui">gssapi-login</a>
+|          <a href="https://accounts.fedoraproject.org">sign up</a>
+
+          </div>
+          <form role="search" method="get" id="1"
+      action="/coprs/fulltext/">
+  <div class="input-group  menu-search">
+    <input name="fulltext" type="text" class="form-control"
+           placeholder="Search projects by name, os or arch"
+           value="">
+
+    <div class="input-group-btn">
+      <button type="submit" class="btn btn-default">
+        <span class="glyphicon glyphicon-search"></span>
+      </button>
+
+      <button type="button" class="btn btn-default dropdown-toggle"
+              data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+        <span class="caret"></span>
+        <span class="sr-only">Toggle Dropdown</span>
+      </button>
+
+      <ul class="dropdown-menu">
+        <li>
+          <a id="search-username" onClick="search_by_attribute('ownername', 1)" href="#">
+            Search by user name
+          </a>
+        </li>
+
+        <li>
+          <a id="search-groupname" onClick="search_by_attribute('ownername', 1)" href="#">
+            Search by group name
+          </a>
+        </li>
+        <li role="separator" class="divider"></li>
+
+        <li>
+          <a id="search-projectname" onClick="search_by_attribute('projectname', 1)" href="#">
+            Search by project name
+          </a>
+        </li>
+
+        <li>
+          <a id="search-packagename" onClick="search_by_attribute('packagename', 1)" href="#">
+            Search by package name
+          </a>
+        </li>
+        <li role="separator" class="divider"></li>
+
+        <li>
+          <a href="https://docs.pagure.org/copr.copr/user_documentation.html#advanced-searching">
+            Searching documentation
+          </a>
+        </li>
+      </ul>
+    </div>
+  </div>
+</form>
+
+        </div>
+      </div>
+    </div>
+  </nav>
+  <div class="breadcrumb-panel">
+    <div class="container">
+    </div>
+  </div>
+
+  <!-- CONTENT -->
+  <div id=content>
+    <div class="container">
+
+      <!-- Flash messages -->
+
+
+
+      <!-- the actual content -->
+<h1> Error 404: Page Not Found</h1>
+  The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again. 
+    </div>
+    <footer class="footer">
+      <div>
+        <div class="container text-muted">
+          <div class="">
+            <div class="row">
+             <div class="col-sm-2">
+                <dl>
+<dt><h3>Contact us</h3></dt>
+<dd>
+  <ul>
+    <li> <a href="https://matrix.to/#/#buildsys:fedoraproject.org">Fedora Build System on Matrix</a> </li>
+  </ul>
+</dd>                </dl>
+              </div>
+              <div class="col-sm-2">
+                <dl>
+<dt><h3>Copr Project</h3></dt>
+<dd>
+  <ul>
+    <li><a href="https://github.com/fedora-copr/copr">Project Homepage</a></li>
+    <li><a href="https://docs.pagure.org/copr.copr/user_documentation.html">User Documentation</a></li>
+    <li><a href="/api_3/docs/">API Documentation</a></li>
+    <li><a href="https://github.com/fedora-copr/copr/issues/new">Report a Bug</a></li>
+    <li><a href="https://github.com/fedora-copr/copr/security">Report a security issue</a></li>
+    <li><a href="https://github.com/fedora-copr/copr/issues">Known Issues</a></li>
+    <li><a href="https://docs.pagure.org/copr.copr/user_documentation.html#faq">FAQ</a></li>
+  </ul>
+</dd>                </dl>
+              </div>
+              <div class="col-sm-2">
+                <dl>
+                  <dt><h3>Site Navigation</h3></dt>
+                  <dd>
+                    <ul>
+                      <li> <a href="/coprs/">Home</a> </li>
+                      <li> <a href="/status/importing/">Task Queue</a> </li>
+                      <li> <a href="/api/">API</a> </li>
+                      <li> <a href="/user/info">GDPR</a> </li>
+                      <li> <a href="/rss/">RSS</a> </li>
+                      <li> <a href="/db_dumps/">Database Dump</a> </li>
+                      <li><a href="https://download.copr.fedorainfracloud.org/stats/index.html">Storage statistics</a> </li>
+                    </ul>
+                  </dd>
+                </dl>
+              </div>
+              <div class="col-sm-2">
+                <dl>
+                  <dt><h3>Powered by</h3></dt>
+                  <dd>
+                    <ul>
+                      <li><a href="https://www.python.org">Python</a></li>
+                      <li><a href="https://www.patternfly.org">PatternFly</a></li>
+                      <li><a href="https://github.com/release-engineering/dist-git">Dist Git</a></li>
+                      <li><a href="https://github.com/praiskup/resalloc">Resalloc</a></li>
+                    </ul>
+                  </dd>
+                </dl>
+              </div>
+              <div class="col-sm-2">
+                <dl>
+<dt><h3>Sponsored by</h3></dt>
+<dd>
+    <ul>
+        <li><a href="https://www.redhat.com">Red Hat</a></li>
+        <li><a href="https://www.fedoraproject.org">Fedora</a></li>
+        <li><a href="https://aws.amazon.com/">Amazon Web Services</a></li>
+        <li><a href="https://www.ibm.com/us-en/">IBM</a></li>
+        <li><a href="https://osuosl.org/">Oregon State University</a></li>
+    </ul>
+</dd>                </dl>
+              </div>
+            </div>
+            <!-- <small class="text-muted">
+              Build 2.6.hotfix.4-1.fc43
+              Build 1.125-1.git.16.4767b3b.fc25
+            </small> -->
+          </div>
+        </div>
+      </div>
+    </footer>
+  </div>
+
+  <!-- FEDORA MENU -->
+  <script src="https://apps.fedoraproject.org/fedmenu//js/fedora-libravatar.js"></script>
+  <script src="https://apps.fedoraproject.org/fedmenu//js/fedmenu.js"></script>
+  <script>
+    fedmenu({
+        'url': 'https://apps.fedoraproject.org/js/data.js',
+        'mimeType': 'application/javascript',
+        'position': 'bottom-right',
+    });
+  </script>
+  <!-- Last post from our blog -->
+  <script src="/static/js/blog.js"></script>
+  <script>
+    $(document).ready(function(){
+      show_last_articles("https://fedora-copr.github.io/feed.xml", 2)
+      $(".show-me-javascript").removeClass("hidden");
+    });
+  </script>
+
+</body>
+</html>
