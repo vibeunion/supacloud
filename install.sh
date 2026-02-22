@@ -1538,7 +1538,7 @@ install_pigsty() {
                 PYTHON_PATH=$(command -v python3 2>/dev/null || echo "/usr/bin/python3")
                 # node_repo_remove=false 防止 Pigsty 删掉操作系统的 epel/appstream 源导致装包失败
                 # node_tune=none 和 node_kernel_modules=[] 防止容器内修改内核/加载模块 (如 ip_vs) 报错
-                EXTRA_ARGS="$EXTRA_ARGS -e ansible_python_interpreter=$PYTHON_PATH -e repo_enabled=false -e node_write_etc_hosts=false -e node_dns_method=none -e node_repo_remove=false -e node_tune=none -e node_kernel_modules=[] -e node_repo_modules=infra"
+                EXTRA_ARGS="$EXTRA_ARGS -e ansible_python_interpreter=$PYTHON_PATH -e repo_enabled=false -e node_write_etc_hosts=false -e node_dns_method=none -e node_repo_remove=false -e node_tune=none -e node_kernel_modules=[]"
                 log_info "以容器模式调用 Ansible: 附加参数 $EXTRA_ARGS"
             fi
             ansible-playbook "$PIGSTY_ENTRYPOINT" $EXTRA_ARGS
