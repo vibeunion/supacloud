@@ -1522,10 +1522,14 @@ install_pigsty() {
 
     if [[ -n "$PIGSTY_ENTRYPOINT" ]]; then
         if command -v ansible-playbook &> /dev/null; then
-            # 在容器/CI环境中添加详细日志以便调试 MODULE FAILURE
             local EXTRA_ARGS=""
             if [[ -f /.dockerenv ]] || grep -q "docker\|lxc\|containerd" /proc/1/cgroup 2>/dev/null; then
                 EXTRA_ARGS="-vvv"
+                # 在命令行动理中注入容器特殊变量，避免修改 pigsty.yml 产生重复的 vars 键并防止 /etc/hosts 冲突
+                local PYTHON_PATH
+                PYTHON_PATH=$(command -v python3 2>/dev/null || echo "/usr/bin/python3")
+                EXTRA_ARGS="$EXTRA_ARGS -e ansible_python_interpreter=$PYTHON_PATH -e repo_enabled=false -e node_write_etc_hosts=false -e node_repo_modules=infra"
+                log_info "以容器模式调用 Ansible: 附加参数 $EXTRA_ARGS"
             fi
             ansible-playbook "$PIGSTY_ENTRYPOINT" $EXTRA_ARGS
         elif [[ -x "./$PIGSTY_ENTRYPOINT" ]]; then
@@ -1545,7 +1549,7 @@ install_pigsty() {
     if [[ -x "./docker.yml" ]]; then
         ./docker.yml || true
     elif [[ -f "docker.yml" ]] && command -v ansible-playbook &> /dev/null; then
-        ansible-playbook docker.yml || true
+        ansible-playbook docker.yml $EXTRA_ARGS || true
     else
         log_warn "未找到 docker.yml，跳过 Docker 配置"
     fi
@@ -1558,7 +1562,7 @@ install_pigsty() {
             manual_start_supabase
         }
     elif [[ -f "app.yml" ]] && command -v ansible-playbook &> /dev/null; then
-        ansible-playbook app.yml || {
+        ansible-playbook app.yml $EXTRA_ARGS || {
             log_warn "app.yml 失败，尝试手动启动..."
             manual_start_supabase
         }
@@ -1590,12 +1594,7 @@ update_pigsty_config() {
         fi
     fi
     
-    # 显式设置 Python 解释器（避免容器中 Ansible 自动发现失败）
-    if ! grep -q "ansible_python_interpreter" "$PIGSTY_YML"; then
-        local PYTHON_PATH
-        PYTHON_PATH=$(command -v python3 2>/dev/null || echo "/usr/bin/python3")
-        sed -i "s|^all:|all:\n  vars:\n    ansible_python_interpreter: ${PYTHON_PATH}|" "$PIGSTY_YML" 2>/dev/null || true
-    fi
+
     
     # 更新域名配置
     # 更新域名配置
@@ -1664,13 +1663,7 @@ update_pigsty_config() {
     if [[ "${S3_STORAGE_TYPE:-minio}" != "minio" ]]; then
         configure_s3_in_pigsty
     fi
-    # 容器/CI 环境检测
-    # 此时禁用 Pigsty 本地 REPO 构建（容器中没有离线包缓存）及 /etc/hosts 修改
-    if [[ -f /.dockerenv ]] || grep -q "docker\|lxc\|containerd" /proc/1/cgroup 2>/dev/null; then
-        log_info "检测到容器/CI 环境，禁用 Pigsty 本地 REPO 构建和 /etc/hosts 覆盖..."
-        # 在 all: 下的 vars: 块中插入 repo_enabled: false 和 node_write_etc_hosts: false
-        sed -i 's/^    nginx_enabled: true/    repo_enabled: false\n    node_write_etc_hosts: false\n    node_repo_modules: infra\n    nginx_enabled: true/' "$PIGSTY_YML" 2>/dev/null || true
-    fi
+    # 容器/CI 环境检测限制变量现已移至 ansible-playbook 命令行 (EXTRA_ARGS)
     
     log_info "配置更新完成"
 }
