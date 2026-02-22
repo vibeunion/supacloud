@@ -417,6 +417,22 @@ install_base_dependencies() {
             log_info "基础依赖检查通过"
         fi
     fi
+
+    # 确保 sudo 对于 root 免密且修复容器中常见的 PAM 错误
+    if command -v sudo &> /dev/null; then
+        mkdir -p /etc/sudoers.d
+        echo "root ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/root
+        chmod 440 /etc/sudoers.d/root
+        
+        # 修复 RHEL/Alma 容器中常见的 PAM account management error
+        if [[ -f /.dockerenv ]] || grep -q "docker\|lxc\|containerd" /proc/1/cgroup 2>/dev/null; then
+            if [[ -f /etc/pam.d/sudo ]]; then
+                log_info "容器环境：调整 sudo PAM 配置以避免 Authentication service cannot retrieve info 错误..."
+                sed -i 's/^account.*include.*system-auth/account  sufficient pam_permit.so/' /etc/pam.d/sudo 2>/dev/null || true
+                sed -i 's/^session.*include.*system-auth/session  sufficient pam_permit.so/' /etc/pam.d/sudo 2>/dev/null || true
+            fi
+        fi
+    fi
 }
 
 # ========== 检查并配置 Swap ==========
