@@ -6,7 +6,7 @@
 #   1. 编辑 config.env 配置文件
 #   2. 运行: sudo bash install.sh
 #
-# 支持系统: Rocky Linux 8/9, AlmaLinux 8/9, Ubuntu 22.04/24.04, Debian 12
+# 支持系统: CentOS 8/9, Ubuntu 22.04/24.04, Debian 12
 # ============================================================
 
 set -e
