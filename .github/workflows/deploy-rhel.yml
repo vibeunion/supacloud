@@ -57,6 +57,7 @@ jobs:
           
           # 注入 CI 配置以跳过交互
           docker exec rhel-node /bin/bash -c "cat > /workspace/config.env <<INNEREOF
+          ENABLE_ANALYTICS=false
           INTERNAL_IP=127.0.0.1
           SUPABASE_PUBLIC_DOMAIN=api.ci-test.local
           SUPABASE_STUDIO_DOMAIN=studio.ci-test.local
