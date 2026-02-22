@@ -159,7 +159,8 @@ jobs:
             -v ${{ github.workspace }}:/workspace \
             -e INTERNAL_IP=10.0.0.1 \
             -e PIGSTY_VERSION=v4.1.0 \
-            -e ENABLE_ANALYTICS=false \
+            -e ENABLE_ANALYTICS=true \
+            -e LOGFLARE_ERL_FLAGS='+P 16384 +Q 2048 +S 1:1 +hms 32 +L' \
             ${{ matrix.distro }} \
             /bin/bash -c '
               cd /workspace
