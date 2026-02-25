@@ -50,10 +50,12 @@ export type TaskStatus = "pending" | "processing" | "completed" | "failed";
 export type TaskType =
   | "provision_db"
   | "provision_s3"
+  | "provision_runtime"
   | "provision_router"
   | "provision_gateway"
   | "cleanup_db"
   | "cleanup_s3"
+  | "cleanup_runtime"
   | "cleanup_router";
 
 export interface ProjectTask {
