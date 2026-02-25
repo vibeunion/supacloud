@@ -245,7 +245,6 @@ check_os_compatibility() {
             opencloudos|tencentos)
                 log_warn "检测到 $PRETTY_NAME"
                 log_warn "将使用兼容模式安装，避免 Pigsty 使用 Rocky Linux 源"
-                export USE_SYSTEM_NGINX=true
                 export SKIP_EPEL=true
                 export USE_OPENCLOUDOS_COMPAT=true
                 ;;
