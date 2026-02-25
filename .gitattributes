@@ -1,0 +1,30 @@
+# SupaCloud .gitattributes
+# 强制 shell 脚本和 TypeScript 文件使用 LF 行尾
+# 防止 Windows 开发环境将 CRLF 提交到仓库，导致 Linux 执行时出现 /bin/bash^M 错误
+
+# Shell 脚本
+*.sh            text eol=lf
+supacloud       text eol=lf
+*.bash          text eol=lf
+
+# Node/TypeScript
+*.ts            text eol=lf
+*.js            text eol=lf
+*.json          text eol=lf
+
+# YAML / Config
+*.yml           text eol=lf
+*.yaml          text eol=lf
+*.env           text eol=lf
+*.env.*         text eol=lf
+config.env      text eol=lf
+
+# Markdown
+*.md            text eol=lf
+
+# 二进制文件不转换
+*.png           binary
+*.jpg           binary
+*.gif           binary
+*.woff          binary
+*.woff2         binary
