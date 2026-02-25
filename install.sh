@@ -233,6 +233,33 @@ EOF
     log_info "JWT 密钥已保存到: /etc/supabase/jwt-keys.env"
 }
 
+# ========== 检查操作系统兼容性 ==========
+check_os_compatibility() {
+    log_step "检查操作系统兼容性..."
+    
+    if [[ -f /etc/os-release ]]; then
+        source /etc/os-release
+        log_info "操作系统: $PRETTY_NAME"
+        
+        case "$ID" in
+            opencloudos|tencentos)
+                log_warn "检测到 $PRETTY_NAME"
+                log_warn "将使用兼容模式安装，避免升级核心系统库"
+                export USE_SYSTEM_NGINX=true
+                export SKIP_EPEL=true
+                ;;
+        esac
+    fi
+    
+    # 检查 OpenSSL 版本，防止意外升级
+    OPENSSL_VER=$(openssl version 2>/dev/null | awk '{print $2}')
+    if [[ "$OPENSSL_VER" =~ ^3\.[5-9] ]]; then
+        log_error "检测到非标准 OpenSSL 版本: $OPENSSL_VER"
+        log_error "这可能导致 sshd 等关键服务无法启动"
+        exit 1
+    fi
+}
+
 # ========== 检查系统要求 ==========
 check_system() {
     log_step "检查系统要求..."
@@ -1218,6 +1245,10 @@ configure_external_s3() {
 install_nginx_mainline() {
     log_step "正在安装 Nginx Mainline (带 ACME 模块)..."
 
+    # ⚠️ 新增：检查并锁定 OpenSSL 版本
+    CURRENT_OPENSSL=$(rpm -q openssl-libs --qf '%{VERSION}' 2>/dev/null || echo "unknown")
+    log_info "当前 OpenSSL 版本: $CURRENT_OPENSSL"
+
     # 识别操作系统
     if [[ -f /etc/os-release ]]; then
         source /etc/os-release
@@ -1227,6 +1258,14 @@ install_nginx_mainline() {
     fi
 
     log_info "检测到系统: $DISTRO_ID $DISTRO_VERSION_ID"
+
+    # 如果是 OpenCloudOS，使用系统自带 nginx 而非 mainline
+    if [[ "${USE_SYSTEM_NGINX:-false}" == "true" ]]; then
+        log_warn "检测到兼容模式标识，使用系统自带 Nginx 以避免 OpenSSL 冲突"
+        dnf install -y nginx
+        systemctl enable --now nginx
+        return
+    fi
 
     case "$DISTRO_ID" in
         # RHEL 系列
@@ -2305,6 +2344,8 @@ main() {
     echo ""
     
     check_config
+    generate_jwt_keys
+    check_os_compatibility
     check_system
     install_base_dependencies  # 新增：确保 sudo, tar, ssh 等基础工具存在
     setup_local_ssh            # 新增：确保本机 SSH 免密 (Ansible 需要)
