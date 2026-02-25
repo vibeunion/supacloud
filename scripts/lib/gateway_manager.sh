@@ -123,56 +123,106 @@ enable_jwt() {
     fi
 }
 
-# ========== Per-Tenant Upstream（方案C：多租户动态路由） ==========
-# 为每个租户创建独立 Kong Service → Route，指向该租户的 PostgREST 端口
-# 请求通过 Nginx 设置的 X-Project-Ref header 进行匹配分发
+# ========== Per-Tenant Upstream（方案C+：多租户动态路由 - 声明式） ==========
+# 将租户配置追加到 Kong Declarative YAML 中并热重载
+rebuild_kong_config() {
+    local KONG_YML="/etc/supabase/volumes/api/kong.yml"
+    local KONG_BASE="${KONG_YML}.base"
+    local TENANT_DIR="/etc/supabase/kong_tenants"
+    
+    # 初始化 base 全局配置备份
+    if [ ! -f "$KONG_BASE" ]; then
+        if [ -f "$KONG_YML" ]; then
+            cp "$KONG_YML" "$KONG_BASE"
+        else
+            echo "WARNING: $KONG_YML not found, skip kong reload" >&2
+            return
+        fi
+    fi
+    
+    local temp_yml
+    temp_yml=$(mktemp)
+    
+    # 在 services: 后插入所有的租户服务配置段落
+    awk -v tenant_dir="$TENANT_DIR" '
+    /^services:/ {
+        print $0
+        system("if ls " tenant_dir "/*.yml >/dev/null 2>&1; then cat " tenant_dir "/*.yml; fi")
+        next
+    }
+    { print $0 }
+    ' "$KONG_BASE" > "$temp_yml"
+    
+    cat "$temp_yml" > "$KONG_YML"
+    rm -f "$temp_yml"
+    
+    # 热重载 Kong 节点
+    echo "Reloading Kong Gateway..."
+    if docker ps -q -f "name=supabase-kong" | grep -q .; then
+        docker exec supabase-kong kong reload
+    elif podman ps -q -f "name=supabase-kong" | grep -q .; then
+        podman exec supabase-kong kong reload
+    else
+        echo "WARNING: supabase-kong container not running"
+    fi
+}
+
 setup_upstream() {
-    local port="${3:-}"
-    if [ -z "$port" ]; then
-        echo "ERROR: Port is required for setup-upstream" >&2
+    local pgrst_port="${3:-}"
+    local gotrue_port="${4:-}"
+    
+    if [ -z "$pgrst_port" ] || [ -z "$gotrue_port" ]; then
+        echo "ERROR: pgrst_port and gotrue_port are required for setup-upstream" >&2
         exit 1
     fi
 
-    local service_name="svc-${PROJECT_REF}"
-    local route_name="route-${PROJECT_REF}"
+    mkdir -p /etc/supabase/kong_tenants
+    local tenant_yml="/etc/supabase/kong_tenants/${PROJECT_REF}.yml"
 
-    echo "Setting up Kong upstream for ${PROJECT_REF} → 127.0.0.1:${port}..."
+    echo "Setting up Kong declarative configuration for ${PROJECT_REF}..."
 
-    # 创建/更新 Service（指向该租户的 PostgREST 端口）
-    curl -s -X PUT "${KONG_ADMIN_URL}/services/${service_name}" \
-        -d "name=${service_name}" \
-        -d "url=http://127.0.0.1:${port}" \
-        -d "connect_timeout=5000" \
-        -d "read_timeout=60000" \
-        -d "write_timeout=60000" > /dev/null
+    # 生成声明式的 Kong 配置文件
+    cat > "$tenant_yml" <<EOF
+  - name: svc-pgrst-${PROJECT_REF}
+    url: http://127.0.0.1:${pgrst_port}
+    connect_timeout: 5000
+    read_timeout: 60000
+    write_timeout: 60000
+    routes:
+      - name: route-pgrst-${PROJECT_REF}
+        strip_path: false
+        preserve_host: true
+        paths:
+          - /rest/v1
+          - /graphql/v1
+        headers:
+          X-Project-Ref:
+            - ${PROJECT_REF}
+  - name: svc-gotrue-${PROJECT_REF}
+    url: http://127.0.0.1:${gotrue_port}
+    connect_timeout: 5000
+    read_timeout: 60000
+    write_timeout: 60000
+    routes:
+      - name: route-gotrue-${PROJECT_REF}
+        strip_path: false
+        preserve_host: true
+        paths:
+          - /auth/v1
+        headers:
+          X-Project-Ref:
+            - ${PROJECT_REF}
+EOF
 
-    # 创建/更新 Route（通过 X-Project-Ref header 匹配）
-    # 使用 PUT 确保幂等
-    curl -s -X PUT "${KONG_ADMIN_URL}/services/${service_name}/routes/${route_name}" \
-        -d "name=${route_name}" \
-        --data-urlencode "headers.X-Project-Ref=${PROJECT_REF}" \
-        -d "strip_path=false" \
-        -d "preserve_host=true" > /dev/null
-
-    echo "Kong upstream registered: ${service_name} → 127.0.0.1:${port}"
+    rebuild_kong_config
+    echo "Kong upstream registered for ${PROJECT_REF} (pgrst:${pgrst_port}, gotrue:${gotrue_port})"
 }
 
 # 移除租户的 Kong Service/Route
 remove_service() {
-    local service_name="svc-${PROJECT_REF}"
-    local route_name="route-${PROJECT_REF}"
-
     echo "Removing Kong service for ${PROJECT_REF}..."
-
-    # 先删除 Route（Route 依赖 Service）
-    curl -s -X DELETE "${KONG_ADMIN_URL}/routes/${route_name}" > /dev/null 2>&1 || true
-
-    # 再删除 Service
-    curl -s -X DELETE "${KONG_ADMIN_URL}/services/${service_name}" > /dev/null 2>&1 || true
-
-    # 删除 Consumer
-    curl -s -X DELETE "${KONG_ADMIN_URL}/consumers/${PROJECT_REF}" > /dev/null 2>&1 || true
-
+    rm -f "/etc/supabase/kong_tenants/${PROJECT_REF}.yml"
+    rebuild_kong_config
     echo "Kong service removed for ${PROJECT_REF}"
 }
 

@@ -11,9 +11,11 @@ PROJECT_REF="${2:-}"
 # 配置
 TENANT_CONFIG_DIR="${TENANT_CONFIG_DIR:-/etc/supabase/tenants}"
 POSTGREST_BIN="${POSTGREST_BIN:-/usr/local/bin/postgrest}"
+GOTRUE_BIN="${GOTRUE_BIN:-/usr/local/bin/gotrue}"
 PG_HOST="${PG_HOST:-localhost}"
 PG_PORT="${PG_PORT:-5432}"
-PORT_BASE="${PORT_BASE:-3100}"
+PGRST_PORT_BASE="${PGRST_PORT_BASE:-3100}"
+GOTRUE_PORT_BASE="${GOTRUE_PORT_BASE:-4100}"
 PORT_RANGE="${PORT_RANGE:-10000}"
 SUPACLOUD_META_DB="${SUPACLOUD_META_DB:-supacloud_meta}"
 
@@ -29,9 +31,21 @@ validate_params() {
 # ========== 端口分配（确定性 hash，避免冲突） ==========
 get_tenant_port() {
     local ref="$1"
+    local type="$2" # pgrst 或 gotrue
+    local base_port
+
+    if [ "$type" = "pgrst" ]; then
+        base_port=$PGRST_PORT_BASE
+    elif [ "$type" = "gotrue" ]; then
+        base_port=$GOTRUE_PORT_BASE
+    else
+        echo "ERROR: Unknown port type $type" >&2
+        exit 1
+    fi
+
     local hash
     hash=$(echo -n "$ref" | cksum | awk '{print $1}')
-    local port=$(( PORT_BASE + (hash % PORT_RANGE) ))
+    local port=$(( base_port + (hash % PORT_RANGE) ))
 
     # 冲突检测：如果端口被其他租户占用，线性探测
     local config_dir="$TENANT_CONFIG_DIR"
@@ -43,9 +57,14 @@ get_tenant_port() {
             for f in "$config_dir"/*.env; do
                 [ -f "$f" ] || continue
                 local existing_ref
-                existing_ref=$(basename "$f" .env)
+                # 支持 ref.env (pgrst) 和 ref_gotrue.env (gotrue)
+                existing_ref=$(basename "$f" | sed -e 's/\.env$//' -e 's/_gotrue$//')
                 [ "$existing_ref" = "$ref" ] && continue
-                if grep -q "PGRST_SERVER_PORT=${port}" "$f" 2>/dev/null; then
+                
+                local search_str="PGRST_SERVER_PORT=${port}"
+                [ "$type" = "gotrue" ] && search_str="GOTRUE_API_PORT=${port}"
+
+                if grep -q "$search_str" "$f" 2>/dev/null; then
                     conflict=true
                     break
                 fi
@@ -59,7 +78,7 @@ get_tenant_port() {
         try=$(( try + 1 ))
     done
 
-    echo "ERROR: Cannot find available port for ${ref}" >&2
+    echo "ERROR: Cannot find available port for ${ref} (${type})" >&2
     exit 1
 }
 
@@ -126,10 +145,42 @@ ensure_postgrest() {
     rm -rf "$tmp_dir"
 }
 
+# ========== 确保 GoTrue 二进制可用 ==========
+ensure_gotrue() {
+    if command -v gotrue &>/dev/null; then
+        GOTRUE_BIN=$(command -v gotrue)
+        return
+    fi
+
+    if [ -x "$GOTRUE_BIN" ]; then
+        return
+    fi
+
+    echo "GoTrue binary not found. Installing..."
+
+    # 从容器中提取（如果 Supabase 容器正在运行）
+    local container_id
+    container_id=$(docker ps -q -f "name=supabase-auth" 2>/dev/null || podman ps -q -f "name=supabase-auth" 2>/dev/null || true)
+    if [ -n "$container_id" ]; then
+        echo "Extracting GoTrue from running container..."
+        local tmp_bin="/tmp/gotrue-extract"
+        (docker cp "${container_id}:/usr/local/bin/gotrue" "$tmp_bin" 2>/dev/null || podman cp "${container_id}:/usr/local/bin/gotrue" "$tmp_bin" 2>/dev/null || true)
+        if [ -x "$tmp_bin" ]; then
+            mv "$tmp_bin" "$GOTRUE_BIN"
+            echo "GoTrue extracted successfully"
+            return
+        fi
+    fi
+    
+    echo "ERROR: Failed to extract GoTrue from container. Please ensure supabase-auth container is running, or download and place 'gotrue' binary at $GOTRUE_BIN manually." >&2
+    exit 1
+}
+
 # ========== 生成租户配置文件 ==========
 generate_tenant_config() {
     local ref="$1"
-    local port="$2"
+    local pgrst_port="$2"
+    local gotrue_port="$3"
 
     mkdir -p "$TENANT_CONFIG_DIR"
 
@@ -145,46 +196,58 @@ generate_tenant_config() {
         exit 1
     fi
 
-    # 生成 .env 文件（systemd EnvironmentFile）
+    # 1. 生成 PostgREST .env 和 .conf
     cat > "${TENANT_CONFIG_DIR}/${ref}.env" <<EOF
-# SupaCloud Tenant Runtime: ${ref}
-# Generated: $(date -u +"%Y-%m-%dT%H:%M:%SZ")
+# SupaCloud Tenant PostgREST Runtime: ${ref}
 PGRST_DB_URI=postgres://authenticator:${db_password}@${PG_HOST}:${PG_PORT}/${db_name}
 PGRST_DB_SCHEMAS=public,storage,graphql_public
 PGRST_DB_ANON_ROLE=anon
 PGRST_JWT_SECRET=${jwt_secret}
-PGRST_SERVER_PORT=${port}
+PGRST_SERVER_PORT=${pgrst_port}
 PGRST_DB_POOL=10
 PGRST_DB_POOL_ACQUISITION_TIMEOUT=10
 PGRST_LOG_LEVEL=warn
 EOF
     chmod 600 "${TENANT_CONFIG_DIR}/${ref}.env"
 
-    # 生成 PostgREST 配置文件
     cat > "${TENANT_CONFIG_DIR}/${ref}.conf" <<EOF
 # PostgREST config for tenant: ${ref}
 db-uri = "postgres://authenticator:${db_password}@${PG_HOST}:${PG_PORT}/${db_name}"
 db-schemas = "public, storage, graphql_public"
 db-anon-role = "anon"
 jwt-secret = "${jwt_secret}"
-server-port = ${port}
+server-port = ${pgrst_port}
 db-pool = 10
 db-pool-acquisition-timeout = 10
 log-level = "warn"
 EOF
     chmod 600 "${TENANT_CONFIG_DIR}/${ref}.conf"
 
-    echo "Config generated for ${ref} on port ${port}"
+    # 2. 生成 GoTrue .env
+    cat > "${TENANT_CONFIG_DIR}/${ref}_gotrue.env" <<EOF
+# SupaCloud Tenant GoTrue Runtime: ${ref}
+GOTRUE_API_HOST=127.0.0.1
+GOTRUE_API_PORT=${gotrue_port}
+GOTRUE_DB_DRIVER=postgres
+GOTRUE_DB_DATABASE_URL=postgres://supabase_auth_admin:${db_password}@${PG_HOST}:${PG_PORT}/${db_name}
+GOTRUE_SITE_URL=http://localhost:3000
+GOTRUE_JWT_SECRET=${jwt_secret}
+GOTRUE_JWT_EXP=3600
+GOTRUE_JWT_DEFAULT_GROUP_NAME=authenticated
+GOTRUE_LOG_LEVEL=info
+GOTRUE_SERVER_READ_TIMEOUT=20
+GOTRUE_SECURITY_UPDATE_PASSWORD_REQUIRE_REAUTHENTICATION=true
+EOF
+    chmod 600 "${TENANT_CONFIG_DIR}/${ref}_gotrue.env"
+
+    echo "Config generated for ${ref} (pgrst_port=${pgrst_port}, gotrue_port=${gotrue_port})"
 }
 
 # ========== 安装 systemd template unit ==========
 install_systemd_template() {
-    local unit_file="/etc/systemd/system/supacloud-pgrst@.service"
-    if [ -f "$unit_file" ]; then
-        return
-    fi
-
-    cat > "$unit_file" <<EOF
+    local pgrst_unit="/etc/systemd/system/supacloud-pgrst@.service"
+    if [ ! -f "$pgrst_unit" ]; then
+        cat > "$pgrst_unit" <<EOF
 [Unit]
 Description=SupaCloud PostgREST for tenant %i
 After=postgresql.service network.target
@@ -210,9 +273,40 @@ ReadOnlyPaths=/etc/supabase/tenants
 [Install]
 WantedBy=multi-user.target
 EOF
+    fi
+
+    local gotrue_unit="/etc/systemd/system/supacloud-gotrue@.service"
+    if [ ! -f "$gotrue_unit" ]; then
+        cat > "$gotrue_unit" <<EOF
+[Unit]
+Description=SupaCloud GoTrue for tenant %i
+After=postgresql.service network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=nobody
+Group=nobody
+EnvironmentFile=/etc/supabase/tenants/%i_gotrue.env
+ExecStart=${GOTRUE_BIN}
+Restart=on-failure
+RestartSec=5
+StartLimitBurst=3
+StartLimitIntervalSec=60
+
+# 安全加固
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/etc/supabase/tenants
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    fi
 
     systemctl daemon-reload
-    echo "systemd template unit installed"
+    echo "systemd template units installed"
 }
 
 # ========== 启动租户运行时 ==========
@@ -220,25 +314,42 @@ start_runtime() {
     local ref="$1"
 
     ensure_postgrest
+    ensure_gotrue
     install_systemd_template
 
-    local port
-    port=$(get_tenant_port "$ref")
+    local pgrst_port
+    pgrst_port=$(get_tenant_port "$ref" "pgrst")
+    local gotrue_port
+    gotrue_port=$(get_tenant_port "$ref" "gotrue")
 
     # 生成配置
-    generate_tenant_config "$ref" "$port"
+    generate_tenant_config "$ref" "$pgrst_port" "$gotrue_port"
 
     # 启动 systemd 服务
     systemctl enable "supacloud-pgrst@${ref}" 2>/dev/null || true
     systemctl start "supacloud-pgrst@${ref}"
+    
+    systemctl enable "supacloud-gotrue@${ref}" 2>/dev/null || true
+    systemctl start "supacloud-gotrue@${ref}"
 
-    # 等待健康检查
-    echo "Waiting for PostgREST on port ${port}..."
-    local retries=15
+    # 等待健康检查 (检查两个端口)
+    echo "Waiting for PostgREST(${pgrst_port}) and GoTrue(${gotrue_port})..."
+    local retries=20
+    local pgrst_ok=0
+    local gotrue_ok=0
+    
     while [ $retries -gt 0 ]; do
-        if curl -sf "http://127.0.0.1:${port}/" >/dev/null 2>&1; then
+        if [ $pgrst_ok -eq 0 ] && curl -sf "http://127.0.0.1:${pgrst_port}/" >/dev/null 2>&1; then
+            pgrst_ok=1
+        fi
+        if [ $gotrue_ok -eq 0 ] && curl -sf "http://127.0.0.1:${gotrue_port}/health" >/dev/null 2>&1; then
+            gotrue_ok=1
+        fi
+        
+        if [ $pgrst_ok -eq 1 ] && [ $gotrue_ok -eq 1 ]; then
             echo "RUNTIME_STARTED=true"
-            echo "PORT=${port}"
+            echo "PORT=${pgrst_port}"
+            echo "GOTRUE_PORT=${gotrue_port}"
             echo "STATUS=running"
             return
         fi
@@ -246,9 +357,10 @@ start_runtime() {
         retries=$((retries - 1))
     done
 
-    echo "WARNING: PostgREST health check timeout, but service may still be starting" >&2
+    echo "WARNING: Health check timeout, some services may still be starting" >&2
     echo "RUNTIME_STARTED=true"
-    echo "PORT=${port}"
+    echo "PORT=${pgrst_port}"
+    echo "GOTRUE_PORT=${gotrue_port}"
     echo "STATUS=starting"
 }
 
@@ -258,24 +370,32 @@ stop_runtime() {
 
     systemctl stop "supacloud-pgrst@${ref}" 2>/dev/null || true
     systemctl disable "supacloud-pgrst@${ref}" 2>/dev/null || true
+    
+    systemctl stop "supacloud-gotrue@${ref}" 2>/dev/null || true
+    systemctl disable "supacloud-gotrue@${ref}" 2>/dev/null || true
 
     # 清理配置文件
-    rm -f "${TENANT_CONFIG_DIR}/${ref}.env" "${TENANT_CONFIG_DIR}/${ref}.conf"
+    rm -f "${TENANT_CONFIG_DIR}/${ref}.env" "${TENANT_CONFIG_DIR}/${ref}.conf" "${TENANT_CONFIG_DIR}/${ref}_gotrue.env"
 
-    echo "Runtime stopped for ${ref}"
+    echo "Runttime stopped for ${ref}"
 }
 
 # ========== 重启租户运行时 ==========
 restart_runtime() {
     local ref="$1"
 
-    if systemctl is-active "supacloud-pgrst@${ref}" >/dev/null 2>&1; then
+    if systemctl is-active "supacloud-pgrst@${ref}" >/dev/null 2>&1 || systemctl is-active "supacloud-gotrue@${ref}" >/dev/null 2>&1; then
         # 重新生成配置（凭据可能已更新）
-        local port
-        port=$(get_tenant_port "$ref")
-        generate_tenant_config "$ref" "$port"
+        local pgrst_port
+        pgrst_port=$(get_tenant_port "$ref" "pgrst")
+        local gotrue_port
+        gotrue_port=$(get_tenant_port "$ref" "gotrue")
+        
+        generate_tenant_config "$ref" "$pgrst_port" "$gotrue_port"
+        
         systemctl restart "supacloud-pgrst@${ref}"
-        echo "Runtime restarted for ${ref} on port ${port}"
+        systemctl restart "supacloud-gotrue@${ref}"
+        echo "Runtime restarted for ${ref} (pgrst=${pgrst_port}, gotrue=${gotrue_port})"
     else
         # 未运行则启动
         start_runtime "$ref"
@@ -286,17 +406,28 @@ restart_runtime() {
 check_status() {
     local ref="$1"
 
-    if systemctl is-active "supacloud-pgrst@${ref}" >/dev/null 2>&1; then
-        local port
-        port=$(get_tenant_port "$ref")
-        local health="unknown"
-        if curl -sf "http://127.0.0.1:${port}/" >/dev/null 2>&1; then
+    local pgrst_running=false
+    local gotrue_running=false
+    
+    systemctl is-active "supacloud-pgrst@${ref}" >/dev/null 2>&1 && pgrst_running=true
+    systemctl is-active "supacloud-gotrue@${ref}" >/dev/null 2>&1 && gotrue_running=true
+
+    if [ "$pgrst_running" = true ] || [ "$gotrue_running" = true ]; then
+        local pgrst_port
+        pgrst_port=$(get_tenant_port "$ref" "pgrst")
+        local gotrue_port
+        gotrue_port=$(get_tenant_port "$ref" "gotrue")
+        
+        local health="unhealthy"
+        if curl -sf "http://127.0.0.1:${pgrst_port}/" >/dev/null 2>&1 && curl -sf "http://127.0.0.1:${gotrue_port}/health" >/dev/null 2>&1; then
             health="healthy"
-        else
-            health="unhealthy"
+        elif curl -sf "http://127.0.0.1:${pgrst_port}/" >/dev/null 2>&1 || curl -sf "http://127.0.0.1:${gotrue_port}/health" >/dev/null 2>&1; then
+            health="degraded"
         fi
+        
         echo "STATUS=running"
-        echo "PORT=${port}"
+        echo "PORT=${pgrst_port}"
+        echo "GOTRUE_PORT=${gotrue_port}"
         echo "HEALTH=${health}"
     else
         echo "STATUS=stopped"
@@ -306,9 +437,12 @@ check_status() {
 # ========== 获取端口 ==========
 get_port() {
     local ref="$1"
-    local port
-    port=$(get_tenant_port "$ref")
-    echo "$port"
+    local pgrst_port
+    pgrst_port=$(get_tenant_port "$ref" "pgrst")
+    local gotrue_port
+    gotrue_port=$(get_tenant_port "$ref" "gotrue")
+    echo "PORT=${pgrst_port}"
+    echo "GOTRUE_PORT=${gotrue_port}"
 }
 
 # 主逻辑
