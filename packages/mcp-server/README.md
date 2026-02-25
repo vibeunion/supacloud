@@ -33,11 +33,18 @@ AI-native 的 Supabase 基础设施管理 MCP Server。让 AI Agent（Claude、C
 
 ### 2. 开始对话
 
-安装前：
+**全新服务器部署（三步走）：**
+```
+1. ping_server            → 验证 SSH 连通性
+2. setup_server_ssh       → 配置前置环境（SSH自连接 + OpenSSL兼容）
+3. install_supacloud      → 一键安装（后台运行，约15-30分钟）
+```
 
-> "帮我在 1.2.3.4 上安装 SupaCloud，域名用 api.example.com"
+**示例对话（安装前）：**
 
-安装后（填入 API_TOKEN）：
+> "帮我检查一下 1.2.3.4 能不能连上，然后配置好环境，最后安装 SupaCloud，域名用 api.example.com"
+
+**示例对话（安装后，填入 API_TOKEN）：**
 
 > "帮我创建一个叫 my-app 的项目，开启 Google 登录"
 
@@ -60,7 +67,8 @@ AI-native 的 Supabase 基础设施管理 MCP Server。让 AI Agent（Claude、C
 | 工具 | 说明 |
 |------|------|
 | `ping_server` | 检测服务器连通性 |
-| `install_supacloud` | 一键安装 SupaCloud |
+| `setup_server_ssh` | 配置目标服务器 SSH 自连接 + 修复 OpenSSL 兼容性，**安装前必须执行** |
+| `install_supacloud` | 一键安装 SupaCloud（国内镜像加速，后台运行） |
 | `upgrade_supacloud` | 升级到最新版本 |
 | `diagnose_server` | 系统诊断（内存/磁盘/服务） |
 | `ssh_exec` | 执行自定义命令 |
