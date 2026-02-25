@@ -65,6 +65,17 @@ AI-native 的 Supabase 基础设施管理 MCP Server。让 AI Agent（Claude、C
 | `diagnose_server` | 系统诊断（内存/磁盘/服务） |
 | `ssh_exec` | 执行自定义命令 |
 
+### 多租户与诊断工具（系统级）
+
+| 工具 | 说明 |
+|------|------|
+| `troubleshoot_install` | 诊断 SupaCloud 安装/运行故障 |
+| `manage_tenant_runtime` | 管理租户专属 PostgREST & GoTrue 双核运行时 |
+| `list_tenant_runtimes` | 列出所有租户的双核运行时状态 |
+| `diagnose_multi_tenant` | 诊断多租户环境及 Kong 声明式路由配置 |
+| `inspect_tenant_gateway`| 查看租户的 Kong 声明式网关路由配置 (YAML) |
+| `migrate_tenant_data` | 在租户数据库之间迁移数据 |
+
 ### 项目管理工具（安装后可用）
 
 | 工具 | 说明 |
