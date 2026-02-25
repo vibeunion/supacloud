@@ -80,14 +80,16 @@ export class TaskWorker {
 
                     // 从输出中提取端口号
                     const portMatch = startRes.output.match(/PORT=(\d+)/);
+                    const gotruePortMatch = startRes.output.match(/GOTRUE_PORT=(\d+)/);
                     const port = portMatch ? portMatch[1] : "";
-                    if (!port) {
-                        console.error(`[TaskWorker] Cannot determine PostgREST port for ${project_ref}`);
+                    const gotruePort = gotruePortMatch ? gotruePortMatch[1] : "";
+                    if (!port || !gotruePort) {
+                        console.error(`[TaskWorker] Cannot determine PostgREST/GoTrue port for ${project_ref}`);
                         return false;
                     }
 
-                    // 在 Kong 中注册该租户的独立 upstream
-                    const upstreamRes = await databaseService.setupUpstream(project_ref, port);
+                    // 在 Kong 中注册该租户的独立 upstream (声明式)
+                    const upstreamRes = await databaseService.setupUpstream(project_ref, port, gotruePort);
                     if (!upstreamRes.success) {
                         console.error(`[TaskWorker] Failed to setup Kong upstream for ${project_ref}`);
                         return false;
@@ -97,9 +99,10 @@ export class TaskWorker {
                     await projectRepository.updateConfig(project_ref, {
                         ...project.config,
                         postgrest_port: parseInt(port),
+                        gotrue_port: parseInt(gotruePort),
                     });
 
-                    console.log(`[TaskWorker] Runtime started for ${project_ref} on port ${port}`);
+                    console.log(`[TaskWorker] Runtime started for ${project_ref} on ports (pgrst:${port}, gotrue:${gotruePort})`);
                     return true;
                 }
 
