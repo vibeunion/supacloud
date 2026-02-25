@@ -292,6 +292,12 @@ check_system() {
 setup_local_ssh() {
     log_step "配置本机 SSH 免密登录..."
     
+    # OpenCloudOS 兼容性检查
+    if grep -qi "opencloudos" /etc/os-release 2>/dev/null; then
+        log_warn "检测到 OpenCloudOS，跳过 sshd 配置修改以避免连接中断"
+        SKIP_SSHD_RESTART=true
+    fi
+    
     # 确保 .ssh 目录存在
     mkdir -p ~/.ssh
     chmod 700 ~/.ssh
@@ -338,7 +344,9 @@ setup_local_ssh() {
     
     # 覆盖 sshd 配置：允许 root 登录、使用 PAM、宽松模式
     # RHEL 9 默认在 sshd_config 顶部 Include /etc/ssh/sshd_config.d/*.conf，00 前缀确保最高优先级
-    cat > /etc/ssh/sshd_config.d/00-supacloud-test.conf << 'EOF'
+    # ⚠️ OpenCloudOS 跳过此步骤以避免 SSH 连接中断
+    if [[ "${SKIP_SSHD_RESTART:-false}" != "true" ]]; then
+        cat > /etc/ssh/sshd_config.d/00-supacloud-test.conf << 'EOF'
 UsePAM yes
 PermitRootLogin yes
 StrictModes no
@@ -346,20 +354,23 @@ PubkeyAuthentication yes
 PasswordAuthentication yes
 EOF
     
-    # 启动/重启 sshd 以应用新配置
-    if command -v systemctl &>/dev/null && systemctl is-system-running &>/dev/null; then
-        # systemd 环境：安装并重启 sshd
-        systemctl restart sshd 2>/dev/null || systemctl start sshd 2>/dev/null || true
-    else
-        # 非 systemd 环境（或 systemd 未就绪）：直接启动
-        if pgrep -x sshd >/dev/null; then
-            # 已有 sshd 运行，kill 后重启以应用新配置
-            pkill -x sshd 2>/dev/null || true
-            sleep 1
+        # 启动/重启 sshd 以应用新配置
+        if command -v systemctl &>/dev/null && systemctl is-system-running &>/dev/null; then
+            # systemd 环境：安装并重启 sshd
+            systemctl restart sshd 2>/dev/null || systemctl start sshd 2>/dev/null || true
+        else
+            # 非 systemd 环境（或 systemd 未就绪）：直接启动
+            if pgrep -x sshd >/dev/null; then
+                # 已有 sshd 运行，kill 后重启以应用新配置
+                pkill -x sshd 2>/dev/null || true
+                sleep 1
+            fi
+            /usr/sbin/sshd -E /var/log/sshd.log 2>/dev/null || log_warn "直接启动 sshd 失败，Ansible 可能会报错"
         fi
-        /usr/sbin/sshd -E /var/log/sshd.log 2>/dev/null || log_warn "直接启动 sshd 失败，Ansible 可能会报错"
+        sleep 1
+    else
+        log_info "OpenCloudOS 兼容模式：跳过 sshd 配置修改"
     fi
-    sleep 1
     
     # 重新扫描 host keys（sshd 可能刚重启，key 可能变了）
     ssh-keyscan -H localhost 127.0.0.1 ::1 > ~/.ssh/known_hosts 2>/dev/null || true
@@ -416,7 +427,11 @@ install_base_dependencies() {
         fi
 
         # 确保 EPEL 仓库可用 (Pigsty bootstrap 需要从 EPEL 安装 ansible)
-        if ! rpm -q epel-release &> /dev/null; then
+        # ⚠️ OpenCloudOS 使用 EPOL 而非 EPEL
+        if grep -qi "opencloudos" /etc/os-release 2>/dev/null; then
+            log_info "OpenCloudOS 检测到，启用 EPOL 仓库（替代 EPEL）..."
+            dnf config-manager --set-enabled EPOL 2>/dev/null || true
+        elif ! rpm -q epel-release &> /dev/null; then
             log_info "安装 EPEL 仓库..."
             dnf install -y epel-release
         fi
@@ -1245,10 +1260,6 @@ configure_external_s3() {
 install_nginx_mainline() {
     log_step "正在安装 Nginx Mainline (带 ACME 模块)..."
 
-    # ⚠️ 新增：检查并锁定 OpenSSL 版本
-    CURRENT_OPENSSL=$(rpm -q openssl-libs --qf '%{VERSION}' 2>/dev/null || echo "unknown")
-    log_info "当前 OpenSSL 版本: $CURRENT_OPENSSL"
-
     # 识别操作系统
     if [[ -f /etc/os-release ]]; then
         source /etc/os-release
@@ -1259,7 +1270,21 @@ install_nginx_mainline() {
 
     log_info "检测到系统: $DISTRO_ID $DISTRO_VERSION_ID"
 
-    # 如果是 OpenCloudOS，使用系统自带 nginx 而非 mainline
+    # ⚠️ OpenCloudOS 特殊处理：使用系统自带 nginx 而非 mainline，避免 OpenSSL 升级导致系统崩溃
+    if [[ "$DISTRO_ID" == "opencloudos" ]]; then
+        log_warn "检测到 OpenCloudOS，使用系统自带 Nginx 以避免 OpenSSL 冲突"
+        log_warn "Nginx Mainline 会升级 OpenSSL，可能导致 sshd/dnf 等关键服务无法启动"
+        dnf install -y nginx
+        systemctl enable --now nginx
+        log_info "Nginx 安装完成（系统版本）"
+        return
+    fi
+
+    # ⚠️ 检查并锁定 OpenSSL 版本
+    CURRENT_OPENSSL=$(rpm -q openssl-libs --qf '%{VERSION}' 2>/dev/null || echo "unknown")
+    log_info "当前 OpenSSL 版本: $CURRENT_OPENSSL"
+
+    # 如果设置了兼容模式标识，使用系统自带 Nginx
     if [[ "${USE_SYSTEM_NGINX:-false}" == "true" ]]; then
         log_warn "检测到兼容模式标识，使用系统自带 Nginx 以避免 OpenSSL 冲突"
         dnf install -y nginx
@@ -1362,11 +1387,16 @@ EOF
     if ! find /usr/lib/nginx/modules /usr/lib64/nginx/modules /etc/nginx/modules -name "ngx_http_acme_module.so" 2>/dev/null | grep -q .; then
         log_info "未检测到 ngx_http_acme_module.so，尝试通过第三方仓库手动安装该模块..."
         case "$DISTRO_ID" in
-            rocky|almalinux|centos|rhel|opencloudos|anolis|tencentos)
+            rocky|almalinux|centos|rhel|anolis|tencentos)
                 if command -v dnf &> /dev/null; then
                     dnf install -y epel-release || true
                     dnf install -y nginx-mod-http-acme nginx-module-acme || log_warn "未能成功从源安装 Nginx ACME 模块"
                 fi
+                ;;
+            opencloudos)
+                # OpenCloudOS 使用 EPOL，不安装 EPEL
+                log_info "OpenCloudOS 跳过 EPEL 安装，尝试从 EPOL 获取 ACME 模块..."
+                dnf install -y nginx-mod-http-acme 2>/dev/null || log_warn "OpenCloudOS 未提供 nginx ACME 模块，将使用 certbot 替代"
                 ;;
             ubuntu)
                 if ! command -v add-apt-repository &> /dev/null; then
