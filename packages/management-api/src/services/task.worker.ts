@@ -146,12 +146,10 @@ export class TaskWorker {
             console.log(`[TaskWorker] Rolling back DB for ${project_ref}`);
             await taskRepository.createTask(project_ref, "cleanup_db");
         } else if (task_type === "provision_router" || task_type === "provision_gateway") {
-            // If router/gateway failed, we might want to clean up both DB and S3, or leave it paused for manual intervention
-            // For full safety, queue both:
-            await taskRepository.createTasks([
-                { ref: project_ref, type: "cleanup_s3" },
-                { ref: project_ref, type: "cleanup_db" }
-            ]);
+            // router/gateway 失败时保留数据库和 S3 资源，避免数据丢失
+            // 管理员可以手动排查并重试，或通过 API 触发清理
+            console.warn(`[TaskWorker] ${task_type} failed for ${project_ref}. DB and S3 resources preserved for manual intervention.`);
+            console.warn(`[TaskWorker] To retry: update task status to 'pending'. To cleanup: manually delete project.`);
         }
     }
 }
