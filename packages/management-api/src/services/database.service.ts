@@ -79,8 +79,8 @@ export class DatabaseService {
 
   // --- Kong upstream 管理 ---
 
-  async setupUpstream(projectRef: string, port: string): Promise<{ success: boolean; error?: string }> {
-    const result = await shellService.execute("gateway_manager.sh", ["setup-upstream", projectRef, port]);
+  async setupUpstream(projectRef: string, pgrstPort: string, gotruePort: string): Promise<{ success: boolean; error?: string }> {
+    const result = await shellService.execute("gateway_manager.sh", ["setup-upstream", projectRef, pgrstPort, gotruePort]);
     return result;
   }
 

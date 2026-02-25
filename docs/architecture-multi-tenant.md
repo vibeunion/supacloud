@@ -1,84 +1,43 @@
 # SupaCloud Multi-Tenant Architecture
 
-> **Status**: Implemented (Option C)  
+> **Status**: Implemented (Option C+)  
 > **Last Updated**: 2026-02-25
 
 ## Current Architecture
 
 ```
-┌─────────────┐     ┌──────────┐     ┌─────────────────────────────────┐
-│  Nginx      │────▶│  Kong    │────▶│  Shared Container Layer         │
-│  (per-tenant│     │  Gateway │     │  ┌──────────┐ ┌──────────────┐  │
-│   routing)  │     │          │     │  │PostgREST │ │ GoTrue(Auth) │  │
-└─────────────┘     └──────────┘     │  │(single)  │ │ (single)     │  │
-                                     │  └────┬─────┘ └──────┬───────┘  │
-                                     └───────┼──────────────┼──────────┘
-                                             │              │
-                    ┌────────────────────────┼──────────────┘
-                    ▼                        ▼
-          ┌──────────────────────────────────────────┐
-          │  PostgreSQL (Pigsty)                      │
-          │  ┌──────────┐ ┌──────────┐ ┌──────────┐  │
-          │  │supa_proj1│ │supa_proj2│ │supa_projN│  │
-          │  │(isolated)│ │(isolated)│ │(isolated)│  │
-          │  └──────────┘ └──────────┘ └──────────┘  │
-          └──────────────────────────────────────────┘
+┌─────────────┐     ┌──────────┐     ┌────────────────┐     ┌───────────────┐
+│ Nginx Proxy │ ──► │   Kong   │ ──► │ PostgREST(:310x)──► │ supa_tenant_1 │
+└─────────────┘     │(:80/8000)│     │ GoTrue(:410x)  │     └───────────────┘
+                    └──────────┘     │ (per-tenant)   │     ┌───────────────┐
+                                     └────────────────┘ ──► │ supa_tenant_N │
+                                                            └───────────────┘
 ```
 
-## Core Issue
+> **Note**: SupaCloud natively relies on Kong. 
+To support proper multi-tenant isolation safely and effectively without massive monolithic overhead, we adopted Option C+ (Per-Tenant Processes + Declarative Routing).
 
-PostgREST and GoTrue are **global singletons** bound to a single `PGRST_DB_URI` and `PGRST_JWT_SECRET` at startup. They cannot dynamically switch databases or JWT secrets per-request.
+### 1. PostgREST & GoTrue (Per-Tenant Processes) ⭐ Implemented
+These core REST, GraphQL, and Authentication services are extremely lightweight (20-50MB RAM). 
+We spin up a unique `postgrest` AND `gotrue` process for *every* tenant dynamically using `systemd` templates (`supacloud-pgrst@.service` and `supacloud-gotrue@.service`):
+- They bind to unique deterministically generated ports (e.g., PostgREST starts from 3100, GoTrue starts from 4100).
+- They connect securely to the tenant's isolated Postgres database (`supa_<ref>`) using unique credentials.
+- They possess isolated `JWT_SECRET`s to ensure cryptographic boundary security (users from Tenant A cannot authenticate into Tenant B).
 
-**Impact**: Only **one tenant** can be active at a time. Requests from other tenants will fail with authentication errors or hit the wrong database.
+### 2. Kong Declarative Routing ⭐ Implemented
+Since standard Supabase Kong is run in `KONG_DATABASE=off` (DB-less) mode, Admin API routing edits are ephemeral and ineffective. We use dynamic **declarative configuration**:
+- Whenever a tenant is created or removed, `gateway_manager.sh` manages a YAML fragment in `/etc/supabase/kong_tenants/<ref>.yml`.
+- These are merged into the global `kong.yml` and hot-reloaded (`kong reload`).
+- `X-Project-Ref: <ref>` headers reliably route traffic to the tenant's exact local port for Database REST (`/rest/v1`, `/graphql/v1`) and Auth (`/auth/v1`).
 
-## Proposed Solutions
+### 3. Storage API
+The Node.js based Storage API handles binary uploads to Object Storage AND metadata insertions into PostgreSQL (including Row Level Security checks).
+If globally shared, tenant uploads would pollute the default database's `storage.objects` table and bypass tenant RLS.
+**Status**: To be fully isolated, Storage API must eventually be separated into per-tenant processes just like GoTrue, connecting to the specific tenant's database.
 
-### Option A: Schema-Based Soft Isolation (Lightweight)
-
-Use PostgreSQL schemas + RLS within a single database. All tenants share one DB, one PostgREST, one GoTrue.
-
-| Pros | Cons |
-|------|------|
-| Minimal resource usage | Weaker isolation |
-| Simple deployment | Complex RLS policy management |
-| No container orchestration needed | Noisy neighbor risks |
-
-**Implementation**: Add `tenant_id` column + RLS policies. PostgREST uses JWT claim `x-tenant-id` to set `current_setting('request.jwt.claims')`.
-
-### Option B: Per-Tenant Container Groups (Strong Isolation)
-
-Each tenant gets its own PostgREST + GoTrue containers, connecting to its dedicated database.
-
-| Pros | Cons |
-|------|------|
-| Full isolation | High resource usage |
-| Independent JWT secrets | Requires container orchestration |
-| Per-tenant scaling | Complex provisioning |
-
-**Implementation**: Management API calls Docker/Podman API to spin up per-tenant containers with unique ports. Kong routes traffic to the correct container port based on `X-Project-Ref` header.
-
-### Option C: PostgREST Multi-Tenant Proxy (Balanced) ⭐ Recommended
-
-> **Note**: SupaCloud already uses Kong (`gateway_manager.sh` manages consumers, JWT plugins, rate limiting, and CORS via Kong Admin API at `localhost:8001`). This makes Option C the most natural upgrade path — leveraging existing infrastructure.
-
-Deploy a Kong plugin that rewrites the PostgREST database connection per-request based on `X-Project-Ref` header.
-
-| Pros | Cons |
-|------|------|
-| Leverages **existing** Kong infrastructure | Requires PostgREST 13+ or custom pgrst-proxy |
-| Moderate resource usage | JWT validation per-tenant adds complexity |
-| Database-level isolation preserved | Custom Kong plugin development needed |
-| No container orchestration needed | |
-
-**Implementation**: Kong plugin maps `X-Project-Ref` → tenant DB URI + JWT secret, passes them via PostgREST config override headers. Each request hits the correct tenant database with the correct JWT validation.
-
-## Recommendation
-
-Since Kong is already deployed and actively used (`gateway_manager.sh`):
-
-1. **Recommended**: Option C (Kong-based multi-tenant proxy) — lowest friction, leverages existing infrastructure
-2. **Fallback**: Option B (per-tenant containers) if PostgREST doesn't support dynamic DB override
-3. **Quick MVP**: Option A (schema isolation) for immediate multi-tenant capability
+### 4. Realtime API & Studio
+- **Realtime (Elixir)**: Very resource-intensive as it listens to PostgreSQL logical replication slots. Recommended to remain a shared premium feature or require dedicated high-tier clusters.
+- **Studio**: Tied to a single connection pool. It serves as the Host/SuperAdmin dashboard. Tenant-level UI should use generic database tooling (e.g., PGWeb, Adminer) dynamically provisioned based on connection strings.
 
 ## Additional Issues Found
 
