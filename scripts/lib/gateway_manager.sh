@@ -126,7 +126,7 @@ enable_jwt() {
 # ========== Per-Tenant Upstream（方案C+：多租户动态路由 - 声明式） ==========
 # 将租户配置追加到 Kong Declarative YAML 中并热重载
 rebuild_kong_config() {
-    local KONG_YML="/etc/supabase/volumes/api/kong.yml"
+    local KONG_YML="/root/pigsty/app/supabase/volumes/api/kong.yml"
     local KONG_BASE="${KONG_YML}.base"
     local TENANT_DIR="/etc/supabase/kong_tenants"
     
@@ -177,6 +177,22 @@ setup_upstream() {
         exit 1
     fi
 
+    # 检测宿主机在容器网络中的 IP（供 Kong 容器反向访问宿主机进程）
+    # 优先级：环境变量 > podman1 > docker0 > 127.0.0.1
+    local host_ip="${DOCKER_HOST_IP:-}"
+    if [ -z "$host_ip" ]; then
+        host_ip=$(ip addr show podman1 2>/dev/null | grep "inet " | awk '{print $2}' | cut -d/ -f1 || true)
+    fi
+    if [ -z "$host_ip" ]; then
+        host_ip=$(ip addr show docker0 2>/dev/null | grep "inet " | awk '{print $2}' | cut -d/ -f1 || true)
+    fi
+    if [ -z "$host_ip" ]; then
+        host_ip="127.0.0.1"
+        echo "WARNING: Could not detect container bridge IP, defaulting to 127.0.0.1 (may cause 502 if Kong runs in container)" >&2
+    else
+        echo "Detected container-accessible host IP: ${host_ip}"
+    fi
+
     mkdir -p /etc/supabase/kong_tenants
     local tenant_yml="/etc/supabase/kong_tenants/${PROJECT_REF}.yml"
 
@@ -185,7 +201,7 @@ setup_upstream() {
     # 生成声明式的 Kong 配置文件
     cat > "$tenant_yml" <<EOF
   - name: svc-pgrst-${PROJECT_REF}
-    url: http://127.0.0.1:${pgrst_port}
+    url: http://${host_ip}:${pgrst_port}
     connect_timeout: 5000
     read_timeout: 60000
     write_timeout: 60000
@@ -201,7 +217,7 @@ setup_upstream() {
           X-Project-Ref:
             - ${PROJECT_REF}
   - name: svc-gotrue-${PROJECT_REF}
-    url: http://127.0.0.1:${gotrue_port}
+    url: http://${host_ip}:${gotrue_port}
     connect_timeout: 5000
     read_timeout: 60000
     write_timeout: 60000
