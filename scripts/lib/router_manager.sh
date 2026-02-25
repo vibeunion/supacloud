@@ -60,8 +60,8 @@ server {
 
     # ACME 自动证书 (Pigsty 4.x 原生支持)
     acme_certificate letsencrypt;
-    ssl_certificate     $acme_certificate;
-    ssl_certificate_key $acme_certificate_key;
+    ssl_certificate     \$acme_certificate;
+    ssl_certificate_key \$acme_certificate_key;
 
     # 安全头
     add_header X-Project-Ref ${PROJECT_REF} always;
@@ -131,8 +131,8 @@ add_custom_domain() {
     ssl_certificate_key /etc/pigsty/cert/${custom_domain}.key;"
     else
         ssl_config='    acme_certificate letsencrypt;
-    ssl_certificate     $acme_certificate;
-    ssl_certificate_key $acme_certificate_key;'
+    ssl_certificate     \$acme_certificate;
+    ssl_certificate_key \$acme_certificate_key;'
     fi
 
     cat > "$config_file" <<EOF
