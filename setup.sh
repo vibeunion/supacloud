@@ -63,6 +63,30 @@ clone_repo() {
     fi
 }
 
+# ⚠️ 锁定 OpenSSL 版本，防止升级导致系统崩溃
+# 必须在运行 install.sh 之前执行
+lock_openssl() {
+    if [[ -f /etc/os-release ]]; then
+        source /etc/os-release
+        case "$ID" in
+            opencloudos|tencentos)
+                log_warn "检测到 $PRETTY_NAME，锁定 OpenSSL 版本..."
+                log_warn "防止 Pigsty bootstrap 升级 OpenSSL 导致 sshd/dnf 崩溃"
+                
+                # 在 dnf.conf 中排除 OpenSSL 相关包
+                if ! grep -q "exclude=openssl" /etc/dnf/dnf.conf 2>/dev/null; then
+                    echo "exclude=openssl* libssl* libcrypto*" >> /etc/dnf/dnf.conf
+                    log_info "已在 /etc/dnf/dnf.conf 中排除 OpenSSL 包"
+                fi
+                
+                # 记录当前 OpenSSL 版本
+                OPENSSL_VER=$(openssl version 2>/dev/null | awk '{print $2}')
+                log_info "当前 OpenSSL 版本: $OPENSSL_VER (已锁定)"
+                ;;
+        esac
+    fi
+}
+
 # 生成配置
 generate_config() {
     log_step "生成安装配置..."
