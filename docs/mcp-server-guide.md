@@ -72,11 +72,17 @@ SupaCloud MCP 天然支持多路复用。如果你有多台服务器（如测试
 你可以在 AI 对话框中直接提出以下需求，AI 会自动调用 MCP 工具完成。
 
 ### 场景 1：零基础全新安装
-> **你**："我刚买了一台服务器，请帮我在这台机器上安装 SupaCloud（数据库密码不用自动生成，帮我设成 `MySuperSecret!23`，域名用 `api.example.com`）。"
+> **你**："我刚买了一台服务器，IP 是 1.2.3.4，请帮我安装 SupaCloud，域名用 `api.example.com`，数据库密码设成 `MySuperSecret!23`。"
 > 
-> **AI**：(调用 `install_supacloud` 工具) -> 返回部署结果。
+> **AI**：将依次调用以下工具完成安装：
+> 1. `ping_server` → 验证 SSH 可达性
+> 2. `setup_server_ssh` → 配置 SSH 自连接（Pigsty/Ansible 必需）+ 修复 OpenSSL 兼容性
+> 3. `install_supacloud` → 后台启动安装（约 15-30 分钟）
 >
-> ⚠️ **提示**: 如果安装时间较长，AI 会等待命令完成。
+> 安装启动后，AI 会返回进程 PID。你可以随时说：
+> **"帮我查一下安装进度"**，AI 会调用 `ssh_exec` 执行 `tail -f /tmp/supacloud-install.log`。
+>
+> ✅ **注意**：安装在服务器后台运行，即使关闭对话窗口也不会中断。安装完成后使用 `diagnose_server` 验证服务状态。
 
 ### 场景 2：日常租户管理
 > **你**："帮我列出现在所有的 Supabase 项目，并创建一个名字叫 `app-prod` 的新项目。"
@@ -116,6 +122,9 @@ SupaCloud MCP 天然支持多路复用。如果你有多台服务器（如测试
 ### 常用环境排错一览
 | 现象 | 排查指令/工具建议 |
 |------|-------------------|
+| `install_supacloud` 返回 SSH 连接失败 | 先调用 `ping_server`，再调用 `setup_server_ssh` 修复前置环境 |
+| Pigsty/Ansible 报 `Connection refused` | 调用 `setup_server_ssh` 修复 SSH 自连接配置 |
+| `setup.sh` 下载失败 | 调用 `ssh_exec` 手动执行：`curl -fsSL https://ghproxy.net/...` |
 | Web 端访问一直卡在 Loading | 调用 `diagnose_server` 检查 `Management API` 进程是否健康 |
 | 无法创建新租户 | 可能是 Pigsty DNS 漂移，调用 `troubleshoot_install` |
 | 函数执行超时 | 调用 `get_container_logs` 检测 `supabase-edge-runtime` |
