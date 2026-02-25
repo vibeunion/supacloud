@@ -49,6 +49,45 @@ export class DatabaseService {
     const result = await shellService.execute("key_manager.sh", ["delete-secret", projectRef, name]);
     return result.success;
   }
+
+  // --- 租户运行时管理（方案C: per-tenant PostgREST） ---
+
+  async startRuntime(projectRef: string): Promise<{ success: boolean; output: string; error?: string }> {
+    const result = await shellService.execute("tenant_runtime.sh", ["start", projectRef]);
+    return result;
+  }
+
+  async stopRuntime(projectRef: string): Promise<{ success: boolean; error?: string }> {
+    const result = await shellService.execute("tenant_runtime.sh", ["stop", projectRef]);
+    return result;
+  }
+
+  async restartRuntime(projectRef: string): Promise<{ success: boolean; error?: string }> {
+    const result = await shellService.execute("tenant_runtime.sh", ["restart", projectRef]);
+    return result;
+  }
+
+  async getRuntimeStatus(projectRef: string): Promise<{ success: boolean; output: string; error?: string }> {
+    const result = await shellService.execute("tenant_runtime.sh", ["status", projectRef]);
+    return result;
+  }
+
+  async getRuntimePort(projectRef: string): Promise<string> {
+    const result = await shellService.execute("tenant_runtime.sh", ["port", projectRef]);
+    return result.success ? result.output.trim() : "";
+  }
+
+  // --- Kong upstream 管理 ---
+
+  async setupUpstream(projectRef: string, port: string): Promise<{ success: boolean; error?: string }> {
+    const result = await shellService.execute("gateway_manager.sh", ["setup-upstream", projectRef, port]);
+    return result;
+  }
+
+  async removeService(projectRef: string): Promise<{ success: boolean; error?: string }> {
+    const result = await shellService.execute("gateway_manager.sh", ["remove-service", projectRef]);
+    return result;
+  }
 }
 
 export const databaseService = new DatabaseService();
