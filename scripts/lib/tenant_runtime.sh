@@ -164,7 +164,11 @@ ensure_gotrue() {
     if [ -n "$container_id" ]; then
         echo "Extracting GoTrue from running container..."
         local tmp_bin="/tmp/gotrue-extract"
-        (docker cp "${container_id}:/usr/local/bin/gotrue" "$tmp_bin" 2>/dev/null || podman cp "${container_id}:/usr/local/bin/gotrue" "$tmp_bin" 2>/dev/null || true)
+        # Bug Fix: 新版本的 supabase/gotrue 容器内二进制文件被重命名为 'auth'，需要同时尝试 gotrue 和 auth 两个名字
+        (docker cp "${container_id}:/usr/local/bin/gotrue" "$tmp_bin" 2>/dev/null || \
+         docker cp "${container_id}:/usr/local/bin/auth" "$tmp_bin" 2>/dev/null || \
+         podman cp "${container_id}:/usr/local/bin/gotrue" "$tmp_bin" 2>/dev/null || \
+         podman cp "${container_id}:/usr/local/bin/auth" "$tmp_bin" 2>/dev/null || true)
         if [ -x "$tmp_bin" ]; then
             mv "$tmp_bin" "$GOTRUE_BIN"
             echo "GoTrue extracted successfully"
@@ -377,7 +381,7 @@ stop_runtime() {
     # 清理配置文件
     rm -f "${TENANT_CONFIG_DIR}/${ref}.env" "${TENANT_CONFIG_DIR}/${ref}.conf" "${TENANT_CONFIG_DIR}/${ref}_gotrue.env"
 
-    echo "Runttime stopped for ${ref}"
+    echo "Runtime stopped for ${ref}"
 }
 
 # ========== 重启租户运行时 ==========
@@ -385,6 +389,11 @@ restart_runtime() {
     local ref="$1"
 
     if systemctl is-active "supacloud-pgrst@${ref}" >/dev/null 2>&1 || systemctl is-active "supacloud-gotrue@${ref}" >/dev/null 2>&1; then
+        # Bug Fix: 重启前同样需要确保二进制和 systemd 模板存在，防止如果宇机未分配 .service 直接崩溃
+        ensure_postgrest
+        ensure_gotrue
+        install_systemd_template
+
         # 重新生成配置（凭据可能已更新）
         local pgrst_port
         pgrst_port=$(get_tenant_port "$ref" "pgrst")
