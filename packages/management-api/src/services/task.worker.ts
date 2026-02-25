@@ -73,6 +73,36 @@ export class TaskWorker {
                     return res.success;
                 }
 
+                case "provision_runtime": {
+                    // 启动租户专属 PostgREST 进程
+                    const startRes = await databaseService.startRuntime(project_ref);
+                    if (!startRes.success) return false;
+
+                    // 从输出中提取端口号
+                    const portMatch = startRes.output.match(/PORT=(\d+)/);
+                    const port = portMatch ? portMatch[1] : "";
+                    if (!port) {
+                        console.error(`[TaskWorker] Cannot determine PostgREST port for ${project_ref}`);
+                        return false;
+                    }
+
+                    // 在 Kong 中注册该租户的独立 upstream
+                    const upstreamRes = await databaseService.setupUpstream(project_ref, port);
+                    if (!upstreamRes.success) {
+                        console.error(`[TaskWorker] Failed to setup Kong upstream for ${project_ref}`);
+                        return false;
+                    }
+
+                    // 保存端口到项目配置
+                    await projectRepository.updateConfig(project_ref, {
+                        ...project.config,
+                        postgrest_port: parseInt(port),
+                    });
+
+                    console.log(`[TaskWorker] Runtime started for ${project_ref} on port ${port}`);
+                    return true;
+                }
+
                 case "provision_router": {
                     const res = await routerService.addRoute(project_ref);
                     await routerService.reload();
@@ -97,6 +127,14 @@ export class TaskWorker {
                     return true;
                 }
 
+                case "cleanup_runtime": {
+                    // 停止租户 PostgREST 进程
+                    await databaseService.stopRuntime(project_ref);
+                    // 移除 Kong Service/Route
+                    await databaseService.removeService(project_ref);
+                    return true;
+                }
+
                 case "cleanup_router": {
                     await routerService.removeRoute(project_ref);
                     await routerService.reload();
@@ -117,9 +155,12 @@ export class TaskWorker {
         const { project_ref, task_type } = task;
 
         // Workflow orchestration: queue the next task upon completion
+        // 流水线: provision_db → provision_s3 → provision_runtime → provision_router → provision_gateway
         if (task_type === "provision_db") {
             await taskRepository.createTask(project_ref, "provision_s3");
         } else if (task_type === "provision_s3") {
+            await taskRepository.createTask(project_ref, "provision_runtime");
+        } else if (task_type === "provision_runtime") {
             await taskRepository.createTask(project_ref, "provision_router");
         } else if (task_type === "provision_router") {
             await taskRepository.createTask(project_ref, "provision_gateway");
@@ -127,8 +168,10 @@ export class TaskWorker {
             // Final step completed, activate project
             await projectRepository.updateStatus(project_ref, "active");
             console.log(`[TaskWorker] Project ${project_ref} fully provisioned and activated.`);
+        } else if (task_type === "cleanup_runtime") {
+            // Runtime 清理完成后清理路由
+            await taskRepository.createTask(project_ref, "cleanup_router");
         } else if (task_type === "cleanup_db") {
-            // Deletion cleanups
             console.log(`[TaskWorker] Cleanup for ${project_ref} db done.`);
         }
     }
