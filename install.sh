@@ -244,36 +244,22 @@ check_os_compatibility() {
         case "$ID" in
             opencloudos|tencentos)
                 log_warn "检测到 $PRETTY_NAME"
-                log_warn "将使用兼容模式安装，避免升级核心系统库"
+                log_warn "将使用兼容模式安装，避免 Pigsty 使用 Rocky Linux 源"
                 export USE_SYSTEM_NGINX=true
                 export SKIP_EPEL=true
-                export LOCK_OPENSSL=true
+                export USE_OPENCLOUDOS_COMPAT=true
                 ;;
         esac
     fi
     
-    # ⚠️ 锁定 OpenSSL 版本，防止升级导致系统崩溃
-    if [[ "${LOCK_OPENSSL:-false}" == "true" ]]; then
-        log_info "锁定 OpenSSL 版本，防止升级..."
-        # 在 dnf.conf 中排除 OpenSSL 相关包
-        if ! grep -q "exclude=openssl\*" /etc/dnf/dnf.conf 2>/dev/null; then
-            echo "exclude=openssl* libssl* libcrypto*" >> /etc/dnf/dnf.conf
-            log_info "已在 /etc/dnf/dnf.conf 中排除 OpenSSL 升级"
-        fi
-        # 同时创建版本锁定文件
-        cat > /etc/dnf/protected.d/openssl.conf << 'EOF'
-[openssl]
-packages=openssl,openssl-libs,openssl-devel
-EOF
-        log_info "已创建 OpenSSL 版本锁定保护"
-    fi
-    
-    # 检查 OpenSSL 版本，防止意外升级
+    # 检查 OpenSSL 版本，记录日志
     OPENSSL_VER=$(openssl version 2>/dev/null | awk '{print $2}')
+    log_info "当前 OpenSSL 版本: $OPENSSL_VER"
+    
+    # 警告但不阻止安装
     if [[ "$OPENSSL_VER" =~ ^3\.[5-9] ]]; then
-        log_error "检测到非标准 OpenSSL 版本: $OPENSSL_VER"
-        log_error "这可能导致 sshd 等关键服务无法启动"
-        exit 1
+        log_warn "检测到非标准 OpenSSL 版本: $OPENSSL_VER"
+        log_warn "如果遇到 sshd 问题，请安装兼容的 openssh 包"
     fi
 }
 
@@ -1633,19 +1619,28 @@ install_pigsty() {
     
     cd ~
     
-    # ⚠️ OpenCloudOS 特殊处理：先安装 ansible，避免 Pigsty bootstrap 使用不兼容的 Rocky Linux repo
+    # ⚠️ OpenCloudOS 特殊处理：先安装 ansible 和依赖，避免 Pigsty bootstrap 使用不兼容的 Rocky Linux repo
+    local IS_OPENCLOUDOS=false
     if grep -qi "opencloudos" /etc/os-release 2>/dev/null; then
-        log_warn "检测到 OpenCloudOS，使用 EPOL 仓库安装 ansible..."
+        IS_OPENCLOUDOS=true
+        log_warn "检测到 OpenCloudOS，使用兼容模式安装..."
+        
         # 启用 EPOL 仓库
         dnf config-manager --set-enabled EPOL 2>/dev/null || true
-        # 直接安装 ansible
+        
+        # 安装 ansible 和必要的依赖
         if ! command -v ansible-playbook &> /dev/null; then
             log_info "从 EPOL 安装 ansible..."
-            dnf install -y ansible || {
+            dnf install -y ansible python3-jmespath || {
                 log_error "无法安装 ansible，请检查 EPOL 仓库是否可用"
                 exit 1
             }
         fi
+        
+        # 安装必要的 Ansible 集合
+        log_info "安装 Ansible 集合..."
+        ansible-galaxy collection install community.crypto ansible.posix community.general 2>/dev/null || true
+        
         log_info "ansible 已安装: $(ansible --version | head -1)"
     fi
     
@@ -1673,13 +1668,13 @@ install_pigsty() {
     cd ~/pigsty
     
     # ⚠️ OpenCloudOS 特殊处理：跳过 bootstrap 并恢复原始 repo
-    if grep -qi "opencloudos" /etc/os-release 2>/dev/null; then
+    if [[ "$IS_OPENCLOUDOS" == "true" ]]; then
         log_warn "OpenCloudOS 跳过 Pigsty bootstrap（已手动安装 ansible）"
         # 恢复原始 repo 配置（Pigsty 可能已替换为 Rocky Linux 源）
         if [[ -d /etc/yum.repos.d/pre-pigsty-backup ]]; then
             log_info "恢复 OpenCloudOS 原始 repo 配置..."
             # 移除 Pigsty 添加的 Rocky Linux 源
-            rm -f /etc/yum.repos.d/el9.repo 2>/dev/null || true
+            rm -f /etc/yum.repos.d/el9.repo /etc/yum.repos.d/node.repo /etc/yum.repos.d/pgsql.repo /etc/yum.repos.d/infra.repo 2>/dev/null || true
             # 恢复原始配置
             cp /etc/yum.repos.d/pre-pigsty-backup/*.repo /etc/yum.repos.d/ 2>/dev/null || true
             dnf clean all
@@ -1694,6 +1689,16 @@ install_pigsty() {
     # 使用 Supabase 配置模板
     log_info "配置 Supabase 模板..."
     ./configure -i "$INTERNAL_IP" -c app/supa
+    
+    # ⚠️ OpenCloudOS 特殊处理：禁用 Pigsty 的 repo 功能，使用系统自带包
+    if [[ "$IS_OPENCLOUDOS" == "true" ]]; then
+        log_info "配置 OpenCloudOS 兼容性..."
+        # 禁用 Pigsty 的 repo 模块，避免使用 Rocky Linux 源
+        sed -i 's/^node_repo_modules:.*/node_repo_modules: ""/' pigsty.yml 2>/dev/null || true
+        sed -i 's/^node_repo_remove:.*/node_repo_remove: false/' pigsty.yml 2>/dev/null || true
+        # 禁用 infra repo
+        sed -i 's/^infra_repo_enabled:.*/infra_repo_enabled: false/' pigsty.yml 2>/dev/null || true
+    fi
     
     # 注入 Lua 逻辑到模板
     inject_lua_config
