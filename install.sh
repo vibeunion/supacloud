@@ -1633,6 +1633,25 @@ install_pigsty() {
     
     cd ~
     
+    # ⚠️ OpenCloudOS 特殊处理：先安装 ansible，避免 Pigsty bootstrap 使用不兼容的 Rocky Linux repo
+    if grep -qi "opencloudos" /etc/os-release 2>/dev/null; then
+        log_warn "检测到 OpenCloudOS，使用 EPOL 仓库安装 ansible..."
+        # 启用 EPOL 仓库
+        dnf config-manager --set-enabled EPOL 2>/dev/null || true
+        # 直接安装 ansible
+        if ! command -v ansible-playbook &> /dev/null; then
+            log_info "从 EPOL 安装 ansible..."
+            dnf install -y ansible || {
+                log_warn "EPOL 安装 ansible 失败，尝试使用 pip..."
+                pip3 install ansible-core 2>/dev/null || pip install ansible-core 2>/dev/null || {
+                    log_error "无法安装 ansible，请检查 EPOL 仓库是否可用"
+                    exit 1
+                }
+            }
+        fi
+        log_info "ansible 已安装: $(ansible --version | head -1)"
+    fi
+    
     # 下载 Pigsty (判断 bootstrap 文件而非目录，避免 mkdir -p 提前创建空目录导致跳过)
     if [[ ! -f ~/pigsty/bootstrap ]]; then
         log_info "下载 Pigsty..."
@@ -1649,9 +1668,16 @@ install_pigsty() {
     
     cd ~/pigsty
     
-    # 运行 bootstrap
-    log_info "运行 bootstrap..."
-    ./bootstrap
+    # ⚠️ OpenCloudOS 跳过 bootstrap（已经安装了 ansible）
+    if grep -qi "opencloudos" /etc/os-release 2>/dev/null; then
+        log_warn "OpenCloudOS 跳过 Pigsty bootstrap（已手动安装 ansible）"
+        # 创建标记文件，让 Pigsty 认为已完成 bootstrap
+        touch ~/pigsty/.bootstrap_done 2>/dev/null || true
+    else
+        # 运行 bootstrap
+        log_info "运行 bootstrap..."
+        ./bootstrap
+    fi
     
     # 使用 Supabase 配置模板
     log_info "配置 Supabase 模板..."
