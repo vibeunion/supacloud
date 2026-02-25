@@ -200,6 +200,17 @@ generate_tenant_config() {
         exit 1
     fi
 
+    # 查询租户的 API 外部访问 URL（用于 GoTrue API_EXTERNAL_URL）
+    # 优先级：环境变量覆盖 > supacloud_meta.projects.api_url > 默认占位值
+    local api_external_url="${GOTRUE_API_EXTERNAL_URL:-}"
+    if [ -z "$api_external_url" ]; then
+        api_external_url=$(get_tenant_credentials "$ref" "api_url" 2>/dev/null || true)
+    fi
+    if [ -z "$api_external_url" ]; then
+        api_external_url="https://your-supacloud-domain.com"
+        echo "WARNING: API_EXTERNAL_URL not set. Set GOTRUE_API_EXTERNAL_URL env var or add api_url to supacloud_meta.projects" >&2
+    fi
+
     # 1. 生成 PostgREST .env 和 .conf
     cat > "${TENANT_CONFIG_DIR}/${ref}.env" <<EOF
 # SupaCloud Tenant PostgREST Runtime: ${ref}
@@ -235,6 +246,8 @@ EOF
 # Bug Fix: 绑定到 0.0.0.0 以允许 Kong 容器通过宿主机桥接 IP 访问
 GOTRUE_API_HOST=0.0.0.0
 GOTRUE_API_PORT=${gotrue_port}
+# Required: external URL used for email verification links and OAuth redirects
+API_EXTERNAL_URL=${api_external_url}
 GOTRUE_DB_DRIVER=postgres
 GOTRUE_DB_DATABASE_URL=postgres://supabase_auth_admin:${db_password}@${PG_HOST}:${PG_PORT}/${db_name}
 GOTRUE_SITE_URL=http://localhost:3000
