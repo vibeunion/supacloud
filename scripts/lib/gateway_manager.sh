@@ -168,8 +168,8 @@ rebuild_kong_config() {
 }
 
 setup_upstream() {
-    local pgrst_port="${3:-}"
-    local gotrue_port="${4:-}"
+    local pgrst_port="${1:-}"
+    local gotrue_port="${2:-}"
     
     if [ -z "$pgrst_port" ] || [ -z "$gotrue_port" ]; then
         echo "ERROR: pgrst_port and gotrue_port are required for setup-upstream" >&2
@@ -190,7 +190,7 @@ setup_upstream() {
     write_timeout: 60000
     routes:
       - name: route-pgrst-${PROJECT_REF}
-        strip_path: false
+        strip_path: true
         preserve_host: true
         paths:
           - /rest/v1
@@ -205,7 +205,7 @@ setup_upstream() {
     write_timeout: 60000
     routes:
       - name: route-gotrue-${PROJECT_REF}
-        strip_path: false
+        strip_path: true
         preserve_host: true
         paths:
           - /auth/v1
@@ -243,7 +243,7 @@ case "$ACTION" in
         enable_jwt
         ;;
     setup-upstream)
-        setup_upstream
+        setup_upstream "${3:-}" "${4:-}"
         ;;
     remove-service)
         remove_service
