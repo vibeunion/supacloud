@@ -1642,14 +1642,18 @@ install_pigsty() {
         if ! command -v ansible-playbook &> /dev/null; then
             log_info "从 EPOL 安装 ansible..."
             dnf install -y ansible || {
-                log_warn "EPOL 安装 ansible 失败，尝试使用 pip..."
-                pip3 install ansible-core 2>/dev/null || pip install ansible-core 2>/dev/null || {
-                    log_error "无法安装 ansible，请检查 EPOL 仓库是否可用"
-                    exit 1
-                }
+                log_error "无法安装 ansible，请检查 EPOL 仓库是否可用"
+                exit 1
             }
         fi
         log_info "ansible 已安装: $(ansible --version | head -1)"
+    fi
+    
+    # 备份原始 repo 配置（Pigsty 会替换）
+    if [[ -d /etc/yum.repos.d ]] && [[ ! -d /etc/yum.repos.d/pre-pigsty-backup ]]; then
+        log_info "备份原始 repo 配置..."
+        mkdir -p /etc/yum.repos.d/pre-pigsty-backup
+        cp /etc/yum.repos.d/*.repo /etc/yum.repos.d/pre-pigsty-backup/ 2>/dev/null || true
     fi
     
     # 下载 Pigsty (判断 bootstrap 文件而非目录，避免 mkdir -p 提前创建空目录导致跳过)
@@ -1668,11 +1672,19 @@ install_pigsty() {
     
     cd ~/pigsty
     
-    # ⚠️ OpenCloudOS 跳过 bootstrap（已经安装了 ansible）
+    # ⚠️ OpenCloudOS 特殊处理：跳过 bootstrap 并恢复原始 repo
     if grep -qi "opencloudos" /etc/os-release 2>/dev/null; then
         log_warn "OpenCloudOS 跳过 Pigsty bootstrap（已手动安装 ansible）"
-        # 创建标记文件，让 Pigsty 认为已完成 bootstrap
-        touch ~/pigsty/.bootstrap_done 2>/dev/null || true
+        # 恢复原始 repo 配置（Pigsty 可能已替换为 Rocky Linux 源）
+        if [[ -d /etc/yum.repos.d/pre-pigsty-backup ]]; then
+            log_info "恢复 OpenCloudOS 原始 repo 配置..."
+            # 移除 Pigsty 添加的 Rocky Linux 源
+            rm -f /etc/yum.repos.d/el9.repo 2>/dev/null || true
+            # 恢复原始配置
+            cp /etc/yum.repos.d/pre-pigsty-backup/*.repo /etc/yum.repos.d/ 2>/dev/null || true
+            dnf clean all
+            dnf makecache
+        fi
     else
         # 运行 bootstrap
         log_info "运行 bootstrap..."
