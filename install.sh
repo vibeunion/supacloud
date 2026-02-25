@@ -247,8 +247,25 @@ check_os_compatibility() {
                 log_warn "将使用兼容模式安装，避免升级核心系统库"
                 export USE_SYSTEM_NGINX=true
                 export SKIP_EPEL=true
+                export LOCK_OPENSSL=true
                 ;;
         esac
+    fi
+    
+    # ⚠️ 锁定 OpenSSL 版本，防止升级导致系统崩溃
+    if [[ "${LOCK_OPENSSL:-false}" == "true" ]]; then
+        log_info "锁定 OpenSSL 版本，防止升级..."
+        # 在 dnf.conf 中排除 OpenSSL 相关包
+        if ! grep -q "exclude=openssl\*" /etc/dnf/dnf.conf 2>/dev/null; then
+            echo "exclude=openssl* libssl* libcrypto*" >> /etc/dnf/dnf.conf
+            log_info "已在 /etc/dnf/dnf.conf 中排除 OpenSSL 升级"
+        fi
+        # 同时创建版本锁定文件
+        cat > /etc/dnf/protected.d/openssl.conf << 'EOF'
+[openssl]
+packages=openssl,openssl-libs,openssl-devel
+EOF
+        log_info "已创建 OpenSSL 版本锁定保护"
     fi
     
     # 检查 OpenSSL 版本，防止意外升级
