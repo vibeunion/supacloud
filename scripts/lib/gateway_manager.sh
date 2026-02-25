@@ -126,7 +126,9 @@ enable_jwt() {
 # ========== Per-Tenant Upstream（方案C+：多租户动态路由 - 声明式） ==========
 # 将租户配置追加到 Kong Declarative YAML 中并热重载
 rebuild_kong_config() {
-    local KONG_YML="/root/pigsty/app/supabase/volumes/api/kong.yml"
+    # 支持通过 KONG_YML 环境变量覆盖路径，以适配不同部署场景（Pigsty / 自定义安装）
+    # 默认路径对应 Pigsty 标准安装目录
+    local KONG_YML="${KONG_YML:-/root/pigsty/app/supabase/volumes/api/kong.yml}"
     local KONG_BASE="${KONG_YML}.base"
     local TENANT_DIR="/etc/supabase/kong_tenants"
     
