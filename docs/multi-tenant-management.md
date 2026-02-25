@@ -136,6 +136,14 @@ Kong 根据 `Host` Header 动态验证不同项目的 JWT 密钥。
 | PUT | `/v1/projects/:ref/settings` | 更新项目配置 |
 | GET | `/v1/projects/:ref/status` | 获取项目运行状态 |
 | POST | `/v1/projects/:ref/restart` | 重启项目服务 |
+| GET | `/v1/projects/:ref/types/typescript`| 获取数据库 TS 类型(供 CLI 使用) |
+| PATCH| `/v1/projects/:ref/config/auth` | 设置 Auth/OAuth/SMTP 等提供商 |
+| GET | `/v1/projects/:ref/secrets` | 控制边缘函数等敏感变量 |
+
+#### 命令行生态 (Supabase CLI)
+| 方法 | 端点 | 说明 |
+|------|------|------|
+| GET | `/v1/oauth/authorize` | 兼容 `supabase login` 的令牌派发页 |
 
 #### 密钥管理
 
