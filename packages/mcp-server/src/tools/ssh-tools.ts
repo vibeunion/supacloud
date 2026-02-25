@@ -24,10 +24,62 @@ export function registerSshTools(server: McpServer, ssh: SshTransport): void {
         }
     );
 
+    // ── 配置目标服务器 SSH 自连接 (Ansible 必需) ──
+    server.tool(
+        "setup_server_ssh",
+        "在目标服务器上配置 root 用户 SSH 本机自连接，修复 OpenSSL 兼容性，为 Pigsty/Ansible 安装做前置准备",
+        {},
+        async () => {
+            // 1. 确保 OpenSSL 1.1 兼容库存在
+            const opensslFix = await ssh.exec(
+                "dnf install -y compat-openssl11 libatomic 2>/dev/null; " +
+                "ldconfig; " +
+                "openssl version"
+            );
+
+            // 2. 配置 root SSH 自连接
+            const sshSetup = await ssh.exec(
+                "mkdir -p ~/.ssh && chmod 700 ~/.ssh && " +
+                "if [ ! -f ~/.ssh/id_ed25519 ]; then ssh-keygen -t ed25519 -N '' -f ~/.ssh/id_ed25519; fi && " +
+                "cat ~/.ssh/id_ed25519.pub >> ~/.ssh/authorized_keys && " +
+                "chmod 600 ~/.ssh/authorized_keys && " +
+                "sed -i 's/^#\\?PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config && " +
+                "sed -i 's/^#\\?PubkeyAuthentication.*/PubkeyAuthentication yes/' /etc/ssh/sshd_config && " +
+                "grep -q '^PermitRootLogin' /etc/ssh/sshd_config || echo 'PermitRootLogin yes' >> /etc/ssh/sshd_config && " +
+                "systemctl restart sshd || service ssh restart"
+            );
+
+            // 3. 等 sshd 就绪，填充 known_hosts，验证自连接
+            await ssh.exec("sleep 2");
+            const keyscan = await ssh.exec(
+                "IP=$(hostname -I | cut -d' ' -f1) && " +
+                "ssh-keyscan -H localhost 127.0.0.1 $IP >> ~/.ssh/known_hosts 2>/dev/null && " +
+                "chmod 600 ~/.ssh/known_hosts"
+            );
+            const verify = await ssh.exec(
+                "ssh -o StrictHostKeyChecking=no root@localhost 'echo SSH_SELF_OK'"
+            );
+
+            const success = verify.stdout.includes("SSH_SELF_OK");
+            return {
+                content: [{
+                    type: "text",
+                    text: [
+                        success ? "✅ SSH 自连接配置成功，Ansible 可正常运行" : "❌ SSH 自连接验证失败，请检查 sshd 状态",
+                        `\nOpenSSL: ${opensslFix.stdout.trim()}`,
+                        `SSH 配置: exit ${sshSetup.code}`,
+                        `known_hosts: exit ${keyscan.code}`,
+                        `自连接验证: ${verify.stdout.trim() || verify.stderr.trim()}`,
+                    ].join("\n"),
+                }],
+            };
+        }
+    );
+
     // ── 安装 SupaCloud ──
     server.tool(
         "install_supacloud",
-        "在目标服务器上一键安装 SupaCloud (Pigsty + Supabase)",
+        "在目标服务器上一键安装 SupaCloud (Pigsty + Supabase)。请先调用 setup_server_ssh 确保前置环境就绪。",
         {
             public_domain: z.string().describe("API 域名，例如 api.example.com"),
             studio_domain: z.string().optional().describe("Studio 域名，默认同 public_domain"),
@@ -40,38 +92,54 @@ export function registerSshTools(server: McpServer, ssh: SshTransport): void {
             // 1. 检测基础环境
             const osCheck = await ssh.exec("cat /etc/os-release | head -5");
 
-            // 2. 构建配置
-            const envLines = [
+            // 2. 写入配置文件
+            const envContent = [
                 `SUPABASE_PUBLIC_DOMAIN=${public_domain}`,
                 `SUPABASE_STUDIO_DOMAIN=${studio_domain ?? public_domain}`,
                 `EDGE_RUNTIME=${edge_runtime}`,
                 `S3_STORAGE_TYPE=${storage_type}`,
-            ];
-            if (postgres_password) envLines.push(`POSTGRES_PASSWORD=${postgres_password}`);
-            if (dashboard_password) envLines.push(`DASHBOARD_PASSWORD=${dashboard_password}`);
+                postgres_password ? `POSTGRES_PASSWORD=${postgres_password}` : "",
+                dashboard_password ? `DASHBOARD_PASSWORD=${dashboard_password}` : "",
+            ].filter(Boolean).join("\n");
 
-            // 3. 下载并执行安装脚本
+            await ssh.exec(`cat > /tmp/supacloud-config.env << 'ENVEOF'\n${envContent}\nENVEOF`);
+
+            // 3. 拉取 setup.sh（国内多镜像回退）
+            const downloadCmd = [
+                "SETUP=/tmp/supacloud-setup.sh",
+                "rm -f $SETUP",
+                // 优先尝试 ghproxy，失败则直连 github
+                "curl -fsSL https://ghproxy.net/https://raw.githubusercontent.com/zuohuadong/supacloud/main/setup.sh -o $SETUP 2>/dev/null",
+                "[ -s $SETUP ] || curl -fsSL https://raw.githubusercontent.com/zuohuadong/supacloud/main/setup.sh -o $SETUP 2>/dev/null",
+                "[ -s $SETUP ] && echo 'downloaded' || echo 'DOWNLOAD_FAILED'",
+            ].join(" && ");
+            const download = await ssh.exec(downloadCmd, 30_000);
+
+            if (!download.stdout.includes("downloaded")) {
+                return {
+                    content: [{ type: "text", text: "❌ setup.sh 下载失败，请检查服务器网络连通性。可尝试 ssh_exec 手动执行：\ncurl -fsSL https://ghproxy.net/https://raw.githubusercontent.com/zuohuadong/supacloud/main/setup.sh -o /tmp/setup.sh" }],
+                };
+            }
+
+            // 4. 后台启动安装脚本（避免 SSH 超时中断）
             const installCmd = [
-                `cd /tmp`,
-                `curl -fsSL https://raw.githubusercontent.com/zuohuadong/supacloud/main/setup.sh -o setup.sh`,
-                `cat > /tmp/supacloud-config.env << 'ENVEOF'`,
-                ...envLines,
-                `ENVEOF`,
-                `export $(cat /tmp/supacloud-config.env | xargs)`,
-                `bash setup.sh`,
-            ].join("\n");
+                "export $(cat /tmp/supacloud-config.env | grep -v '^#' | xargs)",
+                "nohup bash /tmp/supacloud-setup.sh > /tmp/supacloud-install.log 2>&1 &",
+                "INSTALL_PID=$!",
+                "sleep 3",
+                "kill -0 $INSTALL_PID 2>/dev/null && echo \"INSTALL_STARTED pid=$INSTALL_PID\" || echo 'INSTALL_FAILED'",
+            ].join(" && ");
 
-            const result = await ssh.exec(installCmd, 1800_000); // 30 分钟超时
+            const result = await ssh.exec(installCmd, 30_000);
+            const started = result.stdout.includes("INSTALL_STARTED");
 
             return {
-                content: [
-                    {
-                        type: "text",
-                        text: result.success
-                            ? `✅ SupaCloud 安装成功！\n\n操作系统:\n${osCheck.stdout}\n\n安装日志(最后 500 字符):\n${result.stdout.slice(-500)}`
-                            : `❌ 安装失败 (exit ${result.code})\n\nstderr:\n${result.stderr.slice(-1000)}\n\nstdout:\n${result.stdout.slice(-500)}`,
-                    },
-                ],
+                content: [{
+                    type: "text",
+                    text: started
+                        ? `✅ SupaCloud 安装已在后台启动！\n\n操作系统:\n${osCheck.stdout}\n\n进程: ${result.stdout.trim()}\n\n📋 查看实时进度 (通过 ssh_exec):\ntail -f /tmp/supacloud-install.log\n\n安装约需 15-30 分钟，完成后可使用 diagnose_server 验证服务状态。`
+                        : `❌ 启动失败 (exit ${result.code})\n${result.stderr.slice(-500)}`,
+                }],
             };
         }
     );
