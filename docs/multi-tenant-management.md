@@ -340,3 +340,63 @@ supacloud_project_storage_bytes{project_ref="abc123"}
 | 2 | Shell 脚本集成 | 完整的项目创建流程 |
 | 3 | Nginx 动态路由 | 多租户域名支持 |
 | 4 | 监控集成 | Grafana 多项目仪表板 |
+| 5 | MCP Server | AI Agent 原生基础设施操控 |
+
+---
+
+## 十、MCP Server (AI Agent 集成)
+
+### 10.1 架构设计
+
+MCP Server 以 **npm 包** 形式运行在用户本地（Cursor / Claude Desktop），通过两条通道连接目标服务器：
+
+```
+用户本机 (AI IDE)
+┌───────────────────────────────┐
+│  @supacloud/mcp-server (stdio)│
+│  ┌──────────┐  ┌────────────┐│
+│  │ SSH 通道  │  │ HTTP 通道  ││
+│  └────┬─────┘  └─────┬──────┘│
+└───────┼──────────────┼───────┘
+        │              │
+   ═════╪══════════════╪═════ 网络
+        │              │
+┌───────▼──────────────▼───────┐
+│         目标服务器             │
+│  Port 22 (SSH)  Port 9090 (API)│
+│  install.sh     Management API │
+└──────────────────────────────┘
+```
+
+### 10.2 两阶段工具模型
+
+| 阶段 | SupaCloud 状态 | 传输通道 | 可用工具 |
+|------|---------------|---------|---------|
+| 安装前 | 未安装 | SSH | `ping_server` `install_supacloud` `upgrade_supacloud` `diagnose_server` `ssh_exec` |
+| 安装后 | 运行中 | HTTP API | 项目 CRUD、函数部署、Auth 配置、Secrets、备份、监控等 23 个工具 |
+
+### 10.3 配置方式
+
+```json
+{
+  "mcpServers": {
+    "supacloud": {
+      "command": "npx",
+      "args": ["-y", "@supacloud/mcp-server"],
+      "env": {
+        "SUPACLOUD_HOST": "服务器 IP",
+        "SUPACLOUD_SSH_KEY": "~/.ssh/id_rsa",
+        "SUPACLOUD_API_TOKEN": "Master Token (安装后填入)"
+      }
+    }
+  }
+}
+```
+
+### 10.4 安全策略
+
+- SSH 密钥/密码通过环境变量注入，不持久化
+- API Token 与 Management API 的 Master Token 一致
+- 工具级权限隔离：SSH 工具和 HTTP 工具根据环境变量独立注册
+- 敏感操作（`ssh_exec`、`delete_project`）在工具描述中标注风险
+
