@@ -35,7 +35,9 @@ generate_jwt() {
     local exp=$((now + 315360000)) # 10 年
 
     local header='{"alg":"HS256","typ":"JWT"}'
-    local payload="{\"role\":\"${role}\",\"iss\":\"supabase\",\"iat\":${now},\"exp\":${exp}}"
+    # Supabase/GoTrue default behavior requires an 'aud' claim to query correct schemas and user records.
+    # Without 'aud' (even as service_role), Admin APIs mistakenly filter out 'authenticated' users. 
+    local payload="{\"aud\":\"authenticated\",\"role\":\"${role}\",\"iss\":\"supabase\",\"iat\":${now},\"exp\":${exp}}"
 
     local encoded_header
     encoded_header=$(echo -n "$header" | base64url_encode)
