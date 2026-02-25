@@ -661,16 +661,44 @@ EOF
 setup_podman_socket() {
     log_info "配置 Podman socket..."
     
-    # 启用 podman socket
+    # 启用 podman systemd 服务（参考: systemctl enable/start podman）
     if systemctl list-unit-files | grep -q podman.socket; then
         systemctl enable --now podman.socket || true
     fi
+    if systemctl list-unit-files | grep -q 'podman.service'; then
+        systemctl enable podman 2>/dev/null || true
+        systemctl start  podman 2>/dev/null || true
+    fi
     
-    # 创建 Docker socket 符号链接
+    # 创建 Docker socket 符号链接（兼容 docker-compose 默认查找路径）
     if [[ -S /run/podman/podman.sock ]] && [[ ! -e /var/run/docker.sock ]]; then
         ln -sf /run/podman/podman.sock /var/run/docker.sock
+    elif [[ -S /run/podman/podman.sock ]] && [[ -L /var/run/docker.sock ]]; then
+        # 已是符号链接，无需处理
+        true
     fi
-     
+    
+    # 将 DOCKER_HOST 写入 /etc/profile.d/supacloud.sh，使 docker-compose 能找到 podman socket
+    # 参考方案: export DOCKER_HOST=unix:///var/run/podman/podman.sock
+    mkdir -p /etc/supabase
+    PROFILE_FILE="/etc/profile.d/supacloud.sh"
+    if [[ -f "$PROFILE_FILE" ]]; then
+        # 已存在（由 install_management_api 创建），追加 DOCKER_HOST
+        if ! grep -q 'DOCKER_HOST' "$PROFILE_FILE"; then
+            echo 'export DOCKER_HOST=unix:///var/run/podman/podman.sock' >> "$PROFILE_FILE"
+        fi
+    else
+        # 尚未创建，提前写入（install_management_api 会追加 MASTER_TOKEN）
+        cat > "$PROFILE_FILE" <<'EOF'
+# SupaCloud CLI 环境变量 - 由 install.sh 自动生成
+export DOCKER_HOST=unix:///var/run/podman/podman.sock
+EOF
+    fi
+    chmod 644 "$PROFILE_FILE"
+    # 当前 shell 立即生效
+    export DOCKER_HOST=unix:///var/run/podman/podman.sock
+    log_info "DOCKER_HOST 已设置: $DOCKER_HOST"
+    
     # 配置镜像加速
     configure_podman_mirrors
 }
@@ -702,14 +730,18 @@ install_juicefs() {
 install_docker_compose() {
     log_step "检查 Docker Compose..."
     
-    # 检查是否已安装
-    if command -v docker-compose &> /dev/null; then
+    COMPOSE_VERSION="v5.1.0"
+    
+    # 如果使用 Podman，始终安装独立的 docker-compose 二进制
+    # （而非依赖 'podman compose' 子命令，版本可能较旧且行为有差异）
+    if [[ "${CONTAINER_RUNTIME:-}" != "podman" ]] && command -v docker-compose &> /dev/null; then
         log_info "Docker Compose 已安装: $(docker-compose --version)"
         return
     fi
     
-    # 检查 docker compose (plugin 形式)
-    if docker compose version &> /dev/null 2>&1; then
+    # Podman 环境或尚未安装时，检查插件形式（docker compose）
+    # 注意：podman 下 'docker compose' 实际调用 podman-compose，行为与原版不同，跳过
+    if [[ "${CONTAINER_RUNTIME:-}" != "podman" ]] && docker compose version &> /dev/null 2>&1; then
         log_info "Docker Compose (plugin) 已安装"
         if ! command -v docker-compose &> /dev/null; then
             mkdir -p /usr/local/bin
@@ -722,18 +754,15 @@ EOF
         return
     fi
     
-    log_warn "Docker Compose 未安装，正在安装..."
-    
-    COMPOSE_VERSION="v2.32.3"
+    log_info "安装独立 docker-compose ${COMPOSE_VERSION}..."
     COMPOSE_URL="https://github.com/docker/compose/releases/download/${COMPOSE_VERSION}/docker-compose-$(uname -s)-$(uname -m)"
     
     # 优先使用 gh-proxy.net 代理加速下载
-    log_info "使用 gh-proxy.net 代理加速下载..."
-    if curl -L --progress-bar "https://gh-proxy.net/$COMPOSE_URL" -o /usr/local/bin/docker-compose; then
+    if curl -fsSL --progress-bar "https://gh-proxy.net/${COMPOSE_URL}" -o /usr/local/bin/docker-compose 2>/dev/null; then
         log_info "代理下载成功"
     else
         log_warn "代理下载失败，尝试直接下载..."
-        curl -L --progress-bar "$COMPOSE_URL" -o /usr/local/bin/docker-compose
+        curl -fsSL --progress-bar "${COMPOSE_URL}" -o /usr/local/bin/docker-compose
     fi
     
     chmod +x /usr/local/bin/docker-compose
@@ -1579,13 +1608,19 @@ install_pigsty() {
         exit 1
     fi
 
-    log_info "配置 Docker..."
-    if [[ -x "./docker.yml" ]]; then
-        ./docker.yml || true
-    elif [[ -f "docker.yml" ]] && command -v ansible-playbook &> /dev/null; then
-        ansible-playbook docker.yml $EXTRA_ARGS || true
+    # 仅在使用 Docker 运行时时才运行 docker.yml
+    # 若使用 Podman，跳过以避免与系统自带的 podman-docker 包冲突（如 Rocky Linux 9）
+    if [[ "${CONTAINER_RUNTIME:-}" == "podman" ]]; then
+        log_info "检测到 Podman 运行时，跳过 docker.yml（避免与 podman-docker 冲突）"
     else
-        log_warn "未找到 docker.yml，跳过 Docker 配置"
+        log_info "配置 Docker..."
+        if [[ -x "./docker.yml" ]]; then
+            ./docker.yml || true
+        elif [[ -f "docker.yml" ]] && command -v ansible-playbook &> /dev/null; then
+            ansible-playbook docker.yml $EXTRA_ARGS || true
+        else
+            log_warn "未找到 docker.yml，跳过 Docker 配置"
+        fi
     fi
 
     log_info "启动 Supabase..."
@@ -2158,8 +2193,17 @@ EOF
 
     # 初始化数据库
     log_info "初始化 Management API 数据库..."
+    # 先用 peer 认证（su postgres）确保 supacloud_meta 库存在，绕过 TCP 密码认证问题
+    log_info "创建 supacloud_meta 数据库（peer 认证）..."
+    su - postgres -c "psql -tAc \"SELECT 1 FROM pg_database WHERE datname='supacloud_meta'\" | grep -q 1 || psql -c 'CREATE DATABASE supacloud_meta'" 2>/dev/null && \
+        log_info "supacloud_meta 数据库就绪" || \
+        log_warn "数据库预创建失败，将由 bun run db:init 尝试创建"
+    # 确保 postgres 用户密码已设置（供 Bun TCP 连接使用）
+    if [[ -n "${POSTGRES_PASSWORD:-}" ]]; then
+        su - postgres -c "psql -c \"ALTER USER postgres PASSWORD '${POSTGRES_PASSWORD}'\"" 2>/dev/null || true
+    fi
     cd "$API_INSTALL_DIR"
-    bun run db:init || log_warn "数据库初始化可能需要稍后手动执行"
+    bun run db:init || log_warn "数据库初始化可能需要稍后手动执行: cd ${API_INSTALL_DIR} && bun run db:init"
 
     # 安装 Systemd 服务
     if [[ -f "${SCRIPT_DIR}/scripts/supacloud-api.service" ]]; then
@@ -2173,6 +2217,8 @@ EOF
     # 安装 CLI 工具
     if [[ -f "${SCRIPT_DIR}/supacloud" ]]; then
         cp "${SCRIPT_DIR}/supacloud" /usr/local/bin/supacloud
+        # 去除 Windows CRLF 换行符，避免 /bin/bash^M 解析错误
+        sed -i 's/\r//' /usr/local/bin/supacloud
         chmod +x /usr/local/bin/supacloud
         log_info "CLI 工具已安装: supacloud"
     fi
@@ -2182,6 +2228,15 @@ EOF
         cp "${SCRIPT_DIR}/scripts/health_check.sh" "$SCRIPTS_INSTALL_DIR/"
         chmod +x "$SCRIPTS_INSTALL_DIR/health_check.sh"
     fi
+
+    # 将 MASTER_TOKEN 写入系统 profile，使后续 shell 会话无需手动设置即可直接使用 supacloud CLI
+    cat > /etc/profile.d/supacloud.sh <<EOF
+# SupaCloud CLI 环境变量 - 由 install.sh 自动生成
+export MASTER_TOKEN="${MASTER_TOKEN}"
+export MANAGEMENT_API_URL="http://localhost:9090"
+EOF
+    chmod 644 /etc/profile.d/supacloud.sh
+    log_info "MASTER_TOKEN 已写入 /etc/profile.d/supacloud.sh（新 shell 会话自动生效）"
 
     log_info "Management API 安装完成"
     log_info "  API 地址: http://localhost:9090"
@@ -2209,6 +2264,14 @@ show_completion() {
     echo -e "${YELLOW}  /etc/supabase/supacloud-credentials.env${NC}"
     echo ""
     echo "请妥善保管此文件！"
+    echo ""
+    echo "Management API Master Token:"
+    if [[ -f /etc/supabase/master-token.env ]]; then
+        source /etc/supabase/master-token.env 2>/dev/null || true
+        echo -e "  ${YELLOW}MASTER_TOKEN=${MASTER_TOKEN}${NC}"
+    fi
+    echo "  立即生效: source /etc/profile.d/supacloud.sh"
+    echo "  下次登录后自动生效（已写入 /etc/profile.d/supacloud.sh）"
     echo ""
     echo "下一步操作:"
     echo "  1. 将域名 ${SUPABASE_PUBLIC_DOMAIN} 的 DNS A 记录指向服务器公网 IP"
