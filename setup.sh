@@ -161,6 +161,7 @@ main() {
     echo "============================================================"
     echo -e "${NC}"
 
+    lock_openssl
     install_base_deps
     clone_repo
     generate_config
