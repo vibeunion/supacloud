@@ -20,7 +20,14 @@ async function initDatabase() {
       await adminSql`CREATE DATABASE supacloud_meta`.simple();
     }
   } catch (error) {
-    console.log("Database may already exist, continuing...");
+    // 连接 postgres 库可能因 pg_hba.conf TCP 认证失败
+    // install.sh 已在调用 db:init 前通过 su postgres psql 预创建了数据库
+    // 若仍失败，请手动执行：
+    //   su - postgres -c "psql -c 'CREATE DATABASE supacloud_meta'"
+    //   ALTER USER postgres PASSWORD '<your_password>';
+    console.warn("Warning: Could not verify/create supacloud_meta via admin connection.");
+    console.warn("If the database was pre-created by install.sh, this is safe to ignore.");
+    console.warn("To fix manually: su - postgres -c \"psql -c 'CREATE DATABASE supacloud_meta'\"");
   } finally {
     await adminSql.close();
   }
