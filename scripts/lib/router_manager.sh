@@ -37,6 +37,51 @@ ensure_directory() {
     fi
 }
 
+# ========== SSL 模式检测 ==========
+# 检测当前 Nginx 是否支持 Pigsty ACME 模块，回退到 certbot 或自签名
+# 解决：在非 Pigsty 定制 Nginx 上使用 acme_certificate 指令导致 emerg 崩溃
+detect_ssl_mode() {
+    if nginx -V 2>&1 | grep -qi 'acme'; then
+        echo "acme"
+    elif [ -d "/etc/letsencrypt/live" ]; then
+        echo "certbot"
+    else
+        echo "self-signed"
+    fi
+}
+
+# 根据 SSL 模式生成对应的配置块
+# $1: 域名
+generate_ssl_config() {
+    local domain="$1"
+    local ssl_mode
+    ssl_mode=$(detect_ssl_mode)
+
+    case "$ssl_mode" in
+        acme)
+            cat <<'SSL_BLOCK'
+    # Pigsty ACME 自动证书
+    acme_certificate letsencrypt;
+    ssl_certificate     $acme_certificate;
+    ssl_certificate_key $acme_certificate_key;
+SSL_BLOCK
+            ;;
+        certbot)
+            cat <<SSL_BLOCK
+    # Let's Encrypt (certbot)
+    ssl_certificate     /etc/letsencrypt/live/${domain}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${domain}/privkey.pem;
+SSL_BLOCK
+            ;;
+        self-signed)
+            cat <<'SSL_BLOCK'
+    # Self-signed / no SSL (listen on 80 only)
+    # TODO: Configure proper SSL certificates
+SSL_BLOCK
+            ;;
+    esac
+}
+
 # 添加项目路由
 add_route() {
     local project_domain="${DOMAIN:-${PROJECT_REF}.${BASE_DOMAIN}}"
@@ -46,11 +91,18 @@ add_route() {
 
     ensure_directory
 
-    echo "Adding Nginx route for ${PROJECT_REF}..."
+    local ssl_mode
+    ssl_mode=$(detect_ssl_mode)
+    echo "Adding Nginx route for ${PROJECT_REF}... (SSL mode: ${ssl_mode})"
+
+    # 生成 SSL 配置
+    local api_ssl_block
+    api_ssl_block=$(generate_ssl_config "$api_domain")
 
     cat > "$config_file" <<EOF
 # SupaCloud tenant: ${PROJECT_REF}
 # Generated: $(date -u +"%Y-%m-%dT%H:%M:%SZ")
+# SSL mode: ${ssl_mode}
 
 # --- API Endpoint ---
 server {
@@ -58,10 +110,7 @@ server {
     listen 443 ssl;
     server_name ${api_domain};
 
-    # ACME 自动证书 (Pigsty 4.x 原生支持)
-    acme_certificate letsencrypt;
-    ssl_certificate     \$acme_certificate;
-    ssl_certificate_key \$acme_certificate_key;
+${api_ssl_block}
 
     # 安全头
     add_header X-Project-Ref ${PROJECT_REF} always;
@@ -99,9 +148,6 @@ server {
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto \$scheme;
-        
-        # 只要带上这个端点，Studio 就能识别项目
-        # 注意：这里可能需要额外的 Header 或配置来让 Studio 自动切换项目
     }
 }
 EOF
@@ -111,7 +157,7 @@ EOF
     echo "  - Studio: ${studio_domain}"
 }
 
-# 添加项目自定义域名 (联动 ACME)
+# 添加项目自定义域名 (联动 ACME / certbot)
 add_custom_domain() {
     local custom_domain="${DOMAIN}"
     if [ -z "$custom_domain" ]; then
@@ -124,15 +170,13 @@ add_custom_domain() {
 
     echo "Adding custom domain ${custom_domain} for ${PROJECT_REF}..."
 
-    # 根据是否存在静态证书决定 SSL 配置
+    # 根据证书存在情况和 Nginx 能力决定 SSL 配置
     local ssl_config
     if [ -f "/etc/pigsty/cert/${custom_domain}.pem" ]; then
         ssl_config="    ssl_certificate     /etc/pigsty/cert/${custom_domain}.pem;
     ssl_certificate_key /etc/pigsty/cert/${custom_domain}.key;"
     else
-        ssl_config='    acme_certificate letsencrypt;
-    ssl_certificate     \$acme_certificate;
-    ssl_certificate_key \$acme_certificate_key;'
+        ssl_config=$(generate_ssl_config "$custom_domain")
     fi
 
     cat > "$config_file" <<EOF
