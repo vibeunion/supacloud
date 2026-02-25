@@ -472,18 +472,22 @@ setup_swap() {
     
     log_info "总内存: ${TOTAL_MEM_GB}GB"
     
-    # 检查是否需要 Swap (< 3.5GB)
-    NEED_SWAP=$(echo "$TOTAL_MEM_GB < 3.5" | bc)
+    # 检查是否需要 Swap (< 4.2GB，全面覆盖标称 4GB 内存的服务器)
+    NEED_SWAP=$(echo "$TOTAL_MEM_GB < 4.2" | bc)
     
     if [[ "$NEED_SWAP" -eq 1 ]]; then
         SWAP_SIZE=${SWAP_SIZE_GB:-4}
-        log_warn "内存低于 3.5GB，将创建 ${SWAP_SIZE}GB Swap"
+        log_warn "内存低于 4.2GB，将创建 ${SWAP_SIZE}GB Swap"
         
         if [[ -f /swapfile ]]; then
             log_info "Swap 文件已存在，正在启用..."
             swapon /swapfile 2>/dev/null || true
         else
-            fallocate -l ${SWAP_SIZE}G /swapfile
+            # 优先使用 fallocate 失败时回退到 dd (解决 xfs/btrfs 等可能不支持 fallocate 预分配的问题)
+            if ! fallocate -l ${SWAP_SIZE}G /swapfile 2>/dev/null; then
+                log_info "fallocate 分配失败，回退使用 dd 创建 swap 文件..."
+                dd if=/dev/zero of=/swapfile bs=1M count=$((SWAP_SIZE * 1024)) status=progress
+            fi
             chmod 600 /swapfile
             mkswap /swapfile
             swapon /swapfile
