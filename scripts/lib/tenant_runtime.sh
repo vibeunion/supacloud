@@ -212,7 +212,7 @@ PGRST_DB_POOL=10
 PGRST_DB_POOL_ACQUISITION_TIMEOUT=10
 PGRST_LOG_LEVEL=warn
 EOF
-    chmod 600 "${TENANT_CONFIG_DIR}/${ref}.env"
+    chmod 644 "${TENANT_CONFIG_DIR}/${ref}.env"
 
     cat > "${TENANT_CONFIG_DIR}/${ref}.conf" <<EOF
 # PostgREST config for tenant: ${ref}
@@ -221,16 +221,19 @@ db-schemas = "public, storage, graphql_public"
 db-anon-role = "anon"
 jwt-secret = "${jwt_secret}"
 server-port = ${pgrst_port}
+# Bug Fix: 绑定到 0.0.0.0 以允许 Kong 容器（podman/docker 网络）通过宿主机桥接 IP 访问
+server-host = "0.0.0.0"
 db-pool = 10
 db-pool-acquisition-timeout = 10
 log-level = "warn"
 EOF
-    chmod 600 "${TENANT_CONFIG_DIR}/${ref}.conf"
+    chmod 644 "${TENANT_CONFIG_DIR}/${ref}.conf"
 
     # 2. 生成 GoTrue .env
     cat > "${TENANT_CONFIG_DIR}/${ref}_gotrue.env" <<EOF
 # SupaCloud Tenant GoTrue Runtime: ${ref}
-GOTRUE_API_HOST=127.0.0.1
+# Bug Fix: 绑定到 0.0.0.0 以允许 Kong 容器通过宿主机桥接 IP 访问
+GOTRUE_API_HOST=0.0.0.0
 GOTRUE_API_PORT=${gotrue_port}
 GOTRUE_DB_DRIVER=postgres
 GOTRUE_DB_DATABASE_URL=postgres://supabase_auth_admin:${db_password}@${PG_HOST}:${PG_PORT}/${db_name}
@@ -242,7 +245,7 @@ GOTRUE_LOG_LEVEL=info
 GOTRUE_SERVER_READ_TIMEOUT=20
 GOTRUE_SECURITY_UPDATE_PASSWORD_REQUIRE_REAUTHENTICATION=true
 EOF
-    chmod 600 "${TENANT_CONFIG_DIR}/${ref}_gotrue.env"
+    chmod 644 "${TENANT_CONFIG_DIR}/${ref}_gotrue.env"
 
     echo "Config generated for ${ref} (pgrst_port=${pgrst_port}, gotrue_port=${gotrue_port})"
 }
