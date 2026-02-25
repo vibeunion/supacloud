@@ -1,0 +1,27 @@
+{
+  "name": "@supacloud/mcp-server",
+  "version": "0.1.0",
+  "description": "MCP Server for SupaCloud – AI-native Supabase infrastructure management",
+  "type": "module",
+  "bin": {
+    "supacloud-mcp": "./dist/index.js"
+  },
+  "scripts": {
+    "dev": "bun run --watch src/index.ts",
+    "build": "bun build src/index.ts --outdir dist --target node",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test"
+  },
+  "keywords": ["mcp", "supabase", "supacloud", "ai", "agent"],
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.1",
+    "zod": "^3.24.4",
+    "ssh2": "^1.16.0"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.9",
+    "@types/ssh2": "^1.15.5",
+    "typescript": "^5.9.3"
+  }
+}
