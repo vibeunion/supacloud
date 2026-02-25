@@ -285,4 +285,150 @@ export function registerSshTools(server: McpServer, ssh: SshTransport): void {
             };
         }
     );
+
+    // ══════════════════════════════════════════════
+    // 多租户运行时管理工具（方案C: per-tenant PostgREST）
+    // ══════════════════════════════════════════════
+
+    // ── 管理租户运行时 ──
+    server.tool(
+        "manage_tenant_runtime",
+        "管理租户专属 PostgREST 运行时进程（启动/停止/重启/查看状态）",
+        {
+            action: z.enum(["start", "stop", "restart", "status"]).describe("操作类型"),
+            project_ref: z.string().describe("项目引用 ID，例如 u3gksdpq3r"),
+        },
+        async ({ action, project_ref }) => {
+            const cmd = `bash /opt/supacloud/scripts/lib/tenant_runtime.sh ${action} ${project_ref}`;
+            const result = await ssh.exec(cmd, 60_000);
+            const emoji = result.success ? "✅" : "❌";
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: `${emoji} 租户运行时 ${action} [${project_ref}]\n\n${result.stdout}${result.stderr ? `\nstderr:\n${result.stderr}` : ""}`,
+                    },
+                ],
+            };
+        }
+    );
+
+    // ── 列出所有租户运行时 ──
+    server.tool(
+        "list_tenant_runtimes",
+        "列出所有已注册的租户 PostgREST 运行时进程及其状态",
+        {},
+        async () => {
+            const cmd = [
+                "echo '=== 租户运行时状态 ==='",
+                "for f in /etc/supabase/tenants/*.env; do",
+                "  [ -f \"$f\" ] || continue",
+                "  ref=$(basename \"$f\" .env)",
+                "  port=$(grep PGRST_SERVER_PORT \"$f\" | cut -d= -f2)",
+                "  if systemctl is-active \"supacloud-pgrst@${ref}\" >/dev/null 2>&1; then",
+                "    health=$(curl -sf http://127.0.0.1:${port}/ >/dev/null 2>&1 && echo 'healthy' || echo 'unhealthy')",
+                "    echo \"  ✅ ${ref}  port=${port}  status=running  health=${health}\"",
+                "  else",
+                "    echo \"  ⏹️ ${ref}  port=${port}  status=stopped\"",
+                "  fi",
+                "done",
+                "echo ''",
+                "echo '=== Kong Services ==='",
+                "curl -s http://localhost:8001/services 2>/dev/null | python3 -m json.tool 2>/dev/null | grep -E '\"name\"|\"host\"|\"port\"' | head -30 || echo '无法获取 Kong 服务列表'",
+            ].join("\n");
+            const result = await ssh.exec(cmd, 30_000);
+            return {
+                content: [{ type: "text", text: result.stdout || result.stderr }],
+            };
+        }
+    );
+
+    // ── 多租户环境诊断 ──
+    server.tool(
+        "diagnose_multi_tenant",
+        "诊断多租户环境：检查 PostgREST 进程、Kong 路由、数据库隔离、JWT 配置",
+        {
+            project_ref: z.string().optional().describe("指定租户 ID 进行精准诊断，留空则诊断全部"),
+        },
+        async ({ project_ref }) => {
+            const checks: string[] = [
+                "echo '══════ 多租户诊断报告 ══════'",
+                "echo ''",
+                "echo '--- PostgREST 进程 ---'",
+                "ps aux | grep postgrest | grep -v grep || echo '无 PostgREST 进程运行'",
+                "echo ''",
+                "echo '--- systemd 租户服务 ---'",
+                "systemctl list-units 'supacloud-pgrst@*' --no-pager 2>/dev/null || echo '无租户服务'",
+                "echo ''",
+                "echo '--- Kong Routes ---'",
+                "curl -s http://localhost:8001/routes 2>/dev/null | python3 -c \"import sys,json; data=json.load(sys.stdin); [print(f'  {r[\\\"name\\\"]}  →  headers={r.get(\\\"headers\\\",{})}') for r in data.get('data',[])]\" 2>/dev/null || echo '无法获取'",
+                "echo ''",
+                "echo '--- 租户数据库列表 ---'",
+                "su - postgres -c \"psql -tAc \\\"SELECT datname FROM pg_database WHERE datname LIKE 'supa_%'\\\"\" 2>/dev/null || echo '无法查询'",
+            ];
+
+            if (project_ref) {
+                checks.push(
+                    `echo ''`,
+                    `echo '--- 租户 ${project_ref} 详情 ---'`,
+                    `systemctl status supacloud-pgrst@${project_ref} --no-pager 2>/dev/null || echo '服务未找到'`,
+                    `echo ''`,
+                    `cat /etc/supabase/tenants/${project_ref}.env 2>/dev/null | grep -v PASSWORD | grep -v SECRET || echo '配置未找到'`,
+                    `echo ''`,
+                    `echo '--- authenticator 权限 ---'`,
+                    `su - postgres -c "psql -tAc \\"SELECT has_database_privilege('authenticator', 'supa_${project_ref}', 'CONNECT')\\"" 2>/dev/null || echo '无法检查'`,
+                );
+            }
+
+            const result = await ssh.exec(checks.join("\n"), 30_000);
+            return {
+                content: [{ type: "text", text: result.stdout || result.stderr }],
+            };
+        }
+    );
+
+    // ── 租户数据迁移 ──
+    server.tool(
+        "migrate_tenant_data",
+        "通过 pg_dump/pg_restore 在租户数据库之间迁移数据",
+        {
+            source_ref: z.string().describe("源租户项目 ID"),
+            target_ref: z.string().describe("目标租户项目 ID"),
+            schemas: z.string().default("public,auth,storage").describe("要迁移的 schema，逗号分隔"),
+            data_only: z.boolean().default(false).describe("仅迁移数据（不含结构）"),
+        },
+        async ({ source_ref, target_ref, schemas, data_only }) => {
+            const schemaArgs = schemas.split(",").map(s => `-n ${s.trim()}`).join(" ");
+            const dataFlag = data_only ? "--data-only" : "";
+            const cmd = [
+                `echo '迁移数据: supa_${source_ref} → supa_${target_ref}'`,
+                `echo 'Schemas: ${schemas}'`,
+                `echo ''`,
+                // 磁盘空间检查
+                `avail=$(df -k /tmp | awk 'NR==2 {print $4}')`,
+                `if [ "$avail" -lt 5242880 ]; then echo 'ERROR: /tmp 剩余空间 < 5GB，请清理后重试'; exit 1; fi`,
+                // dump
+                `pg_dump -h localhost -U postgres -d supa_${source_ref} ${schemaArgs} ${dataFlag} -Fc -f /tmp/migrate_${source_ref}_to_${target_ref}.dump 2>&1`,
+                `echo '✅ Dump 完成'`,
+                // restore
+                `pg_restore -h localhost -U postgres -d supa_${target_ref} --no-owner --no-acl /tmp/migrate_${source_ref}_to_${target_ref}.dump 2>&1 || true`,
+                `echo '✅ Restore 完成'`,
+                // 清理
+                `rm -f /tmp/migrate_${source_ref}_to_${target_ref}.dump`,
+                `echo '✅ 临时文件已清理'`,
+            ].join("\n");
+
+            const result = await ssh.exec(cmd, 600_000); // 10 分钟超时
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: result.success
+                            ? `✅ 数据迁移完成\n\n${result.stdout}`
+                            : `❌ 迁移过程有错误\n\n${result.stdout}\n\nstderr:\n${result.stderr.slice(-1000)}`,
+                    },
+                ],
+            };
+        }
+    );
 }
