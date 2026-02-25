@@ -12,7 +12,8 @@
 ### Key Features
 
 - **Multi-Tenant Architecture**: Run multiple isolated Supabase projects with shared infrastructure
-- **Management API**: Full REST API (25+ endpoints) for project lifecycle management
+- **Management API**: Full REST API (30+ endpoints) for complete project lifecycle
+- **CLI Compatibility**: Native support for the official `supabase` CLI (login, gen types, edge functions)
 - **CLI Tool**: `supacloud` command-line tool for easy project management
 - **Pigsty Powered**: Enterprise-grade PostgreSQL with built-in monitoring
 - **One-Click Installation**: Fully automated setup via `install.sh`
@@ -140,6 +141,10 @@ curl http://localhost:9090/v1/projects/<ref>/api-keys \
 | GET | `/v1/projects/:ref/settings` | Get settings |
 | PUT | `/v1/projects/:ref/settings` | Update settings |
 | GET | `/v1/projects/:ref/api-keys` | Get API keys |
+| GET | `/v1/projects/:ref/types/typescript`| Generate TS types for CLI |
+| PATCH| `/v1/projects/:ref/config/auth` | Configure Auth & Providers |
+| GET | `/v1/projects/:ref/secrets` | Manage Edge Function Secrets |
+| GET | `/v1/oauth/authorize` | Supabase CLI OAuth Login |
 
 #### Runtime Switching
 
@@ -204,7 +209,8 @@ Key settings in `config.env`:
 ### 核心特性
 
 - **多租户架构**: 共享基础设施，运行多个隔离的 Supabase 项目
-- **Management API**: 完整的 REST API（25+ 个端点）管理项目生命周期
+- **Management API**: 完整的 REST API（30+ 个端点）管理项目及周边配置生命周期
+- **CLI 生态兼容**: 完全兼容 Supabase 官方命令行体系（登录鉴权、数据库类型推导、云函数发布）
 - **CLI 工具**: `supacloud` 命令行工具，便捷管理项目
 - **Pigsty 驱动**: 企业级 PostgreSQL，内置监控
 - **一键部署**: 通过 `install.sh` 全自动安装
@@ -332,6 +338,10 @@ curl http://localhost:9090/v1/projects/<ref>/api-keys \
 | GET | `/v1/projects/:ref/settings` | 获取配置 |
 | PUT | `/v1/projects/:ref/settings` | 更新配置 |
 | GET | `/v1/projects/:ref/api-keys` | 获取 API 密钥 |
+| GET | `/v1/projects/:ref/types/typescript`| 自动生成 TypeScript 类型声明 |
+| PATCH| `/v1/projects/:ref/config/auth` | 自定义鉴权及三方 OAuth 设置 |
+| GET | `/v1/projects/:ref/secrets` | 管理 Edge Functions Secrets |
+| GET | `/v1/oauth/authorize` | 授权官方 CLI OAuth 登录 |
 
 #### 运行时切换
 
