@@ -38,6 +38,41 @@ run_sql() {
     psql -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -d "$PG_DATABASE" -t -A -c "$1" 2>/dev/null
 }
 
+# 磁盘空间预检（防止磁盘满导致 WAL 写入失败引发集群崩溃）
+check_disk_space() {
+    local data_dir="${PG_DATA_DIR:-/var/lib/pgsql/data}"
+    local min_gb="${MIN_DISK_GB:-10}"
+
+    # 尝试检测实际 PostgreSQL 数据目录
+    if [ ! -d "$data_dir" ]; then
+        # 常见路径回退
+        for d in /pg/data /var/lib/postgresql/data /data/pgsql; do
+            if [ -d "$d" ]; then
+                data_dir="$d"
+                break
+            fi
+        done
+    fi
+
+    if [ ! -d "$data_dir" ]; then
+        echo "WARNING: Cannot determine PostgreSQL data directory, skipping disk check" >&2
+        return 0
+    fi
+
+    local avail_kb
+    avail_kb=$(df -k "$data_dir" 2>/dev/null | awk 'NR==2 {print $4}')
+    local min_kb=$((min_gb * 1024 * 1024))
+
+    if [ -n "$avail_kb" ] && [ "$avail_kb" -lt "$min_kb" ]; then
+        echo "ERROR: Insufficient disk space on ${data_dir}" >&2
+        echo "  Available: $((avail_kb / 1024))MB, Required minimum: ${min_gb}GB" >&2
+        echo "  Refusing to create database to prevent WAL write failures and cluster crash." >&2
+        exit 1
+    fi
+
+    echo "Disk check passed: $((avail_kb / 1024))MB available on ${data_dir}"
+}
+
 # 创建项目数据库和角色
 create_database() {
     if [ -z "$DB_PASSWORD" ]; then
@@ -46,6 +81,9 @@ create_database() {
     fi
 
     echo "Creating database ${DB_NAME} and role ${DB_USER}..."
+
+    # 磁盘空间预检
+    check_disk_space
 
     # 创建角色
     run_sql "DO \$\$
@@ -254,7 +292,24 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO anon;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO authenticated;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO service_role;
 
+-- 6. authenticator 角色权限（PostgREST 通过此角色连接数据库）
+DO $$
+BEGIN
+    -- 创建 authenticator 角色（如果不存在）
+    IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'authenticator') THEN
+        CREATE ROLE authenticator NOINHERIT LOGIN;
+    END IF;
+    -- 授权 authenticator 可切换到 API 角色
+    GRANT anon, authenticated, service_role TO authenticator;
+END
+$$;
+
 SUPABASE_SCHEMA
+
+    # 在库级别授予 authenticator CONNECT 权限
+    # 注意：GRANT ON DATABASE 必须在 psql 连接到 postgres 库时执行
+    psql -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -d "$PG_DATABASE" -c \
+        "GRANT CONNECT ON DATABASE ${DB_NAME} TO authenticator;" 2>/dev/null || true
 
     echo "Database ${DB_NAME} created successfully"
 }
