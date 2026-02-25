@@ -1693,11 +1693,14 @@ install_pigsty() {
     # ⚠️ OpenCloudOS 特殊处理：禁用 Pigsty 的 repo 功能，使用系统自带包
     if [[ "$IS_OPENCLOUDOS" == "true" ]]; then
         log_info "配置 OpenCloudOS 兼容性..."
-        # 禁用 Pigsty 的 repo 模块，避免使用 Rocky Linux 源
-        sed -i 's/^node_repo_modules:.*/node_repo_modules: ""/' pigsty.yml 2>/dev/null || true
-        sed -i 's/^node_repo_remove:.*/node_repo_remove: false/' pigsty.yml 2>/dev/null || true
-        # 禁用 infra repo
-        sed -i 's/^infra_repo_enabled:.*/infra_repo_enabled: false/' pigsty.yml 2>/dev/null || true
+        # 移除 Pigsty 添加的 Rocky Linux repo
+        rm -f /etc/yum.repos.d/el9.repo /etc/yum.repos.d/node.repo /etc/yum.repos.d/pgsql.repo /etc/yum.repos.d/infra.repo 2>/dev/null || true
+        # 恢复原始 repo 配置
+        if [[ -d /etc/yum.repos.d/backup ]]; then
+            cp /etc/yum.repos.d/backup/*.repo /etc/yum.repos.d/ 2>/dev/null || true
+        fi
+        # 清理 dnf 缓存
+        dnf clean all 2>/dev/null || true
     fi
     
     # 注入 Lua 逻辑到模板
