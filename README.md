@@ -195,8 +195,10 @@ supacloud/
 │   ├── management-api/     # REST API server (Bun + Elysia)
 │   │   ├── src/            # TypeScript source
 │   │   └── tests/          # Unit & integration tests
-│   └── mcp-server/         # MCP Server for AI agents
-│       └── src/            # SSH + HTTP tools
+│   ├── mcp-server/         # MCP Server for AI agents
+│   │   └── src/            # SSH + HTTP tools
+│   └── web-console/        # Modern SvelteKit dashboard (Next Gen UI)
+│       └── src/            # Components, routes, assets
 ├── scripts/
 │   └── lib/                # Shell script modules
 │       ├── db_manager.sh   # Database management
@@ -419,8 +421,10 @@ supacloud/
 │   ├── management-api/     # REST API 服务 (Bun + Elysia)
 │   │   ├── src/            # TypeScript 源码
 │   │   └── tests/          # 单元测试和集成测试
-│   └── mcp-server/         # MCP Server (AI Agent 集成)
-│       └── src/            # SSH + HTTP 工具集
+│   ├── mcp-server/         # MCP Server (AI Agent 集成)
+│   │   └── src/            # SSH + HTTP 工具集
+│   └── web-console/        # 现代 SvelteKit 控制台 (下一代 UI)
+│       └── src/            # 组件, 路由, 资源
 ├── scripts/
 │   └── lib/                # Shell 脚本模块
 │       ├── db_manager.sh   # 数据库管理
