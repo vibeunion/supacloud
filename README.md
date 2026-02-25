@@ -15,6 +15,7 @@
 - **Management API**: Full REST API (30+ endpoints) for complete project lifecycle
 - **CLI Compatibility**: Native support for the official `supabase` CLI (login, gen types, edge functions)
 - **CLI Tool**: `supacloud` command-line tool for easy project management
+- **MCP Server**: AI-native infrastructure management – let Claude/Cursor manage your Supabase via conversation
 - **Pigsty Powered**: Enterprise-grade PostgreSQL with built-in monitoring
 - **One-Click Installation**: Fully automated setup via `install.sh`
 - **JuiceFS Storage**: Powered by PostgreSQL Large Objects (LO) for ultra-thin metadata
@@ -159,6 +160,29 @@ curl http://localhost:9090/v1/projects/<ref>/api-keys \
 ./switch.sh status
 ```
 
+#### MCP Server (AI Agent)
+
+Let AI assistants (Claude, Cursor, Windsurf) manage your SupaCloud via natural language.
+
+```json
+// claude_desktop_config.json or Cursor MCP settings
+{
+  "mcpServers": {
+    "supacloud": {
+      "command": "npx",
+      "args": ["-y", "@supacloud/mcp-server"],
+      "env": {
+        "SUPACLOUD_HOST": "your-server-ip",
+        "SUPACLOUD_SSH_KEY": "~/.ssh/id_rsa",
+        "SUPACLOUD_API_TOKEN": "your-master-token"
+      }
+    }
+  }
+}
+```
+
+28 MCP tools available: install, upgrade, create projects, deploy functions, configure auth, manage secrets, backups, and more. See [MCP Server README](packages/mcp-server/README.md) for details.
+
 ### Project Structure
 
 ```
@@ -168,9 +192,11 @@ supacloud/
 ├── supacloud               # CLI management tool
 ├── config.env              # Global configuration
 ├── packages/
-│   └── management-api/     # REST API server (Bun + Elysia)
-│       ├── src/            # TypeScript source
-│       └── tests/          # Unit & integration tests
+│   ├── management-api/     # REST API server (Bun + Elysia)
+│   │   ├── src/            # TypeScript source
+│   │   └── tests/          # Unit & integration tests
+│   └── mcp-server/         # MCP Server for AI agents
+│       └── src/            # SSH + HTTP tools
 ├── scripts/
 │   └── lib/                # Shell script modules
 │       ├── db_manager.sh   # Database management
@@ -196,6 +222,7 @@ Key settings in `config.env`:
 ### Documentation
 
 - [Multi-Tenant Management Technical Spec](docs/multi-tenant-management.md)
+- [MCP Server (AI Agent Integration)](packages/mcp-server/README.md)
 - [Pigsty Documentation](https://pigsty.cc/)
 - [Supabase Self-Hosting](https://supabase.com/docs/guides/self-hosting)
 
@@ -212,6 +239,7 @@ Key settings in `config.env`:
 - **Management API**: 完整的 REST API（30+ 个端点）管理项目及周边配置生命周期
 - **CLI 生态兼容**: 完全兼容 Supabase 官方命令行体系（登录鉴权、数据库类型推导、云函数发布）
 - **CLI 工具**: `supacloud` 命令行工具，便捷管理项目
+- **MCP Server**: AI 原生基础设施管理 —— 让 Claude/Cursor 通过对话操控你的 Supabase
 - **Pigsty 驱动**: 企业级 PostgreSQL，内置监控
 - **一键部署**: 通过 `install.sh` 全自动安装
 - **JuiceFS 存储**: 基于 PostgreSQL Large Objects (LO) 后端，极致轻量
@@ -356,6 +384,29 @@ curl http://localhost:9090/v1/projects/<ref>/api-keys \
 ./switch.sh status
 ```
 
+#### MCP Server (AI Agent)
+
+让 AI 助手（Claude、Cursor、Windsurf）通过自然语言管理你的 SupaCloud：
+
+```json
+// claude_desktop_config.json 或 Cursor MCP 设置
+{
+  "mcpServers": {
+    "supacloud": {
+      "command": "npx",
+      "args": ["-y", "@supacloud/mcp-server"],
+      "env": {
+        "SUPACLOUD_HOST": "你的服务器IP",
+        "SUPACLOUD_SSH_KEY": "~/.ssh/id_rsa",
+        "SUPACLOUD_API_TOKEN": "你的Master Token"
+      }
+    }
+  }
+}
+```
+
+提供 28 个 MCP 工具：安装平台、升级、创建项目、部署函数、配置鉴权、管理密钥、备份等。详见 [MCP Server 文档](packages/mcp-server/README.md)。
+
 ### 项目结构
 
 ```
@@ -365,9 +416,11 @@ supacloud/
 ├── supacloud               # CLI 管理工具
 ├── config.env              # 全局配置文件
 ├── packages/
-│   └── management-api/     # REST API 服务 (Bun + Elysia)
-│       ├── src/            # TypeScript 源码
-│       └── tests/          # 单元测试和集成测试
+│   ├── management-api/     # REST API 服务 (Bun + Elysia)
+│   │   ├── src/            # TypeScript 源码
+│   │   └── tests/          # 单元测试和集成测试
+│   └── mcp-server/         # MCP Server (AI Agent 集成)
+│       └── src/            # SSH + HTTP 工具集
 ├── scripts/
 │   └── lib/                # Shell 脚本模块
 │       ├── db_manager.sh   # 数据库管理
@@ -393,6 +446,7 @@ supacloud/
 ### 参考文档
 
 - [多租户管理技术规范](docs/multi-tenant-management.md)
+- [MCP Server 文档 (AI Agent 集成)](packages/mcp-server/README.md)
 - [Pigsty 官方文档](https://pigsty.cc/)
 - [Supabase 自托管文档](https://supabase.com/docs/guides/self-hosting)
 
