@@ -56,60 +56,57 @@ jobs:
 
       - name: Setup Local SSH (Required for Ansible)
         run: |
-          # 1. 生成 keys
-          ssh-keygen -t rsa -N "" -f ~/.ssh/id_rsa
-          
-          # 2. 配置 authorized_keys
-          cat ~/.ssh/id_rsa.pub >> ~/.ssh/authorized_keys
-          chmod 600 ~/.ssh/authorized_keys
-          
-          # 3. 确保已知 host (避免首次连接的 yes/no 提示)
-          ssh-keyscan -H localhost >> ~/.ssh/known_hosts
-          ssh-keyscan -H 127.0.0.1 >> ~/.ssh/known_hosts
-          ssh-keyscan -H $(hostname -I | awk '{print $1}') >> ~/.ssh/known_hosts
-          
-          # 4. 配置 SSH 服务 (GitHub Runner 可能默认禁用了 root 登录或者没配好)
-          # 对于 CI Runner，通常用户是 'runner'，但我们后续是用 sudo ./install.sh
-          # Pigsty 默认用 root 或带有 sudo 的用户。
-          # 我们需要让当前用户能 ssh localhost
-          
-          echo "Testing SSH connection..."
-          ssh -o StrictHostKeyChecking=no $(whoami)@localhost "echo SSH Connection OK"
-          
-          # 5. 特殊处理：Pigsty 运行在 sudo 下，会尝试 ssh root@ip
-          # 必须允许 root 通过 SSH 登录
-          
-          # 关键：目录权限必须是 700，否则 SSH 会拒绝使用 Key
-          sudo mkdir -p /root/.ssh
-          sudo chmod 700 /root/.ssh
-          
-          sudo cp ~/.ssh/authorized_keys /root/.ssh/authorized_keys
-          sudo cp ~/.ssh/id_rsa /root/.ssh/id_rsa
-          sudo chmod 600 /root/.ssh/authorized_keys
-          sudo chmod 600 /root/.ssh/id_rsa
-          sudo chown -R root:root /root/.ssh
-          
-          # 修改 sshd_config 允许 root 登录
-          sudo sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config
-          sudo sed -i 's/#PermitRootLogin yes/PermitRootLogin yes/' /etc/ssh/sshd_config
-          
-          if ! grep -q "PermitRootLogin" /etc/ssh/sshd_config; then
-            echo "PermitRootLogin yes" | sudo tee -a /etc/ssh/sshd_config
-          fi
-          
-          # 重启 sshd
-          sudo systemctl restart ssh || sudo service ssh restart
-          
-          echo "Testing Root SSH connection..."
-          sudo ssh -o StrictHostKeyChecking=no -i /root/.ssh/id_rsa root@localhost "echo ROOT SSH OK" || echo "Root SSH Failed"
-          sudo ssh -o StrictHostKeyChecking=no -i /root/.ssh/id_rsa root@$(hostname -I | awk '{print $1}') "echo ROOT IP SSH OK" || echo "Root IP SSH Failed"
-          
-          # 设置 Ansible 变量
-          echo "ANSIBLE_HOST_KEY_CHECKING=False" >> $GITHUB_ENV
-          echo "ANSIBLE_PRIVATE_KEY_FILE=/root/.ssh/id_rsa" >> $GITHUB_ENV
-          # 注意：sudo 会重置环境变量，所以我们需要在 sudo 命令中显式传递，或者配置 sudoers
-          # 更简单的是在 sudo install.sh 时 -E 保留环境
+          RUNNER_IP=$(hostname -I | awk '{print $1}')
+          echo "Runner IP: $RUNNER_IP"
 
+          # ── Step 1: 生成 SSH 密鑰（优先用 ed25519）
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          ssh-keygen -t ed25519 -N "" -f ~/.ssh/id_ed25519
+          cat ~/.ssh/id_ed25519.pub >> ~/.ssh/authorized_keys
+          chmod 600 ~/.ssh/authorized_keys
+
+          # ── Step 2: 修改 sshd_config（必须在 keyscan 之前，修改后才重启）
+          sudo sed -i \
+            -e 's/^#\?PermitRootLogin.*/PermitRootLogin yes/' \
+            -e 's/^#\?PubkeyAuthentication.*/PubkeyAuthentication yes/' \
+            /etc/ssh/sshd_config
+          grep -q "^PermitRootLogin" /etc/ssh/sshd_config  || echo "PermitRootLogin yes"  | sudo tee -a /etc/ssh/sshd_config
+          grep -q "^PubkeyAuthentication" /etc/ssh/sshd_config || echo "PubkeyAuthentication yes" | sudo tee -a /etc/ssh/sshd_config
+
+          # ── Step 3: 重启 sshd（必须在 keyscan 之前）
+          sudo systemctl restart ssh || sudo service ssh restart
+          sleep 2  # 等待 sshd 完全就绪
+
+          # ── Step 4: 为 root 配置密鑰 ──
+          sudo mkdir -p /root/.ssh && sudo chmod 700 /root/.ssh
+          sudo cp ~/.ssh/id_ed25519 /root/.ssh/id_ed25519
+          sudo cp ~/.ssh/authorized_keys /root/.ssh/authorized_keys
+          sudo chmod 600 /root/.ssh/id_ed25519 /root/.ssh/authorized_keys
+          sudo chown -R root:root /root/.ssh
+
+          # ── Step 5: keyscan 填充 known_hosts（sshd 已重启后）
+          # 包括当前用户和 root 的 known_hosts，二者都必须填充
+          for host in localhost 127.0.0.1 "$RUNNER_IP"; do
+            ssh-keyscan -H "$host" 2>/dev/null >> ~/.ssh/known_hosts
+            ssh-keyscan -H "$host" 2>/dev/null | sudo tee -a /root/.ssh/known_hosts > /dev/null
+          done
+          chmod 600 ~/.ssh/known_hosts
+          sudo chmod 600 /root/.ssh/known_hosts
+
+          # ── Step 6: 验证（root IP SSH 必须成功，否则 Ansible 一定失败）
+          echo "Testing root@localhost SSH..."
+          sudo ssh -o StrictHostKeyChecking=no -i /root/.ssh/id_ed25519 root@localhost "echo ROOT_LOCALHOST_OK" || echo "WARN: root@localhost failed"
+
+          echo "Testing root@IP SSH (this is what Ansible uses)..."
+          sudo ssh -o StrictHostKeyChecking=no -i /root/.ssh/id_ed25519 root@"$RUNNER_IP" "echo ROOT_IP_OK" || {
+            echo "ERROR: root@$RUNNER_IP SSH failed — Ansible cannot proceed"
+            exit 1
+          }
+
+          # ── Step 7: 导出 Ansible 环境变量 ──
+          echo "ANSIBLE_HOST_KEY_CHECKING=False" >> "$GITHUB_ENV"
+          echo "ANSIBLE_PRIVATE_KEY_FILE=/root/.ssh/id_ed25519" >> "$GITHUB_ENV"
+          echo "SSH setup complete ✅"
 
       - name: Run Install Script
         run: |
