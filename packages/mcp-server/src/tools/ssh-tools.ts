@@ -293,7 +293,7 @@ export function registerSshTools(server: McpServer, ssh: SshTransport): void {
     // ── 管理租户运行时 ──
     server.tool(
         "manage_tenant_runtime",
-        "管理租户专属 PostgREST 运行时进程（启动/停止/重启/查看状态）",
+        "管理租户专属 PostgREST & GoTrue 运行时进程（双核启停/状态）",
         {
             action: z.enum(["start", "stop", "restart", "status"]).describe("操作类型"),
             project_ref: z.string().describe("项目引用 ID，例如 u3gksdpq3r"),
@@ -316,25 +316,28 @@ export function registerSshTools(server: McpServer, ssh: SshTransport): void {
     // ── 列出所有租户运行时 ──
     server.tool(
         "list_tenant_runtimes",
-        "列出所有已注册的租户 PostgREST 运行时进程及其状态",
+        "列出所有已注册的租户 PostgREST & GoTrue 运行时进程及其状态",
         {},
         async () => {
             const cmd = [
                 "echo '=== 租户运行时状态 ==='",
                 "for f in /etc/supabase/tenants/*.env; do",
                 "  [ -f \"$f\" ] || continue",
+                "  if [[ \"$f\" == *_gotrue.env ]]; then continue; fi",
                 "  ref=$(basename \"$f\" .env)",
-                "  port=$(grep PGRST_SERVER_PORT \"$f\" | cut -d= -f2)",
-                "  if systemctl is-active \"supacloud-pgrst@${ref}\" >/dev/null 2>&1; then",
-                "    health=$(curl -sf http://127.0.0.1:${port}/ >/dev/null 2>&1 && echo 'healthy' || echo 'unhealthy')",
-                "    echo \"  ✅ ${ref}  port=${port}  status=running  health=${health}\"",
+                "  port=$(grep PGRST_SERVER_PORT \"$f\" | cut -d= -f2 || echo 'N/A')",
+                "  gotrue_port=$(grep GOTRUE_API_PORT \"/etc/supabase/tenants/${ref}_gotrue.env\" 2>/dev/null | cut -d= -f2 || echo 'N/A')",
+                "  if systemctl is-active \"supacloud-pgrst@${ref}\" >/dev/null 2>&1 || systemctl is-active \"supacloud-gotrue@${ref}\" >/dev/null 2>&1; then",
+                "    pgrst_h=$(curl -sf http://127.0.0.1:${port}/ >/dev/null 2>&1 && echo 'ok' || echo 'fail')",
+                "    gotrue_h=$(curl -sf http://127.0.0.1:${gotrue_port}/health >/dev/null 2>&1 && echo 'ok' || echo 'fail')",
+                "    echo \"  ✅ ${ref}  pgrst=${port}(${pgrst_h})  gotrue=${gotrue_port}(${gotrue_h})  status=running\"",
                 "  else",
-                "    echo \"  ⏹️ ${ref}  port=${port}  status=stopped\"",
+                "    echo \"  ⏹️ ${ref}  pgrst=${port}  gotrue=${gotrue_port}  status=stopped\"",
                 "  fi",
                 "done",
                 "echo ''",
-                "echo '=== Kong Services ==='",
-                "curl -s http://localhost:8001/services 2>/dev/null | python3 -m json.tool 2>/dev/null | grep -E '\"name\"|\"host\"|\"port\"' | head -30 || echo '无法获取 Kong 服务列表'",
+                "echo '=== Kong 声明式路由配置 (Declarative) ==='",
+                "ls -l /etc/supabase/kong_tenants/*.yml 2>/dev/null | awk '{print $9}' || echo '无动态路由配置'",
             ].join("\n");
             const result = await ssh.exec(cmd, 30_000);
             return {
@@ -343,10 +346,31 @@ export function registerSshTools(server: McpServer, ssh: SshTransport): void {
         }
     );
 
+    // ── 查看租户网关配置 ──
+    server.tool(
+        "inspect_tenant_gateway",
+        "查看租户的 Kong 声明式网关路由配置 (YAML)",
+        {
+            project_ref: z.string().describe("项目引用 ID"),
+        },
+        async ({ project_ref }) => {
+            const cmd = `cat /etc/supabase/kong_tenants/${project_ref}.yml 2>/dev/null || echo '未找到该租户的网关配置文件'`;
+            const result = await ssh.exec(cmd, 10_000);
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: `📄 ${project_ref} 网关配置:\n\n${result.stdout || result.stderr}`,
+                    },
+                ],
+            };
+        }
+    );
+
     // ── 多租户环境诊断 ──
     server.tool(
         "diagnose_multi_tenant",
-        "诊断多租户环境：检查 PostgREST 进程、Kong 路由、数据库隔离、JWT 配置",
+        "诊断多租户环境：检查 PostgREST & GoTrue 进程、Kong 声明式路由、数据库隔离、JWT 配置",
         {
             project_ref: z.string().optional().describe("指定租户 ID 进行精准诊断，留空则诊断全部"),
         },
@@ -354,14 +378,14 @@ export function registerSshTools(server: McpServer, ssh: SshTransport): void {
             const checks: string[] = [
                 "echo '══════ 多租户诊断报告 ══════'",
                 "echo ''",
-                "echo '--- PostgREST 进程 ---'",
-                "ps aux | grep postgrest | grep -v grep || echo '无 PostgREST 进程运行'",
+                "echo '--- 租户进程 (PostgREST & GoTrue) ---'",
+                "ps aux | grep -E 'postgrest|gotrue' | grep -v grep || echo '无租户进程运行'",
                 "echo ''",
                 "echo '--- systemd 租户服务 ---'",
-                "systemctl list-units 'supacloud-pgrst@*' --no-pager 2>/dev/null || echo '无租户服务'",
+                "systemctl list-units 'supacloud-pgrst@*' 'supacloud-gotrue@*' --no-pager 2>/dev/null || echo '无租户服务'",
                 "echo ''",
-                "echo '--- Kong Routes ---'",
-                "curl -s http://localhost:8001/routes 2>/dev/null | python3 -c \"import sys,json; data=json.load(sys.stdin); [print(f'  {r[\\\"name\\\"]}  →  headers={r.get(\\\"headers\\\",{})}') for r in data.get('data',[])]\" 2>/dev/null || echo '无法获取'",
+                "echo '--- Kong 声明式路由配置 ---'",
+                "ls -l /etc/supabase/kong_tenants/*.yml 2>/dev/null || echo '无配置'",
                 "echo ''",
                 "echo '--- 租户数据库列表 ---'",
                 "su - postgres -c \"psql -tAc \\\"SELECT datname FROM pg_database WHERE datname LIKE 'supa_%'\\\"\" 2>/dev/null || echo '无法查询'",
@@ -371,9 +395,10 @@ export function registerSshTools(server: McpServer, ssh: SshTransport): void {
                 checks.push(
                     `echo ''`,
                     `echo '--- 租户 ${project_ref} 详情 ---'`,
-                    `systemctl status supacloud-pgrst@${project_ref} --no-pager 2>/dev/null || echo '服务未找到'`,
+                    `systemctl status supacloud-pgrst@${project_ref} --no-pager 2>/dev/null || echo 'PostgREST服务未找到'`,
+                    `systemctl status supacloud-gotrue@${project_ref} --no-pager 2>/dev/null || echo 'GoTrue服务未找到'`,
                     `echo ''`,
-                    `cat /etc/supabase/tenants/${project_ref}.env 2>/dev/null | grep -v PASSWORD | grep -v SECRET || echo '配置未找到'`,
+                    `cat /etc/supabase/tenants/${project_ref}.env /etc/supabase/tenants/${project_ref}_gotrue.env 2>/dev/null | grep -v PASSWORD | grep -v SECRET | grep -v URL || echo '配置未找到'`,
                     `echo ''`,
                     `echo '--- authenticator 权限 ---'`,
                     `su - postgres -c "psql -tAc \\"SELECT has_database_privilege('authenticator', 'supa_${project_ref}', 'CONNECT')\\"" 2>/dev/null || echo '无法检查'`,
