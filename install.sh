@@ -1272,16 +1272,6 @@ install_nginx_mainline() {
 
     log_info "检测到系统: $DISTRO_ID $DISTRO_VERSION_ID"
 
-    # ⚠️ OpenCloudOS 特殊处理：使用系统自带 nginx 而非 mainline，避免 OpenSSL 升级导致系统崩溃
-    if [[ "$DISTRO_ID" == "opencloudos" ]]; then
-        log_warn "检测到 OpenCloudOS，使用系统自带 Nginx 以避免 OpenSSL 冲突"
-        log_warn "Nginx Mainline 会升级 OpenSSL，可能导致 sshd/dnf 等关键服务无法启动"
-        dnf install -y nginx
-        systemctl enable --now nginx
-        log_info "Nginx 安装完成（系统版本）"
-        return
-    fi
-
     # ⚠️ 检查并锁定 OpenSSL 版本
     CURRENT_OPENSSL=$(rpm -q openssl-libs --qf '%{VERSION}' 2>/dev/null || echo "unknown")
     log_info "当前 OpenSSL 版本: $CURRENT_OPENSSL"
