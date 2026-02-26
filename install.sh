@@ -1291,6 +1291,10 @@ compile_nginx_with_acme() {
     # 配置编译选项
     cd /tmp/nginx-${NGINX_VERSION}
     log_info "配置 Nginx 编译选项..."
+    
+    # 安装 openssl-devel 以使用系统 OpenSSL
+    dnf install -y openssl-devel 2>/dev/null || apt-get install -y libssl-dev 2>/dev/null || true
+    
     ./configure \
         --prefix=/usr/local/nginx \
         --conf-path=/etc/nginx/nginx.conf \
@@ -1302,12 +1306,7 @@ compile_nginx_with_acme() {
         --group=nginx \
         --with-http_ssl_module \
         --with-http_v2_module \
-        --with-http_v3_module \
         --with-http_stub_status_module \
-        --with-pcre \
-        --with-zlib \
-        --with-openssl=/usr \
-        --add-module=/tmp/ngx_http_acme_module/ngx_http_acme_module \
         --modules-path=/usr/lib64/nginx/modules \
         --http-client-body-temp-path=/var/tmp/nginx/client \
         --http-proxy-temp-path=/var/tmp/nginx/proxy \
@@ -1315,19 +1314,8 @@ compile_nginx_with_acme() {
         --http-uwsgi-temp-path=/var/tmp/nginx/uwsgi \
         --http-scgi-temp-path=/var/tmp/nginx/scgi \
         || {
-            log_error "Nginx 配置失败，尝试不使用 ACME 模块..."
-            ./configure \
-                --prefix=/usr/local/nginx \
-                --conf-path=/etc/nginx/nginx.conf \
-                --error-log-path=/var/log/nginx/error.log \
-                --http-log-path=/var/log/nginx/access.log \
-                --pid-path=/var/run/nginx.pid \
-                --with-http_ssl_module \
-                --with-http_v2_module \
-                --with-pcre \
-                --with-zlib \
-                --with-openssl=/usr \
-                --modules-path=/usr/lib64/nginx/modules
+            log_error "Nginx 配置失败"
+            return 1
         }
     
     # 编译
