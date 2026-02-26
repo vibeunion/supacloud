@@ -1375,7 +1375,15 @@ EOF
     # 启用服务
     systemctl daemon-reload
     systemctl enable nginx
-    systemctl start nginx
+    
+    # 先停止可能存在的旧 Nginx 进程
+    pkill nginx 2>/dev/null || true
+    sleep 1
+    
+    systemctl start nginx || {
+        log_warn "systemctl start nginx 失败，尝试直接启动..."
+        /usr/local/nginx/sbin/nginx
+    }
     
     log_info "Nginx 编译安装完成: $(/usr/local/nginx/sbin/nginx -v 2>&1)"
 }
