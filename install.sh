@@ -1338,6 +1338,14 @@ compile_nginx_with_acme() {
         return 1
     }
     
+    # 创建临时目录和 nginx 用户
+    log_info "创建 Nginx 运行环境..."
+    useradd -r nginx 2>/dev/null || true
+    mkdir -p /var/tmp/nginx/{client,proxy,fastcgi,uwsgi,scgi}
+    chown -R nginx:nginx /var/tmp/nginx
+    mkdir -p /var/log/nginx
+    chown -R nginx:nginx /var/log/nginx
+    
     # 创建 systemd 服务
     log_info "创建 Nginx systemd 服务..."
     cat > /etc/systemd/system/nginx.service << 'EOF'
