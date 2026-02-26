@@ -12,8 +12,8 @@ PROJECT_REF="${2:-}"
 TENANT_CONFIG_DIR="${TENANT_CONFIG_DIR:-/etc/supabase/tenants}"
 POSTGREST_BIN="${POSTGREST_BIN:-/usr/local/bin/postgrest}"
 GOTRUE_BIN="${GOTRUE_BIN:-/usr/local/bin/gotrue}"
-PG_HOST="${PG_HOST:-${POSTGRES_HOST:-localhost}}"
-PG_PORT="${PG_PORT:-${POSTGRES_PORT:-5432}}"
+PG_HOST="${PG_HOST:-127.0.0.1}"
+PG_PORT="${PG_PORT:-5432}"
 PGRST_PORT_BASE="${PGRST_PORT_BASE:-3100}"
 GOTRUE_PORT_BASE="${GOTRUE_PORT_BASE:-4100}"
 PORT_RANGE="${PORT_RANGE:-10000}"
@@ -87,8 +87,9 @@ get_tenant_credentials() {
     local ref="$1"
     local field="$2"
 
-    psql -h "$PG_HOST" -p "$PG_PORT" -U postgres -d "$SUPACLOUD_META_DB" \
-        -t -A -c "SELECT ${field} FROM projects WHERE ref='${ref}'" 2>/dev/null
+    # Use sudo -u postgres to enforce local unix socket peer authentication and strip PSQL timing artifacts
+    sudo -u postgres psql -d "$SUPACLOUD_META_DB" \
+        -t -A -c "SELECT ${field} FROM projects WHERE ref='${ref}'" 2>/dev/null | grep -v '^Time:' | head -n 1
 }
 
 # ========== 确保 PostgREST 二进制可用 ==========
@@ -260,7 +261,7 @@ API_EXTERNAL_URL=${api_external_url}
 # Bug Fix: SITE_URL 应该是实际可访问的 URL
 GOTRUE_SITE_URL=${api_external_url}
 GOTRUE_DB_DRIVER=postgres
-GOTRUE_DB_DATABASE_URL=postgres://supabase_auth_admin:${db_password}@${PG_HOST}:${PG_PORT}/${db_name}
+GOTRUE_DB_DATABASE_URL=postgres://supabase_auth_admin:${PG_PASSWORD:-${POSTGRES_PASSWORD:-postgres}}@${PG_HOST}:${PG_PORT}/${db_name}
 
 GOTRUE_JWT_SECRET=${jwt_secret}
 GOTRUE_JWT_EXP=3600
