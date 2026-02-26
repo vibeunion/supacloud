@@ -295,9 +295,13 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO service_role;
 -- 6. authenticator 角色权限（PostgREST 通过此角色连接数据库）
 DO $$
 BEGIN
-    -- 创建 authenticator 角色（如果不存在）
+    -- 创建 authenticator 角色（如果不存在），并设置密码以供 PostgREST 连接
+    -- 密码必须与 supacloud_meta 中存储的 db_password 一致
     IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'authenticator') THEN
-        CREATE ROLE authenticator NOINHERIT LOGIN;
+        CREATE ROLE authenticator NOINHERIT LOGIN PASSWORD '${DB_PASSWORD}';
+    ELSE
+        -- 若已存在则同步更新密码，确保与 db_password 始终一致
+        ALTER ROLE authenticator WITH PASSWORD '${DB_PASSWORD}';
     END IF;
     -- 授权 authenticator 可切换到 API 角色
     GRANT anon, authenticated, service_role TO authenticator;
