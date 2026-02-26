@@ -10,7 +10,7 @@ DB_PASSWORD="${3:-}"
 
 # 从环境变量或默认值获取 PostgreSQL 连接信息
 PG_HOST="${PG_HOST:-${POSTGRES_HOST:-localhost}}"
-PG_PORT="${PG_PORT:-${POSTGRES_PORT:-5432}}"
+PG_PORT="${PG_PORT:-${POSTGRES_PORT:-6432}}"
 PG_USER="${PG_USER:-postgres}"
 PG_DATABASE="${PG_DATABASE:-postgres}"
 
