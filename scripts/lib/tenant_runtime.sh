@@ -12,8 +12,8 @@ PROJECT_REF="${2:-}"
 TENANT_CONFIG_DIR="${TENANT_CONFIG_DIR:-/etc/supabase/tenants}"
 POSTGREST_BIN="${POSTGREST_BIN:-/usr/local/bin/postgrest}"
 GOTRUE_BIN="${GOTRUE_BIN:-/usr/local/bin/gotrue}"
-PG_HOST="${PG_HOST:-localhost}"
-PG_PORT="${PG_PORT:-5432}"
+PG_HOST="${PG_HOST:-${POSTGRES_HOST:-localhost}}"
+PG_PORT="${PG_PORT:-${POSTGRES_PORT:-5432}}"
 PGRST_PORT_BASE="${PGRST_PORT_BASE:-3100}"
 GOTRUE_PORT_BASE="${GOTRUE_PORT_BASE:-4100}"
 PORT_RANGE="${PORT_RANGE:-10000}"
@@ -216,6 +216,7 @@ generate_tenant_config() {
 # SupaCloud Tenant PostgREST Runtime: ${ref}
 PGRST_DB_URI=postgres://authenticator:${db_password}@${PG_HOST}:${PG_PORT}/${db_name}
 PGRST_DB_SCHEMAS=public,storage,graphql_public
+PGRST_DB_EXTRA_SEARCH_PATH=public
 PGRST_DB_ANON_ROLE=anon
 PGRST_JWT_SECRET=${jwt_secret}
 PGRST_SERVER_PORT=${pgrst_port}
@@ -229,6 +230,8 @@ EOF
 # PostgREST config for tenant: ${ref}
 db-uri = "postgres://authenticator:${db_password}@${PG_HOST}:${PG_PORT}/${db_name}"
 db-schemas = "public, storage, graphql_public"
+# Bug Fix: 明确设置 search_path，确保租户间 schema 隔离，防止跨租户数据泄露
+db-extra-search-path = "public"
 db-anon-role = "anon"
 jwt-secret = "${jwt_secret}"
 server-port = ${pgrst_port}
@@ -250,9 +253,11 @@ GOTRUE_API_PORT=${gotrue_port}
 API_EXTERNAL_URL=${api_external_url}
 GOTRUE_DB_DRIVER=postgres
 GOTRUE_DB_DATABASE_URL=postgres://supabase_auth_admin:${db_password}@${PG_HOST}:${PG_PORT}/${db_name}
-GOTRUE_SITE_URL=http://localhost:3000
+# Bug Fix: 使用实际域名，邮件验证链接和密码重置链接将指向正确地址
+GOTRUE_SITE_URL=${api_external_url}
 GOTRUE_JWT_SECRET=${jwt_secret}
 GOTRUE_JWT_EXP=3600
+GOTRUE_JWT_AUD=authenticated
 GOTRUE_JWT_DEFAULT_GROUP_NAME=authenticated
 GOTRUE_LOG_LEVEL=info
 GOTRUE_SERVER_READ_TIMEOUT=20
