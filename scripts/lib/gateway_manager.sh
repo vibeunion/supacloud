@@ -173,7 +173,10 @@ setup_upstream() {
     # 彻底修复：函数内部必须读取自己的位置参数，$1 为 pgrst_port, $2 为 gotrue_port
     local pgrst_port="${1:-}"
     local gotrue_port="${2:-}"
-    
+    local functions_port="${3:-}"
+    local storage_port="${4:-}"
+    local realtime_port="${5:-}"
+
     if [ -z "$pgrst_port" ] || [ -z "$gotrue_port" ]; then
         echo "ERROR: pgrst_port and gotrue_port are required for setup-upstream" >&2
         exit 1
@@ -225,7 +228,6 @@ setup_upstream() {
     write_timeout: 60000
     routes:
       - name: route-gotrue-${PROJECT_REF}
-        # 彻底修复：strip_path 必须为 true，否则 Kong 会把路径前缀带给下游导致 404
         strip_path: true
         preserve_host: true
         paths:
@@ -233,6 +235,67 @@ setup_upstream() {
         headers:
           X-Project-Ref:
             - ${PROJECT_REF}
+EOF
+
+    # 可选服务: Edge Functions
+    if [ -n "$functions_port" ]; then
+        cat >> "$tenant_yml" <<EOF
+  - name: svc-functions-${PROJECT_REF}
+    url: http://${host_ip}:${functions_port}
+    connect_timeout: 5000
+    read_timeout: 60000
+    write_timeout: 60000
+    routes:
+      - name: route-functions-${PROJECT_REF}
+        strip_path: true
+        preserve_host: true
+        paths:
+          - /functions/v1
+        headers:
+          X-Project-Ref:
+            - ${PROJECT_REF}
+EOF
+    fi
+
+    # 可选服务: Storage
+    if [ -n "$storage_port" ]; then
+        cat >> "$tenant_yml" <<EOF
+  - name: svc-storage-${PROJECT_REF}
+    url: http://${host_ip}:${storage_port}
+    connect_timeout: 5000
+    read_timeout: 60000
+    write_timeout: 60000
+    routes:
+      - name: route-storage-${PROJECT_REF}
+        strip_path: true
+        preserve_host: true
+        paths:
+          - /storage/v1
+        headers:
+          X-Project-Ref:
+            - ${PROJECT_REF}
+EOF
+    fi
+
+    # 可选服务: Realtime
+    if [ -n "$realtime_port" ]; then
+        cat >> "$tenant_yml" <<EOF
+  - name: svc-realtime-${PROJECT_REF}
+    url: http://${host_ip}:${realtime_port}
+    connect_timeout: 5000
+    read_timeout: 60000
+    write_timeout: 60000
+    routes:
+      - name: route-realtime-${PROJECT_REF}
+        strip_path: true
+        preserve_host: true
+        paths:
+          - /realtime/v1
+        headers:
+          X-Project-Ref:
+            - ${PROJECT_REF}
+EOF
+    fi
 EOF
 
     rebuild_kong_config
@@ -264,8 +327,8 @@ case "$ACTION" in
         enable_jwt
         ;;
     setup-upstream)
-        # 彻底修复：显式传递位置参数 $3 和 $4 给函数内部的 $1 和 $2
-        setup_upstream "${3:-}" "${4:-}"
+        # 彻底修复：显式传递位置参数 $3 到 $7 给函数内部
+        setup_upstream "${3:-}" "${4:-}" "${5:-}" "${6:-}" "${7:-}"
         ;;
     remove-service)
         remove_service
