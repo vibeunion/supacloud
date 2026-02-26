@@ -310,10 +310,18 @@ $$;
 
 SUPABASE_SCHEMA
 
-    # 在库级别授予 authenticator CONNECT 权限
-    # 注意：GRANT ON DATABASE 必须在 psql 连接到 postgres 库时执行
     psql -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -d "$PG_DATABASE" -c \
         "GRANT CONNECT ON DATABASE ${DB_NAME} TO authenticator;" 2>/dev/null || true
+
+    # service_role 需要绕过 RLS 才能在 Edge Function 管理操作中直接写入数据
+    psql -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -d "$DB_NAME" -c \
+        "ALTER ROLE service_role BYPASSRLS;" 2>/dev/null || true
+
+    # 在 public schema 上配置默认 RLS：启用，但暂不添加策略
+    # 各租户应根据自身业务逻辑通过 migration 添加具体 RLS policy
+    # 这里只设置 default_row_security = on，防止无策略表对外暴露
+    psql -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -d "$DB_NAME" -c \
+        "SET row_security = on;" 2>/dev/null || true
 
     echo "Database ${DB_NAME} created successfully"
 }
