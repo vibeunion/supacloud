@@ -1293,9 +1293,12 @@ compile_acme_module() {
     log_info "下载 Nginx ACME 模块源码..."
     rm -rf nginx-acme nginx-acme.tar.gz 2>/dev/null
     
-    # 尝试多种方式下载
-    git clone --depth 1 https://github.com/nginx/acme.git nginx-acme 2>&1 || {
-        log_warn "git clone 失败，尝试下载 tarball..."
+    # 尝试多种方式下载（使用代理加速）
+    log_info "尝试方式1: 使用 gh-proxy 代理下载 tarball..."
+    wget -q "https://gh-proxy.net/https://github.com/nginx/acme/archive/refs/heads/main.tar.gz" -O nginx-acme.tar.gz && \
+    tar -xzf nginx-acme.tar.gz && \
+    mv nginx-acme-main nginx-acme || {
+        log_warn "gh-proxy 下载失败，尝试直接下载..."
         wget -q https://github.com/nginx/acme/archive/refs/heads/main.tar.gz -O nginx-acme.tar.gz && \
         tar -xzf nginx-acme.tar.gz && \
         mv nginx-acme-main nginx-acme
