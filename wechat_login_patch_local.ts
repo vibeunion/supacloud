@@ -1,10 +1,22 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
-import { createClient } from "npm:@supabase/supabase-js@2.42.0"
-import { sign } from "npm:jsonwebtoken@9.0.2"
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 
 const corsHeaders = {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+}
+
+const b64 = (obj: any) => btoa(JSON.stringify(obj)).replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_")
+
+async function signJwt(payload: any, secret: string): Promise<string> {
+    const header = { alg: "HS256", typ: "JWT" }
+    const encoder = new TextEncoder()
+    const toSign = `${b64(header)}.${b64(payload)}`
+    const keyData = encoder.encode(secret)
+    const cryptoKey = await crypto.subtle.importKey("raw", keyData, { name: "HMAC", hash: "SHA-256" }, false, ["sign"])
+    const sigBuf = await crypto.subtle.sign("HMAC", cryptoKey, encoder.encode(toSign))
+    const sigB64 = btoa(String.fromCharCode(...new Uint8Array(sigBuf))).replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_")
+    return `${toSign}.${sigB64}`
 }
 
 serve(async (req) => {
@@ -15,7 +27,7 @@ serve(async (req) => {
         const WECHAT_APP_SECRET = Deno.env.get("WECHAT_APP_SECRET")
         const SUPABASE_URL = Deno.env.get("SUPABASE_URL")
         const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")
-        const JWT_SECRET = Deno.env.get("JWT_SECRET")
+        const JWT_SECRET = Deno.env.get("JWT_SECRET") as string
         const PROJECT_REF = Deno.env.get("PROJECT_REF") || ""
 
         // 1. Get WeChat Session
@@ -38,9 +50,9 @@ serve(async (req) => {
             iat: Math.floor(Date.now() / 1000),
             exp: Math.floor(Date.now() / 1000) + 300 // 5 minutes
         }
-        const FIXED_SERVICE_KEY = sign(srvPayload, JWT_SECRET, { algorithm: 'HS256' })
+        const FIXED_SERVICE_KEY = await signJwt(srvPayload, JWT_SECRET)
 
-        const supabaseAdmin = createClient(SUPABASE_URL, FIXED_SERVICE_KEY, {
+        const supabaseAdmin = createClient(SUPABASE_URL as string, FIXED_SERVICE_KEY, {
             auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false },
             global: { headers: PROJECT_REF ? { "X-Project-Ref": PROJECT_REF } : {} }
         })
@@ -52,7 +64,7 @@ serve(async (req) => {
 
         let userId = ""
         const { data: newUser, error: createError } = await supabaseAdmin.auth.admin.createUser({
-            email, email_confirm: true, user_metadata: { openid, unionid }, aud: "authenticated"
+            email, email_confirm: true, user_metadata: { openid, unionid }
         })
 
         if (createError) {
@@ -77,7 +89,7 @@ serve(async (req) => {
         const currentTimestamp = Math.floor(Date.now() / 1000)
         const expiration = currentTimestamp + 60 * 60 * 24 * 7 // 7 days
         const jwtPayload = { aud: "authenticated", exp: expiration, sub: userId, email: email, role: "authenticated", app_metadata: { provider: "wechat", providers: ["wechat"] }, user_metadata: { openid, unionid } }
-        const access_token = sign(jwtPayload, JWT_SECRET, { algorithm: 'HS256' })
+        const access_token = await signJwt(jwtPayload, JWT_SECRET)
 
         const session = { access_token, token_type: "bearer", expires_in: 60 * 60 * 24 * 7, refresh_token: access_token, user: { id: userId, email, app_metadata: jwtPayload.app_metadata, user_metadata: jwtPayload.user_metadata, aud: jwtPayload.aud, created_at: new Date().toISOString(), role: jwtPayload.role } }
 
