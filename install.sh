@@ -1578,25 +1578,22 @@ apply_nginx_acme_config() {
     
     if [[ -n "$ACME_MODULE_PATH" ]]; then
         log_info "发现 ACME 模块: $ACME_MODULE_PATH"
-        ACME_ENABLED=true
     else
-        log_warn "未找到 ngx_http_acme_module.so！将跳过 ACME 自动证书配置。"
-        log_warn "您可以稍后手动配置 SSL 证书或使用 certbot。"
-        log_warn "---------- 诊断信息 ----------"
-        log_warn "已安装的 Nginx 版本:"
+        log_error "未找到 ngx_http_acme_module.so！ACME 模块是必需的。"
+        log_error "---------- 诊断信息 ----------"
+        log_error "已安装的 Nginx 版本:"
         nginx -v 2>&1 || true
-        log_warn "已安装的 Nginx 相关包:"
+        log_error "已安装的 Nginx 相关包:"
         (dpkg -l | grep nginx 2>/dev/null || rpm -qa | grep nginx 2>/dev/null) || true
-        log_warn "Nginx 模块目录内容:"
+        log_error "Nginx 模块目录内容:"
         ls -la /usr/lib/nginx/modules/ 2>/dev/null || true
         ls -la /usr/lib64/nginx/modules/ 2>/dev/null || true
         ls -la /etc/nginx/modules/ 2>/dev/null || true
-        ACME_ENABLED=false
+        exit 1
     fi
 
     # 生成最终的 nginx.conf
-    if [[ "$ACME_ENABLED" == "true" ]]; then
-        cat > "$NGINX_CONF" << EOF
+    cat > "$NGINX_CONF" << EOF
 user nginx;
 worker_processes auto;
 error_log /var/log/nginx/error.log notice;
@@ -1711,70 +1708,6 @@ http {
     include /etc/nginx/sites-enabled/supa-tenants/*.conf;
 }
 EOF
-    else
-        # 无 ACME 模块的配置（HTTP only，稍后可手动配置 SSL）
-        cat > "$NGINX_CONF" << EOF
-user nginx;
-worker_processes auto;
-error_log /var/log/nginx/error.log notice;
-pid /var/run/nginx.pid;
-
-events {
-    worker_connections 1024;
-}
-
-http {
-    include       /etc/nginx/mime.types;
-    default_type  application/octet-stream;
-    
-    log_format  main  '\$remote_addr - \$remote_user [\$time_local] "\$request" '
-                      '\$status \$body_bytes_sent "\$http_referer" '
-                      '"\$http_user_agent" "\$http_x_forwarded_for"';
-
-    access_log  /var/log/nginx/access.log  main;
-
-    sendfile        on;
-    keepalive_timeout  65;
-
-    # 后端定义
-    upstream studio_backend {
-        server 127.0.0.1:3003;
-    }
-    
-    upstream kong_backend {
-        server 127.0.0.1:8000;
-    }
-
-    # HTTP Server (no SSL - ACME module not available)
-    server {
-        listen 80;
-        server_name ${SUPABASE_STUDIO_DOMAIN} ${SUPABASE_PUBLIC_DOMAIN};
-        
-        location / {
-            # 根据域名路由到不同后端
-            if (\$host = ${SUPABASE_STUDIO_DOMAIN}) {
-                proxy_pass http://studio_backend;
-            }
-            if (\$host = ${SUPABASE_PUBLIC_DOMAIN}) {
-                proxy_pass http://kong_backend;
-            }
-            proxy_set_header Host \$host;
-            proxy_set_header X-Real-IP \$remote_addr;
-            proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-            proxy_set_header X-Forwarded-Proto \$scheme;
-            proxy_set_header Upgrade \$http_upgrade;
-            proxy_set_header Connection "upgrade";
-        }
-    }
-
-    include /etc/nginx/conf.d/*.conf;
-
-    # --- 租户路由包含 (SupaCloud Tenants) ---
-    include /etc/nginx/sites-enabled/supa-tenants/*.conf;
-}
-EOF
-        log_warn "已生成 HTTP-only 配置。请稍后手动配置 SSL 证书。"
-    fi
 
     # 提前创建租户路由目录，防止 nginx -t 校验因目录不存在而失败
     mkdir -p /etc/nginx/sites-enabled/supa-tenants
