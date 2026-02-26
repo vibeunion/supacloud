@@ -12,8 +12,8 @@ PROJECT_REF="${2:-}"
 TENANT_CONFIG_DIR="${TENANT_CONFIG_DIR:-/etc/supabase/tenants}"
 POSTGREST_BIN="${POSTGREST_BIN:-/usr/local/bin/postgrest}"
 GOTRUE_BIN="${GOTRUE_BIN:-/usr/local/bin/gotrue}"
-PG_HOST="${PG_HOST:-127.0.0.1}"
-PG_PORT="${PG_PORT:-5432}"
+PG_HOST="${PG_HOST:-${POSTGRES_HOST:-localhost}}"
+PG_PORT="${PG_PORT:-${POSTGRES_PORT:-5432}}"
 PGRST_PORT_BASE="${PGRST_PORT_BASE:-3100}"
 GOTRUE_PORT_BASE="${GOTRUE_PORT_BASE:-4100}"
 PORT_RANGE="${PORT_RANGE:-10000}"
@@ -87,8 +87,11 @@ get_tenant_credentials() {
     local ref="$1"
     local field="$2"
 
-    # Use sudo -u postgres to enforce local unix socket peer authentication and strip PSQL timing artifacts
-    sudo -u postgres psql -d "$SUPACLOUD_META_DB" \
+    # Use TCP connection via dbuser_dba (DBA user with TCP access allowed in pg_hba.conf)
+    # Strip PSQL \timing artifacts that appear when run in Pigsty environment
+    PGPASSWORD="${PG_ADMIN_PASSWORD:-${POSTGRES_PASSWORD:-DBUser.DBA}}" psql \
+        -h "$PG_HOST" -p "$PG_PORT" -U dbuser_dba \
+        -d "$SUPACLOUD_META_DB" \
         -t -A -c "SELECT ${field} FROM projects WHERE ref='${ref}'" 2>/dev/null | grep -v '^Time:' | head -n 1
 }
 
