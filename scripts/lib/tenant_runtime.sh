@@ -229,6 +229,8 @@ EOF
 # PostgREST config for tenant: ${ref}
 db-uri = "postgres://authenticator:${db_password}@${PG_HOST}:${PG_PORT}/${db_name}"
 db-schemas = "public, storage, graphql_public"
+# Bug Fix: 多租户隔离 - 额外搜索路径应包含租户特定的 schema
+db-extra-search-path = "public, extensions, auth, ${ref}"
 db-anon-role = "anon"
 jwt-secret = "${jwt_secret}"
 server-port = ${pgrst_port}
@@ -241,6 +243,12 @@ EOF
     chmod 644 "${TENANT_CONFIG_DIR}/${ref}.conf"
 
     # 2. 生成 GoTrue .env
+    # 获取租户配置的邮件发件人（如果有）
+    local gotrue_sender="${GOTRUE_SMTP_ADMIN_EMAIL:-noreply@${api_external_url#https://}}"
+    local smtp_host="${GOTRUE_SMTP_HOST:-}"
+    local smtp_user="${GOTRUE_SMTP_USER:-}"
+    local smtp_pass="${GOTRUE_SMTP_PASS:-}"
+    
     cat > "${TENANT_CONFIG_DIR}/${ref}_gotrue.env" <<EOF
 # SupaCloud Tenant GoTrue Runtime: ${ref}
 # Bug Fix: 绑定到 0.0.0.0 以允许 Kong 容器通过宿主机桥接 IP 访问
@@ -248,9 +256,10 @@ GOTRUE_API_HOST=0.0.0.0
 GOTRUE_API_PORT=${gotrue_port}
 # Required: external URL used for email verification links and OAuth redirects
 API_EXTERNAL_URL=${api_external_url}
+# Bug Fix: SITE_URL 应该是实际可访问的 URL
+GOTRUE_SITE_URL=${api_external_url}
 GOTRUE_DB_DRIVER=postgres
 GOTRUE_DB_DATABASE_URL=postgres://supabase_auth_admin:${db_password}@${PG_HOST}:${PG_PORT}/${db_name}
-GOTRUE_SITE_URL=http://localhost:3000
 GOTRUE_JWT_SECRET=${jwt_secret}
 GOTRUE_JWT_EXP=3600
 GOTRUE_JWT_DEFAULT_GROUP_NAME=authenticated
@@ -260,6 +269,19 @@ GOTRUE_LOG_LEVEL=info
 GOTRUE_SERVER_READ_TIMEOUT=20
 GOTRUE_SECURITY_UPDATE_PASSWORD_REQUIRE_REAUTHENTICATION=true
 EOF
+
+    # 如果配置了 SMTP，添加到 GoTrue 配置
+    if [ -n "$smtp_host" ]; then
+        cat >> "${TENANT_CONFIG_DIR}/${ref}_gotrue.env" <<EOF
+# SMTP Configuration
+GOTRUE_SMTP_ADMIN_EMAIL=${gotrue_sender}
+GOTRUE_SMTP_HOST=${smtp_host}
+GOTRUE_SMTP_PORT=587
+GOTRUE_SMTP_USER=${smtp_user}
+GOTRUE_SMTP_PASS=${smtp_pass}
+GOTRUE_SMTP_SENDER_NAME=SupaCloud
+EOF
+    fi
     chmod 644 "${TENANT_CONFIG_DIR}/${ref}_gotrue.env"
 
     echo "Config generated for ${ref} (pgrst_port=${pgrst_port}, gotrue_port=${gotrue_port})"
