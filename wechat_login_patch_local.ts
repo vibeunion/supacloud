@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
-import { createClient } from "npm:@supabase/supabase-js@2.42.0"
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 import { sign } from "npm:jsonwebtoken@9.0.2"
 
 const corsHeaders = {
@@ -15,7 +15,7 @@ serve(async (req) => {
         const WECHAT_APP_SECRET = Deno.env.get("WECHAT_APP_SECRET")
         const SUPABASE_URL = Deno.env.get("SUPABASE_URL")
         const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")
-        const JWT_SECRET = Deno.env.get("JWT_SECRET")
+        const JWT_SECRET = Deno.env.get("JWT_SECRET") as string
         const PROJECT_REF = Deno.env.get("PROJECT_REF") || ""
 
         // 1. Get WeChat Session
@@ -40,7 +40,7 @@ serve(async (req) => {
         }
         const FIXED_SERVICE_KEY = sign(srvPayload, JWT_SECRET, { algorithm: 'HS256' })
 
-        const supabaseAdmin = createClient(SUPABASE_URL, FIXED_SERVICE_KEY, {
+        const supabaseAdmin = createClient(SUPABASE_URL as string, FIXED_SERVICE_KEY, {
             auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false },
             global: { headers: PROJECT_REF ? { "X-Project-Ref": PROJECT_REF } : {} }
         })
@@ -52,7 +52,7 @@ serve(async (req) => {
 
         let userId = ""
         const { data: newUser, error: createError } = await supabaseAdmin.auth.admin.createUser({
-            email, email_confirm: true, user_metadata: { openid, unionid }, aud: "authenticated"
+            email, email_confirm: true, user_metadata: { openid, unionid }
         })
 
         if (createError) {
