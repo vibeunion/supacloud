@@ -38,13 +38,10 @@ ensure_directory() {
 }
 
 # ========== SSL 模式检测 ==========
-# 检测当前 Nginx 是否支持 Pigsty ACME 模块，回退到 certbot 或自签名
-# 解决：在非 Pigsty 定制 Nginx 上使用 acme_certificate 指令导致 emerg 崩溃
+# 检测当前 Nginx 是否支持 Pigsty/Open Source ACME 动态模块
 detect_ssl_mode() {
-    if nginx -V 2>&1 | grep -qi 'acme'; then
+    if nginx -V 2>&1 | grep -qi 'acme\|ngx_http_acme_module'; then
         echo "acme"
-    elif [ -d "/etc/letsencrypt/live" ]; then
-        echo "certbot"
     else
         echo "self-signed"
     fi
@@ -60,22 +57,15 @@ generate_ssl_config() {
     case "$ssl_mode" in
         acme)
             cat <<'SSL_BLOCK'
-    # Pigsty ACME 自动证书
+    # Nginx ACME 动态模块自动证书 (ngx_http_acme_module)
     acme_certificate letsencrypt;
     ssl_certificate     $acme_certificate;
     ssl_certificate_key $acme_certificate_key;
 SSL_BLOCK
             ;;
-        certbot)
-            cat <<SSL_BLOCK
-    # Let's Encrypt (certbot)
-    ssl_certificate     /etc/letsencrypt/live/${domain}/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/${domain}/privkey.pem;
-SSL_BLOCK
-            ;;
-        self-signed)
+        *)
             cat <<'SSL_BLOCK'
-    # Self-signed / no SSL (listen on 80 only)
+    # Self-signed / no SSL (Fallback)
     # TODO: Configure proper SSL certificates
 SSL_BLOCK
             ;;
