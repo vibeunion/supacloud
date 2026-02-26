@@ -1257,7 +1257,126 @@ configure_external_s3() {
 }
 
 # ========== 安装 Pigsty ==========
-# ========== 操作系统全兼容 OpenResty 劫持逻辑 ==========
+# ========== 编译安装 Nginx (带 ACME 模块) - 备用方案 ==========
+compile_nginx_with_acme() {
+    log_step "从源码编译安装 Nginx (带 ACME 模块)..."
+    
+    local NGINX_VERSION="1.26.3"
+    local OPENSSL_VERSION="3.0.12"
+    
+    # 安装编译依赖
+    log_info "安装编译依赖..."
+    dnf install -y gcc make pcre-devel zlib-devel wget tar git || {
+        log_error "编译依赖安装失败"
+        return 1
+    }
+    
+    # 下载 Nginx 源码
+    cd /tmp
+    log_info "下载 Nginx $NGINX_VERSION..."
+    wget -q https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz || {
+        log_error "Nginx 源码下载失败"
+        return 1
+    }
+    tar -xzf nginx-${NGINX_VERSION}.tar.gz
+    
+    # 下载 ngx_http_acme_module
+    log_info "下载 ngx_http_acme_module..."
+    git clone --depth 1 https://github.com/nginx/njs_examples.git /tmp/ngx_http_acme_module 2>/dev/null || {
+        # 如果 git 失败，尝试从 tarball
+        log_warn "使用备用方式获取 ACME 模块..."
+        mkdir -p /tmp/ngx_http_acme_module
+    }
+    
+    # 配置编译选项
+    cd /tmp/nginx-${NGINX_VERSION}
+    log_info "配置 Nginx 编译选项..."
+    ./configure \
+        --prefix=/usr/local/nginx \
+        --conf-path=/etc/nginx/nginx.conf \
+        --error-log-path=/var/log/nginx/error.log \
+        --http-log-path=/var/log/nginx/access.log \
+        --pid-path=/var/run/nginx.pid \
+        --lock-path=/var/lock/nginx.lock \
+        --user=nginx \
+        --group=nginx \
+        --with-http_ssl_module \
+        --with-http_v2_module \
+        --with-http_v3_module \
+        --with-http_stub_status_module \
+        --with-pcre \
+        --with-zlib \
+        --with-openssl=/usr \
+        --add-module=/tmp/ngx_http_acme_module/ngx_http_acme_module \
+        --modules-path=/usr/lib64/nginx/modules \
+        --http-client-body-temp-path=/var/tmp/nginx/client \
+        --http-proxy-temp-path=/var/tmp/nginx/proxy \
+        --http-fastcgi-temp-path=/var/tmp/nginx/fastcgi \
+        --http-uwsgi-temp-path=/var/tmp/nginx/uwsgi \
+        --http-scgi-temp-path=/var/tmp/nginx/scgi \
+        || {
+            log_error "Nginx 配置失败，尝试不使用 ACME 模块..."
+            ./configure \
+                --prefix=/usr/local/nginx \
+                --conf-path=/etc/nginx/nginx.conf \
+                --error-log-path=/var/log/nginx/error.log \
+                --http-log-path=/var/log/nginx/access.log \
+                --pid-path=/var/run/nginx.pid \
+                --with-http_ssl_module \
+                --with-http_v2_module \
+                --with-pcre \
+                --with-zlib \
+                --with-openssl=/usr \
+                --modules-path=/usr/lib64/nginx/modules
+        }
+    
+    # 编译
+    log_info "编译 Nginx (这可能需要几分钟)..."
+    make -j$(nproc) || {
+        log_error "Nginx 编译失败"
+        return 1
+    }
+    
+    # 安装
+    log_info "安装 Nginx..."
+    make install || {
+        log_error "Nginx 安装失败"
+        return 1
+    }
+    
+    # 创建 systemd 服务
+    log_info "创建 Nginx systemd 服务..."
+    cat > /etc/systemd/system/nginx.service << 'EOF'
+[Unit]
+Description=The nginx HTTP and reverse proxy server
+After=syslog.target network-online.target remote-fs.target nss-lookup.target
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=forking
+PIDFile=/var/run/nginx.pid
+ExecStartPre=/usr/local/nginx/sbin/nginx -t
+ExecStart=/usr/local/nginx/sbin/nginx
+ExecReload=/bin/kill -s HUP $MAINPID
+ExecStop=/bin/kill -s QUIT $MAINPID
+PrivateTmp=true
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    
+    # 创建 nginx 用户
+    useradd -r nginx 2>/dev/null || true
+    
+    # 启用服务
+    systemctl daemon-reload
+    systemctl enable nginx
+    systemctl start nginx
+    
+    log_info "Nginx 编译安装完成: $(/usr/local/nginx/sbin/nginx -v 2>&1)"
+}
 # ========== 安装 Nginx Mainline (带 ACME 模块) ==========
 install_nginx_mainline() {
     log_step "正在安装 Nginx Mainline (带 ACME 模块)..."
@@ -1377,7 +1496,7 @@ EOF
     
     # 检查模块文件
     if ! find /usr/lib/nginx/modules /usr/lib64/nginx/modules /etc/nginx/modules -name "ngx_http_acme_module.so" 2>/dev/null | grep -q .; then
-        log_info "未检测到 ngx_http_acme_module.so，尝试通过第三方仓库手动安装该模块..."
+        log_warn "Nginx 仓库版缺少 ACME 模块，尝试从 EPOL/第三方源安装..."
         case "$DISTRO_ID" in
             rocky|almalinux|centos|rhel|anolis|tencentos)
                 if command -v dnf &> /dev/null; then
@@ -1386,9 +1505,8 @@ EOF
                 fi
                 ;;
             opencloudos)
-                # OpenCloudOS 使用 EPOL，不安装 EPEL
-                log_info "OpenCloudOS 跳过 EPEL 安装，尝试从 EPOL 获取 ACME 模块..."
-                dnf install -y nginx-mod-http-acme 2>/dev/null || log_warn "OpenCloudOS 未提供 nginx ACME 模块，将使用 certbot 替代"
+                log_info "OpenCloudOS 尝试从 EPOL 获取 ACME 模块..."
+                dnf install -y nginx-mod-http-acme 2>/dev/null || log_warn "OpenCloudOS EPOL 未提供 nginx ACME 模块"
                 ;;
             ubuntu)
                 if ! command -v add-apt-repository &> /dev/null; then
@@ -1407,6 +1525,12 @@ EOF
                 apt-get install -y libnginx-mod-http-acme || apt-get install -y nginx-module-acme || log_warn "未能成功安装 Nginx ACME 模块"
                 ;;
         esac
+    fi
+    
+    # 最终检查：如果还是没有 ACME 模块，从源码编译安装
+    if ! find /usr/lib/nginx/modules /usr/lib64/nginx/modules /etc/nginx/modules -name "ngx_http_acme_module.so" 2>/dev/null | grep -q .; then
+        log_warn "所有仓库方案失败，尝试从源码编译 Nginx with ACME..."
+        compile_nginx_with_acme
     else
         log_info "已存在 ngx_http_acme_module.so，无需额外安装。"
     fi
