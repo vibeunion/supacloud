@@ -12,8 +12,8 @@ PROJECT_REF="${2:-}"
 TENANT_CONFIG_DIR="${TENANT_CONFIG_DIR:-/etc/supabase/tenants}"
 POSTGREST_BIN="${POSTGREST_BIN:-/usr/local/bin/postgrest}"
 GOTRUE_BIN="${GOTRUE_BIN:-/usr/local/bin/gotrue}"
-PG_HOST="${PG_HOST:-localhost}"
-PG_PORT="${PG_PORT:-5432}"
+PG_HOST="${PG_HOST:-${POSTGRES_HOST:-localhost}}"
+PG_PORT="${PG_PORT:-${POSTGRES_PORT:-5432}}"
 PGRST_PORT_BASE="${PGRST_PORT_BASE:-3100}"
 GOTRUE_PORT_BASE="${GOTRUE_PORT_BASE:-4100}"
 PORT_RANGE="${PORT_RANGE:-10000}"
@@ -216,6 +216,7 @@ generate_tenant_config() {
 # SupaCloud Tenant PostgREST Runtime: ${ref}
 PGRST_DB_URI=postgres://authenticator:${db_password}@${PG_HOST}:${PG_PORT}/${db_name}
 PGRST_DB_SCHEMAS=public,storage,graphql_public
+PGRST_DB_EXTRA_SEARCH_PATH=public
 PGRST_DB_ANON_ROLE=anon
 PGRST_JWT_SECRET=${jwt_secret}
 PGRST_SERVER_PORT=${pgrst_port}
@@ -260,8 +261,10 @@ API_EXTERNAL_URL=${api_external_url}
 GOTRUE_SITE_URL=${api_external_url}
 GOTRUE_DB_DRIVER=postgres
 GOTRUE_DB_DATABASE_URL=postgres://supabase_auth_admin:${db_password}@${PG_HOST}:${PG_PORT}/${db_name}
+
 GOTRUE_JWT_SECRET=${jwt_secret}
 GOTRUE_JWT_EXP=3600
+GOTRUE_JWT_AUD=authenticated
 GOTRUE_JWT_DEFAULT_GROUP_NAME=authenticated
 # Bug Fix: 必须设置 JWT_AUD，否则用户查询会因 aud 为空而被过滤
 GOTRUE_JWT_AUD=authenticated
