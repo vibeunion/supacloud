@@ -1263,6 +1263,72 @@ configure_external_s3() {
 }
 
 # ========== 安装 Pigsty ==========
+# ========== 编译 ACME 模块 (Rust) ==========
+compile_acme_module() {
+    log_step "编译 Nginx ACME 模块..."
+    
+    # 检查是否已有 ACME 模块
+    if find /usr/lib/nginx/modules /usr/lib64/nginx/modules -name "ngx_http_acme_module.so" 2>/dev/null | grep -q .; then
+        log_info "ACME 模块已存在，跳过编译"
+        return 0
+    fi
+    
+    # 安装 Rust
+    log_info "安装 Rust 工具链..."
+    if ! command -v cargo &> /dev/null; then
+        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+        source "$HOME/.cargo/env" 2>/dev/null || source /root/.cargo/env 2>/dev/null || true
+    fi
+    
+    # 验证 Rust 安装
+    if ! command -v cargo &> /dev/null; then
+        log_error "Rust 安装失败"
+        return 1
+    fi
+    
+    log_info "Rust 版本: $(rustc --version)"
+    
+    # 下载 ACME 模块源码
+    cd /tmp
+    log_info "下载 Nginx ACME 模块源码..."
+    git clone --depth 1 https://github.com/nginx/acme.git nginx-acme 2>/dev/null || {
+        log_warn "git clone 失败，尝试下载 tarball..."
+        wget -q https://github.com/nginx/acme/archive/refs/heads/main.tar.gz -O nginx-acme.tar.gz
+        tar -xzf nginx-acme.tar.gz
+        mv nginx-acme-main nginx-acme
+    }
+    
+    # 编译模块
+    cd /tmp/nginx-acme
+    log_info "编译 ACME 模块 (这可能需要几分钟)..."
+    
+    # 设置 NGINX 源码路径
+    export NGINX_SOURCE=/tmp/nginx-1.26.3
+    
+    # 编译
+    cargo build --release 2>&1 || {
+        log_error "ACME 模块编译失败"
+        return 1
+    }
+    
+    # 复制模块到 Nginx 模块目录
+    mkdir -p /usr/lib64/nginx/modules
+    cp /tmp/nginx-acme/target/release/libngx_http_acme_module.so /usr/lib64/nginx/modules/ngx_http_acme_module.so 2>/dev/null || \
+    cp /tmp/nginx-acme/target/release/ngx_http_acme_module.so /usr/lib64/nginx/modules/ngx_http_acme_module.so 2>/dev/null || {
+        log_warn "找不到编译好的模块文件，尝试其他路径..."
+        find /tmp/nginx-acme -name "*.so" -exec cp {} /usr/lib64/nginx/modules/ngx_http_acme_module.so \;
+    }
+    
+    # 验证
+    if [ -f /usr/lib64/nginx/modules/ngx_http_acme_module.so ]; then
+        log_info "ACME 模块编译成功: /usr/lib64/nginx/modules/ngx_http_acme_module.so"
+        return 0
+    else
+        log_error "ACME 模块文件未找到"
+        return 1
+    fi
+}
+
 # ========== 编译安装 Nginx (带 ACME 模块) - 备用方案 ==========
 compile_nginx_with_acme() {
     log_step "从源码编译安装 Nginx (带 ACME 模块)..."
@@ -1345,6 +1411,10 @@ compile_nginx_with_acme() {
     chown -R nginx:nginx /var/tmp/nginx
     mkdir -p /var/log/nginx
     chown -R nginx:nginx /var/log/nginx
+    
+    # 编译 ACME 模块 (Rust)
+    log_info "编译 Nginx ACME 模块 (需要 Rust)..."
+    compile_acme_module || log_warn "ACME 模块编译失败，将尝试其他方式..."
     
     # 创建 systemd 服务
     log_info "创建 Nginx systemd 服务..."
