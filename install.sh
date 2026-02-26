@@ -1291,12 +1291,23 @@ compile_acme_module() {
     # 下载 ACME 模块源码
     cd /tmp
     log_info "下载 Nginx ACME 模块源码..."
-    git clone --depth 1 https://github.com/nginx/acme.git nginx-acme 2>/dev/null || {
+    rm -rf nginx-acme nginx-acme.tar.gz 2>/dev/null
+    
+    # 尝试多种方式下载
+    git clone --depth 1 https://github.com/nginx/acme.git nginx-acme 2>&1 || {
         log_warn "git clone 失败，尝试下载 tarball..."
-        wget -q https://github.com/nginx/acme/archive/refs/heads/main.tar.gz -O nginx-acme.tar.gz
-        tar -xzf nginx-acme.tar.gz
+        wget -q https://github.com/nginx/acme/archive/refs/heads/main.tar.gz -O nginx-acme.tar.gz && \
+        tar -xzf nginx-acme.tar.gz && \
         mv nginx-acme-main nginx-acme
     }
+    
+    # 验证目录存在
+    if [ ! -d "/tmp/nginx-acme" ]; then
+        log_error "ACME 模块源码下载失败"
+        return 1
+    fi
+    
+    log_info "ACME 模块源码已下载到 /tmp/nginx-acme"
     
     # 编译模块
     cd /tmp/nginx-acme
