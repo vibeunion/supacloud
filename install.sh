@@ -85,21 +85,27 @@ EOF
             INTERNAL_IP="${IPS[0]}"
             log_info "自动检测到内网 IP: $INTERNAL_IP"
         else
-            log_warn "检测到多个 IP 地址，请选择:"
+            log_warn "检测到多个 IP 地址:"
             for i in "${!IPS[@]}"; do
                 echo "  [$((i+1))] ${IPS[$i]}"
             done
             
-            while true; do
-                read -p "请输入序号 (1-${#IPS[@]}) 或直接输入 IP: " selection
-                if [[ "$selection" =~ ^[0-9]+$ ]] && (( selection >= 1 && selection <= ${#IPS[@]} )); then
-                    INTERNAL_IP="${IPS[$((selection-1))]}"
-                    break
-                elif [[ -n "$selection" ]]; then
-                    INTERNAL_IP="$selection"
-                    break
-                fi
-            done
+            # 非交互模式自动选择第一个 IP
+            if [ ! -t 0 ]; then
+                INTERNAL_IP="${IPS[0]}"
+                log_info "非交互模式，自动选择第一个 IP: $INTERNAL_IP"
+            else
+                while true; do
+                    read -p "请输入序号 (1-${#IPS[@]}) 或直接输入 IP: " selection
+                    if [[ "$selection" =~ ^[0-9]+$ ]] && (( selection >= 1 && selection <= ${#IPS[@]} )); then
+                        INTERNAL_IP="${IPS[$((selection-1))]}"
+                        break
+                    elif [[ -n "$selection" ]]; then
+                        INTERNAL_IP="$selection"
+                        break
+                    fi
+                done
+            fi
         fi
         log_info "已设置内网 IP: $INTERNAL_IP"
     else
