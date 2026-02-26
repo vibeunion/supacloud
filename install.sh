@@ -1293,12 +1293,22 @@ compile_acme_module() {
     log_info "下载 Nginx ACME 模块源码..."
     rm -rf nginx-acme nginx-acme.tar.gz 2>/dev/null
     
-    # 尝试多种方式下载（使用代理加速）
-    log_info "尝试方式1: 使用 gh-proxy 代理下载 tarball..."
-    wget -q "https://gh-proxy.net/https://github.com/nginx/acme/archive/refs/heads/main.tar.gz" -O nginx-acme.tar.gz && \
+    # 尝试多种方式下载（使用多个代理）
+    log_info "尝试方式1: 使用 mirror.ghproxy.com 代理..."
+    wget -q "https://mirror.ghproxy.com/https://github.com/nginx/acme/archive/refs/heads/main.tar.gz" -O nginx-acme.tar.gz && \
     tar -xzf nginx-acme.tar.gz && \
     mv nginx-acme-main nginx-acme || {
-        log_warn "gh-proxy 下载失败，尝试直接下载..."
+        log_warn "mirror.ghproxy.com 失败，尝试 gh-proxy.net..."
+        wget -q "https://gh-proxy.net/https://github.com/nginx/acme/archive/refs/heads/main.tar.gz" -O nginx-acme.tar.gz && \
+        tar -xzf nginx-acme.tar.gz && \
+        mv nginx-acme-main nginx-acme
+    } || {
+        log_warn "gh-proxy.net 失败，尝试 jsdelivr CDN..."
+        wget -q "https://cdn.jsdelivr.net/gh/nginx/acme@main.tar.gz" -O nginx-acme.tar.gz && \
+        tar -xzf nginx-acme.tar.gz && \
+        mv nginx-acme-main nginx-acme || mv nginx-acme nginx-acme 2>/dev/null
+    } || {
+        log_warn "CDN 失败，尝试直接下载..."
         wget -q https://github.com/nginx/acme/archive/refs/heads/main.tar.gz -O nginx-acme.tar.gz && \
         tar -xzf nginx-acme.tar.gz && \
         mv nginx-acme-main nginx-acme
