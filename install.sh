@@ -639,6 +639,9 @@ install_container_runtime() {
 
 # ========== 安装 Podman (多发行版支持) ==========
 install_podman() {
+    # 在安装前先写入镜像加速配置，确保安装过程中拉取镜像(如果需要)能加速
+    configure_podman_mirrors
+
     # 检测发行版
     if [[ -f /etc/os-release ]]; then
         source /etc/os-release
@@ -728,43 +731,37 @@ install_podman() {
 configure_podman_mirrors() {
     log_info "配置 Podman 镜像加速..."
     
-    mkdir -p /etc/containers
+    # 确保目录存在
+    mkdir -p /etc/containers/registries.conf.d/
     
-    # 基础配置，只使用官方源
+    # 1. 配置基础搜索域 (全局配置)
     cat > /etc/containers/registries.conf << EOF
-unqualified-search-registries = ["docker.io"]
+unqualified-search-registries = ["docker.io", "quay.io"]
+EOF
 
+    # 2. 写入镜像加速配置 (使用推荐的稳定加速地址)
+    cat > /etc/containers/registries.conf.d/mirror.conf << EOF
 [[registry]]
 prefix = "docker.io"
 location = "docker.io"
-EOF
 
-    # 仅当明确启用中国区代理时，才追加极不稳定的第三方加速器
-    if [[ "${USE_CHINA_MIRROR:-false}" == "true" ]]; then
-        log_info "检测到 USE_CHINA_MIRROR=true，注入第三方加速代理..."
-        cat >> /etc/containers/registries.conf << EOF
+[[registry.mirror]]
+location = "docker.m.daocloud.io"
+
+[[registry.mirror]]
+location = "dockerproxy.com"
+
+[[registry.mirror]]
+location = "docker.mirrors.ustc.edu.cn"
 
 [[registry.mirror]]
 location = "docker.1panel.live"
-insecure = true
 
 [[registry.mirror]]
 location = "hub.rat.dev"
-insecure = true
-
-[[registry.mirror]]
-location = "docker.xuanyuan.me"
-insecure = true
-
-[[registry.mirror]]
-location = "dockerproxy.net"
-insecure = true
 EOF
-    else
-        log_info "跳过中国区镜像代理配置 (防止因反代封锁导致拉取失败)"
-    fi
 
-    log_info "Podman 镜像加速配置完成"
+    log_info "Podman 镜像加速配置完成 (已写入 /etc/containers/registries.conf.d/mirror.conf)"
 }
 
 # ========== 配置 Podman Socket ==========
