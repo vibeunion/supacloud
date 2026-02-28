@@ -1788,6 +1788,18 @@ install_pigsty() {
         cp /etc/yum.repos.d/*.repo /etc/yum.repos.d/pre-pigsty-backup/ 2>/dev/null || true
     fi
     
+    # ⚠️ OpenCloudOS 特殊处理：在 Pigsty 安装前锁定关键包版本
+    if [[ "$IS_OPENCLOUDOS" == "true" ]]; then
+        log_info "OpenCloudOS: 锁定 OpenSSL 和 OpenSSH 版本，防止 Pigsty 替换..."
+        # 锁定关键包，防止被 Pigsty 的 Rocky Linux 源升级
+        dnf versionlock add openssl openssl-libs openssh openssh-server openssh-clients 2>/dev/null || {
+            # 如果 versionlock 插件不存在，安装它
+            dnf install -y python3-dnf-plugin-versionlock 2>/dev/null || true
+            dnf versionlock add openssl openssl-libs openssh openssh-server openssh-clients 2>/dev/null || true
+        }
+        log_info "已锁定: $(dnf versionlock list 2>/dev/null | grep -E 'openssl|openssh' | head -5)"
+    fi
+    
     # 下载 Pigsty (判断 bootstrap 文件而非目录，避免 mkdir -p 提前创建空目录导致跳过)
     if [[ ! -f ~/pigsty/bootstrap ]]; then
         log_info "下载 Pigsty..."
@@ -1838,6 +1850,31 @@ install_pigsty() {
         fi
         # 清理 dnf 缓存
         dnf clean all 2>/dev/null || true
+        
+        # ⚠️ 关键：恢复 OpenCloudOS 原生 OpenSSL 和 OpenSSH
+        # Pigsty 可能安装了不兼容的 OpenSSL 3.5.x（来自 Rocky Linux）
+        log_info "检查并恢复 OpenCloudOS 原生 OpenSSL/OpenSSH..."
+        local CURRENT_SSL_VER=$(openssl version 2>/dev/null | awk '{print $2}')
+        if [[ "$CURRENT_SSL_VER" =~ ^3\.[5-9] ]]; then
+            log_warn "检测到不兼容的 OpenSSL $CURRENT_SSL_VER，正在恢复 OpenCloudOS 原生版本..."
+            # 恢复 Python 软链接（可能被 Pigsty 改变）
+            ln -sf /usr/bin/python3.9 /usr/bin/python3 2>/dev/null || true
+            # 降级 OpenSSL 到 OpenCloudOS 原生版本
+            dnf downgrade -y openssl openssl-libs --allowerasing 2>/dev/null || {
+                log_warn "dnf 降级失败，尝试使用 rpm..."
+                # 如果 dnf 不可用，使用 rpm 强制降级
+                curl -sL "https://mirrors.opencloudos.tech/opencloudos/9/BaseOS/x86_64/os/Packages/" | grep -o 'openssl-libs-[0-9.]*[0-9].*\.rpm' | head -1
+            }
+            # 重装 OpenSSH 以匹配 OpenSSL
+            dnf reinstall -y openssh-server openssh-clients --allowerasing 2>/dev/null || true
+            # 验证
+            log_info "OpenSSL 版本: $(openssl version)"
+            if ssh -V 2>&1 | grep -q "OpenSSH"; then
+                log_info "OpenSSH 版本: $(ssh -V 2>&1)"
+            else
+                log_error "OpenSSH 仍然有问题，请手动修复"
+            fi
+        fi
     fi
     
     # 注入 Lua 逻辑到模板
