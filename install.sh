@@ -1493,14 +1493,32 @@ install_openresty() {
         return 0
     fi
 
-    # 停止并禁用系统已有的 Nginx（避免与 OpenResty 端口 80/443 冲突）
-    if systemctl is-active --quiet nginx 2>/dev/null; then
-        log_info "将已运行的 Nginx 停止并禁用..."
+    # ── 处理已有 Nginx：备份配置 → stop/disable → 卸载包 ──────────────────────
+    if command -v nginx &>/dev/null || systemctl list-unit-files nginx.service &>/dev/null 2>&1; then
+        local backup_dir="/etc/nginx.bak.$(date +%Y%m%d_%H%M%S)"
+        if [[ -d /etc/nginx ]]; then
+            log_info "备份原有 Nginx 配置到 ${backup_dir} ..."
+            cp -a /etc/nginx "${backup_dir}" || true
+            log_info "  备份完成：${backup_dir}"
+        fi
+
+        # 停止并禁用 nginx 服务
         systemctl stop    nginx 2>/dev/null || true
         systemctl disable nginx 2>/dev/null || true
+
+        # 按发行版卸载 nginx 包（避免与 OpenResty 端口 80/443 冲突）
+        # 仅卸载 nginx 本体，保留 openssl 等公共依赖
+        if command -v dnf &>/dev/null; then
+            dnf remove -y nginx nginx-core nginx-filesystem 2>/dev/null || true
+        elif command -v yum &>/dev/null; then
+            yum remove -y nginx nginx-core 2>/dev/null || true
+        elif command -v apt-get &>/dev/null; then
+            apt-get remove -y nginx nginx-common 2>/dev/null || true
+        fi
+        log_info "  原有 Nginx 已停止并卸载（配置已备份到 ${backup_dir}）"
     fi
 
-    # 调用 setup.sh 安装阶段（无需 PG，可在 Pigsty 之前运行）
+    # ── 调用 setup.sh 安装阶段（无需 PG，可在 Pigsty 之前运行）─────────────────
     PHASE=install \
     PG_PASSWORD="${POSTGRES_PASSWORD}" \
     PG_HOST="/var/run/postgresql" \
@@ -1508,16 +1526,17 @@ install_openresty() {
     STUDIO_DOMAIN="${SUPABASE_STUDIO_DOMAIN}" \
     API_DOMAIN="${SUPABASE_PUBLIC_DOMAIN}" \
     bash "${setup_script}" --phase install || {
-        log_warn "OpenResty setup.sh 执行失败，可事后手动运行: bash infra/openresty/setup.sh"
+        log_warn "OpenResty setup.sh 执行失败，可事后手动运行: bash infra/openresty/setup.sh --phase install"
         return 0
     }
 
     log_info "OpenResty 安装完成"
     log_info "  配置文件: /usr/local/openresty/nginx/conf/nginx.conf"
+    log_info "  原 Nginx 配置备份: /etc/nginx.bak.* (如存在)"
     log_info "  证书存储: PostgreSQL (autossl.certificates)"
     log_info "  动态 SSL: lua-resty-auto-ssl 按需自动申请 Let's Encrypt 证书"
-    log_info "  待 OpenResty 启动后首次请求会触发证书申请，通常需要 5-30s"
 }
+
 
 # 为兼容册保留此函数别名
 install_nginx_mainline() { install_openresty; }
