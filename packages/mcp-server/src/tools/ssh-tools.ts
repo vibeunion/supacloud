@@ -30,11 +30,16 @@ export function registerSshTools(server: McpServer, ssh: SshTransport): void {
         "在目标服务器上配置 root 用户 SSH 本机自连接，修复 OpenSSL 兼容性，为 Pigsty/Ansible 安装做前置准备",
         {},
         async () => {
-            // 1. 确保 OpenSSL 1.1 兼容库存在
-            const opensslFix = await ssh.exec(
-                "dnf install -y compat-openssl11 libatomic 2>/dev/null; " +
-                "ldconfig; " +
-                "openssl version"
+            // 1. 确保基础工具 (Git, OpenSSL 兼容库) 存在
+            const baseTools = await ssh.exec(
+                "if ! command -v git &>/dev/null; then " +
+                "  if command -v dnf &>/dev/null; then dnf install -y git; " +
+                "  elif command -v yum &>/dev/null; then yum install -y git; " +
+                "  elif command -v apt-get &>/dev/null; then apt-get update && apt-get install -y git; fi; " +
+                "fi; " +
+                "if command -v dnf &>/dev/null; then dnf install -y compat-openssl11 libatomic 2>/dev/null; " +
+                "elif command -v yum &>/dev/null; then yum install -y compat-openssl11 libatomic 2>/dev/null; fi; " +
+                "ldconfig 2>/dev/null; git --version; openssl version"
             );
 
             // 2. 配置 root SSH 自连接
@@ -66,7 +71,7 @@ export function registerSshTools(server: McpServer, ssh: SshTransport): void {
                     type: "text",
                     text: [
                         success ? "✅ SSH 自连接配置成功，Ansible 可正常运行" : "❌ SSH 自连接验证失败，请检查 sshd 状态",
-                        `\nOpenSSL: ${opensslFix.stdout.trim()}`,
+                        `环境工具: ${baseTools.stdout.trim()}`,
                         `SSH 配置: exit ${sshSetup.code}`,
                         `known_hosts: exit ${keyscan.code}`,
                         `自连接验证: ${verify.stdout.trim() || verify.stderr.trim()}`,
