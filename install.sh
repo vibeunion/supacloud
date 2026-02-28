@@ -1483,9 +1483,7 @@ EOF
     
     log_info "Nginx 编译安装完成: $(/usr/local/nginx/sbin/nginx -v 2>&1)"
 }
-# ========== 安装 OpenResty（替代 Nginx，带 lua-resty-auto-ssl 自动 SSL）==========
-# OpenResty 是 Nginx 的超集，兼容现有配置，同时支持 Lua 脚本实现动态 SSL。
-# Pigsty 的 Nginx 管理通过 nginx_enabled: false 禁用。
+
 # ========== 安装 Angie（Nginx 分叉版，带原生 http_acme 自动 SSL）==========
 # Angie 是 Nginx 的加强版，原生支持 ACME，架构更简洁。
 # Pigsty 的 Nginx 管理通过 nginx_enabled: false 禁用。
@@ -2033,6 +2031,12 @@ configure_s3_in_pigsty() {
     
     # 根据存储类型获取凭据
     case "$S3_STORAGE_TYPE" in
+        minio)
+            S3_ENDPOINT="http://${INTERNAL_IP}:9000"
+            S3_ACCESS_KEY="${S3_ACCESS_KEY:-minioadmin}"
+            S3_SECRET_KEY="${S3_SECRET_KEY:-minioadmin}"
+            S3_REGION="us-east-1"
+            ;;
         garage)
             if [[ -f /etc/garage/s3-credentials.env ]]; then
                 source /etc/garage/s3-credentials.env 2>/dev/null || true
@@ -2058,16 +2062,16 @@ configure_s3_in_pigsty() {
     esac
     
     # 更新 pigsty.yml 中的 S3 配置
-    # 注释掉 MinIO 相关配置
     if [[ "${S3_STORAGE_TYPE}" != "minio" ]]; then
         log_info "从 pigsty.yml 中移除/禁用内置 MinIO..."
-        
-        # [ROBUST FIX] 使用更精确的范围匹配，并确保不误伤 hosts:
         # 找到 minio 组，并注释掉其 hosts 整个块
-        # 匹配原理：从 minio: 到下一个顶级字段（通常以非空格字符或少于当前缩进的行开始）
-        # 这里针对 Pigsty YAML 常用缩进（2/4/6）进行处理
         sed -i '/minio:/,/vars:/ { s/^[[:space:]]*hosts:/#     hosts:/ }' "$PIGSTY_YML"
         sed -i 's/^    minio:/#   minio:/g' "$PIGSTY_YML"
+    else
+        log_info "确保 pigsty.yml 中 MinIO 已启用..."
+        # 恢复 minio 组及其 hosts
+        sed -i 's/^#   minio:/    minio:/g' "$PIGSTY_YML"
+        sed -i '/minio:/,/vars:/ { s/^#     hosts:/      hosts:/ }' "$PIGSTY_YML"
     fi
     
     # 更新 Supabase .env 文件 (如果存在)
