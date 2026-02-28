@@ -1923,15 +1923,19 @@ update_pigsty_config() {
     
     # 强制替换所有默认 IP 为 INTERNAL_IP
     if [[ -n "$INTERNAL_IP" ]]; then
-        # 替换各版本模板中可能出现的默认 IP
+        # [RESTORE] 修复可能被之前误伤的 hosts: 行
+        sed -i '/infra:/,/vars:/ s/^#     hosts:/      hosts:/' "$PIGSTY_YML"
+        sed -i '/etcd:/,/vars:/ s/^#     hosts:/      hosts:/' "$PIGSTY_YML"
+
+        # [ROBUST FIX] 直接针对 infra/etcd/minio 块下的 IP 进行精确替换
+        sed -i "/infra:/,/seq:/ s/[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}/${INTERNAL_IP}/" "$PIGSTY_YML"
+        sed -i "/etcd:/,/seq:/ s/[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}/${INTERNAL_IP}/" "$PIGSTY_YML"
+        
+        # 常见默认模板 IP 兜底
         sed -i "s|10.6.0.9|${INTERNAL_IP}|g" "$PIGSTY_YML"
         sed -i "s|10.10.10.10|${INTERNAL_IP}|g" "$PIGSTY_YML"
-        sed -i "s|10.2.0.14|${INTERNAL_IP}|g" "$PIGSTY_YML"  # 补充常见默认 IP
-        
-        # 兜底：如果 infra 组下的 hosts 仍是模板值，强制替换
-        # 匹配 infra: 下方的第一个 IPv4 地址
-        sed -i "/infra:/,/hosts:/ s/[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}/${INTERNAL_IP}/" "$PIGSTY_YML"
-    
+        sed -i "s|10.2.0.14|${INTERNAL_IP}|g" "$PIGSTY_YML"
+    fi
 
     
     # 更新域名配置
@@ -2056,11 +2060,13 @@ configure_s3_in_pigsty() {
     # 更新 pigsty.yml 中的 S3 配置
     # 注释掉 MinIO 相关配置
     if [[ "${S3_STORAGE_TYPE}" != "minio" ]]; then
-        log_info "禁用 Pigsty 内置 MinIO..."
+        log_info "从 pigsty.yml 中移除/禁用内置 MinIO..."
         
-        # [FIX] 必须使用范围匹配，否则会误伤所有组的 hosts: 行
-        # 找到 minio 块并将其 hosts 内容注释掉
-        sed -i '/^    minio:/,/^    [a-z0-9]/ s/^\([[:space:]]\{6,8\}\)hosts:/\1# hosts:/' "$PIGSTY_YML"
+        # [ROBUST FIX] 使用更精确的范围匹配，并确保不误伤 hosts:
+        # 找到 minio 组，并注释掉其 hosts 整个块
+        # 匹配原理：从 minio: 到下一个顶级字段（通常以非空格字符或少于当前缩进的行开始）
+        # 这里针对 Pigsty YAML 常用缩进（2/4/6）进行处理
+        sed -i '/minio:/,/vars:/ { s/^[[:space:]]*hosts:/#     hosts:/ }' "$PIGSTY_YML"
         sed -i 's/^    minio:/#   minio:/g' "$PIGSTY_YML"
     fi
     
@@ -2437,11 +2443,17 @@ install_management_api() {
     # 复制管理脚本
     if [[ -d "${SCRIPT_DIR}/scripts/lib" ]]; then
         # 只有在源路径和目标路径不同时才执行复制，避免 "same file" 错误
-        if [[ "$(realpath "${SCRIPT_DIR}/scripts/lib")" != "$(realpath "$SCRIPTS_INSTALL_DIR")" ]]; then
-            cp -rf "${SCRIPT_DIR}/scripts/lib/"* "$SCRIPTS_INSTALL_DIR/"
+        # 使用 realpath 确保即使是相对路径也被正确识别
+        local SRC_LIB_DIR DST_LIB_DIR
+        SRC_LIB_DIR=$(realpath "${SCRIPT_DIR}/scripts/lib")
+        DST_LIB_DIR=$(realpath "$SCRIPTS_INSTALL_DIR")
+        
+        if [[ "$SRC_LIB_DIR" != "$DST_LIB_DIR" ]]; then
+            log_info "同步脚本到 ${SCRIPTS_INSTALL_DIR} ..."
+            cp -rf "${SRC_LIB_DIR}/"* "$DST_LIB_DIR/"
         fi
-        chmod +x "$SCRIPTS_INSTALL_DIR"/*.sh
-        log_info "管理脚本已复制到 ${SCRIPTS_INSTALL_DIR}"
+        chmod +x "$DST_LIB_DIR"/*.sh
+        log_info "管理脚本就绪"
     fi
 
     # 安装依赖
