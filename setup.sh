@@ -80,8 +80,9 @@ check_openssl_compat() {
 }
 
 # 生成配置
+# 生成配置
 generate_config() {
-    log_step "生成安装配置..."
+    log_step "准备安装配置..."
     
     CONFIG_FILE="config.env"
     if [[ -f "$CONFIG_FILE" ]]; then
@@ -90,23 +91,27 @@ generate_config() {
     fi
 
     # 自动获取内网 IP
-    INTERNAL_IP=$(hostname -I | awk '{print $1}')
+    if [[ -z "$INTERNAL_IP" ]]; then
+        INTERNAL_IP=$(hostname -I | awk '{print $1}')
+    fi
     
-    # 交互式获取域名
-    echo ""
-    echo -e "${YELLOW}请输入您的 Supabase API 域名 (必需)${NC}"
-    echo -e "${BLUE}该域名将用于 API, Auth, Realtime 等访问 (例如: supa.example.com)${NC}"
-    read -p "域名: " SUPABASE_PUBLIC_DOMAIN
-    
-    while [[ -z "$SUPABASE_PUBLIC_DOMAIN" ]]; do
-        log_error "域名不能为空，请重新输入"
-        read -p "域名: " SUPABASE_PUBLIC_DOMAIN
-    done
+    # 域名逻辑：环境变量 > 交互输入 > 自动生成 (nip.io)
+    if [[ -z "$SUPABASE_PUBLIC_DOMAIN" ]]; then
+        if [ -t 0 ]; then
+            echo -e "${YELLOW}请输入您的 Supabase API 域名 (直接回车将使用 api.${INTERNAL_IP}.nip.io)${NC}"
+            read -p "域名: " SUPABASE_PUBLIC_DOMAIN
+        fi
+        
+        if [[ -z "$SUPABASE_PUBLIC_DOMAIN" ]]; then
+            SUPABASE_PUBLIC_DOMAIN="api.${INTERNAL_IP}.nip.io"
+            log_info "使用自动分配域名: $SUPABASE_PUBLIC_DOMAIN"
+        fi
+    fi
 
-    # 自动生成强密码
-    DB_PASS=$(openssl rand -base64 24 | tr -dc 'a-zA-Z0-9' | head -c 16)
-    STUDIO_PASS=$(openssl rand -base64 24 | tr -dc 'a-zA-Z0-9' | head -c 16)
-    GRAFANA_PASS=$(openssl rand -base64 24 | tr -dc 'a-zA-Z0-9' | head -c 16)
+    # 自动生成强密码 (如果环境变量没给)
+    [[ -z "$POSTGRES_PASSWORD" ]] && POSTGRES_PASSWORD=$(openssl rand -base64 24 | tr -dc 'a-zA-Z0-9' | head -c 16)
+    [[ -z "$DASHBOARD_PASSWORD" ]] && DASHBOARD_PASSWORD=$(openssl rand -base64 24 | tr -dc 'a-zA-Z0-9' | head -c 16)
+    [[ -z "$GRAFANA_PASSWORD" ]] && GRAFANA_PASSWORD=$(openssl rand -base64 24 | tr -dc 'a-zA-Z0-9' | head -c 16)
 
     # 写入配置
     cat > "$CONFIG_FILE" << EOF
@@ -115,29 +120,30 @@ generate_config() {
 
 INTERNAL_IP="${INTERNAL_IP}"
 SUPABASE_PUBLIC_DOMAIN="${SUPABASE_PUBLIC_DOMAIN}"
-SUPABASE_STUDIO_DOMAIN="studio.${SUPABASE_PUBLIC_DOMAIN}"
+SUPABASE_STUDIO_DOMAIN="${SUPABASE_STUDIO_DOMAIN:-studio.${SUPABASE_PUBLIC_DOMAIN}}"
 
-DASHBOARD_USERNAME="admin"
-DASHBOARD_PASSWORD="${STUDIO_PASS}"
-POSTGRES_PASSWORD="${DB_PASS}"
-GRAFANA_PASSWORD="${GRAFANA_PASS}"
+DASHBOARD_USERNAME="${DASHBOARD_USERNAME:-admin}"
+DASHBOARD_PASSWORD="${DASHBOARD_PASSWORD}"
+POSTGRES_PASSWORD="${POSTGRES_PASSWORD}"
+GRAFANA_PASSWORD="${GRAFANA_PASSWORD}"
 
-SWAP_SIZE_GB=4
-PG_VERSION=18
-S3_STORAGE_TYPE="garage"
-EDGE_RUNTIME="deno"
-ENABLE_ANALYTICS=true
-ANALYTICS_BACKEND="postgres"
+SWAP_SIZE_GB="${SWAP_SIZE_GB:-4}"
+PG_VERSION="${PG_VERSION:-18}"
+S3_STORAGE_TYPE="${S3_STORAGE_TYPE:-garage}"
+EDGE_RUNTIME="${EDGE_RUNTIME:-deno}"
+ENABLE_ANALYTICS="${ENABLE_ANALYTICS:-true}"
+ANALYTICS_BACKEND="${ANALYTICS_BACKEND:-postgres}"
 EOF
 
-    log_info "配置已生成并保存到 $CONFIG_FILE"
+    log_info "配置已就绪: $CONFIG_FILE"
     echo -e "----------------------------------------"
-    echo -e "Studio 用户名: admin"
-    echo -e "Studio 密码:   ${STUDIO_PASS}"
-    echo -e "数据库密码:    ${DB_PASS}"
+    echo -e "API 域名:      ${SUPABASE_PUBLIC_DOMAIN}"
+    echo -e "Studio 密码:   ${DASHBOARD_PASSWORD}"
+    echo -e "数据库密码:    ${POSTGRES_PASSWORD}"
     echo -e "----------------------------------------"
-    log_warn "请务必记录以上密码！安装完成后也可以在 /etc/supabase/supacloud-credentials.env 找到。"
+    log_warn "请记录以上密码。安装即刻开始..."
 }
+
 
 # 执行安装
 run_install() {
