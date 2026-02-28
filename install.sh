@@ -4,7 +4,15 @@
 # 
 # 使用方法:
 #   1. 编辑 config.env 配置文件
-#   2. 运行: sudo bash install.sh
+#   2. 运行: sudo bash install.sh [options]
+#
+# 选项:
+#   --ip <ip>              指定内网 IP (INTERNAL_IP)
+#   --domain <domain>      指定 API 域名 (SUPABASE_PUBLIC_DOMAIN)
+#   --studio <domain>      指定 Studio 域名 (SUPABASE_STUDIO_DOMAIN)
+#   --s3 <type>            指定存储类型 (minio|juicefs)
+#   --password <pass>      指定数据库/面板密码 (统一设置)
+#   --help                 显示帮助信息
 #
 # 支持系统: CentOS 9, Ubuntu 22.04/24.04, Debian 12
 # ============================================================
@@ -13,6 +21,33 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONFIG_FILE="${SCRIPT_DIR}/config.env"
+
+# ── 命令行参数解析 ────────────────────────────────────────────────────────────
+# 先解析参数，以便后续加载配置文件时可以进行环境变量覆盖
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --ip)     INTERNAL_IP="$2"; shift 2 ;;
+        --domain) SUPABASE_PUBLIC_DOMAIN="$2"; shift 2 ;;
+        --studio) SUPABASE_STUDIO_DOMAIN="$2"; shift 2 ;;
+        --s3)     S3_STORAGE_TYPE="$2"; shift 2 ;;
+        --password) 
+            POSTGRES_PASSWORD="$2"; 
+            DASHBOARD_PASSWORD="$2"; 
+            GRAFANA_PASSWORD="$2"; 
+            shift 2 ;;
+        --help)
+            echo "用法: sudo bash install.sh [选项]"
+            echo "选项:"
+            echo "  --ip <ip>          指定服务器内网 IP"
+            echo "  --domain <domain>  指定 Supabase API 域名"
+            echo "  --studio <domain>  指定 Supabase Studio 域名"
+            echo "  --s3 <type>        指定存储类型 (minio | juicefs)"
+            echo "  --password <pass>  统一设置数据库和管理面板密码"
+            exit 0
+            ;;
+        *) shift ;;
+    esac
+done
 
 # 颜色定义
 RED='\033[0;31m'
@@ -55,9 +90,28 @@ EOF
             log_info "请先复制并编辑配置文件: cp config.env.example config.env"
             exit 1
         fi
+    # 加载配置文件 (如果存在)
+    if [[ -f "$CONFIG_FILE" ]]; then
+        # 备份命令行传入的变量，防止被 source 覆盖
+        [[ -n "$INTERNAL_IP" ]] && local CMD_IP="$INTERNAL_IP"
+        [[ -n "$SUPABASE_PUBLIC_DOMAIN" ]] && local CMD_DOMAIN="$SUPABASE_PUBLIC_DOMAIN"
+        [[ -n "$SUPABASE_STUDIO_DOMAIN" ]] && local CMD_STUDIO="$SUPABASE_STUDIO_DOMAIN"
+        [[ -n "$S3_STORAGE_TYPE" ]] && local CMD_S3="$S3_STORAGE_TYPE"
+        [[ -n "$POSTGRES_PASSWORD" ]] && local CMD_PG_PASS="$POSTGRES_PASSWORD"
+        
+        source "$CONFIG_FILE"
+
+        # 恢复命令行变量 (优先级最高)
+        [[ -n "$CMD_IP" ]] && INTERNAL_IP="$CMD_IP"
+        [[ -n "$CMD_DOMAIN" ]] && SUPABASE_PUBLIC_DOMAIN="$CMD_DOMAIN"
+        [[ -n "$CMD_STUDIO" ]] && SUPABASE_STUDIO_DOMAIN="$CMD_STUDIO"
+        [[ -n "$CMD_S3" ]] && S3_STORAGE_TYPE="$CMD_S3"
+        [[ -n "$CMD_PG_PASS" ]] && {
+            POSTGRES_PASSWORD="$CMD_PG_PASS"
+            DASHBOARD_PASSWORD="$CMD_PG_PASS"
+            GRAFANA_PASSWORD="$CMD_PG_PASS"
+        }
     fi
-    
-    source "$CONFIG_FILE"
     
     # 1. 验证/获取 INTERNAL_IP
     if [[ -z "$INTERNAL_IP" || "$INTERNAL_IP" == "10.6.0.9" ]]; then
