@@ -421,6 +421,7 @@ install_base_dependencies() {
         ! command -v openssl &> /dev/null && PACKAGES="$PACKAGES openssl"
         ! command -v bc &> /dev/null && PACKAGES="$PACKAGES bc"
         ! command -v jq &> /dev/null && PACKAGES="$PACKAGES jq"
+        ! command -v git &> /dev/null && PACKAGES="$PACKAGES git"
         # 某些极简镜像也没有 procps-ng (ps, top)
         ! command -v ps &> /dev/null && PACKAGES="$PACKAGES procps-ng"
         # SSH 工具 (ssh-keygen, sshd) — Ansible 必需
@@ -465,6 +466,7 @@ install_base_dependencies() {
         ! command -v sudo &> /dev/null && PACKAGES="$PACKAGES sudo"
         ! command -v bc &> /dev/null && PACKAGES="$PACKAGES bc"
         ! command -v jq &> /dev/null && PACKAGES="$PACKAGES jq"
+        ! command -v git &> /dev/null && PACKAGES="$PACKAGES git"
         ! command -v ps &> /dev/null && PACKAGES="$PACKAGES procps"
         # SSH 工具 — Ansible 必需
         ! command -v ssh-keygen &> /dev/null && PACKAGES="$PACKAGES openssh-client"
