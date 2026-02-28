@@ -1,4 +1,4 @@
-﻿#!/bin/bash
+#!/bin/bash
 # ============================================================
 # Pigsty Supabase 一键安装脚本
 # 
@@ -2449,8 +2449,9 @@ install_management_api() {
 
     # 检查 Bun 是否安装
     if ! command -v bun &>/dev/null; then
-        log_info "安装 Bun 运行时..."
-        curl -fsSL https://bun.sh/install | bash
+        log_info "安装 Bun 运行时（使用国内镜像）..."
+        # 使用国内镜像 bun.cn 加速下载
+        curl -fsSL https://bun.cn/install | bash
         export PATH="$HOME/.bun/bin:$PATH"
         # 添加到系统 PATH
         if [[ -f /etc/profile.d/bun.sh ]]; then
