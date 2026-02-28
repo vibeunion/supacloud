@@ -1748,8 +1748,7 @@ NGINXEOF
         nginx -t 2>&1 || true
         exit 1
     fi
-    
-
+}
 
 
 install_pigsty() {
