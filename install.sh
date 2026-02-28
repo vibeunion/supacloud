@@ -2644,6 +2644,47 @@ show_completion() {
     echo ""
 }
 
+# ========== PostgreSQL 性能调优 ==========
+tune_postgres() {
+    log_step "应用 PostgreSQL 18 性能优化参数..."
+
+    local tune_script="${SCRIPT_DIR}/infra/postgres/pg_tune.sh"
+    if [[ ! -f "${tune_script}" ]]; then
+        log_warn "pg_tune.sh 不存在（${tune_script}），跳过调优"
+        return 0
+    fi
+
+    # 等待 PostgreSQL 完全就绪（Pigsty 安装完刚启动可能需要几秒）
+    local retries=0
+    until psql -h /var/run/postgresql -U postgres -d postgres -c "SELECT 1" &>/dev/null 2>&1; do
+        retries=$((retries + 1))
+        if [[ ${retries} -ge 20 ]]; then
+            log_warn "PostgreSQL 连接超时，跳过性能调优"
+            return 0
+        fi
+        log_info "等待 PostgreSQL 就绪... (${retries}/20)"
+        sleep 3
+    done
+
+    # 执行调优脚本（使用 unix socket 连接本地 PG）
+    PG_HOST=/var/run/postgresql PG_VERSION="${PG_VERSION:-18}" bash "${tune_script}" || {
+        log_warn "pg_tune.sh 执行失败，不影响主流程，可事后手动运行: bash infra/postgres/pg_tune.sh"
+        return 0
+    }
+
+    # 重启 PostgreSQL 使 shared_buffers / io_method 等需要重启的参数生效
+    log_info "重启 PostgreSQL 使所有参数生效..."
+    if systemctl is-active --quiet patroni 2>/dev/null; then
+        systemctl restart patroni
+        log_info "Patroni（PostgreSQL HA）已重启"
+    elif systemctl is-active --quiet postgresql 2>/dev/null; then
+        systemctl restart postgresql
+        log_info "PostgreSQL 已重启"
+    else
+        log_warn "未检测到 patroni/postgresql systemd 服务，请手动重启 PostgreSQL 以使 shared_buffers 等参数生效"
+    fi
+}
+
 # ========== 主函数 ==========
 main() {
     echo ""
@@ -2672,6 +2713,9 @@ main() {
     deploy_mcp_function
     configure_analytics
     configure_pg_hba
+
+    # Pigsty PG 初始化完成后应用性能调优（根据机器内存/存储类型动态计算）
+    tune_postgres
     
     # 在所有安装完成后，应用最终的网关路由和 SSL 配置
     apply_nginx_acme_config
