@@ -815,12 +815,11 @@ EOF
 install_juicefs() {
     log_step "准备 JuiceFS (Postgres LO)..."
     
-    local JFS_VER="1.2.1"
+    local JFS_VER="1.2.2"
     local ARCH=$(uname -m)
     local OS=$(uname -s | tr '[:upper:]' '[:lower:]')
     local JFS_URL=""
 
-    # 1. 下载 JuiceFS 二进制
     if ! command -v juicefs &> /dev/null; then
         log_info "正在下载 JuiceFS ${JFS_VER}..."
         case "${ARCH}" in
@@ -829,7 +828,6 @@ install_juicefs() {
             *) log_error "不支持的架构: ${ARCH}"; return 1 ;;
         esac
 
-        # 使用代理下载
         if ! curl -fsSL --progress-bar "https://gh-proxy.net/${JFS_URL}" -o /tmp/juicefs.tar.gz; then
             log_warn "代理下载失败，尝试直接下载..."
             curl -fsSL --progress-bar "${JFS_URL}" -o /tmp/juicefs.tar.gz || {
@@ -845,14 +843,70 @@ install_juicefs() {
         log_info "JuiceFS 已安装: $(juicefs --version)"
     fi
 
-    # 2. 初始化 JuiceFS 存储卷 (待 Pigsty 初始化 PG 后执行更稳，这里先做准备)
-    # 元数据引擎使用本地 PostgreSQL，数据存储使用 PG LO
-    local META_URL="postgres://postgres:${POSTGRES_PASSWORD}@${INTERNAL_IP}:5432/postgres?sslmode=disable"
-    log_info "JuiceFS 将在 Pigsty 部署后自动完成格式化"
-    
-    # 标记需要初始化
     mkdir -p /etc/supabase
     touch /etc/supabase/.init_juicefs
+    
+    return 0
+}
+
+init_juicefs_s3_gateway() {
+    log_step "初始化 JuiceFS S3 Gateway..."
+    
+    local JFS_DATA_DIR="/var/lib/juicefs"
+    local JFS_CACHE_DIR="/data/juicefs"
+    local JFS_META_DB="juicefs"
+    
+    mkdir -p "${JFS_DATA_DIR}" "${JFS_CACHE_DIR}"
+    
+    log_info "创建 JuiceFS 元数据库..."
+    su - postgres -c "psql -c \"CREATE DATABASE ${JFS_META_DB};\"" 2>/dev/null || true
+    su - postgres -c "psql -c \"GRANT ALL PRIVILEGES ON DATABASE ${JFS_META_DB} TO supabase_admin;\"" 2>/dev/null || true
+    
+    local META_URL="postgres://supabase_admin:${POSTGRES_PASSWORD}@${INTERNAL_IP}:5432/${JFS_META_DB}?sslmode=disable"
+    
+    if ! juicefs status "${META_URL}" &>/dev/null; then
+        log_info "格式化 JuiceFS 文件系统..."
+        juicefs format --storage file --bucket "${JFS_DATA_DIR}" "${META_URL}" supadata || {
+            log_error "JuiceFS 格式化失败"; return 1
+        }
+    fi
+    
+    log_info "创建 S3 bucket 目录..."
+    mkdir -p "${JFS_DATA_DIR}/supadata/data"
+    
+    log_info "创建 systemd 服务..."
+    cat > /etc/systemd/system/juicefs-s3.service << EOF
+[Unit]
+Description=JuiceFS S3 Gateway for Supabase
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+Environment="MINIO_ROOT_USER=${S3_ACCESS_KEY:-s3user_data}"
+Environment="MINIO_ROOT_PASSWORD=${S3_SECRET_KEY:-S3User.Data}"
+ExecStart=/usr/local/bin/juicefs gateway --multi-buckets "${META_URL}" 0.0.0.0:9000
+Restart=always
+RestartSec=5
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    
+    systemctl daemon-reload
+    systemctl enable juicefs-s3
+    systemctl restart juicefs-s3
+    
+    sleep 3
+    if curl -s http://localhost:9000/minio/health/live > /dev/null; then
+        log_info "JuiceFS S3 Gateway 启动成功"
+    else
+        log_warn "JuiceFS S3 Gateway 启动中，请稍后检查"
+    fi
+    
+    S3_ENDPOINT="http://${INTERNAL_IP}:9000"
+    S3_PROTOCOL="http"
     
     return 0
 }
@@ -2506,11 +2560,9 @@ main() {
     # Pigsty PG 初始化完成后应用性能调优
     tune_postgres
     
-    # [NEW] 如果需要，初始化 JuiceFS 存储卷 (此时 PG 已就绪)
+    # [NEW] 如果需要，初始化 JuiceFS S3 Gateway (此时 PG 已就绪)
     if [[ -f /etc/supabase/.init_juicefs ]] && [[ "$S3_STORAGE_TYPE" == "juicefs" ]]; then
-        log_step "初始化 JuiceFS 存储卷..."
-        local META_URL="postgres://postgres:${POSTGRES_PASSWORD}@${INTERNAL_IP}:5432/postgres?sslmode=disable"
-        juicefs format --storage pglo --bucket supabase "${META_URL}" supabase || true
+        init_juicefs_s3_gateway
         rm -f /etc/supabase/.init_juicefs
     fi
 
