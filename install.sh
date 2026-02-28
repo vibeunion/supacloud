@@ -1526,15 +1526,6 @@ install_angie() {
 install_nginx_mainline() { install_angie; }
 
 
-
-# ========== 注入 Lua 自动 SSL 逻辑到 Pigsty 模板 (已弃用) ==========
-inject_lua_config() {
-    log_info "跳过模板注入，将在安装后直接应用最终配置..."
-    log_info "跳过模板注入，将在安装后直接应用最终配置..."
-    # 我们改用 apply_nginx_acme_config 直接覆盖配置，更加稳健
-    return 0
-}
-
 # ========== 应用 Nginx 配置（静态证书，无 ACME 动态模块）==========
 apply_nginx_acme_config() {
     log_step "应用 Nginx 配置（静态证书模式）..."
@@ -1838,10 +1829,7 @@ install_pigsty() {
             fi
         fi
     fi
-    
-    # 注入 Lua 逻辑到模板
-    inject_lua_config
-    
+
     # 修改配置文件
     update_pigsty_config
     
@@ -2032,10 +2020,21 @@ configure_s3_in_pigsty() {
     # 根据存储类型获取凭据
     case "$S3_STORAGE_TYPE" in
         minio)
-            S3_ENDPOINT="http://${INTERNAL_IP}:9000"
+            # 对齐 Pigsty Supabase 标准: 使用 sss.pigsty 域名
+            S3_ENDPOINT="https://sss.pigsty:9000"
             S3_ACCESS_KEY="${S3_ACCESS_KEY:-minioadmin}"
             S3_SECRET_KEY="${S3_SECRET_KEY:-minioadmin}"
             S3_REGION="us-east-1"
+
+            # ── 确保域名解析 ──────────────────────────────────────────────
+            if [[ -n "$INTERNAL_IP" ]]; then
+                log_info "确保 /etc/hosts 中存在 sss.pigsty 解析..."
+                if grep -q "sss.pigsty" /etc/hosts; then
+                    sed -i "s/.*sss.pigsty.*/${INTERNAL_IP} sss.pigsty/" /etc/hosts
+                else
+                    echo "${INTERNAL_IP} sss.pigsty" >> /etc/hosts
+                fi
+            fi
             ;;
         garage)
             if [[ -f /etc/garage/s3-credentials.env ]]; then
@@ -2092,6 +2091,11 @@ configure_s3_in_pigsty() {
         
         if [[ -n "$S3_REGION" ]]; then
             sed -i "s|S3_REGION=.*|S3_REGION=${S3_REGION}|g" "$SUPABASE_ENV"
+        fi
+
+        # MinIO 必须启用 Path Style
+        if [[ "$S3_STORAGE_TYPE" == "minio" ]]; then
+            sed -i "s|S3_FORCE_PATH_STYLE=.*|S3_FORCE_PATH_STYLE=true|g" "$SUPABASE_ENV"
         fi
     fi
     
