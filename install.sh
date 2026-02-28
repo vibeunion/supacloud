@@ -1,4 +1,4 @@
-#!/bin/bash
+﻿#!/bin/bash
 # ============================================================
 # Pigsty Supabase 一键安装脚本
 # 
@@ -1500,14 +1500,14 @@ install_openresty() {
         systemctl disable nginx 2>/dev/null || true
     fi
 
-    # 调用 setup.sh—“安装 OpenResty + pgmoon + lua-resty-auto-ssl + 执行数据库迁移"
-    # setup.sh 会自动从环境变量读取 PG 连接参数
+    # 调用 setup.sh 安装阶段（无需 PG，可在 Pigsty 之前运行）
+    PHASE=install \
     PG_PASSWORD="${POSTGRES_PASSWORD}" \
     PG_HOST="/var/run/postgresql" \
     PG_DATABASE="postgres" \
     STUDIO_DOMAIN="${SUPABASE_STUDIO_DOMAIN}" \
     API_DOMAIN="${SUPABASE_PUBLIC_DOMAIN}" \
-    bash "${setup_script}" || {
+    bash "${setup_script}" --phase install || {
         log_warn "OpenResty setup.sh 执行失败，可事后手动运行: bash infra/openresty/setup.sh"
         return 0
     }
@@ -1522,227 +1522,26 @@ install_openresty() {
 # 为兼容册保留此函数别名
 install_nginx_mainline() { install_openresty; }
 
-    if [[ -f /etc/os-release ]]; then
-        source /etc/os-release
-        DISTRO_ID="${ID,,}"
-        DISTRO_VERSION_ID="${VERSION_ID%%.*}"
+# ========== OpenResty DB 迁移（Pigsty PG 就绪后调用）==========
+openresty_db_migration() {
+    log_step "OpenResty DB 迁移（autossl PostgreSQL 数据库初始化）..."
+
+    local setup_script="${SCRIPT_DIR}/infra/openresty/setup.sh"
+    if [[ ! -f "${setup_script}" ]]; then
+        log_warn "infra/openresty/setup.sh 不存在，跳过迁移"
+        return 0
     fi
 
-    log_info "检测到系统: $DISTRO_ID $DISTRO_VERSION_ID"
-
-    case "$DISTRO_ID" in
-        rocky|almalinux|centos|rhel|anolis|tencentos|opencloudos)
-            # 添加 nginx.org 官方 mainline 仓库
-            local OS_VER="centos/\$releasever"
-            [[ "$DISTRO_ID" == "opencloudos" ]] && OS_VER="centos/9"
-
-            cat > /etc/yum.repos.d/nginx.repo <<REPOEOF
-[nginx-mainline]
-name=nginx mainline repo
-baseurl=http://nginx.org/packages/mainline/${OS_VER}/\$basearch/
-gpgcheck=1
-enabled=1
-gpgkey=https://nginx.org/keys/nginx_signing.key
-module_hotfixes=true
-REPOEOF
-
-            log_info "安装 Nginx Mainline..."
-            if ! dnf install -y nginx 2>/dev/null; then
-                log_warn "officianl 仓库安装失败，回退到系统默认版本"
-                rm -f /etc/yum.repos.d/nginx.repo
-                dnf install -y nginx
-            fi
-            ;;
-
-        debian|ubuntu)
-            apt-get update
-            if [[ "$DISTRO_ID" == "ubuntu" ]]; then
-                apt-get install -y curl gnupg2 ca-certificates lsb-release ubuntu-keyring
-            else
-                apt-get install -y curl gnupg2 ca-certificates lsb-release debian-archive-keyring
-            fi
-            curl -fsSL https://nginx.org/keys/nginx_signing.key | gpg --dearmor \
-                | tee /usr/share/keyrings/nginx-archive-keyring.gpg >/dev/null
-            echo "deb [signed-by=/usr/share/keyrings/nginx-archive-keyring.gpg] \
-            http://nginx.org/packages/mainline/${DISTRO_ID} \
-            $(lsb_release -cs) nginx" \
-            | tee /etc/apt/sources.list.d/nginx.list
-            echo -e "Package: *\nPin: origin nginx.org\nPin: release o=nginx\nPin-Priority: 900\n" \
-                | tee /etc/apt/preferences.d/99nginx
-            apt-get update
-            apt-get install -y nginx
-            ;;
-
-        *)
-            log_error "不支持的操作系统: $DISTRO_ID"
-            exit 1
-            ;;
-    esac
-
-    # 确保租户路由目录存在
-    mkdir -p /etc/nginx/sites-enabled/supa-tenants
-
-    systemctl enable nginx
-    log_info "Nginx 安装完成: $(nginx -v 2>&1)"
+    PHASE=migrate \
+    PG_PASSWORD="${POSTGRES_PASSWORD}" \
+    PG_HOST="/var/run/postgresql" \
+    PG_DATABASE="postgres" \
+    bash "${setup_script}" --phase migrate || {
+        log_warn "OpenResty 迁移失败，可事后手动运行:"
+        log_warn "  bash infra/openresty/setup.sh --phase migrate --pg-password <密码>"
+        return 0
+    }
 }
-
-    # 识别操作系统
-    if [[ -f /etc/os-release ]]; then
-        source /etc/os-release
-        DISTRO_ID="${ID,,}"
-        DISTRO_CODENAME="${VERSION_CODENAME}"
-        DISTRO_VERSION_ID="${VERSION_ID%%.*}"
-    fi
-
-    log_info "检测到系统: $DISTRO_ID $DISTRO_VERSION_ID"
-
-    # ⚠️ 检查并锁定 OpenSSL 版本
-    CURRENT_OPENSSL=$(rpm -q openssl-libs --qf '%{VERSION}' 2>/dev/null || echo "unknown")
-    log_info "当前 OpenSSL 版本: $CURRENT_OPENSSL"
-
-    # 如果设置了兼容模式标识，使用系统自带 Nginx
-    if [[ "${USE_SYSTEM_NGINX:-false}" == "true" ]]; then
-        log_warn "检测到兼容模式标识，使用系统自带 Nginx 以避免 OpenSSL 冲突"
-        dnf install -y nginx
-        systemctl enable --now nginx
-        return
-    fi
-
-    case "$DISTRO_ID" in
-        # RHEL 系列
-        rocky|almalinux|opencloudos|centos|rhel|anolis|tencentos)
-            log_info "配置 Nginx Mainline 仓库 (RHEL/CentOS)..."
-            
-            # 创建 repo 文件
-            local OS_VER="centos"
-            if [[ "$DISTRO_ID" == "opencloudos" ]]; then
-                # OpenCloudOS 9 兼容 RHEL 9
-                OS_VER="centos/9"
-            else
-                OS_VER="centos/\$releasever"
-            fi
-
-            cat > /etc/yum.repos.d/nginx.repo << EOF
-[nginx-mainline]
-name=nginx mainline repo
-baseurl=http://nginx.org/packages/mainline/${OS_VER}/\$basearch/
-gpgcheck=1
-enabled=1
-gpgkey=https://nginx.org/keys/nginx_signing.key
-module_hotfixes=true
-EOF
-            
-            # 安装 Nginx 和 ACME 模块
-            local INSTALL_CMD="dnf install -y"
-            if ! command -v dnf &> /dev/null; then
-                INSTALL_CMD="yum install -y"
-            fi
-
-            log_info "尝试从官方仓库安装 Nginx..."
-            if ! $INSTALL_CMD nginx; then
-                log_warn "Nginx 官方仓库安装失败，回退到系统默认版本..."
-                rm -f /etc/yum.repos.d/nginx.repo
-                if command -v dnf &> /dev/null; then
-                    dnf clean all
-                    dnf install -y nginx
-                else
-                    yum clean all
-                    yum install -y nginx
-                fi
-            fi
-            
-            # 单独安装 ACME 模块（依赖 nginx，必须在 nginx 安装后）
-            log_info "安装 nginx-module-acme..."
-            $INSTALL_CMD nginx-module-acme || log_warn "nginx-module-acme 安装失败，稍后将尝试第三方源"
-            ;;
-        
-        # Debian/Ubuntu 系列
-        debian|ubuntu)
-            log_info "配置 Nginx Mainline 仓库 (Debian/Ubuntu)..."
-            
-            # 安装依赖 (Debian 和 Ubuntu 的 keyring 包名不同)
-            apt-get update
-            if [[ "$DISTRO_ID" == "ubuntu" ]]; then
-                apt-get install -y curl gnupg2 ca-certificates lsb-release ubuntu-keyring
-            else
-                apt-get install -y curl gnupg2 ca-certificates lsb-release debian-archive-keyring
-            fi
-
-            # 添加 nginx.org 官方签名密钥
-            curl -fsSL https://nginx.org/keys/nginx_signing.key | gpg --dearmor \
-                | tee /usr/share/keyrings/nginx-archive-keyring.gpg >/dev/null
-
-            # 添加 mainline 源
-            echo "deb [signed-by=/usr/share/keyrings/nginx-archive-keyring.gpg] \
-            http://nginx.org/packages/mainline/${DISTRO_ID} \
-            $(lsb_release -cs) nginx" \
-            | tee /etc/apt/sources.list.d/nginx.list
-
-            # 设置优先级 (确保安装官方包而非系统包)
-            echo -e "Package: *\nPin: origin nginx.org\nPin: release o=nginx\nPin-Priority: 900\n" \
-                | tee /etc/apt/preferences.d/99nginx
-
-            apt-get update
-            apt-get install -y nginx
-            
-            # 单独安装 ACME 模块（依赖 nginx，必须在 nginx 安装后）
-            log_info "安装 nginx-module-acme..."
-            apt-get install -y nginx-module-acme || log_warn "nginx-module-acme 安装失败，稍后将尝试第三方源"
-            ;;
-        
-        *)
-            log_error "不支持的操作系统: $DISTRO_ID"
-            exit 1
-            ;;
-    esac
-
-    # 启用 Nginx
-    systemctl enable nginx
-    
-    # 检查模块文件
-    if ! find /usr/lib/nginx/modules /usr/lib64/nginx/modules /etc/nginx/modules -name "ngx_http_acme_module.so" 2>/dev/null | grep -q .; then
-        log_warn "Nginx 仓库版缺少 ACME 模块，尝试从 EPOL/第三方源安装..."
-        case "$DISTRO_ID" in
-            rocky|almalinux|centos|rhel|anolis|tencentos)
-                if command -v dnf &> /dev/null; then
-                    dnf install -y epel-release || true
-                    dnf install -y nginx-mod-http-acme nginx-module-acme || log_warn "未能成功从源安装 Nginx ACME 模块"
-                fi
-                ;;
-            opencloudos)
-                log_info "OpenCloudOS 尝试从 EPOL 获取 ACME 模块..."
-                dnf install -y nginx-mod-http-acme 2>/dev/null || log_warn "OpenCloudOS EPOL 未提供 nginx ACME 模块"
-                ;;
-            ubuntu)
-                if ! command -v add-apt-repository &> /dev/null; then
-                    apt-get update && apt-get install -y software-properties-common
-                fi
-                add-apt-repository ppa:ondrej/nginx -y
-                apt-get update
-                apt-get install -y libnginx-mod-http-acme || apt-get install -y nginx-module-acme || log_warn "未能成功安装 Nginx ACME 模块"
-                ;;
-            debian)
-                apt-get update && apt-get install -y lsb-release ca-certificates apt-transport-https software-properties-common curl
-                curl -sSLo /tmp/debsuryorg-archive-keyring.deb https://packages.sury.org/debsuryorg-archive-keyring.deb
-                dpkg -i /tmp/debsuryorg-archive-keyring.deb || true
-                echo "deb [signed-by=/usr/share/keyrings/debsuryorg-archive-keyring.gpg] https://packages.sury.org/nginx/ $(lsb_release -sc) main" > /etc/apt/sources.list.d/nginx-sury.list
-                apt-get update
-                apt-get install -y libnginx-mod-http-acme || apt-get install -y nginx-module-acme || log_warn "未能成功安装 Nginx ACME 模块"
-                ;;
-        esac
-    fi
-    
-    # 最终检查：如果还是没有 ACME 模块，从源码编译安装
-    if ! find /usr/lib/nginx/modules /usr/lib64/nginx/modules /etc/nginx/modules -name "ngx_http_acme_module.so" 2>/dev/null | grep -q .; then
-        log_warn "所有仓库方案失败，尝试从源码编译 Nginx with ACME..."
-        compile_nginx_with_acme
-    else
-        log_info "已存在 ngx_http_acme_module.so，无需额外安装。"
-    fi
-    
-    log_info "Nginx 安装完成"
-}
-
 
 
 # ========== 注入 Lua 自动 SSL 逻辑到 Pigsty 模板 (已弃用) ==========
@@ -2832,8 +2631,8 @@ main() {
     # Pigsty PG 初始化完成后应用性能调优
     tune_postgres
 
-    # OpenResty 配置已在 install_openresty 中完成，无需重复应用
-    # apply_nginx_acme_config 函数保留备用（不调用）
+    # PG 已就绪：执行 OpenResty autossl DB 迁移（建表 + 角色）
+    openresty_db_migration
     
     # 安装 Management API
     install_management_api
