@@ -813,24 +813,47 @@ EOF
 # ========== 安装 Docker Compose ==========
 # ========== 安装 JuiceFS (Postgres LO) ==========
 install_juicefs() {
-    log_step "配置 JuiceFS S3 Gateway (Postgres LO)..."
+    log_step "准备 JuiceFS (Postgres LO)..."
     
-    # 确保 pigsty 环境已知，通常 juicefs 作为 pigsty 的一个应用部署
-    # 或者直接使用我们简化的容器化方案
-    
-    log_info "正在通过 Pigsty 部署 JuiceFS 模块..."
-    
-    # 检查是否有 pigsty 目录
-    if [[ -d ~/pigsty ]]; then
-        cd ~/pigsty
-        # 启用 juicefs 扩展 (由我们的 schema 管理)
-        # 实际上 JuiceFS PostgreSQL 模式不需要特殊的 PG 插件，只需要连接权限
-        log_info "JuiceFS 将使用 PostgreSQL 作为元数据引擎，LO 作为数据存储"
+    local JFS_VER="1.2.1"
+    local ARCH=$(uname -m)
+    local OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+    local JFS_URL=""
+
+    # 1. 下载 JuiceFS 二进制
+    if ! command -v juicefs &> /dev/null; then
+        log_info "正在下载 JuiceFS ${JFS_VER}..."
+        case "${ARCH}" in
+            x86_64)  JFS_URL="https://github.com/juicedata/juicefs/releases/download/v${JFS_VER}/juicefs-${JFS_VER}-${OS}-amd64.tar.gz" ;;
+            aarch64) JFS_URL="https://github.com/juicedata/juicefs/releases/download/v${JFS_VER}/juicefs-${JFS_VER}-${OS}-arm64.tar.gz" ;;
+            *) log_error "不支持的架构: ${ARCH}"; return 1 ;;
+        esac
+
+        # 使用代理下载
+        if ! curl -fsSL --progress-bar "https://gh-proxy.net/${JFS_URL}" -o /tmp/juicefs.tar.gz; then
+            log_warn "代理下载失败，尝试直接下载..."
+            curl -fsSL --progress-bar "${JFS_URL}" -o /tmp/juicefs.tar.gz || {
+                log_error "JuiceFS 下载失败"; return 1
+            }
+        fi
+
+        tar -xzf /tmp/juicefs.tar.gz -C /tmp
+        install -m 755 /tmp/juicefs /usr/local/bin/juicefs
+        rm -f /tmp/juicefs /tmp/juicefs.tar.gz
+        log_info "JuiceFS 已安装: $(juicefs --version)"
+    else
+        log_info "JuiceFS 已安装: $(juicefs --version)"
     fi
+
+    # 2. 初始化 JuiceFS 存储卷 (待 Pigsty 初始化 PG 后执行更稳，这里先做准备)
+    # 元数据引擎使用本地 PostgreSQL，数据存储使用 PG LO
+    local META_URL="postgres://postgres:${POSTGRES_PASSWORD}@${INTERNAL_IP}:5432/postgres?sslmode=disable"
+    log_info "JuiceFS 将在 Pigsty 部署后自动完成格式化"
     
-    # 部署 JuiceFS S3 网关容器 (模拟 S3 接口)
-    # 这部分逻辑通常集成在 Docker Compose 中
-    log_info "JuiceFS S3 Gateway 将在 Pigsty App 部署阶段自动启动"
+    # 标记需要初始化
+    mkdir -p /etc/supabase
+    touch /etc/supabase/.init_juicefs
+    
     return 0
 }
 
@@ -1862,6 +1885,14 @@ configure_s3_in_pigsty() {
             S3_SECRET_KEY="$EXTERNAL_S3_SECRET_KEY"
             S3_REGION="${EXTERNAL_S3_REGION:-us-east-1}"
             ;;
+        juicefs)
+            # JuiceFS S3 Gateway 运行在本地 9001 端口
+            S3_ENDPOINT="http://${INTERNAL_IP}:9001"
+            S3_ACCESS_KEY="${S3_ACCESS_KEY:-minioadmin}"
+            S3_SECRET_KEY="${S3_SECRET_KEY:-minioadmin}"
+            S3_REGION="us-east-1"
+            log_info "JuiceFS 模式：S3 Endpoint 设置为 ${S3_ENDPOINT}"
+            ;;
     esac
     
     # 更新 pigsty.yml 中的 S3 配置
@@ -2475,6 +2506,14 @@ main() {
     # Pigsty PG 初始化完成后应用性能调优
     tune_postgres
     
+    # [NEW] 如果需要，初始化 JuiceFS 存储卷 (此时 PG 已就绪)
+    if [[ -f /etc/supabase/.init_juicefs ]] && [[ "$S3_STORAGE_TYPE" == "juicefs" ]]; then
+        log_step "初始化 JuiceFS 存储卷..."
+        local META_URL="postgres://postgres:${POSTGRES_PASSWORD}@${INTERNAL_IP}:5432/postgres?sslmode=disable"
+        juicefs format --storage pglo --bucket supabase "${META_URL}" supabase || true
+        rm -f /etc/supabase/.init_juicefs
+    fi
+
     # 安装 Management API
     install_management_api
 
