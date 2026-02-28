@@ -10,7 +10,9 @@ TARGET=$2
 OPTIONS=$3
 
 MOUNT_POINT="/mnt/juicefs"
-META_URL="postgres://postgres:postgres@localhost:5432/juicefs?sslmode=disable"
+# 默认指向本地 Supabase 专用的 JuiceFS 元数据库
+# 如果在 install.sh 中修改了密码，这里也需要对齐
+META_URL="postgres://postgres:${POSTGRES_PASSWORD:-postgres}@localhost:5432/postgres?sslmode=disable"
 
 log_info() { echo -e "\033[0;32m[INFO]\033[0m $1"; }
 log_error() { echo -e "\033[0;31m[ERROR]\033[0m $1"; }
@@ -46,7 +48,12 @@ case $COMMAND in
         export ACCESS_KEY="$ACCESS_KEY"
         export SECRET_KEY="$SECRET_KEY"
         
-        juicefs sync --force-update "jfs://${META_URL}" "${S3_URL}"
+        # 如果提供了 endpoint，则在 sync 中指定
+        if [ -n "$ENDPOINT" ] && [ "$ENDPOINT" != "null" ]; then
+            juicefs sync --force-update --endpoint "$ENDPOINT" "jfs://${META_URL}" "${S3_URL}"
+        else
+            juicefs sync --force-update "jfs://${META_URL}" "${S3_URL}"
+        fi
         
         log_info "Data sync completed. Next: Dump metadata..."
         
