@@ -1775,6 +1775,8 @@ update_pigsty_config() {
     
     if [[ -n "$POSTGRES_PASSWORD" && "$POSTGRES_PASSWORD" != "DBUser.Supa" ]]; then
         sed -i "s|POSTGRES_PASSWORD: DBUser.Supa|POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}|g" "$PIGSTY_YML"
+        # 同时更新 pg_users 中的硬编码密码 (supabase_admin, authenticator, supabase_auth_admin 等)
+        sed -i "s|password: 'DBUser.Supa'|password: '${POSTGRES_PASSWORD}'|g" "$PIGSTY_YML"
     fi
     
     if [[ -n "$GRAFANA_PASSWORD" && "$GRAFANA_PASSWORD" != "pigsty" ]]; then
