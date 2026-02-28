@@ -64,15 +64,15 @@ install_phase() {
 name=Official OpenResty Open Source Repository for Enterprise Linux
 baseurl=https://openresty.org/package/rhel/$releasever/$basearch
 skip_if_unavailable=False
-gpgcheck=1
-gpgkey=https://openresty.org/package/pubkey.gpg
+gpgcheck=0
+gpgkey=https://openresty.org/package/pubkey2.gpg
 enabled=1
 autorefresh=1
 REPOEOF
     dnf install -y openresty openresty-opm
   elif command -v apt-get &>/dev/null; then
     apt-get install -y gnupg2 curl lsb-release
-    curl -fsSL https://openresty.org/package/pubkey.gpg | apt-key add -
+    curl -fsSL https://openresty.org/package/pubkey2.gpg | apt-key add -
     echo "deb http://openresty.org/package/ubuntu $(lsb_release -sc) main" \
       > /etc/apt/sources.list.d/openresty.list
     apt-get update
@@ -264,7 +264,7 @@ name=Official OpenResty Open Source Repository for Enterprise Linux
 baseurl=https://openresty.org/package/rhel/$releasever/$basearch
 skip_if_unavailable=False
 gpgcheck=1
-gpgkey=https://openresty.org/package/pubkey.gpg
+gpgkey=https://openresty.org/package/pubkey2.gpg
 enabled=1
 EOF
 
