@@ -218,7 +218,7 @@ generate_tenant_config() {
     # 1. 生成 PostgREST .env 和 .conf
     cat > "${TENANT_CONFIG_DIR}/${ref}.env" <<EOF
 # SupaCloud Tenant PostgREST Runtime: ${ref}
-PGRST_DB_URI=postgres://authenticator:${db_password}@${PG_HOST}:${PG_PORT}/${db_name}
+PGRST_DB_URI=postgres://authenticator_${ref}:${db_password}@${PG_HOST}:${PG_PORT}/${db_name}
 PGRST_DB_SCHEMAS=public,storage,graphql_public
 PGRST_DB_EXTRA_SEARCH_PATH=public
 PGRST_DB_ANON_ROLE=anon
@@ -232,7 +232,7 @@ EOF
 
     cat > "${TENANT_CONFIG_DIR}/${ref}.conf" <<EOF
 # PostgREST config for tenant: ${ref}
-db-uri = "postgres://authenticator:${db_password}@${PG_HOST}:${PG_PORT}/${db_name}"
+db-uri = "postgres://authenticator_${ref}:${db_password}@${PG_HOST}:${PG_PORT}/${db_name}"
 db-schemas = "public, storage, graphql_public"
 # Bug Fix: 多租户隔离 - 额外搜索路径应包含租户特定的 schema
 db-extra-search-path = "public, extensions, auth, ${ref}"
