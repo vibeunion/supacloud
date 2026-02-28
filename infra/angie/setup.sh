@@ -53,6 +53,7 @@ sed \
   -e "s|YOUR_API_DOMAIN|${API_DOMAIN}|g" \
   "${SCRIPT_DIR}/angie.conf" > /etc/angie/angie.conf
 
+mkdir -p /etc/angie/http.d/
 log "  配置文件已写入: /etc/angie/angie.conf"
 
 # ── Step 4: 服务管理 ────────────────────────────────────────────────────────
