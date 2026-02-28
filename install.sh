@@ -1263,15 +1263,13 @@ configure_external_s3() {
 }
 
 # ========== 安装 Pigsty ==========
-# ========== 编译 ACME 模块 (Rust) ==========
+# ========== [已废弃] 编译 ACME 模块 ==========
+# ngx_http_acme_module.so 与 Rocky Linux 9 上的 Nginx 二进制存在 ABI 不兼容，
+# 加载后导致 Nginx Segfault（Cloudflare 521 错误）。已彻底废弃此方案。
+# SSL 改由 /etc/pigsty/cert/ 静态证书或 Let's Encrypt 传统目录管理。
 compile_acme_module() {
-    log_step "编译 Nginx ACME 模块..."
-    
-    # 检查是否已有 ACME 模块
-    if find /usr/lib/nginx/modules /usr/lib64/nginx/modules -name "ngx_http_acme_module.so" 2>/dev/null | grep -q .; then
-        log_info "ACME 模块已存在，跳过编译"
-        return 0
-    fi
+    log_warn "[已废弃] compile_acme_module: ACME .so 模块导致 Segfault，已停用，跳过"
+    return 0
     
     # 安装 Rust
     log_info "安装 Rust 工具链..."
@@ -1353,9 +1351,11 @@ compile_acme_module() {
     fi
 }
 
-# ========== 编译安装 Nginx (带 ACME 模块) - 备用方案 ==========
+# ========== [已废弃] 从源码编译 Nginx + ACME 模块 ==========
+# 同上，ABI 不兼容导致 Segfault，废弃整个编译分支。
 compile_nginx_with_acme() {
-    log_step "从源码编译安装 Nginx (带 ACME 模块)..."
+    log_warn "[已废弃] compile_nginx_with_acme: 已停用，使用仓库版 Nginx 替代"
+    return 0
     
     local NGINX_VERSION="1.26.3"
     local OPENSSL_VERSION="3.0.12"
@@ -1481,9 +1481,75 @@ EOF
     
     log_info "Nginx 编译安装完成: $(/usr/local/nginx/sbin/nginx -v 2>&1)"
 }
-# ========== 安装 Nginx Mainline (带 ACME 模块) ==========
+# ========== 安装 Nginx Mainline (纯净版，无 ACME 动态模块) ==========
+# ACME 动态模块（ngx_http_acme_module.so）与 Rocky Linux 9 Nginx 二进制 ABI 不兼容，
+# 已彻底移除。SSL 证书由 Pigsty /etc/pigsty/cert/ 或 certbot 管理。
 install_nginx_mainline() {
-    log_step "正在安装 Nginx Mainline (带 ACME 模块)..."
+    log_step "正在安装 Nginx Mainline（纯净版）..."
+
+    if [[ -f /etc/os-release ]]; then
+        source /etc/os-release
+        DISTRO_ID="${ID,,}"
+        DISTRO_VERSION_ID="${VERSION_ID%%.*}"
+    fi
+
+    log_info "检测到系统: $DISTRO_ID $DISTRO_VERSION_ID"
+
+    case "$DISTRO_ID" in
+        rocky|almalinux|centos|rhel|anolis|tencentos|opencloudos)
+            # 添加 nginx.org 官方 mainline 仓库
+            local OS_VER="centos/\$releasever"
+            [[ "$DISTRO_ID" == "opencloudos" ]] && OS_VER="centos/9"
+
+            cat > /etc/yum.repos.d/nginx.repo <<REPOEOF
+[nginx-mainline]
+name=nginx mainline repo
+baseurl=http://nginx.org/packages/mainline/${OS_VER}/\$basearch/
+gpgcheck=1
+enabled=1
+gpgkey=https://nginx.org/keys/nginx_signing.key
+module_hotfixes=true
+REPOEOF
+
+            log_info "安装 Nginx Mainline..."
+            if ! dnf install -y nginx 2>/dev/null; then
+                log_warn "officianl 仓库安装失败，回退到系统默认版本"
+                rm -f /etc/yum.repos.d/nginx.repo
+                dnf install -y nginx
+            fi
+            ;;
+
+        debian|ubuntu)
+            apt-get update
+            if [[ "$DISTRO_ID" == "ubuntu" ]]; then
+                apt-get install -y curl gnupg2 ca-certificates lsb-release ubuntu-keyring
+            else
+                apt-get install -y curl gnupg2 ca-certificates lsb-release debian-archive-keyring
+            fi
+            curl -fsSL https://nginx.org/keys/nginx_signing.key | gpg --dearmor \
+                | tee /usr/share/keyrings/nginx-archive-keyring.gpg >/dev/null
+            echo "deb [signed-by=/usr/share/keyrings/nginx-archive-keyring.gpg] \
+            http://nginx.org/packages/mainline/${DISTRO_ID} \
+            $(lsb_release -cs) nginx" \
+            | tee /etc/apt/sources.list.d/nginx.list
+            echo -e "Package: *\nPin: origin nginx.org\nPin: release o=nginx\nPin-Priority: 900\n" \
+                | tee /etc/apt/preferences.d/99nginx
+            apt-get update
+            apt-get install -y nginx
+            ;;
+
+        *)
+            log_error "不支持的操作系统: $DISTRO_ID"
+            exit 1
+            ;;
+    esac
+
+    # 确保租户路由目录存在
+    mkdir -p /etc/nginx/sites-enabled/supa-tenants
+
+    systemctl enable nginx
+    log_info "Nginx 安装完成: $(nginx -v 2>&1)"
+}
 
     # 识别操作系统
     if [[ -f /etc/os-release ]]; then
@@ -1652,10 +1718,181 @@ inject_lua_config() {
     return 0
 }
 
-# ========== 执行 Nginx 二进制劫持 ==========
-# ========== 应用 Nginx ACME 配置 ==========
+# ========== 应用 Nginx 配置（静态证书，无 ACME 动态模块）==========
 apply_nginx_acme_config() {
-    log_step "应用 Nginx 配置 (原生 ACME 模块)..."
+    log_step "应用 Nginx 配置（静态证书模式）..."
+
+    local NGINX_CONF="/etc/nginx/nginx.conf"
+
+    # 备份旧配置
+    [[ -f "$NGINX_CONF" ]] && cp "$NGINX_CONF" "${NGINX_CONF}.bak.$(date +%s)"
+
+    # ── 检测证书路径（优先级：Pigsty cert > Let's Encrypt > 自签名回退）────────
+    detect_ssl_cert() {
+        local domain="$1"
+        # 1. Pigsty 颁发/管理的证书
+        if [[ -f "/etc/pigsty/cert/${domain}.pem" ]]; then
+            echo "/etc/pigsty/cert/${domain}.pem /etc/pigsty/cert/${domain}.key"
+            return
+        fi
+        # 2. Let's Encrypt 传统目录
+        if [[ -f "/etc/letsencrypt/live/${domain}/fullchain.pem" ]]; then
+            echo "/etc/letsencrypt/live/${domain}/fullchain.pem /etc/letsencrypt/live/${domain}/privkey.pem"
+            return
+        fi
+        # 3. 自签名回退（首次安装尚无证书时正常现象）
+        echo "/etc/nginx/ssl/${domain}.crt /etc/nginx/ssl/${domain}.key"
+    }
+
+    # 为两个域名检测证书
+    read -r STUDIO_CERT STUDIO_KEY <<< "$(detect_ssl_cert "$SUPABASE_STUDIO_DOMAIN")"
+    read -r API_CERT    API_KEY    <<< "$(detect_ssl_cert "$SUPABASE_PUBLIC_DOMAIN")"
+
+    log_info "Studio  证书: $STUDIO_CERT"
+    log_info "API     证书: $API_CERT"
+
+    # ── 生成自签名证书（仅当找不到任何真实证书时，保证 Nginx 能正常启动）──────
+    generate_fallback_cert() {
+        local domain="$1" cert="$2" key="$3"
+        mkdir -p "$(dirname "$cert")"
+        if [[ ! -f "$cert" ]]; then
+            log_warn "未找到 ${domain} 的证书，生成临时自签名证书以确保 Nginx 启动"
+            openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+                -keyout "$key" -out "$cert" \
+                -subj "/CN=${domain}/O=SupaCloud/C=CN" 2>/dev/null
+        fi
+    }
+
+    generate_fallback_cert "$SUPABASE_STUDIO_DOMAIN" "$STUDIO_CERT" "$STUDIO_KEY"
+    generate_fallback_cert "$SUPABASE_PUBLIC_DOMAIN"  "$API_CERT"    "$API_KEY"
+
+    # ── 生成 nginx.conf ──────────────────────────────────────────────────────
+    cat > "$NGINX_CONF" <<NGINXEOF
+user nginx;
+worker_processes auto;
+error_log /var/log/nginx/error.log notice;
+pid /var/run/nginx.pid;
+
+events {
+    worker_connections 4096;
+    use epoll;
+}
+
+http {
+    include       /etc/nginx/mime.types;
+    default_type  application/octet-stream;
+
+    log_format main '\$remote_addr - \$remote_user [\$time_local] "\$request" '
+                    '\$status \$body_bytes_sent "\$http_referer" '
+                    '"\$http_user_agent" "\$http_x_forwarded_for"';
+    access_log /var/log/nginx/access.log main;
+
+    sendfile       on;
+    tcp_nopush     on;
+    keepalive_timeout 65;
+
+    # SSL 全局优化
+    ssl_session_cache   shared:SSL:10m;
+    ssl_session_timeout 10m;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_ciphers         ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384;
+    ssl_prefer_server_ciphers off;
+
+    # DNS resolver（用于 proxy 域名解析）
+    resolver 8.8.8.8 8.8.4.4 valid=300s;
+
+    upstream studio_backend { server 127.0.0.1:3003; }
+    upstream kong_backend   { server 127.0.0.1:8000; }
+
+    # ── HTTP 80：ACME challenge 兼容 + 强制跳转 HTTPS ────────────────────────
+    server {
+        listen 80 default_server;
+        server_name ${SUPABASE_STUDIO_DOMAIN} ${SUPABASE_PUBLIC_DOMAIN} _;
+
+        # certbot / acme.sh HTTP-01 验证目录（Let's Encrypt 标准路径）
+        location /.well-known/acme-challenge/ {
+            root /var/www/html;
+            try_files \$uri =404;
+        }
+
+        location / {
+            return 301 https://\$host\$request_uri;
+        }
+    }
+
+    # ── Studio HTTPS ──────────────────────────────────────────────────────────
+    server {
+        listen 443 ssl;
+        server_name ${SUPABASE_STUDIO_DOMAIN};
+
+        ssl_certificate     ${STUDIO_CERT};
+        ssl_certificate_key ${STUDIO_KEY};
+
+        location / {
+            proxy_pass http://studio_backend;
+            proxy_set_header Host              \$host;
+            proxy_set_header X-Real-IP         \$remote_addr;
+            proxy_set_header X-Forwarded-For   \$proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto \$scheme;
+            proxy_set_header Upgrade           \$http_upgrade;
+            proxy_set_header Connection        "upgrade";
+            proxy_read_timeout 86400;
+        }
+    }
+
+    # ── API HTTPS ─────────────────────────────────────────────────────────────
+    server {
+        listen 443 ssl;
+        server_name ${SUPABASE_PUBLIC_DOMAIN};
+
+        ssl_certificate     ${API_CERT};
+        ssl_certificate_key ${API_KEY};
+
+        location / {
+            proxy_pass http://kong_backend;
+            proxy_set_header Host              \$host;
+            proxy_set_header X-Real-IP         \$remote_addr;
+            proxy_set_header X-Forwarded-For   \$proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto \$scheme;
+            proxy_set_header Upgrade           \$http_upgrade;
+            proxy_set_header Connection        "upgrade";
+            proxy_read_timeout 86400;
+        }
+    }
+
+    include /etc/nginx/conf.d/*.conf;
+
+    # ── 多租户路由（SupaCloud Tenants）────────────────────────────────────────
+    include /etc/nginx/sites-enabled/supa-tenants/*.conf;
+}
+NGINXEOF
+
+    # ACME challenge webroot 目录（供 certbot/acme.sh 后续使用）
+    mkdir -p /var/www/html/.well-known/acme-challenge
+    mkdir -p /etc/nginx/sites-enabled/supa-tenants
+
+    log_info "验证 Nginx 配置..."
+    if nginx -t 2>&1; then
+        log_info "配置验证通过，重启 Nginx..."
+        if systemctl is-system-running &>/dev/null; then
+            systemctl restart nginx
+        else
+            nginx -s stop 2>/dev/null || true
+            nginx
+        fi
+        log_info "Nginx 已启动"
+        log_info ""
+        log_info "证书说明:"
+        log_info "  当前使用: 静态证书路径（Pigsty cert 或自签名临时证书）"
+        log_info "  申请真实证书（二选一）:"
+        log_info "    certbot: certbot --nginx -d ${SUPABASE_STUDIO_DOMAIN} -d ${SUPABASE_PUBLIC_DOMAIN}"
+        log_info "    acme.sh: acme.sh --issue -d ${SUPABASE_STUDIO_DOMAIN} --webroot /var/www/html"
+        log_info "  申请后 Pigsty 也可通过 'make cert' 统一管理证书"
+    else
+        log_error "Nginx 配置验证失败！"
+        nginx -t 2>&1 || true
+        exit 1
+    fi
     
     # 确保 modules 目录存在 (防止某些发行版路径差异)
     # 通常在 /usr/lib/nginx/modules 或 /etc/nginx/modules
