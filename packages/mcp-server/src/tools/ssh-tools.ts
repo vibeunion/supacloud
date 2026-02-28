@@ -1,4 +1,4 @@
-/**
+﻿/**
  * SSH 工具集 – 安装/升级/诊断 (SupaCloud 安装前可用)
  */
 import { z } from "zod";
@@ -79,7 +79,7 @@ export function registerSshTools(server: McpServer, ssh: SshTransport): void {
     // ── 安装 SupaCloud ──
     server.tool(
         "install_supacloud",
-        "在目标服务器上一键安装 SupaCloud (Pigsty + Supabase)。请先调用 setup_server_ssh 确保前置环境就绪。",
+        "在目标服务器上一键安装 SupaCloud (Pigsty + Supabase + OpenResty)。请先调用 setup_server_ssh 确保前置环境就绪。",
         {
             public_domain: z.string().describe("API 域名，例如 api.example.com"),
             studio_domain: z.string().optional().describe("Studio 域名，默认同 public_domain"),
@@ -89,11 +89,34 @@ export function registerSshTools(server: McpServer, ssh: SshTransport): void {
             storage_type: z.enum(["garage", "rustfs", "minio", "external"]).default("garage").describe("存储后端"),
         },
         async ({ public_domain, studio_domain, postgres_password, dashboard_password, edge_runtime, storage_type }) => {
-            // 1. 检测基础环境
-            const osCheck = await ssh.exec("cat /etc/os-release | head -5");
+            const INSTALL_DIR = "/opt/supacloud";
+            const LOG_FILE = "/tmp/supacloud-install.log";
+            const REPO_URL = "https://github.com/zuohuadong/supacloud.git";
+            const REPO_PROXY = "https://ghproxy.net/" + REPO_URL;
 
-            // 2. 写入配置文件
-            const envContent = [
+            // 1. 检测基础环境
+            const osCheck = await ssh.exec("cat /etc/os-release | grep -E 'NAME|VERSION_ID' | head -4");
+
+            // 2. 克隆/更新仓库
+            const cloneCmd = [
+                `if [ -d "${INSTALL_DIR}/.git" ]; then`,
+                `  echo 'repo exists, pulling latest...'; git -C ${INSTALL_DIR} pull --ff-only`,
+                `else`,
+                `  echo 'cloning repo...'`,
+                `  git clone ${REPO_PROXY} ${INSTALL_DIR} 2>/dev/null || git clone ${REPO_URL} ${INSTALL_DIR}`,
+                `fi`,
+                `echo CLONE_OK`,
+            ].join("\n");
+            const clone = await ssh.exec(cloneCmd, 120_000);
+
+            if (!clone.stdout.includes("CLONE_OK")) {
+                return {
+                    content: [{ type: "text", text: `❌ 仓库克隆失败，请检查服务器网络\n\n${clone.stderr.slice(-500)}` }],
+                };
+            }
+
+            // 3. 写入 config.env
+            const envLines = [
                 `SUPABASE_PUBLIC_DOMAIN=${public_domain}`,
                 `SUPABASE_STUDIO_DOMAIN=${studio_domain ?? public_domain}`,
                 `EDGE_RUNTIME=${edge_runtime}`,
@@ -102,32 +125,17 @@ export function registerSshTools(server: McpServer, ssh: SshTransport): void {
                 dashboard_password ? `DASHBOARD_PASSWORD=${dashboard_password}` : "",
             ].filter(Boolean).join("\n");
 
-            await ssh.exec(`cat > /tmp/supacloud-config.env << 'ENVEOF'\n${envContent}\nENVEOF`);
+            await ssh.exec(
+                `cat > ${INSTALL_DIR}/config.env << 'ENVEOF'\n${envLines}\nENVEOF`
+            );
 
-            // 3. 拉取 setup.sh（国内多镜像回退）
-            const downloadCmd = [
-                "SETUP=/tmp/supacloud-setup.sh",
-                "rm -f $SETUP",
-                // 优先尝试 ghproxy，失败则直连 github
-                "curl -fsSL https://ghproxy.net/https://raw.githubusercontent.com/zuohuadong/supacloud/main/setup.sh -o $SETUP 2>/dev/null",
-                "[ -s $SETUP ] || curl -fsSL https://raw.githubusercontent.com/zuohuadong/supacloud/main/setup.sh -o $SETUP 2>/dev/null",
-                "[ -s $SETUP ] && echo 'downloaded' || echo 'DOWNLOAD_FAILED'",
-            ].join(" && ");
-            const download = await ssh.exec(downloadCmd, 30_000);
-
-            if (!download.stdout.includes("downloaded")) {
-                return {
-                    content: [{ type: "text", text: "❌ setup.sh 下载失败，请检查服务器网络连通性。可尝试 ssh_exec 手动执行：\ncurl -fsSL https://ghproxy.net/https://raw.githubusercontent.com/zuohuadong/supacloud/main/setup.sh -o /tmp/setup.sh" }],
-                };
-            }
-
-            // 4. 后台启动安装脚本（避免 SSH 超时中断）
+            // 4. 后台启动安装（nohup 避免 SSH 超时中断）
             const installCmd = [
-                "export $(cat /tmp/supacloud-config.env | grep -v '^#' | xargs)",
-                "nohup bash /tmp/supacloud-setup.sh > /tmp/supacloud-install.log 2>&1 &",
-                "INSTALL_PID=$!",
-                "sleep 3",
-                "kill -0 $INSTALL_PID 2>/dev/null && echo \"INSTALL_STARTED pid=$INSTALL_PID\" || echo 'INSTALL_FAILED'",
+                `chmod +x ${INSTALL_DIR}/install.sh`,
+                `nohup bash ${INSTALL_DIR}/install.sh > ${LOG_FILE} 2>&1 &`,
+                `INSTALL_PID=$!`,
+                `sleep 3`,
+                `kill -0 $INSTALL_PID 2>/dev/null && echo "INSTALL_STARTED pid=$INSTALL_PID" || echo 'INSTALL_FAILED'`,
             ].join(" && ");
 
             const result = await ssh.exec(installCmd, 30_000);
@@ -137,7 +145,20 @@ export function registerSshTools(server: McpServer, ssh: SshTransport): void {
                 content: [{
                     type: "text",
                     text: started
-                        ? `✅ SupaCloud 安装已在后台启动！\n\n操作系统:\n${osCheck.stdout}\n\n进程: ${result.stdout.trim()}\n\n📋 查看实时进度 (通过 ssh_exec):\ntail -f /tmp/supacloud-install.log\n\n安装约需 15-30 分钟，完成后可使用 diagnose_server 验证服务状态。`
+                        ? [
+                            `✅ SupaCloud 安装已在后台启动！`,
+                            ``,
+                            `操作系统: ${osCheck.stdout.trim()}`,
+                            ``,
+                            `进程: ${result.stdout.trim()}`,
+                            `安装目录: ${INSTALL_DIR}`,
+                            `安装日志: ${LOG_FILE}`,
+                            ``,
+                            `📋 实时跟踪进度（通过 ssh_exec）:`,
+                            `  tail -f ${LOG_FILE}`,
+                            ``,
+                            `⏱ 安装约需 15-30 分钟。完成后调用 diagnose_server 验证服务状态。`,
+                        ].join("\n")
                         : `❌ 启动失败 (exit ${result.code})\n${result.stderr.slice(-500)}`,
                 }],
             };
@@ -181,6 +202,7 @@ export function registerSshTools(server: McpServer, ssh: SshTransport): void {
                 "echo '=== Disk ===' && df -h /",
                 "echo '=== Docker/Podman ===' && (docker ps --format 'table {{.Names}}\t{{.Status}}' 2>/dev/null || podman ps --format 'table {{.Names}}\t{{.Status}}' 2>/dev/null || echo 'Not found')",
                 "echo '=== PostgreSQL ===' && (pg_isready 2>/dev/null && echo 'Running' || echo 'Not detected')",
+                "echo '=== OpenResty ===' && (systemctl is-active openresty 2>/dev/null && openresty -v 2>&1 || echo 'Not running')",
                 "echo '=== Management API ===' && (curl -sf http://localhost:9090/v1/projects > /dev/null && echo 'Running' || echo 'Not running')",
             ];
             const result = await ssh.exec(cmds.join(" && "));
