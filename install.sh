@@ -1926,16 +1926,11 @@ update_pigsty_config() {
         # 替换各版本模板中可能出现的默认 IP
         sed -i "s|10.6.0.9|${INTERNAL_IP}|g" "$PIGSTY_YML"
         sed -i "s|10.10.10.10|${INTERNAL_IP}|g" "$PIGSTY_YML"
+        sed -i "s|10.2.0.14|${INTERNAL_IP}|g" "$PIGSTY_YML"  # 补充常见默认 IP
         
-        # Pigsty configure 可能自动检测容器桥接 IP 而忽略 -i 参数
-        # 检测实际 IP 并替换
-        local DETECTED_IP
-        DETECTED_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
-        if [[ -n "$DETECTED_IP" && "$DETECTED_IP" != "$INTERNAL_IP" ]]; then
-            log_info "检测到 Pigsty 使用了自动 IP ($DETECTED_IP)，替换为 INTERNAL_IP ($INTERNAL_IP)..."
-            sed -i "s|${DETECTED_IP}|${INTERNAL_IP}|g" "$PIGSTY_YML"
-        fi
-    fi
+        # 兜底：如果 infra 组下的 hosts 仍是模板值，强制替换
+        # 匹配 infra: 下方的第一个 IPv4 地址
+        sed -i "/infra:/,/hosts:/ s/[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}/${INTERNAL_IP}/" "$PIGSTY_YML"
     
 
     
@@ -2063,10 +2058,10 @@ configure_s3_in_pigsty() {
     if [[ "${S3_STORAGE_TYPE}" != "minio" ]]; then
         log_info "禁用 Pigsty 内置 MinIO..."
         
-        # 在 pigsty.yml 中注释掉 minio 组 (通过添加标记)
-        # 这是一个简化处理，实际可能需要更复杂的 YAML 操作
+        # [FIX] 必须使用范围匹配，否则会误伤所有组的 hosts: 行
+        # 找到 minio 块并将其 hosts 内容注释掉
+        sed -i '/^    minio:/,/^    [a-z0-9]/ s/^\([[:space:]]\{6,8\}\)hosts:/\1# hosts:/' "$PIGSTY_YML"
         sed -i 's/^    minio:/#   minio:/g' "$PIGSTY_YML"
-        sed -i 's/^      hosts:/#     hosts:/g' "$PIGSTY_YML"
     fi
     
     # 更新 Supabase .env 文件 (如果存在)
@@ -2441,7 +2436,10 @@ install_management_api() {
 
     # 复制管理脚本
     if [[ -d "${SCRIPT_DIR}/scripts/lib" ]]; then
-        cp -r "${SCRIPT_DIR}/scripts/lib/"* "$SCRIPTS_INSTALL_DIR/"
+        # 只有在源路径和目标路径不同时才执行复制，避免 "same file" 错误
+        if [[ "$(realpath "${SCRIPT_DIR}/scripts/lib")" != "$(realpath "$SCRIPTS_INSTALL_DIR")" ]]; then
+            cp -rf "${SCRIPT_DIR}/scripts/lib/"* "$SCRIPTS_INSTALL_DIR/"
+        fi
         chmod +x "$SCRIPTS_INSTALL_DIR"/*.sh
         log_info "管理脚本已复制到 ${SCRIPTS_INSTALL_DIR}"
     fi
