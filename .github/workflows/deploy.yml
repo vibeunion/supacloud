@@ -129,10 +129,10 @@ jobs:
         run: |
           echo "Installation script finished successfully."
           # 检查生成的文件是否存在
-          ls -l /etc/nginx/nginx.conf || true
+          ls -l /usr/local/openresty/nginx/conf/nginx.conf || true
           ls -l /etc/supabase/jwt-keys.env || true
-          # 检查服务状态 (如果安装成功的话)
-          systemctl status nginx || true
+          # 检查 OpenResty 服务状态
+          systemctl status openresty || true
 
   management-test:
     name: Management API Integration Test
