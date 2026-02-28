@@ -38,12 +38,15 @@ ensure_directory() {
 }
 
 # ========== SSL 模式检测 ==========
-# 检测当前 Nginx 是否支持 Pigsty/Open Source ACME 动态模块
+# 检测系统中已存在的证书
 detect_ssl_mode() {
-    if nginx -V 2>&1 | grep -qi 'acme\|ngx_http_acme_module'; then
-        echo "acme"
+    local domain="$1"
+    if [ -f "/etc/pigsty/cert/${domain}.pem" ]; then
+        echo "pigsty"
+    elif [ -d "/etc/letsencrypt/live/${domain}" ]; then
+        echo "certbot"
     else
-        echo "self-signed"
+        echo "none"
     fi
 }
 
@@ -52,21 +55,27 @@ detect_ssl_mode() {
 generate_ssl_config() {
     local domain="$1"
     local ssl_mode
-    ssl_mode=$(detect_ssl_mode)
+    ssl_mode=$(detect_ssl_mode "$domain")
 
     case "$ssl_mode" in
-        acme)
-            cat <<'SSL_BLOCK'
-    # Nginx ACME 动态模块自动证书 (ngx_http_acme_module)
-    acme_certificate letsencrypt;
-    ssl_certificate     $acme_certificate;
-    ssl_certificate_key $acme_certificate_key;
+        pigsty)
+            cat <<SSL_BLOCK
+    # Pigsty static certificate
+    ssl_certificate     /etc/pigsty/cert/${domain}.pem;
+    ssl_certificate_key /etc/pigsty/cert/${domain}.key;
+SSL_BLOCK
+            ;;
+        certbot)
+            cat <<SSL_BLOCK
+    # Let's Encrypt (certbot)
+    ssl_certificate     /etc/letsencrypt/live/${domain}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${domain}/privkey.pem;
 SSL_BLOCK
             ;;
         *)
             cat <<'SSL_BLOCK'
-    # Self-signed / no SSL (Fallback)
-    # TODO: Configure proper SSL certificates
+    # No SSL certificate found. 
+    # Use ssl_manager.sh or certbot to issue certificates for this domain.
 SSL_BLOCK
             ;;
     esac
@@ -82,7 +91,7 @@ add_route() {
     ensure_directory
 
     local ssl_mode
-    ssl_mode=$(detect_ssl_mode)
+    ssl_mode=$(detect_ssl_mode "$api_domain")
     echo "Adding Nginx route for ${PROJECT_REF}... (SSL mode: ${ssl_mode})"
 
     # 生成 SSL 配置
