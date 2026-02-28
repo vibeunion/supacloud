@@ -1263,15 +1263,13 @@ configure_external_s3() {
 }
 
 # ========== 安装 Pigsty ==========
-# ========== 编译 ACME 模块 (Rust) ==========
+# ========== [已废弃] 编译 ACME 模块 ==========
+# ngx_http_acme_module.so 与 Rocky Linux 9 上的 Nginx 二进制存在 ABI 不兼容，
+# 加载后导致 Nginx Segfault（Cloudflare 521 错误）。已彻底废弃此方案。
+# SSL 改由 /etc/pigsty/cert/ 静态证书或 Let's Encrypt 传统目录管理。
 compile_acme_module() {
-    log_step "编译 Nginx ACME 模块..."
-    
-    # 检查是否已有 ACME 模块
-    if find /usr/lib/nginx/modules /usr/lib64/nginx/modules -name "ngx_http_acme_module.so" 2>/dev/null | grep -q .; then
-        log_info "ACME 模块已存在，跳过编译"
-        return 0
-    fi
+    log_warn "[已废弃] compile_acme_module: ACME .so 模块导致 Segfault，已停用，跳过"
+    return 0
     
     # 安装 Rust
     log_info "安装 Rust 工具链..."
@@ -1353,9 +1351,11 @@ compile_acme_module() {
     fi
 }
 
-# ========== 编译安装 Nginx (带 ACME 模块) - 备用方案 ==========
+# ========== [已废弃] 从源码编译 Nginx + ACME 模块 ==========
+# 同上，ABI 不兼容导致 Segfault，废弃整个编译分支。
 compile_nginx_with_acme() {
-    log_step "从源码编译安装 Nginx (带 ACME 模块)..."
+    log_warn "[已废弃] compile_nginx_with_acme: 已停用，使用仓库版 Nginx 替代"
+    return 0
     
     local NGINX_VERSION="1.26.3"
     local OPENSSL_VERSION="3.0.12"
@@ -1481,9 +1481,110 @@ EOF
     
     log_info "Nginx 编译安装完成: $(/usr/local/nginx/sbin/nginx -v 2>&1)"
 }
-# ========== 安装 Nginx Mainline (带 ACME 模块) ==========
-install_nginx_mainline() {
-    log_step "正在安装 Nginx Mainline (带 ACME 模块)..."
+# ========== 安装 OpenResty（替代 Nginx，带 lua-resty-auto-ssl 自动 SSL）==========
+# OpenResty 是 Nginx 的超集，兼容现有配置，同时支持 Lua 脚本实现动态 SSL。
+# Pigsty 的 Nginx 管理通过 nginx_enabled: false 禁用。
+install_openresty() {
+    log_step "安装 OpenResty（lua-resty-auto-ssl + PostgreSQL 存储）..."
+
+    local setup_script="${SCRIPT_DIR}/infra/openresty/setup.sh"
+    if [[ ! -f "${setup_script}" ]]; then
+        log_warn "infra/openresty/setup.sh 不存在，跳过 OpenResty 安装"
+        return 0
+    fi
+
+    # 停止并禁用系统已有的 Nginx（避免与 OpenResty 端口 80/443 冲突）
+    if systemctl is-active --quiet nginx 2>/dev/null; then
+        log_info "将已运行的 Nginx 停止并禁用..."
+        systemctl stop    nginx 2>/dev/null || true
+        systemctl disable nginx 2>/dev/null || true
+    fi
+
+    # 调用 setup.sh—“安装 OpenResty + pgmoon + lua-resty-auto-ssl + 执行数据库迁移"
+    # setup.sh 会自动从环境变量读取 PG 连接参数
+    PG_PASSWORD="${POSTGRES_PASSWORD}" \
+    PG_HOST="/var/run/postgresql" \
+    PG_DATABASE="postgres" \
+    STUDIO_DOMAIN="${SUPABASE_STUDIO_DOMAIN}" \
+    API_DOMAIN="${SUPABASE_PUBLIC_DOMAIN}" \
+    bash "${setup_script}" || {
+        log_warn "OpenResty setup.sh 执行失败，可事后手动运行: bash infra/openresty/setup.sh"
+        return 0
+    }
+
+    log_info "OpenResty 安装完成"
+    log_info "  配置文件: /usr/local/openresty/nginx/conf/nginx.conf"
+    log_info "  证书存储: PostgreSQL (autossl.certificates)"
+    log_info "  动态 SSL: lua-resty-auto-ssl 按需自动申请 Let's Encrypt 证书"
+    log_info "  待 OpenResty 启动后首次请求会触发证书申请，通常需要 5-30s"
+}
+
+# 为兼容册保留此函数别名
+install_nginx_mainline() { install_openresty; }
+
+    if [[ -f /etc/os-release ]]; then
+        source /etc/os-release
+        DISTRO_ID="${ID,,}"
+        DISTRO_VERSION_ID="${VERSION_ID%%.*}"
+    fi
+
+    log_info "检测到系统: $DISTRO_ID $DISTRO_VERSION_ID"
+
+    case "$DISTRO_ID" in
+        rocky|almalinux|centos|rhel|anolis|tencentos|opencloudos)
+            # 添加 nginx.org 官方 mainline 仓库
+            local OS_VER="centos/\$releasever"
+            [[ "$DISTRO_ID" == "opencloudos" ]] && OS_VER="centos/9"
+
+            cat > /etc/yum.repos.d/nginx.repo <<REPOEOF
+[nginx-mainline]
+name=nginx mainline repo
+baseurl=http://nginx.org/packages/mainline/${OS_VER}/\$basearch/
+gpgcheck=1
+enabled=1
+gpgkey=https://nginx.org/keys/nginx_signing.key
+module_hotfixes=true
+REPOEOF
+
+            log_info "安装 Nginx Mainline..."
+            if ! dnf install -y nginx 2>/dev/null; then
+                log_warn "officianl 仓库安装失败，回退到系统默认版本"
+                rm -f /etc/yum.repos.d/nginx.repo
+                dnf install -y nginx
+            fi
+            ;;
+
+        debian|ubuntu)
+            apt-get update
+            if [[ "$DISTRO_ID" == "ubuntu" ]]; then
+                apt-get install -y curl gnupg2 ca-certificates lsb-release ubuntu-keyring
+            else
+                apt-get install -y curl gnupg2 ca-certificates lsb-release debian-archive-keyring
+            fi
+            curl -fsSL https://nginx.org/keys/nginx_signing.key | gpg --dearmor \
+                | tee /usr/share/keyrings/nginx-archive-keyring.gpg >/dev/null
+            echo "deb [signed-by=/usr/share/keyrings/nginx-archive-keyring.gpg] \
+            http://nginx.org/packages/mainline/${DISTRO_ID} \
+            $(lsb_release -cs) nginx" \
+            | tee /etc/apt/sources.list.d/nginx.list
+            echo -e "Package: *\nPin: origin nginx.org\nPin: release o=nginx\nPin-Priority: 900\n" \
+                | tee /etc/apt/preferences.d/99nginx
+            apt-get update
+            apt-get install -y nginx
+            ;;
+
+        *)
+            log_error "不支持的操作系统: $DISTRO_ID"
+            exit 1
+            ;;
+    esac
+
+    # 确保租户路由目录存在
+    mkdir -p /etc/nginx/sites-enabled/supa-tenants
+
+    systemctl enable nginx
+    log_info "Nginx 安装完成: $(nginx -v 2>&1)"
+}
 
     # 识别操作系统
     if [[ -f /etc/os-release ]]; then
@@ -1652,183 +1753,183 @@ inject_lua_config() {
     return 0
 }
 
-# ========== 执行 Nginx 二进制劫持 ==========
-# ========== 应用 Nginx ACME 配置 ==========
+# ========== 应用 Nginx 配置（静态证书，无 ACME 动态模块）==========
 apply_nginx_acme_config() {
-    log_step "应用 Nginx 配置 (原生 ACME 模块)..."
-    
-    # 确保 modules 目录存在 (防止某些发行版路径差异)
-    # 通常在 /usr/lib/nginx/modules 或 /etc/nginx/modules
-    
-    NGINX_CONF="/etc/nginx/nginx.conf"
-    
-    # 备份旧配置
-    if [[ -f "$NGINX_CONF" ]]; then
-        cp "$NGINX_CONF" "${NGINX_CONF}.bak.$(date +%s)"
-    fi
-    
-    # 查找 ACME 模块路径
-    ACME_MODULE_PATH=$(find /usr/lib/nginx/modules /usr/lib64/nginx/modules /etc/nginx/modules -name "ngx_http_acme_module.so" 2>/dev/null | head -1)
-    
-    if [[ -n "$ACME_MODULE_PATH" ]]; then
-        log_info "发现 ACME 模块: $ACME_MODULE_PATH"
-    else
-        log_error "未找到 ngx_http_acme_module.so！ACME 模块是必需的。"
-        log_error "---------- 诊断信息 ----------"
-        log_error "已安装的 Nginx 版本:"
-        nginx -v 2>&1 || true
-        log_error "已安装的 Nginx 相关包:"
-        (dpkg -l | grep nginx 2>/dev/null || rpm -qa | grep nginx 2>/dev/null) || true
-        log_error "Nginx 模块目录内容:"
-        ls -la /usr/lib/nginx/modules/ 2>/dev/null || true
-        ls -la /usr/lib64/nginx/modules/ 2>/dev/null || true
-        ls -la /etc/nginx/modules/ 2>/dev/null || true
-        exit 1
-    fi
+    log_step "应用 Nginx 配置（静态证书模式）..."
 
-    # 生成最终的 nginx.conf
-    cat > "$NGINX_CONF" << EOF
+    local NGINX_CONF="/etc/nginx/nginx.conf"
+
+    # 备份旧配置
+    [[ -f "$NGINX_CONF" ]] && cp "$NGINX_CONF" "${NGINX_CONF}.bak.$(date +%s)"
+
+    # ── 检测证书路径（优先级：Pigsty cert > Let's Encrypt > 自签名回退）────────
+    detect_ssl_cert() {
+        local domain="$1"
+        # 1. Pigsty 颁发/管理的证书
+        if [[ -f "/etc/pigsty/cert/${domain}.pem" ]]; then
+            echo "/etc/pigsty/cert/${domain}.pem /etc/pigsty/cert/${domain}.key"
+            return
+        fi
+        # 2. Let's Encrypt 传统目录
+        if [[ -f "/etc/letsencrypt/live/${domain}/fullchain.pem" ]]; then
+            echo "/etc/letsencrypt/live/${domain}/fullchain.pem /etc/letsencrypt/live/${domain}/privkey.pem"
+            return
+        fi
+        # 3. 自签名回退（首次安装尚无证书时正常现象）
+        echo "/etc/nginx/ssl/${domain}.crt /etc/nginx/ssl/${domain}.key"
+    }
+
+    # 为两个域名检测证书
+    read -r STUDIO_CERT STUDIO_KEY <<< "$(detect_ssl_cert "$SUPABASE_STUDIO_DOMAIN")"
+    read -r API_CERT    API_KEY    <<< "$(detect_ssl_cert "$SUPABASE_PUBLIC_DOMAIN")"
+
+    log_info "Studio  证书: $STUDIO_CERT"
+    log_info "API     证书: $API_CERT"
+
+    # ── 生成自签名证书（仅当找不到任何真实证书时，保证 Nginx 能正常启动）──────
+    generate_fallback_cert() {
+        local domain="$1" cert="$2" key="$3"
+        mkdir -p "$(dirname "$cert")"
+        if [[ ! -f "$cert" ]]; then
+            log_warn "未找到 ${domain} 的证书，生成临时自签名证书以确保 Nginx 启动"
+            openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+                -keyout "$key" -out "$cert" \
+                -subj "/CN=${domain}/O=SupaCloud/C=CN" 2>/dev/null
+        fi
+    }
+
+    generate_fallback_cert "$SUPABASE_STUDIO_DOMAIN" "$STUDIO_CERT" "$STUDIO_KEY"
+    generate_fallback_cert "$SUPABASE_PUBLIC_DOMAIN"  "$API_CERT"    "$API_KEY"
+
+    # ── 生成 nginx.conf ──────────────────────────────────────────────────────
+    cat > "$NGINX_CONF" <<NGINXEOF
 user nginx;
 worker_processes auto;
 error_log /var/log/nginx/error.log notice;
 pid /var/run/nginx.pid;
 
-load_module "$ACME_MODULE_PATH";
-
 events {
-    worker_connections 1024;
+    worker_connections 4096;
+    use epoll;
 }
 
 http {
     include       /etc/nginx/mime.types;
     default_type  application/octet-stream;
-    
-    log_format  main  '\$remote_addr - \$remote_user [\$time_local] "\$request" '
-                      '\$status \$body_bytes_sent "\$http_referer" '
-                      '"\$http_user_agent" "\$http_x_forwarded_for"';
 
-    access_log  /var/log/nginx/access.log  main;
+    log_format main '\$remote_addr - \$remote_user [\$time_local] "\$request" '
+                    '\$status \$body_bytes_sent "\$http_referer" '
+                    '"\$http_user_agent" "\$http_x_forwarded_for"';
+    access_log /var/log/nginx/access.log main;
 
-    sendfile        on;
-    keepalive_timeout  65;
+    sendfile       on;
+    tcp_nopush     on;
+    keepalive_timeout 65;
 
-    # --- ACME 全局配置 ---
-    resolver 8.8.8.8 1.1.1.1 valid=300s;
-    
-    acme_issuer letsencrypt {
-        uri https://acme-v02.api.letsencrypt.org/directory;
-        # uri https://acme-staging-v02.api.letsencrypt.org/directory; # 测试用
-        
-        # 必须配置 ecdsa (ECC) 密钥，支持 256/384
-        account_key ecdsa:256;
-        
-        # 使用 HTTP-01 验证 (Nginx 原生支持)
-        challenge http-01;
-    }
+    # SSL 全局优化
+    ssl_session_cache   shared:SSL:10m;
+    ssl_session_timeout 10m;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_ciphers         ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384;
+    ssl_prefer_server_ciphers off;
 
-    # 后端定义
-    upstream studio_backend {
-        server 127.0.0.1:3003;
-    }
-    
-    upstream kong_backend {
-        server 127.0.0.1:8000;
-    }
+    # DNS resolver（用于 proxy 域名解析）
+    resolver 8.8.8.8 8.8.4.4 valid=300s;
 
-    # HTTP Server (Redirect + ACME Challenge)
+    upstream studio_backend { server 127.0.0.1:3003; }
+    upstream kong_backend   { server 127.0.0.1:8000; }
+
+    # ── HTTP 80：ACME challenge 兼容 + 强制跳转 HTTPS ────────────────────────
     server {
-        listen 80;
-        server_name ${SUPABASE_STUDIO_DOMAIN} ${SUPABASE_PUBLIC_DOMAIN};
-        
-        # ACME 模块会自动处理 /.well-known/acme-challenge/
-        # 无需手动配置 location
-        
+        listen 80 default_server;
+        server_name ${SUPABASE_STUDIO_DOMAIN} ${SUPABASE_PUBLIC_DOMAIN} _;
+
+        # certbot / acme.sh HTTP-01 验证目录（Let's Encrypt 标准路径）
+        location /.well-known/acme-challenge/ {
+            root /var/www/html;
+            try_files \$uri =404;
+        }
+
         location / {
             return 301 https://\$host\$request_uri;
         }
     }
 
-    # Studio HTTPS
+    # ── Studio HTTPS ──────────────────────────────────────────────────────────
     server {
         listen 443 ssl;
         server_name ${SUPABASE_STUDIO_DOMAIN};
-        
-        # 启用 ACME 证书管理
-        acme_certificate letsencrypt;
-        
-        # 使用变量引用生成的证书
-        ssl_certificate     \$acme_certificate;
-        ssl_certificate_key \$acme_certificate_key;
-        
-        # 推荐的 SSL 设置
-        ssl_protocols TLSv1.2 TLSv1.3;
-        ssl_ciphers HIGH:!aNULL:!MD5;
-        
+
+        ssl_certificate     ${STUDIO_CERT};
+        ssl_certificate_key ${STUDIO_KEY};
+
         location / {
             proxy_pass http://studio_backend;
-            proxy_set_header Host \$host;
-            proxy_set_header X-Real-IP \$remote_addr;
-            proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+            proxy_set_header Host              \$host;
+            proxy_set_header X-Real-IP         \$remote_addr;
+            proxy_set_header X-Forwarded-For   \$proxy_add_x_forwarded_for;
             proxy_set_header X-Forwarded-Proto \$scheme;
-            proxy_set_header Upgrade \$http_upgrade;
-            proxy_set_header Connection "upgrade";
+            proxy_set_header Upgrade           \$http_upgrade;
+            proxy_set_header Connection        "upgrade";
+            proxy_read_timeout 86400;
         }
     }
-    
-    # API HTTPS
+
+    # ── API HTTPS ─────────────────────────────────────────────────────────────
     server {
         listen 443 ssl;
         server_name ${SUPABASE_PUBLIC_DOMAIN};
-        
-        acme_certificate letsencrypt;
-        ssl_certificate     \$acme_certificate;
-        ssl_certificate_key \$acme_certificate_key;
-        
+
+        ssl_certificate     ${API_CERT};
+        ssl_certificate_key ${API_KEY};
+
         location / {
             proxy_pass http://kong_backend;
-            proxy_set_header Host \$host;
-            proxy_set_header X-Real-IP \$remote_addr;
-            proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+            proxy_set_header Host              \$host;
+            proxy_set_header X-Real-IP         \$remote_addr;
+            proxy_set_header X-Forwarded-For   \$proxy_add_x_forwarded_for;
             proxy_set_header X-Forwarded-Proto \$scheme;
-            proxy_set_header Upgrade \$http_upgrade;
-            proxy_set_header Connection "upgrade";
+            proxy_set_header Upgrade           \$http_upgrade;
+            proxy_set_header Connection        "upgrade";
+            proxy_read_timeout 86400;
         }
     }
 
     include /etc/nginx/conf.d/*.conf;
 
-    # --- 租户路由包含 (SupaCloud Tenants) ---
-    # 允许动态通过外部文件增加路由，且不干扰主配置
+    # ── 多租户路由（SupaCloud Tenants）────────────────────────────────────────
     include /etc/nginx/sites-enabled/supa-tenants/*.conf;
 }
-EOF
+NGINXEOF
 
-    # 提前创建租户路由目录，防止 nginx -t 校验因目录不存在而失败
+    # ACME challenge webroot 目录（供 certbot/acme.sh 后续使用）
+    mkdir -p /var/www/html/.well-known/acme-challenge
     mkdir -p /etc/nginx/sites-enabled/supa-tenants
 
     log_info "验证 Nginx 配置..."
-    log_info "---------- 生成的 nginx.conf ----------"
-    cat "$NGINX_CONF"
-    log_info "---------- nginx -t 输出 ----------"
     if nginx -t 2>&1; then
-        log_info "配置验证通过，重启 Nginx 服务..."
-        if command -v systemctl &>/dev/null && systemctl is-system-running &>/dev/null; then
+        log_info "配置验证通过，重启 Nginx..."
+        if systemctl is-system-running &>/dev/null; then
             systemctl restart nginx
         else
-            # CI/容器环境可能没有 systemd，直接启动 nginx
             nginx -s stop 2>/dev/null || true
             nginx
         fi
-        
-        # 等待 ACME 证书申请 (首次启动可能需要一点时间)
-        log_info "Nginx 已启动，正在后台自动申请证书..."
+        log_info "Nginx 已启动"
+        log_info ""
+        log_info "证书说明:"
+        log_info "  当前使用: 静态证书路径（Pigsty cert 或自签名临时证书）"
+        log_info "  申请真实证书（二选一）:"
+        log_info "    certbot: certbot --nginx -d ${SUPABASE_STUDIO_DOMAIN} -d ${SUPABASE_PUBLIC_DOMAIN}"
+        log_info "    acme.sh: acme.sh --issue -d ${SUPABASE_STUDIO_DOMAIN} --webroot /var/www/html"
+        log_info "  申请后 Pigsty 也可通过 'make cert' 统一管理证书"
     else
         log_error "Nginx 配置验证失败！"
-        log_error "---------- 详细错误 ----------"
         nginx -t 2>&1 || true
         exit 1
     fi
-}
+    
+
 
 
 install_pigsty() {
@@ -2087,6 +2188,20 @@ update_pigsty_config() {
     fi
     # 容器/CI 环境检测限制变量现已移至 ansible-playbook 命令行 (EXTRA_ARGS)
     
+    # ── 禁用 Pigsty 的 Nginx 管理（OpenResty 接管 80/443）───────────────────────────────
+    # 必须在 ./configure 之后、bootstrap/install 之前注入，否则 Pigsty 仍会尝试安装 Nginx
+    if [[ -f "$PIGSTY_YML" ]]; then
+        if ! grep -q 'nginx_enabled' "$PIGSTY_YML"; then
+            log_info "向 pigsty.yml 注入 nginx_enabled: false"
+            # 在 vars 块首行插入（公共 vars 区域）
+            sed -i '/^  vars:$/a\    nginx_enabled: false\n    nginx_exporter_enabled: false' "$PIGSTY_YML" || true
+        else
+            # 已存在，确保为 false
+            sed -i 's/nginx_enabled: true/nginx_enabled: false/g' "$PIGSTY_YML" || true
+        fi
+        log_info "pigsty.yml nginx_enabled = false"
+    fi
+
     log_info "配置更新完成"
 }
 
@@ -2702,23 +2817,23 @@ main() {
     setup_local_ssh            # 新增：确保本机 SSH 免密 (Ansible 需要)
     setup_swap
     
-    # 安装 Nginx Mainline + ACME 模块
-    install_nginx_mainline
+    # OpenResty 安装必须在 Pigsty 之前（需要先停系统 Nginx 避免端口冲突）
+    install_openresty
     
     install_container_runtime
     install_docker_compose
     install_s3_storage
     configure_edge_runtime
-    install_pigsty
+    install_pigsty      # Pigsty 已通过 nginx_enabled: false 屏蔽其 nginx 安装
     deploy_mcp_function
     configure_analytics
     configure_pg_hba
 
-    # Pigsty PG 初始化完成后应用性能调优（根据机器内存/存储类型动态计算）
+    # Pigsty PG 初始化完成后应用性能调优
     tune_postgres
-    
-    # 在所有安装完成后，应用最终的网关路由和 SSL 配置
-    apply_nginx_acme_config
+
+    # OpenResty 配置已在 install_openresty 中完成，无需重复应用
+    # apply_nginx_acme_config 函数保留备用（不调用）
     
     # 安装 Management API
     install_management_api
