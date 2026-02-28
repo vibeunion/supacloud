@@ -46,7 +46,7 @@ SERVICE_ROLE_KEY=${SERVICE_ROLE_KEY}
 DASHBOARD_USERNAME=${DASHBOARD_USERNAME:-admin}
 DASHBOARD_PASSWORD=${DASHBOARD_PASSWORD:-pigsty}
 GRAFANA_PASSWORD=${GRAFANA_PASSWORD:-pigsty}
-S3_STORAGE_TYPE=${S3_STORAGE_TYPE:-minio}
+S3_STORAGE_TYPE=${S3_STORAGE_TYPE:-juicefs}
 EDGE_RUNTIME=${EDGE_RUNTIME:-deno}
 EOF
              log_info "配置文件已生成: $CONFIG_FILE"
@@ -998,12 +998,6 @@ install_s3_storage() {
         minio)
             log_info "使用 Pigsty 内置 MinIO，无需额外安装"
             ;;
-        garage)
-            install_garage
-            ;;
-        rustfs)
-            install_rustfs
-            ;;
         juicefs)
             install_juicefs
             ;;
@@ -1016,233 +1010,6 @@ install_s3_storage() {
             exit 1
             ;;
     esac
-}
-
-# ========== 安装 Garage ==========
-install_garage() {
-    log_step "安装 Garage S3..."
-    
-    GARAGE_VERSION="v1.0.1"
-    GARAGE_ARCH=$(uname -m)
-    
-    # 架构映射
-    GARAGE_ARCH_SUFFIX=""
-    case "$GARAGE_ARCH" in
-        x86_64) GARAGE_ARCH_SUFFIX="amd64" ;;
-        aarch64) GARAGE_ARCH_SUFFIX="arm64" ;;
-        *) log_error "不支持的架构: $GARAGE_ARCH"; exit 1 ;;
-    esac
-    
-    # 优先使用配置中的自定义下载地址
-    if [[ -n "$GARAGE_DOWNLOAD_URL" ]]; then
-        GARAGE_URL="$GARAGE_DOWNLOAD_URL"
-    else
-        # 使用 GitHub 镜像分发，支持多架构
-        GARAGE_URL="https://github.com/zuohuadong/supacloud/releases/download/garage-${GARAGE_VERSION}/garage-${GARAGE_VERSION}-linux-${GARAGE_ARCH_SUFFIX}"
-    fi
-    
-    # 下载 Garage
-    if [[ ! -f /usr/local/bin/garage ]]; then
-        log_info "下载 Garage ${GARAGE_VERSION} ..."
-        
-        # 尝试使用镜像加速
-        MIRROR_GARAGE_URL="https://gh-proxy.net/${GARAGE_URL}"
-        log_info "尝试从镜像下载: $MIRROR_GARAGE_URL"
-        
-        if curl -L --progress-bar "$MIRROR_GARAGE_URL" -o /usr/local/bin/garage; then
-            log_info "通过镜像下载成功"
-        else
-            log_warn "镜像下载失败，尝试直接下载: $GARAGE_URL"
-            if curl -L --progress-bar "$GARAGE_URL" -o /usr/local/bin/garage; then
-                log_info "常规下载成功"
-            else
-                log_error "Garage 下载失败"
-                rm -f /usr/local/bin/garage
-                exit 1
-            fi
-        fi
-        chmod +x /usr/local/bin/garage
-    fi
-    
-    # 创建配置目录
-    mkdir -p /etc/garage /var/lib/garage
-    
-    # 生成配置文件
-    GARAGE_SECRET=$(openssl rand -hex 32)
-    GARAGE_RPC_SECRET=$(openssl rand -hex 32)
-    
-    cat > /etc/garage/garage.toml << EOF
-metadata_dir = "/var/lib/garage/meta"
-data_dir = "/var/lib/garage/data"
-db_engine = "lmdb"
-
-replication_factor = 1
-
-rpc_bind_addr = "[::]:3901"
-rpc_public_addr = "${INTERNAL_IP}:3901"
-rpc_secret = "${GARAGE_RPC_SECRET}"
-
-[s3_api]
-s3_region = "us-east-1"
-api_bind_addr = "[::]:9000"
-root_domain = ".s3.garage.localhost"
-
-[s3_web]
-bind_addr = "[::]:3902"
-root_domain = ".web.garage.localhost"
-
-[admin]
-api_bind_addr = "[::]:3903"
-admin_token = "${GARAGE_SECRET}"
-EOF
-    
-    # 创建 systemd 服务
-    cat > /etc/systemd/system/garage.service << EOF
-[Unit]
-Description=Garage S3-compatible object storage
-After=network.target
-
-[Service]
-Type=simple
-ExecStart=/usr/local/bin/garage -c /etc/garage/garage.toml server
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-EOF
-    
-    # 启动服务
-    systemctl daemon-reload
-    systemctl enable --now garage
-    
-    # 等待启动
-    # 等待启动
-    log_info "等待 Garage 启动 (5s)..."
-    sleep 5
-    
-    # 初始化集群
-    log_info "初始化 Garage 集群..."
-    GARAGE_NODE_ID=$(garage -c /etc/garage/garage.toml node id -q 2>/dev/null | head -1)
-    if [[ -n "$GARAGE_NODE_ID" ]]; then
-        garage -c /etc/garage/garage.toml layout assign -z dc1 -c 1G "$GARAGE_NODE_ID" || true
-        garage -c /etc/garage/garage.toml layout apply --version 1 || true
-    fi
-    
-    # 创建访问密钥
-    log_info "创建 Garage 访问密钥..."
-    GARAGE_KEY_OUTPUT=$(garage -c /etc/garage/garage.toml key create supabase-key 2>/dev/null || true)
-    
-    # 提取 Access Key 和 Secret Key 到变量 (用于统一凭据保存)
-    S3_ACCESS_KEY=$(garage -c /etc/garage/garage.toml key info supabase-key 2>/dev/null | grep "Key ID" | awk '{print $3}')
-    S3_SECRET_KEY=$(garage -c /etc/garage/garage.toml key info supabase-key 2>/dev/null | grep "Secret key" | awk '{print $3}')
-    
-    # 创建 bucket
-    garage -c /etc/garage/garage.toml bucket create supabase-storage || true
-    garage -c /etc/garage/garage.toml bucket create pgsql || true
-    garage -c /etc/garage/garage.toml bucket allow --read --write supabase-storage --key supabase-key || true
-    garage -c /etc/garage/garage.toml bucket allow --read --write pgsql --key supabase-key || true
-    
-    # 保存密钥信息
-    echo "# Garage S3 配置" > /etc/garage/s3-credentials.env
-    echo "S3_ENDPOINT=http://${INTERNAL_IP}:9000" >> /etc/garage/s3-credentials.env
-    echo "S3_REGION=us-east-1" >> /etc/garage/s3-credentials.env
-    garage -c /etc/garage/garage.toml key info supabase-key 2>/dev/null | grep -E "Key ID|Secret key" >> /etc/garage/s3-credentials.env || true
-    
-    # 设置环境变量供后续使用
-    S3_ENDPOINT="http://${INTERNAL_IP}:9000"
-    S3_REGION="us-east-1"
-    
-    log_info "Garage 安装完成"
-    log_info "  端点: http://${INTERNAL_IP}:9000"
-    log_info "  密钥信息: /etc/garage/s3-credentials.env"
-}
-
-# ========== 安装 RustFS ==========
-install_rustfs() {
-    log_step "安装 RustFS..."
-    
-    RUSTFS_VERSION="v0.8.1"
-    RUSTFS_ARCH=$(uname -m)
-    
-    # 架构映射
-    case "$RUSTFS_ARCH" in
-        x86_64) RUSTFS_ARCH="x86_64-unknown-linux-musl" ;;
-        aarch64) RUSTFS_ARCH="aarch64-unknown-linux-musl" ;;
-        *) log_error "不支持的架构: $RUSTFS_ARCH"; exit 1 ;;
-    esac
-    
-    RUSTFS_URL="https://github.com/RustFS/rustfs/releases/download/${RUSTFS_VERSION}/rustfs-${RUSTFS_ARCH}.tar.gz"
-    
-    # 下载 RustFS（使用代理加速）
-    if [[ ! -f /usr/local/bin/rustfs ]]; then
-        log_info "下载 RustFS ${RUSTFS_VERSION}（使用 gh-proxy.net 加速）..."
-        cd /tmp
-        if curl -L --progress-bar "https://gh-proxy.net/$RUSTFS_URL" -o rustfs.tar.gz; then
-            log_info "代理下载成功"
-        else
-            log_warn "代理下载失败，尝试直接下载..."
-            curl -L --progress-bar "$RUSTFS_URL" -o rustfs.tar.gz
-        fi
-        tar -xzf rustfs.tar.gz
-        mv rustfs /usr/local/bin/
-        chmod +x /usr/local/bin/rustfs
-        rm -f rustfs.tar.gz
-    fi
-    
-    # 创建数据目录
-    mkdir -p /var/lib/rustfs
-    
-    # 生成访问密钥
-    RUSTFS_ACCESS_KEY=$(openssl rand -hex 10)
-    RUSTFS_SECRET_KEY=$(openssl rand -hex 20)
-    
-    # 创建 systemd 服务
-    cat > /etc/systemd/system/rustfs.service << EOF
-[Unit]
-Description=RustFS S3-compatible object storage
-After=network.target
-
-[Service]
-Type=simple
-Environment="RUSTFS_ROOT_USER=${RUSTFS_ACCESS_KEY}"
-Environment="RUSTFS_ROOT_PASSWORD=${RUSTFS_SECRET_KEY}"
-ExecStart=/usr/local/bin/rustfs server /var/lib/rustfs --address :9000 --console-address :9001
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-EOF
-    
-    # 保存凭据
-    cat > /etc/rustfs-credentials.env << EOF
-# RustFS S3 配置
-S3_ENDPOINT=http://${INTERNAL_IP}:9000
-S3_ACCESS_KEY=${RUSTFS_ACCESS_KEY}
-S3_SECRET_KEY=${RUSTFS_SECRET_KEY}
-S3_REGION=us-east-1
-EOF
-    
-    chmod 600 /etc/rustfs-credentials.env
-    
-    # 启动服务
-    systemctl daemon-reload
-    systemctl enable --now rustfs
-    
-    # 等待启动
-    sleep 3
-    
-    # 设置环境变量供后续使用
-    S3_ENDPOINT="http://${INTERNAL_IP}:9000"
-    S3_ACCESS_KEY="$RUSTFS_ACCESS_KEY"
-    S3_SECRET_KEY="$RUSTFS_SECRET_KEY"
-    S3_REGION="us-east-1"
-    
-    log_info "RustFS 安装完成"
-    log_info "  S3 端点: http://${INTERNAL_IP}:9000"
-    log_info "  控制台: http://${INTERNAL_IP}:9001"
-    log_info "  凭据文件: /etc/rustfs-credentials.env"
 }
 
 # ========== 配置外部 S3 ==========
@@ -2035,22 +1802,6 @@ configure_s3_in_pigsty() {
                     echo "${INTERNAL_IP} sss.pigsty" >> /etc/hosts
                 fi
             fi
-            ;;
-        garage)
-            if [[ -f /etc/garage/s3-credentials.env ]]; then
-                source /etc/garage/s3-credentials.env 2>/dev/null || true
-                # 从 Garage 获取密钥
-                S3_ACCESS_KEY=$(garage -c /etc/garage/garage.toml key info supabase-key 2>/dev/null | grep "Key ID" | awk '{print $3}' || echo "")
-                S3_SECRET_KEY=$(garage -c /etc/garage/garage.toml key info supabase-key 2>/dev/null | grep "Secret key" | awk '{print $3}' || echo "")
-            fi
-            S3_ENDPOINT="http://${INTERNAL_IP}:9000"
-            S3_REGION="garage"
-            ;;
-        rustfs)
-            if [[ -f /etc/rustfs-credentials.env ]]; then
-                source /etc/rustfs-credentials.env
-            fi
-            S3_ENDPOINT="http://${INTERNAL_IP}:9000"
             ;;
         external)
             S3_ENDPOINT="$EXTERNAL_S3_ENDPOINT"
