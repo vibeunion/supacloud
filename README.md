@@ -71,12 +71,25 @@ curl -fsSL https://gh-proxy.net/https://raw.githubusercontent.com/zuohuadong/sup
 git clone https://github.com/zuohuadong/supacloud.git
 cd supacloud
 
-# 2. Configure (edit domains and passwords)
+# 2. Configure (Edit config.env or use CLI arguments)
+# OPTION A: Edit file
 vim config.env
+
+# OPTION B: Use CLI arguments (Overrides config.env)
+sudo bash install.sh --ip 1.2.3.4 --domain supa.example.com --s3 minio
 
 # 3. Run installation
 sudo bash install.sh
 ```
+
+**Available CLI Options:**
+| Option | Description | Example |
+|--------|-------------|---------|
+| `--ip` | Server Internal IP | `--ip 10.0.0.5` |
+| `--domain` | API/Public Domain | `--domain supa.com` |
+| `--studio` | Studio Dashboard Domain| `--studio studio.com`|
+| `--s3` | Storage Type | `minio` or `juicefs`|
+| `--password`| Master Password | `--password mysecret` |
 
 ### Management
 
@@ -217,7 +230,7 @@ Key settings in `config.env`:
 |----------|-------------|---------|
 | `SUPABASE_PUBLIC_DOMAIN` | API domain | (required) |
 | `SUPABASE_STUDIO_DOMAIN` | Studio domain | (optional) |
-| `S3_STORAGE_TYPE` | Storage backend | `garage` |
+| `S3_STORAGE_TYPE` | Storage backend | `juicefs` |
 | `EDGE_RUNTIME` | Functions runtime | `deno` |
 | `PG_VERSION` | PostgreSQL version | `18` |
 
@@ -297,12 +310,25 @@ curl -fsSL https://gh-proxy.net/https://raw.githubusercontent.com/zuohuadong/sup
 git clone https://github.com/zuohuadong/supacloud.git
 cd supacloud
 
-# 2. 编辑配置（设置域名和密码）
+# 2. 配置说明 (编辑 config.env 或使用命令行参数)
+# 方式 A: 编辑文件
 vim config.env
+
+# 方式 B: 使用命令行参数 (优先级最高)
+sudo bash install.sh --ip 1.2.3.4 --domain api.example.com --s3 minio
 
 # 3. 运行安装脚本
 sudo bash install.sh
 ```
+
+**命令行参数详解:**
+| 参数 | 说明 | 示例 |
+|--------|-------------|---------|
+| `--ip` | 指定内网 IP | `--ip 10.0.0.5` |
+| `--domain` | 指定 API 域名 | `--domain supa.com` |
+| `--studio` | 指定 Studio 域名| `--studio studio.com`|
+| `--s3` | 指定存储类型 | `minio` 或 `juicefs`|
+| `--password`| 统一设置初始密码 | `--password mysecret` |
 
 ### 项目管理
 
@@ -443,7 +469,7 @@ supacloud/
 |------|------|--------|
 | `SUPABASE_PUBLIC_DOMAIN` | API 域名 | （必填） |
 | `SUPABASE_STUDIO_DOMAIN` | Studio 域名 | （可选） |
-| `S3_STORAGE_TYPE` | 存储后端 | `garage` |
+| `S3_STORAGE_TYPE` | 存储后端 | `juicefs` |
 | `EDGE_RUNTIME` | 云函数运行时 | `deno` |
 | `PG_VERSION` | PostgreSQL 版本 | `18` |
 
