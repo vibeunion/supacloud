@@ -41,6 +41,7 @@ import { HttpTransport } from "./transports/http";
 import { registerSshTools } from "./tools/ssh-tools";
 import { registerProjectTools } from "./tools/project-tools";
 import { registerAdvancedTools } from "./tools/advanced-tools";
+import { registerDeploymentTools } from "./tools/deployment-tools";
 import { resolve } from "path";
 import { homedir } from "os";
 
@@ -80,6 +81,9 @@ if (API_URL) {
     registerProjectTools(server, http);
     registerAdvancedTools(server, http);
 }
+
+// ── 注册部署工具 (本地 Docker 操作) ──
+registerDeploymentTools(server);
 
 // ── 如果两者都没配置，注册一个帮助工具 ──
 if (!HOST && !API_URL) {
