@@ -1486,12 +1486,15 @@ EOF
 # ========== 安装 OpenResty（替代 Nginx，带 lua-resty-auto-ssl 自动 SSL）==========
 # OpenResty 是 Nginx 的超集，兼容现有配置，同时支持 Lua 脚本实现动态 SSL。
 # Pigsty 的 Nginx 管理通过 nginx_enabled: false 禁用。
-install_openresty() {
-    log_step "安装 OpenResty（lua-resty-auto-ssl + PostgreSQL 存储）..."
+# ========== 安装 Angie（Nginx 分叉版，带原生 http_acme 自动 SSL）==========
+# Angie 是 Nginx 的加强版，原生支持 ACME，架构更简洁。
+# Pigsty 的 Nginx 管理通过 nginx_enabled: false 禁用。
+install_angie() {
+    log_step "安装 Angie（原生 http_acme 自动 SSL）..."
 
-    local setup_script="${SCRIPT_DIR}/infra/openresty/setup.sh"
+    local setup_script="${SCRIPT_DIR}/infra/angie/setup.sh"
     if [[ ! -f "${setup_script}" ]]; then
-        log_warn "infra/openresty/setup.sh 不存在，跳过 OpenResty 安装"
+        log_warn "infra/angie/setup.sh 不存在，跳过 Angie 安装"
         return 0
     fi
 
@@ -1501,68 +1504,29 @@ install_openresty() {
         if [[ -d /etc/nginx ]]; then
             log_info "备份原有 Nginx 配置到 ${backup_dir} ..."
             cp -a /etc/nginx "${backup_dir}" || true
-            log_info "  备份完成：${backup_dir}"
         fi
-
-        # 停止并禁用 nginx 服务
         systemctl stop    nginx 2>/dev/null || true
         systemctl disable nginx 2>/dev/null || true
-
-        # 按发行版卸载 nginx 包（避免与 OpenResty 端口 80/443 冲突）
-        # 仅卸载 nginx 本体，保留 openssl 等公共依赖
         if command -v dnf &>/dev/null; then
             dnf remove -y nginx nginx-core nginx-filesystem 2>/dev/null || true
-        elif command -v yum &>/dev/null; then
-            yum remove -y nginx nginx-core 2>/dev/null || true
-        elif command -v apt-get &>/dev/null; then
-            apt-get remove -y nginx nginx-common 2>/dev/null || true
         fi
-        log_info "  原有 Nginx 已停止并卸载（配置已备份到 ${backup_dir}）"
     fi
 
-    # ── 调用 setup.sh 安装阶段（无需 PG，可在 Pigsty 之前运行）─────────────────
-    PHASE=install \
-    PG_PASSWORD="${POSTGRES_PASSWORD}" \
-    PG_HOST="/var/run/postgresql" \
-    PG_DATABASE="postgres" \
-    STUDIO_DOMAIN="${SUPABASE_STUDIO_DOMAIN}" \
-    API_DOMAIN="${SUPABASE_PUBLIC_DOMAIN}" \
-    bash "${setup_script}" --phase install || {
-        log_warn "OpenResty setup.sh 执行失败，可事后手动运行: bash infra/openresty/setup.sh --phase install"
+    # ── 调用 setup.sh ────────────────────────────────────────────────────────
+    bash "${setup_script}" \
+        --studio-domain "${SUPABASE_STUDIO_DOMAIN}" \
+        --api-domain "${SUPABASE_PUBLIC_DOMAIN}" || {
+        log_warn "Angie setup.sh 执行失败"
         return 0
     }
 
-    log_info "OpenResty 安装完成"
-    log_info "  配置文件: /usr/local/openresty/nginx/conf/nginx.conf"
-    log_info "  原 Nginx 配置备份: /etc/nginx.bak.* (如存在)"
-    log_info "  证书存储: PostgreSQL (autossl.certificates)"
-    log_info "  动态 SSL: lua-resty-auto-ssl 按需自动申请 Let's Encrypt 证书"
+    log_info "Angie 安装成功"
 }
 
 
-# 为兼容册保留此函数别名
-install_nginx_mainline() { install_openresty; }
+# 为兼容性保留此函数别名
+install_nginx_mainline() { install_angie; }
 
-# ========== OpenResty DB 迁移（Pigsty PG 就绪后调用）==========
-openresty_db_migration() {
-    log_step "OpenResty DB 迁移（autossl PostgreSQL 数据库初始化）..."
-
-    local setup_script="${SCRIPT_DIR}/infra/openresty/setup.sh"
-    if [[ ! -f "${setup_script}" ]]; then
-        log_warn "infra/openresty/setup.sh 不存在，跳过迁移"
-        return 0
-    fi
-
-    PHASE=migrate \
-    PG_PASSWORD="${POSTGRES_PASSWORD}" \
-    PG_HOST="/var/run/postgresql" \
-    PG_DATABASE="postgres" \
-    bash "${setup_script}" --phase migrate || {
-        log_warn "OpenResty 迁移失败，可事后手动运行:"
-        log_warn "  bash infra/openresty/setup.sh --phase migrate --pg-password <密码>"
-        return 0
-    }
-}
 
 
 # ========== 注入 Lua 自动 SSL 逻辑到 Pigsty 模板 (已弃用) ==========
@@ -2044,7 +2008,7 @@ update_pigsty_config() {
     fi
     # 容器/CI 环境检测限制变量现已移至 ansible-playbook 命令行 (EXTRA_ARGS)
     
-    # ── 禁用 Pigsty 的 Nginx 管理（OpenResty 接管 80/443）───────────────────────────────
+    # ── 禁用 Pigsty 的 Nginx 管理（Angie 接管 80/443）───────────────────────────────
     # 必须在 ./configure 之后、bootstrap/install 之前注入，否则 Pigsty 仍会尝试安装 Nginx
     if [[ -f "$PIGSTY_YML" ]]; then
         if ! grep -q 'nginx_enabled' "$PIGSTY_YML"; then
@@ -2467,7 +2431,7 @@ install_management_api() {
 
     mkdir -p "$API_INSTALL_DIR"
     mkdir -p "$SCRIPTS_INSTALL_DIR"
-    mkdir -p /etc/nginx/sites-enabled/supa-tenants
+    mkdir -p /etc/angie/http.d
 
     # 复制 API 代码
     if [[ -d "${SCRIPT_DIR}/packages/management-api" ]]; then
@@ -2499,7 +2463,7 @@ DATABASE_URL=postgresql://postgres:${POSTGRES_PASSWORD}@localhost:5432/supacloud
 MASTER_TOKEN=${MASTER_TOKEN}
 SCRIPTS_PATH=${SCRIPTS_INSTALL_DIR}
 PIGSTY_PATH=${HOME}/pigsty
-NGINX_SITES_PATH=/etc/nginx/sites-enabled/supa-tenants
+NGINX_SITES_PATH=/etc/angie/http.d
 S3_ENDPOINT=${S3_ENDPOINT:-http://localhost:9000}
 S3_REGION=${S3_REGION:-us-east-1}
 BASE_DOMAIN=${SUPABASE_PUBLIC_DOMAIN}
@@ -2600,7 +2564,7 @@ show_completion() {
     echo ""
     echo "下一步操作:"
     echo "  1. 将域名 ${SUPABASE_PUBLIC_DOMAIN} 的 DNS A 记录指向服务器公网 IP"
-    echo "  2. 运行 'cd ~/pigsty && make cert' 申请 HTTPS 证书"
+    echo "  2. Angie 将自动申请并管理 HTTPS 证书，无需手动操作"
     echo ""
     echo "常用命令:"
     echo "  查看容器状态: podman ps 或 docker ps"
@@ -2674,8 +2638,8 @@ main() {
     setup_local_ssh            # 新增：确保本机 SSH 免密 (Ansible 需要)
     setup_swap
     
-    # OpenResty 安装必须在 Pigsty 之前（需要先停系统 Nginx 避免端口冲突）
-    install_openresty
+    # OpenResty 已替换为 Angie
+    install_angie
     
     install_container_runtime
     install_docker_compose
@@ -2688,9 +2652,6 @@ main() {
 
     # Pigsty PG 初始化完成后应用性能调优
     tune_postgres
-
-    # PG 已就绪：执行 OpenResty autossl DB 迁移（建表 + 角色）
-    openresty_db_migration
     
     # 安装 Management API
     install_management_api
