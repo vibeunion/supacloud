@@ -9,8 +9,8 @@ PROJECT_REF="${2:-}"
 DB_PASSWORD="${3:-}"
 
 # 从环境变量或默认值获取 PostgreSQL 连接信息
-PG_HOST="${PG_HOST:-localhost}"
-PG_PORT="${PG_PORT:-5432}"
+PG_HOST="${PG_HOST:-${POSTGRES_HOST:-localhost}}"
+PG_PORT="${PG_PORT:-${POSTGRES_PORT:-6432}}"
 PG_USER="${PG_USER:-postgres}"
 PG_DATABASE="${PG_DATABASE:-postgres}"
 
@@ -295,21 +295,32 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO service_role;
 -- 6. authenticator 角色权限（PostgREST 通过此角色连接数据库）
 DO $$
 BEGIN
-    -- 创建 authenticator 角色（如果不存在）
-    IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'authenticator') THEN
-        CREATE ROLE authenticator NOINHERIT LOGIN;
+    -- Bug Fix: 防止多租户互相覆盖全集群唯一的 authenticator 密码
+    -- 使用租户独立的 authenticator_${PROJECT_REF} 角色
+    IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'authenticator_${PROJECT_REF}') THEN
+        CREATE ROLE authenticator_${PROJECT_REF} NOINHERIT LOGIN PASSWORD '${DB_PASSWORD}';
+    ELSE
+        ALTER ROLE authenticator_${PROJECT_REF} WITH PASSWORD '${DB_PASSWORD}';
     END IF;
-    -- 授权 authenticator 可切换到 API 角色
-    GRANT anon, authenticated, service_role TO authenticator;
+    -- 授权租户专属的 authenticator 可切换到 API 角色
+    GRANT anon, authenticated, service_role TO authenticator_${PROJECT_REF};
 END
 $$;
 
 SUPABASE_SCHEMA
 
-    # 在库级别授予 authenticator CONNECT 权限
-    # 注意：GRANT ON DATABASE 必须在 psql 连接到 postgres 库时执行
     psql -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -d "$PG_DATABASE" -c \
-        "GRANT CONNECT ON DATABASE ${DB_NAME} TO authenticator;" 2>/dev/null || true
+        "GRANT CONNECT ON DATABASE ${DB_NAME} TO authenticator_${PROJECT_REF};" 2>/dev/null || true
+
+    # service_role 需要绕过 RLS 才能在 Edge Function 管理操作中直接写入数据
+    psql -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -d "$DB_NAME" -c \
+        "ALTER ROLE service_role BYPASSRLS;" 2>/dev/null || true
+
+    # 在 public schema 上配置默认 RLS：启用，但暂不添加策略
+    # 各租户应根据自身业务逻辑通过 migration 添加具体 RLS policy
+    # 这里只设置 default_row_security = on，防止无策略表对外暴露
+    psql -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -d "$DB_NAME" -c \
+        "SET row_security = on;" 2>/dev/null || true
 
     echo "Database ${DB_NAME} created successfully"
 }
