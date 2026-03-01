@@ -277,38 +277,48 @@ export class PigstyManager {
         const isApt = (await $`command -v apt-get`.nothrow().quiet()).exitCode === 0;
         if (!isApt) return;
 
-        console.log("[PigstyManager] 正在扫描并平稳化 APT 仓库定义...");
+        console.log("[PigstyManager] 正在扫描并全量平衡 APT 仓库定义...");
         try {
-            // 查找包含 debian.org 且带有 [trusted=yes] 的源文件
+            // 1. 扫描所有可能的源文件 (sources.list, .list, .sources)
             const sourcesDir = "/etc/apt/sources.list.d";
-            const files = (await $`ls ${sourcesDir}/*.list`.nothrow().text()).split("\n").filter(f => f.trim());
+            const allFiles = ["/etc/apt/sources.list"];
+            if (await Bun.file(sourcesDir).exists()) {
+                const dirents = await $`ls ${sourcesDir}`.nothrow().text();
+                dirents.split("\n").filter(f => f.trim()).forEach(f => {
+                    allFiles.push(`${sourcesDir}/${f}`);
+                });
+            }
 
-            for (const file of files) {
-                const content = await Bun.file(file).text();
-                // 如果发现这个文件是 Pigsty 自动生成的且包含可能冲突的定义
-                if (content.includes("trusted=yes") && content.includes("deb.debian.org")) {
-                    console.log(`[PigstyManager] 检测到潜在冲突源: ${file}, 正在执行平滑处理...`);
-                    // 在 Debian 12 容器中，如果默认 sources.list 已经有了，这个新加的 [trusted=yes] 会导致 apt update 崩溃
-                    // 我们保留 Pigsty 的源，但注释掉系统默认中冲突的行（如果存在）
-                    const mainList = "/etc/apt/sources.list";
-                    if (await Bun.file(mainList).exists()) {
-                        let mainContent = await Bun.file(mainList).text();
-                        if (mainContent.includes("deb.debian.org/debian")) {
-                            const lines = mainContent.split("\n").map(line => {
-                                if (line.includes("deb.debian.org/debian") && !line.startsWith("#")) {
-                                    return `# [SupaCloud-Patch] ${line}`;
-                                }
-                                return line;
-                            });
-                            await $`sudo tee ${mainList} <<EOF
-${lines.join("\n")}
-EOF`.quiet();
+            for (const file of allFiles) {
+                if (!(await Bun.file(file).exists())) continue;
+
+                let content = await Bun.file(file).text();
+                let modified = false;
+
+                // 如果这个文件不是 Pigsty 自己的冲突源，但包含 debian.org 且没被注释
+                // 我们在 Debian 12 容器中发现官方源与 Pigsty 注入的 [trusted=yes] 会产生选项冲突
+                if (!file.includes("pigsty") && content.includes("deb.debian.org/debian")) {
+                    const lines = content.split("\n").map(line => {
+                        const trimmed = line.trim();
+                        // 匹配 deb http... 且包含 debian.org 的行
+                        if (trimmed && !trimmed.startsWith("#") && trimmed.includes("deb.debian.org/debian")) {
+                            console.log(`[PigstyManager] 命中冲突定义: ${file} -> 执行平滑处理`);
+                            modified = true;
+                            return `# [SupaCloud-Patch] ${line}`;
                         }
+                        return line;
+                    });
+
+                    if (modified) {
+                        const newContent = lines.join("\n");
+                        const tmpPath = `/tmp/apt_patch_${Math.random().toString(36).substring(7)}.tmp`;
+                        await Bun.write(tmpPath, newContent);
+                        await $`sudo mv ${tmpPath} ${file} && sudo chmod 644 ${file}`.quiet();
                     }
                 }
             }
         } catch (e) {
-            console.warn(`[PigstyManager] [WARN] 仓库平稳化跳过: ${e}`);
+            console.warn(`[PigstyManager] [WARN] 仓库平稳化逻辑跳过: ${e}`);
         }
     }
 }
