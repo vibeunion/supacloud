@@ -317,11 +317,11 @@ async function prepareSystemEnv() {
     const s = p.spinner();
     s.start("基础系统依赖及包管理器预热");
 
-    let isUbuntu = (await $`command -v apt-get &>/dev/null`.nothrow()).exitCode === 0;
+    let isUbuntu = (await $`apt-get --version`.nothrow().quiet()).exitCode === 0;
     if (isUbuntu) {
-        await $`apt-get update -qq >/dev/null && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq curl tar gzip openssl bc jq git procps openssh-client openssh-server >/dev/null`.nothrow();
+        await $`apt-get update -qq >/dev/null && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq curl tar gzip openssl bc jq git procps openssh-client openssh-server >/dev/null`;
     } else {
-        await $`dnf install -y -q curl tar gzip openssl bc jq git procps-ng openssh-clients openssh-server >/dev/null`.nothrow();
+        await $`dnf install -y -q curl tar gzip openssl bc jq git procps-ng openssh-clients openssh-server >/dev/null`;
     }
     s.stop("底层支持组建拉取完毕");
 

@@ -66,7 +66,7 @@ jobs:
               echo '[CI] 模拟业务冒烟测试 (功能闭环)...'
               # 在 CI 环境中测试 API 模式启动与业务逻辑 (虽然缺少真 Pigsty 环境，但逻辑路径应通畅)
               # 启动后台服务 (Mock 模式)
-              supacloud start &
+              supacloud --server &
               sleep 3
               
               # 运行冒烟测试
