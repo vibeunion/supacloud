@@ -23,81 +23,14 @@ validate_params() {
     fi
 }
 
-# 获取租户配置
-get_tenant_config() {
-    local env_file="${TENANT_BASE_DIR}/${PROJECT_REF}.env"
-    if [ ! -f "$env_file" ]; then
-        echo "ERROR: Tenant config not found at $env_file" >&2
-        exit 1
+# 租户配置与代码路径
+TENANT_FUNCTIONS_DIR="${FUNCTIONS_ROOT}/${PROJECT_REF}"
+
+# 确保租户函数目录存在
+ensure_tenant_dir() {
+    if [ "$PROJECT_REF" != "global" ]; then
+        mkdir -p "$TENANT_FUNCTIONS_DIR"
     fi
-    grep -E '^(FUNCTIONS_PORT|SUPABASE_URL|SUPABASE_ANON_KEY|SUPABASE_SERVICE_ROLE_KEY|JWT_SECRET|WECHAT_APP_ID|WECHAT_APP_SECRET)=' "$env_file" | sed 's/ //g'
-}
-
-# 生成动态路由 (静态导入以适配 Edge Runtime 编译沙块)
-generate_router() {
-    local main_dir="${FUNCTIONS_ROOT}/main"
-    local router_file="${main_dir}/index.ts"
-    
-    echo "Generating dynamic router at ${router_file}..."
-    
-    cat << 'EOF' > "$router_file"
-import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
-
-const functions: Record<string, any> = {};
-EOF
-
-    # 遍历所有函数文件 (排除 index.ts)
-    for f in "$main_dir"/*.ts; do
-        filename=$(basename "$f")
-        if [ "$filename" == "index.ts" ]; then continue; fi
-        slug="${filename%.*}"
-        varname="func_${slug//-/_}"
-        
-        echo "import * as ${varname} from './${filename}'" >> "$router_file"
-        echo "functions['${slug}'] = ${varname}.default;" >> "$router_file"
-    done
-
-    cat << 'EOF' >> "$router_file"
-
-serve(async (req) => {
-  const url = new URL(req.url);
-  const pathParts = url.pathname.split('/');
-  
-  let functionName = '';
-  if (url.pathname.startsWith('/functions/v1/')) {
-      functionName = pathParts[3]; 
-  } else {
-      functionName = pathParts[pathParts.length - 1];
-  }
-
-  console.log(`Routing to function: ${functionName} from path: ${url.pathname}`);
-
-  if (functions[functionName]) {
-    try {
-      return await functions[functionName](req);
-    } catch (err: any) {
-      console.error(`Handler error in ${functionName}:`, err);
-      return new Response(JSON.stringify({ error: err.message || String(err) }), { 
-          status: 500, 
-          headers: { 'Content-Type': 'application/json' } 
-      });
-    }
-  }
-  
-  if (!functionName || functionName === 'health' || functionName === '') {
-    return new Response(JSON.stringify({ status: 'ok', message: 'Edge Runtime is running', available: Object.keys(functions) }), { 
-        status: 200, 
-        headers: { 'Content-Type': 'application/json' } 
-    });
-  }
-
-  return new Response(JSON.stringify({ 
-      error: `Function ${functionName} not found`,
-      path: url.pathname,
-      available: Object.keys(functions)
-  }), { status: 404, headers: { 'Content-Type': 'application/json' } });
-});
-EOF
 }
 
 # 初始化全局 Edge Runtime
@@ -176,16 +109,49 @@ case "$ACTION" in
         CODE="${4:-}"
         if [ -z "$SLUG" ]; then echo "slug required" >&2; exit 1; fi
         
-        # 部署到 main 根目录下，文件名为 slug.ts
-        # 这样 index.ts 静态导入时结构扁平，可靠性最高
-        DATA_FILE="${FUNCTIONS_ROOT}/main/${SLUG}.ts"
-        mkdir -p "${FUNCTIONS_ROOT}/main"
+        ensure_tenant_dir
+        DATA_FILE="${TENANT_FUNCTIONS_DIR}/${SLUG}.ts"
         echo "$CODE" > "$DATA_FILE"
-        echo "Deployed $SLUG. Generating router and restarting runtime..."
+        echo "Deployed $SLUG to $TENANT_FUNCTIONS_DIR."
         start_tenant_runtime
         ;;
+    read)
+        SLUG="${3:-}"
+        if [ -z "$SLUG" ]; then echo "slug required" >&2; exit 1; fi
+        
+        DATA_FILE="${TENANT_FUNCTIONS_DIR}/${SLUG}.ts"
+        if [ -f "$DATA_FILE" ]; then
+            cat "$DATA_FILE"
+        else
+            echo "Function not found" >&2
+            exit 1
+        fi
+        ;;
+    list)
+        ensure_tenant_dir
+        # Output JSON array of function slugs
+        if [ -d "$TENANT_FUNCTIONS_DIR" ]; then
+            # Use jq if available, otherwise fallback to simple formatting
+            find "$TENANT_FUNCTIONS_DIR" -maxdepth 1 -name "*.ts" -type f -exec basename {} .ts \; | jq -R . | jq -s . || echo "[]"
+        else
+            echo "[]"
+        fi
+        ;;
+    delete)
+        SLUG="${3:-}"
+        if [ -z "$SLUG" ]; then echo "slug required" >&2; exit 1; fi
+        
+        DATA_FILE="${TENANT_FUNCTIONS_DIR}/${SLUG}.ts"
+        if [ -f "$DATA_FILE" ]; then
+            rm -f "$DATA_FILE"
+            echo "Deleted $SLUG."
+        else
+            echo "Function not found" >&2
+            exit 1
+        fi
+        ;;
     *)
-        echo "Usage: $0 {init_global|start|stop|status|deploy} <project_ref> [args...]"
+        echo "Usage: $0 {init_global|start|stop|status|deploy|read|list|delete} <project_ref> [args...]"
         exit 1
         ;;
 esac
