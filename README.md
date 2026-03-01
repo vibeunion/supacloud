@@ -67,10 +67,16 @@ curl -fsSL https://gh-proxy.net/https://raw.githubusercontent.com/zuohuadong/sup
 ```
 
 **Binary Installation**
-1. Download the latest standalone binary from [GitHub Releases](https://github.com/zuohuadong/supacloud/releases).
-2. Run installation with your configuration:
+1. Download the latest standalone binary:
 ```bash
-# Initialize database and install components
+# AMD64
+wget https://gh-proxy.net/https://github.com/zuohuadong/supacloud/releases/latest/download/supacloud-api-linux-amd64 -O supacloud-api
+# ARM64
+wget https://gh-proxy.net/https://github.com/zuohuadong/supacloud/releases/latest/download/supacloud-api-linux-arm64 -O supacloud-api
+```
+2. Run installation:
+```bash
+chmod +x supacloud-api
 sudo ./supacloud-api --init-db
 ```
 
@@ -298,10 +304,16 @@ curl -fsSL https://gh-proxy.net/https://raw.githubusercontent.com/zuohuadong/sup
 ```
 
 **二进制安装**
-1. 从 [GitHub Releases](https://github.com/zuohuadong/supacloud/releases) 下载最新的独立二进制文件。
+1. 下载最新独立二进制文件：
+```bash
+# AMD64 (常见云服务器)
+wget https://gh-proxy.net/https://github.com/zuohuadong/supacloud/releases/latest/download/supacloud-api-linux-amd64 -O supacloud-api
+# ARM64 (树莓派/Apple Silicon)
+wget https://gh-proxy.net/https://github.com/zuohuadong/supacloud/releases/latest/download/supacloud-api-linux-arm64 -O supacloud-api
+```
 2. 运行安装及初始化：
 ```bash
-# 初始化数据库并安装组件
+chmod +x supacloud-api
 sudo ./supacloud-api --init-db
 ```
 

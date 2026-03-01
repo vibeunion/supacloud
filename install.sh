@@ -2260,16 +2260,29 @@ install_management_api() {
     local BIN_NAME="supacloud-api-linux-${BIN_ARCH}"
 
     log_info "正在从 GitHub 下载最新版本 API 二进制 (${BIN_NAME}) ..."
-    # TODO: 后续更换为真实的发布件链接，并在 CI 建立后取消回退逻辑。
-    # 由于目前尚未发布过 Release，因此作为平滑过渡兼容，这里仅做概念演示或提供本地回退
-    if [[ -f "${SCRIPT_DIR}/packages/management-api/${BIN_NAME}" ]]; then
-        cp "${SCRIPT_DIR}/packages/management-api/${BIN_NAME}" "$API_INSTALL_DIR/supacloud-api"
-        log_info "已复制本地编译结果"
-    else
-        log_warn "未找到编译的二进制包 ${BIN_NAME}。请确保已通过 CI 拉取！"
-        # 实际线上应为: wget -q -O "$API_INSTALL_DIR/supacloud-api" "https://github.com/zuohuadong/supacloud/releases/latest/download/${BIN_NAME}" || log_error "下载 API 核心组件失败"
-        # 临时创建空测试占位（防报错）:
-        touch "$API_INSTALL_DIR/supacloud-api"
+    
+    local RELEASE_URL="https://github.com/zuohuadong/supacloud/releases/latest/download/${BIN_NAME}"
+    local DOWNLOADED=false
+
+    # 1. 尝试通过代理下载
+    if curl -fsSL --progress-bar "https://gh-proxy.net/${RELEASE_URL}" -o "$API_INSTALL_DIR/supacloud-api"; then
+        log_info "通过代理下载成功"
+        DOWNLOADED=true
+    # 2. 尝试直接下载
+    elif curl -fsSL --progress-bar "${RELEASE_URL}" -o "$API_INSTALL_DIR/supacloud-api"; then
+        log_info "直接下载成功"
+        DOWNLOADED=true
+    fi
+
+    # 3. 兜底逻辑：如果下载失败且本地有预编译包，则使用本地包
+    if [[ "$DOWNLOADED" == "false" ]]; then
+        if [[ -f "${SCRIPT_DIR}/packages/management-api/${BIN_NAME}" ]]; then
+            log_warn "从 GitHub 下载失败，将使用本地编译结果回退"
+            cp "${SCRIPT_DIR}/packages/management-api/${BIN_NAME}" "$API_INSTALL_DIR/supacloud-api"
+        else
+            log_error "无法获取 API 核心组件：下载失败且本地文件不存在！"
+            exit 1
+        fi
     fi
     chmod +x "$API_INSTALL_DIR/supacloud-api"
 
