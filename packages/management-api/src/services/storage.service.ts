@@ -24,6 +24,50 @@ export class StorageService {
   }
 
   /**
+   * 创建存储桶 (S3 后端)
+   */
+  static async createBucket(ref: string): Promise<{ success: boolean; accessKey?: string; secretKey?: string; error?: string }> {
+    const { shellService } = await import("./shell.service");
+    const result = await shellService.execute("s3_manager.sh", ["create", ref]);
+
+    if (!result.success) {
+      return { success: false, error: result.error };
+    }
+
+    // 解析输出中的 ACCESS_KEY 和 SECRET_KEY
+    const accessKey = result.output.match(/ACCESS_KEY=([^\n]+)/)?.[1];
+    const secretKey = result.output.match(/SECRET_KEY=([^\n]+)/)?.[1];
+
+    return { success: true, accessKey, secretKey };
+  }
+
+  /**
+   * 删除存储桶
+   */
+  static async deleteBucket(ref: string): Promise<{ success: boolean; error?: string }> {
+    const { shellService } = await import("./shell.service");
+    const result = await shellService.execute("s3_manager.sh", ["delete", ref]);
+    return { success: result.success, error: result.error };
+  }
+
+  /**
+   * 获取存储凭据
+   */
+  static async getCredentials(ref: string): Promise<{ success: boolean; accessKey?: string; secretKey?: string; error?: string }> {
+    const { shellService } = await import("./shell.service");
+    const result = await shellService.execute("s3_manager.sh", ["credentials", ref]);
+
+    if (!result.success) {
+      return { success: false, error: result.error };
+    }
+
+    const accessKey = result.output.match(/ACCESS_KEY=([^\n]+)/)?.[1];
+    const secretKey = result.output.match(/SECRET_KEY=([^\n]+)/)?.[1];
+
+    return { success: true, accessKey, secretKey };
+  }
+
+  /**
    * 获取存储状态
    */
   static async getStatus(): Promise<StorageStatus> {
