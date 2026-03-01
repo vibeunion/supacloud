@@ -885,7 +885,7 @@ Wants=postgresql.service
 Type=simple
 Environment="MINIO_ROOT_USER=${S3_ACCESS_KEY:-s3user_data}"
 Environment="MINIO_ROOT_PASSWORD=${S3_SECRET_KEY:-S3User.Data}"
-ExecStart=/usr/local/bin/juicefs gateway --multi-buckets "${META_URL}" 0.0.0.0:9000
+ExecStart=/usr/local/bin/juicefs gateway --multi-buckets --cache-dir /dev/shm/juicefs_cache --cache-size 100 "${META_URL}" 0.0.0.0:9000
 Restart=always
 RestartSec=5
 LimitNOFILE=65536
@@ -1405,13 +1405,31 @@ install_angie() {
         fi
     fi
 
-    # ── 调用 setup.sh ────────────────────────────────────────────────────────
     bash "${setup_script}" \
         --studio-domain "${SUPABASE_STUDIO_DOMAIN}" \
         --api-domain "${SUPABASE_PUBLIC_DOMAIN}" || {
         log_warn "Angie setup.sh 执行失败"
         return 0
     }
+
+    # ── 注入 Angie 全局性能配置 (Gzip & 代理缓存) ─────────────────────────
+    log_info "初始化 Angie 全局性能配置..."
+    mkdir -p /etc/angie/http.d
+    cat > /etc/angie/http.d/00-global-perf.conf << 'EOF'
+# 全局 Gzip 压缩优化 (减少外网流量消耗)
+gzip on;
+gzip_comp_level 5;
+gzip_min_length 256;
+gzip_types application/javascript application/json application/xml text/css text/plain text/xml image/svg+xml;
+gzip_vary on;
+
+# 全局代理缓存池 (专用于 Storage 缩略图提速)
+proxy_cache_path /var/cache/angie/storage_render levels=1:2 keys_zone=render_cache:10m max_size=1g inactive=7d use_temp_path=off;
+EOF
+    mkdir -p /var/cache/angie/storage_render
+    # 如果是以 angie 用户运行，这里确保权限正确
+    chown -R angie:angie /var/cache/angie 2>/dev/null || true
+    systemctl restart angie || true
 
     log_info "Angie 安装成功"
 }
@@ -1902,6 +1920,14 @@ update_pigsty_config() {
             sed -i 's/nginx_enabled: true/nginx_enabled: false/g' "$PIGSTY_YML" || true
         fi
         log_info "pigsty.yml nginx_enabled = false"
+    fi
+
+    # ── 提升性能: PgBouncer 极致复用 ───────────────────────────────
+    if [[ -f "$PIGSTY_YML" ]]; then
+        if ! grep -q 'pgbouncer_max_client_conn' "$PIGSTY_YML"; then
+            log_info "向 pigsty.yml 注入 pgbouncer 高并发配置 (10000 排队, 20 连接)"
+            sed -i '/^  vars:$/a\    pgbouncer_max_client_conn: 10000\n    pgbouncer_default_pool_size: 20' "$PIGSTY_YML" || true
+        fi
     fi
 
     log_info "配置更新完成"

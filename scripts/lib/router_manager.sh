@@ -113,6 +113,22 @@ ${api_ssl_block}
     # 安全头
     add_header x-project-ref ${PROJECT_REF} always;
 
+    # Supabase Storage 图片渲染缓存
+    location ^~ /storage/v1/render/ {
+        proxy_pass http://${KONG_INTERNAL};
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_set_header x-project-ref ${PROJECT_REF};
+
+        proxy_cache render_cache;
+        proxy_cache_valid 200 7d;
+        proxy_cache_use_stale error timeout updating http_500 http_502 http_503 http_504;
+        proxy_cache_lock on;
+        add_header X-Cache-Status \$upstream_cache_status always;
+    }
+
     location / {
         proxy_pass http://${KONG_INTERNAL};
         proxy_set_header Host \$host;
@@ -181,6 +197,20 @@ server {
     server_name ${custom_domain};
 
 ${ssl_config}
+    # Supabase Storage 图片渲染缓存 (自定义域名)
+    location ^~ /storage/v1/render/ {
+        proxy_pass http://${KONG_INTERNAL};
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header x-project-ref ${PROJECT_REF};
+
+        proxy_cache render_cache;
+        proxy_cache_valid 200 7d;
+        proxy_cache_use_stale error timeout updating http_500 http_502 http_503 http_504;
+        proxy_cache_lock on;
+        add_header X-Cache-Status \$upstream_cache_status always;
+    }
 
     location / {
         proxy_pass http://${KONG_INTERNAL};
