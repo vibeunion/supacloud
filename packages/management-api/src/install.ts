@@ -359,8 +359,12 @@ async function prepareSystemEnv() {
     await $`mkdir -p ${sshDir} && chmod 700 ${sshDir}`;
 
     if ((await $`test -f ${sshDir}/id_ed25519`.nothrow()).exitCode !== 0) {
-        // 使用更直接的方式生成密钥，避免 Bun Shell 对空字符串参数的解析歧义
-        await $`ssh-keygen -q -t ed25519 -N "" -f ${sshDir}/id_ed25519`;
+        // 使用 Bun.spawn 显式传递参数数组，彻底解决 Shell 对空参数的解析歧义
+        const proc = Bun.spawn(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", `${sshDir}/id_ed25519`], {
+            stdout: "inherit",
+            stderr: "inherit"
+        });
+        await proc.exited;
     }
     const pubKey = (await $`cat ${sshDir}/id_ed25519.pub`.text()).trim();
     await $`grep -q "${pubKey}" ${sshDir}/authorized_keys &>/dev/null || echo "${pubKey}" >> ${sshDir}/authorized_keys`;
