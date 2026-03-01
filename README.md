@@ -66,20 +66,12 @@
 curl -fsSL https://gh-proxy.net/https://raw.githubusercontent.com/zuohuadong/supacloud/main/setup.sh | sudo bash
 ```
 
-**Standard Installation**
-# 1. Clone repository
-git clone https://github.com/zuohuadong/supacloud.git
-cd supacloud
-
-# 2. Configure (Edit config.env or use CLI arguments)
-# OPTION A: Edit file
-vim config.env
-
-# OPTION B: Use CLI arguments (Overrides config.env)
-sudo bash install.sh --ip 1.2.3.4 --domain supa.example.com --s3 minio
-
-# 3. Run installation
-sudo bash install.sh
+**Binary Installation**
+1. Download the latest standalone binary from [GitHub Releases](https://github.com/zuohuadong/supacloud/releases).
+2. Run installation with your configuration:
+```bash
+# Initialize database and install components
+sudo ./supacloud-api --init-db
 ```
 
 **Available CLI Options:**
@@ -167,7 +159,7 @@ curl http://localhost:9090/v1/projects/<ref>/api-keys \
 ./switch.sh runtime deno   # or: bun
 
 # Switch storage backend
-./switch.sh storage rustfs # or: minio, garage, external
+./switch.sh storage minio  # or: external
 
 # Show current configuration
 ./switch.sh status
@@ -305,20 +297,12 @@ Key settings in `config.env`:
 curl -fsSL https://gh-proxy.net/https://raw.githubusercontent.com/zuohuadong/supacloud/main/setup.sh | sudo bash
 ```
 
-**手动安装**
-# 1. 下载代码
-git clone https://github.com/zuohuadong/supacloud.git
-cd supacloud
-
-# 2. 配置说明 (编辑 config.env 或使用命令行参数)
-# 方式 A: 编辑文件
-vim config.env
-
-# 方式 B: 使用命令行参数 (优先级最高)
-sudo bash install.sh --ip 1.2.3.4 --domain api.example.com --s3 minio
-
-# 3. 运行安装脚本
-sudo bash install.sh
+**二进制安装**
+1. 从 [GitHub Releases](https://github.com/zuohuadong/supacloud/releases) 下载最新的独立二进制文件。
+2. 运行安装及初始化：
+```bash
+# 初始化数据库并安装组件
+sudo ./supacloud-api --init-db
 ```
 
 **命令行参数详解:**
@@ -406,7 +390,7 @@ curl http://localhost:9090/v1/projects/<ref>/api-keys \
 ./switch.sh runtime deno   # 或: bun
 
 # 切换存储后端
-./switch.sh storage rustfs # 或: minio, garage, external
+./switch.sh storage minio  # 或: external
 
 # 查看当前配置
 ./switch.sh status
