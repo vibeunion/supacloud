@@ -60,24 +60,27 @@
 
 #### Installation
 
-**One-Click Installation (Recommended)**
-
-```bash
-curl -fsSL https://gh-proxy.net/https://raw.githubusercontent.com/zuohuadong/supacloud/main/setup.sh | sudo bash
-```
-
-**Binary Installation**
+**Binary Installation (Recommended)**
 1. Download the latest standalone binary:
 ```bash
 # AMD64
-wget https://gh-proxy.net/https://github.com/zuohuadong/supacloud/releases/latest/download/supacloud-api-linux-amd64 -O supacloud-api
+wget https://gh-proxy.net/https://github.com/zuohuadong/supacloud/releases/latest/download/supacloud-api-linux-amd64 -O supacloudapi
 # ARM64
-wget https://gh-proxy.net/https://github.com/zuohuadong/supacloud/releases/latest/download/supacloud-api-linux-arm64 -O supacloud-api
+wget https://gh-proxy.net/https://github.com/zuohuadong/supacloud/releases/latest/download/supacloud-api-linux-arm64 -O supacloudapi
 ```
-2. Run installation:
+
+2. Running the Interactive Installer:
 ```bash
-chmod +x supacloud-api
-sudo ./supacloud-api --init-db
+chmod +x supacloudapi
+sudo ./supacloudapi install
+```
+
+3. Post-Installation Maintenance:
+```bash
+# System environment check
+supacloud doctor
+# Automated upgrade
+supacloud upgrade
 ```
 
 **Available CLI Options:**

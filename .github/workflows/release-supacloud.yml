@@ -40,6 +40,20 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
+          body: |
+            ## SuperCloud Release
+            
+            ### Quick Install (Linux)
+            ```bash
+            # Download and Install
+            wget https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/supacloud-api-linux-amd64 -O supacloudapi
+            chmod +x supacloudapi
+            ./supacloudapi install
+            ```
+            
+            ### Maintenance
+            - Run `supacloud doctor` for health check.
+            - Run `supacloud upgrade` for future updates.
           files: |
             packages/management-api/supacloud-api-linux-amd64
             packages/management-api/supacloud-api-linux-arm64
