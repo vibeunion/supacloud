@@ -10,8 +10,16 @@ export interface PigstyConfig {
     grafanaPass: string;
     jwtSecret: string;
     storageType: string;
+    force?: boolean;
     anonKey?: string;
     serviceRoleKey?: string;
+}
+
+export enum PigstyStatus {
+    NOT_INSTALLED = "NOT_INSTALLED",
+    DOWNLOADED = "DOWNLOADED",
+    CONFIGURED = "CONFIGURED",
+    INSTALLED = "INSTALLED",
 }
 
 /**
@@ -19,69 +27,144 @@ export interface PigstyConfig {
  * 负责收集上游 TS 类型化的环境参数，将配置映射渲染至 `pigsty.yml`，并妥善调度 Ansible 环境
  */
 export class PigstyManager {
+    static async checkStatus(): Promise<PigstyStatus> {
+        const home = os.homedir();
+        const pigstyDir = `${home}/pigsty`;
+
+        if ((await $`test -f ${home}/.pigsty_installed`.nothrow()).exitCode === 0) {
+            return PigstyStatus.INSTALLED;
+        }
+
+        if ((await $`test -f ${pigstyDir}/pigsty.yml`.nothrow()).exitCode === 0) {
+            // 检查是否已经 configure 过 (简单判断是否包含我们的 IP)
+            const content = await Bun.file(`${pigstyDir}/pigsty.yml`).text();
+            if (content.includes("SITE_URL") && !content.includes("10.10.10.10")) {
+                return PigstyStatus.CONFIGURED;
+            }
+            return PigstyStatus.DOWNLOADED;
+        }
+
+        return PigstyStatus.NOT_INSTALLED;
+    }
+
     /**
      * 执行完整的下载、配置、Ansible 部署流程
      */
     static async install(config: PigstyConfig) {
-        console.log("[PigstyManager] 开始部署基准数据库及中间件群落 (Pigsty)...");
+        const status = await this.checkStatus();
+        if (status === PigstyStatus.INSTALLED && !config.force) {
+            console.log("[PigstyManager] 检测到 Pigsty 已完成安装，跳过。使用 force: true 可强制重新安装。");
+            return;
+        }
+
+        console.log(`[PigstyManager] 当前状态: ${status}, 开始部署流程...`);
         const home = os.homedir();
         const pigstyDir = `${home}/pigsty`;
+        const ymlPath = `${pigstyDir}/pigsty.yml`;
+        const backupPath = `${ymlPath}.pre_sc_patch`;
 
         // 1. 获取 Pigsty 安装目录
-        if ((await $`test -f ${pigstyDir}/bootstrap`.nothrow()).exitCode !== 0) {
+        if (status === PigstyStatus.NOT_INSTALLED) {
             console.log("[PigstyManager] 正在下载 Pigsty 发行版...");
             await $`rm -rf ${pigstyDir}`.nothrow();
             await $`curl -fsSL https://repo.pigsty.io/get | bash`;
-        } else {
-            console.log("[PigstyManager] Pigsty 已下载 (bootstrap 存在)");
         }
 
         // 2. 调度执行 Bootstrap 与模板 Configure
-        // 注意: cwd 变更使用 Bun $ 的 cwd 选项或显式写入串联 Shell 语句
-        console.log("[PigstyManager] 执行初始化和模板映射...");
-        await $`cd ${pigstyDir} && ./bootstrap`;
-        await $`cd ${pigstyDir} && ./configure -i ${config.internalIp} -c app/supa`;
-
-        // 3. 将变量映射进入 YML (替代笨重的 sed 流)
-        await this.updatePigstyConfig(config, `${pigstyDir}/pigsty.yml`);
-
-        console.log("[PigstyManager] 调用底层 Ansible Playbooks (这通常需要 10-20 分钟)...");
-
-        // 判断入口点并进行调用
-        let entrypoint = "";
-        if ((await $`test -f ${pigstyDir}/deploy.yml`.nothrow()).exitCode === 0) {
-            entrypoint = "deploy.yml";
-        } else if ((await $`test -f ${pigstyDir}/install.yml`.nothrow()).exitCode === 0) {
-            entrypoint = "install.yml";
-        } else {
-            throw new Error("找不到 Pigsty 的可执行剧本 (deploy.yml 或 install.yml)");
+        if (status === PigstyStatus.NOT_INSTALLED || status === PigstyStatus.DOWNLOADED) {
+            console.log("[PigstyManager] 执行初始化和模板映射...");
+            await $`cd ${pigstyDir} && ./bootstrap`;
+            await $`cd ${pigstyDir} && ./configure -i ${config.internalIp} -c app/supa`;
         }
 
-        // 强制使用原生 ansible-playbook 执行入口剧本 (带可能的容器参数支持)
-        const extraArgsArray = await this.getPlaybookExtraArgs();
-        // Convert array to a string since passing an array directly to Bun's $ literal is tricky
-        const extraArgs = extraArgsArray.join(" ");
-
-        // 执行 Pigsty Core 环境
-        const installRes = await $`cd ${pigstyDir} && ansible-playbook ${entrypoint} ${extraArgs}`.nothrow();
-        if (installRes.exitCode !== 0) {
-            throw new Error(`Pigsty 核心环境搭建失败：${installRes.stderr.toString()}`);
-        }
-
-        // 执行容器运行时依赖 (限非 Podman 主机层环境)
-        const isPodman = process.env.CONTAINER_RUNTIME === "podman";
-        if (!isPodman && (await $`test -f ${pigstyDir}/docker.yml`.nothrow()).exitCode === 0) {
-            console.log("[PigstyManager] 配置 Docker 环境...");
-            await $`cd ${pigstyDir} && ansible-playbook docker.yml ${extraArgs}`.nothrow();
-        }
-
-        // 执行 Supabase 集成依赖剧本
-        if ((await $`test -f ${pigstyDir}/app.yml`.nothrow()).exitCode === 0) {
-            console.log("[PigstyManager] 启动 Supabase 集成群...");
-            const appRes = await $`cd ${pigstyDir} && ansible-playbook app.yml ${extraArgs}`.nothrow();
-            if (appRes.exitCode !== 0) {
-                console.warn("[PigstyManager] app.yml 集群启动受挫，尝试使用传统手段编排。");
+        // 3. 将变量映射进入 YML (带回滚保护)
+        try {
+            // 创建快照
+            if (await Bun.file(ymlPath).exists()) {
+                await $`cp -f ${ymlPath} ${backupPath}`;
             }
+
+            await this.updatePigstyConfig(config, ymlPath);
+
+            console.log("[PigstyManager] 调用底层 Ansible Playbooks (这通常需要 10-20 分钟)...");
+
+            let entrypoint = "";
+            if ((await $`test -f ${pigstyDir}/deploy.yml`.nothrow()).exitCode === 0) {
+                entrypoint = "deploy.yml";
+            } else if ((await $`test -f ${pigstyDir}/install.yml`.nothrow()).exitCode === 0) {
+                entrypoint = "install.yml";
+            } else {
+                throw new Error("找不到 Pigsty 的可执行剧本 (deploy.yml 或 install.yml)");
+            }
+
+            const extraArgsArray = await this.getPlaybookExtraArgs();
+
+            // 执行 Pigsty Core 环境
+            console.log(`[PigstyManager] 启动主剧本部署: ${entrypoint}...`);
+            await this.runCommandWithStreaming(
+                ["ansible-playbook", entrypoint, ...extraArgsArray],
+                pigstyDir
+            );
+
+            const isPodman = process.env.CONTAINER_RUNTIME === "podman";
+            if (!isPodman && (await $`test -f ${pigstyDir}/docker.yml`.nothrow()).exitCode === 0) {
+                console.log("[PigstyManager] 配置 Docker 环境...");
+                await this.runCommandWithStreaming(
+                    ["ansible-playbook", "docker.yml", ...extraArgsArray],
+                    pigstyDir
+                );
+            }
+
+            if ((await $`test -f ${pigstyDir}/app.yml`.nothrow()).exitCode === 0) {
+                console.log("[PigstyManager] 启动 Supabase 集成群...");
+                await this.runCommandWithStreaming(
+                    ["ansible-playbook", "app.yml", ...extraArgsArray],
+                    pigstyDir
+                );
+            }
+
+            // 标记安装成功
+            await $`touch ${home}/.pigsty_installed`;
+            // 删除备份
+            await $`rm -f ${backupPath}`.nothrow();
+
+        } catch (error) {
+            console.error("[PigstyManager] 部署中途崩溃，启动回滚机制...");
+            if (await Bun.file(backupPath).exists()) {
+                await $`mv -f ${backupPath} ${ymlPath}`;
+                console.log("[PigstyManager] 已恢复原始 pigsty.yml 配置文件。");
+            }
+            throw error;
+        }
+    }
+
+    /**
+     * 使用 Bun.spawn 实现流式输出捕获
+     */
+    private static async runCommandWithStreaming(args: string[], cwd: string) {
+        const proc = Bun.spawn({
+            cmd: args,
+            cwd: cwd,
+            stdout: "pipe",
+            stderr: "pipe",
+        });
+
+        const reader = async (stream: ReadableStream) => {
+            const decoder = new TextDecoder();
+            for await (const chunk of stream) {
+                const text = decoder.decode(chunk as Uint8Array);
+                // 实时输出每一行，并在前面加上前缀以区分
+                text.split("\n").filter(line => line.trim()).forEach(line => {
+                    console.log(`  [Ansible] ${line.trim()}`);
+                });
+            }
+        };
+
+        await Promise.all([reader(proc.stdout), reader(proc.stderr)]);
+        const exitCode = await proc.exited;
+
+        if (exitCode !== 0) {
+            throw new Error(`命令执行失败 (Exit Code: ${exitCode}): ${args.join(" ")}`);
         }
     }
 

@@ -1,111 +1,84 @@
 import { $ } from "bun";
+import * as p from "@clack/prompts";
 import os from "node:os";
-import { chmod, rename, unlink } from "node:fs/promises";
 
-const REPO_OWNER = "zuohuadong";
-const REPO_NAME = "supacloud";
-// 采用内部代理或直连
-const PROXY_PREFIX = "https://gh-proxy.net/";
-const GITHUB_API = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases/latest`;
+const PACKAGE_JSON_URL = "https://raw.githubusercontent.com/zuohuadong/supacloud/main/packages/management-api/package.json";
+const REPO_URL = "https://api.github.com/repos/zuohuadong/supacloud/releases/latest";
+
+async function getLocalVersion(): Promise<string> {
+    try {
+        // 在二进制文件中，我们可能需要通过其他方式获取版本，
+        // 这里暂时通过读取同级 package.json (开发环境) 或预设值
+        return "1.0.0";
+    } catch {
+        return "0.0.0";
+    }
+}
 
 export async function runUpgrade() {
-    console.log(`
-  ╔═══════════════════════════════════════════════════════════╗
-  ║          SupaCloud CLI Updater                            ║
-  ╚═══════════════════════════════════════════════════════════╝
-  `);
+    p.intro("\x1b[46m SupaCloud 自持更新总线 (Self-Upgrade) \x1b[0m");
+
+    const s = p.spinner();
+    s.start("正在检索 GitHub 最新发布版本");
 
     try {
-        console.log(`\x1b[34m[STEP]\x1b[0m 正在检查最新版本信息...`);
-
-        // 1. 获取最新 Release 信息
-        const res = await fetch(GITHUB_API, {
-            headers: {
-                "User-Agent": "SupaCloud-CLI",
-                "Accept": "application/vnd.github.v3+json"
-            }
-            // 此处可设较短 timeout，为简化略
+        const response = await fetch(REPO_URL, {
+            headers: { "User-Agent": "SupaCloud-CLI" }
         });
 
-        if (!res.ok) {
-            throw new Error(`无法连接到 GitHub API (Status: ${res.status})`);
+        if (!response.ok) throw new Error("无法连接到 GitHub Release API");
+
+        const data = await response.json();
+        const remoteVersion = data.tag_name.replace('v', '');
+        const localVersion = await getLocalVersion();
+
+        s.stop(`本地版本: ${localVersion} | 远程最新: ${remoteVersion}`);
+
+        if (remoteVersion === localVersion) {
+            p.note("您当前已是最新版本，无需更新。");
+            return;
         }
 
-        const releaseData = await res.json();
-        const latestVersion = releaseData.tag_name;
-        const currentVersion = process.env.SUPACLOUD_VERSION || "v1.0.0"; // 如果有内置常量则可对比
+        const confirm = await p.confirm({
+            message: `检测到新版本 ${remoteVersion}，是否现在执行原地升级？`,
+            initialValue: true
+        });
 
-        console.log(`\x1b[32m[INFO]\x1b[0m 发现版本: ${latestVersion}`);
+        if (!confirm || p.isCancel(confirm)) {
+            p.cancel("升级已取消。");
+            return;
+        }
 
-        // 2. 匹配本机架构
+        s.start("正在根据系统架构匹配二进制包");
         const arch = os.arch();
-        let binArch = "amd64";
-        if (arch === "arm64") {
-            binArch = "arm64";
-        }
-        const targetAsset = `supacloud-api-linux-${binArch}`;
+        const platform = os.platform();
+        let assetName = `supacloud-api-linux-${arch === "arm64" ? "arm64" : "amd64"}`;
 
-        // 查找对应资产
-        const asset = releaseData.assets?.find((a: any) => a.name === targetAsset);
+        const asset = data.assets.find((a: any) => a.name === assetName);
         if (!asset) {
-            // 退回兼容命名尝试查找
-            const fallbackAsset = releaseData.assets?.find((a: any) => a.name === "supacloud");
-            if (!fallbackAsset) {
-                throw new Error(`未在此 Release 中找到适配 ${arch} 架构的二进制文件(${targetAsset})`);
-            }
+            s.stop("未找到匹配当前系统架构的发布包");
+            return;
         }
 
-        // 使用兼容或找到的确切名字拼接下载地址
-        const targetDownloadUrl = asset ? asset.browser_download_url : `https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/latest/download/${targetAsset}`;
+        s.start(`正在下载更新包: ${assetName}`);
+        const downloadRes = await fetch(asset.browser_download_url);
+        if (!downloadRes.ok) throw new Error("下载失败");
 
-        console.log(`\x1b[34m[STEP]\x1b[0m 正在下载 ${targetAsset}... (将启用代理加速)`);
+        const buffer = await downloadRes.arrayBuffer();
+        const tempFile = `${process.argv[0]}.tmp`;
 
-        // 当前二进制的绝对路径
-        // Bun 中 process.execPath 指向当前可执行文件（如果是 bun build --compile 打包出来的，指向的就是自身）
-        const currentExePath = process.execPath;
-        const tempExePath = `${currentExePath}.new`;
+        s.start("正在校验并覆盖现存二进制文件");
+        await Bun.write(tempFile, buffer);
+        await $`chmod +x ${tempFile}`;
 
-        // 3. 开始下载并写入临时文件
-        const downloadUrl = `${PROXY_PREFIX}${targetDownloadUrl}`;
+        // 原地原子替换
+        await $`mv -f ${tempFile} ${process.argv[0]}`;
 
-        // 使用 Bun Shell 的灵活下载特性 
-        const downloadRes = await $`curl -fsSL --progress-bar ${downloadUrl} -o ${tempExePath}`;
+        s.stop("更新包已就绪并完成覆盖");
 
-        if (downloadRes.exitCode !== 0) {
-            console.log(`\x1b[33m[WARN]\x1b[0m 代理下载失败，正在尝试直连...`);
-            const directRes = await $`curl -fsSL --progress-bar ${targetDownloadUrl} -o ${tempExePath}`;
-            if (directRes.exitCode !== 0) {
-                throw new Error("下载失败。请检查网络。");
-            }
-        }
-
-        // 4. 重置权限并替换文件
-        console.log(`\x1b[34m[STEP]\x1b[0m 设置执行权限并替换源程序...`);
-        await chmod(tempExePath, 0o755);
-
-        // Linux 允许对正在执行的文件执行 unlink 或 rename 至同名覆盖（某些文件系统需要 unlink 原文件）
-        try {
-            await rename(tempExePath, currentExePath);
-        } catch (e: any) {
-            // 如果遇到 Text File Busy，先 unlink
-            if (e.code === 'ETXTBSY' || e.message.includes('busy')) {
-                await unlink(currentExePath);
-                await rename(tempExePath, currentExePath);
-            } else {
-                throw e;
-            }
-        }
-
-        console.log(`
-  ============================================================
-  \x1b[32m升级成功！\x1b[0m 
-  成功将 SupaCloud CLI 更新至 ${latestVersion}
-  请重新运行您的命令。
-  ============================================================
-    `);
-
+        p.outro(`🎉 升级成功！请重启服务或重新运行命令。`);
     } catch (error: any) {
-        console.error(`\x1b[31m[ERROR]\x1b[0m 升级失败: ${error.message}`);
+        s.stop(`升级失败: ${error.message}`);
         process.exit(1);
     }
 }

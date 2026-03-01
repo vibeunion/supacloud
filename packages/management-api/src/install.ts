@@ -43,6 +43,47 @@ async function checkSystem() {
     if (os.userInfo().uid !== 0) throw new Error("请使用 root 权限（sudo）运行安装程序。");
 }
 
+async function performPreFlightChecks() {
+    const s = p.spinner();
+    s.start("执行环境预检查 (Pre-flight Checks)");
+
+    // 1. 检查关键端口占用
+    const ports = [5432, 80, 443, 9090];
+    const conflictingPorts = [];
+    for (const port of ports) {
+        const isOccupied = (await $`ss -tuln | grep :${port} `.nothrow()).exitCode === 0;
+        if (isOccupied) conflictingPorts.push(port);
+    }
+
+    if (conflictingPorts.length > 0) {
+        s.stop("检测到端口冲突");
+        const force = await p.confirm({
+            message: `检测到关键端口 [${conflictingPorts.join(", ")}] 已被占用，强制继续可能会导致安装失败。是否继续？`,
+            initialValue: false
+        });
+        if (!force || p.isCancel(force)) process.exit(1);
+    } else {
+        s.stop("核心端口可用性验证通过");
+    }
+
+    // 2. 检查磁盘空间 (要求至少 10GB)
+    s.start("正在评估系统存储容量");
+    const dfOutput = await $`df -k /opt | tail -1 | awk '{print $4}'`.text();
+    const availableKB = parseInt(dfOutput.trim());
+    const availableGB = availableKB / 1024 / 1024;
+
+    if (availableGB < 10) {
+        s.stop("磁盘空间较低");
+        const force = await p.confirm({
+            message: `由于 Pigsty 极其庞大，建议至少预留 10GB 空间。当前仅剩 ${availableGB.toFixed(1)}GB，是否强制继续？`,
+            initialValue: false
+        });
+        if (!force || p.isCancel(force)) process.exit(1);
+    } else {
+        s.stop(`磁盘空间充足 (剩余 ${availableGB.toFixed(1)}GB)`);
+    }
+}
+
 import { PigstyManager, type PigstyConfig } from "./infra/pigsty";
 import { LoadBalancerManager } from "./infra/loadbalancer";
 import { ServiceManager } from "./infra/service";
@@ -200,6 +241,7 @@ export async function runInstall() {
         await extractAssets();
         s.stop("SupaCloud 控制面二进制文件解压成功");
 
+        await performPreFlightChecks();
         const config = await runInteractiveConfig();
         await prepareSystemEnv();
 
