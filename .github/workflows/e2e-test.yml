@@ -27,6 +27,7 @@ jobs:
         working-directory: ./packages/management-api
         run: |
           bun install
+          bun run prebuild
           echo "[CI] 运行逻辑单元测试与 Mock 集成测试..."
           bun test
           bun run build:amd64

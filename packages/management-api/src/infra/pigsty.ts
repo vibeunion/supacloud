@@ -238,7 +238,7 @@ export class PigstyManager {
 
         // 关闭 Pigsty 默认的 Nginx 并发配置 (我们已经交给了 Angie 负责前端)
         if (!yml.includes("nginx_enabled: false")) {
-            yml = yml.replace(/  vars:/, `  vars:\n    nginx_enabled: false\n    nginx_exporter_enabled: false\n    pgbouncer_max_client_conn: 10000\n    pgbouncer_default_pool_size: 20`);
+            yml = yml.replace(/^  vars:/m, `  vars:\n    nginx_enabled: false\n    nginx_exporter_enabled: false\n    pgbouncer_max_client_conn: 10000\n    pgbouncer_default_pool_size: 20`);
         }
 
         await Bun.write(ymlPath, yml);
