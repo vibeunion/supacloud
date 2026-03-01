@@ -336,6 +336,9 @@ async function prepareSystemEnv() {
 
     let isUbuntu = (await $`apt-get --version`.nothrow().quiet()).exitCode === 0;
     if (isUbuntu) {
+        // [NON-INTERACTIVE] 预设时区并强制静默模式，防止 tzdata 挂起
+        await $`echo "tzdata tzdata/Areas select Etc" | debconf-set-selections`.nothrow();
+        await $`echo "tzdata tzdata/Zones/Etc select UTC" | debconf-set-selections`.nothrow();
         await $`apt-get update -qq >/dev/null && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq sudo curl tar gzip openssl bc jq git procps openssh-client openssh-server postgresql-client >/dev/null`;
     } else {
         await $`dnf install -y -q --allowerasing epel-release sudo curl tar gzip openssl bc jq git procps-ng openssh-clients openssh-server postgresql >/dev/null`;
