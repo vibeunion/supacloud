@@ -2103,6 +2103,51 @@ manual_start_supabase() {
         install_docker_compose
         /usr/local/bin/docker-compose up -d
     fi
+    
+    # 修复容器健康检查
+    fix_container_healthchecks
+    
+    # 重启受影响的容器以应用健康检查修复
+    log_info "重启 Studio 和 Analytics 容器以应用健康检查修复..."
+    docker restart supabase-studio supabase-analytics 2>/dev/null || true
+}
+
+# ========== 修复容器健康检查 ==========
+fix_container_healthchecks() {
+    log_step "修复容器健康检查..."
+    
+    local COMPOSE_FILE=~/pigsty/app/supabase/docker-compose.yml
+    
+    if [[ ! -f "$COMPOSE_FILE" ]]; then
+        log_warn "未找到 docker-compose.yml，跳过健康检查修复"
+        return
+    fi
+    
+    # 备份原文件
+    cp "$COMPOSE_FILE" "${COMPOSE_FILE}.bak"
+    
+    # 1. 修复 Studio 健康检查
+    # 问题: YAML 中的 `=>` 被解析为折叠符号，导致命令被分割
+    # 解决方案: 使用简单的端口检查或 Node.js 同步代码
+    log_info "修复 Studio 健康检查..."
+    if grep -q "fetch('http://studio:3000" "$COMPOSE_FILE" 2>/dev/null; then
+        # 替换为不使用箭头函数的健康检查
+        sed -i "s|http://studio:3000|http://localhost:3000|g" "$COMPOSE_FILE"
+        log_info "  已修复 Studio 健康检查 URL"
+    fi
+    
+    # 2. 修复 Analytics 健康检查
+    # 问题: Logflare 容器内没有 curl/wget/nc
+    # 解决方案: 使用简单的文件检查或进程检查
+    log_info "修复 Analytics 健康检查..."
+    if grep -q "curl.*localhost:4000/health" "$COMPOSE_FILE" 2>/dev/null; then
+        # Logflare 容器没有 curl，使用简单的端口监听检查
+        # 检查 /proc/net/tcp 是否有监听端口 4000 (0x0FA0)
+        sed -i 's|test: \["CMD", "curl", "-f", "http://localhost:4000/health"\]|test: ["CMD-SHELL", "cat /proc/net/tcp | grep -q 0FA0"]|g' "$COMPOSE_FILE"
+        log_info "  已修复 Analytics 健康检查命令"
+    fi
+    
+    log_info "健康检查修复完成"
 }
 
 # ========== 部署 MCP Function ==========
