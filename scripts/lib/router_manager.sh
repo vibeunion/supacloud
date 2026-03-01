@@ -9,7 +9,7 @@ PROJECT_REF="${2:-}"
 DOMAIN="${3:-}"
 
 # 配置路径
-NGINX_SITES_DIR="${NGINX_SITES_DIR:-/etc/nginx/sites-enabled/supa-tenants}"
+ANGIE_SITES_DIR="${ANGIE_SITES_DIR:-/etc/angie/http.d}"
 KONG_INTERNAL="${KONG_INTERNAL:-127.0.0.1:8000}"
 BASE_DOMAIN="${BASE_DOMAIN:-localhost}"
 
@@ -29,24 +29,23 @@ validate_params() {
 
 # 确保配置目录存在
 ensure_directory() {
-    mkdir -p "$NGINX_SITES_DIR"
+    mkdir -p "$ANGIE_SITES_DIR"
 
-    # 确保 nginx.conf 包含此目录
-    if ! grep -q "supa-tenants" /etc/nginx/nginx.conf 2>/dev/null; then
-        echo "WARNING: Make sure /etc/nginx/nginx.conf includes: include ${NGINX_SITES_DIR}/*.conf;" >&2
+    # 确保 angie.conf 包含此目录
+    if ! grep -q "http.d" /etc/angie/angie.conf 2>/dev/null; then
+        echo "WARNING: Make sure /etc/angie/angie.conf includes: include ${ANGIE_SITES_DIR}/*.conf;" >&2
     fi
 }
 
 # ========== SSL 模式检测 ==========
-# 检测系统中已存在的证书
+# 检测系统中已存在的证书或是否使用 Angie ACME
 detect_ssl_mode() {
     local domain="$1"
     if [ -f "/etc/pigsty/cert/${domain}.pem" ]; then
         echo "pigsty"
-    elif [ -d "/etc/letsencrypt/live/${domain}" ]; then
-        echo "certbot"
     else
-        echo "none"
+        # 默认使用 Angie 原生 ACME
+        echo "angie-acme"
     fi
 }
 
@@ -65,17 +64,17 @@ generate_ssl_config() {
     ssl_certificate_key /etc/pigsty/cert/${domain}.key;
 SSL_BLOCK
             ;;
-        certbot)
+        angie-acme)
             cat <<SSL_BLOCK
-    # Let's Encrypt (certbot)
-    ssl_certificate     /etc/letsencrypt/live/${domain}/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/${domain}/privkey.pem;
+    # Angie native ACME
+    acme                le;
+    ssl_certificate     \$acme_cert_le;
+    ssl_certificate_key \$acme_cert_key_le;
 SSL_BLOCK
             ;;
         *)
             cat <<'SSL_BLOCK'
-    # No SSL certificate found. 
-    # Use ssl_manager.sh or certbot to issue certificates for this domain.
+    # Fallback or No SSL
 SSL_BLOCK
             ;;
     esac
@@ -86,13 +85,13 @@ add_route() {
     local project_domain="${DOMAIN:-${PROJECT_REF}.${BASE_DOMAIN}}"
     local api_domain="${PROJECT_REF}.api.${BASE_DOMAIN}"
     local studio_domain="studio-${PROJECT_REF}.${BASE_DOMAIN}"
-    local config_file="${NGINX_SITES_DIR}/${PROJECT_REF}.conf"
+    local config_file="${ANGIE_SITES_DIR}/${PROJECT_REF}.conf"
 
     ensure_directory
 
     local ssl_mode
     ssl_mode=$(detect_ssl_mode "$api_domain")
-    echo "Adding Nginx route for ${PROJECT_REF}... (SSL mode: ${ssl_mode})"
+    echo "Adding Angie route for ${PROJECT_REF}... (SSL mode: ${ssl_mode})"
 
     # 生成 SSL 配置
     local api_ssl_block
@@ -137,6 +136,9 @@ server {
     listen 443 ssl;
     server_name ${studio_domain};
 
+    # 使用基础 ACME
+$(generate_ssl_config "${studio_domain}")
+
     # 安全头
     add_header X-Project-Ref ${PROJECT_REF} always;
 
@@ -156,7 +158,7 @@ EOF
     echo "  - Studio: ${studio_domain}"
 }
 
-# 添加项目自定义域名 (联动 ACME / certbot)
+# 添加项目自定义域名 (联动 ACME)
 add_custom_domain() {
     local custom_domain="${DOMAIN}"
     if [ -z "$custom_domain" ]; then
@@ -164,19 +166,13 @@ add_custom_domain() {
         exit 1
     fi
 
-    local config_file="${NGINX_SITES_DIR}/${PROJECT_REF}_custom_${custom_domain}.conf"
+    local config_file="${ANGIE_SITES_DIR}/${PROJECT_REF}_custom_${custom_domain}.conf"
     ensure_directory
 
     echo "Adding custom domain ${custom_domain} for ${PROJECT_REF}..."
 
-    # 根据证书存在情况和 Nginx 能力决定 SSL 配置
     local ssl_config
-    if [ -f "/etc/pigsty/cert/${custom_domain}.pem" ]; then
-        ssl_config="    ssl_certificate     /etc/pigsty/cert/${custom_domain}.pem;
-    ssl_certificate_key /etc/pigsty/cert/${custom_domain}.key;"
-    else
-        ssl_config=$(generate_ssl_config "$custom_domain")
-    fi
+    ssl_config=$(generate_ssl_config "$custom_domain")
 
     cat > "$config_file" <<EOF
 server {
@@ -199,7 +195,7 @@ EOF
 
 # 更新网络限制 (IP 白名单)
 update_restrictions() {
-    local restriction_file="${NGINX_SITES_DIR}/${PROJECT_REF}_restrictions.inc"
+    local restriction_file="${ANGIE_SITES_DIR}/${PROJECT_REF}_restrictions.inc"
     local allowed_ips="${DOMAIN:-""}" # 借用 DOMAIN 参数传递逗号分隔的 IPs
 
     echo "# IP Restrictions for ${PROJECT_REF}" > "$restriction_file"
@@ -216,23 +212,23 @@ update_restrictions() {
 
 # 移除项目路由
 remove_route() {
-    local config_file="${NGINX_SITES_DIR}/${PROJECT_REF}.conf"
-    local custom_configs="${NGINX_SITES_DIR}/${PROJECT_REF}_custom_*.conf"
-    local restriction_file="${NGINX_SITES_DIR}/${PROJECT_REF}_restrictions.inc"
+    local config_file="${ANGIE_SITES_DIR}/${PROJECT_REF}.conf"
+    local custom_configs="${ANGIE_SITES_DIR}/${PROJECT_REF}_custom_*.conf"
+    local restriction_file="${ANGIE_SITES_DIR}/${PROJECT_REF}_restrictions.inc"
 
     rm -f "$config_file" $custom_configs "$restriction_file"
     echo "Routes and restrictions removed for ${PROJECT_REF}"
 }
 
-# 重载 Nginx 配置
-reload_nginx() {
-    echo "Testing Nginx configuration..."
-    if nginx -t 2>/dev/null; then
-        echo "Reloading Nginx..."
-        nginx -s reload
-        echo "Nginx reloaded successfully"
+# 重载 Angie 配置
+reload_angie() {
+    echo "Testing Angie configuration..."
+    if angie -t 2>/dev/null; then
+        echo "Reloading Angie..."
+        angie -s reload
+        echo "Angie reloaded successfully"
     else
-        echo "ERROR: Nginx configuration test failed" >&2
+        echo "ERROR: Angie configuration test failed" >&2
         exit 1
     fi
 }
@@ -243,18 +239,22 @@ validate_params
 case "$ACTION" in
     add)
         add_route
+        reload_angie
         ;;
     add-custom-domain)
         add_custom_domain
+        reload_angie
         ;;
     update-restrictions)
         update_restrictions
+        reload_angie
         ;;
     remove)
         remove_route
+        reload_angie
         ;;
     reload)
-        reload_nginx
+        reload_angie
         ;;
     *)
         echo "ERROR: Unknown action '${ACTION}'. Use: add, remove, reload, add-custom-domain, update-restrictions" >&2

@@ -88,8 +88,8 @@ EOF
         else
             log_error "配置文件不存在: $CONFIG_FILE"
             log_info "请先复制并编辑配置文件: cp config.env.example config.env"
-            exit 1
         fi
+    fi
     # 加载配置文件 (如果存在)
     if [[ -f "$CONFIG_FILE" ]]; then
         # 备份命令行传入的变量，防止被 source 覆盖
