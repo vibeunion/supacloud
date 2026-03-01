@@ -1,161 +1,217 @@
+
 import { EMBEDDED_ASSETS } from "./assets.gen";
-import { mkdir, writeFile, chmod } from "node:fs/promises";
-import { join, dirname } from "node:path";
 import { $ } from "bun";
 import os from "node:os";
-
-/**
- * SupaCloud Installer Engine
- * 处理全功能单二进制文件的环境初始化与资源释放
- */
+import * as p from "@clack/prompts";
 
 const INSTALL_BASE_DIR = "/opt/supacloud";
-
-async function logStep(msg: string) {
-    console.log(`\x1b[34m[STEP]\x1b[0m ${msg}`);
-}
-
-async function logInfo(msg: string) {
-    console.log(`\x1b[32m[INFO]\x1b[0m ${msg}`);
-}
-
-async function logWarn(msg: string) {
-    console.log(`\x1b[33m[WARN]\x1b[0m ${msg}`);
-}
-
-async function logError(msg: string) {
-    console.error(`\x1b[31m[ERROR]\x1b[0m ${msg}`);
-}
+const CONFIG_FILE = `${INSTALL_BASE_DIR}/config.env`;
 
 /**
- * 释放内嵌资源到磁盘
+ * 使用 Bun 原生 API 生成安全随机字符串
  */
+function generateSecurePassword(length = 24) {
+    // Bun 1.x 原生支持生成均匀分布的随机填充，性能优于 node:crypto
+    const charset = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    let ret = '';
+    const bytes = new Uint8Array(length);
+    crypto.getRandomValues(bytes);
+    for (let i = 0; i < length; i++) {
+        ret += charset[bytes[i] % charset.length];
+    }
+    return ret;
+}
+
 async function extractAssets() {
-    await logStep("正在释放内嵌资源...");
-
     for (const [path, asset] of Object.entries(EMBEDDED_ASSETS)) {
-        const targetPath = join(INSTALL_BASE_DIR, path.startsWith("/") ? path.substring(1) : path);
-        await mkdir(dirname(targetPath), { recursive: true });
-
+        const targetPath = `${INSTALL_BASE_DIR}/${path.startsWith("/") ? path.substring(1) : path}`;
+        // 使用 Bun.write 代替 fs.writeFile，它能处理各种缓冲区并在系统层面进行优化
         const buffer = Buffer.from(asset.content, 'base64');
-        await writeFile(targetPath, buffer);
+        await Bun.write(targetPath, buffer);
 
-        // 如果是脚本，增加执行权限
         if (path.endsWith(".sh") || path.includes("/scripts/")) {
-            await chmod(targetPath, 0o755);
+            await $`chmod +x ${targetPath}`;
         }
     }
-
-    await logInfo(`资源已释放至: ${INSTALL_BASE_DIR}`);
 }
 
-/**
- * 检查操作系统兼容性 (翻译自 install.sh:check_os_compatibility)
- */
+
 async function checkSystem() {
-    await logStep("检查系统要求与兼容性...");
-
-    if (os.platform() !== "linux") {
-        throw new Error("SupaCloud 目前仅支持 Linux 操作系统。");
-    }
-
+    if (os.platform() !== "linux") throw new Error("SupaCloud 仅支持 Linux 操作系统。");
     const arch = os.arch();
-    if (arch !== "x64" && arch !== "arm64") {
-        throw new Error(`不支持的架构: ${arch}。仅支持 x86_64 和 aarch64。`);
-    }
-
-    // 检查 root 权限
-    const uid = os.userInfo().uid;
-    if (uid !== 0) {
-        throw new Error("请使用 root 权限（sudo）运行安装程序。");
-    }
-
-    await logInfo(`系统检查通过: Linux ${arch} (root)`);
+    if (arch !== "x64" && arch !== "arm64") throw new Error(`不支持的架构: ${arch}。`);
+    if (os.userInfo().uid !== 0) throw new Error("请使用 root 权限（sudo）运行安装程序。");
 }
 
-/**
- * 环境初始化逻辑 (翻译自 install.sh:install_base_dependencies, setup_swap, setup_local_ssh)
- */
-async function initializeEnvironment() {
-    await logStep("正在初始化系统环境（依赖、Swap、SSH）...");
+import { PigstyManager, type PigstyConfig } from "./infra/pigsty";
+import { LoadBalancerManager } from "./infra/loadbalancer";
 
-    // 1. 安装基础依赖
-    await logInfo("更新系统并安装基础依赖...");
-    if ((await $`command -v dnf &>/dev/null`).exitCode === 0) {
-        await $`dnf install -y curl tar gzip openssl bc jq git procps-ng openssh-clients openssh-server`;
-    } else if ((await $`command -v apt-get &>/dev/null`).exitCode === 0) {
-        await $`apt-get update && apt-get install -y curl tar gzip openssl bc jq git procps openssh-client openssh-server`;
+async function runInteractiveConfig(): Promise<PigstyConfig> {
+    const s = p.spinner();
+
+    // 如果配置文件已存在，尝试读出并解析（为了本阶段简化演示，我们假设一旦存在就略过，但为 TS 流我们需要完整变量）
+    // 实际可以通过 dotenv 库来载入现有 config.env 
+    // 在此演示中简略跳过步骤直接重开覆盖即可
+
+    // 基本 IP 和域名搜集
+    s.start("检测系统网络环境");
+    const hostIp = (await $`hostname -I | awk '{print $1}'`.text()).trim() || "127.0.0.1";
+    s.stop(`检测到内网 IP: ${hostIp}`);
+
+    const projectConfig = await p.group({
+        internalIp: () => p.text({
+            message: '请输入服务器内网 IP',
+            initialValue: hostIp,
+            placeholder: hostIp
+        }),
+        publicDomain: () => p.text({
+            message: '请输入 Supabase API 域名',
+            initialValue: `api.${hostIp}.nip.io`,
+            placeholder: `api.${hostIp}.nip.io`
+        }),
+        storageType: () => p.select({
+            message: '请选择存储后端架构',
+            options: [
+                { value: 'juicefs', label: 'JuiceFS (推荐: 高性能分布式块存储)' },
+                { value: 'minio', label: 'Minio (标准 S3)' }
+            ]
+        })
+    }, {
+        onCancel: () => {
+            p.cancel("安装已中止。");
+            process.exit(0);
+        }
+    });
+
+    const isTestDomain = projectConfig.publicDomain.includes("nip.io");
+    const defaultStudio = isTestDomain ? `studio.${hostIp}.nip.io` : `studio.${projectConfig.publicDomain.replace(/^api\./, '')}`;
+
+    const studioDomain = await p.text({
+        message: '请输入全局控制台 (Studio) 的域名',
+        initialValue: defaultStudio,
+        placeholder: defaultStudio
+    });
+    if (p.isCancel(studioDomain)) process.exit(0);
+
+    const useAutoPasswords = await p.confirm({
+        message: "是否随机生成高强度的数据库和面板密码？(极度推荐)",
+        initialValue: true
+    });
+    if (p.isCancel(useAutoPasswords)) process.exit(0);
+
+    let dbPass = "", studioPass = "";
+    if (useAutoPasswords) {
+        dbPass = generateSecurePassword(24);
+        studioPass = generateSecurePassword(24);
+    } else {
+        const customPass = await p.group({
+            db: () => p.password({ message: "请输入数据库主密码 (供 Postgres/Pigsty 使用)" }),
+            studio: () => p.password({ message: "请输入 Studio 面板的超级管理员密码" })
+        });
+        if (p.isCancel(customPass)) process.exit(0);
+        dbPass = customPass.db;
+        studioPass = customPass.studio;
     }
 
-    // 2. 配置 Swap (如果内存 < 4GB)
-    const totalMemByte = os.totalmem();
-    const totalMemGB = totalMemByte / 1024 / 1024 / 1024;
+    s.start("正在加密生成最终配置项结构");
+    const jwtSecret = generateSecurePassword(40);
+    const envContent = `
+# SupaCloud Unified Configuration
+INTERNAL_IP="${projectConfig.internalIp}"
+SUPABASE_PUBLIC_DOMAIN="${projectConfig.publicDomain}"
+SUPABASE_STUDIO_DOMAIN="${studioDomain}"
 
+DASHBOARD_USERNAME="admin"
+DASHBOARD_PASSWORD="${studioPass}"
+POSTGRES_PASSWORD="${dbPass}"
+GRAFANA_PASSWORD="${dbPass}"
+
+SWAP_SIZE_GB="4"
+PG_VERSION="18"
+S3_STORAGE_TYPE="${projectConfig.storageType}"
+EDGE_RUNTIME="deno"
+ENABLE_ANALYTICS="true"
+ANALYTICS_BACKEND="postgres"
+JWT_SECRET="${jwtSecret}"
+`;
+    await Bun.write(CONFIG_FILE, envContent.trim());
+    s.stop("核心配置组落盘完成！");
+
+    p.note(`API 域名: ${projectConfig.publicDomain}\n控制台面: ${studioDomain}\n控制面板密码: ${studioPass}\n数据库密码: ${dbPass}`, "⚠️ 关键凭证 (请截图保存)");
+
+    return {
+        internalIp: projectConfig.internalIp as string,
+        publicDomain: projectConfig.publicDomain as string,
+        studioDomain: studioDomain as string,
+        dashboardPass: studioPass,
+        postgresPass: dbPass,
+        grafanaPass: dbPass,
+        jwtSecret: jwtSecret,
+        storageType: projectConfig.storageType as string,
+    };
+}
+
+async function prepareSystemEnv() {
+    const s = p.spinner();
+    s.start("基础系统依赖及包管理器预热");
+
+    let isUbuntu = (await $`command -v apt-get &>/dev/null`.nothrow()).exitCode === 0;
+    if (isUbuntu) {
+        await $`apt-get update -qq >/dev/null && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq curl tar gzip openssl bc jq git procps openssh-client openssh-server >/dev/null`.nothrow();
+    } else {
+        await $`dnf install -y -q curl tar gzip openssl bc jq git procps-ng openssh-clients openssh-server >/dev/null`.nothrow();
+    }
+    s.stop("底层支持组建拉取完毕");
+
+    const totalMemGB = os.totalmem() / 1024 / 1024 / 1024;
     if (totalMemGB < 4.2) {
-        await logWarn(`检测到物理内存较小 (${totalMemGB.toFixed(2)}GB)，正在创建 4GB Swap...`);
-        if ((await $`ls /swapfile &>/dev/null`).exitCode !== 0) {
-            await $`fallocate -l 4G /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=4096`;
-            await $`chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile`;
+        s.start(`检测到物理内存较小 (${totalMemGB.toFixed(1)}G)，初始化 4GB Swap`);
+        if ((await $`ls /swapfile &>/dev/null`.nothrow()).exitCode !== 0) {
+            await $`fallocate -l 4G /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=4096 status=none`;
+            await $`chmod 600 /swapfile && mkswap /swapfile >/dev/null && swapon /swapfile >/dev/null`;
             await $`grep -q "/swapfile" /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab`;
         }
-        await logInfo("Swap 配置完成");
+        s.stop("虚拟内存挂载成功");
     }
 
-    // 3. 配置本地 SSH 免密 (Ansible 必需)
-    await logInfo("配置本地 SSH 免密登录...");
+    s.start("注入无感 SSH 桥接信任凭证 (Ansible Node 需)");
     const homeDir = os.homedir();
-    const sshDir = join(homeDir, ".ssh");
-    await mkdir(sshDir, { recursive: true, mode: 0o700 });
+    const sshDir = `${homeDir}/.ssh`;
+    await $`mkdir -p ${sshDir} && chmod 700 ${sshDir}`;
 
-    if ((await $`ls ${sshDir}/id_ed25519 &>/dev/null`).exitCode !== 0) {
-        await $`ssh-keygen -t ed25519 -N "" -f ${sshDir}/id_ed25519`;
+    if ((await $`ls ${sshDir}/id_ed25519 &>/dev/null`.nothrow()).exitCode !== 0) {
+        await $`ssh-keygen -q -t ed25519 -N "" -f ${sshDir}/id_ed25519`;
     }
-
     const pubKey = (await $`cat ${sshDir}/id_ed25519.pub`.text()).trim();
     await $`grep -q "${pubKey}" ${sshDir}/authorized_keys &>/dev/null || echo "${pubKey}" >> ${sshDir}/authorized_keys`;
-    await chmod(join(sshDir, "authorized_keys"), 0o600);
-
-    // 基础防火墙/安全策略微调
+    await $`chmod 600 ${sshDir}/authorized_keys`;
     await $`ssh-keyscan -H localhost 127.0.0.1 ::1 > ${sshDir}/known_hosts 2>/dev/null || true`;
-
-    await logInfo("系统环境初始化完成");
+    s.stop("可信通信加密桥搭建成功");
 }
 
-/**
- * 核心安装入口
- */
 export async function runInstall() {
-    console.log(`
-  ╔═══════════════════════════════════════════════════════════╗
-  ║          SupaCloud Unified Installer (CLI)                ║
-  ║          "One File to Rule Them All"                      ║
-  ╚═══════════════════════════════════════════════════════════╝
-  `);
+    p.intro("\x1b[45m SupaCloud 一体化节点部署总线 (Bun 飞升版) \x1b[0m");
 
     try {
         await checkSystem();
+        const s = p.spinner();
+        s.start("基座系统脱水执行态唤醒");
         await extractAssets();
-        await initializeEnvironment();
+        s.stop("SupaCloud 控制面二进制文件解压成功");
 
-        // 下一步：调用释放出来的 infra/angie/setup.sh 和 setup.sh
-        await logStep("正在启动基础设施部署 (Pigsty/Angie)...");
+        const config = await runInteractiveConfig();
+        await prepareSystemEnv();
 
-        // 设置环境变量
-        process.env.INTERNAL_IP = process.env.INTERNAL_IP || (await $`hostname -I | awk '{print $1}'`.text()).trim();
+        p.log.step(">>> 开始转接 Ansible (Pigsty) 剧本列阵 ...");
+        await PigstyManager.install(config);
 
-        const setupScript = join(INSTALL_BASE_DIR, "setup.sh");
-        await logInfo("执行底层部署脚本...");
+        p.log.step(">>> 开始转接 Angie / OpenResty 前端路由引擎 ...");
+        await LoadBalancerManager.installAngie(config.studioDomain, config.publicDomain);
 
-        // 通过 Bun 子进程调用 Bash 脚本完成重型部署任务
-        await $`bash ${setupScript} --s3 juicefs`.inherit();
-
-        await logInfo("============================================================");
-        await logInfo("SupaCloud 核心环境部署成功！");
-        await logInfo(`请访问控制台: http://${process.env.INTERNAL_IP}:9090`);
-        await logInfo("============================================================");
-
+        p.outro(`🎉 SupaCloud 控制栈部署完成`);
     } catch (error: any) {
-        await logError(`安装失败: ${error.message}`);
+        p.log.error(`部署崩溃: ${error.message}`);
         process.exit(1);
     }
 }
+

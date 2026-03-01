@@ -4,6 +4,7 @@ import { cors } from "@elysiajs/cors";
 import { config } from "./config";
 import { authMiddleware } from "./middleware/auth";
 import { projectRoutes, organizationRoutes, userRoutes, backupRoutes, monitorRoutes, maintenanceRoutes, extensionRoutes, securityRoutes, storageRoutes, scalingRoutes, taskRoutes } from "./routes";
+import { wakeupProxy } from "./wakeup-proxy";
 
 const app = new Elysia({ strictPath: false })
   // Swagger 文档

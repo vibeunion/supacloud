@@ -204,19 +204,23 @@ setup_upstream() {
     mkdir -p /etc/supabase/kong_tenants
     local tenant_yml="/etc/supabase/kong_tenants/${PROJECT_REF}.yml"
 
-    echo "Setting up Kong declarative configuration for ${PROJECT_REF}..."
+    # 新增：代理到 Wakeup Proxy 的端口（management-api 的监听端口）
+    local proxy_port="${MANAGEMENT_API_PORT:-8080}"
 
-    # 生成声明式的 Kong 配置文件
+    echo "Setting up Kong declarative configuration for ${PROJECT_REF} (Using Wakeup Proxy on ${proxy_port})..."
+
+    # 生成声明式的 Kong 配置文件 (通过 Wakeup Proxy 实现按需休眠与拦截)
     cat > "$tenant_yml" <<EOF
   - name: svc-pgrst-${PROJECT_REF}
-    url: http://${host_ip}:${pgrst_port}
+    url: http://${host_ip}:${proxy_port}/_proxy/pgrst/${PROJECT_REF}/${pgrst_port}
     connect_timeout: 5000
     read_timeout: 60000
     write_timeout: 60000
     routes:
       - name: route-pgrst-${PROJECT_REF}
-        # 彻底修复：strip_path 必须为 true，否则 Kong 会把路径前缀带给下游导致 404
-        strip_path: true
+        # 当流量被转发给我们的反向拦截器时，不需要在 Kong 层面剥除路径。
+        # 原封不动送到代理：/_proxy/pgrst/REF/PORT/rest/v1/...
+        strip_path: false
         preserve_host: true
         paths:
           - /rest/v1
@@ -226,13 +230,13 @@ setup_upstream() {
           x-project-ref:
             - ${PROJECT_REF}
   - name: svc-gotrue-${PROJECT_REF}
-    url: http://${host_ip}:${gotrue_port}
+    url: http://${host_ip}:${proxy_port}/_proxy/gotrue/${PROJECT_REF}/${gotrue_port}
     connect_timeout: 5000
     read_timeout: 60000
     write_timeout: 60000
     routes:
       - name: route-gotrue-${PROJECT_REF}
-        strip_path: true
+        strip_path: false
         preserve_host: true
         paths:
           - /auth/v1

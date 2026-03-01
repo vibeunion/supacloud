@@ -16,9 +16,10 @@
     "build:all": "bun run prebuild && bun run build:amd64 && bun run build:arm64"
   },
   "dependencies": {
-    "elysia": "^1.4.25",
-    "@elysiajs/swagger": "^1.3.1",
+    "@clack/prompts": "^1.0.1",
     "@elysiajs/cors": "^1.4.1",
+    "@elysiajs/swagger": "^1.3.1",
+    "elysia": "^1.4.25",
     "nanoid": "^5.1.6"
   },
   "devDependencies": {

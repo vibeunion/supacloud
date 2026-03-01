@@ -309,20 +309,19 @@ Type=simple
 User=nobody
 Group=nobody
 EnvironmentFile=/etc/supabase/tenants/%i.env
-# 极限压榨: 限制单线程，并强制 Haskell 运行时激进回收内存 (-M30m 封顶, -I0.1 空闲 0.1秒触发 GC)
-Environment="GHCRTS=-N1 -M30m -I0.1 -A1m"
-ExecStart=${POSTGREST_BIN} /etc/supabase/tenants/%i.conf +RTS -N1 -M30m -I0.1 -A1m -RTS
+# 合理运行时配置：由于启用了按需休眠，无需再做极限内存压榨
+Environment="GHCRTS=-N1 -M128m -I0.5 -A4m"
+ExecStart=${POSTGREST_BIN} /etc/supabase/tenants/%i.conf +RTS -N1 -M128m -I0.5 -A4m -RTS
 Restart=on-failure
 RestartSec=5
 StartLimitBurst=3
 StartLimitIntervalSec=60
 
-# 安全与资源沙盒化
+# 安全沙盒化
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
 ReadOnlyPaths=/etc/supabase/tenants
-MemoryMax=45M
 CPUWeight=20
 
 [Install]
@@ -343,9 +342,8 @@ Type=simple
 User=nobody
 Group=nobody
 EnvironmentFile=/etc/supabase/tenants/%i_gotrue.env
-# 极限压榨: Go 原生内存墙 15MB 并在 20% 增长时立刻 GC
-Environment="GOMEMLIMIT=15MiB"
-Environment="GOGC=20"
+# 合理运行时配置：由于启用了按需休眠，无需再做极限内存压榨
+Environment="GOMEMLIMIT=128MiB"
 ExecStart=${GOTRUE_BIN}
 Restart=on-failure
 RestartSec=5
