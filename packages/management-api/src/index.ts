@@ -193,7 +193,7 @@ async function bootstrap() {
   } else if (args.includes("storage") || args.includes("--storage")) {
 
   } else if (args.includes("--version") || args.includes("-v")) {
-    const pkg = await import("../package.json");
+    const pkg = await import("../../../package.json");
     console.log(`SupaCloud Version: ${pkg.version}`);
     process.exit(0);
   } else {
