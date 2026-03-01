@@ -95,12 +95,12 @@ export class HealthChecker {
 
             const isContainer = (await $`test -f /.dockerenv`.nothrow()).exitCode === 0;
 
-            if (!isSystemd || isContainer) {
+            if (!isSystemd) {
                 return {
                     component: label,
-                    status: isContainer ? "OK" : "WARN",
-                    message: isContainer ? "运行中 (容器模拟)" : "非 Systemd 环境",
-                    recommendation: isContainer ? undefined : "建议在标准的 Systemd Linux 发行版上运行。"
+                    status: isContainer ? "ERROR" : "WARN", // 在容器内没启动成功那就是错误
+                    message: "系统未由 Systemd 引导",
+                    recommendation: "Pigsty 强依赖 Systemd。请确保在标准 Linux 发行版或支持 Systemd 的容器中运行。"
                 };
             }
 

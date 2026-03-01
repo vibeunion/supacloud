@@ -345,7 +345,7 @@ async function prepareSystemEnv() {
     const totalMemGB = os.totalmem() / 1024 / 1024 / 1024;
     if (totalMemGB < 4.2) {
         s.start(`检测到物理内存较小 (${totalMemGB.toFixed(1)}G)，初始化 4GB Swap`);
-        if ((await $`test -f /swapfile &>/dev/null`.nothrow()).exitCode !== 0) {
+        if ((await $`test -f /swapfile`.nothrow().quiet()).exitCode !== 0) {
             await $`fallocate -l 4G /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=4096 status=none`;
             await $`chmod 600 /swapfile && mkswap /swapfile >/dev/null && swapon /swapfile >/dev/null`;
             await $`grep -q "/swapfile" /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab`;
@@ -367,7 +367,10 @@ async function prepareSystemEnv() {
         await proc.exited;
     }
     const pubKey = (await $`cat ${sshDir}/id_ed25519.pub`.text()).trim();
-    await $`grep -q "${pubKey}" ${sshDir}/authorized_keys &>/dev/null || echo "${pubKey}" >> ${sshDir}/authorized_keys`;
+    await $`grep -q "${pubKey}" ${sshDir}/authorized_keys`.nothrow().quiet();
+    if ((await $`grep -q "${pubKey}" ${sshDir}/authorized_keys`.nothrow().quiet()).exitCode !== 0) {
+        await $`echo "${pubKey}" >> ${sshDir}/authorized_keys`;
+    }
     await $`chmod 600 ${sshDir}/authorized_keys`;
     await $`ssh-keyscan -H localhost 127.0.0.1 ::1 > ${sshDir}/known_hosts 2>/dev/null || true`;
     s.stop("可信通信加密桥搭建成功");
