@@ -52,9 +52,13 @@ jobs:
               cp packages/management-api/supacloud-linux-amd64 /usr/local/bin/supacloud
               chmod +x /usr/local/bin/supacloud
               
-              echo '[CI] 验证版本...'
+              echo '[CI] 验证版本与安装流程 (Dry Run)...'
               supacloud --version || true
-
+              
+              # 运行安装 Dry Run
+              # 我们提供必要的参数以跳过所有交互
+              supacloud install --yes --dry-run --ip 127.0.0.1 --domain api.local.nip.io --password ci-test-pass
+              
               echo '[CI] 运行 Doctor 扫描 (基础设施)...'
               # 预期会有 WARN 但不应 Crash
               supacloud doctor --skip-smoke-test || true

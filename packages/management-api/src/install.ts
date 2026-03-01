@@ -46,6 +46,11 @@ async function checkSystem() {
 export async function runInstall(options: { forceYes?: boolean } = {}) {
     p.intro("\x1b[45m SupaCloud 一体化节点部署总线 (Bun 飞升版) \x1b[0m");
 
+    const isDryRun = process.argv.includes("--dry-run");
+    if (isDryRun) {
+        p.log.warn("⚠️ 检测到 --dry-run 标志，将跳过实际的服务安装和系统更改。");
+    }
+
     try {
         await checkSystem();
         const s = p.spinner();
@@ -57,20 +62,26 @@ export async function runInstall(options: { forceYes?: boolean } = {}) {
         const config = await runInteractiveConfig(options.forceYes);
         await prepareSystemEnv();
 
-        p.log.step(">>> 开始转接 Ansible (Pigsty) 剧本列阵 ...");
-        await PigstyManager.install(config);
+        if (isDryRun) {
+            p.log.warn("[Dry Run] 跳过 Ansible (Pigsty) 剧本执行。");
+            p.log.warn("[Dry Run] 跳过 Angie / OpenResty 安装。");
+            p.log.warn("[Dry Run] 跳过 Systemd 服务注册。");
+        } else {
+            p.log.step(">>> 开始转接 Ansible (Pigsty) 剧本列阵 ...");
+            await PigstyManager.install(config);
 
-        p.log.step(">>> 开始转接 Angie / OpenResty 前端路由引擎 ...");
-        await LoadBalancerManager.installAngie(config.studioDomain, config.publicDomain);
+            p.log.step(">>> 开始转接 Angie / OpenResty 前端路由引擎 ...");
+            await LoadBalancerManager.installAngie(config.studioDomain, config.publicDomain);
 
-        p.log.step(">>> 正在将 Management API 注册为系统服务 ...");
-        const selfPath = process.argv[0];
-        await ServiceManager.register(
-            "supacloud-api",
-            "SupaCloud Management API Server",
-            selfPath,
-            ["start"]
-        );
+            p.log.step(">>> 正在将 Management API 注册为系统服务 ...");
+            const selfPath = process.argv[0];
+            await ServiceManager.register(
+                "supacloud-api",
+                "SupaCloud Management API Server",
+                selfPath,
+                ["start"]
+            );
+        }
 
         p.log.success(`🎉 SupaCloud 控制栈部署完成`);
 
@@ -225,7 +236,7 @@ async function runInteractiveConfig(forceYes = false): Promise<PigstyConfig> {
     }
 
     const isTestDomain = publicDomain.includes("nip.io");
-    const defaultStudio = isTestDomain ? `studio.${hostIp}.nip.io` : `studio.${publicDomain.replace(/^api\./, '')}`;
+    const defaultStudio = isTestDomain ? `studio.${internalIp}.nip.io` : `studio.${publicDomain.replace(/^api\./, '')}`;
     let studioDomain = argStudio || defaultStudio;
 
     if (!forceYes || !argStudio) {
