@@ -1,3 +1,4 @@
+import { $ } from "bun";
 import { taskRepository } from "../repositories/task.repository";
 import { projectRepository } from "../repositories/project.repository";
 import { databaseService } from "./database.service";
@@ -27,6 +28,9 @@ export class TaskWorker {
 
     private async poll() {
         try {
+            // 首先通过简单的 Ping 或空查询验证数据库活性 (可选)
+            // await sql`SELECT 1`; 
+
             const task = await taskRepository.claimNextTask();
             if (!task) return; // No pending tasks
 
@@ -42,7 +46,13 @@ export class TaskWorker {
                 await this.handleTaskFailure(task);
             }
         } catch (err: any) {
-            console.error(`[TaskWorker] Error processing task:`, err);
+            // 针对特定数据库连接关闭错误进行更友好的日志记录并尝试在下一次循环恢复
+            if (err.code === "ERR_POSTGRES_CONNECTION_CLOSED" || err.message?.includes("Connection closed")) {
+                console.error(`[TaskWorker] 数据库连接已断开，等待自动重连...`);
+            } else {
+                console.error(`[TaskWorker] Error processing task:`, err);
+            }
+            // 发生错误时，短暂停止本次轮询，等待下个 interval
         }
     }
 
@@ -62,15 +72,20 @@ export class TaskWorker {
                 }
 
                 case "provision_s3": {
-                    const res = await storageService.createBucket(project_ref);
-                    if (res.success && res.accessKey && res.secretKey) {
-                        await projectRepository.updateConfig(project_ref, {
-                            ...project.config,
-                            s3_access_key: res.accessKey,
-                            s3_secret_key: res.secretKey,
-                        });
+                    // 在云原生架构中，租户通常使用 JuiceFS 挂载点下的子目录
+                    // 如果 STORAGE_TYPE 是 juicefs，我们只需确保挂载正常并创建子目录
+                    const storageType = process.env.STORAGE_TYPE || "local";
+                    const mountPoint = process.env.STORAGE_MOUNT_POINT || "/mnt/supacloud";
+
+                    try {
+                        const tenantPath = `${mountPoint}/projects/${project_ref}`;
+                        await $`mkdir -p ${tenantPath}`.quiet();
+                        console.log(`[TaskWorker] Storage provisioned at ${tenantPath} (Type: ${storageType})`);
+                        return true;
+                    } catch (e) {
+                        console.error(`[TaskWorker] Failed to provision storage for ${project_ref}:`, e);
+                        return false;
                     }
-                    return res.success;
                 }
 
                 case "provision_runtime": {
@@ -126,7 +141,10 @@ export class TaskWorker {
                 }
 
                 case "cleanup_s3": {
-                    await storageService.deleteBucket(project_ref);
+                    const mountPoint = process.env.STORAGE_MOUNT_POINT || "/mnt/supacloud";
+                    const tenantPath = `${mountPoint}/projects/${project_ref}`;
+                    await $`rm -rf ${tenantPath}`.quiet();
+                    console.log(`[TaskWorker] Storage cleaned up for ${project_ref}`);
                     return true;
                 }
 
