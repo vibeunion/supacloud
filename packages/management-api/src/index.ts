@@ -82,8 +82,9 @@ import { EMBEDDED_ASSETS } from "./assets.gen";
 /**
  * 注册静态资产 (SPA)
  */
-export function registerStaticAssets(app: Elysia) {
-  return app.get("*", async ({ request, set }) => {
+export function registerStaticAssets(app: Elysia<any, any, any, any, any, any, any>) {
+  return app.get("*", async (context: any) => {
+    const { request, set } = context;
     const url = new URL(request.url);
     const path = url.pathname === "/" ? "/index.html" : url.pathname;
 
@@ -119,7 +120,7 @@ export function registerStaticAssets(app: Elysia) {
 /**
  * 注册所有路由模块
  */
-export async function registerAllRoutes(app: Elysia) {
+export async function registerAllRoutes(app: Elysia<any, any, any, any, any, any, any>) {
   const {
     projectRoutes, organizationRoutes, userRoutes, backupRoutes,
     monitorRoutes, maintenanceRoutes, extensionRoutes, securityRoutes,
