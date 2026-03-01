@@ -54,6 +54,12 @@ const app = new Elysia({ strictPath: false })
     docs: "/swagger",
   }))
 
+  // 监控与诊断接口 (无需认证，后续可加)
+  .get("/monitor/health", async () => {
+    const { HealthChecker } = await import("./infra/health");
+    return await HealthChecker.runFullCheck();
+  })
+
   // 需要认证的路由
   .use(authMiddleware)
   .use(projectRoutes)
@@ -125,6 +131,7 @@ import { initDatabase } from "./db/init";
 import { taskWorker } from "./services/task.worker";
 import { runInstall } from "./install";
 import { runUpgrade } from "./upgrade";
+import { runDoctor } from "./doctor";
 
 const args = process.argv.slice(2);
 
@@ -148,6 +155,13 @@ if (args.includes("--init-db")) {
     process.exit(0);
   }).catch((err) => {
     console.error("Upgrade aborted:", err);
+    process.exit(1);
+  });
+} else if (args.includes("doctor") || args.includes("--doctor")) {
+  runDoctor().then(() => {
+    process.exit(0);
+  }).catch((err) => {
+    console.error("Doctor scan failed:", err);
     process.exit(1);
   });
 } else {
