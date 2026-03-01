@@ -157,13 +157,18 @@ export class PigstyManager {
             stderr: "pipe",
         });
 
+        let hasFailed = false;
         const reader = async (stream: ReadableStream) => {
             const decoder = new TextDecoder();
             for await (const chunk of stream) {
                 const text = decoder.decode(chunk as Uint8Array);
-                // 实时输出每一行，并在前面加上前缀以区分
                 text.split("\n").filter(line => line.trim()).forEach(line => {
-                    console.log(`  [Ansible] ${line.trim()}`);
+                    const trimmed = line.trim();
+                    console.log(`  [Ansible] ${trimmed}`);
+                    // 实时扫描关键错误关键字，防止退出码未对齐
+                    if (trimmed.includes("FAILED!") || trimmed.includes("fatal: [")) {
+                        hasFailed = true;
+                    }
                 });
             }
         };
@@ -171,8 +176,8 @@ export class PigstyManager {
         await Promise.all([reader(proc.stdout), reader(proc.stderr)]);
         const exitCode = await proc.exited;
 
-        if (exitCode !== 0) {
-            throw new Error(`命令执行失败 (Exit Code: ${exitCode}): ${args.join(" ")}`);
+        if (exitCode !== 0 || hasFailed) {
+            throw new Error(`Ansible 执行失败 (Exit Code: ${exitCode}, Failure Detected: ${hasFailed})`);
         }
     }
 
@@ -312,12 +317,8 @@ export class PigstyManager {
                     const filePath = `${sourcesDir}/${f}`;
                     if (f.includes("pigsty")) continue; // 保命：绝对不能动 Pigsty 自己的源
 
-                    const content = await Bun.file(filePath).text();
-                    // 如果该文件包含 debian.org 定义，直接物理隔离
-                    if (content.includes("deb.debian.org/debian")) {
-                        console.log(`[PigstyManager] 正在隔离第三方/冲突源文件: ${f}`);
-                        await $`sudo mv -f ${filePath} ${backupDir}/${f}`.quiet();
-                    }
+                    console.log(`[PigstyManager] 正在物理隔离第三方/冲突源文件: ${f}`);
+                    await $`sudo mv -f ${filePath} ${backupDir}/${f}`.quiet();
                 }
             }
 
