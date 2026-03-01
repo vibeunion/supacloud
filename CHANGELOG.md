@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.3.9](https://github.com/zuohuadong/supacloud/compare/v0.3.8...v0.3.9) (2026-03-01)
+
+
+### Bug Fixes
+
+* resolve remaining 9 test failures and finalize non-interactive mode ([0be714a](https://github.com/zuohuadong/supacloud/commit/0be714acc38e73ce53e1b77f9505484138023917))
+
 ### [0.3.8](https://github.com/zuohuadong/supacloud/compare/v0.3.7...v0.3.8) (2026-03-01)
 
 
