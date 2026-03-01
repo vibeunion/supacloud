@@ -105,7 +105,7 @@ export async function runInstall(options: { forceYes?: boolean } = {}) {
         const { runDoctor } = await import("./doctor");
         await runDoctor({ forceYes: options.forceYes });
     } catch (error: any) {
-        p.log.error(`部署崩溃: ${error.message}`);
+        p.log.error(`部署失败: ${error.message}`);
         process.exit(1);
     }
 }

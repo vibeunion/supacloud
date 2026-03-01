@@ -48,8 +48,16 @@ jobs:
                 yum install -y --allowerasing epel-release curl wget sudo kmod iproute2
               fi
 
-              # 2. 模拟系统环境 (假装有 systemd)
+              # 2. 模拟系统环境 (假装有 systemd) 并启动 SSH
               mkdir -p /etc/supabase
+              mkdir -p /run/sshd
+              if command -v apt-get >/dev/null; then
+                ssh-keygen -A
+                /usr/sbin/sshd
+              elif command -v dnf >/dev/null; then
+                ssh-keygen -A
+                /usr/sbin/sshd
+              fi
               
               # 3. 运行安装测试
               cp supacloud /usr/local/bin/supacloud
