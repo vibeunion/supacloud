@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.3.4](https://github.com/zuohuadong/supacloud/compare/v0.3.3...v0.3.4) (2026-03-01)
+
+
+### Features
+
+* support macOS binary build and fix node command registration ([0c82965](https://github.com/zuohuadong/supacloud/commit/0c82965cce5f091ec33854bc4bb50d0b27401063))
+
 ### [0.3.3](https://github.com/zuohuadong/supacloud/compare/v0.3.2...v0.3.3) (2026-03-01)
 
 ### [0.3.2](https://github.com/zuohuadong/supacloud/compare/v0.3.1...v0.3.2) (2026-03-01)
