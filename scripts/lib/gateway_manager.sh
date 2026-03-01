@@ -173,7 +173,10 @@ setup_upstream() {
     # 彻底修复：函数内部必须读取自己的位置参数，$1 为 pgrst_port, $2 为 gotrue_port
     local pgrst_port="${1:-}"
     local gotrue_port="${2:-}"
-    local functions_port="${3:-}"
+    
+    # [变更] Edge Functions 现在使用单实例全局入口，不再依赖单个租户独立分配端口 
+    local functions_port="9000"
+    
     local storage_port="${4:-}"
     local realtime_port="${5:-}"
 
