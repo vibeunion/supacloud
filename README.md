@@ -83,14 +83,19 @@ sudo ./supacloudapi install
 - `supacloud upgrade`: 检查并升级 SupaCloud 至最新版本。
 ```
 
-**Available CLI Options:**
 | Option | Description | Example |
 |--------|-------------|---------|
-| `--ip` | Server Internal IP | `--ip 10.0.0.5` |
+| `--ip` | Server Internal IP (Bypasses selection) | `--ip 10.0.0.5` |
 | `--domain` | API/Public Domain | `--domain supa.com` |
 | `--studio` | Studio Dashboard Domain| `--studio studio.com`|
 | `--s3` | Storage Type | `minio` or `juicefs`|
 | `--password`| Master Password | `--password mysecret` |
+| `--yes`, `-y`| Non-interactive mode (Auto-confirm) | `--yes` |
+
+**Non-interactive Installation Example:**
+```bash
+sudo ./supacloudapi install --yes --ip 10.0.0.5 --domain api.example.com --password mysecret
+```
 
 ### Management
 
@@ -323,11 +328,17 @@ sudo ./supacloud-api --init-db
 **命令行参数详解:**
 | 参数 | 说明 | 示例 |
 |--------|-------------|---------|
-| `--ip` | 指定内网 IP | `--ip 10.0.0.5` |
+| `--ip` | 指定内网 IP (跳过选择菜单) | `--ip 10.0.0.5` |
 | `--domain` | 指定 API 域名 | `--domain supa.com` |
 | `--studio` | 指定 Studio 域名| `--studio studio.com`|
 | `--s3` | 指定存储类型 | `minio` 或 `juicefs`|
 | `--password`| 统一设置初始密码 | `--password mysecret` |
+| `--yes`, `-y`| 非交互模式 (自动确认) | `--yes` |
+
+**非交互式安装示例:**
+```bash
+sudo ./supacloud-api install --yes --ip 10.0.0.5 --domain supa.com --password mysecret
+```
 
 ### 项目管理
 

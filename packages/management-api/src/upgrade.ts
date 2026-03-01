@@ -15,7 +15,7 @@ async function getLocalVersion(): Promise<string> {
     }
 }
 
-export async function runUpgrade() {
+export async function runUpgrade(options: { forceYes?: boolean } = {}) {
     p.intro("\x1b[46m SupaCloud 自持更新总线 (Self-Upgrade) \x1b[0m");
 
     const s = p.spinner();
@@ -39,7 +39,7 @@ export async function runUpgrade() {
             return;
         }
 
-        const confirm = await p.confirm({
+        const confirm = options.forceYes || await p.confirm({
             message: `检测到新版本 ${remoteVersion}，是否现在执行原地升级？`,
             initialValue: true
         });

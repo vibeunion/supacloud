@@ -130,8 +130,9 @@ async function bootstrap() {
     }
   } else if (args.includes("install") || args.includes("--install")) {
     const { runInstall } = await import("./install");
+    const forceYes = args.includes("--yes") || args.includes("-y");
     try {
-      await runInstall();
+      await runInstall({ forceYes });
       process.exit(0);
     } catch (err) {
       console.error("Installation aborted:", err);
@@ -139,8 +140,9 @@ async function bootstrap() {
     }
   } else if (args.includes("upgrade") || args.includes("--upgrade")) {
     const { runUpgrade } = await import("./upgrade");
+    const forceYes = args.includes("--yes") || args.includes("-y");
     try {
-      await runUpgrade();
+      await runUpgrade({ forceYes });
       process.exit(0);
     } catch (err) {
       console.error("Upgrade aborted:", err);
@@ -148,40 +150,17 @@ async function bootstrap() {
     }
   } else if (args.includes("doctor") || args.includes("--doctor")) {
     const { runDoctor } = await import("./doctor");
+    const skipSmokeTest = args.includes("--skip-smoke-test");
+    const forceYes = args.includes("--yes") || args.includes("-y");
     try {
-      await runDoctor();
+      await runDoctor({ skipSmokeTest, forceYes });
       process.exit(0);
     } catch (err) {
       console.error("Doctor scan failed:", err);
       process.exit(1);
     }
   } else if (args.includes("storage") || args.includes("--storage")) {
-    const { runStorageManager } = await import("./storage");
-    try {
-      await runStorageManager();
-      process.exit(0);
-    } catch (err) {
-      console.error("Storage management failed:", err);
-      process.exit(1);
-    }
-  } else if (args.includes("node") || args.includes("--node")) {
-    const { runNodeManager } = await import("./node");
-    try {
-      await runNodeManager();
-      process.exit(0);
-    } catch (err) {
-      console.error("Node management failed:", err);
-      process.exit(1);
-    }
-  } else if (args.includes("cluster") || args.includes("--cluster")) {
-    const { runClusterManager } = await import("./cluster");
-    try {
-      await runClusterManager();
-      process.exit(0);
-    } catch (err) {
-      console.error("Cluster management failed:", err);
-      process.exit(1);
-    }
+
   } else if (args.includes("--version") || args.includes("-v")) {
     const pkg = await Bun.file("package.json").json();
     console.log(`SupaCloud Version: ${pkg.version}`);

@@ -43,7 +43,51 @@ async function checkSystem() {
     if (os.userInfo().uid !== 0) throw new Error("请使用 root 权限（sudo）运行安装程序。");
 }
 
-async function performPreFlightChecks() {
+export async function runInstall(options: { forceYes?: boolean } = {}) {
+    p.intro("\x1b[45m SupaCloud 一体化节点部署总线 (Bun 飞升版) \x1b[0m");
+
+    try {
+        await checkSystem();
+        const s = p.spinner();
+        s.start("基座系统脱水执行态唤醒");
+        await extractAssets();
+        s.stop("SupaCloud 控制面二进制文件解压成功");
+
+        await performPreFlightChecks(options.forceYes);
+        const config = await runInteractiveConfig(options.forceYes);
+        await prepareSystemEnv();
+
+        p.log.step(">>> 开始转接 Ansible (Pigsty) 剧本列阵 ...");
+        await PigstyManager.install(config);
+
+        p.log.step(">>> 开始转接 Angie / OpenResty 前端路由引擎 ...");
+        await LoadBalancerManager.installAngie(config.studioDomain, config.publicDomain);
+
+        p.log.step(">>> 正在将 Management API 注册为系统服务 ...");
+        const selfPath = process.argv[0];
+        await ServiceManager.register(
+            "supacloud-api",
+            "SupaCloud Management API Server",
+            selfPath,
+            ["start"]
+        );
+
+        p.log.success(`🎉 SupaCloud 控制栈部署完成`);
+
+        // --- 安装后立即巡检 ---
+        const { runDoctor } = await import("./doctor");
+        await runDoctor({ forceYes: options.forceYes });
+    } catch (error: any) {
+        p.log.error(`部署崩溃: ${error.message}`);
+        process.exit(1);
+    }
+}
+
+import { PigstyManager, type PigstyConfig } from "./infra/pigsty";
+import { LoadBalancerManager } from "./infra/loadbalancer";
+import { ServiceManager } from "./infra/service";
+
+async function performPreFlightChecks(forceYes = false) {
     const s = p.spinner();
     s.start("执行环境预检查 (Pre-flight Checks)");
 
@@ -57,11 +101,15 @@ async function performPreFlightChecks() {
 
     if (conflictingPorts.length > 0) {
         s.stop("检测到端口冲突");
-        const force = await p.confirm({
-            message: `检测到关键端口 [${conflictingPorts.join(", ")}] 已被占用，强制继续可能会导致安装失败。是否继续？`,
-            initialValue: false
-        });
-        if (!force || p.isCancel(force)) process.exit(1);
+        if (!forceYes) {
+            const force = await p.confirm({
+                message: `检测到关键端口 [${conflictingPorts.join(", ")}] 已被占用，强制继续可能会导致安装失败。是否继续？`,
+                initialValue: false
+            });
+            if (!force || p.isCancel(force)) process.exit(1);
+        } else {
+            p.log.warn(`检测到关键端口 [${conflictingPorts.join(", ")}] 已被占用，由于开启了非交互模式，将强制继续。`);
+        }
     } else {
         s.stop("核心端口可用性验证通过");
     }
@@ -74,93 +122,154 @@ async function performPreFlightChecks() {
 
     if (availableGB < 10) {
         s.stop("磁盘空间较低");
-        const force = await p.confirm({
-            message: `由于 Pigsty 极其庞大，建议至少预留 10GB 空间。当前仅剩 ${availableGB.toFixed(1)}GB，是否强制继续？`,
-            initialValue: false
-        });
-        if (!force || p.isCancel(force)) process.exit(1);
+        if (!forceYes) {
+            const force = await p.confirm({
+                message: `由于 Pigsty 极其庞大，建议至少预留 10GB 空间。当前仅剩 ${availableGB.toFixed(1)}GB，是否强制继续？`,
+                initialValue: false
+            });
+            if (!force || p.isCancel(force)) process.exit(1);
+        } else {
+            p.log.warn(`磁盘空间较低 (当前仅剩 ${availableGB.toFixed(1)}GB)，由于开启了非交互模式，将强制继续。`);
+        }
     } else {
         s.stop(`磁盘空间充足 (剩余 ${availableGB.toFixed(1)}GB)`);
     }
 }
 
-import { PigstyManager, type PigstyConfig } from "./infra/pigsty";
-import { LoadBalancerManager } from "./infra/loadbalancer";
-import { ServiceManager } from "./infra/service";
-
-async function runInteractiveConfig(): Promise<PigstyConfig> {
+async function runInteractiveConfig(forceYes = false): Promise<PigstyConfig> {
     const s = p.spinner();
 
-    // 如果配置文件已存在，尝试读出并解析（为了本阶段简化演示，我们假设一旦存在就略过，但为 TS 流我们需要完整变量）
-    // 实际可以通过 dotenv 库来载入现有 config.env 
-    // 在此演示中简略跳过步骤直接重开覆盖即可
+    // ── 命令行参数解析 ──────────────────────────────────────────────────────────
+    const args = process.argv.slice(2);
+    const getArg = (name: string) => {
+        const index = args.indexOf(name);
+        return (index !== -1 && index + 1 < args.length) ? args[index + 1] : null;
+    };
+
+    const argIp = getArg("--ip");
+    const argDomain = getArg("--domain");
+    const argStudio = getArg("--studio");
+    const argS3 = getArg("--s3");
+    const argPassword = getArg("--password");
 
     // 基本 IP 和域名搜集
     s.start("检测系统网络环境");
-    const hostIp = (await $`hostname -I | awk '{print $1}'`.text()).trim() || "127.0.0.1";
-    s.stop(`检测到内网 IP: ${hostIp}`);
-
-    const projectConfig = await p.group({
-        internalIp: () => p.text({
-            message: '请输入服务器内网 IP',
-            initialValue: hostIp,
-            placeholder: hostIp
-        }),
-        publicDomain: () => p.text({
-            message: '请输入 Supabase API 域名',
-            initialValue: `api.${hostIp}.nip.io`,
-            placeholder: `api.${hostIp}.nip.io`
-        }),
-        storageType: () => p.select({
-            message: '请选择存储后端架构',
-            options: [
-                { value: 'juicefs', label: 'JuiceFS (推荐: 高性能分布式块存储)' },
-                { value: 'minio', label: 'Minio (标准 S3)' }
-            ]
-        })
-    }, {
-        onCancel: () => {
-            p.cancel("安装已中止。");
-            process.exit(0);
+    const interfaces = os.networkInterfaces();
+    const detectedIps: string[] = [];
+    for (const name of Object.keys(interfaces)) {
+        for (const iface of interfaces[name] || []) {
+            if (iface.family === 'IPv4' && !iface.internal) {
+                detectedIps.push(iface.address);
+            }
         }
-    });
+    }
+    const primaryIp = detectedIps[0] || "127.0.0.1";
+    s.stop(`检测到 ${detectedIps.length} 个可用内网 IP`);
 
-    const isTestDomain = projectConfig.publicDomain.includes("nip.io");
-    const defaultStudio = isTestDomain ? `studio.${hostIp}.nip.io` : `studio.${projectConfig.publicDomain.replace(/^api\./, '')}`;
+    let internalIp = argIp || "";
+    let publicDomain = argDomain || "";
+    let storageType = argS3 || "";
 
-    const studioDomain = await p.text({
-        message: '请输入全局控制台 (Studio) 的域名',
-        initialValue: defaultStudio,
-        placeholder: defaultStudio
-    });
-    if (p.isCancel(studioDomain)) process.exit(0);
-
-    const useAutoPasswords = await p.confirm({
-        message: "是否随机生成高强度的数据库和面板密码？(极度推荐)",
-        initialValue: true
-    });
-    if (p.isCancel(useAutoPasswords)) process.exit(0);
-
-    let dbPass = "", studioPass = "";
-    if (useAutoPasswords) {
-        dbPass = generateSecurePassword(24);
-        studioPass = generateSecurePassword(24);
-    } else {
-        const customPass = await p.group({
-            db: () => p.password({ message: "请输入数据库主密码 (供 Postgres/Pigsty 使用)" }),
-            studio: () => p.password({ message: "请输入 Studio 面板的超级管理员密码" })
+    if (!internalIp && (!forceYes || !argDomain || !argS3)) {
+        // IP 选择逻辑
+        const ipSelection = await p.select({
+            message: '请选择或输入服务器内网 IP',
+            options: [
+                ...detectedIps.map(ip => ({ value: ip, label: ip })),
+                { value: 'manual', label: '手动输入...' }
+            ],
+            initialValue: detectedIps.includes(primaryIp) ? primaryIp : 'manual'
         });
-        if (p.isCancel(customPass)) process.exit(0);
-        dbPass = customPass.db;
-        studioPass = customPass.studio;
+
+        if (p.isCancel(ipSelection)) process.exit(0);
+
+        if (ipSelection === 'manual') {
+            const manualIp = await p.text({
+                message: '请输入服务器内网 IP',
+                initialValue: primaryIp,
+                placeholder: primaryIp
+            });
+            if (p.isCancel(manualIp)) process.exit(0);
+            internalIp = manualIp;
+        } else {
+            internalIp = ipSelection as string;
+        }
+
+        const projectConfig = await p.group({
+            publicDomain: () => p.text({
+                message: '请输入 Supabase API 域名',
+                initialValue: publicDomain || `api.${internalIp}.nip.io`,
+                placeholder: `api.${internalIp}.nip.io`
+            }),
+            storageType: () => p.select({
+                message: '请选择存储后端架构',
+                initialValue: storageType as any || 'juicefs',
+                options: [
+                    { value: 'juicefs', label: 'JuiceFS (推荐: 高性能分布式块存储)' },
+                    { value: 'minio', label: 'Minio (标准 S3)' }
+                ]
+            })
+        }, {
+            onCancel: () => {
+                p.cancel("安装已中止。");
+                process.exit(0);
+            }
+        });
+        publicDomain = projectConfig.publicDomain;
+        storageType = projectConfig.storageType;
+    } else {
+        internalIp = internalIp || primaryIp;
+        publicDomain = publicDomain || `api.${internalIp}.nip.io`;
+        storageType = storageType || 'juicefs';
+        p.log.info(`使用配置: IP=${internalIp}, Domain=${publicDomain}, Storage=${storageType}`);
+    }
+
+    const isTestDomain = publicDomain.includes("nip.io");
+    const defaultStudio = isTestDomain ? `studio.${hostIp}.nip.io` : `studio.${publicDomain.replace(/^api\./, '')}`;
+    let studioDomain = argStudio || defaultStudio;
+
+    if (!forceYes || !argStudio) {
+        const studioResult = await p.text({
+            message: '请输入全局控制台 (Studio) 的域名',
+            initialValue: studioDomain,
+            placeholder: studioDomain
+        });
+        if (p.isCancel(studioResult)) process.exit(0);
+        studioDomain = studioResult;
+    }
+
+    let dbPass = argPassword || "";
+    let studioPass = argPassword || "";
+
+    if (!forceYes || !argPassword) {
+        const useAutoPasswords = await p.confirm({
+            message: "是否随机生成高强度的数据库和面板密码？(极度推荐)",
+            initialValue: true
+        });
+        if (p.isCancel(useAutoPasswords)) process.exit(0);
+
+        if (useAutoPasswords) {
+            dbPass = generateSecurePassword(24);
+            studioPass = generateSecurePassword(24);
+        } else {
+            const customPass = await p.group({
+                db: () => p.password({ message: "请输入数据库主密码 (供 Postgres/Pigsty 使用)" }),
+                studio: () => p.password({ message: "请输入 Studio 面板的超级管理员密码" })
+            });
+            if (p.isCancel(customPass)) process.exit(0);
+            dbPass = customPass.db;
+            studioPass = customPass.studio;
+        }
+    } else {
+        p.log.info(`使用提供的统一密码进行配置。`);
     }
 
     s.start("正在加密生成最终配置项结构");
     const jwtSecret = generateSecurePassword(40);
     const envContent = `
 # SupaCloud Unified Configuration
-INTERNAL_IP="${projectConfig.internalIp}"
-SUPABASE_PUBLIC_DOMAIN="${projectConfig.publicDomain}"
+INTERNAL_IP="${internalIp}"
+SUPABASE_PUBLIC_DOMAIN="${publicDomain}"
 SUPABASE_STUDIO_DOMAIN="${studioDomain}"
 
 DASHBOARD_USERNAME="admin"
@@ -170,7 +279,7 @@ GRAFANA_PASSWORD="${dbPass}"
 
 SWAP_SIZE_GB="4"
 PG_VERSION="18"
-S3_STORAGE_TYPE="${projectConfig.storageType}"
+S3_STORAGE_TYPE="${storageType}"
 EDGE_RUNTIME="deno"
 ENABLE_ANALYTICS="true"
 ANALYTICS_BACKEND="postgres"
@@ -179,17 +288,17 @@ JWT_SECRET="${jwtSecret}"
     await Bun.write(CONFIG_FILE, envContent.trim());
     s.stop("核心配置组落盘完成！");
 
-    p.note(`API 域名: ${projectConfig.publicDomain}\n控制台面: ${studioDomain}\n控制面板密码: ${studioPass}\n数据库密码: ${dbPass}`, "⚠️ 关键凭证 (请截图保存)");
+    p.note(`API 域名: ${publicDomain}\n控制台面: ${studioDomain}\n控制面板密码: ${studioPass}\n数据库密码: ${dbPass}`, "⚠️ 关键凭证 (请截图保存)");
 
     return {
-        internalIp: projectConfig.internalIp as string,
-        publicDomain: projectConfig.publicDomain as string,
-        studioDomain: studioDomain as string,
+        internalIp: internalIp,
+        publicDomain: publicDomain,
+        studioDomain: studioDomain,
         dashboardPass: studioPass,
         postgresPass: dbPass,
         grafanaPass: dbPass,
         jwtSecret: jwtSecret,
-        storageType: projectConfig.storageType as string,
+        storageType: storageType,
     };
 }
 
@@ -229,41 +338,5 @@ async function prepareSystemEnv() {
     await $`chmod 600 ${sshDir}/authorized_keys`;
     await $`ssh-keyscan -H localhost 127.0.0.1 ::1 > ${sshDir}/known_hosts 2>/dev/null || true`;
     s.stop("可信通信加密桥搭建成功");
-}
-
-export async function runInstall() {
-    p.intro("\x1b[45m SupaCloud 一体化节点部署总线 (Bun 飞升版) \x1b[0m");
-
-    try {
-        await checkSystem();
-        const s = p.spinner();
-        s.start("基座系统脱水执行态唤醒");
-        await extractAssets();
-        s.stop("SupaCloud 控制面二进制文件解压成功");
-
-        await performPreFlightChecks();
-        const config = await runInteractiveConfig();
-        await prepareSystemEnv();
-
-        p.log.step(">>> 开始转接 Ansible (Pigsty) 剧本列阵 ...");
-        await PigstyManager.install(config);
-
-        p.log.step(">>> 开始转接 Angie / OpenResty 前端路由引擎 ...");
-        await LoadBalancerManager.installAngie(config.studioDomain, config.publicDomain);
-
-        p.log.step(">>> 正在将 Management API 注册为系统服务 ...");
-        const selfPath = process.argv[0];
-        await ServiceManager.register(
-            "supacloud-api",
-            "SupaCloud Management API Server",
-            selfPath,
-            ["start"]
-        );
-
-        p.outro(`🎉 SupaCloud 控制栈部署完成`);
-    } catch (error: any) {
-        p.log.error(`部署崩溃: ${error.message}`);
-        process.exit(1);
-    }
 }
 

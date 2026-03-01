@@ -27,6 +27,8 @@ jobs:
         working-directory: ./packages/management-api
         run: |
           bun install
+          echo "[CI] 运行逻辑单元测试与 Mock 集成测试..."
+          bun test
           bun run build:amd64
 
       - name: Run E2E Test in Container
@@ -53,17 +55,18 @@ jobs:
               echo '[CI] 验证版本...'
               supacloud --version || true
 
-              echo '[CI] 运行 Doctor 扫描...'
-              # 由于容器内缺少实际 Pigsty 环境，预期会有一部分 WARN，但进程不应 crash
-              supacloud doctor || true
+              echo '[CI] 运行 Doctor 扫描 (基础设施)...'
+              # 预期会有 WARN 但不应 Crash
+              supacloud doctor --skip-smoke-test || true
 
-              echo '[CI] 模拟数据库初始化...'
-              # 仅测试参数解析是否正常
-              supacloud --init-db --help
+              echo '[CI] 模拟业务冒烟测试 (功能闭环)...'
+              # 在 CI 环境中测试 API 模式启动与业务逻辑 (虽然缺少真 Pigsty 环境，但逻辑路径应通畅)
+              # 启动后台服务 (Mock 模式)
+              supacloud start &
+              sleep 3
               
-              echo '[CI] 测试节点管理逻辑...'
-              # 验证 nodes.json 写入
-              supacloud node --help
-
-              echo '[CI] 所有二进制逻辑通路验证通过！'
+              # 运行冒烟测试
+              supacloud doctor --yes || true
+              
+              echo '[CI] 所有二进制逻辑通路验证完成！'
             "

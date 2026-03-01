@@ -21,8 +21,8 @@ export class HealthChecker {
 
         // 2. 基础设施服务检查
         reports.push(await this.checkServiceStatus("supacloud-api", "Management API"));
-        reports.push(await this.checkServiceStatus("pigsty", "Pigsty Infrastructure"));
-        reports.push(await this.checkServiceStatus("angie", "Load Balancer (Angie)"));
+        reports.push(await this.checkPigstyStatus());
+        reports.push(await this.checkAngieStatus());
 
         // 3. 数据库专项检查
         reports.push(await this.checkPostgresHealth());
@@ -113,7 +113,10 @@ export class HealthChecker {
                 };
             }
 
-            // 2. 集群高可用探测 (Patroni)
+            // 2. 获取版本
+            const pgVersion = await $`psql -At -c "SHOW server_version;"`.nothrow().text();
+
+            // 3. 集群高可用探测 (Patroni)
             const { ClusterManager } = await import("./cluster");
             const nodes = await ClusterManager.getStatus();
 
@@ -126,7 +129,7 @@ export class HealthChecker {
                     return {
                         component: "数据库集群 (HA)",
                         status: "ERROR",
-                        message: "集群当前无主 (No Leader)",
+                        message: `集群 (PG ${pgVersion.trim()}) 当前无主 (No Leader)`,
                         recommendation: "Patroni 可能正在选主或 ETCD 出现故障。请运行 'supacloud cluster health' 处理。"
                     };
                 }
@@ -135,7 +138,7 @@ export class HealthChecker {
                     return {
                         component: "数据库集群 (HA)",
                         status: "WARN",
-                        message: `有 ${issues.length} 个节点状态异常`,
+                        message: `PG ${pgVersion.trim()} 有 ${issues.length} 个节点状态异常`,
                         recommendation: "至少一个副本宕机，高可用可用性下降。"
                     };
                 }
@@ -143,24 +146,56 @@ export class HealthChecker {
                 return {
                     component: "数据库集群 (HA)",
                     status: "OK",
-                    message: `集群正常 (主: ${leader.member}, 存活副本: ${replicas.length})`
+                    message: `集群正常 (PG ${pgVersion.trim()}, 主: ${leader.member}, 存活副本: ${replicas.length})`
                 };
             }
 
-            // 3. 后备方案：检测主从同步 (尝试在管理库执行简单查询)
+            // 4. 后备方案：检测主从同步 (尝试在管理库执行简单查询)
             const syncStatus = await $`psql -At -c "SELECT count(*) FROM pg_stat_replication;"`.nothrow();
             if (syncStatus.exitCode === 0) {
                 const replicas = parseInt(syncStatus.stdout.toString().trim());
                 return {
                     component: "数据库连接",
                     status: "OK",
-                    message: `PostgreSQL 已就绪 (活动副本数: ${replicas})`
+                    message: `PostgreSQL ${pgVersion.trim()} 已就绪 (活动副本数: ${replicas})`
                 };
             }
 
-            return { component: "数据库 (PostgreSQL)", status: "OK", message: "单节点运行中" };
+            return { component: "数据库 (PostgreSQL)", status: "OK", message: `PG ${pgVersion.trim()} 单节点运行中` };
         } catch {
             return { component: "数据库", status: "WARN", message: "无法探测详细数据库指标" };
         }
+    }
+
+    private static async checkPigstyStatus(): Promise<HealthReport> {
+        try {
+            const version = await $`pig --version`.nothrow().text();
+            if (version.trim()) {
+                return {
+                    component: "Pigsty 引擎",
+                    status: "OK",
+                    message: `已就绪 (版本: ${version.trim()})`
+                };
+            }
+        } catch { }
+        return this.checkServiceStatus("pigsty", "Pigsty 基础设施");
+    }
+
+    private static async checkAngieStatus(): Promise<HealthReport> {
+        try {
+            const version = await $`angie -v 2>&1`.nothrow().text();
+            const isActive = (await $`systemctl is-active angie`.nothrow()).exitCode === 0;
+            if (version.includes("angie")) {
+                const vMatch = version.match(/angie\/([^ ]+)/);
+                const vStr = vMatch ? vMatch[1] : "unknown";
+                return {
+                    component: "负载均衡 (Angie)",
+                    status: isActive ? "OK" : "ERROR",
+                    message: isActive ? `运行中 (v${vStr})` : `服务已停止 (v${vStr})`,
+                    recommendation: isActive ? undefined : "请执行 'sudo systemctl start angie'。"
+                };
+            }
+        } catch { }
+        return this.checkServiceStatus("angie", "负载均衡 (Angie)");
     }
 }
