@@ -338,7 +338,7 @@ async function prepareSystemEnv() {
     if (isUbuntu) {
         await $`apt-get update -qq >/dev/null && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq curl tar gzip openssl bc jq git procps openssh-client openssh-server postgresql-client >/dev/null`;
     } else {
-        await $`dnf install -y -q curl tar gzip openssl bc jq git procps-ng openssh-clients openssh-server postgresql >/dev/null`;
+        await $`dnf install -y -q --allowerasing curl tar gzip openssl bc jq git procps-ng openssh-clients openssh-server postgresql >/dev/null`;
     }
     s.stop("底层支持组建拉取完毕");
 

@@ -35,9 +35,12 @@ WantedBy=multi-user.target
 `.trim();
 
         const servicePath = `/etc/systemd/system/${name}.service`;
-        await $`sudo tee ${servicePath} <<EOF
-${unitFile}
-EOF`.nothrow();
+        const tempPath = `/tmp/${name}.service.tmp`;
+        await Bun.write(tempPath, unitFile);
+
+        await $`sudo mv ${tempPath} ${servicePath}`.nothrow();
+        await $`sudo chown root:root ${servicePath}`.nothrow();
+        await $`sudo chmod 644 ${servicePath}`.nothrow();
 
         await $`sudo systemctl daemon-reload`.nothrow();
         await $`sudo systemctl enable ${name}`.nothrow();
