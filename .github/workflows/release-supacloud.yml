@@ -37,6 +37,12 @@ jobs:
         working-directory: ./packages/management-api
         run: bun run build:arm64
 
+      - name: Build macOS Binaries
+        working-directory: ./packages/management-api
+        run: |
+          bun run build:macos-amd64
+          bun run build:macos-arm64
+
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
@@ -50,6 +56,10 @@ jobs:
             chmod +x supacloud
             ./supacloud install
             ```
+
+            ### Download for macOS
+            - [Apple Silicon (M1/M2/M3)](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/supacloud-macos-arm64)
+            - [Intel Mac](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/supacloud-macos-amd64)
             
             ### Maintenance
             - Run `supacloud doctor` for health check.
@@ -57,5 +67,7 @@ jobs:
           files: |
             packages/management-api/supacloud-linux-amd64
             packages/management-api/supacloud-linux-arm64
+            packages/management-api/supacloud-macos-amd64
+            packages/management-api/supacloud-macos-arm64
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

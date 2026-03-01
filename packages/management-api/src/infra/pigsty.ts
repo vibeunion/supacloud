@@ -209,15 +209,30 @@ export class PigstyManager {
 
         if (storageType === "juicefs") {
             console.log(`[PigstyManager] 正在将 Supabase Storage 后端切换至 JuiceFS: ${mountPoint}`);
-            // 修改 Supabase Storage 默认配置 (app.yml 对应的变量)
             yml = yml.replace(/STORAGE_BACKEND: .*/g, `STORAGE_BACKEND: local`);
-            // 此处逻辑需对应 Pigsty app/supa 剧本中对存储路径的变量定义
-            // 假设 Pigsty 使用 STORAGE_LOCAL_ROOTPATH 
             if (yml.includes("STORAGE_LOCAL_ROOTPATH")) {
                 yml = yml.replace(/STORAGE_LOCAL_ROOTPATH: .*/g, `STORAGE_LOCAL_ROOTPATH: ${mountPoint}`);
             } else {
-                // 如果没有则注入到 vars 块中
                 yml = yml.replace(/  vars:/, `  vars:\n    STORAGE_LOCAL_ROOTPATH: ${mountPoint}`);
+            }
+        }
+
+        // --- 多节点集群扩展 (Phase 6: HA) ---
+        const { NodeManager } = await import("./node");
+        const nodes = await NodeManager.listNodes();
+        if (nodes.length > 0) {
+            console.log(`[PigstyManager] 检测到 ${nodes.length} 个额外节点，正在注入集群定义...`);
+            const pgNodes = nodes.filter(n => n.role === "pg");
+            if (pgNodes.length > 0) {
+                let nodeInjections = "";
+                pgNodes.forEach((node, idx) => {
+                    nodeInjections += `    ${node.hostname}: { node_id: ${idx + 2}, ip: ${node.ip} }\n`;
+                });
+                if (yml.includes("pg-test:")) {
+                    yml = yml.replace(/pg-test:\s+hosts: \{([^\}]+)\}/, (match, p1) => {
+                        return `pg-test:\n  hosts: {${p1.trim()}\n${nodeInjections.trimEnd()}\n  }`;
+                    });
+                }
             }
         }
 
@@ -225,8 +240,6 @@ export class PigstyManager {
         if (!yml.includes("nginx_enabled: false")) {
             yml = yml.replace(/  vars:/, `  vars:\n    nginx_enabled: false\n    nginx_exporter_enabled: false\n    pgbouncer_max_client_conn: 10000\n    pgbouncer_default_pool_size: 20`);
         }
-
-        // 后续可直接处理 MinIO / JuiceFS 的剥离屏蔽逻辑
 
         await Bun.write(ymlPath, yml);
     }

@@ -134,6 +134,8 @@ import { runUpgrade } from "./upgrade";
 import { runDoctor } from "./doctor";
 import { runStorageManager } from "./storage";
 
+import { runNodeManager } from "./node";
+
 const args = process.argv.slice(2);
 
 if (args.includes("--init-db")) {
@@ -170,6 +172,21 @@ if (args.includes("--init-db")) {
     process.exit(0);
   }).catch((err) => {
     console.error("Storage management failed:", err);
+    process.exit(1);
+  });
+} else if (args.includes("node") || args.includes("--node")) {
+  runNodeManager().then(() => {
+    process.exit(0);
+  }).catch((err) => {
+    console.error("Node management failed:", err);
+    process.exit(1);
+  });
+} else if (args.includes("cluster") || args.includes("--cluster")) {
+  const { runClusterManager } = await import("./cluster");
+  runClusterManager().then(() => {
+    process.exit(0);
+  }).catch((err) => {
+    console.error("Cluster management failed:", err);
     process.exit(1);
   });
 } else {

@@ -102,7 +102,7 @@ export class HealthChecker {
 
     private static async checkPostgresHealth(): Promise<HealthReport> {
         try {
-            // 检查 pg_isready
+            // 1. 基础连通性
             const isReady = (await $`pg_isready -h localhost`.nothrow()).exitCode === 0;
             if (!isReady) {
                 return {
@@ -113,12 +113,46 @@ export class HealthChecker {
                 };
             }
 
-            // 检查主从同步 (尝试在管理库执行简单查询)
+            // 2. 集群高可用探测 (Patroni)
+            const { ClusterManager } = await import("./cluster");
+            const nodes = await ClusterManager.getStatus();
+
+            if (nodes.length > 0) {
+                const leader = nodes.find(n => n.role === "Leader");
+                const replicas = nodes.filter(n => n.role === "Replica");
+                const issues = nodes.filter(n => n.state !== "running");
+
+                if (!leader) {
+                    return {
+                        component: "数据库集群 (HA)",
+                        status: "ERROR",
+                        message: "集群当前无主 (No Leader)",
+                        recommendation: "Patroni 可能正在选主或 ETCD 出现故障。请运行 'supacloud cluster health' 处理。"
+                    };
+                }
+
+                if (issues.length > 0) {
+                    return {
+                        component: "数据库集群 (HA)",
+                        status: "WARN",
+                        message: `有 ${issues.length} 个节点状态异常`,
+                        recommendation: "至少一个副本宕机，高可用可用性下降。"
+                    };
+                }
+
+                return {
+                    component: "数据库集群 (HA)",
+                    status: "OK",
+                    message: `集群正常 (主: ${leader.member}, 存活副本: ${replicas.length})`
+                };
+            }
+
+            // 3. 后备方案：检测主从同步 (尝试在管理库执行简单查询)
             const syncStatus = await $`psql -At -c "SELECT count(*) FROM pg_stat_replication;"`.nothrow();
             if (syncStatus.exitCode === 0) {
                 const replicas = parseInt(syncStatus.stdout.toString().trim());
                 return {
-                    component: "数据库集群",
+                    component: "数据库连接",
                     status: "OK",
                     message: `PostgreSQL 已就绪 (活动副本数: ${replicas})`
                 };
