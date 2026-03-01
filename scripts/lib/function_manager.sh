@@ -9,7 +9,7 @@ PROJECT_REF="${2:-global}"
 KONG_ADMIN_URL="${KONG_ADMIN_URL:-http://localhost:8001}"
 
 GLOBAL_CONTAINER_NAME="supacloud-global-edge-runtime"
-GLOBAL_PORT="9000"
+GLOBAL_PORT="9001"
 TENANT_BASE_DIR="/etc/supabase/tenants"
 FUNCTIONS_ROOT="/root/pigsty/app/supabase/volumes/functions"
 ROUTER_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
