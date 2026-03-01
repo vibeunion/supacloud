@@ -181,7 +181,7 @@ async function runInteractiveConfig(forceYes = false): Promise<PigstyConfig> {
     let publicDomain = argDomain || "";
     let storageType = argS3 || "";
 
-    if (!internalIp && (!forceYes || !argDomain || !argS3)) {
+    if (!forceYes && (!internalIp || !argDomain || !argS3)) {
         // IP 选择逻辑
         const ipSelection = await p.select({
             message: '请选择或输入服务器内网 IP',
@@ -189,7 +189,7 @@ async function runInteractiveConfig(forceYes = false): Promise<PigstyConfig> {
                 ...detectedIps.map(ip => ({ value: ip, label: ip })),
                 { value: 'manual', label: '手动输入...' }
             ],
-            initialValue: detectedIps.includes(primaryIp) ? primaryIp : 'manual'
+            initialValue: detectedIps.includes(internalIp || primaryIp) ? (internalIp || primaryIp) : 'manual'
         });
 
         if (p.isCancel(ipSelection)) process.exit(0);
@@ -197,8 +197,8 @@ async function runInteractiveConfig(forceYes = false): Promise<PigstyConfig> {
         if (ipSelection === 'manual') {
             const manualIp = await p.text({
                 message: '请输入服务器内网 IP',
-                initialValue: primaryIp,
-                placeholder: primaryIp
+                initialValue: internalIp || primaryIp,
+                placeholder: internalIp || primaryIp
             });
             if (p.isCancel(manualIp)) process.exit(0);
             internalIp = manualIp;
@@ -239,7 +239,7 @@ async function runInteractiveConfig(forceYes = false): Promise<PigstyConfig> {
     const defaultStudio = isTestDomain ? `studio.${internalIp}.nip.io` : `studio.${publicDomain.replace(/^api\./, '')}`;
     let studioDomain = argStudio || defaultStudio;
 
-    if (!forceYes || !argStudio) {
+    if (!forceYes && !argStudio) {
         const studioResult = await p.text({
             message: '请输入全局控制台 (Studio) 的域名',
             initialValue: studioDomain,
