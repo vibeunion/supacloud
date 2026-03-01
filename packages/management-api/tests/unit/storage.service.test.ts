@@ -170,11 +170,12 @@ describe("StorageService", () => {
     test("getStatus should return parsed status", async () => {
       const spy = spyOn(shellService, "execute").mockResolvedValue({
         success: true,
-        output: JSON.stringify({ status: "mounted", size: "1T", used: "100G" })
+        output: "juicefs:supacloud  100G  1.2G   99G   2% /mnt/supacloud"
       });
       const result = await service.getStatus();
       expect(result.status).toBe("mounted");
-      expect(result.size).toBe("1T");
+      expect(result.size).toBe("100G");
+      expect(result.used).toBe("1.2G");
       spy.mockRestore();
     });
 
