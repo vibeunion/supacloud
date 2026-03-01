@@ -272,14 +272,15 @@ export class PigstyManager {
 
     /**
      * [Debian 12 Stability] 解决由于 Pigsty Bootstrap 注入冲突源导致的 'Conflicting values set for option Trusted' 错误
+     * 采用“侵略性清理”策略：强制注释掉所有系统默认源，仅保留 Pigsty 注入的源。
      */
     private static async stabilizeAptSources() {
         const isApt = (await $`command -v apt-get`.nothrow().quiet()).exitCode === 0;
         if (!isApt) return;
 
-        console.log("[PigstyManager] 正在扫描并全量平衡 APT 仓库定义...");
+        console.log("[PigstyManager] 正在执行侵略性 APT 仓库平稳化 (Purge Old Sources)...");
         try {
-            // 1. 扫描所有可能的源文件 (sources.list, .list, .sources)
+            // 扫描所有可能的源文件
             const sourcesDir = "/etc/apt/sources.list.d";
             const allFiles = ["/etc/apt/sources.list"];
             if (await Bun.file(sourcesDir).exists()) {
@@ -291,34 +292,56 @@ export class PigstyManager {
 
             for (const file of allFiles) {
                 if (!(await Bun.file(file).exists())) continue;
+                if (file.includes("pigsty")) continue; // 绝对不要动 Pigsty 自己的源
 
                 let content = await Bun.file(file).text();
+                let lines = content.split("\n");
                 let modified = false;
 
-                // 如果这个文件不是 Pigsty 自己的冲突源，但包含 debian.org 且没被注释
-                // 我们在 Debian 12 容器中发现官方源与 Pigsty 注入的 [trusted=yes] 会产生选项冲突
-                if (!file.includes("pigsty") && content.includes("deb.debian.org/debian")) {
-                    const lines = content.split("\n").map(line => {
-                        const trimmed = line.trim();
-                        // 匹配 deb http... 且包含 debian.org 的行
-                        if (trimmed && !trimmed.startsWith("#") && trimmed.includes("deb.debian.org/debian")) {
-                            console.log(`[PigstyManager] 命中冲突定义: ${file} -> 执行平滑处理`);
+                // 处理传统 .list 格式
+                if (file.endsWith(".list") || file === "/etc/apt/sources.list") {
+                    lines = lines.map(line => {
+                        const t = line.trim();
+                        if (t && !t.startsWith("#") && t.includes("deb.debian.org/debian")) {
                             modified = true;
-                            return `# [SupaCloud-Patch] ${line}`;
+                            return `# [SupaCloud-Purge] ${line}`;
                         }
                         return line;
                     });
-
-                    if (modified) {
-                        const newContent = lines.join("\n");
-                        const tmpPath = `/tmp/apt_patch_${Math.random().toString(36).substring(7)}.tmp`;
-                        await Bun.write(tmpPath, newContent);
-                        await $`sudo mv ${tmpPath} ${file} && sudo chmod 644 ${file}`.quiet();
+                }
+                // 处理新式 DEB822 .sources 格式
+                else if (file.endsWith(".sources")) {
+                    // DEB822 只要块内包含 deb.debian.org，我们就把整个块注释掉或禁用它
+                    // 简单策略：如果文件中包含 deb.debian.org，我们直接在行首加 # 或修改 Enabled: yes
+                    if (content.includes("deb.debian.org/debian") && !content.includes("Enabled: no")) {
+                        lines = lines.map(line => {
+                            if (line.trim().startsWith("Enabled: yes")) {
+                                modified = true;
+                                return "Enabled: no # [SupaCloud-Purge]";
+                            }
+                            if (!line.trim().startsWith("#")) {
+                                modified = true;
+                                return `# [SupaCloud-Purge] ${line}`;
+                            }
+                            return line;
+                        });
                     }
                 }
+
+                if (modified) {
+                    console.log(`[PigstyManager] 正在清洗冲突源文件: ${file}`);
+                    const tmpPath = `/tmp/apt_purge_${Math.random().toString(36).substring(7)}.tmp`;
+                    await Bun.write(tmpPath, lines.join("\n"));
+                    await $`sudo mv ${tmpPath} ${file} && sudo chmod 644 ${file}`.quiet();
+                }
             }
+
+            // 强制刷新
+            console.log("[PigstyManager] 正在验证仓库连通性...");
+            await $`sudo apt-get update -o Acquire::Retries=3`.quiet();
+            console.log("[PigstyManager] APT 仓库状态已恢复健康。");
         } catch (e) {
-            console.warn(`[PigstyManager] [WARN] 仓库平稳化逻辑跳过: ${e}`);
+            console.warn(`[PigstyManager] [WARN] 仓库侵略性平稳化逻辑跳过: ${e}`);
         }
     }
 }
