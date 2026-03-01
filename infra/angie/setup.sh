@@ -31,8 +31,8 @@ done
 # ── Step 1: 配置 Angie 仓库 ──────────────────────────────────────────────────
 log "Step 1/4: 配置 Angie 官方仓库..."
 if command -v dnf &>/dev/null; then
-    # 安装 Angie 的 RPM 仓库配置包
-    dnf install -y https://download.angie.software/angie/el/9/x86_64/angie-repo-1.0-1.el9.noarch.rpm || true
+    # 安装 Angie 的 RPM 仓库配置包 (使用稳定版)
+    dnf install -y https://download.angie.software/angie/el/9/x86_64/stable/angie-repo-1.0-1.el9.noarch.rpm || true
     dnf makecache
 else
     die "当前仅支持基于 DNF (RHEL/CentOS 9 系列) 的发行版"
