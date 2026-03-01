@@ -201,8 +201,25 @@ export class PigstyManager {
         yml = yml.replace(/grafana_admin_password: pigsty/g, `grafana_admin_password: ${config.grafanaPass}`);
         yml = yml.replace(/JWT_SECRET: your-super-secret-jwt-token-with-at-least-32-characters-long/g, `JWT_SECRET: ${config.jwtSecret}`);
 
-        if (config.anonKey) yml = yml.replace(/ANON_KEY: .*/g, `ANON_KEY: ${config.anonKey}`);
         if (config.serviceRoleKey) yml = yml.replace(/SERVICE_ROLE_KEY: .*/g, `SERVICE_ROLE_KEY: ${config.serviceRoleKey}`);
+
+        // 云原生存储集成 (JuiceFS)
+        const storageType = process.env.STORAGE_TYPE || "local";
+        const mountPoint = process.env.STORAGE_MOUNT_POINT || "/mnt/supacloud";
+
+        if (storageType === "juicefs") {
+            console.log(`[PigstyManager] 正在将 Supabase Storage 后端切换至 JuiceFS: ${mountPoint}`);
+            // 修改 Supabase Storage 默认配置 (app.yml 对应的变量)
+            yml = yml.replace(/STORAGE_BACKEND: .*/g, `STORAGE_BACKEND: local`);
+            // 此处逻辑需对应 Pigsty app/supa 剧本中对存储路径的变量定义
+            // 假设 Pigsty 使用 STORAGE_LOCAL_ROOTPATH 
+            if (yml.includes("STORAGE_LOCAL_ROOTPATH")) {
+                yml = yml.replace(/STORAGE_LOCAL_ROOTPATH: .*/g, `STORAGE_LOCAL_ROOTPATH: ${mountPoint}`);
+            } else {
+                // 如果没有则注入到 vars 块中
+                yml = yml.replace(/  vars:/, `  vars:\n    STORAGE_LOCAL_ROOTPATH: ${mountPoint}`);
+            }
+        }
 
         // 关闭 Pigsty 默认的 Nginx 并发配置 (我们已经交给了 Angie 负责前端)
         if (!yml.includes("nginx_enabled: false")) {

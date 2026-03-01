@@ -27,7 +27,33 @@ export class HealthChecker {
         // 3. 数据库专项检查
         reports.push(await this.checkPostgresHealth());
 
+        // 4. 云原生存储检查
+        reports.push(await this.checkCloudStorage());
+
         return reports;
+    }
+
+    private static async checkCloudStorage(): Promise<HealthReport> {
+        const mountPoint = process.env.STORAGE_MOUNT_POINT || "/mnt/supacloud";
+        try {
+            const isMounted = (await $`mount | grep ${mountPoint}`.nothrow()).exitCode === 0;
+            if (isMounted) {
+                const df = await $`df -h ${mountPoint} | tail -n 1`.text();
+                return {
+                    component: "云原生存储 (JuiceFS)",
+                    status: "OK",
+                    message: `已挂载: ${df.trim()}`
+                };
+            }
+            return {
+                component: "云原生存储",
+                status: "WARN",
+                message: "未挂载云原生存储后端",
+                recommendation: "如果需要云端弹性存储，请运行 'supacloud storage setup'。"
+            };
+        } catch {
+            return { component: "云原生存储", status: "ERROR", message: "无法探测存储挂载状态" };
+        }
     }
 
     private static async checkDiskSpace(): Promise<HealthReport> {

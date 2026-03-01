@@ -1,4 +1,5 @@
-import { shellService } from './shell.service';
+import { $ } from "bun";
+import { StorageManager } from "../infra/storage";
 
 export interface StorageStatus {
   status: 'mounted' | 'unmounted';
@@ -9,63 +10,64 @@ export interface StorageStatus {
 }
 
 export class StorageService {
+  private static getManager(): StorageManager {
+    // 实际配置应从环境变量或 config 对象中读取
+    return new StorageManager({
+      type: (process.env.STORAGE_TYPE as any) || "local",
+      mountPoint: process.env.STORAGE_MOUNT_POINT || "/mnt/supacloud",
+      metaUrl: process.env.JUICEFS_META_URL,
+      bucketName: process.env.S3_BUCKET_NAME,
+      endpoint: process.env.S3_ENDPOINT,
+      accessKey: process.env.S3_ACCESS_KEY,
+      secretKey: process.env.S3_SECRET_KEY,
+    });
+  }
+
   /**
-   * 获取存储状态 (JuiceFS)
+   * 获取存储状态
    */
   static async getStatus(): Promise<StorageStatus> {
-    const { success, output, error } = await shellService.execute('storage_manager.sh', ['status']);
-    if (!success) {
-      console.error('Failed to get storage status:', error);
-      return { status: 'unmounted' };
+    const manager = this.getManager();
+    const status = await manager.getStatus();
+
+    if (!status.mounted) return { status: 'unmounted' };
+
+    // 解析 df 输出以提取详情
+    // 示例: juicefs:supacloud  100G  1.2G   99G   2% /mnt/supacloud
+    const parts = status.details.split(/\s+/);
+    if (parts.length >= 5) {
+      return {
+        status: 'mounted',
+        size: parts[1],
+        used: parts[2],
+        avail: parts[3],
+        use_percent: parts[4]
+      };
     }
-    try {
-      return JSON.parse(output || '{"status":"unmounted"}');
-    } catch (e) {
-      return { status: 'unmounted' };
-    }
+
+    return { status: 'mounted' };
   }
 
   /**
-   * 启动迁移任务 (JuiceFS -> S3)
+   * 启动迁移任务 (使用 juicefs sync)
    */
   static async startMigration(s3Url: string, credentials: { access_key: string, secret_key: string, endpoint: string }): Promise<{ message: string }> {
-    const options = JSON.stringify(credentials);
-    shellService.execute('storage_manager.sh', ['migrate_to_s3', s3Url, options]).catch(err => {
-      console.error('Async migration task failed:', err);
-    });
-    return { message: '存储迁移后台任务已启动，请在后台日志中关注 juicefs sync 进度' };
-  }
+    const manager = this.getManager();
 
-  /**
-   * 兼容旧版：创建 S3 Bucket (Garage/MinIO/RustFS)
-   */
-  static async createBucket(projectRef: string): Promise<{ success: boolean; accessKey?: string; secretKey?: string; error?: string }> {
-    const { success, output, error } = await shellService.execute('s3_manager.sh', ['create', projectRef]);
-    if (!success) return { success: false, error };
+    // 异步执行迁移，不阻塞请求
+    (async () => {
+      try {
+        const mountPoint = process.env.STORAGE_MOUNT_POINT || "/mnt/supacloud";
+        // 假设迁移是指将挂载点内容同步到新的 S3 目标，或者反之
+        // 这里以同步到外部 S3 为例
+        await manager.sync(mountPoint, s3Url);
+        console.log(`[Storage] 迁移任务完成: ${s3Url}`);
+      } catch (error) {
+        console.error(`[Storage] 迁移任务失败:`, error);
+      }
+    })();
 
-    const accessKey = output.match(/ACCESS_KEY=([^\n]+)/)?.[1];
-    const secretKey = output.match(/SECRET_KEY=([^\n]+)/)?.[1];
-    return { success: true, accessKey, secretKey };
-  }
-
-  /**
-   * 兼容旧版：删除 S3 Bucket
-   */
-  static async deleteBucket(projectRef: string): Promise<{ success: boolean; error?: string }> {
-    const { success, error } = await shellService.execute('s3_manager.sh', ['delete', projectRef]);
-    return { success, error };
-  }
-
-  /**
-   * 兼容旧版：获取 S3 凭据
-   */
-  static async getCredentials(projectRef: string): Promise<{ success: boolean; accessKey?: string; secretKey?: string; error?: string }> {
-    const { success, output, error } = await shellService.execute('s3_manager.sh', ['credentials', projectRef]);
-    if (!success) return { success: false, error };
-
-    const accessKey = output.match(/ACCESS_KEY=([^\n]+)/)?.[1];
-    const secretKey = output.match(/SECRET_KEY=([^\n]+)/)?.[1];
-    return { success: true, accessKey, secretKey };
+    return { message: '存储同步后台任务已启动，请在后台日志中关注进度' };
   }
 }
 

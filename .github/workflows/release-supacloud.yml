@@ -46,16 +46,16 @@ jobs:
             ### Quick Install (Linux)
             ```bash
             # Download and Install
-            wget https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/supacloud-api-linux-amd64 -O supacloudapi
-            chmod +x supacloudapi
-            ./supacloudapi install
+            wget https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/supacloud-linux-amd64 -O supacloud
+            chmod +x supacloud
+            ./supacloud install
             ```
             
             ### Maintenance
             - Run `supacloud doctor` for health check.
             - Run `supacloud upgrade` for future updates.
           files: |
-            packages/management-api/supacloud-api-linux-amd64
-            packages/management-api/supacloud-api-linux-arm64
+            packages/management-api/supacloud-linux-amd64
+            packages/management-api/supacloud-linux-arm64
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

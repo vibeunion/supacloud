@@ -77,10 +77,10 @@ sudo ./supacloudapi install
 
 3. Post-Installation Maintenance:
 ```bash
-# System environment check
-supacloud doctor
-# Automated upgrade
-supacloud upgrade
+# System- `supacloud install`: 执行交互式一键安装流程。
+- `supacloud doctor`: 运行系统健康巡检，检查磁盘、内存、服务及数据库状态。
+- `supacloud storage`: 交互式配置 JuiceFS/S3 云原生存储后端。
+- `supacloud upgrade`: 检查并升级 SupaCloud 至最新版本。
 ```
 
 **Available CLI Options:**

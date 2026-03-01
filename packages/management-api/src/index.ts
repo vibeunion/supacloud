@@ -132,6 +132,7 @@ import { taskWorker } from "./services/task.worker";
 import { runInstall } from "./install";
 import { runUpgrade } from "./upgrade";
 import { runDoctor } from "./doctor";
+import { runStorageManager } from "./storage";
 
 const args = process.argv.slice(2);
 
@@ -162,6 +163,13 @@ if (args.includes("--init-db")) {
     process.exit(0);
   }).catch((err) => {
     console.error("Doctor scan failed:", err);
+    process.exit(1);
+  });
+} else if (args.includes("storage") || args.includes("--storage")) {
+  runStorageManager().then(() => {
+    process.exit(0);
+  }).catch((err) => {
+    console.error("Storage management failed:", err);
     process.exit(1);
   });
 } else {
