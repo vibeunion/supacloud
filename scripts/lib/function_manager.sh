@@ -132,6 +132,10 @@ start_tenant_runtime() {
         --name "$container_name" \
         --network supabase_default \
         --restart always \
+        --memory="64m" \
+        --cpus="0.5" \
+        --log-opt max-size=10m \
+        --log-opt max-file=3 \
         -p "${port}:9000" \
         -v "${FUNCTIONS_ROOT}:/home/deno/functions:ro" \
         -e "JWT_SECRET=${jwt_secret}" \
