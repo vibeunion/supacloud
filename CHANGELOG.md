@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.3.7](https://github.com/zuohuadong/supacloud/compare/v0.3.6...v0.3.7) (2026-03-01)
+
+
+### Features
+
+* implement non-interactive mode and refine IP selection logic ([6267723](https://github.com/zuohuadong/supacloud/commit/626772366dfed3c55ec2436c7639236784e93bcf))
+
+
+### Bug Fixes
+
+* resolve integration and unit test failures in storage and api routes ([8f0d88b](https://github.com/zuohuadong/supacloud/commit/8f0d88b578fc9e390f3d7738009da5771fd14ce3))
+
 ### [0.3.5](https://github.com/zuohuadong/supacloud/compare/v0.3.6...v0.3.5) (2026-03-01)
 
 
