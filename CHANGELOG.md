@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.3.11](https://github.com/zuohuadong/supacloud/compare/v0.3.10...v0.3.11) (2026-03-01)
+
+
+### Features
+
+* add --dry-run to install and enhance CI with installation smoke test ([cb60bc3](https://github.com/zuohuadong/supacloud/commit/cb60bc343e435b35a884c9bfb9115de2c7fa7097))
+
 ### [0.3.10](https://github.com/zuohuadong/supacloud/compare/v0.3.9...v0.3.10) (2026-03-01)
 
 
