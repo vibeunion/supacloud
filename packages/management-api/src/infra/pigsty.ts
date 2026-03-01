@@ -281,76 +281,59 @@ export class PigstyManager {
 
     /**
      * [Debian 12 Stability] 解决由于 Pigsty Bootstrap 注入冲突源导致的 'Conflicting values set for option Trusted' 错误
-     * 采用“侵略性清理”策略：强制注释掉所有系统默认源，仅保留 Pigsty 注入的源。
+     * 采用“核级清洗”策略：物理隔离所有系统默认源，强制实现环境纯净。
      */
     private static async stabilizeAptSources() {
         const isApt = (await $`command -v apt-get`.nothrow().quiet()).exitCode === 0;
         if (!isApt) return;
 
-        console.log("[PigstyManager] 正在执行侵略性 APT 仓库平稳化 (Purge Old Sources)...");
+        console.log("[PigstyManager] 正在启动“核级清洗”程序 (Nuclear Repo Purge)...");
         try {
-            // 扫描所有可能的源文件
-            const sourcesDir = "/etc/apt/sources.list.d";
-            const allFiles = ["/etc/apt/sources.list"];
-            if (await Bun.file(sourcesDir).exists()) {
-                const dirents = await $`ls ${sourcesDir}`.nothrow().text();
-                dirents.split("\n").filter(f => f.trim()).forEach(f => {
-                    allFiles.push(`${sourcesDir}/${f}`);
-                });
+            const backupDir = "/etc/apt/sources.list.d.supacloud_bak";
+            await $`sudo mkdir -p ${backupDir}`.quiet();
+
+            // 1. 处理主 sources.list
+            const mainList = "/etc/apt/sources.list";
+            if (await Bun.file(mainList).exists()) {
+                const content = await Bun.file(mainList).text();
+                if (content.includes("deb.debian.org/debian")) {
+                    console.log(`[PigstyManager] 正在隔离系统主源: ${mainList}`);
+                    await $`sudo mv -f ${mainList} ${mainList}.pigsty_bak`.quiet();
+                    // 留下一个空的或仅含注释的文件防止某些工具报错
+                    await $`sudo touch ${mainList}`.quiet();
+                }
             }
 
-            for (const file of allFiles) {
-                if (!(await Bun.file(file).exists())) continue;
-                if (file.includes("pigsty")) continue; // 绝对不要动 Pigsty 自己的源
+            // 2. 处理 sources.list.d 下的所有冲突源
+            const sourcesDir = "/etc/apt/sources.list.d";
+            if (await Bun.file(sourcesDir).exists()) {
+                const dirents = (await $`ls ${sourcesDir}`.nothrow().text()).split("\n").filter(f => f.trim());
+                for (const f of dirents) {
+                    const filePath = `${sourcesDir}/${f}`;
+                    if (f.includes("pigsty")) continue; // 保命：绝对不能动 Pigsty 自己的源
 
-                let content = await Bun.file(file).text();
-                let lines = content.split("\n");
-                let modified = false;
-
-                // 处理传统 .list 格式
-                if (file.endsWith(".list") || file === "/etc/apt/sources.list") {
-                    lines = lines.map(line => {
-                        const t = line.trim();
-                        if (t && !t.startsWith("#") && t.includes("deb.debian.org/debian")) {
-                            modified = true;
-                            return `# [SupaCloud-Purge] ${line}`;
-                        }
-                        return line;
-                    });
-                }
-                // 处理新式 DEB822 .sources 格式
-                else if (file.endsWith(".sources")) {
-                    // DEB822 只要块内包含 deb.debian.org，我们就把整个块注释掉或禁用它
-                    // 简单策略：如果文件中包含 deb.debian.org，我们直接在行首加 # 或修改 Enabled: yes
-                    if (content.includes("deb.debian.org/debian") && !content.includes("Enabled: no")) {
-                        lines = lines.map(line => {
-                            if (line.trim().startsWith("Enabled: yes")) {
-                                modified = true;
-                                return "Enabled: no # [SupaCloud-Purge]";
-                            }
-                            if (!line.trim().startsWith("#")) {
-                                modified = true;
-                                return `# [SupaCloud-Purge] ${line}`;
-                            }
-                            return line;
-                        });
+                    const content = await Bun.file(filePath).text();
+                    // 如果该文件包含 debian.org 定义，直接物理隔离
+                    if (content.includes("deb.debian.org/debian")) {
+                        console.log(`[PigstyManager] 正在隔离第三方/冲突源文件: ${f}`);
+                        await $`sudo mv -f ${filePath} ${backupDir}/${f}`.quiet();
                     }
                 }
-
-                if (modified) {
-                    console.log(`[PigstyManager] 正在清洗冲突源文件: ${file}`);
-                    const tmpPath = `/tmp/apt_purge_${Math.random().toString(36).substring(7)}.tmp`;
-                    await Bun.write(tmpPath, lines.join("\n"));
-                    await $`sudo mv ${tmpPath} ${file} && sudo chmod 644 ${file}`.quiet();
-                }
             }
 
-            // 强制刷新
-            console.log("[PigstyManager] 正在验证仓库连通性...");
-            await $`sudo apt-get update -o Acquire::Retries=3`.quiet();
-            console.log("[PigstyManager] APT 仓库状态已恢复健康。");
+            // 3. 强制清除 APT 缓存并尝试刷新
+            console.log("[PigstyManager] 正在重置并校验全量软件源状态...");
+            await $`sudo rm -rf /var/lib/apt/lists/*`.quiet();
+            const updateProc = await $`sudo apt-get update -o Acquire::Retries=3`.nothrow().quiet();
+
+            if (updateProc.exitCode === 0) {
+                console.log("[PigstyManager] APT 环境已成功锁定为 Pigsty 独占状态。");
+            } else {
+                console.warn("[PigstyManager] [WARN] APT 刷新仍有异常，检查是否隔离过度。");
+            }
         } catch (e) {
-            console.warn(`[PigstyManager] [WARN] 仓库侵略性平稳化逻辑跳过: ${e}`);
+            console.error(`[PigstyManager] [CRITICAL] 仓库核级清洗失败: ${e}`);
+            throw e; // 抛出异常，触发 install.ts 的 exit(1)
         }
     }
 }
