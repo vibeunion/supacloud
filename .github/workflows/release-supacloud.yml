@@ -1,4 +1,4 @@
-name: Release Management API
+name: Release SupaCloud Binary
 
 on:
   push:
@@ -24,6 +24,10 @@ jobs:
       - name: Install Dependencies
         working-directory: ./packages/management-api
         run: bun install
+
+      - name: Prebuild Web Console & Pack Assets
+        working-directory: ./packages/management-api
+        run: bun run prebuild
 
       - name: Build AMD64 Binary
         working-directory: ./packages/management-api

@@ -85,6 +85,45 @@ const app = new Elysia({ strictPath: false })
     return { error: "Internal server error" };
   })
 
+  // 挂载内置打包静态资源 SPA (通过 pack-assets.ts 编译期预塞入内存)
+  .get("*", async ({ request, set }) => {
+    const url = new URL(request.url);
+    const path = url.pathname === "/" ? "/index.html" : url.pathname;
+
+    // 如果是 API 路由前缀且没有匹配则不归 SPA 管，或者返回 404
+    if (path.startsWith("/api/")) {
+      set.status = 404;
+      return { error: "API route not found" };
+    }
+
+    try {
+      // 动态引入编译后的字典文件。如果是开发阶段未构建 web-console 则提供友善提示
+      // @ts-ignore:此文件将在生产构建 (bun run build) 阶段由 pack-assets.ts 动态生成
+      const builtin = await import("./assets.gen");
+      const ASSETS = builtin.ASSETS;
+
+      let asset = ASSETS[path];
+      // 支持 SPA 前端客户端路由的 Fallback (任意找不到路径的 URI 均返回 HTML 单壳)
+      if (!asset && !path.includes(".")) {
+        asset = ASSETS["/index.html"];
+      }
+
+      if (asset) {
+        set.headers["Content-Type"] = asset.contentType;
+        return asset.content;
+      } else {
+        set.status = 404;
+        return "Internal Asset Not Found.";
+      }
+    } catch (e) {
+      if (process.env.NODE_ENV !== "production") {
+        return "Management Console DEV mode: run 'bun run build:all' to load SPA assets into memory.";
+      }
+      set.status = 404;
+      return "App Assets Not Built.";
+    }
+  });
+
 import { initDatabase } from "./db/init";
 import { taskWorker } from "./services/task.worker";
 
