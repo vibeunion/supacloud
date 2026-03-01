@@ -219,7 +219,8 @@ setup_upstream() {
           - /rest/v1
           - /graphql/v1
         headers:
-          X-Project-Ref:
+
+          x-project-ref:
             - ${PROJECT_REF}
   - name: svc-gotrue-${PROJECT_REF}
     url: http://${host_ip}:${gotrue_port}
@@ -233,7 +234,8 @@ setup_upstream() {
         paths:
           - /auth/v1
         headers:
-          X-Project-Ref:
+
+          x-project-ref:
             - ${PROJECT_REF}
 EOF
 
@@ -251,8 +253,10 @@ EOF
         preserve_host: true
         paths:
           - /functions/v1
+          - /functions/v1/
         headers:
-          X-Project-Ref:
+
+          x-project-ref:
             - ${PROJECT_REF}
 EOF
     fi
@@ -272,7 +276,8 @@ EOF
         paths:
           - /storage/v1
         headers:
-          X-Project-Ref:
+
+          x-project-ref:
             - ${PROJECT_REF}
 EOF
     fi
@@ -292,7 +297,8 @@ EOF
         paths:
           - /realtime/v1
         headers:
-          X-Project-Ref:
+
+          x-project-ref:
             - ${PROJECT_REF}
 EOF
     fi
