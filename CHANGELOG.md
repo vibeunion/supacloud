@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.3.8](https://github.com/zuohuadong/supacloud/compare/v0.3.7...v0.3.8) (2026-03-01)
+
+
+### Bug Fixes
+
+* restore missing StorageService methods and fix Saga/API tests ([c131e73](https://github.com/zuohuadong/supacloud/commit/c131e733fb651900e7c2cddea8a78bd9f809e16e))
+
 ### [0.3.7](https://github.com/zuohuadong/supacloud/compare/v0.3.6...v0.3.7) (2026-03-01)
 
 
