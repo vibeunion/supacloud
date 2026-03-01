@@ -111,7 +111,7 @@ server {
 ${api_ssl_block}
 
     # 安全头
-    add_header X-Project-Ref ${PROJECT_REF} always;
+    add_header x-project-ref ${PROJECT_REF} always;
 
     location / {
         proxy_pass http://${KONG_INTERNAL};
@@ -140,7 +140,7 @@ server {
 $(generate_ssl_config "${studio_domain}")
 
     # 安全头
-    add_header X-Project-Ref ${PROJECT_REF} always;
+    add_header x-project-ref ${PROJECT_REF} always;
 
     location / {
         # 转发到 Supabase Studio (通常在 8000 端口)
