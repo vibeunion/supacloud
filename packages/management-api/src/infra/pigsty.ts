@@ -72,10 +72,14 @@ export class PigstyManager {
 
         // 2. 调度执行 Bootstrap 与模板 Configure
         if (status === PigstyStatus.NOT_INSTALLED || status === PigstyStatus.DOWNLOADED) {
+            console.log("[PigstyManager] 预先执行仓库平稳化 (Bootstrap 前置)...");
+            await this.stabilizeAptSources();
+
             console.log("[PigstyManager] 执行初始化和模板映射...");
+            // 确保不带 .nothrow()，如果 bootstrap 失败必须抛出异常
             await $`cd ${pigstyDir} && ./bootstrap`;
 
-            // [DEBIAN 12 FIX] Bootstrap 可能会产生冲突的 APT 源定义
+            // [DEBIAN 12 FIX] Bootstrap 可能会产生冲突的 APT 源定义，再次扫描确保纯净
             await this.stabilizeAptSources();
 
             await $`cd ${pigstyDir} && ./configure -i ${config.internalIp} -c app/supa`;
@@ -240,9 +244,14 @@ export class PigstyManager {
             }
         }
 
-        // 关闭 Pigsty 默认的 Nginx 并发配置 (我们已经交给了 Angie 负责前端)
+        // --- Nginx 停用逻辑 (交由 Angie 负责) ---
         if (!yml.includes("nginx_enabled: false")) {
-            yml = yml.replace(/^  vars:/m, `  vars:\n    nginx_enabled: false\n    nginx_exporter_enabled: false\n    pgbouncer_max_client_conn: 10000\n    pgbouncer_default_pool_size: 20`);
+            // 改进注入逻辑，如果 vars: 已存在则追加，否则创建
+            if (yml.includes("  vars:")) {
+                yml = yml.replace(/^  vars:/m, `  vars:\n    nginx_enabled: false\n    nginx_exporter_enabled: false\n    pgbouncer_max_client_conn: 10000\n    pgbouncer_default_pool_size: 20`);
+            } else {
+                yml = yml.replace(/^all:/m, `all:\n  vars:\n    nginx_enabled: false\n    nginx_exporter_enabled: false\n    pgbouncer_max_client_conn: 10000\n    pgbouncer_default_pool_size: 20`);
+            }
         }
 
         await Bun.write(ymlPath, yml);
