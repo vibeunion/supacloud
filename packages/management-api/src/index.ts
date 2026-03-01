@@ -196,7 +196,21 @@ async function bootstrap() {
     const pkg = await import("../../../package.json");
     console.log(`SupaCloud Version: ${pkg.version}`);
     process.exit(0);
-  } else {
+  } else if (args.includes("--help") || args.includes("-h")) {
+    console.log(`
+      SupaCloud Management API CLI
+      
+      Usage:
+        supacloud install [--dry-run]  Install SupaCloud environment
+        supacloud doctor               Run preflight checks
+        supacloud upgrade              Upgrade cluster components
+        supacloud --version            Show version
+        supacloud --help               Show this help message
+        
+      If no arguments are provided, the API server will start.
+    `);
+    process.exit(0);
+  } else if (args.length === 0 || args.includes("--server")) {
     // API 服务器模式：此时才加载路由和启动 TaskWorker
     app.use(await registerAllRoutes());
     app.use(registerStaticAssets());
@@ -213,6 +227,11 @@ async function bootstrap() {
     ║  Swagger docs at:   http://localhost:${config.port}/swagger        ║
     ╚═══════════════════════════════════════════════════════════╝
     `);
+  } else {
+    // 未知命令
+    console.error(`Unknown command or argument: ${args.join(" ")}`);
+    console.log("Run 'supacloud --help' for usage information.");
+    process.exit(1);
   }
 }
 
