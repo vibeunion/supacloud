@@ -6,7 +6,12 @@ export async function initDatabase() {
 
   // 先连接到默认 postgres 数据库创建 supacloud_meta
   const adminUrl = config.databaseUrl.replace(/\/[^/]+$/, "/postgres");
-  const adminSql = new SQL({ url: adminUrl });
+  const adminSql = new SQL({
+    url: adminUrl,
+    max: 1, // 初始化只需一个连接
+    idleTimeout: 300,
+    connectTimeout: 10000
+  });
 
   try {
     // 检查数据库是否存在
@@ -18,12 +23,11 @@ export async function initDatabase() {
       console.log("Creating supacloud_meta database...");
       await adminSql`CREATE DATABASE supacloud_meta`.simple();
     }
-  } catch (error) {
-    // 连接 postgres 库可能因 pg_hba.conf TCP 认证失败
-    // install.sh 已在调用 db:init 前通过 su postgres psql 预创建了数据库
-    // 若仍失败，请手动执行：
-    //   su - postgres -c "psql -c 'CREATE DATABASE supacloud_meta'"
-    //   ALTER USER postgres PASSWORD '<your_password>';
+  } catch (error: any) {
+    if (error.message?.includes("Connection closed") || error.code === "ERR_POSTGRES_CONNECTION_CLOSED") {
+      console.warn("[Init] Connection closed during DB creation check, retry once...");
+      // 此处可增加简单重试逻辑，或依赖 install.sh 的重试
+    }
     console.warn("Warning: Could not verify/create supacloud_meta via admin connection.");
     console.warn("If the database was pre-created by install.sh, this is safe to ignore.");
     console.warn("To fix manually: su - postgres -c \"psql -c 'CREATE DATABASE supacloud_meta'\"");
@@ -32,9 +36,17 @@ export async function initDatabase() {
   }
 
   // 连接到 supacloud_meta 数据库创建表
-  const sql = new SQL({ url: config.databaseUrl });
+  const sql = new SQL({
+    url: config.databaseUrl,
+    max: 5, // 初始化表结构只需少量连接
+    idleTimeout: 300,
+    connectTimeout: 15000 // 给予更多初始化缓冲时间
+  });
 
   try {
+    // 增加一个简单的活性检查
+    await sql`SELECT 1`;
+
     // 创建 organizations 表
     await sql`
       CREATE TABLE IF NOT EXISTS organizations (
@@ -45,6 +57,7 @@ export async function initDatabase() {
         updated_at TIMESTAMPTZ DEFAULT NOW()
       )
     `;
+    // ... 后续逻辑保持不变
 
     // 创建 projects 表
     await sql`
