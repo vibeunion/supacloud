@@ -39,17 +39,18 @@ jobs:
             -w /workspace \
             ${{ matrix.os }} \
             bash -c "
+              set -e
               # 0. 非交互模式强制开启
               export DEBIAN_FRONTEND=noninteractive
               ln -fs /usr/share/zoneinfo/UTC /etc/localtime
 
-              # 1. 安装基础依赖
+              # 1. 安装基础依赖 (显式补充 ansible 以加速部署并提升稳定性)
               if command -v apt-get >/dev/null; then
-                apt-get update && apt-get install -y curl wget sudo kmod iproute2 openssh-server openssh-client
+                apt-get update && apt-get install -y curl wget sudo kmod iproute2 openssh-server openssh-client ansible
               elif command -v dnf >/dev/null; then
-                dnf install -y --allowerasing epel-release curl wget sudo kmod iproute2 openssh-server openssh-clients
+                dnf install -y --allowerasing epel-release curl wget sudo kmod iproute2 openssh-server openssh-clients ansible
               elif command -v yum >/dev/null; then
-                yum install -y --allowerasing epel-release curl wget sudo kmod iproute2 openssh-server openssh-clients
+                yum install -y --allowerasing epel-release curl wget sudo kmod iproute2 openssh-server openssh-clients ansible
               fi
 
               # 2. 模拟系统环境 (假装有 systemd) 并启动 SSH
@@ -62,12 +63,7 @@ jobs:
               cp packages/management-api/supacloud-linux-amd64 /usr/local/bin/supacloud
               chmod +x /usr/local/bin/supacloud
               
-              echo '[CI] 验证版本...'
-              supacloud --version
-              
               echo '[CI] 开始完整安装流量测试...'
-              # 安装脚本内部会自动触发 Doctor 巡检
-              supacloud install --yes --ip 127.0.0.1 --domain api.local.nip.io --password ci-test-pass
-              
-              echo '[CI] 安装流程逻辑路径验证完成！'
+              # 安装脚本内部会自动触发 Doctor 巡检，这里不加额外的成功 echo 以确保错误码直达。
+              /usr/local/bin/supacloud install --yes --ip 127.0.0.1 --domain api.local.nip.io --password ci-test-pass
             "

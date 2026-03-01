@@ -299,12 +299,13 @@ export class PigstyManager {
 
             // 1. 处理主 sources.list
             const mainList = "/etc/apt/sources.list";
+            const mainListBak = `${mainList}.pigsty_bak`;
             if (await Bun.file(mainList).exists()) {
                 const content = await Bun.file(mainList).text();
-                if (content.includes("deb.debian.org/debian")) {
+                // 只有主源包含 debian.org 才隔离，且避免重复移动
+                if (content.includes("deb.debian.org/debian") && !(await Bun.file(mainListBak).exists())) {
                     console.log(`[PigstyManager] 正在隔离系统主源: ${mainList}`);
-                    await $`sudo mv -f ${mainList} ${mainList}.pigsty_bak`.quiet();
-                    // 留下一个空的或仅含注释的文件防止某些工具报错
+                    await $`sudo mv -f ${mainList} ${mainListBak}`.quiet();
                     await $`sudo touch ${mainList}`.quiet();
                 }
             }

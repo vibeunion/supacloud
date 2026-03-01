@@ -339,9 +339,11 @@ async function prepareSystemEnv() {
         // [NON-INTERACTIVE] 预设时区并强制静默模式，防止 tzdata 挂起
         await $`echo "tzdata tzdata/Areas select Etc" | debconf-set-selections`.nothrow();
         await $`echo "tzdata tzdata/Zones/Etc select UTC" | debconf-set-selections`.nothrow();
-        await $`apt-get update -qq >/dev/null && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq sudo curl tar gzip openssl bc jq git procps openssh-client openssh-server postgresql-client >/dev/null`;
+        // [ANSIBLE FIX] 预装 ansible 提升部署效率
+        await $`apt-get update -qq >/dev/null && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq sudo curl tar gzip openssl bc jq git procps openssh-client openssh-server postgresql-client ansible >/dev/null`;
     } else {
-        await $`dnf install -y -q --allowerasing epel-release sudo curl tar gzip openssl bc jq git procps-ng openssh-clients openssh-server postgresql >/dev/null`;
+        // [ANSIBLE FIX] RHEL/Rocky 下预装 ansible
+        await $`dnf install -y -q --allowerasing epel-release sudo curl tar gzip openssl bc jq git procps-ng openssh-clients openssh-server postgresql ansible >/dev/null`;
     }
     s.stop("底层支持组建拉取完毕");
 
