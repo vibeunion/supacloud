@@ -88,10 +88,14 @@ export class HealthChecker {
 
     private static async checkServiceStatus(name: string, label: string): Promise<HealthReport> {
         try {
-            const hasSystemd = (await $`systemctl --version`.nothrow().quiet()).exitCode === 0;
-            if (!hasSystemd) {
-                // 在 CI/Docker 环境下，如果检测不到 systemctl，我们假定核心逻辑仍需验证但跳过物理服务检查
-                const isContainer = (await $`test -f /.dockerenv`.nothrow()).exitCode === 0;
+            // 在 Docker 容器中，systemctl 即使存在也通常无法使用（PID 1 不是 systemd）
+            // 检查系统是否真的由 systemd 引导
+            const isSystemd = (await $`systemctl is-system-running 2>/dev/null`.nothrow().quiet()).exitCode === 0 ||
+                (await $`systemctl --version 2>/dev/null`.nothrow().quiet()).exitCode === 0;
+
+            const isContainer = (await $`test -f /.dockerenv`.nothrow()).exitCode === 0;
+
+            if (!isSystemd || isContainer) {
                 return {
                     component: label,
                     status: isContainer ? "OK" : "WARN",

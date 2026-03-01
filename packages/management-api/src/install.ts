@@ -43,6 +43,22 @@ async function checkSystem() {
     if (os.userInfo().uid !== 0) throw new Error("请使用 root 权限（sudo）运行安装程序。");
 }
 
+/**
+ * 判断是否为 CI 环境，如果是则返回静默 Spinner 以避免日志污染
+ */
+function getSpinner() {
+    const s = p.spinner();
+    const isCI = process.env.GITHUB_ACTIONS === "true" || !process.stdout.isTTY;
+    if (isCI) {
+        return {
+            start: (msg: string) => console.log(`[CI] ${msg}...`),
+            stop: (msg: string) => console.log(`[CI] ✅ ${msg}`),
+            message: (msg: string) => console.log(`[CI] ${msg}`)
+        };
+    }
+    return s;
+}
+
 export async function runInstall(options: { forceYes?: boolean } = {}) {
     p.intro("\x1b[45m SupaCloud 一体化节点部署总线 (Bun 飞升版) \x1b[0m");
 
@@ -53,7 +69,7 @@ export async function runInstall(options: { forceYes?: boolean } = {}) {
 
     try {
         await checkSystem();
-        const s = p.spinner();
+        const s = getSpinner();
         s.start("基座系统脱水执行态唤醒");
         await extractAssets();
         s.stop("SupaCloud 控制面二进制文件解压成功");
@@ -99,14 +115,14 @@ import { LoadBalancerManager } from "./infra/loadbalancer";
 import { ServiceManager } from "./infra/service";
 
 async function performPreFlightChecks(forceYes = false) {
-    const s = p.spinner();
+    const s = getSpinner();
     s.start("执行环境预检查 (Pre-flight Checks)");
 
     // 1. 检查关键端口占用
     const ports = [5432, 80, 443, 9090];
     const conflictingPorts = [];
     for (const port of ports) {
-        const isOccupied = (await $`ss -tuln | grep :${port} `.nothrow()).exitCode === 0;
+        const isOccupied = (await $`ss -tuln | grep :${port} `.nothrow().quiet()).exitCode === 0;
         if (isOccupied) conflictingPorts.push(port);
     }
 
@@ -148,7 +164,7 @@ async function performPreFlightChecks(forceYes = false) {
 }
 
 async function runInteractiveConfig(forceYes = false): Promise<PigstyConfig> {
-    const s = p.spinner();
+    const s = getSpinner();
 
     // ── 命令行参数解析 ──────────────────────────────────────────────────────────
     const args = process.argv.slice(2);
@@ -275,7 +291,8 @@ async function runInteractiveConfig(forceYes = false): Promise<PigstyConfig> {
         p.log.info(`使用提供的统一密码进行配置。`);
     }
 
-    s.start("正在加密生成最终配置项结构");
+    const sEnv = getSpinner();
+    sEnv.start("正在加密生成最终配置项结构");
     const jwtSecret = generateSecurePassword(40);
     const envContent = `
 # SupaCloud Unified Configuration
@@ -297,7 +314,7 @@ ANALYTICS_BACKEND="postgres"
 JWT_SECRET="${jwtSecret}"
 `;
     await Bun.write(CONFIG_FILE, envContent.trim());
-    s.stop("核心配置组落盘完成！");
+    sEnv.stop("核心配置组落盘完成！");
 
     p.note(`API 域名: ${publicDomain}\n控制台面: ${studioDomain}\n控制面板密码: ${studioPass}\n数据库密码: ${dbPass}`, "⚠️ 关键凭证 (请截图保存)");
 
@@ -314,21 +331,21 @@ JWT_SECRET="${jwtSecret}"
 }
 
 async function prepareSystemEnv() {
-    const s = p.spinner();
+    const s = getSpinner();
     s.start("基础系统依赖及包管理器预热");
 
     let isUbuntu = (await $`apt-get --version`.nothrow().quiet()).exitCode === 0;
     if (isUbuntu) {
-        await $`apt-get update -qq >/dev/null && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq curl tar gzip openssl bc jq git procps openssh-client openssh-server >/dev/null`;
+        await $`apt-get update -qq >/dev/null && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq curl tar gzip openssl bc jq git procps openssh-client openssh-server postgresql-client >/dev/null`;
     } else {
-        await $`dnf install -y -q curl tar gzip openssl bc jq git procps-ng openssh-clients openssh-server >/dev/null`;
+        await $`dnf install -y -q curl tar gzip openssl bc jq git procps-ng openssh-clients openssh-server postgresql >/dev/null`;
     }
     s.stop("底层支持组建拉取完毕");
 
     const totalMemGB = os.totalmem() / 1024 / 1024 / 1024;
     if (totalMemGB < 4.2) {
         s.start(`检测到物理内存较小 (${totalMemGB.toFixed(1)}G)，初始化 4GB Swap`);
-        if ((await $`ls /swapfile &>/dev/null`.nothrow()).exitCode !== 0) {
+        if ((await $`test -f /swapfile &>/dev/null`.nothrow()).exitCode !== 0) {
             await $`fallocate -l 4G /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=4096 status=none`;
             await $`chmod 600 /swapfile && mkswap /swapfile >/dev/null && swapon /swapfile >/dev/null`;
             await $`grep -q "/swapfile" /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab`;
@@ -342,7 +359,8 @@ async function prepareSystemEnv() {
     await $`mkdir -p ${sshDir} && chmod 700 ${sshDir}`;
 
     if ((await $`test -f ${sshDir}/id_ed25519`.nothrow()).exitCode !== 0) {
-        await $`ssh-keygen -q -t ed25519 -N '' -f ${sshDir}/id_ed25519`;
+        // 使用更直接的方式生成密钥，避免 Bun Shell 对空字符串参数的解析歧义
+        await $`ssh-keygen -q -t ed25519 -N "" -f ${sshDir}/id_ed25519`;
     }
     const pubKey = (await $`cat ${sshDir}/id_ed25519.pub`.text()).trim();
     await $`grep -q "${pubKey}" ${sshDir}/authorized_keys &>/dev/null || echo "${pubKey}" >> ${sshDir}/authorized_keys`;

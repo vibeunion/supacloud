@@ -1,10 +1,24 @@
 import * as p from "@clack/prompts";
 import { HealthChecker, type HealthReport } from "./infra/health";
+import os from "node:os";
+
+function getSpinner() {
+    const s = p.spinner();
+    const isCI = process.env.GITHUB_ACTIONS === "true" || !process.stdout.isTTY;
+    if (isCI) {
+        return {
+            start: (msg: string) => console.log(`[CI] ${msg}...`),
+            stop: (msg: string) => console.log(`[CI] ✅ ${msg}`),
+            message: (msg: string) => console.log(`[CI] ${msg}`)
+        };
+    }
+    return s;
+}
 
 export async function runDoctor(options: { skipSmokeTest?: boolean, forceYes?: boolean } = {}) {
     p.intro("\x1b[45m SupaCloud 系统巡检中心 (Doctor) \x1b[0m");
 
-    const s = p.spinner();
+    const s = getSpinner();
     s.start("正在深度扫描基础设施状态...");
 
     try {
