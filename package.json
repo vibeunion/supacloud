@@ -1,6 +1,7 @@
 {
   "name": "supacloud",
   "private": true,
+  "version": "0.3.0",
   "scripts": {
     "release": "standard-version"
   },
@@ -10,6 +11,5 @@
   },
   "peerDependencies": {
     "typescript": "^5"
-  },
-  "version": null
+  }
 }
