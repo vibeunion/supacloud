@@ -613,6 +613,17 @@ setup_swap() {
     fi
 }
 
+# ========== 开启 KSM 内存去重 (针对多租户优化) ==========
+enable_ksm_optimization() {
+    log_step "配置系统级内存去重 (KSM)..."
+    local KSM_SCRIPT="infra/os/ksm_enable.sh"
+    if [[ -f "$KSM_SCRIPT" ]]; then
+        bash "$KSM_SCRIPT" || log_warn "KSM 配置脚本执行失败，跳过。"
+    else
+        log_warn "未找到 KSM 配置脚本: $KSM_SCRIPT"
+    fi
+}
+
 # ========== 安装容器运行时 ==========
 install_container_runtime() {
     log_step "检查容器运行时..."
@@ -2615,6 +2626,7 @@ main() {
     install_base_dependencies  # 新增：确保 sudo, tar, ssh 等基础工具存在
     setup_local_ssh            # 新增：确保本机 SSH 免密 (Ansible 需要)
     setup_swap
+    enable_ksm_optimization     # 新置：开启内核内存去重
     
     # OpenResty 已替换为 Angie
     install_angie
