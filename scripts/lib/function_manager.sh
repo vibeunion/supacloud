@@ -1,22 +1,24 @@
 #!/bin/bash
-# SupaCloud - 边缘函数管理脚本 (多租户隔离版)
-# 用法: function_manager.sh <action> <project_ref> [args...]
+# SupaCloud - 边缘函数管理脚本 (单实例 Web Worker 版)
+# 用法: function_manager.sh <init_global|start|stop|status|deploy> <project_ref> [args...]
 
 set -euo pipefail
 
 ACTION="${1:-}"
-PROJECT_REF="${2:-}"
+PROJECT_REF="${2:-global}"
 KONG_ADMIN_URL="${KONG_ADMIN_URL:-http://localhost:8001}"
 
-# 配置路径
+GLOBAL_CONTAINER_NAME="supacloud-global-edge-runtime"
+GLOBAL_PORT="9000"
 TENANT_BASE_DIR="/etc/supabase/tenants"
 FUNCTIONS_ROOT="/root/pigsty/app/supabase/volumes/functions"
+ROUTER_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # 验证参数
 validate_params() {
-    if [ -z "$ACTION" ] || [ -z "$PROJECT_REF" ]; then
-        echo "ERROR: Missing required parameters" >&2
-        echo "Usage: $0 <action> <project_ref> [args...]" >&2
+    if [ -z "$ACTION" ]; then
+        echo "ERROR: Missing action parameter" >&2
+        echo "Usage: $0 {init_global|start|stop|status|deploy} <project_ref> [args...]" >&2
         exit 1
     fi
 }
@@ -98,69 +100,59 @@ serve(async (req) => {
 EOF
 }
 
-# 启动租户专属 Edge Runtime 容器
-start_tenant_runtime() {
-    echo "Starting isolated Edge Runtime for ${PROJECT_REF}..."
+# 初始化全局 Edge Runtime
+init_global_runtime() {
+    echo "Initializing Global Edge Runtime (Worker Router)..."
     
-    # 首先确保生成最新的路由
-    generate_router
+    # 停止旧的全局容器
+    docker rm -f "$GLOBAL_CONTAINER_NAME" 2>/dev/null || true
 
-    local config
-    config=$(get_tenant_config)
-    
-    local port=$(echo "$config" | grep "^FUNCTIONS_PORT=" | tail -n1 | cut -d= -f2)
-    if [ -z "$port" ]; then
-        echo "ERROR: FUNCTIONS_PORT not defined for tenant ${PROJECT_REF}" >&2
-        exit 1
-    fi
+    mkdir -p "$FUNCTIONS_ROOT"
+    mkdir -p "$TENANT_BASE_DIR"
 
-    local container_name="supacloud-functions-${PROJECT_REF}"
-    
-    # 停止旧容器
-    docker rm -f "$container_name" 2>/dev/null || true
+    # 将路由脚本同步到专门目录
+    mkdir -p "${FUNCTIONS_ROOT}/_global_router"
+    cp "${ROUTER_SCRIPT_DIR}/global_router.ts" "${FUNCTIONS_ROOT}/_global_router/main.ts"
+    cp "${ROUTER_SCRIPT_DIR}/worker_runner.ts" "${FUNCTIONS_ROOT}/_global_router/worker_runner.ts"
 
-    # 提取环境变量
-    local jwt_secret=$(echo "$config" | grep "^JWT_SECRET=" | tail -n1 | cut -d= -f2)
-    local supabase_url=$(echo "$config" | grep "^SUPABASE_URL=" | tail -n1 | cut -d= -f2)
-    local supabase_anon_key=$(echo "$config" | grep "^SUPABASE_ANON_KEY=" | tail -n1 | cut -d= -f2)
-    local supabase_service_role_key=$(echo "$config" | grep "^SUPABASE_SERVICE_ROLE_KEY=" | tail -n1 | cut -d= -f2)
-    local wechat_app_id=$(echo "$config" | grep "^WECHAT_APP_ID=" | tail -n1 | cut -d= -f2)
-    local wechat_app_secret=$(echo "$config" | grep "^WECHAT_APP_SECRET=" | tail -n1 | cut -d= -f2)
-
-    # 启动新容器
+    echo "Starting global container on port ${GLOBAL_PORT}..."
     docker run -d \
-        --name "$container_name" \
+        --name "$GLOBAL_CONTAINER_NAME" \
         --network supabase_default \
         --restart always \
-        --memory="64m" \
-        --cpus="0.5" \
+        --memory="300m" \
+        --cpus="1.0" \
         --log-opt max-size=10m \
         --log-opt max-file=3 \
-        -p "${port}:9000" \
+        -p "${GLOBAL_PORT}:9000" \
         -v "${FUNCTIONS_ROOT}:/home/deno/functions:ro" \
-        -e "JWT_SECRET=${jwt_secret}" \
-        -e "SUPABASE_URL=${supabase_url}" \
-        -e "SUPABASE_ANON_KEY=${supabase_anon_key}" \
-        -e "SUPABASE_SERVICE_ROLE_KEY=${supabase_service_role_key}" \
-        -e "WECHAT_APP_ID=${wechat_app_id}" \
-        -e "WECHAT_APP_SECRET=${wechat_app_secret}" \
-        -e "PROJECT_REF=${PROJECT_REF}" \
+        -v "${TENANT_BASE_DIR}:${TENANT_BASE_DIR}:ro" \
         supabase/edge-runtime:v1.69.23 \
-        start --main-service /home/deno/functions/main
+        start --main-service /home/deno/functions/_global_router/main
 
-    echo "Tenant runtime started at port ${port}"
+    echo "Global Edge Runtime initialized."
 }
 
-# 停止租户专属容器
+# 挂载租户到全局运行池 (虚拟操作)
+start_tenant_runtime() {
+    echo "Activate tenant ${PROJECT_REF} into global pool."
+    if ! docker ps -q -f name="$GLOBAL_CONTAINER_NAME" | grep -q .; then
+        init_global_runtime
+    fi
+}
+
+# 停止租户
 stop_tenant_runtime() {
-    echo "Stopping Edge Runtime for ${PROJECT_REF}..."
-    docker stop "supacloud-functions-${PROJECT_REF}" 2>/dev/null || true
-    echo "Stopped."
+    echo "Notice: Tenant Worker will be recycled automatically or upon redeploy."
 }
 
 # 检查状态
 check_status() {
-    docker ps -f "name=supacloud-functions-${PROJECT_REF}" --format "{{.Status}}"
+    if docker ps -q -f name="$GLOBAL_CONTAINER_NAME" | grep -q .; then
+        echo "Running (Inside Global Pool)"
+    else
+        echo "Global Pool Offline"
+    fi
 }
 
 # 主逻辑
