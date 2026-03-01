@@ -43,16 +43,16 @@ jobs:
               if command -v apt-get >/dev/null; then
                 apt-get update && apt-get install -y curl wget sudo kmod iproute2
               elif command -v dnf >/dev/null; then
-                dnf install -y --allowerasing curl wget sudo kmod iproute2
+                dnf install -y --allowerasing epel-release curl wget sudo kmod iproute2
               elif command -v yum >/dev/null; then
-                yum install -y --allowerasing curl wget sudo kmod iproute2
+                yum install -y --allowerasing epel-release curl wget sudo kmod iproute2
               fi
 
               # 2. 模拟系统环境 (假装有 systemd)
               mkdir -p /etc/supabase
               
               # 3. 运行安装测试
-              cp packages/management-api/supacloud-linux-amd64 /usr/local/bin/supacloud
+              cp supacloud /usr/local/bin/supacloud
               chmod +x /usr/local/bin/supacloud
               
               echo '[CI] 验证版本...'
