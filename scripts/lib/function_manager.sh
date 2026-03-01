@@ -159,6 +159,9 @@ check_status() {
 validate_params
 
 case "$ACTION" in
+    init_global)
+        init_global_runtime
+        ;;
     start)
         start_tenant_runtime
         ;;
@@ -182,7 +185,7 @@ case "$ACTION" in
         start_tenant_runtime
         ;;
     *)
-        echo "Usage: $0 {start|stop|status|deploy} <project_ref> [args...]"
+        echo "Usage: $0 {init_global|start|stop|status|deploy} <project_ref> [args...]"
         exit 1
         ;;
 esac
