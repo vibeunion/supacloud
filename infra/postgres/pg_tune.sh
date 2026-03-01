@@ -81,27 +81,21 @@ log "内核版本: $(uname -r)，io_uring 支持: $(${IO_URING_SUPPORTED} && ech
 
 # ── 动态计算各参数值 ─────────────────────────────────────────────────────────
 
-# shared_buffers: 系统内存的 25%（PG 官方推荐）
-SHARED_BUFFERS_GB=$(awk "BEGIN {printf \"%.0f\", ${TOTAL_MEM_GB} * 0.25}")
+# shared_buffers: 在微小机型上缩减至 10%-15%，尽量腾出内存给 Angie 和 JuiceFS OSM 缓存
+SHARED_BUFFERS_GB=$(awk "BEGIN {printf \"%.0f\", ${TOTAL_MEM_GB} * 0.12}")
 [[ ${SHARED_BUFFERS_GB} -lt 1 ]] && SHARED_BUFFERS_GB=1
-SHARED_BUFFERS="${SHARED_BUFFERS_GB}GB"
+SHARED_BUFFERS="256MB" # 强制在微型机器上保守设定
 
-# effective_cache_size: 系统内存的 75%（帮助查询规划器估算可用缓存）
-EFFECTIVE_CACHE_SIZE_GB=$(awk "BEGIN {printf \"%.0f\", ${TOTAL_MEM_GB} * 0.75}")
+# effective_cache_size: 系统内存的 50%（预留给页面缓存）
+EFFECTIVE_CACHE_SIZE_GB=$(awk "BEGIN {printf \"%.0f\", ${TOTAL_MEM_GB} * 0.50}")
 [[ ${EFFECTIVE_CACHE_SIZE_GB} -lt 1 ]] && EFFECTIVE_CACHE_SIZE_GB=1
 EFFECTIVE_CACHE_SIZE="${EFFECTIVE_CACHE_SIZE_GB}GB"
 
-# work_mem: (内存 * 0.25) / max_connections（按 100 连接估算）
-WORK_MEM_MB=$(awk "BEGIN {printf \"%.0f\", ${TOTAL_MEM_GB} * 1024 * 0.25 / 100}")
-[[ ${WORK_MEM_MB} -lt 4 ]] && WORK_MEM_MB=4
-[[ ${WORK_MEM_MB} -gt 512 ]] && WORK_MEM_MB=512
-WORK_MEM="${WORK_MEM_MB}MB"
+# work_mem: 保守压缩以防御 100 租户高并发雪崩，锁死在极小数值 (1MB)
+WORK_MEM="1MB"
 
-# maintenance_work_mem: 用于 VACUUM/ANALYZE/CREATE INDEX，可以大一些
-MAINTENANCE_WORK_MEM_MB=$(awk "BEGIN {printf \"%.0f\", ${TOTAL_MEM_GB} * 1024 * 0.05}")
-[[ ${MAINTENANCE_WORK_MEM_MB} -lt 64 ]] && MAINTENANCE_WORK_MEM_MB=64
-[[ ${MAINTENANCE_WORK_MEM_MB} -gt 2048 ]] && MAINTENANCE_WORK_MEM_MB=2048
-MAINTENANCE_WORK_MEM="${MAINTENANCE_WORK_MEM_MB}MB"
+# maintenance_work_mem: 用于 VACUUM/ANALYZE/CREATE INDEX，适当降级 
+MAINTENANCE_WORK_MEM="32MB"
 
 # effective_io_concurrency: SSD 用 200，HDD 用 2
 if ${IS_SSD}; then
