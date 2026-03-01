@@ -119,7 +119,7 @@ export class GatewayManager {
         if (appNodes.length === 0) {
             let hostIp = "127.0.0.1";
             try {
-                const hostIpText = await $`ip addr show podman1 2>/dev/null | grep "inet " | awk '{print $2}' | cut -d/ -f1 || ip addr show docker0 2>/dev/null | grep "inet " | awk '{print $2}' | cut -d/ -f1`.text();
+                const hostIpText = await $`ip addr show podman1 | grep "inet " | awk '{print $2}' | cut -d/ -f1 || ip addr show docker0 | grep "inet " | awk '{print $2}' | cut -d/ -f1`.nothrow().quiet().text();
                 if (hostIpText.trim()) hostIp = hostIpText.trim();
             } catch (e) { }
             appNodes.push({ ip: hostIp, hostname: "localhost", role: "app", status: "online", createdAt: 0 });
@@ -213,8 +213,8 @@ services:
         }
 
         try {
-            const isDockerKong = (await $`docker ps -q -f "name=supabase-kong" 2>/dev/null`.nothrow().text()).trim();
-            const isPodmanKong = (await $`podman ps -q -f "name=supabase-kong" 2>/dev/null`.nothrow().text()).trim();
+            const isDockerKong = (await $`docker ps -q -f "name=supabase-kong"`.nothrow().quiet().text()).trim();
+            const isPodmanKong = (await $`podman ps -q -f "name=supabase-kong"`.nothrow().quiet().text()).trim();
 
             if (isDockerKong) {
                 await $`docker exec supabase-kong kong reload`.nothrow();

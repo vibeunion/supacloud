@@ -113,7 +113,7 @@ export class TenantManager {
             if (!cid) cid = (await $`podman ps -q -f "name=supabase-auth"`.nothrow().text()).trim();
 
             if (cid) {
-                await $`docker cp ${cid}:/usr/local/bin/gotrue /tmp/gotrue-extract 2>/dev/null || docker cp ${cid}:/usr/local/bin/auth /tmp/gotrue-extract 2>/dev/null`.nothrow();
+                await $`docker cp ${cid}:/usr/local/bin/gotrue /tmp/gotrue-extract || docker cp ${cid}:/usr/local/bin/auth /tmp/gotrue-extract`.nothrow().quiet();
                 if (await Bun.file('/tmp/gotrue-extract').exists()) {
                     await $`mv /tmp/gotrue-extract ${this.GOTRUE_BIN}`;
                     await $`chmod +x ${this.GOTRUE_BIN}`;

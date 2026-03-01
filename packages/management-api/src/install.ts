@@ -372,7 +372,7 @@ async function prepareSystemEnv() {
         await $`echo "${pubKey}" >> ${sshDir}/authorized_keys`;
     }
     await $`chmod 600 ${sshDir}/authorized_keys`;
-    await $`ssh-keyscan -H localhost 127.0.0.1 ::1 > ${sshDir}/known_hosts 2>/dev/null || true`;
+    await $`ssh-keyscan -H localhost 127.0.0.1 ::1 > ${sshDir}/known_hosts`.nothrow().quiet();
     s.stop("可信通信加密桥搭建成功");
 }
 

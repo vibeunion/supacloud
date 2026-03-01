@@ -90,8 +90,8 @@ export class HealthChecker {
         try {
             // 在 Docker 容器中，systemctl 即使存在也通常无法使用（PID 1 不是 systemd）
             // 检查系统是否真的由 systemd 引导
-            const isSystemd = (await $`systemctl is-system-running 2>/dev/null`.nothrow().quiet()).exitCode === 0 ||
-                (await $`systemctl --version 2>/dev/null`.nothrow().quiet()).exitCode === 0;
+            const isSystemd = (await $`systemctl is-system-running`.nothrow().quiet()).exitCode === 0 ||
+                (await $`systemctl --version`.nothrow().quiet()).exitCode === 0;
 
             const isContainer = (await $`test -f /.dockerenv`.nothrow()).exitCode === 0;
 
@@ -104,7 +104,7 @@ export class HealthChecker {
                 };
             }
 
-            const isActive = (await $`systemctl is-active ${name} 2>/dev/null`.nothrow()).exitCode === 0;
+            const isActive = (await $`systemctl is-active ${name}`.nothrow().quiet()).exitCode === 0;
             return {
                 component: label,
                 status: isActive ? "OK" : "ERROR",
