@@ -302,15 +302,14 @@ export class PigstyManager {
             const mainListBak = `${mainList}.pigsty_bak`;
             if (await Bun.file(mainList).exists()) {
                 const content = await Bun.file(mainList).text();
-                // 只有主源包含 debian.org 才隔离，且避免重复移动
+                // 只要包含 debian.org 就隔离，且避免重复移动；不再 touch 空文件，防止语法解析错误
                 if (content.includes("deb.debian.org/debian") && !(await Bun.file(mainListBak).exists())) {
                     console.log(`[PigstyManager] 正在隔离系统主源: ${mainList}`);
                     await $`sudo mv -f ${mainList} ${mainListBak}`.quiet();
-                    await $`sudo touch ${mainList}`.quiet();
                 }
             }
 
-            // 2. 处理 sources.list.d 下的所有冲突源
+            // 2. 处理 sources.list.d 下的所有冲突源 (无差别物理隔离)
             const sourcesDir = "/etc/apt/sources.list.d";
             if (await Bun.file(sourcesDir).exists()) {
                 const dirents = (await $`ls ${sourcesDir}`.nothrow().text()).split("\n").filter(f => f.trim());
@@ -318,7 +317,7 @@ export class PigstyManager {
                     const filePath = `${sourcesDir}/${f}`;
                     if (f.includes("pigsty")) continue; // 保命：绝对不能动 Pigsty 自己的源
 
-                    console.log(`[PigstyManager] 正在物理隔离第三方/冲突源文件: ${f}`);
+                    console.log(`[PigstyManager] 正在物理隔离冲突源文件: ${f}`);
                     await $`sudo mv -f ${filePath} ${backupDir}/${f}`.quiet();
                 }
             }
