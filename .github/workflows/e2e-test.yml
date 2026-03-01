@@ -55,9 +55,9 @@ jobs:
               echo '[CI] 验证版本与安装流程 (Dry Run)...'
               supacloud --version || true
               
-              # 运行安装 Dry Run
+              # 运行完整安装
               # 我们提供必要的参数以跳过所有交互
-              supacloud install --yes --dry-run --ip 127.0.0.1 --domain api.local.nip.io --password ci-test-pass
+              supacloud install --yes --ip 127.0.0.1 --domain api.local.nip.io --password ci-test-pass
               
               echo '[CI] 运行 Doctor 扫描 (基础设施)...'
               # 预期会有 WARN 但不应 Crash
