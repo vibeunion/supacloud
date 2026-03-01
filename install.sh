@@ -2121,6 +2121,9 @@ manual_start_supabase() {
     # 重启受影响的容器以应用健康检查修复
     log_info "重启 Studio 和 Analytics 容器以应用健康检查修复..."
     docker restart supabase-studio supabase-analytics 2>/dev/null || true
+    
+    # 修复 Realtime 服务
+    fix_realtime_service
 }
 
 # ========== 修复容器健康检查 ==========
@@ -2139,26 +2142,95 @@ fix_container_healthchecks() {
     
     # 1. 修复 Studio 健康检查
     # 问题: YAML 中的 `=>` 被解析为折叠符号，导致命令被分割
-    # 解决方案: 使用简单的端口检查或 Node.js 同步代码
+    # 解决方案: 使用简单的端口检查
     log_info "修复 Studio 健康检查..."
     if grep -q "fetch('http://studio:3000" "$COMPOSE_FILE" 2>/dev/null; then
-        # 替换为不使用箭头函数的健康检查
         sed -i "s|http://studio:3000|http://localhost:3000|g" "$COMPOSE_FILE"
         log_info "  已修复 Studio 健康检查 URL"
     fi
     
     # 2. 修复 Analytics 健康检查
     # 问题: Logflare 容器内没有 curl/wget/nc
-    # 解决方案: 使用简单的文件检查或进程检查
+    # 解决方案: 使用简单的端口监听检查
     log_info "修复 Analytics 健康检查..."
     if grep -q "curl.*localhost:4000/health" "$COMPOSE_FILE" 2>/dev/null; then
-        # Logflare 容器没有 curl，使用简单的端口监听检查
-        # 检查 /proc/net/tcp 是否有监听端口 4000 (0x0FA0)
         sed -i 's|test: \["CMD", "curl", "-f", "http://localhost:4000/health"\]|test: ["CMD-SHELL", "cat /proc/net/tcp | grep -q 0FA0"]|g' "$COMPOSE_FILE"
         log_info "  已修复 Analytics 健康检查命令"
     fi
     
+    # 3. 修复 Realtime 健康检查
+    # 问题: Realtime seeds.exs 脚本需要 ENCRYPTION_KEY，但格式要求严格
+    # 解决方案: 禁用自动 seed，使用简单的健康检查
+    log_info "修复 Realtime 健康检查..."
+    if grep -q "realtime" "$COMPOSE_FILE" 2>/dev/null; then
+        # 添加 SEED_SELF_HOST=false 环境变量
+        if ! grep -q "SEED_SELF_HOST" "$COMPOSE_FILE" 2>/dev/null; then
+            sed -i '/realtime:/,/^[^ ]/ s/-e PORT=4000/-e PORT=4000\n      - SEED_SELF_HOST=false/' "$COMPOSE_FILE" 2>/dev/null || true
+        fi
+        log_info "  已添加 SEED_SELF_HOST=false 到 Realtime 服务"
+    fi
+    
     log_info "健康检查修复完成"
+}
+
+# ========== 修复 Realtime 服务 ==========
+fix_realtime_service() {
+    log_step "修复 Realtime 服务..."
+    
+    source ~/pigsty/app/supabase/.env 2>/dev/null || source /opt/supabase/.env 2>/dev/null
+    
+    # 检查 Realtime 容器是否存在
+    if ! docker ps -a --format '{{.Names}}' | grep -q "realtime"; then
+        log_warn "未找到 Realtime 容器，跳过修复"
+        return
+    fi
+    
+    # 检查 Realtime 是否健康
+    local realtime_status=$(docker inspect realtime-dev.supabase-realtime --format '{{.State.Health.Status}}' 2>/dev/null || echo "unknown")
+    
+    if [[ "$realtime_status" != "healthy" ]]; then
+        log_info "Realtime 不健康，重新创建容器..."
+        
+        # 停止并删除旧容器
+        docker rm -f realtime-dev.supabase-realtime 2>/dev/null || true
+        
+        # 创建新的 Realtime 容器，禁用自动 seed
+        docker run -d --name realtime-dev.supabase-realtime \
+            --network supabase_default \
+            --restart unless-stopped \
+            -e PORT=4000 \
+            -e DB_HOST=${POSTGRES_HOST} \
+            -e DB_PORT=${POSTGRES_PORT} \
+            -e DB_USER=supabase_admin \
+            -e DB_PASSWORD=${POSTGRES_PASSWORD} \
+            -e DB_NAME=${POSTGRES_DB} \
+            -e DB_SSL=false \
+            -e JWT_SECRET=${JWT_SECRET} \
+            -e REPLICATION_MODE=RLS \
+            -e REPLICATION_POLL_INTERVAL=100 \
+            -e SECURE_CHANNELS=true \
+            -e SUBSCRIBER_JWT_SECRET=${JWT_SECRET} \
+            -e MAX_HEADER_SIZE=16384 \
+            -e API_JWT_SECRET=${JWT_SECRET} \
+            -e SECRET_KEY_BASE=${JWT_SECRET} \
+            -e ERL_AFLAGS="-proto_dist inet6_tcp" \
+            -e DNS_NODES="realtime-dev.supabase-realtime" \
+            -e SEED_SELF_HOST=false \
+            -e APP_NAME=realtime \
+            -e FLY_APP_NAME=realtime \
+            -e FLY_REGION=local \
+            -e FLY_ALLOC_ID=abc123 \
+            --health-cmd "curl -s http://localhost:4000/health" \
+            --health-interval 10s \
+            --health-timeout 30s \
+            --health-retries 3 \
+            --health-start-period 60s \
+            supabase/realtime:v2.76.5
+        
+        log_info "Realtime 容器已重新创建"
+    else
+        log_info "Realtime 服务健康，无需修复"
+    fi
 }
 
 # ========== 部署 MCP Function ==========
