@@ -41,26 +41,21 @@ jobs:
             bash -c "
               # 1. 安装基础依赖
               if command -v apt-get >/dev/null; then
-                apt-get update && apt-get install -y curl wget sudo kmod iproute2
+                apt-get update && apt-get install -y curl wget sudo kmod iproute2 openssh-server openssh-client
               elif command -v dnf >/dev/null; then
-                dnf install -y --allowerasing epel-release curl wget sudo kmod iproute2
+                dnf install -y --allowerasing epel-release curl wget sudo kmod iproute2 openssh-server openssh-clients
               elif command -v yum >/dev/null; then
-                yum install -y --allowerasing epel-release curl wget sudo kmod iproute2
+                yum install -y --allowerasing epel-release curl wget sudo kmod iproute2 openssh-server openssh-clients
               fi
 
               # 2. 模拟系统环境 (假装有 systemd) 并启动 SSH
               mkdir -p /etc/supabase
               mkdir -p /run/sshd
-              if command -v apt-get >/dev/null; then
-                ssh-keygen -A
-                /usr/sbin/sshd
-              elif command -v dnf >/dev/null; then
-                ssh-keygen -A
-                /usr/sbin/sshd
-              fi
+              ssh-keygen -A
+              /usr/sbin/sshd
               
               # 3. 运行安装测试
-              cp supacloud /usr/local/bin/supacloud
+              cp packages/management-api/supacloud-linux-amd64 /usr/local/bin/supacloud
               chmod +x /usr/local/bin/supacloud
               
               echo '[CI] 验证版本...'
