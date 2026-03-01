@@ -1,0 +1,14 @@
+{
+  "name": "supacloud",
+  "private": true,
+  "scripts": {
+    "release": "standard-version"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "standard-version": "^9.5.0"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  }
+}
