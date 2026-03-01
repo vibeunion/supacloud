@@ -15,8 +15,8 @@ describe("SupaCloud 多租户 API 隔离性测试", () => {
             })
         );
 
-        // 如果认证失败会是 401，我们预期是进入业务逻辑 (即便最后因为无 DB 报错)
-        expect(res.status).not.toBe(401);
+        // 如果认证失败会是 401，我们预期是进入业务逻辑 (即便最后因为无 DB 报错返回 404 或 500)
+        expect([200, 404, 500]).toContain(res.status);
     });
 
     test("租户 A 不应被允许访问租户 B 的项目详情", async () => {

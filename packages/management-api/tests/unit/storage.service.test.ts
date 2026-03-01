@@ -168,11 +168,13 @@ describe("StorageService", () => {
 
   describe("JuiceFS Methods", () => {
     test("getStatus should return parsed status", async () => {
-      const spy = spyOn(shellService, "execute").mockResolvedValue({
-        success: true,
-        output: "juicefs:supacloud  100G  1.2G   99G   2% /mnt/supacloud"
+      const { StorageManager } = await import("../../src/infra/storage");
+      const spy = spyOn(StorageManager.prototype, "getStatus").mockResolvedValue({
+        mounted: true,
+        type: "juicefs",
+        details: "juicefs:supacloud  100G  1.2G   99G   2% /mnt/supacloud"
       });
-      const result = await service.getStatus();
+      const result = await StorageService.getStatus();
       expect(result.status).toBe("mounted");
       expect(result.size).toBe("100G");
       expect(result.used).toBe("1.2G");

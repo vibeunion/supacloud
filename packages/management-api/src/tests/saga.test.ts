@@ -21,6 +21,7 @@ describe("Saga 任务流转 Mock 测试", () => {
 
         // 执行一次 Poll
         // @ts-ignore: 访问私有方法进行测试
+        const executeSpy = spyOn(taskWorker, "executeTask").mockResolvedValue(true);
         await taskWorker.poll();
 
         // 验证: provision_db 完成后应创建 provision_s3
@@ -50,6 +51,7 @@ describe("Saga 任务流转 Mock 测试", () => {
         const updateProjectStatusSpy = spyOn(projectRepository, "updateStatus").mockResolvedValue({} as any);
 
         // @ts-ignore
+        const executeSpy = spyOn(taskWorker, "executeTask").mockResolvedValue(true);
         await taskWorker.poll();
 
         // 验证: S3 失败应回滚 DB (加入 cleanup_db 任务)

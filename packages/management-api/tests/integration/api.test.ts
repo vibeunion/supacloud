@@ -79,7 +79,7 @@ const testApp = new Elysia()
   // 创建项目
   .post(
     "/v1/projects",
-    ({ body, set }) => {
+    ({ body, set }: any) => {
       const ref = `test${++projectCounter}`;
       const project = {
         id: `uuid-${ref}`,
