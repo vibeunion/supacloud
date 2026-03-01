@@ -52,25 +52,12 @@ jobs:
               cp packages/management-api/supacloud-linux-amd64 /usr/local/bin/supacloud
               chmod +x /usr/local/bin/supacloud
               
-              echo '[CI] 验证版本与安装流程 (Dry Run)...'
-              supacloud --version || true
+              echo '[CI] 验证版本...'
+              supacloud --version
               
-              # 运行完整安装
-              # 我们提供必要的参数以跳过所有交互
+              echo '[CI] 开始完整安装流量测试...'
+              # 安装脚本内部会自动触发 Doctor 巡检
               supacloud install --yes --ip 127.0.0.1 --domain api.local.nip.io --password ci-test-pass
               
-              echo '[CI] 运行 Doctor 扫描 (基础设施)...'
-              # 预期会有 WARN 但不应 Crash
-              supacloud doctor --skip-smoke-test || true
-
-              echo '[CI] 模拟业务冒烟测试 (功能闭环)...'
-              # 在 CI 环境中测试 API 模式启动与业务逻辑 (虽然缺少真 Pigsty 环境，但逻辑路径应通畅)
-              # 启动后台服务 (Mock 模式)
-              supacloud --server &
-              sleep 3
-              
-              # 运行冒烟测试
-              supacloud doctor --yes || true
-              
-              echo '[CI] 所有二进制逻辑通路验证完成！'
+              echo '[CI] 安装流程逻辑路径验证完成！'
             "

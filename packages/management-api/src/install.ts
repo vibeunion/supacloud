@@ -358,7 +358,7 @@ async function prepareSystemEnv() {
     const sshDir = `${homeDir}/.ssh`;
     await $`mkdir -p ${sshDir} && chmod 700 ${sshDir}`;
 
-    if ((await $`test -f ${sshDir}/id_ed25519`.nothrow()).exitCode !== 0) {
+    if ((await $`test -f ${sshDir}/id_ed25519`.nothrow().quiet()).exitCode !== 0) {
         // 使用 Bun.spawn 显式传递参数数组，彻底解决 Shell 对空参数的解析歧义
         const proc = Bun.spawn(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", `${sshDir}/id_ed25519`], {
             stdout: "inherit",
