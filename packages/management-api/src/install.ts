@@ -45,6 +45,7 @@ async function checkSystem() {
 
 import { PigstyManager, type PigstyConfig } from "./infra/pigsty";
 import { LoadBalancerManager } from "./infra/loadbalancer";
+import { ServiceManager } from "./infra/service";
 
 async function runInteractiveConfig(): Promise<PigstyConfig> {
     const s = p.spinner();
@@ -207,6 +208,15 @@ export async function runInstall() {
 
         p.log.step(">>> 开始转接 Angie / OpenResty 前端路由引擎 ...");
         await LoadBalancerManager.installAngie(config.studioDomain, config.publicDomain);
+
+        p.log.step(">>> 正在将 Management API 注册为系统服务 ...");
+        const selfPath = process.argv[0];
+        await ServiceManager.register(
+            "supacloud-api",
+            "SupaCloud Management API Server",
+            selfPath,
+            ["start"]
+        );
 
         p.outro(`🎉 SupaCloud 控制栈部署完成`);
     } catch (error: any) {
