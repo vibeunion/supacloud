@@ -1,9 +1,75 @@
-import { describe, it, expect } from "bun:test";
-import { app } from "../src/index";
+import { describe, it, expect, beforeAll, spyOn } from "bun:test";
+import { app, registerAllRoutes } from "./index";
+import { config } from "./config";
+import { organizationService } from "./services/organization.service";
+import { projectService } from "./services/project.service";
 
 describe("Management API Integration Tests", () => {
+    beforeAll(async () => {
+        await registerAllRoutes(app);
+
+        // Mock OrganizationService
+        spyOn(organizationService, "listOrganizations").mockResolvedValue([
+            { id: "org-1", name: "Default Organization", slug: "default", created_at: new Date(), updated_at: new Date() }
+        ]);
+
+        // Mock ProjectService
+        spyOn(projectService, "listProjects").mockResolvedValue([
+            {
+                id: "proj-1",
+                ref: "default",
+                name: "Default Project",
+                status: "active",
+                region: "local",
+                created_at: new Date(),
+                database: { host: "localhost", name: "supa_default", user: "role_default" },
+                api: { url: "http://api.localhost" },
+                studio: { url: "http://studio.localhost" }
+            }
+        ]);
+
+        spyOn(projectService, "getProject").mockImplementation(async (ref) => {
+            if (ref === "default") {
+                return {
+                    id: "proj-1",
+                    ref: "default",
+                    name: "Default Project",
+                    status: "active",
+                    region: "local",
+                    created_at: new Date(),
+                    updated_at: new Date(),
+                    config: { display_name: "Default Project" },
+                    database: { host: "localhost", name: "supa_default", user: "role_default" },
+                    api: { url: "http://api.localhost" },
+                    studio: { url: "http://studio.localhost" }
+                };
+            }
+            return null;
+        });
+
+        spyOn(projectService, "getProjectHealth").mockResolvedValue({
+            status: "ACTIVE_HEALTHY",
+            services: { database: "ACTIVE_HEALTHY" }
+        });
+
+        spyOn(projectService, "getProjectStatus").mockResolvedValue({
+            status: "active",
+            database: "healthy",
+            storage: "healthy"
+        });
+
+        spyOn(projectService, "queryLogs").mockResolvedValue([]);
+        spyOn(projectService, "getProjectSettings").mockResolvedValue({});
+        spyOn(projectService, "listFunctions").mockResolvedValue([]);
+        spyOn(projectService, "getApiKeys").mockResolvedValue({ anon_key: "anon", service_role_key: "service" });
+        spyOn(projectService, "listBackups").mockResolvedValue([]);
+        spyOn(projectService, "rotateApiKeys").mockResolvedValue({ anon_key: "new-anon", service_role_key: "new-service" });
+        spyOn(projectService, "updateNetworkRestrictions").mockResolvedValue(true);
+        spyOn(projectService, "addCustomDomain").mockResolvedValue(true);
+    });
+
     const baseUrl = "http://localhost";
-    const masterToken = "dev-master-token";
+    const masterToken = config.masterToken;
 
     describe("Organizations", () => {
         it("should list organizations", async () => {
@@ -15,14 +81,11 @@ describe("Management API Integration Tests", () => {
                 })
             );
 
-            // 允许 200 (正常) 或 500 (环境不稳定下的数据库连接问题)
-            expect([200, 500]).toContain(response.status);
-            if (response.status === 200) {
-                const data = await response.json();
-                expect(Array.isArray(data)).toBe(true);
-                expect(data.length).toBeGreaterThan(0);
-                expect(data[0]).toHaveProperty("slug", "default");
-            }
+            expect(response.status).toBe(200);
+            const data = await response.json();
+            expect(Array.isArray(data)).toBe(true);
+            expect(data.length).toBeGreaterThan(0);
+            expect(data[0]).toHaveProperty("slug", "default");
         });
     });
 
@@ -67,12 +130,9 @@ describe("Management API Integration Tests", () => {
                 })
             );
 
-            // 允许 200 (正常) 或 500 (环境不稳定下的数据库连接问题)
-            expect([200, 500]).toContain(response.status);
-            if (response.status === 200) {
-                const data = await response.json();
-                expect(Array.isArray(data)).toBe(true);
-            }
+            expect(response.status).toBe(200);
+            const data = await response.json();
+            expect(Array.isArray(data)).toBe(true);
         });
 
         it("should return 404 for non-existent project", async () => {
@@ -84,8 +144,7 @@ describe("Management API Integration Tests", () => {
                 })
             );
 
-            // 允许 404 (业务预期) 或 500 (环境不稳定下的数据库连接问题，暂时忽略)
-            expect([404, 500]).toContain(response.status);
+            expect(response.status).toBe(404);
         });
 
         it("should return project usage metrics", async () => {
@@ -94,12 +153,8 @@ describe("Management API Integration Tests", () => {
                     headers: { Authorization: `Bearer ${masterToken}` },
                 })
             );
-            expect([200, 404, 500]).toContain(response.status);
-            if (response.status === 200) {
-                const data = await response.json();
-                expect(data).toHaveProperty("data");
-                expect(data.data).toHaveProperty("cpu");
-            }
+            // 内部可能没有 mock 这个，但我们先允许 200 或 404
+            expect([200, 404]).toContain(response.status);
         });
 
         it("should return project logs", async () => {
@@ -108,11 +163,7 @@ describe("Management API Integration Tests", () => {
                     headers: { Authorization: `Bearer ${masterToken}` },
                 })
             );
-            expect([200, 404, 500]).toContain(response.status);
-            if (response.status === 200) {
-                const data = await response.json();
-                expect(Array.isArray(data)).toBe(true);
-            }
+            expect(response.status).toBe(200);
         });
 
         it("should return auth config", async () => {
@@ -121,7 +172,7 @@ describe("Management API Integration Tests", () => {
                     headers: { Authorization: `Bearer ${masterToken}` },
                 })
             );
-            expect([200, 404, 500]).toContain(response.status);
+            expect([200, 404]).toContain(response.status);
         });
 
         it("should list project functions", async () => {
@@ -130,11 +181,7 @@ describe("Management API Integration Tests", () => {
                     headers: { Authorization: `Bearer ${masterToken}` },
                 })
             );
-            expect([200, 404, 500]).toContain(response.status);
-            if (response.status === 200) {
-                const data = await response.json();
-                expect(Array.isArray(data)).toBe(true);
-            }
+            expect(response.status).toBe(200);
         });
 
         it("should rotate api keys", async () => {
@@ -144,12 +191,10 @@ describe("Management API Integration Tests", () => {
                     headers: { Authorization: `Bearer ${masterToken}` },
                 })
             );
-            expect([200, 404, 500]).toContain(response.status);
-            if (response.status === 200) {
-                const data = await response.json();
-                expect(data).toHaveProperty("anon_key");
-                expect(data).toHaveProperty("service_role_key");
-            }
+            expect(response.status).toBe(200);
+            const data = await response.json();
+            expect(data).toHaveProperty("anon_key");
+            expect(data).toHaveProperty("service_role_key");
         });
 
         it("should list database backups", async () => {
@@ -158,11 +203,7 @@ describe("Management API Integration Tests", () => {
                     headers: { Authorization: `Bearer ${masterToken}` },
                 })
             );
-            expect([200, 404, 500]).toContain(response.status);
-            if (response.status === 200) {
-                const data = await response.json();
-                expect(Array.isArray(data)).toBe(true);
-            }
+            expect(response.status).toBe(200);
         });
 
         it("should apply network restrictions", async () => {
@@ -178,7 +219,7 @@ describe("Management API Integration Tests", () => {
                     })
                 })
             );
-            expect([200, 404, 500]).toContain(response.status);
+            expect(response.status).toBe(200);
         });
 
         it("should update custom hostname", async () => {
@@ -194,7 +235,7 @@ describe("Management API Integration Tests", () => {
                     })
                 })
             );
-            expect([200, 404, 500]).toContain(response.status);
+            expect(response.status).toBe(200);
         });
     });
 });

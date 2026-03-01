@@ -79,37 +79,67 @@ const app = new Elysia({ strictPath: false })
 // @ts-ignore: 此文件由 scripts/pack-assets.ts 自动生成
 import { EMBEDDED_ASSETS } from "./assets.gen";
 
-app.get("*", async ({ request, set }) => {
-  const url = new URL(request.url);
-  const path = url.pathname === "/" ? "/index.html" : url.pathname;
+/**
+ * 注册静态资产 (SPA)
+ */
+export function registerStaticAssets(app: Elysia) {
+  return app.get("*", async ({ request, set }) => {
+    const url = new URL(request.url);
+    const path = url.pathname === "/" ? "/index.html" : url.pathname;
 
-  if (path.startsWith("/api/")) {
-    set.status = 404;
-    return { error: "API route not found" };
-  }
-
-  try {
-    const ASSETS = EMBEDDED_ASSETS;
-    let asset = ASSETS[path];
-    if (!asset && !path.includes(".")) {
-      asset = ASSETS["/index.html"];
-    }
-
-    if (asset) {
-      set.headers["Content-Type"] = asset.mimeType;
-      return Buffer.from(asset.content, 'base64');
-    } else {
+    if (path.startsWith("/api/") || path.startsWith("/v1/")) {
       set.status = 404;
-      return "Internal Asset Not Found.";
+      return { error: "Route not found" };
     }
-  } catch (e) {
-    if (process.env.NODE_ENV !== "production") {
-      return "Management Console DEV mode: run 'bun run build:all' to load SPA assets into memory.";
+
+    try {
+      const ASSETS = EMBEDDED_ASSETS;
+      let asset = ASSETS[path];
+      if (!asset && !path.includes(".")) {
+        asset = ASSETS["/index.html"];
+      }
+
+      if (asset) {
+        set.headers["Content-Type"] = asset.mimeType;
+        return Buffer.from(asset.content, 'base64');
+      } else {
+        set.status = 404;
+        return "Internal Asset Not Found.";
+      }
+    } catch (e) {
+      if (process.env.NODE_ENV !== "production") {
+        return "Management Console DEV mode: run 'bun run build:all' to load SPA assets into memory.";
+      }
+      set.status = 404;
+      return "App Assets Not Built.";
     }
-    set.status = 404;
-    return "App Assets Not Built.";
-  }
-});
+  });
+}
+
+/**
+ * 注册所有路由模块
+ */
+export async function registerAllRoutes(app: Elysia) {
+  const {
+    projectRoutes, organizationRoutes, userRoutes, backupRoutes,
+    monitorRoutes, maintenanceRoutes, extensionRoutes, securityRoutes,
+    storageRoutes, scalingRoutes, taskRoutes
+  } = await import("./routes");
+
+  return app
+    .use(authMiddleware)
+    .use(projectRoutes)
+    .use(organizationRoutes)
+    .use(userRoutes)
+    .use(backupRoutes)
+    .use(monitorRoutes)
+    .use(maintenanceRoutes)
+    .use(extensionRoutes)
+    .use(securityRoutes)
+    .use(storageRoutes)
+    .use(scalingRoutes)
+    .use(taskRoutes);
+}
 
 const args = process.argv.slice(2);
 
@@ -167,26 +197,9 @@ async function bootstrap() {
     process.exit(0);
   } else {
     // API 服务器模式：此时才加载路由和启动 TaskWorker
-    const {
-      projectRoutes, organizationRoutes, userRoutes, backupRoutes,
-      monitorRoutes, maintenanceRoutes, extensionRoutes, securityRoutes,
-      storageRoutes, scalingRoutes, taskRoutes
-    } = await import("./routes");
+    await registerAllRoutes(app);
+    registerStaticAssets(app);
     const { taskWorker } = await import("./services/task.worker");
-
-    app
-      .use(authMiddleware)
-      .use(projectRoutes)
-      .use(organizationRoutes)
-      .use(userRoutes)
-      .use(backupRoutes)
-      .use(monitorRoutes)
-      .use(maintenanceRoutes)
-      .use(extensionRoutes)
-      .use(securityRoutes)
-      .use(storageRoutes)
-      .use(scalingRoutes)
-      .use(taskRoutes);
 
     app.listen(config.port);
     taskWorker.start();
@@ -202,6 +215,8 @@ async function bootstrap() {
   }
 }
 
-bootstrap();
+if (import.meta.main) {
+  bootstrap();
+}
 
 export { app };

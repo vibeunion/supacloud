@@ -1,0 +1,360 @@
+bun test v1.3.10 (30e609e0)
+
+src\api.test.ts:
+(pass) Management API Integration Tests > Organizations > should list organizations [16.00ms]
+(pass) Management API Integration Tests > User Profile > should return user profile
+(pass) Management API Integration Tests > User Profile > should return current user (me)
+(pass) Management API Integration Tests > Projects > should list projects
+(pass) Management API Integration Tests > Projects > should return 404 for non-existent project [15.00ms]
+(pass) Management API Integration Tests > Projects > should return project usage metrics
+(pass) Management API Integration Tests > Projects > should return project logs
+(pass) Management API Integration Tests > Projects > should return auth config
+(pass) Management API Integration Tests > Projects > should list project functions
+(pass) Management API Integration Tests > Projects > should rotate api keys
+(pass) Management API Integration Tests > Projects > should list database backups
+(pass) Management API Integration Tests > Projects > should apply network restrictions
+(pass) Management API Integration Tests > Projects > should update custom hostname
+
+tests\integration\api.test.ts:
+(pass) Health Check > GET /health should return ok
+(pass) Auth Middleware > should return 401 without auth header
+(pass) Auth Middleware > should return 401 with Basic auth
+(pass) Auth Middleware > should return 403 with invalid Bearer token
+(pass) Auth Middleware > should return 200 with valid token
+(pass) Auth Middleware > should handle empty Bearer token
+(pass) Organizations > should list organizations
+(pass) User Profile > should return user profile
+(pass) User Profile > should return current user (me) [15.00ms]
+(pass) GET /v1/projects/available-regions > should return region list
+(pass) GET /v1/projects/available-regions > each region should have required fields
+(pass) Projects CRUD > POST /v1/projects should create project
+(pass) Projects CRUD > POST /v1/projects should accept region
+(pass) Projects CRUD > POST /v1/projects validation - empty name
+(pass) Projects CRUD > POST /v1/projects validation - missing name
+(pass) Projects CRUD > GET /v1/projects should list projects
+(pass) Projects CRUD > GET /v1/projects/:ref should get project details
+(pass) Projects CRUD > GET /v1/projects/:ref - not found
+(pass) Projects CRUD > PATCH /v1/projects/:ref should update project
+(pass) Projects CRUD > DELETE /v1/projects/:ref should delete project
+(pass) Project Lifecycle > POST /v1/projects/:ref/pause should pause project
+(pass) Project Lifecycle > POST /v1/projects/:ref/restore should restore project [16.00ms]
+(pass) Project Lifecycle > POST /v1/projects/:ref/restart should restart project
+(pass) Project Health & Status > GET /v1/projects/:ref/health should return health status
+(pass) Project Health & Status > GET /v1/projects/:ref/status should return status
+(pass) Project Settings > GET /v1/projects/:ref/settings should return settings
+(pass) Project Settings > PUT /v1/projects/:ref/settings should update settings
+(pass) API Keys > GET /v1/projects/:ref/api-keys should return keys
+(pass) Not Found Cases > GET /v1/projects/:ref returns 404
+(pass) Not Found Cases > PATCH /v1/projects/:ref returns 404
+(pass) Not Found Cases > DELETE /v1/projects/:ref returns 404
+(pass) Not Found Cases > POST /v1/projects/:ref/pause returns 404
+(pass) Not Found Cases > POST /v1/projects/:ref/restore returns 404
+(pass) Not Found Cases > GET /v1/projects/:ref/health returns 404
+(pass) Not Found Cases > GET /v1/projects/:ref/status returns 404
+(pass) Not Found Cases > POST /v1/projects/:ref/restart returns 404
+(pass) Not Found Cases > GET /v1/projects/:ref/settings returns 404
+(pass) Not Found Cases > PUT /v1/projects/:ref/settings returns 404
+(pass) Not Found Cases > GET /v1/projects/:ref/api-keys returns 404
+
+tests\unit\auth.test.ts:
+(pass) Auth Middleware Logic > should have a master token configured
+(pass) Auth Middleware Logic > should match valid Bearer token format
+(pass) Auth Middleware Logic > should reject non-Bearer formats
+(pass) Auth Middleware Logic > should reject empty authorization
+(pass) Auth Middleware Logic > should reject wrong token
+
+tests\unit\backup.service.test.ts:
+(pass) BackupService > listBackups should parse pgBackRest JSON output
+(pass) BackupService > createBackup should return success message immediately
+(pass) BackupService > restore should return success message
+
+tests\unit\config.test.ts:
+(pass) Config > should have port configured
+(pass) Config > should have database URL
+(pass) Config > should have master token
+(pass) Config > should have scripts path
+(pass) Config > should have base domain
+(pass) Config > should have S3 endpoint
+(pass) Config > should default port to 9090
+
+tests\unit\database.service.test.ts:
+(pass) DatabaseService > generatePassword > should generate a password string
+(pass) DatabaseService > generatePassword > should generate unique passwords
+(pass) DatabaseService > generatePassword > should only contain URL-safe characters
+(pass) DatabaseService > createDatabase > should return result object [547.00ms]
+(pass) DatabaseService > createDatabase > should call shell service with correct args
+(pass) DatabaseService > createDatabase > should return success when shell succeeds
+(pass) DatabaseService > createDatabase > should return error when shell fails
+(pass) DatabaseService > deleteDatabase > should return result object [250.00ms]
+(pass) DatabaseService > deleteDatabase > should call shell service with correct args
+(pass) DatabaseService > checkStatus > should return result with output [234.00ms]
+(pass) DatabaseService > checkStatus > should call shell service with correct args
+(pass) DatabaseService > getSecrets > should return empty array when shell fails
+(pass) DatabaseService > getSecrets > should return parsed JSON when shell succeeds
+(pass) DatabaseService > getSecrets > should return empty array when JSON parse fails
+(pass) DatabaseService > getSecrets > should call shell service with correct args
+(pass) DatabaseService > upsertSecret > should return true when shell succeeds
+(pass) DatabaseService > upsertSecret > should return false when shell fails
+(pass) DatabaseService > upsertSecret > should call shell service with correct args
+(pass) DatabaseService > deleteSecret > should return true when shell succeeds
+(pass) DatabaseService > deleteSecret > should return false when shell fails
+(pass) DatabaseService > deleteSecret > should call shell service with correct args
+
+tests\unit\extension.service.test.ts:
+(pass) ExtensionService > listExtensions should parse JSON output
+(pass) ExtensionService > enableExtension should call enable command
+
+tests\unit\gateway.service.test.ts:
+(pass) GatewayService > setRateLimit should call gateway_manager.sh with pro tier
+(pass) GatewayService > setCors should call gateway_manager.sh with origins
+(pass) GatewayService > applyConfig should combine multiple calls
+
+tests\unit\jwt.service.test.ts:
+(pass) JwtService > generateSecret > should return a string with 40 characters
+(pass) JwtService > generateSecret > should generate unique secrets
+(pass) JwtService > generateSecret > should only contain alphanumeric and dash/underscore
+(pass) JwtService > generateProjectRef > should return a lowercase string with 10 characters
+(pass) JwtService > generateProjectRef > should generate unique refs
+(pass) JwtService > generateAnonKey > should return a valid JWT
+(pass) JwtService > generateAnonKey > should have correct header
+(pass) JwtService > generateAnonKey > should have anon role in payload
+(pass) JwtService > generateAnonKey > should have valid timestamps
+(pass) JwtService > generateAnonKey > should have 10 year expiry
+(pass) JwtService > generateServiceRoleKey > should return a valid JWT
+(pass) JwtService > generateServiceRoleKey > should have service_role in payload
+(pass) JwtService > generateServiceRoleKey > should have different signature than anon key
+(pass) JwtService > generateKeySet > should return all three keys
+(pass) JwtService > generateKeySet > should have correct secret length
+(pass) JwtService > generateKeySet > should have valid JWTs
+(pass) JwtService > generateKeySet > should generate unique key sets
+(pass) JwtService > generateKeySet > keys should be generated with the same secret
+
+tests\unit\maintenance.service.test.ts:
+(pass) MaintenanceService > switchover should call ha_manager.sh with correct args
+(pass) MaintenanceService > reloadConfig should call ha_manager.sh reload
+(pass) MaintenanceService > addReplica should trigger async expansion
+
+tests\unit\monitor.service.test.ts:
+(pass) MonitorService > getHealth should return formatted status
+(pass) MonitorService > getMetrics should aggregate and parse VM results
+Health check failed for 1.2.3.4: 49 |         expect(metrics.cpu_usage).toBe(42.5);
+50 |         expect(metrics.mem_usage).toBe(42.5);
+51 |     });
+52 | 
+53 |     test("getHealth should handle errors gracefully", async () => {
+54 |         globalThis.fetch = mock(() => Promise.reject(new Error("Network Error"))) as any;
+                                                              ^
+error: Network Error
+      at <anonymous> (D:\workspace\supacloud\packages\management-api\tests\unit\monitor.service.test.ts:54:58)
+      at getHealth (D:\workspace\supacloud\packages\management-api\src\services\monitor.service.ts:13:36)
+      at <anonymous> (D:\workspace\supacloud\packages\management-api\tests\unit\monitor.service.test.ts:56:45)
+
+(pass) MonitorService > getHealth should handle errors gracefully
+
+tests\unit\project.repository.test.ts:
+(pass) ProjectRepository > findAll > should return all non-deleted projects
+(pass) ProjectRepository > findAll > should return empty array when no projects
+(pass) ProjectRepository > findByRef > should return project when found
+(pass) ProjectRepository > findByRef > should return null when not found
+(pass) ProjectRepository > findById > should return project when found
+(pass) ProjectRepository > findById > should return null when not found
+(pass) ProjectRepository > create > should create and return project
+(pass) ProjectRepository > create > should handle optional s3 keys
+(pass) ProjectRepository > create > should handle config option
+(pass) ProjectRepository > updateStatus > should update and return project
+(pass) ProjectRepository > updateStatus > should return null when project not found
+(pass) ProjectRepository > updateConfig > should update and return project
+(pass) ProjectRepository > updateConfig > should return null when project not found
+(pass) ProjectRepository > softDelete > should soft delete and return project
+(pass) ProjectRepository > softDelete > should return null when project not found
+(pass) ProjectRepository > existsByRef > should return true when ref exists
+(pass) ProjectRepository > existsByRef > should return false when ref does not exist
+
+tests\unit\project.service.comprehensive.test.ts:
+(pass) ProjectService - Comprehensive > listProjects > should return empty array when no projects
+(pass) ProjectService - Comprehensive > listProjects > should return mapped projects
+(pass) ProjectService - Comprehensive > getProject > should return null when project not found
+(pass) ProjectService - Comprehensive > getProject > should return project detail response
+[Saga] Initiated resource provisioning for project newref1234
+(pass) ProjectService - Comprehensive > createProject > should create project with generated credentials
+[Saga] Initiated resource provisioning for project newref1234
+(pass) ProjectService - Comprehensive > createProject > should accept custom region
+(pass) ProjectService - Comprehensive > deleteProject > should return false when project not found
+[Saga] Initiated resource cleanup for project test123abc
+(pass) ProjectService - Comprehensive > deleteProject > should soft delete and return true
+(pass) ProjectService - Comprehensive > updateProject > should return false when project not found
+(pass) ProjectService - Comprehensive > updateProject > should update name and return true
+(pass) ProjectService - Comprehensive > updateProject > should return true even without name
+(pass) ProjectService - Comprehensive > pauseProject > should return false when project not found
+(pass) ProjectService - Comprehensive > pauseProject > should pause and return true
+(pass) ProjectService - Comprehensive > restoreProject > should return false when project not found
+(pass) ProjectService - Comprehensive > restoreProject > should restore and return true
+(pass) ProjectService - Comprehensive > getProjectHealth > should return null when project not found
+(pass) ProjectService - Comprehensive > getProjectHealth > should return health status for active project
+(pass) ProjectService - Comprehensive > getProjectHealth > should return unhealthy when db check fails
+(pass) ProjectService - Comprehensive > getProjectHealth > should return INACTIVE for paused project
+(pass) ProjectService - Comprehensive > getProjectStatus > should return null when project not found
+(pass) ProjectService - Comprehensive > getProjectStatus > should return status object
+(pass) ProjectService - Comprehensive > getProjectStatus > should return unhealthy when db fails
+(pass) ProjectService - Comprehensive > restartProject > should return false when project not found
+(pass) ProjectService - Comprehensive > restartProject > should reload router and return true
+(pass) ProjectService - Comprehensive > getProjectSettings > should return null when project not found
+(pass) ProjectService - Comprehensive > getProjectSettings > should return config object
+(pass) ProjectService - Comprehensive > updateProjectSettings > should return null when project not found
+(pass) ProjectService - Comprehensive > updateProjectSettings > should merge and update config
+(pass) ProjectService - Comprehensive > updateProjectSettings > should return null when update fails
+(pass) ProjectService - Comprehensive > getApiKeys > should return null when project not found
+(pass) ProjectService - Comprehensive > getApiKeys > should return api keys
+(pass) ProjectService - Comprehensive > getSecrets > should return null when project not found
+(pass) ProjectService - Comprehensive > getSecrets > should return secrets from database service
+(pass) ProjectService - Comprehensive > upsertSecrets > should return false when project not found
+(pass) ProjectService - Comprehensive > upsertSecrets > should upsert all secrets and return true
+(pass) ProjectService - Comprehensive > upsertSecrets > should return false if any upsert fails
+(pass) ProjectService - Comprehensive > deleteSecret > should return false when project not found
+(pass) ProjectService - Comprehensive > deleteSecret > should delete secret and return result
+(pass) ProjectService - Comprehensive > getFunctionCode > should return null when project not found
+(pass) ProjectService - Comprehensive > getFunctionCode > should return code from shell service
+(pass) ProjectService - Comprehensive > getFunctionCode > should return null when shell fails
+(pass) ProjectService - Comprehensive > deployFunction > should return false when project not found
+(pass) ProjectService - Comprehensive > deployFunction > should deploy function and return success
+(pass) ProjectService - Comprehensive > deployFunction > should return false when deploy fails
+
+tests\unit\project.service.test.ts:
+(pass) ProjectService > listProjects > should return array of projects
+(pass) ProjectService > getProject > should return null for non-existent ref
+(pass) ProjectService > createProject > should accept name and region
+(pass) ProjectService > deleteProject > should accept ref string
+(pass) ProjectService > updateProject > should accept ref and update request
+(pass) ProjectService > pauseProject > should accept ref string
+(pass) ProjectService > restoreProject > should accept ref string
+(pass) ProjectService > getProjectHealth > should accept ref string
+(pass) ProjectService > getProjectStatus > should accept ref string
+(pass) ProjectService > restartProject > should accept ref string
+(pass) ProjectService > getProjectSettings > should accept ref string
+(pass) ProjectService > updateProjectSettings > should accept ref and config
+(pass) ProjectService > getApiKeys > should accept ref string
+
+tests\unit\router.service.test.ts:
+(pass) RouterService > addRoute > should return result object [235.00ms]
+(pass) RouterService > addRoute > should accept custom domain [265.00ms]
+(pass) RouterService > removeRoute > should return result object [250.00ms]
+(pass) RouterService > reload > should return result object [250.00ms]
+(pass) RouterService > getProjectDomain > should return formatted domain
+(pass) RouterService > getProjectDomain > should include project ref in domain
+(pass) RouterService > getProjectApiUrl > should return HTTPS URL
+(pass) RouterService > getProjectApiUrl > should include api subdomain
+(pass) RouterService > getProjectApiUrl > should include project ref
+
+tests\unit\scaling.service.test.ts:
+执行垂直扩容: test-proj -> pro
+(pass) ScalingService > checkAndScale should trigger vertical scale on high CPU
+执行水平扩容: test-proj 增加副本 10.0.0.178
+(pass) ScalingService > checkAndScale should trigger horizontal scale on high QPS
+
+tests\unit\security.service.test.ts:
+(pass) SecurityService > addFirewallRule should call security_manager.sh
+(pass) SecurityService > requestSsl should trigger async cert generation
+
+tests\unit\shell.service.test.ts:
+(pass) ShellService > execute > should return success with output for successful command
+(pass) ShellService > execute > should return error for non-existent script [219.00ms]
+(pass) ShellService > execute > should handle empty args array [328.00ms]
+(pass) ShellService > execute > should return output as empty string on failure [234.00ms]
+(pass) ShellService > execute > should handle multiple arguments [250.00ms]
+(pass) ShellService > execute > should handle special characters in script name [250.00ms]
+bun: command not found: test
+(pass) ShellService > scriptExists > should return false for non-existent script
+(pass) ShellService > scriptExists > should be a function
+bun: command not found: test
+(pass) ShellService > scriptExists > should return boolean [16.00ms]
+bun: command not found: test
+(pass) ShellService > scriptExists > should handle empty string
+(pass) ShellService > singleton instance > should export shellService singleton
+(pass) ShellService > singleton instance > shellService should have execute method
+(pass) ShellService > singleton instance > shellService should have scriptExists method
+
+tests\unit\storage.service.test.ts:
+(pass) StorageService > createBucket > should return result object [234.00ms]
+(pass) StorageService > createBucket > should return error when shell fails
+(pass) StorageService > createBucket > should parse access key and secret from output
+(pass) StorageService > createBucket > should handle output without keys
+(pass) StorageService > createBucket > should handle partial key output
+(pass) StorageService > createBucket > should call shell service with correct args
+(pass) StorageService > deleteBucket > should return result object [235.00ms]
+(pass) StorageService > deleteBucket > should return success when shell succeeds
+(pass) StorageService > deleteBucket > should return error when shell fails
+(pass) StorageService > deleteBucket > should call shell service with correct args
+(pass) StorageService > getCredentials > should return result object [234.00ms]
+(pass) StorageService > getCredentials > should return error when shell fails
+(pass) StorageService > getCredentials > should parse access key and secret from output
+(pass) StorageService > getCredentials > should handle output without keys
+(pass) StorageService > getCredentials > should handle only secret key in output
+(pass) StorageService > getCredentials > should call shell service with correct args
+(pass) StorageService > getCredentials > should handle multiline output with extra content
+(pass) StorageService > JuiceFS Methods > getStatus should return parsed status
+[Storage] 正在同步数据从 /mnt/supacloud 到 s3://bucket...
+[Storage] 迁移任务失败:  96 |      * 同步/迁移数据 (使用 juicefs sync)
+ 97 |      */
+ 98 |     async sync(src: string, dest: string, parallel: number = 10): Promise<void> {
+ 99 |         console.log(`[Storage] 正在同步数据从 ${src} 到 ${dest}...`);
+100 |         // juicefs sync [flags] SRC DST
+101 |         await $`juicefs sync --parallel ${parallel} ${src} ${dest}`.quiet();
+                     ^
+ShellError: Failed with exit code 1
+ exitCode: 1,
+   stdout: "",
+   stderr: "bun: command not found: juicefs\n",
+
+      at new ShellPromise (75:16)
+      at BunShell2 (190:36)
+      at sync (D:\workspace\supacloud\packages\management-api\src\infra\storage.ts:101:15)
+      at <anonymous> (D:\workspace\supacloud\packages\management-api\src\services\storage.service.ts:107:23)
+      at startMigration (D:\workspace\supacloud\packages\management-api\src\services\storage.service.ts:110:48)
+      at <anonymous> (D:\workspace\supacloud\packages\management-api\tests\unit\storage.service.test.ts:186:36)
+
+185 |       const spy = spyOn(shellService, "execute").mockResolvedValue({ success: true, output: "" });
+186 |       const result = await service.startMigration("s3://bucket", { access_key: "ak", secret_key: "sk", endpoint: "ep" });
+187 |       expect(result.message).toContain("已启动");
+188 |       // 等待异步任务触发
+189 |       await new Promise(resolve => setTimeout(resolve, 0));
+190 |       expect(spy).toHaveBeenCalled();
+                        ^
+error: expect(received).toHaveBeenCalled()
+
+Expected number of calls: >= 1
+Received number of calls: 0
+
+      at <anonymous> (D:\workspace\supacloud\packages\management-api\tests\unit\storage.service.test.ts:190:19)
+(fail) StorageService > JuiceFS Methods > startMigration should trigger async sync [16.00ms]
+
+src\tests\api.test.ts:
+(pass) SupaCloud 多租户 API 隔离性测试 > 租户应该能访问自己的项目详情
+(pass) SupaCloud 多租户 API 隔离性测试 > 租户 A 不应被允许访问租户 B 的项目详情
+(pass) SupaCloud 多租户 API 隔离性测试 > 未通过认证的项目创建请求应该被拒绝 [15.00ms]
+
+src\tests\gateway.test.ts:
+(pass) GatewayService 集成 Mock 测试 > applyConfig 应该能正确编排多个网关原子操作
+Failed to set rate limit for ref: critical shell error
+(pass) GatewayService 集成 Mock 测试 > 当底层脚本报错时，Service 应该能正确感应并记录错误
+
+src\tests\jwt.test.ts:
+(pass) JwtService 单元测试 > 应该能生成指定长度的 Secret
+(pass) JwtService 单元测试 > 应该能生成符合格式要求的 ProjectRef
+(pass) JwtService 单元测试 > 生成的 JWT 应该具有正确的三段式结构
+(pass) JwtService 单元测试 > generateKeySet 应该返回完整的凭据集
+
+src\tests\saga.test.ts:
+[TaskWorker] Processing task: task-1 (provision_db) for project p-1
+(pass) Saga 任务流转 Mock 测试 > 任务完成后应自动触发下一个 Saga 阶段
+[TaskWorker] Processing task: task-2 (provision_s3) for project p-2
+[TaskWorker] Saga compensation triggered for p-2 failed at provision_s3
+[TaskWorker] Rolling back DB for p-2
+(pass) Saga 任务流转 Mock 测试 > 任务失败时应触发 Saga 补偿逻辑
+
+1 tests failed:
+(fail) StorageService > JuiceFS Methods > startMigration should trigger async sync [16.00ms]
+
+ 246 pass
+ 1 fail
+ 408 expect() calls
+Ran 247 tests across 23 files. [4.47s]
