@@ -3,8 +3,6 @@ import { swagger } from "@elysiajs/swagger";
 import { cors } from "@elysiajs/cors";
 import { config } from "./config";
 import { authMiddleware } from "./middleware/auth";
-import { projectRoutes, organizationRoutes, userRoutes, backupRoutes, monitorRoutes, maintenanceRoutes, extensionRoutes, securityRoutes, storageRoutes, scalingRoutes, taskRoutes } from "./routes";
-import { wakeupProxy } from "./wakeup-proxy";
 
 const app = new Elysia({ strictPath: false })
   // Swagger 文档
@@ -60,20 +58,6 @@ const app = new Elysia({ strictPath: false })
     return await HealthChecker.runFullCheck();
   })
 
-  // 需要认证的路由
-  .use(authMiddleware)
-  .use(projectRoutes)
-  .use(organizationRoutes)
-  .use(userRoutes)
-  .use(backupRoutes)
-  .use(monitorRoutes)
-  .use(maintenanceRoutes)
-  .use(extensionRoutes)
-  .use(securityRoutes)
-  .use(storageRoutes)
-  .use(scalingRoutes)
-  .use(taskRoutes)
-
   // 错误处理
   .onError(({ code, error, set }) => {
     console.error(`Error [${code}]:`, error);
@@ -90,7 +74,7 @@ const app = new Elysia({ strictPath: false })
 
     set.status = 500;
     return { error: "Internal server error" };
-  })
+  });
 
 // @ts-ignore: 此文件由 scripts/pack-assets.ts 自动生成
 import { EMBEDDED_ASSETS } from "./assets.gen";
@@ -127,80 +111,118 @@ app.get("*", async ({ request, set }) => {
   }
 });
 
-import { initDatabase } from "./db/init";
-import { taskWorker } from "./services/task.worker";
-import { runInstall } from "./install";
-import { runUpgrade } from "./upgrade";
-import { runDoctor } from "./doctor";
-import { runStorageManager } from "./storage";
-
-import { runNodeManager } from "./node";
-
 const args = process.argv.slice(2);
 
-if (args.includes("--init-db")) {
-  initDatabase().then(() => {
-    console.log("Database initialized successfully!");
+/**
+ * 核心逻辑：根据命令行参数决定是执行单次任务还是启动 API 服务器。
+ * 这确保了在安装阶段 (无数据库) 绝不会触发数据库重连逻辑。
+ */
+async function bootstrap() {
+  if (args.includes("--init-db")) {
+    const { initDatabase } = await import("./db/init");
+    try {
+      await initDatabase();
+      console.log("Database initialized successfully!");
+      process.exit(0);
+    } catch (err) {
+      console.error("Failed to initialize database:", err);
+      process.exit(1);
+    }
+  } else if (args.includes("install") || args.includes("--install")) {
+    const { runInstall } = await import("./install");
+    try {
+      await runInstall();
+      process.exit(0);
+    } catch (err) {
+      console.error("Installation aborted:", err);
+      process.exit(1);
+    }
+  } else if (args.includes("upgrade") || args.includes("--upgrade")) {
+    const { runUpgrade } = await import("./upgrade");
+    try {
+      await runUpgrade();
+      process.exit(0);
+    } catch (err) {
+      console.error("Upgrade aborted:", err);
+      process.exit(1);
+    }
+  } else if (args.includes("doctor") || args.includes("--doctor")) {
+    const { runDoctor } = await import("./doctor");
+    try {
+      await runDoctor();
+      process.exit(0);
+    } catch (err) {
+      console.error("Doctor scan failed:", err);
+      process.exit(1);
+    }
+  } else if (args.includes("storage") || args.includes("--storage")) {
+    const { runStorageManager } = await import("./storage");
+    try {
+      await runStorageManager();
+      process.exit(0);
+    } catch (err) {
+      console.error("Storage management failed:", err);
+      process.exit(1);
+    }
+  } else if (args.includes("node") || args.includes("--node")) {
+    const { runNodeManager } = await import("./node");
+    try {
+      await runNodeManager();
+      process.exit(0);
+    } catch (err) {
+      console.error("Node management failed:", err);
+      process.exit(1);
+    }
+  } else if (args.includes("cluster") || args.includes("--cluster")) {
+    const { runClusterManager } = await import("./cluster");
+    try {
+      await runClusterManager();
+      process.exit(0);
+    } catch (err) {
+      console.error("Cluster management failed:", err);
+      process.exit(1);
+    }
+  } else if (args.includes("--version") || args.includes("-v")) {
+    const pkg = await Bun.file("package.json").json();
+    console.log(`SupaCloud Version: ${pkg.version}`);
     process.exit(0);
-  }).catch((err) => {
-    console.error("Failed to initialize database:", err);
-    process.exit(1);
-  });
-} else if (args.includes("install") || args.includes("--install")) {
-  runInstall().then(() => {
-    process.exit(0);
-  }).catch((err) => {
-    console.error("Installation aborted:", err);
-    process.exit(1);
-  });
-} else if (args.includes("upgrade") || args.includes("--upgrade")) {
-  runUpgrade().then(() => {
-    process.exit(0);
-  }).catch((err) => {
-    console.error("Upgrade aborted:", err);
-    process.exit(1);
-  });
-} else if (args.includes("doctor") || args.includes("--doctor")) {
-  runDoctor().then(() => {
-    process.exit(0);
-  }).catch((err) => {
-    console.error("Doctor scan failed:", err);
-    process.exit(1);
-  });
-} else if (args.includes("storage") || args.includes("--storage")) {
-  runStorageManager().then(() => {
-    process.exit(0);
-  }).catch((err) => {
-    console.error("Storage management failed:", err);
-    process.exit(1);
-  });
-} else if (args.includes("node") || args.includes("--node")) {
-  runNodeManager().then(() => {
-    process.exit(0);
-  }).catch((err) => {
-    console.error("Node management failed:", err);
-    process.exit(1);
-  });
-} else if (args.includes("cluster") || args.includes("--cluster")) {
-  const { runClusterManager } = await import("./cluster");
-  runClusterManager().then(() => {
-    process.exit(0);
-  }).catch((err) => {
-    console.error("Cluster management failed:", err);
-    process.exit(1);
-  });
-} else {
-  app.listen(config.port);
-  taskWorker.start();
+  } else {
+    // API 服务器模式：此时才加载路由和启动 TaskWorker
+    const {
+      projectRoutes, organizationRoutes, userRoutes, backupRoutes,
+      monitorRoutes, maintenanceRoutes, extensionRoutes, securityRoutes,
+      storageRoutes, scalingRoutes, taskRoutes
+    } = await import("./routes");
+    const { taskWorker } = await import("./services/task.worker");
 
-  console.log(`
-  ╔═══════════════════════════════════════════════════════════╗
-  ║          SupaCloud Management API                         ║
-  ╠═══════════════════════════════════════════════════════════╣
-  ║  Server running at: http://localhost:${config.port}                ║
-  ║  Swagger docs at:   http://localhost:${config.port}/swagger        ║
-  ╚═══════════════════════════════════════════════════════════╝
-  `);
+    app
+      .use(authMiddleware)
+      .use(projectRoutes)
+      .use(organizationRoutes)
+      .use(userRoutes)
+      .use(backupRoutes)
+      .use(monitorRoutes)
+      .use(maintenanceRoutes)
+      .use(extensionRoutes)
+      .use(securityRoutes)
+      .use(storageRoutes)
+      .use(scalingRoutes)
+      .use(taskRoutes);
+
+    app.listen(config.port);
+    taskWorker.start();
+
+    console.log(`
+    ╔═══════════════════════════════════════════════════════════╗
+    ║          SupaCloud Management API                         ║
+    ╠═══════════════════════════════════════════════════════════╣
+    ║  Server running at: http://localhost:${config.port}                ║
+    ║  Swagger docs at:   http://localhost:${config.port}/swagger        ║
+    ╚═══════════════════════════════════════════════════════════╝
+    `);
+  }
 }
+
+bootstrap();
 
 export { app };
