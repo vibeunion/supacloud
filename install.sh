@@ -2475,6 +2475,12 @@ install_management_api() {
         else
             echo 'export PATH="$HOME/.bun/bin:$PATH"' > /etc/profile.d/bun.sh
         fi
+        
+        # 强制配置国内 Bun 镜像站使用淘宝(阿里云) NPM 源以覆盖默认的腾讯云源
+        cat > ~/.bunfig.toml << 'EOF'
+[install]
+registry = "https://registry.npmmirror.com"
+EOF
     fi
 
     # 复制 Management API 代码
