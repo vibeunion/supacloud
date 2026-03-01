@@ -5,7 +5,7 @@ import { projectService } from "../services/project.service";
 
 describe("SupaCloud 多租户 API 隔离性测试", () => {
     beforeAll(async () => {
-        await registerAllRoutes(app);
+        app.use(await registerAllRoutes());
 
         // Mock getProject globally for isolation tests
         spyOn(projectService, "getProject").mockImplementation(async (ref) => {

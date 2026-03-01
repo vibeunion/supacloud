@@ -82,8 +82,8 @@ import { EMBEDDED_ASSETS } from "./assets.gen";
 /**
  * 注册静态资产 (SPA)
  */
-export function registerStaticAssets(app: Elysia<any, any, any, any, any, any, any>) {
-  return app.get("*", async (context: any) => {
+export function registerStaticAssets() {
+  return new Elysia({ name: "static-assets" }).get("*", async (context) => {
     const { request, set } = context;
     const url = new URL(request.url);
     const path = url.pathname === "/" ? "/index.html" : url.pathname;
@@ -101,7 +101,7 @@ export function registerStaticAssets(app: Elysia<any, any, any, any, any, any, a
       }
 
       if (asset) {
-        set.headers["Content-Type"] = asset.mimeType;
+        set.headers["Content-Type"] = asset.mimeType as string;
         return Buffer.from(asset.content, 'base64');
       } else {
         set.status = 404;
@@ -120,14 +120,14 @@ export function registerStaticAssets(app: Elysia<any, any, any, any, any, any, a
 /**
  * 注册所有路由模块
  */
-export async function registerAllRoutes(app: Elysia<any, any, any, any, any, any, any>) {
+export async function registerAllRoutes() {
   const {
     projectRoutes, organizationRoutes, userRoutes, backupRoutes,
     monitorRoutes, maintenanceRoutes, extensionRoutes, securityRoutes,
     storageRoutes, scalingRoutes, taskRoutes
   } = await import("./routes");
 
-  return app
+  return new Elysia({ name: "api-routes" })
     .use(authMiddleware)
     .use(projectRoutes)
     .use(organizationRoutes)
@@ -198,8 +198,8 @@ async function bootstrap() {
     process.exit(0);
   } else {
     // API 服务器模式：此时才加载路由和启动 TaskWorker
-    await registerAllRoutes(app);
-    registerStaticAssets(app);
+    app.use(await registerAllRoutes());
+    app.use(registerStaticAssets());
     const { taskWorker } = await import("./services/task.worker");
 
     app.listen(config.port);

@@ -6,7 +6,7 @@ import { projectService } from "./services/project.service";
 
 describe("Management API Integration Tests", () => {
     beforeAll(async () => {
-        await registerAllRoutes(app);
+        app.use(await registerAllRoutes());
 
         // Mock OrganizationService
         spyOn(organizationService, "listOrganizations").mockResolvedValue([
