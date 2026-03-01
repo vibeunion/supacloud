@@ -1,8 +1,7 @@
 import { SQL } from "bun";
 import { config } from "../config";
 
-// 初始化数据库 schema
-async function initDatabase() {
+export async function initDatabase() {
   console.log("Initializing database...");
 
   // 先连接到默认 postgres 数据库创建 supacloud_meta
@@ -109,5 +108,3 @@ async function initDatabase() {
   }
 }
 
-// 运行初始化
-initDatabase().catch(console.error);

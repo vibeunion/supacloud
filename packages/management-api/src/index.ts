@@ -85,18 +85,29 @@ const app = new Elysia({ strictPath: false })
     return { error: "Internal server error" };
   })
 
-  .listen(config.port);
-
+import { initDatabase } from "./db/init";
 import { taskWorker } from "./services/task.worker";
-taskWorker.start();
 
-console.log(`
-╔═══════════════════════════════════════════════════════════╗
-║          SupaCloud Management API                         ║
-╠═══════════════════════════════════════════════════════════╣
-║  Server running at: http://localhost:${config.port}                ║
-║  Swagger docs at:   http://localhost:${config.port}/swagger        ║
-╚═══════════════════════════════════════════════════════════╝
-`);
+if (process.argv.includes("--init-db")) {
+  initDatabase().then(() => {
+    console.log("Database initialized successfully!");
+    process.exit(0);
+  }).catch((err) => {
+    console.error("Failed to initialize database:", err);
+    process.exit(1);
+  });
+} else {
+  app.listen(config.port);
+  taskWorker.start();
+
+  console.log(`
+  ╔═══════════════════════════════════════════════════════════╗
+  ║          SupaCloud Management API                         ║
+  ╠═══════════════════════════════════════════════════════════╣
+  ║  Server running at: http://localhost:${config.port}                ║
+  ║  Swagger docs at:   http://localhost:${config.port}/swagger        ║
+  ╚═══════════════════════════════════════════════════════════╝
+  `);
+}
 
 export { app };

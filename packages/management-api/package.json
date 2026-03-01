@@ -9,7 +9,10 @@
     "db:init": "bun run src/db/init.ts",
     "tsc": "tsc",
     "typecheck": "tsc --noEmit",
-    "test": "bun test"
+    "test": "bun test",
+    "build:amd64": "bun build src/index.ts --compile --minify --target=bun-linux-x64 --outfile=supacloud-api-linux-amd64",
+    "build:arm64": "bun build src/index.ts --compile --minify --target=bun-linux-arm64 --outfile=supacloud-api-linux-arm64",
+    "build:all": "bun run build:amd64 && bun run build:arm64"
   },
   "dependencies": {
     "elysia": "^1.4.25",

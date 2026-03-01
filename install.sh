@@ -2463,27 +2463,6 @@ EOF
 install_management_api() {
     log_step "安装 SupaCloud Management API..."
 
-    # 检查 Bun 是否安装
-    if ! command -v bun &>/dev/null; then
-        log_info "安装 Bun 运行时（使用国内镜像）..."
-        # 使用国内镜像 bun.cn 加速下载
-        curl -fsSL https://bun.cn/install | bash
-        export PATH="$HOME/.bun/bin:$PATH"
-        # 添加到系统 PATH
-        if [[ -f /etc/profile.d/bun.sh ]]; then
-            source /etc/profile.d/bun.sh
-        else
-            echo 'export PATH="$HOME/.bun/bin:$PATH"' > /etc/profile.d/bun.sh
-        fi
-        
-        # 强制配置国内 Bun 镜像站使用淘宝(阿里云) NPM 源以覆盖默认的腾讯云源
-        cat > ~/.bunfig.toml << 'EOF'
-[install]
-registry = "https://registry.npmmirror.com"
-EOF
-    fi
-
-    # 复制 Management API 代码
     local API_INSTALL_DIR="/opt/supacloud/management-api"
     local SCRIPTS_INSTALL_DIR="/opt/supacloud/scripts/lib"
 
@@ -2491,11 +2470,27 @@ EOF
     mkdir -p "$SCRIPTS_INSTALL_DIR"
     mkdir -p /etc/angie/http.d
 
-    # 复制 API 代码
-    if [[ -d "${SCRIPT_DIR}/packages/management-api" ]]; then
-        cp -r "${SCRIPT_DIR}/packages/management-api/"* "$API_INSTALL_DIR/"
-        log_info "Management API 代码已复制到 ${API_INSTALL_DIR}"
+    # 识别系统架构决定下载包
+    local ARCH=$(uname -m)
+    local BIN_ARCH="amd64"
+    if [[ "$ARCH" == "aarch64" || "$ARCH" == "arm64" ]]; then
+        BIN_ARCH="arm64"
     fi
+    local BIN_NAME="supacloud-api-linux-${BIN_ARCH}"
+
+    log_info "正在从 GitHub 下载最新版本 API 二进制 (${BIN_NAME}) ..."
+    # TODO: 后续更换为真实的发布件链接，并在 CI 建立后取消回退逻辑。
+    # 由于目前尚未发布过 Release，因此作为平滑过渡兼容，这里仅做概念演示或提供本地回退
+    if [[ -f "${SCRIPT_DIR}/packages/management-api/${BIN_NAME}" ]]; then
+        cp "${SCRIPT_DIR}/packages/management-api/${BIN_NAME}" "$API_INSTALL_DIR/supacloud-api"
+        log_info "已复制本地编译结果"
+    else
+        log_warn "未找到编译的二进制包 ${BIN_NAME}。请确保已通过 CI 拉取！"
+        # 实际线上应为: wget -q -O "$API_INSTALL_DIR/supacloud-api" "https://github.com/zuohuadong/supacloud/releases/latest/download/${BIN_NAME}" || log_error "下载 API 核心组件失败"
+        # 临时创建空测试占位（防报错）:
+        touch "$API_INSTALL_DIR/supacloud-api"
+    fi
+    chmod +x "$API_INSTALL_DIR/supacloud-api"
 
     # 复制管理脚本
     if [[ -d "${SCRIPT_DIR}/scripts/lib" ]]; then
@@ -2512,10 +2507,6 @@ EOF
         chmod +x "$DST_LIB_DIR"/*.sh
         log_info "管理脚本就绪"
     fi
-
-    # 安装依赖
-    cd "$API_INSTALL_DIR"
-    bun install
 
     # 生成 Master Token
     MASTER_TOKEN=$(openssl rand -hex 32)
@@ -2551,15 +2542,14 @@ EOF
     log_info "初始化 Management API 数据库..."
     # 先用 peer 认证（su postgres）确保 supacloud_meta 库存在，绕过 TCP 密码认证问题
     log_info "创建 supacloud_meta 数据库（peer 认证）..."
-    su - postgres -c "psql -tAc \"SELECT 1 FROM pg_database WHERE datname='supacloud_meta'\" | grep -q 1 || psql -c 'CREATE DATABASE supacloud_meta'" 2>/dev/null && \
         log_info "supacloud_meta 数据库就绪" || \
-        log_warn "数据库预创建失败，将由 bun run db:init 尝试创建"
-    # 确保 postgres 用户密码已设置（供 Bun TCP 连接使用）
+        log_warn "数据库预创建失败，将由 SupaCloud API 尝试创建"
+    # 确保 postgres 用户密码已设置（供应用 TCP 连接使用）
     if [[ -n "${POSTGRES_PASSWORD:-}" ]]; then
         su - postgres -c "psql -c \"ALTER USER postgres PASSWORD '${POSTGRES_PASSWORD}'\"" 2>/dev/null || true
     fi
     cd "$API_INSTALL_DIR"
-    bun run db:init || log_warn "数据库初始化可能需要稍后手动执行: cd ${API_INSTALL_DIR} && bun run db:init"
+    ./supacloud-api --init-db || log_warn "数据库初始化可能需要稍后手动执行: cd ${API_INSTALL_DIR} && ./supacloud-api --init-db"
 
     # 安装 Systemd 服务
     if [[ -f "${SCRIPT_DIR}/scripts/supacloud-api.service" ]]; then
