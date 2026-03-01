@@ -104,7 +104,7 @@ export class TenantManager {
      * 下载或提取 GoTrue 二进制
      */
     static async ensureGotrue(): Promise<void> {
-        if ((await $`command -v gotrue`.nothrow()).exitCode === 0) return;
+        if ((await $`which gotrue`.nothrow()).exitCode === 0) return;
         if (await Bun.file(this.GOTRUE_BIN).exists()) return;
 
         console.log("[Tenant] GoTrue binary not found, extracting...");

@@ -251,7 +251,7 @@ export class PigstyManager {
         const isDockerEnv = (await $`test -f /.dockerenv`.nothrow()).exitCode === 0;
         if (isDockerEnv) {
             console.log("[PigstyManager] 检测到容器运行时沙盒隔离，添加专属 Ansible 解析层参数。");
-            const pythonPath = (await $`command -v python3`.text()).trim() || "/usr/bin/python3";
+            const pythonPath = (await $`which python3`.nothrow().text()).trim() || "/usr/bin/python3";
             return [
                 "-vvv",
                 "-e", `ansible_python_interpreter=${pythonPath}`,

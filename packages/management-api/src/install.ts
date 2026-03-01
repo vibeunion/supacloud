@@ -341,8 +341,8 @@ async function prepareSystemEnv() {
     const sshDir = `${homeDir}/.ssh`;
     await $`mkdir -p ${sshDir} && chmod 700 ${sshDir}`;
 
-    if ((await $`ls ${sshDir}/id_ed25519 &>/dev/null`.nothrow()).exitCode !== 0) {
-        await $`ssh-keygen -q -t ed25519 -N "" -f ${sshDir}/id_ed25519`;
+    if ((await $`test -f ${sshDir}/id_ed25519`.nothrow()).exitCode !== 0) {
+        await $`ssh-keygen -q -t ed25519 -N '' -f ${sshDir}/id_ed25519`;
     }
     const pubKey = (await $`cat ${sshDir}/id_ed25519.pub`.text()).trim();
     await $`grep -q "${pubKey}" ${sshDir}/authorized_keys &>/dev/null || echo "${pubKey}" >> ${sshDir}/authorized_keys`;

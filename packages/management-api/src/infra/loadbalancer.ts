@@ -12,18 +12,25 @@ export class LoadBalancerManager {
         console.log("[LoadBalancerManager] 安装 Angie (原生 http_acme 自动 SSL)...");
 
         // 1. 处理已有的 Nginx (备份、停用、卸载)
-        if ((await $`command -v nginx`.nothrow()).exitCode === 0 ||
+        if ((await $`which nginx`.nothrow()).exitCode === 0 ||
             (await $`systemctl list-unit-files nginx.service`.nothrow()).exitCode === 0) {
+
             const backupDir = `/etc/nginx.bak.${Date.now()}`;
             if ((await $`test -d /etc/nginx`.nothrow()).exitCode === 0) {
                 console.log(`[LoadBalancerManager] 备份原有 Nginx 配置到 ${backupDir} ...`);
                 await $`cp -a /etc/nginx ${backupDir}`.nothrow();
             }
-            await $`systemctl stop nginx`.nothrow();
-            await $`systemctl disable nginx`.nothrow();
 
-            if ((await $`command -v dnf`.nothrow()).exitCode === 0) {
+            // 仅在有 systemctl 时尝试停止
+            if ((await $`systemctl --version`.nothrow().quiet()).exitCode === 0) {
+                await $`systemctl stop nginx`.nothrow();
+                await $`systemctl disable nginx`.nothrow();
+            }
+
+            if ((await $`which dnf`.nothrow()).exitCode === 0) {
                 await $`dnf remove -y nginx nginx-core nginx-filesystem`.nothrow();
+            } else if ((await $`which apt-get`.nothrow()).exitCode === 0) {
+                await $`apt-get remove -y nginx nginx-common nginx-full`.nothrow();
             }
         }
 
@@ -59,7 +66,10 @@ proxy_cache_path /var/cache/angie/storage_render levels=1:2 keys_zone=render_cac
         await Bun.write("/etc/angie/http.d/00-global-perf.conf", perfConf.trim());
         await $`mkdir -p /var/cache/angie/storage_render`;
         await $`chown -R angie:angie /var/cache/angie`.nothrow();
-        await $`systemctl restart angie`.nothrow();
+
+        if ((await $`systemctl --version`.nothrow().quiet()).exitCode === 0) {
+            await $`systemctl restart angie`.nothrow();
+        }
 
         console.log("[LoadBalancerManager] Angie 配置成功, 代理网关已上线。");
     }
