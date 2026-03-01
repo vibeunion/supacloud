@@ -41,12 +41,6 @@ export class LoadBalancerManager {
             return;
         }
 
-        const isRHEL = (await $`which dnf`.nothrow()).exitCode === 0;
-        if (!isRHEL) {
-            console.warn("[LoadBalancerManager] Angie 独立发行版目前仅支持 RHEL/DNF 系列 (CentOS/Rocky)。在 Debian/Ubuntu 上建议直接使用源码或等待后续更新。跳过部署。");
-            return;
-        }
-
         const res = await $`bash ${setupScript} --studio-domain ${studioDomain} --api-domain ${apiDomain}`.nothrow();
         if (res.exitCode !== 0) {
             console.warn("[LoadBalancerManager] Angie setup.sh 执行失败", res.stderr.toString());
