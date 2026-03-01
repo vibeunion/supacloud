@@ -184,7 +184,7 @@ describe("StorageService", () => {
     test("startMigration should trigger async sync", async () => {
       const spy = spyOn(shellService, "execute").mockResolvedValue({ success: true, output: "" });
       const result = await service.startMigration("s3://bucket", { access_key: "ak", secret_key: "sk", endpoint: "ep" });
-      expect(result.message).toContain("已启动");
+      expect(result.message).toContain("已触发");
       expect(spy).toHaveBeenCalled();
       spy.mockRestore();
     });

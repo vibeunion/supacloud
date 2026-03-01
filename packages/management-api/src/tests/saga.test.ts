@@ -45,13 +45,12 @@ describe("Saga 任务流转 Mock 测试", () => {
 
         // 模拟执行失败
         // @ts-ignore
-        const executeSpy = spyOn(taskWorker, "executeTask").mockResolvedValue(false);
+        const executeSpyComp = spyOn(taskWorker, "executeTask").mockResolvedValue(false);
         const updateStatusSpy = spyOn(taskRepository, "updateStatus").mockResolvedValue({} as any);
         const createTaskSpy = spyOn(taskRepository, "createTask").mockResolvedValue({} as any);
         const updateProjectStatusSpy = spyOn(projectRepository, "updateStatus").mockResolvedValue({} as any);
 
         // @ts-ignore
-        const executeSpy = spyOn(taskWorker, "executeTask").mockResolvedValue(true);
         await taskWorker.poll();
 
         // 验证: S3 失败应回滚 DB (加入 cleanup_db 任务)
@@ -60,7 +59,7 @@ describe("Saga 任务流转 Mock 测试", () => {
         expect(updateProjectStatusSpy).toHaveBeenCalledWith("p-2", "paused");
 
         claimSpy.mockRestore();
-        executeSpy.mockRestore();
+        executeSpyComp.mockRestore();
         updateStatusSpy.mockRestore();
         createTaskSpy.mockRestore();
         updateProjectStatusSpy.mockRestore();
