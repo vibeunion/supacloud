@@ -34,13 +34,10 @@ export class GatewayManager {
      */
     static async setupJwt(ref: string, jwtSecret: string): Promise<void> {
         await this.ensureConsumer(ref);
-
         try {
-            // 1. 获取现有 JWT ID
             const res = await fetch(`${this.ADMIN_URL}/consumers/${ref}/jwt`);
             if (res.ok) {
                 const data = await res.json();
-                // 尝试删除
                 if (data?.data && data.data.length > 0) {
                     await Promise.all(
                         data.data.map((jwt: any) =>
@@ -49,8 +46,6 @@ export class GatewayManager {
                     );
                 }
             }
-
-            // 2. 新增新的凭据
             const form = new URLSearchParams({
                 key: "supabase",
                 secret: jwtSecret,
@@ -94,14 +89,12 @@ export class GatewayManager {
             });
 
             if (pluginId) {
-                // PATCH
                 await fetch(`${this.ADMIN_URL}/plugins/${pluginId}`, {
                     method: "PATCH",
                     body: form,
                     headers: { "Content-Type": "application/x-www-form-urlencoded" }
                 });
             } else {
-                // POST
                 await fetch(`${this.ADMIN_URL}/routes/${routeName}/plugins`, {
                     method: "POST",
                     body: form,
@@ -114,25 +107,43 @@ export class GatewayManager {
     }
 
     /**
-     * 生成声明式路由配置文件并重启 Kong (按需休眠的 Wakeup Proxy)
+     * 生成声明式路由配置文件并重启 Kong (支持多节点负载均衡)
      */
     static async setupUpstream(ref: string, ports: GatewayPorts): Promise<void> {
-        // 确保租户目录存在
         await $`mkdir -p ${this.TENANT_DIR}`.quiet();
-        const proxyPort = process.env.MANAGEMENT_API_PORT || "8080";
 
-        // 探明容器宿主机桥接 IP (以确保 Kong 容器可以访问 API 控制面)
-        let hostIp = "127.0.0.1";
-        try {
-            const hostIpText = await $`ip addr show podman1 2>/dev/null | grep "inet " | awk '{print $2}' | cut -d/ -f1 || ip addr show docker0 2>/dev/null | grep "inet " | awk '{print $2}' | cut -d/ -f1`.text();
-            if (hostIpText.trim()) {
-                hostIp = hostIpText.trim();
-            }
-        } catch (e) { }
+        const { NodeManager } = await import("./node");
+        const nodes = await NodeManager.listNodes();
+        const appNodes = nodes.filter(n => n.role === "app" && n.status === "online");
 
-        const yamlContent = `
+        if (appNodes.length === 0) {
+            let hostIp = "127.0.0.1";
+            try {
+                const hostIpText = await $`ip addr show podman1 2>/dev/null | grep "inet " | awk '{print $2}' | cut -d/ -f1 || ip addr show docker0 2>/dev/null | grep "inet " | awk '{print $2}' | cut -d/ -f1`.text();
+                if (hostIpText.trim()) hostIp = hostIpText.trim();
+            } catch (e) { }
+            appNodes.push({ ip: hostIp, hostname: "localhost", role: "app", status: "online", createdAt: 0 });
+        }
+
+        const upstreamNamePgrst = `upstream-pgrst-${ref}`;
+        const upstreamNameGotrue = `upstream-gotrue-${ref}`;
+
+        const targetsYaml = `
+upstreams:
+  - name: ${upstreamNamePgrst}
+    targets:
+${appNodes.map(n => `      - target: ${n.ip}:${ports.pgrst}`).join("\n")}
+  - name: ${upstreamNameGotrue}
+    targets:
+${appNodes.map(n => `      - target: ${n.ip}:${ports.gotrue}`).join("\n")}
+`;
+
+        const serviceYaml = `
+services:
   - name: svc-pgrst-${ref}
-    url: http://${hostIp}:${proxyPort}/_proxy/pgrst/${ref}/${ports.pgrst}
+    host: ${upstreamNamePgrst}
+    protocol: http
+    port: 80
     connect_timeout: 5000
     read_timeout: 60000
     write_timeout: 60000
@@ -148,7 +159,9 @@ export class GatewayManager {
             - ${ref}
             
   - name: svc-gotrue-${ref}
-    url: http://${hostIp}:${proxyPort}/_proxy/gotrue/${ref}/${ports.gotrue}
+    host: ${upstreamNameGotrue}
+    protocol: http
+    port: 80
     connect_timeout: 5000
     read_timeout: 60000
     write_timeout: 60000
@@ -162,32 +175,11 @@ export class GatewayManager {
           x-project-ref:
             - ${ref}
 `;
-        // 可选的 Functions 配置
-        let extraYaml = "";
-        if (ports.functions) {
-            extraYaml += `
-  - name: svc-functions-${ref}
-    url: http://${hostIp}:${ports.functions}
-    connect_timeout: 5000
-    read_timeout: 60000
-    write_timeout: 60000
-    routes:
-      - name: route-functions-${ref}
-        strip_path: true
-        preserve_host: true
-        paths:
-          - /functions/v1
-        headers:
-          x-project-ref:
-            - ${ref}
-`;
-        }
 
         const tenantYml = `${this.TENANT_DIR}/${ref}.yml`;
-        await Bun.write(tenantYml, yamlContent + extraYaml);
-        console.log(`[Gateway] Declarative config generated for ${ref}`);
+        await Bun.write(tenantYml, targetsYaml + serviceYaml);
+        console.log(`[Gateway] Multi-node upstream config generated for ${ref} (${appNodes.length} nodes)`);
 
-        // 重建汇总 YAML
         await this.rebuildKongConfig();
     }
 
@@ -197,7 +189,6 @@ export class GatewayManager {
     private static async rebuildKongConfig(): Promise<void> {
         const baseYaml = `${this.KONG_YML}.base`;
 
-        // 如果 base 不存在，先备份初始状态
         try {
             const baseExists = await Bun.file(baseYaml).exists();
             if (!baseExists && await Bun.file(this.KONG_YML).exists()) {
@@ -207,9 +198,7 @@ export class GatewayManager {
             console.warn("[Gateway] Base config sync failed:", e);
         }
 
-        // 进行安全的文件拼接
         try {
-            // 利用 awk 进行高效组合，相当于完整的 Bash 拼接迁移
             await $`awk -v tenant_dir=${this.TENANT_DIR} '
         /^services:/ {
             print $0
@@ -223,7 +212,6 @@ export class GatewayManager {
             return;
         }
 
-        // Kong Hot Reload
         try {
             const isDockerKong = (await $`docker ps -q -f "name=supabase-kong" 2>/dev/null`.nothrow().text()).trim();
             const isPodmanKong = (await $`podman ps -q -f "name=supabase-kong" 2>/dev/null`.nothrow().text()).trim();
