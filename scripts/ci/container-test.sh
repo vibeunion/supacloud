@@ -23,22 +23,30 @@ fi
 # 2. 模拟系统环境 (模拟 systemd 以通过 Ansible 检查)
 mkdir -p /etc/supabase /run/sshd /root/.ssh
 ssh-keygen -A
-if [ ! -f /root/.ssh/id_rsa ]; then
-    ssh-keygen -t rsa -N "" -f /root/.ssh/id_rsa
+if [ ! -f /root/.ssh/id_ed25519 ]; then
+    # 使用 ED25519 以规避 Rocky 9 默认禁用 RSA-SHA1 的限制
+    ssh-keygen -t ed25519 -N "" -f /root/.ssh/id_ed25519
 fi
-cat /root/.ssh/id_rsa.pub >> /root/.ssh/authorized_keys
+cat /root/.ssh/id_ed25519.pub >> /root/.ssh/authorized_keys
 chmod 700 /root/.ssh
 chmod 600 /root/.ssh/authorized_keys
 echo "StrictHostKeyChecking no" >> /root/.ssh/config
 
-# 彻底清理可能存在的安全限制 (尤其针对 Rocky/RHEL 镜像)
+# 彻底清理并强制覆盖 SSH 配置 (核心修复 Rocky 9/RHEL 9)
 rm -rf /etc/ssh/sshd_config.d/*
+# 禁用所有 Include 防止干扰
+sed -i 's/^Include /#Include /' /etc/ssh/sshd_config
+# 直接修改并追加关键设置
 sed -i 's/^#PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config
+sed -i 's/^PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config
 sed -i 's/^#PubkeyAuthentication.*/PubkeyAuthentication yes/' /etc/ssh/sshd_config
+sed -i 's/^PubkeyAuthentication.*/PubkeyAuthentication yes/' /etc/ssh/sshd_config
 echo "PermitRootLogin yes" >> /etc/ssh/sshd_config
 echo "PubkeyAuthentication yes" >> /etc/ssh/sshd_config
+echo "AuthorizedKeysFile .ssh/authorized_keys" >> /etc/ssh/sshd_config
 
-# 启动 SSHD
+# 强制重启 SSHD (清理存量进程)
+pkill sshd || true
 /usr/sbin/sshd
 
 # 自测连通性

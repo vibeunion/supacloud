@@ -2,38 +2,42 @@
 
 为了确保 `supacloud --version` 显示的版本号与 Git Tag 以及 GitHub Release 保持一致，请遵循以下发布流程。
 
-## 推荐流程：使用自动化工具
+## 1. 自动化发布 (推荐)
 
-项目已集成 `standard-version`，它可以自动：
-1. 更新 `package.json` 中的版本号。
-2. 根据 Git Commit 历史自动生成/更新 `CHANGELOG.md`。
-3. 创建对应的 Git Tag。
+项目中已配置 [auto-release.yml](file:///d:/workspace/supacloud/.github/workflows/auto-release.yml)，这是发布新版的“金标准”流程。
 
-### 发布步骤：
-
-```bash
-# 1. 确保在 main 分支且代码已全部提交
-git checkout main
-git pull origin main
-
-# 2. 执行发布命令 (自动提升版本并生成 Changelog)
-# 选项: --release-as [major|minor|patch|x.x.x]
-npm run release -- --release-as 0.3.15
-
-# 3. 推送代码和 Tag 到远程
-git push --follow-tags origin main
-```
+### 操作方法：
+1. 打开 GitHub 仓库的 **Actions** 标签页。
+2. 选择左侧的 **Auto Release & Tag** 工作流。
+3. 点击 **Run workflow**，选择发布类型（patch/minor/major）。
+4. **它会自动完成以下所有动作**：
+   - 提升 `package.json` 中的版本号。
+   - 更新 `CHANGELOG.md`。
+   - 自动打上 `v*` 格式的 Git Tag。
+   - 自动推送回 `main`。
+   - **连锁反应**：推送 Tag 会接着触发 [release-supacloud.yml](file:///d:/workspace/supacloud/.github/workflows/release-supacloud.yml) 开始构建各平台的二进制。
 
 ---
 
-## 手动流程 (不推荐，容易出错)
+## 2. 本地快速发布 (替代方案)
 
-如果需要手动发布，**必须** 严格执行以下顺序：
+如果您希望在本地执行，也请使用我们预设的脚本，**禁止直接打 Tag**。
 
-1. **修改版本号**：手动编辑根目录下的 `package.json`，将 `"version": "0.3.11"` 修改为目标版本（如 `0.3.15`）。
-2. **提交变更**：`git add package.json && git commit -m "chore(release): 0.3.15"`。
-3. **打标签**：`git tag v0.3.15`。
-4. **推送**：`git push origin main && git push origin v0.3.15`。
+```bash
+# 执行此命令会：修改 package.json -> 生成 Changelog -> 打 Tag
+npm run release -- --release-as 0.3.15
+
+# 推送
+git push --follow-tags origin main
+```
+
+## 为什么之前版本号不对？
+
+因为之前的操作是：`直打 Tag` -> `触发构建`。
+但构建时引用的 **源码** 里的 `package.json` 依然是旧的（0.3.11）。
+
+> [!IMPORTANT]
+> **发布铁律**：永远不要手动创建 `v*` 标签。必须通过 `standard-version`（即 `npm run release` 或 GitHub UI）来由内而外地提升版本。
 
 ## 为什么之前的版本显示不对？
 

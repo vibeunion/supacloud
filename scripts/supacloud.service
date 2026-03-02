@@ -1,0 +1,29 @@
+[Unit]
+Description=SupaCloud Management API
+Documentation=https://github.com/supacloud/supacloud
+After=network.target postgresql.service nginx.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/supacloud
+ExecStart=/usr/local/bin/supacloud start
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=supacloud
+
+EnvironmentFile=-/etc/supabase/management-api.env
+
+NoNewPrivileges=false
+ProtectSystem=full
+ProtectHome=false
+ReadWritePaths=/etc/nginx/sites-enabled/supa-tenants /etc/supabase
+
+LimitNOFILE=65536
+LimitNPROC=4096
+
+[Install]
+WantedBy=multi-user.target
