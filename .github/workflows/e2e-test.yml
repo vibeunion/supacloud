@@ -17,28 +17,34 @@ jobs:
       - name: Prepare SSH Environment
         run: |
           # 1. 生成并授权当前用户
+          mkdir -p ~/.ssh
           ssh-keygen -t rsa -N "" -f ~/.ssh/id_rsa
           cat ~/.ssh/id_rsa.pub >> ~/.ssh/authorized_keys
           chmod 700 ~/.ssh && chmod 600 ~/.ssh/authorized_keys
           
-          # 2. 关键：彻底开启 root 登录权限并授权
+          # 2. 彻底开启 root 登录权限并授权
           sudo mkdir -p /root/.ssh
           sudo cp ~/.ssh/id_rsa.pub /root/.ssh/authorized_keys
           sudo chmod 700 /root/.ssh && sudo chmod 600 /root/.ssh/authorized_keys
           
-          # 3. 强制覆盖所有可能的限制
+          # 3. 物理强力覆盖 sshd 配置
           sudo ssh-keygen -A # 确保主机密钥就绪
-          sudo sed -i 's/^PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config
-          sudo sed -i 's/^#PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config
-          sudo sed -i 's/^#PubkeyAuthentication.*/PubkeyAuthentication yes/' /etc/ssh/sshd_config
           
-          # 清理 ubuntu 宿主机特有的限制覆盖文件（这是权限被拒的最核心原因）
+          # 删除所有配置干扰项
           sudo rm -f /etc/ssh/sshd_config.d/*.conf || true
           
+          # 写入最宽松的配置
+          echo "PermitRootLogin yes" | sudo tee /etc/ssh/sshd_config.d/00-allow-root.conf
+          echo "PubkeyAuthentication yes" | sudo tee -a /etc/ssh/sshd_config.d/00-allow-root.conf
+          echo "AuthorizedKeysFile .ssh/authorized_keys" | sudo tee -a /etc/ssh/sshd_config.d/00-allow-root.conf
+          echo "PasswordAuthentication yes" | sudo tee -a /etc/ssh/sshd_config.d/00-allow-root.conf
+          
+          # 重启服务并强制加载
+          sudo systemctl daemon-reload || true
           sudo systemctl restart ssh || sudo service ssh restart
           
-          # 4. 验证连通性
-          ssh -o StrictHostKeyChecking=no root@127.0.0.1 "echo SSH Connection Verified"
+          # 4. 验证连通性 (增加 -v 方便调试)
+          ssh -o StrictHostKeyChecking=no -v root@127.0.0.1 "echo SSH Connection Verified"
 
       - name: Build and Test
         run: |
@@ -49,7 +55,7 @@ jobs:
           sudo cp supacloud-linux-amd64 /usr/local/bin/supacloud
           sudo chmod +x /usr/local/bin/supacloud
           echo "[CI] 开始宿主机原生环境测试..."
-          # 宿主机上同样需要注入环境兼容参数，防止误删源或尝试无意义的内核/服务操作
+          # 宿主机上同样需要注入环境兼容参数
           export SUPACLOUD_ANSIBLE_ARGS="-e node_repo_remove=false -e node_write_etc_hosts=false -e node_dns_method=none -e node_tune=none -e node_kernel_modules=[] -e chrony_enabled=false -vv"
           sudo -E /usr/local/bin/supacloud install --yes --ip 127.0.0.1 --domain api.local.nip.io --password ci-test-pass
 
@@ -66,18 +72,19 @@ jobs:
         uses: oven-sh/setup-bun@v1
       - name: Run E2E Test in Container
         run: |
-          # 启动带 systemd 的容器
-          docker run -d --name e2e-node --privileged \
-            -v /sys/fs/cgroup:/sys/fs/cgroup:ro \
-            -v ${{ github.workspace }}:/root/supacloud \
-            ${{ matrix.os }} /sbin/init || \
-          docker run -d --name e2e-node --privileged \
-            -v /sys/fs/cgroup:/sys/fs/cgroup:ro \
-            -v ${{ github.workspace }}:/root/supacloud \
-            ${{ matrix.os }} /lib/systemd/systemd
+          # 1. 清理可能存在的旧容器，防止冲突
+          docker rm -f e2e-node || true
           
-          echo "[CI] 等待容器系统初始化 (10s)..."
-          sleep 10
+          # 2. 启动一个通用的后台容器 (跳过 /sbin/init)
+          docker run -d --name e2e-node --privileged \
+            -v /sys/fs/cgroup:/sys/fs/cgroup:ro \
+            -v ${{ github.workspace }}:/root/supacloud \
+            ${{ matrix.os }} tail -f /dev/null
+          
+          echo "[CI] 容器 ${{ matrix.os }} 已就绪，准备初始化..."
+          
+          # 3. 安装补丁 (判断 yum/apt)
+          docker exec -t e2e-node bash -c "if command -v apt-get >/dev/null; then apt-get update && apt-get install -y sudo curl; else yum install -y sudo curl; fi" || true
           
           # 执行测试脚本
           docker exec -t e2e-node bash /root/supacloud/scripts/ci/container-test.sh
