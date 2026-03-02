@@ -1,17 +1,17 @@
-# SupaCloud 多租户管理方案与 Management API 技术规范
+# SupaCloud Multi-tenant Management Solution and Management API Technical Specification
 
-本文档详细说明了基于 Pigsty 架构实现多项目管理的技术方案设计以及 Management API 的完整技术规范。
+This document details the technical solution design for multi-project management based on Pigsty architecture and the complete technical specification for Management API.
 
 ---
 
-## 一、架构概述
+## 1. Architecture Overview
 
-通过共享基础设施（Pigsty PostgreSQL、Nginx 网关和 S3 存储）提供逻辑隔离的方式运行多个 Supabase 项目。
+Multiple Supabase projects are run with logical isolation by sharing infrastructure (Pigsty PostgreSQL, Nginx gateway, and S3 storage).
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                    Management API (:9090)                    │
-│              Bun + Elysia + 依赖注入                         │
+│              Bun + Elysia + Dependency Injection             │
 ├─────────────────────────────────────────────────────────────┤
 │                                                              │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐       │
@@ -34,21 +34,21 @@
 
 ---
 
-## 二、数据隔离策略
+## 2. Data Isolation Strategy
 
-### 2.1 数据库隔离 (PostgreSQL)
+### 2.1 Database Isolation (PostgreSQL)
 
-每个项目在 Pigsty 集群中拥有独立的逻辑数据库和用户。
+Each project has its own logical database and user in the Pigsty cluster.
 
-| 资源 | 命名规范 | 示例 |
-|------|----------|------|
-| 项目数据库 | `supa_<project_ref>` | `supa_abc123` |
-| 项目角色 | `role_<project_ref>` | `role_abc123` |
-| 权限 | 角色仅能访问所属数据库 | HBA 规则强制 |
+| Resource | Naming Convention | Example |
+|----------|-------------------|---------|
+| Project Database | `supa_<project_ref>` | `supa_abc123` |
+| Project Role | `role_<project_ref>` | `role_abc123` |
+| Permissions | Role can only access its own database | Enforced by HBA rules |
 
-### 2.2 元数据存储
+### 2.2 Metadata Storage
 
-专用 `supacloud_meta` 数据库存储项目生命周期信息。
+Dedicated `supacloud_meta` database stores project lifecycle information.
 
 ```sql
 CREATE DATABASE supacloud_meta;
@@ -78,84 +78,84 @@ CREATE INDEX idx_projects_ref ON projects(ref);
 CREATE INDEX idx_projects_status ON projects(status);
 ```
 
-### 2.3 存储隔离 (S3)
+### 2.3 Storage Isolation (S3)
 
-- **Bucket 命名**: `supa-<project_ref>`
-- **凭据**: 每项目独立的 Access Key / Secret Key
-- **支持后端**: RustFS, Garage, MinIO, External S3
+- **Bucket Naming**: `supa-<project_ref>`
+- **Credentials**: Independent Access Key / Secret Key per project
+- **Supported Backends**: RustFS, Garage, MinIO, External S3
 
-### 2.4 DNS 与路由隔离
+### 2.4 DNS and Routing Isolation
 
-使用动态 Vhost 生成，Management API 负责在 `/etc/nginx/sites-enabled/supa-tenants/` 生成配置片段。
+Dynamic Vhost generation, Management API generates config snippets in `/etc/nginx/sites-enabled/supa-tenants/`.
 
-| 域名模式 | 路由目标 |
-|----------|----------|
-| `api.example.com` | 共享 Kong 网关 |
-| `studio.example.com` | 共享 Studio 控制台 |
-| `<project>.api.example.com` | Kong + 租户 Header |
+| Domain Pattern | Routing Target |
+|----------------|----------------|
+| `api.example.com` | Shared Kong Gateway |
+| `studio.example.com` | Shared Studio Console |
+| `<project>.api.example.com` | Kong + Tenant Header |
 
 ---
 
-## 三、JWT 安全隔离
+## 3. JWT Security Isolation
 
-### 3.1 独立密钥
+### 3.1 Independent Keys
 
-每个项目初始化时生成唯一的 `JWT_SECRET` (32+ 字符)。
+Each project generates a unique `JWT_SECRET` (32+ characters) during initialization.
 
-### 3.2 密钥派生
+### 3.2 Key Derivation
 
 ```
 JWT_SECRET → ANON_KEY (role: anon, exp: 10 years)
 JWT_SECRET → SERVICE_ROLE_KEY (role: service_role, exp: 10 years)
 ```
 
-### 3.3 Kong 配合
+### 3.3 Kong Integration
 
-Kong 根据 `Host` Header 动态验证不同项目的 JWT 密钥。
+Kong dynamically validates JWT keys for different projects based on `Host` Header.
 
 ---
 
-## 四、Management API 规范
+## 4. Management API Specification
 
-### 4.1 认证
+### 4.1 Authentication
 
-- **Master Token**: 存储在 `/etc/supabase/master-token.env`
+- **Master Token**: Stored in `/etc/supabase/master-token.env`
 - **Header**: `Authorization: Bearer <MASTER_TOKEN>`
 
-### 4.2 API 端点
+### 4.2 API Endpoints
 
-#### 项目管理
+#### Project Management
 
-| 方法 | 端点 | 说明 |
-|------|------|------|
-| GET | `/v1/projects` | 获取所有项目列表 |
-| POST | `/v1/projects` | 创建新项目 |
-| GET | `/v1/projects/:ref` | 获取项目详情 |
-| DELETE | `/v1/projects/:ref` | 删除项目 (软删除) |
-| GET | `/v1/projects/:ref/settings` | 获取项目配置 |
-| PUT | `/v1/projects/:ref/settings` | 更新项目配置 |
-| GET | `/v1/projects/:ref/status` | 获取项目运行状态 |
-| POST | `/v1/projects/:ref/restart` | 重启项目服务 |
-| GET | `/v1/projects/:ref/types/typescript`| 获取数据库 TS 类型(供 CLI 使用) |
-| PATCH| `/v1/projects/:ref/config/auth` | 设置 Auth/OAuth/SMTP 等提供商 |
-| GET | `/v1/projects/:ref/secrets` | 控制边缘函数等敏感变量 |
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/v1/projects` | Get all projects list |
+| POST | `/v1/projects` | Create new project |
+| GET | `/v1/projects/:ref` | Get project details |
+| DELETE | `/v1/projects/:ref` | Delete project (soft delete) |
+| GET | `/v1/projects/:ref/settings` | Get project config |
+| PUT | `/v1/projects/:ref/settings` | Update project config |
+| GET | `/v1/projects/:ref/status` | Get project running status |
+| POST | `/v1/projects/:ref/restart` | Restart project services |
+| GET | `/v1/projects/:ref/types/typescript`| Get database TS types (for CLI) |
+| PATCH| `/v1/projects/:ref/config/auth` | Set Auth/OAuth/SMTP providers |
+| GET | `/v1/projects/:ref/secrets` | Control sensitive variables like edge functions |
 
-#### 命令行生态 (Supabase CLI)
-| 方法 | 端点 | 说明 |
-|------|------|------|
-| GET | `/v1/oauth/authorize` | 兼容 `supabase login` 的令牌派发页 |
+#### CLI Ecosystem (Supabase CLI)
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/v1/oauth/authorize` | Token issuance page compatible with `supabase login` |
 
-#### 密钥管理
+#### Key Management
 
-| 方法 | 端点 | 说明 |
-|------|------|------|
-| GET | `/v1/projects/:ref/api-keys` | 获取项目 API 密钥 |
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/v1/projects/:ref/api-keys` | Get project API keys |
 
-### 4.3 请求/响应示例
+### 4.3 Request/Response Examples
 
 #### POST /v1/projects
 
-**请求**:
+**Request**:
 ```json
 {
   "name": "My Project",
@@ -163,7 +163,7 @@ Kong 根据 `Host` Header 动态验证不同项目的 JWT 密钥。
 }
 ```
 
-**响应**:
+**Response**:
 ```json
 {
   "id": "550e8400-e29b-41d4-a716-446655440000",
@@ -176,7 +176,7 @@ Kong 根据 `Host` Header 动态验证不同项目的 JWT 密钥。
 
 #### GET /v1/projects/:ref/api-keys
 
-**响应**:
+**Response**:
 ```json
 {
   "anon_key": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.REDACTED_EXAMPLE",
@@ -186,73 +186,73 @@ Kong 根据 `Host` Header 动态验证不同项目的 JWT 密钥。
 
 ---
 
-## 五、模块化脚本
+## 5. Modular Scripts
 
-### 5.1 脚本位置
+### 5.1 Script Location
 
 ```
 /opt/supacloud/scripts/lib/
-├── db_manager.sh      # 数据库管理
-├── s3_manager.sh      # 存储管理
-├── router_manager.sh  # Nginx 路由管理
-└── jwt_manager.sh     # JWT 密钥管理
+├── db_manager.sh      # Database management
+├── s3_manager.sh      # Storage management
+├── router_manager.sh  # Nginx routing management
+└── jwt_manager.sh     # JWT key management
 ```
 
-### 5.2 脚本接口
+### 5.2 Script Interface
 
 #### db_manager.sh
 
 ```bash
-# 创建项目数据库和角色
+# Create project database and role
 db_manager.sh create <project_ref> <password>
 
-# 删除项目数据库和角色
+# Delete project database and role
 db_manager.sh delete <project_ref>
 
-# 检查数据库状态
+# Check database status
 db_manager.sh status <project_ref>
 ```
 
 #### s3_manager.sh
 
 ```bash
-# 创建项目 Bucket
+# Create project Bucket
 s3_manager.sh create <project_ref>
 
-# 删除项目 Bucket
+# Delete project Bucket
 s3_manager.sh delete <project_ref>
 
-# 获取凭据
+# Get credentials
 s3_manager.sh credentials <project_ref>
 ```
 
 #### router_manager.sh
 
 ```bash
-# 添加项目路由
+# Add project route
 router_manager.sh add <project_ref> <domain>
 
-# 删除项目路由
+# Remove project route
 router_manager.sh remove <project_ref>
 
-# 重载 Nginx
+# Reload Nginx
 router_manager.sh reload
 ```
 
 #### jwt_manager.sh
 
 ```bash
-# 生成项目 JWT 密钥
+# Generate project JWT key
 jwt_manager.sh generate <project_ref>
 
-# 输出: JWT_SECRET, ANON_KEY, SERVICE_ROLE_KEY
+# Output: JWT_SECRET, ANON_KEY, SERVICE_ROLE_KEY
 ```
 
 ---
 
-## 六、部署配置
+## 6. Deployment Configuration
 
-### 6.1 Systemd 服务
+### 6.1 Systemd Service
 
 ```ini
 [Unit]
@@ -273,7 +273,7 @@ EnvironmentFile=/etc/supabase/management-api.env
 WantedBy=multi-user.target
 ```
 
-### 6.2 环境变量
+### 6.2 Environment Variables
 
 ```bash
 # /etc/supabase/management-api.env
@@ -285,11 +285,11 @@ SCRIPTS_PATH=/opt/supacloud/scripts/lib
 
 ---
 
-## 七、监控与日志
+## 7. Monitoring and Logging
 
-### 7.1 Prometheus 指标
+### 7.1 Prometheus Metrics
 
-所有指标带 `project_ref` 标签：
+All metrics have `project_ref` label:
 
 ```
 supacloud_project_requests_total{project_ref="abc123"}
@@ -297,7 +297,7 @@ supacloud_project_db_connections{project_ref="abc123"}
 supacloud_project_storage_bytes{project_ref="abc123"}
 ```
 
-### 7.2 日志格式
+### 7.2 Log Format
 
 ```json
 {
@@ -310,72 +310,72 @@ supacloud_project_storage_bytes{project_ref="abc123"}
 
 ---
 
-## 八、错误处理与回滚
+## 8. Error Handling and Rollback
 
-### 8.1 项目创建流程
+### 8.1 Project Creation Flow
 
 ```
-1. 生成 project_ref
-2. 插入 projects 表 (status: creating)
-3. 创建数据库 → 失败则回滚
-4. 创建 S3 Bucket → 失败则回滚数据库
-5. 生成 JWT 密钥
-6. 配置 Nginx 路由
-7. 更新 status: active
+1. Generate project_ref
+2. Insert into projects table (status: creating)
+3. Create database → Rollback on failure
+4. Create S3 Bucket → Rollback database on failure
+5. Generate JWT keys
+6. Configure Nginx routing
+7. Update status: active
 ```
 
-### 8.2 回滚策略
+### 8.2 Rollback Strategy
 
-- 数据库创建失败: 仅删除 projects 记录
-- S3 创建失败: 删除数据库 + projects 记录
-- 路由配置失败: 删除 S3 + 数据库 + projects 记录
+- Database creation failed: Delete projects record only
+- S3 creation failed: Delete database + projects record
+- Routing config failed: Delete S3 + database + projects record
 
 ---
 
-## 九、实施路径
+## 9. Implementation Path
 
-| 阶段 | 目标 | 产出 |
-|------|------|------|
-| 1 | 基础 API + 数据库层 | 可运行的 CRUD API |
-| 2 | Shell 脚本集成 | 完整的项目创建流程 |
-| 3 | Nginx 动态路由 | 多租户域名支持 |
-| 4 | 监控集成 | Grafana 多项目仪表板 |
-| 5 | MCP Server | AI Agent 原生基础设施操控 |
+| Phase | Goal | Output |
+|-------|------|--------|
+| 1 | Basic API + Database layer | Runnable CRUD API |
+| 2 | Shell script integration | Complete project creation flow |
+| 3 | Nginx dynamic routing | Multi-tenant domain support |
+| 4 | Monitoring integration | Grafana multi-project dashboard |
+| 5 | MCP Server | AI Agent native infrastructure control |
 
 ---
 
-## 十、MCP Server (AI Agent 集成)
+## 10. MCP Server (AI Agent Integration)
 
-### 10.1 架构设计
+### 10.1 Architecture Design
 
-MCP Server 以 **npm 包** 形式运行在用户本地（Cursor / Claude Desktop），通过两条通道连接目标服务器：
+MCP Server runs as an **npm package** locally on user's machine (Cursor / Claude Desktop), connecting to target server via two channels:
 
 ```
-用户本机 (AI IDE)
+User's Machine (AI IDE)
 ┌───────────────────────────────┐
 │  @supacloud/mcp-server (stdio)│
 │  ┌──────────┐  ┌────────────┐│
-│  │ SSH 通道  │  │ HTTP 通道  ││
+│  │ SSH Channel│  │ HTTP Channel││
 │  └────┬─────┘  └─────┬──────┘│
 └───────┼──────────────┼───────┘
         │              │
-   ═════╪══════════════╪═════ 网络
+   ═════╪══════════════╪═════ Network
         │              │
 ┌───────▼──────────────▼───────┐
-│         目标服务器             │
+│         Target Server          │
 │  Port 22 (SSH)  Port 9090 (API)│
 │  install.sh     Management API │
 └──────────────────────────────┘
 ```
 
-### 10.2 两阶段工具模型
+### 10.2 Two-Phase Tool Model
 
-| 阶段 | SupaCloud 状态 | 传输通道 | 可用工具 |
-|------|---------------|---------|---------|
-| 安装前 | 未安装 | SSH | `ping_server` `install_supacloud` `upgrade_supacloud` `diagnose_server` `ssh_exec` |
-| 安装后 | 运行中 | HTTP API | 项目 CRUD、函数部署、Auth 配置、Secrets、备份、监控等 23 个工具 |
+| Phase | SupaCloud Status | Transport Channel | Available Tools |
+|-------|------------------|-------------------|-----------------|
+| Pre-installation | Not installed | SSH | `ping_server` `install_supacloud` `upgrade_supacloud` `diagnose_server` `ssh_exec` |
+| Post-installation | Running | HTTP API | Project CRUD, function deployment, Auth config, Secrets, backup, monitoring, etc. 23 tools |
 
-### 10.3 配置方式
+### 10.3 Configuration
 
 ```json
 {
@@ -384,19 +384,19 @@ MCP Server 以 **npm 包** 形式运行在用户本地（Cursor / Claude Desktop
       "command": "npx",
       "args": ["-y", "@supacloud/mcp-server"],
       "env": {
-        "SUPACLOUD_HOST": "服务器 IP",
+        "SUPACLOUD_HOST": "Server IP",
         "SUPACLOUD_SSH_KEY": "~/.ssh/id_rsa",
-        "SUPACLOUD_API_TOKEN": "Master Token (安装后填入)"
+        "SUPACLOUD_API_TOKEN": "Master Token (fill in after installation)"
       }
     }
   }
 }
 ```
 
-### 10.4 安全策略
+### 10.4 Security Policy
 
-- SSH 密钥/密码通过环境变量注入，不持久化
-- API Token 与 Management API 的 Master Token 一致
-- 工具级权限隔离：SSH 工具和 HTTP 工具根据环境变量独立注册
-- 敏感操作（`ssh_exec`、`delete_project`）在工具描述中标注风险
+- SSH key/password injected via environment variables, not persisted
+- API Token matches Management API's Master Token
+- Tool-level permission separation: SSH tools and HTTP tools registered independently based on environment variables
+- Sensitive operations (`ssh_exec`, `delete_project`) marked with risk in tool description
 

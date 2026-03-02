@@ -44,24 +44,24 @@ export interface ProjectDetailResponse extends ProjectResponse {
 }
 
 export class ProjectService {
-  // 获取所有项目
+  // Get all projects
   async listProjects(): Promise<ProjectResponse[]> {
     const projects = await projectRepository.findAll();
     return projects.map((p) => this.toResponse(p));
   }
 
-  // 获取项目详情
+  // Get project details
   async getProject(ref: string): Promise<ProjectDetailResponse | null> {
     const project = await projectRepository.findByRef(ref);
     if (!project) return null;
     return this.toDetailResponse(project);
   }
 
-  // 创建项目
+  // Create project
   async createProject(request: CreateProjectRequest): Promise<ProjectResponse> {
     const projectRef = jwtService.generateProjectRef();
 
-    // 生成所有必要的凭据
+    // Generate all necessary credentials
     const dbPassword = databaseService.generatePassword();
     const { jwtSecret, anonKey, serviceRoleKey } = await jwtService.generateKeySet();
 
@@ -69,7 +69,7 @@ export class ProjectService {
     const dbUser = `role_${projectRef}`;
     const s3Bucket = `supa-${projectRef}`;
 
-    // 1. 在数据库中创建项目记录 (status: creating)
+    // 1. Create project record in database (status: creating)
     const project = await projectRepository.create({
       ref: projectRef,
       name: request.name,
@@ -83,7 +83,7 @@ export class ProjectService {
       region: request.region || "local",
     });
 
-    // 2. 异步执行资源创建 (后台进行)
+    // 2. Asynchronously provision resources (background)
     this.provisionResources(projectRef, dbPassword).catch((error) => {
       console.error(`Failed to provision resources for ${projectRef}:`, error);
     });
@@ -91,10 +91,10 @@ export class ProjectService {
     return this.toResponse(project);
   }
 
-  // 异步创建资源 (Saga Orcherstrator)
+  // Asynchronously provision resources (Saga Orchestrator)
   private async provisionResources(projectRef: string, dbPassword: string): Promise<void> {
     try {
-      // 通过入队第一个任务来启动 Saga
+      // Start Saga by enqueuing the first task
       await taskRepository.createTask(projectRef, "provision_db", { dbPassword });
       console.log(`[Saga] Initiated resource provisioning for project ${projectRef}`);
     } catch (error) {
@@ -103,15 +103,15 @@ export class ProjectService {
     }
   }
 
-  // 删除项目
+  // Delete project
   async deleteProject(ref: string): Promise<boolean> {
     const project = await projectRepository.findByRef(ref);
     if (!project) return false;
 
-    // 软删除数据库记录
+    // Soft delete database record
     await projectRepository.softDelete(ref);
 
-    // 异步清理资源
+    // Asynchronously cleanup resources
     this.cleanupResources(ref).catch((error) => {
       console.error(`Failed to cleanup resources for ${ref}:`, error);
     });
@@ -119,7 +119,7 @@ export class ProjectService {
     return true;
   }
 
-  // 更新项目
+  // Update project
   async updateProject(ref: string, request: UpdateProjectRequest): Promise<boolean> {
     const project = await projectRepository.findByRef(ref);
     if (!project) return false;
@@ -134,7 +134,7 @@ export class ProjectService {
     return true;
   }
 
-  // 暂停项目
+  // Pause project
   async pauseProject(ref: string): Promise<boolean> {
     const project = await projectRepository.findByRef(ref);
     if (!project) return false;
@@ -143,7 +143,7 @@ export class ProjectService {
     return true;
   }
 
-  // 恢复项目
+  // Restore project
   async restoreProject(ref: string): Promise<boolean> {
     const project = await projectRepository.findByRef(ref);
     if (!project) return false;
@@ -152,7 +152,7 @@ export class ProjectService {
     return true;
   }
 
-  // 获取项目健康状态
+  // Get project health status
   async getProjectHealth(ref: string): Promise<{ status: string; services: Record<string, string> } | null> {
     const project = await projectRepository.findByRef(ref);
     if (!project) return null;
@@ -170,7 +170,7 @@ export class ProjectService {
     };
   }
 
-  // 异步清理资源 (Saga)
+  // Asynchronously cleanup resources (Saga)
   private async cleanupResources(projectRef: string): Promise<void> {
     try {
       await taskRepository.createTask(projectRef, "cleanup_router");
@@ -180,7 +180,7 @@ export class ProjectService {
     }
   }
 
-  // 获取项目状态
+  // Get project status
   async getProjectStatus(ref: string): Promise<{ status: ProjectStatus; database: string; storage: string } | null> {
     const project = await projectRepository.findByRef(ref);
     if (!project) return null;
@@ -190,29 +190,29 @@ export class ProjectService {
     return {
       status: project.status,
       database: dbStatus.success ? "healthy" : "unhealthy",
-      storage: "unknown", // TODO: 实现存储健康检查
+      storage: "unknown", // TODO: Implement storage health check
     };
   }
 
-  // 重启项目服务
+  // Restart project services
   async restartProject(ref: string): Promise<boolean> {
     const project = await projectRepository.findByRef(ref);
     if (!project) return false;
 
-    // TODO: 实现服务重启逻辑
-    // 当前仅重载路由
+    // TODO: Implement service restart logic
+    // Currently only reloads router
     await routerService.reload();
     return true;
   }
 
-  // 获取项目设置
+  // Get project settings
   async getProjectSettings(ref: string): Promise<Record<string, unknown> | null> {
     const project = await projectRepository.findByRef(ref);
     if (!project) return null;
     return project.config;
   }
 
-  // 更新项目设置
+  // Update project settings
   async updateProjectSettings(ref: string, config: Record<string, unknown>): Promise<Record<string, unknown> | null> {
     const project = await projectRepository.findByRef(ref);
     if (!project) return null;
@@ -225,7 +225,7 @@ export class ProjectService {
     return updated?.config || null;
   }
 
-  // 获取项目 API 密钥
+  // Get project API keys
   async getApiKeys(ref: string): Promise<{ anon_key: string; service_role_key: string } | null> {
     const project = await projectRepository.findByRef(ref);
     if (!project) return null;
@@ -236,7 +236,7 @@ export class ProjectService {
     };
   }
 
-  // --- 环境变量 (Secrets) 管理 ---
+  // --- Environment Variables (Secrets) Management ---
 
   async getSecrets(ref: string): Promise<any[] | null> {
     const project = await projectRepository.findByRef(ref);
@@ -253,7 +253,7 @@ export class ProjectService {
       if (!success) return false;
     }
 
-    // 更新完成后，可触发 Runtime 重启逻辑
+    // After update, can trigger Runtime restart logic
     return true;
   }
 
@@ -263,7 +263,7 @@ export class ProjectService {
     return await databaseService.deleteSecret(ref, name);
   }
 
-  // --- 在线编辑 (Functions) 管理 ---
+  // --- Online Editing (Functions) Management ---
 
   async getFunctionCode(ref: string, slug: string): Promise<string | null> {
     const project = await projectRepository.findByRef(ref);
@@ -310,7 +310,7 @@ export class ProjectService {
     return result.success;
   }
 
-  // 转换为响应格式
+  // Convert to response format
   private toResponse(project: Project): ProjectResponse {
     return {
       id: project.id,
@@ -333,7 +333,7 @@ export class ProjectService {
     };
   }
 
-  // 获取详细响应格式
+  // Get detailed response format
   private toDetailResponse(project: Project): ProjectDetailResponse {
     return {
       ...this.toResponse(project),
@@ -342,13 +342,13 @@ export class ProjectService {
     };
   }
 
-  // --- 日志管理 ---
+  // --- Log Management ---
 
   async queryLogs(ref: string, type: string = "all"): Promise<any[]> {
     const project = await projectRepository.findByRef(ref);
     if (!project) return [];
 
-    // 模拟日志数据，激活 Studio Logs Explorer
+    // Simulated log data, activates Studio Logs Explorer
     const now = new Date();
     return [
       {
@@ -366,26 +366,26 @@ export class ProjectService {
     ];
   }
 
-  // --- API 密钥管理 ---
+  // --- API Key Management ---
 
   async rotateApiKeys(ref: string): Promise<{ anon_key: string, service_role_key: string } | null> {
     const project = await projectRepository.findByRef(ref);
     if (!project) return null;
 
-    // 1. 生成新的密钥集
+    // 1. Generate new key set
     const { jwtSecret, anonKey, serviceRoleKey } = await jwtService.generateKeySet();
 
-    // 2. 更新数据库
+    // 2. Update database
     await projectRepository.updateApiKeys(ref, {
       jwt_secret: jwtSecret,
       anon_key: anonKey,
       service_role_key: serviceRoleKey,
     });
 
-    // 3. 同步到 Kong 网关
+    // 3. Sync to Kong gateway
     await gatewayService.setupJwt(ref, jwtSecret);
 
-    // 4. TODO: 此处后续可以增加通知路由器重载的逻辑
+    // 4. TODO: Logic to notify router reload can be added here later
 
     return {
       anon_key: anonKey,
@@ -393,7 +393,7 @@ export class ProjectService {
     };
   }
 
-  // --- 备份管理 ---
+  // --- Backup Management ---
 
   async listBackups(ref: string): Promise<any[]> {
     const project = await projectRepository.findByRef(ref);
@@ -416,7 +416,7 @@ export class ProjectService {
     return result.success;
   }
 
-  // --- 网络限制 ---
+  // --- Network Restrictions ---
 
   async updateNetworkRestrictions(ref: string, allowedIps: string[]): Promise<boolean> {
     const project = await projectRepository.findByRef(ref);
@@ -426,7 +426,7 @@ export class ProjectService {
     return result.success;
   }
 
-  // --- 自定义域名 ---
+  // --- Custom Domain ---
 
   async getCustomDomain(ref: string): Promise<{ custom_hostname: string, status: string } | null> {
     const project = await projectRepository.findByRef(ref);

@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # extension_manager.sh
-# 管理 PostgreSQL 扩展插件 (CREATE/DROP EXTENSION)
+# Manage PostgreSQL extensions (CREATE/DROP EXTENSION)
 
 set -e
 
@@ -9,7 +9,7 @@ COMMAND=$1
 DB_NAME=$2
 EXT_NAME=$3
 
-# 从环境变量或默认值获取 PostgreSQL 连接信息
+# Get PostgreSQL connection info from environment variables or default values
 PG_HOST="${PG_HOST:-${POSTGRES_HOST:-localhost}}"
 PG_PORT="${PG_PORT:-${POSTGRES_PORT:-6432}}"
 PG_USER="${PG_USER:-postgres}"
@@ -20,7 +20,7 @@ run_sql() {
 
 case $COMMAND in
     list)
-        # 获取可用和已安装的扩展
+        # Get available and installed extensions
         run_sql "SELECT json_agg(t) FROM (
             SELECT 
                 name, 

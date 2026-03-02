@@ -1,7 +1,7 @@
 /**
- * SupaCloud MCP Server – HTTP 传输层
+ * SupaCloud MCP Server – HTTP Transport Layer
  *
- * SupaCloud 安装完成后，通过 Management API (HTTP) 管理项目。
+ * After SupaCloud is installed, manage projects via Management API (HTTP).
  */
 
 export interface HttpConfig {
@@ -79,7 +79,7 @@ export class HttpTransport {
         return { ok: res.ok, status: res.status, data };
     }
 
-    /** 快速检测 API 是否可达 */
+    /** Quick check if API is reachable */
     async ping(): Promise<boolean> {
         const res = await this.get("/v1/projects").catch(() => null);
         return res?.ok ?? false;

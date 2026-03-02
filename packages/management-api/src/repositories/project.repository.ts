@@ -22,7 +22,7 @@ export class ProjectRepository {
     return [];
   }
 
-  // 根据 ref 查找项目
+  // Find project by ref
   async findByRef(ref: string): Promise<Project | null> {
     const [project] = await sql`
       SELECT * FROM projects
@@ -31,7 +31,7 @@ export class ProjectRepository {
     return project || null;
   }
 
-  // 根据 id 查找项目
+  // Find project by id
   async findById(id: string): Promise<Project | null> {
     const [project] = await sql`
       SELECT * FROM projects
@@ -40,7 +40,7 @@ export class ProjectRepository {
     return project || null;
   }
 
-  // 创建项目
+  // Create project
   async create(input: CreateProjectInput): Promise<Project> {
     const [project] = await sql`
       INSERT INTO projects (
@@ -68,7 +68,7 @@ export class ProjectRepository {
     return project;
   }
 
-  // 更新项目状态
+  // Update project status
   async updateStatus(ref: string, status: ProjectStatus): Promise<Project | null> {
     const [project] = await sql`
       UPDATE projects
@@ -79,7 +79,7 @@ export class ProjectRepository {
     return project || null;
   }
 
-  // 更新项目配置
+  // Update project config
   async updateConfig(ref: string, config: Record<string, unknown>): Promise<Project | null> {
     const [project] = await sql`
       UPDATE projects
@@ -90,7 +90,7 @@ export class ProjectRepository {
     return project || null;
   }
 
-  // 更新 API 密钥
+  // Update API keys
   async updateApiKeys(ref: string, keys: { jwt_secret: string, anon_key: string, service_role_key: string }): Promise<Project | null> {
     const [project] = await sql`
       UPDATE projects
@@ -105,7 +105,7 @@ export class ProjectRepository {
     return project || null;
   }
 
-  // 软删除项目
+  // Soft delete project
   async softDelete(ref: string): Promise<Project | null> {
     const [project] = await sql`
       UPDATE projects
@@ -116,7 +116,7 @@ export class ProjectRepository {
     return project || null;
   }
 
-  // 检查 ref 是否已存在
+  // Check if ref already exists
   async existsByRef(ref: string): Promise<boolean> {
     const [result] = await sql`
       SELECT 1 FROM projects WHERE ref = ${ref}

@@ -4,8 +4,8 @@ import { RestoreRequest } from '../types/backup';
 
 export const backupRoutes = new Elysia({ prefix: "/v1/projects/:ref/database/backups" })
     .get('/', async ({ params, query }: any) => {
-        // stanza 通常就是项目对应的租户数据库 supa_<ref>，这里作简化兼容处理，
-        // 在未来的演进中应该移除 stanza 参数，只传 projectRef。
+        // stanza is usually the tenant database supa_<ref> for the project, simplified here for compatibility,
+        // in future evolution should remove stanza parameter, only pass projectRef.
         const stanza = query.stanza || `supa_${params.ref}`;
         return await BackupService.listBackups(stanza);
     })
@@ -17,7 +17,7 @@ export const backupRoutes = new Elysia({ prefix: "/v1/projects/:ref/database/bac
     .post('/restore', async ({ body }: any) => {
         return await BackupService.restore(body as RestoreRequest);
     })
-    // --- 租户级逻辑备份路由 ---
+    // --- Tenant-level logical backup routes ---
     .post('/logical', async ({ params: { ref } }: any) => {
         return await BackupService.createLogicalBackup(ref);
     })

@@ -3,9 +3,9 @@ import { config } from '../config';
 
 export class MonitorService {
     /**
-     * 获取数据库实例的健康状态
-     * @param nodeIp 数据库节点 IP
-     * @param port PG Exporter 端口，默认 9630
+     * Get database instance health status
+     * @param nodeIp Database node IP
+     * @param port PG Exporter port, defaults to 9630
      */
     static async getHealth(nodeIp: string, port: number = 9630): Promise<HealthStatus> {
         const url = `http://${nodeIp}:${port}/health`;
@@ -14,7 +14,7 @@ export class MonitorService {
             if (!response.ok) throw new Error('Exporter returned non-OK status');
 
             const data = await response.json();
-            // 假设 Pigsty Exporter 返回结构包含 status 和 role
+            // Assume Pigsty Exporter returns structure with status and role
             return {
                 status: data.status === 'ok' ? 'up' : 'down',
                 role: data.role || 'unknown',
@@ -33,8 +33,8 @@ export class MonitorService {
     }
 
     /**
-     * 从 VictoriaMetrics 获取核心指标
-     * @param nodeIp 节点 IP
+     * Get core metrics from VictoriaMetrics
+     * @param nodeIp Node IP
      */
     static async getMetrics(nodeIp: string): Promise<NodeMetrics> {
         const vmUrl = process.env.VICTORIAMETRICS_URL || `http://${nodeIp}:8428`;
