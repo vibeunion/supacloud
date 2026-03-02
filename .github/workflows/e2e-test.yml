@@ -29,21 +29,23 @@ jobs:
           cat ~/.ssh/id_rsa.pub >> ~/.ssh/authorized_keys
           chmod 700 ~/.ssh && chmod 600 ~/.ssh/authorized_keys
           
-          # 2. 关键：开启 root 登录权限并授权
+          # 2. 关键：彻底开启 root 登录权限并授权
           sudo mkdir -p /root/.ssh
           sudo cp ~/.ssh/id_rsa.pub /root/.ssh/authorized_keys
           sudo chmod 700 /root/.ssh && sudo chmod 600 /root/.ssh/authorized_keys
           
-          # 3. 修正 SSHD 配置以允许 root 密钥登录 (GitHub Runner 默认可能限制)
-          sudo sed -i 's/^#PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config
+          # 3. 强制覆盖所有可能的限制
+          sudo ssh-keygen -A # 确保主机密钥就绪
           sudo sed -i 's/^PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config
+          sudo sed -i 's/^#PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config
           sudo sed -i 's/^#PubkeyAuthentication.*/PubkeyAuthentication yes/' /etc/ssh/sshd_config
-          # 清理可能存在的 config.d 限制
-          sudo find /etc/ssh/sshd_config.d/ -type f -exec sed -i 's/^PermitRootLogin.*/PermitRootLogin yes/' {} + || true
           
-          sudo systemctl restart ssh
+          # 清理 ubuntu 宿主机特有的限制覆盖文件（这是权限被拒的最核心原因）
+          sudo rm -f /etc/ssh/sshd_config.d/*.conf || true
           
-          # 验证连通性
+          sudo systemctl restart ssh || sudo service ssh restart
+          
+          # 4. 验证连通性
           ssh -o StrictHostKeyChecking=no root@127.0.0.1 "echo SSH Connection Verified"
 
       - name: Build and Test
@@ -55,8 +57,8 @@ jobs:
           sudo cp supacloud-linux-amd64 /usr/local/bin/supacloud
           sudo chmod +x /usr/local/bin/supacloud
           echo "[CI] 开始宿主机原生环境测试..."
-          # 回归原始：不注入多余的 node_repo 等参数，仅开启详细日志
-          export SUPACLOUD_ANSIBLE_ARGS="-vv"
+          # 宿主机上增加 repo 保护，防止 ansible 误删 runner 的系统源
+          export SUPACLOUD_ANSIBLE_ARGS="-e node_repo_remove=false -vv"
           sudo -E /usr/local/bin/supacloud install --yes --ip 127.0.0.1 --domain api.local.nip.io --password ci-test-pass
 
   test_container:
