@@ -65,26 +65,36 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: ["debian:12", "debian:11", "ubuntu:24.04", "ubuntu:22.04", "rockylinux:9"]
+        include:
+          - os: "debian:12"
+            image: "geerlingguy/docker-debian12-ansible"
+            init: "/lib/systemd/systemd"
+          - os: "debian:11"
+            image: "geerlingguy/docker-debian11-ansible"
+            init: "/lib/systemd/systemd"
+          - os: "ubuntu:24.04"
+            image: "geerlingguy/docker-ubuntu2204-ansible" # 暂时用 22.04 稳定版，或寻找对应 24.04 版
+            init: "/lib/systemd/systemd"
+          - os: "rockylinux:9"
+            image: "geerlingguy/docker-rockylinux9-ansible"
+            init: "/usr/lib/systemd/systemd"
     steps:
       - uses: actions/checkout@v3
       - name: Set up Bun
         uses: oven-sh/setup-bun@v1
       - name: Run E2E Test in Container
         run: |
-          # 1. 清理可能存在的旧容器，防止冲突
           docker rm -f e2e-node || true
           
-          # 2. 启动一个通用的后台容器 (跳过 /sbin/init)
+          # 使用带 systemd 的专业 Ansible 测试镜像
           docker run -d --name e2e-node --privileged \
+            --workdir /root/supacloud \
             -v /sys/fs/cgroup:/sys/fs/cgroup:ro \
             -v ${{ github.workspace }}:/root/supacloud \
-            ${{ matrix.os }} tail -f /dev/null
+            ${{ matrix.image }} ${{ matrix.init }}
           
-          echo "[CI] 容器 ${{ matrix.os }} 已就绪，准备初始化..."
-          
-          # 3. 安装补丁 (判断 yum/apt)
-          docker exec -t e2e-node bash -c "if command -v apt-get >/dev/null; then apt-get update && apt-get install -y sudo curl; else yum install -y sudo curl; fi" || true
+          echo "[CI] 容器 ${{ matrix.os }} (using ${{ matrix.image }}) 已启动，等待系统初始化..."
+          sleep 5
           
           # 执行测试脚本
           docker exec -t e2e-node bash /root/supacloud/scripts/ci/container-test.sh
