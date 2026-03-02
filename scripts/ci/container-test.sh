@@ -27,6 +27,10 @@ for cmd in systemctl hostnamectl timedatectl sysctl modprobe apparmor_status ude
         systemctl)
             cat <<'INNEREOF' > /usr/local/bin/systemctl
 #!/bin/bash
+arg="$@"
+if [[ "$arg" == *"is-active"* || "$arg" == *"is-enabled"* || "$arg" == *"status"* ]]; then
+    exit 0
+fi
 [ "$1" = "daemon-reload" ] && exit 0
 echo "Simulating systemctl $@"
 exit 0
