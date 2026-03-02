@@ -114,6 +114,22 @@ EXTENSIONS
 
     # 初始化 Supabase 核心 Schema (auth, storage, realtime)
     echo "Initializing Supabase schema for ${DB_NAME}..."
+    
+    # 先创建 authenticator 角色（需要变量替换）
+    psql -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -d "$DB_NAME" <<EOF
+-- 创建租户专属的 authenticator 角色
+DO \$\$
+BEGIN
+    IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'authenticator_${PROJECT_REF}') THEN
+        CREATE ROLE authenticator_${PROJECT_REF} NOINHERIT LOGIN PASSWORD '${DB_PASSWORD}';
+    ELSE
+        ALTER ROLE authenticator_${PROJECT_REF} WITH PASSWORD '${DB_PASSWORD}';
+    END IF;
+END
+\$\$;
+EOF
+
+    # 执行静态 Schema 初始化
     psql -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -d "$DB_NAME" <<'SUPABASE_SCHEMA'
 
 -- ============================================================
@@ -292,20 +308,8 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO anon;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO authenticated;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO service_role;
 
--- 6. authenticator 角色权限（PostgREST 通过此角色连接数据库）
-    DO $$
-    BEGIN
-        -- Bug Fix: 防止多租户互相覆盖全集群唯一的 authenticator 密码
-        -- 使用租户独立的 authenticator_${PROJECT_REF} 角色
-        IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'authenticator_${PROJECT_REF}') THEN
-            CREATE ROLE authenticator_${PROJECT_REF} NOINHERIT LOGIN PASSWORD '${DB_PASSWORD}';
-        ELSE
-            ALTER ROLE authenticator_${PROJECT_REF} WITH PASSWORD '${DB_PASSWORD}';
-        END IF;
-        -- 授权租户专属的 authenticator 可切换到 API 角色
-        GRANT anon, authenticated, service_role TO authenticator_${PROJECT_REF};
-    END
-    $$;
+-- 6. 授权 authenticator 可切换到 API 角色
+GRANT anon, authenticated, service_role TO authenticator_${PROJECT_REF};
 
 SUPABASE_SCHEMA
 
