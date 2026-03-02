@@ -1,4 +1,7 @@
-import { nanoid } from "nanoid";
+import { customAlphabet, nanoid as originalNanoid } from "nanoid";
+
+// 只使用小写字母和数字，避免与 shell 脚本验证冲突
+const generateProjectRefId = customAlphabet("abcdefghijklmnopqrstuvwxyz0123456789", 10);
 
 // JWT Header
 const header = {
@@ -6,7 +9,7 @@ const header = {
   typ: "JWT",
 };
 
-// Base64URL 编码
+// Base64URL encoding
 function base64UrlEncode(data: string | Uint8Array): string {
   const base64 = typeof data === "string"
     ? btoa(data)
@@ -14,7 +17,7 @@ function base64UrlEncode(data: string | Uint8Array): string {
   return base64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
-// HMAC-SHA256 签名
+// HMAC-SHA256 signature
 async function sign(message: string, secret: string): Promise<string> {
   const encoder = new TextEncoder();
   const key = await crypto.subtle.importKey(
@@ -28,7 +31,7 @@ async function sign(message: string, secret: string): Promise<string> {
   return base64UrlEncode(new Uint8Array(signature));
 }
 
-// 生成 JWT
+// Generate JWT
 async function generateJwt(payload: Record<string, unknown>, secret: string): Promise<string> {
   const encodedHeader = base64UrlEncode(JSON.stringify(header));
   const encodedPayload = base64UrlEncode(JSON.stringify(payload));
@@ -38,17 +41,17 @@ async function generateJwt(payload: Record<string, unknown>, secret: string): Pr
 }
 
 export class JwtService {
-  // 生成随机的 JWT Secret (32+ 字符)
+  // Generate random JWT Secret (32+ characters)
   generateSecret(): string {
-    return nanoid(40);
+    return originalNanoid(40);
   }
 
-  // 生成项目引用 ID (10 字符)
+  // Generate project reference ID (10 characters, lowercase alphanumeric only)
   generateProjectRef(): string {
-    return nanoid(10).toLowerCase();
+    return generateProjectRefId();
   }
 
-  // 生成 anon key
+  // Generate anon key
   async generateAnonKey(jwtSecret: string): Promise<string> {
     const now = Math.floor(Date.now() / 1000);
     const payload = {
@@ -60,7 +63,7 @@ export class JwtService {
     return generateJwt(payload, jwtSecret);
   }
 
-  // 生成 service_role key
+  // Generate service_role key
   async generateServiceRoleKey(jwtSecret: string): Promise<string> {
     const now = Math.floor(Date.now() / 1000);
     const payload = {
@@ -72,7 +75,7 @@ export class JwtService {
     return generateJwt(payload, jwtSecret);
   }
 
-  // 生成完整的 JWT 密钥集
+  // Generate complete JWT key set
   async generateKeySet(): Promise<{
     jwtSecret: string;
     anonKey: string;

@@ -1,14 +1,14 @@
 #!/bin/bash
 # ============================================================
-# SupaCloud 简易安装入口脚本
+# SupaCloud Simple Installation Entry Script
 #
-# 使用方法:
+# Usage:
 #   curl -fsSL https://raw.githubusercontent.com/zuohuadong/supacloud/main/setup.sh | sudo bash
 # ============================================================
 
 set -e
 
-# 颜色定义
+# Color definitions
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -20,17 +20,17 @@ log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 log_step() { echo -e "${BLUE}[STEP]${NC} $1"; }
 
-# 检查 root 权限
+# Check root privileges
 if [[ $EUID -ne 0 ]]; then
-    log_error "请使用 root 用户运行此脚本"
+    log_error "Please run this script as root"
     exit 1
 fi
 
-# 检查并安装基础依赖
+# Check and install base dependencies
 install_base_deps() {
-    log_step "检查基础依赖..."
+    log_step "Checking base dependencies..."
     if command -v git &>/dev/null && command -v curl &>/dev/null; then
-        log_info "基础依赖已就绪"
+        log_info "Base dependencies ready"
         return
     fi
 
@@ -44,29 +44,29 @@ install_base_deps() {
                 apt-get update && apt-get install -y git curl
                 ;;
             *)
-                log_warn "未识别的系统，请确保已安装 git 和 curl"
+                log_warn "Unrecognized system, please ensure git and curl are installed"
                 ;;
         esac
     fi
 }
 
-# 克隆仓库
+# Clone repository
 clone_repo() {
     INSTALL_DIR="/opt/supacloud"
     if [[ -d "$INSTALL_DIR" ]]; then
-        log_info "目标目录 $INSTALL_DIR 已存在，更新代码..."
+        log_info "Target directory $INSTALL_DIR already exists, updating code..."
         cd "$INSTALL_DIR"
-        git pull || log_warn "代码更新失败，将使用现有版本"
+        git pull || log_warn "Code update failed, will use existing version"
     else
-        log_step "克隆 SupaCloud 仓库到 $INSTALL_DIR..."
+        log_step "Cloning SupaCloud repository to $INSTALL_DIR..."
         git clone --depth 1 https://gh-proxy.net/https://github.com/zuohuadong/supacloud.git "$INSTALL_DIR"
         cd "$INSTALL_DIR"
     fi
 }
 
-# 下载核心二进制
+# Download core binaries
 download_binaries() {
-    log_step "检测 CPU 架构并下载核心二进制..."
+    log_step "Detecting CPU architecture and downloading core binaries..."
     local ARCH=$(uname -m)
     local BIN_NAME=""
     
@@ -75,83 +75,83 @@ download_binaries() {
     elif [[ "$ARCH" == "aarch64" ]]; then
         BIN_NAME="supacloud-linux-arm64"
     else
-        log_error "不支持的 CPU 架构: $ARCH"
+        log_error "Unsupported CPU architecture: $ARCH"
         exit 1
     fi
 
-    # 优先检测本地是否已有（例如本地构建过）
+    # Prefer detecting if local binary exists (e.g., locally built)
     if [[ -f "./$BIN_NAME" ]] || [[ -f "./dist/$BIN_NAME" ]]; then
-        log_info "发现本地二进制产物，跳过下载"
+        log_info "Local binary artifact found, skipping download"
         return
     fi
 
-    # 从 GitHub 下载。注意：这里假设发布在 main 分支的最新构建
-    # 在生产环境下，通常从 Release 页面或特定的 CDN 下载
-    log_info "正在从 GitHub 下载最新二进制 ($BIN_NAME)..."
+    # Download from GitHub. Note: Here we assume the latest build on main branch
+    # In production, usually download from Release page or specific CDN
+    log_info "Downloading latest binary from GitHub ($BIN_NAME)..."
     local DOWNLOAD_URL="https://gh-proxy.net/https://github.com/zuohuadong/supacloud/releases/latest/download/${BIN_NAME}"
     
-    # 如果还没有 releases，可以先从 git 仓库的 dist 目录尝试（如果存在）
-    # 这里演示下载逻辑
+    # If there are no releases yet, you can try from git repository's dist directory (if exists)
+    # Here demonstrates the download logic
     mkdir -p dist
     curl -Lo "dist/${BIN_NAME}" "$DOWNLOAD_URL" || {
-        log_warn "从 Release 下载失败（可能尚未发布），请确保本地已通过 bun run build 生成二进制"
+        log_warn "Download from Release failed (may not be published yet), please ensure local binary has been generated via bun run build"
     }
 }
 
-# ⚠️ OpenCloudOS 兼容性预检查
-# 注意：不再锁定 OpenSSL，因为会阻止必要的包安装
-# 改为在 install.sh 中处理 repo 兼容性问题
+# ⚠️ OpenCloudOS compatibility pre-check
+# Note: No longer locking OpenSSL, as it would block necessary package installations
+# Instead, handle repo compatibility issues in install.sh
 check_openssl_compat() {
     if [[ -f /etc/os-release ]]; then
         source /etc/os-release
         case "$ID" in
             opencloudos|tencentos)
-                log_warn "检测到 $PRETTY_NAME"
-                log_warn "将使用兼容模式安装，避免 Pigsty 使用 Rocky Linux 源"
+                log_warn "Detected $PRETTY_NAME"
+                log_warn "Will use compatibility mode for installation, avoiding Pigsty using Rocky Linux repo"
                 export USE_OPENCLOUDOS_COMPAT=true
                 ;;
         esac
     fi
 }
 
-# 生成配置
-# 生成配置
+# Generate configuration
+# Generate configuration
 generate_config() {
-    log_step "准备安装配置..."
+    log_step "Preparing installation configuration..."
     
     CONFIG_FILE="config.env"
     if [[ -f "$CONFIG_FILE" ]]; then
-        log_info "配置文件已存在，将使用现有配置"
+        log_info "Configuration file already exists, will use existing configuration"
         return
     fi
 
-    # 自动获取内网 IP
+    # Auto-get internal IP
     if [[ -z "$INTERNAL_IP" ]]; then
         INTERNAL_IP=$(hostname -I | awk '{print $1}')
     fi
     
-    # 域名逻辑：环境变量 > 交互输入 > 自动生成 (nip.io)
+    # Domain logic: environment variable > interactive input > auto-generate (nip.io)
     if [[ -z "$SUPABASE_PUBLIC_DOMAIN" ]]; then
         if [ -t 0 ]; then
-            echo -e "${YELLOW}请输入您的 Supabase API 域名 (直接回车将使用 api.${INTERNAL_IP}.nip.io)${NC}"
-            read -p "域名: " SUPABASE_PUBLIC_DOMAIN
+            echo -e "${YELLOW}Please enter your Supabase API domain (press Enter to use api.${INTERNAL_IP}.nip.io)${NC}"
+            read -p "Domain: " SUPABASE_PUBLIC_DOMAIN
         fi
         
         if [[ -z "$SUPABASE_PUBLIC_DOMAIN" ]]; then
             SUPABASE_PUBLIC_DOMAIN="api.${INTERNAL_IP}.nip.io"
-            log_info "使用自动分配域名: $SUPABASE_PUBLIC_DOMAIN"
+            log_info "Using auto-assigned domain: $SUPABASE_PUBLIC_DOMAIN"
         fi
     fi
 
-    # 自动生成强密码 (如果环境变量没给)
+    # Auto-generate strong passwords (if not provided via environment variable)
     [[ -z "$POSTGRES_PASSWORD" ]] && POSTGRES_PASSWORD=$(openssl rand -base64 24 | tr -dc 'a-zA-Z0-9' | head -c 16)
     [[ -z "$DASHBOARD_PASSWORD" ]] && DASHBOARD_PASSWORD=$(openssl rand -base64 24 | tr -dc 'a-zA-Z0-9' | head -c 16)
     [[ -z "$GRAFANA_PASSWORD" ]] && GRAFANA_PASSWORD=$(openssl rand -base64 24 | tr -dc 'a-zA-Z0-9' | head -c 16)
 
-    # 写入配置
+    # Write configuration
     cat > "$CONFIG_FILE" << EOF
 #!/bin/bash
-# SupaCloud 自动生成的配置文件
+# SupaCloud Auto-generated Configuration File
 
 INTERNAL_IP="${INTERNAL_IP}"
 SUPABASE_PUBLIC_DOMAIN="${SUPABASE_PUBLIC_DOMAIN}"
@@ -170,27 +170,27 @@ ENABLE_ANALYTICS="${ENABLE_ANALYTICS:-true}"
 ANALYTICS_BACKEND="${ANALYTICS_BACKEND:-postgres}"
 EOF
 
-    log_info "配置已就绪: $CONFIG_FILE"
+    log_info "Configuration ready: $CONFIG_FILE"
     echo -e "----------------------------------------"
-    echo -e "API 域名:      ${SUPABASE_PUBLIC_DOMAIN}"
-    echo -e "Studio 密码:   ${DASHBOARD_PASSWORD}"
-    echo -e "数据库密码:    ${POSTGRES_PASSWORD}"
+    echo -e "API Domain:      ${SUPABASE_PUBLIC_DOMAIN}"
+    echo -e "Studio Password: ${DASHBOARD_PASSWORD}"
+    echo -e "Database Password: ${POSTGRES_PASSWORD}"
     echo -e "----------------------------------------"
-    log_warn "请记录以上密码。安装即刻开始..."
+    log_warn "Please record the above passwords. Installation starting immediately..."
 }
 
 
-# 执行安装
+# Run installation
 run_install() {
-    log_step "启动正式安装程序..."
+    log_step "Starting formal installation program..."
     bash install.sh
 }
 
-# 主程序
+# Main program
 main() {
     echo -e "${GREEN}"
     echo "============================================================"
-    echo "       SupaCloud - 下一代企业级 Supabase 私有化部署"
+    echo "       SupaCloud - Next-Gen Enterprise Supabase Self-Hosting"
     echo "============================================================"
     echo -e "${NC}"
 

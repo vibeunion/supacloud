@@ -1,14 +1,14 @@
 #!/bin/bash
 # ============================================================
-# Supabase 运行时切换脚本
-# 用于在部署后切换 Edge Functions 运行时和 S3 存储
+# Supabase Runtime Switch Script
+# Used to switch Edge Functions runtime and S3 storage after deployment
 # ============================================================
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# 颜色定义
+# Color definitions
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -20,83 +20,83 @@ log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 log_step() { echo -e "${BLUE}[STEP]${NC} $1"; }
 
-# 显示帮助
+# Show help
 show_help() {
-    echo "Supabase 运行时切换工具"
+    echo "Supabase Runtime Switch Tool"
     echo ""
-    echo "用法: $0 <command> [options]"
+    echo "Usage: $0 <command> [options]"
     echo ""
-    echo "命令:"
-    echo "  runtime <deno|bun>     切换 Edge Functions 运行时"
-    echo "  storage <type>         切换 S3 存储类型"
-    echo "  status                 显示当前配置"
+    echo "Commands:"
+    echo "  runtime <deno|bun>     Switch Edge Functions runtime"
+    echo "  storage <type>         Switch S3 storage type"
+    echo "  status                 Show current configuration"
     echo ""
-    echo "存储类型:"
-    echo "  minio                  使用 MinIO (Pigsty 默认)"
-    echo "  garage                 使用 Garage S3"
-    echo "  rustfs                 使用 RustFS"
-    echo "  external               使用外部 S3 (需要额外配置)"
+    echo "Storage Types:"
+    echo "  minio                  Use MinIO (Pigsty default)"
+    echo "  garage                 Use Garage S3"
+    echo "  rustfs                 Use RustFS"
+    echo "  external               Use external S3 (requires additional config)"
     echo ""
-    echo "示例:"
-    echo "  $0 runtime bun         切换到 Bun 运行时"
-    echo "  $0 runtime deno        切换到 Deno 运行时"
-    echo "  $0 storage garage      切换到 Garage S3"
-    echo "  $0 status              显示当前状态"
+    echo "Examples:"
+    echo "  $0 runtime bun         Switch to Bun runtime"
+    echo "  $0 runtime deno        Switch to Deno runtime"
+    echo "  $0 storage garage      Switch to Garage S3"
+    echo "  $0 status              Show current status"
     echo ""
 }
 
-# 显示当前状态
+# Show current status
 show_status() {
-    log_step "当前配置状态"
+    log_step "Current configuration status"
     echo ""
     
-    # Edge Functions 运行时
-    echo "Edge Functions 运行时:"
+    # Edge Functions runtime
+    echo "Edge Functions Runtime:"
     if [[ -f /etc/supabase/.use_bun_runtime ]]; then
-        echo -e "  当前: ${GREEN}Bun${NC}"
+        echo -e "  Current: ${GREEN}Bun${NC}"
         if command -v podman &> /dev/null; then
-            podman ps --filter "name=bun-functions" --format "  容器状态: {{.Status}}" 2>/dev/null || echo "  容器状态: 未运行"
+            podman ps --filter "name=bun-functions" --format "  Container Status: {{.Status}}" 2>/dev/null || echo "  Container Status: Not running"
         elif command -v docker &> /dev/null; then
-            docker ps --filter "name=bun-functions" --format "  容器状态: {{.Status}}" 2>/dev/null || echo "  容器状态: 未运行"
+            docker ps --filter "name=bun-functions" --format "  Container Status: {{.Status}}" 2>/dev/null || echo "  Container Status: Not running"
         fi
-        echo "  配置项: /etc/supabase/bun-functions.env"
+        echo "  Config: /etc/supabase/bun-functions.env"
     else
-        echo -e "  当前: ${GREEN}Deno${NC} (官方默认)"
+        echo -e "  Current: ${GREEN}Deno${NC} (Official default)"
         if command -v podman &> /dev/null; then
-            podman ps --filter "name=edge-functions" --format "  容器状态: {{.Status}}" 2>/dev/null || echo "  容器状态: 未运行"
+            podman ps --filter "name=edge-functions" --format "  Container Status: {{.Status}}" 2>/dev/null || echo "  Container Status: Not running"
         fi
-        [[ -f /etc/supabase/deno-functions.env ]] && echo "  配置项: /etc/supabase/deno-functions.env"
+        [[ -f /etc/supabase/deno-functions.env ]] && echo "  Config: /etc/supabase/deno-functions.env"
     fi
     echo ""
     
-    # S3 存储
-    echo "S3 存储:"
+    # S3 Storage
+    echo "S3 Storage:"
     if [[ -f /etc/supabase/bun-functions.env ]]; then
         source /etc/supabase/bun-functions.env 2>/dev/null || true
     fi
     
     if systemctl is-active --quiet garage 2>/dev/null; then
-        echo -e "  当前: ${GREEN}Garage${NC}"
-        echo "  端口: 9000"
+        echo -e "  Current: ${GREEN}Garage${NC}"
+        echo "  Port: 9000"
     elif systemctl is-active --quiet rustfs 2>/dev/null; then
-        echo -e "  当前: ${GREEN}RustFS${NC}"
-        echo "  端口: 9000"
+        echo -e "  Current: ${GREEN}RustFS${NC}"
+        echo "  Port: 9000"
     elif systemctl is-active --quiet minio 2>/dev/null; then
-        echo -e "  当前: ${GREEN}MinIO${NC}"
+        echo -e "  Current: ${GREEN}MinIO${NC}"
     else
-        echo "  当前: 外部 S3 或未配置"
+        echo "  Current: External S3 or not configured"
     fi
     echo ""
     
-    # 显示凭据位置
-    echo "配置文件位置:"
-    echo "  JWT 密钥: /etc/supabase/jwt-keys.env"
-    [[ -f /etc/garage/s3-credentials.env ]] && echo "  Garage 凭据: /etc/garage/s3-credentials.env"
-    [[ -f /etc/rustfs-credentials.env ]] && echo "  RustFS 凭据: /etc/rustfs-credentials.env"
+    # Show credential locations
+    echo "Config file locations:"
+    echo "  JWT Keys: /etc/supabase/jwt-keys.env"
+    [[ -f /etc/garage/s3-credentials.env ]] && echo "  Garage Credentials: /etc/garage/s3-credentials.env"
+    [[ -f /etc/rustfs-credentials.env ]] && echo "  RustFS Credentials: /etc/rustfs-credentials.env"
     echo ""
 }
 
-# 切换 Edge Functions 运行时
+# Switch Edge Functions runtime
 switch_runtime() {
     local runtime=$1
     
@@ -108,18 +108,18 @@ switch_runtime() {
             switch_to_bun
             ;;
         *)
-            log_error "未知的运行时: $runtime"
-            log_info "支持的运行时: deno, bun"
+            log_error "Unknown runtime: $runtime"
+            log_info "Supported runtimes: deno, bun"
             exit 1
             ;;
     esac
 }
 
-# 切换到 Deno
+# Switch to Deno
 switch_to_deno() {
-    log_step "切换到 Deno 运行时..."
+    log_step "Switching to Deno runtime..."
     
-    # 停止 Bun 容器
+    # Stop Bun container
     if command -v podman &> /dev/null; then
         podman stop supabase-bun-functions 2>/dev/null || true
         podman rm supabase-bun-functions 2>/dev/null || true
@@ -128,22 +128,22 @@ switch_to_deno() {
         docker rm supabase-bun-functions 2>/dev/null || true
     fi
     
-    # 移除 Bun 标记
+    # Remove Bun flag
     rm -f /etc/supabase/.use_bun_runtime
     
-    # 获取 IP 用于写入环境
+    # Get IP for writing to environment
     INTERNAL_IP=$(hostname -I | awk '{print $1}')
     DENO_FUNCTIONS_DIR=~/pigsty/app/supabase/volumes/functions
     
-    # 显示输出环境信息
+    # Display output environment info
     cat > /etc/supabase/deno-functions.env << EOF
-# Deno Edge Functions 配置
-# 运行时由 Pigsty 的 docker-compose (supabase-edge-functions 容器) 管理 
+# Deno Edge Functions Configuration
+# Runtime managed by Pigsty's docker-compose (supabase-edge-functions container) 
 EDGE_FUNCTIONS_DIR="${DENO_FUNCTIONS_DIR}"
 API_ENDPOINT="http://${INTERNAL_IP}:9000/functions/v1/"
 EOF
     
-    # 重启 Supabase 容器以使用默认 Deno edge-runtime
+    # Restart Supabase container to use default Deno edge-runtime
     cd ~/pigsty/app/supabase
     if command -v docker-compose &> /dev/null; then
         docker-compose up -d supabase-edge-functions
@@ -151,39 +151,39 @@ EOF
         /usr/local/bin/docker-compose up -d supabase-edge-functions
     fi
     
-    log_info "已切换到 Deno 运行时"
-    log_info "函数资源挂载点: ${DENO_FUNCTIONS_DIR}"
+    log_info "Switched to Deno runtime"
+    log_info "Function mount point: ${DENO_FUNCTIONS_DIR}"
     log_info "Edge Functions API: http://${INTERNAL_IP}:9000/functions/v1/{function}"
 }
 
-# 切换到 Bun
+# Switch to Bun
 switch_to_bun() {
-    log_step "切换到 Bun 运行时..."
+    log_step "Switching to Bun runtime..."
     
-    # 检查 Bun 容器是否已构建
+    # Check if Bun container is already built
     BUN_FUNCTIONS_DIR="/opt/supabase/bun-functions"
     
     if [[ ! -d "$BUN_FUNCTIONS_DIR" ]]; then
-        log_error "Bun 函数目录不存在: $BUN_FUNCTIONS_DIR"
-        log_info "请先运行安装脚本并设置 EDGE_RUNTIME=bun"
+        log_error "Bun functions directory does not exist: $BUN_FUNCTIONS_DIR"
+        log_info "Please run the installation script first and set EDGE_RUNTIME=bun"
         exit 1
     fi
     
-    # 停止 Deno 容器
+    # Stop Deno container
     if command -v podman &> /dev/null; then
         podman stop supabase-edge-functions 2>/dev/null || true
     elif command -v docker &> /dev/null; then
         docker stop supabase-edge-functions 2>/dev/null || true
     fi
     
-    # 加载 JWT 密钥
+    # Load JWT keys
     if [[ -f /etc/supabase/jwt-keys.env ]]; then
         set -a
         source /etc/supabase/jwt-keys.env
         set +a
     fi
     
-    # 启动 Bun 容器
+    # Start Bun container
     cd "$BUN_FUNCTIONS_DIR"
     if command -v docker-compose &> /dev/null; then
         docker-compose up -d --build
@@ -201,14 +201,14 @@ switch_to_bun() {
             supabase-bun-functions
     fi
     
-    # 创建 Bun 标记
+    # Create Bun flag
     touch /etc/supabase/.use_bun_runtime
     
-    log_info "已切换到 Bun 运行时"
+    log_info "Switched to Bun runtime"
     log_info "Edge Functions API: http://localhost:9001/{function}"
 }
 
-# 切换 S3 存储
+# Switch S3 storage
 switch_storage() {
     local storage_type=$1
     
@@ -226,38 +226,38 @@ switch_storage() {
             configure_external_s3
             ;;
         *)
-            log_error "未知的存储类型: $storage_type"
-            log_info "支持的类型: minio, garage, rustfs, external"
+            log_error "Unknown storage type: $storage_type"
+            log_info "Supported types: minio, garage, rustfs, external"
             exit 1
             ;;
     esac
 }
 
-# 切换到 MinIO
+# Switch to MinIO
 switch_to_minio() {
-    log_step "切换到 MinIO..."
+    log_step "Switching to MinIO..."
     
-    # 停止其他 S3 服务
+    # Stop other S3 services
     systemctl stop garage 2>/dev/null || true
     systemctl stop rustfs 2>/dev/null || true
     
-    # MinIO 通常由 Pigsty 管理
-    log_info "MinIO 由 Pigsty 管理"
-    log_info "请确保 Pigsty MinIO 服务正在运行"
-    log_info "运行: cd ~/pigsty && ./minio.yml"
+    # MinIO is typically managed by Pigsty
+    log_info "MinIO is managed by Pigsty"
+    log_info "Please ensure Pigsty MinIO service is running"
+    log_info "Run: cd ~/pigsty && ./minio.yml"
     
-    log_info "已切换到 MinIO"
+    log_info "Switched to MinIO"
 }
 
-# 切换到 Garage
+# Switch to Garage
 switch_to_garage() {
-    log_step "切换到 Garage S3..."
+    log_step "Switching to Garage S3..."
     
-    # 停止其他 S3 服务
+    # Stop other S3 services
     systemctl stop rustfs 2>/dev/null || true
     
-    # 尝试停止 MinIO (如果存在)
-    log_info "检查 MinIO 容器..."
+    # Try to stop MinIO (if exists)
+    log_info "Checking MinIO container..."
     if command -v docker &> /dev/null; then
         docker stop minio 2>/dev/null || true
         docker rm minio 2>/dev/null || true
@@ -266,81 +266,81 @@ switch_to_garage() {
         podman rm minio 2>/dev/null || true
     fi
     
-    # 检查 Garage 是否已安装
+    # Check if Garage is installed
     if ! command -v garage &> /dev/null; then
-        log_warn "Garage 未安装，正在安装..."
-        # 这里可以调用安装函数，或者提示用户重新运行安装脚本
-        log_info "请运行: S3_STORAGE_TYPE=garage ./install.sh"
+        log_warn "Garage not installed, installing..."
+        # You can call the installation function here, or prompt user to re-run installation script
+        log_info "Please run: S3_STORAGE_TYPE=garage ./install.sh"
         exit 1
     fi
     
-    # 启动 Garage
+    # Start Garage
     systemctl enable --now garage
     systemctl restart garage
     
-    # 等待 Garage 启动
-    log_info "等待 Garage 启动..."
+    # Wait for Garage startup
+    log_info "Waiting for Garage to start..."
     sleep 5
     if ! systemctl is-active --quiet garage; then
-        log_error "Garage 启动失败，请检查日志: journalctl -u garage -n 20"
+        log_error "Garage failed to start, check logs: journalctl -u garage -n 20"
         exit 1
     fi
     
-    # 获取内网 IP
+    # Get internal IP
     INTERNAL_IP=$(hostname -I | awk '{print $1}')
     
-    # 更新 Supabase 配置
+    # Update Supabase configuration
     update_supabase_s3_config "garage" "http://${INTERNAL_IP}:9000" "garage"
     
-    log_info "已切换到 Garage S3"
-    log_info "S3 端点: http://${INTERNAL_IP}:9000"
-    log_info "凭据: /etc/garage/s3-credentials.env"
+    log_info "Switched to Garage S3"
+    log_info "S3 Endpoint: http://${INTERNAL_IP}:9000"
+    log_info "Credentials: /etc/garage/s3-credentials.env"
 }
 
-# 切换到 RustFS
+# Switch to RustFS
 switch_to_rustfs() {
-    log_step "切换到 RustFS..."
+    log_step "Switching to RustFS..."
     
-    # 停止其他 S3 服务
+    # Stop other S3 services
     systemctl stop garage 2>/dev/null || true
     
-    # 检查 RustFS 是否已安装
+    # Check if RustFS is installed
     if ! command -v rustfs &> /dev/null; then
-        log_warn "RustFS 未安装，正在安装..."
-        log_info "请运行: S3_STORAGE_TYPE=rustfs ./install.sh"
+        log_warn "RustFS not installed, installing..."
+        log_info "Please run: S3_STORAGE_TYPE=rustfs ./install.sh"
         exit 1
     fi
     
-    # 启动 RustFS
+    # Start RustFS
     systemctl enable --now rustfs
     
-    # 更新 Supabase 配置
+    # Update Supabase configuration
     if [[ -f /etc/rustfs-credentials.env ]]; then
         source /etc/rustfs-credentials.env
         update_supabase_s3_config "rustfs" "$S3_ENDPOINT" "$S3_REGION"
     fi
     
-    log_info "已切换到 RustFS"
-    log_info "S3 端点: http://localhost:9000"
-    log_info "凭据: /etc/rustfs-credentials.env"
+    log_info "Switched to RustFS"
+    log_info "S3 Endpoint: http://localhost:9000"
+    log_info "Credentials: /etc/rustfs-credentials.env"
 }
 
-# 配置外部 S3
+# Configure external S3
 configure_external_s3() {
-    log_step "配置外部 S3..."
+    log_step "Configuring external S3..."
     
     echo ""
-    echo "请输入外部 S3 配置:"
-    read -p "S3 端点 URL: " S3_ENDPOINT
-    read -p "S3 区域: " S3_REGION
+    echo "Please enter external S3 configuration:"
+    read -p "S3 Endpoint URL: " S3_ENDPOINT
+    read -p "S3 Region: " S3_REGION
     read -p "Access Key: " S3_ACCESS_KEY
     read -sp "Secret Key: " S3_SECRET_KEY
     echo ""
-    read -p "Bucket 名称: " S3_BUCKET
+    read -p "Bucket Name: " S3_BUCKET
     
-    # 保存配置
+    # Save configuration
     cat > /etc/supabase/external-s3.env << EOF
-# 外部 S3 配置
+# External S3 Configuration
 S3_ENDPOINT=${S3_ENDPOINT}
 S3_REGION=${S3_REGION}
 S3_ACCESS_KEY=${S3_ACCESS_KEY}
@@ -349,18 +349,18 @@ S3_BUCKET=${S3_BUCKET}
 EOF
     chmod 600 /etc/supabase/external-s3.env
     
-    # 停止本地 S3 服务
+    # Stop local S3 services
     systemctl stop garage 2>/dev/null || true
     systemctl stop rustfs 2>/dev/null || true
     
-    # 更新 Supabase 配置
+    # Update Supabase configuration
     update_supabase_s3_config "external" "$S3_ENDPOINT" "$S3_REGION"
     
-    log_info "已配置外部 S3"
-    log_info "配置保存到: /etc/supabase/external-s3.env"
+    log_info "External S3 configured"
+    log_info "Configuration saved to: /etc/supabase/external-s3.env"
 }
 
-# 更新 Supabase S3 配置
+# Update Supabase S3 configuration
 update_supabase_s3_config() {
     local type=$1
     local endpoint=$2
@@ -369,12 +369,12 @@ update_supabase_s3_config() {
     SUPABASE_ENV=~/pigsty/app/supabase/.env
     
     if [[ -f "$SUPABASE_ENV" ]]; then
-        log_info "更新 Supabase S3 配置..."
+        log_info "Updating Supabase S3 configuration..."
         
         sed -i "s|S3_ENDPOINT=.*|S3_ENDPOINT=${endpoint}|g" "$SUPABASE_ENV"
         sed -i "s|S3_REGION=.*|S3_REGION=${region}|g" "$SUPABASE_ENV"
         
-        # 重启 storage 服务
+        # Restart storage service
         cd ~/pigsty/app/supabase
         if command -v docker-compose &> /dev/null; then
             docker-compose restart supabase-storage
@@ -382,13 +382,13 @@ update_supabase_s3_config() {
             /usr/local/bin/docker-compose restart supabase-storage
         fi
         
-        log_info "Supabase Storage 服务已重启"
+        log_info "Supabase Storage service restarted"
     else
-        log_warn "未找到 Supabase 配置文件: $SUPABASE_ENV"
+        log_warn "Supabase configuration file not found: $SUPABASE_ENV"
     fi
 }
 
-# 主函数
+# Main function
 main() {
     if [[ $# -eq 0 ]]; then
         show_help
@@ -398,14 +398,14 @@ main() {
     case "$1" in
         runtime)
             if [[ -z "$2" ]]; then
-                log_error "请指定运行时: deno 或 bun"
+                log_error "Please specify runtime: deno or bun"
                 exit 1
             fi
             switch_runtime "$2"
             ;;
         storage)
             if [[ -z "$2" ]]; then
-                log_error "请指定存储类型: minio, garage, rustfs, external"
+                log_error "Please specify storage type: minio, garage, rustfs, external"
                 exit 1
             fi
             switch_storage "$2"
@@ -417,7 +417,7 @@ main() {
             show_help
             ;;
         *)
-            log_error "未知命令: $1"
+            log_error "Unknown command: $1"
             show_help
             exit 1
             ;;

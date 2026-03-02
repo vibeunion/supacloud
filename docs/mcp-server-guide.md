@@ -1,22 +1,22 @@
-# SupaCloud MCP Server 使用与排障指南
+# SupaCloud MCP Server Usage and Troubleshooting Guide
 
-SupaCloud MCP (Model Context Protocol) Server 允许你通过 Claude、Cursor 或 Windsurf 等 AI 助手直接使用自然语言来管理你的私有化 Supabase 平台。
+SupaCloud MCP (Model Context Protocol) Server allows you to manage your self-hosted Supabase platform using natural language through AI assistants like Claude, Cursor, or Windsurf.
 
-## 一、配置指南
+## 1. Configuration Guide
 
-### 1.1 在 Cursor 中配置
+### 1.1 Configure in Cursor
 
-1. 打开 Cursor 并在顶部菜单栏选择 **Cursor Settings** (或按 `Ctrl + Shift + J` / `Cmd + Shift + J` 打开 MCP 侧边栏, 进入设置)。
-2. 找到 **Features** -> **MCP** -> 点击 **+ Add New MCP Server**。
-3. 按照以下方式填写：
+1. Open Cursor and select **Cursor Settings** from the top menu bar (or press `Ctrl + Shift + J` / `Cmd + Shift + J` to open MCP sidebar, then enter settings).
+2. Find **Features** -> **MCP** -> click **+ Add New MCP Server**.
+3. Fill in as follows:
     - **Name**: `supacloud`
     - **Type**: `command`
     - **Command**: `npx -y supacloud-mcp`
-4. 为该 MCP 配置环境变量（可以在启动时指定或系统环境配置），通常我们在 `cursor` 的环境设置或全局环境中确保以下变量可用，或者你可以针对特定服务器临时使用自定义 MCP 命令，如 `env SUPACLOUD_HOST=x.x.x.x SUPACLOUD_SSH_KEY=~/.ssh/id_rsa npx -y supacloud-mcp`。
+4. Configure environment variables for this MCP (can be specified at startup or in system environment config). Usually we ensure the following variables are available in `cursor`'s environment settings or global environment, or you can temporarily use a custom MCP command for a specific server, e.g. `env SUPACLOUD_HOST=x.x.x.x SUPACLOUD_SSH_KEY=~/.ssh/id_rsa npx -y supacloud-mcp`.
 
-### 1.2 在 Claude Desktop 中配置
+### 1.2 Configure in Claude Desktop
 
-修改配置项（Windows 下位于 `%APPDATA%\Claude\claude_desktop_config.json`，Mac 位于 `~/Library/Application Support/Claude/claude_desktop_config.json`）：
+Modify config file (Windows: `%APPDATA%\Claude\claude_desktop_config.json`, Mac: `~/Library/Application Support/Claude/claude_desktop_config.json`):
 
 ```json
 {
@@ -28,17 +28,17 @@ SupaCloud MCP (Model Context Protocol) Server 允许你通过 Claude、Cursor �
         "SUPACLOUD_HOST": "1.2.3.4",
         "SUPACLOUD_SSH_USER": "root",
         "SUPACLOUD_SSH_KEY": "/Users/yourname/.ssh/id_rsa",
-        "SUPACLOUD_API_TOKEN": "你的_MASTER_TOKEN"
+        "SUPACLOUD_API_TOKEN": "your_MASTER_TOKEN"
       }
     }
   }
 }
 ```
-*注：如果在安装前，`SUPACLOUD_API_TOKEN` 可以留空。安装成功后，请将其填入。*
+*Note: Before installation, `SUPACLOUD_API_TOKEN` can be left empty. Fill it in after successful installation.*
 
-### 1.3 多服务器 / 多集群管理
+### 1.3 Multi-Server / Multi-Cluster Management
 
-SupaCloud MCP 天然支持多路复用。如果你有多台服务器（如测试环境、美东、亚太等），**不需要额外修改代码**，只需要在配置中注册多个同类命令，并分配不同的环境变量即可：
+SupaCloud MCP natively supports multiplexing. If you have multiple servers (e.g. test environment, US East, Asia Pacific, etc.), **no code changes needed** - just register multiple commands of the same type in config with different environment variables:
 
 ```json
 {
@@ -63,76 +63,76 @@ SupaCloud MCP 天然支持多路复用。如果你有多台服务器（如测试
 }
 ```
 
-配置后，你可以直接对 AI 提出定向需求：*"帮我查一下 us-east 的磁盘状态，然后给 ap-asia 区装一套平台"*，AI 会自动帮你分发到对应环境的进程进行执行。
+After configuration, you can directly make targeted requests to AI: *"Check disk status for us-east, then install platform for ap-asia region"*, AI will automatically dispatch to corresponding environment processes for execution.
 
 ---
 
-## 二、使用场景示例
+## 2. Usage Scenario Examples
 
-你可以在 AI 对话框中直接提出以下需求，AI 会自动调用 MCP 工具完成。
+You can directly make the following requests in the AI chat box, and AI will automatically call MCP tools to complete them.
 
-### 场景 1：零基础全新安装
-> **你**："我刚买了一台服务器，IP 是 1.2.3.4，请帮我安装 SupaCloud，域名用 `api.example.com`，数据库密码设成 `MySuperSecret!23`。"
+### Scenario 1: Fresh Installation from Scratch
+> **You**: "I just bought a server, IP is 1.2.3.4, please help me install SupaCloud, use domain `api.example.com`, set database password to `MySuperSecret!23`."
 > 
-> **AI**：将依次调用以下工具完成安装：
-> 1. `ping_server` → 验证 SSH 可达性
-> 2. `setup_server_ssh` → 配置 SSH 自连接（Pigsty/Ansible 必需）+ 修复 OpenSSL 兼容性
-> 3. `install_supacloud` → 后台启动安装（约 15-30 分钟）
+> **AI**: Will sequentially call the following tools to complete installation:
+> 1. `ping_server` → Verify SSH reachability
+> 2. `setup_server_ssh` → Configure SSH self-connection (Pigsty/Ansible required) + fix OpenSSL compatibility
+> 3. `install_supacloud` → Start installation in background (about 15-30 minutes)
 >
-> 安装启动后，AI 会返回进程 PID。你可以随时说：
-> **"帮我查一下安装进度"**，AI 会调用 `ssh_exec` 执行 `tail -f /tmp/supacloud-install.log`。
+> After installation starts, AI will return process PID. You can say anytime:
+> **"Check installation progress for me"**, AI will call `ssh_exec` to execute `tail -f /tmp/supacloud-install.log`.
 >
-> ✅ **注意**：安装在服务器后台运行，即使关闭对话窗口也不会中断。安装完成后使用 `diagnose_server` 验证服务状态。
+> ✅ **Note**: Installation runs in server background, won't interrupt even if you close the chat window. Use `diagnose_server` to verify service status after installation completes.
 
-### 场景 2：日常租户管理
-> **你**："帮我列出现在所有的 Supabase 项目，并创建一个名字叫 `app-prod` 的新项目。"
+### Scenario 2: Daily Tenant Management
+> **You**: "List all current Supabase projects for me, and create a new project named `app-prod`."
 > 
-> **AI**：(依次调用 `list_projects` 和 `create_project`) -> 告诉你创建成功，并附带新项目的 Ref 短信和数据库链接。
+> **AI**: (Sequentially calls `list_projects` and `create_project`) -> Tells you creation succeeded, with new project's Ref ID and database connection.
 
-### 场景 3：鉴权和高阶功能
-> **你**："给刚才创建的 `app-prod` 项目开启 Google 登录，这是我的 Client ID 和 Secret..."
+### Scenario 3: Auth and Advanced Features
+> **You**: "Enable Google login for the `app-prod` project just created, here are my Client ID and Secret..."
 > 
-> **AI**：(调用 `update_auth_config`) -> 更新对应参数。
+> **AI**: (Calls `update_auth_config`) -> Updates corresponding parameters.
 
 ---
 
-## 三、安装与运维故障排查 (Troubleshooting)
+## 3. Installation and Operations Troubleshooting
 
-在管理开源组件或自托管 PIGSTY + Supabase 的过程中，偶尔可能会遇到意外。我们专门设计了内置排障工具，你可以让 AI 快速定位死结。
+During management of open source components or self-hosted PIGSTY + Supabase, you may occasionally encounter unexpected issues. We've designed built-in troubleshooting tools that allow AI to quickly locate problems.
 
-### 3.1 自动智能诊断
-如果你发现安装 `install_supacloud` 后没跑起来，或者由于网络原因中途卡住导致无法调用 API，直接对 AI 说：
-> **你**："安装似乎失败了，去排查一下原因。"
+### 3.1 Automatic Intelligent Diagnosis
+If you find `install_supacloud` didn't run after installation, or got stuck midway due to network issues preventing API calls, just tell AI:
+> **You**: "Installation seems to have failed, go troubleshoot the cause."
 >
-> **AI**：将会调用 `troubleshoot_install` 工具。该工具会自动巡检容器、PostgreSQL 存活情况、磁盘空间和网络端口状态，并返回类似以下的报告进行诊断：
-> `⚠️ 自动检测到 1 个潜在问题: 容器镜像拉取异常，可能是 registry 配置错误`
+> **AI**: Will call `troubleshoot_install` tool. This tool automatically checks container and PostgreSQL survival status, disk space, and network port status, and returns a report like the following for diagnosis:
+> `⚠️ Detected 1 potential issue: Container image pull abnormal, may be registry config error`
 
-### 3.2 提取单容器日志
-如果你发现某个特定服务（比如 Analytics）一直不断重启（Exit 1），你可以让 AI 去抓取底层信息：
-> **你**："帮我获取一下 `supabase-analytics` 这个容器最近 200 行报错日志吧。"
+### 3.2 Extract Single Container Logs
+If you find a specific service (like Analytics) keeps restarting (Exit 1), you can have AI fetch underlying information:
+> **You**: "Get me the last 200 lines of error logs from the `supabase-analytics` container."
 > 
-> **AI**：(调用 `get_container_logs`，参数传入 container="supabase-analytics", lines=200)。
+> **AI**: (Calls `get_container_logs`, passing container="supabase-analytics", lines=200).
 
-### 3.3 手动清理和重装
-通过诊断确认无法修复的基础环境故障（例如硬盘写满或脏数据），可以让 AI 直接执行清理并在清理后重新诊断：
-> **你**："服务器太乱了，帮我执行 `bash /tmp/setup.sh uninstall` 然后重新查一遍磁盘空间。"
+### 3.3 Manual Cleanup and Reinstall
+For irreparable base environment issues diagnosed (like full disk or dirty data), you can have AI execute cleanup and re-diagnose after cleanup:
+> **You**: "Server is too messy, help me execute `bash /tmp/setup.sh uninstall` then check disk space again."
 > 
-> **AI**：(调用 `ssh_exec` 取消部署，随后调用 `diagnose_server` 展示新状态)。
+> **AI**: (Calls `ssh_exec` to uninstall, then calls `diagnose_server` to show new status).
 
-### 常用环境排错一览
-| 现象 | 排查指令/工具建议 |
-|------|-------------------|
-| `install_supacloud` 返回 SSH 连接失败 | 先调用 `ping_server`，再调用 `setup_server_ssh` 修复前置环境 |
-| Pigsty/Ansible 报 `Connection refused` | 调用 `setup_server_ssh` 修复 SSH 自连接配置 |
-| `setup.sh` 下载失败 | 调用 `ssh_exec` 手动执行：`curl -fsSL https://ghproxy.net/...` |
-| Web 端访问一直卡在 Loading | 调用 `diagnose_server` 检查 `Management API` 进程是否健康 |
-| 无法创建新租户 | 可能是 Pigsty DNS 漂移，调用 `troubleshoot_install` |
-| 函数执行超时 | 调用 `get_container_logs` 检测 `supabase-edge-runtime` |
-| 容器镜像拉取 Error 403 | 调用 `troubleshoot_install` (focus='network') 查询 `docker.io` 封锁与网络限制 |
+### Common Environment Troubleshooting Reference
+| Symptom | Troubleshooting Command/Tool Suggestion |
+|---------|----------------------------------------|
+| `install_supacloud` returns SSH connection failed | First call `ping_server`, then call `setup_server_ssh` to fix prerequisites |
+| Pigsty/Ansible reports `Connection refused` | Call `setup_server_ssh` to fix SSH self-connection config |
+| `setup.sh` download failed | Call `ssh_exec` to manually execute: `curl -fsSL https://ghproxy.net/...` |
+| Web access stuck at Loading | Call `diagnose_server` to check if `Management API` process is healthy |
+| Cannot create new tenants | May be Pigsty DNS drift, call `troubleshoot_install` |
+| Function execution timeout | Call `get_container_logs` to check `supabase-edge-runtime` |
+| Container image pull Error 403 | Call `troubleshoot_install` (focus='network') to query `docker.io` blocking and network restrictions |
 
 ---
 
-## 四、安全与最佳实践
+## 4. Security and Best Practices
 
-1. **不可将全局配置文件（含 Master Token）泄露到公共代码库**：保持其在 cursor 或 claude 配置内作为本地密钥。
-2. **谨慎使用 ssh_exec**：当 AI 提议使用 `ssh_exec` 执行 `rm -rf` 等破坏性操作时，一定要在点击确认（Approve Tool Call）前仔细审阅其具体的 Command 参数。由于拥有 Root SSH，AI 能修改底层文件。
+1. **Never leak global config files (containing Master Token) to public code repos**: Keep them as local secrets in cursor or claude config.
+2. **Use ssh_exec with caution**: When AI proposes using `ssh_exec` to execute destructive operations like `rm -rf`, carefully review the specific Command parameters before clicking confirm (Approve Tool Call). Since it has Root SSH, AI can modify underlying files.

@@ -1,5 +1,5 @@
 /**
- * 高级工具集 – Edge Functions、Secrets、Auth 配置、备份
+ * Advanced Tools - Edge Functions, Secrets, Auth Config, Backup
  */
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -12,8 +12,8 @@ export function registerAdvancedTools(server: McpServer, http: HttpTransport): v
 
     server.tool(
         "list_edge_functions",
-        "列出项目的所有 Edge Functions",
-        { ref: z.string().describe("项目 ref") },
+        "List all Edge Functions for a project",
+        { ref: z.string().describe("Project ref") },
         async ({ ref }) => {
             const res = await http.get(`/v1/projects/${ref}/functions`);
             return {
@@ -24,11 +24,11 @@ export function registerAdvancedTools(server: McpServer, http: HttpTransport): v
 
     server.tool(
         "deploy_edge_function",
-        "部署一个 Edge Function 到项目",
+        "Deploy an Edge Function to a project",
         {
-            ref: z.string().describe("项目 ref"),
-            slug: z.string().describe("函数名 (slug)"),
-            code: z.string().describe("函数源代码 (TypeScript)"),
+            ref: z.string().describe("Project ref"),
+            slug: z.string().describe("Function name (slug)"),
+            code: z.string().describe("Function source code (TypeScript)"),
         },
         async ({ ref, slug, code }) => {
             const res = await http.post(`/v1/projects/${ref}/functions/${slug}`, { code });
@@ -37,8 +37,8 @@ export function registerAdvancedTools(server: McpServer, http: HttpTransport): v
                     {
                         type: "text",
                         text: res.ok
-                            ? `✅ 函数 ${slug} 部署成功`
-                            : `❌ 部署失败 (${res.status}): ${JSON.stringify(res.data)}`,
+                            ? `✅ Function ${slug} deployed successfully`
+                            : `❌ Deployment failed (${res.status}): ${JSON.stringify(res.data)}`,
                     },
                 ],
             };
@@ -47,10 +47,10 @@ export function registerAdvancedTools(server: McpServer, http: HttpTransport): v
 
     server.tool(
         "delete_edge_function",
-        "删除项目中的一个 Edge Function",
+        "Delete an Edge Function from a project",
         {
-            ref: z.string().describe("项目 ref"),
-            slug: z.string().describe("函数名"),
+            ref: z.string().describe("Project ref"),
+            slug: z.string().describe("Function name"),
         },
         async ({ ref, slug }) => {
             const res = await http.delete(`/v1/projects/${ref}/functions/${slug}`);
@@ -58,7 +58,7 @@ export function registerAdvancedTools(server: McpServer, http: HttpTransport): v
                 content: [
                     {
                         type: "text",
-                        text: res.ok ? `✅ 函数 ${slug} 已删除` : `❌ 删除失败 (${res.status})`,
+                        text: res.ok ? `✅ Function ${slug} deleted` : `❌ Deletion failed (${res.status})`,
                     },
                 ],
             };
@@ -71,8 +71,8 @@ export function registerAdvancedTools(server: McpServer, http: HttpTransport): v
 
     server.tool(
         "list_secrets",
-        "列出项目的所有 Secrets (环境变量)",
-        { ref: z.string().describe("项目 ref") },
+        "List all Secrets (environment variables) for a project",
+        { ref: z.string().describe("Project ref") },
         async ({ ref }) => {
             const res = await http.get(`/v1/projects/${ref}/secrets`);
             return {
@@ -83,12 +83,12 @@ export function registerAdvancedTools(server: McpServer, http: HttpTransport): v
 
     server.tool(
         "upsert_secrets",
-        "创建或更新项目的 Secrets",
+        "Create or update project Secrets",
         {
-            ref: z.string().describe("项目 ref"),
+            ref: z.string().describe("Project ref"),
             secrets: z
                 .array(z.object({ name: z.string(), value: z.string() }))
-                .describe("Secret 列表，例如 [{name: 'API_KEY', value: '...'}]"),
+                .describe("Secret list, e.g. [{name: 'API_KEY', value: '...'}]"),
         },
         async ({ ref, secrets }) => {
             const res = await http.post(`/v1/projects/${ref}/secrets`, secrets);
@@ -97,8 +97,8 @@ export function registerAdvancedTools(server: McpServer, http: HttpTransport): v
                     {
                         type: "text",
                         text: res.ok
-                            ? `✅ 已更新 ${secrets.length} 个 Secrets`
-                            : `❌ 更新失败 (${res.status})`,
+                            ? `✅ Updated ${secrets.length} Secrets`
+                            : `❌ Update failed (${res.status})`,
                     },
                 ],
             };
@@ -107,10 +107,10 @@ export function registerAdvancedTools(server: McpServer, http: HttpTransport): v
 
     server.tool(
         "delete_secret",
-        "删除项目的一个 Secret",
+        "Delete a Secret from a project",
         {
-            ref: z.string().describe("项目 ref"),
-            name: z.string().describe("Secret 名称"),
+            ref: z.string().describe("Project ref"),
+            name: z.string().describe("Secret name"),
         },
         async ({ ref, name }) => {
             const res = await http.delete(`/v1/projects/${ref}/secrets/${name}`);
@@ -118,7 +118,7 @@ export function registerAdvancedTools(server: McpServer, http: HttpTransport): v
                 content: [
                     {
                         type: "text",
-                        text: res.ok ? `✅ Secret ${name} 已删除` : `❌ 删除失败 (${res.status})`,
+                        text: res.ok ? `✅ Secret ${name} deleted` : `❌ Deletion failed (${res.status})`,
                     },
                 ],
             };
@@ -126,13 +126,13 @@ export function registerAdvancedTools(server: McpServer, http: HttpTransport): v
     );
 
     // ═══════════════════════════════════════
-    //  Auth 配置
+    //  Auth Config
     // ═══════════════════════════════════════
 
     server.tool(
         "get_auth_config",
-        "获取项目的 Auth 鉴权配置 (SMTP, OAuth 提供商等)",
-        { ref: z.string().describe("项目 ref") },
+        "Get project Auth config (SMTP, OAuth providers, etc.)",
+        { ref: z.string().describe("Project ref") },
         async ({ ref }) => {
             const res = await http.get(`/v1/projects/${ref}/config/auth`);
             return {
@@ -143,13 +143,13 @@ export function registerAdvancedTools(server: McpServer, http: HttpTransport): v
 
     server.tool(
         "update_auth_config",
-        "更新项目的 Auth 鉴权配置，可一次性开启多个 OAuth 提供商或配置 SMTP",
+        "Update project Auth config, can enable multiple OAuth providers or configure SMTP at once",
         {
-            ref: z.string().describe("项目 ref"),
+            ref: z.string().describe("Project ref"),
             config: z
                 .record(z.unknown())
                 .describe(
-                    "Auth 配置对象，例如: {external_google_enabled: true, external_google_client_id: '...'}"
+                    "Auth config object, e.g.: {external_google_enabled: true, external_google_client_id: '...'}"
                 ),
         },
         async ({ ref, config }) => {
@@ -159,8 +159,8 @@ export function registerAdvancedTools(server: McpServer, http: HttpTransport): v
                     {
                         type: "text",
                         text: res.ok
-                            ? `✅ Auth 配置已更新`
-                            : `❌ 更新失败 (${res.status}): ${JSON.stringify(res.data)}`,
+                            ? `✅ Auth config updated`
+                            : `❌ Update failed (${res.status}): ${JSON.stringify(res.data)}`,
                     },
                 ],
             };
@@ -168,13 +168,13 @@ export function registerAdvancedTools(server: McpServer, http: HttpTransport): v
     );
 
     // ═══════════════════════════════════════
-    //  备份
+    //  Backup
     // ═══════════════════════════════════════
 
     server.tool(
         "list_backups",
-        "列出项目的所有数据库备份",
-        { ref: z.string().describe("项目 ref") },
+        "List all database backups for a project",
+        { ref: z.string().describe("Project ref") },
         async ({ ref }) => {
             const res = await http.get(`/v1/projects/${ref}/database/backups`);
             return {
@@ -185,8 +185,8 @@ export function registerAdvancedTools(server: McpServer, http: HttpTransport): v
 
     server.tool(
         "create_backup",
-        "为项目创建一个数据库备份",
-        { ref: z.string().describe("项目 ref") },
+        "Create a database backup for a project",
+        { ref: z.string().describe("Project ref") },
         async ({ ref }) => {
             const res = await http.post(`/v1/projects/${ref}/database/backups`);
             return {
@@ -194,8 +194,8 @@ export function registerAdvancedTools(server: McpServer, http: HttpTransport): v
                     {
                         type: "text",
                         text: res.ok
-                            ? `✅ 备份任务已创建\n${JSON.stringify(res.data, null, 2)}`
-                            : `❌ 备份失败 (${res.status})`,
+                            ? `✅ Backup task created\n${JSON.stringify(res.data, null, 2)}`
+                            : `❌ Backup failed (${res.status})`,
                     },
                 ],
             };
@@ -203,12 +203,12 @@ export function registerAdvancedTools(server: McpServer, http: HttpTransport): v
     );
 
     // ═══════════════════════════════════════
-    //  监控
+    //  Monitoring
     // ═══════════════════════════════════════
 
     server.tool(
         "get_system_metrics",
-        "获取 SupaCloud 平台的系统级监控指标",
+        "Get system-level monitoring metrics for SupaCloud platform",
         {},
         async () => {
             const res = await http.get("/v1/monitor/system");
@@ -219,13 +219,13 @@ export function registerAdvancedTools(server: McpServer, http: HttpTransport): v
     );
 
     // ═══════════════════════════════════════
-    //  安全
+    //  Security
     // ═══════════════════════════════════════
 
     server.tool(
         "get_network_restrictions",
-        "获取项目的网络访问限制规则",
-        { ref: z.string().describe("项目 ref") },
+        "Get project network access restriction rules",
+        { ref: z.string().describe("Project ref") },
         async ({ ref }) => {
             const res = await http.get(`/v1/projects/${ref}/network-restrictions`);
             return {
@@ -236,14 +236,14 @@ export function registerAdvancedTools(server: McpServer, http: HttpTransport): v
 
     server.tool(
         "update_network_restrictions",
-        "更新项目的网络访问限制 (IP 白名单)",
+        "Update project network access restrictions (IP whitelist)",
         {
-            ref: z.string().describe("项目 ref"),
+            ref: z.string().describe("Project ref"),
             restrictions: z
                 .object({
-                    allowedCidrs: z.array(z.string()).describe("允许访问的 CIDR 列表"),
+                    allowedCidrs: z.array(z.string()).describe("List of allowed CIDRs"),
                 })
-                .describe("网络限制配置"),
+                .describe("Network restriction config"),
         },
         async ({ ref, restrictions }) => {
             const res = await http.put(`/v1/projects/${ref}/network-restrictions`, restrictions);
@@ -252,8 +252,8 @@ export function registerAdvancedTools(server: McpServer, http: HttpTransport): v
                     {
                         type: "text",
                         text: res.ok
-                            ? `✅ 网络限制已更新`
-                            : `❌ 更新失败 (${res.status})`,
+                            ? `✅ Network restrictions updated`
+                            : `❌ Update failed (${res.status})`,
                     },
                 ],
             };

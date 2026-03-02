@@ -1,14 +1,14 @@
 #!/bin/bash
-# SupaCloud - 租户运行时管理脚本
-# 为每个租户动态启动独立的 PostgREST 进程，绑定到唯一端口，连接专属租户库
-# 用法: tenant_runtime.sh <start|stop|restart|status|port> <project_ref>
+# SupaCloud - Tenant Runtime Management Script
+# Dynamically starts independent PostgREST processes for each tenant, binding to unique ports, connecting to dedicated tenant databases
+# Usage: tenant_runtime.sh <start|stop|restart|status|port> <project_ref>
 
 set -euo pipefail
 
 ACTION="${1:-}"
 PROJECT_REF="${2:-}"
 
-# 配置
+# Configuration
 TENANT_CONFIG_DIR="${TENANT_CONFIG_DIR:-/etc/supabase/tenants}"
 POSTGREST_BIN="${POSTGREST_BIN:-/usr/local/bin/postgrest}"
 GOTRUE_BIN="${GOTRUE_BIN:-/usr/local/bin/gotrue}"
@@ -19,7 +19,7 @@ GOTRUE_PORT_BASE="${GOTRUE_PORT_BASE:-4100}"
 PORT_RANGE="${PORT_RANGE:-10000}"
 SUPACLOUD_META_DB="${SUPACLOUD_META_DB:-supacloud_meta}"
 
-# 验证参数
+# Validate parameters
 validate_params() {
     if [ -z "$ACTION" ] || [ -z "$PROJECT_REF" ]; then
         echo "ERROR: Missing required parameters" >&2
@@ -28,10 +28,10 @@ validate_params() {
     fi
 }
 
-# ========== 端口分配（确定性 hash，避免冲突） ==========
+# ========== Port allocation (deterministic hash, avoid conflicts) ==========
 get_tenant_port() {
     local ref="$1"
-    local type="$2" # pgrst 或 gotrue
+    local type="$2" # pgrst or gotrue
     local base_port
 
     if [ "$type" = "pgrst" ]; then
@@ -47,7 +47,7 @@ get_tenant_port() {
     hash=$(echo -n "$ref" | cksum | awk '{print $1}')
     local port=$(( base_port + (hash % PORT_RANGE) ))
 
-    # 冲突检测：如果端口被其他租户占用，线性探测
+    # Conflict detection: if port is occupied by another tenant, linear probe
     local config_dir="$TENANT_CONFIG_DIR"
     local max_tries=100
     local try=0
@@ -57,7 +57,7 @@ get_tenant_port() {
             for f in "$config_dir"/*.env; do
                 [ -f "$f" ] || continue
                 local existing_ref
-                # 支持 ref.env (pgrst) 和 ref_gotrue.env (gotrue)
+                # Support ref.env (pgrst) and ref_gotrue.env (gotrue)
                 existing_ref=$(basename "$f" | sed -e 's/\.env$//' -e 's/_gotrue$//')
                 [ "$existing_ref" = "$ref" ] && continue
                 
@@ -82,13 +82,13 @@ get_tenant_port() {
     exit 1
 }
 
-# ========== 从 supacloud_meta 查询租户凭据 ==========
+# ========== Query tenant credentials from supacloud_meta ==========
 get_tenant_credentials() {
     local ref="$1"
     local field="$2"
 
-    # 使用环境变量中的数据库连接信息
-    # 优先使用 PG_USER 和 PGPASSWORD，否则回退到 supabase_admin
+    # Use database connection info from environment variables
+    # Prefer PG_USER and PGPASSWORD, otherwise fallback to supabase_admin
     local db_user="${PG_USER:-supabase_admin}"
     local db_pass="${PGPASSWORD:-${POSTGRES_PASSWORD:-}}"
     
@@ -103,7 +103,7 @@ get_tenant_credentials() {
         -t -A -c "SELECT ${field} FROM projects WHERE ref='${ref}'" 2>/dev/null | grep -v '^Time:' | head -n 1
 }
 
-# ========== 确保 PostgREST 二进制可用 ==========
+# ========== Ensure PostgREST binary is available ==========
 ensure_postgrest() {
     if command -v postgrest &>/dev/null; then
         POSTGREST_BIN=$(command -v postgrest)
@@ -116,7 +116,7 @@ ensure_postgrest() {
 
     echo "PostgREST binary not found. Installing..."
 
-    # 从容器中提取（如果 Supabase 容器正在运行）
+    # Extract from container (if Supabase container is running)
     local container_id
     container_id=$(docker ps -q -f "name=supabase-rest" 2>/dev/null || true)
     if [ -n "$container_id" ]; then
@@ -128,7 +128,7 @@ ensure_postgrest() {
         fi
     fi
 
-    # 直接下载
+    # Direct download
     local arch
     arch=$(uname -m)
     case "$arch" in
@@ -157,7 +157,7 @@ ensure_postgrest() {
     rm -rf "$tmp_dir"
 }
 
-# ========== 确保 GoTrue 二进制可用 ==========
+# ========== Ensure GoTrue binary is available ==========
 ensure_gotrue() {
     if command -v gotrue &>/dev/null; then
         GOTRUE_BIN=$(command -v gotrue)
@@ -170,13 +170,13 @@ ensure_gotrue() {
 
     echo "GoTrue binary not found. Installing..."
 
-    # 从容器中提取（如果 Supabase 容器正在运行）
+    # Extract from container (if Supabase container is running)
     local container_id
     container_id=$(docker ps -q -f "name=supabase-auth" 2>/dev/null || podman ps -q -f "name=supabase-auth" 2>/dev/null || true)
     if [ -n "$container_id" ]; then
         echo "Extracting GoTrue from running container..."
         local tmp_bin="/tmp/gotrue-extract"
-        # Bug Fix: 新版本的 supabase/gotrue 容器内二进制文件被重命名为 'auth'，需要同时尝试 gotrue 和 auth 两个名字
+        # Bug Fix: New versions of supabase/gotrue container renamed the binary to 'auth', need to try both gotrue and auth
         (docker cp "${container_id}:/usr/local/bin/gotrue" "$tmp_bin" 2>/dev/null || \
          docker cp "${container_id}:/usr/local/bin/auth" "$tmp_bin" 2>/dev/null || \
          podman cp "${container_id}:/usr/local/bin/gotrue" "$tmp_bin" 2>/dev/null || \
@@ -192,7 +192,7 @@ ensure_gotrue() {
     exit 1
 }
 
-# ========== 生成租户配置文件 ==========
+# ========== Generate tenant configuration files ==========
 generate_tenant_config() {
     local ref="$1"
     local pgrst_port="$2"
@@ -200,7 +200,7 @@ generate_tenant_config() {
 
     mkdir -p "$TENANT_CONFIG_DIR"
 
-    # 查询租户凭据
+    # Query tenant credentials
     local db_name="supa_${ref}"
     local db_password
     db_password=$(get_tenant_credentials "$ref" "db_password")
@@ -212,8 +212,8 @@ generate_tenant_config() {
         exit 1
     fi
 
-    # 查询租户的 API 外部访问 URL（用于 GoTrue API_EXTERNAL_URL）
-    # 优先级：环境变量覆盖 > supacloud_meta.projects.api_url > 默认占位值
+    # Query tenant's API external access URL (for GoTrue API_EXTERNAL_URL)
+    # Priority: environment variable override > supacloud_meta.projects.api_url > default placeholder
     local api_external_url="${GOTRUE_API_EXTERNAL_URL:-}"
     if [ -z "$api_external_url" ]; then
         api_external_url=$(get_tenant_credentials "$ref" "api_url" 2>/dev/null || true)
@@ -223,7 +223,7 @@ generate_tenant_config() {
         echo "WARNING: API_EXTERNAL_URL not set. Set GOTRUE_API_EXTERNAL_URL env var or add api_url to supacloud_meta.projects" >&2
     fi
 
-    # 1. 生成 PostgREST .env 和 .conf
+    # 1. Generate PostgREST .env and .conf
     cat > "${TENANT_CONFIG_DIR}/${ref}.env" <<EOF
 # SupaCloud Tenant PostgREST Runtime: ${ref}
 PGRST_DB_URI=postgres://authenticator_${ref}:${db_password}@${PG_HOST}:${PG_PORT}/${db_name}
@@ -242,12 +242,12 @@ EOF
 # PostgREST config for tenant: ${ref}
 db-uri = "postgres://authenticator_${ref}:${db_password}@${PG_HOST}:${PG_PORT}/${db_name}"
 db-schemas = "public, storage, graphql_public"
-# Bug Fix: 多租户隔离 - 额外搜索路径应包含租户特定的 schema
+# Bug Fix: Multi-tenant isolation - extra search path should include tenant-specific schema
 db-extra-search-path = "public, extensions, auth, ${ref}"
 db-anon-role = "anon"
 jwt-secret = "${jwt_secret}"
 server-port = ${pgrst_port}
-# Bug Fix: 绑定到 0.0.0.0 以允许 Kong 容器（podman/docker 网络）通过宿主机桥接 IP 访问
+# Bug Fix: Bind to 0.0.0.0 to allow Kong container (podman/docker network) access via host bridge IP
 server-host = "0.0.0.0"
 db-pool = 10
 db-pool-acquisition-timeout = 10
@@ -255,8 +255,8 @@ log-level = "warn"
 EOF
     chmod 644 "${TENANT_CONFIG_DIR}/${ref}.conf"
 
-    # 2. 生成 GoTrue .env
-    # 获取租户配置的邮件发件人（如果有）
+    # 2. Generate GoTrue .env
+    # Get tenant configured email sender (if any)
     local gotrue_sender="${GOTRUE_SMTP_ADMIN_EMAIL:-noreply@${api_external_url#https://}}"
     local smtp_host="${GOTRUE_SMTP_HOST:-}"
     local smtp_user="${GOTRUE_SMTP_USER:-}"
@@ -264,12 +264,12 @@ EOF
     
     cat > "${TENANT_CONFIG_DIR}/${ref}_gotrue.env" <<EOF
 # SupaCloud Tenant GoTrue Runtime: ${ref}
-# Bug Fix: 绑定到 0.0.0.0 以允许 Kong 容器通过宿主机桥接 IP 访问
+# Bug Fix: Bind to 0.0.0.0 to allow Kong container access via host bridge IP
 GOTRUE_API_HOST=0.0.0.0
 GOTRUE_API_PORT=${gotrue_port}
 # Required: external URL used for email verification links and OAuth redirects
 API_EXTERNAL_URL=${api_external_url}
-# Bug Fix: SITE_URL 应该是实际可访问的 URL
+# Bug Fix: SITE_URL should be the actually accessible URL
 GOTRUE_SITE_URL=${api_external_url}
 GOTRUE_DB_DRIVER=postgres
 GOTRUE_DB_DATABASE_URL=postgres://supabase_auth_admin:${PGPASSWORD:-${POSTGRES_PASSWORD:-postgres}}@${PG_HOST}:${PG_PORT}/${db_name}
@@ -278,14 +278,14 @@ GOTRUE_JWT_SECRET=${jwt_secret}
 GOTRUE_JWT_EXP=3600
 GOTRUE_JWT_AUD=authenticated
 GOTRUE_JWT_DEFAULT_GROUP_NAME=authenticated
-# Bug Fix: 必须设置 JWT_AUD，否则用户查询会因 aud 为空而被过滤
+# Bug Fix: Must set JWT_AUD, otherwise user queries will be filtered out due to empty aud
 GOTRUE_JWT_AUD=authenticated
 GOTRUE_LOG_LEVEL=info
 GOTRUE_SERVER_READ_TIMEOUT=20
 GOTRUE_SECURITY_UPDATE_PASSWORD_REQUIRE_REAUTHENTICATION=true
 EOF
 
-    # 如果配置了 SMTP，添加到 GoTrue 配置
+    # If SMTP is configured, add to GoTrue config
     if [ -n "$smtp_host" ]; then
         cat >> "${TENANT_CONFIG_DIR}/${ref}_gotrue.env" <<EOF
 # SMTP Configuration
@@ -302,7 +302,7 @@ EOF
     echo "Config generated for ${ref} (pgrst_port=${pgrst_port}, gotrue_port=${gotrue_port})"
 }
 
-# ========== 安装 systemd template unit ==========
+# ========== Install systemd template unit ==========
 install_systemd_template() {
     local pgrst_unit="/etc/systemd/system/supacloud-pgrst@.service"
     if [ ! -f "$pgrst_unit" ]; then
@@ -317,7 +317,7 @@ Type=simple
 User=nobody
 Group=nobody
 EnvironmentFile=/etc/supabase/tenants/%i.env
-# 极限压榨: 限制单线程，并强制 Haskell 运行时激进回收内存 (-M30m 封顶, -I0.1 空闲 0.1秒触发 GC)
+# Extreme squeeze: limit to single thread, force Haskell runtime to aggressively reclaim memory (-M30m cap, -I0.1 idle 0.1s triggers GC)
 Environment="GHCRTS=-N1 -M30m -I0.1 -A1m"
 ExecStart=${POSTGREST_BIN} /etc/supabase/tenants/%i.conf +RTS -N1 -M30m -I0.1 -A1m -RTS
 Restart=on-failure
@@ -325,7 +325,7 @@ RestartSec=5
 StartLimitBurst=3
 StartLimitIntervalSec=60
 
-# 安全与资源沙盒化
+# Security and resource sandboxing
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
@@ -351,7 +351,7 @@ Type=simple
 User=nobody
 Group=nobody
 EnvironmentFile=/etc/supabase/tenants/%i_gotrue.env
-# 极限压榨: Go 原生内存墙 15MB 并在 20% 增长时立刻 GC
+# Extreme squeeze: Go native memory wall 15MB and trigger GC immediately at 20% growth
 Environment="GOMEMLIMIT=15MiB"
 Environment="GOGC=20"
 ExecStart=${GOTRUE_BIN}
@@ -360,7 +360,7 @@ RestartSec=5
 StartLimitBurst=3
 StartLimitIntervalSec=60
 
-# 安全与资源沙盒化
+# Security and resource sandboxing
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
@@ -377,7 +377,7 @@ EOF
     echo "systemd template units installed"
 }
 
-# ========== 启动租户运行时 ==========
+# ========== Start tenant runtime ==========
 start_runtime() {
     local ref="$1"
 
@@ -390,17 +390,17 @@ start_runtime() {
     local gotrue_port
     gotrue_port=$(get_tenant_port "$ref" "gotrue")
 
-    # 生成配置
+    # Generate config
     generate_tenant_config "$ref" "$pgrst_port" "$gotrue_port"
 
-    # 启动 systemd 服务
+    # Start systemd services
     systemctl enable "supacloud-pgrst@${ref}" 2>/dev/null || true
     systemctl start "supacloud-pgrst@${ref}"
     
     systemctl enable "supacloud-gotrue@${ref}" 2>/dev/null || true
     systemctl start "supacloud-gotrue@${ref}"
 
-    # 等待健康检查 (检查两个端口)
+    # Wait for health check (check both ports)
     echo "Waiting for PostgREST(${pgrst_port}) and GoTrue(${gotrue_port})..."
     local retries=20
     local pgrst_ok=0
@@ -432,7 +432,7 @@ start_runtime() {
     echo "STATUS=starting"
 }
 
-# ========== 停止租户运行时 ==========
+# ========== Stop tenant runtime ==========
 stop_runtime() {
     local ref="$1"
 
@@ -442,23 +442,23 @@ stop_runtime() {
     systemctl stop "supacloud-gotrue@${ref}" 2>/dev/null || true
     systemctl disable "supacloud-gotrue@${ref}" 2>/dev/null || true
 
-    # 清理配置文件
+    # Clean up config files
     rm -f "${TENANT_CONFIG_DIR}/${ref}.env" "${TENANT_CONFIG_DIR}/${ref}.conf" "${TENANT_CONFIG_DIR}/${ref}_gotrue.env"
 
     echo "Runtime stopped for ${ref}"
 }
 
-# ========== 重启租户运行时 ==========
+# ========== Restart tenant runtime ==========
 restart_runtime() {
     local ref="$1"
 
     if systemctl is-active "supacloud-pgrst@${ref}" >/dev/null 2>&1 || systemctl is-active "supacloud-gotrue@${ref}" >/dev/null 2>&1; then
-        # Bug Fix: 重启前同样需要确保二进制和 systemd 模板存在，防止如果宇机未分配 .service 直接崩溃
+        # Bug Fix: Before restart, also need to ensure binary and systemd template exist, prevent crash if .service not allocated
         ensure_postgrest
         ensure_gotrue
         install_systemd_template
 
-        # 重新生成配置（凭据可能已更新）
+        # Regenerate config (credentials may have been updated)
         local pgrst_port
         pgrst_port=$(get_tenant_port "$ref" "pgrst")
         local gotrue_port
@@ -470,12 +470,12 @@ restart_runtime() {
         systemctl restart "supacloud-gotrue@${ref}"
         echo "Runtime restarted for ${ref} (pgrst=${pgrst_port}, gotrue=${gotrue_port})"
     else
-        # 未运行则启动
+        # Not running, start it
         start_runtime "$ref"
     fi
 }
 
-# ========== 查询状态 ==========
+# ========== Check status ==========
 check_status() {
     local ref="$1"
 
@@ -507,7 +507,7 @@ check_status() {
     fi
 }
 
-# ========== 获取端口 ==========
+# ========== Get port ==========
 get_port() {
     local ref="$1"
     local pgrst_port
@@ -518,7 +518,7 @@ get_port() {
     echo "GOTRUE_PORT=${gotrue_port}"
 }
 
-# 主逻辑
+# Main logic
 validate_params
 
 case "$ACTION" in
