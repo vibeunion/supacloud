@@ -12,14 +12,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      - name: Free Disk Space
-        run: |
-          sudo docker image prune -af
-          sudo rm -rf /usr/share/dotnet
-          sudo rm -rf /usr/local/lib/android
-          sudo rm -rf /opt/ghc
-          df -h
-
       - name: Set up Bun
         uses: oven-sh/setup-bun@v1
       - name: Prepare SSH Environment
@@ -62,38 +54,30 @@ jobs:
           sudo -E /usr/local/bin/supacloud install --yes --ip 127.0.0.1 --domain api.local.nip.io --password ci-test-pass
 
   test_container:
-    name: Test on ${{ matrix.os }} (Docker Mocked)
+    name: Test on ${{ matrix.os }} Container
     runs-on: ubuntu-latest
     strategy:
-      matrix:
-        os: [ "ubuntu:22.04", "debian:12", "rockylinux:9" ]
       fail-fast: false
+      matrix:
+        os: ["debian:12", "debian:11", "ubuntu:24.04", "ubuntu:22.04", "rockylinux:9"]
     steps:
       - uses: actions/checkout@v3
-      - name: Free Disk Space
-        run: |
-          sudo docker image prune -af
-          sudo rm -rf /usr/share/dotnet
-          sudo rm -rf /usr/local/lib/android
-          sudo rm -rf /opt/ghc
-          df -h
-
       - name: Set up Bun
         uses: oven-sh/setup-bun@v1
-      - name: Build Management API Binary
-        working-directory: ./packages/management-api
-        run: |
-          bun install
-          bun run prebuild
-          bun run build:amd64
-
       - name: Run E2E Test in Container
         run: |
-          # 确保脚本有执行权限
-          chmod +x ./scripts/ci/container-test.sh
-          # 使用更加健壮的执行方式：直接指向挂载的脚本文件
-          docker run --privileged --rm \
-            -v ${{ github.workspace }}:/workspace \
-            -w /workspace \
-            ${{ matrix.os }} \
-            bash /workspace/scripts/ci/container-test.sh
+          # 启动带 systemd 的容器
+          docker run -d --name e2e-node --privileged \
+            -v /sys/fs/cgroup:/sys/fs/cgroup:ro \
+            -v ${{ github.workspace }}:/root/supacloud \
+            ${{ matrix.os }} /sbin/init || \
+          docker run -d --name e2e-node --privileged \
+            -v /sys/fs/cgroup:/sys/fs/cgroup:ro \
+            -v ${{ github.workspace }}:/root/supacloud \
+            ${{ matrix.os }} /lib/systemd/systemd
+          
+          echo "[CI] 等待容器系统初始化 (10s)..."
+          sleep 10
+          
+          # 执行测试脚本
+          docker exec -t e2e-node bash /root/supacloud/scripts/ci/container-test.sh
