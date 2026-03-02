@@ -3,12 +3,12 @@ import { ScalingService } from "../services/scaling.service";
 
 export const scalingRoutes = new Elysia({ prefix: "/v1/projects/:ref/upgrade" })
     .post("/", async ({ params, body, set }: any) => {
-        // 由于 ScalingService.checkAndScale 目前设计为基于自动指标判断，
-        // 这里做一个手动的升级触发封装
+        // Since ScalingService.checkAndScale is currently designed for automatic metric-based decisions,
+        // here we provide a manual upgrade trigger wrapper
         const { target_tier } = body as { target_tier: string };
 
-        // 此处我们调用 underlying scale 方法（绕过了指标限制强制执行）
-        // TypeScript 可能会报错因为方法被标记为 private，我们暂且强制使用 any
+        // Here we call the underlying scale method (bypassing metric restrictions for forced execution)
+        // TypeScript may complain because the method is marked private, we temporarily force use any
         try {
             await (ScalingService as any).verticalScale(params.ref, target_tier);
             return { success: true, message: `Project ${params.ref} upgrade to ${target_tier} initiated.` };

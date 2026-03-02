@@ -10,7 +10,7 @@ export interface StorageStatus {
 
 export class StorageService {
   /**
-   * 获取存储状态 (JuiceFS)
+   * Get storage status (JuiceFS)
    */
   static async getStatus(): Promise<StorageStatus> {
     const { success, output, error } = await shellService.execute('storage_manager.sh', ['status']);
@@ -26,18 +26,18 @@ export class StorageService {
   }
 
   /**
-   * 启动迁移任务 (JuiceFS -> S3)
+   * Start migration task (JuiceFS -> S3)
    */
   static async startMigration(s3Url: string, credentials: { access_key: string, secret_key: string, endpoint: string }): Promise<{ message: string }> {
     const options = JSON.stringify(credentials);
     shellService.execute('storage_manager.sh', ['migrate_to_s3', s3Url, options]).catch(err => {
       console.error('Async migration task failed:', err);
     });
-    return { message: '存储迁移后台任务已启动，请在后台日志中关注 juicefs sync 进度' };
+    return { message: 'Storage migration background task started, please monitor juicefs sync progress in background logs' };
   }
 
   /**
-   * 兼容旧版：创建 S3 Bucket (Garage/MinIO/RustFS)
+   * Legacy compatibility: Create S3 Bucket (Garage/MinIO/RustFS)
    */
   static async createBucket(projectRef: string): Promise<{ success: boolean; accessKey?: string; secretKey?: string; error?: string }> {
     const { success, output, error } = await shellService.execute('s3_manager.sh', ['create', projectRef]);
@@ -49,7 +49,7 @@ export class StorageService {
   }
 
   /**
-   * 兼容旧版：删除 S3 Bucket
+   * Legacy compatibility: Delete S3 Bucket
    */
   static async deleteBucket(projectRef: string): Promise<{ success: boolean; error?: string }> {
     const { success, error } = await shellService.execute('s3_manager.sh', ['delete', projectRef]);
@@ -57,7 +57,7 @@ export class StorageService {
   }
 
   /**
-   * 兼容旧版：获取 S3 凭据
+   * Legacy compatibility: Get S3 credentials
    */
   static async getCredentials(projectRef: string): Promise<{ success: boolean; accessKey?: string; secretKey?: string; error?: string }> {
     const { success, output, error } = await shellService.execute('s3_manager.sh', ['credentials', projectRef]);

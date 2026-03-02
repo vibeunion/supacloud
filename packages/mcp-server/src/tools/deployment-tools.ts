@@ -1,6 +1,6 @@
 
 /**
- * 部署管理工具集 - 系统级部署操作
+ * Deployment Management Tools - System-level deployment operations
  */
 import { z } from "zod";
 import { exec } from "child_process";
@@ -12,22 +12,22 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 const execAsync = promisify(exec);
 
 export function registerDeploymentTools(server: McpServer): void {
-    // ── 部署 Web 控制台 ──
+    // ── Deploy Web Console ──
     server.tool(
         "deploy_web_console",
-        "部署或更新 Web 控制台前端容器",
+        "Deploy or update Web Console frontend container",
         {
-            port: z.number().default(3000).describe("控制台运行端口 (默认 3000)"),
-            apiUrl: z.string().optional().describe("Management API 地址 (默认 http://localhost:9090)"),
+            port: z.number().default(3000).describe("Console running port (default 3000)"),
+            apiUrl: z.string().optional().describe("Management API URL (default http://localhost:9090)"),
         },
         async ({ port, apiUrl }) => {
             try {
-                // 确定脚本路径 - 优先使用环境变量，否则在项目根目录查找
+                // Determine script path - prefer environment variable, otherwise look in project root
                 let scriptPath = process.env.SUPACLOUD_SCRIPTS_DIR 
                     ? path.join(process.env.SUPACLOUD_SCRIPTS_DIR, "deploy_web_console.sh")
                     : path.resolve(process.cwd(), "scripts/deploy_web_console.sh");
                 
-                // 如果当前目录没有，尝试向上一级查找（在 monorepo 开发环境可能需要）
+                // If not in current directory, try one level up (may be needed in monorepo dev environment)
                 if (!fs.existsSync(scriptPath)) {
                     const parentPath = path.resolve(process.cwd(), "../..", "scripts/deploy_web_console.sh");
                     if (fs.existsSync(parentPath)) {
@@ -38,20 +38,20 @@ export function registerDeploymentTools(server: McpServer): void {
                 }
 
                 if (!fs.existsSync(scriptPath)) {
-                    throw new Error(`找不到部署脚本: ${scriptPath}。请确保 scripts/deploy_web_console.sh 存在，或设置 SUPACLOUD_SCRIPTS_DIR 环境变量。`);
+                    throw new Error(`Deployment script not found: ${scriptPath}. Please ensure scripts/deploy_web_console.sh exists, or set SUPACLOUD_SCRIPTS_DIR environment variable.`);
                 }
 
-                // 构建环境变量
+                // Build environment variables
                 const env = {
                     ...process.env,
                     CONSOLE_PORT: port.toString(),
                     API_URL: apiUrl || "http://localhost:9090",
                 };
 
-                // 执行脚本
-                // 注意：Windows 环境下可能需要 wsl 或 bash，这里假设环境中有 bash (如 git bash 或 wsl)
-                // 如果是在 Windows 原生环境且没有 bash，这可能会失败，但 SupaCloud 似乎是面向 Linux/Unix 环境的
-                // 用户环境是 Windows，但之前的 install.sh 都是 bash 脚本，说明用户可能有 bash 环境 (Git Bash, WSL 等)
+                // Execute script
+                // Note: Windows environment may need wsl or bash, assuming bash is available (e.g., git bash or wsl)
+                // If on native Windows without bash, this may fail, but SupaCloud seems targeted at Linux/Unix environments
+                // User environment is Windows, but previous install.sh are all bash scripts, indicating user may have bash (Git Bash, WSL, etc.)
                 
                 const { stdout, stderr } = await execAsync(`bash "${scriptPath}"`, { env });
 
@@ -59,7 +59,7 @@ export function registerDeploymentTools(server: McpServer): void {
                     content: [
                         {
                             type: "text",
-                            text: `✅ 部署脚本执行成功\n\n${stdout}\n${stderr ? `Warnings/Errors:\n${stderr}` : ""}`,
+                            text: `✅ Deployment script executed successfully\n\n${stdout}\n${stderr ? `Warnings/Errors:\n${stderr}` : ""}`,
                         },
                     ],
                 };
@@ -68,7 +68,7 @@ export function registerDeploymentTools(server: McpServer): void {
                     content: [
                         {
                             type: "text",
-                            text: `❌ 部署失败: ${error.message}\n${error.stderr || ""}`,
+                            text: `❌ Deployment failed: ${error.message}\n${error.stderr || ""}`,
                         },
                     ],
                 };
