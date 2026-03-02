@@ -54,13 +54,48 @@ install_base_deps() {
 clone_repo() {
     INSTALL_DIR="/opt/supacloud"
     if [[ -d "$INSTALL_DIR" ]]; then
-        log_info "目标目录 $INSTALL_DIR 已存在，跳过克隆"
+        log_info "目标目录 $INSTALL_DIR 已存在，更新代码..."
         cd "$INSTALL_DIR"
+        git pull || log_warn "代码更新失败，将使用现有版本"
     else
-        log_step "克隆 SupaCloud 仓库到 $INSTALL_DIR (使用加速)..."
-        git clone https://gh-proxy.net/https://github.com/zuohuadong/supacloud.git "$INSTALL_DIR"
+        log_step "克隆 SupaCloud 仓库到 $INSTALL_DIR..."
+        git clone --depth 1 https://gh-proxy.net/https://github.com/zuohuadong/supacloud.git "$INSTALL_DIR"
         cd "$INSTALL_DIR"
     fi
+}
+
+# 下载核心二进制
+download_binaries() {
+    log_step "检测 CPU 架构并下载核心二进制..."
+    local ARCH=$(uname -m)
+    local BIN_NAME=""
+    
+    if [[ "$ARCH" == "x86_64" ]]; then
+        BIN_NAME="supacloud-linux-amd64"
+    elif [[ "$ARCH" == "aarch64" ]]; then
+        BIN_NAME="supacloud-linux-arm64"
+    else
+        log_error "不支持的 CPU 架构: $ARCH"
+        exit 1
+    fi
+
+    # 优先检测本地是否已有（例如本地构建过）
+    if [[ -f "./$BIN_NAME" ]] || [[ -f "./dist/$BIN_NAME" ]]; then
+        log_info "发现本地二进制产物，跳过下载"
+        return
+    fi
+
+    # 从 GitHub 下载。注意：这里假设发布在 main 分支的最新构建
+    # 在生产环境下，通常从 Release 页面或特定的 CDN 下载
+    log_info "正在从 GitHub 下载最新二进制 ($BIN_NAME)..."
+    local DOWNLOAD_URL="https://gh-proxy.net/https://github.com/zuohuadong/supacloud/releases/latest/download/${BIN_NAME}"
+    
+    # 如果还没有 releases，可以先从 git 仓库的 dist 目录尝试（如果存在）
+    # 这里演示下载逻辑
+    mkdir -p dist
+    curl -Lo "dist/${BIN_NAME}" "$DOWNLOAD_URL" || {
+        log_warn "从 Release 下载失败（可能尚未发布），请确保本地已通过 bun run build 生成二进制"
+    }
 }
 
 # ⚠️ OpenCloudOS 兼容性预检查
@@ -161,6 +196,7 @@ main() {
 
     install_base_deps
     clone_repo
+    download_binaries
     check_openssl_compat
     generate_config
     run_install
