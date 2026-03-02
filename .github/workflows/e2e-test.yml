@@ -86,15 +86,24 @@ jobs:
         run: |
           docker rm -f e2e-node || true
           
-          # 使用带 systemd 的专业 Ansible 测试镜像
+          # 使用带 systemd 的专业镜像，并增加 cgroup v2 兼容参数
+          # 关键参数：--tmpfs /run --tmpfs /run/lock -v /sys/fs/cgroup:/sys/fs/cgroup:rw
           docker run -d --name e2e-node --privileged \
             --workdir /root/supacloud \
-            -v /sys/fs/cgroup:/sys/fs/cgroup:ro \
+            --tmpfs /run --tmpfs /run/lock \
+            -v /sys/fs/cgroup:/sys/fs/cgroup:rw \
             -v ${{ github.workspace }}:/root/supacloud \
             ${{ matrix.image }} ${{ matrix.init }}
           
-          echo "[CI] 容器 ${{ matrix.os }} (using ${{ matrix.image }}) 已启动，等待系统初始化..."
+          echo "[CI] 容器 ${{ matrix.os }} (using ${{ matrix.image }}) 已启动，正在进行健康检查..."
           sleep 5
+          
+          # 诊断：如果容器没跑起来，打印日志
+          if [ "$(docker inspect -f '{{.State.Running}}' e2e-node)" != "true" ]; then
+            echo "错误: 容器启动失败！以下是容器日志："
+            docker logs e2e-node
+            exit 1
+          fi
           
           # 执行测试脚本
           docker exec -t e2e-node bash /root/supacloud/scripts/ci/container-test.sh
