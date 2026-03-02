@@ -2298,6 +2298,9 @@ configure_pg_hba() {
     # host all all <CIDR> scram-sha-256
     CONFIG_LINE="host all all ${CONTAINER_NET} scram-sha-256"
     
+    # 添加 localhost 密码认证规则 (management-api 需要)
+    LOCALHOST_RULE="host    all             all             127.0.0.1/32            scram-sha-256"
+    
     if grep -qF "$CONTAINER_NET" "$PG_HBA"; then
         log_info "规则已存在: $CONFIG_LINE"
     else
@@ -2306,8 +2309,15 @@ configure_pg_hba() {
         cp "$PG_HBA" "${PG_HBA}.bak.$(date +%s)"
         # 添加到文件末尾
         echo "$CONFIG_LINE" >> "$PG_HBA"
+    fi
+    
+    # 添加 localhost 规则
+    if ! grep -qF "127.0.0.1/32" "$PG_HBA"; then
+        log_info "添加 localhost 密码认证规则..."
+        echo "$LOCALHOST_RULE" >> "$PG_HBA"
+    fi
         
-        # 4. 重载配置
+    # 4. 重载配置
         log_info "重载 PostgreSQL 配置..."
         if command -v pg_ctl &> /dev/null; then
              # 需要切换到 postgres 用户执行
@@ -2459,18 +2469,25 @@ EOF
     cat > /etc/supabase/management-api.env <<EOF
 # SupaCloud Management API Configuration
 PORT=9090
-DATABASE_URL=postgresql://postgres:${POSTGRES_PASSWORD}@localhost:5432/supacloud_meta
+DATABASE_URL=postgresql://postgres:${POSTGRES_PASSWORD}@${INTERNAL_IP}:5432/supacloud_meta
 MASTER_TOKEN=${MASTER_TOKEN}
 SCRIPTS_PATH=${SCRIPTS_INSTALL_DIR}
 PIGSTY_PATH=${HOME}/pigsty
 NGINX_SITES_PATH=/etc/angie/http.d
 BASE_DOMAIN=${SUPABASE_PUBLIC_DOMAIN}
+# 数据库连接环境变量 (脚本执行需要)
+PG_HOST=${INTERNAL_IP}
+PG_PORT=5432
+PG_USER=postgres
+PGPASSWORD=${POSTGRES_PASSWORD}
 EOF
     chmod 600 /etc/supabase/management-api.env
 
-    # 6. 利用 supacloud 二进制自身执行数据库迁移 (替代原 bun run db:init)
-    log_info "正在利用 supacloud 二进制初始化元数据库..."
-    $BIN_TARGET install --dry-run &>/dev/null || true # 这里的逻辑可根据实际实现调整
+    # 6. 利用 supacloud 二进制自身执行数据库迁移
+    log_info "正在初始化元数据库表结构..."
+    export DATABASE_URL="postgresql://postgres:${POSTGRES_PASSWORD}@${INTERNAL_IP}:5432/supacloud_meta"
+    $BIN_TARGET --init-db 2>/dev/null || log_warn "数据库表初始化失败，请手动执行: supacloud --init-db"
+    unset DATABASE_URL
     
     # 7. 注册 Systemd 服务 (指向全局二进制且执行 start 命令)
     log_info "注册 Systemd 服务单元 (supacloud.service)..."
