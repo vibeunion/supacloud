@@ -24,26 +24,27 @@ jobs:
         uses: oven-sh/setup-bun@v1
       - name: Prepare SSH Environment
         run: |
-          # 生成并授权当前用户
+          # 1. 生成并授权当前用户
           ssh-keygen -t rsa -N "" -f ~/.ssh/id_rsa
           cat ~/.ssh/id_rsa.pub >> ~/.ssh/authorized_keys
-          chmod 600 ~/.ssh/authorized_keys
-          echo "StrictHostKeyChecking no" >> ~/.ssh/config
+          chmod 700 ~/.ssh && chmod 600 ~/.ssh/authorized_keys
           
-          # 关键：开启 root 登录权限并授权
+          # 2. 关键：开启 root 登录权限并授权
           sudo mkdir -p /root/.ssh
           sudo cp ~/.ssh/id_rsa.pub /root/.ssh/authorized_keys
-          sudo chmod 700 /root/.ssh
-          sudo chmod 600 /root/.ssh/authorized_keys
+          sudo chmod 700 /root/.ssh && sudo chmod 600 /root/.ssh/authorized_keys
           
-          # 修正 SSHD 配置以允许 root 密钥登录 (GitHub Runner 默认可能限制)
+          # 3. 修正 SSHD 配置以允许 root 密钥登录 (GitHub Runner 默认可能限制)
           sudo sed -i 's/^#PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config
           sudo sed -i 's/^PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config
           sudo sed -i 's/^#PubkeyAuthentication.*/PubkeyAuthentication yes/' /etc/ssh/sshd_config
+          # 清理可能存在的 config.d 限制
+          sudo find /etc/ssh/sshd_config.d/ -type f -exec sed -i 's/^PermitRootLogin.*/PermitRootLogin yes/' {} + || true
+          
           sudo systemctl restart ssh
           
           # 验证连通性
-          ssh -o BatchMode=yes -o StrictHostKeyChecking=no root@127.0.0.1 "echo SSH Connection Verified"
+          ssh -o StrictHostKeyChecking=no root@127.0.0.1 "echo SSH Connection Verified"
 
       - name: Build and Test
         run: |
@@ -51,11 +52,11 @@ jobs:
           bun install
           bun run prebuild
           bun run build:amd64
-          cp supacloud-linux-amd64 /usr/local/bin/supacloud
-          chmod +x /usr/local/bin/supacloud
+          sudo cp supacloud-linux-amd64 /usr/local/bin/supacloud
+          sudo chmod +x /usr/local/bin/supacloud
           echo "[CI] 开始宿主机原生环境测试..."
-          # 宿主机上虽然通常不会忙，但为了环境一致性和鲁棒性，我们也注入一些安全参数
-          export SUPACLOUD_ANSIBLE_ARGS="-e node_write_etc_hosts=false -e node_dns_method=none -vv"
+          # 回归原始：不注入多余的 node_repo 等参数，仅开启详细日志
+          export SUPACLOUD_ANSIBLE_ARGS="-vv"
           sudo -E /usr/local/bin/supacloud install --yes --ip 127.0.0.1 --domain api.local.nip.io --password ci-test-pass
 
   test_container:
