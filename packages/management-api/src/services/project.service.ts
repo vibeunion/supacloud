@@ -4,7 +4,7 @@ import { databaseService } from "./database.service";
 import { storageService } from "./storage.service";
 import { routerService } from "./router.service";
 import { shellService } from "./shell.service";
-import { GatewayService } from "./gateway.service";
+import { gatewayService } from "./gateway.service";
 import { taskRepository } from "../repositories/task.repository";
 import type { Project, ProjectStatus } from "../db";
 
@@ -383,7 +383,7 @@ export class ProjectService {
     });
 
     // 3. 同步到 Kong 网关
-    await GatewayService.setupProject(ref, jwtSecret);
+    await gatewayService.setupJwt(ref, jwtSecret);
 
     // 4. TODO: 此处后续可以增加通知路由器重载的逻辑
 
@@ -422,10 +422,7 @@ export class ProjectService {
     const project = await projectRepository.findByRef(ref);
     if (!project) return false;
 
-    const result = await shellService.execute("router_manager.sh", ["update-restrictions", ref, allowedIps.join(",")]);
-    if (result.success) {
-      await routerService.reload();
-    }
+    const result = await routerService.updateNetworkRestrictions(ref, allowedIps);
     return result.success;
   }
 
@@ -446,10 +443,9 @@ export class ProjectService {
     const project = await projectRepository.findByRef(ref);
     if (!project) return false;
 
-    const result = await shellService.execute("router_manager.sh", ["add-custom-domain", ref, domain]);
+    const result = await routerService.addCustomDomain(ref, domain);
     if (result.success) {
       await projectRepository.updateConfig(ref, { ...project.config, custom_domain: domain });
-      await routerService.reload();
     }
     return result.success;
   }
@@ -459,14 +455,13 @@ export class ProjectService {
     if (!project) return false;
 
     const domain = project.config?.custom_domain as string | undefined;
-    if (!domain) return true; // 未配置过视为删除成功
+    if (!domain) return true;
 
-    const result = await shellService.execute("router_manager.sh", ["remove-custom-domain", ref, domain]);
+    const result = await routerService.removeCustomDomain(ref, domain);
     if (result.success) {
       const newConfig = { ...project.config };
       delete newConfig.custom_domain;
       await projectRepository.updateConfig(ref, newConfig);
-      await routerService.reload();
     }
     return result.success;
   }
