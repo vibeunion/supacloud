@@ -3,7 +3,7 @@ import { projectRepository } from "../repositories/project.repository";
 import { databaseService } from "./database.service";
 import { storageService } from "./storage.service";
 import { routerService } from "./router.service";
-import { GatewayService } from "./gateway.service";
+import { gatewayService } from "./gateway.service";
 import type { ProjectTask } from "../db";
 
 export class TaskWorker {
@@ -117,10 +117,10 @@ export class TaskWorker {
                 }
 
                 case "provision_gateway": {
-                    await GatewayService.setupProject(project_ref, project.jwt_secret);
-                    await GatewayService.setRateLimit(project_ref, "free");
-                    await GatewayService.setCors(project_ref, "*");
-                    await GatewayService.enableJwtAuth(project_ref);
+                    await gatewayService.setupJwt(project_ref, project.jwt_secret);
+                    await gatewayService.setRateLimit(project_ref, "free");
+                    await gatewayService.setCors(project_ref, "*");
+                    await gatewayService.enableJwtAuth(project_ref);
                     return true;
                 }
 

@@ -303,102 +303,102 @@ WantedBy=multi-user.target
         await $`systemctl start supacloud-gotrue@${ref}`.nothrow().quiet();
 
         // 等待服务探活
-        console.log(\`Waiting for PostgREST(\${pgrstPort}) and GoTrue(\${gotruePort}) health checks...\`);
-    let pgrstOk = false;
-    let gotrueOk = false;
-    
-    for (let tryIdx = 0; tryIdx < 20; tryIdx++) {
-      if (!pgrstOk) {
-        try {
-          const res = await fetch(\`http://127.0.0.1:\${pgrstPort}/\`);
-          if (res.ok) pgrstOk = true;
-        } catch { /* ignore */ }
-      }
-      
-      if (!gotrueOk) {
-        try {
-          const res = await fetch(\`http://127.0.0.1:\${gotruePort}/health\`);
-          if (res.ok) gotrueOk = true;
-        } catch { /* ignore */ }
-      }
+        console.log(`Waiting for PostgREST(${pgrstPort}) and GoTrue(${gotruePort}) health checks...`);
+        let pgrstOk = false;
+        let gotrueOk = false;
 
-      if (pgrstOk && gotrueOk) {
-        return { status: "running", port: pgrstPort, gotruePort, health: "healthy" };
-      }
-      await Bun.sleep(1000);
+        for (let tryIdx = 0; tryIdx < 20; tryIdx++) {
+            if (!pgrstOk) {
+                try {
+                    const res = await fetch(`http://127.0.0.1:${pgrstPort}/`);
+                    if (res.ok) pgrstOk = true;
+                } catch { /* ignore */ }
+            }
+
+            if (!gotrueOk) {
+                try {
+                    const res = await fetch(`http://127.0.0.1:${gotruePort}/health`);
+                    if (res.ok) gotrueOk = true;
+                } catch { /* ignore */ }
+            }
+
+            if (pgrstOk && gotrueOk) {
+                return { status: "running", port: pgrstPort, gotruePort, health: "healthy" };
+            }
+            await Bun.sleep(1000);
+        }
+
+        console.warn("WARNING: Health check timeout, some services may still be starting");
+        return { status: "starting", port: pgrstPort, gotruePort, health: "degraded" };
     }
 
-    console.warn("WARNING: Health check timeout, some services may still be starting");
-    return { status: "starting", port: pgrstPort, gotruePort, health: "degraded" };
-  }
+    public async stopRuntime(ref: string): Promise<void> {
+        await $`systemctl stop supacloud-pgrst@${ref}`.nothrow().quiet();
+        await $`systemctl disable supacloud-pgrst@${ref}`.nothrow().quiet();
 
-  public async stopRuntime(ref: string): Promise<void> {
-    await $`systemctl stop supacloud - pgrst@${ ref }`.nothrow().quiet();
-    await $`systemctl disable supacloud - pgrst@${ ref }`.nothrow().quiet();
+        await $`systemctl stop supacloud-gotrue@${ref}`.nothrow().quiet();
+        await $`systemctl disable supacloud-gotrue@${ref}`.nothrow().quiet();
 
-    await $`systemctl stop supacloud - gotrue@${ ref }`.nothrow().quiet();
-    await $`systemctl disable supacloud - gotrue@${ ref }`.nothrow().quiet();
+        // 清理配置文件
+        const pgrstEnvFile = Bun.file(path.join(this.TENANT_CONFIG_DIR, `${ref}.env`));
+        const pgrstConfFile = Bun.file(path.join(this.TENANT_CONFIG_DIR, `${ref}.conf`));
+        const gotrueEnvFile = Bun.file(path.join(this.TENANT_CONFIG_DIR, `${ref}_gotrue.env`));
 
-    // 清理配置文件
-    const pgrstEnvFile = Bun.file(path.join(this.TENANT_CONFIG_DIR, \`\${ref}.env\`));
-    const pgrstConfFile = Bun.file(path.join(this.TENANT_CONFIG_DIR, \`\${ref}.conf\`));
-    const gotrueEnvFile = Bun.file(path.join(this.TENANT_CONFIG_DIR, \`\${ref}_gotrue.env\`));
-    
-    if (await pgrstEnvFile.exists()) await fs.unlink(pgrstEnvFile.name!);
-    if (await pgrstConfFile.exists()) await fs.unlink(pgrstConfFile.name!);
-    if (await gotrueEnvFile.exists()) await fs.unlink(gotrueEnvFile.name!);
-    
-    console.log(\`Runtime stopped for \${ref}\`);
-  }
+        if (await pgrstEnvFile.exists()) await fs.unlink(pgrstEnvFile.name!);
+        if (await pgrstConfFile.exists()) await fs.unlink(pgrstConfFile.name!);
+        if (await gotrueEnvFile.exists()) await fs.unlink(gotrueEnvFile.name!);
 
-  public async restartRuntime(ref: string): Promise<RuntimeStatus> {
-    const pgrstActive = (await $`systemctl is - active supacloud - pgrst@${ ref }`.nothrow().quiet()).exitCode === 0;
-    const gotrueActive = (await $`systemctl is - active supacloud - gotrue@${ ref }`.nothrow().quiet()).exitCode === 0;
-
-    if (pgrstActive || gotrueActive) {
-      await this.ensureBinaries();
-      await this.installSystemdTemplate();
-
-      const pgrstPort = await this.getTenantPort(ref, "pgrst");
-      const gotruePort = await this.getTenantPort(ref, "gotrue");
-      await this.generateTenantConfig(ref, pgrstPort, gotruePort);
-
-      await $`systemctl restart supacloud - pgrst@${ ref }`.nothrow().quiet();
-      await $`systemctl restart supacloud - gotrue@${ ref }`.nothrow().quiet();
-      
-      return await this.checkStatus(ref);
-    } else {
-      return await this.startRuntime(ref);
-    }
-  }
-
-  public async checkStatus(ref: string): Promise<RuntimeStatus> {
-    const pgrstActive = (await $`systemctl is - active supacloud - pgrst@${ ref }`.nothrow().quiet()).exitCode === 0;
-    const gotrueActive = (await $`systemctl is - active supacloud - gotrue@${ ref }`.nothrow().quiet()).exitCode === 0;
-
-    const port = await this.getTenantPort(ref, "pgrst");
-    const gotruePort = await this.getTenantPort(ref, "gotrue");
-
-    if (pgrstActive || gotrueActive) {
-      let pgrstOk = false;
-      let gotrueOk = false;
-
-      try {
-        pgrstOk = (await fetch(\`http://127.0.0.1:\${port}/\`)).ok;
-      } catch { }
-
-      try {
-        gotrueOk = (await fetch(\`http://127.0.0.1:\${gotruePort}/health\`)).ok;
-      } catch { }
-
-      let health: RuntimeStatus["health"] = "unhealthy";
-      if (pgrstOk && gotrueOk) health = "healthy";
-      else if (pgrstOk || gotrueOk) health = "degraded";
-
-      return { status: "running", port, gotruePort, health };
+        console.log(`Runtime stopped for ${ref}`);
     }
 
-            return { status: "stopped", port, gotruePort, health: "unknown" };
+    public async restartRuntime(ref: string): Promise<RuntimeStatus> {
+        const pgrstActive = (await $`systemctl is-active supacloud-pgrst@${ref}`.nothrow().quiet()).exitCode === 0;
+        const gotrueActive = (await $`systemctl is-active supacloud-gotrue@${ref}`.nothrow().quiet()).exitCode === 0;
+
+        if (pgrstActive || gotrueActive) {
+            await this.ensureBinaries();
+            await this.installSystemdTemplate();
+
+            const pgrstPort = await this.getTenantPort(ref, "pgrst");
+            const gotruePort = await this.getTenantPort(ref, "gotrue");
+            await this.generateTenantConfig(ref, pgrstPort, gotruePort);
+
+            await $`systemctl restart supacloud-pgrst@${ref}`.nothrow().quiet();
+            await $`systemctl restart supacloud-gotrue@${ref}`.nothrow().quiet();
+
+            return await this.checkStatus(ref);
+        } else {
+            return await this.startRuntime(ref);
+        }
+    }
+
+    public async checkStatus(ref: string): Promise<RuntimeStatus> {
+        const pgrstActive = (await $`systemctl is-active supacloud-pgrst@${ref}`.nothrow().quiet()).exitCode === 0;
+        const gotrueActive = (await $`systemctl is-active supacloud-gotrue@${ref}`.nothrow().quiet()).exitCode === 0;
+
+        const port = await this.getTenantPort(ref, "pgrst");
+        const gotruePort = await this.getTenantPort(ref, "gotrue");
+
+        if (pgrstActive || gotrueActive) {
+            let pgrstOk = false;
+            let gotrueOk = false;
+
+            try {
+                pgrstOk = (await fetch(`http://127.0.0.1:${port}/`)).ok;
+            } catch { }
+
+            try {
+                gotrueOk = (await fetch(`http://127.0.0.1:${gotruePort}/health`)).ok;
+            } catch { }
+
+            let health: RuntimeStatus["health"] = "unhealthy";
+            if (pgrstOk && gotrueOk) health = "healthy";
+            else if (pgrstOk || gotrueOk) health = "degraded";
+
+            return { status: "running", port, gotruePort, health };
+        }
+
+        return { status: "stopped", port, gotruePort, health: "unknown" };
     }
 }
 
