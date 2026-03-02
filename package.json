@@ -1,7 +1,7 @@
 {
   "name": "supacloud",
   "private": true,
-  "version": "0.3.18",
+  "version": "0.3.19",
   "scripts": {
     "release": "standard-version"
   },
