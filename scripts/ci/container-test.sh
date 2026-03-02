@@ -34,18 +34,32 @@ echo "PermitRootLogin yes" >> /etc/ssh/sshd_config
 echo "PubkeyAuthentication yes" >> /etc/ssh/sshd_config
 /usr/sbin/sshd
 
+# 核心劫持：将 /usr/local/bin 置于首位，用于拦截 systemctl 报错
+export PATH="/usr/local/bin:$PATH"
+
 for cmd in systemctl hostnamectl timedatectl sysctl modprobe apparmor_status udevadm; do
     case "$cmd" in
         systemctl)
             cat <<'INNEREOF' > /usr/local/bin/systemctl
 #!/bin/bash
-arg="$@"
-if [[ "$arg" == *"is-active"* || "$arg" == *"is-enabled"* || "$arg" == *"status"* ]]; then
+# 定向劫持 Chrony 请求，防止容器内无权限报错；其他请求尝试透传
+REAL_SYSTEMCTL=$(which -a systemctl | grep -v "/usr/local/bin/systemctl" | head -n 1)
+args="$@"
+
+if [[ "$args" == *"chronyd"* || "$args" == *"chrony"* ]]; then
+    echo "[MOCK] Intecepted systemctl $args for chrony -> Success"
     exit 0
 fi
-[ "$1" = "daemon-reload" ] && exit 0
-echo "Simulating systemctl $@"
-exit 0
+
+if [ -n "$REAL_SYSTEMCTL" ]; then
+    exec "$REAL_SYSTEMCTL" "$@"
+else
+    # 回退逻辑：如果系统内没装真实 systemctl (比如极简镜像)
+    if [[ "$args" == *"is-active"* || "$args" == *"is-enabled"* || "$args" == *"status"* ]]; then
+        exit 0
+    fi
+    exit 0
+fi
 INNEREOF
             ;;
         hostnamectl)

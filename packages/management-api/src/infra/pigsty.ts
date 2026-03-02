@@ -276,7 +276,6 @@ export class PigstyManager {
             console.log("[PigstyManager] 检测到受限环境 (Container/CI)，自动注入环境避让补丁...");
             args.push("-e", "node_tune=none");            // 禁止调优内核
             args.push("-e", "chrony_enabled=false");      // 阻止 chrony 角色
-            args.push("-e", "node_ntp_service=none");     // [NEW] 彻底禁用 NTP 服务管理逻辑
             args.push("-e", "node_write_etc_hosts=false"); // 禁止修改只读 hosts
             args.push("-e", "node_dns_method=none");      // 彻底禁止修改 resolv.conf / hosts
             args.push("-e", "node_repo_remove=true");      // [FIX] 允许清理旧源，解决 Conflicting Trusted values
