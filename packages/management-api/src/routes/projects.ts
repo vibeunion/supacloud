@@ -1,6 +1,6 @@
 import { Elysia, t } from "elysia";
 import { projectService } from "../services";
-import { GatewayService } from "../services/gateway.service";
+import { gatewayService } from "../services/gateway.service";
 
 // 可用区域列表
 const AVAILABLE_REGIONS = [
@@ -763,7 +763,7 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
   .post(
     "/:ref/gateway/config",
     async ({ params, body, set }) => {
-      const result = await GatewayService.applyConfig(params.ref, {
+      const result = await gatewayService.applyConfig(params.ref, {
         rateLimitTier: body.rate_limit_tier as any,
         corsOrigins: body.cors_origins,
         jwtEnabled: body.jwt_enabled,

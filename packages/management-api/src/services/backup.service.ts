@@ -1,7 +1,6 @@
-import { shellService } from './shell.service';
+import { $ } from 'bun';
 import { BackupInfo, RestoreRequest } from '../types/backup';
 import { projectRepository } from '../repositories/project.repository';
-import { $ } from "bun";
 
 export class BackupService {
     /**
@@ -9,27 +8,22 @@ export class BackupService {
      * @param stanza 库名/实例名，默认为 db-main
      */
     static async listBackups(stanza: string = 'db-main'): Promise<BackupInfo[]> {
-        const { success, output, error } = await shellService.execute('backup_manager.sh', ['list', stanza]);
+        const result = await $`sudo -u postgres pgbackrest --stanza=${stanza} info --output=json`.nothrow().quiet();
 
-        if (!success) {
-            console.error('Failed to list backups:', error);
-            throw new Error('无法读取备份列表');
+        if (result.exitCode !== 0) {
+            // pgbackrest 未安装时返回空列表
+            console.warn('[Backup] pgbackrest not available or no backups found');
+            return [];
         }
 
         try {
-            const rawData = JSON.parse(output);
-
-            // 解析 pgBackRest 的 JSON 输出
+            const rawData = JSON.parse(result.text());
             if (!Array.isArray(rawData) || rawData.length === 0) return [];
-
             const backups = rawData[0].backup || [];
             return backups.map((b: any) => ({
                 id: b.label,
                 type: b.type,
-                timestamp: {
-                    start: b.timestamp.start,
-                    stop: b.timestamp.stop,
-                },
+                timestamp: { start: b.timestamp.start, stop: b.timestamp.stop },
                 size: b.info.size.backup,
                 database: rawData[0].name,
             }));
@@ -39,31 +33,17 @@ export class BackupService {
         }
     }
 
-    /**
-     * 创建新备份
-     * @param stanza 库名
-     * @param type 备份类型: full, incr, diff
-     */
     static async createBackup(stanza: string = 'db-main', type: 'full' | 'incr' | 'diff' = 'incr'): Promise<{ message: string }> {
-        // 备份是耗时操作，通常建议异步处理
-        // shellService.execute 是 await 的，但为了不阻塞 API，我们可以异步调用
-        shellService.execute('backup_manager.sh', ['create', stanza, type]).catch(err => {
-            console.error('Async backup task failed:', err);
+        $`sudo -u postgres pgbackrest --stanza=${stanza} --type=${type} backup`.nothrow().quiet().catch(err => {
+            console.error('[Backup] Async backup task failed:', err);
         });
-
         return { message: `已启动 ${type} 备份任务` };
     }
 
-    /**
-     * 执行 PITR 恢复
-     * @param request 包含目标时间或 LSN
-     */
     static async restore(request: RestoreRequest): Promise<{ message: string }> {
-        // PITR 是危险且耗时的操作
-        shellService.execute('backup_manager.sh', ['restore', request.target]).catch(err => {
-            console.error('Async restore task failed:', err);
+        $`sudo -u postgres pig pitr ${request.target}`.nothrow().quiet().catch(err => {
+            console.error('[Backup] Async restore task failed:', err);
         });
-
         return { message: `已启动点对点恢复 (PITR) 任务，目标: ${request.target}` };
     }
     /**
