@@ -342,8 +342,13 @@ async function prepareSystemEnv() {
         // [ANSIBLE FIX] 预装 ansible 提升部署效率
         await $`apt-get update -qq >/dev/null && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq sudo curl tar gzip openssl bc jq git procps openssh-client openssh-server postgresql-client ansible >/dev/null`;
     } else {
-        // [ANSIBLE FIX] RHEL/Rocky 下预装 ansible
-        await $`dnf install -y -q --allowerasing epel-release sudo curl tar gzip openssl bc jq git procps-ng openssh-clients openssh-server postgresql ansible >/dev/null`;
+        // [ANSIBLE FIX] RHEL/Rocky/OpenCloudOS 下预装 ansible
+        // 先尝试启用 CRB 仓库 (OpenCloudOS/Rocky 9 需要)
+        await $`dnf config-manager --set-enabled crb 2>/dev/null || dnf config-manager --set-enabled powertools 2>/dev/null || true`.quiet();
+        // 安装 EPEL (可能需要先启用 CRB)
+        await $`dnf install -y -q epel-release 2>/dev/null || dnf install -y -q https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm 2>/dev/null || true`.quiet();
+        // 安装其余依赖
+        await $`dnf install -y -q --allowerasing sudo curl tar gzip openssl bc jq git procps-ng openssh-clients openssh-server postgresql ansible iproute >/dev/null`;
     }
     s.stop("底层支持组建拉取完毕");
 
