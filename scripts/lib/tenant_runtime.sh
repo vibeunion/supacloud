@@ -87,10 +87,18 @@ get_tenant_credentials() {
     local ref="$1"
     local field="$2"
 
-    # Use TCP connection via dbuser_dba (DBA user with TCP access allowed in pg_hba.conf)
-    # Strip PSQL \timing artifacts that appear when run in Pigsty environment
-    PGPASSWORD="${PG_ADMIN_PASSWORD:-${POSTGRES_PASSWORD:-DBUser.DBA}}" psql \
-        -h "$PG_HOST" -p "$PG_PORT" -U dbuser_dba \
+    # 使用环境变量中的数据库连接信息
+    # 优先使用 PG_USER 和 PGPASSWORD，否则回退到 supabase_admin
+    local db_user="${PG_USER:-supabase_admin}"
+    local db_pass="${PGPASSWORD:-${POSTGRES_PASSWORD:-}}"
+    
+    if [ -z "$db_pass" ]; then
+        echo "ERROR: PGPASSWORD or POSTGRES_PASSWORD not set" >&2
+        exit 1
+    fi
+    
+    PGPASSWORD="$db_pass" psql \
+        -h "$PG_HOST" -p "$PG_PORT" -U "$db_user" \
         -d "$SUPACLOUD_META_DB" \
         -t -A -c "SELECT ${field} FROM projects WHERE ref='${ref}'" 2>/dev/null | grep -v '^Time:' | head -n 1
 }
@@ -264,7 +272,7 @@ API_EXTERNAL_URL=${api_external_url}
 # Bug Fix: SITE_URL 应该是实际可访问的 URL
 GOTRUE_SITE_URL=${api_external_url}
 GOTRUE_DB_DRIVER=postgres
-GOTRUE_DB_DATABASE_URL=postgres://supabase_auth_admin:${PG_PASSWORD:-${POSTGRES_PASSWORD:-postgres}}@${PG_HOST}:${PG_PORT}/${db_name}
+GOTRUE_DB_DATABASE_URL=postgres://supabase_auth_admin:${PGPASSWORD:-${POSTGRES_PASSWORD:-postgres}}@${PG_HOST}:${PG_PORT}/${db_name}
 
 GOTRUE_JWT_SECRET=${jwt_secret}
 GOTRUE_JWT_EXP=3600
