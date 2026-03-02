@@ -82,3 +82,46 @@ jobs:
           echo "=== Checking supacloud CLI ==="
           shellcheck -s bash supacloud || true
 
+  build-binaries:
+    name: Build Binaries
+    needs: [lint-and-typecheck, unit-test]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev')
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        working-directory: packages/management-api
+        run: bun install
+
+      - name: Build all platforms
+        working-directory: packages/management-api
+        run: |
+          # 确保构建目录存在
+          mkdir -p dist
+          # 执行编译指令 (amd64, arm64, macos)
+          bun run build:amd64
+          bun run build:arm64
+          bun run build:macos-amd64
+          bun run build:macos-arm64
+          # 将产物移动到统一目录
+          mv supacloud-linux-amd64 dist/
+          mv supacloud-linux-arm64 dist/
+          mv supacloud-macos-amd64 dist/
+          mv supacloud-macos-arm64 dist/
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: supacloud-binaries
+          path: packages/management-api/dist/*
+          retention-days: 7
+
+
