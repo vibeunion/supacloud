@@ -3,7 +3,8 @@ set -ex
 echo "[CI] 容器内部执行环境已就绪: $(cat /etc/os-release | grep PRETTY_NAME)"
 
 export DEBIAN_FRONTEND=noninteractive
-export SUPACLOUD_ANSIBLE_ARGS="-vv"
+# 关键：在容器内必须禁用 hosts/dns 修改，因为这些文件是由容器运行时挂载的，Ansible 修改会报 Device or resource busy
+export SUPACLOUD_ANSIBLE_ARGS="-e node_write_etc_hosts=false -e node_dns_method=none -vv"
 ln -fs /usr/share/zoneinfo/UTC /etc/localtime
 
 # 1. 安装基础依赖
