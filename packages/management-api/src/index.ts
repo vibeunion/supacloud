@@ -3,7 +3,6 @@ import { swagger } from "@elysiajs/swagger";
 import { cors } from "@elysiajs/cors";
 import { config } from "./config";
 import { authMiddleware } from "./middleware/auth";
-import { projectRoutes, organizationRoutes, userRoutes, backupRoutes, monitorRoutes, maintenanceRoutes, extensionRoutes, securityRoutes, storageRoutes, scalingRoutes, taskRoutes } from "./routes";
 
 const app = new Elysia({ strictPath: false })
   // Swagger 文档
@@ -53,19 +52,11 @@ const app = new Elysia({ strictPath: false })
     docs: "/swagger",
   }))
 
-  // 需要认证的路由
-  .use(authMiddleware)
-  .use(projectRoutes)
-  .use(organizationRoutes)
-  .use(userRoutes)
-  .use(backupRoutes)
-  .use(monitorRoutes)
-  .use(maintenanceRoutes)
-  .use(extensionRoutes)
-  .use(securityRoutes)
-  .use(storageRoutes)
-  .use(scalingRoutes)
-  .use(taskRoutes)
+  // 监控与诊断接口 (无需认证，后续可加)
+  .get("/monitor/health", async () => {
+    const { HealthChecker } = await import("./infra/health");
+    return await HealthChecker.runFullCheck();
+  })
 
   // 错误处理
   .onError(({ code, error, set }) => {
@@ -83,20 +74,190 @@ const app = new Elysia({ strictPath: false })
 
     set.status = 500;
     return { error: "Internal server error" };
-  })
+  });
 
-  .listen(config.port);
+// @ts-ignore: 此文件由 scripts/pack-assets.ts 自动生成
+import { EMBEDDED_ASSETS } from "./assets.gen";
 
-import { taskWorker } from "./services/task.worker";
-taskWorker.start();
+/**
+ * 注册静态资产 (SPA)
+ */
+export function registerStaticAssets() {
+  return new Elysia({ name: "static-assets" }).get("*", async (context) => {
+    const { request, set } = context;
+    const url = new URL(request.url);
+    const path = url.pathname === "/" ? "/index.html" : url.pathname;
 
-console.log(`
-╔═══════════════════════════════════════════════════════════╗
-║          SupaCloud Management API                         ║
-╠═══════════════════════════════════════════════════════════╣
-║  Server running at: http://localhost:${config.port}                ║
-║  Swagger docs at:   http://localhost:${config.port}/swagger        ║
-╚═══════════════════════════════════════════════════════════╝
-`);
+    if (path.startsWith("/api/") || path.startsWith("/v1/")) {
+      set.status = 404;
+      return { error: "Route not found" };
+    }
+
+    try {
+      const ASSETS = EMBEDDED_ASSETS;
+      let asset = ASSETS[path];
+      if (!asset && !path.includes(".")) {
+        asset = ASSETS["/index.html"];
+      }
+
+      if (asset) {
+        set.headers["Content-Type"] = asset.mimeType as string;
+        return Buffer.from(asset.content, 'base64');
+      } else {
+        set.status = 404;
+        return "Internal Asset Not Found.";
+      }
+    } catch (e) {
+      if (process.env.NODE_ENV !== "production") {
+        return "Management Console DEV mode: run 'bun run build:all' to load SPA assets into memory.";
+      }
+      set.status = 404;
+      return "App Assets Not Built.";
+    }
+  });
+}
+
+/**
+ * 注册所有路由模块
+ */
+export async function registerAllRoutes() {
+  const {
+    projectRoutes, organizationRoutes, userRoutes, backupRoutes,
+    monitorRoutes, maintenanceRoutes, extensionRoutes, securityRoutes,
+    storageRoutes, scalingRoutes, taskRoutes
+  } = await import("./routes");
+
+  return new Elysia({ name: "api-routes" })
+    .use(authMiddleware)
+    .use(projectRoutes)
+    .use(organizationRoutes)
+    .use(userRoutes)
+    .use(backupRoutes)
+    .use(monitorRoutes)
+    .use(maintenanceRoutes)
+    .use(extensionRoutes)
+    .use(securityRoutes)
+    .use(storageRoutes)
+    .use(scalingRoutes)
+    .use(taskRoutes);
+}
+
+const args = process.argv.slice(2);
+
+/**
+ * 核心逻辑：根据命令行参数决定是执行单次任务还是启动 API 服务器。
+ * 这确保了在安装阶段 (无数据库) 绝不会触发数据库重连逻辑。
+ */
+async function bootstrap() {
+  if (args.includes("--init-db")) {
+    const { initDatabase } = await import("./db/init");
+    try {
+      await initDatabase();
+      console.log("Database initialized successfully!");
+      process.exit(0);
+    } catch (err) {
+      console.error("Failed to initialize database:", err);
+      process.exit(1);
+    }
+  } else if (args.includes("install") || args.includes("--install")) {
+    const { runInstall } = await import("./install");
+    const forceYes = args.includes("--yes") || args.includes("-y");
+    try {
+      await runInstall({ forceYes });
+      process.exit(0);
+    } catch (err) {
+      console.error("Installation aborted:", err);
+      process.exit(1);
+    }
+  } else if (args.includes("upgrade") || args.includes("--upgrade")) {
+    const { runUpgrade } = await import("./upgrade");
+    const forceYes = args.includes("--yes") || args.includes("-y");
+    try {
+      await runUpgrade({ forceYes });
+      process.exit(0);
+    } catch (err) {
+      console.error("Upgrade aborted:", err);
+      process.exit(1);
+    }
+  } else if (args.includes("doctor") || args.includes("--doctor")) {
+    const { runDoctor } = await import("./doctor");
+    const skipSmokeTest = args.includes("--skip-smoke-test");
+    const forceYes = args.includes("--yes") || args.includes("-y");
+    try {
+      await runDoctor({ skipSmokeTest, forceYes });
+      process.exit(0);
+    } catch (err) {
+      console.error("Doctor scan failed:", err);
+      process.exit(1);
+    }
+  } else if (args.includes("storage") || args.includes("--storage")) {
+
+  } else if (args.includes("start") || args.includes("up")) {
+    const { handleStart } = await import("./cli/lifecycle");
+    await handleStart();
+    process.exit(0);
+  } else if (args.includes("stop") || args.includes("down")) {
+    const { handleStop } = await import("./cli/lifecycle");
+    await handleStop();
+    process.exit(0);
+  } else if (args.includes("status") || args.includes("check")) {
+    const { handleStatus } = await import("./cli/lifecycle");
+    await handleStatus();
+    process.exit(0);
+  } else if (args[0] === "logs") {
+    const { handleLogs } = await import("./cli/lifecycle");
+    const serviceTarget = args[1] && !args[1].startsWith("-") ? args[1] : undefined;
+    await handleLogs(serviceTarget);
+    process.exit(0);
+  } else if (args.includes("--version") || args.includes("-v")) {
+    const pkg = await import("../package.json");
+    console.log(`SupaCloud Version: ${pkg.version}`);
+    process.exit(0);
+  } else if (args.includes("--help") || args.includes("-h")) {
+    console.log(`
+      SupaCloud Management API CLI
+      
+      Usage:
+        supacloud install [--dry-run]  安装 SupaCloud 全栈环境
+        supacloud start / up           拉起所有组件容器
+        supacloud stop / down          优雅停止并清理组件
+        supacloud status / check       检查核心组件与端口存活状态
+        supacloud logs [service]       查看指定组件或全部日志
+        supacloud doctor               运行环境预检与诊断
+        supacloud upgrade              升级集群组件
+        supacloud --version            显示版本号
+        supacloud --help               显示此帮助信息
+        
+      If no arguments are provided, the API server will start.
+    `);
+    process.exit(0);
+  } else if (args.length === 0 || args.includes("--server")) {
+    // API 服务器模式：此时才加载路由和启动 TaskWorker
+    app.use(await registerAllRoutes());
+    app.use(registerStaticAssets());
+    const { taskWorker } = await import("./services/task.worker");
+
+    app.listen(config.port);
+    taskWorker.start();
+
+    console.log(`
+    ╔═══════════════════════════════════════════════════════════╗
+    ║          SupaCloud Management API                         ║
+    ╠═══════════════════════════════════════════════════════════╣
+    ║  Server running at: http://localhost:${config.port}                ║
+    ║  Swagger docs at:   http://localhost:${config.port}/swagger        ║
+    ╚═══════════════════════════════════════════════════════════╝
+    `);
+  } else {
+    // 未知命令
+    console.error(`Unknown command or argument: ${args.join(" ")}`);
+    console.log("Run 'supacloud --help' for usage information.");
+    process.exit(1);
+  }
+}
+
+if (import.meta.main) {
+  bootstrap();
+}
 
 export { app };
