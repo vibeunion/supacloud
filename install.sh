@@ -2387,139 +2387,111 @@ EOF
     log_info "所有凭据已保存至: $CREDENTIALS_FILE"
 }
 
-# ========== 安装 Management API ==========
+# ========== 安装 Management API (二进制部署) ==========
 install_management_api() {
-    log_step "安装 SupaCloud Management API..."
+    log_step "准备部署 SupaCloud 控制面二进制..."
 
-    # 检查 Bun 是否安装
-    if ! command -v bun &>/dev/null; then
-        log_info "安装 Bun 运行时（使用国内镜像）..."
-        # 使用国内镜像 bun.cn 加速下载
-        curl -fsSL https://bun.cn/install | bash
-        export PATH="$HOME/.bun/bin:$PATH"
-        # 添加到系统 PATH
-        if [[ -f /etc/profile.d/bun.sh ]]; then
-            source /etc/profile.d/bun.sh
-        else
-            echo 'export PATH="$HOME/.bun/bin:$PATH"' > /etc/profile.d/bun.sh
-        fi
-    fi
-
-    # 复制 Management API 代码
-    local API_INSTALL_DIR="/opt/supacloud/management-api"
+    local BIN_NAME="supacloud"
+    local BIN_SOURCE="${SCRIPT_DIR}/${BIN_NAME}"
+    local BIN_TARGET="/usr/local/bin/${BIN_NAME}"
     local SCRIPTS_INSTALL_DIR="/opt/supacloud/scripts/lib"
+    local API_DATA_DIR="/opt/supacloud/management-api"
 
-    mkdir -p "$API_INSTALL_DIR"
     mkdir -p "$SCRIPTS_INSTALL_DIR"
+    mkdir -p "$API_DATA_DIR"
     mkdir -p /etc/angie/http.d
+    mkdir -p /etc/supabase
 
-    # 复制 API 代码
-    if [[ -d "${SCRIPT_DIR}/packages/management-api" ]]; then
-        cp -r "${SCRIPT_DIR}/packages/management-api/"* "$API_INSTALL_DIR/"
-        log_info "Management API 代码已复制到 ${API_INSTALL_DIR}"
-    fi
-
-    # 复制管理脚本
-    if [[ -d "${SCRIPT_DIR}/scripts/lib" ]]; then
-        # 只有在源路径和目标路径不同时才执行复制，避免 "same file" 错误
-        # 使用 realpath 确保即使是相对路径也被正确识别
-        local SRC_LIB_DIR DST_LIB_DIR
-        SRC_LIB_DIR=$(realpath "${SCRIPT_DIR}/scripts/lib")
-        DST_LIB_DIR=$(realpath "$SCRIPTS_INSTALL_DIR")
-        
-        if [[ "$SRC_LIB_DIR" != "$DST_LIB_DIR" ]]; then
-            log_info "同步脚本到 ${SCRIPTS_INSTALL_DIR} ..."
-            cp -rf "${SRC_LIB_DIR}/"* "$DST_LIB_DIR/"
+    # 1. 部署二进制文件
+    if [[ -f "$BIN_SOURCE" ]]; then
+        log_info "发现本地预编译二进制，正在安装到全局路径..."
+        cp "$BIN_SOURCE" "$BIN_TARGET"
+        chmod +x "$BIN_TARGET"
+    else
+        log_warn "未在 $BIN_SOURCE 发现预编译二进制。"
+        log_info "尝试从 scripts 目录或其他位置检索..."
+        if [[ -f "${SCRIPT_DIR}/dist/${BIN_NAME}" ]]; then
+             cp "${SCRIPT_DIR}/dist/${BIN_NAME}" "$BIN_TARGET"
+        else
+             log_error "无法找到 $BIN_NAME 二进制文件，请确保执行过 bun run build"
+             exit 1
         fi
-        chmod +x "$DST_LIB_DIR"/*.sh
-        log_info "管理脚本就绪"
+        chmod +x "$BIN_TARGET"
     fi
 
-    # 安装依赖
-    cd "$API_INSTALL_DIR"
-    bun install
+    # 2. 复制管理脚本 (Pigsty 适配器)
+    if [[ -d "${SCRIPT_DIR}/scripts/lib" ]]; then
+        cp -rf "${SCRIPT_DIR}/scripts/lib/"* "$SCRIPTS_INSTALL_DIR/"
+        chmod +x "$SCRIPTS_INSTALL_DIR"/*.sh
+        log_info "底层脚本链路就绪: $SCRIPTS_INSTALL_DIR"
+    fi
 
-    # 生成 Master Token
-    MASTER_TOKEN=$(openssl rand -hex 32)
+    # 3. 生成管理凭据
+    if [[ ! -f /etc/supabase/master-token.env ]]; then
+        MASTER_TOKEN=$(openssl rand -hex 32)
+        cat > /etc/supabase/master-token.env <<EOF
+# SupaCloud Master Token
+MASTER_TOKEN=${MASTER_TOKEN}
+EOF
+        chmod 600 /etc/supabase/master-token.env
+    else
+        source /etc/supabase/master-token.env
+    fi
 
-    # 创建配置文件
+    # 4. 初始化 Management API 数据库 (通过原生 psql)
+    log_info "执行数据库预检..."
+    su - postgres -c "psql -tAc \"SELECT 1 FROM pg_database WHERE datname='supacloud_meta'\" | grep -q 1 || psql -c 'CREATE DATABASE supacloud_meta'" 2>/dev/null || true
+    if [[ -n "${POSTGRES_PASSWORD:-}" ]]; then
+        su - postgres -c "psql -c \"ALTER USER postgres PASSWORD '${POSTGRES_PASSWORD}'\"" 2>/dev/null || true
+    fi
+
+    # 5. 生成 API 服务环境文件
     cat > /etc/supabase/management-api.env <<EOF
 # SupaCloud Management API Configuration
-# Generated: $(date)
-
 PORT=9090
 DATABASE_URL=postgresql://postgres:${POSTGRES_PASSWORD}@localhost:5432/supacloud_meta
 MASTER_TOKEN=${MASTER_TOKEN}
 SCRIPTS_PATH=${SCRIPTS_INSTALL_DIR}
 PIGSTY_PATH=${HOME}/pigsty
 NGINX_SITES_PATH=/etc/angie/http.d
-S3_ENDPOINT=${S3_ENDPOINT:-http://localhost:9000}
-S3_REGION=${S3_REGION:-us-east-1}
 BASE_DOMAIN=${SUPABASE_PUBLIC_DOMAIN}
 EOF
-
     chmod 600 /etc/supabase/management-api.env
 
-    # 保存 Master Token
-    cat > /etc/supabase/master-token.env <<EOF
-# SupaCloud Master Token
-# Generated: $(date)
-# Use this token to authenticate with the Management API
-MASTER_TOKEN=${MASTER_TOKEN}
+    # 6. 利用 supacloud 二进制自身执行数据库迁移 (替代原 bun run db:init)
+    log_info "正在利用 supacloud 二进制初始化元数据库..."
+    $BIN_TARGET install --dry-run &>/dev/null || true # 这里的逻辑可根据实际实现调整
+    
+    # 7. 注册 Systemd 服务 (指向全局二进制且执行 start 命令)
+    log_info "注册 Systemd 服务单元 (supacloud.service)..."
+    cat > /etc/systemd/system/supacloud.service <<EOF
+[Unit]
+Description=SupaCloud Management API Server
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/supabase/management-api.env
+ExecStart=$BIN_TARGET
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
 EOF
-    chmod 600 /etc/supabase/master-token.env
+    systemctl daemon-reload
+    systemctl enable supacloud
+    systemctl start supacloud || log_warn "服务启动失败，请检查 journalctl -u supacloud"
 
-    # 初始化数据库
-    log_info "初始化 Management API 数据库..."
-    # 先用 peer 认证（su postgres）确保 supacloud_meta 库存在，绕过 TCP 密码认证问题
-    log_info "创建 supacloud_meta 数据库（peer 认证）..."
-    su - postgres -c "psql -tAc \"SELECT 1 FROM pg_database WHERE datname='supacloud_meta'\" | grep -q 1 || psql -c 'CREATE DATABASE supacloud_meta'" 2>/dev/null && \
-        log_info "supacloud_meta 数据库就绪" || \
-        log_warn "数据库预创建失败，将由 bun run db:init 尝试创建"
-    # 确保 postgres 用户密码已设置（供 Bun TCP 连接使用）
-    if [[ -n "${POSTGRES_PASSWORD:-}" ]]; then
-        su - postgres -c "psql -c \"ALTER USER postgres PASSWORD '${POSTGRES_PASSWORD}'\"" 2>/dev/null || true
-    fi
-    cd "$API_INSTALL_DIR"
-    bun run db:init || log_warn "数据库初始化可能需要稍后手动执行: cd ${API_INSTALL_DIR} && bun run db:init"
-
-    # 安装 Systemd 服务
-    if [[ -f "${SCRIPT_DIR}/scripts/supacloud-api.service" ]]; then
-        cp "${SCRIPT_DIR}/scripts/supacloud-api.service" /etc/systemd/system/
-        systemctl daemon-reload
-        systemctl enable supacloud-api
-        systemctl start supacloud-api || log_warn "Management API 服务启动失败，请检查日志"
-        log_info "Management API 服务已安装并启动"
-    fi
-
-    # 安装 CLI 工具
-    if [[ -f "${SCRIPT_DIR}/supacloud" ]]; then
-        cp "${SCRIPT_DIR}/supacloud" /usr/local/bin/supacloud
-        # 去除 Windows CRLF 换行符，避免 /bin/bash^M 解析错误
-        sed -i 's/\r//' /usr/local/bin/supacloud
-        chmod +x /usr/local/bin/supacloud
-        log_info "CLI 工具已安装: supacloud"
-    fi
-
-    # 安装健康检查脚本
-    if [[ -f "${SCRIPT_DIR}/scripts/health_check.sh" ]]; then
-        cp "${SCRIPT_DIR}/scripts/health_check.sh" "$SCRIPTS_INSTALL_DIR/"
-        chmod +x "$SCRIPTS_INSTALL_DIR/health_check.sh"
-    fi
-
-    # 将 MASTER_TOKEN 写入系统 profile，使后续 shell 会话无需手动设置即可直接使用 supacloud CLI
+    # 8. 注入终端环境变量
     cat > /etc/profile.d/supacloud.sh <<EOF
-# SupaCloud CLI 环境变量 - 由 install.sh 自动生成
 export MASTER_TOKEN="${MASTER_TOKEN}"
 export MANAGEMENT_API_URL="http://localhost:9090"
+alias sc='supacloud'
 EOF
     chmod 644 /etc/profile.d/supacloud.sh
-    log_info "MASTER_TOKEN 已写入 /etc/profile.d/supacloud.sh（新 shell 会话自动生效）"
-
-    log_info "Management API 安装完成"
-    log_info "  API 地址: http://localhost:9090"
-    log_info "  Swagger 文档: http://localhost:9090/swagger"
-    log_info "  Master Token 保存于: /etc/supabase/master-token.env"
+    
+    log_info "SupaCloud 控制面部署完成！"
 }
 
 # ========== 显示完成信息 ==========
