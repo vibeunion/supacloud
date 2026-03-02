@@ -305,7 +305,6 @@ EOF
             - ${PROJECT_REF}
 EOF
     fi
-EOF
 
     rebuild_kong_config
     echo "Kong upstream registered for ${PROJECT_REF} (pgrst:${pgrst_port}, gotrue:${gotrue_port})"

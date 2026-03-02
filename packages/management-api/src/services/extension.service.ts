@@ -1,4 +1,4 @@
-import { shellService } from './shell.service';
+import { SQL } from "bun";
 
 export interface ExtensionInfo {
     name: string;
@@ -9,54 +9,71 @@ export interface ExtensionInfo {
 }
 
 export class ExtensionService {
+    private readonly PG_HOST = process.env.PG_HOST || process.env.POSTGRES_HOST || "localhost";
+    private readonly PG_PORT = parseInt(process.env.PG_PORT || process.env.POSTGRES_PORT || "6432");
+    private readonly PG_USER = process.env.PG_USER || "postgres";
+    private readonly PG_PASSWORD = process.env.PGPASSWORD || process.env.POSTGRES_PASSWORD || "postgres";
+
+    private getTenantDb(dbName: string): SQL {
+        return new SQL({
+            hostname: this.PG_HOST,
+            port: this.PG_PORT,
+            database: dbName,
+            username: this.PG_USER,
+            password: this.PG_PASSWORD,
+        });
+    }
+
     /**
-     * 获取项目的扩展列表
-     * @param projectRef 项目标识
+     * 获取项目的扩展列表（直接查询 pg_available_extensions）
      */
-    static async listExtensions(projectRef: string): Promise<ExtensionInfo[]> {
+    async listExtensions(projectRef: string): Promise<ExtensionInfo[]> {
         const dbName = `supa_${projectRef}`;
-        const { success, output, error } = await shellService.execute('extension_manager.sh', ['list', dbName]);
-
-        if (!success) {
-            console.error(`Failed to list extensions for ${projectRef}:`, error);
-            throw new Error('无法获取插件列表');
-        }
-
+        const db = this.getTenantDb(dbName);
         try {
-            return JSON.parse(output || '[]');
-        } catch (e) {
-            console.error(`Failed to parse extensions for ${projectRef}:`, e);
-            throw new Error('解析插件列表失败');
+            const rows = await db`
+                SELECT
+                    name,
+                    default_version,
+                    installed_version,
+                    comment,
+                    installed_version IS NOT NULL AS is_installed
+                FROM pg_available_extensions
+                ORDER BY name
+            `;
+            return rows as ExtensionInfo[];
+        } finally {
+            await db.close();
         }
     }
 
     /**
-     * 启用扩展
+     * 启用扩展（直接 CREATE EXTENSION）
      */
-    static async enableExtension(projectRef: string, extension: string): Promise<{ message: string }> {
+    async enableExtension(projectRef: string, extension: string): Promise<{ message: string }> {
         const dbName = `supa_${projectRef}`;
-        const { success, error } = await shellService.execute('extension_manager.sh', ['enable', dbName, extension]);
-
-        if (!success) {
-            console.error(`Failed to enable extension ${extension}:`, error);
-            throw new Error(`启用插件 ${extension} 失败`);
+        const db = this.getTenantDb(dbName);
+        try {
+            await db.unsafe(`CREATE EXTENSION IF NOT EXISTS "${extension}" CASCADE`);
+            return { message: `插件 ${extension} 已成功启用` };
+        } finally {
+            await db.close();
         }
-
-        return { message: `插件 ${extension} 已成功启用` };
     }
 
     /**
-     * 禁用扩展
+     * 禁用扩展（直接 DROP EXTENSION）
      */
-    static async disableExtension(projectRef: string, extension: string): Promise<{ message: string }> {
+    async disableExtension(projectRef: string, extension: string): Promise<{ message: string }> {
         const dbName = `supa_${projectRef}`;
-        const { success, error } = await shellService.execute('extension_manager.sh', ['disable', dbName, extension]);
-
-        if (!success) {
-            console.error(`Failed to disable extension ${extension}:`, error);
-            throw new Error(`禁用插件 ${extension} 失败`);
+        const db = this.getTenantDb(dbName);
+        try {
+            await db.unsafe(`DROP EXTENSION IF EXISTS "${extension}" CASCADE`);
+            return { message: `插件 ${extension} 已成功禁用` };
+        } finally {
+            await db.close();
         }
-
-        return { message: `插件 ${extension} 已成功禁用` };
     }
 }
+
+export const extensionService = new ExtensionService();
