@@ -59,10 +59,8 @@ jobs:
           bun run build:amd64
           sudo cp supacloud-linux-amd64 /usr/local/bin/supacloud
           sudo chmod +x /usr/local/bin/supacloud
-          echo "[CI] 开始宿主机原生环境测试..."
-          # 宿主机上必须应用全套环境保护参数，与 1.5 个月前的“纯净环境”对齐
-          export SUPACLOUD_ANSIBLE_ARGS="-e node_repo_remove=false -e node_write_etc_hosts=false -e node_dns_method=none -e node_tune=none -e node_kernel_modules=[] -e chrony_enabled=false -vv"
-          sudo -E /usr/local/bin/supacloud install --yes --ip 127.0.0.1 --domain api.local.nip.io --password ci-test-pass
+          echo "[CI] 开始宿主机原生环境测试 (集成环境补丁已自动启动)..."
+          sudo /usr/local/bin/supacloud install --yes --ip 127.0.0.1 --domain api.local.nip.io --password ci-test-pass
 
   test_container:
     name: Test on ${{ matrix.os }} Container
