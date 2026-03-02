@@ -49,18 +49,21 @@ jobs:
             -v ${{ github.workspace }}:/workspace \
             -w /workspace \
             ${{ matrix.os }} \
-            bash <<'EOF'
-          set -e
+            bash -xe <<'EOF'
+          echo "[CI] 已成功进入容器: ${{ matrix.os }}"
           export DEBIAN_FRONTEND=noninteractive
           ln -fs /usr/share/zoneinfo/UTC /etc/localtime
 
           # 1. 安装基础依赖
           if command -v apt-get >/dev/null; then
-            apt-get update && apt-get install -y curl wget sudo kmod iproute2 openssh-server openssh-client ansible
+            apt-get update -qq
+            apt-get install -y -qq curl wget sudo kmod iproute2 openssh-server openssh-client ansible
           elif command -v dnf >/dev/null; then
-            dnf install -y --allowerasing epel-release curl wget sudo kmod iproute openssh-server openssh-clients ansible
+            dnf install -y -q --allowerasing epel-release
+            dnf install -y -q --allowerasing curl wget sudo kmod iproute openssh-server openssh-clients ansible
           elif command -v yum >/dev/null; then
-            yum install -y --allowerasing epel-release curl wget sudo kmod iproute openssh-server openssh-clients ansible
+            yum install -y -q --allowerasing epel-release
+            yum install -y -q --allowerasing curl wget sudo kmod iproute openssh-server openssh-clients ansible
           fi
 
           # 2. 模拟系统环境 (关键：通过伪装指令绕过 Ansible/Pigsty 环境检查)
