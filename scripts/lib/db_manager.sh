@@ -1,6 +1,6 @@
 #!/bin/bash
-# SupaCloud - 数据库管理脚本
-# 用法: db_manager.sh <create|delete|status> <project_ref> [password]
+# SupaCloud - Database Management Script
+# Usage: db_manager.sh <create|delete|status> <project_ref> [password]
 
 set -euo pipefail
 
@@ -8,17 +8,17 @@ ACTION="${1:-}"
 PROJECT_REF="${2:-}"
 DB_PASSWORD="${3:-}"
 
-# 从环境变量或默认值获取 PostgreSQL 连接信息
+# Get PostgreSQL connection info from environment variables or default values
 PG_HOST="${PG_HOST:-${POSTGRES_HOST:-localhost}}"
 PG_PORT="${PG_PORT:-${POSTGRES_PORT:-6432}}"
 PG_USER="${PG_USER:-postgres}"
 PG_DATABASE="${PG_DATABASE:-postgres}"
 
-# 项目命名规范
+# Project naming convention
 DB_NAME="supa_${PROJECT_REF}"
 DB_USER="role_${PROJECT_REF}"
 
-# 验证参数
+# Validate parameters
 validate_params() {
     if [ -z "$ACTION" ] || [ -z "$PROJECT_REF" ]; then
         echo "ERROR: Missing required parameters" >&2
@@ -26,26 +26,26 @@ validate_params() {
         exit 1
     fi
 
-    # 验证 project_ref 格式 (字母数字和连字符, 最长20字符)
+    # Validate project_ref format (alphanumeric and hyphens, max 20 chars)
     if ! echo "$PROJECT_REF" | grep -qE '^[a-z0-9-]{1,20}$'; then
         echo "ERROR: Invalid project_ref format. Use lowercase alphanumeric and hyphens, max 20 chars." >&2
         exit 1
     fi
 }
 
-# 执行 SQL 命令
+# Execute SQL command
 run_sql() {
     psql -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -d "$PG_DATABASE" -t -A -c "$1" 2>/dev/null
 }
 
-# 磁盘空间预检（防止磁盘满导致 WAL 写入失败引发集群崩溃）
+# Disk space pre-check (prevent disk full causing WAL write failure leading to cluster crash)
 check_disk_space() {
     local data_dir="${PG_DATA_DIR:-/var/lib/pgsql/data}"
     local min_gb="${MIN_DISK_GB:-10}"
 
-    # 尝试检测实际 PostgreSQL 数据目录
+    # Try to detect actual PostgreSQL data directory
     if [ ! -d "$data_dir" ]; then
-        # 常见路径回退
+        # Common path fallbacks
         for d in /pg/data /var/lib/postgresql/data /data/pgsql; do
             if [ -d "$d" ]; then
                 data_dir="$d"
@@ -73,7 +73,7 @@ check_disk_space() {
     echo "Disk check passed: $((avail_kb / 1024))MB available on ${data_dir}"
 }
 
-# 创建项目数据库和角色
+# Create project database and role
 create_database() {
     if [ -z "$DB_PASSWORD" ]; then
         echo "ERROR: Password is required for create action" >&2
@@ -82,10 +82,10 @@ create_database() {
 
     echo "Creating database ${DB_NAME} and role ${DB_USER}..."
 
-    # 磁盘空间预检
+    # Disk space pre-check
     check_disk_space
 
-    # 创建角色
+    # Create role
     run_sql "DO \$\$
     BEGIN
         IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '${DB_USER}') THEN
@@ -94,17 +94,17 @@ create_database() {
     END
     \$\$;"
 
-    # 创建数据库
+    # Create database
     if ! run_sql "SELECT 1 FROM pg_database WHERE datname = '${DB_NAME}'" | grep -q 1; then
         psql -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -d "$PG_DATABASE" -c \
             "CREATE DATABASE ${DB_NAME} OWNER ${DB_USER};" 2>/dev/null
     fi
 
-    # 设置权限
+    # Set permissions
     run_sql "REVOKE ALL ON DATABASE ${DB_NAME} FROM PUBLIC;"
     run_sql "GRANT ALL PRIVILEGES ON DATABASE ${DB_NAME} TO ${DB_USER};"
 
-    # 在项目数据库中安装 Supabase 必需的扩展
+    # Install Supabase required extensions in project database
     psql -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -d "$DB_NAME" <<'EXTENSIONS'
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
@@ -112,12 +112,12 @@ CREATE EXTENSION IF NOT EXISTS pgjwt;
 CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
 EXTENSIONS
 
-    # 初始化 Supabase 核心 Schema (auth, storage, realtime)
+    # Initialize Supabase core Schema (auth, storage, realtime)
     echo "Initializing Supabase schema for ${DB_NAME}..."
     
-    # 先创建 authenticator 角色（需要变量替换）
+    # First create authenticator role (needs variable substitution)
     psql -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -d "$DB_NAME" <<EOF
--- 创建租户专属的 authenticator 角色
+-- Create tenant-specific authenticator role
 DO \$\$
 BEGIN
     IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'authenticator_${PROJECT_REF}') THEN
@@ -129,7 +129,7 @@ END
 \$\$;
 EOF
 
-    # 执行静态 Schema 初始化
+    # Execute static Schema initialization
     psql -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -d "$DB_NAME" <<'SUPABASE_SCHEMA'
 
 -- ============================================================
@@ -137,7 +137,7 @@ EOF
 -- Based on supabase/postgres official migrations
 -- ============================================================
 
--- 1. 创建 Supabase 专用 Role
+-- 1. Create Supabase specific Roles
 DO $$
 BEGIN
     IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'anon') THEN
@@ -161,7 +161,7 @@ BEGIN
 END
 $$;
 
--- 授予 authenticator 可以切换到各角色
+-- Grant authenticator ability to switch to various roles
 GRANT anon TO postgres;
 GRANT authenticated TO postgres;
 GRANT service_role TO postgres;
@@ -251,7 +251,7 @@ CREATE TABLE IF NOT EXISTS auth.identities (
 CREATE INDEX IF NOT EXISTS identities_user_id_idx ON auth.identities (user_id);
 CREATE INDEX IF NOT EXISTS identities_email_idx ON auth.identities (email);
 
--- 授权
+-- Grants
 GRANT ALL ON ALL TABLES IN SCHEMA auth TO supabase_auth_admin;
 GRANT ALL ON ALL SEQUENCES IN SCHEMA auth TO supabase_auth_admin;
 GRANT SELECT ON ALL TABLES IN SCHEMA auth TO service_role;
@@ -289,12 +289,12 @@ CREATE TABLE IF NOT EXISTS storage.objects (
 CREATE INDEX IF NOT EXISTS objects_bucket_id_idx ON storage.objects (bucket_id);
 CREATE UNIQUE INDEX IF NOT EXISTS objects_bucket_name_idx ON storage.objects (bucket_id, name);
 
--- 授权
+-- Grants
 GRANT ALL ON ALL TABLES IN SCHEMA storage TO supabase_storage_admin;
 GRANT ALL ON ALL SEQUENCES IN SCHEMA storage TO supabase_storage_admin;
 GRANT SELECT ON ALL TABLES IN SCHEMA storage TO anon, authenticated;
 
--- 启用 RLS
+-- Enable RLS
 ALTER TABLE storage.buckets ENABLE ROW LEVEL SECURITY;
 ALTER TABLE storage.objects ENABLE ROW LEVEL SECURITY;
 
@@ -302,13 +302,13 @@ ALTER TABLE storage.objects ENABLE ROW LEVEL SECURITY;
 CREATE SCHEMA IF NOT EXISTS realtime;
 GRANT USAGE ON SCHEMA realtime TO anon, authenticated, service_role;
 
--- 5. Public Schema 权限
+-- 5. Public Schema permissions
 GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO anon;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO authenticated;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO service_role;
 
--- 6. 授权 authenticator 可切换到 API 角色
+-- 6. Grant authenticator ability to switch to API roles
 GRANT anon, authenticated, service_role TO authenticator_${PROJECT_REF};
 
 SUPABASE_SCHEMA
@@ -316,32 +316,32 @@ SUPABASE_SCHEMA
     psql -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -d "$PG_DATABASE" -c \
         "GRANT CONNECT ON DATABASE ${DB_NAME} TO authenticator_${PROJECT_REF};" 2>/dev/null || true
 
-    # service_role 需要绕过 RLS 才能在 Edge Function 管理操作中直接写入数据
+    # service_role needs to bypass RLS to write data directly in Edge Function management operations
     psql -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -d "$DB_NAME" -c \
         "ALTER ROLE service_role BYPASSRLS;" 2>/dev/null || true
 
-    # 在 public schema 上配置默认 RLS：启用，但暂不添加策略
-    # 这里只设置 default_row_security = on，防止无策略表对外暴露
+    # Configure default RLS on public schema: enable, but don't add policies yet
+    # Here only set default_row_security = on, prevent tables without policies from being exposed
     psql -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -d "$DB_NAME" -c \
         "SET row_security = on;" 2>/dev/null || true
 
     echo "Database ${DB_NAME} created successfully"
 }
 
-# 删除项目数据库和角色
+# Delete project database and role
 delete_database() {
     echo "Deleting database ${DB_NAME} and role ${DB_USER}..."
 
-    # 终止活动连接
+    # Terminate active connections
     run_sql "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '${DB_NAME}' AND pid <> pg_backend_pid();" || true
 
-    # 删除数据库
+    # Delete database
     if run_sql "SELECT 1 FROM pg_database WHERE datname = '${DB_NAME}'" | grep -q 1; then
         psql -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -d "$PG_DATABASE" -c \
             "DROP DATABASE ${DB_NAME};" 2>/dev/null
     fi
 
-    # 删除角色
+    # Delete role
     if run_sql "SELECT 1 FROM pg_roles WHERE rolname = '${DB_USER}'" | grep -q 1; then
         run_sql "DROP ROLE ${DB_USER};"
     fi
@@ -349,7 +349,7 @@ delete_database() {
     echo "Database ${DB_NAME} deleted successfully"
 }
 
-# 检查数据库状态
+# Check database status
 check_status() {
     local db_exists
     db_exists=$(run_sql "SELECT 1 FROM pg_database WHERE datname = '${DB_NAME}'" || echo "")
@@ -367,7 +367,7 @@ check_status() {
     fi
 }
 
-# 主逻辑
+# Main logic
 validate_params
 
 case "$ACTION" in

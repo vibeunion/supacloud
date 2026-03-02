@@ -1,6 +1,6 @@
 #!/bin/bash
-# SupaCloud - Nginx 路由管理脚本
-# 用法: router_manager.sh <add|remove|reload> <project_ref> [domain]
+# SupaCloud - Nginx Route Management Script
+# Usage: router_manager.sh <add|remove|reload> <project_ref> [domain]
 
 set -euo pipefail
 
@@ -8,12 +8,12 @@ ACTION="${1:-}"
 PROJECT_REF="${2:-}"
 DOMAIN="${3:-}"
 
-# 配置路径
+# Configuration paths
 ANGIE_SITES_DIR="${ANGIE_SITES_DIR:-/etc/angie/http.d}"
 KONG_INTERNAL="${KONG_INTERNAL:-127.0.0.1:8000}"
 BASE_DOMAIN="${BASE_DOMAIN:-localhost}"
 
-# 验证参数
+# Validate parameters
 validate_params() {
     if [ -z "$ACTION" ]; then
         echo "ERROR: Missing required parameters" >&2
@@ -27,30 +27,30 @@ validate_params() {
     fi
 }
 
-# 确保配置目录存在
+# Ensure configuration directory exists
 ensure_directory() {
     mkdir -p "$ANGIE_SITES_DIR"
 
-    # 确保 angie.conf 包含此目录
+    # Ensure angie.conf includes this directory
     if ! grep -q "http.d" /etc/angie/angie.conf 2>/dev/null; then
         echo "WARNING: Make sure /etc/angie/angie.conf includes: include ${ANGIE_SITES_DIR}/*.conf;" >&2
     fi
 }
 
-# ========== SSL 模式检测 ==========
-# 检测系统中已存在的证书或是否使用 Angie ACME
+# ========== SSL mode detection ==========
+# Detect existing certificates in the system or whether using Angie ACME
 detect_ssl_mode() {
     local domain="$1"
     if [ -f "/etc/pigsty/cert/${domain}.pem" ]; then
         echo "pigsty"
     else
-        # 默认使用 Angie 原生 ACME
+        # Default to Angie native ACME
         echo "angie-acme"
     fi
 }
 
-# 根据 SSL 模式生成对应的配置块
-# $1: 域名
+# Generate corresponding configuration block based on SSL mode
+# $1: domain
 generate_ssl_config() {
     local domain="$1"
     local ssl_mode
@@ -80,7 +80,7 @@ SSL_BLOCK
     esac
 }
 
-# 添加项目路由
+# Add project route
 add_route() {
     local project_domain="${DOMAIN:-${PROJECT_REF}.${BASE_DOMAIN}}"
     local api_domain="${PROJECT_REF}.api.${BASE_DOMAIN}"
@@ -93,7 +93,7 @@ add_route() {
     ssl_mode=$(detect_ssl_mode "$api_domain")
     echo "Adding Angie route for ${PROJECT_REF}... (SSL mode: ${ssl_mode})"
 
-    # 生成 SSL 配置
+    # Generate SSL configuration
     local api_ssl_block
     api_ssl_block=$(generate_ssl_config "$api_domain")
 
@@ -110,10 +110,10 @@ server {
 
 ${api_ssl_block}
 
-    # 安全头
+    # Security headers
     add_header x-project-ref ${PROJECT_REF} always;
 
-    # Supabase Storage 图片渲染缓存
+    # Supabase Storage image rendering (cache disabled, needs pre-configured proxy_cache_path)
     location ^~ /storage/v1/render/ {
         proxy_pass http://${KONG_INTERNAL};
         proxy_set_header Host \$host;
@@ -121,12 +121,6 @@ ${api_ssl_block}
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto \$scheme;
         proxy_set_header x-project-ref ${PROJECT_REF};
-
-        proxy_cache render_cache;
-        proxy_cache_valid 200 7d;
-        proxy_cache_use_stale error timeout updating http_500 http_502 http_503 http_504;
-        proxy_cache_lock on;
-        add_header X-Cache-Status \$upstream_cache_status always;
     }
 
     location / {
@@ -137,7 +131,7 @@ ${api_ssl_block}
         proxy_set_header X-Forwarded-Proto \$scheme;
         proxy_set_header X-Project-Ref ${PROJECT_REF};
 
-        # WebSocket 支持
+        # WebSocket support
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection "upgrade";
 
@@ -152,14 +146,14 @@ server {
     listen 443 ssl;
     server_name ${studio_domain};
 
-    # 使用基础 ACME
+    # Use base ACME
 $(generate_ssl_config "${studio_domain}")
 
-    # 安全头
+    # Security headers
     add_header x-project-ref ${PROJECT_REF} always;
 
     location / {
-        # 转发到 Supabase Studio (通常在 8000 端口)
+        # Forward to Supabase Studio (usually on port 8000)
         proxy_pass http://127.0.0.1:8000;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
@@ -174,7 +168,7 @@ EOF
     echo "  - Studio: ${studio_domain}"
 }
 
-# 添加项目自定义域名 (联动 ACME)
+# Add project custom domain (with ACME integration)
 add_custom_domain() {
     local custom_domain="${DOMAIN}"
     if [ -z "$custom_domain" ]; then
@@ -197,19 +191,13 @@ server {
     server_name ${custom_domain};
 
 ${ssl_config}
-    # Supabase Storage 图片渲染缓存 (自定义域名)
+    # Supabase Storage image rendering (cache disabled, needs pre-configured proxy_cache_path)
     location ^~ /storage/v1/render/ {
         proxy_pass http://${KONG_INTERNAL};
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header x-project-ref ${PROJECT_REF};
-
-        proxy_cache render_cache;
-        proxy_cache_valid 200 7d;
-        proxy_cache_use_stale error timeout updating http_500 http_502 http_503 http_504;
-        proxy_cache_lock on;
-        add_header X-Cache-Status \$upstream_cache_status always;
     }
 
     location / {
@@ -223,10 +211,10 @@ ${ssl_config}
 EOF
 }
 
-# 更新网络限制 (IP 白名单)
+# Update network restrictions (IP whitelist)
 update_restrictions() {
     local restriction_file="${ANGIE_SITES_DIR}/${PROJECT_REF}_restrictions.inc"
-    local allowed_ips="${DOMAIN:-""}" # 借用 DOMAIN 参数传递逗号分隔的 IPs
+    local allowed_ips="${DOMAIN:-""}" # Borrow DOMAIN parameter to pass comma-separated IPs
 
     echo "# IP Restrictions for ${PROJECT_REF}" > "$restriction_file"
     if [ -n "$allowed_ips" ]; then
@@ -240,7 +228,7 @@ update_restrictions() {
     fi
 }
 
-# 移除项目路由
+# Remove project route
 remove_route() {
     local config_file="${ANGIE_SITES_DIR}/${PROJECT_REF}.conf"
     local custom_configs="${ANGIE_SITES_DIR}/${PROJECT_REF}_custom_*.conf"
@@ -250,7 +238,7 @@ remove_route() {
     echo "Routes and restrictions removed for ${PROJECT_REF}"
 }
 
-# 重载 Angie 配置
+# Reload Angie configuration
 reload_angie() {
     echo "Testing Angie configuration..."
     if angie -t 2>/dev/null; then
@@ -263,7 +251,7 @@ reload_angie() {
     fi
 }
 
-# 主逻辑
+# Main logic
 validate_params
 
 case "$ACTION" in

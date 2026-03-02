@@ -25,7 +25,7 @@ export class ExtensionService {
     }
 
     /**
-     * 获取项目的扩展列表（直接查询 pg_available_extensions）
+     * Get extension list for project (direct query to pg_available_extensions)
      */
     async listExtensions(projectRef: string): Promise<ExtensionInfo[]> {
         const dbName = `supa_${projectRef}`;
@@ -48,28 +48,28 @@ export class ExtensionService {
     }
 
     /**
-     * 启用扩展（直接 CREATE EXTENSION）
+     * Enable extension (direct CREATE EXTENSION)
      */
     async enableExtension(projectRef: string, extension: string): Promise<{ message: string }> {
         const dbName = `supa_${projectRef}`;
         const db = this.getTenantDb(dbName);
         try {
             await db.unsafe(`CREATE EXTENSION IF NOT EXISTS "${extension}" CASCADE`);
-            return { message: `插件 ${extension} 已成功启用` };
+            return { message: `Extension ${extension} enabled successfully` };
         } finally {
             await db.close();
         }
     }
 
     /**
-     * 禁用扩展（直接 DROP EXTENSION）
+     * Disable extension (direct DROP EXTENSION)
      */
     async disableExtension(projectRef: string, extension: string): Promise<{ message: string }> {
         const dbName = `supa_${projectRef}`;
         const db = this.getTenantDb(dbName);
         try {
             await db.unsafe(`DROP EXTENSION IF EXISTS "${extension}" CASCADE`);
-            return { message: `插件 ${extension} 已成功禁用` };
+            return { message: `Extension ${extension} disabled successfully` };
         } finally {
             await db.close();
         }

@@ -20,7 +20,7 @@ export class GatewayService {
     private readonly KONG_YML = process.env.KONG_YML || "/root/pigsty/app/supabase/volumes/api/kong.yml";
     private readonly TENANT_DIR = "/etc/supabase/kong_tenants";
 
-    // --- Kong Admin API 辅助方法 ---
+    // --- Kong Admin API helper methods ---
     private async kongRequest(path: string, method: string = "GET", body?: Record<string, unknown>): Promise<any> {
         const init: RequestInit = {
             method,
@@ -31,7 +31,7 @@ export class GatewayService {
         }
         const res = await fetch(`${this.KONG_ADMIN_URL}${path}`, init);
         if (!res.ok && method !== "POST") {
-            // POST 时，409 Conflict 视为正常（已存在则跳过）
+            // During POST, 409 Conflict is considered normal (skip if already exists)
             if (res.status !== 409) {
                 const text = await res.text().catch(() => "");
                 console.warn(`Kong API ${method} ${path} returned ${res.status}: ${text}`);
@@ -54,13 +54,13 @@ export class GatewayService {
         try {
             await this.ensureConsumer(projectRef);
 
-            // 删除旧的 JWT 凭据
+            // Delete old JWT credentials
             const existing = await this.kongRequest(`/consumers/${projectRef}/jwt`);
             for (const cred of existing?.data ?? []) {
                 await this.kongRequest(`/consumers/${projectRef}/jwt/${cred.id}`, "DELETE");
             }
 
-            // 创建新凭据
+            // Create new credentials
             await this.kongRequest(`/consumers/${projectRef}/jwt`, "POST", {
                 key: "supabase",
                 secret: jwtSecret,
@@ -73,7 +73,7 @@ export class GatewayService {
         }
     }
 
-    // --- 限流 ---
+    // --- Rate Limiting ---
 
     private getRateLimitConfig(tier: string): RateLimitConfig {
         switch (tier) {
@@ -139,7 +139,7 @@ export class GatewayService {
         }
     }
 
-    // --- JWT Auth 插件 ---
+    // --- JWT Auth Plugin ---
 
     async enableJwtAuth(projectRef: string): Promise<boolean> {
         try {
@@ -159,7 +159,7 @@ export class GatewayService {
         }
     }
 
-    // --- 声明式 Kong YAML 管理 ---
+    // --- Declarative Kong YAML Management ---
 
     private generateTenantYaml(projectRef: string, hostIp: string, pgrstPort: number, gotruePort: number): string {
         const functionsPort = 9000;
@@ -239,10 +239,10 @@ export class GatewayService {
             }
         }
 
-        // 读取 base 配置
+        // Read base configuration
         const baseContent = await Bun.file(kongBase).text();
 
-        // 读取所有租户的 YAML 片段
+        // Read YAML snippets from all tenants
         let tenantSnippets = "";
         try {
             const files = await fs.readdir(tenantDir);
@@ -251,14 +251,14 @@ export class GatewayService {
                 tenantSnippets += snippet;
             }
         } catch {
-            // tenantDir 不存在时跳过
+            // Skip if tenantDir doesn't exist
         }
 
-        // 将租户配置插入 `services:` 之后
+        // Insert tenant configurations after `services:` section
         const merged = baseContent.replace(/(^services:\s*$)/m, `$1\n${tenantSnippets}`);
         await Bun.write(kongYml, merged);
 
-        // 热重载 Kong
+        // Hot reload Kong gateway
         const kongContainer = (await $`docker ps -q -f name=supabase-kong`.nothrow().quiet()).text().trim()
             || (await $`podman ps -q -f name=supabase-kong`.nothrow().quiet()).text().trim();
 
@@ -272,7 +272,7 @@ export class GatewayService {
         }
     }
 
-    // --- 核心公开方法 ---
+    // --- Core reload logic ---
 
     async setupUpstream(projectRef: string, pgrstPort: number | string, gotruePort: number | string): Promise<{ success: boolean; error?: string }> {
         try {
@@ -338,7 +338,7 @@ export class GatewayService {
         if (config.rateLimitTier) await this.setRateLimit(projectRef, config.rateLimitTier);
         if (config.corsOrigins) await this.setCors(projectRef, config.corsOrigins);
         if (config.jwtEnabled) await this.enableJwtAuth(projectRef);
-        return { success: true, message: "网关配置已更新" };
+        return { success: true, message: "Gateway configuration updated" };
     }
 }
 

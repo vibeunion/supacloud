@@ -22,18 +22,18 @@ class TenantRuntimeService {
     private readonly PORT_RANGE = parseInt(process.env.PORT_RANGE || "10000");
 
     /**
-     * 基于 cksum 的确定性哈希端口分配
-     * 与原有 bash awk '{print $1}' 行为尽量对齐的近似算法，但使用 Node 原生
+     * Deterministic port allocation based on hashing
+     * Aligned with original bash awk behavior using native Bun logic
      */
     private async getTenantPort(ref: string, type: "pgrst" | "gotrue"): Promise<number> {
         const basePort = type === "pgrst" ? this.PGRST_PORT_BASE : this.GOTRUE_PORT_BASE;
 
-        // 使用 bun:hash 替代 crypto
+        // Use bun:hash for performance
         const hash = Bun.hash(ref);
-        // TypeScript 里 number 精度安全范围内直接对大整数取模
+        // BigInt modulo for safe large number arithmetic
         let port = basePort + Number(BigInt(hash) % BigInt(this.PORT_RANGE));
 
-        // 冲突探测逻辑
+        // Port collision detection logic
         const maxTries = 100;
         try {
             await fs.access(this.TENANT_CONFIG_DIR);
@@ -60,10 +60,7 @@ class TenantRuntimeService {
                 port++;
             }
         } catch (e: any) {
-            if (e.code === 'ENOENT') {
-                // 配置目录不存在，直接返回第一个计算出的 port
-                return port;
-            }
+            // Config directory missing, return the first calculated port
             throw e;
         }
 
@@ -71,7 +68,7 @@ class TenantRuntimeService {
     }
 
     /**
-     * 从 supacloud_meta (本地配置库) 拿取密码和 jwt 等
+     * Retrieve credentials from supacloud_meta (local metadata DB)
      */
     private async getTenantCredentials(ref: string) {
         const sql = new SQL({
@@ -98,10 +95,10 @@ class TenantRuntimeService {
     }
 
     /**
-     * 提权或寻找现有容器内部的二进制文件
+     * Ensure binaries exist by elevating privileges or copying from containers
      */
     private async ensureBinaries() {
-        // 检查 postgrest
+        // Check PostgREST binary
         const pgrstCheck = await $`which postgrest`.nothrow().quiet();
         const hasPgrstEnv = await fs.access(this.POSTGREST_BIN).then(() => true).catch(() => false);
 
@@ -115,7 +112,7 @@ class TenantRuntimeService {
             }
         }
 
-        // 检查 gotrue
+        // Check GoTrue binary
         const gotrueCheck = await $`which gotrue`.nothrow().quiet();
         const hasGotrueEnv = await fs.access(this.GOTRUE_BIN).then(() => true).catch(() => false);
 
@@ -125,7 +122,7 @@ class TenantRuntimeService {
             if (cid.toString().trim()) {
                 const container = cid.toString().trim();
                 const tmpBin = "/tmp/gotrue-extract";
-                // 尝试从 gotrue 或 auth 拷贝
+                // Attempt to copy from common container binary paths
                 await $`docker cp ${container}:/usr/local/bin/gotrue ${tmpBin} || docker cp ${container}:/usr/local/bin/auth ${tmpBin}`.nothrow().quiet();
                 await $`mv ${tmpBin} ${this.GOTRUE_BIN}`.nothrow().quiet();
                 await $`chmod +x ${this.GOTRUE_BIN}`.nothrow().quiet();
@@ -140,7 +137,7 @@ class TenantRuntimeService {
 
         const creds = await this.getTenantCredentials(ref);
 
-        // PGRST .env
+        // Generate PostgREST .env configuration
         const pgrstEnv = `
 # SupaCloud Tenant PostgREST Runtime: ${ref}
 PGRST_DB_URI=postgres://authenticator_${ref}:${creds.dbPassword}@${this.PG_HOST}:${this.PG_PORT}/${creds.dbName}
@@ -155,7 +152,7 @@ PGRST_LOG_LEVEL=warn
 `.trim();
         await Bun.write(path.join(this.TENANT_CONFIG_DIR, `${ref}.env`), pgrstEnv);
 
-        // PGRST .conf
+        // Generate PostgREST .conf configuration
         const pgrstConf = `
 # PostgREST config for tenant: ${ref}
 db-uri = "postgres://authenticator_${ref}:${creds.dbPassword}@${this.PG_HOST}:${this.PG_PORT}/${creds.dbName}"
@@ -171,7 +168,7 @@ log-level = "warn"
 `.trim();
         await Bun.write(path.join(this.TENANT_CONFIG_DIR, `${ref}.conf`), pgrstConf);
 
-        // GoTrue .env
+        // Generate GoTrue .env configuration
         const apiExternalUrl = creds.apiUrl;
         const gotrueSender = process.env.GOTRUE_SMTP_ADMIN_EMAIL || `noreply@${apiExternalUrl.replace('https://', '').replace('http://', '')}`;
 
@@ -212,7 +209,7 @@ GOTRUE_SMTP_SENDER_NAME=SupaCloud
         const pgrstUnitPath = "/etc/systemd/system/supacloud-pgrst@.service";
         const gotrueUnitPath = "/etc/systemd/system/supacloud-gotrue@.service";
 
-        // 尽量不去重复写入以减少磁盘 IO
+        // Avoid redundant disk IO if units already exist
         const pgrstExists = await Bun.file(pgrstUnitPath).exists();
         if (!pgrstExists) {
             const pgrstUnit = `
@@ -295,14 +292,14 @@ WantedBy=multi-user.target
 
         await this.generateTenantConfig(ref, pgrstPort, gotruePort);
 
-        // 启停系统服务
+        // Start and enable systemd units
         await $`systemctl enable supacloud-pgrst@${ref}`.nothrow().quiet();
         await $`systemctl start supacloud-pgrst@${ref}`.nothrow().quiet();
 
         await $`systemctl enable supacloud-gotrue@${ref}`.nothrow().quiet();
         await $`systemctl start supacloud-gotrue@${ref}`.nothrow().quiet();
 
-        // 等待服务探活
+        // Wait for service health checks
         console.log(`Waiting for PostgREST(${pgrstPort}) and GoTrue(${gotruePort}) health checks...`);
         let pgrstOk = false;
         let gotrueOk = false;
@@ -339,7 +336,7 @@ WantedBy=multi-user.target
         await $`systemctl stop supacloud-gotrue@${ref}`.nothrow().quiet();
         await $`systemctl disable supacloud-gotrue@${ref}`.nothrow().quiet();
 
-        // 清理配置文件
+        // Clean up configuration files
         const pgrstEnvFile = Bun.file(path.join(this.TENANT_CONFIG_DIR, `${ref}.env`));
         const pgrstConfFile = Bun.file(path.join(this.TENANT_CONFIG_DIR, `${ref}.conf`));
         const gotrueEnvFile = Bun.file(path.join(this.TENANT_CONFIG_DIR, `${ref}_gotrue.env`));
