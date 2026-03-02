@@ -59,6 +59,17 @@ export class TaskRepository {
     `;
         return (task as ProjectTask) || null;
     }
+
+    /**
+     * 更新任务错误信息
+     */
+    async updateTaskError(id: string, error: string): Promise<void> {
+        await sql`
+      UPDATE project_tasks
+      SET error = ${error}, updated_at = NOW()
+      WHERE id = ${id}
+    `;
+    }
 }
 
 export const taskRepository = new TaskRepository();
