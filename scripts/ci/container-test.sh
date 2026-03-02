@@ -19,8 +19,18 @@ elif command -v yum >/dev/null; then
 fi
 
 # 2. 模拟系统环境 (模拟 systemd 以通过 Ansible 检查)
-mkdir -p /etc/supabase /run/sshd
+mkdir -p /etc/supabase /run/sshd /root/.ssh
 ssh-keygen -A
+if [ ! -f /root/.ssh/id_rsa ]; then
+    ssh-keygen -t rsa -N "" -f /root/.ssh/id_rsa
+fi
+cat /root/.ssh/id_rsa.pub >> /root/.ssh/authorized_keys
+chmod 700 /root/.ssh
+chmod 600 /root/.ssh/authorized_keys
+echo "StrictHostKeyChecking no" >> /root/.ssh/config
+echo "PermitRootLogin yes" >> /etc/ssh/sshd_config
+echo "PubkeyAuthentication yes" >> /etc/ssh/sshd_config
+/usr/sbin/sshd
 
 for cmd in systemctl hostnamectl timedatectl sysctl modprobe apparmor_status udevadm; do
     case "$cmd" in

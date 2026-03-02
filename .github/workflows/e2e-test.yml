@@ -22,6 +22,18 @@ jobs:
 
       - name: Set up Bun
         uses: oven-sh/setup-bun@v1
+      - name: Prepare SSH Environment
+        run: |
+          ssh-keygen -t rsa -N "" -f ~/.ssh/id_rsa
+          cat ~/.ssh/id_rsa.pub >> ~/.ssh/authorized_keys
+          chmod 600 ~/.ssh/authorized_keys
+          echo "StrictHostKeyChecking no" >> ~/.ssh/config
+          # 同步授权给 root 用户
+          sudo mkdir -p /root/.ssh
+          sudo cp ~/.ssh/id_rsa.pub /root/.ssh/authorized_keys
+          sudo chmod 700 /root/.ssh
+          sudo chmod 600 /root/.ssh/authorized_keys
+
       - name: Build and Test
         run: |
           cd packages/management-api
