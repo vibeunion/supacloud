@@ -27,24 +27,26 @@ jobs:
           sudo cp ~/.ssh/id_rsa.pub /root/.ssh/authorized_keys
           sudo chmod 700 /root/.ssh && sudo chmod 600 /root/.ssh/authorized_keys
           
-          # 3. 物理强力覆盖 sshd 配置
+          # 3. 物理强力覆盖 sshd 配置 (终极方案)
           sudo ssh-keygen -A # 确保主机密钥就绪
           
-          # 删除所有配置干扰项
-          sudo rm -f /etc/ssh/sshd_config.d/*.conf || true
+          # 彻底移除所有子配置目录，防止它们覆盖主配置
+          sudo rm -rf /etc/ssh/sshd_config.d/ || true
           
-          # 写入最宽松的配置
-          echo "PermitRootLogin yes" | sudo tee /etc/ssh/sshd_config.d/00-allow-root.conf
-          echo "PubkeyAuthentication yes" | sudo tee -a /etc/ssh/sshd_config.d/00-allow-root.conf
-          echo "AuthorizedKeysFile .ssh/authorized_keys" | sudo tee -a /etc/ssh/sshd_config.d/00-allow-root.conf
-          echo "PasswordAuthentication yes" | sudo tee -a /etc/ssh/sshd_config.d/00-allow-root.conf
+          # 在主配置文件最前面插入强制允许规则 (sed 1i 确保优先级最高)
+          sudo sed -i '1i PermitRootLogin yes' /etc/ssh/sshd_config
+          sudo sed -i '1i PubkeyAuthentication yes' /etc/ssh/sshd_config
+          sudo sed -i '1i AuthorizedKeysFile .ssh/authorized_keys' /etc/ssh/sshd_config
           
           # 重启服务并强制加载
           sudo systemctl daemon-reload || true
           sudo systemctl restart ssh || sudo service ssh restart
           
-          # 4. 验证连通性 (增加 -v 方便调试)
-          ssh -o StrictHostKeyChecking=no -v root@127.0.0.1 "echo SSH Connection Verified"
+          # 调试：检查当前生效的配置
+          sudo sshd -T | grep -iE "permitrootlogin|pubkeyauthentication|authorizedkeysfile"
+          
+          # 4. 验证连通性 (增加 -vv 方便调试)
+          ssh -o StrictHostKeyChecking=no -vv root@127.0.0.1 "echo SSH Connection Verified"
 
       - name: Build and Test
         run: |
