@@ -12,8 +12,21 @@ export class ShellService {
   async execute(script: string, args: string[]): Promise<{ success: boolean; output: string; error?: string }> {
     const scriptPath = `${this.scriptsPath}/${script}`;
 
+    // 从 DATABASE_URL 解析数据库连接信息
+    const dbUrl = config.databaseUrl;
+    const dbUrlMatch = dbUrl.match(/postgresql:\/\/([^:]+):([^@]+)@([^:]+):(\d+)\//);
+
+    // 构建环境变量
+    const env: Record<string, string> = {
+      ...process.env,
+      PG_HOST: process.env.PG_HOST || dbUrlMatch?.[3] || "localhost",
+      PG_PORT: process.env.PG_PORT || dbUrlMatch?.[4] || "5432",
+      PG_USER: process.env.PG_USER || dbUrlMatch?.[1] || "postgres",
+      PGPASSWORD: process.env.PGPASSWORD || dbUrlMatch?.[2] || "postgres",
+    };
+
     try {
-      const result = await $`bash ${scriptPath} ${args}`.text();
+      const result = await $`bash ${scriptPath} ${args}`.env(env).text();
       return { success: true, output: result.trim() };
     } catch (error: any) {
       return {
