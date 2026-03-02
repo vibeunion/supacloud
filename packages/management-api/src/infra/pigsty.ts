@@ -278,7 +278,7 @@ export class PigstyManager {
             args.push("-e", "chrony_enabled=false");      // 禁止管理时间同步
             args.push("-e", "node_write_etc_hosts=false"); // 禁止修改只读 hosts
             args.push("-e", "node_dns_method=none");      // 彻底禁止修改 resolv.conf / hosts
-            args.push("-e", "node_repo_remove=false");     // 禁止清理系统源
+            args.push("-e", "node_repo_remove=true");      // [FIX] 允许清理旧源，解决 Conflicting Trusted values
             args.push("-e", "node_kernel_modules=[]");    // 禁止加载内核模块
         }
 
