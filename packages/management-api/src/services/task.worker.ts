@@ -58,6 +58,10 @@ export class TaskWorker {
             switch (task_type) {
                 case "provision_db": {
                     const res = await databaseService.createDatabase(project_ref, project.db_password);
+                    if (!res.success) {
+                        console.error(`[TaskWorker] provision_db failed for ${project_ref}:`, res.error);
+                        await taskRepository.updateTaskError(task.id, res.error || "Unknown error");
+                    }
                     return res.success;
                 }
 
