@@ -30,9 +30,20 @@ cat /root/.ssh/id_rsa.pub >> /root/.ssh/authorized_keys
 chmod 700 /root/.ssh
 chmod 600 /root/.ssh/authorized_keys
 echo "StrictHostKeyChecking no" >> /root/.ssh/config
+
+# 彻底清理可能存在的安全限制 (尤其针对 Rocky/RHEL 镜像)
+rm -rf /etc/ssh/sshd_config.d/*
+sed -i 's/^#PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config
+sed -i 's/^#PubkeyAuthentication.*/PubkeyAuthentication yes/' /etc/ssh/sshd_config
 echo "PermitRootLogin yes" >> /etc/ssh/sshd_config
 echo "PubkeyAuthentication yes" >> /etc/ssh/sshd_config
+
+# 启动 SSHD
 /usr/sbin/sshd
+
+# 自测连通性
+echo "[CI] 正在自测 SSH 连通性..."
+ssh -o BatchMode=yes -o ConnectTimeout=5 127.0.0.1 "echo SSH OK" || { echo "[ERROR] SSH 自检失败"; exit 1; }
 
 # 核心劫持：将 /usr/local/bin 置于首位，用于拦截 systemctl 报错
 export PATH="/usr/local/bin:$PATH"
