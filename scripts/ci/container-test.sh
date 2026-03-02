@@ -49,27 +49,30 @@ ssh -o BatchMode=yes -o ConnectTimeout=5 127.0.0.1 "echo SSH OK" || { echo "[ERR
 export PATH="/usr/local/bin:$PATH"
 
 for cmd in systemctl hostnamectl timedatectl sysctl modprobe apparmor_status udevadm; do
-    REAL_CMD=$(which "$cmd" 2>/dev/null || true)
-    if [ -z "$REAL_CMD" ]; then
-        # 如果系统没装，我们就在 /usr/local/bin 模拟一个
-        MOCK_DEST="/usr/local/bin/$cmd"
-    else
-        # 如果系统装了，我们把它藏起来，用 Mock 顶替
-        if [[ "$REAL_CMD" != *"/usr/local/bin"* ]]; then
-            mv "$REAL_CMD" "${REAL_CMD}.real"
-            MOCK_DEST="$REAL_CMD"
-        else
-            MOCK_DEST="$REAL_CMD"
+    # 查找全路径下的二进制 (防止 /sbin 和 /usr/bin 路径不一导致的漏网之鱼)
+    ALL_BINS=$(which -a "$cmd" 2>/dev/null || true)
+    
+    for REAL_CMD in $ALL_BINS; do
+        # 确保不重复劫持
+        if [[ "$REAL_CMD" == *".real"* || "$REAL_CMD" == *"/usr/local/bin/$cmd"* ]]; then
+            continue
         fi
-    fi
+        
+        # 物理置换
+        mv "$REAL_CMD" "${REAL_CMD}.real"
+        MOCK_DEST="$REAL_CMD"
 
-    case "$cmd" in
-        systemctl)
-            cat <<'INNEREOF' > "$MOCK_DEST"
+        case "$cmd" in
+            systemctl)
+                cat <<'INNEREOF' > "$MOCK_DEST"
 #!/bin/bash
 args="$@"
 # 只有包含 chrony 的请求我们才百分之百返回成功
 if [[ "$args" == *"chrony"* ]]; then
+    if [[ "$args" == *"is-active"* || "$args" == *"is-enabled"* ]]; then
+        echo "active"
+        exit 0
+    fi
     echo "[MOCK] Intercepted systemctl $args for chrony/chronyd -> Success"
     exit 0
 fi
@@ -80,13 +83,14 @@ if [ -f "$REAL_BIN" ]; then
     exec "$REAL_BIN" "$@"
 else
     # 万不得已的回退模拟
-    if [[ "$args" == *"is-active"* || "$args" == *"is-enabled"* || "$args" == *"status"* ]]; then
+    if [[ "$args" == *"is-active"* || "$args" == *"status"* ]]; then
+        echo "active"
         exit 0
     fi
     exit 0
 fi
 INNEREOF
-            ;;
+                ;;
         hostnamectl)
             cat <<'INNEREOF' > "$MOCK_DEST"
 #!/bin/bash
