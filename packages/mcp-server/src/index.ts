@@ -2,9 +2,9 @@
 /**
  * @supacloud/mcp-server
  *
- * AI-native 的 Supabase 基础设施管理 MCP Server。
+ * AI-native Supabase infrastructure management MCP Server.
  *
- * 使用方式 (Claude Desktop / Cursor / Windsurf):
+ * Usage (Claude Desktop / Cursor / Windsurf):
  * ```json
  * {
  *   "mcpServers": {
@@ -24,14 +24,14 @@
  * }
  * ```
  *
- * 环境变量说明:
- * - SUPACLOUD_HOST:       目标服务器 IP / 域名 (必填)
- * - SUPACLOUD_SSH_USER:   SSH 用户名 (默认 root)
- * - SUPACLOUD_SSH_PORT:   SSH 端口 (默认 22)
- * - SUPACLOUD_SSH_KEY:    SSH 私钥路径 (默认 ~/.ssh/id_rsa)
- * - SUPACLOUD_SSH_PASS:   SSH 密码 (优先使用 key)
- * - SUPACLOUD_API_URL:    Management API 地址 (默认 http://{HOST}:9090)
- * - SUPACLOUD_API_TOKEN:  Management API Master Token (安装后填入)
+ * Environment variables:
+ * - SUPACLOUD_HOST:       Target server IP / domain (required)
+ * - SUPACLOUD_SSH_USER:   SSH username (default root)
+ * - SUPACLOUD_SSH_PORT:   SSH port (default 22)
+ * - SUPACLOUD_SSH_KEY:    SSH private key path (default ~/.ssh/id_rsa)
+ * - SUPACLOUD_SSH_PASS:   SSH password (prefer key)
+ * - SUPACLOUD_API_URL:    Management API URL (default http://{HOST}:9090)
+ * - SUPACLOUD_API_TOKEN:  Management API Master Token (fill in after installation)
  */
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -45,7 +45,7 @@ import { registerDeploymentTools } from "./tools/deployment-tools";
 import { resolve } from "path";
 import { homedir } from "os";
 
-// ── 解析环境变量 ──
+// ── Parse environment variables ──
 const HOST = process.env.SUPACLOUD_HOST ?? "";
 const SSH_USER = process.env.SUPACLOUD_SSH_USER ?? "root";
 const SSH_PORT = parseInt(process.env.SUPACLOUD_SSH_PORT ?? "22", 10);
@@ -54,13 +54,13 @@ const SSH_PASS = process.env.SUPACLOUD_SSH_PASS ?? "";
 const API_URL = process.env.SUPACLOUD_API_URL ?? (HOST ? `http://${HOST}:9090` : "");
 const API_TOKEN = process.env.SUPACLOUD_API_TOKEN ?? "";
 
-// ── 创建 MCP Server ──
+// ── Create MCP Server ──
 const server = new McpServer({
     name: "supacloud",
     version: "0.1.0",
 });
 
-// ── 注册 SSH 工具 (始终可用) ──
+// ── Register SSH tools (always available) ──
 if (HOST) {
     const ssh = new SshTransport({
         host: HOST,
@@ -72,7 +72,7 @@ if (HOST) {
     registerSshTools(server, ssh);
 }
 
-// ── 注册 HTTP 工具 (需要 API 地址) ──
+// ── Register HTTP tools (requires API URL) ──
 if (API_URL) {
     const http = new HttpTransport({
         baseUrl: API_URL,
@@ -82,31 +82,31 @@ if (API_URL) {
     registerAdvancedTools(server, http);
 }
 
-// ── 注册部署工具 (本地 Docker 操作) ──
+// ── Register deployment tools (local Docker operations) ──
 registerDeploymentTools(server);
 
-// ── 如果两者都没配置，注册一个帮助工具 ──
+// ── If neither is configured, register a help tool ──
 if (!HOST && !API_URL) {
     server.tool(
         "setup_help",
-        "显示 SupaCloud MCP Server 配置指南",
+        "Display SupaCloud MCP Server configuration guide",
         {},
         async () => ({
             content: [
                 {
                     type: "text",
                     text: [
-                        "⚠️ SupaCloud MCP Server 尚未配置目标服务器。",
+                        "⚠️ SupaCloud MCP Server target server not configured.",
                         "",
-                        "请在 MCP 配置中设置以下环境变量:",
+                        "Please set the following environment variables in MCP config:",
                         "",
-                        "  SUPACLOUD_HOST       - 服务器 IP 或域名 (必填)",
-                        "  SUPACLOUD_SSH_USER   - SSH 用户名 (默认 root)",
-                        "  SUPACLOUD_SSH_KEY    - SSH 私钥路径 (默认 ~/.ssh/id_rsa)",
-                        "  SUPACLOUD_API_URL    - Management API 地址 (安装后自动推断)",
-                        "  SUPACLOUD_API_TOKEN  - Master Token (安装后填入)",
+                        "  SUPACLOUD_HOST       - Server IP or domain (required)",
+                        "  SUPACLOUD_SSH_USER   - SSH username (default root)",
+                        "  SUPACLOUD_SSH_KEY    - SSH private key path (default ~/.ssh/id_rsa)",
+                        "  SUPACLOUD_API_URL    - Management API URL (auto-inferred after installation)",
+                        "  SUPACLOUD_API_TOKEN  - Master Token (fill in after installation)",
                         "",
-                        "配置示例 (claude_desktop_config.json):",
+                        "Configuration example (claude_desktop_config.json):",
                         JSON.stringify(
                             {
                                 mcpServers: {
@@ -130,7 +130,7 @@ if (!HOST && !API_URL) {
     );
 }
 
-// ── 启动 stdio 传输 ──
+// ── Start stdio transport ──
 async function main(): Promise<void> {
     const transport = new StdioServerTransport();
     await server.connect(transport);

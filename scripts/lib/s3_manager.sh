@@ -1,13 +1,13 @@
 #!/bin/bash
-# SupaCloud - S3 存储管理脚本
-# 用法: s3_manager.sh <create|delete|credentials> <project_ref>
+# SupaCloud - S3 Storage Management Script
+# Usage: s3_manager.sh <create|delete|credentials> <project_ref>
 
 set -euo pipefail
 
 ACTION="${1:-}"
 PROJECT_REF="${2:-}"
 
-# S3 配置 (从环境变量加载)
+# S3 configuration (loaded from environment variables)
 S3_ENDPOINT="${S3_ENDPOINT:-http://localhost:9000}"
 S3_ACCESS_KEY="${S3_ACCESS_KEY:-}"
 S3_SECRET_KEY="${S3_SECRET_KEY:-}"
@@ -15,7 +15,7 @@ S3_STORAGE_TYPE="${S3_STORAGE_TYPE:-rustfs}"
 
 BUCKET_NAME="supa-${PROJECT_REF}"
 
-# 加载存储凭据
+# Load storage credentials
 load_credentials() {
     case "$S3_STORAGE_TYPE" in
         rustfs)
@@ -39,7 +39,7 @@ load_credentials() {
     esac
 }
 
-# 验证参数
+# Validate parameters
 validate_params() {
     if [ -z "$ACTION" ] || [ -z "$PROJECT_REF" ]; then
         echo "ERROR: Missing required parameters" >&2
@@ -53,7 +53,7 @@ validate_params() {
     fi
 }
 
-# 使用 curl 进行 S3 操作 (兼容所有 S3 API)
+# Use curl for S3 operations (compatible with all S3 APIs)
 s3_request() {
     local method="$1"
     local path="$2"
@@ -61,7 +61,7 @@ s3_request() {
     date=$(date -u +"%a, %d %b %Y %H:%M:%S GMT")
     local content_type="application/octet-stream"
 
-    # 简单签名 (适用于大多数 S3 兼容存储)
+    # Simple signing (suitable for most S3-compatible storage)
     local string_to_sign="${method}\n\n${content_type}\n${date}\n${path}"
     local signature
     signature=$(echo -en "$string_to_sign" | openssl dgst -sha1 -hmac "$S3_SECRET_KEY" -binary | base64)
@@ -73,11 +73,11 @@ s3_request() {
         "${S3_ENDPOINT}${path}"
 }
 
-# 创建 Bucket
+# Create Bucket
 create_bucket() {
     echo "Creating S3 bucket: ${BUCKET_NAME}..."
 
-    # 使用 mc (MinIO Client) 或 curl 创建 bucket
+    # Use mc (MinIO Client) or curl to create bucket
     if command -v mc &>/dev/null; then
         mc alias set supacloud "$S3_ENDPOINT" "$S3_ACCESS_KEY" "$S3_SECRET_KEY" --api S3v4 2>/dev/null || true
         mc mb "supacloud/${BUCKET_NAME}" 2>/dev/null || true
@@ -85,7 +85,7 @@ create_bucket() {
         s3_request "PUT" "/${BUCKET_NAME}" || true
     fi
 
-    # 为项目生成独立的访问密钥
+    # Generate independent access keys for project
     local project_access_key
     local project_secret_key
     project_access_key="supa_${PROJECT_REF}_$(openssl rand -hex 8)"
@@ -96,7 +96,7 @@ create_bucket() {
     echo "Bucket ${BUCKET_NAME} created successfully"
 }
 
-# 删除 Bucket
+# Delete Bucket
 delete_bucket() {
     echo "Deleting S3 bucket: ${BUCKET_NAME}..."
 
@@ -104,14 +104,14 @@ delete_bucket() {
         mc alias set supacloud "$S3_ENDPOINT" "$S3_ACCESS_KEY" "$S3_SECRET_KEY" --api S3v4 2>/dev/null || true
         mc rb --force "supacloud/${BUCKET_NAME}" 2>/dev/null || true
     else
-        # 先清空 bucket
+        # Empty bucket first
         s3_request "DELETE" "/${BUCKET_NAME}" || true
     fi
 
     echo "Bucket ${BUCKET_NAME} deleted successfully"
 }
 
-# 获取凭据
+# Get credentials
 get_credentials() {
     echo "ACCESS_KEY=${S3_ACCESS_KEY}"
     echo "SECRET_KEY=${S3_SECRET_KEY}"
@@ -119,7 +119,7 @@ get_credentials() {
     echo "BUCKET=${BUCKET_NAME}"
 }
 
-# 主逻辑
+# Main logic
 validate_params
 load_credentials
 

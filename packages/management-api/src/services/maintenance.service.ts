@@ -2,46 +2,46 @@ import { shellService } from './shell.service';
 
 export class MaintenanceService {
     /**
-     * 执行主从切换 (Switchover)
-     * @param cluster 集群名
-     * @param candidate 目标节点 (可选)
+     * Execute primary-replica switchover
+     * @param cluster Cluster name
+     * @param candidate Target node (optional)
      */
     static async switchover(cluster: string = 'db-main', candidate?: string): Promise<{ message: string }> {
         const { success, error } = await shellService.execute('ha_manager.sh', ['switchover', cluster, candidate || '']);
 
         if (!success) {
             console.error('Switchover failed:', error);
-            throw new Error('主从切换指令发送失败');
+            throw new Error('Switchover command failed to send');
         }
 
-        return { message: '主从切换操作已下发成功' };
+        return { message: 'Switchover operation sent successfully' };
     }
 
     /**
-     * 在线重载数据库配置
-     * @param nodeIp 节点 IP
+     * Online reload database config
+     * @param nodeIp Node IP
      */
     static async reloadConfig(nodeIp: string): Promise<{ message: string }> {
         const { success, error } = await shellService.execute('ha_manager.sh', ['reload', nodeIp]);
 
         if (!success) {
             console.error('Reload failed:', error);
-            throw new Error('配置重载失败');
+            throw new Error('Config reload failed');
         }
 
-        return { message: '配置重载指令已发送' };
+        return { message: 'Config reload command sent' };
     }
 
     /**
-     * 扩容只读副本
-     * @param ip 新节点 IP
+     * Scale out read replica
+     * @param ip New node IP
      */
     static async addReplica(ip: string): Promise<{ message: string }> {
-        // 扩容是极长任务，不等待完成，直接返回
+        // Scaling is a very long task, don't wait for completion, return immediately
         shellService.execute('ha_manager.sh', ['add_replica', ip]).catch(err => {
             console.error('Async add_replica task failed:', err);
         });
 
-        return { message: `已启动节点 ${ip} 的只读副本扩容任务` };
+        return { message: `Read replica expansion task started for node ${ip}` };
     }
 }

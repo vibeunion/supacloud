@@ -1,6 +1,6 @@
 #!/bin/bash
-# SupaCloud - 边缘函数管理脚本 (单实例 Web Worker 版)
-# 用法: function_manager.sh <init_global|start|stop|status|deploy> <project_ref> [args...]
+# SupaCloud - Edge Function Management Script (Single Instance Web Worker Version)
+# Usage: function_manager.sh <init_global|start|stop|status|deploy> <project_ref> [args...]
 
 set -euo pipefail
 
@@ -14,7 +14,7 @@ TENANT_BASE_DIR="/etc/supabase/tenants"
 FUNCTIONS_ROOT="/root/pigsty/app/supabase/volumes/functions"
 ROUTER_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# 验证参数
+# Validate parameters
 validate_params() {
     if [ -z "$ACTION" ]; then
         echo "ERROR: Missing action parameter" >&2
@@ -23,7 +23,7 @@ validate_params() {
     fi
 }
 
-# 获取租户配置
+# Get tenant configuration
 get_tenant_config() {
     local env_file="${TENANT_BASE_DIR}/${PROJECT_REF}.env"
     if [ ! -f "$env_file" ]; then
@@ -33,7 +33,7 @@ get_tenant_config() {
     grep -E '^(FUNCTIONS_PORT|SUPABASE_URL|SUPABASE_ANON_KEY|SUPABASE_SERVICE_ROLE_KEY|JWT_SECRET|WECHAT_APP_ID|WECHAT_APP_SECRET)=' "$env_file" | sed 's/ //g'
 }
 
-# 生成动态路由 (静态导入以适配 Edge Runtime 编译沙块)
+# Generate dynamic router (static import to adapt to Edge Runtime compile chunk)
 generate_router() {
     local main_dir="${FUNCTIONS_ROOT}/main"
     local router_file="${main_dir}/index.ts"
@@ -46,7 +46,7 @@ import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 const functions: Record<string, any> = {};
 EOF
 
-    # 遍历所有函数文件 (排除 index.ts)
+    # Traverse all function files (exclude index.ts)
     for f in "$main_dir"/*.ts; do
         filename=$(basename "$f")
         if [ "$filename" == "index.ts" ]; then continue; fi
@@ -100,17 +100,17 @@ serve(async (req) => {
 EOF
 }
 
-# 初始化全局 Edge Runtime
+# Initialize Global Edge Runtime
 init_global_runtime() {
     echo "Initializing Global Edge Runtime (Worker Router)..."
     
-    # 停止旧的全局容器
+    # Stop old global container
     docker rm -f "$GLOBAL_CONTAINER_NAME" 2>/dev/null || true
 
     mkdir -p "$FUNCTIONS_ROOT"
     mkdir -p "$TENANT_BASE_DIR"
 
-    # 将路由脚本同步到专门目录
+    # Sync router script to dedicated directory
     mkdir -p "${FUNCTIONS_ROOT}/_global_router"
     cp "${ROUTER_SCRIPT_DIR}/global_router.ts" "${FUNCTIONS_ROOT}/_global_router/main.ts"
     cp "${ROUTER_SCRIPT_DIR}/worker_runner.ts" "${FUNCTIONS_ROOT}/_global_router/worker_runner.ts"
@@ -133,7 +133,7 @@ init_global_runtime() {
     echo "Global Edge Runtime initialized."
 }
 
-# 挂载租户到全局运行池 (虚拟操作)
+# Mount tenant to global runtime pool (virtual operation)
 start_tenant_runtime() {
     echo "Activate tenant ${PROJECT_REF} into global pool."
     if ! docker ps -q -f name="$GLOBAL_CONTAINER_NAME" | grep -q .; then
@@ -141,12 +141,12 @@ start_tenant_runtime() {
     fi
 }
 
-# 停止租户
+# Stop tenant
 stop_tenant_runtime() {
     echo "Notice: Tenant Worker will be recycled automatically or upon redeploy."
 }
 
-# 检查状态
+# Check status
 check_status() {
     if docker ps -q -f name="$GLOBAL_CONTAINER_NAME" | grep -q .; then
         echo "Running (Inside Global Pool)"
@@ -155,7 +155,7 @@ check_status() {
     fi
 }
 
-# 主逻辑
+# Main logic
 validate_params
 
 case "$ACTION" in
@@ -176,8 +176,8 @@ case "$ACTION" in
         CODE="${4:-}"
         if [ -z "$SLUG" ]; then echo "slug required" >&2; exit 1; fi
         
-        # 部署到 main 根目录下，文件名为 slug.ts
-        # 这样 index.ts 静态导入时结构扁平，可靠性最高
+        # Deploy to main root directory, filename is slug.ts
+        # This way index.ts static import structure is flat, most reliable
         DATA_FILE="${FUNCTIONS_ROOT}/main/${SLUG}.ts"
         mkdir -p "${FUNCTIONS_ROOT}/main"
         echo "$CODE" > "$DATA_FILE"

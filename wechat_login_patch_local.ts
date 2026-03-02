@@ -30,7 +30,7 @@ serve(async (req) => {
         const { openid, session_key, unionid } = wechatData
         console.log("[wechat-login] Real openid from WeChat:", openid)
 
-        // 补丁：手动签发一个带 aud 的 Service Role Token
+        // Patch: Manually issue a Service Role Token with aud attribute
         const srvPayload = {
             role: "service_role",
             iss: "supabase",

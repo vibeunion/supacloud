@@ -1,13 +1,13 @@
 #!/bin/bash
-# SupaCloud - JWT 密钥管理脚本
-# 用法: jwt_manager.sh generate <project_ref>
+# SupaCloud - JWT Key Management Script
+# Usage: jwt_manager.sh generate <project_ref>
 
 set -euo pipefail
 
 ACTION="${1:-}"
 PROJECT_REF="${2:-}"
 
-# 验证参数
+# Validate parameters
 validate_params() {
     if [ -z "$ACTION" ] || [ -z "$PROJECT_REF" ]; then
         echo "ERROR: Missing required parameters" >&2
@@ -21,18 +21,18 @@ validate_params() {
     fi
 }
 
-# Base64URL 编码
+# Base64URL encoding
 base64url_encode() {
     openssl enc -base64 -A | tr '+/' '-_' | tr -d '='
 }
 
-# 生成 JWT
+# Generate JWT
 generate_jwt() {
     local secret="$1"
     local role="$2"
     local now
     now=$(date +%s)
-    local exp=$((now + 315360000)) # 10 年
+    local exp=$((now + 315360000)) # 10 years
 
     local header='{"alg":"HS256","typ":"JWT"}'
     # Supabase/GoTrue default behavior requires an 'aud' claim to query correct schemas and user records.
@@ -51,19 +51,19 @@ generate_jwt() {
     echo "${message}.${signature}"
 }
 
-# 生成完整密钥集
+# Generate complete key set
 generate_keys() {
     echo "Generating JWT keys for project ${PROJECT_REF}..."
 
-    # 生成 JWT Secret
+    # Generate JWT Secret
     local jwt_secret
     jwt_secret=$(openssl rand -hex 20)
 
-    # 生成 Anon Key
+    # Generate Anon Key
     local anon_key
     anon_key=$(generate_jwt "$jwt_secret" "anon")
 
-    # 生成 Service Role Key
+    # Generate Service Role Key
     local service_role_key
     service_role_key=$(generate_jwt "$jwt_secret" "service_role")
 
@@ -71,7 +71,7 @@ generate_keys() {
     echo "ANON_KEY=${anon_key}"
     echo "SERVICE_ROLE_KEY=${service_role_key}"
 
-    # 保存到项目凭据文件
+    # Save to project credentials file
     local creds_dir="/etc/supabase/projects"
     mkdir -p "$creds_dir"
     local creds_file="${creds_dir}/${PROJECT_REF}.env"
@@ -88,7 +88,7 @@ EOF
     echo "Credentials saved to ${creds_file}"
 }
 
-# 主逻辑
+# Main logic
 validate_params
 
 case "$ACTION" in

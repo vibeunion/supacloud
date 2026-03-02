@@ -2,7 +2,7 @@ import { sql, type ProjectTask, type TaskStatus, type TaskType } from "../db";
 
 export class TaskRepository {
     /**
-     * 创建任务
+     * Create task
      */
     async createTask(ref: string, type: TaskType, payload: Record<string, any> = {}): Promise<ProjectTask> {
         const [task] = await sql`
@@ -14,8 +14,9 @@ export class TaskRepository {
     }
 
     /**
-     * 批量创建任务，保证顺序执行的串行依赖，可以通过按时间戳或外部调度器实现，
-     * 这里的简单实现就是都入队。
+     * Batch create tasks, ensuring serial dependency for sequential execution,
+     * can be implemented via timestamps or external scheduler,
+     * simple implementation here just enqueues all.
      */
     async createTasks(tasks: { ref: string; type: TaskType; payload?: Record<string, any> }[]): Promise<void> {
         if (tasks.length === 0) return;
@@ -28,8 +29,8 @@ export class TaskRepository {
     }
 
     /**
-     * 获取下一个要处理的 pending 任务并锁定 (SKIP LOCKED)
-     * 支持重试失败次数 < 3 的任务
+     * Get next pending task and lock it (SKIP LOCKED)
+     * Supports retrying tasks with failure count < 3
      */
     async claimNextTask(): Promise<ProjectTask | null> {
         const [task] = await sql`
@@ -48,7 +49,7 @@ export class TaskRepository {
     }
 
     /**
-     * 更新任务状态
+     * Update task status
      */
     async updateStatus(id: string, status: TaskStatus, error?: string): Promise<ProjectTask | null> {
         const [task] = await sql`
@@ -61,7 +62,7 @@ export class TaskRepository {
     }
 
     /**
-     * 更新任务错误信息
+     * Update task error info
      */
     async updateTaskError(id: string, error: string): Promise<void> {
         await sql`

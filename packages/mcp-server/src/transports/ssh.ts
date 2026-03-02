@@ -1,7 +1,7 @@
 /**
- * SupaCloud MCP Server – SSH 传输层
+ * SupaCloud MCP Server – SSH Transport Layer
  *
- * 在 SupaCloud 尚未安装时，通过 SSH 连接目标服务器执行运维操作。
+ * When SupaCloud is not yet installed, execute ops tasks on target server via SSH.
  */
 import { Client } from "ssh2";
 
@@ -27,7 +27,7 @@ export class SshTransport {
         this.config = config;
     }
 
-    /** 执行远程命令并返回结果 */
+    /** Execute remote command and return result */
     async exec(command: string, timeoutMs: number = 300_000): Promise<SshResult> {
         return new Promise((resolve, reject) => {
             const conn = new Client();
@@ -77,7 +77,7 @@ export class SshTransport {
         });
     }
 
-    /** 上传文件到远程主机 */
+    /** Upload file to remote host */
     async upload(localPath: string, remotePath: string): Promise<void> {
         return new Promise((resolve, reject) => {
             const conn = new Client();
@@ -108,7 +108,7 @@ export class SshTransport {
         });
     }
 
-    /** 快速检测主机是否可达 */
+    /** Quick check if host is reachable */
     async ping(): Promise<boolean> {
         const result = await this.exec("echo pong", 10_000).catch(() => null);
         return result?.stdout.trim() === "pong";

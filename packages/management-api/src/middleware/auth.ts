@@ -1,7 +1,7 @@
 import { Elysia } from "elysia";
 import { config } from "../config";
 
-// 认证中间件
+// Authentication middleware
 export const authMiddleware = new Elysia({ name: "auth" })
   .derive(({ headers, set }) => {
     const authorization = headers.authorization;

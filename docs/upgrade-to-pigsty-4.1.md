@@ -1,60 +1,60 @@
-# 升级到 Pigsty 4.1 及 Garage 兼容性指南
+# Upgrade to Pigsty 4.1 and Garage Compatibility Guide
 
-本指南旨在帮助现有 SupaCloud（基于 Pigsty 前期版本安装）的用户平滑升级到最新的 Pigsty v4.1，以获得最新的 PostgreSQL 支持、更好的性能以及系统安全提升。
+This guide aims to help existing SupaCloud users (installed based on earlier Pigsty versions) smoothly upgrade to the latest Pigsty v4.1 for latest PostgreSQL support, better performance, and system security improvements.
 
-## 注意事项
+## Important Notes
 
-**在进行基础设施的全面更新前，请务必进行核心数据备份！**
+**Please make sure to backup core data before performing full infrastructure updates!**
 
-Pigsty 提供了强大的自动化部署工具，但大版本跨越（特别是涉及 PostgreSQL 版本的核心调整时）可能伴随着配置变动。请在操作前仔细衡量风险时间窗。
+Pigsty provides powerful automated deployment tools, but major version upgrades (especially when involving core PostgreSQL version adjustments) may come with configuration changes. Please carefully assess risk time windows before proceeding.
 
-## 升级方式一：使用一键升级脚本（推荐）
+## Upgrade Method 1: Use One-Click Upgrade Script (Recommended)
 
-SupaCloud 提供了一个半自动化的升级辅助脚本，您可以直接在服务器终端中执行它：
+SupaCloud provides a semi-automated upgrade helper script that you can directly execute on the server terminal:
 
 ```bash
 cd /path/to/supacloud
 bash scripts/upgrade_pigsty.sh
 ```
 
-此脚本会自动：
-1. 下载并在您的当前用户的主目录 (`$HOME/pigsty`) 中构建最新的 v4.1.0 发行版代码库。
-2. 自动运行 `./configure`。
-3. 执行 `ansible-playbook` 重新下发各项组件的更新，完成原地升级。
+This script will automatically:
+1. Download and build the latest v4.1.0 release codebase in your current user's home directory (`$HOME/pigsty`).
+2. Automatically run `./configure`.
+3. Execute `ansible-playbook` to redeploy updates for each component, completing in-place upgrade.
 
-## 升级方式二：手动升级（遵循官方指南）
+## Upgrade Method 2: Manual Upgrade (Follow Official Guide)
 
-如果您维护有大量的自定义主机配置项，或希望分步执行以控制更新范围，建议直接按照 Pigsty 官方手册中的命令执行：
+If you maintain a large number of custom host configuration items, or wish to execute step-by-step to control update scope, it's recommended to directly follow the commands in the Pigsty official manual:
 
-1. **下载并签出最新代码**：
+1. **Download and checkout latest code**:
    ```bash
    curl -fsSL https://repo.pigsty.io/get | bash -s v4.1.0
    cd ~/pigsty
    ```
-2. **应用重新配置**：
+2. **Apply reconfiguration**:
    ```bash
    ./configure
    ```
-3. **逐步剧本升级**：
-   依据您需要更新的部分单独运行剧本。若想对整机系统进行全面应用：
+3. **Step-by-step playbook upgrade**:
+   Run playbooks individually according to the parts you need to update. For full system-wide application:
    ```bash
    ansible-playbook -i pigsty.yml install.yml
    ```
 
-## Garage S3 的重要变更兼容补充
+## Garage S3 Important Change Compatibility Supplement
 
-最新版 SupaCloud `install.sh` 改变了自托管 Garage S3 的默认 Region（区域）设置，以增强其与 MinIO 和标准 S3 客户端（它们常使用诸如 `us-east-1` 等默认配置）的 API 兼容交互行为。
+The latest SupaCloud `install.sh` changed the default Region setting for self-hosted Garage S3 to enhance its API compatibility interaction with MinIO and standard S3 clients (which often use default configs like `us-east-1`).
 
-如果您的旧版本遇到了由于 Garage S3 的 Region 值（原被默认设为 `garage`）而导致的客户端 **AuthorizationHeaderMalformed** （鉴权签名头异常）报错问题，您可以通过以下方式手动对其进行校正兼容：
+If your older version encountered **AuthorizationHeaderMalformed** (auth signature header abnormal) errors from clients due to Garage S3's Region value (previously defaulted to `garage`), you can manually correct it for compatibility:
 
-1. **修改配置文件**：编辑 `/etc/garage/garage.toml`，找到 `[s3_api]` 段落
-   将其中的 `s3_region = "garage"` 修改为：
+1. **Modify config file**: Edit `/etc/garage/garage.toml`, find the `[s3_api]` section
+   Change `s3_region = "garage"` to:
    ```toml
    s3_region = "us-east-1"
    ```
-2. **修改凭据环境变量（若使用）**：
-   编辑 `/etc/garage/s3-credentials.env` 以及您项目中对应的环境变量指向文件，将 `S3_REGION` 的值修正为 `us-east-1`。
-3. **重新拉起引擎**：
+2. **Modify credential environment variables (if used)**:
+   Edit `/etc/garage/s3-credentials.env` and corresponding environment variable files in your projects, correct the `S3_REGION` value to `us-east-1`.
+3. **Restart the engine**:
    ```bash
    systemctl restart garage
    ```

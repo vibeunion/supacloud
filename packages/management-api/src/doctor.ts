@@ -16,83 +16,83 @@ function getSpinner() {
 }
 
 export async function runDoctor(options: { skipSmokeTest?: boolean, forceYes?: boolean } = {}) {
-    p.intro("\x1b[45m SupaCloud 系统巡检中心 (Doctor) \x1b[0m");
+    p.intro("\x1b[45m SupaCloud System Health Check Center (Doctor) \x1b[0m");
 
     const s = getSpinner();
-    s.start("正在深度扫描基础设施状态...");
+    s.start("Deep scanning infrastructure status...");
 
     try {
         const reports = await HealthChecker.runFullCheck();
-        s.stop("基础设施巡检完成");
+        s.stop("Infrastructure scan completed");
 
         const tableData = reports.map(r => {
             const statusIcon = r.status === "OK" ? "✅" : r.status === "WARN" ? "⚠️" : "❌";
             return `${statusIcon} [${r.component.padEnd(12)}] ${r.message}`;
         });
 
-        p.note(tableData.join("\n"), "系统体检报告");
+        p.note(tableData.join("\n"), "System Health Report");
 
         const hasError = reports.some(r => r.status === "ERROR");
         if (hasError) {
-            p.log.error("检测到关键服务异常，基础功能测试已自动跳过。");
+            p.log.error("Critical service errors detected, basic functionality tests skipped.");
             const issues = reports.filter(r => r.status !== "OK");
             issues.forEach(r => {
-                p.log.step(`- \x1b[33m${r.component}\x1b[0m: ${r.recommendation || "请检查日志。"}`);
+                p.log.step(`- \x1b[33m${r.component}\x1b[0m: ${r.recommendation || "Please check logs."}`);
             });
-            p.outro("巡检结束，请先修复上述红色异常。");
+            p.outro("Health check complete. Please fix the red errors above first.");
             return;
         }
 
-        // --- 冒烟测试入口 ---
+        // --- Smoke test entry ---
         if (!options.skipSmokeTest) {
             const shouldTest = options.forceYes || await p.confirm({
-                message: "基础设施似乎已就绪。是否运行【业务冒烟测试】（创建并销毁一个测试项目）？",
+                message: "Infrastructure seems ready. Run business smoke test (create and destroy a test project)?",
                 initialValue: true
             });
 
             if (p.isCancel(shouldTest) || !shouldTest) {
-                p.outro("通过基础检查，业务功能待验证。祝您使用愉快！");
+                p.outro("Basic checks passed, business functionality pending verification. Enjoy!");
                 return;
             }
 
-            s.start("正在执行业务冒烟测试 (创建项目中)...");
+            s.start("Running business smoke test (creating project)...");
             const testRef = `smoke-test-${Math.random().toString(36).substring(7)}`;
 
             try {
                 const { projectService } = await import("./services");
 
-                // 1. 创建项目
+                // 1. Create project
                 const project = await projectService.createProject({
                     name: "Doctor Smoke Test Project",
                     organization_id: "default"
                 });
-                s.message(`项目项目注入成功 (Ref: ${project.ref})，正在等待网关生效...`);
+                s.message(`Project injected successfully (Ref: ${project.ref}), waiting for gateway to take effect...`);
 
-                // 模拟等待网关就绪 (通常 Pigsty/Angie 需要几秒同步)
+                // Simulate waiting for gateway ready (Pigsty/Angie usually needs a few seconds to sync)
                 await new Promise(r => setTimeout(r, 2000));
 
-                // 2. 验证详情获取
+                // 2. Verify details retrieval
                 const details = await projectService.getProject(project.ref);
-                if (!details) throw new Error("无法获取测试项目详情，持久化异常。");
+                if (!details) throw new Error("Unable to get test project details, persistence error.");
 
-                s.message("功能验证通过，正在清理测试数据...");
+                s.message("Function verification passed, cleaning up test data...");
 
-                // 3. 清理
+                // 3. Cleanup
                 await projectService.deleteProject(project.ref);
 
-                s.stop("业务冒烟测试全链路通过！ ✨");
-                p.log.success("【结论】您的 SupaCloud 已完全准备好接管生产业务。");
+                s.stop("Business smoke test full chain passed! ✨");
+                p.log.success("[Conclusion] Your SupaCloud is fully ready for production.");
             } catch (testErr: any) {
-                s.stop("业务冒烟测试失败");
-                p.log.error(`冒烟测试发现逻辑故障: ${testErr.message}`);
-                p.log.info("这可能意味着数据库权限或路由脚本存在瑕疵。");
+                s.stop("Business smoke test failed");
+                p.log.error(`Smoke test found logic error: ${testErr.message}`);
+                p.log.info("This may indicate database permissions or routing script issues.");
             }
         }
 
-        p.outro("巡检结束，祝您部署愉快！");
+        p.outro("Health check complete, happy deployment!");
     } catch (error: any) {
-        s.stop("巡检中途故障");
-        p.log.error(`巡检工具自身崩溃: ${error.message}`);
+        s.stop("Health check failed midway");
+        p.log.error(`Health check tool crashed: ${error.message}`);
         process.exit(1);
     }
 }

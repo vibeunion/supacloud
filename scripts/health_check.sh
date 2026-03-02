@@ -1,6 +1,6 @@
 #!/bin/bash
-# SupaCloud - 健康检查脚本
-# 用法: health_check.sh [service]
+# SupaCloud - Health Check Script
+# Usage: health_check.sh [service]
 
 set -euo pipefail
 
@@ -22,26 +22,26 @@ check_service() {
     fi
 }
 
-echo "SupaCloud 健康检查"
+echo "SupaCloud Health Check"
 echo "=================="
 echo ""
 
-# 检查 Management API
+# Check Management API
 check_service "Management API (9090)" "curl -sf http://localhost:9090/health"
 
-# 检查 PostgreSQL
+# Check PostgreSQL
 check_service "PostgreSQL (5432)" "pg_isready -h localhost -p 5432"
 
-# 检查 Kong API Gateway
+# Check Kong API Gateway
 check_service "Kong Gateway (8000)" "curl -sf http://localhost:8000"
 
-# 检查 Supabase Studio
+# Check Supabase Studio
 check_service "Supabase Studio (3003)" "curl -sf http://localhost:3003"
 
-# 检查 Nginx
+# Check Nginx
 check_service "Nginx" "nginx -t"
 
-# 检查 S3 存储
+# Check S3 Storage
 if systemctl is-active --quiet rustfs 2>/dev/null; then
     check_service "RustFS (9000)" "curl -sf http://localhost:9000"
 elif systemctl is-active --quiet garage 2>/dev/null; then
@@ -49,8 +49,8 @@ elif systemctl is-active --quiet garage 2>/dev/null; then
 elif systemctl is-active --quiet minio 2>/dev/null; then
     check_service "MinIO (9000)" "curl -sf http://localhost:9000"
 else
-    echo -e "${YELLOW}?${NC} S3 Storage (未检测到服务)"
+    echo -e "${YELLOW}?${NC} S3 Storage (No service detected)"
 fi
 
 echo ""
-echo "检查完成"
+echo "Check complete"
