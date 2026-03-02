@@ -100,17 +100,24 @@ jobs:
         run: |
           docker rm -f e2e-node || true
           
-          # 使用带 systemd 的专业镜像，并增加 cgroup v2 兼容参数
+          # 关键方案：增加 --cgroupns=host 以匹配 GitHub Actions 的 cgroup v2 环境
           docker run -d --name e2e-node --privileged \
+            --cgroupns=host \
             --workdir /root/supacloud \
             --tmpfs /run --tmpfs /run/lock \
             -v /sys/fs/cgroup:/sys/fs/cgroup:rw \
             -v ${{ github.workspace }}:/root/supacloud \
             ${{ matrix.image }} ${{ matrix.init }}
           
-          echo "[CI] 容器 ${{ matrix.os }} (using ${{ matrix.image }}) 已启动，进行最后检查..."
-          sleep 5
-          docker inspect -f '{{.State.Running}}' e2e-node || { docker logs e2e-node; exit 1; }
+          echo "[CI] 容器 ${{ matrix.os }} (using ${{ matrix.image }}) 已启动，正在进行初始化等待 (10s)..."
+          sleep 10
+          
+          # 诊断：如果容器没跑起来，打印详细日志
+          if [ "$(docker inspect -f '{{.State.Running}}' e2e-node)" != "true" ]; then
+            echo "错误: 容器启动失败 (Exited)！系统启动日志如下："
+            docker logs e2e-node
+            exit 1
+          fi
           
           # 执行测试脚本
           docker exec -t e2e-node bash /root/supacloud/scripts/ci/container-test.sh
