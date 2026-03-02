@@ -63,14 +63,17 @@
 **One-Click Installation (Recommended)**
 
 ```bash
-# This will setup the system and install the 'supacloud' binary to /usr/local/bin
-sudo bash install.sh [options]
+# 中国用户 (使用 gh-proxy.net 加速)
+curl -fsSL https://gh-proxy.net/https://raw.githubusercontent.com/zuohuadong/supacloud/main/setup.sh | sudo bash
+
+# 国际用户
+curl -fsSL https://raw.githubusercontent.com/zuohuadong/supacloud/main/setup.sh | sudo bash
 ```
 
 **Standard Installation**
 ```bash
-# 1. Clone repository
-git clone https://github.com/zuohuadong/supacloud.git
+# 1. Clone repository (中国用户使用加速)
+git clone https://gh-proxy.net/https://github.com/zuohuadong/supacloud.git
 cd supacloud
 
 # 2. Configure (Edit config.env or use CLI flags)
@@ -293,14 +296,17 @@ Key settings in `config.env`:
 **一键安装（推荐）**
 
 ```bash
-# 脚本将自动处理系统依赖、容器环境并安装 supacloud 二进制到全局路径
-sudo bash install.sh [选项]
+# 中国用户 (使用 gh-proxy.net 加速)
+curl -fsSL https://gh-proxy.net/https://raw.githubusercontent.com/zuohuadong/supacloud/main/setup.sh | sudo bash
+
+# 国际用户
+curl -fsSL https://raw.githubusercontent.com/zuohuadong/supacloud/main/setup.sh | sudo bash
 ```
 
 **手动安装**
 ```bash
-# 1. 下载代码
-git clone https://github.com/zuohuadong/supacloud.git
+# 1. 下载代码 (中国用户使用加速)
+git clone https://gh-proxy.net/https://github.com/zuohuadong/supacloud.git
 cd supacloud
 
 # 2. 环境初始化 (支持命令行参数或读取 config.env)
