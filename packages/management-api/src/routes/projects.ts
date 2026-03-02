@@ -2,7 +2,7 @@ import { Elysia, t } from "elysia";
 import { projectService } from "../services";
 import { gatewayService } from "../services/gateway.service";
 
-// 可用区域列表
+// Available regions list
 const AVAILABLE_REGIONS = [
   { code: "local", name: "Local", continent: "local" },
   { code: "us-east-1", name: "US East (N. Virginia)", continent: "americas" },
@@ -12,12 +12,12 @@ const AVAILABLE_REGIONS = [
 ];
 
 export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
-  // 获取可用区域
+  // Get available regions
   .get("/available-regions", () => {
     return AVAILABLE_REGIONS;
   })
 
-  // 获取所有项目
+  // Get all projects
   .get("/", async () => {
     const projects = await projectService.listProjects();
     return projects;
@@ -27,7 +27,7 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     return projects;
   })
 
-  // 创建新项目
+  // Create new project
   .post(
     "/",
     async ({ body, set }) => {
@@ -44,7 +44,7 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     }
   )
 
-  // 获取项目详情
+  // Get project details
   .get(
     "/:ref",
     async ({ params, set }) => {
@@ -62,7 +62,7 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     }
   )
 
-  // 更新项目 (PATCH)
+  // Update project (PATCH)
   .patch(
     "/:ref",
     async ({ params, body, set }) => {
@@ -83,7 +83,7 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     }
   )
 
-  // 删除项目
+  // Delete project
   .delete(
     "/:ref",
     async ({ params, set }) => {
@@ -101,7 +101,7 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     }
   )
 
-  // 暂停项目
+  // Pause project
   .post(
     "/:ref/pause",
     async ({ params, set }) => {
@@ -119,7 +119,7 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     }
   )
 
-  // 恢复项目
+  // Restore project
   .post(
     "/:ref/restore",
     async ({ params, set }) => {
@@ -137,7 +137,7 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     }
   )
 
-  // 获取项目健康状态
+  // Get project health status
   .get(
     "/:ref/health",
     async ({ params, set }) => {
@@ -155,7 +155,7 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     }
   )
 
-  // 获取项目状态 (兼容旧接口)
+  // Get project status (legacy compatibility)
   .get(
     "/:ref/status",
     async ({ params, set }) => {
@@ -173,7 +173,7 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     }
   )
 
-  // 获取项目健康状态
+  // Get project health status
   .get(
     "/:ref/usage",
     async ({ params, set }) => {
@@ -182,7 +182,7 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
         set.status = 404;
         return { error: "Project not found" };
       }
-      // 返回模拟的基础指标，使 Studio 仪表盘动起来
+      // Return simulated basic metrics to make Studio dashboard work
       return {
         data: {
           database: { usage: 10, limit: 500, unit: "MB" },
@@ -199,7 +199,7 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     }
   )
 
-  // 重启项目
+  // Restart project
   .post(
     "/:ref/restart",
     async ({ params, set }) => {
@@ -217,7 +217,7 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     }
   )
 
-  // 获取项目设置
+  // Get project settings
   .get(
     "/:ref/settings",
     async ({ params, set }) => {
@@ -235,7 +235,7 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     }
   )
 
-  // 更新项目设置
+  // Update project settings
   .put(
     "/:ref/settings",
     async ({ params, body, set }) => {
@@ -254,7 +254,7 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     }
   )
 
-  // 获取项目 API 密钥
+  // Get project API keys
   .get(
     "/:ref/api-keys",
     async ({ params, set }) => {
@@ -272,7 +272,7 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     }
   )
 
-  // 轮换 API 密钥
+  // Rotate API keys
   .post(
     "/:ref/api-keys/rotate",
     async ({ params, set }) => {
@@ -290,7 +290,7 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     }
   )
 
-  // 获取日志
+  // Get logs
   .get(
     "/:ref/logs",
     async ({ params, query, set }) => {
@@ -307,7 +307,7 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     }
   )
 
-  // 获取备份列表
+  // Get backup list
   .get(
     "/:ref/database/backups",
     async ({ params, set }) => {
@@ -321,7 +321,7 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     }
   )
 
-  // 还原备份
+  // Restore backup
   .post(
     "/:ref/database/backups/restore",
     async ({ params, body, set }) => {
@@ -342,7 +342,7 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     }
   )
 
-  // 更新网络限制
+  // Update network restrictions
   .post(
     "/:ref/network-restrictions",
     async ({ params, body, set }) => {
@@ -363,7 +363,7 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     }
   )
 
-  // 获取自定义域名
+  // Get custom domain
   .get(
     "/:ref/custom-hostname",
     async ({ params, set }) => {
@@ -381,7 +381,7 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     }
   )
 
-  // 添加自定义域名
+  // Add custom domain
   .post(
     "/:ref/custom-hostname",
     async ({ params, body, set }) => {
@@ -402,7 +402,7 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     }
   )
 
-  // 删除自定义域名
+  // Delete custom domain
   .delete(
     "/:ref/custom-hostname",
     async ({ params, set }) => {
@@ -420,7 +420,7 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     }
   )
 
-  // 获取 Auth 配置
+  // Get Auth config
   .get(
     "/:ref/config/auth",
     async ({ params, set }) => {
@@ -438,7 +438,7 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     }
   )
 
-  // 修改 Auth 配置（支持第三方 Providers 深拷贝覆盖）
+  // Modify Auth config (supports deep copy override for third-party Providers)
   .patch(
     "/:ref/config/auth",
     async ({ params, body, set }) => {
@@ -468,7 +468,7 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     }
   )
 
-  // 获取 Database 配置
+  // Get Database config
   .get(
     "/:ref/config/database",
     async ({ params, set }) => {
@@ -486,7 +486,7 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     }
   )
 
-  // 修改 Database 配置
+  // Modify Database config
   .patch(
     "/:ref/config/database",
     async ({ params, body, set }) => {
@@ -506,7 +506,7 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     }
   )
 
-  // 获取 PostgREST 配置
+  // Get PostgREST config
   .get(
     "/:ref/config/postgrest",
     async ({ params, set }) => {
@@ -517,7 +517,7 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     { params: t.Object({ ref: t.String() }) }
   )
 
-  // 修改 PostgREST 配置
+  // Modify PostgREST config
   .patch(
     "/:ref/config/postgrest",
     async ({ params, body, set }) => {
@@ -536,7 +536,7 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     }
   )
 
-  // 获取 Storage 配置
+  // Get Storage config
   .get(
     "/:ref/config/storage",
     async ({ params, set }) => {
@@ -547,7 +547,7 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     { params: t.Object({ ref: t.String() }) }
   )
 
-  // 修改 Storage 配置
+  // Modify Storage config
   .patch(
     "/:ref/config/storage",
     async ({ params, body, set }) => {
@@ -566,7 +566,7 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     }
   )
 
-  // 获取 Realtime 配置
+  // Get Realtime config
   .get(
     "/:ref/config/realtime",
     async ({ params, set }) => {
@@ -577,7 +577,7 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     { params: t.Object({ ref: t.String() }) }
   )
 
-  // 修改 Realtime 配置
+  // Modify Realtime config
   .patch(
     "/:ref/config/realtime",
     async ({ params, body, set }) => {
@@ -596,7 +596,7 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     }
   )
 
-  // 获取 PgBouncer 配置 (Studio 显示用)
+  // Get PgBouncer config (for Studio display)
   .get(
     "/:ref/pgbouncer",
     async ({ params, set }) => {
@@ -611,11 +611,11 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     { params: t.Object({ ref: t.String() }) }
   )
 
-  // 获取 Typescript Types 存根，防止面板报错
+  // Get Typescript Types stub, prevent panel errors
   .get(
     "/:ref/types/typescript",
     async ({ params, query, set }) => {
-      // 在生产环境中通常会从真实的 Postgres 获取 pgmeta 然后生成。此处返回一个壳子用于 Studio 兼容处理。
+      // In production environment, usually get pgmeta from real Postgres then generate. Here return a shell for Studio compatibility.
       return { types: "export type Json = string | number | boolean | null | { [key: string]: Json } | Json[];" };
     },
     {
@@ -624,7 +624,7 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     }
   )
 
-  // 获取环境变量 (Secrets)
+  // Get environment variables (Secrets)
   .get(
     "/:ref/secrets",
     async ({ params, set }) => {
@@ -642,7 +642,7 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     }
   )
 
-  // 设置环境变量
+  // Set environment variables
   .post(
     "/:ref/secrets",
     async ({ params, body, set }) => {
@@ -666,7 +666,7 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     }
   )
 
-  // 删除环境变量
+  // Delete environment variable
   .delete(
     "/:ref/secrets/:name",
     async ({ params, set }) => {
@@ -685,7 +685,7 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     }
   )
 
-  // 获取函数列表
+  // Get function list
   .get(
     "/:ref/functions",
     async ({ params, set }) => {
@@ -699,7 +699,7 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     }
   )
 
-  // 获取函数代码
+  // Get function code
   .get(
     "/:ref/functions/:slug",
     async ({ params, set }) => {
@@ -718,7 +718,7 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     }
   )
 
-  // 部署函数代码
+  // Deploy function code
   .post(
     "/:ref/functions/:slug",
     async ({ params, body, set }) => {
@@ -740,7 +740,7 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     }
   )
 
-  // 删除函数代码
+  // Delete function code
   .delete(
     "/:ref/functions/:slug",
     async ({ params, set }) => {
@@ -759,7 +759,7 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     }
   )
 
-  // 更新网关配置 (限流, CORS, JWT)
+  // Update gateway config (rate limiting, CORS, JWT)
   .post(
     "/:ref/gateway/config",
     async ({ params, body, set }) => {

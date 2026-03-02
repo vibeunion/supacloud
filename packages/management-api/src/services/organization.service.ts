@@ -3,13 +3,13 @@ import type { Organization } from "../db";
 
 export class OrganizationService {
     async listOrganizations(): Promise<Organization[]> {
-        // 确保至少有一个默认组织
+        // Ensure at least one default organization exists
         await organizationRepository.ensureDefaultOrganization();
 
-        // 获取所有组织
+        // Get all organizations
         const orgs = await organizationRepository.findAll();
 
-        // 如果列表为空（理论上不应该），再次尝试确保并获取
+        // If list is empty (theoretically shouldn't happen), try again to ensure and get
         if (orgs.length === 0) {
             const defaultOrg = await organizationRepository.ensureDefaultOrganization();
             return [defaultOrg];

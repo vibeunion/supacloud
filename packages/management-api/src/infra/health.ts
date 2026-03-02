@@ -10,24 +10,24 @@ export interface HealthReport {
 
 export class HealthChecker {
     /**
-     * 运行全量体检
+     * Run full system check
      */
     static async runFullCheck(): Promise<HealthReport[]> {
         const reports: HealthReport[] = [];
 
-        // 1. 系统级检查
+        // 1. System-level checks
         reports.push(await this.checkDiskSpace());
         reports.push(await this.checkMemory());
 
-        // 2. 基础设施服务检查
+        // 2. Infrastructure service checks
         reports.push(await this.checkServiceStatus("supacloud", "Management API"));
         reports.push(await this.checkPigstyStatus());
         reports.push(await this.checkAngieStatus());
 
-        // 3. 数据库专项检查
+        // 3. Database-specific checks
         reports.push(await this.checkPostgresHealth());
 
-        // 4. 云原生存储检查
+        // 4. Cloud-native storage check
         reports.push(await this.checkCloudStorage());
 
         return reports;
@@ -40,19 +40,19 @@ export class HealthChecker {
             if (isMounted) {
                 const df = await $`df -h ${mountPoint} | tail -n 1`.text();
                 return {
-                    component: "云原生存储 (JuiceFS)",
+                    component: "Cloud-native Storage (JuiceFS)",
                     status: "OK",
-                    message: `已挂载: ${df.trim()}`
+                    message: `Mounted: ${df.trim()}`
                 };
             }
             return {
-                component: "云原生存储",
+                component: "Cloud-native Storage",
                 status: "WARN",
-                message: "未挂载云原生存储后端",
-                recommendation: "如果需要云端弹性存储，请运行 'supacloud storage setup'。"
+                message: "Cloud-native storage backend not mounted",
+                recommendation: "If you need cloud elastic storage, run 'supacloud storage setup'."
             };
         } catch {
-            return { component: "云原生存储", status: "ERROR", message: "无法探测存储挂载状态" };
+            return { component: "Cloud-native Storage", status: "ERROR", message: "Cannot detect storage mount status" };
         }
     }
 
@@ -63,13 +63,13 @@ export class HealthChecker {
             const isLow = available.endsWith("M") || (available.endsWith("G") && parseFloat(available) < 5);
 
             return {
-                component: "存储空间",
+                component: "Storage Space",
                 status: isLow ? "WARN" : "OK",
-                message: `可用空间: ${available}`,
-                recommendation: isLow ? "建议扩容磁盘或清理 /var/log 日志。" : undefined
+                message: `Available: ${available}`,
+                recommendation: isLow ? "Recommend expanding disk or cleaning /var/log logs." : undefined
             };
         } catch {
-            return { component: "存储空间", status: "ERROR", message: "无法获取磁盘信息" };
+            return { component: "Storage Space", status: "ERROR", message: "Cannot get disk info" };
         }
     }
 
@@ -79,17 +79,17 @@ export class HealthChecker {
         const isLow = free < 0.5;
 
         return {
-            component: "内存状态",
+            component: "Memory Status",
             status: isLow ? "WARN" : "OK",
-            message: `剩余 ${free.toFixed(2)}GB / 总计 ${total.toFixed(2)}GB`,
-            recommendation: isLow ? "由于数据库较重，建议增加 RAM 或启用 Swap。" : undefined
+            message: `Free ${free.toFixed(2)}GB / Total ${total.toFixed(2)}GB`,
+            recommendation: isLow ? "Database is heavy, recommend adding RAM or enabling Swap." : undefined
         };
     }
 
     private static async checkServiceStatus(name: string, label: string): Promise<HealthReport> {
         try {
-            // 在 Docker 容器中，systemctl 即使存在也通常无法使用（PID 1 不是 systemd）
-            // 检查系统是否真的由 systemd 引导
+            // In Docker containers, systemctl may exist but usually cannot be used (PID 1 is not systemd)
+            // Check if system is really booted by systemd
             const isSystemd = (await $`systemctl is-system-running`.nothrow().quiet()).exitCode === 0 ||
                 (await $`systemctl --version`.nothrow().quiet()).exitCode === 0;
 
@@ -98,9 +98,9 @@ export class HealthChecker {
             if (!isSystemd) {
                 return {
                     component: label,
-                    status: isContainer ? "ERROR" : "WARN", // 在容器内没启动成功那就是错误
-                    message: "系统未由 Systemd 引导",
-                    recommendation: "Pigsty 强依赖 Systemd。请确保在标准 Linux 发行版或支持 Systemd 的容器中运行。"
+                    status: isContainer ? "ERROR" : "WARN", // If not started in container, that's an error
+                    message: "System not booted by Systemd",
+                    recommendation: "Pigsty strongly depends on Systemd. Please ensure running on standard Linux distro or Systemd-enabled container."
                 };
             }
 
@@ -108,31 +108,31 @@ export class HealthChecker {
             return {
                 component: label,
                 status: isActive ? "OK" : "ERROR",
-                message: isActive ? "运行中" : "服务已停止",
-                recommendation: isActive ? undefined : `尝试运行 'sudo systemctl restart ${name}'。`
+                message: isActive ? "Running" : "Service stopped",
+                recommendation: isActive ? undefined : `Try running 'sudo systemctl restart ${name}'.`
             };
         } catch {
-            return { component: label, status: "WARN", message: "无法访问服务状态" };
+            return { component: label, status: "WARN", message: "Cannot access service status" };
         }
     }
 
     private static async checkPostgresHealth(): Promise<HealthReport> {
         try {
-            // 1. 基础连通性
+            // 1. Basic connectivity
             const isReady = (await $`pg_isready -h localhost`.nothrow()).exitCode === 0;
             if (!isReady) {
                 return {
-                    component: "数据库 (PostgreSQL)",
+                    component: "Database (PostgreSQL)",
                     status: "ERROR",
-                    message: "数据库不接受连接",
-                    recommendation: "检查端口 5432 是否被防火墙拦截，或查询 'systemctl status postgres'。"
+                    message: "Database not accepting connections",
+                    recommendation: "Check if port 5432 is blocked by firewall, or query 'systemctl status postgres'."
                 };
             }
 
-            // 2. 获取版本
+            // 2. Get version
             const pgVersion = await $`psql -At -c "SHOW server_version;"`.nothrow().text();
 
-            // 3. 集群高可用探测 (Patroni)
+            // 3. Cluster HA detection (Patroni)
             // @ts-ignore
             const { ClusterManager } = await import("./cluster");
             const nodes: any[] = await ClusterManager.getStatus();
@@ -144,43 +144,43 @@ export class HealthChecker {
 
                 if (!leader) {
                     return {
-                        component: "数据库集群 (HA)",
+                        component: "Database Cluster (HA)",
                         status: "ERROR",
-                        message: `集群 (PG ${pgVersion.trim()}) 当前无主 (No Leader)`,
-                        recommendation: "Patroni 可能正在选主或 ETCD 出现故障。请运行 'supacloud cluster health' 处理。"
+                        message: `Cluster (PG ${pgVersion.trim()}) currently has no leader`,
+                        recommendation: "Patroni may be electing leader or ETCD has issues. Please run 'supacloud cluster health' to handle."
                     };
                 }
 
                 if (issues.length > 0) {
                     return {
-                        component: "数据库集群 (HA)",
+                        component: "Database Cluster (HA)",
                         status: "WARN",
-                        message: `PG ${pgVersion.trim()} 有 ${issues.length} 个节点状态异常`,
-                        recommendation: "至少一个副本宕机，高可用可用性下降。"
+                        message: `PG ${pgVersion.trim()} has ${issues.length} nodes with abnormal status`,
+                        recommendation: "At least one replica is down, HA availability reduced."
                     };
                 }
 
                 return {
-                    component: "数据库集群 (HA)",
+                    component: "Database Cluster (HA)",
                     status: "OK",
-                    message: `集群正常 (PG ${pgVersion.trim()}, 主: ${leader.member}, 存活副本: ${replicas.length})`
+                    message: `Cluster healthy (PG ${pgVersion.trim()}, Primary: ${leader.member}, Alive replicas: ${replicas.length})`
                 };
             }
 
-            // 4. 后备方案：检测主从同步 (尝试在管理库执行简单查询)
+            // 4. Fallback: Detect primary-replica sync (try simple query on management DB)
             const syncStatus = await $`psql -At -c "SELECT count(*) FROM pg_stat_replication;"`.nothrow();
             if (syncStatus.exitCode === 0) {
                 const replicas = parseInt(syncStatus.stdout.toString().trim());
                 return {
-                    component: "数据库连接",
+                    component: "Database Connection",
                     status: "OK",
-                    message: `PostgreSQL ${pgVersion.trim()} 已就绪 (活动副本数: ${replicas})`
+                    message: `PostgreSQL ${pgVersion.trim()} ready (Active replicas: ${replicas})`
                 };
             }
 
-            return { component: "数据库 (PostgreSQL)", status: "OK", message: `PG ${pgVersion.trim()} 单节点运行中` };
+            return { component: "Database (PostgreSQL)", status: "OK", message: `PG ${pgVersion.trim()} running in single-node mode` };
         } catch {
-            return { component: "数据库", status: "WARN", message: "无法探测详细数据库指标" };
+            return { component: "Database", status: "WARN", message: "Cannot detect detailed database metrics" };
         }
     }
 
@@ -189,13 +189,13 @@ export class HealthChecker {
             const version = await $`pig --version`.nothrow().text();
             if (version.trim()) {
                 return {
-                    component: "Pigsty 引擎",
+                    component: "Pigsty Engine",
                     status: "OK",
-                    message: `已就绪 (版本: ${version.trim()})`
+                    message: `Ready (Version: ${version.trim()})`
                 };
             }
         } catch { }
-        return this.checkServiceStatus("pigsty", "Pigsty 基础设施");
+        return this.checkServiceStatus("pigsty", "Pigsty Infrastructure");
     }
 
     private static async checkAngieStatus(): Promise<HealthReport> {
@@ -206,13 +206,13 @@ export class HealthChecker {
                 const vMatch = version.match(/angie\/([^ ]+)/);
                 const vStr = vMatch ? vMatch[1] : "unknown";
                 return {
-                    component: "负载均衡 (Angie)",
+                    component: "Load Balancer (Angie)",
                     status: isActive ? "OK" : "ERROR",
-                    message: isActive ? `运行中 (v${vStr})` : `服务已停止 (v${vStr})`,
-                    recommendation: isActive ? undefined : "请执行 'sudo systemctl start angie'。"
+                    message: isActive ? `Running (v${vStr})` : `Service stopped (v${vStr})`,
+                    recommendation: isActive ? undefined : "Please run 'sudo systemctl start angie'."
                 };
             }
         } catch { }
-        return this.checkServiceStatus("angie", "负载均衡 (Angie)");
+        return this.checkServiceStatus("angie", "Load Balancer (Angie)");
     }
 }

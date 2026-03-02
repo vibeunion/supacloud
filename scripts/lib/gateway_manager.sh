@@ -1,6 +1,6 @@
 #!/bin/bash
-# SupaCloud - Kong Gateway 管理脚本
-# 用法: gateway_manager.sh <action> <project_ref> [args...]
+# SupaCloud - Kong Gateway Management Script
+# Usage: gateway_manager.sh <action> <project_ref> [args...]
 
 set -euo pipefail
 
@@ -8,7 +8,7 @@ ACTION="${1:-}"
 PROJECT_REF="${2:-}"
 KONG_ADMIN_URL="${KONG_ADMIN_URL:-http://localhost:8001}"
 
-# 验证参数
+# Validate parameters
 validate_params() {
     if [ -z "$ACTION" ] || [ -z "$PROJECT_REF" ]; then
         echo "ERROR: Missing required parameters" >&2
@@ -17,33 +17,33 @@ validate_params() {
     fi
 }
 
-# 确保 Consumer 存在
+# Ensure Consumer exists
 ensure_consumer() {
     curl -s -X POST "${KONG_ADMIN_URL}/consumers" \
         -d "username=${PROJECT_REF}" \
         -d "custom_id=${PROJECT_REF}" > /dev/null
 }
 
-# 设置 JWT 凭据
+# Set JWT credentials
 setup_jwt() {
     local jwt_secret="$1"
     ensure_consumer
     
-    # 先尝试删除旧的 JWT 凭据（如果存在）
+    # First try to delete old JWT credentials (if exists)
     local existing_id
     existing_id=$(curl -s "${KONG_ADMIN_URL}/consumers/${PROJECT_REF}/jwt" | grep -oP '"id":"\K[^"]+' | head -1 || true)
     if [ -n "$existing_id" ]; then
         curl -s -X DELETE "${KONG_ADMIN_URL}/consumers/${PROJECT_REF}/jwt/${existing_id}" > /dev/null
     fi
 
-    # 创建新的 JWT 凭据
+    # Create new JWT credentials
     curl -s -X POST "${KONG_ADMIN_URL}/consumers/${PROJECT_REF}/jwt" \
         -d "key=supabase" \
         -d "secret=${jwt_secret}" \
         -d "algorithm=HS256" > /dev/null
 }
 
-# 设置限流
+# Set rate limiting
 set_rate_limit() {
     local tier="${1:-free}"
     local second=10
@@ -57,23 +57,23 @@ set_rate_limit() {
             second=1000; minute=50000; hour=1000000 ;;
     esac
 
-    # 为该项目的 Route 绑定 rate-limiting 插件
-    # 假设 route 名称为 "route-${PROJECT_REF}"
+    # Bind rate-limiting plugin for this project's Route
+    # Assume route name is "route-${PROJECT_REF}"
     local route_name="route-${PROJECT_REF}"
     
-    # 获取现有插件 ID (如果有)
+    # Get existing plugin ID (if any)
     local plugin_id
     plugin_id=$(curl -s "${KONG_ADMIN_URL}/routes/${route_name}/plugins" | grep -oP '"id":"\K[^"]+' | head -1 || true)
 
     if [ -n "$plugin_id" ]; then
-        # 更新现有插件
+        # Update existing plugin
         curl -s -X PATCH "${KONG_ADMIN_URL}/plugins/${plugin_id}" \
             -d "config.second=${second}" \
             -d "config.minute=${minute}" \
             -d "config.hour=${hour}" \
             -d "config.policy=local" > /dev/null
     else
-        # 创建新插件
+        # Create new plugin
         curl -s -X POST "${KONG_ADMIN_URL}/routes/${route_name}/plugins" \
             -d "name=rate-limiting" \
             -d "config.second=${second}" \
@@ -83,12 +83,12 @@ set_rate_limit() {
     fi
 }
 
-# 设置 CORS
+# Set CORS
 set_cors() {
     local origins="${1:-*}"
     local route_name="route-${PROJECT_REF}"
     
-    # 获取现有 cors 插件 ID
+    # Get existing cors plugin ID
     local plugin_id
     plugin_id=$(curl -s "${KONG_ADMIN_URL}/routes/${route_name}/plugins?name=cors" | grep -oP '"id":"\K[^"]+' | head -1 || true)
 
@@ -110,11 +110,11 @@ set_cors() {
     fi
 }
 
-# 启用 JWT 验证
+# Enable JWT verification
 enable_jwt() {
     local route_name="route-${PROJECT_REF}"
     
-    # 检查是否已启用
+    # Check if already enabled
     if ! curl -s "${KONG_ADMIN_URL}/routes/${route_name}/plugins" | grep -q '"name":"jwt"'; then
         curl -s -X POST "${KONG_ADMIN_URL}/routes/${route_name}/plugins" \
             -d "name=jwt" \
@@ -123,16 +123,16 @@ enable_jwt() {
     fi
 }
 
-# ========== Per-Tenant Upstream（方案C+：多租户动态路由 - 声明式） ==========
-# 将租户配置追加到 Kong Declarative YAML 中并热重载
+# ========== Per-Tenant Upstream (Plan C+: Multi-tenant dynamic routing - Declarative) ==========
+# Append tenant configuration to Kong Declarative YAML and hot reload
 rebuild_kong_config() {
-    # 支持通过 KONG_YML 环境变量覆盖路径，以适配不同部署场景（Pigsty / 自定义安装）
-    # 默认路径对应 Pigsty 标准安装目录
+    # Support overriding path via KONG_YML environment variable for different deployment scenarios (Pigsty / custom install)
+    # Default path corresponds to Pigsty standard installation directory
     local KONG_YML="${KONG_YML:-/root/pigsty/app/supabase/volumes/api/kong.yml}"
     local KONG_BASE="${KONG_YML}.base"
     local TENANT_DIR="/etc/supabase/kong_tenants"
     
-    # 初始化 base 全局配置备份
+    # Initialize base global config backup
     if [ ! -f "$KONG_BASE" ]; then
         if [ -f "$KONG_YML" ]; then
             cp "$KONG_YML" "$KONG_BASE"
@@ -145,7 +145,7 @@ rebuild_kong_config() {
     local temp_yml
     temp_yml=$(mktemp)
     
-    # 在 services: 后插入所有的租户服务配置段落
+    # Insert all tenant service configuration blocks after services:
     awk -v tenant_dir="$TENANT_DIR" '
     /^services:/ {
         print $0
@@ -158,7 +158,7 @@ rebuild_kong_config() {
     cat "$temp_yml" > "$KONG_YML"
     rm -f "$temp_yml"
     
-    # 热重载 Kong 节点
+    # Hot reload Kong node
     echo "Reloading Kong Gateway..."
     if docker ps -q -f "name=supabase-kong" | grep -q .; then
         docker exec supabase-kong kong reload
@@ -170,11 +170,11 @@ rebuild_kong_config() {
 }
 
 setup_upstream() {
-    # 彻底修复：函数内部必须读取自己的位置参数，$1 为 pgrst_port, $2 为 gotrue_port
+    # Complete fix: function must read its own positional parameters, $1 is pgrst_port, $2 is gotrue_port
     local pgrst_port="${1:-}"
     local gotrue_port="${2:-}"
     
-    # [变更] Edge Functions 现在使用单实例全局入口，不再依赖单个租户独立分配端口 
+    # [Change] Edge Functions now use single instance global entry, no longer depend on individual tenant port allocation 
     local functions_port="9000"
     
     local storage_port="${4:-}"
@@ -185,8 +185,8 @@ setup_upstream() {
         exit 1
     fi
 
-    # 检测宿主机在容器网络中的 IP（供 Kong 容器反向访问宿主机进程）
-    # 优先级：环境变量 > podman1 > docker0 > 127.0.0.1
+    # Detect host IP in container network (for Kong container to reverse access host processes)
+    # Priority: environment variable > podman1 > docker0 > 127.0.0.1
     local host_ip="${DOCKER_HOST_IP:-}"
     if [ -z "$host_ip" ]; then
         host_ip=$(ip addr show podman1 2>/dev/null | grep "inet " | awk '{print $2}' | cut -d/ -f1 || true)
@@ -206,7 +206,7 @@ setup_upstream() {
 
     echo "Setting up Kong declarative configuration for ${PROJECT_REF}..."
 
-    # 生成声明式的 Kong 配置文件
+    # Generate declarative Kong configuration file
     cat > "$tenant_yml" <<EOF
   - name: svc-pgrst-${PROJECT_REF}
     url: http://${host_ip}:${pgrst_port}
@@ -215,7 +215,7 @@ setup_upstream() {
     write_timeout: 60000
     routes:
       - name: route-pgrst-${PROJECT_REF}
-        # 彻底修复：strip_path 必须为 true，否则 Kong 会把路径前缀带给下游导致 404
+        # Complete fix: strip_path must be true, otherwise Kong will pass path prefix to downstream causing 404
         strip_path: true
         preserve_host: true
         paths:
@@ -242,7 +242,7 @@ setup_upstream() {
             - ${PROJECT_REF}
 EOF
 
-    # 可选服务: Edge Functions
+    # Optional service: Edge Functions
     if [ -n "$functions_port" ]; then
         cat >> "$tenant_yml" <<EOF
   - name: svc-functions-${PROJECT_REF}
@@ -264,7 +264,7 @@ EOF
 EOF
     fi
 
-    # 可选服务: Storage
+    # Optional service: Storage
     if [ -n "$storage_port" ]; then
         cat >> "$tenant_yml" <<EOF
   - name: svc-storage-${PROJECT_REF}
@@ -285,7 +285,7 @@ EOF
 EOF
     fi
 
-    # 可选服务: Realtime
+    # Optional service: Realtime
     if [ -n "$realtime_port" ]; then
         cat >> "$tenant_yml" <<EOF
   - name: svc-realtime-${PROJECT_REF}
@@ -310,7 +310,7 @@ EOF
     echo "Kong upstream registered for ${PROJECT_REF} (pgrst:${pgrst_port}, gotrue:${gotrue_port})"
 }
 
-# 移除租户的 Kong Service/Route
+# Remove tenant's Kong Service/Route
 remove_service() {
     echo "Removing Kong service for ${PROJECT_REF}..."
     rm -f "/etc/supabase/kong_tenants/${PROJECT_REF}.yml"
@@ -318,7 +318,7 @@ remove_service() {
     echo "Kong service removed for ${PROJECT_REF}"
 }
 
-# 主逻辑
+# Main logic
 validate_params
 
 case "$ACTION" in
@@ -335,14 +335,14 @@ case "$ACTION" in
         enable_jwt
         ;;
     setup-upstream)
-        # 彻底修复：显式传递位置参数 $3 到 $7 给函数内部
+        # Complete fix: explicitly pass positional parameters $3 to $7 to function internals
         setup_upstream "${3:-}" "${4:-}" "${5:-}" "${6:-}" "${7:-}"
         ;;
     remove-service)
         remove_service
         ;;
     add-upstream-target)
-        # 将副本加入负载均衡
+        # Add replica to load balancer
         UPSTREAM_NAME="upstream-${PROJECT_REF}-ro"
         REPLICA_IP="${3:-}"
         curl -s -X POST "${KONG_ADMIN_URL}/upstreams" -d "name=${UPSTREAM_NAME}" > /dev/null || true

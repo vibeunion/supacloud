@@ -2,7 +2,7 @@ import { Elysia } from "elysia";
 
 export const userRoutes = new Elysia({ prefix: "/v1" })
     .get("/profile", async () => {
-        // 模拟 Supabase 官方 profile 响应
+        // Simulate Supabase official profile response
         return {
             id: "00000000-0000-0000-0000-000000000000",
             primary_email: "admin@supacloud.local",

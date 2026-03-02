@@ -8,15 +8,15 @@ export class ShellService {
     this.scriptsPath = config.scriptsPath;
   }
 
-  // 执行脚本并返回结果
+  // Execute script and return result
   async execute(script: string, args: string[]): Promise<{ success: boolean; output: string; error?: string }> {
     const scriptPath = `${this.scriptsPath}/${script}`;
 
-    // 从 DATABASE_URL 解析数据库连接信息
+    // Parse database connection info from DATABASE_URL
     const dbUrl = config.databaseUrl;
     const dbUrlMatch = dbUrl.match(/postgresql:\/\/([^:]+):([^@]+)@([^:]+):(\d+)\//);
 
-    // 构建环境变量
+    // Build environment variables
     const env: Record<string, string> = {
       ...process.env,
       PG_HOST: process.env.PG_HOST || dbUrlMatch?.[3] || "localhost",
@@ -37,7 +37,24 @@ export class ShellService {
     }
   }
 
-  // 检查脚本是否存在
+  // Execute a system command (not a script)
+  async executeCommand(command: string, args: string[] = []): Promise<{ success: boolean; output: string; error?: string }> {
+    try {
+      const cmd = args.length > 0 ? `${command} ${args.join(" ")}` : command;
+      const result = await $`${{ raw: cmd }}`.text();
+      return { success: true, output: result.trim() };
+    } catch (error: any) {
+      const stderr = error.stderr?.toString() || "";
+      const stdout = error.stdout?.toString() || "";
+      return {
+        success: false,
+        output: stdout + stderr,
+        error: stderr || error.message || "Command failed",
+      };
+    }
+  }
+
+  // Check if script exists
   async scriptExists(script: string): Promise<boolean> {
     const scriptPath = `${this.scriptsPath}/${script}`;
     try {
