@@ -133,13 +133,14 @@ export class HealthChecker {
             const pgVersion = await $`psql -At -c "SHOW server_version;"`.nothrow().text();
 
             // 3. 集群高可用探测 (Patroni)
+            // @ts-ignore
             const { ClusterManager } = await import("./cluster");
-            const nodes = await ClusterManager.getStatus();
+            const nodes: any[] = await ClusterManager.getStatus();
 
             if (nodes.length > 0) {
-                const leader = nodes.find(n => n.role === "Leader");
-                const replicas = nodes.filter(n => n.role === "Replica");
-                const issues = nodes.filter(n => n.state !== "running");
+                const leader = nodes.find((n: any) => n.role === "Leader");
+                const replicas = nodes.filter((n: any) => n.role === "Replica");
+                const issues = nodes.filter((n: any) => n.state !== "running");
 
                 if (!leader) {
                     return {

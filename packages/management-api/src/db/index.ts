@@ -1,11 +1,27 @@
 import { SQL } from "bun";
 import { config } from "../config";
 
-// 创建数据库连接
+// 解析 DATABASE_URL 获取各组件
+function parseDatabaseUrl(url: string) {
+  const urlMatch = url.match(/postgresql?:\/\/([^:]+):([^@]+)@([^:]+):(\d+)\/(.+)/);
+  if (!urlMatch) {
+    throw new Error("Invalid DATABASE_URL format");
+  }
+  const [, username, password, hostname, port, database] = urlMatch;
+  return { hostname, port: parseInt(port, 10), database, username, password };
+}
+
+const dbConfig = parseDatabaseUrl(config.databaseUrl);
+
+// 创建数据库连接 - 使用显式配置确保数据库名正确
 export const sql = new SQL({
-  url: config.databaseUrl,
-  max: 100, // 维持稳定数量
-  idleTimeout: 30, // 较短的空闲以保持活跃
+  hostname: dbConfig.hostname,
+  port: dbConfig.port,
+  database: dbConfig.database,
+  username: dbConfig.username,
+  password: dbConfig.password,
+  max: 100,
+  idleTimeout: 30,
   connectTimeout: 5000,
 });
 
@@ -25,9 +41,8 @@ export interface Organization {
 export interface Project {
   id: string;
   ref: string;
-  organization_id: string; // 关联组织
+  organization_id: string;
   name: string;
-  // ... 其他保持不变
   db_name: string;
   db_user: string;
   db_password: string;
