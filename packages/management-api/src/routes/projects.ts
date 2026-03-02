@@ -468,6 +468,162 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     }
   )
 
+  // 获取 Database 配置
+  .get(
+    "/:ref/config/database",
+    async ({ params, set }) => {
+      const settings = await projectService.getProjectSettings(params.ref);
+      if (!settings) {
+        set.status = 404;
+        return { error: "Project not found" };
+      }
+      return settings.database || {};
+    },
+    {
+      params: t.Object({
+        ref: t.String(),
+      }),
+    }
+  )
+
+  // 修改 Database 配置
+  .patch(
+    "/:ref/config/database",
+    async ({ params, body, set }) => {
+      const settings = await projectService.getProjectSettings(params.ref);
+      if (!settings) return { error: "Project not found" };
+
+      const current = (settings.database as any) || {};
+      const updated = await projectService.updateProjectSettings(params.ref, {
+        ...settings,
+        database: { ...current, ...(typeof body === "object" ? body : {}) },
+      });
+      return updated?.database || {};
+    },
+    {
+      params: t.Object({ ref: t.String() }),
+      body: t.Record(t.String(), t.Unknown()),
+    }
+  )
+
+  // 获取 PostgREST 配置
+  .get(
+    "/:ref/config/postgrest",
+    async ({ params, set }) => {
+      const settings = await projectService.getProjectSettings(params.ref);
+      if (!settings) return { error: "Project not found" };
+      return settings.postgrest || {};
+    },
+    { params: t.Object({ ref: t.String() }) }
+  )
+
+  // 修改 PostgREST 配置
+  .patch(
+    "/:ref/config/postgrest",
+    async ({ params, body, set }) => {
+      const settings = await projectService.getProjectSettings(params.ref);
+      if (!settings) return { error: "Project not found" };
+      const current = (settings.postgrest as any) || {};
+      const updated = await projectService.updateProjectSettings(params.ref, {
+        ...settings,
+        postgrest: { ...current, ...(typeof body === "object" ? body : {}) },
+      });
+      return updated?.postgrest || {};
+    },
+    {
+      params: t.Object({ ref: t.String() }),
+      body: t.Record(t.String(), t.Unknown()),
+    }
+  )
+
+  // 获取 Storage 配置
+  .get(
+    "/:ref/config/storage",
+    async ({ params, set }) => {
+      const settings = await projectService.getProjectSettings(params.ref);
+      if (!settings) return { error: "Project not found" };
+      return settings.storage || {};
+    },
+    { params: t.Object({ ref: t.String() }) }
+  )
+
+  // 修改 Storage 配置
+  .patch(
+    "/:ref/config/storage",
+    async ({ params, body, set }) => {
+      const settings = await projectService.getProjectSettings(params.ref);
+      if (!settings) return { error: "Project not found" };
+      const current = (settings.storage as any) || {};
+      const updated = await projectService.updateProjectSettings(params.ref, {
+        ...settings,
+        storage: { ...current, ...(typeof body === "object" ? body : {}) },
+      });
+      return updated?.storage || {};
+    },
+    {
+      params: t.Object({ ref: t.String() }),
+      body: t.Record(t.String(), t.Unknown()),
+    }
+  )
+
+  // 获取 Realtime 配置
+  .get(
+    "/:ref/config/realtime",
+    async ({ params, set }) => {
+      const settings = await projectService.getProjectSettings(params.ref);
+      if (!settings) return { error: "Project not found" };
+      return settings.realtime || {};
+    },
+    { params: t.Object({ ref: t.String() }) }
+  )
+
+  // 修改 Realtime 配置
+  .patch(
+    "/:ref/config/realtime",
+    async ({ params, body, set }) => {
+      const settings = await projectService.getProjectSettings(params.ref);
+      if (!settings) return { error: "Project not found" };
+      const current = (settings.realtime as any) || {};
+      const updated = await projectService.updateProjectSettings(params.ref, {
+        ...settings,
+        realtime: { ...current, ...(typeof body === "object" ? body : {}) },
+      });
+      return updated?.realtime || {};
+    },
+    {
+      params: t.Object({ ref: t.String() }),
+      body: t.Record(t.String(), t.Unknown()),
+    }
+  )
+
+  // 获取 PgBouncer 配置 (Studio 显示用)
+  .get(
+    "/:ref/pgbouncer",
+    async ({ params, set }) => {
+      const settings = await projectService.getProjectSettings(params.ref);
+      if (!settings) return { error: "Project not found" };
+      return settings.pgbouncer || {
+        pool_mode: "transaction",
+        default_pool_size: 15,
+        ignore_startup_parameters: "extra_float_digits"
+      };
+    },
+    { params: t.Object({ ref: t.String() }) }
+  )
+
+  // 获取 Typescript Types 存根，防止面板报错
+  .get(
+    "/:ref/types/typescript",
+    async ({ params, query, set }) => {
+      // 在生产环境中通常会从真实的 Postgres 获取 pgmeta 然后生成。此处返回一个壳子用于 Studio 兼容处理。
+      return { types: "export type Json = string | number | boolean | null | { [key: string]: Json } | Json[];" };
+    },
+    {
+      params: t.Object({ ref: t.String() }),
+      query: t.Optional(t.Object({ included_schemas: t.Optional(t.String()) }))
+    }
+  )
+
   // 获取环境变量 (Secrets)
   .get(
     "/:ref/secrets",
