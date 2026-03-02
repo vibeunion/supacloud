@@ -45,9 +45,7 @@ echo "PubkeyAuthentication yes" >> /etc/ssh/sshd_config
 echo "[CI] 正在自测 SSH 连通性..."
 ssh -o BatchMode=yes -o ConnectTimeout=5 127.0.0.1 "echo SSH OK" || { echo "[ERROR] SSH 自检失败"; exit 1; }
 
-# 核心劫持：将 /usr/local/bin 置于首位，用于拦截 systemctl 报错
-export PATH="/usr/local/bin:$PATH"
-
+# 核心劫持：通过物理置换绕过权限限制
 for cmd in systemctl hostnamectl timedatectl sysctl modprobe apparmor_status udevadm; do
     # 查找全路径下的二进制 (防止 /sbin 和 /usr/bin 路径不一导致的漏网之鱼)
     ALL_BINS=$(which -a "$cmd" 2>/dev/null || true)
@@ -78,7 +76,7 @@ if [[ "$args" == *"chrony"* ]]; then
 fi
 
 # 如果是其他请求，且有真实命令存在，则透传
-REAL_BIN="${0}.real"
+REAL_BIN="$0.real"
 if [ -f "$REAL_BIN" ]; then
     exec "$REAL_BIN" "$@"
 else
@@ -91,38 +89,36 @@ else
 fi
 INNEREOF
                 ;;
-        hostnamectl)
-            cat <<'INNEREOF' > "$MOCK_DEST"
+            hostnamectl)
+                cat <<'INNEREOF' > "$MOCK_DEST"
 #!/bin/bash
 echo "Static hostname: localhost"; echo "Icon name: computer-vm"; echo "Chassis: vm"; echo "Operating System: Linux"
 INNEREOF
-            ;;
-        timedatectl)
-            cat <<'INNEREOF' > "$MOCK_DEST"
+                ;;
+            timedatectl)
+                cat <<'INNEREOF' > "$MOCK_DEST"
 #!/bin/bash
 echo "Local time: $(date)"; echo "Time zone: UTC (UTC, +0000)"
 INNEREOF
-            ;;
-        sysctl|modprobe|udevadm)
-            cat <<'INNEREOF' > "$MOCK_DEST"
+                ;;
+            sysctl|modprobe|udevadm)
+                cat <<'INNEREOF' > "$MOCK_DEST"
 #!/bin/bash
 echo "Simulating $cmd $@"
 exit 0
 INNEREOF
-            ;;
-        apparmor_status)
-            cat <<'INNEREOF' > "$MOCK_DEST"
+                ;;
+            apparmor_status)
+                cat <<'INNEREOF' > "$MOCK_DEST"
 #!/bin/bash
 echo "apparmor module is not loaded."
 exit 0
 INNEREOF
-            ;;
-    esac
-    chmod +x "$MOCK_DEST"
+                ;;
+        esac
+        chmod +x "$MOCK_DEST"
+    done
 done
-
-# 启动 SSHD (Ansible 需要)
-/usr/sbin/sshd
 
 # 3. 运行安装测试
 CDIR="/root/supacloud"
@@ -144,6 +140,7 @@ on_failure() {
 trap on_failure ERR
 
 echo '[CI] 开始跨发行版容器集成测试...'
+export PATH="/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin"
 /usr/local/bin/supacloud install --yes --ip 127.0.0.1 --domain api.local.nip.io --password ci-test-pass
 
 # 4. 自动化冒烟测试 (Smoke Test)
