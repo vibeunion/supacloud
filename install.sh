@@ -2403,21 +2403,31 @@ install_management_api() {
     mkdir -p /etc/supabase
 
     # 1. 部署二进制文件
-    if [[ -f "$BIN_SOURCE" ]]; then
-        log_info "发现本地预编译二进制，正在安装到全局路径..."
-        cp "$BIN_SOURCE" "$BIN_TARGET"
-        chmod +x "$BIN_TARGET"
-    else
-        log_warn "未在 $BIN_SOURCE 发现预编译二进制。"
-        log_info "尝试从 scripts 目录或其他位置检索..."
-        if [[ -f "${SCRIPT_DIR}/dist/${BIN_NAME}" ]]; then
-             cp "${SCRIPT_DIR}/dist/${BIN_NAME}" "$BIN_TARGET"
-        else
-             log_error "无法找到 $BIN_NAME 二进制文件，请确保执行过 bun run build"
-             exit 1
-        fi
-        chmod +x "$BIN_TARGET"
+    # 支持本地 supacloud 或 CI 产出的 supacloud-linux-amd64/arm64
+    local ARCH=$(uname -m)
+    local OS_TYPE=$(uname -s | tr '[:upper:]' '[:lower:]')
+    local CI_BIN=""
+
+    if [[ "$ARCH" == "x86_64" ]]; then
+        CI_BIN="supacloud-linux-amd64"
+    elif [[ "$ARCH" == "aarch64" ]]; then
+        CI_BIN="supacloud-linux-arm64"
     fi
+
+    if [[ -f "$BIN_SOURCE" ]]; then
+        log_info "发现本地预编译二进制 ($BIN_SOURCE)，正在安装..."
+        cp "$BIN_SOURCE" "$BIN_TARGET"
+    elif [[ -n "$CI_BIN" ]] && [[ -f "${SCRIPT_DIR}/dist/${CI_BIN}" ]]; then
+        log_info "发现 CI 构建产物 (${CI_BIN})，正在安装..."
+        cp "${SCRIPT_DIR}/dist/${CI_BIN}" "$BIN_TARGET"
+    elif [[ -n "$CI_BIN" ]] && [[ -f "${SCRIPT_DIR}/${CI_BIN}" ]]; then
+        log_info "在根目录发现平台二进制 (${CI_BIN})，正在安装..."
+        cp "${SCRIPT_DIR}/${CI_BIN}" "$BIN_TARGET"
+    else
+        log_error "无法找到核心二进制文件。请确保：1. 本地执行过 bun run build 或 2. 已下载 CI 产物至 dist 目录。"
+        exit 1
+    fi
+    chmod +x "$BIN_TARGET"
 
     # 2. 复制管理脚本 (Pigsty 适配器)
     if [[ -d "${SCRIPT_DIR}/scripts/lib" ]]; then
