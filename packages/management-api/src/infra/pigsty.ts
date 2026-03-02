@@ -171,7 +171,10 @@ export class PigstyManager {
         const exitCode = await proc.exited;
 
         if (exitCode !== 0 || hasFailed) {
-            throw new Error(`Ansible 执行失败 (Exit Code: ${exitCode}, Failure Detected: ${hasFailed})`);
+            const errorMsg = `Ansible 执行失败 (Exit Code: ${exitCode}, Failure Detected: ${hasFailed})`;
+            console.error(`\n[CRITICAL ERROR] ${errorMsg}`);
+            console.error(`[CRITICAL ERROR] 请检查上述 [Ansible] 日志以获取详细错误堆栈。\n`);
+            throw new Error(errorMsg);
         }
     }
 

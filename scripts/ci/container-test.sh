@@ -3,7 +3,7 @@ set -ex
 echo "[CI] 容器内部执行环境已就绪: $(cat /etc/os-release | grep PRETTY_NAME)"
 
 export DEBIAN_FRONTEND=noninteractive
-export SUPACLOUD_ANSIBLE_ARGS="-e node_write_etc_hosts=false -e node_dns_method=none -e node_repo_remove=false -e node_tune=none -e node_kernel_modules=[]"
+export SUPACLOUD_ANSIBLE_ARGS="-e node_write_etc_hosts=false -e node_dns_method=none -e node_repo_remove=false -e node_tune=none -e node_kernel_modules=[] -vv"
 ln -fs /usr/share/zoneinfo/UTC /etc/localtime
 
 # 1. 安装基础依赖
