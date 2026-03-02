@@ -63,23 +63,22 @@
 **One-Click Installation (Recommended)**
 
 ```bash
-curl -fsSL https://gh-proxy.net/https://raw.githubusercontent.com/zuohuadong/supacloud/main/setup.sh | sudo bash
+# This will setup the system and install the 'supacloud' binary to /usr/local/bin
+sudo bash install.sh [options]
 ```
 
 **Standard Installation**
+```bash
 # 1. Clone repository
 git clone https://github.com/zuohuadong/supacloud.git
 cd supacloud
 
-# 2. Configure (Edit config.env or use CLI arguments)
-# OPTION A: Edit file
-vim config.env
+# 2. Configure (Edit config.env or use CLI flags)
+sudo bash install.sh --ip 1.2.3.4 --domain api.example.com --s3 juicefs
 
-# OPTION B: Use CLI arguments (Overrides config.env)
-sudo bash install.sh --ip 1.2.3.4 --domain supa.example.com --s3 minio
-
-# 3. Run installation
-sudo bash install.sh
+# 3. Environment Initialization
+# After installation, the 'supacloud' command is available globally.
+source /etc/profile.d/supacloud.sh
 ```
 
 **Available CLI Options:**
@@ -93,29 +92,21 @@ sudo bash install.sh
 
 ### Management
 
-#### CLI Tool
+#### CLI Tool (System Lifecycle & Project Management)
 
 ```bash
-# List all projects
-supacloud list
+# Lifecycle Management
+supacloud start              # Wake up all containers
+supacloud stop               # Stop the service stack
+supacloud status             # Health check & monitor ports
+supacloud logs [service]     # Diagnostic logs
 
-# Create a new project
-supacloud create "My Project"
-
-# Get project details
-supacloud info <project_ref>
-
-# Get API keys
-supacloud keys <project_ref>
-
-# Check project status
-supacloud status <project_ref>
-
-# Delete project
-supacloud delete <project_ref>
-
-# System health check
-supacloud health
+# Project Management
+supacloud list               # List all projects
+supacloud create "My Project" # Create a new project
+supacloud info <ref>         # Get project details
+supacloud keys <ref>         # Get API keys
+supacloud health             # System pre-flight check
 ```
 
 #### Management API
@@ -302,23 +293,21 @@ Key settings in `config.env`:
 **一键安装（推荐）**
 
 ```bash
-curl -fsSL https://gh-proxy.net/https://raw.githubusercontent.com/zuohuadong/supacloud/main/setup.sh | sudo bash
+# 脚本将自动处理系统依赖、容器环境并安装 supacloud 二进制到全局路径
+sudo bash install.sh [选项]
 ```
 
 **手动安装**
+```bash
 # 1. 下载代码
 git clone https://github.com/zuohuadong/supacloud.git
 cd supacloud
 
-# 2. 配置说明 (编辑 config.env 或使用命令行参数)
-# 方式 A: 编辑文件
-vim config.env
+# 2. 环境初始化 (支持命令行参数或读取 config.env)
+sudo bash install.sh --ip 1.2.3.4 --domain api.example.com --s3 juicefs
 
-# 方式 B: 使用命令行参数 (优先级最高)
-sudo bash install.sh --ip 1.2.3.4 --domain api.example.com --s3 minio
-
-# 3. 运行安装脚本
-sudo bash install.sh
+# 3. 启用命令行工具
+source /etc/profile.d/supacloud.sh
 ```
 
 **命令行参数详解:**
@@ -332,29 +321,21 @@ sudo bash install.sh
 
 ### 项目管理
 
-#### CLI 命令行工具
+#### CLI 命令行工具 (全栈生命周期与项目管理)
 
 ```bash
-# 列出所有项目
-supacloud list
+# 平台管控
+supacloud start              # 拉起全栈容器
+supacloud stop               # 优雅停止并清理
+supacloud status             # 检查核心组件与端口存活
+supacloud logs [service]     # 查看诊断日志
 
-# 创建新项目
-supacloud create "我的项目"
-
-# 查看项目详情
-supacloud info <project_ref>
-
-# 获取 API 密钥
-supacloud keys <project_ref>
-
-# 查看项目状态
-supacloud status <project_ref>
-
-# 删除项目
-supacloud delete <project_ref>
-
-# 系统健康检查
-supacloud health
+# 项目管理
+supacloud list               # 列出所有项目
+supacloud create "我的项目"   # 创建新项目
+supacloud info <ref>         # 查看项目详情
+supacloud keys <ref>         # 获取 API 密钥
+supacloud health             # 运行环境预检与诊断
 ```
 
 #### Management API
