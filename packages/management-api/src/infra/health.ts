@@ -20,7 +20,7 @@ export class HealthChecker {
         reports.push(await this.checkMemory());
 
         // 2. 基础设施服务检查
-        reports.push(await this.checkServiceStatus("supacloud-api", "Management API"));
+        reports.push(await this.checkServiceStatus("supacloud", "Management API"));
         reports.push(await this.checkPigstyStatus());
         reports.push(await this.checkAngieStatus());
 

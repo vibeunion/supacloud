@@ -92,7 +92,7 @@ export async function runInstall(options: { forceYes?: boolean } = {}) {
             p.log.step(">>> 正在将 Management API 注册为系统服务 ...");
             const selfPath = process.argv[0];
             await ServiceManager.register(
-                "supacloud-api",
+                "supacloud",
                 "SupaCloud Management API Server",
                 selfPath,
                 ["start"]

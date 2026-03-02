@@ -52,7 +52,7 @@ export async function runUpgrade(options: { forceYes?: boolean } = {}) {
         s.start("正在根据系统架构匹配二进制包");
         const arch = os.arch();
         const platform = os.platform();
-        let assetName = `supacloud-api-linux-${arch === "arm64" ? "arm64" : "amd64"}`;
+        let assetName = `supacloud-linux-${arch === "arm64" ? "arm64" : "amd64"}`;
 
         const asset = data.assets.find((a: any) => a.name === assetName);
         if (!asset) {
