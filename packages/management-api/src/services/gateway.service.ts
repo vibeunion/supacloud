@@ -161,7 +161,7 @@ export class GatewayService {
 
     // --- Declarative Kong YAML Management ---
 
-    private generateTenantYaml(projectRef: string, hostIp: string, pgrstPort: number, gotruePort: number): string {
+    private generateTenantYaml(projectRef: string, hostIp: string, pgrstPort: number, gotruePort: number, jwtSecret?: string): string {
         const functionsPort = 9000;
         return `  - name: svc-pgrst-${projectRef}
     url: http://${hostIp}:${pgrstPort}
@@ -178,6 +178,31 @@ export class GatewayService {
         headers:
           x-project-ref:
             - ${projectRef}
+        plugins:
+          - name: cors
+            config:
+              origins:
+                - "*"
+              methods:
+                - GET
+                - POST
+                - PUT
+                - PATCH
+                - DELETE
+                - OPTIONS
+              headers:
+                - Accept
+                - Authorization
+                - Content-Type
+                - X-Api-Version
+              credentials: true
+              max_age: 3600
+          - name: rate-limiting
+            config:
+              second: 10
+              minute: 100
+              hour: 1000
+              policy: local
   - name: svc-gotrue-${projectRef}
     url: http://${hostIp}:${gotruePort}
     connect_timeout: 5000
@@ -192,6 +217,25 @@ export class GatewayService {
         headers:
           x-project-ref:
             - ${projectRef}
+        plugins:
+          - name: cors
+            config:
+              origins:
+                - "*"
+              methods:
+                - GET
+                - POST
+                - PUT
+                - PATCH
+                - DELETE
+                - OPTIONS
+              headers:
+                - Accept
+                - Authorization
+                - Content-Type
+                - X-Api-Version
+              credentials: true
+              max_age: 3600
   - name: svc-functions-${projectRef}
     url: http://${hostIp}:${functionsPort}
     connect_timeout: 5000
@@ -206,6 +250,25 @@ export class GatewayService {
         headers:
           x-project-ref:
             - ${projectRef}
+        plugins:
+          - name: cors
+            config:
+              origins:
+                - "*"
+              methods:
+                - GET
+                - POST
+                - PUT
+                - PATCH
+                - DELETE
+                - OPTIONS
+              headers:
+                - Accept
+                - Authorization
+                - Content-Type
+                - X-Api-Version
+              credentials: true
+              max_age: 3600
 `;
     }
 
