@@ -13,7 +13,7 @@ Restart=on-failure
 RestartSec=5
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=supacloud-api
+SyslogIdentifier=supacloud
 
 # 环境变量
 EnvironmentFile=-/etc/supabase/management-api.env
