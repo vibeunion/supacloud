@@ -49,23 +49,37 @@ ssh -o BatchMode=yes -o ConnectTimeout=5 127.0.0.1 "echo SSH OK" || { echo "[ERR
 export PATH="/usr/local/bin:$PATH"
 
 for cmd in systemctl hostnamectl timedatectl sysctl modprobe apparmor_status udevadm; do
+    REAL_CMD=$(which "$cmd" 2>/dev/null || true)
+    if [ -z "$REAL_CMD" ]; then
+        # 如果系统没装，我们就在 /usr/local/bin 模拟一个
+        MOCK_DEST="/usr/local/bin/$cmd"
+    else
+        # 如果系统装了，我们把它藏起来，用 Mock 顶替
+        if [[ "$REAL_CMD" != *"/usr/local/bin"* ]]; then
+            mv "$REAL_CMD" "${REAL_CMD}.real"
+            MOCK_DEST="$REAL_CMD"
+        else
+            MOCK_DEST="$REAL_CMD"
+        fi
+    fi
+
     case "$cmd" in
         systemctl)
-            cat <<'INNEREOF' > /usr/local/bin/systemctl
+            cat <<'INNEREOF' > "$MOCK_DEST"
 #!/bin/bash
-# 定向劫持 Chrony 请求，防止容器内无权限报错；其他请求尝试透传
-REAL_SYSTEMCTL=$(which -a systemctl | grep -v "/usr/local/bin/systemctl" | head -n 1)
 args="$@"
-
+# 只有包含 chrony 的请求我们才百分之百返回成功
 if [[ "$args" == *"chrony"* ]]; then
-    echo "[MOCK] Intecepted systemctl $args for chrony/chronyd -> Success"
+    echo "[MOCK] Intercepted systemctl $args for chrony/chronyd -> Success"
     exit 0
 fi
 
-if [ -n "$REAL_SYSTEMCTL" ]; then
-    exec "$REAL_SYSTEMCTL" "$@"
+# 如果是其他请求，且有真实命令存在，则透传
+REAL_BIN="${0}.real"
+if [ -f "$REAL_BIN" ]; then
+    exec "$REAL_BIN" "$@"
 else
-    # 回退逻辑：如果系统内没装真实 systemctl (比如极简镜像)
+    # 万不得已的回退模拟
     if [[ "$args" == *"is-active"* || "$args" == *"is-enabled"* || "$args" == *"status"* ]]; then
         exit 0
     fi
@@ -74,33 +88,33 @@ fi
 INNEREOF
             ;;
         hostnamectl)
-            cat <<'INNEREOF' > /usr/local/bin/hostnamectl
+            cat <<'INNEREOF' > "$MOCK_DEST"
 #!/bin/bash
 echo "Static hostname: localhost"; echo "Icon name: computer-vm"; echo "Chassis: vm"; echo "Operating System: Linux"
 INNEREOF
             ;;
         timedatectl)
-            cat <<'INNEREOF' > /usr/local/bin/timedatectl
+            cat <<'INNEREOF' > "$MOCK_DEST"
 #!/bin/bash
 echo "Local time: $(date)"; echo "Time zone: UTC (UTC, +0000)"
 INNEREOF
             ;;
         sysctl|modprobe|udevadm)
-            cat <<'INNEREOF' > "/usr/local/bin/$cmd"
+            cat <<'INNEREOF' > "$MOCK_DEST"
 #!/bin/bash
 echo "Simulating $cmd $@"
 exit 0
 INNEREOF
             ;;
         apparmor_status)
-            cat <<'INNEREOF' > /usr/local/bin/apparmor_status
+            cat <<'INNEREOF' > "$MOCK_DEST"
 #!/bin/bash
 echo "apparmor module is not loaded."
 exit 0
 INNEREOF
             ;;
     esac
-    chmod +x "/usr/local/bin/$cmd"
+    chmod +x "$MOCK_DEST"
 done
 
 # 启动 SSHD (Ansible 需要)
