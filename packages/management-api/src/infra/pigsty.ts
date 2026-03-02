@@ -262,15 +262,34 @@ export class PigstyManager {
 
     /**
      * 获取执行 Ansible 的附加参数
-     * 支持通过环境变量 SUPACLOUD_ANSIBLE_ARGS 传递额外参数（如 -e 变量覆盖），实现 CI 环境与应用代码的解耦。
+     * 实现环境自适应：如果是容器或受限环境，自动注入避障参数（node_tune=none, chrony_enabled=false 等）
      */
     private static async getPlaybookExtraArgs(): Promise<string[]> {
+        const args: string[] = [];
+
+        // 1. 自动探测环境限制
+        const isContainer = (await $`test -f /.dockerenv`.nothrow()).exitCode === 0 ||
+            process.env.CONTAINER_RUNTIME ||
+            process.env.GITHUB_ACTIONS;
+
+        if (isContainer) {
+            console.log("[PigstyManager] 检测到受限环境 (Container/CI)，自动注入环境避让补丁...");
+            args.push("-e", "node_tune=none");            // 禁止调优内核
+            args.push("-e", "chrony_enabled=false");      // 禁止管理时间同步
+            args.push("-e", "node_write_etc_hosts=false"); // 禁止修改只读 hosts
+            args.push("-e", "node_dns_method=none");      // 彻底禁止修改 resolv.conf / hosts
+            args.push("-e", "node_repo_remove=false");     // 禁止清理系统源
+            args.push("-e", "node_kernel_modules=[]");    // 禁止加载内核模块
+        }
+
+        // 2. 支持外部环境变量手动注入 (保留扩展性)
         const extra = process.env.SUPACLOUD_ANSIBLE_ARGS;
         if (extra) {
-            console.log(`[PigstyManager] 检测到外部 Ansible 参数注入: ${extra}`);
-            return extra.split(/\s+/).filter(Boolean);
+            console.log(`[PigstyManager] 检测到额外 Ansible 参数注入: ${extra}`);
+            args.push(...extra.split(/\s+/).filter(Boolean));
         }
-        return [];
+
+        return args;
     }
 
     // 移除了针对 Debian 12 的 stabilizeAptSources 补丁，依循最佳实践交由底层处理
