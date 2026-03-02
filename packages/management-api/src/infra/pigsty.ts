@@ -72,15 +72,9 @@ export class PigstyManager {
 
         // 2. 调度执行 Bootstrap 与模板 Configure
         if (status === PigstyStatus.NOT_INSTALLED || status === PigstyStatus.DOWNLOADED) {
-            console.log("[PigstyManager] 预先执行仓库平稳化 (Bootstrap 前置)...");
-            await this.stabilizeAptSources();
-
             console.log("[PigstyManager] 执行初始化和模板映射...");
             // 确保不带 .nothrow()，如果 bootstrap 失败必须抛出异常
             await $`cd ${pigstyDir} && ./bootstrap`;
-
-            // [DEBIAN 12 FIX] Bootstrap 可能会产生冲突的 APT 源定义，再次扫描确保纯净
-            await this.stabilizeAptSources();
 
             await $`cd ${pigstyDir} && ./configure -i ${config.internalIp} -c app/supa`;
         }
@@ -263,73 +257,11 @@ export class PigstyManager {
     }
 
     /**
-     * 获取用于处理非标环境(如容器内部隔离网络)执行 Ansible 的必须安全指令
+     * 获取执行 Ansible 的附加参数
      */
     private static async getPlaybookExtraArgs(): Promise<string[]> {
-        const isDockerEnv = (await $`test -f /.dockerenv`.nothrow()).exitCode === 0;
-        if (isDockerEnv) {
-            console.log("[PigstyManager] 检测到容器运行时沙盒隔离，添加专属 Ansible 解析层参数。");
-            const pythonPath = (await $`which python3`.nothrow().text()).trim() || "/usr/bin/python3";
-            return [
-                "-vvv",
-                "-e", `ansible_python_interpreter=${pythonPath}`,
-                "-e", "repo_enabled=false",
-                "-e", "node_write_etc_hosts=false",
-                "-e", "node_dns_method=none",
-                "-e", "node_repo_remove=false",
-                "-e", "node_tune=none",
-                "-e", "node_kernel_modules=[]"
-            ];
-        }
         return [];
     }
 
-    /**
-     * [Debian 12 Stability] 解决由于 Pigsty Bootstrap 注入冲突源导致的 'Conflicting values set for option Trusted' 错误
-     * 采用“核级清洗”策略：物理隔离所有系统默认源，强制实现环境纯净。
-     */
-    /**
-     * [Debian 12 Stability] 解决由于 Pigsty Bootstrap 注入冲突源导致的 'Conflicting values set for option Trusted' 错误
-     * 策略：不再暴力隔离，而是通过全局 APT 配置强制抑制属性冲突检查。
-     */
-    private static async stabilizeAptSources() {
-        const isApt = (await $`command -v apt-get`.nothrow().quiet()).exitCode === 0;
-        if (!isApt) return;
-
-        console.log("[PigstyManager] 正在执行 APT 兼容性补丁 (Suppress Trusted Conflicts)...");
-        try {
-            // 1. 尝试恢复之前可能被“物理隔离”的文件 (兼容性回稳)
-            const backupDir = "/etc/apt/sources.list.d.supacloud_bak";
-            const mainList = "/etc/apt/sources.list";
-            const mainListBak = `${mainList}.pigsty_bak`;
-
-            if (await Bun.file(mainListBak).exists()) {
-                await $`sudo mv -f ${mainListBak} ${mainList}`.nothrow().quiet();
-            }
-            if (await Bun.file(backupDir).exists()) {
-                await $`sudo mv -f ${backupDir}/* /etc/apt/sources.list.d/`.nothrow().quiet();
-                await $`sudo rm -rf ${backupDir}`.nothrow().quiet();
-            }
-
-            // 2. 注入全局配置：强制允许不一致的 Trusted 属性
-            // 这是解决 Debian 12 DEB822 与传统 .list 冲突最温和且有效的方式
-            const confPath = "/etc/apt/apt.conf.d/99supacloud";
-            const configLines = [
-                'Apt::Get::AllowUnauthenticated "true";',
-                'Acquire::AllowInsecureRepositories "true";',
-                'Acquire::AllowDowngradeToInsecureRepositories "true";'
-            ].join("\n");
-
-            const tmpConf = `/tmp/apt_conf_${Math.random().toString(36).substring(7)}`;
-            await Bun.write(tmpConf, configLines);
-            await $`sudo mv -f ${tmpConf} ${confPath} && sudo chmod 644 ${confPath}`.quiet();
-
-            // 3. 强制刷新并重置
-            console.log("[PigstyManager] 正在同步仓库状态 (Global Config Mode)...");
-            await $`sudo apt-get update -o Acquire::Retries=3`.quiet();
-            console.log("[PigstyManager] APT 仓库冲突已通过全局配置抑制。");
-        } catch (e) {
-            console.warn(`[PigstyManager] [WARN] APT 兼容性补丁执行异常: ${e}`);
-        }
-    }
+    // 移除了针对 Debian 12 的 stabilizeAptSources 补丁，依循最佳实践交由底层处理
 }

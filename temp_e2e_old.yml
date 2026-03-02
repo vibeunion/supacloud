@@ -1,0 +1,69 @@
+name: E2E Integration Test
+
+on:
+  push:
+    branches: [ "main", "dev" ]
+  pull_request:
+    branches: [ "main", "dev" ]
+
+jobs:
+  test:
+    name: Test on ${{ matrix.os }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os: [ "ubuntu:22.04", "debian:12", "rockylinux:9" ]
+      fail-fast: false
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: latest
+
+      - name: Build Management API Binary
+        working-directory: ./packages/management-api
+        run: |
+          bun install
+          bun run prebuild
+          echo "[CI] 运行逻辑单元测试与 Mock 集成测试..."
+          bun test
+          bun run build:amd64
+
+      - name: Run E2E Test in Container
+        run: |
+          docker run --privileged --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            ${{ matrix.os }} \
+            bash -c "
+              set -e
+              # 0. 非交互模式强制开启
+              export DEBIAN_FRONTEND=noninteractive
+              ln -fs /usr/share/zoneinfo/UTC /etc/localtime
+
+              # 1. 安装基础依赖 (显式补充 ansible 以加速部署并提升稳定性)
+              if command -v apt-get >/dev/null; then
+                apt-get update && apt-get install -y curl wget sudo kmod iproute2 openssh-server openssh-client ansible
+              elif command -v dnf >/dev/null; then
+                dnf install -y --allowerasing epel-release curl wget sudo kmod iproute2 openssh-server openssh-clients ansible
+              elif command -v yum >/dev/null; then
+                yum install -y --allowerasing epel-release curl wget sudo kmod iproute2 openssh-server openssh-clients ansible
+              fi
+
+              # 2. 模拟系统环境 (假装有 systemd) 并启动 SSH
+              mkdir -p /etc/supabase
+              mkdir -p /run/sshd
+              ssh-keygen -A
+              /usr/sbin/sshd
+              
+              # 3. 运行安装测试
+              cp packages/management-api/supacloud-linux-amd64 /usr/local/bin/supacloud
+              chmod +x /usr/local/bin/supacloud
+              
+              echo '[CI] 开始完整安装流量测试...'
+              # 安装脚本内部会自动触发 Doctor 巡检，这里不加额外的成功 echo 以确保错误码直达。
+              /usr/local/bin/supacloud install --yes --ip 127.0.0.1 --domain api.local.nip.io --password ci-test-pass
+            "
