@@ -347,8 +347,8 @@ async function prepareSystemEnv() {
         await $`dnf config-manager --set-enabled crb 2>/dev/null || dnf config-manager --set-enabled powertools 2>/dev/null || true`.quiet();
         // 安装 EPEL (可能需要先启用 CRB)
         await $`dnf install -y -q epel-release 2>/dev/null || dnf install -y -q https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm 2>/dev/null || true`.quiet();
-        // 安装其余依赖
-        await $`dnf install -y -q --allowerasing sudo curl tar gzip openssl bc jq git procps-ng openssh-clients openssh-server postgresql ansible iproute >/dev/null`;
+        // 安装其余依赖 (排除 openssl/openssh 避免版本不兼容导致 SSH 崩溃)
+        await $`dnf install -y -q sudo curl tar gzip bc jq git procps-ng postgresql ansible iproute >/dev/null`.nothrow();
     }
     // [ANSIBLE COLLECTION] 安装 Pigsty 所需的 Ansible 集合
     await $`ansible-galaxy collection install community.crypto community.general --force 2>/dev/null || true`.quiet();
