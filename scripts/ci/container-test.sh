@@ -82,7 +82,7 @@ done
 /usr/sbin/sshd
 
 # 3. 运行安装测试
-CDIR="/workspace"
+CDIR="/root/supacloud"
 cp $CDIR/packages/management-api/supacloud-linux-amd64 /usr/local/bin/supacloud
 chmod +x /usr/local/bin/supacloud
 
