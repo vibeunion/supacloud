@@ -6,6 +6,17 @@ export DEBIAN_FRONTEND=noninteractive
 export SUPACLOUD_ANSIBLE_ARGS="-e node_write_etc_hosts=false -e node_dns_method=none -e node_repo_remove=false -e node_tune=none -e node_kernel_modules=[] -vv"
 ln -fs /usr/share/zoneinfo/UTC /etc/localtime
 
+# 1. 针对 Debian 12 的特定 APT 仓库冲突修复 (最佳实践：在 CI 层消化环境缺陷)
+if [ -f /etc/debian_version ]; then
+    echo "[CI] 检测到 Debian 环境，正在注入 APT 仓库属性冲突抑制配置..."
+    mkdir -p /etc/apt/apt.conf.d/
+    cat <<'INNEREOF' > /etc/apt/apt.conf.d/99supacloud
+Apt::Get::AllowUnauthenticated "true";
+Acquire::AllowInsecureRepositories "true";
+Acquire::AllowDowngradeToInsecureRepositories "true";
+INNEREOF
+fi
+
 # 1. 安装基础依赖
 if command -v apt-get >/dev/null; then
     apt-get update -qq

@@ -156,14 +156,15 @@ export class PigstyManager {
             const decoder = new TextDecoder();
             for await (const chunk of stream) {
                 const text = decoder.decode(chunk as Uint8Array);
-                text.split("\n").filter(line => line.trim()).forEach(line => {
+                const lines = text.split("\n").filter(line => line.trim());
+                for (const line of lines) {
                     const trimmed = line.trim();
                     console.log(`  [Ansible] ${trimmed}`);
                     // 实时扫描关键错误关键字，防止退出码未对齐
                     if (trimmed.includes("FAILED!") || trimmed.includes("fatal: [")) {
                         hasFailed = true;
                     }
-                });
+                }
             }
         };
 
