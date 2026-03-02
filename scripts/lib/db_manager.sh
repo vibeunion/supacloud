@@ -26,9 +26,9 @@ validate_params() {
         exit 1
     fi
 
-    # 验证 project_ref 格式 (字母数字, 最长20字符)
-    if ! echo "$PROJECT_REF" | grep -qE '^[a-z0-9]{1,20}$'; then
-        echo "ERROR: Invalid project_ref format. Use lowercase alphanumeric, max 20 chars." >&2
+    # 验证 project_ref 格式 (字母数字和连字符, 最长20字符)
+    if ! echo "$PROJECT_REF" | grep -qE '^[a-z0-9-]{1,20}$'; then
+        echo "ERROR: Invalid project_ref format. Use lowercase alphanumeric and hyphens, max 20 chars." >&2
         exit 1
     fi
 }
