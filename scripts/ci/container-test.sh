@@ -57,8 +57,8 @@ for cmd in systemctl hostnamectl timedatectl sysctl modprobe apparmor_status ude
 REAL_SYSTEMCTL=$(which -a systemctl | grep -v "/usr/local/bin/systemctl" | head -n 1)
 args="$@"
 
-if [[ "$args" == *"chronyd"* || "$args" == *"chrony"* ]]; then
-    echo "[MOCK] Intecepted systemctl $args for chrony -> Success"
+if [[ "$args" == *"chrony"* ]]; then
+    echo "[MOCK] Intecepted systemctl $args for chrony/chronyd -> Success"
     exit 0
 fi
 
