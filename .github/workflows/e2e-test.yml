@@ -61,6 +61,11 @@ jobs:
           sudo chmod +x /usr/local/bin/supacloud
           echo "[CI] 开始宿主机原生环境测试 (集成环境补丁已自动启动)..."
           sudo /usr/local/bin/supacloud install --yes --ip 127.0.0.1 --domain api.local.nip.io --password ci-test-pass
+          
+          echo "[CI] 等待 API 启动并执行冒烟测试..."
+          sleep 10
+          curl -f http://127.0.0.1:8080/health || (echo "[ERROR] 冒烟测试失败！" && exit 1)
+          echo "[SUCCESS] 宿主机冒烟测试通过！"
 
   test_container:
     name: Test on ${{ matrix.os }} Container

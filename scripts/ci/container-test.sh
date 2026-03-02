@@ -86,5 +86,37 @@ CDIR="/workspace"
 cp $CDIR/packages/management-api/supacloud-linux-amd64 /usr/local/bin/supacloud
 chmod +x /usr/local/bin/supacloud
 
+# --- 故障诊断函数 ---
+on_failure() {
+    echo "===================================================="
+    echo "[CRITICAL ERROR] 检测到部署失败！正在提取诊断日志..."
+    echo "===================================================="
+    echo "[SSHD STATUS]"
+    ps aux | grep sshd || true
+    echo "[PG_HBA.CONF]"
+    find /var/lib/pgsql -name pg_hba.conf -exec cat {} + || echo "pg_hba.conf not found"
+    echo "[SYSTEM LOGS (LAST 50)]"
+    tail -n 50 /var/log/syslog || tail -n 50 /var/log/messages || true
+}
+trap on_failure ERR
+
 echo '[CI] 开始跨发行版容器集成测试...'
 /usr/local/bin/supacloud install --yes --ip 127.0.0.1 --domain api.local.nip.io --password ci-test-pass
+
+# 4. 自动化冒烟测试 (Smoke Test)
+echo '[CI] 开始冒烟测试 (Smoke Test)...'
+max_retry=5
+retry_count=0
+until curl -s -f http://127.0.0.1:8080/health || [ $retry_count -eq $max_retry ]; do
+    echo "等待 Management API 就绪 (5s)..."
+    sleep 5
+    ((retry_count++))
+done
+
+if [ $retry_count -eq $max_retry ]; then
+    echo "[ERROR] 冒烟测试失败: Management API 响应超时"
+    on_failure
+    exit 1
+fi
+
+echo "[SUCCESS] 冒烟测试通过: Management API 已上线"
