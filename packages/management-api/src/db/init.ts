@@ -5,7 +5,7 @@ export async function initDatabase() {
   console.log("Initializing database...");
   console.log("DATABASE_URL:", config.databaseUrl.replace(/:[^:@]+@/, ":****@"));
 
-  // 解析 DATABASE_URL 获取各组件
+  // Parse DATABASE_URL to get components
   const dbUrl = config.databaseUrl;
   const urlMatch = dbUrl.match(/postgresql?:\/\/([^:]+):([^@]+)@([^:]+):(\d+)\/(.+)/);
   
@@ -65,7 +65,7 @@ export async function initDatabase() {
     CREATE INDEX IF NOT EXISTS idx_project_tasks_status ON project_tasks(status);
   `;
 
-  // 使用显式配置而不是 URL，确保数据库名正确
+  // Use explicit config instead of URL to ensure correct database name
   const sql = new SQL({
     hostname,
     port: parseInt(port, 10),
@@ -79,7 +79,7 @@ export async function initDatabase() {
     await sql`SELECT 1`;
     console.log("Connected to database");
 
-    // 检查当前数据库
+    // Check current database
     const [dbInfo] = await sql`SELECT current_database() as db, current_user as user`;
     console.log("Current database:", dbInfo?.db, "user:", dbInfo?.user);
 
@@ -98,7 +98,7 @@ export async function initDatabase() {
 
     console.log("Executing DDL statements...");
     
-    // Bun SQL: unsafe() 可以直接执行多条语句
+    // Bun SQL: unsafe() can execute multiple statements directly
     await sql.unsafe(ddlQuery);
     console.log("DDL executed successfully.");
 

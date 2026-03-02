@@ -4,14 +4,14 @@ import { projectRepository } from '../repositories/project.repository';
 
 export class BackupService {
     /**
-     * 获取备份列表
-     * @param stanza 库名/实例名，默认为 db-main
+     * Get backup list
+     * @param stanza Database name/instance name, defaults to db-main
      */
     static async listBackups(stanza: string = 'db-main'): Promise<BackupInfo[]> {
         const result = await $`sudo -u postgres pgbackrest --stanza=${stanza} info --output=json`.nothrow().quiet();
 
         if (result.exitCode !== 0) {
-            // pgbackrest 未安装时返回空列表
+            // Return empty list when pgbackrest is not installed
             console.warn('[Backup] pgbackrest not available or no backups found');
             return [];
         }
@@ -29,7 +29,7 @@ export class BackupService {
             }));
         } catch (e) {
             console.error('Failed to parse backup list:', e);
-            throw new Error('解析备份列表失败');
+            throw new Error('Failed to parse backup list');
         }
     }
 
@@ -37,18 +37,18 @@ export class BackupService {
         $`sudo -u postgres pgbackrest --stanza=${stanza} --type=${type} backup`.nothrow().quiet().catch(err => {
             console.error('[Backup] Async backup task failed:', err);
         });
-        return { message: `已启动 ${type} 备份任务` };
+        return { message: `${type} backup task started` };
     }
 
     static async restore(request: RestoreRequest): Promise<{ message: string }> {
         $`sudo -u postgres pig pitr ${request.target}`.nothrow().quiet().catch(err => {
             console.error('[Backup] Async restore task failed:', err);
         });
-        return { message: `已启动点对点恢复 (PITR) 任务，目标: ${request.target}` };
+        return { message: `Point-in-time recovery (PITR) task started, target: ${request.target}` };
     }
     /**
-     * 按租户级别执行逻辑备份 (pg_dump)
-     * 将专属数据导出并可上传至对应的 S3 桶中
+     * Execute logical backup per tenant level (pg_dump)
+     * Export dedicated data and upload to corresponding S3 bucket
      */
     static async createLogicalBackup(projectRef: string): Promise<{ success: boolean; message: string; file?: string }> {
         const project = await projectRepository.findByRef(projectRef);
@@ -59,32 +59,32 @@ export class BackupService {
         const backupPath = `/tmp/${filename}`;
 
         try {
-            // 使用租户角色，导出为 Custom 归档格式并带有默认 gzip 压缩
+            // Use tenant role, export as Custom archive format with default gzip compression
             const tenantUri = `postgres://${project.db_user}:${project.db_password}@localhost:5432/${project.db_name}`;
 
             console.log(`[LogicalBackup] Starting dump for ${projectRef} -> ${backupPath}`);
             await $`pg_dump ${tenantUri} -F c -Z 6 -f ${backupPath}`.quiet();
 
-            // 尝试通过 AWS CLI (兼容 MinIO/Garage) 上传到租户的隐藏备份前缀
+            // Try to upload to tenant's hidden backup prefix via AWS CLI (MinIO/Garage compatible)
             if (project.s3_access_key && project.s3_secret_key) {
                 try {
                     await $`AWS_ACCESS_KEY_ID=${project.s3_access_key} AWS_SECRET_ACCESS_KEY=${project.s3_secret_key} aws --endpoint-url http://localhost:9000 s3 cp ${backupPath} s3://${project.s3_bucket}/_backups/${filename}`.quiet();
                     console.log(`[LogicalBackup] Uploaded ${filename} to S3.`);
-                    await $`rm -f ${backupPath}`.quiet(); // 上传成功后清理本地
+                    await $`rm -f ${backupPath}`.quiet(); // Cleanup local after successful upload
                 } catch (uploadErr) {
                     console.warn('[LogicalBackup] S3 Upload failed (Ensure awscli is installed). Kept local copy at', backupPath);
                 }
             }
 
-            return { success: true, message: "逻辑备份已完成", file: filename };
+            return { success: true, message: "Logical backup completed", file: filename };
         } catch (err: any) {
             console.error("[LogicalBackup] failed:", err);
-            return { success: false, message: "逻辑备份失败: " + err.message };
+            return { success: false, message: "Logical backup failed: " + err.message };
         }
     }
 
     /**
-     * 按租户级别执行逻辑恢复 (pg_restore)
+     * Execute logical restore per tenant level (pg_restore)
      */
     static async restoreLogicalBackup(projectRef: string, backupId: string): Promise<{ success: boolean; message: string }> {
         const project = await projectRepository.findByRef(projectRef);
@@ -93,7 +93,7 @@ export class BackupService {
         const backupPath = `/tmp/${backupId}`;
 
         try {
-            // 先尝试从 S3 下载
+            // Try downloading from S3 first
             if (project.s3_access_key && project.s3_secret_key) {
                 try {
                     await $`AWS_ACCESS_KEY_ID=${project.s3_access_key} AWS_SECRET_ACCESS_KEY=${project.s3_secret_key} aws --endpoint-url http://localhost:9000 s3 cp s3://${project.s3_bucket}/_backups/${backupId} ${backupPath}`.quiet();
@@ -103,26 +103,26 @@ export class BackupService {
                 }
             }
 
-            // 检查文件存在
+            // Check file exists
             const fileExists = await $`test -f ${backupPath}`.nothrow();
             if (fileExists.exitCode !== 0) {
-                return { success: false, message: "未找到指定的备份文件: " + backupId };
+                return { success: false, message: "Backup file not found: " + backupId };
             }
 
-            // 执行 pg_restore (强制清除旧对象并在单一事务中完成)
+            // Execute pg_restore (force clean old objects and complete in single transaction)
             const tenantUri = `postgres://${project.db_user}:${project.db_password}@localhost:5432/${project.db_name}`;
             console.log(`[LogicalBackup] Starting restore for ${projectRef} from ${backupPath}`);
 
-            // 使用 -c (clean) 清理原有数据, -1 (single-transaction)
+            // Use -c (clean) to cleanup existing data, -1 (single-transaction)
             await $`pg_restore -d ${tenantUri} -c -1 ${backupPath}`.quiet();
 
             console.log(`[LogicalBackup] Restore complete for ${projectRef}`);
-            return { success: true, message: "逻辑恢复成功完成" };
+            return { success: true, message: "Logical restore completed successfully" };
         } catch (err: any) {
             console.error("[LogicalBackup] Restore failed:", err);
-            return { success: false, message: "恢复过程发生错误: " + err.message };
+            return { success: false, message: "Restore process error: " + err.message };
         } finally {
-            // 清理本地临时文件
+            // Cleanup local temp file
             await $`rm -f ${backupPath}`.nothrow().quiet();
         }
     }

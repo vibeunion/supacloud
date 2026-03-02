@@ -78,11 +78,11 @@ export class TaskWorker {
                 }
 
                 case "provision_runtime": {
-                    // 启动租户专属 PostgREST 进程
+                    // Start tenant-specific PostgREST process
                     const startRes = await databaseService.startRuntime(project_ref);
                     if (!startRes.success) return false;
 
-                    // 从输出中提取端口号
+                    // Extract port numbers from output
                     const portMatch = startRes.output.match(/PORT=(\d+)/);
                     const gotruePortMatch = startRes.output.match(/GOTRUE_PORT=(\d+)/);
                     const port = portMatch ? portMatch[1] : "";
@@ -92,14 +92,14 @@ export class TaskWorker {
                         return false;
                     }
 
-                    // 在 Kong 中注册该租户的独立 upstream (声明式)
+                    // Register this tenant's independent upstream in Kong (declarative)
                     const upstreamRes = await databaseService.setupUpstream(project_ref, port, gotruePort);
                     if (!upstreamRes.success) {
                         console.error(`[TaskWorker] Failed to setup Kong upstream for ${project_ref}`);
                         return false;
                     }
 
-                    // 保存端口到项目配置
+                    // Save ports to project config
                     await projectRepository.updateConfig(project_ref, {
                         ...project.config,
                         postgrest_port: parseInt(port),
@@ -135,9 +135,9 @@ export class TaskWorker {
                 }
 
                 case "cleanup_runtime": {
-                    // 停止租户 PostgREST 进程
+                    // Stop tenant PostgREST process
                     await databaseService.stopRuntime(project_ref);
-                    // 移除 Kong Service/Route
+                    // Remove Kong Service/Route
                     await databaseService.removeService(project_ref);
                     return true;
                 }
@@ -162,7 +162,7 @@ export class TaskWorker {
         const { project_ref, task_type } = task;
 
         // Workflow orchestration: queue the next task upon completion
-        // 流水线: provision_db → provision_s3 → provision_runtime → provision_router → provision_gateway
+        // Pipeline: provision_db → provision_s3 → provision_runtime → provision_router → provision_gateway
         if (task_type === "provision_db") {
             await taskRepository.createTask(project_ref, "provision_s3");
         } else if (task_type === "provision_s3") {
@@ -176,7 +176,7 @@ export class TaskWorker {
             await projectRepository.updateStatus(project_ref, "active");
             console.log(`[TaskWorker] Project ${project_ref} fully provisioned and activated.`);
         } else if (task_type === "cleanup_runtime") {
-            // Runtime 清理完成后清理路由
+            // After runtime cleanup, cleanup router
             await taskRepository.createTask(project_ref, "cleanup_router");
         } else if (task_type === "cleanup_db") {
             console.log(`[TaskWorker] Cleanup for ${project_ref} db done.`);
@@ -196,8 +196,8 @@ export class TaskWorker {
             console.log(`[TaskWorker] Rolling back DB for ${project_ref}`);
             await taskRepository.createTask(project_ref, "cleanup_db");
         } else if (task_type === "provision_router" || task_type === "provision_gateway") {
-            // router/gateway 失败时保留数据库和 S3 资源，避免数据丢失
-            // 管理员可以手动排查并重试，或通过 API 触发清理
+            // When router/gateway fails, preserve DB and S3 resources to avoid data loss
+            // Admin can manually troubleshoot and retry, or trigger cleanup via API
             console.warn(`[TaskWorker] ${task_type} failed for ${project_ref}. DB and S3 resources preserved for manual intervention.`);
             console.warn(`[TaskWorker] To retry: update task status to 'pending'. To cleanup: manually delete project.`);
         }

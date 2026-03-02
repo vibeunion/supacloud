@@ -10,7 +10,7 @@ export const organizationRoutes = new Elysia({ prefix: "/v1/organizations" })
     })
     .get("/:slug", async ({ params, set }) => {
         const orgs = await organizationService.listOrganizations();
-        // 模拟按 slug 查找（目前只有一个默认组织）
+        // Simulate finding by slug (currently only one default organization)
         const org = orgs.find((o: any) => o.slug === params.slug) || orgs[0];
         if (!org) {
             set.status = 404;

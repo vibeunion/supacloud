@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # storage_manager.sh
-# 管理 JuiceFS 存储与 S3 迁移
+# Manage JuiceFS storage and S3 migration
 
 set -e
 
@@ -10,8 +10,8 @@ TARGET=$2
 OPTIONS=$3
 
 MOUNT_POINT="/mnt/juicefs"
-# 默认指向本地 Supabase 专用的 JuiceFS 元数据库
-# 如果在 install.sh 中修改了密码，这里也需要对齐
+# Default points to local Supabase-specific JuiceFS metadata database
+# If password was modified in install.sh, need to align here as well
 META_URL="postgres://postgres:${POSTGRES_PASSWORD:-postgres}@localhost:5432/postgres?sslmode=disable"
 
 log_info() { echo -e "\033[0;32m[INFO]\033[0m $1"; }
@@ -19,7 +19,7 @@ log_error() { echo -e "\033[0;31m[ERROR]\033[0m $1"; }
 
 case $COMMAND in
     status)
-        # 检查维护状态与空间使用
+        # Check maintenance status and space usage
         if mountpoint -q "$MOUNT_POINT"; then
             df -h "$MOUNT_POINT" | tail -n 1 | awk '{print "{\"status\":\"mounted\",\"size\":\""$2"\",\"used\":\""$3"\",\"avail\":\""$4"\",\"use_percent\":\""$5"\"}"}'
         else
@@ -28,7 +28,7 @@ case $COMMAND in
         ;;
 
     migrate_to_s3)
-        # 迁移至 S3
+        # Migrate to S3
         # TARGET: S3_URL (e.g., s3://mybucket)
         # OPTIONS: JSON string with access_key and secret_key
         S3_URL=$TARGET
@@ -43,12 +43,12 @@ case $COMMAND in
 
         log_info "Starting migration from PG-LO to $S3_URL..."
         
-        # 使用 juicefs sync 执行数据迁移
-        # --force-update 确保全量覆盖校验
+        # Use juicefs sync to perform data migration
+        # --force-update ensures full overwrite validation
         export ACCESS_KEY="$ACCESS_KEY"
         export SECRET_KEY="$SECRET_KEY"
         
-        # 如果提供了 endpoint，则在 sync 中指定
+        # If endpoint is provided, specify it in sync
         if [ -n "$ENDPOINT" ] && [ "$ENDPOINT" != "null" ]; then
             juicefs sync --force-update --endpoint "$ENDPOINT" "jfs://${META_URL}" "${S3_URL}"
         else
@@ -57,7 +57,7 @@ case $COMMAND in
         
         log_info "Data sync completed. Next: Dump metadata..."
         
-        # 导出元数据供以后 load
+        # Export metadata for later load
         juicefs dump "${META_URL}" metadata_migration_backup.json
         
         log_info "Migration prepared successfully"
