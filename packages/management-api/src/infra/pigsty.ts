@@ -258,8 +258,14 @@ export class PigstyManager {
 
     /**
      * 获取执行 Ansible 的附加参数
+     * 支持通过环境变量 SUPACLOUD_ANSIBLE_ARGS 传递额外参数（如 -e 变量覆盖），实现 CI 环境与应用代码的解耦。
      */
     private static async getPlaybookExtraArgs(): Promise<string[]> {
+        const extra = process.env.SUPACLOUD_ANSIBLE_ARGS;
+        if (extra) {
+            console.log(`[PigstyManager] 检测到外部 Ansible 参数注入: ${extra}`);
+            return extra.split(/\s+/).filter(Boolean);
+        }
         return [];
     }
 
