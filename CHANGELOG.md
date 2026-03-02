@@ -2,6 +2,8 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.3.16](https://github.com/zuohuadong/supacloud/compare/v0.3.18...v0.3.16) (2026-03-02)
+
 ### [0.3.11](https://github.com/zuohuadong/supacloud/compare/v0.3.10...v0.3.11) (2026-03-01)
 
 
