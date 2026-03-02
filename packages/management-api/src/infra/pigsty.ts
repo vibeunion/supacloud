@@ -273,13 +273,13 @@ export class PigstyManager {
             process.env.GITHUB_ACTIONS;
 
         if (isContainer) {
-            console.log("[PigstyManager] 检测ato受限环境 (Container/CI)，自动注入环境避让补丁...");
+            console.log("[PigstyManager] 检测到受限环境 (Container/CI)，自动注入环境避让补丁...");
             args.push("-e", "node_tune=none");            // 禁止调优内核
             args.push("-e", "chrony_enabled=false");      // 阻止 chrony 角色
             args.push("-e", "node_write_etc_hosts=false"); // 禁止修改只读 hosts
             args.push("-e", "node_dns_method=none");      // 彻底禁止修改 resolv.conf / hosts
             args.push("-e", "node_repo_remove=true");      // [FIX] 允许清理旧源，解决 Conflicting Trusted values
-            args.push("-e", "node_kernel_modules='[]'");   // [FIX] 强制禁用内核模块加载，避免寻址 /lib/modules
+            args.push("-e", JSON.stringify({ node_kernel_modules: [] })); // [FIX] 使用 JSON 格式确保 Ansible 将其识别为真正的空列表，跳过 Task 循环
         }
 
         // 2. 支持外部环境变量手动注入 (保留扩展性)
