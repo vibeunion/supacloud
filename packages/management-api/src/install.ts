@@ -350,6 +350,8 @@ async function prepareSystemEnv() {
         // 安装其余依赖
         await $`dnf install -y -q --allowerasing sudo curl tar gzip openssl bc jq git procps-ng openssh-clients openssh-server postgresql ansible iproute >/dev/null`;
     }
+    // [ANSIBLE COLLECTION] 安装 Pigsty 所需的 Ansible 集合
+    await $`ansible-galaxy collection install community.crypto community.general --force 2>/dev/null || true`.quiet();
     s.stop("底层支持组建拉取完毕");
 
     const totalMemGB = os.totalmem() / 1024 / 1024 / 1024;
