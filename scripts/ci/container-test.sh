@@ -3,8 +3,8 @@ set -ex
 echo "[CI] 容器内部执行环境已就绪: $(cat /etc/os-release | grep PRETTY_NAME)"
 
 export DEBIAN_FRONTEND=noninteractive
-# 关键：在容器内必须禁用 hosts/dns 修改（由于挂载限制）、内核模块加载（由于权限限制）以及节点调优（Chrony 等服务无权限）
-export SUPACLOUD_ANSIBLE_ARGS="-e node_write_etc_hosts=false -e node_dns_method=none -e node_tune=none -e node_kernel_modules=[] -vv"
+# 关键：在容器内必须禁用 hosts/dns 修改（由于挂载限制）、内核模块加载（由于权限限制）以及节点调优与时间同步（无 service 管理权限）
+export SUPACLOUD_ANSIBLE_ARGS="-e node_write_etc_hosts=false -e node_dns_method=none -e node_tune=none -e node_kernel_modules=[] -e chrony_enabled=false -vv"
 ln -fs /usr/share/zoneinfo/UTC /etc/localtime
 
 # 1. 安装基础依赖

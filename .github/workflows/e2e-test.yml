@@ -57,8 +57,8 @@ jobs:
           sudo cp supacloud-linux-amd64 /usr/local/bin/supacloud
           sudo chmod +x /usr/local/bin/supacloud
           echo "[CI] 开始宿主机原生环境测试..."
-          # 宿主机上增加 repo 保护，防止 ansible 误删 runner 的系统源
-          export SUPACLOUD_ANSIBLE_ARGS="-e node_repo_remove=false -vv"
+          # 宿主机上同样需要注入环境兼容参数，防止误删源或尝试无意义的内核/服务操作
+          export SUPACLOUD_ANSIBLE_ARGS="-e node_repo_remove=false -e node_write_etc_hosts=false -e node_dns_method=none -e node_tune=none -e node_kernel_modules=[] -e chrony_enabled=false -vv"
           sudo -E /usr/local/bin/supacloud install --yes --ip 127.0.0.1 --domain api.local.nip.io --password ci-test-pass
 
   test_container:
