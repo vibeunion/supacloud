@@ -117,10 +117,10 @@ export class TaskWorker {
                 }
 
                 case "provision_gateway": {
-                    await gatewayService.setupJwt(project_ref, project.jwt_secret);
-                    await gatewayService.setRateLimit(project_ref, "free");
-                    await gatewayService.setCors(project_ref, "*");
-                    await gatewayService.enableJwtAuth(project_ref);
+                    // Kong uses declarative config (KONG_DATABASE=off), Admin API is read-only.
+                    // CORS and rate-limiting are already configured in the YAML template.
+                    // This task is a no-op for now, but can be extended for other gateway configs.
+                    console.log(`[TaskWorker] Gateway config skipped for ${project_ref} (Kong declarative mode)`);
                     return true;
                 }
 
