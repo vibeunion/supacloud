@@ -12,6 +12,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
+      - name: Free Disk Space
+        run: |
+          sudo docker image prune -amf
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          df -h
+
       - name: Set up Bun
         uses: oven-sh/setup-bun@v1
       - name: Build and Test
@@ -23,7 +31,9 @@ jobs:
           cp supacloud-linux-amd64 /usr/local/bin/supacloud
           chmod +x /usr/local/bin/supacloud
           echo "[CI] 开始宿主机原生环境测试..."
-          sudo /usr/local/bin/supacloud install --yes --ip 127.0.0.1 --domain api.local.nip.io --password ci-test-pass
+          # 宿主机上虽然通常不会忙，但为了环境一致性和鲁棒性，我们也注入一些安全参数
+          export SUPACLOUD_ANSIBLE_ARGS="-e node_write_etc_hosts=false -e node_dns_method=none -vv"
+          sudo -E /usr/local/bin/supacloud install --yes --ip 127.0.0.1 --domain api.local.nip.io --password ci-test-pass
 
   test_container:
     name: Test on ${{ matrix.os }} (Docker Mocked)
@@ -34,6 +44,14 @@ jobs:
       fail-fast: false
     steps:
       - uses: actions/checkout@v3
+      - name: Free Disk Space
+        run: |
+          sudo docker image prune -amf
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          df -h
+
       - name: Set up Bun
         uses: oven-sh/setup-bun@v1
       - name: Build Management API Binary
