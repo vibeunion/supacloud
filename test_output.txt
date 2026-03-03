@@ -1,0 +1,39 @@
+bun test v1.3.10 (30e609e0)
+
+packages\management-api\src\services\router.service.test.ts:
+Route added for test-project-1 (api: test-project-1.api.test.domain)
+(pass) RouterService > should generate correct config with ENABLE_SSL=true
+Route added for test-project-2 (api: test-project-2.api.test.domain)
+56 |         expect(fs.writeFile).toHaveBeenCalled();
+57 |         const callArgs = (fs.writeFile as ReturnType<typeof mock>).mock.calls[0];
+58 |         const writtenConfig = callArgs[1] as string;
+59 | 
+60 |         // 验证非 SSL 配置
+61 |         expect(writtenConfig).not.toContain("acme le;");
+                                       ^
+error: expect(received).not.toContain(expected)
+
+Expected to not contain: "acme le;"
+Received: "# SupaCloud tenant: test-project-1\n# Generated: 2026-03-03T02:45:50.083Z\n\n# --- API Endpoint ---\nserver {\n    listen 80;\n    listen 443 ssl;\n    server_name test-project-1.api.test.domain;\n\n    acme le;\n    ssl_certificate $acme_cert_le;\n    ssl_certificate_key $acme_cert_key_le;\n\n    add_header x-project-ref test-project-1 always;\n\n    # Storage render endpoint (cache disabled - requires proxy_cache_path pre-configuration)\n    location ^~ /storage/v1/render/ {\n        proxy_pass http://127.0.0.1:8000;\n        proxy_set_header Host $host;\n        proxy_set_header X-Real-IP $remote_addr;\n        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n        proxy_set_header X-Forwarded-Proto $scheme;\n        proxy_set_header x-project-ref test-project-1;\n    }\n\n    location / {\n        proxy_pass http://127.0.0.1:8000;\n        proxy_set_header Host $host;\n        proxy_set_header X-Real-IP $remote_addr;\n        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n        proxy_set_header X-Forwarded-Proto $scheme;\n        proxy_set_header X-Project-Ref test-project-1;\n\n        proxy_set_header Upgrade $http_upgrade;\n        proxy_set_header Connection \"upgrade\";\n\n        proxy_read_timeout 86400;\n        proxy_send_timeout 86400;\n    }\n}\n\n# --- Studio Endpoint ---\nserver {\n    listen 80;\n    listen 443 ssl;\n    server_name studio-test-project-1.test.domain;\n\n    acme le;\n    ssl_certificate $acme_cert_le;\n    ssl_certificate_key $acme_cert_key_le;\n\n    add_header x-project-ref test-project-1 always;\n\n    location / {\n        proxy_pass http://127.0.0.1:8000;\n        proxy_set_header Host $host;\n        proxy_set_header X-Real-IP $remote_addr;\n        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n        proxy_set_header X-Forwarded-Proto $scheme;\n    }\n}\n"
+
+      at <anonymous> (D:\workspace\supacloud\packages\management-api\src\services\router.service.test.ts:61:35)
+(fail) RouterService > should generate correct config with ENABLE_SSL=false
+75 |         expect(fs.writeFile).toHaveBeenCalled();
+76 |         const callArgs = (fs.writeFile as ReturnType<typeof mock>).mock.calls[0];
+77 |         const writtenConfig = callArgs[1] as string;
+78 | 
+79 |         // 验证自定义域名的 ACME 配置
+80 |         expect(writtenConfig).toContain(`server_name ${customDomain};`);
+                                   ^
+error: expect(received).toContain(expected)
+
+Expected to contain: "server_name custom.example.com;"
+Received: "# SupaCloud tenant: test-project-1\n# Generated: 2026-03-03T02:45:50.083Z\n\n# --- API Endpoint ---\nserver {\n    listen 80;\n    listen 443 ssl;\n    server_name test-project-1.api.test.domain;\n\n    acme le;\n    ssl_certificate $acme_cert_le;\n    ssl_certificate_key $acme_cert_key_le;\n\n    add_header x-project-ref test-project-1 always;\n\n    # Storage render endpoint (cache disabled - requires proxy_cache_path pre-configuration)\n    location ^~ /storage/v1/render/ {\n        proxy_pass http://127.0.0.1:8000;\n        proxy_set_header Host $host;\n        proxy_set_header X-Real-IP $remote_addr;\n        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n        proxy_set_header X-Forwarded-Proto $scheme;\n        proxy_set_header x-project-ref test-project-1;\n    }\n\n    location / {\n        proxy_pass http://127.0.0.1:8000;\n        proxy_set_header Host $host;\n        proxy_set_header X-Real-IP $remote_addr;\n        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n        proxy_set_header X-Forwarded-Proto $scheme;\n        proxy_set_header X-Project-Ref test-project-1;\n\n        proxy_set_header Upgrade $http_upgrade;\n        proxy_set_header Connection \"upgrade\";\n\n        proxy_read_timeout 86400;\n        proxy_send_timeout 86400;\n    }\n}\n\n# --- Studio Endpoint ---\nserver {\n    listen 80;\n    listen 443 ssl;\n    server_name studio-test-project-1.test.domain;\n\n    acme le;\n    ssl_certificate $acme_cert_le;\n    ssl_certificate_key $acme_cert_key_le;\n\n    add_header x-project-ref test-project-1 always;\n\n    location / {\n        proxy_pass http://127.0.0.1:8000;\n        proxy_set_header Host $host;\n        proxy_set_header X-Real-IP $remote_addr;\n        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n        proxy_set_header X-Forwarded-Proto $scheme;\n    }\n}\n"
+
+      at <anonymous> (D:\workspace\supacloud\packages\management-api\src\services\router.service.test.ts:80:31)
+(fail) RouterService > should generate correct config for custom domain with ENABLE_SSL=true
+
+ 1 pass
+ 2 fail
+ 9 expect() calls
+Ran 3 tests across 1 file. [83.00ms]

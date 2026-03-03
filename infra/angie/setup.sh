@@ -16,12 +16,14 @@ die()  { echo "${LOG_PREFIX} [ERROR] $*" >&2; exit 1; }
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STUDIO_DOMAIN="${STUDIO_DOMAIN:-}"
 API_DOMAIN="${API_DOMAIN:-}"
+ACME_CLIENT="${ACME_CLIENT:-le}"
 
 # ── 命令行参数 ────────────────────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --studio-domain) STUDIO_DOMAIN="$2"; shift 2 ;;
     --api-domain)    API_DOMAIN="$2";    shift 2 ;;
+    --acme-client)   ACME_CLIENT="$2";   shift 2 ;;
     *) warn "未知参数: $1"; shift ;;
   esac
 done
@@ -51,6 +53,9 @@ BACKUP_TIME=$(date +%Y%m%d%H%M%S)
 sed \
   -e "s|YOUR_STUDIO_DOMAIN|${STUDIO_DOMAIN}|g" \
   -e "s|YOUR_API_DOMAIN|${API_DOMAIN}|g" \
+  -e "s|le;|${ACME_CLIENT};|g" \
+  -e "s|acme_cert_le|acme_cert_${ACME_CLIENT}|g" \
+  -e "s|acme_cert_key_le|acme_cert_key_${ACME_CLIENT}|g" \
   "${SCRIPT_DIR}/angie.conf" > /etc/angie/angie.conf
 
 mkdir -p /etc/angie/http.d/
