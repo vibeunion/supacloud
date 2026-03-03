@@ -77,6 +77,20 @@ export async function runInstall(options: { forceYes?: boolean } = {}) {
         await performPreFlightChecks(options.forceYes);
         const config = await runInteractiveConfig(options.forceYes);
 
+        if (!isDryRun) {
+            p.log.step(">>> Initializing Load Balancer (Angie with ACME) ...");
+            // 从生成的配置文件读取或直接从变量同步
+            // 这里为了同步正确性，我们再次解构 config 对象（虽然 runInteractiveConfig 返回的是 PigstyConfig，但包含我们需要的信息）
+            await LoadBalancerManager.installAngie(
+                config.studioDomain,
+                config.publicDomain,
+                // @ts-ignore: SSL 选项在 install.ts 局部变量中，或从环境变量读取
+                true, // 默认开启
+                // @ts-ignore
+                "le"
+            );
+        }
+
         if (isDryRun) {
             p.log.warn("[Dry Run] Skipping Systemd service registration.");
         } else {
@@ -187,6 +201,8 @@ async function runInteractiveConfig(forceYes = false): Promise<PigstyConfig> {
     let internalIp = argIp || "";
     let publicDomain = argDomain || "";
     let storageType = argS3 || "";
+    let enableSsl = true;
+    let acmeClient = "le";
 
     if (!forceYes && (!internalIp || !argDomain || !argS3)) {
         // IP selection logic
@@ -226,20 +242,37 @@ async function runInteractiveConfig(forceYes = false): Promise<PigstyConfig> {
                     { value: 'juicefs', label: 'JuiceFS (Recommended: High-performance distributed block storage)' },
                     { value: 'minio', label: 'Minio (Standard S3)' }
                 ]
-            })
+            }),
+            enableSsl: () => p.confirm({
+                message: 'Enable automatic SSL/HTTPS (via Angie ACME)?',
+                initialValue: true
+            }),
+            acmeClient: ({ results }) => results.enableSsl ? p.select({
+                message: 'Select ACME Directory Issuer',
+                initialValue: 'le',
+                options: [
+                    { value: 'le', label: "Let's Encrypt (Production)" },
+                    { value: 'le_staging', label: "Let's Encrypt (Staging/Test)" },
+                    { value: 'zerossl', label: "ZeroSSL" }
+                ]
+            }) : Promise.resolve('le')
         }, {
             onCancel: () => {
                 p.cancel("Installation aborted.");
                 process.exit(0);
             }
         });
-        publicDomain = projectConfig.publicDomain;
-        storageType = projectConfig.storageType;
+        publicDomain = projectConfig.publicDomain as string;
+        storageType = projectConfig.storageType as string;
+        enableSsl = projectConfig.enableSsl as boolean;
+        acmeClient = (projectConfig.acmeClient as string) || 'le';
     } else {
         internalIp = internalIp || primaryIp;
         publicDomain = publicDomain || `api.${internalIp}.nip.io`;
         storageType = storageType || 'juicefs';
-        p.log.info(`Using config: IP=${internalIp}, Domain=${publicDomain}, Storage=${storageType}`);
+        enableSsl = process.env.ENABLE_SSL !== "false";
+        acmeClient = process.env.ACME_CLIENT || 'le';
+        p.log.info(`Using config: IP=${internalIp}, Domain=${publicDomain}, Storage=${storageType}, SSL=${enableSsl}`);
     }
 
     const isTestDomain = publicDomain.includes("nip.io");
@@ -303,6 +336,13 @@ EDGE_RUNTIME="deno"
 ENABLE_ANALYTICS="true"
 ANALYTICS_BACKEND="postgres"
 JWT_SECRET="${jwtSecret}"
+
+# SSL & ACME Sync
+ENABLE_SSL="${enableSsl}"
+ACME_CLIENT="${acmeClient}"
+BASE_DOMAIN="${publicDomain.replace(/^api\./, "")}"
+ANGIE_SITES_DIR="/etc/angie/http.d"
+KONG_INTERNAL="127.0.0.1:8000"
 `;
     await Bun.write(CONFIG_FILE, envContent.trim());
     sEnv.stop("Core configuration group persisted!");
