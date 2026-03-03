@@ -15,6 +15,10 @@ export class RouterService {
     return `https://studio-${projectRef}.${this.BASE_DOMAIN}`;
   }
 
+  getProjectDomain(projectRef: string): string {
+    return `${projectRef}.${this.BASE_DOMAIN}`;
+  }
+
   async addRoute(projectRef: string): Promise<{ success: boolean; error?: string }> {
     try {
       const apiDomain = `${projectRef}.api.${this.BASE_DOMAIN}`;
