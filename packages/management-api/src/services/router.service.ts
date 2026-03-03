@@ -6,6 +6,8 @@ export class RouterService {
   private readonly ANGIE_SITES_DIR = process.env.ANGIE_SITES_DIR || "/etc/angie/http.d";
   private readonly KONG_INTERNAL = process.env.KONG_INTERNAL || "127.0.0.1:8000";
   private readonly BASE_DOMAIN = process.env.BASE_DOMAIN || "localhost";
+  private readonly ENABLE_SSL = process.env.ENABLE_SSL === "true";
+  private readonly ACME_CLIENT = process.env.ACME_CLIENT || "le";
 
   getProjectApiUrl(projectRef: string): string {
     return `https://${projectRef}.api.${this.BASE_DOMAIN}`;
@@ -28,9 +30,77 @@ export class RouterService {
       await fs.mkdir(this.ANGIE_SITES_DIR, { recursive: true });
 
       const kong = this.KONG_INTERNAL;
+      const acmeClient = this.ACME_CLIENT;
 
-      const config = `# SupaCloud tenant: ${projectRef}
+      let config: string;
+
+      if (this.ENABLE_SSL) {
+        config = `# SupaCloud tenant: ${projectRef}
 # Generated: ${new Date().toISOString()}
+
+# --- API Endpoint ---
+server {
+    listen 80;
+    listen 443 ssl;
+    server_name ${apiDomain};
+
+    acme ${acmeClient};
+    ssl_certificate $acme_cert_${acmeClient};
+    ssl_certificate_key $acme_cert_key_${acmeClient};
+
+    add_header x-project-ref ${projectRef} always;
+
+    # Storage render endpoint (cache disabled - requires proxy_cache_path pre-configuration)
+    location ^~ /storage/v1/render/ {
+        proxy_pass http://${kong};
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header x-project-ref ${projectRef};
+    }
+
+    location / {
+        proxy_pass http://${kong};
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Project-Ref ${projectRef};
+
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+
+        proxy_read_timeout 86400;
+        proxy_send_timeout 86400;
+    }
+}
+
+# --- Studio Endpoint ---
+server {
+    listen 80;
+    listen 443 ssl;
+    server_name ${studioDomain};
+
+    acme ${acmeClient};
+    ssl_certificate $acme_cert_${acmeClient};
+    ssl_certificate_key $acme_cert_key_${acmeClient};
+
+    add_header x-project-ref ${projectRef} always;
+
+    location / {
+        proxy_pass http://${kong};
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+`;
+      } else {
+        config = `# SupaCloud tenant: ${projectRef}
+# Generated: ${new Date().toISOString()}
+# Note: SSL disabled (ENABLE_SSL not set)
 
 # --- API Endpoint ---
 server {
@@ -81,16 +151,15 @@ server {
     }
 }
 `;
+      }
 
       await fs.writeFile(configFile, config, "utf-8");
       console.log(`Route added for ${projectRef} (api: ${apiDomain})`);
 
-      // 测试并重载 Angie
       const testResult = await shellService.executeCommand("angie", ["-t"]);
       if (!testResult.success) {
         console.error("Angie config test failed:", testResult.output);
-        // 删除失败的配置
-        await fs.unlink(configFile).catch(() => {});
+        await fs.unlink(configFile).catch(() => { });
         return { success: false, error: testResult.output };
       }
 
@@ -109,7 +178,7 @@ server {
   async removeRoute(projectRef: string): Promise<{ success: boolean; error?: string }> {
     try {
       const configFile = path.join(this.ANGIE_SITES_DIR, `${projectRef}.conf`);
-      
+
       try {
         await fs.unlink(configFile);
       } catch (e: any) {
@@ -118,7 +187,6 @@ server {
         }
       }
 
-      // Reload Angie
       const reloadResult = await shellService.executeCommand("angie", ["-s", "reload"]);
       if (!reloadResult.success) {
         return { success: false, error: reloadResult.output };
@@ -138,9 +206,41 @@ server {
   async addCustomDomain(projectRef: string, domain: string): Promise<{ success: boolean; error?: string }> {
     try {
       const kong = this.KONG_INTERNAL;
+      const acmeClient = this.ACME_CLIENT;
       const configFile = path.join(this.ANGIE_SITES_DIR, `${projectRef}_custom_${domain}.conf`);
 
-      const config = `server {
+      let config: string;
+
+      if (this.ENABLE_SSL) {
+        config = `server {
+    listen 80;
+    listen 443 ssl;
+    server_name ${domain};
+
+    acme ${acmeClient};
+    ssl_certificate $acme_cert_${acmeClient};
+    ssl_certificate_key $acme_cert_key_${acmeClient};
+
+    # Storage render endpoint (cache disabled)
+    location ^~ /storage/v1/render/ {
+        proxy_pass http://${kong};
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header x-project-ref ${projectRef};
+    }
+
+    location / {
+        proxy_pass http://${kong};
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Project-Ref ${projectRef};
+    }
+}
+`;
+      } else {
+        config = `server {
     listen 80;
     server_name ${domain};
 
@@ -162,12 +262,13 @@ server {
     }
 }
 `;
+      }
 
       await fs.writeFile(configFile, config, "utf-8");
 
       const testResult = await shellService.executeCommand("angie", ["-t"]);
       if (!testResult.success) {
-        await fs.unlink(configFile).catch(() => {});
+        await fs.unlink(configFile).catch(() => { });
         return { success: false, error: testResult.output };
       }
 
@@ -181,7 +282,28 @@ server {
   async removeCustomDomain(projectRef: string, domain: string): Promise<{ success: boolean; error?: string }> {
     try {
       const configFile = path.join(this.ANGIE_SITES_DIR, `${projectRef}_custom_${domain}.conf`);
-      await fs.unlink(configFile).catch(() => {});
+      await fs.unlink(configFile).catch(() => { });
+      await shellService.executeCommand("angie", ["-s", "reload"]);
+      return { success: true };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  }
+
+  async updateNetworkRestrictions(projectRef: string, allowedIps: string[]): Promise<{ success: boolean; error?: string }> {
+    try {
+      const configFile = path.join(this.ANGIE_SITES_DIR, `${projectRef}.conf`);
+      const existing = await fs.readFile(configFile, "utf-8").catch(() => "");
+      // Build geo-restriction allow block from IP list
+      const allowRules = allowedIps.length > 0
+        ? allowedIps.map(ip => `        allow ${ip};`).join("\n") + "\n        deny all;"
+        : "        allow all;";
+      // Replace or inject the allow/deny block inside location block
+      const updated = existing.replace(
+        /(location\s+\/\s*\{[^}]*?)(allow[^;]+;[^}]*?deny[^;]+;|allow all;)/s,
+        `$1${allowRules}`
+      );
+      await fs.writeFile(configFile, updated.includes("allow") ? updated : existing + `\n# Network restrictions\n${allowRules}\n`);
       await shellService.executeCommand("angie", ["-s", "reload"]);
       return { success: true };
     } catch (error: any) {

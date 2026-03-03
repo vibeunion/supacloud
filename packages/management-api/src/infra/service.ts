@@ -1,84 +1,194 @@
-import { $ } from "bun";
-import os from "node:os";
+/**
+ * Service Infrastructure Management
+ * 
+ * Handles low-level service operations and process management
+ */
 
+import { exec } from 'child_process'
+import { promisify } from 'util'
+
+const execAsync = promisify(exec)
+
+const logger = {
+  info: (...args: any[]) => console.log('[INFO]', ...args),
+  warn: (...args: any[]) => console.warn('[WARN]', ...args),
+  error: (...args: any[]) => console.error('[ERROR]', ...args),
+}
+
+
+export interface ServiceInfo {
+  name: string
+  status: 'running' | 'stopped' | 'failed' | 'unknown'
+  pid?: number
+  port?: number
+  uptime?: number
+  memoryUsage?: number
+}
+
+export interface ServiceConfig {
+  name: string
+  command: string
+  env?: Record<string, string>
+  cwd?: string
+  autoRestart?: boolean
+  maxRestarts?: number
+}
+
+/**
+ * Service Manager
+ * Manages system services and processes
+ */
 export class ServiceManager {
-    static async register(name: string, description: string, execPath: string, args: string[] = []) {
-        const platform = os.platform();
-        const fullExec = `${execPath} ${args.join(" ")}`.trim();
+  private services: Map<string, ServiceConfig> = new Map()
 
-        if (platform === "linux") {
-            await this.registerLinux(name, description, fullExec);
-        } else if (platform === "darwin") {
-            await this.registerMac(name, description, fullExec);
-        } else {
-            throw new Error(`暂不支持在 ${platform} 上自动注册服务。`);
-        }
+  /**
+   * Static helper to register a systemd service (Linux only)
+   */
+  static async register(name: string, description: string, execPath: string, args: string[] = []) {
+    if (process.platform !== 'linux') {
+      logger.warn(`Skip service registration on ${process.platform}`)
+      return
     }
 
-    private static async registerLinux(name: string, description: string, execPath: string) {
-        console.log(`[ServiceManager] 正在 Linux (Systemd) 下注册服务: ${name}`);
-        const unitFile = `
-[Unit]
+    const serviceContent = `[Unit]
 Description=${description}
 After=network.target
 
 [Service]
-Type=simple
-ExecStart=${execPath}
+ExecStart=${execPath} ${args.join(' ')}
 Restart=always
-RestartSec=10
-StandardOutput=null
-StandardError=journal
+User=root
+EnvironmentFile=/opt/supacloud/config.env
 
 [Install]
 WantedBy=multi-user.target
-`.trim();
+`
+    const serviceFile = `/etc/systemd/system/${name}.service`
 
-        const servicePath = `/etc/systemd/system/${name}.service`;
-        const tempPath = `/tmp/${name}.service.tmp`;
-        await Bun.write(tempPath, unitFile);
+    try {
+      const { $ } = await import('bun')
+      await $`echo "${serviceContent}" | sudo tee ${serviceFile} > /dev/null`.nothrow()
+      await $`sudo systemctl daemon-reload`.nothrow()
+      await $`sudo systemctl enable ${name}`.nothrow()
+      await $`sudo systemctl start ${name}`.nothrow()
+      logger.info(`Systemd service registered and started: ${name}`)
+    } catch (err) {
+      logger.error(`Failed to register systemd service ${name}:`, err)
+      throw err
+    }
+  }
 
-        await $`sudo mv ${tempPath} ${servicePath}`.nothrow();
-        await $`sudo chown root:root ${servicePath}`.nothrow();
-        await $`sudo chmod 644 ${servicePath}`.nothrow();
 
-        await $`sudo systemctl daemon-reload`.nothrow();
-        await $`sudo systemctl enable ${name}`.nothrow();
-        await $`sudo systemctl restart ${name}`.nothrow();
-        console.log(`[ServiceManager] 服务 ${name} 已在 Systemd 注册并启动。`);
+  /**
+   * Register a new service
+   */
+  registerService(config: ServiceConfig): void {
+    this.services.set(config.name, config)
+    logger.info(`Service registered: ${config.name}`)
+  }
+
+  /**
+   * Get service status by name
+   */
+  async getServiceStatus(serviceName: string): Promise<ServiceInfo> {
+    try {
+      const { stdout } = await execAsync(`systemctl is-active ${serviceName}`)
+      const status = stdout.trim()
+
+      return {
+        name: serviceName,
+        status: status === 'active' ? 'running' : 'stopped'
+      }
+    } catch {
+      // Check if process exists via pgrep
+      try {
+        const { stdout } = await execAsync(`pgrep -f ${serviceName}`)
+        const pid = parseInt(stdout.trim(), 10)
+        return {
+          name: serviceName,
+          status: 'running',
+          pid
+        }
+      } catch {
+        return {
+          name: serviceName,
+          status: 'stopped'
+        }
+      }
+    }
+  }
+
+  /**
+   * Start a service
+   */
+  async startService(serviceName: string): Promise<boolean> {
+    try {
+      await execAsync(`systemctl start ${serviceName}`)
+      logger.info(`Service started: ${serviceName}`)
+      return true
+    } catch (error) {
+      logger.error(`Failed to start service ${serviceName}:`, error)
+      return false
+    }
+  }
+
+  /**
+   * Stop a service
+   */
+  async stopService(serviceName: string): Promise<boolean> {
+    try {
+      await execAsync(`systemctl stop ${serviceName}`)
+      logger.info(`Service stopped: ${serviceName}`)
+      return true
+    } catch (error) {
+      logger.error(`Failed to stop service ${serviceName}:`, error)
+      return false
+    }
+  }
+
+  /**
+   * Restart a service
+   */
+  async restartService(serviceName: string): Promise<boolean> {
+    try {
+      await execAsync(`systemctl restart ${serviceName}`)
+      logger.info(`Service restarted: ${serviceName}`)
+      return true
+    } catch (error) {
+      logger.error(`Failed to restart service ${serviceName}:`, error)
+      return false
+    }
+  }
+
+  /**
+   * Get all registered services status
+   */
+  async getAllServicesStatus(): Promise<ServiceInfo[]> {
+    const statuses: ServiceInfo[] = []
+
+    for (const [name] of this.services) {
+      const status = await this.getServiceStatus(name)
+      statuses.push(status)
     }
 
-    private static async registerMac(name: string, description: string, execPath: string) {
-        console.log(`[ServiceManager] 正在 macOS (Launchd) 下注册服务: ${name}`);
-        const label = `com.supacloud.${name}`;
-        const plist = `
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>${label}</string>
-    <key>ProgramArguments</key>
-    <array>
-        ${execPath.split(" ").map(arg => `<string>${arg}</string>`).join("\n        ")}
-    </array>
-    <key>RunAtLoad</key>
-    <true/>
-    <key>KeepAlive</key>
-    <true/>
-    <key>StandardOutPath</key>
-    <string>/tmp/${name}.log</string>
-    <key>StandardErrorPath</key>
-    <string>/tmp/${name}.err</string>
-</dict>
-</plist>
-`.trim();
+    return statuses
+  }
 
-        const plistPath = `${os.homedir()}/Library/LaunchAgents/${label}.plist`;
-        await Bun.write(plistPath, plist);
-
-        await $`launchctl unload ${plistPath}`.nothrow();
-        await $`launchctl load ${plistPath}`.nothrow();
-        console.log(`[ServiceManager] 服务 ${name} 已在 Launchd 注册并启动。`);
+  /**
+   * Check service health by HTTP endpoint
+   */
+  async checkServiceHealth(url: string): Promise<boolean> {
+    try {
+      const response = await fetch(url, {
+        method: 'GET',
+        signal: AbortSignal.timeout(5000)
+      })
+      return response.ok
+    } catch {
+      return false
     }
+  }
 }
+
+// Export singleton instance
+export const serviceManager = new ServiceManager()
