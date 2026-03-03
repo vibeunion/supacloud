@@ -209,6 +209,83 @@ async function bootstrap() {
     const serviceTarget = args[1] && !args[1].startsWith("-") ? args[1] : undefined;
     await handleLogs(serviceTarget);
     process.exit(0);
+  } else if (args[0] === "project") {
+    const { handleProjectCreate, handleProjectList, handleProjectGet, handleProjectDelete,
+            handleProjectPause, handleProjectRestore, handleProjectRestart,
+            handleProjectKeys, handleProjectRotateKeys, printProjectHelp } = await import("./cli/project");
+    const subCommand = args[1];
+    switch (subCommand) {
+      case "create":
+        await handleProjectCreate(args.slice(2));
+        break;
+      case "list":
+      case "ls":
+        await handleProjectList();
+        break;
+      case "get":
+        if (!args[2]) {
+          console.error("Error: project ref required");
+          printProjectHelp();
+          process.exit(1);
+        }
+        await handleProjectGet(args[2]);
+        break;
+      case "delete":
+      case "rm":
+        if (!args[2]) {
+          console.error("Error: project ref required");
+          printProjectHelp();
+          process.exit(1);
+        }
+        await handleProjectDelete(args[2], args.slice(3));
+        break;
+      case "pause":
+        if (!args[2]) {
+          console.error("Error: project ref required");
+          printProjectHelp();
+          process.exit(1);
+        }
+        await handleProjectPause(args[2]);
+        break;
+      case "restore":
+        if (!args[2]) {
+          console.error("Error: project ref required");
+          printProjectHelp();
+          process.exit(1);
+        }
+        await handleProjectRestore(args[2]);
+        break;
+      case "restart":
+        if (!args[2]) {
+          console.error("Error: project ref required");
+          printProjectHelp();
+          process.exit(1);
+        }
+        await handleProjectRestart(args[2]);
+        break;
+      case "keys":
+        if (!args[2]) {
+          console.error("Error: project ref required");
+          printProjectHelp();
+          process.exit(1);
+        }
+        await handleProjectKeys(args[2]);
+        break;
+      case "rotate-keys":
+        if (!args[2]) {
+          console.error("Error: project ref required");
+          printProjectHelp();
+          process.exit(1);
+        }
+        await handleProjectRotateKeys(args[2], args.slice(3));
+        break;
+      case "--help":
+      case "-h":
+      default:
+        printProjectHelp();
+        process.exit(0);
+    }
+    process.exit(0);
   } else if (args.includes("--version") || args.includes("-v")) {
     const pkg = await import("../package.json");
     console.log(`SupaCloud Version: ${pkg.version}`);
@@ -225,6 +302,18 @@ async function bootstrap() {
         supacloud logs [service]       View specified component or all logs
         supacloud doctor               Run environment pre-check and diagnostics
         supacloud upgrade              Upgrade cluster components
+        
+      Project Management:
+        supacloud project create [--name <name>] [--domain <domain>]  Create a new project
+        supacloud project list                                         List all projects
+        supacloud project get <ref>                                    Get project details
+        supacloud project delete <ref>                                 Delete a project
+        supacloud project pause <ref>                                  Pause a project
+        supacloud project restore <ref>                                Restore a paused project
+        supacloud project restart <ref>                                Restart a project
+        supacloud project keys <ref>                                   Get API keys
+        supacloud project rotate-keys <ref>                            Rotate API keys
+        
         supacloud --version            Display version number
         supacloud --help               Display this help message
         
