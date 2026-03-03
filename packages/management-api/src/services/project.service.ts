@@ -12,6 +12,7 @@ export interface CreateProjectRequest {
   name: string;
   region?: string;
   organization_id?: string;
+  domain?: string;  // Custom domain for the project (e.g., "aorist.cn")
 }
 
 export interface UpdateProjectRequest {
@@ -69,6 +70,12 @@ export class ProjectService {
     const dbUser = `role_${projectRef}`;
     const s3Bucket = `supa-${projectRef}`;
 
+    // Build initial config with custom domain if provided
+    const initialConfig: Record<string, unknown> = {};
+    if (request.domain) {
+      initialConfig.custom_domain = request.domain;
+    }
+
     // 1. Create project record in database (status: creating)
     const project = await projectRepository.create({
       ref: projectRef,
@@ -81,10 +88,11 @@ export class ProjectService {
       service_role_key: serviceRoleKey,
       s3_bucket: s3Bucket,
       region: request.region || "local",
+      config: initialConfig,
     });
 
     // 2. Asynchronously provision resources (background)
-    this.provisionResources(projectRef, dbPassword).catch((error) => {
+    this.provisionResources(projectRef, dbPassword, request.domain).catch((error) => {
       console.error(`Failed to provision resources for ${projectRef}:`, error);
     });
 
@@ -92,10 +100,10 @@ export class ProjectService {
   }
 
   // Asynchronously provision resources (Saga Orchestrator)
-  private async provisionResources(projectRef: string, dbPassword: string): Promise<void> {
+  private async provisionResources(projectRef: string, dbPassword: string, domain?: string): Promise<void> {
     try {
       // Start Saga by enqueuing the first task
-      await taskRepository.createTask(projectRef, "provision_db", { dbPassword });
+      await taskRepository.createTask(projectRef, "provision_db", { dbPassword, domain });
       console.log(`[Saga] Initiated resource provisioning for project ${projectRef}`);
     } catch (error) {
       console.error(`Failed to initiate saga for ${projectRef}:`, error);
@@ -312,6 +320,7 @@ export class ProjectService {
 
   // Convert to response format
   private toResponse(project: Project): ProjectResponse {
+    const customDomain = project.config?.custom_domain as string | undefined;
     return {
       id: project.id,
       ref: project.ref,
@@ -325,10 +334,10 @@ export class ProjectService {
         user: project.db_user,
       },
       api: {
-        url: routerService.getProjectApiUrl(project.ref),
+        url: routerService.getProjectApiUrl(project.ref, customDomain),
       },
       studio: {
-        url: routerService.getProjectStudioUrl(project.ref),
+        url: routerService.getProjectStudioUrl(project.ref, customDomain),
       },
     };
   }

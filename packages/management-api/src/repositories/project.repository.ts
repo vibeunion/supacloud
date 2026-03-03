@@ -61,7 +61,7 @@ export class ProjectRepository {
         ${input.s3_access_key || null},
         ${input.s3_secret_key || null},
         ${input.region || "local"},
-        ${JSON.stringify(input.config || {})}
+        ${input.config || sql`'{}'::jsonb`}
       )
       RETURNING *
     `;
@@ -83,7 +83,7 @@ export class ProjectRepository {
   async updateConfig(ref: string, config: Record<string, unknown>): Promise<Project | null> {
     const [project] = await sql`
       UPDATE projects
-      SET config = ${JSON.stringify(config)}, updated_at = NOW()
+      SET config = ${config}, updated_at = NOW()
       WHERE ref = ${ref} AND deleted_at IS NULL
       RETURNING *
     `;
