@@ -2,14 +2,27 @@ import { $ } from "bun";
 import * as p from "@clack/prompts";
 
 const API_URL = process.env.SUPACLOUD_API_URL || "http://localhost:9090";
-const MASTER_TOKEN = process.env.MASTER_TOKEN || "supacloud-master-token-2024";
+
+async function getMasterToken(): Promise<string> {
+    if (process.env.MASTER_TOKEN) {
+        return process.env.MASTER_TOKEN;
+    }
+    console.error("Error: MASTER_TOKEN environment variable is required");
+    console.error("Set it with: export MASTER_TOKEN=your-token");
+    process.exit(1);
+}
+
+let cachedToken: string | null = null;
 
 async function apiRequest(method: string, path: string, body?: unknown) {
+    if (!cachedToken) {
+        cachedToken = await getMasterToken();
+    }
     const response = await fetch(`${API_URL}${path}`, {
         method,
         headers: {
             "Content-Type": "application/json",
-            "Authorization": `Bearer ${MASTER_TOKEN}`,
+            "Authorization": `Bearer ${cachedToken}`,
         },
         body: body ? JSON.stringify(body) : undefined,
     });
