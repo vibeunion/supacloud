@@ -1,0 +1,337 @@
+import { $ } from "bun";
+import * as p from "@clack/prompts";
+
+const API_URL = process.env.SUPACLOUD_API_URL || "http://localhost:9090";
+const MASTER_TOKEN = process.env.MASTER_TOKEN || "supacloud-master-token-2024";
+
+async function apiRequest(method: string, path: string, body?: unknown) {
+    const response = await fetch(`${API_URL}${path}`, {
+        method,
+        headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${MASTER_TOKEN}`,
+        },
+        body: body ? JSON.stringify(body) : undefined,
+    });
+    if (!response.ok) {
+        const error = await response.text();
+        throw new Error(`API error: ${response.status} - ${error}`);
+    }
+    return response.json();
+}
+
+export async function handleProjectCreate(args: string[]) {
+    p.intro("🚀 Creating a new SupaCloud project...");
+
+    const nameIndex = args.indexOf("--name");
+    const domainIndex = args.indexOf("--domain");
+    const regionIndex = args.indexOf("--region");
+
+    const name = nameIndex !== -1 ? args[nameIndex + 1] : undefined;
+    const domain = domainIndex !== -1 ? args[domainIndex + 1] : undefined;
+    const region = regionIndex !== -1 ? args[regionIndex + 1] : undefined;
+
+    let projectName = name;
+    let projectDomain = domain;
+    let projectRegion = region;
+
+    if (!projectName) {
+        projectName = await p.text({
+            message: "Enter project name:",
+            placeholder: "my-project",
+            validate: (value) => {
+                if (!value || value.length < 1) return "Project name is required";
+                if (value.length > 100) return "Project name must be less than 100 characters";
+            },
+        });
+        if (p.isCancel(projectName)) {
+            p.cancel("Operation cancelled");
+            process.exit(0);
+        }
+    }
+
+    if (!projectDomain) {
+        const useCustomDomain = await p.confirm({
+            message: "Do you want to use a custom domain?",
+            initialValue: false,
+        });
+        if (p.isCancel(useCustomDomain)) {
+            p.cancel("Operation cancelled");
+            process.exit(0);
+        }
+        if (useCustomDomain) {
+            projectDomain = await p.text({
+                message: "Enter custom domain (e.g., example.com):",
+                placeholder: "example.com",
+                validate: (value) => {
+                    if (!value) return "Domain is required";
+                    if (!/^[a-z0-9.-]+$/.test(value)) return "Invalid domain format";
+                },
+            });
+            if (p.isCancel(projectDomain)) {
+                p.cancel("Operation cancelled");
+                process.exit(0);
+            }
+        }
+    }
+
+    const s = p.spinner();
+    s.start("Creating project...");
+
+    try {
+        const body: Record<string, string> = { name: projectName };
+        if (projectDomain) body.domain = projectDomain;
+        if (projectRegion) body.region = projectRegion;
+
+        const result = await apiRequest("POST", "/v1/projects", body);
+        s.stop("Project created successfully!");
+
+        p.log.success(`Project: ${result.name}`);
+        p.log.info(`Ref: ${result.ref}`);
+        p.log.info(`Status: ${result.status}`);
+        p.log.info(`API URL: ${result.api.url}`);
+        p.log.info(`Studio URL: ${result.studio.url}`);
+
+        p.outro("✅ Project creation initiated. Use 'supacloud project list' to check status.");
+    } catch (error: any) {
+        s.stop("Failed to create project");
+        p.log.error(error.message);
+        process.exit(1);
+    }
+}
+
+export async function handleProjectList() {
+    p.intro("📋 Listing all SupaCloud projects...");
+
+    const s = p.spinner();
+    s.start("Fetching projects...");
+
+    try {
+        const result = await apiRequest("GET", "/v1/projects");
+        s.stop(`Found ${result.length} project(s)`);
+
+        if (result.length === 0) {
+            p.log.info("No projects found. Create one with 'supacloud project create'");
+        } else {
+            console.log("\n");
+            for (const project of result) {
+                console.log(`  📦 ${project.name} (${project.ref})`);
+                console.log(`     Status: ${project.status}`);
+                console.log(`     API: ${project.api.url}`);
+                console.log(`     Studio: ${project.studio.url}`);
+                console.log("");
+            }
+        }
+
+        p.outro("Done");
+    } catch (error: any) {
+        s.stop("Failed to fetch projects");
+        p.log.error(error.message);
+        process.exit(1);
+    }
+}
+
+export async function handleProjectGet(ref: string) {
+    p.intro(`🔍 Getting project details: ${ref}`);
+
+    const s = p.spinner();
+    s.start("Fetching project...");
+
+    try {
+        const result = await apiRequest("GET", `/v1/projects/${ref}`);
+        s.stop("Project found");
+
+        console.log("\n");
+        console.log(`  Name: ${result.name}`);
+        console.log(`  Ref: ${result.ref}`);
+        console.log(`  Status: ${result.status}`);
+        console.log(`  Region: ${result.region}`);
+        console.log(`  Created: ${result.created_at}`);
+        console.log(`  API URL: ${result.api.url}`);
+        console.log(`  Studio URL: ${result.studio.url}`);
+        console.log(`  Database: ${result.database.name}`);
+        console.log("");
+
+        p.outro("Done");
+    } catch (error: any) {
+        s.stop("Failed to fetch project");
+        p.log.error(error.message);
+        process.exit(1);
+    }
+}
+
+export async function handleProjectDelete(ref: string, args: string[]) {
+    p.intro(`🗑️ Deleting project: ${ref}`);
+
+    const skipConfirm = args.includes("--yes") || args.includes("-y");
+
+    if (!skipConfirm) {
+        const confirm = await p.confirm({
+            message: `Are you sure you want to delete project ${ref}? This action cannot be undone.`,
+            initialValue: false,
+        });
+
+        if (p.isCancel(confirm) || !confirm) {
+            p.cancel("Operation cancelled");
+            process.exit(0);
+        }
+    }
+
+    const s = p.spinner();
+    s.start("Deleting project...");
+
+    try {
+        await apiRequest("DELETE", `/v1/projects/${ref}`);
+        s.stop("Project deletion initiated");
+
+        p.outro(`✅ Project ${ref} is being deleted. Resources will be cleaned up shortly.`);
+    } catch (error: any) {
+        s.stop("Failed to delete project");
+        p.log.error(error.message);
+        process.exit(1);
+    }
+}
+
+export async function handleProjectPause(ref: string) {
+    p.intro(`⏸️ Pausing project: ${ref}`);
+
+    const s = p.spinner();
+    s.start("Pausing project...");
+
+    try {
+        const result = await apiRequest("POST", `/v1/projects/${ref}/pause`);
+        s.stop("Project paused");
+
+        p.outro(`✅ Project ${ref} is now paused`);
+    } catch (error: any) {
+        s.stop("Failed to pause project");
+        p.log.error(error.message);
+        process.exit(1);
+    }
+}
+
+export async function handleProjectRestore(ref: string) {
+    p.intro(`▶️ Restoring project: ${ref}`);
+
+    const s = p.spinner();
+    s.start("Restoring project...");
+
+    try {
+        const result = await apiRequest("POST", `/v1/projects/${ref}/restore`);
+        s.stop("Project restored");
+
+        p.outro(`✅ Project ${ref} is now active`);
+    } catch (error: any) {
+        s.stop("Failed to restore project");
+        p.log.error(error.message);
+        process.exit(1);
+    }
+}
+
+export async function handleProjectRestart(ref: string) {
+    p.intro(`🔄 Restarting project: ${ref}`);
+
+    const s = p.spinner();
+    s.start("Restarting project...");
+
+    try {
+        const result = await apiRequest("POST", `/v1/projects/${ref}/restart`);
+        s.stop("Project restart initiated");
+
+        p.outro(`✅ Project ${ref} is restarting`);
+    } catch (error: any) {
+        s.stop("Failed to restart project");
+        p.log.error(error.message);
+        process.exit(1);
+    }
+}
+
+export async function handleProjectKeys(ref: string) {
+    p.intro(`🔑 Getting API keys for project: ${ref}`);
+
+    const s = p.spinner();
+    s.start("Fetching API keys...");
+
+    try {
+        const result = await apiRequest("GET", `/v1/projects/${ref}/api-keys`);
+        s.stop("API keys retrieved");
+
+        console.log("\n");
+        console.log(`  anon key: ${result.anon_key}`);
+        console.log(`  service_role key: ${result.service_role_key}`);
+        console.log("");
+
+        p.outro("⚠️ Keep these keys secure!");
+    } catch (error: any) {
+        s.stop("Failed to fetch API keys");
+        p.log.error(error.message);
+        process.exit(1);
+    }
+}
+
+export async function handleProjectRotateKeys(ref: string, args: string[]) {
+    p.intro(`🔄 Rotating API keys for project: ${ref}`);
+
+    const skipConfirm = args.includes("--yes") || args.includes("-y");
+
+    if (!skipConfirm) {
+        const confirm = await p.confirm({
+            message: `Are you sure you want to rotate API keys for ${ref}? Existing keys will stop working.`,
+            initialValue: false,
+        });
+
+        if (p.isCancel(confirm) || !confirm) {
+            p.cancel("Operation cancelled");
+            process.exit(0);
+        }
+    }
+
+    const s = p.spinner();
+    s.start("Rotating API keys...");
+
+    try {
+        const result = await apiRequest("POST", `/v1/projects/${ref}/api-keys/rotate`);
+        s.stop("API keys rotated");
+
+        console.log("\n");
+        console.log(`  New anon key: ${result.anon_key}`);
+        console.log(`  New service_role key: ${result.service_role_key}`);
+        console.log("");
+
+        p.outro("✅ API keys have been rotated. Update your applications!");
+    } catch (error: any) {
+        s.stop("Failed to rotate API keys");
+        p.log.error(error.message);
+        process.exit(1);
+    }
+}
+
+export function printProjectHelp() {
+    console.log(`
+    SupaCloud Project Management CLI
+    
+    Usage:
+      supacloud project create [--name <name>] [--domain <domain>] [--region <region>]
+                              Create a new project
+      supacloud project list    List all projects
+      supacloud project get <ref>    Get project details
+      supacloud project delete <ref> [--yes] Delete a project
+      supacloud project pause <ref>  Pause a project
+      supacloud project restore <ref> Restore a paused project
+      supacloud project restart <ref> Restart a project
+      supacloud project keys <ref>   Get API keys
+      supacloud project rotate-keys <ref> [--yes] Rotate API keys
+    
+    Options:
+      --name <name>     Project name
+      --domain <domain> Custom domain (e.g., example.com)
+                        API will be at api.<domain>, Studio at studio.<domain>
+      --region <region> Project region (default: local)
+      --yes, -y         Skip confirmation prompts
+    
+    Examples:
+      supacloud project create --name myapp --domain example.com
+      supacloud project list
+      supacloud project delete abc123 --yes
+  `);
+}
