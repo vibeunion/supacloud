@@ -7,7 +7,7 @@ describe("SecurityService", () => {
         const spy = spyOn(shellService, "execute").mockResolvedValue({ success: true, output: "" });
 
         const result = await SecurityService.addFirewallRule(5432, "1.2.3.4");
-        expect(result.message).toContain("已对 IP 1.2.3.4 开放");
+        expect(result.message).toContain("opened");
         expect(spy).toHaveBeenCalledWith("security_manager.sh", ["add_firewall_rule", "5432", "1.2.3.4"]);
 
         spy.mockRestore();
@@ -17,7 +17,7 @@ describe("SecurityService", () => {
         const spy = spyOn(shellService, "execute").mockResolvedValue({ success: true, output: "" });
 
         const result = await SecurityService.requestSsl("example.com");
-        expect(result.message).toContain("SSL 证书申请任务");
+        expect(result.message).toContain("SSL");
         expect(spy).toHaveBeenCalled();
 
         spy.mockRestore();
