@@ -61,6 +61,10 @@ export class TaskWorker {
         try {
             switch (task_type) {
                 case "provision_db": {
+                    if (!project) {
+                        console.error(`[TaskWorker] Project ${project_ref} not found for provision_db`);
+                        return false;
+                    }
                     const res = await databaseService.createDatabase(project_ref, project.db_password);
                     if (!res.success) {
                         console.error(`[TaskWorker] provision_db failed for ${project_ref}:`, res.error);
@@ -70,6 +74,10 @@ export class TaskWorker {
                 }
 
                 case "provision_s3": {
+                    if (!project) {
+                        console.error(`[TaskWorker] Project ${project_ref} not found for provision_s3`);
+                        return false;
+                    }
                     const res = await storageService.createBucket(project_ref);
                     if (res.success && res.accessKey && res.secretKey) {
                         await projectRepository.updateConfig(project_ref, {
@@ -82,6 +90,10 @@ export class TaskWorker {
                 }
 
                 case "provision_runtime": {
+                    if (!project) {
+                        console.error(`[TaskWorker] Project ${project_ref} not found for provision_runtime`);
+                        return false;
+                    }
                     // Start tenant-specific PostgREST process
                     const startRes = await databaseService.startRuntime(project_ref);
                     if (!startRes.success) return false;
