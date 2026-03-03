@@ -44,12 +44,12 @@ export async function handleProjectCreate(args: string[]) {
     const domain = domainIndex !== -1 ? args[domainIndex + 1] : undefined;
     const region = regionIndex !== -1 ? args[regionIndex + 1] : undefined;
 
-    let projectName = name;
-    let projectDomain = domain;
-    let projectRegion = region;
+    let projectName: string | undefined = name;
+    let projectDomain: string | undefined = domain;
+    let projectRegion: string | undefined = region;
 
     if (!projectName) {
-        projectName = await p.text({
+        const input = await p.text({
             message: "Enter project name:",
             placeholder: "my-project",
             validate: (value) => {
@@ -57,10 +57,11 @@ export async function handleProjectCreate(args: string[]) {
                 if (value.length > 100) return "Project name must be less than 100 characters";
             },
         });
-        if (p.isCancel(projectName)) {
+        if (p.isCancel(input)) {
             p.cancel("Operation cancelled");
             process.exit(0);
         }
+        projectName = input;
     }
 
     if (!projectDomain) {
@@ -73,7 +74,7 @@ export async function handleProjectCreate(args: string[]) {
             process.exit(0);
         }
         if (useCustomDomain) {
-            projectDomain = await p.text({
+            const input = await p.text({
                 message: "Enter custom domain (e.g., example.com):",
                 placeholder: "example.com",
                 validate: (value) => {
@@ -81,10 +82,11 @@ export async function handleProjectCreate(args: string[]) {
                     if (!/^[a-z0-9.-]+$/.test(value)) return "Invalid domain format";
                 },
             });
-            if (p.isCancel(projectDomain)) {
+            if (p.isCancel(input)) {
                 p.cancel("Operation cancelled");
                 process.exit(0);
             }
+            projectDomain = input;
         }
     }
 
@@ -92,7 +94,7 @@ export async function handleProjectCreate(args: string[]) {
     s.start("Creating project...");
 
     try {
-        const body: Record<string, string> = { name: projectName };
+        const body: Record<string, string> = { name: projectName! };
         if (projectDomain) body.domain = projectDomain;
         if (projectRegion) body.region = projectRegion;
 
