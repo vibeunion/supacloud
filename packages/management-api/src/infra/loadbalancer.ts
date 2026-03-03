@@ -8,8 +8,8 @@ export class LoadBalancerManager {
     /**
      * 安装并配置具备自动 ACME SSL 能力的前端代理网关
      */
-    static async installAngie(studioDomain: string, apiDomain: string) {
-        console.log("[LoadBalancerManager] 安装 Angie (原生 http_acme 自动 SSL)...");
+    static async installAngie(studioDomain: string, apiDomain: string, enableSsl = true, acmeClient = "le") {
+        console.log(`[LoadBalancerManager] 安装 Angie (SSL=${enableSsl}, Client=${acmeClient})...`);
 
         // 1. 处理已有的 Nginx (备份、停用、卸载)
         if ((await $`which nginx`.nothrow()).exitCode === 0 ||
@@ -41,7 +41,7 @@ export class LoadBalancerManager {
             return;
         }
 
-        const res = await $`bash ${setupScript} --studio-domain ${studioDomain} --api-domain ${apiDomain}`.nothrow();
+        const res = await $`bash ${setupScript} --studio-domain ${studioDomain} --api-domain ${apiDomain} --acme-client ${acmeClient}`.nothrow();
         if (res.exitCode !== 0) {
             console.warn("[LoadBalancerManager] Angie setup.sh 执行失败", res.stderr.toString());
             return;
