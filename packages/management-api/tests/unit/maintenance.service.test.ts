@@ -7,7 +7,7 @@ describe("MaintenanceService", () => {
         const spy = spyOn(shellService, "execute").mockResolvedValue({ success: true, output: "OK" });
 
         const result = await MaintenanceService.switchover("db-cluster", "node-2");
-        expect(result.message).toContain("已下发成功");
+        expect(result.message).toContain("successfully");
         expect(spy).toHaveBeenCalledWith("ha_manager.sh", ["switchover", "db-cluster", "node-2"]);
 
         spy.mockRestore();
@@ -17,7 +17,7 @@ describe("MaintenanceService", () => {
         const spy = spyOn(shellService, "execute").mockResolvedValue({ success: true, output: "OK" });
 
         const result = await MaintenanceService.reloadConfig("192.168.1.10");
-        expect(result.message).toContain("已发送");
+        expect(result.message).toContain("sent");
         expect(spy).toHaveBeenCalledWith("ha_manager.sh", ["reload", "192.168.1.10"]);
 
         spy.mockRestore();
@@ -27,7 +27,7 @@ describe("MaintenanceService", () => {
         const spy = spyOn(shellService, "execute").mockResolvedValue({ success: true, output: "OK" });
 
         const result = await MaintenanceService.addReplica("192.168.1.11");
-        expect(result.message).toContain("已启动");
+        expect(result.message).toContain("started");
         expect(spy).toHaveBeenCalled();
 
         spy.mockRestore();
