@@ -1,9 +1,15 @@
-import { describe, it, expect } from "bun:test";
-import { app } from "../src/index";
+import { describe, it, expect, beforeAll } from "bun:test";
+import { app as baseApp, registerAllRoutes } from "../src/index";
 
 describe("Management API Integration Tests", () => {
     const baseUrl = "http://localhost";
     const masterToken = "dev-master-token";
+    let app: any;
+
+    beforeAll(async () => {
+        app = baseApp.use(await registerAllRoutes());
+    });
+
 
     describe("Organizations", () => {
         it("should list organizations", async () => {
