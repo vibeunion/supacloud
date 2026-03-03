@@ -2,6 +2,11 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { shellService } from "./shell.service";
 
+export interface ProjectDomains {
+  apiDomain: string;
+  studioDomain: string;
+}
+
 export class RouterService {
   private readonly ANGIE_SITES_DIR = process.env.ANGIE_SITES_DIR || "/etc/angie/http.d";
   private readonly KONG_INTERNAL = process.env.KONG_INTERNAL || "127.0.0.1:8000";
@@ -9,11 +14,17 @@ export class RouterService {
   private readonly ENABLE_SSL = process.env.ENABLE_SSL === "true";
   private readonly ACME_CLIENT = process.env.ACME_CLIENT || "le";
 
-  getProjectApiUrl(projectRef: string): string {
+  getProjectApiUrl(projectRef: string, customDomain?: string): string {
+    if (customDomain) {
+      return `https://api.${customDomain}`;
+    }
     return `https://${projectRef}.api.${this.BASE_DOMAIN}`;
   }
 
-  getProjectStudioUrl(projectRef: string): string {
+  getProjectStudioUrl(projectRef: string, customDomain?: string): string {
+    if (customDomain) {
+      return `https://studio.${customDomain}`;
+    }
     return `https://studio-${projectRef}.${this.BASE_DOMAIN}`;
   }
 
@@ -21,10 +32,10 @@ export class RouterService {
     return `${projectRef}.${this.BASE_DOMAIN}`;
   }
 
-  async addRoute(projectRef: string): Promise<{ success: boolean; error?: string }> {
+  async addRoute(projectRef: string, domains?: ProjectDomains): Promise<{ success: boolean; error?: string }> {
     try {
-      const apiDomain = `${projectRef}.api.${this.BASE_DOMAIN}`;
-      const studioDomain = `studio-${projectRef}.${this.BASE_DOMAIN}`;
+      const apiDomain = domains?.apiDomain || `${projectRef}.api.${this.BASE_DOMAIN}`;
+      const studioDomain = domains?.studioDomain || `studio-${projectRef}.${this.BASE_DOMAIN}`;
       const configFile = path.join(this.ANGIE_SITES_DIR, `${projectRef}.conf`);
 
       await fs.mkdir(this.ANGIE_SITES_DIR, { recursive: true });
