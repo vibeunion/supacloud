@@ -48,8 +48,12 @@ export class TaskWorker {
 
     private async executeTask(task: ProjectTask): Promise<boolean> {
         const { project_ref, task_type, payload } = task;
+
+        // Cleanup tasks don't require project to exist
+        const isCleanupTask = task_type.startsWith("cleanup_");
+
         const project = await projectRepository.findByRef(project_ref);
-        if (!project) {
+        if (!project && !isCleanupTask) {
             console.error(`[TaskWorker] Project ${project_ref} not found for task ${task.id}`);
             return false;
         }
