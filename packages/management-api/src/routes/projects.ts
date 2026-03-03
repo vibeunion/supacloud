@@ -40,6 +40,7 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
         name: t.String({ minLength: 1, maxLength: 100 }),
         region: t.Optional(t.String()),
         organization_id: t.Optional(t.String()),
+        domain: t.Optional(t.String({ description: "Custom domain for the project (e.g., 'aorist.cn')" })),
       }),
     }
   )

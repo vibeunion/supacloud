@@ -115,7 +115,13 @@ export class TaskWorker {
                 }
 
                 case "provision_router": {
-                    const res = await routerService.addRoute(project_ref);
+                    // Get domain from project config or task payload
+                    const domain = project?.config?.custom_domain as string | undefined || payload?.domain as string | undefined;
+                    const domains = domain ? {
+                        apiDomain: `api.${domain}`,
+                        studioDomain: `studio.${domain}`
+                    } : undefined;
+                    const res = await routerService.addRoute(project_ref, domains);
                     await routerService.reload();
                     return res.success;
                 }
