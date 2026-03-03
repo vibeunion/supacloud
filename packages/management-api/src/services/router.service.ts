@@ -27,8 +27,6 @@ export class RouterService {
 
       await fs.mkdir(this.ANGIE_SITES_DIR, { recursive: true });
 
-      const apiSsl = this.generateSslBlock(apiDomain);
-      const studioSsl = this.generateSslBlock(studioDomain);
       const kong = this.KONG_INTERNAL;
 
       const config = `# SupaCloud tenant: ${projectRef}
@@ -37,10 +35,7 @@ export class RouterService {
 # --- API Endpoint ---
 server {
     listen 80;
-    listen 443 ssl;
     server_name ${apiDomain};
-
-${apiSsl}
 
     add_header x-project-ref ${projectRef} always;
 
@@ -73,10 +68,7 @@ ${apiSsl}
 # --- Studio Endpoint ---
 server {
     listen 80;
-    listen 443 ssl;
     server_name ${studioDomain};
-
-${studioSsl}
 
     add_header x-project-ref ${projectRef} always;
 
@@ -126,8 +118,8 @@ ${studioSsl}
         }
       }
 
-      // 重载 Angie
-      const reloadResult = await shellService.execute("angie", ["-s", "reload"]);
+      // Reload Angie
+      const reloadResult = await shellService.executeCommand("angie", ["-s", "reload"]);
       if (!reloadResult.success) {
         return { success: false, error: reloadResult.output };
       }
@@ -143,25 +135,14 @@ ${studioSsl}
     return result;
   }
 
-  private generateSslBlock(domain: string): string {
-    // 暂时禁用 SSL/ACME，仅使用 HTTP
-    // TODO: 配置 ACME 或使用自签名证书
-    return `    # SSL disabled for now (ACME not configured)
-    # listen 443 ssl;`;
-  }
-
   async addCustomDomain(projectRef: string, domain: string): Promise<{ success: boolean; error?: string }> {
     try {
-      const ssl = this.generateSslBlock(domain);
       const kong = this.KONG_INTERNAL;
       const configFile = path.join(this.ANGIE_SITES_DIR, `${projectRef}_custom_${domain}.conf`);
 
       const config = `server {
     listen 80;
-    listen 443 ssl;
     server_name ${domain};
-
-${ssl}
 
     # Storage render endpoint (cache disabled)
     location ^~ /storage/v1/render/ {
@@ -184,13 +165,13 @@ ${ssl}
 
       await fs.writeFile(configFile, config, "utf-8");
 
-      const testResult = await shellService.execute("angie", ["-t"]);
+      const testResult = await shellService.executeCommand("angie", ["-t"]);
       if (!testResult.success) {
         await fs.unlink(configFile).catch(() => {});
         return { success: false, error: testResult.output };
       }
 
-      await shellService.execute("angie", ["-s", "reload"]);
+      await shellService.executeCommand("angie", ["-s", "reload"]);
       return { success: true };
     } catch (error: any) {
       return { success: false, error: error.message };
@@ -201,7 +182,7 @@ ${ssl}
     try {
       const configFile = path.join(this.ANGIE_SITES_DIR, `${projectRef}_custom_${domain}.conf`);
       await fs.unlink(configFile).catch(() => {});
-      await shellService.execute("angie", ["-s", "reload"]);
+      await shellService.executeCommand("angie", ["-s", "reload"]);
       return { success: true };
     } catch (error: any) {
       return { success: false, error: error.message };
