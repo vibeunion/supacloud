@@ -167,6 +167,9 @@ GRANT authenticated TO postgres;
 GRANT service_role TO postgres;
 GRANT supabase_admin TO postgres;
 
+-- 设置 supabase_auth_admin 默认 search_path (GoTrue 需要)
+ALTER ROLE supabase_auth_admin SET search_path TO auth, public;
+
 -- 2. Auth Schema
 CREATE SCHEMA IF NOT EXISTS auth AUTHORIZATION supabase_auth_admin;
 GRANT USAGE ON SCHEMA auth TO anon, authenticated, service_role;

@@ -9,3 +9,6 @@ export { securityRoutes } from "./security";
 export { storageRoutes } from "./storage";
 export { scalingRoutes } from "./scaling";
 export { taskRoutes } from "./tasks";
+export { databaseRoutes } from "./database";
+export { authRoutes } from "./auth";
+export { frontendRoutes } from "./frontend";
