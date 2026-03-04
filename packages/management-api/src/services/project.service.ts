@@ -8,6 +8,7 @@ import { gatewayService } from "./gateway.service";
 import { taskRepository } from "../repositories/task.repository";
 import type { Project, ProjectStatus } from "../db";
 import { logger } from "../utils/logger";
+import { $ } from "bun";
 
 export interface CreateProjectRequest {
   name: string;
@@ -407,8 +408,8 @@ export class ProjectService {
               rawOutputs.push({ source: sourceName, jsonStr: line });
             }
           }
-        } catch (e) {
-          logger.error(`Error fetching journal for ${unitName}`, e);
+        } catch (e: any) {
+          logger.error(`Error fetching journal for ${unitName}`, { error: e.message || String(e) });
         }
       };
 
@@ -466,14 +467,16 @@ export class ProjectService {
             id: `log-${ms}-${Math.random().toString(36).substring(2, 9)}`,
             timestamp: timestampStr,
             event_message: message,
-            metadata: [
-              {
-                severity,
-                source,
-                syslog_identifier: entry.SYSLOG_IDENTIFIER,
-                message: message
-              }
-            ]
+            metadata: {
+              items: [
+                {
+                  severity,
+                  source,
+                  syslog_identifier: entry.SYSLOG_IDENTIFIER,
+                  message: message
+                }
+              ]
+            }
           });
         } catch (je) {
           // Skip unparseable lines
