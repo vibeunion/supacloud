@@ -7,6 +7,7 @@ import { shellService } from "./shell.service";
 import { gatewayService } from "./gateway.service";
 import { taskRepository } from "../repositories/task.repository";
 import type { Project, ProjectStatus } from "../db";
+import { logger } from "../utils/logger";
 
 export interface CreateProjectRequest {
   name: string;
@@ -42,6 +43,35 @@ export interface ProjectResponse {
 export interface ProjectDetailResponse extends ProjectResponse {
   config: Record<string, unknown>;
   updated_at: Date;
+}
+
+export interface BackupResponse {
+  id: string;
+  project_id: string;
+  status: string;
+  created_at: string;
+  size_bytes?: number;
+}
+
+export interface SecretResponse {
+  name: string;
+  value: string;
+}
+
+export interface FunctionResponse {
+  id: string;
+  slug: string;
+  name: string;
+  status: string;
+  created_at: string;
+}
+
+export interface LogEntryResponse {
+  id: string;
+  timestamp: string;
+  event_message: string;
+  SystemMock?: boolean;
+  metadata: Record<string, unknown>;
 }
 
 export class ProjectService {
@@ -104,9 +134,9 @@ export class ProjectService {
     try {
       // Start Saga by enqueuing the first task
       await taskRepository.createTask(projectRef, "provision_db", { dbPassword, domain });
-      console.log(`[Saga] Initiated resource provisioning for project ${projectRef}`);
+      logger.info(`[Saga] Initiated resource provisioning for project ${projectRef}`);
     } catch (error) {
-      console.error(`Failed to initiate saga for ${projectRef}:`, error);
+      logger.error(`Failed to initiate saga for ${projectRef}:`, error as Error);
       await projectRepository.updateStatus(projectRef, "paused");
     }
   }
@@ -182,9 +212,9 @@ export class ProjectService {
   private async cleanupResources(projectRef: string): Promise<void> {
     try {
       await taskRepository.createTask(projectRef, "cleanup_router");
-      console.log(`[Saga] Initiated resource cleanup for project ${projectRef}`);
+      logger.info(`[Saga] Initiated resource cleanup for project ${projectRef}`);
     } catch (error) {
-      console.error(`Cleanup saga initiation error for ${projectRef}:`, error);
+      logger.error(`Cleanup saga initiation error for ${projectRef}:`, error as Error);
     }
   }
 
@@ -246,7 +276,7 @@ export class ProjectService {
 
   // --- Environment Variables (Secrets) Management ---
 
-  async getSecrets(ref: string): Promise<any[] | null> {
+  async getSecrets(ref: string): Promise<SecretResponse[] | null> {
     const project = await projectRepository.findByRef(ref);
     if (!project) return null;
     return await databaseService.getSecrets(ref);
@@ -282,7 +312,7 @@ export class ProjectService {
     return result.output;
   }
 
-  async listFunctions(ref: string): Promise<any[]> {
+  async listFunctions(ref: string): Promise<FunctionResponse[]> {
     const project = await projectRepository.findByRef(ref);
     if (!project) return [];
 
@@ -353,23 +383,26 @@ export class ProjectService {
 
   // --- Log Management ---
 
-  async queryLogs(ref: string, type: string = "all"): Promise<any[]> {
+  async queryLogs(ref: string, type: string = "all"): Promise<LogEntryResponse[]> {
     const project = await projectRepository.findByRef(ref);
     if (!project) return [];
 
-    // Simulated log data, activates Studio Logs Explorer
+    // TODO: Implement actual log aggregation from Vector/ClickHouse
+    logger.warn(`[SystemMock] Returning mocked log data for project ${ref}`);
     const now = new Date();
     return [
       {
         id: "log-1",
         timestamp: new Date(now.getTime() - 1000).toISOString(),
         event_message: `Project ${ref} received a request to ${type} logs.`,
+        SystemMock: true,
         metadata: { severity: "info", source: "management-api" },
       },
       {
         id: "log-2",
         timestamp: now.toISOString(),
         event_message: `Successfully retrieved ${type} logs for ${project.name}.`,
+        SystemMock: true,
         metadata: { severity: "success", source: "management-api" },
       }
     ];
@@ -404,7 +437,7 @@ export class ProjectService {
 
   // --- Backup Management ---
 
-  async listBackups(ref: string): Promise<any[]> {
+  async listBackups(ref: string): Promise<BackupResponse[]> {
     const project = await projectRepository.findByRef(ref);
     if (!project) return [];
 

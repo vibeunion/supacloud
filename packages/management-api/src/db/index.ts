@@ -1,5 +1,6 @@
 import { SQL } from "bun";
 import { config } from "../config";
+import { logger } from "../utils/logger";
 
 // 解析 DATABASE_URL 获取各组件
 function parseDatabaseUrl(url: string) {
@@ -25,13 +26,39 @@ export const sql = new SQL({
   connectTimeout: 5000,
 });
 
+const MAX_CACHED_CONNECTIONS = 100;
+
 // 项目数据库连接缓存
-const projectConnections: Map<string, SQL> = new Map();
+const projectConnections: Map<string, { sql: SQL; lastUsed: number }> = new Map();
 
 // 获取项目数据库连接
 export function getProjectDb(dbName: string): SQL {
-  if (projectConnections.has(dbName)) {
-    return projectConnections.get(dbName)!;
+  const cached = projectConnections.get(dbName);
+  if (cached) {
+    cached.lastUsed = Date.now();
+    return cached.sql;
+  }
+
+  // LRU 清理机制：超出最大连接数时清理最久未使用的连接
+  if (projectConnections.size >= MAX_CACHED_CONNECTIONS) {
+    let oldestDbName = "";
+    let oldestTime = Infinity;
+
+    for (const [key, value] of projectConnections.entries()) {
+      if (value.lastUsed < oldestTime) {
+        oldestTime = value.lastUsed;
+        oldestDbName = key;
+      }
+    }
+
+    if (oldestDbName) {
+      const conn = projectConnections.get(oldestDbName);
+      if (conn) {
+        logger.debug(`Evicting project connection cache for ${oldestDbName} due to limit.`);
+        conn.sql.close().catch(e => logger.error(`Failed to close evicted connection ${oldestDbName}`, e));
+      }
+      projectConnections.delete(oldestDbName);
+    }
   }
 
   const projectSql = new SQL({
@@ -45,8 +72,21 @@ export function getProjectDb(dbName: string): SQL {
     connectTimeout: 5000,
   });
 
-  projectConnections.set(dbName, projectSql);
+  projectConnections.set(dbName, { sql: projectSql, lastUsed: Date.now() });
   return projectSql;
+}
+
+// 显式移除某个项目的缓存 (例如项目已被删除或暂停时)
+export async function removeProjectDbCache(dbName: string) {
+  const cached = projectConnections.get(dbName);
+  if (cached) {
+    try {
+      await cached.sql.close();
+    } catch (e) {
+      logger.error(`Failed to close connection for ${dbName} during cache removal`, e as Error);
+    }
+    projectConnections.delete(dbName);
+  }
 }
 
 // 执行 SQL 查询
@@ -151,4 +191,14 @@ export interface CreateProjectInput {
 // 关闭数据库连接
 export async function closeDb() {
   await sql.close();
+
+  // Clean up all cached project connections
+  for (const [dbName, cached] of projectConnections.entries()) {
+    try {
+      await cached.sql.close();
+    } catch (e) {
+      logger.error(`Failed to close cached connection for ${dbName} during shutdown`, e as Error);
+    }
+  }
+  projectConnections.clear();
 }
