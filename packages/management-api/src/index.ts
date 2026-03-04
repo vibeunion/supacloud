@@ -87,7 +87,14 @@ const app = new Elysia({ strictPath: false })
   })
   .get("/platform/projects/:ref", async ({ params, set }) => {
     const { projectService } = await import("./services");
-    const project = await projectService.getProject(params.ref);
+    let project = await projectService.getProject(params.ref);
+    
+    // If ref is "default", return the first project
+    if (!project && params.ref === "default") {
+      const projects = await projectService.listProjects();
+      project = projects[0];
+    }
+    
     if (!project) {
       set.status = 404;
       return { error: "Project not found" };
@@ -96,11 +103,11 @@ const app = new Elysia({ strictPath: false })
       id: project.id,
       ref: project.ref,
       name: project.name,
-      status: project.status,
-      region: project.region,
+      status: project.status?.toUpperCase() || "ACTIVE_HEALTHY",
+      region: project.region || "local",
       organization_id: "default",
       cloud_provider: project.cloud_provider || "localhost",
-      inserted_at: project.inserted_at,
+      inserted_at: project.created_at,
       connectionString: project.connectionString || "",
       created_at: project.created_at,
       updated_at: project.updated_at || null,
