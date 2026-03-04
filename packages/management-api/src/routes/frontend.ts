@@ -308,4 +308,118 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
         })),
       };
     }
+  )
+
+  .post(
+    "/deployments/:id/tokens",
+    async ({ params, body, set }) => {
+      const result = await frontendService.createDeployToken(params.ref, params.id, body.name);
+      if (!result) {
+        set.status = 404;
+        return { error: "Deployment not found" };
+      }
+      return result;
+    },
+    {
+      params: t.Object({
+        ref: t.String(),
+        id: t.String(),
+      }),
+      body: t.Object({
+        name: t.String({ minLength: 1 }),
+      }),
+    }
+  )
+
+  .get(
+    "/deployments/:id/tokens",
+    async ({ params, set }) => {
+      const tokens = await frontendService.listDeployTokens(params.ref, params.id);
+      return { tokens };
+    },
+    {
+      params: t.Object({
+        ref: t.String(),
+        id: t.String(),
+      }),
+    }
+  )
+
+  .delete(
+    "/deployments/:id/tokens/:tokenId",
+    async ({ params, set }) => {
+      const success = await frontendService.deleteDeployToken(params.ref, params.id, params.tokenId);
+      if (!success) {
+        set.status = 404;
+        return { error: "Token not found" };
+      }
+      return { message: "Token deleted successfully" };
+    },
+    {
+      params: t.Object({
+        ref: t.String(),
+        id: t.String(),
+        tokenId: t.String(),
+      }),
+    }
+  )
+
+  .put(
+    "/deployments/:id/git",
+    async ({ params, body, set }) => {
+      const deployment = await frontendService.setGitConfig(
+        params.ref,
+        params.id,
+        body.git_url,
+        body.branch || "main"
+      );
+      if (!deployment) {
+        set.status = 404;
+        return { error: "Deployment not found" };
+      }
+      return deployment;
+    },
+    {
+      params: t.Object({
+        ref: t.String(),
+        id: t.String(),
+      }),
+      body: t.Object({
+        git_url: t.String(),
+        branch: t.Optional(t.String({ default: "main" })),
+      }),
+    }
+  )
+
+  .get(
+    "/deployments/:id/records",
+    async ({ params, set }) => {
+      const records = await frontendService.listDeploymentRecords(params.ref, params.id);
+      return { records };
+    },
+    {
+      params: t.Object({
+        ref: t.String(),
+        id: t.String(),
+      }),
+    }
+  )
+
+  .get(
+    "/deployments/:id/records/:recordId",
+    async ({ params, set }) => {
+      const record = await frontendService.getDeploymentRecord(params.ref, params.id, params.recordId);
+      if (!record) {
+        set.status = 404;
+        return { error: "Record not found" };
+      }
+      return record;
+    },
+    {
+      params: t.Object({
+        ref: t.String(),
+        id: t.String(),
+        recordId: t.String(),
+      }),
+    }
   );
