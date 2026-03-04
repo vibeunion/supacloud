@@ -387,25 +387,108 @@ export class ProjectService {
     const project = await projectRepository.findByRef(ref);
     if (!project) return [];
 
-    // TODO: Implement actual log aggregation from Vector/ClickHouse
-    logger.warn(`[SystemMock] Returning mocked log data for project ${ref}`);
-    const now = new Date();
-    return [
-      {
-        id: "log-1",
-        timestamp: new Date(now.getTime() - 1000).toISOString(),
-        event_message: `Project ${ref} received a request to ${type} logs.`,
-        SystemMock: true,
-        metadata: { severity: "info", source: "management-api" },
-      },
-      {
-        id: "log-2",
-        timestamp: now.toISOString(),
-        event_message: `Successfully retrieved ${type} logs for ${project.name}.`,
-        SystemMock: true,
-        metadata: { severity: "success", source: "management-api" },
+    try {
+      // Mapping from Studio "postgres", "auth", "realtime", "api" etc to our systemd unit types
+      let mappedType = "all";
+      if (type === "auth" || type === "gotrue") mappedType = "auth";
+      else if (type === "api" || type === "postgrest") mappedType = "api";
+      else if (type === "database" || type === "postgres") mappedType = "database";
+
+      const limit = 50;
+      let rawOutputs: { source: string, jsonStr: string }[] = [];
+
+      // Helper to fetch journalctl logs natively using Bun Shell
+      const fetchJournal = async (unitName: string, sourceName: string) => {
+        try {
+          const result = await $`journalctl -u ${unitName} -o json -n ${limit} --no-pager`.nothrow().quiet();
+          if (result.exitCode === 0) {
+            const lines = result.text().trim().split('\\n').filter((l: string) => l.trim().length > 0);
+            for (const line of lines) {
+              rawOutputs.push({ source: sourceName, jsonStr: line });
+            }
+          }
+        } catch (e) {
+          logger.error(`Error fetching journal for ${unitName}`, e);
+        }
+      };
+
+      if (mappedType === "auth" || mappedType === "all") {
+        await fetchJournal(`supacloud-gotrue@${ref}`, "auth");
       }
-    ];
+      if (mappedType === "api" || mappedType === "all") {
+        await fetchJournal(`supacloud-pgrst@${ref}`, "api");
+      }
+
+      // PostgreSQL is managed by patroni / single instance on 1G server
+      if (mappedType === "database" || mappedType === "all") {
+        try {
+          const pgLogCmd = await shellService.execute("bash", ["-c", `journalctl -u patroni -o json -n 20 --no-pager | grep supa_${ref}`]);
+          if (pgLogCmd.success && pgLogCmd.output.trim().length > 0) {
+            const lines = pgLogCmd.output.trim().split('\\n').filter((l: string) => l.trim().length > 0);
+            for (const line of lines) {
+              rawOutputs.push({ source: "database", jsonStr: line });
+            }
+          }
+        } catch (e) { /* ignore */ }
+      }
+
+      if (rawOutputs.length === 0) {
+        return [];
+      }
+
+      const parsedLogs: LogEntryResponse[] = [];
+
+      for (const raw of rawOutputs) {
+        try {
+          const entry = JSON.parse(raw.jsonStr);
+
+          const timestampNum = parseInt(entry.__REALTIME_TIMESTAMP || "0");
+          const ms = Math.floor(timestampNum / 1000) || Date.now();
+          const timestampStr = new Date(ms).toISOString();
+
+          const source = raw.source || "system";
+          const message = entry.MESSAGE || JSON.stringify(entry);
+
+          // Infer severity from systemd priority or keywords
+          let severity = "info";
+          const prio = parseInt(entry.PRIORITY || "6");
+          if (prio <= 3) severity = "error";
+          else if (prio === 4) severity = "warning";
+
+          if (message.toLowerCase().includes("error") || message.toLowerCase().includes("fatal")) {
+            severity = "error";
+          } else if (message.toLowerCase().includes("warn")) {
+            severity = "warning";
+          }
+
+          parsedLogs.push({
+            // Ensure unique ID for UI rendering
+            id: `log-${ms}-${Math.random().toString(36).substring(2, 9)}`,
+            timestamp: timestampStr,
+            event_message: message,
+            metadata: [
+              {
+                severity,
+                source,
+                syslog_identifier: entry.SYSLOG_IDENTIFIER,
+                message: message
+              }
+            ]
+          });
+        } catch (je) {
+          // Skip unparseable lines
+        }
+      }
+
+      // Sort globally by timestamp descending
+      parsedLogs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+
+      // Return top LIMIT
+      return parsedLogs.slice(0, limit);
+    } catch (e: any) {
+      logger.error(`Failed to get real logs for ${ref}`, e);
+      return [];
+    }
   }
 
   // --- API Key Management ---

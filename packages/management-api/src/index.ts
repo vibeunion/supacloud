@@ -57,11 +57,10 @@ const app = new Elysia({ strictPath: false })
       id: project.id,
       ref: project.ref,
       name: project.name,
-      status: project.status,
-      region: project.region,
+      status: project.status?.toUpperCase() || "ACTIVE_HEALTHY",
+      region: project.region || "local",
       organization_id: "default",
       cloud_provider: project.cloud_provider || "localhost",
-      status: project.status?.toUpperCase() || "ACTIVE_HEALTHY",
       inserted_at: project.created_at,
       updated_at: project.updated_at,
       database: {
@@ -88,13 +87,13 @@ const app = new Elysia({ strictPath: false })
   .get("/platform/projects/:ref", async ({ params, set }) => {
     const { projectService } = await import("./services");
     let project = await projectService.getProject(params.ref);
-    
+
     // If ref is "default", return the first project
     if (!project && params.ref === "default") {
       const projects = await projectService.listProjects();
       project = projects[0];
     }
-    
+
     if (!project) {
       set.status = 404;
       return { error: "Project not found" };
@@ -106,30 +105,30 @@ const app = new Elysia({ strictPath: false })
       status: project.status?.toUpperCase() || "ACTIVE_HEALTHY",
       region: project.region || "local",
       organization_id: "default",
-      cloud_provider: project.cloud_provider || "localhost",
+      cloud_provider: (project as any).cloud_provider || "localhost",
       inserted_at: project.created_at,
-      connectionString: project.connectionString || "",
+      connectionString: (project as any).connectionString || "",
       created_at: project.created_at,
       updated_at: project.updated_at || null,
       database: {
         host: project.database?.host || "localhost",
         name: project.database?.name || `supa_${project.ref}`,
         user: project.database?.user || `role_${project.ref}`,
-        port: project.database?.port || 5432,
-        pool_size: project.database?.pool_size || 20,
+        port: (project.database as any)?.port || 5432,
+        pool_size: (project.database as any)?.pool_size || 20,
       },
       api: {
         url: project.api?.url || "",
-        internal_api_key: project.internal_api_key || "",
-        jwt_secret: project.jwt_secret || "",
+        internal_api_key: (project as any).internal_api_key || "",
+        jwt_secret: (project as any).jwt_secret || "",
       },
       studio: {
         url: project.studio?.url || "",
-        internal_api_key: project.internal_api_key || "",
+        internal_api_key: (project as any).internal_api_key || "",
       },
-      services: project.services || [],
-      rest: project.rest || {},
-      realtime: project.realtime || false,
+      services: (project as any).services || [],
+      rest: (project as any).rest || {},
+      realtime: (project as any).realtime || false,
     };
   })
   .get("/platform/organizations", async () => {
@@ -204,6 +203,220 @@ const app = new Elysia({ strictPath: false })
         created_at: new Date().toISOString(),
       },
     };
+  })
+
+  // Studio project detail APIs
+  .get("/platform/projects/:ref/config", async ({ params, set }) => {
+    const { projectService } = await import("./services");
+    let project = await projectService.getProject(params.ref);
+    if (!project && params.ref === "default") {
+      const projects = await projectService.listProjects();
+      project = projects[0];
+    }
+    if (!project) {
+      set.status = 404;
+      return { error: "Project not found" };
+    }
+    return {
+      project_id: project.id,
+      db_dns_name: project.database?.host || "localhost",
+      db_ip: "127.0.0.1",
+      db_port: project.database?.port || 5432,
+      db_name: project.database?.name || `supa_${project.ref}`,
+      db_user: project.database?.user || `role_${project.ref}`,
+      db_pass: project.database?.password || "postgres",
+      jwt_secret: project.jwt_secret || "",
+      service_key: project.service_key || "",
+      anon_key: project.anon_key || "",
+      api_url: project.api?.url || "",
+      api_internal_url: `http://localhost:8000`,
+      db_ssl: false,
+      cloud_provider: project.cloud_provider || "localhost",
+      region: project.region || "local",
+    };
+  })
+  .get("/platform/projects/:ref/services", async ({ params, set }) => {
+    const { projectService } = await import("./services");
+    let project = await projectService.getProject(params.ref);
+    if (!project && params.ref === "default") {
+      const projects = await projectService.listProjects();
+      project = projects[0];
+    }
+    if (!project) {
+      set.status = 404;
+      return { error: "Project not found" };
+    }
+    return {
+      services: [
+        { name: "PostgreSQL", status: "ACTIVE_HEALTHY", version: "15.0" },
+        { name: "PostgREST", status: "ACTIVE_HEALTHY", version: "12.0" },
+        { name: "GoTrue", status: "ACTIVE_HEALTHY", version: "2.0" },
+        { name: "Realtime", status: "ACTIVE_HEALTHY", version: "5.0" },
+        { name: "Storage", status: "ACTIVE_HEALTHY", version: "1.0" },
+        { name: "Kong", status: "ACTIVE_HEALTHY", version: "2.0" },
+      ],
+    };
+  })
+  .get("/platform/projects/:ref/api-keys", async ({ params, set }) => {
+    const { projectService } = await import("./services");
+    let project = await projectService.getProject(params.ref);
+    if (!project && params.ref === "default") {
+      const projects = await projectService.listProjects();
+      project = projects[0];
+    }
+    if (!project) {
+      set.status = 404;
+      return { error: "Project not found" };
+    }
+    return [
+      { id: 1, name: "anon", api_key: project.anon_key || "anon-key", created_at: project.created_at },
+      { id: 2, name: "service_role", api_key: project.service_key || "service-key", created_at: project.created_at },
+    ];
+  })
+  .get("/platform/projects/:ref/postgrest", async ({ params, set }) => {
+    const { projectService } = await import("./services");
+    let project = await projectService.getProject(params.ref);
+    if (!project && params.ref === "default") {
+      const projects = await projectService.listProjects();
+      project = projects[0];
+    }
+    if (!project) {
+      set.status = 404;
+      return { error: "Project not found" };
+    }
+    return {
+      db_schema: "public",
+      db_anon_role: "anon",
+      db_user: project.database?.user || `role_${project.ref}`,
+      max_rows: 1000,
+      enabled: true,
+    };
+  })
+  .get("/platform/projects/:ref/auth/config", async ({ params, set }) => {
+    const { projectService } = await import("./services");
+    let project = await projectService.getProject(params.ref);
+    if (!project && params.ref === "default") {
+      const projects = await projectService.listProjects();
+      project = projects[0];
+    }
+    if (!project) {
+      set.status = 404;
+      return { error: "Project not found" };
+    }
+    return {
+      jwt_expiry: 3600,
+      jwt_secret: project.jwt_secret || "",
+      site_url: project.api?.url || "",
+      enabled: true,
+      email_enabled: true,
+      phone_enabled: false,
+      providers: ["email"],
+    };
+  })
+  .get("/platform/projects/:ref/database", async ({ params, set }) => {
+    const { projectService } = await import("./services");
+    let project = await projectService.getProject(params.ref);
+    if (!project && params.ref === "default") {
+      const projects = await projectService.listProjects();
+      project = projects[0];
+    }
+    if (!project) {
+      set.status = 404;
+      return { error: "Project not found" };
+    }
+    return {
+      host: project.database?.host || "localhost",
+      port: project.database?.port || 5432,
+      database: project.database?.name || `supa_${project.ref}`,
+      user: project.database?.user || `role_${project.ref}`,
+      ssl: false,
+      version: "15.0",
+      size: 0,
+      status: "ACTIVE_HEALTHY",
+    };
+  })
+  .get("/platform/projects/:ref/storage", async ({ params, set }) => {
+    const { projectService } = await import("./services");
+    let project = await projectService.getProject(params.ref);
+    if (!project && params.ref === "default") {
+      const projects = await projectService.listProjects();
+      project = projects[0];
+    }
+    if (!project) {
+      set.status = 404;
+      return { error: "Project not found" };
+    }
+    return {
+      enabled: true,
+      features: { sizes: true, image_transformation: true },
+      buckets: [],
+    };
+  })
+  .get("/platform/projects/:ref/realtime", async ({ params, set }) => {
+    const { projectService } = await import("./services");
+    let project = await projectService.getProject(params.ref);
+    if (!project && params.ref === "default") {
+      const projects = await projectService.listProjects();
+      project = projects[0];
+    }
+    if (!project) {
+      set.status = 404;
+      return { error: "Project not found" };
+    }
+    return {
+      enabled: project.realtime || false,
+      endpoints: [],
+    };
+  })
+
+  // Organization APIs
+  .get("/platform/organizations/:slug", async ({ params, set }) => {
+    if (params.slug !== "supacloud" && params.slug !== "default") {
+      set.status = 404;
+      return { error: "Organization not found" };
+    }
+    return {
+      id: 1,
+      name: "SupaCloud",
+      slug: "supacloud",
+      billing_email: "admin@supacloud.local",
+      plan: "pro",
+      created_at: new Date().toISOString(),
+    };
+  })
+  .get("/platform/organizations/:slug/projects", async ({ params, set }) => {
+    if (params.slug !== "supacloud" && params.slug !== "default") {
+      set.status = 404;
+      return { error: "Organization not found" };
+    }
+    const { projectService } = await import("./services");
+    const projects = await projectService.listProjects();
+    return projects.map((project: any) => ({
+      id: project.id,
+      ref: project.ref,
+      name: project.name,
+      status: project.status?.toUpperCase() || "ACTIVE_HEALTHY",
+      region: project.region || "local",
+      organization_id: "default",
+      cloud_provider: project.cloud_provider || "localhost",
+      inserted_at: project.created_at,
+    }));
+  })
+  .get("/platform/organizations/:slug/members", async ({ params, set }) => {
+    if (params.slug !== "supacloud" && params.slug !== "default") {
+      set.status = 404;
+      return { error: "Organization not found" };
+    }
+    return [
+      {
+        id: 1,
+        user_id: "1",
+        username: "admin",
+        email: "admin@supacloud.local",
+        role: "Owner",
+        created_at: new Date().toISOString(),
+      },
+    ];
   })
 
   // API version info (no auth required)
