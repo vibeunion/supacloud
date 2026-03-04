@@ -10,6 +10,7 @@ export interface ProjectDomains {
 export class RouterService {
   private readonly ANGIE_SITES_DIR = process.env.ANGIE_SITES_DIR || "/etc/angie/http.d";
   private readonly KONG_INTERNAL = process.env.KONG_INTERNAL || "127.0.0.1:8000";
+  private readonly STUDIO_INTERNAL = process.env.STUDIO_INTERNAL || "10.89.0.47:3000";
   private readonly BASE_DOMAIN = process.env.BASE_DOMAIN || "localhost";
   private readonly ENABLE_SSL = process.env.ENABLE_SSL === "true";
   private readonly ACME_CLIENT = process.env.ACME_CLIENT || "le";
@@ -100,11 +101,14 @@ server {
     add_header x-project-ref ${projectRef} always;
 
     location / {
-        proxy_pass http://${kong};
+        proxy_pass http://${this.STUDIO_INTERNAL};
+        proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
     }
 }
 `;
@@ -154,11 +158,14 @@ server {
     add_header x-project-ref ${projectRef} always;
 
     location / {
-        proxy_pass http://${kong};
+        proxy_pass http://${this.STUDIO_INTERNAL};
+        proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
     }
 }
 `;
