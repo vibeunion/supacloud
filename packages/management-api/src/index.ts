@@ -26,6 +26,8 @@ const app = new Elysia({ strictPath: false })
           { name: "storage", description: "JuiceFS storage and S3 migration management" },
           { name: "scaling", description: "Auto-scaling and vertical upgrade management" },
           { name: "tasks", description: "Background task monitoring" },
+          { name: "auth", description: "Authentication and OAuth provider management" },
+          { name: "frontend", description: "Frontend hosting and deployment management" },
         ],
         components: {
           securitySchemes: {
@@ -124,7 +126,8 @@ export async function registerAllRoutes() {
   const {
     projectRoutes, organizationRoutes, userRoutes, backupRoutes,
     monitorRoutes, maintenanceRoutes, extensionRoutes, securityRoutes,
-    storageRoutes, scalingRoutes, taskRoutes
+    storageRoutes, scalingRoutes, taskRoutes, databaseRoutes, authRoutes,
+    frontendRoutes
   } = await import("./routes");
 
   return new Elysia({ name: "api-routes" })
@@ -139,7 +142,10 @@ export async function registerAllRoutes() {
     .use(securityRoutes)
     .use(storageRoutes)
     .use(scalingRoutes)
-    .use(taskRoutes);
+    .use(taskRoutes)
+    .use(databaseRoutes)
+    .use(authRoutes)
+    .use(frontendRoutes);
 }
 
 const args = process.argv.slice(2);

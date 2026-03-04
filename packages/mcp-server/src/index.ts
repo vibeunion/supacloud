@@ -3,6 +3,7 @@
  * @supacloud/mcp-server
  *
  * AI-native Supabase infrastructure management MCP Server.
+ * Supports multi-tenant project access with project scoping and read-only mode.
  *
  * Usage (Claude Desktop / Cursor / Windsurf):
  * ```json
@@ -17,7 +18,9 @@
  *         "SUPACLOUD_SSH_PORT": "22",
  *         "SUPACLOUD_SSH_KEY": "~/.ssh/id_rsa",
  *         "SUPACLOUD_API_URL": "http://1.2.3.4:9090",
- *         "SUPACLOUD_API_TOKEN": ""
+ *         "SUPACLOUD_API_TOKEN": "",
+ *         "SUPACLOUD_PROJECT_REF": "",
+ *         "SUPACLOUD_READ_ONLY": "false"
  *       }
  *     }
  *   }
@@ -25,13 +28,15 @@
  * ```
  *
  * Environment variables:
- * - SUPACLOUD_HOST:       Target server IP / domain (required)
- * - SUPACLOUD_SSH_USER:   SSH username (default root)
- * - SUPACLOUD_SSH_PORT:   SSH port (default 22)
- * - SUPACLOUD_SSH_KEY:    SSH private key path (default ~/.ssh/id_rsa)
- * - SUPACLOUD_SSH_PASS:   SSH password (prefer key)
- * - SUPACLOUD_API_URL:    Management API URL (default http://{HOST}:9090)
- * - SUPACLOUD_API_TOKEN:  Management API Master Token (fill in after installation)
+ * - SUPACLOUD_HOST:         Target server IP / domain (required)
+ * - SUPACLOUD_SSH_USER:     SSH username (default root)
+ * - SUPACLOUD_SSH_PORT:     SSH port (default 22)
+ * - SUPACLOUD_SSH_KEY:      SSH private key path (default ~/.ssh/id_rsa)
+ * - SUPACLOUD_SSH_PASS:     SSH password (prefer key)
+ * - SUPACLOUD_API_URL:      Management API URL (default http://{HOST}:9090)
+ * - SUPACLOUD_API_TOKEN:    Management API Master Token (fill in after installation)
+ * - SUPACLOUD_PROJECT_REF:  Scope to specific project (optional, enables project-scoped mode)
+ * - SUPACLOUD_READ_ONLY:    Enable read-only mode (optional, default false)
  */
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -42,6 +47,7 @@ import { registerSshTools } from "./tools/ssh-tools";
 import { registerProjectTools } from "./tools/project-tools";
 import { registerAdvancedTools } from "./tools/advanced-tools";
 import { registerDeploymentTools } from "./tools/deployment-tools";
+import { registerDatabaseTools } from "./tools/database-tools";
 import { resolve } from "path";
 import { homedir } from "os";
 
@@ -53,11 +59,14 @@ const SSH_KEY = process.env.SUPACLOUD_SSH_KEY ?? resolve(homedir(), ".ssh", "id_
 const SSH_PASS = process.env.SUPACLOUD_SSH_PASS ?? "";
 const API_URL = process.env.SUPACLOUD_API_URL ?? (HOST ? `http://${HOST}:9090` : "");
 const API_TOKEN = process.env.SUPACLOUD_API_TOKEN ?? "";
+const PROJECT_REF = process.env.SUPACLOUD_PROJECT_REF ?? "";
+const READ_ONLY = process.env.SUPACLOUD_READ_ONLY === "true";
 
 // ── Create MCP Server ──
+const serverName = PROJECT_REF ? `supacloud-${PROJECT_REF}` : "supacloud";
 const server = new McpServer({
-    name: "supacloud",
-    version: "0.1.0",
+    name: serverName,
+    version: "0.2.0",
 });
 
 // ── Register SSH tools (always available) ──
@@ -78,7 +87,19 @@ if (API_URL) {
         baseUrl: API_URL,
         token: API_TOKEN,
     });
-    registerProjectTools(server, http);
+
+    // Database tools with project scoping and read-only mode
+    registerDatabaseTools(server, http, {
+        projectRef: PROJECT_REF || undefined,
+        readOnly: READ_ONLY,
+    });
+
+    // Project management tools (only if not project-scoped)
+    if (!PROJECT_REF) {
+        registerProjectTools(server, http);
+    }
+
+    // Advanced tools (skip write operations in read-only mode)
     registerAdvancedTools(server, http);
 }
 
@@ -100,11 +121,13 @@ if (!HOST && !API_URL) {
                         "",
                         "Please set the following environment variables in MCP config:",
                         "",
-                        "  SUPACLOUD_HOST       - Server IP or domain (required)",
-                        "  SUPACLOUD_SSH_USER   - SSH username (default root)",
-                        "  SUPACLOUD_SSH_KEY    - SSH private key path (default ~/.ssh/id_rsa)",
-                        "  SUPACLOUD_API_URL    - Management API URL (auto-inferred after installation)",
-                        "  SUPACLOUD_API_TOKEN  - Master Token (fill in after installation)",
+                        "  SUPACLOUD_HOST         - Server IP or domain (required)",
+                        "  SUPACLOUD_SSH_USER     - SSH username (default root)",
+                        "  SUPACLOUD_SSH_KEY      - SSH private key path (default ~/.ssh/id_rsa)",
+                        "  SUPACLOUD_API_URL      - Management API URL (auto-inferred after installation)",
+                        "  SUPACLOUD_API_TOKEN    - Master Token (fill in after installation)",
+                        "  SUPACLOUD_PROJECT_REF  - Scope to specific project (optional)",
+                        "  SUPACLOUD_READ_ONLY    - Enable read-only mode (optional, default false)",
                         "",
                         "Configuration example (claude_desktop_config.json):",
                         JSON.stringify(
@@ -116,6 +139,27 @@ if (!HOST && !API_URL) {
                                         env: {
                                             SUPACLOUD_HOST: "YOUR_SERVER_IP",
                                             SUPACLOUD_SSH_KEY: "~/.ssh/id_rsa",
+                                            SUPACLOUD_API_TOKEN: "your-master-token",
+                                        },
+                                    },
+                                },
+                            },
+                            null,
+                            2
+                        ),
+                        "",
+                        "Project-scoped mode (single project access):",
+                        JSON.stringify(
+                            {
+                                mcpServers: {
+                                    "supacloud-myproject": {
+                                        command: "npx",
+                                        args: ["-y", "@supacloud/mcp-server"],
+                                        env: {
+                                            SUPACLOUD_HOST: "YOUR_SERVER_IP",
+                                            SUPACLOUD_API_TOKEN: "your-master-token",
+                                            SUPACLOUD_PROJECT_REF: "abc123defg",
+                                            SUPACLOUD_READ_ONLY: "true",
                                         },
                                     },
                                 },

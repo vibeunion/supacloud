@@ -309,8 +309,9 @@ install_systemd_template() {
         cat > "$pgrst_unit" <<EOF
 [Unit]
 Description=SupaCloud PostgREST for tenant %i
-After=postgresql.service network.target
-Wants=network.target
+Documentation=https://github.com/supacloud/supacloud
+After=network.target patroni.service
+Wants=patroni.service
 
 [Service]
 Type=simple
@@ -343,8 +344,9 @@ EOF
         cat > "$gotrue_unit" <<EOF
 [Unit]
 Description=SupaCloud GoTrue for tenant %i
-After=postgresql.service network.target
-Wants=network.target
+Documentation=https://github.com/supacloud/supacloud
+After=network.target patroni.service
+Wants=patroni.service
 
 [Service]
 Type=simple

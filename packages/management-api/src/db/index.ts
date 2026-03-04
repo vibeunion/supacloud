@@ -25,6 +25,52 @@ export const sql = new SQL({
   connectTimeout: 5000,
 });
 
+// 项目数据库连接缓存
+const projectConnections: Map<string, SQL> = new Map();
+
+// 获取项目数据库连接
+export function getProjectDb(dbName: string): SQL {
+  if (projectConnections.has(dbName)) {
+    return projectConnections.get(dbName)!;
+  }
+
+  const projectSql = new SQL({
+    hostname: dbConfig.hostname,
+    port: dbConfig.port,
+    database: dbName,
+    username: dbConfig.username,
+    password: dbConfig.password,
+    max: 10,
+    idleTimeout: 30,
+    connectTimeout: 5000,
+  });
+
+  projectConnections.set(dbName, projectSql);
+  return projectSql;
+}
+
+// 执行 SQL 查询
+export async function executeQuery(dbName: string, sqlQuery: string): Promise<{ rows: unknown[]; rowCount: number; command: string }> {
+  const projectDb = getProjectDb(dbName);
+  try {
+    const result = await projectDb.unsafe(sqlQuery);
+    return {
+      rows: result as unknown[],
+      rowCount: result.length,
+      command: (result as any).command || sqlQuery.trim().split(/\s+/)[0].toUpperCase(),
+    };
+  } catch (error) {
+    throw new Error(`SQL execution error: ${error instanceof Error ? error.message : "Unknown error"}`);
+  }
+}
+
+// 数据库操作封装
+export const db = {
+  sql,
+  getProjectDb,
+  executeQuery,
+};
+
 // 项目状态类型
 export type ProjectStatus = "creating" | "active" | "paused" | "deleted";
 
