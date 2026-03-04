@@ -40,8 +40,8 @@ export class ShellService {
   // Execute a system command (not a script)
   async executeCommand(command: string, args: string[] = []): Promise<{ success: boolean; output: string; error?: string }> {
     try {
-      const cmd = args.length > 0 ? `${command} ${args.join(" ")}` : command;
-      const result = await $`${{ raw: cmd }}`.text();
+      // Safe execution using Bun Shell's built-in argument escaping
+      const result = await $`${command} ${args}`.text();
       return { success: true, output: result.trim() };
     } catch (error: any) {
       const stderr = error.stderr?.toString() || "";
