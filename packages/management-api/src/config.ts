@@ -49,3 +49,15 @@ export const config = {
   // Base domain for projects
   baseDomain: process.env.BASE_DOMAIN || managementEnv.BASE_DOMAIN || "localhost",
 };
+
+// 增加基础验证，避免无效的配置导致后续链路直接崩溃
+function validateConfig() {
+  if (!config.databaseUrl || !/^postgresql?:\/\//.test(config.databaseUrl)) {
+    throw new Error("Invalid or missing DATABASE_URL configuration. Must be a valid postgres DSN string.");
+  }
+  if (!config.masterToken || config.masterToken.length < 8) {
+    console.warn("WARNING: MASTER_TOKEN is dangerously short or missing. Set properly for production security.");
+  }
+}
+
+validateConfig();

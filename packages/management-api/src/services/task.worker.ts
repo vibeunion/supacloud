@@ -4,10 +4,12 @@ import { databaseService } from "./database.service";
 import { storageService } from "./storage.service";
 import { routerService } from "./router.service";
 import { gatewayService } from "./gateway.service";
+import { logger } from "../utils/logger";
 import type { ProjectTask } from "../db";
 
 export class TaskWorker {
     private isRunning = false;
+    private isProcessing = false;
     private intervalId?: Timer;
 
     start(intervalMs = 3000) {
@@ -26,11 +28,14 @@ export class TaskWorker {
     }
 
     private async poll() {
+        if (!this.isRunning || this.isProcessing) return;
+        this.isProcessing = true;
+
         try {
             const task = await taskRepository.claimNextTask();
             if (!task) return; // No pending tasks
 
-            console.log(`[TaskWorker] Processing task: ${task.id} (${task.task_type}) for project ${task.project_ref}`);
+            logger.info(`[TaskWorker] Processing task: ${task.id} (${task.task_type}) for project ${task.project_ref}`);
 
             const success = await this.executeTask(task);
 
@@ -42,7 +47,9 @@ export class TaskWorker {
                 await this.handleTaskFailure(task);
             }
         } catch (err: any) {
-            console.error(`[TaskWorker] Error processing task:`, err);
+            logger.error(`[TaskWorker] Error processing task loop:`, err);
+        } finally {
+            this.isProcessing = false;
         }
     }
 
@@ -206,22 +213,35 @@ export class TaskWorker {
     }
 
     private async handleTaskFailure(task: ProjectTask) {
-        const { project_ref, task_type } = task;
-        console.error(`[TaskWorker] Saga compensation triggered for ${project_ref} failed at ${task_type}`);
+        const { project_ref, task_type, retries } = task;
 
-        // Mark project as paused/error
-        await projectRepository.updateStatus(project_ref, "paused");
+        // 如果重试次数还未上限，等待下一次轮询，避免过快判定死刑
+        if (retries < 3) {
+            logger.warn(`[TaskWorker] Task ${task_type} for ${project_ref} failed but has retries left (${retries}/3)`);
+            return;
+        }
+
+        logger.error(`[TaskWorker] Saga compensation triggered for ${project_ref} failed permanently at ${task_type}`);
+
+        // Mark project as paused/error (仅对创建流程)
+        if (task_type.startsWith("provision_")) {
+            await projectRepository.updateStatus(project_ref, "paused");
+        }
 
         // Saga Compensation Logic
-        if (task_type === "provision_s3") {
-            // If S3 failed, we need to rollback DB
-            console.log(`[TaskWorker] Rolling back DB for ${project_ref}`);
+        if (task_type === "provision_s3" || task_type === "provision_runtime") {
+            // If S3 or runtime provision failed, we need to rollback DB and S3
+            logger.info(`[TaskWorker] Rolling back resources for ${project_ref} due to provisioning failure.`);
+            await taskRepository.createTask(project_ref, "cleanup_runtime");
+            await taskRepository.createTask(project_ref, "cleanup_s3");
             await taskRepository.createTask(project_ref, "cleanup_db");
+        } else if (task_type.startsWith("cleanup_")) {
+            // Cleanup fail permanently
+            logger.error(`[TaskWorker] CRITICAL: Cleanup task ${task_type} for ${project_ref} failed permanently after all retries. Manual intervention requested!`);
         } else if (task_type === "provision_router" || task_type === "provision_gateway") {
             // When router/gateway fails, preserve DB and S3 resources to avoid data loss
             // Admin can manually troubleshoot and retry, or trigger cleanup via API
-            console.warn(`[TaskWorker] ${task_type} failed for ${project_ref}. DB and S3 resources preserved for manual intervention.`);
-            console.warn(`[TaskWorker] To retry: update task status to 'pending'. To cleanup: manually delete project.`);
+            logger.warn(`[TaskWorker] ${task_type} failed for ${project_ref}. DB and S3 resources preserved for manual intervention.`);
         }
     }
 }
