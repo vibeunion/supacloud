@@ -1,49 +1,46 @@
 import { sql, type Organization } from "../db";
+import { withRetry } from "../utils/retry";
 
 export class OrganizationRepository {
   async findAll(): Promise<Organization[]> {
-    let retries = 3;
-    while (retries > 0) {
-      try {
-        return await sql`
-          SELECT * FROM organizations
-          ORDER BY name ASC
-        `;
-      } catch (err: any) {
-        if (err.message.includes("closed") && retries > 1) {
-          retries--;
-          await new Promise(resolve => setTimeout(resolve, 100));
-          continue;
-        }
-        throw err;
-      }
-    }
-    return [];
+    return withRetry("OrganizationRepository.findAll", async () => {
+      const results = await sql`
+        SELECT * FROM organizations
+        ORDER BY name ASC
+      `;
+      return results as any as Organization[];
+    });
   }
 
   async findBySlug(slug: string): Promise<Organization | null> {
-    const [org] = await sql`
-      SELECT * FROM organizations
-      WHERE slug = ${slug}
-    `;
-    return org || null;
+    return withRetry("OrganizationRepository.findBySlug", async () => {
+      const [org] = await sql`
+        SELECT * FROM organizations
+        WHERE slug = ${slug}
+      `;
+      return org as Organization || null;
+    });
   }
 
   async findById(id: string): Promise<Organization | null> {
-    const [org] = await sql`
-      SELECT * FROM organizations
-      WHERE id = ${id}
-    `;
-    return org || null;
+    return withRetry("OrganizationRepository.findById", async () => {
+      const [org] = await sql`
+        SELECT * FROM organizations
+        WHERE id = ${id}
+      `;
+      return org as Organization || null;
+    });
   }
 
   async create(name: string, slug: string): Promise<Organization> {
-    const [org] = await sql`
-      INSERT INTO organizations (name, slug)
-      VALUES (${name}, ${slug})
-      RETURNING *
-    `;
-    return org;
+    return withRetry("OrganizationRepository.create", async () => {
+      const [org] = await sql`
+        INSERT INTO organizations (name, slug)
+        VALUES (${name}, ${slug})
+        RETURNING *
+      `;
+      return org as Organization;
+    });
   }
 
   async ensureDefaultOrganization(): Promise<Organization> {
