@@ -2,6 +2,7 @@ import { nanoid } from "nanoid";
 import { shellService } from "./shell.service";
 import { SQL } from "bun";
 import { $ } from "bun";
+import { ValidationUtils } from "../utils/validation";
 
 export class DatabaseService {
   private readonly PG_HOST = process.env.PG_HOST || process.env.POSTGRES_HOST || "localhost";
@@ -44,6 +45,26 @@ export class DatabaseService {
     });
   }
 
+  // Unified execution wrap for Admin DB to ensure connection release
+  private async withAdminDb<T>(operation: (db: SQL) => Promise<T>): Promise<T> {
+    const db = this.getAdminDb();
+    try {
+      return await operation(db);
+    } finally {
+      await db.close();
+    }
+  }
+
+  // Unified execution wrap for Tenant DB to ensure connection release
+  private async withTenantDb<T>(dbName: string, operation: (db: SQL) => Promise<T>): Promise<T> {
+    const db = this.getTenantDb(dbName);
+    try {
+      return await operation(db);
+    } finally {
+      await db.close();
+    }
+  }
+
   // Disk space pre-check: prevent WAL disk full which causes cluster panic
   private async checkDiskSpace(): Promise<void> {
     const minGb = parseInt(process.env.MIN_DISK_GB || "10");
@@ -82,17 +103,20 @@ export class DatabaseService {
     const dbUser = `role_${projectRef}`;
 
     try {
+      // Verify identifiers for safety to prevent SQL injection in DDL
+      ValidationUtils.assertValidDbName("dbName", dbName);
+      ValidationUtils.assertValidIdentifier("dbUser", dbUser);
+
       await this.checkDiskSpace();
 
-      const adminDb = this.getAdminDb();
-      try {
+      await this.withAdminDb(async (adminDb) => {
         // Check if database already exists
         const [dbExists] = await adminDb`
           SELECT 1 FROM pg_database WHERE datname = ${dbName}
         `;
 
         if (dbExists) {
-          return { success: true };
+          return;
         }
 
         // Create database - use double quotes to support identifiers with hyphens
@@ -102,9 +126,6 @@ export class DatabaseService {
         await adminDb.unsafe(`CREATE ROLE "${dbUser}" LOGIN CONNECTION LIMIT 20 PASSWORD '${password}'`);
 
         // Set kernel-level configs for resource exhaustion prevention
-        // 1. statement_timeout: forcefully kill long-running queries (30s)
-        // 2. idle_in_transaction_session_timeout: forcefully clean up deadlocked transactions (1m)
-        // 3. work_mem: limit per-connection memory consumption for complex operations (4MB)
         await adminDb.unsafe(`
           ALTER ROLE "${dbUser}" SET statement_timeout = '30s';
           ALTER ROLE "${dbUser}" SET idle_in_transaction_session_timeout = '1min';
@@ -113,14 +134,12 @@ export class DatabaseService {
 
         // Grant privileges
         await adminDb.unsafe(`GRANT ALL PRIVILEGES ON DATABASE "${dbName}" TO "${dbUser}"`);
+      });
 
-        // Apply Supabase Schema
-        await this.applySupabaseSchema(dbName, projectRef, password);
+      // Apply schema independently 
+      await this.applySupabaseSchema(dbName, projectRef, password);
 
-        return { success: true };
-      } finally {
-        await adminDb.close();
-      }
+      return { success: true };
     } catch (error: any) {
       return { success: false, error: error.message };
     }
@@ -128,9 +147,7 @@ export class DatabaseService {
 
   // Apply Supabase Schema
   private async applySupabaseSchema(dbName: string, projectRef: string, password: string): Promise<void> {
-    const tenantDb = this.getTenantDb(dbName);
-
-    try {
+    await this.withTenantDb(dbName, async (tenantDb) => {
       // Create extensions
       await tenantDb.unsafe(`CREATE EXTENSION IF NOT EXISTS "uuid-ossp"`);
       await tenantDb.unsafe(`CREATE EXTENSION IF NOT EXISTS "pgcrypto"`);
@@ -141,6 +158,9 @@ export class DatabaseService {
       const anonRole = `anon`;
       const authenticatedRole = `authenticated`;
       const serviceRole = `service_role`;
+
+      // Safe check identifiers
+      ValidationUtils.assertValidIdentifier("authenticatorRole", authenticatorRole);
 
       // PostgreSQL doesn't support CREATE ROLE IF NOT EXISTS, use DO block
       await tenantDb.unsafe(`
@@ -163,7 +183,7 @@ export class DatabaseService {
         CREATE ROLE "${authenticatorRole}" CONNECTION LIMIT 30 NOINHERIT LOGIN PASSWORD '${password}';
         GRANT ${anonRole}, ${authenticatedRole}, ${serviceRole} TO "${authenticatorRole}";
 
-        -- Set shorter timeout and same memory limits for API Role to prevent cascades
+        -- Set shorter timeout and same memory limits for API Role to prevent cascade failures
         ALTER ROLE "${authenticatorRole}" SET statement_timeout = '15s';
         ALTER ROLE "${authenticatorRole}" SET idle_in_transaction_session_timeout = '30s';
         ALTER ROLE "${authenticatorRole}" SET work_mem = '4MB';
@@ -183,10 +203,7 @@ export class DatabaseService {
         GRANT ALL ON SCHEMA public TO ${authenticatedRole}, ${serviceRole};
         GRANT USAGE ON SCHEMA auth TO ${anonRole}, ${authenticatedRole}, ${serviceRole};
       `);
-
-    } finally {
-      await tenantDb.close();
-    }
+    });
   }
 
   // Delete project database
@@ -195,9 +212,11 @@ export class DatabaseService {
     const dbUser = `role_${projectRef}`;
 
     try {
-      const adminDb = this.getAdminDb();
-      try {
-        // Terminate connections
+      ValidationUtils.assertValidDbName("dbName", dbName);
+      ValidationUtils.assertValidIdentifier("dbUser", dbUser);
+
+      await this.withAdminDb(async (adminDb) => {
+        // Terminate connections safely
         try {
           await adminDb`
             SELECT pg_terminate_backend(pid)
@@ -206,16 +225,14 @@ export class DatabaseService {
           `;
         } catch { /* ignore */ }
 
-        // Drop database - use double quotes to support hyphens
+        // Drop database
         await adminDb.unsafe(`DROP DATABASE IF EXISTS "${dbName}"`);
 
-        // Drop role - use double quotes to support hyphens
+        // Drop role
         await adminDb.unsafe(`DROP ROLE IF EXISTS "${dbUser}"`);
+      });
 
-        return { success: true };
-      } finally {
-        await adminDb.close();
-      }
+      return { success: true };
     } catch (error: any) {
       return { success: false, error: error.message };
     }
@@ -226,8 +243,9 @@ export class DatabaseService {
     const dbName = `supa_${projectRef}`;
 
     try {
-      const adminDb = this.getAdminDb();
-      try {
+      ValidationUtils.assertValidDbName("dbName", dbName);
+
+      return await this.withAdminDb(async (adminDb) => {
         const [dbCount] = await adminDb`
           SELECT 1 FROM pg_database WHERE datname = ${dbName}
         `;
@@ -237,9 +255,7 @@ export class DatabaseService {
         } else {
           return { success: true, output: "not_found" };
         }
-      } finally {
-        await adminDb.close();
-      }
+      });
     } catch (error: any) {
       return { success: false, output: "", error: error.message };
     }
@@ -247,7 +263,7 @@ export class DatabaseService {
 
   // --- Environment Variables (Secrets) Management ---
 
-  async getSecrets(projectRef: string): Promise<any[]> {
+  async getSecrets(projectRef: string): Promise<{ name: string; value: string }[]> {
     const result = await shellService.execute("key_manager.sh", ["list-secrets", projectRef]);
     if (!result.success) return [];
     try {
