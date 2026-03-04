@@ -3,6 +3,7 @@ import { swagger } from "@elysiajs/swagger";
 import { cors } from "@elysiajs/cors";
 import { config } from "./config";
 import { authMiddleware } from "./middleware/auth";
+import { closeDb } from "./db";
 
 const app = new Elysia({ strictPath: false })
   // Swagger docs
@@ -47,6 +48,40 @@ const app = new Elysia({ strictPath: false })
 
   // Health check (no auth required)
   .get("/health", () => ({ status: "ok", timestamp: new Date().toISOString() }))
+
+  // Studio compatibility routes (IS_PLATFORM mode expects /platform/*)
+  .get("/platform/projects", async () => {
+    const { projectService } = await import("./services");
+    const projects = await projectService.listProjects();
+    return projects;
+  })
+  .get("/platform/projects/:ref", async ({ params, set }) => {
+    const { projectService } = await import("./services");
+    const project = await projectService.getProject(params.ref);
+    if (!project) {
+      set.status = 404;
+      return { error: "Project not found" };
+    }
+    return project;
+  })
+  .get("/platform/organizations", async () => {
+    return [{ id: 1, name: "SupaCloud", slug: "supacloud" }];
+  })
+  .get("/platform/profile", async () => {
+    return {
+      id: 1,
+      primary_email: "admin@supacloud.local",
+      username: "admin",
+      first_name: "Admin",
+      last_name: "User",
+      organizations: [{
+        id: 1,
+        name: "SupaCloud",
+        slug: "supacloud",
+        projects: []
+      }]
+    };
+  })
 
   // API version info (no auth required)
   .get("/", () => ({
@@ -219,8 +254,8 @@ async function bootstrap() {
     process.exit(0);
   } else if (args[0] === "project") {
     const { handleProjectCreate, handleProjectList, handleProjectGet, handleProjectDelete,
-            handleProjectPause, handleProjectRestore, handleProjectRestart,
-            handleProjectKeys, handleProjectRotateKeys, printProjectHelp } = await import("./cli/project");
+      handleProjectPause, handleProjectRestore, handleProjectRestart,
+      handleProjectKeys, handleProjectRotateKeys, printProjectHelp } = await import("./cli/project");
     const subCommand = args[1];
     switch (subCommand) {
       case "create":
@@ -355,6 +390,28 @@ async function bootstrap() {
 
 if (import.meta.main) {
   bootstrap();
+
+  // 增加 Graceful Shutdown 支持以释放连接池及保护 Task 队列一致性
+  const shutdown = async (signal: string) => {
+    console.log(`\nReceived ${signal}. Gracefully shutting down...`);
+
+    // Stop TaskWorker loop if it is running
+    try {
+      const { taskWorker } = await import("./services/task.worker");
+      taskWorker.stop();
+    } catch { /* ignore if not loaded */ }
+
+    // Close Database connections including LRU caches
+    try {
+      await closeDb();
+      console.log("Database connections released.");
+    } catch { /* ignore */ }
+
+    process.exit(0);
+  };
+
+  process.on("SIGINT", () => shutdown("SIGINT"));
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
 }
 
 export { app };
