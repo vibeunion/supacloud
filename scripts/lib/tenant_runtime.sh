@@ -232,7 +232,7 @@ PGRST_DB_EXTRA_SEARCH_PATH=public
 PGRST_DB_ANON_ROLE=anon
 PGRST_JWT_SECRET=${jwt_secret}
 PGRST_SERVER_PORT=${pgrst_port}
-PGRST_DB_POOL=10
+PGRST_DB_POOL=3
 PGRST_DB_POOL_ACQUISITION_TIMEOUT=10
 PGRST_LOG_LEVEL=warn
 EOF
@@ -249,7 +249,7 @@ jwt-secret = "${jwt_secret}"
 server-port = ${pgrst_port}
 # Bug Fix: Bind to 0.0.0.0 to allow Kong container (podman/docker network) access via host bridge IP
 server-host = "0.0.0.0"
-db-pool = 10
+db-pool = 3
 db-pool-acquisition-timeout = 10
 log-level = "warn"
 EOF
