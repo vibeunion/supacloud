@@ -53,7 +53,37 @@ const app = new Elysia({ strictPath: false })
   .get("/platform/projects", async () => {
     const { projectService } = await import("./services");
     const projects = await projectService.listProjects();
-    return projects;
+    return projects.map((project: any) => ({
+      id: project.id,
+      ref: project.ref,
+      name: project.name,
+      status: project.status,
+      region: project.region,
+      organization_id: "default",
+      cloud_provider: project.cloud_provider || "localhost",
+      status: project.status?.toUpperCase() || "ACTIVE_HEALTHY",
+      inserted_at: project.created_at,
+      updated_at: project.updated_at,
+      database: {
+        host: project.database?.host || "localhost",
+        name: project.database?.name || `supa_${project.ref}`,
+        user: project.database?.user || `role_${project.ref}`,
+        port: project.database?.port || 5432,
+        pool_size: project.database?.pool_size || 20,
+      },
+      api: {
+        url: project.api?.url || "",
+        internal_api_key: project.internal_api_key || "",
+        jwt_secret: project.jwt_secret || "",
+      },
+      studio: {
+        url: project.studio?.url || "",
+        internal_api_key: project.internal_api_key || "",
+      },
+      services: project.services || [],
+      rest: project.rest || {},
+      realtime: project.realtime || false,
+    }));
   })
   .get("/platform/projects/:ref", async ({ params, set }) => {
     const { projectService } = await import("./services");
@@ -62,7 +92,38 @@ const app = new Elysia({ strictPath: false })
       set.status = 404;
       return { error: "Project not found" };
     }
-    return project;
+    return {
+      id: project.id,
+      ref: project.ref,
+      name: project.name,
+      status: project.status,
+      region: project.region,
+      organization_id: "default",
+      cloud_provider: project.cloud_provider || "localhost",
+      inserted_at: project.inserted_at,
+      connectionString: project.connectionString || "",
+      created_at: project.created_at,
+      updated_at: project.updated_at || null,
+      database: {
+        host: project.database?.host || "localhost",
+        name: project.database?.name || `supa_${project.ref}`,
+        user: project.database?.user || `role_${project.ref}`,
+        port: project.database?.port || 5432,
+        pool_size: project.database?.pool_size || 20,
+      },
+      api: {
+        url: project.api?.url || "",
+        internal_api_key: project.internal_api_key || "",
+        jwt_secret: project.jwt_secret || "",
+      },
+      studio: {
+        url: project.studio?.url || "",
+        internal_api_key: project.internal_api_key || "",
+      },
+      services: project.services || [],
+      rest: project.rest || {},
+      realtime: project.realtime || false,
+    };
   })
   .get("/platform/organizations", async () => {
     return [{ id: 1, name: "SupaCloud", slug: "supacloud" }];
