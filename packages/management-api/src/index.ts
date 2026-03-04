@@ -177,6 +177,27 @@ const app = new Elysia({ strictPath: false })
       billing_email: "admin@supacloud.local",
     };
   })
+  // Auth session for Studio
+  .get("/auth/session", async () => {
+    return {
+      access_token: "mock-access-token",
+      token_type: "bearer",
+      expires_in: 3600,
+      refresh_token: "mock-refresh-token",
+      user: {
+        id: "1",
+        email: "admin@supacloud.local",
+        user_metadata: {
+          first_name: "Admin",
+          last_name: "User",
+        },
+        app_metadata: {},
+        aud: "authenticated",
+        role: "authenticated",
+        created_at: new Date().toISOString(),
+      },
+    };
+  })
 
   // API version info (no auth required)
   .get("/", () => ({
