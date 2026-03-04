@@ -104,6 +104,8 @@ export const studioRoutes = new Elysia({ prefix: "/platform" })
 
     // --- Projects ---
     .get("/projects", async () => {
+        // CRITICAL: We MUST return the projects as they are in DB,
+        // so Studio can correctly set the project ref context.
         const projects = await projectService.listProjects();
         return projects.map((p: any) => ({
             ...toPlatformProject(p),
@@ -207,7 +209,14 @@ export const studioRoutes = new Elysia({ prefix: "/platform" })
     })
     .get("/projects/:ref/settings", async ({ params }) => {
         const project = await getProjectOrThrow(params.ref);
-        return toPlatformProject(project);
+        return {
+            ...toPlatformProject(project),
+            database: {
+                host: project.database?.host || "localhost",
+                port: project.database?.port || 5432,
+                name: project.database?.name || `supa_${project.ref}`,
+            }
+        };
     })
     .get("/projects/:ref/functions", async () => [])
     .get("/projects/:ref/edge-functions", async () => [])
@@ -223,8 +232,16 @@ export const studioRoutes = new Elysia({ prefix: "/platform" })
             }
         ];
     })
+    .get("/projects/:ref/analytics/endpoints/logs.all", async ({ params }) => {
+        const project = await getProjectOrThrow(params.ref);
+        const logs = await projectService.queryLogs(project.ref, "all");
+        return { data: logs, meta: { count: logs.length } };
+    })
+    .get("/projects/:ref/content/folders", async () => [])
+    .get("/projects/:ref/content", async () => [])
+
     // --- pg-meta Proxy ---
-    .all("/pg-meta/:ref/*", async ({ params, request, set, query }) => {
+    .all("/pg-meta/:ref/*", async ({ params, request, set }) => {
         const project: any = await getProjectOrThrow(params.ref);
         const path = (params as any)["*"];
 
@@ -244,7 +261,7 @@ export const studioRoutes = new Elysia({ prefix: "/platform" })
             } catch (e) {
                 logger.error("pg-meta query proxy failed", { error: String(e) });
             }
-            return [];
+            return []; // Safe fallback
         }
 
         try {
@@ -260,27 +277,7 @@ export const studioRoutes = new Elysia({ prefix: "/platform" })
             set.status = 502;
             return { error: "Failed to proxy to pg-meta", details: String(e) };
         }
-    })
-    // --- Analytics / Logs Explorer Simulation ---
-    .get("/projects/:ref/analytics/endpoints/logs.all", async ({ params }) => {
-        const project = await getProjectOrThrow(params.ref);
-        const logs = await projectService.queryLogs(project.ref, "all");
-        return { data: logs, meta: { count: logs.length } };
-    })
-    .get("/projects/:ref/content/folders", async () => [])
-    .get("/projects/:ref/content", async () => [])
-    .get("/projects/:ref/settings", async ({ params }) => {
-        const project = await getProjectOrThrow(params.ref);
-        return {
-            ...toPlatformProject(project),
-            database: {
-                host: project.database?.host || "localhost",
-                port: project.database?.port || 5432,
-                name: project.database?.name || `supa_${project.ref}`,
-            }
-        };
     });
-
 
 // Studio also requests /api/v1/projects/[ref]/...
 export const studioV1Routes = new Elysia({ prefix: "/v1" })
