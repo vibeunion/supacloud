@@ -28,6 +28,7 @@ const app = new Elysia({ strictPath: false })
           { name: "tasks", description: "Background task monitoring" },
           { name: "auth", description: "Authentication and OAuth provider management" },
           { name: "frontend", description: "Frontend hosting and deployment management" },
+          { name: "webhook", description: "GitHub webhook and CI/CD integration" },
         ],
         components: {
           securitySchemes: {
@@ -127,7 +128,7 @@ export async function registerAllRoutes() {
     projectRoutes, organizationRoutes, userRoutes, backupRoutes,
     monitorRoutes, maintenanceRoutes, extensionRoutes, securityRoutes,
     storageRoutes, scalingRoutes, taskRoutes, databaseRoutes, authRoutes,
-    frontendRoutes
+    frontendRoutes, webhookRoutes
   } = await import("./routes");
 
   return new Elysia({ name: "api-routes" })
@@ -145,7 +146,8 @@ export async function registerAllRoutes() {
     .use(taskRoutes)
     .use(databaseRoutes)
     .use(authRoutes)
-    .use(frontendRoutes);
+    .use(frontendRoutes)
+    .use(webhookRoutes);
 }
 
 const args = process.argv.slice(2);

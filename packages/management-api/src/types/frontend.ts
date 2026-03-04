@@ -20,6 +20,41 @@ export interface FrontendDeployment {
   last_deployed_at?: string;
   deployment_url: string;
   build_log?: string;
+  git_url?: string;
+  git_branch?: string;
+  deploy_tokens?: DeployToken[];
+}
+
+export interface DeployToken {
+  id: string;
+  name: string;
+  token: string;
+  created_at: string;
+  last_used_at?: string;
+}
+
+export interface DeploymentRecord {
+  id: string;
+  deployment_id: string;
+  project_ref: string;
+  status: BuildStatus;
+  commit_sha?: string;
+  commit_message?: string;
+  branch?: string;
+  triggered_by: "manual" | "webhook" | "ci";
+  build_log?: string;
+  started_at: string;
+  finished_at?: string;
+  duration?: number;
+}
+
+export interface GitHubWebhookConfig {
+  deployment_id: string;
+  project_ref: string;
+  github_repo: string;
+  branch: string;
+  secret: string;
+  enabled: boolean;
 }
 
 export interface FrontendDeploymentConfig {
