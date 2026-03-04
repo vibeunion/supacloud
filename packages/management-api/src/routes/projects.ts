@@ -431,13 +431,14 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
         return { error: "Project not found" };
       }
 
-      const authConfig = (settings.auth as Record<string, any>) || {};
+      const authConfig = (settings.auth as Record<string, unknown>) || {};
+      const externalConfig = (authConfig.external as Record<string, unknown>) || {};
 
       const studioCompatibleConfig = {
         ...authConfig,
-        external: authConfig.external || {},
-        external_providers: Object.keys(authConfig.external || {})
-          .filter(key => authConfig.external[key]?.client_id)
+        external: externalConfig,
+        external_providers: Object.keys(externalConfig)
+          .filter(key => (externalConfig[key] as any)?.client_id)
           .join(","),
       };
 
