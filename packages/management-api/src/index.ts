@@ -154,6 +154,29 @@ const app = new Elysia({ strictPath: false })
       }]
     };
   })
+  // Auth routes for Studio compatibility
+  .get("/platform/auth/user", async () => {
+    return {
+      id: "1",
+      email: "admin@supacloud.local",
+      user_metadata: {
+        first_name: "Admin",
+        last_name: "User",
+      },
+      app_metadata: {},
+      aud: "authenticated",
+      role: "authenticated",
+      created_at: new Date().toISOString(),
+    };
+  })
+  .get("/platform/subscription", async () => {
+    return {
+      id: 1,
+      name: "Pro Plan",
+      tier: "pro",
+      billing_email: "admin@supacloud.local",
+    };
+  })
 
   // API version info (no auth required)
   .get("/", () => ({
