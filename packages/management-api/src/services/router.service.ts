@@ -111,6 +111,16 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 
+    # Hijack /api/auth/* to Management API for auth support
+    location /api/auth/ {
+        proxy_pass http://${this.MANAGEMENT_API_INTERNAL}/auth/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
     location / {
         proxy_pass http://${this.STUDIO_INTERNAL};
         proxy_http_version 1.1;
@@ -171,6 +181,16 @@ server {
     # Hijack /api/platform/* to Management API for multi-project support
     location /api/platform/ {
         proxy_pass http://${this.MANAGEMENT_API_INTERNAL}/platform/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # Hijack /api/auth/* to Management API for auth support
+    location /api/auth/ {
+        proxy_pass http://${this.MANAGEMENT_API_INTERNAL}/auth/;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
