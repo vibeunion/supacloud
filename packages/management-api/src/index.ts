@@ -129,6 +129,8 @@ const app = new Elysia({ strictPath: false })
     return [{ id: 1, name: "SupaCloud", slug: "supacloud" }];
   })
   .get("/platform/profile", async () => {
+    const { projectService } = await import("./services");
+    const projects = await projectService.listProjects();
     return {
       id: 1,
       primary_email: "admin@supacloud.local",
@@ -139,7 +141,16 @@ const app = new Elysia({ strictPath: false })
         id: 1,
         name: "SupaCloud",
         slug: "supacloud",
-        projects: []
+        projects: projects.map((p: any) => ({
+          id: p.id,
+          ref: p.ref,
+          name: p.name,
+          status: p.status?.toUpperCase() || "ACTIVE_HEALTHY",
+          region: p.region || "local",
+          organization_id: "default",
+          cloud_provider: p.cloud_provider || "localhost",
+          inserted_at: p.created_at,
+        }))
       }]
     };
   })
