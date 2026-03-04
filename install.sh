@@ -2483,14 +2483,21 @@ EOF
     cat > /etc/systemd/system/supacloud.service <<EOF
 [Unit]
 Description=SupaCloud Management API Server
-After=network.target postgresql.service
+Documentation=https://github.com/supacloud/supacloud
+After=network.target patroni.service
+Wants=patroni.service
+Requires=patroni.service
 
 [Service]
 Type=simple
 EnvironmentFile=/etc/supabase/management-api.env
+ExecStartPre=/opt/supacloud/scripts/pre_start_recovery.sh
 ExecStart=$BIN_TARGET
 Restart=always
 RestartSec=10
+StartLimitBurst=5
+StartLimitIntervalSec=60
+LimitNOFILE=65536
 
 [Install]
 WantedBy=multi-user.target

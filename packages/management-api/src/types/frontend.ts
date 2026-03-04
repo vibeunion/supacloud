@@ -1,0 +1,115 @@
+export type FrontendFramework = "static" | "react" | "vue" | "svelte" | "nextjs" | "nuxt" | "sveltekit" | "astro" | "remix";
+
+export type BuildStatus = "pending" | "building" | "success" | "failed";
+
+export interface FrontendDeployment {
+  id: string;
+  project_ref: string;
+  name: string;
+  framework: FrontendFramework;
+  domain: string;
+  custom_domains: string[];
+  build_command: string;
+  output_dir: string;
+  install_command: string;
+  node_version: string;
+  env_vars: Record<string, string>;
+  status: BuildStatus;
+  created_at: string;
+  updated_at: string;
+  last_deployed_at?: string;
+  deployment_url: string;
+  build_log?: string;
+}
+
+export interface FrontendDeploymentConfig {
+  name: string;
+  framework: FrontendFramework;
+  domain?: string;
+  custom_domains?: string[];
+  build_command?: string;
+  output_dir?: string;
+  install_command?: string;
+  node_version?: string;
+  env_vars?: Record<string, string>;
+}
+
+export interface FrontendBuildResult {
+  success: boolean;
+  deployment_id: string;
+  url: string;
+  build_log: string;
+  error?: string;
+}
+
+export const FRAMEWORK_DEFAULTS: Record<FrontendFramework, {
+  build_command: string;
+  output_dir: string;
+  install_command: string;
+  node_version: string;
+  is_ssr: boolean;
+}> = {
+  static: {
+    build_command: "",
+    output_dir: ".",
+    install_command: "",
+    node_version: "20",
+    is_ssr: false,
+  },
+  react: {
+    build_command: "npm run build",
+    output_dir: "dist",
+    install_command: "npm install",
+    node_version: "20",
+    is_ssr: false,
+  },
+  vue: {
+    build_command: "npm run build",
+    output_dir: "dist",
+    install_command: "npm install",
+    node_version: "20",
+    is_ssr: false,
+  },
+  svelte: {
+    build_command: "npm run build",
+    output_dir: "dist",
+    install_command: "npm install",
+    node_version: "20",
+    is_ssr: false,
+  },
+  nextjs: {
+    build_command: "npm run build",
+    output_dir: ".next",
+    install_command: "npm install",
+    node_version: "20",
+    is_ssr: true,
+  },
+  nuxt: {
+    build_command: "npm run build",
+    output_dir: ".output",
+    install_command: "npm install",
+    node_version: "20",
+    is_ssr: true,
+  },
+  sveltekit: {
+    build_command: "npm run build",
+    output_dir: "build",
+    install_command: "npm install",
+    node_version: "20",
+    is_ssr: true,
+  },
+  astro: {
+    build_command: "npm run build",
+    output_dir: "dist",
+    install_command: "npm install",
+    node_version: "20",
+    is_ssr: false,
+  },
+  remix: {
+    build_command: "npm run build",
+    output_dir: "build",
+    install_command: "npm install",
+    node_version: "20",
+    is_ssr: true,
+  },
+};
