@@ -4,6 +4,7 @@ import {
   FrontendDeploymentConfig,
   FrontendFramework,
   FrontendBuildResult,
+  DeploymentRecord,
   FRAMEWORK_DEFAULTS,
 } from "../types/frontend";
 
@@ -474,7 +475,7 @@ server {
     buildDir: string
   ): Promise<void> {
     const port = 30000 + parseInt(deploymentId, 16) % 10000;
-    const appName = `frontend-${projectRef}-${deploymentId}`;
+    const serviceName = `supacloud-frontend-${projectRef}-${deploymentId}`;
 
     const envFile = this.joinPath(this.baseDir, projectRef, deploymentId, ".env");
     const envContent = Object.entries(deployment.env_vars)
@@ -482,48 +483,42 @@ server {
       .join("\n");
     await Bun.write(envFile, envContent);
 
-    const pm2Config = {
-      apps: [{
-        name: appName,
-        script: this.getSSRStartScript(deployment.framework, buildDir),
-        cwd: buildDir,
-        instances: 1,
-        exec_mode: "cluster",
-        env: {
-          PORT: port,
-          NODE_ENV: "production",
-          ...deployment.env_vars,
-        },
-      }],
-    };
+    const bunPath = process.env.BUN_PATH || "/usr/local/bin/bun";
+    const systemdService = `[Unit]
+Description=SupaCloud Frontend: ${deployment.name} (${projectRef}/${deploymentId})
+After=network.target
 
-    const pm2ConfigPath = this.joinPath(this.baseDir, projectRef, deploymentId, "pm2.json");
-    await Bun.write(pm2ConfigPath, JSON.stringify(pm2Config, null, 2));
+[Service]
+Type=simple
+User=root
+WorkingDirectory=${buildDir}
+Environment="PORT=${port}"
+Environment="NODE_ENV=production"
+EnvironmentFile=${envFile}
+ExecStart=${bunPath} run ${buildDir}/index.js
+Restart=always
+RestartSec=5
+LimitNOFILE=65536
 
-    await $`pm2 start ${pm2ConfigPath}`.nothrow().quiet();
-    await $`pm2 save`.nothrow().quiet();
+[Install]
+WantedBy=multi-user.target
+`;
+
+    const servicePath = `/etc/systemd/system/${serviceName}.service`;
+    await Bun.write(servicePath, systemdService);
+
+    await $`systemctl daemon-reload`.quiet();
+    await $`systemctl enable ${serviceName}`.quiet();
+    await $`systemctl restart ${serviceName}`.quiet();
   }
 
   private async stopSSRProcess(projectRef: string, deploymentId: string): Promise<void> {
-    const appName = `frontend-${projectRef}-${deploymentId}`;
-    await $`pm2 stop ${appName}`.nothrow().quiet();
-    await $`pm2 delete ${appName}`.nothrow().quiet();
-    await $`pm2 save`.nothrow().quiet();
-  }
-
-  private getSSRStartScript(framework: FrontendFramework, buildDir: string): string {
-    const scripts: Record<FrontendFramework, string> = {
-      nextjs: `${buildDir}/node_modules/next/dist/bin/next start`,
-      nuxt: `${buildDir}/server/index.mjs`,
-      sveltekit: `${buildDir}/index.js`,
-      remix: `${buildDir}/server.js`,
-      static: `${buildDir}/server.js`,
-      react: `${buildDir}/server.js`,
-      vue: `${buildDir}/server.js`,
-      svelte: `${buildDir}/server.js`,
-      astro: `${buildDir}/server.js`,
-    };
-    return scripts[framework] || `${buildDir}/server.js`;
+    const serviceName = `supacloud-frontend-${projectRef}-${deploymentId}`;
+    
+    await $`systemctl stop ${serviceName}`.nothrow().quiet();
+    await $`systemctl disable ${serviceName}`.nothrow().quiet();
+    await $`rm -f /etc/systemd/system/${serviceName}.service`.quiet();
+    await $`systemctl daemon-reload`.quiet();
   }
 
   async getBuildLog(projectRef: string, deploymentId: string): Promise<string> {
@@ -607,6 +602,223 @@ server {
     await this.configureAngie(updated, buildDir, defaults.is_ssr);
 
     return updated;
+  }
+
+  async createDeployToken(
+    projectRef: string,
+    deploymentId: string,
+    name: string
+  ): Promise<{ id: string; token: string } | null> {
+    const deployment = await this.getDeployment(projectRef, deploymentId);
+    if (!deployment) return null;
+
+    const tokenId = crypto.randomUUID().substring(0, 8);
+    const token = `supa_deploy_${crypto.randomUUID().replace(/-/g, "")}`;
+
+    const deployToken = {
+      id: tokenId,
+      name,
+      token,
+      created_at: new Date().toISOString(),
+    };
+
+    const updated = {
+      ...deployment,
+      deploy_tokens: [...(deployment.deploy_tokens || []), deployToken],
+      updated_at: new Date().toISOString(),
+    };
+
+    await Bun.write(
+      this.joinPath(this.baseDir, projectRef, deploymentId, "deployment.json"),
+      JSON.stringify(updated, null, 2)
+    );
+
+    return { id: tokenId, token };
+  }
+
+  async listDeployTokens(projectRef: string, deploymentId: string): Promise<{ id: string; name: string; created_at: string; last_used_at?: string }[]> {
+    const deployment = await this.getDeployment(projectRef, deploymentId);
+    if (!deployment) return [];
+
+    return (deployment.deploy_tokens || []).map((t) => ({
+      id: t.id,
+      name: t.name,
+      created_at: t.created_at,
+      last_used_at: t.last_used_at,
+    }));
+  }
+
+  async deleteDeployToken(projectRef: string, deploymentId: string, tokenId: string): Promise<boolean> {
+    const deployment = await this.getDeployment(projectRef, deploymentId);
+    if (!deployment) return false;
+
+    const updated = {
+      ...deployment,
+      deploy_tokens: (deployment.deploy_tokens || []).filter((t) => t.id !== tokenId),
+      updated_at: new Date().toISOString(),
+    };
+
+    await Bun.write(
+      this.joinPath(this.baseDir, projectRef, deploymentId, "deployment.json"),
+      JSON.stringify(updated, null, 2)
+    );
+
+    return true;
+  }
+
+  async verifyDeployToken(projectRef: string, deploymentId: string, token: string): Promise<boolean> {
+    const deployment = await this.getDeployment(projectRef, deploymentId);
+    if (!deployment) return false;
+
+    const foundToken = (deployment.deploy_tokens || []).find((t) => t.token === token);
+    if (!foundToken) return false;
+
+    foundToken.last_used_at = new Date().toISOString();
+    await Bun.write(
+      this.joinPath(this.baseDir, projectRef, deploymentId, "deployment.json"),
+      JSON.stringify(deployment, null, 2)
+    );
+
+    return true;
+  }
+
+  async setGitConfig(
+    projectRef: string,
+    deploymentId: string,
+    gitUrl: string,
+    branch: string
+  ): Promise<FrontendDeployment | null> {
+    const deployment = await this.getDeployment(projectRef, deploymentId);
+    if (!deployment) return null;
+
+    const updated = {
+      ...deployment,
+      git_url: gitUrl,
+      git_branch: branch,
+      updated_at: new Date().toISOString(),
+    };
+
+    await Bun.write(
+      this.joinPath(this.baseDir, projectRef, deploymentId, "deployment.json"),
+      JSON.stringify(updated, null, 2)
+    );
+
+    return updated;
+  }
+
+  async createDeploymentRecord(
+    projectRef: string,
+    deploymentId: string,
+    record: Partial<DeploymentRecord>
+  ): Promise<string> {
+    const recordId = crypto.randomUUID().substring(0, 8);
+    const recordPath = this.joinPath(
+      this.baseDir,
+      projectRef,
+      deploymentId,
+      "records",
+      `${recordId}.json`
+    );
+
+    await $`mkdir -p ${this.joinPath(this.baseDir, projectRef, deploymentId, "records")}`.quiet();
+
+    const fullRecord = {
+      id: recordId,
+      deployment_id: deploymentId,
+      project_ref: projectRef,
+      status: record.status || "pending",
+      commit_sha: record.commit_sha,
+      commit_message: record.commit_message,
+      branch: record.branch,
+      triggered_by: record.triggered_by || "manual",
+      build_log: record.build_log,
+      started_at: new Date().toISOString(),
+    };
+
+    await Bun.write(recordPath, JSON.stringify(fullRecord, null, 2));
+
+    return recordId;
+  }
+
+  async updateDeploymentRecord(
+    projectRef: string,
+    deploymentId: string,
+    recordId: string,
+    updates: Partial<DeploymentRecord>
+  ): Promise<void> {
+    const recordPath = this.joinPath(
+      this.baseDir,
+      projectRef,
+      deploymentId,
+      "records",
+      `${recordId}.json`
+    );
+
+    try {
+      const record = await Bun.file(recordPath).json();
+      const updated = {
+        ...record,
+        ...updates,
+        finished_at: updates.status === "success" || updates.status === "failed" 
+          ? new Date().toISOString() 
+          : undefined,
+        duration: updates.status === "success" || updates.status === "failed"
+          ? Date.now() - new Date(record.started_at).getTime()
+          : undefined,
+      };
+
+      await Bun.write(recordPath, JSON.stringify(updated, null, 2));
+    } catch {
+      // ignore
+    }
+  }
+
+  async listDeploymentRecords(
+    projectRef: string,
+    deploymentId: string
+  ): Promise<DeploymentRecord[]> {
+    const recordsDir = this.joinPath(this.baseDir, projectRef, deploymentId, "records");
+    const records: DeploymentRecord[] = [];
+
+    try {
+      const result = await $`ls ${recordsDir}`.quiet();
+      const files = result.text().trim().split("\n").filter(Boolean);
+
+      for (const file of files) {
+        try {
+          const record = await Bun.file(this.joinPath(recordsDir, file)).json();
+          records.push(record);
+        } catch {
+          continue;
+        }
+      }
+
+      return records.sort((a, b) => 
+        new Date(b.started_at).getTime() - new Date(a.started_at).getTime()
+      );
+    } catch {
+      return [];
+    }
+  }
+
+  async getDeploymentRecord(
+    projectRef: string,
+    deploymentId: string,
+    recordId: string
+  ): Promise<DeploymentRecord | null> {
+    const recordPath = this.joinPath(
+      this.baseDir,
+      projectRef,
+      deploymentId,
+      "records",
+      `${recordId}.json`
+    );
+
+    try {
+      return await Bun.file(recordPath).json();
+    } catch {
+      return null;
+    }
   }
 }
 
