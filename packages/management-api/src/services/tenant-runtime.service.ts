@@ -2,6 +2,7 @@ import { $, BunFile, SQL } from "bun";
 import { config } from "../config";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { OAuthProvider, OAuthProviderConfig, OAUTH_ENV_MAPPINGS } from "../types/oauth";
 
 export interface RuntimeStatus {
     status: "running" | "stopped" | "starting" | "error";
@@ -215,8 +216,9 @@ GOTRUE_SMTP_SENDER_NAME=SupaCloud
             const pgrstUnit = `
 [Unit]
 Description=SupaCloud PostgREST for tenant %i
-After=postgresql.service network.target
-Wants=network.target
+Documentation=https://github.com/supacloud/supacloud
+After=network.target patroni.service
+Wants=patroni.service
 
 [Service]
 Type=simple
@@ -248,8 +250,9 @@ WantedBy=multi-user.target
             const gotrueUnit = `
 [Unit]
 Description=SupaCloud GoTrue for tenant %i
-After=postgresql.service network.target
-Wants=network.target
+Documentation=https://github.com/supacloud/supacloud
+After=network.target patroni.service
+Wants=patroni.service
 
 [Service]
 Type=simple
@@ -396,6 +399,206 @@ WantedBy=multi-user.target
         }
 
         return { status: "stopped", port, gotruePort, health: "unknown" };
+    }
+
+    public async updateOAuthConfig(ref: string, provider: OAuthProvider, providerConfig: OAuthProviderConfig): Promise<void> {
+        const gotrueEnvPath = path.join(this.TENANT_CONFIG_DIR, `${ref}_gotrue.env`);
+
+        const exists = await Bun.file(gotrueEnvPath).exists();
+        if (!exists) {
+            throw new Error(`GoTrue config file not found for project ${ref}`);
+        }
+
+        let envContent = await Bun.file(gotrueEnvPath).text();
+
+        const mapping = OAUTH_ENV_MAPPINGS[provider];
+        if (!mapping) {
+            throw new Error(`Unsupported OAuth provider: ${provider}`);
+        }
+
+        const lines = envContent.split("\n");
+        const updatedLines: string[] = [];
+        const addedKeys = new Set<string>();
+
+        for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed || trimmed.startsWith("#")) {
+                updatedLines.push(line);
+                continue;
+            }
+
+            const [key] = trimmed.split("=");
+            const keyTrimmed = key?.trim();
+
+            if (keyTrimmed === mapping.clientId) {
+                updatedLines.push(`${mapping.clientId}=${providerConfig.client_id}`);
+                addedKeys.add(mapping.clientId);
+            } else if (keyTrimmed === mapping.clientSecret) {
+                updatedLines.push(`${mapping.clientSecret}=${providerConfig.client_secret}`);
+                addedKeys.add(mapping.clientSecret);
+            } else if (mapping.redirectUri && keyTrimmed === mapping.redirectUri) {
+                if (providerConfig.redirect_uri) {
+                    updatedLines.push(`${mapping.redirectUri}=${providerConfig.redirect_uri}`);
+                }
+                addedKeys.add(mapping.redirectUri);
+            } else if (mapping.url && keyTrimmed === mapping.url) {
+                if (providerConfig.url) {
+                    updatedLines.push(`${mapping.url}=${providerConfig.url}`);
+                }
+                addedKeys.add(mapping.url);
+            } else {
+                updatedLines.push(line);
+            }
+        }
+
+        const newLines: string[] = [];
+        if (!addedKeys.has(mapping.clientId)) {
+            newLines.push(`${mapping.clientId}=${providerConfig.client_id}`);
+        }
+        if (!addedKeys.has(mapping.clientSecret)) {
+            newLines.push(`${mapping.clientSecret}=${providerConfig.client_secret}`);
+        }
+        if (mapping.redirectUri && providerConfig.redirect_uri && !addedKeys.has(mapping.redirectUri)) {
+            newLines.push(`${mapping.redirectUri}=${providerConfig.redirect_uri}`);
+        }
+        if (mapping.url && providerConfig.url && !addedKeys.has(mapping.url)) {
+            newLines.push(`${mapping.url}=${providerConfig.url}`);
+        }
+
+        if (newLines.length > 0) {
+            updatedLines.push("");
+            updatedLines.push(`# OAuth Provider: ${provider}`);
+            updatedLines.push(...newLines);
+        }
+
+        await Bun.write(gotrueEnvPath, updatedLines.join("\n"));
+
+        await $`systemctl restart supacloud-gotrue@${ref}`.nothrow().quiet();
+        console.log(`OAuth config updated for ${provider} in project ${ref}`);
+    }
+
+    public async removeOAuthConfig(ref: string, provider: OAuthProvider): Promise<void> {
+        const gotrueEnvPath = path.join(this.TENANT_CONFIG_DIR, `${ref}_gotrue.env`);
+
+        const exists = await Bun.file(gotrueEnvPath).exists();
+        if (!exists) {
+            return;
+        }
+
+        let envContent = await Bun.file(gotrueEnvPath).text();
+
+        const mapping = OAUTH_ENV_MAPPINGS[provider];
+        if (!mapping) {
+            throw new Error(`Unsupported OAuth provider: ${provider}`);
+        }
+
+        const keysToRemove = new Set<string>([
+            mapping.clientId,
+            mapping.clientSecret,
+        ]);
+        if (mapping.redirectUri) keysToRemove.add(mapping.redirectUri);
+        if (mapping.url) keysToRemove.add(mapping.url);
+
+        const lines = envContent.split("\n");
+        const updatedLines: string[] = [];
+
+        for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed || trimmed.startsWith("#")) {
+                updatedLines.push(line);
+                continue;
+            }
+
+            const [key] = trimmed.split("=");
+            const keyTrimmed = key?.trim();
+
+            if (keyTrimmed && keysToRemove.has(keyTrimmed)) {
+                continue;
+            }
+
+            updatedLines.push(line);
+        }
+
+        await Bun.write(gotrueEnvPath, updatedLines.join("\n"));
+
+        await $`systemctl restart supacloud-gotrue@${ref}`.nothrow().quiet();
+        console.log(`OAuth config removed for ${provider} in project ${ref}`);
+    }
+
+    public async updateGoTrueCustomOAuth(ref: string, config: {
+        name: string;
+        client_id: string;
+        client_secret: string;
+        redirect_uri: string;
+        authorize_url: string;
+        token_url: string;
+        user_url: string;
+        auth_scheme?: string;
+    }): Promise<void> {
+        const gotrueEnvPath = path.join(this.TENANT_CONFIG_DIR, `${ref}_gotrue.env`);
+
+        const exists = await Bun.file(gotrueEnvPath).exists();
+        if (!exists) {
+            throw new Error(`GoTrue config file not found for project ${ref}`);
+        }
+
+        let envContent = await Bun.file(gotrueEnvPath).text();
+
+        const prefix = `GOTRUE_EXTERNAL_${config.name.toUpperCase()}`;
+        const customOAuthEnv = `
+# Custom OAuth Provider: ${config.name}
+${prefix}_CLIENT_ID=${config.client_id}
+${prefix}_SECRET=${config.client_secret}
+${prefix}_REDIRECT_URI=${config.redirect_uri}
+${prefix}_URL=${config.authorize_url}
+`;
+
+        const keysToRemove = new Set<string>([
+            `${prefix}_CLIENT_ID`,
+            `${prefix}_SECRET`,
+            `${prefix}_REDIRECT_URI`,
+            `${prefix}_URL`,
+        ]);
+
+        const lines = envContent.split("\n");
+        const updatedLines: string[] = [];
+        let hasCustomSection = false;
+
+        for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed || trimmed.startsWith("#")) {
+                if (trimmed.includes(`# Custom OAuth Provider: ${config.name}`)) {
+                    hasCustomSection = true;
+                }
+                updatedLines.push(line);
+                continue;
+            }
+
+            const [key] = trimmed.split("=");
+            const keyTrimmed = key?.trim();
+
+            if (keyTrimmed && keysToRemove.has(keyTrimmed)) {
+                continue;
+            }
+
+            updatedLines.push(line);
+        }
+
+        if (!hasCustomSection) {
+            updatedLines.push(customOAuthEnv);
+        } else {
+            const sectionStartIndex = updatedLines.findIndex(l => 
+                l.includes(`# Custom OAuth Provider: ${config.name}`)
+            );
+            if (sectionStartIndex >= 0) {
+                updatedLines.splice(sectionStartIndex + 1, 0, ...customOAuthEnv.trim().split("\n").slice(1));
+            }
+        }
+
+        await Bun.write(gotrueEnvPath, updatedLines.join("\n"));
+
+        await $`systemctl restart supacloud-gotrue@${ref}`.nothrow().quiet();
+        console.log(`Custom OAuth config updated for ${config.name} in project ${ref}`);
     }
 }
 
