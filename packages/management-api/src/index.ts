@@ -4,7 +4,7 @@ import { cors } from "@elysiajs/cors";
 import { config } from "./config";
 import { authMiddleware } from "./middleware/auth";
 import { closeDb } from "./db";
-import { studioRoutes, studioAuthRoutes } from "./routes";
+import { studioRoutes, studioAuthRoutes, studioV1Routes } from "./routes";
 
 const app = new Elysia({ strictPath: false })
   // Swagger docs
@@ -51,6 +51,7 @@ const app = new Elysia({ strictPath: false })
   .get("/health", () => ({ status: "ok", timestamp: new Date().toISOString() }))
   .use(studioRoutes)
   .use(studioAuthRoutes)
+  .use(studioV1Routes)
 
   // API version info (no auth required)
   .get("/", () => ({
