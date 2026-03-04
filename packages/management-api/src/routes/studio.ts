@@ -70,7 +70,7 @@ export const studioRoutes = new Elysia({ prefix: "/platform" })
     }))
     .get("/config", async () => ({
         platform_name: "SupaCloud",
-        features: { analytics: false, storage: true, functions: true }
+        features: { analytics: true, storage: true, functions: true }
     }))
 
     // --- Organizations ---
@@ -78,10 +78,6 @@ export const studioRoutes = new Elysia({ prefix: "/platform" })
         { id: 1, name: "SupaCloud", slug: "supacloud" }
     ])
     .get("/organizations/:slug", async ({ params, set }) => {
-        if (params.slug !== "supacloud" && params.slug !== "default") {
-            set.status = 404;
-            return { error: "Organization not found" };
-        }
         return {
             id: 1,
             name: "SupaCloud",
@@ -92,18 +88,10 @@ export const studioRoutes = new Elysia({ prefix: "/platform" })
         };
     })
     .get("/organizations/:slug/projects", async ({ params, set }) => {
-        if (params.slug !== "supacloud" && params.slug !== "default") {
-            set.status = 404;
-            return { error: "Organization not found" };
-        }
         const projects = await projectService.listProjects();
         return projects.map(toPlatformProject);
     })
     .get("/organizations/:slug/members", async ({ params, set }) => {
-        if (params.slug !== "supacloud" && params.slug !== "default") {
-            set.status = 404;
-            return { error: "Organization not found" };
-        }
         return [{
             id: 1,
             user_id: "1",
@@ -221,13 +209,8 @@ export const studioRoutes = new Elysia({ prefix: "/platform" })
         const project = await getProjectOrThrow(params.ref);
         return toPlatformProject(project);
     })
-    .get("/projects/:ref/functions", async ({ params }) => {
-        // Return empty list instead of 404/500 to satisfy Studio
-        return [];
-    })
-    .get("/projects/:ref/edge-functions", async ({ params }) => {
-        return [];
-    })
+    .get("/projects/:ref/functions", async () => [])
+    .get("/projects/:ref/edge-functions", async () => [])
     .get("/projects/:ref/databases", async ({ params }) => {
         const project = await getProjectOrThrow(params.ref);
         return [
@@ -241,15 +224,14 @@ export const studioRoutes = new Elysia({ prefix: "/platform" })
         ];
     })
     // --- pg-meta Proxy ---
-    .all("/pg-meta/:ref/*", async ({ params, request, set }) => {
+    .all("/pg-meta/:ref/*", async ({ params, request, set, query }) => {
         const project: any = await getProjectOrThrow(params.ref);
-        // Map to the internal pg-meta port for the project. 
-        // In this architecture, we assume pg-meta is on a consistent port per tenant or we use a internal gateway.
-        // For SupaCloud, if we use elygate, we can proxy to it.
         const path = (params as any)["*"];
-        const internalUrl = `http://localhost:8080/${path}`;
 
-        // If SQL query, we might need to mock successful empty result to avoid UI crash
+        // Reconstruct URL with query string if present
+        const searchParams = new URL(request.url).search;
+        const internalUrl = `http://localhost:8080/${path}${searchParams}`;
+
         if (request.method === "POST" && path === "query") {
             try {
                 const reqClone = request.clone();
@@ -262,17 +244,14 @@ export const studioRoutes = new Elysia({ prefix: "/platform" })
             } catch (e) {
                 logger.error("pg-meta query proxy failed", { error: String(e) });
             }
-            return []; // Mock empty success instead of 404/500
+            return [];
         }
 
         try {
             const reqClone = request.clone();
             const resp = await fetch(internalUrl, {
                 method: request.method,
-                headers: {
-                    ...reqClone.headers,
-                    "x-connection-encrypted": project.database?.password || "postgres"
-                },
+                headers: { ...reqClone.headers, "x-connection-encrypted": project.database?.password || "postgres" },
                 body: request.method !== "GET" && request.method !== "HEAD" ? await reqClone.arrayBuffer() : undefined
             });
             set.status = resp.status;
@@ -283,29 +262,32 @@ export const studioRoutes = new Elysia({ prefix: "/platform" })
         }
     })
     // --- Analytics / Logs Explorer Simulation ---
-    .get("/projects/:ref/analytics/endpoints/logs.all", async ({ params, query }) => {
-        // Studio often sends SQL queries to Logflare. We'll ignore the SQL and return our system logs.
+    .get("/projects/:ref/analytics/endpoints/logs.all", async ({ params }) => {
         const project = await getProjectOrThrow(params.ref);
         const logs = await projectService.queryLogs(project.ref, "all");
-
-        // Studio expects a specific envelope for analytics endpoints
+        return { data: logs, meta: { count: logs.length } };
+    })
+    .get("/projects/:ref/content/folders", async () => [])
+    .get("/projects/:ref/content", async () => [])
+    .get("/projects/:ref/settings", async ({ params }) => {
+        const project = await getProjectOrThrow(params.ref);
         return {
-            data: logs,
-            meta: {
-                count: logs.length
+            ...toPlatformProject(project),
+            database: {
+                host: project.database?.host || "localhost",
+                port: project.database?.port || 5432,
+                name: project.database?.name || `supa_${project.ref}`,
             }
         };
-    })
-    .get("/projects/:ref/content", async () => {
-        return [];
     });
+
 
 // Studio also requests /api/v1/projects/[ref]/...
 export const studioV1Routes = new Elysia({ prefix: "/v1" })
     .get("/projects/:ref/functions", async () => [])
     .get("/projects/:ref/edge-functions", async () => [])
     .get("/projects/:ref/config/auth", async ({ params }) => {
-        const project: any = await projectService.getProject(params.ref) || (await projectService.listProjects())[0];
+        const project: any = await getProjectOrThrow(params.ref);
         return {
             jwt_expiry: 3600,
             jwt_secret: project.jwt_secret || "",
@@ -313,7 +295,6 @@ export const studioV1Routes = new Elysia({ prefix: "/v1" })
             enabled: true,
         };
     });
-
 
 // Extra top-level routes for auth
 export const studioAuthRoutes = new Elysia({ prefix: "/auth" })
