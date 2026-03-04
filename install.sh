@@ -1009,115 +1009,98 @@ EOF
 
 # ========== Install Bun Runtime (Docker Hub image optional) ==========
 install_bun_runtime() {
-    log_step "Installing Bun.js runtime (Docker Hub image)..."
+    log_step "Installing Bun.js runtime..."
     
-    # Docker Hub image address
+    # 1. Install Bun binary for SSR hosting
+    if ! command -v bun &> /dev/null; then
+        log_info "Installing Bun binary..."
+        
+        # Use China mirror for faster download
+        if [[ "${USE_CHINA_MIRROR:-false}" == "true" ]] || [[ "${CN:-false}" == "true" ]]; then
+            log_info "Using China mirror (bunjs.cn)..."
+            curl -fsSL https://bunjs.cn/install | bash
+        else
+            curl -fsSL https://bun.sh/install | bash
+        fi
+        
+        # Add to system PATH
+        ln -sf ~/.bun/bin/bun /usr/local/bin/bun 2>/dev/null || true
+        ln -sf ~/.bun/bin/bunx /usr/local/bin/bunx 2>/dev/null || true
+        
+        # Verify installation
+        if command -v bun &> /dev/null; then
+            log_info "Bun installed: $(bun --version)"
+        else
+            log_warn "Bun installation may require shell reload, binary at ~/.bun/bin/bun"
+        fi
+    else
+        log_info "Bun already installed: $(bun --version)"
+    fi
+    
+    # 2. Create frontend hosting directory
+    mkdir -p /var/supacloud/frontends
+    mkdir -p /etc/supabase
+    
+    # 3. Mark as Bun runtime available
+    touch /etc/supabase/.bun_installed
+    
+    # 4. Optional: Docker Hub image for Edge Functions
     BUN_FUNCTIONS_IMAGE="${BUN_FUNCTIONS_IMAGE:-zuohuadong/supabase-bun-function:latest}"
     BUN_FUNCTIONS_DIR="${BUN_FUNCTIONS_DIR:-bun-functions}"
     BUN_FUNCTIONS_PORT="${BUN_FUNCTIONS_PORT:-9001}"
     
-    log_info "Using image: ${BUN_FUNCTIONS_IMAGE}"
-    
-    # Create functions directory
-    mkdir -p /opt/supabase/${BUN_FUNCTIONS_DIR}/functions
-    mkdir -p /etc/supabase
-    
-    # Create example function
-    mkdir -p /opt/supabase/${BUN_FUNCTIONS_DIR}/functions/hello
-    cat > /opt/supabase/${BUN_FUNCTIONS_DIR}/functions/hello/index.ts << 'EOF'
-// Example Bun Edge Function
-// Compatible with supabase.functions.invoke('hello', { body: { name: 'World' } })
-
-interface FunctionContext {
-  req: Request;
-  headers: Record<string, string>;
-  body: any;
-  params: Record<string, string>;
-  query: Record<string, string>;
-  env: {
-    SUPABASE_URL?: string;
-    SUPABASE_ANON_KEY?: string;
-    SUPABASE_SERVICE_ROLE_KEY?: string;
-  };
-}
-
-export default async function handler(ctx: FunctionContext) {
-  const name = ctx.body?.name || ctx.query?.name || 'World';
-  
-  return {
-    message: `Hello, ${name}!`,
-    runtime: 'bun',
-    timestamp: new Date().toISOString(),
-  };
-}
-EOF
-    
-    # Load JWT keys
-    if [[ -f /etc/supabase/jwt-keys.env ]]; then
-        set -a
-        source /etc/supabase/jwt-keys.env
-        set +a
+    if [[ "${BUN_EDGE_FUNCTIONS:-false}" == "true" ]]; then
+        log_info "Installing Bun Edge Functions container..."
+        
+        # Create functions directory
+        mkdir -p /opt/supabase/${BUN_FUNCTIONS_DIR}/functions
+        
+        # Load JWT keys
+        if [[ -f /etc/supabase/jwt-keys.env ]]; then
+            set -a
+            source /etc/supabase/jwt-keys.env
+            set +a
+        fi
+        
+        # Pull and start container
+        log_info "Pulling Docker Hub image..."
+        
+        if command -v podman &> /dev/null; then
+            podman pull "${BUN_FUNCTIONS_IMAGE}"
+            podman run -d --name supabase-bun-functions \
+                --restart unless-stopped \
+                -p ${BUN_FUNCTIONS_PORT}:9001 \
+                -e PORT=9001 \
+                -e JWT_SECRET="${JWT_SECRET}" \
+                -e ANON_KEY="${ANON_KEY}" \
+                -e SERVICE_ROLE_KEY="${SERVICE_ROLE_KEY}" \
+                -e SUPABASE_URL="http://localhost:8000" \
+                -v /opt/supabase/${BUN_FUNCTIONS_DIR}/functions:/app/functions:ro \
+                --network supabase_default \
+                "${BUN_FUNCTIONS_IMAGE}"
+        elif command -v docker &> /dev/null; then
+            docker pull "${BUN_FUNCTIONS_IMAGE}"
+            docker run -d --name supabase-bun-functions \
+                --restart unless-stopped \
+                -p ${BUN_FUNCTIONS_PORT}:9001 \
+                -e PORT=9001 \
+                -e JWT_SECRET="${JWT_SECRET}" \
+                -e ANON_KEY="${ANON_KEY}" \
+                -e SERVICE_ROLE_KEY="${SERVICE_ROLE_KEY}" \
+                -e SUPABASE_URL="http://localhost:8000" \
+                -v /opt/supabase/${BUN_FUNCTIONS_DIR}/functions:/app/functions:ro \
+                --network supabase_default \
+                "${BUN_FUNCTIONS_IMAGE}"
+        fi
+        
+        log_info "Bun Edge Functions container started on port ${BUN_FUNCTIONS_PORT}"
     fi
     
-    # Pull and start container
-    log_info "Pulling Docker Hub image..."
-    
-    if command -v podman &> /dev/null; then
-        # Use Podman
-        podman pull "${BUN_FUNCTIONS_IMAGE}"
-        
-        # Start new container
-        podman run -d --name supabase-bun-functions \
-            --restart unless-stopped \
-            -p ${BUN_FUNCTIONS_PORT}:9001 \
-            -e PORT=9001 \
-            -e JWT_SECRET="${JWT_SECRET}" \
-            -e ANON_KEY="${ANON_KEY}" \
-            -e SERVICE_ROLE_KEY="${SERVICE_ROLE_KEY}" \
-            -e SUPABASE_URL="http://localhost:8000" \
-            -v /opt/supabase/${BUN_FUNCTIONS_DIR}/functions:/app/functions:ro \
-            --network supabase_default \
-            "${BUN_FUNCTIONS_IMAGE}"
-            
-    elif command -v docker &> /dev/null; then
-        # Use Docker
-        docker pull "${BUN_FUNCTIONS_IMAGE}"
-        
-        # Start new container
-        docker run -d --name supabase-bun-functions \
-            --restart unless-stopped \
-            -p ${BUN_FUNCTIONS_PORT}:9001 \
-            -e PORT=9001 \
-            -e JWT_SECRET="${JWT_SECRET}" \
-            -e ANON_KEY="${ANON_KEY}" \
-            -e SERVICE_ROLE_KEY="${SERVICE_ROLE_KEY}" \
-            -e SUPABASE_URL="http://localhost:8000" \
-            -v /opt/supabase/${BUN_FUNCTIONS_DIR}/functions:/app/functions:ro \
-            --network supabase_default \
-            "${BUN_FUNCTIONS_IMAGE}"
-    else
-        log_error "Docker or Podman not found"
-        return 1
-    fi
-    
-    # Save configuration
-    cat > /etc/supabase/bun-functions.env << EOF
-# Bun Edge Functions Configuration (Docker Hub image)
-BUN_FUNCTIONS_IMAGE=${BUN_FUNCTIONS_IMAGE}
-BUN_FUNCTIONS_PORT=${BUN_FUNCTIONS_PORT}
-BUN_FUNCTIONS_DIR=/opt/supabase/${BUN_FUNCTIONS_DIR}
-BUN_FUNCTIONS_CONTAINER=supabase-bun-functions
-EOF
-    
-    # Mark as using Bun runtime
-    touch /etc/supabase/.use_bun_runtime
-    
-    log_info "Bun Edge Functions installation complete"
-    log_info "  Image: ${BUN_FUNCTIONS_IMAGE}"
-    log_info "  Container: supabase-bun-functions"
-    log_info "  Port: ${BUN_FUNCTIONS_PORT}"
-    log_info "  Functions Dir: /opt/supabase/${BUN_FUNCTIONS_DIR}/functions"
-    log_info "  API: http://localhost:${BUN_FUNCTIONS_PORT}/{function}"
+    log_info "Bun runtime installation complete"
+    log_info "  Binary: $(which bun 2>/dev/null || echo '~/.bun/bin/bun')"
+    log_info "  Frontend hosting: /var/supacloud/frontends"
+    log_info ""
+    log_info "Tip: For China users, use: USE_CHINA_MIRROR=true ./install.sh"
 }
 
 # ========== S3 Storage Installation ==========

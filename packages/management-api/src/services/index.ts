@@ -4,4 +4,4 @@ export { storageService, StorageService } from "./storage.service";
 export { routerService, RouterService } from "./router.service";
 export { shellService, ShellService } from "./shell.service";
 export { projectService, ProjectService } from "./project.service";
-export { frontendService, FrontendService } from "./frontend.service";
+export { frontendService } from "./frontend.service";
