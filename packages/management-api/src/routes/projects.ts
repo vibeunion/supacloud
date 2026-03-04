@@ -421,7 +421,7 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     }
   )
 
-  // Get Auth config
+  // Get Auth config (Studio compatible format)
   .get(
     "/:ref/config/auth",
     async ({ params, set }) => {
@@ -430,7 +430,18 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
         set.status = 404;
         return { error: "Project not found" };
       }
-      return settings.auth || {};
+
+      const authConfig = (settings.auth as Record<string, any>) || {};
+
+      const studioCompatibleConfig = {
+        ...authConfig,
+        external: authConfig.external || {},
+        external_providers: Object.keys(authConfig.external || {})
+          .filter(key => authConfig.external[key]?.client_id)
+          .join(","),
+      };
+
+      return studioCompatibleConfig;
     },
     {
       params: t.Object({
