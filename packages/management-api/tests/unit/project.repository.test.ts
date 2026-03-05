@@ -1,8 +1,31 @@
 import { describe, test, expect, mock, beforeEach, afterEach } from "bun:test";
 
 // Mock the SQL module
-const mockSql: any = mock(() => Promise.resolve([]));
-mockSql.unsafe = mock(() => Promise.resolve([]));
+const mockProject = {
+  id: "uuid-test123",
+  ref: "test123",
+  organization_id: "default",
+  name: "Test Project",
+  db_name: "supa_test123",
+  db_user: "role_test123",
+  db_password: "password123",
+  jwt_secret: "secret123",
+  anon_key: "anon.key.test",
+  service_role_key: "service.key.test",
+  s3_bucket: "supa-test123",
+  s3_access_key: "access123",
+  s3_secret_key: "secret123",
+  status: "active" as const,
+  region: "local",
+  config: {},
+  created_at: new Date(),
+  updated_at: new Date(),
+  deleted_at: null,
+};
+
+// Mock the SQL module
+const mockSql: any = mock(() => Promise.resolve([mockProject]));
+mockSql.unsafe = mock(() => Promise.resolve([mockProject]));
 
 mock.module("../../src/db", () => ({
   sql: mockSql,
@@ -17,28 +40,6 @@ import { ProjectRepository } from "../../src/repositories/project.repository";
 
 describe("ProjectRepository", () => {
   let repository: ProjectRepository;
-
-  const mockProject = {
-    id: "uuid-test123",
-    ref: "test123",
-    organization_id: "default",
-    name: "Test Project",
-    db_name: "supa_test123",
-    db_user: "role_test123",
-    db_password: "password123",
-    jwt_secret: "secret123",
-    anon_key: "anon.key.test",
-    service_role_key: "service.key.test",
-    s3_bucket: "supa-test123",
-    s3_access_key: "access123",
-    s3_secret_key: "secret123",
-    status: "active" as const,
-    region: "local",
-    config: {},
-    created_at: new Date(),
-    updated_at: new Date(),
-    deleted_at: null,
-  };
 
   beforeEach(() => {
     repository = new ProjectRepository();
