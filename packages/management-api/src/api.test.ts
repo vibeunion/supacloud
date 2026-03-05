@@ -7,7 +7,8 @@ describe("Management API Integration Tests", () => {
     let app: any;
 
     beforeAll(async () => {
-        app = baseApp.use(await registerAllRoutes());
+        const routes = await registerAllRoutes();
+        app = baseApp.use(routes);
     });
 
 
