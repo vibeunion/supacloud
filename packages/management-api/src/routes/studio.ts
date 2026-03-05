@@ -84,31 +84,42 @@ export const studioRoutes = new Elysia()
     }, { params: t.Object({ ref: t.String() }) })
     .get("/platform/projects/:ref/analytics/log-drains", async () => ({ data: [] }))
 
-    // pg-meta 接口
-    .get("/pg-meta/:ref/tables", async ({ params }) => {
+    // pg-meta 接口 (Studio 请求 /api/platform/pg-meta/:ref/...)
+    .get("/platform/pg-meta/:ref/tables", async ({ params }) => {
         const project = await getProjectOrThrow(params.ref);
         const db = getProjectDb(project.database?.name || "postgres");
         const tables = await db`SELECT (table_schema || '.' || table_name) as id, table_name as name, table_schema as schema FROM information_schema.tables WHERE table_schema NOT IN ('information_schema', 'pg_catalog')`;
         return tables;
     }, { params: t.Object({ ref: t.String() }) })
-    .get("/pg-meta/:ref/views", async ({ params }) => {
+    .get("/platform/pg-meta/:ref/views", async ({ params }) => {
         const project = await getProjectOrThrow(params.ref);
         const db = getProjectDb(project.database?.name || "postgres");
         return await db`SELECT (table_schema || '.' || table_name) as id, table_name as name, table_schema as schema FROM information_schema.views WHERE table_schema NOT IN ('information_schema', 'pg_catalog')`;
     }, { params: t.Object({ ref: t.String() }) })
-    .get("/pg-meta/:ref/roles", async ({ params }) => {
+    .get("/platform/pg-meta/:ref/roles", async ({ params }) => {
         const project = await getProjectOrThrow(params.ref);
         const db = getProjectDb(project.database?.name || "postgres");
         return await db`SELECT oid as id, rolname as name FROM pg_roles`;
     }, { params: t.Object({ ref: t.String() }) })
-    .get("/pg-meta/:ref/schemas", async ({ params }) => {
+    .get("/platform/pg-meta/:ref/schemas", async ({ params }) => {
         const project = await getProjectOrThrow(params.ref);
         const db = getProjectDb(project.database?.name || "postgres");
         return await db`SELECT schema_name as id, schema_name as name FROM information_schema.schemata WHERE schema_name NOT IN ('information_schema', 'pg_catalog')`;
     }, { params: t.Object({ ref: t.String() }) })
-    .get("/pg-meta/:ref/materialized-views", async () => [])
-    .get("/pg-meta/:ref/publications", async () => [])
-    .get("/pg-meta/:ref/types", async () => []);
+    .get("/platform/pg-meta/:ref/materialized-views", async () => [])
+    .get("/platform/pg-meta/:ref/publications", async () => [])
+    .get("/platform/pg-meta/:ref/types", async () => [])
+    .get("/platform/pg-meta/:ref/columns", async ({ params }) => {
+        const project = await getProjectOrThrow(params.ref);
+        const db = getProjectDb(project.database?.name || "postgres");
+        return await db`SELECT column_name as name, table_name, table_schema, data_type FROM information_schema.columns WHERE table_schema NOT IN ('information_schema', 'pg_catalog')`;
+    }, { params: t.Object({ ref: t.String() }) })
+    .get("/platform/pg-meta/:ref/primary-keys", async ({ params }) => {
+        const project = await getProjectOrThrow(params.ref);
+        const db = getProjectDb(project.database?.name || "postgres");
+        return await db`SELECT kcu.column_name, kcu.table_name, kcu.table_schema FROM information_schema.table_constraints tc JOIN information_schema.key_column_usage kcu ON tc.constraint_name = kcu.constraint_name WHERE tc.constraint_type = 'PRIMARY KEY' AND kcu.table_schema NOT IN ('information_schema', 'pg_catalog')`;
+    }, { params: t.Object({ ref: t.String() }) })
+    .get("/platform/pg-meta/:ref/relationships", async () => []);
 
 // --- V1 API Routes ---
 export const studioV1Routes = new Elysia({ prefix: "/v1" })
@@ -119,7 +130,30 @@ export const studioV1Routes = new Elysia({ prefix: "/v1" })
     })
     .get("/projects/:ref", async ({ params }) => {
         const project = await getProjectOrThrow(params.ref);
-        return toPlatformProject(project);
+        return {
+            ...toPlatformProject(project),
+            // Additional fields for Project Settings menu
+            database: {
+                identifier: project.database?.name || `supa_${project.ref}`,
+                host: "localhost",
+                port: 5432,
+                version: "15.0",
+                postgres_engine: "15.0",
+                release_channel: "stable",
+            },
+            services: [
+                { name: "PostgreSQL", status: "ACTIVE_HEALTHY" },
+                { name: "PostgREST", status: "ACTIVE_HEALTHY" },
+                { name: "GoTrue", status: "ACTIVE_HEALTHY" },
+                { name: "Realtime", status: "ACTIVE_HEALTHY" },
+                { name: "Storage", status: "ACTIVE_HEALTHY" },
+                { name: "Kong", status: "ACTIVE_HEALTHY" },
+            ],
+            endpoint: `https://${project.ref}.default.cn`,
+            anon_key: project.anon_key || "anon-key",
+            service_key: project.service_key || "service-key",
+            jwt_secret: project.jwt_secret || "jwt-secret",
+        };
     }, { params: t.Object({ ref: t.String() }) })
     .get("/projects/:ref/api-keys", async ({ params }) => {
         const project = await getProjectOrThrow(params.ref);
@@ -134,6 +168,38 @@ export const studioV1Routes = new Elysia({ prefix: "/v1" })
     .get("/projects/:ref/config/auth", async ({ params }) => {
         const project = await getProjectOrThrow(params.ref);
         return { jwt_secret: project.jwt_secret || "secret", enabled: true };
+    }, { params: t.Object({ ref: t.String() }) })
+    .get("/projects/:ref/config/database", async ({ params }) => {
+        const project = await getProjectOrThrow(params.ref);
+        return {
+            db_host: "localhost",
+            db_name: project.database?.name || `supa_${project.ref}`,
+            db_port: 5432,
+            db_user: "postgres",
+            db_ssl: false,
+        };
+    }, { params: t.Object({ ref: t.String() }) })
+    .get("/projects/:ref/config/storage", async () => ({ enabled: true }))
+    .get("/projects/:ref/config/realtime", async () => ({ enabled: true }))
+    .get("/projects/:ref/config/functions", async () => ({ enabled: true }))
+    .get("/projects/:ref/config/api", async ({ params }) => {
+        const project = await getProjectOrThrow(params.ref);
+        return {
+            api_url: `https://${project.ref}.default.cn`,
+            db_schema: "public",
+            db_anon_role: "anon",
+        };
+    }, { params: t.Object({ ref: t.String() }) })
+    .get("/projects/:ref/settings", async ({ params }) => {
+        const project = await getProjectOrThrow(params.ref);
+        return {
+            name: project.name,
+            ref: project.ref,
+            organization_id: "default",
+            region: "local",
+            cloud_provider: "localhost",
+            status: "ACTIVE_HEALTHY",
+        };
     }, { params: t.Object({ ref: t.String() }) });
 
 // --- Auth Routes ---
