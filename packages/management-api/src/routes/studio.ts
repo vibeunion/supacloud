@@ -8,8 +8,8 @@ import { db, getProjectDb } from "../db";
  * 解决 Studio 随机 ID 问题。
  */
 const getProjectOrThrow = async (ref: string) => {
-    // 强制匹配：如果 ref 看起来像 Studio 随机生成的 10 位字符标识符，或者找不到该项目，则回退到第一个项目
-    const isRandomRef = /^[a-z]{10}$/.test(ref);
+    // 强制匹配：如果 ref 看起来像 Studio 随机生成的 10 位字符标识符，或者是 "default"，或者找不到该项目，则回退到第一个项目
+    const isRandomRef = /^[a-z0-9]{10}$/.test(ref) || ref === "default";
     try {
         let project: any = null;
         if (!isRandomRef) {
@@ -123,6 +123,22 @@ export const studioRoutes = new Elysia()
         };
     }, { params: t.Object({ ref: t.String() }) })
     .get("/platform/projects/:ref/analytics/log-drains", () => ({ data: [] }))
+    .get("/platform/projects/:ref/settings", async () => ({
+        // 提供足够的字段防止前端崩溃
+        database: { pool_mode: "transaction" },
+        auth: { site_url: "http://localhost:3000" },
+        api: { port: 9090 }
+    }))
+    .get("/platform/projects/:ref/databases", async ({ params }) => {
+        const project = await getProjectOrThrow(params.ref);
+        return [{
+            id: project.id,
+            name: project.database?.name || "postgres",
+            host: "localhost",
+            port: 5432,
+            status: "ACTIVE_HEALTHY"
+        }];
+    }, { params: t.Object({ ref: t.String() }) })
 
     // --- pg-meta (platform) ---
     .get("/platform/pg-meta/:ref/tables", async ({ params }) => {
