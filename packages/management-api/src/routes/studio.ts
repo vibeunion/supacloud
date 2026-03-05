@@ -57,17 +57,17 @@ export const studioRoutes = new Elysia()
         };
     })
     .get("/config", async () => ({ platform_name: "SupaCloud", features: { analytics: true, storage: true, functions: true } }))
-    .get("/organizations", async () => [{ id: "esgfarm", name: "esgfarm", slug: "esgfarm" }])
-    .get("/organizations/:slug", async () => ({ id: "esgfarm", name: "esgfarm", slug: "esgfarm", plan: "pro" }))
-    .get("/projects", async () => {
+    .get("/platform/organizations", async () => [{ id: "esgfarm", name: "esgfarm", slug: "esgfarm" }])
+    .get("/platform/organizations/:slug", async () => ({ id: "esgfarm", name: "esgfarm", slug: "esgfarm", plan: "pro" }))
+    .get("/platform/projects", async () => {
         const projects = await projectService.listProjects();
         return projects.map(toPlatformProject);
     })
-    .get("/projects/:ref", async ({ params }) => {
+    .get("/platform/projects/:ref", async ({ params }) => {
         const project = await getProjectOrThrow(params.ref);
         return toPlatformProject(project);
     }, { params: t.Object({ ref: t.String() }) })
-    .get("/projects/:ref/config", async ({ params }) => {
+    .get("/platform/projects/:ref/config", async ({ params }) => {
         const project = await getProjectOrThrow(params.ref);
         return {
             project_id: project.id, jwt_secret: project.jwt_secret || "secret",
@@ -75,14 +75,14 @@ export const studioRoutes = new Elysia()
             db_user: "postgres", db_pass: "postgres", db_port: 5432
         };
     }, { params: t.Object({ ref: t.String() }) })
-    .get("/projects/:ref/api-keys", async ({ params }) => {
+    .get("/platform/projects/:ref/api-keys", async ({ params }) => {
         const project = await getProjectOrThrow(params.ref);
         return [
             { name: "anon", api_key: project.anon_key || "anon" },
             { name: "service_role", api_key: project.service_key || "service" }
         ];
     }, { params: t.Object({ ref: t.String() }) })
-    .get("/projects/:ref/analytics/log-drains", async () => ({ data: [] }))
+    .get("/platform/projects/:ref/analytics/log-drains", async () => ({ data: [] }))
 
     // pg-meta 接口
     .get("/pg-meta/:ref/tables", async ({ params }) => {
