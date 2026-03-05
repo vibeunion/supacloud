@@ -1,4 +1,13 @@
-import { describe, test, expect, beforeEach, spyOn } from "bun:test";
+import { describe, test, expect, beforeEach, mock } from "bun:test";
+
+const mockShell = {
+  execute: mock(() => Promise.resolve({ success: true, output: "" })),
+};
+
+mock.module("../../src/services/shell.service", () => ({
+  shellService: mockShell,
+}));
+
 import { DatabaseService } from "../../src/services/database.service";
 import { shellService } from "../../src/services/shell.service";
 
@@ -29,104 +38,104 @@ describe("DatabaseService", () => {
   });
 
   describe("createDatabase", () => {
-    test.skip("should return result object", async () => {
+    test("should return result object", async () => {
+      const mockResult = { success: true, output: "" };
+      mockShell.execute.mockResolvedValueOnce(mockResult);
+      
       const result = await databaseService.createDatabase("testref123", "testpass");
-      expect(result).toHaveProperty("success");
-      expect(typeof result.success).toBe("boolean");
+      expect(result.success).toBe(true);
+      expect(mockShell.execute).toHaveBeenCalledWith("db_manager.sh", ["create", "testref123", "testpass"]);
     });
   });
 
   describe("deleteDatabase", () => {
-    test.skip("should return result object", async () => {
+    test("should return result object", async () => {
+      const mockResult = { success: true, output: "" };
+      mockShell.execute.mockResolvedValueOnce(mockResult);
+
       const result = await databaseService.deleteDatabase("testref123");
-      expect(result).toHaveProperty("success");
-      expect(typeof result.success).toBe("boolean");
+      expect(result.success).toBe(true);
+      expect(mockShell.execute).toHaveBeenCalledWith("db_manager.sh", ["delete", "testref123"]);
     });
   });
 
   describe("checkStatus", () => {
-    test.skip("should return result with output", async () => {
+    test("should return result with output", async () => {
+      const mockResult = { success: true, output: "RUNNING" };
+      mockShell.execute.mockResolvedValueOnce(mockResult);
+
       const result = await databaseService.checkStatus("testref123");
-      expect(result).toHaveProperty("success");
-      expect(result).toHaveProperty("output");
+      expect(result.success).toBe(true);
+      expect(result.output).toBe("RUNNING");
+      expect(mockShell.execute).toHaveBeenCalledWith("db_manager.sh", ["status", "testref123"]);
     });
   });
 
   describe("getSecrets", () => {
     test("should return empty array when shell fails", async () => {
-      const spy = spyOn(shellService, "execute").mockResolvedValue({ success: false, output: "" });
+      mockShell.execute.mockResolvedValueOnce({ success: false, output: "" });
       const result = await databaseService.getSecrets("testref");
       expect(Array.isArray(result)).toBe(true);
-      spy.mockRestore();
     });
 
     test("should return parsed JSON when shell succeeds", async () => {
       const mockData = [{ name: "key1", value: "val1" }];
-      const spy = spyOn(shellService, "execute").mockResolvedValue({ success: true, output: JSON.stringify(mockData) });
+      mockShell.execute.mockResolvedValueOnce({ success: true, output: JSON.stringify(mockData) });
       const result = await databaseService.getSecrets("testref");
       expect(result).toEqual(mockData);
-      spy.mockRestore();
     });
 
     test("should return empty array when JSON parse fails", async () => {
-      const spy = spyOn(shellService, "execute").mockResolvedValue({ success: true, output: "invalid json" });
+      mockShell.execute.mockResolvedValueOnce({ success: true, output: "invalid json" });
       const result = await databaseService.getSecrets("testref");
       expect(Array.isArray(result)).toBe(true);
       expect(result.length).toBe(0);
-      spy.mockRestore();
     });
 
     test("should call shell service with correct args", async () => {
-      const spy = spyOn(shellService, "execute").mockResolvedValue({ success: true, output: "[]" });
+      mockShell.execute.mockResolvedValueOnce({ success: true, output: "[]" });
       await databaseService.getSecrets("myproj");
-      expect(spy).toHaveBeenCalledWith("key_manager.sh", ["list-secrets", "myproj"]);
-      spy.mockRestore();
+      expect(mockShell.execute).toHaveBeenCalledWith("key_manager.sh", ["list-secrets", "myproj"]);
     });
   });
 
   describe("upsertSecret", () => {
     test("should return true when shell succeeds", async () => {
-      const spy = spyOn(shellService, "execute").mockResolvedValue({ success: true, output: "" });
+      mockShell.execute.mockResolvedValueOnce({ success: true, output: "" });
       const result = await databaseService.upsertSecret("testref", "key1", "val1");
       expect(result).toBe(true);
-      spy.mockRestore();
     });
 
     test("should return false when shell fails", async () => {
-      const spy = spyOn(shellService, "execute").mockResolvedValue({ success: false, output: "" });
+      mockShell.execute.mockResolvedValueOnce({ success: false, output: "" });
       const result = await databaseService.upsertSecret("testref", "key1", "val1");
       expect(result).toBe(false);
-      spy.mockRestore();
     });
 
     test("should call shell service with correct args", async () => {
-      const spy = spyOn(shellService, "execute").mockResolvedValue({ success: true, output: "" });
+      mockShell.execute.mockResolvedValueOnce({ success: true, output: "" });
       await databaseService.upsertSecret("myproj", "mykey", "myval");
-      expect(spy).toHaveBeenCalledWith("key_manager.sh", ["set-secret", "myproj", "mykey", "myval"]);
-      spy.mockRestore();
+      expect(mockShell.execute).toHaveBeenCalledWith("key_manager.sh", ["set-secret", "myproj", "mykey", "myval"]);
     });
   });
 
   describe("deleteSecret", () => {
     test("should return true when shell succeeds", async () => {
-      const spy = spyOn(shellService, "execute").mockResolvedValue({ success: true, output: "" });
+      mockShell.execute.mockResolvedValueOnce({ success: true, output: "" });
       const result = await databaseService.deleteSecret("testref", "key1");
       expect(result).toBe(true);
-      spy.mockRestore();
     });
 
     test("should return false when shell fails", async () => {
-      const spy = spyOn(shellService, "execute").mockResolvedValue({ success: false, output: "" });
+      mockShell.execute.mockResolvedValueOnce({ success: false, output: "" });
       const result = await databaseService.deleteSecret("testref", "key1");
       expect(result).toBe(false);
-      spy.mockRestore();
     });
 
     test("should call shell service with correct args", async () => {
-      const spy = spyOn(shellService, "execute").mockResolvedValue({ success: true, output: "" });
+      mockShell.execute.mockResolvedValueOnce({ success: true, output: "" });
       await databaseService.deleteSecret("myproj", "mykey");
-      expect(spy).toHaveBeenCalledWith("key_manager.sh", ["delete-secret", "myproj", "mykey"]);
-      spy.mockRestore();
+      expect(mockShell.execute).toHaveBeenCalledWith("key_manager.sh", ["delete-secret", "myproj", "mykey"]);
     });
   });
 });
