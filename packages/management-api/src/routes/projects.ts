@@ -1,6 +1,7 @@
 import { Elysia, t } from "elysia";
 import { projectService } from "../services";
 import { gatewayService } from "../services/gateway.service";
+import { db, getProjectDb } from "../db";
 
 // Available regions list
 const AVAILABLE_REGIONS = [
@@ -54,6 +55,22 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
         set.status = 404;
         return { error: "Project not found" };
       }
+
+      // Get real database version
+      let dbVersion = "15.0";
+      let dbSize = 0;
+      try {
+        const projectDb = getProjectDb(project.database?.name || `supa_${project.ref}`);
+        const versionResult = await projectDb`SHOW server_version`;
+        if (versionResult[0]?.server_version) {
+          dbVersion = versionResult[0].server_version.split(" ")[0];
+        }
+        const sizeResult = await projectDb`SELECT pg_database_size(current_database()) as size`;
+        dbSize = sizeResult[0]?.size || 0;
+      } catch (e) {
+        // Ignore database errors
+      }
+
       // Return Studio-compatible format
       return {
         id: project.id,
@@ -70,9 +87,10 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
           identifier: project.database?.name || `supa_${project.ref}`,
           host: project.database?.host || "localhost",
           port: project.database?.port || 5432,
-          version: "15.0",
-          postgres_engine: "15.0",
+          version: dbVersion,
+          postgres_engine: dbVersion.split(".")[0] + "." + dbVersion.split(".")[1],
           release_channel: "stable",
+          size: dbSize,
         },
         services: [
           { name: "PostgreSQL", status: "ACTIVE_HEALTHY" },
