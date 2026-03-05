@@ -74,16 +74,26 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
         // Ignore database errors
       }
 
-      // Check service statuses (for now, return static status)
-      // TODO: Implement actual service health checks
-      const serviceStatuses = [
-        { name: "PostgreSQL", status: "ACTIVE_HEALTHY" },
-        { name: "PostgREST", status: "ACTIVE_HEALTHY" },
-        { name: "GoTrue", status: "ACTIVE_HEALTHY" },
-        { name: "Realtime", status: "ACTIVE_HEALTHY" },
-        { name: "Storage", status: "ACTIVE_HEALTHY" },
-        { name: "Kong", status: "ACTIVE_HEALTHY" },
-      ];
+      // Check service statuses using systemd
+      const checkServiceStatus = async (serviceName: string): Promise<string> => {
+        try {
+          const result = await Bun.$`systemctl is-active ${serviceName} 2>/dev/null || echo "inactive"`.quiet();
+          const status = result.text().trim();
+          return status === "active" ? "ACTIVE_HEALTHY" : "INACTIVE";
+        } catch {
+          return "INACTIVE";
+        }
+      };
+
+      const ref = project.ref;
+      const serviceStatuses = await Promise.all([
+        checkServiceStatus("postgresql").then(s => ({ name: "PostgreSQL", status: s })),
+        checkServiceStatus(`supacloud-pgrst@${ref}`).then(s => ({ name: "PostgREST", status: s })),
+        checkServiceStatus(`supacloud-gotrue@${ref}`).then(s => ({ name: "GoTrue", status: s })),
+        checkServiceStatus(`supacloud-realtime@${ref}`).then(s => ({ name: "Realtime", status: s })),
+        checkServiceStatus(`supacloud-storage@${ref}`).then(s => ({ name: "Storage", status: s })),
+        checkServiceStatus("kong").then(s => ({ name: "Kong", status: s })),
+      ]);
 
       // Return Studio-compatible format
       return {
