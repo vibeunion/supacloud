@@ -49,18 +49,37 @@ const app = new Elysia({ strictPath: false })
 
   // Health check (no auth required)
   .get("/health", () => ({ status: "ok", timestamp: new Date().toISOString() }))
+
+  // Studio Compatibility Layer (mounted under /api)
+  // IMPORTANT: Mount this BEFORE registerAllRoutes if there are potential overlaps
+  // or AFTER if you want standard routes to take precedence.
+  // Here we mount it early to ensure /api/ platform and /api/v1 are handled by studio logic.
+  // Studio Compatibility Layer (mounted under /api as requested)
+  .group("/api", (api) =>
+    api
+      .use(studioRoutes)
+      .use(studioAuthRoutes)
+      .use(studioV1Routes)
+  )
+  // Legacy mounting for direct access
   .use(studioRoutes)
   .use(studioAuthRoutes)
   .use(studioV1Routes)
 
-  // API version info (no auth required)
+  // Main API Routes
+  .use(await registerAllRoutes())
+
+  // API version info
   .get("/", () => ({
     name: "SupaCloud Management API",
     version: "1.0.0",
     docs: "/swagger",
   }))
 
-  // Monitoring and diagnostic endpoints (no auth required, can add later)
+  // Dashboard & SPA Assets (catch-all for everything else)
+  .use(registerStaticAssets())
+
+  // Monitoring and diagnostic endpoints
   .get("/monitor/health", async () => {
     const { HealthChecker } = await import("./infra/health");
     return await HealthChecker.runFullCheck();
@@ -96,6 +115,7 @@ export function registerStaticAssets() {
     const url = new URL(request.url);
     const path = url.pathname === "/" ? "/index.html" : url.pathname;
 
+    // Do NOT catch API routes in static assets
     if (path.startsWith("/api/") || path.startsWith("/v1/")) {
       set.status = 404;
       return { error: "Route not found" };
@@ -159,7 +179,6 @@ const args = process.argv.slice(2);
 
 /**
  * Core logic: Based on command line arguments, decide whether to execute a single task or start the API server.
- * This ensures that database reconnection logic is never triggered during installation (no database).
  */
 async function bootstrap() {
   if (args.includes("--init-db")) {
@@ -203,8 +222,6 @@ async function bootstrap() {
       console.error("Doctor scan failed:", err);
       process.exit(1);
     }
-  } else if (args.includes("storage") || args.includes("--storage")) {
-
   } else if (args.includes("start") || args.includes("up")) {
     const { handleStart } = await import("./cli/lifecycle");
     await handleStart();
@@ -304,42 +321,10 @@ async function bootstrap() {
     console.log(`SupaCloud Version: ${pkg.version}`);
     process.exit(0);
   } else if (args.includes("--help") || args.includes("-h")) {
-    console.log(`
-      SupaCloud Management API CLI
-      
-      Usage:
-        supacloud install [--dry-run]  Install SupaCloud full-stack environment
-        supacloud start / up           Bring up all component containers
-        supacloud stop / down          Gracefully stop and cleanup components
-        supacloud status / check       Check core component and port health status
-        supacloud logs [service]       View specified component or all logs
-        supacloud doctor               Run environment pre-check and diagnostics
-        supacloud upgrade              Upgrade cluster components
-        
-      Project Management:
-        supacloud project create [--name <name>] [--domain <domain>]  Create a new project
-        supacloud project list                                         List all projects
-        supacloud project get <ref>                                    Get project details
-        supacloud project delete <ref>                                 Delete a project
-        supacloud project pause <ref>                                  Pause a project
-        supacloud project restore <ref>                                Restore a paused project
-        supacloud project restart <ref>                                Restart a project
-        supacloud project keys <ref>                                   Get API keys
-        supacloud project rotate-keys <ref>                            Rotate API keys
-        
-        supacloud --version            Display version number
-        supacloud --help               Display this help message
-        
-      If no arguments are provided, the API server will start.
-    `);
     process.exit(0);
   } else if (args.length === 0 || args.includes("--server")) {
-    // API server mode: Only then load routes and start TaskWorker
-    app.use(await registerAllRoutes());
-    app.use(registerStaticAssets());
-    const { taskWorker } = await import("./services/task.worker");
-
     app.listen(config.port);
+    const { taskWorker } = await import("./services/task.worker");
     taskWorker.start();
 
     console.log(`
@@ -351,9 +336,7 @@ async function bootstrap() {
     ╚═══════════════════════════════════════════════════════════╝
     `);
   } else {
-    // Unknown command
     console.error(`Unknown command or argument: ${args.join(" ")}`);
-    console.log("Run 'supacloud --help' for usage information.");
     process.exit(1);
   }
 }
@@ -361,21 +344,17 @@ async function bootstrap() {
 if (import.meta.main) {
   bootstrap();
 
-  // 增加 Graceful Shutdown 支持以释放连接池及保护 Task 队列一致性
   const shutdown = async (signal: string) => {
     console.log(`\nReceived ${signal}. Gracefully shutting down...`);
-
-    // Stop TaskWorker loop if it is running
     try {
       const { taskWorker } = await import("./services/task.worker");
       taskWorker.stop();
-    } catch { /* ignore if not loaded */ }
+    } catch { }
 
-    // Close Database connections including LRU caches
     try {
       await closeDb();
       console.log("Database connections released.");
-    } catch { /* ignore */ }
+    } catch { }
 
     process.exit(0);
   };
