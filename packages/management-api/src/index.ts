@@ -50,23 +50,20 @@ const app = new Elysia({ strictPath: false })
   // Health check (no auth required)
   .get("/health", () => ({ status: "ok", timestamp: new Date().toISOString() }))
 
-  // Studio Compatibility Layer (mounted under /api)
-  // IMPORTANT: Mount this BEFORE registerAllRoutes if there are potential overlaps
-  // or AFTER if you want standard routes to take precedence.
-  // Here we mount it early to ensure /api/ platform and /api/v1 are handled by studio logic.
-  // Studio Compatibility Layer (mounted under /api as requested)
+  // Studio Compatibility Layer (mounted BEFORE main routes to override)
+  // This ensures /api/platform/* and /api/v1/* Studio-specific routes take precedence
   .group("/api", (api) =>
     api
       .use(studioRoutes)
       .use(studioAuthRoutes)
       .use(studioV1Routes)
   )
-  // Legacy mounting for direct access
+  // Direct mounting for internal access
   .use(studioRoutes)
   .use(studioAuthRoutes)
   .use(studioV1Routes)
 
-  // Main API Routes
+  // Main API Routes (mounted after Studio routes)
   .use(await registerAllRoutes())
 
   // API version info
