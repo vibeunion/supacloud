@@ -5,12 +5,16 @@ import { db, getProjectDb } from "../db";
 
 /**
  * 核心助手：处理项目引用。
- * 关键点：Studio 可能会随机生成一个 ref（如 pyayjnscjk）。
  * 解决 Studio 随机 ID 问题。
  */
 const getProjectOrThrow = async (ref: string) => {
+    // 强制匹配：如果 ref 看起来像 Studio 随机生成的 10 位字符标识符，或者找不到该项目，则回退到第一个项目
+    const isRandomRef = /^[a-z]{10}$/.test(ref);
     try {
-        let project: any = await projectService.getProject(ref);
+        let project: any = null;
+        if (!isRandomRef) {
+            project = await projectService.getProject(ref);
+        }
         if (!project) {
             const projects = await projectService.listProjects();
             project = projects[0];
@@ -24,7 +28,7 @@ const getProjectOrThrow = async (ref: string) => {
     }
 };
 
-const toPlatformProject = (project: any) => ({
+const formatProject = (project: any) => ({
     id: project.id,
     ref: project.ref,
     name: project.name,
@@ -34,40 +38,82 @@ const toPlatformProject = (project: any) => ({
     cloud_provider: "localhost",
     inserted_at: project.created_at,
     updated_at: project.updated_at || null,
-    // 以下字段对激活 Studio 菜单至关重要
-    services: ["database", "auth", "storage",    // 数据库连接配置
-        db_host: "localhost",
-        db_name: project.database?.name || `supa_${project.ref}`,
-        db_port: 5432,
-        db_user: "postgres",
-        db_pass: "postgres",
-        db_ssl: false,
+    // 关键服务：告知 Studio 启用哪些功能卡片
+    services: [
+        { name: "database", status: "ACTIVE_HEALTHY" },
+        { name: "auth", status: "ACTIVE_HEALTHY" },
+        { name: "storage", status: "ACTIVE_HEALTHY" },
+        { name: "functions", status: "ACTIVE_HEALTHY" },
+        { name: "realtime", status: "ACTIVE_HEALTHY" }
+    ],
+    // 数据库连接配置
+    db_host: "localhost",
+    db_name: project.database?.name || `supa_${project.ref}`,
+    db_port: 5432,
+    db_user: "postgres",
+    db_pass: "postgres",
+    db_ssl: false,
 });
 
-// --- Platform API Routes ---
+/**
+ * 统一导出所有 Studio 兼容路由。
+ * 注意：所有路径都包含在 /api 前缀下（在 index.ts 中挂载）。
+ * 这里的路径从 /platform 或 /v1 开始。
+ */
 export const studioRoutes = new Elysia()
-    .get("/platform/auth/user", async () => ({
-        id: "1", email: "admin@supacloud.local", aud: "authenticated", role: "authenticated",
-        user_metadata: { first_name: "Admin" }
-    }))
+    // --- Auth & Profile ---
+    .get("/auth/session", () => ({ user: { id: "1", email: "admin@supacloud.local" } }))
+    .get("/auth/user", () => ({ id: "1", email: "admin@supacloud.local" }))
+    .get("/platform/auth/user", () => ({ id: "1", email: "admin@supacloud.local", aud: "authenticated", role: "authenticated" }))
     .get("/platform/profile", async () => {
         const projects = await projectService.listProjects();
         return {
             id: 1, primary_email: "admin@supacloud.local",
-            organizations: [{ id: "default", name: "default", slug: "default", projects: projects.map(toPlatformProject) }]
+            organizations: [{ id: "default", name: "default", slug: "default", projects: projects.map(formatProject) }]
         };
     })
-    .get("/config", async () => ({ platform_name: "SupaCloud", features: { analytics: true, storage: true, functions: true } }))
-    .get("/platform/organizations", async () => [{ id: "default", name: "default", slug: "default" }])
-    .get("/platform/organizations/:slug", async () => ({ id: "default", name: "default", slug: "default", plan: "pro" }))
+    .get("/platform/config", () => ({ platform_name: "SupaCloud", features: { analytics: true, storage: true, functions: true } }))
+
+    // --- Organizations ---
+    .get("/v1/organizations", () => [{ id: "default", name: "default", slug: "default" }])
+    .get("/platform/organizations", () => [{ id: "default", name: "default", slug: "default" }])
+    .get("/platform/organizations/:slug", () => ({ id: "default", name: "default", slug: "default", plan: "pro" }))
+
+    // --- Projects (v1) ---
+    .get("/v1/projects", async () => {
+        const projects = await projectService.listProjects();
+        return projects.map(p => ({ id: p.id, ref: p.ref, name: p.name, organization_id: "default" }));
+    })
+    .get("/v1/projects/:ref", async ({ params }) => {
+        const project = await getProjectOrThrow(params.ref);
+        return formatProject(project);
+    }, { params: t.Object({ ref: t.String() }) })
+    .get("/v1/projects/:ref/api-keys", async ({ params }) => {
+        const project = await getProjectOrThrow(params.ref);
+        return [
+            { name: "anon", api_key: project.anon_key || "anon" },
+            { name: "service_role", api_key: project.service_key || "service" }
+        ];
+    }, { params: t.Object({ ref: t.String() }) })
+    .get("/v1/projects/:ref/functions", () => [])
+    .get("/v1/projects/:ref/edge-functions", () => [])
+    .get("/v1/projects/:ref/analytics/log-drains", () => ({ data: [] }))
+    .get("/v1/projects/:ref/permissions", () => [])
+    .get("/v1/projects/:ref/config/auth", async ({ params }) => {
+        const project = await getProjectOrThrow(params.ref);
+        return { jwt_secret: project.jwt_secret || "secret", enabled: true };
+    }, { params: t.Object({ ref: t.String() }) })
+
+    // --- Projects (platform) ---
     .get("/platform/projects", async () => {
         const projects = await projectService.listProjects();
-        return projects.map(toPlatformProject);
+        return projects.map(formatProject);
     })
     .get("/platform/projects/:ref", async ({ params }) => {
         const project = await getProjectOrThrow(params.ref);
-        return toPlatformProject(project);
+        return formatProject(project);
     }, { params: t.Object({ ref: t.String() }) })
+    .get("/platform/projects/:ref/permissions", () => [])
     .get("/platform/projects/:ref/config", async ({ params }) => {
         const project = await getProjectOrThrow(params.ref);
         return {
@@ -76,16 +122,9 @@ export const studioRoutes = new Elysia()
             db_user: "postgres", db_pass: "postgres", db_port: 5432
         };
     }, { params: t.Object({ ref: t.String() }) })
-    .get("/platform/projects/:ref/api-keys", async ({ params }) => {
-        const project = await getProjectOrThrow(params.ref);
-        return [
-            { name: "anon", api_key: project.anon_key || "anon" },
-            { name: "service_role", api_key: project.service_key || "service" }
-        ];
-    }, { params: t.Object({ ref: t.String() }) })
-    .get("/platform/projects/:ref/analytics/log-drains", async () => ({ data: [] }))
+    .get("/platform/projects/:ref/analytics/log-drains", () => ({ data: [] }))
 
-    // pg-meta 接口 (Studio 请求 /api/platform/pg-meta/:ref/...)
+    // --- pg-meta (platform) ---
     .get("/platform/pg-meta/:ref/tables", async ({ params }) => {
         const project = await getProjectOrThrow(params.ref);
         const db = getProjectDb(project.database?.name || "postgres");
@@ -107,103 +146,11 @@ export const studioRoutes = new Elysia()
         const db = getProjectDb(project.database?.name || "postgres");
         return await db`SELECT schema_name as id, schema_name as name FROM information_schema.schemata WHERE schema_name NOT IN ('information_schema', 'pg_catalog')`;
     }, { params: t.Object({ ref: t.String() }) })
-    .get("/platform/pg-meta/:ref/materialized-views", async () => [])
-    .get("/platform/pg-meta/:ref/publications", async () => [])
-    .get("/platform/pg-meta/:ref/types", async () => [])
-    .get("/platform/pg-meta/:ref/columns", async ({ params }) => {
-        const project = await getProjectOrThrow(params.ref);
-        const db = getProjectDb(project.database?.name || "postgres");
-        return await db`SELECT column_name as name, table_name, table_schema, data_type FROM information_schema.columns WHERE table_schema NOT IN ('information_schema', 'pg_catalog')`;
-    }, { params: t.Object({ ref: t.String() }) })
-    .get("/platform/pg-meta/:ref/primary-keys", async ({ params }) => {
-        const project = await getProjectOrThrow(params.ref);
-        const db = getProjectDb(project.database?.name || "postgres");
-        return await db`SELECT kcu.column_name, kcu.table_name, kcu.table_schema FROM information_schema.table_constraints tc JOIN information_schema.key_column_usage kcu ON tc.constraint_name = kcu.constraint_name WHERE tc.constraint_type = 'PRIMARY KEY' AND kcu.table_schema NOT IN ('information_schema', 'pg_catalog')`;
-    }, { params: t.Object({ ref: t.String() }) })
-    .get("/platform/pg-meta/:ref/relationships", async () => []);
+    .get("/platform/pg-meta/:ref/materialized-views", () => [])
+    .get("/platform/pg-meta/:ref/publications", () => [])
+    .get("/platform/pg-meta/:ref/types", () => [])
+    .get("/platform/pg-meta/:ref/query", async () => ({ rows: [] }));
 
-// --- V1 API Routes ---
-export const studioV1Routes = new Elysia({ prefix: "/v1" })
-    .get("/organizations", async () => [{ id: "default", name: "default", slug: "default" }])
-    .get("/projects", async () => {
-        const projects = await projectService.listProjects();
-        return projects.map(p => ({ id: p.id, ref: p.ref, name: p.name, organization_id: "default" }));
-    })
-    .get("/projects/:ref", async ({ params }) => {
-        const project = await getProjectOrThrow(params.ref);
-        return {
-            ...toPlatformProject(project),
-            // Additional fields for Project Settings menu
-            database: {
-                identifier: project.database?.name || `supa_${project.ref}`,
-                host: "localhost",
-                port: 5432,
-                version: "15.0",
-                postgres_engine: "15.0",
-                release_channel: "stable",
-            },
-            services: [
-                { name: "PostgreSQL", status: "ACTIVE_HEALTHY" },
-                { name: "PostgREST", status: "ACTIVE_HEALTHY" },
-                { name: "GoTrue", status: "ACTIVE_HEALTHY" },
-                { name: "Realtime", status: "ACTIVE_HEALTHY" },
-                { name: "Storage", status: "ACTIVE_HEALTHY" },
-                { name: "Kong", status: "ACTIVE_HEALTHY" },
-            ],
-            endpoint: `https://${project.ref}.default.cn`,
-            anon_key: project.anon_key || "anon-key",
-            service_key: project.service_key || "service-key",
-            jwt_secret: project.jwt_secret || "jwt-secret",
-        };
-    }, { params: t.Object({ ref: t.String() }) })
-    .get("/projects/:ref/api-keys", async ({ params }) => {
-        const project = await getProjectOrThrow(params.ref);
-        return [
-            { name: "anon", api_key: project.anon_key || "anon" },
-            { name: "service_role", api_key: project.service_key || "service" }
-        ];
-    }, { params: t.Object({ ref: t.String() }) })
-    .get("/projects/:ref/functions", async () => [])
-    .get("/projects/:ref/edge-functions", async () => [])
-    .get("/projects/:ref/analytics/log-drains", async () => ({ data: [] }))
-    .get("/projects/:ref/config/auth", async ({ params }) => {
-        const project = await getProjectOrThrow(params.ref);
-        return { jwt_secret: project.jwt_secret || "secret", enabled: true };
-    }, { params: t.Object({ ref: t.String() }) })
-    .get("/projects/:ref/config/database", async ({ params }) => {
-        const project = await getProjectOrThrow(params.ref);
-        return {
-            db_host: "localhost",
-            db_name: project.database?.name || `supa_${project.ref}`,
-            db_port: 5432,
-            db_user: "postgres",
-            db_ssl: false,
-        };
-    }, { params: t.Object({ ref: t.String() }) })
-    .get("/projects/:ref/config/storage", async () => ({ enabled: true }))
-    .get("/projects/:ref/config/realtime", async () => ({ enabled: true }))
-    .get("/projects/:ref/config/functions", async () => ({ enabled: true }))
-    .get("/projects/:ref/config/api", async ({ params }) => {
-        const project = await getProjectOrThrow(params.ref);
-        return {
-            api_url: `https://${project.ref}.default.cn`,
-            db_schema: "public",
-            db_anon_role: "anon",
-        };
-    }, { params: t.Object({ ref: t.String() }) })
-    .get("/projects/:ref/settings", async ({ params }) => {
-        const project = await getProjectOrThrow(params.ref);
-        return {
-            name: project.name,
-            ref: project.ref,
-            organization_id: "default",
-            region: "local",
-            cloud_provider: "localhost",
-            status: "ACTIVE_HEALTHY",
-        };
-    }, { params: t.Object({ ref: t.String() }) });
-
-// --- Auth Routes ---
-export const studioAuthRoutes = new Elysia({ prefix: "/auth" })
-    .get("/session", async () => ({ user: { id: "1", email: "admin@supacloud.local" } }))
-    .get("/user", async () => ({ id: "1", email: "admin@supacloud.local" }));
+// Backward compatibility exports
+export const studioV1Routes = studioRoutes;
+export const studioAuthRoutes = studioRoutes;
