@@ -1,0 +1,46 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    name: Build and Release
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        working-directory: packages/management-api
+        run: bun install
+
+      - name: Build all platforms
+        working-directory: packages/management-api
+        run: |
+          bun run build:amd64
+          bun run build:arm64
+          bun run build:macos-amd64
+          bun run build:macos-arm64
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            packages/management-api/supacloud-linux-amd64
+            packages/management-api/supacloud-linux-arm64
+            packages/management-api/supacloud-macos-amd64
+            packages/management-api/supacloud-macos-arm64
+          generate_release_notes: true
