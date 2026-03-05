@@ -1,7 +1,8 @@
 import { Elysia, t } from "elysia";
 import { projectService } from "../services";
 import { logger } from "../utils/logger";
-import { db, getProjectDb } from "../db";
+import { db, getProjectDb, dbConfig } from "../db";
+import { pgMetaManager } from "../db/pg-meta";
 
 /**
  * 核心助手：处理项目引用。
@@ -141,32 +142,62 @@ export const studioRoutes = new Elysia()
     }, { params: t.Object({ ref: t.String() }) })
 
     // --- pg-meta (platform) ---
-    .get("/platform/pg-meta/:ref/tables", async ({ params }) => {
-        const project = await getProjectOrThrow(params.ref);
-        const db = getProjectDb(project.database?.name || "postgres");
-        const tables = await db`SELECT (table_schema || '.' || table_name) as id, table_name as name, table_schema as schema FROM information_schema.tables WHERE table_schema NOT IN ('information_schema', 'pg_catalog')`;
-        return tables;
-    }, { params: t.Object({ ref: t.String() }) })
-    .get("/platform/pg-meta/:ref/views", async ({ params }) => {
-        const project = await getProjectOrThrow(params.ref);
-        const db = getProjectDb(project.database?.name || "postgres");
-        return await db`SELECT (table_schema || '.' || table_name) as id, table_name as name, table_schema as schema FROM information_schema.views WHERE table_schema NOT IN ('information_schema', 'pg_catalog')`;
-    }, { params: t.Object({ ref: t.String() }) })
-    .get("/platform/pg-meta/:ref/roles", async ({ params }) => {
-        const project = await getProjectOrThrow(params.ref);
-        const db = getProjectDb(project.database?.name || "postgres");
-        return await db`SELECT oid as id, rolname as name FROM pg_roles`;
-    }, { params: t.Object({ ref: t.String() }) })
-    .get("/platform/pg-meta/:ref/schemas", async ({ params }) => {
-        const project = await getProjectOrThrow(params.ref);
-        const db = getProjectDb(project.database?.name || "postgres");
-        return await db`SELECT schema_name as id, schema_name as name FROM information_schema.schemata WHERE schema_name NOT IN ('information_schema', 'pg_catalog')`;
-    }, { params: t.Object({ ref: t.String() }) })
-    .get("/platform/pg-meta/:ref/materialized-views", () => [])
-    .get("/platform/pg-meta/:ref/publications", () => [])
-    .get("/platform/pg-meta/:ref/types", () => [])
-    .get("/platform/pg-meta/:ref/query", async () => ({ rows: [] }));
-
+    .guard({ params: t.Object({ ref: t.String() }) }, app => app
+        .derive(async ({ params, query }) => {
+            const project = await getProjectOrThrow(params.ref);
+            const dbUser = dbConfig.username || "postgres";
+            const dbPass = dbConfig.password || "postgres";
+            const dbHost = dbConfig.hostname || "127.0.0.1";
+            const dbPort = project.database?.port || 5432;
+            const dbName = project.database?.name || `supa_${project.ref}`;
+            const connectionString = `postgres://${dbUser}:${dbPass}@${dbHost}:${dbPort}/${dbName}`;
+            logger.info(`[PgMeta] Connecting with: postgres://${dbUser}:***@${dbHost}:${dbPort}/${dbName} (Pass length: ${dbPass?.length})`);
+            const meta = pgMetaManager.getInstance(connectionString);
+            const metaOpts = {
+                includeSystemSchemas: query.include_system_schemas === 'true',
+                limit: query.limit ? Number(query.limit) : undefined,
+                offset: query.offset ? Number(query.offset) : undefined,
+            };
+            return { meta, metaOpts };
+        })
+        .get("/platform/pg-meta/:ref/tables", async ({ meta, metaOpts }) => {
+            const { data, error } = await meta.tables.list(metaOpts);
+            if (error) return new Response(JSON.stringify(error), { status: 400 });
+            return data;
+        })
+        .get("/platform/pg-meta/:ref/views", async ({ meta, metaOpts }) => {
+            const { data, error } = await meta.views.list(metaOpts);
+            if (error) return new Response(JSON.stringify(error), { status: 400 });
+            return data;
+        })
+        .get("/platform/pg-meta/:ref/roles", async ({ meta, metaOpts }) => {
+            const { data, error } = await meta.roles.list(metaOpts);
+            if (error) return new Response(JSON.stringify(error), { status: 400 });
+            return data;
+        })
+        .get("/platform/pg-meta/:ref/schemas", async ({ meta, metaOpts }) => {
+            const { data, error } = await meta.schemas.list(metaOpts);
+            if (error) return new Response(JSON.stringify(error), { status: 400 });
+            return data;
+        })
+        .get("/platform/pg-meta/:ref/materialized-views", async ({ meta, metaOpts }) => {
+            const { data, error } = await meta.materializedViews.list(metaOpts);
+            if (error) return new Response(JSON.stringify(error), { status: 400 });
+            return data;
+        })
+        .get("/platform/pg-meta/:ref/publications", async ({ meta, metaOpts }) => {
+            const { data, error } = await meta.publications.list(metaOpts);
+            if (error) return new Response(JSON.stringify(error), { status: 400 });
+            return data;
+        })
+        .get("/platform/pg-meta/:ref/types", async ({ meta, metaOpts }) => {
+            const { data, error } = await meta.types.list(metaOpts);
+            if (error) return new Response(JSON.stringify(error), { status: 400 });
+            return data;
+        })
+        // Query usually uses POST, but we proxy GET for specific checks
+        .get("/platform/pg-meta/:ref/query", async () => ({ rows: [] }))
+    );
 // Backward compatibility exports
 export const studioV1Routes = studioRoutes;
 export const studioAuthRoutes = studioRoutes;
