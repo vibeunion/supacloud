@@ -1,4 +1,9 @@
-import { describe, it, expect, beforeAll } from "bun:test";
+import { describe, it, expect, beforeAll, mock } from "bun:test";
+
+mock.module("../src/utils/retry", () => ({
+    withRetry: (name: string, fn: any) => fn(),
+}));
+
 import { app as baseApp, registerAllRoutes } from "../src/index";
 
 describe("Management API Integration Tests", () => {
