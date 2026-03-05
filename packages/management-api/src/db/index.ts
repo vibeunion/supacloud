@@ -12,7 +12,7 @@ function parseDatabaseUrl(url: string) {
   return { hostname, port: parseInt(port, 10), database, username, password };
 }
 
-const dbConfig = parseDatabaseUrl(config.databaseUrl);
+export const dbConfig = parseDatabaseUrl(config.databaseUrl);
 
 // 创建数据库连接 - 使用显式配置确保数据库名正确
 export const sql = new SQL({
