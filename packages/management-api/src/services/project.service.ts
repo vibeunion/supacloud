@@ -44,6 +44,10 @@ export interface ProjectResponse {
 export interface ProjectDetailResponse extends ProjectResponse {
   config: Record<string, unknown>;
   updated_at: Date;
+  // API Keys for Studio compatibility
+  anon_key?: string;
+  service_key?: string;
+  jwt_secret?: string;
 }
 
 export interface BackupResponse {
@@ -379,6 +383,10 @@ export class ProjectService {
       ...this.toResponse(project),
       config: project.config,
       updated_at: project.updated_at,
+      // API Keys for Studio compatibility
+      anon_key: project.anon_key,
+      service_key: project.service_role_key,
+      jwt_secret: project.jwt_secret,
     };
   }
 

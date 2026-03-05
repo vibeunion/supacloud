@@ -101,9 +101,9 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
           { name: "Kong", status: "ACTIVE_HEALTHY" },
         ],
         endpoint: project.api?.url || `https://${project.ref}.localhost`,
-        anon_key: project.anon_key || "anon-key",
-        service_key: project.service_key || "service-key",
-        jwt_secret: project.jwt_secret || "jwt-secret",
+        anon_key: project.anon_key,
+        service_key: project.service_key,
+        jwt_secret: project.jwt_secret,
         // Original fields for backward compatibility
         api: project.api,
         studio: project.studio,
