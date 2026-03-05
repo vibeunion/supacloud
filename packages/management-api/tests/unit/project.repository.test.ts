@@ -1,11 +1,15 @@
 import { describe, test, expect, mock, beforeEach, afterEach } from "bun:test";
 
 // Mock the SQL module
-const mockSql = mock(() => Promise.resolve([]));
+const mockSql: any = mock(() => Promise.resolve([]));
 mockSql.unsafe = mock(() => Promise.resolve([]));
 
 mock.module("../../src/db", () => ({
   sql: mockSql,
+}));
+
+mock.module("../../src/utils/retry", () => ({
+  withRetry: (_name: string, fn: Function) => fn(),
 }));
 
 // Import after mocking
@@ -17,6 +21,7 @@ describe("ProjectRepository", () => {
   const mockProject = {
     id: "uuid-test123",
     ref: "test123",
+    organization_id: "default",
     name: "Test Project",
     db_name: "supa_test123",
     db_user: "role_test123",
@@ -38,6 +43,7 @@ describe("ProjectRepository", () => {
   beforeEach(() => {
     repository = new ProjectRepository();
     mockSql.mockClear();
+    mockSql.unsafe.mockClear();
   });
 
   describe("findAll", () => {
