@@ -45,7 +45,7 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     }
   )
 
-  // Get project details
+  // Get project details (Studio-compatible format)
   .get(
     "/:ref",
     async ({ params, set }) => {
@@ -54,7 +54,43 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
         set.status = 404;
         return { error: "Project not found" };
       }
-      return project;
+      // Return Studio-compatible format
+      return {
+        id: project.id,
+        ref: project.ref,
+        name: project.name,
+        status: project.status?.toUpperCase() || "ACTIVE_HEALTHY",
+        region: project.region || "local",
+        organization_id: project.organization_id || "esgfarm",
+        cloud_provider: project.cloud_provider || "localhost",
+        created_at: project.created_at,
+        updated_at: project.updated_at,
+        // Studio-specific fields
+        database: {
+          identifier: project.database?.name || `supa_${project.ref}`,
+          host: project.database?.host || "localhost",
+          port: project.database?.port || 5432,
+          version: "15.0",
+          postgres_engine: "15.0",
+          release_channel: "stable",
+        },
+        services: [
+          { name: "PostgreSQL", status: "ACTIVE_HEALTHY" },
+          { name: "PostgREST", status: "ACTIVE_HEALTHY" },
+          { name: "GoTrue", status: "ACTIVE_HEALTHY" },
+          { name: "Realtime", status: "ACTIVE_HEALTHY" },
+          { name: "Storage", status: "ACTIVE_HEALTHY" },
+          { name: "Kong", status: "ACTIVE_HEALTHY" },
+        ],
+        endpoint: project.api?.url || `https://${project.ref}.localhost`,
+        anon_key: project.anon_key || "anon-key",
+        service_key: project.service_key || "service-key",
+        jwt_secret: project.jwt_secret || "jwt-secret",
+        // Original fields for backward compatibility
+        api: project.api,
+        studio: project.studio,
+        config: project.config,
+      };
     },
     {
       params: t.Object({
