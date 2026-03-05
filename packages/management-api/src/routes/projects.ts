@@ -87,12 +87,14 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
 
       const ref = project.ref;
       const serviceStatuses = await Promise.all([
-        checkServiceStatus("postgresql").then(s => ({ name: "PostgreSQL", status: s })),
+        checkServiceStatus("patroni").then(s => ({ name: "PostgreSQL", status: s })),
         checkServiceStatus(`supacloud-pgrst@${ref}`).then(s => ({ name: "PostgREST", status: s })),
         checkServiceStatus(`supacloud-gotrue@${ref}`).then(s => ({ name: "GoTrue", status: s })),
-        checkServiceStatus(`supacloud-realtime@${ref}`).then(s => ({ name: "Realtime", status: s })),
-        checkServiceStatus(`supacloud-storage@${ref}`).then(s => ({ name: "Storage", status: s })),
-        checkServiceStatus("kong").then(s => ({ name: "Kong", status: s })),
+        // Realtime and Storage are optional, check if service exists
+        checkServiceStatus(`supacloud-realtime@${ref}`).then(s => ({ name: "Realtime", status: s })).catch(() => ({ name: "Realtime", status: "INACTIVE" })),
+        checkServiceStatus(`supacloud-storage@${ref}`).then(s => ({ name: "Storage", status: s })).catch(() => ({ name: "Storage", status: "INACTIVE" })),
+        // Kong is optional
+        checkServiceStatus("kong").then(s => ({ name: "Kong", status: s })).catch(() => ({ name: "Kong", status: "INACTIVE" })),
       ]);
 
       // Return Studio-compatible format
@@ -102,15 +104,15 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
         name: project.name,
         status: project.status?.toUpperCase() || "ACTIVE_HEALTHY",
         region: project.region || "local",
-        organization_id: project.organization_id || "default",
-        cloud_provider: project.cloud_provider || "localhost",
+        organization_id: (project as any).organization_id || "default",
+        cloud_provider: (project as any).cloud_provider || "localhost",
         created_at: project.created_at,
         updated_at: project.updated_at,
         // Studio-specific fields
         database: {
           identifier: project.database?.name || `supa_${project.ref}`,
           host: project.database?.host || "localhost",
-          port: project.database?.port || 5432,
+          port: (project.database as any)?.port || 5432,
           version: dbVersion,
           postgres_engine: dbVersion.split(".")[0] + "." + dbVersion.split(".")[1],
           release_channel: "stable",
