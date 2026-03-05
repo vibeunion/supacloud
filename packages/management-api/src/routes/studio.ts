@@ -35,12 +35,13 @@ const toPlatformProject = (project: any) => ({
     inserted_at: project.created_at,
     updated_at: project.updated_at || null,
     // 以下字段对激活 Studio 菜单至关重要
-    services: ["database", "auth", "storage", "functions"],
-    db_host: "localhost",
-    db_name: project.database?.name || `supa_${project.ref}`,
-    db_port: 5432,
-    db_user: "postgres",
-    db_ssl: false,
+    services: ["database", "auth", "storage",    // 数据库连接配置
+        db_host: "localhost",
+        db_name: project.database?.name || `supa_${project.ref}`,
+        db_port: 5432,
+        db_user: "postgres",
+        db_pass: "postgres",
+        db_ssl: false,
 });
 
 // --- Platform API Routes ---
