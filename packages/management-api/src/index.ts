@@ -1,6 +1,20 @@
 import { Elysia } from "elysia";
 import { swagger } from "@elysiajs/swagger";
 import { cors } from "@elysiajs/cors";
+
+try {
+  const envFile = Bun.file('/opt/supacloud/config.env');
+  if (envFile.size > 0) {
+    const text = await envFile.text();
+    const matches = text.matchAll(/^([A-Z0-9_]+)="?(.*?)"?$/gm);
+    for (const match of matches) {
+      if (!process.env[match[1]]) process.env[match[1]] = match[2];
+    }
+  }
+} catch (e) {
+  // Ignore
+}
+
 import { config } from "./config";
 import { authMiddleware } from "./middleware/auth";
 import { closeDb } from "./db";
@@ -137,7 +151,7 @@ export function registerStaticAssets() {
     try {
       const fs = await import("fs");
       const filePath = `${WEB_CONSOLE_DIR}${path}`;
-      
+
       if (fs.existsSync(filePath)) {
         const stat = fs.statSync(filePath);
         if (stat.isFile()) {
@@ -146,7 +160,7 @@ export function registerStaticAssets() {
           return fs.readFileSync(filePath);
         }
       }
-      
+
       // Try index.html for SPA routing
       const indexPath = `${WEB_CONSOLE_DIR}/index.html`;
       if (fs.existsSync(indexPath) && !path.includes(".")) {
