@@ -56,9 +56,10 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
         return { error: "Project not found" };
       }
 
-      // Get real database version
+      // Get real database version and connection count
       let dbVersion = "15.0";
       let dbSize = 0;
+      let connectionCount = 0;
       try {
         const projectDb = getProjectDb(project.database?.name || `supa_${project.ref}`);
         const versionResult = await projectDb`SHOW server_version`;
@@ -67,9 +68,22 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
         }
         const sizeResult = await projectDb`SELECT pg_database_size(current_database()) as size`;
         dbSize = sizeResult[0]?.size || 0;
+        const connectionResult = await projectDb`SELECT count(*) as count FROM pg_stat_activity WHERE state = 'active'`;
+        connectionCount = connectionResult[0]?.count || 0;
       } catch (e) {
         // Ignore database errors
       }
+
+      // Check service statuses (for now, return static status)
+      // TODO: Implement actual service health checks
+      const serviceStatuses = [
+        { name: "PostgreSQL", status: "ACTIVE_HEALTHY" },
+        { name: "PostgREST", status: "ACTIVE_HEALTHY" },
+        { name: "GoTrue", status: "ACTIVE_HEALTHY" },
+        { name: "Realtime", status: "ACTIVE_HEALTHY" },
+        { name: "Storage", status: "ACTIVE_HEALTHY" },
+        { name: "Kong", status: "ACTIVE_HEALTHY" },
+      ];
 
       // Return Studio-compatible format
       return {
@@ -91,15 +105,9 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
           postgres_engine: dbVersion.split(".")[0] + "." + dbVersion.split(".")[1],
           release_channel: "stable",
           size: dbSize,
+          connection_count: connectionCount,
         },
-        services: [
-          { name: "PostgreSQL", status: "ACTIVE_HEALTHY" },
-          { name: "PostgREST", status: "ACTIVE_HEALTHY" },
-          { name: "GoTrue", status: "ACTIVE_HEALTHY" },
-          { name: "Realtime", status: "ACTIVE_HEALTHY" },
-          { name: "Storage", status: "ACTIVE_HEALTHY" },
-          { name: "Kong", status: "ACTIVE_HEALTHY" },
-        ],
+        services: serviceStatuses,
         endpoint: project.api?.url || `https://${project.ref}.localhost`,
         anon_key: project.anon_key,
         service_key: project.service_key,
