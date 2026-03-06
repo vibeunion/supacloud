@@ -1,5 +1,4 @@
 import { $ } from "bun";
-import { existsSync, readFileSync } from "fs";
 
 export interface NodeInfo {
     ip: string;
@@ -20,9 +19,11 @@ export class NodeManager {
      * 获取所有节点列表
      */
     static async listNodes(): Promise<NodeInfo[]> {
-        if (!existsSync(this.NODE_DB_PATH)) return [];
+        const file = Bun.file(this.NODE_DB_PATH);
+        if (!(await file.exists())) return [];
         try {
-            return JSON.parse(readFileSync(this.NODE_DB_PATH, "utf-8"));
+            const data = await file.text();
+            return JSON.parse(data);
         } catch (e) {
             return [];
         }
@@ -38,7 +39,7 @@ export class NodeManager {
         // 注意: 实际执行中建议先检测能否免密联通
         try {
             const pubKeyPath = `${process.env.HOME}/.ssh/id_rsa.pub`;
-            if (!existsSync(pubKeyPath)) {
+            if (!(await Bun.file(pubKeyPath).exists())) {
                 console.log("[Node] 生成管理节点 SSH 密钥对...");
                 await $`ssh-keygen -t rsa -N "" -f ${process.env.HOME}/.ssh/id_rsa`.quiet();
             }

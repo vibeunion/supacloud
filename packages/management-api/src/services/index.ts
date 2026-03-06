@@ -5,3 +5,4 @@ export { routerService, RouterService } from "./router.service";
 export { shellService, ShellService } from "./shell.service";
 export { projectService, ProjectService } from "./project.service";
 export { frontendService } from "./frontend.service";
+export { deployService, DeployServiceClass } from "./deploy.service";
