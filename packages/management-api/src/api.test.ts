@@ -4,6 +4,21 @@ mock.module("../src/utils/retry", () => ({
     withRetry: (name: string, fn: any) => fn(),
 }));
 
+const mockSql: any = mock((strings: any) => {
+    const sqlStr = Array.isArray(strings) ? strings.join("") : String(strings);
+    if (sqlStr.toLowerCase().includes("organizations")) {
+        return Promise.resolve([
+            { id: "org-uuid", name: "Default Org", slug: "default", created_at: new Date(), updated_at: new Date() }
+        ]);
+    }
+    // 默认返回空数组，满足 Projects 等其他列表查询
+    return Promise.resolve([]);
+});
+mockSql.unsafe = mock(() => Promise.resolve([]));
+mock.module("../src/db", () => ({
+    sql: mockSql,
+}));
+
 import { app as baseApp, registerAllRoutes } from "../src/index";
 
 describe("Management API Integration Tests", () => {

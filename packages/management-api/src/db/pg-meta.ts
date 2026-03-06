@@ -1,6 +1,7 @@
 import { PostgresMeta } from '@supabase/postgres-meta';
 import { logger } from '../utils/logger';
 
+
 class PgMetaManager {
     private instances = new Map<string, { meta: PostgresMeta; lastUpdated: number }>();
     private readonly ttlMs = 5 * 60 * 1000; // 5 minutes completely idle TTL
@@ -19,6 +20,7 @@ class PgMetaManager {
         }
 
         logger.info(`[PgMetaManager] Initializing new PostgresMeta instance for tenant.`);
+
         // Initialize new instance with a small pool size to conserve memory
         const meta = new PostgresMeta({ connectionString, max: 2, idleTimeoutMillis: 30000 });
 

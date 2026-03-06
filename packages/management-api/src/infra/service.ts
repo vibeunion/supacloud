@@ -4,10 +4,7 @@
  * Handles low-level service operations and process management
  */
 
-import { exec } from 'child_process'
-import { promisify } from 'util'
-
-const execAsync = promisify(exec)
+import { $ } from 'bun'
 
 const logger = {
   info: (...args: any[]) => console.log('[INFO]', ...args),
@@ -66,7 +63,6 @@ WantedBy=multi-user.target
     const serviceFile = `/etc/systemd/system/${name}.service`
 
     try {
-      const { $ } = await import('bun')
       await $`echo "${serviceContent}" | sudo tee ${serviceFile} > /dev/null`.nothrow()
       await $`sudo systemctl daemon-reload`.nothrow()
       await $`sudo systemctl enable ${name}`.nothrow()
@@ -92,7 +88,7 @@ WantedBy=multi-user.target
    */
   async getServiceStatus(serviceName: string): Promise<ServiceInfo> {
     try {
-      const { stdout } = await execAsync(`systemctl is-active ${serviceName}`)
+      const stdout = await $`systemctl is-active ${serviceName}`.text()
       const status = stdout.trim()
 
       return {
@@ -102,7 +98,7 @@ WantedBy=multi-user.target
     } catch {
       // Check if process exists via pgrep
       try {
-        const { stdout } = await execAsync(`pgrep -f ${serviceName}`)
+        const stdout = await $`pgrep -f ${serviceName}`.text()
         const pid = parseInt(stdout.trim(), 10)
         return {
           name: serviceName,
@@ -123,7 +119,7 @@ WantedBy=multi-user.target
    */
   async startService(serviceName: string): Promise<boolean> {
     try {
-      await execAsync(`systemctl start ${serviceName}`)
+      await $`systemctl start ${serviceName}`
       logger.info(`Service started: ${serviceName}`)
       return true
     } catch (error) {
@@ -137,7 +133,7 @@ WantedBy=multi-user.target
    */
   async stopService(serviceName: string): Promise<boolean> {
     try {
-      await execAsync(`systemctl stop ${serviceName}`)
+      await $`systemctl stop ${serviceName}`
       logger.info(`Service stopped: ${serviceName}`)
       return true
     } catch (error) {
@@ -151,7 +147,7 @@ WantedBy=multi-user.target
    */
   async restartService(serviceName: string): Promise<boolean> {
     try {
-      await execAsync(`systemctl restart ${serviceName}`)
+      await $`systemctl restart ${serviceName}`
       logger.info(`Service restarted: ${serviceName}`)
       return true
     } catch (error) {
