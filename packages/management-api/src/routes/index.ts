@@ -14,3 +14,4 @@ export { authRoutes } from "./auth";
 export { frontendRoutes } from "./frontend";
 export { webhookRoutes } from "./webhook";
 export { studioRoutes, studioAuthRoutes, studioV1Routes } from "./studio";
+export { deployRoutes } from "./deploy";

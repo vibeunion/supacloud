@@ -18,7 +18,7 @@ try {
 import { config } from "./config";
 import { authMiddleware } from "./middleware/auth";
 import { closeDb } from "./db";
-import { studioRoutes, studioAuthRoutes, studioV1Routes } from "./routes";
+import { studioRoutes, studioAuthRoutes, studioV1Routes, deployRoutes } from "./routes";
 
 const app = new Elysia({ strictPath: false })
   // Swagger docs
@@ -64,20 +64,15 @@ const app = new Elysia({ strictPath: false })
   // Health check (no auth required)
   .get("/health", () => ({ status: "ok", timestamp: new Date().toISOString() }))
 
-  // Studio Compatibility Layer (mounted BEFORE main routes to override)
-  // This ensures /api/platform/* and /api/v1/* Studio-specific routes take precedence
-  .group("/api", (api) =>
-    api
-      .use(studioRoutes)
-      .use(studioAuthRoutes)
-      .use(studioV1Routes)
-  )
-  // Direct mounting for internal access
+  // Studio Compatibility Layer (MOUNTED AT ROOT TO AVOID 404)
   .use(studioRoutes)
   .use(studioAuthRoutes)
   .use(studioV1Routes)
 
-  // Main API Routes (mounted after Studio routes)
+  // SPA Assets (Mounted after critical APIs)
+  .use(registerStaticAssets())
+
+  // Main API Routes
   .use(await registerAllRoutes())
 
   // API version info
@@ -204,7 +199,7 @@ export async function registerAllRoutes() {
     projectRoutes, organizationRoutes, userRoutes, backupRoutes,
     monitorRoutes, maintenanceRoutes, extensionRoutes, securityRoutes,
     storageRoutes, scalingRoutes, taskRoutes, databaseRoutes, authRoutes,
-    frontendRoutes, webhookRoutes
+    frontendRoutes, webhookRoutes, deployRoutes
   } = await import("./routes");
 
   return new Elysia({ name: "api-routes" })
@@ -223,7 +218,8 @@ export async function registerAllRoutes() {
     .use(databaseRoutes)
     .use(authRoutes)
     .use(frontendRoutes)
-    .use(webhookRoutes);
+    .use(webhookRoutes)
+    .use(deployRoutes);
 }
 
 const args = process.argv.slice(2);

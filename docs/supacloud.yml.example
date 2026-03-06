@@ -1,0 +1,42 @@
+# SupaCloud Deployment Configuration
+# Place this file in your project root directory
+
+app:
+  name: my-app          # Application name (required)
+  tenant: my-tenant-id  # Tenant ID (required)
+
+deploy:
+  # Static site configurations
+  static:
+    - name: admin
+      source: dist                    # Build artifact path
+      target: /var/www/html/admin     # Target symlink path
+      url: https://example.com/admin/ # Access URL (optional)
+
+    - name: docs
+      source: docs/dist
+      target: /var/www/html/docs
+      url: https://docs.example.com/
+
+  # SSR service configurations
+  ssr:
+    - name: web
+      source: build                   # Build artifact path
+      target: /var/www/app/web        # Target symlink path
+      service: my-web-service         # systemd service name
+      url: https://example.com/       # Access URL (optional)
+      env:                            # Environment variables (optional)
+        NODE_ENV: production
+        API_URL: https://api.example.com
+        API_KEY: ${API_KEY}           # Use environment variable
+
+  # Version retention policy
+  retention:
+    keep_versions: 5    # Number of versions to keep (default: 5)
+    auto_cleanup: true  # Auto cleanup old versions (default: true)
+
+  # Deployment hooks
+  hooks:
+    pre_deploy: echo "Starting deployment for ${APP_NAME}..."
+    post_deploy: curl -f https://example.com/health || exit 1
+    on_failure: echo "Deployment failed!"
