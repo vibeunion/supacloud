@@ -1,18 +1,24 @@
-import { readFileSync, existsSync } from "fs";
-
 function loadEnvFile(path: string): Record<string, string> {
-  if (!existsSync(path)) return {};
-  const content = readFileSync(path, "utf-8");
-  const env: Record<string, string> = {};
-  for (const line of content.split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) continue;
-    const [key, ...valueParts] = trimmed.split("=");
-    if (key && valueParts.length > 0) {
-      env[key.trim()] = valueParts.join("=").trim().replace(/^["']|["']$/g, "");
+  try {
+    // 使用 Bun.spawnSync 直接调用 cat，利用操作系统缓存且完全避开 Node.js fs 模块
+    const { stdout } = Bun.spawnSync(["cat", path]);
+    const content = stdout ? stdout.toString() : "";
+    if (!content) return {};
+    
+    const env: Record<string, string> = {};
+    for (const line of content.split("\n")) {
+      const trimmed = line.trim();
+      // 兼容更多写法，确保 = 存在
+      if (!trimmed || trimmed.startsWith("#") || !trimmed.includes("=")) continue;
+      const [key, ...valueParts] = trimmed.split("=");
+      if (key && valueParts.length > 0) {
+        env[key.trim()] = valueParts.join("=").trim().replace(/^["']|["']$/g, "");
+      }
     }
+    return env;
+  } catch {
+    return {};
   }
-  return env;
 }
 
 // Load environment files

@@ -1,4 +1,12 @@
 import { describe, test, expect, mock, beforeEach, spyOn } from "bun:test";
+
+// Mock database to prevent top-level connection attempts
+const mockSql: any = mock(() => Promise.resolve([]));
+mockSql.unsafe = mock(() => Promise.resolve([]));
+mock.module("../../src/db", () => ({
+  sql: mockSql,
+}));
+
 import { ProjectService, type CreateProjectRequest } from "../../src/services/project.service";
 import { projectRepository } from "../../src/repositories/project.repository";
 import { jwtService } from "../../src/services/jwt.service";
@@ -13,6 +21,7 @@ describe("ProjectService - Comprehensive", () => {
   const mockProject = {
     id: "uuid-test123",
     ref: "test123abc",
+    organization_id: "org-default",
     name: "Test Project",
     db_name: "supa_test123abc",
     db_user: "role_test123abc",
