@@ -130,9 +130,10 @@ export const studioRoutes = new Elysia()
         const baseProject = (projects && projects.length > 0) ? projects[0] : null;
         const formattedBaseProject = baseProject ? formatProject(baseProject, requestedRef) : null;
         
-        const projectsList: any = formattedBaseProject ? [formattedBaseProject] : [];
+        const projectsList = formattedBaseProject ? [formattedBaseProject] : [];
 
-        const defaultOrg: any = { 
+        // 核心对齐：使用真实组织 ID 和字段
+        const defaultOrg = { 
             id: 1, 
             name: "Default Organization", 
             slug: "default", 
@@ -155,7 +156,7 @@ export const studioRoutes = new Elysia()
             auth0_id: "auth0|admin",
             gotrue_id: "admin-gotrue-id",
             disabled_features: [],
-            free_project_limit: null,
+            free_project_limit: 10,
             is_alpha_user: false,
             is_sso_user: false,
             mobile: null,
