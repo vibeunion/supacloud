@@ -1,5 +1,5 @@
 # SupaCloud Studio Dockerfile
-# Use pnpm with turbo prune and patches support
+# Optimized for faster builds
 # Build from Supabase repo root: docker build . -f supacloud/deploy/studio/Dockerfile -t supacloud-studio
 
 # Stage 1: Base
@@ -29,24 +29,18 @@ ENV NODE_OPTIONS="--max-old-space-size=8192"
 
 COPY --from=turbo /app/out/json ./
 COPY --from=turbo /app/out/pnpm-lock.yaml ./
-
-# Copy patches directory (not included by turbo prune)
 COPY patches ./patches
 
-# Install with patches support
-RUN pnpm config set store-dir /tmp/pnpm-store && \
-  pnpm install \
-    --no-frozen-lockfile \
-    --network-concurrency 1 \
-    --child-concurrency 1 \
-    --ignore-scripts \
-    --no-optional
+# Faster install with reasonable concurrency
+RUN pnpm install \
+  --frozen-lockfile \
+  --network-concurrency 16 \
+  --child-concurrency 4 \
+  --ignore-scripts
 
 # Stage 4: Builder
 FROM deps AS builder
 COPY --from=turbo /app/out/full ./
-
-# Copy patches again for full build
 COPY patches ./patches
 
 ARG NEXT_PUBLIC_IS_PLATFORM=true
