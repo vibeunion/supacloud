@@ -51,7 +51,7 @@ FROM dev AS builder
 # Set build-time environment variables for platform mode (Aligned with official supabase/apps/studio)
 ARG NEXT_PUBLIC_IS_PLATFORM=true
 ARG NEXT_PUBLIC_API_URL=/api
-ARG NEXT_PUBLIC_SITE_URL=https://studio.esgfarm.cn
+ARG NEXT_PUBLIC_SITE_URL
 ARG NEXT_PUBLIC_ENVIRONMENT=production
 ARG NEXT_PUBLIC_ENABLE_LOGS=true
 ARG NEXT_PUBLIC_REALTIME_ENABLED=true
