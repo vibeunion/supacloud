@@ -31,7 +31,6 @@ COPY --from=turbo /app/out/json ./
 COPY --from=turbo /app/out/pnpm-lock.yaml ./
 COPY patches ./patches
 
-# Faster install with reasonable concurrency
 RUN pnpm install \
   --frozen-lockfile \
   --network-concurrency 16 \
@@ -44,7 +43,7 @@ COPY --from=turbo /app/out/full ./
 COPY patches ./patches
 
 ARG NEXT_PUBLIC_IS_PLATFORM=true
-ARG NEXT_PUBLIC_API_URL=/api
+ARG NEXT_PUBLIC_API_URL=https://studio.esgfarm.cn/api
 ARG NEXT_PUBLIC_SITE_URL=https://studio.esgfarm.cn
 ARG NEXT_PUBLIC_ENVIRONMENT=production
 ARG NEXT_PUBLIC_ENABLE_LOGS=true
