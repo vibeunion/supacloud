@@ -98,35 +98,31 @@ const formatProject = (project: any, requestedRef?: string) => {
  */
 export const studioRoutes = new Elysia()
     // --- Auth & Profile ---
-    .post("/api/platform/login", async ({ body, set }) => {
-        const { email, password } = body as { email?: string; password?: string };
+    .post("/api/platform/login", async ({ body }) => {
+        const bodyAny = body as any;
+        const email = bodyAny?.email || "admin@supacloud.local";
+        const password = bodyAny?.password;
         
-        // Simple auth: accept any credentials or use default admin
-        const validEmail = email || "admin@supacloud.local";
-        
-        // Return session token (simplified - in production use proper JWT)
         return {
             access_token: "supacloud-session-token",
             token_type: "bearer",
             expires_in: 86400,
             user: {
                 id: "1",
-                email: validEmail,
+                email: email,
                 user_metadata: { name: "Admin" },
                 app_metadata: { provider: "email" }
             }
         };
-    })
+    }, { body: t.Optional(t.Any()) })
     .post("/api/platform/signup", async ({ body }) => {
-        const { email } = body as { email?: string };
+        const bodyAny = body as any;
+        const email = bodyAny?.email || "admin@supacloud.local";
         return {
             message: "Signup successful",
-            user: {
-                id: "1",
-                email: email || "admin@supacloud.local"
-            }
+            user: { id: "1", email }
         };
-    })
+    }, { body: t.Optional(t.Any()) })
     .post("/api/platform/logout", () => ({ success: true }))
     .get("/api/auth/session", () => ({ 
         user: { 
