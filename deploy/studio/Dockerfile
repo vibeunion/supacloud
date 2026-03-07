@@ -82,12 +82,13 @@ ENV PORT=3000
 RUN addgroup --system --gid 1001 nodejs && \
   adduser --system --uid 1001 nextjs
 
-# Copy standalone output (monorepo structure: .next/standalone/apps/studio/)
-COPY --from=builder /app/apps/studio/.next/standalone/apps/studio ./
-COPY --from=builder /app/apps/studio/public ./public
-COPY --from=builder --chown=nextjs:nodejs /app/apps/studio/.next/static ./.next/static
+# Copy entire standalone (includes node_modules at root level for monorepo)
+COPY --from=builder --chown=nextjs:nodejs /app/apps/studio/.next/standalone ./
+COPY --from=builder /app/apps/studio/public ./apps/studio/public
+COPY --from=builder --chown=nextjs:nodejs /app/apps/studio/.next/static ./apps/studio/.next/static
 
 USER nextjs
 EXPOSE 3000
 
+WORKDIR /app/apps/studio
 CMD ["node", "server.js"]
