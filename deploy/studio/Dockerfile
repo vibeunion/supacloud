@@ -31,16 +31,18 @@ FROM base AS deps
 COPY --from=turbo /app/out/json ./
 COPY --from=turbo /app/out/pnpm-lock.yaml ./
 
-# 核心修复：针对 Exit 254 (内存或锁定崩溃)，禁用强制锁定并限制并发，增加重试
-RUN pnpm install --no-frozen-lockfile --network-concurrency 1 --retry-max 5 --ignore-scripts --child-concurrency 1 || \
-  pnpm install --no-frozen-lockfile --network-concurrency 1 --ignore-scripts
+# 核心优化：参考官方构建，针对 Exit 254 实施串行化与容错
+# 关闭强制锁定检测以应对非标准环境，限制并发至 1 以规避内存溢出
+RUN pnpm install --no-frozen-lockfile --network-concurrency 1 --child-concurrency 1 --ignore-scripts
+
+# Stage 4: Dev (source code)
 FROM deps AS dev
 COPY --from=turbo /app/out/full ./
 
 # Stage 5: Build with platform mode
 FROM dev AS builder
 
-# Set build-time environment variables for platform mode
+# Set build-time environment variables for platform mode (Aligned with official supabase/apps/studio)
 ARG NEXT_PUBLIC_IS_PLATFORM=true
 ARG NEXT_PUBLIC_API_URL=/api
 ARG NEXT_PUBLIC_SITE_URL=https://studio.esgfarm.cn
@@ -51,6 +53,7 @@ ARG FORCE_ASSET_CDN=-1
 ARG SENTRY_IGNORE_API_RESOLUTION_ERROR=1
 ARG NEXT_PUBLIC_HCAPTCHA_SITE_KEY=
 ARG NEXT_PUBLIC_STRIPE_PUBLIC_KEY=
+ARG NEXT_PUBLIC_LOCAL_JWT_SECRET=
 
 ENV NEXT_PUBLIC_IS_PLATFORM=$NEXT_PUBLIC_IS_PLATFORM
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
@@ -62,8 +65,10 @@ ENV FORCE_ASSET_CDN=$FORCE_ASSET_CDN
 ENV SENTRY_IGNORE_API_RESOLUTION_ERROR=$SENTRY_IGNORE_API_RESOLUTION_ERROR
 ENV NEXT_PUBLIC_HCAPTCHA_SITE_KEY=$NEXT_PUBLIC_HCAPTCHA_SITE_KEY
 ENV NEXT_PUBLIC_STRIPE_PUBLIC_KEY=$NEXT_PUBLIC_STRIPE_PUBLIC_KEY
+ENV NEXT_PUBLIC_LOCAL_JWT_SECRET=$NEXT_PUBLIC_LOCAL_JWT_SECRET
 
-RUN pnpm --filter studio exec next build
+# 官方构建指令：使用 turbo 进行过滤构建
+RUN pnpm dlx turbo run build --filter=studio...
 
 # Stage 6: Production
 FROM base AS production
