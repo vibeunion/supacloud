@@ -1,11 +1,15 @@
 # SupaCloud Studio Dockerfile
 # Based on official Supabase Studio Dockerfile with platform mode enabled
-# Build from Supabase repo root: docker build . -f supacloud/deploy/studio/Dockerfile -t supacloud-studio
+# IMPORTANT: This Dockerfile is designed to be built from the SUPABASE source root.
+# Usage: docker build . -f supacloud/deploy/studio/Dockerfile -t supacloud-studio
 
-# Stage 1: Base
-FROM node:24-slim AS base
+# Stage 1: Base - Use a more stable Node version to avoid pnpm v10 crashes in slim images
+FROM node:22-slim AS base
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
+
+# Increase memory limits for Node/PNPM during build
+ENV NODE_OPTIONS="--max-old-space-size=4096"
 
 RUN apt-get update -qq && \
   apt-get install -y --no-install-recommends \
@@ -16,6 +20,7 @@ RUN apt-get update -qq && \
   rm -rf /var/lib/apt/lists/* && \
   update-ca-certificates
 
+# Sync pnpm version with official requirements if possible
 RUN corepack enable && corepack prepare pnpm@10.16.1 --activate
 
 WORKDIR /app
@@ -24,6 +29,7 @@ WORKDIR /app
 FROM base AS turbo
 COPY . .
 
+# 确保读取的是 supabase 根目录的 studio
 RUN pnpm dlx turbo@2.3.3 prune studio --docker
 
 # Stage 3: Dependencies
@@ -31,9 +37,9 @@ FROM base AS deps
 COPY --from=turbo /app/out/json ./
 COPY --from=turbo /app/out/pnpm-lock.yaml ./
 
-# 核心优化：参考官方构建，针对 Exit 254 实施串行化与容错
-# 关闭强制锁定检测以应对非标准环境，限制并发至 1 以规避内存溢出
-RUN pnpm install --no-frozen-lockfile --network-concurrency 1 --child-concurrency 1 --ignore-scripts
+# 极致优化：针对 Exit 254 (I/O 或内存崩溃)，实施彻底的串行化和忽略锁定校验
+# --no-frozen-lockfile 是关键，因为 turbo prune 后的锁文件在受限环境下常导致 pnpm 校验崩溃
+RUN pnpm install --no-frozen-lockfile --network-concurrency 1 --child-concurrency 1 --ignore-scripts --prefer-offline
 
 # Stage 4: Dev (source code)
 FROM deps AS dev
@@ -78,7 +84,7 @@ ENV NODE_ENV=production
 ENV HOSTNAME="0.0.0.0"
 ENV PORT=3000
 
-# Copy built files
+# Copy built files - Adjusted paths to match standalone output
 COPY --from=builder /app/apps/studio/public ./apps/studio/public
 COPY --from=builder /app/apps/studio/.next/standalone ./
 COPY --from=builder /app/apps/studio/.next/static ./apps/studio/.next/static
