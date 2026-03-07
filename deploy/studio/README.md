@@ -2,76 +2,42 @@
 
 启用云平台模式，支持多项目、组织管理等企业功能。
 
-## 为什么需要自编译？
+## 架构
 
-`NEXT_PUBLIC_*` 环境变量在 Next.js 构建时嵌入到 JavaScript 代码中，运行时注入无效。官方 Docker 镜像使用 `IS_PLATFORM=false` 构建，只支持单项目模式。
-
-## 构建方式
-
-### 方式一：本地构建（推荐）
-
-```powershell
-# 1. 克隆 Supabase 源码
-git clone --depth 1 https://github.com/supabase/supabase.git supabase-studio
-
-# 2. 运行构建脚本
-cd supacloud/deploy/studio
-.\build.ps1
-
-# 3. 输出目录
-# dist/standalone - 可直接运行
+```
+浏览器 → Studio 前端 → NEXT_PUBLIC_API_URL → SupaCloud API
 ```
 
-### 方式二：Docker 构建
-
-```powershell
-# 构建 Docker 镜像
-.\build.ps1 -Docker
-
-# 推送到镜像仓库
-.\build.ps1 -Docker -Push -Tag your-registry/supacloud-studio:latest
-```
-
-## 部署
-
-### 服务器部署
+## 本地构建
 
 ```bash
-# 1. 上传构建产物
-scp -r dist/* root@server:/opt/supacloud/studio/
-
-# 2. 启动服务
-cd /opt/supacloud/studio
-node server.js
+docker build . -f Dockerfile --build-arg NEXT_PUBLIC_API_URL=http://localhost:9090 -t studio
 ```
 
-### Docker 部署
+## GitHub Actions 手动触发
+
+在 GitHub Actions 页面点击 "Run workflow" 按钮，手动输入参数：
+- `api_url`: 你的 API 地址
+- `site_url`: 你的站点地址
+
+构建完成后，镜像会推送到 `ghcr.io/your-username/supacloud/studio:latest`。然后拉取镜像部署即可。
 
 ```bash
-# 使用 docker-compose
-docker-compose up -d
+docker pull ghcr.io/your-username/supacloud/studio:latest
+docker run -d --name supabase-studio \
+  -p 3000:3000 \
+  -e NEXT_PUBLIC_API_URL=https://your-domain.com/api \
+  -e NEXT_PUBLIC_SITE_URL=https://your-domain.com \
+  -e NEXT_PUBLIC_IS_PLATFORM=true \
+  -e SUPABASE_URL=http://kong:8000 \
+  -e SUPABASE_PUBLIC_URL=https://your-domain.com \
+  --memory=512m \
+  supabase/studio:latest
 ```
 
-## 配置说明
+---
 
-| 变量 | 值 | 说明 |
-|------|-----|------|
-| `NEXT_PUBLIC_IS_PLATFORM` | `true` | 启用云平台模式 |
-| `NEXT_PUBLIC_API_URL` | `/api` | API 路径（由 Angie 代理） |
-| `NEXT_PUBLIC_SITE_URL` | `https://studio.esgfarm.cn` | 站点 URL |
-
-## 功能对比
-
-| 功能 | 官方镜像 | 自编译镜像 |
-|------|---------|-----------|
-| 多项目支持 | ❌ | ✅ |
-| 组织管理 | ❌ | ✅ |
-| 团队协作 | ❌ | ✅ |
-| 计费集成 | ❌ | 🟡 需配置 |
-| 权限管理 | ❌ | ✅ |
-
-## 注意事项
-
-1. 构建需要约 4GB 内存
-2. 首次构建约需 10-15 分钟
-3. 构建产物约 200MB
+**注意**:
+1. `NEXT_PUBLIC_API_URL` 必须是完整 URL（包含 `/api` 路径）
+2. 默认值 `http://localhost:9090` 仅用于本地测试
+3. 实际部署时请替换为你自己的域名
