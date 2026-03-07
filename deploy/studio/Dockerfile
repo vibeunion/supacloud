@@ -82,6 +82,7 @@ ENV PORT=3000
 RUN addgroup --system --gid 1001 nodejs && \
   adduser --system --uid 1001 nextjs
 
+# Copy from apps/studio directory
 COPY --from=builder /app/apps/studio/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/apps/studio/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/apps/studio/.next/static ./.next/static
