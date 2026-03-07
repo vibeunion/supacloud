@@ -1,6 +1,6 @@
 # SupaCloud Studio Dockerfile
-# Optimized for faster builds
-# Build from Supabase repo root: docker build . -f supacloud/deploy/studio/Dockerfile -t supacloud-studio
+# Customizable build with platform mode enabled
+# Build: docker build . -f Dockerfile -t studio
 
 # Stage 1: Base
 FROM node:22-slim AS base
@@ -20,6 +20,13 @@ WORKDIR /app
 # Stage 2: Turbo prune
 FROM base AS turbo
 COPY . .
+
+# Apply patches for relative API URL support (patch file copied from supacloud repo)
+RUN if [ -f /app/patches/studio-api-url.patch ]; then \
+  cd /app/apps/studio && \
+  git apply /app/patches/studio-api-url.patch || echo "Patch already applied"; \
+  fi
+
 RUN pnpm dlx turbo@2.3.3 prune studio --docker
 
 # Stage 3: Dependencies
@@ -42,9 +49,10 @@ FROM deps AS builder
 COPY --from=turbo /app/out/full ./
 COPY patches ./patches
 
+# Build arguments - use relative path for universal image
 ARG NEXT_PUBLIC_IS_PLATFORM=true
-ARG NEXT_PUBLIC_API_URL=https://studio.esgfarm.cn/api
-ARG NEXT_PUBLIC_SITE_URL=https://studio.esgfarm.cn
+ARG NEXT_PUBLIC_API_URL=/api
+ARG NEXT_PUBLIC_SITE_URL=
 ARG NEXT_PUBLIC_ENVIRONMENT=production
 ARG NEXT_PUBLIC_ENABLE_LOGS=true
 ARG NEXT_PUBLIC_REALTIME_ENABLED=true
