@@ -45,6 +45,10 @@ COPY patches ./patches
 # Copy modified csp.js that supports relative API URL
 COPY deploy/studio/patches/csp.js /app/apps/studio/csp.js
 
+# Fix _app.tsx to handle relative API_URL during SSR
+RUN cd /app/apps/studio && \
+  sed -i "s|href={new URL(API_URL).origin}|href={API_URL.startsWith('http') ? new URL(API_URL).origin : (typeof window !== 'undefined' ? window.location.origin : '')}|g" pages/_app.tsx
+
 # Build arguments - use relative path for universal image
 ARG NEXT_PUBLIC_IS_PLATFORM=true
 ARG NEXT_PUBLIC_API_URL=/api
