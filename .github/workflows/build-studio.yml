@@ -35,6 +35,8 @@ jobs:
         run: |
           mkdir -p supabase/patches
           cp supacloud/deploy/studio/patches/*.patch supabase/patches/ 2>/dev/null || true
+          mkdir -p supabase/deploy/studio/patches
+          cp supacloud/deploy/studio/patches/csp.js supabase/deploy/studio/patches/ 2>/dev/null || true
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
