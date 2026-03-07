@@ -60,14 +60,12 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             NEXT_PUBLIC_IS_PLATFORM=true
-            NEXT_PUBLIC_API_URL=/api
+            NEXT_PUBLIC_API_URL=https://studio.esgfarm.cn/api
             NEXT_PUBLIC_SITE_URL=https://studio.esgfarm.cn
             NEXT_PUBLIC_ENVIRONMENT=production
             NEXT_PUBLIC_ENABLE_LOGS=true
             NEXT_PUBLIC_REALTIME_ENABLED=true
             FORCE_ASSET_CDN=-1
             SENTRY_IGNORE_API_RESOLUTION_ERROR=1
-            NEXT_PUBLIC_HCAPTCHA_SITE_KEY=
-            NEXT_PUBLIC_STRIPE_PUBLIC_KEY=
           cache-from: type=gha
           cache-to: type=gha,mode=max
