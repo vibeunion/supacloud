@@ -20,17 +20,25 @@ RUN npm install -g pnpm@10.16.1
 
 WORKDIR /app
 
-# Stage 2: Dependencies
+# Stage 2: Prune with turbo
+FROM base AS turbo
+COPY . .
+
+RUN pnpm dlx turbo@2.3.3 prune studio --docker
+
+# Stage 3: Dependencies
 FROM base AS deps
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-COPY apps/studio/package.json ./apps/studio/
-COPY packages ./packages
+COPY --from=turbo /app/out/json ./
+COPY --from=turbo /app/out/pnpm-lock.yaml ./
 
-RUN pnpm install --no-frozen-lockfile
+RUN pnpm install --frozen-lockfile
 
-# Stage 3: Build
-FROM base AS builder
-WORKDIR /app
+# Stage 4: Dev (source code)
+FROM deps AS dev
+COPY --from=turbo /app/out/full ./
+
+# Stage 5: Build with platform mode
+FROM dev AS builder
 
 # Set build-time environment variables for platform mode
 ARG NEXT_PUBLIC_IS_PLATFORM=true
@@ -55,34 +63,21 @@ ENV SENTRY_IGNORE_API_RESOLUTION_ERROR=$SENTRY_IGNORE_API_RESOLUTION_ERROR
 ENV NEXT_PUBLIC_HCAPTCHA_SITE_KEY=$NEXT_PUBLIC_HCAPTCHA_SITE_KEY
 ENV NEXT_PUBLIC_STRIPE_PUBLIC_KEY=$NEXT_PUBLIC_STRIPE_PUBLIC_KEY
 
-# Copy dependencies
-COPY --from=deps /app/node_modules ./node_modules
-COPY --from=deps /app/apps/studio/node_modules ./apps/studio/node_modules
-COPY . .
+RUN pnpm --filter studio exec next build
 
-# Build
-WORKDIR /app/apps/studio
-RUN pnpm build
-
-# Stage 4: Production
-FROM node:22-slim AS production
+# Stage 6: Production
+FROM base AS production
 WORKDIR /app
 
 ENV NODE_ENV=production
 ENV HOSTNAME="0.0.0.0"
 ENV PORT=3000
 
-# Create non-root user
-RUN addgroup --system --gid 1001 nodejs
-RUN adduser --system --uid 1001 nextjs
-
 # Copy built files
-COPY --from=builder /app/apps/studio/public ./public
-COPY --from=builder --chown=nextjs:nodejs /app/apps/studio/.next/standalone ./
-COPY --from=builder --chown=nextjs:nodejs /app/apps/studio/.next/static ./.next/static
-
-USER nextjs
+COPY --from=builder /app/apps/studio/public ./apps/studio/public
+COPY --from=builder /app/apps/studio/.next/standalone ./
+COPY --from=builder /app/apps/studio/.next/static ./apps/studio/.next/static
 
 EXPOSE 3000
 
-CMD ["node", "server.js"]
+CMD ["node", "apps/studio/server.js"]
