@@ -97,8 +97,8 @@ const formatProject = (project: any, requestedRef?: string) => {
  * 这里的路径从 /platform 或 /v1 开始。
  */
 const getAdminUsers = () => {
-    const adminEmail = process.env.SUPACLOUD_ADMIN_EMAIL || "admin@supacloud.local";
-    const adminPassword = process.env.SUPACLOUD_ADMIN_PASSWORD || "supacloud2024";
+    const adminEmail = process.env.SUPACLOUD_ADMIN_EMAIL || "admin@esgfarm.cn";
+    const adminPassword = process.env.SUPACLOUD_ADMIN_PASSWORD || "Supacloud@2026!";
     const adminName = process.env.SUPACLOUD_ADMIN_NAME || "Admin";
     
     return [
