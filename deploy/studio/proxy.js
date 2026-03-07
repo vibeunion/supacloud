@@ -11,13 +11,14 @@ const API_URL = process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000';
 
 const server = http.createServer((req, res) => {
   // Always forward /auth/ and /rest/ requests to the main domain
-  let path = req.url;
+  // We use the Host header from the request to stay dynamic
+  const protocol = req.headers['x-forwarded-proto'] || 'http';
+  const host = req.headers['host'];
+  const base = `${protocol}://${host}`;
   
-  // Studio sometimes uses /rest/v1/ and sometimes just /rest/
-  // We ensure it maps to the correct backend format
-  const targetUrl = new URL(req.url, API_URL);
+  const targetUrl = new URL(req.url, base);
   
-  console.log(`[Proxy] ${req.method} ${req.url} -> ${targetUrl.href}`);
+  console.log(`[Proxy] ${req.method} ${req.url} -> ${targetUrl.href} (Host: ${host})`);
 
   const options = {
     hostname: targetUrl.hostname,
