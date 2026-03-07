@@ -1,0 +1,41 @@
+--- a/apps/studio/lib/auth-provider.tsx
++++ b/apps/studio/lib/auth-provider.tsx
+@@ -1,5 +1,5 @@
+ import { GoTrueClient } from '@supabase/auth-js'
+-import { GoTrueAuthProvider } from 'ui-patterns'
++import { GoTrueAuthProvider as GoTrueAuthProviderBase } from 'ui-patterns'
+ import { useAppStateSnapshot } from 'state/app-state'
+ import { IS_PLATFORM } from 'lib/constants'
+ import { useStore } from 'hooks'
+@@ -7,6 +7,30 @@ import { usePrevious } from 'hooks'
+ import { useSignOut } from 'hooks/misc/useSignOut'
+ import { useOnSignOut } from 'hooks/misc/useSignOut'
+ 
++// Custom auth provider that uses relative URLs for SupaCloud
++function GoTrueAuthProvider({ children, ...props }: any) {
++  // For SupaCloud platform, use relative URL (will be proxied through Next.js)
++  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
++  const isRelativeUrl = supabaseUrl.startsWith('/') || supabaseUrl === ''
++  
++  if (isRelativeUrl && typeof window !== 'undefined') {
++    // Override the URL to use current origin
++    const clientUrl = window.location.origin
++    return (
++      <GoTrueAuthProviderBase
++        {...props}
++        auth={{
++          ...props.auth,
++          url: clientUrl,
++        }}
++      >
++        {children}
++      </GoTrueAuthProviderBase>
++    )
++  }
++  
++  return <GoTrueAuthProviderBase {...props}>{children}</GoTrueAuthProviderBase>
++}
++
+ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
+   const state = useAppStateSnapshot()
+   const { selectedProjectRef } = state
