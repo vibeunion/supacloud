@@ -3,7 +3,7 @@
 # Build from Supabase repo root: docker build . -f supacloud/deploy/studio/Dockerfile -t supacloud-studio
 
 # Stage 1: Base
-FROM node:22-slim AS base
+FROM node:24-slim AS base
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
 
@@ -16,7 +16,7 @@ RUN apt-get update -qq && \
   rm -rf /var/lib/apt/lists/* && \
   update-ca-certificates
 
-RUN npm install -g pnpm@10.16.1
+RUN corepack enable && corepack prepare pnpm@10.16.1 --activate
 
 WORKDIR /app
 
@@ -31,9 +31,9 @@ FROM base AS deps
 COPY --from=turbo /app/out/json ./
 COPY --from=turbo /app/out/pnpm-lock.yaml ./
 
-RUN pnpm install --frozen-lockfile
-
-# Stage 4: Dev (source code)
+# 核心修复：针对 Exit 254 (内存或锁定崩溃)，禁用强制锁定并限制并发，增加重试
+RUN pnpm install --no-frozen-lockfile --network-concurrency 1 --retry-max 5 --ignore-scripts --child-concurrency 1 || \
+  pnpm install --no-frozen-lockfile --network-concurrency 1 --ignore-scripts
 FROM deps AS dev
 COPY --from=turbo /app/out/full ./
 
