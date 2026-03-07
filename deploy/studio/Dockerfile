@@ -3,20 +3,26 @@
 
 # Stage 1: Dependencies
 FROM node:20-alpine AS deps
-RUN apk add --no-cache libc6-compat
+RUN apk add --no-cache libc6-compat python3 make g++
 WORKDIR /app
 
+# Install pnpm globally
+RUN corepack enable && corepack prepare pnpm@latest --activate
+
 # Copy package files
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY package.json pnpm-lock.yaml* pnpm-workspace.yaml ./
 COPY apps/studio/package.json ./apps/studio/
 COPY packages ./packages
 
-# Install pnpm
-RUN corepack enable pnpm && pnpm i --frozen-lockfile
+# Install dependencies
+RUN pnpm install --no-frozen-lockfile
 
 # Stage 2: Build
 FROM node:20-alpine AS builder
 WORKDIR /app
+
+# Install pnpm globally
+RUN corepack enable && corepack prepare pnpm@latest --activate
 
 # Copy dependencies
 COPY --from=deps /app/node_modules ./node_modules
@@ -44,7 +50,7 @@ ENV SENTRY_IGNORE_API_RESOLUTION_ERROR=$SENTRY_IGNORE_API_RESOLUTION_ERROR
 
 # Build
 WORKDIR /app/apps/studio
-RUN corepack enable pnpm && pnpm build
+RUN pnpm build
 
 # Stage 3: Production
 FROM node:20-alpine AS runner
