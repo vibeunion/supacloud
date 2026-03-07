@@ -21,11 +21,31 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
   // Get all projects
   .get("/", async () => {
     const projects = await projectService.listProjects();
-    return projects;
+    // 对齐 Studio 格式化
+    return projects.map(p => ({
+      id: p.id,
+      ref: p.ref,
+      name: p.name,
+      status: p.status?.toUpperCase() || "ACTIVE",
+      region: p.region || "local",
+      organization_id: p.organization_id || "default",
+      created_at: p.created_at,
+      updated_at: p.updated_at
+    }));
   })
   .get("", async () => {
     const projects = await projectService.listProjects();
-    return projects;
+    // 对齐 Studio 格式化
+    return projects.map(p => ({
+      id: p.id,
+      ref: p.ref,
+      name: p.name,
+      status: p.status?.toUpperCase() || "ACTIVE",
+      region: p.region || "local",
+      organization_id: p.organization_id || "default",
+      created_at: p.created_at,
+      updated_at: p.updated_at
+    }));
   })
 
   // Create new project

@@ -5,12 +5,15 @@ import { db, getProjectDb, dbConfig } from "../db";
 import { pgMetaManager } from "../db/pg-meta";
 
 /**
- * 核心助手：处理项目引用。
- * 解决 Studio 随机 ID 问题。
+ * 核心助手：确保返回的对象永远支持 .find 方法，即便它是空数组。
+ * 返回纯数组，JSON 序列化时不会被污染。
  */
+const ensureArray = <T>(arr: T[] | null | undefined): T[] => {
+    return Array.isArray(arr) ? arr : [];
+};
+
 const getProjectOrThrow = async (ref: string) => {
-    // 强制匹配：如果 ref 是 "default" 或者是 Studio 随机生成的 10 位字符标识符，则回退到第一个项目
-    const isSpecialRef = ref === "default" || /^[a-z0-9]{10}$/.test(ref);
+    const isSpecialRef = ref === "default" || /^[a-z0-9]{10,20}$/.test(ref);
     try {
         let project: any = null;
         if (!isSpecialRef) {
@@ -18,7 +21,6 @@ const getProjectOrThrow = async (ref: string) => {
         }
         if (!project) {
             const projects = await projectService.listProjects();
-            // 到服务器端实测，如果找不到则拿第一个，确保 studio 始终能加载
             project = projects[0];
         }
         if (!project) throw new Error("No projects found");
@@ -30,44 +32,61 @@ const getProjectOrThrow = async (ref: string) => {
     }
 };
 
-const formatProject = (project: any) => ({
-    id: 1, // 官方标杆：项目 ID 通常是数字。统一为 1 避免 UUID/数字混用导致的查找失败。
-    ref: "default", // 关键：将所有项目 ref 统一为 "default"，彻底解决 URL 路径与数据实体的对齐匹配问题
-    name: project.name,
-    status: "ACTIVE", // 官方 Cloud 是 ACTIVE，不是 ACTIVE_HEALTHY
-    region: "us-east-1", // 官方标杆，避免 "local" 可能引发的过滤逻辑边界
-    organization_id: "default",
-    organization: {
-        id: "default",
-        name: "Default Organization",
-        slug: "default",
-        subscription: { id: "sub_local", plan: { id: "pro", name: "Pro" } }
-    },
-    cloud_provider: "aws",
-    inserted_at: project.created_at,
-    updated_at: project.updated_at || null,
-    // 关键服务：告知 Studio 启用哪些功能卡片。对齐官方 8 大核心服务。
-    // 注意：type 必须精细对齐，例如 auth -> gotrue, api -> postgrest，否则前端 filter 会崩溃。
-    services: [
-        { id: 1, name: "database", type: "database", status: "ACTIVE" },
-        { id: 2, name: "auth", type: "gotrue", status: "ACTIVE" },
-        { id: 3, name: "gotrue", type: "gotrue", status: "ACTIVE" },
-        { id: 4, name: "storage", type: "storage", status: "ACTIVE" },
-        { id: 5, name: "functions", type: "functions", status: "ACTIVE" },
-        { id: 6, name: "realtime", type: "realtime", status: "ACTIVE" },
-        { id: 7, name: "postgrest", type: "postgrest", status: "ACTIVE" },
-        { id: 8, name: "api", type: "postgrest", status: "ACTIVE" }
-    ],
-    // 数据库连接配置
-    db_host: "localhost",
-    db_name: project.database?.name || `supa_${project.ref}`,
-    db_port: 5432,
-    db_user: "postgres",
-    db_pass: "postgres",
-    db_ssl: false,
-    owner_id: "1",
-    is_paused: false
-});
+const formatProject = (project: any, requestedRef?: string) => {
+    const projectId = "1";
+    const orgId = "default";
+    const activeRef = requestedRef || project.ref || "default";
+
+    return {
+        id: projectId,
+        ref: activeRef,
+        name: project.name,
+        status: "ACTIVE", 
+        region: project.region || "us-east-1",
+        organization_id: orgId,
+        organization: {
+            id: orgId,
+            name: project.organization?.name || "Default Organization",
+            slug: "default",
+            subscription: { id: "sub_local", plan: { id: "pro", name: "Pro" } }
+        },
+        cloud_provider: project.cloud_provider || "aws",
+        inserted_at: project.created_at || new Date().toISOString(),
+        updated_at: project.updated_at || project.created_at || new Date().toISOString(),
+        databases: ensureArray([
+            {
+                id: projectId,
+                identifier: activeRef,
+                name: project.database?.name || `supa_${activeRef}`,
+                status: "ACTIVE",
+                infra_compute_size: "nano"
+            }
+        ]),
+        services: ensureArray([
+            { id: "s1", name: "database", type: "database", status: "ACTIVE" },
+            { id: "s2", name: "auth", type: "gotrue", status: "ACTIVE" },
+            { id: "s3", name: "gotrue", type: "gotrue", status: "ACTIVE" },
+            { id: "s4", name: "storage", type: "storage", status: "ACTIVE" },
+            { id: "s5", name: "functions", type: "functions", status: "ACTIVE" },
+            { id: "s6", name: "realtime", type: "realtime", status: "ACTIVE" },
+            { id: "s7", name: "postgrest", type: "postgrest", status: "ACTIVE" },
+            { id: "s8", name: "api", type: "postgrest", status: "ACTIVE" }
+        ]),
+        // 扩展字段防止在 project.XXX.find 处崩溃
+        members: ensureArray([{ id: "1", user: { id: "1", email: "admin@supacloud.local" } }]),
+        permissions: ensureArray(["all"]),
+        feature_flags: ensureArray([]),
+        custom_domains: ensureArray([]),
+        db_host: project.db_host || "localhost",
+        db_name: project.database?.name || `supa_${activeRef}`,
+        db_port: project.database?.port || 5432,
+        db_user: "postgres",
+        db_pass: "postgres",
+        db_ssl: false,
+        owner_id: "1",
+        is_paused: false
+    };
+};
 
 /**
  * 统一导出所有 Studio 兼容路由。
@@ -99,31 +118,47 @@ export const studioRoutes = new Elysia()
         role: "authenticated",
         user_metadata: { name: "Admin" }
     }))
-    .get("/api/platform/profile", async () => {
-        const projects = await projectService.listProjects();
-        // 关键对齐：强制所有项目 ref 为 "default"，确保 Studio 路由匹配一致。
-        // [IMPORTANT] 必须去重：如果列表里有多个相同 ref/id 的项目，Studio 的项目发现逻辑会崩毁。
-        // 我们只取第一个项目作为 "default" 项目返回，确保前端上下文绝对唯一匹配。
-        const baseProject = projects[0];
-        const projectsWithAlias = baseProject ? [
-            { ...formatProject(baseProject), ref: "default", id: 1 }
-        ] : [];
+    .get("/api/platform/profile", async ({ headers }) => {
+        const referer = headers['referer'] || "";
+        const refMatch = referer.match(/\/project\/([a-z0-9]{1,20})/);
+        const requestedRef = refMatch ? refMatch[1] : "default";
 
-        return {
-            id: 1, 
-            primary_email: "admin@example.com",
+        const projects = await projectService.listProjects();
+        const baseProject = (projects && projects.length > 0) ? projects[0] : null;
+        const formattedBaseProject = baseProject ? formatProject(baseProject, requestedRef) : null;
+        
+        const projectsList: any = formattedBaseProject ? [formattedBaseProject] : [];
+
+        const defaultOrg: any = { 
+            id: "default", 
+            name: "Default Organization", 
+            slug: "default", 
+            projects: projectsList,
+            members: ensureArray([{ id: "1", is_owner: true, user: { id: "1", email: "admin@supacloud.local" } }]),
+            roles: ensureArray([{ id: "1", name: "Owner" }]),
+            feature_flags: ensureArray([]),
+            subscription: { id: "sub_local", plan: { id: "pro", name: "Pro" } }
+        };
+
+        const organizations = [defaultOrg];
+
+        const resp = {
+            id: "1", 
+            primary_email: "admin@supacloud.local",
             username: "admin",
             first_name: "Admin",
             last_name: "User",
-            organizations: [{ 
-                id: "default", 
-                name: "Default Organization", 
-                slug: "default", 
-                projects: projectsWithAlias,
-                subscription: { id: "sub_local", plan: { id: "pro", name: "Pro" } }
-            }]
+            organizations: organizations
         };
+        logger.info(`[Studio API] /profile response size: ${JSON.stringify(resp).length}`);
+        return resp;
     })
+    .get("/api/platform/account/me", () => ({
+        id: "1",
+        primary_email: "admin@supacloud.local",
+        username: "admin",
+        organizations: [{ id: "default", name: "Default Organization", slug: "default" }]
+    }))
     .get("/api/platform/config", () => ({ 
         platform_name: "SupaCloud", 
         features: { 
@@ -137,15 +172,18 @@ export const studioRoutes = new Elysia()
 
     // --- Organizations ---
     .get("/api/v1/organizations", () => [{ id: "default", name: "Default Organization", slug: "default" }])
-    .get("/api/platform/organizations", () => [{ id: "default", name: "Default Organization", slug: "default" }])
+    .get("/api/platform/organizations", () => [{ id: "default", name: "Default Organization", slug: "default", billing_email: "admin@supacloud.local", projects: [] }])
+    .get("/api/platform/organizations/:slug/members", () => ensureArray([{ id: "1", is_owner: true, user: { id: "1", email: "admin@supacloud.local" } }]))
+    .get("/api/platform/organizations/:slug/roles", () => ensureArray([{ id: "1", name: "Owner" }]))
+    .get("/api/platform/organizations/:slug/permissions", () => ensureArray(["all"]))
+    .get("/api/v1/projects/:ref/organizations", () => [{ id: "default", name: "Default Organization", slug: "default" }])
     .get("/api/platform/organizations/:slug", () => ({ id: "default", name: "Default Organization", slug: "default", plan: "pro" }))
 
     // --- Projects (v1) ---
     .get("/api/v1/projects", async () => {
         const projects = await projectService.listProjects();
-        // 关键对齐：确保返回的项目列表中包含 organization_id: "default"
-        // 并且强制第一个项目的 ref 为 "default" 以解决导航冲突
         if (projects.length === 0) return [];
+        // 关键：对齐全局唯一的 default 项目
         return [formatProject(projects[0])];
     })
     .get("/api/v1/projects/:ref", async ({ params }) => {
@@ -159,10 +197,10 @@ export const studioRoutes = new Elysia()
             { name: "service_role", api_key: project.service_key || "service" }
         ];
     }, { params: t.Object({ ref: t.String() }) })
-    .get("/api/v1/projects/:ref/functions", () => [])
-    .get("/api/v1/projects/:ref/edge-functions", () => [])
-    .get("/api/v1/projects/:ref/analytics/log-drains", () => ({ data: [] }))
-    .get("/api/v1/projects/:ref/permissions", () => ["all"])
+    .get("/api/v1/projects/:ref/functions", () => ensureArray([]))
+    .get("/api/v1/projects/:ref/edge-functions", () => ensureArray([]))
+    .get("/api/v1/projects/:ref/analytics/log-drains", () => ({ data: ensureArray([]) }))
+    .get("/api/v1/projects/:ref/permissions", () => ensureArray(["all"]))
     .get("/api/v1/projects/:ref/config/auth", async ({ params }) => {
         const project = await getProjectOrThrow(params.ref);
         return { jwt_secret: project.jwt_secret || "secret", enabled: true };
@@ -171,13 +209,30 @@ export const studioRoutes = new Elysia()
     // --- Projects (platform) ---
     .get("/api/platform/projects", async () => {
         const projects = await projectService.listProjects();
-        return projects.map(formatProject);
+        const formattedProjects = Array.isArray(projects) ? projects.map(p => formatProject(p)) : [];
+        return formattedProjects;
     })
     .get("/api/platform/projects/:ref", async ({ params }) => {
         const project = await getProjectOrThrow(params.ref);
+        // 单个项目详情返回扁平对象，但 Studio 有时会在列表上下文通过 ref 查找
         return formatProject(project);
     }, { params: t.Object({ ref: t.String() }) })
-    .get("/api/platform/projects/:ref/permissions", () => [])
+    .get("/api/platform/projects/:ref/permissions", () => ensureArray(["all"]))
+    .get("/api/platform/projects/:ref/features", () => ensureArray([
+        { id: "analytics", name: "Analytics", enabled: true },
+        { id: "storage", name: "Storage", enabled: true },
+        { id: "auth", name: "Auth", enabled: true }
+    ]))
+    .get("/api/platform/projects/:ref/feature-flags", () => ensureArray([]))
+    .get("/api/platform/projects/:ref/custom-domains", () => ensureArray([]))
+    .get("/api/platform/organizations/:slug/feature-flags", () => ensureArray([]))
+    .get("/api/platform/organizations/:slug/members", () => ensureArray([{ id: "1", is_owner: true, user: { id: "1", email: "admin@supacloud.local" } }]))
+    .get("/api/platform/organizations-list", async () => {
+        // 补全组织列表，Studio 初始化必需。ID 需对齐 profile 接口。
+        return [
+            { id: "default", name: "Default Organization", slug: "default", billing_email: "admin@supacloud.local" }
+        ];
+    })
     .get("/api/platform/projects/:ref/config", async ({ params }) => {
         const project = await getProjectOrThrow(params.ref);
         return {
@@ -189,10 +244,11 @@ export const studioRoutes = new Elysia()
     .get("/api/platform/projects/:ref/analytics/log-drains", () => ({ data: [] }))
     .get("/api/platform/projects/:ref/permissions", () => ["all"])
     .get("/api/platform/projects/:ref/settings", async () => ({
-        // 提供足够的字段防止前端崩溃
-        database: { pool_mode: "transaction" },
-        auth: { site_url: "http://localhost:3000" },
-        api: { port: 9090 }
+        // 提供极致完整的结构，防止前端多级解构后在 undefined 上调用 find
+        database: { pool_mode: "transaction", status: "ACTIVE_HEALTHY" },
+        auth: { site_url: "http://localhost:3000", additional_redirect_urls: ensureArray([]) },
+        api: { port: 9090, max_rows: 1000 },
+        storage: { enabled: true, file_size_limit: 52428800 }
     }))
     // 补全 Postgrest 配置指纹，解决 API Docs 相关 404
     .get("/api/platform/projects/:ref/config/postgrest", () => ({
@@ -216,13 +272,18 @@ export const studioRoutes = new Elysia()
     }, { params: t.Object({ ref: t.String() }) })
     .get("/api/platform/projects/:ref/databases", async ({ params }) => {
         const project = await getProjectOrThrow(params.ref);
-        return [{
+        const dbData = [{
             id: project.id,
             name: project.database?.name || "postgres",
             host: "localhost",
+            db_user: "postgres",
+            db_pass: "postgres",
+            db_port: 5432,
             port: 5432,
             status: "ACTIVE_HEALTHY"
         }];
+        logger.info(`[Studio API] /databases response: ${JSON.stringify(dbData)}`);
+        return { data: dbData };
     }, { params: t.Object({ ref: t.String() }) })
     .get("/api/platform/projects/:ref/tables", async ({ params, query }) => {
         const project = await getProjectOrThrow(params.ref);
@@ -237,7 +298,8 @@ export const studioRoutes = new Elysia()
             includeSystemSchemas: query.include_system_schemas === 'true'
         });
         if (error) return new Response(JSON.stringify(error), { status: 400 });
-        return data;
+        // 关键对齐：Tables 列表必须包裹在 data 中
+        return { data };
     }, { params: t.Object({ ref: t.String() }) })
     .get("/api/platform/projects/:ref/run-lints", () => [])
     // SQL 编辑器核心内容路由 (对齐 Studio { data } 全量武装)
@@ -408,32 +470,80 @@ export const studioRoutes = new Elysia()
                     return new Response(JSON.stringify({ error: "Invalid query body" }), { status: 400 });
                 }
 
-                logger.info(`[Query] Executing on ${dbName}: ${queryText.substring(0, 100)}...`);
+                logger.info(`[Query] Executing on ${dbName}: ${queryText.substring(0, 50)}... (key: ${query.key || 'none'})`);
                 const queryResult = await db.executeQuery(dbName, queryText);
                 let rows = queryResult.rows as any[];
                 
+                // 1. 处理多结果集
                 if (Array.isArray(rows) && rows.length > 0 && Array.isArray(rows[0])) {
-                    // 如果第一项是数组，说明是多结果集，寻找第一个非空数组或者最后一组数据
                     rows = (rows.find(r => Array.isArray(r) && r.length > 0) || rows[rows.length - 1]) as any[];
                 }
 
-                // 指纹修正：判断是否是典型的元数据查询（如 Table Editor 初始加载 schemas 等）
-                // 官方 pg-meta 对于带有 key 的 GET/POST 辅助查询通常返回扁平数组
-                const isMetadataQuery = query.key === 'schemas' || query.key === 'tables';
+                // 2. 指纹判定与自适应包装逻辑
+                const isMetadataKey = !!query.key;
+                const isSystemTableQuery = queryText.toLowerCase().includes('information_schema') ||
+                                         queryText.toLowerCase().includes('pg_catalog');
+                // 关键识别点：如果是报告查询 (pg_stat_statements, pg_stat_activity 等)，Studio 期望 200 状态码下的扁平数组
+                const isReportQuery = queryText.toLowerCase().includes('pg_stat_statements') || 
+                                     queryText.toLowerCase().includes('pg_stat_activity') ||
+                                     queryText.toLowerCase().includes('pg_authid');
 
-                if (isMetadataQuery) {
-                    return rows;
+                // 检查是否已经由 pg-meta 完成了 json 封装 (包含 data 键)
+                const hasDataEnvelope = rows.length === 1 && rows[0] && typeof rows[0] === 'object' && 'data' in rows[0];
+
+                if (hasDataEnvelope) {
+                    const innerData = rows[0].data;
+                    // 如果是工具链对象 (entity-types, fdws 等)，Studio 期望结构为 { data: { count, entities } }
+                    // 源码级对齐：src/data/entity-types/entity-types-infinite-query.ts
+                    // 内部使用 jsonb_build_object 已经封装了 { entities, count }
+                    const isToolchainObject = innerData && typeof innerData === 'object' && 
+                                           ('entities' in innerData || 'count' in innerData || 'item' in innerData);
+
+                    if (isToolchainObject) {
+                        logger.info(`[Query] Result is toolchain object, precisely aligning as { data: ... }`);
+                        // 返回行中的第一个对象，即匹配 result[0] 的解构逻辑
+                        return new Response(JSON.stringify(rows[0]), { 
+                            headers: { 'Content-Type': 'application/json' } 
+                        });
+                    }
+                    
+                    // 如果内部 data 是个普通列表且带有 key，通常需要扁平化
+                    if (isMetadataKey && Array.isArray(innerData)) {
+                        logger.info(`[Query] Result is nested data list with key, flattening.`);
+                        return new Response(JSON.stringify(innerData), { 
+                            headers: { 'Content-Type': 'application/json' } 
+                        });
+                    }
                 }
 
-                set.status = 201; // 对齐官方 201 Created 响应状态
-                // 官方对标：SQL Workspaces 的 Query 响应是一个 [ { data: rows } ] 的这种数组套对象格式
-                return [{ data: rows }];
+                // 3. 兜底逻辑：针对不同的请求场景返回官方标准格式
+                
+                // 情况 A：元数据列表请求 或 性能报告请求 -> 必须返回 200 状态码 + 扁平数组
+                if (isMetadataKey || isSystemTableQuery || isReportQuery) {
+                    return new Response(JSON.stringify(ensureArray(rows)), { 
+                        status: 200,
+                        headers: { 'Content-Type': 'application/json' } 
+                    });
+                }
+
+                // 情况 B：SQL Workspace 手动按钮点击运行 -> 期望返回 201 状态码 + [{ data: rows }] 包装
+                set.status = 201; 
+                const wrappedRows = ensureArray(rows.map(r => ({ data: r })));
+                if (wrappedRows.length === 0) wrappedRows.push({ data: [] });
+
+                const resultResp = new Response(JSON.stringify(wrappedRows), { 
+                    status: 201,
+                    headers: { 'Content-Type': 'application/json' } 
+                });
+                logger.info(`[Query Result] Type: Workspace, Rows: ${rows.length}`);
+                return resultResp;
             } catch (error) {
-                logger.warn(`[Query Intercepted] ${error instanceof Error ? error.message : String(error)} - Returning empty rows for compatibility.`);
-                return [{ data: [] }];
+                logger.warn(`[Query Error] ${error instanceof Error ? error.message : String(error)}`);
+                const errResp = ensureArray([]);
+                return new Response(JSON.stringify(errResp), { headers: { 'Content-Type': 'application/json' } });
             }
         })
-        .get("/api/platform/pg-meta/:ref/query", async () => [])
+        .get("/api/platform/pg-meta/:ref/query", async () => ensureArray([]))
     );
 
 // Backward compatibility exports

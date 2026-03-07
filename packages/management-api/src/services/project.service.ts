@@ -27,7 +27,9 @@ export interface ProjectResponse {
   name: string;
   status: ProjectStatus;
   region: string;
+  organization_id: string;
   created_at: Date;
+  updated_at: Date;
   database: {
     host: string;
     name: string;
@@ -362,7 +364,9 @@ export class ProjectService {
       name: project.name,
       status: project.status,
       region: project.region,
+      organization_id: project.organization_id || "default",
       created_at: project.created_at,
+      updated_at: project.updated_at,
       database: {
         host: "localhost",
         name: project.db_name,
