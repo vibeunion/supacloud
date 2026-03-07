@@ -38,8 +38,9 @@ COPY --from=turbo /app/out/json ./
 COPY --from=turbo /app/out/pnpm-lock.yaml ./
 COPY patches ./patches
 
+# Use --no-frozen-lockfile because patches change the lockfile
 RUN pnpm install \
-  --frozen-lockfile \
+  --no-frozen-lockfile \
   --network-concurrency 16 \
   --child-concurrency 4 \
   --ignore-scripts
