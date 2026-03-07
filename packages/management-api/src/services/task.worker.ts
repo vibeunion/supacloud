@@ -205,10 +205,14 @@ export class TaskWorker {
             await projectRepository.updateStatus(project_ref, "active");
             console.log(`[TaskWorker] Project ${project_ref} fully provisioned and activated.`);
         } else if (task_type === "cleanup_runtime") {
-            // After runtime cleanup, cleanup router
-            await taskRepository.createTask(project_ref, "cleanup_router");
+            // After runtime cleanup, cleanup database
+            await taskRepository.createTask(project_ref, "cleanup_db");
         } else if (task_type === "cleanup_db") {
-            console.log(`[TaskWorker] Cleanup for ${project_ref} db done.`);
+            // After database cleanup, cleanup router
+            await taskRepository.createTask(project_ref, "cleanup_router");
+        } else if (task_type === "cleanup_router") {
+            // Cleanup complete
+            console.log(`[TaskWorker] Project ${project_ref} fully cleaned up.`);
         }
     }
 
