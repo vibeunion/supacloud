@@ -502,4 +502,4 @@ class DeployServiceClass {
 }
 
 export const deployService = new DeployServiceClass();
-export type { DeployServiceClass };
+export { DeployServiceClass };
