@@ -10,7 +10,11 @@ const PORT = 8000;
 const API_URL = process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000';
 
 const server = http.createServer((req, res) => {
-  // Always forward /auth/ requests to the main domain
+  // Always forward /auth/ and /rest/ requests to the main domain
+  let path = req.url;
+  
+  // Studio sometimes uses /rest/v1/ and sometimes just /rest/
+  // We ensure it maps to the correct backend format
   const targetUrl = new URL(req.url, API_URL);
   
   console.log(`[Proxy] ${req.method} ${req.url} -> ${targetUrl.href}`);
