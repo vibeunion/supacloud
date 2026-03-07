@@ -34,16 +34,20 @@ const getProjectOrThrow = async (ref: string) => {
 
 const formatProject = (project: any, requestedRef?: string) => {
     const projectId = "1";
-    const orgId = "default";
+    const orgId = 1;
     const activeRef = requestedRef || project.ref || "default";
 
+    // V1ProjectResponse 格式（来自 api.d.ts）
     return {
         id: projectId,
         ref: activeRef,
         name: project.name,
-        status: "ACTIVE", 
+        status: "ACTIVE_HEALTHY",
         region: project.region || "us-east-1",
-        organization_id: orgId,
+        organization_id: String(orgId),
+        organization_slug: "default",
+        created_at: project.created_at || new Date().toISOString(),
+        // 扩展字段
         organization: {
             id: orgId,
             name: project.organization?.name || "Default Organization",
@@ -72,7 +76,6 @@ const formatProject = (project: any, requestedRef?: string) => {
             { id: "s7", name: "postgrest", type: "postgrest", status: "ACTIVE" },
             { id: "s8", name: "api", type: "postgrest", status: "ACTIVE" }
         ]),
-        // 扩展字段防止在 project.XXX.find 处崩溃
         members: ensureArray([{ id: "1", user: { id: "1", email: "admin@supacloud.local" } }]),
         permissions: ensureArray(["all"]),
         feature_flags: ensureArray([]),
@@ -130,7 +133,7 @@ export const studioRoutes = new Elysia()
         const projectsList: any = formattedBaseProject ? [formattedBaseProject] : [];
 
         const defaultOrg: any = { 
-            id: "default", 
+            id: 1, 
             name: "Default Organization", 
             slug: "default", 
             projects: projectsList,
@@ -142,12 +145,20 @@ export const studioRoutes = new Elysia()
 
         const organizations = [defaultOrg];
 
+        // ProfileResponse 格式（来自 platform.d.ts）
         const resp = {
-            id: "1", 
+            id: 1,
             primary_email: "admin@supacloud.local",
             username: "admin",
             first_name: "Admin",
             last_name: "User",
+            auth0_id: "auth0|admin",
+            gotrue_id: "admin-gotrue-id",
+            disabled_features: [],
+            free_project_limit: null,
+            is_alpha_user: false,
+            is_sso_user: false,
+            mobile: null,
             organizations: organizations
         };
         logger.info(`[Studio API] /profile response size: ${JSON.stringify(resp).length}`);
@@ -171,13 +182,50 @@ export const studioRoutes = new Elysia()
     }))
 
     // --- Organizations ---
-    .get("/api/v1/organizations", () => [{ id: "default", name: "Default Organization", slug: "default" }])
-    .get("/api/platform/organizations", () => [{ id: "default", name: "Default Organization", slug: "default", billing_email: "admin@supacloud.local", projects: [] }])
+    // OrganizationResponse 格式（来自 platform.d.ts）
+    .get("/api/v1/organizations", () => [
+        { id: 1, name: "Default Organization", slug: "default" }
+    ])
+    .get("/api/platform/organizations", () => [
+        {
+            id: 1,
+            name: "Default Organization",
+            slug: "default",
+            billing_email: "admin@supacloud.local",
+            billing_partner: null,
+            is_owner: true,
+            opt_in_tags: [],
+            organization_missing_address: false,
+            organization_requires_mfa: false,
+            plan: { id: "pro", name: "Pro" },
+            restriction_data: null,
+            restriction_status: null,
+            stripe_customer_id: null,
+            subscription_id: null,
+            usage_billing_enabled: false
+        }
+    ])
     .get("/api/platform/organizations/:slug/members", () => ensureArray([{ id: "1", is_owner: true, user: { id: "1", email: "admin@supacloud.local" } }]))
     .get("/api/platform/organizations/:slug/roles", () => ensureArray([{ id: "1", name: "Owner" }]))
     .get("/api/platform/organizations/:slug/permissions", () => ensureArray(["all"]))
-    .get("/api/v1/projects/:ref/organizations", () => [{ id: "default", name: "Default Organization", slug: "default" }])
-    .get("/api/platform/organizations/:slug", () => ({ id: "default", name: "Default Organization", slug: "default", plan: "pro" }))
+    .get("/api/v1/projects/:ref/organizations", () => [{ id: 1, name: "Default Organization", slug: "default" }])
+    .get("/api/platform/organizations/:slug", () => ({ 
+        id: 1, 
+        name: "Default Organization", 
+        slug: "default", 
+        plan: { id: "pro", name: "Pro" },
+        billing_email: "admin@supacloud.local",
+        billing_partner: null,
+        is_owner: true,
+        opt_in_tags: [],
+        organization_missing_address: false,
+        organization_requires_mfa: false,
+        restriction_data: null,
+        restriction_status: null,
+        stripe_customer_id: null,
+        subscription_id: null,
+        usage_billing_enabled: false
+    }))
 
     // --- Projects (v1) ---
     .get("/api/v1/projects", async () => {
