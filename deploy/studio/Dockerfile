@@ -1,9 +1,9 @@
 # SupaCloud Studio Dockerfile
-# Simplified build without turbo prune to avoid pnpm issues
+# Use bun for building (compatible with pnpm workspaces)
 # Build from Supabase repo root: docker build . -f supacloud/deploy/studio/Dockerfile -t supacloud-studio
 
-# Stage 1: Base
-FROM node:22-slim AS base
+# Stage 1: Base with bun
+FROM oven/bun:1 AS base
 
 RUN apt-get update -qq && \
   apt-get install -y --no-install-recommends \
@@ -15,15 +15,14 @@ RUN apt-get update -qq && \
 
 WORKDIR /app
 
-# Stage 2: Dependencies - Use npm instead of pnpm to avoid exit 254
+# Stage 2: Dependencies
 FROM base AS deps
-COPY package.json package-lock.json* ./
+COPY package.json bun.lockb* pnpm-lock.yaml* ./
 COPY apps/studio/package.json ./apps/studio/
 COPY packages packages/
 
-# Use npm for more reliable dependency installation
-RUN npm install -g npm@latest
-RUN npm ci --legacy-peer-deps || npm install --legacy-peer-deps
+# Install dependencies with bun
+RUN bun install --frozen-lockfile || bun install
 
 # Stage 3: Builder
 FROM deps AS builder
@@ -49,7 +48,7 @@ ENV FORCE_ASSET_CDN=$FORCE_ASSET_CDN
 ENV SENTRY_IGNORE_API_RESOLUTION_ERROR=$SENTRY_IGNORE_API_RESOLUTION_ERROR
 
 WORKDIR /app/apps/studio
-RUN npm run build
+RUN bun run build
 
 # Stage 4: Production
 FROM node:22-slim AS production
