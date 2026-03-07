@@ -43,25 +43,6 @@ FROM deps AS builder
 COPY --from=turbo /app/out/full ./
 COPY patches ./patches
 
-# Copy modified csp.js that supports relative API URL
-COPY deploy/studio/patches/csp.js /app/apps/studio/csp.js
-
-# Apply next.config.js patch for auth rewrites
-RUN cd /app && \
-  if [ -f patches/next-config-rewrite.patch ]; then \
-  git apply patches/next-config-rewrite.patch || true; \
-  fi
-
-# Apply auth-provider patch for relative URL support
-RUN cd /app && \
-  if [ -f patches/auth-provider.patch ]; then \
-  git apply patches/auth-provider.patch || true; \
-  fi
-
-# Fix _app.tsx - skip preconnect for relative API URLs during SSR
-RUN cd /app/apps/studio && \
-  sed -i "s|{IS_PLATFORM && (|{IS_PLATFORM \&\& API_URL.startsWith('http') \&\& (|" pages/_app.tsx
-
 # Build arguments - minimal set for runtime flexibility
 ARG NEXT_PUBLIC_IS_PLATFORM=true
 ARG NEXT_PUBLIC_API_URL=/api
