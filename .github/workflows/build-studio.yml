@@ -31,6 +31,11 @@ jobs:
         with:
           path: supacloud
 
+      - name: Copy patches to Supabase
+        run: |
+          mkdir -p supabase/patches
+          cp supacloud/deploy/studio/patches/*.patch supabase/patches/ 2>/dev/null || true
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -60,8 +65,7 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             NEXT_PUBLIC_IS_PLATFORM=true
-            NEXT_PUBLIC_API_URL=https://studio.esgfarm.cn/api
-            NEXT_PUBLIC_SITE_URL=https://studio.esgfarm.cn
+            NEXT_PUBLIC_API_URL=/api
             NEXT_PUBLIC_ENVIRONMENT=production
             NEXT_PUBLIC_ENABLE_LOGS=true
             NEXT_PUBLIC_REALTIME_ENABLED=true
