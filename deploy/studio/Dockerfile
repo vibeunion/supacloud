@@ -20,13 +20,6 @@ WORKDIR /app
 # Stage 2: Turbo prune
 FROM base AS turbo
 COPY . .
-
-# Apply patches for relative API URL support (patch file copied from supacloud repo)
-RUN if [ -f /app/patches/studio-api-url.patch ]; then \
-  cd /app/apps/studio && \
-  git apply /app/patches/studio-api-url.patch || echo "Patch already applied"; \
-  fi
-
 RUN pnpm dlx turbo@2.3.3 prune studio --docker
 
 # Stage 3: Dependencies
@@ -38,7 +31,6 @@ COPY --from=turbo /app/out/json ./
 COPY --from=turbo /app/out/pnpm-lock.yaml ./
 COPY patches ./patches
 
-# Use --no-frozen-lockfile because patches change the lockfile
 RUN pnpm install \
   --no-frozen-lockfile \
   --network-concurrency 16 \
@@ -49,6 +41,10 @@ RUN pnpm install \
 FROM deps AS builder
 COPY --from=turbo /app/out/full ./
 COPY patches ./patches
+
+# Apply patches for relative API URL support
+RUN cd /app/apps/studio && \
+  git apply /app/patches/studio-api-url.patch || echo "Patch applied or already applied"
 
 # Build arguments - use relative path for universal image
 ARG NEXT_PUBLIC_IS_PLATFORM=true
