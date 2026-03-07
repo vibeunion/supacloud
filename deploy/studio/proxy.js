@@ -2,23 +2,22 @@ const http = require('http');
 
 /**
  * SupaCloud Local Proxy
- * Special proxy to redirect hardcoded localhost:8000 requests (Auth/GoTrue) 
- * to the actual production API.
+ * Special proxy to redirect hardcoded localhost:8000 requests (Auth/GoTrue/API) 
+ * to the actual production API. 
+ * 
+ * IMPORTANT: Read target from RUNTIME environment variables, not build-time.
  */
 
 const PORT = 8000;
-const API_URL = process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000';
+// Use a specific internal env var for the real backend to avoid confusion with the build-time one
+const TARGET_API = process.env.SUPA_BACKEND_URL || process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000';
 
 const server = http.createServer((req, res) => {
   // Always forward /auth/ and /rest/ requests to the main domain
   // We use the Host header from the request to stay dynamic
-  const protocol = req.headers['x-forwarded-proto'] || 'http';
-  const host = req.headers['host'];
-  const base = `${protocol}://${host}`;
+  const targetUrl = new URL(req.url, TARGET_API);
   
-  const targetUrl = new URL(req.url, base);
-  
-  console.log(`[Proxy] ${req.method} ${req.url} -> ${targetUrl.href} (Host: ${host})`);
+  console.log(`[Proxy] ${req.method} ${req.url} -> ${targetUrl.href}`);
 
   const options = {
     hostname: targetUrl.hostname,
@@ -31,7 +30,8 @@ const server = http.createServer((req, res) => {
     }
   };
 
-  const proxyReq = (targetUrl.protocol === 'https:' ? require('https') : http).request(options, (proxyRes) => {
+  const protocolHandler = targetUrl.protocol === 'https:' ? require('https') : require('http');
+  const proxyReq = protocolHandler.request(options, (proxyRes) => {
     res.writeHead(proxyRes.statusCode, proxyRes.headers);
     proxyRes.pipe(res, { end: true });
   });
