@@ -49,13 +49,13 @@ COPY deploy/studio/patches/csp.js /app/apps/studio/csp.js
 # Apply next.config.js patch for auth rewrites
 RUN cd /app && \
   if [ -f patches/next-config-rewrite.patch ]; then \
-    git apply patches/next-config-rewrite.patch || true; \
+  git apply patches/next-config-rewrite.patch || true; \
   fi
 
 # Apply auth-provider patch for relative URL support
 RUN cd /app && \
   if [ -f patches/auth-provider.patch ]; then \
-    git apply patches/auth-provider.patch || true; \
+  git apply patches/auth-provider.patch || true; \
   fi
 
 # Fix _app.tsx - skip preconnect for relative API URLs during SSR
@@ -102,8 +102,14 @@ COPY --from=builder --chown=nextjs:nodejs /app/apps/studio/.next/standalone ./
 COPY --from=builder /app/apps/studio/public ./apps/studio/public
 COPY --from=builder --chown=nextjs:nodejs /app/apps/studio/.next/static ./apps/studio/.next/static
 
+# Copy proxy to production
+COPY --from=builder /app/deploy/studio/proxy.js ./apps/studio/proxy.js
+
 USER nextjs
 EXPOSE 3000
+# Also expose 8000 for internal auth redirection if needed (though only visible inside container)
+EXPOSE 8000
 
 WORKDIR /app/apps/studio
-CMD ["node", "server.js"]
+# Run both proxy and studio server
+CMD node proxy.js & node server.js
