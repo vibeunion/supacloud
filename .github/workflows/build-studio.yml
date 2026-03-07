@@ -24,6 +24,7 @@ jobs:
         with:
           repository: supabase/supabase
           path: supabase
+          fetch-depth: 1
 
       - name: Checkout SupaCloud
         uses: actions/checkout@v4
@@ -45,6 +46,9 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest
+            type=sha
 
       - name: Build and push
         uses: docker/build-push-action@v5
@@ -63,5 +67,7 @@ jobs:
             NEXT_PUBLIC_REALTIME_ENABLED=true
             FORCE_ASSET_CDN=-1
             SENTRY_IGNORE_API_RESOLUTION_ERROR=1
+            NEXT_PUBLIC_HCAPTCHA_SITE_KEY=
+            NEXT_PUBLIC_STRIPE_PUBLIC_KEY=
           cache-from: type=gha
           cache-to: type=gha,mode=max
