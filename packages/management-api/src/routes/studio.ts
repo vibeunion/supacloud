@@ -96,34 +96,68 @@ const formatProject = (project: any, requestedRef?: string) => {
  * 注意：所有路径都包含在 /api 前缀下（在 index.ts 中挂载）。
  * 这里的路径从 /platform 或 /v1 开始。
  */
+const ADMIN_USERS = [
+    { id: "1", email: "admin@supacloud.local", password: "supacloud2024", name: "Admin", role: "owner" }
+];
+
+const generateToken = (userId: string) => {
+    const header = Buffer.from(JSON.stringify({ alg: "HS256", typ: "JWT" })).toString("base64url");
+    const payload = Buffer.from(JSON.stringify({
+        sub: userId,
+        iat: Math.floor(Date.now() / 1000),
+        exp: Math.floor(Date.now() / 1000) + 86400
+    })).toString("base64url");
+    return `${header}.${payload}.supacloud`;
+};
+
 export const studioRoutes = new Elysia()
     // --- Auth & Profile ---
-    .post("/api/platform/login", async ({ body }) => {
+    .post("/api/platform/login", async ({ body, set }) => {
         const bodyAny = body as any;
-        const email = bodyAny?.email || "admin@supacloud.local";
-        const password = bodyAny?.password;
+        const email = bodyAny?.email || "";
+        const password = bodyAny?.password || "";
+        
+        const admin = ADMIN_USERS.find(u => u.email === email && u.password === password);
+        
+        if (!admin) {
+            set.status = 401;
+            return { error: "Invalid credentials", message: "邮箱或密码错误" };
+        }
         
         return {
-            access_token: "supacloud-session-token",
+            access_token: generateToken(admin.id),
             token_type: "bearer",
             expires_in: 86400,
             user: {
-                id: "1",
-                email: email,
-                user_metadata: { name: "Admin" },
-                app_metadata: { provider: "email" }
+                id: admin.id,
+                email: admin.email,
+                user_metadata: { name: admin.name, role: admin.role },
+                app_metadata: { provider: "email", role: admin.role }
             }
         };
     }, { body: t.Optional(t.Any()) })
-    .post("/api/platform/signup", async ({ body }) => {
-        const bodyAny = body as any;
-        const email = bodyAny?.email || "admin@supacloud.local";
-        return {
-            message: "Signup successful",
-            user: { id: "1", email }
+    .post("/api/platform/signup", async ({ set }) => {
+        set.status = 403;
+        return { 
+            error: "Registration disabled", 
+            message: "注册已关闭，请联系管理员获取账号" 
         };
-    }, { body: t.Optional(t.Any()) })
+    })
     .post("/api/platform/logout", () => ({ success: true }))
+    .get("/api/platform/auth/sso", async ({ set }) => {
+        set.status = 400;
+        return { 
+            error: "SSO disabled", 
+            message: "SSO 登录未启用，请使用邮箱密码登录" 
+        };
+    })
+    .get("/api/platform/auth/github", async ({ set }) => {
+        set.status = 400;
+        return { 
+            error: "GitHub auth disabled", 
+            message: "GitHub 登录未启用，请使用邮箱密码登录" 
+        };
+    })
     .get("/api/auth/session", () => ({ 
         user: { 
             id: "1", 
