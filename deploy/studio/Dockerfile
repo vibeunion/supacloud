@@ -42,32 +42,9 @@ FROM deps AS builder
 COPY --from=turbo /app/out/full ./
 COPY patches ./patches
 
-# Fix csp.js to support relative API URL using heredoc
-RUN cd /app/apps/studio && cat > csp.js << 'EOF'
-const API_URL = process.env.NEXT_PUBLIC_API_URL
-  ? (process.env.NEXT_PUBLIC_API_URL.startsWith('http')
-    ? new URL(process.env.NEXT_PUBLIC_API_URL).origin
-    : '')
-  : ''
-const SUPABASE_URL = process.env.SUPABASE_URL ? new URL(process.env.SUPABASE_URL).origin : ''
-const SUPABASE_PUBLIC_URL = process.env.SUPABASE_PUBLIC_URL || ''
-
-module.exports = {
-  ContentSecurityPolicy: `
-    default-src 'self';
-    script-src 'self' 'unsafe-eval' 'unsafe-inline' ${API_URL} ${SUPABASE_URL} vitals.vercel-insights.com;
-    style-src 'self' 'unsafe-inline';
-    img-src 'self' blob: data: ${API_URL} ${SUPABASE_URL} ${SUPABASE_PUBLIC_URL};
-    media-src 'self' blob: data: ${SUPABASE_URL} ${SUPABASE_PUBLIC_URL};
-    connect-src 'self' ${API_URL} ${SUPABASE_URL} ${SUPABASE_PUBLIC_URL} vitals.vercel-insights.com;
-    font-src 'self' data:;
-    object-src 'none';
-    base-uri 'self';
-    form-action 'self';
-    frame-ancestors 'none';
-  `,
-}
-EOF
+# Fix csp.js to support relative API URL - use perl for multiline replacement
+RUN cd /app/apps/studio && \
+  perl -i -0pe 's/const API_URL = process\.env\.NEXT_PUBLIC_API_URL\n  \? new URL\(process\.env\.NEXT_PUBLIC_API_URL\)\.origin\n  : '\'''\''/const API_URL = process.env.NEXT_PUBLIC_API_URL\n  ? (process.env.NEXT_PUBLIC_API_URL.startsWith('\''http'\'')\n    ? new URL(process.env.NEXT_PUBLIC_API_URL).origin\n    : '\''\'''\''\n  : '\'''\'''\''/g' csp.js
 
 # Build arguments - use relative path for universal image
 ARG NEXT_PUBLIC_IS_PLATFORM=true
