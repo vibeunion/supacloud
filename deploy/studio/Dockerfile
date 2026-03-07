@@ -1,10 +1,11 @@
 # SupaCloud Studio Dockerfile
-# Use bun for building (compatible with pnpm workspaces)
+# Use pnpm with memory limits and concurrency control
 # Build from Supabase repo root: docker build . -f supacloud/deploy/studio/Dockerfile -t supacloud-studio
 
-# Stage 1: Base with bun
-FROM oven/bun:1 AS base
+# Stage 1: Base
+FROM node:22-slim AS base
 
+# Install system dependencies
 RUN apt-get update -qq && \
   apt-get install -y --no-install-recommends \
   git \
@@ -13,20 +14,38 @@ RUN apt-get update -qq && \
   build-essential && \
   rm -rf /var/lib/apt/lists/*
 
+# Install pnpm via corepack
+RUN corepack enable && corepack prepare pnpm@10.16.1 --activate
+
 WORKDIR /app
 
-# Stage 2: Dependencies
-FROM base AS deps
-COPY package.json bun.lockb* pnpm-lock.yaml* ./
-COPY apps/studio/package.json ./apps/studio/
-COPY packages packages/
-
-# Install dependencies with bun
-RUN bun install --frozen-lockfile || bun install
-
-# Stage 3: Builder
-FROM deps AS builder
+# Stage 2: Turbo prune
+FROM base AS turbo
 COPY . .
+RUN pnpm dlx turbo@2.3.3 prune studio --docker
+
+# Stage 3: Dependencies
+FROM base AS deps
+
+# Set memory limit for Node.js
+ENV NODE_OPTIONS="--max-old-space-size=8192"
+
+COPY --from=turbo /app/out/json ./
+COPY --from=turbo /app/out/pnpm-lock.yaml ./
+
+# Install with aggressive settings to prevent exit 254
+RUN pnpm config set store-dir /tmp/pnpm-store && \
+  pnpm install \
+    --no-frozen-lockfile \
+    --network-concurrency 1 \
+    --child-concurrency 1 \
+    --ignore-scripts \
+    --prefer-offline \
+    --no-optional
+
+# Stage 4: Builder
+FROM deps AS builder
+COPY --from=turbo /app/out/full ./
 
 # Set build-time environment variables for platform mode
 ARG NEXT_PUBLIC_IS_PLATFORM=true
@@ -48,9 +67,9 @@ ENV FORCE_ASSET_CDN=$FORCE_ASSET_CDN
 ENV SENTRY_IGNORE_API_RESOLUTION_ERROR=$SENTRY_IGNORE_API_RESOLUTION_ERROR
 
 WORKDIR /app/apps/studio
-RUN bun run build
+RUN pnpm exec next build
 
-# Stage 4: Production
+# Stage 5: Production
 FROM node:22-slim AS production
 WORKDIR /app
 
