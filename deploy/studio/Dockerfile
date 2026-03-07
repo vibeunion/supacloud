@@ -42,9 +42,8 @@ FROM deps AS builder
 COPY --from=turbo /app/out/full ./
 COPY patches ./patches
 
-# Fix csp.js to support relative API URL - use perl for multiline replacement
-RUN cd /app/apps/studio && \
-  perl -i -0pe 's/const API_URL = process\.env\.NEXT_PUBLIC_API_URL\n  \? new URL\(process\.env\.NEXT_PUBLIC_API_URL\)\.origin\n  : '\'''\''/const API_URL = process.env.NEXT_PUBLIC_API_URL\n  ? (process.env.NEXT_PUBLIC_API_URL.startsWith('\''http'\'')\n    ? new URL(process.env.NEXT_PUBLIC_API_URL).origin\n    : '\''\'''\''\n  : '\'''\'''\''/g' csp.js
+# Copy modified csp.js that supports relative API URL
+COPY deploy/studio/patches/csp.js /app/apps/studio/csp.js
 
 # Build arguments - use relative path for universal image
 ARG NEXT_PUBLIC_IS_PLATFORM=true
