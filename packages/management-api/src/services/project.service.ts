@@ -216,9 +216,10 @@ export class ProjectService {
   }
 
   // Asynchronously cleanup resources (Saga)
+  // Cleanup pipeline: cleanup_runtime → cleanup_db → cleanup_router
   private async cleanupResources(projectRef: string): Promise<void> {
     try {
-      await taskRepository.createTask(projectRef, "cleanup_router");
+      await taskRepository.createTask(projectRef, "cleanup_runtime");
       logger.info(`[Saga] Initiated resource cleanup for project ${projectRef}`);
     } catch (error) {
       logger.error(`Cleanup saga initiation error for ${projectRef}:`, error as Error);
