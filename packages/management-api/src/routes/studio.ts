@@ -96,18 +96,31 @@ const formatProject = (project: any, requestedRef?: string) => {
  * 注意：所有路径都包含在 /api 前缀下（在 index.ts 中挂载）。
  * 这里的路径从 /platform 或 /v1 开始。
  */
-const ADMIN_USERS = [
-    { id: "1", email: "admin@supacloud.local", password: "supacloud2024", name: "Admin", role: "owner" }
-];
+const getAdminUsers = () => {
+    const adminEmail = process.env.SUPACLOUD_ADMIN_EMAIL || "admin@supacloud.local";
+    const adminPassword = process.env.SUPACLOUD_ADMIN_PASSWORD || "supacloud2024";
+    const adminName = process.env.SUPACLOUD_ADMIN_NAME || "Admin";
+    
+    return [
+        { id: "1", email: adminEmail, password: adminPassword, name: adminName, role: "owner" }
+    ];
+};
+
+const JWT_SECRET = process.env.SUPACLOUD_JWT_SECRET || "supacloud-secret-key-change-in-production";
 
 const generateToken = (userId: string) => {
+    const crypto = require("crypto");
     const header = Buffer.from(JSON.stringify({ alg: "HS256", typ: "JWT" })).toString("base64url");
     const payload = Buffer.from(JSON.stringify({
         sub: userId,
         iat: Math.floor(Date.now() / 1000),
         exp: Math.floor(Date.now() / 1000) + 86400
     })).toString("base64url");
-    return `${header}.${payload}.supacloud`;
+    const signature = crypto
+        .createHmac("sha256", JWT_SECRET)
+        .update(`${header}.${payload}`)
+        .digest("base64url");
+    return `${header}.${payload}.${signature}`;
 };
 
 export const studioRoutes = new Elysia()
@@ -117,7 +130,8 @@ export const studioRoutes = new Elysia()
         const email = bodyAny?.email || "";
         const password = bodyAny?.password || "";
         
-        const admin = ADMIN_USERS.find(u => u.email === email && u.password === password);
+        const adminUsers = getAdminUsers();
+        const admin = adminUsers.find(u => u.email === email && u.password === password);
         
         if (!admin) {
             set.status = 401;
