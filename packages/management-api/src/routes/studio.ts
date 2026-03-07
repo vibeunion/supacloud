@@ -667,7 +667,63 @@ export const studioRoutes = new Elysia()
             }
         })
         .get("/api/platform/pg-meta/:ref/query", async () => ensureArray([]))
-    );
+    )
+    
+    // --- Incident Status ---
+    .get("/api/incident-status", () => ({
+        incidents: [],
+        message: "All systems operational"
+    }))
+    
+    // --- GoTrue compatibility (for login page) ---
+    .post("/auth/v1/token", async ({ body, set }) => {
+        const bodyAny = body as any;
+        const grantType = bodyAny?.grant_type || "password";
+        
+        if (grantType === "password") {
+            const email = bodyAny?.email || "";
+            const password = bodyAny?.password || "";
+            
+            const adminUsers = getAdminUsers();
+            const admin = adminUsers.find(u => u.email === email && u.password === password);
+            
+            if (!admin) {
+                set.status = 400;
+                return { 
+                    error: "invalid_grant", 
+                    error_description: "Invalid login credentials" 
+                };
+            }
+            
+            return {
+                access_token: generateToken(admin.id),
+                token_type: "bearer",
+                expires_in: 86400,
+                refresh_token: generateToken(admin.id),
+                user: {
+                    id: admin.id,
+                    email: admin.email,
+                    aud: "authenticated",
+                    role: "authenticated",
+                    created_at: new Date().toISOString(),
+                    updated_at: new Date().toISOString(),
+                    user_metadata: { name: admin.name, role: admin.role },
+                    app_metadata: { provider: "email", role: admin.role }
+                }
+            };
+        }
+        
+        set.status = 400;
+        return { error: "unsupported_grant_type" };
+    }, { body: t.Optional(t.Any()) })
+    .get("/auth/v1/user", () => ({
+        id: "1",
+        email: "admin@supacloud.local",
+        aud: "authenticated",
+        role: "authenticated",
+        created_at: new Date().toISOString(),
+        user_metadata: { name: "Admin" }
+    }));
 
 // Backward compatibility exports
 export const studioV1Routes = studioRoutes;
