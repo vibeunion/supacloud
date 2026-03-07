@@ -41,7 +41,7 @@ describe("RouterService", () => {
   describe("getProjectDomain", () => {
     test("should return formatted domain", () => {
       const domain = routerService.getProjectDomain("testref");
-      expect(domain).toBe(`testref.${config.baseDomain}`);
+      expect(domain).toBe(`testref.localhost`);
     });
 
     test("should include project ref in domain", () => {
