@@ -3,26 +3,14 @@
 # Build: docker build . -f Dockerfile -t studio
 # Version: 0.2.1
 
-# Stage 1: Base - Early Injection & Context Adaptive
+# Stage 1: Base
 FROM node:22-slim AS base
-
 RUN apt-get update -qq && \
   apt-get install -y --no-install-recommends \
-  git \
-  python3 \
-  ca-certificates \
-  build-essential && \
+  git python3 ca-certificates build-essential && \
   rm -rf /var/lib/apt/lists/*
-
 RUN corepack enable && corepack prepare pnpm@10.16.1 --activate
-
 WORKDIR /app
-
-# [CRITICAL] Adaptive Copy: Works whether build context is repo root OR deploy/studio/
-# We use wildcards to make the source optional/flexible during the COPY phase
-# This ensures visibility across all stages and bypasses turbo prune logic.
-COPY proxy.js* deploy/studio/proxy.js* /app/
-COPY patches/csp.js* deploy/studio/patches/csp.js* /app/
 
 # Stage 2: Turbo prune
 FROM base AS turbo
@@ -31,47 +19,41 @@ RUN pnpm dlx turbo@2.3.3 prune studio --docker
 
 # Stage 3: Dependencies
 FROM base AS deps
-
 ENV NODE_OPTIONS="--max-old-space-size=8192"
-
 COPY --from=turbo /app/out/json ./
 COPY --from=turbo /app/out/pnpm-lock.yaml ./
 COPY patches ./patches
-
-RUN pnpm install \
-  --no-frozen-lockfile \
-  --network-concurrency 16 \
-  --child-concurrency 4 \
-  --ignore-scripts
+RUN pnpm install --no-frozen-lockfile --ignore-scripts
 
 # Stage 4: Builder
 FROM deps AS builder
 COPY --from=turbo /app/out/full ./
 COPY patches ./patches
 
-# Transfer the early injected assets from the base/deps layers into the workspace
-# Supports both filenames potentially caught by the adaptive COPY above
-RUN mkdir -p /app/apps/studio && \
-  (cp /app/csp.js /app/apps/studio/csp.js 2>/dev/null || cp /app/patches/csp.js /app/apps/studio/csp.js 2>/dev/null || true) && \
-  (cp /app/proxy.js /app/apps/studio/proxy.js 2>/dev/null || true) && \
-  ls -la /app/apps/studio/proxy.js
+# [FINAL FIX]: Re-inject key assets directly from the build context into the final builder location.
+# This bypasses all issues with multi-stage layer inheritance and turbo pruning.
+# We use wildcards to handle both root-level and deploy-level build triggers.
+COPY proxy.js* deploy/studio/proxy.js* ./apps/studio/
+COPY patches/csp.js* deploy/studio/patches/csp.js* ./apps/studio/
+
+# Verify file existence immediately (this will fail build if files are missing)
+RUN ls -la ./apps/studio/proxy.js ./apps/studio/csp.js
 
 # Fix _app.tsx - skip preconnect for relative API URLs during SSR
-RUN cd /app/apps/studio && \
+RUN cd apps/studio && \
   sed -i "s|href={new URL(API_URL).origin}|href={API_URL.startsWith('http') ? new URL(API_URL).origin : ''}|" pages/_app.tsx && \
   sed -i "s|{IS_PLATFORM && (|{IS_PLATFORM \&\& API_URL.startsWith('http') \&\& (|" pages/_app.tsx
 
-# Build arguments - minimal set for runtime flexibility
+# Build arguments
 ARG NEXT_PUBLIC_IS_PLATFORM=true
 ARG NEXT_PUBLIC_API_URL=/api
 ARG NEXT_PUBLIC_ENVIRONMENT=production
-# Hardcode to localhost so client always hits the internal proxy.js
 ARG NEXT_PUBLIC_SITE_URL=http://localhost:8000
 
-ENV NEXT_PUBLIC_IS_PLATFORM=$NEXT_PUBLIC_IS_PLATFORM
-ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
-ENV NEXT_PUBLIC_ENVIRONMENT=$NEXT_PUBLIC_ENVIRONMENT
-ENV NEXT_PUBLIC_SITE_URL=$NEXT_PUBLIC_SITE_URL
+ENV NEXT_PUBLIC_IS_PLATFORM=$NEXT_PUBLIC_IS_PLATFORM \
+  NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL \
+  NEXT_PUBLIC_ENVIRONMENT=$NEXT_PUBLIC_ENVIRONMENT \
+  NEXT_PUBLIC_SITE_URL=$NEXT_PUBLIC_SITE_URL
 
 WORKDIR /app/apps/studio
 RUN pnpm exec next build
@@ -79,27 +61,16 @@ RUN pnpm exec next build
 # Stage 5: Production
 FROM node:22-slim AS production
 WORKDIR /app
+ENV NODE_ENV=production HOSTNAME="0.0.0.0" PORT=3000
+RUN addgroup --system --gid 1001 nodejs && adduser --system --uid 1001 nextjs
 
-ENV NODE_ENV=production
-ENV HOSTNAME="0.0.0.0"
-ENV PORT=3000
-
-RUN addgroup --system --gid 1001 nodejs && \
-  adduser --system --uid 1001 nextjs
-
-# Copy entire standalone (includes node_modules at root level for monorepo)
+# Copy entire standalone
 COPY --from=builder --chown=nextjs:nodejs /app/apps/studio/.next/standalone ./
 COPY --from=builder /app/apps/studio/public ./apps/studio/public
 COPY --from=builder --chown=nextjs:nodejs /app/apps/studio/.next/static ./apps/studio/.next/static
-
-# Copy proxy to production from builder stage
 COPY --from=builder /app/apps/studio/proxy.js ./apps/studio/proxy.js
 
 USER nextjs
-EXPOSE 3000
-# Also expose 8000 for internal auth redirection if needed (though only visible inside container)
-EXPOSE 8000
-
+EXPOSE 3000 8000
 WORKDIR /app/apps/studio
-# Run both proxy and studio server
 CMD node proxy.js & node server.js
