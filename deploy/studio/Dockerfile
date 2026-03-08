@@ -65,18 +65,26 @@ RUN cd apps/studio && \
   sed -i "s|href={new URL(API_URL).origin}|href={API_URL.startsWith('http') ? new URL(API_URL).origin : ''}|" pages/_app.tsx && \
   sed -i "s|{IS_PLATFORM && (|{IS_PLATFORM \&\& API_URL.startsWith('http') \&\& (|" pages/_app.tsx
 
+# Apply auth-provider patch for relative URL support
+RUN cd /app && \
+  if [ -f patches/auth-provider.patch ]; then \
+    git apply patches/auth-provider.patch || echo "Auth provider patch may already be applied"; \
+  fi
+
 # Build arguments - Sanitized for open source distribution
 # Setting NEXT_PUBLIC_SITE_URL to empty enables relative path requests for Auth.
 # This ensures Studio works behind any reverse proxy without hardcoding domains.
 ARG NEXT_PUBLIC_IS_PLATFORM=true
 ARG NEXT_PUBLIC_API_URL=/api
 ARG NEXT_PUBLIC_GOTRUE_URL=/auth
+ARG NEXT_PUBLIC_SUPABASE_URL=/api
 ARG NEXT_PUBLIC_ENVIRONMENT=production
 ARG NEXT_PUBLIC_SITE_URL=
 
 ENV NEXT_PUBLIC_IS_PLATFORM=$NEXT_PUBLIC_IS_PLATFORM \
   NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL \
   NEXT_PUBLIC_GOTRUE_URL=$NEXT_PUBLIC_GOTRUE_URL \
+  NEXT_PUBLIC_SUPABASE_URL=$NEXT_PUBLIC_SUPABASE_URL \
   NEXT_PUBLIC_ENVIRONMENT=$NEXT_PUBLIC_ENVIRONMENT \
   NEXT_PUBLIC_SITE_URL=$NEXT_PUBLIC_SITE_URL
 
