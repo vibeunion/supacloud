@@ -82,7 +82,7 @@ COPY --from=builder --chown=nextjs:nodejs /app/apps/studio/.next/standalone ./
 COPY --from=builder /app/apps/studio/public ./apps/studio/public
 COPY --from=builder --chown=nextjs:nodejs /app/apps/studio/.next/static ./apps/studio/.next/static
 
-# Copy proxy to production directly from host context
+# Copy proxy to production from the current directory (deploy/studio/)
 COPY deploy/studio/proxy.js ./apps/studio/proxy.js
 
 USER nextjs
