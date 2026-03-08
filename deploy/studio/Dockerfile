@@ -48,9 +48,9 @@ COPY patches ./patches
 COPY deploy ./deploy-context
 
 # Find and move them to their final destination in the workspace
-# Using find makes it robust against directory structure variations in the build context
-RUN find ./deploy-context -name "csp.js" -exec cp {} ./apps/studio/csp.js \; && \
-  find ./deploy-context -name "proxy.js" -exec cp {} ./apps/studio/proxy.js \; && \
+# Using find makes it robust. We use absolute paths to ensure they go to the right place.
+RUN find ./deploy-context -name "csp.js" -exec cp {} /app/apps/studio/csp.js \; && \
+  find ./deploy-context -name "proxy.js" -exec cp {} /app/apps/studio/proxy.js \; && \
   rm -rf ./deploy-context
 
 # Fix _app.tsx - skip preconnect for relative API URLs during SSR
@@ -89,7 +89,7 @@ COPY --from=builder --chown=nextjs:nodejs /app/apps/studio/.next/standalone ./
 COPY --from=builder /app/apps/studio/public ./apps/studio/public
 COPY --from=builder --chown=nextjs:nodejs /app/apps/studio/.next/static ./apps/studio/.next/static
 
-# Copy proxy to production from builder stage
+# Copy proxy to production from builder stage (using absolute path from builder)
 COPY --from=builder /app/apps/studio/proxy.js ./apps/studio/proxy.js
 
 USER nextjs
