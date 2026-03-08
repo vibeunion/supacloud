@@ -3,7 +3,7 @@
 # Build: docker build . -f Dockerfile -t studio
 # Version: 0.2.1
 
-# Stage 1: Base - Early Injection Strategy
+# Stage 1: Base - Early Injection & Context Adaptive
 FROM node:22-slim AS base
 
 RUN apt-get update -qq && \
@@ -18,10 +18,11 @@ RUN corepack enable && corepack prepare pnpm@10.16.1 --activate
 
 WORKDIR /app
 
-# [CRITICAL] Inject key assets at the very beginning to ensure visibility across all stages
-# This bypasses all .dockerignore and turbo prune logic later.
-COPY deploy/studio/proxy.js /app/proxy.js
-COPY deploy/studio/patches/csp.js /app/csp.js
+# [CRITICAL] Adaptive Copy: Works whether build context is repo root OR deploy/studio/
+# We use wildcards to make the source optional/flexible during the COPY phase
+# This ensures visibility across all stages and bypasses turbo prune logic.
+COPY proxy.js* deploy/studio/proxy.js* /app/
+COPY patches/csp.js* deploy/studio/patches/csp.js* /app/
 
 # Stage 2: Turbo prune
 FROM base AS turbo
@@ -49,9 +50,10 @@ COPY --from=turbo /app/out/full ./
 COPY patches ./patches
 
 # Transfer the early injected assets from the base/deps layers into the workspace
-# Since we are in Stage 4 (builder), the workspace apps/studio already exists from 'out/full'
-RUN cp /app/csp.js /app/apps/studio/csp.js && \
-  cp /app/proxy.js /app/apps/studio/proxy.js && \
+# Supports both filenames potentially caught by the adaptive COPY above
+RUN mkdir -p /app/apps/studio && \
+  (cp /app/csp.js /app/apps/studio/csp.js 2>/dev/null || cp /app/patches/csp.js /app/apps/studio/csp.js 2>/dev/null || true) && \
+  (cp /app/proxy.js /app/apps/studio/proxy.js 2>/dev/null || true) && \
   ls -la /app/apps/studio/proxy.js
 
 # Fix _app.tsx - skip preconnect for relative API URLs during SSR
