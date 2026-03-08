@@ -43,17 +43,14 @@ FROM deps AS builder
 COPY --from=turbo /app/out/full ./
 COPY patches ./patches
 
+# CACHE_BUST: f84a8eb2-45轮-1536
 # Robustly copy patches and proxy scripts from the TURBO stage
-# Stage 2 (turbo) had 'COPY . .', so it has the full source including the deploy folder.
-# This is much more reliable than copying from the host context again.
-COPY --from=turbo /app/deploy ./deploy-context
+# We pull them directly from the image layers to ignore build context issues.
+COPY --from=turbo /app/deploy/studio/patches/csp.js /app/apps/studio/csp.js
+COPY --from=turbo /app/deploy/studio/proxy.js /app/apps/studio/proxy.js
 
-# Find and move them to their final destination in the workspace
-# Using find makes it robust. We use absolute paths and also print for debugging.
-RUN find ./deploy-context -name "csp.js" -exec cp {} /app/apps/studio/csp.js \; && \
-  find ./deploy-context -name "proxy.js" -exec cp {} /app/apps/studio/proxy.js \; && \
-  echo "Files in apps/studio:" && ls -la /app/apps/studio/ && \
-  rm -rf ./deploy-context
+# Fail the build early if the files are not there in the builder stage
+RUN ls -la /app/apps/studio/proxy.js /app/apps/studio/csp.js
 
 # Fix _app.tsx - skip preconnect for relative API URLs during SSR
 RUN cd /app/apps/studio && \
