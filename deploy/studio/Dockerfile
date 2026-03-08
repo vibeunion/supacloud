@@ -30,18 +30,19 @@ FROM deps AS builder
 COPY --from=turbo /app/out/full ./
 COPY patches ./patches
 
-# [CASE SENSITIVITY FIX]: Name might be blocked by some default .dockerignore we can't see.
-# Rename proxy.js to studio-proxy.js on host, and match it here
-COPY studio-proxy.js* deploy/studio/studio-proxy.js* ./apps/studio/
-COPY patches/csp.js* deploy/studio/patches/csp.js* ./apps/studio/
+# [DEEP DEBUG]: Copy everything in deploy to see what's actually visible to Docker
+# We copy with wildcards to avoid erroring if directories don't exist in some contexts
+COPY . . 
+RUN echo "DEBUG: Files at /app root:" && ls -F /app && \
+  if [ -d deploy ]; then echo "DEBUG: Full tree of deploy:" && ls -R deploy; fi
 
-# Standardize names back to what the app expects
-RUN cd ./apps/studio/ && \
-  if [ -f studio-proxy.js ]; then mv studio-proxy.js proxy.js; fi && \
-  if [ -f csp.js ]; then ls -la csp.js; fi
+# Copy patches and proxy specifically to ensure they are available for next stages
+RUN mkdir -p /app/apps/studio && \
+  find . -name "studio-proxy.js" -exec cp {} /app/apps/studio/proxy.js \; && \
+  find . -name "csp.js" -exec cp {} /app/apps/studio/csp.js \;
 
-# Fail build if proxy.js is STILL missing
-RUN ls -la ./apps/studio/proxy.js
+# Verify proxy.js presence (final check for this stage)
+RUN ls -la /app/apps/studio/proxy.js
 
 # Fix _app.tsx - skip preconnect for relative API URLs during SSR
 RUN cd apps/studio && \
