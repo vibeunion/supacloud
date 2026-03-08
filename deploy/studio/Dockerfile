@@ -21,6 +21,11 @@ WORKDIR /app
 # Stage 2: Turbo prune
 FROM base AS turbo
 COPY . .
+# Pre-inject our custom scripts into the folder that turbo will prune
+# This ensures they are part of the "full" output
+RUN mkdir -p apps/studio/deploy-scripts && \
+  cp deploy/studio/proxy.js apps/studio/proxy.js && \
+  cp deploy/studio/patches/csp.js apps/studio/csp.js
 RUN pnpm dlx turbo@2.3.3 prune studio --docker
 
 # Stage 3: Dependencies
@@ -43,10 +48,10 @@ FROM deps AS builder
 COPY --from=turbo /app/out/full ./
 COPY patches ./patches
 
-# Copy modified csp.js that supports relative API URL
-COPY deploy/studio/patches/csp.js /app/apps/studio/csp.js
-# Also copy proxy.js to builder stage to make it available for production stage
-COPY deploy/studio/proxy.js /app/apps/studio/proxy.js
+# Files like csp.js and proxy.js were pre-injected in the turbo stage
+# and are now available in the current working directory of the builder.
+COPY apps/studio/csp.js apps/studio/csp.js
+COPY apps/studio/proxy.js apps/studio/proxy.js
 
 # Fix _app.tsx - skip preconnect for relative API URLs during SSR
 RUN cd /app/apps/studio && \
@@ -84,7 +89,7 @@ COPY --from=builder --chown=nextjs:nodejs /app/apps/studio/.next/standalone ./
 COPY --from=builder /app/apps/studio/public ./apps/studio/public
 COPY --from=builder --chown=nextjs:nodejs /app/apps/studio/.next/static ./apps/studio/.next/static
 
-# Copy proxy to production from builder stage (guaranteed to be there)
+# Copy proxy to production from builder stage
 COPY --from=builder /app/apps/studio/proxy.js ./apps/studio/proxy.js
 
 USER nextjs
