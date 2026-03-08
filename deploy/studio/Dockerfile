@@ -65,7 +65,9 @@ RUN cd apps/studio && \
   sed -i "s|href={new URL(API_URL).origin}|href={API_URL.startsWith('http') ? new URL(API_URL).origin : ''}|" pages/_app.tsx && \
   sed -i "s|{IS_PLATFORM && (|{IS_PLATFORM \&\& API_URL.startsWith('http') \&\& (|" pages/_app.tsx
 
-# Build arguments
+# Build arguments - Sanitized for open source and local proxy architecture
+# NEXT_PUBLIC_SITE_URL is set to localhost:8000 so the frontend requests stay inside the container
+# and hit our proxy.js, which then forwards them to the external API_URL at runtime.
 ARG NEXT_PUBLIC_IS_PLATFORM=true
 ARG NEXT_PUBLIC_API_URL=/api
 ARG NEXT_PUBLIC_ENVIRONMENT=production
