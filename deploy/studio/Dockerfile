@@ -21,7 +21,8 @@ WORKDIR /app
 # Stage 2: Turbo prune
 FROM base AS turbo
 COPY . .
-RUN pnpm dlx turbo@2.3.3 prune studio --docker
+# DEBUG: Verify file existence before prune
+RUN ls -R /app/deploy && pnpm dlx turbo@2.3.3 prune studio --docker
 
 # Stage 3: Dependencies
 FROM base AS deps
