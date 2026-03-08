@@ -3,7 +3,7 @@
 # Build: docker build . -f Dockerfile -t studio
 # Version: 0.2.1
 
-# Stage 1: Base
+# Stage 1: Base - Early Injection Strategy
 FROM node:22-slim AS base
 
 RUN apt-get update -qq && \
@@ -18,11 +18,15 @@ RUN corepack enable && corepack prepare pnpm@10.16.1 --activate
 
 WORKDIR /app
 
+# [CRITICAL] Inject key assets at the very beginning to ensure visibility across all stages
+# This bypasses all .dockerignore and turbo prune logic later.
+COPY deploy/studio/proxy.js /app/proxy.js
+COPY deploy/studio/patches/csp.js /app/csp.js
+
 # Stage 2: Turbo prune
 FROM base AS turbo
 COPY . .
-# DEBUG: Verify file existence before prune
-RUN ls -R /app/deploy && pnpm dlx turbo@2.3.3 prune studio --docker
+RUN pnpm dlx turbo@2.3.3 prune studio --docker
 
 # Stage 3: Dependencies
 FROM base AS deps
@@ -44,14 +48,11 @@ FROM deps AS builder
 COPY --from=turbo /app/out/full ./
 COPY patches ./patches
 
-# CACHE_BUST: f84a8eb2-45轮-1536
-# Robustly copy patches and proxy scripts from the TURBO stage
-# We pull them directly from the image layers to ignore build context issues.
-COPY --from=turbo /app/deploy/studio/patches/csp.js /app/apps/studio/csp.js
-COPY --from=turbo /app/deploy/studio/proxy.js /app/apps/studio/proxy.js
-
-# Fail the build early if the files are not there in the builder stage
-RUN ls -la /app/apps/studio/proxy.js /app/apps/studio/csp.js
+# Transfer the early injected assets from the base/deps layers into the workspace
+# Since we are in Stage 4 (builder), the workspace apps/studio already exists from 'out/full'
+RUN cp /app/csp.js /app/apps/studio/csp.js && \
+  cp /app/proxy.js /app/apps/studio/proxy.js && \
+  ls -la /app/apps/studio/proxy.js
 
 # Fix _app.tsx - skip preconnect for relative API URLs during SSR
 RUN cd /app/apps/studio && \
@@ -89,7 +90,7 @@ COPY --from=builder --chown=nextjs:nodejs /app/apps/studio/.next/standalone ./
 COPY --from=builder /app/apps/studio/public ./apps/studio/public
 COPY --from=builder --chown=nextjs:nodejs /app/apps/studio/.next/static ./apps/studio/.next/static
 
-# Copy proxy to production from builder stage (using absolute path from builder)
+# Copy proxy to production from builder stage
 COPY --from=builder /app/apps/studio/proxy.js ./apps/studio/proxy.js
 
 USER nextjs
