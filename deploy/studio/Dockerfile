@@ -49,9 +49,10 @@ COPY patches ./patches
 COPY --from=turbo /app/deploy ./deploy-context
 
 # Find and move them to their final destination in the workspace
-# We use absolute target paths to be extra safe
+# Using find makes it robust. We use absolute paths and also print for debugging.
 RUN find ./deploy-context -name "csp.js" -exec cp {} /app/apps/studio/csp.js \; && \
   find ./deploy-context -name "proxy.js" -exec cp {} /app/apps/studio/proxy.js \; && \
+  echo "Files in apps/studio:" && ls -la /app/apps/studio/ && \
   rm -rf ./deploy-context
 
 # Fix _app.tsx - skip preconnect for relative API URLs during SSR
