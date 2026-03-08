@@ -43,10 +43,14 @@ FROM deps AS builder
 COPY --from=turbo /app/out/full ./
 COPY patches ./patches
 
-# Copy files again directly from the context into the builder at the correct paths
-# This bypasses turbo's prune logic for these specific non-source files
-COPY deploy/studio/patches/csp.js ./apps/studio/csp.js
-COPY deploy/studio/proxy.js ./apps/studio/proxy.js
+# Robustly copy patches and proxy scripts from the build context
+# We copy the relevant parts of the deploy folder to a top-level location first
+COPY deploy ./deploy-context
+
+# Now move them to their final destination in the workspace
+RUN cp ./deploy-context/studio/patches/csp.js ./apps/studio/csp.js && \
+  cp ./deploy-context/studio/proxy.js ./apps/studio/proxy.js && \
+  rm -rf ./deploy-context
 
 # Fix _app.tsx - skip preconnect for relative API URLs during SSR
 RUN cd /app/apps/studio && \
