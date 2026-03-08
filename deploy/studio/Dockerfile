@@ -21,11 +21,6 @@ WORKDIR /app
 # Stage 2: Turbo prune
 FROM base AS turbo
 COPY . .
-# Pre-inject our custom scripts into the folder that turbo will prune
-# This ensures they are part of the "full" output
-RUN mkdir -p apps/studio/deploy-scripts && \
-  cp deploy/studio/proxy.js apps/studio/proxy.js && \
-  cp deploy/studio/patches/csp.js apps/studio/csp.js
 RUN pnpm dlx turbo@2.3.3 prune studio --docker
 
 # Stage 3: Dependencies
@@ -48,10 +43,10 @@ FROM deps AS builder
 COPY --from=turbo /app/out/full ./
 COPY patches ./patches
 
-# Files like csp.js and proxy.js were pre-injected in the turbo stage
-# and are now available in the current working directory of the builder.
-COPY apps/studio/csp.js apps/studio/csp.js
-COPY apps/studio/proxy.js apps/studio/proxy.js
+# Copy files again directly from the context into the builder at the correct paths
+# This bypasses turbo's prune logic for these specific non-source files
+COPY deploy/studio/patches/csp.js ./apps/studio/csp.js
+COPY deploy/studio/proxy.js ./apps/studio/proxy.js
 
 # Fix _app.tsx - skip preconnect for relative API URLs during SSR
 RUN cd /app/apps/studio && \
