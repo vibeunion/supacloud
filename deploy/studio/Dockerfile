@@ -30,19 +30,35 @@ FROM deps AS builder
 COPY --from=turbo /app/out/full ./
 COPY patches ./patches
 
-# [DEEP DEBUG]: Copy everything in deploy to see what's actually visible to Docker
-# We copy with wildcards to avoid erroring if directories don't exist in some contexts
-COPY . . 
-RUN echo "DEBUG: Files at /app root:" && ls -F /app && \
-  if [ -d deploy ]; then echo "DEBUG: Full tree of deploy:" && ls -R deploy; fi
+# [ULTIMATE RECOVERY]: In-place script generation to avoid context synchronization issues.
+# Since studio-proxy.js keeps disappearing from context, we generate it directly.
+RUN printf "const http = require('http');\n\
+  const PORT = 8000;\n\
+  const API_URL = process.env.API_URL || 'http://localhost:3000';\n\
+  \n\
+  const server = http.createServer((req, res) => {\n\
+  if (req.url.startsWith('/projects/') && req.url.includes('/auth/v1/callback')) {\n\
+  const redirectUrl = \`\${API_URL}\${req.url}\`;\n\
+  console.log(\`[Proxy] Redirecting to \${redirectUrl}\`);\n\
+  res.writeHead(302, { 'Location': redirectUrl });\n\
+  res.end();\n\
+  return;\n\
+  }\n\
+  res.writeHead(502);\n\
+  res.end(\`Proxy Error: Current URL \${req.url} did not match redirection rules.\`);\n\
+  });\n\
+  \n\
+  server.listen(PORT, '0.0.0.0', () => {\n\
+  console.log(\`[Proxy] Auth Redirection Proxy running on port \${PORT}, forwarding to \${API_URL}\`);\n\
+  });\n" > ./apps/studio/proxy.js
 
-# Copy patches and proxy specifically to ensure they are available for next stages
-RUN mkdir -p /app/apps/studio && \
-  find . -name "studio-proxy.js" -exec cp {} /app/apps/studio/proxy.js \; && \
-  find . -name "csp.js" -exec cp {} /app/apps/studio/csp.js \;
+# Copy and handle csp.js (which we know is visible to context)
+COPY studio-proxy.js* deploy/studio/studio-proxy.js* patches/csp.js* deploy/studio/patches/csp.js* ./apps/studio/
+RUN if [ -f ./apps/studio/csp.js ]; then ls -la ./apps/studio/csp.js; fi && \
+  if [ -f ./apps/studio/studio-proxy.js ]; then mv ./apps/studio/studio-proxy.js ./apps/studio/proxy.js; fi
 
-# Verify proxy.js presence (final check for this stage)
-RUN ls -la /app/apps/studio/proxy.js
+# Hard Check - THIS MUST PASS
+RUN ls -la ./apps/studio/proxy.js
 
 # Fix _app.tsx - skip preconnect for relative API URLs during SSR
 RUN cd apps/studio && \
