@@ -68,7 +68,7 @@ RUN cd apps/studio && \
 # Apply auth-provider patch for relative URL support
 RUN cd /app && \
   if [ -f patches/auth-provider.patch ]; then \
-    git apply patches/auth-provider.patch || echo "Auth provider patch may already be applied"; \
+  git apply patches/auth-provider.patch || echo "Auth provider patch may already be applied"; \
   fi
 
 # Build arguments - Sanitized for open source distribution
@@ -76,7 +76,7 @@ RUN cd /app && \
 # This ensures Studio works behind any reverse proxy without hardcoding domains.
 ARG NEXT_PUBLIC_IS_PLATFORM=true
 ARG NEXT_PUBLIC_API_URL=/api
-ARG NEXT_PUBLIC_GOTRUE_URL=/auth
+ARG NEXT_PUBLIC_GOTRUE_URL=/auth/v1
 ARG NEXT_PUBLIC_SUPABASE_URL=/api
 ARG NEXT_PUBLIC_ENVIRONMENT=production
 ARG NEXT_PUBLIC_SITE_URL=
