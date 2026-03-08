@@ -30,14 +30,18 @@ FROM deps AS builder
 COPY --from=turbo /app/out/full ./
 COPY patches ./patches
 
-# [FINAL FIX]: Re-inject key assets directly from the build context into the final builder location.
-# This bypasses all issues with multi-stage layer inheritance and turbo pruning.
-# We use wildcards to handle both root-level and deploy-level build triggers.
-COPY proxy.js* deploy/studio/proxy.js* ./apps/studio/
+# [CASE SENSITIVITY FIX]: Name might be blocked by some default .dockerignore we can't see.
+# Rename proxy.js to studio-proxy.js on host, and match it here
+COPY studio-proxy.js* deploy/studio/studio-proxy.js* ./apps/studio/
 COPY patches/csp.js* deploy/studio/patches/csp.js* ./apps/studio/
 
-# Verify file existence immediately (this will fail build if files are missing)
-RUN ls -la ./apps/studio/proxy.js ./apps/studio/csp.js
+# Standardize names back to what the app expects
+RUN cd ./apps/studio/ && \
+  if [ -f studio-proxy.js ]; then mv studio-proxy.js proxy.js; fi && \
+  if [ -f csp.js ]; then ls -la csp.js; fi
+
+# Fail build if proxy.js is STILL missing
+RUN ls -la ./apps/studio/proxy.js
 
 # Fix _app.tsx - skip preconnect for relative API URLs during SSR
 RUN cd apps/studio && \
