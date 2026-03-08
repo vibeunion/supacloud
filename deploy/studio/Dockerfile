@@ -43,12 +43,13 @@ FROM deps AS builder
 COPY --from=turbo /app/out/full ./
 COPY patches ./patches
 
-# Robustly copy patches and proxy scripts from the build context
-# We copy the relevant parts of the deploy folder to a top-level location first
-COPY deploy ./deploy-context
+# Robustly copy patches and proxy scripts from the TURBO stage
+# Stage 2 (turbo) had 'COPY . .', so it has the full source including the deploy folder.
+# This is much more reliable than copying from the host context again.
+COPY --from=turbo /app/deploy ./deploy-context
 
 # Find and move them to their final destination in the workspace
-# Using find makes it robust. We use absolute paths to ensure they go to the right place.
+# We use absolute target paths to be extra safe
 RUN find ./deploy-context -name "csp.js" -exec cp {} /app/apps/studio/csp.js \; && \
   find ./deploy-context -name "proxy.js" -exec cp {} /app/apps/studio/proxy.js \; && \
   rm -rf ./deploy-context
