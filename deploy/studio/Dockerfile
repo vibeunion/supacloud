@@ -46,6 +46,11 @@ COPY patches ./patches
 # Copy modified csp.js that supports relative API URL
 COPY deploy/studio/patches/csp.js /app/apps/studio/csp.js
 
+# Fix _app.tsx - skip preconnect for relative API URLs during SSR
+RUN cd /app/apps/studio && \
+  sed -i "s|href={new URL(API_URL).origin}|href={API_URL.startsWith('http') ? new URL(API_URL).origin : ''}|" pages/_app.tsx && \
+  sed -i "s|{IS_PLATFORM && (|{IS_PLATFORM \&\& API_URL.startsWith('http') \&\& (|" pages/_app.tsx
+
 # Build arguments - minimal set for runtime flexibility
 ARG NEXT_PUBLIC_IS_PLATFORM=true
 ARG NEXT_PUBLIC_API_URL=/api
