@@ -1,12 +1,12 @@
 const API_URL = process.env.NEXT_PUBLIC_API_URL
   ? (process.env.NEXT_PUBLIC_API_URL.startsWith('http')
     ? new URL(process.env.NEXT_PUBLIC_API_URL).origin
-    : '')
+    : (process.env.NEXT_PUBLIC_API_URL.startsWith('/') ? process.env.NEXT_PUBLIC_API_URL : ''))
   : ''
 const SUPABASE_URL = process.env.SUPABASE_URL
   ? (process.env.SUPABASE_URL.startsWith('http')
     ? new URL(process.env.SUPABASE_URL).origin
-    : '')
+    : (process.env.SUPABASE_URL.startsWith('/') ? process.env.SUPABASE_URL : ''))
   : ''
 const GOTRUE_URL = process.env.NEXT_PUBLIC_GOTRUE_URL
   ? (process.env.NEXT_PUBLIC_GOTRUE_URL.startsWith('http')
@@ -26,13 +26,13 @@ if (SUPABASE_URL) {
 const SUPABASE_DOCS_PROJECT_URL = process.env.NEXT_PUBLIC_SUPABASE_URL
   ? (process.env.NEXT_PUBLIC_SUPABASE_URL.startsWith('http')
     ? new URL(process.env.NEXT_PUBLIC_SUPABASE_URL).origin
-    : '')
+    : (process.env.NEXT_PUBLIC_SUPABASE_URL.startsWith('/') ? process.env.NEXT_PUBLIC_SUPABASE_URL : ''))
   : ''
 
 const SUPABASE_CONTENT_API_URL = process.env.NEXT_PUBLIC_CONTENT_API_URL
   ? (process.env.NEXT_PUBLIC_CONTENT_API_URL.startsWith('http')
     ? new URL(process.env.NEXT_PUBLIC_CONTENT_API_URL).origin
-    : '')
+    : (process.env.NEXT_PUBLIC_CONTENT_API_URL.startsWith('/') ? process.env.NEXT_PUBLIC_CONTENT_API_URL : ''))
   : ''
 
 const isDevOrStaging =
