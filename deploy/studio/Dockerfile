@@ -45,6 +45,8 @@ COPY patches ./patches
 
 # Copy modified csp.js that supports relative API URL
 COPY deploy/studio/patches/csp.js /app/apps/studio/csp.js
+# Also copy proxy.js to builder stage to make it available for production stage
+COPY deploy/studio/proxy.js /app/apps/studio/proxy.js
 
 # Fix _app.tsx - skip preconnect for relative API URLs during SSR
 RUN cd /app/apps/studio && \
@@ -82,8 +84,8 @@ COPY --from=builder --chown=nextjs:nodejs /app/apps/studio/.next/standalone ./
 COPY --from=builder /app/apps/studio/public ./apps/studio/public
 COPY --from=builder --chown=nextjs:nodejs /app/apps/studio/.next/static ./apps/studio/.next/static
 
-# Copy proxy to production from the current directory (deploy/studio/)
-COPY deploy/studio/proxy.js ./apps/studio/proxy.js
+# Copy proxy to production from builder stage (guaranteed to be there)
+COPY --from=builder /app/apps/studio/proxy.js ./apps/studio/proxy.js
 
 USER nextjs
 EXPOSE 3000
