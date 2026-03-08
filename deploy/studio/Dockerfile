@@ -43,6 +43,9 @@ FROM deps AS builder
 COPY --from=turbo /app/out/full ./
 COPY patches ./patches
 
+# Copy modified csp.js that supports relative API URL
+COPY deploy/studio/patches/csp.js /app/apps/studio/csp.js
+
 # Build arguments - minimal set for runtime flexibility
 ARG NEXT_PUBLIC_IS_PLATFORM=true
 ARG NEXT_PUBLIC_API_URL=/api
