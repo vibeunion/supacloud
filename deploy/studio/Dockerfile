@@ -76,7 +76,7 @@ RUN cd /app && \
 # This ensures Studio works behind any reverse proxy without hardcoding domains.
 ARG NEXT_PUBLIC_IS_PLATFORM=true
 ARG NEXT_PUBLIC_API_URL=/api
-ARG NEXT_PUBLIC_GOTRUE_URL=/auth
+ARG NEXT_PUBLIC_GOTRUE_URL=/auth/v1
 ARG NEXT_PUBLIC_SUPABASE_URL=/api
 ARG NEXT_PUBLIC_ENVIRONMENT=production
 ARG NEXT_PUBLIC_SITE_URL=
