@@ -47,9 +47,10 @@ COPY patches ./patches
 # We copy the relevant parts of the deploy folder to a top-level location first
 COPY deploy ./deploy-context
 
-# Now move them to their final destination in the workspace
-RUN cp ./deploy-context/studio/patches/csp.js ./apps/studio/csp.js && \
-  cp ./deploy-context/studio/proxy.js ./apps/studio/proxy.js && \
+# Find and move them to their final destination in the workspace
+# Using find makes it robust against directory structure variations in the build context
+RUN find ./deploy-context -name "csp.js" -exec cp {} ./apps/studio/csp.js \; && \
+  find ./deploy-context -name "proxy.js" -exec cp {} ./apps/studio/proxy.js \; && \
   rm -rf ./deploy-context
 
 # Fix _app.tsx - skip preconnect for relative API URLs during SSR
