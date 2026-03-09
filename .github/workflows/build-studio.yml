@@ -70,9 +70,10 @@ jobs:
           build-args: |
             NEXT_PUBLIC_IS_PLATFORM=true
             NEXT_PUBLIC_API_URL=/api
-            NEXT_PUBLIC_GOTRUE_URL=/auth
+            NEXT_PUBLIC_GOTRUE_URL=/auth/v1
             NEXT_PUBLIC_SUPABASE_URL=/api
             NEXT_PUBLIC_ENVIRONMENT=production
+            NEXT_PUBLIC_SITE_URL=
             NEXT_PUBLIC_ENABLE_LOGS=true
             NEXT_PUBLIC_REALTIME_ENABLED=true
             FORCE_ASSET_CDN=-1
