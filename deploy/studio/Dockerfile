@@ -1,7 +1,7 @@
 # SupaCloud Studio Dockerfile
 # Customizable build with platform mode enabled
 # Build: docker build . -f Dockerfile -t studio
-# Version: 0.2.1
+# Version: 0.2.2
 
 # Stage 1: Base
 FROM node:22-slim AS base
