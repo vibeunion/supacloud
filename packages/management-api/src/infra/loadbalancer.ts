@@ -2,26 +2,26 @@ import { $ } from "bun";
 import os from "node:os";
 
 /**
- * 现代版 Angie (OpenResty 兼容加强版 / Nginx Fork) 负载均衡与网关生命周期管理
+ * Modern Angie (OpenResty-compatible enhanced version / Nginx Fork) Load Balancer and Gateway Lifecycle Management
  */
 export class LoadBalancerManager {
     /**
-     * 安装并配置具备自动 ACME SSL 能力的前端代理网关
+     * Install and configure frontend proxy gateway with automatic ACME SSL capability
      */
     static async installAngie(studioDomain: string, apiDomain: string, enableSsl = true, acmeClient = "le") {
-        console.log(`[LoadBalancerManager] 安装 Angie (SSL=${enableSsl}, Client=${acmeClient})...`);
+        console.log(`[LoadBalancerManager] Installing Angie (SSL=${enableSsl}, Client=${acmeClient})...`);
 
-        // 1. 处理已有的 Nginx (备份、停用、卸载)
+        // 1. Handle existing Nginx (backup, stop, uninstall)
         if ((await $`which nginx`.nothrow()).exitCode === 0 ||
             (await $`systemctl list-unit-files nginx.service`.nothrow()).exitCode === 0) {
 
             const backupDir = `/etc/nginx.bak.${Date.now()}`;
             if ((await $`test -d /etc/nginx`.nothrow()).exitCode === 0) {
-                console.log(`[LoadBalancerManager] 备份原有 Nginx 配置到 ${backupDir} ...`);
+                console.log(`[LoadBalancerManager] Backing up existing Nginx config to ${backupDir} ...`);
                 await $`cp -a /etc/nginx ${backupDir}`.nothrow();
             }
 
-            // 仅在有 systemctl 时尝试停止
+            // Only attempt to stop if systemctl is available
             if ((await $`systemctl --version`.nothrow().quiet()).exitCode === 0) {
                 await $`systemctl stop nginx`.nothrow();
                 await $`systemctl disable nginx`.nothrow();
@@ -34,35 +34,35 @@ export class LoadBalancerManager {
             }
         }
 
-        // 2. 调用已释放出来的底层原生 setup.sh (由于涉及到红帽 DNF 仓库源的配置，保留 bash 隔离)
+        // 2. Call underlying native setup.sh (bash isolation required for RedHat DNF repo configuration)
         const setupScript = "/opt/supacloud/infra/angie/setup.sh";
         if ((await $`test -f ${setupScript}`.nothrow()).exitCode !== 0) {
-            console.warn(`[LoadBalancerManager] 找不到底层脚本: ${setupScript}，跳过 Angie 安装。`);
+            console.warn(`[LoadBalancerManager] Setup script not found: ${setupScript}, skipping Angie installation.`);
             return;
         }
 
         const res = await $`bash ${setupScript} --studio-domain ${studioDomain} --api-domain ${apiDomain} --acme-client ${acmeClient}`.nothrow();
         if (res.exitCode !== 0) {
-            console.warn("[LoadBalancerManager] Angie setup.sh 执行失败", res.stderr.toString());
+            console.warn("[LoadBalancerManager] Angie setup.sh execution failed", res.stderr.toString());
             return;
         }
 
-        // 3. 注入全局性能配置 (Gzip & 代理缓存)
-        console.log("[LoadBalancerManager] 初始化 Angie 全局性能配置...");
+        // 3. Inject global performance configuration (Gzip & Proxy Cache)
+        console.log("[LoadBalancerManager] Initializing Angie global performance configuration...");
         await $`mkdir -p /etc/angie/http.d`;
 
         const perfConf = `
-# 全局 Gzip 压缩优化 (减少外网流量消耗)
+# Global Gzip compression optimization (reduce external network traffic)
 gzip on;
 gzip_comp_level 5;
 gzip_min_length 256;
 gzip_types application/javascript application/json application/xml text/css text/plain text/xml image/svg+xml;
 gzip_vary on;
 
-# 全局代理缓存池 (专用于 Storage 缩略图提速)
+# Global proxy cache pool (dedicated for Storage thumbnail acceleration)
 proxy_cache_path /var/cache/angie/storage_render levels=1:2 keys_zone=render_cache:10m max_size=1g inactive=7d use_temp_path=off;
 `;
-        // 改用 Bun.write 加速文件落盘
+        // Use Bun.write for faster file writing
         await Bun.write("/etc/angie/http.d/00-global-perf.conf", perfConf.trim());
         await $`mkdir -p /var/cache/angie/storage_render`;
         await $`chown -R angie:angie /var/cache/angie`.nothrow();
@@ -71,6 +71,6 @@ proxy_cache_path /var/cache/angie/storage_render levels=1:2 keys_zone=render_cac
             await $`systemctl restart angie`.nothrow();
         }
 
-        console.log("[LoadBalancerManager] Angie 配置成功, 代理网关已上线。");
+        console.log("[LoadBalancerManager] Angie configured successfully, proxy gateway is online.");
     }
 }

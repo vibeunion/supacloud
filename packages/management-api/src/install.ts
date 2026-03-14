@@ -79,13 +79,13 @@ export async function runInstall(options: { forceYes?: boolean } = {}) {
 
         if (!isDryRun) {
             p.log.step(">>> Initializing Load Balancer (Angie with ACME) ...");
-            // 从生成的配置文件读取或直接从变量同步
-            // 这里为了同步正确性，我们再次解构 config 对象（虽然 runInteractiveConfig 返回的是 PigstyConfig，但包含我们需要的信息）
+            // Read from generated config file or sync directly from variables
+            // For sync correctness, we destructure config object again (although runInteractiveConfig returns PigstyConfig, it contains the info we need)
             await LoadBalancerManager.installAngie(
                 config.studioDomain,
                 config.publicDomain,
-                // @ts-ignore: SSL 选项在 install.ts 局部变量中，或从环境变量读取
-                true, // 默认开启
+                // @ts-ignore: SSL options are in install.ts local variables, or read from env vars
+                true, // Default enabled
                 // @ts-ignore
                 "le"
             );

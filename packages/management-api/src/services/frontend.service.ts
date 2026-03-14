@@ -388,7 +388,7 @@ server {
     listen 443 ssl;
     server_name ${deployment.domain} ${deployment.custom_domains.join(" ")};
 
-    # ACME 自动证书 (ECC/ECDSA P-256)
+    # ACME automatic certificate (ECC/ECDSA P-256)
     acme le;
     ssl_certificate     $acme_cert_le;
     ssl_certificate_key $acme_cert_key_le;
@@ -420,7 +420,7 @@ server {
     listen 443 ssl;
     server_name ${deployment.domain} ${deployment.custom_domains.join(" ")};
 
-    # ACME 自动证书 (ECC/ECDSA P-256)
+    # ACME automatic certificate (ECC/ECDSA P-256)
     acme le;
     ssl_certificate     $acme_cert_le;
     ssl_certificate_key $acme_cert_key_le;
