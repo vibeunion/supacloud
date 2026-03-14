@@ -9,14 +9,14 @@ export interface NodeInfo {
 }
 
 /**
- * 集群节点管理器
- * 负责多机互信、状态拨测以及 Pigsty 节点定义维护
+ * Cluster Node Manager
+ * Responsible for multi-node trust establishment, health checks, and Pigsty node definition maintenance
  */
 export class NodeManager {
     private static readonly NODE_DB_PATH = "/etc/supabase/nodes.json";
 
     /**
-     * 获取所有节点列表
+     * Get all nodes list
      */
     static async listNodes(): Promise<NodeInfo[]> {
         const file = Bun.file(this.NODE_DB_PATH);
@@ -30,28 +30,28 @@ export class NodeManager {
     }
 
     /**
-     * 添加新节点并配置互信
+     * Add new node and configure trust
      */
     static async addNode(ip: string, user: string, pass: string, role: string): Promise<NodeInfo> {
-        console.log(`[Node] 正在准备添加节点: ${ip} (${role})...`);
+        console.log(`[Node] Preparing to add node: ${ip} (${role})...`);
 
-        // 1. 配置 SSH 互信 (使用 ssh-copy-id 模拟，或直接写入密钥)
-        // 注意: 实际执行中建议先检测能否免密联通
+        // 1. Configure SSH trust (using ssh-copy-id simulation, or write key directly)
+        // Note: In actual execution, it's recommended to check if passwordless connection works first
         try {
             const pubKeyPath = `${process.env.HOME}/.ssh/id_rsa.pub`;
             if (!(await Bun.file(pubKeyPath).exists())) {
-                console.log("[Node] 生成管理节点 SSH 密钥对...");
+                console.log("[Node] Generating management node SSH key pair...");
                 await $`ssh-keygen -t rsa -N "" -f ${process.env.HOME}/.ssh/id_rsa`.quiet();
             }
 
-            console.log(`[Node] 分发 SSH 密钥至 ${ip}...`);
-            // 使用 sshpass (如果安装了) 或 手动注入
+            console.log(`[Node] Distributing SSH key to ${ip}...`);
+            // Use sshpass (if installed) or manual injection
             await $`sshpass -p "${pass}" ssh-copy-id -o StrictHostKeyChecking=no ${user}@${ip}`.quiet();
         } catch (error) {
-            throw new Error(`无法通过 SSH 建立互信: ${error}`);
+            throw new Error(`Failed to establish SSH trust: ${error}`);
         }
 
-        // 2. 获取目标主机名
+        // 2. Get target hostname
         const hostname = (await $`ssh ${ip} "hostname"`.text()).trim();
 
         const newNode: NodeInfo = {
@@ -62,7 +62,7 @@ export class NodeManager {
             createdAt: Date.now(),
         };
 
-        // 3. 保存至元数据层
+        // 3. Save to metadata layer
         const nodes = await this.listNodes();
         nodes.push(newNode);
         await Bun.write(this.NODE_DB_PATH, JSON.stringify(nodes, null, 2));
@@ -71,7 +71,7 @@ export class NodeManager {
     }
 
     /**
-     * 检测所有节点健康状态
+     * Check all nodes health status
      */
     static async pingAll(): Promise<void> {
         const nodes = await this.listNodes();
