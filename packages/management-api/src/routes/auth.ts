@@ -649,7 +649,7 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
         provider: "wechat_miniprogram",
         enabled: true,
         name: WECHAT_PROVIDER_INFO.wechat_miniprogram.name,
-        message: "微信小程序登录配置成功，Edge Function 已部署",
+        message: "WeChat Mini Program login configured successfully, Edge Function deployed",
         function_slug: "wechat-login",
       };
     },
@@ -711,7 +711,7 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
         provider: "wechat_mp",
         enabled: true,
         name: WECHAT_PROVIDER_INFO.wechat_mp.name,
-        message: "微信公众号登录配置成功",
+        message: "WeChat Official Account login configured successfully",
       };
     },
     {
@@ -780,7 +780,7 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
         provider: "wechat",
         enabled: true,
         name: WECHAT_PROVIDER_INFO.wechat.name,
-        message: "微信开放平台登录配置成功（标准 OAuth2.0）",
+        message: "WeChat Open Platform login configured successfully (Standard OAuth2.0)",
         is_standard_oauth: true,
       };
     },
@@ -839,7 +839,7 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
         provider: "wechat_mp",
         enabled: true,
         name: WECHAT_PROVIDER_INFO.wechat_mp.name,
-        message: "微信公众号登录配置成功，Edge Function 已部署",
+        message: "WeChat Official Account login configured successfully, Edge Function deployed",
         function_slug: "wechat-mp-login",
         is_standard_oauth: false,
       };
@@ -944,7 +944,7 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
         provider,
         enabled: true,
         name: info.name,
-        message: `${info.name}登录配置成功`,
+        message: `${info.name} login configured successfully`,
         function_slug: `${provider}-login`,
         is_standard_oauth: info.isStandardOAuth,
       };
