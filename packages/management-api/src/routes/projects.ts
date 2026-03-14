@@ -21,7 +21,7 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
   // Get all projects
   .get("/", async () => {
     const projects = await projectService.listProjects();
-    // 对齐 Studio 格式化
+    // Align with Studio format
     return projects.map(p => ({
       id: p.id,
       ref: p.ref,
@@ -35,7 +35,7 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
   })
   .get("", async () => {
     const projects = await projectService.listProjects();
-    // 对齐 Studio 格式化
+    // Align with Studio format
     return projects.map(p => ({
       id: p.id,
       ref: p.ref,

@@ -2,7 +2,7 @@ import { SQL } from "bun";
 import { config } from "../config";
 import { logger } from "../utils/logger";
 
-// 解析 DATABASE_URL 获取各组件
+// Parse DATABASE_URL to get components
 function parseDatabaseUrl(url: string) {
   const urlMatch = url.match(/postgresql?:\/\/([^:]+):([^@]+)@([^:]+):(\d+)\/(.+)/);
   if (!urlMatch) {
@@ -14,7 +14,7 @@ function parseDatabaseUrl(url: string) {
 
 export const dbConfig = parseDatabaseUrl(config.databaseUrl);
 
-// 创建数据库连接 - 使用显式配置确保数据库名正确
+// Create database connection - use explicit config to ensure database name is correct
 export const sql = new SQL({
   hostname: dbConfig.hostname,
   port: dbConfig.port,
@@ -28,10 +28,10 @@ export const sql = new SQL({
 
 const MAX_CACHED_CONNECTIONS = 100;
 
-// 项目数据库连接缓存
+// Project database connection cache
 const projectConnections: Map<string, { sql: SQL; lastUsed: number }> = new Map();
 
-// 获取项目数据库连接
+// Get project database connection
 export function getProjectDb(dbName: string): SQL {
   const cached = projectConnections.get(dbName);
   if (cached) {
@@ -39,7 +39,7 @@ export function getProjectDb(dbName: string): SQL {
     return cached.sql;
   }
 
-  // LRU 清理机制：超出最大连接数时清理最久未使用的连接
+  // LRU cleanup: evict least recently used connection when exceeding max connections
   if (projectConnections.size >= MAX_CACHED_CONNECTIONS) {
     let oldestDbName = "";
     let oldestTime = Infinity;
@@ -76,7 +76,7 @@ export function getProjectDb(dbName: string): SQL {
   return projectSql;
 }
 
-// 显式移除某个项目的缓存 (例如项目已被删除或暂停时)
+// Explicitly remove cache for a project (e.g., when project is deleted or paused)
 export async function removeProjectDbCache(dbName: string) {
   const cached = projectConnections.get(dbName);
   if (cached) {
@@ -89,7 +89,7 @@ export async function removeProjectDbCache(dbName: string) {
   }
 }
 
-// 执行 SQL 查询
+// Execute SQL query
 export async function executeQuery(dbName: string, sqlQuery: string): Promise<{ rows: unknown[]; rowCount: number; command: string }> {
   const projectDb = getProjectDb(dbName);
   try {
@@ -104,17 +104,17 @@ export async function executeQuery(dbName: string, sqlQuery: string): Promise<{ 
   }
 }
 
-// 数据库操作封装
+// Database operations wrapper
 export const db = {
   sql,
   getProjectDb,
   executeQuery,
 };
 
-// 项目状态类型
+// Project status type
 export type ProjectStatus = "creating" | "active" | "paused" | "deleted";
 
-// 组织类型定义
+// Organization type definition
 export interface Organization {
   id: string;
   name: string;
@@ -123,7 +123,7 @@ export interface Organization {
   updated_at: Date;
 }
 
-// 项目类型定义
+// Project type definition
 export interface Project {
   id: string;
   ref: string;
@@ -146,7 +146,7 @@ export interface Project {
   deleted_at: Date | null;
 }
 
-// 任务状态与类型
+// Task status and type
 export type TaskStatus = "pending" | "processing" | "completed" | "failed";
 export type TaskType =
   | "provision_db"
@@ -171,7 +171,7 @@ export interface ProjectTask {
   updated_at: Date;
 }
 
-// 创建项目输入类型
+// Create project input type
 export interface CreateProjectInput {
   ref: string;
   name: string;
@@ -188,7 +188,7 @@ export interface CreateProjectInput {
   config?: Record<string, unknown>;
 }
 
-// 关闭数据库连接
+// Close database connection
 export async function closeDb() {
   await sql.close();
 

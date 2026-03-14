@@ -5,8 +5,8 @@ import { db, getProjectDb, dbConfig } from "../db";
 import { pgMetaManager } from "../db/pg-meta";
 
 /**
- * 核心助手：确保返回的对象永远支持 .find 方法，即便它是空数组。
- * 返回纯数组，JSON 序列化时不会被污染。
+ * Core Helper: Ensures the returned object always supports .find method, even if it's an empty array.
+ * Returns a pure array, JSON serialization won't be polluted.
  */
 const ensureArray = <T>(arr: T[] | null | undefined): T[] => {
     return Array.isArray(arr) ? arr : [];
@@ -37,7 +37,7 @@ const formatProject = (project: any, requestedRef?: string) => {
     const orgId = 1;
     const activeRef = requestedRef || project.ref || "default";
 
-    // V1ProjectResponse 格式（来自 api.d.ts）
+    // V1ProjectResponse format (from api.d.ts)
     return {
         id: projectId,
         ref: activeRef,
@@ -47,7 +47,7 @@ const formatProject = (project: any, requestedRef?: string) => {
         organization_id: String(orgId),
         organization_slug: "default",
         created_at: project.created_at || new Date().toISOString(),
-        // 扩展字段
+        // Extended fields
         organization: {
             id: orgId,
             name: project.organization?.name || "Default Organization",
@@ -92,9 +92,9 @@ const formatProject = (project: any, requestedRef?: string) => {
 };
 
 /**
- * 统一导出所有 Studio 兼容路由。
- * 注意：所有路径都包含在 /api 前缀下（在 index.ts 中挂载）。
- * 这里的路径从 /platform 或 /v1 开始。
+ * Unified export of all Studio compatible routes.
+ * Note: All paths are prefixed with /api (mounted in index.ts).
+ * The paths here start with /platform or /v1.
  */
 const getAdminUsers = () => {
     const adminEmail = process.env.SUPACLOUD_ADMIN_EMAIL || "admin@supacloud.local";
@@ -135,7 +135,7 @@ export const studioRoutes = new Elysia()
         
         if (!admin) {
             set.status = 401;
-            return { error: "Invalid credentials", message: "邮箱或密码错误" };
+            return { error: "Invalid credentials", message: "Invalid email or password" };
         }
         
         return {
@@ -154,7 +154,7 @@ export const studioRoutes = new Elysia()
         set.status = 403;
         return { 
             error: "Registration disabled", 
-            message: "注册已关闭，请联系管理员获取账号" 
+            message: "Registration is disabled, please contact administrator for an account" 
         };
     })
     .post("/api/platform/logout", () => ({ success: true }))
@@ -162,14 +162,14 @@ export const studioRoutes = new Elysia()
         set.status = 400;
         return { 
             error: "SSO disabled", 
-            message: "SSO 登录未启用，请使用邮箱密码登录" 
+            message: "SSO login is not enabled, please use email and password" 
         };
     })
     .get("/api/platform/auth/github", async ({ set }) => {
         set.status = 400;
         return { 
             error: "GitHub auth disabled", 
-            message: "GitHub 登录未启用，请使用邮箱密码登录" 
+            message: "GitHub login is not enabled, please use email and password" 
         };
     })
     .get("/api/auth/session", () => ({ 
@@ -206,7 +206,7 @@ export const studioRoutes = new Elysia()
         
         const projectsList = formattedBaseProject ? [formattedBaseProject] : [];
 
-        // 核心对齐：使用真实组织 ID 和字段
+        // Core alignment: use real organization ID and fields
         const defaultOrg = { 
             id: 1, 
             name: "Default Organization", 
@@ -220,7 +220,7 @@ export const studioRoutes = new Elysia()
 
         const organizations = [defaultOrg];
 
-        // ProfileResponse 格式（来自 platform.d.ts）
+        // ProfileResponse format (from platform.d.ts)
         const resp = {
             id: 1,
             primary_email: "admin@supacloud.local",
@@ -257,7 +257,7 @@ export const studioRoutes = new Elysia()
     }))
 
     // --- Organizations ---
-    // OrganizationResponse 格式（来自 platform.d.ts）
+    // OrganizationResponse format (from platform.d.ts)
     .get("/api/v1/organizations", () => [
         { id: 1, name: "Default Organization", slug: "default" }
     ])
@@ -306,7 +306,7 @@ export const studioRoutes = new Elysia()
     .get("/api/v1/projects", async () => {
         const projects = await projectService.listProjects();
         if (projects.length === 0) return [];
-        // 关键：对齐全局唯一的 default 项目
+        // Key: align with the globally unique default project
         return [formatProject(projects[0])];
     })
     .get("/api/v1/projects/:ref", async ({ params }) => {
@@ -337,7 +337,7 @@ export const studioRoutes = new Elysia()
     })
     .get("/api/platform/projects/:ref", async ({ params }) => {
         const project = await getProjectOrThrow(params.ref);
-        // 单个项目详情返回扁平对象，但 Studio 有时会在列表上下文通过 ref 查找
+        // Single project details return flat object, but Studio sometimes looks up by ref in list context
         return formatProject(project);
     }, { params: t.Object({ ref: t.String() }) })
     .get("/api/platform/projects/:ref/permissions", () => ensureArray(["all"]))
@@ -351,7 +351,7 @@ export const studioRoutes = new Elysia()
     .get("/api/platform/organizations/:slug/feature-flags", () => ensureArray([]))
     .get("/api/platform/organizations/:slug/members", () => ensureArray([{ id: "1", is_owner: true, user: { id: "1", email: "admin@supacloud.local" } }]))
     .get("/api/platform/organizations-list", async () => {
-        // 补全组织列表，Studio 初始化必需。ID 需对齐 profile 接口。
+        // Complete the organization list, required for Studio initialization. ID must align with profile endpoint.
         return [
             { id: "default", name: "Default Organization", slug: "default", billing_email: "admin@supacloud.local" }
         ];
@@ -367,20 +367,20 @@ export const studioRoutes = new Elysia()
     .get("/api/platform/projects/:ref/analytics/log-drains", () => ({ data: [] }))
     .get("/api/platform/projects/:ref/permissions", () => ["all"])
     .get("/api/platform/projects/:ref/settings", async () => ({
-        // 提供极致完整的结构，防止前端多级解构后在 undefined 上调用 find
+        // Provide extremely complete structure to prevent find being called on undefined after multi-level frontend destructuring
         database: { pool_mode: "transaction", status: "ACTIVE_HEALTHY" },
         auth: { site_url: "http://localhost:3000", additional_redirect_urls: ensureArray([]) },
         api: { port: 9090, max_rows: 1000 },
         storage: { enabled: true, file_size_limit: 52428800 }
     }))
-    // 补全 Postgrest 配置指纹，解决 API Docs 相关 404
+    // Complete Postgrest config fingerprint to fix API Docs related 404
     .get("/api/platform/projects/:ref/config/postgrest", () => ({
         db_schema: "public,storage,auth",
         db_anon_role: "anon",
         db_extra_search_path: "public,extensions",
         max_rows: 1000
     }))
-    // 补全 OpenAPI 接口，解决 API Docs 页面 404。返回一个极简的 OpenAPI 定义。
+    // Complete OpenAPI interface to fix API Docs page 404. Returns a minimal OpenAPI definition.
     .get("/api/platform/projects/:ref/api/rest", () => ({
         openapi: "3.0.0",
         info: { title: "SupaCloud API", version: "1.0.0" },
@@ -421,18 +421,18 @@ export const studioRoutes = new Elysia()
             includeSystemSchemas: query.include_system_schemas === 'true'
         });
         if (error) return new Response(JSON.stringify(error), { status: 400 });
-        // 关键对齐：Tables 列表必须包裹在 data 中
+        // Key alignment: Tables list must be wrapped in data
         return { data };
     }, { params: t.Object({ ref: t.String() }) })
     .get("/api/platform/projects/:ref/run-lints", () => [])
-    // SQL 编辑器核心内容路由 (对齐 Studio { data } 全量武装)
+    // SQL Editor core content route (aligned with Studio { data } fully equipped)
     .get("/api/platform/projects/:ref/content/count", () => ({ count: 1 }))
     .get("/api/platform/projects/:ref/content/folders", ({ params }) => ({
         data: {
             folders: [
                 {
                     id: "folder_sql",
-                    project_id: 1, // 对齐项目数字 ID
+                    project_id: 1, // Align with project numeric ID
                     name: "SQL Queries",
                     inserted_at: new Date().toISOString(),
                     updated_at: new Date().toISOString()
@@ -441,7 +441,7 @@ export const studioRoutes = new Elysia()
             contents: [
                 {
                     id: "8399e548-2b70-4b9f-be4d-2efb44594a7b",
-                    project_id: 1, // 对齐项目数字 ID
+                    project_id: 1, // Align with project numeric ID
                     name: "SQL Query",
                     type: "sql",
                     visibility: "user",
@@ -452,12 +452,12 @@ export const studioRoutes = new Elysia()
             ]
         }
     }))
-    // SQL 编辑器列表，必须根据官方 Cloud 对齐：包裹在 {"data": [...]} 中
+    // SQL Editor list, must align with official Cloud: wrap in {"data": [...]}
     .get("/api/platform/projects/:ref/content", ({ params }) => ({
         data: [
             {
                 id: "8399e548-2b70-4b9f-be4d-2efb44594a7b",
-                project_id: 1, // 对齐项目数字 ID
+                project_id: 1, // Align with project numeric ID
                 name: "SQL Query",
                 type: "sql",
                 visibility: "user",
@@ -470,7 +470,7 @@ export const studioRoutes = new Elysia()
     .get("/api/platform/projects/:ref/content/item/:id", ({ params }) => ({
         data: {
             id: params.id,
-            project_id: 1, // 对齐项目数字 ID
+            project_id: 1, // Align with project numeric ID
             name: "SQL Query",
             type: "sql",
             description: "",
@@ -481,11 +481,11 @@ export const studioRoutes = new Elysia()
             updated_at: new Date().toISOString()
         }
     }), { params: t.Object({ ref: t.String(), id: t.String() }) })
-    // 兜底 /content/:id (对齐官方结构，包裹在 data 中)
+    // Fallback /content/:id (align with official structure, wrap in data)
     .get("/api/platform/projects/:ref/content/:id", ({ params }) => ({
         data: {
             id: params.id,
-            project_id: 1, // 对齐项目数字 ID
+            project_id: 1, // Align with project numeric ID
             name: "SQL Query",
             type: "sql",
             description: "",
@@ -534,7 +534,7 @@ export const studioRoutes = new Elysia()
         .get("/api/platform/pg-meta/:ref/tables", async ({ meta, metaOpts }) => {
             const { data, error } = await meta.tables.list(metaOpts);
             if (error) return new Response(JSON.stringify(error), { status: 400 });
-            // 官方对标：Table 列表返回的是扁平数组，不是 {"data": [...]}
+            // Official alignment: Table list returns flat array, not {"data": [...]}
             return Array.isArray(data) ? data.filter(Boolean) : [];
         })
         .get("/api/platform/pg-meta/:ref/views", async ({ meta, metaOpts }) => {
@@ -597,40 +597,40 @@ export const studioRoutes = new Elysia()
                 const queryResult = await db.executeQuery(dbName, queryText);
                 let rows = queryResult.rows as any[];
                 
-                // 1. 处理多结果集
+                // 1. Handle multiple result sets
                 if (Array.isArray(rows) && rows.length > 0 && Array.isArray(rows[0])) {
                     rows = (rows.find(r => Array.isArray(r) && r.length > 0) || rows[rows.length - 1]) as any[];
                 }
 
-                // 2. 指纹判定与自适应包装逻辑
+                // 2. Fingerprint detection and adaptive wrapping logic
                 const isMetadataKey = !!query.key;
                 const isSystemTableQuery = queryText.toLowerCase().includes('information_schema') ||
                                          queryText.toLowerCase().includes('pg_catalog');
-                // 关键识别点：如果是报告查询 (pg_stat_statements, pg_stat_activity 等)，Studio 期望 200 状态码下的扁平数组
+                // Key recognition: If it's a report query (pg_stat_statements, pg_stat_activity, etc.), Studio expects flat array under 200 status
                 const isReportQuery = queryText.toLowerCase().includes('pg_stat_statements') || 
                                      queryText.toLowerCase().includes('pg_stat_activity') ||
                                      queryText.toLowerCase().includes('pg_authid');
 
-                // 检查是否已经由 pg-meta 完成了 json 封装 (包含 data 键)
+                // Check if pg-meta has already completed json envelope (contains data key)
                 const hasDataEnvelope = rows.length === 1 && rows[0] && typeof rows[0] === 'object' && 'data' in rows[0];
 
                 if (hasDataEnvelope) {
                     const innerData = rows[0].data;
-                    // 如果是工具链对象 (entity-types, fdws 等)，Studio 期望结构为 { data: { count, entities } }
-                    // 源码级对齐：src/data/entity-types/entity-types-infinite-query.ts
-                    // 内部使用 jsonb_build_object 已经封装了 { entities, count }
+                    // If it's a toolchain object (entity-types, fdws, etc.), Studio expects structure { data: { count, entities } }
+                    // Source-level alignment: src/data/entity-types/entity-types-infinite-query.ts
+                    // Internally uses jsonb_build_object which has already wrapped { entities, count }
                     const isToolchainObject = innerData && typeof innerData === 'object' && 
                                            ('entities' in innerData || 'count' in innerData || 'item' in innerData);
 
                     if (isToolchainObject) {
                         logger.info(`[Query] Result is toolchain object, precisely aligning as { data: ... }`);
-                        // 返回行中的第一个对象，即匹配 result[0] 的解构逻辑
+                        // Return the first object in rows, matching result[0] destructuring logic
                         return new Response(JSON.stringify(rows[0]), { 
                             headers: { 'Content-Type': 'application/json' } 
                         });
                     }
                     
-                    // 如果内部 data 是个普通列表且带有 key，通常需要扁平化
+                    // If inner data is a normal list with key, usually needs to be flattened
                     if (isMetadataKey && Array.isArray(innerData)) {
                         logger.info(`[Query] Result is nested data list with key, flattening.`);
                         return new Response(JSON.stringify(innerData), { 
@@ -639,9 +639,9 @@ export const studioRoutes = new Elysia()
                     }
                 }
 
-                // 3. 兜底逻辑：针对不同的请求场景返回官方标准格式
+                // 3. Fallback logic: return official standard format for different request scenarios
                 
-                // 情况 A：元数据列表请求 或 性能报告请求 -> 必须返回 200 状态码 + 扁平数组
+                // Case A: Metadata list request or performance report request -> must return 200 status + flat array
                 if (isMetadataKey || isSystemTableQuery || isReportQuery) {
                     return new Response(JSON.stringify(ensureArray(rows)), { 
                         status: 200,
@@ -649,7 +649,7 @@ export const studioRoutes = new Elysia()
                     });
                 }
 
-                // 情况 B：SQL Workspace 手动按钮点击运行 -> 期望返回 201 状态码 + [{ data: rows }] 包装
+                // Case B: SQL Workspace manual button click run -> expects 201 status + [{ data: rows }] wrapper
                 set.status = 201; 
                 const wrappedRows = ensureArray(rows.map(r => ({ data: r })));
                 if (wrappedRows.length === 0) wrappedRows.push({ data: [] });
