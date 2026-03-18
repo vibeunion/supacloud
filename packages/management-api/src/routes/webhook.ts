@@ -151,6 +151,67 @@ export const webhookRoutes = new Elysia({ prefix: "/v1/webhooks" })
     }
   )
 
+  // ─── GitLab Webhook ───
+  .post(
+    "/gitlab",
+    async ({ body, headers, set }) => {
+      const event = headers["x-gitlab-event"] || "";
+      if (event !== "Push Hook") {
+        return { message: "Event ignored", event };
+      }
+      const payload = body as any;
+      const branch = (payload.ref || "").replace("refs/heads/", "");
+      const gitUrl = payload.project?.git_http_url || payload.repository?.git_http_url || "";
+      const commitSha = payload.checkout_sha || payload.after || "";
+      const commitMessage = payload.commits?.[0]?.message || "";
+      const repoName = payload.project?.path_with_namespace || "";
+
+      return await triggerDeployForGit(gitUrl, branch, commitSha, commitMessage, repoName, "gitlab");
+    },
+    { body: t.Any() }
+  )
+
+  // ─── Gitee Webhook ───
+  .post(
+    "/gitee",
+    async ({ body, headers, set }) => {
+      const event = headers["x-gitee-event"] || (body as any)?.hook_name;
+      if (event !== "push_hooks" && event !== "Push Hook") {
+        return { message: "Event ignored", event };
+      }
+      const payload = body as any;
+      const branch = (payload.ref || "").replace("refs/heads/", "");
+      const gitUrl = payload.repository?.clone_url || payload.repository?.git_http_url || "";
+      const commitSha = payload.after || payload.head_commit?.id || "";
+      const commitMessage = payload.head_commit?.message || payload.commits?.[0]?.message || "";
+      const repoName = payload.repository?.full_name || payload.repository?.path_with_namespace || "";
+
+      return await triggerDeployForGit(gitUrl, branch, commitSha, commitMessage, repoName, "gitee");
+    },
+    { body: t.Any() }
+  )
+
+  // ─── GitCode (CSDN) Webhook ───
+  .post(
+    "/gitcode",
+    async ({ body, headers, set }) => {
+      const event = headers["x-gitcode-event"] || headers["x-gitlab-event"] || "";
+      // GitCode uses GitLab-compatible webhook format
+      if (event !== "Push Hook" && event !== "push") {
+        return { message: "Event ignored", event };
+      }
+      const payload = body as any;
+      const branch = (payload.ref || "").replace("refs/heads/", "");
+      const gitUrl = payload.project?.git_http_url || payload.repository?.clone_url || "";
+      const commitSha = payload.checkout_sha || payload.after || "";
+      const commitMessage = payload.commits?.[0]?.message || "";
+      const repoName = payload.project?.path_with_namespace || payload.repository?.full_name || "";
+
+      return await triggerDeployForGit(gitUrl, branch, commitSha, commitMessage, repoName, "gitcode");
+    },
+    { body: t.Any() }
+  )
+
   .post(
     "/deploy",
     async ({ body, headers, set }) => {
@@ -315,3 +376,32 @@ async function findDeploymentsByGitUrl(gitUrl: string, branch: string): Promise<
 }
 
 export { findDeploymentsByGitUrl };
+
+/** Shared helper: trigger deploy for all matching projects by git URL */
+async function triggerDeployForGit(
+  gitUrl: string, branch: string, commitSha: string,
+  commitMessage: string, repoName: string, source: string
+) {
+  const deployments = await findDeploymentsByGitUrl(gitUrl, branch);
+  if (deployments.length === 0) {
+    return { message: "No matching deployments found", repo: repoName, branch, source };
+  }
+  const results = [];
+  for (const deployment of deployments) {
+    try {
+      const recordId = await frontendService.createDeploymentRecord(
+        deployment.project_ref, deployment.id,
+        { status: "pending", commit_sha: commitSha, commit_message: commitMessage, branch, triggered_by: "webhook" }
+      );
+      const buildResult = await frontendService.deployFromGit(deployment.project_ref, deployment.id, gitUrl, branch);
+      await frontendService.updateDeploymentRecord(
+        deployment.project_ref, deployment.id, recordId,
+        { status: buildResult.success ? "success" : "failed", build_log: buildResult.build_log }
+      );
+      results.push({ deployment_id: deployment.id, project_ref: deployment.project_ref, success: buildResult.success, url: buildResult.url, error: buildResult.error });
+    } catch (error: any) {
+      results.push({ deployment_id: deployment.id, project_ref: deployment.project_ref, success: false, error: error.message });
+    }
+  }
+  return { message: "Webhook processed", repo: repoName, branch, commit: commitSha, source, deployments: results };
+}

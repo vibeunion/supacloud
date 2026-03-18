@@ -54,6 +54,10 @@ export const config = {
 
   // Base domain for projects
   baseDomain: process.env.BASE_DOMAIN || managementEnv.BASE_DOMAIN || "localhost",
+
+  // Studio login credentials
+  studioUsername: process.env.STUDIO_USERNAME || managementEnv.STUDIO_USERNAME || "admin",
+  studioPassword: process.env.STUDIO_PASSWORD || managementEnv.STUDIO_PASSWORD || "supacloud",
 };
 
 // Add basic validation to prevent invalid configuration from crashing downstream

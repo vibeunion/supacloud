@@ -1,0 +1,41 @@
+<script lang="ts">
+  import { page } from "$app/state";
+  import { Globe, FolderGit2, Settings, History } from "lucide-svelte";
+
+  let { children } = $props();
+  const projectRef = $derived(page.params.ref);
+
+  const TABS = [
+    { id: "", label: "站点列表", icon: Globe },
+    { id: "new", label: "新建部署", icon: FolderGit2 },
+  ];
+
+  const currentTab = $derived(page.url.pathname.split("/hosting/")[1]?.split("/")[0] || "");
+</script>
+
+<div class="h-full flex flex-col pt-4">
+  <div class="px-6 mb-6">
+    <div class="flex items-center justify-between mb-4">
+      <div>
+        <h1 class="text-2xl font-bold">SupaCloud Pages</h1>
+        <p class="text-sm text-muted-foreground mt-1">像 Vercel 一样部署前端应用 — 支持静态站点和 SSR 框架</p>
+      </div>
+      <span class="px-2 py-1 text-[10px] font-bold rounded-full bg-brand/10 text-brand border border-brand/20">HOSTING</span>
+    </div>
+    <div class="flex items-center gap-2 overflow-x-auto pb-2">
+      {#each TABS as tab}
+        {@const Icon = tab.icon}
+        <a
+          href={`/project/${projectRef}/hosting${tab.id ? '/' + tab.id : ''}`}
+          class="flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-full whitespace-nowrap transition-colors {currentTab === tab.id ? 'bg-brand text-white shadow-md' : 'bg-muted/50 text-muted-foreground hover:bg-muted hover:text-foreground'}"
+        >
+          <Icon size={14} />
+          {tab.label}
+        </a>
+      {/each}
+    </div>
+  </div>
+  <div class="flex-1 overflow-y-auto px-6 pb-6">
+    {@render children()}
+  </div>
+</div>
