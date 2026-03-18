@@ -1,1 +1,1 @@
-fix: restore missing S
+fix(functions): restore read/list/delete actions and fix project isolation

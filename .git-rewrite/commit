@@ -1,6 +1,6 @@
-tree 42b014276775f04bc7433a07c381ea3784c9f36e
-parent 08e413c9344ae5a9888646128dc372e54a21bbe0
-author huadong <“159921208@qq.com”> 1772360460 +0800
-committer huadong <“159921208@qq.com”> 1772360460 +0800
+tree e16d2331ec5eb537703cdb10517f91d91b48b19d
+parent 667d9df16b0b021f41a1f0caba9248f4b7f3503c
+author huadong <“159921208@qq.com”> 1772347214 +0800
+committer huadong <“159921208@qq.com”> 1772347214 +0800
 
-fix: resolve integration and unit test failures in storage and api routes
+fix(functions): restore read/list/delete actions and fix project isolation
