@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { apiClient } from "$lib/api";
+
   import { onMount } from "svelte";
   import { page } from "$app/state";
   import { Loader2, Shield, Table, Plus, Search, Trash2 } from "lucide-svelte";
@@ -70,7 +72,7 @@
   async function fetchPolicies() {
     isLoading = true;
     try {
-      const res = await fetch(`/v1/projects/${projectRef}/database/sql`, {
+      const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sql: POLICIES_SQL })
@@ -89,11 +91,11 @@
   async function fetchMetaData() {
     try {
       const [tblRes, roleRes] = await Promise.all([
-        fetch(`/v1/projects/${projectRef}/database/sql`, {
+        apiClient(`/v1/projects/${projectRef}/database/sql`, {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ sql: "SELECT tablename FROM pg_catalog.pg_tables WHERE schemaname = 'public' ORDER BY tablename;" })
         }),
-        fetch(`/v1/projects/${projectRef}/database/sql`, {
+        apiClient(`/v1/projects/${projectRef}/database/sql`, {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ sql: "SELECT rolname FROM pg_catalog.pg_roles ORDER BY rolname;" })
         })
@@ -126,7 +128,7 @@
     sql += ";";
 
     try {
-      const res = await fetch(`/v1/projects/${projectRef}/database/sql`, {
+      const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sql })
       });
@@ -148,7 +150,7 @@
     isDeleting = true;
     try {
       const sql = `DROP POLICY "${policy.policyname}" ON "${policy.schemaname}"."${policy.tablename}";`;
-      const res = await fetch(`/v1/projects/${projectRef}/database/sql`, {
+      const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sql })
       });

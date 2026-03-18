@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { apiClient } from "$lib/api";
+
   import { onMount } from "svelte";
   import { page } from "$app/state";
   import { Timer, ShieldAlert, Mail, KeyRound, Smartphone, AlertTriangle, Loader2, Save, RefreshCw } from "lucide-svelte";
@@ -42,7 +44,7 @@
   async function fetchConfig() {
     isLoading = true;
     try {
-      const res = await fetch(`/v1/projects/${projectRef}/auth/config`);
+      const res = await apiClient(`/v1/projects/${projectRef}/auth/config`);
       const config = res.ok ? await res.json() : {};
       limits = RATE_LIMITS_DEF.map(def => ({
         ...def,
@@ -61,7 +63,7 @@
     try {
       const payload: Record<string, string> = {};
       for (const l of limits) { payload[l.envKey] = l.value; }
-      const res = await fetch(`/v1/projects/${projectRef}/auth/config`, {
+      const res = await apiClient(`/v1/projects/${projectRef}/auth/config`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
