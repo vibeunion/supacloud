@@ -1,15 +1,16 @@
 <script lang="ts">
-    const stats = [
+    import { t } from "svelte-i18n";
+    let stats = $derived([
         {
-            label: "Total Projects",
+            label: $t("GlobalDashboard.total_projects"),
             value: "12",
-            trend: "+2 this month",
+            trend: $t("GlobalDashboard.this_month"),
             icon: "📁",
         },
-        { label: "Active Users", value: "1.2k", trend: "+12%", icon: "👤" },
-        { label: "CPU Usage", value: "24%", trend: "Healthy", icon: "⚡" },
-        { label: "Storage", value: "45.2 GB", trend: "Of 100 GB", icon: "💾" },
-    ];
+        { label: $t("GlobalDashboard.active_users"), value: "1.2k", trend: "+12%", icon: "👤" },
+        { label: $t("GlobalDashboard.cpu_usage"), value: "24%", trend: $t("Dashboard.healthy"), icon: "⚡" },
+        { label: $t("GlobalDashboard.storage"), value: "45.2 GB", trend: "Of 100 GB", icon: "💾" },
+    ]);
 
     const recentProjects = [
         {
@@ -35,8 +36,8 @@
 
 <div class="overview">
     <section class="welcome">
-        <h1>Welcome back, Admin</h1>
-        <p>Here's what's happening with your SupaCloud platform today.</p>
+        <h1>{$t("GlobalDashboard.welcome")}</h1>
+        <p>{$t("GlobalDashboard.subtitle")}</p>
     </section>
 
     <div class="stats-grid">
@@ -54,8 +55,8 @@
 
     <section class="projects-section">
         <div class="section-header">
-            <h2>Recent Projects</h2>
-            <a href="/projects" class="view-all">View All →</a>
+            <h2>{$t("GlobalDashboard.recent_projects")}</h2>
+            <a href="/projects" class="view-all">{$t("GlobalDashboard.view_all")}</a>
         </div>
 
         <div class="project-list">
@@ -71,7 +72,7 @@
                             >{project.status}</span
                         >
                     </div>
-                    <button class="action-btn">Manage</button>
+                    <button class="action-btn">{$t("GlobalDashboard.manage")}</button>
                 </div>
             {/each}
         </div>
