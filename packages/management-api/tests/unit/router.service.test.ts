@@ -53,7 +53,7 @@ describe("RouterService", () => {
   describe("getProjectApiUrl", () => {
     test("should return HTTPS URL", () => {
       const url = routerService.getProjectApiUrl("testref");
-      expect(url).toStartWith("https://");
+      expect(url.startsWith("https://")).toBe(true);
     });
 
     test("should include api subdomain", () => {

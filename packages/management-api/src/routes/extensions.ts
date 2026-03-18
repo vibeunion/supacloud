@@ -13,3 +13,19 @@ export const extensionRoutes = new Elysia({ prefix: "/v1/projects/:ref/extension
         const extension = body.extension;
         return await extensionService.disableExtension(params.ref, extension);
     });
+
+// System-level extension management (platform admin)
+export const systemExtensionRoutes = new Elysia({ prefix: "/v1/system/extensions" })
+    .get('/', async () => {
+        return await extensionService.listSystemExtensions();
+    })
+    .post('/install', async ({ body }: any) => {
+        const name = body.name;
+        if (!name) throw new Error("Extension package name is required");
+        return await extensionService.installSystemExtension(name);
+    })
+    .post('/remove', async ({ body }: any) => {
+        const name = body.name;
+        if (!name) throw new Error("Extension package name is required");
+        return await extensionService.removeSystemExtension(name);
+    });
