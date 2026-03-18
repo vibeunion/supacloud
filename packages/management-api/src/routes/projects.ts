@@ -1,7 +1,9 @@
 import { Elysia, t } from "elysia";
 import { projectService } from "../services";
 import { gatewayService } from "../services/gateway.service";
+import { tenantRuntimeService } from "../services/tenant-runtime.service";
 import { db, getProjectDb } from "../db";
+import { $ } from "bun";
 
 // Available regions list
 const AVAILABLE_REGIONS = [
@@ -308,6 +310,57 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     {
       params: t.Object({
         ref: t.String(),
+      }),
+    }
+  )
+
+  // Individual service control (start/stop/restart)
+  .post(
+    "/:ref/services/:service/:action",
+    async ({ params, set }) => {
+      const { ref, service, action } = params;
+      const validActions = ["start", "stop", "restart"];
+      if (!validActions.includes(action)) {
+        set.status = 400;
+        return { error: `Invalid action: ${action}. Must be one of: ${validActions.join(", ")}` };
+      }
+
+      // Map service names to systemd unit names
+      const serviceMap: Record<string, string> = {
+        postgresql: "patroni",
+        postgrest: `supacloud-pgrst@${ref}`,
+        gotrue: `supacloud-gotrue@${ref}`,
+        realtime: `supacloud-realtime@${ref}`,
+        storage: `supacloud-storage@${ref}`,
+        kong: "kong",
+      };
+
+      const unitName = serviceMap[service];
+      if (!unitName) {
+        set.status = 400;
+        return { error: `Unknown service: ${service}. Available: ${Object.keys(serviceMap).join(", ")}` };
+      }
+
+      try {
+        const result = await $`systemctl ${action} ${unitName}`.nothrow().quiet();
+        return {
+          service,
+          action,
+          success: result.exitCode === 0,
+          message: result.exitCode === 0 
+            ? `Service ${service} ${action} succeeded`
+            : `Service ${service} ${action} failed (exit code: ${result.exitCode})`,
+        };
+      } catch (err: any) {
+        set.status = 500;
+        return { error: `Failed to ${action} ${service}: ${err.message}` };
+      }
+    },
+    {
+      params: t.Object({
+        ref: t.String(),
+        service: t.String(),
+        action: t.String(),
       }),
     }
   )

@@ -57,15 +57,156 @@ export class StorageService {
   }
 
   /**
-   * Legacy compatibility: Get S3 credentials
+   * Get S3 credentials
    */
-  static async getCredentials(projectRef: string): Promise<{ success: boolean; accessKey?: string; secretKey?: string; error?: string }> {
+  static async getCredentials(projectRef: string): Promise<{ success: boolean; accessKey?: string; secretKey?: string; endpoint?: string; bucket?: string; error?: string }> {
     const { success, output, error } = await shellService.execute('s3_manager.sh', ['credentials', projectRef]);
     if (!success) return { success: false, error };
 
-    const accessKey = output.match(/ACCESS_KEY=([^\n]+)/)?.[1];
-    const secretKey = output.match(/SECRET_KEY=([^\n]+)/)?.[1];
-    return { success: true, accessKey, secretKey };
+    const accessKey = output.match(/ACCESS_KEY=([^\n]+)/)?.[1]?.trim();
+    const secretKey = output.match(/SECRET_KEY=([^\n]+)/)?.[1]?.trim();
+    const endpoint = output.match(/ENDPOINT=([^\n]+)/)?.[1]?.trim() || process.env.S3_ENDPOINT || 'http://localhost:9000';
+    const bucket = output.match(/BUCKET=([^\n]+)/)?.[1]?.trim() || `supa-${projectRef}`;
+    return { success: true, accessKey, secretKey, endpoint, bucket };
+  }
+
+  /**
+   * List Buckets (Real API)
+   * In SupaCloud's S3 model, each project gets one real S3 bucket 'supa-<ref>'
+   */
+  static async listBuckets(projectRef: string): Promise<any[]> {
+    const creds = await this.getCredentials(projectRef);
+    if (!creds.success || !creds.bucket) {
+      return [{ id: 'default', name: 'default', public: true, size: '0 B' }];
+    }
+    // Return the logical root bucket for this project
+    return [{ id: creds.bucket, name: creds.bucket, public: false, size: '-' }];
+  }
+
+  /**
+   * List Files (Direct S3 API implementation)
+   */
+  static async listFiles(projectRef: string, bucketName: string): Promise<any[]> {
+    const creds = await this.getCredentials(projectRef);
+    if (!creds.success || !creds.accessKey || !creds.secretKey || !creds.endpoint || !creds.bucket) {
+      console.error('Failed to get credentials for storage');
+      return [];
+    }
+
+    try {
+      const { AwsClient } = await import('aws4fetch');
+      const aws = new AwsClient({
+        accessKeyId: creds.accessKey,
+        secretAccessKey: creds.secretKey,
+        service: 's3',
+        region: 'us-east-1', // Default for S3-compatible endpoints
+      });
+
+      // We normalize the endpoint (MinIO/Garage typical path-style routing: endpoint/bucket?list-type=2)
+      let baseUrl = creds.endpoint.endsWith('/') ? creds.endpoint.slice(0, -1) : creds.endpoint;
+      
+      const url = new URL(`${baseUrl}/${creds.bucket}/?list-type=2`);
+      const res = await aws.fetch(url.toString(), { method: 'GET' });
+      
+      if (!res.ok) {
+        console.error('S3 ListObjectsV2 failed:', await res.text());
+        return [];
+      }
+
+      const xml = await res.text();
+      
+      // Manual quick parsing of S3 XML response using regex 
+      const files: any[] = [];
+      const regex = /<Contents><Key>(.*?)<\/Key><LastModified>(.*?)<\/LastModified><ETag>.*?<\/ETag><Size>(.*?)<\/Size>.*?<\/Contents>/g;
+      
+      let match;
+      while ((match = regex.exec(xml)) !== null) {
+        files.push({
+          id: match[1],
+          name: match[1],
+          updated: match[2],
+          size: Math.round(parseInt(match[3]) / 1024) + ' KB', // Convert to KB
+          type: match[1].includes('.') ? match[1].split('.').pop() : 'unknown'
+        });
+      }
+      return files;
+    } catch (err) {
+      console.error('Exception during S3 listing:', err);
+      return [];
+    }
+  }
+
+  /**
+   * Upload File to S3
+   */
+  static async uploadFile(projectRef: string, bucketName: string, fileName: string, fileData: Blob | Buffer | Uint8Array | ArrayBuffer, contentType: string): Promise<boolean> {
+    const creds = await this.getCredentials(projectRef);
+    if (!creds.success || !creds.accessKey || !creds.secretKey || !creds.endpoint || !creds.bucket) return false;
+
+    try {
+      const { AwsClient } = await import('aws4fetch');
+      const aws = new AwsClient({
+        accessKeyId: creds.accessKey,
+        secretAccessKey: creds.secretKey,
+        service: 's3',
+        region: 'us-east-1',
+      });
+
+      let baseUrl = creds.endpoint.endsWith('/') ? creds.endpoint.slice(0, -1) : creds.endpoint;
+      
+      // Clean up filename (e.g. remove leading slashes)
+      const cleanFileName = fileName.replace(/^\/+/, '');
+      const url = new URL(`${baseUrl}/${creds.bucket}/${cleanFileName}`);
+      const res = await aws.fetch(url.toString(), { 
+        method: 'PUT',
+        body: fileData as any,
+        headers: {
+          'Content-Type': contentType
+        }
+      });
+      
+      if (!res.ok) {
+        console.error('S3 Upload failed:', await res.text());
+        return false;
+      }
+      return true;
+    } catch (err) {
+      console.error('Exception during S3 upload:', err);
+      return false;
+    }
+  }
+
+  /**
+   * Delete File from S3
+   */
+  static async deleteFile(projectRef: string, bucketName: string, fileName: string): Promise<boolean> {
+    const creds = await this.getCredentials(projectRef);
+    if (!creds.success || !creds.accessKey || !creds.secretKey || !creds.endpoint || !creds.bucket) return false;
+
+    try {
+      const { AwsClient } = await import('aws4fetch');
+      const aws = new AwsClient({
+        accessKeyId: creds.accessKey,
+        secretAccessKey: creds.secretKey,
+        service: 's3',
+        region: 'us-east-1',
+      });
+
+      let baseUrl = creds.endpoint.endsWith('/') ? creds.endpoint.slice(0, -1) : creds.endpoint;
+      const cleanFileName = fileName.replace(/^\/+/, '');
+      const url = new URL(`${baseUrl}/${creds.bucket}/${cleanFileName}`);
+      
+      const res = await aws.fetch(url.toString(), { method: 'DELETE' });
+      
+      if (!res.ok) {
+        console.error('S3 Delete failed:', await res.text());
+        return false;
+      }
+      return true;
+    } catch (err) {
+      console.error('Exception during S3 delete:', err);
+      return false;
+    }
   }
 }
 
