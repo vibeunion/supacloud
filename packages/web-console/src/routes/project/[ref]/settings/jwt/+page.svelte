@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { apiClient } from "$lib/api";
+
   import { onMount } from "svelte";
   import { page } from "$app/state";
   import { Loader2, Key, Eye, EyeOff, Copy, Clock, Shield } from "lucide-svelte";
@@ -13,7 +15,7 @@
   async function fetchJwt() {
     isLoading = true;
     try {
-      const res = await fetch(`/v1/projects/${projectRef}`);
+      const res = await apiClient(`/v1/projects/${projectRef}`);
       if (res.ok) {
         const data = await res.json();
         jwtSecret = data.config?.jwt_secret || data.jwt_secret || "super-secret-jwt-token-with-at-least-32-characters-long";

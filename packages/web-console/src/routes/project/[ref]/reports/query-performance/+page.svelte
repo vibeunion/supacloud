@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { apiClient } from "$lib/api";
+
   import { onMount } from "svelte";
   import { page } from "$app/state";
   import { t } from "svelte-i18n";
@@ -30,7 +32,7 @@
 
     for (const schemaPrefix of schemasToTry) {
       try {
-        const res = await fetch(`/v1/projects/${projectRef}/database/sql`, {
+        const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -76,7 +78,7 @@
   async function enableExtension() {
     isEnabling = true;
     try {
-      const res = await fetch(`/v1/projects/${projectRef}/database/sql`, {
+      const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

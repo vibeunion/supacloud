@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { apiClient } from "$lib/api";
+
   import { onMount } from "svelte";
   import { page } from "$app/state";
   import { t } from "svelte-i18n";
@@ -21,7 +23,7 @@
   async function fetchSecrets() {
     isLoading = true;
     try {
-      const res = await fetch(`/v1/projects/${projectRef}/secrets`);
+      const res = await apiClient(`/v1/projects/${projectRef}/secrets`);
       if (res.ok) {
         secrets = await res.json();
       }
@@ -37,7 +39,7 @@
   async function addSecret() {
     if (!newKey.trim() || !newValue.trim()) return;
     try {
-      await fetch(`/v1/projects/${projectRef}/secrets`, {
+      await apiClient(`/v1/projects/${projectRef}/secrets`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify([{ name: newKey, value: newValue }])
@@ -54,7 +56,7 @@
   async function deleteSecret(name: string) {
     if (!confirm(`确定删除 Secret "${name}"？此操作不可恢复。`)) return;
     try {
-      await fetch(`/v1/projects/${projectRef}/secrets/${name}`, { method: "DELETE" });
+      await apiClient(`/v1/projects/${projectRef}/secrets/${name}`, { method: "DELETE" });
       await fetchSecrets();
     } catch (err) {
       console.error("Failed to delete secret:", err);

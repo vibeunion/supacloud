@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { apiClient } from "$lib/api";
+
   import { onMount } from "svelte";
   import { page } from "$app/state";
   import { Loader2, Shield, ArrowLeft, UserPlus, LogIn, Key } from "lucide-svelte";
@@ -13,7 +15,7 @@
     isLoading = true;
     try {
       // Get total user count and recent signups
-      const res = await fetch(`/v1/projects/${projectRef}/database/sql`, {
+      const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -32,7 +34,7 @@
       if (rows.length > 0) authStats = rows[0];
 
       // Recent signups
-      const res2 = await fetch(`/v1/projects/${projectRef}/database/sql`, {
+      const res2 = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

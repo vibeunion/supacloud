@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { apiClient } from "$lib/api";
+
   import { onMount } from "svelte";
   import { Loader2, SlidersHorizontal, Save, RefreshCw, AlertTriangle, CheckCircle2 } from "lucide-svelte";
 
@@ -37,7 +39,7 @@
 
   async function runSql(sql: string): Promise<any[]> {
     try {
-      const res = await fetch("/v1/projects/default/database/sql", {
+      const res = await apiClient("/v1/projects/default/database/sql", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sql })
