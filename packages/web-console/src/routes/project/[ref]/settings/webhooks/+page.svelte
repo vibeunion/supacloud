@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { apiClient } from "$lib/api";
+
   import { onMount } from "svelte";
   import { page } from "$app/state";
   import { Webhook, Plus, Globe, Trash2, Loader2 } from "lucide-svelte";
@@ -32,7 +34,7 @@
     isLoading = true;
     try {
       // Create pg_net extension if not exists
-      await fetch(`/v1/projects/${projectRef}/database/sql`, {
+      await apiClient(`/v1/projects/${projectRef}/database/sql`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sql: "CREATE EXTENSION IF NOT EXISTS pg_net;" })
       });
@@ -48,7 +50,7 @@
         JOIN pg_namespace n ON c.relnamespace = n.oid
         WHERE n.nspname = 'public' AND t.tgname LIKE 'webhook_%';
       `;
-      const res = await fetch(`/v1/projects/${projectRef}/database/sql`, {
+      const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sql })
       });
@@ -71,7 +73,7 @@
       });
 
       // Fetch tables
-      const tblRes = await fetch(`/v1/projects/${projectRef}/database/sql`, {
+      const tblRes = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sql: "SELECT tablename FROM pg_catalog.pg_tables WHERE schemaname = 'public' ORDER BY tablename;" })
       });
@@ -116,7 +118,7 @@
         FOR EACH ROW EXECUTE FUNCTION public."${funcName}"();
       `;
 
-      const res = await fetch(`/v1/projects/${projectRef}/database/sql`, {
+      const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sql })
       });
@@ -146,7 +148,7 @@
         DROP TRIGGER IF EXISTS "${triggerName}" ON public."${tableName}";
         DROP FUNCTION IF EXISTS public."${funcName}"();
       `;
-      const res = await fetch(`/v1/projects/${projectRef}/database/sql`, {
+      const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sql })
       });

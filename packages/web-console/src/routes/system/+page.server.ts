@@ -1,3 +1,4 @@
+import { apiClient } from "$lib/api";
 import type { PageServerLoad } from './$types';
 import { env } from '$env/dynamic/private';
 
@@ -6,7 +7,7 @@ export const load: PageServerLoad = async ({ fetch }) => {
     const API_URL = env.SUPACLOUD_API_URL || 'http://localhost:9090';
 
     try {
-        const response = await fetch(`${API_URL}/v1/monitor/system`, {
+        const response = await apiClient(`${API_URL}/v1/monitor/system`, {
             headers: {
                 'Authorization': `Bearer ${MASTER_TOKEN}`
             }

@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { apiClient } from "$lib/api";
+
   import { onMount } from "svelte";
   import { Loader2, Package, Download, Trash2, RefreshCw, Search, AlertTriangle } from "lucide-svelte";
 
@@ -20,7 +22,7 @@
     isLoading = true;
     error = null;
     try {
-      const res = await fetch("/v1/system/extensions");
+      const res = await apiClient("/v1/system/extensions");
       const data = await res.json();
       extensions = Array.isArray(data) ? data : [];
     } catch (err: any) {
@@ -34,7 +36,7 @@
     actionTarget = name;
     actionMsg = null;
     try {
-      const res = await fetch("/v1/system/extensions/install", {
+      const res = await apiClient("/v1/system/extensions/install", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name })
@@ -55,7 +57,7 @@
     actionTarget = name;
     actionMsg = null;
     try {
-      const res = await fetch("/v1/system/extensions/remove", {
+      const res = await apiClient("/v1/system/extensions/remove", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name })

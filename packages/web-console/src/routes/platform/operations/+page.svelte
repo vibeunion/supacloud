@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { apiClient } from "$lib/api";
+
   import { onMount } from "svelte";
   import { Loader2, Wrench, Play, RefreshCw, AlertTriangle, CheckCircle2, Server, ArrowRightLeft, Plus, Shield, Clock, Terminal } from "lucide-svelte";
 
@@ -24,7 +26,7 @@
   async function apiCall(url: string, method: string = "GET", body?: any): Promise<any> {
     const opts: RequestInit = { method, headers: { "Content-Type": "application/json" } };
     if (body) opts.body = JSON.stringify(body);
-    const res = await fetch(url, opts);
+    const res = await apiClient(url, opts);
     return await res.json();
   }
 

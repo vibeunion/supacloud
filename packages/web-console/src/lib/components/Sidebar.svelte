@@ -106,6 +106,13 @@
   </nav>
 
   <div class="p-4 border-t space-y-2">
+    <a
+      href="/platform"
+      class="flex w-full items-center gap-3 px-3 py-2 text-sm font-medium rounded-md text-brand bg-brand/5 hover:bg-brand/10 transition-colors"
+    >
+      <Shield class="w-4 h-4" />
+      <span>平台管理 (Platform Admin)</span>
+    </a>
     <button
       onclick={(e) => { e.preventDefault(); toggleLanguage(); }}
       class="flex w-full items-center gap-3 px-3 py-2 text-sm font-medium rounded-md text-muted-foreground hover:bg-secondary/50 hover:text-foreground transition-colors"

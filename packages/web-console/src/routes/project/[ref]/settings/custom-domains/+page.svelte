@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { apiClient } from "$lib/api";
+
   import { onMount } from "svelte";
   import { page } from "$app/state";
   import { Loader2, Globe, Plus, Trash2, Shield, AlertTriangle, ExternalLink, Copy, CheckCircle, XCircle } from "lucide-svelte";
@@ -22,7 +24,7 @@
   async function fetchDomain() {
     isLoading = true;
     try {
-      const res = await fetch(`/v1/projects/${projectRef}/custom-hostname`);
+      const res = await apiClient(`/v1/projects/${projectRef}/custom-hostname`);
       if (res.ok) {
         domain = await res.json();
       }
@@ -37,7 +39,7 @@
     if (!newDomain.trim()) return;
     saving = true;
     try {
-      const res = await fetch(`/v1/projects/${projectRef}/custom-hostname`, {
+      const res = await apiClient(`/v1/projects/${projectRef}/custom-hostname`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ custom_hostname: newDomain.trim() })
@@ -63,7 +65,7 @@
     if (!confirm("确定删除自定义域名？删除后将自动移除 Angie 配置和 SSL 证书。")) return;
     deleting = true;
     try {
-      const res = await fetch(`/v1/projects/${projectRef}/custom-hostname`, { method: "DELETE" });
+      const res = await apiClient(`/v1/projects/${projectRef}/custom-hostname`, { method: "DELETE" });
       if (res.ok) {
         msg = "✅ 域名已删除，Angie 配置已移除";
         await fetchDomain();

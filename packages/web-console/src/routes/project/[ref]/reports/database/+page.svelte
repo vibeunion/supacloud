@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { apiClient } from "$lib/api";
+
   import { onMount } from "svelte";
   import { page } from "$app/state";
   import { Loader2, Database, ArrowLeft, HardDrive, Activity } from "lucide-svelte";
@@ -12,7 +14,7 @@
   async function fetchDbStats() {
     isLoading = true;
     try {
-      const res = await fetch(`/v1/projects/${projectRef}/database/sql`, {
+      const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -34,7 +36,7 @@
       const data = await res.json();
       dbStats = Array.isArray(data) ? data : data.rows || [];
 
-      const res2 = await fetch(`/v1/projects/${projectRef}/database/sql`, {
+      const res2 = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
