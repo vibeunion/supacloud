@@ -198,20 +198,40 @@ export class ProjectService {
   }
 
   // Get project health status
-  async getProjectHealth(ref: string): Promise<{ status: string; services: Record<string, string> } | null> {
+  async getProjectHealth(ref: string): Promise<{ status: string; services: { name: string; status: string }[] } | null> {
     const project = await projectRepository.findByRef(ref);
     if (!project) return null;
 
     const dbStatus = await databaseService.checkStatus(ref);
 
+    const checkService = async (unitName: string) => {
+      try {
+        const { $ } = await import("bun");
+        const result = await $`systemctl is-active ${unitName}`.nothrow().quiet();
+        return result.exitCode === 0 ? "ACTIVE_HEALTHY" : "INACTIVE";
+      } catch {
+        return "INACTIVE";
+      }
+    };
+
+    const [pgrstStatus, gotrueStatus, realtimeStatus, storageStatus, kongStatus] = await Promise.all([
+      checkService(`supacloud-pgrst@${ref}`),
+      checkService(`supacloud-gotrue@${ref}`),
+      checkService(`supacloud-realtime@${ref}`),
+      checkService(`supacloud-storage@${ref}`),
+      checkService("kong"),
+    ]);
+
     return {
       status: project.status === "active" ? "ACTIVE_HEALTHY" : "INACTIVE",
-      services: {
-        database: dbStatus.success ? "ACTIVE_HEALTHY" : "UNHEALTHY",
-        storage: "ACTIVE_HEALTHY",
-        auth: "ACTIVE_HEALTHY",
-        realtime: "ACTIVE_HEALTHY",
-      },
+      services: [
+        { name: "PostgreSQL", status: dbStatus.success ? "ACTIVE_HEALTHY" : "INACTIVE" },
+        { name: "PostgREST", status: pgrstStatus },
+        { name: "GoTrue", status: gotrueStatus },
+        { name: "Realtime", status: realtimeStatus },
+        { name: "Storage", status: storageStatus },
+        { name: "Kong", status: kongStatus },
+      ],
     };
   }
 

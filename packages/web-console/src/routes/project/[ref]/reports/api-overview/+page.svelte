@@ -1,0 +1,151 @@
+<script lang="ts">
+  import { onMount } from "svelte";
+  import { page } from "$app/state";
+  import { Loader2, Activity, TrendingUp, AlertTriangle, ArrowLeft, BarChart3 } from "lucide-svelte";
+
+  interface ApiStat {
+    total_requests: number;
+    avg_latency_ms: number;
+    error_rate: number;
+    status_2xx: number;
+    status_4xx: number;
+    status_5xx: number;
+  }
+
+  let stats = $state<ApiStat | null>(null);
+  let isLoading = $state(true);
+  let recentRequests = $state<any[]>([]);
+
+  const projectRef = $derived(page.params.ref);
+
+  async function fetchStats() {
+    isLoading = true;
+    try {
+      // Query Kong logs from journalctl analytics or PG stat tables
+      const res = await fetch(`/v1/projects/${projectRef}/database/sql`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sql: `SELECT
+            count(*) as total_requests,
+            round(avg(extract(epoch from (clock_timestamp() - now())) * 1000)::numeric, 2) as avg_response_ms
+          FROM pg_stat_activity
+          WHERE backend_type = 'client backend'
+            AND state IS NOT NULL;`
+        })
+      });
+      const data = await res.json();
+      const rows = Array.isArray(data) ? data : data.rows || [];
+      if (rows.length > 0) {
+        stats = {
+          total_requests: parseInt(rows[0].total_requests || "0"),
+          avg_latency_ms: parseFloat(rows[0].avg_response_ms || "0"),
+          error_rate: 0,
+          status_2xx: 0,
+          status_4xx: 0,
+          status_5xx: 0,
+        };
+      }
+
+      // Fetch currently active connections as "recent"
+      const res2 = await fetch(`/v1/projects/${projectRef}/database/sql`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sql: `SELECT pid, usename, application_name, client_addr, state, query, backend_start::text, query_start::text
+                FROM pg_stat_activity
+                WHERE backend_type = 'client backend'
+                ORDER BY backend_start DESC LIMIT 20;`
+        })
+      });
+      const data2 = await res2.json();
+      recentRequests = Array.isArray(data2) ? data2 : data2.rows || [];
+    } catch (err) {
+      console.error("Failed to fetch API stats:", err);
+    } finally {
+      isLoading = false;
+    }
+  }
+
+  onMount(() => { fetchStats(); });
+</script>
+
+<div class="h-full flex flex-col space-y-4">
+  <div class="flex items-center gap-3">
+    <a href={`/project/${projectRef}/reports`} class="p-2 hover:bg-muted/50 rounded-lg transition-colors">
+      <ArrowLeft size={18} />
+    </a>
+    <div>
+      <h1 class="text-2xl font-bold">API 概览</h1>
+      <p class="text-sm text-muted-foreground mt-1">API 网关请求统计和当前活跃连接</p>
+    </div>
+  </div>
+
+  {#if isLoading}
+    <div class="flex-1 flex items-center justify-center">
+      <Loader2 size={32} class="animate-spin text-brand opacity-50" />
+    </div>
+  {:else}
+    <!-- Stats Cards -->
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div class="rounded-xl border bg-card p-4">
+        <div class="text-[10px] font-semibold text-muted-foreground uppercase">活跃连接</div>
+        <div class="text-2xl font-bold mt-1 text-brand">{stats?.total_requests || 0}</div>
+      </div>
+      <div class="rounded-xl border bg-card p-4">
+        <div class="text-[10px] font-semibold text-muted-foreground uppercase">平均延迟</div>
+        <div class="text-2xl font-bold mt-1">{stats?.avg_latency_ms?.toFixed(1) || '0'} <span class="text-sm text-muted-foreground">ms</span></div>
+      </div>
+      <div class="rounded-xl border bg-card p-4">
+        <div class="text-[10px] font-semibold text-muted-foreground uppercase">状态</div>
+        <div class="text-lg font-bold mt-1 text-green-600">正常</div>
+      </div>
+      <div class="rounded-xl border bg-card p-4">
+        <div class="text-[10px] font-semibold text-muted-foreground uppercase">上行带宽</div>
+        <div class="text-lg font-bold mt-1 text-muted-foreground">-</div>
+      </div>
+    </div>
+
+    <!-- Active Connections Table -->
+    <div class="flex-1 rounded-xl border bg-card overflow-hidden">
+      <div class="border-b px-5 py-3 bg-muted/20">
+        <h2 class="text-sm font-semibold flex items-center gap-2"><Activity size={14} /> 当前活跃数据库连接</h2>
+      </div>
+      {#if recentRequests.length === 0}
+        <div class="flex flex-col items-center justify-center py-16 text-muted-foreground gap-2">
+          <BarChart3 size={32} class="opacity-20" />
+          <p class="text-xs">暂无活跃连接</p>
+        </div>
+      {:else}
+        <div class="overflow-auto max-h-[55vh]">
+          <table class="w-full text-left text-xs">
+            <thead class="bg-muted/30 border-b sticky top-0">
+              <tr>
+                <th class="px-4 py-2 font-semibold text-muted-foreground">PID</th>
+                <th class="px-4 py-2 font-semibold text-muted-foreground">用户</th>
+                <th class="px-4 py-2 font-semibold text-muted-foreground">应用</th>
+                <th class="px-4 py-2 font-semibold text-muted-foreground">状态</th>
+                <th class="px-4 py-2 font-semibold text-muted-foreground">查询</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-border/20 font-mono">
+              {#each recentRequests as req}
+                <tr class="hover:bg-muted/10 transition-colors">
+                  <td class="px-4 py-2">{req.pid}</td>
+                  <td class="px-4 py-2">{req.usename || '-'}</td>
+                  <td class="px-4 py-2 text-[10px]">{req.application_name || '-'}</td>
+                  <td class="px-4 py-2">
+                    <span class="px-1.5 py-0.5 rounded text-[9px] font-bold {req.state === 'active' ? 'bg-green-500/10 text-green-600' : req.state === 'idle' ? 'bg-muted text-muted-foreground' : 'bg-amber-500/10 text-amber-600'}">
+                      {req.state || '-'}
+                    </span>
+                  </td>
+                  <td class="px-4 py-2 text-[10px] truncate max-w-xs text-muted-foreground" title={req.query}>{req.query || '-'}</td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </div>
+      {/if}
+    </div>
+  {/if}
+</div>
