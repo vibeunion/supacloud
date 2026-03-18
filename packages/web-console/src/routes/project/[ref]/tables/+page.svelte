@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { apiClient } from "$lib/api";
+
   import { onMount } from "svelte";
   import { page } from "$app/state";
   import { t } from "svelte-i18n";
@@ -70,7 +72,7 @@
 
   async function runSql(sql: string): Promise<{ rows: any[]; error?: string }> {
     try {
-      const res = await fetch(`/v1/projects/${projectRef}/database/sql`, {
+      const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sql })
@@ -92,7 +94,7 @@
     isLoadingSidebar = true;
     sidebarError = null;
     try {
-      const res = await fetch(`/v1/projects/${projectRef}/database/sql`, {
+      const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           sql: `SELECT table_name, table_schema, table_type,
@@ -121,7 +123,7 @@
         );
         ${newTableDesc ? `COMMENT ON TABLE "${selectedSchema}"."${newTableName}" IS '${newTableDesc.replace(/'/g, "''")}';` : ''}
       `;
-      const res = await fetch(`/v1/projects/${projectRef}/database/sql`, {
+      const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sql })
       });
@@ -144,7 +146,7 @@
     
     try {
       const sql = `DROP TABLE "${selectedTable.table_schema}"."${selectedTable.table_name}" CASCADE;`;
-      const res = await fetch(`/v1/projects/${projectRef}/database/sql`, {
+      const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sql })
       });

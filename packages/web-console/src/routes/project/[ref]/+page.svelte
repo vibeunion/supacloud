@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { apiClient } from "$lib/api";
+
   import { onMount } from "svelte";
   import { page } from "$app/state";
   import { t } from "svelte-i18n";
@@ -32,7 +34,7 @@
 
   async function runSql(sql: string): Promise<any[]> {
     try {
-      const res = await fetch(`/v1/projects/${projectRef}/database/sql`, {
+      const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sql })
@@ -76,7 +78,7 @@
   async function fetchServices() {
     servicesLoading = true;
     try {
-      const res = await fetch(`/v1/projects/${projectRef}`);
+      const res = await apiClient(`/v1/projects/${projectRef}`);
       if (res.ok) {
         const data = await res.json();
         services = data.services || [];
@@ -88,7 +90,7 @@
   // Fetch functions count
   async function fetchFunctions() {
     try {
-      const res = await fetch(`/v1/projects/${projectRef}/functions`);
+      const res = await apiClient(`/v1/projects/${projectRef}/functions`);
       if (res.ok) {
         const data = await res.json();
         functionsCount = Array.isArray(data) ? data.length : 0;

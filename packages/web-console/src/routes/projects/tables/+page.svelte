@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { apiClient } from "$lib/api";
+
   import TableSidebar from "$lib/components/TableSidebar.svelte";
   import { 
     RefreshCcw, 
@@ -39,7 +41,7 @@
     
     try {
       const query = `SELECT * FROM "${table.schema}"."${table.name}" LIMIT ${pageSize} OFFSET ${(page - 1) * pageSize}`;
-      const res = await fetch('/api/query', {
+      const res = await apiClient('/api/query', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ projectRef: data.project?.ref || 'default', query })

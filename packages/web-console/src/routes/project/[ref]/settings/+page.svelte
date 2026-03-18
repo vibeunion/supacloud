@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { apiClient } from "$lib/api";
+
   import { onMount } from "svelte";
   import { page } from "$app/state";
   import { t } from "svelte-i18n";
@@ -14,7 +16,7 @@
   async function fetchProject() {
     isLoading = true;
     try {
-      const res = await fetch(`/v1/projects/${projectRef}`);
+      const res = await apiClient(`/v1/projects/${projectRef}`);
       project = await res.json();
     } catch (err) {
       console.error("Failed to fetch project:", err);
@@ -26,7 +28,7 @@
   async function restartProject() {
     actionInProgress = "restart";
     try {
-      await fetch(`/v1/projects/${projectRef}/restart`, { method: "POST" });
+      await apiClient(`/v1/projects/${projectRef}/restart`, { method: "POST" });
       actionMsg = "✅ 项目重启请求已发送";
       await new Promise(r => setTimeout(r, 2000));
       await fetchProject();
@@ -42,7 +44,7 @@
     if (!confirm("确定要暂停项目？暂停后所有服务将停止。")) return;
     actionInProgress = "pause";
     try {
-      await fetch(`/v1/projects/${projectRef}/pause`, { method: "POST" });
+      await apiClient(`/v1/projects/${projectRef}/pause`, { method: "POST" });
       actionMsg = "✅ 项目已暂停";
       await fetchProject();
     } catch {
@@ -56,7 +58,7 @@
   async function restoreProject() {
     actionInProgress = "restore";
     try {
-      await fetch(`/v1/projects/${projectRef}/restore`, { method: "POST" });
+      await apiClient(`/v1/projects/${projectRef}/restore`, { method: "POST" });
       actionMsg = "✅ 项目已恢复";
       await new Promise(r => setTimeout(r, 2000));
       await fetchProject();
@@ -69,11 +71,16 @@
   }
 
   async function deleteProject() {
-    if (!confirm(`确定要删除项目 ${project?.name || projectRef}？此操作不可撤销！`)) return;
-    if (!confirm("再次确认：所有数据（数据库、存储、认证用户）都将被永久删除。")) return;
+    const input = prompt(`请输入项目名称以确认删除：\n[ ${project?.name} ]`);
+    if (input !== project?.name) {
+      actionMsg = "❌ 项目名称不匹配，已取消删除";
+      setTimeout(() => actionMsg = null, 4000);
+      return;
+    }
+    if (!confirm("再次确认：所有数据（数据库、存储、认证用户）都将被永久删除。此操作不可撤销！")) return;
     actionInProgress = "delete";
     try {
-      const res = await fetch(`/v1/projects/${projectRef}`, { method: "DELETE" });
+      const res = await apiClient(`/v1/projects/${projectRef}`, { method: "DELETE" });
       if (res.ok) {
         actionMsg = "✅ 项目已删除。正在跳转...";
         setTimeout(() => { window.location.href = "/"; }, 2000);

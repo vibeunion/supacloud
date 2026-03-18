@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { apiClient } from "$lib/api";
+
   import { onMount } from "svelte";
   import { Loader2, Database, HardDrive, Cloud, RefreshCw, ArrowRight, AlertTriangle, CheckCircle2, FolderOpen, Server } from "lucide-svelte";
 
@@ -33,7 +35,7 @@
   async function fetchStatus() {
     isLoading = true;
     try {
-      const res = await fetch("/v1/storage/status");
+      const res = await apiClient("/v1/storage/status");
       if (res.ok) {
         const data = await res.json();
         status = {
@@ -48,7 +50,7 @@
 
     // Fetch buckets
     try {
-      const res = await fetch("/v1/storage/default/buckets");
+      const res = await apiClient("/v1/storage/default/buckets");
       if (res.ok) {
         const data = await res.json();
         buckets = Array.isArray(data) ? data : [];
@@ -68,7 +70,7 @@
     isMigrating = true;
     actionMsg = null;
     try {
-      const res = await fetch("/v1/storage/migrate", {
+      const res = await apiClient("/v1/storage/migrate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

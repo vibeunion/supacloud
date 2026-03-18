@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { apiClient } from "$lib/api";
+
   import { onMount } from "svelte";
   import { page } from "$app/state";
   import { t } from "svelte-i18n";
@@ -55,7 +57,7 @@
     isLoading = true;
     error = null;
     try {
-      const res = await fetch(`/v1/projects/${projectRef}/database/sql`, {
+      const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sql: ROLES_SQL })
@@ -90,7 +92,7 @@
     if (newRolePassword) opts.push(`PASSWORD '${newRolePassword.replace(/'/g, "''")}'`);
     const sql = `CREATE ROLE "${newRoleName.trim()}" ${opts.join(' ')};`;
     try {
-      const res = await fetch(`/v1/projects/${projectRef}/database/sql`, {
+      const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sql })
       });
@@ -104,7 +106,7 @@
   async function deleteRole(rolename: string) {
     if (!confirm(`确定删除角色 ${rolename} 吗？此操作不可撤销。`)) return;
     try {
-      const res = await fetch(`/v1/projects/${projectRef}/database/sql`, {
+      const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sql: `DROP ROLE IF EXISTS "${rolename}";` })
       });

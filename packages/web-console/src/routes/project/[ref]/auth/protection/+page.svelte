@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { apiClient } from "$lib/api";
+
   import { onMount } from "svelte";
   import { page } from "$app/state";
   import { Shield, Ban, AlertTriangle, Globe, Lock, Loader2 } from "lucide-svelte";
@@ -30,7 +32,7 @@
   async function fetchConfig() {
     isLoading = true;
     try {
-      const res = await fetch(`/v1/projects/${projectRef}/auth/config`);
+      const res = await apiClient(`/v1/projects/${projectRef}/auth/config`);
       if (res.ok) {
         const configData = await res.json();
         for (const cfg of configs) {
@@ -59,7 +61,7 @@
     cfg.enabled = !cfg.enabled;
 
     try {
-      const res = await fetch(`/v1/projects/${projectRef}/auth/config`, {
+      const res = await apiClient(`/v1/projects/${projectRef}/auth/config`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ [cfg.key]: String(cfg.enabled) })

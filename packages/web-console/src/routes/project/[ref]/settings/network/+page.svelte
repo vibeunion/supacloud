@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { apiClient } from "$lib/api";
+
   import { onMount } from "svelte";
   import { page } from "$app/state";
   import { Loader2, Shield, Plus, Trash2, Save, AlertTriangle, Globe } from "lucide-svelte";
@@ -14,7 +16,7 @@
   async function fetchRestrictions() {
     isLoading = true;
     try {
-      const res = await fetch(`/v1/projects/${projectRef}/network-restrictions`);
+      const res = await apiClient(`/v1/projects/${projectRef}/network-restrictions`);
       if (res.ok) {
         const data = await res.json();
         allowedIps = data.allowed_address_ranges || [];
@@ -41,7 +43,7 @@
   async function saveRestrictions() {
     saving = true;
     try {
-      const res = await fetch(`/v1/projects/${projectRef}/network-restrictions`, {
+      const res = await apiClient(`/v1/projects/${projectRef}/network-restrictions`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ allowed_address_ranges: allowedIps })

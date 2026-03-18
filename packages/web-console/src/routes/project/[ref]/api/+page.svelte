@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { apiClient } from "$lib/api";
+
   import { onMount } from "svelte";
   import { page } from "$app/state";
   import { t } from "svelte-i18n";
@@ -25,7 +27,7 @@
   async function fetchProject() {
     isLoading = true;
     try {
-      const res = await fetch(`/v1/projects/${projectRef}`);
+      const res = await apiClient(`/v1/projects/${projectRef}`);
       project = await res.json();
     } catch {} finally { isLoading = false; }
   }
@@ -33,7 +35,7 @@
   async function fetchEndpoints() {
     loadingEndpoints = true;
     try {
-      const res = await fetch(`/v1/projects/${projectRef}/database/sql`, {
+      const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

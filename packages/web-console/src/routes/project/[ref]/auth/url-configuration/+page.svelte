@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { apiClient } from "$lib/api";
+
   import { onMount } from "svelte";
   import { page } from "$app/state";
   import { Loader2, Link2, Globe, Plus, Trash2, Save } from "lucide-svelte";
@@ -15,7 +17,7 @@
   async function fetchUrlConfig() {
     isLoading = true;
     try {
-      const res = await fetch(`/v1/projects/${projectRef}/auth/config`);
+      const res = await apiClient(`/v1/projects/${projectRef}/auth/config`);
       if (res.ok) {
         const config = await res.json();
         siteUrl = config.SITE_URL || config.site_url || "";
@@ -41,7 +43,7 @@
   async function saveConfig() {
     saving = true;
     try {
-      const res = await fetch(`/v1/projects/${projectRef}/auth/config`, {
+      const res = await apiClient(`/v1/projects/${projectRef}/auth/config`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
