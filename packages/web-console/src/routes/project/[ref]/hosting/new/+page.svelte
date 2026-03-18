@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { apiClient } from "$lib/api";
+
   import { page } from "$app/state";
   import { goto } from "$app/navigation";
   import { Loader2, Rocket, FolderGit2, Upload, AlertTriangle } from "lucide-svelte";
@@ -37,7 +39,7 @@
 
     try {
       // Step 1: Create deployment
-      const res = await fetch(`/v1/projects/${projectRef}/frontend/deployments`, {
+      const res = await apiClient(`/v1/projects/${projectRef}/frontend/deployments`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -54,14 +56,14 @@
       // Step 2: If git mode, trigger git deploy
       if (deployMode === "git" && gitUrl.trim()) {
         // Set git config
-        await fetch(`/v1/projects/${projectRef}/frontend/deployments/${dep.id}/git`, {
+        await apiClient(`/v1/projects/${projectRef}/frontend/deployments/${dep.id}/git`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ git_url: gitUrl.trim(), branch: gitBranch || "main" })
         });
 
         // Trigger deploy
-        await fetch(`/v1/projects/${projectRef}/frontend/deployments/${dep.id}/deploy/git`, {
+        await apiClient(`/v1/projects/${projectRef}/frontend/deployments/${dep.id}/deploy/git`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ git_url: gitUrl.trim(), branch: gitBranch || "main" })

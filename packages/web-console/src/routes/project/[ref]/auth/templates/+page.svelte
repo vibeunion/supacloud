@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { apiClient } from "$lib/api";
+
   import { onMount } from "svelte";
   import { page } from "$app/state";
   import { Loader2, Mail, FileText, Save, ChevronDown, ChevronUp } from "lucide-svelte";
@@ -33,7 +35,7 @@
   async function fetchConfig() {
     isLoading = true;
     try {
-      const res = await fetch(`/v1/projects/${projectRef}/auth/config`);
+      const res = await apiClient(`/v1/projects/${projectRef}/auth/config`);
       const config = res.ok ? await res.json() : {};
       templates = TEMPLATES_DEF.map(t => ({
         ...t,
@@ -54,7 +56,7 @@
         if (t.subject) payload[t.subjectKey] = t.subject;
         if (t.body) payload[t.bodyKey] = t.body;
       }
-      const res = await fetch(`/v1/projects/${projectRef}/auth/config`, {
+      const res = await apiClient(`/v1/projects/${projectRef}/auth/config`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)

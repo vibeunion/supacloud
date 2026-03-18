@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { apiClient } from "$lib/api";
+
   import { onMount } from "svelte";
   import { page } from "$app/state";
   import { Loader2, Save, Key, Globe, GitBranch, Terminal, Copy, RefreshCw, Trash2, Plus, ExternalLink } from "lucide-svelte";
@@ -39,7 +41,7 @@
   async function fetchDeployment() {
     isLoading = true;
     try {
-      const res = await fetch(`/v1/projects/${projectRef}/frontend/deployments/${deployId}`);
+      const res = await apiClient(`/v1/projects/${projectRef}/frontend/deployments/${deployId}`);
       if (res.ok) {
         dep = await res.json();
         buildCommand = dep.build_command || "";
@@ -54,13 +56,13 @@
 
     // Fetch tokens
     try {
-      const res = await fetch(`/v1/projects/${projectRef}/frontend/deployments/${deployId}/tokens`);
+      const res = await apiClient(`/v1/projects/${projectRef}/frontend/deployments/${deployId}/tokens`);
       if (res.ok) { const data = await res.json(); tokens = data.tokens || []; }
     } catch {}
 
     // Fetch logs
     try {
-      const res = await fetch(`/v1/projects/${projectRef}/frontend/deployments/${deployId}/logs`);
+      const res = await apiClient(`/v1/projects/${projectRef}/frontend/deployments/${deployId}/logs`);
       if (res.ok) { const data = await res.json(); logs = data.logs || ""; }
     } catch {}
 
@@ -70,14 +72,14 @@
   async function saveBuildConfig() {
     isSaving = true;
     try {
-      await fetch(`/v1/projects/${projectRef}/frontend/deployments/${deployId}`, {
+      await apiClient(`/v1/projects/${projectRef}/frontend/deployments/${deployId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ build_command: buildCommand, output_dir: outputDir, install_command: installCommand, node_version: nodeVersion })
       });
       // Save git config
       if (gitUrl) {
-        await fetch(`/v1/projects/${projectRef}/frontend/deployments/${deployId}/git`, {
+        await apiClient(`/v1/projects/${projectRef}/frontend/deployments/${deployId}/git`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ git_url: gitUrl, branch: gitBranch || "main" })
@@ -94,7 +96,7 @@
     const envObj: Record<string, string> = {};
     envPairs.filter(p => p.key.trim()).forEach(p => envObj[p.key] = p.value);
     try {
-      await fetch(`/v1/projects/${projectRef}/frontend/deployments/${deployId}/env`, {
+      await apiClient(`/v1/projects/${projectRef}/frontend/deployments/${deployId}/env`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ env_vars: envObj })
@@ -109,7 +111,7 @@
     if (!newDomain.trim()) return;
     isAddingDomain = true;
     try {
-      await fetch(`/v1/projects/${projectRef}/frontend/deployments/${deployId}/domains`, {
+      await apiClient(`/v1/projects/${projectRef}/frontend/deployments/${deployId}/domains`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ domain: newDomain.trim() })
@@ -123,7 +125,7 @@
   }
 
   async function removeDomain(domain: string) {
-    await fetch(`/v1/projects/${projectRef}/frontend/deployments/${deployId}/domains/${domain}`, { method: "DELETE" });
+    await apiClient(`/v1/projects/${projectRef}/frontend/deployments/${deployId}/domains/${domain}`, { method: "DELETE" });
     await fetchDeployment();
   }
 
@@ -131,7 +133,7 @@
     if (!newTokenName.trim()) return;
     isCreatingToken = true;
     try {
-      const res = await fetch(`/v1/projects/${projectRef}/frontend/deployments/${deployId}/tokens`, {
+      const res = await apiClient(`/v1/projects/${projectRef}/frontend/deployments/${deployId}/tokens`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: newTokenName.trim() })
@@ -147,7 +149,7 @@
   }
 
   async function deleteToken(tokenId: string) {
-    await fetch(`/v1/projects/${projectRef}/frontend/deployments/${deployId}/tokens/${tokenId}`, { method: "DELETE" });
+    await apiClient(`/v1/projects/${projectRef}/frontend/deployments/${deployId}/tokens/${tokenId}`, { method: "DELETE" });
     await fetchDeployment();
   }
 

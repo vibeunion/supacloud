@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { apiClient } from "$lib/api";
+
   import { onMount } from "svelte";
   import { page } from "$app/state";
   import { Loader2, Check, X, Search, Shield, KeyRound, ChevronDown, ChevronUp, Save, Trash2, Eye, EyeOff } from "lucide-svelte";
@@ -63,7 +65,7 @@
   async function fetchProviders() {
     isLoading = true;
     try {
-      const res = await fetch(`/v1/projects/${projectRef}/auth/studio/providers`);
+      const res = await apiClient(`/v1/projects/${projectRef}/auth/studio/providers`);
       if (res.ok) {
         const data = await res.json();
         const provMap = data.providers || {};
@@ -104,7 +106,7 @@
     }
     provider.saving = true;
     try {
-      const res = await fetch(`/v1/projects/${projectRef}/auth/providers/${provider.key}`, {
+      const res = await apiClient(`/v1/projects/${projectRef}/auth/providers/${provider.key}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -132,7 +134,7 @@
     if (!confirm(`确定禁用 ${provider.name} 登录？`)) return;
     provider.saving = true;
     try {
-      await fetch(`/v1/projects/${projectRef}/auth/providers/${provider.key}`, { method: "DELETE" });
+      await apiClient(`/v1/projects/${projectRef}/auth/providers/${provider.key}`, { method: "DELETE" });
       provider.enabled = false;
       provider.client_id = "";
       provider.client_secret = "";

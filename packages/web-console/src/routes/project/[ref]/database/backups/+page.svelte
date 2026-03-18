@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { apiClient } from "$lib/api";
+
   import { onMount } from "svelte";
   import { page } from "$app/state";
   import { t } from "svelte-i18n";
@@ -29,7 +31,7 @@
   async function fetchBackupInfo() {
     isLoading = true;
     try {
-      const sizeRes = await fetch(`/v1/projects/${projectRef}/database/sql`, {
+      const sizeRes = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sql: "SELECT pg_size_pretty(pg_database_size(current_database())) as size;" })
@@ -81,7 +83,7 @@
     isCreating = true;
     createMsg = null;
     try {
-      const res = await fetch(`/v1/projects/${projectRef}/database/backups/logical`, { method: "POST" });
+      const res = await apiClient(`/v1/projects/${projectRef}/database/backups/logical`, { method: "POST" });
       const data = await res.json();
       if (!data.success) throw new Error(data.message || "备份失败");
       createMsg = `✅ 备份已生成：${data.file || '成功'}`;
@@ -100,7 +102,7 @@
     isRestoring = true;
     restoreMsg = null;
     try {
-      const res = await fetch(`/v1/projects/${projectRef}/database/backups/logical/restore`, { 
+      const res = await apiClient(`/v1/projects/${projectRef}/database/backups/logical/restore`, { 
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ backupId: restoreFile.trim() })

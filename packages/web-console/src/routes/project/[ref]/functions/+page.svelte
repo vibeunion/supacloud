@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { apiClient } from "$lib/api";
+
   import { onMount } from "svelte";
   import { page } from "$app/state";
   import { t } from "svelte-i18n";
@@ -37,7 +39,7 @@ serve(async (req) => {
   async function fetchFunctions() {
     isLoading = true;
     try {
-      const res = await fetch(`/v1/projects/${projectRef}/functions`);
+      const res = await apiClient(`/v1/projects/${projectRef}/functions`);
       if (res.ok) {
         functions = await res.json();
       }
@@ -56,7 +58,7 @@ serve(async (req) => {
     }
     deploying = true;
     try {
-      const res = await fetch(`/v1/projects/${projectRef}/functions/${newSlug}`, {
+      const res = await apiClient(`/v1/projects/${projectRef}/functions/${newSlug}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ code: newCode }),
@@ -81,7 +83,7 @@ serve(async (req) => {
   async function deleteFunction(slug: string) {
     if (!confirm(`确定删除 Edge Function "${slug}"？此操作不可恢复。`)) return;
     try {
-      await fetch(`/v1/projects/${projectRef}/functions/${slug}`, { method: "DELETE" });
+      await apiClient(`/v1/projects/${projectRef}/functions/${slug}`, { method: "DELETE" });
       deployMsg = `函数 "${slug}" 已删除`;
       setTimeout(() => deployMsg = null, 3000);
       await fetchFunctions();

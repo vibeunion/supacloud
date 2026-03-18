@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { apiClient } from "$lib/api";
+
   import { onMount } from "svelte";
   import { t } from "svelte-i18n";
   import { page } from "$app/state";
@@ -23,7 +25,7 @@
   async function fetchBuckets() {
     isLoadingBuckets = true;
     try {
-      const res = await fetch(`/v1/storage/${projectRef}/buckets`);
+      const res = await apiClient(`/v1/storage/${projectRef}/buckets`);
       buckets = await res.json();
       if (buckets.length > 0 && !selectedBucketId) {
         selectedBucketId = buckets[0].id || buckets[0].name;
@@ -39,7 +41,7 @@
     if (!newBucketName.trim()) { bucketMsg = "❌ 请输入 Bucket 名称"; setTimeout(() => bucketMsg = null, 3000); return; }
     creatingBucket = true;
     try {
-      const res = await fetch(`/v1/storage/${projectRef}/buckets`, {
+      const res = await apiClient(`/v1/storage/${projectRef}/buckets`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -70,7 +72,7 @@
     if (!bucketName) return;
     isLoadingFiles = true;
     try {
-      const res = await fetch(`/v1/storage/${projectRef}/buckets/${bucketName}/files`);
+      const res = await apiClient(`/v1/storage/${projectRef}/buckets/${bucketName}/files`);
       files = await res.json();
     } catch (err) {
       console.error("Failed to fetch files:", err);
@@ -92,7 +94,7 @@
       const formData = new FormData();
       formData.append("file", file);
 
-      const res = await fetch(`/v1/storage/${projectRef}/buckets/${selectedBucketId}/upload`, {
+      const res = await apiClient(`/v1/storage/${projectRef}/buckets/${selectedBucketId}/upload`, {
         method: "POST",
         body: formData,
       });
@@ -114,7 +116,7 @@
     if (!selectedBucketId || !confirm(`确定删除 ${fileName} 吗？`)) return;
     
     try {
-      const res = await fetch(`/v1/storage/${projectRef}/buckets/${selectedBucketId}/files/${encodeURIComponent(fileName)}`, {
+      const res = await apiClient(`/v1/storage/${projectRef}/buckets/${selectedBucketId}/files/${encodeURIComponent(fileName)}`, {
         method: "DELETE"
       });
       if (!res.ok) throw new Error(await res.text());

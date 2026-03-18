@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { apiClient } from "$lib/api";
+
   import { onMount } from "svelte";
   import { page } from "$app/state";
   import { t } from "svelte-i18n";
@@ -49,7 +51,7 @@
     isLoading = true;
     error = null;
     try {
-      const res = await fetch(`/v1/projects/${projectRef}/database/sql`, {
+      const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -71,7 +73,7 @@
     if (!newUserEmail || !newUserPassword) return;
     isSubmitting = true;
     try {
-      const res = await fetch(`/v1/projects/${projectRef}/auth/users`, {
+      const res = await apiClient(`/v1/projects/${projectRef}/auth/users`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -102,7 +104,7 @@
     if (!inviteEmail) return;
     isSubmitting = true;
     try {
-      const res = await fetch(`/v1/projects/${projectRef}/auth/users/invite`, {
+      const res = await apiClient(`/v1/projects/${projectRef}/auth/users/invite`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: inviteEmail })
@@ -127,7 +129,7 @@
   async function deleteUser(id: string, email: string) {
     if (!confirm(`确定删除用户 ${email || id} 吗？此操作不可撤销。`)) return;
     try {
-      const res = await fetch(`/v1/projects/${projectRef}/auth/users/${id}`, { method: "DELETE" });
+      const res = await apiClient(`/v1/projects/${projectRef}/auth/users/${id}`, { method: "DELETE" });
       if (res.ok) {
         submitMsg = `用户已删除`;
         await fetchUsers();

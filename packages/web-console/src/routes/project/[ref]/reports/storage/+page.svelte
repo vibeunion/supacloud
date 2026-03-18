@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { apiClient } from "$lib/api";
+
   import { onMount } from "svelte";
   import { page } from "$app/state";
   import { Loader2, HardDrive, ArrowLeft, Folder } from "lucide-svelte";
@@ -11,7 +13,7 @@
   async function fetchStats() {
     isLoading = true;
     try {
-      const res = await fetch(`/v1/projects/${projectRef}/database/sql`, {
+      const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

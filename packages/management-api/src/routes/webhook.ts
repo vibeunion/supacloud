@@ -1,5 +1,6 @@
 import { Elysia, t } from "elysia";
 import { frontendService } from "../services/frontend.service";
+import type { FrontendDeployment } from "../types/frontend";
 
 interface GitHubPushEvent {
   ref: string;
@@ -92,6 +93,30 @@ export const webhookRoutes = new Elysia({ prefix: "/v1/webhooks" })
 
       for (const deployment of deployments) {
         try {
+          // Verify GitHub signature using deploy tokens as secrets
+          let isValidSignature = false;
+          const tokens = deployment.deploy_tokens || [];
+          
+          if (tokens.length === 0) {
+            // If no tokens exist, we might allow it (or reject depending on strictness). 
+            // For security, if tokens exist, it must match. If none exist, allow (backwards compatibility).
+            isValidSignature = true;
+          } else {
+            const payloadStr = JSON.stringify(body);
+            const safeSignature = signature || "";
+            for (const t of tokens) {
+              if (await verifyGitHubSignature(payloadStr, safeSignature, t.token)) {
+                isValidSignature = true;
+                break;
+              }
+            }
+          }
+
+          if (!isValidSignature) {
+             results.push({ deployment_id: deployment.id, success: false, error: "Invalid webhook signature" });
+             continue;
+          }
+
           const recordId = await frontendService.createDeploymentRecord(
             deployment.project_ref,
             deployment.id,
@@ -156,17 +181,17 @@ export const webhookRoutes = new Elysia({ prefix: "/v1/webhooks" })
     "/gitlab",
     async ({ body, headers, set }) => {
       const event = headers["x-gitlab-event"] || "";
-      if (event !== "Push Hook") {
-        return { message: "Event ignored", event };
-      }
+      if (event !== "Push Hook") return { message: "Event ignored", event };
+      
       const payload = body as any;
       const branch = (payload.ref || "").replace("refs/heads/", "");
       const gitUrl = payload.project?.git_http_url || payload.repository?.git_http_url || "";
       const commitSha = payload.checkout_sha || payload.after || "";
       const commitMessage = payload.commits?.[0]?.message || "";
       const repoName = payload.project?.path_with_namespace || "";
+      const token = headers["x-gitlab-token"];
 
-      return await triggerDeployForGit(gitUrl, branch, commitSha, commitMessage, repoName, "gitlab");
+      return await triggerDeployForGit(gitUrl, branch, commitSha, commitMessage, repoName, "gitlab", token);
     },
     { body: t.Any() }
   )
@@ -176,17 +201,17 @@ export const webhookRoutes = new Elysia({ prefix: "/v1/webhooks" })
     "/gitee",
     async ({ body, headers, set }) => {
       const event = headers["x-gitee-event"] || (body as any)?.hook_name;
-      if (event !== "push_hooks" && event !== "Push Hook") {
-        return { message: "Event ignored", event };
-      }
+      if (event !== "push_hooks" && event !== "Push Hook") return { message: "Event ignored", event };
+      
       const payload = body as any;
       const branch = (payload.ref || "").replace("refs/heads/", "");
       const gitUrl = payload.repository?.clone_url || payload.repository?.git_http_url || "";
       const commitSha = payload.after || payload.head_commit?.id || "";
       const commitMessage = payload.head_commit?.message || payload.commits?.[0]?.message || "";
       const repoName = payload.repository?.full_name || payload.repository?.path_with_namespace || "";
+      const token = headers["x-gitee-token"] || (payload.password || "");
 
-      return await triggerDeployForGit(gitUrl, branch, commitSha, commitMessage, repoName, "gitee");
+      return await triggerDeployForGit(gitUrl, branch, commitSha, commitMessage, repoName, "gitee", token);
     },
     { body: t.Any() }
   )
@@ -196,18 +221,17 @@ export const webhookRoutes = new Elysia({ prefix: "/v1/webhooks" })
     "/gitcode",
     async ({ body, headers, set }) => {
       const event = headers["x-gitcode-event"] || headers["x-gitlab-event"] || "";
-      // GitCode uses GitLab-compatible webhook format
-      if (event !== "Push Hook" && event !== "push") {
-        return { message: "Event ignored", event };
-      }
+      if (event !== "Push Hook" && event !== "push") return { message: "Event ignored", event };
+      
       const payload = body as any;
       const branch = (payload.ref || "").replace("refs/heads/", "");
       const gitUrl = payload.project?.git_http_url || payload.repository?.clone_url || "";
       const commitSha = payload.checkout_sha || payload.after || "";
       const commitMessage = payload.commits?.[0]?.message || "";
       const repoName = payload.project?.path_with_namespace || payload.repository?.full_name || "";
+      const token = headers["x-gitcode-token"] || headers["x-gitlab-token"];
 
-      return await triggerDeployForGit(gitUrl, branch, commitSha, commitMessage, repoName, "gitcode");
+      return await triggerDeployForGit(gitUrl, branch, commitSha, commitMessage, repoName, "gitcode", token);
     },
     { body: t.Any() }
   )
@@ -331,8 +355,8 @@ export const webhookRoutes = new Elysia({ prefix: "/v1/webhooks" })
     }
   );
 
-async function findDeploymentsByGitUrl(gitUrl: string, branch: string): Promise<Array<{ id: string; project_ref: string; git_url?: string; git_branch?: string }>> {
-  const deployments: Array<{ id: string; project_ref: string; git_url?: string; git_branch?: string }> = [];
+async function findDeploymentsByGitUrl(gitUrl: string, branch: string): Promise<FrontendDeployment[]> {
+  const deployments: FrontendDeployment[] = [];
 
   const baseDir = "/var/supacloud/frontends";
 
@@ -352,12 +376,7 @@ async function findDeploymentsByGitUrl(gitUrl: string, branch: string): Promise<
 
             if (config.git_url && config.git_url === gitUrl) {
               if (!config.git_branch || config.git_branch === branch) {
-                deployments.push({
-                  id: deploymentId,
-                  project_ref: projectRef,
-                  git_url: config.git_url,
-                  git_branch: config.git_branch,
-                });
+                deployments.push(config as FrontendDeployment);
               }
             }
           } catch {
@@ -380,7 +399,7 @@ export { findDeploymentsByGitUrl };
 /** Shared helper: trigger deploy for all matching projects by git URL */
 async function triggerDeployForGit(
   gitUrl: string, branch: string, commitSha: string,
-  commitMessage: string, repoName: string, source: string
+  commitMessage: string, repoName: string, source: string, token?: string
 ) {
   const deployments = await findDeploymentsByGitUrl(gitUrl, branch);
   if (deployments.length === 0) {
@@ -389,6 +408,18 @@ async function triggerDeployForGit(
   const results = [];
   for (const deployment of deployments) {
     try {
+      if (token && deployment.deploy_tokens && deployment.deploy_tokens.length > 0) {
+        const isValid = deployment.deploy_tokens.some(t => t.token === token);
+        if (!isValid) {
+          results.push({ deployment_id: deployment.id, project_ref: deployment.project_ref, success: false, error: "Invalid webhook token" });
+          continue;
+        }
+      } else if (deployment.deploy_tokens && deployment.deploy_tokens.length > 0 && !token) {
+        // If deployment has tokens configured but no token was provided
+        results.push({ deployment_id: deployment.id, project_ref: deployment.project_ref, success: false, error: "Missing webhook token" });
+        continue;
+      }
+
       const recordId = await frontendService.createDeploymentRecord(
         deployment.project_ref, deployment.id,
         { status: "pending", commit_sha: commitSha, commit_message: commitMessage, branch, triggered_by: "webhook" }

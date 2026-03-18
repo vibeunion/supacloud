@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { apiClient } from "$lib/api";
+
   import { onMount } from "svelte";
   import { page } from "$app/state";
   import { Loader2, Play, Square, RotateCw, Activity, Server, Shield, Database, Radio, HardDrive, AlertTriangle } from "lucide-svelte";
@@ -19,7 +21,7 @@
   async function fetchServices() {
     isLoading = true;
     try {
-      const res = await fetch(`/v1/projects/${projectRef}`);
+      const res = await apiClient(`/v1/projects/${projectRef}`);
       if (res.ok) {
         const data = await res.json();
         const svcArr = data.services || [];
@@ -42,7 +44,7 @@
   async function restartProject() {
     actionInProgress = "restart";
     try {
-      await fetch(`/v1/projects/${projectRef}/restart`, { method: "POST" });
+      await apiClient(`/v1/projects/${projectRef}/restart`, { method: "POST" });
       await new Promise(r => setTimeout(r, 2000));
       await fetchServices();
     } finally {
@@ -53,7 +55,7 @@
   async function pauseProject() {
     actionInProgress = "pause";
     try {
-      await fetch(`/v1/projects/${projectRef}/pause`, { method: "POST" });
+      await apiClient(`/v1/projects/${projectRef}/pause`, { method: "POST" });
       await new Promise(r => setTimeout(r, 1000));
       await fetchServices();
     } finally {
@@ -64,7 +66,7 @@
   async function restoreProject() {
     actionInProgress = "restore";
     try {
-      await fetch(`/v1/projects/${projectRef}/restore`, { method: "POST" });
+      await apiClient(`/v1/projects/${projectRef}/restore`, { method: "POST" });
       await new Promise(r => setTimeout(r, 2000));
       await fetchServices();
     } finally {
@@ -75,7 +77,7 @@
   async function controlService(action: "start" | "stop" | "restart", serviceName: string) {
     actionInProgress = `${action}-${serviceName}`;
     try {
-      await fetch(`/v1/projects/${projectRef}/services/${serviceName}/${action}`, { method: "POST" });
+      await apiClient(`/v1/projects/${projectRef}/services/${serviceName}/${action}`, { method: "POST" });
       await new Promise(r => setTimeout(r, 2000));
       await fetchServices();
     } finally {

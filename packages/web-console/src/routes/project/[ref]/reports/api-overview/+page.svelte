@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { apiClient } from "$lib/api";
+
   import { onMount } from "svelte";
   import { page } from "$app/state";
   import { Loader2, Activity, TrendingUp, AlertTriangle, ArrowLeft, BarChart3 } from "lucide-svelte";
@@ -22,7 +24,7 @@
     isLoading = true;
     try {
       // Query Kong logs from journalctl analytics or PG stat tables
-      const res = await fetch(`/v1/projects/${projectRef}/database/sql`, {
+      const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -48,7 +50,7 @@
       }
 
       // Fetch currently active connections as "recent"
-      const res2 = await fetch(`/v1/projects/${projectRef}/database/sql`, {
+      const res2 = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

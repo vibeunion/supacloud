@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { apiClient } from "$lib/api";
+
   import { onMount } from "svelte";
   import { page } from "$app/state";
   import { Loader2, CheckCircle2, XCircle, Clock, GitCommit, RefreshCw } from "lucide-svelte";
@@ -24,7 +26,7 @@
   async function fetchRecords() {
     isLoading = true;
     try {
-      const res = await fetch(`/v1/projects/${projectRef}/frontend/deployments/${deployId}/records`);
+      const res = await apiClient(`/v1/projects/${projectRef}/frontend/deployments/${deployId}/records`);
       if (res.ok) {
         const data = await res.json();
         records = data.records || [];
