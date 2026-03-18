@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { apiClient } from "$lib/api";
+
   import { onMount } from "svelte";
   import { page } from "$app/state";
   import { goto } from "$app/navigation";
@@ -28,7 +30,7 @@
   async function fetchDeployments() {
     isLoading = true;
     try {
-      const res = await fetch(`/v1/projects/${projectRef}/frontend/deployments`);
+      const res = await apiClient(`/v1/projects/${projectRef}/frontend/deployments`);
       if (res.ok) {
         const data = await res.json();
         deployments = data.deployments || [];
@@ -40,7 +42,7 @@
   async function redeploy(id: string) {
     actionMsg = null;
     try {
-      const res = await fetch(`/v1/projects/${projectRef}/frontend/deployments/${id}/redeploy`, { method: "POST" });
+      const res = await apiClient(`/v1/projects/${projectRef}/frontend/deployments/${id}/redeploy`, { method: "POST" });
       const data = await res.json();
       actionMsg = data.success !== false ? `✅ 重新部署已触发` : `❌ ${data.error || '部署失败'}`;
       await fetchDeployments();
@@ -54,7 +56,7 @@
     if (!confirm("确定要删除此部署吗？这将停止服务并删除所有相关文件。")) return;
     deletingId = id;
     try {
-      await fetch(`/v1/projects/${projectRef}/frontend/deployments/${id}`, { method: "DELETE" });
+      await apiClient(`/v1/projects/${projectRef}/frontend/deployments/${id}`, { method: "DELETE" });
       actionMsg = "✅ 部署已删除";
       await fetchDeployments();
     } catch {}

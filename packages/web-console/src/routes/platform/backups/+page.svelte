@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { apiClient } from "$lib/api";
+
   import { onMount } from "svelte";
   import { Loader2, HardDrive, Play, RotateCcw, Calendar, Clock, AlertTriangle, CheckCircle2, RefreshCw } from "lucide-svelte";
 
@@ -26,7 +28,7 @@
   async function fetchBackups() {
     isLoading = true;
     try {
-      const res = await fetch("/v1/projects/default/database/backups");
+      const res = await apiClient("/v1/projects/default/database/backups");
       if (res.ok) {
         const data = await res.json();
         backups = Array.isArray(data) ? data : data.backups || [];
@@ -39,7 +41,7 @@
     isCreating = true;
     actionMsg = null;
     try {
-      const res = await fetch("/v1/projects/default/database/backups", {
+      const res = await apiClient("/v1/projects/default/database/backups", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ type: backupType })
@@ -66,7 +68,7 @@
     isRestoring = true;
     actionMsg = null;
     try {
-      const res = await fetch("/v1/projects/default/database/backups/logical/restore", {
+      const res = await apiClient("/v1/projects/default/database/backups/logical/restore", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ target_time: target })

@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { apiClient } from "$lib/api";
+
   import { onMount } from "svelte";
   import { page } from "$app/state";
   import { Loader2, Copy, Eye, EyeOff, Tag, Link2 } from "lucide-svelte";
@@ -15,7 +17,7 @@
   async function fetchProject() {
     isLoading = true;
     try {
-      const res = await fetch(`/v1/projects/${projectRef}`);
+      const res = await apiClient(`/v1/projects/${projectRef}`);
       project = await res.json();
     } catch (err) {
       console.error("Failed to fetch project:", err);

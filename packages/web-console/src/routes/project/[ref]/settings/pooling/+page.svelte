@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { apiClient } from "$lib/api";
+
   import { onMount } from "svelte";
   import { page } from "$app/state";
   import { Loader2, Database, Copy, RefreshCw, Settings } from "lucide-svelte";
@@ -22,7 +24,7 @@
   async function fetchPooling() {
     isLoading = true;
     try {
-      const res = await fetch(`/v1/projects/${projectRef}`);
+      const res = await apiClient(`/v1/projects/${projectRef}`);
       if (res.ok) {
         const data = await res.json();
         const cfg = data.config || {};

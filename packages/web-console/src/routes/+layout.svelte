@@ -1,10 +1,14 @@
 <script lang="ts">
+  import { apiClient } from "$lib/api";
+
   import "../app.css";
   import { waitLocale } from "$lib/i18n";
   import { onMount } from "svelte";
   import { goto } from "$app/navigation";
-  import { isLoading } from 'svelte-i18n';
+  import { isLoading, t } from 'svelte-i18n';
   import Sidebar from "$lib/components/Sidebar.svelte";
+  import PlatformSidebar from "$lib/components/PlatformSidebar.svelte";
+  import { ModeWatcher } from "mode-watcher";
   
   let { children } = $props();
   
@@ -15,6 +19,8 @@
   
   let isCoreLoading = $derived($isLoading || projectsLoading);
   let currentProject = $derived(projects?.[0] || null);
+
+  let isPlatformRoute = $derived(typeof window !== 'undefined' ? window.location.pathname.startsWith("/platform") : false);
 
   onMount(async () => {
     await waitLocale();
@@ -35,7 +41,7 @@
 
     // Verify token validity
     try {
-      const res = await fetch("/auth/verify", {
+      const res = await apiClient("/auth/verify", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ token })
@@ -56,7 +62,7 @@
 
     // Fetch projects
     try {
-      const response = await fetch('/v1/projects');
+      const response = await apiClient('/v1/projects');
       if (response.ok) {
         projects = await response.json();
       }
@@ -72,6 +78,8 @@
   });
 </script>
 
+<ModeWatcher />
+
 <div class="flex h-screen overflow-hidden bg-background">
   {#if isOnLoginPage}
     {@render children()}
@@ -81,10 +89,11 @@
       <p class="text-muted-foreground animate-pulse text-sm">Initializing Studio Core...</p>
     </div>
   {:else}
-    <Sidebar 
-      {projects} 
-      {currentProject} 
-    />
+    {#if isPlatformRoute}
+      <PlatformSidebar />
+    {:else}
+      <Sidebar {projects} {currentProject} />
+    {/if}
     
     <main class="flex-1 overflow-y-auto relative">
       <div class="sticky top-0 z-40 flex h-16 shrink-0 items-center gap-x-4 border-b bg-background px-4 shadow-sm sm:gap-x-6 sm:px-6 lg:px-8">
@@ -92,14 +101,14 @@
           <div class="flex items-center gap-2 text-sm text-muted-foreground">
             <span class="hover:text-foreground cursor-pointer transition-colors">Default Organization</span>
             <span>/</span>
-            <span class="text-foreground font-medium">{currentProject?.name || 'Home'}</span>
+            <span class="text-foreground font-medium">{isPlatformRoute ? 'Platform Admin' : (currentProject?.name || 'Home')}</span>
           </div>
         </div>
         <button
           onclick={() => { localStorage.removeItem('supacloud_session'); localStorage.removeItem('supacloud_master_token'); window.location.href = '/login'; }}
           class="px-3 py-1.5 text-xs font-medium rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
         >
-          退出
+          {$t("Auth.signOut") || "Logout"}
         </button>
       </div>
 

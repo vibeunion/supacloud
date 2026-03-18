@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { apiClient } from "$lib/api";
+
   import { onMount } from "svelte";
   import { page } from "$app/state";
   import { t } from "svelte-i18n";
@@ -53,7 +55,7 @@
     error = null;
     fallbackMsg = null;
     try {
-      const res = await fetch(`/v1/projects/${projectRef}/database/sql`, {
+      const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sql: JOBS_SQL })
@@ -65,7 +67,7 @@
       }
       jobs = Array.isArray(data) ? data : data.rows || [];
 
-      const res2 = await fetch(`/v1/projects/${projectRef}/database/sql`, {
+      const res2 = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sql: RUNS_SQL })
@@ -89,7 +91,7 @@
     try {
       // Ensure pg_cron implies quotes correctly
       const sql = `SELECT cron.schedule('${newName.replace(/'/g,"''")}', '${newSchedule.replace(/'/g,"''")}', '${newCommand.replace(/'/g,"''")}');`;
-      const res = await fetch(`/v1/projects/${projectRef}/database/sql`, {
+      const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sql })
       });
@@ -107,7 +109,7 @@
     if (!confirm(`确定取消任务 "${jobName}" (#${jobId}) 的排程吗？`)) return;
     try {
       const sql = `SELECT cron.unschedule(${jobId});`;
-      const res = await fetch(`/v1/projects/${projectRef}/database/sql`, {
+      const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sql })
       });
