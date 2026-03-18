@@ -153,7 +153,7 @@ export function registerStaticAssets() {
     const path = url.pathname === "/" ? "/index.html" : url.pathname;
 
     // Do NOT catch API routes in static assets
-    if (path.startsWith("/api/") || path.startsWith("/v1/") || path.startsWith("/platform/")) {
+    if (path.startsWith("/api/") || path.startsWith("/v1/")) {
       set.status = 404;
       return { error: "Route not found" };
     }
