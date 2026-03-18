@@ -1,0 +1,151 @@
+<script lang="ts">
+  import { onMount } from "svelte";
+  import { page } from "$app/state";
+  import { Loader2, Database, ArrowLeft, HardDrive, Activity } from "lucide-svelte";
+
+  let dbStats = $state<any[]>([]);
+  let tableStats = $state<any[]>([]);
+  let isLoading = $state(true);
+
+  const projectRef = $derived(page.params.ref);
+
+  async function fetchDbStats() {
+    isLoading = true;
+    try {
+      const res = await fetch(`/v1/projects/${projectRef}/database/sql`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sql: `SELECT
+            datname,
+            numbackends as connections,
+            xact_commit as commits,
+            xact_rollback as rollbacks,
+            blks_read,
+            blks_hit,
+            CASE WHEN blks_hit + blks_read > 0
+              THEN round(100.0 * blks_hit / (blks_hit + blks_read), 2)
+              ELSE 0 END as cache_hit_ratio,
+            pg_size_pretty(pg_database_size(datname)) as db_size
+          FROM pg_stat_database
+          WHERE datname = current_database();`
+        })
+      });
+      const data = await res.json();
+      dbStats = Array.isArray(data) ? data : data.rows || [];
+
+      const res2 = await fetch(`/v1/projects/${projectRef}/database/sql`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sql: `SELECT
+            schemaname,
+            relname as table_name,
+            n_live_tup as live_rows,
+            n_dead_tup as dead_rows,
+            n_tup_ins as inserts,
+            n_tup_upd as updates,
+            n_tup_del as deletes,
+            seq_scan,
+            idx_scan,
+            pg_size_pretty(pg_total_relation_size(relid)) as total_size
+          FROM pg_stat_user_tables
+          ORDER BY n_live_tup DESC LIMIT 30;`
+        })
+      });
+      const data2 = await res2.json();
+      tableStats = Array.isArray(data2) ? data2 : data2.rows || [];
+    } catch (err) {
+      console.error("Failed to fetch DB stats:", err);
+    } finally {
+      isLoading = false;
+    }
+  }
+
+  onMount(() => { fetchDbStats(); });
+
+  function formatNum(n: any): string {
+    return new Intl.NumberFormat().format(Number(n) || 0);
+  }
+</script>
+
+<div class="h-full flex flex-col space-y-4">
+  <div class="flex items-center gap-3">
+    <a href={`/project/${projectRef}/reports`} class="p-2 hover:bg-muted/50 rounded-lg transition-colors">
+      <ArrowLeft size={18} />
+    </a>
+    <div>
+      <h1 class="text-2xl font-bold">数据库报表</h1>
+      <p class="text-sm text-muted-foreground mt-1">数据库连接、缓存命中率和表级统计</p>
+    </div>
+  </div>
+
+  {#if isLoading}
+    <div class="flex-1 flex items-center justify-center">
+      <Loader2 size={32} class="animate-spin text-brand opacity-50" />
+    </div>
+  {:else}
+    {#if dbStats.length > 0}
+      {@const db = dbStats[0]}
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div class="rounded-xl border bg-card p-4">
+          <div class="text-[10px] font-semibold text-muted-foreground uppercase">数据库大小</div>
+          <div class="text-xl font-bold mt-1 text-brand">{db.db_size}</div>
+        </div>
+        <div class="rounded-xl border bg-card p-4">
+          <div class="text-[10px] font-semibold text-muted-foreground uppercase">活跃连接</div>
+          <div class="text-xl font-bold mt-1">{db.connections}</div>
+        </div>
+        <div class="rounded-xl border bg-card p-4">
+          <div class="text-[10px] font-semibold text-muted-foreground uppercase">缓存命中率</div>
+          <div class="text-xl font-bold mt-1 {Number(db.cache_hit_ratio) > 95 ? 'text-green-600' : Number(db.cache_hit_ratio) > 80 ? 'text-amber-600' : 'text-red-600'}">
+            {db.cache_hit_ratio}%
+          </div>
+        </div>
+        <div class="rounded-xl border bg-card p-4">
+          <div class="text-[10px] font-semibold text-muted-foreground uppercase">提交 / 回滚</div>
+          <div class="text-lg font-bold mt-1">{formatNum(db.commits)} / <span class="text-red-600">{formatNum(db.rollbacks)}</span></div>
+        </div>
+      </div>
+    {/if}
+
+    <!-- Table Stats -->
+    <div class="flex-1 rounded-xl border bg-card overflow-hidden">
+      <div class="border-b px-5 py-3 bg-muted/20">
+        <h2 class="text-sm font-semibold flex items-center gap-2"><HardDrive size={14} /> 表级统计 (Top 30)</h2>
+      </div>
+      <div class="overflow-auto max-h-[55vh]">
+        <table class="w-full text-left text-xs">
+          <thead class="bg-muted/30 border-b sticky top-0">
+            <tr>
+              <th class="px-4 py-2 font-semibold text-muted-foreground">Schema</th>
+              <th class="px-4 py-2 font-semibold text-muted-foreground">表名</th>
+              <th class="px-4 py-2 font-semibold text-muted-foreground text-right">行数</th>
+              <th class="px-4 py-2 font-semibold text-muted-foreground text-right">大小</th>
+              <th class="px-4 py-2 font-semibold text-muted-foreground text-right">Insert</th>
+              <th class="px-4 py-2 font-semibold text-muted-foreground text-right">Update</th>
+              <th class="px-4 py-2 font-semibold text-muted-foreground text-right">Delete</th>
+              <th class="px-4 py-2 font-semibold text-muted-foreground text-right">Seq Scan</th>
+              <th class="px-4 py-2 font-semibold text-muted-foreground text-right">Idx Scan</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-border/20 font-mono">
+            {#each tableStats as t}
+              <tr class="hover:bg-muted/10 transition-colors">
+                <td class="px-4 py-2 text-muted-foreground">{t.schemaname}</td>
+                <td class="px-4 py-2 font-semibold">{t.table_name}</td>
+                <td class="px-4 py-2 text-right tabular-nums">{formatNum(t.live_rows)}</td>
+                <td class="px-4 py-2 text-right">{t.total_size}</td>
+                <td class="px-4 py-2 text-right tabular-nums text-green-600">{formatNum(t.inserts)}</td>
+                <td class="px-4 py-2 text-right tabular-nums text-amber-600">{formatNum(t.updates)}</td>
+                <td class="px-4 py-2 text-right tabular-nums text-red-600">{formatNum(t.deletes)}</td>
+                <td class="px-4 py-2 text-right tabular-nums {Number(t.seq_scan) > 1000 ? 'text-red-600 font-bold' : ''}">{formatNum(t.seq_scan)}</td>
+                <td class="px-4 py-2 text-right tabular-nums">{formatNum(t.idx_scan)}</td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  {/if}
+</div>

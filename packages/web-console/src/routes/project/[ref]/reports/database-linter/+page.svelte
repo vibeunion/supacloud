@@ -1,0 +1,184 @@
+<script lang="ts">
+  import { onMount } from "svelte";
+  import { page } from "$app/state";
+  import { t } from "svelte-i18n";
+  import { Loader2, ShieldCheck, AlertTriangle, ShieldAlert, Info, CheckCircle2 } from "lucide-svelte";
+
+  interface LintIssue {
+    type: "no_primary_key" | "no_rls" | "no_index_on_fk";
+    severity: "danger" | "warning" | "info";
+    table_schema: string;
+    table_name: string;
+    detail: string;
+    fix_sql: string;
+  }
+
+  let issues = $state<LintIssue[]>([]);
+  let isLoading = $state(true);
+  let error = $state<string | null>(null);
+
+  const projectRef = $derived(page.params.ref);
+
+  const LINT_SQL = `
+    -- 1. Tables without primary key
+    SELECT 
+      'no_primary_key' as type, 'danger' as severity,
+      t.table_schema, t.table_name,
+      'Table has no primary key' as detail,
+      'ALTER TABLE ' || t.table_schema || '.' || t.table_name || ' ADD COLUMN id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY;' as fix_sql
+    FROM information_schema.tables t
+    LEFT JOIN information_schema.table_constraints tc 
+      ON tc.table_schema = t.table_schema AND tc.table_name = t.table_name AND tc.constraint_type = 'PRIMARY KEY'
+    WHERE t.table_schema = 'public' AND t.table_type = 'BASE TABLE' AND tc.constraint_name IS NULL
+
+    UNION ALL
+
+    -- 2. Tables without RLS enabled
+    SELECT 
+      'no_rls' as type, 'warning' as severity,
+      schemaname as table_schema, tablename as table_name,
+      'Row Level Security is not enabled' as detail,
+      'ALTER TABLE ' || schemaname || '.' || tablename || ' ENABLE ROW LEVEL SECURITY;' as fix_sql
+    FROM pg_tables
+    WHERE schemaname = 'public'
+      AND NOT EXISTS (
+        SELECT 1 FROM pg_class c 
+        JOIN pg_namespace n ON n.oid = c.relnamespace 
+        WHERE n.nspname = pg_tables.schemaname 
+          AND c.relname = pg_tables.tablename 
+          AND c.relrowsecurity = true
+      )
+
+    UNION ALL
+
+    -- 3. Foreign keys without indexes
+    SELECT 
+      'no_index_on_fk' as type, 'info' as severity,
+      tc.table_schema, tc.table_name,
+      'Foreign key column "' || kcu.column_name || '" has no index' as detail,
+      'CREATE INDEX ON ' || tc.table_schema || '.' || tc.table_name || ' (' || kcu.column_name || ');' as fix_sql
+    FROM information_schema.table_constraints tc
+    JOIN information_schema.key_column_usage kcu 
+      ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema
+    WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_schema = 'public'
+      AND NOT EXISTS (
+        SELECT 1 FROM pg_indexes pi 
+        WHERE pi.schemaname = tc.table_schema 
+          AND pi.tablename = tc.table_name 
+          AND pi.indexdef LIKE '%' || kcu.column_name || '%'
+      )
+    ORDER BY severity, type, table_name;
+  `;
+
+  async function runLint() {
+    isLoading = true;
+    error = null;
+    try {
+      const res = await fetch(`/v1/projects/${projectRef}/database/sql`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sql: LINT_SQL })
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.message || data.error);
+      issues = Array.isArray(data) ? data : data.rows || [];
+    } catch (err: any) {
+      error = err.message;
+    } finally {
+      isLoading = false;
+    }
+  }
+
+  onMount(() => { runLint(); });
+
+  function getSeverityColor(severity: string): string {
+    if (severity === "danger") return "text-red-500 bg-red-500/10 border-red-500/20";
+    if (severity === "warning") return "text-amber-500 bg-amber-500/10 border-amber-500/20";
+    return "text-blue-500 bg-blue-500/10 border-blue-500/20";
+  }
+
+  function getTypeLabel(type: string): string {
+    if (type === "no_primary_key") return $t("DatabaseLinter.no_primary_key");
+    if (type === "no_rls") return $t("DatabaseLinter.no_rls");
+    if (type === "no_index_on_fk") return $t("DatabaseLinter.no_index_on_fk");
+    return type;
+  }
+
+  function getTypeDesc(type: string): string {
+    if (type === "no_primary_key") return $t("DatabaseLinter.no_primary_key_desc");
+    if (type === "no_rls") return $t("DatabaseLinter.no_rls_desc");
+    if (type === "no_index_on_fk") return $t("DatabaseLinter.no_index_on_fk_desc");
+    return "";
+  }
+
+  function getSeverityLabel(severity: string): string {
+    if (severity === "danger") return $t("DatabaseLinter.severity_danger");
+    if (severity === "warning") return $t("DatabaseLinter.severity_warning");
+    return $t("DatabaseLinter.severity_info");
+  }
+</script>
+
+<div class="h-full flex flex-col space-y-4">
+  <div class="flex items-center gap-3">
+    <h1 class="text-2xl font-bold">{$t("DatabaseLinter.title")}</h1>
+    {#if !isLoading && issues.length > 0}
+      <span class="px-2.5 py-0.5 rounded-full bg-amber-500/10 text-amber-600 text-xs font-bold">{issues.length} {$t("DatabaseLinter.issues_found")}</span>
+    {/if}
+  </div>
+  <p class="text-sm text-muted-foreground">{$t("DatabaseLinter.subtitle")}</p>
+
+  <div class="flex-1 overflow-y-auto space-y-3">
+    {#if isLoading}
+      <div class="flex flex-col items-center justify-center py-24 text-muted-foreground gap-3">
+        <Loader2 size={32} class="animate-spin text-brand opacity-50" />
+        <p class="text-xs font-mono uppercase tracking-widest">{$t("DatabaseLinter.loading")}</p>
+      </div>
+    {:else if error}
+      <div class="p-4 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-sm font-mono">
+        {error}
+      </div>
+    {:else if issues.length === 0}
+      <div class="flex flex-col items-center justify-center py-24 text-muted-foreground gap-4">
+        <div class="w-16 h-16 rounded-full bg-green-500/10 text-green-500 flex items-center justify-center">
+          <CheckCircle2 size={32} />
+        </div>
+        <p class="text-sm font-medium">{$t("DatabaseLinter.no_issues")}</p>
+      </div>
+    {:else}
+      {#each issues as issue}
+        <div class="rounded-lg border {getSeverityColor(issue.severity)} p-4 transition-all hover:shadow-sm">
+          <div class="flex items-start justify-between gap-4">
+            <div class="flex items-start gap-3 flex-1">
+              <div class="mt-0.5">
+                {#if issue.severity === "danger"}
+                  <ShieldAlert size={18} />
+                {:else if issue.severity === "warning"}
+                  <AlertTriangle size={18} />
+                {:else}
+                  <Info size={18} />
+                {/if}
+              </div>
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-2 mb-1">
+                  <span class="font-semibold text-sm">{getTypeLabel(issue.type)}</span>
+                  <span class="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded {getSeverityColor(issue.severity)}">{getSeverityLabel(issue.severity)}</span>
+                </div>
+                <p class="text-xs text-muted-foreground mb-2">{getTypeDesc(issue.type)}</p>
+                <div class="flex items-center gap-2 text-xs">
+                  <span class="font-medium">{$t("DatabaseLinter.table")}:</span>
+                  <code class="px-1.5 py-0.5 bg-muted/50 rounded font-mono text-[11px]">{issue.table_schema}.{issue.table_name}</code>
+                </div>
+              </div>
+            </div>
+          </div>
+          {#if issue.fix_sql}
+            <div class="mt-3 pt-3 border-t border-current/10">
+              <p class="text-[10px] font-bold uppercase tracking-wider mb-1.5 opacity-70">{$t("DatabaseLinter.fix_hint")}</p>
+              <code class="block text-[11px] font-mono p-2 rounded bg-background/50 overflow-x-auto whitespace-pre">{issue.fix_sql}</code>
+            </div>
+          {/if}
+        </div>
+      {/each}
+    {/if}
+  </div>
+</div>
