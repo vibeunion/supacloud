@@ -115,3 +115,4 @@ bun.lock
 config.env.deploy
 packages/management-api/*.exe
 packages/management-api/supacloud-*
+.git-rewrite/
