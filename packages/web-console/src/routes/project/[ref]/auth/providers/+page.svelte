@@ -148,6 +148,41 @@
     }
   }
 
+  async function toggleProvider(provider: ProviderConfig) {
+    if (provider.category === "built_in") return;
+    if (provider.enabled) {
+      await disableProvider(provider);
+    } else {
+      // If no credentials configured, expand the form for user to fill in
+      if (!provider.client_id) {
+        provider.expanded = true;
+        saveMsg = `请填写 ${provider.name} 的凭据后保存`;
+        setTimeout(() => saveMsg = null, 3000);
+        return;
+      }
+      // Re-enable with existing credentials via PATCH
+      provider.saving = true;
+      try {
+        const res = await apiClient(`/v1/projects/${projectRef}/auth/studio/providers/${provider.key}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ enabled: true, client_id: provider.client_id }),
+        });
+        if (res.ok) {
+          provider.enabled = true;
+          saveMsg = `✅ ${provider.name} 已启用`;
+        } else {
+          saveMsg = `❌ 启用失败`;
+        }
+      } catch {
+        saveMsg = `❌ 网络错误`;
+      } finally {
+        provider.saving = false;
+        setTimeout(() => saveMsg = null, 3000);
+      }
+    }
+  }
+
   onMount(() => { fetchProviders(); });
 
   function getCategoryLabel(cat: string): string {
@@ -232,14 +267,20 @@
                 </div>
               </div>
               <div class="flex items-center gap-3">
-                {#if providers[i].enabled}
+                {#if providers[i].category !== "built_in"}
+                  <button
+                    onclick={(e) => { e.stopPropagation(); toggleProvider(providers[i]); }}
+                    disabled={providers[i].saving}
+                    class="relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none disabled:opacity-50 {providers[i].enabled ? 'bg-green-500' : 'bg-muted-foreground/30'}"
+                    role="switch"
+                    aria-checked={providers[i].enabled}
+                  >
+                    <span class="pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow transform ring-0 transition duration-200 ease-in-out {providers[i].enabled ? 'translate-x-4' : 'translate-x-0'}"></span>
+                  </button>
+                {:else}
                   <div class="flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-green-500/30 bg-green-500/10">
                     <Check size={12} class="text-green-600" />
-                    <span class="text-[10px] font-bold text-green-600">已启用</span>
-                  </div>
-                {:else}
-                  <div class="px-2.5 py-1 rounded-full border border-border bg-muted/30">
-                    <span class="text-[10px] text-muted-foreground">未配置</span>
+                    <span class="text-[10px] font-bold text-green-600">内置</span>
                   </div>
                 {/if}
                 {#if providers[i].expanded}
