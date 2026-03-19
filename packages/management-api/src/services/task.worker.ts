@@ -4,6 +4,7 @@ import { databaseService } from "./database.service";
 import { storageService } from "./storage.service";
 import { routerService } from "./router.service";
 import { gatewayService } from "./gateway.service";
+import { tenantRuntimeService } from "./tenant-runtime.service";
 import { logger } from "../utils/logger";
 import type { ProjectTask } from "../db";
 
@@ -164,10 +165,14 @@ export class TaskWorker {
                 }
 
                 case "cleanup_runtime": {
-                    // Stop tenant PostgREST process
-                    await databaseService.stopRuntime(project_ref);
+                    // Stop tenant PostgREST + GoTrue processes and clean config files
+                    await tenantRuntimeService.stopRuntime(project_ref);
                     // Remove Kong Service/Route
-                    await databaseService.removeService(project_ref);
+                    try {
+                        await gatewayService.removeService(project_ref);
+                    } catch (e) {
+                        logger.warn(`[TaskWorker] Gateway cleanup failed for ${project_ref} (non-fatal): ${e}`);
+                    }
                     return true;
                 }
 
@@ -219,9 +224,16 @@ export class TaskWorker {
     private async handleTaskFailure(task: ProjectTask) {
         const { project_ref, task_type, retries } = task;
 
-        // 如果重试次数还未上限，等待下一次轮询，避免过快判定死刑
-        if (retries < 3) {
-            logger.warn(`[TaskWorker] Task ${task_type} for ${project_ref} failed but has retries left (${retries}/3)`);
+        // Cleanup tasks get more retries (10) to ensure resources are freed
+        const maxRetries = task_type.startsWith("cleanup_") ? 10 : 3;
+
+        if (retries < maxRetries) {
+            logger.warn(`[TaskWorker] Task ${task_type} for ${project_ref} failed but has retries left (${retries}/${maxRetries})`);
+            // Re-queue cleanup tasks with exponential backoff via a new pending task
+            if (task_type.startsWith("cleanup_") && retries >= 3) {
+                logger.info(`[TaskWorker] Re-queuing cleanup task ${task_type} for ${project_ref} (retry ${retries + 1})`);
+                await taskRepository.createTask(project_ref, task_type, task.payload);
+            }
             return;
         }
 
@@ -240,8 +252,8 @@ export class TaskWorker {
             await taskRepository.createTask(project_ref, "cleanup_s3");
             await taskRepository.createTask(project_ref, "cleanup_db");
         } else if (task_type.startsWith("cleanup_")) {
-            // Cleanup fail permanently
-            logger.error(`[TaskWorker] CRITICAL: Cleanup task ${task_type} for ${project_ref} failed permanently after all retries. Manual intervention requested!`);
+            // Cleanup failed permanently after all retries
+            logger.error(`[TaskWorker] CRITICAL: Cleanup task ${task_type} for ${project_ref} failed permanently after ${maxRetries} retries. Manual intervention required!`);
         } else if (task_type === "provision_router" || task_type === "provision_gateway") {
             // When router/gateway fails, preserve DB and S3 resources to avoid data loss
             // Admin can manually troubleshoot and retry, or trigger cleanup via API

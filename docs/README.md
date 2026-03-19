@@ -2,33 +2,33 @@
 
 ## Quick Links
 
-- [Deploy Guide](./deploy-guide.md) - 部署系统使用指南
-- [Deploy API](./deploy-api.md) - 部署 API 参考
-- [Configuration Example](./supacloud.yml.example) - 配置文件示例
+- [Deploy Guide](./deploy-guide.md) - Complete deployment guide
+- [Deploy API](./deploy-api.md) - Deployment API reference
+- [Configuration Example](./supacloud.yml.example) - Configuration file example
 
 ## Architecture
 
-- [Multi-Tenant Architecture](./architecture-multi-tenant.md) - 多租户架构设计
-- [Multi-Tenant Management](./multi-tenant-management.md) - 多租户管理
+- [Multi-Tenant Architecture](./architecture-multi-tenant.md) - Multi-tenant architecture design
+- [Multi-Tenant Management](./multi-tenant-management.md) - Multi-tenant management specification
 
 ## Deployment
 
-- [Deploy Guide](./deploy-guide.md) - 部署系统完整使用指南
-- [Deploy API](./deploy-api.md) - 部署 API 接口文档
-- [CI/CD Integration](./ci-cd-integration.md) - CI/CD 集成
-- [Frontend Hosting](./frontend-hosting.md) - 前端托管
+- [Deploy Guide](./deploy-guide.md) - Full deployment guide
+- [Deploy API](./deploy-api.md) - Deployment API documentation
+- [CI/CD Integration](./ci-cd-integration.md) - CI/CD integration with GitHub webhooks
+- [Frontend Hosting](./frontend-hosting.md) - SupaCloud Pages static site hosting
 
 ## Authentication
 
-- [OAuth Providers](./oauth-providers.md) - OAuth 提供商配置
-- [China OAuth Integration](./china-oauth-integration.md) - 国内 OAuth 集成
-- [WeChat Auth Integration](./wechat-auth-integration.md) - 微信登录集成
+- [OAuth Providers](./oauth-providers.md) - OAuth provider configuration
+- [China OAuth Integration](./china-oauth-integration.md) - China OAuth (WeChat, Alipay, DingTalk)
+- [WeChat Auth Integration](./wechat-auth-integration.md) - WeChat Mini Program login
 
 ## Operations
 
-- [Upgrade to Pigsty 4.1](./upgrade-to-pigsty-4.1.md) - 升级到 Pigsty 4.1
-- [Troubleshooting Podman DNS](./troubleshooting-podman-dns.md) - Podman DNS 问题排查
+- [Upgrade to Pigsty 4.1](./upgrade-to-pigsty-4.1.md) - Pigsty upgrade guide
+- [Troubleshooting Podman DNS](./troubleshooting-podman-dns.md) - Podman DNS troubleshooting
 
 ## Development
 
-- [MCP Server Guide](./mcp-server-guide.md) - MCP 服务器指南
+- [MCP Server Guide](./mcp-server-guide.md) - MCP Server development guide

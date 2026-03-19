@@ -12,17 +12,22 @@
 ### Key Features
 
 - **Multi-Tenant Architecture**: Run multiple isolated Supabase projects with shared infrastructure
-- **Management API**: Full REST API (30+ endpoints) for complete project lifecycle
+- **Management API**: Full REST API (50+ endpoints) for complete project lifecycle management
+- **Web Console**: Modern SvelteKit management dashboard with authentication
 - **CLI Compatibility**: Native support for the official `supabase` CLI (login, gen types, edge functions)
-- **CLI Tool**: `supacloud` command-line tool for easy project management
+- **CLI Tool**: `supacloud` binary with full project management, install, upgrade, and diagnostics
 - **MCP Server**: AI-native infrastructure management – let Claude/Cursor manage your Supabase via conversation
-- **Pigsty Powered**: Enterprise-grade PostgreSQL with built-in monitoring
+- **SupaCloud Pages**: Frontend static site hosting with GitHub webhook auto-deploy
+- **Pigsty Powered**: Enterprise-grade PostgreSQL with built-in monitoring (Grafana)
 - **One-Click Installation**: Fully automated setup via `install.sh`
 - **JuiceFS Storage**: Powered by PostgreSQL Large Objects (LO) for ultra-thin metadata
 - **Kong API Gateway**: Dynamic rate limiting, CORS, and per-project JWT validation
+- **Angie Gateway**: Modern Nginx fork with native ACME SSL auto-provisioning
 - **Auto-scaling Engine**: Rule-based vertical and horizontal scaling based on real-time metrics
 - **Dual Runtime**: Deno (default) or Bun.js for Edge Functions
-- **40+ Comprehensive Tests**: High reliability with unit and integration coverage
+- **China OAuth**: Built-in WeChat, Alipay, DingTalk login integration
+- **CI/CD Integration**: GitHub webhook for automated deployments
+- **Comprehensive Tests**: 17 unit tests + integration test suite
 
 ### Architecture
 
@@ -38,12 +43,20 @@
 │  ┌────────────┐  ┌────────────┐  ┌────────────┐            │
 │  │ GatewaySvc │  │ ScalingSvc │  │ BackupSvc  │            │
 │  └────────────┘  └────────────┘  └────────────┘            │
+│        ▼               ▼               ▼                    │
+│  ┌────────────┐  ┌────────────┐  ┌────────────┐            │
+│  │ RouterSvc  │  │ FrontendSv │  │ DeploySvc  │            │
+│  └────────────┘  └────────────┘  └────────────┘            │
 ├─────────────────────────────────────────────────────────────┤
 │                   Shared Infrastructure                      │
 │  ┌────────────┐  ┌────────────┐  ┌────────────┐            │
 │  │ PostgreSQL │  │   Kong     │  │  JuiceFS   │            │
 │  │  (Pigsty)  │  │  Gateway   │  │  (PG-LO)   │            │
 │  └────────────┘  └────────────┘  └────────────┘            │
+│  ┌────────────┐  ┌────────────┐                             │
+│  │   Angie    │  │  Grafana   │                             │
+│  │  (SSL/LB)  │  │ (Monitor)  │                             │
+│  └────────────┘  └────────────┘                             │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -63,24 +76,23 @@
 **One-Click Installation (Recommended)**
 
 ```bash
-# 中国用户 (使用 gh-proxy.net 加速)
+# China users (accelerated via gh-proxy.net)
 curl -fsSL https://gh-proxy.net/https://raw.githubusercontent.com/zuohuadong/supacloud/main/setup.sh | sudo bash
 
-# 国际用户
+# International users
 curl -fsSL https://raw.githubusercontent.com/zuohuadong/supacloud/main/setup.sh | sudo bash
 ```
 
 **Standard Installation**
 ```bash
-# 1. Clone repository (中国用户使用加速)
-git clone https://gh-proxy.net/https://github.com/zuohuadong/supacloud.git
+# 1. Clone repository
+git clone https://github.com/zuohuadong/supacloud.git
 cd supacloud
 
-# 2. Configure (Edit config.env or use CLI flags)
+# 2. Configure & Install
 sudo bash install.sh --ip 1.2.3.4 --domain api.example.com --s3 juicefs
 
-# 3. Environment Initialization
-# After installation, the 'supacloud' command is available globally.
+# 3. Enable CLI
 source /etc/profile.d/supacloud.sh
 ```
 
@@ -95,21 +107,33 @@ source /etc/profile.d/supacloud.sh
 
 ### Management
 
-#### CLI Tool (System Lifecycle & Project Management)
+#### CLI Tool
+
+The `supacloud` binary provides full lifecycle and project management:
 
 ```bash
 # Lifecycle Management
-supacloud start              # Wake up all containers
+supacloud start              # Start all containers
 supacloud stop               # Stop the service stack
 supacloud status             # Health check & monitor ports
 supacloud logs [service]     # Diagnostic logs
 
 # Project Management
-supacloud list               # List all projects
-supacloud create "My Project" # Create a new project
-supacloud info <ref>         # Get project details
-supacloud keys <ref>         # Get API keys
-supacloud health             # System pre-flight check
+supacloud project list       # List all projects
+supacloud project create     # Create a new project
+supacloud project get <ref>  # Get project details
+supacloud project delete <ref> # Delete a project
+supacloud project pause <ref>  # Pause a project
+supacloud project restore <ref> # Restore a project
+supacloud project restart <ref> # Restart services
+supacloud project keys <ref>   # Get API keys
+supacloud project rotate-keys <ref> # Rotate API keys
+
+# System Operations
+supacloud install            # Run installation wizard
+supacloud upgrade            # Upgrade to latest version
+supacloud doctor             # System diagnostics & health check
+supacloud --version          # Show version
 ```
 
 #### Management API
@@ -132,7 +156,7 @@ curl http://localhost:9090/v1/projects/<ref>/api-keys \
   -H "Authorization: Bearer $MASTER_TOKEN"
 ```
 
-**API Endpoints:**
+**Core API Endpoints:**
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
@@ -149,10 +173,30 @@ curl http://localhost:9090/v1/projects/<ref>/api-keys \
 | GET | `/v1/projects/:ref/settings` | Get settings |
 | PUT | `/v1/projects/:ref/settings` | Update settings |
 | GET | `/v1/projects/:ref/api-keys` | Get API keys |
-| GET | `/v1/projects/:ref/types/typescript`| Generate TS types for CLI |
-| PATCH| `/v1/projects/:ref/config/auth` | Configure Auth & Providers |
-| GET | `/v1/projects/:ref/secrets` | Manage Edge Function Secrets |
-| GET | `/v1/oauth/authorize` | Supabase CLI OAuth Login |
+| POST | `/v1/projects/:ref/rotate-keys` | Rotate API keys |
+| GET | `/v1/projects/:ref/types/typescript` | Generate TS types |
+| PATCH | `/v1/projects/:ref/config/auth` | Configure Auth & Providers |
+| GET | `/v1/projects/:ref/secrets` | List Edge Function Secrets |
+| POST | `/v1/projects/:ref/secrets` | Upsert Secrets |
+| DELETE | `/v1/projects/:ref/secrets/:name` | Delete Secret |
+| GET | `/v1/oauth/authorize` | CLI OAuth Login |
+
+**Extended API Endpoints:**
+
+| Category | Endpoints | Description |
+|----------|-----------|-------------|
+| Database | `/v1/projects/:ref/database/*` | SQL query, schema inspection, migrations |
+| Auth | `/v1/projects/:ref/config/auth` | OAuth providers, WeChat/Alipay/DingTalk |
+| Frontend | `/v1/projects/:ref/frontend/*` | Pages hosting, deployments, custom domains |
+| Webhook | `/v1/webhooks/github` | GitHub webhook for CI/CD auto-deploy |
+| Storage | `/v1/storage/*` | Bucket management, file upload, S3 migration |
+| Extensions | `/v1/extensions/*` | PostgreSQL extension marketplace |
+| Scaling | `/v1/projects/:ref/scaling/*` | Vertical upgrade & horizontal replicas |
+| Backups | `/v1/projects/:ref/backups/*` | Database backup & restore |
+| Monitor | `/v1/monitor/*` | Database monitoring & health |
+| Security | `/v1/security/*` | Firewall rules & SSL certificates |
+| Deploy | `/v1/deploy/*` | Edge Function deployment |
+| Tasks | `/v1/projects/:ref/tasks/*` | Background task monitoring |
 
 #### Runtime Switching
 
@@ -188,32 +232,81 @@ Let AI assistants (Claude, Cursor, Windsurf) manage your SupaCloud via natural l
 }
 ```
 
-28 MCP tools available: install, upgrade, create projects, deploy functions, configure auth, manage secrets, backups, and more. See [MCP Server README](packages/mcp-server/README.md) for details.
+**Project-scoped mode** (restrict AI to single project):
+```json
+{
+  "mcpServers": {
+    "supacloud-myproject": {
+      "command": "npx",
+      "args": ["-y", "@supacloud/mcp-server"],
+      "env": {
+        "SUPACLOUD_HOST": "your-server-ip",
+        "SUPACLOUD_API_TOKEN": "your-master-token",
+        "SUPACLOUD_PROJECT_REF": "abc123defg",
+        "SUPACLOUD_READ_ONLY": "true"
+      }
+    }
+  }
+}
+```
+
+5 tool groups available: SSH tools, project management, database operations, advanced management, and deployment tools. See [MCP Server README](packages/mcp-server/README.md) for details.
 
 ### Project Structure
 
 ```
 supacloud/
-├── install.sh              # One-click deployment script
-├── switch.sh               # Runtime/storage switching tool
-├── supacloud               # CLI management tool
-├── config.env              # Global configuration
+├── install.sh                  # One-click deployment script
+├── setup.sh                    # Remote setup bootstrap
+├── switch.sh                   # Runtime/storage switching tool
+├── supacloud                   # CLI management tool (shell wrapper)
+├── config.env                  # Global configuration
 ├── packages/
-│   ├── management-api/     # REST API server (Bun + Elysia)
-│   │   ├── src/            # TypeScript source
-│   │   └── tests/          # Unit & integration tests
-│   ├── mcp-server/         # MCP Server for AI agents
-│   │   └── src/            # SSH + HTTP tools
-│   └── web-console/        # Modern SvelteKit dashboard (Next Gen UI)
-│       └── src/            # Components, routes, assets
+│   ├── management-api/         # REST API server (Bun + Elysia)
+│   │   ├── src/
+│   │   │   ├── routes/         # 17 route modules (projects, auth, frontend, webhook, etc.)
+│   │   │   ├── services/       # 20 service modules
+│   │   │   ├── cli/            # CLI subcommands (lifecycle, project)
+│   │   │   ├── db/             # Database layer & migrations
+│   │   │   ├── middleware/     # Auth middleware
+│   │   │   ├── infra/          # Health checker
+│   │   │   ├── install.ts      # Interactive installer
+│   │   │   ├── upgrade.ts      # Upgrade wizard
+│   │   │   └── doctor.ts       # System diagnostics
+│   │   └── tests/              # Unit (17) & integration tests
+│   ├── mcp-server/             # MCP Server for AI agents
+│   │   └── src/
+│   │       ├── tools/          # 5 tool modules (ssh, project, advanced, database, deployment)
+│   │       └── transports/     # SSH & HTTP transports
+│   └── web-console/            # SvelteKit management dashboard
+│       └── src/                # Components, routes, assets
 ├── scripts/
-│   └── lib/                # Shell script modules
-│       ├── db_manager.sh   # Database management
-│       ├── s3_manager.sh   # Storage management
-│       ├── router_manager.sh # Nginx routing
-│       └── jwt_manager.sh  # JWT key generation
-└── docs/
-    └── multi-tenant-management.md  # Technical specification
+│   └── lib/                    # Shell script modules
+│       ├── db_manager.sh       # Database lifecycle
+│       ├── gateway_manager.sh  # Kong gateway configuration
+│       ├── router_manager.sh   # Nginx/Angie routing
+│       ├── tenant_runtime.sh   # Tenant PostgREST & GoTrue runtime
+│       ├── function_manager.sh # Edge Functions management
+│       ├── s3_manager.sh       # Storage backend management
+│       ├── jwt_manager.sh      # JWT key generation
+│       ├── backup_manager.sh   # Backup operations
+│       ├── ha_manager.sh       # High availability
+│       ├── security_manager.sh # Firewall & SSL
+│       ├── storage_manager.sh  # Storage operations
+│       ├── extension_manager.sh# PostgreSQL extensions
+│       ├── global_router.ts    # Global routing logic
+│       └── worker_runner.ts    # Background worker
+├── infra/
+│   ├── angie/                  # Angie gateway (Nginx fork with ACME SSL)
+│   ├── os/                     # OS-level configurations
+│   └── postgres/               # PostgreSQL configurations
+├── docs/                       # 14 documentation files
+│   ├── deploy-guide.md         # Deployment guide
+│   ├── architecture-multi-tenant.md  # Architecture design
+│   ├── china-oauth-integration.md    # China OAuth (WeChat, etc.)
+│   └── ...                     # See docs/README.md for full index
+└── .github/
+    └── workflows/              # CI/CD (build-studio, management-api, release)
 ```
 
 ### Configuration
@@ -227,11 +320,16 @@ Key settings in `config.env`:
 | `S3_STORAGE_TYPE` | Storage backend | `juicefs` |
 | `EDGE_RUNTIME` | Functions runtime | `deno` |
 | `PG_VERSION` | PostgreSQL version | `18` |
+| `PIGSTY_VERSION` | Pigsty version | `v4.2.0` |
+| `ENABLE_ANALYTICS` | Logflare analytics | `true` |
 
 ### Documentation
 
-- [Multi-Tenant Management Technical Spec](docs/multi-tenant-management.md)
-- [MCP Server (AI Agent Integration)](packages/mcp-server/README.md)
+- [Documentation Index](docs/README.md)
+- [Deployment Guide](docs/deploy-guide.md)
+- [Multi-Tenant Architecture](docs/architecture-multi-tenant.md)
+- [China OAuth Integration](docs/china-oauth-integration.md)
+- [MCP Server (AI Agent)](packages/mcp-server/README.md)
 - [Pigsty Documentation](https://pigsty.cc/)
 - [Supabase Self-Hosting](https://supabase.com/docs/guides/self-hosting)
 
@@ -245,17 +343,22 @@ Key settings in `config.env`:
 ### 核心特性
 
 - **多租户架构**: 共享基础设施，运行多个隔离的 Supabase 项目
-- **Management API**: 完整的 REST API（30+ 个端点）管理项目及周边配置生命周期
+- **Management API**: 完整的 REST API（50+ 个端点）管理项目及周边配置生命周期
+- **Web 管理面板**: 现代 SvelteKit 管理面板，内置登录认证
 - **CLI 生态兼容**: 完全兼容 Supabase 官方命令行体系（登录鉴权、数据库类型推导、云函数发布）
-- **CLI 工具**: `supacloud` 命令行工具，便捷管理项目
-- **MCP Server**: AI 原生基础设施管理 —— 让 Claude/Cursor 通过对话操控你的 Supabase
-- **Pigsty 驱动**: 企业级 PostgreSQL，内置监控
+- **CLI 工具**: `supacloud` 二进制工具，支持项目管理、安装、升级、诊断
+- **MCP Server**: AI 原生基础设施管理 — 让 Claude/Cursor 通过对话操控你的 Supabase
+- **SupaCloud Pages**: 前端静态站点托管，支持 GitHub Webhook 自动部署
+- **Pigsty 驱动**: 企业级 PostgreSQL，内置 Grafana 监控
 - **一键部署**: 通过 `install.sh` 全自动安装
 - **JuiceFS 存储**: 基于 PostgreSQL Large Objects (LO) 后端，极致轻量
 - **Kong 深度集成**: 支持项目级限流 (Rate Limit)、CORS 及统一鉴权
+- **Angie 网关**: 现代 Nginx 分叉版，原生 ACME SSL 自动证书管理
 - **自动扩缩容**: 基于负载指标的垂直提升与水平副本扩展
 - **双运行时**: Deno（默认）或 Bun.js 云函数运行时
-- **40+ 单元测试**: 生产就绪，经过全面测试
+- **国内 OAuth**: 内置微信、支付宝、钉钉登录集成
+- **CI/CD 集成**: GitHub Webhook 自动化部署
+- **完善测试**: 17 个单元测试 + 集成测试套件
 
 ### 架构设计
 
@@ -271,12 +374,20 @@ Key settings in `config.env`:
 │  ┌────────────┐  ┌────────────┐  ┌────────────┐            │
 │  │ GatewaySvc │  │ ScalingSvc │  │ BackupSvc  │            │
 │  └────────────┘  └────────────┘  └────────────┘            │
+│        ▼               ▼               ▼                    │
+│  ┌────────────┐  ┌────────────┐  ┌────────────┐            │
+│  │ RouterSvc  │  │ FrontendSv │  │ DeploySvc  │            │
+│  └────────────┘  └────────────┘  └────────────┘            │
 ├─────────────────────────────────────────────────────────────┤
 │                       共享基础设施                            │
 │  ┌────────────┐  ┌────────────┐  ┌────────────┐            │
 │  │ PostgreSQL │  │    Kong    │  │  JuiceFS   │            │
 │  │  (Pigsty)  │  │    网关    │  │  (PG-LO)   │            │
 │  └────────────┘  └────────────┘  └────────────┘            │
+│  ┌────────────┐  ┌────────────┐                             │
+│  │   Angie    │  │  Grafana   │                             │
+│  │ (SSL/负载)  │  │  (监控)    │                             │
+│  └────────────┘  └────────────┘                             │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -318,7 +429,7 @@ source /etc/profile.d/supacloud.sh
 
 **命令行参数详解:**
 | 参数 | 说明 | 示例 |
-|--------|-------------|---------|
+|--------|-------------|---------| 
 | `--ip` | 指定内网 IP | `--ip 10.0.0.5` |
 | `--domain` | 指定 API 域名 | `--domain supa.com` |
 | `--studio` | 指定 Studio 域名| `--studio studio.com`|
@@ -327,7 +438,9 @@ source /etc/profile.d/supacloud.sh
 
 ### 项目管理
 
-#### CLI 命令行工具 (全栈生命周期与项目管理)
+#### CLI 命令行工具
+
+`supacloud` 二进制工具提供全栈生命周期与项目管理：
 
 ```bash
 # 平台管控
@@ -337,11 +450,21 @@ supacloud status             # 检查核心组件与端口存活
 supacloud logs [service]     # 查看诊断日志
 
 # 项目管理
-supacloud list               # 列出所有项目
-supacloud create "我的项目"   # 创建新项目
-supacloud info <ref>         # 查看项目详情
-supacloud keys <ref>         # 获取 API 密钥
-supacloud health             # 运行环境预检与诊断
+supacloud project list       # 列出所有项目
+supacloud project create     # 创建新项目
+supacloud project get <ref>  # 查看项目详情
+supacloud project delete <ref> # 删除项目
+supacloud project pause <ref>  # 暂停项目
+supacloud project restore <ref> # 恢复项目
+supacloud project restart <ref> # 重启服务
+supacloud project keys <ref>   # 获取 API 密钥
+supacloud project rotate-keys <ref> # 轮换 API 密钥
+
+# 系统运维
+supacloud install            # 交互式安装向导
+supacloud upgrade            # 升级到最新版本
+supacloud doctor             # 系统诊断与健康检查
+supacloud --version          # 查看版本
 ```
 
 #### Management API
@@ -364,7 +487,7 @@ curl http://localhost:9090/v1/projects/<ref>/api-keys \
   -H "Authorization: Bearer $MASTER_TOKEN"
 ```
 
-**API 端点：**
+**核心 API 端点：**
 
 | 方法 | 端点 | 说明 |
 |------|------|------|
@@ -381,10 +504,28 @@ curl http://localhost:9090/v1/projects/<ref>/api-keys \
 | GET | `/v1/projects/:ref/settings` | 获取配置 |
 | PUT | `/v1/projects/:ref/settings` | 更新配置 |
 | GET | `/v1/projects/:ref/api-keys` | 获取 API 密钥 |
-| GET | `/v1/projects/:ref/types/typescript`| 自动生成 TypeScript 类型声明 |
-| PATCH| `/v1/projects/:ref/config/auth` | 自定义鉴权及三方 OAuth 设置 |
+| POST | `/v1/projects/:ref/rotate-keys` | 轮换 API 密钥 |
+| GET | `/v1/projects/:ref/types/typescript` | 自动生成 TypeScript 类型 |
+| PATCH | `/v1/projects/:ref/config/auth` | 自定义鉴权及三方 OAuth |
 | GET | `/v1/projects/:ref/secrets` | 管理 Edge Functions Secrets |
 | GET | `/v1/oauth/authorize` | 授权官方 CLI OAuth 登录 |
+
+**扩展 API 端点：**
+
+| 分类 | 端点 | 说明 |
+|------|------|------|
+| 数据库 | `/v1/projects/:ref/database/*` | SQL 查询、Schema 检查、数据迁移 |
+| 鉴权 | `/v1/projects/:ref/config/auth` | OAuth 登录、微信/支付宝/钉钉 |
+| 前端托管 | `/v1/projects/:ref/frontend/*` | Pages 托管、自动部署、自定义域名 |
+| Webhook | `/v1/webhooks/github` | GitHub Webhook CI/CD 自动部署 |
+| 存储 | `/v1/storage/*` | Bucket 管理、文件上传、S3 迁移 |
+| 扩展 | `/v1/extensions/*` | PostgreSQL 扩展市场 |
+| 扩缩容 | `/v1/projects/:ref/scaling/*` | 垂直升级与水平副本 |
+| 备份 | `/v1/projects/:ref/backups/*` | 数据库备份与恢复 |
+| 监控 | `/v1/monitor/*` | 数据库监控与健康检查 |
+| 安全 | `/v1/security/*` | 防火墙规则与 SSL 证书 |
+| 部署 | `/v1/deploy/*` | Edge Function 部署 |
+| 任务 | `/v1/projects/:ref/tasks/*` | 后台任务监控 |
 
 #### 运行时切换
 
@@ -420,32 +561,81 @@ curl http://localhost:9090/v1/projects/<ref>/api-keys \
 }
 ```
 
-提供 28 个 MCP 工具：安装平台、升级、创建项目、部署函数、配置鉴权、管理密钥、备份等。详见 [MCP Server 文档](packages/mcp-server/README.md)。
+**项目范围模式**（限制 AI 只能访问单个项目）：
+```json
+{
+  "mcpServers": {
+    "supacloud-myproject": {
+      "command": "npx",
+      "args": ["-y", "@supacloud/mcp-server"],
+      "env": {
+        "SUPACLOUD_HOST": "你的服务器IP",
+        "SUPACLOUD_API_TOKEN": "你的Master Token",
+        "SUPACLOUD_PROJECT_REF": "abc123defg",
+        "SUPACLOUD_READ_ONLY": "true"
+      }
+    }
+  }
+}
+```
+
+提供 5 个工具组：SSH 工具、项目管理、数据库操作、高级管理、部署工具。详见 [MCP Server 文档](packages/mcp-server/README.md)。
 
 ### 项目结构
 
 ```
 supacloud/
-├── install.sh              # 一键部署脚本
-├── switch.sh               # 运行时/存储切换工具
-├── supacloud               # CLI 管理工具
-├── config.env              # 全局配置文件
+├── install.sh                  # 一键部署脚本
+├── setup.sh                    # 远程安装引导
+├── switch.sh                   # 运行时/存储切换工具
+├── supacloud                   # CLI 管理工具 (Shell 入口)
+├── config.env                  # 全局配置文件
 ├── packages/
-│   ├── management-api/     # REST API 服务 (Bun + Elysia)
-│   │   ├── src/            # TypeScript 源码
-│   │   └── tests/          # 单元测试和集成测试
-│   ├── mcp-server/         # MCP Server (AI Agent 集成)
-│   │   └── src/            # SSH + HTTP 工具集
-│   └── web-console/        # 现代 SvelteKit 控制台 (下一代 UI)
-│       └── src/            # 组件, 路由, 资源
+│   ├── management-api/         # REST API 服务 (Bun + Elysia)
+│   │   ├── src/
+│   │   │   ├── routes/         # 17 个路由模块 (projects, auth, frontend, webhook 等)
+│   │   │   ├── services/       # 20 个服务模块
+│   │   │   ├── cli/            # CLI 子命令 (lifecycle, project)
+│   │   │   ├── db/             # 数据库层 & 迁移
+│   │   │   ├── middleware/     # 认证中间件
+│   │   │   ├── infra/          # 健康检查器
+│   │   │   ├── install.ts      # 交互式安装器
+│   │   │   ├── upgrade.ts      # 升级向导
+│   │   │   └── doctor.ts       # 系统诊断
+│   │   └── tests/              # 单元测试 (17) & 集成测试
+│   ├── mcp-server/             # MCP Server (AI Agent 集成)
+│   │   └── src/
+│   │       ├── tools/          # 5 个工具模块 (ssh, project, advanced, database, deployment)
+│   │       └── transports/     # SSH & HTTP 传输层
+│   └── web-console/            # SvelteKit 管理面板
+│       └── src/                # 组件, 路由, 资源
 ├── scripts/
-│   └── lib/                # Shell 脚本模块
-│       ├── db_manager.sh   # 数据库管理
-│       ├── s3_manager.sh   # 存储管理
-│       ├── router_manager.sh # Nginx 路由
-│       └── jwt_manager.sh  # JWT 密钥生成
-└── docs/
-    └── multi-tenant-management.md  # 技术规范文档
+│   └── lib/                    # Shell 脚本模块
+│       ├── db_manager.sh       # 数据库生命周期
+│       ├── gateway_manager.sh  # Kong 网关配置
+│       ├── router_manager.sh   # Nginx/Angie 路由
+│       ├── tenant_runtime.sh   # 租户 PostgREST & GoTrue 运行时
+│       ├── function_manager.sh # 云函数管理
+│       ├── s3_manager.sh       # 存储后端管理
+│       ├── jwt_manager.sh      # JWT 密钥生成
+│       ├── backup_manager.sh   # 备份操作
+│       ├── ha_manager.sh       # 高可用
+│       ├── security_manager.sh # 防火墙 & SSL
+│       ├── storage_manager.sh  # 存储操作
+│       ├── extension_manager.sh# PostgreSQL 扩展
+│       ├── global_router.ts    # 全局路由逻辑
+│       └── worker_runner.ts    # 后台 Worker
+├── infra/
+│   ├── angie/                  # Angie 网关 (Nginx 分叉版, 原生 ACME SSL)
+│   ├── os/                     # 操作系统配置
+│   └── postgres/               # PostgreSQL 配置
+├── docs/                       # 14 篇技术文档
+│   ├── deploy-guide.md         # 部署指南
+│   ├── architecture-multi-tenant.md  # 架构设计
+│   ├── china-oauth-integration.md    # 国内 OAuth 集成
+│   └── ...                     # 详见 docs/README.md 完整索引
+└── .github/
+    └── workflows/              # CI/CD (build-studio, management-api, release)
 ```
 
 ### 配置说明
@@ -459,10 +649,15 @@ supacloud/
 | `S3_STORAGE_TYPE` | 存储后端 | `juicefs` |
 | `EDGE_RUNTIME` | 云函数运行时 | `deno` |
 | `PG_VERSION` | PostgreSQL 版本 | `18` |
+| `PIGSTY_VERSION` | Pigsty 版本 | `v4.2.0` |
+| `ENABLE_ANALYTICS` | Logflare 分析 | `true` |
 
 ### 参考文档
 
-- [多租户管理技术规范](docs/multi-tenant-management.md)
+- [文档索引](docs/README.md)
+- [部署指南](docs/deploy-guide.md)
+- [多租户架构设计](docs/architecture-multi-tenant.md)
+- [国内 OAuth 集成](docs/china-oauth-integration.md)
 - [MCP Server 文档 (AI Agent 集成)](packages/mcp-server/README.md)
 - [Pigsty 官方文档](https://pigsty.cc/)
 - [Supabase 自托管文档](https://supabase.com/docs/guides/self-hosting)
