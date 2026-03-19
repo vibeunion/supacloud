@@ -243,6 +243,46 @@ export async function registerAllRoutes() {
 const args = process.argv.slice(2);
 
 /**
+ * Auto-detect and stop orphan systemd services for deleted/missing projects.
+ * Runs on startup to prevent resource waste from failed cleanup sagas.
+ */
+async function cleanupOrphanServices() {
+  const { $ } = await import("bun");
+  const { sql: metaSql } = await import("./db");
+
+  // Get all active project refs from database
+  const activeProjects = await metaSql`SELECT ref FROM projects WHERE status != 'deleted'`;
+  const activeRefs = new Set(activeProjects.map((p: any) => p.ref));
+
+  // List running supacloud-gotrue and supacloud-pgrst services
+  const result = await $`systemctl list-units 'supacloud-gotrue@*' 'supacloud-pgrst@*' --all --plain --no-pager`
+    .nothrow().quiet();
+  const output = result.text();
+
+  const serviceRegex = /supacloud-(gotrue|pgrst)@([^.]+)\.service/g;
+  let match;
+  let orphanCount = 0;
+
+  while ((match = serviceRegex.exec(output)) !== null) {
+    const ref = match[2];
+    if (!activeRefs.has(ref)) {
+      const unitName = `supacloud-${match[1]}@${ref}.service`;
+      console.log(`[OrphanCleanup] Stopping orphan service: ${unitName}`);
+      await $`systemctl stop ${unitName}`.nothrow().quiet();
+      await $`systemctl disable ${unitName}`.nothrow().quiet();
+      orphanCount++;
+    }
+  }
+
+  if (orphanCount > 0) {
+    await $`systemctl daemon-reload`.nothrow().quiet();
+    console.log(`[OrphanCleanup] Stopped ${orphanCount} orphan service(s).`);
+  } else {
+    console.log("[OrphanCleanup] No orphan services detected.");
+  }
+}
+
+/**
  * Core logic: Based on command line arguments, decide whether to execute a single task or start the API server.
  */
 async function bootstrap() {
@@ -391,6 +431,11 @@ async function bootstrap() {
     app.listen(config.port);
     const { taskWorker } = await import("./services/task.worker");
     taskWorker.start();
+
+    // Auto-detect and stop orphan services for deleted projects
+    cleanupOrphanServices().catch(err =>
+      console.warn("[Bootstrap] Orphan service cleanup failed (non-fatal):", err)
+    );
 
     console.log(`
     ╔═══════════════════════════════════════════════════════════╗

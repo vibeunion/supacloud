@@ -197,11 +197,28 @@ export class DatabaseService {
         CREATE SCHEMA IF NOT EXISTS realtime;
       `);
 
+      // Create supabase_auth_admin role (used by GoTrue for migrations)
+      await tenantDb.unsafe(`
+        DO $$
+        BEGIN
+          IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'supabase_auth_admin') THEN
+            CREATE ROLE supabase_auth_admin LOGIN PASSWORD '${password}';
+          END IF;
+        END
+        $$;
+      `);
+
       // Grant privileges
       await tenantDb.unsafe(`
         GRANT USAGE ON SCHEMA public TO ${anonRole}, ${authenticatedRole}, ${serviceRole};
         GRANT ALL ON SCHEMA public TO ${authenticatedRole}, ${serviceRole};
         GRANT USAGE ON SCHEMA auth TO ${anonRole}, ${authenticatedRole}, ${serviceRole};
+
+        -- GoTrue needs CREATE on public for schema_migrations table
+        GRANT ALL ON SCHEMA public TO supabase_auth_admin;
+        GRANT ALL ON SCHEMA auth TO supabase_auth_admin;
+        ALTER DEFAULT PRIVILEGES IN SCHEMA auth GRANT ALL ON TABLES TO supabase_auth_admin;
+        ALTER DEFAULT PRIVILEGES IN SCHEMA auth GRANT ALL ON SEQUENCES TO supabase_auth_admin;
       `);
     });
   }
@@ -228,8 +245,10 @@ export class DatabaseService {
         // Drop database
         await adminDb.unsafe(`DROP DATABASE IF EXISTS "${dbName}"`);
 
-        // Drop role
+        // Drop roles (both the project role and the authenticator role)
         await adminDb.unsafe(`DROP ROLE IF EXISTS "${dbUser}"`);
+        const authenticatorRole = `authenticator_${projectRef}`;
+        await adminDb.unsafe(`DROP ROLE IF EXISTS "${authenticatorRole}"`);
       });
 
       return { success: true };
