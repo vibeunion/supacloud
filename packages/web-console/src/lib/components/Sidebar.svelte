@@ -36,13 +36,13 @@
     { title: $t("Navigation.auth"), icon: Users, href: `/project/${currentProject?.ref}/auth` },
     { title: $t("Navigation.storage"), icon: Box, href: `/project/${currentProject?.ref}/storage` },
     { title: $t("Navigation.edge_functions"), icon: Zap, href: `/project/${currentProject?.ref}/functions` },
-    { title: "Hosting", icon: Globe, href: `/project/${currentProject?.ref}/hosting` },
-    { title: "Realtime", icon: Radio, href: `/project/${currentProject?.ref}/realtime` },
+    { title: $t("Hosting.title"), icon: Globe, href: `/project/${currentProject?.ref}/hosting` },
+    { title: $t("Realtime.title"), icon: Radio, href: `/project/${currentProject?.ref}/realtime` },
     { title: $t("Navigation.database"), icon: Database, href: `/project/${currentProject?.ref}/database` },
     { title: $t("Navigation.api_docs"), icon: Files, href: `/project/${currentProject?.ref}/api` },
     { title: $t("Navigation.query_performance"), icon: LineChart, href: `/project/${currentProject?.ref}/reports/query-performance` },
     { title: $t("Navigation.database_linter"), icon: ShieldCheck, href: `/project/${currentProject?.ref}/reports/database-linter` },
-    { title: "数据库顾问", icon: ShieldCheck, href: `/project/${currentProject?.ref}/reports/advisors` },
+    { title: $t("Sidebar.database_advisor"), icon: ShieldCheck, href: `/project/${currentProject?.ref}/reports/advisors` },
     { title: $t("Navigation.logs"), icon: ScrollText, href: `/project/${currentProject?.ref}/logs` },
     { title: $t("Navigation.settings"), icon: Settings, href: `/project/${currentProject?.ref}/settings` },
   ]);
@@ -90,7 +90,7 @@
 
     <!-- Platform Admin separator -->
     <div class="h-px bg-border/50 my-3"></div>
-    <span class="px-3 text-[9px] font-bold uppercase text-muted-foreground/50 tracking-widest">平台管理</span>
+    <span class="px-3 text-[9px] font-bold uppercase text-muted-foreground/50 tracking-widest">{$t("Sidebar.platform_admin")}</span>
     <a
       href="/platform"
       class={cn(
@@ -101,7 +101,7 @@
       )}
     >
       <Settings class="w-4 h-4" />
-      基础设施
+      {$t("Sidebar.infrastructure")}
     </a>
   </nav>
 
@@ -111,7 +111,7 @@
       class="flex w-full items-center gap-3 px-3 py-2 text-sm font-medium rounded-md text-brand bg-brand/5 hover:bg-brand/10 transition-colors"
     >
       <Shield class="w-4 h-4" />
-      <span>平台管理 (Platform Admin)</span>
+      <span>{$t("Sidebar.platform_admin")}</span>
     </a>
     <button
       onclick={(e) => { e.preventDefault(); toggleLanguage(); }}

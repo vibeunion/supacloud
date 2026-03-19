@@ -89,7 +89,8 @@
     "role": "Role",
     "verified": "Verified",
     "created": "Created",
-    "last_sign_in": "Last Sign In"
+    "last_sign_in": "Last Sign In",
+    "signOut": "Sign Out"
   },
   "Tables": {
     "loading": "Loading tables...",
@@ -353,5 +354,90 @@
     "message": "Message",
     "refresh": "Refresh",
     "auto_refresh": "Auto-refresh"
+  },
+  "Hosting": {
+    "title": "Hosting",
+    "site_list": "Site List",
+    "new_deploy": "New Deployment",
+    "refresh": "Refresh",
+    "no_deployments": "No deployments yet",
+    "no_deployments_desc": "Create your first frontend deployment — supports static sites, React, Vue, Next.js, SvelteKit, and more",
+    "redeploy": "Redeploy",
+    "delete": "Delete",
+    "settings": "Settings",
+    "records": "Records",
+    "redeploy_triggered": "Redeployment triggered",
+    "deleted": "Deployment deleted",
+    "confirm_delete": "Are you sure you want to delete this deployment? This will stop the service and remove all related files.",
+    "webhook_info": "Webhook Auto-deploy",
+    "webhook_desc": "Supports GitHub, GitLab, Gitee, and GitCode. Add the Webhook URL in your repo settings, and push events will automatically trigger matching deployments.",
+    "not_deployed": "Not deployed",
+    "static": "Static Site",
+    "framework": "Framework"
+  },
+  "Providers": {
+    "title": "Auth Providers",
+    "subtitle": "Configure OAuth login providers — expand to fill in Client ID / Secret, then save to activate",
+    "enabled_count": "Enabled",
+    "total_count": "Total",
+    "search": "Search providers...",
+    "loading": "Loading provider configuration...",
+    "built_in": "Built-in",
+    "social": "Social",
+    "china": "China",
+    "enterprise": "Enterprise",
+    "enabled": "Enabled",
+    "not_configured": "Not configured",
+    "client_id": "Client ID (App ID)",
+    "client_secret": "Client Secret (App Secret)",
+    "redirect_uri": "Redirect URI (optional)",
+    "save_and_enable": "Save & Enable",
+    "disable": "Disable",
+    "save_note": "Saving will automatically update GoTrue config and restart the auth service",
+    "fill_credentials": "Please fill in credentials and save",
+    "confirm_disable": "Disable this login provider?",
+    "disabled_msg": "Disabled",
+    "saved_msg": "Configuration saved and applied (GoTrue restarted)",
+    "fill_id_secret": "Please fill in Client ID and Client Secret"
+  },
+  "Platform": {
+    "title": "Platform Admin",
+    "infrastructure": "Infrastructure",
+    "extensions_market": "Extensions Market",
+    "backups_pitr": "Backups & PITR",
+    "engine_tuning": "Engine Tuning",
+    "monitoring": "Monitoring",
+    "connection_pool": "Connection Pool",
+    "storage_juicefs": "Storage (JuiceFS)",
+    "operations_console": "Operations Console"
+  },
+  "Sidebar": {
+    "platform_admin": "Platform Admin",
+    "infrastructure": "Infrastructure",
+    "back_to_projects": "Back to Projects",
+    "database_advisor": "Database Advisor"
+  },
+  "Realtime": {
+    "title": "Realtime",
+    "subtitle": "Manage realtime channels and connections.",
+    "loading": "Loading realtime channels..."
+  },
+  "Common": {
+    "save": "Save",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "confirm": "Confirm",
+    "loading": "Loading...",
+    "error": "Error",
+    "success": "Success",
+    "network_error": "Network Error",
+    "enabled": "Enabled",
+    "disabled": "Disabled",
+    "refresh": "Refresh",
+    "search": "Search...",
+    "close": "Close",
+    "ago_minutes": "minutes ago",
+    "ago_hours": "hours ago",
+    "ago_days": "days ago"
   }
 }
