@@ -6,6 +6,9 @@ AI-native 的 Supabase 基础设施管理 MCP Server。让 AI Agent（Claude、C
 
 - 🔧 **安装前可用**：通过 SSH 远程安装 SupaCloud
 - 🚀 **安装后增强**：通过 Management API 管理项目全生命周期
+- 🗄️ **数据库操作**：SQL 查询、Schema 检查、数据迁移（支持只读模式）
+- 📦 **部署管理**：Docker 容器状态检查与管理
+- 🔒 **项目范围模式**：限制 AI 只能访问指定项目，支持只读模式
 - 🤖 **AI 原生**：标准 MCP 协议，兼容所有主流 AI IDE
 - 🔐 **安全可控**：环境变量配置凭据，工具级权限隔离
 
@@ -25,6 +28,25 @@ AI-native 的 Supabase 基础设施管理 MCP Server。让 AI Agent（Claude、C
         "SUPACLOUD_HOST": "1.2.3.4",
         "SUPACLOUD_SSH_KEY": "~/.ssh/id_rsa",
         "SUPACLOUD_API_TOKEN": ""
+      }
+    }
+  }
+}
+```
+
+**项目范围模式**（限制 AI 只能访问单个项目）：
+
+```json
+{
+  "mcpServers": {
+    "supacloud-myproject": {
+      "command": "npx",
+      "args": ["-y", "@supacloud/mcp-server"],
+      "env": {
+        "SUPACLOUD_HOST": "1.2.3.4",
+        "SUPACLOUD_API_TOKEN": "your-master-token",
+        "SUPACLOUD_PROJECT_REF": "abc123defg",
+        "SUPACLOUD_READ_ONLY": "true"
       }
     }
   }
@@ -59,6 +81,8 @@ AI-native 的 Supabase 基础设施管理 MCP Server。让 AI Agent（Claude、C
 | `SUPACLOUD_SSH_PASS` | SSH 密码 (备选) | - |
 | `SUPACLOUD_API_URL` | Management API 地址 | `http://{HOST}:9090` |
 | `SUPACLOUD_API_TOKEN` | Master Token | - |
+| `SUPACLOUD_PROJECT_REF` | 限定项目 (项目范围模式) | - |
+| `SUPACLOUD_READ_ONLY` | 启用只读模式 | `false` |
 
 ## 可用工具
 
@@ -100,6 +124,18 @@ AI-native 的 Supabase 基础设施管理 MCP Server。让 AI Agent（Claude、C
 | `get_project_settings` | 获取配置 |
 | `update_project_settings` | 更新配置 |
 
+### 数据库工具（支持只读模式）
+
+| 工具 | 说明 |
+|------|------|
+| `query_database` | 执行 SQL 查询（只读模式下仅允许 SELECT） |
+| `list_schemas` | 列出数据库 Schema |
+| `list_tables` | 列出指定 Schema 的所有表 |
+| `describe_table` | 查看表结构（列、类型、约束） |
+| `get_table_data` | 分页获取表数据 |
+
+> 💡 项目范围模式下，数据库工具自动绑定到指定项目，无需手动传入 `projectRef`。
+
 ### 高级工具（安装后可用）
 
 | 工具 | 说明 |
@@ -118,6 +154,13 @@ AI-native 的 Supabase 基础设施管理 MCP Server。让 AI Agent（Claude、C
 | `get_network_restrictions` | 获取网络限制 |
 | `update_network_restrictions` | 更新网络限制 |
 
+### 部署工具（本地 Docker 操作）
+
+| 工具 | 说明 |
+|------|------|
+| `check_docker_status` | 检查 Docker/Podman 容器状态 |
+| `manage_containers` | 启动/停止/重启容器 |
+
 ## 开发
 
 ```bash
@@ -129,3 +172,4 @@ bun run dev
 ## License
 
 MIT
+

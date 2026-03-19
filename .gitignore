@@ -113,6 +113,17 @@ templates/base/volumes/db/data/
 # Bun lockfile
 bun.lock
 config.env.deploy
+
+# SupaCloud build artifacts
 packages/management-api/*.exe
 packages/management-api/supacloud-*
+packages/management-api/*.log
+packages/web-console/*.log
+*.bundle
+
+# Git rewrite artifacts
 .git-rewrite/
+
+# Root-level test/debug scripts
+test_*.ts
+wechat_login_patch_local.ts
