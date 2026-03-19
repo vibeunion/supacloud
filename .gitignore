@@ -127,3 +127,7 @@ packages/web-console/*.log
 # Root-level test/debug scripts
 test_*.ts
 wechat_login_patch_local.ts
+
+# AI assistant directories
+.claude/
+.agents/
