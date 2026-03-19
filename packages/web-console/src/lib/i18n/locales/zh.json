@@ -89,7 +89,8 @@
     "role": "角色",
     "verified": "已验证",
     "created": "创建时间",
-    "last_sign_in": "最后登录"
+    "last_sign_in": "最后登录",
+    "signOut": "退出登录"
   },
   "Tables": {
     "loading": "正在加载表结构...",
@@ -353,5 +354,90 @@
     "message": "消息",
     "refresh": "刷新",
     "auto_refresh": "自动刷新"
+  },
+  "Hosting": {
+    "title": "站点托管",
+    "site_list": "站点列表",
+    "new_deploy": "新建部署",
+    "refresh": "刷新",
+    "no_deployments": "还没有任何部署",
+    "no_deployments_desc": "创建你的第一个前端部署 — 支持静态站点、React、Vue、Next.js、SvelteKit 等",
+    "redeploy": "重新部署",
+    "delete": "删除",
+    "settings": "设置",
+    "records": "记录",
+    "redeploy_triggered": "重新部署已触发",
+    "deleted": "部署已删除",
+    "confirm_delete": "确定要删除此部署吗？这将停止服务并删除所有相关文件。",
+    "webhook_info": "Webhook 自动部署",
+    "webhook_desc": "支持 GitHub、GitLab、Gitee、GitCode 四大平台。在仓库设置中添加 Webhook URL，Push 事件将自动触发匹配的部署。",
+    "not_deployed": "未部署",
+    "static": "静态站点",
+    "framework": "框架"
+  },
+  "Providers": {
+    "title": "认证提供者",
+    "subtitle": "配置 OAuth 登录提供者 — 点击展开填写 Client ID / Secret 后保存即生效",
+    "enabled_count": "已启用",
+    "total_count": "总计",
+    "search": "搜索提供者...",
+    "loading": "正在加载提供者配置...",
+    "built_in": "内置",
+    "social": "社交",
+    "china": "国内",
+    "enterprise": "企业",
+    "enabled": "已启用",
+    "not_configured": "未配置",
+    "client_id": "Client ID (App ID)",
+    "client_secret": "Client Secret (App Secret)",
+    "redirect_uri": "Redirect URI (可选)",
+    "save_and_enable": "保存并启用",
+    "disable": "禁用",
+    "save_note": "保存后将自动更新 GoTrue 配置并重启认证服务",
+    "fill_credentials": "请填写凭据后保存",
+    "confirm_disable": "确定禁用登录？",
+    "disabled_msg": "已禁用",
+    "saved_msg": "配置已保存并生效（GoTrue 已重启）",
+    "fill_id_secret": "请填写 Client ID 和 Client Secret"
+  },
+  "Platform": {
+    "title": "平台管理",
+    "infrastructure": "基础设施",
+    "extensions_market": "扩展市场",
+    "backups_pitr": "备份与恢复",
+    "engine_tuning": "引擎调优",
+    "monitoring": "系统监控",
+    "connection_pool": "连接池",
+    "storage_juicefs": "存储 (JuiceFS)",
+    "operations_console": "运维控制台"
+  },
+  "Sidebar": {
+    "platform_admin": "平台管理",
+    "infrastructure": "基础设施",
+    "back_to_projects": "返回项目列表",
+    "database_advisor": "数据库顾问"
+  },
+  "Realtime": {
+    "title": "实时订阅",
+    "subtitle": "管理实时频道和连接。",
+    "loading": "正在加载实时频道..."
+  },
+  "Common": {
+    "save": "保存",
+    "cancel": "取消",
+    "delete": "删除",
+    "confirm": "确认",
+    "loading": "加载中...",
+    "error": "错误",
+    "success": "成功",
+    "network_error": "网络错误",
+    "enabled": "已启用",
+    "disabled": "已禁用",
+    "refresh": "刷新",
+    "search": "搜索...",
+    "close": "关闭",
+    "ago_minutes": "分钟前",
+    "ago_hours": "小时前",
+    "ago_days": "天前"
   }
 }
