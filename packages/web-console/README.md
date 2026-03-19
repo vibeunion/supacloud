@@ -1,42 +1,36 @@
-# sv
+# SupaCloud Web Console
 
-Everything you need to build a Svelte project, powered by [`sv`](https://github.com/sveltejs/cli).
+Modern management dashboard for SupaCloud, built with **SvelteKit** + **TailwindCSS**.
 
-## Creating a project
+## Features
 
-If you're seeing this, you've probably already done this step. Congrats!
+- 🔐 **Login Authentication**: Secure login with session management
+- 📊 **Project Dashboard**: View and manage all Supabase projects
+- ⚙️ **Project Settings**: Configure project settings, API keys, auth providers
+- 📈 **System Monitoring**: Real-time system health and resource monitoring
+- 🚀 **One-click Operations**: Create, pause, restore, restart projects
+- 🎨 **Modern UI**: Responsive dark-mode SvelteKit interface
 
-```sh
-# create a new project
-npx sv create my-app
+## Development
+
+```bash
+cd packages/web-console
+bun install
+bun run dev
 ```
 
-To recreate this project with the same configuration:
-
-```sh
-# recreate this project
-bun x sv create --template minimal --types ts --install bun web-console
-```
-
-## Developing
-
-Once you've created a project and installed dependencies with `npm install` (or `pnpm install` or `yarn`), start a development server:
-
-```sh
-npm run dev
-
-# or start the server and open the app in a new browser tab
-npm run dev -- --open
-```
+The dev server will start at `http://localhost:5173`.
 
 ## Building
 
-To create a production version of your app:
-
-```sh
-npm run build
+```bash
+bun run build
 ```
 
-You can preview the production build with `npm run preview`.
+The production build outputs to `build/` directory. In production, the Management API serves these assets as embedded SPA.
 
-> To deploy your app, you may need to install an [adapter](https://svelte.dev/docs/kit/adapters) for your target environment.
+## Tech Stack
+
+- [SvelteKit](https://kit.svelte.dev/) - Full-stack web framework
+- [TailwindCSS](https://tailwindcss.com/) - Utility-first CSS
+- [TypeScript](https://www.typescriptlang.org/) - Type-safe JavaScript
