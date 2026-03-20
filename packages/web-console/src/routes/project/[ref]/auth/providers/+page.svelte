@@ -327,21 +327,21 @@
                       保存后将自动更新 GoTrue 配置并重启认证服务
                     </p>
                     <div class="flex items-center gap-2">
-                      {#if provider.enabled}
+                      {#if providers[i].enabled}
                         <button
-                          onclick={() => disableProvider(provider)}
-                          disabled={provider.saving}
+                          onclick={() => disableProvider(providers[i])}
+                          disabled={providers[i].saving}
                           class="flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-semibold rounded-lg border border-destructive text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-50"
                         >
                           <Trash2 size={12} /> 禁用
                         </button>
                       {/if}
                       <button
-                        onclick={() => saveProvider(provider)}
-                        disabled={provider.saving}
+                        onclick={() => saveProvider(providers[i])}
+                        disabled={providers[i].saving}
                         class="flex items-center gap-1.5 px-4 py-1.5 text-[10px] font-semibold rounded-lg bg-brand text-white hover:bg-brand/90 transition-colors disabled:opacity-50"
                       >
-                        {#if provider.saving}<Loader2 size={12} class="animate-spin" />{:else}<Save size={12} />{/if}
+                        {#if providers[i].saving}<Loader2 size={12} class="animate-spin" />{:else}<Save size={12} />{/if}
                         保存并启用
                       </button>
                     </div>
