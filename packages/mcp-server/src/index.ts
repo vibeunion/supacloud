@@ -48,6 +48,10 @@ import { registerProjectTools } from "./tools/project-tools";
 import { registerAdvancedTools } from "./tools/advanced-tools";
 import { registerDeploymentTools } from "./tools/deployment-tools";
 import { registerDatabaseTools } from "./tools/database-tools";
+import { registerAuthTools } from "./tools/auth-tools";
+import { registerStorageTools } from "./tools/storage-tools";
+import { registerOrganizationTools } from "./tools/org-tools";
+import { registerTaskTools } from "./tools/task-tools";
 import { resolve } from "path";
 import { homedir } from "os";
 
@@ -66,7 +70,7 @@ const READ_ONLY = process.env.SUPACLOUD_READ_ONLY === "true";
 const serverName = PROJECT_REF ? `supacloud-${PROJECT_REF}` : "supacloud";
 const server = new McpServer({
     name: serverName,
-    version: "0.2.0",
+    version: "0.5.4",
 });
 
 // ── Register SSH tools (always available) ──
@@ -94,9 +98,20 @@ if (API_URL) {
         readOnly: READ_ONLY,
     });
 
+    // Auth provider management tools
+    registerAuthTools(server, http);
+
+    // Storage management tools
+    registerStorageTools(server, http);
+
+    // Task queue monitoring tools
+    registerTaskTools(server, http);
+
     // Project management tools (only if not project-scoped)
     if (!PROJECT_REF) {
         registerProjectTools(server, http);
+        // Organization management tools
+        registerOrganizationTools(server, http);
     }
 
     // Advanced tools (skip write operations in read-only mode)
