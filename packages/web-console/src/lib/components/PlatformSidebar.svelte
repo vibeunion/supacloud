@@ -8,6 +8,7 @@
     Network, 
     HardDrive, 
     Terminal,
+    Bot,
     Languages
   } from "lucide-svelte";
   import { page } from '$app/stores';
@@ -27,6 +28,7 @@
     { title: $t("Platform.connection_pool"), icon: Network, href: `/platform/pooling` },
     { title: $t("Platform.storage_juicefs"), icon: HardDrive, href: `/platform/storage` },
     { title: $t("Platform.operations_console"), icon: Terminal, href: `/platform/operations` },
+    { title: "MCP 配置", icon: Bot, href: `/platform/mcp` },
   ]);
 
   function isActive(href: string) {
