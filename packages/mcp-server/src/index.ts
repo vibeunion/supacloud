@@ -70,7 +70,7 @@ const READ_ONLY = process.env.SUPACLOUD_READ_ONLY === "true";
 const serverName = PROJECT_REF ? `supacloud-${PROJECT_REF}` : "supacloud";
 const server = new McpServer({
     name: serverName,
-    version: "0.5.4",
+    version: "0.5.5",
 });
 
 // ── Register SSH tools (always available) ──
