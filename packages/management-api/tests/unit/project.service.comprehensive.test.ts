@@ -239,7 +239,8 @@ describe("ProjectService - Comprehensive", () => {
       const result = await service.getProjectHealth("test123abc");
       expect(result).not.toBeNull();
       expect(result?.status).toBe("ACTIVE_HEALTHY");
-      expect(result?.services.database).toBe("ACTIVE_HEALTHY");
+      const dbService = result?.services.find((s: any) => s.name === "PostgreSQL");
+      expect(dbService?.status).toBe("ACTIVE_HEALTHY");
 
       findSpy.mockRestore();
       dbSpy.mockRestore();
@@ -250,7 +251,8 @@ describe("ProjectService - Comprehensive", () => {
       const dbSpy = spyOn(databaseService, "checkStatus").mockResolvedValue({ success: false, output: "", error: "fail" });
 
       const result = await service.getProjectHealth("test123abc");
-      expect(result?.services.database).toBe("UNHEALTHY");
+      const dbService = result?.services.find((s: any) => s.name === "PostgreSQL");
+      expect(dbService?.status).toBe("INACTIVE");
 
       findSpy.mockRestore();
       dbSpy.mockRestore();
