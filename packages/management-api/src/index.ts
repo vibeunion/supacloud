@@ -95,6 +95,9 @@ const app = new Elysia({ strictPath: false })
     }
   })
 
+  // MCP Endpoint (has its own auth, registered before authMiddleware)
+  .use((await import("./routes/mcp")).mcpRoutes)
+
   // Main API Routes
   .use(await registerAllRoutes())
 
