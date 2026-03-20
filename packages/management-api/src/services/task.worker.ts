@@ -6,22 +6,43 @@ import { routerService } from "./router.service";
 import { gatewayService } from "./gateway.service";
 import { tenantRuntimeService } from "./tenant-runtime.service";
 import { logger } from "../utils/logger";
+import { createPgListener, type PgListenerHandle } from "../lib/pg-listen";
+import { config } from "../config";
 import type { ProjectTask } from "../db";
 
 export class TaskWorker {
     private isRunning = false;
     private isProcessing = false;
     private intervalId?: Timer;
+    private listener?: PgListenerHandle;
 
-    start(intervalMs = 3000) {
+    start(intervalMs = 10000) {
         if (this.isRunning) return;
         this.isRunning = true;
         console.log("Starting Task Worker...");
+
+        // Primary: event-driven via PostgreSQL LISTEN/NOTIFY
+        try {
+            this.listener = createPgListener({
+                url: config.databaseUrl,
+                channels: ["task_pending"],
+                onNotification: (_channel, _payload) => {
+                    logger.info(`[TaskWorker] NOTIFY received, triggering immediate poll`);
+                    this.poll();
+                },
+            });
+        } catch (err) {
+            logger.warn(`[TaskWorker] Failed to start pg-listen, falling back to polling only:`, err as Error);
+        }
+
+        // Fallback: 10s safety-net polling (increased from 3s since LISTEN is primary)
         this.intervalId = setInterval(() => this.poll(), intervalMs);
     }
 
     stop() {
         this.isRunning = false;
+        this.listener?.close();
+        this.listener = undefined;
         if (this.intervalId) {
             clearInterval(this.intervalId);
         }
