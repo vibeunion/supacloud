@@ -16,7 +16,7 @@ class TenantRuntimeService {
     private readonly POSTGREST_BIN = process.env.POSTGREST_BIN || "/usr/local/bin/postgrest";
     private readonly GOTRUE_BIN = process.env.GOTRUE_BIN || "/usr/local/bin/gotrue";
     private readonly PG_HOST = process.env.PG_HOST || process.env.POSTGRES_HOST || "localhost";
-    private readonly PG_PORT = process.env.PG_PORT || process.env.POSTGRES_PORT || "6432";
+    private readonly PG_PORT = process.env.PG_PORT || process.env.POSTGRES_PORT || "5432";
 
     private readonly PGRST_PORT_BASE = parseInt(process.env.PGRST_PORT_BASE || "3100");
     private readonly GOTRUE_PORT_BASE = parseInt(process.env.GOTRUE_PORT_BASE || "4100");
