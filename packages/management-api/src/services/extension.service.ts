@@ -11,7 +11,7 @@ export interface ExtensionInfo {
 
 export class ExtensionService {
     private readonly PG_HOST = process.env.PG_HOST || process.env.POSTGRES_HOST || "localhost";
-    private readonly PG_PORT = parseInt(process.env.PG_PORT || process.env.POSTGRES_PORT || "6432");
+    private readonly PG_PORT = parseInt(process.env.PG_PORT || process.env.POSTGRES_PORT || "5432");
     private readonly PG_USER = process.env.PG_USER || "postgres";
     private readonly PG_PASSWORD = process.env.PGPASSWORD || process.env.POSTGRES_PASSWORD || "postgres";
 
