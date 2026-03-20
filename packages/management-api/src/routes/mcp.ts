@@ -77,17 +77,9 @@ export const mcpRoutes = new Elysia({ prefix: "/mcp" })
       session = createMcpSession(tokenPayload);
     }
 
-    // Convert Elysia request to a standard request and pipe through transport
+    // Pass the original request directly to transport
     try {
-      const body = await request.json();
-      const fakeReq = new Request(request.url, {
-        method: "POST",
-        headers: request.headers,
-        body: JSON.stringify(body),
-      });
-
-      // Use a promise to collect the response
-      const response = await session.transport.handleRequest(fakeReq);
+      const response = await session.transport.handleRequest(request);
       
       if (response) {
         // Copy headers from MCP response
