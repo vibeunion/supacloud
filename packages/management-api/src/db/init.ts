@@ -91,16 +91,37 @@ export async function initDatabase() {
     const tableCount = Number(result[0]?.count || 0);
     console.log(`Found ${tableCount} tables in database`);
 
-    if (tableCount >= 3) {
-      console.log("Tables already exist, skipping initialization");
-      return;
+    if (tableCount < 3) {
+      console.log("Executing DDL statements...");
+      await sql.unsafe(ddlQuery);
+      console.log("DDL executed successfully.");
+    } else {
+      console.log("Tables already exist, skipping table creation.");
     }
 
-    console.log("Executing DDL statements...");
-    
-    // Bun SQL: unsafe() can execute multiple statements directly
-    await sql.unsafe(ddlQuery);
-    console.log("DDL executed successfully.");
+    // Always apply trigger (idempotent: CREATE OR REPLACE + DROP IF EXISTS)
+    const notifyTriggerDDL = `
+      CREATE OR REPLACE FUNCTION notify_task_change() RETURNS trigger AS $$
+      BEGIN
+        PERFORM pg_notify(
+          'task_' || NEW.status,
+          json_build_object(
+            'id', NEW.id,
+            'project_ref', NEW.project_ref,
+            'task_type', NEW.task_type
+          )::text
+        );
+        RETURN NEW;
+      END;
+      $$ LANGUAGE plpgsql;
+
+      DROP TRIGGER IF EXISTS trg_task_notify ON project_tasks;
+      CREATE TRIGGER trg_task_notify
+        AFTER INSERT OR UPDATE ON project_tasks
+        FOR EACH ROW EXECUTE FUNCTION notify_task_change();
+    `;
+    await sql.unsafe(notifyTriggerDDL);
+    console.log("LISTEN/NOTIFY trigger applied.");
 
     const [verify] = await sql`
       SELECT COUNT(*) as count FROM information_schema.tables 
