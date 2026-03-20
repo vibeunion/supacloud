@@ -16,9 +16,39 @@ AI-native 的 Supabase 基础设施管理 MCP Server。让 AI Agent（Claude、C
 
 ## 快速开始
 
-### 1. 配置 MCP Client
+### 方式一：远程 MCP 端点（推荐 ⭐）
 
-在你的 AI IDE（Claude Desktop、Cursor 等）的 MCP 配置中添加：
+Management API 内嵌了 Streamable HTTP MCP 端点，无需安装任何东西，一个 URL + Token 即可：
+
+**管理员（完全控制）：**
+```json
+{
+  "mcpServers": {
+    "supacloud": {
+      "url": "http://your-server:9090/mcp",
+      "headers": { "Authorization": "Bearer your-master-token" }
+    }
+  }
+}
+```
+
+**项目开发者（只读单项目）：**
+```json
+{
+  "mcpServers": {
+    "my-project": {
+      "url": "http://your-server:9090/mcp",
+      "headers": { "Authorization": "Bearer supa_proj_xxx..." }
+    }
+  }
+}
+```
+
+> 💡 项目 Token 可通过管理员 MCP 工具 `create_mcp_token` 生成，或调用 `POST /mcp/tokens`。
+
+### 方式二：npx 本地模式（含 SSH 工具）
+
+适用于需要 SSH 远程安装/诊断的场景：
 
 ```json
 {
@@ -30,25 +60,6 @@ AI-native 的 Supabase 基础设施管理 MCP Server。让 AI Agent（Claude、C
         "SUPACLOUD_HOST": "1.2.3.4",
         "SUPACLOUD_SSH_KEY": "~/.ssh/id_rsa",
         "SUPACLOUD_API_TOKEN": ""
-      }
-    }
-  }
-}
-```
-
-**项目范围模式**（限制 AI 只能访问单个项目）：
-
-```json
-{
-  "mcpServers": {
-    "supacloud-myproject": {
-      "command": "npx",
-      "args": ["-y", "@supacloud/mcp-server"],
-      "env": {
-        "SUPACLOUD_HOST": "1.2.3.4",
-        "SUPACLOUD_API_TOKEN": "your-master-token",
-        "SUPACLOUD_PROJECT_REF": "abc123defg",
-        "SUPACLOUD_READ_ONLY": "true"
       }
     }
   }
