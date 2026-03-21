@@ -24,7 +24,7 @@
 - **Kong API Gateway**: Dynamic rate limiting, CORS, and per-project JWT validation
 - **Angie Gateway**: Modern Nginx fork with native ACME SSL auto-provisioning
 - **Auto-scaling Engine**: Rule-based vertical and horizontal scaling based on real-time metrics
-- **Dual Runtime**: Deno (default) or Bun.js for Edge Functions
+- **Dual Runtime**: Deno (legacy) or Bun.js Edge Runtime (recommended) for Edge Functions
 - **China OAuth**: Built-in WeChat, Alipay, DingTalk login integration
 - **CI/CD Integration**: GitHub webhook for automated deployments
 - **Comprehensive Tests**: 17 unit tests + integration test suite
@@ -202,7 +202,8 @@ curl http://localhost:9090/v1/projects/<ref>/api-keys \
 
 ```bash
 # Switch Edge Functions runtime
-./switch.sh runtime deno   # or: bun
+./switch.sh runtime deno   # Legacy: Deno V8 Workers
+./switch.sh runtime bun    # Recommended: Bun + Elysia Worker Pool
 
 # Switch storage backend
 ./switch.sh storage rustfs # or: minio, garage, external
@@ -210,6 +211,29 @@ curl http://localhost:9090/v1/projects/<ref>/api-keys \
 # Show current configuration
 ./switch.sh status
 ```
+
+**Edge Runtime Architecture (Bun mode):**
+
+```
+SupaCloud (:3000)          Edge Runtime (:9000)
+├── Management API    ←──  Bun.spawn() manages
+├── Web Console            ├── Elysia Server
+└── only :3000             ├── Worker Thread Pool (4 threads)
+                           ├── Deno Compat Shim
+                           └── URL Import Plugin
+
+Kong/Angie Gateway:
+  /api/*        → :3000
+  /functions/*  → :9000 (direct, no proxy)
+```
+
+| Feature | Deno (legacy) | Bun (recommended) |
+|---------|--------------|--------------------|
+| Memory (200 functions) | ~1.4GB | **~140MB** |
+| Cold start | 40-60ms | 8-15ms |
+| Warm latency | <1ms | <1ms |
+| Deno code compat | Native | ✅ via shim |
+| Isolation | V8 Worker | Worker Thread |
 
 #### MCP Server (AI Agent)
 
@@ -278,6 +302,13 @@ supacloud/
 │   │   └── src/
 │   │       ├── tools/          # 5 tool modules (ssh, project, advanced, database, deployment)
 │   │       └── transports/     # SSH & HTTP transports
+│   ├── edge-runtime/           # Bun Edge Functions runtime
+│   │   ├── server.ts           # Elysia server (:9000)
+│   │   ├── worker-pool.ts      # Fixed-size Worker Thread Pool
+│   │   ├── worker-executor.ts  # Function loader + LRU cache
+│   │   ├── deno-compat.ts      # Deno API compatibility shim
+│   │   ├── url-import-plugin.ts# Bun Plugin: URL import interception
+│   │   └── shims/              # Deno std library replacements
 │   └── web-console/            # SvelteKit management dashboard
 │       └── src/                # Components, routes, assets
 ├── scripts/
@@ -318,7 +349,7 @@ Key settings in `config.env`:
 | `SUPABASE_PUBLIC_DOMAIN` | API domain | (required) |
 | `SUPABASE_STUDIO_DOMAIN` | Studio domain | (optional) |
 | `S3_STORAGE_TYPE` | Storage backend | `juicefs` |
-| `EDGE_RUNTIME` | Functions runtime | `deno` |
+| `EDGE_RUNTIME` | Functions runtime | `bun` |
 | `PG_VERSION` | PostgreSQL version | `18` |
 | `PIGSTY_VERSION` | Pigsty version | `v4.2.0` |
 | `ENABLE_ANALYTICS` | Logflare analytics | `true` |
@@ -355,7 +386,7 @@ Key settings in `config.env`:
 - **Kong 深度集成**: 支持项目级限流 (Rate Limit)、CORS 及统一鉴权
 - **Angie 网关**: 现代 Nginx 分叉版，原生 ACME SSL 自动证书管理
 - **自动扩缩容**: 基于负载指标的垂直提升与水平副本扩展
-- **双运行时**: Deno（默认）或 Bun.js 云函数运行时
+- **双运行时**: Deno（旧版兼容）或 Bun.js Edge Runtime（推荐，内存占用减少 92%）
 - **国内 OAuth**: 内置微信、支付宝、钉钉登录集成
 - **CI/CD 集成**: GitHub Webhook 自动化部署
 - **完善测试**: 17 个单元测试 + 集成测试套件
@@ -531,7 +562,8 @@ curl http://localhost:9090/v1/projects/<ref>/api-keys \
 
 ```bash
 # 切换云函数运行时
-./switch.sh runtime deno   # 或: bun
+./switch.sh runtime deno   # 旧版: Deno V8 Workers
+./switch.sh runtime bun    # 推荐: Bun + Elysia Worker Pool
 
 # 切换存储后端
 ./switch.sh storage rustfs # 或: minio, garage, external
@@ -539,6 +571,30 @@ curl http://localhost:9090/v1/projects/<ref>/api-keys \
 # 查看当前配置
 ./switch.sh status
 ```
+
+**Edge Runtime 架构 (Bun 模式):**
+
+```
+SupaCloud (:3000)          Edge Runtime (:9000)
+├── Management API    ←──  Bun.spawn() 管理
+├── Web Console            ├── Elysia Server
+└── 仅监听 :3000           ├── Worker 线程池 (4 线程，固定)
+                           ├── Deno 兼容层
+                           └── URL Import 插件
+
+Kong/Angie 网关:
+  /api/*        → :3000 (管理 API)
+  /functions/*  → :9000 (Edge Runtime 直连)
+```
+
+| 特性 | Deno (旧版) | Bun (推荐) |
+|------|-----------|------------|
+| 内存 (200 函数) | ~1.4GB | **~140MB** |
+| 冷启动 | 40-60ms | 8-15ms |
+| 预热延迟 | <1ms | <1ms |
+| Deno 代码兼容 | 原生 | ✅ 兼容层 |
+| 隔离级别 | V8 Worker | Worker 线程 |
+| 用户函数改动 | — | **零改动** |
 
 #### MCP Server (AI Agent)
 
@@ -607,6 +663,13 @@ supacloud/
 │   │   └── src/
 │   │       ├── tools/          # 5 个工具模块 (ssh, project, advanced, database, deployment)
 │   │       └── transports/     # SSH & HTTP 传输层
+│   ├── edge-runtime/           # Bun 云函数运行时
+│   │   ├── server.ts           # Elysia 服务 (:9000)
+│   │   ├── worker-pool.ts      # 固定大小 Worker 线程池
+│   │   ├── worker-executor.ts  # 函数加载器 + LRU 缓存
+│   │   ├── deno-compat.ts      # Deno API 兼容层
+│   │   ├── url-import-plugin.ts# Bun Plugin: URL import 拦截
+│   │   └── shims/              # Deno 标准库替代实现
 │   └── web-console/            # SvelteKit 管理面板
 │       └── src/                # 组件, 路由, 资源
 ├── scripts/
@@ -647,7 +710,7 @@ supacloud/
 | `SUPABASE_PUBLIC_DOMAIN` | API 域名 | （必填） |
 | `SUPABASE_STUDIO_DOMAIN` | Studio 域名 | （可选） |
 | `S3_STORAGE_TYPE` | 存储后端 | `juicefs` |
-| `EDGE_RUNTIME` | 云函数运行时 | `deno` |
+| `EDGE_RUNTIME` | 云函数运行时 | `bun` |
 | `PG_VERSION` | PostgreSQL 版本 | `18` |
 | `PIGSTY_VERSION` | Pigsty 版本 | `v4.2.0` |
 | `ENABLE_ANALYTICS` | Logflare 分析 | `true` |

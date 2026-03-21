@@ -130,7 +130,7 @@ export class ProjectService {
 
     // 2. Asynchronously provision resources (background)
     this.provisionResources(projectRef, dbPassword, request.domain).catch((error) => {
-      console.error(`Failed to provision resources for ${projectRef}:`, error);
+      logger.error(`Failed to provision resources for ${projectRef}:`, { error: error instanceof Error ? error.message : String(error) });
     });
 
     return this.toResponse(project);
@@ -142,7 +142,7 @@ export class ProjectService {
       // Start Saga by enqueuing the first task
       await taskRepository.createTask(projectRef, "provision_db", { dbPassword, domain });
       logger.info(`[Saga] Initiated resource provisioning for project ${projectRef}`);
-    } catch (error) {
+    } catch (error: unknown) {
       logger.error(`Failed to initiate saga for ${projectRef}:`, error as Error);
       await projectRepository.updateStatus(projectRef, "paused");
     }
@@ -158,7 +158,7 @@ export class ProjectService {
 
     // Asynchronously cleanup resources
     this.cleanupResources(ref).catch((error) => {
-      console.error(`Failed to cleanup resources for ${ref}:`, error);
+      logger.error(`Failed to cleanup resources for ${ref}:`, { error: error instanceof Error ? error.message : String(error) });
     });
 
     return true;
@@ -209,7 +209,8 @@ export class ProjectService {
         const { $ } = await import("bun");
         const result = await $`systemctl is-active ${unitName}`.nothrow().quiet();
         return result.exitCode === 0 ? "ACTIVE_HEALTHY" : "INACTIVE";
-      } catch {
+      } catch (err: unknown) {
+        logger.warn("[] import failed silently", { error: err });
         return "INACTIVE";
       }
     };
@@ -241,7 +242,7 @@ export class ProjectService {
     try {
       await taskRepository.createTask(projectRef, "cleanup_runtime");
       logger.info(`[Saga] Initiated resource cleanup for project ${projectRef}`);
-    } catch (error) {
+    } catch (error: unknown) {
       logger.error(`Cleanup saga initiation error for ${projectRef}:`, error as Error);
     }
   }
@@ -355,7 +356,8 @@ export class ProjectService {
         status: "ACTIVE",
         created_at: new Date().toISOString(),
       }));
-    } catch {
+    } catch (err: unknown) {
+      logger.warn("[] Date failed silently", { error: err });
       return [];
     }
   }
@@ -441,8 +443,8 @@ export class ProjectService {
               rawOutputs.push({ source: sourceName, jsonStr: line });
             }
           }
-        } catch (e: any) {
-          logger.error(`Error fetching journal for ${unitName}`, { error: e.message || String(e) });
+        } catch (e: unknown) {
+          logger.error(`Error fetching journal for ${unitName}`, { error: (e instanceof Error ? e.message : String(e)) || String(e) });
         }
       };
 
@@ -463,7 +465,7 @@ export class ProjectService {
               rawOutputs.push({ source: "database", jsonStr: line });
             }
           }
-        } catch (e) { /* ignore */ }
+        } catch (e: unknown) { /* ignore */ }
       }
 
       if (rawOutputs.length === 0) {
@@ -511,7 +513,7 @@ export class ProjectService {
               ]
             }
           });
-        } catch (je) {
+        } catch (je: unknown) {
           // Skip unparseable lines
         }
       }
@@ -521,8 +523,8 @@ export class ProjectService {
 
       // Return top LIMIT
       return parsedLogs.slice(0, limit);
-    } catch (e: any) {
-      logger.error(`Failed to get real logs for ${ref}`, e);
+    } catch (e: unknown) {
+      logger.error(`Failed to get real logs for ${ref}`, { error: e instanceof Error ? e.message : String(e) });
       return [];
     }
   }
@@ -564,7 +566,8 @@ export class ProjectService {
     if (!result.success) return [];
     try {
       return JSON.parse(result.output);
-    } catch {
+    } catch (err: unknown) {
+      logger.warn("[] shellService.execute failed silently", { error: err });
       return [];
     }
   }

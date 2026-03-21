@@ -1,4 +1,5 @@
 import { $ } from "bun";
+import { logger } from "../utils/logger";
 import os from "node:os";
 
 /**
@@ -9,7 +10,7 @@ export class LoadBalancerManager {
      * Install and configure frontend proxy gateway with automatic ACME SSL capability
      */
     static async installAngie(studioDomain: string, apiDomain: string, enableSsl = true, acmeClient = "le") {
-        console.log(`[LoadBalancerManager] Installing Angie (SSL=${enableSsl}, Client=${acmeClient})...`);
+        logger.info(`[LoadBalancerManager] Installing Angie (SSL=${enableSsl}, Client=${acmeClient})...`);
 
         // 1. Handle existing Nginx (backup, stop, uninstall)
         if ((await $`which nginx`.nothrow()).exitCode === 0 ||
@@ -17,7 +18,7 @@ export class LoadBalancerManager {
 
             const backupDir = `/etc/nginx.bak.${Date.now()}`;
             if ((await $`test -d /etc/nginx`.nothrow()).exitCode === 0) {
-                console.log(`[LoadBalancerManager] Backing up existing Nginx config to ${backupDir} ...`);
+                logger.info(`[LoadBalancerManager] Backing up existing Nginx config to ${backupDir} ...`);
                 await $`cp -a /etc/nginx ${backupDir}`.nothrow();
             }
 
@@ -37,18 +38,18 @@ export class LoadBalancerManager {
         // 2. Call underlying native setup.sh (bash isolation required for RedHat DNF repo configuration)
         const setupScript = "/opt/supacloud/infra/angie/setup.sh";
         if ((await $`test -f ${setupScript}`.nothrow()).exitCode !== 0) {
-            console.warn(`[LoadBalancerManager] Setup script not found: ${setupScript}, skipping Angie installation.`);
+            logger.warn(`[LoadBalancerManager] Setup script not found: ${setupScript}, skipping Angie installation.`);
             return;
         }
 
         const res = await $`bash ${setupScript} --studio-domain ${studioDomain} --api-domain ${apiDomain} --acme-client ${acmeClient}`.nothrow();
         if (res.exitCode !== 0) {
-            console.warn("[LoadBalancerManager] Angie setup.sh execution failed", res.stderr.toString());
+            logger.warn("[LoadBalancerManager] Angie setup.sh execution failed", res.stderr.toString());
             return;
         }
 
         // 3. Inject global performance configuration (Gzip & Proxy Cache)
-        console.log("[LoadBalancerManager] Initializing Angie global performance configuration...");
+        logger.info("[LoadBalancerManager] Initializing Angie global performance configuration...");
         await $`mkdir -p /etc/angie/http.d`;
 
         const perfConf = `
@@ -71,6 +72,6 @@ proxy_cache_path /var/cache/angie/storage_render levels=1:2 keys_zone=render_cac
             await $`systemctl restart angie`.nothrow();
         }
 
-        console.log("[LoadBalancerManager] Angie configured successfully, proxy gateway is online.");
+        logger.info("[LoadBalancerManager] Angie configured successfully, proxy gateway is online.");
     }
 }

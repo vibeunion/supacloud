@@ -31,13 +31,13 @@
     { name: "log_min_duration_statement", label: "慢查询阈值 (ms)", group: "日志", desc: "超过此耗时的语句将被记录（-1 禁用）" },
   ];
 
-  let settings: Record<string, PgSetting> = $state({});
-  let editValues: Record<string, string> = $state({});
+  let settings: Record<string, PgSetting> = $state.raw({});
+  let editValues: Record<string, string> = $state.raw({});
   let isLoading = $state(true);
   let isSaving = $state(false);
-  let saveMsg: string | null = $state(null);
+  let saveMsg: string | null = $state.raw(null);
 
-  async function runSql(sql: string): Promise<any[]> {
+  async function runSql(sql: string): Promise<Record<string, unknown>[]> {
     try {
       const res = await apiClient("/v1/projects/default/database/sql", {
         method: "POST",
@@ -56,8 +56,8 @@
     const map: Record<string, PgSetting> = {};
     const vals: Record<string, string> = {};
     for (const row of rows) {
-      map[row.name] = row;
-      vals[row.name] = row.setting;
+      map[row.name as string] = row as unknown as PgSetting;
+      vals[row.name as string] = row.setting as string;
     }
     settings = map;
     editValues = vals;

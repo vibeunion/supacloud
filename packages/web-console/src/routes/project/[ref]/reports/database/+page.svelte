@@ -4,9 +4,10 @@
   import { onMount } from "svelte";
   import { page } from "$app/state";
   import { Loader2, Database, ArrowLeft, HardDrive, Activity } from "lucide-svelte";
+  import { toast } from "svelte-sonner";
 
-  let dbStats = $state<any[]>([]);
-  let tableStats = $state<any[]>([]);
+  let dbStats = $state<Record<string, unknown>[]>([]);
+  let tableStats = $state<Record<string, unknown>[]>([]);
   let isLoading = $state(true);
 
   const projectRef = $derived(page.params.ref);
@@ -57,8 +58,8 @@
       });
       const data2 = await res2.json();
       tableStats = Array.isArray(data2) ? data2 : data2.rows || [];
-    } catch (err) {
-      console.error("Failed to fetch DB stats:", err);
+    } catch (err: unknown) {
+      toast.error("无法fetch DB stats");
     } finally {
       isLoading = false;
     }
@@ -66,7 +67,7 @@
 
   onMount(() => { fetchDbStats(); });
 
-  function formatNum(n: any): string {
+  function formatNum(n: unknown): string {
     return new Intl.NumberFormat().format(Number(n) || 0);
   }
 </script>

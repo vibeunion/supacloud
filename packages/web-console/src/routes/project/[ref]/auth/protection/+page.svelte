@@ -4,6 +4,7 @@
   import { onMount } from "svelte";
   import { page } from "$app/state";
   import { Shield, Ban, AlertTriangle, Globe, Lock, Loader2 } from "lucide-svelte";
+  import { toast } from "svelte-sonner";
 
   const projectRef = $derived(page.params.ref);
 
@@ -11,7 +12,7 @@
     key: string;
     name: string;
     description: string;
-    icon: any;
+    icon: typeof import('lucide-svelte').Shield;
     enabled: boolean;
     detail: string;
   }
@@ -41,8 +42,8 @@
           }
         }
       }
-    } catch (err) {
-      console.error("Failed to fetch protection config", err);
+    } catch (err: unknown) {
+      toast.error("无法fetch protection config");
     } finally {
       isLoading = false;
     }
@@ -73,7 +74,7 @@
       } else {
         throw new Error("Failed to save");
       }
-    } catch (err) {
+    } catch (err: unknown) {
       // Revert on failure
       cfg.enabled = originalValue;
       saveMsg = `❌ 保存失败`;

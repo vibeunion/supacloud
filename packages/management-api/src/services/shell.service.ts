@@ -1,4 +1,7 @@
+interface ShellError extends Error { stdout: Buffer; stderr: Buffer; }
+
 import { $ } from "bun";
+import { logger } from "../utils/logger";
 import { config } from "../config";
 
 export class ShellService {
@@ -28,11 +31,11 @@ export class ShellService {
     try {
       const result = await $`bash ${scriptPath} ${args}`.env(env).text();
       return { success: true, output: result.trim() };
-    } catch (error: any) {
+    } catch (error: unknown) {
       return {
         success: false,
         output: "",
-        error: error.stderr?.toString() || error.message || "Unknown error",
+        error: (error as ShellError).stderr?.toString() || (error instanceof Error ? error.message : String(error)) || "Unknown error",
       };
     }
   }
@@ -43,13 +46,13 @@ export class ShellService {
       // Safe execution using Bun Shell's built-in argument escaping
       const result = await $`${command} ${args}`.text();
       return { success: true, output: result.trim() };
-    } catch (error: any) {
-      const stderr = error.stderr?.toString() || "";
-      const stdout = error.stdout?.toString() || "";
+    } catch (error: unknown) {
+      const stderr = (error as ShellError).stderr?.toString() || "";
+      const stdout = (error as ShellError).stdout?.toString() || "";
       return {
         success: false,
         output: stdout + stderr,
-        error: stderr || error.message || "Command failed",
+        error: stderr || (error instanceof Error ? error.message : String(error)) || "Command failed",
       };
     }
   }
@@ -60,7 +63,8 @@ export class ShellService {
     try {
       await $`test -f ${scriptPath}`;
       return true;
-    } catch {
+    } catch (err: unknown) {
+      logger.warn("[] scriptExists failed silently", { error: err });
       return false;
     }
   }

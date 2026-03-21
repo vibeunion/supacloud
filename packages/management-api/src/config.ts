@@ -1,3 +1,19 @@
+import { logger } from "./utils/logger";
+
+interface Config {
+  port: number;
+  databaseUrl: string;
+  masterToken: string;
+  scriptsPath: string;
+  pigstyPath: string;
+  nginxSitesPath: string;
+  s3Endpoint: string;
+  s3Region: string;
+  baseDomain: string;
+  studioUsername: string;
+  studioPassword: string;
+}
+
 function loadEnvFile(path: string): Record<string, string> {
   try {
     // Use Bun.spawnSync to call cat directly, leveraging OS cache and completely avoiding Node.js fs module
@@ -16,7 +32,8 @@ function loadEnvFile(path: string): Record<string, string> {
       }
     }
     return env;
-  } catch {
+  } catch (err: unknown) {
+    logger.warn("[] if failed silently", { error: err });
     return {};
   }
 }
@@ -58,7 +75,7 @@ export const config = {
   // Studio login credentials
   studioUsername: process.env.STUDIO_USERNAME || managementEnv.STUDIO_USERNAME || "admin",
   studioPassword: process.env.STUDIO_PASSWORD || managementEnv.STUDIO_PASSWORD || "supacloud",
-};
+} satisfies Config;
 
 // Add basic validation to prevent invalid configuration from crashing downstream
 function validateConfig() {
@@ -66,7 +83,7 @@ function validateConfig() {
     throw new Error("Invalid or missing DATABASE_URL configuration. Must be a valid postgres DSN string.");
   }
   if (!config.masterToken || config.masterToken.length < 8) {
-    console.warn("WARNING: MASTER_TOKEN is dangerously short or missing. Set properly for production security.");
+    logger.warn("WARNING: MASTER_TOKEN is dangerously short or missing. Set properly for production security.");
   }
 }
 

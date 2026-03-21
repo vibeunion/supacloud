@@ -70,7 +70,7 @@ export class SshTransport {
                     port: this.config.port,
                     username: this.config.username,
                     ...(this.config.privateKeyPath
-                        ? { privateKey: Bun.file(this.config.privateKeyPath).stream() as any }
+                        ? { privateKey: Bun.file(this.config.privateKeyPath).stream() as unknown as Buffer }
                         : {}),
                     ...(this.config.password ? { password: this.config.password } : {}),
                 });
@@ -101,7 +101,7 @@ export class SshTransport {
                     port: this.config.port,
                     username: this.config.username,
                     ...(this.config.privateKeyPath
-                        ? { privateKey: Bun.file(this.config.privateKeyPath).stream() as any }
+                        ? { privateKey: Bun.file(this.config.privateKeyPath).stream() as unknown as Buffer }
                         : {}),
                     ...(this.config.password ? { password: this.config.password } : {}),
                 });

@@ -1,4 +1,5 @@
-import { Elysia, t } from "elysia";
+import { Elysia, t, status } from "elysia";
+import { logger } from "../utils/logger";
 import { projectService } from "../services";
 import { gatewayService } from "../services/gateway.service";
 import { tenantRuntimeService } from "../services/tenant-runtime.service";
@@ -74,8 +75,7 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params, set }) => {
       const project = await projectService.getProject(params.ref);
       if (!project) {
-        set.status = 404;
-        return { error: "Project not found" };
+                return status(404, { error: "Project not found" });
       }
 
       // Get real database version and connection count
@@ -92,7 +92,7 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
         dbSize = sizeResult[0]?.size || 0;
         const connectionResult = await projectDb`SELECT count(*) as count FROM pg_stat_activity WHERE state = 'active'`;
         connectionCount = connectionResult[0]?.count || 0;
-      } catch (e) {
+      } catch (e: unknown) {
         // Ignore database errors
       }
 
@@ -102,7 +102,8 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
           const result = await Bun.$`systemctl is-active ${serviceName} 2>/dev/null || echo "inactive"`.quiet();
           const status = result.text().trim();
           return status === "active" ? "ACTIVE_HEALTHY" : "INACTIVE";
-        } catch {
+        } catch (err: unknown) {
+          logger.warn("[] async failed silently", { error: err });
           return "INACTIVE";
         }
       };
@@ -126,15 +127,15 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
         name: project.name,
         status: project.status?.toUpperCase() || "ACTIVE_HEALTHY",
         region: project.region || "local",
-        organization_id: (project as any).organization_id || "default",
-        cloud_provider: (project as any).cloud_provider || "localhost",
+        organization_id: (project as unknown as Record<string, unknown>).organization_id || "default",
+        cloud_provider: (project as unknown as Record<string, unknown>).cloud_provider || "localhost",
         created_at: project.created_at,
         updated_at: project.updated_at,
         // Studio-specific fields
         database: {
           identifier: project.database?.name || `supa_${project.ref}`,
           host: project.database?.host || "localhost",
-          port: (project.database as any)?.port || 5432,
+          port: (project.database as unknown as Record<string, unknown>)?.port || 5432,
           version: dbVersion,
           postgres_engine: dbVersion.split(".")[0] + "." + dbVersion.split(".")[1],
           release_channel: "stable",
@@ -165,8 +166,7 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params, body, set }) => {
       const updated = await projectService.updateProject(params.ref, body);
       if (!updated) {
-        set.status = 404;
-        return { error: "Project not found" };
+                return status(404, { error: "Project not found" });
       }
       return { ref: params.ref };
     },
@@ -186,8 +186,7 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params, set }) => {
       const deleted = await projectService.deleteProject(params.ref);
       if (!deleted) {
-        set.status = 404;
-        return { error: "Project not found" };
+                return status(404, { error: "Project not found" });
       }
       return { ref: params.ref };
     },
@@ -204,8 +203,7 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params, set }) => {
       const paused = await projectService.pauseProject(params.ref);
       if (!paused) {
-        set.status = 404;
-        return { error: "Project not found" };
+                return status(404, { error: "Project not found" });
       }
       return { ref: params.ref, status: "paused" };
     },
@@ -222,8 +220,7 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params, set }) => {
       const restored = await projectService.restoreProject(params.ref);
       if (!restored) {
-        set.status = 404;
-        return { error: "Project not found" };
+                return status(404, { error: "Project not found" });
       }
       return { ref: params.ref, status: "active" };
     },
@@ -240,8 +237,7 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params, set }) => {
       const health = await projectService.getProjectHealth(params.ref);
       if (!health) {
-        set.status = 404;
-        return { error: "Project not found" };
+                return status(404, { error: "Project not found" });
       }
       return health;
     },
@@ -256,12 +252,11 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
   .get(
     "/:ref/status",
     async ({ params, set }) => {
-      const status = await projectService.getProjectStatus(params.ref);
-      if (!status) {
-        set.status = 404;
-        return { error: "Project not found" };
+      const projectStatus = await projectService.getProjectStatus(params.ref);
+      if (!projectStatus) {
+                return status(404, { error: "Project not found" });
       }
-      return status;
+      return projectStatus;
     },
     {
       params: t.Object({
@@ -276,8 +271,7 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params, set }) => {
       const project = await projectService.getProject(params.ref);
       if (!project) {
-        set.status = 404;
-        return { error: "Project not found" };
+                return status(404, { error: "Project not found" });
       }
       // Return simulated basic metrics to make Studio dashboard work
       return {
@@ -302,8 +296,7 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params, set }) => {
       const restarted = await projectService.restartProject(params.ref);
       if (!restarted) {
-        set.status = 404;
-        return { error: "Project not found" };
+                return status(404, { error: "Project not found" });
       }
       return { ref: params.ref, message: "Project restart initiated" };
     },
@@ -351,9 +344,9 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
             ? `Service ${service} ${action} succeeded`
             : `Service ${service} ${action} failed (exit code: ${result.exitCode})`,
         };
-      } catch (err: any) {
+      } catch (err: unknown) {
         set.status = 500;
-        return { error: `Failed to ${action} ${service}: ${err.message}` };
+        return { error: `Failed to ${action} ${service}: ${err instanceof Error ? err.message : String(err)}` };
       }
     },
     {
@@ -371,8 +364,7 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params, set }) => {
       const settings = await projectService.getProjectSettings(params.ref);
       if (settings === null) {
-        set.status = 404;
-        return { error: "Project not found" };
+                return status(404, { error: "Project not found" });
       }
       return settings;
     },
@@ -389,8 +381,7 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params, body, set }) => {
       const settings = await projectService.updateProjectSettings(params.ref, body);
       if (settings === null) {
-        set.status = 404;
-        return { error: "Project not found" };
+                return status(404, { error: "Project not found" });
       }
       return settings;
     },
@@ -408,8 +399,7 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params, set }) => {
       const keys = await projectService.getApiKeys(params.ref);
       if (!keys) {
-        set.status = 404;
-        return { error: "Project not found" };
+                return status(404, { error: "Project not found" });
       }
       return keys;
     },
@@ -426,8 +416,7 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params, set }) => {
       const keys = await projectService.rotateApiKeys(params.ref);
       if (!keys) {
-        set.status = 404;
-        return { error: "Project not found" };
+                return status(404, { error: "Project not found" });
       }
       return keys;
     },
@@ -475,8 +464,7 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params, body, set }) => {
       const success = await projectService.restoreBackup(params.ref, body.backup_id);
       if (!success) {
-        set.status = 500;
-        return { error: "Failed to restore backup" };
+                return status(500, { error: "Failed to restore backup" });
       }
       return { success: true };
     },
@@ -496,8 +484,7 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params, body, set }) => {
       const success = await projectService.updateNetworkRestrictions(params.ref, body.allowed_address_ranges);
       if (!success) {
-        set.status = 500;
-        return { error: "Failed to update network restrictions" };
+                return status(500, { error: "Failed to update network restrictions" });
       }
       return { success: true };
     },
@@ -517,8 +504,7 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params, set }) => {
       const domainInfo = await projectService.getCustomDomain(params.ref);
       if (!domainInfo) {
-        set.status = 404;
-        return { error: "Project not found" };
+                return status(404, { error: "Project not found" });
       }
       return domainInfo;
     },
@@ -535,8 +521,7 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params, body, set }) => {
       const success = await projectService.addCustomDomain(params.ref, body.custom_hostname);
       if (!success) {
-        set.status = 500;
-        return { error: "Failed to add custom hostname" };
+                return status(500, { error: "Failed to add custom hostname" });
       }
       return { success: true };
     },
@@ -556,8 +541,7 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params, set }) => {
       const success = await projectService.deleteCustomDomain(params.ref);
       if (!success) {
-        set.status = 500;
-        return { error: "Failed to delete custom hostname" };
+                return status(500, { error: "Failed to delete custom hostname" });
       }
       return { success: true };
     },
@@ -574,8 +558,7 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params, set }) => {
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings) {
-        set.status = 404;
-        return { error: "Project not found" };
+                return status(404, { error: "Project not found" });
       }
 
       const authConfig = (settings.auth as Record<string, unknown>) || {};
@@ -585,7 +568,7 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
         ...authConfig,
         external: externalConfig,
         external_providers: Object.keys(externalConfig)
-          .filter(key => (externalConfig[key] as any)?.client_id)
+          .filter(key => (externalConfig[key] as Record<string, unknown>)?.client_id)
           .join(","),
       };
 
@@ -604,11 +587,10 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params, body, set }) => {
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings) {
-        set.status = 404;
-        return { error: "Project not found" };
+                return status(404, { error: "Project not found" });
       }
 
-      const currentAuth = (settings.auth as any) || {};
+      const currentAuth = (settings.auth as Record<string, unknown>) || {};
       const newAuth = typeof body === "object" ? body : {};
 
       const updated = await projectService.updateProjectSettings(params.ref, {
@@ -634,8 +616,7 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params, set }) => {
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings) {
-        set.status = 404;
-        return { error: "Project not found" };
+                return status(404, { error: "Project not found" });
       }
       return settings.database || {};
     },
@@ -653,7 +634,7 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings) return { error: "Project not found" };
 
-      const current = (settings.database as any) || {};
+      const current = (settings.database as Record<string, unknown>) || {};
       const updated = await projectService.updateProjectSettings(params.ref, {
         ...settings,
         database: { ...current, ...(typeof body === "object" ? body : {}) },
@@ -683,7 +664,7 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params, body, set }) => {
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings) return { error: "Project not found" };
-      const current = (settings.postgrest as any) || {};
+      const current = (settings.postgrest as Record<string, unknown>) || {};
       const updated = await projectService.updateProjectSettings(params.ref, {
         ...settings,
         postgrest: { ...current, ...(typeof body === "object" ? body : {}) },
@@ -713,7 +694,7 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params, body, set }) => {
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings) return { error: "Project not found" };
-      const current = (settings.storage as any) || {};
+      const current = (settings.storage as Record<string, unknown>) || {};
       const updated = await projectService.updateProjectSettings(params.ref, {
         ...settings,
         storage: { ...current, ...(typeof body === "object" ? body : {}) },
@@ -743,7 +724,7 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params, body, set }) => {
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings) return { error: "Project not found" };
-      const current = (settings.realtime as any) || {};
+      const current = (settings.realtime as Record<string, unknown>) || {};
       const updated = await projectService.updateProjectSettings(params.ref, {
         ...settings,
         realtime: { ...current, ...(typeof body === "object" ? body : {}) },
@@ -790,8 +771,7 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params, set }) => {
       const secrets = await projectService.getSecrets(params.ref);
       if (!secrets) {
-        set.status = 404;
-        return { error: "Project not found" };
+                return status(404, { error: "Project not found" });
       }
       return secrets;
     },
@@ -806,10 +786,9 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
   .post(
     "/:ref/secrets",
     async ({ params, body, set }) => {
-      const success = await projectService.upsertSecrets(params.ref, body as any);
+      const success = await projectService.upsertSecrets(params.ref, body as { name: string; value: string }[]);
       if (!success) {
-        set.status = 500;
-        return { error: "Failed to update secrets" };
+                return status(500, { error: "Failed to update secrets" });
       }
       return { success: true };
     },
@@ -832,8 +811,7 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params, set }) => {
       const success = await projectService.deleteSecret(params.ref, params.name);
       if (!success) {
-        set.status = 500;
-        return { error: "Failed to delete secret" };
+                return status(500, { error: "Failed to delete secret" });
       }
       return { success: true };
     },
@@ -865,8 +843,7 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params, set }) => {
       const code = await projectService.getFunctionCode(params.ref, params.slug);
       if (code === null) {
-        set.status = 404;
-        return { error: "Function not found" };
+                return status(404, { error: "Function not found" });
       }
       return { code };
     },
@@ -884,8 +861,7 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params, body, set }) => {
       const success = await projectService.deployFunction(params.ref, params.slug, body.code);
       if (!success) {
-        set.status = 500;
-        return { error: "Failed to deploy function" };
+                return status(500, { error: "Failed to deploy function" });
       }
       return { success: true };
     },
@@ -906,8 +882,7 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params, set }) => {
       const success = await projectService.deleteFunction(params.ref, params.slug);
       if (!success) {
-        set.status = 500;
-        return { error: "Failed to delete function" };
+                return status(500, { error: "Failed to delete function" });
       }
       return { success: true };
     },
@@ -924,14 +899,13 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     "/:ref/gateway/config",
     async ({ params, body, set }) => {
       const result = await gatewayService.applyConfig(params.ref, {
-        rateLimitTier: body.rate_limit_tier as any,
+        rateLimitTier: body.rate_limit_tier as "free" | "pro" | "enterprise" | undefined,
         corsOrigins: body.cors_origins,
         jwtEnabled: body.jwt_enabled,
         jwtSecret: body.jwt_secret
       });
       if (!result.success) {
-        set.status = 500;
-        return { error: result.message };
+                return status(500, { error: result.message });
       }
       return result;
     },

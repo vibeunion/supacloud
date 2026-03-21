@@ -19,10 +19,10 @@
     public: boolean;
   }
 
-  let status: StorageStatus | null = $state(null);
-  let buckets: BucketInfo[] = $state([]);
+  let status: StorageStatus | null = $state.raw(null);
+  let buckets: BucketInfo[] = $state.raw([]);
   let isLoading = $state(true);
-  let actionMsg: string | null = $state(null);
+  let actionMsg: string | null = $state.raw(null);
 
   // Migration form
   let showMigration = $state(false);
@@ -83,10 +83,10 @@
         })
       });
       const data = await res.json();
-      actionMsg = data.message ? `✅ ${data.message}` : "✅ 迁移任务已启动";
+      actionMsg = data instanceof Error ? data.message : String(data) ? `✅ ${data.message}` : "✅ 迁移任务已启动";
       showMigration = false;
-    } catch (err: any) {
-      actionMsg = `❌ ${err.message}`;
+    } catch (err: unknown) {
+      actionMsg = `❌ ${(err instanceof Error ? err.message : String(err))}`;
     } finally {
       isMigrating = false;
       setTimeout(() => actionMsg = null, 8000);
@@ -198,20 +198,20 @@
           </div>
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label class="text-xs font-semibold text-muted-foreground block mb-1">S3 Endpoint</label>
-              <input bind:value={migEndpoint} placeholder="https://s3.us-east-1.amazonaws.com" class="w-full px-3 py-2 text-xs font-mono rounded-md border bg-muted/30 focus:outline-none focus:ring-1 focus:ring-brand" />
+              <label for="a11y-routes-platform-storage--page-svelte-201" class="text-xs font-semibold text-muted-foreground block mb-1">S3 Endpoint</label>
+              <input id="a11y-routes-platform-storage--page-svelte-201" bind:value={migEndpoint} placeholder="https://s3.us-east-1.amazonaws.com" class="w-full px-3 py-2 text-xs font-mono rounded-md border bg-muted/30 focus:outline-none focus:ring-1 focus:ring-brand" />
             </div>
             <div>
-              <label class="text-xs font-semibold text-muted-foreground block mb-1">Bucket 名称</label>
-              <input bind:value={migBucket} placeholder="supacloud-storage" class="w-full px-3 py-2 text-xs font-mono rounded-md border bg-muted/30 focus:outline-none focus:ring-1 focus:ring-brand" />
+              <label for="a11y-routes-platform-storage--page-svelte-205" class="text-xs font-semibold text-muted-foreground block mb-1">Bucket 名称</label>
+              <input id="a11y-routes-platform-storage--page-svelte-205" bind:value={migBucket} placeholder="supacloud-storage" class="w-full px-3 py-2 text-xs font-mono rounded-md border bg-muted/30 focus:outline-none focus:ring-1 focus:ring-brand" />
             </div>
             <div>
-              <label class="text-xs font-semibold text-muted-foreground block mb-1">Access Key</label>
-              <input bind:value={migAccessKey} placeholder="AKIAIOSFODNN7EXAMPLE" class="w-full px-3 py-2 text-xs font-mono rounded-md border bg-muted/30 focus:outline-none focus:ring-1 focus:ring-brand" />
+              <label for="a11y-routes-platform-storage--page-svelte-209" class="text-xs font-semibold text-muted-foreground block mb-1">Access Key</label>
+              <input id="a11y-routes-platform-storage--page-svelte-209" bind:value={migAccessKey} placeholder="AKIAIOSFODNN7EXAMPLE" class="w-full px-3 py-2 text-xs font-mono rounded-md border bg-muted/30 focus:outline-none focus:ring-1 focus:ring-brand" />
             </div>
             <div>
-              <label class="text-xs font-semibold text-muted-foreground block mb-1">Secret Key</label>
-              <input bind:value={migSecretKey} type="password" placeholder="••••••••" class="w-full px-3 py-2 text-xs font-mono rounded-md border bg-muted/30 focus:outline-none focus:ring-1 focus:ring-brand" />
+              <label for="a11y-routes-platform-storage--page-svelte-213" class="text-xs font-semibold text-muted-foreground block mb-1">Secret Key</label>
+              <input id="a11y-routes-platform-storage--page-svelte-213" bind:value={migSecretKey} type="password" placeholder="••••••••" class="w-full px-3 py-2 text-xs font-mono rounded-md border bg-muted/30 focus:outline-none focus:ring-1 focus:ring-brand" />
             </div>
           </div>
           <button onclick={startMigration} disabled={isMigrating} class="px-4 py-2 text-xs font-semibold rounded-lg bg-brand text-white hover:bg-brand/90 transition-colors flex items-center gap-2 disabled:opacity-50">

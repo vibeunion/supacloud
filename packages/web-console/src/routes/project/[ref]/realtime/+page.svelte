@@ -50,7 +50,7 @@
         addSystemMessage("已连接到 Realtime 服务");
 
         // Join channel based on mode
-        const joinPayload: any = {};
+        const joinPayload: Record<string, unknown> = {};
         if (subMode === "postgres_changes" || subMode === "all") {
           joinPayload.config = {
             postgres_changes: [{ event: pgEvent, schema: "public", table: pgTable === "*" ? undefined : pgTable }]
@@ -84,7 +84,7 @@
             channel: channelName,
             event: "RAW",
             payload: event.data,
-            type: "system",
+            type: "system" as const,
           }, ...messages].slice(0, 200);
         }
       };
@@ -98,8 +98,8 @@
         isConnected = false;
         addSystemMessage("连接失败 — Realtime 服务可能未启动，请在「设置 → 服务控制」中检查");
       };
-    } catch (err: any) {
-      addSystemMessage(`连接异常: ${err.message}`);
+    } catch (err: unknown) {
+      addSystemMessage(`连接异常: ${(err instanceof Error ? err.message : String(err))}`);
     }
   }
 
@@ -118,11 +118,12 @@
     }, ...messages];
   }
 
-  function inferType(data: any): RealtimeMessage["type"] {
-    if (data.event === "phx_reply" || data.event === "phx_close" || data.event === "heartbeat") return "system";
-    if (data.event === "broadcast") return "broadcast";
-    if (data.event === "presence_diff" || data.event === "presence_state") return "presence";
-    if (data.payload?.type === "INSERT" || data.payload?.type === "UPDATE" || data.payload?.type === "DELETE") return "postgres_changes";
+  function inferType(data: unknown): RealtimeMessage["type"] {
+    const d = data as Record<string, unknown>;
+    if (d.event === "phx_reply" || d.event === "phx_close" || d.event === "heartbeat") return "system";
+    if (d.event === "broadcast") return "broadcast";
+    if (d.event === "presence_diff" || d.event === "presence_state") return "presence";
+    if ((d.payload as Record<string, unknown>)?.type === "INSERT" || (d.payload as Record<string, unknown>)?.type === "UPDATE" || (d.payload as Record<string, unknown>)?.type === "DELETE") return "postgres_changes";
     return "system";
   }
 
@@ -137,8 +138,8 @@
         ref: String(++msgId)
       }));
       addSystemMessage(`已发送 Broadcast: ${broadcastEvent}`);
-    } catch (err: any) {
-      addSystemMessage(`发送失败: ${err.message}`);
+    } catch (err: unknown) {
+      addSystemMessage(`发送失败: ${(err instanceof Error ? err.message : String(err))}`);
     }
   }
 

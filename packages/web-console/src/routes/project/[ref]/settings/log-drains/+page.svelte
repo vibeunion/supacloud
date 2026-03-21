@@ -153,7 +153,7 @@
               </div>
             </div>
             <div class="flex items-center gap-2">
-              <button onclick={() => toggleDrain(drain.id)}
+              <button aria-label="Toggle" onclick={() => toggleDrain(drain.id)}
                 class="relative w-10 h-5 rounded-full transition-colors {drain.enabled ? 'bg-brand' : 'bg-muted'}">
                 <span class="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform {drain.enabled ? 'translate-x-5' : ''}"></span>
               </button>
