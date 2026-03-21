@@ -33,7 +33,7 @@ function loadEnvFile(path: string): Record<string, string> {
     }
     return env;
   } catch (err: unknown) {
-    logger.warn("[] if failed silently", { error: err });
+    logger.warn("[Config] Failed to load config from override file", { error: err });
     return {};
   }
 }

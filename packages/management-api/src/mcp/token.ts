@@ -88,7 +88,7 @@ export async function verifyMcpToken(token: string): Promise<McpTokenPayload | n
     if (payload.exp < Date.now()) return null; // expired
     return payload;
   } catch (err: unknown) {
-    logger.warn("[] parse failed silently", { error: err });
+    logger.warn("[MCP] Failed to parse authentication token", { error: err });
     return null;
   }
 }
