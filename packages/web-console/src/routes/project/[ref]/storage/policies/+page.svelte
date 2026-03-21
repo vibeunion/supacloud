@@ -4,6 +4,7 @@
   import { onMount } from "svelte";
   import { page } from "$app/state";
   import { Loader2, Shield, Search } from "lucide-svelte";
+  import { toast } from "svelte-sonner";
 
   interface StoragePolicy {
     policyname: string;
@@ -53,8 +54,8 @@
       if (!data.error) {
         policies = Array.isArray(data) ? data : data.rows || [];
       }
-    } catch (err) {
-      console.error("Failed to fetch storage policies:", err);
+    } catch (err: unknown) {
+      toast.error("无法fetch storage policies");
     } finally {
       isLoading = false;
     }

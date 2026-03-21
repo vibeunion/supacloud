@@ -13,7 +13,7 @@ export const load: PageServerLoad = async ({ url }) => {
             return { users: [], count: 0 };
         }
 
-        const dbName = project.db_name || `supa_${project.ref}`;
+        const dbName = (project as unknown as Record<string, unknown>).db_name as string || `supa_${project.ref}`;
         
         // Fetch Users from auth.users (Standard Supabase Structure)
         const usersResult = await db.executeQuery(dbName, `
@@ -24,16 +24,19 @@ export const load: PageServerLoad = async ({ url }) => {
 
         return {
             project,
-            users: usersResult.rows.map((r: any) => ({
-                id: r.id,
-                email: r.email || r.phone || 'Anonymous',
-                last_sign_in_at: r.last_sign_in_at,
-                created_at: r.created_at,
-                metadata: r.raw_user_metadata || {}
-            })),
+            users: usersResult.rows.map((r) => {
+                const row = r as Record<string, unknown>;
+                return {
+                    id: row.id,
+                    email: String(row.email || row.phone || 'Anonymous'),
+                    last_sign_in_at: row.last_sign_in_at,
+                    created_at: row.created_at,
+                    metadata: row.raw_user_metadata || {}
+                };
+            }),
             count: usersResult.rowCount
         };
-    } catch (err) {
+    } catch (err: unknown) {
         console.error('Failed to load auth users:', err);
         return { users: [], count: 0 };
     }

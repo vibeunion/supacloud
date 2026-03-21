@@ -8,22 +8,22 @@
     id: string;
     name: string;
     desc: string;
-    icon: any;
+    icon: typeof import('lucide-svelte').RefreshCw;
     danger: boolean;
     fields: { key: string; label: string; placeholder: string; required: boolean }[];
     action: (params: Record<string, string>) => Promise<string>;
   }
 
-  let activeOp: string | null = $state(null);
-  let opParams: Record<string, string> = $state({});
+  let activeOp: string | null = $state.raw(null);
+  let opParams: Record<string, string> = $state.raw({});
   let isExecuting = $state(false);
-  let logs: { time: string; op: string; result: string; success: boolean }[] = $state([]);
+  let logs: { time: string; op: string; result: string; success: boolean }[] = $state.raw([]);
 
   // Health Check
-  let healthStatus: any = $state(null);
+  let healthStatus: unknown = $state.raw(null);
   let isCheckingHealth = $state(false);
 
-  async function apiCall(url: string, method: string = "GET", body?: any): Promise<any> {
+  async function apiCall(url: string, method: string = "GET", body?: unknown): Promise<Record<string, unknown>> {
     const opts: RequestInit = { method, headers: { "Content-Type": "application/json" } };
     if (body) opts.body = JSON.stringify(body);
     const res = await apiClient(url, opts);
@@ -42,7 +42,7 @@
       ],
       action: async (params) => {
         const data = await apiCall("/v1/maintenance/reload", "POST", { ip: params.ip });
-        return data.message || JSON.stringify(data);
+        return String(data.message || JSON.stringify(data));
       }
     },
     {
@@ -60,7 +60,7 @@
           cluster: params.cluster || "db-main",
           candidate: params.candidate || undefined
         });
-        return data.message || JSON.stringify(data);
+        return String(data.message || JSON.stringify(data));
       }
     },
     {
@@ -74,7 +74,7 @@
       ],
       action: async (params) => {
         const data = await apiCall("/v1/maintenance/replicas", "POST", { ip: params.ip });
-        return data.message || JSON.stringify(data);
+        return String(data.message || JSON.stringify(data));
       }
     },
   ];
@@ -93,8 +93,8 @@
     try {
       const result = await op.action(opParams);
       addLog(op.name, result, true);
-    } catch (err: any) {
-      addLog(op.name, err.message, false);
+    } catch (err: unknown) {
+      addLog(op.name, (err instanceof Error ? err.message : String(err)), false);
     } finally {
       isExecuting = false;
     }
@@ -112,8 +112,8 @@
       const data = await apiCall("/monitor/health");
       healthStatus = data;
       addLog("健康检查", "检查完成", true);
-    } catch (err: any) {
-      addLog("健康检查", err.message, false);
+    } catch (err: unknown) {
+      addLog("健康检查", (err instanceof Error ? err.message : String(err)), false);
     }
     isCheckingHealth = false;
   }
@@ -190,10 +190,10 @@
           <div class="p-4 space-y-3">
             {#each op.fields as field}
               <div>
-                <label class="text-xs font-semibold text-muted-foreground block mb-1">
+                <label for="a11y-routes-platform-operations--page-svelte-193" class="text-xs font-semibold text-muted-foreground block mb-1">
                   {field.label} {#if field.required}<span class="text-red-500">*</span>{/if}
                 </label>
-                <input
+                <input id="a11y-routes-platform-operations--page-svelte-193"
                   bind:value={opParams[field.key]}
                   placeholder={field.placeholder}
                   class="w-full px-3 py-2 text-xs font-mono rounded-md border bg-muted/30 focus:outline-none focus:ring-1 focus:ring-brand"

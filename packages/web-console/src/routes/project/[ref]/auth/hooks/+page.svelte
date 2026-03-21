@@ -66,8 +66,8 @@
         body: JSON.stringify(payload)
       });
       saveMsg = res.ok ? "✅ Auth Hooks 配置已保存（GoTrue 将重启）" : `❌ 保存失败`;
-    } catch (err: any) {
-      saveMsg = `❌ 保存失败: ${err.message}`;
+    } catch (err: unknown) {
+      saveMsg = `❌ 保存失败: ${(err instanceof Error ? err.message : String(err))}`;
     } finally {
       saving = false;
       setTimeout(() => saveMsg = null, 4000);
@@ -138,7 +138,7 @@
                   <h4 class="text-sm font-semibold">启用该 Hook</h4>
                   <p class="text-[10px] text-muted-foreground mt-0.5">打开此开关后，认证系统会路由到下方配置的端点</p>
                 </div>
-                <button onclick={() => hook.enabled = !hook.enabled}
+                <button aria-label="Action button" onclick={() => hook.enabled = !hook.enabled}
                   class="relative w-10 h-5 rounded-full transition-colors {hook.enabled ? 'bg-brand' : 'bg-muted'}">
                   <span class="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform {hook.enabled ? 'translate-x-5' : ''}"></span>
                 </button>

@@ -19,7 +19,7 @@ export class TaskWorker {
     start(intervalMs = 10000) {
         if (this.isRunning) return;
         this.isRunning = true;
-        console.log("Starting Task Worker...");
+        logger.info("Starting Task Worker...");
 
         // Primary: event-driven via PostgreSQL LISTEN/NOTIFY
         try {
@@ -31,8 +31,8 @@ export class TaskWorker {
                     this.poll();
                 },
             });
-        } catch (err) {
-            logger.warn(`[TaskWorker] Failed to start pg-listen, falling back to polling only:`, err as Error);
+        } catch (err: unknown) {
+            logger.warn(`[TaskWorker] Failed to start pg-listen, falling back to polling only`, { error: err instanceof Error ? err.message : String(err) });
         }
 
         // Fallback: 10s safety-net polling (increased from 3s since LISTEN is primary)
@@ -46,7 +46,7 @@ export class TaskWorker {
         if (this.intervalId) {
             clearInterval(this.intervalId);
         }
-        console.log("Task Worker stopped.");
+        logger.info("Task Worker stopped.");
     }
 
     private async poll() {
@@ -68,8 +68,8 @@ export class TaskWorker {
                 await taskRepository.updateStatus(task.id, "failed", "Task execution failed");
                 await this.handleTaskFailure(task);
             }
-        } catch (err: any) {
-            logger.error(`[TaskWorker] Error processing task loop:`, err);
+        } catch (err: unknown) {
+            logger.error(`[TaskWorker] Error processing task loop`, { error: err instanceof Error ? err.message : String(err) });
         } finally {
             this.isProcessing = false;
         }
@@ -83,7 +83,7 @@ export class TaskWorker {
 
         const project = await projectRepository.findByRef(project_ref);
         if (!project && !isCleanupTask) {
-            console.error(`[TaskWorker] Project ${project_ref} not found for task ${task.id}`);
+            logger.error(`[TaskWorker] Project ${project_ref} not found for task ${task.id}`);
             return false;
         }
 
@@ -91,12 +91,12 @@ export class TaskWorker {
             switch (task_type) {
                 case "provision_db": {
                     if (!project) {
-                        console.error(`[TaskWorker] Project ${project_ref} not found for provision_db`);
+                        logger.error(`[TaskWorker] Project ${project_ref} not found for provision_db`);
                         return false;
                     }
                     const res = await databaseService.createDatabase(project_ref, project.db_password);
                     if (!res.success) {
-                        console.error(`[TaskWorker] provision_db failed for ${project_ref}:`, res.error);
+                        logger.error(`[TaskWorker] provision_db failed for ${project_ref}`, { error: res.error });
                         await taskRepository.updateTaskError(task.id, res.error || "Unknown error");
                     }
                     return res.success;
@@ -104,7 +104,7 @@ export class TaskWorker {
 
                 case "provision_s3": {
                     if (!project) {
-                        console.error(`[TaskWorker] Project ${project_ref} not found for provision_s3`);
+                        logger.error(`[TaskWorker] Project ${project_ref} not found for provision_s3`);
                         return false;
                     }
                     const res = await storageService.createBucket(project_ref);
@@ -120,7 +120,7 @@ export class TaskWorker {
 
                 case "provision_runtime": {
                     if (!project) {
-                        console.error(`[TaskWorker] Project ${project_ref} not found for provision_runtime`);
+                        logger.error(`[TaskWorker] Project ${project_ref} not found for provision_runtime`);
                         return false;
                     }
                     // Start tenant-specific PostgREST process
@@ -133,14 +133,14 @@ export class TaskWorker {
                     const port = portMatch ? portMatch[1] : "";
                     const gotruePort = gotruePortMatch ? gotruePortMatch[1] : "";
                     if (!port || !gotruePort) {
-                        console.error(`[TaskWorker] Cannot determine PostgREST/GoTrue port for ${project_ref}`);
+                        logger.error(`[TaskWorker] Cannot determine PostgREST/GoTrue port for ${project_ref}`);
                         return false;
                     }
 
                     // Register this tenant's independent upstream in Kong (declarative)
                     const upstreamRes = await databaseService.setupUpstream(project_ref, port, gotruePort);
                     if (!upstreamRes.success) {
-                        console.error(`[TaskWorker] Failed to setup Kong upstream for ${project_ref}`);
+                        logger.error(`[TaskWorker] Failed to setup Kong upstream for ${project_ref}`);
                         return false;
                     }
 
@@ -151,7 +151,7 @@ export class TaskWorker {
                         gotrue_port: parseInt(gotruePort),
                     });
 
-                    console.log(`[TaskWorker] Runtime started for ${project_ref} on ports (pgrst:${port}, gotrue:${gotruePort})`);
+                    logger.info(`[TaskWorker] Runtime started for ${project_ref} on ports (pgrst:${port}, gotrue:${gotruePort})`);
                     return true;
                 }
 
@@ -171,7 +171,7 @@ export class TaskWorker {
                     // Kong uses declarative config (KONG_DATABASE=off), Admin API is read-only.
                     // CORS and rate-limiting are already configured in the YAML template.
                     // This task is a no-op for now, but can be extended for other gateway configs.
-                    console.log(`[TaskWorker] Gateway config skipped for ${project_ref} (Kong declarative mode)`);
+                    logger.info(`[TaskWorker] Gateway config skipped for ${project_ref} (Kong declarative mode)`);
                     return true;
                 }
 
@@ -191,7 +191,7 @@ export class TaskWorker {
                     // Remove Kong Service/Route
                     try {
                         await gatewayService.removeService(project_ref);
-                    } catch (e) {
+                    } catch (e: unknown) {
                         logger.warn(`[TaskWorker] Gateway cleanup failed for ${project_ref} (non-fatal): ${e}`);
                     }
                     return true;
@@ -204,11 +204,11 @@ export class TaskWorker {
                 }
 
                 default:
-                    console.warn(`[TaskWorker] Unknown task type: ${task_type}`);
+                    logger.warn(`[TaskWorker] Unknown task type: ${task_type}`);
                     return false;
             }
-        } catch (err: any) {
-            console.error(`[TaskWorker] Error executing ${task_type} for ${project_ref}:`, err);
+        } catch (err: unknown) {
+            logger.error(`[TaskWorker] Error executing ${task_type} for ${project_ref}`, { error: err instanceof Error ? err.message : String(err) });
             return false;
         }
     }
@@ -229,7 +229,7 @@ export class TaskWorker {
         } else if (task_type === "provision_gateway") {
             // Final step completed, activate project
             await projectRepository.updateStatus(project_ref, "active");
-            console.log(`[TaskWorker] Project ${project_ref} fully provisioned and activated.`);
+            logger.info(`[TaskWorker] Project ${project_ref} fully provisioned and activated.`);
         } else if (task_type === "cleanup_runtime") {
             // After runtime cleanup, cleanup database
             await taskRepository.createTask(project_ref, "cleanup_db");
@@ -238,7 +238,7 @@ export class TaskWorker {
             await taskRepository.createTask(project_ref, "cleanup_router");
         } else if (task_type === "cleanup_router") {
             // Cleanup complete
-            console.log(`[TaskWorker] Project ${project_ref} fully cleaned up.`);
+            logger.info(`[TaskWorker] Project ${project_ref} fully cleaned up.`);
         }
     }
 

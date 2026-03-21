@@ -12,7 +12,7 @@
     columns: { name: string; type: string; nullable: boolean; default_val: string | null }[];
   }
 
-  let project = $state<any>(null);
+  let project = $state(null as Record<string, unknown> | null);
   let isLoading = $state(true);
   let copiedField = $state<string | null>(null);
   let endpoints = $state<TableEndpoint[]>([]);
@@ -55,7 +55,7 @@
       });
       const data = await res.json();
       const rows = Array.isArray(data) ? data : data.rows || [];
-      endpoints = rows.map((r: any) => ({
+      endpoints = rows.map((r: Record<string, unknown>) => ({
         table_name: r.table_name,
         table_schema: r.table_schema,
         columns: typeof r.columns === 'string' ? JSON.parse(r.columns) : r.columns || []
@@ -153,7 +153,7 @@ const { error: delErr } = await supabase
             </div>
             <div class="flex items-center gap-2">
               <code class="flex-1 p-2 rounded-lg bg-muted text-[10px] font-mono break-all max-h-16 overflow-hidden">{project?.anon_key || "N/A"}</code>
-              <button onclick={() => copyToClipboard(project?.anon_key || '', 'anon')} class="px-2 py-1.5 rounded border hover:bg-muted/50">
+              <button onclick={() => copyToClipboard(String(project?.anon_key || ''), 'anon')} class="px-2 py-1.5 rounded border hover:bg-muted/50">
                 {#if copiedField === 'anon'}<Check size={12} class="text-green-600" />{:else}<Copy size={12} />{/if}
               </button>
             </div>
@@ -165,7 +165,7 @@ const { error: delErr } = await supabase
             </div>
             <div class="flex items-center gap-2">
               <code class="flex-1 p-2 rounded-lg bg-muted text-[10px] font-mono break-all max-h-16 overflow-hidden" style="-webkit-text-security: disc;">{project?.service_role_key || project?.service_key || "N/A"}</code>
-              <button onclick={() => copyToClipboard(project?.service_role_key || project?.service_key || '', 'service')} class="px-2 py-1.5 rounded border hover:bg-muted/50">
+              <button onclick={() => copyToClipboard(String(project?.service_role_key || project?.service_key || ''), 'service')} class="px-2 py-1.5 rounded border hover:bg-muted/50">
                 {#if copiedField === 'service'}<Check size={12} class="text-green-600" />{:else}<Copy size={12} />{/if}
               </button>
             </div>

@@ -1,5 +1,10 @@
-import { describe, test, expect, mock, spyOn, afterEach, beforeEach } from "bun:test";
-import { MonitorService } from "../../src/services/monitor.service";
+import { describe, test, expect, mock, afterEach } from "bun:test";
+import * as MonitorService from "../../src/services/monitor.service";
+
+/** Type-safe mock for globalThis.fetch */
+function mockFetch(handler: (url: string) => Promise<Partial<Response>>): void {
+    globalThis.fetch = mock(handler) as unknown as typeof fetch;
+}
 
 describe("MonitorService", () => {
     const originalFetch = globalThis.fetch;
@@ -9,7 +14,7 @@ describe("MonitorService", () => {
     });
 
     test("getHealth should return formatted status", async () => {
-        globalThis.fetch = mock((url: string) => {
+        mockFetch((url: string) => {
             if (url.endsWith('/health')) {
                 return Promise.resolve({
                     ok: true,
@@ -17,7 +22,7 @@ describe("MonitorService", () => {
                 });
             }
             return Promise.reject(new Error("Unknown URL"));
-        }) as any;
+        });
 
         const status = await MonitorService.getHealth("1.2.3.4");
 
@@ -27,7 +32,7 @@ describe("MonitorService", () => {
     });
 
     test("getMetrics should aggregate and parse VM results", async () => {
-        globalThis.fetch = mock((url: string) => {
+        mockFetch((url: string) => {
             if (url.includes('/api/v1/query')) {
                 return Promise.resolve({
                     ok: true,
@@ -39,7 +44,7 @@ describe("MonitorService", () => {
                 });
             }
             return Promise.reject(new Error("Unknown URL"));
-        }) as any;
+        });
 
         const metrics = await MonitorService.getMetrics("1.2.3.4");
 
@@ -51,7 +56,7 @@ describe("MonitorService", () => {
     });
 
     test("getHealth should handle errors gracefully", async () => {
-        globalThis.fetch = mock(() => Promise.reject(new Error("Network Error"))) as any;
+        mockFetch(() => Promise.reject(new Error("Network Error")));
 
         const status = await MonitorService.getHealth("1.2.3.4");
         expect(status.status).toBe("unreachable");

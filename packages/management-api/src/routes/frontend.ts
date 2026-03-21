@@ -1,6 +1,7 @@
-import { Elysia, t } from "elysia";
+import { Elysia, t, status } from "elysia";
 import { frontendService } from "../services/frontend.service";
-import { FrontendFramework, FRAMEWORK_DEFAULTS } from "../types/frontend";
+import type { FrontendFramework } from "../types/frontend";
+import { FRAMEWORK_DEFAULTS } from "../types/frontend";
 
 export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" })
   .get(
@@ -21,8 +22,7 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
     async ({ params, set }) => {
       const deployment = await frontendService.getDeployment(params.ref, params.id);
       if (!deployment) {
-        set.status = 404;
-        return { error: "Deployment not found" };
+                return status(404, { error: "Deployment not found" });
       }
       return deployment;
     },
@@ -85,8 +85,7 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
       });
 
       if (!deployment) {
-        set.status = 404;
-        return { error: "Deployment not found" };
+                return status(404, { error: "Deployment not found" });
       }
 
       return deployment;
@@ -114,8 +113,7 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
     async ({ params, set }) => {
       const success = await frontendService.deleteDeployment(params.ref, params.id);
       if (!success) {
-        set.status = 404;
-        return { error: "Deployment not found" };
+                return status(404, { error: "Deployment not found" });
       }
       return { message: "Deployment deleted successfully" };
     },
@@ -132,8 +130,7 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
     async ({ params, body, set }) => {
       const deployment = await frontendService.getDeployment(params.ref, params.id);
       if (!deployment) {
-        set.status = 404;
-        return { error: "Deployment not found" };
+                return status(404, { error: "Deployment not found" });
       }
 
       const result = await frontendService.deployFromGit(
@@ -162,8 +159,7 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
     async ({ params, body, set }) => {
       const deployment = await frontendService.getDeployment(params.ref, params.id);
       if (!deployment) {
-        set.status = 404;
-        return { error: "Deployment not found" };
+                return status(404, { error: "Deployment not found" });
       }
 
       const tempDir = `/tmp/frontend-upload-${params.id}`;
@@ -200,8 +196,7 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
     async ({ params, set }) => {
       const deployment = await frontendService.getDeployment(params.ref, params.id);
       if (!deployment) {
-        set.status = 404;
-        return { error: "Deployment not found" };
+                return status(404, { error: "Deployment not found" });
       }
 
       const deploymentDir = `/var/supacloud/frontends/${params.ref}/${params.id}`;
@@ -237,8 +232,7 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
     async ({ params, body, set }) => {
       const deployment = await frontendService.setEnvVars(params.ref, params.id, body.env_vars);
       if (!deployment) {
-        set.status = 404;
-        return { error: "Deployment not found" };
+                return status(404, { error: "Deployment not found" });
       }
       return deployment;
     },
@@ -258,8 +252,7 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
     async ({ params, body, set }) => {
       const deployment = await frontendService.addCustomDomain(params.ref, params.id, body.domain);
       if (!deployment) {
-        set.status = 404;
-        return { error: "Deployment not found" };
+                return status(404, { error: "Deployment not found" });
       }
       return deployment;
     },
@@ -283,8 +276,7 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
         params.domain
       );
       if (!deployment) {
-        set.status = 404;
-        return { error: "Deployment not found" };
+                return status(404, { error: "Deployment not found" });
       }
       return deployment;
     },
@@ -315,8 +307,7 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
     async ({ params, body, set }) => {
       const result = await frontendService.createDeployToken(params.ref, params.id, body.name);
       if (!result) {
-        set.status = 404;
-        return { error: "Deployment not found" };
+                return status(404, { error: "Deployment not found" });
       }
       return result;
     },
@@ -350,8 +341,7 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
     async ({ params, set }) => {
       const success = await frontendService.deleteDeployToken(params.ref, params.id, params.tokenId);
       if (!success) {
-        set.status = 404;
-        return { error: "Token not found" };
+                return status(404, { error: "Token not found" });
       }
       return { message: "Token deleted successfully" };
     },
@@ -374,8 +364,7 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
         body.branch || "main"
       );
       if (!deployment) {
-        set.status = 404;
-        return { error: "Deployment not found" };
+                return status(404, { error: "Deployment not found" });
       }
       return deployment;
     },
@@ -410,8 +399,7 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
     async ({ params, set }) => {
       const record = await frontendService.getDeploymentRecord(params.ref, params.id, params.recordId);
       if (!record) {
-        set.status = 404;
-        return { error: "Record not found" };
+                return status(404, { error: "Record not found" });
       }
       return record;
     },

@@ -1,6 +1,36 @@
-import { Elysia, t } from "elysia";
+import { Elysia, t, status } from "elysia";
+import { logger } from "../utils/logger";
 import { frontendService } from "../services/frontend.service";
 import type { FrontendDeployment } from "../types/frontend";
+
+interface WebhookPayload {
+  ref?: string;
+  after?: string;
+  checkout_sha?: string;
+  repository?: {
+    full_name?: string;
+    git_http_url?: string;
+    clone_url?: string;
+    path_with_namespace?: string;
+    id?: string | number;
+  };
+  project?: {
+    git_http_url?: string;
+    path_with_namespace?: string;
+  };
+  head_commit?: { id?: string; message?: string };
+  hook_name?: string;
+  password?: string;
+  commits?: Array<{
+    id?: string;
+    message?: string;
+    modified?: string[];
+    added?: string[];
+    removed?: string[];
+  }>;
+  [key: string]: unknown;
+}
+
 
 interface GitHubPushEvent {
   ref: string;
@@ -64,7 +94,7 @@ async function verifyGitHubSignature(
 export const webhookRoutes = new Elysia({ prefix: "/v1/webhooks" })
   .post(
     "/github",
-    async ({ body, headers, set }) => {
+    async ({ body, headers }) => {
       const event = headers[WEBHOOK_EVENT_HEADER] || headers["x-github-event"];
       const signature = headers[WEBHOOK_SECRET_HEADER] || headers["x-hub-signature-256"];
 
@@ -153,12 +183,12 @@ export const webhookRoutes = new Elysia({ prefix: "/v1/webhooks" })
             url: buildResult.url,
             error: buildResult.error,
           });
-        } catch (error: any) {
+        } catch (error: unknown) {
           results.push({
             deployment_id: deployment.id,
             project_ref: deployment.project_ref,
             success: false,
-            error: error.message,
+            error: (error instanceof Error ? error.message : String(error)),
           });
         }
       }
@@ -179,11 +209,11 @@ export const webhookRoutes = new Elysia({ prefix: "/v1/webhooks" })
   // ─── GitLab Webhook ───
   .post(
     "/gitlab",
-    async ({ body, headers, set }) => {
+    async ({ body, headers }) => {
       const event = headers["x-gitlab-event"] || "";
       if (event !== "Push Hook") return { message: "Event ignored", event };
       
-      const payload = body as any;
+      const payload = body as WebhookPayload;
       const branch = (payload.ref || "").replace("refs/heads/", "");
       const gitUrl = payload.project?.git_http_url || payload.repository?.git_http_url || "";
       const commitSha = payload.checkout_sha || payload.after || "";
@@ -199,11 +229,11 @@ export const webhookRoutes = new Elysia({ prefix: "/v1/webhooks" })
   // ─── Gitee Webhook ───
   .post(
     "/gitee",
-    async ({ body, headers, set }) => {
-      const event = headers["x-gitee-event"] || (body as any)?.hook_name;
+    async ({ body, headers }) => {
+      const event = headers["x-gitee-event"] || (body as WebhookPayload)?.hook_name;
       if (event !== "push_hooks" && event !== "Push Hook") return { message: "Event ignored", event };
       
-      const payload = body as any;
+      const payload = body as WebhookPayload;
       const branch = (payload.ref || "").replace("refs/heads/", "");
       const gitUrl = payload.repository?.clone_url || payload.repository?.git_http_url || "";
       const commitSha = payload.after || payload.head_commit?.id || "";
@@ -219,11 +249,11 @@ export const webhookRoutes = new Elysia({ prefix: "/v1/webhooks" })
   // ─── GitCode (CSDN) Webhook ───
   .post(
     "/gitcode",
-    async ({ body, headers, set }) => {
+    async ({ body, headers }) => {
       const event = headers["x-gitcode-event"] || headers["x-gitlab-event"] || "";
       if (event !== "Push Hook" && event !== "push") return { message: "Event ignored", event };
       
-      const payload = body as any;
+      const payload = body as WebhookPayload;
       const branch = (payload.ref || "").replace("refs/heads/", "");
       const gitUrl = payload.project?.git_http_url || payload.repository?.clone_url || "";
       const commitSha = payload.checkout_sha || payload.after || "";
@@ -238,12 +268,11 @@ export const webhookRoutes = new Elysia({ prefix: "/v1/webhooks" })
 
   .post(
     "/deploy",
-    async ({ body, headers, set }) => {
+    async ({ body, headers }) => {
       const authHeader = headers["authorization"] || headers["Authorization"];
 
       if (!authHeader?.startsWith("Bearer ")) {
-        set.status = 401;
-        return { error: "Missing or invalid authorization header" };
+                return status(401, { error: "Missing or invalid authorization header" });
       }
 
       const token = authHeader.replace("Bearer ", "");
@@ -251,14 +280,12 @@ export const webhookRoutes = new Elysia({ prefix: "/v1/webhooks" })
 
       const isValid = await frontendService.verifyDeployToken(project_ref, deployment_id, token);
       if (!isValid) {
-        set.status = 403;
-        return { error: "Invalid deploy token" };
+                return status(403, { error: "Invalid deploy token" });
       }
 
       const deployment = await frontendService.getDeployment(project_ref, deployment_id);
       if (!deployment) {
-        set.status = 404;
-        return { error: "Deployment not found" };
+                return status(404, { error: "Deployment not found" });
       }
 
       const recordId = await frontendService.createDeploymentRecord(
@@ -315,21 +342,19 @@ export const webhookRoutes = new Elysia({ prefix: "/v1/webhooks" })
 
   .post(
     "/callback",
-    async ({ body, headers, set }) => {
+    async ({ body, headers }) => {
       const authHeader = headers["authorization"] || headers["Authorization"];
 
       if (!authHeader?.startsWith("Bearer ")) {
-        set.status = 401;
-        return { error: "Missing or invalid authorization header" };
+                return status(401, { error: "Missing or invalid authorization header" });
       }
 
       const token = authHeader.replace("Bearer ", "");
-      const { deployment_id, project_ref, record_id, status, build_log } = body;
+      const { deployment_id, project_ref, record_id, status: deployStatus, build_log } = body;
 
       const isValid = await frontendService.verifyDeployToken(project_ref, deployment_id, token);
       if (!isValid) {
-        set.status = 403;
-        return { error: "Invalid deploy token" };
+                return status(403, { error: "Invalid deploy token" });
       }
 
       await frontendService.updateDeploymentRecord(
@@ -337,12 +362,12 @@ export const webhookRoutes = new Elysia({ prefix: "/v1/webhooks" })
         deployment_id,
         record_id,
         {
-          status,
+          status: deployStatus,
           build_log,
         }
       );
 
-      return { message: "Callback received", record_id, status };
+      return { message: "Callback received", record_id, status: deployStatus };
     },
     {
       body: t.Object({
@@ -379,17 +404,17 @@ async function findDeploymentsByGitUrl(gitUrl: string, branch: string): Promise<
                 deployments.push(config as FrontendDeployment);
               }
             }
-          } catch {
+          } catch (err: unknown) {
+            logger.warn("[] if failed silently", { error: err });
             continue;
           }
         }
-      } catch {
+      } catch (err: unknown) {
+        logger.warn("[] catch failed silently", { error: err });
         continue;
       }
     }
-  } catch {
-    // ignore
-  }
+  } catch (e: unknown) { logger.debug("[routes/webhook] suppressed error", { error: e instanceof Error ? e.message : String(e) }); }
 
   return deployments;
 }
@@ -430,8 +455,8 @@ async function triggerDeployForGit(
         { status: buildResult.success ? "success" : "failed", build_log: buildResult.build_log }
       );
       results.push({ deployment_id: deployment.id, project_ref: deployment.project_ref, success: buildResult.success, url: buildResult.url, error: buildResult.error });
-    } catch (error: any) {
-      results.push({ deployment_id: deployment.id, project_ref: deployment.project_ref, success: false, error: error.message });
+    } catch (error: unknown) {
+      results.push({ deployment_id: deployment.id, project_ref: deployment.project_ref, success: false, error: (error instanceof Error ? error.message : String(error)) });
     }
   }
   return { message: "Webhook processed", repo: repoName, branch, commit: commitSha, source, deployments: results };

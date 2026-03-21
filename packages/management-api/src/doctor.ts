@@ -82,17 +82,17 @@ export async function runDoctor(options: { skipSmokeTest?: boolean, forceYes?: b
 
                 s.stop("Business smoke test full chain passed! ✨");
                 p.log.success("[Conclusion] Your SupaCloud is fully ready for production.");
-            } catch (testErr: any) {
+            } catch (testErr: unknown) {
                 s.stop("Business smoke test failed");
-                p.log.error(`Smoke test found logic error: ${testErr.message}`);
+                p.log.error(`Smoke test found logic error: ${testErr instanceof Error ? testErr.message : String(testErr)}`);
                 p.log.info("This may indicate database permissions or routing script issues.");
             }
         }
 
         p.outro("Health check complete, happy deployment!");
-    } catch (error: any) {
+    } catch (error: unknown) {
         s.stop("Health check failed midway");
-        p.log.error(`Health check tool crashed: ${error.message}`);
+        p.log.error(`Health check tool crashed: ${error instanceof Error ? error.message : String(error)}`);
         process.exit(1);
     }
 }

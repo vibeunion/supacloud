@@ -19,7 +19,7 @@ export const load: PageServerLoad = async ({ fetch }) => {
 
         const projects = await response.json();
         return { projects };
-    } catch (err) {
+    } catch (err: unknown) {
         // Fallback for development if API is not running
         return {
             projects: [

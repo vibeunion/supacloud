@@ -20,7 +20,7 @@
     duration?: number;
   }
 
-  let records: Record[] = $state([]);
+  let records: Record[] = $state.raw([]);
   let isLoading = $state(true);
 
   async function fetchRecords() {

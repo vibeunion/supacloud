@@ -69,8 +69,8 @@
         body: JSON.stringify(payload)
       });
       saveMsg = res.ok ? "✅ 速率限制已保存（GoTrue 服务已重启）" : `❌ 保存失败: ${(await res.json()).error || res.statusText}`;
-    } catch (err: any) {
-      saveMsg = `❌ 保存失败: ${err.message}`;
+    } catch (err: unknown) {
+      saveMsg = `❌ 保存失败: ${(err instanceof Error ? err.message : String(err))}`;
     } finally {
       saving = false;
       setTimeout(() => saveMsg = null, 4000);

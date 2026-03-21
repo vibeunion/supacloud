@@ -6,7 +6,7 @@
   let username = $state("");
   let password = $state("");
   let isLoading = $state(false);
-  let error: string | null = $state(null);
+  let error: string | null = $state.raw(null);
   let showPassword = $state(false);
 
   async function handleLogin() {
@@ -30,8 +30,8 @@
       } else {
         error = data.error || "登录失败";
       }
-    } catch (err: any) {
-      error = err.message || "网络错误";
+    } catch (err: unknown) {
+      error = err instanceof Error ? err.message : String(err) || "网络错误";
     } finally {
       isLoading = false;
     }

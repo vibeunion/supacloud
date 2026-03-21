@@ -32,3 +32,4 @@
 ## Development
 
 - [MCP Server Guide](./mcp-server-guide.md) - MCP Server development guide
+- [Edge Runtime Guide](./edge-runtime-guide.md) - Bun + Elysia Edge Functions runtime (architecture, migration from Deno)

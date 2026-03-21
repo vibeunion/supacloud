@@ -50,8 +50,8 @@
 
   <!-- Grafana Host Input -->
   <div class="flex items-center gap-3">
-    <label class="text-xs font-semibold text-muted-foreground shrink-0">Grafana 地址:</label>
-    <input bind:value={grafanaHost} class="flex-1 max-w-md px-3 py-1.5 text-xs font-mono rounded-md border bg-muted/30 focus:outline-none focus:ring-1 focus:ring-brand" placeholder="http://your-server:3000" />
+    <label for="a11y-routes-platform-monitoring--page-svelte-53" class="text-xs font-semibold text-muted-foreground shrink-0">Grafana 地址:</label>
+    <input id="a11y-routes-platform-monitoring--page-svelte-53" bind:value={grafanaHost} class="flex-1 max-w-md px-3 py-1.5 text-xs font-mono rounded-md border bg-muted/30 focus:outline-none focus:ring-1 focus:ring-brand" placeholder="http://your-server:3000" />
   </div>
 
   <!-- Dashboard Selector -->

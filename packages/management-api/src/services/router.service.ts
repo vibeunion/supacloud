@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import { logger } from "../utils/logger";
 import path from "node:path";
 import { shellService } from "./shell.service";
 
@@ -213,24 +214,24 @@ server {
       }
 
       await fs.writeFile(configFile, config, "utf-8");
-      console.log(`Route added for ${projectRef} (api: ${apiDomain})`);
+      logger.info(`Route added for ${projectRef} (api: ${apiDomain})`);
 
       const testResult = await shellService.executeCommand("angie", ["-t"]);
       if (!testResult.success) {
-        console.error("Angie config test failed:", testResult.output);
+        logger.error("Angie config test failed:", testResult.output);
         await fs.unlink(configFile).catch(() => { });
         return { success: false, error: testResult.output };
       }
 
       const reloadResult = await shellService.executeCommand("angie", ["-s", "reload"]);
       if (!reloadResult.success) {
-        console.error("Angie reload failed:", reloadResult.output);
+        logger.error("Angie reload failed:", reloadResult.output);
         return { success: false, error: reloadResult.output };
       }
 
       return { success: true };
-    } catch (error: any) {
-      return { success: false, error: error.message };
+    } catch (error: unknown) {
+      return { success: false, error: (error instanceof Error ? error.message : String(error)) };
     }
   }
 
@@ -240,8 +241,8 @@ server {
 
       try {
         await fs.unlink(configFile);
-      } catch (e: any) {
-        if (e.code !== "ENOENT") {
+      } catch (e: unknown) {
+        if ((e as NodeJS.ErrnoException).code !== "ENOENT") {
           throw e;
         }
       }
@@ -252,8 +253,8 @@ server {
       }
 
       return { success: true };
-    } catch (error: any) {
-      return { success: false, error: error.message };
+    } catch (error: unknown) {
+      return { success: false, error: (error instanceof Error ? error.message : String(error)) };
     }
   }
 
@@ -333,8 +334,8 @@ server {
 
       await shellService.executeCommand("angie", ["-s", "reload"]);
       return { success: true };
-    } catch (error: any) {
-      return { success: false, error: error.message };
+    } catch (error: unknown) {
+      return { success: false, error: (error instanceof Error ? error.message : String(error)) };
     }
   }
 
@@ -344,8 +345,8 @@ server {
       await fs.unlink(configFile).catch(() => { });
       await shellService.executeCommand("angie", ["-s", "reload"]);
       return { success: true };
-    } catch (error: any) {
-      return { success: false, error: error.message };
+    } catch (error: unknown) {
+      return { success: false, error: (error instanceof Error ? error.message : String(error)) };
     }
   }
 
@@ -365,8 +366,8 @@ server {
       await fs.writeFile(configFile, updated.includes("allow") ? updated : existing + `\n# Network restrictions\n${allowRules}\n`);
       await shellService.executeCommand("angie", ["-s", "reload"]);
       return { success: true };
-    } catch (error: any) {
-      return { success: false, error: error.message };
+    } catch (error: unknown) {
+      return { success: false, error: (error instanceof Error ? error.message : String(error)) };
     }
   }
 }

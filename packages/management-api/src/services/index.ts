@@ -1,8 +1,8 @@
-export { jwtService, JwtService } from "./jwt.service";
-export { databaseService, DatabaseService } from "./database.service";
-export { storageService, StorageService } from "./storage.service";
-export { routerService, RouterService } from "./router.service";
-export { shellService, ShellService } from "./shell.service";
-export { projectService, ProjectService } from "./project.service";
+export { jwtService } from "./jwt.service";
+export { databaseService } from "./database.service";
+export { storageService } from "./storage.service";
+export { routerService } from "./router.service";
+export { shellService } from "./shell.service";
+export { projectService } from "./project.service";
 export { frontendService } from "./frontend.service";
-export { deployService, DeployServiceClass } from "./deploy.service";
+export { deployService } from "./deploy.service";

@@ -55,7 +55,7 @@ export function getProjectDb(dbName: string): SQL {
       const conn = projectConnections.get(oldestDbName);
       if (conn) {
         logger.debug(`Evicting project connection cache for ${oldestDbName} due to limit.`);
-        conn.sql.close().catch(e => logger.error(`Failed to close evicted connection ${oldestDbName}`, e));
+        conn.sql.close().catch(e => logger.error(`Failed to close evicted connection ${oldestDbName}`, { error: e instanceof Error ? e.message : String(e) }));
       }
       projectConnections.delete(oldestDbName);
     }
@@ -82,7 +82,7 @@ export async function removeProjectDbCache(dbName: string) {
   if (cached) {
     try {
       await cached.sql.close();
-    } catch (e) {
+    } catch (e: unknown) {
       logger.error(`Failed to close connection for ${dbName} during cache removal`, e as Error);
     }
     projectConnections.delete(dbName);
@@ -97,9 +97,9 @@ export async function executeQuery(dbName: string, sqlQuery: string): Promise<{ 
     return {
       rows: result as unknown[],
       rowCount: result.length,
-      command: (result as any).command || sqlQuery.trim().split(/\s+/)[0].toUpperCase(),
+      command: ((result as unknown as Record<string, unknown>).command as string) || sqlQuery.trim().split(/\s+/)[0].toUpperCase(),
     };
-  } catch (error) {
+  } catch (error: unknown) {
     throw new Error(`SQL execution error: ${error instanceof Error ? error.message : "Unknown error"}`);
   }
 }
@@ -112,7 +112,13 @@ export const db = {
 };
 
 // Project status type
-export type ProjectStatus = "creating" | "active" | "paused" | "deleted";
+export const ProjectStatus = {
+  CREATING: "creating",
+  ACTIVE: "active",
+  PAUSED: "paused",
+  DELETED: "deleted",
+} as const;
+export type ProjectStatus = (typeof ProjectStatus)[keyof typeof ProjectStatus];
 
 // Organization type definition
 export interface Organization {
@@ -147,24 +153,33 @@ export interface Project {
 }
 
 // Task status and type
-export type TaskStatus = "pending" | "processing" | "completed" | "failed";
-export type TaskType =
-  | "provision_db"
-  | "provision_s3"
-  | "provision_runtime"
-  | "provision_router"
-  | "provision_gateway"
-  | "cleanup_db"
-  | "cleanup_s3"
-  | "cleanup_runtime"
-  | "cleanup_router";
+export const TaskStatus = {
+  PENDING: "pending",
+  PROCESSING: "processing",
+  COMPLETED: "completed",
+  FAILED: "failed",
+} as const;
+export type TaskStatus = (typeof TaskStatus)[keyof typeof TaskStatus];
+
+export const TaskType = {
+  PROVISION_DB: "provision_db",
+  PROVISION_S3: "provision_s3",
+  PROVISION_RUNTIME: "provision_runtime",
+  PROVISION_ROUTER: "provision_router",
+  PROVISION_GATEWAY: "provision_gateway",
+  CLEANUP_DB: "cleanup_db",
+  CLEANUP_S3: "cleanup_s3",
+  CLEANUP_RUNTIME: "cleanup_runtime",
+  CLEANUP_ROUTER: "cleanup_router",
+} as const;
+export type TaskType = (typeof TaskType)[keyof typeof TaskType];
 
 export interface ProjectTask {
   id: string;
   project_ref: string;
   task_type: TaskType;
   status: TaskStatus;
-  payload: Record<string, any>;
+  payload: Record<string, unknown>;
   error: string | null;
   retries: number;
   created_at: Date;
@@ -196,7 +211,7 @@ export async function closeDb() {
   for (const [dbName, cached] of projectConnections.entries()) {
     try {
       await cached.sql.close();
-    } catch (e) {
+    } catch (e: unknown) {
       logger.error(`Failed to close cached connection for ${dbName} during shutdown`, e as Error);
     }
   }
