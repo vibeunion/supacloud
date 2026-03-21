@@ -170,26 +170,38 @@ ensure_gotrue() {
 
     echo "GoTrue binary not found. Installing..."
 
-    # Extract from container (if Supabase container is running)
-    local container_id
-    container_id=$(docker ps -q -f "name=supabase-auth" 2>/dev/null || podman ps -q -f "name=supabase-auth" 2>/dev/null || true)
-    if [ -n "$container_id" ]; then
-        echo "Extracting GoTrue from running container..."
-        local tmp_bin="/tmp/gotrue-extract"
-        # Bug Fix: New versions of supabase/gotrue container renamed the binary to 'auth', need to try both gotrue and auth
-        (docker cp "${container_id}:/usr/local/bin/gotrue" "$tmp_bin" 2>/dev/null || \
-         docker cp "${container_id}:/usr/local/bin/auth" "$tmp_bin" 2>/dev/null || \
-         podman cp "${container_id}:/usr/local/bin/gotrue" "$tmp_bin" 2>/dev/null || \
-         podman cp "${container_id}:/usr/local/bin/auth" "$tmp_bin" 2>/dev/null || true)
-        if [ -x "$tmp_bin" ]; then
-            mv "$tmp_bin" "$GOTRUE_BIN"
-            echo "GoTrue extracted successfully"
-            return
+    # Direct download from GitHub
+    local arch
+    arch=$(uname -m)
+    case "$arch" in
+        x86_64) arch="linux-amd64" ;;
+        aarch64) arch="linux-arm64" ;;
+        *) echo "ERROR: Unsupported architecture: $arch" >&2; exit 1 ;;
+    esac
+
+    local version="v2.164.0"
+    local url="https://github.com/supabase/auth/releases/download/${version}/auth-${version}-${arch}.tar.gz"
+    echo "Downloading GoTrue ${version}..."
+
+    local tmp_dir
+    tmp_dir=$(mktemp -d)
+    if curl -fsSL "https://gh-proxy.net/${url}" -o "${tmp_dir}/gotrue.tar.gz" 2>/dev/null || \
+       curl -fsSL "${url}" -o "${tmp_dir}/gotrue.tar.gz"; then
+        tar -xf "${tmp_dir}/gotrue.tar.gz" -C "${tmp_dir}"
+        # The binary may be named 'auth' or 'gotrue' depending on the release
+        if [ -f "${tmp_dir}/auth" ]; then
+            mv "${tmp_dir}/auth" "$GOTRUE_BIN"
+        elif [ -f "${tmp_dir}/gotrue" ]; then
+            mv "${tmp_dir}/gotrue" "$GOTRUE_BIN"
         fi
+        chmod +x "$GOTRUE_BIN"
+        echo "GoTrue installed to $GOTRUE_BIN"
+    else
+        echo "ERROR: Failed to download GoTrue. Please manually place the binary at $GOTRUE_BIN" >&2
+        rm -rf "$tmp_dir"
+        exit 1
     fi
-    
-    echo "ERROR: Failed to extract GoTrue from container. Please ensure supabase-auth container is running, or download and place 'gotrue' binary at $GOTRUE_BIN manually." >&2
-    exit 1
+    rm -rf "$tmp_dir"
 }
 
 # ========== Generate tenant configuration files ==========
