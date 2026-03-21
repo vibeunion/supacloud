@@ -49,8 +49,8 @@
         body: JSON.stringify({ allowed_address_ranges: allowedIps })
       });
       msg = res.ok ? "✅ 网络限制已保存，Angie 配置已重载" : "❌ 保存失败";
-    } catch (err: any) {
-      msg = `❌ ${err.message}`;
+    } catch (err: unknown) {
+      msg = `❌ ${(err instanceof Error ? err.message : String(err))}`;
     } finally {
       saving = false;
       setTimeout(() => msg = null, 4000);

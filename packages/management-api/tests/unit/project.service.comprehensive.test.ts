@@ -1,7 +1,7 @@
 import { describe, test, expect, mock, beforeEach, spyOn } from "bun:test";
 
 // Mock database to prevent top-level connection attempts
-const mockSql: any = mock(() => Promise.resolve([]));
+const mockSql: unknown = mock(() => Promise.resolve([]));
 mockSql.unsafe = mock(() => Promise.resolve([]));
 mock.module("../../src/db", () => ({
   sql: mockSql,
@@ -239,7 +239,7 @@ describe("ProjectService - Comprehensive", () => {
       const result = await service.getProjectHealth("test123abc");
       expect(result).not.toBeNull();
       expect(result?.status).toBe("ACTIVE_HEALTHY");
-      const dbService = result?.services.find((s: any) => s.name === "PostgreSQL");
+      const dbService = result?.services.find((s: Record<string, unknown>) => s.name === "PostgreSQL");
       expect(dbService?.status).toBe("ACTIVE_HEALTHY");
 
       findSpy.mockRestore();
@@ -251,7 +251,7 @@ describe("ProjectService - Comprehensive", () => {
       const dbSpy = spyOn(databaseService, "checkStatus").mockResolvedValue({ success: false, output: "", error: "fail" });
 
       const result = await service.getProjectHealth("test123abc");
-      const dbService = result?.services.find((s: any) => s.name === "PostgreSQL");
+      const dbService = result?.services.find((s: Record<string, unknown>) => s.name === "PostgreSQL");
       expect(dbService?.status).toBe("INACTIVE");
 
       findSpy.mockRestore();

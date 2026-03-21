@@ -8,10 +8,10 @@
   const projectRef = $derived(page.params.ref);
   const deployId = $derived(page.url.pathname.split("/hosting/")[1]?.split("/")[0] || "");
 
-  let dep: any = $state(null);
+  let dep: Record<string, unknown> | null = $state.raw(null);
   let isLoading = $state(true);
   let isSaving = $state(false);
-  let actionMsg: string | null = $state(null);
+  let actionMsg: string | null = $state.raw(null);
 
   // Editable fields
   let buildCommand = $state("");
@@ -22,7 +22,7 @@
   let gitBranch = $state("");
 
   // Environment Variables
-  let envPairs: { key: string; value: string }[] = $state([]);
+  let envPairs: { key: string; value: string }[] = $state.raw([]);
   let isSavingEnv = $state(false);
 
   // Custom Domains
@@ -30,10 +30,10 @@
   let isAddingDomain = $state(false);
 
   // Deploy Tokens
-  let tokens: any[] = $state([]);
+  let tokens: unknown[] = $state.raw([]);
   let newTokenName = $state("");
   let isCreatingToken = $state(false);
-  let lastCreatedToken: string | null = $state(null);
+  let lastCreatedToken: string | null = $state.raw(null);
 
   // Build Logs
   let logs = $state("");
@@ -44,12 +44,13 @@
       const res = await apiClient(`/v1/projects/${projectRef}/frontend/deployments/${deployId}`);
       if (res.ok) {
         dep = await res.json();
-        buildCommand = dep.build_command || "";
-        outputDir = dep.output_dir || "";
-        installCommand = dep.install_command || "";
-        nodeVersion = dep.node_version || "20";
-        gitUrl = dep.git_url || "";
-        gitBranch = dep.git_branch || "main";
+        if (!dep) return;
+        buildCommand = String(dep.build_command || "");
+        outputDir = String(dep.output_dir || "");
+        installCommand = String(dep.install_command || "");
+        nodeVersion = String(dep.node_version || "20");
+        gitUrl = String(dep.git_url || "");
+        gitBranch = String(dep.git_branch || "main");
         envPairs = Object.entries(dep.env_vars || {}).map(([key, value]) => ({ key, value: value as string }));
       }
     } catch {}
@@ -86,7 +87,7 @@
         });
       }
       actionMsg = "✅ 构建配置已保存";
-    } catch (err: any) { actionMsg = `❌ ${err.message}`; }
+    } catch (err: unknown) { actionMsg = `❌ ${(err instanceof Error ? err.message : String(err))}`; }
     isSaving = false;
     setTimeout(() => actionMsg = null, 4000);
   }
@@ -102,7 +103,7 @@
         body: JSON.stringify({ env_vars: envObj })
       });
       actionMsg = "✅ 环境变量已保存";
-    } catch (err: any) { actionMsg = `❌ ${err.message}`; }
+    } catch (err: unknown) { actionMsg = `❌ ${(err instanceof Error ? err.message : String(err))}`; }
     isSavingEnv = false;
     setTimeout(() => actionMsg = null, 4000);
   }
@@ -172,7 +173,7 @@
         <p class="text-xs text-muted-foreground">{dep.framework} · ID: {dep.id}</p>
       </div>
       {#if dep.deployment_url}
-        <a href={dep.deployment_url} target="_blank" class="flex items-center gap-2 px-3 py-2 text-xs rounded-lg border hover:bg-muted/50 transition-colors"><ExternalLink size={12} /> 访问站点</a>
+        <a href={String(dep.deployment_url || "")} target="_blank" class="flex items-center gap-2 px-3 py-2 text-xs rounded-lg border hover:bg-muted/50 transition-colors"><ExternalLink size={12} /> 访问站点</a>
       {/if}
     </div>
 
@@ -228,7 +229,7 @@
         <h3 class="text-sm font-semibold flex items-center gap-2"><Globe size={16} /> 自定义域名</h3>
       </div>
       <div class="p-4">
-        {#each dep.custom_domains || [] as domain}
+        {#each (dep.custom_domains || []) as string[] as domain}
           <div class="flex items-center justify-between py-1.5">
             <span class="text-xs font-mono">{domain}</span>
             <button onclick={() => removeDomain(domain)} class="text-red-500 text-[10px] hover:bg-red-500/10 rounded px-2 py-0.5">移除</button>
@@ -274,8 +275,8 @@
         {/if}
         {#each tokens as token}
           <div class="flex items-center justify-between py-1.5">
-            <div><span class="text-xs font-medium">{token.name}</span><span class="text-[10px] text-muted-foreground ml-2">创建于 {token.created_at}</span></div>
-            <button onclick={() => deleteToken(token.id)} class="text-red-500 text-[10px]">删除</button>
+            <div><span class="text-xs font-medium">{(token as Record<string, unknown>).name}</span><span class="text-[10px] text-muted-foreground ml-2">创建于 {(token as Record<string, unknown>).created_at}</span></div>
+            <button onclick={() => deleteToken(String((token as Record<string, unknown>).id))} class="text-red-500 text-[10px]">删除</button>
           </div>
         {/each}
         <div class="flex items-center gap-2 mt-2">

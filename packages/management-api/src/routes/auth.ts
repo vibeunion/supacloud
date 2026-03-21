@@ -1,4 +1,5 @@
-import { Elysia, t } from "elysia";
+import { Elysia, t, status } from "elysia";
+import { logger } from "../utils/logger";
 import { projectService } from "../services";
 import { tenantRuntimeService } from "../services/tenant-runtime.service";
 import { shellService } from "../services/shell.service";
@@ -48,11 +49,10 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
     async ({ params, set }) => {
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings) {
-        set.status = 404;
-        return { error: "Project not found" };
+                return status(404, { error: "Project not found" });
       }
 
-      const oauthConfig = (settings.auth as Record<string, any>)?.external || {};
+      const oauthConfig = ((settings.auth as Record<string, unknown>)?.external ?? {}) as Record<string, Record<string, string>>;
       const result: Record<string, { enabled: boolean; client_id?: string; redirect_uri?: string }> = {};
 
       for (const provider of SUPPORTED_OAUTH_PROVIDERS) {
@@ -89,11 +89,10 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
 
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings) {
-        set.status = 404;
-        return { error: "Project not found" };
+                return status(404, { error: "Project not found" });
       }
 
-      const oauthConfig = (settings.auth as Record<string, any>)?.external || {};
+      const oauthConfig = ((settings.auth as Record<string, unknown>)?.external ?? {}) as Record<string, Record<string, string>>;
       const providerConfig = oauthConfig[provider];
 
       if (!providerConfig || !providerConfig.client_id) {
@@ -132,12 +131,11 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
 
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings) {
-        set.status = 404;
-        return { error: "Project not found" };
+                return status(404, { error: "Project not found" });
       }
 
-      const currentAuth = (settings.auth as Record<string, any>) || {};
-      const currentExternal = currentAuth.external || {};
+      const currentAuth = (settings.auth as Record<string, unknown>) || {};
+      const currentExternal = (currentAuth.external ?? {}) as Record<string, Record<string, string>>;
 
       const providerConfig: OAuthProviderConfig = {
         provider,
@@ -167,8 +165,8 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
 
       try {
         await tenantRuntimeService.updateOAuthConfig(params.ref, provider, providerConfig);
-      } catch (error) {
-        console.error(`Failed to update GoTrue OAuth config for ${provider}:`, error);
+      } catch (error: unknown) {
+        logger.error(`Failed to update GoTrue OAuth config for ${provider}:`, { error: error instanceof Error ? error.message : String(error) });
       }
 
       return {
@@ -205,13 +203,12 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
 
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings) {
-        set.status = 404;
-        return { error: "Project not found" };
+                return status(404, { error: "Project not found" });
       }
 
-      const currentAuth = (settings.auth as Record<string, any>) || {};
-      const currentExternal = currentAuth.external || {};
-      const currentProviderConfig = currentExternal[provider] || {};
+      const currentAuth = (settings.auth as Record<string, unknown>) || {};
+      const currentExternal = (currentAuth.external ?? {}) as Record<string, Record<string, string>>;
+      const currentProviderConfig = currentExternal[provider] || ({} as Record<string, string>);
 
       const updatedProviderConfig = {
         ...currentProviderConfig,
@@ -240,8 +237,8 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
             redirect_uri: updatedProviderConfig.redirect_uri,
             url: updatedProviderConfig.url,
           });
-        } catch (error) {
-          console.error(`Failed to update GoTrue OAuth config for ${provider}:`, error);
+        } catch (error: unknown) {
+          logger.error(`Failed to update GoTrue OAuth config for ${provider}:`, { error: error instanceof Error ? error.message : String(error) });
         }
       }
 
@@ -279,12 +276,11 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
 
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings) {
-        set.status = 404;
-        return { error: "Project not found" };
+                return status(404, { error: "Project not found" });
       }
 
-      const currentAuth = (settings.auth as Record<string, any>) || {};
-      const currentExternal = currentAuth.external || {};
+      const currentAuth = (settings.auth as Record<string, unknown>) || {};
+      const currentExternal = (currentAuth.external ?? {}) as Record<string, Record<string, string>>;
 
       if (!currentExternal[provider]) {
         return {
@@ -307,8 +303,8 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
 
       try {
         await tenantRuntimeService.removeOAuthConfig(params.ref, provider);
-      } catch (error) {
-        console.error(`Failed to remove GoTrue OAuth config for ${provider}:`, error);
+      } catch (error: unknown) {
+        logger.error(`Failed to remove GoTrue OAuth config for ${provider}:`, { error: error instanceof Error ? error.message : String(error) });
       }
 
       return {
@@ -330,20 +326,21 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
     async ({ params, set }) => {
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings) {
-        set.status = 404;
-        return { error: "Project not found" };
+                return status(404, { error: "Project not found" });
       }
 
-      const authConfig = (settings.auth as Record<string, any>) || {};
-      const safeConfig = { ...authConfig };
+      const authConfig = (settings.auth as Record<string, unknown>) || {};
+      const safeConfig: Record<string, unknown> = { ...authConfig };
 
-      if (safeConfig.external) {
-        for (const provider of Object.keys(safeConfig.external)) {
-          if (safeConfig.external[provider].client_secret) {
-            safeConfig.external[provider].client_secret = maskSecret(
-              safeConfig.external[provider].client_secret
-            );
+      {
+        const ext = safeConfig.external as Record<string, Record<string, string>> | undefined;
+        if (ext) {
+          for (const provider of Object.keys(ext)) {
+            if (ext[provider].client_secret) {
+              ext[provider].client_secret = maskSecret(ext[provider].client_secret);
+            }
           }
+          safeConfig.external = ext;
         }
       }
 
@@ -361,11 +358,10 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
     async ({ params, body, set }) => {
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings) {
-        set.status = 404;
-        return { error: "Project not found" };
+                return status(404, { error: "Project not found" });
       }
 
-      const currentAuth = (settings.auth as Record<string, any>) || {};
+      const currentAuth = (settings.auth as Record<string, unknown>) || {};
       const updatedAuth = {
         ...currentAuth,
         ...body,
@@ -378,8 +374,8 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
 
       try {
         await tenantRuntimeService.restartRuntime(params.ref);
-      } catch (error) {
-        console.error("Failed to restart GoTrue after config update:", error);
+      } catch (error: unknown) {
+        logger.error("Failed to restart GoTrue after config update:", { error: error instanceof Error ? error.message : String(error) });
       }
 
       return updated?.auth || {};
@@ -422,12 +418,11 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
     async ({ params, set }) => {
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings) {
-        set.status = 404;
-        return { error: "Project not found" };
+                return status(404, { error: "Project not found" });
       }
 
-      const oauthConfig = (settings.auth as Record<string, any>)?.external || {};
-      const providers: Record<string, any> = {};
+      const oauthConfig = ((settings.auth as Record<string, unknown>)?.external ?? {}) as Record<string, Record<string, string>>;
+      const providers: Record<string, unknown> = {};
       const chinaProviderList: ChinaOAuthProvider[] = ["qq", "weibo", "alipay", "dingtalk", "douyin", "baidu", "huawei", "xiaomi", "kuaishou", "bilibili"];
 
       for (const provider of SUPPORTED_OAUTH_PROVIDERS) {
@@ -456,7 +451,7 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
 
       return {
         providers,
-        enabled_providers: Object.keys(providers).filter(p => providers[p].enabled),
+        enabled_providers: Object.keys(providers).filter(p => (providers[p] as Record<string, unknown>).enabled),
       };
     },
     {
@@ -478,13 +473,12 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
 
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings) {
-        set.status = 404;
-        return { error: "Project not found" };
+                return status(404, { error: "Project not found" });
       }
 
-      const currentAuth = (settings.auth as Record<string, any>) || {};
-      const currentExternal = currentAuth.external || {};
-      const currentProviderConfig = currentExternal[provider] || {};
+      const currentAuth = (settings.auth as Record<string, unknown>) || {};
+      const currentExternal = (currentAuth.external ?? {}) as Record<string, Record<string, string>>;
+      const currentProviderConfig = currentExternal[provider] || ({} as Record<string, string>);
 
       const updatedProviderConfig = {
         ...currentProviderConfig,
@@ -546,8 +540,8 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
               });
             }
           }
-        } catch (error) {
-          console.error(`Failed to update GoTrue OAuth config for ${provider}:`, error);
+        } catch (error: unknown) {
+          logger.error(`Failed to update GoTrue OAuth config for ${provider}:`, { error: error instanceof Error ? error.message : String(error) });
         }
       }
 
@@ -577,13 +571,12 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
     async ({ params, set }) => {
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings) {
-        set.status = 404;
-        return { error: "Project not found" };
+                return status(404, { error: "Project not found" });
       }
 
-      const oauthConfig = (settings.auth as Record<string, any>)?.external || {};
+      const oauthConfig = ((settings.auth as Record<string, unknown>)?.external ?? {}) as Record<string, Record<string, string>>;
       const wechatProviders: WeChatProviderType[] = ["wechat", "wechat_miniprogram", "wechat_mp"];
-      const result: Record<string, any> = {};
+      const result: Record<string, unknown> = {};
 
       for (const provider of wechatProviders) {
         const providerConfig = oauthConfig[provider];
@@ -612,12 +605,11 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
     async ({ params, body, set }) => {
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings) {
-        set.status = 404;
-        return { error: "Project not found" };
+                return status(404, { error: "Project not found" });
       }
 
-      const currentAuth = (settings.auth as Record<string, any>) || {};
-      const currentExternal = currentAuth.external || {};
+      const currentAuth = (settings.auth as Record<string, unknown>) || {};
+      const currentExternal = (currentAuth.external ?? {}) as Record<string, Record<string, string>>;
 
       const providerConfig = {
         client_id: body.app_id,
@@ -640,8 +632,8 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
       if (body.deploy_function !== false) {
         try {
           await deployWeChatMiniProgramFunction(params.ref, body.app_id, body.app_secret);
-        } catch (error) {
-          console.error("Failed to deploy wechat-login function:", error);
+        } catch (error: unknown) {
+          logger.error("Failed to deploy wechat-login function:", { error: error instanceof Error ? error.message : String(error) });
         }
       }
 
@@ -670,12 +662,11 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
     async ({ params, body, set }) => {
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings) {
-        set.status = 404;
-        return { error: "Project not found" };
+                return status(404, { error: "Project not found" });
       }
 
-      const currentAuth = (settings.auth as Record<string, any>) || {};
-      const currentExternal = currentAuth.external || {};
+      const currentAuth = (settings.auth as Record<string, unknown>) || {};
+      const currentExternal = (currentAuth.external ?? {}) as Record<string, Record<string, string>>;
 
       const providerConfig = {
         client_id: body.app_id,
@@ -703,8 +694,8 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
           client_secret: body.app_secret,
           redirect_uri: body.redirect_uri,
         });
-      } catch (error) {
-        console.error("Failed to update GoTrue wechat_mp config:", error);
+      } catch (error: unknown) {
+        logger.error("Failed to update GoTrue wechat_mp config:", { error: error instanceof Error ? error.message : String(error) });
       }
 
       return {
@@ -731,12 +722,11 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
     async ({ params, body, set }) => {
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings) {
-        set.status = 404;
-        return { error: "Project not found" };
+                return status(404, { error: "Project not found" });
       }
 
-      const currentAuth = (settings.auth as Record<string, any>) || {};
-      const currentExternal = currentAuth.external || {};
+      const currentAuth = (settings.auth as Record<string, unknown>) || {};
+      const currentExternal = (currentAuth.external ?? {}) as Record<string, Record<string, string>>;
 
       const providerConfig = {
         client_id: body.app_id,
@@ -772,8 +762,8 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
           user_url: "https://api.weixin.qq.com/sns/userinfo",
           auth_scheme: "query",
         });
-      } catch (error) {
-        console.error("Failed to update GoTrue wechat config:", error);
+      } catch (error: unknown) {
+        logger.error("Failed to update GoTrue wechat config:", { error: error instanceof Error ? error.message : String(error) });
       }
 
       return {
@@ -801,12 +791,11 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
     async ({ params, body, set }) => {
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings) {
-        set.status = 404;
-        return { error: "Project not found" };
+                return status(404, { error: "Project not found" });
       }
 
-      const currentAuth = (settings.auth as Record<string, any>) || {};
-      const currentExternal = currentAuth.external || {};
+      const currentAuth = (settings.auth as Record<string, unknown>) || {};
+      const currentExternal = (currentAuth.external ?? {}) as Record<string, Record<string, string>>;
 
       const providerConfig = {
         client_id: body.app_id,
@@ -830,8 +819,8 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
       if (body.deploy_function !== false) {
         try {
           await deployWeChatMPFunction(params.ref, body.app_id, body.app_secret, body.redirect_uri);
-        } catch (error) {
-          console.error("Failed to deploy wechat-mp-login function:", error);
+        } catch (error: unknown) {
+          logger.error("Failed to deploy wechat-mp-login function:", { error: error instanceof Error ? error.message : String(error) });
         }
       }
 
@@ -873,8 +862,7 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
     async ({ params, body, set }) => {
       const project = await projectService.getProject(params.ref);
       if (!project || !project.jwt_secret) {
-        set.status = 404;
-        return { error: "Project or JWT secret not found" };
+                return status(404, { error: "Project or JWT secret not found" });
       }
 
       const { jwtService } = await import("../services/jwt.service");
@@ -922,8 +910,7 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
     async ({ params, body, set }) => {
       const project = await projectService.getProject(params.ref);
       if (!project || !project.jwt_secret) {
-        set.status = 404;
-        return { error: "Project or JWT secret not found" };
+                return status(404, { error: "Project or JWT secret not found" });
       }
 
       const { jwtService } = await import("../services/jwt.service");
@@ -965,8 +952,7 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
     async ({ params, set }) => {
       const project = await projectService.getProject(params.ref);
       if (!project || !project.jwt_secret) {
-        set.status = 404;
-        return { error: "Project or JWT secret not found" };
+                return status(404, { error: "Project or JWT secret not found" });
       }
 
       const { jwtService } = await import("../services/jwt.service");
@@ -1003,13 +989,12 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
     async ({ params, set }) => {
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings) {
-        set.status = 404;
-        return { error: "Project not found" };
+                return status(404, { error: "Project not found" });
       }
 
-      const oauthConfig = (settings.auth as Record<string, any>)?.external || {};
+      const oauthConfig = ((settings.auth as Record<string, unknown>)?.external ?? {}) as Record<string, Record<string, string>>;
       const chinaProviders: ChinaOAuthProvider[] = ["qq", "weibo", "alipay", "dingtalk", "douyin", "baidu", "huawei", "xiaomi", "kuaishou", "bilibili"];
-      const result: Record<string, any> = {};
+      const result: Record<string, unknown> = {};
 
       for (const provider of chinaProviders) {
         const providerConfig = oauthConfig[provider];
@@ -1046,12 +1031,11 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
 
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings) {
-        set.status = 404;
-        return { error: "Project not found" };
+                return status(404, { error: "Project not found" });
       }
 
-      const currentAuth = (settings.auth as Record<string, any>) || {};
-      const currentExternal = currentAuth.external || {};
+      const currentAuth = (settings.auth as Record<string, unknown>) || {};
+      const currentExternal = (currentAuth.external ?? {}) as Record<string, Record<string, string>>;
 
       const providerConfig = {
         client_id: body.app_id,
@@ -1075,8 +1059,8 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
       if (body.deploy_function !== false) {
         try {
           await deployChinaOAuthFunction(params.ref, provider, body.app_id, body.app_secret, body.redirect_uri);
-        } catch (error) {
-          console.error(`Failed to deploy ${provider}-login function:`, error);
+        } catch (error: unknown) {
+          logger.error(`Failed to deploy ${provider}-login function:`, { error: error instanceof Error ? error.message : String(error) });
         }
       }
 
@@ -1190,9 +1174,9 @@ serve(async (req) => {
     const session = { access_token, token_type: "bearer", expires_in: 60 * 60 * 24 * 7, refresh_token: access_token, user: { id: userId, email, app_metadata: jwtPayload.app_metadata, user_metadata: jwtPayload.user_metadata, aud: jwtPayload.aud, created_at: new Date().toISOString(), role: jwtPayload.role } }
 
     return new Response(JSON.stringify(session), { headers: { ...corsHeaders, "Content-Type": "application/json" } })
-  } catch (error: any) {
-    console.error("WeChat MiniProgram Login Error:", error)
-    return new Response(JSON.stringify({ data: { session: null, user: null }, error: error.message }), { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 })
+  } catch (error: unknown) {
+    logger.error("WeChat MiniProgram Login Error:", { error: error instanceof Error ? error.message : String(error) })
+    return new Response(JSON.stringify({ data: { session: null, user: null }, error: (error instanceof Error ? error.message : String(error)) }), { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 })
   }
 })`;
 }
@@ -1281,9 +1265,9 @@ serve(async (req) => {
     const session = { access_token, token_type: "bearer", expires_in: 60 * 60 * 24 * 7, refresh_token: access_token, user: { id: userId, email, app_metadata: jwtPayload.app_metadata, user_metadata: jwtPayload.user_metadata, aud: jwtPayload.aud, created_at: new Date().toISOString(), role: jwtPayload.role } }
 
     return new Response(JSON.stringify(session), { headers: { ...corsHeaders, "Content-Type": "application/json" } })
-  } catch (error: any) {
-    console.error("${providerInfo.name} Login Error:", error)
-    return new Response(JSON.stringify({ data: { session: null, user: null }, error: error.message }), { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 })
+  } catch (error: unknown) {
+    logger.error("${providerInfo.name} Login Error:", { error: error instanceof Error ? error.message : String(error) })
+    return new Response(JSON.stringify({ data: { session: null, user: null }, error: (error instanceof Error ? error.message : String(error)) }), { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 })
   }
 })`;
 }
@@ -1381,9 +1365,9 @@ serve(async (req) => {
     const session = { access_token, token_type: "bearer", expires_in: 60 * 60 * 24 * 7, refresh_token: access_token, user: { id: userId, email, app_metadata: jwtPayload.app_metadata, user_metadata: jwtPayload.user_metadata, aud: jwtPayload.aud, created_at: new Date().toISOString(), role: jwtPayload.role } }
 
     return new Response(JSON.stringify(session), { headers: { ...corsHeaders, "Content-Type": "application/json" } })
-  } catch (error: any) {
-    console.error("WeChat MP Login Error:", error)
-    return new Response(JSON.stringify({ data: { session: null, user: null }, error: error.message }), { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 })
+  } catch (error: unknown) {
+    logger.error("WeChat MP Login Error:", { error: error instanceof Error ? error.message : String(error) })
+    return new Response(JSON.stringify({ data: { session: null, user: null }, error: (error instanceof Error ? error.message : String(error)) }), { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 })
   }
 })`;
 }

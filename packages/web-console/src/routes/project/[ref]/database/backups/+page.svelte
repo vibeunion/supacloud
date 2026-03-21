@@ -87,8 +87,8 @@
       const data = await res.json();
       if (!data.success) throw new Error(data.message || "备份失败");
       createMsg = `✅ 备份已生成：${data.file || '成功'}`;
-    } catch (err: any) {
-      createMsg = `❌ 失败: ${err.message}`;
+    } catch (err: unknown) {
+      createMsg = `❌ 失败: ${(err instanceof Error ? err.message : String(err))}`;
     } finally {
       isCreating = false;
       setTimeout(() => createMsg = null, 5000);
@@ -111,8 +111,8 @@
       if (!data.success) throw new Error(data.message || "还原失败");
       restoreMsg = `✅ 还原已完成`;
       showRestore = false;
-    } catch (err: any) {
-      restoreMsg = `❌ 失败: ${err.message}`;
+    } catch (err: unknown) {
+      restoreMsg = `❌ 失败: ${(err instanceof Error ? err.message : String(err))}`;
     } finally {
       isRestoring = false;
       setTimeout(() => restoreMsg = null, 5000);

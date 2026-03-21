@@ -25,14 +25,14 @@
   let cacheHitRatio = $state(0);
   let tableCount = $state(0);
   let indexCount = $state(0);
-  let recentUsers = $state<any[]>([]);
-  let activeQueries = $state<any[]>([]);
+  let recentUsers = $state<Record<string, unknown>[]>([]);
+  let activeQueries = $state<Record<string, unknown>[]>([]);
   let services = $state<ServiceInfo[]>([]);
   let servicesLoading = $state(true);
 
   const projectRef = $derived(page.params.ref);
 
-  async function runSql(sql: string): Promise<any[]> {
+  async function runSql(sql: string): Promise<Record<string, unknown>[]> {
     try {
       const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
         method: "POST",
@@ -61,14 +61,14 @@
     ]);
 
     if (dbInfo[0]) {
-      dbSize = dbInfo[0].size || "-";
-      cacheHitRatio = parseFloat(dbInfo[0].cache_ratio || "0");
+      dbSize = String(dbInfo[0].size || "-");
+      cacheHitRatio = parseFloat(String(dbInfo[0].cache_ratio || "0"));
     }
-    if (connInfo[0]) connections = parseInt(connInfo[0].active || "0");
-    if (userInfo[0]) totalUsers = parseInt(userInfo[0].total || "0");
-    if (tableInfo[0]) tableCount = parseInt(tableInfo[0].cnt || "0");
-    if (indexInfo[0]) indexCount = parseInt(indexInfo[0].cnt || "0");
-    if (storageInfo[0]) storageSize = storageInfo[0].size || "0 bytes";
+    if (connInfo[0]) connections = parseInt(String(connInfo[0].active || "0"));
+    if (userInfo[0]) totalUsers = parseInt(String(userInfo[0].total || "0"));
+    if (tableInfo[0]) tableCount = parseInt(String(tableInfo[0].cnt || "0"));
+    if (indexInfo[0]) indexCount = parseInt(String(indexInfo[0].cnt || "0"));
+    if (storageInfo[0]) storageSize = String(storageInfo[0].size || "0 bytes");
     recentUsers = recentUserInfo;
     activeQueries = activeInfo;
 
@@ -147,8 +147,8 @@
     <!-- Quick Access Cards -->
     <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
       {#each QUICK_LINKS as link}
+        {@const Icon = link.icon}
         <a href={`/project/${projectRef}/${link.href}`} class="group flex flex-col items-center justify-center gap-3 p-4 rounded-xl border bg-card hover:border-brand/40 hover:shadow-sm transition-all text-center">
-          {@const Icon = link.icon}
           <div class={`w-10 h-10 rounded-xl flex items-center justify-center border transition-transform group-hover:scale-110 ${link.color}`}>
             <Icon size={18} />
           </div>
@@ -256,11 +256,11 @@
               <div class="px-5 py-2.5 flex items-center justify-between">
                 <div class="flex items-center gap-2">
                   <div class="w-6 h-6 rounded-full bg-brand/10 text-brand flex items-center justify-center text-[10px] font-bold">
-                    {(user.email || "?").charAt(0).toUpperCase()}
+                    {String(user.email || "?").charAt(0).toUpperCase()}
                   </div>
                   <span class="text-xs font-mono truncate max-w-[160px]">{user.email || "-"}</span>
                 </div>
-                <span class="text-[10px] text-muted-foreground">{user.created_at?.substring(0, 10)}</span>
+                <span class="text-[10px] text-muted-foreground">{String(user.created_at || "").substring(0, 10)}</span>
               </div>
             {/each}
           </div>

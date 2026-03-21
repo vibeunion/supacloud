@@ -1,4 +1,5 @@
 import { $ } from "bun";
+import { logger } from "../utils/logger";
 
 export interface NodeInfo {
     ip: string;
@@ -24,7 +25,7 @@ export class NodeManager {
         try {
             const data = await file.text();
             return JSON.parse(data);
-        } catch (e) {
+        } catch (e: unknown) {
             return [];
         }
     }
@@ -33,21 +34,21 @@ export class NodeManager {
      * Add new node and configure trust
      */
     static async addNode(ip: string, user: string, pass: string, role: string): Promise<NodeInfo> {
-        console.log(`[Node] Preparing to add node: ${ip} (${role})...`);
+        logger.info(`[Node] Preparing to add node: ${ip} (${role})...`);
 
         // 1. Configure SSH trust (using ssh-copy-id simulation, or write key directly)
         // Note: In actual execution, it's recommended to check if passwordless connection works first
         try {
             const pubKeyPath = `${process.env.HOME}/.ssh/id_rsa.pub`;
             if (!(await Bun.file(pubKeyPath).exists())) {
-                console.log("[Node] Generating management node SSH key pair...");
+                logger.info("[Node] Generating management node SSH key pair...");
                 await $`ssh-keygen -t rsa -N "" -f ${process.env.HOME}/.ssh/id_rsa`.quiet();
             }
 
-            console.log(`[Node] Distributing SSH key to ${ip}...`);
+            logger.info(`[Node] Distributing SSH key to ${ip}...`);
             // Use sshpass (if installed) or manual injection
             await $`sshpass -p "${pass}" ssh-copy-id -o StrictHostKeyChecking=no ${user}@${ip}`.quiet();
-        } catch (error) {
+        } catch (error: unknown) {
             throw new Error(`Failed to establish SSH trust: ${error}`);
         }
 
@@ -57,7 +58,7 @@ export class NodeManager {
         const newNode: NodeInfo = {
             ip,
             hostname,
-            role: role as any,
+            role: role as "db" | "app" | "pg" | "lb",
             status: "online",
             createdAt: Date.now(),
         };

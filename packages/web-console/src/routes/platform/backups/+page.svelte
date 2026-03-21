@@ -13,9 +13,9 @@
     label: string;
   }
 
-  let backups: BackupInfo[] = $state([]);
+  let backups: BackupInfo[] = $state.raw([]);
   let isLoading = $state(true);
-  let actionMsg: string | null = $state(null);
+  let actionMsg: string | null = $state.raw(null);
   let isCreating = $state(false);
   let backupType = $state("incr");
 
@@ -49,8 +49,8 @@
       const data = await res.json();
       actionMsg = data.success !== false ? `✅ 物理备份已触发 (${backupType})` : `❌ ${data.message || '备份失败'}`;
       await fetchBackups();
-    } catch (err: any) {
-      actionMsg = `❌ ${err.message}`;
+    } catch (err: unknown) {
+      actionMsg = `❌ ${(err instanceof Error ? err.message : String(err))}`;
     } finally {
       isCreating = false;
       setTimeout(() => actionMsg = null, 6000);
@@ -76,8 +76,8 @@
       const data = await res.json();
       actionMsg = data.success !== false ? "✅ PITR 恢复命令已发送" : `❌ ${data.message}`;
       showPitr = false;
-    } catch (err: any) {
-      actionMsg = `❌ ${err.message}`;
+    } catch (err: unknown) {
+      actionMsg = `❌ ${(err instanceof Error ? err.message : String(err))}`;
     } finally {
       isRestoring = false;
       setTimeout(() => actionMsg = null, 8000);
@@ -117,7 +117,7 @@
     </div>
     <div class="p-5 flex items-end gap-4">
       <div class="flex-1">
-        <label class="text-xs font-semibold text-muted-foreground block mb-1.5">备份类型</label>
+        <label for="a11y-routes-platform-backups--page-svelte-120" class="text-xs font-semibold text-muted-foreground block mb-1.5">备份类型</label>
         <div class="flex gap-1 bg-muted/30 rounded-lg p-0.5 w-fit">
           {#each [{ v: "full", label: "全量 (Full)" }, { v: "incr", label: "增量 (Incr)" }, { v: "diff", label: "差异 (Diff)" }] as opt}
             <button
@@ -157,12 +157,12 @@
         </div>
         <div class="flex items-end gap-4">
           <div>
-            <label class="text-xs font-semibold text-muted-foreground block mb-1.5">恢复到日期</label>
-            <input type="date" bind:value={pitrDate} class="px-3 py-2 text-xs rounded-md border bg-muted/30 focus:outline-none focus:ring-1 focus:ring-brand" />
+            <label for="a11y-routes-platform-backups--page-svelte-160" class="text-xs font-semibold text-muted-foreground block mb-1.5">恢复到日期</label>
+            <input id="a11y-routes-platform-backups--page-svelte-160" type="date" bind:value={pitrDate} class="px-3 py-2 text-xs rounded-md border bg-muted/30 focus:outline-none focus:ring-1 focus:ring-brand" />
           </div>
           <div>
-            <label class="text-xs font-semibold text-muted-foreground block mb-1.5">时间</label>
-            <input type="time" step="1" bind:value={pitrTime} class="px-3 py-2 text-xs rounded-md border bg-muted/30 focus:outline-none focus:ring-1 focus:ring-brand" />
+            <label for="a11y-routes-platform-backups--page-svelte-164" class="text-xs font-semibold text-muted-foreground block mb-1.5">时间</label>
+            <input id="a11y-routes-platform-backups--page-svelte-164" type="time" step="1" bind:value={pitrTime} class="px-3 py-2 text-xs rounded-md border bg-muted/30 focus:outline-none focus:ring-1 focus:ring-brand" />
           </div>
           <button
             onclick={restorePitr}

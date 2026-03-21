@@ -4,6 +4,7 @@
   import { onMount } from "svelte";
   import { page } from "$app/state";
   import { Loader2, Play, Square, RotateCw, Activity, Server, Shield, Database, Radio, HardDrive, AlertTriangle } from "lucide-svelte";
+  import { toast } from "svelte-sonner";
 
   interface ServiceInfo {
     name: string;
@@ -26,16 +27,16 @@
         const data = await res.json();
         const svcArr = data.services || [];
         services = [
-          { name: "PostgreSQL", icon: Database, status: svcArr.find((s: any) => s.name === "PostgreSQL")?.status || "INACTIVE", systemdUnit: "patroni" },
-          { name: "PostgREST", icon: Server, status: svcArr.find((s: any) => s.name === "PostgREST")?.status || "INACTIVE", systemdUnit: `supacloud-pgrst@${projectRef}` },
-          { name: "GoTrue", icon: Shield, status: svcArr.find((s: any) => s.name === "GoTrue")?.status || "INACTIVE", systemdUnit: `supacloud-gotrue@${projectRef}` },
-          { name: "Realtime", icon: Radio, status: svcArr.find((s: any) => s.name === "Realtime")?.status || "INACTIVE", systemdUnit: `supacloud-realtime@${projectRef}` },
-          { name: "Storage", icon: HardDrive, status: svcArr.find((s: any) => s.name === "Storage")?.status || "INACTIVE", systemdUnit: `supacloud-storage@${projectRef}` },
-          { name: "Kong", icon: Activity, status: svcArr.find((s: any) => s.name === "Kong")?.status || "INACTIVE", systemdUnit: "kong" },
+          { name: "PostgreSQL", icon: Database, status: svcArr.find((s: Record<string, unknown>) => s.name === "PostgreSQL")?.status || "INACTIVE", systemdUnit: "patroni" },
+          { name: "PostgREST", icon: Server, status: svcArr.find((s: Record<string, unknown>) => s.name === "PostgREST")?.status || "INACTIVE", systemdUnit: `supacloud-pgrst@${projectRef}` },
+          { name: "GoTrue", icon: Shield, status: svcArr.find((s: Record<string, unknown>) => s.name === "GoTrue")?.status || "INACTIVE", systemdUnit: `supacloud-gotrue@${projectRef}` },
+          { name: "Realtime", icon: Radio, status: svcArr.find((s: Record<string, unknown>) => s.name === "Realtime")?.status || "INACTIVE", systemdUnit: `supacloud-realtime@${projectRef}` },
+          { name: "Storage", icon: HardDrive, status: svcArr.find((s: Record<string, unknown>) => s.name === "Storage")?.status || "INACTIVE", systemdUnit: `supacloud-storage@${projectRef}` },
+          { name: "Kong", icon: Activity, status: svcArr.find((s: Record<string, unknown>) => s.name === "Kong")?.status || "INACTIVE", systemdUnit: "kong" },
         ];
       }
-    } catch (err) {
-      console.error("Failed to fetch services:", err);
+    } catch (err: unknown) {
+      toast.error("无法fetch services");
     } finally {
       isLoading = false;
     }

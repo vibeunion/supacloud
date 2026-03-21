@@ -131,3 +131,5 @@ wechat_login_patch_local.ts
 # AI assistant directories
 .claude/
 .agents/
+
+progress.md

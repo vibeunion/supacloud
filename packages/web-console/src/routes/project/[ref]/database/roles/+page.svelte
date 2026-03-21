@@ -65,8 +65,8 @@
       const data = await res.json();
       if (data.error) throw new Error(data.message || data.error);
       roles = Array.isArray(data) ? data : data.rows || [];
-    } catch (err: any) {
-      error = err.message;
+    } catch (err: unknown) {
+      error = err instanceof Error ? err.message : String(err);
     } finally {
       isLoading = false;
     }
@@ -99,7 +99,7 @@
       const data = await res.json();
       if (data.error) { roleMsg = `❌ ${data.message || data.error}`; }
       else { roleMsg = `✅ 角色 ${newRoleName} 已创建`; showCreateRole = false; newRoleName = ""; newRolePassword = ""; await fetchRoles(); }
-    } catch (err: any) { roleMsg = `❌ ${err.message}`; }
+    } catch (err: unknown) { roleMsg = `❌ ${(err instanceof Error ? err.message : String(err))}`; }
     finally { isCreating = false; setTimeout(() => roleMsg = null, 4000); }
   }
 
@@ -113,7 +113,7 @@
       const data = await res.json();
       if (data.error) { roleMsg = `❌ ${data.message || data.error}`; }
       else { roleMsg = `角色 ${rolename} 已删除`; await fetchRoles(); }
-    } catch (err: any) { roleMsg = `❌ ${err.message}`; }
+    } catch (err: unknown) { roleMsg = `❌ ${(err instanceof Error ? err.message : String(err))}`; }
     finally { setTimeout(() => roleMsg = null, 4000); }
   }
 

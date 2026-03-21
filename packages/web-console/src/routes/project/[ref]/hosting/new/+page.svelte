@@ -28,7 +28,7 @@
   let installCommand = $state("");
   let deployMode = $state<"git" | "upload">("git");
   let isCreating = $state(false);
-  let error: string | null = $state(null);
+  let error: string | null = $state.raw(null);
 
   const selectedFw = $derived(FRAMEWORKS.find(f => f.id === framework));
 
@@ -71,8 +71,8 @@
       }
 
       goto(`/project/${projectRef}/hosting`);
-    } catch (err: any) {
-      error = err.message;
+    } catch (err: unknown) {
+      error = err instanceof Error ? err.message : String(err);
     } finally {
       isCreating = false;
     }

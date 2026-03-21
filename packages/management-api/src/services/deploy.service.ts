@@ -85,7 +85,7 @@ class DeployServiceClass {
     try {
       await $`mkdir -p ${DEPLOY_BASE_DIR}`;
       await this.loadHistory();
-    } catch (error) {
+    } catch (error: unknown) {
       logger.error("Failed to initialize deploy service", { error });
     }
   }
@@ -94,7 +94,8 @@ class DeployServiceClass {
     try {
       const data = await Bun.file(HISTORY_FILE).text();
       this.history = JSON.parse(data);
-    } catch {
+    } catch (err: unknown) {
+      logger.warn("[] Bun.file failed silently", { error: err });
       this.history = [];
     }
   }
@@ -192,7 +193,7 @@ class DeployServiceClass {
         rollbackCommand: `supacloud rollback --app ${request.app} --version ${versions.previous}`,
         logs,
       };
-    } catch (error) {
+    } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       log(`Deployment failed: ${errorMessage}`);
 
@@ -200,7 +201,7 @@ class DeployServiceClass {
         log(`Running on_failure hook: ${request.config.hooks.on_failure}`);
         try {
           await this.executeHook(request.config.hooks.on_failure, "");
-        } catch (hookError) {
+        } catch (hookError: unknown) {
           log(`Hook failed: ${hookError}`);
         }
       }
@@ -262,7 +263,8 @@ class DeployServiceClass {
         previousVersion = match[1];
         log(`Previous version: ${previousVersion}`);
       }
-    } catch {
+    } catch (err: unknown) {
+      logger.warn("[] trim failed silently", { error: err });
       log("No previous version found");
     }
 
@@ -303,7 +305,8 @@ class DeployServiceClass {
         previousVersion = match[1];
         log(`Previous version: ${previousVersion}`);
       }
-    } catch {
+    } catch (err: unknown) {
+      logger.warn("[] trim failed silently", { error: err });
       log("No previous version found");
     }
 
@@ -424,7 +427,7 @@ class DeployServiceClass {
         rollbackCommand: "",
         logs,
       };
-    } catch (error) {
+    } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       log(`Rollback failed: ${errorMessage}`);
 
@@ -477,7 +480,7 @@ class DeployServiceClass {
           try {
             await $`rm -rf ${versionDir}`;
             log(`Removed old version directory: ${versionDir}`);
-          } catch (error) {
+          } catch (error: unknown) {
             log(`Failed to remove ${versionDir}: ${error}`);
           }
         }
@@ -492,7 +495,7 @@ class DeployServiceClass {
           try {
             await $`rm -rf ${versionDir}`;
             log(`Removed old version directory: ${versionDir}`);
-          } catch (error) {
+          } catch (error: unknown) {
             log(`Failed to remove ${versionDir}: ${error}`);
           }
         }

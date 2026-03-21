@@ -1,4 +1,5 @@
 import { $ } from "bun";
+import { logger } from "../utils/logger";
 import os from "node:os";
 
 export interface HealthReport {
@@ -51,7 +52,8 @@ export class HealthChecker {
                 message: "Cloud-native storage backend not mounted",
                 recommendation: "If you need cloud elastic storage, run 'supacloud storage setup'."
             };
-        } catch {
+        } catch (err: unknown) {
+          logger.warn("[] operation failed silently", { error: err });
             return { component: "Cloud-native Storage", status: "ERROR", message: "Cannot detect storage mount status" };
         }
     }
@@ -68,7 +70,8 @@ export class HealthChecker {
                 message: `Available: ${available}`,
                 recommendation: isLow ? "Recommend expanding disk or cleaning /var/log logs." : undefined
             };
-        } catch {
+        } catch (err: unknown) {
+          logger.warn("[] operation failed silently", { error: err });
             return { component: "Storage Space", status: "ERROR", message: "Cannot get disk info" };
         }
     }
@@ -111,7 +114,8 @@ export class HealthChecker {
                 message: isActive ? "Running" : "Service stopped",
                 recommendation: isActive ? undefined : `Try running 'sudo systemctl restart ${name}'.`
             };
-        } catch {
+        } catch (err: unknown) {
+          logger.warn("[] operation failed silently", { error: err });
             return { component: label, status: "WARN", message: "Cannot access service status" };
         }
     }
@@ -135,12 +139,12 @@ export class HealthChecker {
             // 3. Cluster HA detection (Patroni)
             // @ts-ignore
             const { ClusterManager } = await import("./cluster");
-            const nodes: any[] = await ClusterManager.getStatus();
+            const nodes: { role: string; state: string; member: string }[] = await ClusterManager.getStatus();
 
             if (nodes.length > 0) {
-                const leader = nodes.find((n: any) => n.role === "Leader");
-                const replicas = nodes.filter((n: any) => n.role === "Replica");
-                const issues = nodes.filter((n: any) => n.state !== "running");
+                const leader = nodes.find((n) => n.role === "Leader");
+                const replicas = nodes.filter((n) => n.role === "Replica");
+                const issues = nodes.filter((n) => n.state !== "running");
 
                 if (!leader) {
                     return {
@@ -179,7 +183,8 @@ export class HealthChecker {
             }
 
             return { component: "Database (PostgreSQL)", status: "OK", message: `PG ${pgVersion.trim()} running in single-node mode` };
-        } catch {
+        } catch (err: unknown) {
+          logger.warn("[] trim failed silently", { error: err });
             return { component: "Database", status: "WARN", message: "Cannot detect detailed database metrics" };
         }
     }
@@ -194,7 +199,7 @@ export class HealthChecker {
                     message: `Ready (Version: ${version.trim()})`
                 };
             }
-        } catch { }
+        } catch (e: unknown) { logger.debug("[infra/health] suppressed error", { error: e instanceof Error ? e.message : String(e) }); }
         return this.checkServiceStatus("pigsty", "Pigsty Infrastructure");
     }
 
@@ -212,7 +217,7 @@ export class HealthChecker {
                     recommendation: isActive ? undefined : "Please run 'sudo systemctl start angie'."
                 };
             }
-        } catch { }
+        } catch (e: unknown) { logger.debug("[infra/health] suppressed error", { error: e instanceof Error ? e.message : String(e) }); }
         return this.checkServiceStatus("angie", "Load Balancer (Angie)");
     }
 }

@@ -1,11 +1,15 @@
-import { describe, test, expect, mock, spyOn } from "bun:test";
+import { describe, test, expect, mock } from "bun:test";
 import { gatewayService } from "../../src/services/gateway.service";
+
+/** Type-safe mock for globalThis.fetch using two-step cast */
+function mockFetch(handler: () => Promise<Response>): void {
+    globalThis.fetch = mock(handler) as unknown as typeof fetch;
+}
 
 describe("GatewayService", () => {
     test("applyConfig should combine multiple calls", async () => {
-        // Mock fetch to simulate Kong Admin API
         const originalFetch = globalThis.fetch;
-        globalThis.fetch = mock(() => Promise.resolve(new Response(JSON.stringify({ data: [] })))) as any;
+        mockFetch(() => Promise.resolve(new Response(JSON.stringify({ data: [] }))));
 
         const result = await gatewayService.applyConfig("testref123", {
             rateLimitTier: 'enterprise',
@@ -20,7 +24,7 @@ describe("GatewayService", () => {
 
     test("setRateLimit should return true", async () => {
         const originalFetch = globalThis.fetch;
-        globalThis.fetch = mock(() => Promise.resolve(new Response(JSON.stringify({ data: [] })))) as any;
+        mockFetch(() => Promise.resolve(new Response(JSON.stringify({ data: [] }))));
 
         const result = await gatewayService.setRateLimit("testref123", "pro");
         expect(result).toBe(true);
@@ -30,7 +34,7 @@ describe("GatewayService", () => {
 
     test("setCors should return true", async () => {
         const originalFetch = globalThis.fetch;
-        globalThis.fetch = mock(() => Promise.resolve(new Response(JSON.stringify({ data: [] })))) as any;
+        mockFetch(() => Promise.resolve(new Response(JSON.stringify({ data: [] }))));
 
         const result = await gatewayService.setCors("testref123", "*");
         expect(result).toBe(true);

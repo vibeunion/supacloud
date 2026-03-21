@@ -5,9 +5,10 @@
   import { t } from "svelte-i18n";
   import { page } from "$app/state";
   import { Database, Folder, Plus, Search, Trash2, ExternalLink, Loader2, X, Save } from "lucide-svelte";
+  import { toast } from "svelte-sonner";
 
-  let buckets = $state<any[]>([]);
-  let files = $state<any[]>([]);
+  let buckets = $state<Record<string, unknown>[]>([]);
+  let files = $state<Record<string, unknown>[]>([]);
   let selectedBucketId = $state<string | null>(null);
   let isLoadingBuckets = $state<boolean>(true);
   let isLoadingFiles = $state<boolean>(false);
@@ -28,10 +29,10 @@
       const res = await apiClient(`/v1/storage/${projectRef}/buckets`);
       buckets = await res.json();
       if (buckets.length > 0 && !selectedBucketId) {
-        selectedBucketId = buckets[0].id || buckets[0].name;
+        selectedBucketId = String(buckets[0].id || buckets[0].name);
       }
-    } catch (err) {
-      console.error("Failed to fetch buckets:", err);
+    } catch (err: unknown) {
+      toast.error("无法fetch buckets");
     } finally {
       isLoadingBuckets = false;
     }
@@ -58,10 +59,10 @@
         await fetchBuckets();
       } else {
         const err = await res.json();
-        bucketMsg = `❌ 创建失败: ${err.error || err.message || res.statusText}`;
+        bucketMsg = `❌ 创建失败: ${err.error || (err instanceof Error ? err.message : String(err)) || res.statusText}`;
       }
-    } catch (err: any) {
-      bucketMsg = `❌ 创建失败: ${err.message}`;
+    } catch (err: unknown) {
+      bucketMsg = `❌ 创建失败: ${(err instanceof Error ? err.message : String(err))}`;
     } finally {
       creatingBucket = false;
       setTimeout(() => bucketMsg = null, 4000);
@@ -74,8 +75,8 @@
     try {
       const res = await apiClient(`/v1/storage/${projectRef}/buckets/${bucketName}/files`);
       files = await res.json();
-    } catch (err) {
-      console.error("Failed to fetch files:", err);
+    } catch (err: unknown) {
+      toast.error("无法fetch files");
     } finally {
       isLoadingFiles = false;
     }
@@ -103,8 +104,8 @@
       
       // Refresh files list
       await fetchFiles(selectedBucketId);
-    } catch (err) {
-      console.error("Failed to upload file:", err);
+    } catch (err: unknown) {
+      toast.error("无法upload file");
       alert("上传失败");
     } finally {
       isUploading = false;
@@ -122,8 +123,8 @@
       if (!res.ok) throw new Error(await res.text());
       
       await fetchFiles(selectedBucketId);
-    } catch (err) {
-      console.error("Failed to delete file:", err);
+    } catch (err: unknown) {
+      toast.error("无法delete file");
       alert("删除失败");
     }
   }
@@ -187,7 +188,7 @@
         {:else}
           {#each buckets as bucket}
             <button 
-              onclick={() => selectedBucketId = bucket.id || bucket.name}
+              onclick={() => selectedBucketId = String(bucket.id || bucket.name)}
               class="w-full flex items-center justify-between px-3 py-2 text-sm rounded-md transition-all
                 {selectedBucketId === (bucket.id || bucket.name) ? 'bg-brand/10 text-brand font-medium' : 'hover:bg-muted/50 text-foreground'}"
             >
@@ -280,10 +281,10 @@
                     <td class="px-6 py-4">
                       <span class="text-xs px-2 py-0.5 bg-muted rounded text-muted-foreground">{file.type}</span>
                     </td>
-                    <td class="px-6 py-4 text-muted-foreground tabular-nums">{new Date(file.updated).toLocaleString()}</td>
+                    <td class="px-6 py-4 text-muted-foreground tabular-nums">{new Date(String(file.updated)).toLocaleString()}</td>
                     <td class="px-6 py-4 text-right">
                       <button 
-                        onclick={() => deleteFile(file.name)}
+                        onclick={() => deleteFile(String(file.name))}
                         class="p-1.5 hover:bg-destructive/10 hover:text-destructive rounded text-muted-foreground transition-colors opacity-0 group-hover:opacity-100"
                         title="Delete file"
                       >

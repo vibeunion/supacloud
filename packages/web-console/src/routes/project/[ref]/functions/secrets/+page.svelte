@@ -5,6 +5,7 @@
   import { page } from "$app/state";
   import { t } from "svelte-i18n";
   import { Loader2, Plus, KeyRound, Trash2, Eye, EyeOff, AlertTriangle, Lock } from "lucide-svelte";
+  import { toast } from "svelte-sonner";
 
   interface Secret {
     name: string;
@@ -27,8 +28,8 @@
       if (res.ok) {
         secrets = await res.json();
       }
-    } catch (err) {
-      console.error("Failed to fetch secrets:", err);
+    } catch (err: unknown) {
+      toast.error("无法fetch secrets");
     } finally {
       isLoading = false;
     }
@@ -48,8 +49,8 @@
       newKey = "";
       newValue = "";
       await fetchSecrets();
-    } catch (err) {
-      console.error("Failed to add secret:", err);
+    } catch (err: unknown) {
+      toast.error("无法add secret");
     }
   }
 
@@ -58,8 +59,8 @@
     try {
       await apiClient(`/v1/projects/${projectRef}/secrets/${name}`, { method: "DELETE" });
       await fetchSecrets();
-    } catch (err) {
-      console.error("Failed to delete secret:", err);
+    } catch (err: unknown) {
+      toast.error("无法delete secret");
     }
   }
 </script>

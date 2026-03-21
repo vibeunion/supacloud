@@ -4,6 +4,7 @@
   import { onMount } from "svelte";
   import { page } from "$app/state";
   import { Loader2, Database, Clock, HardDrive, Shield, Cpu } from "lucide-svelte";
+  import { toast } from "svelte-sonner";
 
   interface DbSetting {
     name: string;
@@ -46,8 +47,8 @@
       if (!data.error) {
         settings = Array.isArray(data) ? data : data.rows || [];
       }
-    } catch (err) {
-      console.error("Failed to fetch settings:", err);
+    } catch (err: unknown) {
+      toast.error("无法fetch settings");
     } finally {
       isLoading = false;
     }

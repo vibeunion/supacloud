@@ -4,6 +4,7 @@
   import { onMount } from "svelte";
   import { page } from "$app/state";
   import { Loader2, Database, Copy, RefreshCw, Settings } from "lucide-svelte";
+  import { toast } from "svelte-sonner";
 
   let poolMode = $state("transaction");
   let poolSize = $state(15);
@@ -32,8 +33,8 @@
         poolSize = cfg.pgbouncer_default_pool_size || 15;
         pgbouncerPort = cfg.pgbouncer_port || 6543;
       }
-    } catch (err) {
-      console.error("Failed to fetch pooling config:", err);
+    } catch (err: unknown) {
+      toast.error("无法fetch pooling config");
     } finally {
       isLoading = false;
     }

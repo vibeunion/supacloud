@@ -4,8 +4,9 @@
   import { onMount } from "svelte";
   import { page } from "$app/state";
   import { Loader2, Copy, Eye, EyeOff, Tag, Link2 } from "lucide-svelte";
+  import { toast } from "svelte-sonner";
 
-  let project = $state<any>(null);
+  let project = $state<Record<string, unknown> | null>(null);
   let isLoading = $state(true);
   let showAnonKey = $state(false);
   let showServiceKey = $state(false);
@@ -19,8 +20,8 @@
     try {
       const res = await apiClient(`/v1/projects/${projectRef}`);
       project = await res.json();
-    } catch (err) {
-      console.error("Failed to fetch project:", err);
+    } catch (err: unknown) {
+      toast.error("无法fetch project");
     } finally {
       isLoading = false;
     }
@@ -93,7 +94,7 @@
                 >{project.anon_key || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."}</textarea>
               </div>
               <div class="flex flex-col gap-2 shrink-0">
-                <button onclick={() => copyToClipboard(project.anon_key || "")}
+                <button onclick={() => copyToClipboard(String((project as Record<string, unknown>)?.anon_key || ""))}
                   class="px-3 py-2 text-xs rounded-lg border hover:bg-muted/50 transition-colors" title="复制">
                   <Copy size={14} />
                 </button>
@@ -121,7 +122,7 @@
                 >{project.service_role_key || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."}</textarea>
               </div>
               <div class="flex flex-col gap-2 shrink-0">
-                <button onclick={() => copyToClipboard(project.service_role_key || "")}
+                <button onclick={() => copyToClipboard(String((project as Record<string, unknown>)?.service_role_key || ""))}
                   class="px-3 py-2 text-xs rounded-lg border hover:bg-muted/50 transition-colors" title="复制">
                   <Copy size={14} />
                 </button>

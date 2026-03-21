@@ -108,9 +108,9 @@ export async function handleProjectCreate(args: string[]) {
         p.log.info(`Studio URL: ${result.studio.url}`);
 
         p.outro("✅ Project creation initiated. Use 'supacloud project list' to check status.");
-    } catch (error: any) {
+    } catch (error: unknown) {
         s.stop("Failed to create project");
-        p.log.error(error.message);
+        p.log.error((error instanceof Error ? error.message : String(error)));
         process.exit(1);
     }
 }
@@ -139,9 +139,9 @@ export async function handleProjectList() {
         }
 
         p.outro("Done");
-    } catch (error: any) {
+    } catch (error: unknown) {
         s.stop("Failed to fetch projects");
-        p.log.error(error.message);
+        p.log.error((error instanceof Error ? error.message : String(error)));
         process.exit(1);
     }
 }
@@ -168,9 +168,9 @@ export async function handleProjectGet(ref: string) {
         console.log("");
 
         p.outro("Done");
-    } catch (error: any) {
+    } catch (error: unknown) {
         s.stop("Failed to fetch project");
-        p.log.error(error.message);
+        p.log.error((error instanceof Error ? error.message : String(error)));
         process.exit(1);
     }
 }
@@ -200,9 +200,9 @@ export async function handleProjectDelete(ref: string, args: string[]) {
         s.stop("Project deletion initiated");
 
         p.outro(`✅ Project ${ref} is being deleted. Resources will be cleaned up shortly.`);
-    } catch (error: any) {
+    } catch (error: unknown) {
         s.stop("Failed to delete project");
-        p.log.error(error.message);
+        p.log.error((error instanceof Error ? error.message : String(error)));
         process.exit(1);
     }
 }
@@ -218,9 +218,9 @@ export async function handleProjectPause(ref: string) {
         s.stop("Project paused");
 
         p.outro(`✅ Project ${ref} is now paused`);
-    } catch (error: any) {
+    } catch (error: unknown) {
         s.stop("Failed to pause project");
-        p.log.error(error.message);
+        p.log.error((error instanceof Error ? error.message : String(error)));
         process.exit(1);
     }
 }
@@ -236,9 +236,9 @@ export async function handleProjectRestore(ref: string) {
         s.stop("Project restored");
 
         p.outro(`✅ Project ${ref} is now active`);
-    } catch (error: any) {
+    } catch (error: unknown) {
         s.stop("Failed to restore project");
-        p.log.error(error.message);
+        p.log.error((error instanceof Error ? error.message : String(error)));
         process.exit(1);
     }
 }
@@ -254,9 +254,9 @@ export async function handleProjectRestart(ref: string) {
         s.stop("Project restart initiated");
 
         p.outro(`✅ Project ${ref} is restarting`);
-    } catch (error: any) {
+    } catch (error: unknown) {
         s.stop("Failed to restart project");
-        p.log.error(error.message);
+        p.log.error((error instanceof Error ? error.message : String(error)));
         process.exit(1);
     }
 }
@@ -277,9 +277,9 @@ export async function handleProjectKeys(ref: string) {
         console.log("");
 
         p.outro("⚠️ Keep these keys secure!");
-    } catch (error: any) {
+    } catch (error: unknown) {
         s.stop("Failed to fetch API keys");
-        p.log.error(error.message);
+        p.log.error((error instanceof Error ? error.message : String(error)));
         process.exit(1);
     }
 }
@@ -314,9 +314,9 @@ export async function handleProjectRotateKeys(ref: string, args: string[]) {
         console.log("");
 
         p.outro("✅ API keys have been rotated. Update your applications!");
-    } catch (error: any) {
+    } catch (error: unknown) {
         s.stop("Failed to rotate API keys");
-        p.log.error(error.message);
+        p.log.error((error instanceof Error ? error.message : String(error)));
         process.exit(1);
     }
 }

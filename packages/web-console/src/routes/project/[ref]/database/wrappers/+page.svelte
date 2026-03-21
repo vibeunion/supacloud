@@ -4,6 +4,7 @@
   import { onMount } from "svelte";
   import { page } from "$app/state";
   import { Loader2, Globe, Database, Settings, AlertTriangle } from "lucide-svelte";
+  import { toast } from "svelte-sonner";
 
   interface Wrapper {
     id: number;
@@ -52,8 +53,8 @@
       if (!data.error) {
         wrappers = Array.isArray(data) ? data : data.rows || [];
       }
-    } catch (err) {
-      console.error("Failed to fetch wrappers:", err);
+    } catch (err: unknown) {
+      toast.error("无法fetch wrappers");
     } finally {
       isLoading = false;
     }

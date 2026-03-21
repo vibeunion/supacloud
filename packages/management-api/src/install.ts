@@ -109,13 +109,13 @@ export async function runInstall(options: { forceYes?: boolean } = {}) {
         // --- Immediate post-install inspection ---
         const { runDoctor } = await import("./doctor");
         await runDoctor({ forceYes: options.forceYes });
-    } catch (error: any) {
-        p.log.error(`Deployment failed: ${error.message}`);
+    } catch (error: unknown) {
+        p.log.error(`Deployment failed: ${error instanceof Error ? error.message : String(error)}`);
         process.exit(1);
     }
 }
 
-import { PigstyManager, type PigstyConfig } from "./infra/pigsty";
+import { install as pigstyInstall, type PigstyConfig } from "./infra/pigsty";
 import { LoadBalancerManager } from "./infra/loadbalancer";
 import { ServiceManager } from "./infra/service";
 
@@ -237,7 +237,7 @@ async function runInteractiveConfig(forceYes = false): Promise<PigstyConfig> {
             }),
             storageType: () => p.select({
                 message: 'Select storage backend architecture',
-                initialValue: storageType as any || 'juicefs',
+                initialValue: storageType as string || 'juicefs',
                 options: [
                     { value: 'juicefs', label: 'JuiceFS (Recommended: High-performance distributed block storage)' },
                     { value: 'minio', label: 'Minio (Standard S3)' }

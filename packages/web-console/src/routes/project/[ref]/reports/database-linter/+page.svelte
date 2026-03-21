@@ -84,8 +84,8 @@
       const data = await res.json();
       if (data.error) throw new Error(data.message || data.error);
       issues = Array.isArray(data) ? data : data.rows || [];
-    } catch (err: any) {
-      error = err.message;
+    } catch (err: unknown) {
+      error = err instanceof Error ? err.message : String(err);
     } finally {
       isLoading = false;
     }
