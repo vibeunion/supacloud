@@ -301,6 +301,39 @@ export class GatewayService {
                 - Authorization
                 - Content-Type
                 - X-Api-Version
+               credentials: true
+              max_age: 3600
+  - name: svc-realtime-${projectRef}
+    url: http://${hostIp}:4000
+    connect_timeout: 5000
+    read_timeout: 86400000
+    write_timeout: 86400000
+    routes:
+      - name: route-realtime-${projectRef}
+        strip_path: true
+        preserve_host: true
+        paths:
+          - /realtime/v1
+        headers:
+          x-project-ref:
+            - ${projectRef}
+        plugins:
+          - name: cors
+            config:
+              origins:
+                - "*"
+              methods:
+                - GET
+                - POST
+                - PUT
+                - PATCH
+                - DELETE
+                - OPTIONS
+              headers:
+                - Accept
+                - Authorization
+                - Content-Type
+                - X-Api-Version
               credentials: true
               max_age: 3600
 `;
