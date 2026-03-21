@@ -1,0 +1,13 @@
+{
+  "name": "@supacloud/edge-runtime",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun run --watch server.ts",
+    "start": "bun run server.ts"
+  },
+  "dependencies": {
+    "elysia": "^1.2.25"
+  }
+}
