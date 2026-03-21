@@ -9,6 +9,10 @@
  * Auth: Bearer token in Authorization header.
  *   - masterToken → admin (all tools)
  *   - HMAC-signed token → project-scoped (subset of tools)
+ *
+ * Uses Elysia's onRequest lifecycle to intercept /mcp paths BEFORE
+ * body parsing, passing the raw Request directly to MCP SDK's
+ * WebStandardStreamableHTTPServerTransport.
  */
 import { Elysia } from "elysia";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -16,29 +20,29 @@ import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/
 import { verifyMcpToken, type McpTokenPayload } from "../mcp/token";
 import { registerMcpTools } from "../mcp/tools";
 
-// Session store: sessionId → { transport, server }
-const sessions = new Map<string, { transport: WebStandardStreamableHTTPServerTransport; server: McpServer }>();
+// Session store: sessionId → { transport, server, _createdAt }
+const sessions = new Map<string, { transport: WebStandardStreamableHTTPServerTransport; server: McpServer; _createdAt: number }>();
 
 // Cleanup old sessions every 30 minutes
 setInterval(() => {
   const maxAge = 30 * 60_000;
   const now = Date.now();
   for (const [id, session] of sessions) {
-    if ((session as any)._createdAt && now - (session as any)._createdAt > maxAge) {
+    if (now - session._createdAt > maxAge) {
       session.transport.close?.();
       sessions.delete(id);
     }
   }
 }, 30 * 60_000);
 
-async function authenticate(headers: Record<string, string | undefined>): Promise<McpTokenPayload | null> {
-  const authHeader = headers.authorization || headers.Authorization;
+async function authenticate(headers: Headers): Promise<McpTokenPayload | null> {
+  const authHeader = headers.get("authorization") || headers.get("Authorization");
   if (!authHeader?.startsWith("Bearer ")) return null;
   const token = authHeader.slice(7);
   return await verifyMcpToken(token);
 }
 
-function createMcpSession(tokenPayload: McpTokenPayload): { transport: WebStandardStreamableHTTPServerTransport; server: McpServer } {
+function createMcpSession(tokenPayload: McpTokenPayload) {
   const serverName = tokenPayload.ref ? `supacloud-${tokenPayload.ref}` : "supacloud";
   const server = new McpServer({ name: serverName, version: "0.5.5" });
 
@@ -47,130 +51,118 @@ function createMcpSession(tokenPayload: McpTokenPayload): { transport: WebStanda
   const transport = new WebStandardStreamableHTTPServerTransport({
     sessionIdGenerator: () => crypto.randomUUID(),
     onsessioninitialized: (sessionId: string) => {
-      const session = { transport, server, _createdAt: Date.now() } as any;
-      sessions.set(sessionId, session);
+      sessions.set(sessionId, { transport, server, _createdAt: Date.now() });
     },
   });
 
   server.connect(transport);
 
-  return { transport, server };
+  return { transport, server, _createdAt: Date.now() };
 }
 
-export const mcpRoutes = new Elysia({ prefix: "/mcp" })
-  // POST /mcp — Main JSON-RPC endpoint
-  .post("/", async ({ request, headers, body, set }) => {
-    const tokenPayload = await authenticate(headers as any);
-    if (!tokenPayload) {
-      set.status = 401;
-      return { error: "Invalid or missing MCP token" };
+// JSON helper
+function jsonResponse(data: any, status = 200): Response {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+// Handle MCP request (POST, GET, DELETE)
+async function handleMcp(request: Request): Promise<Response> {
+  const method = request.method;
+
+  // Auth check (all methods)
+  const tokenPayload = await authenticate(request.headers);
+  if (!tokenPayload) {
+    return jsonResponse({ error: "Invalid or missing MCP token" }, 401);
+  }
+
+  // POST /mcp — JSON-RPC
+  if (method === "POST") {
+    const url = new URL(request.url);
+    // Token creation endpoint
+    if (url.pathname === "/mcp/tokens") {
+      if (tokenPayload.role !== "admin") {
+        return jsonResponse({ error: "Admin token required" }, 403);
+      }
+      const body = await request.json() as any;
+      const { createMcpToken } = await import("../mcp/token");
+      if (!body.ref) {
+        return jsonResponse({ error: "ref is required" }, 400);
+      }
+      const token = await createMcpToken({
+        role: "project",
+        ref: body.ref,
+        name: body.name || "default",
+        readonly: body.readonly ?? true,
+        expiresInDays: body.expires_days ?? 365,
+      });
+      return jsonResponse({ token, ref: body.ref, readonly: body.readonly ?? true, expires_days: body.expires_days ?? 365 });
     }
 
-    // Check for existing session
-    const sessionId = headers["mcp-session-id"] as string | undefined;
+    // MCP JSON-RPC
+    const sessionId = request.headers.get("mcp-session-id");
     let session: { transport: WebStandardStreamableHTTPServerTransport; server: McpServer };
 
     if (sessionId && sessions.has(sessionId)) {
       session = sessions.get(sessionId)!;
     } else {
-      // New session (initialize request)
       session = createMcpSession(tokenPayload);
     }
 
-    // Elysia consumes the request body, so reconstruct a fresh Request for the transport
-    try {
-      const freshReq = new Request(request.url, {
-        method: "POST",
-        headers: request.headers,
-        body: JSON.stringify(body),
-      });
+    return await session.transport.handleRequest(request);
+  }
 
-      const response = await session.transport.handleRequest(freshReq);
-      
-      if (response) {
-        // Copy headers from MCP response
-        for (const [k, v] of response.headers.entries()) {
-          set.headers[k] = v;
-        }
-        set.status = response.status;
-        return response.body ? await response.text() : "";
-      }
-
-      set.status = 202;
-      return "";
-    } catch (e: any) {
-      console.error("[MCP] Error:", e);
-      set.status = 500;
-      return { error: e.message };
-    }
-  })
-
-  // GET /mcp — SSE stream (for server-initiated notifications)
-  .get("/", async ({ request, headers, set }) => {
-    const tokenPayload = await authenticate(headers as any);
-    if (!tokenPayload) {
-      set.status = 401;
-      return { error: "Invalid or missing MCP token" };
-    }
-
-    const sessionId = headers["mcp-session-id"] as string | undefined;
+  // GET /mcp — SSE stream
+  if (method === "GET") {
+    const sessionId = request.headers.get("mcp-session-id");
     if (!sessionId || !sessions.has(sessionId)) {
-      set.status = 400;
-      return { error: "No active session. Send POST /mcp first to initialize." };
+      return jsonResponse({ error: "No active session. Send POST /mcp first to initialize." }, 400);
     }
-
     const session = sessions.get(sessionId)!;
-    try {
-      const response = await session.transport.handleRequest(request);
-      if (response) {
-        for (const [k, v] of response.headers.entries()) {
-          set.headers[k] = v;
-        }
-        set.status = response.status;
-        return response.body;
-      }
-      set.status = 200;
-      return "";
-    } catch (e: any) {
-      set.status = 500;
-      return { error: e.message };
-    }
-  })
+    return await session.transport.handleRequest(request);
+  }
 
   // DELETE /mcp — Close session
-  .delete("/", async ({ headers, set }) => {
-    const sessionId = headers["mcp-session-id"] as string | undefined;
+  if (method === "DELETE") {
+    const sessionId = request.headers.get("mcp-session-id");
     if (sessionId && sessions.has(sessionId)) {
       const session = sessions.get(sessionId)!;
       session.transport.close?.();
       sessions.delete(sessionId);
     }
-    set.status = 200;
-    return { message: "Session closed" };
-  })
+    return jsonResponse({ message: "Session closed" });
+  }
 
-  // Token management (admin only, no /mcp prefix needed really but grouping here)
-  .post("/tokens", async ({ headers, body, set }) => {
-    const tokenPayload = await authenticate(headers as any);
-    if (!tokenPayload || tokenPayload.role !== "admin") {
-      set.status = 403;
-      return { error: "Admin token required" };
+  return jsonResponse({ error: "Method not allowed" }, 405);
+}
+
+/**
+ * Register MCP routes using Elysia's onRequest lifecycle.
+ * This intercepts /mcp paths BEFORE Elysia touches the body,
+ * giving the MCP SDK a fresh, unconsumed Request object.
+ */
+export const mcpRoutes = new Elysia()
+  .onRequest(async ({ request, set }) => {
+    const url = new URL(request.url);
+    if (url.pathname.startsWith("/mcp")) {
+      try {
+        const response = await handleMcp(request);
+        // Copy response back to Elysia
+        set.status = response.status;
+        for (const [k, v] of response.headers.entries()) {
+          set.headers[k] = v;
+        }
+        // If it's an SSE stream, return the ReadableStream directly
+        if (response.headers.get("content-type")?.includes("text/event-stream")) {
+          return response;
+        }
+        return await response.text();
+      } catch (e: any) {
+        console.error("[MCP] Error:", e);
+        set.status = 500;
+        return JSON.stringify({ error: e.message });
+      }
     }
-
-    const { createMcpToken } = await import("../mcp/token");
-    const { ref, name, readonly, expires_days } = body as any;
-    if (!ref) {
-      set.status = 400;
-      return { error: "ref is required" };
-    }
-
-    const token = await createMcpToken({
-      role: "project",
-      ref,
-      name: name || "default",
-      readonly: readonly ?? true,
-      expiresInDays: expires_days ?? 365,
-    });
-
-    return { token, ref, readonly: readonly ?? true, expires_days: expires_days ?? 365 };
   });
