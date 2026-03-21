@@ -98,40 +98,30 @@ class TenantRuntimeService {
     }
 
     /**
-     * Ensure binaries exist by elevating privileges or copying from containers
+     * Ensure binaries exist at their configured paths.
+     * PostgREST and GoTrue must be pre-installed — no container fallback.
      */
     private async ensureBinaries() {
         // Check PostgREST binary
         const pgrstCheck = await $`which postgrest`.nothrow().quiet();
-        const hasPgrstEnv = await fs.access(this.POSTGREST_BIN).then(() => true).catch(() => false);
+        const hasPgrstBin = await fs.access(this.POSTGREST_BIN).then(() => true).catch(() => false);
 
-        if (pgrstCheck.exitCode !== 0 && !hasPgrstEnv) {
-            logger.info("PostgREST missing, attempting docker copy...");
-            const { stdout: cid } = await $`docker ps -q -f "name=supabase-rest"`.nothrow().quiet();
-            if (cid.toString().trim()) {
-                await $`docker cp ${cid.toString().trim()}:/usr/local/bin/postgrest ${this.POSTGREST_BIN}`.nothrow().quiet();
-            } else {
-                throw new Error("PostgREST binary not found and no running supabase-rest container to extract from.");
-            }
+        if (pgrstCheck.exitCode !== 0 && !hasPgrstBin) {
+            throw new Error(
+                `PostgREST binary not found at ${this.POSTGREST_BIN} or in PATH. ` +
+                `Install it manually: curl -L https://github.com/PostgREST/postgrest/releases/latest -o ${this.POSTGREST_BIN} && chmod +x ${this.POSTGREST_BIN}`
+            );
         }
 
         // Check GoTrue binary
         const gotrueCheck = await $`which gotrue`.nothrow().quiet();
-        const hasGotrueEnv = await fs.access(this.GOTRUE_BIN).then(() => true).catch(() => false);
+        const hasGotrueBin = await fs.access(this.GOTRUE_BIN).then(() => true).catch(() => false);
 
-        if (gotrueCheck.exitCode !== 0 && !hasGotrueEnv) {
-            logger.info("GoTrue missing, attempting docker copy...");
-            const { stdout: cid } = await $`docker ps -q -f "name=supabase-auth"`.nothrow().quiet();
-            if (cid.toString().trim()) {
-                const container = cid.toString().trim();
-                const tmpBin = "/tmp/gotrue-extract";
-                // Attempt to copy from common container binary paths
-                await $`docker cp ${container}:/usr/local/bin/gotrue ${tmpBin} || docker cp ${container}:/usr/local/bin/auth ${tmpBin}`.nothrow().quiet();
-                await $`mv ${tmpBin} ${this.GOTRUE_BIN}`.nothrow().quiet();
-                await $`chmod +x ${this.GOTRUE_BIN}`.nothrow().quiet();
-            } else {
-                throw new Error("GoTrue binary not found and no running supabase-auth container to extract from.");
-            }
+        if (gotrueCheck.exitCode !== 0 && !hasGotrueBin) {
+            throw new Error(
+                `GoTrue binary not found at ${this.GOTRUE_BIN} or in PATH. ` +
+                `Install it manually: curl -L https://github.com/supabase/gotrue/releases/latest -o ${this.GOTRUE_BIN} && chmod +x ${this.GOTRUE_BIN}`
+            );
         }
     }
 
