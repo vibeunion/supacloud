@@ -1,6 +1,7 @@
 import { $ } from "bun";
 import path from "path";
 import { logger } from "../utils/logger";
+import { sql } from "../db";
 
 export interface StaticDeployConfig {
   name: string;
@@ -76,32 +77,51 @@ export interface DeploymentHistory {
 }
 
 const DEPLOY_BASE_DIR = "/var/supacloud/deployments";
-const HISTORY_FILE = "/var/supacloud/deployments/history.json";
 
 class DeployServiceClass {
-  private history: DeploymentHistory[] = [];
+  private initialized = false;
 
   async initialize(): Promise<void> {
     try {
       await $`mkdir -p ${DEPLOY_BASE_DIR}`;
-      await this.loadHistory();
+      // Ensure deployment_history table exists
+      await sql`
+        CREATE TABLE IF NOT EXISTS deployment_history (
+          id TEXT PRIMARY KEY,
+          app TEXT NOT NULL,
+          tenant TEXT NOT NULL,
+          version TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'success',
+          deployed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          triggered_by TEXT NOT NULL DEFAULT 'api',
+          config JSONB NOT NULL DEFAULT '{}'::jsonb,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `;
+      this.initialized = true;
     } catch (error: unknown) {
       logger.error("Failed to initialize deploy service", { error });
     }
   }
 
-  private async loadHistory(): Promise<void> {
-    try {
-      const data = await Bun.file(HISTORY_FILE).text();
-      this.history = JSON.parse(data);
-    } catch (err: unknown) {
-      logger.warn("[] Bun.file failed silently", { error: err });
-      this.history = [];
-    }
+  private async addHistory(entry: DeploymentHistory): Promise<void> {
+    await sql`
+      INSERT INTO deployment_history (id, app, tenant, version, status, deployed_at, triggered_by, config)
+      VALUES (${entry.id}, ${entry.appId}, ${entry.tenant}, ${entry.version}, ${entry.status}, ${entry.deployedAt}, ${entry.triggeredBy}, ${JSON.stringify(entry.config)})
+    `;
   }
 
-  private async saveHistory(): Promise<void> {
-    await Bun.write(HISTORY_FILE, JSON.stringify(this.history, null, 2));
+  private rowToHistory(r: Record<string, unknown>): DeploymentHistory {
+    return {
+      id: r.id as string,
+      appId: r.app as string,
+      tenant: r.tenant as string,
+      version: r.version as string,
+      status: r.status as "success" | "failed" | "rolled_back",
+      deployedAt: new Date(r.deployed_at as string),
+      triggeredBy: r.triggered_by as string,
+      config: r.config as DeployConfig,
+    };
   }
 
   async deploy(request: DeployRequest, triggeredBy: string = "api"): Promise<DeployResult> {
@@ -179,8 +199,7 @@ class DeployServiceClass {
         triggeredBy,
         config: request.config,
       };
-      this.history.push(deployment);
-      await this.saveHistory();
+      await this.addHistory(deployment);
 
       const duration = Date.now() - startTime;
       log(`Deployment completed successfully in ${duration}ms`);
@@ -216,8 +235,7 @@ class DeployServiceClass {
         triggeredBy,
         config: request.config,
       };
-      this.history.push(deployment);
-      await this.saveHistory();
+      await this.addHistory(deployment);
 
       return {
         success: false,
@@ -352,9 +370,13 @@ class DeployServiceClass {
     try {
       log(`Starting rollback for app: ${app}`);
 
-      const appDeployments = this.history.filter(
-        (d) => d.appId === app && d.status === "success"
-      );
+      const appRows = await sql`
+        SELECT id, app, tenant, version, status, deployed_at, triggered_by, config
+        FROM deployment_history
+        WHERE app = ${app} AND status = 'success'
+        ORDER BY deployed_at DESC
+      `;
+      const appDeployments = appRows.map((r: Record<string, unknown>) => this.rowToHistory(r));
 
       if (appDeployments.length === 0) {
         throw new Error(`No successful deployments found for app: ${app}`);
@@ -363,7 +385,7 @@ class DeployServiceClass {
       let targetDeployment: DeploymentHistory | undefined;
 
       if (version) {
-        targetDeployment = appDeployments.find((d) => d.version === version);
+        targetDeployment = appDeployments.find((d: DeploymentHistory) => d.version === version);
         if (!targetDeployment) {
           throw new Error(`Version ${version} not found for app: ${app}`);
         }
@@ -413,8 +435,7 @@ class DeployServiceClass {
         triggeredBy: "rollback",
         config: targetDeployment.config,
       };
-      this.history.push(rollbackDeployment);
-      await this.saveHistory();
+      await this.addHistory(rollbackDeployment);
 
       return {
         success: true,
@@ -443,22 +464,23 @@ class DeployServiceClass {
   }
 
   async getHistory(app?: string, limit: number = 20): Promise<DeploymentHistory[]> {
-    let filtered = this.history;
-    if (app) {
-      filtered = filtered.filter((d) => d.appId === app);
-    }
-    return filtered.sort((a, b) => b.deployedAt.getTime() - a.deployedAt.getTime()).slice(0, limit);
+    const rows = app
+      ? await sql`SELECT id, app, tenant, version, status, deployed_at, triggered_by, config FROM deployment_history WHERE app = ${app} ORDER BY deployed_at DESC LIMIT ${limit}`
+      : await sql`SELECT id, app, tenant, version, status, deployed_at, triggered_by, config FROM deployment_history ORDER BY deployed_at DESC LIMIT ${limit}`;
+    return rows.map((r: Record<string, unknown>) => this.rowToHistory(r));
   }
 
   async getVersions(app: string): Promise<{ version: string; deployedAt: Date; status: string }[]> {
-    const appDeployments = this.history.filter((d) => d.appId === app && d.status === "success");
-    return appDeployments
-      .map((d) => ({
-        version: d.version,
-        deployedAt: d.deployedAt,
-        status: d.status,
-      }))
-      .sort((a, b) => b.deployedAt.getTime() - a.deployedAt.getTime());
+    const rows = await sql`
+      SELECT version, deployed_at, status FROM deployment_history
+      WHERE app = ${app} AND status = 'success'
+      ORDER BY deployed_at DESC
+    `;
+    return rows.map((r: Record<string, unknown>) => ({
+      version: r.version as string,
+      deployedAt: new Date(r.deployed_at as string),
+      status: r.status as string,
+    }));
   }
 
   private async cleanup(app: string, keepVersions: number, log: (msg: string) => void): Promise<void> {
@@ -468,7 +490,8 @@ class DeployServiceClass {
     const versionsToRemove = versions.slice(keepVersions);
 
     for (const v of versionsToRemove) {
-      const deployment = this.history.find((d) => d.appId === app && d.version === v.version);
+      const [depRow] = await sql`SELECT id, app, tenant, version, status, deployed_at, triggered_by, config FROM deployment_history WHERE app = ${app} AND version = ${v.version} LIMIT 1`;
+      const deployment = depRow ? this.rowToHistory(depRow as Record<string, unknown>) : undefined;
       if (!deployment) continue;
 
       if (deployment.config.static) {

@@ -15,6 +15,40 @@ const AVAILABLE_REGIONS = [
   { code: "ap-southeast-1", name: "Asia Pacific (Singapore)", continent: "apac" },
 ];
 
+/**
+ * Factory: generates GET + PATCH routes for a project settings config section.
+ * Eliminates repeated boilerplate for database/postgrest/storage/realtime configs.
+ */
+function addConfigRoutes(section: string) {
+  return new Elysia({ prefix: "/v1/projects" })
+    .get(
+      `/:ref/config/${section}`,
+      async ({ params }: { params: { ref: string } }) => {
+        const settings = await projectService.getProjectSettings(params.ref);
+        if (!settings) return status(404, { error: "Project not found" });
+        return (settings as Record<string, unknown>)[section] || {};
+      },
+      { params: t.Object({ ref: t.String() }) }
+    )
+    .patch(
+      `/:ref/config/${section}`,
+      async ({ params, body }: { params: { ref: string }; body: Record<string, unknown> }) => {
+        const settings = await projectService.getProjectSettings(params.ref);
+        if (!settings) return status(404, { error: "Project not found" });
+        const current = ((settings as Record<string, unknown>)[section] as Record<string, unknown>) || {};
+        const updated = await projectService.updateProjectSettings(params.ref, {
+          ...settings,
+          [section]: { ...current, ...(typeof body === "object" ? body : {}) },
+        });
+        return (updated as Record<string, unknown>)?.[section] || {};
+      },
+      {
+        params: t.Object({ ref: t.String() }),
+        body: t.Record(t.String(), t.Unknown()),
+      }
+    );
+}
+
 export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
   // Get available regions
   .get("/available-regions", () => {
@@ -610,132 +644,11 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
     }
   )
 
-  // Get Database config
-  .get(
-    "/:ref/config/database",
-    async ({ params, set }) => {
-      const settings = await projectService.getProjectSettings(params.ref);
-      if (!settings) {
-                return status(404, { error: "Project not found" });
-      }
-      return settings.database || {};
-    },
-    {
-      params: t.Object({
-        ref: t.String(),
-      }),
-    }
-  )
-
-  // Modify Database config
-  .patch(
-    "/:ref/config/database",
-    async ({ params, body, set }) => {
-      const settings = await projectService.getProjectSettings(params.ref);
-      if (!settings) return { error: "Project not found" };
-
-      const current = (settings.database as Record<string, unknown>) || {};
-      const updated = await projectService.updateProjectSettings(params.ref, {
-        ...settings,
-        database: { ...current, ...(typeof body === "object" ? body : {}) },
-      });
-      return updated?.database || {};
-    },
-    {
-      params: t.Object({ ref: t.String() }),
-      body: t.Record(t.String(), t.Unknown()),
-    }
-  )
-
-  // Get PostgREST config
-  .get(
-    "/:ref/config/postgrest",
-    async ({ params, set }) => {
-      const settings = await projectService.getProjectSettings(params.ref);
-      if (!settings) return { error: "Project not found" };
-      return settings.postgrest || {};
-    },
-    { params: t.Object({ ref: t.String() }) }
-  )
-
-  // Modify PostgREST config
-  .patch(
-    "/:ref/config/postgrest",
-    async ({ params, body, set }) => {
-      const settings = await projectService.getProjectSettings(params.ref);
-      if (!settings) return { error: "Project not found" };
-      const current = (settings.postgrest as Record<string, unknown>) || {};
-      const updated = await projectService.updateProjectSettings(params.ref, {
-        ...settings,
-        postgrest: { ...current, ...(typeof body === "object" ? body : {}) },
-      });
-      return updated?.postgrest || {};
-    },
-    {
-      params: t.Object({ ref: t.String() }),
-      body: t.Record(t.String(), t.Unknown()),
-    }
-  )
-
-  // Get Storage config
-  .get(
-    "/:ref/config/storage",
-    async ({ params, set }) => {
-      const settings = await projectService.getProjectSettings(params.ref);
-      if (!settings) return { error: "Project not found" };
-      return settings.storage || {};
-    },
-    { params: t.Object({ ref: t.String() }) }
-  )
-
-  // Modify Storage config
-  .patch(
-    "/:ref/config/storage",
-    async ({ params, body, set }) => {
-      const settings = await projectService.getProjectSettings(params.ref);
-      if (!settings) return { error: "Project not found" };
-      const current = (settings.storage as Record<string, unknown>) || {};
-      const updated = await projectService.updateProjectSettings(params.ref, {
-        ...settings,
-        storage: { ...current, ...(typeof body === "object" ? body : {}) },
-      });
-      return updated?.storage || {};
-    },
-    {
-      params: t.Object({ ref: t.String() }),
-      body: t.Record(t.String(), t.Unknown()),
-    }
-  )
-
-  // Get Realtime config
-  .get(
-    "/:ref/config/realtime",
-    async ({ params, set }) => {
-      const settings = await projectService.getProjectSettings(params.ref);
-      if (!settings) return { error: "Project not found" };
-      return settings.realtime || {};
-    },
-    { params: t.Object({ ref: t.String() }) }
-  )
-
-  // Modify Realtime config
-  .patch(
-    "/:ref/config/realtime",
-    async ({ params, body, set }) => {
-      const settings = await projectService.getProjectSettings(params.ref);
-      if (!settings) return { error: "Project not found" };
-      const current = (settings.realtime as Record<string, unknown>) || {};
-      const updated = await projectService.updateProjectSettings(params.ref, {
-        ...settings,
-        realtime: { ...current, ...(typeof body === "object" ? body : {}) },
-      });
-      return updated?.realtime || {};
-    },
-    {
-      params: t.Object({ ref: t.String() }),
-      body: t.Record(t.String(), t.Unknown()),
-    }
-  )
+  // --- Config CRUD (database, postgrest, storage, realtime) via factory ---
+  .use(addConfigRoutes("database"))
+  .use(addConfigRoutes("postgrest"))
+  .use(addConfigRoutes("storage"))
+  .use(addConfigRoutes("realtime"))
 
   // Get PgBouncer config (for Studio display)
   .get(

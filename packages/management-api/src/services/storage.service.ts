@@ -95,44 +95,28 @@ export class StorageService {
     }
 
     try {
-      const { AwsClient } = await import('aws4fetch');
-      const aws = new AwsClient({
+      const { S3Client } = await import('bun');
+      let baseUrl = creds.endpoint.endsWith('/') ? creds.endpoint.slice(0, -1) : creds.endpoint;
+
+      const s3 = new S3Client({
         accessKeyId: creds.accessKey,
         secretAccessKey: creds.secretKey,
-        service: 's3',
-        region: 'us-east-1', // Default for S3-compatible endpoints
+        endpoint: baseUrl,
+        region: 'us-east-1',
+        bucket: creds.bucket,
       });
 
-      // We normalize the endpoint (MinIO/Garage typical path-style routing: endpoint/bucket?list-type=2)
-      let baseUrl = creds.endpoint.endsWith('/') ? creds.endpoint.slice(0, -1) : creds.endpoint;
+      const res = await s3.list();
       
-      const url = new URL(`${baseUrl}/${creds.bucket}/?list-type=2`);
-      const res = await aws.fetch(url.toString(), { method: 'GET' });
-      
-      if (!res.ok) {
-        logger.error('S3 ListObjectsV2 failed:', await res.text());
-        return [];
-      }
-
-      const xml = await res.text();
-      
-      // Manual quick parsing of S3 XML response using regex 
-      const files: Record<string, unknown>[] = [];
-      const regex = /<Contents><Key>(.*?)<\/Key><LastModified>(.*?)<\/LastModified><ETag>.*?<\/ETag><Size>(.*?)<\/Size>.*?<\/Contents>/g;
-      
-      let match;
-      while ((match = regex.exec(xml)) !== null) {
-        files.push({
-          id: match[1],
-          name: match[1],
-          updated: match[2],
-          size: Math.round(parseInt(match[3]) / 1024) + ' KB', // Convert to KB
-          type: match[1].includes('.') ? match[1].split('.').pop() : 'unknown'
-        });
-      }
-      return files;
+      return (res.contents || []).map((file: any) => ({
+        id: file.key,
+        name: file.key,
+        updated: file.lastModified,
+        size: Math.round(file.size / 1024) + ' KB',
+        type: file.key.includes('.') ? file.key.split('.').pop() : 'unknown'
+      }));
     } catch (err: unknown) {
-      logger.error('Exception during S3 listing:', { error: err instanceof Error ? err.message : String(err) });
+      logger.error('Exception during native S3 listing:', { error: err instanceof Error ? err.message : String(err) });
       return [];
     }
   }
@@ -145,34 +129,25 @@ export class StorageService {
     if (!creds.success || !creds.accessKey || !creds.secretKey || !creds.endpoint || !creds.bucket) return false;
 
     try {
-      const { AwsClient } = await import('aws4fetch');
-      const aws = new AwsClient({
+      const { S3Client } = await import('bun');
+      let baseUrl = creds.endpoint.endsWith('/') ? creds.endpoint.slice(0, -1) : creds.endpoint;
+
+      const s3 = new S3Client({
         accessKeyId: creds.accessKey,
         secretAccessKey: creds.secretKey,
-        service: 's3',
+        endpoint: baseUrl,
         region: 'us-east-1',
+        bucket: creds.bucket,
       });
 
-      let baseUrl = creds.endpoint.endsWith('/') ? creds.endpoint.slice(0, -1) : creds.endpoint;
-      
-      // Clean up filename (e.g. remove leading slashes)
       const cleanFileName = fileName.replace(/^\/+/, '');
-      const url = new URL(`${baseUrl}/${creds.bucket}/${cleanFileName}`);
-      const res = await aws.fetch(url.toString(), { 
-        method: 'PUT',
-        body: fileData instanceof Blob ? fileData : fileData instanceof ArrayBuffer ? new Uint8Array(fileData) : Uint8Array.from(fileData as Uint8Array),
-        headers: {
-          'Content-Type': contentType
-        }
+      const bytesWritten = await s3.file(cleanFileName).write(fileData, {
+        type: contentType
       });
       
-      if (!res.ok) {
-        logger.error('S3 Upload failed:', await res.text());
-        return false;
-      }
-      return true;
+      return bytesWritten > 0;
     } catch (err: unknown) {
-      logger.error('Exception during S3 upload:', { error: err instanceof Error ? err.message : String(err) });
+      logger.error('Exception during native S3 upload:', { error: err instanceof Error ? err.message : String(err) });
       return false;
     }
   }
@@ -185,27 +160,23 @@ export class StorageService {
     if (!creds.success || !creds.accessKey || !creds.secretKey || !creds.endpoint || !creds.bucket) return false;
 
     try {
-      const { AwsClient } = await import('aws4fetch');
-      const aws = new AwsClient({
+      const { S3Client } = await import('bun');
+      let baseUrl = creds.endpoint.endsWith('/') ? creds.endpoint.slice(0, -1) : creds.endpoint;
+
+      const s3 = new S3Client({
         accessKeyId: creds.accessKey,
         secretAccessKey: creds.secretKey,
-        service: 's3',
+        endpoint: baseUrl,
         region: 'us-east-1',
+        bucket: creds.bucket,
       });
 
-      let baseUrl = creds.endpoint.endsWith('/') ? creds.endpoint.slice(0, -1) : creds.endpoint;
       const cleanFileName = fileName.replace(/^\/+/, '');
-      const url = new URL(`${baseUrl}/${creds.bucket}/${cleanFileName}`);
+      await s3.file(cleanFileName).delete();
       
-      const res = await aws.fetch(url.toString(), { method: 'DELETE' });
-      
-      if (!res.ok) {
-        logger.error('S3 Delete failed:', await res.text());
-        return false;
-      }
       return true;
     } catch (err: unknown) {
-      logger.error('Exception during S3 delete:', { error: err instanceof Error ? err.message : String(err) });
+      logger.error('Exception during native S3 delete:', { error: err instanceof Error ? err.message : String(err) });
       return false;
     }
   }
