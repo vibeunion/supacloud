@@ -1,4 +1,5 @@
 import type { Subprocess } from "bun";
+import { logger } from "../utils/logger";
 
 /**
  * Manages the Edge Runtime as a separate Bun process.
@@ -28,22 +29,22 @@ export class EdgeRuntimeManager {
       stdout: "inherit",
       stderr: "inherit",
       onExit: (_proc, code, _signal) => {
-        console.error(`[EdgeRuntime] Process exited code=${code}`);
+        logger.error(`[EdgeRuntime] Process exited code=${code}`);
         if (this.restartCount < this.maxRestarts) {
           this.restartCount++;
-          console.log(
+          logger.info(
             `[EdgeRuntime] Restarting in ${this.restartDelay}ms (${this.restartCount}/${this.maxRestarts})`,
           );
           setTimeout(() => this.start(), this.restartDelay);
           this.restartDelay = Math.min(this.restartDelay * 2, 30000);
         } else {
-          console.error(
+          logger.error(
             "[EdgeRuntime] Max restarts reached, giving up",
           );
         }
       },
     });
-    console.log(
+    logger.info(
       `[EdgeRuntime] Started pid=${this.proc.pid} port=${this.config.port}`,
     );
 

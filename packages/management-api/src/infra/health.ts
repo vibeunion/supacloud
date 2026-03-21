@@ -53,7 +53,7 @@ export class HealthChecker {
                 recommendation: "If you need cloud elastic storage, run 'supacloud storage setup'."
             };
         } catch (err: unknown) {
-          logger.warn("[] operation failed silently", { error: err });
+          logger.warn("[HealthChecker] PostgreSQL health check failed", { error: err });
             return { component: "Cloud-native Storage", status: "ERROR", message: "Cannot detect storage mount status" };
         }
     }
@@ -71,7 +71,7 @@ export class HealthChecker {
                 recommendation: isLow ? "Recommend expanding disk or cleaning /var/log logs." : undefined
             };
         } catch (err: unknown) {
-          logger.warn("[] operation failed silently", { error: err });
+          logger.warn("[HealthChecker] PostgREST health check failed", { error: err });
             return { component: "Storage Space", status: "ERROR", message: "Cannot get disk info" };
         }
     }
@@ -115,7 +115,7 @@ export class HealthChecker {
                 recommendation: isActive ? undefined : `Try running 'sudo systemctl restart ${name}'.`
             };
         } catch (err: unknown) {
-          logger.warn("[] operation failed silently", { error: err });
+          logger.warn("[HealthChecker] GoTrue health check failed", { error: err });
             return { component: label, status: "WARN", message: "Cannot access service status" };
         }
     }
@@ -184,7 +184,7 @@ export class HealthChecker {
 
             return { component: "Database (PostgreSQL)", status: "OK", message: `PG ${pgVersion.trim()} running in single-node mode` };
         } catch (err: unknown) {
-          logger.warn("[] trim failed silently", { error: err });
+          logger.warn("[HealthChecker] Failed to parse disk usage output", { error: err });
             return { component: "Database", status: "WARN", message: "Cannot detect detailed database metrics" };
         }
     }

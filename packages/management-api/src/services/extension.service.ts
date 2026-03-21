@@ -101,7 +101,7 @@ export class ExtensionService {
                 };
             }).filter((e: { name: string }) => e.name);
         } catch (err: unknown) {
-          logger.warn("[] slice failed silently", { error: err });
+          logger.warn("[ExtensionService] Failed to parse extension version info", { error: err });
             return [];
         }
     }

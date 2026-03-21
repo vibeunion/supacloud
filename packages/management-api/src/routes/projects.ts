@@ -137,7 +137,7 @@ export const projectRoutes = new Elysia({ prefix: "/v1/projects" })
           const status = result.text().trim();
           return status === "active" ? "ACTIVE_HEALTHY" : "INACTIVE";
         } catch (err: unknown) {
-          logger.warn("[] async failed silently", { error: err });
+          logger.warn("[Projects] Failed to start runtime services for new project", { error: err });
           return "INACTIVE";
         }
       };
