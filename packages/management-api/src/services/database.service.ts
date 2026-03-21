@@ -289,7 +289,7 @@ export class DatabaseService {
     try {
       return JSON.parse(result.output);
     } catch (err: unknown) {
-      logger.warn("[] shellService.execute failed silently", { error: err });
+      logger.warn("[DatabaseService] Failed to execute database diagnostic script", { error: err });
       return [];
     }
   }

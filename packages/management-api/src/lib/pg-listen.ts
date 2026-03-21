@@ -361,7 +361,7 @@ export function createPgListener(opts: PgListenerOptions): PgListenerHandle {
         socket?.end?.();
       } catch (err: unknown) {
       // Ignore close errors
-      logger.warn("[pg-listen] end failed silently", { error: err });
+      logger.warn("[PgListen] Failed to close TCP connection during cleanup", { error: err });
     }
       logger.info(`[PgListener] Closed.`);
     },

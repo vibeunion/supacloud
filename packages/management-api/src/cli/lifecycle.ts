@@ -68,7 +68,7 @@ export async function handleStatus() {
             s.stop("Container running status:");
             console.log(out);
         } catch (err: unknown) {
-          logger.warn("[] start failed silently", { error: err });
+          logger.warn("[CLI] Failed to execute lifecycle command", { error: err });
             s.stop("Unable to get status via docker-compose.");
         }
     }

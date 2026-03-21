@@ -210,7 +210,7 @@ export class ProjectService {
         const result = await $`systemctl is-active ${unitName}`.nothrow().quiet();
         return result.exitCode === 0 ? "ACTIVE_HEALTHY" : "INACTIVE";
       } catch (err: unknown) {
-        logger.warn("[] import failed silently", { error: err });
+        logger.warn("[ProjectService] Failed to import gateway service for domain setup", { error: err });
         return "INACTIVE";
       }
     };
@@ -357,7 +357,7 @@ export class ProjectService {
         created_at: new Date().toISOString(),
       }));
     } catch (err: unknown) {
-      logger.warn("[] Date failed silently", { error: err });
+      logger.warn("[ProjectService] Failed to parse backup timestamps", { error: err });
       return [];
     }
   }
@@ -567,7 +567,7 @@ export class ProjectService {
     try {
       return JSON.parse(result.output);
     } catch (err: unknown) {
-      logger.warn("[] shellService.execute failed silently", { error: err });
+      logger.warn("[ProjectService] Failed to execute secret deletion script", { error: err });
       return [];
     }
   }
