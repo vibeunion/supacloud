@@ -1,35 +1,51 @@
-import { Elysia, t, status } from "elysia";
+import { Elysia, t, type Static, status } from "elysia";
 import { logger } from "../utils/logger";
 import { frontendService } from "../services/frontend.service";
 import type { FrontendDeployment } from "../types/frontend";
 
-interface WebhookPayload {
-  ref?: string;
-  after?: string;
-  checkout_sha?: string;
-  repository?: {
-    full_name?: string;
-    git_http_url?: string;
-    clone_url?: string;
-    path_with_namespace?: string;
-    id?: string | number;
-  };
-  project?: {
-    git_http_url?: string;
-    path_with_namespace?: string;
-  };
-  head_commit?: { id?: string; message?: string };
-  hook_name?: string;
-  password?: string;
-  commits?: Array<{
-    id?: string;
-    message?: string;
-    modified?: string[];
-    added?: string[];
-    removed?: string[];
-  }>;
-  [key: string]: unknown;
-}
+// Shared TypeBox schema for Git webhook payloads (GitHub/GitLab/Gitee/GitCode)
+const WebhookBodySchema = t.Object({
+  ref: t.Optional(t.String()),
+  after: t.Optional(t.String()),
+  checkout_sha: t.Optional(t.String()),
+  repository: t.Optional(t.Object({
+    full_name: t.Optional(t.String()),
+    git_http_url: t.Optional(t.String()),
+    clone_url: t.Optional(t.String()),
+    html_url: t.Optional(t.String()),
+    path_with_namespace: t.Optional(t.String()),
+    id: t.Optional(t.Union([t.String(), t.Number()])),
+  })),
+  project: t.Optional(t.Object({
+    git_http_url: t.Optional(t.String()),
+    path_with_namespace: t.Optional(t.String()),
+  })),
+  head_commit: t.Optional(t.Object({
+    id: t.Optional(t.String()),
+    message: t.Optional(t.String()),
+  })),
+  hook_name: t.Optional(t.String()),
+  password: t.Optional(t.String()),
+  before: t.Optional(t.String()),
+  commits: t.Optional(t.Array(t.Object({
+    id: t.Optional(t.String()),
+    message: t.Optional(t.String()),
+    author: t.Optional(t.Object({
+      name: t.Optional(t.String()),
+      email: t.Optional(t.String()),
+    })),
+    modified: t.Optional(t.Array(t.String())),
+    added: t.Optional(t.Array(t.String())),
+    removed: t.Optional(t.Array(t.String())),
+  }))),
+  pusher: t.Optional(t.Object({
+    name: t.Optional(t.String()),
+    email: t.Optional(t.String()),
+  })),
+}, { additionalProperties: true });
+
+// Derive TS type from the TypeBox schema for use in `as` casts
+type WebhookPayload = Static<typeof WebhookBodySchema>;
 
 
 interface GitHubPushEvent {
@@ -202,7 +218,7 @@ export const webhookRoutes = new Elysia({ prefix: "/v1/webhooks" })
       };
     },
     {
-      body: t.Any(),
+      body: WebhookBodySchema,
     }
   )
 
@@ -223,7 +239,7 @@ export const webhookRoutes = new Elysia({ prefix: "/v1/webhooks" })
 
       return await triggerDeployForGit(gitUrl, branch, commitSha, commitMessage, repoName, "gitlab", token);
     },
-    { body: t.Any() }
+    { body: WebhookBodySchema }
   )
 
   // ─── Gitee Webhook ───
@@ -243,7 +259,7 @@ export const webhookRoutes = new Elysia({ prefix: "/v1/webhooks" })
 
       return await triggerDeployForGit(gitUrl, branch, commitSha, commitMessage, repoName, "gitee", token);
     },
-    { body: t.Any() }
+    { body: WebhookBodySchema }
   )
 
   // ─── GitCode (CSDN) Webhook ───
@@ -263,7 +279,7 @@ export const webhookRoutes = new Elysia({ prefix: "/v1/webhooks" })
 
       return await triggerDeployForGit(gitUrl, branch, commitSha, commitMessage, repoName, "gitcode", token);
     },
-    { body: t.Any() }
+    { body: WebhookBodySchema }
   )
 
   .post(
@@ -405,12 +421,12 @@ async function findDeploymentsByGitUrl(gitUrl: string, branch: string): Promise<
               }
             }
           } catch (err: unknown) {
-            logger.warn("[] if failed silently", { error: err });
+            logger.warn("[Webhook] Failed to auto-deploy after push event", { error: err });
             continue;
           }
         }
       } catch (err: unknown) {
-        logger.warn("[] catch failed silently", { error: err });
+        logger.warn("[Webhook] Failed to process GitHub webhook payload", { error: err });
         continue;
       }
     }

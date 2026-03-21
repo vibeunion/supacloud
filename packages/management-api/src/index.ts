@@ -92,7 +92,7 @@ const app = new Elysia({ strictPath: false })
       const expected = Array.from(new Uint8Array(sig)).map(b => b.toString(16).padStart(2, "0")).join("");
       return { valid: sigHex === expected };
     } catch (err: unknown) {
-      logger.warn("[] TextEncoder failed silently", { error: err });
+      logger.warn("[Auth] Failed to verify session token signature", { error: err });
       return { valid: false };
     }
   })
@@ -236,7 +236,7 @@ export async function registerAllRoutes() {
   const {
     projectRoutes, organizationRoutes, userRoutes, backupRoutes,
     monitorRoutes, maintenanceRoutes, extensionRoutes, systemExtensionRoutes, securityRoutes,
-    storageRoutes, scalingRoutes, taskRoutes, databaseRoutes, authRoutes,
+    storageRoutes, storageCompatRoutes, scalingRoutes, taskRoutes, databaseRoutes, authRoutes,
     wechatAuthRoutes, chinaAuthRoutes, userManagementRoutes,
     frontendRoutes, webhookRoutes, deployRoutes
   } = await import("./routes");
@@ -253,6 +253,7 @@ export async function registerAllRoutes() {
     .use(systemExtensionRoutes)
     .use(securityRoutes)
     .use(storageRoutes)
+    .use(storageCompatRoutes)
     .use(scalingRoutes)
     .use(taskRoutes)
     .use(databaseRoutes)
