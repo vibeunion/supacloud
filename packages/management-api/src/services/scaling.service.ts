@@ -1,5 +1,6 @@
-import { MonitorService } from './monitor.service';
-import { MaintenanceService } from './maintenance.service';
+import { getMetrics } from './monitor.service';
+import { logger } from "../utils/logger";
+import { addReplica } from './maintenance.service';
 import { shellService } from './shell.service';
 import { projectRepository } from '../repositories/project.repository';
 
@@ -29,7 +30,7 @@ export class ScalingService {
 
         // Default to primary node port (In Pigsty mode, primary/replica IPs may differ, simplified logic here)
         const nodeIp = 'localhost';
-        const metrics = await MonitorService.getMetrics(nodeIp);
+        const metrics = await getMetrics(nodeIp);
 
         // 1. Vertical scaling check (CPU/MEM)
         if (metrics.cpu_usage! > DEFAULT_THRESHOLDS.cpuHigh || metrics.mem_usage! > DEFAULT_THRESHOLDS.memHigh) {
@@ -53,8 +54,8 @@ export class ScalingService {
     /**
      * Vertical scaling: Adjust resource limits
      */
-    private static async verticalScale(projectRef: string, tier: string): Promise<void> {
-        console.log(`Executing vertical scaling: ${projectRef} -> ${tier}`);
+    static async verticalScale(projectRef: string, tier: string): Promise<void> {
+        logger.info(`Executing vertical scaling: ${projectRef} -> ${tier}`);
         const limits = tier === 'pro' ? 'cpu=4,mem=8g' : 'cpu=2,mem=4g';
         await shellService.execute('ha_manager.sh', ['vertical_scale', `supa_${projectRef}`, limits]);
     }
@@ -62,11 +63,11 @@ export class ScalingService {
     /**
      * Horizontal scaling: Add read replica and register to gateway
      */
-    private static async horizontalScale(projectRef: string, replicaIp: string): Promise<void> {
-        console.log(`Executing horizontal scaling: ${projectRef} adding replica ${replicaIp}`);
+    static async horizontalScale(projectRef: string, replicaIp: string): Promise<void> {
+        logger.info(`Executing horizontal scaling: ${projectRef} adding replica ${replicaIp}`);
 
         // 1. Execute replica initialization (time-consuming task)
-        await MaintenanceService.addReplica(replicaIp);
+        await addReplica(replicaIp);
 
         // 2. Asynchronously register to gateway load balancer (Since initialization is time-consuming, should actually wait for Job completion before registering)
         // Demo calls directly here

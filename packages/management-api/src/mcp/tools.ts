@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { logger } from "../utils/logger";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { projectService } from "../services";
 import { organizationService } from "../services/organization.service";
@@ -18,7 +19,7 @@ export function registerMcpTools(server: McpServer, token: McpTokenPayload): voi
     throw new Error("Project ref is required");
   };
 
-  const refParam = scopedRef
+  const refParam: Record<string, z.ZodType> = scopedRef
     ? {}
     : { ref: z.string().describe("Project ref") };
 
@@ -36,14 +37,14 @@ export function registerMcpTools(server: McpServer, token: McpTokenPayload): voi
       name: z.string().describe("Project name"),
       region: z.string().default("local").describe("Region"),
       organization_id: z.string().optional().describe("Organization ID"),
-    }, async ({ name, region, organization_id }) => {
+    }, async ({ name, region, organization_id }: { name: string; region: string; organization_id?: string }) => {
       const project = await projectService.createProject({ name, region, organization_id });
       return { content: [{ type: "text", text: `✅ Project created\n${JSON.stringify(project, null, 2)}` }] };
     });
 
     server.tool("delete_project", "Delete a project (soft delete)", {
       ref: z.string().describe("Project ref"),
-    }, async ({ ref }) => {
+    }, async ({ ref }: { ref: string }) => {
       const ok = await projectService.deleteProject(ref);
       return { content: [{ type: "text", text: ok ? `✅ Project ${ref} deleted` : `❌ Delete failed` }] };
     });
@@ -59,7 +60,7 @@ export function registerMcpTools(server: McpServer, token: McpTokenPayload): voi
       name: z.string().default("default").describe("Human-readable label"),
       readonly: z.boolean().default(true).describe("Read-only mode"),
       expires_days: z.number().default(365).describe("Expiry in days"),
-    }, async ({ ref, name, readonly, expires_days }) => {
+    }, async ({ ref, name, readonly, expires_days }: { ref: string; name: string; readonly: boolean; expires_days: number }) => {
       const tkn = await createMcpToken({ role: "project", ref, readonly, name, expiresInDays: expires_days });
       return { content: [{ type: "text", text: `✅ Project MCP token created\n\nToken: ${tkn}\nRef: ${ref}\nRead-only: ${readonly}\nExpires: ${expires_days} days\n\nConfigure in AI IDE:\n${JSON.stringify({ mcpServers: { [ref]: { url: "<API_URL>/mcp", headers: { Authorization: `Bearer ${tkn}` } } } }, null, 2)}` }] };
     });
@@ -69,32 +70,32 @@ export function registerMcpTools(server: McpServer, token: McpTokenPayload): voi
   // Project Info (all roles)
   // ═══════════════════════════════════════════════
 
-  server.tool("get_project", "Get project details", refParam, async (args: any) => {
-    const ref = resolveRef(args.ref);
+  server.tool("get_project", "Get project details", refParam, async (args: Record<string, unknown>) => {
+    const ref = resolveRef(args.ref as string | undefined);
     const project = await projectService.getProject(ref);
     return { content: [{ type: "text", text: project ? JSON.stringify(project, null, 2) : "❌ Project not found" }] };
   });
 
-  server.tool("get_project_health", "Get project health and service status", refParam, async (args: any) => {
-    const ref = resolveRef(args.ref);
+  server.tool("get_project_health", "Get project health and service status", refParam, async (args: Record<string, unknown>) => {
+    const ref = resolveRef(args.ref as string | undefined);
     const health = await projectService.getProjectHealth(ref);
     return { content: [{ type: "text", text: health ? JSON.stringify(health, null, 2) : "❌ Project not found" }] };
   });
 
-  server.tool("get_project_settings", "Get project configuration", refParam, async (args: any) => {
-    const ref = resolveRef(args.ref);
+  server.tool("get_project_settings", "Get project configuration", refParam, async (args: Record<string, unknown>) => {
+    const ref = resolveRef(args.ref as string | undefined);
     const settings = await projectService.getProjectSettings(ref);
     return { content: [{ type: "text", text: settings ? JSON.stringify(settings, null, 2) : "❌ Not found" }] };
   });
 
-  server.tool("get_api_keys", "Get project API keys (anon_key, service_role_key)", refParam, async (args: any) => {
-    const ref = resolveRef(args.ref);
+  server.tool("get_api_keys", "Get project API keys (anon_key, service_role_key)", refParam, async (args: Record<string, unknown>) => {
+    const ref = resolveRef(args.ref as string | undefined);
     const keys = await projectService.getApiKeys(ref);
     return { content: [{ type: "text", text: keys ? JSON.stringify(keys, null, 2) : "❌ Not found" }] };
   });
 
-  server.tool("list_project_tasks", "List provisioning/cleanup tasks for a project", refParam, async (args: any) => {
-    const ref = resolveRef(args.ref);
+  server.tool("list_project_tasks", "List provisioning/cleanup tasks for a project", refParam, async (args: Record<string, unknown>) => {
+    const ref = resolveRef(args.ref as string | undefined);
     const tasks = await metaSql`SELECT * FROM project_tasks WHERE project_ref = ${ref} ORDER BY created_at DESC LIMIT 50`;
     return { content: [{ type: "text", text: JSON.stringify(tasks, null, 2) }] };
   });
@@ -104,20 +105,20 @@ export function registerMcpTools(server: McpServer, token: McpTokenPayload): voi
   // ═══════════════════════════════════════════════
 
   if (isAdmin || !readOnly) {
-    server.tool("pause_project", "Pause a project to release resources", refParam, async (args: any) => {
-      const ref = resolveRef(args.ref);
+    server.tool("pause_project", "Pause a project to release resources", refParam, async (args: Record<string, unknown>) => {
+      const ref = resolveRef(args.ref as string | undefined);
       const ok = await projectService.pauseProject(ref);
       return { content: [{ type: "text", text: ok ? `✅ ${ref} paused` : "❌ Failed" }] };
     });
 
-    server.tool("restore_project", "Restore a paused project", refParam, async (args: any) => {
-      const ref = resolveRef(args.ref);
+    server.tool("restore_project", "Restore a paused project", refParam, async (args: Record<string, unknown>) => {
+      const ref = resolveRef(args.ref as string | undefined);
       const ok = await projectService.restoreProject(ref);
       return { content: [{ type: "text", text: ok ? `✅ ${ref} restored` : "❌ Failed" }] };
     });
 
-    server.tool("restart_project", "Restart all services for a project", refParam, async (args: any) => {
-      const ref = resolveRef(args.ref);
+    server.tool("restart_project", "Restart all services for a project", refParam, async (args: Record<string, unknown>) => {
+      const ref = resolveRef(args.ref as string | undefined);
       const ok = await projectService.restartProject(ref);
       return { content: [{ type: "text", text: ok ? "✅ Restart complete" : "❌ Failed" }] };
     });
@@ -125,14 +126,14 @@ export function registerMcpTools(server: McpServer, token: McpTokenPayload): voi
     server.tool("update_project_settings", "Update project configuration", {
       ...refParam,
       settings: z.record(z.unknown()).describe("Config fields to update"),
-    }, async (args: any) => {
-      const ref = resolveRef(args.ref);
-      const result = await projectService.updateProjectSettings(ref, args.settings);
+    }, async (args: Record<string, unknown>) => {
+      const ref = resolveRef(args.ref as string | undefined);
+      const result = await projectService.updateProjectSettings(ref, args.settings as Record<string, unknown>);
       return { content: [{ type: "text", text: result ? `✅ Updated\n${JSON.stringify(result, null, 2)}` : "❌ Failed" }] };
     });
 
-    server.tool("rotate_api_keys", "Rotate project API keys", refParam, async (args: any) => {
-      const ref = resolveRef(args.ref);
+    server.tool("rotate_api_keys", "Rotate project API keys", refParam, async (args: Record<string, unknown>) => {
+      const ref = resolveRef(args.ref as string | undefined);
       const keys = await projectService.rotateApiKeys(ref);
       return { content: [{ type: "text", text: keys ? `✅ Keys rotated\n${JSON.stringify(keys, null, 2)}` : "❌ Failed" }] };
     });
@@ -147,9 +148,9 @@ export function registerMcpTools(server: McpServer, token: McpTokenPayload): voi
     : "Execute SQL on project database", {
     ...refParam,
     sql: z.string().describe("SQL query"),
-  }, async (args: any) => {
-    const ref = resolveRef(args.ref);
-    const sqlStr: string = args.sql;
+  }, async (args: Record<string, unknown>) => {
+    const ref = resolveRef(args.ref as string | undefined);
+    const sqlStr = args.sql as string;
 
     if (readOnly) {
       const upper = sqlStr.trim().toUpperCase();
@@ -181,8 +182,8 @@ export function registerMcpTools(server: McpServer, token: McpTokenPayload): voi
       } finally {
         await db.close();
       }
-    } catch (e: any) {
-      return { content: [{ type: "text", text: `❌ SQL error: ${e.message}` }] };
+    } catch (e: unknown) {
+      return { content: [{ type: "text", text: `❌ SQL error: ${e instanceof Error ? e.message : String(e)}` }] };
     }
   });
 
@@ -190,14 +191,14 @@ export function registerMcpTools(server: McpServer, token: McpTokenPayload): voi
   // Auth Providers
   // ═══════════════════════════════════════════════
 
-  server.tool("list_auth_providers", "List OAuth providers and their enabled status", refParam, async (args: any) => {
-    const ref = resolveRef(args.ref);
+  server.tool("list_auth_providers", "List OAuth providers and their enabled status", refParam, async (args: Record<string, unknown>) => {
+    const ref = resolveRef(args.ref as string | undefined);
     const settings = await projectService.getProjectSettings(ref);
     if (!settings) return { content: [{ type: "text", text: "❌ Not found" }] };
-    const external = (settings.auth as any)?.external || {};
+    const external = (settings.auth as Record<string, unknown>)?.external || {};
     const result: Record<string, boolean> = {};
     for (const [k, v] of Object.entries(external)) {
-      result[k] = !!(v as any)?.client_id;
+      result[k] = !!(v as Record<string, unknown>)?.client_id;
     }
     return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
   });
@@ -209,33 +210,33 @@ export function registerMcpTools(server: McpServer, token: McpTokenPayload): voi
       client_id: z.string().describe("OAuth Client ID"),
       client_secret: z.string().describe("OAuth Client Secret"),
       redirect_uri: z.string().optional().describe("Redirect URI"),
-    }, async (args: any) => {
-      const ref = resolveRef(args.ref);
+    }, async (args: Record<string, unknown>) => {
+      const ref = resolveRef(args.ref as string | undefined);
       const settings = await projectService.getProjectSettings(ref);
       if (!settings) return { content: [{ type: "text", text: "❌ Not found" }] };
-      const auth = (settings.auth as any) || {};
-      const external = auth.external || {};
-      external[args.provider] = {
-        client_id: args.client_id,
-        client_secret: args.client_secret,
-        redirect_uri: args.redirect_uri,
+      const auth = (settings.auth as Record<string, unknown>) || {};
+      const external = (auth.external || {}) as Record<string, unknown>;
+      external[(args.provider as string)] = {
+        client_id: args.client_id as string,
+        client_secret: args.client_secret as string,
+        redirect_uri: args.redirect_uri as string | undefined,
       };
       await projectService.updateProjectSettings(ref, { ...settings, auth: { ...auth, external } });
-      return { content: [{ type: "text", text: `✅ Provider ${args.provider} configured` }] };
+      return { content: [{ type: "text", text: `✅ Provider ${(args.provider as string)} configured` }] };
     });
 
     server.tool("disable_auth_provider", "Disable an OAuth provider", {
       ...refParam,
       provider: z.string().describe("Provider name"),
-    }, async (args: any) => {
-      const ref = resolveRef(args.ref);
+    }, async (args: Record<string, unknown>) => {
+      const ref = resolveRef(args.ref as string | undefined);
       const settings = await projectService.getProjectSettings(ref);
       if (!settings) return { content: [{ type: "text", text: "❌ Not found" }] };
-      const auth = (settings.auth as any) || {};
-      const external = { ...(auth.external || {}) };
-      delete external[args.provider];
+      const auth = (settings.auth as Record<string, unknown>) || {};
+      const external = { ...((auth.external || {}) as Record<string, unknown>) };
+      delete external[(args.provider as string)];
       await projectService.updateProjectSettings(ref, { ...settings, auth: { ...auth, external } });
-      return { content: [{ type: "text", text: `✅ Provider ${args.provider} disabled` }] };
+      return { content: [{ type: "text", text: `✅ Provider ${(args.provider as string)} disabled` }] };
     });
   }
 
@@ -248,8 +249,8 @@ export function registerMcpTools(server: McpServer, token: McpTokenPayload): voi
     return { content: [{ type: "text", text: JSON.stringify(status, null, 2) }] };
   });
 
-  server.tool("list_storage_buckets", "List storage buckets for a project", refParam, async (args: any) => {
-    const ref = resolveRef(args.ref);
+  server.tool("list_storage_buckets", "List storage buckets for a project", refParam, async (args: Record<string, unknown>) => {
+    const ref = resolveRef(args.ref as string | undefined);
     const buckets = await StorageService.listBuckets(ref);
     return { content: [{ type: "text", text: JSON.stringify(buckets, null, 2) }] };
   });
@@ -257,9 +258,9 @@ export function registerMcpTools(server: McpServer, token: McpTokenPayload): voi
   server.tool("list_storage_files", "List files in a bucket", {
     ...refParam,
     bucket: z.string().describe("Bucket name"),
-  }, async (args: any) => {
-    const ref = resolveRef(args.ref);
-    const files = await StorageService.listFiles(ref, args.bucket);
+  }, async (args: Record<string, unknown>) => {
+    const ref = resolveRef(args.ref as string | undefined);
+    const files = await StorageService.listFiles(ref, args.bucket as string);
     return { content: [{ type: "text", text: JSON.stringify(files, null, 2) }] };
   });
 
@@ -267,8 +268,8 @@ export function registerMcpTools(server: McpServer, token: McpTokenPayload): voi
   // Secrets (admin or non-readonly)
   // ═══════════════════════════════════════════════
 
-  server.tool("list_secrets", "List project secrets (env vars)", refParam, async (args: any) => {
-    const ref = resolveRef(args.ref);
+  server.tool("list_secrets", "List project secrets (env vars)", refParam, async (args: Record<string, unknown>) => {
+    const ref = resolveRef(args.ref as string | undefined);
     const secrets = await projectService.getSecrets(ref);
     return { content: [{ type: "text", text: JSON.stringify(secrets, null, 2) }] };
   });
@@ -277,19 +278,19 @@ export function registerMcpTools(server: McpServer, token: McpTokenPayload): voi
     server.tool("upsert_secrets", "Create or update secrets", {
       ...refParam,
       secrets: z.array(z.object({ name: z.string(), value: z.string() })).describe("Secrets to set"),
-    }, async (args: any) => {
-      const ref = resolveRef(args.ref);
-      const ok = await projectService.upsertSecrets(ref, args.secrets);
-      return { content: [{ type: "text", text: ok ? `✅ ${args.secrets.length} secret(s) updated` : "❌ Failed" }] };
+    }, async (args: Record<string, unknown>) => {
+      const ref = resolveRef(args.ref as string | undefined);
+      const ok = await projectService.upsertSecrets(ref, args.secrets as { name: string; value: string }[]);
+      return { content: [{ type: "text", text: ok ? `✅ ${(args.secrets as unknown[]).length} secret(s) updated` : "❌ Failed" }] };
     });
 
     server.tool("delete_secret", "Delete a secret", {
       ...refParam,
       name: z.string().describe("Secret name"),
-    }, async (args: any) => {
-      const ref = resolveRef(args.ref);
-      const ok = await projectService.deleteSecret(ref, args.name);
-      return { content: [{ type: "text", text: ok ? `✅ Deleted ${args.name}` : "❌ Failed" }] };
+    }, async (args: Record<string, unknown>) => {
+      const ref = resolveRef(args.ref as string | undefined);
+      const ok = await projectService.deleteSecret(ref, args.name as string);
+      return { content: [{ type: "text", text: ok ? `✅ Deleted ${args.name as string}` : "❌ Failed" }] };
     });
   }
 
@@ -297,8 +298,8 @@ export function registerMcpTools(server: McpServer, token: McpTokenPayload): voi
   // Edge Functions
   // ═══════════════════════════════════════════════
 
-  server.tool("list_edge_functions", "List Edge Functions", refParam, async (args: any) => {
-    const ref = resolveRef(args.ref);
+  server.tool("list_edge_functions", "List Edge Functions", refParam, async (args: Record<string, unknown>) => {
+    const ref = resolveRef(args.ref as string | undefined);
     const fns = await projectService.listFunctions(ref);
     return { content: [{ type: "text", text: JSON.stringify(fns, null, 2) }] };
   });
@@ -308,19 +309,19 @@ export function registerMcpTools(server: McpServer, token: McpTokenPayload): voi
       ...refParam,
       slug: z.string().describe("Function name"),
       code: z.string().describe("TypeScript source code"),
-    }, async (args: any) => {
-      const ref = resolveRef(args.ref);
-      const ok = await projectService.deployFunction(ref, args.slug, args.code);
-      return { content: [{ type: "text", text: ok ? `✅ ${args.slug} deployed` : "❌ Deploy failed" }] };
+    }, async (args: Record<string, unknown>) => {
+      const ref = resolveRef(args.ref as string | undefined);
+      const ok = await projectService.deployFunction(ref, (args.slug as string), (args.code as string));
+      return { content: [{ type: "text", text: ok ? `✅ ${(args.slug as string)} deployed` : "❌ Deploy failed" }] };
     });
 
     server.tool("delete_edge_function", "Delete an Edge Function", {
       ...refParam,
       slug: z.string().describe("Function name"),
-    }, async (args: any) => {
-      const ref = resolveRef(args.ref);
-      const ok = await projectService.deleteFunction(ref, args.slug);
-      return { content: [{ type: "text", text: ok ? `✅ ${args.slug} deleted` : "❌ Failed" }] };
+    }, async (args: Record<string, unknown>) => {
+      const ref = resolveRef(args.ref as string | undefined);
+      const ok = await projectService.deleteFunction(ref, (args.slug as string));
+      return { content: [{ type: "text", text: ok ? `✅ ${(args.slug as string)} deleted` : "❌ Failed" }] };
     });
   }
 
@@ -328,8 +329,8 @@ export function registerMcpTools(server: McpServer, token: McpTokenPayload): voi
   // Backups
   // ═══════════════════════════════════════════════
 
-  server.tool("list_backups", "List database backups", refParam, async (args: any) => {
-    const ref = resolveRef(args.ref);
+  server.tool("list_backups", "List database backups", refParam, async (args: Record<string, unknown>) => {
+    const ref = resolveRef(args.ref as string | undefined);
     const backups = await projectService.listBackups(ref);
     return { content: [{ type: "text", text: JSON.stringify(backups, null, 2) }] };
   });

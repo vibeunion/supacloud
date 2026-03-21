@@ -1,9 +1,10 @@
 import { config } from "../config";
+import { logger } from "../utils/logger";
 import { SQL } from "bun";
 
 export async function initDatabase() {
-  console.log("Initializing database...");
-  console.log("DATABASE_URL:", config.databaseUrl.replace(/:[^:@]+@/, ":****@"));
+  logger.info("Initializing database...");
+  logger.info(`DATABASE_URL: ${config.databaseUrl.replace(/:[^:@]+@/, ":****@")}`);
 
   // Parse DATABASE_URL to get components
   const dbUrl = config.databaseUrl;
@@ -14,7 +15,7 @@ export async function initDatabase() {
   }
   
   const [, username, password, hostname, port, database] = urlMatch;
-  console.log(`Connecting to database: ${database} on ${hostname}:${port}`);
+  logger.info(`Connecting to database: ${database} on ${hostname}:${port}`);
 
   const ddlQuery = `
     CREATE TABLE IF NOT EXISTS organizations (
@@ -77,11 +78,11 @@ export async function initDatabase() {
 
   try {
     await sql`SELECT 1`;
-    console.log("Connected to database");
+    logger.info("Connected to database");
 
     // Check current database
     const [dbInfo] = await sql`SELECT current_database() as db, current_user as user`;
-    console.log("Current database:", dbInfo?.db, "user:", dbInfo?.user);
+    logger.info(`Current database: ${dbInfo?.db}, user: ${dbInfo?.user}`);
 
     const result = await sql`
       SELECT COUNT(*) as count FROM information_schema.tables 
@@ -89,14 +90,14 @@ export async function initDatabase() {
     `;
     
     const tableCount = Number(result[0]?.count || 0);
-    console.log(`Found ${tableCount} tables in database`);
+    logger.info(`Found ${tableCount} tables in database`);
 
     if (tableCount < 3) {
-      console.log("Executing DDL statements...");
+      logger.info("Executing DDL statements...");
       await sql.unsafe(ddlQuery);
-      console.log("DDL executed successfully.");
+      logger.info("DDL executed successfully.");
     } else {
-      console.log("Tables already exist, skipping table creation.");
+      logger.info("Tables already exist, skipping table creation.");
     }
 
     // Always apply trigger (idempotent: CREATE OR REPLACE + DROP IF EXISTS)
@@ -121,7 +122,7 @@ export async function initDatabase() {
         FOR EACH ROW EXECUTE FUNCTION notify_task_change();
     `;
     await sql.unsafe(notifyTriggerDDL);
-    console.log("LISTEN/NOTIFY trigger applied.");
+    logger.info("LISTEN/NOTIFY trigger applied.");
 
     const [verify] = await sql`
       SELECT COUNT(*) as count FROM information_schema.tables 
@@ -129,13 +130,13 @@ export async function initDatabase() {
     `;
     
     const finalCount = Number(verify?.count || 0);
-    console.log(`Database initialized successfully! Tables verified: ${finalCount}/3`);
+    logger.info(`Database initialized successfully! Tables verified: ${finalCount}/3`);
     
     if (finalCount < 3) {
       throw new Error(`Table creation verified but failed. Expected 3 tables, got ${finalCount}`);
     }
-  } catch (error) {
-    console.error("Failed to initialize database:", error);
+  } catch (error: unknown) {
+    logger.error("Failed to initialize database:", { error: error instanceof Error ? error.message : String(error) });
     throw error;
   } finally {
     await sql.close();

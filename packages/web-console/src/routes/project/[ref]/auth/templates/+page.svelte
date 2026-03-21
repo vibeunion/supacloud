@@ -62,8 +62,8 @@
         body: JSON.stringify(payload)
       });
       saveMsg = res.ok ? "✅ 邮件模板已保存" : `❌ 保存失败`;
-    } catch (err: any) {
-      saveMsg = `❌ ${err.message}`;
+    } catch (err: unknown) {
+      saveMsg = `❌ ${(err instanceof Error ? err.message : String(err))}`;
     } finally {
       saving = false;
       setTimeout(() => saveMsg = null, 4000);

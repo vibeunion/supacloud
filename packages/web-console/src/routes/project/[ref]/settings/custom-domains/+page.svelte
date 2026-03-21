@@ -4,6 +4,7 @@
   import { onMount } from "svelte";
   import { page } from "$app/state";
   import { Loader2, Globe, Plus, Trash2, Shield, AlertTriangle, ExternalLink, Copy, CheckCircle, XCircle } from "lucide-svelte";
+  import { toast } from "svelte-sonner";
 
   interface DomainInfo {
     custom_hostname: string;
@@ -28,8 +29,8 @@
       if (res.ok) {
         domain = await res.json();
       }
-    } catch (err) {
-      console.error("Failed to fetch custom domain:", err);
+    } catch (err: unknown) {
+      toast.error("无法fetch custom domain");
     } finally {
       isLoading = false;
     }
@@ -53,8 +54,8 @@
         const err = await res.json();
         msg = `❌ 添加失败: ${err.error || "Unknown error"}`;
       }
-    } catch (err: any) {
-      msg = `❌ ${err.message}`;
+    } catch (err: unknown) {
+      msg = `❌ ${(err instanceof Error ? err.message : String(err))}`;
     } finally {
       saving = false;
       setTimeout(() => msg = null, 5000);
@@ -72,8 +73,8 @@
       } else {
         msg = "❌ 删除失败";
       }
-    } catch (err: any) {
-      msg = `❌ ${err.message}`;
+    } catch (err: unknown) {
+      msg = `❌ ${(err instanceof Error ? err.message : String(err))}`;
     } finally {
       deleting = false;
       setTimeout(() => msg = null, 4000);

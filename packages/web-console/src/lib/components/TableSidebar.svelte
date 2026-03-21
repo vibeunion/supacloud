@@ -9,7 +9,7 @@
     Filter
   } from "lucide-svelte";
 
-  let { tables = [], schemas = [], selectedTable = null, onSelectTable = (t: any) => {} } = $props();
+  let { tables = [], schemas = [], selectedTable = null, onSelectTable = (t: Record<string, unknown>) => {} } = $props();
   
   let searchTerm = $state("");
   let expandedSchemas = $state<Set<string>>(new Set(['public']));
@@ -24,7 +24,7 @@
   }
 
   let filteredTables = $derived(
-    tables.filter((t: any) => 
+    tables.filter((t) => 
       t.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       t.schema.toLowerCase().includes(searchTerm.toLowerCase())
     )
@@ -61,7 +61,7 @@
 
         {#if expandedSchemas.has(schema)}
           <div class="space-y-0.5 ml-2 border-l pl-2">
-            {#each filteredTables.filter((t: any) => t.schema === schema) as table}
+            {#each filteredTables.filter((t) => t.schema === schema) as table}
               <button
                 onclick={() => onSelectTable(table)}
                 class={cn(

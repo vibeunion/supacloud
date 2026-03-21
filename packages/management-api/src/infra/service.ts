@@ -5,12 +5,9 @@
  */
 
 import { $ } from 'bun'
+import { logger } from "../utils/logger";
 
-const logger = {
-  info: (...args: any[]) => console.log('[INFO]', ...args),
-  warn: (...args: any[]) => console.warn('[WARN]', ...args),
-  error: (...args: any[]) => console.error('[ERROR]', ...args),
-}
+
 
 
 export interface ServiceInfo {
@@ -68,8 +65,8 @@ WantedBy=multi-user.target
       await $`sudo systemctl enable ${name}`.nothrow()
       await $`sudo systemctl start ${name}`.nothrow()
       logger.info(`Systemd service registered and started: ${name}`)
-    } catch (err) {
-      logger.error(`Failed to register systemd service ${name}:`, err)
+    } catch (err: unknown) {
+      logger.error(`Failed to register systemd service ${name}`, { error: err instanceof Error ? (err as Error).message : String(err) })
       throw err
     }
   }
@@ -95,7 +92,8 @@ WantedBy=multi-user.target
         name: serviceName,
         status: status === 'active' ? 'running' : 'stopped'
       }
-    } catch {
+    } catch (err: unknown) {
+      logger.warn("[] operation failed silently", { error: err });
       // Check if process exists via pgrep
       try {
         const stdout = await $`pgrep -f ${serviceName}`.text()
@@ -105,7 +103,8 @@ WantedBy=multi-user.target
           status: 'running',
           pid
         }
-      } catch {
+      } catch (err: unknown) {
+        logger.warn("[] operation failed silently", { error: err });
         return {
           name: serviceName,
           status: 'stopped'
@@ -122,8 +121,8 @@ WantedBy=multi-user.target
       await $`systemctl start ${serviceName}`
       logger.info(`Service started: ${serviceName}`)
       return true
-    } catch (error) {
-      logger.error(`Failed to start service ${serviceName}:`, error)
+    } catch (error: unknown) {
+      logger.error(`Failed to start service ${serviceName}`, { error: error instanceof Error ? error.message : String(error) })
       return false
     }
   }
@@ -136,8 +135,8 @@ WantedBy=multi-user.target
       await $`systemctl stop ${serviceName}`
       logger.info(`Service stopped: ${serviceName}`)
       return true
-    } catch (error) {
-      logger.error(`Failed to stop service ${serviceName}:`, error)
+    } catch (error: unknown) {
+      logger.error(`Failed to stop service ${serviceName}`, { error: error instanceof Error ? error.message : String(error) })
       return false
     }
   }
@@ -150,8 +149,8 @@ WantedBy=multi-user.target
       await $`systemctl restart ${serviceName}`
       logger.info(`Service restarted: ${serviceName}`)
       return true
-    } catch (error) {
-      logger.error(`Failed to restart service ${serviceName}:`, error)
+    } catch (error: unknown) {
+      logger.error(`Failed to restart service ${serviceName}`, { error: error instanceof Error ? error.message : String(error) })
       return false
     }
   }
@@ -180,9 +179,8 @@ WantedBy=multi-user.target
         signal: AbortSignal.timeout(5000)
       })
       return response.ok
-    } catch {
-      return false
-    }
+    } catch (e: unknown) { logger.debug("[infra/service] suppressed error", { error: e instanceof Error ? e.message : String(e) }); }
+    return false;
   }
 }
 

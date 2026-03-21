@@ -11,11 +11,11 @@
     description: string;
   }
 
-  let extensions: SystemExt[] = $state([]);
+  let extensions: SystemExt[] = $state.raw([]);
   let isLoading = $state(true);
-  let error: string | null = $state(null);
-  let actionMsg: string | null = $state(null);
-  let actionTarget: string | null = $state(null);
+  let error: string | null = $state.raw(null);
+  let actionMsg: string | null = $state.raw(null);
+  let actionTarget: string | null = $state.raw(null);
   let searchQuery = $state("");
 
   async function fetchExtensions() {
@@ -25,8 +25,8 @@
       const res = await apiClient("/v1/system/extensions");
       const data = await res.json();
       extensions = Array.isArray(data) ? data : [];
-    } catch (err: any) {
-      error = err.message;
+    } catch (err: unknown) {
+      error = err instanceof Error ? err.message : String(err);
     } finally {
       isLoading = false;
     }
@@ -44,8 +44,8 @@
       const data = await res.json();
       actionMsg = data.success ? `✅ ${data.message}` : `❌ ${data.message}`;
       if (data.success) await fetchExtensions();
-    } catch (err: any) {
-      actionMsg = `❌ ${err.message}`;
+    } catch (err: unknown) {
+      actionMsg = `❌ ${(err instanceof Error ? err.message : String(err))}`;
     } finally {
       actionTarget = null;
       setTimeout(() => actionMsg = null, 6000);
@@ -65,8 +65,8 @@
       const data = await res.json();
       actionMsg = data.success ? `✅ ${data.message}` : `❌ ${data.message}`;
       if (data.success) await fetchExtensions();
-    } catch (err: any) {
-      actionMsg = `❌ ${err.message}`;
+    } catch (err: unknown) {
+      actionMsg = `❌ ${(err instanceof Error ? err.message : String(err))}`;
     } finally {
       actionTarget = null;
       setTimeout(() => actionMsg = null, 6000);

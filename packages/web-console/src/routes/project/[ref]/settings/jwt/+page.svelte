@@ -4,6 +4,7 @@
   import { onMount } from "svelte";
   import { page } from "$app/state";
   import { Loader2, Key, Eye, EyeOff, Copy, Clock, Shield } from "lucide-svelte";
+  import { toast } from "svelte-sonner";
 
   let jwtSecret = $state("");
   let jwtExpiry = $state(3600);
@@ -21,8 +22,8 @@
         jwtSecret = data.config?.jwt_secret || data.jwt_secret || "super-secret-jwt-token-with-at-least-32-characters-long";
         jwtExpiry = data.config?.jwt_expiry || 3600;
       }
-    } catch (err) {
-      console.error("Failed to fetch JWT config:", err);
+    } catch (err: unknown) {
+      toast.error("无法fetch JWT config");
     } finally {
       isLoading = false;
     }

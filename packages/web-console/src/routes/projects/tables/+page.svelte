@@ -15,10 +15,11 @@
     Loader2
   } from "lucide-svelte";
   import { cn } from "$lib/utils";
+  import { toast } from "svelte-sonner";
 
   let { data } = $props();
 
-  let selectedTable = $state<any>(null);
+  let selectedTable = $state<Record<string, unknown> | null>(null);
   
   // Set initial table once data is available
   $effect(() => {
@@ -27,14 +28,14 @@
     }
   });
 
-  let tableData = $state<any[]>([]);
+  let tableData = $state<Record<string, unknown>[]>([]);
   let columns = $state<string[]>([]);
   let isLoading = $state(false);
   let totalRows = $state(0);
   let page = $state(1);
   let pageSize = $state(50);
 
-  async function loadTableData(table: any) {
+  async function loadTableData(table: Record<string, unknown>) {
     if (!table) return;
     selectedTable = table;
     isLoading = true;
@@ -44,7 +45,7 @@
       const res = await apiClient('/api/query', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectRef: data.project?.ref || 'default', query })
+        body: JSON.stringify({ projectRef: (data.project as Record<string, unknown>)?.ref as string || 'default', query })
       });
       
       const result = await res.json();
@@ -53,8 +54,8 @@
         columns = tableData.length > 0 ? Object.keys(tableData[0]) : [];
         totalRows = result.rowCount || 0;
       }
-    } catch (err) {
-      console.error('Failed to load table data:', err);
+    } catch (err: unknown) {
+      toast.error("无法load table data");
     } finally {
       isLoading = false;
     }
@@ -63,7 +64,7 @@
   // Effect to load data when page changes or table changes
   $effect(() => {
     if (selectedTable) {
-      loadTableData(selectedTable);
+      loadTableData(selectedTable!);
     }
   });
 </script>
@@ -74,7 +75,7 @@
     tables={data.tables} 
     schemas={data.schemas} 
     selectedTable={selectedTable}
-    onSelectTable={(t) => { page = 1; selectedTable = t; }}
+    onSelectTable={(t: Record<string, unknown>) => { page = 1; selectedTable = t; }}
   />
 
   <!-- Right Side: Data Grid Area -->
@@ -84,7 +85,7 @@
       <div class="flex items-center gap-4">
         <div class="flex items-center gap-1.5 px-2 py-1 bg-secondary/50 rounded border text-xs font-medium">
           <TableIcon class="w-3.5 h-3.5" />
-          {selectedTable?.name || 'No table selected'}
+          {(selectedTable as Record<string, unknown>)?.name || 'No table selected'}
         </div>
         <div class="h-4 w-px bg-border"></div>
         <div class="flex items-center gap-1">
@@ -99,7 +100,7 @@
 
       <div class="flex items-center gap-2">
         <button 
-          onclick={() => loadTableData(selectedTable)}
+          onclick={() => loadTableData(selectedTable!)}
           class="p-1.5 hover:bg-secondary rounded-md text-muted-foreground hover:text-foreground transition-all"
         >
           <RefreshCcw class={cn("w-4 h-4", isLoading && "animate-spin")} />
@@ -170,7 +171,7 @@
             <p class="text-sm">This table is empty or the query returned no results.</p>
           </div>
           <button 
-            onclick={() => loadTableData(selectedTable)}
+            onclick={() => loadTableData(selectedTable!)}
             class="px-4 py-2 text-brand font-medium hover:underline text-sm"
           >
             Try refreshing

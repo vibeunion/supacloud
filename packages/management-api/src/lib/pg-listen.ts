@@ -178,7 +178,7 @@ function parseConnectionUrl(url: string): {
  *   url: "postgresql://user:pass@localhost:5432/mydb",
  *   channels: ["task_pending", "task_completed"],
  *   onNotification: (channel, payload) => {
- *     console.log(`Got ${channel}: ${payload}`);
+ *     logger.info(`Got ${channel}: ${payload}`);
  *   },
  * });
  *
@@ -285,7 +285,7 @@ export function createPgListener(opts: PgListenerOptions): PgListenerHandle {
                 if (notification) {
                   try {
                     onNotification(notification.channel, notification.payload);
-                  } catch (err) {
+                  } catch (err: unknown) {
                     logger.error(
                       `[PgListener] Notification handler error:`,
                       err as Error
@@ -313,12 +313,12 @@ export function createPgListener(opts: PgListenerOptions): PgListenerHandle {
         },
 
         error(_sock, err) {
-          logger.error(`[PgListener] Socket error: ${err.message}`);
+          logger.error(`[PgListener] Socket error: ${err instanceof Error ? err.message : String(err)}`);
           scheduleReconnect();
         },
 
         connectError(_sock, err) {
-          logger.error(`[PgListener] Connect error: ${err.message}`);
+          logger.error(`[PgListener] Connect error: ${err instanceof Error ? err.message : String(err)}`);
           scheduleReconnect();
         },
       },
@@ -349,9 +349,10 @@ export function createPgListener(opts: PgListenerOptions): PgListenerHandle {
       try {
         // @ts-ignore - Bun.connect returns a socket with end()
         socket?.end?.();
-      } catch {
-        // Ignore close errors
-      }
+      } catch (err: unknown) {
+      // Ignore close errors
+      logger.warn("[pg-listen] end failed silently", { error: err });
+    }
       logger.info(`[PgListener] Closed.`);
     },
   };

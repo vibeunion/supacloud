@@ -25,12 +25,12 @@
     connect_time: string;
   }
 
-  let pools: PoolInfo[] = $state([]);
-  let clients: ClientInfo[] = $state([]);
+  let pools: PoolInfo[] = $state.raw([]);
+  let clients: ClientInfo[] = $state.raw([]);
   let isLoading = $state(true);
-  let actionMsg: string | null = $state(null);
+  let actionMsg: string | null = $state.raw(null);
 
-  async function runBouncerSql(sql: string): Promise<any[]> {
+  async function runBouncerSql(sql: string): Promise<Record<string, unknown>[]> {
     try {
       // Query pgbouncer admin port via management API SQL endpoint
       const res = await apiClient("/v1/projects/default/database/sql", {
@@ -65,8 +65,8 @@
         FROM pg_stat_activity WHERE backend_type = 'client backend'
         ORDER BY backend_start DESC LIMIT 50;`)
     ]);
-    pools = poolData;
-    clients = clientData;
+    pools = poolData as unknown as PoolInfo[];
+    clients = clientData as unknown as ClientInfo[];
     isLoading = false;
   }
 
@@ -76,8 +76,8 @@
     try {
       const result = await runBouncerSql(`SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE state = 'idle' AND backend_type = 'client backend' AND pid != pg_backend_pid();`);
       actionMsg = `✅ 已断开 ${result.length} 个空闲连接`;
-    } catch (err: any) {
-      actionMsg = `❌ ${err.message}`;
+    } catch (err: unknown) {
+      actionMsg = `❌ ${(err instanceof Error ? err.message : String(err))}`;
     }
     setTimeout(() => actionMsg = null, 5000);
     await fetchDiagnostics();

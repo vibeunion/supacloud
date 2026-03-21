@@ -1,71 +1,57 @@
-import { Elysia } from "elysia";
+import { Elysia, t, status } from "elysia";
 import { deployService } from "../services/deploy.service";
 import { logger } from "../utils/logger";
 
 export const deployRoutes = new Elysia({ prefix: "/v1/deploy" })
   .post("/", async ({ body }) => {
     try {
-      const { app, tenant, artifact, config } = body as {
-        app: string;
-        tenant: string;
-        artifact: string;
-        config: any;
-      };
-
-      if (!app || !tenant || !artifact || !config) {
-        return {
-          success: false,
-          error: "Missing required fields: app, tenant, artifact, config",
-        };
-      }
-
       const result = await deployService.deploy(
         {
-          app,
-          tenant,
-          artifact,
-          config,
+          app: body.app,
+          tenant: body.tenant,
+          artifact: body.artifact,
+          config: body.config,
         },
         "api"
       );
 
       return result;
-    } catch (error) {
+    } catch (error: unknown) {
       logger.error("Deploy failed", { error });
-      return {
+      return status(500, {
         success: false,
         error: error instanceof Error ? error.message : "Unknown error",
-      };
+      });
     }
+  }, {
+    body: t.Object({
+      app: t.String(),
+      tenant: t.String(),
+      artifact: t.String(),
+      config: t.Any(),
+    }),
   })
   .post("/rollback", async ({ body }) => {
     try {
-      const { app, version } = body as {
-        app: string;
-        version?: string;
-      };
-
-      if (!app) {
-        return {
-          success: false,
-          error: "Missing required field: app",
-        };
-      }
-
-      const result = await deployService.rollback(app, version);
+      const result = await deployService.rollback(body.app, body.version);
       return result;
-    } catch (error) {
+    } catch (error: unknown) {
       logger.error("Rollback failed", { error });
-      return {
+      return status(500, {
         success: false,
         error: error instanceof Error ? error.message : "Unknown error",
-      };
+      });
     }
+  }, {
+    body: t.Object({
+      app: t.String(),
+      version: t.Optional(t.String()),
+    }),
   })
   .get("/history", async ({ query }) => {
     try {
-      const app = query.app as string | undefined;
-      const limit = parseInt(query.limit as string) || 20;
+      const app = query.app;
+      const limit = parseInt(query.limit ?? "20") || 20;
 
       const history = await deployService.getHistory(app, limit);
 
@@ -73,37 +59,45 @@ export const deployRoutes = new Elysia({ prefix: "/v1/deploy" })
         success: true,
         history,
       };
-    } catch (error) {
+    } catch (error: unknown) {
       logger.error("Failed to get history", { error });
-      return {
+      return status(500, {
         success: false,
         error: error instanceof Error ? error.message : "Unknown error",
-      };
+      });
     }
+  }, {
+    query: t.Object({
+      app: t.Optional(t.String()),
+      limit: t.Optional(t.String()),
+    }),
   })
   .get("/versions", async ({ query }) => {
     try {
-      const app = query.app as string;
-
-      if (!app) {
-        return {
+      if (!query.app) {
+        return status(400, {
           success: false,
           error: "Missing required query parameter: app",
-        };
+        });
       }
 
-      const versions = await deployService.getVersions(app);
+      const versions = await deployService.getVersions(query.app);
 
       return {
         success: true,
-        app,
+        app: query.app,
         versions,
       };
-    } catch (error) {
+    } catch (error: unknown) {
       logger.error("Failed to get versions", { error });
-      return {
+      return status(500, {
         success: false,
         error: error instanceof Error ? error.message : "Unknown error",
-      };
+      });
     }
+  }, {
+    query: t.Object({
+      app: t.Optional(t.String()),
+    }),
   });
+

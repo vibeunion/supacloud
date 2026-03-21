@@ -18,7 +18,7 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
                 const dbName = `supa_${params.ref}`;
                 const result = await db.executeQuery(dbName, sql);
                 return result;
-            } catch (error) {
+            } catch (error: unknown) {
                 set.status = 500;
                 return {
                     error: "SQL execution failed",
@@ -86,7 +86,7 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
                 await db.executeQuery(dbName, `INSERT INTO schema_migrations (version) VALUES ('${version}');`);
 
                 return { success: true, version, name };
-            } catch (error) {
+            } catch (error: unknown) {
                 set.status = 500;
                 return {
                     error: "Migration failed",
@@ -121,7 +121,7 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
                     `SELECT version, applied_at FROM schema_migrations ORDER BY applied_at DESC;`
                 );
                 return result;
-            } catch (error) {
+            } catch (error: unknown) {
                 return { rows: [] };
             }
         },

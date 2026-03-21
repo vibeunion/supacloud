@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { cn } from "$lib/utils";
-  import { Code2, Activity } from "lucide-svelte";
+  import { Code2, Activity , Plus, Play, Table as TableIcon} from "lucide-svelte";
 
   import MonacoEditor from "$lib/components/MonacoEditor.svelte";
 
@@ -13,7 +13,7 @@
   let activeIndex = $derived(tabs.findIndex(t => t.active));
 
   let activeTab = $derived(tabs.find(t => t.active) || tabs[0]);
-  let results = $state<any[]>([]);
+  let results = $state<Record<string, unknown>[]>([]);
   let isRunning = $state(false);
 
   function switchTab(id: string) {

@@ -7,13 +7,14 @@ export const load: PageServerLoad = async ({ url }) => {
     
     try {
         const projects = await projectService.listProjects();
-        const project = (projects.find(p => p.ref === projectRef) || projects[0]) as any;
+        const foundProject = projects.find(p => p.ref === projectRef) || projects[0];
         
-        if (!project) {
+        if (!foundProject) {
             return { tables: [], schemas: [], project: null };
         }
 
-        const dbName = project.db_name || `supa_${project.ref}`;
+        const project = foundProject as unknown as Record<string, unknown>;
+        const dbName = String(project.db_name || `supa_${project.ref || 'default'}`);
         
         // Fetch All Schemas
         const schemasResult = await db.executeQuery(dbName, `
@@ -33,14 +34,13 @@ export const load: PageServerLoad = async ({ url }) => {
 
         return {
             project,
-            schemas: schemasResult.rows.map((r: any) => r.schema_name),
-            tables: tablesResult.rows.map((r: any) => ({
-                schema: r.table_schema,
-                name: r.table_name,
-                type: r.table_type
-            }))
+            schemas: schemasResult.rows.map((r) => (r as Record<string, unknown>).schema_name as string),
+            tables: tablesResult.rows.map((r) => {
+                const row = r as Record<string, unknown>;
+                return { schema: row.table_schema as string, name: row.table_name as string, type: row.table_type as string };
+            })
         };
-    } catch (err) {
+    } catch (err: unknown) {
         console.error('Failed to load table metadata:', err);
         return { tables: [], schemas: [] };
     }

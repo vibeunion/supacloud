@@ -20,10 +20,10 @@
     created_at: string;
   }
 
-  let deployments: Deployment[] = $state([]);
+  let deployments: Deployment[] = $state.raw([]);
   let isLoading = $state(true);
-  let actionMsg: string | null = $state(null);
-  let deletingId: string | null = $state(null);
+  let actionMsg: string | null = $state.raw(null);
+  let deletingId: string | null = $state.raw(null);
 
   const projectRef = $derived(page.params.ref);
 
@@ -46,8 +46,8 @@
       const data = await res.json();
       actionMsg = data.success !== false ? `✅ 重新部署已触发` : `❌ ${data.error || '部署失败'}`;
       await fetchDeployments();
-    } catch (err: any) {
-      actionMsg = `❌ ${err.message}`;
+    } catch (err: unknown) {
+      actionMsg = `❌ ${(err instanceof Error ? err.message : String(err))}`;
     }
     setTimeout(() => actionMsg = null, 5000);
   }

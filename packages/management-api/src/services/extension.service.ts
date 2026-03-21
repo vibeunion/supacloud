@@ -1,4 +1,5 @@
 import { SQL } from "bun";
+import { logger } from "../utils/logger";
 import { $ } from "bun";
 
 export interface ExtensionInfo {
@@ -99,7 +100,8 @@ export class ExtensionService {
                     description: parts.slice(3).join(' ') || '',
                 };
             }).filter((e: { name: string }) => e.name);
-        } catch {
+        } catch (err: unknown) {
+          logger.warn("[] slice failed silently", { error: err });
             return [];
         }
     }
@@ -114,8 +116,8 @@ export class ExtensionService {
                 return { success: false, message: `Failed to install ${name}: ${result.stderr.toString().slice(0, 500)}` };
             }
             return { success: true, message: `Extension package '${name}' installed successfully` };
-        } catch (err: any) {
-            return { success: false, message: err.message };
+        } catch (err: unknown) {
+            return { success: false, message: (err instanceof Error ? err.message : String(err)) };
         }
     }
 
@@ -129,8 +131,8 @@ export class ExtensionService {
                 return { success: false, message: `Failed to remove ${name}: ${result.stderr.toString().slice(0, 500)}` };
             }
             return { success: true, message: `Extension package '${name}' removed successfully` };
-        } catch (err: any) {
-            return { success: false, message: err.message };
+        } catch (err: unknown) {
+            return { success: false, message: (err instanceof Error ? err.message : String(err)) };
         }
     }
 }

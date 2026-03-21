@@ -4,6 +4,7 @@
   import { onMount } from "svelte";
   import { page } from "$app/state";
   import { Loader2, Shield, Table, Plus, Search, Trash2 } from "lucide-svelte";
+  import { toast } from "svelte-sonner";
 
   interface RlsPolicy {
     policyname: string;
@@ -81,8 +82,8 @@
       if (!data.error) {
         policies = Array.isArray(data) ? data : data.rows || [];
       }
-    } catch (err) {
-      console.error("Failed to fetch policies:", err);
+    } catch (err: unknown) {
+      toast.error("无法fetch policies");
     } finally {
       isLoading = false;
     }
@@ -102,9 +103,9 @@
       ]);
       const tblData = await tblRes.json();
       const roleData = await roleRes.json();
-      if (!tblData.error) tables = (Array.isArray(tblData) ? tblData : tblData.rows || []).map((r: any) => r.tablename);
-      if (!roleData.error) roles = (Array.isArray(roleData) ? roleData : roleData.rows || []).map((r: any) => r.rolname);
-    } catch (err) { console.error(err); }
+      if (!tblData.error) tables = (Array.isArray(tblData) ? tblData : tblData.rows || []).map((r: Record<string, unknown>) => r.tablename);
+      if (!roleData.error) roles = (Array.isArray(roleData) ? roleData : roleData.rows || []).map((r: Record<string, unknown>) => r.rolname);
+    } catch (err: unknown) { toast.error("操作失败"); }
   }
 
   onMount(() => { 
@@ -138,8 +139,8 @@
       showAdd = false;
       newPolName = ""; newPolUsing = ""; newPolWithCheck = "";
       await fetchPolicies();
-    } catch (err: any) {
-      addError = err.message || "创建失败";
+    } catch (err: unknown) {
+      addError = (err instanceof Error ? err.message : String(err)) || "创建失败";
     } finally {
       isSaving = false;
     }
@@ -157,8 +158,8 @@
       const data = await res.json();
       if (data.error) throw new Error(data.error);
       await fetchPolicies();
-    } catch (err: any) {
-      alert("删除失败: " + err.message);
+    } catch (err: unknown) {
+      alert("删除失败: " + (err instanceof Error ? err.message : String(err)));
     } finally {
       isDeleting = false;
     }

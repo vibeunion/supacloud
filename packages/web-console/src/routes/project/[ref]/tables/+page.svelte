@@ -38,7 +38,7 @@
   // Data Grid state
   let selectedTable = $state<TableInfo | null>(null);
   let tableColumns = $state<TableColumn[]>([]);
-  let tableData = $state<any[]>([]);
+  let tableData = $state<Record<string, unknown>[]>([]);
   let isLoadingData = $state(false);
   let dataError = $state<string | null>(null);
 
@@ -70,7 +70,7 @@
     || tableColumns[0]?.column_name || 'id'
   );
 
-  async function runSql(sql: string): Promise<{ rows: any[]; error?: string }> {
+  async function runSql(sql: string): Promise<{ rows: unknown[]; error?: string }> {
     try {
       const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
         method: "POST",
@@ -81,12 +81,12 @@
       if (data.error) return { rows: [], error: data.message || data.error };
       const rows = Array.isArray(data) ? data : data.rows || [];
       return { rows };
-    } catch (err: any) { return { rows: [], error: err.message }; }
+    } catch (err: unknown) { return { rows: [], error: (err instanceof Error ? err.message : String(err)) }; }
   }
 
   async function fetchSchemas() {
     const { rows } = await runSql(`SELECT DISTINCT schemaname FROM pg_tables WHERE schemaname NOT IN ('pg_catalog', 'information_schema') ORDER BY schemaname`);
-    schemas = rows.map((r: any) => r.schemaname);
+    schemas = rows.map((r) => String((r as Record<string, unknown>).schemaname));
     if (schemas.length === 0) schemas = ["public"];
   }
 
@@ -107,8 +107,8 @@
       const data = await res.json();
       if (data.error) throw new Error(data.error);
       tables = Array.isArray(data) ? data : data.rows || [];
-    } catch (err: any) {
-      sidebarError = err.message;
+    } catch (err: unknown) {
+      sidebarError = (err instanceof Error ? err.message : String(err));
     } finally { isLoadingSidebar = false; }
   }
 
@@ -133,8 +133,8 @@
       showAddTable = false;
       newTableName = ""; newTableDesc = "";
       await fetchTables();
-    } catch (err: any) {
-      addTableError = err.message || "建表失败";
+    } catch (err: unknown) {
+      addTableError = (err instanceof Error ? err.message : String(err)) || "建表失败";
     } finally {
       isCreatingTable = false;
     }
@@ -155,8 +155,8 @@
       
       selectedTable = null;
       await fetchTables();
-    } catch (err: any) {
-      alert("删除失败: " + err.message);
+    } catch (err: unknown) {
+      alert("删除失败: " + (err instanceof Error ? err.message : String(err)));
     }
   }
 
@@ -174,16 +174,16 @@
       WHERE table_schema = '${tbl.table_schema}' AND table_name = '${tbl.table_name}'
       ORDER BY ordinal_position`);
     if (colResult.error) { dataError = colResult.error; isLoadingData = false; return; }
-    tableColumns = colResult.rows;
+    tableColumns = colResult.rows as TableColumn[];
 
     const off = (pageNum - 1) * pageSize;
     const dataResult = await runSql(`SELECT * FROM "${tbl.table_schema}"."${tbl.table_name}" LIMIT ${pageSize} OFFSET ${off}`);
     if (dataResult.error) { dataError = dataResult.error; isLoadingData = false; return; }
-    tableData = dataResult.rows;
+    tableData = dataResult.rows as Record<string, unknown>[];
 
     if (tbl.row_estimate < 100000) {
       const countResult = await runSql(`SELECT count(*) as cnt FROM "${tbl.table_schema}"."${tbl.table_name}"`);
-      if (countResult.rows[0]) totalRows = parseInt(countResult.rows[0].cnt);
+      if (countResult.rows[0]) totalRows = parseInt(String((countResult.rows[0] as Record<string, unknown>).cnt));
     }
     isLoadingData = false;
   }
@@ -218,7 +218,7 @@
   }
 
   // DELETE
-  async function deleteRow(row: any) {
+  async function deleteRow(row: Record<string, unknown>) {
     if (!selectedTable) return;
     const pkVal = row[pkColumn];
     if (pkVal === undefined || pkVal === null) { crudMsg = "❌ 无法确定主键值"; setTimeout(() => crudMsg = null, 3000); return; }
@@ -232,7 +232,7 @@
   }
 
   // INLINE EDIT
-  function startEdit(rowIdx: number, col: string, currentValue: any) {
+  function startEdit(rowIdx: number, col: string, currentValue: unknown) {
     editingCell = { rowIdx, col };
     editValue = currentValue === null ? "" : String(currentValue);
   }
@@ -397,7 +397,7 @@
                       <span class="text-[11px]">{col.column_name}</span>
                       <span class="text-[9px] font-mono text-muted-foreground/60">{col.data_type}</span>
                       {#if col.is_identity === 'YES' || col.column_default?.includes('nextval')}
-                        <Key size={9} class="text-amber-500" title="主键" />
+                        <span title="主键"><Key size={9} class="text-amber-500" /></span>
                       {/if}
                     </div>
                   </th>
@@ -422,7 +422,7 @@
                             <input type="text" bind:value={editValue}
                               onkeydown={(e) => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') cancelEdit(); }}
                               class="flex-1 px-1 py-0.5 text-[11px] font-mono rounded border border-brand bg-background focus:outline-none min-w-[60px]"
-                              autofocus />
+ />
                             <button onclick={saveEdit} disabled={isSaving} class="p-0.5 text-green-600 hover:bg-green-500/10 rounded"><Check size={12} /></button>
                             <button onclick={cancelEdit} class="p-0.5 text-muted-foreground hover:bg-muted rounded"><X size={12} /></button>
                           </div>

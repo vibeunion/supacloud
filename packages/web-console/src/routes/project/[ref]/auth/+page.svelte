@@ -28,8 +28,8 @@
     last_sign_in_at: string;
     role: string;
     email_confirmed_at: string | null;
-    raw_app_meta_data?: any;
-    raw_user_meta_data?: any;
+    raw_app_meta_data?: Record<string, unknown>;
+    raw_user_meta_data?: Record<string, unknown>;
   }
 
   let users = $state<AuthUser[]>([]);
@@ -62,8 +62,8 @@
       const data = await res.json();
       if (data.error) throw new Error(data.message || data.error);
       users = Array.isArray(data) ? data : data.rows || [];
-    } catch (err: any) {
-      error = err.message;
+    } catch (err: unknown) {
+      error = err instanceof Error ? err.message : String(err);
     } finally {
       isLoading = false;
     }
@@ -92,8 +92,8 @@
         const err = await res.json();
         submitMsg = `❌ 创建失败: ${err.error}`;
       }
-    } catch (err: any) {
-      submitMsg = `❌ 创建失败: ${err.message}`;
+    } catch (err: unknown) {
+      submitMsg = `❌ 创建失败: ${(err instanceof Error ? err.message : String(err))}`;
     } finally {
       isSubmitting = false;
       setTimeout(() => submitMsg = null, 4000);
@@ -118,8 +118,8 @@
         const err = await res.json();
         submitMsg = `❌ 邀请失败: ${err.error}`;
       }
-    } catch (err: any) {
-      submitMsg = `❌ 邀请失败: ${err.message}`;
+    } catch (err: unknown) {
+      submitMsg = `❌ 邀请失败: ${(err instanceof Error ? err.message : String(err))}`;
     } finally {
       isSubmitting = false;
       setTimeout(() => submitMsg = null, 4000);
@@ -137,8 +137,8 @@
         const err = await res.json();
         submitMsg = `❌ 删除失败: ${err.error}`;
       }
-    } catch (err: any) {
-      submitMsg = `❌ 删除失败: ${err.message}`;
+    } catch (err: unknown) {
+      submitMsg = `❌ 删除失败: ${(err instanceof Error ? err.message : String(err))}`;
     } finally {
       setTimeout(() => submitMsg = null, 4000);
     }
@@ -158,7 +158,7 @@
       return user.raw_app_meta_data.providers;
     }
     if (user.raw_app_meta_data?.provider) {
-      return [user.raw_app_meta_data.provider];
+      return [String(user.raw_app_meta_data.provider)];
     }
     return ["email"];
   }
@@ -206,12 +206,12 @@
         <div class="p-6 space-y-4">
           {#if showAddUser}
             <div>
-              <label class="text-xs font-medium uppercase text-muted-foreground">邮箱</label>
-              <input type="email" bind:value={newUserEmail} class="mt-1.5 w-full flex h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand" placeholder="user@example.com" />
+              <label for="a11y-routes-project--ref--auth--page-svelte-209" class="text-xs font-medium uppercase text-muted-foreground">邮箱</label>
+              <input id="a11y-routes-project--ref--auth--page-svelte-209" type="email" bind:value={newUserEmail} class="mt-1.5 w-full flex h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand" placeholder="user@example.com" />
             </div>
             <div>
-              <label class="text-xs font-medium uppercase text-muted-foreground">密码</label>
-              <input type="password" bind:value={newUserPassword} class="mt-1.5 w-full flex h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand" placeholder="••••••••" />
+              <label for="a11y-routes-project--ref--auth--page-svelte-213" class="text-xs font-medium uppercase text-muted-foreground">密码</label>
+              <input id="a11y-routes-project--ref--auth--page-svelte-213" type="password" bind:value={newUserPassword} class="mt-1.5 w-full flex h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand" placeholder="••••••••" />
             </div>
             <label class="flex items-center gap-2 text-sm mt-2">
               <input type="checkbox" bind:checked={newUserAutoConfirm} class="rounded border-input text-brand focus:ring-brand" />
@@ -222,8 +222,8 @@
             </button>
           {:else}
             <div>
-              <label class="text-xs font-medium uppercase text-muted-foreground">邀请邮箱</label>
-              <input type="email" bind:value={inviteEmail} class="mt-1.5 w-full flex h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand" placeholder="user@example.com" />
+              <label for="a11y-routes-project--ref--auth--page-svelte-225" class="text-xs font-medium uppercase text-muted-foreground">邀请邮箱</label>
+              <input id="a11y-routes-project--ref--auth--page-svelte-225" type="email" bind:value={inviteEmail} class="mt-1.5 w-full flex h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand" placeholder="user@example.com" />
             </div>
             <p class="text-xs text-muted-foreground mt-2">GoTrue 服务将发送一封带有魔术链接的邀请邮件至该邮箱。</p>
             <button onclick={inviteUser} disabled={isSubmitting || !inviteEmail} class="w-full mt-4 bg-brand text-white h-9 rounded-md text-sm font-semibold hover:bg-brand/90 transition-colors disabled:opacity-50 flex items-center justify-center gap-2">

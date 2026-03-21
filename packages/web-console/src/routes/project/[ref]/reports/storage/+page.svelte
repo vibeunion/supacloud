@@ -4,8 +4,9 @@
   import { onMount } from "svelte";
   import { page } from "$app/state";
   import { Loader2, HardDrive, ArrowLeft, Folder } from "lucide-svelte";
+  import { toast } from "svelte-sonner";
 
-  let bucketStats = $state<any[]>([]);
+  let bucketStats = $state<Record<string, unknown>[]>([]);
   let isLoading = $state(true);
 
   const projectRef = $derived(page.params.ref);
@@ -32,8 +33,8 @@
       });
       const data = await res.json();
       bucketStats = Array.isArray(data) ? data : data.rows || [];
-    } catch (err) {
-      console.error("Failed to fetch storage stats:", err);
+    } catch (err: unknown) {
+      toast.error("无法fetch storage stats");
     } finally {
       isLoading = false;
     }
@@ -41,7 +42,7 @@
 
   onMount(() => { fetchStats(); });
 
-  function formatNum(n: any): string {
+  function formatNum(n: unknown): string {
     return new Intl.NumberFormat().format(Number(n) || 0);
   }
 
@@ -116,7 +117,7 @@
                   </td>
                   <td class="px-4 py-2 text-right tabular-nums">{formatNum(bucket.object_count)}</td>
                   <td class="px-4 py-2 text-right">{bucket.total_size}</td>
-                  <td class="px-4 py-2 text-[10px] text-muted-foreground">{bucket.last_upload?.substring(0, 19) || '-'}</td>
+                  <td class="px-4 py-2 text-[10px] text-muted-foreground">{String(bucket.last_upload || "").substring(0, 19) || '-'}</td>
                 </tr>
               {/each}
             </tbody>
