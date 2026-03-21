@@ -14,7 +14,6 @@
  * body parsing, passing the raw Request directly to MCP SDK's
  * WebStandardStreamableHTTPServerTransport.
  */
-import { Elysia } from "elysia";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { verifyMcpToken, type McpTokenPayload } from "../mcp/token";
@@ -69,7 +68,7 @@ function jsonResponse(data: any, status = 200): Response {
 }
 
 // Handle MCP request (POST, GET, DELETE)
-async function handleMcp(request: Request): Promise<Response> {
+export async function handleMcp(request: Request): Promise<Response> {
   const method = request.method;
 
   // Auth check (all methods)
@@ -137,32 +136,3 @@ async function handleMcp(request: Request): Promise<Response> {
 
   return jsonResponse({ error: "Method not allowed" }, 405);
 }
-
-/**
- * Register MCP routes using Elysia's onRequest lifecycle.
- * This intercepts /mcp paths BEFORE Elysia touches the body,
- * giving the MCP SDK a fresh, unconsumed Request object.
- */
-export const mcpRoutes = new Elysia()
-  .onRequest(async ({ request, set }) => {
-    const url = new URL(request.url);
-    if (url.pathname.startsWith("/mcp")) {
-      try {
-        const response = await handleMcp(request);
-        // Copy response back to Elysia
-        set.status = response.status;
-        for (const [k, v] of response.headers.entries()) {
-          set.headers[k] = v;
-        }
-        // If it's an SSE stream, return the ReadableStream directly
-        if (response.headers.get("content-type")?.includes("text/event-stream")) {
-          return response;
-        }
-        return await response.text();
-      } catch (e: any) {
-        console.error("[MCP] Error:", e);
-        set.status = 500;
-        return JSON.stringify({ error: e.message });
-      }
-    }
-  });

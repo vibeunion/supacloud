@@ -95,9 +95,6 @@ const app = new Elysia({ strictPath: false })
     }
   })
 
-  // MCP Endpoint (has its own auth, registered before authMiddleware)
-  .use((await import("./routes/mcp")).mcpRoutes)
-
   // Main API Routes
   .use(await registerAllRoutes())
 
@@ -431,7 +428,20 @@ async function bootstrap() {
   } else if (args.includes("--help") || args.includes("-h")) {
     process.exit(0);
   } else if (args.length === 0 || args.includes("--server")) {
-    app.listen(config.port);
+    // Use Bun.serve with custom fetch to intercept /mcp before Elysia touches the body
+    const { handleMcp } = await import("./routes/mcp");
+    Bun.serve({
+      port: config.port,
+      async fetch(request: Request) {
+        const url = new URL(request.url);
+        // Route /mcp paths directly to MCP handler (bypasses Elysia body parsing)
+        if (url.pathname.startsWith("/mcp")) {
+          return handleMcp(request);
+        }
+        // Everything else goes through Elysia
+        return app.fetch(request);
+      },
+    });
     const { taskWorker } = await import("./services/task.worker");
     taskWorker.start();
 
