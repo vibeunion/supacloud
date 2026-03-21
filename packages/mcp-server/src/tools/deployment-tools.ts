@@ -63,12 +63,12 @@ export function registerDeploymentTools(server: McpServer): void {
                         },
                     ],
                 };
-            } catch (error: any) {
+            } catch (error: unknown) {
                 return {
                     content: [
                         {
                             type: "text",
-                            text: `❌ Deployment failed: ${error.message}\n${error.stderr || ""}`,
+                            text: `❌ Deployment failed: ${(error instanceof Error ? error.message : String(error))}\n${(error as { stderr?: string }).stderr || ""}`,
                         },
                     ],
                 };

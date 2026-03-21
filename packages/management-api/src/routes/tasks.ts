@@ -1,8 +1,9 @@
-import { Elysia } from "elysia";
+import { Elysia, status } from "elysia";
+import { logger } from "../utils/logger";
 import { sql } from "../db";
 
 export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
-    .get("/", async ({ params, set }: any) => {
+    .get("/", async ({ params }) => {
         try {
             const tasks = await sql`
                 SELECT id, task_type, status, error, created_at, updated_at
@@ -12,8 +13,7 @@ export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
                 LIMIT 50
             `;
             return tasks;
-        } catch (err: any) {
-            set.status = 500;
-            return { error: "Failed to retrieve tasks", details: err.message };
+        } catch (err: unknown) {
+                        return status(500, { error: "Failed to retrieve tasks", details: (err instanceof Error ? err.message : String(err)) });
         }
     });

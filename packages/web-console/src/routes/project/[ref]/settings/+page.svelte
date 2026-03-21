@@ -5,8 +5,9 @@
   import { page } from "$app/state";
   import { t } from "svelte-i18n";
   import { Loader2, Activity, Server, Pause, RotateCw, Trash2, AlertTriangle } from "lucide-svelte";
+  import { toast } from "svelte-sonner";
 
-  let project = $state<any>(null);
+  let project = $state<Record<string, unknown> | null>(null);
   let isLoading = $state(true);
   let actionInProgress = $state<string | null>(null);
   let actionMsg = $state<string | null>(null);
@@ -18,8 +19,8 @@
     try {
       const res = await apiClient(`/v1/projects/${projectRef}`);
       project = await res.json();
-    } catch (err) {
-      console.error("Failed to fetch project:", err);
+    } catch (err: unknown) {
+      toast.error("无法fetch project");
     } finally {
       isLoading = false;
     }
@@ -137,21 +138,21 @@
       </div>
 
       <!-- Services -->
-      {#if project.services}
+      {#if (project as Record<string, unknown>)?.services}
         <div class="border rounded-xl bg-card p-6 space-y-4">
           <h2 class="text-lg font-semibold flex items-center gap-2">
             <Server size={16} />
             {$t("Settings.services")}
           </h2>
           <div class="grid grid-cols-2 lg:grid-cols-3 gap-3">
-            {#each project.services as service}
+            {#each ((project as Record<string, unknown>)?.services as unknown[] || []) as service}
               <div class="flex items-center justify-between p-3 rounded-lg border bg-background">
                 <div class="flex items-center gap-2">
-                  <Activity size={14} class={service.status === 'ACTIVE_HEALTHY' ? 'text-green-500' : 'text-muted-foreground'} />
-                  <span class="text-sm font-medium">{service.name}</span>
+                  <Activity size={14} class={(service as Record<string, unknown>).status === 'ACTIVE_HEALTHY' ? 'text-green-500' : 'text-muted-foreground'} />
+                  <span class="text-sm font-medium">{(service as Record<string, unknown>).name}</span>
                 </div>
-                <span class="text-[10px] px-2 py-0.5 rounded-full {service.status === 'ACTIVE_HEALTHY' ? 'bg-green-500/10 text-green-600' : 'bg-muted text-muted-foreground'}">
-                  {service.status === 'ACTIVE_HEALTHY' ? $t("Settings.active") : $t("Settings.inactive")}
+                <span class="text-[10px] px-2 py-0.5 rounded-full {(service as Record<string, unknown>).status === 'ACTIVE_HEALTHY' ? 'bg-green-500/10 text-green-600' : 'bg-muted text-muted-foreground'}">
+                  {(service as Record<string, unknown>).status === 'ACTIVE_HEALTHY' ? $t("Settings.active") : $t("Settings.inactive")}
                 </span>
               </div>
             {/each}
@@ -160,21 +161,21 @@
       {/if}
 
       <!-- Database Info -->
-      {#if project.database}
+      {#if (project as Record<string, unknown>)?.database}
         <div class="border rounded-xl bg-card p-6 space-y-4">
           <h2 class="text-lg font-semibold">{$t("Settings.database_info")}</h2>
           <div class="grid grid-cols-2 gap-4 text-sm">
             <div>
               <span class="text-xs text-muted-foreground">PostgreSQL</span>
-              <p class="font-mono text-xs">v{project.database.version}</p>
+              <p class="font-mono text-xs">v{((project as Record<string, unknown>)?.database as Record<string, unknown>)?.version}</p>
             </div>
             <div>
               <span class="text-xs text-muted-foreground">{$t("Dashboard.db_connections")}</span>
-              <p class="font-mono text-xs">{project.database.connection_count}</p>
+              <p class="font-mono text-xs">{((project as Record<string, unknown>)?.database as Record<string, unknown>)?.connection_count}</p>
             </div>
             <div>
               <span class="text-xs text-muted-foreground">{$t("Settings.db_size")}</span>
-              <p class="font-mono text-xs">{(project.database.size / 1024 / 1024).toFixed(1)} MB</p>
+              <p class="font-mono text-xs">{(((project as Record<string, unknown>)?.database as Record<string, unknown>)?.size as number / 1024 / 1024).toFixed(1)} MB</p>
             </div>
           </div>
         </div>
@@ -189,7 +190,7 @@
             {#if actionInProgress === "restart"}<Loader2 size={16} class="animate-spin" />{:else}<RotateCw size={16} />{/if}
             重启项目
           </button>
-          {#if project.status === "active"}
+          {#if (project as Record<string, unknown>)?.status === "active"}
             <button onclick={pauseProject} disabled={!!actionInProgress}
               class="flex items-center justify-center gap-2 px-4 py-3 text-sm font-semibold rounded-lg border border-amber-500 text-amber-600 hover:bg-amber-500/10 transition-colors disabled:opacity-50">
               {#if actionInProgress === "pause"}<Loader2 size={16} class="animate-spin" />{:else}<Pause size={16} />{/if}

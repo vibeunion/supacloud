@@ -1,8 +1,9 @@
 import { nanoid } from "nanoid";
+import { logger } from "../utils/logger";
 import { shellService } from "./shell.service";
 import { SQL } from "bun";
 import { $ } from "bun";
-import { ValidationUtils } from "../utils/validation";
+import { assertValidIdentifier, assertValidDbName } from "../utils/validation";
 
 export class DatabaseService {
   private readonly PG_HOST = process.env.PG_HOST || process.env.POSTGRES_HOST || "localhost";
@@ -90,8 +91,8 @@ export class DatabaseService {
           }
         }
       }
-    } catch (error) {
-      if (error instanceof Error && error.message.includes("Insufficient disk space")) {
+    } catch (error: unknown) {
+      if (error instanceof Error && (error instanceof Error ? error.message : String(error)).includes("Insufficient disk space")) {
         throw error;
       }
     }
@@ -104,8 +105,8 @@ export class DatabaseService {
 
     try {
       // Verify identifiers for safety to prevent SQL injection in DDL
-      ValidationUtils.assertValidDbName("dbName", dbName);
-      ValidationUtils.assertValidIdentifier("dbUser", dbUser);
+      assertValidDbName("dbName", dbName);
+      assertValidIdentifier("dbUser", dbUser);
 
       await this.checkDiskSpace();
 
@@ -140,8 +141,8 @@ export class DatabaseService {
       await this.applySupabaseSchema(dbName, projectRef, password);
 
       return { success: true };
-    } catch (error: any) {
-      return { success: false, error: error.message };
+    } catch (error: unknown) {
+      return { success: false, error: (error instanceof Error ? error.message : String(error)) };
     }
   }
 
@@ -160,7 +161,7 @@ export class DatabaseService {
       const serviceRole = `service_role`;
 
       // Safe check identifiers
-      ValidationUtils.assertValidIdentifier("authenticatorRole", authenticatorRole);
+      assertValidIdentifier("authenticatorRole", authenticatorRole);
 
       // PostgreSQL doesn't support CREATE ROLE IF NOT EXISTS, use DO block
       await tenantDb.unsafe(`
@@ -229,8 +230,8 @@ export class DatabaseService {
     const dbUser = `role_${projectRef}`;
 
     try {
-      ValidationUtils.assertValidDbName("dbName", dbName);
-      ValidationUtils.assertValidIdentifier("dbUser", dbUser);
+      assertValidDbName("dbName", dbName);
+      assertValidIdentifier("dbUser", dbUser);
 
       await this.withAdminDb(async (adminDb) => {
         // Terminate connections safely
@@ -240,7 +241,7 @@ export class DatabaseService {
             FROM pg_stat_activity
             WHERE datname = ${dbName} AND pid <> pg_backend_pid()
           `;
-        } catch { /* ignore */ }
+        } catch (e: unknown) { logger.debug("[services/database.service] suppressed error", { error: e instanceof Error ? e.message : String(e) }); }
 
         // Drop database
         await adminDb.unsafe(`DROP DATABASE IF EXISTS "${dbName}"`);
@@ -252,8 +253,8 @@ export class DatabaseService {
       });
 
       return { success: true };
-    } catch (error: any) {
-      return { success: false, error: error.message };
+    } catch (error: unknown) {
+      return { success: false, error: (error instanceof Error ? error.message : String(error)) };
     }
   }
 
@@ -262,7 +263,7 @@ export class DatabaseService {
     const dbName = `supa_${projectRef}`;
 
     try {
-      ValidationUtils.assertValidDbName("dbName", dbName);
+      assertValidDbName("dbName", dbName);
 
       return await this.withAdminDb(async (adminDb) => {
         const [dbCount] = await adminDb`
@@ -275,8 +276,8 @@ export class DatabaseService {
           return { success: true, output: "not_found" };
         }
       });
-    } catch (error: any) {
-      return { success: false, output: "", error: error.message };
+    } catch (error: unknown) {
+      return { success: false, output: "", error: (error instanceof Error ? error.message : String(error)) };
     }
   }
 
@@ -287,7 +288,8 @@ export class DatabaseService {
     if (!result.success) return [];
     try {
       return JSON.parse(result.output);
-    } catch {
+    } catch (err: unknown) {
+      logger.warn("[] shellService.execute failed silently", { error: err });
       return [];
     }
   }

@@ -19,7 +19,7 @@ export const load: PageServerLoad = async ({ fetch }) => {
 
         const metrics = await response.json();
         return { metrics };
-    } catch (err) {
+    } catch (err: unknown) {
         // Fallback Mock Data
         return {
             metrics: {

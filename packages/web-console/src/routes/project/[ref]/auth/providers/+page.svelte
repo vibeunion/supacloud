@@ -122,8 +122,8 @@
         const err = await res.json();
         saveMsg = `❌ 保存失败: ${err.error || res.statusText}`;
       }
-    } catch (err: any) {
-      saveMsg = `❌ 网络错误: ${err.message}`;
+    } catch (err: unknown) {
+      saveMsg = `❌ 网络错误: ${(err instanceof Error ? err.message : String(err))}`;
     } finally {
       provider.saving = false;
       setTimeout(() => saveMsg = null, 4000);
@@ -248,9 +248,12 @@
           {#if i !== -1}
           <div class="group">
             <!-- Header Row (clickable to expand) -->
-            <button
+            <div
+              role="button"
+              tabindex="0"
               onclick={() => providers[i].expanded = !providers[i].expanded}
-              class="w-full flex items-center justify-between px-5 py-3.5 hover:bg-muted/10 transition-colors text-left"
+              onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); providers[i].expanded = !providers[i].expanded; } }}
+              class="w-full flex items-center justify-between px-5 py-3.5 hover:bg-muted/10 transition-colors text-left cursor-pointer"
             >
               <div class="flex items-center gap-3">
                 <div class="w-8 h-8 rounded-lg flex items-center justify-center {providers[i].enabled ? 'bg-brand/10 text-brand' : 'bg-muted/50 text-muted-foreground'}">
@@ -268,7 +271,7 @@
               </div>
               <div class="flex items-center gap-3">
                 {#if providers[i].category !== "built_in"}
-                  <button
+                  <button aria-label="Action button"
                     onclick={(e) => { e.stopPropagation(); toggleProvider(providers[i]); }}
                     disabled={providers[i].saving}
                     class="relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none disabled:opacity-50 {providers[i].enabled ? 'bg-green-500' : 'bg-muted-foreground/30'}"
@@ -289,7 +292,7 @@
                   <ChevronDown size={14} class="text-muted-foreground" />
                 {/if}
               </div>
-            </button>
+            </div>
 
             <!-- Expanded Config Form -->
             {#if providers[i].expanded}
@@ -350,6 +353,7 @@
               </div>
             {/if}
           </div>
+          {/if}
         {/each}
       </div>
     {/if}

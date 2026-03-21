@@ -5,6 +5,7 @@
  * Format: base64url(payload).hex(HMAC-SHA256(payload, masterToken))
  */
 import { config } from "../config";
+import { logger } from "../utils/logger";
 
 export type McpTokenRole = "admin" | "project";
 
@@ -86,7 +87,8 @@ export async function verifyMcpToken(token: string): Promise<McpTokenPayload | n
     const payload: McpTokenPayload = JSON.parse(base64urlDecode(encoded));
     if (payload.exp < Date.now()) return null; // expired
     return payload;
-  } catch {
+  } catch (err: unknown) {
+    logger.warn("[] parse failed silently", { error: err });
     return null;
   }
 }

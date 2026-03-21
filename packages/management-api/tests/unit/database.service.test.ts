@@ -2,27 +2,39 @@ import { describe, test, expect, beforeEach, mock, spyOn } from "bun:test";
 import { DatabaseService } from "../../src/services/database.service";
 import { shellService } from "../../src/services/shell.service";
 
+/** Typed mock for SQL connection used in DatabaseService */
+interface MockSql {
+    (strings: TemplateStringsArray, ...values: unknown[]): Promise<unknown[]>;
+    unsafe: ReturnType<typeof mock>;
+    close: ReturnType<typeof mock>;
+    mockResolvedValueOnce: (value: unknown) => void;
+}
+
+function createMockSql(): MockSql {
+    const fn = mock((strings: unknown) => Promise.resolve([]));
+    (fn as Record<string, unknown>).unsafe = mock(() => Promise.resolve([]));
+    (fn as Record<string, unknown>).close = mock(() => Promise.resolve());
+    return fn as unknown as MockSql;
+}
+
 describe("DatabaseService", () => {
   let databaseService: DatabaseService;
-  let mockSql: any;
+  let mockSql: MockSql;
 
   beforeEach(() => {
     databaseService = new DatabaseService();
-    
-    // Mock SQL object - return empty array by default so "exists" checks pass (false)
-    mockSql = mock((strings: any) => Promise.resolve([]));
-    mockSql.unsafe = mock(() => Promise.resolve([]));
-    mockSql.close = mock(() => Promise.resolve());
+
+    mockSql = createMockSql();
 
     // Intercept database connections
-    spyOn(DatabaseService.prototype as any, "getAdminDb").mockReturnValue(mockSql);
-    spyOn(DatabaseService.prototype as any, "getTenantDb").mockReturnValue(mockSql);
-    
+    spyOn(DatabaseService.prototype as unknown as Record<string, unknown>, "getAdminDb").mockReturnValue(mockSql);
+    spyOn(DatabaseService.prototype as unknown as Record<string, unknown>, "getTenantDb").mockReturnValue(mockSql);
+
     // Mock disk space check to avoid shell dependency
-    spyOn(DatabaseService.prototype as any, "checkDiskSpace").mockResolvedValue(undefined);
-    
+    spyOn(DatabaseService.prototype as unknown as Record<string, unknown>, "checkDiskSpace").mockResolvedValue(undefined);
+
     // Mock applySupabaseSchema to avoid complex nested DB calls in simple tests
-    spyOn(DatabaseService.prototype as any, "applySupabaseSchema").mockResolvedValue(undefined);
+    spyOn(DatabaseService.prototype as unknown as Record<string, unknown>, "applySupabaseSchema").mockResolvedValue(undefined);
   });
 
   describe("generatePassword", () => {
@@ -63,7 +75,7 @@ describe("DatabaseService", () => {
   describe("checkStatus", () => {
     test("should return result with output", async () => {
       // Mock DB exists
-      mockSql.mockResolvedValueOnce([{ exists: 1 }]);
+      (mockSql as unknown as ReturnType<typeof mock>).mockResolvedValueOnce([{ exists: 1 }]);
       const result = await databaseService.checkStatus("testref123");
       expect(result.success).toBe(true);
       expect(result.output).toBe("active");

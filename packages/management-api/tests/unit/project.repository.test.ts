@@ -24,7 +24,7 @@ const mockProject = {
 };
 
 // Mock the SQL module
-const mockSql: any = mock(() => Promise.resolve([mockProject]));
+const mockSql: unknown = mock(() => Promise.resolve([mockProject]));
 mockSql.unsafe = mock(() => Promise.resolve([mockProject]));
 
 mock.module("../../src/db", () => ({

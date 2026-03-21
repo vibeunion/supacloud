@@ -2,6 +2,7 @@
   import { apiClient } from "$lib/api";
   import { onMount } from "svelte";
   import { Key, Plus, Copy, Trash2, CheckCircle2, Clock, Shield, Bot, Globe, Lock } from "lucide-svelte";
+  import { toast } from "svelte-sonner";
 
   interface McpToken {
     token: string;
@@ -13,8 +14,8 @@
   }
 
   // State
-  let tokens: McpToken[] = $state([]);
-  let projects: { ref: string; name: string }[] = $state([]);
+  let tokens: McpToken[] = $state.raw([]);
+  let projects: { ref: string; name: string }[] = $state.raw([]);
   let isCreating = $state(false);
   let copiedToken = $state<string | null>(null);
   let masterToken = $state("");
@@ -30,7 +31,7 @@
   // Detect API URL from current page
   const apiBaseUrl = $derived(typeof window !== 'undefined' ? `${window.location.protocol}//${window.location.host}` : '');
 
-  async function apiCall(url: string, method: string = "GET", body?: any): Promise<any> {
+  async function apiCall(url: string, method: string = "GET", body?: unknown): Promise<unknown> {
     const opts: RequestInit = { method, headers: { "Content-Type": "application/json" } };
     if (body) opts.body = JSON.stringify(body);
     const res = await apiClient(url, opts);
@@ -40,7 +41,7 @@
   async function loadProjects() {
     try {
       const data = await apiCall("/v1/projects");
-      projects = Array.isArray(data) ? data.map((p: any) => ({ ref: p.ref, name: p.name })) : [];
+      projects = Array.isArray(data) ? data.map((p: Record<string, unknown>) => ({ ref: String(p.ref), name: String(p.name) })) : [];
     } catch { projects = []; }
   }
 
@@ -70,13 +71,14 @@
         readonly: form.readonly,
         expires_days: form.expires_days,
       });
-      if (data.token) {
+      const tokenData = data as Record<string, unknown>;
+      if (tokenData.token) {
         const project = projects.find(p => p.ref === form.ref);
-        tokens = [...tokens, { ...data, name: form.name, created_at: new Date().toISOString() }];
+        tokens = [...tokens, { ...(tokenData as unknown as McpToken), name: form.name, created_at: new Date().toISOString() }];
         form.name = "default";
       }
-    } catch (err: any) {
-      console.error("Failed to create token:", err);
+    } catch (err: unknown) {
+      toast.error("无法create token");
     }
     isCreating = false;
   }
@@ -173,10 +175,10 @@
 
         <!-- Token Name -->
         <div>
-          <label class="text-xs font-semibold text-muted-foreground block mb-1.5">
+          <label for="a11y-routes-platform-mcp--page-svelte-178" class="text-xs font-semibold text-muted-foreground block mb-1.5">
             令牌名称
           </label>
-          <input
+          <input id="a11y-routes-platform-mcp--page-svelte-178"
             bind:value={form.name}
             placeholder="e.g. dev-team"
             class="w-full px-3 py-2 text-xs rounded-md border bg-muted/30 focus:outline-none focus:ring-1 focus:ring-brand"
@@ -260,7 +262,7 @@
           <div class="p-4 space-y-3">
             <!-- Token Value -->
             <div>
-              <label class="text-[10px] font-bold uppercase text-muted-foreground block mb-1">Token</label>
+              <label for="a11y-routes-platform-mcp--page-svelte-265" class="text-[10px] font-bold uppercase text-muted-foreground block mb-1">Token</label>
               <div class="flex items-center gap-2">
                 <code class="flex-1 px-3 py-2 text-[10px] font-mono bg-muted/30 rounded-md border truncate">{token.token}</code>
                 <button
@@ -274,7 +276,7 @@
 
             <!-- One-click Config Copy -->
             <div>
-              <label class="text-[10px] font-bold uppercase text-muted-foreground block mb-1">MCP 配置（复制到 AI IDE）</label>
+              <label for="a11y-routes-platform-mcp--page-svelte-279" class="text-[10px] font-bold uppercase text-muted-foreground block mb-1">MCP 配置（复制到 AI IDE）</label>
               <div class="relative group">
                 <pre class="bg-muted/30 rounded-lg p-3 text-[10px] font-mono overflow-x-auto border">{config}</pre>
                 <button

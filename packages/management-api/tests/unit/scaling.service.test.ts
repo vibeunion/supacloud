@@ -1,28 +1,30 @@
 import { describe, test, expect, spyOn, mock } from "bun:test";
 import { ScalingService } from "../../src/services/scaling.service";
-import { MonitorService } from "../../src/services/monitor.service";
+import * as MonitorService from "../../src/services/monitor.service";
 import { shellService } from "../../src/services/shell.service";
 import { projectRepository } from "../../src/repositories/project.repository";
+import type { Project } from "../../src/db";
+
+const mockProject: Partial<Project> = {
+    ref: "test-proj",
+    status: "active",
+    config: {}
+};
 
 describe("ScalingService", () => {
     test("checkAndScale should trigger vertical scale on high CPU", async () => {
-        // 1. Mock Database
-        const projectSpy = spyOn(projectRepository, "findByRef").mockResolvedValue({
-            ref: "test-proj",
-            status: "active",
-            config: {}
-        } as any);
+        const projectSpy = spyOn(projectRepository, "findByRef").mockResolvedValue(
+            mockProject as Project
+        );
 
-        // 2. Mock High Metrics
         const monitorSpy = spyOn(MonitorService, "getMetrics").mockResolvedValue({
             qps: 10,
             active_connections: 5,
             slow_queries: 0,
-            cpu_usage: 95, // High!
+            cpu_usage: 95,
             mem_usage: 40
         });
 
-        // 3. Spy on shell execution
         const shellSpy = spyOn(shellService, "execute").mockResolvedValue({ success: true, output: "" });
 
         const result = await ScalingService.checkAndScale("test-proj");
@@ -37,14 +39,12 @@ describe("ScalingService", () => {
     });
 
     test("checkAndScale should trigger horizontal scale on high QPS", async () => {
-        const projectSpy = spyOn(projectRepository, "findByRef").mockResolvedValue({
-            ref: "test-proj",
-            status: "active",
-            config: {}
-        } as any);
+        const projectSpy = spyOn(projectRepository, "findByRef").mockResolvedValue(
+            mockProject as Project
+        );
 
         const monitorSpy = spyOn(MonitorService, "getMetrics").mockResolvedValue({
-            qps: 1200, // High!
+            qps: 1200,
             active_connections: 5,
             slow_queries: 0,
             cpu_usage: 10,
@@ -56,7 +56,6 @@ describe("ScalingService", () => {
         const result = await ScalingService.checkAndScale("test-proj");
 
         expect(result.action).toBe("horizontal_scale");
-        // Verify gateway registration was called
         expect(shellSpy).toHaveBeenCalledWith("gateway_manager.sh", expect.arrayContaining(["add-upstream-target"]));
 
         shellSpy.mockRestore();

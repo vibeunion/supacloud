@@ -76,8 +76,8 @@
       if (!data2.error) {
         runs = Array.isArray(data2) ? data2 : data2.rows || [];
       }
-    } catch (err: any) {
-      error = err.message;
+    } catch (err: unknown) {
+      error = err instanceof Error ? err.message : String(err);
     } finally {
       isLoading = false;
     }
@@ -100,8 +100,8 @@
       
       showAdd = false; newName = ""; newSchedule = "* * * * *"; newCommand = "";
       await fetchCronData();
-    } catch (err: any) {
-      actionError = err.message || "创建任务失败";
+    } catch (err: unknown) {
+      actionError = (err instanceof Error ? err.message : String(err)) || "创建任务失败";
     } finally { isSaving = false; }
   }
 
@@ -116,8 +116,8 @@
       const data = await res.json();
       if (data.error) throw new Error(data.error);
       await fetchCronData();
-    } catch (err: any) {
-      alert("取消排程失败: " + err.message);
+    } catch (err: unknown) {
+      alert("取消排程失败: " + (err instanceof Error ? err.message : String(err)));
     }
   }
 

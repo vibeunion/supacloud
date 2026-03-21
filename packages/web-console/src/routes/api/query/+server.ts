@@ -14,7 +14,7 @@ export const POST: RequestHandler = async ({ request }) => {
             return json({ error: 'Project not found' }, { status: 404 });
         }
 
-        const dbName = project.db_name || `supa_${project.ref}`;
+        const dbName = (project as unknown as Record<string, unknown>).db_name as string || `supa_${project.ref}`;
         const result = await db.executeQuery(dbName, query);
         
         return json({
@@ -22,8 +22,8 @@ export const POST: RequestHandler = async ({ request }) => {
             rowCount: result.rowCount,
             command: result.command
         });
-    } catch (err: any) {
+    } catch (err: unknown) {
         console.error('SQL Query Error:', err);
-        return json({ error: err.message }, { status: 500 });
+        return json({ error: (err instanceof Error ? err.message : String(err)) }, { status: 500 });
     }
 };

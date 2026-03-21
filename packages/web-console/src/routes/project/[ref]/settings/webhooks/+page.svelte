@@ -4,6 +4,7 @@
   import { onMount } from "svelte";
   import { page } from "$app/state";
   import { Webhook, Plus, Globe, Trash2, Loader2 } from "lucide-svelte";
+  import { toast } from "svelte-sonner";
 
   const projectRef = $derived(page.params.ref);
 
@@ -57,11 +58,11 @@
       const data = await res.json();
       const rows = Array.isArray(data) ? data : data.rows || [];
       
-      endpoints = rows.map((r: any) => {
+      endpoints = rows.map((r: Record<string, unknown>) => {
         const events = [];
-        if (r.def.includes("INSERT")) events.push("INSERT");
-        if (r.def.includes("UPDATE")) events.push("UPDATE");
-        if (r.def.includes("DELETE")) events.push("DELETE");
+        if (String(r.def).includes("INSERT")) events.push("INSERT");
+        if (String(r.def).includes("UPDATE")) events.push("UPDATE");
+        if (String(r.def).includes("DELETE")) events.push("DELETE");
         
         return {
           id: r.id,
@@ -78,9 +79,9 @@
         body: JSON.stringify({ sql: "SELECT tablename FROM pg_catalog.pg_tables WHERE schemaname = 'public' ORDER BY tablename;" })
       });
       const tblData = await tblRes.json();
-      tables = (Array.isArray(tblData) ? tblData : tblData.rows || []).map((t: any) => t.tablename);
+      tables = (Array.isArray(tblData) ? tblData : tblData.rows || []).map((t: Record<string, unknown>) => t.tablename as string);
 
-    } catch (err) { console.error(err); }
+    } catch (err: unknown) { toast.error("操作失败"); }
     finally { isLoading = false; }
   }
 
@@ -128,8 +129,8 @@
       showAdd = false;
       newName = ""; newUrl = ""; newTable = ""; selectedEvents = [];
       await fetchWebhooks();
-    } catch (err: any) {
-      addError = err.message || "创建 Webhook 失败";
+    } catch (err: unknown) {
+      addError = (err instanceof Error ? err.message : String(err)) || "创建 Webhook 失败";
     } finally {
       isSaving = false;
     }
@@ -153,7 +154,7 @@
         body: JSON.stringify({ sql })
       });
       await fetchWebhooks();
-    } catch (err) {
+    } catch (err: unknown) {
       alert("删除失败");
     }
   }

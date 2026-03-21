@@ -4,6 +4,7 @@
   import { onMount } from "svelte";
   import { page } from "$app/state";
   import { Loader2, Activity, TrendingUp, AlertTriangle, ArrowLeft, BarChart3 } from "lucide-svelte";
+  import { toast } from "svelte-sonner";
 
   interface ApiStat {
     total_requests: number;
@@ -16,7 +17,7 @@
 
   let stats = $state<ApiStat | null>(null);
   let isLoading = $state(true);
-  let recentRequests = $state<any[]>([]);
+  let recentRequests = $state<Record<string, unknown>[]>([]);
 
   const projectRef = $derived(page.params.ref);
 
@@ -62,8 +63,8 @@
       });
       const data2 = await res2.json();
       recentRequests = Array.isArray(data2) ? data2 : data2.rows || [];
-    } catch (err) {
-      console.error("Failed to fetch API stats:", err);
+    } catch (err: unknown) {
+      toast.error("无法fetch API stats");
     } finally {
       isLoading = false;
     }
@@ -141,7 +142,7 @@
                       {req.state || '-'}
                     </span>
                   </td>
-                  <td class="px-4 py-2 text-[10px] truncate max-w-xs text-muted-foreground" title={req.query}>{req.query || '-'}</td>
+                  <td class="px-4 py-2 text-[10px] truncate max-w-xs text-muted-foreground" title={String(req.query || "")}>{req.query || '-'}</td>
                 </tr>
               {/each}
             </tbody>

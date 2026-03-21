@@ -18,9 +18,9 @@
 
   let searchTerm = $state("");
   let filteredUsers = $derived(
-    data.users.filter((u: any) => 
-      u.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      u.id.toLowerCase().includes(searchTerm.toLowerCase())
+    data.users.filter((u) => 
+      String(u.email).toLowerCase().includes(searchTerm.toLowerCase()) ||
+      String(u.id).toLowerCase().includes(searchTerm.toLowerCase())
     )
   );
 
@@ -97,11 +97,11 @@
             <td class="px-6 py-4 text-muted-foreground tabular-nums">
               <div class="flex items-center gap-2">
                 <Clock class="w-3.5 h-3.5" />
-                {formatDate(user.created_at)}
+                {formatDate(String(user.created_at))}
               </div>
             </td>
             <td class="px-6 py-4 text-muted-foreground tabular-nums">
-              {formatDate(user.last_sign_in_at)}
+              {formatDate(String(user.last_sign_in_at))}
             </td>
             <td class="px-6 py-4 text-right">
               <button class="p-1.5 hover:bg-secondary rounded-md">

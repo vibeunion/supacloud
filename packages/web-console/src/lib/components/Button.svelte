@@ -1,6 +1,6 @@
 <script lang="ts">
     interface Props {
-        children: any;
+        children: import('svelte').Snippet;
         onclick?: () => void;
         type?: "button" | "submit";
         variant?: "primary" | "secondary" | "danger" | "ghost";

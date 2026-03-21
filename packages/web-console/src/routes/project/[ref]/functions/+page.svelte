@@ -5,6 +5,7 @@
   import { page } from "$app/state";
   import { t } from "svelte-i18n";
   import { Loader2, Zap, Trash2, KeyRound, Clock, Plus, X, Upload, Code2 } from "lucide-svelte";
+  import { toast } from "svelte-sonner";
 
   interface EdgeFunction {
     id: string;
@@ -43,8 +44,8 @@ serve(async (req) => {
       if (res.ok) {
         functions = await res.json();
       }
-    } catch (err) {
-      console.error("Failed to fetch functions:", err);
+    } catch (err: unknown) {
+      toast.error("无法fetch functions");
     } finally {
       isLoading = false;
     }
@@ -72,8 +73,8 @@ serve(async (req) => {
         const err = await res.json();
         deployMsg = `❌ 部署失败: ${err.error || res.statusText}`;
       }
-    } catch (err: any) {
-      deployMsg = `❌ 部署失败: ${err.message}`;
+    } catch (err: unknown) {
+      deployMsg = `❌ 部署失败: ${(err instanceof Error ? err.message : String(err))}`;
     } finally {
       deploying = false;
       setTimeout(() => deployMsg = null, 4000);
@@ -87,8 +88,8 @@ serve(async (req) => {
       deployMsg = `函数 "${slug}" 已删除`;
       setTimeout(() => deployMsg = null, 3000);
       await fetchFunctions();
-    } catch (err) {
-      console.error("Failed to delete function:", err);
+    } catch (err: unknown) {
+      toast.error("无法delete function");
     }
   }
 

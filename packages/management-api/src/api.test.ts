@@ -1,10 +1,10 @@
 import { describe, it, expect, beforeAll, mock } from "bun:test";
 
 mock.module("../src/utils/retry", () => ({
-    withRetry: (name: string, fn: any) => fn(),
+    withRetry: (name: string, fn: () => unknown) => fn(),
 }));
 
-const mockSql: any = mock((strings: any) => {
+const mockSql = mock((strings: string | TemplateStringsArray) => {
     const sqlStr = Array.isArray(strings) ? strings.join("") : String(strings);
     if (sqlStr.toLowerCase().includes("organizations")) {
         return Promise.resolve([
@@ -14,17 +14,19 @@ const mockSql: any = mock((strings: any) => {
     // 默认返回空数组，满足 Projects 等其他列表查询
     return Promise.resolve([]);
 });
-mockSql.unsafe = mock(() => Promise.resolve([]));
+(mockSql as unknown as { unsafe: ReturnType<typeof mock> }).unsafe = mock(() => Promise.resolve([]));
 mock.module("../src/db", () => ({
     sql: mockSql,
 }));
 
 import { app as baseApp, registerAllRoutes } from "../src/index";
 
+import type { Elysia } from "elysia";
+
 describe("Management API Integration Tests", () => {
     const baseUrl = "http://localhost";
     const masterToken = "dev-master-token";
-    let app: any;
+    let app: typeof baseApp;
 
     beforeAll(async () => {
         const routes = await registerAllRoutes();

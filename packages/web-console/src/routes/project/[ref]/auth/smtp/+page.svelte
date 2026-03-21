@@ -70,8 +70,8 @@
         const err = await res.json();
         saveMsg = `❌ 保存失败: ${err.error || res.statusText}`;
       }
-    } catch (err: any) {
-      saveMsg = `❌ 保存失败: ${err.message}`;
+    } catch (err: unknown) {
+      saveMsg = `❌ 保存失败: ${(err instanceof Error ? err.message : String(err))}`;
     } finally {
       saving = false;
       setTimeout(() => saveMsg = null, 4000);
@@ -115,7 +115,7 @@
         <p class="text-[10px] text-muted-foreground">使用自己的邮件服务器替代默认内置邮件</p>
       </div>
     </div>
-    <button onclick={() => smtpEnabled = !smtpEnabled}
+    <button aria-label="Action button" onclick={() => smtpEnabled = !smtpEnabled}
       class="relative w-10 h-5 rounded-full transition-colors {smtpEnabled ? 'bg-brand' : 'bg-muted'}">
       <span class="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform {smtpEnabled ? 'translate-x-5' : ''}"></span>
     </button>

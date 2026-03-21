@@ -1,6 +1,6 @@
 <script lang="ts">
     interface Props {
-        children: any;
+        children: import('svelte').Snippet;
         class?: string;
         variant?: "glass" | "glow" | "outline" | "ghost";
     }

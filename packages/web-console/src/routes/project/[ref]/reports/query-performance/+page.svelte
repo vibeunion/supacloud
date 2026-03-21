@@ -58,8 +58,8 @@
         lastError = null; // Clear error on success
         break; // Exit loop on success
 
-      } catch (err: any) {
-        lastError = { message: err.message };
+      } catch (err: unknown) {
+        lastError = { message: (err instanceof Error ? err.message : String(err)) };
         break; // Stop on non-recoverable error
       }
     }
@@ -68,7 +68,7 @@
        if (lastError.message?.includes("pg_stat_statements") && lastError.message?.includes("does not exist")) {
          missingExtension = true;
        } else {
-         error = lastError.message || lastError.error || "Unknown error";
+         error = lastError instanceof Error ? lastError.message : String(lastError) || lastError.error || "Unknown error";
        }
     }
     
@@ -88,8 +88,8 @@
       const data = await res.json();
       if (data.error) throw new Error(data.message || data.error);
       await fetchStats();
-    } catch (err: any) {
-      error = err.message;
+    } catch (err: unknown) {
+      error = err instanceof Error ? err.message : String(err);
     } finally {
       isEnabling = false;
     }
