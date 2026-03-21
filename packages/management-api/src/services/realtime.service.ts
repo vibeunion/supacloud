@@ -11,9 +11,9 @@
 import { logger } from "../utils/logger";
 
 const REALTIME_ADMIN_URL = process.env.REALTIME_ADMIN_URL || "http://127.0.0.1:4000";
-const REALTIME_API_KEY = process.env.REALTIME_API_KEY || process.env.JWT_SECRET || "super-secret-jwt-token";
-const PG_HOST = process.env.POSTGRES_HOST || "localhost";
-const PG_PORT = process.env.POSTGRES_PORT || "6432";
+const REALTIME_API_SECRET = process.env.REALTIME_API_SECRET || process.env.JWT_SECRET || "super-secret-jwt-token";
+const PG_HOST = process.env.POSTGRES_HOST || "10.2.0.14";
+const PG_PORT = process.env.POSTGRES_PORT || "5432";
 
 interface RealtimeTenantConfig {
     projectRef: string;
@@ -24,11 +24,41 @@ interface RealtimeTenantConfig {
 
 export class RealtimeService {
     private readonly adminUrl: string;
-    private readonly apiKey: string;
+    private readonly apiSecret: string;
 
     constructor() {
         this.adminUrl = REALTIME_ADMIN_URL;
-        this.apiKey = REALTIME_API_KEY;
+        this.apiSecret = REALTIME_API_SECRET;
+    }
+
+    /**
+     * Generate HS256 JWT for Realtime Admin API authentication.
+     * The Realtime container verifies tokens signed with API_JWT_SECRET.
+     */
+    private async signJwt(): Promise<string> {
+        const header = Buffer.from(JSON.stringify({ alg: "HS256", typ: "JWT" })).toString("base64url");
+        const now = Math.floor(Date.now() / 1000);
+        const payload = Buffer.from(JSON.stringify({
+            iss: "supabase",
+            role: "supabase_admin",
+            iat: now,
+            exp: now + 3600,
+        })).toString("base64url");
+
+        const { createHmac } = await import("crypto");
+        const signature = createHmac("sha256", this.apiSecret)
+            .update(`${header}.${payload}`)
+            .digest("base64url");
+
+        return `${header}.${payload}.${signature}`;
+    }
+
+    private async authHeaders(): Promise<Record<string, string>> {
+        const jwt = await this.signJwt();
+        return {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${jwt}`,
+        };
     }
 
     /**
@@ -39,10 +69,7 @@ export class RealtimeService {
         try {
             const res = await fetch(`${this.adminUrl}/api/tenants`, {
                 method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    "Authorization": `Bearer ${this.apiKey}`,
-                },
+                headers: await this.authHeaders(),
                 body: JSON.stringify({
                     tenant: {
                         external_id: config.projectRef,
@@ -90,9 +117,7 @@ export class RealtimeService {
         try {
             const res = await fetch(`${this.adminUrl}/api/tenants/${projectRef}`, {
                 method: "DELETE",
-                headers: {
-                    "Authorization": `Bearer ${this.apiKey}`,
-                },
+                headers: await this.authHeaders(),
             });
 
             if (res.ok || res.status === 404) {
@@ -116,10 +141,7 @@ export class RealtimeService {
         try {
             const res = await fetch(`${this.adminUrl}/api/tenants/${config.projectRef}`, {
                 method: "PUT",
-                headers: {
-                    "Content-Type": "application/json",
-                    "Authorization": `Bearer ${this.apiKey}`,
-                },
+                headers: await this.authHeaders(),
                 body: JSON.stringify({
                     tenant: {
                         jwt_secret: config.jwtSecret,
@@ -160,7 +182,7 @@ export class RealtimeService {
     async healthCheck(): Promise<{ healthy: boolean; tenants?: number }> {
         try {
             const res = await fetch(`${this.adminUrl}/api/tenants`, {
-                headers: { "Authorization": `Bearer ${this.apiKey}` },
+                headers: await this.authHeaders(),
             });
             if (res.ok) {
                 const data = await res.json() as unknown[];
