@@ -24,8 +24,10 @@ export interface PgListenerOptions {
   channels: string[];
   /** Callback when a notification is received */
   onNotification: (channel: string, payload: string) => void;
-  /** Reconnect delay in ms (default: 3000) */
+  /** Initial reconnect delay in ms (default: 3000). Doubles on each retry up to maxReconnectDelay. */
   reconnectDelay?: number;
+  /** Maximum reconnect delay in ms (default: 300000 = 5 minutes) */
+  maxReconnectDelay?: number;
   /** Application name for pg_stat_activity */
   applicationName?: string;
 }
@@ -189,14 +191,17 @@ function parseConnectionUrl(url: string): {
 export function createPgListener(opts: PgListenerOptions): PgListenerHandle {
   const { url, channels, onNotification, applicationName } = opts;
   const reconnectDelay = opts.reconnectDelay ?? 3000;
+  const maxReconnectDelay = opts.maxReconnectDelay ?? 300_000; // 5 minutes
   const connInfo = parseConnectionUrl(url);
 
   let closed = false;
+  let fatalError = false;
+  let currentDelay = reconnectDelay;
   let socket: ReturnType<typeof Bun.connect> | null = null;
   let reconnectTimer: Timer | null = null;
 
   function connect() {
-    if (closed) return;
+    if (closed || fatalError) return;
 
     let buffer: Uint8Array = new Uint8Array(0);
     let authenticated = false;
@@ -256,8 +261,9 @@ export function createPgListener(opts: PgListenerOptions): PgListenerHandle {
                   sock.write(buildPasswordMessage(hash));
                 } else {
                   logger.error(
-                    `[PgListener] Unsupported auth type: ${authType}`
+                    `[PgListener] Unsupported auth type: ${authType} (e.g. SCRAM-SHA-256). Will NOT retry — configure pg_hba.conf to use md5 or trust for this connection.`
                   );
+                  fatalError = true;
                   sock.end();
                 }
                 break;
@@ -273,6 +279,8 @@ export function createPgListener(opts: PgListenerOptions): PgListenerHandle {
                   logger.info(
                     `[PgListener] Connected and listening on: ${channels.join(", ")}`
                   );
+                  // Reset backoff delay on successful connection
+                  currentDelay = reconnectDelay;
                   // Only send LISTEN once (on first ReadyForQuery after auth)
                   authenticated = false;
                 }
@@ -326,14 +334,16 @@ export function createPgListener(opts: PgListenerOptions): PgListenerHandle {
   }
 
   function scheduleReconnect() {
-    if (closed || reconnectTimer) return;
+    if (closed || fatalError || reconnectTimer) return;
     logger.info(
-      `[PgListener] Reconnecting in ${reconnectDelay / 1000}s...`
+      `[PgListener] Reconnecting in ${currentDelay / 1000}s...`
     );
     reconnectTimer = setTimeout(() => {
       reconnectTimer = null;
       connect();
-    }, reconnectDelay);
+    }, currentDelay);
+    // Exponential backoff: double delay each attempt, capped at maxReconnectDelay
+    currentDelay = Math.min(currentDelay * 2, maxReconnectDelay);
   }
 
   // Start initial connection
