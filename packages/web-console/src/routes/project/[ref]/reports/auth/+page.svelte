@@ -4,9 +4,10 @@
   import { onMount } from "svelte";
   import { page } from "$app/state";
   import { Loader2, Shield, ArrowLeft, UserPlus, LogIn, Key } from "lucide-svelte";
+  import { toast } from "svelte-sonner";
 
-  let authStats = $state<any>(null);
-  let recentUsers = $state<any[]>([]);
+  let authStats = $state(null as Record<string, unknown> | null);
+  let recentUsers = $state<Record<string, unknown>[]>([]);
   let isLoading = $state(true);
 
   const projectRef = $derived(page.params.ref);
@@ -45,8 +46,8 @@
       });
       const data2 = await res2.json();
       recentUsers = Array.isArray(data2) ? data2 : data2.rows || [];
-    } catch (err) {
-      console.error("Failed to fetch auth stats:", err);
+    } catch (err: unknown) {
+      toast.error("无法fetch auth stats");
     } finally {
       isLoading = false;
     }
@@ -75,27 +76,27 @@
       <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
         <div class="rounded-xl border bg-card p-4">
           <div class="text-[10px] font-semibold text-muted-foreground uppercase">总用户</div>
-          <div class="text-xl font-bold mt-1 text-brand">{authStats.total_users}</div>
+          <div class="text-xl font-bold mt-1 text-brand">{authStats?.total_users}</div>
         </div>
         <div class="rounded-xl border bg-card p-4">
           <div class="text-[10px] font-semibold text-muted-foreground uppercase">24h 注册</div>
-          <div class="text-xl font-bold mt-1 text-green-600">{authStats.signups_24h}</div>
+          <div class="text-xl font-bold mt-1 text-green-600">{authStats?.signups_24h}</div>
         </div>
         <div class="rounded-xl border bg-card p-4">
           <div class="text-[10px] font-semibold text-muted-foreground uppercase">7 天注册</div>
-          <div class="text-xl font-bold mt-1">{authStats.signups_7d}</div>
+          <div class="text-xl font-bold mt-1">{authStats?.signups_7d}</div>
         </div>
         <div class="rounded-xl border bg-card p-4">
           <div class="text-[10px] font-semibold text-muted-foreground uppercase">24h 登录</div>
-          <div class="text-xl font-bold mt-1 text-blue-600">{authStats.logins_24h}</div>
+          <div class="text-xl font-bold mt-1 text-blue-600">{authStats?.logins_24h}</div>
         </div>
         <div class="rounded-xl border bg-card p-4">
           <div class="text-[10px] font-semibold text-muted-foreground uppercase">7 天登录</div>
-          <div class="text-xl font-bold mt-1">{authStats.logins_7d}</div>
+          <div class="text-xl font-bold mt-1">{authStats?.logins_7d}</div>
         </div>
         <div class="rounded-xl border bg-card p-4">
           <div class="text-[10px] font-semibold text-muted-foreground uppercase">已验证</div>
-          <div class="text-xl font-bold mt-1">{authStats.confirmed_users}</div>
+          <div class="text-xl font-bold mt-1">{authStats?.confirmed_users}</div>
         </div>
       </div>
     {/if}
@@ -125,8 +126,8 @@
               {#each recentUsers as user}
                 <tr class="hover:bg-muted/10 transition-colors">
                   <td class="px-4 py-2 text-[11px]">{user.email || '-'}</td>
-                  <td class="px-4 py-2 text-[10px] text-muted-foreground">{user.created_at?.substring(0, 19) || '-'}</td>
-                  <td class="px-4 py-2 text-[10px] text-muted-foreground">{user.last_sign_in_at?.substring(0, 19) || '-'}</td>
+                  <td class="px-4 py-2 text-[10px] text-muted-foreground">{String(user.created_at || "").substring(0, 19) || '-'}</td>
+                  <td class="px-4 py-2 text-[10px] text-muted-foreground">{String(user.last_sign_in_at || "").substring(0, 19) || '-'}</td>
                   <td class="px-4 py-2">
                     <span class="px-1.5 py-0.5 rounded text-[9px] font-bold {user.status === '已验证' ? 'bg-green-500/10 text-green-600' : 'bg-amber-500/10 text-amber-600'}">{user.status}</span>
                   </td>

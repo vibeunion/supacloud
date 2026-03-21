@@ -10,16 +10,16 @@
     id: string;
     name: string;
     sql: string;
-    results: any[] | null;
+    results: unknown[] | null;
     error: string | null;
-    explainResults: any[] | null;
+    explainResults: unknown[] | null;
   }
 
   let tabs = $state<QueryTab[]>([]);
   let activeTabId = $state("");
   let isRunning = $state(false);
   let isSaving = $state(false);
-  let saveTimeout: any;
+  let saveTimeout: ReturnType<typeof setTimeout> | undefined;
   let tabCounter = $state(1);
 
   // Explain mode state
@@ -148,8 +148,8 @@
           return { ...tb, results: rows, explainResults: null, error: null };
         }
       });
-    } catch (err: any) {
-      tabs = tabs.map(tb => tb.id === activeTabId ? { ...tb, error: err.message, results: null, explainResults: null } : tb);
+    } catch (err: unknown) {
+      tabs = tabs.map(tb => tb.id === activeTabId ? { ...tb, error: (err instanceof Error ? err.message : String(err)), results: null, explainResults: null } : tb);
     } finally {
       isRunning = false;
     }
@@ -309,7 +309,7 @@
                   onkeydown={(e) => { if (e.key === 'Enter') submitCustomRole(); }}
                   placeholder="自定义角色名"
                   class="w-full px-2 py-1.5 text-xs font-mono rounded border bg-muted/30 focus:outline-none focus:ring-1 focus:ring-brand"
-                  autofocus
+ 
                 />
               </div>
             {:else}
@@ -371,7 +371,7 @@
               <thead class="bg-muted/50 border-b">
                 <tr>
                   {#if activeTab.results.length > 0}
-                    {#each Object.keys(activeTab.results[0]) as key}
+                    {#each Object.keys(activeTab.results[0] as Record<string, unknown>) as key}
                       <th class="px-3 py-2 font-bold text-muted-foreground">{key}</th>
                     {/each}
                   {/if}
@@ -380,7 +380,7 @@
               <tbody class="divide-y divide-border/30">
                 {#each activeTab.results as row}
                   <tr class="hover:bg-muted/30 transition-colors">
-                    {#each Object.values(row) as value}
+                    {#each Object.values(row as Record<string, unknown>) as value}
                       <td class="px-3 py-2 tabular-nums">
                         {typeof value === 'object' ? JSON.stringify(value) : value}
                       </td>
@@ -394,7 +394,7 @@
           <!-- Explain Visualizer -->
           <div class="space-y-0 font-mono text-xs">
             {#each activeTab.explainResults as row}
-              {@const planLine = row["QUERY PLAN"] || Object.values(row)[0] || ""}
+              {@const planLine = String((row as Record<string, unknown>)["QUERY PLAN"] || Object.values(row as Record<string, unknown>)[0] || "")}
               {@const indent = planLine.match(/^(\s*)/)?.[1]?.length || 0}
               {@const isSeqScan = planLine.toLowerCase().includes("seq scan")}
               {@const isIndexScan = planLine.toLowerCase().includes("index")}

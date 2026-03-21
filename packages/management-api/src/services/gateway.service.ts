@@ -1,4 +1,5 @@
 import { $ } from "bun";
+import { logger } from "../utils/logger";
 import path from "node:path";
 import fs from "node:fs/promises";
 
@@ -34,7 +35,7 @@ export class GatewayService {
             // During POST, 409 Conflict is considered normal (skip if already exists)
             if (res.status !== 409) {
                 const text = await res.text().catch(() => "");
-                console.warn(`Kong API ${method} ${path} returned ${res.status}: ${text}`);
+                logger.warn(`Kong API ${method} ${path} returned ${res.status}: ${text}`);
             }
         }
         const text = await res.text();
@@ -67,8 +68,8 @@ export class GatewayService {
                 algorithm: "HS256",
             });
             return true;
-        } catch (error: any) {
-            console.error(`Failed to setup JWT for ${projectRef}:`, error.message);
+        } catch (error: unknown) {
+            logger.error(`Failed to setup JWT for ${projectRef}:`, (error instanceof Error ? error.message : String(error)));
             return false;
         }
     }
@@ -88,7 +89,7 @@ export class GatewayService {
             const { second, minute, hour } = this.getRateLimitConfig(tier);
             const routeName = `route-${projectRef}`;
             const pluginsRes = await this.kongRequest(`/routes/${routeName}/plugins`);
-            const existing = pluginsRes?.data?.find((p: any) => p.name === "rate-limiting");
+            const existing = pluginsRes?.data?.find((p: Record<string, unknown>) => p.name === "rate-limiting");
 
             const payload = {
                 name: "rate-limiting",
@@ -101,8 +102,8 @@ export class GatewayService {
                 await this.kongRequest(`/routes/${routeName}/plugins`, "POST", payload);
             }
             return true;
-        } catch (error: any) {
-            console.error(`Failed to set rate limit for ${projectRef}:`, error.message);
+        } catch (error: unknown) {
+            logger.error(`Failed to set rate limit for ${projectRef}:`, (error instanceof Error ? error.message : String(error)));
             return false;
         }
     }
@@ -133,8 +134,8 @@ export class GatewayService {
                 await this.kongRequest(`/routes/${routeName}/plugins`, "POST", payload);
             }
             return true;
-        } catch (error: any) {
-            console.error(`Failed to set CORS for ${projectRef}:`, error.message);
+        } catch (error: unknown) {
+            logger.error(`Failed to set CORS for ${projectRef}:`, (error instanceof Error ? error.message : String(error)));
             return false;
         }
     }
@@ -145,7 +146,7 @@ export class GatewayService {
         try {
             const routeName = `route-${projectRef}`;
             const pluginsRes = await this.kongRequest(`/routes/${routeName}/plugins`);
-            const hasJwt = pluginsRes?.data?.some((p: any) => p.name === "jwt");
+            const hasJwt = pluginsRes?.data?.some((p: Record<string, unknown>) => p.name === "jwt");
             if (!hasJwt) {
                 await this.kongRequest(`/routes/${routeName}/plugins`, "POST", {
                     name: "jwt",
@@ -153,8 +154,8 @@ export class GatewayService {
                 });
             }
             return true;
-        } catch (error: any) {
-            console.error(`Failed to enable JWT auth for ${projectRef}:`, error.message);
+        } catch (error: unknown) {
+            logger.error(`Failed to enable JWT auth for ${projectRef}:`, (error instanceof Error ? error.message : String(error)));
             return false;
         }
     }
@@ -316,7 +317,7 @@ export class GatewayService {
             }
         }
 
-        console.warn("Could not detect container bridge IP, defaulting to 127.0.0.1");
+        logger.warn("Could not detect container bridge IP, defaulting to 127.0.0.1");
         return "127.0.0.1";
     }
 
@@ -330,7 +331,7 @@ export class GatewayService {
                 const baseContent = await Bun.file(kongYml).text();
                 await Bun.write(kongBase, baseContent);
             } else {
-                console.warn(`WARNING: ${kongYml} not found, skipping Kong reload`);
+                logger.warn(`WARNING: ${kongYml} not found, skipping Kong reload`);
                 return;
             }
         }
@@ -346,9 +347,10 @@ export class GatewayService {
                 const snippet = await Bun.file(path.join(tenantDir, file)).text();
                 tenantSnippets += snippet;
             }
-        } catch {
-            // Skip if tenantDir doesn't exist
-        }
+        } catch (err: unknown) {
+      // Skip if tenantDir doesn't exist
+      logger.warn("[gateway] filter failed silently", { error: err });
+    }
 
         // Insert tenant configurations after `services:` section
         const merged = baseContent.replace(/(^services:\s*$)/m, `$1\n${tenantSnippets}`);
@@ -362,9 +364,9 @@ export class GatewayService {
             const runtime = (await $`docker ps -q -f name=supabase-kong`.nothrow().quiet()).text().trim()
                 ? "docker" : "podman";
             await $`${runtime} exec supabase-kong kong reload`.nothrow().quiet();
-            console.log("Kong Gateway reloaded.");
+            logger.info("Kong Gateway reloaded.");
         } else {
-            console.warn("WARNING: supabase-kong container not running, config written but not reloaded");
+            logger.warn("WARNING: supabase-kong container not running, config written but not reloaded");
         }
     }
 
@@ -379,11 +381,11 @@ export class GatewayService {
             await Bun.write(path.join(this.TENANT_DIR, `${projectRef}.yml`), yaml);
 
             await this.rebuildKongConfig();
-            console.log(`Kong upstream registered for ${projectRef} (pgrst:${pgrstPort}, gotrue:${gotruePort})`);
+            logger.info(`Kong upstream registered for ${projectRef} (pgrst:${pgrstPort}, gotrue:${gotruePort})`);
             return { success: true };
-        } catch (error: any) {
-            console.error(`Failed to setup upstream for ${projectRef}:`, error.message);
-            return { success: false, error: error.message };
+        } catch (error: unknown) {
+            logger.error(`Failed to setup upstream for ${projectRef}:`, (error instanceof Error ? error.message : String(error)));
+            return { success: false, error: (error instanceof Error ? error.message : String(error)) };
         }
     }
 
@@ -394,11 +396,11 @@ export class GatewayService {
                 await fs.unlink(tenantYml);
             }
             await this.rebuildKongConfig();
-            console.log(`Kong service removed for ${projectRef}`);
+            logger.info(`Kong service removed for ${projectRef}`);
             return { success: true };
-        } catch (error: any) {
-            console.error(`Failed to remove service for ${projectRef}:`, error.message);
-            return { success: false, error: error.message };
+        } catch (error: unknown) {
+            logger.error(`Failed to remove service for ${projectRef}:`, (error instanceof Error ? error.message : String(error)));
+            return { success: false, error: (error instanceof Error ? error.message : String(error)) };
         }
     }
 
@@ -411,8 +413,8 @@ export class GatewayService {
                 weight: 100,
             });
             return { success: true };
-        } catch (error: any) {
-            return { success: false, error: error.message };
+        } catch (error: unknown) {
+            return { success: false, error: (error instanceof Error ? error.message : String(error)) };
         }
     }
 
@@ -424,8 +426,8 @@ export class GatewayService {
                 weight: 0,
             });
             return { success: true };
-        } catch (error: any) {
-            return { success: false, error: error.message };
+        } catch (error: unknown) {
+            return { success: false, error: (error instanceof Error ? error.message : String(error)) };
         }
     }
 

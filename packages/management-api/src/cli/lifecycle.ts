@@ -1,6 +1,7 @@
 import { $ } from "bun";
 import * as p from "@clack/prompts";
 import fs from "node:fs/promises";
+import { logger } from "../utils/logger";
 
 // According to shell branch convention, Supabase Pigsty configuration directory
 const PIGSTY_SUPABASE_DIR = `${process.env.HOME || "/root"}/pigsty/app/supabase`;
@@ -26,9 +27,9 @@ export async function handleStart() {
     try {
         await $`cd ${PIGSTY_SUPABASE_DIR} && ${composeCmd} up -d`.quiet();
         s.stop("Component start command execution complete.");
-    } catch (e: any) {
+    } catch (e: unknown) {
         s.stop("Startup failed.");
-        p.log.error(e.message);
+        p.log.error(e instanceof Error ? e.message : String(e));
         process.exit(1);
     }
     p.outro("✅ Services are running in background.");
@@ -47,9 +48,9 @@ export async function handleStop() {
     try {
         await $`cd ${PIGSTY_SUPABASE_DIR} && ${composeCmd} down`.quiet();
         s.stop("Service stack fully stopped.");
-    } catch (e: any) {
+    } catch (e: unknown) {
         s.stop("Error during shutdown.");
-        p.log.error(e.message);
+        p.log.error(e instanceof Error ? e.message : String(e));
         process.exit(1);
     }
     p.outro("✅ Environment cleaned up.");
@@ -66,7 +67,8 @@ export async function handleStatus() {
             const out = await $`cd ${PIGSTY_SUPABASE_DIR} && ${composeCmd} ps --format "table {{.Name}}\t{{.Status}}\t{{.Ports}}"`.quiet().text();
             s.stop("Container running status:");
             console.log(out);
-        } catch {
+        } catch (err: unknown) {
+          logger.warn("[] start failed silently", { error: err });
             s.stop("Unable to get status via docker-compose.");
         }
     }
@@ -99,7 +101,7 @@ export async function handleLogs(serviceTarget?: string) {
     const target = serviceTarget || "";
     try {
         await $`cd ${PIGSTY_SUPABASE_DIR} && ${composeCmd} logs --tail 50 ${target}`.nothrow();
-    } catch (e: any) {
-        p.log.error(`Log read failed: ${e.message}`);
+    } catch (e: unknown) {
+        p.log.error(`Log read failed: ${e instanceof Error ? e.message : String(e)}`);
     }
 }

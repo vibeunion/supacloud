@@ -1,6 +1,7 @@
 import { $ } from "bun";
 import * as p from "@clack/prompts";
 import os from "node:os";
+import { logger } from "./utils/logger";
 
 const PACKAGE_JSON_URL = "https://raw.githubusercontent.com/zuohuadong/supacloud/main/packages/management-api/package.json";
 const REPO_URL = "https://api.github.com/repos/zuohuadong/supacloud/releases/latest";
@@ -10,7 +11,8 @@ async function getLocalVersion(): Promise<string> {
         // In binary files, we may need to get version through other means,
         // here temporarily read sibling package.json (dev environment) or preset value
         return "1.0.0";
-    } catch {
+    } catch (err: unknown) {
+      logger.warn("[] getLocalVersion failed silently", { error: err });
         return "0.0.0";
     }
 }
@@ -54,7 +56,7 @@ export async function runUpgrade(options: { forceYes?: boolean } = {}) {
         const platform = os.platform();
         let assetName = `supacloud-linux-${arch === "arm64" ? "arm64" : "amd64"}`;
 
-        const asset = data.assets.find((a: any) => a.name === assetName);
+        const asset = data.assets.find((a: Record<string, unknown>) => a.name === assetName);
         if (!asset) {
             s.stop("No release package found matching current system architecture");
             return;
@@ -77,8 +79,8 @@ export async function runUpgrade(options: { forceYes?: boolean } = {}) {
         s.stop("Update package ready and overwrite complete");
 
         p.outro(`🎉 Upgrade successful! Please restart the service or rerun the command.`);
-    } catch (error: any) {
-        s.stop(`Upgrade failed: ${error.message}`);
+    } catch (error: unknown) {
+        s.stop(`Upgrade failed: ${error instanceof Error ? error.message : String(error)}`);
         process.exit(1);
     }
 }

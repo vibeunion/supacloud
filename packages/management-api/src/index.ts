@@ -1,4 +1,5 @@
 import { Elysia } from "elysia";
+import { logger } from "./utils/logger";
 import { swagger } from "@elysiajs/swagger";
 import { cors } from "@elysiajs/cors";
 
@@ -11,7 +12,7 @@ try {
       if (!process.env[match[1]]) process.env[match[1]] = match[2];
     }
   }
-} catch (e) {
+} catch (e: unknown) {
   // Ignore
 }
 
@@ -90,7 +91,8 @@ const app = new Elysia({ strictPath: false })
       const sig = await crypto.subtle.sign("HMAC", key, encoder.encode(JSON.stringify(payload)));
       const expected = Array.from(new Uint8Array(sig)).map(b => b.toString(16).padStart(2, "0")).join("");
       return { valid: sigHex === expected };
-    } catch {
+    } catch (err: unknown) {
+      logger.warn("[] TextEncoder failed silently", { error: err });
       return { valid: false };
     }
   })
@@ -109,7 +111,7 @@ const app = new Elysia({ strictPath: false })
 
   // Error handling
   .onError(({ code, error, set }) => {
-    console.error(`Error [${code}]:`, error);
+    logger.error(`Error [${code}]:`, error);
 
     if (code === "VALIDATION") {
       set.status = 400;
@@ -178,9 +180,9 @@ export function registerStaticAssets() {
         const text = await iItem.text();
         return new Response(text, { headers: { "Content-Type": "text/html; charset=utf-8" } });
       }
-    } catch (e) {
+    } catch (e: unknown) {
       // Fall through to embedded assets
-      console.error("Asset FS error:", e);
+      logger.error("Asset FS error:", { error: e instanceof Error ? e.message : String(e) });
     }
 
     // Fall back to embedded assets
@@ -198,7 +200,7 @@ export function registerStaticAssets() {
         set.status = 404;
         return "Internal Asset Not Found.";
       }
-    } catch (e) {
+    } catch (e: unknown) {
       if (process.env.NODE_ENV !== "production") {
         return "Management Console DEV mode: run 'bun run build:all' to load SPA assets into memory.";
       }
@@ -252,7 +254,7 @@ async function cleanupOrphanServices() {
 
   // Get all active project refs from database
   const activeProjects = await metaSql`SELECT ref FROM projects WHERE status != 'deleted'`;
-  const activeRefs = new Set(activeProjects.map((p: any) => p.ref));
+  const activeRefs = new Set(activeProjects.map((p: Record<string, unknown>) => p.ref));
 
   // List running supacloud-gotrue and supacloud-pgrst services
   const result = await $`systemctl list-units 'supacloud-gotrue@*' 'supacloud-pgrst@*' --all --plain --no-pager`
@@ -267,7 +269,7 @@ async function cleanupOrphanServices() {
     const ref = match[2];
     if (!activeRefs.has(ref)) {
       const unitName = `supacloud-${match[1]}@${ref}.service`;
-      console.log(`[OrphanCleanup] Stopping orphan service: ${unitName}`);
+      logger.info(`[OrphanCleanup] Stopping orphan service: ${unitName}`);
       await $`systemctl stop ${unitName}`.nothrow().quiet();
       await $`systemctl disable ${unitName}`.nothrow().quiet();
       orphanCount++;
@@ -276,9 +278,9 @@ async function cleanupOrphanServices() {
 
   if (orphanCount > 0) {
     await $`systemctl daemon-reload`.nothrow().quiet();
-    console.log(`[OrphanCleanup] Stopped ${orphanCount} orphan service(s).`);
+    logger.info(`[OrphanCleanup] Stopped ${orphanCount} orphan service(s).`);
   } else {
-    console.log("[OrphanCleanup] No orphan services detected.");
+    logger.info("[OrphanCleanup] No orphan services detected.");
   }
 }
 
@@ -290,10 +292,10 @@ async function bootstrap() {
     const { initDatabase } = await import("./db/init");
     try {
       await initDatabase();
-      console.log("Database initialized successfully!");
+      logger.info("Database initialized successfully!");
       process.exit(0);
-    } catch (err) {
-      console.error("Failed to initialize database:", err);
+    } catch (err: unknown) {
+      logger.error("Failed to initialize database:", { error: err instanceof Error ? err.message : String(err) });
       process.exit(1);
     }
   } else if (args.includes("install") || args.includes("--install")) {
@@ -302,8 +304,8 @@ async function bootstrap() {
     try {
       await runInstall({ forceYes });
       process.exit(0);
-    } catch (err) {
-      console.error("Installation aborted:", err);
+    } catch (err: unknown) {
+      logger.error("Installation aborted:", { error: err instanceof Error ? err.message : String(err) });
       process.exit(1);
     }
   } else if (args.includes("upgrade") || args.includes("--upgrade")) {
@@ -312,8 +314,8 @@ async function bootstrap() {
     try {
       await runUpgrade({ forceYes });
       process.exit(0);
-    } catch (err) {
-      console.error("Upgrade aborted:", err);
+    } catch (err: unknown) {
+      logger.error("Upgrade aborted:", { error: err instanceof Error ? err.message : String(err) });
       process.exit(1);
     }
   } else if (args.includes("doctor") || args.includes("--doctor")) {
@@ -323,8 +325,8 @@ async function bootstrap() {
     try {
       await runDoctor({ skipSmokeTest, forceYes });
       process.exit(0);
-    } catch (err) {
-      console.error("Doctor scan failed:", err);
+    } catch (err: unknown) {
+      logger.error("Doctor scan failed:", { error: err instanceof Error ? err.message : String(err) });
       process.exit(1);
     }
   } else if (args.includes("start") || args.includes("up")) {
@@ -359,7 +361,7 @@ async function bootstrap() {
         break;
       case "get":
         if (!args[2]) {
-          console.error("Error: project ref required");
+          logger.error("Error: project ref required");
           printProjectHelp();
           process.exit(1);
         }
@@ -368,7 +370,7 @@ async function bootstrap() {
       case "delete":
       case "rm":
         if (!args[2]) {
-          console.error("Error: project ref required");
+          logger.error("Error: project ref required");
           printProjectHelp();
           process.exit(1);
         }
@@ -376,7 +378,7 @@ async function bootstrap() {
         break;
       case "pause":
         if (!args[2]) {
-          console.error("Error: project ref required");
+          logger.error("Error: project ref required");
           printProjectHelp();
           process.exit(1);
         }
@@ -384,7 +386,7 @@ async function bootstrap() {
         break;
       case "restore":
         if (!args[2]) {
-          console.error("Error: project ref required");
+          logger.error("Error: project ref required");
           printProjectHelp();
           process.exit(1);
         }
@@ -392,7 +394,7 @@ async function bootstrap() {
         break;
       case "restart":
         if (!args[2]) {
-          console.error("Error: project ref required");
+          logger.error("Error: project ref required");
           printProjectHelp();
           process.exit(1);
         }
@@ -400,7 +402,7 @@ async function bootstrap() {
         break;
       case "keys":
         if (!args[2]) {
-          console.error("Error: project ref required");
+          logger.error("Error: project ref required");
           printProjectHelp();
           process.exit(1);
         }
@@ -408,7 +410,7 @@ async function bootstrap() {
         break;
       case "rotate-keys":
         if (!args[2]) {
-          console.error("Error: project ref required");
+          logger.error("Error: project ref required");
           printProjectHelp();
           process.exit(1);
         }
@@ -423,7 +425,7 @@ async function bootstrap() {
     process.exit(0);
   } else if (args.includes("--version") || args.includes("-v")) {
     const pkg = await import("../package.json");
-    console.log(`SupaCloud Version: ${pkg.version}`);
+    logger.info(`SupaCloud Version: ${pkg.version}`);
     process.exit(0);
   } else if (args.includes("--help") || args.includes("-h")) {
     process.exit(0);
@@ -447,10 +449,10 @@ async function bootstrap() {
 
     // Auto-detect and stop orphan services for deleted projects
     cleanupOrphanServices().catch(err =>
-      console.warn("[Bootstrap] Orphan service cleanup failed (non-fatal):", err)
+      logger.warn("[Bootstrap] Orphan service cleanup failed (non-fatal):", err)
     );
 
-    console.log(`
+    logger.info(`
     ╔═══════════════════════════════════════════════════════════╗
     ║          SupaCloud Management API                         ║
     ╠═══════════════════════════════════════════════════════════╣
@@ -459,7 +461,7 @@ async function bootstrap() {
     ╚═══════════════════════════════════════════════════════════╝
     `);
   } else {
-    console.error(`Unknown command or argument: ${args.join(" ")}`);
+    logger.error(`Unknown command or argument: ${args.join(" ")}`);
     process.exit(1);
   }
 }
@@ -468,16 +470,16 @@ if (import.meta.main) {
   bootstrap();
 
   const shutdown = async (signal: string) => {
-    console.log(`\nReceived ${signal}. Gracefully shutting down...`);
+    logger.info(`\nReceived ${signal}. Gracefully shutting down...`);
     try {
       const { taskWorker } = await import("./services/task.worker");
       taskWorker.stop();
-    } catch { }
+    } catch (e: unknown) { logger.debug("[index] suppressed error", { error: e instanceof Error ? e.message : String(e) }); }
 
     try {
       await closeDb();
-      console.log("Database connections released.");
-    } catch { }
+      logger.info("Database connections released.");
+    } catch (e: unknown) { logger.debug("[index] suppressed error", { error: e instanceof Error ? e.message : String(e) }); }
 
     process.exit(0);
   };

@@ -4,7 +4,7 @@
 
   let sql = $state("");
   let isSaving = $state(false);
-  let saveTimeout: any;
+  let saveTimeout: ReturnType<typeof setTimeout> | undefined;
 
   // 從 URL 獲取項目引用
   const projectRef = $derived(page.params.ref);

@@ -44,6 +44,7 @@
 
   <nav class="flex-1 overflow-y-auto py-4 px-3 space-y-1">
     {#each navItems as item}
+      {@const Icon = item.icon}
       <a
         href={item.href}
         class={cn(
@@ -51,7 +52,7 @@
           isActive(item.href) ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground"
         )}
       >
-        <svelte:component this={item.icon} size={18} />
+        <Icon size={18} />
         {item.title}
       </a>
     {/each}

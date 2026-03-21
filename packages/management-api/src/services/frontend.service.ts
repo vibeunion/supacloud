@@ -1,10 +1,13 @@
 import { $ } from "bun";
-import {
+import { logger } from "../utils/logger";
+import type {
   FrontendDeployment,
   FrontendDeploymentConfig,
   FrontendFramework,
   FrontendBuildResult,
   DeploymentRecord,
+} from "../types/frontend";
+import {
   FRAMEWORK_DEFAULTS,
 } from "../types/frontend";
 
@@ -41,11 +44,13 @@ class FrontendService {
         try {
           const config = await Bun.file(configPath).json();
           deployments.push(config);
-        } catch {
+        } catch (err: unknown) {
+          logger.warn("[] Bun.file failed silently", { error: err });
           continue;
         }
       }
-    } catch {
+    } catch (err: unknown) {
+      logger.warn("[] catch failed silently", { error: err });
       return [];
     }
 
@@ -56,7 +61,8 @@ class FrontendService {
     const configPath = this.joinPath(this.baseDir, projectRef, deploymentId, "deployment.json");
     try {
       return await Bun.file(configPath).json();
-    } catch {
+    } catch (err: unknown) {
+      logger.warn("[] Bun.file failed silently", { error: err });
       return null;
     }
   }
@@ -131,7 +137,8 @@ class FrontendService {
       }
       await $`rm -rf ${deploymentDir}`.quiet();
       return true;
-    } catch {
+    } catch (err: unknown) {
+      logger.warn("[] removeAngieConfig failed silently", { error: err });
       return false;
     }
   }
@@ -156,7 +163,7 @@ class FrontendService {
     const sourceDir = this.joinPath(deploymentDir, "source");
     const buildDir = this.joinPath(deploymentDir, "build");
 
-    await this.updateDeployment(projectRef, deploymentId, { status: "building" } as any);
+    await this.updateDeployment(projectRef, deploymentId, { status: "building" } as Partial<FrontendDeployment>);
 
     let buildLog = "";
 
@@ -208,7 +215,7 @@ class FrontendService {
         status: "success",
         last_deployed_at: new Date().toISOString(),
         build_log: buildLog,
-      } as any);
+      } as Partial<FrontendDeployment>);
 
       return {
         success: true,
@@ -216,19 +223,19 @@ class FrontendService {
         url: deployment.deployment_url,
         build_log: buildLog,
       };
-    } catch (error: any) {
-      buildLog += `\nError: ${error.message}\n`;
+    } catch (error: unknown) {
+      buildLog += `\nError: ${error instanceof Error ? error.message : String(error)}\n`;
       await this.updateDeployment(projectRef, deploymentId, {
         status: "failed",
         build_log: buildLog,
-      } as any);
+      } as Partial<FrontendDeployment>);
 
       return {
         success: false,
         deployment_id: deploymentId,
         url: "",
         build_log: buildLog,
-        error: error.message,
+        error: (error instanceof Error ? error.message : String(error)),
       };
     }
   }
@@ -266,19 +273,19 @@ class FrontendService {
       }
 
       return await this.buildDeployment(projectRef, deploymentId, sourceDir);
-    } catch (error: any) {
-      buildLog += `\nError: ${error.message}\n`;
+    } catch (error: unknown) {
+      buildLog += `\nError: ${error instanceof Error ? error.message : String(error)}\n`;
       await this.updateDeployment(projectRef, deploymentId, {
         status: "failed",
         build_log: buildLog,
-      } as any);
+      } as Partial<FrontendDeployment>);
 
       return {
         success: false,
         deployment_id: deploymentId,
         url: "",
         build_log: buildLog,
-        error: error.message,
+        error: (error instanceof Error ? error.message : String(error)),
       };
     }
   }
@@ -303,7 +310,7 @@ class FrontendService {
     const buildDir = this.joinPath(deploymentDir, "build");
     let buildLog = "";
 
-    await this.updateDeployment(projectRef, deploymentId, { status: "building" } as any);
+    await this.updateDeployment(projectRef, deploymentId, { status: "building" } as Partial<FrontendDeployment>);
 
     try {
       if (deployment.install_command) {
@@ -351,7 +358,7 @@ class FrontendService {
         status: "success",
         last_deployed_at: new Date().toISOString(),
         build_log: buildLog,
-      } as any);
+      } as Partial<FrontendDeployment>);
 
       return {
         success: true,
@@ -359,19 +366,19 @@ class FrontendService {
         url: deployment.deployment_url,
         build_log: buildLog,
       };
-    } catch (error: any) {
-      buildLog += `\nError: ${error.message}\n`;
+    } catch (error: unknown) {
+      buildLog += `\nError: ${error instanceof Error ? error.message : String(error)}\n`;
       await this.updateDeployment(projectRef, deploymentId, {
         status: "failed",
         build_log: buildLog,
-      } as any);
+      } as Partial<FrontendDeployment>);
 
       return {
         success: false,
         deployment_id: deploymentId,
         url: "",
         build_log: buildLog,
-        error: error.message,
+        error: (error instanceof Error ? error.message : String(error)),
       };
     }
   }
@@ -463,9 +470,7 @@ server {
     try {
       await $`rm -f ${configPath}`.quiet();
       await $`angie -s reload`.nothrow().quiet();
-    } catch {
-      // ignore
-    }
+    } catch (e: unknown) { logger.debug("[services/frontend.service] suppressed error", { error: e instanceof Error ? e.message : String(e) }); }
   }
 
   private async startSSRProcess(
@@ -768,9 +773,7 @@ WantedBy=multi-user.target
       };
 
       await Bun.write(recordPath, JSON.stringify(updated, null, 2));
-    } catch {
-      // ignore
-    }
+    } catch (e: unknown) { logger.debug("[services/frontend.service] suppressed error", { error: e instanceof Error ? e.message : String(e) }); }
   }
 
   async listDeploymentRecords(
@@ -788,7 +791,8 @@ WantedBy=multi-user.target
         try {
           const record = await Bun.file(this.joinPath(recordsDir, file)).json();
           records.push(record);
-        } catch {
+        } catch (err: unknown) {
+          logger.warn("[] Bun.file failed silently", { error: err });
           continue;
         }
       }
@@ -796,7 +800,8 @@ WantedBy=multi-user.target
       return records.sort((a, b) => 
         new Date(b.started_at).getTime() - new Date(a.started_at).getTime()
       );
-    } catch {
+    } catch (err: unknown) {
+      logger.warn("[] sort failed silently", { error: err });
       return [];
     }
   }
@@ -816,7 +821,8 @@ WantedBy=multi-user.target
 
     try {
       return await Bun.file(recordPath).json();
-    } catch {
+    } catch (err: unknown) {
+      logger.warn("[] Bun.file failed silently", { error: err });
       return null;
     }
   }

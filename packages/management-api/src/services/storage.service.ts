@@ -1,4 +1,5 @@
 import { shellService } from './shell.service';
+import { logger } from "../utils/logger";
 
 export interface StorageStatus {
   status: 'mounted' | 'unmounted';
@@ -15,12 +16,12 @@ export class StorageService {
   static async getStatus(): Promise<StorageStatus> {
     const { success, output, error } = await shellService.execute('storage_manager.sh', ['status']);
     if (!success) {
-      console.error('Failed to get storage status:', error);
+      logger.error('Failed to get storage status:', error);
       return { status: 'unmounted' };
     }
     try {
       return JSON.parse(output || '{"status":"unmounted"}');
-    } catch (e) {
+    } catch (e: unknown) {
       return { status: 'unmounted' };
     }
   }
@@ -31,7 +32,7 @@ export class StorageService {
   static async startMigration(s3Url: string, credentials: { access_key: string, secret_key: string, endpoint: string }): Promise<{ message: string }> {
     const options = JSON.stringify(credentials);
     shellService.execute('storage_manager.sh', ['migrate_to_s3', s3Url, options]).catch(err => {
-      console.error('Async migration task failed:', err);
+      logger.error('Async migration task failed:', { error: err instanceof Error ? err.message : String(err) });
     });
     return { message: 'Storage migration background task started, please monitor juicefs sync progress in background logs' };
   }
@@ -74,7 +75,7 @@ export class StorageService {
    * List Buckets (Real API)
    * In SupaCloud's S3 model, each project gets one real S3 bucket 'supa-<ref>'
    */
-  static async listBuckets(projectRef: string): Promise<any[]> {
+  static async listBuckets(projectRef: string): Promise<Record<string, unknown>[]> {
     const creds = await this.getCredentials(projectRef);
     if (!creds.success || !creds.bucket) {
       return [{ id: 'default', name: 'default', public: true, size: '0 B' }];
@@ -86,10 +87,10 @@ export class StorageService {
   /**
    * List Files (Direct S3 API implementation)
    */
-  static async listFiles(projectRef: string, bucketName: string): Promise<any[]> {
+  static async listFiles(projectRef: string, bucketName: string): Promise<Record<string, unknown>[]> {
     const creds = await this.getCredentials(projectRef);
     if (!creds.success || !creds.accessKey || !creds.secretKey || !creds.endpoint || !creds.bucket) {
-      console.error('Failed to get credentials for storage');
+      logger.error('Failed to get credentials for storage');
       return [];
     }
 
@@ -109,14 +110,14 @@ export class StorageService {
       const res = await aws.fetch(url.toString(), { method: 'GET' });
       
       if (!res.ok) {
-        console.error('S3 ListObjectsV2 failed:', await res.text());
+        logger.error('S3 ListObjectsV2 failed:', await res.text());
         return [];
       }
 
       const xml = await res.text();
       
       // Manual quick parsing of S3 XML response using regex 
-      const files: any[] = [];
+      const files: Record<string, unknown>[] = [];
       const regex = /<Contents><Key>(.*?)<\/Key><LastModified>(.*?)<\/LastModified><ETag>.*?<\/ETag><Size>(.*?)<\/Size>.*?<\/Contents>/g;
       
       let match;
@@ -130,8 +131,8 @@ export class StorageService {
         });
       }
       return files;
-    } catch (err) {
-      console.error('Exception during S3 listing:', err);
+    } catch (err: unknown) {
+      logger.error('Exception during S3 listing:', { error: err instanceof Error ? err.message : String(err) });
       return [];
     }
   }
@@ -159,19 +160,19 @@ export class StorageService {
       const url = new URL(`${baseUrl}/${creds.bucket}/${cleanFileName}`);
       const res = await aws.fetch(url.toString(), { 
         method: 'PUT',
-        body: fileData as any,
+        body: fileData instanceof Blob ? fileData : fileData instanceof ArrayBuffer ? new Uint8Array(fileData) : Uint8Array.from(fileData as Uint8Array),
         headers: {
           'Content-Type': contentType
         }
       });
       
       if (!res.ok) {
-        console.error('S3 Upload failed:', await res.text());
+        logger.error('S3 Upload failed:', await res.text());
         return false;
       }
       return true;
-    } catch (err) {
-      console.error('Exception during S3 upload:', err);
+    } catch (err: unknown) {
+      logger.error('Exception during S3 upload:', { error: err instanceof Error ? err.message : String(err) });
       return false;
     }
   }
@@ -199,12 +200,12 @@ export class StorageService {
       const res = await aws.fetch(url.toString(), { method: 'DELETE' });
       
       if (!res.ok) {
-        console.error('S3 Delete failed:', await res.text());
+        logger.error('S3 Delete failed:', await res.text());
         return false;
       }
       return true;
-    } catch (err) {
-      console.error('Exception during S3 delete:', err);
+    } catch (err: unknown) {
+      logger.error('Exception during S3 delete:', { error: err instanceof Error ? err.message : String(err) });
       return false;
     }
   }

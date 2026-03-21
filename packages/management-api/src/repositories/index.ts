@@ -1,1 +1,1 @@
-export { projectRepository, ProjectRepository } from "./project.repository";
+export { projectRepository } from "./project.repository";

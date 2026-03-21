@@ -4,7 +4,7 @@ export interface RetryOptions {
     maxRetries?: number;
     initialDelayMs?: number;
     backoffFactor?: number;
-    shouldRetry?: (error: any) => boolean;
+    shouldRetry?: (error: unknown) => boolean;
 }
 
 /**
@@ -28,14 +28,14 @@ export async function withRetry<T>(
     while (true) {
         try {
             return await fn();
-        } catch (error: any) {
+        } catch (error: unknown) {
             if (retries >= maxRetries || !shouldRetry(error)) {
-                logger.error(`Operation [${operationName}] failed permanently after ${retries} retries`, { error: error.message });
+                logger.error(`Operation [${operationName}] failed permanently after ${retries} retries`, { error: (error instanceof Error ? error.message : String(error)) });
                 throw error;
             }
 
             retries++;
-            logger.warn(`Operation [${operationName}] failed, retrying (${retries}/${maxRetries})...`, { error: error.message, nextDelayMs: delay });
+            logger.warn(`Operation [${operationName}] failed, retrying (${retries}/${maxRetries})...`, { error: (error instanceof Error ? error.message : String(error)), nextDelayMs: delay });
 
             await new Promise(resolve => setTimeout(resolve, delay));
             delay *= backoffFactor;

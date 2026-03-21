@@ -1,8 +1,10 @@
 import { $, BunFile, SQL } from "bun";
+import { logger } from "../utils/logger";
 import { config } from "../config";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { OAuthProvider, OAuthProviderConfig, OAUTH_ENV_MAPPINGS } from "../types/oauth";
+import type { OAuthProvider, OAuthProviderConfig } from "../types/oauth";
+import { OAUTH_ENV_MAPPINGS } from "../types/oauth";
 
 export interface RuntimeStatus {
     status: "running" | "stopped" | "starting" | "error";
@@ -60,7 +62,7 @@ class TenantRuntimeService {
                 if (!conflict) return port;
                 port++;
             }
-        } catch (e: any) {
+        } catch (e: unknown) {
             // Config directory missing, return the first calculated port
             throw e;
         }
@@ -104,7 +106,7 @@ class TenantRuntimeService {
         const hasPgrstEnv = await fs.access(this.POSTGREST_BIN).then(() => true).catch(() => false);
 
         if (pgrstCheck.exitCode !== 0 && !hasPgrstEnv) {
-            console.log("PostgREST missing, attempting docker copy...");
+            logger.info("PostgREST missing, attempting docker copy...");
             const { stdout: cid } = await $`docker ps -q -f "name=supabase-rest"`.nothrow().quiet();
             if (cid.toString().trim()) {
                 await $`docker cp ${cid.toString().trim()}:/usr/local/bin/postgrest ${this.POSTGREST_BIN}`.nothrow().quiet();
@@ -118,7 +120,7 @@ class TenantRuntimeService {
         const hasGotrueEnv = await fs.access(this.GOTRUE_BIN).then(() => true).catch(() => false);
 
         if (gotrueCheck.exitCode !== 0 && !hasGotrueEnv) {
-            console.log("GoTrue missing, attempting docker copy...");
+            logger.info("GoTrue missing, attempting docker copy...");
             const { stdout: cid } = await $`docker ps -q -f "name=supabase-auth"`.nothrow().quiet();
             if (cid.toString().trim()) {
                 const container = cid.toString().trim();
@@ -203,7 +205,7 @@ GOTRUE_SMTP_SENDER_NAME=SupaCloud
         }
         await Bun.write(path.join(this.TENANT_CONFIG_DIR, `${ref}_gotrue.env`), gotrueEnv);
 
-        console.log(`Config generated for ${ref} (pgrst_port=${pgrstPort}, gotrue_port=${gotruePort})`);
+        logger.info(`Config generated for ${ref} (pgrst_port=${pgrstPort}, gotrue_port=${gotruePort})`);
     }
 
     private async installSystemdTemplate() {
@@ -282,7 +284,7 @@ WantedBy=multi-user.target
 
         if (!pgrstExists || !gotrueExists) {
             await $`systemctl daemon-reload`.nothrow().quiet();
-            console.log("systemd template units installed");
+            logger.info("systemd template units installed");
         }
     }
 
@@ -303,7 +305,7 @@ WantedBy=multi-user.target
         await $`systemctl start supacloud-gotrue@${ref}`.nothrow().quiet();
 
         // Wait for service health checks
-        console.log(`Waiting for PostgREST(${pgrstPort}) and GoTrue(${gotruePort}) health checks...`);
+        logger.info(`Waiting for PostgREST(${pgrstPort}) and GoTrue(${gotruePort}) health checks...`);
         let pgrstOk = false;
         let gotrueOk = false;
 
@@ -312,14 +314,14 @@ WantedBy=multi-user.target
                 try {
                     const res = await fetch(`http://127.0.0.1:${pgrstPort}/`);
                     if (res.ok) pgrstOk = true;
-                } catch { /* ignore */ }
+                } catch (e: unknown) { logger.debug("[services/tenant-runtime.service] suppressed error", { error: e instanceof Error ? e.message : String(e) }); }
             }
 
             if (!gotrueOk) {
                 try {
                     const res = await fetch(`http://127.0.0.1:${gotruePort}/health`);
                     if (res.ok) gotrueOk = true;
-                } catch { /* ignore */ }
+                } catch (e: unknown) { logger.debug("[services/tenant-runtime.service] suppressed error", { error: e instanceof Error ? e.message : String(e) }); }
             }
 
             if (pgrstOk && gotrueOk) {
@@ -328,7 +330,7 @@ WantedBy=multi-user.target
             await Bun.sleep(1000);
         }
 
-        console.warn("WARNING: Health check timeout, some services may still be starting");
+        logger.warn("WARNING: Health check timeout, some services may still be starting");
         return { status: "starting", port: pgrstPort, gotruePort, health: "degraded" };
     }
 
@@ -348,7 +350,7 @@ WantedBy=multi-user.target
         if (await pgrstConfFile.exists()) await fs.unlink(pgrstConfFile.name!);
         if (await gotrueEnvFile.exists()) await fs.unlink(gotrueEnvFile.name!);
 
-        console.log(`Runtime stopped for ${ref}`);
+        logger.info(`Runtime stopped for ${ref}`);
     }
 
     public async restartRuntime(ref: string): Promise<RuntimeStatus> {
@@ -385,11 +387,11 @@ WantedBy=multi-user.target
 
             try {
                 pgrstOk = (await fetch(`http://127.0.0.1:${port}/`)).ok;
-            } catch { }
+            } catch (e: unknown) { logger.debug("[services/tenant-runtime.service] suppressed error", { error: e instanceof Error ? e.message : String(e) }); }
 
             try {
                 gotrueOk = (await fetch(`http://127.0.0.1:${gotruePort}/health`)).ok;
-            } catch { }
+            } catch (e: unknown) { logger.debug("[services/tenant-runtime.service] suppressed error", { error: e instanceof Error ? e.message : String(e) }); }
 
             let health: RuntimeStatus["health"] = "unhealthy";
             if (pgrstOk && gotrueOk) health = "healthy";
@@ -474,7 +476,7 @@ WantedBy=multi-user.target
         await Bun.write(gotrueEnvPath, updatedLines.join("\n"));
 
         await $`systemctl restart supacloud-gotrue@${ref}`.nothrow().quiet();
-        console.log(`OAuth config updated for ${provider} in project ${ref}`);
+        logger.info(`OAuth config updated for ${provider} in project ${ref}`);
     }
 
     public async removeOAuthConfig(ref: string, provider: OAuthProvider): Promise<void> {
@@ -522,7 +524,7 @@ WantedBy=multi-user.target
         await Bun.write(gotrueEnvPath, updatedLines.join("\n"));
 
         await $`systemctl restart supacloud-gotrue@${ref}`.nothrow().quiet();
-        console.log(`OAuth config removed for ${provider} in project ${ref}`);
+        logger.info(`OAuth config removed for ${provider} in project ${ref}`);
     }
 
     public async updateGoTrueCustomOAuth(ref: string, config: {
@@ -598,7 +600,7 @@ ${prefix}_URL=${config.authorize_url}
         await Bun.write(gotrueEnvPath, updatedLines.join("\n"));
 
         await $`systemctl restart supacloud-gotrue@${ref}`.nothrow().quiet();
-        console.log(`Custom OAuth config updated for ${config.name} in project ${ref}`);
+        logger.info(`Custom OAuth config updated for ${config.name} in project ${ref}`);
     }
 }
 

@@ -60,7 +60,7 @@ function createMcpSession(tokenPayload: McpTokenPayload) {
 }
 
 // JSON helper
-function jsonResponse(data: any, status = 200): Response {
+function jsonResponse(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
     status,
     headers: { "Content-Type": "application/json" },
@@ -85,19 +85,19 @@ export async function handleMcp(request: Request): Promise<Response> {
       if (tokenPayload.role !== "admin") {
         return jsonResponse({ error: "Admin token required" }, 403);
       }
-      const body = await request.json() as any;
+      const body = await request.json() as Record<string, unknown>;
       const { createMcpToken } = await import("../mcp/token");
       if (!body.ref) {
         return jsonResponse({ error: "ref is required" }, 400);
       }
       const token = await createMcpToken({
         role: "project",
-        ref: body.ref,
-        name: body.name || "default",
-        readonly: body.readonly ?? true,
-        expiresInDays: body.expires_days ?? 365,
+        ref: body.ref as string,
+        name: (body.name as string) || "default",
+        readonly: (body.readonly as boolean) ?? true,
+        expiresInDays: (body.expires_days as number) ?? 365,
       });
-      return jsonResponse({ token, ref: body.ref, readonly: body.readonly ?? true, expires_days: body.expires_days ?? 365 });
+      return jsonResponse({ token, ref: body.ref, readonly: (body.readonly as boolean) ?? true, expires_days: (body.expires_days as number) ?? 365 });
     }
 
     // MCP JSON-RPC

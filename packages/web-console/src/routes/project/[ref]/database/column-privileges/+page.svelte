@@ -89,8 +89,8 @@
         table_name,
         columns: Array.from(colMap.values())
       }));
-    } catch (err: any) {
-      error = err.message;
+    } catch (err: unknown) {
+      error = err instanceof Error ? err.message : String(err);
     } finally {
       isLoading = false;
     }

@@ -9,10 +9,11 @@
   import Sidebar from "$lib/components/Sidebar.svelte";
   import PlatformSidebar from "$lib/components/PlatformSidebar.svelte";
   import { ModeWatcher } from "mode-watcher";
+  import { Toaster, toast } from "svelte-sonner";
   
   let { children } = $props();
   
-  let projects = $state<any[]>([]);
+  let projects = $state<Record<string, unknown>[]>([]);
   let projectsLoading = $state(true);
   let isAuthenticated = $state(false);
   let isOnLoginPage = $state(false);
@@ -66,8 +67,8 @@
       if (response.ok) {
         projects = await response.json();
       }
-    } catch (err) {
-      console.error('Network error during project loading:', err);
+    } catch (err: unknown) {
+      toast.error("网络错误 during project loading");
     } finally {
       projectsLoading = false;
     }
@@ -79,6 +80,7 @@
 </script>
 
 <ModeWatcher />
+<Toaster richColors position="top-right" />
 
 <div class="flex h-screen overflow-hidden bg-background">
   {#if isOnLoginPage}
