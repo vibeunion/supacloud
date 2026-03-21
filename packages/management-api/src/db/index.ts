@@ -21,12 +21,12 @@ export const sql = new SQL({
   database: dbConfig.database,
   username: dbConfig.username,
   password: dbConfig.password,
-  max: 100,
+  max: 20,
   idleTimeout: 30,
   connectTimeout: 5000,
 });
 
-const MAX_CACHED_CONNECTIONS = 100;
+const MAX_CACHED_CONNECTIONS = 20;
 
 // Project database connection cache
 const projectConnections: Map<string, { sql: SQL; lastUsed: number }> = new Map();

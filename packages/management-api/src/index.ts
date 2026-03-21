@@ -237,6 +237,7 @@ export async function registerAllRoutes() {
     projectRoutes, organizationRoutes, userRoutes, backupRoutes,
     monitorRoutes, maintenanceRoutes, extensionRoutes, systemExtensionRoutes, securityRoutes,
     storageRoutes, scalingRoutes, taskRoutes, databaseRoutes, authRoutes,
+    wechatAuthRoutes, chinaAuthRoutes, userManagementRoutes,
     frontendRoutes, webhookRoutes, deployRoutes
   } = await import("./routes");
 
@@ -256,6 +257,9 @@ export async function registerAllRoutes() {
     .use(taskRoutes)
     .use(databaseRoutes)
     .use(authRoutes)
+    .use(wechatAuthRoutes)
+    .use(chinaAuthRoutes)
+    .use(userManagementRoutes)
     .use(frontendRoutes)
     .use(webhookRoutes)
     .use(deployRoutes);
