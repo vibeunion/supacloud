@@ -59,7 +59,7 @@ function createMcpSession(tokenPayload: McpTokenPayload): { transport: WebStanda
 
 export const mcpRoutes = new Elysia({ prefix: "/mcp" })
   // POST /mcp — Main JSON-RPC endpoint
-  .post("/", async ({ request, headers, set }) => {
+  .post("/", async ({ request, headers, body, set }) => {
     const tokenPayload = await authenticate(headers as any);
     if (!tokenPayload) {
       set.status = 401;
@@ -77,9 +77,15 @@ export const mcpRoutes = new Elysia({ prefix: "/mcp" })
       session = createMcpSession(tokenPayload);
     }
 
-    // Pass the original request directly to transport
+    // Elysia consumes the request body, so reconstruct a fresh Request for the transport
     try {
-      const response = await session.transport.handleRequest(request);
+      const freshReq = new Request(request.url, {
+        method: "POST",
+        headers: request.headers,
+        body: JSON.stringify(body),
+      });
+
+      const response = await session.transport.handleRequest(freshReq);
       
       if (response) {
         // Copy headers from MCP response
