@@ -374,15 +374,10 @@ update_supabase_s3_config() {
         sed -i "s|S3_ENDPOINT=.*|S3_ENDPOINT=${endpoint}|g" "$SUPABASE_ENV"
         sed -i "s|S3_REGION=.*|S3_REGION=${region}|g" "$SUPABASE_ENV"
         
-        # Restart storage service
-        cd ~/pigsty/app/supabase
-        if command -v docker-compose &> /dev/null; then
-            docker-compose restart supabase-storage
-        else
-            /usr/local/bin/docker-compose restart supabase-storage
-        fi
+        # SupaCloud uses its own Storage API (Bun.S3Client), restart the management API
+        systemctl restart supacloud.service 2>/dev/null || true
         
-        log_info "Supabase Storage service restarted"
+        log_info "SupaCloud Management API restarted with new S3 config"
     else
         log_warn "Supabase configuration file not found: $SUPABASE_ENV"
     fi
