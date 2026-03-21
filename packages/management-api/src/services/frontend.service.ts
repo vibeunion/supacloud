@@ -161,81 +161,24 @@ class FrontendService {
 
     const deploymentDir = this.joinPath(this.baseDir, projectRef, deploymentId);
     const sourceDir = this.joinPath(deploymentDir, "source");
-    const buildDir = this.joinPath(deploymentDir, "build");
-
-    await this.updateDeployment(projectRef, deploymentId, { status: "building" } as Partial<FrontendDeployment>);
-
-    let buildLog = "";
 
     try {
+      // Copy source to deployment directory, then delegate to shared build pipeline
       await $`cp -r ${sourcePath}/. ${sourceDir}`.quiet();
-
-      if (deployment.install_command) {
-        buildLog += `$ ${deployment.install_command}\n`;
-        const installResult = await $`${deployment.install_command}`
-          .cwd(sourceDir)
-          .env({
-            ...process.env,
-            ...deployment.env_vars,
-            NODE_VERSION: deployment.node_version,
-          })
-          .quiet();
-        buildLog += installResult.stdout.toString() + "\n";
-        if (installResult.exitCode !== 0) {
-          throw new Error(`Install failed: ${installResult.stderr.toString()}`);
-        }
-      }
-
-      if (deployment.build_command) {
-        buildLog += `$ ${deployment.build_command}\n`;
-        const buildResult = await $`${deployment.build_command}`
-          .cwd(sourceDir)
-          .env({
-            ...process.env,
-            ...deployment.env_vars,
-            NODE_VERSION: deployment.node_version,
-          })
-          .quiet();
-        buildLog += buildResult.stdout.toString() + "\n";
-        if (buildResult.exitCode !== 0) {
-          throw new Error(`Build failed: ${buildResult.stderr.toString()}`);
-        }
-      }
-
-      const defaults = FRAMEWORK_DEFAULTS[deployment.framework];
-      const outputDir = this.joinPath(sourceDir, deployment.output_dir);
-      await $`rm -rf ${buildDir} && cp -r ${outputDir} ${buildDir}`.quiet();
-
-      if (defaults.is_ssr) {
-        await this.startSSRProcess(projectRef, deploymentId, deployment, buildDir);
-      }
-      await this.configureAngie(deployment, buildDir, defaults.is_ssr);
-
-      await this.updateDeployment(projectRef, deploymentId, {
-        status: "success",
-        last_deployed_at: new Date().toISOString(),
-        build_log: buildLog,
-      } as Partial<FrontendDeployment>);
-
-      return {
-        success: true,
-        deployment_id: deploymentId,
-        url: deployment.deployment_url,
-        build_log: buildLog,
-      };
+      return await this.buildDeployment(projectRef, deploymentId, sourceDir);
     } catch (error: unknown) {
-      buildLog += `\nError: ${error instanceof Error ? error.message : String(error)}\n`;
+      const errorMsg = error instanceof Error ? error.message : String(error);
       await this.updateDeployment(projectRef, deploymentId, {
         status: "failed",
-        build_log: buildLog,
+        build_log: `Error copying source: ${errorMsg}`,
       } as Partial<FrontendDeployment>);
 
       return {
         success: false,
         deployment_id: deploymentId,
         url: "",
-        build_log: buildLog,
-        error: (error instanceof Error ? error.message : String(error)),
+        build_log: `Error: ${errorMsg}`,
+        error: errorMsg,
       };
     }
   }
