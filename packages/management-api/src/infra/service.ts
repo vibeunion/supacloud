@@ -93,7 +93,7 @@ WantedBy=multi-user.target
         status: status === 'active' ? 'running' : 'stopped'
       }
     } catch (err: unknown) {
-      logger.warn("[] operation failed silently", { error: err });
+      logger.warn("[InfraService] Systemd service status check failed", { error: err });
       // Check if process exists via pgrep
       try {
         const stdout = await $`pgrep -f ${serviceName}`.text()
@@ -104,7 +104,7 @@ WantedBy=multi-user.target
           pid
         }
       } catch (err: unknown) {
-        logger.warn("[] operation failed silently", { error: err });
+        logger.warn("[InfraService] Failed to parse systemd service output", { error: err });
         return {
           name: serviceName,
           status: 'stopped'

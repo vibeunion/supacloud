@@ -282,7 +282,7 @@ class DeployServiceClass {
         log(`Previous version: ${previousVersion}`);
       }
     } catch (err: unknown) {
-      logger.warn("[] trim failed silently", { error: err });
+      logger.warn("[DeployService] Failed to read current symlink version", { error: err });
       log("No previous version found");
     }
 
@@ -324,7 +324,7 @@ class DeployServiceClass {
         log(`Previous version: ${previousVersion}`);
       }
     } catch (err: unknown) {
-      logger.warn("[] trim failed silently", { error: err });
+      logger.warn("[DeployService] Failed to read current SSR symlink version", { error: err });
       log("No previous version found");
     }
 

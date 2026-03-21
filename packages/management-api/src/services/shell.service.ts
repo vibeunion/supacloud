@@ -64,7 +64,7 @@ export class ShellService {
       await $`test -f ${scriptPath}`;
       return true;
     } catch (err: unknown) {
-      logger.warn("[] scriptExists failed silently", { error: err });
+      logger.warn("[ShellService] Failed to check script existence", { error: err });
       return false;
     }
   }

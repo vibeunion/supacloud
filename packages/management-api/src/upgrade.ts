@@ -12,7 +12,7 @@ async function getLocalVersion(): Promise<string> {
         // here temporarily read sibling package.json (dev environment) or preset value
         return "1.0.0";
     } catch (err: unknown) {
-      logger.warn("[] getLocalVersion failed silently", { error: err });
+      logger.warn("[Upgrade] Failed to read local version from package.json", { error: err });
         return "0.0.0";
     }
 }

@@ -108,11 +108,12 @@ export class StorageService {
 
       const res = await s3.list();
       
-      return (res.contents || []).map((file: any) => ({
+      const s3Contents = res.contents || [];
+      return s3Contents.map((file: { key: string; lastModified?: string; size?: number }) => ({
         id: file.key,
         name: file.key,
         updated: file.lastModified,
-        size: Math.round(file.size / 1024) + ' KB',
+        size: Math.round((file.size ?? 0) / 1024) + ' KB',
         type: file.key.includes('.') ? file.key.split('.').pop() : 'unknown'
       }));
     } catch (err: unknown) {
