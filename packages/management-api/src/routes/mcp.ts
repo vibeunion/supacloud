@@ -12,12 +12,12 @@
  */
 import { Elysia } from "elysia";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { verifyMcpToken, type McpTokenPayload } from "../mcp/token";
 import { registerMcpTools } from "../mcp/tools";
 
 // Session store: sessionId → { transport, server }
-const sessions = new Map<string, { transport: StreamableHTTPServerTransport; server: McpServer }>();
+const sessions = new Map<string, { transport: WebStandardStreamableHTTPServerTransport; server: McpServer }>();
 
 // Cleanup old sessions every 30 minutes
 setInterval(() => {
@@ -38,13 +38,13 @@ async function authenticate(headers: Record<string, string | undefined>): Promis
   return await verifyMcpToken(token);
 }
 
-function createMcpSession(tokenPayload: McpTokenPayload): { transport: StreamableHTTPServerTransport; server: McpServer } {
+function createMcpSession(tokenPayload: McpTokenPayload): { transport: WebStandardStreamableHTTPServerTransport; server: McpServer } {
   const serverName = tokenPayload.ref ? `supacloud-${tokenPayload.ref}` : "supacloud";
   const server = new McpServer({ name: serverName, version: "0.5.5" });
 
   registerMcpTools(server, tokenPayload);
 
-  const transport = new StreamableHTTPServerTransport({
+  const transport = new WebStandardStreamableHTTPServerTransport({
     sessionIdGenerator: () => crypto.randomUUID(),
     onsessioninitialized: (sessionId: string) => {
       const session = { transport, server, _createdAt: Date.now() } as any;
@@ -68,7 +68,7 @@ export const mcpRoutes = new Elysia({ prefix: "/mcp" })
 
     // Check for existing session
     const sessionId = headers["mcp-session-id"] as string | undefined;
-    let session: { transport: StreamableHTTPServerTransport; server: McpServer };
+    let session: { transport: WebStandardStreamableHTTPServerTransport; server: McpServer };
 
     if (sessionId && sessions.has(sessionId)) {
       session = sessions.get(sessionId)!;
