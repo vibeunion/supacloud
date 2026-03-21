@@ -45,12 +45,12 @@ class FrontendService {
           const config = await Bun.file(configPath).json();
           deployments.push(config);
         } catch (err: unknown) {
-          logger.warn("[] Bun.file failed silently", { error: err });
+          logger.warn("[FrontendService] Failed to read deployment config", { error: err });
           continue;
         }
       }
     } catch (err: unknown) {
-      logger.warn("[] catch failed silently", { error: err });
+      logger.warn("[FrontendService] Failed to list deployment directories", { error: err });
       return [];
     }
 
@@ -62,7 +62,7 @@ class FrontendService {
     try {
       return await Bun.file(configPath).json();
     } catch (err: unknown) {
-      logger.warn("[] Bun.file failed silently", { error: err });
+      logger.warn("[FrontendService] Failed to read deployment JSON", { error: err });
       return null;
     }
   }
@@ -138,7 +138,7 @@ class FrontendService {
       await $`rm -rf ${deploymentDir}`.quiet();
       return true;
     } catch (err: unknown) {
-      logger.warn("[] removeAngieConfig failed silently", { error: err });
+      logger.warn("[FrontendService] Failed to remove Angie config for deployment", { error: err });
       return false;
     }
   }
@@ -735,7 +735,7 @@ WantedBy=multi-user.target
           const record = await Bun.file(this.joinPath(recordsDir, file)).json();
           records.push(record);
         } catch (err: unknown) {
-          logger.warn("[] Bun.file failed silently", { error: err });
+          logger.warn("[FrontendService] Failed to read version deployment.json", { error: err });
           continue;
         }
       }
@@ -744,7 +744,7 @@ WantedBy=multi-user.target
         new Date(b.started_at).getTime() - new Date(a.started_at).getTime()
       );
     } catch (err: unknown) {
-      logger.warn("[] sort failed silently", { error: err });
+      logger.warn("[FrontendService] Failed to list version directories", { error: err });
       return [];
     }
   }
@@ -765,7 +765,7 @@ WantedBy=multi-user.target
     try {
       return await Bun.file(recordPath).json();
     } catch (err: unknown) {
-      logger.warn("[] Bun.file failed silently", { error: err });
+      logger.warn("[FrontendService] Failed to read deployment record file", { error: err });
       return null;
     }
   }

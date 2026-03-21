@@ -271,7 +271,7 @@ export class GatewayService {
               credentials: true
               max_age: 3600
   - name: svc-storage-${projectRef}
-    url: http://${hostIp}:5000
+    url: http://${hostIp}:9090
     connect_timeout: 5000
     read_timeout: 60000
     write_timeout: 60000
@@ -349,7 +349,7 @@ export class GatewayService {
             }
         } catch (err: unknown) {
       // Skip if tenantDir doesn't exist
-      logger.warn("[gateway] filter failed silently", { error: err });
+      logger.warn("[GatewayService] Failed to filter Angie upstream entries", { error: err });
     }
 
         // Insert tenant configurations after `services:` section
