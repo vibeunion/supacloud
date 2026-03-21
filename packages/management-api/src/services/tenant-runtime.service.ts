@@ -1,6 +1,6 @@
-import { $, BunFile, SQL } from "bun";
+import { $ } from "bun";
 import { logger } from "../utils/logger";
-import { config } from "../config";
+import { sql as metaSql } from "../db";
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { OAuthProvider, OAuthProviderConfig } from "../types/oauth";
@@ -72,29 +72,21 @@ class TenantRuntimeService {
 
     /**
      * Retrieve credentials from supacloud_meta (local metadata DB)
+     * Uses the global connection pool from db/index.ts
      */
     private async getTenantCredentials(ref: string) {
-        const sql = new SQL({
-            url: config.databaseUrl,
-            max: 2,
-        });
+        const [project] = await metaSql`SELECT db_password, jwt_secret, config->>'api_url' as api_url, db_name FROM projects WHERE ref=${ref}`;
 
-        try {
-            const [project] = await sql`SELECT db_password, jwt_secret, config->>'api_url' as api_url, db_name FROM projects WHERE ref=${ref}`;
-
-            if (!project || !project.db_password || !project.jwt_secret) {
-                throw new Error(`Cannot find valid credentials for project ${ref} in supacloud_meta`);
-            }
-
-            return {
-                dbPassword: project.db_password,
-                jwtSecret: project.jwt_secret,
-                dbName: project.db_name || `supa_${ref}`,
-                apiUrl: (project.api_url as string) || process.env.GOTRUE_API_EXTERNAL_URL || "https://your-supacloud-domain.com"
-            };
-        } finally {
-            await sql.close();
+        if (!project || !project.db_password || !project.jwt_secret) {
+            throw new Error(`Cannot find valid credentials for project ${ref} in supacloud_meta`);
         }
+
+        return {
+            dbPassword: project.db_password,
+            jwtSecret: project.jwt_secret,
+            dbName: project.db_name || `supa_${ref}`,
+            apiUrl: (project.api_url as string) || process.env.GOTRUE_API_EXTERNAL_URL || "https://your-supacloud-domain.com"
+        };
     }
 
     /**
