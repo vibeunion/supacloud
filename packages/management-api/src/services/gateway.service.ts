@@ -268,6 +268,9 @@ export class GatewayService {
                 - Authorization
                 - Content-Type
                 - X-Api-Version
+                - X-Client-Info
+              exposed_headers:
+                - X-Relay-Error
               credentials: true
               max_age: 3600
   - name: svc-storage-${projectRef}
