@@ -124,6 +124,27 @@ restart_failed_tenants() {
     log_info "Tenant service recovery complete"
 }
 
+ensure_service_containers_running() {
+    log_info "Checking service containers (Imaginary, Realtime)..."
+
+    local RUNTIME="podman"
+    command -v podman &>/dev/null || RUNTIME="docker"
+
+    for container in supacloud-imaginary realtime-dev.supabase-realtime; do
+        local status
+        status=$($RUNTIME ps -a --filter "name=${container}" --format '{{.Status}}' 2>/dev/null || echo "")
+
+        if [[ -n "$status" ]]; then
+            if [[ "$status" != *"Up"* ]] && [[ "$status" != *"Running"* ]]; then
+                log_warn "${container} not running, starting..."
+                $RUNTIME start "${container}" 2>/dev/null || true
+            else
+                log_info "${container} already running"
+            fi
+        fi
+    done
+}
+
 main() {
     echo "=========================================="
     echo "SupaCloud Pre-start Recovery"
@@ -133,6 +154,7 @@ main() {
     fix_stale_postmaster_pid
     fix_gotrue_search_path
     ensure_kong_running
+    ensure_service_containers_running
     restart_failed_tenants
     
     echo ""
