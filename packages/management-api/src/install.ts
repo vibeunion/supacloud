@@ -332,7 +332,7 @@ GRAFANA_PASSWORD="${dbPass}"
 SWAP_SIZE_GB="4"
 PG_VERSION="18"
 S3_STORAGE_TYPE="${storageType}"
-EDGE_RUNTIME="deno"
+# Edge Runtime: Bun (built-in)
 ENABLE_ANALYTICS="true"
 ANALYTICS_BACKEND="postgres"
 JWT_SECRET="${jwtSecret}"
