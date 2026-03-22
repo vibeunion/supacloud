@@ -1,7 +1,7 @@
 import { Elysia, t, status } from "elysia";
 import { logger } from "../utils/logger";
 import { projectService } from "../services";
-import { shellService } from "../services/shell.service";
+import { edgeFunctionService } from "../services/edge-function.service";
 import {
   ChinaOAuthProvider,
   CHINA_OAUTH_PROVIDER_INFO,
@@ -119,9 +119,9 @@ export const chinaAuthRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
 
 async function deployChinaOAuthFunction(ref: string, provider: ChinaOAuthProvider, appId: string, appSecret: string, redirectUri?: string): Promise<void> {
   const functionCode = generateChinaOAuthFunction(provider, appId, appSecret, redirectUri);
-  const result = await shellService.execute("function_manager.sh", ["deploy", ref, `${provider}-login`, functionCode]);
-  if (!result.success) {
-    throw new Error(`Failed to deploy ${provider}-login function: ${result.output}`);
+  const ok = await edgeFunctionService.deploy(ref, `${provider}-login`, functionCode);
+  if (!ok) {
+    throw new Error(`Failed to deploy ${provider}-login function`);
   }
 }
 
