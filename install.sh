@@ -2500,6 +2500,95 @@ EOF
     log_info "SupaCloud Control Plane deployed successfully!"
 }
 
+# ========== Deploy Service Containers (Imaginary + Realtime) ==========
+deploy_service_containers() {
+    log_step "Deploying SupaCloud service containers..."
+
+    local RUNTIME="${CONTAINER_RUNTIME:-podman}"
+    local MIRROR_PREFIX="docker.1ms.run/"
+
+    # --- 1. Deploy Imaginary (Image Transformation Engine) ---
+    if $RUNTIME ps -a --format '{{.Names}}' 2>/dev/null | grep -q supacloud-imaginary; then
+        log_info "Imaginary container already exists, skipping"
+    else
+        log_info "Pulling and deploying Imaginary (image processing)..."
+        $RUNTIME pull "${MIRROR_PREFIX}h2non/imaginary:latest" 2>/dev/null || \
+            $RUNTIME pull h2non/imaginary:latest
+
+        $RUNTIME run -d \
+            --name supacloud-imaginary \
+            --restart=always \
+            -p 127.0.0.1:9010:9000 \
+            "${MIRROR_PREFIX}h2non/imaginary:latest" \
+            -enable-url-source \
+            -allowed-origins ".*"
+
+        log_info "Imaginary deployed on port 9010"
+    fi
+
+    # --- 2. Deploy Supabase Realtime (Multi-tenant WebSocket) ---
+    if $RUNTIME ps -a --format '{{.Names}}' 2>/dev/null | grep -q supabase-realtime; then
+        log_info "Realtime container already exists, skipping"
+    else
+        log_info "Pulling and deploying Supabase Realtime (multi-tenant)..."
+        $RUNTIME pull "${MIRROR_PREFIX}supabase/realtime:v2.76.5" 2>/dev/null || \
+            $RUNTIME pull supabase/realtime:v2.76.5
+
+        # Create _realtime schema in postgres database
+        if [[ -n "${POSTGRES_PASSWORD:-}" ]]; then
+            PGPASSWORD="${POSTGRES_PASSWORD}" psql -h "${INTERNAL_IP}" -U supabase_admin -d postgres \
+                -c "CREATE SCHEMA IF NOT EXISTS _realtime;" 2>/dev/null || true
+        fi
+
+        local SECRET_KEY_BASE
+        SECRET_KEY_BASE=$(openssl rand -hex 64)
+
+        # Container name follows official convention: realtime constructs tenant id from subdomain
+        $RUNTIME run -d \
+            --name realtime-dev.supabase-realtime \
+            --restart=always \
+            --privileged \
+            -p 127.0.0.1:4000:4000 \
+            -e PORT=4000 \
+            -e DB_HOST="${INTERNAL_IP}" \
+            -e DB_PORT=5432 \
+            -e DB_USER=supabase_admin \
+            -e DB_PASSWORD="${POSTGRES_PASSWORD}" \
+            -e DB_NAME=postgres \
+            -e "DB_AFTER_CONNECT_QUERY=SET search_path TO _realtime" \
+            -e DB_ENC_KEY=supabaserealtime \
+            -e DB_SSL=false \
+            -e API_JWT_SECRET="${JWT_SECRET:-super-secret-jwt-token}" \
+            -e SECRET_KEY_BASE="${SECRET_KEY_BASE}" \
+            -e METRICS_JWT_SECRET="${JWT_SECRET:-super-secret-jwt-token}" \
+            -e ERL_AFLAGS="-proto_dist inet_tcp" \
+            -e "DNS_NODES=''" \
+            -e RLIMIT_NOFILE=10000 \
+            -e APP_NAME=realtime \
+            -e SEED_SELF_HOST=true \
+            -e RUN_JANITOR=true \
+            -e SECURE_CHANNELS=false \
+            -e DISABLE_HEALTHCHECK_LOGGING=true \
+            "${MIRROR_PREFIX}supabase/realtime:v2.76.5"
+
+        log_info "Realtime deployed on port 4000 (multi-tenant mode)"
+    fi
+
+    # --- 3. Update management API env with container references ---
+    if ! grep -q "IMAGINARY_URL" /etc/supabase/management-api.env 2>/dev/null; then
+        cat >> /etc/supabase/management-api.env <<EOF
+
+# Service container endpoints
+IMAGINARY_URL=http://127.0.0.1:9010
+REALTIME_ADMIN_URL=http://127.0.0.1:4000
+REALTIME_API_SECRET=${JWT_SECRET:-super-secret-jwt-token}
+EOF
+        log_info "Container endpoints appended to management-api.env"
+    fi
+
+    log_info "Service containers deployed successfully!"
+}
+
 # ========== Show Completion Message ==========
 show_completion() {
     log_step "Installation Complete!"
@@ -2629,6 +2718,9 @@ main() {
 
     # Install Management API
     install_management_api
+
+    # Deploy Imaginary + Realtime containers
+    deploy_service_containers
 
     # Save all credentials
     save_all_credentials

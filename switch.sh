@@ -88,6 +88,23 @@ show_status() {
     fi
     echo ""
     
+    # Service Containers
+    echo "Service Containers:"
+    if command -v podman &> /dev/null; then
+        local rt_status im_status
+        rt_status=$(podman ps -a --filter "name=supabase-realtime" --format "{{.Status}}" 2>/dev/null || echo "Not deployed")
+        im_status=$(podman ps -a --filter "name=supacloud-imaginary" --format "{{.Status}}" 2>/dev/null || echo "Not deployed")
+        echo "  Realtime:  ${rt_status:-Not deployed}"
+        echo "  Imaginary: ${im_status:-Not deployed}"
+    elif command -v docker &> /dev/null; then
+        local rt_status im_status
+        rt_status=$(docker ps -a --filter "name=supabase-realtime" --format "{{.Status}}" 2>/dev/null || echo "Not deployed")
+        im_status=$(docker ps -a --filter "name=supacloud-imaginary" --format "{{.Status}}" 2>/dev/null || echo "Not deployed")
+        echo "  Realtime:  ${rt_status:-Not deployed}"
+        echo "  Imaginary: ${im_status:-Not deployed}"
+    fi
+    echo ""
+    
     # Show credential locations
     echo "Config file locations:"
     echo "  JWT Keys: /etc/supabase/jwt-keys.env"
