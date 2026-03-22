@@ -7,6 +7,7 @@ import { shellService } from "./shell.service";
 import { gatewayService } from "./gateway.service";
 import { taskRepository } from "../repositories/task.repository";
 import type { Project, ProjectStatus } from "../db";
+import { edgeFunctionService } from "./edge-function.service";
 import { logger } from "../utils/logger";
 import { $ } from "bun";
 
@@ -336,46 +337,36 @@ export class ProjectService {
     const project = await projectRepository.findByRef(ref);
     if (!project) return null;
 
-    const result = await shellService.execute("function_manager.sh", ["read", ref, slug]);
-    if (!result.success) return null;
-    return result.output;
+    const code = await edgeFunctionService.read(ref, slug);
+    return code;
   }
 
   async listFunctions(ref: string): Promise<FunctionResponse[]> {
     const project = await projectRepository.findByRef(ref);
     if (!project) return [];
 
-    const result = await shellService.execute("function_manager.sh", ["list", ref]);
-    if (!result.success) return [];
-    try {
-      const slugs = JSON.parse(result.output);
-      return slugs.map((slug: string) => ({
-        id: slug,
-        slug: slug,
-        name: slug,
-        status: "ACTIVE",
-        created_at: new Date().toISOString(),
-      }));
-    } catch (err: unknown) {
-      logger.warn("[ProjectService] Failed to parse backup timestamps", { error: err });
-      return [];
-    }
+    const slugs = await edgeFunctionService.list(ref);
+    return slugs.map((slug: string) => ({
+      id: slug,
+      slug: slug,
+      name: slug,
+      status: "ACTIVE",
+      created_at: new Date().toISOString(),
+    }));
   }
 
   async deleteFunction(ref: string, slug: string): Promise<boolean> {
     const project = await projectRepository.findByRef(ref);
     if (!project) return false;
 
-    const result = await shellService.execute("function_manager.sh", ["delete", ref, slug]);
-    return result.success;
+    return await edgeFunctionService.remove(ref, slug);
   }
 
   async deployFunction(ref: string, slug: string, code: string): Promise<boolean> {
     const project = await projectRepository.findByRef(ref);
     if (!project) return false;
 
-    const result = await shellService.execute("function_manager.sh", ["deploy", ref, slug, code]);
-    return result.success;
+    return await edgeFunctionService.deploy(ref, slug, code);
   }
 
   // Convert to response format
