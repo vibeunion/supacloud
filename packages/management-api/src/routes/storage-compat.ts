@@ -33,6 +33,26 @@ import { logger } from "../utils/logger";
 // ── Imaginary Config ──────────────────────────────────────────────
 const IMAGINARY_URL = process.env.IMAGINARY_URL || "http://127.0.0.1:9010";
 const S3_ENDPOINT  = process.env.S3_ENDPOINT   || "http://127.0.0.1:9000";
+const SIGNING_SECRET = process.env.JWT_SECRET || process.env.STORAGE_SIGNING_SECRET || "super-secret-signing-key";
+
+import { createHmac } from "crypto";
+
+/**
+ * Generate HMAC-SHA256 signed token for a storage path + expiry.
+ */
+function generateSignedToken(ref: string, bucket: string, path: string, expiresAt: number): string {
+    const payload = `${ref}:${bucket}:${path}:${expiresAt}`;
+    return createHmac("sha256", SIGNING_SECRET).update(payload).digest("hex");
+}
+
+/**
+ * Verify a signed token against path + expiry.
+ */
+function verifySignedToken(ref: string, bucket: string, path: string, expiresAt: number, token: string): boolean {
+    if (Date.now() / 1000 > expiresAt) return false; // expired
+    const expected = generateSignedToken(ref, bucket, path, expiresAt);
+    return expected === token;
+}
 
 function buildSourceUrl(bucket: string, path: string): string {
     const base = S3_ENDPOINT.endsWith('/') ? S3_ENDPOINT.slice(0, -1) : S3_ENDPOINT;
@@ -64,6 +84,28 @@ function resolveS3Path(projectRef: string, logicalBucket: string, filePath: stri
 // ── Supabase SDK-Compatible Routes ────────────────────────────────
 // These are mounted DIRECTLY by Kong at /storage/v1 (Kong strips prefix)
 // So these routes see paths starting from /object/..., /bucket/..., /render/...
+
+// ── TUS Upload State ──────────────────────────────────────────────
+interface TusUpload {
+    ref: string;
+    bucket: string;
+    objectName: string;
+    contentType: string;
+    totalSize: number;
+    offset: number;
+    chunks: Buffer[];
+    createdAt: number;
+}
+
+const tusUploads = new Map<string, TusUpload>();
+
+// Auto-cleanup abandoned uploads every 10 minutes
+setInterval(() => {
+    const cutoff = Date.now() - 60 * 60 * 1000; // 1 hour
+    for (const [id, upload] of tusUploads) {
+        if (upload.createdAt < cutoff) tusUploads.delete(id);
+    }
+}, 10 * 60 * 1000);
 
 export const storageCompatRoutes = new Elysia({ prefix: "/storage/v1/s" })
 
@@ -224,6 +266,87 @@ export const storageCompatRoutes = new Elysia({ prefix: "/storage/v1/s" })
     })
 
     // ════════════════════════════════════════════════════════
+    // SIGNED URL — POST /object/sign/:bucket
+    // supabase.storage.from('bucket').createSignedUrl('path', expiresIn)
+    // ════════════════════════════════════════════════════════
+
+    .post('/object/sign/:bucket', async ({ params, headers, body }) => {
+        const ref = getProjectRef(headers as Record<string, string | undefined>);
+        const b = body as Record<string, unknown>;
+        const filePath = String(b.url || b.path || '').replace(/^\//, '');
+        const expiresIn = Number(b.expiresIn) || 3600;
+
+        if (!filePath) {
+            return status(400, { statusCode: '400', error: 'Bad Request', message: 'Missing file path' });
+        }
+
+        const expiresAt = Math.floor(Date.now() / 1000) + expiresIn;
+        const token = generateSignedToken(ref, params.bucket, filePath, expiresAt);
+
+        return {
+            signedURL: `/storage/v1/s/object/sign/${params.bucket}/${filePath}?token=${token}&t=${expiresAt}`,
+        };
+    })
+
+    // POST /object/sign/:bucket — Batch signed URLs
+    // supabase.storage.from('bucket').createSignedUrls(['path1', 'path2'], expiresIn)
+    .post('/object/sign/:bucket/sign-multi', async ({ params, headers, body }) => {
+        const ref = getProjectRef(headers as Record<string, string | undefined>);
+        const b = body as Record<string, unknown>;
+        const paths = (b.paths as string[]) || [];
+        const expiresIn = Number(b.expiresIn) || 3600;
+
+        return paths.map(filePath => {
+            const cleanPath = filePath.replace(/^\//, '');
+            const expiresAt = Math.floor(Date.now() / 1000) + expiresIn;
+            const token = generateSignedToken(ref, params.bucket, cleanPath, expiresAt);
+            return {
+                error: null,
+                path: filePath,
+                signedURL: `/storage/v1/s/object/sign/${params.bucket}/${cleanPath}?token=${token}&t=${expiresAt}`,
+            };
+        });
+    })
+
+    // GET /object/sign/:bucket/* — Serve signed file (validates token)
+    .get('/object/sign/:bucket/*', async ({ params, headers, query, set }) => {
+        const ref = getProjectRef(headers as Record<string, string | undefined>);
+        const filePath = params['*'];
+        if (!filePath) return status(400, { statusCode: '400', error: 'Bad Request', message: 'Missing file path' });
+
+        const token = query.token as string;
+        const expiresAt = Number(query.t);
+
+        if (!token || !expiresAt) {
+            return status(401, { statusCode: '401', error: 'Unauthorized', message: 'Missing signed URL token' });
+        }
+
+        if (!verifySignedToken(ref, params.bucket, filePath, expiresAt, token)) {
+            return status(401, { statusCode: '401', error: 'Unauthorized', message: 'Invalid or expired signed URL' });
+        }
+
+        // Token valid — proxy from S3
+        const { bucket, key } = resolveS3Path(ref, params.bucket, filePath);
+
+        // Transform support for signed URLs
+        if (query.width || query.height || query.resize || query.format || query.quality) {
+            return proxyToImaginary(params.bucket, filePath, query, set as { headers: Record<string, string> });
+        }
+
+        try {
+            const url = buildSourceUrl(bucket, key);
+            const res = await fetch(url);
+            if (!res.ok) return status(404, { statusCode: '404', error: 'Not Found', message: 'Object not found' });
+
+            set.headers['Content-Type'] = res.headers.get('Content-Type') || 'application/octet-stream';
+            set.headers['Cache-Control'] = 'private, no-store';
+            return new Response(res.body);
+        } catch (err: unknown) {
+            return status(500, { statusCode: '500', error: 'Internal', message: 'Download failed' });
+        }
+    })
+
+    // ════════════════════════════════════════════════════════
     // OBJECT LIST — POST /object/list/:bucket
     // supabase.storage.from('bucket').list('folder', { limit, offset, sortBy })
     // ════════════════════════════════════════════════════════
@@ -329,6 +452,113 @@ export const storageCompatRoutes = new Elysia({ prefix: "/storage/v1/s" })
         const filePath = params['*'];
         if (!filePath) return status(400, { error: 'Missing file path' });
         return proxyToImaginary(params.bucket, filePath, query, set as { headers: Record<string, string> });
+    })
+
+    // ════════════════════════════════════════════════════════
+    // TUS RESUMABLE UPLOAD (v1.0.0)
+    // supabase.storage.from('bucket').upload(path, file) — triggers TUS for >6MB
+    // ════════════════════════════════════════════════════════
+
+    // OPTIONS /upload/resumable — TUS capabilities discovery
+    .options('/upload/resumable', ({ set }) => {
+        set.headers['Tus-Resumable'] = '1.0.0';
+        set.headers['Tus-Version'] = '1.0.0';
+        set.headers['Tus-Extension'] = 'creation,termination';
+        set.headers['Tus-Max-Size'] = String(5 * 1024 * 1024 * 1024); // 5GB
+        return '';
+    })
+
+    // POST /upload/resumable — Create a new resumable upload
+    .post('/upload/resumable', async ({ headers, set }) => {
+        const ref = getProjectRef(headers as Record<string, string | undefined>);
+        const uploadLength = Number(headers['upload-length'] || 0);
+        const metadataHeader = headers['upload-metadata'] || '';
+
+        // Parse TUS metadata: key base64value,key2 base64value2
+        const meta: Record<string, string> = {};
+        for (const pair of metadataHeader.split(',')) {
+            const [key, val] = pair.trim().split(' ');
+            if (key && val) meta[key] = Buffer.from(val, 'base64').toString('utf-8');
+        }
+
+        const bucket = meta.bucketName || 'default';
+        const objectName = meta.objectName || `upload-${Date.now()}`;
+        const contentType = meta.contentType || 'application/octet-stream';
+
+        const uploadId = `${ref}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
+        // Store upload state
+        tusUploads.set(uploadId, {
+            ref,
+            bucket,
+            objectName,
+            contentType,
+            totalSize: uploadLength,
+            offset: 0,
+            chunks: [],
+            createdAt: Date.now(),
+        });
+
+        set.headers['Tus-Resumable'] = '1.0.0';
+        set.headers['Location'] = `/storage/v1/s/upload/resumable/${uploadId}`;
+        set.status = 201;
+        return '';
+    })
+
+    // HEAD /upload/resumable/:uploadId — Get current upload offset
+    .get('/upload/resumable/:uploadId', ({ params, set }) => {
+        const upload = tusUploads.get(params.uploadId);
+        if (!upload) return status(404, { error: 'Upload not found' });
+
+        set.headers['Tus-Resumable'] = '1.0.0';
+        set.headers['Upload-Offset'] = String(upload.offset);
+        set.headers['Upload-Length'] = String(upload.totalSize);
+        set.headers['Cache-Control'] = 'no-store';
+        return '';
+    })
+
+    // PATCH /upload/resumable/:uploadId — Upload a chunk
+    .patch('/upload/resumable/:uploadId', async ({ params, headers, request, set }) => {
+        const upload = tusUploads.get(params.uploadId);
+        if (!upload) return status(404, { error: 'Upload not found' });
+
+        const clientOffset = Number(headers['upload-offset'] || 0);
+        if (clientOffset !== upload.offset) {
+            return status(409, { error: 'Offset mismatch', expected: upload.offset, received: clientOffset });
+        }
+
+        const chunk = Buffer.from(await request.arrayBuffer());
+        upload.chunks.push(chunk);
+        upload.offset += chunk.length;
+
+        set.headers['Tus-Resumable'] = '1.0.0';
+        set.headers['Upload-Offset'] = String(upload.offset);
+
+        // Upload complete — assemble and store in S3
+        if (upload.offset >= upload.totalSize) {
+            const fullBody = Buffer.concat(upload.chunks);
+            const { bucket, key } = resolveS3Path(upload.ref, upload.bucket, upload.objectName);
+
+            try {
+                await StorageService.uploadFile(upload.ref, bucket, key, fullBody, upload.contentType);
+                tusUploads.delete(params.uploadId);
+                return { Key: `${upload.bucket}/${upload.objectName}` };
+            } catch (err: unknown) {
+                tusUploads.delete(params.uploadId);
+                return status(500, { error: 'Failed to finalize upload' });
+            }
+        }
+
+        set.status = 204;
+        return '';
+    })
+
+    // DELETE /upload/resumable/:uploadId — Abort a resumable upload
+    .delete('/upload/resumable/:uploadId', ({ params, set }) => {
+        tusUploads.delete(params.uploadId);
+        set.headers['Tus-Resumable'] = '1.0.0';
+        set.status = 204;
+        return '';
     });
 
 

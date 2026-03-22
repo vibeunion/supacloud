@@ -11,28 +11,70 @@ const pool = new WorkerPool({
   requestTimeout: 20_000,
 });
 
+async function dispatchFunction(
+  projectRef: string,
+  functionName: string,
+  request: Request,
+  setHeaders: Record<string, string>,
+) {
+  const functionId = `${projectRef}_${functionName}`;
+  const functionPath = `./functions/${projectRef}/${functionName}.ts`;
+
+  try {
+    return await pool.dispatch({
+      functionId,
+      functionPath,
+      env: await loadTenantEnv(projectRef),
+      request,
+    });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : "Internal Error";
+
+    // x-relay-error tells the SDK this is an infrastructure error,
+    // not a response from the user's function
+    setHeaders["x-relay-error"] = "true";
+
+    const statusCode = message.includes("not found") || message.includes("ENOENT")
+      ? 404
+      : message.includes("timeout") || message.includes("Timeout")
+        ? 504
+        : 500;
+
+    return new Response(JSON.stringify({ error: message }), {
+      status: statusCode,
+      headers: { "Content-Type": "application/json", "x-relay-error": "true" },
+    });
+  }
+}
+
 const app = new Elysia()
   .get("/health", () => ({ status: "ok", runtime: "bun-edge" }))
   .get("/metrics", () => pool.getMetrics())
 
+  // Main function invoke — handles supabase.functions.invoke('name', { body })
+  // Supports nested paths: /functions/v1/name/sub/path
+  .all("/functions/v1/:functionName/*", async (c) => {
+    const projectRef = c.headers["x-project-ref"];
+    if (!projectRef) {
+      c.set.headers["x-relay-error"] = "true";
+      return new Response(JSON.stringify({ error: "Missing x-project-ref" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json", "x-relay-error": "true" },
+      });
+    }
+    return dispatchFunction(projectRef, c.params.functionName, c.request, c.set.headers as Record<string, string>);
+  })
+
   .all("/functions/v1/:functionName", async (c) => {
     const projectRef = c.headers["x-project-ref"];
-    if (!projectRef) return c.error(400, "Missing x-project-ref");
-
-    const functionId = `${projectRef}_${c.params.functionName}`;
-    const functionPath = `./functions/${projectRef}/${c.params.functionName}.ts`;
-
-    try {
-      return await pool.dispatch({
-        functionId,
-        functionPath,
-        env: await loadTenantEnv(projectRef),
-        request: c.request,
+    if (!projectRef) {
+      c.set.headers["x-relay-error"] = "true";
+      return new Response(JSON.stringify({ error: "Missing x-project-ref" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json", "x-relay-error": "true" },
       });
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "Internal Error";
-      return c.error(500, { error: message });
     }
+    return dispatchFunction(projectRef, c.params.functionName, c.request, c.set.headers as Record<string, string>);
   })
 
   .listen(PORT);
