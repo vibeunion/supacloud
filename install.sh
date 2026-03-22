@@ -82,7 +82,7 @@ DASHBOARD_USERNAME=${DASHBOARD_USERNAME:-admin}
 DASHBOARD_PASSWORD=${DASHBOARD_PASSWORD:-pigsty}
 GRAFANA_PASSWORD=${GRAFANA_PASSWORD:-pigsty}
 S3_STORAGE_TYPE=${S3_STORAGE_TYPE:-juicefs}
-EDGE_RUNTIME=${EDGE_RUNTIME:-deno}
+# Edge Runtime: Bun (built-in, no configuration needed)
 EOF
              log_info "Configuration file generated: $CONFIG_FILE"
         else
@@ -964,144 +964,66 @@ EOF
 }
 
 # ========== Edge Functions Runtime Configuration ==========
-configure_edge_runtime() {
-    log_step "Configuring Edge Functions runtime (${EDGE_RUNTIME:-deno})..."
+install_edge_runtime() {
+    log_step "Installing Edge Runtime (Bun + Elysia Worker Pool)..."
     
-    case "${EDGE_RUNTIME:-deno}" in
-        deno)
-            install_deno_runtime
-            ;;
-        bun)
-            install_bun_runtime
-            ;;
-        *)
-            log_warn "Unknown runtime: $EDGE_RUNTIME, using default Deno"
-            ;;
-    esac
-}
-
-# ========== Install Deno Runtime (Default Priority) ==========
-install_deno_runtime() {
-    log_step "Initializing Deno runtime (Default official Edge Functions)..."
-    
-    # Define function directory (Pigsty Supabase default mount point)
-    DENO_FUNCTIONS_DIR=~/pigsty/app/supabase/volumes/functions
-    
-    # Clear old Bun flag to ensure system uses Deno
-    rm -f /etc/supabase/.use_bun_runtime
-    
-    # Create base directories
-    mkdir -p "$DENO_FUNCTIONS_DIR"
-    mkdir -p /etc/supabase
-    
-    # Output environment information for user reference
-    cat > /etc/supabase/deno-functions.env << EOF
-# Deno Edge Functions Configuration
-# Runtime managed by Pigsty's docker-compose (supabase-edge-functions container)
-EDGE_FUNCTIONS_DIR="${DENO_FUNCTIONS_DIR}"
-API_ENDPOINT="http://${INTERNAL_IP}:9000/functions/v1/"
-EOF
-    
-    log_info "Using official Deno environment, managed by Pigsty Compose."
-    log_info "Functions resource mount point: ${DENO_FUNCTIONS_DIR}"
-    log_info "Deno routing API: http://${INTERNAL_IP}:9000/functions/v1/"
-}
-
-# ========== Install Bun Runtime (Docker Hub image optional) ==========
-install_bun_runtime() {
-    log_step "Installing Bun.js runtime..."
-    
-    # 1. Install Bun binary for SSR hosting
+    # 1. Install Bun binary
     if ! command -v bun &> /dev/null; then
         log_info "Installing Bun binary..."
-        
-        # Use China mirror for faster download
         if [[ "${USE_CHINA_MIRROR:-false}" == "true" ]] || [[ "${CN:-false}" == "true" ]]; then
-            log_info "Using China mirror (bunjs.cn)..."
             curl -fsSL https://bunjs.cn/install | bash
         else
             curl -fsSL https://bun.sh/install | bash
         fi
-        
-        # Add to system PATH
         ln -sf ~/.bun/bin/bun /usr/local/bin/bun 2>/dev/null || true
         ln -sf ~/.bun/bin/bunx /usr/local/bin/bunx 2>/dev/null || true
-        
-        # Verify installation
-        if command -v bun &> /dev/null; then
-            log_info "Bun installed: $(bun --version)"
-        else
-            log_warn "Bun installation may require shell reload, binary at ~/.bun/bin/bun"
-        fi
+        command -v bun &> /dev/null && log_info "Bun installed: $(bun --version)" || log_warn "Bun at ~/.bun/bin/bun, reload shell"
     else
         log_info "Bun already installed: $(bun --version)"
     fi
-    
-    # 2. Create frontend hosting directory
-    mkdir -p /var/supacloud/frontends
-    mkdir -p /etc/supabase
-    
-    # 3. Mark as Bun runtime available
+
+    # 2. Create directories
+    mkdir -p /var/supacloud/frontends /opt/supacloud/edge-runtime /etc/supabase
     touch /etc/supabase/.bun_installed
-    
-    # 4. Optional: Docker Hub image for Edge Functions
-    BUN_FUNCTIONS_IMAGE="${BUN_FUNCTIONS_IMAGE:-zuohuadong/supabase-bun-function:latest}"
-    BUN_FUNCTIONS_DIR="${BUN_FUNCTIONS_DIR:-bun-functions}"
-    BUN_FUNCTIONS_PORT="${BUN_FUNCTIONS_PORT:-9001}"
-    
-    if [[ "${BUN_EDGE_FUNCTIONS:-false}" == "true" ]]; then
-        log_info "Installing Bun Edge Functions container..."
-        
-        # Create functions directory
-        mkdir -p /opt/supabase/${BUN_FUNCTIONS_DIR}/functions
-        
-        # Load JWT keys
-        if [[ -f /etc/supabase/jwt-keys.env ]]; then
-            set -a
-            source /etc/supabase/jwt-keys.env
-            set +a
-        fi
-        
-        # Pull and start container
-        log_info "Pulling Docker Hub image..."
-        
-        if command -v podman &> /dev/null; then
-            podman pull "${BUN_FUNCTIONS_IMAGE}"
-            podman run -d --name supabase-bun-functions \
-                --restart unless-stopped \
-                -p ${BUN_FUNCTIONS_PORT}:9001 \
-                -e PORT=9001 \
-                -e JWT_SECRET="${JWT_SECRET}" \
-                -e ANON_KEY="${ANON_KEY}" \
-                -e SERVICE_ROLE_KEY="${SERVICE_ROLE_KEY}" \
-                -e SUPABASE_URL="http://localhost:8000" \
-                -v /opt/supabase/${BUN_FUNCTIONS_DIR}/functions:/app/functions:ro \
-                --network supabase_default \
-                "${BUN_FUNCTIONS_IMAGE}"
-        elif command -v docker &> /dev/null; then
-            docker pull "${BUN_FUNCTIONS_IMAGE}"
-            docker run -d --name supabase-bun-functions \
-                --restart unless-stopped \
-                -p ${BUN_FUNCTIONS_PORT}:9001 \
-                -e PORT=9001 \
-                -e JWT_SECRET="${JWT_SECRET}" \
-                -e ANON_KEY="${ANON_KEY}" \
-                -e SERVICE_ROLE_KEY="${SERVICE_ROLE_KEY}" \
-                -e SUPABASE_URL="http://localhost:8000" \
-                -v /opt/supabase/${BUN_FUNCTIONS_DIR}/functions:/app/functions:ro \
-                --network supabase_default \
-                "${BUN_FUNCTIONS_IMAGE}"
-        fi
-        
-        log_info "Bun Edge Functions container started on port ${BUN_FUNCTIONS_PORT}"
+
+    # 3. Deploy Edge Runtime from source
+    local EDGE_RT_SRC="${SCRIPT_DIR}/packages/edge-runtime"
+    if [[ -d "$EDGE_RT_SRC" ]]; then
+        cp -rf "$EDGE_RT_SRC"/* /opt/supacloud/edge-runtime/
+        cd /opt/supacloud/edge-runtime && bun install --frozen-lockfile 2>/dev/null || bun install
+        log_info "Edge Runtime deployed to /opt/supacloud/edge-runtime"
+    else
+        log_warn "Edge Runtime source not found at $EDGE_RT_SRC"
     fi
+
+    # 4. Register systemd service
+    cat > /etc/systemd/system/supacloud-edge-runtime.service <<SVCEOF
+[Unit]
+Description=SupaCloud Edge Runtime (Bun + Elysia)
+After=supacloud.service
+Wants=supacloud.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/supacloud/edge-runtime
+ExecStart=/usr/local/bin/bun run server.ts
+Restart=always
+RestartSec=5
+Environment=PORT=9000
+Environment=WORKER_POOL_SIZE=4
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
+SVCEOF
+    systemctl daemon-reload
+    systemctl enable supacloud-edge-runtime 2>/dev/null || true
     
-    log_info "Bun runtime installation complete"
-    log_info "  Binary: $(which bun 2>/dev/null || echo '~/.bun/bin/bun')"
-    log_info "  Frontend hosting: /var/supacloud/frontends"
-    log_info ""
-    log_info "Tip: For China users, use: USE_CHINA_MIRROR=true ./install.sh"
+    log_info "Edge Runtime on port 9000 (Bun + Elysia Worker Pool)"
 }
+
+
+
 
 # ========== S3 Storage Installation ==========
 install_s3_storage() {
@@ -2137,26 +2059,20 @@ fix_container_healthchecks() {
 deploy_mcp_function() {
     log_step "Deploying MCP Edge Function..."
     
-    # 1. index.ts
+    # MCP function source (Bun-compatible)
     MCP_INDEX_TS=$(cat << 'EOF'
-// Setup type definitions for built-in Supabase Runtime APIs
-import 'jsr:@supabase/functions-js/edge-runtime.d.ts'
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { StreamableHTTPTransport } from '@hono/mcp'
+import { Hono } from 'hono'
+import { z } from 'zod'
 
-import { McpServer } from 'npm:@modelcontextprotocol/sdk/server/mcp.js'
-import { StreamableHTTPTransport } from 'npm:@hono/mcp'
-import { Hono } from 'npm:hono'
-import { z } from 'npm:zod'
-
-// Create Hono app
 const app = new Hono()
 
-// Create your MCP server
 const server = new McpServer({
   name: 'mcp',
   version: '0.1.0',
 })
 
-// Register a simple addition tool
 server.registerTool(
   'add',
   {
@@ -2169,49 +2085,21 @@ server.registerTool(
   })
 )
 
-// Handle MCP requests at the root path
 app.all('/', async (c) => {
   const transport = new StreamableHTTPTransport()
   await server.connect(transport)
   return transport.handleRequest(c)
 })
 
-Deno.serve(app.fetch)
+export default app
 EOF
 )
 
-    # 2. deno.json
-    MCP_DENO_JSON=$(cat << 'EOF'
-{
-  "imports": {
-    "@hono/mcp": "npm:@hono/mcp@^0.1.1",
-    "@modelcontextprotocol/sdk": "npm:@modelcontextprotocol/sdk@^1.24.3",
-    "hono": "npm:hono@^4.9.2",
-    "zod": "npm:zod@^4.1.13"
-  }
-}
-EOF
-)
-
-    # Deployment target path
-    # If Deno (Pigsty default)
-    DENO_FUNC_DIR=~/pigsty/app/supabase/volumes/functions/mcp
-    mkdir -p "$DENO_FUNC_DIR"
-    echo "$MCP_INDEX_TS" > "$DENO_FUNC_DIR/index.ts"
-    echo "$MCP_DENO_JSON" > "$DENO_FUNC_DIR/deno.json"
-    log_info "Deployed MCP Function to Deno runtime: $DENO_FUNC_DIR"
-    
-    # If Bun configured
-    if [[ -n "$BUN_FUNCTIONS_DIR" ]]; then
-        BUN_FUNC_ROOT="/opt/supabase/${BUN_FUNCTIONS_DIR}/functions"
-        if [[ -d "$BUN_FUNC_ROOT" ]]; then
-            BUN_MCP_DIR="$BUN_FUNC_ROOT/mcp"
-            mkdir -p "$BUN_MCP_DIR"
-            echo "$MCP_INDEX_TS" > "$BUN_MCP_DIR/index.ts"
-            echo "$MCP_DENO_JSON" > "$BUN_MCP_DIR/deno.json"
-            log_info "Deployed MCP Function to Bun runtime: $BUN_MCP_DIR"
-        fi
-    fi
+    # Deploy to Edge Runtime functions directory
+    local MCP_DIR="/opt/supacloud/edge-runtime/functions/global/mcp"
+    mkdir -p "$MCP_DIR"
+    echo "$MCP_INDEX_TS" > "$MCP_DIR/mcp.ts"
+    log_info "Deployed MCP Function to Edge Runtime: $MCP_DIR"
 }
  
 # ========== Configure PG HBA Whitelist ==========
@@ -2701,7 +2589,7 @@ main() {
     install_container_runtime
     install_docker_compose
     install_s3_storage
-    configure_edge_runtime
+    install_edge_runtime
     install_pigsty      # Pigsty nginx suppressed via nginx_enabled: false
     deploy_mcp_function
     configure_analytics
