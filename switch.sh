@@ -22,12 +22,11 @@ log_step() { echo -e "${BLUE}[STEP]${NC} $1"; }
 
 # Show help
 show_help() {
-    echo "Supabase Runtime Switch Tool"
+    echo "SupaCloud Configuration Tool"
     echo ""
     echo "Usage: $0 <command> [options]"
     echo ""
     echo "Commands:"
-    echo "  runtime <deno|bun>     Switch Edge Functions runtime"
     echo "  storage <type>         Switch S3 storage type"
     echo "  status                 Show current configuration"
     echo ""
@@ -38,8 +37,6 @@ show_help() {
     echo "  external               Use external S3 (requires additional config)"
     echo ""
     echo "Examples:"
-    echo "  $0 runtime bun         Switch to Bun runtime"
-    echo "  $0 runtime deno        Switch to Deno runtime"
     echo "  $0 storage garage      Switch to Garage S3"
     echo "  $0 status              Show current status"
     echo ""
@@ -50,31 +47,20 @@ show_status() {
     log_step "Current configuration status"
     echo ""
     
-    # Edge Functions runtime
+    # Edge Functions Runtime (Bun)
     echo "Edge Functions Runtime:"
-    if [[ -f /etc/supabase/.use_bun_runtime ]]; then
-        echo -e "  Current: ${GREEN}Bun${NC}"
-        if command -v podman &> /dev/null; then
-            podman ps --filter "name=bun-functions" --format "  Container Status: {{.Status}}" 2>/dev/null || echo "  Container Status: Not running"
-        elif command -v docker &> /dev/null; then
-            docker ps --filter "name=bun-functions" --format "  Container Status: {{.Status}}" 2>/dev/null || echo "  Container Status: Not running"
-        fi
-        echo "  Config: /etc/supabase/bun-functions.env"
+    echo -e "  Runtime: ${GREEN}Bun + Elysia Worker Pool${NC}"
+    if systemctl is-active --quiet supacloud-edge-runtime 2>/dev/null; then
+        echo -e "  Status:  ${GREEN}Running${NC}"
     else
-        echo -e "  Current: ${GREEN}Deno${NC} (Official default)"
-        if command -v podman &> /dev/null; then
-            podman ps --filter "name=edge-functions" --format "  Container Status: {{.Status}}" 2>/dev/null || echo "  Container Status: Not running"
-        fi
-        [[ -f /etc/supabase/deno-functions.env ]] && echo "  Config: /etc/supabase/deno-functions.env"
+        echo -e "  Status:  ${RED}Stopped${NC}"
     fi
+    echo "  Port: 9000"
+    echo "  Service: supacloud-edge-runtime.service"
     echo ""
     
     # S3 Storage
     echo "S3 Storage:"
-    if [[ -f /etc/supabase/bun-functions.env ]]; then
-        source /etc/supabase/bun-functions.env 2>/dev/null || true
-    fi
-    
     if systemctl is-active --quiet garage 2>/dev/null; then
         echo -e "  Current: ${GREEN}Garage${NC}"
         echo "  Port: 9000"
@@ -90,22 +76,16 @@ show_status() {
     
     # Service Containers
     echo "Service Containers:"
-    if command -v podman &> /dev/null; then
-        local rt_status im_status
-        rt_status=$(podman ps -a --filter "name=supabase-realtime" --format "{{.Status}}" 2>/dev/null || echo "Not deployed")
-        im_status=$(podman ps -a --filter "name=supacloud-imaginary" --format "{{.Status}}" 2>/dev/null || echo "Not deployed")
-        echo "  Realtime:  ${rt_status:-Not deployed}"
-        echo "  Imaginary: ${im_status:-Not deployed}"
-    elif command -v docker &> /dev/null; then
-        local rt_status im_status
-        rt_status=$(docker ps -a --filter "name=supabase-realtime" --format "{{.Status}}" 2>/dev/null || echo "Not deployed")
-        im_status=$(docker ps -a --filter "name=supacloud-imaginary" --format "{{.Status}}" 2>/dev/null || echo "Not deployed")
-        echo "  Realtime:  ${rt_status:-Not deployed}"
-        echo "  Imaginary: ${im_status:-Not deployed}"
-    fi
+    local crt="podman"
+    command -v podman &>/dev/null || crt="docker"
+    local rt_status im_status
+    rt_status=$($crt ps -a --filter "name=supabase-realtime" --format "{{.Status}}" 2>/dev/null || echo "Not deployed")
+    im_status=$($crt ps -a --filter "name=supacloud-imaginary" --format "{{.Status}}" 2>/dev/null || echo "Not deployed")
+    echo "  Realtime:  ${rt_status:-Not deployed}"
+    echo "  Imaginary: ${im_status:-Not deployed}"
     echo ""
     
-    # Show credential locations
+    # Config locations
     echo "Config file locations:"
     echo "  JWT Keys: /etc/supabase/jwt-keys.env"
     [[ -f /etc/garage/s3-credentials.env ]] && echo "  Garage Credentials: /etc/garage/s3-credentials.env"
@@ -113,117 +93,6 @@ show_status() {
     echo ""
 }
 
-# Switch Edge Functions runtime
-switch_runtime() {
-    local runtime=$1
-    
-    case "$runtime" in
-        deno)
-            switch_to_deno
-            ;;
-        bun)
-            switch_to_bun
-            ;;
-        *)
-            log_error "Unknown runtime: $runtime"
-            log_info "Supported runtimes: deno, bun"
-            exit 1
-            ;;
-    esac
-}
-
-# Switch to Deno
-switch_to_deno() {
-    log_step "Switching to Deno runtime..."
-    
-    # Stop Bun container
-    if command -v podman &> /dev/null; then
-        podman stop supabase-bun-functions 2>/dev/null || true
-        podman rm supabase-bun-functions 2>/dev/null || true
-    elif command -v docker &> /dev/null; then
-        docker stop supabase-bun-functions 2>/dev/null || true
-        docker rm supabase-bun-functions 2>/dev/null || true
-    fi
-    
-    # Remove Bun flag
-    rm -f /etc/supabase/.use_bun_runtime
-    
-    # Get IP for writing to environment
-    INTERNAL_IP=$(hostname -I | awk '{print $1}')
-    DENO_FUNCTIONS_DIR=~/pigsty/app/supabase/volumes/functions
-    
-    # Display output environment info
-    cat > /etc/supabase/deno-functions.env << EOF
-# Deno Edge Functions Configuration
-# Runtime managed by Pigsty's docker-compose (supabase-edge-functions container) 
-EDGE_FUNCTIONS_DIR="${DENO_FUNCTIONS_DIR}"
-API_ENDPOINT="http://${INTERNAL_IP}:9000/functions/v1/"
-EOF
-    
-    # Restart Supabase container to use default Deno edge-runtime
-    cd ~/pigsty/app/supabase
-    if command -v docker-compose &> /dev/null; then
-        docker-compose up -d supabase-edge-functions
-    else
-        /usr/local/bin/docker-compose up -d supabase-edge-functions
-    fi
-    
-    log_info "Switched to Deno runtime"
-    log_info "Function mount point: ${DENO_FUNCTIONS_DIR}"
-    log_info "Edge Functions API: http://${INTERNAL_IP}:9000/functions/v1/{function}"
-}
-
-# Switch to Bun
-switch_to_bun() {
-    log_step "Switching to Bun runtime..."
-    
-    # Check if Bun container is already built
-    BUN_FUNCTIONS_DIR="/opt/supabase/bun-functions"
-    
-    if [[ ! -d "$BUN_FUNCTIONS_DIR" ]]; then
-        log_error "Bun functions directory does not exist: $BUN_FUNCTIONS_DIR"
-        log_info "Please run the installation script first and set EDGE_RUNTIME=bun"
-        exit 1
-    fi
-    
-    # Stop Deno container
-    if command -v podman &> /dev/null; then
-        podman stop supabase-edge-functions 2>/dev/null || true
-    elif command -v docker &> /dev/null; then
-        docker stop supabase-edge-functions 2>/dev/null || true
-    fi
-    
-    # Load JWT keys
-    if [[ -f /etc/supabase/jwt-keys.env ]]; then
-        set -a
-        source /etc/supabase/jwt-keys.env
-        set +a
-    fi
-    
-    # Start Bun container
-    cd "$BUN_FUNCTIONS_DIR"
-    if command -v docker-compose &> /dev/null; then
-        docker-compose up -d --build
-    elif command -v podman &> /dev/null; then
-        podman build -t supabase-bun-functions .
-        podman run -d --name supabase-bun-functions \
-            --restart unless-stopped \
-            -p 9001:9001 \
-            -e PORT=9001 \
-            -e JWT_SECRET="${JWT_SECRET}" \
-            -e ANON_KEY="${ANON_KEY}" \
-            -e SERVICE_ROLE_KEY="${SERVICE_ROLE_KEY}" \
-            -v ./functions:/app/functions:ro \
-            --network supabase_default \
-            supabase-bun-functions
-    fi
-    
-    # Create Bun flag
-    touch /etc/supabase/.use_bun_runtime
-    
-    log_info "Switched to Bun runtime"
-    log_info "Edge Functions API: http://localhost:9001/{function}"
-}
 
 # Switch S3 storage
 switch_storage() {
@@ -408,13 +277,7 @@ main() {
     fi
     
     case "$1" in
-        runtime)
-            if [[ -z "$2" ]]; then
-                log_error "Please specify runtime: deno or bun"
-                exit 1
-            fi
-            switch_runtime "$2"
-            ;;
+
         storage)
             if [[ -z "$2" ]]; then
                 log_error "Please specify storage type: minio, garage, rustfs, external"
