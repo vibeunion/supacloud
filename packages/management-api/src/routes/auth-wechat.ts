@@ -2,7 +2,7 @@ import { Elysia, t, status } from "elysia";
 import { logger } from "../utils/logger";
 import { projectService } from "../services";
 import { tenantRuntimeService } from "../services/tenant-runtime.service";
-import { shellService } from "../services/shell.service";
+import { edgeFunctionService } from "../services/edge-function.service";
 import { WECHAT_PROVIDER_INFO, WeChatProviderType } from "../types/oauth";
 
 /**
@@ -199,17 +199,17 @@ export const wechatAuthRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
 
 async function deployWeChatMiniProgramFunction(ref: string, appId: string, appSecret: string): Promise<void> {
   const functionCode = generateWeChatMiniProgramLoginFunction(appId, appSecret);
-  const result = await shellService.execute("function_manager.sh", ["deploy", ref, "wechat-login", functionCode]);
-  if (!result.success) {
-    throw new Error(`Failed to deploy wechat-login function: ${result.output}`);
+  const ok = await edgeFunctionService.deploy(ref, "wechat-login", functionCode);
+  if (!ok) {
+    throw new Error("Failed to deploy wechat-login function");
   }
 }
 
 async function deployWeChatMPFunction(ref: string, appId: string, appSecret: string, redirectUri?: string): Promise<void> {
   const functionCode = generateWeChatMPLoginFunction(appId, appSecret, redirectUri);
-  const result = await shellService.execute("function_manager.sh", ["deploy", ref, "wechat-mp-login", functionCode]);
-  if (!result.success) {
-    throw new Error(`Failed to deploy wechat-mp-login function: ${result.output}`);
+  const ok = await edgeFunctionService.deploy(ref, "wechat-mp-login", functionCode);
+  if (!ok) {
+    throw new Error("Failed to deploy wechat-mp-login function");
   }
 }
 
