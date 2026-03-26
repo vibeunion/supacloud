@@ -8,6 +8,8 @@
     "start": "bun run server.ts"
   },
   "dependencies": {
+    "@elysiajs/cors": "^1.4.0",
+    "@supabase/supabase-js": "^2.49.0",
     "elysia": "^1.2.25"
   }
 }
