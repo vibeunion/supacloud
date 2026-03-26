@@ -14,6 +14,7 @@ import { databaseService } from "../../src/services/database.service";
 import { storageService } from "../../src/services/storage.service";
 import { routerService } from "../../src/services/router.service";
 import { shellService } from "../../src/services/shell.service";
+import { edgeFunctionService } from "../../src/services/edge-function.service";
 
 describe("ProjectService - Comprehensive", () => {
   let service: ProjectService;
@@ -479,33 +480,26 @@ describe("ProjectService - Comprehensive", () => {
       spy.mockRestore();
     });
 
-    test("should return code from shell service", async () => {
+    test("should return code from edge function service", async () => {
       const findSpy = spyOn(projectRepository, "findByRef").mockResolvedValue(mockProject);
-      const shellSpy = spyOn(shellService, "execute").mockResolvedValue({
-        success: true,
-        output: "function code here",
-      });
+      const edgeSpy = spyOn(edgeFunctionService, "read").mockResolvedValue("function code here");
 
       const result = await service.getFunctionCode("test123abc", "my-func");
       expect(result).toBe("function code here");
 
       findSpy.mockRestore();
-      shellSpy.mockRestore();
+      edgeSpy.mockRestore();
     });
 
-    test("should return null when shell fails", async () => {
+    test("should return null when read fails", async () => {
       const findSpy = spyOn(projectRepository, "findByRef").mockResolvedValue(mockProject);
-      const shellSpy = spyOn(shellService, "execute").mockResolvedValue({
-        success: false,
-        output: "",
-        error: "fail",
-      });
+      const edgeSpy = spyOn(edgeFunctionService, "read").mockResolvedValue(null);
 
       const result = await service.getFunctionCode("test123abc", "my-func");
       expect(result).toBeNull();
 
       findSpy.mockRestore();
-      shellSpy.mockRestore();
+      edgeSpy.mockRestore();
     });
   });
 
@@ -519,31 +513,24 @@ describe("ProjectService - Comprehensive", () => {
 
     test("should deploy function and return success", async () => {
       const findSpy = spyOn(projectRepository, "findByRef").mockResolvedValue(mockProject);
-      const shellSpy = spyOn(shellService, "execute").mockResolvedValue({
-        success: true,
-        output: "deployed",
-      });
+      const edgeSpy = spyOn(edgeFunctionService, "deploy").mockResolvedValue(true);
 
       const result = await service.deployFunction("test123abc", "my-func", "function code");
       expect(result).toBe(true);
 
       findSpy.mockRestore();
-      shellSpy.mockRestore();
+      edgeSpy.mockRestore();
     });
 
     test("should return false when deploy fails", async () => {
       const findSpy = spyOn(projectRepository, "findByRef").mockResolvedValue(mockProject);
-      const shellSpy = spyOn(shellService, "execute").mockResolvedValue({
-        success: false,
-        output: "",
-        error: "fail",
-      });
+      const edgeSpy = spyOn(edgeFunctionService, "deploy").mockResolvedValue(false);
 
       const result = await service.deployFunction("test123abc", "my-func", "code");
       expect(result).toBe(false);
 
       findSpy.mockRestore();
-      shellSpy.mockRestore();
+      edgeSpy.mockRestore();
     });
   });
 });

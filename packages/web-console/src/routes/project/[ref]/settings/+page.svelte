@@ -4,13 +4,20 @@
   import { onMount } from "svelte";
   import { page } from "$app/state";
   import { t } from "svelte-i18n";
-  import { Loader2, Activity, Server, Pause, RotateCw, Trash2, AlertTriangle } from "lucide-svelte";
+  import { Loader2, Activity, Server, Pause, RotateCw, Trash2, AlertTriangle, Globe, CheckCircle2, XCircle } from "lucide-svelte";
   import { toast } from "svelte-sonner";
 
   let project = $state<Record<string, unknown> | null>(null);
   let isLoading = $state(true);
   let actionInProgress = $state<string | null>(null);
   let actionMsg = $state<string | null>(null);
+
+  // Custom domain state
+  let domainHostname = $state("");
+  let domainStatus = $state("not_configured");
+  let domainLoading = $state(false);
+  let newDomain = $state("");
+  let domainError = $state<string | null>(null);
 
   const projectRef = $derived(page.params.ref);
 
@@ -97,7 +104,62 @@
 
   onMount(() => {
     fetchProject();
+    fetchDomain();
   });
+
+  // --- Custom Domain ---
+  async function fetchDomain() {
+    try {
+      const res = await apiClient(`/v1/projects/${projectRef}/custom-hostname`);
+      if (res.ok) {
+        const data = await res.json();
+        domainHostname = data.custom_hostname || "";
+        domainStatus = data.status || "not_configured";
+      }
+    } catch {}
+  }
+
+  async function addDomain() {
+    if (!newDomain.trim()) return;
+    domainLoading = true;
+    domainError = null;
+    try {
+      const res = await apiClient(`/v1/projects/${projectRef}/custom-hostname`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ custom_hostname: newDomain.trim() })
+      });
+      if (res.ok) {
+        domainHostname = newDomain.trim();
+        domainStatus = "active";
+        newDomain = "";
+        toast.success("Custom domain added successfully");
+        await fetchProject();
+      } else {
+        const err = await res.json();
+        domainError = err.error || "Failed to add domain";
+      }
+    } catch (e: unknown) {
+      domainError = "Network error";
+    } finally {
+      domainLoading = false;
+    }
+  }
+
+  async function removeDomain() {
+    if (!confirm(`Remove custom domain "${domainHostname}"?`)) return;
+    domainLoading = true;
+    try {
+      const res = await apiClient(`/v1/projects/${projectRef}/custom-hostname`, { method: "DELETE" });
+      if (res.ok) {
+        domainHostname = "";
+        domainStatus = "not_configured";
+        toast.success("Custom domain removed");
+        await fetchProject();
+      }
+    } catch {}
+    domainLoading = false;
+  }
 </script>
 
 <div class="flex flex-col space-y-6">
@@ -135,6 +197,116 @@
             <span class="px-2 py-0.5 {project.status === 'active' ? 'bg-green-500/10 text-green-600' : 'bg-amber-500/10 text-amber-600'} text-xs rounded-full">{project.status}</span>
           </div>
         </div>
+      </div>
+
+      <!-- API & Access URLs -->
+      <div class="border rounded-xl bg-card p-6 space-y-4">
+        <h2 class="text-lg font-semibold">API 地址</h2>
+        <div class="space-y-3 text-sm">
+          {#if (project as Record<string, unknown>)?.config}
+            {@const config = (project as Record<string, unknown>).config as Record<string, unknown>}
+            {#if config?.custom_domain}
+              <div>
+                <span class="text-xs text-muted-foreground">自定义域名 (Custom Domain)</span>
+                <p class="font-mono text-xs bg-muted/50 rounded px-3 py-2 mt-1 select-all">{config.custom_domain}</p>
+              </div>
+            {/if}
+            <div>
+              <span class="text-xs text-muted-foreground">API URL</span>
+              <p class="font-mono text-xs bg-muted/50 rounded px-3 py-2 mt-1 select-all">{config?.custom_domain ? `https://${config.custom_domain}` : `http://82.157.196.165:8000`}</p>
+            </div>
+            {#if config?.postgrest_port}
+              <div>
+                <span class="text-xs text-muted-foreground">PostgREST Port</span>
+                <p class="font-mono text-xs">{config.postgrest_port}</p>
+              </div>
+            {/if}
+            {#if config?.gotrue_port}
+              <div>
+                <span class="text-xs text-muted-foreground">GoTrue Port</span>
+                <p class="font-mono text-xs">{config.gotrue_port}</p>
+              </div>
+            {/if}
+          {:else}
+            <div>
+              <span class="text-xs text-muted-foreground">API URL</span>
+              <p class="font-mono text-xs bg-muted/50 rounded px-3 py-2 mt-1 select-all">http://82.157.196.165:8000</p>
+            </div>
+          {/if}
+          <div>
+            <span class="text-xs text-muted-foreground">Studio URL</span>
+            <p class="font-mono text-xs bg-muted/50 rounded px-3 py-2 mt-1 select-all">{`${typeof window !== 'undefined' ? window.location.origin : ''}/project/${projectRef}`}</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Custom Domain -->
+      <div class="border rounded-xl bg-card p-6 space-y-4">
+        <div class="flex items-center justify-between">
+          <h2 class="text-lg font-semibold flex items-center gap-2">
+            <Globe size={16} />
+            Custom Domain
+          </h2>
+          {#if domainHostname}
+            <span class="text-[10px] px-2.5 py-1 rounded-full bg-green-500/10 text-green-600 font-semibold flex items-center gap-1">
+              <CheckCircle2 size={10} /> Active
+            </span>
+          {/if}
+        </div>
+
+        {#if domainHostname}
+          <!-- Current domain -->
+          <div class="rounded-lg border bg-background p-4 space-y-3">
+            <div>
+              <span class="text-xs text-muted-foreground">Current Domain</span>
+              <p class="font-mono text-sm font-semibold mt-1">{domainHostname}</p>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+              <div class="rounded-lg bg-muted/30 p-3">
+                <span class="text-muted-foreground">API Endpoint</span>
+                <p class="font-mono mt-1 select-all">https://{domainHostname}</p>
+              </div>
+              <div class="rounded-lg bg-muted/30 p-3">
+                <span class="text-muted-foreground">Auth Endpoint</span>
+                <p class="font-mono mt-1 select-all">https://{domainHostname}/auth/v1</p>
+              </div>
+            </div>
+            <div class="pt-2 border-t">
+              <button onclick={removeDomain} disabled={domainLoading}
+                class="text-xs text-destructive hover:text-destructive/80 font-medium transition-colors disabled:opacity-50">
+                {#if domainLoading}<Loader2 size={12} class="animate-spin inline mr-1" />{/if}
+                Remove Domain
+              </button>
+            </div>
+          </div>
+
+          <!-- DNS Instructions -->
+          <div class="rounded-lg border border-amber-500/20 bg-amber-500/5 p-4 space-y-2">
+            <h3 class="text-xs font-semibold text-amber-700">DNS Configuration Required</h3>
+            <p class="text-[10px] text-muted-foreground">Add the following DNS records to your domain registrar:</p>
+            <div class="font-mono text-[11px] bg-background rounded p-3 space-y-1 select-all">
+              <div>A&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;{domainHostname}&nbsp;&nbsp;→&nbsp;&nbsp;82.157.196.165</div>
+            </div>
+          </div>
+        {:else}
+          <!-- Add domain form -->
+          <div class="space-y-3">
+            <p class="text-xs text-muted-foreground">Bind a custom domain for your project API. SSL certificates will be automatically provisioned via ACME.</p>
+            <div class="flex gap-2">
+              <input type="text" bind:value={newDomain} placeholder="e.g. api.example.com"
+                class="flex-1 px-3 py-2 text-sm rounded-lg border bg-background focus:outline-none focus:ring-2 focus:ring-brand/50 font-mono"
+                onkeydown={(e: KeyboardEvent) => e.key === 'Enter' && addDomain()} />
+              <button onclick={addDomain} disabled={domainLoading || !newDomain.trim()}
+                class="px-4 py-2 text-sm font-semibold rounded-lg bg-brand text-white hover:bg-brand/90 transition-colors disabled:opacity-50 flex items-center gap-2">
+                {#if domainLoading}<Loader2 size={14} class="animate-spin" />{/if}
+                Add Domain
+              </button>
+            </div>
+            {#if domainError}
+              <p class="text-xs text-destructive flex items-center gap-1"><XCircle size={12} /> {domainError}</p>
+            {/if}
+          </div>
+        {/if}
       </div>
 
       <!-- Services -->
