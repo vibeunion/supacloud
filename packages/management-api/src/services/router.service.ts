@@ -13,6 +13,7 @@ export class RouterService {
   private readonly KONG_INTERNAL = process.env.KONG_INTERNAL || "127.0.0.1:8000";
   private readonly STUDIO_INTERNAL = process.env.STUDIO_INTERNAL || "127.0.0.1:3000";
   private readonly MANAGEMENT_API_INTERNAL = process.env.MANAGEMENT_API_INTERNAL || "127.0.0.1:9090";
+  private readonly EDGE_RUNTIME_INTERNAL = process.env.EDGE_RUNTIME_INTERNAL || "127.0.0.1:9000";
   private readonly BASE_DOMAIN = process.env.BASE_DOMAIN || "localhost";
   private readonly ENABLE_SSL = process.env.ENABLE_SSL === "true";
   private readonly ACME_CLIENT = process.env.ACME_CLIENT || "le";
@@ -63,6 +64,17 @@ server {
     ssl_certificate_key $acme_cert_key_${acmeClient};
 
     add_header x-project-ref ${projectRef} always;
+
+    # Edge Functions — direct to edge-runtime (bypass Kong for lower latency)
+    location /functions/v1/ {
+        proxy_pass http://${this.EDGE_RUNTIME_INTERNAL};
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Project-Ref ${projectRef};
+    }
 
     # Storage render endpoint (cache disabled - requires proxy_cache_path pre-configuration)
     location ^~ /storage/v1/render/ {
@@ -145,6 +157,17 @@ server {
     server_name ${apiDomain};
 
     add_header x-project-ref ${projectRef} always;
+
+    # Edge Functions — direct to edge-runtime (bypass Kong for lower latency)
+    location /functions/v1/ {
+        proxy_pass http://${this.EDGE_RUNTIME_INTERNAL};
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Project-Ref ${projectRef};
+    }
 
     # Storage render endpoint (cache disabled - requires proxy_cache_path pre-configuration)
     location ^~ /storage/v1/render/ {
@@ -281,6 +304,17 @@ server {
     ssl_certificate $acme_cert_${acmeClient};
     ssl_certificate_key $acme_cert_key_${acmeClient};
 
+    # Edge Functions — direct to edge-runtime
+    location /functions/v1/ {
+        proxy_pass http://${this.EDGE_RUNTIME_INTERNAL};
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Project-Ref ${projectRef};
+    }
+
     # Storage render endpoint (cache disabled)
     location ^~ /storage/v1/render/ {
         proxy_pass http://${kong};
@@ -303,6 +337,17 @@ server {
         config = `server {
     listen 80;
     server_name ${domain};
+
+    # Edge Functions — direct to edge-runtime
+    location /functions/v1/ {
+        proxy_pass http://${this.EDGE_RUNTIME_INTERNAL};
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Project-Ref ${projectRef};
+    }
 
     # Storage render endpoint (cache disabled)
     location ^~ /storage/v1/render/ {
