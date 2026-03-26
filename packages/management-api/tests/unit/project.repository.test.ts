@@ -25,7 +25,7 @@ const mockProject = {
 
 // Mock the SQL module
 const mockSql: unknown = mock(() => Promise.resolve([mockProject]));
-mockSql.unsafe = mock(() => Promise.resolve([mockProject]));
+(mockSql as Record<string, unknown>).unsafe = mock(() => Promise.resolve([mockProject]));
 
 mock.module("../../src/db", () => ({
   sql: mockSql,
@@ -35,63 +35,60 @@ mock.module("../../src/utils/retry", () => ({
   withRetry: (_name: string, fn: Function) => fn(),
 }));
 
-// Import after mocking
-import { ProjectRepository } from "../../src/repositories/project.repository";
+// Import the object after mocking
+import { projectRepository } from "../../src/repositories/project.repository";
 
 describe("ProjectRepository", () => {
-  let repository: ProjectRepository;
-
   beforeEach(() => {
-    repository = new ProjectRepository();
-    mockSql.mockClear();
-    mockSql.unsafe.mockClear();
+    (mockSql as ReturnType<typeof mock>).mockClear();
+    ((mockSql as Record<string, unknown>).unsafe as ReturnType<typeof mock>).mockClear();
   });
 
   describe("findAll", () => {
     test("should return all non-deleted projects", async () => {
-      mockSql.mockResolvedValueOnce([mockProject]);
-      const projects = await repository.findAll();
+      (mockSql as ReturnType<typeof mock>).mockResolvedValueOnce([mockProject]);
+      const projects = await projectRepository.findAll();
       expect(Array.isArray(projects)).toBe(true);
     });
 
     test("should return empty array when no projects", async () => {
-      mockSql.mockResolvedValueOnce([]);
-      const projects = await repository.findAll();
+      (mockSql as ReturnType<typeof mock>).mockResolvedValueOnce([]);
+      const projects = await projectRepository.findAll();
       expect(projects).toEqual([]);
     });
   });
 
   describe("findByRef", () => {
     test("should return project when found", async () => {
-      mockSql.mockResolvedValueOnce([mockProject]);
-      const project = await repository.findByRef("test123");
+      (mockSql as ReturnType<typeof mock>).mockResolvedValueOnce([mockProject]);
+      const project = await projectRepository.findByRef("test123");
       expect(project).toBeDefined();
     });
 
     test("should return null when not found", async () => {
-      mockSql.mockResolvedValueOnce([]);
-      const project = await repository.findByRef("nonexistent");
+      (mockSql as ReturnType<typeof mock>).mockResolvedValueOnce([]);
+      const project = await projectRepository.findByRef("nonexistent");
       expect(project).toBeNull();
     });
   });
 
   describe("findById", () => {
     test("should return project when found", async () => {
-      mockSql.mockResolvedValueOnce([mockProject]);
-      const project = await repository.findById("uuid-test123");
+      (mockSql as ReturnType<typeof mock>).mockResolvedValueOnce([mockProject]);
+      const project = await projectRepository.findById("uuid-test123");
       expect(project).toBeDefined();
     });
 
     test("should return null when not found", async () => {
-      mockSql.mockResolvedValueOnce([]);
-      const project = await repository.findById("nonexistent-uuid");
+      (mockSql as ReturnType<typeof mock>).mockResolvedValueOnce([]);
+      const project = await projectRepository.findById("nonexistent-uuid");
       expect(project).toBeNull();
     });
   });
 
   describe("create", () => {
     test("should create and return project", async () => {
-      mockSql.mockResolvedValueOnce([mockProject]);
+      (mockSql as ReturnType<typeof mock>).mockResolvedValueOnce([mockProject]);
       const input = {
         ref: "newproj",
         name: "New Project",
@@ -104,12 +101,12 @@ describe("ProjectRepository", () => {
         s3_bucket: "supa-newproj",
         region: "local",
       };
-      const project = await repository.create(input);
+      const project = await projectRepository.create(input);
       expect(project).toBeDefined();
     });
 
     test("should handle optional s3 keys", async () => {
-      mockSql.mockResolvedValueOnce([mockProject]);
+      (mockSql as ReturnType<typeof mock>).mockResolvedValueOnce([mockProject]);
       const input = {
         ref: "newproj",
         name: "New Project",
@@ -123,12 +120,12 @@ describe("ProjectRepository", () => {
         s3_access_key: "access",
         s3_secret_key: "secret",
       };
-      const project = await repository.create(input);
+      const project = await projectRepository.create(input);
       expect(project).toBeDefined();
     });
 
     test("should handle config option", async () => {
-      mockSql.mockResolvedValueOnce([mockProject]);
+      (mockSql as ReturnType<typeof mock>).mockResolvedValueOnce([mockProject]);
       const input = {
         ref: "newproj",
         name: "New Project",
@@ -141,7 +138,7 @@ describe("ProjectRepository", () => {
         s3_bucket: "supa-newproj",
         config: { custom: "value" },
       };
-      const project = await repository.create(input);
+      const project = await projectRepository.create(input);
       expect(project).toBeDefined();
     });
   });
@@ -149,14 +146,14 @@ describe("ProjectRepository", () => {
   describe("updateStatus", () => {
     test("should update and return project", async () => {
       const updatedProject = { ...mockProject, status: "paused" as const };
-      mockSql.mockResolvedValueOnce([updatedProject]);
-      const project = await repository.updateStatus("test123", "paused");
+      (mockSql as ReturnType<typeof mock>).mockResolvedValueOnce([updatedProject]);
+      const project = await projectRepository.updateStatus("test123", "paused");
       expect(project).toBeDefined();
     });
 
     test("should return null when project not found", async () => {
-      mockSql.mockResolvedValueOnce([]);
-      const project = await repository.updateStatus("nonexistent", "paused");
+      (mockSql as ReturnType<typeof mock>).mockResolvedValueOnce([]);
+      const project = await projectRepository.updateStatus("nonexistent", "paused");
       expect(project).toBeNull();
     });
   });
@@ -164,14 +161,14 @@ describe("ProjectRepository", () => {
   describe("updateConfig", () => {
     test("should update and return project", async () => {
       const updatedProject = { ...mockProject, config: { key: "value" } };
-      mockSql.mockResolvedValueOnce([updatedProject]);
-      const project = await repository.updateConfig("test123", { key: "value" });
+      (mockSql as ReturnType<typeof mock>).mockResolvedValueOnce([updatedProject]);
+      const project = await projectRepository.updateConfig("test123", { key: "value" });
       expect(project).toBeDefined();
     });
 
     test("should return null when project not found", async () => {
-      mockSql.mockResolvedValueOnce([]);
-      const project = await repository.updateConfig("nonexistent", { key: "value" });
+      (mockSql as ReturnType<typeof mock>).mockResolvedValueOnce([]);
+      const project = await projectRepository.updateConfig("nonexistent", { key: "value" });
       expect(project).toBeNull();
     });
   });
@@ -179,28 +176,28 @@ describe("ProjectRepository", () => {
   describe("softDelete", () => {
     test("should soft delete and return project", async () => {
       const deletedProject = { ...mockProject, status: "deleted" as const, deleted_at: new Date() };
-      mockSql.mockResolvedValueOnce([deletedProject]);
-      const project = await repository.softDelete("test123");
+      (mockSql as ReturnType<typeof mock>).mockResolvedValueOnce([deletedProject]);
+      const project = await projectRepository.softDelete("test123");
       expect(project).toBeDefined();
     });
 
     test("should return null when project not found", async () => {
-      mockSql.mockResolvedValueOnce([]);
-      const project = await repository.softDelete("nonexistent");
+      (mockSql as ReturnType<typeof mock>).mockResolvedValueOnce([]);
+      const project = await projectRepository.softDelete("nonexistent");
       expect(project).toBeNull();
     });
   });
 
   describe("existsByRef", () => {
     test("should return true when ref exists", async () => {
-      mockSql.mockResolvedValueOnce([{ "?column?": 1 }]);
-      const exists = await repository.existsByRef("test123");
+      (mockSql as ReturnType<typeof mock>).mockResolvedValueOnce([{ "?column?": 1 }]);
+      const exists = await projectRepository.existsByRef("test123");
       expect(exists).toBe(true);
     });
 
     test("should return false when ref does not exist", async () => {
-      mockSql.mockResolvedValueOnce([]);
-      const exists = await repository.existsByRef("nonexistent");
+      (mockSql as ReturnType<typeof mock>).mockResolvedValueOnce([]);
+      const exists = await projectRepository.existsByRef("nonexistent");
       expect(exists).toBe(false);
     });
   });

@@ -7,7 +7,7 @@
   import {
     Loader2, Database, Users, HardDrive, Zap, Activity, Server,
     ArrowRight, BarChart3, Shield, Code2, Radio, ScrollText, Folder,
-    RefreshCw, CheckCircle2, XCircle, Clock, FileText, Terminal
+    RefreshCw, CheckCircle2, XCircle, MinusCircle, Clock, FileText, Terminal
   } from "lucide-svelte";
 
   interface ServiceInfo {
@@ -115,13 +115,14 @@
   ]);
 
   function getStatusColor(status: string): string {
-    if (status === "RUNNING" || status === "running" || status === "active") return "text-green-600";
-    if (status === "INACTIVE" || status === "inactive" || status === "dead") return "text-muted-foreground";
+    if (status === "RUNNING" || status === "running" || status === "active" || status === "ACTIVE_HEALTHY") return "text-green-600";
+    if (status === "INACTIVE" || status === "inactive" || status === "dead") return "text-muted-foreground/50";
     return "text-amber-600";
   }
 
   function getStatusIcon(status: string) {
-    if (status === "RUNNING" || status === "running" || status === "active") return CheckCircle2;
+    if (status === "RUNNING" || status === "running" || status === "active" || status === "ACTIVE_HEALTHY") return CheckCircle2;
+    if (status === "INACTIVE" || status === "inactive" || status === "dead") return MinusCircle;
     return XCircle;
   }
 </script>

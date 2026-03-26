@@ -2,6 +2,7 @@ import { parentPort } from "worker_threads";
 import "./port-guard";
 import "./url-import-plugin";
 import "./deno-compat";
+import { autoInstallDeps } from "./auto-deps";
 
 interface CachedModule {
   mod: { default: unknown };
@@ -10,6 +11,22 @@ interface CachedModule {
 
 const moduleCache = new Map<string, CachedModule>();
 const MAX_CACHED = 20;
+
+/** Try to import a function module; on missing-dep errors, auto-install and retry once */
+async function loadModule(functionPath: string): Promise<{ default: unknown }> {
+  try {
+    return await import(functionPath);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg.includes("Cannot find module") || msg.includes("Could not resolve")) {
+      console.log(`[Worker] Module load failed, attempting auto-install for ${functionPath}`);
+      await autoInstallDeps(functionPath);
+      // Retry after auto-install (clear Bun's internal module cache for this path)
+      return await import(functionPath);
+    }
+    throw err;
+  }
+}
 
 parentPort?.on("message", async (msg) => {
   try {
@@ -24,7 +41,7 @@ parentPort?.on("message", async (msg) => {
     // Load module (LRU cache)
     let cached = moduleCache.get(functionId);
     if (!cached) {
-      const mod = await import(functionPath);
+      const mod = await loadModule(functionPath);
       cached = { mod, lastUsed: Date.now() };
       moduleCache.set(functionId, cached);
       if (moduleCache.size > MAX_CACHED) {
