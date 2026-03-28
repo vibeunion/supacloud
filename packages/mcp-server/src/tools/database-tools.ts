@@ -390,6 +390,42 @@ export function registerDatabaseTools(
 
     if (!readOnly) {
         server.tool(
+            "create_table_with_rls",
+            "Create a secure table by automatically enabling Row Level Security (RLS) and adding a default permissive policy for authenticated users. Always prefer this over raw CREATE TABLE.",
+            {
+                ref: projectRef ? z.never().optional() : z.string().describe("Project ref"),
+                schema: z.string().default("public").describe("Schema name (default: public)"),
+                table: z.string().describe("Table name (e.g. 'posts')"),
+                columns: z.string().describe("Column definitions (e.g. 'id uuid primary key default uuid_generate_v4(), title text not null')"),
+            },
+            async (args) => {
+                const ref = projectRef || (args as { ref?: string }).ref;
+                const { schema, table, columns } = args as { schema: string; table: string; columns: string };
+
+                const sql = `
+                    BEGIN;
+                    CREATE TABLE IF NOT EXISTS "${schema}"."${table}" (
+                        ${columns}
+                    );
+                    ALTER TABLE "${schema}"."${table}" ENABLE ROW LEVEL SECURITY;
+                    CREATE POLICY "Enable ALL for authenticated users only" ON "${schema}"."${table}" 
+                        FOR ALL TO authenticated USING (true) WITH CHECK (true);
+                    COMMIT;
+                `;
+
+                const res = await http.post(`/v1/projects/${ref}/database/sql`, { sql });
+                return {
+                    content: [{
+                        type: "text",
+                        text: res.ok
+                            ? `✅ Secure table '${schema}.${table}' created successfully with RLS enabled.`
+                            : `❌ Failed to create table (${res.status}): ${JSON.stringify(res.data)}`,
+                    }],
+                };
+            }
+        );
+
+        server.tool(
             "apply_migration",
             "Apply a SQL migration to project database (DDL operations)",
             {

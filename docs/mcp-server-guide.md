@@ -94,6 +94,27 @@ You can directly make the following requests in the AI chat box, and AI will aut
 > 
 > **AI**: (Calls `update_auth_config`) -> Updates corresponding parameters.
 
+### Scenario 4: Fast Schema Design with RLS (Using Composite Tools)
+> **You**: "Create a table for user profiles in the `app-prod` project, make sure it is secure."
+>
+> **AI**: (Calls `create_table_with_rls` instead of `execute_sql`) -> Seamlessly executes `CREATE TABLE` and `ALTER TABLE ENABLE ROW LEVEL SECURITY` along with default permissive policies in a single operation.
+
+---
+
+## 3. Advanced MCP Native Features: Prompts & Resources
+
+In modern AI assistants like Cursor and Claude Desktop, SupaCloud MCP provides deep IDE integration via Prompts and Resources.
+
+### 3.1 Prompt Templates
+You don't need to manually tell AI how to analyze your database. In your AI chat interface, click the **Prompts (Slash Menu)** to invoke these pre-loaded contexts:
+- **`analyze_database_performance`**: Instantly instructs the AI to pull `get_database_stats` and `get_database_connections` and act as an expert DBA to hunt down slow queries, index bloating, and connection leaks for a specific project.
+- **`design_tenant_schema`**: Prompts the AI to act as a Supabase Database Architect for a specific business domain. It's programmed to automatically cross-check existing schemas and *always* enforce UUID and RLS when generating new schemas.
+
+### 3.2 Live Database Resources (Schema Files)
+Instead of forcing the LLM to waste tokens sequentially searching tables via tools, the MCP server maps live Postgres schemas to virtual "files" that you or the AI can read instantly.
+- **Resource URI Syntax**: `pg://{project_ref}/schema/{schema_name}` 
+- **Example**: Mentally typing or explicitly attaching `pg://app-prod/schema/public` will automatically resolve into a dense Markdown documentation snapshot of every table and column in your public schema. The AI reads this instantly without burning API calls.
+
 ---
 
 ## 3. Installation and Operations Troubleshooting
