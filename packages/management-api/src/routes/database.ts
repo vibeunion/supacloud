@@ -3,6 +3,62 @@ import { projectService } from "../services";
 import { db } from "../db";
 
 export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" })
+    .get(
+        "/tables",
+        async ({ params, query, set }) => {
+            const project = await projectService.getProject(params.ref);
+            if (!project) {
+                set.status = 404;
+                return { error: "Project not found" };
+            }
+
+            try {
+                const dbName = `supa_${params.ref}`;
+                const skip = Number(query.skip || 0);
+                const limit = Number(query.limit || 50);
+                const search = query.query ? String(query.query) : "";
+                
+                let whereClause = "WHERE table_schema = 'public' AND table_type = 'BASE TABLE'";
+                if (search) {
+                    // Quick safe sanitization for table names
+                    const safeSearch = search.replace(/'/g, "''");
+                    whereClause += ` AND table_name ILIKE '%${safeSearch}%'`;
+                }
+
+                const sql = `
+                    SELECT table_name, table_schema, table_type,
+                    (SELECT reltuples::bigint FROM pg_class WHERE oid = ('"'||table_schema||'"."'||table_name||'"')::regclass) as row_estimate
+                    FROM information_schema.tables
+                    ${whereClause}
+                    ORDER BY table_name;
+                `;
+
+                const result = await db.executeQuery(dbName, sql);
+                const allTables = (result as any).rows || [];
+
+                return {
+                    data: allTables.slice(skip, skip + limit),
+                    total: allTables.length
+                };
+            } catch (error: unknown) {
+                set.status = 500;
+                return {
+                    error: "Failed to list tables",
+                    message: error instanceof Error ? error.message : "Unknown error",
+                };
+            }
+        },
+        {
+            params: t.Object({
+                ref: t.String({ minLength: 1 }),
+            }),
+            query: t.Object({
+                skip: t.Optional(t.String()),
+                limit: t.Optional(t.String()),
+                query: t.Optional(t.String()),
+            })
+        }
+    )
     .post(
         "/sql",
         async ({ params, body, set }) => {
