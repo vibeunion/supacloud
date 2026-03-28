@@ -6,8 +6,9 @@
   import { t } from "svelte-i18n";
   import { Loader2, Zap, Trash2, KeyRound, Clock, Plus, X, Upload, Code2 } from "lucide-svelte";
   import { toast } from "svelte-sonner";
+  import { useList, type BaseRecord } from "@svadmin/core";
 
-  interface EdgeFunction {
+  interface EdgeFunction extends BaseRecord {
     id: string;
     slug: string;
     name: string;
@@ -15,8 +16,9 @@
     created_at: string;
   }
 
-  let functions = $state<EdgeFunction[]>([]);
-  let isLoading = $state(true);
+  const projectRef = $derived(page.params.ref);
+  const { query } = useList<EdgeFunction>({ get resource() { return `v1/projects/${projectRef}/functions`; } });
+  const functions = $derived(Array.isArray(query.data?.data) ? query.data.data : ((query.data?.data as unknown as Record<string, unknown>)?.functions as EdgeFunction[] || []));
   let showCreate = $state(false);
   let newSlug = $state("");
   let newCode = $state(`import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
@@ -35,21 +37,7 @@ serve(async (req) => {
   let deploying = $state(false);
   let deployMsg = $state<string | null>(null);
 
-  const projectRef = $derived(page.params.ref);
 
-  async function fetchFunctions() {
-    isLoading = true;
-    try {
-      const res = await apiClient(`/v1/projects/${projectRef}/functions`);
-      if (res.ok) {
-        functions = await res.json();
-      }
-    } catch (err: unknown) {
-      toast.error("无法fetch functions");
-    } finally {
-      isLoading = false;
-    }
-  }
 
   async function deployFunction() {
     if (!newSlug.trim()) {
@@ -68,7 +56,7 @@ serve(async (req) => {
         deployMsg = `✅ 函数 "${newSlug}" 部署成功`;
         showCreate = false;
         newSlug = "";
-        await fetchFunctions();
+        query.refetch();
       } else {
         const err = await res.json();
         deployMsg = `❌ 部署失败: ${err.error || res.statusText}`;
@@ -87,13 +75,13 @@ serve(async (req) => {
       await apiClient(`/v1/projects/${projectRef}/functions/${slug}`, { method: "DELETE" });
       deployMsg = `函数 "${slug}" 已删除`;
       setTimeout(() => deployMsg = null, 3000);
-      await fetchFunctions();
+      query.refetch();
     } catch (err: unknown) {
       toast.error("无法delete function");
     }
   }
 
-  onMount(() => { fetchFunctions(); });
+
 </script>
 
 <div class="h-full flex flex-col space-y-4">
@@ -147,7 +135,7 @@ serve(async (req) => {
   {/if}
 
   <div class="flex-1 rounded-xl border border-border/50 bg-background shadow-sm overflow-hidden">
-    {#if isLoading}
+    {#if query.isLoading}
       <div class="flex flex-col items-center justify-center py-24 text-muted-foreground gap-3">
         <Loader2 size={32} class="animate-spin text-brand opacity-50" />
         <p class="text-xs font-mono uppercase tracking-widest">正在查询 Edge Functions...</p>
