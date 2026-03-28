@@ -39,8 +39,9 @@
  * - SUPACLOUD_READ_ONLY:    Enable read-only mode (optional, default false)
  */
 
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { z } from "zod";
 import { SshTransport } from "./transports/ssh";
 import { HttpTransport } from "./transports/http";
 import { registerSshTools } from "./tools/ssh-tools";
@@ -97,6 +98,103 @@ if (API_URL) {
         projectRef: PROJECT_REF || undefined,
         readOnly: READ_ONLY,
     });
+
+    // ── Register MCP Prompts ──
+    server.prompt(
+        "analyze_database_performance",
+        "Analyze database performance (size, connections, slow queries)",
+        {
+            ref: z.string().describe("Project ref to analyze")
+        },
+        (args: any) => ({
+            messages: [
+                {
+                    role: "user",
+                    content: {
+                        type: "text",
+                        text: `Please analyze the database performance for project '${args.ref}'. Start by using 'get_database_stats' and 'get_database_connections' to gather metrics, then provide recommendations on missing indexes, connection bloat, or table sizing optimization.`
+                    }
+                }
+            ]
+        })
+    );
+
+    server.prompt(
+        "design_tenant_schema",
+        "Help design a database schema following best practices and RLS",
+        {
+            ref: z.string().describe("Project ref to work on"),
+            domain: z.string().describe("Business domain to model (e.g., 'e-commerce store', 'SaaS platform')")
+        },
+        (args: any) => ({
+            messages: [
+                {
+                    role: "user",
+                    content: {
+                        type: "text",
+                        text: `I want to design a database schema for a '${args.domain}' workload on Supabase. I am working on project '${args.ref}'. Please start by querying 'list_tables' to see what already exists. Then propose the SQL for new tables, ensuring every table has ROW LEVEL SECURITY enabled, uses UUID primary keys, and has an 'updated_at' trigger. Whenever you actually create tables, prefer using the 'create_table_with_rls' tool.`
+                    }
+                }
+            ]
+        })
+    );
+
+    // ── Register MCP Resources ──
+    // Expose database schemas as real-time readable resources (e.g. pg://test/schema/public)
+    server.resource(
+        "database-schema",
+        new ResourceTemplate("pg://{ref}/schema/{schema}", { list: undefined }),
+        async (uri: any, { ref, schema }: { ref?: string; schema?: string }) => {
+            if (typeof ref !== 'string' || typeof schema !== 'string') {
+                throw new Error("Missing ref or schema in resource URI");
+            }
+            if (PROJECT_REF && PROJECT_REF !== ref) {
+                throw new Error(`Unauthorized: Server is scoped to project ${PROJECT_REF}`);
+            }
+            
+            const sqlCols = `
+                SELECT table_name, column_name, data_type, is_nullable, column_default 
+                FROM information_schema.columns 
+                WHERE table_schema = '${schema.replace(/'/g, "''")}';
+            `;
+            const colRes = await http.post(`/v1/projects/${ref}/database/sql`, { sql: sqlCols });
+            
+            let markdown = `# Database Schema: ${schema}\\n\\n`;
+            if (colRes.ok && typeof colRes.data === 'object' && colRes.data && 'rows' in colRes.data) {
+                const cols = (colRes.data as { rows: any[] }).rows || [];
+                const grouped: Record<string, any[]> = {};
+                for (const c of cols) {
+                    if (!grouped[c.table_name]) grouped[c.table_name] = [];
+                    grouped[c.table_name].push(c);
+                }
+                
+                for (const [tname, tcols] of Object.entries(grouped)) {
+                    markdown += `## Table: \`${tname}\`\\n`;
+                    for (const c of tcols) {
+                        const nullFlag = c.is_nullable === 'YES' ? 'NULL' : 'NOT NULL';
+                        const defFlag = c.column_default ? ` DEFAULT ${c.column_default}` : '';
+                        markdown += `- \`${c.column_name}\`: \`${c.data_type}\` ${nullFlag}${defFlag}\\n`;
+                    }
+                    markdown += `\\n`;
+                }
+                if (Object.keys(grouped).length === 0) {
+                     markdown += `*No tables found in schema '${schema}'.*`;
+                }
+            } else {
+                markdown += `*Error or no tables found: ${JSON.stringify(colRes.data)}*`;
+            }
+
+            return {
+                contents: [
+                    {
+                        uri: uri.href,
+                        text: markdown,
+                        mimeType: "text/markdown"
+                    }
+                ]
+            };
+        }
+    );
 
     // Auth provider management tools
     registerAuthTools(server, http);
