@@ -6,36 +6,23 @@
   import { t } from "svelte-i18n";
   import { Loader2, Plus, KeyRound, Trash2, Eye, EyeOff, AlertTriangle, Lock } from "lucide-svelte";
   import { toast } from "svelte-sonner";
+  import { useList, type BaseRecord } from "@svadmin/core";
 
-  interface Secret {
+  interface Secret extends BaseRecord {
     name: string;
     created_at: string;
     masked_value: string;
   }
 
-  let secrets = $state<Secret[]>([]);
-  let isLoading = $state(true);
+  const projectRef = $derived(page.params.ref);
+  const { query } = useList<Secret>({ get resource() { return `v1/projects/${projectRef}/secrets`; } });
+  const secrets = $derived(Array.isArray(query.data?.data) ? query.data.data : ((query.data?.data as unknown as Record<string, unknown>)?.secrets as Secret[] || []));
+
   let showAdd = $state(false);
   let newKey = $state("");
   let newValue = $state("");
 
-  const projectRef = $derived(page.params.ref);
 
-  async function fetchSecrets() {
-    isLoading = true;
-    try {
-      const res = await apiClient(`/v1/projects/${projectRef}/secrets`);
-      if (res.ok) {
-        secrets = await res.json();
-      }
-    } catch (err: unknown) {
-      toast.error("无法fetch secrets");
-    } finally {
-      isLoading = false;
-    }
-  }
-
-  onMount(() => { fetchSecrets(); });
 
   async function addSecret() {
     if (!newKey.trim() || !newValue.trim()) return;
@@ -48,7 +35,7 @@
       showAdd = false;
       newKey = "";
       newValue = "";
-      await fetchSecrets();
+      await query.refetch();
     } catch (err: unknown) {
       toast.error("无法add secret");
     }
@@ -58,7 +45,7 @@
     if (!confirm(`确定删除 Secret "${name}"？此操作不可恢复。`)) return;
     try {
       await apiClient(`/v1/projects/${projectRef}/secrets/${name}`, { method: "DELETE" });
-      await fetchSecrets();
+      await query.refetch();
     } catch (err: unknown) {
       toast.error("无法delete secret");
     }
@@ -117,7 +104,7 @@
   </div>
 
   <div class="flex-1 rounded-xl border border-border/50 bg-background shadow-sm overflow-hidden">
-    {#if isLoading}
+    {#if query.isLoading}
       <div class="flex flex-col items-center justify-center py-24 text-muted-foreground gap-3">
         <Loader2 size={32} class="animate-spin text-brand opacity-50" />
         <p class="text-xs font-mono uppercase tracking-widest">正在加载 Secrets...</p>
