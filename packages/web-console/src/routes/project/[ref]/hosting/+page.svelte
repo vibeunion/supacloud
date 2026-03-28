@@ -5,8 +5,9 @@
   import { page } from "$app/state";
   import { goto } from "$app/navigation";
   import { Loader2, Globe, ExternalLink, GitBranch, Clock, CheckCircle2, XCircle, RefreshCw, Trash2, Settings, AlertTriangle } from "lucide-svelte";
+  import { useList, type BaseRecord } from "@svadmin/core";
 
-  interface Deployment {
+  interface Deployment extends BaseRecord {
     id: string;
     name: string;
     framework: string;
@@ -20,24 +21,12 @@
     created_at: string;
   }
 
-  let deployments: Deployment[] = $state.raw([]);
-  let isLoading = $state(true);
-  let actionMsg: string | null = $state.raw(null);
-  let deletingId: string | null = $state.raw(null);
-
   const projectRef = $derived(page.params.ref);
+  const { query } = useList<Deployment>({ get resource() { return `v1/projects/${projectRef}/frontend/deployments`; } });
+  const deployments = $derived(Array.isArray(query.data?.data) ? query.data.data : ((query.data?.data as unknown as Record<string, unknown>)?.deployments as Deployment[] || []));
 
-  async function fetchDeployments() {
-    isLoading = true;
-    try {
-      const res = await apiClient(`/v1/projects/${projectRef}/frontend/deployments`);
-      if (res.ok) {
-        const data = await res.json();
-        deployments = data.deployments || [];
-      }
-    } catch {}
-    isLoading = false;
-  }
+  let actionMsg: string | null = $state.raw(null);
+
 
   async function redeploy(id: string) {
     actionMsg = null;
@@ -45,12 +34,14 @@
       const res = await apiClient(`/v1/projects/${projectRef}/frontend/deployments/${id}/redeploy`, { method: "POST" });
       const data = await res.json();
       actionMsg = data.success !== false ? `✅ 重新部署已触发` : `❌ ${data.error || '部署失败'}`;
-      await fetchDeployments();
+      await query.refetch();
     } catch (err: unknown) {
       actionMsg = `❌ ${(err instanceof Error ? err.message : String(err))}`;
     }
     setTimeout(() => actionMsg = null, 5000);
   }
+
+  let deletingId: string | null = $state.raw(null);
 
   async function deleteDeployment(id: string) {
     if (!confirm("确定要删除此部署吗？这将停止服务并删除所有相关文件。")) return;
@@ -58,13 +49,13 @@
     try {
       await apiClient(`/v1/projects/${projectRef}/frontend/deployments/${id}`, { method: "DELETE" });
       actionMsg = "✅ 部署已删除";
-      await fetchDeployments();
+      await query.refetch();
     } catch {}
     deletingId = null;
     setTimeout(() => actionMsg = null, 3000);
   }
 
-  onMount(() => fetchDeployments());
+
 
   function getStatusIcon(status: string): string {
     if (status === "success") return "text-green-600";
@@ -95,7 +86,7 @@
   <div class="flex items-center justify-between">
     <h2 class="text-xl font-bold">站点列表</h2>
     <div class="flex items-center gap-2">
-      <button onclick={() => fetchDeployments()} class="flex items-center gap-2 px-3 py-2 text-xs rounded-lg border hover:bg-muted/50 transition-colors">
+      <button onclick={() => query.refetch()} class="flex items-center gap-2 px-3 py-2 text-xs rounded-lg border hover:bg-muted/50 transition-colors">
         <RefreshCw size={12} /> 刷新
       </button>
       <a href={`/project/${projectRef}/hosting/new`} class="flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg bg-brand text-white hover:bg-brand/90 transition-colors">
@@ -110,7 +101,7 @@
     </div>
   {/if}
 
-  {#if isLoading}
+  {#if query.isLoading}
     <div class="flex items-center justify-center py-24">
       <Loader2 size={24} class="animate-spin text-brand opacity-50" />
     </div>
