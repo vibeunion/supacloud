@@ -17,7 +17,7 @@ try {
 }
 
 import { config } from "./config";
-import { authMiddleware } from "./middleware/auth";
+import { checkAuth } from "./middleware/auth";
 import { closeDb } from "./db";
 import { authRoutes, deployRoutes } from "./routes";
 
@@ -242,7 +242,14 @@ export async function registerAllRoutes() {
   } = await import("./routes");
 
   return new Elysia({ name: "api-routes" })
-    .use(authMiddleware)
+    // Auth guard — runs before every route in this group
+    .onBeforeHandle(({ request, set }) => {
+      const result = checkAuth(request);
+      if (result) {
+        set.status = result.status;
+        return result.body;
+      }
+    })
     .use(projectRoutes)
     .use(organizationRoutes)
     .use(userRoutes)

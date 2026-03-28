@@ -1,33 +1,26 @@
-import { Elysia } from "elysia";
 import { config } from "../config";
 
-// Authentication middleware
-export const authMiddleware = new Elysia({ name: "auth" })
-  .derive(({ headers, set }) => {
-    const authorization = headers.authorization;
+/**
+ * Validate the Authorization header. Returns error response body if invalid,
+ * or undefined if the request is authorized.
+ */
+export function checkAuth(request: Request): { status: number; body: { error: string } } | undefined {
+  const authorization = request.headers.get("authorization");
 
-    if (!authorization) {
-      set.status = 401;
-      return { authorized: false, error: "Missing Authorization header" };
-    }
+  if (!authorization) {
+    return { status: 401, body: { error: "Missing Authorization header" } };
+  }
 
-    if (!authorization.startsWith("Bearer ")) {
-      set.status = 401;
-      return { authorized: false, error: "Invalid Authorization format" };
-    }
+  if (!authorization.startsWith("Bearer ")) {
+    return { status: 401, body: { error: "Invalid Authorization format" } };
+  }
 
-    const token = authorization.slice(7);
+  const token = authorization.slice(7);
 
-    if (token !== config.masterToken) {
-      set.status = 403;
-      return { authorized: false, error: "Invalid token" };
-    }
+  if (token !== config.masterToken) {
+    return { status: 403, body: { error: "Invalid token" } };
+  }
 
-    return { authorized: true, error: null };
-  })
-  .onBeforeHandle(({ authorized, error, set }) => {
-    if (!authorized) {
-      set.status = set.status || 401;
-      return { error: error || "Unauthorized" };
-    }
-  });
+  // Token valid
+  return undefined;
+}

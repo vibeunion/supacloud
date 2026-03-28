@@ -133,3 +133,6 @@ wechat_login_patch_local.ts
 .agents/
 
 progress.md
+
+servers.local.md
+.mailbox/
