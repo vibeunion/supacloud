@@ -6,6 +6,54 @@ import { projectService } from "../services";
  * User Management routes — Admin API proxy to GoTrue
  */
 export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
+  .get(
+    "/users",
+    async ({ params, query, set }) => {
+      const project = await projectService.getProject(params.ref);
+      if (!project || !project.jwt_secret) {
+        return status(404, { error: "Project or JWT secret not found" });
+      }
+
+      const { jwtService } = await import("../services/jwt.service");
+      const serviceRoleKey = await jwtService.generateServiceRoleKey(project.jwt_secret);
+      const apiUrl = project.api?.url || `https://${params.ref}.supabase.co`;
+
+      // Pass along pagination
+      const skip = Number(query.skip || 0);
+      const limit = Number(query.limit || 50);
+      
+      const res = await fetch(`${apiUrl}/auth/v1/admin/users`, {
+        headers: {
+          "apikey": serviceRoleKey,
+          "Authorization": `Bearer ${serviceRoleKey}`
+        }
+      });
+
+      if (!res.ok) {
+        set.status = res.status;
+        const err = await res.json().catch(() => ({}));
+        return { error: err.msg || err.message || "Failed to fetch users" };
+      }
+
+      const d = await res.json() as any;
+      const allUsers = Array.isArray(d) ? d : (d.users || []);
+      
+      // Manual pagination if GoTrue doesn't paginate automatically
+      const paginatedUsers = allUsers.slice(skip, skip + limit);
+
+      return {
+        data: paginatedUsers,
+        total: allUsers.length
+      };
+    },
+    {
+      params: t.Object({ ref: t.String() }),
+      query: t.Object({
+        skip: t.Optional(t.String()),
+        limit: t.Optional(t.String()),
+      })
+    }
+  )
   .post(
     "/users",
     async ({ params, body, set }) => {
