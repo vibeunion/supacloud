@@ -5,6 +5,7 @@
   import { waitLocale } from "$lib/i18n";
   import { onMount } from "svelte";
   import { goto } from "$app/navigation";
+  import { page } from "$app/stores";
   import { isLoading, t } from 'svelte-i18n';
   import Sidebar from "$lib/components/Sidebar.svelte";
   import PlatformSidebar from "$lib/components/PlatformSidebar.svelte";
@@ -19,9 +20,17 @@
   let isOnLoginPage = $state(false);
   
   let isCoreLoading = $derived($isLoading || projectsLoading);
-  let currentProject = $derived(projects?.[0] || null);
 
-  let isPlatformRoute = $derived(typeof window !== 'undefined' ? window.location.pathname.startsWith("/platform") : false);
+  // Derive currentProject from URL's [ref] param, fallback to first project
+  let currentProject = $derived.by(() => {
+    const refFromUrl = $page.params?.ref;
+    if (refFromUrl && projects.length) {
+      return projects.find(p => p.ref === refFromUrl) || projects[0];
+    }
+    return projects[0] || null;
+  });
+
+  let isPlatformRoute = $derived($page.url.pathname.startsWith("/platform"));
 
   onMount(async () => {
     await waitLocale();
@@ -36,6 +45,7 @@
     // Check session
     const token = localStorage.getItem("supacloud_session");
     if (!token) {
+      projectsLoading = false;
       goto("/login");
       return;
     }
@@ -51,10 +61,12 @@
       if (!data.valid) {
         localStorage.removeItem("supacloud_session");
         localStorage.removeItem("supacloud_master_token");
+        projectsLoading = false;
         goto("/login");
         return;
       }
     } catch {
+      projectsLoading = false;
       goto("/login");
       return;
     }
@@ -89,6 +101,10 @@
     <div class="flex-1 flex flex-col items-center justify-center space-y-4">
       <div class="w-12 h-12 border-4 border-brand border-t-transparent rounded-full animate-spin"></div>
       <p class="text-muted-foreground animate-pulse text-sm">Initializing Studio Core...</p>
+    </div>
+  {:else if !isAuthenticated}
+    <div class="flex-1 flex flex-col items-center justify-center space-y-4">
+      <p class="text-muted-foreground text-sm">正在跳转到登录页面…</p>
     </div>
   {:else}
     {#if isPlatformRoute}
