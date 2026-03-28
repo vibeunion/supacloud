@@ -3,7 +3,8 @@ import { logger } from "../utils/logger";
 import { projectService } from "../services";
 import { tenantRuntimeService } from "../services/tenant-runtime.service";
 import { edgeFunctionService } from "../services/edge-function.service";
-import { WECHAT_PROVIDER_INFO, WeChatProviderType } from "../types/oauth";
+import { WECHAT_PROVIDER_INFO } from "../types/oauth";
+import type { WeChatProviderType } from "../types/oauth";
 
 /**
  * WeChat OAuth routes — miniprogram, official account (mp), and open platform

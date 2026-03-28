@@ -157,17 +157,24 @@ async function runCommandWithStreaming(args: string[], cwd: string) {
     let hasFailed = false;
     const reader = async (stream: ReadableStream) => {
         const decoder = new TextDecoder();
-        for await (const chunk of stream) {
-            const text = decoder.decode(chunk as Uint8Array);
-            const lines = text.split("\n").filter(line => line.trim());
-            for (const line of lines) {
-                const trimmed = line.trim();
-                logger.info(`  [Ansible] ${trimmed}`);
-                // Real-time scan for critical error keywords to prevent exit code misalignment
-                if (trimmed.includes("FAILED!") || trimmed.includes("fatal: [")) {
-                    hasFailed = true;
+        const reader = stream.getReader();
+        try {
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                const text = decoder.decode(value);
+                const lines = text.split("\n").filter(line => line.trim());
+                for (const line of lines) {
+                    const trimmed = line.trim();
+                    logger.info(`  [Ansible] ${trimmed}`);
+                    // Real-time scan for critical error keywords to prevent exit code misalignment
+                    if (trimmed.includes("FAILED!") || trimmed.includes("fatal: [")) {
+                        hasFailed = true;
+                    }
                 }
             }
+        } finally {
+            reader.releaseLock();
         }
     };
 
@@ -180,7 +187,7 @@ async function runCommandWithStreaming(args: string[], cwd: string) {
         logger.error(`[CRITICAL ERROR] Please check the above [Ansible] logs for detailed error stack.\n`);
         throw new Error(errorMsg);
     }
-    }
+}
 
     /**
      * Fine-grained modification of pigsty.yml. Use Bun.file to read entirely and perform safe regex replacement
