@@ -32,3 +32,31 @@ export const resources: ResourceDefinition[] = [
     ]
   }
 ];
+
+export const getTenantResources = (ref: string): ResourceDefinition[] => [
+  {
+    name: `v1/projects/${ref}/database/tables`,
+    label: 'Tables',
+    fields: [
+      { key: 'table_name', label: 'Name', type: 'text', required: true, searchable: true },
+      { key: 'table_schema', label: 'Schema', type: 'select', showInForm: false },
+      { key: 'table_type', label: 'Type', type: 'select', showInForm: false },
+      { key: 'row_estimate', label: 'Rows', type: 'number', showInForm: false }
+    ]
+  },
+  {
+    name: `v1/projects/${ref}/auth/users`,
+    label: 'Users',
+    fields: [
+      { key: 'id', label: 'UUID', type: 'text', showInForm: false },
+      { key: 'email', label: 'Email', type: 'text', required: true, searchable: true },
+      { key: 'password', label: 'Password', type: 'text', required: true, showInList: false },
+      { key: 'role', label: 'Role', type: 'select', showInForm: false, options: [
+        { label: 'Super Admin', value: 'supabase_admin' },
+        { label: 'Admin', value: 'supabase_auth_admin' }
+      ]},
+      { key: 'created_at', label: 'Created At', type: 'date', showInForm: false },
+      { key: 'last_sign_in_at', label: 'Last Login', type: 'date', showInForm: false }
+    ]
+  }
+];
