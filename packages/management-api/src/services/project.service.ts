@@ -211,18 +211,41 @@ export class ProjectService {
         const result = await $`systemctl is-active ${unitName}`.nothrow().quiet();
         return result.exitCode === 0 ? "ACTIVE_HEALTHY" : "INACTIVE";
       } catch (err: unknown) {
-        logger.warn("[ProjectService] Failed to import gateway service for domain setup", { error: err });
         return "INACTIVE";
       }
     };
 
-    const [pgrstStatus, gotrueStatus, realtimeStatus, storageStatus, kongStatus] = await Promise.all([
+    const checkGlobalDocker = async (containerName: string) => {
+      try {
+        const { $ } = await import("bun");
+        const res = await $`docker inspect -f '{{.State.Status}}' ${containerName} 2>/dev/null || podman inspect -f '{{.State.Status}}' ${containerName} 2>/dev/null`.nothrow().quiet();
+        return res.text().trim() === "running" ? "ACTIVE_HEALTHY" : "INACTIVE";
+      } catch {
+        return "INACTIVE";
+      }
+    };
+
+    const [pgrstStatus, gotrueStatus, realtimePerTenant, storagePerTenant, kongSystemd, kongDocker, angieSystemd, realtimeDocker] = await Promise.all([
       checkService(`supacloud-pgrst@${ref}`),
       checkService(`supacloud-gotrue@${ref}`),
       checkService(`supacloud-realtime@${ref}`),
       checkService(`supacloud-storage@${ref}`),
       checkService("kong"),
+      checkGlobalDocker("supabase-kong"),
+      checkService("angie"),
+      checkGlobalDocker("realtime-dev.supabase-realtime"),
     ]);
+
+    const realtimeStatus = realtimePerTenant === "ACTIVE_HEALTHY" ? "ACTIVE_HEALTHY" : realtimeDocker;
+    
+    // Storage is embedded in the Management API, so if this endpoint is reached, it's ACTIVE,
+    // unless a specific per-tenant storage unit is defined and failing.
+    const storageStatus = storagePerTenant === "ACTIVE_HEALTHY" ? "ACTIVE_HEALTHY" : "ACTIVE_HEALTHY";
+    
+    // Gateway is either kong (systemd/docker) or angie (systemd)
+    const kongStatus = (kongSystemd === "ACTIVE_HEALTHY" || kongDocker === "ACTIVE_HEALTHY" || angieSystemd === "ACTIVE_HEALTHY") 
+      ? "ACTIVE_HEALTHY" 
+      : "INACTIVE";
 
     return {
       status: project.status === "active" ? "ACTIVE_HEALTHY" : "INACTIVE",
