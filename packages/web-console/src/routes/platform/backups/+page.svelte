@@ -4,7 +4,9 @@
   import { onMount } from "svelte";
   import { Loader2, HardDrive, Play, RotateCcw, Calendar, Clock, AlertTriangle, CheckCircle2, RefreshCw } from "lucide-svelte";
 
-  interface BackupInfo {
+  import { useList, type BaseRecord } from "@svadmin/core";
+
+  interface BackupInfo extends BaseRecord {
     id: string;
     type: string;
     status: string;
@@ -13,8 +15,9 @@
     label: string;
   }
 
-  let backups: BackupInfo[] = $state.raw([]);
-  let isLoading = $state(true);
+  const { query } = useList<BackupInfo>({ resource: "v1/projects/default/database/backups" });
+  const backups = $derived(Array.isArray(query.data?.data) ? query.data.data : ((query.data?.data as unknown as Record<string, unknown>)?.backups as BackupInfo[] || []));
+
   let actionMsg: string | null = $state.raw(null);
   let isCreating = $state(false);
   let backupType = $state("incr");
@@ -25,17 +28,7 @@
   let pitrTime = $state("");
   let isRestoring = $state(false);
 
-  async function fetchBackups() {
-    isLoading = true;
-    try {
-      const res = await apiClient("/v1/projects/default/database/backups");
-      if (res.ok) {
-        const data = await res.json();
-        backups = Array.isArray(data) ? data : data.backups || [];
-      }
-    } catch {}
-    isLoading = false;
-  }
+
 
   async function createBackup() {
     isCreating = true;
@@ -48,7 +41,7 @@
       });
       const data = await res.json();
       actionMsg = data.success !== false ? `✅ 物理备份已触发 (${backupType})` : `❌ ${data.message || '备份失败'}`;
-      await fetchBackups();
+      query.refetch();
     } catch (err: unknown) {
       actionMsg = `❌ ${(err instanceof Error ? err.message : String(err))}`;
     } finally {
@@ -84,7 +77,7 @@
     }
   }
 
-  onMount(() => fetchBackups());
+
 
   function getStatusColor(status: string): string {
     if (status === "completed" || status === "ok") return "text-green-600 bg-green-500/10";
@@ -99,8 +92,8 @@
       <h2 class="text-xl font-bold">物理备份 & PITR</h2>
       <p class="text-xs text-muted-foreground mt-1">基于 pgBackRest 的全量/增量物理备份与任意时间点恢复</p>
     </div>
-    <button onclick={() => fetchBackups()} class="flex items-center gap-2 px-3 py-2 text-xs rounded-lg border hover:bg-muted/50 transition-colors">
-      <RefreshCw size={12} /> 刷新
+    <button onclick={() => query.refetch()} disabled={query.isFetching} class="flex items-center gap-2 px-3 py-2 text-xs rounded-lg border hover:bg-muted/50 transition-colors disabled:opacity-50">
+      <RefreshCw size={12} class={query.isFetching ? 'animate-spin' : ''} /> 刷新
     </button>
   </div>
 
@@ -182,7 +175,7 @@
     <div class="border-b px-5 py-3 bg-muted/20">
       <h3 class="text-sm font-semibold flex items-center gap-2"><Calendar size={16} /> 备份历史</h3>
     </div>
-    {#if isLoading}
+    {#if query.isLoading}
       <div class="flex items-center justify-center py-16">
         <Loader2 size={24} class="animate-spin text-brand opacity-50" />
       </div>
