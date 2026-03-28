@@ -34,3 +34,11 @@ The production build outputs to `build/` directory. In production, the Managemen
 - [SvelteKit](https://kit.svelte.dev/) - Full-stack web framework
 - [TailwindCSS](https://tailwindcss.com/) - Utility-first CSS
 - [TypeScript](https://www.typescriptlang.org/) - Type-safe JavaScript
+
+## Architecture Note
+
+The console is compiled as a pure SPA (Single Page Application) using SvelteKit's `adapter-static`.
+To ensure compatibility:
+- **Do not use `+page.server.ts` or `+layout.server.ts`** files, as they rely on Node.js at runtime and break static exports.
+- All data fetching should happen client-side in `+page.svelte` or `+page.ts` using the `apiClient`.
+- Authentication routing uses `window.location.href` for hard redirects to overcome SPA routing state staleness during session expiration.
