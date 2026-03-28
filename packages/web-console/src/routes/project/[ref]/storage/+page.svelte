@@ -7,11 +7,22 @@
   import { Database, Folder, Plus, Search, Trash2, ExternalLink, Loader2, X, Save } from "lucide-svelte";
   import { toast } from "svelte-sonner";
 
-  let buckets = $state<Record<string, unknown>[]>([]);
-  let files = $state<Record<string, unknown>[]>([]);
+  import { useList, type BaseRecord } from "@svadmin/core";
+
+  interface Bucket extends BaseRecord {
+    id?: string;
+    name: string;
+    public: boolean;
+  }
+
+  interface StorageFile extends BaseRecord {
+    name: string;
+    size: number;
+    type: string;
+    updated: string;
+  }
+
   let selectedBucketId = $state<string | null>(null);
-  let isLoadingBuckets = $state<boolean>(true);
-  let isLoadingFiles = $state<boolean>(false);
 
   // Create Bucket
   let showCreateBucket = $state(false);
@@ -23,20 +34,22 @@
 
   const projectRef = $derived(page.params.ref);
 
-  async function fetchBuckets() {
-    isLoadingBuckets = true;
-    try {
-      const res = await apiClient(`/v1/storage/${projectRef}/buckets`);
-      buckets = await res.json();
-      if (buckets.length > 0 && !selectedBucketId) {
-        selectedBucketId = String(buckets[0].id || buckets[0].name);
-      }
-    } catch (err: unknown) {
-      toast.error("无法fetch buckets");
-    } finally {
-      isLoadingBuckets = false;
+  const { query: bucketsQuery } = useList<Bucket>({ 
+    get resource() { return `v1/storage/${projectRef}/buckets`; } 
+  });
+  const buckets = $derived(Array.isArray(bucketsQuery.data?.data) ? bucketsQuery.data.data : []);
+
+  $effect(() => {
+    if (buckets.length > 0 && !selectedBucketId) {
+      selectedBucketId = String(buckets[0].id || buckets[0].name);
     }
-  }
+  });
+
+  const { query: filesQuery } = useList<StorageFile>({
+    get resource() { return selectedBucketId ? `v1/storage/${projectRef}/buckets/${selectedBucketId}/files` : ""; },
+    get queryOptions() { return { enabled: !!selectedBucketId }; }
+  });
+  const files = $derived(Array.isArray(filesQuery.data?.data) ? filesQuery.data.data : []);
 
   async function createBucket() {
     if (!newBucketName.trim()) { bucketMsg = "❌ 请输入 Bucket 名称"; setTimeout(() => bucketMsg = null, 3000); return; }
@@ -56,7 +69,7 @@
         showCreateBucket = false;
         newBucketName = "";
         newBucketPublic = false;
-        await fetchBuckets();
+        bucketsQuery.refetch();
       } else {
         const err = await res.json();
         bucketMsg = `❌ 创建失败: ${err.error || (err instanceof Error ? err.message : String(err)) || res.statusText}`;
@@ -69,18 +82,7 @@
     }
   }
 
-  async function fetchFiles(bucketName: string) {
-    if (!bucketName) return;
-    isLoadingFiles = true;
-    try {
-      const res = await apiClient(`/v1/storage/${projectRef}/buckets/${bucketName}/files`);
-      files = await res.json();
-    } catch (err: unknown) {
-      toast.error("无法fetch files");
-    } finally {
-      isLoadingFiles = false;
-    }
-  }
+
 
   let fileInput: HTMLInputElement;
   let isUploading = $state<boolean>(false);
@@ -103,7 +105,7 @@
       if (!res.ok) throw new Error(await res.text());
       
       // Refresh files list
-      await fetchFiles(selectedBucketId);
+      filesQuery.refetch();
     } catch (err: unknown) {
       toast.error("无法upload file");
       alert("上传失败");
@@ -122,22 +124,14 @@
       });
       if (!res.ok) throw new Error(await res.text());
       
-      await fetchFiles(selectedBucketId);
+      filesQuery.refetch();
     } catch (err: unknown) {
       toast.error("无法delete file");
       alert("删除失败");
     }
   }
 
-  onMount(() => {
-    fetchBuckets();
-  });
 
-  $effect(() => {
-    if (selectedBucketId) {
-      fetchFiles(selectedBucketId);
-    }
-  });
 </script>
 
 <div class="h-full flex flex-col -m-4 sm:-m-6 lg:-m-8">
@@ -180,7 +174,7 @@
       {/if}
       
       <div class="flex-1 overflow-y-auto p-2 space-y-1">
-        {#if isLoadingBuckets}
+        {#if bucketsQuery.isLoading}
           <div class="flex flex-col items-center justify-center py-12 gap-2 opacity-50">
             <Loader2 size={16} class="animate-spin text-brand" />
             <span class="text-[10px] uppercase tracking-tighter">{$t("Storage.scanning")}</span>
@@ -250,7 +244,7 @@
       <!-- Files Table -->
       <div class="flex-1 overflow-y-auto p-6">
         <div class="rounded-xl border border-border/50 shadow-sm overflow-hidden bg-background">
-          {#if isLoadingFiles}
+          {#if filesQuery.isLoading || (selectedBucketId && !filesQuery.isSuccess && !filesQuery.isError)}
             <div class="py-24 flex flex-col items-center justify-center text-muted-foreground gap-3">
               <Loader2 size={32} class="animate-spin text-brand opacity-50" />
               <p class="text-xs font-mono uppercase tracking-widest">{$t("Storage.hydrating_streams")}</p>
