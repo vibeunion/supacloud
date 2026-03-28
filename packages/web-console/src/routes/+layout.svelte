@@ -21,9 +21,14 @@
   
   let isCoreLoading = $derived($isLoading || projectsLoading);
 
-  // Derive currentProject from URL's [ref] param, fallback to first project
+  // Extract ref from URL pathname — more reliable than $page.params in root layout
+  let refFromUrl = $derived.by(() => {
+    const match = $page.url.pathname.match(/^\/project\/([^/]+)/);
+    return match ? match[1] : null;
+  });
+
+  // Derive currentProject from URL ref, fallback to first project
   let currentProject = $derived.by(() => {
-    const refFromUrl = $page.params?.ref;
     if (refFromUrl && projects.length) {
       return projects.find(p => p.ref === refFromUrl) || projects[0];
     }
@@ -46,7 +51,7 @@
     const token = localStorage.getItem("supacloud_session");
     if (!token) {
       projectsLoading = false;
-      goto("/login");
+      window.location.href = "/login";
       return;
     }
 
@@ -62,12 +67,12 @@
         localStorage.removeItem("supacloud_session");
         localStorage.removeItem("supacloud_master_token");
         projectsLoading = false;
-        goto("/login");
+        window.location.href = "/login";
         return;
       }
     } catch {
       projectsLoading = false;
-      goto("/login");
+      window.location.href = "/login";
       return;
     }
 
@@ -96,7 +101,9 @@
 
 <div class="flex h-screen overflow-hidden bg-background">
   {#if isOnLoginPage}
-    {@render children()}
+    <div class="flex-1 w-full">
+      {@render children()}
+    </div>
   {:else if isCoreLoading}
     <div class="flex-1 flex flex-col items-center justify-center space-y-4">
       <div class="w-12 h-12 border-4 border-brand border-t-transparent rounded-full animate-spin"></div>
