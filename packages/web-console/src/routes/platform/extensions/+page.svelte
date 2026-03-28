@@ -1,36 +1,25 @@
 <script lang="ts">
-  import { apiClient } from "$lib/api";
-
-  import { onMount } from "svelte";
+  import { useList } from "@svadmin/core";
   import { Loader2, Package, Download, Trash2, RefreshCw, Search, AlertTriangle } from "lucide-svelte";
 
-  interface SystemExt {
+  import type { BaseRecord } from '@svadmin/core';
+
+  interface SystemExt extends BaseRecord {
+    id: string;
     name: string;
     version: string;
     status: string;
     description: string;
   }
 
-  let extensions: SystemExt[] = $state.raw([]);
-  let isLoading = $state(true);
-  let error: string | null = $state.raw(null);
+  import { apiClient } from "$lib/api";
+
+  const { query } = useList<SystemExt>({ resource: "v1/system/extensions" });
+  const extensions = $derived(Array.isArray(query.data?.data) ? query.data.data : []);
+
   let actionMsg: string | null = $state.raw(null);
   let actionTarget: string | null = $state.raw(null);
   let searchQuery = $state("");
-
-  async function fetchExtensions() {
-    isLoading = true;
-    error = null;
-    try {
-      const res = await apiClient("/v1/system/extensions");
-      const data = await res.json();
-      extensions = Array.isArray(data) ? data : [];
-    } catch (err: unknown) {
-      error = err instanceof Error ? err.message : String(err);
-    } finally {
-      isLoading = false;
-    }
-  }
 
   async function installExt(name: string) {
     actionTarget = name;
@@ -43,7 +32,7 @@
       });
       const data = await res.json();
       actionMsg = data.success ? `✅ ${data.message}` : `❌ ${data.message}`;
-      if (data.success) await fetchExtensions();
+      if (data.success) query.refetch();
     } catch (err: unknown) {
       actionMsg = `❌ ${(err instanceof Error ? err.message : String(err))}`;
     } finally {
@@ -64,7 +53,7 @@
       });
       const data = await res.json();
       actionMsg = data.success ? `✅ ${data.message}` : `❌ ${data.message}`;
-      if (data.success) await fetchExtensions();
+      if (data.success) query.refetch();
     } catch (err: unknown) {
       actionMsg = `❌ ${(err instanceof Error ? err.message : String(err))}`;
     } finally {
@@ -73,11 +62,9 @@
     }
   }
 
-  onMount(() => fetchExtensions());
-
   const filtered = $derived(
     searchQuery
-      ? extensions.filter(e => e.name.toLowerCase().includes(searchQuery.toLowerCase()) || e.description.toLowerCase().includes(searchQuery.toLowerCase()))
+      ? extensions.filter((e: SystemExt) => e.name.toLowerCase().includes(searchQuery.toLowerCase()) || e.description.toLowerCase().includes(searchQuery.toLowerCase()))
       : extensions
   );
 
@@ -100,7 +87,7 @@
       <h2 class="text-xl font-bold">扩展市场 (Pigsty)</h2>
       <p class="text-xs text-muted-foreground mt-1">通过 <code class="px-1 py-0.5 rounded bg-muted text-[10px]">pig ext</code> 在操作系统层面安装/卸载 PostgreSQL 扩展包</p>
     </div>
-    <button onclick={() => fetchExtensions()} class="flex items-center gap-2 px-3 py-2 text-xs rounded-lg border hover:bg-muted/50 transition-colors">
+    <button onclick={() => query.refetch()} class="flex items-center gap-2 px-3 py-2 text-xs rounded-lg border hover:bg-muted/50 transition-colors">
       <RefreshCw size={12} /> 刷新
     </button>
   </div>
@@ -153,13 +140,13 @@
       </div>
     </div>
 
-    {#if isLoading}
+    {#if query.isLoading}
       <div class="flex items-center justify-center py-16">
         <Loader2 size={24} class="animate-spin text-brand opacity-50" />
       </div>
-    {:else if error}
+    {:else if query.isError}
       <div class="p-4">
-        <div class="p-3 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-xs">{error}</div>
+        <div class="p-3 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-xs">{query.error?.message || "Failed to load extensions"}</div>
       </div>
     {:else if filtered.length === 0}
       <div class="p-8 text-center text-muted-foreground text-xs">

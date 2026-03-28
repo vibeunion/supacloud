@@ -6,6 +6,7 @@
   import { t } from "svelte-i18n";
   import { Loader2, Activity, Server, Pause, RotateCw, Trash2, AlertTriangle, Globe, CheckCircle2, XCircle } from "lucide-svelte";
   import { toast } from "svelte-sonner";
+  import { AutoForm } from "@svadmin/ui";
 
   let project = $state<Record<string, unknown> | null>(null);
   let isLoading = $state(true);
@@ -176,27 +177,10 @@
     </div>
   {:else if project}
     <div class="space-y-6">
-      <!-- General -->
+      <!-- General via svadmin AutoForm -->
       <div class="border rounded-xl bg-card p-6 space-y-4">
         <h2 class="text-lg font-semibold">{$t("Settings.general")}</h2>
-        <div class="grid grid-cols-2 gap-4 text-sm">
-          <div>
-            <span class="text-xs text-muted-foreground">{$t("Settings.project_name")}</span>
-            <p class="font-medium">{project.name}</p>
-          </div>
-          <div>
-            <span class="text-xs text-muted-foreground">{$t("Settings.project_ref")}</span>
-            <p class="font-mono text-xs">{project.ref}</p>
-          </div>
-          <div>
-            <span class="text-xs text-muted-foreground">{$t("Settings.region")}</span>
-            <p>{project.region}</p>
-          </div>
-          <div>
-            <span class="text-xs text-muted-foreground">{$t("Settings.status")}</span>
-            <span class="px-2 py-0.5 {project.status === 'active' ? 'bg-green-500/10 text-green-600' : 'bg-amber-500/10 text-amber-600'} text-xs rounded-full">{project.status}</span>
-          </div>
-        </div>
+        <AutoForm resourceName="v1/projects" id={projectRef} />
       </div>
 
       <!-- API & Access URLs -->
