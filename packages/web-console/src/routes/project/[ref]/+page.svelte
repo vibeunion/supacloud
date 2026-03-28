@@ -98,10 +98,14 @@
     } catch {}
   }
 
-  onMount(() => {
-    fetchDashboard();
-    fetchServices();
-    fetchFunctions();
+  $effect(() => {
+    // Explicitly reference projectRef to trigger re-fetch on URL change
+    const _currentRef = projectRef;
+    if (_currentRef) {
+      fetchDashboard();
+      fetchServices();
+      fetchFunctions();
+    }
   });
 
   const QUICK_LINKS = $derived([
