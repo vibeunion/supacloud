@@ -3,14 +3,16 @@ import { logger } from "../utils/logger";
 import { projectService } from "../services";
 import { tenantRuntimeService } from "../services/tenant-runtime.service";
 import { shellService } from "../services/shell.service";
-import {
+import type {
   OAuthProvider,
   OAuthProviderConfig,
+  WeChatProviderType,
+  ChinaOAuthProvider
+} from "../types/oauth";
+import {
   OAUTH_ENV_MAPPINGS,
   SUPPORTED_OAUTH_PROVIDERS,
-  WeChatProviderType,
   WECHAT_PROVIDER_INFO,
-  ChinaOAuthProvider,
   CHINA_OAUTH_PROVIDER_INFO,
 } from "../types/oauth";
 

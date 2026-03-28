@@ -2,10 +2,8 @@ import { Elysia, t, status } from "elysia";
 import { logger } from "../utils/logger";
 import { projectService } from "../services";
 import { edgeFunctionService } from "../services/edge-function.service";
-import {
-  ChinaOAuthProvider,
-  CHINA_OAUTH_PROVIDER_INFO,
-} from "../types/oauth";
+import { CHINA_OAUTH_PROVIDER_INFO } from "../types/oauth";
+import type { ChinaOAuthProvider } from "../types/oauth";
 
 const CHINA_PROVIDERS: ChinaOAuthProvider[] = ["qq", "weibo", "alipay", "dingtalk", "douyin", "baidu", "huawei", "xiaomi", "kuaishou", "bilibili"];
 
