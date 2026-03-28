@@ -35,9 +35,10 @@ The Node.js based Storage API handles binary uploads to Object Storage AND metad
 If globally shared, tenant uploads would pollute the default database's `storage.objects` table and bypass tenant RLS.
 **Status**: To be fully isolated, Storage API must eventually be separated into per-tenant processes just like GoTrue, connecting to the specific tenant's database.
 
-### 4. Realtime API & Studio
+### 4. Realtime API & Admin Console
 - **Realtime (Elixir)**: Very resource-intensive as it listens to PostgreSQL logical replication slots. Recommended to remain a shared premium feature or require dedicated high-tier clusters.
-- **Studio**: Tied to a single connection pool. It serves as the Host/SuperAdmin dashboard. Tenant-level UI should use generic database tooling (e.g., PGWeb, Adminer) dynamically provisioned based on connection strings.
+- **Web Console (SVAdmin Hybrid Mount)**: The central dashboard (`web-console`) is fully multi-tenant aware via URL routing parameter `[ref]`. It acts as the Host/SuperAdmin dashboard, but internally relies on the `@svadmin/core` `DataProvider`. When standard CRUD is requested (e.g. Auth Users or DB Tables), the root `+layout.svelte` dynamically bridges SvelteKit routing into SVAdmin's resources array. 
+  - This allows the UI to render `svadmin` `<AutoTable>` and `useList` hooks seamlessly while hitting RESTful routes securely proxied to the tenant specific GoTrue / PostgREST instances via the Kong proxy.
 
 ## Additional Issues Found
 
