@@ -40,5 +40,12 @@ The production build outputs to `build/` directory. In production, the Managemen
 The console is compiled as a pure SPA (Single Page Application) using SvelteKit's `adapter-static`.
 To ensure compatibility:
 - **Do not use `+page.server.ts` or `+layout.server.ts`** files, as they rely on Node.js at runtime and break static exports.
-- All data fetching should happen client-side in `+page.svelte` or `+page.ts` using the `apiClient`.
-- Authentication routing uses `window.location.href` for hard redirects to overcome SPA routing state staleness during session expiration.
+
+### SVAdmin Hybrid Mount Architecture
+
+SupaCloud's Web Console now uses a custom hybrid architecture with the **SVAdmin** framework:
+- **Global Data Flow**: We use `@tanstack/svelte-query` and SVAdmin's `DataProvider` injected at the layout level (`+layout.svelte`) to automatically append authentication headers and handle caching.
+- **Dynamic Tenant Resources**: Resources (like `v1/projects/[ref]/database/tables` and `auth/users`) are dynamically registered via a `$effect` hook based on SvelteKit routing parameters, meaning SVAdmin adapts seamlessly to whichever tenant project you are viewing.
+- **Auto Components & Headless Hooks**: 
+  - Standard CRUD pages (like Auth Users or Tables) use declarative `<AutoTable />` with custom Svelte snippets (`#snippet cellRenderer`) to preserve Supabase-like visual styling without manual markup.
+  - Complex custom pages (like Storage buckets or Edge Function deployments) use SVAdmin's headless hooks (`useList`, `useDelete`) coupled with fully custom Svelte layouts (like split-panes or Monaco editors).
