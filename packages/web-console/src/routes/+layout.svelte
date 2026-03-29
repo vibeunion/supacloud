@@ -1,3 +1,11 @@
+<script module>
+  if (typeof window !== "undefined") {
+    if (window.location.hash.includes("/login")) {
+      window.location.replace("/login");
+    }
+  }
+</script>
+
 <script lang="ts">
   import "../app.css";
   import "$lib/i18n"; // Ensure svelte-i18n is initialized synchronously before child components import `t`
@@ -29,18 +37,17 @@
     defaultOptions: { queries: { staleTime: 30_000, retry: 1 } }
   });
 
-  $effect.pre(() => {
-    setDataProvider(dataProvider);
-    setAuthProvider(authProvider);
+  // INITIALIZE SYNCHRONOUSLY to prevent <Layout> from crashing because getAuthProvider() was uninitialized during its script execution!
+  setDataProvider(dataProvider);
+  setAuthProvider(authProvider);
 
-    const ref = $page.params.ref;
-    const allResources = ref ? [...resources, ...getTenantResources(ref)] : resources;
-    setResources(allResources);
+  const ref = $page.params.ref;
+  const allResources = ref ? [...resources, ...getTenantResources(ref)] : resources;
+  setResources(allResources);
 
-    setRouterProvider(routerProvider);
-    setTheme("system");
-    setLocale("zh-CN");
-  });
+  setRouterProvider(routerProvider);
+  setTheme("system");
+  setLocale("zh-CN");
 
   let isRawPage = $derived(($page.url.pathname as string) === "/login" || ($page.url.pathname as string) === "/register");
 </script>
