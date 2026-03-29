@@ -9,7 +9,8 @@
     HardDrive, 
     Terminal,
     Bot,
-    Languages
+    Languages,
+    Home
   } from "lucide-svelte";
   import { page } from '$app/stores';
   import { t, locale } from "svelte-i18n";
@@ -29,6 +30,7 @@
     { title: $t("Platform.storage_juicefs"), icon: HardDrive, href: `/platform/storage` },
     { title: $t("Platform.operations_console"), icon: Terminal, href: `/platform/operations` },
     { title: "MCP 配置", icon: Bot, href: `/platform/mcp` },
+    { title: $t("Platform.settings") || "系统设置", icon: Settings2, href: `/platform/settings` },
   ]);
 
   function isActive(href: string) {
@@ -58,7 +60,14 @@
     {/each}
   </nav>
 
-  <div class="p-4 border-t">
+  <div class="p-4 border-t space-y-2">
+    <a 
+      href="/"
+      class="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm font-medium text-brand bg-brand/5 hover:bg-brand/10 transition-colors cursor-pointer"
+    >
+      <Home size={18} />
+      <span>{$t("Sidebar.return_to_projects") || "返回项目列表"}</span>
+    </a>
     <button 
       onclick={toggleLanguage}
       class="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition-colors cursor-pointer"

@@ -20,10 +20,15 @@
   ];
 
   function detectGrafanaHost() {
-    // Try to detect: same host, port 3000
     const protocol = window.location.protocol;
     const host = window.location.hostname;
-    grafanaHost = `${protocol}//${host}:3000`;
+    // In production, Grafana is reverse-proxied through /grafana/ path
+    // In local dev, fall back to direct port 3000 access
+    if (host === "localhost" || host === "127.0.0.1") {
+      grafanaHost = `${protocol}//${host}:3000`;
+    } else {
+      grafanaHost = `${protocol}//${host}/grafana`;
+    }
   }
 
   const grafanaUrl = $derived(
