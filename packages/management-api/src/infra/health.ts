@@ -138,7 +138,6 @@ export class HealthChecker {
             const pgVersion = await $`psql -At -c "SHOW server_version;"`.nothrow().text();
 
             // 3. Cluster HA detection (Patroni)
-            // @ts-ignore
             const { ClusterManager } = await import("./cluster");
             const nodes: { role: string; state: string; member: string }[] = await ClusterManager.getStatus();
 
