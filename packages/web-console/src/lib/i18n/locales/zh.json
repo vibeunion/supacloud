@@ -13,6 +13,7 @@
   },
   "Dashboard": {
     "title": "仪表盘",
+    "subtitle": "查看和管理你的项目概览指标。",
     "org_default": "默认组织",
     "project_dashboard": "项目概览",
     "db_connections": "数据库连接数",
@@ -32,7 +33,8 @@
     "query_performance": "慢查询看板",
     "database_linter": "表结构体检",
     "logs": "日志",
-    "settings": "项目设置"
+    "settings": "项目设置",
+    "reports": "各类监控报表"
   },
   "Project": {
     "home": "首页",
@@ -439,5 +441,15 @@
     "ago_minutes": "分钟前",
     "ago_hours": "小时前",
     "ago_days": "天前"
+  },
+  "chat": {
+    "title": "SupaCloud AI 助手",
+    "welcome": "你好，我是你的专属开发顾问",
+    "welcomeDesc": "我可以帮您编写 SQL、分析慢查询、或解答关于数据库的疑问。有什么我可以帮您的？",
+    "suggestion1": "帮我写一个创建用户的 SQL 表结构",
+    "suggestion2": "如何开启数据库表的 Row Level Security（RLS）？",
+    "suggestion3": "请分析一下我当前的慢查询情况",
+    "placeholder": "输入你的问题...",
+    "shortcutHint": "快捷键"
   }
 }
