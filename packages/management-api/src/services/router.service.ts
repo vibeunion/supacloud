@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import { logger } from "../utils/logger";
+import { config } from "../config";
 import path from "node:path";
 import { shellService } from "./shell.service";
 
@@ -9,14 +10,14 @@ export interface ProjectDomains {
 }
 
 export class RouterService {
-  private readonly ANGIE_SITES_DIR = process.env.ANGIE_SITES_DIR || "/etc/angie/http.d";
-  private readonly KONG_INTERNAL = process.env.KONG_INTERNAL || "127.0.0.1:8000";
-  private readonly STUDIO_INTERNAL = process.env.STUDIO_INTERNAL || "127.0.0.1:3000";
-  private readonly MANAGEMENT_API_INTERNAL = process.env.MANAGEMENT_API_INTERNAL || "127.0.0.1:9090";
-  private readonly EDGE_RUNTIME_INTERNAL = process.env.EDGE_RUNTIME_INTERNAL || "127.0.0.1:9000";
-  private readonly BASE_DOMAIN = process.env.BASE_DOMAIN || "localhost";
-  private readonly ENABLE_SSL = process.env.ENABLE_SSL === "true";
-  private readonly ACME_CLIENT = process.env.ACME_CLIENT || "le";
+  private get ANGIE_SITES_DIR() { return config.angieSitesDir; }
+  private get KONG_INTERNAL() { return config.kongInternal; }
+  private get STUDIO_INTERNAL() { return config.studioInternal; }
+  private get MANAGEMENT_API_INTERNAL() { return config.managementApiInternal; }
+  private get EDGE_RUNTIME_INTERNAL() { return config.edgeRuntimeInternal; }
+  private get BASE_DOMAIN() { return config.baseDomain; }
+  private get ENABLE_SSL() { return config.enableSsl; }
+  private get ACME_CLIENT() { return config.acmeClient; }
 
   getProjectApiUrl(projectRef: string, customDomain?: string): string {
     if (customDomain) {

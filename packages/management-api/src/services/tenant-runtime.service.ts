@@ -1,5 +1,6 @@
 import { $ } from "bun";
 import { logger } from "../utils/logger";
+import { config } from "../config";
 import { sql as metaSql } from "../db";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -14,15 +15,15 @@ export interface RuntimeStatus {
 }
 
 class TenantRuntimeService {
-    private readonly TENANT_CONFIG_DIR = process.env.TENANT_CONFIG_DIR || "/etc/supabase/tenants";
-    private readonly POSTGREST_BIN = process.env.POSTGREST_BIN || "/usr/local/bin/postgrest";
-    private readonly GOTRUE_BIN = process.env.GOTRUE_BIN || "/usr/local/bin/gotrue";
-    private readonly PG_HOST = process.env.PG_HOST || process.env.POSTGRES_HOST || "localhost";
-    private readonly PG_PORT = process.env.PG_PORT || process.env.POSTGRES_PORT || "5432";
+    private readonly TENANT_CONFIG_DIR = config.tenantConfigDir;
+    private readonly POSTGREST_BIN = config.postgrestBin;
+    private readonly GOTRUE_BIN = config.gotrueBin;
+    private readonly PG_HOST = config.pgHost;
+    private readonly PG_PORT = String(config.pgPort);
 
-    private readonly PGRST_PORT_BASE = parseInt(process.env.PGRST_PORT_BASE || "3100");
-    private readonly GOTRUE_PORT_BASE = parseInt(process.env.GOTRUE_PORT_BASE || "4100");
-    private readonly PORT_RANGE = parseInt(process.env.PORT_RANGE || "10000");
+    private readonly PGRST_PORT_BASE = config.pgrstPortBase;
+    private readonly GOTRUE_PORT_BASE = config.gotruePortBase;
+    private readonly PORT_RANGE = parseInt(config.portRange);
 
     /**
      * Deterministic port allocation based on hashing
@@ -85,7 +86,7 @@ class TenantRuntimeService {
             dbPassword: project.db_password,
             jwtSecret: project.jwt_secret,
             dbName: project.db_name || `supa_${ref}`,
-            apiUrl: (project.api_url as string) || process.env.GOTRUE_API_EXTERNAL_URL || "https://your-supacloud-domain.com"
+            apiUrl: (project.api_url as string) || config.gotrueApiExternalUrl || "https://your-supacloud-domain.com"
         };
     }
 
@@ -155,7 +156,7 @@ log-level = "warn"
 
         // Generate GoTrue .env configuration
         const apiExternalUrl = creds.apiUrl;
-        const gotrueSender = process.env.GOTRUE_SMTP_ADMIN_EMAIL || `noreply@${apiExternalUrl.replace('https://', '').replace('http://', '')}`;
+        const gotrueSender = config.gotrueSmtpAdminEmail || `noreply@${apiExternalUrl.replace('https://', '').replace('http://', '')}`;
 
         let gotrueEnv = `
 # SupaCloud Tenant GoTrue Runtime: ${ref}
@@ -164,7 +165,7 @@ GOTRUE_API_PORT=${gotruePort}
 API_EXTERNAL_URL=${apiExternalUrl}
 GOTRUE_SITE_URL=${apiExternalUrl}
 GOTRUE_DB_DRIVER=postgres
-GOTRUE_DB_DATABASE_URL=postgres://supabase_auth_admin:${process.env.PGPASSWORD || process.env.POSTGRES_PASSWORD || 'postgres'}@${this.PG_HOST}:${this.PG_PORT}/${creds.dbName}
+GOTRUE_DB_DATABASE_URL=postgres://supabase_auth_admin:${config.pgPassword}@${this.PG_HOST}:${this.PG_PORT}/${creds.dbName}
 GOTRUE_JWT_SECRET=${creds.jwtSecret}
 GOTRUE_JWT_EXP=3600
 GOTRUE_JWT_AUD=authenticated
@@ -174,14 +175,14 @@ GOTRUE_SERVER_READ_TIMEOUT=20
 GOTRUE_SECURITY_UPDATE_PASSWORD_REQUIRE_REAUTHENTICATION=true
 `.trim();
 
-        if (process.env.GOTRUE_SMTP_HOST) {
+        if (config.gotrueSmtpHost) {
             gotrueEnv += `
 # SMTP Configuration
 GOTRUE_SMTP_ADMIN_EMAIL=${gotrueSender}
-GOTRUE_SMTP_HOST=${process.env.GOTRUE_SMTP_HOST}
+GOTRUE_SMTP_HOST=${config.gotrueSmtpHost}
 GOTRUE_SMTP_PORT=587
-GOTRUE_SMTP_USER=${process.env.GOTRUE_SMTP_USER || ''}
-GOTRUE_SMTP_PASS=${process.env.GOTRUE_SMTP_PASS || ''}
+GOTRUE_SMTP_USER=${config.gotrueSmtpUser}
+GOTRUE_SMTP_PASS=${config.gotrueSmtpPass}
 GOTRUE_SMTP_SENDER_NAME=SupaCloud
 `;
         }

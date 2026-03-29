@@ -22,10 +22,10 @@ export class ShellService {
     // Build environment variables
     const env: Record<string, string> = {
       ...process.env,
-      PG_HOST: process.env.PG_HOST || dbUrlMatch?.[3] || "localhost",
-      PG_PORT: process.env.PG_PORT || dbUrlMatch?.[4] || "5432",
-      PG_USER: process.env.PG_USER || dbUrlMatch?.[1] || "postgres",
-      PGPASSWORD: process.env.PGPASSWORD || dbUrlMatch?.[2] || "postgres",
+      PG_HOST: config.pgHost,
+      PG_PORT: String(config.pgPort),
+      PG_USER: config.pgUser,
+      PGPASSWORD: config.pgPassword,
     };
 
     try {

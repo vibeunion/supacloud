@@ -1,5 +1,6 @@
 import { $ } from "bun";
 import { logger } from "../utils/logger";
+import { config } from "../config";
 
 export interface NodeInfo {
     ip: string;
@@ -39,10 +40,10 @@ export class NodeManager {
         // 1. Configure SSH trust (using ssh-copy-id simulation, or write key directly)
         // Note: In actual execution, it's recommended to check if passwordless connection works first
         try {
-            const pubKeyPath = `${process.env.HOME}/.ssh/id_rsa.pub`;
+            const pubKeyPath = `${config.homePath}/.ssh/id_rsa.pub`;
             if (!(await Bun.file(pubKeyPath).exists())) {
                 logger.info("[Node] Generating management node SSH key pair...");
-                await $`ssh-keygen -t rsa -N "" -f ${process.env.HOME}/.ssh/id_rsa`.quiet();
+                await $`ssh-keygen -t rsa -N "" -f ${config.homePath}/.ssh/id_rsa`.quiet();
             }
 
             logger.info(`[Node] Distributing SSH key to ${ip}...`);
