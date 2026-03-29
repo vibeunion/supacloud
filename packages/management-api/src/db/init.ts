@@ -64,6 +64,14 @@ export async function initDatabase() {
     );
 
     CREATE INDEX IF NOT EXISTS idx_project_tasks_status ON project_tasks(status);
+
+    CREATE TABLE IF NOT EXISTS platform_settings (
+      key VARCHAR(255) PRIMARY KEY,
+      value TEXT NOT NULL DEFAULT '',
+      description TEXT,
+      is_secret BOOLEAN NOT NULL DEFAULT false,
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
   `;
 
   // Use explicit config instead of URL to ensure correct database name

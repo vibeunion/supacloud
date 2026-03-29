@@ -238,7 +238,8 @@ export async function registerAllRoutes() {
     monitorRoutes, maintenanceRoutes, extensionRoutes, systemExtensionRoutes, securityRoutes,
     storageRoutes, storageCompatRoutes, scalingRoutes, taskRoutes, databaseRoutes, authRoutes,
     wechatAuthRoutes, chinaAuthRoutes, userManagementRoutes,
-    frontendRoutes, webhookRoutes, deployRoutes
+    frontendRoutes, webhookRoutes, deployRoutes,
+    chatRoutes, platformSettingsRoutes, projectLogsRoutes
   } = await import("./routes");
 
   return new Elysia({ name: "api-routes" })
@@ -272,7 +273,10 @@ export async function registerAllRoutes() {
     .use(userManagementRoutes)
     .use(frontendRoutes)
     .use(webhookRoutes)
-    .use(deployRoutes);
+    .use(deployRoutes)
+    .use(chatRoutes)
+    .use(platformSettingsRoutes)
+    .use(projectLogsRoutes);
 }
 
 const args = process.argv.slice(2);

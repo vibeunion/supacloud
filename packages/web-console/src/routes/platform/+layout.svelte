@@ -1,6 +1,6 @@
 <script lang="ts">
   import { page } from "$app/state";
-  import { Package, HardDrive, Activity, SlidersHorizontal, BarChart3, Database, Wrench } from "lucide-svelte";
+  import { Package, HardDrive, Activity, SlidersHorizontal, BarChart3, Database, Wrench, Settings } from "lucide-svelte";
 
   let { children } = $props();
 
@@ -12,6 +12,7 @@
     { id: "pooling", label: "连接池诊断", icon: Activity },
     { id: "storage", label: "存储管理", icon: Database },
     { id: "operations", label: "运维操作", icon: Wrench },
+    { id: "settings", label: "系统设置", icon: Settings },
   ];
 
   const currentTab = $derived(page.url.pathname.split("/platform/")[1]?.split("/")[0] || "");

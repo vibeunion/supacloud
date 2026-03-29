@@ -21,7 +21,9 @@
           {#if field.key === 'table_name'}
             <div class="flex items-center gap-2">
               <TableProperties size={14} class="text-brand" />
-              <span class="font-mono font-medium text-sm text-foreground">{value}</span>
+              <a href={`/project/${projectRef}/tables/${record.table_schema}/${value}`} class="font-mono font-medium text-sm text-foreground hover:text-brand hover:underline transition-colors block py-1">
+                {value}
+              </a>
             </div>
           {:else if field.key === 'table_schema'}
             <span class="px-2 py-0.5 bg-brand/10 text-brand text-[10px] rounded-full uppercase font-medium tracking-wider">

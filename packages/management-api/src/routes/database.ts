@@ -59,6 +59,102 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
             })
         }
     )
+    .get(
+        "/tables/:schema/:table/columns",
+        async ({ params, set }) => {
+            const project = await projectService.getProject(params.ref);
+            if (!project) {
+                set.status = 404;
+                return { error: "Project not found" };
+            }
+
+            try {
+                const dbName = `supa_${params.ref}`;
+                // Quick and safe parameterized query logic for schema inspection
+                // Use ::regclass format if possible, or just exact string match 
+                const schema = params.schema.replace(/'/g, "''");
+                const table = params.table.replace(/'/g, "''");
+
+                const sql = `
+                    SELECT column_name, data_type, is_nullable, column_default 
+                    FROM information_schema.columns 
+                    WHERE table_schema = '${schema}' AND table_name = '${table}'
+                    ORDER BY ordinal_position;
+                `;
+
+                const result = await db.executeQuery(dbName, sql);
+                return {
+                    data: (result as any).rows || []
+                };
+            } catch (error: unknown) {
+                set.status = 500;
+                return {
+                    error: "Failed to list columns",
+                    message: error instanceof Error ? error.message : "Unknown error",
+                };
+            }
+        },
+        {
+            params: t.Object({
+                ref: t.String({ minLength: 1 }),
+                schema: t.String({ minLength: 1 }),
+                table: t.String({ minLength: 1 }),
+            })
+        }
+    )
+    .get(
+        "/tables/:schema/:table/rows",
+        async ({ params, query, set }) => {
+            const project = await projectService.getProject(params.ref);
+            if (!project) {
+                set.status = 404;
+                return { error: "Project not found" };
+            }
+
+            try {
+                const dbName = `supa_${params.ref}`;
+                const skip = Number(query.skip || 0);
+                const limit = Number(query.limit || 50);
+
+                // Sanitize schema and table to avoid injection
+                const regex = /^[a-zA-Z_0-9]+$/;
+                if (!regex.test(params.schema) || !regex.test(params.table)) {
+                     set.status = 400;
+                     return { error: "Invalid schema or table name format" };
+                }
+
+                const sql = `SELECT * FROM "${params.schema}"."${params.table}" LIMIT ${limit} OFFSET ${skip};`;
+                const countSql = `SELECT count(*) as count FROM "${params.schema}"."${params.table}";`;
+
+                const [resRows, resCount] = await Promise.all([
+                    db.executeQuery(dbName, sql),
+                    db.executeQuery(dbName, countSql)
+                ]);
+
+                return {
+                    data: (resRows as any).rows || [],
+                    total: parseInt((resCount as any).rows[0]?.count || "0")
+                };
+            } catch (error: unknown) {
+                set.status = 500;
+                return {
+                    error: "Failed to fetch rows",
+                    message: error instanceof Error ? error.message : "Unknown error",
+                };
+            }
+        },
+        {
+            params: t.Object({
+                ref: t.String({ minLength: 1 }),
+                schema: t.String({ minLength: 1 }),
+                table: t.String({ minLength: 1 }),
+            }),
+            query: t.Object({
+                skip: t.Optional(t.String()),
+                limit: t.Optional(t.String()),
+            })
+        }
+    )
     .post(
         "/sql",
         async ({ params, body, set }) => {
