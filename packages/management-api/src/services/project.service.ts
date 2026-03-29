@@ -11,6 +11,8 @@ import { edgeFunctionService } from "./edge-function.service";
 import { logger } from "../utils/logger";
 import { config } from "../config";
 import { $ } from "bun";
+import { projectLogService } from "./project-logs.service";
+import { projectOpsService } from "./project-ops.service";
 
 export interface CreateProjectRequest {
   name: string;
@@ -451,118 +453,10 @@ export class ProjectService {
     };
   }
 
-  // --- Log Management ---
+  // --- Log Management (delegated) ---
 
   async queryLogs(ref: string, type: string = "all"): Promise<LogEntryResponse[]> {
-    const project = await projectRepository.findByRef(ref);
-    if (!project) return [];
-
-    try {
-      // Mapping from Studio "postgres", "auth", "realtime", "api" etc to our systemd unit types
-      let mappedType = "all";
-      if (type === "auth" || type === "gotrue") mappedType = "auth";
-      else if (type === "api" || type === "postgrest") mappedType = "api";
-      else if (type === "database" || type === "postgres") mappedType = "database";
-
-      const limit = 50;
-      let rawOutputs: { source: string, jsonStr: string }[] = [];
-
-      // Helper to fetch journalctl logs natively using Bun Shell
-      const fetchJournal = async (unitName: string, sourceName: string) => {
-        try {
-          const result = await $`journalctl -u ${unitName} -o json -n ${limit} --no-pager`.nothrow().quiet();
-          if (result.exitCode === 0) {
-            const lines = result.text().trim().split('\\n').filter((l: string) => l.trim().length > 0);
-            for (const line of lines) {
-              rawOutputs.push({ source: sourceName, jsonStr: line });
-            }
-          }
-        } catch (e: unknown) {
-          logger.error(`Error fetching journal for ${unitName}`, { error: (e instanceof Error ? e.message : String(e)) || String(e) });
-        }
-      };
-
-      if (mappedType === "auth" || mappedType === "all") {
-        await fetchJournal(`supacloud-gotrue@${ref}`, "auth");
-      }
-      if (mappedType === "api" || mappedType === "all") {
-        await fetchJournal(`supacloud-pgrst@${ref}`, "api");
-      }
-
-      // PostgreSQL is managed by patroni / single instance on 1G server
-      if (mappedType === "database" || mappedType === "all") {
-        try {
-          const pgLogCmd = await shellService.execute("bash", ["-c", `journalctl -u patroni -o json -n 20 --no-pager | grep supa_${ref}`]);
-          if (pgLogCmd.success && pgLogCmd.output.trim().length > 0) {
-            const lines = pgLogCmd.output.trim().split('\\n').filter((l: string) => l.trim().length > 0);
-            for (const line of lines) {
-              rawOutputs.push({ source: "database", jsonStr: line });
-            }
-          }
-        } catch (e: unknown) { 
-          logger.debug(`[ProjectService] DB log fetch failed for ${ref}`, { error: e });
-        }
-      }
-
-      if (rawOutputs.length === 0) {
-        return [];
-      }
-
-      const parsedLogs: LogEntryResponse[] = [];
-
-      for (const raw of rawOutputs) {
-        try {
-          const entry = JSON.parse(raw.jsonStr);
-
-          const timestampNum = parseInt(entry.__REALTIME_TIMESTAMP || "0");
-          const ms = Math.floor(timestampNum / 1000) || Date.now();
-          const timestampStr = new Date(ms).toISOString();
-
-          const source = raw.source || "system";
-          const message = entry.MESSAGE || JSON.stringify(entry);
-
-          // Infer severity from systemd priority or keywords
-          let severity = "info";
-          const prio = parseInt(entry.PRIORITY || "6");
-          if (prio <= 3) severity = "error";
-          else if (prio === 4) severity = "warning";
-
-          if (message.toLowerCase().includes("error") || message.toLowerCase().includes("fatal")) {
-            severity = "error";
-          } else if (message.toLowerCase().includes("warn")) {
-            severity = "warning";
-          }
-
-          parsedLogs.push({
-            // Ensure unique ID for UI rendering
-            id: `log-${ms}-${Math.random().toString(36).substring(2, 9)}`,
-            timestamp: timestampStr,
-            event_message: message,
-            metadata: {
-              items: [
-                {
-                  severity,
-                  source,
-                  syslog_identifier: entry.SYSLOG_IDENTIFIER,
-                  message: message
-                }
-              ]
-            }
-          });
-        } catch (je: unknown) {
-          // Skip unparseable lines
-        }
-      }
-
-      // Sort globally by timestamp descending
-      parsedLogs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-
-      // Return top LIMIT
-      return parsedLogs.slice(0, limit);
-    } catch (e: unknown) {
-      logger.error(`Failed to get real logs for ${ref}`, { error: e instanceof Error ? e.message : String(e) });
-      return [];
-    }
+    return projectLogService.queryLogs(ref, type);
   }
 
   // --- API Key Management ---
@@ -571,101 +465,45 @@ export class ProjectService {
     const project = await projectRepository.findByRef(ref);
     if (!project) return null;
 
-    // 1. Generate new key set
     const { jwtSecret, anonKey, serviceRoleKey } = await jwtService.generateKeySet();
 
-    // 2. Update database
     await projectRepository.updateApiKeys(ref, {
       jwt_secret: jwtSecret,
       anon_key: anonKey,
       service_role_key: serviceRoleKey,
     });
 
-    // 3. Sync to Kong gateway
     await gatewayService.setupJwt(ref, jwtSecret);
-
-    // 4. Notify router to reload updated JWT configuration
     await routerService.reload();
     logger.info(`[ProjectService] Rotated API keys and reloaded router for ${ref}`);
 
-    return {
-      anon_key: anonKey,
-      service_role_key: serviceRoleKey,
-    };
+    return { anon_key: anonKey, service_role_key: serviceRoleKey };
   }
 
-  // --- Backup Management ---
+  // --- Operations (delegated) ---
 
   async listBackups(ref: string): Promise<BackupResponse[]> {
-    const project = await projectRepository.findByRef(ref);
-    if (!project) return [];
-
-    const result = await shellService.execute("backup_manager.sh", ["list", ref]);
-    if (!result.success) return [];
-    try {
-      return JSON.parse(result.output);
-    } catch (err: unknown) {
-      logger.warn("[ProjectService] Failed to execute secret deletion script", { error: err });
-      return [];
-    }
+    return projectOpsService.listBackups(ref);
   }
 
   async restoreBackup(ref: string, backupId: string): Promise<boolean> {
-    const project = await projectRepository.findByRef(ref);
-    if (!project) return false;
-
-    const result = await shellService.execute("backup_manager.sh", ["restore", ref, backupId]);
-    return result.success;
+    return projectOpsService.restoreBackup(ref, backupId);
   }
-
-  // --- Network Restrictions ---
 
   async updateNetworkRestrictions(ref: string, allowedIps: string[]): Promise<boolean> {
-    const project = await projectRepository.findByRef(ref);
-    if (!project) return false;
-
-    const result = await routerService.updateNetworkRestrictions(ref, allowedIps);
-    return result.success;
+    return projectOpsService.updateNetworkRestrictions(ref, allowedIps);
   }
 
-  // --- Custom Domain ---
-
-  async getCustomDomain(ref: string): Promise<{ custom_hostname: string, status: string } | null> {
-    const project = await projectRepository.findByRef(ref);
-    if (!project) return null;
-
-    const domain = project.config?.custom_domain as string | undefined;
-    if (domain) {
-      return { custom_hostname: domain, status: "active" };
-    }
-    return { custom_hostname: "", status: "not_configured" };
+  async getCustomDomain(ref: string) {
+    return projectOpsService.getCustomDomain(ref);
   }
 
   async addCustomDomain(ref: string, domain: string): Promise<boolean> {
-    const project = await projectRepository.findByRef(ref);
-    if (!project) return false;
-
-    const result = await routerService.addCustomDomain(ref, domain);
-    if (result.success) {
-      await projectRepository.updateConfig(ref, { ...project.config, custom_domain: domain });
-    }
-    return result.success;
+    return projectOpsService.addCustomDomain(ref, domain);
   }
 
   async deleteCustomDomain(ref: string): Promise<boolean> {
-    const project = await projectRepository.findByRef(ref);
-    if (!project) return false;
-
-    const domain = project.config?.custom_domain as string | undefined;
-    if (!domain) return true;
-
-    const result = await routerService.removeCustomDomain(ref, domain);
-    if (result.success) {
-      const newConfig = { ...project.config };
-      delete newConfig.custom_domain;
-      await projectRepository.updateConfig(ref, newConfig);
-    }
-    return result.success;
+    return projectOpsService.deleteCustomDomain(ref);
   }
 }
 
