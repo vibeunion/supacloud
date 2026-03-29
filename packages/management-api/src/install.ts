@@ -3,6 +3,7 @@ import { EMBEDDED_ASSETS } from "./assets.gen";
 import { $ } from "bun";
 import os from "node:os";
 import * as p from "@clack/prompts";
+import { config as appConfig } from "./config";
 
 const INSTALL_BASE_DIR = "/opt/supacloud";
 const CONFIG_FILE = `${INSTALL_BASE_DIR}/config.env`;
@@ -48,7 +49,7 @@ async function checkSystem() {
  */
 function getSpinner() {
     const s = p.spinner();
-    const isCI = process.env.GITHUB_ACTIONS === "true" || !process.stdout.isTTY;
+    const isCI = appConfig.isGithubActions || !process.stdout.isTTY;
     if (isCI) {
         return {
             start: (msg: string) => console.log(`[CI] ${msg}...`),
@@ -84,10 +85,8 @@ export async function runInstall(options: { forceYes?: boolean } = {}) {
             await LoadBalancerManager.installAngie(
                 config.studioDomain,
                 config.publicDomain,
-                // @ts-ignore: SSL options are in install.ts local variables, or read from env vars
-                true, // Default enabled
-                // @ts-ignore
-                "le"
+                appConfig.enableSsl,
+                appConfig.acmeClient
             );
         }
 
@@ -270,8 +269,8 @@ async function runInteractiveConfig(forceYes = false): Promise<PigstyConfig> {
         internalIp = internalIp || primaryIp;
         publicDomain = publicDomain || `api.${internalIp}.nip.io`;
         storageType = storageType || 'juicefs';
-        enableSsl = process.env.ENABLE_SSL !== "false";
-        acmeClient = process.env.ACME_CLIENT || 'le';
+        enableSsl = appConfig.enableSsl;
+        acmeClient = appConfig.acmeClient;
         p.log.info(`Using config: IP=${internalIp}, Domain=${publicDomain}, Storage=${storageType}, SSL=${enableSsl}`);
     }
 

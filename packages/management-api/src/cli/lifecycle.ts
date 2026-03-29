@@ -2,9 +2,10 @@ import { $ } from "bun";
 import * as p from "@clack/prompts";
 import fs from "node:fs/promises";
 import { logger } from "../utils/logger";
+import { config } from "../config";
 
 // According to shell branch convention, Supabase Pigsty configuration directory
-const PIGSTY_SUPABASE_DIR = `${process.env.HOME || "/root"}/pigsty/app/supabase`;
+const PIGSTY_SUPABASE_DIR = `${config.homePath}/pigsty/app/supabase`;
 
 async function getComposeCmd() {
     const hasDockerCompose = await $`command -v docker-compose`.quiet().nothrow();

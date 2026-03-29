@@ -9,6 +9,7 @@ import { taskRepository } from "../repositories/task.repository";
 import type { Project, ProjectStatus } from "../db";
 import { edgeFunctionService } from "./edge-function.service";
 import { logger } from "../utils/logger";
+import { config } from "../config";
 import { $ } from "bun";
 
 export interface CreateProjectRequest {
@@ -83,6 +84,18 @@ export interface LogEntryResponse {
 }
 
 export class ProjectService {
+  /** Check if the storage backend (S3/MinIO) is reachable */
+  private async checkStorageHealth(): Promise<boolean> {
+    try {
+      const res = await fetch(`${config.s3Endpoint}/minio/health/live`, {
+        signal: AbortSignal.timeout(3000),
+      });
+      return res.ok;
+    } catch {
+      return false;
+    }
+  }
+
   // Get all projects
   async listProjects(): Promise<ProjectResponse[]> {
     const projects = await projectRepository.findAll();
@@ -282,7 +295,7 @@ export class ProjectService {
     return {
       status: project.status,
       database: dbStatus.success ? "healthy" : "unhealthy",
-      storage: "unknown", // TODO: Implement storage health check
+      storage: await this.checkStorageHealth() ? "healthy" : "unhealthy",
     };
   }
 
@@ -291,8 +304,14 @@ export class ProjectService {
     const project = await projectRepository.findByRef(ref);
     if (!project) return false;
 
-    // TODO: Implement service restart logic
-    // Currently only reloads router
+    // Restart per-tenant services via systemd
+    try {
+      await $`systemctl restart supacloud-pgrst@${ref}`.nothrow().quiet();
+      await $`systemctl restart supacloud-gotrue@${ref}`.nothrow().quiet();
+      logger.info(`[ProjectService] Restarted services for project ${ref}`);
+    } catch (err: unknown) {
+      logger.warn(`[ProjectService] Service restart partial failure for ${ref}`, { error: err });
+    }
     await routerService.reload();
     return true;
   }
@@ -565,7 +584,9 @@ export class ProjectService {
     // 3. Sync to Kong gateway
     await gatewayService.setupJwt(ref, jwtSecret);
 
-    // 4. TODO: Logic to notify router reload can be added here later
+    // 4. Notify router to reload updated JWT configuration
+    await routerService.reload();
+    logger.info(`[ProjectService] Rotated API keys and reloaded router for ${ref}`);
 
     return {
       anon_key: anonKey,

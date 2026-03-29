@@ -1,10 +1,11 @@
 import * as p from "@clack/prompts";
 import { HealthChecker, type HealthReport } from "./infra/health";
+import { config } from "./config";
 import os from "node:os";
 
 function getSpinner() {
     const s = p.spinner();
-    const isCI = process.env.GITHUB_ACTIONS === "true" || !process.stdout.isTTY;
+    const isCI = config.isGithubActions || !process.stdout.isTTY;
     if (isCI) {
         return {
             start: (msg: string) => console.log(`[CI] ${msg}...`),

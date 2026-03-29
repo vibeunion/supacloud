@@ -357,8 +357,8 @@ export function createPgListener(opts: PgListenerOptions): PgListenerHandle {
         reconnectTimer = null;
       }
       try {
-        // @ts-ignore - Bun.connect returns a socket with end()
-        socket?.end?.();
+        // socket is the return value of Bun.connect — use type assertion for end()
+        (socket as { end?: () => void })?.end?.();
       } catch (err: unknown) {
       // Ignore close errors
       logger.warn("[PgListen] Failed to close TCP connection during cleanup", { error: err });
