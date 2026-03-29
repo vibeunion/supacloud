@@ -9,7 +9,7 @@ const savedLocale = typeof localStorage !== 'undefined' ? localStorage.getItem('
 
 init({
   fallbackLocale: 'en',
-  initialLocale: savedLocale || getLocaleFromNavigator(),
+  initialLocale: savedLocale || getLocaleFromNavigator() || 'zh-CN',
 });
 
 // 在客戶端環境下導出一個等待函數
