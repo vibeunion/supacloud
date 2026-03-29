@@ -2,6 +2,8 @@ import { register, init, getLocaleFromNavigator, locale, waitLocale } from 'svel
 
 register('en', () => import('./locales/en.json'));
 register('zh', () => import('./locales/zh.json'));
+register('zh-CN', () => import('./locales/zh.json'));
+register('en-US', () => import('./locales/en.json'));
 
 const savedLocale = typeof localStorage !== 'undefined' ? localStorage.getItem('selected-locale') : null;
 

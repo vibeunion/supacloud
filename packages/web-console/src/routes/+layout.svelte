@@ -1,5 +1,6 @@
 <script lang="ts">
   import "../app.css";
+  import "$lib/i18n"; // Ensure svelte-i18n is initialized synchronously before child components import `t`
   import { onMount, type Snippet } from "svelte";
   import {
     setDataProvider,
