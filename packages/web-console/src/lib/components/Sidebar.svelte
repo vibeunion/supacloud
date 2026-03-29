@@ -54,82 +54,86 @@
   }
 </script>
 
-<aside class={cn("flex flex-col w-64 h-screen border-r bg-card text-foreground", className)}>
-  <div class="h-16 flex items-center px-6 border-b">
-    <span class="text-xl font-bold tracking-tight text-brand">SupaCloud</span>
+<aside class={cn("flex flex-col w-64 h-screen border-r bg-card/80 backdrop-blur-2xl text-foreground", className)}>
+  <div class="h-16 flex items-center gap-3 px-6 border-b border-border/50">
+    <div class="w-7 h-7 rounded-lg bg-gradient-to-br from-brand to-purple-600 flex items-center justify-center text-white font-black text-sm shadow-md shadow-brand/20">SC</div>
+    <span class="text-lg font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-foreground to-muted-foreground">SupaCloud</span>
   </div>
 
   <ProjectSwitcher {projects} {currentProject} />
 
-  <nav class="flex-1 overflow-y-auto py-6 px-3 space-y-1">
+  <nav class="flex-1 overflow-y-auto py-6 px-4 space-y-1.5 scrollbar-thin scrollbar-thumb-secondary">
     <a
       href={`/project/${currentProject?.ref}`}
       class={cn(
-        "flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-md transition-colors",
+        "group flex items-center gap-3 px-3 py-2.5 text-sm font-medium rounded-xl transition-all duration-300",
         $page.url.pathname === `/project/${currentProject?.ref}` || $page.url.pathname === `/project/${currentProject?.ref}/`
-          ? "bg-secondary text-foreground" 
-          : "text-muted-foreground hover:bg-secondary/50 hover:text-foreground"
+          ? "bg-secondary/80 text-foreground shadow-sm ring-1 ring-border/50" 
+          : "text-muted-foreground hover:bg-secondary/50 hover:text-foreground hover:translate-x-1"
       )}
     >
-      <LayoutDashboard class="w-4 h-4" />
+      <LayoutDashboard class={cn("w-4 h-4 transition-colors", $page.url.pathname === `/project/${currentProject?.ref}` || $page.url.pathname === `/project/${currentProject?.ref}/` ? "text-brand" : "group-hover:text-brand")} />
       {$t("Dashboard.title")}
     </a>
-    <div class="h-4"></div>
+    <div class="h-3"></div>
     {#each navItems as item}
       <a
         href={item.href}
         class={cn(
-          "flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-md transition-colors",
+          "group flex items-center gap-3 px-3 py-2.5 text-sm font-medium rounded-xl transition-all duration-300",
           isActive(item.href) 
-            ? "bg-secondary text-foreground" 
-            : "text-muted-foreground hover:bg-secondary/50 hover:text-foreground"
+            ? "bg-secondary/80 text-foreground shadow-sm ring-1 ring-border/50" 
+            : "text-muted-foreground hover:bg-secondary/50 hover:text-foreground hover:translate-x-1"
         )}
       >
-        <item.icon class="w-4 h-4" />
+        <item.icon class={cn("w-4 h-4 transition-colors", isActive(item.href) ? "text-brand" : "group-hover:text-brand")} />
         {item.title}
       </a>
     {/each}
 
     <!-- Platform Admin separator -->
-    <div class="h-px bg-border/50 my-3"></div>
-    <span class="px-3 text-[9px] font-bold uppercase text-muted-foreground/50 tracking-widest">{$t("Sidebar.platform_admin")}</span>
+    <div class="h-px bg-border/40 my-4"></div>
+    <span class="px-3 text-[10px] font-bold uppercase text-muted-foreground/40 tracking-widest mb-1 block">{$t("Sidebar.platform_admin")}</span>
     <a
       href="/platform"
       class={cn(
-        "flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-md transition-colors",
+        "group flex items-center gap-3 px-3 py-2.5 text-sm font-medium rounded-xl transition-all duration-300",
         $page.url.pathname.startsWith("/platform")
-          ? "bg-secondary text-foreground" 
-          : "text-muted-foreground hover:bg-secondary/50 hover:text-foreground"
+          ? "bg-secondary/80 text-foreground shadow-sm ring-1 ring-border/50" 
+          : "text-muted-foreground hover:bg-secondary/50 hover:text-foreground hover:translate-x-1"
       )}
     >
-      <Settings class="w-4 h-4" />
+      <Settings class={cn("w-4 h-4 transition-colors", $page.url.pathname.startsWith("/platform") ? "text-brand" : "group-hover:text-brand")} />
       {$t("Sidebar.infrastructure")}
     </a>
   </nav>
 
-  <div class="p-4 border-t space-y-2">
+  <div class="p-4 border-t border-border/50 space-y-2 relative overflow-hidden">
+    <!-- Subtle glow background at bottom -->
+    <div class="absolute -bottom-10 -left-10 w-32 h-32 bg-brand/5 rounded-full blur-3xl pointer-events-none"></div>
+
     <a
       href="/platform"
-      class="flex w-full items-center gap-3 px-3 py-2 text-sm font-medium rounded-md text-brand bg-brand/5 hover:bg-brand/10 transition-colors"
+      class="group flex w-full items-center gap-3 px-3 py-2.5 text-sm font-medium rounded-xl text-brand bg-brand/5 hover:bg-brand/10 transition-all duration-300 hover:shadow-sm"
     >
-      <Shield class="w-4 h-4" />
+      <Shield class="w-4 h-4 group-hover:scale-110 transition-transform" />
       <span>{$t("Sidebar.platform_admin")}</span>
     </a>
     <button
       onclick={(e) => { e.preventDefault(); toggleLanguage(); }}
-      class="flex w-full items-center gap-3 px-3 py-2 text-sm font-medium rounded-md text-muted-foreground hover:bg-secondary/50 hover:text-foreground transition-colors"
+      class="flex w-full items-center gap-3 px-3 py-2.5 text-sm font-medium rounded-xl text-muted-foreground hover:bg-secondary/50 hover:text-foreground transition-all duration-300"
     >
       <Languages class="w-4 h-4" />
       <span>{$locale === 'zh' ? 'English' : '简体中文'}</span>
     </button>
 
-    <div class="flex items-center gap-3 px-3 py-2">
-      <div class="w-8 h-8 rounded-full bg-brand/20 flex items-center justify-center text-brand font-bold text-xs">
+    <div class="flex items-center gap-3 px-3 py-3 mt-1 bg-secondary/30 rounded-xl border border-border/30">
+      <div class="w-8 h-8 rounded-full bg-gradient-to-tr from-brand to-emerald-400 flex items-center justify-center text-white font-bold text-xs shadow-inner">
         SC
       </div>
-      <div class="flex flex-col">
-        <span class="text-sm font-semibold truncate">Admin User</span>
-        <span class="text-xs text-muted-foreground truncate">admin@supacloud.local</span>
+      <div class="flex flex-col flex-1 min-w-0">
+        <span class="text-sm font-semibold truncate text-foreground">Admin User</span>
+        <span class="text-[10px] text-muted-foreground truncate opacity-80">admin@supacloud.local</span>
       </div>
     </div>
   </div>
