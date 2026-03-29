@@ -1,5 +1,8 @@
 @import "tailwindcss";
 
+@source "../node_modules/@svadmin/ui";
+@source "../node_modules/@svadmin/core";
+
 @theme {
   --color-brand: hsl(153 60% 53%);
   --color-border: hsl(var(--border));
