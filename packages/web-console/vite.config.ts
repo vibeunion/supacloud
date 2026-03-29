@@ -11,6 +11,11 @@ export default defineConfig({
 	optimizeDeps: {
 		exclude: ['bun', 'bun:sql', 'monaco-editor']
 	},
+	build: {
+		rollupOptions: {
+			external: ['bun', 'bun:sql', 'monaco-editor']
+		}
+	},
 	server: {
 		fs: {
 			// Allow serving files from management-api (since we use it via alias)
