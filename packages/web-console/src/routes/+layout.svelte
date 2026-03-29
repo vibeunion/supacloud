@@ -28,7 +28,8 @@
     setRouterProvider,
     setTheme,
     setLocale,
-    setChatProvider
+    setChatProvider,
+    addTranslations
   } from "@svadmin/core";
   import { createSvelteKitRouterProvider } from "@svadmin/sveltekit";
   import { Toast as SvadminToast, DevTools, setComponentRegistry, ChatDialog } from "@svadmin/ui";
@@ -36,6 +37,27 @@
   import { dataProvider, chatProvider } from "$lib/admin/provider";
   import { authProvider } from "$lib/admin/auth";
   import { resources as defaultResources, getTenantResources } from "$lib/admin/resources";
+  
+  import zhLocales from "$lib/i18n/locales/zh.json";
+  import enLocales from "$lib/i18n/locales/en.json";
+  
+  const flattenChat = (loc: any): Record<string, string> => {
+    if (!loc?.chat) return {};
+    return {
+      'chat.title': loc.chat.title || '',
+      'chat.welcome': loc.chat.welcome || '',
+      'chat.welcomeDesc': loc.chat.welcomeDesc || '',
+      'chat.suggestion1': loc.chat.suggestion1 || '',
+      'chat.suggestion2': loc.chat.suggestion2 || '',
+      'chat.suggestion3': loc.chat.suggestion3 || '',
+      'chat.placeholder': loc.chat.placeholder || '',
+      'chat.shortcutHint': loc.chat.shortcutHint || '',
+    };
+  };
+  
+  addTranslations('zh-CN', flattenChat(zhLocales));
+  addTranslations('en', flattenChat(enLocales));
+
 
   let { children }: { children: Snippet } = $props();
 
