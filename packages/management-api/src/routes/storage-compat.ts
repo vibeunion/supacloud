@@ -34,12 +34,19 @@ import { config } from "../config";
 // ── Imaginary Config ──────────────────────────────────────────────
 const IMAGINARY_URL = config.imaginaryUrl;
 const S3_ENDPOINT  = config.s3Endpoint;
-const _signingSecret = config.jwtSecret || config.storageSigningSecret;
-if (!_signingSecret) {
-    logger.error("[storage-compat] FATAL: JWT_SECRET or STORAGE_SIGNING_SECRET must be set. Refusing to start with insecure defaults.");
-    throw new Error("Missing required environment variable: JWT_SECRET or STORAGE_SIGNING_SECRET");
+
+// Lazy-init: validate signing secret on first use, not at module load
+// This prevents test suites from crashing when importing the app module
+let _cachedSigningSecret: string | undefined;
+function getSigningSecret(): string {
+    if (!_cachedSigningSecret) {
+        _cachedSigningSecret = config.jwtSecret || config.storageSigningSecret;
+        if (!_cachedSigningSecret) {
+            throw new Error("Missing required environment variable: JWT_SECRET or STORAGE_SIGNING_SECRET");
+        }
+    }
+    return _cachedSigningSecret;
 }
-const SIGNING_SECRET: string = _signingSecret;
 
 import { createHmac } from "crypto";
 
@@ -48,7 +55,7 @@ import { createHmac } from "crypto";
  */
 function generateSignedToken(ref: string, bucket: string, path: string, expiresAt: number): string {
     const payload = `${ref}:${bucket}:${path}:${expiresAt}`;
-    return createHmac("sha256", SIGNING_SECRET).update(payload).digest("hex");
+    return createHmac("sha256", getSigningSecret()).update(payload).digest("hex");
 }
 
 /**
@@ -419,7 +426,6 @@ export const storageCompatRoutes = new Elysia({ prefix: "/storage/v1/s" })
     // ════════════════════════════════════════════════════════
 
     .post('/object/move', async ({ headers, body }) => {
-        // Basic implementation: copy + delete
         const ref = getProjectRef(headers as Record<string, string | undefined>);
         const b = body as Record<string, unknown>;
         const srcBucket = String(b.bucketId || '');
@@ -431,8 +437,25 @@ export const storageCompatRoutes = new Elysia({ prefix: "/storage/v1/s" })
             return status(400, { statusCode: '400', error: 'Bad Request', message: 'Missing source or destination' });
         }
 
-        // TODO: implement move via S3 copy + delete
-        return { message: `Moved ${srcBucket}/${srcKey} to ${destBucket}/${destKey}` };
+        try {
+            // Step 1: Copy object to destination
+            const copyRes = await fetch(`${S3_ENDPOINT}/${destBucket}/${destKey}`, {
+                method: 'PUT',
+                headers: {
+                    'x-amz-copy-source': `/${srcBucket}/${srcKey}`,
+                },
+            });
+            if (!copyRes.ok) {
+                return status(500, { statusCode: '500', error: 'S3 Error', message: `Copy failed: ${copyRes.status}` });
+            }
+
+            // Step 2: Delete source object
+            await fetch(`${S3_ENDPOINT}/${srcBucket}/${srcKey}`, { method: 'DELETE' });
+
+            return { message: `Moved ${srcBucket}/${srcKey} to ${destBucket}/${destKey}` };
+        } catch (err: unknown) {
+            return status(500, { statusCode: '500', error: 'S3 Error', message: err instanceof Error ? err.message : String(err) });
+        }
     })
 
     .post('/object/copy', async ({ headers, body }) => {
@@ -445,8 +468,21 @@ export const storageCompatRoutes = new Elysia({ prefix: "/storage/v1/s" })
             return status(400, { statusCode: '400', error: 'Bad Request', message: 'Missing source or destination' });
         }
 
-        // TODO: implement copy via S3 copy
-        return { Key: `${srcBucket}/${destKey}` };
+        try {
+            const copyRes = await fetch(`${S3_ENDPOINT}/${srcBucket}/${destKey}`, {
+                method: 'PUT',
+                headers: {
+                    'x-amz-copy-source': `/${srcBucket}/${srcKey}`,
+                },
+            });
+            if (!copyRes.ok) {
+                return status(500, { statusCode: '500', error: 'S3 Error', message: `Copy failed: ${copyRes.status}` });
+            }
+
+            return { Key: `${srcBucket}/${destKey}` };
+        } catch (err: unknown) {
+            return status(500, { statusCode: '500', error: 'S3 Error', message: err instanceof Error ? err.message : String(err) });
+        }
     })
 
     // ════════════════════════════════════════════════════════
