@@ -1,11 +1,12 @@
 import { $ } from "bun";
 import * as p from "@clack/prompts";
+import { config } from "../config";
 
-const API_URL = process.env.SUPACLOUD_API_URL || "http://localhost:9090";
+const API_URL = config.supacloudApiUrl;
 
 async function getMasterToken(): Promise<string> {
-    if (process.env.MASTER_TOKEN) {
-        return process.env.MASTER_TOKEN;
+    if (config.masterToken && config.masterToken !== "dev-master-token") {
+        return config.masterToken;
     }
     console.error("Error: MASTER_TOKEN environment variable is required");
     console.error("Set it with: export MASTER_TOKEN=your-token");
