@@ -18,7 +18,8 @@
     ShieldCheck,
     ScrollText,
     Radio,
-    Globe
+    Globe,
+    Glasses
   } from "lucide-svelte";
   import { page } from '$app/stores';
 
@@ -43,6 +44,7 @@
     { title: $t("Navigation.query_performance"), icon: LineChart, href: `/project/${currentProject?.ref}/reports/query-performance` },
     { title: $t("Navigation.database_linter"), icon: ShieldCheck, href: `/project/${currentProject?.ref}/reports/database-linter` },
     { title: $t("Sidebar.database_advisor"), icon: ShieldCheck, href: `/project/${currentProject?.ref}/reports/advisors` },
+    { title: $t("Navigation.reports"), icon: Glasses, href: `/project/${currentProject?.ref}/reports/slow-queries` },
     { title: $t("Navigation.logs"), icon: ScrollText, href: `/project/${currentProject?.ref}/logs` },
     { title: $t("Navigation.settings"), icon: Settings, href: `/project/${currentProject?.ref}/settings` },
   ]);
