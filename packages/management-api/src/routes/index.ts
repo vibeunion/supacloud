@@ -20,3 +20,6 @@ export { userManagementRoutes } from "./auth-users";
 export { frontendRoutes } from "./frontend";
 export { webhookRoutes } from "./webhook";
 export { deployRoutes } from "./deploy";
+export { chatRoutes } from "./chat";
+export { platformSettingsRoutes } from "./platform-settings";
+export { projectLogsRoutes } from "./project-logs";

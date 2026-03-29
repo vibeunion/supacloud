@@ -16,7 +16,8 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
 
       const { jwtService } = await import("../services/jwt.service");
       const serviceRoleKey = await jwtService.generateServiceRoleKey(project.jwt_secret);
-      const apiUrl = project.api?.url || `https://${params.ref}.supabase.co`;
+      const { config } = await import("../config");
+      const apiUrl = project.api?.url || config.kongInternal;
 
       // Pass along pagination
       const skip = Number(query.skip || 0);
@@ -25,7 +26,8 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
       const res = await fetch(`${apiUrl}/auth/v1/admin/users`, {
         headers: {
           "apikey": serviceRoleKey,
-          "Authorization": `Bearer ${serviceRoleKey}`
+          "Authorization": `Bearer ${serviceRoleKey}`,
+          "x-project-ref": params.ref
         }
       });
 
@@ -64,14 +66,16 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
 
       const { jwtService } = await import("../services/jwt.service");
       const serviceRoleKey = await jwtService.generateServiceRoleKey(project.jwt_secret);
-      const apiUrl = project.api?.url || `https://${params.ref}.supabase.co`;
+      const { config } = await import("../config");
+      const apiUrl = project.api?.url || config.kongInternal;
 
       const res = await fetch(`${apiUrl}/auth/v1/admin/users`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           "apikey": serviceRoleKey,
-          "Authorization": `Bearer ${serviceRoleKey}`
+          "Authorization": `Bearer ${serviceRoleKey}`,
+          "x-project-ref": params.ref
         },
         body: JSON.stringify({
           email: body.email,
@@ -112,14 +116,16 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
 
       const { jwtService } = await import("../services/jwt.service");
       const serviceRoleKey = await jwtService.generateServiceRoleKey(project.jwt_secret);
-      const apiUrl = project.api?.url || `https://${params.ref}.supabase.co`;
+      const { config } = await import("../config");
+      const apiUrl = project.api?.url || config.kongInternal;
 
       const res = await fetch(`${apiUrl}/auth/v1/invite`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           "apikey": serviceRoleKey,
-          "Authorization": `Bearer ${serviceRoleKey}`
+          "Authorization": `Bearer ${serviceRoleKey}`,
+          "x-project-ref": params.ref
         },
         body: JSON.stringify({
           email: body.email,
@@ -154,14 +160,16 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
 
       const { jwtService } = await import("../services/jwt.service");
       const serviceRoleKey = await jwtService.generateServiceRoleKey(project.jwt_secret);
-      const apiUrl = project.api?.url || `https://${params.ref}.supabase.co`;
+      const { config } = await import("../config");
+      const apiUrl = project.api?.url || config.kongInternal;
 
       const res = await fetch(`${apiUrl}/auth/v1/admin/users/${params.id}`, {
         method: "DELETE",
         headers: {
           "Content-Type": "application/json",
           "apikey": serviceRoleKey,
-          "Authorization": `Bearer ${serviceRoleKey}`
+          "Authorization": `Bearer ${serviceRoleKey}`,
+          "x-project-ref": params.ref
         }
       });
 
