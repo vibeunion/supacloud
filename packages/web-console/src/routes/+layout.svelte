@@ -6,7 +6,8 @@
     setAuthProvider,
     setResources,
     setRouterProvider,
-    setTheme
+    setTheme,
+    setLocale
   } from "@svadmin/core";
   import { createSvelteKitRouterProvider } from "@svadmin/sveltekit";
   import { Layout, Toast, DevTools, setComponentRegistry } from "@svadmin/ui";
@@ -37,6 +38,7 @@
 
     setRouterProvider(routerProvider);
     setTheme("system");
+    setLocale("zh-CN");
   });
 
   let isRawPage = $derived(($page.url.pathname as string) === "/login" || ($page.url.pathname as string) === "/register");
