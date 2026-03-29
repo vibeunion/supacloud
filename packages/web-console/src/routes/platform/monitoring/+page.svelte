@@ -21,8 +21,9 @@
 
   function detectGrafanaHost() {
     // Try to detect: same host, port 3000
+    const protocol = window.location.protocol;
     const host = window.location.hostname;
-    grafanaHost = `http://${host}:3000`;
+    grafanaHost = `${protocol}//${host}:3000`;
   }
 
   const grafanaUrl = $derived(
