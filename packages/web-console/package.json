@@ -48,7 +48,11 @@
     "@svadmin/sveltekit": "^0.8.0",
     "@svadmin/ui": "^0.18.0",
     "@tanstack/svelte-query": "^6.1.10",
+    "highlight.js": "^11.11.1",
+    "isomorphic-dompurify": "^3.7.1",
     "lucide-svelte": "^0.577.0",
+    "marked": "^17.0.5",
+    "marked-highlight": "^2.2.3",
     "monaco-editor": "^0.55.1",
     "svelte-i18n": "^4.0.1"
   }
