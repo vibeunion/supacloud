@@ -1,10 +1,10 @@
 <script lang="ts">
   import { apiClient } from "$lib/api";
 
-  import { onMount } from "svelte";
   import { page } from "$app/state";
   import { t } from "svelte-i18n";
   import { Loader2, GitCommitVertical, FileCode2 } from "lucide-svelte";
+  import { createQuery } from "@tanstack/svelte-query";
 
   interface Migration {
     version: string;
@@ -12,11 +12,6 @@
     statements: number;
     executed_at: string;
   }
-
-  let migrations = $state<Migration[]>([]);
-  let isLoading = $state(true);
-  let error = $state<string | null>(null);
-  let fallbackMsg = $state<string | null>(null);
 
   const projectRef = $derived(page.params.ref);
 
@@ -30,35 +25,23 @@
     ORDER BY version DESC;
   `;
 
-  async function fetchMigrations() {
-    isLoading = true;
-    error = null;
-    fallbackMsg = null;
-    try {
+  const migrationsQuery = createQuery(() => ({
+    queryKey: ["database_migrations", projectRef],
+    queryFn: async () => {
       const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sql: MIGRATIONS_SQL })
       });
       const data = await res.json();
-      if (data.error) {
-        fallbackMsg = $t("Migrations.no_migrations");
-        return;
-      }
-      const rows = Array.isArray(data) ? data : data.rows || [];
-      if (rows.length === 0) {
-        fallbackMsg = $t("Migrations.no_migrations");
-      } else {
-        migrations = rows;
-      }
-    } catch (err: unknown) {
-      error = err instanceof Error ? err.message : String(err);
-    } finally {
-      isLoading = false;
+      if (data.error) throw new Error(data.message || data.error);
+      return (Array.isArray(data) ? data : data.rows || []) as Migration[];
     }
-  }
+  }));
 
-  onMount(() => { fetchMigrations(); });
+  const migrations = $derived((migrationsQuery.data as Migration[]) || []);
+  const isLoading = $derived(migrationsQuery.isPending);
+  const error = $derived(migrationsQuery.error?.message || null);
+  const fallbackMsg = $derived(!isLoading && !error && migrations.length === 0 ? "暂无迁移历史" : null);
 
   function formatTime(ts: string): string {
     try { return new Date(ts).toLocaleString(); } catch { return ts; }

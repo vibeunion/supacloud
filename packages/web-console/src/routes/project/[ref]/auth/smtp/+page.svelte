@@ -1,9 +1,9 @@
 <script lang="ts">
   import { apiClient } from "$lib/api";
 
-  import { onMount } from "svelte";
   import { page } from "$app/state";
   import { Loader2, Mail, Server, AlertTriangle, Save } from "lucide-svelte";
+  import { createQuery, createMutation, useQueryClient } from "@tanstack/svelte-query";
 
   interface SmtpField {
     key: string;
@@ -25,33 +25,38 @@
   ];
 
   let fields = $state<SmtpField[]>(SMTP_FIELDS.map(f => ({ ...f })));
-  let isLoading = $state(true);
   let smtpEnabled = $state(false);
-  let saving = $state(false);
   let saveMsg = $state<string | null>(null);
 
   const projectRef = $derived(page.params.ref);
+  const queryClient = useQueryClient();
 
-  async function fetchConfig() {
-    isLoading = true;
-    try {
+  const configQuery = createQuery(() => ({
+    queryKey: ["auth_config", projectRef],
+    queryFn: async () => {
       const res = await apiClient(`/v1/projects/${projectRef}/auth/config`);
-      if (res.ok) {
-        const config = await res.json();
-        smtpEnabled = config.SMTP_HOST ? true : false;
-        for (const f of fields) {
-          if (config[f.key] !== undefined && config[f.key] !== null) {
-            f.value = String(config[f.key]);
-          }
-        }
-      }
-    } catch { /* keep defaults */ }
-    finally { isLoading = false; }
-  }
+      if (!res.ok) throw new Error("Failed to load config");
+      return await res.json();
+    }
+  }));
 
-  async function saveConfig() {
-    saving = true;
-    try {
+  $effect(() => {
+    if (configQuery.data) {
+      const config = configQuery.data;
+      smtpEnabled = config.SMTP_HOST ? true : false;
+      fields = fields.map(f => {
+        if (config[f.key] !== undefined && config[f.key] !== null) {
+          return { ...f, value: String(config[f.key]) };
+        }
+        return f;
+      });
+    }
+  });
+
+  const isLoading = $derived(configQuery.isPending);
+
+  const saveMutation = createMutation(() => ({
+    mutationFn: async () => {
       const configPayload: Record<string, string> = {};
       for (const f of fields) {
         configPayload[f.key] = f.value;
@@ -64,21 +69,27 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(configPayload)
       });
-      if (res.ok) {
-        saveMsg = "✅ SMTP 配置已保存（GoTrue 服务已重启）";
-      } else {
+      if (!res.ok) {
         const err = await res.json();
-        saveMsg = `❌ 保存失败: ${err.error || res.statusText}`;
+        throw new Error(err.error || res.statusText);
       }
-    } catch (err: unknown) {
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["auth_config", projectRef] });
+      saveMsg = "✅ SMTP 配置已保存（GoTrue 服务已重启）";
+      setTimeout(() => saveMsg = null, 4000);
+    },
+    onError: (err: unknown) => {
       saveMsg = `❌ 保存失败: ${(err instanceof Error ? err.message : String(err))}`;
-    } finally {
-      saving = false;
       setTimeout(() => saveMsg = null, 4000);
     }
-  }
+  }));
 
-  onMount(() => { fetchConfig(); });
+  async function saveConfig() {
+    saveMsg = null;
+    saveMutation.mutate();
+  }
 </script>
 
 <div class="h-full flex flex-col space-y-4">
@@ -87,9 +98,9 @@
       <h1 class="text-2xl font-bold">SMTP 设置</h1>
       <p class="text-sm text-muted-foreground mt-1">配置自定义 SMTP 服务器，用于发送认证相关邮件</p>
     </div>
-    <button onclick={saveConfig} disabled={saving || !smtpEnabled}
+    <button onclick={saveConfig} disabled={saveMutation.isPending || (smtpEnabled && Object.values(fields).some(f => !f.value && f.key !== "SMTP_PASS"))}
       class="flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg bg-brand text-white hover:bg-brand/90 transition-colors disabled:opacity-50">
-      {#if saving}<Loader2 size={14} class="animate-spin" />{:else}<Save size={14} />{/if}
+      {#if saveMutation.isPending}<Loader2 size={14} class="animate-spin" />{:else}<Save size={14} />{/if}
       保存配置
     </button>
   </div>

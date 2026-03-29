@@ -1,10 +1,10 @@
 <script lang="ts">
   import { apiClient } from "$lib/api";
 
-  import { onMount } from "svelte";
   import { page } from "$app/state";
   import { t } from "svelte-i18n";
   import { Loader2, Key, Copy, Check, Database, Code2, BookOpen, ArrowRight, Globe, Tag, Shield } from "lucide-svelte";
+  import { createQuery } from "@tanstack/svelte-query";
 
   interface TableEndpoint {
     table_name: string;
@@ -12,11 +12,7 @@
     columns: { name: string; type: string; nullable: boolean; default_val: string | null }[];
   }
 
-  let project = $state(null as Record<string, unknown> | null);
-  let isLoading = $state(true);
   let copiedField = $state<string | null>(null);
-  let endpoints = $state<TableEndpoint[]>([]);
-  let loadingEndpoints = $state(false);
   let selectedEndpoint = $state<TableEndpoint | null>(null);
   let activeTab = $state<"introduction" | "endpoints">("introduction");
 
@@ -24,17 +20,18 @@
   const hostname = $derived(page.url?.hostname || "localhost");
   const apiUrl = $derived(`http://${hostname}:8000`);
 
-  async function fetchProject() {
-    isLoading = true;
-    try {
+  const projectQuery = createQuery(() => ({
+    queryKey: ["v1/projects", "getOne", projectRef],
+    queryFn: async () => {
       const res = await apiClient(`/v1/projects/${projectRef}`);
-      project = await res.json();
-    } catch {} finally { isLoading = false; }
-  }
+      if (!res.ok) throw new Error("Failed to fetch project");
+      return res.json();
+    }
+  }));
 
-  async function fetchEndpoints() {
-    loadingEndpoints = true;
-    try {
+  const endpointsQuery = createQuery(() => ({
+    queryKey: ["api-endpoints", projectRef],
+    queryFn: async () => {
       const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -53,15 +50,21 @@
           ORDER BY t.table_name`
         })
       });
+      if (!res.ok) throw new Error("Failed to fetch endpoints");
       const data = await res.json();
       const rows = Array.isArray(data) ? data : data.rows || [];
-      endpoints = rows.map((r: Record<string, unknown>) => ({
+      return rows.map((r: Record<string, unknown>) => ({
         table_name: r.table_name,
         table_schema: r.table_schema,
         columns: typeof r.columns === 'string' ? JSON.parse(r.columns) : r.columns || []
-      }));
-    } catch {} finally { loadingEndpoints = false; }
-  }
+      })) as TableEndpoint[];
+    }
+  }));
+
+  const project = $derived(projectQuery.data?.data || projectQuery.data || null);
+  const endpoints = $derived(endpointsQuery.data || []);
+  const isLoading = $derived(projectQuery.isPending);
+  const loadingEndpoints = $derived(endpointsQuery.isPending);
 
   async function copyToClipboard(text: string, field: string) {
     try { await navigator.clipboard.writeText(text); } catch {}
@@ -69,7 +72,7 @@
     setTimeout(() => copiedField = null, 2000);
   }
 
-  onMount(() => { fetchProject(); fetchEndpoints(); });
+
 
   function generateCurlExample(ep: TableEndpoint): string {
     return `curl '${apiUrl}/rest/v1/${ep.table_name}?select=*' \\

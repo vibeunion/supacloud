@@ -269,7 +269,8 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
             const res = await fetch(`${IMAGINARY_URL}/health`);
             if (!res.ok) return { status: 'unhealthy', statusCode: res.status };
             return { status: 'healthy', engine: 'imaginary/libvips' };
-        } catch {
+        } catch (err: unknown) {
+            logger.warn(`[Storage] Imaginary service health check failed: ${(err as Error).message}`);
             return { status: 'unreachable', error: 'Cannot connect to imaginary service' };
         }
     });

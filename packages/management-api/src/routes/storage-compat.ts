@@ -33,7 +33,12 @@ import { logger } from "../utils/logger";
 // ── Imaginary Config ──────────────────────────────────────────────
 const IMAGINARY_URL = process.env.IMAGINARY_URL || "http://127.0.0.1:9010";
 const S3_ENDPOINT  = process.env.S3_ENDPOINT   || "http://127.0.0.1:9000";
-const SIGNING_SECRET = process.env.JWT_SECRET || process.env.STORAGE_SIGNING_SECRET || "super-secret-signing-key";
+const _signingSecret = process.env.JWT_SECRET || process.env.STORAGE_SIGNING_SECRET;
+if (!_signingSecret) {
+    logger.error("[storage-compat] FATAL: JWT_SECRET or STORAGE_SIGNING_SECRET must be set. Refusing to start with insecure defaults.");
+    throw new Error("Missing required environment variable: JWT_SECRET or STORAGE_SIGNING_SECRET");
+}
+const SIGNING_SECRET: string = _signingSecret;
 
 import { createHmac } from "crypto";
 

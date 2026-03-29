@@ -1,10 +1,10 @@
 <script lang="ts">
   import { apiClient } from "$lib/api";
 
-  import { onMount } from "svelte";
   import { page } from "$app/state";
   import { t } from "svelte-i18n";
   import { Loader2, Radio, Check, X } from "lucide-svelte";
+  import { createQuery } from "@tanstack/svelte-query";
 
   interface Publication {
     pubname: string;
@@ -16,10 +16,6 @@
     pubtruncate: boolean;
     tables: string;
   }
-
-  let publications = $state<Publication[]>([]);
-  let isLoading = $state(true);
-  let error = $state<string | null>(null);
 
   const projectRef = $derived(page.params.ref);
 
@@ -40,26 +36,22 @@
     ORDER BY p.pubname;
   `;
 
-  async function fetchPublications() {
-    isLoading = true;
-    error = null;
-    try {
+  const publicationsQuery = createQuery(() => ({
+    queryKey: ["database_publications", projectRef],
+    queryFn: async () => {
       const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sql: PUB_SQL })
       });
       const data = await res.json();
       if (data.error) throw new Error(data.message || data.error);
-      publications = Array.isArray(data) ? data : data.rows || [];
-    } catch (err: unknown) {
-      error = err instanceof Error ? err.message : String(err);
-    } finally {
-      isLoading = false;
+      return (Array.isArray(data) ? data : data.rows || []) as Publication[];
     }
-  }
+  }));
 
-  onMount(() => { fetchPublications(); });
+  const publications = $derived((publicationsQuery.data as Publication[]) || []);
+  const isLoading = $derived(publicationsQuery.isPending);
+  const error = $derived(publicationsQuery.error?.message || null);
 </script>
 
 <div class="h-full flex flex-col space-y-4">

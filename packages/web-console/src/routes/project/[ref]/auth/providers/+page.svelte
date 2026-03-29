@@ -1,9 +1,9 @@
 <script lang="ts">
   import { apiClient } from "$lib/api";
 
-  import { onMount } from "svelte";
   import { page } from "$app/state";
   import { Loader2, Check, X, Search, Shield, KeyRound, ChevronDown, ChevronUp, Save, Trash2, Eye, EyeOff } from "lucide-svelte";
+  import { createQuery, createMutation, useQueryClient } from "@tanstack/svelte-query";
 
   interface ProviderConfig {
     name: string;
@@ -46,13 +46,49 @@
     { name: "抖音", key: "douyin", category: "china" },
   ];
 
-  let providers = $state<ProviderConfig[]>([]);
-  let isLoading = $state(true);
   let searchQuery = $state("");
   let showSecrets = $state<Record<string, boolean>>({});
   let saveMsg = $state<string | null>(null);
 
   const projectRef = $derived(page.params.ref);
+  const queryClient = useQueryClient();
+
+  const providersQuery = createQuery(() => ({
+    queryKey: ["auth_providers", projectRef],
+    queryFn: async () => {
+      const res = await apiClient(`/v1/projects/${projectRef}/auth/studio/providers`);
+      if (!res.ok) throw new Error("Failed to load providers");
+      return await res.json();
+    }
+  }));
+
+  // Create local states based on the query data
+  let providers = $state<ProviderConfig[]>([]);
+
+  $effect(() => {
+    if (providersQuery.data) {
+      const provMap = providersQuery.data.providers || {};
+      providers = PROVIDERS_DEF.map(def => {
+        // preserve expanded state
+        const existing = providers.find(p => p.key === def.key);
+        return {
+          ...def,
+          enabled: provMap[def.key]?.enabled || false,
+          client_id: provMap[def.key]?.client_id || existing?.client_id || "",
+          client_secret: existing?.client_secret || "",
+          redirect_uri: provMap[def.key]?.redirect_uri || existing?.redirect_uri || "",
+          expanded: existing?.expanded || false,
+          saving: false,
+        };
+      });
+    } else if (providersQuery.isError || (providers.length === 0 && !providersQuery.isPending)) {
+      providers = PROVIDERS_DEF.map(def => ({
+        ...def, enabled: false, client_id: "", client_secret: "", redirect_uri: "", expanded: false, saving: false,
+      }));
+    }
+  });
+
+  const isLoading = $derived(providersQuery.isPending);
 
   const filteredProviders = $derived(
     searchQuery.trim()
@@ -62,50 +98,8 @@
 
   const enabledCount = $derived(providers.filter(p => p.enabled).length);
 
-  async function fetchProviders() {
-    isLoading = true;
-    try {
-      const res = await apiClient(`/v1/projects/${projectRef}/auth/studio/providers`);
-      if (res.ok) {
-        const data = await res.json();
-        const provMap = data.providers || {};
-        providers = PROVIDERS_DEF.map(def => ({
-          ...def,
-          enabled: provMap[def.key]?.enabled || false,
-          client_id: provMap[def.key]?.client_id || "",
-          client_secret: "",
-          redirect_uri: provMap[def.key]?.redirect_uri || "",
-          expanded: false,
-          saving: false,
-        }));
-      } else {
-        providers = PROVIDERS_DEF.map(def => ({
-          ...def,
-          enabled: false,
-          client_id: "",
-          client_secret: "",
-          redirect_uri: "",
-          expanded: false,
-          saving: false,
-        }));
-      }
-    } catch {
-      providers = PROVIDERS_DEF.map(def => ({
-        ...def, enabled: false, client_id: "", client_secret: "", redirect_uri: "", expanded: false, saving: false,
-      }));
-    } finally {
-      isLoading = false;
-    }
-  }
-
-  async function saveProvider(provider: ProviderConfig) {
-    if (!provider.client_id || !provider.client_secret) {
-      saveMsg = `请填写 ${provider.name} 的 Client ID 和 Client Secret`;
-      setTimeout(() => saveMsg = null, 3000);
-      return;
-    }
-    provider.saving = true;
-    try {
+  const saveMutation = createMutation(() => ({
+    mutationFn: async (provider: ProviderConfig) => {
       const res = await apiClient(`/v1/projects/${projectRef}/auth/providers/${provider.key}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -115,75 +109,98 @@
           redirect_uri: provider.redirect_uri || undefined,
         }),
       });
-      if (res.ok) {
-        provider.enabled = true;
-        saveMsg = `✅ ${provider.name} 配置已保存并生效（GoTrue 已重启）`;
-      } else {
+      if (!res.ok) {
         const err = await res.json();
-        saveMsg = `❌ 保存失败: ${err.error || res.statusText}`;
+        throw new Error(err.error || res.statusText);
       }
-    } catch (err: unknown) {
-      saveMsg = `❌ 网络错误: ${(err instanceof Error ? err.message : String(err))}`;
-    } finally {
-      provider.saving = false;
+      return { provider, ...await res.json() };
+    },
+    onMutate: (provider) => { provider.saving = true; },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["auth_providers", projectRef] });
+      saveMsg = `✅ ${data.provider.name} 配置已保存并生效（GoTrue 已重启）`;
       setTimeout(() => saveMsg = null, 4000);
+    },
+    onError: (err: unknown, provider) => {
+      saveMsg = `❌ 保存失败: ${(err instanceof Error ? err.message : String(err))}`;
+      setTimeout(() => saveMsg = null, 4000);
+    },
+    onSettled: (data, err, provider) => { provider.saving = false; }
+  }));
+
+  async function saveProvider(provider: ProviderConfig) {
+    if (!provider.client_id || !provider.client_secret) {
+      saveMsg = `请填写 ${provider.name} 的 Client ID 和 Client Secret`;
+      setTimeout(() => saveMsg = null, 3000);
+      return;
     }
+    saveMutation.mutate(provider);
   }
+
+  const disableMutation = createMutation(() => ({
+    mutationFn: async (provider: ProviderConfig) => {
+      const res = await apiClient(`/v1/projects/${projectRef}/auth/providers/${provider.key}`, { method: "DELETE" });
+      if (!res.ok) throw new Error("Disable failed");
+      return { provider };
+    },
+    onMutate: (provider) => { provider.saving = true; },
+    onSuccess: (data) => {
+      data.provider.client_id = "";
+      data.provider.client_secret = "";
+      data.provider.redirect_uri = "";
+      queryClient.invalidateQueries({ queryKey: ["auth_providers", projectRef] });
+      saveMsg = `${data.provider.name} 已禁用`;
+      setTimeout(() => saveMsg = null, 3000);
+    },
+    onError: () => {
+      saveMsg = `❌ 禁用失败`;
+      setTimeout(() => saveMsg = null, 3000);
+    },
+    onSettled: (data, err, provider) => { provider.saving = false; }
+  }));
 
   async function disableProvider(provider: ProviderConfig) {
     if (!confirm(`确定禁用 ${provider.name} 登录？`)) return;
-    provider.saving = true;
-    try {
-      await apiClient(`/v1/projects/${projectRef}/auth/providers/${provider.key}`, { method: "DELETE" });
-      provider.enabled = false;
-      provider.client_id = "";
-      provider.client_secret = "";
-      provider.redirect_uri = "";
-      saveMsg = `${provider.name} 已禁用`;
-    } catch {
-      saveMsg = `❌ 禁用失败`;
-    } finally {
-      provider.saving = false;
-      setTimeout(() => saveMsg = null, 3000);
-    }
+    disableMutation.mutate(provider);
   }
+
+  const toggleMutation = createMutation(() => ({
+    mutationFn: async (provider: ProviderConfig) => {
+      const res = await apiClient(`/v1/projects/${projectRef}/auth/studio/providers/${provider.key}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: true, client_id: provider.client_id }),
+      });
+      if (!res.ok) throw new Error("Toggle failed");
+      return { provider };
+    },
+    onMutate: (provider) => { provider.saving = true; },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["auth_providers", projectRef] });
+      saveMsg = `✅ ${data.provider.name} 已启用`;
+      setTimeout(() => saveMsg = null, 3000);
+    },
+    onError: () => {
+      saveMsg = `❌ 启用失败`;
+      setTimeout(() => saveMsg = null, 3000);
+    },
+    onSettled: (data, err, provider) => { provider.saving = false; }
+  }));
 
   async function toggleProvider(provider: ProviderConfig) {
     if (provider.category === "built_in") return;
     if (provider.enabled) {
       await disableProvider(provider);
     } else {
-      // If no credentials configured, expand the form for user to fill in
       if (!provider.client_id) {
         provider.expanded = true;
         saveMsg = `请填写 ${provider.name} 的凭据后保存`;
         setTimeout(() => saveMsg = null, 3000);
         return;
       }
-      // Re-enable with existing credentials via PATCH
-      provider.saving = true;
-      try {
-        const res = await apiClient(`/v1/projects/${projectRef}/auth/studio/providers/${provider.key}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ enabled: true, client_id: provider.client_id }),
-        });
-        if (res.ok) {
-          provider.enabled = true;
-          saveMsg = `✅ ${provider.name} 已启用`;
-        } else {
-          saveMsg = `❌ 启用失败`;
-        }
-      } catch {
-        saveMsg = `❌ 网络错误`;
-      } finally {
-        provider.saving = false;
-        setTimeout(() => saveMsg = null, 3000);
-      }
+      toggleMutation.mutate(provider);
     }
   }
-
-  onMount(() => { fetchProviders(); });
 
   function getCategoryLabel(cat: string): string {
     if (cat === "built_in") return "内置";

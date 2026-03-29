@@ -5,6 +5,7 @@
   import { page } from "$app/state";
   import { t } from "svelte-i18n";
   import { Loader2, Play, Database, History, Shield, ChevronDown, Microscope, ChevronRight, Plus, X } from "lucide-svelte";
+  import { createMutation } from "@tanstack/svelte-query";
 
   interface QueryTab {
     id: string;
@@ -123,13 +124,11 @@
     return `SET ROLE '${selectedRole}';\n${rawSql}\nRESET ROLE;`;
   }
 
-  async function runQuery() {
-    if (!activeTab || !activeTab.sql || isRunning) return;
-    isRunning = true;
-    try {
-      let queryToRun = activeTab.sql;
+  const runQueryMutation = createMutation(() => ({
+    mutationFn: async ({ rawSql, explainMode }: { rawSql: string, explainMode: boolean }) => {
+      let queryToRun = rawSql;
       if (explainMode) {
-        queryToRun = `EXPLAIN (ANALYZE, COSTS, VERBOSE, FORMAT TEXT) ${activeTab.sql}`;
+        queryToRun = `EXPLAIN (ANALYZE, COSTS, VERBOSE, FORMAT TEXT) ${rawSql}`;
       }
       const wrappedSql = wrapWithRole(queryToRun);
       const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
@@ -139,20 +138,28 @@
       });
       const data = await res.json();
       if (data.error) throw new Error(data.message || data.error);
-      const rows = Array.isArray(data) ? data : data.rows || [data];
+      return Array.isArray(data) ? data : data.rows || [data];
+    },
+    onMutate: () => { isRunning = true; },
+    onSuccess: (rows, variables) => {
       tabs = tabs.map(tb => {
         if (tb.id !== activeTabId) return tb;
-        if (explainMode) {
+        if (variables.explainMode) {
           return { ...tb, explainResults: rows, results: null, error: null };
         } else {
           return { ...tb, results: rows, explainResults: null, error: null };
         }
       });
-    } catch (err: unknown) {
+    },
+    onError: (err: unknown) => {
       tabs = tabs.map(tb => tb.id === activeTabId ? { ...tb, error: (err instanceof Error ? err.message : String(err)), results: null, explainResults: null } : tb);
-    } finally {
-      isRunning = false;
-    }
+    },
+    onSettled: () => { isRunning = false; }
+  }));
+
+  function runQuery() {
+    if (!activeTab || !activeTab.sql || runQueryMutation.isPending) return;
+    runQueryMutation.mutate({ rawSql: activeTab.sql, explainMode });
   }
 
   function selectRole(role: string) {
@@ -215,10 +222,10 @@
       </button>
       <button
         onclick={runQuery}
-        disabled={isRunning || !activeTab?.sql}
+        disabled={runQueryMutation.isPending || !activeTab?.sql}
         class="flex items-center gap-2 px-4 py-1.5 bg-brand text-white text-xs font-semibold rounded-md shadow-lg shadow-brand/20 hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:grayscale transition-all"
       >
-        {#if isRunning}
+        {#if runQueryMutation.isPending}
           <Loader2 size={14} class="animate-spin" />
           执行中...
         {:else}
@@ -360,7 +367,7 @@
           <div class="p-4 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-xs font-mono">
             <strong>执行错误：</strong> {activeTab.error}
           </div>
-        {:else if isRunning}
+        {:else if runQueryMutation.isPending}
            <div class="h-full flex flex-col items-center justify-center text-muted-foreground gap-2 opacity-50">
              <Loader2 size={24} class="animate-spin text-brand" />
              <p class="text-[10px] uppercase font-bold tracking-[0.2em]">正在执行查询...</p>

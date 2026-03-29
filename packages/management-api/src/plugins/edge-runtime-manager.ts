@@ -61,8 +61,9 @@ export class EdgeRuntimeManager {
           `http://127.0.0.1:${this.config.port}/health`,
         );
         if (res.ok) return;
-      } catch {
+      } catch (err: unknown) {
         // Not ready yet
+        logger.debug("[EdgeRuntime] Startup busy loop: " + (err instanceof Error ? err.message : String(err)));
       }
       await Bun.sleep(100);
     }

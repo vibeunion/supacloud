@@ -1,10 +1,10 @@
 <script lang="ts">
   import { apiClient } from "$lib/api";
 
-  import { onMount } from "svelte";
   import { page } from "$app/state";
   import { t } from "svelte-i18n";
   import { Loader2, Shield, ShieldCheck, User, Plus, Trash2, X, Save } from "lucide-svelte";
+  import { createQuery, useQueryClient } from "@tanstack/svelte-query";
 
   interface Role {
     rolname: string;
@@ -18,11 +18,8 @@
     member_of: string;
   }
 
-  let roles = $state<Role[]>([]);
-  let isLoading = $state(true);
-  let error = $state<string | null>(null);
-
   const projectRef = $derived(page.params.ref);
+  const queryClient = useQueryClient();
 
   const SUPABASE_ROLES = [
     "postgres", "supabase_admin", "supabase_auth_admin", "supabase_storage_admin",
@@ -53,24 +50,22 @@
     ORDER BY r.rolname;
   `;
 
-  async function fetchRoles() {
-    isLoading = true;
-    error = null;
-    try {
+  const rolesQuery = createQuery(() => ({
+    queryKey: ["database_roles", projectRef],
+    queryFn: async () => {
       const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sql: ROLES_SQL })
       });
       const data = await res.json();
       if (data.error) throw new Error(data.message || data.error);
-      roles = Array.isArray(data) ? data : data.rows || [];
-    } catch (err: unknown) {
-      error = err instanceof Error ? err.message : String(err);
-    } finally {
-      isLoading = false;
+      return (Array.isArray(data) ? data : data.rows || []) as Role[];
     }
-  }
+  }));
+
+  const roles = $derived((rolesQuery.data as Role[]) || []);
+  const isLoading = $derived(rolesQuery.isPending);
+  const error = $derived(rolesQuery.error?.message || null);
 
   // Create role state
   let showCreateRole = $state(false);
@@ -98,7 +93,11 @@
       });
       const data = await res.json();
       if (data.error) { roleMsg = `❌ ${data.message || data.error}`; }
-      else { roleMsg = `✅ 角色 ${newRoleName} 已创建`; showCreateRole = false; newRoleName = ""; newRolePassword = ""; await fetchRoles(); }
+      else { 
+        roleMsg = `✅ 角色 ${newRoleName} 已创建`; 
+        showCreateRole = false; newRoleName = ""; newRolePassword = ""; 
+        queryClient.invalidateQueries({ queryKey: ["database_roles", projectRef] }); 
+      }
     } catch (err: unknown) { roleMsg = `❌ ${(err instanceof Error ? err.message : String(err))}`; }
     finally { isCreating = false; setTimeout(() => roleMsg = null, 4000); }
   }
@@ -112,12 +111,14 @@
       });
       const data = await res.json();
       if (data.error) { roleMsg = `❌ ${data.message || data.error}`; }
-      else { roleMsg = `角色 ${rolename} 已删除`; await fetchRoles(); }
+      else { 
+        roleMsg = `角色 ${rolename} 已删除`; 
+        queryClient.invalidateQueries({ queryKey: ["database_roles", projectRef] }); 
+      }
     } catch (err: unknown) { roleMsg = `❌ ${(err instanceof Error ? err.message : String(err))}`; }
     finally { setTimeout(() => roleMsg = null, 4000); }
   }
 
-  onMount(() => { fetchRoles(); });
 
   const supabaseRoles = $derived(roles.filter(r => SUPABASE_ROLES.includes(r.rolname)));
   const customRoles = $derived(roles.filter(r => !SUPABASE_ROLES.includes(r.rolname)));

@@ -1,10 +1,10 @@
 <script lang="ts">
   import { apiClient } from "$lib/api";
 
-  import { onMount } from "svelte";
   import { page } from "$app/state";
   import { Loader2, Activity, TrendingUp, AlertTriangle, ArrowLeft, BarChart3 } from "lucide-svelte";
   import { toast } from "svelte-sonner";
+  import { createQuery } from "@tanstack/svelte-query";
 
   interface ApiStat {
     total_requests: number;
@@ -15,16 +15,11 @@
     status_5xx: number;
   }
 
-  let stats = $state<ApiStat | null>(null);
-  let isLoading = $state(true);
-  let recentRequests = $state<Record<string, unknown>[]>([]);
-
   const projectRef = $derived(page.params.ref);
 
-  async function fetchStats() {
-    isLoading = true;
-    try {
-      // Query Kong logs from journalctl analytics or PG stat tables
+  const statsQuery = createQuery(() => ({
+    queryKey: ["api-overview", projectRef],
+    queryFn: async () => {
       const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -37,10 +32,13 @@
             AND state IS NOT NULL;`
         })
       });
+      if (!res.ok) throw new Error("Failed to fetch stats");
       const data = await res.json();
       const rows = Array.isArray(data) ? data : data.rows || [];
+      
+      let statsObj: ApiStat | null = null;
       if (rows.length > 0) {
-        stats = {
+        statsObj = {
           total_requests: parseInt(rows[0].total_requests || "0"),
           avg_latency_ms: parseFloat(rows[0].avg_response_ms || "0"),
           error_rate: 0,
@@ -50,7 +48,6 @@
         };
       }
 
-      // Fetch currently active connections as "recent"
       const res2 = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -61,17 +58,19 @@
                 ORDER BY backend_start DESC LIMIT 20;`
         })
       });
+      if (!res2.ok) throw new Error("Failed to fetch active connections");
       const data2 = await res2.json();
-      recentRequests = Array.isArray(data2) ? data2 : data2.rows || [];
-    } catch (err: unknown) {
-      toast.error("无法fetch API stats");
-    } finally {
-      isLoading = false;
-    }
-  }
+      const recentReqs: Record<string, unknown>[] = Array.isArray(data2) ? data2 : data2.rows || [];
 
-  onMount(() => { fetchStats(); });
+      return { stats: statsObj, recentRequests: recentReqs };
+    }
+  }));
+
+  const stats = $derived(statsQuery.data?.stats || null);
+  const recentRequests = $derived(statsQuery.data?.recentRequests || []);
+  const isLoading = $derived(statsQuery.isPending);
 </script>
+
 
 <div class="h-full flex flex-col space-y-4">
   <div class="flex items-center gap-3">

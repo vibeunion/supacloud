@@ -1,4 +1,6 @@
 export { projectRoutes } from "./projects";
+export { projectSecretsRoutes } from "./project-secrets";
+export { projectFunctionsRoutes } from "./project-functions";
 export { organizationRoutes } from "./organizations";
 export { userRoutes } from "./user";
 export { backupRoutes } from "./backups";

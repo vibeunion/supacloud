@@ -75,8 +75,9 @@ export const authProvider: AuthProvider = {
     }
   },
   
-  onError: async (error: any) => {
-    if (error?.status === 401 || error?.status === 403) {
+  onError: async (error: unknown) => {
+    const status = (error as { status?: number })?.status;
+    if (status === 401 || status === 403) {
       return { logout: true, redirectTo: '/login' };
     }
     return {};

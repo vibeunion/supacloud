@@ -1,11 +1,11 @@
 <script lang="ts">
   import { apiClient } from "$lib/api";
 
-  import { onMount } from "svelte";
   import { page } from "$app/state";
   import { goto } from "$app/navigation";
   import { Loader2, Globe, ExternalLink, GitBranch, Clock, CheckCircle2, XCircle, RefreshCw, Trash2, Settings, AlertTriangle } from "lucide-svelte";
   import { useList, type BaseRecord } from "@svadmin/core";
+  import { createMutation } from "@tanstack/svelte-query";
 
   interface Deployment extends BaseRecord {
     id: string;
@@ -27,34 +27,53 @@
 
   let actionMsg: string | null = $state.raw(null);
 
-
-  async function redeploy(id: string) {
-    actionMsg = null;
-    try {
+  const redeployMutation = createMutation(() => ({
+    mutationFn: async (id: string) => {
       const res = await apiClient(`/v1/projects/${projectRef}/frontend/deployments/${id}/redeploy`, { method: "POST" });
       const data = await res.json();
-      actionMsg = data.success !== false ? `✅ 重新部署已触发` : `❌ ${data.error || '部署失败'}`;
-      await query.refetch();
-    } catch (err: unknown) {
+      if (data.success === false) throw new Error(data.error || '部署失败');
+      return true;
+    },
+    onSuccess: () => {
+      actionMsg = `✅ 重新部署已触发`;
+      query.refetch();
+      setTimeout(() => actionMsg = null, 5000);
+    },
+    onError: (err: unknown) => {
       actionMsg = `❌ ${(err instanceof Error ? err.message : String(err))}`;
+      setTimeout(() => actionMsg = null, 5000);
     }
-    setTimeout(() => actionMsg = null, 5000);
+  }));
+
+  function redeploy(id: string) {
+    actionMsg = null;
+    redeployMutation.mutate(id);
   }
 
   let deletingId: string | null = $state.raw(null);
 
-  async function deleteDeployment(id: string) {
-    if (!confirm("确定要删除此部署吗？这将停止服务并删除所有相关文件。")) return;
-    deletingId = id;
-    try {
+  const deleteMutation = createMutation(() => ({
+    mutationFn: async (id: string) => {
       await apiClient(`/v1/projects/${projectRef}/frontend/deployments/${id}`, { method: "DELETE" });
+      return true;
+    },
+    onMutate: (id) => {
+      deletingId = id;
+    },
+    onSuccess: () => {
       actionMsg = "✅ 部署已删除";
-      await query.refetch();
-    } catch {}
-    deletingId = null;
-    setTimeout(() => actionMsg = null, 3000);
-  }
+      query.refetch();
+    },
+    onSettled: () => {
+      deletingId = null;
+      setTimeout(() => actionMsg = null, 3000);
+    }
+  }));
 
+  function deleteDeployment(id: string) {
+    if (!confirm("确定要删除此部署吗？这将停止服务并删除所有相关文件。")) return;
+    deleteMutation.mutate(id);
+  }
 
 
   function getStatusIcon(status: string): string {

@@ -1,10 +1,11 @@
 <script lang="ts">
   import { apiClient } from "$lib/api";
 
-  import { onMount } from "svelte";
   import { page } from "$app/state";
   import { Loader2, Play, Square, RotateCw, Activity, Server, Shield, Database, Radio, HardDrive, AlertTriangle } from "lucide-svelte";
   import { toast } from "svelte-sonner";
+  import { useShow } from "@svadmin/core";
+  import { useQueryClient, createMutation } from "@tanstack/svelte-query";
 
   interface ServiceInfo {
     name: string;
@@ -13,80 +14,84 @@
     systemdUnit: string;
   }
 
-  let services = $state<ServiceInfo[]>([]);
-  let isLoading = $state(true);
   let actionInProgress = $state<string | null>(null);
 
   const projectRef = $derived(page.params.ref);
 
-  async function fetchServices() {
-    isLoading = true;
-    try {
-      const res = await apiClient(`/v1/projects/${projectRef}`);
-      if (res.ok) {
-        const data = await res.json();
-        const svcArr = data.services || [];
-        services = [
-          { name: "PostgreSQL", icon: Database, status: svcArr.find((s: Record<string, unknown>) => s.name === "PostgreSQL")?.status || "INACTIVE", systemdUnit: "patroni" },
-          { name: "PostgREST", icon: Server, status: svcArr.find((s: Record<string, unknown>) => s.name === "PostgREST")?.status || "INACTIVE", systemdUnit: `supacloud-pgrst@${projectRef}` },
-          { name: "GoTrue", icon: Shield, status: svcArr.find((s: Record<string, unknown>) => s.name === "GoTrue")?.status || "INACTIVE", systemdUnit: `supacloud-gotrue@${projectRef}` },
-          { name: "Realtime", icon: Radio, status: svcArr.find((s: Record<string, unknown>) => s.name === "Realtime")?.status || "INACTIVE", systemdUnit: `supacloud-realtime@${projectRef}` },
-          { name: "Storage", icon: HardDrive, status: svcArr.find((s: Record<string, unknown>) => s.name === "Storage")?.status || "INACTIVE", systemdUnit: `supacloud-storage@${projectRef}` },
-          { name: "Kong", icon: Activity, status: svcArr.find((s: Record<string, unknown>) => s.name === "Kong")?.status || "INACTIVE", systemdUnit: "kong" },
-        ];
+  const { query } = useShow({
+    get resource() { return "v1/projects"; },
+    get id() { return projectRef; }
+  });
+
+  const queryClient = useQueryClient();
+
+  const services = $derived.by(() => {
+    const data = query.data?.data as Record<string, any>;
+    const svcArr = data?.services || [];
+    return [
+      { name: "PostgreSQL", icon: Database, status: svcArr.find((s: Record<string, unknown>) => s.name === "PostgreSQL")?.status || "INACTIVE", systemdUnit: "patroni" },
+      { name: "PostgREST", icon: Server, status: svcArr.find((s: Record<string, unknown>) => s.name === "PostgREST")?.status || "INACTIVE", systemdUnit: `supacloud-pgrst@${projectRef}` },
+      { name: "GoTrue", icon: Shield, status: svcArr.find((s: Record<string, unknown>) => s.name === "GoTrue")?.status || "INACTIVE", systemdUnit: `supacloud-gotrue@${projectRef}` },
+      { name: "Realtime", icon: Radio, status: svcArr.find((s: Record<string, unknown>) => s.name === "Realtime")?.status || "INACTIVE", systemdUnit: `supacloud-realtime@${projectRef}` },
+      { name: "Storage", icon: HardDrive, status: svcArr.find((s: Record<string, unknown>) => s.name === "Storage")?.status || "INACTIVE", systemdUnit: `supacloud-storage@${projectRef}` },
+      { name: "Kong", icon: Activity, status: svcArr.find((s: Record<string, unknown>) => s.name === "Kong")?.status || "INACTIVE", systemdUnit: "kong" },
+    ];
+  });
+
+  const isLoading = $derived(query.isLoading);
+
+  async function refetchServices() {
+    await queryClient.invalidateQueries({ queryKey: ["v1/projects", "getOne", projectRef] });
+  }
+
+  const actionMutation = createMutation(() => ({
+    mutationFn: async ({ type, serviceName }: { type: string, serviceName?: string }) => {
+      let url = "";
+      if (type === "restart") url = `/v1/projects/${projectRef}/restart`;
+      else if (type === "pause") url = `/v1/projects/${projectRef}/pause`;
+      else if (type === "restore") url = `/v1/projects/${projectRef}/restore`;
+      else if (['start', 'stop', 'restart-svc'].includes(type) && serviceName) {
+        const action = type === 'restart-svc' ? 'restart' : type;
+        url = `/v1/projects/${projectRef}/services/${serviceName}/${action}`;
       }
-    } catch (err: unknown) {
-      toast.error("无法fetch services");
-    } finally {
-      isLoading = false;
-    }
-  }
-
-  async function restartProject() {
-    actionInProgress = "restart";
-    try {
-      await apiClient(`/v1/projects/${projectRef}/restart`, { method: "POST" });
-      await new Promise(r => setTimeout(r, 2000));
-      await fetchServices();
-    } finally {
+      
+      const res = await apiClient(url, { method: "POST" });
+      if (!res.ok) throw new Error(`${type} failed`);
+      await new Promise(r => setTimeout(r, type === "pause" ? 1000 : 2000));
+      return { type, serviceName };
+    },
+    onMutate: (variables) => {
+      actionInProgress = variables.type === 'restart-svc' ? `restart-${variables.serviceName}` : `${variables.type}${variables.serviceName ? '-' + variables.serviceName : ''}`;
+    },
+    onSuccess: () => {
+      refetchServices();
+    },
+    onError: () => {
+      toast.error("操作失败");
+    },
+    onSettled: () => {
       actionInProgress = null;
     }
+  }));
+
+  function restartProject() {
+    actionMutation.mutate({ type: "restart" });
   }
 
-  async function pauseProject() {
-    actionInProgress = "pause";
-    try {
-      await apiClient(`/v1/projects/${projectRef}/pause`, { method: "POST" });
-      await new Promise(r => setTimeout(r, 1000));
-      await fetchServices();
-    } finally {
-      actionInProgress = null;
-    }
+  function pauseProject() {
+    actionMutation.mutate({ type: "pause" });
   }
 
-  async function restoreProject() {
-    actionInProgress = "restore";
-    try {
-      await apiClient(`/v1/projects/${projectRef}/restore`, { method: "POST" });
-      await new Promise(r => setTimeout(r, 2000));
-      await fetchServices();
-    } finally {
-      actionInProgress = null;
-    }
+  function restoreProject() {
+    actionMutation.mutate({ type: "restore" });
   }
 
-  async function controlService(action: "start" | "stop" | "restart", serviceName: string) {
-    actionInProgress = `${action}-${serviceName}`;
-    try {
-      await apiClient(`/v1/projects/${projectRef}/services/${serviceName}/${action}`, { method: "POST" });
-      await new Promise(r => setTimeout(r, 2000));
-      await fetchServices();
-    } finally {
-      actionInProgress = null;
-    }
+  function controlService(action: "start" | "stop" | "restart", serviceName: string) {
+    const type = action === "restart" ? "restart-svc" : action;
+    actionMutation.mutate({ type, serviceName });
   }
 
-  onMount(() => { fetchServices(); });
+
 
   function statusColor(status: string): string {
     if (status === "ACTIVE_HEALTHY") return "text-green-600 bg-green-500/10";

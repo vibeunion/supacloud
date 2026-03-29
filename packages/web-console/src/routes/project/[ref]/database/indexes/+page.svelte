@@ -1,10 +1,10 @@
 <script lang="ts">
   import { apiClient } from "$lib/api";
 
-  import { onMount } from "svelte";
   import { page } from "$app/state";
   import { t } from "svelte-i18n";
   import { Loader2, Search, Hash, Check, X } from "lucide-svelte";
+  import { createQuery } from "@tanstack/svelte-query";
 
   interface DbIndex {
     schemaname: string;
@@ -17,9 +17,6 @@
     am_name: string;
   }
 
-  let indexes = $state<DbIndex[]>([]);
-  let isLoading = $state(true);
-  let error = $state<string | null>(null);
   let searchQuery = $state("");
 
   const projectRef = $derived(page.params.ref);
@@ -42,26 +39,22 @@
     ORDER BY s.idx_scan ASC, s.relname, s.indexrelname;
   `;
 
-  async function fetchIndexes() {
-    isLoading = true;
-    error = null;
-    try {
+  const indexesQuery = createQuery(() => ({
+    queryKey: ["database_indexes", projectRef],
+    queryFn: async () => {
       const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sql: INDEXES_SQL })
       });
       const data = await res.json();
       if (data.error) throw new Error(data.message || data.error);
-      indexes = Array.isArray(data) ? data : data.rows || [];
-    } catch (err: unknown) {
-      error = err instanceof Error ? err.message : String(err);
-    } finally {
-      isLoading = false;
+      return (Array.isArray(data) ? data : data.rows || []) as DbIndex[];
     }
-  }
+  }));
 
-  onMount(() => { fetchIndexes(); });
+  const indexes = $derived((indexesQuery.data as DbIndex[]) || []);
+  const isLoading = $derived(indexesQuery.isPending);
+  const error = $derived(indexesQuery.error?.message || null);
 
   const filteredIndexes = $derived(
     searchQuery
