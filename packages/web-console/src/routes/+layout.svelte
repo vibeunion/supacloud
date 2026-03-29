@@ -27,12 +27,13 @@
     setResources,
     setRouterProvider,
     setTheme,
-    setLocale
+    setLocale,
+    setChatProvider
   } from "@svadmin/core";
   import { createSvelteKitRouterProvider } from "@svadmin/sveltekit";
-  import { Toast as SvadminToast, DevTools, setComponentRegistry } from "@svadmin/ui";
+  import { Toast as SvadminToast, DevTools, setComponentRegistry, ChatDialog } from "@svadmin/ui";
   import { QueryClient, QueryClientProvider } from "@tanstack/svelte-query";
-  import { dataProvider } from "$lib/admin/provider";
+  import { dataProvider, chatProvider } from "$lib/admin/provider";
   import { authProvider } from "$lib/admin/auth";
   import { resources as defaultResources, getTenantResources } from "$lib/admin/resources";
 
@@ -71,6 +72,7 @@
   setDataProvider(dataProvider);
   setAuthProvider(authProvider);
   setRouterProvider(routerProvider);
+  setChatProvider(chatProvider);
   setTheme("system");
   setLocale("zh-CN");
   
@@ -191,5 +193,6 @@
   </div>
 
   <SvadminToast />
+  <ChatDialog />
   <DevTools />
 </QueryClientProvider>
