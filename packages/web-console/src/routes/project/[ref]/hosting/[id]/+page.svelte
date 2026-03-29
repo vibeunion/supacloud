@@ -1,84 +1,89 @@
 <script lang="ts">
   import { apiClient } from "$lib/api";
 
-  import { onMount } from "svelte";
   import { page } from "$app/state";
   import { Loader2, Save, Key, Globe, GitBranch, Terminal, Copy, RefreshCw, Trash2, Plus, ExternalLink } from "lucide-svelte";
+  import { createQuery, createMutation, useQueryClient } from "@tanstack/svelte-query";
 
   const projectRef = $derived(page.params.ref);
   const deployId = $derived(page.url.pathname.split("/hosting/")[1]?.split("/")[0] || "");
 
-  let dep: Record<string, unknown> | null = $state.raw(null);
-  let isLoading = $state(true);
-  let isSaving = $state(false);
   let actionMsg: string | null = $state.raw(null);
+  const queryClient = useQueryClient();
 
-  // Editable fields
+  // Editable fields (initialized when data loads)
   let buildCommand = $state("");
   let outputDir = $state("");
   let installCommand = $state("");
   let nodeVersion = $state("");
   let gitUrl = $state("");
   let gitBranch = $state("");
-
-  // Environment Variables
-  let envPairs: { key: string; value: string }[] = $state.raw([]);
-  let isSavingEnv = $state(false);
+  let envPairs: { key: string; value: string }[] = $state([]);
 
   // Custom Domains
   let newDomain = $state("");
   let isAddingDomain = $state(false);
 
-  // Deploy Tokens
-  let tokens: unknown[] = $state.raw([]);
-  let newTokenName = $state("");
   let isCreatingToken = $state(false);
+  let newTokenName = $state("");
   let lastCreatedToken: string | null = $state.raw(null);
 
-  // Build Logs
-  let logs = $state("");
-
-  async function fetchDeployment() {
-    isLoading = true;
-    try {
+  const depQuery = createQuery(() => ({
+    queryKey: ["deployment", projectRef, deployId],
+    queryFn: async () => {
       const res = await apiClient(`/v1/projects/${projectRef}/frontend/deployments/${deployId}`);
-      if (res.ok) {
-        dep = await res.json();
-        if (!dep) return;
-        buildCommand = String(dep.build_command || "");
-        outputDir = String(dep.output_dir || "");
-        installCommand = String(dep.install_command || "");
-        nodeVersion = String(dep.node_version || "20");
-        gitUrl = String(dep.git_url || "");
-        gitBranch = String(dep.git_branch || "main");
-        envPairs = Object.entries(dep.env_vars || {}).map(([key, value]) => ({ key, value: value as string }));
-      }
-    } catch {}
+      if (!res.ok) return null;
+      return res.json();
+    }
+  }));
 
-    // Fetch tokens
-    try {
+  const tokensQuery = createQuery(() => ({
+    queryKey: ["deployment_tokens", projectRef, deployId],
+    queryFn: async () => {
       const res = await apiClient(`/v1/projects/${projectRef}/frontend/deployments/${deployId}/tokens`);
-      if (res.ok) { const data = await res.json(); tokens = data.tokens || []; }
-    } catch {}
+      if (!res.ok) return [];
+      const data = await res.json();
+      return data.tokens || [];
+    }
+  }));
 
-    // Fetch logs
-    try {
+  const logsQuery = createQuery(() => ({
+    queryKey: ["deployment_logs", projectRef, deployId],
+    queryFn: async () => {
       const res = await apiClient(`/v1/projects/${projectRef}/frontend/deployments/${deployId}/logs`);
-      if (res.ok) { const data = await res.json(); logs = data.logs || ""; }
-    } catch {}
+      if (!res.ok) return "";
+      const data = await res.json();
+      return data.logs || "";
+    }
+  }));
 
-    isLoading = false;
-  }
+  $effect(() => {
+    if (depQuery.data && !buildCommand && !outputDir && !installCommand) { // Initialize editable fields once
+      const d = depQuery.data;
+      buildCommand = String(d.build_command || "");
+      outputDir = String(d.output_dir || "");
+      installCommand = String(d.install_command || "");
+      nodeVersion = String(d.node_version || "20");
+      gitUrl = String(d.git_url || "");
+      gitBranch = String(d.git_branch || "main");
+      if (envPairs.length === 0) {
+        envPairs = Object.entries(d.env_vars || {}).map(([key, value]) => ({ key, value: String(value) }));
+      }
+    }
+  });
 
-  async function saveBuildConfig() {
-    isSaving = true;
-    try {
+  const dep = $derived(depQuery.data);
+  const isLoading = $derived(depQuery.isPending);
+  const tokens = $derived(tokensQuery.data || []);
+  const logs = $derived(logsQuery.data || "");
+
+  const saveConfigMutation = createMutation(() => ({
+    mutationFn: async () => {
       await apiClient(`/v1/projects/${projectRef}/frontend/deployments/${deployId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ build_command: buildCommand, output_dir: outputDir, install_command: installCommand, node_version: nodeVersion })
       });
-      // Save git config
       if (gitUrl) {
         await apiClient(`/v1/projects/${projectRef}/frontend/deployments/${deployId}/git`, {
           method: "PUT",
@@ -86,77 +91,124 @@
           body: JSON.stringify({ git_url: gitUrl, branch: gitBranch || "main" })
         });
       }
+      return true;
+    },
+    onSuccess: () => {
       actionMsg = "✅ 构建配置已保存";
-    } catch (err: unknown) { actionMsg = `❌ ${(err instanceof Error ? err.message : String(err))}`; }
-    isSaving = false;
-    setTimeout(() => actionMsg = null, 4000);
+      queryClient.invalidateQueries({ queryKey: ["deployment", projectRef, deployId] });
+      setTimeout(() => actionMsg = null, 4000);
+    },
+    onError: (err: unknown) => {
+      actionMsg = `❌ ${(err instanceof Error ? err.message : String(err))}`;
+      setTimeout(() => actionMsg = null, 4000);
+    }
+  }));
+
+  function saveBuildConfig() {
+    saveConfigMutation.mutate();
   }
 
-  async function saveEnvVars() {
-    isSavingEnv = true;
-    const envObj: Record<string, string> = {};
-    envPairs.filter(p => p.key.trim()).forEach(p => envObj[p.key] = p.value);
-    try {
-      await apiClient(`/v1/projects/${projectRef}/frontend/deployments/${deployId}/env`, {
+  const saveEnvMutation = createMutation(() => ({
+    mutationFn: async () => {
+      const envObj: Record<string, string> = {};
+      envPairs.filter(p => p.key.trim()).forEach(p => envObj[p.key] = p.value);
+      const res = await apiClient(`/v1/projects/${projectRef}/frontend/deployments/${deployId}/env`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ env_vars: envObj })
       });
+      if (!res.ok) throw new Error("Failed to save environment variables");
+      return true;
+    },
+    onSuccess: () => {
       actionMsg = "✅ 环境变量已保存";
-    } catch (err: unknown) { actionMsg = `❌ ${(err instanceof Error ? err.message : String(err))}`; }
-    isSavingEnv = false;
-    setTimeout(() => actionMsg = null, 4000);
+      queryClient.invalidateQueries({ queryKey: ["deployment", projectRef, deployId] });
+      setTimeout(() => actionMsg = null, 4000);
+    },
+    onError: (err: unknown) => {
+      actionMsg = `❌ ${(err instanceof Error ? err.message : String(err))}`;
+      setTimeout(() => actionMsg = null, 4000);
+    }
+  }));
+
+  function saveEnvVars() {
+    saveEnvMutation.mutate();
   }
 
-  async function addDomain() {
-    if (!newDomain.trim()) return;
-    isAddingDomain = true;
-    try {
-      await apiClient(`/v1/projects/${projectRef}/frontend/deployments/${deployId}/domains`, {
+  const addDomainMutation = createMutation(() => ({
+    mutationFn: async () => {
+      const res = await apiClient(`/v1/projects/${projectRef}/frontend/deployments/${deployId}/domains`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ domain: newDomain.trim() })
       });
+      if (!res.ok) throw new Error("Could not add domain");
+      return true;
+    },
+    onSuccess: () => {
       newDomain = "";
-      await fetchDeployment();
       actionMsg = "✅ 域名已添加";
-    } catch {}
-    isAddingDomain = false;
-    setTimeout(() => actionMsg = null, 3000);
+      queryClient.invalidateQueries({ queryKey: ["deployment", projectRef, deployId] });
+      setTimeout(() => actionMsg = null, 3000);
+    }
+  }));
+
+  function addDomain() {
+    if (!newDomain.trim()) return;
+    addDomainMutation.mutate();
   }
 
-  async function removeDomain(domain: string) {
-    await apiClient(`/v1/projects/${projectRef}/frontend/deployments/${deployId}/domains/${domain}`, { method: "DELETE" });
-    await fetchDeployment();
+  const removeDomainMutation = createMutation(() => ({
+    mutationFn: async (domain: string) => {
+      await apiClient(`/v1/projects/${projectRef}/frontend/deployments/${deployId}/domains/${domain}`, { method: "DELETE" });
+      return true;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["deployment", projectRef, deployId] });
+    }
+  }));
+
+  function removeDomain(domain: string) {
+    removeDomainMutation.mutate(domain);
   }
 
-  async function createToken() {
-    if (!newTokenName.trim()) return;
-    isCreatingToken = true;
-    try {
+  const createTokenMutation = createMutation(() => ({
+    mutationFn: async () => {
       const res = await apiClient(`/v1/projects/${projectRef}/frontend/deployments/${deployId}/tokens`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: newTokenName.trim() })
       });
-      if (res.ok) {
-        const data = await res.json();
-        lastCreatedToken = data.token;
-        newTokenName = "";
-        await fetchDeployment();
-      }
-    } catch {}
-    isCreatingToken = false;
+      if (!res.ok) throw new Error("Token create failed");
+      return res.json();
+    },
+    onSuccess: (data) => {
+      lastCreatedToken = data.token;
+      newTokenName = "";
+      queryClient.invalidateQueries({ queryKey: ["deployment_tokens", projectRef, deployId] });
+    }
+  }));
+
+  function createToken() {
+    if (!newTokenName.trim()) return;
+    createTokenMutation.mutate();
   }
 
-  async function deleteToken(tokenId: string) {
-    await apiClient(`/v1/projects/${projectRef}/frontend/deployments/${deployId}/tokens/${tokenId}`, { method: "DELETE" });
-    await fetchDeployment();
+  const deleteTokenMutation = createMutation(() => ({
+    mutationFn: async (tokenId: string) => {
+      await apiClient(`/v1/projects/${projectRef}/frontend/deployments/${deployId}/tokens/${tokenId}`, { method: "DELETE" });
+      return true;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["deployment_tokens", projectRef, deployId] });
+    }
+  }));
+
+  function deleteToken(tokenId: string) {
+    deleteTokenMutation.mutate(tokenId);
   }
 
   async function copyText(text: string) { try { await navigator.clipboard.writeText(text); } catch {} }
-
-  onMount(() => fetchDeployment());
 
   const webhookBase = $derived(typeof window !== 'undefined' ? window.location.origin : '');
 </script>
@@ -185,8 +237,8 @@
     <div class="rounded-xl border bg-card overflow-hidden">
       <div class="border-b px-5 py-3 bg-muted/20 flex items-center justify-between">
         <h3 class="text-sm font-semibold flex items-center gap-2"><GitBranch size={16} /> 构建与 Git 配置</h3>
-        <button onclick={saveBuildConfig} disabled={isSaving} class="flex items-center gap-2 px-3 py-1.5 text-xs font-semibold rounded-md bg-brand text-white hover:bg-brand/90 disabled:opacity-50">
-          {#if isSaving}<Loader2 size={12} class="animate-spin" />{:else}<Save size={12} />{/if} 保存
+        <button onclick={saveBuildConfig} disabled={saveConfigMutation.isPending} class="flex items-center gap-2 px-3 py-1.5 text-xs font-semibold rounded-md bg-brand text-white hover:bg-brand/90 disabled:opacity-50">
+          {#if saveConfigMutation.isPending}<Loader2 size={12} class="animate-spin" />{:else}<Save size={12} />{/if} 保存
         </button>
       </div>
       <div class="p-5 grid grid-cols-2 gap-4">
@@ -205,8 +257,8 @@
         <h3 class="text-sm font-semibold flex items-center gap-2"><Key size={16} /> 环境变量</h3>
         <div class="flex gap-2">
           <button onclick={() => envPairs = [...envPairs, { key: '', value: '' }]} class="px-2 py-1 text-[10px] rounded border hover:bg-muted/50"><Plus size={10} class="inline" /> 添加</button>
-          <button onclick={saveEnvVars} disabled={isSavingEnv} class="px-3 py-1 text-[10px] font-semibold rounded bg-brand text-white hover:bg-brand/90 disabled:opacity-50">
-            {#if isSavingEnv}<Loader2 size={10} class="animate-spin inline" />{/if} 保存
+          <button onclick={saveEnvVars} disabled={saveEnvMutation.isPending} class="px-3 py-1 text-[10px] font-semibold rounded bg-brand text-white hover:bg-brand/90 disabled:opacity-50">
+            {#if saveEnvMutation.isPending}<Loader2 size={10} class="animate-spin inline" />{/if} 保存
           </button>
         </div>
       </div>
@@ -237,7 +289,7 @@
         {/each}
         <div class="flex items-center gap-2 mt-2">
           <input bind:value={newDomain} placeholder="example.com" class="flex-1 px-3 py-1.5 text-xs font-mono rounded border bg-muted/30" />
-          <button onclick={addDomain} disabled={isAddingDomain} class="px-3 py-1.5 text-xs font-semibold rounded bg-brand text-white hover:bg-brand/90 disabled:opacity-50">添加</button>
+          <button onclick={addDomain} disabled={addDomainMutation.isPending} class="px-3 py-1.5 text-xs font-semibold rounded bg-brand text-white hover:bg-brand/90 disabled:opacity-50">添加</button>
         </div>
       </div>
     </div>
@@ -281,7 +333,7 @@
         {/each}
         <div class="flex items-center gap-2 mt-2">
           <input bind:value={newTokenName} placeholder="Token 名称 (如 github-actions)" class="flex-1 px-3 py-1.5 text-xs rounded border bg-muted/30" />
-          <button onclick={createToken} disabled={isCreatingToken} class="px-3 py-1.5 text-xs font-semibold rounded bg-brand text-white disabled:opacity-50">创建</button>
+          <button onclick={createToken} disabled={createTokenMutation.isPending} class="px-3 py-1.5 text-xs font-semibold rounded bg-brand text-white disabled:opacity-50">创建</button>
         </div>
       </div>
     </div>

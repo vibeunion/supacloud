@@ -1,11 +1,11 @@
 <script lang="ts">
   import { apiClient } from "$lib/api";
 
-  import { onMount } from "svelte";
   import { page } from "$app/state";
   import { t } from "svelte-i18n";
   import { Loader2, Zap, Trash2, KeyRound, Clock, Plus, X, Upload, Code2 } from "lucide-svelte";
   import { toast } from "svelte-sonner";
+  import { createMutation } from "@tanstack/svelte-query";
   import { useList, type BaseRecord } from "@svadmin/core";
 
   interface EdgeFunction extends BaseRecord {
@@ -37,51 +37,62 @@ serve(async (req) => {
   let deploying = $state(false);
   let deployMsg = $state<string | null>(null);
 
-
-
-  async function deployFunction() {
-    if (!newSlug.trim()) {
-      deployMsg = "❌ 请输入函数名称（slug）";
-      setTimeout(() => deployMsg = null, 3000);
-      return;
-    }
-    deploying = true;
-    try {
+  const deployMutation = createMutation(() => ({
+    mutationFn: async () => {
       const res = await apiClient(`/v1/projects/${projectRef}/functions/${newSlug}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ code: newCode }),
       });
-      if (res.ok) {
-        deployMsg = `✅ 函数 "${newSlug}" 部署成功`;
-        showCreate = false;
-        newSlug = "";
-        query.refetch();
-      } else {
+      if (!res.ok) {
         const err = await res.json();
-        deployMsg = `❌ 部署失败: ${err.error || res.statusText}`;
+        throw new Error(err.error || res.statusText);
       }
-    } catch (err: unknown) {
+      return res.json();
+    },
+    onSuccess: () => {
+      deployMsg = `✅ 函数 "${newSlug}" 部署成功`;
+      showCreate = false;
+      newSlug = "";
+      query.refetch();
+      setTimeout(() => deployMsg = null, 4000);
+    },
+    onError: (err: unknown) => {
       deployMsg = `❌ 部署失败: ${(err instanceof Error ? err.message : String(err))}`;
-    } finally {
-      deploying = false;
       setTimeout(() => deployMsg = null, 4000);
     }
+  }));
+
+  function deployFunction() {
+    if (!newSlug.trim()) {
+      deployMsg = "❌ 请输入函数名称（slug）";
+      setTimeout(() => deployMsg = null, 3000);
+      return;
+    }
+    deployMsg = null;
+    deployMutation.mutate();
   }
 
-  async function deleteFunction(slug: string) {
-    if (!confirm(`确定删除 Edge Function "${slug}"？此操作不可恢复。`)) return;
-    try {
-      await apiClient(`/v1/projects/${projectRef}/functions/${slug}`, { method: "DELETE" });
-      deployMsg = `函数 "${slug}" 已删除`;
+  const deleteMutation = createMutation(() => ({
+    mutationFn: async (slug: string) => {
+      const res = await apiClient(`/v1/projects/${projectRef}/functions/${slug}`, { method: "DELETE" });
+      if (!res.ok) throw new Error("Delete failed");
+      return { slug };
+    },
+    onSuccess: (data) => {
+      deployMsg = `函数 "${data.slug}" 已删除`;
       setTimeout(() => deployMsg = null, 3000);
       query.refetch();
-    } catch (err: unknown) {
-      toast.error("无法delete function");
+    },
+    onError: () => {
+      toast.error("无法删除函数");
     }
+  }));
+
+  function deleteFunction(slug: string) {
+    if (!confirm(`确定删除 Edge Function "${slug}"？此操作不可恢复。`)) return;
+    deleteMutation.mutate(slug);
   }
-
-
 </script>
 
 <div class="h-full flex flex-col space-y-4">
@@ -125,9 +136,9 @@ serve(async (req) => {
       </div>
       <div class="flex items-center justify-between">
         <p class="text-[10px] text-muted-foreground">函数将被部署到 <code class="text-[9px] bg-muted px-1 rounded">/functions/v1/{newSlug || "slug"}</code></p>
-        <button onclick={deployFunction} disabled={deploying}
+        <button onclick={deployFunction} disabled={deployMutation.isPending}
           class="flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg bg-brand text-white hover:bg-brand/90 transition-colors disabled:opacity-50">
-          {#if deploying}<Loader2 size={14} class="animate-spin" />{:else}<Upload size={14} />{/if}
+          {#if deployMutation.isPending}<Loader2 size={14} class="animate-spin" />{:else}<Upload size={14} />{/if}
           部署
         </button>
       </div>
@@ -183,8 +194,8 @@ serve(async (req) => {
                   <div class="flex items-center gap-1"><Clock size={12} />{new Date(fn.created_at).toLocaleDateString()}</div>
                 </td>
                 <td class="px-5 py-3 text-right">
-                  <button onclick={() => deleteFunction(fn.slug)}
-                    class="p-1.5 hover:bg-destructive/10 hover:text-destructive rounded text-muted-foreground transition-colors opacity-0 group-hover:opacity-100"
+                  <button onclick={() => deleteFunction(fn.slug)} disabled={deleteMutation.isPending}
+                    class="p-1.5 hover:bg-destructive/10 hover:text-destructive rounded text-muted-foreground transition-colors opacity-0 group-hover:opacity-100 disabled:opacity-50"
                     title="删除">
                     <Trash2 size={14} />
                   </button>

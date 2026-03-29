@@ -1,10 +1,10 @@
 <script lang="ts">
   import { apiClient } from "$lib/api";
 
-  import { onMount } from "svelte";
   import { page } from "$app/state";
   import { t } from "svelte-i18n";
   import { Loader2, ShieldCheck, AlertTriangle, ShieldAlert, Info, CheckCircle2 } from "lucide-svelte";
+  import { createQuery } from "@tanstack/svelte-query";
 
   interface LintIssue {
     type: "no_primary_key" | "no_rls" | "no_index_on_fk";
@@ -14,10 +14,6 @@
     detail: string;
     fix_sql: string;
   }
-
-  let issues = $state<LintIssue[]>([]);
-  let isLoading = $state(true);
-  let error = $state<string | null>(null);
 
   const projectRef = $derived(page.params.ref);
 
@@ -72,10 +68,9 @@
     ORDER BY severity, type, table_name;
   `;
 
-  async function runLint() {
-    isLoading = true;
-    error = null;
-    try {
+  const lintQuery = createQuery(() => ({
+    queryKey: ["database-lint", projectRef],
+    queryFn: async () => {
       const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -83,15 +78,13 @@
       });
       const data = await res.json();
       if (data.error) throw new Error(data.message || data.error);
-      issues = Array.isArray(data) ? data : data.rows || [];
-    } catch (err: unknown) {
-      error = err instanceof Error ? err.message : String(err);
-    } finally {
-      isLoading = false;
+      return (Array.isArray(data) ? data : data.rows || []) as LintIssue[];
     }
-  }
+  }));
 
-  onMount(() => { runLint(); });
+  const issues = $derived(lintQuery.data || []);
+  const isLoading = $derived(lintQuery.isPending);
+  const error = $derived(lintQuery.error ? (lintQuery.error instanceof Error ? lintQuery.error.message : String(lintQuery.error)) : null);
 
   function getSeverityColor(severity: string): string {
     if (severity === "danger") return "text-red-500 bg-red-500/10 border-red-500/20";

@@ -1,17 +1,23 @@
 <script lang="ts">
-  import { apiClient } from "$lib/api";
+  import { useShow } from "@svadmin/core";
 
-  import { onMount } from "svelte";
+
   import { page } from "$app/state";
   import { Loader2, Database, Copy, RefreshCw, Settings } from "lucide-svelte";
   import { toast } from "svelte-sonner";
 
-  let poolMode = $state("transaction");
-  let poolSize = $state(15);
-  let pgbouncerPort = $state(6543);
-  let isLoading = $state(true);
-
   const projectRef = $derived(page.params.ref);
+
+  const { query } = useShow({
+    get resource() { return "v1/projects"; },
+    get id() { return projectRef; }
+  });
+
+  const poolMode = $derived(String(((query.data?.data as Record<string, unknown>)?.config as Record<string, unknown>)?.pgbouncer_pool_mode ?? "transaction"));
+  const poolSize = $derived(Number(((query.data?.data as Record<string, unknown>)?.config as Record<string, unknown>)?.pgbouncer_default_pool_size) || 15);
+  const pgbouncerPort = $derived(Number(((query.data?.data as Record<string, unknown>)?.config as Record<string, unknown>)?.pgbouncer_port) || 6543);
+  const isLoading = $derived(query.isLoading);
+
   const hostname = $derived(page.url?.hostname || "localhost");
 
   const connectionString = $derived(
@@ -22,29 +28,9 @@
     `postgres://postgres:[YOUR-PASSWORD]@${hostname}:5432/postgres`
   );
 
-  async function fetchPooling() {
-    isLoading = true;
-    try {
-      const res = await apiClient(`/v1/projects/${projectRef}`);
-      if (res.ok) {
-        const data = await res.json();
-        const cfg = data.config || {};
-        poolMode = cfg.pgbouncer_pool_mode || "transaction";
-        poolSize = cfg.pgbouncer_default_pool_size || 15;
-        pgbouncerPort = cfg.pgbouncer_port || 6543;
-      }
-    } catch (err: unknown) {
-      toast.error("无法fetch pooling config");
-    } finally {
-      isLoading = false;
-    }
-  }
-
   async function copyText(text: string) {
     try { await navigator.clipboard.writeText(text); } catch {}
   }
-
-  onMount(() => { fetchPooling(); });
 </script>
 
 <div class="h-full flex flex-col space-y-4">
@@ -104,9 +90,9 @@
           </div>
           <div class="flex gap-1 bg-muted/30 rounded-lg p-0.5">
             <button class="px-3 py-1.5 text-xs font-semibold rounded-md transition-colors {poolMode === 'transaction' ? 'bg-brand text-white' : 'text-muted-foreground hover:text-foreground'}"
-              onclick={() => poolMode = 'transaction'}>Transaction</button>
+              disabled>Transaction</button>
             <button class="px-3 py-1.5 text-xs font-semibold rounded-md transition-colors {poolMode === 'session' ? 'bg-brand text-white' : 'text-muted-foreground hover:text-foreground'}"
-              onclick={() => poolMode = 'session'}>Session</button>
+              disabled>Session</button>
           </div>
         </div>
         <div class="flex items-center justify-between px-6 py-4">

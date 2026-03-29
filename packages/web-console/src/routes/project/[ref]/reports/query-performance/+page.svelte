@@ -1,10 +1,10 @@
 <script lang="ts">
   import { apiClient } from "$lib/api";
 
-  import { onMount } from "svelte";
   import { page } from "$app/state";
   import { t } from "svelte-i18n";
   import { Loader2, AlertTriangle, Play } from "lucide-svelte";
+  import { createQuery, createMutation } from "@tanstack/svelte-query";
 
   interface QueryStat {
     query: string;
@@ -14,70 +14,60 @@
     rows: number;
   }
 
-  let stats = $state<QueryStat[]>([]);
-  let isLoading = $state(true);
-  let error = $state<string | null>(null);
-  let missingExtension = $state(false);
-  let isEnabling = $state(false);
-
   const projectRef = $derived(page.params.ref);
 
-  async function fetchStats() {
-    isLoading = true;
-    error = null;
-    missingExtension = false;
-    
-    const schemasToTry = ['', 'monitor.', 'extensions.'];
-    let lastError = null;
+  const statsQuery = createQuery(() => ({
+    queryKey: ["query-performance", projectRef],
+    queryFn: async () => {
+      const schemasToTry = ['', 'monitor.', 'extensions.'];
+      let lastError = null;
 
-    for (const schemaPrefix of schemasToTry) {
-      try {
-        const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            sql: `SELECT query, calls, total_exec_time, mean_exec_time, rows 
-                  FROM ${schemaPrefix}pg_stat_statements 
-                  ORDER BY total_exec_time DESC LIMIT 100;`
-          })
-        });
-        const data = await res.json();
-        
-        if (data.error) {
-          lastError = data;
-          // If it's a "does not exist" error, continue to the next schema prefix
-          if (data.message?.includes("pg_stat_statements") && data.message?.includes("does not exist")) {
-            continue;
-          } else {
-            throw new Error(data.message || data.error);
+      for (const schemaPrefix of schemasToTry) {
+        try {
+          const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              sql: `SELECT query, calls, total_exec_time, mean_exec_time, rows 
+                    FROM ${schemaPrefix}pg_stat_statements 
+                    ORDER BY total_exec_time DESC LIMIT 100;`
+            })
+          });
+          const data = await res.json();
+          
+          if (data.error) {
+            lastError = data;
+            // If it's a "does not exist" error, continue to the next schema prefix
+            if (data.message?.includes("pg_stat_statements") && data.message?.includes("does not exist")) {
+              continue;
+            } else {
+              throw new Error(data.message || data.error);
+            }
           }
+          
+          // Success
+          return Array.isArray(data) ? data : data.rows || [];
+
+        } catch (err: unknown) {
+          lastError = { message: (err instanceof Error ? err.message : String(err)) };
+          break; // Stop on non-recoverable error
         }
-        
-        // Success
-        stats = Array.isArray(data) ? data : data.rows || [];
-        lastError = null; // Clear error on success
-        break; // Exit loop on success
-
-      } catch (err: unknown) {
-        lastError = { message: (err instanceof Error ? err.message : String(err)) };
-        break; // Stop on non-recoverable error
       }
-    }
 
-    if (lastError) {
-       if (lastError.message?.includes("pg_stat_statements") && lastError.message?.includes("does not exist")) {
-         missingExtension = true;
-       } else {
-         error = lastError instanceof Error ? lastError.message : String(lastError) || lastError.error || "Unknown error";
-       }
-    }
-    
-    isLoading = false;
-  }
+      if (lastError) {
+         if (lastError.message?.includes("pg_stat_statements") && lastError.message?.includes("does not exist")) {
+           throw new Error("MISSING_EXTENSION");
+         } else {
+           throw new Error(lastError instanceof Error ? lastError.message : String(lastError) || lastError.error || "Unknown error");
+         }
+      }
 
-  async function enableExtension() {
-    isEnabling = true;
-    try {
+      return [];
+    }
+  }));
+
+  const enableMutation = createMutation(() => ({
+    mutationFn: async () => {
       const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -87,17 +77,22 @@
       });
       const data = await res.json();
       if (data.error) throw new Error(data.message || data.error);
-      await fetchStats();
-    } catch (err: unknown) {
-      error = err instanceof Error ? err.message : String(err);
-    } finally {
-      isEnabling = false;
+      return true;
+    },
+    onSuccess: () => {
+      statsQuery.refetch();
     }
+  }));
+
+  function enableExtension() {
+    enableMutation.mutate();
   }
 
-  onMount(() => {
-    fetchStats();
-  });
+  const stats = $derived((statsQuery.data || []) as QueryStat[]);
+  const isLoading = $derived(statsQuery.isPending);
+  const isEnabling = $derived(enableMutation.isPending);
+  const missingExtension = $derived(statsQuery.error?.message === "MISSING_EXTENSION");
+  const error = $derived(statsQuery.error && statsQuery.error.message !== "MISSING_EXTENSION" ? statsQuery.error.message : (enableMutation.error ? enableMutation.error.message : null));
 
   function formatMs(ms: number): string {
     if (ms < 1) return ms.toFixed(2) + " ms";

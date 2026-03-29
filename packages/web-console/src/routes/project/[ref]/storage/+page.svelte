@@ -1,12 +1,11 @@
 <script lang="ts">
   import { apiClient } from "$lib/api";
 
-  import { onMount } from "svelte";
   import { t } from "svelte-i18n";
   import { page } from "$app/state";
   import { Database, Folder, Plus, Search, Trash2, ExternalLink, Loader2, X, Save } from "lucide-svelte";
   import { toast } from "svelte-sonner";
-
+  import { createMutation } from "@tanstack/svelte-query";
   import { useList, type BaseRecord } from "@svadmin/core";
 
   interface Bucket extends BaseRecord {
@@ -51,49 +50,49 @@
   });
   const files = $derived(Array.isArray(filesQuery.data?.data) ? filesQuery.data.data : []);
 
-  async function createBucket() {
-    if (!newBucketName.trim()) { bucketMsg = "❌ 请输入 Bucket 名称"; setTimeout(() => bucketMsg = null, 3000); return; }
-    creatingBucket = true;
-    try {
+  const createBucketMutation = createMutation(() => ({
+    mutationFn: async () => {
       const res = await apiClient(`/v1/storage/${projectRef}/buckets`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: newBucketName.trim(),
           public: newBucketPublic,
-          file_size_limit: parseInt(newBucketFileLimit) * 1024 * 1024, // MB to bytes
+          file_size_limit: parseInt(newBucketFileLimit) * 1024 * 1024,
         })
       });
-      if (res.ok) {
-        bucketMsg = `✅ Bucket "${newBucketName}" 已创建`;
-        showCreateBucket = false;
-        newBucketName = "";
-        newBucketPublic = false;
-        bucketsQuery.refetch();
-      } else {
+      if (!res.ok) {
         const err = await res.json();
-        bucketMsg = `❌ 创建失败: ${err.error || (err instanceof Error ? err.message : String(err)) || res.statusText}`;
+        throw new Error(err.error || res.statusText);
       }
-    } catch (err: unknown) {
+      return res.json();
+    },
+    onSuccess: () => {
+      bucketMsg = `✅ Bucket "${newBucketName}" 已创建`;
+      showCreateBucket = false;
+      newBucketName = "";
+      newBucketPublic = false;
+      bucketsQuery.refetch();
+      setTimeout(() => bucketMsg = null, 4000);
+    },
+    onError: (err: unknown) => {
       bucketMsg = `❌ 创建失败: ${(err instanceof Error ? err.message : String(err))}`;
-    } finally {
-      creatingBucket = false;
       setTimeout(() => bucketMsg = null, 4000);
     }
+  }));
+
+  async function createBucket() {
+    if (!newBucketName.trim()) { bucketMsg = "❌ 请输入 Bucket 名称"; setTimeout(() => bucketMsg = null, 3000); return; }
+    bucketMsg = null;
+    createBucketMutation.mutate();
   }
 
 
 
   let fileInput: HTMLInputElement;
-  let isUploading = $state<boolean>(false);
 
-  async function handleFileUpload(event: Event) {
-    const target = event.target as HTMLInputElement;
-    if (!target.files || target.files.length === 0 || !selectedBucketId) return;
-
-    const file = target.files[0];
-    isUploading = true;
-    try {
+  const uploadMutation = createMutation(() => ({
+    mutationFn: async ({ file, target }: { file: File, target: HTMLInputElement }) => {
       const formData = new FormData();
       formData.append("file", file);
 
@@ -103,32 +102,46 @@
       });
 
       if (!res.ok) throw new Error(await res.text());
-      
-      // Refresh files list
+      return res.json();
+    },
+    onSuccess: () => {
       filesQuery.refetch();
-    } catch (err: unknown) {
-      toast.error("无法upload file");
-      alert("上传失败");
-    } finally {
-      isUploading = false;
-      target.value = ''; // Reset input
+    },
+    onError: () => {
+      toast.error("上传失败");
+    },
+    onSettled: (data, err, variables) => {
+      variables.target.value = '';
     }
+  }));
+
+  function handleFileUpload(event: Event) {
+    const target = event.target as HTMLInputElement;
+    if (!target.files || target.files.length === 0 || !selectedBucketId) return;
+
+    const file = target.files[0];
+    uploadMutation.mutate({ file, target });
   }
 
-  async function deleteFile(fileName: string) {
-    if (!selectedBucketId || !confirm(`确定删除 ${fileName} 吗？`)) return;
-    
-    try {
+  const deleteMutation = createMutation(() => ({
+    mutationFn: async (fileName: string) => {
       const res = await apiClient(`/v1/storage/${projectRef}/buckets/${selectedBucketId}/files/${encodeURIComponent(fileName)}`, {
         method: "DELETE"
       });
       if (!res.ok) throw new Error(await res.text());
-      
+      return res.json();
+    },
+    onSuccess: () => {
       filesQuery.refetch();
-    } catch (err: unknown) {
-      toast.error("无法delete file");
-      alert("删除失败");
+    },
+    onError: () => {
+      toast.error("删除失败");
     }
+  }));
+
+  function deleteFile(fileName: string) {
+    if (!selectedBucketId || !confirm(`确定删除 ${fileName} 吗？`)) return;
+    deleteMutation.mutate(fileName);
   }
 
 
@@ -163,9 +176,9 @@
               <span class="text-[9px] text-muted-foreground">MB</span>
             </div>
           </div>
-          <button onclick={createBucket} disabled={creatingBucket}
+          <button onclick={createBucket} disabled={createBucketMutation.isPending}
             class="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 text-[10px] font-semibold rounded bg-brand text-white hover:bg-brand/90 disabled:opacity-50">
-            {#if creatingBucket}<Loader2 size={10} class="animate-spin" />{:else}<Save size={10} />{/if} 创建
+            {#if createBucketMutation.isPending}<Loader2 size={10} class="animate-spin" />{:else}<Save size={10} />{/if} 创建
           </button>
           {#if bucketMsg}
             <div class="text-[10px] {bucketMsg.startsWith('✅') ? 'text-green-700' : 'text-red-600'}">{bucketMsg}</div>
@@ -221,10 +234,10 @@
           </div>
           <button 
             onclick={() => fileInput.click()}
-            disabled={isUploading || !selectedBucketId}
+            disabled={uploadMutation.isPending || !selectedBucketId}
             class="flex items-center gap-2 px-4 py-1.5 bg-brand text-white text-xs font-semibold rounded-full shadow-lg shadow-brand/20 hover:scale-[1.02] active:scale-95 transition-all disabled:opacity-50 disabled:hover:scale-100"
           >
-            {#if isUploading}
+            {#if uploadMutation.isPending}
               <Loader2 size={14} class="animate-spin" />
               <span>Uploading...</span>
             {:else}

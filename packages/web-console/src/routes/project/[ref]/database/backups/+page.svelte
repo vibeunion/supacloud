@@ -1,10 +1,10 @@
 <script lang="ts">
   import { apiClient } from "$lib/api";
 
-  import { onMount } from "svelte";
   import { page } from "$app/state";
   import { t } from "svelte-i18n";
   import { Loader2, HardDrive, CheckCircle2, Clock, AlertTriangle, Plus, UploadCloud, DownloadCloud, X } from "lucide-svelte";
+  import { createQuery, createMutation } from "@tanstack/svelte-query";
 
   interface Backup {
     label: string;
@@ -14,11 +14,6 @@
     size_bytes: number;
   }
 
-  let backups = $state<Backup[]>([]);
-  let isLoading = $state(true);
-  let dbSize = $state("");
-
-  let isCreating = $state(false);
   let createMsg = $state<string | null>(null);
 
   let showRestore = $state(false);
@@ -28,21 +23,20 @@
 
   const projectRef = $derived(page.params.ref);
 
-  async function fetchBackupInfo() {
-    isLoading = true;
-    try {
+  const backupInfoQuery = createQuery(() => ({
+    queryKey: ["database_backups", projectRef],
+    queryFn: async () => {
       const sizeRes = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sql: "SELECT pg_size_pretty(pg_database_size(current_database())) as size;" })
       });
       const sizeData = await sizeRes.json();
       const rows = Array.isArray(sizeData) ? sizeData : sizeData.rows || [];
-      dbSize = rows[0]?.size || "Unknown";
+      const dbSize = rows[0]?.size || "Unknown";
 
       // Simulate backup schedule info since actual backups are platform-managed
       const now = new Date();
-      backups = Array.from({ length: 7 }, (_, i) => {
+      const backups = Array.from({ length: 7 }, (_, i) => {
         const d = new Date(now);
         d.setDate(d.getDate() - i);
         d.setHours(2, 0, 0, 0);
@@ -54,14 +48,14 @@
           size_bytes: 0
         };
       });
-    } catch {
-      // silently fallback
-    } finally {
-      isLoading = false;
-    }
-  }
 
-  onMount(() => { fetchBackupInfo(); });
+      return { dbSize, backups };
+    }
+  }));
+
+  const dbSize = $derived(backupInfoQuery.data?.dbSize || "");
+  const backups = $derived(backupInfoQuery.data?.backups || []);
+  const isLoading = $derived(backupInfoQuery.isPending);
 
   function formatTime(ts: string): string {
     try { return new Date(ts).toLocaleString(); } catch { return ts; }
@@ -79,20 +73,26 @@
     return "text-red-500";
   }
 
-  async function createLogicalBackup() {
-    isCreating = true;
-    createMsg = null;
-    try {
+  const createLogicalBackupMutation = createMutation(() => ({
+    mutationFn: async () => {
       const res = await apiClient(`/v1/projects/${projectRef}/database/backups/logical`, { method: "POST" });
       const data = await res.json();
       if (!data.success) throw new Error(data.message || "备份失败");
+      return data;
+    },
+    onSuccess: (data) => {
       createMsg = `✅ 备份已生成：${data.file || '成功'}`;
-    } catch (err: unknown) {
+      setTimeout(() => createMsg = null, 5000);
+    },
+    onError: (err: unknown) => {
       createMsg = `❌ 失败: ${(err instanceof Error ? err.message : String(err))}`;
-    } finally {
-      isCreating = false;
       setTimeout(() => createMsg = null, 5000);
     }
+  }));
+
+  async function createLogicalBackup() {
+    createMsg = null;
+    createLogicalBackupMutation.mutate();
   }
 
   async function restoreBackup() {
@@ -131,9 +131,9 @@
         class="flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg border bg-background hover:bg-muted transition-colors">
         <DownloadCloud size={14} /> 从文件还原
       </button>
-      <button onclick={createLogicalBackup} disabled={isCreating}
+      <button onclick={createLogicalBackup} disabled={createLogicalBackupMutation.isPending}
         class="flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg bg-brand text-white hover:bg-brand/90 transition-colors disabled:opacity-50">
-        {#if isCreating}
+        {#if createLogicalBackupMutation.isPending}
           <Loader2 size={14} class="animate-spin" />
         {:else}
           <UploadCloud size={14} />

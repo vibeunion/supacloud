@@ -1,10 +1,10 @@
 <script lang="ts">
   import { apiClient } from "$lib/api";
 
-  import { onMount } from "svelte";
   import { page } from "$app/state";
   import { t } from "svelte-i18n";
   import { Loader2, Columns3, Check, X, ShieldCheck } from "lucide-svelte";
+  import { createQuery } from "@tanstack/svelte-query";
 
   interface ColumnPrivilege {
     table_schema: string;
@@ -27,9 +27,6 @@
     privileges: Record<string, boolean>;
   }
 
-  let tables = $state<TableRow[]>([]);
-  let isLoading = $state(true);
-  let error = $state<string | null>(null);
   let selectedRole = $state("anon");
 
   const projectRef = $derived(page.params.ref);
@@ -53,13 +50,11 @@
     ORDER BY c.table_name, c.ordinal_position;
   `;
 
-  async function fetchPrivileges() {
-    isLoading = true;
-    error = null;
-    try {
+  const privilegesQuery = createQuery(() => ({
+    queryKey: ["database_column_privileges", projectRef],
+    queryFn: async () => {
       const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sql: PRIV_SQL })
       });
       const data = await res.json();
@@ -85,18 +80,16 @@
         }
       }
 
-      tables = Array.from(tableMap.entries()).map(([table_name, colMap]) => ({
+      return Array.from(tableMap.entries()).map(([table_name, colMap]) => ({
         table_name,
         columns: Array.from(colMap.values())
       }));
-    } catch (err: unknown) {
-      error = err instanceof Error ? err.message : String(err);
-    } finally {
-      isLoading = false;
     }
-  }
+  }));
 
-  onMount(() => { fetchPrivileges(); });
+  const tables = $derived((privilegesQuery.data as TableRow[]) || []);
+  const isLoading = $derived(privilegesQuery.isPending);
+  const error = $derived(privilegesQuery.error?.message || null);
 
   function hasPriv(col: ColumnInfo, role: string, priv: string): boolean {
     return col.privileges[`${role}:${priv}`] === true;

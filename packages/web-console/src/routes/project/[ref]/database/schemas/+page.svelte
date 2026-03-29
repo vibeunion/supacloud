@@ -1,10 +1,10 @@
 <script lang="ts">
   import { apiClient } from "$lib/api";
 
-  import { onMount } from "svelte";
   import { page } from "$app/state";
   import { t } from "svelte-i18n";
   import { Loader2, FolderOpen, Table2, Braces } from "lucide-svelte";
+  import { createQuery } from "@tanstack/svelte-query";
 
   interface SchemaInfo {
     schema_name: string;
@@ -12,10 +12,6 @@
     table_count: number;
     function_count: number;
   }
-
-  let schemas = $state<SchemaInfo[]>([]);
-  let isLoading = $state(true);
-  let error = $state<string | null>(null);
 
   const projectRef = $derived(page.params.ref);
 
@@ -31,26 +27,22 @@
     ORDER BY n.nspname;
   `;
 
-  async function fetchSchemas() {
-    isLoading = true;
-    error = null;
-    try {
+  const schemasQuery = createQuery(() => ({
+    queryKey: ["database_schemas", projectRef],
+    queryFn: async () => {
       const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sql: SCHEMAS_SQL })
       });
       const data = await res.json();
       if (data.error) throw new Error(data.message || data.error);
-      schemas = Array.isArray(data) ? data : data.rows || [];
-    } catch (err: unknown) {
-      error = err instanceof Error ? err.message : String(err);
-    } finally {
-      isLoading = false;
+      return (Array.isArray(data) ? data : data.rows || []) as SchemaInfo[];
     }
-  }
+  }));
 
-  onMount(() => { fetchSchemas(); });
+  const schemas = $derived((schemasQuery.data as SchemaInfo[]) || []);
+  const isLoading = $derived(schemasQuery.isPending);
+  const error = $derived(schemasQuery.error?.message || null);
 </script>
 
 <div class="h-full flex flex-col space-y-4">

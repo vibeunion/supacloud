@@ -1,10 +1,10 @@
 <script lang="ts">
   import { apiClient } from "$lib/api";
 
-  import { onMount } from "svelte";
   import { page } from "$app/state";
   import { t } from "svelte-i18n";
   import { Loader2, Zap, ZapOff } from "lucide-svelte";
+  import { createQuery } from "@tanstack/svelte-query";
 
   interface Trigger {
     trigger_name: string;
@@ -14,10 +14,6 @@
     action_statement: string;
     is_enabled: string;
   }
-
-  let triggers = $state<Trigger[]>([]);
-  let isLoading = $state(true);
-  let error = $state<string | null>(null);
 
   const projectRef = $derived(page.params.ref);
 
@@ -44,26 +40,22 @@
     ORDER BY event_object_table, trigger_name;
   `;
 
-  async function fetchTriggers() {
-    isLoading = true;
-    error = null;
-    try {
+  const triggersQuery = createQuery(() => ({
+    queryKey: ["database_triggers", projectRef],
+    queryFn: async () => {
       const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sql: TRIGGERS_SQL })
       });
       const data = await res.json();
       if (data.error) throw new Error(data.message || data.error);
-      triggers = Array.isArray(data) ? data : data.rows || [];
-    } catch (err: unknown) {
-      error = err instanceof Error ? err.message : String(err);
-    } finally {
-      isLoading = false;
+      return (Array.isArray(data) ? data : data.rows || []) as Trigger[];
     }
-  }
+  }));
 
-  onMount(() => { fetchTriggers(); });
+  const triggers = $derived((triggersQuery.data as Trigger[]) || []);
+  const isLoading = $derived(triggersQuery.isPending);
+  const error = $derived(triggersQuery.error?.message || null);
 
   function getEventColor(event: string): string {
     if (event === "INSERT") return "text-green-600 bg-green-500/10";

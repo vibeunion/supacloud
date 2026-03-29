@@ -1,10 +1,10 @@
 <script lang="ts">
   import { apiClient } from "$lib/api";
 
-  import { onMount } from "svelte";
   import { page } from "$app/state";
   import { Loader2, Shield, Search } from "lucide-svelte";
   import { toast } from "svelte-sonner";
+  import { createQuery } from "@tanstack/svelte-query";
 
   interface StoragePolicy {
     policyname: string;
@@ -15,17 +15,9 @@
     qual: string;
   }
 
-  let policies = $state<StoragePolicy[]>([]);
-  let isLoading = $state(true);
   let searchQuery = $state("");
 
   const projectRef = $derived(page.params.ref);
-
-  const filteredPolicies = $derived(
-    searchQuery.trim()
-      ? policies.filter(p => p.policyname.toLowerCase().includes(searchQuery.toLowerCase()) || p.tablename.toLowerCase().includes(searchQuery.toLowerCase()))
-      : policies
-  );
 
   const POLICIES_SQL = `
     SELECT
@@ -42,26 +34,29 @@
     ORDER BY c.relname, pol.polname;
   `;
 
-  async function fetchPolicies() {
-    isLoading = true;
-    try {
+  const policiesQuery = createQuery(() => ({
+    queryKey: ["storage_policies", projectRef],
+    queryFn: async () => {
       const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sql: POLICIES_SQL })
       });
       const data = await res.json();
-      if (!data.error) {
-        policies = Array.isArray(data) ? data : data.rows || [];
-      }
-    } catch (err: unknown) {
-      toast.error("无法fetch storage policies");
-    } finally {
-      isLoading = false;
+      if (data.error) throw new Error(data.message || data.error);
+      return (Array.isArray(data) ? data : data.rows || []) as StoragePolicy[];
     }
-  }
+  }));
 
-  onMount(() => { fetchPolicies(); });
+  const policies = $derived(policiesQuery.data || []);
+  const isLoading = $derived(policiesQuery.isPending);
+
+  const filteredPolicies = $derived(
+    searchQuery.trim()
+      ? policies.filter(p => p.policyname.toLowerCase().includes(searchQuery.toLowerCase()) || p.tablename.toLowerCase().includes(searchQuery.toLowerCase()))
+      : policies
+  );
+
+
 
   function getCmdColor(cmd: string): string {
     if (cmd === "SELECT") return "text-blue-600 bg-blue-500/10";

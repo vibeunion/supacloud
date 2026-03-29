@@ -1,9 +1,9 @@
 <script lang="ts">
   import { apiClient } from "$lib/api";
 
-  import { onMount } from "svelte";
   import { page } from "$app/state";
   import { Timer, ShieldAlert, Mail, KeyRound, Smartphone, AlertTriangle, Loader2, Save, RefreshCw } from "lucide-svelte";
+  import { createQuery, createMutation, useQueryClient } from "@tanstack/svelte-query";
 
   interface RateLimit {
     name: string;
@@ -34,33 +34,41 @@
     RATE_LIMIT_VERIFY: "30", RATE_LIMIT_ANONYMOUS_SIGN_IN: "30",
   };
 
-  let limits = $state<RateLimit[]>([]);
-  let isLoading = $state(true);
-  let saving = $state(false);
   let saveMsg = $state<string | null>(null);
 
   const projectRef = $derived(page.params.ref);
+  const queryClient = useQueryClient();
 
-  async function fetchConfig() {
-    isLoading = true;
-    try {
+  const configQuery = createQuery(() => ({
+    queryKey: ["auth_config", projectRef],
+    queryFn: async () => {
       const res = await apiClient(`/v1/projects/${projectRef}/auth/config`);
-      const config = res.ok ? await res.json() : {};
+      if (!res.ok) throw new Error("Failed to load config");
+      return await res.json();
+    }
+  }));
+
+  let limits = $state<RateLimit[]>([]);
+
+  $effect(() => {
+    if (configQuery.data) {
+      const config = configQuery.data;
       limits = RATE_LIMITS_DEF.map(def => ({
         ...def,
         value: String(config[def.envKey] ?? DEFAULT_VALUES[def.envKey] ?? "30"),
       }));
-    } catch {
+    } else if (configQuery.isError || (limits.length === 0 && !configQuery.isPending)) {
       limits = RATE_LIMITS_DEF.map(def => ({
         ...def,
         value: DEFAULT_VALUES[def.envKey] || "30",
       }));
-    } finally { isLoading = false; }
-  }
+    }
+  });
 
-  async function saveConfig() {
-    saving = true;
-    try {
+  const isLoading = $derived(configQuery.isPending);
+
+  const saveMutation = createMutation(() => ({
+    mutationFn: async () => {
       const payload: Record<string, string> = {};
       for (const l of limits) { payload[l.envKey] = l.value; }
       const res = await apiClient(`/v1/projects/${projectRef}/auth/config`, {
@@ -68,16 +76,27 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
       });
-      saveMsg = res.ok ? "✅ 速率限制已保存（GoTrue 服务已重启）" : `❌ 保存失败: ${(await res.json()).error || res.statusText}`;
-    } catch (err: unknown) {
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || res.statusText);
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["auth_config", projectRef] });
+      saveMsg = "✅ 速率限制已保存（GoTrue 服务已重启）";
+      setTimeout(() => saveMsg = null, 4000);
+    },
+    onError: (err: unknown) => {
       saveMsg = `❌ 保存失败: ${(err instanceof Error ? err.message : String(err))}`;
-    } finally {
-      saving = false;
       setTimeout(() => saveMsg = null, 4000);
     }
-  }
+  }));
 
-  onMount(() => { fetchConfig(); });
+  async function saveConfig() {
+    saveMsg = null;
+    saveMutation.mutate();
+  }
 
   function getCategoryColor(cat: string): string {
     if (cat === "auth") return "text-blue-600 bg-blue-500/10";
@@ -94,12 +113,12 @@
       <p class="text-sm text-muted-foreground mt-1">认证端点的速率限制配置，保护应用免受滥用</p>
     </div>
     <div class="flex items-center gap-2">
-      <button onclick={() => fetchConfig()} class="flex items-center gap-1.5 px-3 py-2 text-xs rounded-lg border hover:bg-muted/50 transition-colors">
+      <button onclick={() => queryClient.invalidateQueries({ queryKey: ["auth_config", projectRef] })} class="flex items-center gap-1.5 px-3 py-2 text-xs rounded-lg border hover:bg-muted/50 transition-colors">
         <RefreshCw size={12} /> 刷新
       </button>
-      <button onclick={saveConfig} disabled={saving || isLoading}
+      <button onclick={saveConfig} disabled={saveMutation.isPending || isLoading}
         class="flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg bg-brand text-white hover:bg-brand/90 transition-colors disabled:opacity-50">
-        {#if saving}<Loader2 size={14} class="animate-spin" />{:else}<Save size={14} />{/if}
+        {#if saveMutation.isPending}<Loader2 size={14} class="animate-spin" />{:else}<Save size={14} />{/if}
         保存配置
       </button>
     </div>

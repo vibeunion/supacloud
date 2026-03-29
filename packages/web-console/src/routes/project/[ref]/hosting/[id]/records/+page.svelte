@@ -1,9 +1,9 @@
 <script lang="ts">
   import { apiClient } from "$lib/api";
 
-  import { onMount } from "svelte";
   import { page } from "$app/state";
   import { Loader2, CheckCircle2, XCircle, Clock, GitCommit, RefreshCw } from "lucide-svelte";
+  import { createQuery } from "@tanstack/svelte-query";
 
   const projectRef = $derived(page.params.ref);
   const deployId = $derived(page.url.pathname.split("/hosting/")[1]?.split("/")[0] || "");
@@ -20,22 +20,20 @@
     duration?: number;
   }
 
-  let records: Record[] = $state.raw([]);
-  let isLoading = $state(true);
-
-  async function fetchRecords() {
-    isLoading = true;
-    try {
+  const recordsQuery = createQuery(() => ({
+    queryKey: ["deployment-records", projectRef, deployId],
+    queryFn: async () => {
       const res = await apiClient(`/v1/projects/${projectRef}/frontend/deployments/${deployId}/records`);
-      if (res.ok) {
-        const data = await res.json();
-        records = data.records || [];
-      }
-    } catch {}
-    isLoading = false;
-  }
+      if (!res.ok) throw new Error("Failed to fetch records");
+      const data = await res.json();
+      return (data.records || []) as Record[];
+    }
+  }));
 
-  onMount(() => fetchRecords());
+  const records = $derived(recordsQuery.data || []);
+  const isLoading = $derived(recordsQuery.isPending);
+
+
 
   function triggerLabel(t: string): string {
     if (t === "webhook") return "🔗 Webhook";
@@ -57,7 +55,7 @@
       <h2 class="text-lg font-bold">部署记录</h2>
       <p class="text-xs text-muted-foreground">ID: {deployId}</p>
     </div>
-    <button onclick={() => fetchRecords()} class="flex items-center gap-2 px-3 py-2 text-xs rounded-lg border hover:bg-muted/50 transition-colors">
+    <button onclick={() => recordsQuery.refetch()} disabled={recordsQuery.isFetching} class="flex items-center gap-2 px-3 py-2 text-xs rounded-lg border hover:bg-muted/50 transition-colors disabled:opacity-50">
       <RefreshCw size={12} /> 刷新
     </button>
   </div>

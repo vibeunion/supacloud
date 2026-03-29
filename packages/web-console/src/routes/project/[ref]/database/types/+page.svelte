@@ -1,10 +1,10 @@
 <script lang="ts">
   import { apiClient } from "$lib/api";
 
-  import { onMount } from "svelte";
   import { page } from "$app/state";
   import { t } from "svelte-i18n";
   import { Loader2, Tag, ListOrdered } from "lucide-svelte";
+  import { createQuery } from "@tanstack/svelte-query";
 
   interface EnumType {
     type_name: string;
@@ -12,10 +12,6 @@
     owner: string;
     enum_values: string;
   }
-
-  let types = $state<EnumType[]>([]);
-  let isLoading = $state(true);
-  let error = $state<string | null>(null);
 
   const projectRef = $derived(page.params.ref);
 
@@ -34,26 +30,22 @@
     ORDER BY n.nspname, t.typname;
   `;
 
-  async function fetchTypes() {
-    isLoading = true;
-    error = null;
-    try {
+  const typesQuery = createQuery(() => ({
+    queryKey: ["database_types", projectRef],
+    queryFn: async () => {
       const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sql: ENUM_SQL })
       });
       const data = await res.json();
       if (data.error) throw new Error(data.message || data.error);
-      types = Array.isArray(data) ? data : data.rows || [];
-    } catch (err: unknown) {
-      error = err instanceof Error ? err.message : String(err);
-    } finally {
-      isLoading = false;
+      return (Array.isArray(data) ? data : data.rows || []) as EnumType[];
     }
-  }
+  }));
 
-  onMount(() => { fetchTypes(); });
+  const types = $derived((typesQuery.data as EnumType[]) || []);
+  const isLoading = $derived(typesQuery.isPending);
+  const error = $derived(typesQuery.error?.message || null);
 </script>
 
 <div class="h-full flex flex-col space-y-4">

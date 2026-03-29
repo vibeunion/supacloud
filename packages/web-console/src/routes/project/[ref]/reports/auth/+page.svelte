@@ -1,20 +1,16 @@
 <script lang="ts">
   import { apiClient } from "$lib/api";
 
-  import { onMount } from "svelte";
   import { page } from "$app/state";
   import { Loader2, Shield, ArrowLeft, UserPlus, LogIn, Key } from "lucide-svelte";
   import { toast } from "svelte-sonner";
-
-  let authStats = $state(null as Record<string, unknown> | null);
-  let recentUsers = $state<Record<string, unknown>[]>([]);
-  let isLoading = $state(true);
+  import { createQuery } from "@tanstack/svelte-query";
 
   const projectRef = $derived(page.params.ref);
 
-  async function fetchAuthStats() {
-    isLoading = true;
-    try {
+  const authStatsQuery = createQuery(() => ({
+    queryKey: ["auth-stats", projectRef],
+    queryFn: async () => {
       // Get total user count and recent signups
       const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
         method: "POST",
@@ -30,9 +26,10 @@
           FROM auth.users;`
         })
       });
+      if (!res.ok) throw new Error("Failed to fetch auth stats");
       const data = await res.json();
       const rows = Array.isArray(data) ? data : data.rows || [];
-      if (rows.length > 0) authStats = rows[0];
+      const stats = rows.length > 0 ? rows[0] : null;
 
       // Recent signups
       const res2 = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
@@ -44,17 +41,20 @@
                 FROM auth.users ORDER BY created_at DESC LIMIT 20;`
         })
       });
+      if (!res2.ok) throw new Error("Failed to fetch recent users");
       const data2 = await res2.json();
-      recentUsers = Array.isArray(data2) ? data2 : data2.rows || [];
-    } catch (err: unknown) {
-      toast.error("无法fetch auth stats");
-    } finally {
-      isLoading = false;
+      const users = Array.isArray(data2) ? data2 : data2.rows || [];
+      
+      return { stats, users };
     }
-  }
+  }));
 
-  onMount(() => { fetchAuthStats(); });
+  const authStats = $derived(authStatsQuery.data?.stats || null);
+  const recentUsers = $derived(authStatsQuery.data?.users || []);
+  const isLoading = $derived(authStatsQuery.isPending);
 </script>
+
+
 
 <div class="h-full flex flex-col space-y-4">
   <div class="flex items-center gap-3">
