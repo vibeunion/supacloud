@@ -13,6 +13,7 @@
   },
   "Dashboard": {
     "title": "Dashboard",
+    "subtitle": "View and manage your project overview metrics.",
     "org_default": "Default Organization",
     "project_dashboard": "Project Dashboard",
     "db_connections": "Database Connections",
@@ -32,7 +33,8 @@
     "query_performance": "Query Performance",
     "database_linter": "Database Linter",
     "logs": "Logs",
-    "settings": "Settings"
+    "settings": "Settings",
+    "reports": "Reports & Analytics"
   },
   "Project": {
     "home": "Home",
@@ -439,5 +441,15 @@
     "ago_minutes": "minutes ago",
     "ago_hours": "hours ago",
     "ago_days": "days ago"
+  },
+  "chat": {
+    "title": "SupaCloud AI Assistant",
+    "welcome": "Hello, I'm your AI consultant",
+    "welcomeDesc": "I can help you write SQL, analyze slow queries, or answer database questions. What can I do for you today?",
+    "suggestion1": "Write a SQL schema to create a users table",
+    "suggestion2": "How do I enable Row Level Security (RLS)?",
+    "suggestion3": "Please analyze my current slow queries",
+    "placeholder": "Type your question...",
+    "shortcutHint": "Shortcut"
   }
 }
