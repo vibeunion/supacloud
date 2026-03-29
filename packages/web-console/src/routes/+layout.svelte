@@ -9,13 +9,16 @@
     setTheme
   } from "@svadmin/core";
   import { createSvelteKitRouterProvider } from "@svadmin/sveltekit";
-  import { Layout, Toast, DevTools } from "@svadmin/ui";
+  import { Layout, Toast, DevTools, setComponentRegistry } from "@svadmin/ui";
   import { QueryClient, QueryClientProvider } from "@tanstack/svelte-query";
   import { page } from "$app/stores";
   
   import { dataProvider } from "$lib/admin/provider";
   import { authProvider } from "$lib/admin/auth";
   import { resources, getTenantResources } from "$lib/admin/resources";
+  
+  // Fix 0.18.0 standalone Layout crash: initialize empty registry context so `registry.Breadcrumbs` doesn't throw
+  setComponentRegistry({} as any);
   
   let { children }: { children: Snippet } = $props();
 
