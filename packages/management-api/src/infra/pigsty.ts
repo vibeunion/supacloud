@@ -1,5 +1,6 @@
 import { $ } from "bun";
 import { logger } from "../utils/logger";
+import { config as appConfig } from "../config";
 import os from "node:os";
 
 export interface PigstyConfig {
@@ -111,7 +112,7 @@ export async function install(config: PigstyConfig) {
             pigstyDir
         );
 
-        const isPodman = process.env.CONTAINER_RUNTIME === "podman";
+        const isPodman = appConfig.containerRuntime === "podman";
         if (!isPodman && (await $`test -f ${pigstyDir}/docker.yml`.nothrow()).exitCode === 0) {
             logger.info("[PigstyManager] Configuring Docker environment...");
             await runCommandWithStreaming(
@@ -225,8 +226,8 @@ async function updatePigstyConfig(config: PigstyConfig, ymlPath: string) {
         if (config.serviceRoleKey) yml = yml.replace(/SERVICE_ROLE_KEY: .*/g, `SERVICE_ROLE_KEY: ${config.serviceRoleKey}`);
 
         // Cloud-native storage integration (JuiceFS)
-        const storageType = process.env.STORAGE_TYPE || "local";
-        const mountPoint = process.env.STORAGE_MOUNT_POINT || "/mnt/supacloud";
+        const storageType = appConfig.storageType;
+        const mountPoint = appConfig.storageMountPoint;
 
         if (storageType === "juicefs") {
             logger.info(`[PigstyManager] Switching Supabase Storage backend to JuiceFS: ${mountPoint}`);
@@ -279,8 +280,8 @@ async function getPlaybookExtraArgs(): Promise<string[]> {
 
     // 1. Auto-detect environment restrictions
     const isContainer = (await $`test -f /.dockerenv`.nothrow()).exitCode === 0 ||
-        process.env.CONTAINER_RUNTIME ||
-        process.env.GITHUB_ACTIONS;
+        appConfig.containerRuntime !== "podman" ||
+        appConfig.isGithubActions;
 
     if (isContainer) {
         logger.info("[PigstyManager] Detected restricted environment (Container/CI), auto-injecting environment avoidance patches...");
@@ -293,7 +294,7 @@ async function getPlaybookExtraArgs(): Promise<string[]> {
     }
 
     // 2. Support external environment variable manual injection (preserve extensibility)
-    const extra = process.env.SUPACLOUD_ANSIBLE_ARGS;
+    const extra = appConfig.supacloudAnsibleArgs;
     if (extra) {
         logger.info(`[PigstyManager] Detected extra Ansible parameter injection: ${extra}`);
         args.push(...extra.split(/\s+/).filter(Boolean));

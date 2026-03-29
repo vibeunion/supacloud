@@ -1,13 +1,14 @@
 import { Elysia, t, status } from "elysia";
 import { StorageService } from '../services/storage.service';
 import { logger } from "../utils/logger";
+import { config } from "../config";
 
 const ErrorResponse = t.Object({ error: t.String() });
 const SuccessResponse = t.Object({ success: t.Boolean(), message: t.String() });
 
 // ── Imaginary Config ──────────────────────────────────────────────
-const IMAGINARY_URL = process.env.IMAGINARY_URL || "http://127.0.0.1:9010";
-const S3_ENDPOINT  = process.env.S3_ENDPOINT   || "http://127.0.0.1:9000";
+const IMAGINARY_URL = config.imaginaryUrl;
+const S3_ENDPOINT  = config.s3Endpoint;
 
 /**
  * Build the internal S3 URL for imaginary to fetch the source image from.

@@ -1,3 +1,4 @@
+import { config } from "../config";
 import { shellService } from './shell.service';
 import { logger } from "../utils/logger";
 
@@ -66,7 +67,7 @@ export class StorageService {
 
     const accessKey = output.match(/ACCESS_KEY=([^\n]+)/)?.[1]?.trim();
     const secretKey = output.match(/SECRET_KEY=([^\n]+)/)?.[1]?.trim();
-    const endpoint = output.match(/ENDPOINT=([^\n]+)/)?.[1]?.trim() || process.env.S3_ENDPOINT || 'http://localhost:9000';
+    const endpoint = output.match(/ENDPOINT=([^\n]+)/)?.[1]?.trim() || config.s3Endpoint;
     const bucket = output.match(/BUCKET=([^\n]+)/)?.[1]?.trim() || `supa-${projectRef}`;
     return { success: true, accessKey, secretKey, endpoint, bucket };
   }

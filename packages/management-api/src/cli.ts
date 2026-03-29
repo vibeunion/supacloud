@@ -7,6 +7,7 @@ import { $ } from "bun";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { logger } from "./utils/logger";
+import { config as appConfig } from "./config";
 import { shellService } from "./services/shell.service";
 
 async function setupStudioDomain(domain: string) {
@@ -15,14 +16,14 @@ async function setupStudioDomain(domain: string) {
     process.exit(1);
   }
 
-  const ANGIE_SITES_DIR = process.env.ANGIE_SITES_DIR || "/etc/angie/http.d";
-  const MANAGEMENT_API_INTERNAL = process.env.MANAGEMENT_API_INTERNAL || "127.0.0.1:9090";
-  const STUDIO_INTERNAL = process.env.STUDIO_INTERNAL || "127.0.0.1:3000";
-  const ACME_CLIENT = process.env.ACME_CLIENT || "le";
+  const ANGIE_SITES_DIR = appConfig.angieSitesDir;
+  const MANAGEMENT_API_INTERNAL = appConfig.managementApiInternal;
+  const STUDIO_INTERNAL = appConfig.studioInternal;
+  const ACME_CLIENT = appConfig.acmeClient;
   
   const configFile = path.join(ANGIE_SITES_DIR, `studio-global.conf`);
 
-  const ENABLE_SSL = process.env.ENABLE_SSL !== "false";
+  const ENABLE_SSL = appConfig.enableSsl;
 
   let config = "";
   if (ENABLE_SSL) {

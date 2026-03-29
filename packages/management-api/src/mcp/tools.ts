@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { logger } from "../utils/logger";
+import { config } from "../config";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { projectService } from "../services";
 import { organizationService } from "../services/organization.service";
@@ -170,11 +171,11 @@ export function registerMcpTools(server: McpServer, token: McpTokenPayload): voi
       const { SQL } = await import("bun");
       const dbName = `supa_${ref}`;
       const db = new SQL({
-        hostname: process.env.PG_HOST || "localhost",
-        port: parseInt(process.env.PG_PORT || "5432"),
+        hostname: config.pgHost,
+        port: config.pgPort,
         database: dbName,
-        username: process.env.PG_USER || "postgres",
-        password: process.env.PGPASSWORD || process.env.POSTGRES_PASSWORD || "postgres",
+        username: config.pgUser,
+        password: config.pgPassword,
       });
       try {
         const rows = await db.unsafe(sqlStr);
