@@ -11,7 +11,10 @@
 import { logger } from "../utils/logger";
 
 const REALTIME_ADMIN_URL = process.env.REALTIME_ADMIN_URL || "http://127.0.0.1:4000";
-const REALTIME_API_SECRET = process.env.REALTIME_API_SECRET || process.env.JWT_SECRET || "super-secret-jwt-token";
+const REALTIME_API_SECRET = process.env.REALTIME_API_SECRET || process.env.JWT_SECRET;
+if (!REALTIME_API_SECRET) {
+    logger.error("FATAL: REALTIME_API_SECRET or JWT_SECRET must be set for RealtimeService.");
+}
 const PG_HOST = process.env.POSTGRES_HOST || "10.2.0.14";
 const PG_PORT = process.env.POSTGRES_PORT || "5432";
 
@@ -28,7 +31,7 @@ export class RealtimeService {
 
     constructor() {
         this.adminUrl = REALTIME_ADMIN_URL;
-        this.apiSecret = REALTIME_API_SECRET;
+        this.apiSecret = REALTIME_API_SECRET as string; // Assert string since it's checked above
     }
 
     /**
@@ -189,7 +192,8 @@ export class RealtimeService {
                 return { healthy: true, tenants: Array.isArray(data) ? data.length : 0 };
             }
             return { healthy: false };
-        } catch {
+        } catch (err: unknown) {
+            logger.debug("[Realtime] Health check failed:", (err instanceof Error ? err.message : String(err)));
             return { healthy: false };
         }
     }

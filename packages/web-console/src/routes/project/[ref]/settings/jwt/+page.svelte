@@ -1,39 +1,33 @@
 <script lang="ts">
   import { apiClient } from "$lib/api";
 
-  import { onMount } from "svelte";
+
   import { page } from "$app/state";
   import { Loader2, Key, Eye, EyeOff, Copy, Clock, Shield } from "lucide-svelte";
   import { toast } from "svelte-sonner";
 
-  let jwtSecret = $state("");
-  let jwtExpiry = $state(3600);
-  let isLoading = $state(true);
+  import { useShow } from "@svadmin/core";
+
   let showSecret = $state(false);
 
   const projectRef = $derived(page.params.ref);
 
-  async function fetchJwt() {
-    isLoading = true;
-    try {
-      const res = await apiClient(`/v1/projects/${projectRef}`);
-      if (res.ok) {
-        const data = await res.json();
-        jwtSecret = data.config?.jwt_secret || data.jwt_secret || "super-secret-jwt-token-with-at-least-32-characters-long";
-        jwtExpiry = data.config?.jwt_expiry || 3600;
-      }
-    } catch (err: unknown) {
-      toast.error("无法fetch JWT config");
-    } finally {
-      isLoading = false;
-    }
-  }
+  const { query } = useShow({
+    get resource() { return "v1/projects"; },
+    get id() { return projectRef; }
+  });
+
+  const projectData = $derived(query.data?.data as Record<string, unknown> | undefined);
+  const configData = $derived(projectData?.config as Record<string, unknown> | undefined);
+  const jwtSecret = $derived(String(configData?.jwt_secret ?? projectData?.jwt_secret ?? "super-secret-jwt-token-with-at-least-32-characters-long"));
+  const jwtExpiry = $derived(Number(configData?.jwt_expiry ?? projectData?.jwt_expiry) || 3600);
+  const isLoading = $derived(query.isLoading);
 
   async function copyText(text: string) {
     try { await navigator.clipboard.writeText(text); } catch {}
   }
 
-  onMount(() => { fetchJwt(); });
+
 
   const maskedSecret = $derived(jwtSecret ? jwtSecret.substring(0, 8) + "•".repeat(Math.max(jwtSecret.length - 8, 16)) : "");
   const expiryLabel = $derived(

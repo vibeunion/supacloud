@@ -1,10 +1,10 @@
 <script lang="ts">
   import { apiClient } from "$lib/api";
 
-  import { onMount } from "svelte";
   import { page } from "$app/state";
   import { Webhook, Plus, Globe, Trash2, Loader2 } from "lucide-svelte";
   import { toast } from "svelte-sonner";
+  import { createQuery, createMutation, useQueryClient } from "@tanstack/svelte-query";
 
   const projectRef = $derived(page.params.ref);
 
@@ -16,25 +16,21 @@
     enabled: boolean;
   }
 
-  let endpoints = $state<WebhookEndpoint[]>([]);
-  let isLoading = $state(true);
-  
   // Add State
   let showAdd = $state(false);
-  let isSaving = $state(false);
   let addError = $state<string | null>(null);
   let newName = $state("");
   let newUrl = $state("");
   let newTable = $state("");
   let selectedEvents = $state<string[]>([]);
-  let tables = $state<string[]>([]);
+  
+  const queryClient = useQueryClient();
 
   const AVAILABLE_EVENTS = ["INSERT", "UPDATE", "DELETE"];
 
-  async function fetchWebhooks() {
-    isLoading = true;
-    try {
-      // Create pg_net extension if not exists
+  const webhooksQuery = createQuery(() => ({
+    queryKey: ["webhooks", projectRef],
+    queryFn: async () => {
       await apiClient(`/v1/projects/${projectRef}/database/sql`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sql: "CREATE EXTENSION IF NOT EXISTS pg_net;" })
@@ -55,44 +51,42 @@
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sql })
       });
+      if (!res.ok) throw new Error("Failed to fetch webhooks");
       const data = await res.json();
       const rows = Array.isArray(data) ? data : data.rows || [];
       
-      endpoints = rows.map((r: Record<string, unknown>) => {
+      const endpoints: WebhookEndpoint[] = rows.map((r: Record<string, unknown>) => {
         const events = [];
         if (String(r.def).includes("INSERT")) events.push("INSERT");
         if (String(r.def).includes("UPDATE")) events.push("UPDATE");
         if (String(r.def).includes("DELETE")) events.push("DELETE");
         
         return {
-          id: r.id,
-          table: r.table,
-          enabled: r.enabled,
+          id: r.id as string,
+          table: r.table as string,
+          enabled: r.enabled as boolean,
           events,
           url: "Extracted from pg_trigger",
         };
       });
 
-      // Fetch tables
       const tblRes = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sql: "SELECT tablename FROM pg_catalog.pg_tables WHERE schemaname = 'public' ORDER BY tablename;" })
       });
       const tblData = await tblRes.json();
-      tables = (Array.isArray(tblData) ? tblData : tblData.rows || []).map((t: Record<string, unknown>) => t.tablename as string);
+      const tables = (Array.isArray(tblData) ? tblData : tblData.rows || []).map((t: Record<string, unknown>) => t.tablename as string);
 
-    } catch (err: unknown) { toast.error("操作失败"); }
-    finally { isLoading = false; }
-  }
-
-  onMount(() => fetchWebhooks());
-
-  async function saveWebhook() {
-    if (!newName || !newUrl || !newTable || selectedEvents.length === 0) {
-      addError = "请填写真全信息并选择至少一个事件"; return;
+      return { endpoints, tables };
     }
-    isSaving = true; addError = null;
-    try {
+  }));
+
+  const endpoints = $derived(webhooksQuery.data?.endpoints || []);
+  const tables = $derived(webhooksQuery.data?.tables || []);
+  const isLoading = $derived(webhooksQuery.isPending);
+
+  const saveMutation = createMutation(() => ({
+    mutationFn: async () => {
       const funcName = `webhook_func_${newName}`;
       const triggerName = `webhook_trig_${newName}`;
       const sql = `
@@ -124,24 +118,31 @@
         body: JSON.stringify({ sql })
       });
       const data = await res.json();
-      if (data.error) throw new Error(data.error);
-
+      if (data.error) throw new Error(data.message || data.error);
+      return data;
+    },
+    onSuccess: () => {
       showAdd = false;
       newName = ""; newUrl = ""; newTable = ""; selectedEvents = [];
-      await fetchWebhooks();
-    } catch (err: unknown) {
+      queryClient.invalidateQueries({ queryKey: ["webhooks", projectRef] });
+    },
+    onError: (err: unknown) => {
       addError = (err instanceof Error ? err.message : String(err)) || "创建 Webhook 失败";
-    } finally {
-      isSaving = false;
     }
+  }));
+
+  function saveWebhook() {
+    if (!newName || !newUrl || !newTable || selectedEvents.length === 0) {
+      addError = "请填写真全信息并选择至少一个事件"; return;
+    }
+    addError = null;
+    saveMutation.mutate();
   }
 
-  async function deleteWebhook(id: string) {
-    if (!confirm(`确定要删除 Webhook "${id}" 吗？`)) return;
-    try {
+  const deleteMutation = createMutation(() => ({
+    mutationFn: async (id: string) => {
       const triggerName = id;
       const funcName = id.replace("webhook_trig_", "webhook_func_");
-      
       const endpoint = endpoints.find(e => e.id === id);
       const tableName = endpoint?.table;
       
@@ -153,10 +154,20 @@
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sql })
       });
-      await fetchWebhooks();
-    } catch (err: unknown) {
+      if (!res.ok) throw new Error("Delete failed");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["webhooks", projectRef] });
+    },
+    onError: () => {
       alert("删除失败");
     }
+  }));
+
+  function deleteWebhook(id: string) {
+    if (!confirm(`确定要删除 Webhook "${id}" 吗？`)) return;
+    deleteMutation.mutate(id);
   }
 </script>
 
@@ -226,8 +237,8 @@
       </div>
       <div class="flex justify-end gap-2 pt-2">
         <button onclick={() => showAdd = false} class="px-4 py-2 text-xs rounded-lg border hover:bg-muted/50 transition-colors">取消</button>
-        <button onclick={saveWebhook} disabled={isSaving} class="flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg bg-brand text-white hover:bg-brand/90 transition-colors disabled:opacity-50">
-          {#if isSaving}<Loader2 size={12} class="animate-spin" />{/if} 保存
+        <button onclick={saveWebhook} disabled={saveMutation.isPending} class="flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg bg-brand text-white hover:bg-brand/90 transition-colors disabled:opacity-50">
+          {#if saveMutation.isPending}<Loader2 size={12} class="animate-spin" />{/if} 保存
         </button>
       </div>
     </div>
@@ -266,7 +277,7 @@
               {:else}
                 <span class="px-2 py-0.5 rounded-full text-[9px] font-bold bg-muted text-muted-foreground">已停用</span>
               {/if}
-              <button onclick={() => deleteWebhook(endpoint.id)} class="p-1 hover:bg-red-500/10 hover:text-red-500 rounded-md text-muted-foreground transition-colors">
+              <button onclick={() => deleteWebhook(endpoint.id)} disabled={deleteMutation.isPending} class="p-1 hover:bg-red-500/10 hover:text-red-500 rounded-md text-muted-foreground transition-colors disabled:opacity-50">
                 <Trash2 size={14} />
               </button>
             </div>

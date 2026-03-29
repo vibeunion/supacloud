@@ -1,85 +1,95 @@
 <script lang="ts">
   import { apiClient } from "$lib/api";
 
-  import { onMount } from "svelte";
   import { page } from "$app/state";
   import { t } from "svelte-i18n";
   import { Loader2, Activity, Server, Pause, RotateCw, Trash2, AlertTriangle, Globe, CheckCircle2, XCircle } from "lucide-svelte";
   import { toast } from "svelte-sonner";
   import { AutoForm } from "@svadmin/ui";
+  import { useShow } from "@svadmin/core";
+  import { useQueryClient, createMutation, createQuery } from "@tanstack/svelte-query";
 
-  let project = $state<Record<string, unknown> | null>(null);
-  let isLoading = $state(true);
   let actionInProgress = $state<string | null>(null);
   let actionMsg = $state<string | null>(null);
 
   // Custom domain state
   let domainHostname = $state("");
   let domainStatus = $state("not_configured");
-  let domainLoading = $state(false);
   let newDomain = $state("");
   let domainError = $state<string | null>(null);
 
   const projectRef = $derived(page.params.ref);
 
-  async function fetchProject() {
-    isLoading = true;
-    try {
-      const res = await apiClient(`/v1/projects/${projectRef}`);
-      project = await res.json();
-    } catch (err: unknown) {
-      toast.error("无法fetch project");
-    } finally {
-      isLoading = false;
-    }
+  const { query } = useShow({
+    get resource() { return "v1/projects"; },
+    get id() { return projectRef; }
+  });
+
+  const project = $derived(query.data?.data || null);
+  const isLoading = $derived(query.isLoading);
+
+  const queryClient = useQueryClient();
+
+  async function refetchProject() {
+    await queryClient.invalidateQueries({ queryKey: ["v1/projects", "getOne", projectRef] });
   }
 
-  async function restartProject() {
-    actionInProgress = "restart";
-    try {
-      await apiClient(`/v1/projects/${projectRef}/restart`, { method: "POST" });
-      actionMsg = "✅ 项目重启请求已发送";
-      await new Promise(r => setTimeout(r, 2000));
-      await fetchProject();
-    } catch {
-      actionMsg = "❌ 重启失败";
-    } finally {
+  const projectActionMutation = createMutation(() => ({
+    mutationFn: async (action: 'restart' | 'pause' | 'restore') => {
+      const res = await apiClient(`/v1/projects/${projectRef}/${action}`, { method: "POST" });
+      if (!res.ok) throw new Error(`${action} failed`);
+      await new Promise(r => setTimeout(r, action === "pause" ? 1000 : 2000));
+      return action;
+    },
+    onMutate: (action) => {
+      actionInProgress = action;
+    },
+    onSuccess: (action) => {
+      const msgs = { restart: "✅ 项目重启请求已发送", pause: "✅ 项目已暂停", restore: "✅ 项目已恢复" };
+      actionMsg = msgs[action];
+      refetchProject();
+    },
+    onError: (err, action) => {
+      const msgs = { restart: "❌ 重启失败", pause: "❌ 暂停失败", restore: "❌ 恢复失败" };
+      actionMsg = msgs[action];
+    },
+    onSettled: () => {
       actionInProgress = null;
       setTimeout(() => actionMsg = null, 4000);
     }
+  }));
+
+  function restartProject() {
+    projectActionMutation.mutate('restart');
   }
 
-  async function pauseProject() {
+  function pauseProject() {
     if (!confirm("确定要暂停项目？暂停后所有服务将停止。")) return;
-    actionInProgress = "pause";
-    try {
-      await apiClient(`/v1/projects/${projectRef}/pause`, { method: "POST" });
-      actionMsg = "✅ 项目已暂停";
-      await fetchProject();
-    } catch {
-      actionMsg = "❌ 暂停失败";
-    } finally {
-      actionInProgress = null;
-      setTimeout(() => actionMsg = null, 4000);
-    }
+    projectActionMutation.mutate('pause');
   }
 
-  async function restoreProject() {
-    actionInProgress = "restore";
-    try {
-      await apiClient(`/v1/projects/${projectRef}/restore`, { method: "POST" });
-      actionMsg = "✅ 项目已恢复";
-      await new Promise(r => setTimeout(r, 2000));
-      await fetchProject();
-    } catch {
-      actionMsg = "❌ 恢复失败";
-    } finally {
-      actionInProgress = null;
-      setTimeout(() => actionMsg = null, 4000);
-    }
+  function restoreProject() {
+    projectActionMutation.mutate('restore');
   }
 
-  async function deleteProject() {
+  const deleteMutation = createMutation(() => ({
+    mutationFn: async () => {
+      const res = await apiClient(`/v1/projects/${projectRef}`, { method: "DELETE" });
+      if (!res.ok) throw new Error("Delete failed");
+      return true;
+    },
+    onMutate: () => { actionInProgress = "delete"; },
+    onSuccess: () => {
+      actionMsg = "✅ 项目已删除。正在跳转...";
+      setTimeout(() => { window.location.href = "/"; }, 2000);
+    },
+    onError: () => {
+      actionMsg = "❌ 删除失败";
+    },
+    onSettled: () => { actionInProgress = null; }
+  }));
+
+  function deleteProject() {
     const input = prompt(`请输入项目名称以确认删除：\n[ ${project?.name} ]`);
     if (input !== project?.name) {
       actionMsg = "❌ 项目名称不匹配，已取消删除";
@@ -87,80 +97,77 @@
       return;
     }
     if (!confirm("再次确认：所有数据（数据库、存储、认证用户）都将被永久删除。此操作不可撤销！")) return;
-    actionInProgress = "delete";
-    try {
-      const res = await apiClient(`/v1/projects/${projectRef}`, { method: "DELETE" });
-      if (res.ok) {
-        actionMsg = "✅ 项目已删除。正在跳转...";
-        setTimeout(() => { window.location.href = "/"; }, 2000);
-      } else {
-        actionMsg = "❌ 删除失败";
-      }
-    } catch {
-      actionMsg = "❌ 删除失败";
-    } finally {
-      actionInProgress = null;
-    }
+    deleteMutation.mutate();
   }
-
-  onMount(() => {
-    fetchProject();
-    fetchDomain();
-  });
 
   // --- Custom Domain ---
-  async function fetchDomain() {
-    try {
+  const domainQuery = createQuery(() => ({
+    queryKey: ["custom_hostname", projectRef],
+    queryFn: async () => {
       const res = await apiClient(`/v1/projects/${projectRef}/custom-hostname`);
-      if (res.ok) {
-        const data = await res.json();
-        domainHostname = data.custom_hostname || "";
-        domainStatus = data.status || "not_configured";
-      }
-    } catch {}
-  }
+      if (!res.ok) throw new Error("Failed");
+      return res.json();
+    },
+    retry: false
+  }));
 
-  async function addDomain() {
-    if (!newDomain.trim()) return;
-    domainLoading = true;
-    domainError = null;
-    try {
-      const res = await apiClient(`/v1/projects/${projectRef}/custom-hostname`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ custom_hostname: newDomain.trim() })
-      });
-      if (res.ok) {
-        domainHostname = newDomain.trim();
-        domainStatus = "active";
-        newDomain = "";
-        toast.success("Custom domain added successfully");
-        await fetchProject();
-      } else {
-        const err = await res.json();
-        domainError = err.error || "Failed to add domain";
-      }
-    } catch (e: unknown) {
-      domainError = "Network error";
-    } finally {
-      domainLoading = false;
+  $effect(() => {
+    if (domainQuery.data) {
+      domainHostname = domainQuery.data.custom_hostname || "";
+      domainStatus = domainQuery.data.status || "not_configured";
+    } else if (domainQuery.isError) {
+      domainHostname = "";
+      domainStatus = "not_configured";
     }
+  });
+
+  const addDomainMutation = createMutation(() => ({
+    mutationFn: async (hostname: string) => {
+      const res = await apiClient(`/v1/projects/${projectRef}/custom-hostname`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ custom_hostname: hostname })
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || "Failed to add domain");
+      }
+      return hostname;
+    },
+    onSuccess: () => {
+      toast.success("Custom domain added successfully");
+      newDomain = "";
+      domainError = null;
+      queryClient.invalidateQueries({ queryKey: ["custom_hostname", projectRef] });
+      refetchProject();
+    },
+    onError: (err: unknown) => {
+      domainError = err instanceof Error ? err.message : "Network error";
+    }
+  }));
+
+  function addDomain() {
+    if (!newDomain.trim()) return;
+    addDomainMutation.mutate(newDomain.trim());
   }
 
-  async function removeDomain() {
-    if (!confirm(`Remove custom domain "${domainHostname}"?`)) return;
-    domainLoading = true;
-    try {
+  const removeDomainMutation = createMutation(() => ({
+    mutationFn: async () => {
       const res = await apiClient(`/v1/projects/${projectRef}/custom-hostname`, { method: "DELETE" });
-      if (res.ok) {
-        domainHostname = "";
-        domainStatus = "not_configured";
-        toast.success("Custom domain removed");
-        await fetchProject();
-      }
-    } catch {}
-    domainLoading = false;
+      if (!res.ok) throw new Error("Delete failed");
+      return true;
+    },
+    onSuccess: () => {
+      toast.success("Custom domain removed");
+      queryClient.invalidateQueries({ queryKey: ["custom_hostname", projectRef] });
+      refetchProject();
+    }
+  }));
+
+  function removeDomain() {
+    if (!confirm(`Remove custom domain "${domainHostname}"?`)) return;
+    removeDomainMutation.mutate();
   }
+  const domainLoading = $derived(domainQuery.isPending || addDomainMutation.isPending || removeDomainMutation.isPending);
 </script>
 
 <div class="flex flex-col space-y-6">

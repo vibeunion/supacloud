@@ -10,6 +10,12 @@ export interface GatewayConfig {
     jwtSecret?: string;
 }
 
+export interface KongResponse {
+    data?: Array<Record<string, unknown>>;
+    id?: string;
+    [key: string]: unknown;
+}
+
 interface RateLimitConfig {
     second: number;
     minute: number;
@@ -22,7 +28,7 @@ export class GatewayService {
     private readonly TENANT_DIR = "/etc/supabase/kong_tenants";
 
     // --- Kong Admin API helper methods ---
-    private async kongRequest(path: string, method: string = "GET", body?: Record<string, unknown>): Promise<any> {
+    private async kongRequest(path: string, method: string = "GET", body?: Record<string, unknown>): Promise<KongResponse> {
         const init: RequestInit = {
             method,
             headers: { "Content-Type": "application/json" },

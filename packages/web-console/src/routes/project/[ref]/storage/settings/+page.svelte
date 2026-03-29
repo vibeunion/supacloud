@@ -1,10 +1,8 @@
 <script lang="ts">
-  import { onMount } from "svelte";
   import { page } from "$app/state";
   import { Loader2, HardDrive, Link2, Shield, Globe, Copy } from "lucide-svelte";
 
   const projectRef = $derived(page.params.ref);
-  let isLoading = $state(true);
 
   interface StorageConfig {
     name: string;
@@ -23,7 +21,7 @@
 
   const s3Endpoint = $derived(`http://${page.url?.hostname || 'localhost'}:54321/storage/v1/s3`);
 
-  onMount(() => { setTimeout(() => { isLoading = false; }, 300); });
+
 
   async function copyToClipboard(text: string) {
     try { await navigator.clipboard.writeText(text); } catch {}
@@ -36,11 +34,7 @@
     <p class="text-sm text-muted-foreground mt-1">存储服务配置和 S3 兼容端点</p>
   </div>
 
-  {#if isLoading}
-    <div class="flex items-center justify-center py-24">
-      <Loader2 size={32} class="animate-spin text-brand opacity-50" />
-    </div>
-  {:else}
+
     <!-- S3 Endpoint -->
     <div class="rounded-xl border bg-card overflow-hidden">
       <div class="border-b px-6 py-4 bg-muted/20">
@@ -84,5 +78,5 @@
         {/each}
       </div>
     </div>
-  {/if}
+
 </div>

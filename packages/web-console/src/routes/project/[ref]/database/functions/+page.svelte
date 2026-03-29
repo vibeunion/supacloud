@@ -1,10 +1,10 @@
 <script lang="ts">
   import { apiClient } from "$lib/api";
 
-  import { onMount } from "svelte";
   import { page } from "$app/state";
   import { t } from "svelte-i18n";
   import { Loader2, FunctionSquare, Search, Braces } from "lucide-svelte";
+  import { createQuery } from "@tanstack/svelte-query";
 
   interface DbFunction {
     function_name: string;
@@ -15,9 +15,6 @@
     is_security_definer: boolean;
   }
 
-  let functions = $state<DbFunction[]>([]);
-  let isLoading = $state(true);
-  let error = $state<string | null>(null);
   let searchQuery = $state("");
 
   const projectRef = $derived(page.params.ref);
@@ -42,26 +39,22 @@
     ORDER BY p.proname;
   `;
 
-  async function fetchFunctions() {
-    isLoading = true;
-    error = null;
-    try {
+  const functionsQuery = createQuery(() => ({
+    queryKey: ["database_functions", projectRef],
+    queryFn: async () => {
       const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sql: FUNCTIONS_SQL })
       });
       const data = await res.json();
       if (data.error) throw new Error(data.message || data.error);
-      functions = Array.isArray(data) ? data : data.rows || [];
-    } catch (err: unknown) {
-      error = err instanceof Error ? err.message : String(err);
-    } finally {
-      isLoading = false;
+      return (Array.isArray(data) ? data : data.rows || []) as DbFunction[];
     }
-  }
+  }));
 
-  onMount(() => { fetchFunctions(); });
+  const functions = $derived((functionsQuery.data as DbFunction[]) || []);
+  const isLoading = $derived(functionsQuery.isPending);
+  const error = $derived(functionsQuery.error?.message || null);
 
   const filteredFunctions = $derived(
     searchQuery

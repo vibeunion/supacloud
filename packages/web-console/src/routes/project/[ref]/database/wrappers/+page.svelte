@@ -1,10 +1,10 @@
 <script lang="ts">
   import { apiClient } from "$lib/api";
 
-  import { onMount } from "svelte";
   import { page } from "$app/state";
   import { Loader2, Globe, Database, Settings, AlertTriangle } from "lucide-svelte";
   import { toast } from "svelte-sonner";
+  import { createQuery } from "@tanstack/svelte-query";
 
   interface Wrapper {
     id: number;
@@ -14,9 +14,6 @@
     server: string;
     fdw_type: string;
   }
-
-  let wrappers = $state<Wrapper[]>([]);
-  let isLoading = $state(true);
 
   const projectRef = $derived(page.params.ref);
 
@@ -41,26 +38,21 @@
     ORDER BY f.fdwname;
   `;
 
-  async function fetchWrappers() {
-    isLoading = true;
-    try {
+  const wrappersQuery = createQuery(() => ({
+    queryKey: ["database_wrappers", projectRef],
+    queryFn: async () => {
       const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sql: WRAPPERS_SQL })
       });
       const data = await res.json();
-      if (!data.error) {
-        wrappers = Array.isArray(data) ? data : data.rows || [];
-      }
-    } catch (err: unknown) {
-      toast.error("无法fetch wrappers");
-    } finally {
-      isLoading = false;
+      if (data.error) throw new Error(data.message || data.error);
+      return (Array.isArray(data) ? data : data.rows || []) as Wrapper[];
     }
-  }
+  }));
 
-  onMount(() => { fetchWrappers(); });
+  const wrappers = $derived((wrappersQuery.data as Wrapper[]) || []);
+  const isLoading = $derived(wrappersQuery.isPending);
 
   function getTypeIcon(type: string): string {
     if (type === "PostgreSQL") return "🐘";

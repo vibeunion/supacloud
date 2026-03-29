@@ -1,10 +1,10 @@
 <script lang="ts">
   import { apiClient } from "$lib/api";
 
-  import { onMount } from "svelte";
   import { page } from "$app/state";
   import { t } from "svelte-i18n";
   import { Loader2, Clock, CalendarClock, CheckCircle2, XCircle, AlertCircle, Plus, Trash2, X } from "lucide-svelte";
+  import { createQuery, createMutation, useQueryClient } from "@tanstack/svelte-query";
 
   interface CronJob {
     jobid: number;
@@ -31,11 +31,7 @@
     end_time: string;
   }
 
-  let jobs = $state<CronJob[]>([]);
-  let runs = $state<CronRun[]>([]);
-  let isLoading = $state(true);
-  let error = $state<string | null>(null);
-  let fallbackMsg = $state<string | null>(null);
+  const queryClient = useQueryClient();
 
   // Scheduler state
   let showAdd = $state(false);
@@ -50,75 +46,88 @@
   const JOBS_SQL = `SELECT * FROM cron.job ORDER BY jobid;`;
   const RUNS_SQL = `SELECT * FROM cron.job_run_details ORDER BY start_time DESC LIMIT 50;`;
 
-  async function fetchCronData() {
-    isLoading = true;
-    error = null;
-    fallbackMsg = null;
-    try {
+  const cronQuery = createQuery(() => ({
+    queryKey: ["database_cron", projectRef],
+    queryFn: async () => {
       const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sql: JOBS_SQL })
       });
       const data = await res.json();
-      if (data.error) {
-        fallbackMsg = $t("CronJobs.no_jobs");
-        return;
-      }
-      jobs = Array.isArray(data) ? data : data.rows || [];
+      if (data.error) throw new Error(data.message || data.error);
+      const jobs = Array.isArray(data) ? data : data.rows || [];
 
-      const res2 = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sql: RUNS_SQL })
-      });
-      const data2 = await res2.json();
-      if (!data2.error) {
-        runs = Array.isArray(data2) ? data2 : data2.rows || [];
+      let runs: CronRun[] = [];
+      try {
+        const res2 = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sql: RUNS_SQL })
+        });
+        const data2 = await res2.json();
+        if (!data2.error) {
+          runs = Array.isArray(data2) ? data2 : data2.rows || [];
+        }
+      } catch (e) {
+        // Run details might not be present or accessible
       }
-    } catch (err: unknown) {
-      error = err instanceof Error ? err.message : String(err);
-    } finally {
-      isLoading = false;
+      return { jobs, runs };
     }
-  }
+  }));
 
-  onMount(() => { fetchCronData(); });
+  const jobs = $derived(cronQuery.data?.jobs || []);
+  const runs = $derived(cronQuery.data?.runs || []);
+  const isLoading = $derived(cronQuery.isPending);
+  const error = $derived(cronQuery.error?.message || null);
+  const fallbackMsg = $derived(!isLoading && !error && jobs.length === 0 ? "暂无定时任务" : null);
 
-  async function createJob() {
-    if (!newName || !newSchedule || !newCommand) { actionError = "请完整填写所有必填字段"; return; }
-    isSaving = true; actionError = null;
-    try {
-      // Ensure pg_cron implies quotes correctly
+  const createJobMutation = createMutation(() => ({
+    mutationFn: async () => {
       const sql = `SELECT cron.schedule('${newName.replace(/'/g,"''")}', '${newSchedule.replace(/'/g,"''")}', '${newCommand.replace(/'/g,"''")}');`;
       const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sql })
       });
       const data = await res.json();
-      if (data.error) throw new Error(data.error);
-      
+      if (data.error) throw new Error(data.message || data.error);
+      return data;
+    },
+    onSuccess: () => {
       showAdd = false; newName = ""; newSchedule = "* * * * *"; newCommand = "";
-      await fetchCronData();
-    } catch (err: unknown) {
+      queryClient.invalidateQueries({ queryKey: ["database_cron", projectRef] });
+    },
+    onError: (err: unknown) => {
       actionError = (err instanceof Error ? err.message : String(err)) || "创建任务失败";
-    } finally { isSaving = false; }
+    }
+  }));
+
+  async function createJob() {
+    if (!newName || !newSchedule || !newCommand) { actionError = "请完整填写所有必填字段"; return; }
+    actionError = null;
+    createJobMutation.mutate();
   }
 
-  async function deleteJob(jobId: number, jobName: string) {
-    if (!confirm(`确定取消任务 "${jobName}" (#${jobId}) 的排程吗？`)) return;
-    try {
+  const deleteJobMutation = createMutation(() => ({
+    mutationFn: async (jobId: number) => {
       const sql = `SELECT cron.unschedule(${jobId});`;
       const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sql })
       });
       const data = await res.json();
-      if (data.error) throw new Error(data.error);
-      await fetchCronData();
-    } catch (err: unknown) {
+      if (data.error) throw new Error(data.message || data.error);
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["database_cron", projectRef] });
+    },
+    onError: (err: unknown) => {
       alert("取消排程失败: " + (err instanceof Error ? err.message : String(err)));
     }
+  }));
+
+  async function deleteJob(jobId: number, jobName: string) {
+    if (!confirm(`确定取消任务 "${jobName}" (#${jobId}) 的排程吗？`)) return;
+    deleteJobMutation.mutate(jobId);
   }
 
   function formatTime(ts: string): string {
@@ -171,9 +180,9 @@
       </div>
       <div class="flex justify-end gap-3 pt-2">
         <button onclick={() => showAdd = false} class="px-4 py-2 text-xs font-medium rounded-lg hover:bg-muted/50 transition-colors">取消</button>
-        <button onclick={createJob} disabled={isSaving || !newName || !newCommand} 
+        <button onclick={createJob} disabled={createJobMutation.isPending || !newName || !newCommand} 
           class="flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg bg-brand text-white hover:bg-brand/90 transition-colors disabled:opacity-50">
-          {#if isSaving}<Loader2 size={12} class="animate-spin" />{/if} 确认排程
+          {#if createJobMutation.isPending}<Loader2 size={12} class="animate-spin" />{/if} 确认排程
         </button>
       </div>
     </div>

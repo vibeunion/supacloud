@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+
+
   import { page } from "$app/state";
   import { Loader2, Cpu, HardDrive, Activity, Gauge } from "lucide-svelte";
 

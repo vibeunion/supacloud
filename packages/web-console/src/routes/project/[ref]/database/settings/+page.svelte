@@ -1,10 +1,10 @@
 <script lang="ts">
   import { apiClient } from "$lib/api";
 
-  import { onMount } from "svelte";
   import { page } from "$app/state";
   import { Loader2, Database, Clock, HardDrive, Shield, Cpu } from "lucide-svelte";
   import { toast } from "svelte-sonner";
+  import { createQuery } from "@tanstack/svelte-query";
 
   interface DbSetting {
     name: string;
@@ -13,9 +13,6 @@
     category: string;
     description: string;
   }
-
-  let settings = $state<DbSetting[]>([]);
-  let isLoading = $state(true);
 
   const projectRef = $derived(page.params.ref);
 
@@ -35,26 +32,21 @@
     ORDER BY category, name;
   `;
 
-  async function fetchSettings() {
-    isLoading = true;
-    try {
+  const query = createQuery(() => ({
+    queryKey: ["database_settings", projectRef],
+    queryFn: async () => {
       const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sql: SETTINGS_SQL })
       });
       const data = await res.json();
-      if (!data.error) {
-        settings = Array.isArray(data) ? data : data.rows || [];
-      }
-    } catch (err: unknown) {
-      toast.error("无法fetch settings");
-    } finally {
-      isLoading = false;
+      if (data.error) throw new Error(data.message || data.error);
+      return (Array.isArray(data) ? data : data.rows || []) as DbSetting[];
     }
-  }
+  }));
 
-  onMount(() => { fetchSettings(); });
+  const settings = $derived((query.data as DbSetting[]) || []);
+  const isLoading = $derived(query.isPending);
 
   function getCategoryIcon(cat: string): typeof Database {
     if (cat.includes("Connection")) return Database;

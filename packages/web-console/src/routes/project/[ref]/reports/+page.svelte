@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { onMount } from "svelte";
   import { page } from "$app/state";
   import { BarChart3, Activity, Database, Shield, Zap, HardDrive, Clock, TrendingUp, ArrowRight } from "lucide-svelte";
 

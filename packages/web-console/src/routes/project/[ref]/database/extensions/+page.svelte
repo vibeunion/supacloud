@@ -1,10 +1,10 @@
 <script lang="ts">
   import { apiClient } from "$lib/api";
 
-  import { onMount } from "svelte";
   import { page } from "$app/state";
   import { t } from "svelte-i18n";
   import { Loader2, Package, Check, X, Search } from "lucide-svelte";
+  import { createQuery, useQueryClient } from "@tanstack/svelte-query";
 
   interface Extension {
     name: string;
@@ -14,12 +14,11 @@
     comment: string;
   }
 
-  let extensions = $state<Extension[]>([]);
-  let isLoading = $state(true);
-  let error = $state<string | null>(null);
   let searchQuery = $state("");
+  let toggleError = $state<string | null>(null);
 
   const projectRef = $derived(page.params.ref);
+  const queryClient = useQueryClient();
 
   const EXT_SQL = `
     SELECT 
@@ -34,24 +33,22 @@
     ORDER BY (ei.extversion IS NOT NULL) DESC, e.name;
   `;
 
-  async function fetchExtensions() {
-    isLoading = true;
-    error = null;
-    try {
+  const extensionsQuery = createQuery(() => ({
+    queryKey: ["database_extensions", projectRef],
+    queryFn: async () => {
       const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sql: EXT_SQL })
       });
       const data = await res.json();
       if (data.error) throw new Error(data.message || data.error);
-      extensions = Array.isArray(data) ? data : data.rows || [];
-    } catch (err: unknown) {
-      error = err instanceof Error ? err.message : String(err);
-    } finally {
-      isLoading = false;
+      return (Array.isArray(data) ? data : data.rows || []) as Extension[];
     }
-  }
+  }));
+
+  const extensions = $derived((extensionsQuery.data as Extension[]) || []);
+  const isLoading = $derived(extensionsQuery.isPending);
+  const error = $derived(extensionsQuery.error?.message || toggleError);
 
   let togglingExt = $state<string | null>(null);
 
@@ -72,21 +69,22 @@
       if (data.error) throw new Error(data.message || data.error);
       
       // Update local state instead of doing full refetch for better UX
-      extensions = extensions.map(e => {
-        if (e.name === ext.name) {
-          return { ...e, installed_version: isEnabling ? e.default_version : null };
-        }
-        return e;
+      queryClient.setQueryData(["database_extensions", projectRef], (old: Extension[] | undefined) => {
+        if (!old) return old;
+        return old.map(e => {
+          if (e.name === ext.name) {
+            return { ...e, installed_version: isEnabling ? e.default_version : null };
+          }
+          return e;
+        });
       });
     } catch (err: unknown) {
-      error = err instanceof Error ? err.message : String(err);
-      setTimeout(() => error = null, 5000);
+      toggleError = err instanceof Error ? err.message : String(err);
+      setTimeout(() => toggleError = null, 5000);
     } finally {
       togglingExt = null;
     }
   }
-
-  onMount(() => { fetchExtensions(); });
 
   const filteredExtensions = $derived(
     searchQuery

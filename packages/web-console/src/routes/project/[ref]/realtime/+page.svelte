@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, onDestroy } from "svelte";
+  import { onDestroy } from "svelte";
   import { page } from "$app/state";
   import { t } from "svelte-i18n";
   import { Loader2, Radio, Send, Trash2, Wifi, WifiOff, Hash, Database, Users, Zap, Megaphone } from "lucide-svelte";
@@ -159,7 +159,6 @@
     return Radio;
   }
 
-  onMount(() => {});
   onDestroy(() => { if (ws) ws.close(); });
 </script>
 

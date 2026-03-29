@@ -1,10 +1,10 @@
 <script lang="ts">
   import { apiClient } from "$lib/api";
 
-  import { onMount } from "svelte";
   import { page } from "$app/state";
   import { t } from "svelte-i18n";
   import { Loader2, Webhook, Zap } from "lucide-svelte";
+  import { createQuery } from "@tanstack/svelte-query";
 
   interface DbHook {
     trigger_name: string;
@@ -13,11 +13,6 @@
     action_statement: string;
     is_enabled: string;
   }
-
-  let hooks = $state<DbHook[]>([]);
-  let isLoading = $state(true);
-  let error = $state<string | null>(null);
-  let fallbackMsg = $state<string | null>(null);
 
   const projectRef = $derived(page.params.ref);
 
@@ -41,32 +36,23 @@
     ORDER BY trigger_name;
   `;
 
-  async function fetchHooks() {
-    isLoading = true;
-    error = null;
-    fallbackMsg = null;
-    try {
+  const hooksQuery = createQuery(() => ({
+    queryKey: ["database_hooks", projectRef],
+    queryFn: async () => {
       const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sql: HOOKS_SQL })
       });
       const data = await res.json();
       if (data.error) throw new Error(data.message || data.error);
-      const rows = Array.isArray(data) ? data : data.rows || [];
-      if (rows.length === 0) {
-        fallbackMsg = $t("Hooks.no_hooks");
-      } else {
-        hooks = rows;
-      }
-    } catch (err: unknown) {
-      error = err instanceof Error ? err.message : String(err);
-    } finally {
-      isLoading = false;
+      return (Array.isArray(data) ? data : data.rows || []) as DbHook[];
     }
-  }
+  }));
 
-  onMount(() => { fetchHooks(); });
+  const hooks = $derived((hooksQuery.data as DbHook[]) || []);
+  const isLoading = $derived(hooksQuery.isPending);
+  const error = $derived(hooksQuery.error?.message || null);
+  const fallbackMsg = $derived(!isLoading && !error && hooks.length === 0 ? "暂无 Webhooks 数据" : null);
 
   function getEventColor(event: string): string {
     if (event.includes("INSERT")) return "text-green-600 bg-green-500/10";

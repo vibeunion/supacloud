@@ -1,33 +1,40 @@
 <script lang="ts">
   import { apiClient } from "$lib/api";
 
-  import { onMount } from "svelte";
   import { page } from "$app/state";
   import { Loader2, Link2, Globe, Plus, Trash2, Save } from "lucide-svelte";
+  import { createQuery, createMutation, useQueryClient } from "@tanstack/svelte-query";
 
-  let redirectUrls = $state<string[]>([]);
-  let siteUrl = $state("");
   let newUrl = $state("");
-  let isLoading = $state(true);
-  let saving = $state(false);
   let saveMsg = $state<string | null>(null);
 
   const projectRef = $derived(page.params.ref);
+  const queryClient = useQueryClient();
 
-  async function fetchUrlConfig() {
-    isLoading = true;
-    try {
+  const urlConfigQuery = createQuery(() => ({
+    queryKey: ["auth_config", projectRef],
+    queryFn: async () => {
       const res = await apiClient(`/v1/projects/${projectRef}/auth/config`);
-      if (res.ok) {
-        const config = await res.json();
-        siteUrl = config.SITE_URL || config.site_url || "";
-        const uris = config.URI_ALLOW_LIST || config.REDIRECT_URLS || "";
-        redirectUrls = uris ? uris.split(",").map((u: string) => u.trim()).filter(Boolean) : [];
-      }
-    } catch { /* keep defaults */ }
-    finally { isLoading = false; }
-  }
+      if (!res.ok) throw new Error("Failed to fetch auth config");
+      const config = await res.json();
+      const siteUrlValue = config.SITE_URL || config.site_url || "";
+      const uris = config.URI_ALLOW_LIST || config.REDIRECT_URLS || "";
+      const redirectUrlsValue = uris ? uris.split(",").map((u: string) => u.trim()).filter(Boolean) : [];
+      return { siteUrl: siteUrlValue, redirectUrls: redirectUrlsValue };
+    }
+  }));
 
+  let siteUrl = $state("");
+  let redirectUrls = $state<string[]>([]);
+  
+  $effect(() => {
+    if (urlConfigQuery.data) {
+      siteUrl = urlConfigQuery.data.siteUrl;
+      redirectUrls = urlConfigQuery.data.redirectUrls;
+    }
+  });
+
+  const isLoading = $derived(urlConfigQuery.isPending);
   function addUrl() {
     const url = newUrl.trim();
     if (url && !redirectUrls.includes(url)) {
@@ -40,9 +47,8 @@
     redirectUrls = redirectUrls.filter((_, i) => i !== index);
   }
 
-  async function saveConfig() {
-    saving = true;
-    try {
+  const saveConfigMutation = createMutation(() => ({
+    mutationFn: async () => {
       const res = await apiClient(`/v1/projects/${projectRef}/auth/config`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -51,21 +57,27 @@
           URI_ALLOW_LIST: redirectUrls.join(","),
         })
       });
-      if (res.ok) {
-        saveMsg = "✅ URL 配置已保存（GoTrue 已重启）";
-      } else {
+      if (!res.ok) {
         const err = await res.json();
-        saveMsg = `❌ 保存失败: ${err.error || res.statusText}`;
+        throw new Error(err.error || res.statusText);
       }
-    } catch (err: unknown) {
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["auth_config", projectRef] });
+      saveMsg = "✅ URL 配置已保存（GoTrue 已重启）";
+      setTimeout(() => saveMsg = null, 4000);
+    },
+    onError: (err: unknown) => {
       saveMsg = `❌ 保存失败: ${(err instanceof Error ? err.message : String(err))}`;
-    } finally {
-      saving = false;
       setTimeout(() => saveMsg = null, 4000);
     }
-  }
+  }));
 
-  onMount(() => { fetchUrlConfig(); });
+  async function saveConfig() {
+    saveMsg = null;
+    saveConfigMutation.mutate();
+  }
 </script>
 
 <div class="h-full flex flex-col space-y-4">
@@ -74,9 +86,9 @@
       <h1 class="text-2xl font-bold">URL 配置</h1>
       <p class="text-sm text-muted-foreground mt-1">配置认证流程中使用的重定向 URL</p>
     </div>
-    <button onclick={saveConfig} disabled={saving}
+    <button onclick={saveConfig} disabled={saveConfigMutation.isPending}
       class="flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg bg-brand text-white hover:bg-brand/90 transition-colors disabled:opacity-50">
-      {#if saving}<Loader2 size={14} class="animate-spin" />{:else}<Save size={14} />{/if}
+      {#if saveConfigMutation.isPending}<Loader2 size={14} class="animate-spin" />{:else}<Save size={14} />{/if}
       保存
     </button>
   </div>

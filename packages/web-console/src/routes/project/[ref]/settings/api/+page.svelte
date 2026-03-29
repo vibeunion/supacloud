@@ -1,13 +1,13 @@
 <script lang="ts">
-  import { apiClient } from "$lib/api";
 
-  import { onMount } from "svelte";
+
+
   import { page } from "$app/state";
   import { Loader2, Copy, Eye, EyeOff, Tag, Link2 } from "lucide-svelte";
   import { toast } from "svelte-sonner";
 
-  let project = $state<Record<string, unknown> | null>(null);
-  let isLoading = $state(true);
+  import { useShow } from "@svadmin/core";
+
   let showAnonKey = $state(false);
   let showServiceKey = $state(false);
 
@@ -15,19 +15,13 @@
   const hostname = $derived(page.url?.hostname || "localhost");
   const apiUrl = $derived(`http://${hostname}:8000`);
 
-  async function fetchProject() {
-    isLoading = true;
-    try {
-      const res = await apiClient(`/v1/projects/${projectRef}`);
-      project = await res.json();
-    } catch (err: unknown) {
-      toast.error("无法fetch project");
-    } finally {
-      isLoading = false;
-    }
-  }
+  const { query } = useShow({
+    get resource() { return "v1/projects"; },
+    get id() { return projectRef; }
+  });
 
-  onMount(() => { fetchProject(); });
+  const project = $derived(query.data?.data || {});
+  const isLoading = $derived(query.isLoading);
 
   async function copyToClipboard(text: string) {
     try { await navigator.clipboard.writeText(text); } catch {}
@@ -41,7 +35,7 @@
     <div class="flex items-center justify-center py-24">
       <Loader2 size={32} class="animate-spin text-brand opacity-50" />
     </div>
-  {:else if project}
+  {:else if query.isSuccess}
     <div class="space-y-6">
       <!-- Project URL -->
       <div class="border rounded-xl bg-card overflow-hidden">
