@@ -1,4 +1,5 @@
 import { logger } from "../utils/logger";
+import { config } from "../config";
 import path from "path";
 import fs from "fs/promises";
 
@@ -7,7 +8,7 @@ import fs from "fs/promises";
  * Manages function source files on disk for the Bun Edge Runtime.
  */
 
-const FUNCTIONS_ROOT = process.env.EDGE_FUNCTIONS_DIR || "/opt/supacloud/edge-runtime/functions";
+const FUNCTIONS_ROOT = config.edgeFunctionsDir;
 
 function getFuncDir(ref: string): string {
   return path.join(FUNCTIONS_ROOT, ref);

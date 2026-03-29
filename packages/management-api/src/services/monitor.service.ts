@@ -36,7 +36,7 @@ export async function getHealth(nodeIp: string, port: number = 9630): Promise<He
  * @param nodeIp Node IP
  */
 export async function getMetrics(nodeIp: string): Promise<NodeMetrics> {
-  const vmUrl = process.env.VICTORIAMETRICS_URL || `http://${nodeIp}:8428`;
+  const vmUrl = config.victoriaMetricsUrl || `http://${nodeIp}:8428`;
 
   const queries = {
     qps: `sum(rate(pg_stat_database_xact_commit{instance=~"${nodeIp}:.*"}[5m]))`,

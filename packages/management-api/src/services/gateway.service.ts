@@ -1,3 +1,4 @@
+import { config } from "../config";
 import { $ } from "bun";
 import { logger } from "../utils/logger";
 import path from "node:path";
@@ -23,8 +24,8 @@ interface RateLimitConfig {
 }
 
 export class GatewayService {
-    private readonly KONG_ADMIN_URL = process.env.KONG_ADMIN_URL || "http://localhost:8001";
-    private readonly KONG_YML = process.env.KONG_YML || "/root/pigsty/app/supabase/volumes/api/kong.yml";
+    private readonly KONG_ADMIN_URL = config.kongAdminUrl;
+    private readonly KONG_YML = config.kongYml;
     private readonly TENANT_DIR = "/etc/supabase/kong_tenants";
 
     // --- Kong Admin API helper methods ---
@@ -349,7 +350,7 @@ export class GatewayService {
     }
 
     private async detectHostIp(): Promise<string> {
-        if (process.env.DOCKER_HOST_IP) return process.env.DOCKER_HOST_IP;
+        if (config.dockerHostIp) return config.dockerHostIp;
 
         for (const iface of ["podman1", "docker0"]) {
             const result = await $`ip addr show ${iface}`.nothrow().quiet();
