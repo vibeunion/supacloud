@@ -1,9 +1,8 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { db } from '$management/db';
-import { projectService } from '$management/services';
-
 export const POST: RequestHandler = async ({ request }) => {
+    const { db } = await import('$management/db');
+    const { projectService } = await import('$management/services');
     const { projectRef, query } = await request.json();
     
     try {
