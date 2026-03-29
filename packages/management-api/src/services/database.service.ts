@@ -1,3 +1,4 @@
+import { config } from "../config";
 import { nanoid } from "nanoid";
 import { logger } from "../utils/logger";
 import { shellService } from "./shell.service";
@@ -6,11 +7,11 @@ import { $ } from "bun";
 import { assertValidIdentifier, assertValidDbName } from "../utils/validation";
 
 export class DatabaseService {
-  private readonly PG_HOST = process.env.PG_HOST || process.env.POSTGRES_HOST || "localhost";
-  private readonly PG_PORT = parseInt(process.env.PG_PORT || process.env.POSTGRES_PORT || "5432");
-  private readonly PG_USER = process.env.PG_USER || "postgres";
-  private readonly PG_PASSWORD = process.env.PGPASSWORD || process.env.POSTGRES_PASSWORD || "postgres";
-  private readonly PG_DATABASE = process.env.PG_DATABASE || "postgres";
+  private readonly PG_HOST = config.pgHost;
+  private readonly PG_PORT = config.pgPort;
+  private readonly PG_USER = config.pgUser;
+  private readonly PG_PASSWORD = config.pgPassword;
+  private readonly PG_DATABASE = config.pgDatabase;
 
   // Generate secure random password
   generatePassword(length = 24): string {
@@ -68,10 +69,10 @@ export class DatabaseService {
 
   // Disk space pre-check: prevent WAL disk full which causes cluster panic
   private async checkDiskSpace(): Promise<void> {
-    const minGb = parseInt(process.env.MIN_DISK_GB || "10");
+    const minGb = config.minDiskGb;
     const minKb = minGb * 1024 * 1024;
 
-    let targetDir = process.env.PG_DATA_DIR || "/var/lib/pgsql/data";
+    let targetDir = config.pgDataDir;
 
     const testDir = await $`test -d ${targetDir}`.nothrow().quiet();
     if (testDir.exitCode !== 0) {

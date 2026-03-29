@@ -1,5 +1,6 @@
 import { $ } from "bun";
 import { logger } from "../utils/logger";
+import { config } from "../config";
 import os from "node:os";
 
 export interface HealthReport {
@@ -35,7 +36,7 @@ export class HealthChecker {
     }
 
     private static async checkCloudStorage(): Promise<HealthReport> {
-        const mountPoint = process.env.STORAGE_MOUNT_POINT || "/mnt/supacloud";
+        const mountPoint = config.storageMountPoint;
         try {
             const isMounted = (await $`mount | grep ${mountPoint}`.nothrow()).exitCode === 0;
             if (isMounted) {

@@ -1,3 +1,4 @@
+import { config } from "../config";
 /**
  * RealtimeService - Manages Supabase Realtime tenant registration
  * 
@@ -10,13 +11,13 @@
  */
 import { logger } from "../utils/logger";
 
-const REALTIME_ADMIN_URL = process.env.REALTIME_ADMIN_URL || "http://127.0.0.1:4000";
-const REALTIME_API_SECRET = process.env.REALTIME_API_SECRET || process.env.JWT_SECRET;
+const REALTIME_ADMIN_URL = config.realtimeAdminUrl;
+const REALTIME_API_SECRET = config.realtimeApiSecret || config.jwtSecret;
 if (!REALTIME_API_SECRET) {
     logger.error("FATAL: REALTIME_API_SECRET or JWT_SECRET must be set for RealtimeService.");
 }
-const PG_HOST = process.env.POSTGRES_HOST || "10.2.0.14";
-const PG_PORT = process.env.POSTGRES_PORT || "5432";
+const PG_HOST = config.pgHost;
+const PG_PORT = String(config.pgPort);
 
 interface RealtimeTenantConfig {
     projectRef: string;

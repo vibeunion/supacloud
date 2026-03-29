@@ -29,11 +29,12 @@
 import { Elysia, t, status } from "elysia";
 import { StorageService } from "../services/storage.service";
 import { logger } from "../utils/logger";
+import { config } from "../config";
 
 // ── Imaginary Config ──────────────────────────────────────────────
-const IMAGINARY_URL = process.env.IMAGINARY_URL || "http://127.0.0.1:9010";
-const S3_ENDPOINT  = process.env.S3_ENDPOINT   || "http://127.0.0.1:9000";
-const _signingSecret = process.env.JWT_SECRET || process.env.STORAGE_SIGNING_SECRET;
+const IMAGINARY_URL = config.imaginaryUrl;
+const S3_ENDPOINT  = config.s3Endpoint;
+const _signingSecret = config.jwtSecret || config.storageSigningSecret;
 if (!_signingSecret) {
     logger.error("[storage-compat] FATAL: JWT_SECRET or STORAGE_SIGNING_SECRET must be set. Refusing to start with insecure defaults.");
     throw new Error("Missing required environment variable: JWT_SECRET or STORAGE_SIGNING_SECRET");
