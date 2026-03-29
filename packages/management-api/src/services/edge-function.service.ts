@@ -36,7 +36,10 @@ export const edgeFunctionService = {
   async read(ref: string, slug: string): Promise<string | null> {
     try {
       return await Bun.file(getFuncPath(ref, slug)).text();
-    } catch {
+    } catch (err: unknown) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+         logger.error(`[EdgeFunction] Failed to read ${slug}`, { ref, error: err });
+      }
       return null;
     }
   },
@@ -49,7 +52,10 @@ export const edgeFunctionService = {
       return entries
         .filter((f) => f.endsWith(".ts") && f !== "index.ts")
         .map((f) => f.replace(/\.ts$/, ""));
-    } catch {
+    } catch (err: unknown) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+         logger.warn(`[EdgeFunction] Failed to list functions for ${ref}`, { error: err });
+      }
       return [];
     }
   },
@@ -60,7 +66,10 @@ export const edgeFunctionService = {
       await fs.unlink(getFuncPath(ref, slug));
       logger.info(`[EdgeFunction] Deleted ${slug} for ${ref}`);
       return true;
-    } catch {
+    } catch (err: unknown) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+         logger.error(`[EdgeFunction] Failed to delete ${slug}`, { ref, error: err });
+      }
       return false;
     }
   },

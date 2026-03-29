@@ -1,32 +1,34 @@
 <script lang="ts">
   import { apiClient } from "$lib/api";
 
-  import { onMount } from "svelte";
   import { page } from "$app/state";
   import { Loader2, Shield, Plus, Trash2, Save, AlertTriangle, Globe } from "lucide-svelte";
+  import { createQuery, createMutation, useQueryClient } from "@tanstack/svelte-query";
 
   let allowedIps = $state<string[]>([]);
   let newIp = $state("");
-  let isLoading = $state(true);
-  let saving = $state(false);
   let msg = $state<string | null>(null);
 
   const projectRef = $derived(page.params.ref);
+  const queryClient = useQueryClient();
 
-  async function fetchRestrictions() {
-    isLoading = true;
-    try {
+  const networkQuery = createQuery(() => ({
+    queryKey: ["network_restrictions", projectRef],
+    queryFn: async () => {
       const res = await apiClient(`/v1/projects/${projectRef}/network-restrictions`);
-      if (res.ok) {
-        const data = await res.json();
-        allowedIps = data.allowed_address_ranges || [];
-      }
-    } catch {
-      allowedIps = [];
-    } finally {
-      isLoading = false;
+      if (!res.ok) throw new Error("Failed to fetch restrictions");
+      const data = await res.json();
+      return (data.allowed_address_ranges || []) as string[];
     }
-  }
+  }));
+
+  $effect(() => {
+    if (networkQuery.data) {
+      allowedIps = [...networkQuery.data];
+    }
+  });
+
+  const isLoading = $derived(networkQuery.isPending);
 
   function addIp() {
     const ip = newIp.trim();
@@ -40,24 +42,31 @@
     allowedIps = allowedIps.filter(i => i !== ip);
   }
 
-  async function saveRestrictions() {
-    saving = true;
-    try {
+  const saveMutation = createMutation(() => ({
+    mutationFn: async (ips: string[]) => {
       const res = await apiClient(`/v1/projects/${projectRef}/network-restrictions`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ allowed_address_ranges: allowedIps })
+        body: JSON.stringify({ allowed_address_ranges: ips })
       });
-      msg = res.ok ? "✅ 网络限制已保存，Angie 配置已重载" : "❌ 保存失败";
-    } catch (err: unknown) {
+      if (!res.ok) throw new Error("保存失败");
+      return res.json();
+    },
+    onSuccess: () => {
+      msg = "✅ 网络限制已保存，Angie 配置已重载";
+      queryClient.invalidateQueries({ queryKey: ["network_restrictions", projectRef] });
+      setTimeout(() => msg = null, 4000);
+    },
+    onError: (err: unknown) => {
       msg = `❌ ${(err instanceof Error ? err.message : String(err))}`;
-    } finally {
-      saving = false;
       setTimeout(() => msg = null, 4000);
     }
-  }
+  }));
 
-  onMount(() => { fetchRestrictions(); });
+  function saveRestrictions() {
+    msg = null;
+    saveMutation.mutate(allowedIps);
+  }
 </script>
 
 <div class="h-full flex flex-col space-y-4">
@@ -66,9 +75,9 @@
       <h1 class="text-2xl font-bold">网络限制</h1>
       <p class="text-sm text-muted-foreground mt-1">通过 IP 白名单控制哪些来源可以访问你的项目 API</p>
     </div>
-    <button onclick={saveRestrictions} disabled={saving}
+    <button onclick={saveRestrictions} disabled={saveMutation.isPending}
       class="flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg bg-brand text-white hover:bg-brand/90 transition-colors disabled:opacity-50">
-      {#if saving}<Loader2 size={14} class="animate-spin" />{:else}<Save size={14} />{/if}
+      {#if saveMutation.isPending}<Loader2 size={14} class="animate-spin" />{:else}<Save size={14} />{/if}
       保存规则
     </button>
   </div>

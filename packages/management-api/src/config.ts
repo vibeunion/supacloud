@@ -1,17 +1,71 @@
 import { logger } from "./utils/logger";
 
 interface Config {
+  // Server
   port: number;
+  nodeEnv: string;
+  // Database
   databaseUrl: string;
+  pgHost: string;
+  pgPort: number;
+  pgUser: string;
+  pgPassword: string;
+  pgDatabase: string;
+  pgDataDir: string;
+  // Security
   masterToken: string;
+  jwtSecret: string;
+  storageSigningSecret: string;
+  // Paths
   scriptsPath: string;
   pigstyPath: string;
   nginxSitesPath: string;
+  angieSitesDir: string;
+  tenantConfigDir: string;
+  edgeFunctionsDir: string;
+  homePath: string;
+  // S3 / Storage
   s3Endpoint: string;
   s3Region: string;
+  storageType: string;
+  storageMountPoint: string;
+  // Internal Service URLs
+  imaginaryUrl: string;
+  kongAdminUrl: string;
+  kongYml: string;
+  victoriaMetricsUrl: string;
+  realtimeAdminUrl: string;
+  realtimeApiSecret: string;
+  managementApiInternal: string;
+  studioInternal: string;
+  edgeRuntimeInternal: string;
+  kongInternal: string;
+  // Service Binaries / Ports
+  postgrestBin: string;
+  gotrueBin: string;
+  pgrstPortBase: number;
+  gotruePortBase: number;
+  portRange: string;
+  bunPath: string;
+  // SSL / Domain
+  enableSsl: boolean;
+  acmeClient: string;
   baseDomain: string;
+  // Auth / SMTP
   studioUsername: string;
   studioPassword: string;
+  gotrueApiExternalUrl: string;
+  gotrueSmtpHost: string;
+  gotrueSmtpUser: string;
+  gotrueSmtpPass: string;
+  gotrueSmtpAdminEmail: string;
+  // Runtime
+  containerRuntime: string;
+  dockerHostIp: string;
+  isGithubActions: boolean;
+  minDiskGb: number;
+  supacloudAnsibleArgs: string;
+  supacloudApiUrl: string;
 }
 
 function loadEnvFile(path: string): Record<string, string> {
@@ -43,38 +97,93 @@ const managementEnv = loadEnvFile("/etc/supabase/management-api.env");
 const masterTokenEnv = loadEnvFile("/etc/supabase/master-token.env");
 
 export const config = {
+  // ── Server ───────────────────────────────────────────────────────
   port: parseInt(process.env.PORT || managementEnv.PORT || "9090", 10),
+  nodeEnv: process.env.NODE_ENV || "production",
+
+  // ── Database ─────────────────────────────────────────────────────
   databaseUrl:
     process.env.DATABASE_URL ||
     managementEnv.DATABASE_URL ||
     "postgresql://postgres:postgres@localhost:5432/supacloud_meta",
+  pgHost: process.env.PG_HOST || process.env.POSTGRES_HOST || managementEnv.PG_HOST || "localhost",
+  pgPort: parseInt(process.env.PG_PORT || process.env.POSTGRES_PORT || managementEnv.PG_PORT || "5432", 10),
+  pgUser: process.env.PG_USER || managementEnv.PG_USER || "postgres",
+  pgPassword: process.env.PGPASSWORD || process.env.POSTGRES_PASSWORD || managementEnv.PGPASSWORD || "postgres",
+  pgDatabase: process.env.PG_DATABASE || managementEnv.PG_DATABASE || "postgres",
+  pgDataDir: process.env.PG_DATA_DIR || managementEnv.PG_DATA_DIR || "/pg/data",
+
+  // ── Security ─────────────────────────────────────────────────────
   masterToken:
     process.env.MASTER_TOKEN ||
     masterTokenEnv.MASTER_TOKEN ||
     managementEnv.MASTER_TOKEN ||
     "dev-master-token",
+  jwtSecret: process.env.JWT_SECRET || managementEnv.JWT_SECRET || "",
+  storageSigningSecret: process.env.STORAGE_SIGNING_SECRET || managementEnv.STORAGE_SIGNING_SECRET || "",
+
+  // ── Paths ────────────────────────────────────────────────────────
   scriptsPath:
     process.env.SCRIPTS_PATH ||
     managementEnv.SCRIPTS_PATH ||
     "/opt/supacloud/scripts/lib",
-
-  // Pigsty/Supabase paths
   pigstyPath: process.env.PIGSTY_PATH || managementEnv.PIGSTY_PATH || "/root/pigsty",
   nginxSitesPath:
     process.env.NGINX_SITES_PATH ||
     managementEnv.NGINX_SITES_PATH ||
     "/etc/nginx/sites-enabled/supa-tenants",
+  angieSitesDir: process.env.ANGIE_SITES_DIR || managementEnv.ANGIE_SITES_DIR || "/etc/angie/sites-enabled",
+  tenantConfigDir: process.env.TENANT_CONFIG_DIR || managementEnv.TENANT_CONFIG_DIR || "/etc/supabase/kong_tenants",
+  edgeFunctionsDir: process.env.EDGE_FUNCTIONS_DIR || managementEnv.EDGE_FUNCTIONS_DIR || "/opt/supacloud/functions",
+  homePath: process.env.HOME || "/root",
 
-  // S3 configuration
+  // ── S3 / Storage ─────────────────────────────────────────────────
   s3Endpoint: process.env.S3_ENDPOINT || managementEnv.S3_ENDPOINT || "http://localhost:9000",
   s3Region: process.env.S3_REGION || managementEnv.S3_REGION || "us-east-1",
+  storageType: process.env.STORAGE_TYPE || managementEnv.STORAGE_TYPE || "local",
+  storageMountPoint: process.env.STORAGE_MOUNT_POINT || managementEnv.STORAGE_MOUNT_POINT || "/data/storage",
 
-  // Base domain for projects
+  // ── Internal Service URLs ────────────────────────────────────────
+  imaginaryUrl: process.env.IMAGINARY_URL || managementEnv.IMAGINARY_URL || "http://127.0.0.1:9010",
+  kongAdminUrl: process.env.KONG_ADMIN_URL || managementEnv.KONG_ADMIN_URL || "http://localhost:8001",
+  kongYml: process.env.KONG_YML || managementEnv.KONG_YML || "/root/pigsty/app/supabase/volumes/api/kong.yml",
+  victoriaMetricsUrl: process.env.VICTORIAMETRICS_URL || managementEnv.VICTORIAMETRICS_URL || "http://127.0.0.1:8428",
+  realtimeAdminUrl: process.env.REALTIME_ADMIN_URL || managementEnv.REALTIME_ADMIN_URL || "http://127.0.0.1:4000",
+  realtimeApiSecret: process.env.REALTIME_API_SECRET || managementEnv.REALTIME_API_SECRET || "",
+  managementApiInternal: process.env.MANAGEMENT_API_INTERNAL || managementEnv.MANAGEMENT_API_INTERNAL || "http://127.0.0.1:9090",
+  studioInternal: process.env.STUDIO_INTERNAL || managementEnv.STUDIO_INTERNAL || "http://127.0.0.1:3000",
+  edgeRuntimeInternal: process.env.EDGE_RUNTIME_INTERNAL || managementEnv.EDGE_RUNTIME_INTERNAL || "http://127.0.0.1:9001",
+  kongInternal: process.env.KONG_INTERNAL || managementEnv.KONG_INTERNAL || "http://127.0.0.1:8000",
+
+  // ── Service Binaries / Ports ─────────────────────────────────────
+  postgrestBin: process.env.POSTGREST_BIN || managementEnv.POSTGREST_BIN || "postgrest",
+  gotrueBin: process.env.GOTRUE_BIN || managementEnv.GOTRUE_BIN || "gotrue",
+  pgrstPortBase: parseInt(process.env.PGRST_PORT_BASE || managementEnv.PGRST_PORT_BASE || "3100", 10),
+  gotruePortBase: parseInt(process.env.GOTRUE_PORT_BASE || managementEnv.GOTRUE_PORT_BASE || "9999", 10),
+  portRange: process.env.PORT_RANGE || managementEnv.PORT_RANGE || "3100-3200",
+  bunPath: process.env.BUN_PATH || managementEnv.BUN_PATH || "bun",
+
+  // ── SSL / Domain ─────────────────────────────────────────────────
+  enableSsl: (process.env.ENABLE_SSL || managementEnv.ENABLE_SSL || "false") === "true",
+  acmeClient: process.env.ACME_CLIENT || managementEnv.ACME_CLIENT || "acme.sh",
   baseDomain: process.env.BASE_DOMAIN || managementEnv.BASE_DOMAIN || "localhost",
 
-  // Studio login credentials
+  // ── Auth / SMTP ──────────────────────────────────────────────────
   studioUsername: process.env.STUDIO_USERNAME || managementEnv.STUDIO_USERNAME || "admin",
   studioPassword: process.env.STUDIO_PASSWORD || managementEnv.STUDIO_PASSWORD || "supacloud",
+  gotrueApiExternalUrl: process.env.GOTRUE_API_EXTERNAL_URL || managementEnv.GOTRUE_API_EXTERNAL_URL || "",
+  gotrueSmtpHost: process.env.GOTRUE_SMTP_HOST || managementEnv.GOTRUE_SMTP_HOST || "",
+  gotrueSmtpUser: process.env.GOTRUE_SMTP_USER || managementEnv.GOTRUE_SMTP_USER || "",
+  gotrueSmtpPass: process.env.GOTRUE_SMTP_PASS || managementEnv.GOTRUE_SMTP_PASS || "",
+  gotrueSmtpAdminEmail: process.env.GOTRUE_SMTP_ADMIN_EMAIL || managementEnv.GOTRUE_SMTP_ADMIN_EMAIL || "",
+
+  // ── Runtime ──────────────────────────────────────────────────────
+  containerRuntime: process.env.CONTAINER_RUNTIME || managementEnv.CONTAINER_RUNTIME || "podman",
+  dockerHostIp: process.env.DOCKER_HOST_IP || managementEnv.DOCKER_HOST_IP || "",
+  isGithubActions: process.env.GITHUB_ACTIONS === "true",
+  minDiskGb: parseInt(process.env.MIN_DISK_GB || managementEnv.MIN_DISK_GB || "10", 10),
+  supacloudAnsibleArgs: process.env.SUPACLOUD_ANSIBLE_ARGS || managementEnv.SUPACLOUD_ANSIBLE_ARGS || "",
+  supacloudApiUrl: process.env.SUPACLOUD_API_URL || managementEnv.SUPACLOUD_API_URL || "http://127.0.0.1:9090",
 } satisfies Config;
 
 // Add basic validation to prevent invalid configuration from crashing downstream

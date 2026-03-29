@@ -151,6 +151,7 @@ function getEmbeddedAssets() {
       const { EMBEDDED_ASSETS } = require("./assets.gen");
       _embeddedAssets = EMBEDDED_ASSETS;
     } catch {
+      logger.debug("Failed to load embedded assets (assets.gen.ts not found), using empty fallback.");
       _embeddedAssets = {};
     }
   }
@@ -234,7 +235,7 @@ export function registerStaticAssets() {
  */
 export async function registerAllRoutes() {
   const {
-    projectRoutes, organizationRoutes, userRoutes, backupRoutes,
+    projectRoutes, projectSecretsRoutes, projectFunctionsRoutes, organizationRoutes, userRoutes, backupRoutes,
     monitorRoutes, maintenanceRoutes, extensionRoutes, systemExtensionRoutes, securityRoutes,
     storageRoutes, storageCompatRoutes, scalingRoutes, taskRoutes, databaseRoutes, authRoutes,
     wechatAuthRoutes, chinaAuthRoutes, userManagementRoutes,
@@ -251,6 +252,8 @@ export async function registerAllRoutes() {
       }
     })
     .use(projectRoutes)
+    .use(projectSecretsRoutes)
+    .use(projectFunctionsRoutes)
     .use(organizationRoutes)
     .use(userRoutes)
     .use(backupRoutes)

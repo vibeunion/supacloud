@@ -1,19 +1,16 @@
 <script lang="ts">
   import { apiClient } from "$lib/api";
 
-  import { onMount } from "svelte";
   import { page } from "$app/state";
   import { Loader2, HardDrive, ArrowLeft, Folder } from "lucide-svelte";
   import { toast } from "svelte-sonner";
-
-  let bucketStats = $state<Record<string, unknown>[]>([]);
-  let isLoading = $state(true);
+  import { createQuery } from "@tanstack/svelte-query";
 
   const projectRef = $derived(page.params.ref);
 
-  async function fetchStats() {
-    isLoading = true;
-    try {
+  const storageStatsQuery = createQuery(() => ({
+    queryKey: ["storage-stats", projectRef],
+    queryFn: async () => {
       const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -31,16 +28,16 @@
           ORDER BY total_bytes DESC;`
         })
       });
+      if (!res.ok) throw new Error("Failed to fetch storage stats");
       const data = await res.json();
-      bucketStats = Array.isArray(data) ? data : data.rows || [];
-    } catch (err: unknown) {
-      toast.error("无法fetch storage stats");
-    } finally {
-      isLoading = false;
+      return Array.isArray(data) ? data : data.rows || [];
     }
-  }
+  }));
 
-  onMount(() => { fetchStats(); });
+  const bucketStats = $derived((storageStatsQuery.data || []) as Record<string, unknown>[]);
+  const isLoading = $derived(storageStatsQuery.isPending);
+
+
 
   function formatNum(n: unknown): string {
     return new Intl.NumberFormat().format(Number(n) || 0);

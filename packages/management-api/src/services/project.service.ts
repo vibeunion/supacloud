@@ -220,7 +220,8 @@ export class ProjectService {
         const { $ } = await import("bun");
         const res = await $`docker inspect -f '{{.State.Status}}' ${containerName} 2>/dev/null || podman inspect -f '{{.State.Status}}' ${containerName} 2>/dev/null`.nothrow().quiet();
         return res.text().trim() === "running" ? "ACTIVE_HEALTHY" : "INACTIVE";
-      } catch {
+      } catch (err: unknown) {
+        logger.debug(`[ProjectService] Docker check failed for ${containerName}`, { error: err });
         return "INACTIVE";
       }
     };
@@ -479,7 +480,9 @@ export class ProjectService {
               rawOutputs.push({ source: "database", jsonStr: line });
             }
           }
-        } catch (e: unknown) { /* ignore */ }
+        } catch (e: unknown) { 
+          logger.debug(`[ProjectService] DB log fetch failed for ${ref}`, { error: e });
+        }
       }
 
       if (rawOutputs.length === 0) {

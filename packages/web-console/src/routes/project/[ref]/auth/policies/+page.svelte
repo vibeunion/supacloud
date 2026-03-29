@@ -1,10 +1,10 @@
 <script lang="ts">
   import { apiClient } from "$lib/api";
 
-  import { onMount } from "svelte";
   import { page } from "$app/state";
   import { Loader2, Shield, Table, Plus, Search, Trash2 } from "lucide-svelte";
   import { toast } from "svelte-sonner";
+  import { createQuery, createMutation, useQueryClient } from "@tanstack/svelte-query";
 
   interface RlsPolicy {
     policyname: string;
@@ -16,16 +16,9 @@
     qual: string;
   }
 
-  let policies = $state<RlsPolicy[]>([]);
-  let isLoading = $state(true);
-  let searchQuery = $state("");
-
   // Create Policy State
   let showAdd = $state(false);
-  let isSaving = $state(false);
   let addError = $state<string | null>(null);
-  let tables = $state<string[]>([]);
-  let roles = $state<string[]>([]);
   
   let newPolName = $state("");
   let newPolTable = $state("");
@@ -34,16 +27,8 @@
   let newPolUsing = $state("");
   let newPolWithCheck = $state("");
 
-  // Delete Policy State
-  let isDeleting = $state(false);
-
   const projectRef = $derived(page.params.ref);
-
-  const filteredPolicies = $derived(
-    searchQuery.trim()
-      ? policies.filter(p => p.policyname.toLowerCase().includes(searchQuery.toLowerCase()) || p.tablename.toLowerCase().includes(searchQuery.toLowerCase()))
-      : policies
-  );
+  const queryClient = useQueryClient();
 
   const POLICIES_SQL = `
     SELECT
@@ -70,27 +55,22 @@
     ORDER BY n.nspname, c.relname, pol.polname;
   `;
 
-  async function fetchPolicies() {
-    isLoading = true;
-    try {
+  const policiesQuery = createQuery(() => ({
+    queryKey: ["auth_policies", projectRef],
+    queryFn: async () => {
       const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sql: POLICIES_SQL })
       });
       const data = await res.json();
-      if (!data.error) {
-        policies = Array.isArray(data) ? data : data.rows || [];
-      }
-    } catch (err: unknown) {
-      toast.error("无法fetch policies");
-    } finally {
-      isLoading = false;
+      if (data.error) throw new Error(data.message || data.error);
+      return (Array.isArray(data) ? data : data.rows || []) as RlsPolicy[];
     }
-  }
+  }));
 
-  async function fetchMetaData() {
-    try {
+  const metaQuery = createQuery(() => ({
+    queryKey: ["auth_policies_meta", projectRef],
+    queryFn: async () => {
       const [tblRes, roleRes] = await Promise.all([
         apiClient(`/v1/projects/${projectRef}/database/sql`, {
           method: "POST", headers: { "Content-Type": "application/json" },
@@ -103,66 +83,85 @@
       ]);
       const tblData = await tblRes.json();
       const roleData = await roleRes.json();
-      if (!tblData.error) tables = (Array.isArray(tblData) ? tblData : tblData.rows || []).map((r: Record<string, unknown>) => r.tablename);
-      if (!roleData.error) roles = (Array.isArray(roleData) ? roleData : roleData.rows || []).map((r: Record<string, unknown>) => r.rolname);
-    } catch (err: unknown) { toast.error("操作失败"); }
-  }
+      let tables: string[] = [];
+      let roles: string[] = [];
+      if (!tblData.error) tables = (Array.isArray(tblData) ? tblData : tblData.rows || []).map((r: Record<string, unknown>) => r.tablename as string);
+      if (!roleData.error) roles = (Array.isArray(roleData) ? roleData : roleData.rows || []).map((r: Record<string, unknown>) => r.rolname as string);
+      return { tables, roles };
+    }
+  }));
 
-  onMount(() => { 
-    fetchPolicies(); 
-    fetchMetaData();
-  });
+  const policies = $derived(policiesQuery.data || []);
+  const tables = $derived(metaQuery.data?.tables || []);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const roles = $derived(metaQuery.data?.roles || []); // Kept for reference
+  const isLoading = $derived(policiesQuery.isPending);
+  let searchQuery = $state("");
+
+  const filteredPolicies = $derived(
+    searchQuery.trim()
+      ? policies.filter(p => p.policyname.toLowerCase().includes(searchQuery.toLowerCase()) || p.tablename.toLowerCase().includes(searchQuery.toLowerCase()))
+      : policies
+  );
+
+  const saveMutation = createMutation(() => ({
+    mutationFn: async () => {
+      let sql = `CREATE POLICY "${newPolName}" ON public."${newPolTable}" FOR ${newPolAction} TO ${newPolRoles}`;
+      if (newPolUsing) sql += ` USING (${newPolUsing})`;
+      if (newPolWithCheck && (newPolAction === 'ALL' || newPolAction === 'INSERT' || newPolAction === 'UPDATE')) {
+        sql += ` WITH CHECK (${newPolWithCheck})`;
+      }
+      sql += ";";
+
+      const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sql })
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.message || data.error);
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["auth_policies", projectRef] });
+      showAdd = false;
+      newPolName = ""; newPolUsing = ""; newPolWithCheck = "";
+    },
+    onError: (err: unknown) => {
+      addError = (err instanceof Error ? err.message : String(err)) || "创建失败";
+    }
+  }));
 
   async function savePolicy() {
     if (!newPolName || !newPolTable) {
       addError = "策略名和表名不能为空";
       return;
     }
-    isSaving = true;
     addError = null;
-    
-    let sql = `CREATE POLICY "${newPolName}" ON public."${newPolTable}" FOR ${newPolAction} TO ${newPolRoles}`;
-    if (newPolUsing) sql += ` USING (${newPolUsing})`;
-    if (newPolWithCheck && (newPolAction === 'ALL' || newPolAction === 'INSERT' || newPolAction === 'UPDATE')) {
-      sql += ` WITH CHECK (${newPolWithCheck})`;
-    }
-    sql += ";";
-
-    try {
-      const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sql })
-      });
-      const data = await res.json();
-      if (data.error) throw new Error(data.error);
-      
-      showAdd = false;
-      newPolName = ""; newPolUsing = ""; newPolWithCheck = "";
-      await fetchPolicies();
-    } catch (err: unknown) {
-      addError = (err instanceof Error ? err.message : String(err)) || "创建失败";
-    } finally {
-      isSaving = false;
-    }
+    saveMutation.mutate();
   }
 
-  async function deletePolicy(policy: RlsPolicy) {
-    if (!confirm(`确定要删除策略 "${policy.policyname}" 吗？\n注意：这将立即移除安全访问规则。`)) return;
-    isDeleting = true;
-    try {
+  const deleteMutation = createMutation(() => ({
+    mutationFn: async (policy: RlsPolicy) => {
       const sql = `DROP POLICY "${policy.policyname}" ON "${policy.schemaname}"."${policy.tablename}";`;
       const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sql })
       });
       const data = await res.json();
-      if (data.error) throw new Error(data.error);
-      await fetchPolicies();
-    } catch (err: unknown) {
-      alert("删除失败: " + (err instanceof Error ? err.message : String(err)));
-    } finally {
-      isDeleting = false;
+      if (data.error) throw new Error(data.message || data.error);
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["auth_policies", projectRef] });
+    },
+    onError: (err: unknown) => {
+      toast.error("删除失败: " + (err instanceof Error ? err.message : String(err)));
     }
+  }));
+
+  async function deletePolicy(policy: RlsPolicy) {
+    if (!confirm(`确定要删除策略 "${policy.policyname}" 吗？\n注意：这将立即移除安全访问规则。`)) return;
+    deleteMutation.mutate(policy);
   }
 
   function getCmdColor(cmd: string): string {
@@ -243,8 +242,8 @@
       
       <div class="flex items-center justify-end gap-3 pt-2">
         <button onclick={() => showAdd = false} class="px-4 py-2 text-xs font-medium rounded-lg hover:bg-muted/50 transition-colors">取消</button>
-        <button onclick={savePolicy} disabled={isSaving || !newPolName || !newPolTable} class="flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg bg-brand text-white hover:bg-brand/90 transition-colors disabled:opacity-50">
-          {#if isSaving}<Loader2 size={12} class="animate-spin" />{/if}
+        <button onclick={savePolicy} disabled={saveMutation.isPending || !newPolName || !newPolTable} class="flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg bg-brand text-white hover:bg-brand/90 transition-colors disabled:opacity-50">
+          {#if saveMutation.isPending}<Loader2 size={12} class="animate-spin" />{/if}
           确认创建
         </button>
       </div>
@@ -310,7 +309,7 @@
                   <div class="absolute right-4 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity">
                     <button 
                       onclick={() => deletePolicy(policy)}
-                      disabled={isDeleting}
+                      disabled={deleteMutation.isPending}
                       class="p-1.5 text-red-500 hover:bg-red-500/10 rounded-md transition-colors disabled:opacity-50"
                       title="删除策略"
                     >

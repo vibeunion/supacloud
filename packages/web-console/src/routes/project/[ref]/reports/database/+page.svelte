@@ -1,20 +1,16 @@
 <script lang="ts">
   import { apiClient } from "$lib/api";
 
-  import { onMount } from "svelte";
   import { page } from "$app/state";
   import { Loader2, Database, ArrowLeft, HardDrive, Activity } from "lucide-svelte";
   import { toast } from "svelte-sonner";
-
-  let dbStats = $state<Record<string, unknown>[]>([]);
-  let tableStats = $state<Record<string, unknown>[]>([]);
-  let isLoading = $state(true);
+  import { createQuery } from "@tanstack/svelte-query";
 
   const projectRef = $derived(page.params.ref);
 
-  async function fetchDbStats() {
-    isLoading = true;
-    try {
+  const dbStatsQuery = createQuery(() => ({
+    queryKey: ["database-stats", projectRef],
+    queryFn: async () => {
       const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -34,8 +30,9 @@
           WHERE datname = current_database();`
         })
       });
+      if (!res.ok) throw new Error("Failed to fetch DB stats");
       const data = await res.json();
-      dbStats = Array.isArray(data) ? data : data.rows || [];
+      const dbStatsData = Array.isArray(data) ? data : data.rows || [];
 
       const res2 = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
         method: "POST",
@@ -56,16 +53,19 @@
           ORDER BY n_live_tup DESC LIMIT 30;`
         })
       });
+      if (!res2.ok) throw new Error("Failed to fetch table stats");
       const data2 = await res2.json();
-      tableStats = Array.isArray(data2) ? data2 : data2.rows || [];
-    } catch (err: unknown) {
-      toast.error("无法fetch DB stats");
-    } finally {
-      isLoading = false;
-    }
-  }
+      const tableStatsData = Array.isArray(data2) ? data2 : data2.rows || [];
 
-  onMount(() => { fetchDbStats(); });
+      return { dbStats: dbStatsData, tableStats: tableStatsData };
+    }
+  }));
+
+  const dbStats = $derived(dbStatsQuery.data?.dbStats || []);
+  const tableStats = $derived(dbStatsQuery.data?.tableStats || []);
+  const isLoading = $derived(dbStatsQuery.isPending);
+
+
 
   function formatNum(n: unknown): string {
     return new Intl.NumberFormat().format(Number(n) || 0);

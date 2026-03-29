@@ -1,12 +1,13 @@
 <script lang="ts">
   import { apiClient } from "$lib/api";
 
-  import { onMount } from "svelte";
   import { page } from "$app/state";
   import { Shield, Ban, AlertTriangle, Globe, Lock, Loader2 } from "lucide-svelte";
   import { toast } from "svelte-sonner";
+  import { createQuery, createMutation, useQueryClient } from "@tanstack/svelte-query";
 
   const projectRef = $derived(page.params.ref);
+  const queryClient = useQueryClient();
 
   interface ProtectionConfig {
     key: string;
@@ -17,71 +18,74 @@
     detail: string;
   }
 
-  let configs = $state<ProtectionConfig[]>([
+  const INITIAL_CONFIGS: ProtectionConfig[] = [
     { key: "SECURITY_CAPTCHA_ENABLED", name: "Bot Detection", description: "使用 CAPTCHA 防止自动化机器人攻击", icon: Shield, enabled: false, detail: "支持 hCaptcha 和 Cloudflare Turnstile" },
     { key: "SECURITY_IP_RESTRICTION_ENABLED", name: "IP 限制", description: "限制特定 IP 或 CIDR 范围访问认证 API", icon: Ban, enabled: false, detail: "可设置白名单和黑名单" },
     { key: "PASSWORD_HIBC_ENABLE", name: "泄露密码检测", description: "阻止使用已知泄露密码进行注册", icon: Lock, enabled: true, detail: "使用 HaveIBeenPwned 数据库检查" },
     { key: "PASSWORD_STRENGTH_REQUIRE_COMPLEXITY", name: "强密码策略", description: "要求密码满足复杂度要求（长度、大小写、数字、特殊字符）", icon: Lock, enabled: true, detail: "最小 8 个字符" },
     { key: "SECURITY_LOCKOUT_ENABLED", name: "登录失败锁定", description: "连续登录失败后临时锁定账户", icon: Ban, enabled: false, detail: "默认：5 次失败后锁定 15 分钟" },
     { key: "SECURITY_CORS_RESTRICTION_ENABLED", name: "CORS 限制", description: "限制允许的跨域请求来源", icon: Globe, enabled: true, detail: "默认允许所有域名" },
-  ]);
+  ];
 
-  let isLoading = $state(true);
-  let isSaving = $state(false);
+  const configQuery = createQuery(() => ({
+    queryKey: ["auth_config", projectRef],
+    queryFn: async () => {
+      const res = await apiClient(`/v1/projects/${projectRef}/auth/config`);
+      if (!res.ok) throw new Error("Failed to load config");
+      return await res.json();
+    }
+  }));
+
+  let configs = $state<ProtectionConfig[]>([]);
+
+  $effect(() => {
+    if (configQuery.data) {
+      const configData = configQuery.data;
+      configs = INITIAL_CONFIGS.map(cfg => ({
+        ...cfg,
+        enabled: configData[cfg.key] !== undefined ? String(configData[cfg.key]) === "true" : cfg.enabled
+      }));
+    } else if (configQuery.isError || (configs.length === 0 && !configQuery.isPending)) {
+      configs = INITIAL_CONFIGS.map(cfg => ({ ...cfg }));
+    }
+  });
+
+  const isLoading = $derived(configQuery.isPending);
   let saveMsg = $state<string | null>(null);
 
-  async function fetchConfig() {
-    isLoading = true;
-    try {
-      const res = await apiClient(`/v1/projects/${projectRef}/auth/config`);
-      if (res.ok) {
-        const configData = await res.json();
-        for (const cfg of configs) {
-          if (configData[cfg.key] !== undefined) {
-            cfg.enabled = String(configData[cfg.key]) === "true";
-          }
-        }
-      }
-    } catch (err: unknown) {
-      toast.error("无法fetch protection config");
-    } finally {
-      isLoading = false;
-    }
-  }
-
-  onMount(() => { fetchConfig(); });
-
-  async function toggleConfig(index: number) {
-    if (isSaving) return;
-    isSaving = true;
-    saveMsg = null;
-    
-    const cfg = configs[index];
-    const originalValue = cfg.enabled;
-    // Optimistic update
-    cfg.enabled = !cfg.enabled;
-
-    try {
+  const toggleMutation = createMutation(() => ({
+    mutationFn: async ({ index, enabled }: { index: number, enabled: boolean }) => {
+      const cfg = configs[index];
       const res = await apiClient(`/v1/projects/${projectRef}/auth/config`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ [cfg.key]: String(cfg.enabled) })
+        body: JSON.stringify({ [cfg.key]: String(enabled) })
       });
-      
-      if (res.ok) {
-        saveMsg = `✅ ${cfg.name} 已${cfg.enabled ? '启用' : '完全禁用'} (GoTrue重启中)`;
-        setTimeout(() => saveMsg = null, 3000);
-      } else {
-        throw new Error("Failed to save");
-      }
-    } catch (err: unknown) {
-      // Revert on failure
-      cfg.enabled = originalValue;
+      if (!res.ok) throw new Error("Failed to save");
+      return { index, enabled, cfg };
+    },
+    onMutate: async ({ index, enabled }) => {
+      // Optimistic update
+      configs[index].enabled = enabled;
+      return { previousConfig: configs[index].enabled };
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["auth_config", projectRef] });
+      saveMsg = `✅ ${data.cfg.name} 已${data.enabled ? '启用' : '完全禁用'} (GoTrue重启中)`;
+      setTimeout(() => saveMsg = null, 3000);
+    },
+    onError: (err, variables, context) => {
+      // Revert optimistic update
+      configs[variables.index].enabled = !variables.enabled;
       saveMsg = `❌ 保存失败`;
       setTimeout(() => saveMsg = null, 3000);
-    } finally {
-      isSaving = false;
     }
+  }));
+
+  function toggleConfig(index: number) {
+    if (toggleMutation.isPending) return;
+    saveMsg = null;
+    toggleMutation.mutate({ index, enabled: !configs[index].enabled });
   }
 </script>
 
@@ -124,7 +128,7 @@
             <span class="text-[10px] text-muted-foreground hidden md:block">{cfg.detail}</span>
             <button 
               onclick={() => toggleConfig(i)}
-              disabled={isSaving}
+              disabled={toggleMutation.isPending}
               class="relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full focus:outline-none focus:ring-2 focus:ring-brand focus:ring-offset-2 {cfg.enabled ? 'bg-brand' : 'bg-muted-foreground/30'} transition-colors disabled:opacity-50"
             >
               <span class="sr-only">Use setting</span>

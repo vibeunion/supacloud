@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+
   import { page } from "$app/state";
   import { Loader2, Clock, Shield, RefreshCw, Timer, Fingerprint } from "lucide-svelte";
 
@@ -20,13 +20,8 @@
   ];
 
   let configs = $state<SessionConfig[]>([...SESSION_CONFIGS]);
-  let isLoading = $state(true);
 
   const projectRef = $derived(page.params.ref);
-
-  onMount(() => {
-    setTimeout(() => { isLoading = false; }, 300);
-  });
 
   function formatSeconds(val: string): string {
     const num = parseInt(val);
@@ -45,12 +40,6 @@
   </div>
 
   <div class="flex-1">
-    {#if isLoading}
-      <div class="rounded-xl border bg-card flex flex-col items-center justify-center py-24 text-muted-foreground gap-3">
-        <Loader2 size={32} class="animate-spin text-brand opacity-50" />
-        <p class="text-xs font-mono uppercase tracking-widest">正在加载会话配置...</p>
-      </div>
-    {:else}
       <div class="space-y-3">
         {#each configs as cfg}
           <div class="rounded-xl border bg-card p-5 hover:border-brand/20 transition-colors">
@@ -76,6 +65,5 @@
           </div>
         {/each}
       </div>
-    {/if}
   </div>
 </div>

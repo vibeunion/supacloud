@@ -1,9 +1,9 @@
 <script lang="ts">
   import { apiClient } from "$lib/api";
 
-  import { onMount } from "svelte";
   import { page } from "$app/state";
   import { Loader2, Webhook, Zap, AlertTriangle, Save, ChevronDown, ChevronUp } from "lucide-svelte";
+  import { createQuery, createMutation, useQueryClient } from "@tanstack/svelte-query";
 
   interface AuthHook {
     id: string;
@@ -25,32 +25,42 @@
     { id: "send_email", name: "Send Email", description: "自定义邮件发送逻辑（替代内置邮件服务）", hook_type: "http", enabledKey: "GOTRUE_HOOK_SEND_EMAIL_ENABLED", uriKey: "GOTRUE_HOOK_SEND_EMAIL_URI" },
   ];
 
-  let hooks = $state<AuthHook[]>([]);
-  let isLoading = $state(true);
-  let saving = $state(false);
   let saveMsg = $state<string | null>(null);
 
   const projectRef = $derived(page.params.ref);
+  const queryClient = useQueryClient();
 
-  async function fetchConfig() {
-    isLoading = true;
-    try {
+  const configQuery = createQuery(() => ({
+    queryKey: ["auth_config", projectRef],
+    queryFn: async () => {
       const res = await apiClient(`/v1/projects/${projectRef}/auth/config`);
-      const config = res.ok ? await res.json() : {};
-      hooks = HOOKS_DEF.map(h => ({
-        ...h,
-        expanded: false,
-        enabled: String(config[h.enabledKey]) === "true",
-        uri: config[h.uriKey] || ""
-      }));
-    } catch {
-      hooks = HOOKS_DEF.map(h => ({ ...h, expanded: false, enabled: false, uri: "" }));
-    } finally { isLoading = false; }
-  }
+      if (!res.ok) throw new Error("Failed to load config");
+      return await res.json();
+    }
+  }));
 
-  async function saveHooks() {
-    saving = true;
-    try {
+  let hooks = $state<AuthHook[]>([]);
+
+  $effect(() => {
+    if (configQuery.data) {
+      const config = configQuery.data;
+      hooks = HOOKS_DEF.map(h => {
+        const existing = hooks.find(e => e.id === h.id);
+        return {
+          ...h,
+          expanded: existing?.expanded || false,
+          enabled: String(config[h.enabledKey]) === "true",
+          uri: config[h.uriKey] || existing?.uri || ""
+        };
+      });
+    } else if (configQuery.isError || (hooks.length === 0 && !configQuery.isPending)) {
+      hooks = HOOKS_DEF.map(h => ({ ...h, expanded: false, enabled: false, uri: "" }));
+    }
+  });
+
+  const isLoading = $derived(configQuery.isPending);
+  const saveMutation = createMutation(() => ({
+    mutationFn: async () => {
       const payload: Record<string, string> = {};
       for (const h of hooks) {
         payload[h.enabledKey] = h.enabled ? "true" : "false";
@@ -65,16 +75,24 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
       });
-      saveMsg = res.ok ? "✅ Auth Hooks 配置已保存（GoTrue 将重启）" : `❌ 保存失败`;
-    } catch (err: unknown) {
+      if (!res.ok) throw new Error("保存失败");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["auth_config", projectRef] });
+      saveMsg = "✅ Auth Hooks 配置已保存（GoTrue 将重启）";
+      setTimeout(() => saveMsg = null, 4000);
+    },
+    onError: (err: unknown) => {
       saveMsg = `❌ 保存失败: ${(err instanceof Error ? err.message : String(err))}`;
-    } finally {
-      saving = false;
       setTimeout(() => saveMsg = null, 4000);
     }
-  }
+  }));
 
-  onMount(() => { fetchConfig(); });
+  async function saveHooks() {
+    saveMsg = null;
+    saveMutation.mutate();
+  }
 </script>
 
 <div class="h-full flex flex-col space-y-4">
@@ -83,9 +101,9 @@
       <h1 class="text-2xl font-bold">Auth Hooks</h1>
       <p class="text-sm text-muted-foreground mt-1">在认证流程的关键节点插入自定义逻辑</p>
     </div>
-    <button onclick={saveHooks} disabled={saving}
+    <button onclick={saveHooks} disabled={saveMutation.isPending}
       class="flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg bg-brand text-white hover:bg-brand/90 transition-colors disabled:opacity-50">
-      {#if saving}<Loader2 size={14} class="animate-spin" />{:else}<Save size={14} />{/if}
+      {#if saveMutation.isPending}<Loader2 size={14} class="animate-spin" />{:else}<Save size={14} />{/if}
       保存配置
     </button>
   </div>

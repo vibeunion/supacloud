@@ -1,9 +1,9 @@
 <script lang="ts">
   import { apiClient } from "$lib/api";
 
-  import { onMount } from "svelte";
   import { page } from "$app/state";
   import { Loader2, Mail, FileText, Save, ChevronDown, ChevronUp } from "lucide-svelte";
+  import { createQuery, createMutation, useQueryClient } from "@tanstack/svelte-query";
 
   interface EmailTemplate {
     id: string;
@@ -25,32 +25,38 @@
     { id: "reauthentication", name: "重新认证", subjectKey: "MAILER_SUBJECTS_REAUTHENTICATION", bodyKey: "MAILER_TEMPLATES_REAUTHENTICATION_CONTENT", description: "敏感操作时的重新认证邮件" },
   ];
 
-  let templates = $state<EmailTemplate[]>([]);
-  let isLoading = $state(true);
-  let saving = $state(false);
   let saveMsg = $state<string | null>(null);
 
   const projectRef = $derived(page.params.ref);
+  const queryClient = useQueryClient();
 
-  async function fetchConfig() {
-    isLoading = true;
-    try {
+  const configQuery = createQuery(() => ({
+    queryKey: ["auth_config", projectRef],
+    queryFn: async () => {
       const res = await apiClient(`/v1/projects/${projectRef}/auth/config`);
-      const config = res.ok ? await res.json() : {};
-      templates = TEMPLATES_DEF.map(t => ({
+      if (!res.ok) throw new Error("Failed to load config");
+      return await res.json();
+    }
+  }));
+
+  let templates = $state<EmailTemplate[]>(TEMPLATES_DEF.map(t => ({ ...t, subject: "", body: "", expanded: false })));
+
+  $effect(() => {
+    if (configQuery.data) {
+      const config = configQuery.data;
+      // Preserve expanded state when refreshing
+      templates = templates.map(t => ({
         ...t,
         subject: config[t.subjectKey] || "",
         body: config[t.bodyKey] || "",
-        expanded: false,
       }));
-    } catch {
-      templates = TEMPLATES_DEF.map(t => ({ ...t, subject: "", body: "", expanded: false }));
-    } finally { isLoading = false; }
-  }
+    }
+  });
 
-  async function saveTemplates() {
-    saving = true;
-    try {
+  const isLoading = $derived(configQuery.isPending);
+
+  const saveMutation = createMutation(() => ({
+    mutationFn: async () => {
       const payload: Record<string, string> = {};
       for (const t of templates) {
         if (t.subject) payload[t.subjectKey] = t.subject;
@@ -61,16 +67,24 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
       });
-      saveMsg = res.ok ? "✅ 邮件模板已保存" : `❌ 保存失败`;
-    } catch (err: unknown) {
+      if (!res.ok) throw new Error("保存失败");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["auth_config", projectRef] });
+      saveMsg = "✅ 邮件模板已保存";
+      setTimeout(() => saveMsg = null, 4000);
+    },
+    onError: (err: unknown) => {
       saveMsg = `❌ ${(err instanceof Error ? err.message : String(err))}`;
-    } finally {
-      saving = false;
       setTimeout(() => saveMsg = null, 4000);
     }
-  }
+  }));
 
-  onMount(() => { fetchConfig(); });
+  async function saveTemplates() {
+    saveMsg = null;
+    saveMutation.mutate();
+  }
 </script>
 
 <div class="h-full flex flex-col space-y-4">
@@ -79,9 +93,9 @@
       <h1 class="text-2xl font-bold">邮件模板</h1>
       <p class="text-sm text-muted-foreground mt-1">自定义认证流程中发送给用户的邮件模板（Subject 和 Body HTML）</p>
     </div>
-    <button onclick={saveTemplates} disabled={saving}
+    <button onclick={saveTemplates} disabled={saveMutation.isPending}
       class="flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg bg-brand text-white hover:bg-brand/90 transition-colors disabled:opacity-50">
-      {#if saving}<Loader2 size={14} class="animate-spin" />{:else}<Save size={14} />{/if}
+      {#if saveMutation.isPending}<Loader2 size={14} class="animate-spin" />{:else}<Save size={14} />{/if}
       保存全部
     </button>
   </div>

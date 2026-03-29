@@ -1,91 +1,96 @@
 <script lang="ts">
   import { apiClient } from "$lib/api";
 
-  import { onMount } from "svelte";
   import { page } from "$app/state";
   import { Loader2, Globe, Plus, Trash2, Shield, AlertTriangle, ExternalLink, Copy, CheckCircle, XCircle } from "lucide-svelte";
   import { toast } from "svelte-sonner";
+  import { createQuery, createMutation, useQueryClient } from "@tanstack/svelte-query";
 
   interface DomainInfo {
     custom_hostname: string;
     status: string;
   }
 
-  let domain = $state<DomainInfo | null>(null);
-  let isLoading = $state(true);
   let newDomain = $state("");
   let showAdd = $state(false);
-  let saving = $state(false);
-  let deleting = $state(false);
   let msg = $state<string | null>(null);
 
   const projectRef = $derived(page.params.ref);
   const baseDomain = $derived(page.url?.hostname || "localhost");
+  const queryClient = useQueryClient();
 
-  async function fetchDomain() {
-    isLoading = true;
-    try {
+  const domainQuery = createQuery(() => ({
+    queryKey: ["custom_hostname", projectRef],
+    queryFn: async () => {
       const res = await apiClient(`/v1/projects/${projectRef}/custom-hostname`);
-      if (res.ok) {
-        domain = await res.json();
-      }
-    } catch (err: unknown) {
-      toast.error("无法fetch custom domain");
-    } finally {
-      isLoading = false;
-    }
-  }
+      if (!res.ok) throw new Error("Failed to fetch custom hostname");
+      const data = await res.json();
+      return (data || null) as DomainInfo | null;
+    },
+    // Don't throw errors for 404s since it just means no custom domain
+    retry: false,
+  }));
 
-  async function addDomain() {
-    if (!newDomain.trim()) return;
-    saving = true;
-    try {
+  const domain = $derived(domainQuery.data || null);
+  const isLoading = $derived(domainQuery.isPending);
+
+  const addMutation = createMutation(() => ({
+    mutationFn: async (hostname: string) => {
       const res = await apiClient(`/v1/projects/${projectRef}/custom-hostname`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ custom_hostname: newDomain.trim() })
+        body: JSON.stringify({ custom_hostname: hostname })
       });
-      if (res.ok) {
-        msg = "✅ 域名已添加，Angie 配置已生成并自动申请 SSL 证书";
-        showAdd = false;
-        newDomain = "";
-        await fetchDomain();
-      } else {
+      if (!res.ok) {
         const err = await res.json();
-        msg = `❌ 添加失败: ${err.error || "Unknown error"}`;
+        throw new Error(err.error || "Unknown error");
       }
-    } catch (err: unknown) {
-      msg = `❌ ${(err instanceof Error ? err.message : String(err))}`;
-    } finally {
-      saving = false;
+      return res.json();
+    },
+    onSuccess: () => {
+      msg = "✅ 域名已添加，Angie 配置已生成并自动申请 SSL 证书";
+      showAdd = false;
+      newDomain = "";
+      queryClient.invalidateQueries({ queryKey: ["custom_hostname", projectRef] });
+      setTimeout(() => msg = null, 5000);
+    },
+    onError: (err: unknown) => {
+      msg = `❌ 添加失败: ${(err instanceof Error ? err.message : String(err))}`;
       setTimeout(() => msg = null, 5000);
     }
+  }));
+
+  function addDomain() {
+    const d = newDomain.trim();
+    if (!d) return;
+    addMutation.mutate(d);
   }
 
-  async function deleteDomain() {
-    if (!confirm("确定删除自定义域名？删除后将自动移除 Angie 配置和 SSL 证书。")) return;
-    deleting = true;
-    try {
+  const deleteMutation = createMutation(() => ({
+    mutationFn: async () => {
       const res = await apiClient(`/v1/projects/${projectRef}/custom-hostname`, { method: "DELETE" });
-      if (res.ok) {
-        msg = "✅ 域名已删除，Angie 配置已移除";
-        await fetchDomain();
-      } else {
-        msg = "❌ 删除失败";
-      }
-    } catch (err: unknown) {
+      if (!res.ok) throw new Error("删除失败");
+      return res.json();
+    },
+    onSuccess: () => {
+      msg = "✅ 域名已删除，Angie 配置已移除";
+      queryClient.invalidateQueries({ queryKey: ["custom_hostname", projectRef] });
+      setTimeout(() => msg = null, 4000);
+    },
+    onError: (err: unknown) => {
       msg = `❌ ${(err instanceof Error ? err.message : String(err))}`;
-    } finally {
-      deleting = false;
       setTimeout(() => msg = null, 4000);
     }
+  }));
+
+  function deleteDomain() {
+    if (!confirm("确定删除自定义域名？删除后将自动移除 Angie 配置和 SSL 证书。")) return;
+    deleteMutation.mutate();
   }
 
   async function copyText(text: string) {
     try { await navigator.clipboard.writeText(text); } catch {}
   }
-
-  onMount(() => { fetchDomain(); });
 </script>
 
 <div class="h-full flex flex-col space-y-4">
@@ -127,9 +132,9 @@
               <button onclick={() => copyText(domain!.custom_hostname)} class="px-3 py-1.5 text-xs rounded-lg border hover:bg-muted/50 transition-colors flex items-center gap-1.5">
                 <Copy size={12} /> 复制
               </button>
-              <button onclick={deleteDomain} disabled={deleting}
+              <button onclick={deleteDomain} disabled={deleteMutation.isPending}
                 class="px-3 py-1.5 text-xs rounded-lg border border-destructive/30 text-destructive hover:bg-destructive/10 transition-colors flex items-center gap-1.5 disabled:opacity-50">
-                {#if deleting}<Loader2 size={12} class="animate-spin" />{:else}<Trash2 size={12} />{/if} 删除
+                {#if deleteMutation.isPending}<Loader2 size={12} class="animate-spin" />{:else}<Trash2 size={12} />{/if} 删除
               </button>
             </div>
           </div>
@@ -175,9 +180,9 @@
 
         <div class="flex justify-end gap-2">
           <button onclick={() => showAdd = false} class="px-4 py-2 text-xs rounded-lg border hover:bg-muted/50 transition-colors">取消</button>
-          <button onclick={addDomain} disabled={saving || !newDomain.trim()}
+          <button onclick={addDomain} disabled={addMutation.isPending || !newDomain.trim()}
             class="px-4 py-2 text-xs font-semibold rounded-lg bg-brand text-white hover:bg-brand/90 transition-colors disabled:opacity-50 flex items-center gap-2">
-            {#if saving}<Loader2 size={12} class="animate-spin" />{/if} 添加域名
+            {#if addMutation.isPending}<Loader2 size={12} class="animate-spin" />{/if} 添加域名
           </button>
         </div>
       </div>
