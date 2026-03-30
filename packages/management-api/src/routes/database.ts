@@ -14,9 +14,10 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
 
             try {
                 const dbName = `supa_${params.ref}`;
-                const skip = Number(query.skip || 0);
-                const limit = Number(query.limit || 50);
-                const search = query.query ? String(query.query) : "";
+                const limit = Number(query._limit || query.limit || 50);
+                const page = Number(query._page || 1);
+                const skip = Number(query.skip || (page - 1) * limit);
+                const search = query.q ? String(query.q) : (query.query ? String(query.query) : "");
                 
                 let whereClause = "WHERE table_schema = 'public' AND table_type = 'BASE TABLE'";
                 if (search) {
@@ -55,8 +56,13 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
             query: t.Object({
                 skip: t.Optional(t.String()),
                 limit: t.Optional(t.String()),
+                _page: t.Optional(t.String()),
+                _limit: t.Optional(t.String()),
+                _sort: t.Optional(t.String()),
+                _order: t.Optional(t.String()),
                 query: t.Optional(t.String()),
-            })
+                q: t.Optional(t.String()),
+            }, { additionalProperties: true })
         }
     )
     .get(
@@ -113,8 +119,9 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
 
             try {
                 const dbName = `supa_${params.ref}`;
-                const skip = Number(query.skip || 0);
-                const limit = Number(query.limit || 50);
+                const limit = Number(query._limit || query.limit || 50);
+                const page = Number(query._page || 1);
+                const skip = Number(query.skip || (page - 1) * limit);
 
                 // Sanitize schema and table to avoid injection
                 const regex = /^[a-zA-Z_0-9]+$/;
@@ -152,7 +159,12 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
             query: t.Object({
                 skip: t.Optional(t.String()),
                 limit: t.Optional(t.String()),
-            })
+                _page: t.Optional(t.String()),
+                _limit: t.Optional(t.String()),
+                _sort: t.Optional(t.String()),
+                _order: t.Optional(t.String()),
+                q: t.Optional(t.String()),
+            }, { additionalProperties: true })
         }
     )
     .post(

@@ -30,7 +30,8 @@ describe("Management API Integration Tests", () => {
 
     beforeAll(async () => {
         const routes = await registerAllRoutes();
-        app = baseApp.use(routes);
+        // @ts-expect-error TS2589: Elysia type inference depth limit in testing
+        app = baseApp.use(routes as unknown as typeof baseApp);
     });
 
 
