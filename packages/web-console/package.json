@@ -44,10 +44,9 @@
   },
   "dependencies": {
     "@svadmin/core": "^0.17.0",
-    "@svadmin/editor": "^0.1.0",
     "@svadmin/elysia": "^0.9.0",
     "@svadmin/sveltekit": "^0.8.0",
-    "@svadmin/ui": "^0.20.1",
+    "@svadmin/ui": "^0.20.2",
     "@tanstack/svelte-query": "^6.1.10",
     "highlight.js": "^11.11.1",
     "isomorphic-dompurify": "^3.7.1",
