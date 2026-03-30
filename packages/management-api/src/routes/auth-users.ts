@@ -19,9 +19,10 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
       const { config } = await import("../config");
       const apiUrl = project.api?.url || config.kongInternal;
 
-      // Pass along pagination
-      const skip = Number(query.skip || 0);
-      const limit = Number(query.limit || 50);
+      // Pass along pagination (svadmin uses _page / _limit or standard skip/limit)
+      const limit = Number(query._limit || query.limit || 50);
+      const page = Number(query._page || 1);
+      const skip = Number(query.skip || (page - 1) * limit);
       
       const res = await fetch(`${apiUrl}/auth/v1/admin/users`, {
         headers: {
@@ -53,7 +54,12 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
       query: t.Object({
         skip: t.Optional(t.String()),
         limit: t.Optional(t.String()),
-      })
+        _page: t.Optional(t.String()),
+        _limit: t.Optional(t.String()),
+        _sort: t.Optional(t.String()),
+        _order: t.Optional(t.String()),
+        q: t.Optional(t.String()),
+      }, { additionalProperties: true })
     }
   )
   .post(
