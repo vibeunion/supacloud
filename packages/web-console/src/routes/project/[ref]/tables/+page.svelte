@@ -17,7 +17,7 @@
       <AutoTable 
         resourceName={`v1/projects/${projectRef}/database/tables`} 
       >
-        {#snippet cellRenderer({ field, value, record })}
+        {#snippet defaultCellRenderer({ field, value, record })}
           {#if field.key === 'table_name'}
             <div class="flex items-center gap-2">
               <TableProperties size={14} class="text-brand" />
