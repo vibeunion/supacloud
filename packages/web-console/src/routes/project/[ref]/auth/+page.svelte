@@ -36,7 +36,7 @@
           </Button>
         {/snippet}
 
-        {#snippet cellRenderer({ field, value, record })}
+        {#snippet defaultCellRenderer({ field, value, record })}
           {#if field.key === 'email'}
             <div class="flex items-center gap-3">
               <div class="w-8 h-8 rounded-full bg-brand/10 text-brand flex items-center justify-center font-bold text-xs ring-1 ring-brand/20">
