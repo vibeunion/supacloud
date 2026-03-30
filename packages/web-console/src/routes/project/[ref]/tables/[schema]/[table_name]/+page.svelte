@@ -31,7 +31,7 @@
       <AutoTable 
         resourceName={`v1/projects/${projectRef}/database/tables/${schema}/${tableName}/rows`} 
       >
-        {#snippet cellRenderer({ field, value })}
+        {#snippet defaultCellRenderer({ field, value })}
            <div class="truncate max-w-[200px]" title={String(value)}>
              <span class="text-xs {typeof value === 'number' || typeof value === 'boolean' ? 'tabular-nums text-blue-500 font-mono' : 'text-foreground'}">
                {value === null ? 'null' : String(value)}
