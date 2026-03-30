@@ -22,6 +22,8 @@
     "@elysiajs/cors": "^1.4.1",
     "@elysiajs/swagger": "^1.3.1",
     "@modelcontextprotocol/sdk": "^1.28.0",
+    "@svadmin/core": "^0.19.2",
+    "@svadmin/elysia": "^0.10.0",
     "elysia": "^1.4.25",
     "nanoid": "^5.1.6",
     "zod": "^3.24.4"
