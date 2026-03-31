@@ -146,7 +146,7 @@ export const config = {
   // ── Internal Service URLs ────────────────────────────────────────
   imaginaryUrl: process.env.IMAGINARY_URL || managementEnv.IMAGINARY_URL || "http://127.0.0.1:9010",
   kongAdminUrl: process.env.KONG_ADMIN_URL || managementEnv.KONG_ADMIN_URL || "http://localhost:8001",
-  kongYml: process.env.KONG_YML || managementEnv.KONG_YML || "/root/pigsty/app/supabase/volumes/api/kong.yml",
+  kongYml: process.env.KONG_YML || managementEnv.KONG_YML || "/opt/supabase/volumes/api/kong.yml",
   victoriaMetricsUrl: process.env.VICTORIAMETRICS_URL || managementEnv.VICTORIAMETRICS_URL || "http://127.0.0.1:8428",
   realtimeAdminUrl: process.env.REALTIME_ADMIN_URL || managementEnv.REALTIME_ADMIN_URL || "http://127.0.0.1:4000",
   realtimeApiSecret: process.env.REALTIME_API_SECRET || managementEnv.REALTIME_API_SECRET || "",

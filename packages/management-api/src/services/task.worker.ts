@@ -108,13 +108,6 @@ export class TaskWorker {
                         return false;
                     }
                     const res = await storageService.createBucket(project_ref);
-                    if (res.success && res.accessKey && res.secretKey) {
-                        await projectRepository.updateConfig(project_ref, {
-                            ...project.config,
-                            s3_access_key: res.accessKey,
-                            s3_secret_key: res.secretKey,
-                        });
-                    }
                     return res.success;
                 }
 

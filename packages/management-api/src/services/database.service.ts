@@ -175,7 +175,7 @@ export class DatabaseService {
             CREATE ROLE ${authenticatedRole} NOLOGIN;
           END IF;
           IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = '${serviceRole}') THEN
-            CREATE ROLE ${serviceRole} NOLOGIN;
+            CREATE ROLE ${serviceRole} NOLOGIN BYPASSRLS;
           END IF;
         END
         $$;
@@ -221,6 +221,11 @@ export class DatabaseService {
         GRANT ALL ON SCHEMA auth TO supabase_auth_admin;
         ALTER DEFAULT PRIVILEGES IN SCHEMA auth GRANT ALL ON TABLES TO supabase_auth_admin;
         ALTER DEFAULT PRIVILEGES IN SCHEMA auth GRANT ALL ON SEQUENCES TO supabase_auth_admin;
+
+        -- Ensure service_role has access to all tables created by postgres
+        ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT ALL ON TABLES TO postgres, anon, authenticated, service_role;
+        ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT ALL ON SEQUENCES TO postgres, anon, authenticated, service_role;
+        ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT ALL ON FUNCTIONS TO postgres, anon, authenticated, service_role;
       `);
     });
   }

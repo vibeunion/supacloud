@@ -1,5 +1,5 @@
 import { Elysia, t, status } from "elysia";
-import { StorageService } from '../services/storage.service';
+import { StorageService, migrationJobs } from '../services/storage.service';
 import { logger } from "../utils/logger";
 import { config } from "../config";
 
@@ -71,6 +71,39 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
             200: t.Any(),
             400: ErrorResponse,
         },
+    })
+    .get('/migrate/:jobId', async ({ params, set }) => {
+        const jobId = params.jobId;
+        const job = migrationJobs.get(jobId);
+        
+        if (!job) {
+            set.status = 404;
+            return { error: 'Migration job not found' };
+        }
+        
+        return {
+            id: job.id,
+            status: job.status,
+            progress: job.progress,
+            logs: job.logs,
+            createdAt: job.createdAt,
+            updatedAt: job.updatedAt
+        };
+    }, {
+        params: t.Object({
+            jobId: t.String()
+        }),
+        response: {
+            200: t.Object({
+                id: t.String(),
+                status: t.String(),
+                progress: t.Number(),
+                logs: t.Array(t.String()),
+                createdAt: t.Any(),
+                updatedAt: t.Any()
+            }),
+            404: ErrorResponse
+        }
     })
 
     // ── Supabase-compatible Image Transform (via imaginary) ──────
