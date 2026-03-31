@@ -1,8 +1,11 @@
 import type { Subprocess } from "bun";
 import { logger } from "../utils/logger";
+import path from "node:path";
 
 /**
- * Manages the Edge Runtime as a separate Bun process.
+ * Manages the Edge Function Runner as a child Bun process.
+ * The runner uses deno-compat shim to execute user-authored Deno-style functions.
+ *
  * Handles lifecycle: start, health check, crash recovery with exponential backoff.
  */
 export class EdgeRuntimeManager {
@@ -13,18 +16,18 @@ export class EdgeRuntimeManager {
 
   constructor(
     private config: {
-      scriptPath: string;
       port: number;
-      poolSize: number;
     },
   ) {}
 
   async start() {
-    this.proc = Bun.spawn(["bun", "run", this.config.scriptPath], {
+    // Determine runner path (cwd is packages/management-api)
+    const runnerPath = path.resolve(process.cwd(), "../edge-runtime/server.ts");
+
+    this.proc = Bun.spawn(["bun", "run", runnerPath], {
       env: {
         ...process.env,
         PORT: String(this.config.port),
-        WORKER_POOL_SIZE: String(this.config.poolSize),
       },
       stdout: "inherit",
       stderr: "inherit",
@@ -61,9 +64,8 @@ export class EdgeRuntimeManager {
           `http://127.0.0.1:${this.config.port}/health`,
         );
         if (res.ok) return;
-      } catch (err: unknown) {
+      } catch {
         // Not ready yet
-        logger.debug("[EdgeRuntime] Startup busy loop: " + (err instanceof Error ? err.message : String(err)));
       }
       await Bun.sleep(100);
     }
@@ -75,3 +77,5 @@ export class EdgeRuntimeManager {
     this.proc?.kill();
   }
 }
+
+export const edgeRuntimeManager = new EdgeRuntimeManager({ port: 9000 });
