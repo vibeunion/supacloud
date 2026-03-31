@@ -205,12 +205,6 @@ export class GatewayService {
                 - X-Api-Version
               credentials: true
               max_age: 3600
-          - name: rate-limiting
-            config:
-              second: 10
-              minute: 100
-              hour: 1000
-              policy: local
   - name: svc-gotrue-${projectRef}
     url: http://${hostIp}:${gotruePort}
     connect_timeout: 5000
@@ -290,7 +284,7 @@ export class GatewayService {
         strip_path: true
         preserve_host: true
         paths:
-          - /storage/v1
+          - /storage/v1/
         headers:
           x-project-ref:
             - ${projectRef}
@@ -311,7 +305,7 @@ export class GatewayService {
                 - Authorization
                 - Content-Type
                 - X-Api-Version
-               credentials: true
+              credentials: true
               max_age: 3600
   - name: svc-realtime-${projectRef}
     url: http://${hostIp}:4000
