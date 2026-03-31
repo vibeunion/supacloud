@@ -28,17 +28,18 @@
 
   <div class="flex-1 rounded-xl bg-background overflow-hidden relative min-h-[600px] border shadow-sm">
     {#key `${projectRef}-${schema}-${tableName}`}
+      {#snippet customDefaultRenderer({ value }: { value: any })}
+         <div class="truncate max-w-[200px]" title={String(value)}>
+           <span class="text-xs {typeof value === 'number' || typeof value === 'boolean' ? 'tabular-nums text-blue-500 font-mono' : 'text-foreground'}">
+             {value === null ? 'null' : String(value)}
+           </span>
+         </div>
+      {/snippet}
+
       <AutoTable 
         resourceName={`v1/projects/${projectRef}/database/tables/${schema}/${tableName}/rows`} 
-      >
-        {#snippet defaultCellRenderer({ field, value })}
-           <div class="truncate max-w-[200px]" title={String(value)}>
-             <span class="text-xs {typeof value === 'number' || typeof value === 'boolean' ? 'tabular-nums text-blue-500 font-mono' : 'text-foreground'}">
-               {value === null ? 'null' : String(value)}
-             </span>
-           </div>
-        {/snippet}
-      </AutoTable>
+        defaultCellRenderer={customDefaultRenderer}
+      />
     {/key}
   </div>
 </div>
