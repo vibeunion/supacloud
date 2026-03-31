@@ -1,11 +1,12 @@
 import { parentPort } from "worker_threads";
 import "./port-guard";
 import "./url-import-plugin";
-import "./deno-compat";
+import { getCapturedServeHandler, clearCapturedServeHandler } from "./deno-compat";
 import { autoInstallDeps } from "./auto-deps";
 
 interface CachedModule {
-  mod: { default: unknown };
+  mod: any;
+  serveHandler: Function | null;
   lastUsed: number;
 }
 
@@ -41,8 +42,10 @@ parentPort?.on("message", async (msg) => {
     // Load module (LRU cache)
     let cached = moduleCache.get(functionId);
     if (!cached) {
+      clearCapturedServeHandler();
       const mod = await loadModule(functionPath);
-      cached = { mod, lastUsed: Date.now() };
+      const serveHandler = getCapturedServeHandler();
+      cached = { mod, serveHandler, lastUsed: Date.now() };
       moduleCache.set(functionId, cached);
       if (moduleCache.size > MAX_CACHED) {
         let oldest = { key: "", time: Infinity };
@@ -60,7 +63,7 @@ parentPort?.on("message", async (msg) => {
     const request = new Request(url, init);
 
     // Call function (supports bare handler, Elysia app, or Hono/other)
-    const handler = cached.mod.default;
+    const handler = cached.serveHandler || cached.mod.default;
     let response: Response;
     if (typeof handler === "function") {
       response = await (handler as (req: Request) => Promise<Response>)(
