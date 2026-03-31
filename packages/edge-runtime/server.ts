@@ -2,9 +2,11 @@ import "./url-import-plugin";
 import { Elysia } from "elysia";
 import { WorkerPool } from "./worker-pool";
 import { loadTenantEnv } from "./tenant-env";
+import path from "path";
 
 const PORT = Number(process.env.PORT) || 9000;
 const POOL_SIZE = Number(process.env.WORKER_POOL_SIZE) || 4;
+const FUNCTIONS_DIR = process.env.EDGE_FUNCTIONS_DIR || "./functions";
 
 const pool = new WorkerPool({
   size: POOL_SIZE,
@@ -18,7 +20,7 @@ async function dispatchFunction(
   setHeaders: Record<string, string>,
 ) {
   const functionId = `${projectRef}_${functionName}`;
-  const functionPath = `./functions/${projectRef}/${functionName}.ts`;
+  const functionPath = path.resolve(FUNCTIONS_DIR, projectRef, `${functionName}.ts`);
 
   try {
     return await pool.dispatch({

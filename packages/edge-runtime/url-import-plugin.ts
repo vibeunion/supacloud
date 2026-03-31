@@ -58,7 +58,13 @@ plugin({
       const cleaned = args.path
         .replace("https://esm.sh/", "")
         .replace(/^v\d+\//, ""); // strip version prefix v135/
-      const pkg = cleaned.split("@")[0]; // strip version
+      let pkg = cleaned;
+      if (pkg.startsWith("@")) {
+        const parts = pkg.split("@");
+        pkg = "@" + parts[1];
+      } else {
+        pkg = pkg.split("@")[0];
+      }
       return { path: pkg, external: true }; // resolve via node_modules
     });
 
