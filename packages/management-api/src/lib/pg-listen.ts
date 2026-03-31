@@ -14,6 +14,7 @@
  */
 
 import { logger } from "../utils/logger";
+import { pbkdf2Sync, createHmac, createHash, randomBytes } from "crypto";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -92,6 +93,56 @@ export function computeMd5Password(
   hasher2.update(innerHex);
   hasher2.update(salt);
   return "md5" + hasher2.digest("hex");
+}
+
+/** SCRAM-SHA-256 Logic */
+export function handleScramSha256(password: string, serverFirstMsg: string, scramClientFirstBare: string): string {
+  const parts = serverFirstMsg.split(',');
+  let r = '', sBase64 = '', iStr = '';
+  for (const p of parts) {
+      if (p.startsWith('r=')) r = p.substring(2);
+      if (p.startsWith('s=')) sBase64 = p.substring(2);
+      if (p.startsWith('i=')) iStr = p.substring(2);
+  }
+  const iterations = parseInt(iStr, 10);
+  const salt = Buffer.from(sBase64, 'base64');
+
+  const saltedPassword = pbkdf2Sync(password, salt, iterations, 32, 'sha256');
+  const clientKey = createHmac('sha256', saltedPassword).update("Client Key").digest();
+  const storedKey = createHash('sha256').update(clientKey).digest();
+
+  const authMessage = `${scramClientFirstBare},${serverFirstMsg},c=biws,r=${r}`;
+  const clientSignature = createHmac('sha256', storedKey).update(authMessage).digest();
+  
+  const clientProof = Buffer.alloc(32);
+  for (let i = 0; i < 32; i++) clientProof[i] = clientKey[i] ^ clientSignature[i];
+
+  return `c=biws,r=${r},p=${clientProof.toString('base64')}`;
+}
+
+export function buildSASLInitialResponse(mechanism: string, clientFirstMessageBare: string): Buffer {
+  const mechanismBytes = Buffer.from(mechanism + "\0", "utf8");
+  const clientFirstMsg = `n,,${clientFirstMessageBare}`;
+  const clientFirstMsgBytes = Buffer.from(clientFirstMsg, "utf8");
+
+  const len = 4 + mechanismBytes.length + 4 + clientFirstMsgBytes.length;
+  const buf = Buffer.alloc(1 + len);
+  buf[0] = 0x70; // 'p'
+  buf.writeInt32BE(len, 1);
+  mechanismBytes.copy(buf, 5);
+  buf.writeInt32BE(clientFirstMsgBytes.length, 5 + mechanismBytes.length);
+  clientFirstMsgBytes.copy(buf, 5 + mechanismBytes.length + 4);
+  return buf;
+}
+
+export function buildSASLResponse(clientFinalMessage: string): Buffer {
+  const msgBytes = Buffer.from(clientFinalMessage, "utf8");
+  const len = 4 + msgBytes.length;
+  const buf = Buffer.alloc(1 + len);
+  buf[0] = 0x70; // 'p'
+  buf.writeInt32BE(len, 1);
+  msgBytes.copy(buf, 5);
+  return buf;
 }
 
 /**
@@ -205,6 +256,8 @@ export function createPgListener(opts: PgListenerOptions): PgListenerHandle {
 
     let buffer: Uint8Array = new Uint8Array(0);
     let authenticated = false;
+    let scramClientNonce = "";
+    let scramClientFirstBare = "";
 
     logger.info(
       `[PgListener] Connecting to ${connInfo.hostname}:${connInfo.port}/${connInfo.database}...`
@@ -259,9 +312,22 @@ export function createPgListener(opts: PgListenerOptions): PgListenerHandle {
                     salt
                   );
                   sock.write(buildPasswordMessage(hash));
+                } else if (authType === 10) {
+                  // AuthenticationSASL
+                  scramClientNonce = randomBytes(18).toString('base64');
+                  scramClientFirstBare = `n=,r=${scramClientNonce}`;
+                  sock.write(buildSASLInitialResponse("SCRAM-SHA-256", scramClientFirstBare));
+                } else if (authType === 11) {
+                  // AuthenticationSASLContinue
+                  const serverFirstMsg = msg.body.subarray(4).toString("utf8");
+                  const payload = handleScramSha256(connInfo.password, serverFirstMsg, scramClientFirstBare);
+                  sock.write(buildSASLResponse(payload));
+                } else if (authType === 12) {
+                  // AuthenticationSASLFinal
+                  // We can just ignore this message, AuthOk (0) will follow immediately.
                 } else {
                   logger.error(
-                    `[PgListener] Unsupported auth type: ${authType} (e.g. SCRAM-SHA-256). Will NOT retry — configure pg_hba.conf to use md5 or trust for this connection.`
+                    `[PgListener] Unsupported auth type: ${authType}. Connection failed.`
                   );
                   fatalError = true;
                   sock.end();

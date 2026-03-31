@@ -1,6 +1,7 @@
 import { config } from "../config";
 import { shellService } from './shell.service';
 import { logger } from "../utils/logger";
+import { getStorageDriver } from "./storage.adapter";
 
 export interface StorageStatus {
   status: 'mounted' | 'unmounted';
@@ -9,6 +10,17 @@ export interface StorageStatus {
   avail?: string;
   use_percent?: string;
 }
+
+export type MigrationJob = {
+  id: string;
+  status: 'running' | 'completed' | 'failed';
+  progress: number;
+  logs: string[];
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export const migrationJobs = new Map<string, MigrationJob>();
 
 export class StorageService {
   /**
@@ -28,159 +40,122 @@ export class StorageService {
   }
 
   /**
-   * Start migration task (JuiceFS -> S3)
+   * Start migration task (JuiceFS -> S3) with async live progress tracking.
    */
-  static async startMigration(s3Url: string, credentials: { access_key: string, secret_key: string, endpoint: string }): Promise<{ message: string }> {
-    const options = JSON.stringify(credentials);
-    shellService.execute('storage_manager.sh', ['migrate_to_s3', s3Url, options]).catch(err => {
-      logger.error('Async migration task failed:', { error: err instanceof Error ? err.message : String(err) });
-    });
-    return { message: 'Storage migration background task started, please monitor juicefs sync progress in background logs' };
+  static async startMigration(s3Url: string, credentials: { access_key: string, secret_key: string, endpoint: string }): Promise<{ jobId: string }> {
+    const jobId = crypto.randomUUID();
+    const job: MigrationJob = {
+      id: jobId,
+      status: 'running',
+      progress: 0,
+      logs: [],
+      createdAt: new Date(),
+      updatedAt: new Date()
+    };
+    migrationJobs.set(jobId, job);
+    
+    // Asynchronously begin the spawn operation
+    (async () => {
+      try {
+        const options = JSON.stringify(credentials);
+        const scriptPath = config.scriptsPath ? `${config.scriptsPath}/storage_manager.sh` : './scripts/lib/storage_manager.sh';
+
+        job.logs.push(`[${new Date().toISOString()}] Starting juicefs sync to ${s3Url}...`);
+        
+        const proc = Bun.spawn([scriptPath, 'migrate_to_s3', s3Url, options], {
+          stdout: 'pipe',
+          stderr: 'pipe'
+        });
+
+        // Function to process a single pipe stream, extracting progress strings
+        const processStream = async (stream: ReadableStream<Uint8Array>) => {
+           const reader = stream.getReader();
+           const decoder = new TextDecoder();
+           while (true) {
+             const { done, value } = await reader.read();
+             if (done) break;
+             
+             const text = decoder.decode(value, { stream: true });
+             const lines = text.split('\n');
+             for (const line of lines) {
+               if (!line.trim()) continue;
+               
+               // Look for "100.00%" or similar
+               const match = line.match(/(\d{1,3}\.\d+)%/);
+               if (match) {
+                 job.progress = parseFloat(match[1]);
+                 job.updatedAt = new Date();
+               }
+
+               // Buffer logs strictly
+               job.logs.push(line);
+               if (job.logs.length > 50) job.logs.shift(); // Keep latest 50
+             }
+           }
+        };
+
+        await Promise.allSettled([
+           processStream(proc.stdout),
+           processStream(proc.stderr)
+        ]);
+        
+        const exitCode = await proc.exited;
+
+        if (exitCode === 0) {
+           job.progress = 100;
+           job.status = 'completed';
+           job.logs.push(`[${new Date().toISOString()}] Sync successfully completed.`);
+        } else {
+           job.status = 'failed';
+           job.logs.push(`[${new Date().toISOString()}] Exited with failing bounds (code: ${exitCode}).`);
+           logger.error(`Migration job ${jobId} failed with exit code ${exitCode}`);
+        }
+      } catch (err: unknown) {
+        job.status = 'failed';
+        job.logs.push(`[SYSTEM_ERROR] ${err instanceof Error ? err.message : String(err)}`);
+        logger.error(`Async migration task ${jobId} threw exception.`, err as Error);
+      } finally {
+        job.updatedAt = new Date();
+      }
+    })();
+    
+    return { jobId };
   }
 
   /**
-   * Legacy compatibility: Create S3 Bucket (Garage/MinIO/RustFS)
+   * Tenant Initialization hooks
    */
-  static async createBucket(projectRef: string): Promise<{ success: boolean; accessKey?: string; secretKey?: string; error?: string }> {
-    const { success, output, error } = await shellService.execute('s3_manager.sh', ['create', projectRef]);
-    if (!success) return { success: false, error };
-
-    const accessKey = output.match(/ACCESS_KEY=([^\n]+)/)?.[1];
-    const secretKey = output.match(/SECRET_KEY=([^\n]+)/)?.[1];
-    return { success: true, accessKey, secretKey };
+  static async createBucket(projectRef: string): Promise<{ success: boolean; error?: string }> {
+    const success = await getStorageDriver().createBucket(projectRef, "");
+    return { success };
   }
 
-  /**
-   * Legacy compatibility: Delete S3 Bucket
-   */
   static async deleteBucket(projectRef: string): Promise<{ success: boolean; error?: string }> {
-    const { success, error } = await shellService.execute('s3_manager.sh', ['delete', projectRef]);
-    return { success, error };
+    const success = await getStorageDriver().deleteBucket(projectRef, "");
+    return { success };
   }
 
   /**
-   * Get S3 credentials
-   */
-  static async getCredentials(projectRef: string): Promise<{ success: boolean; accessKey?: string; secretKey?: string; endpoint?: string; bucket?: string; error?: string }> {
-    const { success, output, error } = await shellService.execute('s3_manager.sh', ['credentials', projectRef]);
-    if (!success) return { success: false, error };
-
-    const accessKey = output.match(/ACCESS_KEY=([^\n]+)/)?.[1]?.trim();
-    const secretKey = output.match(/SECRET_KEY=([^\n]+)/)?.[1]?.trim();
-    const endpoint = output.match(/ENDPOINT=([^\n]+)/)?.[1]?.trim() || config.s3Endpoint;
-    const bucket = output.match(/BUCKET=([^\n]+)/)?.[1]?.trim() || `supa-${projectRef}`;
-    return { success: true, accessKey, secretKey, endpoint, bucket };
-  }
-
-  /**
-   * List Buckets (Real API)
-   * In SupaCloud's S3 model, each project gets one real S3 bucket 'supa-<ref>'
+   * Return the logical root bucket for this project setup
    */
   static async listBuckets(projectRef: string): Promise<Record<string, unknown>[]> {
-    const creds = await this.getCredentials(projectRef);
-    if (!creds.success || !creds.bucket) {
-      return [{ id: 'default', name: 'default', public: true, size: '0 B' }];
-    }
-    // Return the logical root bucket for this project
-    return [{ id: creds.bucket, name: creds.bucket, public: false, size: '-' }];
+    return [{ id: `supa-${projectRef}`, name: `supa-${projectRef}`, public: false, size: '-' }];
   }
 
-  /**
-   * List Files (Direct S3 API implementation)
-   */
   static async listFiles(projectRef: string, bucketName: string): Promise<Record<string, unknown>[]> {
-    const creds = await this.getCredentials(projectRef);
-    if (!creds.success || !creds.accessKey || !creds.secretKey || !creds.endpoint || !creds.bucket) {
-      logger.error('Failed to get credentials for storage');
-      return [];
-    }
-
-    try {
-      const { S3Client } = await import('bun');
-      let baseUrl = creds.endpoint.endsWith('/') ? creds.endpoint.slice(0, -1) : creds.endpoint;
-
-      const s3 = new S3Client({
-        accessKeyId: creds.accessKey,
-        secretAccessKey: creds.secretKey,
-        endpoint: baseUrl,
-        region: 'us-east-1',
-        bucket: creds.bucket,
-      });
-
-      const res = await s3.list();
-      
-      const s3Contents = res.contents || [];
-      return s3Contents.map((file: { key: string; lastModified?: string; size?: number }) => ({
-        id: file.key,
-        name: file.key,
-        updated: file.lastModified,
-        size: Math.round((file.size ?? 0) / 1024) + ' KB',
-        type: file.key.includes('.') ? file.key.split('.').pop() : 'unknown'
-      }));
-    } catch (err: unknown) {
-      logger.error('Exception during native S3 listing:', { error: err instanceof Error ? err.message : String(err) });
-      return [];
-    }
+    return await getStorageDriver().listFiles(projectRef, bucketName);
   }
 
-  /**
-   * Upload File to S3
-   */
   static async uploadFile(projectRef: string, bucketName: string, fileName: string, fileData: Blob | Buffer | Uint8Array | ArrayBuffer, contentType: string): Promise<boolean> {
-    const creds = await this.getCredentials(projectRef);
-    if (!creds.success || !creds.accessKey || !creds.secretKey || !creds.endpoint || !creds.bucket) return false;
-
-    try {
-      const { S3Client } = await import('bun');
-      let baseUrl = creds.endpoint.endsWith('/') ? creds.endpoint.slice(0, -1) : creds.endpoint;
-
-      const s3 = new S3Client({
-        accessKeyId: creds.accessKey,
-        secretAccessKey: creds.secretKey,
-        endpoint: baseUrl,
-        region: 'us-east-1',
-        bucket: creds.bucket,
-      });
-
-      const cleanFileName = fileName.replace(/^\/+/, '');
-      const bytesWritten = await s3.file(cleanFileName).write(fileData, {
-        type: contentType
-      });
-      
-      return bytesWritten > 0;
-    } catch (err: unknown) {
-      logger.error('Exception during native S3 upload:', { error: err instanceof Error ? err.message : String(err) });
-      return false;
-    }
+    return await getStorageDriver().uploadFile(projectRef, bucketName, fileName, fileData, contentType);
   }
 
-  /**
-   * Delete File from S3
-   */
   static async deleteFile(projectRef: string, bucketName: string, fileName: string): Promise<boolean> {
-    const creds = await this.getCredentials(projectRef);
-    if (!creds.success || !creds.accessKey || !creds.secretKey || !creds.endpoint || !creds.bucket) return false;
+    return await getStorageDriver().deleteFile(projectRef, bucketName, fileName);
+  }
 
-    try {
-      const { S3Client } = await import('bun');
-      let baseUrl = creds.endpoint.endsWith('/') ? creds.endpoint.slice(0, -1) : creds.endpoint;
-
-      const s3 = new S3Client({
-        accessKeyId: creds.accessKey,
-        secretAccessKey: creds.secretKey,
-        endpoint: baseUrl,
-        region: 'us-east-1',
-        bucket: creds.bucket,
-      });
-
-      const cleanFileName = fileName.replace(/^\/+/, '');
-      await s3.file(cleanFileName).delete();
-      
-      return true;
-    } catch (err: unknown) {
-      logger.error('Exception during native S3 delete:', { error: err instanceof Error ? err.message : String(err) });
-      return false;
-    }
+  static async getDownloadResponse(projectRef: string, bucketName: string, fileName: string): Promise<Response | null> {
+    return await getStorageDriver().getDownloadResponse(projectRef, bucketName, fileName);
   }
 }
 

@@ -19,7 +19,7 @@ try {
 import { config } from "./config";
 import { checkAuth } from "./middleware/auth";
 import { closeDb } from "./db";
-import { authRoutes, deployRoutes } from "./routes";
+import { authRoutes, deployRoutes, storageCompatRoutes } from "./routes";
 
 const app = new Elysia({ strictPath: false })
   // Swagger docs
@@ -98,6 +98,7 @@ const app = new Elysia({ strictPath: false })
   })
 
   // Main API Routes
+  .use(storageCompatRoutes)
   .use(await registerAllRoutes())
 
   // Dashboard & SPA Assets (catch-all for everything else)
@@ -236,7 +237,7 @@ export async function registerAllRoutes() {
   const {
     projectRoutes, projectSecretsRoutes, projectFunctionsRoutes, organizationRoutes, userRoutes, backupRoutes,
     monitorRoutes, maintenanceRoutes, extensionRoutes, systemExtensionRoutes, securityRoutes,
-    storageRoutes, storageCompatRoutes, scalingRoutes, taskRoutes, databaseRoutes, authRoutes,
+    storageRoutes, scalingRoutes, taskRoutes, databaseRoutes, authRoutes,
     wechatAuthRoutes, chinaAuthRoutes, userManagementRoutes,
     frontendRoutes, webhookRoutes, deployRoutes,
     chatRoutes, platformSettingsRoutes, projectLogsRoutes
@@ -263,7 +264,6 @@ export async function registerAllRoutes() {
     .use(systemExtensionRoutes)
     .use(securityRoutes)
     .use(storageRoutes)
-    .use(storageCompatRoutes)
     .use(scalingRoutes)
     .use(taskRoutes)
     .use(databaseRoutes)
