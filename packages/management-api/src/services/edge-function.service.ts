@@ -4,8 +4,11 @@ import path from "path";
 import fs from "fs/promises";
 
 /**
- * Edge Function file management — replaces the old Deno-based function_manager.sh
- * Manages function source files on disk for the Bun Edge Runtime.
+ * Edge Function file management — handles function source files on disk.
+ * Supports both Deno-style and Bun-native user code.
+ *
+ * When deploying, source is stored as-is (original Deno code).
+ * Transformation to Bun-compatible code happens at runtime in the edge-function-runner.
  */
 
 const FUNCTIONS_ROOT = config.edgeFunctionsDir;
@@ -18,13 +21,53 @@ function getFuncPath(ref: string, slug: string): string {
   return path.join(getFuncDir(ref), `${slug}.ts`);
 }
 
+/**
+ * Validate that function code contains a serve handler.
+ * Accepts both `Deno.serve(...)` and `serve(...)` patterns.
+ */
+function validateFunctionCode(code: string): { valid: boolean; error?: string } {
+  if (!code || code.trim().length === 0) {
+    return { valid: false, error: "Function code is empty" };
+  }
+
+  const hasHandler =
+    code.includes("Deno.serve") ||
+    code.includes("serve(") ||
+    code.includes("export default");
+
+  if (!hasHandler) {
+    return {
+      valid: false,
+      error: "Function must contain a Deno.serve() handler, a serve() call, or a default export",
+    };
+  }
+
+  return { valid: true };
+}
+
 export const edgeFunctionService = {
   /** Deploy (create/update) a function */
   async deploy(ref: string, slug: string, code: string): Promise<boolean> {
     try {
+      const validation = validateFunctionCode(code);
+      if (!validation.valid) {
+        logger.error(`[EdgeFunction] Validation failed: ${validation.error}`, { ref, slug });
+        return false;
+      }
+
       const dir = getFuncDir(ref);
       await fs.mkdir(dir, { recursive: true });
       await Bun.write(getFuncPath(ref, slug), code);
+
+      // Also clear the transform cache so the runner picks up the new version
+      const cacheDir = path.join(FUNCTIONS_ROOT, ".cache", ref);
+      const cachePath = path.join(cacheDir, `${slug}.ts`);
+      try {
+        await fs.unlink(cachePath);
+      } catch {
+        // Cache file may not exist yet, ignore
+      }
+
       logger.info(`[EdgeFunction] Deployed ${slug} for ${ref}`);
       return true;
     } catch (err) {
@@ -65,6 +108,15 @@ export const edgeFunctionService = {
   async remove(ref: string, slug: string): Promise<boolean> {
     try {
       await fs.unlink(getFuncPath(ref, slug));
+
+      // Also clean cache
+      const cachePath = path.join(FUNCTIONS_ROOT, ".cache", ref, `${slug}.ts`);
+      try {
+        await fs.unlink(cachePath);
+      } catch {
+        // Ignore
+      }
+
       logger.info(`[EdgeFunction] Deleted ${slug} for ${ref}`);
       return true;
     } catch (err: unknown) {
