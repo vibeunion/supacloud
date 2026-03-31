@@ -1,5 +1,8 @@
-// Deno API compatibility shim — lets Deno-style code run on Bun
 import { stat, readdir, mkdir, rm } from "fs/promises";
+
+let capturedServeHandler: Function | null = null;
+export function getCapturedServeHandler() { return capturedServeHandler; }
+export function clearCapturedServeHandler() { capturedServeHandler = null; }
 
 (globalThis as Record<string, unknown>).Deno = {
   // Environment variables
@@ -70,8 +73,9 @@ import { stat, readdir, mkdir, rm } from "fs/promises";
   connect: () => {
     throw new Error("Deno.connect() not supported, use fetch/Bun.connect");
   },
-  serve: () => {
-    throw new Error("Deno.serve() not supported, use Elysia");
+  serve: (handlerOrOpts: any, maybeHandler?: any) => {
+    capturedServeHandler = typeof handlerOrOpts === "function" ? handlerOrOpts : maybeHandler;
+    return { finished: new Promise(() => {}), shutdown: async () => {}, ref: () => {}, unref: () => {} };
   },
 
   // Utility

@@ -484,6 +484,9 @@ async function bootstrap() {
     const { taskWorker } = await import("./services/task.worker");
     taskWorker.start();
 
+    const { edgeRuntimeManager } = await import("./plugins/edge-runtime-manager");
+    edgeRuntimeManager.start().catch((err: unknown) => logger.error("[EdgeRuntime] Failed to start", { error: err instanceof Error ? err.message : String(err) }));
+
     // Auto-detect and stop orphan services for deleted projects
     cleanupOrphanServices().catch(err =>
       logger.warn("[Bootstrap] Orphan service cleanup failed (non-fatal):", err)
@@ -511,6 +514,8 @@ if (import.meta.main) {
     try {
       const { taskWorker } = await import("./services/task.worker");
       taskWorker.stop();
+      const { edgeRuntimeManager } = await import("./plugins/edge-runtime-manager");
+      edgeRuntimeManager.stop();
     } catch (e: unknown) { logger.debug("[index] suppressed error", { error: e instanceof Error ? e.message : String(e) }); }
 
     try {
