@@ -28,6 +28,7 @@
  */
 import { Elysia, t, status } from "elysia";
 import { StorageService } from "../services/storage.service";
+import { StorageRLS } from "../services/storage-rls";
 import { logger } from "../utils/logger";
 import { config } from "../config";
 
@@ -120,7 +121,7 @@ setInterval(() => {
     }
 }, 10 * 60 * 1000);
 
-export const storageCompatRoutes = new Elysia({ prefix: "/storage/v1/s" })
+export const storageCompatRoutes = new Elysia({ prefix: "" })
 
     // ════════════════════════════════════════════════════════
     // BUCKET Operations
@@ -189,6 +190,13 @@ export const storageCompatRoutes = new Elysia({ prefix: "/storage/v1/s" })
 
         try {
             const body = await request.arrayBuffer();
+            
+            // RLS Evaluation
+            const auth = headers['authorization'];
+            const metadata = { mimetype: contentType, size: body.byteLength };
+            const permitted = await StorageRLS.authorizeAction(ref, auth, 'upload', params.bucket, filePath, metadata);
+            if (!permitted) return status(403, { statusCode: '403', error: 'Forbidden', message: 'Row Level Security violation or bucket missing. Access Denied.' });
+
             const success = await StorageService.uploadFile(ref, bucket, key, Buffer.from(body), contentType);
 
             if (!success) return status(500, { statusCode: '500', error: 'Internal', message: 'Failed to upload file' });
@@ -214,6 +222,13 @@ export const storageCompatRoutes = new Elysia({ prefix: "/storage/v1/s" })
 
         try {
             const body = await request.arrayBuffer();
+            
+            // RLS Evaluation
+            const auth = headers['authorization'];
+            const metadata = { mimetype: contentType, size: body.byteLength };
+            const permitted = await StorageRLS.authorizeAction(ref, auth, 'upload', params.bucket, filePath, metadata); // Upsert requires same RLS as upload.
+            if (!permitted) return status(403, { statusCode: '403', error: 'Forbidden', message: 'Row Level Security violation or bucket missing. Access Denied.' });
+
             const success = await StorageService.uploadFile(ref, bucket, key, Buffer.from(body), contentType);
             if (!success) return status(500, { statusCode: '500', error: 'Internal', message: 'Upsert failed' });
             return { Key: `${params.bucket}/${filePath}` };
@@ -237,17 +252,21 @@ export const storageCompatRoutes = new Elysia({ prefix: "/storage/v1/s" })
             return proxyToImaginary(params.bucket, filePath, query, set as { headers: Record<string, string> });
         }
 
-        // Otherwise, direct proxy from S3
+        // Otherwise, run RLS and get stream
+        const auth = headers['authorization'];
+        const permitted = await StorageRLS.authorizeAction(ref, auth, 'download', params.bucket, filePath);
+        if (!permitted) return status(404, { statusCode: '404', error: 'Not Found', message: 'Object not found or access denied by RLS' });
+
         const { bucket, key } = resolveS3Path(ref, params.bucket, filePath);
         try {
-            const url = buildSourceUrl(bucket, key);
-            const res = await fetch(url);
-            if (!res.ok) return status(404, { statusCode: '404', error: 'Not Found', message: 'Object not found' });
+            const res = await StorageService.getDownloadResponse(ref, bucket, key);
+            if (!res) return status(404, { statusCode: '404', error: 'Not Found', message: 'Object not found internally' });
 
-            set.headers['Content-Type'] = res.headers.get('Content-Type') || 'application/octet-stream';
+            set.headers['Content-Type'] = res.headers?.get('Content-Type') || 'application/octet-stream';
             set.headers['Cache-Control'] = 'public, max-age=3600';
-            set.headers['Content-Length'] = res.headers.get('Content-Length') || '';
-            return new Response(res.body);
+            set.headers['Content-Length'] = res.headers?.get('Content-Length') || '';
+            const newRes = new Response(res.body);
+            return newRes;
         } catch (err: unknown) {
             return status(500, { statusCode: '500', error: 'Internal', message: 'Download failed' });
         }
@@ -264,15 +283,19 @@ export const storageCompatRoutes = new Elysia({ prefix: "/storage/v1/s" })
             return proxyToImaginary(params.bucket, filePath, query, set as { headers: Record<string, string> });
         }
 
+        const auth = headers['authorization'];
+        const permitted = await StorageRLS.authorizeAction(ref, auth, 'download', params.bucket, filePath);
+        if (!permitted) return status(404, { statusCode: '404', error: 'Not Found', message: 'Object not found or access denied by RLS' });
+
         const { bucket, key } = resolveS3Path(ref, params.bucket, filePath);
         try {
-            const url = buildSourceUrl(bucket, key);
-            const res = await fetch(url);
-            if (!res.ok) return status(404, { statusCode: '404', error: 'Not Found', message: 'Object not found' });
+            const res = await StorageService.getDownloadResponse(ref, bucket, key);
+            if (!res) return status(404, { statusCode: '404', error: 'Not Found', message: 'Object not found internally' });
 
-            set.headers['Content-Type'] = res.headers.get('Content-Type') || 'application/octet-stream';
+            set.headers['Content-Type'] = res.headers?.get('Content-Type') || 'application/octet-stream';
             set.headers['Cache-Control'] = 'private, max-age=3600';
-            return new Response(res.body);
+            const newRes = new Response(res.body);
+            return newRes;
         } catch (err: unknown) {
             return status(500, { statusCode: '500', error: 'Internal', message: 'Download failed' });
         }
@@ -297,7 +320,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "/storage/v1/s" })
         const token = generateSignedToken(ref, params.bucket, filePath, expiresAt);
 
         return {
-            signedURL: `/storage/v1/s/object/sign/${params.bucket}/${filePath}?token=${token}&t=${expiresAt}`,
+            signedURL: `/storage/v1/object/sign/${params.bucket}/${filePath}?token=${token}&t=${expiresAt}`,
         };
     })
 
@@ -316,7 +339,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "/storage/v1/s" })
             return {
                 error: null,
                 path: filePath,
-                signedURL: `/storage/v1/s/object/sign/${params.bucket}/${cleanPath}?token=${token}&t=${expiresAt}`,
+                signedURL: `/storage/v1/object/sign/${params.bucket}/${cleanPath}?token=${token}&t=${expiresAt}`,
             };
         });
     })
@@ -347,13 +370,13 @@ export const storageCompatRoutes = new Elysia({ prefix: "/storage/v1/s" })
         }
 
         try {
-            const url = buildSourceUrl(bucket, key);
-            const res = await fetch(url);
-            if (!res.ok) return status(404, { statusCode: '404', error: 'Not Found', message: 'Object not found' });
+            const res = await StorageService.getDownloadResponse(ref, bucket, key);
+            if (!res) return status(404, { statusCode: '404', error: 'Not Found', message: 'Object not found internally' });
 
-            set.headers['Content-Type'] = res.headers.get('Content-Type') || 'application/octet-stream';
+            set.headers['Content-Type'] = res.headers?.get('Content-Type') || 'application/octet-stream';
             set.headers['Cache-Control'] = 'private, no-store';
-            return new Response(res.body);
+            const newRes = new Response(res.body);
+            return newRes;
         } catch (err: unknown) {
             return status(500, { statusCode: '500', error: 'Internal', message: 'Download failed' });
         }
@@ -366,37 +389,29 @@ export const storageCompatRoutes = new Elysia({ prefix: "/storage/v1/s" })
 
     .post('/object/list/:bucket', async ({ params, headers, body }) => {
         const ref = getProjectRef(headers as Record<string, string | undefined>);
-        const files = await StorageService.listFiles(ref, `supa-${ref}`);
+        const auth = headers['authorization'];
 
         const prefix = (body as Record<string, unknown>)?.prefix as string || '';
         const limit  = (body as Record<string, unknown>)?.limit as number || 100;
         const offset = (body as Record<string, unknown>)?.offset as number || 0;
 
-        // Filter by prefix (logical bucket + folder path)
-        const bucketPrefix = `${params.bucket}/${prefix}`;
-        const filtered = files
-            .filter(f => {
-                const name = String(f.name || '');
-                return name.startsWith(bucketPrefix);
-            })
-            .map(f => {
-                const fullName = String(f.name || '');
-                const relativeName = fullName.replace(bucketPrefix, '');
-                return {
-                    name: relativeName,
-                    id: f.id,
-                    updated_at: f.updated || new Date().toISOString(),
-                    created_at: f.updated || new Date().toISOString(),
-                    last_accessed_at: f.updated || new Date().toISOString(),
-                    metadata: {
-                        size: f.size,
-                        mimetype: f.type || 'application/octet-stream',
-                    },
-                };
-            })
-            .slice(offset, offset + limit);
+        // Fetch securely from RLS DB Instead of physical volume
+        const files = await StorageRLS.listObjects(ref, auth, params.bucket, prefix, limit, offset);
 
-        return filtered;
+        return files.map(f => {
+            const relativeName = f.name.replace(prefix, ''); // Strip prefix path for SDK
+            return {
+                name: relativeName || f.name,
+                id: f.id,
+                updated_at: f.updated || new Date().toISOString(),
+                created_at: f.updated || new Date().toISOString(),
+                last_accessed_at: f.updated || new Date().toISOString(),
+                metadata: {
+                    size: f.size,
+                    mimetype: f.type || 'application/octet-stream',
+                },
+            };
+        });
     })
 
     // ════════════════════════════════════════════════════════
@@ -407,11 +422,15 @@ export const storageCompatRoutes = new Elysia({ prefix: "/storage/v1/s" })
     .delete('/object/:bucket', async ({ params, headers, body }) => {
         const ref = getProjectRef(headers as Record<string, string | undefined>);
         const prefixes = (body as Record<string, unknown>)?.prefixes as string[] || [];
+        const auth = headers['authorization'];
 
         const results = await Promise.allSettled(
-            prefixes.map(p => {
+            prefixes.map(async p => {
+                const permitted = await StorageRLS.authorizeAction(ref, auth, 'delete', params.bucket, p);
+                if (!permitted) throw new Error('Forbidden');
+                
                 const { bucket, key } = resolveS3Path(ref, params.bucket, p);
-                return StorageService.deleteFile(ref, bucket, key);
+                return await StorageService.deleteFile(ref, bucket, key);
             })
         );
 
@@ -542,7 +561,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "/storage/v1/s" })
         });
 
         set.headers['Tus-Resumable'] = '1.0.0';
-        set.headers['Location'] = `/storage/v1/s/upload/resumable/${uploadId}`;
+        set.headers['Location'] = `/storage/v1/upload/resumable/${uploadId}`;
         set.status = 201;
         return '';
     })
