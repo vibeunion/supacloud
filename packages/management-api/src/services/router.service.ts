@@ -80,6 +80,8 @@ server {
     # Storage render endpoint (cache disabled - requires proxy_cache_path pre-configuration)
     location ^~ /storage/v1/render/ {
         proxy_pass http://${kong};
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -89,6 +91,8 @@ server {
 
     location / {
         proxy_pass http://${kong};
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -173,6 +177,8 @@ server {
     # Storage render endpoint (cache disabled - requires proxy_cache_path pre-configuration)
     location ^~ /storage/v1/render/ {
         proxy_pass http://${kong};
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -182,6 +188,8 @@ server {
 
     location / {
         proxy_pass http://${kong};
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -319,6 +327,8 @@ server {
     # Storage render endpoint (cache disabled)
     location ^~ /storage/v1/render/ {
         proxy_pass http://${kong};
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -327,6 +337,8 @@ server {
 
     location / {
         proxy_pass http://${kong};
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -353,6 +365,8 @@ server {
     # Storage render endpoint (cache disabled)
     location ^~ /storage/v1/render/ {
         proxy_pass http://${kong};
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -361,6 +375,8 @@ server {
 
     location / {
         proxy_pass http://${kong};
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
