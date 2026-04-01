@@ -7,13 +7,21 @@ try {
   const envFile = Bun.file('/opt/supacloud/config.env');
   if (envFile.size > 0) {
     const text = await envFile.text();
-    const matches = text.matchAll(/^([A-Z0-9_]+)="?(.*?)"?$/gm);
-    for (const match of matches) {
-      if (!process.env[match[1]]) process.env[match[1]] = match[2];
+    for (const line of text.split('\n')) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#') || !trimmed.includes('=')) continue;
+      const eqIdx = trimmed.indexOf('=');
+      const key = trimmed.slice(0, eqIdx).trim();
+      // Strip surrounding quotes (both single and double) from the value
+      const rawVal = trimmed.slice(eqIdx + 1).trim();
+      const val = rawVal.replace(/^["']|["']$/g, '');
+      if (key && /^[A-Z0-9_]+$/.test(key) && !process.env[key]) {
+        process.env[key] = val;
+      }
     }
   }
 } catch (e: unknown) {
-  // Ignore
+  // Ignore - config.env may not exist in dev mode
 }
 
 import { config } from "./config";
