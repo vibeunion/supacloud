@@ -427,7 +427,7 @@ export class ProjectService {
       created_at: project.created_at,
       updated_at: project.updated_at,
       database: {
-        host: "localhost",
+        host: config.baseDomain,
         name: project.db_name,
         user: project.db_user,
       },
