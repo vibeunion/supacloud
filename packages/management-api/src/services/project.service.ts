@@ -18,7 +18,9 @@ export interface CreateProjectRequest {
   name: string;
   region?: string;
   organization_id?: string;
-  domain?: string;  // Custom domain for the project (e.g., "aorist.cn")
+  domain?: string;  // Base custom domain (e.g., "aorist.cn") — auto generates api.X / studio.X
+  api_domain?: string;   // Explicit API domain (e.g., "xg-api.aizhuliren.cn")
+  studio_domain?: string; // Explicit Studio domain (e.g., "xg-studio.aizhuliren.cn")
 }
 
 export interface UpdateProjectRequest {
@@ -45,6 +47,14 @@ export interface ProjectResponse {
   studio: {
     url: string;
   };
+}
+
+export interface ProjectCreateResponse extends ProjectResponse {
+  // Credentials returned only on creation
+  anon_key: string;
+  service_role_key: string;
+  jwt_secret: string;
+  db_password: string;
 }
 
 export interface ProjectDetailResponse extends ProjectResponse {
@@ -112,7 +122,7 @@ export class ProjectService {
   }
 
   // Create project
-  async createProject(request: CreateProjectRequest): Promise<ProjectResponse> {
+  async createProject(request: CreateProjectRequest): Promise<ProjectCreateResponse> {
     const projectRef = jwtService.generateProjectRef();
 
     // Generate all necessary credentials
@@ -127,6 +137,13 @@ export class ProjectService {
     const initialConfig: Record<string, unknown> = {};
     if (request.domain) {
       initialConfig.custom_domain = request.domain;
+    }
+    // Support explicit api_domain / studio_domain (takes precedence over base domain)
+    if (request.api_domain) {
+      initialConfig.api_domain = request.api_domain;
+    }
+    if (request.studio_domain) {
+      initialConfig.studio_domain = request.studio_domain;
     }
 
     // 1. Create project record in database (status: creating)
@@ -149,7 +166,14 @@ export class ProjectService {
       logger.error(`Failed to provision resources for ${projectRef}:`, { error: error instanceof Error ? error.message : String(error) });
     });
 
-    return this.toResponse(project);
+    // Return full response including credentials (only on creation)
+    return {
+      ...this.toResponse(project),
+      anon_key: anonKey,
+      service_role_key: serviceRoleKey,
+      jwt_secret: jwtSecret,
+      db_password: dbPassword,
+    };
   }
 
   // Asynchronously provision resources (Saga Orchestrator)
@@ -417,6 +441,17 @@ export class ProjectService {
   // Convert to response format
   private toResponse(project: Project): ProjectResponse {
     const customDomain = project.config?.custom_domain as string | undefined;
+    const explicitApiDomain = project.config?.api_domain as string | undefined;
+    const explicitStudioDomain = project.config?.studio_domain as string | undefined;
+
+    // Explicit domains take precedence over auto-generated ones
+    const apiUrl = explicitApiDomain
+      ? `https://${explicitApiDomain}`
+      : routerService.getProjectApiUrl(project.ref, customDomain);
+    const studioUrl = explicitStudioDomain
+      ? `https://${explicitStudioDomain}`
+      : routerService.getProjectStudioUrl(project.ref, customDomain);
+
     return {
       id: project.id,
       ref: project.ref,
@@ -432,10 +467,10 @@ export class ProjectService {
         user: project.db_user,
       },
       api: {
-        url: routerService.getProjectApiUrl(project.ref, customDomain),
+        url: apiUrl,
       },
       studio: {
-        url: routerService.getProjectStudioUrl(project.ref, customDomain),
+        url: studioUrl,
       },
     };
   }
