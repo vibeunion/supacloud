@@ -133,7 +133,7 @@ export const config = {
     managementEnv.NGINX_SITES_PATH ||
     "/etc/nginx/sites-enabled/supa-tenants",
   angieSitesDir: process.env.ANGIE_SITES_DIR || managementEnv.ANGIE_SITES_DIR || "/etc/angie/http.d",
-  tenantConfigDir: process.env.TENANT_CONFIG_DIR || managementEnv.TENANT_CONFIG_DIR || "/etc/supabase/kong_tenants",
+  tenantConfigDir: process.env.TENANT_CONFIG_DIR || managementEnv.TENANT_CONFIG_DIR || "/opt/supabase/volumes/api/kong_tenants",
   edgeFunctionsDir: process.env.EDGE_FUNCTIONS_DIR || managementEnv.EDGE_FUNCTIONS_DIR || "/opt/supacloud/functions",
   homePath: process.env.HOME || "/root",
 
