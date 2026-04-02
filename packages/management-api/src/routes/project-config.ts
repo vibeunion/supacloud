@@ -352,4 +352,20 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
         jwt_secret: t.Optional(t.String())
       })
     }
+  )
+
+  // Rebuild ALL tenant Kong configs (propagate CORS / template changes)
+  .post(
+    "/:ref/gateway/rebuild-all",
+    async () => {
+      const result = await gatewayService.rebuildAllTenantConfigs();
+      if (!result.success) {
+        return { ...result, error: "Rebuild failed" };
+      }
+      return result;
+    },
+    {
+      params: t.Object({ ref: t.String() }),
+      detail: { tags: ["projects"], summary: "Rebuild all tenant Kong configs" },
+    }
   );
