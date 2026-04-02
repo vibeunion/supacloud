@@ -132,7 +132,7 @@ export const config = {
     process.env.NGINX_SITES_PATH ||
     managementEnv.NGINX_SITES_PATH ||
     "/etc/nginx/sites-enabled/supa-tenants",
-  angieSitesDir: process.env.ANGIE_SITES_DIR || managementEnv.ANGIE_SITES_DIR || "/etc/angie/sites-enabled",
+  angieSitesDir: process.env.ANGIE_SITES_DIR || managementEnv.ANGIE_SITES_DIR || "/etc/angie/http.d",
   tenantConfigDir: process.env.TENANT_CONFIG_DIR || managementEnv.TENANT_CONFIG_DIR || "/etc/supabase/kong_tenants",
   edgeFunctionsDir: process.env.EDGE_FUNCTIONS_DIR || managementEnv.EDGE_FUNCTIONS_DIR || "/opt/supacloud/functions",
   homePath: process.env.HOME || "/root",
@@ -150,10 +150,10 @@ export const config = {
   victoriaMetricsUrl: process.env.VICTORIAMETRICS_URL || managementEnv.VICTORIAMETRICS_URL || "http://127.0.0.1:8428",
   realtimeAdminUrl: process.env.REALTIME_ADMIN_URL || managementEnv.REALTIME_ADMIN_URL || "http://127.0.0.1:4000",
   realtimeApiSecret: process.env.REALTIME_API_SECRET || managementEnv.REALTIME_API_SECRET || "",
-  managementApiInternal: process.env.MANAGEMENT_API_INTERNAL || managementEnv.MANAGEMENT_API_INTERNAL || "http://127.0.0.1:9090",
-  studioInternal: process.env.STUDIO_INTERNAL || managementEnv.STUDIO_INTERNAL || "http://127.0.0.1:3000",
-  edgeRuntimeInternal: process.env.EDGE_RUNTIME_INTERNAL || managementEnv.EDGE_RUNTIME_INTERNAL || "http://127.0.0.1:9001",
-  kongInternal: process.env.KONG_INTERNAL || managementEnv.KONG_INTERNAL || "http://127.0.0.1:8000",
+  managementApiInternal: process.env.MANAGEMENT_API_INTERNAL || managementEnv.MANAGEMENT_API_INTERNAL || "127.0.0.1:9090",
+  studioInternal: process.env.STUDIO_INTERNAL || managementEnv.STUDIO_INTERNAL || "127.0.0.1:3000",
+  edgeRuntimeInternal: process.env.EDGE_RUNTIME_INTERNAL || managementEnv.EDGE_RUNTIME_INTERNAL || "127.0.0.1:9001",
+  kongInternal: process.env.KONG_INTERNAL || managementEnv.KONG_INTERNAL || "127.0.0.1:8000",
 
   // ── Service Binaries / Ports ─────────────────────────────────────
   postgrestBin: process.env.POSTGREST_BIN || managementEnv.POSTGREST_BIN || "postgrest",
