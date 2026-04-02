@@ -181,7 +181,7 @@ export const config = {
   containerRuntime: process.env.CONTAINER_RUNTIME || managementEnv.CONTAINER_RUNTIME || "podman",
   dockerHostIp: process.env.DOCKER_HOST_IP || managementEnv.DOCKER_HOST_IP || "",
   isGithubActions: process.env.GITHUB_ACTIONS === "true",
-  minDiskGb: parseInt(process.env.MIN_DISK_GB || managementEnv.MIN_DISK_GB || "10", 10),
+  minDiskGb: parseInt(process.env.MIN_DISK_GB || managementEnv.MIN_DISK_GB || "2", 10),
   supacloudAnsibleArgs: process.env.SUPACLOUD_ANSIBLE_ARGS || managementEnv.SUPACLOUD_ANSIBLE_ARGS || "",
   supacloudApiUrl: process.env.SUPACLOUD_API_URL || managementEnv.SUPACLOUD_API_URL || "http://127.0.0.1:9090",
 } satisfies Config;

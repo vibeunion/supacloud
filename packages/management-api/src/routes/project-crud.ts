@@ -63,7 +63,9 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
         name: t.String({ minLength: 1, maxLength: 100 }),
         region: t.Optional(t.String()),
         organization_id: t.Optional(t.String()),
-        domain: t.Optional(t.String({ description: "Custom domain for the project (e.g., 'aorist.cn')" })),
+        domain: t.Optional(t.String({ description: "Base custom domain (e.g., 'aorist.cn'). Auto generates api.X / studio.X" })),
+        api_domain: t.Optional(t.String({ description: "Explicit API domain (e.g., 'xg-api.example.com')" })),
+        studio_domain: t.Optional(t.String({ description: "Explicit Studio domain (e.g., 'xg-studio.example.com')" })),
       }),
     }
   )
