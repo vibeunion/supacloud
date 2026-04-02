@@ -26,7 +26,7 @@ interface RateLimitConfig {
 export class GatewayService {
     private readonly KONG_ADMIN_URL = config.kongAdminUrl;
     private readonly KONG_YML = config.kongYml;
-    private readonly TENANT_DIR = "/etc/supabase/kong_tenants";
+    private readonly TENANT_DIR = config.tenantConfigDir;
 
     // --- Kong Admin API helper methods ---
     private async kongRequest(path: string, method: string = "GET", body?: Record<string, unknown>): Promise<KongResponse> {
@@ -128,8 +128,8 @@ export class GatewayService {
                 config: {
                     origins: [origins],
                     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-                    headers: ["Accept", "Authorization", "Content-Type", "X-Api-Version"],
-                    exposed_headers: ["Content-Length", "X-JSON"],
+                    headers: ["Accept", "Authorization", "Content-Type", "X-Api-Version", "x-supabase-api-version"],
+                    exposed_headers: ["Content-Length", "X-JSON", "x-supabase-api-version"],
                     credentials: true,
                     max_age: 3600,
                 },
@@ -203,6 +203,7 @@ export class GatewayService {
                 - Authorization
                 - Content-Type
                 - X-Api-Version
+                - x-supabase-api-version
               credentials: true
               max_age: 3600
   - name: svc-gotrue-${projectRef}
@@ -236,6 +237,7 @@ export class GatewayService {
                 - Authorization
                 - Content-Type
                 - X-Api-Version
+                - x-supabase-api-version
               credentials: true
               max_age: 3600
   - name: svc-functions-${projectRef}
@@ -270,8 +272,10 @@ export class GatewayService {
                 - Content-Type
                 - X-Api-Version
                 - X-Client-Info
+                - x-supabase-api-version
               exposed_headers:
                 - X-Relay-Error
+                - x-supabase-api-version
               credentials: true
               max_age: 3600
   - name: svc-storage-${projectRef}
@@ -305,6 +309,7 @@ export class GatewayService {
                 - Authorization
                 - Content-Type
                 - X-Api-Version
+                - x-supabase-api-version
               credentials: true
               max_age: 3600
   - name: svc-realtime-${projectRef}
@@ -338,6 +343,7 @@ export class GatewayService {
                 - Authorization
                 - Content-Type
                 - X-Api-Version
+                - x-supabase-api-version
               credentials: true
               max_age: 3600
 `;
