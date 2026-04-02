@@ -1,6 +1,7 @@
 import { config } from "../config";
 import { $ } from "bun";
 import { logger } from "../utils/logger";
+import { sql } from "../db";
 import path from "node:path";
 import fs from "node:fs/promises";
 
@@ -480,6 +481,61 @@ export class GatewayService {
         if (config.corsOrigins) await this.setCors(projectRef, config.corsOrigins);
         if (config.jwtEnabled) await this.enableJwtAuth(projectRef);
         return { success: true, message: "Gateway configuration updated" };
+    }
+
+    /**
+     * Rebuild Kong YAML snippets for ALL active tenants using the current template,
+     * then rebuild the merged kong.yml and hot-reload Kong.
+     * Use this to propagate CORS / template changes to existing projects.
+     */
+    async rebuildAllTenantConfigs(): Promise<{ success: boolean; updated: number; errors: string[] }> {
+        const errors: string[] = [];
+        let updated = 0;
+
+        try {
+            const hostIp = await this.detectHostIp();
+            await fs.mkdir(this.TENANT_DIR, { recursive: true });
+
+            // Query all active projects with their port config
+            const projects = await sql`
+                SELECT ref, config FROM projects
+                WHERE status != 'deleted' AND deleted_at IS NULL
+            `;
+
+            for (const project of projects) {
+                const ref = project.ref as string;
+                const cfg = (project.config || {}) as Record<string, unknown>;
+                const pgrstPort = cfg.postgrest_port as number | undefined;
+                const gotruePort = cfg.gotrue_port as number | undefined;
+
+                if (!pgrstPort || !gotruePort) {
+                    // Skip projects without port config (not yet fully provisioned)
+                    logger.warn(`[GatewayService] Skipping ${ref}: missing port config (pgrst=${pgrstPort}, gotrue=${gotruePort})`);
+                    errors.push(`${ref}: missing port config`);
+                    continue;
+                }
+
+                try {
+                    const yaml = this.generateTenantYaml(ref, hostIp, pgrstPort, gotruePort);
+                    await Bun.write(path.join(this.TENANT_DIR, `${ref}.yml`), yaml);
+                    updated++;
+                } catch (err: unknown) {
+                    const msg = err instanceof Error ? err.message : String(err);
+                    logger.error(`[GatewayService] Failed to regenerate YAML for ${ref}:`, msg);
+                    errors.push(`${ref}: ${msg}`);
+                }
+            }
+
+            // Rebuild merged kong.yml and reload
+            await this.rebuildKongConfig();
+            logger.info(`[GatewayService] Rebuilt Kong config for ${updated} tenant(s).`);
+
+            return { success: true, updated, errors };
+        } catch (error: unknown) {
+            const msg = error instanceof Error ? error.message : String(error);
+            logger.error(`[GatewayService] rebuildAllTenantConfigs failed:`, msg);
+            return { success: false, updated, errors: [...errors, msg] };
+        }
     }
 }
 
