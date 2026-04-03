@@ -54,7 +54,7 @@ async function authenticate(headers: Headers): Promise<McpTokenPayload | null> {
   try {
     const rows = await metaSql`
       SELECT ref FROM projects
-      WHERE config->>'service_role_key' = ${token}
+      WHERE service_role_key = ${token}
         AND status = 'active'
       LIMIT 1
     `;
