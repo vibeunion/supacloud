@@ -10,7 +10,7 @@ const FUNCTIONS_DIR = process.env.EDGE_FUNCTIONS_DIR || "./functions";
 
 const pool = new WorkerPool({
   size: POOL_SIZE,
-  requestTimeout: 20_000,
+  requestTimeout: 120_000,  // 2 min — covers AI streaming responses
 });
 
 async function dispatchFunction(
