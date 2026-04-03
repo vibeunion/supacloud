@@ -156,7 +156,7 @@ export const config = {
   realtimeApiSecret: process.env.REALTIME_API_SECRET || managementEnv.REALTIME_API_SECRET || "",
   managementApiInternal: process.env.MANAGEMENT_API_INTERNAL || managementEnv.MANAGEMENT_API_INTERNAL || "127.0.0.1:9090",
   studioInternal: process.env.STUDIO_INTERNAL || managementEnv.STUDIO_INTERNAL || "127.0.0.1:3000",
-  edgeRuntimeInternal: process.env.EDGE_RUNTIME_INTERNAL || managementEnv.EDGE_RUNTIME_INTERNAL || "127.0.0.1:9001",
+  edgeRuntimeInternal: process.env.EDGE_RUNTIME_INTERNAL || managementEnv.EDGE_RUNTIME_INTERNAL || "127.0.0.1:9000",
   kongInternal: process.env.KONG_INTERNAL || managementEnv.KONG_INTERNAL || "127.0.0.1:8000",
 
   // ── Service Binaries / Ports ─────────────────────────────────────
