@@ -431,11 +431,24 @@ export class ProjectService {
     return await edgeFunctionService.remove(ref, slug);
   }
 
-  async deployFunction(ref: string, slug: string, code: string): Promise<boolean> {
+  async deployFunction(ref: string, slug: string, code: string, minify: boolean = false): Promise<boolean> {
     const project = await projectRepository.findByRef(ref);
     if (!project) return false;
 
-    return await edgeFunctionService.deploy(ref, slug, code);
+    return await edgeFunctionService.deploy(ref, slug, code, minify);
+  }
+
+  async deployFunctionBundle(
+    ref: string,
+    slug: string,
+    files: Record<string, string>,
+    entrypoint: string = "index.ts",
+    minify: boolean = false,
+  ): Promise<boolean> {
+    const project = await projectRepository.findByRef(ref);
+    if (!project) return false;
+
+    return await edgeFunctionService.deployBundle(ref, slug, files, entrypoint, minify);
   }
 
   // Convert to response format

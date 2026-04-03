@@ -24,21 +24,71 @@ export function registerAdvancedTools(server: McpServer, http: HttpTransport): v
 
     server.tool(
         "deploy_edge_function",
-        "Deploy an Edge Function to a project",
+        "Deploy an Edge Function to a project. The server automatically bundles all dependencies — just send the raw source code, no need to pre-bundle.",
         {
             ref: z.string().describe("Project ref"),
             slug: z.string().describe("Function name (slug)"),
             code: z.string().describe("Function source code (TypeScript)"),
+            minify: z.boolean().optional().describe("Minify the bundle (default: false)"),
         },
-        async ({ ref, slug, code }) => {
-            const res = await http.post(`/v1/projects/${ref}/functions/${slug}`, { code });
+        async ({ ref, slug, code, minify }) => {
+            const res = await http.post(`/v1/projects/${ref}/functions/${slug}`, { code, minify });
             return {
                 content: [
                     {
                         type: "text",
                         text: res.ok
-                            ? `✅ Function ${slug} deployed successfully`
+                            ? `✅ Function ${slug} deployed and bundled successfully`
                             : `❌ Deployment failed (${res.status}): ${JSON.stringify(res.data)}`,
+                    },
+                ],
+            };
+        }
+    );
+
+    server.tool(
+        "deploy_edge_function_bundle",
+        "Deploy an Edge Function with multiple files (supports _shared/ dependencies). Send a file map and the server bundles everything automatically.",
+        {
+            ref: z.string().describe("Project ref"),
+            slug: z.string().describe("Function name (slug)"),
+            files: z.record(z.string()).describe("File map: { 'index.ts': '...', '_shared/config.ts': '...' }"),
+            entrypoint: z.string().optional().describe("Entrypoint file (default: 'index.ts')"),
+            minify: z.boolean().optional().describe("Minify the bundle (default: false)"),
+        },
+        async ({ ref, slug, files, entrypoint, minify }) => {
+            const res = await http.post(`/v1/projects/${ref}/functions/${slug}/bundle`, {
+                files, entrypoint, minify,
+            });
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: res.ok
+                            ? `✅ Function ${slug} bundle deployed (${Object.keys(files).length} files)`
+                            : `❌ Bundle deployment failed (${res.status}): ${JSON.stringify(res.data)}`,
+                    },
+                ],
+            };
+        }
+    );
+
+    server.tool(
+        "get_edge_function_source",
+        "Get the original source code of a deployed Edge Function (for debugging)",
+        {
+            ref: z.string().describe("Project ref"),
+            slug: z.string().describe("Function name"),
+        },
+        async ({ ref, slug }) => {
+            const res = await http.get(`/v1/projects/${ref}/functions/${slug}/source`);
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: res.ok
+                            ? JSON.stringify(res.data, null, 2)
+                            : `❌ Source not found (${res.status})`,
                     },
                 ],
             };
