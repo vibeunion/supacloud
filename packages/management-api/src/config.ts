@@ -66,6 +66,10 @@ interface Config {
   minDiskGb: number;
   supacloudAnsibleArgs: string;
   supacloudApiUrl: string;
+  // LLM (platform-unified AI)
+  llmApiKey: string;
+  llmEndpoint: string;
+  llmModel: string;
 }
 
 function loadEnvFile(path: string): Record<string, string> {
@@ -184,6 +188,11 @@ export const config = {
   minDiskGb: parseInt(process.env.MIN_DISK_GB || managementEnv.MIN_DISK_GB || "2", 10),
   supacloudAnsibleArgs: process.env.SUPACLOUD_ANSIBLE_ARGS || managementEnv.SUPACLOUD_ANSIBLE_ARGS || "",
   supacloudApiUrl: process.env.SUPACLOUD_API_URL || managementEnv.SUPACLOUD_API_URL || "http://127.0.0.1:9090",
+
+  // ── LLM (Platform AI) ─────────────────────────────────────────
+  llmApiKey: process.env.LLM_API_KEY || managementEnv.LLM_API_KEY || "",
+  llmEndpoint: process.env.LLM_ENDPOINT || managementEnv.LLM_ENDPOINT || "https://api.openai.com/v1/chat/completions",
+  llmModel: process.env.LLM_MODEL || managementEnv.LLM_MODEL || "gpt-4o-mini",
 } satisfies Config;
 
 // Add basic validation to prevent invalid configuration from crashing downstream
