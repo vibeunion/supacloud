@@ -226,4 +226,30 @@ export function registerProjectTools(server: McpServer, http: HttpTransport): vo
             };
         }
     );
+    // ── Get project logs ──
+    server.tool(
+        "fetch_project_logs",
+        "Fetch the real-time container log output for project services",
+        {
+            ref: z.string().optional().describe("Project ref (Optional if tenant scoped)"),
+            type: z.enum(["all", "auth", "database", "api"]).default("all").describe("Filter logs by service source"),
+        },
+        async ({ ref, type }) => {
+            // Support thick-client environment variables mapping if ref omitted
+            let endpoint = `/mcp/logs?type=${type}`;
+            if (ref) endpoint += `&ref=${ref}`;
+            
+            const res = await http.get(endpoint);
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: res.ok
+                            ? JSON.stringify(res.data, null, 2)
+                            : `❌ Request failed (${res.status})`,
+                    },
+                ],
+            };
+        }
+    );
 }
