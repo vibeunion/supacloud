@@ -129,8 +129,8 @@ export class GatewayService {
                 config: {
                     origins: [origins],
                     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-                    headers: ["Accept", "Authorization", "Content-Type", "X-Api-Version", "x-supabase-api-version"],
-                    exposed_headers: ["Content-Length", "X-JSON", "x-supabase-api-version"],
+                    headers: ["Accept", "Authorization", "Content-Type", "X-Api-Version", "x-supabase-api-version", "X-Client-Info"],
+                    exposed_headers: ["Content-Length", "X-JSON", "x-supabase-api-version", "X-Client-Info"],
                     credentials: true,
                     max_age: 3600,
                 },
@@ -205,6 +205,7 @@ export class GatewayService {
                 - Content-Type
                 - X-Api-Version
                 - x-supabase-api-version
+                - X-Client-Info
               credentials: true
               max_age: 3600
   - name: svc-gotrue-${projectRef}
@@ -239,6 +240,7 @@ export class GatewayService {
                 - Content-Type
                 - X-Api-Version
                 - x-supabase-api-version
+                - X-Client-Info
               credentials: true
               max_age: 3600
   - name: svc-functions-${projectRef}
@@ -311,6 +313,7 @@ export class GatewayService {
                 - Content-Type
                 - X-Api-Version
                 - x-supabase-api-version
+                - X-Client-Info
               credentials: true
               max_age: 3600
   - name: svc-realtime-${projectRef}
@@ -345,6 +348,7 @@ export class GatewayService {
                 - Content-Type
                 - X-Api-Version
                 - x-supabase-api-version
+                - X-Client-Info
               credentials: true
               max_age: 3600
 `;
