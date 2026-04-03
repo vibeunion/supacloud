@@ -288,26 +288,49 @@ export class DatabaseService {
   }
 
   // --- Environment Variables (Secrets) Management ---
+  // Stored in supacloud_meta.project_secrets table (not files).
+  // Edge Runtime reads these dynamically on every function invocation.
 
   async getSecrets(projectRef: string): Promise<{ name: string; value: string }[]> {
-    const result = await shellService.execute("key_manager.sh", ["list-secrets", projectRef]);
-    if (!result.success) return [];
     try {
-      return JSON.parse(result.output);
-    } catch (err: unknown) {
-      logger.warn("[DatabaseService] Failed to execute database diagnostic script", { error: err });
+      const { sql: metaDb } = await import("../db");
+      const rows = await metaDb`
+        SELECT name, value FROM project_secrets
+        WHERE project_ref = ${projectRef}
+        ORDER BY name
+      `;
+      return rows.map((r: any) => ({ name: r.name, value: r.value }));
+    } catch (err) {
+      logger.error("[DatabaseService] Failed to get secrets", { projectRef, error: err });
       return [];
     }
   }
 
   async upsertSecret(projectRef: string, name: string, value: string): Promise<boolean> {
-    const result = await shellService.execute("key_manager.sh", ["set-secret", projectRef, name, value]);
-    return result.success;
+    try {
+      const { sql: metaDb } = await import("../db");
+      await metaDb`
+        INSERT INTO project_secrets (project_ref, name, value)
+        VALUES (${projectRef}, ${name}, ${value})
+        ON CONFLICT (project_ref, name)
+        DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
+      `;
+      return true;
+    } catch (err) {
+      logger.error("[DatabaseService] Failed to upsert secret", { projectRef, name, error: err });
+      return false;
+    }
   }
 
   async deleteSecret(projectRef: string, name: string): Promise<boolean> {
-    const result = await shellService.execute("key_manager.sh", ["delete-secret", projectRef, name]);
-    return result.success;
+    try {
+      const { sql: metaDb } = await import("../db");
+      await metaDb`DELETE FROM project_secrets WHERE project_ref = ${projectRef} AND name = ${name}`;
+      return true;
+    } catch (err) {
+      logger.error("[DatabaseService] Failed to delete secret", { projectRef, name, error: err });
+      return false;
+    }
   }
 
   // --- Tenant Runtime Management ---
