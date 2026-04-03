@@ -61,8 +61,8 @@ const { readFileSync, existsSync } = require("fs");
 const { resolve: pathResolve } = require("path");
 
 // ── Auto-detect .env logic for Thick Client ──
-let tempUrl = process.env.SUPACLOUD_API_URL || "";
-let tempKey = process.env.SUPACLOUD_API_TOKEN || "";
+let tempUrl = process.env.SUPABASE_URL || process.env.SUPACLOUD_API_URL || "";
+let tempKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPACLOUD_API_TOKEN || "";
 
 const envPath = pathResolve(process.cwd(), ".env");
 if ((!tempUrl || !tempKey) && existsSync(envPath)) {
@@ -73,8 +73,8 @@ if ((!tempUrl || !tempKey) && existsSync(envPath)) {
             if (match) {
                 const k = match[1].trim();
                 const v = match[2].trim().replace(/^["']|["']$/g, "");
-                if (k === "SUPACLOUD_API_URL" && !tempUrl) tempUrl = v;
-                if (k === "SUPACLOUD_API_TOKEN" && !tempKey) tempKey = v;
+                if ((k === "SUPABASE_URL" || k === "SUPACLOUD_API_URL") && !tempUrl) tempUrl = v;
+                if ((k === "SUPABASE_SERVICE_ROLE_KEY" || k === "SUPACLOUD_API_TOKEN") && !tempKey) tempKey = v;
             }
         }
     } catch { /* ignore */ }
@@ -89,7 +89,10 @@ const SSH_PASS = process.env.SUPACLOUD_SSH_PASS ?? "";
 
 // For tenant setups, API_URL maps directly to the project domain gateway.
 // Note: Management API runs on port 9090 natively, but tenant APIs proxy via standard HTTP/HTTPS.
-const API_URL = process.env.SUPACLOUD_API_URL ?? (tempUrl ? tempUrl.replace(/\/+$/, "") : (HOST ? `http://${HOST}:9090` : ""));
+let API_URL = process.env.SUPACLOUD_API_URL ?? (tempUrl ? tempUrl.replace(/\/+$/, "") : (HOST ? `http://${HOST}:9090` : ""));
+if (API_URL && !API_URL.includes(":9090") && !API_URL.endsWith("/mcp")) {
+    API_URL = `${API_URL}/mcp`;
+}
 const API_TOKEN = process.env.SUPACLOUD_API_TOKEN ?? tempKey ?? "";
 const PROJECT_REF = process.env.SUPACLOUD_PROJECT_REF ?? "";
 const READ_ONLY = process.env.SUPACLOUD_READ_ONLY === "true";

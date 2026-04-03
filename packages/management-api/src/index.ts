@@ -253,8 +253,8 @@ export async function registerAllRoutes() {
 
   return new Elysia({ name: "api-routes" })
     // Auth guard — runs before every route in this group
-    .onBeforeHandle(({ request, set }) => {
-      const result = checkAuth(request);
+    .onBeforeHandle(async ({ request, set }) => {
+      const result = await checkAuth(request);
       if (result) {
         set.status = result.status;
         return result.body;
@@ -483,7 +483,14 @@ async function bootstrap() {
         const url = new URL(request.url);
         // Route /mcp paths directly to MCP handler (bypasses Elysia body parsing)
         if (url.pathname.startsWith("/mcp")) {
-          return handleMcp(request);
+          if (url.pathname === "/mcp" || url.pathname.startsWith("/mcp/sql") || url.pathname.startsWith("/mcp/tokens") || url.pathname.startsWith("/mcp/logs")) {
+            return handleMcp(request);
+          }
+          // Rewrite /mcp/v1... to /v1... and pass to Elysia
+          const newUrl = new URL(request.url);
+          newUrl.pathname = newUrl.pathname.replace(/^\/mcp/, "");
+          const newReq = new Request(newUrl.toString(), request);
+          return app.fetch(newReq);
         }
         // Everything else goes through Elysia
         return app.fetch(request);
