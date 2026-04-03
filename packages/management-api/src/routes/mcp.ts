@@ -18,6 +18,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { verifyMcpToken, type McpTokenPayload } from "../mcp/token";
 import { registerMcpTools } from "../mcp/tools";
+import { sql as metaSql } from "../db";
 
 // Session store: sessionId → { transport, server, _createdAt }
 const sessions = new Map<string, { transport: WebStandardStreamableHTTPServerTransport; server: McpServer; _createdAt: number }>();
@@ -34,11 +35,44 @@ setInterval(() => {
   }
 }, 30 * 60_000);
 
+/**
+ * Authenticate MCP request. Priority order:
+ * 1. Master token → admin role
+ * 2. HMAC-signed MCP token → project/admin role
+ * 3. Project service_role_key → project role with full access
+ */
 async function authenticate(headers: Headers): Promise<McpTokenPayload | null> {
   const authHeader = headers.get("authorization") || headers.get("Authorization");
   if (!authHeader?.startsWith("Bearer ")) return null;
   const token = authHeader.slice(7);
-  return await verifyMcpToken(token);
+
+  // 1. Try MCP token (includes master token check)
+  const mcpPayload = await verifyMcpToken(token);
+  if (mcpPayload) return mcpPayload;
+
+  // 2. Try service_role_key lookup
+  try {
+    const rows = await metaSql`
+      SELECT ref FROM projects
+      WHERE config->>'service_role_key' = ${token}
+        AND status = 'active'
+      LIMIT 1
+    `;
+    if (rows.length > 0) {
+      return {
+        role: "project",
+        ref: rows[0].ref as string,
+        readonly: false,
+        exp: Infinity,
+        iat: Date.now(),
+        name: "service_role_key",
+      };
+    }
+  } catch {
+    // DB lookup failed, fall through
+  }
+
+  return null;
 }
 
 function createMcpSession(tokenPayload: McpTokenPayload) {
