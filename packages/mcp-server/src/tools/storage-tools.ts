@@ -75,6 +75,45 @@ export function registerStorageTools(server: McpServer, http: HttpTransport): vo
             };
         }
     );
+    server.tool(
+        "upload_base64_file",
+        "Upload a test file payload to a storage bucket using Base64 encoding",
+        {
+            ref: z.string().describe("Project ref"),
+            bucket: z.string().describe("Bucket name"),
+            filename: z.string().describe("Target filename/path"),
+            base64_content: z.string().describe("Base64 encoded file content"),
+            mime_type: z.string().default("application/octet-stream").describe("MIME type"),
+        },
+        async ({ ref, bucket, filename, base64_content, mime_type }) => {
+            try {
+                // Decode base64 to buffer to inject into FormData
+                const buffer = Buffer.from(base64_content, "base64");
+                const blob = new Blob([buffer], { type: mime_type });
+                
+                const formData = new FormData();
+                formData.append("file", blob, filename);
+
+                const res = await http.postMultipart(`/v1/storage/${ref}/buckets/${bucket}/upload`, formData);
+                
+                return {
+                    content: [{
+                        type: "text",
+                        text: res.ok
+                            ? `✅ File ${filename} successfully uploaded to ${bucket}`
+                            : `❌ Upload failed (${res.status}): ${JSON.stringify(res.data)}`,
+                    }],
+                };
+            } catch (err: any) {
+                return {
+                    content: [{
+                        type: "text",
+                        text: `❌ Error uploading file: ${err.message}`,
+                    }],
+                };
+            }
+        }
+    );
 }
 
 function formatBuckets(data: unknown): string {
