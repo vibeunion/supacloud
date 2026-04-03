@@ -181,6 +181,33 @@ export class TaskWorker {
                     return true;
                 }
 
+                case "provision_secrets": {
+                    if (!project) {
+                        logger.error(`[TaskWorker] Project ${project_ref} not found for provision_secrets`);
+                        return false;
+                    }
+                    // Auto-inject standard environment variables into project_secrets
+                    // so Edge Functions can verify JWTs, access Supabase APIs, etc.
+                    const apiDomain = (project.config as Record<string, unknown>)?.api_domain as string | undefined;
+                    const supabaseUrl = apiDomain ? `https://${apiDomain}` : `http://127.0.0.1:8000`;
+                    const standardSecrets = [
+                        { name: "SUPABASE_URL", value: supabaseUrl },
+                        { name: "SUPABASE_ANON_KEY", value: project.anon_key },
+                        { name: "SUPABASE_SERVICE_ROLE_KEY", value: project.service_role_key },
+                        { name: "JWT_SECRET", value: project.jwt_secret },
+                        { name: "X_PROJECT_REF", value: project_ref },
+                    ];
+                    for (const s of standardSecrets) {
+                        const ok = await databaseService.upsertSecret(project_ref, s.name, s.value);
+                        if (!ok) {
+                            logger.error(`[TaskWorker] Failed to seed secret ${s.name} for ${project_ref}`);
+                            return false;
+                        }
+                    }
+                    logger.info(`[TaskWorker] Seeded ${standardSecrets.length} standard secrets for ${project_ref}`);
+                    return true;
+                }
+
                 case "cleanup_db": {
                     const res = await databaseService.deleteDatabase(project_ref);
                     return res.success;
@@ -223,7 +250,7 @@ export class TaskWorker {
         const { project_ref, task_type } = task;
 
         // Workflow orchestration: queue the next task upon completion
-        // Pipeline: provision_db → provision_s3 → provision_runtime → provision_router → provision_gateway
+        // Pipeline: provision_db → provision_s3 → provision_runtime → provision_router → provision_gateway → provision_secrets
         if (task_type === "provision_db") {
             await taskRepository.createTask(project_ref, "provision_s3");
         } else if (task_type === "provision_s3") {
@@ -233,6 +260,8 @@ export class TaskWorker {
         } else if (task_type === "provision_router") {
             await taskRepository.createTask(project_ref, "provision_gateway");
         } else if (task_type === "provision_gateway") {
+            await taskRepository.createTask(project_ref, "provision_secrets");
+        } else if (task_type === "provision_secrets") {
             // Final step completed, activate project
             await projectRepository.updateStatus(project_ref, "active");
             logger.info(`[TaskWorker] Project ${project_ref} fully provisioned and activated.`);
