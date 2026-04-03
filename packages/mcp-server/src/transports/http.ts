@@ -50,6 +50,17 @@ export class HttpTransport {
         return { ok: res.ok, status: res.status, data };
     }
 
+    async postMultipart<T = unknown>(path: string, formData: FormData): Promise<HttpResult<T>> {
+        const headers = { Authorization: `Bearer ${this.token}` };
+        const res = await fetch(`${this.baseUrl}${path}`, {
+            method: "POST",
+            headers,
+            body: formData,
+        });
+        const data = (await res.json().catch(() => null)) as T;
+        return { ok: res.ok, status: res.status, data };
+    }
+
     async patch<T = unknown>(path: string, body?: unknown): Promise<HttpResult<T>> {
         const res = await fetch(`${this.baseUrl}${path}`, {
             method: "PATCH",

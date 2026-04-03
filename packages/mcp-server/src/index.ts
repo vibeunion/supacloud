@@ -301,6 +301,44 @@ if (API_URL) {
         })
     );
 
+    server.prompt(
+        "setup_scheduled_job",
+        "Create a pg_cron scheduled background job",
+        {
+            ref: z.string().describe("Project ref to work on")
+        },
+        (args: any) => ({
+            messages: [
+                {
+                    role: "user",
+                    content: {
+                        type: "text",
+                        text: `I need to set up a scheduled background job for project '${args.ref}'. Please use pg_cron syntax (e.g., SELECT cron.schedule('job_name', '0 0 * * *', 'SQL_COMMAND')). Interactively work with me to define the schedule and the target SQL, ensure the pg_cron extension is active via 'list_extensions', and finally execute it via 'execute_sql'.`
+                    }
+                }
+            ]
+        })
+    );
+
+    server.prompt(
+        "check_schema_diff",
+        "Compare local migration files against the remote database schema",
+        {
+            ref: z.string().describe("Project ref to work on")
+        },
+        (args: any) => ({
+            messages: [
+                {
+                    role: "user",
+                    content: {
+                        type: "text",
+                        text: `I want to check what schema changes are pending for project '${args.ref}'. First, use IDE tools to read the local SQL files inside 'supabase/migrations/'. Next, query the remote database schema using 'list_tables' and 'list_table_columns_by_schema'. Compare the two states and output a concise Markdown report detailing any missing tables, altered columns, or pending migrations.`
+                    }
+                }
+            ]
+        })
+    );
+
     // ── Register MCP Resources ──
     // Expose database schemas as real-time readable resources (e.g. pg://test/schema/public)
     server.resource(
