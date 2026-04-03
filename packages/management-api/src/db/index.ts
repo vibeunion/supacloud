@@ -167,6 +167,7 @@ export const TaskType = {
   PROVISION_RUNTIME: "provision_runtime",
   PROVISION_ROUTER: "provision_router",
   PROVISION_GATEWAY: "provision_gateway",
+  PROVISION_SECRETS: "provision_secrets",
   CLEANUP_DB: "cleanup_db",
   CLEANUP_S3: "cleanup_s3",
   CLEANUP_RUNTIME: "cleanup_runtime",
