@@ -175,8 +175,30 @@ export async function handleMcp(request: Request): Promise<Response> {
     return await session.transport.handleRequest(request);
   }
 
-  // GET /mcp — SSE stream
+  // GET /mcp — Logs and SSE stream
   if (method === "GET") {
+    const url = new URL(request.url);
+
+    // Logs Tunnel
+    if (url.pathname === "/mcp/logs") {
+      let ref = tokenPayload.ref;
+      if (!ref && tokenPayload.role === "admin") {
+        ref = url.searchParams.get("ref") || "";
+      }
+      if (!ref) {
+        return jsonResponse({ error: "Project ref required. Only project-scoped tokens can use this tunnel." }, 403);
+      }
+      try {
+        const type = url.searchParams.get("type") || "all";
+        const { projectLogService } = await import("../services/project-logs.service");
+        const logs = await projectLogService.queryLogs(ref, type);
+        return jsonResponse({ logs });
+      } catch (e: any) {
+        return jsonResponse({ error: e.message || "Failed to fetch logs" }, 500);
+      }
+    }
+
+    // SSE Stream
     const sessionId = request.headers.get("mcp-session-id");
     if (!sessionId || !sessions.has(sessionId)) {
       return jsonResponse({ error: "No active session. Send POST /mcp first to initialize." }, 400);

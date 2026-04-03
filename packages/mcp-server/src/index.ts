@@ -223,6 +223,84 @@ if (API_URL) {
         })
     );
 
+    server.prompt(
+        "analyze_slow_queries",
+        "Fetch and analyze slow performing queries",
+        {
+            ref: z.string().describe("Project ref to work on")
+        },
+        (args: any) => ({
+            messages: [
+                {
+                    role: "user",
+                    content: {
+                        type: "text",
+                        text: `Please analyze the slow queries for project '${args.ref}'. Use the 'get_slow_queries' tool to fetch the top 10 most expensive queries. Review their shapes, identify missing indexes, write out the 'CREATE INDEX CONCURRENTLY' statements, and ask me if I want to execute them via the 'execute_sql' tool.`
+                    }
+                }
+            ]
+        })
+    );
+
+    server.prompt(
+        "generate_mock_data",
+        "Generate realistic mock data and save local seed script",
+        {
+            ref: z.string().describe("Project ref to work on"),
+            table: z.string().describe("Table to seed (Optionally 'all')"),
+        },
+        (args: any) => ({
+            messages: [
+                {
+                    role: "user",
+                    content: {
+                        type: "text",
+                        text: `I need to seed mock data for project '${args.ref}' targeting table '${args.table}'. First, introspect the schema and constraints of the table(s). Then, draft highly realistic batch 'INSERT' SQL statements containing diverse, simulated data spanning at least 20 rows. Save this output to 'supabase/seed.sql' in the local workspace workspace using IDE file tools. Finally, ask if I want you to run the SQL remotely.`
+                    }
+                }
+            ]
+        })
+    );
+
+    server.prompt(
+        "run_security_audit",
+        "Run a comprehensive security audit on the project database",
+        {
+            ref: z.string().describe("Project ref to work on")
+        },
+        (args: any) => ({
+            messages: [
+                {
+                    role: "user",
+                    content: {
+                        type: "text",
+                        text: `Run a security audit for project '${args.ref}'. Use 'get_rls_status' and 'list_table_policies' to ensure public tables are protected. Look for functions with SECURITY DEFINER lacking safe search paths. Once you analyze everything, use your IDE tools to write a detailed markdown report locally to 'SupaCloud_Security_Audit.md'.`
+                    }
+                }
+            ]
+        })
+    );
+
+    server.prompt(
+        "sync_local_edge_functions",
+        "Deploy local Edge Functions to the Cloud",
+        {
+            ref: z.string().describe("Project ref to work on"),
+            function_name: z.string().describe("Name of the folder inside supabase/functions/ to deploy"),
+        },
+        (args: any) => ({
+            messages: [
+                {
+                    role: "user",
+                    content: {
+                        type: "text",
+                        text: `I want to deploy the Edge Function '${args.function_name}' for project '${args.ref}'. Please use your native IDE capabilities to read all the code from 'supabase/functions/${args.function_name}/index.ts' and any dependencies. Consolidate them into a unified code string, and use the 'deploy_edge_function' tool to deploy it to the cloud. Output the success status when done.`
+                    }
+                }
+            ]
+        })
+    );
+
     // ── Register MCP Resources ──
     // Expose database schemas as real-time readable resources (e.g. pg://test/schema/public)
     server.resource(

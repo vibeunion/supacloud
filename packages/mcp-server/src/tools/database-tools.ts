@@ -385,6 +385,37 @@ export function registerDatabaseTools(
         }
     );
 
+    server.tool(
+        "get_slow_queries",
+        "Get the top 10 most expensive/slow queries from pg_stat_statements",
+        {
+            ref: projectRef ? z.never().optional() : z.string().describe("Project ref"),
+        },
+        async (args) => {
+            const ref = projectRef || (args as { ref?: string }).ref;
+
+            const sql = `
+                SELECT
+                    query,
+                    calls,
+                    round(total_exec_time::numeric, 2) as total_exec_time_ms,
+                    round(mean_exec_time::numeric, 2) as mean_exec_time_ms,
+                    rows
+                FROM pg_stat_statements
+                ORDER BY total_exec_time DESC
+                LIMIT 10;
+            `;
+
+            const res = await http.post("/mcp/sql", { ref, sql });
+            return {
+                content: [{
+                    type: "text",
+                    text: res.ok ? JSON.stringify(res.data, null, 2) : `❌ Failed (${res.status}): Make sure pg_stat_statements is enabled.`,
+                }],
+            };
+        }
+    );
+
     // ═══════════════════════════════════════
     // Migrations (write operations)
     // ═══════════════════════════════════════
