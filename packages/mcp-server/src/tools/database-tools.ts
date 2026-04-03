@@ -55,7 +55,7 @@ export function registerDatabaseTools(
                 }
             }
 
-            const res = await http.post(`/v1/projects/${ref}/database/sql`, { sql });
+            const res = await http.post("/mcp/sql", { ref, sql });
             return {
                 content: [{
                     type: "text",
@@ -88,7 +88,8 @@ export function registerDatabaseTools(
                 ORDER BY schemaname, tablename;
             `;
 
-            const res = await http.post(`/v1/projects/${ref}/database/sql`, {
+            const res = await http.post("/mcp/sql", {
+                ref,
                 sql: sql.replace("$1", `ARRAY[${schemas.map(s => `'${s}'`).join(",")}]`)
             });
 
@@ -120,7 +121,7 @@ export function registerDatabaseTools(
                 ORDER BY ordinal_position;
             `;
 
-            const res = await http.post(`/v1/projects/${ref}/database/sql`, { sql });
+            const res = await http.post("/mcp/sql", { ref, sql });
             return {
                 content: [{
                     type: "text",
@@ -147,7 +148,7 @@ export function registerDatabaseTools(
                 FROM pg_indexes WHERE schemaname = '${schema}' AND tablename = '${table}';
             `;
 
-            const res = await http.post(`/v1/projects/${ref}/database/sql`, { sql });
+            const res = await http.post("/mcp/sql", { ref, sql });
             return {
                 content: [{
                     type: "text",
@@ -174,7 +175,7 @@ export function registerDatabaseTools(
                 FROM pg_constraint WHERE connamespace = '${schema}'::regnamespace AND conrelid = '${schema}.${table}'::regclass;
             `;
 
-            const res = await http.post(`/v1/projects/${ref}/database/sql`, { sql });
+            const res = await http.post("/mcp/sql", { ref, sql });
             return {
                 content: [{
                     type: "text",
@@ -199,7 +200,7 @@ export function registerDatabaseTools(
                 ORDER BY extname;
             `;
 
-            const res = await http.post(`/v1/projects/${ref}/database/sql`, { sql });
+            const res = await http.post("/mcp/sql", { ref, sql });
             return {
                 content: [{
                     type: "text",
@@ -230,7 +231,7 @@ export function registerDatabaseTools(
                 ORDER BY tablename;
             `;
 
-            const res = await http.post(`/v1/projects/${ref}/database/sql`, { sql });
+            const res = await http.post("/mcp/sql", { ref, sql });
             return {
                 content: [{
                     type: "text",
@@ -257,7 +258,7 @@ export function registerDatabaseTools(
                 FROM pg_policies WHERE schemaname = '${schema}' AND tablename = '${table}';
             `;
 
-            const res = await http.post(`/v1/projects/${ref}/database/sql`, { sql });
+            const res = await http.post("/mcp/sql", { ref, sql });
             return {
                 content: [{
                     type: "text",
@@ -287,7 +288,7 @@ export function registerDatabaseTools(
                 FROM auth.users ORDER BY created_at DESC LIMIT ${limit};
             `;
 
-            const res = await http.post(`/v1/projects/${ref}/database/sql`, { sql });
+            const res = await http.post("/mcp/sql", { ref, sql });
             return {
                 content: [{
                     type: "text",
@@ -314,7 +315,7 @@ export function registerDatabaseTools(
                 FROM auth.users WHERE id = '${userId}';
             `;
 
-            const res = await http.post(`/v1/projects/${ref}/database/sql`, { sql });
+            const res = await http.post("/mcp/sql", { ref, sql });
             return {
                 content: [{
                     type: "text",
@@ -343,7 +344,7 @@ export function registerDatabaseTools(
                 ORDER BY query_start DESC LIMIT 50;
             `;
 
-            const res = await http.post(`/v1/projects/${ref}/database/sql`, { sql });
+            const res = await http.post("/mcp/sql", { ref, sql });
             return {
                 content: [{
                     type: "text",
@@ -374,7 +375,7 @@ export function registerDatabaseTools(
                 LIMIT 30;
             `;
 
-            const res = await http.post(`/v1/projects/${ref}/database/sql`, { sql });
+            const res = await http.post("/mcp/sql", { ref, sql });
             return {
                 content: [{
                     type: "text",
@@ -413,7 +414,7 @@ export function registerDatabaseTools(
                     COMMIT;
                 `;
 
-                const res = await http.post(`/v1/projects/${ref}/database/sql`, { sql });
+                const res = await http.post("/mcp/sql", { ref, sql });
                 return {
                     content: [{
                         type: "text",
@@ -437,7 +438,7 @@ export function registerDatabaseTools(
                 const ref = projectRef || (args as { ref?: string }).ref;
                 const { name, sql } = args as { name: string; sql: string };
 
-                const res = await http.post(`/v1/projects/${ref}/database/migrations`, { name, sql });
+                const res = await http.post("/mcp/migrations", { ref, name, sql });
 
                 return {
                     content: [{
@@ -459,7 +460,10 @@ export function registerDatabaseTools(
         },
         async (args) => {
             const ref = projectRef || (args as { ref?: string }).ref;
-            const res = await http.get(`/v1/projects/${ref}/database/migrations`);
+            const res = await http.post("/mcp/sql", {
+                ref,
+                sql: `SELECT version, applied_at FROM schema_migrations ORDER BY version DESC LIMIT 50;`
+            });
             return {
                 content: [{
                     type: "text",
@@ -512,7 +516,8 @@ export function registerDatabaseTools(
                 ORDER BY t.table_schema, t.table_name, c.ordinal_position;
             `;
 
-            const res = await http.post(`/v1/projects/${ref}/database/sql`, {
+            const res = await http.post("/mcp/sql", {
+                ref,
                 sql: sql.replace("$1", `ARRAY[${schemas.map(s => `'${s}'`).join(",")}]`)
             });
 
