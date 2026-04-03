@@ -147,9 +147,23 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
     // POST /bucket — Create a bucket  
     .post('/bucket', async ({ headers, body }) => {
         const ref = getProjectRef(headers as Record<string, string | undefined>);
+        const name = (body as Record<string, unknown>).name || ref;
+        const bucketId = String((body as Record<string, unknown>).id || name);
+        const isPublic = (body as Record<string, unknown>).public === true;
+        
+        // 1. Create S3 namespace
         const result = await StorageService.createBucket(ref);
-        if (!result.success) return status(500, { statusCode: '500', error: 'Internal', message: result.error || 'Failed to create bucket' });
-        return { name: (body as Record<string, unknown>).name || ref };
+        if (!result.success) return status(500, { statusCode: '500', error: 'Internal', message: result.error || 'Failed to create bucket in S3 layer' });
+        
+        // 2. Register bucket in Postgres `storage.buckets` so RLS foreign keys pass
+        try {
+            await StorageRLS.registerLogicalBucket(ref, bucketId, String(name), isPublic);
+        } catch (err: unknown) {
+            logger.warn(`[StorageCompat] Failed to register logical bucket ${bucketId} in DB for ${ref}`, { error: err instanceof Error ? err.message : String(err) });
+            // Optionally we still return success since S3 space was allocated
+        }
+        
+        return { name };
     })
 
     // GET /bucket/:id — Get bucket details

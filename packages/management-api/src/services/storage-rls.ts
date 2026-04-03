@@ -3,6 +3,20 @@ import { jwtVerify } from "jose";
 import { logger } from "../utils/logger";
 
 export class StorageRLS {
+  static async registerLogicalBucket(ref: string, bucketId: string, name: string, isPublic: boolean): Promise<void> {
+    const project = (await metaSql`SELECT db_name FROM projects WHERE ref=${ref}`)[0];
+    if (!project) return;
+    
+    const db = getProjectDb(project.db_name);
+    
+    // Insert the bucket into PostgreSQL so RLS and foreign keys don't fail downstream
+    await db`
+      INSERT INTO storage.buckets (id, name, public, created_at, updated_at)
+      VALUES (${bucketId}, ${name}, ${isPublic}, now(), now())
+      ON CONFLICT (id) DO UPDATE SET public = EXCLUDED.public, name = EXCLUDED.name, updated_at = now()
+    `;
+  }
+
   static async getTenantJwtSecret(ref: string): Promise<string | null> {
     const rows = await metaSql`SELECT jwt_secret FROM projects WHERE ref=${ref}`;
     return rows[0]?.jwt_secret || null;
