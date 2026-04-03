@@ -29,6 +29,8 @@ export class EdgeRuntimeManager {
         ...process.env,
         PORT: String(this.config.port),
         EDGE_FUNCTIONS_DIR: require("../config").config.edgeFunctionsDir,
+        MASTER_TOKEN: require("../config").config.masterToken,
+        MANAGEMENT_API_URL: `http://127.0.0.1:${require("../config").config.port || 9090}`,
       },
       stdout: "inherit",
       stderr: "inherit",
