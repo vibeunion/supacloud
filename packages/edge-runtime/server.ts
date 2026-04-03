@@ -56,6 +56,13 @@ const app = new Elysia()
   .get("/health", () => ({ status: "ok", runtime: "bun-edge" }))
   .get("/metrics", () => pool.getMetrics())
 
+  // Cache invalidation — called by Management API after deploy
+  .post("/invalidate/:ref/:slug", (c) => {
+    const functionId = `${c.params.ref}_${c.params.slug}`;
+    pool.invalidateModule(functionId);
+    return { invalidated: functionId };
+  })
+
   // Main function invoke — handles supabase.functions.invoke('name', { body })
   // Supports nested paths: /functions/v1/name/sub/path
   .all("/functions/v1/:functionName/*", async (c) => {

@@ -101,12 +101,23 @@ async function bundleFunction(
  * Clear module caches so Worker threads pick up the new version.
  */
 async function invalidateCache(ref: string, slug: string): Promise<void> {
-  // Clear the transform cache
+  // 1. Clear the transform file cache
   const cacheDir = path.join(FUNCTIONS_ROOT, ".cache", ref);
   for (const ext of [".ts", ".js"]) {
     try {
       await fs.unlink(path.join(cacheDir, `${slug}${ext}`));
     } catch { /* may not exist */ }
+  }
+
+  // 2. Notify Edge Runtime to evict the module from Worker thread caches
+  try {
+    const runtimeUrl = `http://${config.edgeRuntimeInternal}`;
+    await fetch(`${runtimeUrl}/invalidate/${ref}/${slug}`, {
+      method: "POST",
+      signal: AbortSignal.timeout(2000),
+    });
+  } catch {
+    // Edge Runtime may not be running — modules will load fresh on next start
   }
 }
 
