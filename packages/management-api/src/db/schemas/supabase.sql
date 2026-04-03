@@ -161,7 +161,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS objects_bucket_name_idx ON storage.objects (bu
 -- 授权
 GRANT ALL ON ALL TABLES IN SCHEMA storage TO supabase_storage_admin;
 GRANT ALL ON ALL SEQUENCES IN SCHEMA storage TO supabase_storage_admin;
-GRANT SELECT ON ALL TABLES IN SCHEMA storage TO anon, authenticated;
+GRANT ALL ON ALL TABLES IN SCHEMA storage TO anon, authenticated, service_role;
+GRANT ALL ON ALL SEQUENCES IN SCHEMA storage TO anon, authenticated, service_role;
 
 -- 启用 RLS
 ALTER TABLE storage.buckets ENABLE ROW LEVEL SECURITY;
