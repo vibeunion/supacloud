@@ -28,6 +28,7 @@ export class EdgeRuntimeManager {
       env: {
         ...process.env,
         PORT: String(this.config.port),
+        EDGE_FUNCTIONS_DIR: require("../config").config.edgeFunctionsDir,
       },
       stdout: "inherit",
       stderr: "inherit",

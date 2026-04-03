@@ -30,15 +30,24 @@ function validateFunctionCode(code: string): { valid: boolean; error?: string } 
     return { valid: false, error: "Function code is empty" };
   }
 
+  // Accept many patterns: original Deno style, bundled CommonJS, or any export
   const hasHandler =
     code.includes("Deno.serve") ||
     code.includes("serve(") ||
-    code.includes("export default");
+    code.includes("export default") ||
+    // Bun bundler output patterns
+    code.includes("module.exports") ||
+    code.includes("__esModule") ||
+    code.includes("exports.default") ||
+    // Generic handler patterns
+    code.includes("async fetch") ||
+    code.includes("new Request") ||
+    code.includes("new Response");
 
   if (!hasHandler) {
     return {
       valid: false,
-      error: "Function must contain a Deno.serve() handler, a serve() call, or a default export",
+      error: "Function must contain a handler (Deno.serve, export default, module.exports, or fetch handler)",
     };
   }
 
