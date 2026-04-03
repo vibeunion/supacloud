@@ -237,44 +237,32 @@ Kong/Angie Gateway:
 
 #### MCP Server (AI Agent)
 
-Let AI assistants (Claude, Cursor, Windsurf) manage your SupaCloud via natural language.
+Let AI assistants (Claude, Cursor, Windsurf) manage your SupaCloud database and services via natural language without risking other tenants' data.
+
+SupaCloud now natively exposes an HTTP MCP endpoint via the project's API Gateway. **No installation required**.
+
+**Project-scoped mode** (Configure in Cursor / Windsurf):
+- **Type**: `sse`
+- **URL**: `https://<YOUR_API_DOMAIN>/mcp`
+- **Headers**: 
+  - `Authorization: Bearer <YOUR_SERVICE_ROLE_KEY>`
 
 ```json
-// claude_desktop_config.json or Cursor MCP settings
+// Example for claude_desktop_config.json
 {
   "mcpServers": {
-    "supacloud": {
-      "command": "npx",
-      "args": ["-y", "@supacloud/mcp-server"],
-      "env": {
-        "SUPACLOUD_HOST": "your-server-ip",
-        "SUPACLOUD_SSH_KEY": "~/.ssh/id_rsa",
-        "SUPACLOUD_API_TOKEN": "your-master-token"
-      }
+    "my-supacloud-project": {
+      "command": "curl",
+      "args": ["-sX", "POST", "https://api.myproject.com/mcp", "-H", "Authorization: Bearer eyJhb...", "-H", "Accept: text/event-stream"]
     }
   }
 }
 ```
 
-**Project-scoped mode** (restrict AI to single project):
-```json
-{
-  "mcpServers": {
-    "supacloud-myproject": {
-      "command": "npx",
-      "args": ["-y", "@supacloud/mcp-server"],
-      "env": {
-        "SUPACLOUD_HOST": "your-server-ip",
-        "SUPACLOUD_API_TOKEN": "your-master-token",
-        "SUPACLOUD_PROJECT_REF": "abc123defg",
-        "SUPACLOUD_READ_ONLY": "true"
-      }
-    }
-  }
-}
-```
+Available tools include: Database schema introspection (`list_tables`, `describe_table`), SQL Execution (`execute_sql`), and AI-assisted SQL generation using project context.
 
-5 tool groups available: SSH tools, project management, database operations, advanced management, and deployment tools. See [MCP Server README](packages/mcp-server/README.md) for details.
+*Note: For global server administration (SSH, full cluster management), see [SupaCloud Admin MCP](packages/mcp-server/README.md).*
+
 
 ### Project Structure
 
@@ -598,44 +586,20 @@ Kong/Angie 网关:
 
 #### MCP Server (AI Agent)
 
-让 AI 助手（Claude、Cursor、Windsurf）通过自然语言管理你的 SupaCloud：
+让 AI 助手（Claude、Cursor、Windsurf）通过自然语言管理你的专属 SupaCloud 数据库与服务，多租户安全隔离，绝不会影响机器上的其他项目。
 
-```json
-// claude_desktop_config.json 或 Cursor MCP 设置
-{
-  "mcpServers": {
-    "supacloud": {
-      "command": "npx",
-      "args": ["-y", "@supacloud/mcp-server"],
-      "env": {
-        "SUPACLOUD_HOST": "你的服务器IP",
-        "SUPACLOUD_SSH_KEY": "~/.ssh/id_rsa",
-        "SUPACLOUD_API_TOKEN": "你的Master Token"
-      }
-    }
-  }
-}
-```
+SupaCloud 现在原生通过项目的 API 网关暴露了标准 HTTP MCP 端点，**无需任何安装配置**。
 
-**项目范围模式**（限制 AI 只能访问单个项目）：
-```json
-{
-  "mcpServers": {
-    "supacloud-myproject": {
-      "command": "npx",
-      "args": ["-y", "@supacloud/mcp-server"],
-      "env": {
-        "SUPACLOUD_HOST": "你的服务器IP",
-        "SUPACLOUD_API_TOKEN": "你的Master Token",
-        "SUPACLOUD_PROJECT_REF": "abc123defg",
-        "SUPACLOUD_READ_ONLY": "true"
-      }
-    }
-  }
-}
-```
+**如何接入** (在 Cursor 或 Windsurf 中配置):
+- **Type**: `sse`
+- **URL**: `https://<你的项目API域名>/mcp`
+- **Headers**: 
+  - `Authorization: Bearer <你的 SERVICE_ROLE_KEY>`
 
-提供 5 个工具组：SSH 工具、项目管理、数据库操作、高级管理、部署工具。详见 [MCP Server 文档](packages/mcp-server/README.md)。
+内置工具包括：数据库元数据内省（自动读取表结构、外键、RLS策略）、直接执行 SQL（`execute_sql`），以及带有表结构上下文的 AI SQL 生成助手。
+
+*注：如果你需要全局服务器管控能力（SSH、跨项目管理等），请参考 [SupaCloud Admin MCP](packages/mcp-server/README.md)。*
+
 
 ### 项目结构
 
