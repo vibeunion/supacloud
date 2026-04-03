@@ -89,6 +89,19 @@ server {
         proxy_set_header x-project-ref ${projectRef};
     }
 
+    # MCP endpoint — direct to management API (uses its own auth)
+    location /mcp {
+        proxy_pass http://${this.MANAGEMENT_API_INTERNAL};
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Connection '';
+        proxy_read_timeout 300;
+        proxy_buffering off;
+    }
+
     location / {
         proxy_pass http://${kong};
         proxy_http_version 1.1;
@@ -220,6 +233,19 @@ server {
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_set_header x-project-ref ${projectRef};
+    }
+
+    # MCP endpoint — direct to management API (uses its own auth)
+    location /mcp {
+        proxy_pass http://${this.MANAGEMENT_API_INTERNAL};
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Connection '';
+        proxy_read_timeout 300;
+        proxy_buffering off;
     }
 
     location / {
