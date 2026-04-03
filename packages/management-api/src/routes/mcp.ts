@@ -111,9 +111,37 @@ export async function handleMcp(request: Request): Promise<Response> {
     return jsonResponse({ error: "Invalid or missing MCP token" }, 401);
   }
 
-  // POST /mcp — JSON-RPC
+  // POST /mcp — JSON-RPC and Tunnels
   if (method === "POST") {
     const url = new URL(request.url);
+
+    // Direct SQL Execution Tunnel for Thick Client
+    if (url.pathname === "/mcp/sql") {
+      try {
+        const body = await request.json() as { sql: string; ref?: string };
+        if (!body.sql) return jsonResponse({ error: "Missing 'sql' body field" }, 400);
+
+        let ref = tokenPayload.ref;
+        if (!ref && body.ref) {
+          if (tokenPayload.role !== "admin") return jsonResponse({ error: "Only admins can supply custom ref." }, 403);
+          ref = body.ref;
+        }
+        if (!ref) {
+          return jsonResponse({ error: "Project ref required. Only project-scoped tokens can use this tunnel." }, 403);
+        }
+
+        const projectRows = await metaSql`SELECT db_name FROM projects WHERE ref = ${ref} LIMIT 1`;
+        if (!projectRows.length) return jsonResponse({ error: "Project not found" }, 404);
+
+        const { getProjectDb } = await import("../db");
+        const tenantDb = getProjectDb(projectRows[0].db_name as string);
+        const result = await tenantDb.unsafe(body.sql);
+        return jsonResponse(result);
+      } catch (e: any) {
+        return jsonResponse({ error: e.message || "Failed to execute SQL" }, 500);
+      }
+    }
+
     // Token creation endpoint
     if (url.pathname === "/mcp/tokens") {
       if (tokenPayload.role !== "admin") {
