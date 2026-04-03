@@ -20,7 +20,10 @@ async function dispatchFunction(
   setHeaders: Record<string, string>,
 ) {
   const functionId = `${projectRef}_${functionName}`;
-  const functionPath = path.resolve(FUNCTIONS_DIR, projectRef, `${functionName}.ts`);
+  // Prefer bundled .js output from server-side Bun.build(), fall back to raw .ts
+  const jsPath = path.resolve(FUNCTIONS_DIR, projectRef, `${functionName}.js`);
+  const tsPath = path.resolve(FUNCTIONS_DIR, projectRef, `${functionName}.ts`);
+  const functionPath = (await Bun.file(jsPath).exists()) ? jsPath : tsPath;
 
   try {
     return await pool.dispatch({
