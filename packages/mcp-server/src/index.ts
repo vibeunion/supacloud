@@ -56,84 +56,40 @@ import { registerTaskTools } from "./tools/task-tools";
 import { resolve } from "path";
 import { homedir } from "os";
 
-// ── Proxy / Local Mode ──
-if (process.argv.includes("--local") || process.argv.includes("--proxy")) {
-    const { readFileSync, existsSync } = require("fs");
-    const { resolve: pathResolve } = require("path");
-    
-    // Auto-detect .env logic
-    let tempUrl = process.env.SUPABASE_URL || process.env.SUPACLOUD_API_URL || "";
-    let tempKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPACLOUD_API_TOKEN || "";
-    
-    const envPath = pathResolve(process.cwd(), ".env");
-    if ((!tempUrl || !tempKey) && existsSync(envPath)) {
-        try {
-            const envContent = readFileSync(envPath, "utf-8");
-            for (const line of envContent.split("\n")) {
-                const match = line.trim().match(/^([^=]+)=(.*)$/);
-                if (match) {
-                    const k = match[1].trim();
-                    const v = match[2].trim().replace(/^["']|["']$/g, "");
-                    if ((k === "SUPABASE_URL" || k === "SUPACLOUD_API_URL") && !tempUrl) tempUrl = v;
-                    if ((k === "SUPABASE_SERVICE_ROLE_KEY" || k === "SUPACLOUD_API_TOKEN") && !tempKey) tempKey = v;
-                }
+const { readFileSync, existsSync } = require("fs");
+const { resolve: pathResolve } = require("path");
+
+// ── Auto-detect .env logic for Thick Client ──
+let tempUrl = process.env.SUPABASE_URL || process.env.SUPACLOUD_API_URL || "";
+let tempKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPACLOUD_API_TOKEN || "";
+
+const envPath = pathResolve(process.cwd(), ".env");
+if ((!tempUrl || !tempKey) && existsSync(envPath)) {
+    try {
+        const envContent = readFileSync(envPath, "utf-8");
+        for (const line of envContent.split("\n")) {
+            const match = line.trim().match(/^([^=]+)=(.*)$/);
+            if (match) {
+                const k = match[1].trim();
+                const v = match[2].trim().replace(/^["']|["']$/g, "");
+                if ((k === "SUPABASE_URL" || k === "SUPACLOUD_API_URL") && !tempUrl) tempUrl = v;
+                if ((k === "SUPABASE_SERVICE_ROLE_KEY" || k === "SUPACLOUD_API_TOKEN") && !tempKey) tempKey = v;
             }
-        } catch { /* ignore */ }
-    }
-
-    if (!tempUrl || !tempKey) {
-        process.stderr.write("❌ Proxy Mode Error: Could not find SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY in environment or local .env file\\n");
-        process.exit(1);
-    }
-    
-    const EventSource = require("eventsource");
-    (global as any).EventSource = EventSource;
-    
-    const { SSEClientTransport } = require("@modelcontextprotocol/sdk/client/sse.js");
-    const { StdioServerTransport } = require("@modelcontextprotocol/sdk/server/stdio.js");
-
-    const mcpUrl = tempUrl.replace(/\/+$/, "") + "/mcp";
-
-    async function runProxy() {
-        const client = new SSEClientTransport(new URL(mcpUrl), {
-            headers: { "Authorization": `Bearer ${tempKey}` }
-        });
-        
-        const server = new StdioServerTransport();
-        
-        client.onmessage = (msg: any) => server.send(msg);
-        server.onmessage = (msg: any) => client.send(msg);
-        
-        // Handle closure gracefully to prevent stderr noise in IDE
-        client.onclose = () => process.exit(0);
-        client.onerror = (err: any) => {
-            process.stderr.write(`[Proxy Error] ${err}\\n`);
-            process.exit(1);
-        };
-        server.onclose = () => {
-            client.close();
-            process.exit(0);
-        };
-
-        await server.start();
-        await client.start();
-    }
-    
-    runProxy().catch(e => {
-        process.stderr.write(`Failed to start proxy: ${e}\\n`);
-        process.exit(1);
-    });
-
-} else {
+        }
+    } catch { /* ignore */ }
+}
 
 // ── Parse environment variables ──
-const HOST = process.env.SUPACLOUD_HOST ?? "";
+const HOST = process.env.SUPACLOUD_HOST ?? (tempUrl ? new URL(tempUrl).hostname : "");
 const SSH_USER = process.env.SUPACLOUD_SSH_USER ?? "root";
 const SSH_PORT = parseInt(process.env.SUPACLOUD_SSH_PORT ?? "22", 10);
 const SSH_KEY = process.env.SUPACLOUD_SSH_KEY ?? resolve(homedir(), ".ssh", "id_rsa");
 const SSH_PASS = process.env.SUPACLOUD_SSH_PASS ?? "";
-const API_URL = process.env.SUPACLOUD_API_URL ?? (HOST ? `http://${HOST}:9090` : "");
-const API_TOKEN = process.env.SUPACLOUD_API_TOKEN ?? "";
+
+// For tenant setups, API_URL maps directly to the project domain gateway.
+// Note: Management API runs on port 9090 natively, but tenant APIs proxy via standard HTTP/HTTPS.
+const API_URL = process.env.SUPACLOUD_API_URL ?? (tempUrl ? tempUrl.replace(/\/+$/, "") : (HOST ? `http://${HOST}:9090` : ""));
+const API_TOKEN = process.env.SUPACLOUD_API_TOKEN ?? tempKey ?? "";
 const PROJECT_REF = process.env.SUPACLOUD_PROJECT_REF ?? "";
 const READ_ONLY = process.env.SUPACLOUD_READ_ONLY === "true";
 
@@ -367,4 +323,3 @@ main().catch((err) => {
     console.error("SupaCloud MCP Server failed to start:", err);
     process.exit(1);
 });
-}
