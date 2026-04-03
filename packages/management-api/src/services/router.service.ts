@@ -119,9 +119,10 @@ server {
 
     add_header x-project-ref ${projectRef} always;
 
-    # Hijack /api/platform/* to Management API for multi-project support
-    location /api/platform/ {
-        proxy_pass http://${this.MANAGEMENT_API_INTERNAL}/platform/;
+    # Studio login/verify — pass directly to management API
+    location /auth/login {
+        proxy_read_timeout 120s;
+        proxy_pass http://${this.MANAGEMENT_API_INTERNAL};
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -129,9 +130,9 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 
-    # Hijack /api/auth/* to Management API for auth support
-    location /api/auth/ {
-        proxy_pass http://${this.MANAGEMENT_API_INTERNAL}/auth/;
+    location /auth/verify {
+        proxy_read_timeout 120s;
+        proxy_pass http://${this.MANAGEMENT_API_INTERNAL};
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -139,8 +140,43 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 
+    # GoTrue auth endpoints (rewrite /auth/* to /auth/v1/)
+    location /auth {
+        rewrite ^/auth/(.*)$ /auth/v1/$1 break;
+        proxy_read_timeout 120s;
+        proxy_pass http://${this.MANAGEMENT_API_INTERNAL};
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # Grafana reverse proxy
+    location /grafana/ {
+        proxy_pass http://${this.STUDIO_INTERNAL}/grafana/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+
+    # API routes to Management API
+    location /api {
+        proxy_pass http://${this.MANAGEMENT_API_INTERNAL};
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # All other routes — SPA served by management API
     location / {
-        proxy_pass http://${this.STUDIO_INTERNAL};
+        proxy_pass http://${this.MANAGEMENT_API_INTERNAL};
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -211,9 +247,10 @@ server {
 
     add_header x-project-ref ${projectRef} always;
 
-    # Hijack /api/platform/* to Management API for multi-project support
-    location /api/platform/ {
-        proxy_pass http://${this.MANAGEMENT_API_INTERNAL}/platform/;
+    # Studio login/verify — pass directly to management API
+    location /auth/login {
+        proxy_read_timeout 120s;
+        proxy_pass http://${this.MANAGEMENT_API_INTERNAL};
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -221,9 +258,9 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 
-    # Hijack /api/auth/* to Management API for auth support
-    location /api/auth/ {
-        proxy_pass http://${this.MANAGEMENT_API_INTERNAL}/auth/;
+    location /auth/verify {
+        proxy_read_timeout 120s;
+        proxy_pass http://${this.MANAGEMENT_API_INTERNAL};
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -231,8 +268,43 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 
+    # GoTrue auth endpoints (rewrite /auth/* to /auth/v1/)
+    location /auth {
+        rewrite ^/auth/(.*)$ /auth/v1/$1 break;
+        proxy_read_timeout 120s;
+        proxy_pass http://${this.MANAGEMENT_API_INTERNAL};
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # Grafana reverse proxy
+    location /grafana/ {
+        proxy_pass http://${this.STUDIO_INTERNAL}/grafana/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+
+    # API routes to Management API
+    location /api {
+        proxy_pass http://${this.MANAGEMENT_API_INTERNAL};
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # All other routes — SPA served by management API
     location / {
-        proxy_pass http://${this.STUDIO_INTERNAL};
+        proxy_pass http://${this.MANAGEMENT_API_INTERNAL};
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
