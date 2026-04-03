@@ -34,7 +34,6 @@ import { config } from "../config";
 
 // ── Imaginary Config ──────────────────────────────────────────────
 const IMAGINARY_URL = config.imaginaryUrl;
-const S3_ENDPOINT  = config.s3Endpoint;
 
 // Lazy-init: validate signing secret on first use, not at module load
 // This prevents test suites from crashing when importing the app module
@@ -68,31 +67,12 @@ function verifySignedToken(ref: string, bucket: string, path: string, expiresAt:
     return expected === token;
 }
 
-function buildSourceUrl(bucket: string, path: string): string {
-    const base = S3_ENDPOINT.endsWith('/') ? S3_ENDPOINT.slice(0, -1) : S3_ENDPOINT;
-    return `${base}/${bucket}/${path}`;
-}
-
 /**
  * Extract project ref from request.
  * Kong forwards the x-project-ref header; also fall back to apikey-based lookup.
  */
 function getProjectRef(headers: Record<string, string | undefined>): string {
     return headers['x-project-ref'] || headers['x-supabase-project'] || 'default';
-}
-
-/**
- * Resolve the actual S3 bucket name for a project.
- * In SupaCloud, each project gets a real S3 bucket named `supa-<ref>`.
- * The logical bucket name from supabase-js is used as a prefix inside that S3 bucket.
- */
-function resolveS3Path(projectRef: string, logicalBucket: string, filePath: string): {
-    bucket: string; key: string;
-} {
-    return {
-        bucket: `supa-${projectRef}`,
-        key: `${logicalBucket}/${filePath}`,
-    };
 }
 
 // ── Supabase SDK-Compatible Routes ────────────────────────────────
@@ -130,17 +110,16 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
     // GET /bucket — List all buckets
     .get('/bucket', async ({ headers }) => {
         const ref = getProjectRef(headers as Record<string, string | undefined>);
-        const buckets = await StorageService.listBuckets(ref);
-        // Transform to supabase-js expected format
+        const buckets = await StorageRLS.listLogicalBuckets(ref);
         return buckets.map(b => ({
-            id: b.id || b.name,
+            id: b.id,
             name: b.name,
             owner: '',
-            public: b.public ?? false,
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-            file_size_limit: null,
-            allowed_mime_types: null,
+            public: (b.public as boolean) ?? false,
+            created_at: (b.created_at as string) || new Date().toISOString(),
+            updated_at: (b.updated_at as string) || new Date().toISOString(),
+            file_size_limit: b.file_size_limit || null,
+            allowed_mime_types: b.allowed_mime_types || null,
         }));
     })
 
@@ -169,15 +148,16 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
     // GET /bucket/:id — Get bucket details
     .get('/bucket/:id', async ({ params, headers }) => {
         const ref = getProjectRef(headers as Record<string, string | undefined>);
+        const bucket = await StorageRLS.getLogicalBucket(ref, params.id);
         return {
             id: params.id,
-            name: params.id,
+            name: (bucket?.name as string) || params.id,
             owner: '',
-            public: false,
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-            file_size_limit: null,
-            allowed_mime_types: null,
+            public: (bucket?.public as boolean) ?? false,
+            created_at: (bucket?.created_at as string) || new Date().toISOString(),
+            updated_at: (bucket?.updated_at as string) || new Date().toISOString(),
+            file_size_limit: bucket?.file_size_limit || null,
+            allowed_mime_types: bucket?.allowed_mime_types || null,
         };
     })
 
@@ -199,7 +179,6 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         const filePath = params['*'];
         if (!filePath) return status(400, { statusCode: '400', error: 'Bad Request', message: 'Missing file path' });
 
-        const { bucket, key } = resolveS3Path(ref, params.bucket, filePath);
         const contentType = headers['content-type'] || 'application/octet-stream';
 
         try {
@@ -211,12 +190,12 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             const permitted = await StorageRLS.authorizeAction(ref, auth, 'upload', params.bucket, filePath, metadata);
             if (!permitted) return status(403, { statusCode: '403', error: 'Forbidden', message: 'Row Level Security violation or bucket missing. Access Denied.' });
 
-            const success = await StorageService.uploadFile(ref, bucket, key, Buffer.from(body), contentType);
+            const success = await StorageService.uploadFile(ref, params.bucket, filePath, Buffer.from(body), contentType);
 
             if (!success) return status(500, { statusCode: '500', error: 'Internal', message: 'Failed to upload file' });
 
             return {
-                Id: key,
+                Id: `${params.bucket}/${filePath}`,
                 Key: `${params.bucket}/${filePath}`,
             };
         } catch (err: unknown) {
@@ -231,7 +210,6 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         const filePath = params['*'];
         if (!filePath) return status(400, { statusCode: '400', error: 'Bad Request', message: 'Missing file path' });
 
-        const { bucket, key } = resolveS3Path(ref, params.bucket, filePath);
         const contentType = headers['content-type'] || 'application/octet-stream';
 
         try {
@@ -243,7 +221,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             const permitted = await StorageRLS.authorizeAction(ref, auth, 'upload', params.bucket, filePath, metadata); // Upsert requires same RLS as upload.
             if (!permitted) return status(403, { statusCode: '403', error: 'Forbidden', message: 'Row Level Security violation or bucket missing. Access Denied.' });
 
-            const success = await StorageService.uploadFile(ref, bucket, key, Buffer.from(body), contentType);
+            const success = await StorageService.uploadFile(ref, params.bucket, filePath, Buffer.from(body), contentType);
             if (!success) return status(500, { statusCode: '500', error: 'Internal', message: 'Upsert failed' });
             return { Key: `${params.bucket}/${filePath}` };
         } catch (err: unknown) {
@@ -263,7 +241,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
 
         // If transform params are present, proxy to imaginary
         if (query.width || query.height || query.resize || query.format || query.quality) {
-            return proxyToImaginary(params.bucket, filePath, query, set as { headers: Record<string, string> });
+            return proxyToImaginary(ref, params.bucket, filePath, query, set as { headers: Record<string, string> });
         }
 
         // Otherwise, run RLS and get stream
@@ -271,9 +249,8 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         const permitted = await StorageRLS.authorizeAction(ref, auth, 'download', params.bucket, filePath);
         if (!permitted) return status(404, { statusCode: '404', error: 'Not Found', message: 'Object not found or access denied by RLS' });
 
-        const { bucket, key } = resolveS3Path(ref, params.bucket, filePath);
         try {
-            const res = await StorageService.getDownloadResponse(ref, bucket, key);
+            const res = await StorageService.getDownloadResponse(ref, params.bucket, filePath);
             if (!res) return status(404, { statusCode: '404', error: 'Not Found', message: 'Object not found internally' });
 
             set.headers['Content-Type'] = res.headers?.get('Content-Type') || 'application/octet-stream';
@@ -294,16 +271,15 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
 
         // Transform support
         if (query.width || query.height || query.resize || query.format || query.quality) {
-            return proxyToImaginary(params.bucket, filePath, query, set as { headers: Record<string, string> });
+            return proxyToImaginary(ref, params.bucket, filePath, query, set as { headers: Record<string, string> });
         }
 
         const auth = headers['authorization'];
         const permitted = await StorageRLS.authorizeAction(ref, auth, 'download', params.bucket, filePath);
         if (!permitted) return status(404, { statusCode: '404', error: 'Not Found', message: 'Object not found or access denied by RLS' });
 
-        const { bucket, key } = resolveS3Path(ref, params.bucket, filePath);
         try {
-            const res = await StorageService.getDownloadResponse(ref, bucket, key);
+            const res = await StorageService.getDownloadResponse(ref, params.bucket, filePath);
             if (!res) return status(404, { statusCode: '404', error: 'Not Found', message: 'Object not found internally' });
 
             set.headers['Content-Type'] = res.headers?.get('Content-Type') || 'application/octet-stream';
@@ -375,16 +351,13 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             return status(401, { statusCode: '401', error: 'Unauthorized', message: 'Invalid or expired signed URL' });
         }
 
-        // Token valid — proxy from S3
-        const { bucket, key } = resolveS3Path(ref, params.bucket, filePath);
-
         // Transform support for signed URLs
         if (query.width || query.height || query.resize || query.format || query.quality) {
-            return proxyToImaginary(params.bucket, filePath, query, set as { headers: Record<string, string> });
+            return proxyToImaginary(ref, params.bucket, filePath, query, set as { headers: Record<string, string> });
         }
 
         try {
-            const res = await StorageService.getDownloadResponse(ref, bucket, key);
+            const res = await StorageService.getDownloadResponse(ref, params.bucket, filePath);
             if (!res) return status(404, { statusCode: '404', error: 'Not Found', message: 'Object not found internally' });
 
             set.headers['Content-Type'] = res.headers?.get('Content-Type') || 'application/octet-stream';
@@ -443,8 +416,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
                 const permitted = await StorageRLS.authorizeAction(ref, auth, 'delete', params.bucket, p);
                 if (!permitted) throw new Error('Forbidden');
                 
-                const { bucket, key } = resolveS3Path(ref, params.bucket, p);
-                return await StorageService.deleteFile(ref, bucket, key);
+                return await StorageService.deleteFile(ref, params.bucket, p);
             })
         );
 
@@ -471,27 +443,27 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         }
 
         try {
-            // Step 1: Copy object to destination
-            const copyRes = await fetch(`${S3_ENDPOINT}/${destBucket}/${destKey}`, {
-                method: 'PUT',
-                headers: {
-                    'x-amz-copy-source': `/${srcBucket}/${srcKey}`,
-                },
-            });
-            if (!copyRes.ok) {
-                return status(500, { statusCode: '500', error: 'S3 Error', message: `Copy failed: ${copyRes.status}` });
-            }
+            // Step 1: Download source
+            const srcRes = await StorageService.getDownloadResponse(ref, srcBucket, srcKey);
+            if (!srcRes) return status(404, { statusCode: '404', error: 'Not Found', message: 'Source object not found' });
+            const srcData = Buffer.from(await srcRes.arrayBuffer());
+            const contentType = srcRes.headers?.get('Content-Type') || 'application/octet-stream';
 
-            // Step 2: Delete source object
-            await fetch(`${S3_ENDPOINT}/${srcBucket}/${srcKey}`, { method: 'DELETE' });
+            // Step 2: Upload to destination
+            const uploaded = await StorageService.uploadFile(ref, destBucket, destKey, srcData, contentType);
+            if (!uploaded) return status(500, { statusCode: '500', error: 'Internal', message: 'Move failed: could not write destination' });
+
+            // Step 3: Delete source
+            await StorageService.deleteFile(ref, srcBucket, srcKey);
 
             return { message: `Moved ${srcBucket}/${srcKey} to ${destBucket}/${destKey}` };
         } catch (err: unknown) {
-            return status(500, { statusCode: '500', error: 'S3 Error', message: err instanceof Error ? err.message : String(err) });
+            return status(500, { statusCode: '500', error: 'Internal', message: err instanceof Error ? err.message : String(err) });
         }
     })
 
     .post('/object/copy', async ({ headers, body }) => {
+        const ref = getProjectRef(headers as Record<string, string | undefined>);
         const b = body as Record<string, unknown>;
         const srcBucket = String(b.bucketId || '');
         const srcKey = String(b.sourceKey || '');
@@ -502,19 +474,17 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         }
 
         try {
-            const copyRes = await fetch(`${S3_ENDPOINT}/${srcBucket}/${destKey}`, {
-                method: 'PUT',
-                headers: {
-                    'x-amz-copy-source': `/${srcBucket}/${srcKey}`,
-                },
-            });
-            if (!copyRes.ok) {
-                return status(500, { statusCode: '500', error: 'S3 Error', message: `Copy failed: ${copyRes.status}` });
-            }
+            const srcRes = await StorageService.getDownloadResponse(ref, srcBucket, srcKey);
+            if (!srcRes) return status(404, { statusCode: '404', error: 'Not Found', message: 'Source object not found' });
+            const srcData = Buffer.from(await srcRes.arrayBuffer());
+            const contentType = srcRes.headers?.get('Content-Type') || 'application/octet-stream';
+
+            const uploaded = await StorageService.uploadFile(ref, srcBucket, destKey, srcData, contentType);
+            if (!uploaded) return status(500, { statusCode: '500', error: 'Internal', message: 'Copy failed' });
 
             return { Key: `${srcBucket}/${destKey}` };
         } catch (err: unknown) {
-            return status(500, { statusCode: '500', error: 'S3 Error', message: err instanceof Error ? err.message : String(err) });
+            return status(500, { statusCode: '500', error: 'Internal', message: err instanceof Error ? err.message : String(err) });
         }
     })
 
@@ -523,10 +493,11 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
     // supabase.storage.from('bucket').download('path', { transform: { width, height } })
     // ════════════════════════════════════════════════════════
 
-    .get('/render/image/public/:bucket/*', async ({ params, query, set }) => {
+    .get('/render/image/public/:bucket/*', async ({ params, headers, query, set }) => {
+        const ref = getProjectRef(headers as Record<string, string | undefined>);
         const filePath = params['*'];
         if (!filePath) return status(400, { error: 'Missing file path' });
-        return proxyToImaginary(params.bucket, filePath, query, set as { headers: Record<string, string> });
+        return proxyToImaginary(ref, params.bucket, filePath, query, set as { headers: Record<string, string> });
     })
 
     // ════════════════════════════════════════════════════════
@@ -612,10 +583,9 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         // Upload complete — assemble and store in S3
         if (upload.offset >= upload.totalSize) {
             const fullBody = Buffer.concat(upload.chunks);
-            const { bucket, key } = resolveS3Path(upload.ref, upload.bucket, upload.objectName);
 
             try {
-                await StorageService.uploadFile(upload.ref, bucket, key, fullBody, upload.contentType);
+                await StorageService.uploadFile(upload.ref, upload.bucket, upload.objectName, fullBody, upload.contentType);
                 tusUploads.delete(params.uploadId);
                 return { Key: `${upload.bucket}/${upload.objectName}` };
             } catch (err: unknown) {
@@ -638,16 +608,23 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
 
 
 // ── Shared imaginary proxy helper ─────────────────────────────────
+// POST image body directly to imaginary instead of having imaginary fetch via URL.
+// This works for both local/JuiceFS and S3 storage backends.
 async function proxyToImaginary(
-    bucket: string,
+    ref: string,
+    logicalBucket: string,
     filePath: string,
     query: Record<string, string | undefined>,
     set: { headers: Record<string, string> }
 ): Promise<Response | { error: string }> {
-    const sourceUrl = buildSourceUrl(bucket, filePath);
-    const imaginaryParams = new URLSearchParams();
-    imaginaryParams.set('url', sourceUrl);
+    // 1. Read the source image from storage
+    const downloadRes = await StorageService.getDownloadResponse(ref, logicalBucket, filePath);
+    if (!downloadRes) {
+        return status(404, { error: 'Source image not found' }) as unknown as { error: string };
+    }
 
+    // 2. Build imaginary query params
+    const imaginaryParams = new URLSearchParams();
     if (query.width)  imaginaryParams.set('width',  String(query.width));
     if (query.height) imaginaryParams.set('height', String(query.height));
     imaginaryParams.set('quality', String(query.quality || 80));
@@ -667,7 +644,15 @@ async function proxyToImaginary(
     }
 
     try {
-        const res = await fetch(`${IMAGINARY_URL}/${operation}?${imaginaryParams.toString()}`);
+        // 3. POST the raw image body to imaginary (no URL fetch needed)
+        const imageBody = await downloadRes.arrayBuffer();
+        const sourceContentType = downloadRes.headers?.get('Content-Type') || 'application/octet-stream';
+
+        const res = await fetch(`${IMAGINARY_URL}/${operation}?${imaginaryParams.toString()}`, {
+            method: 'POST',
+            body: imageBody,
+            headers: { 'Content-Type': sourceContentType },
+        });
         if (!res.ok) {
             const errText = await res.text();
             logger.error(`Imaginary ${operation} failed:`, { status: res.status, error: errText });

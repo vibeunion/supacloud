@@ -17,6 +17,21 @@ export class StorageRLS {
     `;
   }
 
+  static async listLogicalBuckets(ref: string): Promise<Record<string, unknown>[]> {
+    const project = (await metaSql`SELECT db_name FROM projects WHERE ref=${ref}`)[0];
+    if (!project) return [];
+    const db = getProjectDb(project.db_name);
+    return await db`SELECT id, name, public, created_at, updated_at, file_size_limit, allowed_mime_types FROM storage.buckets ORDER BY name`;
+  }
+
+  static async getLogicalBucket(ref: string, bucketId: string): Promise<Record<string, unknown> | null> {
+    const project = (await metaSql`SELECT db_name FROM projects WHERE ref=${ref}`)[0];
+    if (!project) return null;
+    const db = getProjectDb(project.db_name);
+    const rows = await db`SELECT id, name, public, created_at, updated_at, file_size_limit, allowed_mime_types FROM storage.buckets WHERE id = ${bucketId}`;
+    return (rows[0] as Record<string, unknown>) || null;
+  }
+
   static async getTenantJwtSecret(ref: string): Promise<string | null> {
     const rows = await metaSql`SELECT jwt_secret FROM projects WHERE ref=${ref}`;
     return rows[0]?.jwt_secret || null;
