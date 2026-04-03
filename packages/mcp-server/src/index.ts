@@ -53,6 +53,7 @@ import { registerAuthTools } from "./tools/auth-tools";
 import { registerStorageTools } from "./tools/storage-tools";
 import { registerOrganizationTools } from "./tools/org-tools";
 import { registerTaskTools } from "./tools/task-tools";
+import { registerDocsResources } from "./resources/docs";
 import { resolve } from "path";
 import { homedir } from "os";
 
@@ -146,6 +147,25 @@ if (API_URL) {
     );
 
     server.prompt(
+        "generate_auth_system",
+        "Generate authentication triggers and profile sync logic",
+        {
+            ref: z.string().describe("Project ref to work on")
+        },
+        (args: any) => ({
+            messages: [
+                {
+                    role: "user",
+                    content: {
+                        type: "text",
+                        text: `I need to build an Auth system for project '${args.ref}'. First, read the resource 'docs://supabase/auth' to understand current platform best practices. Then, help me execute the precise SQL to create a public.profiles table and a 'on_auth_user_created' trigger.`
+                    }
+                }
+            ]
+        })
+    );
+
+    server.prompt(
         "design_tenant_schema",
         "Help design a database schema following best practices and RLS",
         {
@@ -158,7 +178,7 @@ if (API_URL) {
                     role: "user",
                     content: {
                         type: "text",
-                        text: `I want to design a database schema for a '${args.domain}' workload on Supabase. I am working on project '${args.ref}'. Please start by querying 'list_tables' to see what already exists. Then propose the SQL for new tables, ensuring every table has ROW LEVEL SECURITY enabled, uses UUID primary keys, and has an 'updated_at' trigger. Whenever you actually create tables, prefer using the 'create_table_with_rls' tool.`
+                        text: `I want to design a database schema for a '${args.domain}' workload on Supabase. I am working on project '${args.ref}'. Please start by reading the resource 'docs://supabase/sql' to ensure modern RLS practices are fresh in your memory. Then, propose the SQL for new tables, ensuring every table has ROW LEVEL SECURITY enabled, uses UUID primary keys, and has an 'updated_at' trigger. Whenever you actually create tables, prefer using the 'create_table_with_rls' tool.`
                     }
                 }
             ]
@@ -312,6 +332,9 @@ if (!HOST && !API_URL) {
         })
     );
 }
+
+// ── Register Documents (Resources) ──
+registerDocsResources(server);
 
 // ── Start stdio transport ──
 async function main(): Promise<void> {
