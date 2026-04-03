@@ -61,8 +61,8 @@ const { readFileSync, existsSync } = require("fs");
 const { resolve: pathResolve } = require("path");
 
 // ── Auto-detect .env logic for Thick Client ──
-let tempUrl = process.env.SUPABASE_URL || process.env.SUPACLOUD_API_URL || "";
-let tempKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPACLOUD_API_TOKEN || "";
+let tempUrl = process.env.SUPACLOUD_API_URL || "";
+let tempKey = process.env.SUPACLOUD_API_TOKEN || "";
 
 const envPath = pathResolve(process.cwd(), ".env");
 if ((!tempUrl || !tempKey) && existsSync(envPath)) {
@@ -73,8 +73,8 @@ if ((!tempUrl || !tempKey) && existsSync(envPath)) {
             if (match) {
                 const k = match[1].trim();
                 const v = match[2].trim().replace(/^["']|["']$/g, "");
-                if ((k === "SUPABASE_URL" || k === "SUPACLOUD_API_URL") && !tempUrl) tempUrl = v;
-                if ((k === "SUPABASE_SERVICE_ROLE_KEY" || k === "SUPACLOUD_API_TOKEN") && !tempKey) tempKey = v;
+                if (k === "SUPACLOUD_API_URL" && !tempUrl) tempUrl = v;
+                if (k === "SUPACLOUD_API_TOKEN" && !tempKey) tempKey = v;
             }
         }
     } catch { /* ignore */ }
