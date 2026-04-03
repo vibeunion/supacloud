@@ -1,0 +1,44 @@
+name: NPM Publish (MCP Server)
+
+on:
+  workflow_dispatch: # 允许通过 GitHub 网页端手动触发
+  push:
+    branches:
+      - main
+    paths:
+      - 'packages/mcp-server/package.json' # 当版本号更新并推送到 main 时自动触发
+
+jobs:
+  publish:
+    name: Build & Publish with Provenance
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write   # 必须！这是 OIDC 颁发无密码 Token 的核心权限
+      contents: read    # 允许拉取代码
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: latest
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install dependencies
+        working-directory: packages/mcp-server
+        run: bun install
+
+      - name: Build
+        working-directory: packages/mcp-server
+        run: bun run build
+
+      - name: Publish with Provenance
+        working-directory: packages/mcp-server
+        run: npm publish --provenance --access public
