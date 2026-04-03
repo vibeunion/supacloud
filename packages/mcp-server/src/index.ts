@@ -185,6 +185,44 @@ if (API_URL) {
         })
     );
 
+    server.prompt(
+        "design_and_save_migration",
+        "Design a schema migration and save it as a local SQL file before applying",
+        {
+            ref: z.string().describe("Project ref to work on")
+        },
+        (args: any) => ({
+            messages: [
+                {
+                    role: "user",
+                    content: {
+                        type: "text",
+                        text: `I need to create a database migration for project '${args.ref}'. Please interactively ask me what schema changes I need. Once we agree on the SQL, DO NOT immediately apply it. First, use your native IDE capabilities to create and save the SQL text into a file at 'supabase/migrations/<YYYYMMDDHHMMSS>_<name>.sql' in the local workspace. After successfully saving the local file, ask me if I want to execute it against the cloud database.`
+                    }
+                }
+            ]
+        })
+    );
+
+    server.prompt(
+        "update_typescript_types",
+        "Generate TypeScript definitions and save them to the local workspace",
+        {
+            ref: z.string().describe("Project ref to work on")
+        },
+        (args: any) => ({
+            messages: [
+                {
+                    role: "user",
+                    content: {
+                        type: "text",
+                        text: `I need to update the TypeScript definitions for project '${args.ref}'. Please use the 'generate_typescript_types' tool. Instead of just showing me the output, use your native IDE capabilities to overwrite the file at 'types/supabase.ts' in my local workspace with the generated types.`
+                    }
+                }
+            ]
+        })
+    );
+
     // ── Register MCP Resources ──
     // Expose database schemas as real-time readable resources (e.g. pg://test/schema/public)
     server.resource(
