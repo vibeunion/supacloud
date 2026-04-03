@@ -241,19 +241,22 @@ Let AI assistants (Claude, Cursor, Windsurf) manage your SupaCloud database and 
 
 SupaCloud now natively exposes an HTTP MCP endpoint via the project's API Gateway. **No installation required**.
 
-**Project-scoped mode** (Configure in Cursor / Windsurf):
+**Project-scoped mode: Option 1 (IDE with Native SSE support, e.g. Cursor / Windsurf)**:
 - **Type**: `sse`
 - **URL**: `https://<YOUR_API_DOMAIN>/mcp`
 - **Headers**: 
   - `Authorization: Bearer <YOUR_SERVICE_ROLE_KEY>`
 
+**Project-scoped mode: Option 2 (Smart Proxy for Claude Desktop / StdIO)**:
+Use our smart proxy to automatically connect to whatever project you are currently working on. It instantly sniffs the `.env` in your active code directory.
+
 ```json
-// Example for claude_desktop_config.json
+// claude_desktop_config.json or IDE MCP settings
 {
   "mcpServers": {
-    "my-supacloud-project": {
-      "command": "curl",
-      "args": ["-sX", "POST", "https://api.myproject.com/mcp", "-H", "Authorization: Bearer eyJhb...", "-H", "Accept: text/event-stream"]
+    "my-supacloud-link": {
+      "command": "npx",
+      "args": ["-y", "supacloud-mcp@latest", "--local"]
     }
   }
 }
@@ -590,11 +593,26 @@ Kong/Angie 网关:
 
 SupaCloud 现在原生通过项目的 API 网关暴露了标准 HTTP MCP 端点，**无需任何安装配置**。
 
-**如何接入** (在 Cursor 或 Windsurf 中配置):
+**如何接入（方案 1：直接接入，Cursor / Windsurf 推荐）**:
 - **Type**: `sse`
 - **URL**: `https://<你的项目API域名>/mcp`
 - **Headers**: 
   - `Authorization: Bearer <你的 SERVICE_ROLE_KEY>`
+
+**如何接入（方案 2：智能本地代理，Claude Desktop / 命令行 IDE 推荐）**:
+如果你在同时开发多个项目，可以使用官方提供的智能代理包。它会自动**嗅探你当前 IDE 所打开代码库**里的 `.env` 变量，实现无缝切换对应项目数据库。
+
+```json
+// claude_desktop_config.json 或是任意要求提供 command 的环境
+{
+  "mcpServers": {
+    "supacloud-auto-link": {
+      "command": "npx",
+      "args": ["-y", "supacloud-mcp@latest", "--local"]
+    }
+  }
+}
+```
 
 内置工具包括：数据库元数据内省（自动读取表结构、外键、RLS策略）、直接执行 SQL（`execute_sql`），以及带有表结构上下文的 AI SQL 生成助手。
 
