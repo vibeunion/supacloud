@@ -30,6 +30,12 @@ async function loadModule(functionPath: string): Promise<{ default: unknown }> {
 }
 
 parentPort?.on("message", async (msg) => {
+  // Handle cache invalidation messages from pool
+  if (msg.type === "invalidate") {
+    moduleCache.delete(msg.functionId);
+    return;
+  }
+
   try {
     const { functionId, functionPath, env, url, method, headers, body } =
       msg;

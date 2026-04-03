@@ -15,12 +15,15 @@ export class WorkerPool {
     resolve: (r: Response) => void;
   }> = [];
   private totalRequests = 0;
+  private allWorkers: Worker[] = [];
 
   constructor(
     private config: { size: number; requestTimeout: number },
   ) {
     for (let i = 0; i < config.size; i++) {
-      this.idle.push(this.createWorker());
+      const w = this.createWorker();
+      this.idle.push(w);
+      this.allWorkers.push(w);
     }
   }
 
@@ -131,5 +134,12 @@ export class WorkerPool {
       `supacloud_edge_queue_length ${this.queue.length}`,
       `supacloud_edge_total_requests ${this.totalRequests}`,
     ].join("\n");
+  }
+
+  /** Notify all workers to evict a function from their module cache */
+  invalidateModule(functionId: string): void {
+    for (const w of this.allWorkers) {
+      w.postMessage({ type: "invalidate", functionId });
+    }
   }
 }
