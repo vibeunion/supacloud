@@ -8,10 +8,10 @@ AI-native 的 Supabase 基础设施管理 MCP Server。让 AI Agent（Claude、C
 - 🚀 **安装后增强**：通过 Management API 管理项目全生命周期
 - 🗄️ **数据库操作**：SQL 查询、Schema 检查、RLS 策略、数据迁移（支持只读模式）
 - 🔐 **Auth 管理**：OAuth Provider 配置（含微信/QQ/微博等国内登录）、Auth 设置
-- 📦 **存储管理**：S3/MinIO 桶管理、文件操作
+- 📦 **存储管理**：S3/MinIO 桶管理、文件操作与 Base64 测试直传
 - 🏗️ **部署管理**：Docker 容器状态检查与 Web Console 部署
 - 🔒 **项目范围模式**：限制 AI 只能访问指定项目，支持只读模式
-- 🤖 **AI 原生**：标准 MCP 协议，兼容所有主流 AI IDE
+- 🤖 **AI 原生**：带有上下文资源（Resources）与超级智能指引（Prompts）的标准 MCP 协议
 - 🔑 **安全可控**：环境变量配置凭据，工具级权限隔离
 
 ## 快速开始
@@ -132,6 +132,7 @@ Management API 内嵌了 Streamable HTTP MCP 端点，无需安装任何东西�
 | `delete_project` | 删除项目 |
 | `pause_project` / `restore_project` | 暂停/恢复项目 |
 | `get_project_health` | 健康检查 |
+| `fetch_project_logs` | 获取远端容器系统底层的实时日志（auth, api, db） |
 | `get_api_keys` | 获取 API 密钥 |
 | `restart_project` | 重启所有容器 |
 | `get_project_settings` / `update_project_settings` | 获取/更新项目配置 |
@@ -173,6 +174,7 @@ Management API 内嵌了 Streamable HTTP MCP 端点，无需安装任何东西�
 | `list_auth_users` / `get_auth_user` | 查询认证用户 |
 | `get_database_connections` | 查看活跃连接 |
 | `get_database_stats` | 数据库统计（表大小/行数） |
+| `get_slow_queries` | 通过 pg_stat_statements 抓取耗时极高的前 10 条慢查询 |
 | `apply_migration` / `list_migrations` | 执行/查看迁移 |
 | `get_project_url` | 获取项目 API URL |
 | `generate_typescript_types` | 从 Schema 生成 TypeScript 类型 |
@@ -184,7 +186,23 @@ Management API 内嵌了 Streamable HTTP MCP 端点，无需安装任何东西�
 | `get_storage_status` | 获取存储后端状态 |
 | `list_storage_buckets` | 列出存储桶 |
 | `list_storage_files` | 列出桶中的文件 |
+| `upload_base64_file` | 直传 Base64 测试文件到远端存储桶 |
 | `delete_storage_file` | 删除文件 |
+
+### 💡 内置智能工作流（Advanced Prompts）
+
+此 MCP 提供高级工作流 Prompt 编排，引导 IDE AI 自动混合本地编辑与远端运维能力：
+
+| Prompt 模板 | 说明 |
+|------|------|
+| `generate_auth_system` | 为项目自动化实现完整 Auth 架构和 Profiles 触发器闭环 |
+| `design_and_save_migration` | 在写数据库前，强制通过编辑器原生能力在工作区 `supabase/migrations` 保留 `.sql` 文件底稿 |
+| `generate_mock_data` | 基于反射 Schema，智造海量的高级随机演练假数据，生成出 `seed.sql` 喂入远端数据库 |
+| `run_security_audit` | 全盘扫描 RLS 及函数漏洞，一键在本地输出《安全审计报告.md》 |
+| `analyze_slow_queries` | 联动底层的慢查询探针检索慢 SQL，AI 思考并立刻补发出 `CREATE INDEX` 优化指令 |
+| `setup_scheduled_job` | 面向 pg_cron 的大管家，以自然语言配置定时清理/邮件计划任务 |
+| `check_schema_diff` | 虚拟化让 AI 对比本地的 migration 文件夹和远端主库表结构，寻找未同步变动 |
+| `sync_local_edge_functions` | 直接读取本地 `supabase/functions/` 目录的 TS 模块，压缩热推云端节点 |
 
 ### 任务队列工具 🆕
 
