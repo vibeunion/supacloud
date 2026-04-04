@@ -162,6 +162,44 @@ export async function handleMcp(request: Request): Promise<Response> {
       return jsonResponse({ token, ref: body.ref, readonly: (body.readonly as boolean) ?? true, expires_days: (body.expires_days as number) ?? 365 });
     }
 
+    // Migrations endpoint — execute SQL and record as migration
+    if (url.pathname === "/mcp/migrations") {
+      try {
+        const body = await request.json() as { sql: string; name: string; ref?: string };
+        if (!body.sql || !body.name) return jsonResponse({ error: "Missing 'sql' and 'name' fields" }, 400);
+
+        let ref = tokenPayload.ref;
+        if (!ref && body.ref) {
+          if (tokenPayload.role !== "admin") return jsonResponse({ error: "Only admins can supply custom ref." }, 403);
+          ref = body.ref;
+        }
+        if (!ref) return jsonResponse({ error: "Project ref required." }, 403);
+
+        const projectRows = await metaSql`SELECT db_name FROM projects WHERE ref = ${ref} LIMIT 1`;
+        if (!projectRows.length) return jsonResponse({ error: "Project not found" }, 404);
+
+        const { getProjectDb } = await import("../db");
+        const tenantDb = getProjectDb(projectRows[0].db_name as string);
+
+        // Execute the migration SQL
+        await tenantDb.unsafe(body.sql);
+
+        // Record the migration (create table if needed)
+        await tenantDb.unsafe(`
+          CREATE TABLE IF NOT EXISTS public.migration_history (
+            id serial PRIMARY KEY,
+            name text NOT NULL,
+            executed_at timestamptz DEFAULT now()
+          )
+        `);
+        await tenantDb.unsafe(`INSERT INTO public.migration_history (name) VALUES ('${body.name.replace(/'/g, "''")}')`);
+
+        return jsonResponse({ success: true, name: body.name, message: "Migration applied" });
+      } catch (e: any) {
+        return jsonResponse({ error: e.message || "Migration failed" }, 500);
+      }
+    }
+
     // MCP JSON-RPC
     const sessionId = request.headers.get("mcp-session-id");
     let session: { transport: WebStandardStreamableHTTPServerTransport; server: McpServer };
