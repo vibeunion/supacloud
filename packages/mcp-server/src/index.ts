@@ -53,6 +53,7 @@ import { registerAuthTools } from "./tools/auth-tools";
 import { registerStorageTools } from "./tools/storage-tools";
 import { registerOrganizationTools } from "./tools/org-tools";
 import { registerTaskTools } from "./tools/task-tools";
+import { registerFrontendTools } from "./tools/frontend-tools";
 import { registerDocsResources } from "./resources/docs";
 import { resolve } from "path";
 import { homedir } from "os";
@@ -417,6 +418,9 @@ if (API_URL) {
 
     // Advanced tools (skip write operations in read-only mode)
     registerAdvancedTools(server, http);
+
+    // Frontend hosting tools
+    registerFrontendTools(server, http);
 }
 
 // ── Register deployment tools (local Docker operations) ──
