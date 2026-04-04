@@ -167,12 +167,33 @@ async function getEmbeddedAssets() {
 }
 
 // Cached SPA index.html content (avoids re-reading on every fallback)
+import { Glob } from "bun";
+
 let _cachedIndexHtml: string | null = null;
+const staticAssetCache = new Set<string>();
+let staticCacheWarmed = false;
+
+function warmupStaticAssets() {
+  if (staticCacheWarmed) return;
+  try {
+    const glob = new Glob("**/*");
+    for (const file of glob.scanSync({ cwd: WEB_CONSOLE_DIR, onlyFiles: true })) {
+      const standardPath = file.startsWith('/') ? file : '/' + file;
+      staticAssetCache.add(standardPath);
+    }
+    logger.info(`[StaticAssets] Pre-warmed ${staticAssetCache.size} files into memory cache O(1)`);
+    staticCacheWarmed = true;
+  } catch (e: unknown) {
+    logger.warn("[StaticAssets] Failed to warm up directory", { dir: WEB_CONSOLE_DIR, error: String(e) });
+  }
+}
 
 /**
- * Register static assets (SPA)
+ * Register static assets (SPA) with O(1) hashmap checks and zero-copy / pre-compression
  */
 export function registerStaticAssets() {
+  warmupStaticAssets();
+
   return new Elysia({ name: "static-assets" }).get("*", async (context) => {
     const { request, set } = context;
     const url = new URL(request.url);
@@ -184,30 +205,48 @@ export function registerStaticAssets() {
       return { error: "Route not found" };
     }
 
-    // Try to serve from file system first (web-console build)
     try {
-      const filePath = `${WEB_CONSOLE_DIR}${path}`;
-      const fItem = Bun.file(filePath);
-      
-      if (await fItem.exists()) {
-        if (fItem.size >= 0 && !path.endsWith("/")) {
-          const ext = path.substring(path.lastIndexOf("."));
-          set.headers["Content-Type"] = MIME_TYPES[ext] || "application/octet-stream";
-          return fItem;
+      // Memory Hash check O(1)
+      const acceptEncoding = request.headers.get('accept-encoding') || '';
+      let diskFile: string | null = null;
+      let encoding: 'br' | 'gzip' | null = null;
+
+      if (acceptEncoding.includes('br') && staticAssetCache.has(path + '.br')) {
+        diskFile = path + '.br';
+        encoding = 'br';
+      } else if (acceptEncoding.includes('gzip') && staticAssetCache.has(path + '.gz')) {
+        diskFile = path + '.gz';
+        encoding = 'gzip';
+      } else if (staticAssetCache.has(path)) {
+        diskFile = path;
+      }
+
+      if (diskFile) {
+        const extMatch = path.match(/\.[0-9a-z]+$/i);
+        const ext = extMatch ? extMatch[0].toLowerCase() : '';
+        set.headers["Content-Type"] = MIME_TYPES[ext] || "application/octet-stream";
+
+        set.headers["Cache-Control"] = path.includes('/assets/') || path.match(/\.[0-9a-f]{8}\./)
+          ? "public, max-age=31536000, immutable" 
+          : "public, max-age=3600";
+
+        if (encoding) {
+          set.headers["Content-Encoding"] = encoding;
+          set.headers["Vary"] = "Accept-Encoding";
         }
+
+        return Bun.file(`${WEB_CONSOLE_DIR}${diskFile}`);
       }
 
       // Try index.html for SPA routing (fallback for non-asset paths)
-      const exactPath = "/opt/supacloud/packages/web-console/build/index.html";
-      const iItem = Bun.file(exactPath);
-      if (await iItem.exists()) {
+      const exactPath = `${WEB_CONSOLE_DIR}/index.html`;
+      if (staticAssetCache.has("/index.html")) {
         if (!_cachedIndexHtml) {
-          _cachedIndexHtml = await iItem.text();
+          _cachedIndexHtml = await Bun.file(exactPath).text();
         }
-        return new Response(_cachedIndexHtml, { headers: { "Content-Type": "text/html; charset=utf-8" } });
+        return new Response(_cachedIndexHtml, { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-cache" } });
       }
     } catch (e: unknown) {
-      // Fall through to embedded assets
       logger.error("Asset FS error:", { error: e instanceof Error ? e.message : String(e) });
     }
 
