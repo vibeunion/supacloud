@@ -265,14 +265,13 @@ export class ProjectService {
       }
     };
 
-    const [pgrstStatus, gotrueStatus, realtimePerTenant, storagePerTenant, kongSystemd, kongDocker, angieSystemd, realtimeDocker] = await Promise.all([
+    const [pgrstStatus, gotrueStatus, realtimePerTenant, storagePerTenant, kongSystemd, kongDocker, realtimeDocker] = await Promise.all([
       checkService(`supacloud-pgrst@${ref}`),
       checkService(`supacloud-gotrue@${ref}`),
       checkService(`supacloud-realtime@${ref}`),
       checkService(`supacloud-storage@${ref}`),
       checkService("kong"),
       checkGlobalDocker("supabase-kong"),
-      checkService("angie"),
       checkGlobalDocker("realtime-dev.supabase-realtime"),
     ]);
 
@@ -282,8 +281,8 @@ export class ProjectService {
     // unless a specific per-tenant storage unit is defined and failing.
     const storageStatus = storagePerTenant === "ACTIVE_HEALTHY" ? "ACTIVE_HEALTHY" : "ACTIVE_HEALTHY";
     
-    // Gateway is either kong (systemd/docker) or angie (systemd)
-    const kongStatus = (kongSystemd === "ACTIVE_HEALTHY" || kongDocker === "ACTIVE_HEALTHY" || angieSystemd === "ACTIVE_HEALTHY") 
+    // Gateway is kong (systemd/docker)
+    const kongStatus = (kongSystemd === "ACTIVE_HEALTHY" || kongDocker === "ACTIVE_HEALTHY") 
       ? "ACTIVE_HEALTHY" 
       : "INACTIVE";
 
