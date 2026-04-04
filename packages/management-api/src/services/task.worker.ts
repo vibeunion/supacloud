@@ -169,7 +169,7 @@ export class TaskWorker {
                     }
 
                     const res = await routerService.addRoute(project_ref, domains);
-                    await routerService.reload();
+                    // API driven gateway no longer requires reload
                     return res.success;
                 }
 
@@ -232,7 +232,7 @@ export class TaskWorker {
 
                 case "cleanup_router": {
                     await routerService.removeRoute(project_ref);
-                    await routerService.reload();
+                    // API driven gateway no longer requires reload
                     return true;
                 }
 
