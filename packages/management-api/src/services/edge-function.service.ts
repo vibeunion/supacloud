@@ -253,10 +253,10 @@ export const edgeFunctionService = {
   async list(ref: string): Promise<string[]> {
     try {
       const dir = getFuncDir(ref);
-      const entries = await fs.readdir(dir);
-      return entries
-        .filter((f) => f.endsWith(".js") && !f.startsWith("."))
-        .map((f) => f.replace(/\.js$/, ""));
+      const { Glob } = await import("bun");
+      const glob = new Glob("*.js");
+      const entries = Array.from(glob.scanSync({ cwd: dir, onlyFiles: true }));
+      return entries.map((f) => f.replace(/\.js$/, ""));
     } catch (err: unknown) {
       if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
          logger.warn(`[EdgeFunction] Failed to list functions for ${ref}`, { error: err });

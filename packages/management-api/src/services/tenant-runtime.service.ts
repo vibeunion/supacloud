@@ -98,7 +98,7 @@ class TenantRuntimeService {
     private async ensureBinaries() {
         // Check PostgREST binary
         const pgrstCheck = await $`which postgrest`.nothrow().quiet();
-        const hasPgrstBin = await fs.access(this.POSTGREST_BIN).then(() => true).catch(() => false);
+        const hasPgrstBin = await Bun.file(this.POSTGREST_BIN).exists();
 
         if (pgrstCheck.exitCode !== 0 && !hasPgrstBin) {
             throw new Error(
@@ -109,7 +109,7 @@ class TenantRuntimeService {
 
         // Check GoTrue binary
         const gotrueCheck = await $`which gotrue`.nothrow().quiet();
-        const hasGotrueBin = await fs.access(this.GOTRUE_BIN).then(() => true).catch(() => false);
+        const hasGotrueBin = await Bun.file(this.GOTRUE_BIN).exists();
 
         if (gotrueCheck.exitCode !== 0 && !hasGotrueBin) {
             throw new Error(
