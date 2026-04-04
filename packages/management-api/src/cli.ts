@@ -108,7 +108,7 @@ server {
 
   logger.info(`Generating global Studio Angie config at ${configFile} for domain ${domain}...`);
   await fs.mkdir(ANGIE_SITES_DIR, { recursive: true });
-  await fs.writeFile(configFile, config, "utf-8");
+  await Bun.write(configFile, config);
 
   logger.info(`Testing Angie configuration...`);
   const testResult = await shellService.executeCommand("angie", ["-t"]);
