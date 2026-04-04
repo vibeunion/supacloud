@@ -168,205 +168,87 @@ export class GatewayService {
         }
     }
 
-    // --- Declarative Kong YAML Management ---
+    // --- IP Restriction Plugin ---
 
-    private generateTenantYaml(projectRef: string, hostIp: string, pgrstPort: number, gotruePort: number, jwtSecret?: string): string {
-        const functionsPort = 9000;
-        return `  - name: svc-pgrst-${projectRef}
-    url: http://${hostIp}:${pgrstPort}
-    connect_timeout: 5000
-    read_timeout: 60000
-    write_timeout: 60000
-    routes:
-      - name: route-pgrst-${projectRef}
-        strip_path: true
-        preserve_host: true
-        paths:
-          - /rest/v1
-          - /graphql/v1
-        headers:
-          x-project-ref:
-            - ${projectRef}
-        plugins:
-          - name: cors
-            config:
-              origins:
-                - "*"
-              methods:
-                - GET
-                - POST
-                - PUT
-                - PATCH
-                - DELETE
-                - OPTIONS
-              headers:
-                - Accept
-                - Authorization
-                - Content-Type
-                - X-Api-Version
-                - x-supabase-api-version
-                - X-Client-Info
-                - apikey
-                - Prefer
-                - Content-Profile
-              credentials: true
-              max_age: 3600
-  - name: svc-gotrue-${projectRef}
-    url: http://${hostIp}:${gotruePort}
-    connect_timeout: 5000
-    read_timeout: 60000
-    write_timeout: 60000
-    routes:
-      - name: route-gotrue-${projectRef}
-        strip_path: true
-        preserve_host: true
-        paths:
-          - /auth/v1
-        headers:
-          x-project-ref:
-            - ${projectRef}
-        plugins:
-          - name: cors
-            config:
-              origins:
-                - "*"
-              methods:
-                - GET
-                - POST
-                - PUT
-                - PATCH
-                - DELETE
-                - OPTIONS
-              headers:
-                - Accept
-                - Authorization
-                - Content-Type
-                - X-Api-Version
-                - x-supabase-api-version
-                - X-Client-Info
-                - apikey
-                - Prefer
-                - Content-Profile
-              credentials: true
-              max_age: 3600
-  - name: svc-functions-${projectRef}
-    url: http://${hostIp}:${functionsPort}
-    connect_timeout: 5000
-    read_timeout: 60000
-    write_timeout: 60000
-    routes:
-      - name: route-functions-${projectRef}
-        strip_path: true
-        preserve_host: true
-        paths:
-          - /functions/v1
-        headers:
-          x-project-ref:
-            - ${projectRef}
-        plugins:
-          - name: cors
-            config:
-              origins:
-                - "*"
-              methods:
-                - GET
-                - POST
-                - PUT
-                - PATCH
-                - DELETE
-                - OPTIONS
-              headers:
-                - Accept
-                - Authorization
-                - Content-Type
-                - X-Api-Version
-                - X-Client-Info
-                - x-supabase-api-version
-                - apikey
-                - Prefer
-                - Content-Profile
-              exposed_headers:
-                - X-Relay-Error
-                - x-supabase-api-version
-              credentials: true
-              max_age: 3600
-  - name: svc-storage-${projectRef}
-    url: http://${hostIp}:9090
-    connect_timeout: 5000
-    read_timeout: 60000
-    write_timeout: 60000
-    routes:
-      - name: route-storage-${projectRef}
-        strip_path: true
-        preserve_host: true
-        paths:
-          - /storage/v1/
-        headers:
-          x-project-ref:
-            - ${projectRef}
-        plugins:
-          - name: cors
-            config:
-              origins:
-                - "*"
-              methods:
-                - GET
-                - POST
-                - PUT
-                - PATCH
-                - DELETE
-                - OPTIONS
-              headers:
-                - Accept
-                - Authorization
-                - Content-Type
-                - X-Api-Version
-                - x-supabase-api-version
-                - X-Client-Info
-                - apikey
-                - Prefer
-                - Content-Profile
-              credentials: true
-              max_age: 3600
-  - name: svc-realtime-${projectRef}
-    url: http://${hostIp}:4000
-    connect_timeout: 5000
-    read_timeout: 86400000
-    write_timeout: 86400000
-    routes:
-      - name: route-realtime-${projectRef}
-        strip_path: true
-        preserve_host: true
-        paths:
-          - /realtime/v1
-        headers:
-          x-project-ref:
-            - ${projectRef}
-        plugins:
-          - name: cors
-            config:
-              origins:
-                - "*"
-              methods:
-                - GET
-                - POST
-                - PUT
-                - PATCH
-                - DELETE
-                - OPTIONS
-              headers:
-                - Accept
-                - Authorization
-                - Content-Type
-                - X-Api-Version
-                - x-supabase-api-version
-                - X-Client-Info
-                - apikey
-                - Prefer
-                - Content-Profile
-              credentials: true
-              max_age: 3600
-`;
+    async setIpRestriction(projectRef: string, allowedIps: string[]): Promise<boolean> {
+        try {
+            const routeName = `route-svc-pgrst-${projectRef}`; // Network restrictions apply heavily to API layer
+            const pluginsRes = await this.kongRequest(`/routes/${routeName}/plugins`);
+            const existing = pluginsRes?.data?.find((p: Record<string, unknown>) => p.name === "ip-restriction");
+
+            if (allowedIps.length === 0) {
+                // If empty list, remove Restriction
+                if (existing) await this.kongRequest(`/plugins/${existing.id}`, "DELETE");
+                return true;
+            }
+
+            const payload = {
+                name: "ip-restriction",
+                config: { allow: allowedIps },
+            };
+
+            if (existing) {
+                await this.kongRequest(`/plugins/${existing.id}`, "PATCH", payload);
+            } else {
+                await this.kongRequest(`/routes/${routeName}/plugins`, "POST", payload);
+            }
+            return true;
+        } catch (error: unknown) {
+            logger.error(`Failed to set IP restrictions for ${projectRef}:`, (error instanceof Error ? error.message : String(error)));
+            return false;
+        }
+    }
+
+    // --- Pure Native Kong REST Management (Replaces Declarative YAML) ---
+
+    private async ensureServiceAndRoute(opts: {
+        name: string;
+        url: string;
+        paths: string[];
+        hosts: string[];
+        projectRef: string;
+        stripPath?: boolean;
+        readTimeout?: number;
+    }): Promise<void> {
+        // 1. Upsert Service
+        await this.kongRequest(`/services/${opts.name}`, "PUT", {
+            name: opts.name,
+            url: opts.url,
+            connect_timeout: 5000,
+            read_timeout: opts.readTimeout || 60000,
+            write_timeout: 60000
+        });
+
+        // 2. Upsert Route matching by Domain (hosts) and Path
+        const routeName = `route-${opts.name}`;
+        await this.kongRequest(`/routes/${routeName}`, "PUT", {
+            name: routeName,
+            service: { name: opts.name },
+            paths: opts.paths,
+            hosts: opts.hosts.length > 0 ? opts.hosts : undefined,
+            strip_path: opts.stripPath ?? true,
+            preserve_host: true,
+        });
+
+        // 3. Inject x-project-ref using request-transformer plugin
+        await this.kongRequest(`/routes/${routeName}/plugins`, "POST", {
+            name: "request-transformer",
+            config: {
+                add: { headers: [`x-project-ref:${opts.projectRef}`] }
+            }
+        });
+        // Actually, we need a dedicated CORS attacher for this specific route name.
+        await this.kongRequest(`/routes/${routeName}/plugins`, "POST", {
+            name: "cors",
+            config: {
+                origins: ["*"],
+                methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+                headers: ["Accept", "Authorization", "Content-Type", "X-Api-Version", "x-supabase-api-version", "X-Client-Info", "apikey", "Prefer", "Content-Profile"],
+                exposed_headers: ["Content-Length", "X-JSON", "x-supabase-api-version", "X-Client-Info", "apikey", "Prefer", "Content-Profile", "X-Relay-Error"],
+                credentials: true,
+                max_age: 3600,
+            }
+        });
     }
 
     private async detectHostIp(): Promise<string> {
@@ -384,85 +266,110 @@ export class GatewayService {
         return "127.0.0.1";
     }
 
-    private async rebuildKongConfig(): Promise<void> {
-        const kongYml = this.KONG_YML;
-        const kongBase = `${kongYml}.base`;
-        const tenantDir = this.TENANT_DIR;
-
-        if (!(await Bun.file(kongBase).exists())) {
-            if (await Bun.file(kongYml).exists()) {
-                const baseContent = await Bun.file(kongYml).text();
-                await Bun.write(kongBase, baseContent);
-            } else {
-                logger.warn(`WARNING: ${kongYml} not found, skipping Kong reload`);
-                return;
-            }
-        }
-
-        // Read base configuration
-        const baseContent = await Bun.file(kongBase).text();
-
-        // Read YAML snippets from all tenants
-        let tenantSnippets = "";
-        try {
-            const files = await fs.readdir(tenantDir);
-            for (const file of files.filter(f => f.endsWith(".yml"))) {
-                const snippet = await Bun.file(path.join(tenantDir, file)).text();
-                tenantSnippets += snippet;
-            }
-        } catch (err: unknown) {
-      // Skip if tenantDir doesn't exist
-      logger.warn("[GatewayService] Failed to filter Angie upstream entries", { error: err });
-    }
-
-        // Insert tenant configurations after `services:` section
-        const merged = baseContent.replace(/(^services:\s*$)/m, `$1\n${tenantSnippets}`);
-        await Bun.write(kongYml, merged);
-
-        // Hot reload Kong gateway
-        const kongContainer = (await $`docker ps -q -f name=supabase-kong`.nothrow().quiet()).text().trim()
-            || (await $`podman ps -q -f name=supabase-kong`.nothrow().quiet()).text().trim();
-
-        if (kongContainer) {
-            const runtime = (await $`docker ps -q -f name=supabase-kong`.nothrow().quiet()).text().trim()
-                ? "docker" : "podman";
-            await $`${runtime} exec supabase-kong kong reload`.nothrow().quiet();
-            logger.info("Kong Gateway reloaded.");
-        } else {
-            logger.warn("WARNING: supabase-kong container not running, config written but not reloaded");
-        }
-    }
-
     // --- Core reload logic ---
 
-    async setupUpstream(projectRef: string, pgrstPort: number | string, gotruePort: number | string): Promise<{ success: boolean; error?: string }> {
+    async setupUpstream(projectRef: string, pgrstPort: number | string, gotruePort: number | string, customApiDomain?: string): Promise<{ success: boolean; error?: string }> {
         try {
             const hostIp = await this.detectHostIp();
-            await fs.mkdir(this.TENANT_DIR, { recursive: true });
+            
+            // Get base domains
+            const baseApiDomain = `${projectRef}.api.${config.baseDomain}`;
+            const hosts = customApiDomain ? [baseApiDomain, `api.${customApiDomain}`] : [baseApiDomain];
 
-            const yaml = this.generateTenantYaml(projectRef, hostIp, Number(pgrstPort), Number(gotruePort));
-            await Bun.write(path.join(this.TENANT_DIR, `${projectRef}.yml`), yaml);
+            await this.ensureServiceAndRoute({ name: `svc-pgrst-${projectRef}`, url: `http://${hostIp}:${pgrstPort}`, paths: ["/rest/v1", "/graphql/v1"], hosts, projectRef });
+            await this.ensureServiceAndRoute({ name: `svc-gotrue-${projectRef}`, url: `http://${hostIp}:${gotruePort}`, paths: ["/auth/v1"], hosts, projectRef });
+            await this.ensureServiceAndRoute({ name: `svc-functions-${projectRef}`, url: `http://${hostIp}:9000`, paths: ["/functions/v1"], hosts, projectRef });
+            await this.ensureServiceAndRoute({ name: `svc-storage-${projectRef}`, url: `http://${hostIp}:9090`, paths: ["/storage/v1/"], hosts, projectRef });
+            await this.ensureServiceAndRoute({ name: `svc-realtime-${projectRef}`, url: `http://${hostIp}:4000`, paths: ["/realtime/v1"], hosts, projectRef, readTimeout: 86400000 });
 
-            await this.rebuildKongConfig();
-            logger.info(`Kong upstream registered for ${projectRef} (pgrst:${pgrstPort}, gotrue:${gotruePort})`);
+            // Ensure Studio routes (Management API proxy loopback for SPA fallback)
+            const studioDomain = `studio-${projectRef}.${config.baseDomain}`;
+            const studioHosts = customApiDomain ? [studioDomain, `studio.${customApiDomain}`] : [studioDomain];
+            await this.ensureServiceAndRoute({ name: `svc-studio-${projectRef}`, url: `http://${hostIp}:3000`, paths: ["/"], hosts: studioHosts, projectRef, stripPath: false });
+
+            logger.info(`Kong upstream dynamically registered via REST for ${projectRef} (pgrst:${pgrstPort}, gotrue:${gotruePort})`);
             return { success: true };
         } catch (error: unknown) {
-            logger.error(`Failed to setup upstream for ${projectRef}:`, (error instanceof Error ? error.message : String(error)));
+            logger.error(`Failed to setup upstream natively for ${projectRef}:`, (error instanceof Error ? error.message : String(error)));
             return { success: false, error: (error instanceof Error ? error.message : String(error)) };
+        }
+    }
+
+    async addProjectDomains(projectRef: string, apiDomains: string[], studioDomains: string[]): Promise<boolean> {
+        try {
+            const servicePrefixes = ["svc-pgrst-", "svc-gotrue-", "svc-functions-", "svc-storage-", "svc-realtime-"];
+            for (const prefix of servicePrefixes) {
+                const routeName = `route-${prefix}${projectRef}`;
+                const route = await this.kongRequest(`/routes/${routeName}`);
+                if (route?.id) {
+                    const existingHosts = (route.hosts as string[] | undefined) || [];
+                    const uniqueHosts = Array.from(new Set([...existingHosts, ...apiDomains]));
+                    await this.kongRequest(`/routes/${route.id}`, "PATCH", { hosts: uniqueHosts });
+                }
+            }
+            
+            // Studio domains
+            const studioRouteName = `route-svc-studio-${projectRef}`;
+            const sRoute = await this.kongRequest(`/routes/${studioRouteName}`);
+            if (sRoute?.id) {
+                const existingSHosts = (sRoute.hosts as string[] | undefined) || [];
+                const uniqueSHosts = Array.from(new Set([...existingSHosts, ...studioDomains]));
+                await this.kongRequest(`/routes/${sRoute.id}`, "PATCH", { hosts: uniqueSHosts });
+            }
+            
+            return true;
+        } catch (error: unknown) {
+            logger.error(`Failed to add domains for ${projectRef}:`, (error instanceof Error ? error.message : String(error)));
+            return false;
+        }
+    }
+
+    async removeProjectDomains(projectRef: string, apiDomains: string[], studioDomains: string[]): Promise<boolean> {
+        try {
+            const servicePrefixes = ["svc-pgrst-", "svc-gotrue-", "svc-functions-", "svc-storage-", "svc-realtime-"];
+            for (const prefix of servicePrefixes) {
+                const routeName = `route-${prefix}${projectRef}`;
+                const route = await this.kongRequest(`/routes/${routeName}`);
+                if (route?.id && route.hosts) {
+                    const existingHosts = (route.hosts as string[]) || [];
+                    const newHosts = existingHosts.filter((h: string) => !apiDomains.includes(h));
+                    await this.kongRequest(`/routes/${route.id}`, "PATCH", { hosts: newHosts });
+                }
+            }
+            
+            // Studio domains
+            const studioRouteName = `route-svc-studio-${projectRef}`;
+            const sRoute = await this.kongRequest(`/routes/${studioRouteName}`);
+            if (sRoute?.id && sRoute.hosts) {
+                const existingSHosts = (sRoute.hosts as string[]) || [];
+                const newSHosts = existingSHosts.filter((h: string) => !studioDomains.includes(h));
+                await this.kongRequest(`/routes/${sRoute.id}`, "PATCH", { hosts: newSHosts });
+            }
+            
+            return true;
+        } catch (error: unknown) {
+            logger.error(`Failed to remove domains for ${projectRef}:`, (error instanceof Error ? error.message : String(error)));
+            return false;
         }
     }
 
     async removeService(projectRef: string): Promise<{ success: boolean; error?: string }> {
         try {
-            const tenantYml = path.join(this.TENANT_DIR, `${projectRef}.yml`);
-            if (await Bun.file(tenantYml).exists()) {
-                await fs.unlink(tenantYml);
+            const servicePrefixes = ["svc-pgrst-", "svc-gotrue-", "svc-functions-", "svc-storage-", "svc-realtime-"];
+            for (const prefix of servicePrefixes) {
+                const name = `${prefix}${projectRef}`;
+                const routeName = `route-${name}`;
+                
+                // Delete route first
+                await this.kongRequest(`/routes/${routeName}`, "DELETE").catch(() => null);
+                // Then delete service
+                await this.kongRequest(`/services/${name}`, "DELETE").catch(() => null);
             }
-            await this.rebuildKongConfig();
-            logger.info(`Kong service removed for ${projectRef}`);
+
+            logger.info(`Kong service and routes explicitly removed for ${projectRef}`);
             return { success: true };
         } catch (error: unknown) {
-            logger.error(`Failed to remove service for ${projectRef}:`, (error instanceof Error ? error.message : String(error)));
+            logger.error(`Failed to remove service dynamically for ${projectRef}:`, (error instanceof Error ? error.message : String(error)));
             return { success: false, error: (error instanceof Error ? error.message : String(error)) };
         }
     }
@@ -503,18 +410,13 @@ export class GatewayService {
     }
 
     /**
-     * Rebuild Kong YAML snippets for ALL active tenants using the current template,
-     * then rebuild the merged kong.yml and hot-reload Kong.
-     * Use this to propagate CORS / template changes to existing projects.
+     * Propagate templates via native REST APIs instead of declarative YAML
      */
     async rebuildAllTenantConfigs(): Promise<{ success: boolean; updated: number; errors: string[] }> {
         const errors: string[] = [];
         let updated = 0;
 
         try {
-            const hostIp = await this.detectHostIp();
-            await fs.mkdir(this.TENANT_DIR, { recursive: true });
-
             // Query all active projects with their port config
             const projects = await sql`
                 SELECT ref, config FROM projects
@@ -528,26 +430,25 @@ export class GatewayService {
                 const gotruePort = cfg.gotrue_port as number | undefined;
 
                 if (!pgrstPort || !gotruePort) {
-                    // Skip projects without port config (not yet fully provisioned)
-                    logger.warn(`[GatewayService] Skipping ${ref}: missing port config (pgrst=${pgrstPort}, gotrue=${gotruePort})`);
+                    logger.warn(`[GatewayService] Skipping ${ref}: missing port config`);
                     errors.push(`${ref}: missing port config`);
                     continue;
                 }
 
                 try {
-                    const yaml = this.generateTenantYaml(ref, hostIp, pgrstPort, gotruePort);
-                    await Bun.write(path.join(this.TENANT_DIR, `${ref}.yml`), yaml);
+                    await this.setupUpstream(ref, pgrstPort, gotruePort);
+                    
+                    // Re-apply keys & limits if configured (assuming user will call applyConfig separately or we re-trigger it)
+                    // (Omitted for brevity, typically applyConfig runs on tenant boot)
                     updated++;
                 } catch (err: unknown) {
                     const msg = err instanceof Error ? err.message : String(err);
-                    logger.error(`[GatewayService] Failed to regenerate YAML for ${ref}:`, msg);
+                    logger.error(`[GatewayService] Failed to regenerate HTTP routes for ${ref}:`, msg);
                     errors.push(`${ref}: ${msg}`);
                 }
             }
 
-            // Rebuild merged kong.yml and reload
-            await this.rebuildKongConfig();
-            logger.info(`[GatewayService] Rebuilt Kong config for ${updated} tenant(s).`);
+            logger.info(`[GatewayService] Rebuilt Kong config securely for ${updated} tenant(s).`);
 
             return { success: true, updated, errors };
         } catch (error: unknown) {

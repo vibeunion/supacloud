@@ -338,7 +338,7 @@ export class ProjectService {
     } catch (err: unknown) {
       logger.warn(`[ProjectService] Service restart partial failure for ${ref}`, { error: err });
     }
-    await routerService.reload();
+    
     return true;
   }
 
@@ -522,7 +522,7 @@ export class ProjectService {
     });
 
     await gatewayService.setupJwt(ref, jwtSecret);
-    await routerService.reload();
+    
     logger.info(`[ProjectService] Rotated API keys and reloaded router for ${ref}`);
 
     return { anon_key: anonKey, service_role_key: serviceRoleKey };
@@ -547,7 +547,7 @@ export class ProjectService {
   }
 
   async addCustomDomain(ref: string, domain: string): Promise<boolean> {
-    return projectOpsService.addCustomDomain(ref, domain);
+    return projectOpsService.bindCustomDomain(ref, domain);
   }
 
   async deleteCustomDomain(ref: string): Promise<boolean> {

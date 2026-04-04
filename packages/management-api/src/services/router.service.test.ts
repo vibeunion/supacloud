@@ -65,7 +65,7 @@ describe("RouterService", () => {
 
         const projectRef = "test-project-3";
         const customDomain = "custom.example.com";
-        await routerService.addCustomDomain(projectRef, customDomain);
+        await routerService.bindCustomDomain(projectRef, customDomain);
 
         expect(fs.writeFile).toHaveBeenCalled();
         const callArgs = (fs.writeFile as ReturnType<typeof mock>).mock.calls[0];

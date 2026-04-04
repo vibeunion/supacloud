@@ -58,11 +58,11 @@ export class ProjectOpsService {
     return { custom_hostname: "", status: "not_configured" };
   }
 
-  async addCustomDomain(ref: string, domain: string): Promise<boolean> {
+  async bindCustomDomain(ref: string, domain: string): Promise<boolean> {
     const project = await projectRepository.findByRef(ref);
     if (!project) return false;
 
-    const result = await routerService.addCustomDomain(ref, domain);
+    const result = await routerService.bindCustomDomain(ref, domain);
     if (result.success) {
       await projectRepository.updateConfig(ref, { ...project.config, custom_domain: domain });
     }
