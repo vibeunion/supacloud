@@ -24,7 +24,6 @@ export class HealthChecker {
         // 2. Infrastructure service checks
         reports.push(await this.checkServiceStatus("supacloud", "Management API"));
         reports.push(await this.checkPigstyStatus());
-        reports.push(await this.checkAngieStatus());
 
         // 3. Database-specific checks
         reports.push(await this.checkPostgresHealth());
@@ -201,23 +200,5 @@ export class HealthChecker {
             }
         } catch (e: unknown) { logger.debug("[infra/health] suppressed error", { error: e instanceof Error ? e.message : String(e) }); }
         return this.checkServiceStatus("pigsty", "Pigsty Infrastructure");
-    }
-
-    private static async checkAngieStatus(): Promise<HealthReport> {
-        try {
-            const version = await $`angie -v 2>&1`.nothrow().text();
-            const isActive = (await $`systemctl is-active angie`.nothrow()).exitCode === 0;
-            if (version.includes("angie")) {
-                const vMatch = version.match(/angie\/([^ ]+)/);
-                const vStr = vMatch ? vMatch[1] : "unknown";
-                return {
-                    component: "Load Balancer (Angie)",
-                    status: isActive ? "OK" : "ERROR",
-                    message: isActive ? `Running (v${vStr})` : `Service stopped (v${vStr})`,
-                    recommendation: isActive ? undefined : "Please run 'sudo systemctl start angie'."
-                };
-            }
-        } catch (e: unknown) { logger.debug("[infra/health] suppressed error", { error: e instanceof Error ? e.message : String(e) }); }
-        return this.checkServiceStatus("angie", "Load Balancer (Angie)");
     }
 }

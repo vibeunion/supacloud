@@ -21,8 +21,7 @@
 - **Pigsty Powered**: Enterprise-grade PostgreSQL with built-in monitoring (Grafana)
 - **One-Click Installation**: Fully automated setup via `install.sh`
 - **JuiceFS Storage**: Powered by PostgreSQL Large Objects (LO) for ultra-thin metadata
-- **Kong API Gateway**: Dynamic rate limiting, CORS, and per-project JWT validation
-- **Angie Gateway**: Modern Nginx fork with native ACME SSL auto-provisioning
+- **Kong API Gateway**: DB-backed Dynamic API Router, native ACME SSL auto-provisioning, Rate Limiting, and CORS
 - **Auto-scaling Engine**: Rule-based vertical and horizontal scaling based on real-time metrics
 - **Dual Runtime**: Deno (legacy) or Bun.js Edge Runtime (recommended) for Edge Functions
 - **China OAuth**: Built-in WeChat, Alipay, DingTalk login integration
@@ -53,10 +52,10 @@
 │  │ PostgreSQL │  │   Kong     │  │  JuiceFS   │            │
 │  │  (Pigsty)  │  │  Gateway   │  │  (PG-LO)   │            │
 │  └────────────┘  └────────────┘  └────────────┘            │
-│  ┌────────────┐  ┌────────────┐                             │
-│  │   Angie    │  │  Grafana   │                             │
-│  │  (SSL/LB)  │  │ (Monitor)  │                             │
-│  └────────────┘  └────────────┘                             │
+│                  ┌────────────┐                             │
+│                  │  Grafana   │                             │
+│                  │ (Monitor)  │                             │
+│                  └────────────┘                             │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -222,7 +221,7 @@ SupaCloud (:3000)          Edge Runtime (:9000)
                            ├── Deno Compat Shim
                            └── URL Import Plugin
 
-Kong/Angie Gateway:
+Kong Gateway:
   /api/*        → :3000
   /functions/*  → :9000 (direct, no proxy)
 ```
@@ -319,7 +318,6 @@ supacloud/
 │       ├── global_router.ts    # Global routing logic
 │       └── worker_runner.ts    # Background worker
 ├── infra/
-│   ├── angie/                  # Angie gateway (Nginx fork with ACME SSL)
 │   ├── os/                     # OS-level configurations
 │   └── postgres/               # PostgreSQL configurations
 ├── docs/                       # 14 documentation files
@@ -374,8 +372,7 @@ Key settings in `config.env`:
 - **Pigsty 驱动**: 企业级 PostgreSQL，内置 Grafana 监控
 - **一键部署**: 通过 `install.sh` 全自动安装
 - **JuiceFS 存储**: 基于 PostgreSQL Large Objects (LO) 后端，极致轻量
-- **Kong 深度集成**: 支持项目级限流 (Rate Limit)、CORS 及统一鉴权
-- **Angie 网关**: 现代 Nginx 分叉版，原生 ACME SSL 自动证书管理
+- **Kong 深度集成**: DB-backed 原生动态路由，全程 API 驱动，原生 ACME SSL 证书自动续签及高可用限流
 - **自动扩缩容**: 基于负载指标的垂直提升与水平副本扩展
 - **双运行时**: Deno（旧版兼容）或 Bun.js Edge Runtime（推荐，内存占用减少 92%）
 - **国内 OAuth**: 内置微信、支付宝、钉钉登录集成
@@ -406,10 +403,10 @@ Key settings in `config.env`:
 │  │ PostgreSQL │  │    Kong    │  │  JuiceFS   │            │
 │  │  (Pigsty)  │  │    网关    │  │  (PG-LO)   │            │
 │  └────────────┘  └────────────┘  └────────────┘            │
-│  ┌────────────┐  ┌────────────┐                             │
-│  │   Angie    │  │  Grafana   │                             │
-│  │ (SSL/负载)  │  │  (监控)    │                             │
-│  └────────────┘  └────────────┘                             │
+│                  ┌────────────┐                             │
+│                  │  Grafana   │                             │
+│                  │  (监控)    │                             │
+│                  └────────────┘                             │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -573,7 +570,7 @@ SupaCloud (:3000)          Edge Runtime (:9000)
                            ├── Deno 兼容层
                            └── URL Import 插件
 
-Kong/Angie 网关:
+Kong 网关:
   /api/*        → :3000 (管理 API)
   /functions/*  → :9000 (Edge Runtime 直连)
 ```
@@ -671,7 +668,6 @@ supacloud/
 │       ├── global_router.ts    # 全局路由逻辑
 │       └── worker_runner.ts    # 后台 Worker
 ├── infra/
-│   ├── angie/                  # Angie 网关 (Nginx 分叉版, 原生 ACME SSL)
 │   ├── os/                     # 操作系统配置
 │   └── postgres/               # PostgreSQL 配置
 ├── docs/                       # 14 篇技术文档
