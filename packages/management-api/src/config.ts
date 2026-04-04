@@ -19,8 +19,7 @@ interface Config {
   // Paths
   scriptsPath: string;
   pigstyPath: string;
-  nginxSitesPath: string;
-  angieSitesDir: string;
+
   tenantConfigDir: string;
   edgeFunctionsDir: string;
   homePath: string;
@@ -132,11 +131,7 @@ export const config = {
     managementEnv.SCRIPTS_PATH ||
     "/opt/supacloud/scripts/lib",
   pigstyPath: process.env.PIGSTY_PATH || managementEnv.PIGSTY_PATH || "/root/pigsty",
-  nginxSitesPath:
-    process.env.NGINX_SITES_PATH ||
-    managementEnv.NGINX_SITES_PATH ||
-    "/etc/nginx/sites-enabled/supa-tenants",
-  angieSitesDir: process.env.ANGIE_SITES_DIR || managementEnv.ANGIE_SITES_DIR || "/etc/angie/http.d",
+
   tenantConfigDir: process.env.TENANT_CONFIG_DIR || managementEnv.TENANT_CONFIG_DIR || "/opt/supabase/volumes/api/kong_tenants",
   edgeFunctionsDir: process.env.EDGE_FUNCTIONS_DIR || managementEnv.EDGE_FUNCTIONS_DIR || "/opt/supacloud/functions",
   homePath: process.env.HOME || "/root",

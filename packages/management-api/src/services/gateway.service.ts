@@ -118,16 +118,18 @@ export class GatewayService {
 
     // --- CORS ---
 
-    async setCors(projectRef: string, origins: string = "*"): Promise<boolean> {
+    async setCors(projectRef: string, origins: string = "~^https?://.*$"): Promise<boolean> {
         try {
             const routeName = `route-${projectRef}`;
             const pluginsRes = await this.kongRequest(`/routes/${routeName}/plugins?name=cors`);
             const existing = pluginsRes?.data?.[0];
 
+            const resolvedOrigins = origins === "*" ? "~^https?://.*$" : origins;
+
             const payload = {
                 name: "cors",
                 config: {
-                    origins: [origins],
+                    origins: [resolvedOrigins],
                     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
                     headers: ["Accept", "Authorization", "Content-Type", "X-Api-Version", "x-supabase-api-version", "X-Client-Info", "apikey", "Prefer", "Content-Profile"],
                     exposed_headers: ["Content-Length", "X-JSON", "x-supabase-api-version", "X-Client-Info", "apikey", "Prefer", "Content-Profile"],
@@ -199,6 +201,28 @@ export class GatewayService {
         }
     }
 
+    // --- Plugin Upsert Helper ---
+
+    private async upsertRoutePlugin(routeName: string, pluginName: string, config: Record<string, unknown>): Promise<void> {
+        try {
+            const pluginsRes = await this.kongRequest(`/routes/${routeName}/plugins`);
+            const existing = pluginsRes?.data?.find((p: Record<string, unknown>) => p.name === pluginName);
+
+            const payload = {
+                name: pluginName,
+                config
+            };
+
+            if (existing) {
+                await this.kongRequest(`/plugins/${existing.id}`, "PATCH", payload);
+            } else {
+                await this.kongRequest(`/routes/${routeName}/plugins`, "POST", payload);
+            }
+        } catch (error: unknown) {
+            logger.error(`Failed to upsert plugin ${pluginName} for route ${routeName}:`, error instanceof Error ? error.message : String(error));
+        }
+    }
+
     // --- Pure Native Kong REST Management (Replaces Declarative YAML) ---
 
     private async ensureServiceAndRoute(opts: {
@@ -231,23 +255,18 @@ export class GatewayService {
         });
 
         // 3. Inject x-project-ref using request-transformer plugin
-        await this.kongRequest(`/routes/${routeName}/plugins`, "POST", {
-            name: "request-transformer",
-            config: {
-                add: { headers: [`x-project-ref:${opts.projectRef}`] }
-            }
+        await this.upsertRoutePlugin(routeName, "request-transformer", {
+            add: { headers: [`x-project-ref:${opts.projectRef}`] }
         });
-        // Actually, we need a dedicated CORS attacher for this specific route name.
-        await this.kongRequest(`/routes/${routeName}/plugins`, "POST", {
-            name: "cors",
-            config: {
-                origins: ["*"],
-                methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-                headers: ["Accept", "Authorization", "Content-Type", "X-Api-Version", "x-supabase-api-version", "X-Client-Info", "apikey", "Prefer", "Content-Profile"],
-                exposed_headers: ["Content-Length", "X-JSON", "x-supabase-api-version", "X-Client-Info", "apikey", "Prefer", "Content-Profile", "X-Relay-Error"],
-                credentials: true,
-                max_age: 3600,
-            }
+
+        // 4. Attach CORS plugin globally for this route
+        await this.upsertRoutePlugin(routeName, "cors", {
+            origins: ["~^https?://.*$"],
+            methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+            headers: ["Accept", "Authorization", "Content-Type", "X-Api-Version", "x-supabase-api-version", "X-Client-Info", "apikey", "Prefer", "Content-Profile"],
+            exposed_headers: ["Content-Length", "X-JSON", "x-supabase-api-version", "X-Client-Info", "apikey", "Prefer", "Content-Profile", "X-Relay-Error"],
+            credentials: true,
+            max_age: 3600,
         });
     }
 
