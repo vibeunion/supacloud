@@ -19,7 +19,7 @@ if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
 fi
 
 echo "=> Starting to download latest Pigsty source code..."
-curl -fsSL https://repo.pigsty.io/get | bash -s v4.1.0
+curl -fsSL https://repo.pigsty.io/get | bash -s v4.2.2
 
 if [ -d "$HOME/pigsty" ]; then
     echo "=> Switching to Pigsty directory..."
