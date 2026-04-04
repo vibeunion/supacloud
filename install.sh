@@ -1285,64 +1285,70 @@ EOF
     log_info "Nginx compiled and installed: $(/usr/local/nginx/sbin/nginx -v 2>&1)"
 }
 
-# ========== Install Angie (Nginx fork with native http_acme Auto SSL) ==========
-# Angie is an enhanced version of Nginx with native ACME support and simpler architecture.
-# Pigsty's Nginx management is disabled via nginx_enabled: false.
-install_angie() {
-    log_step "Installing Angie (Native http_acme auto SSL)..."
+# ========== Install Kong Native Gateway (Unified Edge proxy + ACME) ==========
+install_kong_native() {
+    log_step "Installing Kong Native Gateway (DB-Backed)..."
 
-    local setup_script="${SCRIPT_DIR}/infra/angie/setup.sh"
-    if [[ ! -f "${setup_script}" ]]; then
-        log_warn "infra/angie/setup.sh not found, skipping Angie installation"
-        return 0
-    fi
-
-    # -- Handle existing Nginx: Backup config -> stop/disable -> remove packages -----
+    # 1. Disable existing Nginx/Angie if present
     if command -v nginx &>/dev/null || systemctl list-unit-files nginx.service &>/dev/null 2>&1; then
-        local backup_dir="/etc/nginx.bak.$(date +%Y%m%d_%H%M%S)"
-        if [[ -d /etc/nginx ]]; then
-            log_info "Backing up existing Nginx config to ${backup_dir} ..."
-            cp -a /etc/nginx "${backup_dir}" || true
-        fi
-        systemctl stop    nginx 2>/dev/null || true
+        systemctl stop nginx 2>/dev/null || true
         systemctl disable nginx 2>/dev/null || true
-        if command -v dnf &>/dev/null; then
-            dnf remove -y nginx nginx-core nginx-filesystem 2>/dev/null || true
-        fi
+    fi
+    if command -v angie &>/dev/null || systemctl list-unit-files angie.service &>/dev/null 2>&1; then
+        systemctl stop angie 2>/dev/null || true
+        systemctl disable angie 2>/dev/null || true
     fi
 
-    bash "${setup_script}" \
-        --studio-domain "${SUPABASE_STUDIO_DOMAIN}" \
-        --api-domain "${SUPABASE_PUBLIC_DOMAIN}" || {
-        log_warn "Angie setup.sh execution failed"
-        return 0
-    }
+    # 2. Package installation
+    if command -v dnf &>/dev/null; then
+        log_info "Installing Kong via DNF for RHEL-compatible..."
+        curl -Lo kong.rpm https://download.konghq.com/gateway-3.x-redhat-9/Packages/k/kong-3.6.0.el9.amd64.rpm
+        dnf install -y kong.rpm
+        rm -f kong.rpm
+    elif command -v apt-get &>/dev/null; then
+        log_info "Installing Kong via APT for Debian/Ubuntu..."
+        curl -Lo kong.deb https://download.konghq.com/gateway-3.x-ubuntu-jammy/pool/all/k/kong/kong_3.6.0_amd64.deb
+        apt-get install -y ./kong.deb
+        rm -f kong.deb
+    else
+        log_error "Unsupported package manager for Kong native installation."
+        return 1
+    fi
 
-    # -- Inject Angie Global Performance Config (Gzip & Proxy Cache) -----
-    log_info "Initializing Angie global performance config..."
-    mkdir -p /etc/angie/http.d
-    cat > /etc/angie/http.d/00-global-perf.conf << 'EOF'
-# Global Gzip compression optimization (reduce external traffic consumption)
-gzip on;
-gzip_comp_level 5;
-gzip_min_length 256;
-gzip_types application/javascript application/json application/xml text/css text/plain text/xml image/svg+xml;
-gzip_vary on;
+    # 3. Provision DB (Assuming Postgres is up via Pigsty at 127.0.0.1:5432)
+    log_info "Provisioning Kong database on PostgreSQL..."
+    # Local postgres user comes from PG_ADMIN_PASSWORD or default Pigsty 'postgres'
+    sudo -u postgres psql -c "CREATE USER kong WITH PASSWORD 'kong';" || true
+    sudo -u postgres psql -c "CREATE DATABASE kong OWNER kong;" || true
 
-# Global proxy cache pool (dedicated to Storage rendering acceleration)
-proxy_cache_path /var/cache/angie/storage_render levels=1:2 keys_zone=render_cache:10m max_size=1g inactive=7d use_temp_path=off;
+    # 4. Kong Configuration
+    log_info "Configuring Native Kong..."
+    mkdir -p /etc/kong
+    cat > /etc/kong/kong.conf << 'EOF'
+database = postgres
+pg_host = 127.0.0.1
+pg_port = 5432
+pg_user = kong
+pg_password = kong
+pg_database = kong
+proxy_listen = 0.0.0.0:80, 0.0.0.0:443 ssl
+admin_listen = 0.0.0.0:8001
+plugins = bundled, acme
 EOF
-    mkdir -p /var/cache/angie/storage_render
-    # Ensure correct permissions if running as angie user
-    chown -R angie:angie /var/cache/angie 2>/dev/null || true
-    systemctl restart angie || true
 
-    log_info "Angie installation successful"
+    # 5. Bootstrap Migrations & Enable
+    log_info "Bootstrapping Kong Migrations..."
+    kong migrations bootstrap -c /etc/kong/kong.conf
+    
+    systemctl daemon-reload
+    systemctl enable kong
+    systemctl restart kong
+    
+    log_info "Kong Native Gateway Installation completed."
 }
 
-
 # Keep this function alias for compatibility
-install_nginx_mainline() { install_angie; }
+install_nginx_mainline() { install_kong_native; }
 
 
 # ========== Apply Nginx Config (Static Certificates, No ACME Dynamic Module) ==========
@@ -2583,9 +2589,6 @@ main() {
     setup_swap
     enable_ksm_optimization     # Kernel stack memory deduplication
     
-    # OpenResty replaced by Angie
-    install_angie
-    
     install_container_runtime
     install_docker_compose
     install_s3_storage
@@ -2594,6 +2597,9 @@ main() {
     deploy_mcp_function
     configure_analytics
     configure_pg_hba
+    
+    # Kong native replaced Angie and Docker-Kong. It relies on Pigsty Postgres so must be executed after install_pigsty
+    install_kong_native
 
     # Performance tuning after Pigsty PG initialization
     tune_postgres
