@@ -9,6 +9,7 @@ AI-native 的 Supabase 基础设施管理 MCP Server。让 AI Agent（Claude、C
 - 🗄️ **数据库操作**：SQL 查询、Schema 检查、RLS 策略、数据迁移（支持只读模式）
 - 🔐 **Auth 管理**：OAuth Provider 配置（含微信/QQ/微博等国内登录）、Auth 设置
 - 📦 **存储管理**：S3/MinIO 桶管理、文件操作与 Base64 测试直传
+- 🌐 **前端托管**：静态网站 & SSR 部署、Git 部署、自定义域名、HTTPS 自动证书
 - 🏗️ **部署管理**：Docker 容器状态检查与 Web Console 部署
 - 🔒 **项目范围模式**：限制 AI 只能访问指定项目，支持只读模式
 - 🤖 **AI 原生**：带有上下文资源（Resources）与超级智能指引（Prompts）的标准 MCP 协议
@@ -83,6 +84,8 @@ Management API 内嵌了 Streamable HTTP MCP 端点，无需安装任何东西�
 
 > "列出所有项目的任务队列状态"
 
+> "帮我创建一个 React 前端部署，域名 app.example.com，然后从 GitHub 拉代码部署"
+
 ## 环境变量
 
 | 变量 | 说明 | 默认值 |
@@ -97,7 +100,7 @@ Management API 内嵌了 Streamable HTTP MCP 端点，无需安装任何东西�
 | `SUPACLOUD_PROJECT_REF` | 限定项目 (项目范围模式) | - |
 | `SUPACLOUD_READ_ONLY` | 启用只读模式 | `false` |
 
-## 可用工具（57 个）
+## 可用工具（70+ 个）
 
 ### SSH 工具（安装前可用）
 
@@ -220,6 +223,24 @@ Management API 内嵌了 Streamable HTTP MCP 端点，无需安装任何东西�
 | `list_backups` / `create_backup` | 数据库备份 |
 | `get_system_metrics` | 系统监控 |
 | `get_network_restrictions` / `update_network_restrictions` | 网络限制 |
+
+### 前端托管工具 🆕
+
+| 工具 | 说明 |
+|------|------|
+| `list_frontend_deployments` | 列出项目的前端部署 |
+| `get_frontend_deployment` | 获取部署详情 |
+| `create_frontend_deployment` | 创建前端部署（static/react/vue/svelte/nextjs/nuxt/astro） |
+| `update_frontend_deployment` | 更新部署配置 |
+| `delete_frontend_deployment` | 删除部署 |
+| `deploy_frontend_git` | 从 Git 仓库部署（克隆→安装→构建→上线） |
+| `redeploy_frontend` | 重新构建已有部署 |
+| `get_frontend_build_logs` | 查看构建日志 |
+| `add_frontend_domain` | 添加自定义域名（自动 HTTPS） |
+| `remove_frontend_domain` | 移除自定义域名 |
+| `set_frontend_env` | 设置构建环境变量 |
+| `list_frontend_frameworks` | 列出支持的框架及默认配置 |
+| `list_frontend_records` | 查看部署历史记录 |
 
 ### 部署工具
 
