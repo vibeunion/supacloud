@@ -1,312 +1,143 @@
 /**
- * Advanced Tools - Edge Functions, Secrets, Auth Config, Backup
+ * Advanced — Split into 3 compound tools: edge_functions, secrets, platform
  */
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { HttpTransport } from "../transports/http";
 
 export function registerAdvancedTools(server: McpServer, http: HttpTransport): void {
-    // ═══════════════════════════════════════
-    //  Edge Functions
-    // ═══════════════════════════════════════
 
+    // ═══ Edge Functions (5→1) ═══
     server.tool(
-        "list_edge_functions",
-        "List all Edge Functions for a project",
-        { ref: z.string().describe("Project ref") },
-        async ({ ref }) => {
-            const res = await http.get(`/v1/projects/${ref}/functions`);
-            return {
-                content: [{ type: "text", text: JSON.stringify(res.data, null, 2) }],
-            };
-        }
-    );
-
-    server.tool(
-        "deploy_edge_function",
-        "Deploy an Edge Function to a project. The server automatically bundles all dependencies — just send the raw source code, no need to pre-bundle.",
+        "edge_functions",
+        `Edge Function management (Deno/Bun serverless). Server auto-bundles dependencies.
+Actions: list, deploy, deploy_bundle, source, delete`,
         {
+            action: z.enum(["list", "deploy", "deploy_bundle", "source", "delete"]).describe("Action"),
             ref: z.string().describe("Project ref"),
-            slug: z.string().describe("Function name (slug)"),
-            code: z.string().describe("Function source code (TypeScript)"),
-            minify: z.boolean().optional().describe("Minify the bundle (default: false)"),
+            slug: z.string().optional().describe("[deploy/deploy_bundle/source/delete] Function name"),
+            code: z.string().optional().describe("[deploy] Function source code (TypeScript)"),
+            files: z.record(z.string()).optional().describe("[deploy_bundle] File map: { 'index.ts': '...', '_shared/x.ts': '...' }"),
+            entrypoint: z.string().optional().describe("[deploy_bundle] Entrypoint file (default: index.ts)"),
+            minify: z.boolean().optional().describe("[deploy/deploy_bundle] Minify bundle"),
         },
-        async ({ ref, slug, code, minify }) => {
-            const res = await http.post(`/v1/projects/${ref}/functions/${slug}`, { code, minify });
-            return {
-                content: [
-                    {
-                        type: "text",
-                        text: res.ok
-                            ? `✅ Function ${slug} deployed and bundled successfully`
-                            : `❌ Deployment failed (${res.status}): ${JSON.stringify(res.data)}`,
-                    },
-                ],
-            };
+        async ({ action, ref, slug, code, files, entrypoint, minify }) => {
+            const need = (f: string, v: any) => { if (!v) throw new Error(`'${f}' required for '${action}'`); };
+            let text: string;
+            switch (action) {
+                case "list":
+                    text = JSON.stringify((await http.get(`/v1/projects/${ref}/functions`)).data, null, 2);
+                    break;
+                case "deploy":
+                    need("slug", slug); need("code", code);
+                    const dr = await http.post(`/v1/projects/${ref}/functions/${slug}`, { code, minify });
+                    text = dr.ok ? `✅ Function ${slug} deployed` : `❌ Failed (${dr.status}): ${JSON.stringify(dr.data)}`;
+                    break;
+                case "deploy_bundle":
+                    need("slug", slug); need("files", files);
+                    const br = await http.post(`/v1/projects/${ref}/functions/${slug}/bundle`, { files, entrypoint, minify });
+                    text = br.ok ? `✅ Function ${slug} bundle deployed (${Object.keys(files!).length} files)` : `❌ Failed (${br.status}): ${JSON.stringify(br.data)}`;
+                    break;
+                case "source":
+                    need("slug", slug);
+                    const sr = await http.get(`/v1/projects/${ref}/functions/${slug}/source`);
+                    text = sr.ok ? JSON.stringify(sr.data, null, 2) : `❌ Not found (${sr.status})`;
+                    break;
+                case "delete":
+                    need("slug", slug);
+                    text = (await http.delete(`/v1/projects/${ref}/functions/${slug}`)).ok ? `✅ Function ${slug} deleted` : `❌ Failed`;
+                    break;
+                default: text = `❌ Unknown action`;
+            }
+            return { content: [{ type: "text" as const, text }] };
         }
     );
 
+    // ═══ Secrets (3→1) ═══
     server.tool(
-        "deploy_edge_function_bundle",
-        "Deploy an Edge Function with multiple files (supports _shared/ dependencies). Send a file map and the server bundles everything automatically.",
+        "secrets",
+        `Project secrets (environment variables for Edge Functions).
+Actions: list, upsert, delete`,
         {
+            action: z.enum(["list", "upsert", "delete"]).describe("Action"),
             ref: z.string().describe("Project ref"),
-            slug: z.string().describe("Function name (slug)"),
-            files: z.record(z.string()).describe("File map: { 'index.ts': '...', '_shared/config.ts': '...' }"),
-            entrypoint: z.string().optional().describe("Entrypoint file (default: 'index.ts')"),
-            minify: z.boolean().optional().describe("Minify the bundle (default: false)"),
+            secrets: z.array(z.object({ name: z.string(), value: z.string() })).optional()
+                .describe("[upsert] Secret list: [{name:'KEY', value:'...'}]"),
+            name: z.string().optional().describe("[delete] Secret name to delete"),
         },
-        async ({ ref, slug, files, entrypoint, minify }) => {
-            const res = await http.post(`/v1/projects/${ref}/functions/${slug}/bundle`, {
-                files, entrypoint, minify,
-            });
-            return {
-                content: [
-                    {
-                        type: "text",
-                        text: res.ok
-                            ? `✅ Function ${slug} bundle deployed (${Object.keys(files).length} files)`
-                            : `❌ Bundle deployment failed (${res.status}): ${JSON.stringify(res.data)}`,
-                    },
-                ],
-            };
+        async ({ action, ref, secrets, name }) => {
+            let text: string;
+            switch (action) {
+                case "list":
+                    text = JSON.stringify((await http.get(`/v1/projects/${ref}/secrets`)).data, null, 2);
+                    break;
+                case "upsert":
+                    if (!secrets?.length) throw new Error("'secrets' array required");
+                    text = (await http.post(`/v1/projects/${ref}/secrets`, secrets)).ok
+                        ? `✅ Updated ${secrets.length} secrets` : `❌ Failed`;
+                    break;
+                case "delete":
+                    if (!name) throw new Error("'name' required");
+                    text = (await http.delete(`/v1/projects/${ref}/secrets/${name}`)).ok
+                        ? `✅ Secret ${name} deleted` : `❌ Failed`;
+                    break;
+                default: text = `❌ Unknown action`;
+            }
+            return { content: [{ type: "text" as const, text }] };
         }
     );
 
+    // ═══ Platform (metrics + backup + network + org → 1) ═══
     server.tool(
-        "get_edge_function_source",
-        "Get the original source code of a deployed Edge Function (for debugging)",
+        "platform",
+        `Platform monitoring, backups, network, and organizations.
+Actions: metrics, list_backups, create_backup, network, update_network, list_orgs, get_org`,
         {
-            ref: z.string().describe("Project ref"),
-            slug: z.string().describe("Function name"),
+            action: z.enum([
+                "metrics", "list_backups", "create_backup",
+                "network", "update_network",
+                "list_orgs", "get_org",
+            ]).describe("Action"),
+            ref: z.string().optional().describe("Project ref (for backup/network actions)"),
+            slug: z.string().optional().describe("[get_org] Organization slug"),
+            allowed_cidrs: z.array(z.string()).optional().describe("[update_network] Allowed CIDRs"),
         },
-        async ({ ref, slug }) => {
-            const res = await http.get(`/v1/projects/${ref}/functions/${slug}/source`);
-            return {
-                content: [
-                    {
-                        type: "text",
-                        text: res.ok
-                            ? JSON.stringify(res.data, null, 2)
-                            : `❌ Source not found (${res.status})`,
-                    },
-                ],
-            };
-        }
-    );
-
-    server.tool(
-        "delete_edge_function",
-        "Delete an Edge Function from a project",
-        {
-            ref: z.string().describe("Project ref"),
-            slug: z.string().describe("Function name"),
-        },
-        async ({ ref, slug }) => {
-            const res = await http.delete(`/v1/projects/${ref}/functions/${slug}`);
-            return {
-                content: [
-                    {
-                        type: "text",
-                        text: res.ok ? `✅ Function ${slug} deleted` : `❌ Deletion failed (${res.status})`,
-                    },
-                ],
-            };
-        }
-    );
-
-    // ═══════════════════════════════════════
-    //  Secrets
-    // ═══════════════════════════════════════
-
-    server.tool(
-        "list_secrets",
-        "List all Secrets (environment variables) for a project",
-        { ref: z.string().describe("Project ref") },
-        async ({ ref }) => {
-            const res = await http.get(`/v1/projects/${ref}/secrets`);
-            return {
-                content: [{ type: "text", text: JSON.stringify(res.data, null, 2) }],
-            };
-        }
-    );
-
-    server.tool(
-        "upsert_secrets",
-        "Create or update project Secrets",
-        {
-            ref: z.string().describe("Project ref"),
-            secrets: z
-                .array(z.object({ name: z.string(), value: z.string() }))
-                .describe("Secret list, e.g. [{name: 'API_KEY', value: '...'}]"),
-        },
-        async ({ ref, secrets }) => {
-            const res = await http.post(`/v1/projects/${ref}/secrets`, secrets);
-            return {
-                content: [
-                    {
-                        type: "text",
-                        text: res.ok
-                            ? `✅ Updated ${secrets.length} Secrets`
-                            : `❌ Update failed (${res.status})`,
-                    },
-                ],
-            };
-        }
-    );
-
-    server.tool(
-        "delete_secret",
-        "Delete a Secret from a project",
-        {
-            ref: z.string().describe("Project ref"),
-            name: z.string().describe("Secret name"),
-        },
-        async ({ ref, name }) => {
-            const res = await http.delete(`/v1/projects/${ref}/secrets/${name}`);
-            return {
-                content: [
-                    {
-                        type: "text",
-                        text: res.ok ? `✅ Secret ${name} deleted` : `❌ Deletion failed (${res.status})`,
-                    },
-                ],
-            };
-        }
-    );
-
-    // ═══════════════════════════════════════
-    //  Auth Config
-    // ═══════════════════════════════════════
-
-    server.tool(
-        "get_auth_config",
-        "Get project Auth config (SMTP, OAuth providers, etc.)",
-        { ref: z.string().describe("Project ref") },
-        async ({ ref }) => {
-            const res = await http.get(`/v1/projects/${ref}/config/auth`);
-            return {
-                content: [{ type: "text", text: JSON.stringify(res.data, null, 2) }],
-            };
-        }
-    );
-
-    server.tool(
-        "update_auth_config",
-        "Update project Auth config, can enable multiple OAuth providers or configure SMTP at once",
-        {
-            ref: z.string().describe("Project ref"),
-            config: z
-                .record(z.unknown())
-                .describe(
-                    "Auth config object, e.g.: {external_google_enabled: true, external_google_client_id: '...'}"
-                ),
-        },
-        async ({ ref, config }) => {
-            const res = await http.patch(`/v1/projects/${ref}/config/auth`, config);
-            return {
-                content: [
-                    {
-                        type: "text",
-                        text: res.ok
-                            ? `✅ Auth config updated`
-                            : `❌ Update failed (${res.status}): ${JSON.stringify(res.data)}`,
-                    },
-                ],
-            };
-        }
-    );
-
-    // ═══════════════════════════════════════
-    //  Backup
-    // ═══════════════════════════════════════
-
-    server.tool(
-        "list_backups",
-        "List all database backups for a project",
-        { ref: z.string().describe("Project ref") },
-        async ({ ref }) => {
-            const res = await http.get(`/v1/projects/${ref}/database/backups`);
-            return {
-                content: [{ type: "text", text: JSON.stringify(res.data, null, 2) }],
-            };
-        }
-    );
-
-    server.tool(
-        "create_backup",
-        "Create a database backup for a project",
-        { ref: z.string().describe("Project ref") },
-        async ({ ref }) => {
-            const res = await http.post(`/v1/projects/${ref}/database/backups`);
-            return {
-                content: [
-                    {
-                        type: "text",
-                        text: res.ok
-                            ? `✅ Backup task created\n${JSON.stringify(res.data, null, 2)}`
-                            : `❌ Backup failed (${res.status})`,
-                    },
-                ],
-            };
-        }
-    );
-
-    // ═══════════════════════════════════════
-    //  Monitoring
-    // ═══════════════════════════════════════
-
-    server.tool(
-        "get_system_metrics",
-        "Get system-level monitoring metrics for SupaCloud platform",
-        {},
-        async () => {
-            const res = await http.get("/v1/monitor/system");
-            return {
-                content: [{ type: "text", text: JSON.stringify(res.data, null, 2) }],
-            };
-        }
-    );
-
-    // ═══════════════════════════════════════
-    //  Security
-    // ═══════════════════════════════════════
-
-    server.tool(
-        "get_network_restrictions",
-        "Get project network access restriction rules",
-        { ref: z.string().describe("Project ref") },
-        async ({ ref }) => {
-            const res = await http.get(`/v1/projects/${ref}/network-restrictions`);
-            return {
-                content: [{ type: "text", text: JSON.stringify(res.data, null, 2) }],
-            };
-        }
-    );
-
-    server.tool(
-        "update_network_restrictions",
-        "Update project network access restrictions (IP whitelist)",
-        {
-            ref: z.string().describe("Project ref"),
-            restrictions: z
-                .object({
-                    allowedCidrs: z.array(z.string()).describe("List of allowed CIDRs"),
-                })
-                .describe("Network restriction config"),
-        },
-        async ({ ref, restrictions }) => {
-            const res = await http.put(`/v1/projects/${ref}/network-restrictions`, restrictions);
-            return {
-                content: [
-                    {
-                        type: "text",
-                        text: res.ok
-                            ? `✅ Network restrictions updated`
-                            : `❌ Update failed (${res.status})`,
-                    },
-                ],
-            };
+        async ({ action, ref, slug, allowed_cidrs }) => {
+            const need = (f: string, v: any) => { if (!v) throw new Error(`'${f}' required for '${action}'`); };
+            let text: string;
+            switch (action) {
+                case "metrics":
+                    text = JSON.stringify((await http.get("/v1/monitor/system")).data, null, 2);
+                    break;
+                case "list_backups":
+                    need("ref", ref);
+                    text = JSON.stringify((await http.get(`/v1/projects/${ref}/database/backups`)).data, null, 2);
+                    break;
+                case "create_backup": {
+                    need("ref", ref);
+                    const r = await http.post(`/v1/projects/${ref}/database/backups`);
+                    text = r.ok ? `✅ Backup created\n${JSON.stringify(r.data, null, 2)}` : `❌ Failed (${r.status})`;
+                    break;
+                }
+                case "network":
+                    need("ref", ref);
+                    text = JSON.stringify((await http.get(`/v1/projects/${ref}/network-restrictions`)).data, null, 2);
+                    break;
+                case "update_network":
+                    need("ref", ref); if (!allowed_cidrs) throw new Error("'allowed_cidrs' required");
+                    text = (await http.put(`/v1/projects/${ref}/network-restrictions`, { allowedCidrs: allowed_cidrs })).ok
+                        ? `✅ Network restrictions updated` : `❌ Failed`;
+                    break;
+                case "list_orgs":
+                    text = JSON.stringify((await http.get("/v1/organizations")).data, null, 2);
+                    break;
+                case "get_org":
+                    need("slug", slug);
+                    text = JSON.stringify((await http.get(`/v1/organizations/${slug}`)).data, null, 2);
+                    break;
+                default: text = `❌ Unknown action`;
+            }
+            return { content: [{ type: "text" as const, text }] };
         }
     );
 }
