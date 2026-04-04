@@ -136,3 +136,6 @@ progress.md
 
 servers.local.md
 .mailbox/
+
+.agents/state/
+AGENTS.md
