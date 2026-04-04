@@ -72,6 +72,14 @@ if (process.argv.includes("--help") || process.argv.includes("-h")) {
 
     npx supacloud-mcp                    Start as stdio MCP server
     npx supacloud-mcp --help             Show this help
+    npx supacloud-mcp <module> <action>  Run a specific tool from the CLI
+
+  CLI EXAMPLES
+
+    npx supacloud-mcp project list
+    npx supacloud-mcp database query --ref abc123 --sql "SELECT 1"
+    npx supacloud-mcp ssh diagnose
+    npx supacloud-mcp edge_functions deploy --ref abc123 --slug hello --code "..."
 
   CONFIGURATION
 
@@ -197,6 +205,18 @@ const server = new McpServer({
     name: serverName,
     version: "0.5.5",
 });
+
+// Proxy tool registration to build CLI mapping
+export const cliTools: Record<string, { schema: any; callback: (args: any) => Promise<any> }> = {};
+const originalTool = server.tool.bind(server);
+(server as any).tool = (name: string, description: string, schemaOrCb: any, callback?: any) => {
+    if (typeof schemaOrCb === "function") {
+        cliTools[name] = { schema: {}, callback: schemaOrCb };
+    } else {
+        cliTools[name] = { schema: schemaOrCb, callback };
+    }
+    return originalTool(name, description, schemaOrCb, callback);
+};
 
 // ── Register SSH tools (always available) ──
 if (HOST) {
@@ -585,13 +605,19 @@ if (!HOST && !API_URL) {
 // ── Register Documents (Resources) ──
 registerDocsResources(server);
 
-// ── Start stdio transport ──
+// ── Start Server or CLI ──
 async function main(): Promise<void> {
-    const transport = new StdioServerTransport();
-    await server.connect(transport);
+    const args = process.argv.slice(2);
+    if (args.length > 0 && args[0] !== "--stdio" && args[0] !== "--help" && args[0] !== "-h") {
+        const { runCli } = await import("./cli");
+        await runCli(cliTools, args);
+    } else {
+        const transport = new StdioServerTransport();
+        await server.connect(transport);
+    }
 }
 
 main().catch((err) => {
-    console.error("SupaCloud MCP Server failed to start:", err);
+    console.error("SupaCloud MCP / CLI failed to start:", err);
     process.exit(1);
 });
