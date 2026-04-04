@@ -65,24 +65,19 @@ export class JuiceFSDriver implements StorageDriver {
   async listFiles(projectRef: string, bucket: string): Promise<{id: string, name: string, updated?: string, size: string, type: string}[]> {
     try {
       const bucketPath = this.getBasePath(projectRef, bucket);
-      const entries = await fs.readdir(bucketPath, { withFileTypes: true, recursive: true }).catch(() => []);
+      const { Glob } = await import("bun");
+      const glob = new Glob("**/*");
       const files: any[] = [];
       
-      for (const entry of entries) {
-        if (!entry.isFile()) continue;
+      for (const relPath of glob.scanSync({ cwd: bucketPath, onlyFiles: true })) {
+        const fullPath = path.join(bucketPath, relPath);
+        const f = Bun.file(fullPath);
         
-        // Native fs recursive gives us relative paths in entry.name if we manually construct it, 
-        // but Node 20+ recursive readdir gives entry.path.
-        // Fallback for Bun fs.readdir recursive behavior:
-        const fullPath = path.join((entry as any).path || bucketPath, entry.name);
-        const relPath = path.relative(bucketPath, fullPath);
-        
-        const stat = await fs.stat(fullPath);
         files.push({
           id: relPath,
           name: relPath,
-          updated: stat.mtime.toISOString(),
-          size: Math.round(stat.size / 1024) + ' KB',
+          updated: new Date(f.lastModified).toISOString(),
+          size: Math.round(f.size / 1024) + ' KB',
           type: relPath.includes('.') ? relPath.split('.').pop() : 'unknown'
         });
       }
