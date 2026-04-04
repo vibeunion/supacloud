@@ -192,9 +192,6 @@ const SSH_PASS = process.env.SUPACLOUD_SSH_PASS ?? "";
 // For tenant setups, API_URL maps directly to the project domain gateway.
 // Note: Management API runs on port 9090 natively, but tenant APIs proxy via standard HTTP/HTTPS.
 let API_URL = process.env.SUPACLOUD_API_URL ?? (tempUrl ? tempUrl.replace(/\/+$/, "") : (HOST ? `http://${HOST}:9090` : ""));
-if (API_URL && !API_URL.includes(":9090") && !API_URL.endsWith("/mcp")) {
-    API_URL = `${API_URL}/mcp`;
-}
 const API_TOKEN = process.env.SUPACLOUD_API_TOKEN ?? tempKey ?? "";
 const PROJECT_REF = process.env.SUPACLOUD_PROJECT_REF ?? "";
 const READ_ONLY = process.env.SUPACLOUD_READ_ONLY === "true";
