@@ -94,13 +94,13 @@ export async function initDatabase() {
 
     const result = await sql`
       SELECT COUNT(*) as count FROM information_schema.tables 
-      WHERE table_schema = 'public' AND table_name IN ('organizations', 'projects', 'project_tasks')
+      WHERE table_schema = 'public' AND table_name IN ('organizations', 'projects', 'project_tasks', 'platform_settings')
     `;
     
     const tableCount = Number(result[0]?.count || 0);
     logger.info(`Found ${tableCount} tables in database`);
 
-    if (tableCount < 3) {
+    if (tableCount < 4) {
       logger.info("Executing DDL statements...");
       await sql.unsafe(ddlQuery);
       logger.info("DDL executed successfully.");
@@ -134,14 +134,14 @@ export async function initDatabase() {
 
     const [verify] = await sql`
       SELECT COUNT(*) as count FROM information_schema.tables 
-      WHERE table_schema = 'public' AND table_name IN ('organizations', 'projects', 'project_tasks')
+      WHERE table_schema = 'public' AND table_name IN ('organizations', 'projects', 'project_tasks', 'platform_settings')
     `;
     
     const finalCount = Number(verify?.count || 0);
-    logger.info(`Database initialized successfully! Tables verified: ${finalCount}/3`);
+    logger.info(`Database initialized successfully! Tables verified: ${finalCount}/4`);
     
-    if (finalCount < 3) {
-      throw new Error(`Table creation verified but failed. Expected 3 tables, got ${finalCount}`);
+    if (finalCount < 4) {
+      throw new Error(`Table creation verified but failed. Expected 4 tables, got ${finalCount}`);
     }
   } catch (error: unknown) {
     logger.error("Failed to initialize database:", { error: error instanceof Error ? error.message : String(error) });
@@ -149,4 +149,11 @@ export async function initDatabase() {
   } finally {
     await sql.close();
   }
+}
+
+if (import.meta.main) {
+  initDatabase().catch((e) => {
+    console.error(e);
+    process.exit(1);
+  });
 }
