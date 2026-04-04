@@ -131,8 +131,8 @@ export class GatewayService {
                 config: {
                     origins: [resolvedOrigins],
                     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-                    headers: ["Accept", "Authorization", "Content-Type", "X-Api-Version", "x-supabase-api-version", "X-Client-Info", "apikey", "Prefer", "Content-Profile"],
-                    exposed_headers: ["Content-Length", "X-JSON", "x-supabase-api-version", "X-Client-Info", "apikey", "Prefer", "Content-Profile"],
+                    headers: ["Accept", "Accept-Language", "Content-Language", "Authorization", "Content-Type", "X-Api-Version", "x-supabase-api-version", "X-Client-Info", "apikey", "Prefer", "Content-Profile", "accept-profile", "Range", "Range-Unit"],
+                    exposed_headers: ["Content-Length", "Content-Range", "X-JSON", "x-supabase-api-version", "X-Client-Info", "apikey", "Prefer", "Content-Profile", "accept-profile", "Range", "Range-Unit", "X-Relay-Error"],
                     credentials: true,
                     max_age: 3600,
                 },
@@ -263,8 +263,8 @@ export class GatewayService {
         await this.upsertRoutePlugin(routeName, "cors", {
             origins: ["~^https?://.*$"],
             methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-            headers: ["Accept", "Authorization", "Content-Type", "X-Api-Version", "x-supabase-api-version", "X-Client-Info", "apikey", "Prefer", "Content-Profile"],
-            exposed_headers: ["Content-Length", "X-JSON", "x-supabase-api-version", "X-Client-Info", "apikey", "Prefer", "Content-Profile", "X-Relay-Error"],
+            headers: ["Accept", "Accept-Language", "Content-Language", "Authorization", "Content-Type", "X-Api-Version", "x-supabase-api-version", "X-Client-Info", "apikey", "Prefer", "Content-Profile", "accept-profile", "Range", "Range-Unit"],
+            exposed_headers: ["Content-Length", "Content-Range", "X-JSON", "x-supabase-api-version", "X-Client-Info", "apikey", "Prefer", "Content-Profile", "accept-profile", "Range", "Range-Unit", "X-Relay-Error"],
             credentials: true,
             max_age: 3600,
         });
