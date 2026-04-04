@@ -342,7 +342,7 @@ Key settings in `config.env`:
 | `S3_STORAGE_TYPE` | Storage backend | `juicefs` |
 | `EDGE_RUNTIME` | Functions runtime | `bun` |
 | `PG_VERSION` | PostgreSQL version | `18` |
-| `PIGSTY_VERSION` | Pigsty version | `v4.2.0` |
+| `PIGSTY_VERSION` | Pigsty version | `latest` |
 | `ENABLE_ANALYTICS` | Logflare analytics | `true` |
 
 ### Documentation
@@ -694,7 +694,7 @@ supacloud/
 | `S3_STORAGE_TYPE` | 存储后端 | `juicefs` |
 | `EDGE_RUNTIME` | 云函数运行时 | `bun` |
 | `PG_VERSION` | PostgreSQL 版本 | `18` |
-| `PIGSTY_VERSION` | Pigsty 版本 | `v4.2.0` |
+| `PIGSTY_VERSION` | Pigsty 版本 | `latest` |
 | `ENABLE_ANALYTICS` | Logflare 分析 | `true` |
 
 ### 参考文档
