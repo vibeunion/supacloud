@@ -163,26 +163,11 @@ export function registerMcpTools(server: McpServer, token: McpTokenPayload): voi
       }
     }
 
-    // Execute via project's database
-    const project = await projectService.getProject(ref);
-    if (!project) return { content: [{ type: "text", text: "❌ Project not found" }] };
-
+    // Execute via project's database (uses pooled connection from postgres.js)
     try {
-      const { SQL } = await import("bun");
-      const dbName = `supa_${ref}`;
-      const db = new SQL({
-        hostname: config.pgHost,
-        port: config.pgPort,
-        database: dbName,
-        username: config.pgUser,
-        password: config.pgPassword,
-      });
-      try {
-        const rows = await db.unsafe(sqlStr);
-        return { content: [{ type: "text", text: `✅ ${Array.isArray(rows) ? rows.length : 0} row(s)\n${JSON.stringify(rows, null, 2)}` }] };
-      } finally {
-        await db.close();
-      }
+      const db = await getDb(ref);
+      const rows = await db.unsafe(sqlStr);
+      return { content: [{ type: "text", text: `✅ ${Array.isArray(rows) ? rows.length : 0} row(s)\n${JSON.stringify(rows, null, 2)}` }] };
     } catch (e: unknown) {
       return { content: [{ type: "text", text: `❌ SQL error: ${e instanceof Error ? e.message : String(e)}` }] };
     }

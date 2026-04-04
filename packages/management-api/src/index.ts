@@ -483,7 +483,7 @@ async function bootstrap() {
         const url = new URL(request.url);
         // Route /mcp paths directly to MCP handler (bypasses Elysia body parsing)
         if (url.pathname.startsWith("/mcp")) {
-          if (url.pathname === "/mcp" || url.pathname.startsWith("/mcp/sql") || url.pathname.startsWith("/mcp/tokens") || url.pathname.startsWith("/mcp/logs")) {
+          if (url.pathname === "/mcp" || url.pathname.startsWith("/mcp/sql") || url.pathname.startsWith("/mcp/tokens") || url.pathname.startsWith("/mcp/logs") || url.pathname.startsWith("/mcp/migrations")) {
             return handleMcp(request);
           }
           // Rewrite /mcp/v1... to /v1... and pass to Elysia
