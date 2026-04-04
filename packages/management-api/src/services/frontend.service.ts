@@ -35,7 +35,7 @@ class FrontendService {
     this.domainService = new FrontendDomainService(
       baseDir,
       this.getDeployment.bind(this),
-      this.configureAngie.bind(this),
+      this.configureKongRoute.bind(this),
     );
     this.recordService = new FrontendRecordService(baseDir);
   }
@@ -150,11 +150,8 @@ class FrontendService {
     try {
       const deployment = await this.getDeployment(projectRef, deploymentId);
       if (deployment) {
-        const defaults = FRAMEWORK_DEFAULTS[deployment.framework];
-        if (defaults.is_ssr) {
-          await this.stopSSRProcess(projectRef, deploymentId);
-        }
-        await this.removeAngieConfig(deployment);
+        await this.stopSSRProcess(projectRef, deploymentId);
+        await this.removeKongRoute(deployment);
       }
       await $`rm -rf ${deploymentDir}`.quiet();
       return true;
@@ -282,10 +279,8 @@ class FrontendService {
       const outputDir = this.joinPath(sourceDir, deployment.output_dir);
       await $`rm -rf ${buildDir} && cp -r ${outputDir} ${buildDir}`.quiet();
 
-      if (defaults.is_ssr) {
-        await this.startSSRProcess(projectRef, deploymentId, deployment, buildDir);
-      }
-      await this.configureAngie(deployment, buildDir, defaults.is_ssr);
+      await this.startSSRProcess(projectRef, deploymentId, deployment, buildDir, defaults.is_ssr);
+      await this.configureKongRoute(deployment, buildDir, defaults.is_ssr);
 
       await this.updateDeployment(projectRef, deploymentId, {
         status: "success",
@@ -311,95 +306,47 @@ class FrontendService {
     }
   }
 
-  // ── Angie (Web Server) Config ─────────────────────────────────────
+  // ── Kong (Web Server) Config ─────────────────────────────────────
 
-  async configureAngie(deployment: FrontendDeployment, buildDir: string, isSSR: boolean): Promise<void> {
+  async configureKongRoute(deployment: FrontendDeployment, buildDir: string, isSSR: boolean): Promise<void> {
     const port = 30000 + parseInt(deployment.id, 16) % 10000;
     
-    let angieConfig: string;
-    
-    if (isSSR) {
-      angieConfig = `# SSR Frontend: ${deployment.name}
-server {
-    listen 80;
-    listen 443 ssl;
-    server_name ${deployment.domain} ${deployment.custom_domains.join(" ")};
+    const hosts = [deployment.domain, ...deployment.custom_domains];
+    const serviceName = `svc-frontend-${deployment.project_ref}-${deployment.id}`;
+    const routeName = `route-frontend-${deployment.project_ref}-${deployment.id}`;
 
-    acme le;
-    ssl_certificate     $acme_cert_le;
-    ssl_certificate_key $acme_cert_key_le;
+    const { gatewayService } = await import("./gateway.service");
 
-    location /.well-known/acme-challenge/ {
-        root /var/lib/angie/acme;
-    }
+    await gatewayService['kongRequest'](`/services/${serviceName}`, 'PUT', {
+        name: serviceName,
+        url: `http://127.0.0.1:${port}`,
+        connect_timeout: 5000,
+        read_timeout: 60000,
+        write_timeout: 60000
+    });
 
-    if ($scheme = http) {
-        return 301 https://$host$request_uri;
-    }
-
-    location / {
-        proxy_pass http://127.0.0.1:${port};
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-}
-`;
-    } else {
-      angieConfig = `# Static Frontend: ${deployment.name}
-server {
-    listen 80;
-    listen 443 ssl;
-    server_name ${deployment.domain} ${deployment.custom_domains.join(" ")};
-
-    acme le;
-    ssl_certificate     $acme_cert_le;
-    ssl_certificate_key $acme_cert_key_le;
-
-    location /.well-known/acme-challenge/ {
-        root /var/lib/angie/acme;
-    }
-
-    if ($scheme = http) {
-        return 301 https://$host$request_uri;
-    }
-
-    root ${buildDir};
-    index index.html;
-
-    location / {
-        try_files $uri $uri/ /index.html;
-    }
-
-    location ~* \\.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
-        expires 1y;
-        add_header Cache-Control "public, immutable";
-    }
-
-    gzip on;
-    gzip_types text/plain text/css application/json application/javascript;
-}
-`;
-    }
-
-    const configPath = this.joinPath(ANGIE_SITES_DIR, `frontend-${deployment.project_ref}-${deployment.id}.conf`);
-    await Bun.write(configPath, angieConfig);
-
-    await $`angie -s reload`.nothrow().quiet();
+    await gatewayService['kongRequest'](`/routes/${routeName}`, 'PUT', {
+        name: routeName,
+        service: { name: serviceName },
+        paths: ["/"],
+        hosts: hosts.length > 0 ? hosts : undefined,
+        strip_path: false,
+        preserve_host: true
+    });
   }
 
-  private async removeAngieConfig(deployment: FrontendDeployment): Promise<void> {
-    const configPath = this.joinPath(ANGIE_SITES_DIR, `frontend-${deployment.project_ref}-${deployment.id}.conf`);
+  private async removeKongRoute(deployment: FrontendDeployment): Promise<void> {
+    const serviceName = `svc-frontend-${deployment.project_ref}-${deployment.id}`;
+    const routeName = `route-frontend-${deployment.project_ref}-${deployment.id}`;
+    
+    const { gatewayService } = await import("./gateway.service");
 
     try {
-      await $`rm -f ${configPath}`.quiet();
-      await $`angie -s reload`.nothrow().quiet();
-    } catch (e: unknown) { logger.debug("[services/frontend.service] suppressed error", { error: e instanceof Error ? e.message : String(e) }); }
+        await gatewayService['kongRequest'](`/routes/${routeName}`, 'DELETE');
+        await gatewayService['kongRequest'](`/services/${serviceName}`, 'DELETE');
+    } catch (e: unknown) { logger.debug("suppressed error removing route", { error: String(e) }); }
   }
+
 
   // ── SSR Process Management ────────────────────────────────────────
 
@@ -407,7 +354,8 @@ server {
     projectRef: string,
     deploymentId: string,
     deployment: FrontendDeployment,
-    buildDir: string
+    buildDir: string,
+    isSSR: boolean
   ): Promise<void> {
     const port = 30000 + parseInt(deploymentId, 16) % 10000;
     const serviceName = `supacloud-frontend-${projectRef}-${deploymentId}`;
@@ -430,7 +378,7 @@ WorkingDirectory=${buildDir}
 Environment="PORT=${port}"
 Environment="NODE_ENV=production"
 EnvironmentFile=${envFile}
-ExecStart=${bunPath} run ${buildDir}/index.js
+ExecStart=${isSSR ? `${bunPath} run ${buildDir}/index.js` : `${bunPath}x sirv-cli ${buildDir} --port ${port} --single --quiet`}
 Restart=always
 RestartSec=5
 LimitNOFILE=65536

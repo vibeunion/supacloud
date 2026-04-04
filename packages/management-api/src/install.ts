@@ -79,15 +79,7 @@ export async function runInstall(options: { forceYes?: boolean } = {}) {
         const config = await runInteractiveConfig(options.forceYes);
 
         if (!isDryRun) {
-            p.log.step(">>> Initializing Load Balancer (Angie with ACME) ...");
-            // Read from generated config file or sync directly from variables
-            // For sync correctness, we destructure config object again (although runInteractiveConfig returns PigstyConfig, it contains the info we need)
-            await LoadBalancerManager.installAngie(
-                config.studioDomain,
-                config.publicDomain,
-                appConfig.enableSsl,
-                appConfig.acmeClient
-            );
+            p.log.step(">>> Native Kong configuration is handled via install.sh ...");
         }
 
         if (isDryRun) {
@@ -115,7 +107,6 @@ export async function runInstall(options: { forceYes?: boolean } = {}) {
 }
 
 import { install as pigstyInstall, type PigstyConfig } from "./infra/pigsty";
-import { LoadBalancerManager } from "./infra/loadbalancer";
 import { ServiceManager } from "./infra/service";
 
 async function performPreFlightChecks(forceYes = false) {

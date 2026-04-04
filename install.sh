@@ -1097,9 +1097,9 @@ compile_acme_module() {
     
     # Try multiple download methods (using multiple proxies)
     log_info "Method 1: Using mirror.ghproxy.com..."
-    wget -q "https://mirror.ghproxy.com/https://github.com/nginx/acme/archive/refs/heads/main.tar.gz" -O nginx-acme.tar.gz && \
+    { wget -q "https://mirror.ghproxy.com/https://github.com/nginx/acme/archive/refs/heads/main.tar.gz" -O nginx-acme.tar.gz && \
     tar -xzf nginx-acme.tar.gz && \
-    } || {
+    mv nginx-acme-main nginx-acme; } || {
         log_warn "mirror.ghproxy.com failed, trying gh-proxy.net..."
         wget -q "https://gh-proxy.net/https://github.com/nginx/acme/archive/refs/heads/main.tar.gz" -O nginx-acme.tar.gz && \
         tar -xzf nginx-acme.tar.gz && \
@@ -1154,136 +1154,6 @@ compile_acme_module() {
     fi
 }
 
-# ========== [Deprecated] Compile Nginx + ACME Module from Source ==========
-# Same as above, ABI incompatibility causes Segfault, branch deprecated.
-compile_nginx_with_acme() {
-    log_warn "[Deprecated] compile_nginx_with_acme: Disabled, using repo Nginx instead"
-    return 0
-    
-    local NGINX_VERSION="1.26.3"
-    local OPENSSL_VERSION="3.0.12"
-    
-    # Install build dependencies
-    log_info "Installing build dependencies..."
-    dnf install -y gcc make pcre-devel zlib-devel wget tar git || {
-        log_error "Build dependencies installation failed"
-        return 1
-    }
-    
-    # Download Nginx source
-    cd /tmp
-    log_info "Downloading Nginx $NGINX_VERSION..."
-    wget -q https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz || {
-        log_error "Nginx source download failed"
-        return 1
-    }
-    tar -xzf nginx-${NGINX_VERSION}.tar.gz
-    
-    # Download ngx_http_acme_module
-    log_info "Downloading ngx_http_acme_module..."
-    git clone --depth 1 https://github.com/nginx/njs_examples.git /tmp/ngx_http_acme_module 2>/dev/null || {
-        # Fallback if git fails
-        log_warn "Alternative method for ACME module..."
-        mkdir -p /tmp/ngx_http_acme_module
-    }
-    
-    # Configure build options
-    cd /tmp/nginx-${NGINX_VERSION}
-    log_info "Configuring Nginx build options..."
-    
-    # Install openssl-devel to use system OpenSSL
-    dnf install -y openssl-devel 2>/dev/null || apt-get install -y libssl-dev 2>/dev/null || true
-    
-    ./configure \
-        --prefix=/usr/local/nginx \
-        --conf-path=/etc/nginx/nginx.conf \
-        --error-log-path=/var/log/nginx/error.log \
-        --http-log-path=/var/log/nginx/access.log \
-        --pid-path=/var/run/nginx.pid \
-        --lock-path=/var/lock/nginx.lock \
-        --user=nginx \
-        --group=nginx \
-        --with-http_ssl_module \
-        --with-http_v2_module \
-        --with-http_stub_status_module \
-        --modules-path=/usr/lib64/nginx/modules \
-        --http-client-body-temp-path=/var/tmp/nginx/client \
-        --http-proxy-temp-path=/var/tmp/nginx/proxy \
-        --http-fastcgi-temp-path=/var/tmp/nginx/fastcgi \
-        --http-uwsgi-temp-path=/var/tmp/nginx/uwsgi \
-        --http-scgi-temp-path=/var/tmp/nginx/scgi \
-        || {
-            log_error "Nginx configuration failed"
-            return 1
-        }
-    
-    # Build
-    log_info "Compiling Nginx (this may take a few minutes)..."
-    make -j$(nproc) || {
-        log_error "Nginx compilation failed"
-        return 1
-    }
-    
-    # Install
-    log_info "Installing Nginx..."
-    make install || {
-        log_error "Nginx installation failed"
-        return 1
-    }
-    
-    # Create temporary directories and nginx user
-    log_info "Creating Nginx run environment..."
-    useradd -r nginx 2>/dev/null || true
-    mkdir -p /var/tmp/nginx/{client,proxy,fastcgi,uwsgi,scgi}
-    chown -R nginx:nginx /var/tmp/nginx
-    mkdir -p /var/log/nginx
-    chown -R nginx:nginx /var/log/nginx
-    
-    # Compile ACME module (Rust)
-    log_info "Compiling Nginx ACME module (requires Rust)..."
-    compile_acme_module || log_warn "ACME module compilation failed, will try alternative methods..."
-    
-    # Create systemd service
-    log_info "Creating Nginx systemd service..."
-    cat > /etc/systemd/system/nginx.service << 'EOF'
-[Unit]
-Description=The nginx HTTP and reverse proxy server
-After=syslog.target network-online.target remote-fs.target nss-lookup.target
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=forking
-PIDFile=/var/run/nginx.pid
-ExecStartPre=/usr/local/nginx/sbin/nginx -t
-ExecStart=/usr/local/nginx/sbin/nginx
-ExecReload=/bin/kill -s HUP $MAINPID
-ExecStop=/bin/kill -s QUIT $MAINPID
-PrivateTmp=true
-Restart=on-failure
-
-[Install]
-WantedBy=multi-user.target
-EOF
-    
-    # Create nginx user
-    useradd -r nginx 2>/dev/null || true
-    
-    # Enable service
-    systemctl daemon-reload
-    systemctl enable nginx
-    
-    # Kill any existing Nginx process first
-    pkill nginx 2>/dev/null || true
-    sleep 1
-    
-    systemctl start nginx || {
-        log_warn "systemctl start nginx failed, trying direct start..."
-        /usr/local/nginx/sbin/nginx
-    }
-    
-    log_info "Nginx compiled and installed: $(/usr/local/nginx/sbin/nginx -v 2>&1)"
-}
 
 # ========== Install Kong Native Gateway (Unified Edge proxy + ACME) ==========
 install_kong_native() {
@@ -1300,20 +1170,7 @@ install_kong_native() {
     fi
 
     # 2. Package installation
-    if command -v dnf &>/dev/null; then
-        log_info "Installing Kong via DNF for RHEL-compatible..."
-        curl -Lo kong.rpm https://download.konghq.com/gateway-3.x-redhat-9/Packages/k/kong-3.6.0.el9.amd64.rpm
-        dnf install -y kong.rpm
-        rm -f kong.rpm
-    elif command -v apt-get &>/dev/null; then
-        log_info "Installing Kong via APT for Debian/Ubuntu..."
-        curl -Lo kong.deb https://download.konghq.com/gateway-3.x-ubuntu-jammy/pool/all/k/kong/kong_3.6.0_amd64.deb
-        apt-get install -y ./kong.deb
-        rm -f kong.deb
-    else
-        log_error "Unsupported package manager for Kong native installation."
-        return 1
-    fi
+        log_info "Skipping DNF/APT fetch since Kong was installed natively via repo."
 
     # 3. Provision DB (Assuming Postgres is up via Pigsty at 127.0.0.1:5432)
     log_info "Provisioning Kong database on PostgreSQL..."
@@ -1344,6 +1201,15 @@ EOF
     systemctl enable kong
     systemctl restart kong
     
+    log_info "Initializing Global Let's Encrypt (ACME) for Kong..."
+    sleep 3 # Wait for Kong Admin API to come up
+    curl -s -X POST http://127.0.0.1:8001/plugins \
+        --data "name=acme" \
+        --data "config.account_email=admin@${BASE_DOMAIN:-dbbaby.top}" \
+        --data "config.tos_accepted=true" \
+        --data "config.domains\[\]=*" \
+        --data "config.allow_any_domain=true" || true
+    
     log_info "Kong Native Gateway Installation completed."
 }
 
@@ -1351,181 +1217,6 @@ EOF
 install_nginx_mainline() { install_kong_native; }
 
 
-# ========== Apply Nginx Config (Static Certificates, No ACME Dynamic Module) ==========
-apply_nginx_acme_config() {
-    log_step "Applying Nginx config (Static Certificate mode)..."
-
-    local NGINX_CONF="/etc/nginx/nginx.conf"
-
-    # Backup old config
-    [[ -f "$NGINX_CONF" ]] && cp "$NGINX_CONF" "${NGINX_CONF}.bak.$(date +%s)"
-
-    # -- Detect Certificate Paths (Priority: Pigsty cert > Let's Encrypt > Self-signed fallback) -----
-    detect_ssl_cert() {
-        local domain="$1"
-        # 1. Pigsty issued/managed certificates
-        if [[ -f "/etc/pigsty/cert/${domain}.pem" ]]; then
-            echo "/etc/pigsty/cert/${domain}.pem /etc/pigsty/cert/${domain}.key"
-            return
-        fi
-        # 2. Let's Encrypt traditional directory
-        if [[ -f "/etc/letsencrypt/live/${domain}/fullchain.pem" ]]; then
-            echo "/etc/letsencrypt/live/${domain}/fullchain.pem /etc/letsencrypt/live/${domain}/privkey.pem"
-            return
-        fi
-        # 3. Self-signed fallback (normal for first installation without REAL certificates)
-        echo "/etc/nginx/ssl/${domain}.crt /etc/nginx/ssl/${domain}.key"
-    }
-
-    # Detect certificates for both domains
-    read -r STUDIO_CERT STUDIO_KEY <<< "$(detect_ssl_cert "$SUPABASE_STUDIO_DOMAIN")"
-    read -r API_CERT    API_KEY    <<< "$(detect_ssl_cert "$SUPABASE_PUBLIC_DOMAIN")"
-
-    log_info "Studio certificate: $STUDIO_CERT"
-    log_info "API    certificate: $API_CERT"
-
-    # -- Generate Fallback Certificate (Only if no REAL certificates found, ensuring Nginx starts) -----
-    generate_fallback_cert() {
-        local domain="$1" cert="$2" key="$3"
-        mkdir -p "$(dirname "$cert")"
-        if [[ ! -f "$cert" ]]; then
-            log_warn "Certificate for ${domain} not found, generating temporary self-signed certificate to ensure Nginx starts"
-            openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
-                -keyout "$key" -out "$cert" \
-                -subj "/CN=${domain}/O=SupaCloud/C=CN" 2>/dev/null
-        fi
-    }
-
-    generate_fallback_cert "$SUPABASE_STUDIO_DOMAIN" "$STUDIO_CERT" "$STUDIO_KEY"
-    generate_fallback_cert "$SUPABASE_PUBLIC_DOMAIN"  "$API_CERT"    "$API_KEY"
-
-    # -- Generate nginx.conf ------------------------------------------------------
-    cat > "$NGINX_CONF" <<NGINXEOF
-user nginx;
-worker_processes auto;
-error_log /var/log/nginx/error.log notice;
-pid /var/run/nginx.pid;
-
-events {
-    worker_connections 4096;
-    use epoll;
-}
-
-http {
-    include       /etc/nginx/mime.types;
-    default_type  application/octet-stream;
-
-    log_format main '\$remote_addr - \$remote_user [\$time_local] "\$request" '
-                    '\$status \$body_bytes_sent "\$http_referer" '
-                    '"\$http_user_agent" "\$http_x_forwarded_for"';
-    access_log /var/log/nginx/access.log main;
- 
-    sendfile       on;
-    tcp_nopush     on;
-    keepalive_timeout 65;
- 
-    # SSL Global Optimization
-    ssl_session_cache   shared:SSL:10m;
-    ssl_session_timeout 10m;
-    ssl_protocols       TLSv1.2 TLSv1.3;
-    ssl_ciphers         ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384;
-    ssl_prefer_server_ciphers off;
- 
-    # DNS resolver (for proxy domain resolution)
-    resolver 8.8.8.8 8.8.4.4 valid=300s;
-
-    upstream studio_backend { server 127.0.0.1:3003; }
-    upstream kong_backend   { server 127.0.0.1:8000; }
- 
-    # -- HTTP 80: ACME challenge compatibility + Force HTTPS redirect -----
-    server {
-        listen 80 default_server;
-        server_name ${SUPABASE_STUDIO_DOMAIN} ${SUPABASE_PUBLIC_DOMAIN} _;
- 
-        # certbot / acme.sh HTTP-01 validation directory (Let's Encrypt standard path)
-        location /.well-known/acme-challenge/ {
-            root /var/www/html;
-            try_files \$uri =404;
-        }
-
-        location / {
-            return 301 https://\$host\$request_uri;
-        }
-    }
- 
-    # -- Studio HTTPS ----------------------------------------------------------
-    server {
-        listen 443 ssl;
-        server_name ${SUPABASE_STUDIO_DOMAIN};
-
-        ssl_certificate     ${STUDIO_CERT};
-        ssl_certificate_key ${STUDIO_KEY};
-
-        location / {
-            proxy_pass http://studio_backend;
-            proxy_set_header Host              \$host;
-            proxy_set_header X-Real-IP         \$remote_addr;
-            proxy_set_header X-Forwarded-For   \$proxy_add_x_forwarded_for;
-            proxy_set_header X-Forwarded-Proto \$scheme;
-            proxy_set_header Upgrade           \$http_upgrade;
-            proxy_set_header Connection        "upgrade";
-            proxy_read_timeout 86400;
-        }
-    }
- 
-    # -- API HTTPS -------------------------------------------------------------
-    server {
-        listen 443 ssl;
-        server_name ${SUPABASE_PUBLIC_DOMAIN};
-
-        ssl_certificate     ${API_CERT};
-        ssl_certificate_key ${API_KEY};
-
-        location / {
-            proxy_pass http://kong_backend;
-            proxy_set_header Host              \$host;
-            proxy_set_header X-Real-IP         \$remote_addr;
-            proxy_set_header X-Forwarded-For   \$proxy_add_x_forwarded_for;
-            proxy_set_header X-Forwarded-Proto \$scheme;
-            proxy_set_header Upgrade           \$http_upgrade;
-            proxy_set_header Connection        "upgrade";
-            proxy_read_timeout 86400;
-        }
-    }
-
-    include /etc/nginx/conf.d/*.conf;
- 
-    # -- Multi-tenant routing (SupaCloud Tenants) --------------------------------
-    include /etc/nginx/sites-enabled/supa-tenants/*.conf;
-}
-NGINXEOF
-
-    # ACME challenge webroot directory (for certbot/acme.sh use)
-    mkdir -p /var/www/html/.well-known/acme-challenge
-    mkdir -p /etc/nginx/sites-enabled/supa-tenants
- 
-    log_info "Verifying Nginx configuration..."
-    if nginx -t 2>&1; then
-        log_info "Configuration verification passed, restarting Nginx..."
-        if systemctl is-system-running &>/dev/null; then
-            systemctl restart nginx
-        else
-            nginx -s stop 2>/dev/null || true
-            nginx
-        fi
-        log_info "Nginx started"
-        log_info ""
-        log_info "Certificate Notes:"
-        log_info "  Current use: Static certificate paths (Pigsty cert or self-signed temporary certificate)"
-        log_info "  To apply for a real certificate (choose one):"
-        log_info "    certbot: certbot --nginx -d ${SUPABASE_STUDIO_DOMAIN} -d ${SUPABASE_PUBLIC_DOMAIN}"
-        log_info "    acme.sh: acme.sh --issue -d ${SUPABASE_STUDIO_DOMAIN} --webroot /var/www/html"
-        log_info "  After application, Pigsty can also manage certificates via 'make cert'"
-    else
-        log_error "Nginx configuration verification failed!"
-        nginx -t 2>&1 || true
-        exit 1
-    fi
 }
 
 
@@ -2199,7 +1890,6 @@ configure_pg_hba() {
         else
              log_warn "Cannot automatically reload PostgreSQL, please execute reload manually"
         fi
-    fi
 }
 
 # ========== Save All Credentials ==========
@@ -2275,7 +1965,6 @@ install_management_api() {
 
     mkdir -p "$SCRIPTS_INSTALL_DIR"
     mkdir -p "$API_DATA_DIR"
-    mkdir -p /etc/angie/http.d
     mkdir -p /etc/supabase
 
     # 1. 部署二进制文件
@@ -2339,7 +2028,6 @@ DATABASE_URL=postgresql://postgres:${POSTGRES_PASSWORD}@${INTERNAL_IP}:5432/supa
 MASTER_TOKEN=${MASTER_TOKEN}
 SCRIPTS_PATH=${SCRIPTS_INSTALL_DIR}
 PIGSTY_PATH=${HOME}/pigsty
-NGINX_SITES_PATH=/etc/angie/http.d
 BASE_DOMAIN=${SUPABASE_PUBLIC_DOMAIN}
 # Database connection environment variables (required for script execution)
 PG_HOST=${INTERNAL_IP}
