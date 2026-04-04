@@ -61,6 +61,101 @@ import { homedir } from "os";
 const { readFileSync, existsSync } = require("fs");
 const { resolve: pathResolve } = require("path");
 
+// ── --help flag ──
+if (process.argv.includes("--help") || process.argv.includes("-h")) {
+    const pkg = require("../package.json");
+    process.stderr.write(`
+  ╔═══════════════════════════════════════════════════════════╗
+  ║  supacloud-mcp  v${pkg.version.padEnd(40)}║
+  ║  AI-native Supabase infrastructure management            ║
+  ╚═══════════════════════════════════════════════════════════╝
+
+  USAGE
+
+    npx supacloud-mcp                    Start as stdio MCP server
+    npx supacloud-mcp --help             Show this help
+
+  CONFIGURATION
+
+    Mode 1 — Remote MCP Endpoint (recommended)
+    ─────────────────────────────────────────────
+    No local install needed. Add to your IDE's MCP config:
+
+      {
+        "mcpServers": {
+          "supacloud": {
+            "url": "http://your-server:9090/mcp",
+            "headers": { "Authorization": "Bearer <master-token>" }
+          }
+        }
+      }
+
+    Mode 2 — Local stdio (with SSH tools)
+    ─────────────────────────────────────────────
+      {
+        "mcpServers": {
+          "supacloud": {
+            "command": "npx",
+            "args": ["-y", "supacloud-mcp"],
+            "env": {
+              "SUPACLOUD_HOST": "1.2.3.4",
+              "SUPACLOUD_SSH_KEY": "~/.ssh/id_rsa",
+              "SUPACLOUD_API_TOKEN": "<master-token>"
+            }
+          }
+        }
+      }
+
+    Mode 3 — Project-scoped (read-only for developers)
+    ─────────────────────────────────────────────
+      {
+        "mcpServers": {
+          "my-project": {
+            "command": "npx",
+            "args": ["-y", "supacloud-mcp"],
+            "env": {
+              "SUPACLOUD_API_URL": "http://your-server:9090",
+              "SUPACLOUD_API_TOKEN": "<project-token>",
+              "SUPACLOUD_PROJECT_REF": "abc123",
+              "SUPACLOUD_READ_ONLY": "true"
+            }
+          }
+        }
+      }
+
+  ENVIRONMENT VARIABLES
+
+    SUPACLOUD_HOST           Server IP / domain (required for SSH mode)
+    SUPACLOUD_SSH_USER       SSH user (default: root)
+    SUPACLOUD_SSH_PORT       SSH port (default: 22)
+    SUPACLOUD_SSH_KEY        SSH private key path (default: ~/.ssh/id_rsa)
+    SUPACLOUD_SSH_PASS       SSH password (alternative to key)
+    SUPACLOUD_API_URL        Management API URL (default: http://{HOST}:9090)
+    SUPACLOUD_API_TOKEN      Master Token or Project Token
+    SUPACLOUD_PROJECT_REF    Scope to a specific project
+    SUPACLOUD_READ_ONLY      Enable read-only mode (default: false)
+
+  FEATURES
+
+    70+ tools covering:
+    • Project lifecycle    — create, configure, pause, delete
+    • Database             — SQL queries, schema, RLS, migrations
+    • Auth                 — OAuth providers (GitHub/Google/WeChat/etc.)
+    • Storage              — S3/MinIO buckets, file operations
+    • Edge Functions       — deploy, manage, server-side bundling
+    • Frontend Hosting     — static sites, SSR, Git deploy, custom domains
+    • Secrets              — environment variables for Edge Functions
+    • Monitoring           — system metrics, task queues, backups
+
+  DOCS
+
+    https://github.com/zuohuadong/supacloud
+
+`);
+    process.exit(0);
+}
+
+
 // ── Auto-detect .env logic for Thick Client ──
 let tempUrl = process.env.SUPABASE_URL || process.env.SUPACLOUD_API_URL || "";
 let tempKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPACLOUD_API_TOKEN || "";
