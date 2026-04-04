@@ -51,8 +51,6 @@ import { registerDeploymentTools } from "./tools/deployment-tools";
 import { registerDatabaseTools } from "./tools/database-tools";
 import { registerAuthTools } from "./tools/auth-tools";
 import { registerStorageTools } from "./tools/storage-tools";
-import { registerOrganizationTools } from "./tools/org-tools";
-import { registerTaskTools } from "./tools/task-tools";
 import { registerFrontendTools } from "./tools/frontend-tools";
 import { registerDocsResources } from "./resources/docs";
 import { resolve } from "path";
@@ -137,7 +135,7 @@ if (process.argv.includes("--help") || process.argv.includes("-h")) {
 
   FEATURES
 
-    70+ tools covering:
+    ~12 compound tools covering:
     • Project lifecycle    — create, configure, pause, delete
     • Database             — SQL queries, schema, RLS, migrations
     • Auth                 — OAuth providers (GitHub/Google/WeChat/etc.)
@@ -238,7 +236,7 @@ if (API_URL) {
                     role: "user",
                     content: {
                         type: "text",
-                        text: `Please analyze the database performance for project '${args.ref}'. Start by using 'get_database_stats' and 'get_database_connections' to gather metrics, then provide recommendations on missing indexes, connection bloat, or table sizing optimization.`
+                        text: `Please analyze the database performance for project '${args.ref}'. Use the 'database' tool with action='stats' and action='connections' to gather metrics, then provide recommendations on missing indexes, connection bloat, or table sizing optimization.`
                     }
                 }
             ]
@@ -277,7 +275,7 @@ if (API_URL) {
                     role: "user",
                     content: {
                         type: "text",
-                        text: `I want to design a database schema for a '${args.domain}' workload on Supabase. I am working on project '${args.ref}'. Please start by reading the resource 'docs://supabase/sql' to ensure modern RLS practices are fresh in your memory. Then, propose the SQL for new tables, ensuring every table has ROW LEVEL SECURITY enabled, uses UUID primary keys, and has an 'updated_at' trigger. Whenever you actually create tables, prefer using the 'create_table_with_rls' tool.`
+                        text: `I want to design a database schema for a '${args.domain}' workload on Supabase. I am working on project '${args.ref}'. Please start by reading the resource 'docs://supabase/sql' to ensure modern RLS practices are fresh in your memory. Then, propose the SQL for new tables, ensuring every table has ROW LEVEL SECURITY enabled, uses UUID primary keys, and has an 'updated_at' trigger. Whenever you actually create tables, use the 'database' tool with action='create_table_rls'.`
                     }
                 }
             ]
@@ -315,7 +313,7 @@ if (API_URL) {
                     role: "user",
                     content: {
                         type: "text",
-                        text: `I need to update the TypeScript definitions for project '${args.ref}'. Please use the 'generate_typescript_types' tool. Instead of just showing me the output, use your native IDE capabilities to overwrite the file at 'types/supabase.ts' in my local workspace with the generated types.`
+                        text: `I need to update the TypeScript definitions for project '${args.ref}'. Please use the 'database' tool with action='generate_types'. Instead of just showing me the output, use your native IDE capabilities to overwrite the file at 'types/supabase.ts' in my local workspace with the generated types.`
                     }
                 }
             ]
@@ -334,7 +332,7 @@ if (API_URL) {
                     role: "user",
                     content: {
                         type: "text",
-                        text: `Please analyze the slow queries for project '${args.ref}'. Use the 'get_slow_queries' tool to fetch the top 10 most expensive queries. Review their shapes, identify missing indexes, write out the 'CREATE INDEX CONCURRENTLY' statements, and ask me if I want to execute them via the 'execute_sql' tool.`
+                        text: `Please analyze the slow queries for project '${args.ref}'. Use the 'database' tool with action='slow_queries' to fetch the top 10 most expensive queries. Review their shapes, identify missing indexes, write out the 'CREATE INDEX CONCURRENTLY' statements, and ask me if I want to execute them via the 'database' tool with action='query'.`
                     }
                 }
             ]
@@ -373,7 +371,7 @@ if (API_URL) {
                     role: "user",
                     content: {
                         type: "text",
-                        text: `Run a security audit for project '${args.ref}'. Use 'get_rls_status' and 'list_table_policies' to ensure public tables are protected. Look for functions with SECURITY DEFINER lacking safe search paths. Once you analyze everything, use your IDE tools to write a detailed markdown report locally to 'SupaCloud_Security_Audit.md'.`
+                        text: `Run a security audit for project '${args.ref}'. Use the 'database' tool with action='rls_status' and action='rls_policies' to ensure public tables are protected. Look for functions with SECURITY DEFINER lacking safe search paths. Once you analyze everything, use your IDE tools to write a detailed markdown report locally to 'SupaCloud_Security_Audit.md'.`
                     }
                 }
             ]
@@ -393,7 +391,7 @@ if (API_URL) {
                     role: "user",
                     content: {
                         type: "text",
-                        text: `I want to deploy the Edge Function '${args.function_name}' for project '${args.ref}'. Please use your native IDE capabilities to read all the code from 'supabase/functions/${args.function_name}/index.ts' and any dependencies. Consolidate them into a unified code string, and use the 'deploy_edge_function' tool to deploy it to the cloud. Output the success status when done.`
+                        text: `I want to deploy the Edge Function '${args.function_name}' for project '${args.ref}'. Please use your native IDE capabilities to read all the code from 'supabase/functions/${args.function_name}/index.ts' and any dependencies. Consolidate them into a unified code string, and use the 'edge_functions' tool with action='deploy' to deploy it to the cloud.`
                     }
                 }
             ]
@@ -412,7 +410,7 @@ if (API_URL) {
                     role: "user",
                     content: {
                         type: "text",
-                        text: `I need to set up a scheduled background job for project '${args.ref}'. Please use pg_cron syntax (e.g., SELECT cron.schedule('job_name', '0 0 * * *', 'SQL_COMMAND')). Interactively work with me to define the schedule and the target SQL, ensure the pg_cron extension is active via 'list_extensions', and finally execute it via 'execute_sql'.`
+                        text: `I need to set up a scheduled background job for project '${args.ref}'. Please use pg_cron syntax (e.g., SELECT cron.schedule('job_name', '0 0 * * *', 'SQL_COMMAND')). Interactively work with me to define the schedule and the target SQL, ensure the pg_cron extension is active via 'database' action='list_extensions', and finally execute it via 'database' action='query'.`
                     }
                 }
             ]
@@ -431,7 +429,7 @@ if (API_URL) {
                     role: "user",
                     content: {
                         type: "text",
-                        text: `I want to check what schema changes are pending for project '${args.ref}'. First, use IDE tools to read the local SQL files inside 'supabase/migrations/'. Next, query the remote database schema using 'list_tables' and 'list_table_columns_by_schema'. Compare the two states and output a concise Markdown report detailing any missing tables, altered columns, or pending migrations.`
+                        text: `I want to check what schema changes are pending for project '${args.ref}'. First, use IDE tools to read the local SQL files inside 'supabase/migrations/'. Next, query the remote database schema using 'database' tool with action='list_tables' and action='describe_columns'. Compare the two states and output a concise Markdown report.`
                     }
                 }
             ]
@@ -495,26 +493,21 @@ if (API_URL) {
         }
     );
 
-    // Auth provider management tools
+    // Auth tools (compound)
     registerAuthTools(server, http);
 
-    // Storage management tools
+    // Storage tools (compound)
     registerStorageTools(server, http);
 
-    // Task queue monitoring tools
-    registerTaskTools(server, http);
-
-    // Project management tools (only if not project-scoped)
+    // Project management tools (compound, includes tasks; only if not project-scoped)
     if (!PROJECT_REF) {
         registerProjectTools(server, http);
-        // Organization management tools
-        registerOrganizationTools(server, http);
     }
 
-    // Advanced tools (skip write operations in read-only mode)
+    // Advanced tools: edge_functions + secrets + platform (includes org, backups, monitoring)
     registerAdvancedTools(server, http);
 
-    // Frontend hosting tools
+    // Frontend hosting (compound)
     registerFrontendTools(server, http);
 }
 
