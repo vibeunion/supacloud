@@ -1,7 +1,7 @@
 [Unit]
 Description=SupaCloud Management API
 Documentation=https://github.com/supacloud/supacloud
-After=network.target postgresql.service nginx.service
+After=network.target postgresql.service kong.service
 Wants=postgresql.service
 
 [Service]
@@ -22,7 +22,7 @@ EnvironmentFile=-/etc/supabase/management-api.env
 NoNewPrivileges=false
 ProtectSystem=full
 ProtectHome=false
-ReadWritePaths=/etc/nginx/sites-enabled/supa-tenants /etc/supabase
+ReadWritePaths=/etc/supabase
 
 # 资源限制
 LimitNOFILE=65536
