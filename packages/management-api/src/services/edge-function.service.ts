@@ -83,7 +83,7 @@ async function bundleFunction(
     });
 
     if (!result.success) {
-      const messages = result.logs.map((l: any) => l.message || String(l)).join("\n");
+      const messages = result.logs.map((l: { message?: string }) => l.message || String(l)).join("\n");
       logger.error(`[EdgeFunction] Bun.build() failed:\n${messages}`);
       return null;
     }

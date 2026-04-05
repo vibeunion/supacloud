@@ -50,14 +50,14 @@ export class StorageRLS {
     action: 'upload' | 'download' | 'delete',
     bucketId: string,
     objectName: string,
-    metadata: any = {}
+    metadata: Record<string, unknown> = {}
   ): Promise<boolean> {
     const project = (await metaSql`SELECT db_name FROM projects WHERE ref=${ref}`)[0];
     if (!project) return false;
     
     const db = getProjectDb(project.db_name);
     
-    let payload: any = { role: 'anon' };
+    let payload: Record<string, unknown> = { role: 'anon' };
     if (token) {
       try {
         payload = await this.verifyToken(ref, token.replace('Bearer ', ''));
@@ -73,14 +73,14 @@ export class StorageRLS {
         await tx`SELECT set_config('request.jwt.claims', ${JSON.stringify(payload)}, true)`;
 
         // Prepare owner uuid safely (sometimes sub is not uuid)
-        const owner = payload.sub && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(payload.sub) ? payload.sub : null;
+        const owner = typeof payload.sub === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(payload.sub) ? payload.sub : null;
 
         if (action === 'upload') {
           // Verify bucket exists first, otherwise foreign key fails, but bypassing for speed 
           // RLS ON CONFLICT handles Upsert logic:
           const res = await tx`
             INSERT INTO storage.objects (bucket_id, name, owner, metadata)
-            VALUES (${bucketId}, ${objectName}, ${owner}, ${metadata as any})
+            VALUES (${bucketId}, ${objectName}, ${owner}, ${JSON.stringify(metadata)})
             ON CONFLICT (bucket_id, name)
             DO UPDATE SET metadata = EXCLUDED.metadata, updated_at = now()
             RETURNING id
@@ -108,9 +108,9 @@ export class StorageRLS {
       });
 
       return true;
-    } catch (e: any) {
+    } catch (e: unknown) {
       // If error is RLS related (row level security policy violation) or Postgres throws, deny
-      logger.debug(`[StorageRLS] Action ${action} denied: ${e.message}`);
+      logger.debug(`[StorageRLS] Action ${action} denied: ${e instanceof Error ? e.message : String(e)}`);
       return false;
     }
   }
@@ -128,7 +128,7 @@ export class StorageRLS {
     
     const db = getProjectDb(project.db_name);
     
-    let payload: any = { role: 'anon' };
+    let payload: Record<string, unknown> = { role: 'anon' };
     if (token) {
       try { payload = await this.verifyToken(ref, token.replace('Bearer ', '')); } catch (e) {}
     }
@@ -136,7 +136,7 @@ export class StorageRLS {
     try {
       let results: any[] = [];
       await db.begin(async (tx) => {
-        await tx`SELECT set_config('role', ${payload.role || 'anon'}, true)`;
+        await tx`SELECT set_config('role', ${String(payload.role) || 'anon'}, true)`;
         await tx`SELECT set_config('request.jwt.claims', ${JSON.stringify(payload)}, true)`;
 
         const searchPrefix = prefix + '%';
@@ -159,8 +159,8 @@ export class StorageRLS {
               type: row.name.includes('.') ? row.name.split('.').pop() : 'unknown'
           };
       });
-    } catch (e: any) {
-      logger.error(`[StorageRLS] List access denied:`, { error: e.message || String(e) });
+    } catch (e: unknown) {
+      logger.error(`[StorageRLS] List access denied:`, { error: e instanceof Error ? e.message : String(e) });
       return [];
     }
   }

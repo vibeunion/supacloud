@@ -137,8 +137,8 @@ export async function handleMcp(request: Request): Promise<Response> {
         const tenantDb = getProjectDb(projectRows[0].db_name as string);
         const result = await tenantDb.unsafe(body.sql);
         return jsonResponse(result);
-      } catch (e: any) {
-        return jsonResponse({ error: e.message || "Failed to execute SQL" }, 500);
+      } catch (e: unknown) {
+        return jsonResponse({ error: e instanceof Error ? e.message : "Failed to execute SQL" }, 500);
       }
     }
 
@@ -195,8 +195,8 @@ export async function handleMcp(request: Request): Promise<Response> {
         await tenantDb.unsafe(`INSERT INTO public.migration_history (name) VALUES ('${body.name.replace(/'/g, "''")}')`);
 
         return jsonResponse({ success: true, name: body.name, message: "Migration applied" });
-      } catch (e: any) {
-        return jsonResponse({ error: e.message || "Migration failed" }, 500);
+      } catch (e: unknown) {
+        return jsonResponse({ error: e instanceof Error ? e.message : "Migration failed" }, 500);
       }
     }
 
@@ -231,8 +231,8 @@ export async function handleMcp(request: Request): Promise<Response> {
         const { projectLogService } = await import("../services/project-logs.service");
         const logs = await projectLogService.queryLogs(ref, type);
         return jsonResponse({ logs });
-      } catch (e: any) {
-        return jsonResponse({ error: e.message || "Failed to fetch logs" }, 500);
+      } catch (e: unknown) {
+        return jsonResponse({ error: e instanceof Error ? e.message : "Failed to fetch logs" }, 500);
       }
     }
 

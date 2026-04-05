@@ -7,6 +7,8 @@ interface DispatchOptions {
   request: Request;
 }
 
+const MAX_BODY_SIZE = 10 * 1024 * 1024; // 10MB limit
+
 export class WorkerPool {
   private workers: Worker[] = [];
   private idle: Worker[] = [];
@@ -15,7 +17,7 @@ export class WorkerPool {
     resolve: (r: Response) => void;
   }> = [];
   private totalRequests = 0;
-  private allWorkers: Worker[] = [];
+  private activeWorkers = new Set<Worker>(); // Track all living workers for invalidation
 
   constructor(
     private config: { size: number; requestTimeout: number },
@@ -23,7 +25,7 @@ export class WorkerPool {
     for (let i = 0; i < config.size; i++) {
       const w = this.createWorker();
       this.idle.push(w);
-      this.allWorkers.push(w);
+      this.activeWorkers.add(w);
     }
   }
 
@@ -65,7 +67,27 @@ export class WorkerPool {
       opts.request.body &&
       !["GET", "HEAD"].includes(opts.request.method)
     ) {
+      // Enforce body size limit to prevent OOM
+      const contentLength = opts.request.headers.get('content-length');
+      if (contentLength && parseInt(contentLength) > MAX_BODY_SIZE) {
+        resolve(new Response(JSON.stringify({ error: `Request body too large (max ${MAX_BODY_SIZE / 1024 / 1024}MB)` }), {
+          status: 413,
+          headers: { "Content-Type": "application/json" },
+        }));
+        this.recycle(worker);
+        clearTimeout(timeout);
+        return;
+      }
       body = await opts.request.arrayBuffer();
+      if (body.byteLength > MAX_BODY_SIZE) {
+        resolve(new Response(JSON.stringify({ error: `Request body too large (max ${MAX_BODY_SIZE / 1024 / 1024}MB)` }), {
+          status: 413,
+          headers: { "Content-Type": "application/json" },
+        }));
+        this.recycle(worker);
+        clearTimeout(timeout);
+        return;
+      }
     }
 
     worker.postMessage({
@@ -118,12 +140,14 @@ export class WorkerPool {
   private replaceWorker(dead: Worker) {
     const idx = this.workers.indexOf(dead);
     if (idx !== -1) this.workers.splice(idx, 1);
+    this.activeWorkers.delete(dead); // Remove from tracking set
     try {
       dead.terminate();
     } catch {
       /* ignore */
     }
     const w = this.createWorker();
+    this.activeWorkers.add(w); // Track new worker
     this.idle.push(w);
   }
 
@@ -138,7 +162,7 @@ export class WorkerPool {
 
   /** Notify all workers to evict a function from their module cache */
   invalidateModule(functionId: string): void {
-    for (const w of this.allWorkers) {
+    for (const w of this.activeWorkers) {
       w.postMessage({ type: "invalidate", functionId });
     }
   }

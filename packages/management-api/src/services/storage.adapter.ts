@@ -8,6 +8,7 @@ import { S3Client } from "bun";
 export interface StorageDriver {
   createBucket(projectRef: string, bucket: string): Promise<boolean>;
   deleteBucket(projectRef: string, bucket: string): Promise<boolean>;
+  listBuckets(projectRef: string): Promise<{id: string, name: string, public: boolean, size: string}[]>;
   uploadFile(projectRef: string, bucket: string, key: string, data: Blob | Buffer | Uint8Array | ArrayBuffer, contentType: string): Promise<boolean>;
   deleteFile(projectRef: string, bucket: string, key: string): Promise<boolean>;
   listFiles(projectRef: string, bucket: string): Promise<{id: string, name: string, updated?: string, size: string, type: string}[]>;
@@ -41,6 +42,23 @@ export class JuiceFSDriver implements StorageDriver {
     }
   }
 
+  async listBuckets(projectRef: string): Promise<{id: string, name: string, public: boolean, size: string}[]> {
+    try {
+      const dirPath = this.getBasePath(projectRef);
+      const entries = await fs.readdir(dirPath, { withFileTypes: true });
+      return entries
+        .filter(e => e.isDirectory())
+        .map(e => ({
+          id: e.name,
+          name: e.name,
+          public: false, // Defaulting to false, proper public status lives in tenant DB
+          size: '-'
+        }));
+    } catch (e) {
+      return [];
+    }
+  }
+
   async uploadFile(projectRef: string, bucket: string, key: string, data: Blob | Buffer | Uint8Array | ArrayBuffer, contentType: string): Promise<boolean> {
     try {
       const filePath = this.getBasePath(projectRef, bucket, key);
@@ -67,7 +85,7 @@ export class JuiceFSDriver implements StorageDriver {
       const bucketPath = this.getBasePath(projectRef, bucket);
       const { Glob } = await import("bun");
       const glob = new Glob("**/*");
-      const files: any[] = [];
+      const files: {id: string, name: string, updated?: string, size: string, type: string}[] = [];
       
       for (const relPath of glob.scanSync({ cwd: bucketPath, onlyFiles: true })) {
         const fullPath = path.join(bucketPath, relPath);
@@ -78,7 +96,7 @@ export class JuiceFSDriver implements StorageDriver {
           name: relPath,
           updated: new Date(f.lastModified).toISOString(),
           size: Math.round(f.size / 1024) + ' KB',
-          type: relPath.includes('.') ? relPath.split('.').pop() : 'unknown'
+          type: relPath.includes('.') ? relPath.split('.').pop() || 'unknown' : 'unknown'
         });
       }
       return files;
@@ -95,7 +113,7 @@ export class JuiceFSDriver implements StorageDriver {
 }
 
 export class S3Driver implements StorageDriver {
-  private async getCreds(projectRef: string) {
+  private async getCreds(projectRef: string): Promise<{ accessKey?: string, secretKey?: string, endpoint: string, bucket: string } | null> {
     const { success, output } = await shellService.execute('s3_manager.sh', ['credentials', projectRef]);
     if (!success) return null;
     return {
@@ -106,7 +124,7 @@ export class S3Driver implements StorageDriver {
     };
   }
 
-  private getClient(creds: Record<string, any>): S3Client {
+  private getClient(creds: { accessKey: string, secretKey: string, endpoint: string, bucket: string }): S3Client {
     const baseUrl = creds.endpoint.endsWith('/') ? creds.endpoint.slice(0, -1) : creds.endpoint;
     return new S3Client({
       accessKeyId: creds.accessKey,
@@ -125,12 +143,41 @@ export class S3Driver implements StorageDriver {
     return true; // No distinct deletion for logical prefix unless we rm -rf objects
   }
 
+  async listBuckets(projectRef: string): Promise<{id: string, name: string, public: boolean, size: string}[]> {
+    const creds = await this.getCreds(projectRef);
+    if (!creds?.accessKey || !creds?.secretKey) return [];
+    
+    try {
+      const s3 = this.getClient(creds as { accessKey: string, secretKey: string, endpoint: string, bucket: string });
+      const res = await s3.list();
+      const s3Contents = res.contents || [];
+      
+      const buckets = new Set<string>();
+      for (const obj of s3Contents) {
+        // Find top-level directories which represent buckets in our mapping
+        const parts = obj.key.split('/');
+        if (parts.length > 1) {
+          buckets.add(parts[0]);
+        }
+      }
+      
+      return Array.from(buckets).map(b => ({
+        id: b,
+        name: b,
+        public: false,
+        size: '-'
+      }));
+    } catch (e) {
+      return [];
+    }
+  }
+
   async uploadFile(projectRef: string, bucket: string, key: string, data: Blob | Buffer | Uint8Array | ArrayBuffer, contentType: string): Promise<boolean> {
     const creds = await this.getCreds(projectRef);
     if (!creds?.accessKey || !creds?.secretKey) return false;
     
     try {
-      const s3 = this.getClient(creds);
+      const s3 = this.getClient(creds as { accessKey: string, secretKey: string, endpoint: string, bucket: string });
       const cleanFileName = key.replace(/^\/+/, '');
       const bytesWritten = await s3.file(`${bucket}/${cleanFileName}`).write(data, { type: contentType });
       return bytesWritten > 0;
@@ -144,7 +191,7 @@ export class S3Driver implements StorageDriver {
     if (!creds?.accessKey || !creds?.secretKey) return false;
     
     try {
-      const s3 = this.getClient(creds);
+      const s3 = this.getClient(creds as { accessKey: string, secretKey: string, endpoint: string, bucket: string });
       await s3.file(`${bucket}/${key}`).delete();
       return true;
     } catch (e) {
@@ -157,18 +204,19 @@ export class S3Driver implements StorageDriver {
     if (!creds?.accessKey || !creds?.secretKey) return [];
     
     try {
-      const s3 = this.getClient(creds);
+      const s3 = this.getClient(creds as { accessKey: string, secretKey: string, endpoint: string, bucket: string });
       const res = await s3.list();
-      const s3Contents = (res.contents || []).filter((f: any) => f.key.startsWith(`${bucket}/`));
+      const s3Contents = (res.contents || []).filter((f: Record<string, unknown>) => typeof f.key === 'string' && f.key.startsWith(`${bucket}/`));
       
-      return s3Contents.map((file: any) => {
-        const relativeKey = file.key.substring(bucket.length + 1);
+      return s3Contents.map((file: Record<string, unknown>) => {
+        const key = file.key as string;
+        const relativeKey = key.substring(bucket.length + 1);
         return {
           id: relativeKey,
           name: relativeKey,
-          updated: file.lastModified,
-          size: Math.round((file.size ?? 0) / 1024) + ' KB',
-          type: file.key.includes('.') ? file.key.split('.').pop() : 'unknown'
+          updated: String(file.lastModified),
+          size: Math.round((Number(file.size) ?? 0) / 1024) + ' KB',
+          type: key.includes('.') ? key.split('.').pop() || 'unknown' : 'unknown'
         };
       });
     } catch (e) {

@@ -53,8 +53,8 @@ async function setupStudioDomain(domain: string) {
 
     logger.info(`\n\n✅ Successfully bound Global Studio to: https://${domain}`);
     logger.info(`Make sure to point your DNS A record for ${domain} to this server's IP address.\n`);
-  } catch (error: any) {
-    logger.error(`Failed to bind global domain: ${error.message}`);
+  } catch (error: unknown) {
+    logger.error(`Failed to bind global domain: ${error instanceof Error ? error.message : String(error)}`);
     process.exit(1);
   }
 }

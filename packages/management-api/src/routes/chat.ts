@@ -1,4 +1,4 @@
-import { Elysia } from "elysia";
+import { Elysia, t } from "elysia";
 import { logger } from "../utils/logger";
 import { getPlatformSetting } from "./platform-settings";
 
@@ -16,7 +16,7 @@ import { getPlatformSetting } from "./platform-settings";
 export const chatRoutes = new Elysia({ name: "chat-proxy" })
 
   // ─── POST /v1/chat/completions ─────────────────────────────────
-  .post("/v1/chat/completions", async ({ request, set }) => {
+  .post("/v1/chat/completions", async ({ body, set }) => {
     // 1. Read dynamic config from DB
     const [aiApiBase, aiApiKey, aiModel] = await Promise.all([
       getPlatformSetting("ai_api_base"),
@@ -35,23 +35,17 @@ export const chatRoutes = new Elysia({ name: "chat-proxy" })
     }
 
     // 2. Parse the incoming request body
-    let body: Record<string, unknown>;
-    try {
-      body = await request.json() as Record<string, unknown>;
-    } catch {
-      set.status = 400;
-      return { error: { message: "Invalid JSON body", type: "invalid_request_error" } };
-    }
+    const proxyBody = body as Record<string, unknown>;
 
     // Use configured model as fallback
-    if (!body.model && aiModel) {
-      body.model = aiModel;
+    if (!proxyBody.model && aiModel) {
+      proxyBody.model = aiModel;
     }
 
-    const isStream = body.stream === true;
+    const isStream = proxyBody.stream === true;
     const targetUrl = `${aiApiBase.replace(/\/+$/, "")}/chat/completions`;
 
-    logger.info(`[ChatProxy] → ${targetUrl} model=${body.model} stream=${isStream}`);
+    logger.info(`[ChatProxy] → ${targetUrl} model=${proxyBody.model} stream=${isStream}`);
 
     // 3. Proxy the request to upstream
     try {
@@ -61,7 +55,7 @@ export const chatRoutes = new Elysia({ name: "chat-proxy" })
           "Content-Type": "application/json",
           "Authorization": `Bearer ${aiApiKey}`,
         },
-        body: JSON.stringify(body),
+        body: JSON.stringify(proxyBody),
       });
 
       if (!upstreamRes.ok) {
@@ -99,6 +93,11 @@ export const chatRoutes = new Elysia({ name: "chat-proxy" })
         },
       };
     }
+  }, {
+    body: t.Object({
+      model: t.Optional(t.String()),
+      stream: t.Optional(t.Boolean())
+    }, { additionalProperties: true })
   })
 
   // ─── GET /v1/chat/config ───────────────────────────────────────

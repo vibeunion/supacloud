@@ -2,6 +2,10 @@ import { config } from "../config";
 import { $ } from "bun";
 import { logger } from "../utils/logger";
 import { sql } from "../db";
+
+const DEFAULT_CORS_HEADERS = ["Accept", "Accept-Language", "Content-Language", "Authorization", "Content-Type", "X-Api-Version", "x-supabase-api-version", "X-Client-Info", "apikey", "Prefer", "Content-Profile", "accept-profile", "Range", "Range-Unit"];
+const DEFAULT_CORS_EXPOSED = ["Content-Length", "Content-Range", "X-JSON", "x-supabase-api-version", "X-Client-Info", "apikey", "Prefer", "Content-Profile", "accept-profile", "Range", "Range-Unit", "X-Relay-Error"];
+
 import path from "node:path";
 import fs from "node:fs/promises";
 
@@ -131,8 +135,8 @@ export class GatewayService {
                 config: {
                     origins: [resolvedOrigins],
                     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-                    headers: ["Accept", "Accept-Language", "Content-Language", "Authorization", "Content-Type", "X-Api-Version", "x-supabase-api-version", "X-Client-Info", "apikey", "Prefer", "Content-Profile", "accept-profile", "Range", "Range-Unit"],
-                    exposed_headers: ["Content-Length", "Content-Range", "X-JSON", "x-supabase-api-version", "X-Client-Info", "apikey", "Prefer", "Content-Profile", "accept-profile", "Range", "Range-Unit", "X-Relay-Error"],
+                    headers: DEFAULT_CORS_HEADERS,
+                    exposed_headers: DEFAULT_CORS_EXPOSED,
                     credentials: true,
                     max_age: 3600,
                 },
@@ -263,8 +267,8 @@ export class GatewayService {
         await this.upsertRoutePlugin(routeName, "cors", {
             origins: ["~^https?://.*$"],
             methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-            headers: ["Accept", "Accept-Language", "Content-Language", "Authorization", "Content-Type", "X-Api-Version", "x-supabase-api-version", "X-Client-Info", "apikey", "Prefer", "Content-Profile", "accept-profile", "Range", "Range-Unit"],
-            exposed_headers: ["Content-Length", "Content-Range", "X-JSON", "x-supabase-api-version", "X-Client-Info", "apikey", "Prefer", "Content-Profile", "accept-profile", "Range", "Range-Unit", "X-Relay-Error"],
+            headers: DEFAULT_CORS_HEADERS,
+            exposed_headers: DEFAULT_CORS_EXPOSED,
             credentials: true,
             max_age: 3600,
         });
