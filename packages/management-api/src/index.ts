@@ -28,7 +28,6 @@ import { config } from "./config";
 import { checkAuth } from "./middleware/auth";
 import { closeDb } from "./db";
 import { authRoutes, deployRoutes, storageCompatRoutes } from "./routes";
-import { gatewayService } from "./services/gateway.service";
 import { Glob } from "bun";
 
 const WEB_CONSOLE_DIR = "/opt/supacloud/packages/web-console/build";
@@ -79,8 +78,13 @@ function warmupStaticAssets() {
   }
 }
 
-// Initialize Master Routes in Kong
-await gatewayService.setupMasterRoutes().catch(e => logger.error("Failed to setup master routes", e));
+// Initialize Master Routes in Kong dynamically to avoid circular / initialization reference errors
+try {
+  const { gatewayService } = await import("./services/gateway.service");
+  await gatewayService.setupMasterRoutes();
+} catch (e) {
+  logger.error("Failed to setup master routes", e instanceof Error ? e.message : String(e));
+}
 
 const app = new Elysia({ strictPath: false })
   // Swagger docs
