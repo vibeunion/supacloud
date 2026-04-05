@@ -126,9 +126,9 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
     // POST /bucket — Create a bucket  
     .post('/bucket', async ({ headers, body }) => {
         const ref = getProjectRef(headers as Record<string, string | undefined>);
-        const name = (body as Record<string, unknown>).name || ref;
-        const bucketId = String((body as Record<string, unknown>).id || name);
-        const isPublic = (body as Record<string, unknown>).public === true;
+        const name = body.name || ref;
+        const bucketId = String(body.id || name);
+        const isPublic = body.public === true;
         
         // 1. Create S3 namespace
         const result = await StorageService.createBucket(ref);
@@ -143,6 +143,12 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         }
         
         return { name };
+    }, {
+        body: t.Object({
+            id: t.Optional(t.String()),
+            name: t.Optional(t.String()),
+            public: t.Optional(t.Boolean())
+        })
     })
 
     // GET /bucket/:id — Get bucket details
@@ -298,9 +304,8 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
 
     .post('/object/sign/:bucket', async ({ params, headers, body }) => {
         const ref = getProjectRef(headers as Record<string, string | undefined>);
-        const b = body as Record<string, unknown>;
-        const filePath = String(b.url || b.path || '').replace(/^\//, '');
-        const expiresIn = Number(b.expiresIn) || 3600;
+        const filePath = String(body.url || body.path || '').replace(/^\//, '');
+        const expiresIn = Number(body.expiresIn) || 3600;
 
         if (!filePath) {
             return status(400, { statusCode: '400', error: 'Bad Request', message: 'Missing file path' });
@@ -312,15 +317,20 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         return {
             signedURL: `/storage/v1/object/sign/${params.bucket}/${filePath}?token=${token}&t=${expiresAt}`,
         };
+    }, {
+        body: t.Object({
+            url: t.Optional(t.String()),
+            path: t.Optional(t.String()),
+            expiresIn: t.Optional(t.Number())
+        })
     })
 
     // POST /object/sign/:bucket — Batch signed URLs
     // supabase.storage.from('bucket').createSignedUrls(['path1', 'path2'], expiresIn)
     .post('/object/sign/:bucket/sign-multi', async ({ params, headers, body }) => {
         const ref = getProjectRef(headers as Record<string, string | undefined>);
-        const b = body as Record<string, unknown>;
-        const paths = (b.paths as string[]) || [];
-        const expiresIn = Number(b.expiresIn) || 3600;
+        const paths = body.paths || [];
+        const expiresIn = Number(body.expiresIn) || 3600;
 
         return paths.map(filePath => {
             const cleanPath = filePath.replace(/^\//, '');
@@ -332,6 +342,11 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
                 signedURL: `/storage/v1/object/sign/${params.bucket}/${cleanPath}?token=${token}&t=${expiresAt}`,
             };
         });
+    }, {
+        body: t.Object({
+            paths: t.Array(t.String()),
+            expiresIn: t.Optional(t.Number())
+        })
     })
 
     // GET /object/sign/:bucket/* — Serve signed file (validates token)
@@ -378,9 +393,9 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         const ref = getProjectRef(headers as Record<string, string | undefined>);
         const auth = headers['authorization'];
 
-        const prefix = (body as Record<string, unknown>)?.prefix as string || '';
-        const limit  = (body as Record<string, unknown>)?.limit as number || 100;
-        const offset = (body as Record<string, unknown>)?.offset as number || 0;
+        const prefix = body?.prefix || '';
+        const limit  = body?.limit || 100;
+        const offset = body?.offset || 0;
 
         // Fetch securely from RLS DB Instead of physical volume
         const files = await StorageRLS.listObjects(ref, auth, params.bucket, prefix, limit, offset);
@@ -399,6 +414,16 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
                 },
             };
         });
+    }, {
+        body: t.Optional(t.Object({
+            prefix: t.Optional(t.String()),
+            limit: t.Optional(t.Number()),
+            offset: t.Optional(t.Number()),
+            sortBy: t.Optional(t.Object({
+                column: t.Optional(t.String()),
+                order: t.Optional(t.String())
+            }))
+        }))
     })
 
     // ════════════════════════════════════════════════════════
@@ -408,11 +433,11 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
 
     .delete('/object/:bucket', async ({ params, headers, body }) => {
         const ref = getProjectRef(headers as Record<string, string | undefined>);
-        const prefixes = (body as Record<string, unknown>)?.prefixes as string[] || [];
+        const prefixes = body?.prefixes || [];
         const auth = headers['authorization'];
 
         const results = await Promise.allSettled(
-            prefixes.map(async p => {
+            prefixes.map(async (p: string) => {
                 const permitted = await StorageRLS.authorizeAction(ref, auth, 'delete', params.bucket, p);
                 if (!permitted) throw new Error('Forbidden');
                 
@@ -420,10 +445,14 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             })
         );
 
-        return results.map((r, i) => ({
+        return results.map((r: PromiseSettledResult<unknown>, i: number) => ({
             name: prefixes[i],
             ...(r.status === 'fulfilled' ? {} : { error: 'Delete failed' }),
         }));
+    }, {
+        body: t.Optional(t.Object({
+            prefixes: t.Optional(t.Array(t.String()))
+        }))
     })
 
     // ════════════════════════════════════════════════════════
@@ -432,11 +461,10 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
 
     .post('/object/move', async ({ headers, body }) => {
         const ref = getProjectRef(headers as Record<string, string | undefined>);
-        const b = body as Record<string, unknown>;
-        const srcBucket = String(b.bucketId || '');
-        const srcKey = String(b.sourceKey || '');
-        const destBucket = String(b.destinationBucketId || srcBucket);
-        const destKey = String(b.destinationKey || '');
+        const srcBucket = String(body.bucketId || '');
+        const srcKey = String(body.sourceKey || '');
+        const destBucket = String(body.destinationBucketId || srcBucket);
+        const destKey = String(body.destinationKey || '');
 
         if (!srcBucket || !srcKey || !destKey) {
             return status(400, { statusCode: '400', error: 'Bad Request', message: 'Missing source or destination' });
@@ -460,14 +488,20 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         } catch (err: unknown) {
             return status(500, { statusCode: '500', error: 'Internal', message: err instanceof Error ? err.message : String(err) });
         }
+    }, {
+        body: t.Object({
+            bucketId: t.String(),
+            sourceKey: t.String(),
+            destinationBucketId: t.Optional(t.String()),
+            destinationKey: t.String()
+        })
     })
 
     .post('/object/copy', async ({ headers, body }) => {
         const ref = getProjectRef(headers as Record<string, string | undefined>);
-        const b = body as Record<string, unknown>;
-        const srcBucket = String(b.bucketId || '');
-        const srcKey = String(b.sourceKey || '');
-        const destKey = String(b.destinationKey || '');
+        const srcBucket = String(body.bucketId || '');
+        const srcKey = String(body.sourceKey || '');
+        const destKey = String(body.destinationKey || '');
 
         if (!srcBucket || !srcKey || !destKey) {
             return status(400, { statusCode: '400', error: 'Bad Request', message: 'Missing source or destination' });
@@ -486,6 +520,12 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         } catch (err: unknown) {
             return status(500, { statusCode: '500', error: 'Internal', message: err instanceof Error ? err.message : String(err) });
         }
+    }, {
+        body: t.Object({
+            bucketId: t.String(),
+            sourceKey: t.String(),
+            destinationKey: t.String()
+        })
     })
 
     // ════════════════════════════════════════════════════════

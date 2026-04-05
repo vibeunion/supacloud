@@ -83,7 +83,7 @@ const app = new Elysia({ strictPath: false })
       const key = await crypto.subtle.importKey("raw", encoder.encode(config.masterToken), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
       const sig = await crypto.subtle.sign("HMAC", key, encoder.encode(payload));
       const token = btoa(payload) + "." + Array.from(new Uint8Array(sig)).map(b => b.toString(16).padStart(2, "0")).join("");
-      return { success: true, token, masterToken: config.masterToken };
+      return { success: true, token };
     }
     set.status = 401;
     return { success: false, error: "用户名或密码错误" };
@@ -98,7 +98,11 @@ const app = new Elysia({ strictPath: false })
       const key = await crypto.subtle.importKey("raw", encoder.encode(config.masterToken), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
       const sig = await crypto.subtle.sign("HMAC", key, encoder.encode(JSON.stringify(payload)));
       const expected = Array.from(new Uint8Array(sig)).map(b => b.toString(16).padStart(2, "0")).join("");
-      return { valid: sigHex === expected };
+      // Use timing-safe comparison to prevent timing attacks
+      const sigBuf = Buffer.from(sigHex, 'hex');
+      const expBuf = Buffer.from(expected, 'hex');
+      const valid = sigBuf.length === expBuf.length && crypto.timingSafeEqual(sigBuf, expBuf);
+      return { valid };
     } catch (err: unknown) {
       logger.warn("[Auth] Failed to verify session token signature", { error: err });
       return { valid: false };

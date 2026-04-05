@@ -22,7 +22,7 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
       // Pass along pagination (svadmin uses _page / _limit or standard skip/limit)
       const limit = Number(query._limit || query.limit || 50);
       const page = Number(query._page || 1);
-      const skip = Number(query.skip || (page - 1) * limit);
+      const offset = Number(query.skip || (page - 1) * limit);
       
       const res = await fetch(`${apiUrl}/auth/v1/admin/users`, {
         headers: {
@@ -38,11 +38,11 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
         return { error: err.msg || err.message || "Failed to fetch users" };
       }
 
-      const d = await res.json() as any;
-      const allUsers = Array.isArray(d) ? d : (d.users || []);
+      const d = await res.json() as Record<string, unknown>;
+      const allUsers = Array.isArray(d) ? d : (Array.isArray(d?.users) ? d.users : []);
       
       // Manual pagination if GoTrue doesn't paginate automatically
-      const paginatedUsers = allUsers.slice(skip, skip + limit);
+      const paginatedUsers = allUsers.slice(offset, offset + limit);
 
       return {
         data: paginatedUsers,

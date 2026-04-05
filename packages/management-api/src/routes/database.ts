@@ -35,7 +35,7 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
                 `;
 
                 const result = await db.executeQuery(dbName, sql);
-                const allTables = (result as any).rows || [];
+                const allTables = ((result as unknown as { rows: Record<string, unknown>[] }).rows) || [];
 
                 return {
                     data: allTables.slice(skip, skip + limit),
@@ -90,7 +90,7 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
 
                 const result = await db.executeQuery(dbName, sql);
                 return {
-                    data: (result as any).rows || []
+                    data: ((result as unknown as { rows: Record<string, unknown>[] }).rows) || []
                 };
             } catch (error: unknown) {
                 set.status = 500;
@@ -139,8 +139,8 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
                 ]);
 
                 return {
-                    data: (resRows as any).rows || [],
-                    total: parseInt((resCount as any).rows[0]?.count || "0")
+                    data: ((resRows as unknown as { rows: Record<string, unknown>[] }).rows) || [],
+                    total: parseInt(((resCount as unknown as { rows: { count: string }[] }).rows)[0]?.count || "0")
                 };
             } catch (error: unknown) {
                 set.status = 500;
