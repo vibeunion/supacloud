@@ -28,6 +28,7 @@ import { config } from "./config";
 import { checkAuth } from "./middleware/auth";
 import { closeDb } from "./db";
 import { authRoutes, deployRoutes, storageCompatRoutes } from "./routes";
+import { gatewayService } from "./services/gateway.service";
 import { Glob } from "bun";
 
 const WEB_CONSOLE_DIR = "/opt/supacloud/packages/web-console/build";
