@@ -459,7 +459,13 @@ export class GatewayService {
                 }
 
                 try {
-                    await this.setupUpstream(ref, pgrstPort, gotruePort);
+                    const customApiDomain = cfg.api_domain as string | undefined;
+                    let targetDomain = customApiDomain;
+                    // If the config explicitly binds something like "api.dbbaby.top", extract the base "dbbaby.top"
+                    if (targetDomain && targetDomain.startsWith("api.")) {
+                        targetDomain = targetDomain.slice(4);
+                    }
+                    await this.setupUpstream(ref, pgrstPort, gotruePort, targetDomain);
                     
                     // Re-apply keys & limits if configured (assuming user will call applyConfig separately or we re-trigger it)
                     // (Omitted for brevity, typically applyConfig runs on tenant boot)
