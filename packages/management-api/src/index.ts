@@ -28,6 +28,55 @@ import { config } from "./config";
 import { checkAuth } from "./middleware/auth";
 import { closeDb } from "./db";
 import { authRoutes, deployRoutes, storageCompatRoutes } from "./routes";
+import { Glob } from "bun";
+
+const WEB_CONSOLE_DIR = "/opt/supacloud/packages/web-console/build";
+
+const MIME_TYPES: Record<string, string> = {
+  ".html": "text/html",
+  ".js": "application/javascript",
+  ".css": "text/css",
+  ".json": "application/json",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".svg": "image/svg+xml",
+  ".ico": "image/x-icon",
+  ".woff": "font/woff",
+  ".woff2": "font/woff2",
+};
+
+let _embeddedAssets: Record<string, { content: string; encoding: string; mimeType: string }> | null = null;
+async function getEmbeddedAssets() {
+  if (!_embeddedAssets) {
+    try {
+      const mod = await import("./assets.gen") as Record<string, unknown>;
+      _embeddedAssets = (mod.EMBEDDED_ASSETS as typeof _embeddedAssets) ?? {};
+    } catch {
+      logger.debug("Failed to load embedded assets (assets.gen.ts not found), using empty fallback.");
+      _embeddedAssets = {};
+    }
+  }
+  return _embeddedAssets;
+}
+
+let _cachedIndexHtml: string | null = null;
+const staticAssetCache = new Set<string>();
+let staticCacheWarmed = false;
+
+function warmupStaticAssets() {
+  if (staticCacheWarmed) return;
+  try {
+    const glob = new Glob("**/*");
+    for (const file of glob.scanSync({ cwd: WEB_CONSOLE_DIR, onlyFiles: true })) {
+      const standardPath = file.startsWith('/') ? file : '/' + file;
+      staticAssetCache.add(standardPath);
+    }
+    logger.info(`[StaticAssets] Pre-warmed ${staticAssetCache.size} files into memory cache O(1)`);
+    staticCacheWarmed = true;
+  } catch (e: unknown) {
+    logger.warn("[StaticAssets] Failed to warm up directory", { dir: WEB_CONSOLE_DIR, error: String(e) });
+  }
+}
 
 const app = new Elysia({ strictPath: false })
   // Swagger docs
@@ -140,57 +189,7 @@ const app = new Elysia({ strictPath: false })
     return { error: "Internal server error" };
   });
 
-const WEB_CONSOLE_DIR = "/opt/supacloud/packages/web-console/build";
 
-const MIME_TYPES: Record<string, string> = {
-  ".html": "text/html",
-  ".js": "application/javascript",
-  ".css": "text/css",
-  ".json": "application/json",
-  ".png": "image/png",
-  ".jpg": "image/jpeg",
-  ".svg": "image/svg+xml",
-  ".ico": "image/x-icon",
-  ".woff": "font/woff",
-  ".woff2": "font/woff2",
-};
-
-// Lazy-loaded embedded assets (only loaded on first fallback request)
-let _embeddedAssets: Record<string, { content: string; encoding: string; mimeType: string }> | null = null;
-async function getEmbeddedAssets() {
-  if (!_embeddedAssets) {
-    try {
-      const mod = await import("./assets.gen") as Record<string, unknown>;
-      _embeddedAssets = (mod.EMBEDDED_ASSETS as typeof _embeddedAssets) ?? {};
-    } catch {
-      logger.debug("Failed to load embedded assets (assets.gen.ts not found), using empty fallback.");
-      _embeddedAssets = {};
-    }
-  }
-  return _embeddedAssets;
-}
-
-// Cached SPA index.html content (avoids re-reading on every fallback)
-import { Glob } from "bun";
-
-let _cachedIndexHtml: string | null = null;
-const staticAssetCache = new Set<string>();
-let staticCacheWarmed = false;
-
-function warmupStaticAssets() {
-  if (staticCacheWarmed) return;
-  try {
-    const glob = new Glob("**/*");
-    for (const file of glob.scanSync({ cwd: WEB_CONSOLE_DIR, onlyFiles: true })) {
-      const standardPath = file.startsWith('/') ? file : '/' + file;
-      staticAssetCache.add(standardPath);
-    }
-    logger.info(`[StaticAssets] Pre-warmed ${staticAssetCache.size} files into memory cache O(1)`);
-    staticCacheWarmed = true;
-  } catch (e: unknown) {
-    logger.warn("[StaticAssets] Failed to warm up directory", { dir: WEB_CONSOLE_DIR, error: String(e) });
-  }
-}
 
 /**
  * Register static assets (SPA) with O(1) hashmap checks and zero-copy / pre-compression
