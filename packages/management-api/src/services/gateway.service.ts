@@ -308,7 +308,7 @@ export class GatewayService {
             // Ensure Studio routes (Management API proxy loopback for SPA fallback)
             const studioDomain = `studio-${projectRef}.${config.baseDomain}`;
             const studioHosts = customApiDomain ? [studioDomain, `studio.${customApiDomain}`] : [studioDomain];
-            await this.ensureServiceAndRoute({ name: `svc-studio-${projectRef}`, url: `http://${hostIp}:3000`, paths: ["/"], hosts: studioHosts, projectRef, stripPath: false });
+            await this.ensureServiceAndRoute({ name: `svc-studio-${projectRef}`, url: `http://${hostIp}:${config.port}`, paths: ["/"], hosts: studioHosts, projectRef, stripPath: false });
 
             logger.info(`Kong upstream dynamically registered via REST for ${projectRef} (pgrst:${pgrstPort}, gotrue:${gotruePort})`);
             return { success: true };
@@ -478,6 +478,36 @@ export class GatewayService {
             const msg = error instanceof Error ? error.message : String(error);
             logger.error(`[GatewayService] rebuildAllTenantConfigs failed:`, msg);
             return { success: false, updated, errors: [...errors, msg] };
+        }
+    }
+
+    // --- Global Master Routes ---
+    async setupMasterRoutes(): Promise<void> {
+        try {
+            const hostIp = await this.detectHostIp();
+            
+            // 1. Create Core Management Service
+            await this.kongRequest(`/services/svc-management-api`, "PUT", {
+                name: "svc-management-api",
+                url: `http://${hostIp}:${config.port}`,
+                connect_timeout: 5000,
+                read_timeout: 60000,
+                write_timeout: 60000
+            });
+
+            // 2. Map /mcp route directly
+            await this.kongRequest(`/routes/route-mcp-new`, "PUT", {
+                name: "route-mcp-new",
+                service: { name: "svc-management-api" },
+                paths: ["/mcp"],
+                strip_path: false,
+                preserve_host: true,
+            });
+
+            logger.info(`[GatewayService] Rebuilt Global Master Routes for /mcp to port ${config.port}`);
+        } catch (error: unknown) {
+            const msg = error instanceof Error ? error.message : String(error);
+            logger.error(`[GatewayService] Failed to setup Master Routes:`, msg);
         }
     }
 }
