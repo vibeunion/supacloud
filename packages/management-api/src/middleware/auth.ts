@@ -23,6 +23,26 @@ export async function checkAuth(request: Request): Promise<{ status: number; bod
     return undefined;
   }
 
+  // Verify if it's a valid Studio Session HMAC Token
+  try {
+    const parts = token.split(".");
+    if (parts.length === 2) {
+      const [payloadB64, sigHex] = parts;
+      const payload = JSON.parse(atob(payloadB64));
+      if (payload.exp > Date.now()) {
+        const encoder = new TextEncoder();
+        const key = await crypto.subtle.importKey("raw", encoder.encode(config.masterToken), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+        const sig = await crypto.subtle.sign("HMAC", key, encoder.encode(JSON.stringify(payload)));
+        const expected = Array.from(new Uint8Array(sig)).map(b => b.toString(16).padStart(2, "0")).join("");
+        const sigBuf = Buffer.from(sigHex, 'hex');
+        const expBuf = Buffer.from(expected, 'hex');
+        if (sigBuf.length === expBuf.length && crypto.timingSafeEqual(sigBuf, expBuf)) {
+           return undefined; // Authorized as studio user (admin)
+        }
+      }
+    }
+  } catch { } // Fall through to other token checks
+
   // Verify if it's a valid MCP token
   const mcpPayload = await verifyMcpToken(token);
   let role = mcpPayload?.role;
@@ -57,5 +77,5 @@ export async function checkAuth(request: Request): Promise<{ status: number; bod
     return undefined;
   }
 
-  return { status: 403, body: { error: "Invalid token" } };
+  return { status: 401, body: { error: "Invalid token" } };
 }
