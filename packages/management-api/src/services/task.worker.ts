@@ -174,11 +174,21 @@ export class TaskWorker {
                 }
 
                 case "provision_gateway": {
-                    // Kong uses declarative config (KONG_DATABASE=off), Admin API is read-only.
-                    // CORS and rate-limiting are already configured in the YAML template.
-                    // This task is a no-op for now, but can be extended for other gateway configs.
-                    logger.info(`[TaskWorker] Gateway config skipped for ${project_ref} (Kong declarative mode)`);
-                    return true;
+                    if (!project) {
+                        logger.error(`[TaskWorker] Project ${project_ref} not found for provision_gateway`);
+                        return false;
+                    }
+                    // Apply JWT credentials, CORS, and rate limiting via Kong Admin API
+                    try {
+                        await gatewayService.setupJwt(project_ref, project.jwt_secret);
+                        await gatewayService.setCors(project_ref);
+                        await gatewayService.setRateLimit(project_ref, "free");
+                        logger.info(`[TaskWorker] Kong gateway plugins configured for ${project_ref}`);
+                        return true;
+                    } catch (err: unknown) {
+                        logger.error(`[TaskWorker] Gateway config failed for ${project_ref}`, { error: err instanceof Error ? err.message : String(err) });
+                        return false;
+                    }
                 }
 
                 case "provision_secrets": {

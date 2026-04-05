@@ -1,10 +1,18 @@
 import { config } from "../config";
-import { nanoid } from "nanoid";
 import { logger } from "../utils/logger";
 import { shellService } from "./shell.service";
 import { SQL } from "bun";
+import { sql as adminSql, getProjectDb } from "../db";
 import { $ } from "bun";
 import { assertValidIdentifier, assertValidDbName } from "../utils/validation";
+
+/** Escape a string value for use inside PostgreSQL dollar-quoted strings */
+function pgEscapePassword(password: string): string {
+  // Use dollar-quoting with unique tag to safely embed passwords
+  // The tag includes a hash to avoid collision with password content
+  const tag = `pw${Bun.hash(password).toString(36).slice(0, 6)}`;
+  return `$${tag}$${password}$${tag}$`;
+}
 
 export class DatabaseService {
   private readonly PG_HOST = config.pgHost;
@@ -25,47 +33,26 @@ export class DatabaseService {
     return ret;
   }
 
-  // Gateway DB connection - use explicit configuration to avoid Bun SQL bugs
-  private getAdminDb(): SQL {
-    return new SQL({
-      hostname: this.PG_HOST,
-      port: this.PG_PORT,
-      database: this.PG_DATABASE,
-      username: this.PG_USER,
-      password: this.PG_PASSWORD,
-    });
+  // Reuse global admin connection pool from db/index.ts
+  private get adminDb(): SQL {
+    return adminSql;
   }
 
-  // Tenant project DB connection - use explicit configuration to avoid Bun SQL bugs
+  // Tenant project DB connection - reuse cached pool from db/index.ts
   private getTenantDb(dbName: string): SQL {
-    return new SQL({
-      hostname: this.PG_HOST,
-      port: this.PG_PORT,
-      database: dbName,
-      username: this.PG_USER,
-      password: this.PG_PASSWORD,
-    });
+    return getProjectDb(dbName);
   }
 
-  // Unified execution wrap for Admin DB to ensure connection release
+  // Unified execution wrap for Admin DB (no longer creates/closes connections)
   private async withAdminDb<T>(operation: (db: SQL) => Promise<T>): Promise<T> {
-    const db = this.getAdminDb();
-    try {
-      return await operation(db);
-    } finally {
-      await db.close();
-    }
+    return await operation(this.adminDb);
   }
 
-  // Unified execution wrap for Tenant DB to ensure connection release
+  // Unified execution wrap for Tenant DB (uses cached pool)
   private async withTenantDb<T>(dbName: string, operation: (db: SQL) => Promise<T>): Promise<T> {
-    const db = this.getTenantDb(dbName);
-    try {
-      return await operation(db);
-    } finally {
-      await db.close();
-    }
+    return await operation(this.getTenantDb(dbName));
   }
+
 
   // Disk space pre-check: prevent WAL disk full which causes cluster panic
   private async checkDiskSpace(): Promise<void> {
@@ -125,7 +112,7 @@ export class DatabaseService {
         await adminDb.unsafe(`CREATE DATABASE "${dbName}" OWNER ${this.PG_USER}`);
 
         // Create role - limit connections for low-resource environments (prevent connection exhaustion)
-        await adminDb.unsafe(`CREATE ROLE "${dbUser}" LOGIN CONNECTION LIMIT 20 PASSWORD '${password}'`);
+        await adminDb.unsafe(`CREATE ROLE "${dbUser}" LOGIN CONNECTION LIMIT 20 PASSWORD ${pgEscapePassword(password)}`);
 
         // Set kernel-level configs for resource exhaustion prevention
         await adminDb.unsafe(`
@@ -182,7 +169,7 @@ export class DatabaseService {
       `);
 
       await tenantDb.unsafe(`
-        CREATE ROLE "${authenticatorRole}" CONNECTION LIMIT 30 NOINHERIT LOGIN PASSWORD '${password}';
+        CREATE ROLE "${authenticatorRole}" CONNECTION LIMIT 30 NOINHERIT LOGIN PASSWORD ${pgEscapePassword(password)};
         GRANT ${anonRole}, ${authenticatedRole}, ${serviceRole} TO "${authenticatorRole}";
 
         -- Set shorter timeout and same memory limits for API Role to prevent cascade failures
@@ -204,7 +191,7 @@ export class DatabaseService {
         DO $$
         BEGIN
           IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'supabase_auth_admin') THEN
-            CREATE ROLE supabase_auth_admin LOGIN PASSWORD '${password}';
+            CREATE ROLE supabase_auth_admin LOGIN PASSWORD ${pgEscapePassword(password)};
           END IF;
         END
         $$;
@@ -299,7 +286,7 @@ export class DatabaseService {
         WHERE project_ref = ${projectRef}
         ORDER BY name
       `;
-      return rows.map((r: any) => ({ name: r.name, value: r.value }));
+      return rows.map((r: Record<string, unknown>) => ({ name: r.name as string, value: r.value as string }));
     } catch (err) {
       logger.error("[DatabaseService] Failed to get secrets", { projectRef, error: err });
       return [];
@@ -334,42 +321,75 @@ export class DatabaseService {
   }
 
   // --- Tenant Runtime Management ---
+  // Delegates to TenantRuntimeService (TypeScript implementation)
+  // Shell-based methods removed — unified to TenantRuntimeService
 
   async startRuntime(projectRef: string): Promise<{ success: boolean; output: string; error?: string }> {
-    const result = await shellService.execute("tenant_runtime.sh", ["start", projectRef]);
-    return result;
+    // Import TenantRuntimeService to avoid shell script dual-path
+    const { tenantRuntimeService } = await import("./tenant-runtime.service");
+    try {
+      const status = await tenantRuntimeService.startRuntime(projectRef);
+      return {
+        success: status.status === "running" || status.status === "starting",
+        output: `PORT=${status.port}\nGOTRUE_PORT=${status.gotruePort}`,
+        error: status.health === "unhealthy" ? "Health check failed" : undefined,
+      };
+    } catch (error: unknown) {
+      return { success: false, output: "", error: error instanceof Error ? error.message : String(error) };
+    }
   }
 
   async stopRuntime(projectRef: string): Promise<{ success: boolean; error?: string }> {
-    const result = await shellService.execute("tenant_runtime.sh", ["stop", projectRef]);
-    return result;
+    const { tenantRuntimeService } = await import("./tenant-runtime.service");
+    try {
+      await tenantRuntimeService.stopRuntime(projectRef);
+      return { success: true };
+    } catch (error: unknown) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
   }
 
   async restartRuntime(projectRef: string): Promise<{ success: boolean; error?: string }> {
-    const result = await shellService.execute("tenant_runtime.sh", ["restart", projectRef]);
-    return result;
+    const { tenantRuntimeService } = await import("./tenant-runtime.service");
+    try {
+      await tenantRuntimeService.restartRuntime(projectRef);
+      return { success: true };
+    } catch (error: unknown) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
   }
 
   async getRuntimeStatus(projectRef: string): Promise<{ success: boolean; output: string; error?: string }> {
-    const result = await shellService.execute("tenant_runtime.sh", ["status", projectRef]);
-    return result;
+    const { tenantRuntimeService } = await import("./tenant-runtime.service");
+    try {
+      const status = await tenantRuntimeService.checkStatus(projectRef);
+      return { success: true, output: JSON.stringify(status) };
+    } catch (error: unknown) {
+      return { success: false, output: "", error: error instanceof Error ? error.message : String(error) };
+    }
   }
 
   async getRuntimePort(projectRef: string): Promise<string> {
-    const result = await shellService.execute("tenant_runtime.sh", ["port", projectRef]);
-    return result.success ? result.output.trim() : "";
+    const { tenantRuntimeService } = await import("./tenant-runtime.service");
+    try {
+      const status = await tenantRuntimeService.checkStatus(projectRef);
+      return String(status.port);
+    } catch {
+      return "";
+    }
   }
 
   // --- Kong upstream management ---
 
   async setupUpstream(projectRef: string, pgrstPort: string, gotruePort: string): Promise<{ success: boolean; error?: string }> {
-    const result = await shellService.execute("gateway_manager.sh", ["setup-upstream", projectRef, pgrstPort, gotruePort]);
-    return result;
+    // Delegate to GatewayService REST API instead of shell script
+    const { gatewayService } = await import("./gateway.service");
+    return await gatewayService.setupUpstream(projectRef, pgrstPort, gotruePort);
   }
 
   async removeService(projectRef: string): Promise<{ success: boolean; error?: string }> {
-    const result = await shellService.execute("gateway_manager.sh", ["remove-service", projectRef]);
-    return result;
+    const { gatewayService } = await import("./gateway.service");
+    return await gatewayService.removeService(projectRef);
   }
 }
 

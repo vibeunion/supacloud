@@ -1,4 +1,4 @@
-import { Elysia } from "elysia";
+import { Elysia, t } from "elysia";
 import { sql } from "../db";
 import { logger } from "../utils/logger";
 
@@ -46,9 +46,10 @@ export const platformSettingsRoutes = new Elysia({ name: "platform-settings" })
 
   // ─── PUT /v1/platform/settings ─────────────────────────────────
   .put("/v1/platform/settings", async ({ body }) => {
-    const items = (body as { items: { key: string; value: string; description?: string; is_secret?: boolean }[] }).items;
-    if (!Array.isArray(items) || items.length === 0) {
-      return { success: false, error: "items array is required" };
+    const items = body.items;
+
+    if (items.length === 0) {
+      return { success: false, error: "items array cannot be empty" };
     }
 
     try {
@@ -69,6 +70,15 @@ export const platformSettingsRoutes = new Elysia({ name: "platform-settings" })
       logger.error("[PlatformSettings] Failed to update settings", { error });
       return { success: false, error: "Failed to update settings" };
     }
+  }, {
+    body: t.Object({
+      items: t.Array(t.Object({
+        key: t.String(),
+        value: t.String(),
+        description: t.Optional(t.String()),
+        is_secret: t.Optional(t.Boolean())
+      }))
+    })
   });
 
 /**

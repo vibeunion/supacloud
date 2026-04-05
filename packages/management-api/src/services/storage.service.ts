@@ -139,7 +139,7 @@ export class StorageService {
    * Return the logical root bucket for this project setup
    */
   static async listBuckets(projectRef: string): Promise<Record<string, unknown>[]> {
-    return [{ id: `supa-${projectRef}`, name: `supa-${projectRef}`, public: false, size: '-' }];
+    return await getStorageDriver().listBuckets(projectRef);
   }
 
   static async listFiles(projectRef: string, bucketName: string): Promise<Record<string, unknown>[]> {

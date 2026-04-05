@@ -72,6 +72,29 @@ export async function initDatabase() {
       is_secret BOOLEAN NOT NULL DEFAULT false,
       updated_at TIMESTAMPTZ DEFAULT NOW()
     );
+
+    CREATE TABLE IF NOT EXISTS project_secrets (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      project_ref VARCHAR(20) REFERENCES projects(ref) ON DELETE CASCADE,
+      name VARCHAR(255) NOT NULL,
+      value TEXT NOT NULL,
+      updated_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(project_ref, name)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_project_secrets_ref ON project_secrets(project_ref);
+
+    CREATE TABLE IF NOT EXISTS deployment_history (
+      id TEXT PRIMARY KEY,
+      app TEXT NOT NULL,
+      tenant TEXT NOT NULL,
+      version TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'success',
+      deployed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      triggered_by TEXT NOT NULL DEFAULT 'api',
+      config JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
   `;
 
   // Use explicit config instead of URL to ensure correct database name
@@ -94,13 +117,13 @@ export async function initDatabase() {
 
     const result = await sql`
       SELECT COUNT(*) as count FROM information_schema.tables 
-      WHERE table_schema = 'public' AND table_name IN ('organizations', 'projects', 'project_tasks', 'platform_settings')
+      WHERE table_schema = 'public' AND table_name IN ('organizations', 'projects', 'project_tasks', 'platform_settings', 'project_secrets', 'deployment_history')
     `;
     
     const tableCount = Number(result[0]?.count || 0);
     logger.info(`Found ${tableCount} tables in database`);
 
-    if (tableCount < 4) {
+    if (tableCount < 6) {
       logger.info("Executing DDL statements...");
       await sql.unsafe(ddlQuery);
       logger.info("DDL executed successfully.");
@@ -134,14 +157,14 @@ export async function initDatabase() {
 
     const [verify] = await sql`
       SELECT COUNT(*) as count FROM information_schema.tables 
-      WHERE table_schema = 'public' AND table_name IN ('organizations', 'projects', 'project_tasks', 'platform_settings')
+      WHERE table_schema = 'public' AND table_name IN ('organizations', 'projects', 'project_tasks', 'platform_settings', 'project_secrets', 'deployment_history')
     `;
     
     const finalCount = Number(verify?.count || 0);
-    logger.info(`Database initialized successfully! Tables verified: ${finalCount}/4`);
+    logger.info(`Database initialized successfully! Tables verified: ${finalCount}/6`);
     
-    if (finalCount < 4) {
-      throw new Error(`Table creation verified but failed. Expected 4 tables, got ${finalCount}`);
+    if (finalCount < 6) {
+      throw new Error(`Table creation verified but failed. Expected 6 tables, got ${finalCount}`);
     }
   } catch (error: unknown) {
     logger.error("Failed to initialize database:", { error: error instanceof Error ? error.message : String(error) });
