@@ -11,5 +11,8 @@
     "@elysiajs/cors": "^1.4.0",
     "@supabase/supabase-js": "^2.49.0",
     "elysia": "^1.2.25"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.2"
   }
 }
