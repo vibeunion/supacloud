@@ -5,7 +5,7 @@
  */
 
 export async function apiClient(url: string, options: RequestInit = {}): Promise<Response> {
-  const token = typeof localStorage !== 'undefined' ? localStorage.getItem("supacloud_master_token") : null;
+  const token = typeof localStorage !== 'undefined' ? localStorage.getItem("supacloud_session") : null;
   
   const headers = new Headers(options.headers || {});
   

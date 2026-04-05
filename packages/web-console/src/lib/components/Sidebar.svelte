@@ -31,23 +31,23 @@
     locale.set($locale === 'zh' ? 'en' : 'zh');
   }
 
-  const navItems = $derived([
-    { title: $t("Navigation.table_editor"), icon: Table, href: `/project/${currentProject?.ref}/tables` },
-    { title: $t("Navigation.sql_editor"), icon: Code2, href: `/project/${currentProject?.ref}/sql` },
-    { title: $t("Navigation.auth"), icon: Users, href: `/project/${currentProject?.ref}/auth` },
-    { title: $t("Navigation.storage"), icon: Box, href: `/project/${currentProject?.ref}/storage` },
-    { title: $t("Navigation.edge_functions"), icon: Zap, href: `/project/${currentProject?.ref}/functions` },
-    { title: $t("Hosting.title"), icon: Globe, href: `/project/${currentProject?.ref}/hosting` },
-    { title: $t("Realtime.title"), icon: Radio, href: `/project/${currentProject?.ref}/realtime` },
-    { title: $t("Navigation.database"), icon: Database, href: `/project/${currentProject?.ref}/database` },
-    { title: $t("Navigation.api_docs"), icon: Files, href: `/project/${currentProject?.ref}/api` },
-    { title: $t("Navigation.query_performance"), icon: LineChart, href: `/project/${currentProject?.ref}/reports/query-performance` },
-    { title: $t("Navigation.database_linter"), icon: ShieldCheck, href: `/project/${currentProject?.ref}/reports/database-linter` },
-    { title: $t("Sidebar.database_advisor"), icon: ShieldCheck, href: `/project/${currentProject?.ref}/reports/advisors` },
-    { title: $t("Navigation.reports"), icon: Glasses, href: `/project/${currentProject?.ref}/reports/slow-queries` },
-    { title: $t("Navigation.logs"), icon: ScrollText, href: `/project/${currentProject?.ref}/logs` },
-    { title: $t("Navigation.settings"), icon: Settings, href: `/project/${currentProject?.ref}/settings` },
-  ]);
+  const navItems = $derived(currentProject?.ref ? [
+    { title: $t("Navigation.table_editor"), icon: Table, href: `/project/${currentProject.ref}/tables` },
+    { title: $t("Navigation.sql_editor"), icon: Code2, href: `/project/${currentProject.ref}/sql` },
+    { title: $t("Navigation.auth"), icon: Users, href: `/project/${currentProject.ref}/auth` },
+    { title: $t("Navigation.storage"), icon: Box, href: `/project/${currentProject.ref}/storage` },
+    { title: $t("Navigation.edge_functions"), icon: Zap, href: `/project/${currentProject.ref}/functions` },
+    { title: $t("Hosting.title"), icon: Globe, href: `/project/${currentProject.ref}/hosting` },
+    { title: $t("Realtime.title"), icon: Radio, href: `/project/${currentProject.ref}/realtime` },
+    { title: $t("Navigation.database"), icon: Database, href: `/project/${currentProject.ref}/database` },
+    { title: $t("Navigation.api_docs"), icon: Files, href: `/project/${currentProject.ref}/api` },
+    { title: $t("Navigation.query_performance"), icon: LineChart, href: `/project/${currentProject.ref}/reports/query-performance` },
+    { title: $t("Navigation.database_linter"), icon: ShieldCheck, href: `/project/${currentProject.ref}/reports/database-linter` },
+    { title: $t("Sidebar.database_advisor"), icon: ShieldCheck, href: `/project/${currentProject.ref}/reports/advisors` },
+    { title: $t("Navigation.reports"), icon: Glasses, href: `/project/${currentProject.ref}/reports/api-overview` },
+    { title: $t("Navigation.logs"), icon: ScrollText, href: `/project/${currentProject.ref}/logs` },
+    { title: $t("Navigation.settings"), icon: Settings, href: `/project/${currentProject.ref}/settings` },
+  ] : []);
 
   function isActive(href: string) {
     return $page.url.pathname === href || $page.url.pathname.startsWith(href);
@@ -72,7 +72,7 @@
           : "text-muted-foreground hover:bg-secondary/50 hover:text-foreground hover:translate-x-1"
       )}
     >
-      <LayoutDashboard class={cn("w-4 h-4 transition-colors", $page.url.pathname === `/project/${currentProject?.ref}` || $page.url.pathname === `/project/${currentProject?.ref}/` ? "text-brand" : "group-hover:text-brand")} />
+      <LayoutDashboard fill="currentColor" strokeWidth={1.5} class={cn("w-4 h-4 transition-colors", $page.url.pathname === `/project/${currentProject?.ref}` || $page.url.pathname === `/project/${currentProject?.ref}/` ? "text-brand" : "group-hover:text-brand")} />
       {$t("Dashboard.title")}
     </a>
     <div class="h-3"></div>
@@ -86,7 +86,7 @@
             : "text-muted-foreground hover:bg-secondary/50 hover:text-foreground hover:translate-x-1"
         )}
       >
-        <item.icon class={cn("w-4 h-4 transition-colors", isActive(item.href) ? "text-brand" : "group-hover:text-brand")} />
+        <item.icon fill="currentColor" strokeWidth={1.5} class={cn("w-4 h-4 transition-colors", isActive(item.href) ? "text-brand" : "group-hover:text-brand")} />
         {item.title}
       </a>
     {/each}
@@ -103,7 +103,7 @@
           : "text-muted-foreground hover:bg-secondary/50 hover:text-foreground hover:translate-x-1"
       )}
     >
-      <Settings class={cn("w-4 h-4 transition-colors", $page.url.pathname.startsWith("/platform") ? "text-brand" : "group-hover:text-brand")} />
+      <Settings fill="currentColor" strokeWidth={1.5} class={cn("w-4 h-4 transition-colors", $page.url.pathname.startsWith("/platform") ? "text-brand" : "group-hover:text-brand")} />
       {$t("Sidebar.infrastructure")}
     </a>
   </nav>
@@ -116,7 +116,7 @@
       href="/platform"
       class="group flex w-full items-center gap-3 px-3 py-2.5 text-sm font-medium rounded-xl text-brand bg-brand/5 hover:bg-brand/10 transition-all duration-300 hover:shadow-sm"
     >
-      <Shield class="w-4 h-4 group-hover:scale-110 transition-transform" />
+      <Shield fill="currentColor" strokeWidth={1.5} class="w-4 h-4 group-hover:scale-110 transition-transform" />
       <span>{$t("Sidebar.platform_admin")}</span>
     </a>
     <button

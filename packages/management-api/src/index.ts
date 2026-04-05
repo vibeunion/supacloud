@@ -28,7 +28,6 @@ import { config } from "./config";
 import { checkAuth } from "./middleware/auth";
 import { closeDb } from "./db";
 import { authRoutes, deployRoutes, storageCompatRoutes } from "./routes";
-import { Glob } from "bun";
 
 const WEB_CONSOLE_DIR = "/opt/supacloud/packages/web-console/build";
 
@@ -59,22 +58,46 @@ async function getEmbeddedAssets() {
   return _embeddedAssets;
 }
 
+// --- Caddy/Angie-style try_files static asset serving ---
+// No pre-warmed Set. Direct disk checks per request (Bun.file is near-zero-cost).
+// index.html is cached in memory with mtime-based invalidation.
 let _cachedIndexHtml: string | null = null;
-const staticAssetCache = new Set<string>();
-let staticCacheWarmed = false;
+let _indexHtmlMtime: number = 0;
 
-function warmupStaticAssets() {
-  if (staticCacheWarmed) return;
+/** Check if a static asset exists on disk (O(1) syscall) */
+function staticFileExists(relativePath: string): boolean {
   try {
-    const glob = new Glob("**/*");
-    for (const file of glob.scanSync({ cwd: WEB_CONSOLE_DIR, onlyFiles: true })) {
-      const standardPath = file.startsWith('/') ? file : '/' + file;
-      staticAssetCache.add(standardPath);
+    const f = Bun.file(`${WEB_CONSOLE_DIR}${relativePath}`);
+    return f.size > 0;
+  } catch {
+    return false;
+  }
+}
+
+/** Determine if a path is an immutable hashed asset (should never SPA-fallback) */
+function isImmutableAsset(path: string): boolean {
+  return path.startsWith('/_app/') || path.startsWith('/assets/');
+}
+
+/** Determine if a path looks like a static file request (has a file extension) */
+function hasFileExtension(path: string): boolean {
+  const lastSegment = path.split('/').pop() || '';
+  return lastSegment.includes('.');
+}
+
+/** Get index.html with mtime-based cache invalidation */
+async function getIndexHtml(): Promise<string | null> {
+  try {
+    const file = Bun.file(`${WEB_CONSOLE_DIR}/index.html`);
+    const mtime = file.lastModified;
+    if (!_cachedIndexHtml || mtime !== _indexHtmlMtime) {
+      _cachedIndexHtml = await file.text();
+      _indexHtmlMtime = mtime;
+      logger.info("[StaticAssets] index.html (re)loaded from disk");
     }
-    logger.info(`[StaticAssets] Pre-warmed ${staticAssetCache.size} files into memory cache O(1)`);
-    staticCacheWarmed = true;
-  } catch (e: unknown) {
-    logger.warn("[StaticAssets] Failed to warm up directory", { dir: WEB_CONSOLE_DIR, error: String(e) });
+    return _cachedIndexHtml;
+  } catch {
+    return null;
   }
 }
 
@@ -200,35 +223,50 @@ const app = new Elysia({ strictPath: false })
 
 
 /**
- * Register static assets (SPA) with O(1) hashmap checks and zero-copy / pre-compression
+ * Caddy/Angie-inspired try_files static asset serving.
+ *
+ * Strategy (mirrors `try_files $uri $uri/ /index.html`):
+ *   1. If exact file exists on disk → serve it (with content-negotiation for br/gzip)
+ *   2. If path is an immutable asset (/_app/, /assets/) but missing → 404 (NEVER fallback to HTML)
+ *   3. If path has no file extension (SPA route like /project/xxx/tables) → serve index.html
+ *   4. Last resort: embedded assets fallback
  */
 export function registerStaticAssets() {
-  warmupStaticAssets();
+  // Log directory presence once at startup (no full directory scan)
+  try {
+    const idx = Bun.file(`${WEB_CONSOLE_DIR}/index.html`);
+    if (idx.size > 0) {
+      logger.info(`[StaticAssets] Serving from ${WEB_CONSOLE_DIR} (try_files mode)`);
+    }
+  } catch {
+    logger.warn(`[StaticAssets] ${WEB_CONSOLE_DIR} not found, will use embedded fallback`);
+  }
 
   return new Elysia({ name: "static-assets" }).get("*", async (context) => {
     const { request, set } = context;
     const url = new URL(request.url);
     const path = url.pathname === "/" ? "/index.html" : url.pathname;
 
-    // Do NOT catch API routes in static assets
+    // Do NOT catch API routes
     if (path.startsWith("/api/") || path.startsWith("/v1/")) {
       set.status = 404;
       return { error: "Route not found" };
     }
 
+    // --- Step 1: try_files $uri — check exact file on disk ---
     try {
-      // Memory Hash check O(1)
       const acceptEncoding = request.headers.get('accept-encoding') || '';
       let diskFile: string | null = null;
       let encoding: 'br' | 'gzip' | null = null;
 
-      if (acceptEncoding.includes('br') && staticAssetCache.has(path + '.br')) {
+      // Content-negotiation: prefer brotli > gzip > raw
+      if (acceptEncoding.includes('br') && staticFileExists(path + '.br')) {
         diskFile = path + '.br';
         encoding = 'br';
-      } else if (acceptEncoding.includes('gzip') && staticAssetCache.has(path + '.gz')) {
+      } else if (acceptEncoding.includes('gzip') && staticFileExists(path + '.gz')) {
         diskFile = path + '.gz';
         encoding = 'gzip';
-      } else if (staticAssetCache.has(path)) {
+      } else if (staticFileExists(path)) {
         diskFile = path;
       }
 
@@ -237,8 +275,9 @@ export function registerStaticAssets() {
         const ext = extMatch ? extMatch[0].toLowerCase() : '';
         set.headers["Content-Type"] = MIME_TYPES[ext] || "application/octet-stream";
 
-        set.headers["Cache-Control"] = path.includes('/assets/') || path.match(/\.[0-9a-f]{8}\./)
-          ? "public, max-age=31536000, immutable" 
+        // Immutable hashed assets get permanent cache; everything else gets short cache
+        set.headers["Cache-Control"] = isImmutableAsset(path) || path.match(/\.[0-9a-f]{8,}\./)
+          ? "public, max-age=31536000, immutable"
           : "public, max-age=3600";
 
         if (encoding) {
@@ -248,25 +287,32 @@ export function registerStaticAssets() {
 
         return Bun.file(`${WEB_CONSOLE_DIR}${diskFile}`);
       }
-
-      // Try index.html for SPA routing (fallback for non-asset paths)
-      const exactPath = `${WEB_CONSOLE_DIR}/index.html`;
-      if (staticAssetCache.has("/index.html")) {
-        if (!_cachedIndexHtml) {
-          _cachedIndexHtml = await Bun.file(exactPath).text();
-        }
-        return new Response(_cachedIndexHtml, { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-cache" } });
-      }
     } catch (e: unknown) {
-      logger.error("Asset FS error:", { error: e instanceof Error ? e.message : String(e) });
+      logger.error("[StaticAssets] FS error:", { path, error: e instanceof Error ? e.message : String(e) });
     }
 
-    // Fall back to embedded assets (lazy-loaded)
+    // --- Step 2: immutable asset miss → strict 404 (Caddy/Angie behavior) ---
+    // /_app/immutable/... files are content-hashed; if they don't exist, it's a stale reference.
+    // Returning index.html here would cause "Expected JS but got text/html" browser errors.
+    if (isImmutableAsset(path) || hasFileExtension(path)) {
+      set.status = 404;
+      return "";
+    }
+
+    // --- Step 3: SPA fallback → serve index.html (only for navigation routes) ---
+    const indexHtml = await getIndexHtml();
+    if (indexHtml) {
+      return new Response(indexHtml, {
+        headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-cache" }
+      });
+    }
+
+    // --- Step 4: embedded assets fallback (dev mode / no build dir) ---
     try {
       const ASSETS = await getEmbeddedAssets();
       if (ASSETS) {
         let asset = ASSETS[path];
-        if (!asset && !path.includes(".")) {
+        if (!asset && !hasFileExtension(path)) {
           asset = ASSETS["/index.html"];
         }
 
@@ -277,13 +323,12 @@ export function registerStaticAssets() {
       }
 
       set.status = 404;
-      return "Internal Asset Not Found.";
-    } catch (e: unknown) {
-      if (process.env.NODE_ENV !== "production") {
-        return "Management Console DEV mode: run 'bun run build:all' to load SPA assets into memory.";
-      }
+      return "Asset Not Found.";
+    } catch {
       set.status = 404;
-      return "App Assets Not Built.";
+      return process.env.NODE_ENV !== "production"
+        ? "DEV mode: run 'bun run build:all' to build SPA assets."
+        : "App Assets Not Built.";
     }
   });
 }
