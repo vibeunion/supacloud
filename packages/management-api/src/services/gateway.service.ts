@@ -5,6 +5,12 @@ import { sql } from "../db";
 
 const DEFAULT_CORS_HEADERS = ["Accept", "Accept-Language", "Content-Language", "Authorization", "Content-Type", "X-Api-Version", "x-supabase-api-version", "X-Client-Info", "apikey", "Prefer", "Content-Profile", "accept-profile", "Range", "Range-Unit"];
 const DEFAULT_CORS_EXPOSED = ["Content-Length", "Content-Range", "X-JSON", "x-supabase-api-version", "X-Client-Info", "apikey", "Prefer", "Content-Profile", "accept-profile", "Range", "Range-Unit", "X-Relay-Error"];
+const DEFAULT_CORS_ORIGINS = [
+  "https://sadmin.dbbaby.top",
+  "https://admin.muying-redpack.com",
+  "https://app.muying-redpack.com",
+  "https://servicewechat.com"
+];
 
 import path from "node:path";
 import fs from "node:fs/promises";
@@ -122,18 +128,16 @@ export class GatewayService {
 
     // --- CORS ---
 
-    async setCors(projectRef: string, origins: string = "~^https?://.*$"): Promise<boolean> {
+    async setCors(projectRef: string, origins: string[] = DEFAULT_CORS_ORIGINS): Promise<boolean> {
         try {
             const routeName = `route-${projectRef}`;
             const pluginsRes = await this.kongRequest(`/routes/${routeName}/plugins?name=cors`);
             const existing = pluginsRes?.data?.[0];
 
-            const resolvedOrigins = origins === "*" ? "~^https?://.*$" : origins;
-
             const payload = {
                 name: "cors",
                 config: {
-                    origins: [resolvedOrigins],
+                    origins,
                     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
                     headers: DEFAULT_CORS_HEADERS,
                     exposed_headers: DEFAULT_CORS_EXPOSED,
@@ -265,7 +269,7 @@ export class GatewayService {
 
         // 4. Attach CORS plugin globally for this route
         await this.upsertRoutePlugin(routeName, "cors", {
-            origins: ["~^https?://.*$"],
+            origins: DEFAULT_CORS_ORIGINS,
             methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
             headers: DEFAULT_CORS_HEADERS,
             exposed_headers: DEFAULT_CORS_EXPOSED,
@@ -427,7 +431,10 @@ export class GatewayService {
     async applyConfig(projectRef: string, config: GatewayConfig): Promise<{ success: boolean; message: string }> {
         if (config.jwtSecret) await this.setupJwt(projectRef, config.jwtSecret);
         if (config.rateLimitTier) await this.setRateLimit(projectRef, config.rateLimitTier);
-        if (config.corsOrigins) await this.setCors(projectRef, config.corsOrigins);
+        if (config.corsOrigins) {
+           const originsArray = config.corsOrigins.split(",").map(s => s.trim()).filter(Boolean);
+           await this.setCors(projectRef, originsArray.length > 0 ? originsArray : DEFAULT_CORS_ORIGINS);
+        }
         if (config.jwtEnabled) await this.enableJwtAuth(projectRef);
         return { success: true, message: "Gateway configuration updated" };
     }
