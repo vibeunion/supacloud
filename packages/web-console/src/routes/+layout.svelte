@@ -99,10 +99,10 @@
   setLocale("zh-CN");
   
   // Provide base resources synchronously, then update via effect when refFromUrl changes
-  setResources(defaultResources);
-  $effect(() => {
+  const _syncResources = $derived.by(() => {
     const freshResources = refFromUrl ? [...defaultResources, ...getTenantResources(refFromUrl)] : defaultResources;
     setResources(freshResources);
+    return freshResources;
   });
 
   onMount(async () => {
@@ -158,7 +158,7 @@
   });
 </script>
 
-<ModeWatcher />
+<ModeWatcher defaultMode="light" />
 <!-- Alias Toaster as SonnerToaster in script but use the original name in markup if not aliased -->
 <Toaster richColors position="top-right" />
 
@@ -184,7 +184,7 @@
         <Sidebar {projects} {currentProject} />
       {/if}
       
-      <main class="flex-1 overflow-y-auto relative">
+      <main class="flex-1 overflow-y-auto relative bg-muted/30">
         <div class="sticky top-0 z-40 flex h-16 shrink-0 items-center gap-x-4 border-b bg-background px-4 shadow-sm sm:gap-x-6 sm:px-6 lg:px-8">
           <div class="flex flex-1 gap-x-4 self-stretch lg:gap-x-6">
             <div class="flex items-center gap-2 text-sm text-muted-foreground">
@@ -201,14 +201,12 @@
           </button>
         </div>
 
-        <div class="py-10">
-          <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-            {#key currentProject?.ref}
-              <div class="svadmin-container">
-                {@render children()}
-              </div>
-            {/key}
-          </div>
+        <div class="p-4 sm:p-6">
+          {#key currentProject?.ref}
+            <div class="svadmin-container">
+              {@render children()}
+            </div>
+          {/key}
         </div>
       </main>
     {/if}

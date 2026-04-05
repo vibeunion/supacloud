@@ -108,7 +108,7 @@
     }
   });
 
-  const QUICK_LINKS = $derived([
+  const QUICK_LINKS = $derived(projectRef ? [
     { name: $t("Navigation.sql_editor"), href: "sql", icon: Terminal, color: "text-blue-600 bg-blue-500/10 border-blue-500/20" },
     { name: $t("Navigation.table_editor"), href: "tables", icon: Database, color: "text-violet-600 bg-violet-500/10 border-violet-500/20" },
     { name: $t("Navigation.auth"), href: "auth", icon: Users, color: "text-emerald-600 bg-emerald-500/10 border-emerald-500/20" },
@@ -116,7 +116,7 @@
     { name: $t("Navigation.edge_functions"), href: "functions", icon: Zap, color: "text-amber-600 bg-amber-500/10 border-amber-500/20" },
     { name: $t("Navigation.logs"), href: "logs", icon: ScrollText, color: "text-pink-600 bg-pink-500/10 border-pink-500/20" },
     { name: $t("Navigation.settings"), href: "settings", icon: Server, color: "text-slate-600 bg-slate-500/10 border-slate-500/20" },
-  ]);
+  ] : []);
 
   function getStatusColor(status: string): string {
     if (status === "RUNNING" || status === "running" || status === "active" || status === "ACTIVE_HEALTHY") return "text-green-600";

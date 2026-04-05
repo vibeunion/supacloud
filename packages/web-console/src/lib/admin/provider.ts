@@ -10,7 +10,7 @@ const getApiUrl = () => {
 export const dataProvider = createElysiaDataProvider({
     apiUrl: getApiUrl(),
     headers: (): Record<string, string> => {
-        const token = typeof localStorage !== 'undefined' ? localStorage.getItem("supacloud_master_token") : null;
+        const token = typeof localStorage !== 'undefined' ? localStorage.getItem("supacloud_session") : null;
         if (token) {
             return {
                 Authorization: `Bearer ${token}`
@@ -34,7 +34,7 @@ export const dataProvider = createElysiaDataProvider({
 // Implementation of ChatProvider using Fetch API + SSE for streaming
 export const chatProvider: ChatProvider = {
   async *sendMessage(messages: ChatMessage[], options?: { signal?: AbortSignal }): AsyncGenerator<string, void, unknown> {
-    const token = typeof localStorage !== 'undefined' ? localStorage.getItem("supacloud_master_token") : null;
+    const token = typeof localStorage !== 'undefined' ? localStorage.getItem("supacloud_session") : null;
     try {
       // Direct integration with an OpenAI-compatible /v1/chat/completions endpoint
       // You can point this to your actual locally run proxy/LLM backend
