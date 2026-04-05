@@ -4,12 +4,18 @@ import { logger } from "../utils/logger";
 
 // Parse DATABASE_URL to get components
 function parseDatabaseUrl(url: string) {
-  const urlMatch = url.match(/postgresql?:\/\/([^:]+):([^@]+)@([^:]+):(\d+)\/(.+)/);
+  const urlMatch = url.match(/postgresql?:\/\/([^:]+)(?::([^@]*))?@([^:]*):(\d+)\/(.+)/);
   if (!urlMatch) {
-    throw new Error("Invalid DATABASE_URL format");
+    throw new Error(`Invalid DATABASE_URL format: ${url}`);
   }
   const [, username, password, hostname, port, database] = urlMatch;
-  return { hostname, port: parseInt(port, 10), database, username, password };
+  return { 
+    hostname: hostname || "localhost", 
+    port: parseInt(port, 10), 
+    database, 
+    username, 
+    password: password || "" 
+  };
 }
 
 export const dbConfig = parseDatabaseUrl(config.databaseUrl);
