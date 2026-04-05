@@ -78,6 +78,9 @@ function warmupStaticAssets() {
   }
 }
 
+// Initialize Master Routes in Kong
+await gatewayService.setupMasterRoutes().catch(e => logger.error("Failed to setup master routes", e));
+
 const app = new Elysia({ strictPath: false })
   // Swagger docs
   .use(
