@@ -9,9 +9,8 @@ export const authProvider: AuthProvider = {
     });
     
     const data = await res.json();
-    if (data.success && data.token && data.masterToken) {
+    if (data.success && data.token) {
       localStorage.setItem("supacloud_session", data.token);
-      localStorage.setItem("supacloud_master_token", data.masterToken);
       
       return {
         success: true,
@@ -27,7 +26,6 @@ export const authProvider: AuthProvider = {
   
   logout: async () => {
     localStorage.removeItem("supacloud_session");
-    localStorage.removeItem("supacloud_master_token");
     return {
       success: true,
       redirectTo: '/login'
@@ -49,7 +47,6 @@ export const authProvider: AuthProvider = {
       const data = await res.json();
       if (!data.valid) {
         localStorage.removeItem("supacloud_session");
-        localStorage.removeItem("supacloud_master_token");
         return { authenticated: false, redirectTo: '/login' };
       }
       return { authenticated: true };
