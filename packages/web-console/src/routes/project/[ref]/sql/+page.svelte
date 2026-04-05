@@ -201,7 +201,7 @@
   }
 </script>
 
-<div class="h-full flex flex-col space-y-3">
+<div class="h-[calc(100vh-12rem)] flex flex-col space-y-3">
   <div class="flex items-center justify-between">
     <div class="flex items-center gap-3">
       <h1 class="text-2xl font-bold">{$t("SqlEditor.title")}</h1>

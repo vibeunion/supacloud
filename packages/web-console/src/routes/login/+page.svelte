@@ -23,9 +23,8 @@
         body: JSON.stringify({ username: username.trim(), password: password.trim() })
       });
       const data = await res.json();
-      if (data.success) {
+      if (data.success && data.token) {
         localStorage.setItem("supacloud_session", data.token);
-        localStorage.setItem("supacloud_master_token", data.masterToken);
         window.location.href = "/";
       } else {
         error = data.error || "登录失败";
