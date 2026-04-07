@@ -301,10 +301,15 @@ export function registerStaticAssets() {
         const ext = extMatch ? extMatch[0].toLowerCase() : '';
         set.headers["Content-Type"] = MIME_TYPES[ext] || "application/octet-stream";
 
-        // Immutable hashed assets get permanent cache; everything else gets short cache
-        set.headers["Cache-Control"] = isImmutableAsset(path) || path.match(/\.[0-9a-f]{8,}\./)
-          ? "public, max-age=31536000, immutable"
-          : "public, max-age=3600";
+        // Cache policy: HTML always no-cache (prevents Kong from caching stale index.html);
+        // immutable hashed assets get permanent cache; everything else gets short cache.
+        if (ext === '.html') {
+          set.headers["Cache-Control"] = "no-cache";
+        } else if (isImmutableAsset(path) || path.match(/\.[0-9a-f]{8,}\./)) {
+          set.headers["Cache-Control"] = "public, max-age=31536000, immutable";
+        } else {
+          set.headers["Cache-Control"] = "public, max-age=3600";
+        }
 
         if (encoding) {
           set.headers["Content-Encoding"] = encoding;
