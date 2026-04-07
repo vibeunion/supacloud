@@ -368,4 +368,53 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
       params: t.Object({ ref: t.String() }),
       detail: { tags: ["projects"], summary: "Rebuild all tenant Kong configs" },
     }
+  )
+
+  // --- Programmable Rate Limiting (Kong Admin API) ---
+
+  // Get current rate limit config for a project
+  .get(
+    "/:ref/gateway/rate-limit",
+    async ({ params }) => {
+      const rateLimit = await gatewayService.getRateLimit(params.ref);
+      if (rateLimit === null) {
+        return status(500, { error: "Failed to query rate limit from gateway" });
+      }
+      return rateLimit;
+    },
+    {
+      params: t.Object({ ref: t.String() }),
+      detail: { tags: ["projects"], summary: "Get project rate limit config" },
+    }
+  )
+
+  // Set rate limit — supports tier presets OR custom values
+  .put(
+    "/:ref/gateway/rate-limit",
+    async ({ params, body }) => {
+      let success: boolean;
+      if (body.tier) {
+        success = await gatewayService.setRateLimit(params.ref, body.tier);
+      } else {
+        success = await gatewayService.setRateLimit(params.ref, {
+          second: body.second,
+          minute: body.minute,
+          hour: body.hour,
+        });
+      }
+      if (!success) {
+        return status(500, { error: "Failed to update rate limit" });
+      }
+      return { success: true, message: "Rate limit updated" };
+    },
+    {
+      params: t.Object({ ref: t.String() }),
+      body: t.Object({
+        tier: t.Optional(t.Union([t.Literal("free"), t.Literal("pro"), t.Literal("enterprise")])),
+        second: t.Optional(t.Number()),
+        minute: t.Optional(t.Number()),
+        hour: t.Optional(t.Number()),
+      }),
+      detail: { tags: ["projects"], summary: "Set project rate limit" },
+    }
   );

@@ -64,7 +64,12 @@
     "explain_mode": "Explain",
     "explain_analyze": "Explain Analyze",
     "explain_visual": "Visual Plan",
-    "explain_raw": "Raw Output"
+    "explain_raw": "Raw Output",
+    "untitled_query": "Untitled query",
+    "success_no_rows": "Success. No rows returned",
+    "rows_affected": "{count} row(s) affected",
+    "complete": "complete",
+    "run_shortcut": "Press Ctrl+Enter to run query"
   },
   "Storage": {
     "buckets": "Buckets",

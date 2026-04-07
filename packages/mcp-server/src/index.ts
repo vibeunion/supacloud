@@ -162,6 +162,7 @@ if (process.argv.includes("--help") || process.argv.includes("-h")) {
 }
 
 
+
 // ── Auto-detect .env logic for Thick Client ──
 let tempUrl = process.env.SUPABASE_URL || process.env.SUPACLOUD_API_URL || "";
 let tempKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPACLOUD_API_TOKEN || "";

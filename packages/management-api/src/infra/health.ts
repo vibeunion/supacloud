@@ -48,13 +48,13 @@ export class HealthChecker {
             }
             return {
                 component: "Cloud-native Storage",
-                status: "WARN",
-                message: "Cloud-native storage backend not mounted",
-                recommendation: "If you need cloud elastic storage, run 'supacloud storage setup'."
+                status: "OK",
+                message: "Standard Mode (Local Storage)",
+                recommendation: "Run 'supacloud storage setup' if elastic storage is needed."
             };
         } catch (err: unknown) {
-          logger.warn("[HealthChecker] PostgreSQL health check failed", { error: err });
-            return { component: "Cloud-native Storage", status: "ERROR", message: "Cannot detect storage mount status" };
+          logger.warn("[HealthChecker] Cloud storage check failed", { error: err });
+            return { component: "Cloud-native Storage", status: "WARN", message: "Cannot detect storage mount status" };
         }
     }
 
@@ -71,7 +71,7 @@ export class HealthChecker {
                 recommendation: isLow ? "Recommend expanding disk or cleaning /var/log logs." : undefined
             };
         } catch (err: unknown) {
-          logger.warn("[HealthChecker] PostgREST health check failed", { error: err });
+          logger.warn("[HealthChecker] Disk space check failed", { error: err });
             return { component: "Storage Space", status: "ERROR", message: "Cannot get disk info" };
         }
     }
@@ -115,7 +115,7 @@ export class HealthChecker {
                 recommendation: isActive ? undefined : `Try running 'sudo systemctl restart ${name}'.`
             };
         } catch (err: unknown) {
-          logger.warn("[HealthChecker] GoTrue health check failed", { error: err });
+          logger.warn("[HealthChecker] Service status check failed", { error: err });
             return { component: label, status: "WARN", message: "Cannot access service status" };
         }
     }
@@ -134,7 +134,8 @@ export class HealthChecker {
             }
 
             // 2. Get version
-            const pgVersion = await $`psql -At -c "SHOW server_version;"`.nothrow().text();
+            const pgVersionRaw = await $`sudo -u postgres psql -At -c "SHOW server_version;"`.nothrow().text();
+            const pgVersion = pgVersionRaw.split(/\r?\n/)[0];
 
             // 3. Cluster HA detection (Patroni)
             const { ClusterManager } = await import("./cluster");
@@ -171,7 +172,7 @@ export class HealthChecker {
             }
 
             // 4. Fallback: Detect primary-replica sync (try simple query on management DB)
-            const syncStatus = await $`psql -At -c "SELECT count(*) FROM pg_stat_replication;"`.nothrow();
+            const syncStatus = await $`sudo -u postgres psql -At -c "SELECT count(*) FROM pg_stat_replication;"`.nothrow();
             if (syncStatus.exitCode === 0) {
                 const replicas = parseInt(syncStatus.stdout.toString().trim());
                 return {
@@ -183,19 +184,19 @@ export class HealthChecker {
 
             return { component: "Database (PostgreSQL)", status: "OK", message: `PG ${pgVersion.trim()} running in single-node mode` };
         } catch (err: unknown) {
-          logger.warn("[HealthChecker] Failed to parse disk usage output", { error: err });
+          logger.warn("[HealthChecker] PostgreSQL health check failed", { error: err });
             return { component: "Database", status: "WARN", message: "Cannot detect detailed database metrics" };
         }
     }
 
     private static async checkPigstyStatus(): Promise<HealthReport> {
         try {
-            const version = await $`pig --version`.nothrow().text();
+            const version = await $`pig version`.nothrow().text();
             if (version.trim()) {
                 return {
                     component: "Pigsty Engine",
                     status: "OK",
-                    message: `Ready (Version: ${version.trim()})`
+                    message: `Ready (${version.split(/\r?\n/)[0].trim()})`
                 };
             }
         } catch (e: unknown) { logger.debug("[infra/health] suppressed error", { error: e instanceof Error ? e.message : String(e) }); }

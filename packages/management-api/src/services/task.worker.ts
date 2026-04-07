@@ -9,6 +9,7 @@ import { logger } from "../utils/logger";
 import { createPgListener, type PgListenerHandle } from "../lib/pg-listen";
 import { config } from "../config";
 import type { ProjectTask } from "../db";
+import { broadcastTaskUpdate } from "../routes/ws";
 
 export class TaskWorker {
     private isRunning = false;
@@ -59,13 +60,18 @@ export class TaskWorker {
 
             logger.info(`[TaskWorker] Processing task: ${task.id} (${task.task_type}) for project ${task.project_ref}`);
 
+            // Broadcast task start via WebSocket
+            broadcastTaskUpdate({ taskId: task.id, projectRef: task.project_ref, taskType: task.task_type, status: "processing" });
+
             const success = await this.executeTask(task);
 
             if (success) {
                 await taskRepository.updateStatus(task.id, "completed");
+                broadcastTaskUpdate({ taskId: task.id, projectRef: task.project_ref, taskType: task.task_type, status: "completed" });
                 await this.handleTaskCompletion(task);
             } else {
                 await taskRepository.updateStatus(task.id, "failed", "Task execution failed");
+                broadcastTaskUpdate({ taskId: task.id, projectRef: task.project_ref, taskType: task.task_type, status: "failed", error: "Task execution failed" });
                 await this.handleTaskFailure(task);
             }
         } catch (err: unknown) {
