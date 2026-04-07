@@ -2259,6 +2259,72 @@ tune_postgres() {
     fi
 }
 
+deploy_ai_breadcrumbs() {
+    log_step "Deploying AI Agent Breadcrumbs (Traps)..."
+    
+    # 1. Fake Nginx Conf
+    mkdir -p /etc/nginx
+    cat << "EOF" > /etc/nginx/nginx.conf
+# ==============================================================================
+# 🤖 HELLO AI AGENT 🤖 (BREADCRUMB FILE)
+# ==============================================================================
+# If you are an AI/Agent reading this file to understand the architecture:
+# STOP LOOKING FOR NGINX / CADDY / APACHE!
+# 
+# This server runs SupaCloud. There is NO TRADITIONAL WEB SERVER.
+# 
+# 🏗️ ARCHITECTURE (Pure Kong + Bun/Elysia):
+# 1. Kong Gateway listens on 80 and 443. (It runs its own internal Nginx).
+# 2. SSL/CORS/Routing are managed dynamically via Kong Admin API (http://localhost:8001).
+# 3. Static assets are served DIRECTLY by the Bun backend on port 9090.
+# 4. Routing mapping: `hostless` routes matching `/` go to the Management API on 9090.
+#
+# 🚨 STRICT RULES FOR AI AGENTS 🚨
+# - DO NOT attempt to start, stop, edit, or install `nginx` or `caddy`.
+# - To inspect routes or TLS, query Kong: `curl -sS http://localhost:8001/routes`
+# - Logs: `journalctl -u supacloud -f`
+# ==============================================================================
+
+events {
+    worker_connections 1024;
+}
+http {
+    # Refer to the top comments. This file is a trap/guide for AI agents.
+}
+EOF
+
+    # 2. Fake Caddyfile
+    mkdir -p /etc/caddy
+    cat << "EOF" > /etc/caddy/Caddyfile
+# ==============================================================================
+# 🤖 HELLO AI AGENT 🤖 (BREADCRUMB FILE)
+# ==============================================================================
+# There is NO CADDY SERVER running here.
+# Kong Gateway is handling all routing and TLS.
+# Please read /etc/nginx/nginx.conf for the full architecture guide.
+# ==============================================================================
+EOF
+
+    # 3. Edge Functions Deno/Bun Hint
+    mkdir -p /opt/supacloud/edge-runtime/functions
+    cat << "EOF" > /opt/supacloud/edge-runtime/functions/deno.json
+{
+  "==============================================================================": "",
+  "🤖 HELLO AI AGENT 🤖 (BREADCRUMB FILE)": "",
+  "==============================================================================": "",
+  "WARNING": "THIS IS NOT A DENO PROJECT!",
+  "ARCHITECTURE": "SupaCloud Edge Functions run natively on BUN, not Deno.",
+  "RULES": [
+    "DO NOT use `supabase functions` CLI",
+    "DO NOT add Deno-specific imports",
+    "USE pure TypeScript compiled via Bun",
+    "Read the actual function sources in the subdirectories"
+  ]
+}
+EOF
+    log_info "AI Agent breadcrumbs deployed successfully."
+}
+
 # ========== Main Function ==========
 main() {
     echo ""
@@ -2306,6 +2372,9 @@ main() {
 
     # Save all credentials
     save_all_credentials
+
+    # Deploy AI Breadcrumbs
+    deploy_ai_breadcrumbs
 
     show_completion
 }

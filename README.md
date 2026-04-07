@@ -12,7 +12,7 @@
 ### Key Features
 
 - **Multi-Tenant Architecture**: Run multiple isolated Supabase projects with shared infrastructure
-- **Management API**: Full REST API (50+ endpoints) for complete project lifecycle management
+- **Management API**: Full REST API (60+ endpoints) for complete project lifecycle management
 - **Web Console**: Modern SvelteKit management dashboard with authentication
 - **CLI Compatibility**: Native support for the official `supabase` CLI (login, gen types, edge functions)
 - **CLI Tool**: `supacloud` binary with full project management, install, upgrade, and diagnostics
@@ -21,9 +21,13 @@
 - **Pigsty Powered**: Enterprise-grade PostgreSQL with built-in monitoring (Grafana)
 - **One-Click Installation**: Fully automated setup via `install.sh`
 - **JuiceFS Storage**: Powered by PostgreSQL Large Objects (LO) for ultra-thin metadata
-- **Kong API Gateway**: DB-backed Dynamic API Router, native ACME SSL auto-provisioning, Rate Limiting, and CORS
+- **Kong API Gateway**: DB-backed Dynamic API Router, native ACME SSL, Gzip, Security Headers, Programmable Rate Limiting, and CORS
 - **Auto-scaling Engine**: Rule-based vertical and horizontal scaling based on real-time metrics
 - **Dual Runtime**: Deno (legacy) or Bun.js Edge Runtime (recommended) for Edge Functions
+- **SSE Real-time Logs**: Server-Sent Events streaming for live log tailing via `journalctl --follow`
+- **WebSocket Task Notifications**: Real-time task progress push via native Bun WebSocket
+- **DB Graceful Degradation**: Exponential backoff retry + 503 Service Unavailable on transient DB failures
+- **Edge Function Preheating**: Zero cold-start via worker module pre-import on deploy
 - **China OAuth**: Built-in WeChat, Alipay, DingTalk login integration
 - **CI/CD Integration**: GitHub webhook for automated deployments
 - **Comprehensive Tests**: 17 unit tests + integration test suite
@@ -196,6 +200,9 @@ curl http://localhost:9090/v1/projects/<ref>/api-keys \
 | Security | `/v1/security/*` | Firewall rules & SSL certificates |
 | Deploy | `/v1/deploy/*` | Edge Function deployment |
 | Tasks | `/v1/projects/:ref/tasks/*` | Background task monitoring |
+| **Logs SSE** | `GET /v1/projects/:ref/logs/stream` | **Real-time log streaming via Server-Sent Events** |
+| **Rate Limit** | `GET/PUT /v1/projects/:ref/gateway/rate-limit` | **Programmable per-project rate limiting (Kong Admin API)** |
+| **WebSocket** | `ws://host/ws/tasks` | **Real-time task progress notifications** |
 
 #### Runtime Switching
 
@@ -214,22 +221,25 @@ curl http://localhost:9090/v1/projects/<ref>/api-keys \
 **Edge Runtime Architecture (Bun mode):**
 
 ```
-SupaCloud (:3000)          Edge Runtime (:9000)
+SupaCloud (:9090)          Edge Runtime (:9000)
 ├── Management API    ←──  Bun.spawn() manages
 ├── Web Console            ├── Elysia Server
-└── only :3000             ├── Worker Thread Pool (4 threads)
-                           ├── Deno Compat Shim
-                           └── URL Import Plugin
+├── SSE Log Stream         ├── Worker Thread Pool (4 threads)
+├── WebSocket /ws/tasks    ├── Deno Compat Shim
+└── Static Assets (ETag)   ├── URL Import Plugin
+                           └── /preheat (zero cold-start)
 
-Kong Gateway:
-  /api/*        → :3000
+Kong Gateway (API-driven, native OpenResty):
+  Global plugins: ACME SSL, Gzip, Security Headers, Access Logs
+  Per-route plugins: CORS, Rate Limiting, JWT, IP Restriction
+  /api/*        → :9090
   /functions/*  → :9000 (direct, no proxy)
 ```
 
 | Feature | Deno (legacy) | Bun (recommended) |
 |---------|--------------|--------------------|
 | Memory (200 functions) | ~1.4GB | **~140MB** |
-| Cold start | 40-60ms | 8-15ms |
+| Cold start | 40-60ms | **< 10ms (with preheat: 0ms)** |
 | Warm latency | <1ms | <1ms |
 | Deno code compat | Native | ✅ via shim |
 | Isolation | V8 Worker | Worker Thread |
@@ -278,10 +288,10 @@ supacloud/
 ├── packages/
 │   ├── management-api/         # REST API server (Bun + Elysia)
 │   │   ├── src/
-│   │   │   ├── routes/         # 17 route modules (projects, auth, frontend, webhook, etc.)
+│   │   │   ├── routes/         # 19 route modules (projects, auth, frontend, webhook, ws, logs, etc.)
 │   │   │   ├── services/       # 20 service modules
 │   │   │   ├── cli/            # CLI subcommands (lifecycle, project)
-│   │   │   ├── db/             # Database layer & migrations
+│   │   │   ├── db/             # Database layer, migrations, withRetry & graceful degradation
 │   │   │   ├── middleware/     # Auth middleware
 │   │   │   ├── infra/          # Health checker
 │   │   │   ├── install.ts      # Interactive installer
@@ -293,9 +303,9 @@ supacloud/
 │   │       ├── tools/          # 5 tool modules (ssh, project, advanced, database, deployment)
 │   │       └── transports/     # SSH & HTTP transports
 │   ├── edge-runtime/           # Bun Edge Functions runtime
-│   │   ├── server.ts           # Elysia server (:9000)
-│   │   ├── worker-pool.ts      # Fixed-size Worker Thread Pool
-│   │   ├── worker-executor.ts  # Function loader + LRU cache
+│   │   ├── server.ts           # Elysia server (:9000) + /preheat endpoint
+│   │   ├── worker-pool.ts      # Fixed-size Worker Thread Pool + preheat()
+│   │   ├── worker-executor.ts  # Function loader + LRU cache + preheat msg
 │   │   ├── deno-compat.ts      # Deno API compatibility shim
 │   │   ├── url-import-plugin.ts# Bun Plugin: URL import interception
 │   │   └── shims/              # Deno std library replacements
@@ -363,7 +373,7 @@ Key settings in `config.env`:
 ### 核心特性
 
 - **多租户架构**: 共享基础设施，运行多个隔离的 Supabase 项目
-- **Management API**: 完整的 REST API（50+ 个端点）管理项目及周边配置生命周期
+- **Management API**: 完整的 REST API（60+ 个端点）管理项目及周边配置生命周期
 - **Web 管理面板**: 现代 SvelteKit 管理面板，内置登录认证
 - **CLI 生态兼容**: 完全兼容 Supabase 官方命令行体系（登录鉴权、数据库类型推导、云函数发布）
 - **CLI 工具**: `supacloud` 二进制工具，支持项目管理、安装、升级、诊断
@@ -372,9 +382,13 @@ Key settings in `config.env`:
 - **Pigsty 驱动**: 企业级 PostgreSQL，内置 Grafana 监控
 - **一键部署**: 通过 `install.sh` 全自动安装
 - **JuiceFS 存储**: 基于 PostgreSQL Large Objects (LO) 后端，极致轻量
-- **Kong 深度集成**: DB-backed 原生动态路由，全程 API 驱动，原生 ACME SSL 证书自动续签及高可用限流
+- **Kong 深度集成**: DB-backed 原生动态路由，全程 API 驱动，原生 ACME SSL、Gzip 压缩、安全响应头、编程式限流
 - **自动扩缩容**: 基于负载指标的垂直提升与水平副本扩展
 - **双运行时**: Deno（旧版兼容）或 Bun.js Edge Runtime（推荐，内存占用减少 92%）
+- **SSE 实时日志**: 基于 Server-Sent Events 的实时日志流，`journalctl --follow` 推送
+- **WebSocket 任务通知**: 基于 Bun 原生 WebSocket 的实时任务进度推送
+- **DB 优雅降级**: 指数退避重试 + 503 Service Unavailable，PostgreSQL 短暂不可用时不丢请求
+- **Edge Function 预热**: 部署后自动预导入模块，消除首次请求冷启动
 - **国内 OAuth**: 内置微信、支付宝、钉钉登录集成
 - **CI/CD 集成**: GitHub Webhook 自动化部署
 - **完善测试**: 17 个单元测试 + 集成测试套件
@@ -545,6 +559,9 @@ curl http://localhost:9090/v1/projects/<ref>/api-keys \
 | 安全 | `/v1/security/*` | 防火墙规则与 SSL 证书 |
 | 部署 | `/v1/deploy/*` | Edge Function 部署 |
 | 任务 | `/v1/projects/:ref/tasks/*` | 后台任务监控 |
+| **日志 SSE** | `GET /v1/projects/:ref/logs/stream` | **实时日志流（Server-Sent Events）** |
+| **限流** | `GET/PUT /v1/projects/:ref/gateway/rate-limit` | **编程式限流（Kong Admin API 驱动）** |
+| **WebSocket** | `ws://host/ws/tasks` | **实时任务进度推送** |
 
 #### 运行时切换
 
@@ -563,22 +580,25 @@ curl http://localhost:9090/v1/projects/<ref>/api-keys \
 **Edge Runtime 架构 (Bun 模式):**
 
 ```
-SupaCloud (:3000)          Edge Runtime (:9000)
+SupaCloud (:9090)          Edge Runtime (:9000)
 ├── Management API    ←──  Bun.spawn() 管理
 ├── Web Console            ├── Elysia Server
-└── 仅监听 :3000           ├── Worker 线程池 (4 线程，固定)
-                           ├── Deno 兼容层
-                           └── URL Import 插件
+├── SSE 日志流              ├── Worker 线程池 (4 线程，固定)
+├── WebSocket /ws/tasks    ├── Deno 兼容层
+└── 静态资源 (ETag/304)    ├── URL Import 插件
+                           └── /preheat (零冷启动预热)
 
-Kong 网关:
-  /api/*        → :3000 (管理 API)
+Kong 网关 (API 驱动，原生 OpenResty):
+  全局插件: ACME SSL, Gzip 压缩, 安全响应头, 访问日志
+  路由级插件: CORS, 限流, JWT, IP 限制
+  /api/*        → :9090 (管理 API)
   /functions/*  → :9000 (Edge Runtime 直连)
 ```
 
 | 特性 | Deno (旧版) | Bun (推荐) |
 |------|-----------|------------|
 | 内存 (200 函数) | ~1.4GB | **~140MB** |
-| 冷启动 | 40-60ms | 8-15ms |
+| 冷启动 | 40-60ms | **< 10ms (预热后: 0ms)** |
 | 预热延迟 | <1ms | <1ms |
 | Deno 代码兼容 | 原生 | ✅ 兼容层 |
 | 隔离级别 | V8 Worker | Worker 线程 |
@@ -611,6 +631,8 @@ SupaCloud 现在原生通过项目的 API 网关暴露了标准 HTTP MCP 端点�
 }
 ```
 
+> 💡 **安全模型**：读操作（查看表结构、查询数据）自动执行；写操作（INSERT/UPDATE/DDL 等）会在客户端弹出确认对话框，用户同意后才执行。无需额外配置。
+
 内置工具包括：数据库元数据内省（自动读取表结构、外键、RLS策略）、直接执行 SQL（`execute_sql`），以及带有表结构上下文的 AI SQL 生成助手。
 
 *注：如果你需要全局服务器管控能力（SSH、跨项目管理等），请参考 [SupaCloud Admin MCP](packages/mcp-server/README.md)。*
@@ -628,10 +650,10 @@ supacloud/
 ├── packages/
 │   ├── management-api/         # REST API 服务 (Bun + Elysia)
 │   │   ├── src/
-│   │   │   ├── routes/         # 17 个路由模块 (projects, auth, frontend, webhook 等)
+│   │   │   ├── routes/         # 19 个路由模块 (projects, auth, frontend, webhook, ws, logs 等)
 │   │   │   ├── services/       # 20 个服务模块
 │   │   │   ├── cli/            # CLI 子命令 (lifecycle, project)
-│   │   │   ├── db/             # 数据库层 & 迁移
+│   │   │   ├── db/             # 数据库层、迁移、withRetry 优雅降级
 │   │   │   ├── middleware/     # 认证中间件
 │   │   │   ├── infra/          # 健康检查器
 │   │   │   ├── install.ts      # 交互式安装器
@@ -643,9 +665,9 @@ supacloud/
 │   │       ├── tools/          # 5 个工具模块 (ssh, project, advanced, database, deployment)
 │   │       └── transports/     # SSH & HTTP 传输层
 │   ├── edge-runtime/           # Bun 云函数运行时
-│   │   ├── server.ts           # Elysia 服务 (:9000)
-│   │   ├── worker-pool.ts      # 固定大小 Worker 线程池
-│   │   ├── worker-executor.ts  # 函数加载器 + LRU 缓存
+│   │   ├── server.ts           # Elysia 服务 (:9000) + /preheat 预热端点
+│   │   ├── worker-pool.ts      # 固定大小 Worker 线程池 + preheat()
+│   │   ├── worker-executor.ts  # 函数加载器 + LRU 缓存 + 预热消息
 │   │   ├── deno-compat.ts      # Deno API 兼容层
 │   │   ├── url-import-plugin.ts# Bun Plugin: URL import 拦截
 │   │   └── shims/              # Deno 标准库替代实现

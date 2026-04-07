@@ -189,6 +189,9 @@ const app = new Elysia({ strictPath: false })
     }
   })
 
+  // WebSocket routes (no HTTP auth guard — WS uses query token)
+  .use((await import("./routes/ws")).wsRoutes)
+
   // Main API Routes
   .use(storageCompatRoutes)
   .use(await registerAllRoutes())
@@ -202,7 +205,7 @@ const app = new Elysia({ strictPath: false })
     return await HealthChecker.runFullCheck();
   })
 
-  // Error handling
+  // Error handling (with DB graceful degradation)
   .onError(({ code, error, set }) => {
     logger.error(`Error [${code}]:`, error);
 
@@ -214,6 +217,19 @@ const app = new Elysia({ strictPath: false })
     if (code === "NOT_FOUND") {
       set.status = 404;
       return { error: "Not found" };
+    }
+
+    // DB connection errors → 503 Service Unavailable (not 500)
+    const errMsg = error instanceof Error ? error.message : String(error);
+    if (
+      errMsg.includes("ECONNREFUSED") ||
+      errMsg.includes("Connection terminated") ||
+      errMsg.includes("connection refused") ||
+      errMsg.includes("exhausted all")
+    ) {
+      set.status = 503;
+      set.headers["Retry-After"] = "5";
+      return { error: "Service temporarily unavailable", retryAfter: 5 };
     }
 
     set.status = 500;
@@ -271,6 +287,16 @@ export function registerStaticAssets() {
       }
 
       if (diskFile) {
+        const file = Bun.file(`${WEB_CONSOLE_DIR}${diskFile}`);
+        
+        // ETag / 304 Not Modified support
+        const etag = `W/"${file.lastModified}-${file.size}"`;
+        set.headers["ETag"] = etag;
+        if (request.headers.get("if-none-match") === etag) {
+          set.status = 304;
+          return "";
+        }
+
         const extMatch = path.match(/\.[0-9a-z]+$/i);
         const ext = extMatch ? extMatch[0].toLowerCase() : '';
         set.headers["Content-Type"] = MIME_TYPES[ext] || "application/octet-stream";
@@ -285,7 +311,7 @@ export function registerStaticAssets() {
           set.headers["Vary"] = "Accept-Encoding";
         }
 
-        return Bun.file(`${WEB_CONSOLE_DIR}${diskFile}`);
+        return file;
       }
     } catch (e: unknown) {
       logger.error("[StaticAssets] FS error:", { path, error: e instanceof Error ? e.message : String(e) });
@@ -343,7 +369,7 @@ export async function registerAllRoutes() {
     storageRoutes, scalingRoutes, taskRoutes, databaseRoutes, authRoutes,
     wechatAuthRoutes, chinaAuthRoutes, userManagementRoutes,
     frontendRoutes, webhookRoutes, deployRoutes,
-    chatRoutes, platformSettingsRoutes, projectLogsRoutes
+    chatRoutes, platformSettingsRoutes, projectLogsRoutes, systemRoutes
   } = await import("./routes");
 
   return new Elysia({ name: "api-routes" })
@@ -379,7 +405,8 @@ export async function registerAllRoutes() {
     .use(deployRoutes)
     .use(chatRoutes)
     .use(platformSettingsRoutes)
-    .use(projectLogsRoutes);
+    .use(projectLogsRoutes)
+    .use(systemRoutes);
 }
 
 const args = process.argv.slice(2);

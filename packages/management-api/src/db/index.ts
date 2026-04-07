@@ -117,6 +117,55 @@ export const db = {
   executeQuery,
 };
 
+// --- Graceful Degradation ---
+
+/** Check if the main database connection is healthy */
+export async function isDbHealthy(): Promise<boolean> {
+  try {
+    await sql`SELECT 1`;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Execute a database operation with exponential backoff retry.
+ * On failure, retries up to `maxRetries` times with increasing delays.
+ * Useful for transient connection failures (e.g., PostgreSQL restart).
+ */
+export async function withRetry<T>(
+  fn: () => Promise<T>,
+  opts: { maxRetries?: number; baseDelayMs?: number; label?: string } = {}
+): Promise<T> {
+  const { maxRetries = 3, baseDelayMs = 100, label = "db operation" } = opts;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (error: unknown) {
+      const isConnectionError = error instanceof Error && (
+        error.message.includes("connection") ||
+        error.message.includes("ECONNREFUSED") ||
+        error.message.includes("timeout") ||
+        error.message.includes("Connection terminated")
+      ) && !(error instanceof Error && error.message.includes("no pg_hba.conf"));
+
+      if (!isConnectionError || attempt === maxRetries) {
+        throw error; // Non-retriable error or exhausted retries
+      }
+
+      const delay = baseDelayMs * Math.pow(4, attempt); // 100ms → 400ms → 1600ms
+      logger.warn(`[DB] ${label} failed (attempt ${attempt + 1}/${maxRetries}), retrying in ${delay}ms`, {
+        error: error instanceof Error ? error.message : String(error)
+      });
+      await Bun.sleep(delay);
+    }
+  }
+
+  throw new Error(`[DB] ${label} exhausted all ${maxRetries} retries`);
+}
+
 // Project status type
 export const ProjectStatus = {
   CREATING: "creating",

@@ -36,7 +36,24 @@ Modify config file (Windows: `%APPDATA%\Claude\claude_desktop_config.json`, Mac:
 ```
 *Note: Before installation, `SUPACLOUD_API_TOKEN` can be left empty. Fill it in after successful installation.*
 
-### 1.3 Multi-Server / Multi-Cluster Management
+### 1.3 Auto-Link 模式（零配置，推荐 ⭐）
+
+如果你在同时开发多个项目，使用 `--local` 模式。它会自动嗅探 `.env` 文件中的 `SUPABASE_URL` 和 `SUPABASE_SERVICE_ROLE_KEY`，实现无缝切换项目：
+
+```json
+{
+  "mcpServers": {
+    "supacloud-auto-link": {
+      "command": "npx",
+      "args": ["-y", "supacloud-mcp@latest", "--local"]
+    }
+  }
+}
+```
+
+> 💡 读操作自动执行，写操作会弹出确认对话框——无需额外参数。
+
+### 1.4 Multi-Server / Multi-Cluster Management
 
 SupaCloud MCP natively supports multiplexing. If you have multiple servers (e.g. test environment, US East, Asia Pacific, etc.), **no code changes needed** - just register multiple commands of the same type in config with different environment variables:
 
@@ -153,7 +170,25 @@ For irreparable base environment issues diagnosed (like full disk or dirty data)
 
 ---
 
-## 4. Security and Best Practices
+## 4. 安全和最佳实践
 
-1. **Never leak global config files (containing Master Token) to public code repos**: Keep them as local secrets in cursor or claude config.
-2. **Use ssh_exec with caution**: When AI proposes using `ssh_exec` to execute destructive operations like `rm -rf`, carefully review the specific Command parameters before clicking confirm (Approve Tool Call). Since it has Root SSH, AI can modify underlying files.
+### 4.1 分层安全模型
+
+SupaCloud MCP 使用 MCP 协议原生的 `ToolAnnotations` 机制保障安全：
+
+| 工具类型 | 注解 | 客户端行为 |
+|---------|------|----------|
+| 读操作（list_tables、describe_table 等） | `readOnlyHint: true` | ✅ 自动执行 |
+| 写操作（execute_sql DDL/DML、deploy、delete 等） | `destructiveHint: true` | ⚠️ 弹窗确认 |
+
+这意味着：
+- AI 可以自由读取数据库结构和数据，提高工作效率
+- 任何修改操作（INSERT、UPDATE、DROP 等）都需要用户明确确认
+- 无需额外配置参数，安全内置于协议层
+
+### 4.2 一般安全建议
+
+1. **永远不要把包含 Master Token 的全局配置文件泄漏到公开代码仓库**：请作为本地秘密保留在 cursor 或 claude 配置中。
+2. **谨慎使用 ssh_exec**：当 AI 建议使用 `ssh_exec` 执行破坏性操作（如 `rm -rf`）时，请仔细审查具体的 Command 参数后再确认。
+3. **优先使用 Auto-Link 模式**：`service_role_key` 自动限定在单个项目范围，比 Master Token 更安全。
+4. **为团队开发者使用 MCP Token**：通过 `create_mcp_token` 生成可过期、可只读的项目 Token。

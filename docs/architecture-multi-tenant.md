@@ -1,21 +1,34 @@
 # SupaCloud Multi-Tenant Architecture
 
-> **Status**: Implemented (Option C+)  
-> **Last Updated**: 2026-02-25
+> **Status**: Implemented (Option C+ with Kong Native API-Driven Gateway)  
+> **Last Updated**: 2026-04-06
 
 ## Current Architecture
 
 ```
-┌─────────────┐     ┌──────────┐     ┌────────────────┐     ┌───────────────┐
-│ Nginx Proxy │ ──► │   Kong   │ ──► │ PostgREST(:310x)──► │ supa_tenant_1 │
-└─────────────┘     │(:80/8000)│     │ GoTrue(:410x)  │     └───────────────┘
-                    └──────────┘     │ (per-tenant)   │     ┌───────────────┐
-                                     └────────────────┘ ──► │ supa_tenant_N │
-                                                            └───────────────┘
+┌──────────────┐     ┌──────────────────┐     ┌───────────────┐
+│  Kong (Native │ ──► │ PostgREST(:310x) ──► │ supa_tenant_1 │
+│  OpenResty)  │     │ GoTrue(:410x)    │     └───────────────┘
+│  :80/:443    │     │ (per-tenant)     │     ┌───────────────┐
+│              │     └──────────────────┘ ──► │ supa_tenant_N │
+│  Plugins:    │                              └───────────────┘
+│  - ACME SSL  │     ┌──────────────────┐
+│  - Gzip      │     │ Management API   │
+│  - Sec Hdrs  │ ──► │ (:9090 Elysia)   │
+│  - Rate Limit│     │ ├─ SSE Logs      │
+│  - CORS      │     │ ├─ WebSocket     │
+└──────────────┘     │ └─ Static Assets │
+                     └──────────────────┘
+                     ┌──────────────────┐
+                 ──► │ Edge Runtime     │
+                     │ (:9000 Elysia)   │
+                     │ ├─ Worker Pool   │
+                     │ └─ Preheat Cache │
+                     └──────────────────┘
 ```
 
-> **Note**: SupaCloud natively relies on Kong. 
-To support proper multi-tenant isolation safely and effectively without massive monolithic overhead, we adopted Option C+ (Per-Tenant Processes + Declarative Routing).
+> **Note**: SupaCloud natively relies on **Kong (DB-backed, API-driven)** running as a systemd service.
+> All tenant routing, rate limiting, CORS, and SSL are managed via Kong Admin API — no manual config file edits needed.
 
 ### 1. PostgREST & GoTrue (Per-Tenant Processes) ⭐ Implemented
 These core REST, GraphQL, and Authentication services are extremely lightweight (20-50MB RAM). 
@@ -24,31 +37,49 @@ We spin up a unique `postgrest` AND `gotrue` process for *every* tenant dynamica
 - They connect securely to the tenant's isolated Postgres database (`supa_<ref>`) using unique credentials.
 - They possess isolated `JWT_SECRET`s to ensure cryptographic boundary security (users from Tenant A cannot authenticate into Tenant B).
 
-### 2. Kong Declarative Routing ⭐ Implemented
-Since standard Supabase Kong is run in `KONG_DATABASE=off` (DB-less) mode, Admin API routing edits are ephemeral and ineffective. We use dynamic **declarative configuration**:
-- Whenever a tenant is created or removed, `gateway_manager.sh` manages a YAML fragment in `/etc/supabase/kong_tenants/<ref>.yml`.
-- These are merged into the global `kong.yml` and hot-reloaded (`kong reload`).
-- `X-Project-Ref: <ref>` headers reliably route traffic to the tenant's exact local port for Database REST (`/rest/v1`, `/graphql/v1`) and Auth (`/auth/v1`).
+### 2. Kong API-Driven Gateway ⭐ Implemented
+Kong runs in **DB-backed mode** (PostgreSQL) as a native systemd service, fully managed via the Kong Admin API:
+- `GatewayService.ensureServiceAndRoute()` creates/updates Kong services and routes per tenant.
+- Per-route plugins (CORS, rate-limiting, JWT, request-transformer) are applied dynamically.
+- Global plugins (Gzip compression, security response headers, ACME SSL) are configured at the Kong level.
+- **Programmable Rate Limiting**: Per-tenant rate limits can be set via `PUT /v1/projects/:ref/gateway/rate-limit` (supports tier presets or custom second/minute/hour values).
+- No manual YAML editing or `kong reload` — all changes take effect immediately via Admin API.
 
 ### 3. Storage API
 The Node.js based Storage API handles binary uploads to Object Storage AND metadata insertions into PostgreSQL (including Row Level Security checks).
 If globally shared, tenant uploads would pollute the default database's `storage.objects` table and bypass tenant RLS.
 **Status**: To be fully isolated, Storage API must eventually be separated into per-tenant processes just like GoTrue, connecting to the specific tenant's database.
 
-### 4. Realtime API & Admin Console
+### 3. Real-Time Features ⭐ Implemented
+
+| Feature | Protocol | Description |
+|---------|----------|-------------|
+| **SSE Log Stream** | `text/event-stream` | `GET /v1/projects/:ref/logs/stream` — real-time `journalctl --follow` streaming, per-tenant max 5 connections |
+| **WebSocket Tasks** | `ws://` | `ws://host/ws/tasks` — real-time task progress broadcast from TaskWorker |
+| **DB Graceful Degradation** | HTTP | `503 + Retry-After` on transient DB failures, exponential backoff retry (100ms → 400ms → 1600ms) |
+
+### 4. Storage API
+The Node.js based Storage API handles binary uploads to Object Storage AND metadata insertions into PostgreSQL (including Row Level Security checks).
+If globally shared, tenant uploads would pollute the default database's `storage.objects` table and bypass tenant RLS.
+**Status**: To be fully isolated, Storage API must eventually be separated into per-tenant processes just like GoTrue, connecting to the specific tenant's database.
+
+### 5. Realtime API & Admin Console
 - **Realtime (Elixir)**: Very resource-intensive as it listens to PostgreSQL logical replication slots. Recommended to remain a shared premium feature or require dedicated high-tier clusters.
 - **Web Console (SVAdmin Hybrid Mount)**: The central dashboard (`web-console`) is fully multi-tenant aware via URL routing parameter `[ref]`. It acts as the Host/SuperAdmin dashboard, but internally relies on the `@svadmin/core` `DataProvider`. When standard CRUD is requested (e.g. Auth Users or DB Tables), the root `+layout.svelte` dynamically bridges SvelteKit routing into SVAdmin's resources array. 
   - This allows the UI to render `svadmin` `<AutoTable>` and `useList` hooks seamlessly while hitting RESTful routes securely proxied to the tenant specific GoTrue / PostgREST instances via the Kong proxy.
+
+### 6. Edge Function Preheating ⭐ Implemented
+When a function is deployed via the Management API:
+1. `Bun.build()` bundles the source into a self-contained `.js`
+2. `invalidateCache()` evicts the old version from Worker thread caches
+3. `POST /preheat/:ref/:slug` → Worker imports the module ahead of time
+4. First real request hits warm LRU cache → **0ms cold-start**
 
 ## Additional Issues Found
 
 ### authenticator Role CONNECT Privilege
 
 `db_manager.sh` now grants `CONNECT ON DATABASE` to the `authenticator` role and creates it if missing. This is required for PostgREST to connect to tenant databases.
-
-### Nginx ACME Compatibility
-
-`router_manager.sh` now detects the SSL mode (`acme` / `certbot` / `self-signed`) before generating Nginx configs, preventing crashes on non-Pigsty Nginx builds.
 
 ### Disk Space Pre-Check
 

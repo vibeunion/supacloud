@@ -4,7 +4,7 @@
   import { onMount } from "svelte";
   import { page } from "$app/state";
   import { t } from "svelte-i18n";
-  import { Loader2, Play, Database, History, Shield, ChevronDown, Microscope, ChevronRight, Plus, X } from "lucide-svelte";
+  import { Loader2, Play, Database, History, Shield, ChevronDown, Microscope, ChevronRight, Plus, X, CheckCircle2, Download } from "lucide-svelte";
   import { createMutation } from "@tanstack/svelte-query";
 
   interface QueryTab {
@@ -14,6 +14,8 @@
     results: unknown[] | null;
     error: string | null;
     explainResults: unknown[] | null;
+    command: string | null;
+    rowCount: number | null;
   }
 
   let tabs = $state<QueryTab[]>([]);
@@ -44,12 +46,32 @@
     tabCounter++;
     return {
       id,
-      name: name || `查询 ${tabCounter - 1}`,
+      name: name || $t("SqlEditor.untitled_query"),
       sql: sqlContent || "",
       results: null,
       error: null,
       explainResults: null,
+      command: null,
+      rowCount: null,
     };
+  }
+
+  /** Format a cell value for display (Supabase Studio style) */
+  function formatCellValue(value: unknown): string {
+    if (value === null || value === undefined) return 'NULL';
+    if (typeof value === 'boolean') return value ? 'true' : 'false';
+    if (typeof value === 'object') {
+      try { return JSON.stringify(value, null, 0); } catch { return String(value); }
+    }
+    return String(value);
+  }
+
+  /** Get CSS class for cell value type (dark-mode safe) */
+  function getCellClass(value: unknown): string {
+    if (value === null || value === undefined) return 'text-muted-foreground italic opacity-50';
+    if (typeof value === 'boolean') return 'text-amber-600 dark:text-amber-400';
+    if (typeof value === 'number') return 'text-blue-600 dark:text-blue-400';
+    return '';
   }
 
   function addTab() {
@@ -83,7 +105,7 @@
         throw new Error("empty");
       }
     } catch {
-      const initial = createTab("查询 1");
+      const initial = createTab();
       // Try migrate old single draft
       const oldKey = `supacloud_${projectRef}_sql_draft`;
       const oldDraft = localStorage.getItem(oldKey);
@@ -124,6 +146,40 @@
     return `SET ROLE '${selectedRole}';\n${rawSql}\nRESET ROLE;`;
   }
 
+  function exportToCsv() {
+    if (!activeTab?.results || activeTab.results.length === 0) return;
+    
+    const rows = activeTab.results as Record<string, unknown>[];
+    const headers = Object.keys(rows[0]);
+    
+    const csvContent = [
+      headers.join(','),
+      ...rows.map(row => 
+        headers.map(header => {
+          let val = row[header];
+          if (val === null || val === undefined) return '';
+          if (typeof val === 'object') {
+            try { val = JSON.stringify(val); } catch { val = String(val); }
+          }
+          const strVal = String(val).replace(/"/g, '""');
+          return /[,\n"]/.test(strVal) ? `"${strVal}"` : strVal;
+        }).join(',')
+      )
+    ].join('\n');
+    
+    // Add BOM for Excel UTF-8 compatibility
+    const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `results_${projectRef}_${Date.now()}.csv`;
+    link.style.display = 'none';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }
+
   const runQueryMutation = createMutation(() => ({
     mutationFn: async ({ rawSql, explainMode }: { rawSql: string, explainMode: boolean }) => {
       let queryToRun = rawSql;
@@ -138,21 +194,22 @@
       });
       const data = await res.json();
       if (data.error) throw new Error(data.message || data.error);
-      return Array.isArray(data) ? data : data.rows || [data];
+      const rows = Array.isArray(data) ? data : data.rows || [];
+      return { rows, command: data.command || null, rowCount: data.rowCount ?? rows.length };
     },
     onMutate: () => { isRunning = true; },
-    onSuccess: (rows, variables) => {
+    onSuccess: (result, variables) => {
       tabs = tabs.map(tb => {
         if (tb.id !== activeTabId) return tb;
         if (variables.explainMode) {
-          return { ...tb, explainResults: rows, results: null, error: null };
+          return { ...tb, explainResults: result.rows, results: null, error: null, command: result.command, rowCount: result.rowCount };
         } else {
-          return { ...tb, results: rows, explainResults: null, error: null };
+          return { ...tb, results: result.rows, explainResults: null, error: null, command: result.command, rowCount: result.rowCount };
         }
       });
     },
     onError: (err: unknown) => {
-      tabs = tabs.map(tb => tb.id === activeTabId ? { ...tb, error: (err instanceof Error ? err.message : String(err)), results: null, explainResults: null } : tb);
+      tabs = tabs.map(tb => tb.id === activeTabId ? { ...tb, error: (err instanceof Error ? err.message : String(err)), results: null, explainResults: null, command: null, rowCount: null } : tb);
     },
     onSettled: () => { isRunning = false; }
   }));
@@ -358,7 +415,26 @@
           {/if}
         </div>
         {#if activeTab?.results}
-          <span class="text-[10px] text-muted-foreground">{activeTab.results.length} 行</span>
+          {#if activeTab.command && activeTab.results.length === 0}
+            <span class="px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 text-[10px] font-semibold">
+              ✓ {activeTab.command} {$t("SqlEditor.complete")}
+            </span>
+          {:else}
+            <div class="flex items-center gap-2">
+              <span class="px-2 py-0.5 rounded-full bg-brand/10 text-brand text-[10px] font-bold tabular-nums">
+                {activeTab.results.length} {$t("SqlEditor.rows_returned")}
+              </span>
+              {#if activeTab.results.length > 0}
+                <button
+                  onclick={exportToCsv}
+                  class="p-1.5 hover:bg-muted/50 rounded-md text-muted-foreground hover:text-foreground transition-colors group relative"
+                  title="导出 CSV"
+                >
+                  <Download size={14} />
+                </button>
+              {/if}
+            </div>
+          {/if}
         {/if}
       </div>
 
@@ -372,24 +448,43 @@
              <Loader2 size={24} class="animate-spin text-brand" />
              <p class="text-[10px] uppercase font-bold tracking-[0.2em]">正在执行查询...</p>
            </div>
+        {:else if activeTab?.results && activeTab.results.length === 0 && activeTab.command}
+          <!-- DDL/DML Success: No rows returned (matches Supabase Studio behavior) -->
+          <div class="h-full flex flex-col items-center justify-center gap-3">
+            <div class="w-12 h-12 rounded-full bg-emerald-500/10 flex items-center justify-center">
+              <CheckCircle2 size={24} class="text-emerald-500" />
+            </div>
+            <div class="text-center">
+              <p class="text-sm font-semibold text-foreground">{$t("SqlEditor.success_no_rows")}</p>
+              <p class="text-xs text-muted-foreground mt-1">
+                <span class="font-mono px-1.5 py-0.5 rounded bg-muted text-[10px]">{activeTab.command}</span>
+                {#if activeTab.rowCount !== null && activeTab.rowCount > 0}
+                  · {activeTab.rowCount} row{activeTab.rowCount > 1 ? 's' : ''} affected
+                {/if}
+              </p>
+            </div>
+          </div>
         {:else if activeTab?.results}
-          <div class="rounded border bg-background overflow-hidden">
-            <table class="w-full text-left text-[11px] font-mono">
-              <thead class="bg-muted/50 border-b">
+          <!-- Data Grid (Supabase Studio style) -->
+          <div class="rounded border bg-background overflow-auto h-full">
+            <table class="w-full text-left text-[11px] font-mono border-collapse min-w-max">
+              <thead class="bg-muted/60 dark:bg-muted/30 border-b border-border sticky top-0 z-10">
                 <tr>
+                  <th class="px-2 py-2 font-bold text-muted-foreground/60 text-center border-r border-border/40 w-12 bg-muted/60 dark:bg-muted/30">#</th>
                   {#if activeTab.results.length > 0}
                     {#each Object.keys(activeTab.results[0] as Record<string, unknown>) as key}
-                      <th class="px-3 py-2 font-bold text-muted-foreground">{key}</th>
+                      <th class="px-3 py-2 font-semibold text-foreground/70 border-r border-border/40 whitespace-nowrap bg-muted/60 dark:bg-muted/30">{key}</th>
                     {/each}
                   {/if}
                 </tr>
               </thead>
-              <tbody class="divide-y divide-border/30">
-                {#each activeTab.results as row}
-                  <tr class="hover:bg-muted/30 transition-colors">
+              <tbody class="divide-y divide-border/30 dark:divide-border/20">
+                {#each activeTab.results as row, idx}
+                  <tr class="hover:bg-muted/30 dark:hover:bg-muted/10 transition-colors group">
+                    <td class="px-2 py-1.5 text-center text-muted-foreground/50 border-r border-border/30 dark:border-border/20 tabular-nums select-none text-[10px]">{idx + 1}</td>
                     {#each Object.values(row as Record<string, unknown>) as value}
-                      <td class="px-3 py-2 tabular-nums">
-                        {typeof value === 'object' ? JSON.stringify(value) : value}
+                      <td class="px-3 py-1.5 border-r border-border/20 dark:border-border/10 max-w-[300px] truncate {getCellClass(value)}" title={formatCellValue(value)}>
+                        {formatCellValue(value)}
                       </td>
                     {/each}
                   </tr>
@@ -419,7 +514,7 @@
         {:else}
           <div class="h-full flex flex-col items-center justify-center text-muted-foreground gap-2 opacity-30">
             <History size={32} strokeWidth={1} />
-            <p class="text-xs italic">按 Ctrl+Enter 运行查询</p>
+            <p class="text-xs italic">{$t("SqlEditor.run_shortcut")}</p>
           </div>
         {/if}
       </div>

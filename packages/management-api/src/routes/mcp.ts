@@ -51,6 +51,8 @@ async function authenticate(headers: Headers): Promise<McpTokenPayload | null> {
   if (mcpPayload) return mcpPayload;
 
   // 2. Try service_role_key lookup
+  // Full access granted — safety relies on MCP tool annotations (destructiveHint)
+  // which cause compliant clients to prompt user confirmation before write ops.
   try {
     const rows = await metaSql`
       SELECT ref FROM projects
