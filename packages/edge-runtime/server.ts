@@ -63,6 +63,16 @@ const app = new Elysia()
     return { invalidated: functionId };
   })
 
+  // Pre-heat function — called by Management API after deploy to eliminate cold-start
+  .post("/preheat/:ref/:slug", async (c) => {
+    const functionId = `${c.params.ref}_${c.params.slug}`;
+    const jsPath = path.resolve(FUNCTIONS_DIR, c.params.ref, `${c.params.slug}.js`);
+    const tsPath = path.resolve(FUNCTIONS_DIR, c.params.ref, `${c.params.slug}.ts`);
+    const functionPath = (await Bun.file(jsPath).exists()) ? jsPath : tsPath;
+    const success = await pool.preheat(functionId, functionPath);
+    return { preheated: functionId, success };
+  })
+
   // Main function invoke — handles supabase.functions.invoke('name', { body })
   // Supports nested paths: /functions/v1/name/sub/path
   .all("/functions/v1/:functionName/*", async (c) => {

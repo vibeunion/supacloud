@@ -5,15 +5,19 @@ SupaCloud Edge Functions uses **Bun + Elysia Worker Thread Pool** as the runtime
 ## Architecture
 
 ```
-SupaCloud (:3000)             Edge Runtime (:9000)
+SupaCloud (:9090)             Edge Runtime (:9000)
 ├── Management API       ←──  supacloud-edge-runtime.service
-└── only listens :3000        ├── Elysia Server
-                              ├── Worker Thread Pool (4 threads, fixed ~80MB)
+├── SSE Log Stream (/logs/stream)
+├── WebSocket (/ws/tasks)     ├── Elysia Server
+└── Static Assets (ETag/304)  ├── Worker Thread Pool (4 threads, fixed ~80MB)
                               ├── Deno Compat Shim (globalThis.Deno)
-                              └── URL Import Plugin (deno.land/esm.sh → npm)
+                              ├── URL Import Plugin (deno.land/esm.sh → npm)
+                              └── /preheat endpoint (zero cold-start)
 
-Kong/Angie Gateway:
-  /api/*        → :3000 (Management API)
+Kong Gateway (API-driven, native OpenResty):
+  Global: ACME SSL, Gzip, Security Headers
+  Per-route: CORS, Rate Limiting, JWT
+  /api/*        → :9090 (Management API)
   /functions/*  → :9000 (Edge Runtime, direct)
 ```
 
@@ -22,8 +26,21 @@ Kong/Angie Gateway:
 | Metric | Value |
 |--------|-------|
 | Memory (200 functions) | ~140MB |
-| Cold start | 8-15ms |
+| Cold start (no preheat) | 8-15ms |
+| Cold start (with preheat) | **0ms** |
 | Port | :9000 |
+
+### Function Preheating
+
+After deploying a function, SupaCloud automatically pre-imports the module into the Worker Thread Pool's LRU cache. This eliminates cold-start latency on the first real request.
+
+```
+Deploy flow:
+  1. Bun.build() bundles source → .js
+  2. invalidateCache() clears old version
+  3. POST /preheat/:ref/:slug → Worker imports module ahead of time
+  4. First request hits warm cache → 0ms cold-start
+```
 
 ## Dependency Management
 

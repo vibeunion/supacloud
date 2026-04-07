@@ -25,7 +25,7 @@
     // In production, Grafana is reverse-proxied through /grafana/ path
     // In local dev, fall back to direct port 3000 access
     if (host === "localhost" || host === "127.0.0.1") {
-      grafanaHost = `${protocol}//${host}:3000`;
+      grafanaHost = `${protocol}//${host}:3000/grafana`;
     } else {
       grafanaHost = `${protocol}//${host}/grafana`;
     }

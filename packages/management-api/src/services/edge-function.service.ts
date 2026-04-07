@@ -153,6 +153,18 @@ export const edgeFunctionService = {
       // 3. Invalidate runtime caches
       await invalidateCache(ref, slug);
 
+      // 4. Pre-heat the function in the worker pool (zero cold-start)
+      try {
+        const runtimeUrl = `http://${config.edgeRuntimeInternal}`;
+        await fetch(`${runtimeUrl}/preheat/${ref}/${slug}`, {
+          method: "POST",
+          signal: AbortSignal.timeout(10000),
+        });
+      } catch {
+        // Non-fatal: function will be loaded on first real request
+        logger.debug(`[EdgeFunction] Preheat skipped (runtime unavailable)`, { ref, slug });
+      }
+
       logger.info(`[EdgeFunction] Deployed ${slug} for ${ref} (bundled=${!!bundled}, minify=${minify})`);
       return true;
     } catch (err) {

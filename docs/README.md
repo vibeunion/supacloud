@@ -33,3 +33,7 @@
 
 - [MCP Server Guide](./mcp-server-guide.md) - MCP Server development guide
 - [Edge Runtime Guide](./edge-runtime-guide.md) - Bun + Elysia Edge Functions runtime architecture
+
+## Security
+
+- [MCP Security Model](./mcp-server-guide.md#4-安全和最佳实践) - MCP tool annotations, destructiveHint confirmation model

@@ -67,6 +67,23 @@ Management API 内嵌了 Streamable HTTP MCP 端点，无需安装任何东西�
 }
 ```
 
+### 方式三：智能本地代理（Auto-Link 🆕）
+
+零配置！自动嗅探当前工作目录 `.env` 中的 `SUPABASE_URL` 和 `SUPABASE_SERVICE_ROLE_KEY`，即插即用：
+
+```json
+{
+  "mcpServers": {
+    "supacloud-auto-link": {
+      "command": "npx",
+      "args": ["-y", "@supacloud/mcp-server", "--local"]
+    }
+  }
+}
+```
+
+> 💡 **安全模型**：读操作（查表结构、查数据）自动执行；写操作（INSERT/UPDATE/DDL 等）会在客户端弹出确认对话框，用户同意后才执行。这是 MCP 协议原生的 `destructiveHint` 机制，无需额外配置。
+
 ### 2. 开始对话
 
 **全新服务器部署（三步走）：**
@@ -96,9 +113,11 @@ Management API 内嵌了 Streamable HTTP MCP 端点，无需安装任何东西�
 | `SUPACLOUD_SSH_KEY` | SSH 私钥路径 | `~/.ssh/id_rsa` |
 | `SUPACLOUD_SSH_PASS` | SSH 密码 (备选) | - |
 | `SUPACLOUD_API_URL` | Management API 地址 | `http://{HOST}:9090` |
-| `SUPACLOUD_API_TOKEN` | Master Token | - |
+| `SUPACLOUD_API_TOKEN` | Master Token 或 service_role_key | - |
 | `SUPACLOUD_PROJECT_REF` | 限定项目 (项目范围模式) | - |
 | `SUPACLOUD_READ_ONLY` | 启用只读模式 | `false` |
+
+> 💡 **Auto-Link 模式**下无需手动配置上述变量，系统会自动从 `.env` 读取 `SUPABASE_URL` 和 `SUPABASE_SERVICE_ROLE_KEY`。
 
 ## 可用工具（70+ 个）
 
@@ -257,6 +276,19 @@ cd packages/mcp-server
 bun install
 bun run dev
 ```
+
+## 安全模型
+
+SupaCloud MCP 使用分层安全模型：
+
+| 认证方式 | 权限范围 | 写操作 |
+|---------|---------|--------|
+| Master Token | 全局管理员 | ✅ 直接执行（客户端确认） |
+| MCP Signed Token | 单项目范围 | 可配置 readonly |
+| service_role_key | 单项目范围 | ✅ 客户端确认后执行 |
+| anon_key | ❌ 不支持 | - |
+
+所有写操作工具（`execute_sql` 含 DDL/DML、`deploy_edge_function`、`delete_project` 等）均标记了 MCP `destructiveHint: true` 注解。遵循 MCP 规范的客户端（Claude Desktop、Cursor 等）会在执行前自动弹窗让用户确认。
 
 ## License
 

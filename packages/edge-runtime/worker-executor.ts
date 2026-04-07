@@ -47,6 +47,29 @@ parentPort?.on("message", async (msg: WorkerMessage) => {
     return;
   }
 
+  // Handle function pre-heating (zero cold-start)
+  if (msg.type === "preheat") {
+    try {
+      if (!moduleCache.has(msg.functionId)) {
+        clearCapturedServeHandler();
+        const mod = await loadModule(msg.functionPath);
+        const serveHandler = getCapturedServeHandler() as CachedModule["serveHandler"];
+        moduleCache.set(msg.functionId, { mod: mod as Record<string, unknown>, serveHandler, lastUsed: Date.now() });
+        if (moduleCache.size > MAX_CACHED) {
+          let oldest = { key: "", time: Infinity };
+          for (const [k, v] of moduleCache) {
+            if (v.lastUsed < oldest.time) oldest = { key: k, time: v.lastUsed };
+          }
+          moduleCache.delete(oldest.key);
+        }
+      }
+      parentPort?.postMessage({ type: "preheat_done", functionId: msg.functionId });
+    } catch (err: unknown) {
+      parentPort?.postMessage({ type: "preheat_error", functionId: msg.functionId, error: err instanceof Error ? err.message : String(err) });
+    }
+    return;
+  }
+
   try {
     const { functionId, functionPath, env, url, method, headers, body } =
       msg;
