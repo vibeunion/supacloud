@@ -166,4 +166,41 @@ export class WorkerPool {
       w.postMessage({ type: "invalidate", functionId });
     }
   }
+
+  /**
+   * Pre-heat a function in the worker pool — import the module ahead of time
+   * so the first real request has zero cold-start latency.
+   * Only pre-heats in one idle worker (the module will be cached in LRU).
+   */
+  preheat(functionId: string, functionPath: string): Promise<boolean> {
+    return new Promise((resolve) => {
+      const worker = this.idle[0]; // peek at first idle worker without removing it
+      if (!worker) {
+        resolve(false); // No idle workers available
+        return;
+      }
+
+      const timeout = setTimeout(() => {
+        worker.removeListener("message", onMsg);
+        resolve(false); // Preheat timed out
+      }, 10000);
+
+      const onMsg = (msg: { type?: string; functionId?: string }) => {
+        if (msg.type === "preheat_done" && msg.functionId === functionId) {
+          clearTimeout(timeout);
+          worker.removeListener("message", onMsg);
+          resolve(true);
+        } else if (msg.type === "preheat_error" && msg.functionId === functionId) {
+          clearTimeout(timeout);
+          worker.removeListener("message", onMsg);
+          resolve(false);
+        }
+        // Non-matching messages (normal request responses) are ignored;
+        // the listener stays until preheat completes or times out.
+      };
+
+      worker.on("message", onMsg);
+      worker.postMessage({ type: "preheat", functionId, functionPath });
+    });
+  }
 }

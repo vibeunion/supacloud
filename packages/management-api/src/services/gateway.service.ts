@@ -6,10 +6,7 @@ import { sql } from "../db";
 const DEFAULT_CORS_HEADERS = ["Accept", "Accept-Language", "Content-Language", "Authorization", "Content-Type", "X-Api-Version", "x-supabase-api-version", "X-Client-Info", "apikey", "Prefer", "Content-Profile", "accept-profile", "Range", "Range-Unit"];
 const DEFAULT_CORS_EXPOSED = ["Content-Length", "Content-Range", "X-JSON", "x-supabase-api-version", "X-Client-Info", "apikey", "Prefer", "Content-Profile", "accept-profile", "Range", "Range-Unit", "X-Relay-Error"];
 const DEFAULT_CORS_ORIGINS = [
-  "https://sadmin.dbbaby.top",
-  "https://admin.muying-redpack.com",
-  "https://app.muying-redpack.com",
-  "https://servicewechat.com"
+  "~^https?://.*$"
 ];
 
 import path from "node:path";
@@ -49,14 +46,10 @@ export class GatewayService {
             init.body = JSON.stringify(body);
         }
         const res = await fetch(`${this.KONG_ADMIN_URL}${path}`, init);
-        if (!res.ok && method !== "POST") {
-            // During POST, 409 Conflict is considered normal (skip if already exists)
-            if (res.status !== 409) {
-                const text = await res.text().catch(() => "");
-                logger.warn(`Kong API ${method} ${path} returned ${res.status}: ${text}`);
-            }
-        }
         const text = await res.text();
+        if (!res.ok && res.status !== 409) {
+            logger.warn(`Kong API ${method} ${path} returned ${res.status}: ${text}`);
+        }
         return text ? JSON.parse(text) : {};
     }
 
@@ -102,10 +95,45 @@ export class GatewayService {
         }
     }
 
-    async setRateLimit(projectRef: string, tier: string = "free"): Promise<boolean> {
+    /** Query current rate-limit config from Kong Admin API */
+    async getRateLimit(projectRef: string): Promise<{ tier: string; second: number; minute: number; hour: number; enabled: boolean } | null> {
         try {
-            const { second, minute, hour } = this.getRateLimitConfig(tier);
-            const routeName = `route-${projectRef}`;
+            // Try all possible route name patterns
+            for (const routeName of [`route-svc-pgrst-${projectRef}`, `route-${projectRef}`]) {
+                const pluginsRes = await this.kongRequest(`/routes/${routeName}/plugins`);
+                const existing = pluginsRes?.data?.find((p: Record<string, unknown>) => p.name === "rate-limiting");
+                if (existing) {
+                    const cfg = existing.config as Record<string, unknown>;
+                    const second = (cfg?.second as number) || 0;
+                    const minute = (cfg?.minute as number) || 0;
+                    const hour = (cfg?.hour as number) || 0;
+                    // Reverse-detect tier
+                    let tier = "custom";
+                    if (second === 10 && minute === 100 && hour === 1000) tier = "free";
+                    else if (second === 100 && minute === 2000 && hour === 50000) tier = "pro";
+                    else if (second === 1000 && minute === 50000 && hour === 1000000) tier = "enterprise";
+                    return { tier, second, minute, hour, enabled: (existing.enabled as boolean) ?? true };
+                }
+            }
+            return { tier: "none", second: 0, minute: 0, hour: 0, enabled: false };
+        } catch (error: unknown) {
+            logger.error(`Failed to get rate limit for ${projectRef}:`, (error instanceof Error ? error.message : String(error)));
+            return null;
+        }
+    }
+
+    /** Set rate limit — accepts tier name OR custom numeric values */
+    async setRateLimit(projectRef: string, opts: string | { second?: number; minute?: number; hour?: number } = "free"): Promise<boolean> {
+        try {
+            let second: number, minute: number, hour: number;
+            if (typeof opts === "string") {
+                ({ second, minute, hour } = this.getRateLimitConfig(opts));
+            } else {
+                ({ second = 10, minute = 100, hour = 1000 } = opts);
+            }
+
+            // Apply to the primary API route
+            const routeName = `route-svc-pgrst-${projectRef}`;
             const pluginsRes = await this.kongRequest(`/routes/${routeName}/plugins`);
             const existing = pluginsRes?.data?.find((p: Record<string, unknown>) => p.name === "rate-limiting");
 
@@ -275,6 +303,13 @@ export class GatewayService {
             exposed_headers: DEFAULT_CORS_EXPOSED,
             credentials: true,
             max_age: 3600,
+        });
+
+        // 5. Inject Access-Control-Allow-Origin via response-transformer
+        //    (PostgREST upstream returns its own partial CORS headers that
+        //     interfere with Kong's CORS plugin on non-preflight requests)
+        await this.upsertRoutePlugin(routeName, "response-transformer", {
+            add: { headers: ["Access-Control-Allow-Origin:*"] }
         });
     }
 

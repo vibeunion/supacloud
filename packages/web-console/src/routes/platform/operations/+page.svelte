@@ -123,6 +123,45 @@
     opParams = {};
   }
 
+  // Health check translations
+  function translateComponent(name: string) {
+    const map: Record<string, string> = {
+      "Storage Space": "存储空间",
+      "Memory Status": "系统内存",
+      "Management API": "SupaCloud 管理接口",
+      "Pigsty Infrastructure": "Pigsty 基础设施",
+      "Database (PostgreSQL)": "PostgreSQL 数据库",
+      "Cloud-native Storage": "云原生存储",
+      "Cloud-native Storage (JuiceFS)": "云原生存储 (JuiceFS)",
+      "Database Connection": "数据库连接",
+      "Database Cluster (HA)": "数据库集群 (HA高可用)",
+      "Pigsty Engine": "Pigsty 引擎"
+    };
+    return map[name] || name;
+  }
+
+  function translateMessage(msg: string) {
+    if (!msg) return msg;
+    if (msg === "Running") return "正在运行";
+    if (msg === "Service stopped") return "服务已停止";
+    if (msg === "System not booted by Systemd") return "非 Systemd 启动环境，服务状态未知";
+    if (msg === "Cloud-native storage backend not mounted") return "云原生存储后端未挂载或未配置";
+    if (msg === "Cannot detect storage mount status") return "无法检测存储挂载状态";
+    if (msg === "Cannot get disk info") return "无法获取系统磁盘信息";
+    if (msg === "Database not accepting connections") return "数据库目前拒绝访问连接";
+    if (msg === "Cannot access service status") return "无法获取服务运行状态";
+    
+    // Dynamic replacements
+    let translated = msg;
+    translated = translated.replace(/^Available:\s*(.*)/, "剩余可用: $1");
+    translated = translated.replace(/^Mounted:\s*(.*)/, "已挂载: $1");
+    translated = translated.replace(/^Free (.*?) \/ Total (.*?)$/, "空闲 $1 / 总量 $2");
+    translated = translated.replace(/^PG (.*?) running in single-node mode$/, "PostgreSQL $1 - 单节点独立运行中");
+    translated = translated.replace(/^Ready \((.+?)\)$/, "目前就绪 ($1)");
+
+    return translated;
+  }
+
   onMount(() => checkHealth());
 </script>
 
@@ -148,11 +187,16 @@
         <p class="text-xs text-muted-foreground">正在进行健康检查...</p>
       {:else}
         <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
-          {#each Object.entries(healthStatus) as [key, value]}
-            <div class="rounded-lg border p-3">
-              <div class="text-[10px] font-bold uppercase text-muted-foreground mb-1">{key}</div>
-              <div class="text-sm font-bold {typeof value === 'string' && (value === 'ok' || value === 'healthy' || value === 'running') ? 'text-green-600' : typeof value === 'string' && (value === 'error' || value === 'down') ? 'text-red-600' : ''}">
-                {typeof value === 'object' ? JSON.stringify(value).slice(0, 30) : String(value)}
+          {#each (healthStatus as any[]) as report}
+            <div class="rounded-lg border p-3 flex flex-col justify-between">
+              <div class="text-[10px] font-bold uppercase text-muted-foreground mb-1">{translateComponent(report.component)}</div>
+              <div class="mt-1">
+                <span class="text-xs font-bold px-1.5 py-0.5 rounded-sm {report.status === 'OK' ? 'bg-green-100 text-green-700' : report.status === 'ERROR' ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'}">
+                  {report.status}
+                </span>
+              </div>
+              <div class="text-xs text-muted-foreground mt-2 line-clamp-2" title={translateMessage(report.message)}>
+                {translateMessage(report.message)}
               </div>
             </div>
           {/each}
@@ -190,10 +234,10 @@
           <div class="p-4 space-y-3">
             {#each op.fields as field}
               <div>
-                <label for="a11y-routes-platform-operations--page-svelte-193" class="text-xs font-semibold text-muted-foreground block mb-1">
+                <label for="op-{op.id}-{field.key}" class="text-xs font-semibold text-muted-foreground block mb-1">
                   {field.label} {#if field.required}<span class="text-red-500">*</span>{/if}
                 </label>
-                <input id="a11y-routes-platform-operations--page-svelte-193"
+                <input id="op-{op.id}-{field.key}"
                   bind:value={opParams[field.key]}
                   placeholder={field.placeholder}
                   class="w-full px-3 py-2 text-xs font-mono rounded-md border bg-muted/30 focus:outline-none focus:ring-1 focus:ring-brand"

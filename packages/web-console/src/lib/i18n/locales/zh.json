@@ -64,7 +64,12 @@
     "explain_mode": "解释",
     "explain_analyze": "解释分析",
     "explain_visual": "可视化计划",
-    "explain_raw": "原始输出"
+    "explain_raw": "原始输出",
+    "untitled_query": "未命名查询",
+    "success_no_rows": "执行成功，无返回行",
+    "rows_affected": "影响 {count} 行",
+    "complete": "完成",
+    "run_shortcut": "按 Ctrl+Enter 运行查询"
   },
   "Storage": {
     "buckets": "存储桶",
