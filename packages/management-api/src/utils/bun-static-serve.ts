@@ -134,18 +134,56 @@ function createFetchHandler(root: string) {
         cacheControl = "public, max-age=3600";
       }
 
+      // Range support (206 Partial Content)
+      const rangeHeader = req.headers.get("Range");
+      let start = 0;
+      let end = file.size - 1;
+      let isRange = false;
+
+      if (rangeHeader && rangeHeader.startsWith("bytes=")) {
+        const parts = rangeHeader.replace("bytes=", "").split("-");
+        const parsedStart = parseInt(parts[0], 10);
+        const parsedEnd = parseInt(parts[1], 10);
+        
+        if (!isNaN(parsedStart)) {
+          start = parsedStart;
+          if (!isNaN(parsedEnd)) {
+            end = Math.min(parsedEnd, file.size - 1);
+          }
+          isRange = true;
+        }
+
+        // Check bounds
+        if (start >= file.size || end >= file.size || start > end) {
+          return new Response("Range Not Satisfiable", {
+            status: 416,
+            headers: { "Content-Range": `bytes */${file.size}` }
+          });
+        }
+      }
+
       const headers: Record<string, string> = {
         "Content-Type": mime,
         "Cache-Control": cacheControl,
         "ETag": etag,
+        "Accept-Ranges": "bytes",
       };
+
+      if (isRange) {
+        headers["Content-Range"] = `bytes ${start}-${end}/${file.size}`;
+        headers["Content-Length"] = (end - start + 1).toString();
+      }
 
       if (encoding) {
         headers["Content-Encoding"] = encoding;
         headers["Vary"] = "Accept-Encoding";
       }
 
-      return new Response(file, { headers });
+      const body = isRange ? file.slice(start, end + 1) : file;
+      return new Response(body, { 
+        status: isRange ? 206 : 200, 
+        headers 
+      });
     }
 
     // --- Step 2: immutable / file-extension miss → strict 404 ---
@@ -171,11 +209,21 @@ function createFetchHandler(root: string) {
 
 /** Start a single-process static server (also used by each worker in cluster mode) */
 export function startStaticServer(root: string, port: number, reusePort = false) {
-  Bun.serve({
+  const server = Bun.serve({
     port,
     reusePort,
     fetch: createFetchHandler(root),
   });
+
+  // Graceful shutdown handling
+  const shutdown = () => {
+    // stop(false) closes listeners but waits for active connections to finish before shutting down
+    server.stop(false);
+  };
+  process.on("SIGINT", shutdown);
+  process.on("SIGTERM", shutdown);
+
+  return server;
 }
 
 // ─── Cluster Manager: spawns N workers sharing the same port ─────────────────
@@ -185,6 +233,7 @@ function startCluster(root: string, port: number, workerCount: number) {
   console.log(`[bun-static-serve] Serving ${root}`);
 
   const workers: ReturnType<typeof spawn>[] = [];
+  let isShuttingDown = false;
 
   for (let i = 0; i < workerCount; i++) {
     workers.push(
@@ -199,11 +248,13 @@ function startCluster(root: string, port: number, workerCount: number) {
 
   // Graceful shutdown: forward signals to all workers
   function shutdown() {
-    console.log(`\n[bun-static-serve] Shutting down ${workers.length} workers...`);
+    isShuttingDown = true;
+    console.log(`\n[bun-static-serve] Shutting down ${workers.length} workers gracefully...`);
     for (const w of workers) {
-      w.kill();
+      w.kill("SIGTERM"); // Ask workers to exit gracefully
     }
-    process.exit(0);
+    // Give workers up to 10 seconds to finish pending requests before forcefully exiting
+    setTimeout(() => process.exit(0), 10000).unref();
   }
 
   process.on("SIGINT", shutdown);
@@ -211,7 +262,7 @@ function startCluster(root: string, port: number, workerCount: number) {
 
   // Monitor workers — respawn on crash
   (async () => {
-    while (true) {
+    while (!isShuttingDown) {
       for (let i = 0; i < workers.length; i++) {
         const w = workers[i];
         // Check if worker exited
