@@ -3,13 +3,20 @@
 
 
   import { page } from "$app/state";
-  import { Loader2, Copy, Eye, EyeOff, Tag, Link2 } from "lucide-svelte";
+  import { Loader2, Copy, Eye, EyeOff, Tag, Link2, ShieldAlert, Trash2, Plus } from "lucide-svelte";
   import { toast } from "svelte-sonner";
+  import { getContext } from "svelte";
 
   import { useShow } from "@svadmin/core";
 
   let showAnonKey = $state(false);
   let showServiceKey = $state(false);
+
+  let newPath = $state("");
+  let newSecond = $state<number | "">("");
+  let newMinute = $state<number | "">("");
+  let newHour = $state<number | "">("");
+  let isSubmittingLimit = $state(false);
 
   const projectRef = $derived(page.params.ref);
   const hostname = $derived(page.url?.hostname || "localhost");
@@ -25,6 +32,61 @@
 
   async function copyToClipboard(text: string) {
     try { await navigator.clipboard.writeText(text); } catch {}
+  }
+
+  const { refetch } = query;
+
+  async function addCustomRateLimit() {
+    if (!newPath) return toast.error("请输入基础路径 (例如 /rest/v1)");
+    
+    // Auto-fix path prefix if missing
+    let targetPath = newPath.trim();
+    if (!targetPath.startsWith("/")) {
+        targetPath = "/" + targetPath;
+    }
+
+    try {
+      isSubmittingLimit = true;
+      const res = await fetch(`/api/query?path=/v1/projects/${projectRef}/gateway/custom-rate-limits`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          path: targetPath,
+          second: newSecond || undefined,
+          minute: newMinute || undefined,
+          hour: newHour || undefined
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "添加失败");
+      toast.success("限流规则添加成功");
+      newPath = "";
+      newSecond = "";
+      newMinute = "";
+      newHour = "";
+      refetch();
+    } catch (err: any) {
+      toast.error(err.message);
+    } finally {
+      isSubmittingLimit = false;
+    }
+  }
+
+  async function removeCustomRateLimit(path: string) {
+    if (!confirm(`确定要删除路径 ${path} 的限流规则吗？`)) return;
+    try {
+      const res = await fetch(`/api/query?path=/v1/projects/${projectRef}/gateway/custom-rate-limits`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "删除失败");
+      toast.success("限流规则已删除");
+      refetch();
+    } catch (err: any) {
+      toast.error(err.message);
+    }
   }
 </script>
 
@@ -127,6 +189,86 @@
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Custom Rate Limits -->
+      <div class="border rounded-xl bg-card overflow-hidden">
+        <div class="border-b px-6 py-4 bg-muted/20">
+          <h2 class="text-lg font-semibold flex items-center gap-2">
+            <ShieldAlert size={18} />
+            自定义路由限流
+          </h2>
+          <p class="text-xs text-muted-foreground mt-1">控制特定接口路径的调用频率，防范恶意滥用并保护底层数据库资源。最高不可突破平台兜底限制 (100/秒，2000/分钟)。每个项目最多配置 20 条自定义限制。</p>
+        </div>
+
+        <div class="p-6 space-y-4">
+          <!-- Existing Limits -->
+          {#if Object.keys((project.rate_limits || {})).length > 0}
+            <div class="rounded-lg border overflow-hidden">
+              <table class="w-full text-sm text-left">
+                <thead class="bg-muted/50 text-xs uppercase text-muted-foreground">
+                  <tr>
+                    <th class="px-4 py-3 font-medium">路由路径 (Path)</th>
+                    <th class="px-4 py-3 font-medium">每秒限制 (Second)</th>
+                    <th class="px-4 py-3 font-medium">每分钟限制 (Minute)</th>
+                    <th class="px-4 py-3 font-medium">每小时限制 (Hour)</th>
+                    <th class="px-4 py-3 font-medium text-right">操作</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y">
+                  {#each Object.entries(project.rate_limits || {}) as [path, limits]}
+                    <tr class="hover:bg-muted/20">
+                      <td class="px-4 py-3 font-mono text-xs">{path}</td>
+                      <td class="px-4 py-3">{(limits as any).second || "-"}</td>
+                      <td class="px-4 py-3">{(limits as any).minute || "-"}</td>
+                      <td class="px-4 py-3">{(limits as any).hour || "-"}</td>
+                      <td class="px-4 py-3 text-right">
+                        <button onclick={() => removeCustomRateLimit(path)} class="text-red-500 hover:text-red-700 transition-colors" title="删除规则">
+                          <Trash2 size={16} />
+                        </button>
+                      </td>
+                    </tr>
+                  {/each}
+                </tbody>
+              </table>
+            </div>
+          {:else}
+            <div class="px-4 py-8 text-center border rounded-lg border-dashed bg-muted/10 text-muted-foreground text-sm">
+              暂未配置任何自定义限流规则。
+            </div>
+          {/if}
+
+          <!-- Add New Limit Form -->
+          <div class="flex items-end gap-3 mt-4 pt-4 border-t border-border/50">
+            <div class="flex-1 space-y-1">
+              <span class="block text-xs font-semibold text-muted-foreground">匹配路径</span>
+              <input type="text" bind:value={newPath} placeholder="/rest/v1/payments" class="w-full px-3 py-2 text-sm rounded border bg-background" />
+            </div>
+            <div class="w-24 space-y-1">
+              <span class="block text-xs font-semibold text-muted-foreground">次 / 秒</span>
+              <input type="number" bind:value={newSecond} placeholder="10" class="w-full px-3 py-2 text-sm rounded border bg-background" />
+            </div>
+            <div class="w-24 space-y-1">
+              <span class="block text-xs font-semibold text-muted-foreground">次 / 分钟</span>
+              <input type="number" bind:value={newMinute} placeholder="100" class="w-full px-3 py-2 text-sm rounded border bg-background" />
+            </div>
+            <div class="w-24 space-y-1">
+              <span class="block text-xs font-semibold text-muted-foreground">次 / 小时</span>
+              <input type="number" bind:value={newHour} placeholder="1000" class="w-full px-3 py-2 text-sm rounded border bg-background" />
+            </div>
+            <button
+              onclick={addCustomRateLimit}
+              disabled={isSubmittingLimit}
+              class="px-4 py-2 bg-brand text-white rounded hover:bg-brand/90 transition-colors font-medium text-sm flex items-center justify-center gap-2 h-[38px]"
+            >
+              {#if isSubmittingLimit}
+                <Loader2 size={16} class="animate-spin" />
+              {:else}
+                <Plus size={16} /> 新增
+              {/if}
+            </button>
           </div>
         </div>
       </div>
