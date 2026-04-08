@@ -106,6 +106,24 @@ export function registerMcpTools(server: McpServer, token: McpTokenPayload): voi
     return { content: [{ type: "text", text: JSON.stringify(tasks, null, 2) }] };
   });
 
+  server.tool("create_project_task", "Dispatch a background long-running queue task (e.g. AI generation, MQTT push) into the project's native task worker base", {
+    ...refParam,
+    task_type: z.string().describe("Task type (e.g. ai_generation, mqtt_event)"),
+    payload: z.record(z.any()).default({}).describe("JSON payload for the task dispatcher"),
+  }, DESTRUCTIVE_HINT, async (args: Record<string, unknown>) => {
+    const ref = resolveRef(args.ref as string | undefined);
+    try {
+      const result = await metaSql`
+        INSERT INTO project_tasks (project_ref, task_type, payload, status)
+        VALUES (${ref}, ${args.task_type as string}, ${JSON.stringify(args.payload)}, 'pending')
+        RETURNING id
+      `;
+      return { content: [{ type: "text", text: `✅ Event dispatched to Queue Worker! Task ID: ${result[0].id}` }] };
+    } catch (e: unknown) {
+      return { content: [{ type: "text", text: `❌ Error: ${e instanceof Error ? e.message : String(e)}` }] };
+    }
+  });
+
   // ═══════════════════════════════════════════════
   // Project Actions (admin or non-readonly project)
   // ═══════════════════════════════════════════════
