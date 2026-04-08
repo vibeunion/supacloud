@@ -243,6 +243,7 @@ Management API 内嵌了 Streamable HTTP MCP 端点，无需安装任何东西�
 | `list_backups` / `create_backup` | 数据库备份 |
 | `get_system_metrics` | 系统监控 |
 | `get_network_restrictions` / `update_network_restrictions` | 网络限制 |
+| `set_custom_rate_limit` | 设定项目特定的路由层网关限流配置 |
 
 ### 前端托管工具 🆕
 

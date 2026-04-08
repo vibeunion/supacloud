@@ -560,9 +560,9 @@ curl http://localhost:9090/v1/projects/<ref>/api-keys \
 | 监控 | `/v1/monitor/*` | 数据库监控与健康检查 |
 | 安全 | `/v1/security/*` | 防火墙规则与 SSL 证书 |
 | 部署 | `/v1/deploy/*` | Edge Function 部署 |
-| 任务 | `/v1/projects/:ref/tasks/*` | 后台任务监控 |
+| 任务 | `/v1/projects/:ref/tasks/*` | 后台 AI/通用异步任务生命周期观测与监控 |
 | **日志 SSE** | `GET /v1/projects/:ref/logs/stream` | **实时日志流（Server-Sent Events）** |
-| **限流** | `GET/PUT /v1/projects/:ref/gateway/rate-limit` | **编程式限流（Kong Admin API 驱动）** |
+| **限流** | `GET/PUT /v1/projects/:ref/gateway/rate-limit` 及 `custom-rate-limits` | **编程式架构与客户端路由自定限流（Kong Admin API 驱动）** |
 | **WebSocket** | `ws://host/ws/tasks` | **实时任务进度推送** |
 
 #### 运行时切换

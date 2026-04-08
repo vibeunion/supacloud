@@ -100,10 +100,51 @@ export function registerMcpTools(server: McpServer, token: McpTokenPayload): voi
     return { content: [{ type: "text", text: keys ? JSON.stringify(keys, null, 2) : "❌ Not found" }] };
   });
 
-  server.tool("list_project_tasks", "List provisioning/cleanup tasks for a project", refParam, READONLY_HINT, async (args: Record<string, unknown>) => {
+  server.tool("list_project_tasks", "List background queue (AI generation, webhooks) and provisioning tasks for a project", refParam, READONLY_HINT, async (args: Record<string, unknown>) => {
     const ref = resolveRef(args.ref as string | undefined);
-    const tasks = await metaSql`SELECT * FROM project_tasks WHERE project_ref = ${ref} ORDER BY created_at DESC LIMIT 50`;
+    const tasks = await metaSql`SELECT id, task_type, status, error, created_at, updated_at FROM project_tasks WHERE project_ref = ${ref} ORDER BY created_at DESC LIMIT 50`;
     return { content: [{ type: "text", text: JSON.stringify(tasks, null, 2) }] };
+  });
+
+  server.tool("set_custom_rate_limit", "Set a custom API route rate limit for a project (max 20 per project)", {
+    ...refParam,
+    path: z.string().describe("Base path to rate limit. e.g. /rest/v1/payments"),
+    second: z.number().optional().describe("Requests per second"),
+    minute: z.number().optional().describe("Requests per minute"),
+    hour: z.number().optional().describe("Requests per hour"),
+  }, DESTRUCTIVE_HINT, async (args: Record<string, unknown>) => {
+    const ref = resolveRef(args.ref as string | undefined);
+    try {
+      // Lazy import to avoid circular dep if any, or just import at top. Let's just import gatewayService.
+      const { gatewayService } = await import("../services/gateway.service");
+      
+      const success = await gatewayService.setCustomRouteRateLimit(ref, args.path as string, {
+        second: args.second as number | undefined,
+        minute: args.minute as number | undefined,
+        hour: args.hour as number | undefined,
+      });
+
+      if (!success) {
+        return { content: [{ type: "text", text: `❌ Failed to set custom rate limit in gateway for ${ref} at ${args.path}` }] };
+      }
+
+      // We should also persist it, but projectService handles db connection. Let's just persist it.
+      const settings = await projectService.getProjectSettings(ref);
+      if (settings) {
+        const currentLimits = (settings.rate_limits as Record<string, unknown>) || {};
+        await projectService.updateProjectSettings(ref, {
+            ...settings,
+            rate_limits: {
+              ...currentLimits,
+              [args.path as string]: { second: args.second, minute: args.minute, hour: args.hour }
+            }
+        });
+      }
+
+      return { content: [{ type: "text", text: `✅ Custom rate limit set for ${args.path}` }] };
+    } catch (e: unknown) {
+      return { content: [{ type: "text", text: `❌ Error: ${e instanceof Error ? e.message : String(e)}` }] };
+    }
   });
 
   server.tool("create_project_task", "Dispatch a background long-running queue task (e.g. AI generation, MQTT push) into the project's native task worker base", {
