@@ -231,6 +231,7 @@ Management API 内嵌了 Streamable HTTP MCP 端点，无需安装任何东西�
 | 工具 | 说明 |
 |------|------|
 | `list_project_tasks` | 查看项目任务队列状态 |
+| `create_project_task` | 派发异步队列任务（支持派发 AI 生成、MQTT 设备协同等长周期任务） |
 
 ### 高级工具
 

@@ -25,6 +25,7 @@
 - **Auto-scaling Engine**: Rule-based vertical and horizontal scaling based on real-time metrics
 - **Dual Runtime**: Deno (legacy) or Bun.js Edge Runtime (recommended) for Edge Functions
 - **SSE Real-time Logs**: Server-Sent Events streaming for live log tailing via `journalctl --follow`
+- **Native Queue Worker**: Pure Bun.js PostgreSQL LISTEN/NOTIFY based asynchronous worker for AI inference and MQTT events
 - **WebSocket Task Notifications**: Real-time task progress push via native Bun WebSocket
 - **DB Graceful Degradation**: Exponential backoff retry + 503 Service Unavailable on transient DB failures
 - **Edge Function Preheating**: Zero cold-start via worker module pre-import on deploy
@@ -386,6 +387,7 @@ Key settings in `config.env`:
 - **自动扩缩容**: 基于负载指标的垂直提升与水平副本扩展
 - **双运行时**: Deno（旧版兼容）或 Bun.js Edge Runtime（推荐，内存占用减少 92%）
 - **SSE 实时日志**: 基于 Server-Sent Events 的实时日志流，`journalctl --follow` 推送
+- **原生异步队列**: 基于 PostgreSQL LISTEN/NOTIFY 的零依赖高并发调度底座，支持 AI 大模型任务与 MQTT 消息队列
 - **WebSocket 任务通知**: 基于 Bun 原生 WebSocket 的实时任务进度推送
 - **DB 优雅降级**: 指数退避重试 + 503 Service Unavailable，PostgreSQL 短暂不可用时不丢请求
 - **Edge Function 预热**: 部署后自动预导入模块，消除首次请求冷启动
