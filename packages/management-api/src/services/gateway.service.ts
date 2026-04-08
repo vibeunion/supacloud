@@ -154,6 +154,110 @@ export class GatewayService {
         }
     }
 
+    // --- Custom Rate Limiting ---
+
+    private readonly MAX_RATE_LIMIT = { second: 100, minute: 2000, hour: 50000 };
+
+    private getServiceForPath(basePath: string, projectRef: string): string | null {
+        if (basePath.startsWith("/rest/v1") || basePath.startsWith("/graphql/v1")) return `svc-pgrst-${projectRef}`;
+        if (basePath.startsWith("/auth/v1")) return `svc-gotrue-${projectRef}`;
+        if (basePath.startsWith("/functions/v1")) return `svc-functions-${projectRef}`;
+        if (basePath.startsWith("/storage/v1/")) return `svc-storage-${projectRef}`;
+        if (basePath.startsWith("/realtime/v1")) return `svc-realtime-${projectRef}`;
+        return null;
+    }
+
+    private hashStr(str: string): string {
+        let hash = 0;
+        for (let i = 0; i < str.length; i++) {
+            hash = (hash << 5) - hash + str.charCodeAt(i);
+            hash |= 0;
+        }
+        return Math.abs(hash).toString(36);
+    }
+
+    async setCustomRouteRateLimit(projectRef: string, basePath: string, limits: { second?: number; minute?: number; hour?: number }): Promise<boolean> {
+        try {
+            const serviceName = this.getServiceForPath(basePath, projectRef);
+            if (!serviceName) {
+                logger.error(`[GatewayService] Cannot determine upstream service for custom path: ${basePath}`);
+                return false;
+            }
+
+            // Cap limits by platform max
+            const second = Math.min(limits.second ?? this.MAX_RATE_LIMIT.second, this.MAX_RATE_LIMIT.second);
+            const minute = Math.min(limits.minute ?? this.MAX_RATE_LIMIT.minute, this.MAX_RATE_LIMIT.minute);
+            const hour = Math.min(limits.hour ?? this.MAX_RATE_LIMIT.hour, this.MAX_RATE_LIMIT.hour);
+
+            const routeName = `route-custom-${projectRef}-${this.hashStr(basePath)}`;
+
+            // 1. Check if we need to infer hosts from parent route
+            const parentRouteName = `route-${serviceName}`;
+            const parentRes = await this.kongRequest(`/routes/${parentRouteName}`);
+            const hosts = parentRes?.hosts as string[] | undefined;
+
+            // 2. Upsert custom route
+            await this.kongRequest(`/routes/${routeName}`, "PUT", {
+                name: routeName,
+                service: { name: serviceName },
+                paths: [basePath],
+                hosts: (hosts && hosts.length > 0) ? hosts : undefined,
+                strip_path: parentRes?.strip_path ?? true,
+                preserve_host: true,
+            });
+
+            // 3. Re-attach necessary routing plugins from the parent (e.g., request-transformer, cors, response-transformer)
+            // They are crucial for tenant context.
+            await this.upsertRoutePlugin(routeName, "request-transformer", {
+                add: { headers: [`x-project-ref:${projectRef}`] }
+            });
+            await this.upsertRoutePlugin(routeName, "cors", {
+                origins: DEFAULT_CORS_ORIGINS,
+                methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+                headers: DEFAULT_CORS_HEADERS,
+                exposed_headers: DEFAULT_CORS_EXPOSED,
+                credentials: true,
+                max_age: 3600,
+            });
+            await this.upsertRoutePlugin(routeName, "response-transformer", {
+                add: { headers: ["Access-Control-Allow-Origin:*"] }
+            });
+
+            // 4. Apply rate limiting plugin
+            const pluginsRes = await this.kongRequest(`/routes/${routeName}/plugins`);
+            const existingRl = pluginsRes?.data?.find((p: Record<string, unknown>) => p.name === "rate-limiting");
+            
+            const payload = {
+                name: "rate-limiting",
+                config: { second, minute, hour, policy: "local" },
+            };
+
+            if (existingRl) {
+                await this.kongRequest(`/plugins/${existingRl.id}`, "PATCH", payload);
+            } else {
+                await this.kongRequest(`/routes/${routeName}/plugins`, "POST", payload);
+            }
+
+            logger.info(`[GatewayService] Custom rate limit set for ${projectRef} at ${basePath}`);
+            return true;
+        } catch (error: unknown) {
+            logger.error(`Failed to set custom rate limit for ${projectRef}:`, (error instanceof Error ? error.message : String(error)));
+            return false;
+        }
+    }
+
+    async removeCustomRouteRateLimit(projectRef: string, basePath: string): Promise<boolean> {
+        try {
+            const routeName = `route-custom-${projectRef}-${this.hashStr(basePath)}`;
+            await this.kongRequest(`/routes/${routeName}`, "DELETE");
+            logger.info(`[GatewayService] Custom rate limit removed for ${projectRef} at ${basePath}`);
+            return true;
+        } catch (error: unknown) {
+            logger.error(`Failed to remove custom rate limit for ${projectRef}:`, (error instanceof Error ? error.message : String(error)));
+            return false;
+        }
+    }
+
     // --- CORS ---
 
     async setCors(projectRef: string, origins: string[] = DEFAULT_CORS_ORIGINS): Promise<boolean> {
