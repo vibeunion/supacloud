@@ -1,6 +1,6 @@
 import { customAlphabet, nanoid as originalNanoid } from "nanoid";
 
-// 只使用小写字母和数字，避免与 shell 脚本验证冲突
+// Use only lowercase letters and numbers to avoid conflicts with shell script validation
 const generateProjectRefId = customAlphabet("abcdefghijklmnopqrstuvwxyz0123456789", 10);
 
 // JWT Header

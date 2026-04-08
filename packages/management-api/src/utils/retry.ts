@@ -8,7 +8,7 @@ export interface RetryOptions {
 }
 
 /**
- * 通用重试包裹函数
+ * General retry wrapper function
  */
 export async function withRetry<T>(
     operationName: string,
