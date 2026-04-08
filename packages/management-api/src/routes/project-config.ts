@@ -417,4 +417,92 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
       }),
       detail: { tags: ["projects"], summary: "Set project rate limit" },
     }
+  )
+
+  // --- Tenant Custom Path Rate Limiting ---
+
+  // Set custom rate limit for a specific path
+  .put(
+    "/:ref/gateway/custom-rate-limits",
+    async ({ params, body }) => {
+      // 1. Fetch current settings to persist and check limits
+      const settings = await projectService.getProjectSettings(params.ref);
+      if (!settings) return status(404, { error: "Project not found" });
+
+      const currentLimits = (settings.rate_limits as Record<string, unknown>) || {};
+      const customPaths = Object.keys(currentLimits);
+      
+      // Enforce max 20 custom rate-limit routes per project
+      if (customPaths.length >= 20 && !customPaths.includes(body.path)) {
+          return status(400, { error: "Maximum of 20 custom rate limit routes allowed per project" });
+      }
+
+      // 2. Apply to Kong
+      const success = await gatewayService.setCustomRouteRateLimit(params.ref, body.path, {
+          second: body.second,
+          minute: body.minute,
+          hour: body.hour,
+      });
+
+      if (!success) {
+          return status(500, { error: "Failed to update custom route rate limit in gateway" });
+      }
+
+      // 3. Persist in database
+      await projectService.updateProjectSettings(params.ref, {
+          ...settings,
+          rate_limits: {
+            ...currentLimits,
+            [body.path]: { second: body.second, minute: body.minute, hour: body.hour }
+          }
+      });
+
+      return { success: true, message: `Custom rate limit set for ${body.path}` };
+    },
+    {
+      params: t.Object({ ref: t.String() }),
+      body: t.Object({
+        path: t.String({ description: "Base path to rate limit. e.g. /rest/v1/payments" }),
+        second: t.Optional(t.Number()),
+        minute: t.Optional(t.Number()),
+        hour: t.Optional(t.Number()),
+      }),
+      detail: { tags: ["projects"], summary: "Set a custom rate limit for a specific path" },
+    }
+  )
+
+  // Remove custom rate limit for a specific path
+  .delete(
+    "/:ref/gateway/custom-rate-limits",
+    async ({ params, body }) => {
+      // 1. Fetch current settings
+      const settings = await projectService.getProjectSettings(params.ref);
+      if (!settings) return status(404, { error: "Project not found" });
+
+      // 2. Remove from Kong
+      const success = await gatewayService.removeCustomRouteRateLimit(params.ref, body.path);
+      if (!success) {
+          return status(500, { error: "Failed to remove custom route rate limit from gateway" });
+      }
+
+      // 3. Persist removal in DB
+      const currentLimits = (settings.rate_limits as Record<string, unknown>) || {};
+      if (currentLimits[body.path]) {
+          delete currentLimits[body.path];
+          await projectService.updateProjectSettings(params.ref, {
+              ...settings,
+              rate_limits: currentLimits
+          });
+      }
+
+      return { success: true, message: `Custom rate limit removed for ${body.path}` };
+    },
+    {
+      params: t.Object({ ref: t.String() }),
+      body: t.Object({
+        path: t.String({ description: "Base path to rate limit. e.g. /rest/v1/payments" })
+      }),
+      detail: { tags: ["projects"], summary: "Remove a custom rate limit for a specific path" },
+    }
   );
+
