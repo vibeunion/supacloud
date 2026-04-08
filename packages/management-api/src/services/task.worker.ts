@@ -311,7 +311,7 @@ export class TaskWorker {
 
         logger.error(`[TaskWorker] Saga compensation triggered for ${project_ref} failed permanently at ${task_type}`);
 
-        // Mark project as paused/error (仅对创建流程)
+        // Mark project as paused/error (Only for creation process)
         if (task_type.startsWith("provision_")) {
             await projectRepository.updateStatus(project_ref, "paused");
         }

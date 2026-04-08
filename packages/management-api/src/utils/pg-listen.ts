@@ -1,13 +1,13 @@
 /**
- * @veo-ai/pg-listen — 零依赖 PostgreSQL LISTEN/NOTIFY 客户端
+ * @veo-ai/pg-listen — Zero-dependency PostgreSQL LISTEN/NOTIFY client
  *
- * 使用 Bun.connect() 原生 TCP 直接实现 PostgreSQL Wire Protocol，
- * 仅覆盖 StartupMessage / MD5认证 / SimpleQuery / NotificationResponse。
- * 完全不引入任何第三方依赖。
+ * Implements PostgreSQL Wire Protocol directly using Bun.connect() over native TCP,
+ * covering only StartupMessage / MD5 Auth / SimpleQuery / NotificationResponse.
+ * Uses completely zero third-party dependencies.
  */
 import { createHash } from "crypto";
 
-// ---- 类型 ----
+// ---- Types ----
 
 interface PgConnectOptions {
 	host: string;
@@ -23,7 +23,7 @@ export interface PgListenerHandle {
 	close(): void;
 }
 
-// ---- DSN 解析 ----
+// ---- DSN Parsing ----
 
 function parseDSN(url: string): PgConnectOptions {
 	const u = new URL(url);
@@ -36,7 +36,7 @@ function parseDSN(url: string): PgConnectOptions {
 	};
 }
 
-// ---- 字节工具 ----
+// ---- Byte Utilities ----
 
 function allocBuffer(size: number): DataView {
 	return new DataView(new ArrayBuffer(size));
@@ -57,14 +57,14 @@ function concatBytes(...parts: Uint8Array[]): Uint8Array<ArrayBuffer> {
 	return result;
 }
 
-// ---- PostgreSQL Wire Protocol 消息构造 ----
+// ---- PostgreSQL Wire Protocol Message Construction ----
 
 function buildStartupMessage(user: string, database: string): Uint8Array {
 	const params = encodeString(`user\0${user}\0database\0${database}\0\0`);
 	const totalLen = 8 + params.length;
 	const header = allocBuffer(8);
 	header.setInt32(0, totalLen);
-	header.setInt32(4, 196608); // 协议版本 3.0
+	header.setInt32(4, 196608); // Protocol version 3.0
 	return concatBytes(new Uint8Array(header.buffer), params);
 }
 
@@ -97,7 +97,7 @@ function buildSimpleQuery(sqlText: string): Uint8Array {
 	return concatBytes(new Uint8Array(header.buffer), payload);
 }
 
-// ---- 读取工具 ----
+// ---- Read Utilities ----
 
 function readInt32BE(buf: Uint8Array, offset: number): number {
 	return new DataView(buf.buffer, buf.byteOffset).getInt32(offset);
@@ -114,12 +114,12 @@ function sliceToString(buf: Uint8Array, start: number, end: number): string {
 	return new TextDecoder().decode(buf.subarray(start, end));
 }
 
-// ---- 认证类型 ----
+// ---- Auth Types ----
 const AUTH_OK = 0;
 const AUTH_CLEARTEXT = 3;
 const AUTH_MD5 = 5;
 
-// ---- 主入口 ----
+// ---- Main Entry ----
 
 export function createPgListener(
 	databaseUrl: string,
@@ -139,7 +139,7 @@ export function createPgListener(
 			const msgLen = readInt32BE(pending, 1);
 			const totalLen = 1 + msgLen;
 
-			if (pending.length < totalLen) break; // 分包，等下一次 data
+			if (pending.length < totalLen) break; // Incomplete packet, wait for next data event
 
 			const body = pending.subarray(5, totalLen);
 
@@ -162,7 +162,7 @@ export function createPgListener(
 						const sql = channels.map((ch) => `LISTEN ${ch}`).join("; ");
 						socket.write(buildSimpleQuery(sql));
 						listenSent = true;
-						console.log(`[pg-listen] 已连接并订阅: ${channels.join(", ")}`);
+						console.log(`[pg-listen] Connected and subscribed to: ${channels.join(", ")}`);
 					}
 					break;
 				}
@@ -182,7 +182,7 @@ export function createPgListener(
 					try {
 						onNotify(channel, payload);
 					} catch (err) {
-						console.error(`[pg-listen] 通知回调异常 (channel=${channel}):`, err);
+						console.error(`[pg-listen] Notification callback error (channel=${channel}):`, err);
 					}
 					break;
 				}
@@ -190,10 +190,10 @@ export function createPgListener(
 				case 0x45: {
 					// 'E' — ErrorResponse
 					const text = sliceToString(body, 0, body.length).replace(/\0/g, " | ");
-					console.error(`[pg-listen] PostgreSQL 错误: ${text}`);
+					console.error(`[pg-listen] PostgreSQL Error: ${text}`);
 					break;
 				}
-				// 其他消息 ('S','K','T','C','D','N') 直接忽略
+				// Ignore other messages ('S','K','T','C','D','N') directly
 			}
 
 			pending = pending.subarray(totalLen);
@@ -218,16 +218,16 @@ export function createPgListener(
 					processMessages(socket);
 				},
 				error(_socket: any, err: any) {
-					console.error("[pg-listen] 连接错误:", err);
+					console.error("[pg-listen] Connection error:", err);
 				},
 				close() {
 					if (closed) return;
-					console.log("[pg-listen] 连接已断开，3 秒后重连...");
+					console.log("[pg-listen] Connection lost, reconnecting in 3 seconds...");
 					reconnectTimer = setTimeout(connect, 3000);
 				}
 			}
 		}).catch((err) => {
-			console.error("[pg-listen] 建立连接失败:", err);
+			console.error("[pg-listen] Failed to establish connection:", err);
 			if (!closed) {
 				reconnectTimer = setTimeout(connect, 3000);
 			}
