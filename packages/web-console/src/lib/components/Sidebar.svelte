@@ -19,7 +19,8 @@
     ScrollText,
     Radio,
     Globe,
-    Glasses
+    Glasses,
+    Activity
   } from "lucide-svelte";
   import { page } from '$app/stores';
 
@@ -46,6 +47,7 @@
     { title: $t("Sidebar.database_advisor"), icon: ShieldCheck, href: `/project/${currentProject.ref}/reports/advisors` },
     { title: $t("Navigation.reports"), icon: Glasses, href: `/project/${currentProject.ref}/reports/api-overview` },
     { title: $t("Navigation.logs"), icon: ScrollText, href: `/project/${currentProject.ref}/logs` },
+    { title: "后台任务 (Tasks)", icon: Activity, href: `/project/${currentProject.ref}/tasks` },
     { title: $t("Navigation.settings"), icon: Settings, href: `/project/${currentProject.ref}/settings` },
   ] : []);
 
