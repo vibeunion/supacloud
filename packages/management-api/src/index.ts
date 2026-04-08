@@ -626,6 +626,9 @@ async function bootstrap() {
     const { taskWorker } = await import("./services/task.worker");
     taskWorker.start();
 
+    const { startQueueWorker } = await import("./workers/queue.worker");
+    startQueueWorker();
+
     const { edgeRuntimeManager } = await import("./plugins/edge-runtime-manager");
     edgeRuntimeManager.start().catch((err: unknown) => logger.error("[EdgeRuntime] Failed to start", { error: err instanceof Error ? err.message : String(err) }));
 
@@ -658,6 +661,8 @@ if (import.meta.main) {
       taskWorker.stop();
       const { edgeRuntimeManager } = await import("./plugins/edge-runtime-manager");
       edgeRuntimeManager.stop();
+      const { stopQueueWorker } = await import("./workers/queue.worker");
+      stopQueueWorker();
     } catch (e: unknown) { logger.debug("[index] suppressed error", { error: e instanceof Error ? e.message : String(e) }); }
 
     try {
