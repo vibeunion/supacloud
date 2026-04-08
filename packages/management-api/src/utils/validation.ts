@@ -1,10 +1,10 @@
 /**
- * 通用输入校验工具
+ * General input validation utilities
  */
 
 /**
- * 校验项目名称等标识符是否合法
- * 仅允许字母、数字和下划线，防止 SQL 注入或 Shell 注入
+ * Validate whether identifiers like project names are valid
+ * Only allow letters, numbers, and underscores to prevent SQL or Shell injection
  */
 export function isValidIdentifier(identifier: string): boolean {
     if (!identifier) return false;
@@ -12,7 +12,7 @@ export function isValidIdentifier(identifier: string): boolean {
 }
 
 /**
- * 断言标识符合法，不合法则抛错
+ * Assert that the identifier is valid, throw error if invalid
  */
 export function assertValidIdentifier(name: string, identifier: string): void {
     if (!isValidIdentifier(identifier)) {
@@ -21,7 +21,7 @@ export function assertValidIdentifier(name: string, identifier: string): void {
 }
 
 /**
- * 校验数据库名称 (允许短横线)
+ * Validate database name (allow hyphens)
  */
 export function isValidDbName(identifier: string): boolean {
     if (!identifier) return false;
@@ -29,7 +29,7 @@ export function isValidDbName(identifier: string): boolean {
 }
 
 /**
- * 断言数据库名称合法，不合法则抛错
+ * Assert that the database name is valid, throw error if invalid
  */
 export function assertValidDbName(name: string, identifier: string): void {
     if (!isValidDbName(identifier)) {
