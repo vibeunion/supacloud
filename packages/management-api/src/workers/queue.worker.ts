@@ -4,9 +4,9 @@ import { db, TaskStatus } from "../db/index";
 import { createPgListener, type PgListenerHandle } from "../utils/pg-listen";
 
 /**
- * 这是一个通用的长周期任务/消息队列底座 (Queue Base)
- * 基于原生 PostgreSQL LISTEN/NOTIFY 的事件驱动架构实现。
- * 为类似消息队列、MQTT、以及后台模型生成等长时间连接的异步服务提供统一调度。
+ * A general-purpose long-running task / message queue foundation (Queue Base)
+ * Implemented based on native PostgreSQL LISTEN/NOTIFY event-driven architecture.
+ * Provides unified scheduling for long-lived asynchronous services like message queues, MQTT, and background AI model generation.
  */
 export class QueueWorker {
   private listener: PgListenerHandle | null = null;
@@ -16,26 +16,26 @@ export class QueueWorker {
   public start() {
     logger.info("[QueueWorker] Starting foundation queue worker...");
 
-    // 1. 建立 LISTEN/NOTIFY 监听
+    // 1. Establish LISTEN/NOTIFY subscription
     this.listener = createPgListener(
       config.databaseUrl,
-      ["task_pending"], // `project_tasks` 触发器通过 `task_pending` 广播插入事件
+      ["task_pending"], // `project_tasks` trigger broadcasts insert events via `task_pending`
       (channel, payload) => {
         logger.debug(`[QueueWorker] Received event on ${channel}: ${payload}`);
         if (channel === "task_pending") {
-          // 收到新任务立刻丢进微任务/异步池触发处理，防阻塞 Socket 收包
+          // Immediately dispatch new tasks to the microtask/async pool to prevent blocking the socket
           setImmediate(() => this.triggerSweep());
         }
       }
     );
 
-    // 2. 启动 10s 定时兜底扫描
-    // 防止网络抖动断连丢包（LISTEN 无法感知连接断开期间插入的记录）
+    // 2. Start a 10s fallback sweep timer
+    // Prevents missed events due to network jitter/disconnects (LISTEN cannot detect records inserted during disconnects)
     this.intervalTimer = setInterval(() => {
       this.triggerSweep();
     }, 10_000);
 
-    // 3. 服务启动时的首扫（处理启动前积压数据）
+    // 3. Initial sweep on service startup (to process any backlogged data)
     this.triggerSweep();
   }
 
@@ -50,14 +50,14 @@ export class QueueWorker {
   }
 
   /**
-   * 触发执行器
-   * 负责拉起循环防止重入（Re-entrancyLock）
+   * Trigger the executor
+   * Responsible for initiating the loop and preventing re-entrancy (Re-entrancyLock)
    */
   private triggerSweep() {
     if (this.isProcessing) return;
     this.isProcessing = true;
     
-    // 不用 await 直接 catch，避免阻塞发起方
+    // Catch errors without await to avoid blocking the caller
     this.processPendingTasks()
       .catch((error) => {
         logger.error("[QueueWorker] Error during sweep:", { error: error instanceof Error ? error.message : String(error) });
@@ -68,8 +68,8 @@ export class QueueWorker {
   }
 
   private async processPendingTasks() {
-    // 每次限制 10 条处理，并发过高可能引发数据库连接池拥堵
-    // FOR UPDATE SKIP LOCKED 解决单点 / 多节点部署下的排它锁读：只能拿到没被其他进程锁住的记录
+    // Limit to 10 records per batch; excessive concurrency could cause database connection pool congestion
+    // FOR UPDATE SKIP LOCKED solves exclusive partial locking in single/multi-node deployments: only fetches records not locked by other processes
     const tasks = await db.sql`
       SELECT id, project_ref, task_type, payload 
       FROM project_tasks 
@@ -85,7 +85,7 @@ export class QueueWorker {
 
     logger.info(`[QueueWorker] Fetched ${tasks.length} pending tasks from queue.`);
 
-    // 串行执行或并行执行，考虑到长周期特性，这里可以采用串形或者限制 Promise.all()
+    // Serial or parallel execution. Given long-running characteristics, serial execution or rate-limited Promise.all() can be used here.
     for (const task of tasks) {
       try {
         await this.processTask(task);
@@ -102,18 +102,18 @@ export class QueueWorker {
       }
     }
 
-    // 如果一次直接拉满了 10 个，说明大概率队列里还有数据，直接连环追击
+    // If a full batch of 10 was fetched, it's highly likely there is more data in the queue; immediately trigger the next sweep
     if (tasks.length === 10) {
       setImmediate(() => this.triggerSweep());
     }
   }
 
   /**
-   * 按业务策略处理具体单一任务
+   * Process a single specific task based on business logic via strategic dispatch
    */
   private async processTask(task: any) {
-    // 锁定状态 (从 pending -> processing)
-    // 注意：虽然 SKIP LOCKED 锁了该行，但状态机更新能够使得其他扫描跳过它
+    // Lock the status (pending -> processing)
+    // Note: Although SKIP LOCKED locks the row, updating the state machine ensures other sweeps skip it
     await db.sql`
       UPDATE project_tasks
       SET status = 'processing', updated_at = NOW()
@@ -125,25 +125,59 @@ export class QueueWorker {
     const taskType = String(task.task_type);
     const payload = task.payload as Record<string, any>;
     
-    // ----- TASK DISPATCHER (业务分发路由) -----
-    if (taskType.startsWith('ai_')) {
-        // [AI 引擎调度] eg. 'ai_generation', 'ai_vision', etc.
-        logger.info(`[QueueWorker] Dispatching AI Inference Task: ${task.id}`);
-        // TODO: 接入 SiliconFlow SDK，或是其他的远程 RPC 调用
-        await Bun.sleep(1000); // 占位逻辑
+    // ----- TASK DISPATCHER (Business Routing) -----
+    if (taskType.startsWith('ai_') || taskType === 'edge_function') {
+        // [AI Engine Dispatch] eg. 'ai_generation', 'ai_vision', etc.
+        logger.info(`[QueueWorker] Dispatching Edge Function / AI Task: ${task.id} for project ${task.project_ref}`);
+        
+        // We do not directly invoke heavy workloads like SiliconFlow here. Instead, as a foundational mechanism,
+        // we POST the task back to the specific Edge Function unique to each tenant's environment.
+        // This achieves concurrency control, Token protection, and flexible business isolation.
+        const webhookUrl = payload.webhook_url;
+        if (webhookUrl) {
+           const maxRetries = payload.max_retries || 1;
+           let lastError = null;
+           for(let i = 0; i < maxRetries; i++) {
+             try {
+               const res = await fetch(webhookUrl, {
+                 method: "POST",
+                 headers: {
+                   "Content-Type": "application/json",
+                   // If the tenant has configured custom Tokens, they can be passed via headers
+                   ...(payload.headers || {})
+                 },
+                 body: JSON.stringify(payload.data || {})
+               });
+               if (!res.ok) {
+                 throw new Error(`Edge Function returned HTTP ${res.status}`);
+               }
+               logger.info(`[QueueWorker] Webhook dispatch succeeded: ${task.id}`);
+               lastError = null;
+               break; // Break out of the retry loop upon success
+             } catch(err) {
+               lastError = err;
+               logger.warn(`[QueueWorker] Webhook dispatch attempt ${i+1} failed: ${task.id}`);
+               await Bun.sleep(1000);
+             }
+           }
+           if (lastError) throw lastError;
+        } else {
+           logger.error(`[QueueWorker] Missing webhook_url for AI task ${task.id}`);
+           throw new Error("Missing webhook_url in task payload");
+        }
     } 
     else if (taskType === 'mqtt_event' || taskType === 'ws_push') {
-        // [通讯底座调度] 长连接/消息队列的推送与消息下发
+        // [Communication Foundation Dispatch] Long connections/message queue pushes and dispatch
         logger.info(`[QueueWorker] Delivering Web/MQTT messaging payload for Task: ${task.id}`);
-        await Bun.sleep(200); // 占位逻辑
+        await Bun.sleep(200); // Placeholder logic
     } 
     else {
-        // [管理层底座调度] 例如 provision_db, provision_s3 等基础设施任务 
+        // [Management Foundation Dispatch] E.g., provision_db, provision_s3 and other infrastructure tasks
         logger.info(`[QueueWorker] Processing infrastructure task [${taskType}] for Project [${task.project_ref}]`);
-        await Bun.sleep(500); // 占位逻辑
+        await Bun.sleep(500); // Placeholder logic
     }
 
-    // 更新任务完成
+    // Update task as completed
     await db.sql`
       UPDATE project_tasks
       SET status = 'completed', updated_at = NOW()
@@ -153,7 +187,7 @@ export class QueueWorker {
   }
 }
 
-// 单例模式，提供优雅启动与退出钩子
+// Singleton pattern, providing graceful startup and shutdown hooks
 const workerInstances: QueueWorker[] = [];
 
 export function startQueueWorker() {
