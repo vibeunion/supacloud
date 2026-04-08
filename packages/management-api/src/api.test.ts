@@ -11,7 +11,7 @@ const mockSql = mock((strings: string | TemplateStringsArray) => {
             { id: "org-uuid", name: "Default Org", slug: "default", created_at: new Date(), updated_at: new Date() }
         ]);
     }
-    // 默认返回空数组，满足 Projects 等其他列表查询
+    // Default return empty array to satisfy Projects and other list queries
     return Promise.resolve([]);
 });
 (mockSql as unknown as { unsafe: ReturnType<typeof mock> }).unsafe = mock(() => Promise.resolve([]));
@@ -45,7 +45,7 @@ describe("Management API Integration Tests", () => {
                 })
             );
 
-            // 允许 200 (正常) 或 500 (环境不稳定下的数据库连接问题)
+            // Allow 200 (Normal) or 500 (Database connection issues under unstable environment)
             expect([200, 500]).toContain(response.status);
             if (response.status === 200) {
                 const data = await response.json();
@@ -97,7 +97,7 @@ describe("Management API Integration Tests", () => {
                 })
             );
 
-            // 允许 200 (正常) 或 500 (环境不稳定下的数据库连接问题)
+            // Allow 200 (Normal) or 500 (Database connection issues under unstable environment)
             expect([200, 500]).toContain(response.status);
             if (response.status === 200) {
                 const data = await response.json();
@@ -114,7 +114,7 @@ describe("Management API Integration Tests", () => {
                 })
             );
 
-            // 允许 404 (业务预期) 或 500 (环境不稳定下的数据库连接问题，暂时忽略)
+            // Allow 404 (Business expected) or 500 (Database connection issues under unstable environment, temporarily ignored)
             expect([404, 500]).toContain(response.status);
         });
 
