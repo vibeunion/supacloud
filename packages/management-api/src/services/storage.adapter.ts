@@ -8,6 +8,7 @@ import { S3Client } from "bun";
 export interface StorageDriver {
   createBucket(projectRef: string, bucket: string): Promise<boolean>;
   deleteBucket(projectRef: string, bucket: string): Promise<boolean>;
+  emptyBucket(projectRef: string, bucket: string): Promise<boolean>;
   listBuckets(projectRef: string): Promise<{id: string, name: string, public: boolean, size: string}[]>;
   uploadFile(projectRef: string, bucket: string, key: string, data: Blob | Buffer | Uint8Array | ArrayBuffer, contentType: string): Promise<boolean>;
   deleteFile(projectRef: string, bucket: string, key: string): Promise<boolean>;
@@ -38,6 +39,18 @@ export class JuiceFSDriver implements StorageDriver {
       await fs.rm(this.getBasePath(projectRef, bucket), { recursive: true, force: true });
       return true;
     } catch (e) {
+      return false;
+    }
+  }
+
+  async emptyBucket(projectRef: string, bucket: string): Promise<boolean> {
+    try {
+      const bucketPath = this.getBasePath(projectRef, bucket);
+      await fs.rm(bucketPath, { recursive: true, force: true });
+      await fs.mkdir(bucketPath, { recursive: true });
+      return true;
+    } catch (e: unknown) {
+      logger.error('JuiceFS emptyBucket error:', { error: e instanceof Error ? e.message : String(e) });
       return false;
     }
   }
@@ -141,6 +154,23 @@ export class S3Driver implements StorageDriver {
 
   async deleteBucket(projectRef: string, bucket: string): Promise<boolean> {
     return true; // No distinct deletion for logical prefix unless we rm -rf objects
+  }
+
+  async emptyBucket(projectRef: string, bucket: string): Promise<boolean> {
+    const creds = await this.getCreds(projectRef);
+    if (!creds?.accessKey || !creds?.secretKey) return false;
+
+    try {
+      const s3 = this.getClient(creds as { accessKey: string, secretKey: string, endpoint: string, bucket: string });
+      const res = await s3.list({ prefix: `${bucket}/` });
+      const contents = res.contents || [];
+
+      await Promise.all(contents.map((file: Record<string, unknown>) => s3.file(String(file.key)).delete()));
+      return true;
+    } catch (e: unknown) {
+      logger.error('S3 emptyBucket error:', { error: e instanceof Error ? e.message : String(e) });
+      return false;
+    }
   }
 
   async listBuckets(projectRef: string): Promise<{id: string, name: string, public: boolean, size: string}[]> {

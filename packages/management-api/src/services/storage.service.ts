@@ -125,13 +125,18 @@ export class StorageService {
   /**
    * Tenant Initialization hooks
    */
-  static async createBucket(projectRef: string): Promise<{ success: boolean; error?: string }> {
-    const success = await getStorageDriver().createBucket(projectRef, "");
+  static async createBucket(projectRef: string, bucketName: string = ""): Promise<{ success: boolean; error?: string }> {
+    const success = await getStorageDriver().createBucket(projectRef, bucketName);
     return { success };
   }
 
-  static async deleteBucket(projectRef: string): Promise<{ success: boolean; error?: string }> {
-    const success = await getStorageDriver().deleteBucket(projectRef, "");
+  static async deleteBucket(projectRef: string, bucketName: string = ""): Promise<{ success: boolean; error?: string }> {
+    const success = await getStorageDriver().deleteBucket(projectRef, bucketName);
+    return { success };
+  }
+
+  static async emptyBucket(projectRef: string, bucketName: string): Promise<{ success: boolean; error?: string }> {
+    const success = await getStorageDriver().emptyBucket(projectRef, bucketName);
     return { success };
   }
 
