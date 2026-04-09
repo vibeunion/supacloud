@@ -228,27 +228,35 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         const contentType = headers['content-type'] || 'application/octet-stream';
 
         try {
-            let fileBuffer: Buffer;
+            let fileBuffer = Buffer.from(await request.arrayBuffer());
             let fileMimeType = contentType;
 
-            if (contentType.includes('multipart/form-data')) {
-                const rawBuffer = Buffer.from(await request.arrayBuffer());
+            const isActuallyMultipart = fileBuffer.length > 20 && 
+                                        fileBuffer.subarray(0, 2).toString('utf-8') === '--' && 
+                                        fileBuffer.indexOf(Buffer.from('Content-Disposition: form-data;')) !== -1;
+
+            if (contentType.includes('multipart/form-data') || isActuallyMultipart) {
                 const boundaryMatch = contentType.match(/boundary=(?:"([^"]+)"|([^;]+))/i);
-                const boundary = boundaryMatch ? (boundaryMatch[1] || boundaryMatch[2]) : '';
+                let boundary = boundaryMatch ? (boundaryMatch[1] || boundaryMatch[2]) : '';
+
+                if (!boundary && isActuallyMultipart) {
+                    const firstLineEnd = fileBuffer.indexOf(Buffer.from('\r\n'));
+                    if (firstLineEnd !== -1) boundary = fileBuffer.subarray(2, firstLineEnd).toString('utf-8');
+                }
 
                 if (boundary) {
-                    const extracted = extractMultipartFileFast(rawBuffer, boundary);
+                    const extracted = extractMultipartFileFast(fileBuffer, boundary);
                     if (extracted) {
                         fileBuffer = extracted.fileBuffer;
-                        fileMimeType = extracted.mimeType;
+                        if (!fileMimeType || fileMimeType === 'application/octet-stream' || contentType.includes('multipart')) {
+                            fileMimeType = extracted.mimeType;
+                        }
                     } else {
                         return status(400, { statusCode: '400', error: 'Bad Request', message: 'No file found in multipart data' });
                     }
                 } else {
                     return status(400, { statusCode: '400', error: 'Bad Request', message: 'Missing multipart boundary' });
                 }
-            } else {
-                fileBuffer = Buffer.from(await request.arrayBuffer());
             }
             
             const auth = headers['authorization'];
@@ -279,27 +287,35 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         const contentType = headers['content-type'] || 'application/octet-stream';
 
         try {
-            let fileBuffer: Buffer;
+            let fileBuffer = Buffer.from(await request.arrayBuffer());
             let fileMimeType = contentType;
 
-            if (contentType.includes('multipart/form-data')) {
-                const rawBuffer = Buffer.from(await request.arrayBuffer());
+            const isActuallyMultipart = fileBuffer.length > 20 && 
+                                        fileBuffer.subarray(0, 2).toString('utf-8') === '--' && 
+                                        fileBuffer.indexOf(Buffer.from('Content-Disposition: form-data;')) !== -1;
+
+            if (contentType.includes('multipart/form-data') || isActuallyMultipart) {
                 const boundaryMatch = contentType.match(/boundary=(?:"([^"]+)"|([^;]+))/i);
-                const boundary = boundaryMatch ? (boundaryMatch[1] || boundaryMatch[2]) : '';
+                let boundary = boundaryMatch ? (boundaryMatch[1] || boundaryMatch[2]) : '';
+
+                if (!boundary && isActuallyMultipart) {
+                    const firstLineEnd = fileBuffer.indexOf(Buffer.from('\r\n'));
+                    if (firstLineEnd !== -1) boundary = fileBuffer.subarray(2, firstLineEnd).toString('utf-8');
+                }
 
                 if (boundary) {
-                    const extracted = extractMultipartFileFast(rawBuffer, boundary);
+                    const extracted = extractMultipartFileFast(fileBuffer, boundary);
                     if (extracted) {
                         fileBuffer = extracted.fileBuffer;
-                        fileMimeType = extracted.mimeType;
+                        if (!fileMimeType || fileMimeType === 'application/octet-stream' || contentType.includes('multipart')) {
+                            fileMimeType = extracted.mimeType;
+                        }
                     } else {
                         return status(400, { statusCode: '400', error: 'Bad Request', message: 'No file found in multipart data' });
                     }
                 } else {
                     return status(400, { statusCode: '400', error: 'Bad Request', message: 'Missing multipart boundary' });
                 }
-            } else {
-                fileBuffer = Buffer.from(await request.arrayBuffer());
             }
             
             const auth = headers['authorization'];
