@@ -151,6 +151,32 @@ const app = new Elysia()
     return dispatchFunction(projectRef, c.params.functionName, c.request, c.set.headers as Record<string, string>);
   })
 
+  // Fallback routes for Kong strip_path: true scenarios
+  // e.g. Kong strips /functions/v1 and sends /delegation/ocr directly
+  .all("/:functionName/*", async (c) => {
+    const projectRef = c.headers["x-project-ref"];
+    if (!projectRef) {
+      c.set.headers["x-relay-error"] = "true";
+      return new Response(JSON.stringify({ error: "Missing x-project-ref" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json", "x-relay-error": "true" },
+      });
+    }
+    return dispatchFunction(projectRef, c.params.functionName, c.request, c.set.headers as Record<string, string>);
+  })
+
+  .all("/:functionName", async (c) => {
+    const projectRef = c.headers["x-project-ref"];
+    if (!projectRef) {
+      c.set.headers["x-relay-error"] = "true";
+      return new Response(JSON.stringify({ error: "Missing x-project-ref" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json", "x-relay-error": "true" },
+      });
+    }
+    return dispatchFunction(projectRef, c.params.functionName, c.request, c.set.headers as Record<string, string>);
+  })
+
   .listen(PORT);
 
 console.log(`🚀 Edge Runtime on :${PORT} (${POOL_SIZE} workers)`);
