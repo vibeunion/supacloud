@@ -21,8 +21,29 @@ export async function apiClient(url: string, options: RequestInit = {}): Promise
 
   const response = await fetch(url, { ...options, headers });
   
-  // Handle 401 Unauthorized globally by redirecting to login page
+  // Handle 401 Unauthorized globally by redirecting to login page (with Race-Condition Pre-Flight check)
   if (response.status === 401 && typeof window !== 'undefined' && window.location.pathname !== '/login') {
+    if (token) {
+      try {
+        // Pre-flight validation to see if the token is ACTUALLY gone 
+        // (prevents kicks when another tab/process just refreshed it or temporary network hiccup)
+        const verifyRes = await fetch('/auth/verify', {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ token })
+        });
+        const verifyData = await verifyRes.json();
+        
+        if (verifyData.valid) {
+          // Token is actually still valid! Swallow the 401 logout to prevent false disconnect
+          return response;
+        }
+      } catch (e) {
+        // Fall through to logout
+      }
+    }
+    
+    // Truly expired
     localStorage.removeItem("supacloud_session");
     localStorage.removeItem("supacloud_master_token");
     window.location.href = "/login";

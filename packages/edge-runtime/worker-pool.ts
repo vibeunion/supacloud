@@ -39,10 +39,10 @@ export class WorkerPool {
 
   async dispatch(opts: DispatchOptions): Promise<Response> {
     this.totalRequests++;
-    return new Promise(async (resolve) => {
+    return new Promise<Response>((resolve, reject) => {
       const worker = this.idle.pop();
       if (worker) {
-        await this.execute(worker, opts, resolve);
+        this.execute(worker, opts, resolve).catch(reject);
       } else {
         this.queue.push({ opts, resolve });
       }
@@ -54,13 +54,33 @@ export class WorkerPool {
     opts: DispatchOptions,
     resolve: (r: Response) => void,
   ) {
+    let resolved = false;
+    const safeResolve = (r: Response) => {
+      if (resolved) return; // Prevent double-resolve (e.g. timeout + late response)
+      resolved = true;
+      resolve(r);
+    };
+
     const timeout = setTimeout(() => {
-      resolve(new Response("Gateway Timeout", { status: 504 }));
+      safeResolve(new Response("Gateway Timeout", { status: 504 }));
       this.recycle(worker);
     }, this.config.requestTimeout);
 
-    const headers: Record<string, string> = {};
-    opts.request.headers.forEach((v, k) => (headers[k] = v));
+    // Preserve duplicate headers (e.g. set-cookie) by using getSetCookie() + entries()
+    const headers: Record<string, string | string[]> = {};
+    opts.request.headers.forEach((v, k) => {
+      const lower = k.toLowerCase();
+      if (lower === "set-cookie") {
+        // Handled below
+      } else {
+        headers[k] = v;
+      }
+    });
+    // set-cookie must be sent as an array to preserve multiple values
+    const cookies = (opts.request.headers as any).getSetCookie?.();
+    if (cookies && cookies.length > 0) {
+      headers["set-cookie"] = cookies;
+    }
 
     let body: ArrayBuffer | null = null;
     if (
@@ -70,7 +90,7 @@ export class WorkerPool {
       // Enforce body size limit to prevent OOM
       const contentLength = opts.request.headers.get('content-length');
       if (contentLength && parseInt(contentLength) > MAX_BODY_SIZE) {
-        resolve(new Response(JSON.stringify({ error: `Request body too large (max ${MAX_BODY_SIZE / 1024 / 1024}MB)` }), {
+        safeResolve(new Response(JSON.stringify({ error: `Request body too large (max ${MAX_BODY_SIZE / 1024 / 1024}MB)` }), {
           status: 413,
           headers: { "Content-Type": "application/json" },
         }));
@@ -80,7 +100,7 @@ export class WorkerPool {
       }
       body = await opts.request.arrayBuffer();
       if (body.byteLength > MAX_BODY_SIZE) {
-        resolve(new Response(JSON.stringify({ error: `Request body too large (max ${MAX_BODY_SIZE / 1024 / 1024}MB)` }), {
+        safeResolve(new Response(JSON.stringify({ error: `Request body too large (max ${MAX_BODY_SIZE / 1024 / 1024}MB)` }), {
           status: 413,
           headers: { "Content-Type": "application/json" },
         }));
@@ -102,15 +122,24 @@ export class WorkerPool {
 
     const onMsg = (msg: {
       status: number;
-      headers: Record<string, string>;
+      headers: Record<string, string | string[]>;
       body: ArrayBuffer;
     }) => {
       clearTimeout(timeout);
       worker.removeListener("error", onErr);
-      resolve(
+      // Reconstruct Headers from the serialized map, preserving multi-value headers
+      const resHeaders = new Headers();
+      for (const [k, v] of Object.entries(msg.headers)) {
+        if (Array.isArray(v)) {
+          for (const val of v) resHeaders.append(k, val);
+        } else {
+          resHeaders.set(k, v);
+        }
+      }
+      safeResolve(
         new Response(msg.body, {
           status: msg.status,
-          headers: msg.headers,
+          headers: resHeaders,
         }),
       );
       this.recycle(worker);
@@ -120,7 +149,7 @@ export class WorkerPool {
       clearTimeout(timeout);
       worker.removeListener("message", onMsg);
       console.error("[Pool] Worker error:", err);
-      resolve(new Response("Internal Error", { status: 500 }));
+      safeResolve(new Response("Internal Error", { status: 500 }));
       this.replaceWorker(worker);
     };
 

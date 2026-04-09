@@ -1,12 +1,14 @@
 import type { Subprocess } from "bun";
 import { logger } from "../utils/logger";
 import path from "node:path";
+import { execSync } from "node:child_process";
 
 /**
  * Manages the Edge Function Runner as a child Bun process.
  * The runner uses deno-compat shim to execute user-authored Deno-style functions.
  *
  * Handles lifecycle: start, health check, crash recovery with exponential backoff.
+ * Includes port-exclusivity guard to prevent SO_REUSEPORT ghost processes.
  */
 export class EdgeRuntimeManager {
   private proc: Subprocess | null = null;
@@ -20,7 +22,55 @@ export class EdgeRuntimeManager {
     },
   ) {}
 
+  /**
+   * Kill any stale processes listening on our target port.
+   * Prevents SO_REUSEPORT ghost processes from co-existing with the new runtime,
+   * which would cause ~50% of requests to be routed to the old (stale) process.
+   */
+  private killStaleListeners(): void {
+    const port = this.config.port;
+    try {
+      // Use fuser (part of psmisc, widely available) or fall back to lsof
+      const out = execSync(
+        `lsof -iTCP:${port} -sTCP:LISTEN -t 2>/dev/null || fuser ${port}/tcp 2>/dev/null || true`,
+        { encoding: "utf-8" },
+      ).trim();
+      if (!out) return;
+
+      const myPid = process.pid;
+      const childPid = this.proc?.pid;
+      const pids = out
+        .split(/[\s\n]+/)
+        .map((s) => parseInt(s.trim(), 10))
+        .filter((p) => !isNaN(p) && p !== myPid && p !== childPid);
+
+      for (const pid of pids) {
+        logger.warn(`[EdgeRuntime] Killing stale listener pid=${pid} on port ${port}`);
+        try { process.kill(pid, "SIGTERM"); } catch { /* already dead */ }
+      }
+
+      if (pids.length > 0) {
+        // Brief wait for graceful shutdown
+        execSync("sleep 0.5");
+        // Force-kill survivors
+        for (const pid of pids) {
+          try {
+            process.kill(pid, 0); // alive check
+            process.kill(pid, "SIGKILL");
+            logger.warn(`[EdgeRuntime] Force-killed stale pid=${pid}`);
+          } catch { /* already gone */ }
+        }
+        logger.info(`[EdgeRuntime] Cleared ${pids.length} stale process(es) on port ${port}`);
+      }
+    } catch {
+      // lsof/fuser may not be installed — best-effort guard
+    }
+  }
+
   async start() {
+    // Kill any orphan processes on the port BEFORE spawning
+    this.killStaleListeners();
+
     // Determine runner path (cwd is packages/management-api)
     const runnerPath = path.resolve(process.cwd(), "../edge-runtime/server.ts");
 

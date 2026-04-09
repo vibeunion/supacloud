@@ -140,9 +140,21 @@ parentPort?.on("message", async (msg: WorkerMessage) => {
         );
       }
 
-      // Serialize response
-      const resHeaders: Record<string, string> = {};
-      response.headers.forEach((v, k) => (resHeaders[k] = v));
+      // Serialize response — preserve duplicate headers (e.g. set-cookie)
+      const resHeaders: Record<string, string | string[]> = {};
+      response.headers.forEach((v, k) => {
+        const lower = k.toLowerCase();
+        if (lower === "set-cookie") {
+          // Handled below to preserve all values
+        } else {
+          resHeaders[k] = v;
+        }
+      });
+      // Preserve all set-cookie values as an array
+      const cookies = (response.headers as any).getSetCookie?.();
+      if (cookies && cookies.length > 0) {
+        resHeaders["set-cookie"] = cookies;
+      }
       const resBody = await response.arrayBuffer();
       parentPort?.postMessage(
         { status: response.status, headers: resHeaders, body: resBody },

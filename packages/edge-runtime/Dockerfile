@@ -1,0 +1,25 @@
+FROM oven/bun:1
+
+WORKDIR /app
+
+# Copy dependency manifests
+COPY package.json bun.lock* ./
+COPY packages/edge-runtime/package.json ./packages/edge-runtime/
+
+# Install dependencies
+RUN bun install
+
+# Copy source code
+COPY packages/edge-runtime ./packages/edge-runtime
+
+WORKDIR /app/packages/edge-runtime
+
+EXPOSE 9000
+
+ENV PORT=9000
+ENV NODE_ENV=production
+ENV EDGE_FUNCTIONS_DIR=/app/supabase/functions
+ENV TENANTS_DIR=/etc/supabase/tenants
+
+# Start the edge runtime server
+CMD ["bun", "run", "server.ts"]
