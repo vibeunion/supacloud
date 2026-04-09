@@ -373,6 +373,7 @@ export class GatewayService {
         projectRef: string;
         stripPath?: boolean;
         readTimeout?: number;
+        protocols?: string[];
     }): Promise<void> {
         // 1. Upsert Service
         await this.kongRequest(`/services/${opts.name}`, "PUT", {
@@ -392,6 +393,7 @@ export class GatewayService {
             hosts: opts.hosts.length > 0 ? opts.hosts : undefined,
             strip_path: opts.stripPath ?? true,
             preserve_host: true,
+            protocols: opts.protocols || ["http", "https"],
         });
 
         // 3. Inject x-project-ref using request-transformer plugin
@@ -446,7 +448,17 @@ export class GatewayService {
             await this.ensureServiceAndRoute({ name: `svc-gotrue-${projectRef}`, url: `http://${hostIp}:${gotruePort}`, paths: ["/auth/v1"], hosts, projectRef });
             await this.ensureServiceAndRoute({ name: `svc-functions-${projectRef}`, url: `http://${hostIp}:9000`, paths: ["/functions/v1"], hosts, projectRef, readTimeout: 500_000 });  // 500s for AI/OCR inference
             await this.ensureServiceAndRoute({ name: `svc-storage-${projectRef}`, url: `http://${hostIp}:9090`, paths: ["/storage/v1/"], hosts, projectRef });
-            await this.ensureServiceAndRoute({ name: `svc-realtime-${projectRef}`, url: `http://${hostIp}:4000`, paths: ["/realtime/v1"], hosts, projectRef, readTimeout: 86400000 });
+            await this.ensureServiceAndRoute({
+                name: `svc-realtime-${projectRef}`,
+                // Realtime WebSocket endpoint is /socket/websocket internally.
+                // Keep strip_path=true on /realtime/v1 and prepend /socket at service URL.
+                url: `http://${hostIp}:4000/socket`,
+                paths: ["/realtime/v1"],
+                hosts,
+                projectRef,
+                readTimeout: 86400000,
+                protocols: ["http", "https", "ws", "wss"],
+            });
 
             // Ensure Studio routes (Management API proxy loopback for SPA fallback)
             const studioDomain = `studio-${projectRef}.${config.baseDomain}`;

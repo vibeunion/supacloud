@@ -71,8 +71,8 @@ export class EdgeRuntimeManager {
     // Kill any orphan processes on the port BEFORE spawning
     this.killStaleListeners();
 
-    // Determine runner path (cwd is packages/management-api)
-    const runnerPath = path.resolve(process.cwd(), "../edge-runtime/server.ts");
+    // Determine runner path (cwd may be project root)
+    const runnerPath = path.resolve(import.meta.dir, "../../../edge-runtime/server.ts");
 
     this.proc = Bun.spawn(["bun", "run", runnerPath], {
       env: {

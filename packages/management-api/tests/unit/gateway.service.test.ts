@@ -41,4 +41,46 @@ describe("GatewayService", () => {
 
         globalThis.fetch = originalFetch;
     });
+
+    test("setupUpstream should configure realtime route for supabase-js websocket", async () => {
+        const originalFetch = globalThis.fetch;
+        const calls: Array<{ url: string; method: string; body: Record<string, unknown> | null }> = [];
+
+        globalThis.fetch = mock((input: string | URL | Request, init?: RequestInit) => {
+            const url = typeof input === "string"
+                ? input
+                : input instanceof URL
+                    ? input.toString()
+                    : input.url;
+            const method = init?.method || "GET";
+            let body: Record<string, unknown> | null = null;
+            if (typeof init?.body === "string" && init.body.length > 0) {
+                try {
+                    body = JSON.parse(init.body) as Record<string, unknown>;
+                } catch {
+                    body = null;
+                }
+            }
+            calls.push({ url, method, body });
+            return Promise.resolve(new Response(JSON.stringify({ data: [] })));
+        }) as unknown as typeof fetch;
+
+        const result = await gatewayService.setupUpstream("testref123", 3000, 9999);
+        expect(result.success).toBe(true);
+
+        const realtimeService = calls.find(
+            (c) => c.method === "PUT" && c.url.includes("/services/svc-realtime-testref123")
+        );
+        expect(realtimeService).toBeDefined();
+        expect(realtimeService?.body?.url).toBe("http://127.0.0.1:4000/socket");
+
+        const realtimeRoute = calls.find(
+            (c) => c.method === "PUT" && c.url.includes("/routes/route-svc-realtime-testref123")
+        );
+        expect(realtimeRoute).toBeDefined();
+        expect(realtimeRoute?.body?.paths).toEqual(["/realtime/v1"]);
+        expect(realtimeRoute?.body?.protocols).toEqual(["http", "https", "ws", "wss"]);
+
+        globalThis.fetch = originalFetch;
+    });
 });
