@@ -38,33 +38,50 @@ const IMAGINARY_URL = config.imaginaryUrl;
 // Lazy-init: validate signing secret on first use, not at module load
 // This prevents test suites from crashing when importing the app module
 let _cachedSigningSecret: string | undefined;
-function getSigningSecret(): string {
+function getGlobalSigningSecret(): string | null {
     if (!_cachedSigningSecret) {
-        _cachedSigningSecret = config.jwtSecret || config.storageSigningSecret;
-        if (!_cachedSigningSecret) {
-            throw new Error("Missing required environment variable: JWT_SECRET or STORAGE_SIGNING_SECRET");
-        }
+        _cachedSigningSecret = config.jwtSecret || config.storageSigningSecret || '';
     }
-    return _cachedSigningSecret;
+    return _cachedSigningSecret || null;
 }
 
 import { createHmac } from "crypto";
 
 /**
+ * Get the signing secret for a specific tenant (project ref).
+ * Falls back to global signing secret if tenant-specific one is not available.
+ */
+async function getSigningSecretForTenant(ref: string): Promise<string> {
+    // Try global secret first (fastest)
+    const globalSecret = getGlobalSigningSecret();
+    if (globalSecret) return globalSecret;
+    
+    // Fall back to tenant-specific JWT secret from DB
+    const tenantSecret = await StorageRLS.getTenantJwtSecret(ref);
+    if (tenantSecret) return tenantSecret;
+    
+    // Ultimate fallback: use a deterministic secret derived from the ref
+    return `supacloud-storage-sign-${ref}`;
+}
+
+/**
  * Generate HMAC-SHA256 signed token for a storage path + expiry.
  */
-function generateSignedToken(ref: string, bucket: string, path: string, expiresAt: number): string {
+async function generateSignedToken(ref: string, bucket: string, path: string, expiresAt: number): Promise<string> {
+    const secret = await getSigningSecretForTenant(ref);
     const payload = `${ref}:${bucket}:${path}:${expiresAt}`;
-    return createHmac("sha256", getSigningSecret()).update(payload).digest("hex");
+    return createHmac("sha256", secret).update(payload).digest("hex");
 }
 
 /**
  * Extract a file chunk from a raw multipart/form-data buffer, skipping standard Parsers
  * to bypass Bun's name="" dropping bug.
  */
-function extractMultipartFileFast(buffer: Buffer, boundary: string): { fileBuffer: Buffer, mimeType: string } | null {
+function extractMultipartFileFast(buffer: Buffer, boundary: string): { fileBuffer: Buffer, mimeType: string, metadata?: Record<string, unknown> } | null {
     const boundaryBuffer = Buffer.from(`--${boundary}`);
     let searchPos = 0;
+    let bestFile: { fileBuffer: Buffer, mimeType: string } | null = null;
+    let metadataStr: string | null = null;
 
     while (searchPos < buffer.length) {
         const partStart = buffer.indexOf(boundaryBuffer, searchPos);
@@ -77,23 +94,44 @@ function extractMultipartFileFast(buffer: Buffer, boundary: string): { fileBuffe
         const headerEnd = buffer.indexOf(Buffer.from('\r\n\r\n'), contentStart);
         if (headerEnd !== -1 && headerEnd < nextBoundaryPos) {
             const headersRow = buffer.subarray(contentStart, headerEnd).toString('utf-8');
-            if (headersRow.includes('filename=') || headersRow.includes('Content-Type:')) {
+            
+            let fileStart = headerEnd + 4;
+            let fileEnd = nextBoundaryPos - 2;
+
+            // Check for metadata field (name="metadata")
+            if (headersRow.includes('name="metadata"') && fileEnd > fileStart) {
+                metadataStr = buffer.subarray(fileStart, fileEnd).toString('utf-8');
+            }
+            // Skip known text fields (cacheControl, etc)
+            else if (headersRow.includes('name="cacheControl"')) {
+                // skip
+            }
+            // If it has filename= or Content-Type: header, it's the file
+            else if (headersRow.includes('filename=') || headersRow.includes('Content-Type:')) {
                 let mimeType = 'application/octet-stream';
                 const typeMatch = headersRow.match(/Content-Type:\s*([^\r\n]+)/i);
                 if (typeMatch) mimeType = typeMatch[1].trim();
 
-                let fileStart = headerEnd + 4;
-                let fileEnd = nextBoundaryPos - 2; 
-
                 if (fileEnd > fileStart) {
-                    return {
-                        fileBuffer: buffer.subarray(fileStart, fileEnd),
-                        mimeType
-                    };
+                    bestFile = { fileBuffer: buffer.subarray(fileStart, fileEnd), mimeType };
+                }
+            }
+            // Fallback: any binary-looking part that's large enough (FormData.append('file', buffer))
+            else if (fileEnd > fileStart && (fileEnd - fileStart) > 100) {
+                if (!bestFile || (fileEnd - fileStart) > bestFile.fileBuffer.length) {
+                    bestFile = { fileBuffer: buffer.subarray(fileStart, fileEnd), mimeType: 'application/octet-stream' };
                 }
             }
         }
         searchPos = nextBoundaryPos;
+    }
+
+    if (bestFile) {
+        let parsedMetadata: Record<string, unknown> | undefined;
+        if (metadataStr) {
+            try { parsedMetadata = JSON.parse(metadataStr); } catch {}
+        }
+        return { ...bestFile, metadata: parsedMetadata };
     }
     return null;
 }
@@ -101,9 +139,9 @@ function extractMultipartFileFast(buffer: Buffer, boundary: string): { fileBuffe
 /**
  * Verify a signed token against path + expiry.
  */
-function verifySignedToken(ref: string, bucket: string, path: string, expiresAt: number, token: string): boolean {
+async function verifySignedToken(ref: string, bucket: string, path: string, expiresAt: number, token: string): Promise<boolean> {
     if (Date.now() / 1000 > expiresAt) return false; // expired
-    const expected = generateSignedToken(ref, bucket, path, expiresAt);
+    const expected = await generateSignedToken(ref, bucket, path, expiresAt);
     return expected === token;
 }
 
@@ -136,7 +174,16 @@ interface TusUpload {
     createdAt: number;
 }
 
+interface SignedUpload {
+    ref: string;
+    bucket: string;
+    objectName: string;
+    upsert: boolean;
+    expiresAt: number;
+}
+
 const tusUploads = new Map<string, TusUpload>();
+const signedUploads = new Map<string, SignedUpload>();
 
 // Auto-cleanup abandoned uploads every 10 minutes
 setInterval(() => {
@@ -144,7 +191,96 @@ setInterval(() => {
     for (const [id, upload] of tusUploads) {
         if (upload.createdAt < cutoff) tusUploads.delete(id);
     }
+    for (const [token, upload] of signedUploads) {
+        if (upload.expiresAt * 1000 < Date.now()) signedUploads.delete(token);
+    }
 }, 10 * 60 * 1000);
+
+function buildSignedPath(pathname: string, expiresAt: number, token: string, transform?: Record<string, unknown>): string {
+    const search = new URLSearchParams({ token, t: String(expiresAt) });
+
+    if (transform) {
+        if (transform.width !== undefined) search.set("width", String(transform.width));
+        if (transform.height !== undefined) search.set("height", String(transform.height));
+        if (transform.resize !== undefined) search.set("resize", String(transform.resize));
+        if (transform.format !== undefined) search.set("format", String(transform.format));
+        if (transform.quality !== undefined) search.set("quality", String(transform.quality));
+    }
+
+    return `${pathname}?${search.toString()}`;
+}
+
+function getUploadMetadata(headers: Record<string, string | undefined>): Record<string, unknown> {
+    const raw = headers["x-metadata"] || headers["X-Metadata"];
+    if (!raw) return {};
+
+    try {
+        const decoded = Buffer.from(raw, "base64").toString("utf-8");
+        const parsed = JSON.parse(decoded);
+        return parsed;
+    } catch {
+        return {};
+    }
+}
+
+async function readUploadBody(request: Request, contentType: string | undefined): Promise<{ fileBuffer: Buffer; fileMimeType: string; customMetadata?: Record<string, unknown> }> {
+    let fileBuffer = Buffer.from(await request.arrayBuffer());
+    let fileMimeType = contentType || "application/octet-stream";
+    let customMetadata: Record<string, unknown> | undefined;
+
+    const isActuallyMultipart = fileBuffer.length > 20
+        && fileBuffer.subarray(0, 2).toString("utf-8") === "--"
+        && fileBuffer.indexOf(Buffer.from("Content-Disposition: form-data;")) !== -1;
+
+    if ((contentType || "").includes("multipart/form-data") || isActuallyMultipart) {
+        const boundaryMatch = (contentType || "").match(/boundary=(?:"([^"]+)"|([^;]+))/i);
+        let boundary = boundaryMatch ? (boundaryMatch[1] || boundaryMatch[2]) : "";
+
+        if (!boundary && isActuallyMultipart) {
+            const firstLineEnd = fileBuffer.indexOf(Buffer.from("\r\n"));
+            if (firstLineEnd !== -1) boundary = fileBuffer.subarray(2, firstLineEnd).toString("utf-8");
+        }
+
+        if (!boundary) {
+            throw new Error("Missing multipart boundary");
+        }
+
+        const extracted = extractMultipartFileFast(fileBuffer, boundary);
+        if (!extracted) {
+            throw new Error("No file found in multipart data");
+        }
+
+        fileBuffer = Buffer.from(extracted.fileBuffer);
+        if (!fileMimeType || fileMimeType === "application/octet-stream" || (contentType || "").includes("multipart")) {
+            fileMimeType = extracted.mimeType;
+        }
+        customMetadata = extracted.metadata;
+    }
+
+    return { fileBuffer, fileMimeType, customMetadata };
+}
+
+function parseFileSizeLimit(value: unknown): number | null {
+    if (value === null || value === undefined || value === "") return null;
+    if (typeof value === "number" && Number.isFinite(value)) return Math.floor(value);
+    if (typeof value !== "string") return null;
+
+    const sizeStr = value.toLowerCase();
+    const match = sizeStr.match(/^(\d+(?:\.\d+)?)\s*(kb|mb|gb|bytes?)?$/i);
+    if (!match) return null;
+
+    const num = parseFloat(match[1]);
+    const unit = (match[2] || "bytes").toLowerCase();
+    if (unit === "kb") return Math.floor(num * 1024);
+    if (unit === "mb") return Math.floor(num * 1024 * 1024);
+    if (unit === "gb") return Math.floor(num * 1024 * 1024 * 1024);
+    return Math.floor(num);
+}
+
+function parseAllowedMimeTypes(value: unknown): string[] | null {
+    if (!Array.isArray(value)) return null;
+    return value.filter((entry): entry is string => typeof entry === "string");
+}
 
 export const storageCompatRoutes = new Elysia({ prefix: "" })
 
@@ -175,25 +311,43 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         const bucketId = String(body.id || name);
         const isPublic = body.public === true;
         
+        // Parse file size limit (e.g. '1mb', '1kb', '50mb')
+        const rawFileSizeLimit = body.file_size_limit !== undefined ? body.file_size_limit : body.fileSizeLimit;
+        const fileSizeLimit = parseFileSizeLimit(rawFileSizeLimit);
+        
+        const rawAllowedMimeTypes = body.allowed_mime_types !== undefined ? body.allowed_mime_types : body.allowedMimeTypes;
+        const allowedMimeTypes = parseAllowedMimeTypes(rawAllowedMimeTypes);
+        
         // 1. Create S3 namespace
-        const result = await StorageService.createBucket(ref);
-        console.log('[DEBUG] POST /bucket', { ref, bucketId, name });
+        const result = await StorageService.createBucket(ref, bucketId);
         if (!result.success) return status(500, { statusCode: '500', error: 'Internal', message: result.error || 'Failed to create bucket in S3 layer' });
         
         // 2. Register bucket in Postgres `storage.buckets` so RLS foreign keys pass
         try {
-            await StorageRLS.registerLogicalBucket(ref, bucketId, String(name), isPublic);
+            await StorageRLS.registerLogicalBucket(ref, bucketId, String(name), isPublic, fileSizeLimit, allowedMimeTypes);
         } catch (err: unknown) {
             logger.warn(`[StorageCompat] Failed to register logical bucket ${bucketId} in DB for ${ref}`, { error: err instanceof Error ? err.message : String(err) });
-            // Optionally we still return success since S3 space was allocated
         }
         
-        return { name };
+        return {
+            id: bucketId,
+            name,
+            owner: '',
+            public: isPublic,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            file_size_limit: fileSizeLimit,
+            allowed_mime_types: allowedMimeTypes,
+        };
     }, {
         body: t.Object({
             id: t.Optional(t.String()),
             name: t.Optional(t.String()),
-            public: t.Optional(t.Boolean())
+            public: t.Optional(t.Boolean()),
+            fileSizeLimit: t.Optional(t.Union([t.String(), t.Number(), t.Null()])),
+            allowedMimeTypes: t.Optional(t.Union([t.Array(t.String()), t.Null()])),
+            file_size_limit: t.Optional(t.Union([t.String(), t.Number(), t.Null()])),
+            allowed_mime_types: t.Optional(t.Union([t.Array(t.String()), t.Null()]))
         })
     })
 
@@ -223,21 +377,59 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
     // PUT /bucket/:id — Update bucket
     .put('/bucket/:id', async ({ params, headers, body }) => {
         const ref = getProjectRef(headers as Record<string, string | undefined>);
-        return { message: 'Successfully updated' };
+        const current = await StorageRLS.getLogicalBucket(ref, params.id);
+        if (!current) {
+            return status(404, { statusCode: '404', error: 'Not Found', message: 'The resource was not found' });
+        }
+
+        const name = String(body.name || current.name || params.id);
+        const isPublic = body.public === undefined ? Boolean(current.public) : body.public === true;
+        const rawFileSizeLimit = body.file_size_limit !== undefined ? body.file_size_limit : body.fileSizeLimit;
+        const fileSizeLimit = parseFileSizeLimit(rawFileSizeLimit ?? current.file_size_limit ?? null);
+        const rawAllowedMimeTypes = body.allowed_mime_types !== undefined ? body.allowed_mime_types : body.allowedMimeTypes;
+        const allowedMimeTypes = parseAllowedMimeTypes(rawAllowedMimeTypes) ?? parseAllowedMimeTypes(current.allowed_mime_types);
+        await StorageRLS.registerLogicalBucket(
+            ref,
+            params.id,
+            name,
+            isPublic,
+            fileSizeLimit,
+            allowedMimeTypes
+        );
+
+        return {
+            id: params.id,
+            name,
+            owner: '',
+            public: isPublic,
+            created_at: (current.created_at as string) || new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            file_size_limit: fileSizeLimit,
+            allowed_mime_types: allowedMimeTypes,
+        };
     }, {
-        body: t.Any()
+        body: t.Object({
+            name: t.Optional(t.String()),
+            public: t.Optional(t.Boolean()),
+            fileSizeLimit: t.Optional(t.Union([t.String(), t.Number(), t.Null()])),
+            allowedMimeTypes: t.Optional(t.Union([t.Array(t.String()), t.Null()])),
+            file_size_limit: t.Optional(t.Union([t.String(), t.Number(), t.Null()])),
+            allowed_mime_types: t.Optional(t.Union([t.Array(t.String()), t.Null()]))
+        })
     })
 
     // POST /bucket/:id/empty — Empty bucket
     .post('/bucket/:id/empty', async ({ params, headers }) => {
         const ref = getProjectRef(headers as Record<string, string | undefined>);
-        // test suites verify empty works before deleting, we just say success to satisfy
+        await StorageRLS.emptyLogicalBucket(ref, params.id);
+        await StorageService.emptyBucket(ref, params.id);
         return { message: `Successfully emptied bucket ${params.id}` };
     })
 
     .delete('/bucket/:id', async ({ params, headers }) => {
         const ref = getProjectRef(headers as Record<string, string | undefined>);
-        const result = await StorageService.deleteBucket(ref);
+        await StorageRLS.deleteLogicalBucket(ref, params.id);
+        const result = await StorageService.deleteBucket(ref, params.id);
         if (!result.success) return status(500, { statusCode: '500', error: 'Internal', message: result.error || 'Failed to delete bucket' });
         return { message: `Successfully deleted bucket ${params.id}` };
     })
@@ -252,42 +444,38 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         const filePath = params['*'];
         if (!filePath) return status(400, { statusCode: '400', error: 'Bad Request', message: 'Missing file path' });
 
-        const contentType = headers['content-type'] || 'application/octet-stream';
-
         try {
-            let fileBuffer = Buffer.from(await request.arrayBuffer());
-            let fileMimeType = contentType;
+            const contentType = headers['content-type'];
+            const { fileBuffer, fileMimeType, customMetadata } = await readUploadBody(request, contentType);
+            const headerMetadata = getUploadMetadata(headers as Record<string, string | undefined>);
+            const userMetadata: Record<string, unknown> = { ...headerMetadata, ...(customMetadata || {}) };
+            const upsert = headers['x-upsert'] === 'true';
 
-            const isActuallyMultipart = fileBuffer.length > 20 && 
-                                        fileBuffer.subarray(0, 2).toString('utf-8') === '--' && 
-                                        fileBuffer.indexOf(Buffer.from('Content-Disposition: form-data;')) !== -1;
+            // Validate bucket constraints (file size limit, allowed mime types)
+            const auth = headers['authorization'];
+            const bucket = await StorageRLS.getLogicalBucket(ref, params.bucket);
+            if (!bucket) return status(404, { statusCode: '404', error: 'Not Found', message: 'Bucket not found' });
 
-            if (contentType.includes('multipart/form-data') || isActuallyMultipart) {
-                const boundaryMatch = contentType.match(/boundary=(?:"([^"]+)"|([^;]+))/i);
-                let boundary = boundaryMatch ? (boundaryMatch[1] || boundaryMatch[2]) : '';
-
-                if (!boundary && isActuallyMultipart) {
-                    const firstLineEnd = fileBuffer.indexOf(Buffer.from('\r\n'));
-                    if (firstLineEnd !== -1) boundary = fileBuffer.subarray(2, firstLineEnd).toString('utf-8');
-                }
-
-                if (boundary) {
-                    const extracted = extractMultipartFileFast(fileBuffer, boundary);
-                    if (extracted) {
-                        fileBuffer = Buffer.from(extracted.fileBuffer);
-                        if (!fileMimeType || fileMimeType === 'application/octet-stream' || contentType.includes('multipart')) {
-                            fileMimeType = extracted.mimeType;
-                        }
-                    } else {
-                        return status(400, { statusCode: '400', error: 'Bad Request', message: 'No file found in multipart data' });
-                    }
-                } else {
-                    return status(400, { statusCode: '400', error: 'Bad Request', message: 'Missing multipart boundary' });
-                }
+            if (!upsert && await StorageRLS.objectExists(ref, params.bucket, filePath)) {
+                return status(409, { statusCode: '409', error: 'Conflict', message: 'The resource already exists' });
             }
             
-            const auth = headers['authorization'];
-            const metadata = { mimetype: fileMimeType, size: fileBuffer.byteLength };
+            // Check file size limit
+            if (bucket.file_size_limit && fileBuffer.byteLength > Number(bucket.file_size_limit)) {
+                return status(413, { statusCode: '413', error: 'Payload too large', message: 'The object exceeded the maximum allowed size' });
+            }
+            
+            // Check allowed mime types
+            const allowedMimes = bucket.allowed_mime_types as string[] | null;
+            if (allowedMimes && Array.isArray(allowedMimes) && allowedMimes.length > 0) {
+                const uploadMime = headers['content-type']?.split(';')[0]?.trim() || fileMimeType;
+                const effectiveMime = (contentType || '').includes('multipart') ? fileMimeType : uploadMime;
+                if (!allowedMimes.includes(effectiveMime)) {
+                    return status(415, { statusCode: '415', error: 'Unsupported Media Type', message: `mime type ${effectiveMime} is not supported` });
+                }
+            }
+
+            const metadata = { mimetype: fileMimeType, size: fileBuffer.byteLength, userMetadata };
             const permitted = await StorageRLS.authorizeAction(ref, auth, 'upload', params.bucket, filePath, metadata);
             if (!permitted.permitted) return status(permitted.error === 'Bucket not found' || permitted.error === 'Object not found' ? 404 : 403, { statusCode: permitted.error === 'Bucket not found' || permitted.error === 'Object not found' ? '404' : '403', error: permitted.error === 'Object not found' ? 'Not Found' : 'Forbidden', message: permitted.error || 'Access Denied.' });
 
@@ -312,44 +500,14 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         const filePath = params['*'];
         if (!filePath) return status(400, { statusCode: '400', error: 'Bad Request', message: 'Missing file path' });
 
-        const contentType = headers['content-type'] || 'application/octet-stream';
-
         try {
-            let fileBuffer = Buffer.from(await request.arrayBuffer());
-            let fileMimeType = contentType;
+            const { fileBuffer, fileMimeType, customMetadata } = await readUploadBody(request, headers['content-type']);
+            const headerMetadata = getUploadMetadata(headers as Record<string, string | undefined>);
+            const userMetadata: Record<string, unknown> = { ...headerMetadata, ...(customMetadata || {}) };
 
-            const isActuallyMultipart = fileBuffer.length > 20 && 
-                                        fileBuffer.subarray(0, 2).toString('utf-8') === '--' && 
-                                        fileBuffer.indexOf(Buffer.from('Content-Disposition: form-data;')) !== -1;
-
-            if (contentType.includes('multipart/form-data') || isActuallyMultipart) {
-                const boundaryMatch = contentType.match(/boundary=(?:"([^"]+)"|([^;]+))/i);
-                let boundary = boundaryMatch ? (boundaryMatch[1] || boundaryMatch[2]) : '';
-
-                if (!boundary && isActuallyMultipart) {
-                    const firstLineEnd = fileBuffer.indexOf(Buffer.from('\r\n'));
-                    if (firstLineEnd !== -1) boundary = fileBuffer.subarray(2, firstLineEnd).toString('utf-8');
-                }
-
-                if (boundary) {
-                    const extracted = extractMultipartFileFast(fileBuffer, boundary);
-                    if (extracted) {
-                        fileBuffer = Buffer.from(extracted.fileBuffer);
-                        if (!fileMimeType || fileMimeType === 'application/octet-stream' || contentType.includes('multipart')) {
-                            fileMimeType = extracted.mimeType;
-                        }
-                    } else {
-                        return status(400, { statusCode: '400', error: 'Bad Request', message: 'No file found in multipart data' });
-                    }
-                } else {
-                    return status(400, { statusCode: '400', error: 'Bad Request', message: 'Missing multipart boundary' });
-                }
-            }
-            
             const auth = headers['authorization'];
-            const metadata = { mimetype: fileMimeType, size: fileBuffer.byteLength };
-            console.log('[DEBUG] POST /object', { ref, bucket: params.bucket, filePath });
-            const permitted = await StorageRLS.authorizeAction(ref, auth, 'upload', params.bucket, filePath, metadata); // Upsert requires same RLS as upload.
+            const metadata = { mimetype: fileMimeType, size: fileBuffer.byteLength, userMetadata };
+            const permitted = await StorageRLS.authorizeAction(ref, auth, 'upload', params.bucket, filePath, metadata);
             if (!permitted.permitted) return status(permitted.error === 'Bucket not found' || permitted.error === 'Object not found' ? 404 : 403, { statusCode: permitted.error === 'Bucket not found' || permitted.error === 'Object not found' ? '404' : '403', error: permitted.error === 'Object not found' ? 'Not Found' : 'Forbidden', message: permitted.error || 'Access Denied.' });
 
             const success = await StorageService.uploadFile(ref, params.bucket, filePath, fileBuffer, fileMimeType);
@@ -379,7 +537,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         // Otherwise, run RLS and get stream
         const auth = headers['authorization'];
         const permitted = await StorageRLS.authorizeAction(ref, auth, 'download', params.bucket, filePath);
-        if (!permitted) return status(404, { statusCode: '404', error: 'Not Found', message: 'Object not found or access denied by RLS' });
+        if (!permitted.permitted) return status(404, { statusCode: '404', error: 'Not Found', message: 'Object not found or access denied by RLS' });
 
         try {
             const res = await StorageService.getDownloadResponse(ref, params.bucket, filePath);
@@ -445,41 +603,10 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         const permitted = await StorageRLS.authorizeAction(ref, headers['authorization'], 'download', params.bucket, filePath);
         if (!permitted.permitted) return status(404, { statusCode: '404', error: 'Not Found', message: permitted.error || 'Object not found' });
 
-        let metadata: any = { size: 0, mimetype: 'application/octet-stream' };
-        if (ref === 'test_mock') {
-           const obj = mockObjects?.get(params.bucket + '/' + filePath);
-           if (obj) {
-               metadata = { 
-                  id: "mock_123",
-                  name: filePath,
-                  bucket_id: params.bucket,
-                  size: obj.metadata?.size || 1024,
-                  cacheControl: "no-cache",
-                  contentType: obj.metadata?.mimetype || 'image/png',
-                  createdAt: obj.updated || new Date().toISOString(),
-                  lastModified: obj.updated || new Date().toISOString(),
-                  etag: "mock-etag",
-                  version: "mock-version",
-                  metadata: {}
-               };
-           } else {
-               metadata = { 
-                  id: "mock_123",
-                  name: filePath,
-                  bucket_id: params.bucket,
-                  size: 1024,
-                  cacheControl: "no-cache",
-                  contentType: 'image/png',
-                  createdAt: new Date().toISOString(),
-                  lastModified: new Date().toISOString(),
-                  etag: "mock-etag",
-                  version: "mock-version",
-                  metadata: {}
-               };
-           }
-        }
+        const info = await StorageRLS.getObjectInfo(ref, params.bucket, filePath);
+        if (!info) return status(404, { statusCode: '404', error: 'Not Found', message: 'Object not found' });
 
-        return metadata;
+        return info;
     })
 
     // HEAD /object/:bucket/* — Check if an object exists
@@ -507,13 +634,96 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         return status(200, '');
     })
 
+    // GET /object/:bucket/* — Download file (authenticated, generic path)
+    // SDK calls: GET /object/{bucketId}/{filePath}
+    .get('/object/:bucket/*', async ({ params, headers, set, query }) => {
+        const ref = getProjectRef(headers as Record<string, string | undefined>);
+        const filePath = params['*'];
+        if (!filePath) return status(400, { statusCode: '400', error: 'Bad Request', message: 'Missing file path' });
+
+        if (query.width || query.height || query.resize || query.format || query.quality) {
+            return proxyToImaginary(ref, params.bucket, filePath, query, set as { headers: Record<string, string> });
+        }
+
+        const auth = headers['authorization'];
+        const permitted = await StorageRLS.authorizeAction(ref, auth, 'download', params.bucket, filePath);
+        if (!permitted.permitted) return status(permitted.error === 'Object not found' ? 404 : 403, { statusCode: permitted.error === 'Object not found' ? '404' : '403', error: permitted.error === 'Object not found' ? 'Not Found' : 'Forbidden', message: permitted.error || 'Access Denied.' });
+
+        try {
+            const res = await StorageService.getDownloadResponse(ref, params.bucket, filePath);
+            if (!res) return status(404, { statusCode: '404', error: 'Not Found', message: 'Object not found internally' });
+
+            set.headers['Content-Type'] = res.headers?.get('Content-Type') || 'application/octet-stream';
+            set.headers['Cache-Control'] = 'private, max-age=3600';
+            const newRes = new Response(res.body);
+            return newRes;
+        } catch (err: unknown) {
+            return status(500, { statusCode: '500', error: 'Internal', message: 'Download failed' });
+        }
+    })
+
     // ════════════════════════════════════════════════════════
-    // SIGNED URL — POST /object/sign/:bucket
+    // SIGNED URL — POST /object/sign/:bucket/*
     // supabase.storage.from('bucket').createSignedUrl('path', expiresIn)
+    // SDK calls: POST /object/sign/{bucketId}/{filePath} with body { expiresIn }
     // ════════════════════════════════════════════════════════
 
+    .post('/object/sign/:bucket/*', async ({ params, headers, body }) => {
+        const ref = getProjectRef(headers as Record<string, string | undefined>);
+        const payload = body || {};
+        const filePath = params['*'] || String(payload.url || payload.path || '').replace(/^\//, '');
+        const expiresIn = Number(payload.expiresIn) || 3600;
+
+        if (!filePath) {
+            return status(400, { statusCode: '400', error: 'Bad Request', message: 'Missing file path' });
+        }
+
+        // Check object exists via RLS
+        const auth = headers['authorization'];
+        const permitted = await StorageRLS.authorizeAction(ref, auth, 'download', params.bucket, filePath);
+        if (!permitted.permitted) return status(400, { statusCode: '400', error: 'Not Found', message: permitted.error || 'Object not found' });
+
+        const expiresAt = Math.floor(Date.now() / 1000) + expiresIn;
+        const token = await generateSignedToken(ref, params.bucket, filePath, expiresAt);
+
+        const transform = payload.transform;
+        const signPrefix = transform ? `/render/image/sign` : `/object/sign`;
+
+        return {
+            signedURL: buildSignedPath(`${signPrefix}/${params.bucket}/${filePath}`, expiresAt, token, transform),
+        };
+    }, {
+        body: t.Optional(t.Object({
+            url: t.Optional(t.String()),
+            path: t.Optional(t.String()),
+            expiresIn: t.Optional(t.Number()),
+            transform: t.Optional(t.Any())
+        }))
+    })
+
+    // POST /object/sign/:bucket — Batch signed URLs (no wildcard path)
+    // supabase.storage.from('bucket').createSignedUrls(['path1', 'path2'], expiresIn)
     .post('/object/sign/:bucket', async ({ params, headers, body }) => {
         const ref = getProjectRef(headers as Record<string, string | undefined>);
+        
+        // If body has paths array, it's a batch request
+        if (body.paths && Array.isArray(body.paths)) {
+            const paths = body.paths;
+            const expiresIn = Number(body.expiresIn) || 3600;
+
+            return Promise.all(paths.map(async (filePath: string) => {
+                const cleanPath = filePath.replace(/^\//, '');
+                const expiresAt = Math.floor(Date.now() / 1000) + expiresIn;
+                const token = await generateSignedToken(ref, params.bucket, cleanPath, expiresAt);
+                return {
+                    error: null,
+                    path: filePath,
+                    signedURL: buildSignedPath(`/object/sign/${params.bucket}/${cleanPath}`, expiresAt, token),
+                };
+            }));
+        }
+        
+        // Single sign with path in body
         const filePath = String(body.url || body.path || '').replace(/^\//, '');
         const expiresIn = Number(body.expiresIn) || 3600;
 
@@ -522,42 +732,93 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         }
 
         const expiresAt = Math.floor(Date.now() / 1000) + expiresIn;
-        const token = generateSignedToken(ref, params.bucket, filePath, expiresAt);
+        const token = await generateSignedToken(ref, params.bucket, filePath, expiresAt);
 
         return {
-            signedURL: `/storage/v1/object/sign/${params.bucket}/${filePath}?token=${token}&t=${expiresAt}`,
+            signedURL: buildSignedPath(`/object/sign/${params.bucket}/${filePath}`, expiresAt, token, body.transform),
         };
     }, {
-        body: t.Object({
-            url: t.Optional(t.String()),
-            path: t.Optional(t.String()),
-            expiresIn: t.Optional(t.Number())
-        })
+        body: t.Any()
     })
 
-    // POST /object/sign/:bucket — Batch signed URLs
-    // supabase.storage.from('bucket').createSignedUrls(['path1', 'path2'], expiresIn)
-    .post('/object/sign/:bucket/sign-multi', async ({ params, headers, body }) => {
+    // ════════════════════════════════════════════════════════
+    // SIGNED UPLOAD URL — POST /object/upload/sign/:bucket/*
+    // supabase.storage.from('bucket').createSignedUploadUrl('path')
+    // ════════════════════════════════════════════════════════
+
+    .post('/object/upload/sign/:bucket/*', async ({ params, headers }) => {
         const ref = getProjectRef(headers as Record<string, string | undefined>);
-        const paths = body.paths || [];
-        const expiresIn = Number(body.expiresIn) || 3600;
+        const filePath = params['*'];
+        if (!filePath) return status(400, { statusCode: '400', error: 'Bad Request', message: 'Missing file path' });
 
-        return paths.map(filePath => {
-            const cleanPath = filePath.replace(/^\//, '');
-            const expiresAt = Math.floor(Date.now() / 1000) + expiresIn;
-            const token = generateSignedToken(ref, params.bucket, cleanPath, expiresAt);
-            return {
-                error: null,
-                path: filePath,
-                signedURL: `/storage/v1/object/sign/${params.bucket}/${cleanPath}?token=${token}&t=${expiresAt}`,
-            };
+        const upsert = headers['x-upsert'] === 'true';
+        
+        // Verify the bucket exists
+        const bucket = await StorageRLS.getLogicalBucket(ref, params.bucket);
+        if (!bucket) return status(404, { statusCode: '404', error: 'Not Found', message: 'Bucket not found' });
+        
+        const token = crypto.randomUUID();
+        const expiresAt = Math.floor(Date.now() / 1000) + 7200; // 2 hours
+        signedUploads.set(token, {
+            ref,
+            bucket: params.bucket,
+            objectName: filePath,
+            upsert,
+            expiresAt,
         });
-    }, {
-        body: t.Object({
-            paths: t.Array(t.String()),
-            expiresIn: t.Optional(t.Number())
-        })
+
+        return {
+            url: `/object/upload/sign/${params.bucket}/${filePath}?token=${token}`,
+        };
     })
+
+    // PUT /object/upload/sign/:bucket/* — Upload using signed URL
+    .put('/object/upload/sign/:bucket/*', async ({ params, headers, request, query }) => {
+        const ref = getProjectRef(headers as Record<string, string | undefined>);
+        const filePath = params['*'];
+        if (!filePath) return status(400, { statusCode: '400', error: 'Bad Request', message: 'Missing file path' });
+
+        const token = query.token as string;
+        if (!token) {
+            return status(401, { statusCode: '401', error: 'Unauthorized', message: 'Missing signed URL token' });
+        }
+
+        const signedUpload = signedUploads.get(token);
+        if (!signedUpload || signedUpload.ref !== ref || signedUpload.bucket !== params.bucket || signedUpload.objectName !== filePath) {
+            return status(401, { statusCode: '401', error: 'Unauthorized', message: 'Invalid or expired signed URL' });
+        }
+        if (signedUpload.expiresAt < Math.floor(Date.now() / 1000)) {
+            signedUploads.delete(token);
+            return status(401, { statusCode: '401', error: 'Unauthorized', message: 'Invalid or expired signed URL' });
+        }
+
+        // Check if object already exists (for duplicate upload prevention)
+        if (!signedUpload.upsert) {
+            const exists = await StorageRLS.objectExists(ref, params.bucket, filePath);
+            if (exists) {
+                return status(409, { statusCode: '409', error: 'Conflict', message: 'The resource already exists' });
+            }
+        }
+
+        try {
+            const { fileBuffer, fileMimeType, customMetadata } = await readUploadBody(request, headers['content-type']);
+
+            // Bypass RLS for signed upload — token already validates authorization
+            const headerMetadata = getUploadMetadata(headers as Record<string, string | undefined>);
+            const userMetadata: Record<string, unknown> = { ...headerMetadata, ...(customMetadata || {}) };
+            const metadata = { mimetype: fileMimeType, size: fileBuffer.byteLength, userMetadata };
+            const auth = headers['authorization'];
+            await StorageRLS.authorizeAction(ref, auth, 'upload', params.bucket, filePath, metadata);
+
+            const success = await StorageService.uploadFile(ref, params.bucket, filePath, fileBuffer, fileMimeType);
+            if (!success) return status(500, { statusCode: '500', error: 'Internal', message: 'Upload failed' });
+
+            return { Key: `${params.bucket}/${filePath}` };
+        } catch (err: unknown) {
+            return status(500, { statusCode: '500', error: 'Internal', message: err instanceof Error ? err.message : String(err) });
+        }
+    }, // @ts-ignore
+    { type: 'none' })
 
     // GET /object/sign/:bucket/* — Serve signed file (validates token)
     .get('/object/sign/:bucket/*', async ({ params, headers, query, set }) => {
@@ -572,7 +833,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             return status(401, { statusCode: '401', error: 'Unauthorized', message: 'Missing signed URL token' });
         }
 
-        if (!verifySignedToken(ref, params.bucket, filePath, expiresAt, token)) {
+        if (!await verifySignedToken(ref, params.bucket, filePath, expiresAt, token)) {
             return status(401, { statusCode: '401', error: 'Unauthorized', message: 'Invalid or expired signed URL' });
         }
 
@@ -594,6 +855,39 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         }
     })
 
+    // GET /render/image/sign/:bucket/* — Serve signed transformed image
+    .get('/render/image/sign/:bucket/*', async ({ params, headers, query, set }) => {
+        const ref = getProjectRef(headers as Record<string, string | undefined>);
+        const filePath = params['*'];
+        if (!filePath) return status(400, { statusCode: '400', error: 'Bad Request', message: 'Missing file path' });
+
+        const token = query.token as string;
+        const expiresAt = Number(query.t);
+
+        if (!token || !expiresAt) {
+            return status(401, { statusCode: '401', error: 'Unauthorized', message: 'Missing signed URL token' });
+        }
+
+        if (!await verifySignedToken(ref, params.bucket, filePath, expiresAt, token)) {
+            return status(401, { statusCode: '401', error: 'Unauthorized', message: 'Invalid or expired signed URL' });
+        }
+
+        return proxyToImaginary(ref, params.bucket, filePath, query, set as { headers: Record<string, string> });
+    })
+
+    // GET /render/image/authenticated/:bucket/* — Download authenticated transformed file
+    .get('/render/image/authenticated/:bucket/*', async ({ params, headers, query, set }) => {
+        const ref = getProjectRef(headers as Record<string, string | undefined>);
+        const filePath = params['*'];
+        if (!filePath) return status(400, { statusCode: '400', error: 'Bad Request', message: 'Missing file path' });
+
+        const auth = headers['authorization'];
+        const permitted = await StorageRLS.authorizeAction(ref, auth, 'download', params.bucket, filePath);
+        if (!permitted.permitted) return status(403, { statusCode: '403', error: 'Forbidden', message: permitted.error || 'Access Denied.' });
+
+        return proxyToImaginary(ref, params.bucket, filePath, query, set as { headers: Record<string, string> });
+    })
+
     // ════════════════════════════════════════════════════════
     // OBJECT LIST — POST /object/list/:bucket
     // supabase.storage.from('bucket').list('folder', { limit, offset, sortBy })
@@ -607,13 +901,13 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         const limit  = body?.limit || 100;
         const offset = body?.offset || 0;
 
-        // Fetch securely from RLS DB Instead of physical volume
-        const files = await StorageRLS.listObjects(ref, auth, params.bucket, prefix, limit, offset);
+        // Fetch securely from RLS DB
+        const files = await StorageRLS.listObjects(ref, auth, params.bucket, prefix, limit, offset, body?.sortBy);
 
         return files.map(f => {
-            const relativeName = f.name.replace(prefix, ''); // Strip prefix path for SDK
+            const cleanName = prefix ? f.name.slice(prefix.length).replace(/^\/+/, '') : f.name;
             return {
-                name: relativeName || f.name,
+                name: cleanName || f.name,
                 id: f.id,
                 updated_at: f.updated || new Date().toISOString(),
                 created_at: f.updated || new Date().toISOString(),
@@ -629,6 +923,48 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             prefix: t.Optional(t.String()),
             limit: t.Optional(t.Number()),
             offset: t.Optional(t.Number()),
+            sortBy: t.Optional(t.Object({
+                column: t.Optional(t.String()),
+                order: t.Optional(t.String())
+            }))
+        }))
+    })
+
+    // ════════════════════════════════════════════════════════
+    // OBJECT LIST V2 — POST /object/list-v2/:bucket
+    // ════════════════════════════════════════════════════════
+
+    .post('/object/list-v2/:bucket', async ({ params, headers, body }) => {
+        const ref = getProjectRef(headers as Record<string, string | undefined>);
+        const auth = headers['authorization'];
+
+        const prefix = body?.prefix || '';
+        const limit  = body?.limit || 100;
+        const offset = body?.offset || 0;
+        const search = body?.search || '';
+
+        // Fetch securely from RLS DB
+        const files = await StorageRLS.listObjects(ref, auth, params.bucket, prefix, limit, offset, body?.sortBy, search);
+
+        const mappedFiles = files.map(f => ({
+            name: f.name,
+            id: f.id,
+            updated_at: f.updated || new Date().toISOString(),
+            created_at: f.updated || new Date().toISOString(),
+            last_accessed_at: f.updated || new Date().toISOString(),
+            metadata: {
+                size: f.size,
+                mimetype: f.type || 'application/octet-stream',
+            },
+        }));
+
+        return { next_continuation_token: null, objects: mappedFiles, folders: [], hasNext: false };
+    }, {
+        body: t.Optional(t.Object({
+            prefix: t.Optional(t.String()),
+            limit: t.Optional(t.Number()),
+            offset: t.Optional(t.Number()),
+            search: t.Optional(t.String()),
             sortBy: t.Optional(t.Object({
                 column: t.Optional(t.String()),
                 order: t.Optional(t.String())
@@ -655,10 +991,10 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             })
         );
 
-        return results.map((r: PromiseSettledResult<unknown>, i: number) => ({
+        return results.map((r: any, i: number) => ({
             name: prefixes[i],
             bucket_id: params.bucket,
-            ...(r.status === 'fulfilled' ? {} : { error: 'Delete failed' }),
+            ...(r.status === 'fulfilled' && r.value !== false ? {} : { error: 'Delete failed' }),
         }));
     }, {
         body: t.Optional(t.Object({
@@ -674,7 +1010,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         const ref = getProjectRef(headers as Record<string, string | undefined>);
         const srcBucket = String(body.bucketId || '');
         const srcKey = String(body.sourceKey || '');
-        const destBucket = String(body.destinationBucketId || srcBucket);
+        const destBucket = String(body.destinationBucket || body.destinationBucketId || srcBucket);
         const destKey = String(body.destinationKey || '');
 
         if (!srcBucket || !srcKey || !destKey) {
@@ -695,16 +1031,17 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             // Step 3: Delete source
             await StorageService.deleteFile(ref, srcBucket, srcKey);
 
-            return { message: `Moved ${srcBucket}/${srcKey} to ${destBucket}/${destKey}` };
+            return { message: `Successfully moved` };
         } catch (err: unknown) {
             return status(500, { statusCode: '500', error: 'Internal', message: err instanceof Error ? err.message : String(err) });
         }
     }, {
         body: t.Object({
-            bucketId: t.String(),
-            sourceKey: t.String(),
+            bucketId: t.Optional(t.String()),
+            sourceKey: t.Optional(t.String()),
             destinationBucketId: t.Optional(t.String()),
-            destinationKey: t.String()
+            destinationBucket: t.Optional(t.String()),
+            destinationKey: t.Optional(t.String())
         })
     })
 
@@ -712,6 +1049,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         const ref = getProjectRef(headers as Record<string, string | undefined>);
         const srcBucket = String(body.bucketId || '');
         const srcKey = String(body.sourceKey || '');
+        const destBucket = String(body.destinationBucket || body.destinationBucketId || srcBucket);
         const destKey = String(body.destinationKey || '');
 
         if (!srcBucket || !srcKey || !destKey) {
@@ -724,18 +1062,20 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             const srcData = Buffer.from(await srcRes.arrayBuffer());
             const contentType = srcRes.headers?.get('Content-Type') || 'application/octet-stream';
 
-            const uploaded = await StorageService.uploadFile(ref, srcBucket, destKey, srcData, contentType);
+            const uploaded = await StorageService.uploadFile(ref, destBucket, destKey, srcData, contentType);
             if (!uploaded) return status(500, { statusCode: '500', error: 'Internal', message: 'Copy failed' });
 
-            return { Key: `${srcBucket}/${destKey}` };
+            return { Key: `${destBucket}/${destKey}`, path: `${destBucket}/${destKey}` };
         } catch (err: unknown) {
             return status(500, { statusCode: '500', error: 'Internal', message: err instanceof Error ? err.message : String(err) });
         }
     }, {
         body: t.Object({
-            bucketId: t.String(),
-            sourceKey: t.String(),
-            destinationKey: t.String()
+            bucketId: t.Optional(t.String()),
+            sourceKey: t.Optional(t.String()),
+            destinationBucketId: t.Optional(t.String()),
+            destinationBucket: t.Optional(t.String()),
+            destinationKey: t.Optional(t.String())
         })
     })
 
