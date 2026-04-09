@@ -3,7 +3,7 @@ import { $ } from "bun";
 import { logger } from "../utils/logger";
 import { sql } from "../db";
 
-const DEFAULT_CORS_HEADERS = ["Accept", "Accept-Language", "Content-Language", "Authorization", "Content-Type", "X-Api-Version", "x-supabase-api-version", "X-Client-Info", "apikey", "Prefer", "Content-Profile", "accept-profile", "Range", "Range-Unit"];
+const DEFAULT_CORS_HEADERS = ["Accept", "Accept-Language", "Content-Language", "Authorization", "Content-Type", "X-Api-Version", "x-supabase-api-version", "X-Client-Info", "apikey", "Prefer", "Content-Profile", "accept-profile", "Range", "Range-Unit", "x-upsert", "Cache-Control"];
 const DEFAULT_CORS_EXPOSED = ["Content-Length", "Content-Range", "X-JSON", "x-supabase-api-version", "X-Client-Info", "apikey", "Prefer", "Content-Profile", "accept-profile", "Range", "Range-Unit", "X-Relay-Error"];
 const DEFAULT_CORS_ORIGINS = [
   "~^https?://.*$"
