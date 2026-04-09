@@ -188,15 +188,31 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         const contentType = headers['content-type'] || 'application/octet-stream';
 
         try {
-            const body = await request.arrayBuffer();
+            let fileBuffer: Buffer;
+            let fileMimeType = contentType;
+
+            if (contentType.includes('multipart/form-data')) {
+                const formData = await request.formData();
+                let fileField = formData.get("") || formData.get("file");
+                if (!fileField) {
+                    for (const val of formData.values()) {
+                        if (val instanceof File || val instanceof Blob) { fileField = val; break; }
+                    }
+                }
+                if (fileField instanceof Blob) {
+                    fileBuffer = Buffer.from(await fileField.arrayBuffer());
+                    if (fileField.type) fileMimeType = fileField.type;
+                } else return status(400, { statusCode: '400', error: 'Bad Request', message: 'No file found in multipart data' });
+            } else {
+                fileBuffer = Buffer.from(await request.arrayBuffer());
+            }
             
-            // RLS Evaluation
             const auth = headers['authorization'];
-            const metadata = { mimetype: contentType, size: body.byteLength };
+            const metadata = { mimetype: fileMimeType, size: fileBuffer.byteLength };
             const permitted = await StorageRLS.authorizeAction(ref, auth, 'upload', params.bucket, filePath, metadata);
             if (!permitted) return status(403, { statusCode: '403', error: 'Forbidden', message: 'Row Level Security violation or bucket missing. Access Denied.' });
 
-            const success = await StorageService.uploadFile(ref, params.bucket, filePath, Buffer.from(body), contentType);
+            const success = await StorageService.uploadFile(ref, params.bucket, filePath, fileBuffer, fileMimeType);
 
             if (!success) return status(500, { statusCode: '500', error: 'Internal', message: 'Failed to upload file' });
 
@@ -208,7 +224,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             logger.error('SDK upload error:', { error: err instanceof Error ? err.message : String(err) });
             return status(500, { statusCode: '500', error: 'Internal', message: 'Upload failed' });
         }
-    })
+    }, { type: 'none' })
 
     // PUT /object/:bucket/* — Upsert (same as upload but always overwrites)
     .put('/object/:bucket/*', async ({ params, headers, request }) => {
@@ -219,21 +235,37 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         const contentType = headers['content-type'] || 'application/octet-stream';
 
         try {
-            const body = await request.arrayBuffer();
+            let fileBuffer: Buffer;
+            let fileMimeType = contentType;
+
+            if (contentType.includes('multipart/form-data')) {
+                const formData = await request.formData();
+                let fileField = formData.get("") || formData.get("file");
+                if (!fileField) {
+                    for (const val of formData.values()) {
+                        if (val instanceof File || val instanceof Blob) { fileField = val; break; }
+                    }
+                }
+                if (fileField instanceof Blob) {
+                    fileBuffer = Buffer.from(await fileField.arrayBuffer());
+                    if (fileField.type) fileMimeType = fileField.type;
+                } else return status(400, { statusCode: '400', error: 'Bad Request', message: 'No file found in multipart data' });
+            } else {
+                fileBuffer = Buffer.from(await request.arrayBuffer());
+            }
             
-            // RLS Evaluation
             const auth = headers['authorization'];
-            const metadata = { mimetype: contentType, size: body.byteLength };
+            const metadata = { mimetype: fileMimeType, size: fileBuffer.byteLength };
             const permitted = await StorageRLS.authorizeAction(ref, auth, 'upload', params.bucket, filePath, metadata); // Upsert requires same RLS as upload.
             if (!permitted) return status(403, { statusCode: '403', error: 'Forbidden', message: 'Row Level Security violation or bucket missing. Access Denied.' });
 
-            const success = await StorageService.uploadFile(ref, params.bucket, filePath, Buffer.from(body), contentType);
+            const success = await StorageService.uploadFile(ref, params.bucket, filePath, fileBuffer, fileMimeType);
             if (!success) return status(500, { statusCode: '500', error: 'Internal', message: 'Upsert failed' });
             return { Key: `${params.bucket}/${filePath}` };
         } catch (err: unknown) {
             return status(500, { statusCode: '500', error: 'Internal', message: 'Upsert failed' });
         }
-    })
+    }, { type: 'none' })
 
     // ════════════════════════════════════════════════════════
     // OBJECT DOWNLOAD — GET /object/public/:bucket/*
