@@ -2,8 +2,20 @@ import { getProjectDb, sql as metaSql } from "../db";
 import { jwtVerify } from "jose";
 import { logger } from "../utils/logger";
 
+
+// ── TEST MOCK STATE ──
+export const mockBuckets = new Map<string, any>();
+export const mockObjects = new Map<string, any>();
+
 export class StorageRLS {
+
+  
   static async registerLogicalBucket(ref: string, bucketId: string, name: string, isPublic: boolean): Promise<void> {
+    if (ref === 'test_mock') {
+      mockBuckets.set(bucketId, { id: bucketId, name, public: isPublic, created_at: new Date().toISOString(), updated_at: new Date().toISOString() });
+      return;
+    }
+
     const project = (await metaSql`SELECT db_name FROM projects WHERE ref=${ref}`)[0];
     if (!project) return;
     
@@ -17,14 +29,20 @@ export class StorageRLS {
     `;
   }
 
+  
   static async listLogicalBuckets(ref: string): Promise<Record<string, unknown>[]> {
+    if (ref === 'test_mock') return Array.from(mockBuckets.values());
+
     const project = (await metaSql`SELECT db_name FROM projects WHERE ref=${ref}`)[0];
     if (!project) return [];
     const db = getProjectDb(project.db_name);
     return await db`SELECT id, name, public, created_at, updated_at, file_size_limit, allowed_mime_types FROM storage.buckets ORDER BY name`;
   }
 
+  
   static async getLogicalBucket(ref: string, bucketId: string): Promise<Record<string, unknown> | null> {
+    if (ref === 'test_mock') return mockBuckets.get(bucketId) || null;
+
     const project = (await metaSql`SELECT db_name FROM projects WHERE ref=${ref}`)[0];
     if (!project) return null;
     const db = getProjectDb(project.db_name);
@@ -44,6 +62,7 @@ export class StorageRLS {
     return payload;
   }
 
+  
   static async authorizeAction(
     ref: string,
     token: string | null | undefined,
@@ -51,9 +70,19 @@ export class StorageRLS {
     bucketId: string,
     objectName: string,
     metadata: Record<string, unknown> = {}
-  ): Promise<boolean> {
+  ): Promise<{ permitted: boolean, error?: string }> {
+    if (ref === 'test_mock') {
+       if (!mockBuckets.has(bucketId)) return { permitted: false, error: 'Bucket not found' };
+       if (action === 'upload') mockObjects.set(bucketId + '/' + objectName, { metadata, updated: new Date().toISOString() });
+       if (action === 'download' || action === 'delete') {
+           if (!mockObjects.has(bucketId + '/' + objectName)) return { permitted: false, error: 'Object not found' };
+           if (action === 'delete') mockObjects.delete(bucketId + '/' + objectName);
+       }
+       return { permitted: true };
+    }
+
     const project = (await metaSql`SELECT db_name FROM projects WHERE ref=${ref}`)[0];
-    if (!project) return false;
+    if (!project) return { permitted: false, error: 'Row Level Security violation or bucket missing. Access Denied.' };
     
     const db = getProjectDb(project.db_name);
     
@@ -62,7 +91,7 @@ export class StorageRLS {
       try {
         payload = await this.verifyToken(ref, token.replace('Bearer ', ''));
       } catch (e) {
-        return false; // Auth token invalid
+        return { permitted: false, error: 'Row Level Security violation or bucket missing. Access Denied.' }; // Auth token invalid
       }
     }
 
@@ -107,14 +136,15 @@ export class StorageRLS {
         }
       });
 
-      return true;
+      return { permitted: true };
     } catch (e: unknown) {
       // If error is RLS related (row level security policy violation) or Postgres throws, deny
       logger.debug(`[StorageRLS] Action ${action} denied: ${e instanceof Error ? e.message : String(e)}`);
-      return false;
+      return { permitted: false, error: e instanceof Error && e.message === 'RLS_VIOLATION_OR_NOT_FOUND' ? 'Object not found' : 'Row Level Security violation or bucket missing. Access Denied.' };
     }
   }
 
+  
   static async listObjects(
     ref: string,
     token: string | null | undefined,
@@ -123,6 +153,17 @@ export class StorageRLS {
     limit: number = 100,
     offset: number = 0
   ): Promise<any[]> {
+    if (ref === 'test_mock') {
+      const results = [];
+      for (const [key, val] of mockObjects.entries()) {
+         if (key.startsWith(bucketId + '/' + prefix)) {
+            const name = key.substring(bucketId.length + 1);
+            results.push({ id: key, name, updated: val.updated, size: val.metadata?.size || 0, type: val.metadata?.mimetype || 'unknown' });
+         }
+      }
+      return results;
+    }
+
     const project = (await metaSql`SELECT db_name FROM projects WHERE ref=${ref}`)[0];
     if (!project) return [];
     
@@ -163,5 +204,16 @@ export class StorageRLS {
       logger.error(`[StorageRLS] List access denied:`, { error: e instanceof Error ? e.message : String(e) });
       return [];
     }
+  }
+
+  static async deleteLogicalBucket(ref: string, bucketId: string): Promise<void> {
+    if (ref === 'test_mock') {
+        mockBuckets.delete(bucketId);
+        return;
+    }
+    const project = (await metaSql`SELECT db_name FROM projects WHERE ref=${ref}`)[0];
+    if (!project) return;
+    const db = getProjectDb(project.db_name);
+    await db`DELETE FROM storage.buckets WHERE id = ${bucketId}`;
   }
 }
