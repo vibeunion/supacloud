@@ -379,8 +379,8 @@ export class GatewayService {
             name: opts.name,
             url: opts.url,
             connect_timeout: 5000,
-            read_timeout: opts.readTimeout || 60000,
-            write_timeout: 60000
+            read_timeout: opts.readTimeout || 500_000,  // default 500s — covers long AI/OCR inference
+            write_timeout: 500_000,
         });
 
         // 2. Upsert Route matching by Domain (hosts) and Path
@@ -444,7 +444,7 @@ export class GatewayService {
 
             await this.ensureServiceAndRoute({ name: `svc-pgrst-${projectRef}`, url: `http://${hostIp}:${pgrstPort}`, paths: ["/rest/v1", "/graphql/v1"], hosts, projectRef });
             await this.ensureServiceAndRoute({ name: `svc-gotrue-${projectRef}`, url: `http://${hostIp}:${gotruePort}`, paths: ["/auth/v1"], hosts, projectRef });
-            await this.ensureServiceAndRoute({ name: `svc-functions-${projectRef}`, url: `http://${hostIp}:9000`, paths: ["/functions/v1"], hosts, projectRef });
+            await this.ensureServiceAndRoute({ name: `svc-functions-${projectRef}`, url: `http://${hostIp}:9000`, paths: ["/functions/v1"], hosts, projectRef, readTimeout: 500_000 });  // 500s for AI/OCR inference
             await this.ensureServiceAndRoute({ name: `svc-storage-${projectRef}`, url: `http://${hostIp}:9090`, paths: ["/storage/v1/"], hosts, projectRef });
             await this.ensureServiceAndRoute({ name: `svc-realtime-${projectRef}`, url: `http://${hostIp}:4000`, paths: ["/realtime/v1"], hosts, projectRef, readTimeout: 86400000 });
 
