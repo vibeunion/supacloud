@@ -59,6 +59,46 @@ function generateSignedToken(ref: string, bucket: string, path: string, expiresA
 }
 
 /**
+ * Extract a file chunk from a raw multipart/form-data buffer, skipping standard Parsers
+ * to bypass Bun's name="" dropping bug.
+ */
+function extractMultipartFileFast(buffer: Buffer, boundary: string): { fileBuffer: Buffer, mimeType: string } | null {
+    const boundaryBuffer = Buffer.from(`--${boundary}`);
+    let searchPos = 0;
+
+    while (searchPos < buffer.length) {
+        const partStart = buffer.indexOf(boundaryBuffer, searchPos);
+        if (partStart === -1) break;
+
+        const contentStart = partStart + boundaryBuffer.length;
+        const nextBoundaryPos = buffer.indexOf(boundaryBuffer, contentStart);
+        if (nextBoundaryPos === -1) break;
+
+        const headerEnd = buffer.indexOf(Buffer.from('\r\n\r\n'), contentStart);
+        if (headerEnd !== -1 && headerEnd < nextBoundaryPos) {
+            const headersRow = buffer.subarray(contentStart, headerEnd).toString('utf-8');
+            if (headersRow.includes('filename=') || headersRow.includes('Content-Type:')) {
+                let mimeType = 'application/octet-stream';
+                const typeMatch = headersRow.match(/Content-Type:\s*([^\r\n]+)/i);
+                if (typeMatch) mimeType = typeMatch[1].trim();
+
+                let fileStart = headerEnd + 4;
+                let fileEnd = nextBoundaryPos - 2; 
+
+                if (fileEnd > fileStart) {
+                    return {
+                        fileBuffer: buffer.subarray(fileStart, fileEnd),
+                        mimeType
+                    };
+                }
+            }
+        }
+        searchPos = nextBoundaryPos;
+    }
+    return null;
+}
+
+/**
  * Verify a signed token against path + expiry.
  */
 function verifySignedToken(ref: string, bucket: string, path: string, expiresAt: number, token: string): boolean {
@@ -192,17 +232,21 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             let fileMimeType = contentType;
 
             if (contentType.includes('multipart/form-data')) {
-                const formData = await request.formData();
-                let fileField = formData.get("") || formData.get("file");
-                if (!fileField) {
-                    for (const val of formData.values()) {
-                        if (val instanceof File || val instanceof Blob) { fileField = val; break; }
+                const rawBuffer = Buffer.from(await request.arrayBuffer());
+                const boundaryMatch = contentType.match(/boundary=(?:"([^"]+)"|([^;]+))/i);
+                const boundary = boundaryMatch ? (boundaryMatch[1] || boundaryMatch[2]) : '';
+
+                if (boundary) {
+                    const extracted = extractMultipartFileFast(rawBuffer, boundary);
+                    if (extracted) {
+                        fileBuffer = extracted.fileBuffer;
+                        fileMimeType = extracted.mimeType;
+                    } else {
+                        return status(400, { statusCode: '400', error: 'Bad Request', message: 'No file found in multipart data' });
                     }
+                } else {
+                    return status(400, { statusCode: '400', error: 'Bad Request', message: 'Missing multipart boundary' });
                 }
-                if (fileField instanceof Blob) {
-                    fileBuffer = Buffer.from(await fileField.arrayBuffer());
-                    if (fileField.type) fileMimeType = fileField.type;
-                } else return status(400, { statusCode: '400', error: 'Bad Request', message: 'No file found in multipart data' });
             } else {
                 fileBuffer = Buffer.from(await request.arrayBuffer());
             }
@@ -239,17 +283,21 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             let fileMimeType = contentType;
 
             if (contentType.includes('multipart/form-data')) {
-                const formData = await request.formData();
-                let fileField = formData.get("") || formData.get("file");
-                if (!fileField) {
-                    for (const val of formData.values()) {
-                        if (val instanceof File || val instanceof Blob) { fileField = val; break; }
+                const rawBuffer = Buffer.from(await request.arrayBuffer());
+                const boundaryMatch = contentType.match(/boundary=(?:"([^"]+)"|([^;]+))/i);
+                const boundary = boundaryMatch ? (boundaryMatch[1] || boundaryMatch[2]) : '';
+
+                if (boundary) {
+                    const extracted = extractMultipartFileFast(rawBuffer, boundary);
+                    if (extracted) {
+                        fileBuffer = extracted.fileBuffer;
+                        fileMimeType = extracted.mimeType;
+                    } else {
+                        return status(400, { statusCode: '400', error: 'Bad Request', message: 'No file found in multipart data' });
                     }
+                } else {
+                    return status(400, { statusCode: '400', error: 'Bad Request', message: 'Missing multipart boundary' });
                 }
-                if (fileField instanceof Blob) {
-                    fileBuffer = Buffer.from(await fileField.arrayBuffer());
-                    if (fileField.type) fileMimeType = fileField.type;
-                } else return status(400, { statusCode: '400', error: 'Bad Request', message: 'No file found in multipart data' });
             } else {
                 fileBuffer = Buffer.from(await request.arrayBuffer());
             }
