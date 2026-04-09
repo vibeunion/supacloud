@@ -409,7 +409,7 @@ if (API_URL) {
                     role: "user",
                     content: {
                         type: "text",
-                        text: `I want to deploy the Edge Function '${args.function_name}' for project '${args.ref}'. Please use your native IDE capabilities to read all the code from 'supabase/functions/${args.function_name}/index.ts' and any dependencies. Consolidate them into a unified code string, and use the 'edge_functions' tool with action='deploy' to deploy it to the cloud.`
+                        text: `I want to deploy the Edge Function '${args.function_name}' for project '${args.ref}'. Please use your native IDE capabilities to read all the code from 'supabase/functions/${args.function_name}/index.ts' and any dependencies. Consolidate them into a unified code string, and use the 'edge_functions' tool with action='deploy' to deploy it to the cloud. Note that the 'deploy' action will automatically perform a syntax check first. If you just want to verify syntax, you can use action='check'. You can also pass 'path' instead of 'code'.`
                     }
                 }
             ]

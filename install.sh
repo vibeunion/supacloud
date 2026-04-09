@@ -1006,7 +1006,11 @@ Wants=supacloud.service
 [Service]
 Type=simple
 WorkingDirectory=/opt/supacloud/edge-runtime
+# Kill any orphan bun processes on port 9000 before starting (prevents SO_REUSEPORT ghost processes)
+ExecStartPre=/bin/bash -c 'for pid in \$(lsof -iTCP:9000 -sTCP:LISTEN -t 2>/dev/null); do echo "[EdgeRT] Killing stale pid=\$pid"; kill -9 \$pid 2>/dev/null || true; done; sleep 0.3; true'
 ExecStart=/usr/local/bin/bun run server.ts
+# Ensure cleanup on stop: kill any remaining bun processes on port 9000
+ExecStopPost=/bin/bash -c 'for pid in \$(lsof -iTCP:9000 -sTCP:LISTEN -t 2>/dev/null); do kill -9 \$pid 2>/dev/null || true; done; true'
 Restart=always
 RestartSec=5
 Environment=PORT=9000

@@ -145,6 +145,34 @@ ensure_service_containers_running() {
     done
 }
 
+# ── Edge Runtime Zombie Killer ──────────────────────────────────────
+# SO_REUSEPORT allows multiple processes to bind the same port.
+# If an old bun runtime survives a restart/deploy, requests get split
+# 50/50 between old and new code — causing phantom failures.
+# This function kills ALL processes listening on port 9000 so that
+# only the newly started runtime claims the port.
+kill_edge_runtime_zombies() {
+    local EDGE_PORT="${EDGE_RUNTIME_PORT:-9000}"
+    log_info "Checking for stale Edge Runtime processes on port ${EDGE_PORT}..."
+    
+    local stale_pids
+    stale_pids=$(lsof -iTCP:${EDGE_PORT} -sTCP:LISTEN -t 2>/dev/null || true)
+    
+    if [[ -n "$stale_pids" ]]; then
+        local count=0
+        for pid in $stale_pids; do
+            local cmd
+            cmd=$(ps -p "$pid" -o comm= 2>/dev/null || echo "unknown")
+            log_warn "Killing stale Edge Runtime process: pid=$pid cmd=$cmd"
+            kill -9 "$pid" 2>/dev/null || true
+            count=$((count + 1))
+        done
+        log_info "Killed $count stale Edge Runtime process(es) on port ${EDGE_PORT}"
+    else
+        log_info "No stale Edge Runtime processes found"
+    fi
+}
+
 main() {
     echo "=========================================="
     echo "SupaCloud Pre-start Recovery"
@@ -153,6 +181,7 @@ main() {
     
     fix_stale_postmaster_pid
     fix_gotrue_search_path
+    kill_edge_runtime_zombies
     ensure_kong_running
     ensure_service_containers_running
     restart_failed_tenants

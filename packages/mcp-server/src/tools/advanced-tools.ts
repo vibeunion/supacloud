@@ -11,25 +11,69 @@ export function registerAdvancedTools(server: McpServer, http: HttpTransport): v
     server.tool(
         "edge_functions",
         `Edge Function management (Deno/Bun serverless). Server auto-bundles dependencies.
-Actions: list, deploy, deploy_bundle, source, delete`,
+Actions: list, deploy, deploy_bundle, source, delete, check`,
         {
-            action: z.enum(["list", "deploy", "deploy_bundle", "source", "delete"]).describe("Action"),
+            action: z.enum(["list", "deploy", "deploy_bundle", "source", "delete", "check"]).describe("Action"),
             ref: z.string().describe("Project ref"),
-            slug: z.string().optional().describe("[deploy/deploy_bundle/source/delete] Function name"),
-            code: z.string().optional().describe("[deploy] Function source code (TypeScript)"),
+            slug: z.string().optional().describe("[deploy/deploy_bundle/source/delete/check] Function name"),
+            code: z.string().optional().describe("[deploy/check] Function source code (TypeScript)"),
+            path: z.string().optional().describe("[deploy/check] Local file path to read code from (alternative to code)"),
             files: z.record(z.string()).optional().describe("[deploy_bundle] File map: { 'index.ts': '...', '_shared/x.ts': '...' }"),
             entrypoint: z.string().optional().describe("[deploy_bundle] Entrypoint file (default: index.ts)"),
             minify: z.boolean().optional().describe("[deploy/deploy_bundle] Minify bundle"),
         },
-        async ({ action, ref, slug, code, files, entrypoint, minify }) => {
+        async ({ action, ref, slug, code, path: pathArg, files, entrypoint, minify }) => {
             const need = (f: string, v: any) => { if (!v) throw new Error(`'${f}' required for '${action}'`); };
+
             let text: string;
+
+            // Helper for local TS syntax check
+            const checkSyntax = async (sourceCode: string): Promise<{ ok: boolean; err?: string }> => {
+                const fs = require("fs");
+                const os = require("os");
+                const { promisify } = require("util");
+                const execAsync = promisify(require("child_process").exec);
+                const tmpFile = `${os.tmpdir()}/supacloud_edge_${Date.now()}.ts`;
+                fs.writeFileSync(tmpFile, sourceCode);
+                try {
+                    await execAsync(`bun build ${tmpFile} --external='*'`);
+                    return { ok: true };
+                } catch (e: any) {
+                    return { ok: false, err: e.stdout + "\n" + (e.stderr || e.message) };
+                } finally {
+                    try { fs.unlinkSync(tmpFile); } catch (e) {}
+                }
+            };
+
+            // Resolve code from path if provided
+            if (pathArg && !code) {
+                try {
+                    code = require("fs").readFileSync(pathArg, "utf-8");
+                } catch (e: any) {
+                    throw new Error(`Failed to read path ${pathArg}: ${e.message}`);
+                }
+            }
+
             switch (action) {
                 case "list":
                     text = JSON.stringify((await http.get(`/v1/projects/${ref}/functions`)).data, null, 2);
                     break;
+                case "check":
+                    need("code (or path)", code);
+                    const checkRes = await checkSyntax(code!);
+                    if (checkRes.ok) {
+                        text = `✅ Syntax check passed for function`;
+                    } else {
+                        text = `❌ Syntax check failed:\n${checkRes.err}`;
+                    }
+                    break;
                 case "deploy":
                     need("slug", slug); need("code", code);
+                    const deployCheck = await checkSyntax(code!);
+                    if (!deployCheck.ok) {
+                        text = `❌ Deployment aborted. Syntax check failed:\n${deployCheck.err}`;
+                        break;
+                    }
                     const dr = await http.post(`/v1/projects/${ref}/functions/${slug}`, { code, minify });
                     text = dr.ok ? `✅ Function ${slug} deployed` : `❌ Failed (${dr.status}): ${JSON.stringify(dr.data)}`;
                     break;
