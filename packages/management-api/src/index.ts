@@ -191,7 +191,6 @@ const app = new Elysia({ strictPath: false })
 
   // WebSocket routes (no HTTP auth guard — WS uses query token)
   .use((await import("./routes/ws")).wsRoutes)
-  .use((await import("./routes/realtime")).realtimeRoutes)
 
   // Main API Routes
   .use(storageCompatRoutes)
