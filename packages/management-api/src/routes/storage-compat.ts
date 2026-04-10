@@ -1151,6 +1151,18 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         const objectName = meta.objectName || `upload-${Date.now()}`;
         const contentType = meta.contentType || 'application/octet-stream';
 
+        // TUS Authorization Gate
+        const auth = headers['authorization'];
+        const metadata = { mimetype: contentType, size: uploadLength, userMetadata: meta };
+        const permitted = await StorageRLS.authorizeAction(ref, auth, 'upload', bucket, objectName, metadata);
+        if (!permitted.permitted) {
+            return status(permitted.error === 'Bucket not found' || permitted.error === 'Object not found' ? 404 : 403, { 
+                statusCode: permitted.error === 'Bucket not found' || permitted.error === 'Object not found' ? '404' : '403', 
+                error: permitted.error === 'Object not found' ? 'Not Found' : 'Forbidden', 
+                message: permitted.error || 'Access Denied.' 
+            });
+        }
+
         const uploadId = `${ref}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
         // Store upload state
@@ -1172,7 +1184,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
     })
 
     // HEAD /upload/resumable/:uploadId — Get current upload offset
-    .get('/upload/resumable/:uploadId', ({ params, set }) => {
+    .head('/upload/resumable/:uploadId', ({ params, set }) => {
         const upload = tusUploads.get(params.uploadId);
         if (!upload) return status(404, { error: 'Upload not found' });
 

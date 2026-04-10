@@ -32,12 +32,20 @@ describe("GatewayService", () => {
         globalThis.fetch = originalFetch;
     });
 
-    test("setCors should return true", async () => {
+    test("setCors should return true and map across multiple routes", async () => {
         const originalFetch = globalThis.fetch;
-        mockFetch(() => Promise.resolve(new Response(JSON.stringify({ data: [] }))));
+        const calls: string[] = [];
+        globalThis.fetch = mock((input: string | URL | Request) => {
+            const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+            calls.push(url);
+            return Promise.resolve(new Response(JSON.stringify({ data: [] })));
+        }) as unknown as typeof fetch;
 
-        const result = await gatewayService.setCors("testref123", "*");
+        const result = await gatewayService.setCors("testref123");
         expect(result).toBe(true);
+
+        const patchedRoutes = calls.filter(c => c.includes("route-svc-pgrst-") || c.includes("route-svc-gotrue-") || c.includes("route-svc-realtime-") || c.includes("route-svc-storage-") || c.includes("route-svc-functions-"));
+        expect(patchedRoutes.length).toBeGreaterThan(0);
 
         globalThis.fetch = originalFetch;
     });

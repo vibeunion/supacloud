@@ -11,6 +11,11 @@
 
 const TENANTS_DIR = process.env.TENANTS_DIR || "/etc/supabase/tenants";
 const MGMT_API = process.env.MANAGEMENT_API_URL || "http://127.0.0.1:9090";
+
+if (!process.env.MANAGEMENT_API_URL) {
+  console.warn("[EdgeRuntime] WARNING: MANAGEMENT_API_URL is not set. Defaulting to http://127.0.0.1:9090. If edge-runtime runs on a different node than management-api, this will fail!");
+}
+
 const MASTER_TOKEN = process.env.MASTER_TOKEN || "";
 
 // In-memory cache with TTL to avoid hammering the API on rapid requests

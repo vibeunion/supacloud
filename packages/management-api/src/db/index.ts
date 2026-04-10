@@ -220,12 +220,14 @@ export const TaskType = {
   PROVISION_DB: "provision_db",
   PROVISION_S3: "provision_s3",
   PROVISION_RUNTIME: "provision_runtime",
+  PROVISION_REALTIME: "provision_realtime",
   PROVISION_ROUTER: "provision_router",
   PROVISION_GATEWAY: "provision_gateway",
   PROVISION_SECRETS: "provision_secrets",
   CLEANUP_DB: "cleanup_db",
   CLEANUP_S3: "cleanup_s3",
   CLEANUP_RUNTIME: "cleanup_runtime",
+  CLEANUP_REALTIME: "cleanup_realtime",
   CLEANUP_ROUTER: "cleanup_router",
 } as const;
 export type TaskType = (typeof TaskType)[keyof typeof TaskType];
