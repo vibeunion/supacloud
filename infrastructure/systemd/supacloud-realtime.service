@@ -19,14 +19,14 @@ ExecStart=/usr/bin/podman run --name supacloud-realtime --network host \
   -e DB_USER=${PG_USER} \
   -e DB_NAME=supacloud_meta \
   -e DB_PASSWORD=${PGPASSWORD} \
-  -e SECRET_KEY_BASE=YOUR_SUPER_SECRET_KEY_BASE_SHOULD_BE_64_BYTES_LONG \
+  -e SECRET_KEY_BASE=${REALTIME_SECRET_KEY_BASE} \
   -e JWT_SECRET=${SUPACLOUD_JWT_SECRET} \
   -e API_JWT_SECRET=${SUPACLOUD_JWT_SECRET} \
   -e RLS_ENABLED=true \
   -e MAX_HEADER_LENGTH=8192 \
   -e RLIMIT_NOFILE=10000 \
   -e APP_NAME=realtime \
-  -e DB_ENC_KEY=supabaserealtime \
+  -e DB_ENC_KEY=${REALTIME_DB_ENC_KEY} \
   public.ecr.aws/supabase/realtime:v2.33.3
 
 ExecStop=/usr/bin/podman stop -t 10 supacloud-realtime
