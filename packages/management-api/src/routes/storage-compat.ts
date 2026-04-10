@@ -1225,13 +1225,26 @@ async function proxyToImaginary(
 
     const resizeMode = query.resize || 'cover';
     let operation = 'resize';
-    if (resizeMode === 'cover' || resizeMode === 'crop') {
-        operation = 'crop';
-    } else if (resizeMode === 'contain' || resizeMode === 'embed') {
-        operation = 'embed';
-    } else if (resizeMode === 'fill') {
-        operation = 'enlarge';
-        imaginaryParams.set('force', 'true');
+
+    // Check for extended operations first (overrides standard resize)
+    if (query.smartcrop === 'true' || query.smartcrop === '1' || resizeMode === 'smartcrop') {
+        operation = 'smartcrop';
+    } else if (query.watermark) {
+        operation = 'watermark';
+        imaginaryParams.set('text', query.watermark); // Assuming query.watermark specifies the text
+    } else if (query.blur) {
+        operation = 'blur';
+        imaginaryParams.set('sigma', String(query.blur)); // blur strength
+    } else {
+        // Standard Supabase resize operations
+        if (resizeMode === 'cover' || resizeMode === 'crop') {
+            operation = 'crop';
+        } else if (resizeMode === 'contain' || resizeMode === 'embed') {
+            operation = 'embed';
+        } else if (resizeMode === 'fill') {
+            operation = 'enlarge';
+            imaginaryParams.set('force', 'true');
+        }
     }
 
     try {
