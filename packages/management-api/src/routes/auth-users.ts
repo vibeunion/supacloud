@@ -17,7 +17,7 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
       const { jwtService } = await import("../services/jwt.service");
       const serviceRoleKey = await jwtService.generateServiceRoleKey(project.jwt_secret);
       const { config } = await import("../config");
-      const apiUrl = project.api?.url || config.kongInternal;
+      const apiUrl = project.api?.url || (config.kongInternal.startsWith('http') ? config.kongInternal : `http://${config.kongInternal}`);
 
       // Pass along pagination (svadmin uses _page / _limit or standard skip/limit)
       const limit = Number(query._limit || query.limit || 50);
@@ -73,7 +73,7 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
       const { jwtService } = await import("../services/jwt.service");
       const serviceRoleKey = await jwtService.generateServiceRoleKey(project.jwt_secret);
       const { config } = await import("../config");
-      const apiUrl = project.api?.url || config.kongInternal;
+      const apiUrl = project.api?.url || (config.kongInternal.startsWith('http') ? config.kongInternal : `http://${config.kongInternal}`);
 
       const res = await fetch(`${apiUrl}/auth/v1/admin/users`, {
         method: "POST",
@@ -123,7 +123,7 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
       const { jwtService } = await import("../services/jwt.service");
       const serviceRoleKey = await jwtService.generateServiceRoleKey(project.jwt_secret);
       const { config } = await import("../config");
-      const apiUrl = project.api?.url || config.kongInternal;
+      const apiUrl = project.api?.url || (config.kongInternal.startsWith('http') ? config.kongInternal : `http://${config.kongInternal}`);
 
       const res = await fetch(`${apiUrl}/auth/v1/invite`, {
         method: "POST",
@@ -167,7 +167,7 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
       const { jwtService } = await import("../services/jwt.service");
       const serviceRoleKey = await jwtService.generateServiceRoleKey(project.jwt_secret);
       const { config } = await import("../config");
-      const apiUrl = project.api?.url || config.kongInternal;
+      const apiUrl = project.api?.url || (config.kongInternal.startsWith('http') ? config.kongInternal : `http://${config.kongInternal}`);
 
       const res = await fetch(`${apiUrl}/auth/v1/admin/users/${params.id}`, {
         method: "DELETE",

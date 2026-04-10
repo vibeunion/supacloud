@@ -10,6 +10,7 @@ import { createPgListener, type PgListenerHandle } from "../lib/pg-listen";
 import { config } from "../config";
 import type { ProjectTask } from "../db";
 import { broadcastTaskUpdate } from "../routes/ws";
+import { realtimeService } from "./realtime.service";
 
 export class TaskWorker {
     private isRunning = false;
@@ -154,6 +155,25 @@ export class TaskWorker {
                     return true;
                 }
 
+                case "provision_realtime": {
+                    if (!project) {
+                        logger.error(`[TaskWorker] Project ${project_ref} not found for provision_realtime`);
+                        return false;
+                    }
+                    const cfg = project.config as Record<string, unknown> || {};
+                    const dbName = typeof cfg.db_name === "string" ? cfg.db_name : `supa_${project_ref}`;
+                    const res = await realtimeService.registerTenant({
+                        projectRef: project_ref,
+                        jwtSecret: project.jwt_secret,
+                        dbName,
+                        dbPassword: project.db_password,
+                    });
+                    if (!res) {
+                        logger.error(`[TaskWorker] Failed to provision realtime for ${project_ref}`);
+                    }
+                    return res;
+                }
+
                 case "provision_router": {
                     // Get domain from project config or task payload
                     const domain = project?.config?.custom_domain as string | undefined || payload?.domain as string | undefined;
@@ -204,8 +224,12 @@ export class TaskWorker {
                     }
                     // Auto-inject standard environment variables into project_secrets
                     // so Edge Functions can verify JWTs, access Supabase APIs, etc.
-                    const apiDomain = (project.config as Record<string, unknown>)?.api_domain as string | undefined;
-                    const supabaseUrl = apiDomain ? `https://${apiDomain}` : `http://127.0.0.1:8000`;
+                    const cfg = (project.config as Record<string, unknown>) || {};
+                    const explicitApiDomain = typeof cfg.api_domain === "string" ? cfg.api_domain : undefined;
+                    const customDomain = typeof cfg.custom_domain === "string" ? cfg.custom_domain : undefined;
+                    const supabaseUrl = explicitApiDomain
+                      ? `https://${explicitApiDomain}`
+                      : routerService.getProjectApiUrl(project_ref, customDomain);
                     const standardSecrets = [
                         { name: "SUPABASE_URL", value: supabaseUrl },
                         { name: "SUPABASE_ANON_KEY", value: project.anon_key },
@@ -246,6 +270,11 @@ export class TaskWorker {
                     return true;
                 }
 
+                case "cleanup_realtime": {
+                    const res = await realtimeService.removeTenant(project_ref);
+                    return res;
+                }
+
                 case "cleanup_router": {
                     await routerService.removeRoute(project_ref);
                     // API driven gateway no longer requires reload
@@ -272,6 +301,8 @@ export class TaskWorker {
         } else if (task_type === "provision_s3") {
             await taskRepository.createTask(project_ref, "provision_runtime");
         } else if (task_type === "provision_runtime") {
+            await taskRepository.createTask(project_ref, "provision_realtime");
+        } else if (task_type === "provision_realtime") {
             await taskRepository.createTask(project_ref, "provision_router");
         } else if (task_type === "provision_router") {
             await taskRepository.createTask(project_ref, "provision_gateway");
@@ -282,7 +313,10 @@ export class TaskWorker {
             await projectRepository.updateStatus(project_ref, "active");
             logger.info(`[TaskWorker] Project ${project_ref} fully provisioned and activated.`);
         } else if (task_type === "cleanup_runtime") {
-            // After runtime cleanup, cleanup database
+            // After runtime cleanup, cleanup realtime
+            await taskRepository.createTask(project_ref, "cleanup_realtime");
+        } else if (task_type === "cleanup_realtime") {
+            // After realtime cleanup, cleanup DB
             await taskRepository.createTask(project_ref, "cleanup_db");
         } else if (task_type === "cleanup_db") {
             // After database cleanup, cleanup router
@@ -317,7 +351,7 @@ export class TaskWorker {
         }
 
         // Saga Compensation Logic
-        if (task_type === "provision_s3" || task_type === "provision_runtime") {
+        if (task_type === "provision_s3" || task_type === "provision_runtime" || task_type === "provision_realtime") {
             // If S3 or runtime provision failed, we need to rollback DB and S3
             logger.info(`[TaskWorker] Rolling back resources for ${project_ref} due to provisioning failure.`);
             await taskRepository.createTask(project_ref, "cleanup_runtime");

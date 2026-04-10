@@ -168,8 +168,10 @@ export class StorageRLS {
     try {
       // Use a transaction so we respect standard RLS contexts
       await db.begin(async (tx) => {
-        await tx`SELECT set_config('role', ${payload.role || 'anon'}, true)`;
+        await tx`SELECT set_config('role', ${(payload.role as string) || 'anon'}, true)`;
         await tx`SELECT set_config('request.jwt.claims', ${JSON.stringify(payload)}, true)`;
+        if (payload.sub) await tx`SELECT set_config('request.jwt.claim.sub', ${String(payload.sub)}, true)`;
+        if (payload.role) await tx`SELECT set_config('request.jwt.claim.role', ${String(payload.role)}, true)`;
 
         // Prepare owner uuid safely (sometimes sub is not uuid)
         const owner = typeof payload.sub === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(payload.sub) ? payload.sub : null;
@@ -266,6 +268,8 @@ export class StorageRLS {
       await db.begin(async (tx) => {
         await tx`SELECT set_config('role', ${String(payload.role) || 'anon'}, true)`;
         await tx`SELECT set_config('request.jwt.claims', ${JSON.stringify(payload)}, true)`;
+        if (payload.sub) await tx`SELECT set_config('request.jwt.claim.sub', ${String(payload.sub)}, true)`;
+        if (payload.role) await tx`SELECT set_config('request.jwt.claim.role', ${String(payload.role)}, true)`;
 
         const searchPrefix = prefix + '%';
         const searchTerm = `%${search}%`;

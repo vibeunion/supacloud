@@ -262,28 +262,36 @@ export class GatewayService {
 
     async setCors(projectRef: string, origins: string[] = DEFAULT_CORS_ORIGINS): Promise<boolean> {
         try {
-            const routeName = `route-${projectRef}`;
-            const pluginsRes = await this.kongRequest(`/routes/${routeName}/plugins?name=cors`);
-            const existing = pluginsRes?.data?.[0];
+            const routes = ['pgrst', 'gotrue', 'realtime', 'storage', 'functions'].map(r => `route-svc-${r}-${projectRef}`);
+            let allSuccess = true;
+            for (const routeName of routes) {
+                try {
+                    const pluginsRes = await this.kongRequest(`/routes/${routeName}/plugins?name=cors`);
+                    const existing = pluginsRes?.data?.[0];
 
-            const payload = {
-                name: "cors",
-                config: {
-                    origins,
-                    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-                    headers: DEFAULT_CORS_HEADERS,
-                    exposed_headers: DEFAULT_CORS_EXPOSED,
-                    credentials: true,
-                    max_age: 3600,
-                },
-            };
+                    const payload = {
+                        name: "cors",
+                        config: {
+                            origins,
+                            methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+                            headers: DEFAULT_CORS_HEADERS,
+                            exposed_headers: DEFAULT_CORS_EXPOSED,
+                            credentials: true,
+                            max_age: 3600,
+                        },
+                    };
 
-            if (existing) {
-                await this.kongRequest(`/plugins/${existing.id}`, "PATCH", payload);
-            } else {
-                await this.kongRequest(`/routes/${routeName}/plugins`, "POST", payload);
+                    if (existing) {
+                        await this.kongRequest(`/plugins/${existing.id}`, "PATCH", payload);
+                    } else {
+                        await this.kongRequest(`/routes/${routeName}/plugins`, "POST", payload);
+                    }
+                } catch (e: unknown) {
+                    allSuccess = false;
+                    logger.error(`Failed to set CORS for route ${routeName}:`, (e instanceof Error ? e.message : String(e)));
+                }
             }
-            return true;
+            return allSuccess;
         } catch (error: unknown) {
             logger.error(`Failed to set CORS for ${projectRef}:`, (error instanceof Error ? error.message : String(error)));
             return false;
@@ -294,16 +302,24 @@ export class GatewayService {
 
     async enableJwtAuth(projectRef: string): Promise<boolean> {
         try {
-            const routeName = `route-${projectRef}`;
-            const pluginsRes = await this.kongRequest(`/routes/${routeName}/plugins`);
-            const hasJwt = pluginsRes?.data?.some((p: Record<string, unknown>) => p.name === "jwt");
-            if (!hasJwt) {
-                await this.kongRequest(`/routes/${routeName}/plugins`, "POST", {
-                    name: "jwt",
-                    config: { key_claim_name: "iss", claims_to_verify: ["exp"] },
-                });
+            const routes = ['pgrst', 'gotrue', 'realtime', 'storage', 'functions'].map(r => `route-svc-${r}-${projectRef}`);
+            let allSuccess = true;
+            for (const routeName of routes) {
+                try {
+                    const pluginsRes = await this.kongRequest(`/routes/${routeName}/plugins`);
+                    const hasJwt = pluginsRes?.data?.some((p: Record<string, unknown>) => p.name === "jwt");
+                    if (!hasJwt) {
+                        await this.kongRequest(`/routes/${routeName}/plugins`, "POST", {
+                            name: "jwt",
+                            config: { key_claim_name: "iss", claims_to_verify: ["exp"] },
+                        });
+                    }
+                } catch (e: unknown) {
+                    allSuccess = false;
+                    logger.error(`Failed to enable JWT auth for route ${routeName}:`, (e instanceof Error ? e.message : String(e)));
+                }
             }
-            return true;
+            return allSuccess;
         } catch (error: unknown) {
             logger.error(`Failed to enable JWT auth for ${projectRef}:`, (error instanceof Error ? error.message : String(error)));
             return false;
