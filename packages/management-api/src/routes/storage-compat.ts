@@ -693,12 +693,23 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
 
             return Promise.all(paths.map(async (filePath: string) => {
                 const cleanPath = filePath.replace(/^\//, '');
+                
+                const objectExists = await StorageRLS.objectExists(ref, params.bucket, cleanPath);
+                if (!objectExists) {
+                    return { error: 'Object not found', path: filePath, signedURL: null };
+                }
+
+                const auth = headers['authorization'] || '';
+                if (!(await StorageRLS.authorizeAction(ref, auth, 'download', params.bucket, cleanPath))) {
+                    return { error: 'Unauthorized', path: filePath, signedURL: null };
+                }
+
                 const expiresAt = Math.floor(Date.now() / 1000) + expiresIn;
                 const token = await generateSignedToken(ref, params.bucket, cleanPath, expiresAt);
                 return {
                     error: null,
                     path: filePath,
-                    signedURL: buildSignedPath(`/object/sign/${params.bucket}/${cleanPath}`, expiresAt, token),
+                    signedURL: buildSignedPath(`/object/sign/${params.bucket}/${cleanPath}`, expiresAt, token, body.transform),
                 };
             }));
         }
@@ -711,9 +722,19 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             return status(400, { statusCode: '400', error: 'Bad Request', message: 'Missing file path' });
         }
 
+        const objectExists = await StorageRLS.objectExists(ref, params.bucket, filePath);
+        if (!objectExists) {
+            return status(404, { statusCode: '404', error: 'Not Found', message: 'Object not found' });
+        }
+
+        const auth = headers['authorization'] || '';
+        if (!(await StorageRLS.authorizeAction(ref, auth, 'download', params.bucket, filePath))) {
+            return status(403, { statusCode: '403', error: 'Forbidden', message: 'You do not have permission to access this resource.' });
+        }
+
         const expiresAt = Math.floor(Date.now() / 1000) + expiresIn;
         const token = await generateSignedToken(ref, params.bucket, filePath, expiresAt);
-
+        
         return {
             signedURL: buildSignedPath(`/object/sign/${params.bucket}/${filePath}`, expiresAt, token, body.transform),
         };
@@ -737,6 +758,13 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         const bucket = await StorageRLS.getLogicalBucket(ref, params.bucket);
         if (!bucket) return status(404, { statusCode: '404', error: 'Not Found', message: 'Bucket not found' });
         
+        // Enforce RLS for upload URL generation
+        const auth = headers['authorization'] || '';
+        const action = upsert ? 'upload' : 'upload'; // authorizeAction uses 'upload'
+        if (!(await StorageRLS.authorizeAction(ref, auth, action, params.bucket, filePath))) {
+            return status(403, { statusCode: '403', error: 'Forbidden', message: 'You do not have permission to create signed upload URLs for this resource.' });
+        }
+
         const token = crypto.randomUUID();
         const expiresAt = Math.floor(Date.now() / 1000) + 7200; // 2 hours
         await SignedStore.set(token, {

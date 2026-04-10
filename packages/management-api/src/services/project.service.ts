@@ -283,7 +283,10 @@ export class ProjectService {
     } else {
         // Fall back to checking global docker container, but explicitly verify tenant registration
         if (kongDocker === "ACTIVE_HEALTHY" || kongSystemd === "ACTIVE_HEALTHY") { 
-            const globalRealtimeDocker = await checkGlobalDocker("realtime-dev.supabase-realtime") || await checkGlobalDocker("supacloud-realtime");
+            let globalRealtimeDocker = await checkGlobalDocker("realtime-dev.supabase-realtime");
+            if (globalRealtimeDocker === "INACTIVE") {
+                globalRealtimeDocker = await checkGlobalDocker("supacloud-realtime");
+            }
             if (globalRealtimeDocker === "ACTIVE_HEALTHY" || realtimeDocker === "ACTIVE_HEALTHY") {
                 const { realtimeService } = await import("./realtime.service");
                 const hasTenant = await realtimeService.getTenant(ref);
