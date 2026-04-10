@@ -24,7 +24,15 @@ class TenantRuntimeService {
 
     private readonly PGRST_PORT_BASE = config.pgrstPortBase;
     private readonly GOTRUE_PORT_BASE = config.gotruePortBase;
-    private readonly PORT_RANGE = parseInt(config.portRange);
+    
+    // config.portRange is a string like "3100-3200". We just need the difference as the range size.
+    private readonly PORT_RANGE = (() => {
+        const parts = config.portRange.split('-');
+        if (parts.length === 2) {
+            return parseInt(parts[1]) - parseInt(parts[0]);
+        }
+        return parseInt(config.portRange); // fallback if it's just a number
+    })();
 
     private deriveApiUrl(ref: string, projectConfig: Record<string, unknown> | null | undefined): string {
         const explicitApiDomain = typeof projectConfig?.api_domain === "string" ? projectConfig.api_domain.trim() : "";
@@ -169,7 +177,7 @@ SUPABASE_DB_URL=postgresql://postgres:${config.pgPassword}@${this.PG_HOST}:${thi
 # PostgREST config for tenant: ${ref}
 db-uri = "postgres://authenticator_${ref}:${creds.dbPassword}@${this.PG_HOST}:${this.PG_PORT}/${creds.dbName}"
 db-schemas = "public, storage, graphql_public"
-db-extra-search-path = "public, extensions, auth, ${ref}"
+db-extra-search-path = "public, extensions, auth"
 db-anon-role = "anon"
 jwt-secret = "${creds.jwtSecret}"
 server-port = ${pgrstPort}

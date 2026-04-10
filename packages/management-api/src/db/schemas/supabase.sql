@@ -16,10 +16,10 @@ BEGIN
         CREATE ROLE service_role NOLOGIN NOINHERIT BYPASSRLS;
     END IF;
     IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'supabase_admin') THEN
-        CREATE ROLE supabase_admin NOLOGIN NOINHERIT BYPASSRLS REPLICATION;
+        CREATE ROLE supabase_admin LOGIN NOINHERIT BYPASSRLS REPLICATION;
     END IF;
     IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'supabase_auth_admin') THEN
-        CREATE ROLE supabase_auth_admin NOLOGIN NOINHERIT CREATEROLE CREATEDB;
+        CREATE ROLE supabase_auth_admin LOGIN NOINHERIT CREATEROLE CREATEDB;
     END IF;
     IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'supabase_storage_admin') THEN
         CREATE ROLE supabase_storage_admin NOLOGIN NOINHERIT;
@@ -215,11 +215,16 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO service_role;
 
 -- 6. Supabase SQL Helpers
 CREATE OR REPLACE FUNCTION auth.uid() RETURNS uuid AS $$
-  SELECT COALESCE(
+BEGIN
+  RETURN COALESCE(
     nullif(current_setting('request.jwt.claim.sub', true), ''),
     (nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'sub')
   )::uuid;
-$$ LANGUAGE SQL STABLE;
+EXCEPTION
+  WHEN invalid_text_representation THEN
+    RETURN NULL;
+END
+$$ LANGUAGE plpgsql STABLE;
 
 CREATE OR REPLACE FUNCTION auth.jwt() RETURNS jsonb AS $$
   SELECT nullif(current_setting('request.jwt.claims', true), '')::jsonb;
