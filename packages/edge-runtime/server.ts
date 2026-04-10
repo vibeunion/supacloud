@@ -8,6 +8,8 @@ import { execSync } from "child_process";
 const PORT = Number(process.env.PORT) || 9000;
 const POOL_SIZE = Number(process.env.WORKER_POOL_SIZE) || 4;
 const FUNCTIONS_DIR = process.env.EDGE_FUNCTIONS_DIR || "./functions";
+const MGMT_API = process.env.MANAGEMENT_API_URL || "http://127.0.0.1:9090";
+const MASTER_TOKEN = process.env.MASTER_TOKEN || "";
 
 // ── Startup Port-Exclusivity Guard ──────────────────────────────────
 // Prevent SO_REUSEPORT ghost processes: kill ALL existing listeners on
@@ -104,6 +106,68 @@ async function dispatchFunction(
   }
 }
 
+// ── Function Config Cache ───────────────────────────────────────────────
+// Cache verify_jwt config per function with short TTL to avoid API calls on every invocation
+const configCache = new Map<string, { verify_jwt: boolean; expiresAt: number }>();
+const CONFIG_CACHE_TTL = 10_000; // 10s
+
+async function getFunctionConfig(projectRef: string, functionName: string): Promise<{ verify_jwt: boolean }> {
+  const key = `${projectRef}/${functionName}`;
+  const cached = configCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) {
+    return { verify_jwt: cached.verify_jwt };
+  }
+
+  // Try reading the config file directly (faster than API call)
+  try {
+    const configPath = path.resolve(FUNCTIONS_DIR, projectRef, `${functionName}.config.json`);
+    const raw = await Bun.file(configPath).text();
+    const config = JSON.parse(raw);
+    const verify_jwt = config.verify_jwt !== false; // default true
+    configCache.set(key, { verify_jwt, expiresAt: Date.now() + CONFIG_CACHE_TTL });
+    return { verify_jwt };
+  } catch {
+    // No config file = default (verify_jwt: true)
+    configCache.set(key, { verify_jwt: true, expiresAt: Date.now() + CONFIG_CACHE_TTL });
+    return { verify_jwt: true };
+  }
+}
+
+/** Verify JWT token against Management API's project JWT secret */
+async function verifyJwt(projectRef: string, authHeader: string | null | undefined): Promise<boolean> {
+  if (!authHeader) return false;
+  const token = authHeader.replace(/^Bearer\s+/i, "");
+  if (!token) return false;
+
+  try {
+    const res = await fetch(`${MGMT_API}/v1/projects/${projectRef}/api-keys`, {
+      headers: { Authorization: `Bearer ${MASTER_TOKEN}` },
+      signal: AbortSignal.timeout(3000),
+    });
+    if (!res.ok) return false;
+    const keys = await res.json() as { anon_key?: string; service_role_key?: string };
+    
+    // Allow both anon_key and service_role_key as valid bearer tokens
+    if (token === keys.anon_key || token === keys.service_role_key) return true;
+    
+    // If token is an actual JWT, verify signature via jose
+    const { jwtVerify } = await import("jose");
+    // Fetch JWT secret
+    const detailRes = await fetch(`${MGMT_API}/v1/projects/${projectRef}`, {
+      headers: { Authorization: `Bearer ${MASTER_TOKEN}` },
+      signal: AbortSignal.timeout(3000),
+    });
+    if (!detailRes.ok) return false;
+    const detail = await detailRes.json() as { jwt_secret?: string };
+    if (!detail.jwt_secret) return false;
+    
+    await jwtVerify(token, new TextEncoder().encode(detail.jwt_secret));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 const app = new Elysia()
   .get("/health", () => ({ status: "ok", runtime: "bun-edge" }))
   .get("/metrics", () => pool.getMetrics())
@@ -136,6 +200,19 @@ const app = new Elysia()
         headers: { "Content-Type": "application/json", "x-relay-error": "true" },
       });
     }
+
+    // Check verify_jwt config
+    const fnConfig = await getFunctionConfig(projectRef, c.params.functionName);
+    if (fnConfig.verify_jwt) {
+      const authorized = await verifyJwt(projectRef, c.headers["authorization"]);
+      if (!authorized) {
+        return new Response(JSON.stringify({ msg: "Invalid JWT" }), {
+          status: 401,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+    }
+
     return dispatchFunction(projectRef, c.params.functionName, c.request, c.set.headers as Record<string, string>);
   })
 
@@ -148,6 +225,18 @@ const app = new Elysia()
         headers: { "Content-Type": "application/json", "x-relay-error": "true" },
       });
     }
+
+    const fnConfig = await getFunctionConfig(projectRef, c.params.functionName);
+    if (fnConfig.verify_jwt) {
+      const authorized = await verifyJwt(projectRef, c.headers["authorization"]);
+      if (!authorized) {
+        return new Response(JSON.stringify({ msg: "Invalid JWT" }), {
+          status: 401,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+    }
+
     return dispatchFunction(projectRef, c.params.functionName, c.request, c.set.headers as Record<string, string>);
   })
 

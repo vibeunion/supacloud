@@ -126,4 +126,39 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         slug: t.String(),
       }),
     }
+  )
+
+  // Get function config (verify_jwt, etc.)
+  .get(
+    "/:ref/functions/:slug/config",
+    async ({ params }) => {
+      const { edgeFunctionService } = await import("../services/edge-function.service");
+      const config = await edgeFunctionService.getConfig(params.ref, params.slug);
+      return config;
+    },
+    {
+      params: t.Object({
+        ref: t.String(),
+        slug: t.String(),
+      }),
+    }
+  )
+
+  // Update function config (verify_jwt, etc.)
+  .patch(
+    "/:ref/functions/:slug/config",
+    async ({ params, body }) => {
+      const { edgeFunctionService } = await import("../services/edge-function.service");
+      const updated = await edgeFunctionService.updateConfig(params.ref, params.slug, body);
+      return updated;
+    },
+    {
+      params: t.Object({
+        ref: t.String(),
+        slug: t.String(),
+      }),
+      body: t.Object({
+        verify_jwt: t.Optional(t.Boolean()),
+      }),
+    }
   );
