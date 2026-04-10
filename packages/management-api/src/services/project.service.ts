@@ -294,9 +294,9 @@ export class ProjectService {
         }
     }
     
-    // Storage is embedded in the Management API, so if this endpoint is reached, it's ACTIVE,
-    // unless a specific per-tenant storage unit is defined and failing.
-    const storageStatus = storagePerTenant === "ACTIVE_HEALTHY" ? "ACTIVE_HEALTHY" : "ACTIVE_HEALTHY";
+    // Evaluate storage status based on checking MinIO/S3 reachability
+    const isStorageReachable = await this.checkStorageHealth();
+    const storageStatus = (storagePerTenant === "ACTIVE_HEALTHY" || isStorageReachable) ? "ACTIVE_HEALTHY" : "INACTIVE";
     
     // Gateway is kong (systemd/docker)
     const kongStatus = (kongSystemd === "ACTIVE_HEALTHY" || kongDocker === "ACTIVE_HEALTHY") 
@@ -346,10 +346,10 @@ export class ProjectService {
     const project = await projectRepository.findByRef(ref);
     if (!project) return false;
 
-    // Restart per-tenant services via systemd
+    // Delegate to tenantRuntimeService to ensure config is regenerated properly
+    const { tenantRuntimeService } = await import("./tenant-runtime.service");
     try {
-      await $`systemctl restart supacloud-pgrst@${ref}`.nothrow().quiet();
-      await $`systemctl restart supacloud-gotrue@${ref}`.nothrow().quiet();
+      await tenantRuntimeService.restartRuntime(ref);
       logger.info(`[ProjectService] Restarted services for project ${ref}`);
     } catch (err: unknown) {
       logger.warn(`[ProjectService] Service restart partial failure for ${ref}`, { error: err });
@@ -537,15 +537,37 @@ export class ProjectService {
 
     const { jwtSecret, anonKey, serviceRoleKey } = await jwtService.generateKeySet();
 
+    // 1. Update keys in master database
     await projectRepository.updateApiKeys(ref, {
       jwt_secret: jwtSecret,
       anon_key: anonKey,
       service_role_key: serviceRoleKey,
     });
 
+    // 2. Update keys in Edge Runtime secrets
+    await databaseService.upsertSecret(ref, "JWT_SECRET", jwtSecret);
+    await databaseService.upsertSecret(ref, "SUPABASE_ANON_KEY", anonKey);
+    await databaseService.upsertSecret(ref, "SUPABASE_SERVICE_ROLE_KEY", serviceRoleKey);
+
+    // 3. Update Gateway JWT
     await gatewayService.setupJwt(ref, jwtSecret);
     
-    logger.info(`[ProjectService] Rotated API keys and reloaded router for ${ref}`);
+    // 4. Update Realtime JWT
+    const { realtimeService } = await import("./realtime.service");
+    const cfg = (project.config as Record<string, unknown>) || {};
+    const dbName = typeof cfg.db_name === "string" ? cfg.db_name : `supa_${ref}`;
+    await realtimeService.updateTenant({
+        projectRef: ref,
+        dbName,
+        dbPassword: project.db_password,
+        jwtSecret
+    });
+
+    // 5. Restart PostgREST and GoTrue to pickup new keys
+    const { tenantRuntimeService } = await import("./tenant-runtime.service");
+    await tenantRuntimeService.restartRuntime(ref);
+
+    logger.info(`[ProjectService] Rotated API keys, synchronized secrets, and reloaded runtimes for ${ref}`);
 
     return { anon_key: anonKey, service_role_key: serviceRoleKey };
   }
