@@ -13,6 +13,7 @@
     slug: string;
     name: string;
     status: string;
+    verify_jwt: boolean;
     created_at: string;
   }
 
@@ -93,6 +94,24 @@ serve(async (req) => {
     if (!confirm(`确定删除 Edge Function "${slug}"？此操作不可恢复。`)) return;
     deleteMutation.mutate(slug);
   }
+
+  // Toggle verify_jwt config
+  async function toggleVerifyJwt(fn: EdgeFunction) {
+    const newValue = !fn.verify_jwt;
+    try {
+      const res = await apiClient(`/v1/projects/${projectRef}/functions/${fn.slug}/config`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ verify_jwt: newValue }),
+      });
+      if (!res.ok) throw new Error("Failed");
+      fn.verify_jwt = newValue;
+      toast.success(`${fn.slug}: JWT 验证已${newValue ? '开启' : '关闭'}`);
+      query.refetch();
+    } catch {
+      toast.error(`无法修改 ${fn.slug} 的 JWT 配置`);
+    }
+  }
 </script>
 
 <div class="h-full flex flex-col space-y-4">
@@ -170,6 +189,7 @@ serve(async (req) => {
             <tr>
               <th class="px-5 py-3 font-semibold text-muted-foreground text-xs">函数名</th>
               <th class="px-5 py-3 font-semibold text-muted-foreground text-xs">状态</th>
+              <th class="px-5 py-3 font-semibold text-muted-foreground text-xs">JWT 验证</th>
               <th class="px-5 py-3 font-semibold text-muted-foreground text-xs">端点</th>
               <th class="px-5 py-3 font-semibold text-muted-foreground text-xs">创建时间</th>
               <th class="px-5 py-3"></th>
@@ -189,6 +209,13 @@ serve(async (req) => {
                 </td>
                 <td class="px-5 py-3">
                   <code class="text-[10px] text-muted-foreground">/functions/v1/{fn.slug}</code>
+                </td>
+                <td class="px-5 py-3">
+                  <button onclick={() => toggleVerifyJwt(fn)}
+                    class="relative inline-flex h-5 w-9 items-center rounded-full transition-colors {fn.verify_jwt ? 'bg-brand' : 'bg-muted-foreground/30'}"
+                    title={fn.verify_jwt ? 'JWT 验证已开启（点击关闭）' : 'JWT 验证已关闭（点击开启）'}>
+                    <span class="inline-block h-3.5 w-3.5 rounded-full bg-white transition-transform shadow-sm {fn.verify_jwt ? 'translate-x-[18px]' : 'translate-x-[3px]'}"></span>
+                  </button>
                 </td>
                 <td class="px-5 py-3 text-muted-foreground text-xs font-mono tabular-nums">
                   <div class="flex items-center gap-1"><Clock size={12} />{new Date(fn.created_at).toLocaleDateString()}</div>

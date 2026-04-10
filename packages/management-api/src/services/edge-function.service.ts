@@ -3,6 +3,16 @@ import { config } from "../config";
 import path from "path";
 import fs from "fs/promises";
 
+/** Per-function configuration (mirrors Supabase config.toml [functions.xxx]) */
+export interface EdgeFunctionConfig {
+  verify_jwt: boolean;
+  import_map?: string;
+}
+
+const DEFAULT_FUNCTION_CONFIG: EdgeFunctionConfig = {
+  verify_jwt: true, // Default: require JWT (same as Supabase)
+};
+
 /**
  * Edge Function file management — handles function source files on disk.
  *
@@ -29,6 +39,10 @@ function getFuncPath(ref: string, slug: string): string {
 
 function getSrcPath(ref: string, slug: string): string {
   return path.join(getFuncDir(ref), `${slug}.src.ts`);
+}
+
+function getConfigPath(ref: string, slug: string): string {
+  return path.join(getFuncDir(ref), `${slug}.config.json`);
 }
 
 /**
@@ -122,6 +136,27 @@ async function invalidateCache(ref: string, slug: string): Promise<void> {
 }
 
 export const edgeFunctionService = {
+  /** Read function config (verify_jwt, etc.) */
+  async getConfig(ref: string, slug: string): Promise<EdgeFunctionConfig> {
+    try {
+      const raw = await Bun.file(getConfigPath(ref, slug)).text();
+      return { ...DEFAULT_FUNCTION_CONFIG, ...JSON.parse(raw) };
+    } catch {
+      return { ...DEFAULT_FUNCTION_CONFIG };
+    }
+  },
+
+  /** Update function config */
+  async updateConfig(ref: string, slug: string, config: Partial<EdgeFunctionConfig>): Promise<EdgeFunctionConfig> {
+    const current = await this.getConfig(ref, slug);
+    const merged = { ...current, ...config };
+    const dir = getFuncDir(ref);
+    await fs.mkdir(dir, { recursive: true });
+    await Bun.write(getConfigPath(ref, slug), JSON.stringify(merged, null, 2));
+    logger.info(`[EdgeFunction] Config updated for ${slug}@${ref}: verify_jwt=${merged.verify_jwt}`);
+    return merged;
+  },
+
   /**
    * Deploy a single-file Edge Function.
    * The source code is preserved as .src.ts; a bundled .js is written for the runtime.
