@@ -1,0 +1,30 @@
+[Unit]
+Description=SupaCloud Realtime Service (Supabase/Phoenix)
+After=network.target
+
+[Service]
+Type=simple
+TimeoutStartSec=0
+Restart=always
+RestartSec=5
+# Run using podman (or docker alias)
+ExecStartPre=-/usr/bin/podman rm -f supacloud-realtime
+ExecStart=/usr/bin/podman run --name supacloud-realtime --network host \
+  -e PORT=4000 \
+  -e DB_HOST=127.0.0.1 \
+  -e DB_PORT=5432 \
+  -e DB_USER=supabase_admin \
+  -e DB_NAME=postgres \
+  -e DB_PASSWORD=supabase \
+  -e SECRET_KEY_BASE=YOUR_SUPER_SECRET_KEY_BASE_SHOULD_BE_64_BYTES_LONG \
+  -e JWT_SECRET=YOUR_SUPABASE_JWT_SECRET \
+  -e API_JWT_SECRET=YOUR_SUPABASE_JWT_SECRET \
+  -e RLS_ENABLED=true \
+  -e MAX_HEADER_LENGTH=8192 \
+  -e SLACK_ALERTS_WEBHOOK_URL="" \
+  public.ecr.aws/supabase/realtime:v2.33.3
+
+ExecStop=/usr/bin/podman stop -t 10 supacloud-realtime
+
+[Install]
+WantedBy=multi-user.target
