@@ -316,7 +316,10 @@ export class TaskWorker {
             // After runtime cleanup, cleanup realtime
             await taskRepository.createTask(project_ref, "cleanup_realtime");
         } else if (task_type === "cleanup_realtime") {
-            // After realtime cleanup, cleanup DB
+            // After realtime cleanup, cleanup S3
+            await taskRepository.createTask(project_ref, "cleanup_s3");
+        } else if (task_type === "cleanup_s3") {
+            // After S3 cleanup, cleanup DB
             await taskRepository.createTask(project_ref, "cleanup_db");
         } else if (task_type === "cleanup_db") {
             // After database cleanup, cleanup router

@@ -9,8 +9,9 @@ import { assertValidIdentifier, assertValidDbName } from "../utils/validation";
 /** Escape a string value for use inside PostgreSQL dollar-quoted strings */
 function pgEscapePassword(password: string): string {
   // Use dollar-quoting with unique tag to safely embed passwords
-  // The tag includes a hash to avoid collision with password content
-  const tag = `pw${Bun.hash(password).toString(36).slice(0, 6)}`;
+  // The tag includes a hash and a random segment to avoid collision with password content
+  const randomSegment = crypto.randomUUID().slice(0, 8);
+  const tag = `pw${Bun.hash(password).toString(36).slice(0, 4)}${randomSegment}`;
   return `$${tag}$${password}$${tag}$`;
 }
 
