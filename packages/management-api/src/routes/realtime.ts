@@ -40,22 +40,28 @@ function broadcastPresenceDiff(topic: string, joins: Record<string, any>, leaves
   }
 }
 
+import { ws } from "@elysiajs/websocket";
+
 export const realtimeRoutes = new Elysia()
+  .use(ws())
   .ws("/realtime/v1/websocket", {
-    query: t.Optional(t.Object({
-      apikey: t.Optional(t.String()),
-      vsn: t.Optional(t.String())
-    })),
+    // Accept any query parameters since supabase-js sends various settings
+    // like compress, heartbeat_interval, vsn, apikey, etc.
     open(ws) {
       const id = `conn-${++connCounter}`;
       (ws.data as any).__connId = id;
       (ws.data as any).__topics = new Set<string>();
       connections.set(id, ws);
+      logger.info(`[Realtime] Connected WS: ${id}`);
     },
     async message(ws, message) {
       let msgArr: any[];
       try {
-        msgArr = typeof message === "string" ? JSON.parse(message) : message;
+        let text = message;
+        if (message && typeof (message as any).byteLength === "number") {
+           text = new TextDecoder().decode(message as any);
+        }
+        msgArr = typeof text === "string" ? JSON.parse(text as string) : text;
         if (!Array.isArray(msgArr) || msgArr.length !== 5) return;
       } catch {
         return;
