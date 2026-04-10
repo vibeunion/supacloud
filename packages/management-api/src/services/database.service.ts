@@ -204,19 +204,39 @@ export class DatabaseService {
         $$;
       `);
 
-      // Load and execute full Supabase schema (Auth, Storage, Realtime/Walrus, etc)
+      // Grant tenant roles and supabase_admin to the project owner role (so db_user credentials have actual object access)
+      await tenantDb.unsafe(`
+        GRANT ${anonRole}, ${authenticatedRole}, ${serviceRole}, supabase_admin TO "role_${projectRef}";
+      `);
+
+      // Check if schema was already successfully applied
+      let schemaAlreadyApplied = false;
       try {
-        const { join } = await import('path');
-        const schemaPath = join(import.meta.dir, '../db/schemas/supabase.sql');
-        const schemaSql = await Bun.file(schemaPath).text();
-        await tenantDb.unsafe(schemaSql);
-        logger.info(`[services/database.service] Successfully applied supabase.sql to tenant ${dbName}`);
-      } catch (e: unknown) {
-        logger.error(`[services/database.service] Failed to apply supabase.sql schema: ${e instanceof Error ? e.message : String(e)}`);
-        throw e;
+        const [row] = await tenantDb`
+          SELECT 1 FROM pg_class c
+          JOIN pg_namespace n ON n.oid = c.relnamespace
+          WHERE n.nspname = 'storage' AND c.relname = 'buckets'
+        `;
+        if (row) schemaAlreadyApplied = true;
+      } catch (e) {
+        // Table doesn't exist
       }
 
-
+      if (schemaAlreadyApplied) {
+        logger.info(`[services/database.service] Supabase schema already applied for tenant ${dbName}, skipping execution.`);
+      } else {
+        // Load and execute full Supabase schema (Auth, Storage, Realtime/Walrus, etc)
+        try {
+          const { join } = await import('path');
+          const schemaPath = join(import.meta.dir, '../db/schemas/supabase.sql');
+          const schemaSql = await Bun.file(schemaPath).text();
+          await tenantDb.unsafe(schemaSql);
+          logger.info(`[services/database.service] Successfully applied supabase.sql to tenant ${dbName}`);
+        } catch (err: unknown) {
+          logger.error(`[services/database.service] Error applying Supabase schema at ${dbName}`, { error: err instanceof Error ? err.message : String(err) });
+          throw err;
+        }
+      }
 
       // Grant privileges
       await tenantDb.unsafe(`
