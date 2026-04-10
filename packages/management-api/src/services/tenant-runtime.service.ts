@@ -77,7 +77,7 @@ class TenantRuntimeService {
      * Uses the global connection pool from db/index.ts
      */
     private async getTenantCredentials(ref: string) {
-        const [project] = await metaSql`SELECT db_password, jwt_secret, config->>'api_url' as api_url, db_name FROM projects WHERE ref=${ref}`;
+        const [project] = await metaSql`SELECT db_password, jwt_secret, config->>'api_url' as api_url, db_name, anon_key, service_role_key FROM projects WHERE ref=${ref}`;
 
         if (!project || !project.db_password || !project.jwt_secret) {
             throw new Error(`Cannot find valid credentials for project ${ref} in supacloud_meta`);
@@ -87,7 +87,9 @@ class TenantRuntimeService {
             dbPassword: project.db_password,
             jwtSecret: project.jwt_secret,
             dbName: project.db_name || `supa_${ref}`,
-            apiUrl: (project.api_url as string) || config.gotrueApiExternalUrl || "https://your-supacloud-domain.com"
+            apiUrl: (project.api_url as string) || config.gotrueApiExternalUrl || "https://your-supacloud-domain.com",
+            anonKey: project.anon_key,
+            serviceRoleKey: project.service_role_key
         };
     }
 
@@ -136,6 +138,12 @@ PGRST_SERVER_PORT=${pgrstPort}
 PGRST_DB_POOL=10
 PGRST_DB_POOL_ACQUISITION_TIMEOUT=10
 PGRST_LOG_LEVEL=warn
+
+# SupaCloud Edge Runtime Injection
+SUPABASE_URL=${creds.apiUrl}
+SUPABASE_ANON_KEY=${creds.anonKey}
+SUPABASE_SERVICE_ROLE_KEY=${creds.serviceRoleKey}
+SUPABASE_DB_URL=postgresql://postgres:${config.pgPassword}@${this.PG_HOST}:${this.PG_PORT}/${creds.dbName}
 `.trim();
         await Bun.write(path.join(this.TENANT_CONFIG_DIR, `${ref}.env`), pgrstEnv);
 
