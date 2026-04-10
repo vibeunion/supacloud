@@ -95,7 +95,38 @@ export async function initDatabase() {
       config JSONB NOT NULL DEFAULT '{}'::jsonb,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+
+    CREATE TABLE IF NOT EXISTS system_tus_uploads (
+      id VARCHAR(255) PRIMARY KEY,
+      ref VARCHAR(50) NOT NULL,
+      bucket VARCHAR(63) NOT NULL,
+      object_name TEXT NOT NULL,
+      content_type VARCHAR(100) NOT NULL,
+      total_size BIGINT NOT NULL,
+      offset_size BIGINT NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS system_tus_chunks (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      upload_id VARCHAR(255) REFERENCES system_tus_uploads(id) ON DELETE CASCADE,
+      chunk_data BYTEA NOT NULL,
+      chunk_offset BIGINT NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS system_signed_uploads (
+      token TEXT PRIMARY KEY,
+      ref VARCHAR(50) NOT NULL,
+      bucket VARCHAR(63) NOT NULL,
+      object_name TEXT NOT NULL,
+      upsert BOOLEAN DEFAULT false,
+      expires_at BIGINT NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
   `;
+
 
   // Use explicit config instead of URL to ensure correct database name
   const sql = new SQL({
@@ -117,13 +148,13 @@ export async function initDatabase() {
 
     const result = await sql`
       SELECT COUNT(*) as count FROM information_schema.tables 
-      WHERE table_schema = 'public' AND table_name IN ('organizations', 'projects', 'project_tasks', 'platform_settings', 'project_secrets', 'deployment_history')
+      WHERE table_schema = 'public' AND table_name IN ('organizations', 'projects', 'project_tasks', 'platform_settings', 'project_secrets', 'deployment_history', 'system_tus_uploads', 'system_tus_chunks', 'system_signed_uploads')
     `;
     
     const tableCount = Number(result[0]?.count || 0);
     logger.info(`Found ${tableCount} tables in database`);
 
-    if (tableCount < 6) {
+    if (tableCount < 9) {
       logger.info("Executing DDL statements...");
       await sql.unsafe(ddlQuery);
       logger.info("DDL executed successfully.");
@@ -157,14 +188,14 @@ export async function initDatabase() {
 
     const [verify] = await sql`
       SELECT COUNT(*) as count FROM information_schema.tables 
-      WHERE table_schema = 'public' AND table_name IN ('organizations', 'projects', 'project_tasks', 'platform_settings', 'project_secrets', 'deployment_history')
+      WHERE table_schema = 'public' AND table_name IN ('organizations', 'projects', 'project_tasks', 'platform_settings', 'project_secrets', 'deployment_history', 'system_tus_uploads', 'system_tus_chunks', 'system_signed_uploads')
     `;
     
     const finalCount = Number(verify?.count || 0);
-    logger.info(`Database initialized successfully! Tables verified: ${finalCount}/6`);
+    logger.info(`Database initialized successfully! Tables verified: ${finalCount}/9`);
     
-    if (finalCount < 6) {
-      throw new Error(`Table creation verified but failed. Expected 6 tables, got ${finalCount}`);
+    if (finalCount < 9) {
+      throw new Error(`Table creation verified but failed. Expected 9 tables, got ${finalCount}`);
     }
   } catch (error: unknown) {
     logger.error("Failed to initialize database:", { error: error instanceof Error ? error.message : String(error) });
