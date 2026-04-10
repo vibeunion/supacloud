@@ -1,3 +1,4 @@
+import { TusStore, SignedStore, startStorageCleanupJob } from "../services/storage-store";
 /**
  * Supabase-JS SDK Compatible Storage Routes
  * 
@@ -162,63 +163,13 @@ function getProjectRef(headers: Record<string, string | undefined>): string {
 // These are mounted DIRECTLY by Kong at /storage/v1 (Kong strips prefix)
 // So these routes see paths starting from /object/..., /bucket/..., /render/...
 
-// ── TUS Upload State ──────────────────────────────────────────────
-interface TusUpload {
-    ref: string;
-    bucket: string;
-    objectName: string;
-    contentType: string;
-    totalSize: number;
-    offset: number;
-    chunks: Buffer[];
-    createdAt: number;
-}
-
-interface SignedUpload {
-    ref: string;
-    bucket: string;
-    objectName: string;
-    upsert: boolean;
-    expiresAt: number;
-}
-
-const tusUploads = new Map<string, TusUpload>();
-const signedUploads = new Map<string, SignedUpload>();
-
-const TRANSFORM_QUERY_KEYS = new Set([
-    "width",
-    "height",
-    "resize",
-    "format",
-    "quality",
-    "smartcrop",
-    "blur",
-    "sigma",
-    "watermark",
-    "text",
-    "font",
-    "opacity",
-    "image",
-    "gravity",
-    "wm",
-    "wm_text",
-    "wm_image",
-    "wm_opacity",
-    "wm_gravity",
-    "wm_dx",
-    "wm_dy",
-]);
-
 // Auto-cleanup abandoned uploads every 10 minutes
-setInterval(() => {
-    const cutoff = Date.now() - 60 * 60 * 1000; // 1 hour
-    for (const [id, upload] of tusUploads) {
-        if (upload.createdAt < cutoff) tusUploads.delete(id);
-    }
-    for (const [token, upload] of signedUploads) {
-        if (upload.expiresAt * 1000 < Date.now()) signedUploads.delete(token);
-    }
-}, 10 * 60 * 1000);
+startStorageCleanupJob();
+const TRANSFORM_QUERY_KEYS = new Set([
+    "width", "height", "resize", "format", "quality", "smartcrop", "blur", "sigma", "watermark",
+    "text", "font", "opacity", "image", "gravity", "wm", "wm_text", "wm_image", "wm_opacity",
+    "wm_gravity", "wm_dx", "wm_dy",
+]);
 
 function buildSignedPath(pathname: string, expiresAt: number, token: string, transform?: Record<string, unknown>): string {
     const search = new URLSearchParams({ token, t: String(expiresAt) });
@@ -788,7 +739,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         
         const token = crypto.randomUUID();
         const expiresAt = Math.floor(Date.now() / 1000) + 7200; // 2 hours
-        signedUploads.set(token, {
+        await SignedStore.set(token, {
             ref,
             bucket: params.bucket,
             objectName: filePath,
@@ -812,12 +763,12 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             return status(401, { statusCode: '401', error: 'Unauthorized', message: 'Missing signed URL token' });
         }
 
-        const signedUpload = signedUploads.get(token);
+        const signedUpload = await SignedStore.get(token);
         if (!signedUpload || signedUpload.ref !== ref || signedUpload.bucket !== params.bucket || signedUpload.objectName !== filePath) {
             return status(401, { statusCode: '401', error: 'Unauthorized', message: 'Invalid or expired signed URL' });
         }
         if (signedUpload.expiresAt < Math.floor(Date.now() / 1000)) {
-            signedUploads.delete(token);
+            await SignedStore.delete(token);
             return status(401, { statusCode: '401', error: 'Unauthorized', message: 'Invalid or expired signed URL' });
         }
 
@@ -1166,14 +1117,13 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         const uploadId = `${ref}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
         // Store upload state
-        tusUploads.set(uploadId, {
+        await TusStore.set(uploadId, {
             ref,
             bucket,
             objectName,
             contentType,
             totalSize: uploadLength,
             offset: 0,
-            chunks: [],
             createdAt: Date.now(),
         });
 
@@ -1184,8 +1134,8 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
     })
 
     // HEAD /upload/resumable/:uploadId — Get current upload offset
-    .head('/upload/resumable/:uploadId', ({ params, set }) => {
-        const upload = tusUploads.get(params.uploadId);
+    .head('/upload/resumable/:uploadId', async ({ params, set }) => {
+        const upload = await TusStore.get(params.uploadId);
         if (!upload) return status(404, { error: 'Upload not found' });
 
         set.headers['Tus-Resumable'] = '1.0.0';
@@ -1197,7 +1147,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
 
     // PATCH /upload/resumable/:uploadId — Upload a chunk
     .patch('/upload/resumable/:uploadId', async ({ params, headers, request, set }) => {
-        const upload = tusUploads.get(params.uploadId);
+        const upload = await TusStore.get(params.uploadId);
         if (!upload) return status(404, { error: 'Upload not found' });
 
         const clientOffset = Number(headers['upload-offset'] || 0);
@@ -1206,7 +1156,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         }
 
         const chunk = Buffer.from(await request.arrayBuffer());
-        upload.chunks.push(chunk);
+        await TusStore.updateOffset(params.uploadId, upload.offset + chunk.length, chunk);
         upload.offset += chunk.length;
 
         set.headers['Tus-Resumable'] = '1.0.0';
@@ -1214,14 +1164,14 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
 
         // Upload complete — assemble and store in S3
         if (upload.offset >= upload.totalSize) {
-            const fullBody = Buffer.concat(upload.chunks);
+            const fullBody = await TusStore.assemble(params.uploadId);
 
             try {
                 await StorageService.uploadFile(upload.ref, upload.bucket, upload.objectName, fullBody, upload.contentType);
-                tusUploads.delete(params.uploadId);
+                await TusStore.delete(params.uploadId);
                 return { Key: `${upload.bucket}/${upload.objectName}` };
             } catch (err: unknown) {
-                tusUploads.delete(params.uploadId);
+                await TusStore.delete(params.uploadId);
                 return status(500, { error: 'Failed to finalize upload' });
             }
         }
@@ -1231,8 +1181,8 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
     })
 
     // DELETE /upload/resumable/:uploadId — Abort a resumable upload
-    .delete('/upload/resumable/:uploadId', ({ params, set }) => {
-        tusUploads.delete(params.uploadId);
+    .delete('/upload/resumable/:uploadId', async ({ params, set }) => {
+        await TusStore.delete(params.uploadId);
         set.headers['Tus-Resumable'] = '1.0.0';
         set.status = 204;
         return '';
