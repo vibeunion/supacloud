@@ -181,13 +181,11 @@ export class DatabaseService {
 
       // Create Schema
       await tenantDb.unsafe(`
-        CREATE SCHEMA IF NOT EXISTS auth;
-        CREATE SCHEMA IF NOT EXISTS storage;
         CREATE SCHEMA IF NOT EXISTS extensions;
-        CREATE SCHEMA IF NOT EXISTS realtime;
       `);
 
       // Ensure global admin roles exist with LOGIN capability and global password
+      // (This needs to be done before running supabase.sql to ensure roles exist)
       await tenantDb.unsafe(`
         DO $$
         BEGIN
@@ -205,6 +203,20 @@ export class DatabaseService {
         END
         $$;
       `);
+
+      // Load and execute full Supabase schema (Auth, Storage, Realtime/Walrus, etc)
+      try {
+        const { join } = await import('path');
+        const schemaPath = join(import.meta.dir, '../db/schemas/supabase.sql');
+        const schemaSql = await Bun.file(schemaPath).text();
+        await tenantDb.unsafe(schemaSql);
+        logger.info(`[services/database.service] Successfully applied supabase.sql to tenant ${dbName}`);
+      } catch (e: unknown) {
+        logger.error(`[services/database.service] Failed to apply supabase.sql schema: ${e instanceof Error ? e.message : String(e)}`);
+        throw e;
+      }
+
+
 
       // Grant privileges
       await tenantDb.unsafe(`
