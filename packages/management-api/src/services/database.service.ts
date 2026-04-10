@@ -186,12 +186,20 @@ export class DatabaseService {
         CREATE SCHEMA IF NOT EXISTS realtime;
       `);
 
-      // Create supabase_auth_admin role (used by GoTrue for migrations)
+      // Ensure global admin roles exist with LOGIN capability and global password
       await tenantDb.unsafe(`
         DO $$
         BEGIN
           IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'supabase_auth_admin') THEN
-            CREATE ROLE supabase_auth_admin LOGIN PASSWORD ${pgEscapePassword(password)};
+            CREATE ROLE supabase_auth_admin LOGIN PASSWORD ${pgEscapePassword(this.PG_PASSWORD)};
+          ELSE
+            ALTER ROLE supabase_auth_admin LOGIN PASSWORD ${pgEscapePassword(this.PG_PASSWORD)};
+          END IF;
+
+          IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'supabase_admin') THEN
+            CREATE ROLE supabase_admin LOGIN BYPASSRLS REPLICATION PASSWORD ${pgEscapePassword(this.PG_PASSWORD)};
+          ELSE
+            ALTER ROLE supabase_admin LOGIN PASSWORD ${pgEscapePassword(this.PG_PASSWORD)};
           END IF;
         END
         $$;

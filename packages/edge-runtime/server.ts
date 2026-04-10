@@ -9,6 +9,11 @@ const PORT = Number(process.env.PORT) || 9000;
 const POOL_SIZE = Number(process.env.WORKER_POOL_SIZE) || 4;
 const FUNCTIONS_DIR = process.env.EDGE_FUNCTIONS_DIR || "./functions";
 const MGMT_API = process.env.MANAGEMENT_API_URL || "http://127.0.0.1:9090";
+
+if (!process.env.MANAGEMENT_API_URL) {
+  console.warn("[EdgeRuntime] WARNING: MANAGEMENT_API_URL is not set. Defaulting to http://127.0.0.1:9090. If edge-runtime runs on a different node than management-api, this will fail!");
+}
+
 const MASTER_TOKEN = process.env.MASTER_TOKEN || "";
 
 // ── Startup Port-Exclusivity Guard ──────────────────────────────────
@@ -251,6 +256,18 @@ const app = new Elysia()
         headers: { "Content-Type": "application/json", "x-relay-error": "true" },
       });
     }
+
+    const fnConfig = await getFunctionConfig(projectRef, c.params.functionName);
+    if (fnConfig.verify_jwt) {
+      const authorized = await verifyJwt(projectRef, c.headers["authorization"]);
+      if (!authorized) {
+        return new Response(JSON.stringify({ msg: "Invalid JWT" }), {
+          status: 401,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+    }
+
     return dispatchFunction(projectRef, c.params.functionName, c.request, c.set.headers as Record<string, string>);
   })
 
@@ -263,6 +280,18 @@ const app = new Elysia()
         headers: { "Content-Type": "application/json", "x-relay-error": "true" },
       });
     }
+
+    const fnConfig = await getFunctionConfig(projectRef, c.params.functionName);
+    if (fnConfig.verify_jwt) {
+      const authorized = await verifyJwt(projectRef, c.headers["authorization"]);
+      if (!authorized) {
+        return new Response(JSON.stringify({ msg: "Invalid JWT" }), {
+          status: 401,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+    }
+
     return dispatchFunction(projectRef, c.params.functionName, c.request, c.set.headers as Record<string, string>);
   })
 
