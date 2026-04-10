@@ -450,12 +450,12 @@ export class GatewayService {
             await this.ensureServiceAndRoute({ name: `svc-storage-${projectRef}`, url: `http://${hostIp}:9090`, paths: ["/storage/v1/"], hosts, projectRef });
             await this.ensureServiceAndRoute({
                 name: `svc-realtime-${projectRef}`,
-                // Realtime WebSocket endpoint is /socket/websocket internally.
-                // Keep strip_path=true on /realtime/v1 and prepend /socket at service URL.
-                url: `http://${hostIp}:4000/socket`,
+                // Route to native SupaCloud Elysia Realtime WebSocket handler
+                url: `http://${hostIp}:${config.port}`,
                 paths: ["/realtime/v1"],
                 hosts,
                 projectRef,
+                stripPath: false,
                 readTimeout: 86400000,
                 protocols: ["http", "https", "ws", "wss"],
             });
