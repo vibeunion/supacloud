@@ -26,6 +26,18 @@ class TenantRuntimeService {
     private readonly GOTRUE_PORT_BASE = config.gotruePortBase;
     private readonly PORT_RANGE = parseInt(config.portRange);
 
+    private deriveApiUrl(ref: string, projectConfig: Record<string, unknown> | null | undefined): string {
+        const explicitApiDomain = typeof projectConfig?.api_domain === "string" ? projectConfig.api_domain.trim() : "";
+        if (explicitApiDomain) return `https://${explicitApiDomain}`;
+
+        const customDomain = typeof projectConfig?.custom_domain === "string" ? projectConfig.custom_domain.trim() : "";
+        if (customDomain) return `https://api.${customDomain}`;
+
+        if (config.gotrueApiExternalUrl) return config.gotrueApiExternalUrl.replace(/\/+$/, "");
+
+        return `https://${ref}.api.${config.baseDomain}`;
+    }
+
     /**
      * Deterministic port allocation based on hashing
      * Aligned with original bash awk behavior using native Bun logic
@@ -77,17 +89,22 @@ class TenantRuntimeService {
      * Uses the global connection pool from db/index.ts
      */
     private async getTenantCredentials(ref: string) {
-        const [project] = await metaSql`SELECT db_password, jwt_secret, config->>'api_url' as api_url, db_name, anon_key, service_role_key FROM projects WHERE ref=${ref}`;
+        const [project] = await metaSql`
+          SELECT db_password, jwt_secret, config, db_name, anon_key, service_role_key
+          FROM projects
+          WHERE ref=${ref}
+        `;
 
         if (!project || !project.db_password || !project.jwt_secret) {
             throw new Error(`Cannot find valid credentials for project ${ref} in supacloud_meta`);
         }
 
+        const projectConfig = (project.config as Record<string, unknown> | null | undefined) || {};
         return {
             dbPassword: project.db_password,
             jwtSecret: project.jwt_secret,
             dbName: project.db_name || `supa_${ref}`,
-            apiUrl: (project.api_url as string) || config.gotrueApiExternalUrl || "https://your-supacloud-domain.com",
+            apiUrl: this.deriveApiUrl(ref, projectConfig),
             anonKey: project.anon_key,
             serviceRoleKey: project.service_role_key
         };

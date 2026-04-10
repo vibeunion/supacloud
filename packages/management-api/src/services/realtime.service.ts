@@ -84,6 +84,7 @@ export class RealtimeService {
      * Called during project provisioning.
      */
     async registerTenant(config: RealtimeTenantConfig): Promise<boolean> {
+        const globalConfig = (await import("../config")).config;
         try {
             const res = await fetch(`${this.adminUrl}/api/tenants`, {
                 method: "POST",
@@ -100,7 +101,7 @@ export class RealtimeService {
                                 db_port: PG_PORT,
                                 db_name: config.dbName,
                                 db_user: "supabase_admin",
-                                db_password: config.dbPassword,
+                                db_password: globalConfig.pgPassword || "postgres",
                                 region: "us-east-1",
                                 poll_interval_ms: 100,
                                 poll_max_changes: 100,
@@ -123,6 +124,22 @@ export class RealtimeService {
             return false;
         } catch (err: unknown) {
             logger.error(`[Realtime] Registration error for ${config.projectRef}:`, { error: err instanceof Error ? err.message : String(err) });
+            return false;
+        }
+    }
+
+    /**
+     * Get a registered tenant from the Realtime server.
+     * Returns true if the tenant exists and is healthy.
+     */
+    async getTenant(projectRef: string): Promise<boolean> {
+        try {
+            const res = await fetch(`${this.adminUrl}/api/tenants/${projectRef}`, {
+                method: "GET",
+                headers: await this.authHeaders(),
+            });
+            return res.ok;
+        } catch {
             return false;
         }
     }
@@ -156,6 +173,7 @@ export class RealtimeService {
      * Update tenant configuration (e.g., after password rotation).
      */
     async updateTenant(config: RealtimeTenantConfig): Promise<boolean> {
+        const globalConfig = (await import("../config")).config;
         try {
             const res = await fetch(`${this.adminUrl}/api/tenants/${config.projectRef}`, {
                 method: "PUT",
@@ -170,7 +188,7 @@ export class RealtimeService {
                                 db_port: PG_PORT,
                                 db_name: config.dbName,
                                 db_user: "supabase_admin",
-                                db_password: config.dbPassword,
+                                db_password: globalConfig.pgPassword || "postgres",
                                 region: "us-east-1",
                                 poll_interval_ms: 100,
                                 slot_name: `supabase_realtime_${config.projectRef}`,

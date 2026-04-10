@@ -276,7 +276,23 @@ export class ProjectService {
       checkGlobalDocker("realtime-dev.supabase-realtime"),
     ]);
 
-    const realtimeStatus = realtimePerTenant === "ACTIVE_HEALTHY" ? "ACTIVE_HEALTHY" : realtimeDocker;
+    let realtimeStatus = "INACTIVE";
+
+    if (realtimePerTenant === "ACTIVE_HEALTHY") {
+        realtimeStatus = "ACTIVE_HEALTHY";
+    } else {
+        // Fall back to checking global docker container, but explicitly verify tenant registration
+        if (kongDocker === "ACTIVE_HEALTHY" || kongSystemd === "ACTIVE_HEALTHY") { 
+            const globalRealtimeDocker = await checkGlobalDocker("realtime-dev.supabase-realtime") || await checkGlobalDocker("supacloud-realtime");
+            if (globalRealtimeDocker === "ACTIVE_HEALTHY" || realtimeDocker === "ACTIVE_HEALTHY") {
+                const { realtimeService } = await import("./realtime.service");
+                const hasTenant = await realtimeService.getTenant(ref);
+                if (hasTenant) {
+                    realtimeStatus = "ACTIVE_HEALTHY";
+                }
+            }
+        }
+    }
     
     // Storage is embedded in the Management API, so if this endpoint is reached, it's ACTIVE,
     // unless a specific per-tenant storage unit is defined and failing.
