@@ -1367,7 +1367,12 @@ begin
     perform set_config('role', null, true);
 end;
 $$;
-alter type realtime.equality_op add value 'in';
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_type t JOIN pg_enum e ON t.oid = e.enumtypid JOIN pg_namespace n ON n.oid = t.typnamespace WHERE n.nspname = 'realtime' AND t.typname = 'equality_op' AND e.enumlabel = 'in') THEN
+    ALTER TYPE realtime.equality_op ADD VALUE 'in';
+  END IF;
+END $$;
 
 create or replace function realtime.check_equality_op(
     op realtime.equality_op,
@@ -3298,8 +3303,13 @@ begin
     perform set_config('role', null, true);
 end;
 $$;
-ALTER TABLE realtime.subscription
-ADD COLUMN action_filter text DEFAULT '*' CHECK (action_filter IN ('*', 'INSERT', 'UPDATE', 'DELETE'));
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='realtime' AND table_name='subscription' AND column_name='action_filter') THEN
+    ALTER TABLE realtime.subscription ADD COLUMN action_filter text DEFAULT '*';
+    ALTER TABLE realtime.subscription ADD CONSTRAINT action_filter_check CHECK (action_filter IN ('*', 'INSERT', 'UPDATE', 'DELETE'));
+  END IF;
+END $$;
 
 create or replace function realtime.apply_rls(wal jsonb, max_record_bytes int = 1024 * 1024)
     returns setof realtime.wal_rls
