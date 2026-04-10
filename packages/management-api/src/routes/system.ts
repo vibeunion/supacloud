@@ -1,5 +1,6 @@
 import { Elysia } from "elysia";
 import { logger } from "../utils/logger";
+import { realtimeService } from "../services/realtime.service";
 import os from "node:os";
 
 const startTime = Date.now();
@@ -68,4 +69,16 @@ export const systemRoutes = new Elysia({ name: "system" })
         version: "-",
       };
     }
+  })
+
+  // Check Realtime CDC prerequisites on Postgres cluster
+  .get("/v1/system/realtime/prerequisites", async () => {
+    return await realtimeService.checkCdcPrerequisites();
+  })
+
+  // Ensure supabase_admin role has REPLICATION attribute, then return latest check
+  .post("/v1/system/realtime/prerequisites/ensure", async () => {
+    const ensure = await realtimeService.ensureSupabaseAdminReplication();
+    const current = await realtimeService.checkCdcPrerequisites();
+    return { ensure, current };
   });

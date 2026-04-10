@@ -185,6 +185,30 @@ interface SignedUpload {
 const tusUploads = new Map<string, TusUpload>();
 const signedUploads = new Map<string, SignedUpload>();
 
+const TRANSFORM_QUERY_KEYS = new Set([
+    "width",
+    "height",
+    "resize",
+    "format",
+    "quality",
+    "smartcrop",
+    "blur",
+    "sigma",
+    "watermark",
+    "text",
+    "font",
+    "opacity",
+    "image",
+    "gravity",
+    "wm",
+    "wm_text",
+    "wm_image",
+    "wm_opacity",
+    "wm_gravity",
+    "wm_dx",
+    "wm_dy",
+]);
+
 // Auto-cleanup abandoned uploads every 10 minutes
 setInterval(() => {
     const cutoff = Date.now() - 60 * 60 * 1000; // 1 hour
@@ -200,14 +224,19 @@ function buildSignedPath(pathname: string, expiresAt: number, token: string, tra
     const search = new URLSearchParams({ token, t: String(expiresAt) });
 
     if (transform) {
-        if (transform.width !== undefined) search.set("width", String(transform.width));
-        if (transform.height !== undefined) search.set("height", String(transform.height));
-        if (transform.resize !== undefined) search.set("resize", String(transform.resize));
-        if (transform.format !== undefined) search.set("format", String(transform.format));
-        if (transform.quality !== undefined) search.set("quality", String(transform.quality));
+        for (const [key, value] of Object.entries(transform)) {
+            if (value === undefined || value === null) continue;
+            if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+                search.set(key, String(value));
+            }
+        }
     }
 
     return `${pathname}?${search.toString()}`;
+}
+
+function hasTransformQuery(query: Record<string, unknown>): boolean {
+    return Object.entries(query).some(([key, value]) => value !== undefined && value !== null && TRANSFORM_QUERY_KEYS.has(key));
 }
 
 function getUploadMetadata(headers: Record<string, string | undefined>): Record<string, unknown> {
@@ -530,7 +559,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         if (!filePath) return status(400, { statusCode: '400', error: 'Bad Request', message: 'Missing file path' });
 
         // If transform params are present, proxy to imaginary
-        if (query.width || query.height || query.resize || query.format || query.quality) {
+        if (hasTransformQuery(query as Record<string, unknown>)) {
             return proxyToImaginary(ref, params.bucket, filePath, query, set as { headers: Record<string, string> });
         }
 
@@ -560,7 +589,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         if (!filePath) return status(400, { statusCode: '400', error: 'Bad Request', message: 'Missing file path' });
 
         // Transform support
-        if (query.width || query.height || query.resize || query.format || query.quality) {
+        if (hasTransformQuery(query as Record<string, unknown>)) {
             return proxyToImaginary(ref, params.bucket, filePath, query, set as { headers: Record<string, string> });
         }
 
@@ -641,7 +670,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         const filePath = params['*'];
         if (!filePath) return status(400, { statusCode: '400', error: 'Bad Request', message: 'Missing file path' });
 
-        if (query.width || query.height || query.resize || query.format || query.quality) {
+        if (hasTransformQuery(query as Record<string, unknown>)) {
             return proxyToImaginary(ref, params.bucket, filePath, query, set as { headers: Record<string, string> });
         }
 
@@ -838,7 +867,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         }
 
         // Transform support for signed URLs
-        if (query.width || query.height || query.resize || query.format || query.quality) {
+        if (hasTransformQuery(query as Record<string, unknown>)) {
             return proxyToImaginary(ref, params.bucket, filePath, query, set as { headers: Record<string, string> });
         }
 
@@ -947,7 +976,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         const files = await StorageRLS.listObjects(ref, auth, params.bucket, prefix, limit, offset, body?.sortBy, search);
 
         const mappedFiles = files.map(f => ({
-            name: f.name,
+            name: prefix ? f.name.slice(prefix.length).replace(/^\/+/, '') || f.name : f.name,
             id: f.id,
             updated_at: f.updated || new Date().toISOString(),
             created_at: f.updated || new Date().toISOString(),
@@ -1229,12 +1258,10 @@ async function proxyToImaginary(
     // Check for extended operations first (overrides standard resize)
     if (query.smartcrop === 'true' || query.smartcrop === '1' || resizeMode === 'smartcrop') {
         operation = 'smartcrop';
-    } else if (query.watermark) {
+    } else if (query.watermark || query.text || query.image || query.wm || query.wm_text || query.wm_image) {
         operation = 'watermark';
-        imaginaryParams.set('text', query.watermark); // Assuming query.watermark specifies the text
-    } else if (query.blur) {
+    } else if (query.blur || query.sigma) {
         operation = 'blur';
-        imaginaryParams.set('sigma', String(query.blur)); // blur strength
     } else {
         // Standard Supabase resize operations
         if (resizeMode === 'cover' || resizeMode === 'crop') {
@@ -1244,6 +1271,29 @@ async function proxyToImaginary(
         } else if (resizeMode === 'fill') {
             operation = 'enlarge';
             imaginaryParams.set('force', 'true');
+        }
+    }
+
+    // Pass through advanced transform fields from query directly to imaginary.
+    const queryKeyMap: Record<string, string> = {
+        watermark: 'text',
+        blur: 'sigma',
+        wm: 'text',
+        wm_text: 'text',
+        wm_image: 'image',
+        wm_opacity: 'opacity',
+        wm_gravity: 'gravity',
+        wm_dx: 'dx',
+        wm_dy: 'dy',
+    };
+    for (const [rawKey, rawValue] of Object.entries(query)) {
+        if (rawValue === undefined || rawValue === null) continue;
+        if (!TRANSFORM_QUERY_KEYS.has(rawKey)) continue;
+        if (rawKey === "smartcrop") continue;
+
+        const mappedKey = queryKeyMap[rawKey] || rawKey;
+        if (!imaginaryParams.has(mappedKey)) {
+            imaginaryParams.set(mappedKey, String(rawValue));
         }
     }
 

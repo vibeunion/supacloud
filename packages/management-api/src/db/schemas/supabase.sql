@@ -16,7 +16,7 @@ BEGIN
         CREATE ROLE service_role NOLOGIN NOINHERIT BYPASSRLS;
     END IF;
     IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'supabase_admin') THEN
-        CREATE ROLE supabase_admin NOLOGIN NOINHERIT BYPASSRLS;
+        CREATE ROLE supabase_admin NOLOGIN NOINHERIT BYPASSRLS REPLICATION;
     END IF;
     IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'supabase_auth_admin') THEN
         CREATE ROLE supabase_auth_admin NOLOGIN NOINHERIT CREATEROLE CREATEDB;
@@ -26,6 +26,9 @@ BEGIN
     END IF;
 END
 $$;
+
+-- Ensure existing clusters also grant replication to supabase_admin
+ALTER ROLE supabase_admin WITH REPLICATION;
 
 -- 授予 authenticator 可以切换到各角色
 GRANT anon TO postgres;

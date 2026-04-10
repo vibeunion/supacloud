@@ -1,4 +1,5 @@
 import { config } from "../config";
+import { sql } from "../db";
 /**
  * RealtimeService - Manages Supabase Realtime tenant registration
  * 
@@ -24,6 +25,19 @@ interface RealtimeTenantConfig {
     dbName: string;
     dbPassword: string;
     jwtSecret: string;
+}
+
+export interface RealtimeCdcPrerequisites {
+    ok: boolean;
+    walLevel: string;
+    supabaseAdminExists: boolean;
+    supabaseAdminHasReplication: boolean;
+    checks: {
+        walLevelLogical: boolean;
+        roleExists: boolean;
+        roleReplication: boolean;
+    };
+    messages: string[];
 }
 
 export class RealtimeService {
@@ -196,6 +210,100 @@ export class RealtimeService {
         } catch (err: unknown) {
             logger.debug("[Realtime] Health check failed:", (err instanceof Error ? err.message : String(err)));
             return { healthy: false };
+        }
+    }
+
+    /**
+     * Check Postgres prerequisites required by official Realtime CDC:
+     * 1) wal_level must be logical
+     * 2) supabase_admin role must exist
+     * 3) supabase_admin must have REPLICATION attribute
+     */
+    async checkCdcPrerequisites(): Promise<RealtimeCdcPrerequisites> {
+        const messages: string[] = [];
+        try {
+            const walRows = await sql`SELECT setting FROM pg_settings WHERE name = 'wal_level' LIMIT 1`;
+            const walLevel = String(walRows[0]?.setting || "unknown");
+
+            const roleRows = await sql`
+              SELECT rolname, rolreplication
+              FROM pg_roles
+              WHERE rolname = 'supabase_admin'
+              LIMIT 1
+            `;
+
+            const supabaseAdminExists = roleRows.length > 0;
+            const supabaseAdminHasReplication = Boolean(roleRows[0]?.rolreplication);
+
+            const walLevelLogical = walLevel === "logical";
+            const roleExists = supabaseAdminExists;
+            const roleReplication = supabaseAdminHasReplication;
+            const ok = walLevelLogical && roleExists && roleReplication;
+
+            if (!walLevelLogical) messages.push(`wal_level is '${walLevel}', expected 'logical'`);
+            if (!roleExists) messages.push("role 'supabase_admin' does not exist");
+            if (roleExists && !roleReplication) messages.push("role 'supabase_admin' is missing REPLICATION");
+            if (ok) messages.push("Realtime CDC prerequisites are satisfied");
+
+            return {
+                ok,
+                walLevel,
+                supabaseAdminExists,
+                supabaseAdminHasReplication,
+                checks: {
+                    walLevelLogical,
+                    roleExists,
+                    roleReplication,
+                },
+                messages,
+            };
+        } catch (err: unknown) {
+            return {
+                ok: false,
+                walLevel: "unknown",
+                supabaseAdminExists: false,
+                supabaseAdminHasReplication: false,
+                checks: {
+                    walLevelLogical: false,
+                    roleExists: false,
+                    roleReplication: false,
+                },
+                messages: [`Failed to check prerequisites: ${err instanceof Error ? err.message : String(err)}`],
+            };
+        }
+    }
+
+    /**
+     * Ensure supabase_admin exists and has REPLICATION attribute.
+     * Note: wal_level=logical is cluster-level and still needs postgresql.conf/reload.
+     */
+    async ensureSupabaseAdminReplication(): Promise<{ success: boolean; changed: boolean; error?: string }> {
+        try {
+            const before = await sql`
+              SELECT rolreplication
+              FROM pg_roles
+              WHERE rolname = 'supabase_admin'
+              LIMIT 1
+            `;
+
+            const beforeExists = before.length > 0;
+            const beforeReplication = Boolean(before[0]?.rolreplication);
+
+            if (!beforeExists) {
+                await sql`CREATE ROLE supabase_admin NOLOGIN NOINHERIT BYPASSRLS REPLICATION`;
+            }
+            if (!beforeReplication) {
+                await sql`ALTER ROLE supabase_admin WITH REPLICATION`;
+            }
+
+            const changed = !beforeExists || !beforeReplication;
+            return { success: true, changed };
+        } catch (err: unknown) {
+            return {
+                success: false,
+                changed: false,
+                error: err instanceof Error ? err.message : String(err),
+            };
         }
     }
 }
