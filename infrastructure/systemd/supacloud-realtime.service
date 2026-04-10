@@ -8,24 +8,26 @@ TimeoutStartSec=0
 Restart=always
 RestartSec=5
 
+EnvironmentFile=/etc/supabase/management-api.env
+
 # Run using podman (or docker alias)
 ExecStartPre=-/usr/bin/podman rm -f supacloud-realtime
-ExecStart=/bin/bash -c "source /etc/supabase/management-api.env && /usr/bin/podman run --name supacloud-realtime --network host \
+ExecStart=/usr/bin/podman run --name supacloud-realtime --network host \
   -e PORT=4000 \
-  -e DB_HOST=\${PG_HOST:-127.0.0.1} \
-  -e DB_PORT=\${PG_PORT:-5432} \
-  -e DB_USER=\${PG_USER:-supabase_admin} \
-  -e DB_NAME=postgres \
-  -e DB_PASSWORD=\${PGPASSWORD:-supabase} \
+  -e DB_HOST=${PG_HOST} \
+  -e DB_PORT=${PG_PORT} \
+  -e DB_USER=${PG_USER} \
+  -e DB_NAME=supacloud_meta \
+  -e DB_PASSWORD=${PGPASSWORD} \
   -e SECRET_KEY_BASE=YOUR_SUPER_SECRET_KEY_BASE_SHOULD_BE_64_BYTES_LONG \
-  -e JWT_SECRET=\${SUPACLOUD_JWT_SECRET:-YOUR_SUPABASE_JWT_SECRET} \
-  -e API_JWT_SECRET=\${SUPACLOUD_JWT_SECRET:-YOUR_SUPABASE_JWT_SECRET} \
+  -e JWT_SECRET=${SUPACLOUD_JWT_SECRET} \
+  -e API_JWT_SECRET=${SUPACLOUD_JWT_SECRET} \
   -e RLS_ENABLED=true \
   -e MAX_HEADER_LENGTH=8192 \
   -e RLIMIT_NOFILE=10000 \
   -e APP_NAME=realtime \
   -e DB_ENC_KEY=supabaserealtime \
-  public.ecr.aws/supabase/realtime:v2.33.3"
+  public.ecr.aws/supabase/realtime:v2.33.3
 
 ExecStop=/usr/bin/podman stop -t 10 supacloud-realtime
 
