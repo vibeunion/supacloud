@@ -308,7 +308,9 @@ export class RealtimeService {
             const beforeReplication = Boolean(before[0]?.rolreplication);
 
             if (!beforeExists) {
-                await sql`CREATE ROLE supabase_admin NOLOGIN NOINHERIT BYPASSRLS REPLICATION`;
+                const { config: globalConfig } = await import("../config");
+                const password = globalConfig.pgPassword || "postgres";
+                await sql`CREATE ROLE supabase_admin LOGIN BYPASSRLS REPLICATION PASSWORD ${password}`;
             }
             if (!beforeReplication) {
                 await sql`ALTER ROLE supabase_admin WITH REPLICATION`;

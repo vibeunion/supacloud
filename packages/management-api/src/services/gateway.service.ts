@@ -206,7 +206,7 @@ export class GatewayService {
                 preserve_host: true,
             });
 
-            // 3. Re-attach necessary routing plugins from the parent (e.g., request-transformer, cors, response-transformer)
+            // 3. Re-attach necessary routing plugins from the parent (e.g., request-transformer, cors)
             // They are crucial for tenant context.
             await this.upsertRoutePlugin(routeName, "request-transformer", {
                 add: { headers: [`x-project-ref:${projectRef}`] }
@@ -218,9 +218,6 @@ export class GatewayService {
                 exposed_headers: DEFAULT_CORS_EXPOSED,
                 credentials: true,
                 max_age: 3600,
-            });
-            await this.upsertRoutePlugin(routeName, "response-transformer", {
-                add: { headers: ["Access-Control-Allow-Origin:*"] }
             });
 
             // 4. Apply rate limiting plugin
@@ -427,12 +424,8 @@ export class GatewayService {
             max_age: 3600,
         });
 
-        // 5. Inject Access-Control-Allow-Origin via response-transformer
-        //    (PostgREST upstream returns its own partial CORS headers that
-        //     interfere with Kong's CORS plugin on non-preflight requests)
-        await this.upsertRoutePlugin(routeName, "response-transformer", {
-            add: { headers: ["Access-Control-Allow-Origin:*"] }
-        });
+        // 5. Removed: Access-Control-Allow-Origin:* via response-transformer
+        // Kong's CORS plugin handles origin reflection dynamically when credentials are true.
     }
 
     private async detectHostIp(): Promise<string> {
@@ -527,7 +520,9 @@ export class GatewayService {
                 if (route?.id && route.hosts) {
                     const existingHosts = (route.hosts as string[]) || [];
                     const newHosts = existingHosts.filter((h: string) => !apiDomains.includes(h));
-                    await this.kongRequest(`/routes/${route.id}`, "PATCH", { hosts: newHosts });
+                    if (newHosts.length > 0) {
+                        await this.kongRequest(`/routes/${route.id}`, "PATCH", { hosts: newHosts });
+                    }
                 }
             }
             
@@ -537,7 +532,9 @@ export class GatewayService {
             if (sRoute?.id && sRoute.hosts) {
                 const existingSHosts = (sRoute.hosts as string[]) || [];
                 const newSHosts = existingSHosts.filter((h: string) => !studioDomains.includes(h));
-                await this.kongRequest(`/routes/${sRoute.id}`, "PATCH", { hosts: newSHosts });
+                if (newSHosts.length > 0) {
+                    await this.kongRequest(`/routes/${sRoute.id}`, "PATCH", { hosts: newSHosts });
+                }
             }
             
             return true;
