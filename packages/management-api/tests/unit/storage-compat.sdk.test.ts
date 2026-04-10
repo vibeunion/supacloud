@@ -73,6 +73,40 @@ describe("storageCompatRoutes supabase-js compatibility", () => {
     downloadSpy.mockRestore();
   });
 
+  test("signed transform url keeps advanced imaginary options", async () => {
+    mockObjects.set("avatars/folder/hero.png", {
+      metadata: { size: 3, mimetype: "image/png" },
+      updated: new Date().toISOString(),
+    });
+
+    const res = await request("/storage/v1/object/sign/avatars/folder/hero.png", {
+      method: "POST",
+      headers: {
+        apikey: "test-token",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        expiresIn: 60,
+        transform: {
+          width: 256,
+          height: 256,
+          smartcrop: true,
+          watermark: "ACME",
+          blur: 4,
+          wm_opacity: 0.4,
+        },
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const payload = await res.json();
+    expect(payload.signedURL).toContain("/render/image/sign/avatars/folder/hero.png?");
+    expect(payload.signedURL).toContain("smartcrop=true");
+    expect(payload.signedURL).toContain("watermark=ACME");
+    expect(payload.signedURL).toContain("blur=4");
+    expect(payload.signedURL).toContain("wm_opacity=0.4");
+  });
+
   test("signed upload flow matches createSignedUploadUrl + uploadToSignedUrl", async () => {
     const uploadSpy = spyOn(StorageService, "uploadFile").mockResolvedValue(true);
 
