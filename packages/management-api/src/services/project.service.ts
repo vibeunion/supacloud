@@ -84,6 +84,7 @@ export interface FunctionResponse {
   slug: string;
   name: string;
   status: string;
+  verify_jwt: boolean;
   created_at: string;
 }
 
@@ -414,13 +415,19 @@ export class ProjectService {
     if (!project) return [];
 
     const slugs = await edgeFunctionService.list(ref);
-    return slugs.map((slug: string) => ({
-      id: slug,
-      slug: slug,
-      name: slug,
-      status: "ACTIVE",
-      created_at: new Date().toISOString(),
-    }));
+    const results: FunctionResponse[] = [];
+    for (const slug of slugs) {
+      const cfg = await edgeFunctionService.getConfig(ref, slug);
+      results.push({
+        id: slug,
+        slug,
+        name: slug,
+        status: "ACTIVE",
+        verify_jwt: cfg.verify_jwt,
+        created_at: new Date().toISOString(),
+      });
+    }
+    return results;
   }
 
   async deleteFunction(ref: string, slug: string): Promise<boolean> {
