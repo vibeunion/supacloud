@@ -27,6 +27,13 @@ const DENO_STD_MAP: Record<string, string> = {
   // Assert (testing)
   "assert/mod.ts": "node:assert",
   "testing/asserts.ts": "node:assert",
+
+  // Utilities
+  "fmt/colors.ts": "./shims/deno-fmt-colors.ts",
+  "dotenv/load.ts": "./shims/deno-dotenv-load.ts",
+  "uuid/mod.ts": "./shims/deno-uuid.ts",
+  "datetime/mod.ts": "./shims/deno-datetime.ts",
+  "async/delay.ts": "./shims/deno-async-delay.ts",
 };
 
 plugin({
@@ -78,6 +85,24 @@ plugin({
         return { path: pkg, external: true };
       },
     );
+
+    // Intercept jsr: imports (e.g. jsr:@supabase/supabase-js@2)
+    build.onResolve({ filter: /^jsr:/ }, (args) => {
+      // jsr:@supabase/supabase-js@2 → @supabase/supabase-js
+      const pkg = args.path
+        .replace("jsr:", "")
+        .replace(/@[\d.]+$/, ""); // strip version at the end
+      return { path: pkg, external: true };
+    });
+
+    // Intercept npm: imports
+    build.onResolve({ filter: /^npm:/ }, (args) => {
+      // npm:postgres → postgres
+      const pkg = args.path
+        .replace("npm:", "")
+        .replace(/@[\d.]+$/, ""); // strip version at the end just in case
+      return { path: pkg, external: true };
+    });
   },
 });
 

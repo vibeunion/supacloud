@@ -25,6 +25,11 @@ export function extractDeps(code: string): string[] {
     deps.add(m[1]);
   }
 
+  // jsr: prefix imports: import xxx from "jsr:@supabase/supabase-js@2"
+  for (const m of code.matchAll(/from\s+["']jsr:([^@"'\s]+)/g)) {
+    deps.add(m[1]);
+  }
+
   // Regular npm imports (exclude relative, node: builtins, and paths)
   for (const m of code.matchAll(/from\s+["']([a-z@][^"'\s]*?)["']/g)) {
     const pkg = m[1];
