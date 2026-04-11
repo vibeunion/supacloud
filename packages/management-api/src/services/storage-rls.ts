@@ -37,7 +37,7 @@ export class StorageRLS {
   static async listLogicalBuckets(
     ref: string, 
     token: string | undefined,
-    options?: { limit?: number; offset?: number; search?: string }
+    options?: { limit?: number; offset?: number; search?: string, sortBy?: { column?: string; order?: string } }
   ): Promise<Record<string, unknown>[]> {
     if (ref === 'test_mock') return Array.from(mockBuckets.values());
 
@@ -47,7 +47,16 @@ export class StorageRLS {
              const searchTerm = `%${options.search}%`;
              query = tx`${query} WHERE name ILIKE ${searchTerm}`;
         }
-        query = tx`${query} ORDER BY name`;
+        const col = options?.sortBy?.column || 'name';
+        const ord = (options?.sortBy?.order || 'asc').toUpperCase() === 'DESC' ? 'DESC' : 'ASC';
+        
+        if (col === 'updated_at') {
+            query = ord === 'DESC' ? tx`${query} ORDER BY updated_at DESC` : tx`${query} ORDER BY updated_at ASC`;
+        } else if (col === 'created_at') {
+            query = ord === 'DESC' ? tx`${query} ORDER BY created_at DESC` : tx`${query} ORDER BY created_at ASC`;
+        } else {
+            query = ord === 'DESC' ? tx`${query} ORDER BY name DESC` : tx`${query} ORDER BY name ASC`;
+        }
         if (options?.limit) {
             query = tx`${query} LIMIT ${options.limit}`;
         }
@@ -394,7 +403,7 @@ export class StorageRLS {
       });
     } catch (e: unknown) {
       logger.error(`[StorageRLS] List access denied:`, { error: e instanceof Error ? e.message : String(e) });
-      return [];
+      throw new Error("RLS_VIOLATION_OR_NOT_FOUND");
     }
   }
 

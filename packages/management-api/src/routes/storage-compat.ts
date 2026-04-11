@@ -437,7 +437,8 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         }
         
         // 2. Clear physical storage
-        await StorageService.emptyBucket(ref, params.id);
+        const result = await StorageService.emptyBucket(ref, params.id);
+        if (!result.success) return status(500, { statusCode: '500', error: 'Internal', message: result.error || 'Failed to empty bucket' });
         
         // 3. Clear logical metadata
         await StorageRLS.emptyLogicalBucket(ref, auth, params.id, false);
@@ -858,27 +859,26 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             return status(401, { statusCode: '401', error: 'Unauthorized', message: 'Invalid or expired signed URL' });
         }
 
-        // Check if object already exists (for duplicate upload prevention)
-        if (!signedUpload.upsert) {
-            const exists = await StorageRLS.objectExists(ref, params.bucket, filePath, signedUpload.auth_token);
-            if (exists) {
-                return status(409, { statusCode: '409', error: 'Conflict', message: 'The resource already exists' });
-            }
-        }
-
         try {
             const { fileBuffer, fileMimeType, customMetadata } = await readUploadBody(request, headers['content-type']);
 
-            // Bypass RLS for signed upload — token already validates authorization
+            // Bypass external headers — token already validates authorization
             const headerMetadata = getUploadMetadata(headers as Record<string, string | undefined>);
             const userMetadata: Record<string, unknown> = { ...headerMetadata, ...(customMetadata || {}) };
             const metadata = { mimetype: fileMimeType, size: fileBuffer.byteLength, userMetadata };
             
             const effectiveAuth = signedUpload.auth_token !== undefined ? signedUpload.auth_token : headers['authorization'];
-            await StorageRLS.authorizeAction(ref, effectiveAuth, 'upload', params.bucket, filePath, metadata);
+            
+            // 1. Dry run to ensure rules permit
+            const permitted = await StorageRLS.authorizeAction(ref, effectiveAuth, 'upload', params.bucket, filePath, metadata, true, signedUpload.upsert);
+            if (!permitted.permitted) return status(permitted.error === 'The resource already exists' ? 409 : 403, { statusCode: permitted.error === 'The resource already exists' ? '409' : '403', error: permitted.error === 'The resource already exists' ? 'Conflict' : 'Forbidden', message: permitted.error || 'Access Denied.' });
 
+            // 2. S3 write
             const success = await StorageService.uploadFile(ref, params.bucket, filePath, fileBuffer, fileMimeType);
             if (!success) return status(500, { statusCode: '500', error: 'Internal', message: 'Upload failed' });
+            
+            // 3. Persist DB
+            await StorageRLS.authorizeAction(ref, effectiveAuth, 'upload', params.bucket, filePath, metadata, false, signedUpload.upsert);
 
             return { Key: `${params.bucket}/${filePath}` };
         } catch (err: unknown) {
@@ -969,7 +969,12 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         const offset = body?.offset || 0;
 
         // Fetch securely from RLS DB
-        const files = await StorageRLS.listObjects(ref, auth, params.bucket, prefix, limit, offset, body?.sortBy);
+        let files;
+        try {
+            files = await StorageRLS.listObjects(ref, auth, params.bucket, prefix, limit, offset, body?.sortBy);
+        } catch (e: any) {
+            return status(403, { statusCode: '403', error: 'Forbidden', message: e.message || 'Access Denied' });
+        }
 
         return files.map(f => {
             const cleanName = prefix ? f.name.slice(prefix.length).replace(/^\/+/, '') : f.name;
@@ -1011,7 +1016,12 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         const search = body?.search || '';
 
         // Fetch securely from RLS DB
-        const files = await StorageRLS.listObjects(ref, auth, params.bucket, prefix, limit, offset, body?.sortBy, search);
+        let files;
+        try {
+            files = await StorageRLS.listObjects(ref, auth, params.bucket, prefix, limit, offset, body?.sortBy, search);
+        } catch (e: any) {
+            return status(403, { statusCode: '403', error: 'Forbidden', message: e.message || 'Access Denied' });
+        }
 
         const mappedFiles = files.map(f => ({
             name: prefix ? f.name.slice(prefix.length).replace(/^\/+/, '') || f.name : f.name,
@@ -1051,10 +1061,17 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
 
         const results = await Promise.allSettled(
             prefixes.map(async (p: string) => {
-                const permitted = await StorageRLS.authorizeAction(ref, auth, 'delete', params.bucket, p);
-    if (!permitted.permitted) throw new Error(permitted.error || 'Forbidden');
+                // 1. Dry run delete
+                const permitted = await StorageRLS.authorizeAction(ref, auth, 'delete', params.bucket, p, {}, true);
+                if (!permitted.permitted) throw new Error(permitted.error || 'Forbidden');
                 
-                return await StorageService.deleteFile(ref, params.bucket, p);
+                // 2. Physical delete
+                const physSuccess = await StorageService.deleteFile(ref, params.bucket, p);
+                if (!physSuccess) throw new Error('Physical delete failed');
+
+                // 3. Logical delete
+                await StorageRLS.authorizeAction(ref, auth, 'delete', params.bucket, p, {}, false);
+                return physSuccess;
             })
         );
 
