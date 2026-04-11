@@ -312,26 +312,58 @@ export class StorageRLS {
     search: string = ''
   ): Promise<any[]> {
     if (ref === 'test_mock') {
-      const results = [];
+      const folders = new Set<string>();
+      const uniqueObjects: any[] = [];
+      const searchLower = search.toLowerCase();
+      
       for (const [key, val] of mockObjects.entries()) {
          if (key.startsWith(bucketId + '/' + prefix)) {
-            const name = key.substring(bucketId.length + 1);
-            if (search && !name.toLowerCase().includes(search.toLowerCase())) continue;
-            results.push({ id: key, name, updated: val.updated, size: val.metadata?.size || 0, type: val.metadata?.mimetype || 'unknown' });
+            const rawName = key.substring(bucketId.length + 1);
+            if (search && !rawName.toLowerCase().includes(searchLower)) continue;
+
+            const nameWithoutPrefix = rawName.slice(prefix.length).replace(/^\/+/, '');
+            if (!nameWithoutPrefix) continue;
+
+            const firstSlash = nameWithoutPrefix.indexOf('/');
+            if (firstSlash !== -1) {
+                const folderName = nameWithoutPrefix.substring(0, firstSlash);
+                if (!folders.has(folderName)) {
+                    folders.add(folderName);
+                    uniqueObjects.push({ 
+                        id: null, 
+                        name: prefix ? `${prefix.replace(/\/$/, '')}/${folderName}` : folderName, 
+                        updated: val.updated, 
+                        size: 0, 
+                        type: null,
+                        isFolder: true,
+                        sortKey: folderName
+                    });
+                }
+            } else {
+                uniqueObjects.push({ 
+                    id: key, 
+                    name: rawName, 
+                    updated: val.updated, 
+                    size: val.metadata?.size || 0, 
+                    type: val.metadata?.mimetype || (rawName.includes('.') ? rawName.split('.').pop() : 'unknown'),
+                    isFolder: false,
+                    sortKey: nameWithoutPrefix
+                });
+            }
          }
       }
 
-      const sorted = results.sort((a, b) => {
+      const sorted = uniqueObjects.sort((a, b) => {
         const column = sortBy?.column || 'name';
         const order = (sortBy?.order || 'asc').toLowerCase() === 'desc' ? -1 : 1;
 
-        if (column === 'updated_at') {
+        if (column === 'updated_at' || column === 'updated') {
           return (new Date(a.updated).getTime() - new Date(b.updated).getTime()) * order;
         }
-        if (column === 'metadata.size') {
-          return ((Number(a.size) || 0) - (Number(b.size) || 0)) * order;
+        if (column === 'metadata.size' || column === 'size') {
+          return (a.size - b.size) * order;
         }
-        return String(a.name).localeCompare(String(b.name)) * order;
+        return a.sortKey.localeCompare(b.sortKey) * order;
       });
 
       return sorted.slice(offset, offset + limit);
@@ -377,8 +409,44 @@ export class StorageRLS {
             AND (${search === ''} OR name ILIKE ${searchTerm})
         `;
 
-        results = baseRows
-          .sort((a: Record<string, unknown>, b: Record<string, unknown>) => {
+        const folders = new Set<string>();
+        const uniqueObjects: any[] = [];
+
+        for (const row of baseRows) {
+            const rawName = String(row.name);
+            const nameWithoutPrefix = rawName.slice(prefix.length).replace(/^\/+/, '');
+            if (!nameWithoutPrefix) continue;
+
+            const firstSlash = nameWithoutPrefix.indexOf('/');
+            if (firstSlash !== -1) {
+                const folderName = nameWithoutPrefix.substring(0, firstSlash);
+                if (!folders.has(folderName)) {
+                    folders.add(folderName);
+                    uniqueObjects.push({
+                        id: null,
+                        name: prefix ? `${prefix.replace(/\/$/, '')}/${folderName}` : folderName,
+                        updated_at: row.updated_at,
+                        size: 0,
+                        metadata: { mimetype: null },
+                        isFolder: true,
+                        sortKey: folderName
+                    });
+                }
+            } else {
+                uniqueObjects.push({
+                    id: row.id,
+                    name: rawName,
+                    updated_at: row.updated_at,
+                    size: row.size,
+                    metadata: row.metadata,
+                    isFolder: false,
+                    sortKey: nameWithoutPrefix
+                });
+            }
+        }
+
+        results = uniqueObjects
+          .sort((a: any, b: any) => {
             const order = orderDirection === 'DESC' ? -1 : 1;
             if (orderColumn === 'updated_at') {
               return (new Date(String(a.updated_at)).getTime() - new Date(String(b.updated_at)).getTime()) * order;
@@ -386,7 +454,7 @@ export class StorageRLS {
             if (orderColumn === 'size') {
               return ((Number(a.size) || 0) - (Number(b.size) || 0)) * order;
             }
-            return String(a.name).localeCompare(String(b.name)) * order;
+            return String(a.sortKey).localeCompare(String(b.sortKey)) * order;
           })
           .slice(offset, offset + limit);
       });
@@ -396,9 +464,10 @@ export class StorageRLS {
           return {
               id: row.id,
               name: row.name,
-              updated: row.updated_at,
+              updated: row.updated_at || row.updated,
               size: sizeBytes,
-              type: row.name.includes('.') ? row.name.split('.').pop() : 'unknown'
+              type: row.metadata?.mimetype || (row.name?.includes('.') ? row.name.split('.').pop() : 'unknown'),
+              isFolder: row.isFolder
           };
       });
     } catch (e: unknown) {
