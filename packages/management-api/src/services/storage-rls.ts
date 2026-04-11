@@ -363,6 +363,9 @@ export class StorageRLS {
         if (column === 'updated_at' || column === 'updated') {
           return (new Date(a.updated).getTime() - new Date(b.updated).getTime()) * order;
         }
+        if (column === 'created_at' || column === 'created') {
+          return (new Date(a.updated).getTime() - new Date(b.updated).getTime()) * order; // Map to mock val.updated since mock obj only has updated
+        }
         if (column === 'metadata.size' || column === 'size') {
           return (a.size - b.size) * order;
         }
@@ -394,9 +397,11 @@ export class StorageRLS {
         const searchTerm = `%${search}%`;
         const orderColumn = sortBy?.column === 'updated_at'
           ? 'updated_at'
-          : sortBy?.column === 'metadata.size'
-            ? 'size'
-            : 'name';
+          : sortBy?.column === 'created_at'
+            ? 'created_at'
+            : sortBy?.column === 'metadata.size'
+              ? 'size'
+              : 'name';
         const orderDirection = (sortBy?.order || 'asc').toLowerCase() === 'desc' ? 'DESC' : 'ASC';
 
         const baseRows = await tx`
@@ -404,6 +409,7 @@ export class StorageRLS {
             id,
             name,
             updated_at,
+            created_at,
             metadata,
             COALESCE((metadata->>'size')::bigint, 0) AS size
           FROM storage.objects
@@ -429,6 +435,7 @@ export class StorageRLS {
                         id: null,
                         name: prefix ? `${prefix.replace(/\/$/, '')}/${folderName}` : folderName,
                         updated_at: row.updated_at,
+                        created_at: row.created_at,
                         size: 0,
                         metadata: { mimetype: null },
                         isFolder: true,
@@ -440,6 +447,7 @@ export class StorageRLS {
                     id: row.id,
                     name: rawName,
                     updated_at: row.updated_at,
+                    created_at: row.created_at,
                     size: row.size,
                     metadata: row.metadata,
                     isFolder: false,
@@ -453,6 +461,9 @@ export class StorageRLS {
             const order = orderDirection === 'DESC' ? -1 : 1;
             if (orderColumn === 'updated_at') {
               return (new Date(String(a.updated_at)).getTime() - new Date(String(b.updated_at)).getTime()) * order;
+            }
+            if (orderColumn === 'created_at') {
+              return (new Date(String(a.created_at)).getTime() - new Date(String(b.created_at)).getTime()) * order;
             }
             if (orderColumn === 'size') {
               return ((Number(a.size) || 0) - (Number(b.size) || 0)) * order;
@@ -468,6 +479,7 @@ export class StorageRLS {
               id: row.id,
               name: row.name,
               updated: row.updated_at || row.updated,
+              created: row.created_at || row.updated,
               size: sizeBytes,
               type: row.metadata?.mimetype || (row.name?.includes('.') ? row.name.split('.').pop() : 'unknown'),
               isFolder: row.isFolder

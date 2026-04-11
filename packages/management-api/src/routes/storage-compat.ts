@@ -487,7 +487,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
 
             // Validate bucket constraints (file size limit, allowed mime types)
             const auth = headers['authorization'];
-            const bucket = await StorageRLS.getLogicalBucket(ref, params.bucket, auth);
+            const bucket = await StorageRLS.getLogicalBucket(ref, params.bucket, undefined);
             if (!bucket) return status(404, { statusCode: '404', error: 'Not Found', message: 'Bucket not found' });
 
             // Check file size limit
@@ -668,7 +668,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         }
 
         const bucketId = params.bucket;
-        const bucket = await StorageRLS.getLogicalBucket(ref, bucketId, headers['authorization']);
+        const bucket = await StorageRLS.getLogicalBucket(ref, bucketId, undefined);
         if (!bucket) return status(404, { statusCode: '404', error: 'Not Found', message: 'Bucket not found' });
 
         const auth = headers['authorization'];
@@ -824,7 +824,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         const upsert = headers['x-upsert'] === 'true';
         
         // Verify the bucket exists
-        const bucket = await StorageRLS.getLogicalBucket(ref, params.bucket, headers['authorization']);
+        const bucket = await StorageRLS.getLogicalBucket(ref, params.bucket, undefined);
         if (!bucket) return status(404, { statusCode: '404', error: 'Not Found', message: 'Bucket not found' });
         
         // Enforce RLS for upload URL generation
@@ -1041,7 +1041,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         const auth = headers['authorization'];
 
         const prefix = body?.prefix || '';
-        const limit  = body?.limit || 100;
+        const limit  = body?.limit || 1000;
         const search = body?.search || '';
         let offset = body?.offset || 0;
         
@@ -1180,7 +1180,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             const contentType = srcRes.headers?.get('Content-Type') || 'application/octet-stream';
 
             // Validate destination bucket limits
-            const destBucketCheck = await StorageRLS.getLogicalBucket(ref, destBucket, auth);
+            const destBucketCheck = await StorageRLS.getLogicalBucket(ref, destBucket, undefined);
             if (!destBucketCheck) return status(404, { statusCode: '404', error: 'Not Found', message: 'Destination bucket not found' });
             
             if (destBucketCheck.file_size_limit && srcData.byteLength > Number(destBucketCheck.file_size_limit)) {
@@ -1218,23 +1218,23 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
                 if (!logRollback.permitted) logger.error(`CRITICAL: Orphaned logical metadata abandoned at ${destBucket}/${destKey}`);
             };
 
-            // Step 3: Delete source (actual delete with dryRun checking)
+            // Step 3: Delete source LOCALLY first (to avoid stale metadata on DB failures)
             const preDelete = await StorageRLS.authorizeAction(ref, auth, 'delete', srcBucket, srcKey, {}, true);
             if (!preDelete.permitted) {
                 await rollbackDest();
                 return status(500, { statusCode: '500', error: 'Internal', message: 'Failed to authorize source deletion' });
             }
             
-            const pDelete = await StorageService.deleteFile(ref, srcBucket, srcKey);
-            if (!pDelete) {
-                await rollbackDest();
-                return status(500, { statusCode: '500', error: 'Internal', message: 'Failed to physically delete source object' });
-            }
-
             const finalDelete = await StorageRLS.authorizeAction(ref, auth, 'delete', srcBucket, srcKey, {}, false);
             if (!finalDelete.permitted) {
-                logger.error(`CRITICAL: Logical source deletion failed after physical move. Source metadata remains stale at ${srcBucket}/${srcKey}`);
+                await rollbackDest();
                 return status(500, { statusCode: '500', error: 'Internal', message: 'Move failed during logical source removal' });
+            }
+            
+            // Step 4: Physically Delete Source
+            const pDelete = await StorageService.deleteFile(ref, srcBucket, srcKey);
+            if (!pDelete) {
+               logger.error(`CRITICAL: Orphaned physical file abandoned at ${srcBucket}/${srcKey}. Logical row was securely deleted.`);
             }
 
             return { message: `Successfully moved` };
@@ -1276,7 +1276,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             const contentType = srcRes.headers?.get('Content-Type') || 'application/octet-stream';
 
             // Validate destination bucket limits
-            const destBucketCheck = await StorageRLS.getLogicalBucket(ref, destBucket, auth);
+            const destBucketCheck = await StorageRLS.getLogicalBucket(ref, destBucket, undefined);
             if (!destBucketCheck) return status(404, { statusCode: '404', error: 'Not Found', message: 'Destination bucket not found' });
             
             if (destBucketCheck.file_size_limit && srcData.byteLength > Number(destBucketCheck.file_size_limit)) {
