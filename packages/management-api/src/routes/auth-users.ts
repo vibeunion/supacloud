@@ -43,6 +43,12 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
         return { error: err.msg || err.message || "Failed to fetch users" };
       }
 
+      // P1-6: Forward link and total count headers for SDK pagination
+      const linkHeader = res.headers.get("link");
+      if (linkHeader) set.headers["link"] = linkHeader;
+      const totalHeader = res.headers.get("x-total-count");
+      if (totalHeader) set.headers["x-total-count"] = totalHeader;
+
       const d = await res.json() as Record<string, unknown>;
       
       // If GoTrue returned an array natively (older version), wrap it in the expected paginated structure.
@@ -94,13 +100,19 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
           "x-project-ref": params.ref
         },
         body: JSON.stringify({
-          ...(body.email ? { email: body.email } : {}),
-          ...(body.phone ? { phone: body.phone } : {}),
-          ...(body.password ? { password: body.password } : {}),
-          ...(typeof body.email_confirm !== 'undefined' ? { email_confirm: body.email_confirm } : {}),
-          ...(typeof body.phone_confirm !== 'undefined' ? { phone_confirm: body.phone_confirm } : {}),
-          user_metadata: body.user_metadata || {},
-          app_metadata: body.app_metadata || {}
+          ...(body.email !== undefined ? { email: body.email } : {}),
+          ...(body.phone !== undefined ? { phone: body.phone } : {}),
+          ...(body.password !== undefined ? { password: body.password } : {}),
+          ...(body.email_confirm !== undefined ? { email_confirm: body.email_confirm } : {}),
+          ...(body.phone_confirm !== undefined ? { phone_confirm: body.phone_confirm } : {}),
+          ...(body.user_metadata !== undefined ? { user_metadata: body.user_metadata } : {}),
+          ...(body.app_metadata !== undefined ? { app_metadata: body.app_metadata } : {}),
+          ...(body.nonce !== undefined ? { nonce: body.nonce } : {}),
+          ...(body.ban_duration !== undefined ? { ban_duration: body.ban_duration } : {}),
+          ...(body.role !== undefined ? { role: body.role } : {}),
+          ...(body.password_hash !== undefined ? { password_hash: body.password_hash } : {}),
+          ...(body.id !== undefined ? { id: body.id } : {}),
+          ...(body.current_password !== undefined ? { current_password: body.current_password } : {})
         })
       });
 
@@ -122,6 +134,12 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
         phone_confirm: t.Optional(t.Boolean()),
         user_metadata: t.Optional(t.Any()),
         app_metadata: t.Optional(t.Any()),
+        nonce: t.Optional(t.String()),
+        ban_duration: t.Optional(t.String()),
+        role: t.Optional(t.String()),
+        password_hash: t.Optional(t.String()),
+        id: t.Optional(t.String()),
+        current_password: t.Optional(t.String()),
       })
     }
   )
@@ -266,7 +284,7 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
 
   .delete(
     "/users/:id",
-    async ({ params, set, body }) => {
+    async ({ params, set, body, query }) => {
       const project = await projectService.getProject(params.ref);
       if (!project || !project.jwt_secret) {
         return status(404, { error: "Project or JWT secret not found" });
@@ -277,7 +295,10 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
       const { config } = await import("../config");
       const apiUrl = project.api?.url || (config.kongInternal.startsWith('http') ? config.kongInternal : `http://${config.kongInternal}`);
 
-      const res = await fetch(`${apiUrl}/auth/v1/admin/users/${params.id}`, {
+      // P1-2: should_soft_delete should be in the body, not query params
+      const url = `${apiUrl}/auth/v1/admin/users/${params.id}`;
+
+      const res = await fetch(url, {
         method: "DELETE",
         headers: {
           "Content-Type": "application/json",

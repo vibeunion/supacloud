@@ -154,17 +154,11 @@ class TenantRuntimeService {
         const creds = await this.getTenantCredentials(ref);
 
         // Generate PostgREST .env configuration
-        // NOTE: db-extra-search-path is ONLY set in .conf to avoid precedence conflicts (P2 fix)
+        // Edge runtime and other services consume these env vars
         const pgrstEnv = `
 # SupaCloud Tenant PostgREST Runtime: ${ref}
-PGRST_DB_URI=postgres://authenticator_${ref}:${creds.dbPassword}@${this.PG_HOST}:${this.PG_PORT}/${creds.dbName}
-PGRST_DB_SCHEMAS=public,storage,graphql_public
-PGRST_DB_ANON_ROLE=anon
-PGRST_JWT_SECRET=${creds.jwtSecret}
-PGRST_SERVER_PORT=${pgrstPort}
-PGRST_DB_POOL=10
-PGRST_DB_POOL_ACQUISITION_TIMEOUT=10
-PGRST_LOG_LEVEL=warn
+# PGRST_* variables have been removed to avoid duplicate configuration (P2-2)
+# PostgREST configuration is now single-sourced from the .conf file.
 
 # SupaCloud Edge Runtime Injection
 SUPABASE_URL=${creds.apiUrl}
@@ -196,8 +190,8 @@ openapi-server-proxy-uri = "${creds.apiUrl}/rest/v1"
 # P0-11: Pre-request function for RLS context injection
 db-pre-request = "public.set_request_context"
 
-# P0-12: Root spec returns OpenAPI doc at /
-db-root-spec = "public.root_spec"
+# P1-7: Row limit protection
+db-max-rows = 1000
 `.trim();
         await Bun.write(path.join(this.TENANT_CONFIG_DIR, `${ref}.conf`), pgrstConf);
 
@@ -231,6 +225,8 @@ GOTRUE_MAILER_URLPATHS_CONFIRMATION=/auth/v1/verify
 GOTRUE_MAILER_URLPATHS_INVITE=/auth/v1/verify
 GOTRUE_MAILER_URLPATHS_RECOVERY=/auth/v1/verify
 GOTRUE_MAILER_URLPATHS_EMAIL_CHANGE=/auth/v1/verify
+# Admin Operator Token (P0-6)
+GOTRUE_OPERATOR_TOKEN=${config.masterToken || creds.serviceRoleKey}
 `.trim();
 
         if (config.gotrueSmtpHost) {
@@ -242,6 +238,12 @@ GOTRUE_SMTP_PORT=587
 GOTRUE_SMTP_USER=${config.gotrueSmtpUser}
 GOTRUE_SMTP_PASS=${config.gotrueSmtpPass}
 GOTRUE_SMTP_SENDER_NAME=SupaCloud
+`;
+        } else {
+            // P1-1: Enable auto-confirm if no SMTP is configured so users can register
+            gotrueEnv += `
+# Local Dev / No-SMTP Configuration
+GOTRUE_MAILER_AUTOCONFIRM=true
 `;
         }
         await Bun.write(path.join(this.TENANT_CONFIG_DIR, `${ref}_gotrue.env`), gotrueEnv);

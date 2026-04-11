@@ -170,13 +170,13 @@ export class DatabaseService {
         DO $$
         BEGIN
           IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = '${anonRole}') THEN
-            CREATE ROLE ${anonRole} NOLOGIN;
+            CREATE ROLE ${anonRole} NOLOGIN NOINHERIT;
           END IF;
           IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = '${authenticatedRole}') THEN
-            CREATE ROLE ${authenticatedRole} NOLOGIN;
+            CREATE ROLE ${authenticatedRole} NOLOGIN NOINHERIT;
           END IF;
           IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = '${serviceRole}') THEN
-            CREATE ROLE ${serviceRole} NOLOGIN BYPASSRLS;
+            CREATE ROLE ${serviceRole} NOLOGIN NOINHERIT BYPASSRLS;
           END IF;
         END
         $$;
@@ -192,9 +192,10 @@ export class DatabaseService {
         ALTER ROLE "${authenticatorRole}" SET work_mem = '4MB';
       `);
 
-      // Create Schema
+      // Create Schema and grant access
       await tenantDb.unsafe(`
         CREATE SCHEMA IF NOT EXISTS extensions;
+        GRANT USAGE ON SCHEMA extensions TO ${anonRole}, ${authenticatedRole}, ${serviceRole};
       `);
 
       // Ensure global admin roles exist with LOGIN capability and global password
@@ -203,9 +204,9 @@ export class DatabaseService {
         DO $$
         BEGIN
           IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'supabase_auth_admin') THEN
-            CREATE ROLE supabase_auth_admin LOGIN PASSWORD ${pgEscapePassword(this.PG_PASSWORD)};
+            CREATE ROLE supabase_auth_admin LOGIN CREATEROLE CREATEDB NOINHERIT PASSWORD ${pgEscapePassword(this.PG_PASSWORD)};
           ELSE
-            ALTER ROLE supabase_auth_admin LOGIN PASSWORD ${pgEscapePassword(this.PG_PASSWORD)};
+            ALTER ROLE supabase_auth_admin LOGIN CREATEROLE CREATEDB NOINHERIT PASSWORD ${pgEscapePassword(this.PG_PASSWORD)};
           END IF;
 
           IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'supabase_admin') THEN
