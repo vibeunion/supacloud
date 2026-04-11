@@ -211,7 +211,7 @@ describe("storageCompatRoutes supabase-js compatibility", () => {
 
     expect(res.status).toBe(200);
     const payload = await res.json();
-    expect(payload.next_continuation_token).toBeNull();
+    expect(payload.nextCursor).toBeNull();
     expect(payload.objects).toHaveLength(1);
     expect(payload.objects[0].name).toBe("b.txt");
   });
