@@ -204,15 +204,6 @@ export class DatabaseService {
         $$;
       `);
 
-      // Grant specific tenant roles and schema access to the project owner role to ensure isolation without cluster powers
-      await tenantDb.unsafe(`
-        GRANT ${anonRole}, ${authenticatedRole}, ${serviceRole} TO "role_${projectRef}";
-        GRANT USAGE ON SCHEMA auth, storage, realtime TO "role_${projectRef}";
-        GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA auth, storage, realtime TO "role_${projectRef}";
-        GRANT ALL PRIVILEGES ON ALL ROUTINES IN SCHEMA auth, storage, realtime TO "role_${projectRef}";
-        GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA auth, storage, realtime TO "role_${projectRef}";
-      `);
-
       // Load and execute full Supabase schema (Auth, Storage, Realtime/Walrus, etc)
       try {
         const { join } = await import('path');
@@ -224,6 +215,15 @@ export class DatabaseService {
         logger.error(`[services/database.service] Error applying Supabase schema at ${dbName}`, { error: err instanceof Error ? err.message : String(err) });
         throw err;
       }
+
+      // Grant specific tenant roles and schema access to the project owner role to ensure isolation without cluster powers
+      await tenantDb.unsafe(`
+        GRANT ${anonRole}, ${authenticatedRole}, ${serviceRole} TO "role_${projectRef}";
+        GRANT USAGE ON SCHEMA auth, storage, realtime TO "role_${projectRef}";
+        GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA auth, storage, realtime TO "role_${projectRef}";
+        GRANT ALL PRIVILEGES ON ALL ROUTINES IN SCHEMA auth, storage, realtime TO "role_${projectRef}";
+        GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA auth, storage, realtime TO "role_${projectRef}";
+      `);
 
       // Grant privileges
       await tenantDb.unsafe(`
