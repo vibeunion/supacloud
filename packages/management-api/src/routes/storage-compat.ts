@@ -278,7 +278,8 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             const options = {
                 limit: query.limit ? parseInt(query.limit) : undefined,
                 offset: query.offset ? parseInt(query.offset) : undefined,
-                search: query.search || undefined
+                search: query.search || undefined,
+                sortBy: query.sortColumn ? { column: query.sortColumn, order: query.sortOrder || 'asc' } : undefined
             };
             const buckets = await StorageRLS.listLogicalBuckets(ref, auth, options);
             return buckets.map(b => ({
@@ -514,7 +515,8 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             // Finalize Materialization after physical layer succeeds
             const finalPermit = await StorageRLS.authorizeAction(ref, auth, 'upload', params.bucket, filePath, metadata, false, upsert);
             if (!finalPermit.permitted) {
-                await StorageService.deleteFile(ref, params.bucket, filePath);
+                const rolledBack = await StorageService.deleteFile(ref, params.bucket, filePath);
+                if (!rolledBack) logger.error(`CRITICAL: Orphaned physical file abandoned at ${params.bucket}/${filePath}`);
                 return status(500, { statusCode: '500', error: 'Internal', message: 'Failed to record object' });
             }
 
@@ -552,7 +554,8 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             // Finalize Materialization after physical layer succeeds
             const finalPermit = await StorageRLS.authorizeAction(ref, auth, 'upload', params.bucket, filePath, metadata, false, true);
             if (!finalPermit.permitted) {
-                await StorageService.deleteFile(ref, params.bucket, filePath);
+                const rolledBack = await StorageService.deleteFile(ref, params.bucket, filePath);
+                if (!rolledBack) logger.error(`CRITICAL: Orphaned physical file abandoned at ${params.bucket}/${filePath}`);
                 return status(500, { statusCode: '500', error: 'Internal', message: 'Failed to record object' });
             }
             return { Key: `${params.bucket}/${filePath}` };
@@ -888,7 +891,8 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             // 3. Persist DB
             const finalPermit = await StorageRLS.authorizeAction(ref, effectiveAuth, 'upload', params.bucket, filePath, metadata, false, signedUpload.upsert);
             if (!finalPermit.permitted) {
-                await StorageService.deleteFile(ref, params.bucket, filePath);
+                const rolledBack = await StorageService.deleteFile(ref, params.bucket, filePath);
+                if (!rolledBack) logger.error(`CRITICAL: Orphaned physical file abandoned at ${params.bucket}/${filePath}`);
                 return status(500, { statusCode: '500', error: 'Internal', message: 'Failed to record object' });
             }
 
@@ -996,7 +1000,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
                 updated_at: f.updated || new Date().toISOString(),
                 created_at: f.updated || new Date().toISOString(),
                 last_accessed_at: f.updated || new Date().toISOString(),
-                metadata: {
+                metadata: f.isFolder ? null : {
                     size: f.size,
                     mimetype: f.type || 'application/octet-stream',
                 },
@@ -1035,19 +1039,29 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             return status(403, { statusCode: '403', error: 'Forbidden', message: e.message || 'Access Denied' });
         }
 
-        const mappedFiles = files.map(f => ({
-            name: prefix ? f.name.slice(prefix.length).replace(/^\/+/, '') || f.name : f.name,
-            id: f.id,
-            updated_at: f.updated || new Date().toISOString(),
-            created_at: f.updated || new Date().toISOString(),
-            last_accessed_at: f.updated || new Date().toISOString(),
-            metadata: {
-                size: f.size,
-                mimetype: f.type || 'application/octet-stream',
-            },
-        }));
+        const objects = [];
+        const folders = [];
 
-        return { next_continuation_token: null, objects: mappedFiles, folders: [], hasNext: false };
+        for (const f of files) {
+            const cleanName = prefix ? f.name.slice(prefix.length).replace(/^\/+/, '') : f.name;
+            if (f.isFolder) {
+                folders.push({ name: cleanName || f.name, id: null, updated_at: f.updated || new Date().toISOString(), created_at: f.updated || new Date().toISOString(), last_accessed_at: f.updated || new Date().toISOString(), metadata: null });
+            } else {
+                objects.push({
+                    name: cleanName || f.name,
+                    id: f.id,
+                    updated_at: f.updated || new Date().toISOString(),
+                    created_at: f.updated || new Date().toISOString(),
+                    last_accessed_at: f.updated || new Date().toISOString(),
+                    metadata: {
+                        size: f.size,
+                        mimetype: f.type || 'application/octet-stream',
+                    },
+                });
+            }
+        }
+
+        return { next_continuation_token: null, objects: objects, folders: folders, hasNext: false };
     }, {
         body: t.Optional(t.Object({
             prefix: t.Optional(t.String()),
@@ -1235,7 +1249,8 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             // Finalize SQL Materialization
             const finalPermitted = await StorageRLS.authorizeAction(ref, auth, 'upload', destBucket, destKey, { size: srcData.length, mimetype: contentType }, false);
             if (!finalPermitted.permitted) {
-                await StorageService.deleteFile(ref, destBucket, destKey);
+                const rolledBack = await StorageService.deleteFile(ref, destBucket, destKey);
+                if (!rolledBack) logger.error(`CRITICAL: Orphaned physical file abandoned at ${destBucket}/${destKey}`);
                 return status(500, { statusCode: '500', error: 'Internal', message: 'Failed to record copied object' });
             }
 
@@ -1392,7 +1407,8 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
                 );
                 
                 if (!syncRes.permitted) {
-                    await StorageService.deleteFile(upload.ref, upload.bucket, upload.objectName);
+                    const rolledBack = await StorageService.deleteFile(upload.ref, upload.bucket, upload.objectName);
+                    if (!rolledBack) logger.error(`CRITICAL: Orphaned physical file abandoned at ${upload.bucket}/${upload.objectName}`);
                     throw new Error(syncRes.error || 'Failed to record assembled object');
                 }
 
