@@ -137,7 +137,7 @@ export class StorageRLS {
         if (!project) return null;
         const db = getProjectDb(project.db_name);
         const rows = await db`
-         
+        const rows = await tenantDb`
           SELECT id, name, bucket_id, owner, metadata, created_at, updated_at, last_accessed_at, version
           FROM storage.objects
           WHERE bucket_id = ${bucketId} AND name = ${objectName}
