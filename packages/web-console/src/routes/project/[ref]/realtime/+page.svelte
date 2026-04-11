@@ -3,6 +3,8 @@
   import { page } from "$app/state";
   import { t } from "svelte-i18n";
   import { Loader2, Radio, Send, Trash2, Wifi, WifiOff, Hash, Database, Users, Zap, Megaphone } from "lucide-svelte";
+  import { createQuery } from "@tanstack/svelte-query";
+  import { apiClient } from "$lib/api";
 
   interface RealtimeMessage {
     id: number;
@@ -29,6 +31,17 @@
 
   const projectRef = $derived(page.params.ref);
 
+  const projectQuery = createQuery(() => ({
+    queryKey: ["v1/projects", "getOne", projectRef],
+    queryFn: async () => {
+      const res = await apiClient(`/v1/projects/${projectRef}`);
+      if (!res.ok) throw new Error("Failed to fetch project details");
+      return res.json();
+    }
+  }));
+
+  const project = $derived($projectQuery.data);
+
   const filteredMessages = $derived(
     filterEvent
       ? messages.filter(m => m.event.toLowerCase().includes(filterEvent.toLowerCase()))
@@ -38,9 +51,17 @@
   function connectWebSocket() {
     if (ws) ws.close();
 
+    const anonKey = project?.anon_key;
+    if (!anonKey) {
+        addSystemMessage("连接异常: Missing tenant anon_key. Project might still be loading.");
+        return;
+    }
+
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const host = window.location.hostname;
-    const wsUrl = `${protocol}//${host}:4000/socket/websocket?vsn=1.0.0`;
+    // Connect through the management-api proxy (port 3000) or Kong directly (port 8000) using ?apikey
+    // In local dev, Management API lives on port 3000 mapping to proxy.
+    const wsUrl = `${protocol}//${host}:3000/realtime/v1/websocket?apikey=${anonKey}&vsn=1.0.0`;
 
     try {
       ws = new WebSocket(wsUrl);

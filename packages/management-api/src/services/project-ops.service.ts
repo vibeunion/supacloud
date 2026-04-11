@@ -65,6 +65,12 @@ export class ProjectOpsService {
     const result = await routerService.bindCustomDomain(ref, domain);
     if (result.success) {
       await projectRepository.updateConfig(ref, { ...project.config, custom_domain: domain });
+      try {
+        const { tenantRuntimeService } = await import("./tenant-runtime.service");
+        await tenantRuntimeService.restartRuntime(ref);
+      } catch (err: unknown) {
+        logger.warn(`Failed to restart runtime after binding custom domain for ${ref}`, { error: err });
+      }
     }
     return result.success;
   }
@@ -81,6 +87,12 @@ export class ProjectOpsService {
       const newConfig = { ...project.config };
       delete newConfig.custom_domain;
       await projectRepository.updateConfig(ref, newConfig);
+      try {
+        const { tenantRuntimeService } = await import("./tenant-runtime.service");
+        await tenantRuntimeService.restartRuntime(ref);
+      } catch (err: unknown) {
+        logger.warn(`Failed to restart runtime after deleting custom domain for ${ref}`, { error: err });
+      }
     }
     return result.success;
   }

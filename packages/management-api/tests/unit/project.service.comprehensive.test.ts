@@ -1,10 +1,10 @@
 import { describe, test, expect, mock, beforeEach, spyOn } from "bun:test";
 
 // Mock database to prevent top-level connection attempts
-const mockSql: unknown = mock(() => Promise.resolve([]));
-mockSql.unsafe = mock(() => Promise.resolve([]));
+const baseMock = mock(() => Promise.resolve([]));
+(baseMock as unknown as Record<string, unknown>).unsafe = mock(() => Promise.resolve([]));
 mock.module("../../src/db", () => ({
-  sql: mockSql,
+  sql: baseMock as unknown,
 }));
 
 import { ProjectService, type CreateProjectRequest } from "../../src/services/project.service";
@@ -315,7 +315,7 @@ describe("ProjectService - Comprehensive", () => {
 
     test("should reload router and return true", async () => {
       const findSpy = spyOn(projectRepository, "findByRef").mockResolvedValue(mockProject);
-      const routerSpy = spyOn(routerService, "reload").mockResolvedValue({ success: true });
+      const routerSpy = spyOn(routerService as any, "reload").mockResolvedValue({ success: true });
 
       const result = await service.restartProject("test123abc");
       expect(result).toBe(true);

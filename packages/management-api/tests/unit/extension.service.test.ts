@@ -29,7 +29,7 @@ describe("ExtensionService", () => {
 
         // Use bracket notation to access private method for testing
         const spy = spyOn(
-            extensionService as unknown as Record<string, unknown>,
+            extensionService as unknown as { getTenantDb: () => any },
             "getTenantDb"
         ).mockReturnValue(mockDb);
 
@@ -44,7 +44,7 @@ describe("ExtensionService", () => {
         const mockDb = createMockDb();
 
         const spy = spyOn(
-            extensionService as unknown as Record<string, unknown>,
+            extensionService as unknown as { getTenantDb: () => any },
             "getTenantDb"
         ).mockReturnValue(mockDb);
 

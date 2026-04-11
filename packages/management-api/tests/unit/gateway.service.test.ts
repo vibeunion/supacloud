@@ -87,7 +87,7 @@ describe("GatewayService", () => {
         );
         expect(realtimeRoute).toBeDefined();
         expect(realtimeRoute?.body?.paths).toEqual(["/realtime/v1"]);
-        expect(realtimeRoute?.body?.protocols).toEqual(["http", "https", "ws", "wss"]);
+        expect(realtimeRoute?.body?.protocols).toEqual(["http", "https", "grpc", "grpcs", "ws", "wss"]);
 
         globalThis.fetch = originalFetch;
     });
