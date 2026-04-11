@@ -175,12 +175,8 @@ Deno.serve(async (req) => {
       email, email_confirm: true, user_metadata: { openid, unionid, provider: "${provider}" }
     })
 
-    if (createError && !createError.message.includes("already registered")) {
-      const { data: { users } } = await supabaseAdmin.auth.admin.listUsers({ page: 1, perPage: 1000 })
-      const foundUser = users.find(u => u.email === email || u.user_metadata?.openid === openid)
-      if (!foundUser) {
-        throw new Error(\`Cannot create or find user. Error: \${createError.message}\`)
-      }
+    if (createError && !(createError.message.toLowerCase().includes("already registered") || createError.message.toLowerCase().includes("already exists"))) {
+      throw new Error(\`Cannot create user. Error: \${createError.message}\`)
     }
 
     const { data: linkData, error: linkError } = await supabaseAdmin.auth.admin.generateLink({
