@@ -58,6 +58,7 @@ async function getSigningSecretForTenant(ref: string): Promise<string> {
     if (globalSecret) return globalSecret;
     
     // Fall back to tenant-specific JWT secret from DB
+
     const tenantSecret = await StorageRLS.getTenantJwtSecret(ref);
     if (tenantSecret) return tenantSecret;
     
@@ -983,12 +984,14 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         const prefix = body?.prefix || '';
         const limit  = body?.limit || 100;
         const offset = body?.offset || 0;
+        const search = body?.search || '';
 
         // Fetch securely from RLS DB
         let files;
         try {
-            files = await StorageRLS.listObjects(ref, auth, params.bucket, prefix, limit, offset, body?.sortBy);
+            files = await StorageRLS.listObjects(ref, auth, params.bucket, prefix, limit, offset, body?.sortBy, search);
         } catch (e: any) {
+            if (e.message === 'PROJECT_NOT_FOUND') return status(404, { statusCode: '404', error: 'Not Found', message: 'Tenant Project Not Found' });
             return status(403, { statusCode: '403', error: 'Forbidden', message: e.message || 'Access Denied' });
         }
 
@@ -1021,6 +1024,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             prefix: t.Optional(t.String()),
             limit: t.Optional(t.Number()),
             offset: t.Optional(t.Number()),
+            search: t.Optional(t.String()),
             sortBy: t.Optional(t.Object({
                 column: t.Optional(t.String()),
                 order: t.Optional(t.String())
@@ -1050,13 +1054,14 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             } catch (e) {}
         }
         
-        const with_delimiter = body?.with_delimiter ?? true;
+        const with_delimiter = body?.with_delimiter ?? false;
 
         // Fetch securely from RLS DB (ask for limit + 1 to test hasNext)
         let files;
         try {
             files = await StorageRLS.listObjects(ref, auth, params.bucket, prefix, limit + 1, offset, body?.sortBy, search, with_delimiter);
         } catch (e: any) {
+            if (e.message === 'PROJECT_NOT_FOUND') return status(404, { statusCode: '404', error: 'Not Found', message: 'Tenant Project Not Found' });
             return status(403, { statusCode: '403', error: 'Forbidden', message: e.message || 'Access Denied' });
         }
 
@@ -1087,7 +1092,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
 
         const nextCursor = hasNext ? Buffer.from(String(offset + limit)).toString('base64') : null;
 
-        return { nextCursor, objects, folders };
+        return { nextCursor, objects, folders, hasNext };
     }, {
         body: t.Optional(t.Object({
             prefix: t.Optional(t.String()),
@@ -1200,17 +1205,37 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
 
             // Finalize Materialization after physical layer succeeds
             const finalPermit = await StorageRLS.authorizeAction(ref, auth, 'upload', destBucket, destKey, { size: srcData.length, mimetype: contentType }, false);
-            if (!finalPermit.permitted) return status(500, { statusCode: '500', error: 'Internal', message: 'Failed to record object' });
+            if (!finalPermit.permitted) {
+                const rolledBack = await StorageService.deleteFile(ref, destBucket, destKey);
+                if (!rolledBack) logger.error(`CRITICAL: Orphaned physical file abandoned at ${destBucket}/${destKey}`);
+                return status(500, { statusCode: '500', error: 'Internal', message: 'Failed to record object' });
+            }
+
+            const rollbackDest = async () => {
+                const pRollback = await StorageService.deleteFile(ref, destBucket, destKey);
+                if (!pRollback) logger.error(`CRITICAL: Orphaned physical file abandoned at ${destBucket}/${destKey}`);
+                const logRollback = await StorageRLS.authorizeAction(ref, auth, 'delete', destBucket, destKey, {}, false);
+                if (!logRollback.permitted) logger.error(`CRITICAL: Orphaned logical metadata abandoned at ${destBucket}/${destKey}`);
+            };
 
             // Step 3: Delete source (actual delete with dryRun checking)
             const preDelete = await StorageRLS.authorizeAction(ref, auth, 'delete', srcBucket, srcKey, {}, true);
-            if (!preDelete.permitted) return status(500, { statusCode: '500', error: 'Internal', message: 'Failed to authorize source deletion' });
+            if (!preDelete.permitted) {
+                await rollbackDest();
+                return status(500, { statusCode: '500', error: 'Internal', message: 'Failed to authorize source deletion' });
+            }
             
             const pDelete = await StorageService.deleteFile(ref, srcBucket, srcKey);
-            if (!pDelete) return status(500, { statusCode: '500', error: 'Internal', message: 'Failed to physically delete source object' });
+            if (!pDelete) {
+                await rollbackDest();
+                return status(500, { statusCode: '500', error: 'Internal', message: 'Failed to physically delete source object' });
+            }
 
             const finalDelete = await StorageRLS.authorizeAction(ref, auth, 'delete', srcBucket, srcKey, {}, false);
-            if (!finalDelete.permitted) return status(500, { statusCode: '500', error: 'Internal', message: 'Move failed during logical source removal' });
+            if (!finalDelete.permitted) {
+                logger.error(`CRITICAL: Logical source deletion failed after physical move. Source metadata remains stale at ${srcBucket}/${srcKey}`);
+                return status(500, { statusCode: '500', error: 'Internal', message: 'Move failed during logical source removal' });
+            }
 
             return { message: `Successfully moved` };
         } catch (err: unknown) {
