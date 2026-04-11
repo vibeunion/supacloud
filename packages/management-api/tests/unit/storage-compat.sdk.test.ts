@@ -136,8 +136,10 @@ describe("storageCompatRoutes supabase-js compatibility", () => {
     });
 
     expect(uploadRes.status).toBe(200);
-    expect(await uploadRes.json()).toEqual({ Key: "avatars/signed.txt" });
+    expect(await uploadRes.json()).toEqual({ Id: "avatars/signed.txt", Key: "avatars/signed.txt" });
     expect(uploadSpy).toHaveBeenCalled();
+    // Fix-2: Verify the signed upload token was consumed (one-time use)
+    expect(SignedStore.delete).toHaveBeenCalled();
     uploadSpy.mockRestore();
   });
 

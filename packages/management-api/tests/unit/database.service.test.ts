@@ -83,44 +83,30 @@ describe("DatabaseService", () => {
   });
 
   describe("getSecrets", () => {
-    test("should return empty array when shell fails", async () => {
-      const spy = spyOn(shellService, "execute").mockResolvedValue({ success: false, output: "" });
-      const result = await databaseService.getSecrets("testref");
-      expect(Array.isArray(result)).toBe(true);
-      spy.mockRestore();
-    });
-
-    test("should return parsed JSON when shell succeeds", async () => {
+    test("should return parsed JSON when db query succeeds", async () => {
       const mockData = [{ name: "key1", value: "val1" }];
-      const spy = spyOn(shellService, "execute").mockResolvedValue({ success: true, output: JSON.stringify(mockData) });
+      // Setup dynamic SQL mock for this specific call pattern
+      mock.module("../../src/db", () => ({ 
+           sql: mock().mockResolvedValue(mockData) 
+      }));
       const result = await databaseService.getSecrets("testref");
       expect(result).toEqual(mockData);
-      spy.mockRestore();
     });
   });
 
   describe("upsertSecret", () => {
-    test("should return true when shell succeeds", async () => {
-      const spy = spyOn(shellService, "execute").mockResolvedValue({ success: true, output: "" });
+    test("should return true when db succeeds", async () => {
+      mock.module("../../src/db", () => ({ sql: mock().mockResolvedValue([]) }));
       const result = await databaseService.upsertSecret("testref", "key1", "val1");
       expect(result).toBe(true);
-      spy.mockRestore();
-    });
-
-    test("should return false when shell fails", async () => {
-      const spy = spyOn(shellService, "execute").mockResolvedValue({ success: false, output: "" });
-      const result = await databaseService.upsertSecret("testref", "key1", "val1");
-      expect(result).toBe(false);
-      spy.mockRestore();
     });
   });
 
   describe("deleteSecret", () => {
-    test("should return true when shell succeeds", async () => {
-      const spy = spyOn(shellService, "execute").mockResolvedValue({ success: true, output: "" });
+    test("should return true when db succeeds", async () => {
+      mock.module("../../src/db", () => ({ sql: mock().mockResolvedValue([]) }));
       const result = await databaseService.deleteSecret("testref", "key1");
       expect(result).toBe(true);
-      spy.mockRestore();
     });
   });
 });

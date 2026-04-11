@@ -14,6 +14,27 @@ import { OAUTH_ENV_MAPPINGS } from "../types/oauth";
 export class TenantOAuthService {
     private readonly TENANT_CONFIG_DIR = config.tenantConfigDir;
 
+    private async restartAndPollGoTrue(ref: string, message: string): Promise<void> {
+        await $`systemctl restart supacloud-gotrue@${ref}`.nothrow().quiet();
+        logger.info(message);
+
+        try {
+            const { tenantRuntimeService } = await import("./tenant-runtime.service");
+            // Poll for up to 15 seconds for GoTrue to become healthy
+            for (let i = 0; i < 15; i++) {
+                await Bun.sleep(1000);
+                const status = await tenantRuntimeService.checkStatus(ref);
+                if (status.health === "healthy" || status.health === "degraded") {
+                    logger.info(`GoTrue for ${ref} is back online.`);
+                    return;
+                }
+            }
+            logger.warn(`GoTrue for ${ref} did not return healthy status within 15 seconds.`);
+        } catch (err: unknown) {
+            logger.debug(`Suppressed error while polling GoTrue health for ${ref}`, { error: err });
+        }
+    }
+
     async updateOAuthConfig(ref: string, provider: OAuthProvider, providerConfig: OAuthProviderConfig): Promise<void> {
         const gotrueEnvPath = path.join(this.TENANT_CONFIG_DIR, `${ref}_gotrue.env`);
 
@@ -85,8 +106,7 @@ export class TenantOAuthService {
         }
 
         await Bun.write(gotrueEnvPath, updatedLines.join("\n"));
-        await $`systemctl restart supacloud-gotrue@${ref}`.nothrow().quiet();
-        logger.info(`OAuth config updated for ${provider} in project ${ref}`);
+        await this.restartAndPollGoTrue(ref, `OAuth config updated for ${provider} in project ${ref}`);
     }
 
     async removeOAuthConfig(ref: string, provider: OAuthProvider): Promise<void> {
@@ -122,8 +142,7 @@ export class TenantOAuthService {
         }
 
         await Bun.write(gotrueEnvPath, updatedLines.join("\n"));
-        await $`systemctl restart supacloud-gotrue@${ref}`.nothrow().quiet();
-        logger.info(`OAuth config removed for ${provider} in project ${ref}`);
+        await this.restartAndPollGoTrue(ref, `OAuth config removed for ${provider} in project ${ref}`);
     }
 
     async updateGoTrueCustomOAuth(ref: string, oauthConfig: {
@@ -192,8 +211,7 @@ ${prefix}_URL=${oauthConfig.authorize_url}
         }
 
         await Bun.write(gotrueEnvPath, updatedLines.join("\n"));
-        await $`systemctl restart supacloud-gotrue@${ref}`.nothrow().quiet();
-        logger.info(`Custom OAuth config updated for ${oauthConfig.name} in project ${ref}`);
+        await this.restartAndPollGoTrue(ref, `Custom OAuth config updated for ${oauthConfig.name} in project ${ref}`);
     }
 }
 
