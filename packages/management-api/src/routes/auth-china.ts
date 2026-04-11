@@ -128,6 +128,7 @@ function generateChinaOAuthFunction(provider: ChinaOAuthProvider, appId: string,
   const providerUpper = provider.toUpperCase();
 
   return `import { createClient } from "@supabase/supabase-js"
+import postgres from "https://deno.land/x/postgresjs@v3.4.4/mod.js"
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -199,8 +200,26 @@ Deno.serve(async (req) => {
 
     // Force update user metadata to ensure latest OAuth provider data is present
     await supabaseAdmin.auth.admin.updateUserById(sessionData.user.id, {
-        user_metadata: { ...sessionData.user.user_metadata, openid, unionid, provider: "${provider}" }
+      user_metadata: { ...sessionData.user.user_metadata, openid, unionid, provider: "${provider}" }
     })
+
+    // Explicitly link physical identity row mirroring real OAuth behavior
+    const SUPABASE_DB_URL = Deno.env.get("SUPABASE_DB_URL")
+    if (SUPABASE_DB_URL) {
+      const sql = postgres(SUPABASE_DB_URL)
+      try {
+        await sql\`
+          INSERT INTO auth.identities (id, user_id, provider, identity_data, last_sign_in_at, created_at, updated_at)
+          VALUES (\${openid || unionid}, \${sessionData.user.id}, '\${provider}', \${sql.json({ sub: openid || unionid, ...tokenData })}, NOW(), NOW(), NOW())
+          ON CONFLICT (provider, id) DO UPDATE 
+          SET identity_data = EXCLUDED.identity_data, last_sign_in_at = EXCLUDED.last_sign_in_at, updated_at = EXCLUDED.updated_at
+        \`
+      } catch (e) {
+        console.error("Identity linkage failed:", e)
+      } finally {
+        await sql.end()
+      }
+    }
 
     return new Response(JSON.stringify(sessionData.session), { headers: { ...corsHeaders, "Content-Type": "application/json" } })
   } catch (error: unknown) {

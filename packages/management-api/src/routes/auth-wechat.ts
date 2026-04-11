@@ -216,6 +216,7 @@ async function deployWeChatMPFunction(ref: string, appId: string, appSecret: str
 
 function generateWeChatMiniProgramLoginFunction(appId: string, appSecret: string): string {
   return `import { createClient } from "@supabase/supabase-js"
+import postgres from "https://deno.land/x/postgresjs@v3.4.4/mod.js"
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -252,8 +253,7 @@ Deno.serve(async (req) => {
     })
 
     if (createError && !(createError.message.toLowerCase().includes("already registered") || createError.message.toLowerCase().includes("already exists"))) {
-        throw new Error(\`Cannot create or find user. Error: \${createError.message}\`)
-      }
+      throw new Error(\`Cannot create user. Error: \${createError.message}\`)
     }
 
     const { data: linkData, error: linkError } = await supabaseAdmin.auth.admin.generateLink({
@@ -278,6 +278,24 @@ Deno.serve(async (req) => {
         user_metadata: { ...sessionData.user.user_metadata, openid, unionid, provider: "wechat_miniprogram" }
     })
 
+    // Explicitly link physical identity row mirroring real OAuth behavior
+    const SUPABASE_DB_URL = Deno.env.get("SUPABASE_DB_URL")
+    if (SUPABASE_DB_URL) {
+      const sql = postgres(SUPABASE_DB_URL)
+      try {
+        await sql\`
+          INSERT INTO auth.identities (id, user_id, provider, identity_data, last_sign_in_at, created_at, updated_at)
+          VALUES (\${openid}, \${sessionData.user.id}, 'wechat_miniprogram', \${sql.json({ sub: openid, unionid })}, NOW(), NOW(), NOW())
+          ON CONFLICT (provider, id) DO UPDATE 
+          SET identity_data = EXCLUDED.identity_data, last_sign_in_at = EXCLUDED.last_sign_in_at, updated_at = EXCLUDED.updated_at
+        \`
+      } catch (e) {
+        console.error("Identity linkage failed:", e)
+      } finally {
+        await sql.end()
+      }
+    }
+
     return new Response(JSON.stringify(sessionData.session), { headers: { ...corsHeaders, "Content-Type": "application/json" } })
   } catch (error: unknown) {
     console.error("WeChat MiniProgram Login Error:", error instanceof Error ? error.message : String(error))
@@ -288,6 +306,8 @@ Deno.serve(async (req) => {
 
 function generateWeChatMPLoginFunction(appId: string, appSecret: string, redirectUri?: string): string {
   return `import { createClient } from "@supabase/supabase-js"
+import postgres from "https://deno.land/x/postgresjs@v3.4.4/mod.js"
+import postgres from "https://deno.land/x/postgresjs@v3.4.4/mod.js"
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -340,10 +360,8 @@ Deno.serve(async (req) => {
     })
 
     if (createError && !(createError.message.toLowerCase().includes("already registered") || createError.message.toLowerCase().includes("already exists"))) {
-        throw new Error(\`Cannot create or find user. Error: \${createError.message}\`)
-      }
+      throw new Error(\`Cannot create user. Error: \${createError.message}\`)
     }
-
     const { data: linkData, error: linkError } = await supabaseAdmin.auth.admin.generateLink({
       type: "magiclink",
       email: email,
@@ -365,6 +383,24 @@ Deno.serve(async (req) => {
     await supabaseAdmin.auth.admin.updateUserById(sessionData.user.id, {
         user_metadata: { ...sessionData.user.user_metadata, openid, unionid, nickname: userData.nickname, headimgurl: userData.headimgurl, provider: "wechat_mp" }
     })
+
+    // Explicitly link physical identity row mirroring real OAuth behavior
+    const SUPABASE_DB_URL = Deno.env.get("SUPABASE_DB_URL")
+    if (SUPABASE_DB_URL) {
+      const sql = postgres(SUPABASE_DB_URL)
+      try {
+        await sql\`
+          INSERT INTO auth.identities (id, user_id, provider, identity_data, last_sign_in_at, created_at, updated_at)
+          VALUES (\${openid}, \${sessionData.user.id}, 'wechat_mp', \${sql.json({ sub: openid, unionid, nickname: userData.nickname, headimgurl: userData.headimgurl })}, NOW(), NOW(), NOW())
+          ON CONFLICT (provider, id) DO UPDATE 
+          SET identity_data = EXCLUDED.identity_data, last_sign_in_at = EXCLUDED.last_sign_in_at, updated_at = EXCLUDED.updated_at
+        \`
+      } catch (e) {
+        console.error("Identity linkage failed:", e)
+      } finally {
+        await sql.end()
+      }
+    }
 
     return new Response(JSON.stringify(sessionData.session), { headers: { ...corsHeaders, "Content-Type": "application/json" } })
   } catch (error: unknown) {

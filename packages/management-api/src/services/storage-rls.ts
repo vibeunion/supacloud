@@ -177,14 +177,14 @@ export class StorageRLS {
         name: String(row.name),
         bucket_id: String(row.bucket_id),
         size: Number(meta.size || 0),
-        cache_control: 'max-age=3600',
+        cache_control: String(meta.cacheControl || meta.cache_control || 'public, max-age=3600'),
         content_type: String(meta.mimetype || 'application/octet-stream'),
         created_at: String(row.created_at),
         updated_at: String(row.updated_at),
         last_modified: String(row.updated_at),
-        etag: `"${String(row.id).slice(0, 8)}"`,
+        etag: String(meta.eTag || meta.etag || `"${row.id}"`),
         version: String(row.version || row.id),
-        metadata: (meta.userMetadata || {}) as Record<string, unknown>,
+        metadata: meta,
       };
     }).catch(() => null);
   }
