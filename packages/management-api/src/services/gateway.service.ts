@@ -159,7 +159,8 @@ export class GatewayService {
     private readonly MAX_RATE_LIMIT = { second: 100, minute: 2000, hour: 50000 };
 
     private getServiceForPath(basePath: string, projectRef: string): string | null {
-        if (basePath.startsWith("/rest/v1") || basePath.startsWith("/graphql/v1")) return `svc-pgrst-${projectRef}`;
+        if (basePath.startsWith("/rest/v1")) return `svc-pgrst-${projectRef}`;
+        if (basePath.startsWith("/graphql/v1")) return `svc-graphql-${projectRef}`;
         if (basePath.startsWith("/auth/v1")) return `svc-gotrue-${projectRef}`;
         if (basePath.startsWith("/functions/v1")) return `svc-functions-${projectRef}`;
         if (basePath.startsWith("/storage/v1/")) return `svc-storage-${projectRef}`;
@@ -259,7 +260,7 @@ export class GatewayService {
 
     async setCors(projectRef: string, origins: string[] = DEFAULT_CORS_ORIGINS): Promise<boolean> {
         try {
-            const routes = ['pgrst', 'gotrue', 'realtime', 'storage', 'functions'].map(r => `route-svc-${r}-${projectRef}`);
+            const routes = ['pgrst', 'graphql', 'gotrue', 'realtime', 'storage', 'functions'].map(r => `route-svc-${r}-${projectRef}`);
             let allSuccess = true;
             for (const routeName of routes) {
                 try {
@@ -299,7 +300,7 @@ export class GatewayService {
 
     async enableJwtAuth(projectRef: string): Promise<boolean> {
         try {
-            const routes = ['pgrst', 'gotrue', 'realtime', 'storage', 'functions'].map(r => `route-svc-${r}-${projectRef}`);
+            const routes = ['pgrst', 'graphql', 'gotrue', 'realtime', 'storage', 'functions'].map(r => `route-svc-${r}-${projectRef}`);
             let allSuccess = true;
             for (const routeName of routes) {
                 try {
@@ -387,6 +388,7 @@ export class GatewayService {
         stripPath?: boolean;
         readTimeout?: number;
         protocols?: string[];
+        headers?: string[];
     }): Promise<void> {
         // 1. Upsert Service
         await this.kongRequest(`/services/${opts.name}`, "PUT", {
@@ -409,9 +411,13 @@ export class GatewayService {
             protocols: opts.protocols || ["http", "https"],
         });
 
-        // 3. Inject x-project-ref using request-transformer plugin
+        // 3. Inject x-project-ref and any custom headers using request-transformer plugin
+        const headersToAdd = [`x-project-ref:${opts.projectRef}`];
+        if (opts.headers && opts.headers.length > 0) {
+            headersToAdd.push(...opts.headers);
+        }
         await this.upsertRoutePlugin(routeName, "request-transformer", {
-            add: { headers: [`x-project-ref:${opts.projectRef}`] }
+            add: { headers: headersToAdd }
         });
 
         // 4. Attach CORS plugin globally for this route
@@ -453,7 +459,16 @@ export class GatewayService {
             const baseApiDomain = `${projectRef}.api.${config.baseDomain}`;
             const hosts = customApiDomain ? [baseApiDomain, `api.${customApiDomain}`] : [baseApiDomain];
 
-            await this.ensureServiceAndRoute({ name: `svc-pgrst-${projectRef}`, url: `http://${hostIp}:${pgrstPort}`, paths: ["/rest/v1", "/graphql/v1"], hosts, projectRef });
+            await this.ensureServiceAndRoute({ name: `svc-pgrst-${projectRef}`, url: `http://${hostIp}:${pgrstPort}`, paths: ["/rest/v1"], hosts, projectRef });
+            await this.ensureServiceAndRoute({ 
+                name: `svc-graphql-${projectRef}`, 
+                url: `http://${hostIp}:${pgrstPort}/rpc/graphql`, 
+                paths: ["/graphql/v1"], 
+                hosts, 
+                projectRef, 
+                stripPath: true,
+                headers: ["Content-Profile:graphql_public"]
+            });
             await this.ensureServiceAndRoute({ name: `svc-gotrue-${projectRef}`, url: `http://${hostIp}:${gotruePort}`, paths: ["/auth/v1"], hosts, projectRef });
             await this.ensureServiceAndRoute({ name: `svc-functions-${projectRef}`, url: `http://${hostIp}:9000`, paths: ["/functions/v1"], hosts, projectRef, readTimeout: 500_000 });  // 500s for AI/OCR inference
             await this.ensureServiceAndRoute({ name: `svc-storage-${projectRef}`, url: `http://${hostIp}:9090`, paths: ["/storage/v1/"], hosts, projectRef });
@@ -484,7 +499,7 @@ export class GatewayService {
 
     async addProjectDomains(projectRef: string, apiDomains: string[], studioDomains: string[]): Promise<boolean> {
         try {
-            const servicePrefixes = ["svc-pgrst-", "svc-gotrue-", "svc-functions-", "svc-storage-", "svc-realtime-"];
+            const servicePrefixes = ["svc-pgrst-", "svc-graphql-", "svc-gotrue-", "svc-functions-", "svc-storage-", "svc-realtime-"];
             for (const prefix of servicePrefixes) {
                 const routeName = `route-${prefix}${projectRef}`;
                 const route = await this.kongRequest(`/routes/${routeName}`);
@@ -513,7 +528,7 @@ export class GatewayService {
 
     async removeProjectDomains(projectRef: string, apiDomains: string[], studioDomains: string[]): Promise<boolean> {
         try {
-            const servicePrefixes = ["svc-pgrst-", "svc-gotrue-", "svc-functions-", "svc-storage-", "svc-realtime-"];
+            const servicePrefixes = ["svc-pgrst-", "svc-graphql-", "svc-gotrue-", "svc-functions-", "svc-storage-", "svc-realtime-"];
             for (const prefix of servicePrefixes) {
                 const routeName = `route-${prefix}${projectRef}`;
                 const route = await this.kongRequest(`/routes/${routeName}`);
@@ -546,7 +561,7 @@ export class GatewayService {
 
     async removeService(projectRef: string): Promise<{ success: boolean; error?: string }> {
         try {
-            const servicePrefixes = ["svc-pgrst-", "svc-gotrue-", "svc-functions-", "svc-storage-", "svc-realtime-"];
+            const servicePrefixes = ["svc-pgrst-", "svc-graphql-", "svc-gotrue-", "svc-functions-", "svc-storage-", "svc-realtime-"];
             for (const prefix of servicePrefixes) {
                 const name = `${prefix}${projectRef}`;
                 const routeName = `route-${name}`;

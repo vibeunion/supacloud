@@ -146,18 +146,21 @@ export class StorageRLS {
         const row = rows[0] as Record<string, unknown>;
         const meta = (row.metadata || {}) as Record<string, unknown>;
         return {
-          id: row.id,
-          name: row.name,
-          bucket_id: row.bucket_id,
-          size: meta.size || 0,
-          cache_control: meta.cacheControl || meta.cache_control || 'public, max-age=3600',
-          content_type: meta.mimetype || 'application/octet-stream',
-          created_at: row.created_at,
-          updated_at: row.updated_at,
-          last_modified: row.updated_at,
-          etag: meta.eTag || meta.etag || `"${row.id}"`,
-          version: row.version,
-          metadata: meta,
+          id: row.id ? String(row.id) : null,
+          name: String(row.name),
+          bucket_id: String(row.bucket_id),
+          owner: row.owner ? String(row.owner) : undefined,
+          size: Number(meta.size || 0),
+          cache_control: String(meta.cacheControl || meta.cache_control || 'public, max-age=3600'),
+          content_type: String(meta.mimetype || 'application/octet-stream'),
+          created_at: String(row.created_at),
+          updated_at: String(row.updated_at),
+          last_accessed_at: String(row.last_accessed_at || row.updated_at),
+          metadata: {
+            size: Number(meta.size || 0),
+            mimetype: String(meta.mimetype || 'application/octet-stream'),
+            cacheControl: String(meta.cacheControl || meta.cache_control || 'public, max-age=3600')
+          }
         };
     }
 
@@ -173,18 +176,21 @@ export class StorageRLS {
       const row = rows[0] as Record<string, unknown>;
       const meta = (row.metadata || {}) as Record<string, unknown>;
       return {
-        id: String(row.id),
+        id: row.id ? String(row.id) : null,
         name: String(row.name),
         bucket_id: String(row.bucket_id),
+        owner: row.owner ? String(row.owner) : undefined,
         size: Number(meta.size || 0),
         cache_control: String(meta.cacheControl || meta.cache_control || 'public, max-age=3600'),
         content_type: String(meta.mimetype || 'application/octet-stream'),
         created_at: String(row.created_at),
         updated_at: String(row.updated_at),
-        last_modified: String(row.updated_at),
-        etag: String(meta.eTag || meta.etag || `"${row.id}"`),
-        version: String(row.version || row.id),
-        metadata: meta,
+        last_accessed_at: String(row.last_accessed_at || row.updated_at),
+        metadata: {
+            size: Number(meta.size || 0),
+            mimetype: String(meta.mimetype || 'application/octet-stream'),
+            cacheControl: String(meta.cacheControl || meta.cache_control || 'public, max-age=3600')
+        }
       };
     }).catch(() => null);
   }
@@ -419,7 +425,11 @@ export class StorageRLS {
     
     let payload: Record<string, unknown> = { role: 'anon' };
     if (token) {
-      try { payload = await this.verifyToken(ref, token.replace('Bearer ', '')); } catch (e) {}
+      try {
+        payload = await this.verifyToken(ref, token.replace('Bearer ', ''));
+      } catch (e) {
+        throw new Error('Access Denied');
+      }
     }
 
     try {
@@ -448,6 +458,7 @@ export class StorageRLS {
             updated_at,
             created_at,
             last_accessed_at,
+            owner,
             metadata,
             COALESCE((metadata->>'size')::bigint, 0) AS size
           FROM storage.objects
@@ -475,6 +486,7 @@ export class StorageRLS {
                         updated_at: row.updated_at,
                         created_at: row.created_at,
                         last_accessed_at: row.last_accessed_at,
+                        owner: null,
                         size: 0,
                         metadata: { mimetype: null },
                         isFolder: true,
@@ -488,6 +500,7 @@ export class StorageRLS {
                     updated_at: row.updated_at,
                     created_at: row.created_at,
                     last_accessed_at: row.last_accessed_at,
+                    owner: row.owner,
                     size: row.size,
                     metadata: row.metadata,
                     isFolder: false,
@@ -514,17 +527,20 @@ export class StorageRLS {
       });
 
       return results.map(row => {
-          const sizeBytes = Number(row.metadata?.size || row.size || 0);
+          const meta = row.metadata || {};
           return {
-              id: row.id,
               name: row.name,
-              updated: row.updated_at || row.updated,
-              created: row.created_at || row.updated,
-              last_accessed: row.last_accessed_at || row.updated,
-              size: sizeBytes,
-              metadata: row.metadata,
-              type: row.metadata?.mimetype || 'application/octet-stream',
-              isFolder: row.isFolder
+              id: row.id ? String(row.id) : null,
+              updated_at: row.updated_at || row.updated,
+              created_at: row.created_at || row.created || row.updated,
+              last_accessed_at: row.last_accessed_at || row.last_accessed || row.updated,
+              bucket_id: bucketId,
+              owner: row.owner ? String(row.owner) : undefined,
+              metadata: row.isFolder ? null : {
+                  size: Number(meta.size || row.size || 0),
+                  mimetype: String(meta.mimetype || 'application/octet-stream'),
+                  cacheControl: String(meta.cacheControl || meta.cache_control || 'public, max-age=3600')
+              }
           };
       });
     } catch (e: unknown) {
@@ -568,11 +584,20 @@ export class StorageRLS {
 
     try {
         await this.withBucketRLS(ref, token, async (tx) => {
+            if (dryRun) {
+                // Verify RLS allows deleting ALL objects: count total vs deletable
+                const [{ total }] = await tx`SELECT COUNT(*)::int AS total FROM storage.objects WHERE bucket_id = ${bucketId}`;
+                const deleted = await tx`DELETE FROM storage.objects WHERE bucket_id = ${bucketId} RETURNING id`;
+                if (deleted.length < total) {
+                    throw new Error("RLS_PARTIAL_DELETE");
+                }
+                throw new Error("DRY_RUN_ROLLBACK");
+            }
             await tx`DELETE FROM storage.objects WHERE bucket_id = ${bucketId}`;
-            if (dryRun) throw new Error("DRY_RUN_ROLLBACK");
         });
     } catch (e: any) {
         if (e.message === 'DRY_RUN_ROLLBACK') return;
+        if (e.message === 'RLS_PARTIAL_DELETE') throw new Error("You do not have permission to empty this bucket entirely");
         throw new Error(e.message || "Failed to empty bucket");
     }
   }

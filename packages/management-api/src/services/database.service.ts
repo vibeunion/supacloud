@@ -138,10 +138,19 @@ export class DatabaseService {
   // Apply Supabase Schema
   private async applySupabaseSchema(dbName: string, projectRef: string, password: string): Promise<void> {
     await this.withTenantDb(dbName, async (tenantDb) => {
-      // Create extensions
+      // Create core extensions unconditionally (PG native)
       await tenantDb.unsafe(`CREATE EXTENSION IF NOT EXISTS "uuid-ossp"`);
       await tenantDb.unsafe(`CREATE EXTENSION IF NOT EXISTS "pgcrypto"`);
-      await tenantDb.unsafe(`CREATE EXTENSION IF NOT EXISTS "pgjwt"`);
+      
+      // Graciously attempt to create Supabase-specific extensions
+      const exts = ["pgjwt", "pg_net", "pgsodium", "vault", "pg_graphql"];
+      for (const ext of exts) {
+         try {
+             await tenantDb.unsafe(`CREATE EXTENSION IF NOT EXISTS "${ext}" CASCADE`);
+         } catch (e) {
+             logger.warn(`[DatabaseService] Extension ${ext} not available on this Postgres cluster. Skipping.`);
+         }
+      }
 
       // Create API roles - use double quotes to support hyphens
       const authenticatorRole = `authenticator_${projectRef}`;

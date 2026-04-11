@@ -9,6 +9,7 @@ export interface TusUpload {
     offset: number;
     createdAt: number;
     auth_token?: string;
+    meta?: Record<string, string>;
 }
 
 export interface SignedUpload {
