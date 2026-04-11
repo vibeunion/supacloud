@@ -81,8 +81,16 @@ export class StorageRLS {
   }
 
   
-  static async getLogicalBucket(ref: string, bucketId: string, token: string | undefined): Promise<Record<string, unknown> | null> {
+  static async getLogicalBucket(ref: string, bucketId: string, token: string | undefined, adminOverride = false): Promise<Record<string, unknown> | null> {
     if (ref === 'test_mock') return mockBuckets.get(bucketId) || null;
+
+    if (adminOverride) {
+        const project = (await metaSql`SELECT db_name FROM projects WHERE ref=${ref}`)[0];
+        if (!project) return null;
+        const db = getProjectDb(project.db_name);
+        const rows = await db`SELECT id, name, public, created_at, updated_at, file_size_limit, allowed_mime_types FROM storage.buckets WHERE id = ${bucketId}`;
+        return (rows[0] as Record<string, unknown>) || null;
+    }
 
     return await this.withBucketRLS(ref, token, async (tx) => {
         const rows = await tx`SELECT id, name, public, created_at, updated_at, file_size_limit, allowed_mime_types FROM storage.buckets WHERE id = ${bucketId}`;
