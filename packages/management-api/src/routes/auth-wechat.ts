@@ -227,10 +227,10 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders })
   try {
     const { code } = await req.json()
-    const WECHAT_APP_ID = Deno.env.get("WECHAT_MINIPROGRAM_APP_ID") || "${appId}"
-    const WECHAT_APP_SECRET = Deno.env.get("WECHAT_MINIPROGRAM_APP_SECRET") || "${appSecret}"
-    const SUPABASE_URL = Deno.env.get("SUPABASE_URL")
-    const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")
+    const WECHAT_APP_ID = Bun.env["WECHAT_MINIPROGRAM_APP_ID"] || "${appId}"
+    const WECHAT_APP_SECRET = Bun.env["WECHAT_MINIPROGRAM_APP_SECRET"] || "${appSecret}"
+    const SUPABASE_URL = Bun.env["SUPABASE_URL"]
+    const SUPABASE_SERVICE_ROLE_KEY = Bun.env["SUPABASE_SERVICE_ROLE_KEY"]
 
     const tokenUrl = \`https://api.weixin.qq.com/sns/jscode2session?appid=\${WECHAT_APP_ID}&secret=\${WECHAT_APP_SECRET}&js_code=\${code}&grant_type=authorization_code\`
     const wechatRes = await fetch(tokenUrl)
@@ -279,7 +279,7 @@ Deno.serve(async (req) => {
     })
 
     // Explicitly link physical identity row mirroring real OAuth behavior
-    const SUPABASE_DB_URL = Deno.env.get("SUPABASE_DB_URL")
+    const SUPABASE_DB_URL = Bun.env["SUPABASE_DB_URL"]
     if (SUPABASE_DB_URL) {
       const sql = new SQL(SUPABASE_DB_URL)
       try {
@@ -345,8 +345,8 @@ Deno.serve(async (req) => {
     const userRes = await fetch(userUrl)
     const userData = await userRes.json()
 
-    const SUPABASE_URL = Deno.env.get("SUPABASE_URL")
-    const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")
+    const SUPABASE_URL = Bun.env["SUPABASE_URL"]
+    const SUPABASE_SERVICE_ROLE_KEY = Bun.env["SUPABASE_SERVICE_ROLE_KEY"]
 
     const supabaseAdmin = createClient(SUPABASE_URL as string, SUPABASE_SERVICE_ROLE_KEY as string, {
       auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false },
@@ -384,7 +384,7 @@ Deno.serve(async (req) => {
     })
 
     // Explicitly link physical identity row mirroring real OAuth behavior
-    const SUPABASE_DB_URL = Deno.env.get("SUPABASE_DB_URL")
+    const SUPABASE_DB_URL = Bun.env["SUPABASE_DB_URL"]
     if (SUPABASE_DB_URL) {
       const sql = new SQL(SUPABASE_DB_URL)
       try {
