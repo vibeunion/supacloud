@@ -107,6 +107,7 @@ const sdkProxyRoutesBase = new Elysia({ prefix: "" })
             
             // Reconstruct Elysia response
             set.status = response.status;
+            set.headers['x-supabase-api-version'] = '1.0.0';
             response.headers.forEach((val, key) => {
                 set.headers[key] = val;
             });
@@ -155,6 +156,7 @@ const sdkProxyRoutesBase = new Elysia({ prefix: "" })
             });
             
             set.status = response.status;
+            set.headers['x-supabase-api-version'] = '1.0.0';
             response.headers.forEach((val, key) => {
                 set.headers[key] = val;
             });
@@ -202,6 +204,7 @@ const graphqlHandler = async ({ request, set }: any) => {
             });
             
             set.status = response.status;
+            set.headers['x-supabase-api-version'] = '1.0.0';
             response.headers.forEach((val, key) => {
                 set.headers[key] = val;
             });
