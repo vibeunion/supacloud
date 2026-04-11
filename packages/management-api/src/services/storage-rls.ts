@@ -373,7 +373,7 @@ export class StorageRLS {
     }
 
     const project = (await metaSql`SELECT db_name FROM projects WHERE ref=${ref}`)[0];
-    if (!project) return [];
+    if (!project) throw new Error("PROJECT_NOT_FOUND");
     
     const db = getProjectDb(project.db_name);
     
