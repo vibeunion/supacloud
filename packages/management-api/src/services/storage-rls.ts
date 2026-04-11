@@ -10,67 +10,74 @@ export const mockObjects = new Map<string, any>();
 export class StorageRLS {
 
   
-  static async registerLogicalBucket(ref: string, bucketId: string, name: string, isPublic: boolean, fileSizeLimit?: number | null, allowedMimeTypes?: string[] | null): Promise<void> {
+  static async registerLogicalBucket(ref: string, token: string | undefined, bucketId: string, name: string, isPublic: boolean, fileSizeLimit?: number | null, allowedMimeTypes?: string[] | null): Promise<void> {
     if (ref === 'test_mock') {
       mockBuckets.set(bucketId, { id: bucketId, name, public: isPublic, file_size_limit: fileSizeLimit || null, allowed_mime_types: allowedMimeTypes || null, created_at: new Date().toISOString(), updated_at: new Date().toISOString() });
       return;
     }
 
-    const project = (await metaSql`SELECT db_name FROM projects WHERE ref=${ref}`)[0];
-    if (!project) return;
-    
-    const db = getProjectDb(project.db_name);
-    
     const formattedMimes = allowedMimeTypes && allowedMimeTypes.length > 0
         ? `{${allowedMimeTypes.map((m: string) => `"${m.replace(/"/g, '\\"')}"`).join(',')}}`
         : null;
 
-    // Insert the bucket into PostgreSQL so RLS and foreign keys don't fail downstream
-    await db`
-      INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types, created_at, updated_at)
-      VALUES (${bucketId}, ${name}, ${isPublic}, ${fileSizeLimit || null}, ${formattedMimes}, now(), now())
-      ON CONFLICT (id) DO UPDATE SET public = EXCLUDED.public, name = EXCLUDED.name, file_size_limit = EXCLUDED.file_size_limit, allowed_mime_types = EXCLUDED.allowed_mime_types, updated_at = now()
-    `;
+    try {
+        await this.withBucketRLS(ref, token, async (tx) => {
+            await tx`
+              INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types, created_at, updated_at)
+              VALUES (${bucketId}, ${name}, ${isPublic}, ${fileSizeLimit || null}, ${formattedMimes}, now(), now())
+              ON CONFLICT (id) DO UPDATE SET public = EXCLUDED.public, name = EXCLUDED.name, file_size_limit = EXCLUDED.file_size_limit, allowed_mime_types = EXCLUDED.allowed_mime_types, updated_at = now()
+            `;
+        });
+    } catch (e: any) {
+        throw new Error(e.message || "Failed to create bucket");
+    }
   }
 
   
-  static async listLogicalBuckets(ref: string): Promise<Record<string, unknown>[]> {
+  static async listLogicalBuckets(ref: string, token: string | undefined): Promise<Record<string, unknown>[]> {
     if (ref === 'test_mock') return Array.from(mockBuckets.values());
 
+    return await this.withBucketRLS(ref, token, async (tx) => {
+        return await tx`SELECT id, name, public, created_at, updated_at, file_size_limit, allowed_mime_types FROM storage.buckets ORDER BY name`;
+    });
+  }
+
+  static async rollbackLogicalBucket(ref: string, bucketId: string): Promise<void> {
+    if (ref === 'test_mock') {
+        mockBuckets.delete(bucketId);
+        return;
+    }
     const project = (await metaSql`SELECT db_name FROM projects WHERE ref=${ref}`)[0];
-    if (!project) return [];
+    if (!project) return;
     const db = getProjectDb(project.db_name);
-    return await db`SELECT id, name, public, created_at, updated_at, file_size_limit, allowed_mime_types FROM storage.buckets ORDER BY name`;
+    await db`DELETE FROM storage.buckets WHERE id = ${bucketId}`.catch(() => {});
   }
 
   
-  static async getLogicalBucket(ref: string, bucketId: string): Promise<Record<string, unknown> | null> {
+  static async getLogicalBucket(ref: string, bucketId: string, token: string | undefined): Promise<Record<string, unknown> | null> {
     if (ref === 'test_mock') return mockBuckets.get(bucketId) || null;
 
-    const project = (await metaSql`SELECT db_name FROM projects WHERE ref=${ref}`)[0];
-    if (!project) return null;
-    const db = getProjectDb(project.db_name);
-    const rows = await db`SELECT id, name, public, created_at, updated_at, file_size_limit, allowed_mime_types FROM storage.buckets WHERE id = ${bucketId}`;
-    return (rows[0] as Record<string, unknown>) || null;
+    return await this.withBucketRLS(ref, token, async (tx) => {
+        const rows = await tx`SELECT id, name, public, created_at, updated_at, file_size_limit, allowed_mime_types FROM storage.buckets WHERE id = ${bucketId}`;
+        return (rows[0] as Record<string, unknown>) || null;
+    }).catch(() => null);
   }
 
-  static async objectExists(ref: string, bucketId: string, objectName: string): Promise<boolean> {
+  static async objectExists(ref: string, bucketId: string, objectName: string, token: string | undefined): Promise<boolean> {
     if (ref === 'test_mock') return mockObjects.has(bucketId + '/' + objectName);
 
-    const project = (await metaSql`SELECT db_name FROM projects WHERE ref=${ref}`)[0];
-    if (!project) return false;
-
-    const db = getProjectDb(project.db_name);
-    const rows = await db`
-      SELECT 1
-      FROM storage.objects
-      WHERE bucket_id = ${bucketId} AND name = ${objectName}
-      LIMIT 1
-    `;
-    return rows.length > 0;
+    return await this.withBucketRLS(ref, token, async (tx) => {
+      const rows = await tx`
+        SELECT 1
+        FROM storage.objects
+        WHERE bucket_id = ${bucketId} AND name = ${objectName}
+        LIMIT 1
+      `;
+      return rows.length > 0;
+    }).catch(() => false);
   }
 
-  static async getObjectInfo(ref: string, bucketId: string, objectName: string): Promise<Record<string, unknown> | null> {
+  static async getObjectInfo(ref: string, bucketId: string, objectName: string, token: string | undefined): Promise<Record<string, unknown> | null> {
     if (ref === 'test_mock') {
       const obj = mockObjects.get(bucketId + '/' + objectName);
       if (!obj) return null;
@@ -90,34 +97,32 @@ export class StorageRLS {
       };
     }
 
-    const project = (await metaSql`SELECT db_name FROM projects WHERE ref=${ref}`)[0];
-    if (!project) return null;
+    return await this.withBucketRLS(ref, token, async (tx) => {
+      const rows = await tx`
+        SELECT id, name, bucket_id, metadata, created_at, updated_at, version
+        FROM storage.objects
+        WHERE bucket_id = ${bucketId} AND name = ${objectName}
+        LIMIT 1
+      `;
+      if (rows.length === 0) return null;
 
-    const db = getProjectDb(project.db_name);
-    const rows = await db`
-      SELECT id, name, bucket_id, metadata, created_at, updated_at, version
-      FROM storage.objects
-      WHERE bucket_id = ${bucketId} AND name = ${objectName}
-      LIMIT 1
-    `;
-    if (rows.length === 0) return null;
-
-    const row = rows[0] as Record<string, unknown>;
-    const meta = (row.metadata || {}) as Record<string, unknown>;
-    return {
-      id: String(row.id),
-      name: String(row.name),
-      bucket_id: String(row.bucket_id),
-      size: Number(meta.size || 0),
-      cache_control: 'max-age=3600',
-      content_type: String(meta.mimetype || 'application/octet-stream'),
-      created_at: String(row.created_at),
-      updated_at: String(row.updated_at),
-      last_modified: String(row.updated_at),
-      etag: `"${String(row.id).slice(0, 8)}"`,
-      version: String(row.version || row.id),
-      metadata: (meta.userMetadata || {}) as Record<string, unknown>,
-    };
+      const row = rows[0] as Record<string, unknown>;
+      const meta = (row.metadata || {}) as Record<string, unknown>;
+      return {
+        id: String(row.id),
+        name: String(row.name),
+        bucket_id: String(row.bucket_id),
+        size: Number(meta.size || 0),
+        cache_control: 'max-age=3600',
+        content_type: String(meta.mimetype || 'application/octet-stream'),
+        created_at: String(row.created_at),
+        updated_at: String(row.updated_at),
+        last_modified: String(row.updated_at),
+        etag: `"${String(row.id).slice(0, 8)}"`,
+        version: String(row.version || row.id),
+        metadata: (meta.userMetadata || {}) as Record<string, unknown>,
+      };
+    }).catch(() => null);
   }
 
   static async getTenantJwtSecret(ref: string): Promise<string | null> {
@@ -133,6 +138,36 @@ export class StorageRLS {
   }
 
   
+  
+  static async withBucketRLS<T>(
+    ref: string,
+    token: string | null | undefined,
+    callback: (tx: any, payload: any) => Promise<T>
+  ): Promise<T> {
+    const project = (await metaSql`SELECT db_name FROM projects WHERE ref=${ref}`)[0];
+    if (!project) throw new Error("Project not found");
+    
+    const db = getProjectDb(project.db_name);
+    
+    let payload: Record<string, unknown> = { role: 'anon' };
+    if (token) {
+      try {
+        payload = await this.verifyToken(ref, token.replace('Bearer ', ''));
+      } catch (e) {
+        throw new Error('Access Denied');
+      }
+    }
+
+    return await db.begin(async (tx: any) => {
+        await tx`SELECT set_config('role', ${(payload.role as string) || 'anon'}, true)`;
+        await tx`SELECT set_config('request.jwt.claims', ${JSON.stringify(payload)}, true)`;
+        if (payload.sub) await tx`SELECT set_config('request.jwt.claim.sub', ${String(payload.sub)}, true)`;
+        if (payload.role) await tx`SELECT set_config('request.jwt.claim.role', ${String(payload.role)}, true)`;
+
+        return await callback(tx, payload);
+    });
+  }
+
   static async authorizeAction(
     ref: string,
     token: string | null | undefined,
@@ -331,7 +366,7 @@ export class StorageRLS {
     }
   }
 
-  static async deleteLogicalBucket(ref: string, bucketId: string): Promise<void> {
+  static async deleteLogicalBucket(ref: string, token: string | undefined, bucketId: string): Promise<void> {
     if (ref === 'test_mock') {
         for (const key of Array.from(mockObjects.keys())) {
             if (key.startsWith(`${bucketId}/`)) mockObjects.delete(key);
@@ -339,14 +374,19 @@ export class StorageRLS {
         mockBuckets.delete(bucketId);
         return;
     }
-    const project = (await metaSql`SELECT db_name FROM projects WHERE ref=${ref}`)[0];
-    if (!project) return;
-    const db = getProjectDb(project.db_name);
-    await db`DELETE FROM storage.objects WHERE bucket_id = ${bucketId}`;
-    await db`DELETE FROM storage.buckets WHERE id = ${bucketId}`;
+    
+    try {
+        await this.withBucketRLS(ref, token, async (tx) => {
+            await tx`DELETE FROM storage.objects WHERE bucket_id = ${bucketId}`;
+            const resBuckets = await tx`DELETE FROM storage.buckets WHERE id = ${bucketId} RETURNING id`;
+            if (resBuckets.length === 0) throw new Error("RLS_VIOLATION");
+        });
+    } catch (e: any) {
+        throw new Error(e.message === 'RLS_VIOLATION' ? "You do not have permission to delete this bucket" : (e.message || "Failed to delete bucket"));
+    }
   }
 
-  static async emptyLogicalBucket(ref: string, bucketId: string): Promise<void> {
+  static async emptyLogicalBucket(ref: string, token: string | undefined, bucketId: string): Promise<void> {
     if (ref === 'test_mock') {
       for (const key of Array.from(mockObjects.keys())) {
         if (key.startsWith(`${bucketId}/`)) mockObjects.delete(key);
@@ -354,9 +394,14 @@ export class StorageRLS {
       return;
     }
 
-    const project = (await metaSql`SELECT db_name FROM projects WHERE ref=${ref}`)[0];
-    if (!project) return;
-    const db = getProjectDb(project.db_name);
-    await db`DELETE FROM storage.objects WHERE bucket_id = ${bucketId}`;
+    try {
+        await this.withBucketRLS(ref, token, async (tx) => {
+            await tx`DELETE FROM storage.objects WHERE bucket_id = ${bucketId}`;
+            // Optional: checking if bucket exists/is selectable through RLS might be good,
+            // but simply deleting objects subject to DELETE policies is enough.
+        });
+    } catch (e: any) {
+        throw new Error(e.message || "Failed to empty bucket");
+    }
   }
 }
