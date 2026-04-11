@@ -69,10 +69,17 @@ async function getSigningSecretForTenant(ref: string): Promise<string> {
 /**
  * Generate HMAC-SHA256 signed token for a storage path + expiry.
  */
+import { jwtVerify, SignJWT } from "jose";
+
 async function generateSignedToken(ref: string, bucket: string, path: string, expiresAt: number): Promise<string> {
     const secret = await getSigningSecretForTenant(ref);
-    const payload = `${ref}:${bucket}:${path}:${expiresAt}`;
-    return createHmac("sha256", secret).update(payload).digest("hex");
+    const jwt = await new SignJWT({ url: `${bucket}/${path}` })
+        .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
+        .setIssuedAt(Math.floor(Date.now() / 1000))
+        .setExpirationTime(expiresAt)
+        .sign(new TextEncoder().encode(secret));
+    
+    return jwt;
 }
 
 /**
@@ -145,10 +152,14 @@ function extractMultipartFileFast(buffer: Buffer, boundary: string): { fileBuffe
 /**
  * Verify a signed token against path + expiry.
  */
-async function verifySignedToken(ref: string, bucket: string, path: string, expiresAt: number, token: string): Promise<boolean> {
-    if (Date.now() / 1000 > expiresAt) return false; // expired
-    const expected = await generateSignedToken(ref, bucket, path, expiresAt);
-    return expected === token;
+async function verifySignedToken(ref: string, bucket: string, path: string, token: string): Promise<boolean> {
+    try {
+        const secret = await getSigningSecretForTenant(ref);
+        const { payload } = await jwtVerify(token, new TextEncoder().encode(secret));
+        return payload.url === `${bucket}/${path}`;
+    } catch {
+        return false; // Automatically handles expiry and signature mismatch
+    }
 }
 
 /**
@@ -158,8 +169,11 @@ async function verifySignedToken(ref: string, bucket: string, path: string, expi
 function getProjectRef(headers: Record<string, string | undefined>): string {
     const auth = headers['authorization'] || '';
     const key = headers['apikey'] || '';
-    if (key === 'test-token' || auth === 'Bearer test-token' || auth.includes('jVFIR-MB7rNfUuJaUH') || key.includes('jVFIR-MB7rNfUuJaUH')) {
-         return 'test_mock';
+    // Test-mode backdoor: only enabled in non-production environments
+    if (process.env.NODE_ENV !== 'production') {
+        if (key === 'test-token' || auth === 'Bearer test-token' || auth.includes('jVFIR-MB7rNfUuJaUH') || key.includes('jVFIR-MB7rNfUuJaUH')) {
+             return 'test_mock';
+        }
     }
     return headers['x-project-ref'] || headers['x-supabase-project'] || '';
 }
@@ -192,7 +206,7 @@ const TRANSFORM_QUERY_KEYS = new Set([
 ]);
 
 function buildSignedPath(pathname: string, expiresAt: number, token: string, transform?: Record<string, unknown>): string {
-    const search = new URLSearchParams({ token, t: String(expiresAt) });
+    const search = new URLSearchParams({ token });
 
     if (transform) {
         for (const [key, value] of Object.entries(transform)) {
@@ -291,6 +305,27 @@ function parseAllowedMimeTypes(value: unknown): string[] | null {
 }
 
 export const storageCompatRoutes = new Elysia({ prefix: "" })
+
+    // ── Origin Guard: reject requests without a valid project reference ──
+    // Storage compat routes rely on Kong-injected x-project-ref.
+    // If accessed directly (bypassing Kong), getProjectRef returns '' and each
+    // route already returns 400 "Missing tenant reference". This guard adds
+    // defense-in-depth logging for monitoring direct-access attempts.
+    .onBeforeHandle(({ headers, request }) => {
+        const ref = getProjectRef(headers as Record<string, string | undefined>);
+        if (!ref) {
+            logger.warn('[StorageCompat] Request without project ref detected', {
+                url: request.url,
+                remoteAddr: request.headers.get('x-forwarded-for') || 'unknown',
+            });
+        }
+    })
+    
+    // Inject standard Supabase compatibility headers on all API responses
+    .onAfterHandle(({ set }) => {
+        set.headers['x-supabase-api-version'] = '1.0.0';
+        set.headers['sb-gateway-version'] = '1.0.0';
+    })
 
     // ════════════════════════════════════════════════════════
     // BUCKET Operations
@@ -393,7 +428,8 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             return {
                 id: params.id,
                 name: (bucket.name as string) || params.id,
-                owner: '',
+                owner: bucket.owner || '',
+                owner_id: bucket.owner || '',
                 public: (bucket.public as boolean) ?? false,
                 created_at: (bucket.created_at as string) || new Date().toISOString(),
                 updated_at: (bucket.updated_at as string) || new Date().toISOString(),
@@ -428,16 +464,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             
             await StorageRLS.registerLogicalBucket(ref, auth, params.id, name, isPublic, fileSizeLimit, allowedMimeTypes);
 
-            return {
-                id: params.id,
-                name,
-                owner: '',
-                public: isPublic,
-                created_at: (current.created_at as string) || new Date().toISOString(),
-                updated_at: new Date().toISOString(),
-                file_size_limit: fileSizeLimit,
-                allowed_mime_types: allowedMimeTypes,
-            };
+            return { message: "Successfully updated" };
         } catch (e: any) {
             return status(403, { statusCode: '403', error: 'Forbidden', message: e.message || 'Access Denied' });
         }
@@ -471,7 +498,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         
         // 3. Clear logical metadata
         await StorageRLS.emptyLogicalBucket(ref, auth, params.id, false);
-        return { message: "Successfully emptied" };
+        return { message: "Empty bucket has been queued. Completion may take up to an hour." };
     })
 
     .delete('/bucket/:id', async ({ params, headers }) => {
@@ -492,7 +519,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         
         // 3. Logical delete bucket
         await StorageRLS.deleteLogicalBucket(ref, auth, params.id, false);
-        return { message: `Successfully deleted bucket ${params.id}` };
+        return { message: "Successfully deleted" };
     })
 
     // ════════════════════════════════════════════════════════
@@ -552,6 +579,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             return {
                 Id: info?.id || `${params.bucket}/${filePath}`,
                 Key: `${params.bucket}/${filePath}`,
+                path: filePath
             };
         } catch (err: unknown) {
             logger.error('SDK upload error:', { error: err instanceof Error ? err.message : String(err) });
@@ -591,6 +619,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             return {
                 Id: info?.id || `${params.bucket}/${filePath}`,
                 Key: `${params.bucket}/${filePath}`,
+                path: filePath
             };
         } catch (err: unknown) {
             return status(500, { statusCode: '500', error: 'Internal', message: 'Upsert failed' });
@@ -797,12 +826,12 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
                 const auth = headers['authorization'] || '';
                 const objectExists = await StorageRLS.objectExists(ref, params.bucket, cleanPath, auth);
                 if (!objectExists) {
-                    return { error: 'Object not found', path: filePath, signedURL: null };
+                    return { error: 'Either the object does not exist or you do not have access to it', path: filePath, signedURL: null };
                 }
 
                 const permittedCheck = await StorageRLS.authorizeAction(ref, auth, 'download', params.bucket, cleanPath);
                 if (!permittedCheck.permitted) {
-                    return { error: 'Unauthorized', path: filePath, signedURL: null };
+                    return { error: 'Either the object does not exist or you do not have access to it', path: filePath, signedURL: null };
                 }
 
                 const expiresAt = Math.floor(Date.now() / 1000) + expiresIn;
@@ -929,6 +958,10 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
                 if (!rolledBack) logger.error(`CRITICAL: Orphaned physical file abandoned at ${params.bucket}/${filePath}`);
                 return status(500, { statusCode: '500', error: 'Internal', message: 'Failed to record object' });
             }
+
+            // Consume the signed upload token (one-time use)
+            await SignedStore.delete(token);
+
             const info = await StorageRLS.getObjectInfo(ref, params.bucket, filePath, undefined, true);
             return {
                 Id: info?.id || `${params.bucket}/${filePath}`,
@@ -947,13 +980,12 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         if (!filePath) return status(400, { statusCode: '400', error: 'Bad Request', message: 'Missing file path' });
 
         const token = query.token as string;
-        const expiresAt = Number(query.t);
 
-        if (!token || !expiresAt) {
+        if (!token) {
             return status(401, { statusCode: '401', error: 'Unauthorized', message: 'Missing signed URL token' });
         }
 
-        if (!await verifySignedToken(ref, params.bucket, filePath, expiresAt, token)) {
+        if (!await verifySignedToken(ref, params.bucket, filePath, token)) {
             return status(401, { statusCode: '401', error: 'Unauthorized', message: 'Invalid or expired signed URL' });
         }
 
@@ -983,13 +1015,12 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         if (!filePath) return status(400, { statusCode: '400', error: 'Bad Request', message: 'Missing file path' });
 
         const token = query.token as string;
-        const expiresAt = Number(query.t);
 
-        if (!token || !expiresAt) {
+        if (!token) {
             return status(401, { statusCode: '401', error: 'Unauthorized', message: 'Missing signed URL token' });
         }
 
-        if (!await verifySignedToken(ref, params.bucket, filePath, expiresAt, token)) {
+        if (!await verifySignedToken(ref, params.bucket, filePath, token)) {
             return status(401, { statusCode: '401', error: 'Unauthorized', message: 'Invalid or expired signed URL' });
         }
 
@@ -1167,20 +1198,22 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
 
         const results = await Promise.allSettled(
             prefixes.map(async (p: string) => {
-                // 1. Dry run delete
+                // 1. Dry run delete (RLS check)
                 const permitted = await StorageRLS.authorizeAction(ref, auth, 'delete', params.bucket, p, {}, true);
                 if (!permitted.permitted) throw new Error(permitted.error || 'Forbidden');
                 
                 // Get info for the deleted object response natively matching FileObject (respect RLS)
                 const info = await StorageRLS.getObjectInfo(ref, params.bucket, p, auth, false);
 
-                // 2. Physical delete
-                const physSuccess = await StorageService.deleteFile(ref, params.bucket, p);
-                if (!physSuccess) throw new Error('Physical delete failed');
-
-                // 3. Logical delete
+                // 2. Logical delete FIRST (safer: if this fails, physical file is still intact)
                 const postDelete = await StorageRLS.authorizeAction(ref, auth, 'delete', params.bucket, p, {}, false);
-                if (!postDelete.permitted) throw new Error(postDelete.error || 'Logical delete failed after physical wipe');
+                if (!postDelete.permitted) throw new Error(postDelete.error || 'Logical delete failed');
+
+                // 3. Physical delete (if this fails, we have a harmless orphan file rather than a ghost record)
+                const physSuccess = await StorageService.deleteFile(ref, params.bucket, p);
+                if (!physSuccess) {
+                    logger.warn(`[StorageCompat] Physical file orphaned after logical delete: ${params.bucket}/${p}`);
+                }
                 return info || { name: p, bucket_id: params.bucket };
             })
         );
@@ -1411,7 +1444,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         set.headers['Tus-Resumable'] = '1.0.0';
         set.headers['Tus-Version'] = '1.0.0';
         set.headers['Tus-Extension'] = 'creation,termination';
-        set.headers['Tus-Max-Size'] = String(5 * 1024 * 1024 * 1024); // 5GB
+        set.headers['Tus-Max-Size'] = String(100 * 1024 * 1024); // 100MB — limited for in-memory assembly safety
         return '';
     })
 
@@ -1419,6 +1452,17 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
     .post('/upload/resumable', async ({ headers, set }) => {
         const ref = getProjectRef(headers as Record<string, string | undefined>);
         const uploadLength = Number(headers['upload-length'] || 0);
+
+        // Reject zero-byte uploads (must have a positive Upload-Length)
+        if (!uploadLength || uploadLength <= 0) {
+            return status(400, { statusCode: '400', error: 'Bad Request', message: 'Upload-Length must be greater than 0' });
+        }
+
+        // Hard cap: TUS in-memory assembly cannot safely handle files beyond 100MB
+        const TUS_MAX_SIZE = 100 * 1024 * 1024;
+        if (uploadLength > TUS_MAX_SIZE) {
+            return status(413, { statusCode: '413', error: 'Payload too large', message: `TUS uploads are limited to ${TUS_MAX_SIZE / (1024 * 1024)}MB. Use standard upload for larger files.` });
+        }
         const metadataHeader = headers['upload-metadata'] || '';
 
         // Parse TUS metadata: key base64value,key2 base64value2
@@ -1450,7 +1494,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
 
         // TUS Authorization Gate (DryRun only — we don't materialize until complete)
         const auth = headers['authorization'];
-        const metadata = { mimetype: contentType, size: uploadLength, userMetadata: meta };
+        const metadata = { mimetype: contentType, size: uploadLength, cacheControl: meta.cacheControl, userMetadata: meta };
         const permitted = await StorageRLS.authorizeAction(ref, auth, 'upload', bucket, objectName, metadata, true);
         if (!permitted.permitted) {
             return status(permitted.error === 'Bucket not found' || permitted.error === 'Object not found' ? 404 : 403, { 
@@ -1471,7 +1515,8 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             totalSize: uploadLength,
             offset: 0,
             createdAt: Date.now(),
-            auth_token: auth || ''
+            auth_token: auth || '',
+            meta: meta
         });
 
         set.headers['Tus-Resumable'] = '1.0.0';
@@ -1521,7 +1566,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
                     'upload', 
                     upload.bucket, 
                     upload.objectName, 
-                    { mimetype: upload.contentType, size: upload.totalSize },
+                    { mimetype: upload.contentType, size: upload.totalSize, cacheControl: upload.meta?.cacheControl },
                     true
                 );
                 
@@ -1539,7 +1584,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
                     'upload', 
                     upload.bucket, 
                     upload.objectName, 
-                    { mimetype: upload.contentType, size: upload.totalSize },
+                    { mimetype: upload.contentType, size: upload.totalSize, cacheControl: upload.meta?.cacheControl },
                     false
                 );
                 
@@ -1553,7 +1598,8 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
                 const info = await StorageRLS.getObjectInfo(upload.ref, upload.bucket, upload.objectName, undefined, true);
                 return {
                     Id: info?.id || `${upload.bucket}/${upload.objectName}`,
-                    Key: `${upload.bucket}/${upload.objectName}`
+                    Key: `${upload.bucket}/${upload.objectName}`,
+                    path: upload.objectName
                 };
             } catch (err: unknown) {
                 await TusStore.delete(params.uploadId);
@@ -1577,6 +1623,9 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
 // ── Shared imaginary proxy helper ─────────────────────────────────
 // POST image body directly to imaginary instead of having imaginary fetch via URL.
 // This works for both local/JuiceFS and S3 storage backends.
+const transformRateLimits = new Map<string, { count: number; windowStart: number }>();
+const MAX_TRANSFORMS_PER_MINUTE = 500;
+
 async function proxyToImaginary(
     ref: string,
     logicalBucket: string,
@@ -1585,10 +1634,31 @@ async function proxyToImaginary(
     set: { headers: Record<string, string> },
     isPublic: boolean = false
 ): Promise<Response | { error: string }> {
+    const now = Date.now();
+    const limitState = transformRateLimits.get(ref) || { count: 0, windowStart: now };
+    
+    if (now - limitState.windowStart > 60000) {
+        limitState.count = 0;
+        limitState.windowStart = now;
+    }
+    
+    if (limitState.count >= MAX_TRANSFORMS_PER_MINUTE) {
+        return status(429, { error: 'Too Many Requests for image transformations. Please try again later.' }) as unknown as { error: string };
+    }
+    
+    limitState.count++;
+    transformRateLimits.set(ref, limitState);
+
     // 1. Read the source image from storage
     const downloadRes = await StorageService.getDownloadResponse(ref, logicalBucket, filePath);
     if (!downloadRes) {
         return status(404, { error: 'Source image not found' }) as unknown as { error: string };
+    }
+
+    // Validate source file is actually an image before wasting resources on imaginary
+    const sourceContentTypeCheck = downloadRes.headers?.get('Content-Type') || '';
+    if (sourceContentTypeCheck && !sourceContentTypeCheck.startsWith('image/')) {
+        return status(400, { error: `Cannot transform non-image file (Content-Type: ${sourceContentTypeCheck})` }) as unknown as { error: string };
     }
 
     // 2. Build imaginary query params

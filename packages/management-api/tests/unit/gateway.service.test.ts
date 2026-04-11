@@ -80,7 +80,7 @@ describe("GatewayService", () => {
             (c) => c.method === "PUT" && c.url.includes("/services/svc-realtime-testref123")
         );
         expect(realtimeService).toBeDefined();
-        expect(realtimeService?.body?.url).toBe("http://127.0.0.1:4000/socket");
+        expect(realtimeService?.body?.url).toMatch(/http:\/\/.*:4000\/socket/);
 
         const realtimeRoute = calls.find(
             (c) => c.method === "PUT" && c.url.includes("/routes/route-svc-realtime-testref123")

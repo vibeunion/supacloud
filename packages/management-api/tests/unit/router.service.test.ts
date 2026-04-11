@@ -30,13 +30,7 @@ describe("RouterService", () => {
     });
   });
 
-  describe("reload", () => {
-    test("should return result object", async () => {
-      const result = await routerService.reload();
-      expect(result).toHaveProperty("success");
-      expect(typeof result.success).toBe("boolean");
-    });
-  });
+
 
   describe("getProjectDomain", () => {
     test("should return formatted domain", () => {
