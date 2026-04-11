@@ -44,15 +44,20 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
       }
 
       const d = await res.json() as Record<string, unknown>;
-      const allUsers = Array.isArray(d) ? d : (Array.isArray(d?.users) ? d.users : []);
       
-      const totalHeader = res.headers.get('x-total-count');
-      const total = totalHeader ? Number(totalHeader) : allUsers.length;
-
-      return {
-        data: allUsers,
-        total: total
-      };
+      // If GoTrue returned an array natively (older version), wrap it in the expected paginated structure.
+      // Otherwise it already returns { users, aud, next_page, last_page, total }
+      if (Array.isArray(d)) {
+          const totalHeader = res.headers.get('x-total-count');
+          return {
+              users: d,
+              aud: '',
+              next_page: null,
+              last_page: null,
+              total: totalHeader ? Number(totalHeader) : d.length
+          };
+      }
+      return d;
     },
     {
       params: t.Object({ ref: t.String() }),
@@ -89,9 +94,11 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
           "x-project-ref": params.ref
         },
         body: JSON.stringify({
-          email: body.email,
-          password: body.password,
-          email_confirm: body.email_confirm ?? true,
+          ...(body.email ? { email: body.email } : {}),
+          ...(body.phone ? { phone: body.phone } : {}),
+          ...(body.password ? { password: body.password } : {}),
+          ...(typeof body.email_confirm !== 'undefined' ? { email_confirm: body.email_confirm } : {}),
+          ...(typeof body.phone_confirm !== 'undefined' ? { phone_confirm: body.phone_confirm } : {}),
           user_metadata: body.user_metadata || {},
           app_metadata: body.app_metadata || {}
         })
@@ -108,9 +115,11 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
     {
       params: t.Object({ ref: t.String() }),
       body: t.Object({
-        email: t.String(),
-        password: t.String(),
+        email: t.Optional(t.String()),
+        phone: t.Optional(t.String()),
+        password: t.Optional(t.String()),
         email_confirm: t.Optional(t.Boolean()),
+        phone_confirm: t.Optional(t.Boolean()),
         user_metadata: t.Optional(t.Any()),
         app_metadata: t.Optional(t.Any()),
       })
@@ -140,7 +149,8 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
         },
         body: JSON.stringify({
           email: body.email,
-          data: body.user_metadata || {}
+          data: body.user_metadata || {},
+          ...(body.redirectTo ? { redirect_to: body.redirectTo } : {})
         })
       });
 
@@ -157,13 +167,106 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
       body: t.Object({
         email: t.String(),
         user_metadata: t.Optional(t.Any()),
+        redirectTo: t.Optional(t.String()),
+      })
+    }
+  )
+
+  // GET /users/:id — Get a single user by ID
+  // supabase.auth.admin.getUserById(id)
+  .get(
+    "/users/:id",
+    async ({ params, set }) => {
+      const project = await projectService.getProject(params.ref);
+      if (!project || !project.jwt_secret) {
+        return status(404, { error: "Project or JWT secret not found" });
+      }
+
+      const { jwtService } = await import("../services/jwt.service");
+      const serviceRoleKey = await jwtService.generateServiceRoleKey(project.jwt_secret);
+      const { config } = await import("../config");
+      const apiUrl = project.api?.url || (config.kongInternal.startsWith('http') ? config.kongInternal : `http://${config.kongInternal}`);
+
+      const res = await fetch(`${apiUrl}/auth/v1/admin/users/${params.id}`, {
+        headers: {
+          "apikey": serviceRoleKey,
+          "Authorization": `Bearer ${serviceRoleKey}`,
+          "x-project-ref": params.ref
+        }
+      });
+
+      if (!res.ok) {
+        set.status = res.status;
+        const err = await res.json().catch(() => ({}));
+        return { error: err.msg || err.message || "User not found" };
+      }
+
+      return res.json();
+    },
+    {
+      params: t.Object({
+        ref: t.String(),
+        id: t.String(),
+      })
+    }
+  )
+
+  // PUT /users/:id — Update a user by ID
+  // supabase.auth.admin.updateUserById(id, { email, password, user_metadata, ... })
+  .put(
+    "/users/:id",
+    async ({ params, body, set }) => {
+      const project = await projectService.getProject(params.ref);
+      if (!project || !project.jwt_secret) {
+        return status(404, { error: "Project or JWT secret not found" });
+      }
+
+      const { jwtService } = await import("../services/jwt.service");
+      const serviceRoleKey = await jwtService.generateServiceRoleKey(project.jwt_secret);
+      const { config } = await import("../config");
+      const apiUrl = project.api?.url || (config.kongInternal.startsWith('http') ? config.kongInternal : `http://${config.kongInternal}`);
+
+      const res = await fetch(`${apiUrl}/auth/v1/admin/users/${params.id}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          "apikey": serviceRoleKey,
+          "Authorization": `Bearer ${serviceRoleKey}`,
+          "x-project-ref": params.ref
+        },
+        body: JSON.stringify(body)
+      });
+
+      if (!res.ok) {
+        set.status = res.status;
+        const err = await res.json().catch(() => ({}));
+        return { error: err.msg || err.message || "Failed to update user" };
+      }
+
+      return res.json();
+    },
+    {
+      params: t.Object({
+        ref: t.String(),
+        id: t.String(),
+      }),
+      body: t.Object({
+        email: t.Optional(t.String()),
+        phone: t.Optional(t.String()),
+        password: t.Optional(t.String()),
+        email_confirm: t.Optional(t.Boolean()),
+        phone_confirm: t.Optional(t.Boolean()),
+        user_metadata: t.Optional(t.Any()),
+        app_metadata: t.Optional(t.Any()),
+        ban_duration: t.Optional(t.String()),
+        role: t.Optional(t.String()),
       })
     }
   )
 
   .delete(
     "/users/:id",
-    async ({ params, set }) => {
+    async ({ params, set, body }) => {
       const project = await projectService.getProject(params.ref);
       if (!project || !project.jwt_secret) {
         return status(404, { error: "Project or JWT secret not found" });
@@ -181,7 +284,8 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
           "apikey": serviceRoleKey,
           "Authorization": `Bearer ${serviceRoleKey}`,
           "x-project-ref": params.ref
-        }
+        },
+        body: body && Object.keys(body).length > 0 ? JSON.stringify(body) : undefined
       });
 
       if (!res.ok) {
@@ -190,12 +294,13 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
         return { error: err.msg || err.message || "Failed to delete user" };
       }
 
-      return { success: true, id: params.id };
+      return res.json();
     },
     {
       params: t.Object({
         ref: t.String(),
         id: t.String(),
-      })
+      }),
+      body: t.Optional(t.Any())
     }
   );

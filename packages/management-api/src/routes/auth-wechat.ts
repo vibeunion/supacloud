@@ -297,7 +297,13 @@ Deno.serve(async (req) => {
       }
     }
 
-    return new Response(JSON.stringify(sessionData.session), { headers: { ...corsHeaders, "Content-Type": "application/json" } })
+    // Refetch the user to bundle the completed identity payload within the first session
+    const { data: finalUser } = await supabaseAdmin.auth.admin.getUserById(sessionData.user.id)
+    const finalSession = finalUser?.user ? { ...sessionData.session, user: finalUser.user } : sessionData.session
+    // Embed native OAuth provider tokens to complete the session payload matching Official Supabase
+    if (session.session_key) (finalSession as any).provider_token = session.session_key;
+
+    return new Response(JSON.stringify(finalSession), { headers: { ...corsHeaders, "Content-Type": "application/json" } })
   } catch (error: unknown) {
     console.error("WeChat MiniProgram Login Error:", error instanceof Error ? error.message : String(error))
     return new Response(JSON.stringify({ data: { session: null, user: null }, error: (error instanceof Error ? error.message : String(error)) }), { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 })
@@ -403,7 +409,14 @@ Deno.serve(async (req) => {
       }
     }
 
-    return new Response(JSON.stringify(sessionData.session), { headers: { ...corsHeaders, "Content-Type": "application/json" } })
+    // Refetch the user to bundle the completed identity payload within the first session
+    const { data: finalUser } = await supabaseAdmin.auth.admin.getUserById(sessionData.user.id)
+    const finalSession = finalUser?.user ? { ...sessionData.session, user: finalUser.user } : sessionData.session
+    // Embed native OAuth provider tokens to complete the session payload matching Official Supabase
+    if (tokenData.access_token) (finalSession as any).provider_token = tokenData.access_token;
+    if (tokenData.refresh_token) (finalSession as any).provider_refresh_token = tokenData.refresh_token;
+
+    return new Response(JSON.stringify(finalSession), { headers: { ...corsHeaders, "Content-Type": "application/json" } })
   } catch (error: unknown) {
     console.error("WeChat MP Login Error:", error instanceof Error ? error.message : String(error))
     return new Response(JSON.stringify({ data: { session: null, user: null }, error: (error instanceof Error ? error.message : String(error)) }), { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 })
