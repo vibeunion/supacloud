@@ -164,7 +164,6 @@ Deno.serve(async (req) => {
 
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL")
     const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")
-    const JWT_SECRET = Deno.env.get("JWT_SECRET") as string
 
     const supabaseAdmin = createClient(SUPABASE_URL as string, SUPABASE_SERVICE_ROLE_KEY as string, {
       auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false },
