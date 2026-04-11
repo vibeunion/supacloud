@@ -27,8 +27,8 @@ describe("DatabaseService", () => {
     mockSql = createMockSql();
 
     // Intercept database connections
-    spyOn(DatabaseService.prototype as unknown as Record<string, unknown>, "getAdminDb").mockReturnValue(mockSql);
-    spyOn(DatabaseService.prototype as unknown as Record<string, unknown>, "getTenantDb").mockReturnValue(mockSql);
+    Object.defineProperty(DatabaseService.prototype, "adminDb", { get: () => mockSql, configurable: true });
+    spyOn(DatabaseService.prototype as any, "getTenantDb").mockReturnValue(mockSql);
 
     // Mock disk space check to avoid shell dependency
     spyOn(DatabaseService.prototype as unknown as Record<string, unknown>, "checkDiskSpace").mockResolvedValue(undefined);

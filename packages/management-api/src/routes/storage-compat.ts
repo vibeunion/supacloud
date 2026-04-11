@@ -471,7 +471,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         
         // 3. Clear logical metadata
         await StorageRLS.emptyLogicalBucket(ref, auth, params.id, false);
-        return { message: `Successfully emptied bucket ${params.id}` };
+        return { message: "Successfully emptied" };
     })
 
     .delete('/bucket/:id', async ({ params, headers }) => {
@@ -617,11 +617,12 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         if (!bucket || !bucket.public) return status(400, { statusCode: '400', error: 'Bad Request', message: 'Bucket is not public' });
 
         try {
+            const info = await StorageRLS.getObjectInfo(ref, params.bucket, filePath, undefined, true);
             const res = await StorageService.getDownloadResponse(ref, params.bucket, filePath);
             if (!res) return status(404, { statusCode: '404', error: 'Not Found', message: 'Object not found internally' });
 
             set.headers['Content-Type'] = res.headers?.get('Content-Type') || 'application/octet-stream';
-            set.headers['Cache-Control'] = 'public, max-age=3600';
+            set.headers['Cache-Control'] = (info?.cache_control as string) || 'public, max-age=3600';
             set.headers['Content-Length'] = res.headers?.get('Content-Length') || '';
             setDownloadDisposition(query as Record<string, string | undefined>, filePath, set as { headers: Record<string, string> });
             const newRes = new Response(res.body);
@@ -652,6 +653,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
 
             set.headers['Content-Type'] = res.headers?.get('Content-Type') || 'application/octet-stream';
             set.headers['Cache-Control'] = 'private, max-age=3600';
+            setDownloadDisposition(query as Record<string, string | undefined>, filePath, set as { headers: Record<string, string> });
             const newRes = new Response(res.body);
             return newRes;
         } catch (err: unknown) {
@@ -927,8 +929,11 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
                 if (!rolledBack) logger.error(`CRITICAL: Orphaned physical file abandoned at ${params.bucket}/${filePath}`);
                 return status(500, { statusCode: '500', error: 'Internal', message: 'Failed to record object' });
             }
-
-            return { Key: `${params.bucket}/${filePath}` };
+            const info = await StorageRLS.getObjectInfo(ref, params.bucket, filePath, undefined, true);
+            return {
+                Id: info?.id || `${params.bucket}/${filePath}`,
+                Key: `${params.bucket}/${filePath}`
+            };
         } catch (err: unknown) {
             return status(500, { statusCode: '500', error: 'Internal', message: err instanceof Error ? err.message : String(err) });
         }
@@ -1365,7 +1370,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
                 return status(500, { statusCode: '500', error: 'Internal', message: 'Failed to record copied object' });
             }
 
-            return { Key: `${destBucket}/${destKey}`, path: `${destBucket}/${destKey}` };
+            return { path: `${destBucket}/${destKey}` };
         } catch (err: unknown) {
             return status(500, { statusCode: '500', error: 'Internal', message: err instanceof Error ? err.message : String(err) });
         }
@@ -1545,7 +1550,11 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
                 }
 
                 await TusStore.delete(params.uploadId);
-                return { Key: `${upload.bucket}/${upload.objectName}` };
+                const info = await StorageRLS.getObjectInfo(upload.ref, upload.bucket, upload.objectName, undefined, true);
+                return {
+                    Id: info?.id || `${upload.bucket}/${upload.objectName}`,
+                    Key: `${upload.bucket}/${upload.objectName}`
+                };
             } catch (err: unknown) {
                 await TusStore.delete(params.uploadId);
                 return status(500, { error: 'Failed to finalize upload' });

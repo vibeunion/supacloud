@@ -210,7 +210,7 @@ Deno.serve(async (req) => {
       try {
         await sql\`
           INSERT INTO auth.identities (id, user_id, provider, identity_data, last_sign_in_at, created_at, updated_at)
-          VALUES (\${openid || unionid}, \${sessionData.user.id}, '\${provider}', \${JSON.stringify({ sub: openid || unionid, ...tokenData })}::jsonb, NOW(), NOW(), NOW())
+          VALUES (\${openid || unionid}, \${sessionData.user.id}, \${\`\${provider}\`}, CAST(\${JSON.stringify({ sub: openid || unionid, ...tokenData })} AS jsonb), NOW(), NOW(), NOW())
           ON CONFLICT (provider, id) DO UPDATE 
           SET identity_data = EXCLUDED.identity_data, last_sign_in_at = EXCLUDED.last_sign_in_at, updated_at = EXCLUDED.updated_at
         \`

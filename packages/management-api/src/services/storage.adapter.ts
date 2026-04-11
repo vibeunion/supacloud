@@ -258,16 +258,13 @@ export class S3Driver implements StorageDriver {
     const creds = await this.getCreds(projectRef);
     if (!creds?.accessKey || !creds?.secretKey) return null;
     
-    const url = `${creds.endpoint.endsWith('/') ? creds.endpoint : creds.endpoint + '/'}${creds.bucket}/${bucket}/${key}`;
     try {
-      const res = await fetch(url);
-      if (!res.ok) return null;
-      return new Response(res.body, {
-        headers: {
-          'Content-Type': res.headers.get('Content-Type') || 'application/octet-stream',
-          'Content-Length': res.headers.get('Content-Length') || ''
-        }
-      });
+      const s3 = this.getClient(creds as { accessKey: string, secretKey: string, endpoint: string, bucket: string });
+      const cleanFileName = key.replace(/^\/+/, '');
+      const file = s3.file(`${bucket}/${cleanFileName}`);
+      if (!await file.exists()) return null;
+      
+      return new Response(file);
     } catch {
       return null;
     }
