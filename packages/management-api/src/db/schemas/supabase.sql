@@ -43,6 +43,22 @@ ALTER ROLE supabase_auth_admin SET search_path TO auth, public;
 CREATE SCHEMA IF NOT EXISTS auth AUTHORIZATION supabase_auth_admin;
 GRANT USAGE ON SCHEMA auth TO anon, authenticated, service_role;
 
+-- GoTrue internal tracking tables (P0-6, P1-4)
+CREATE TABLE IF NOT EXISTS auth.schema_migrations (
+  version varchar(255) PRIMARY KEY
+);
+
+CREATE TABLE IF NOT EXISTS auth.audit_log_entries (
+  instance_id uuid,
+  id uuid NOT NULL PRIMARY KEY,
+  payload json,
+  created_at timestamptz,
+  ip_address varchar(64) NOT NULL DEFAULT '',
+  action text
+);
+GRANT ALL ON TABLE auth.schema_migrations TO supabase_auth_admin;
+GRANT ALL ON TABLE auth.audit_log_entries TO supabase_auth_admin;
+
 CREATE TABLE IF NOT EXISTS auth.users (
     instance_id UUID,
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -3909,20 +3925,23 @@ $$ LANGUAGE SQL STABLE;
 
 -- PostgREST pre-request function: sets JWT claims for RLS context
 CREATE OR REPLACE FUNCTION public.set_request_context() RETURNS void AS $$
+DECLARE
+  role_claim text;
 BEGIN
   IF current_setting('request.jwt.claims', true) = '' THEN
     PERFORM set_config('request.jwt.claims', '{}', true);
   END IF;
-  IF current_setting('request.jwt.claim.role', true) = '' THEN
-    PERFORM set_config('request.jwt.claim.role', 'anon', true);
-  END IF;
-END;
-$$ LANGUAGE plpgsql;
+  
+  role_claim := COALESCE(
+    nullif(current_setting('request.jwt.claim.role', true), ''),
+    (nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'role'),
+    'anon'
+  );
 
--- PostgREST root spec: returns OpenAPI spec at root path /
-CREATE OR REPLACE FUNCTION public.root_spec() RETURNS jsonb AS $$
-  SELECT null;
-$$ LANGUAGE SQL STABLE;
+  PERFORM set_config('request.jwt.claim.role', role_claim, true);
+  EXECUTE format('SET LOCAL ROLE %I', role_claim);
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- 7. GraphQL Schema
 CREATE SCHEMA IF NOT EXISTS graphql_public;
