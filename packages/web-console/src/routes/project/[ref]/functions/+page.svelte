@@ -22,9 +22,7 @@
   const functions = $derived(Array.isArray(query.data?.data) ? query.data.data : ((query.data?.data as unknown as Record<string, unknown>)?.functions as EdgeFunction[] || []));
   let showCreate = $state(false);
   let newSlug = $state("");
-  let newCode = $state(`import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
-
-serve(async (req) => {
+  let newCode = $state(`Deno.serve(async (req) => {
   const { name } = await req.json()
   const data = {
     message: \`Hello \${name}!\`,
