@@ -333,29 +333,37 @@ BEGIN
   PERFORM set_config('request.jwt.claim.sub', coalesce(claims->>'sub', ''), true);
   PERFORM set_config('request.jwt.claim.role', coalesce(claims->>'role', 'anon'), true);
   PERFORM set_config('request.jwt.claim.email', coalesce(claims->>'email', ''), true);
+
+  -- P0-1: Switch role based on JWT to enforce RLS correctly
+  IF claims->>'role' = 'service_role' THEN
+    SET LOCAL ROLE service_role;
+  ELSIF claims->>'role' = 'authenticated' THEN
+    SET LOCAL ROLE authenticated;
+  ELSE
+    SET LOCAL ROLE anon;
+  END IF;
 END;
 $$ LANGUAGE plpgsql STABLE SECURITY DEFINER;
 
 -- Grant execute to API roles
 GRANT EXECUTE ON FUNCTION public.set_request_context() TO anon, authenticated, service_role;
 
--- 13. PostgREST db-root-spec function (P0-12)
--- Returns a minimal root spec when accessing / directly
-CREATE OR REPLACE FUNCTION public.root_spec() RETURNS json AS $$
-BEGIN
-  RETURN json_build_object(
-    'info', json_build_object(
-      'title', 'SupaCloud PostgREST API',
-      'description', 'Auto-generated REST API for the tenant database',
-      'version', '1.0.0'
-    ),
-    'host', current_setting('request.header.host', true),
-    'basePath', '/'
-  );
-END;
-$$ LANGUAGE plpgsql STABLE;
+-- 13. GoTrue internal tracking tables (P1-4, P2-5)
+CREATE TABLE IF NOT EXISTS auth.schema_migrations (
+  version varchar(255) PRIMARY KEY
+);
 
-GRANT EXECUTE ON FUNCTION public.root_spec() TO anon, authenticated, service_role;
+CREATE TABLE IF NOT EXISTS auth.audit_log_entries (
+  instance_id uuid,
+  id uuid NOT NULL PRIMARY KEY,
+  payload json,
+  created_at timestamptz,
+  ip_address varchar(64) NOT NULL DEFAULT '',
+  action text
+);
+-- Ensure auth admin has access to these newly created tables
+GRANT ALL ON TABLE auth.schema_migrations TO supabase_auth_admin;
+GRANT ALL ON TABLE auth.audit_log_entries TO supabase_auth_admin;
 
 -- 14. supabase_migrations schema (required by supabase CLI db push)
 -- The CLI needs this table to track applied migrations

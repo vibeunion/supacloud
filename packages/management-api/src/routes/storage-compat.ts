@@ -387,6 +387,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
                 updated_at: (b.updated_at as string) || new Date().toISOString(),
                 file_size_limit: b.file_size_limit || null,
                 allowed_mime_types: b.allowed_mime_types || null,
+                type: (b.type as string) || 'STANDARD',
             }));
         } catch (e: any) {
             return status(403, { statusCode: "403", error: 'Forbidden', message: e.message || 'Access Denied' });
@@ -425,20 +426,15 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         }
         
         return {
-            id: bucketId,
             name,
-            owner: '',
-            public: isPublic,
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-            file_size_limit: fileSizeLimit,
-            allowed_mime_types: allowedMimeTypes,
+            type: body.type || 'STANDARD',
         };
     }, {
         body: t.Object({
             id: t.Optional(t.String()),
             name: t.Optional(t.String()),
             public: t.Optional(t.Boolean()),
+            type: t.Optional(t.String()),
             fileSizeLimit: t.Optional(t.Union([t.String(), t.Number(), t.Null()])),
             allowedMimeTypes: t.Optional(t.Union([t.Array(t.String()), t.Null()])),
             file_size_limit: t.Optional(t.Union([t.String(), t.Number(), t.Null()])),
@@ -462,12 +458,12 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
                 id: params.id,
                 name: (bucket.name as string) || params.id,
                 owner: bucket.owner || '',
-                owner_id: bucket.owner || '',
                 public: (bucket.public as boolean) ?? false,
                 created_at: (bucket.created_at as string) || new Date().toISOString(),
                 updated_at: (bucket.updated_at as string) || new Date().toISOString(),
                 file_size_limit: bucket.file_size_limit || null,
                 allowed_mime_types: bucket.allowed_mime_types || null,
+                type: (bucket.type as string) || 'STANDARD',
             };
         } catch (e: any) {
              return status(403, { statusCode: "403", error: 'Forbidden', message: e.message || 'Access Denied' });
@@ -529,9 +525,9 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         const result = await StorageService.emptyBucket(ref, params.id);
         if (!result.success) return status(500, { statusCode: "500", error: 'Internal', message: result.error || 'Failed to empty bucket' });
         
-        // 3. Clear logical metadata
+        // 3. Logical delete bucket
         await StorageRLS.emptyLogicalBucket(ref, auth, params.id, false);
-        return { message: "Empty bucket has been queued. Completion may take up to an hour." };
+        return { message: "Successfully emptied" };
     })
 
     .delete('/bucket/:id', async ({ params, headers }) => {
@@ -1136,7 +1132,11 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
                     ...f.metadata,
                     size: f.size,
                     mimetype: f.metadata.mimetype || 'application/octet-stream',
-                    cacheControl: f.metadata.cacheControl || f.metadata.cache_control
+                    cacheControl: f.metadata.cacheControl || f.metadata.cache_control,
+                    eTag: f.metadata.eTag || f.metadata.etag || `"${f.id}"`,
+                    lastModified: f.updated_at,
+                    contentLength: f.size,
+                    httpStatusCode: 200
                 } : null
             };
         });

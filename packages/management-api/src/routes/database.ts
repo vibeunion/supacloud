@@ -234,7 +234,14 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
                     `);
                 }
 
-                const version = `${Date.now()}_${name.replace(/[^a-zA-Z0-9_]/g, "_")}`;
+                const now = new Date();
+                const ts = now.getFullYear().toString() +
+                    String(now.getMonth() + 1).padStart(2, '0') +
+                    String(now.getDate()).padStart(2, '0') +
+                    String(now.getHours()).padStart(2, '0') +
+                    String(now.getMinutes()).padStart(2, '0') +
+                    String(now.getSeconds()).padStart(2, '0');
+                const version = `${ts}_${name.replace(/[^a-zA-Z0-9_]/g, "_")}`;
                 const existingMigration = await db.executeQuery(
                     dbName,
                     `SELECT version FROM schema_migrations WHERE version LIKE '%${name.replace(/[^a-zA-Z0-9_]/g, "_")}%'`
