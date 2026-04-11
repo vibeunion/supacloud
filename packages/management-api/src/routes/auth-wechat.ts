@@ -275,7 +275,8 @@ Deno.serve(async (req) => {
     }
 
     await supabaseAdmin.auth.admin.updateUserById(sessionData.user.id, {
-        user_metadata: { ...sessionData.user.user_metadata, openid, unionid, provider: "wechat_miniprogram" }
+        user_metadata: { ...sessionData.user.user_metadata, openid, unionid, provider: "wechat_miniprogram" },
+        app_metadata: { ...sessionData.user.app_metadata, provider: "wechat_miniprogram", providers: ["wechat_miniprogram"] }
     })
 
     // Explicitly link physical identity row mirroring real OAuth behavior
@@ -380,7 +381,8 @@ Deno.serve(async (req) => {
     }
 
     await supabaseAdmin.auth.admin.updateUserById(sessionData.user.id, {
-        user_metadata: { ...sessionData.user.user_metadata, openid, unionid, nickname: userData.nickname, headimgurl: userData.headimgurl, provider: "wechat_mp" }
+        user_metadata: { ...sessionData.user.user_metadata, openid, unionid, nickname: userData.nickname, headimgurl: userData.headimgurl, provider: "wechat_mp" },
+        app_metadata: { ...sessionData.user.app_metadata, provider: "wechat_mp", providers: ["wechat_mp"] }
     })
 
     // Explicitly link physical identity row mirroring real OAuth behavior

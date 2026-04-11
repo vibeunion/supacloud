@@ -200,7 +200,8 @@ Deno.serve(async (req) => {
 
     // Force update user metadata to ensure latest OAuth provider data is present
     await supabaseAdmin.auth.admin.updateUserById(sessionData.user.id, {
-      user_metadata: { ...sessionData.user.user_metadata, openid, unionid, provider: "${provider}" }
+      user_metadata: { ...sessionData.user.user_metadata, openid, unionid, provider: "${provider}" },
+      app_metadata: { ...sessionData.user.app_metadata, provider: "${provider}", providers: ["${provider}"] }
     })
 
     // Explicitly link physical identity row mirroring real OAuth behavior
