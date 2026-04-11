@@ -128,7 +128,7 @@ function generateChinaOAuthFunction(provider: ChinaOAuthProvider, appId: string,
   const providerUpper = provider.toUpperCase();
 
   return `import { createClient } from "@supabase/supabase-js"
-import postgres from "https://deno.land/x/postgresjs@v3.4.4/mod.js"
+import postgres from "postgres"
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
