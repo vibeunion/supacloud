@@ -84,6 +84,7 @@ function extractMultipartFileFast(buffer: Buffer, boundary: string): { fileBuffe
     let searchPos = 0;
     let bestFile: { fileBuffer: Buffer, mimeType: string } | null = null;
     let metadataStr: string | null = null;
+    let cacheControlStr: string | null = null;
 
     while (searchPos < buffer.length) {
         const partStart = buffer.indexOf(boundaryBuffer, searchPos);
@@ -105,8 +106,8 @@ function extractMultipartFileFast(buffer: Buffer, boundary: string): { fileBuffe
                 metadataStr = buffer.subarray(fileStart, fileEnd).toString('utf-8');
             }
             // Skip known text fields (cacheControl, etc)
-            else if (headersRow.includes('name="cacheControl"')) {
-                // skip
+            else if (headersRow.includes('name="cacheControl"') && fileEnd > fileStart) {
+                cacheControlStr = buffer.subarray(fileStart, fileEnd).toString('utf-8');
             }
             // If it has filename= or Content-Type: header, it's the file
             else if (headersRow.includes('filename=') || headersRow.includes('Content-Type:')) {
@@ -129,11 +130,14 @@ function extractMultipartFileFast(buffer: Buffer, boundary: string): { fileBuffe
     }
 
     if (bestFile) {
-        let parsedMetadata: Record<string, unknown> | undefined;
+        let parsedMetadata: Record<string, unknown> = {};
         if (metadataStr) {
             try { parsedMetadata = JSON.parse(metadataStr); } catch {}
         }
-        return { ...bestFile, metadata: parsedMetadata };
+        if (cacheControlStr) {
+            parsedMetadata.cacheControl = cacheControlStr;
+        }
+        return { ...bestFile, metadata: Object.keys(parsedMetadata).length > 0 ? parsedMetadata : undefined };
     }
     return null;
 }
@@ -158,6 +162,21 @@ function getProjectRef(headers: Record<string, string | undefined>): string {
          return 'test_mock';
     }
     return headers['x-project-ref'] || headers['x-supabase-project'] || '';
+}
+
+function setDownloadDisposition(query: Record<string, string | undefined>, filePath: string, set: { headers: Record<string, string> }): void {
+    const download = query.download;
+    if (download !== undefined) {
+        let filename = 'download';
+        if (typeof download === 'string' && download !== 'true' && download !== '') {
+            filename = download;
+        } else {
+            filename = filePath.split('/').pop() || 'download';
+        }
+        set.headers['Content-Disposition'] = `attachment; filename="${encodeURIComponent(filename)}"`;
+    } else {
+        set.headers['Content-Disposition'] = 'inline';
+    }
 }
 
 // ── Supabase SDK-Compatible Routes ────────────────────────────────
@@ -521,8 +540,9 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
                 return status(500, { statusCode: '500', error: 'Internal', message: 'Failed to record object' });
             }
 
+            const info = await StorageRLS.getObjectInfo(ref, params.bucket, filePath, undefined, true);
             return {
-                Id: `${params.bucket}/${filePath}`,
+                Id: info?.id || `${params.bucket}/${filePath}`,
                 Key: `${params.bucket}/${filePath}`,
             };
         } catch (err: unknown) {
@@ -559,7 +579,11 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
                 if (!rolledBack) logger.error(`CRITICAL: Orphaned physical file abandoned at ${params.bucket}/${filePath}`);
                 return status(500, { statusCode: '500', error: 'Internal', message: 'Failed to record object' });
             }
-            return { Key: `${params.bucket}/${filePath}` };
+            const info = await StorageRLS.getObjectInfo(ref, params.bucket, filePath, undefined, true);
+            return {
+                Id: info?.id || `${params.bucket}/${filePath}`,
+                Key: `${params.bucket}/${filePath}`,
+            };
         } catch (err: unknown) {
             return status(500, { statusCode: '500', error: 'Internal', message: 'Upsert failed' });
         }
@@ -591,6 +615,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             set.headers['Content-Type'] = res.headers?.get('Content-Type') || 'application/octet-stream';
             set.headers['Cache-Control'] = 'public, max-age=3600';
             set.headers['Content-Length'] = res.headers?.get('Content-Length') || '';
+            setDownloadDisposition(query as Record<string, string | undefined>, filePath, set as { headers: Record<string, string> });
             const newRes = new Response(res.body);
             return newRes;
         } catch (err: unknown) {
@@ -632,14 +657,13 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         const ref = getProjectRef(headers as Record<string, string | undefined>);
         const filePath = params['*'];
         
-        let metadata: any = { size: 0, mimetype: 'application/octet-stream' };
-        if (ref === 'test_mock') {
-           const obj = mockObjects?.get(params.bucket + '/' + filePath);
-           if (!obj) return status(404, { statusCode: '404', error: 'Not Found', message: 'Object not found' });
-           metadata = obj.metadata || metadata;
-        }
+        const bucket = await StorageRLS.getLogicalBucket(ref, params.bucket, undefined, true);
+        if (!bucket || !bucket.public) return status(400, { statusCode: '400', error: 'Bad Request', message: 'Bucket is not public' });
 
-        return metadata;
+        const info = await StorageRLS.getObjectInfo(ref, params.bucket, filePath, undefined, true);
+        if (!info) return status(404, { statusCode: '404', error: 'Not Found', message: 'Object not found' });
+
+        return info.metadata || { size: info.size, mimetype: info.content_type };
     })
     .get('/object/info/:bucket/*', async ({ params, headers }) => {
         const ref = getProjectRef(headers as Record<string, string | undefined>);
@@ -700,6 +724,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
 
             set.headers['Content-Type'] = res.headers?.get('Content-Type') || 'application/octet-stream';
             set.headers['Cache-Control'] = 'private, max-age=3600';
+            setDownloadDisposition(query as Record<string, string | undefined>, filePath, set as { headers: Record<string, string> });
             const newRes = new Response(res.body);
             return newRes;
         } catch (err: unknown) {
@@ -930,6 +955,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
 
             set.headers['Content-Type'] = res.headers?.get('Content-Type') || 'application/octet-stream';
             set.headers['Cache-Control'] = 'private, no-store';
+            setDownloadDisposition(query as Record<string, string | undefined>, filePath, set as { headers: Record<string, string> });
             const newRes = new Response(res.body);
             return newRes;
         } catch (err: unknown) {
@@ -1013,7 +1039,12 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
                 last_accessed_at: f.last_accessed || f.updated || new Date().toISOString(),
                 metadata: {
                     size: f.size,
-                    mimetype: f.type || 'application/octet-stream',
+                    mimetype: f.metadata?.mimetype || f.type || 'application/octet-stream',
+                    cacheControl: f.metadata?.cacheControl || f.metadata?.cache_control || 'public, max-age=3600',
+                    eTag: f.metadata?.eTag || f.metadata?.etag || `"${f.id}"`,
+                    lastModified: f.updated || new Date().toISOString(),
+                    contentLength: f.size,
+                    httpStatusCode: 200
                 },
             };
         });
@@ -1082,7 +1113,12 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
                     last_accessed_at: f.last_accessed || f.updated || new Date().toISOString(),
                     metadata: {
                         size: f.size,
-                        mimetype: f.type || 'application/octet-stream',
+                        mimetype: f.metadata?.mimetype || f.type || 'application/octet-stream',
+                        cacheControl: f.metadata?.cacheControl || f.metadata?.cache_control || 'public, max-age=3600',
+                        eTag: f.metadata?.eTag || f.metadata?.etag || `"${f.id}"`,
+                        lastModified: f.updated || new Date().toISOString(),
+                        contentLength: f.size,
+                        httpStatusCode: 200
                     },
                 });
             }
@@ -1122,6 +1158,9 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
                 const permitted = await StorageRLS.authorizeAction(ref, auth, 'delete', params.bucket, p, {}, true);
                 if (!permitted.permitted) throw new Error(permitted.error || 'Forbidden');
                 
+                // Get info for the deleted object response natively matching FileObject
+                const info = await StorageRLS.getObjectInfo(ref, params.bucket, p, undefined, true);
+
                 // 2. Physical delete
                 const physSuccess = await StorageService.deleteFile(ref, params.bucket, p);
                 if (!physSuccess) throw new Error('Physical delete failed');
@@ -1129,15 +1168,21 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
                 // 3. Logical delete
                 const postDelete = await StorageRLS.authorizeAction(ref, auth, 'delete', params.bucket, p, {}, false);
                 if (!postDelete.permitted) throw new Error(postDelete.error || 'Logical delete failed after physical wipe');
-                return physSuccess;
+                return info || { name: p, bucket_id: params.bucket };
             })
         );
 
-        return results.map((r: any, i: number) => ({
-            name: prefixes[i],
-            bucket_id: params.bucket,
-            ...(r.status === 'fulfilled' && r.value !== false ? {} : { error: 'Delete failed' }),
-        }));
+        const successfulDeletes: any[] = [];
+        for (let i = 0; i < results.length; i++) {
+            const r = results[i];
+            if (r.status === 'fulfilled' && r.value) {
+                successfulDeletes.push(r.value);
+            }
+        }
+
+        // If any failed, we might want to return an error, but partial success is generally expected.
+        // Returning standard array payload.
+        return successfulDeletes;
     }, {
         body: t.Optional(t.Object({
             prefixes: t.Optional(t.Array(t.String()))
@@ -1606,6 +1651,7 @@ async function proxyToImaginary(
         } else {
              set.headers['Cache-Control'] = 'private, max-age=3600';
         }
+        setDownloadDisposition(query as Record<string, string | undefined>, filePath, set as { headers: Record<string, string> });
         set.headers['X-Image-Engine'] = 'imaginary/libvips';
         return new Response(res.body);
     } catch (err: unknown) {
