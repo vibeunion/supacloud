@@ -14,6 +14,7 @@ DO $$ BEGIN ALTER TABLE auth.sessions ADD COLUMN ip TEXT; EXCEPTION WHEN duplica
 
 -- 3. storage.objects adds
 DO $$ BEGIN ALTER TABLE storage.objects ADD COLUMN user_metadata JSONB; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE storage.objects ADD COLUMN version UUID NOT NULL DEFAULT gen_random_uuid(); EXCEPTION WHEN duplicate_column THEN NULL; END $$;
 
 -- 4. MFA schemas
 DO $$ BEGIN CREATE TYPE auth.factor_type AS ENUM('totp', 'webauthn'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
@@ -224,6 +225,31 @@ CREATE TABLE IF NOT EXISTS supabase_functions.migrations (
     version TEXT PRIMARY KEY,
     inserted_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- 11. Native Bun Realtime LISTEN/NOTIFY Emulation Triggers
+CREATE OR REPLACE FUNCTION realtime.notify_postgres_changes() RETURNS trigger AS $
+DECLARE
+  payload jsonb;
+BEGIN
+  payload = jsonb_build_object(
+    'topic', 'realtime:public',
+    'event', 'postgres_changes',
+    'payload', jsonb_build_object(
+      'type', TG_OP,
+      'schema', TG_TABLE_SCHEMA,
+      'table', TG_TABLE_NAME,
+      'record', row_to_json(NEW),
+      'old_record', row_to_json(OLD)
+    )
+  );
+  PERFORM pg_notify('realtime_changes', payload::text);
+  RETURN NEW;
+END;
+$ LANGUAGE plpgsql;
+
+-- Apply notify trigger to common public tables automatically (Example: only to public.profiles if exists)
+-- An advanced Implementation would use an Event Trigger on ddl_command_end to attach it to all tables.
+-- For SupaCloud native Edge WAL, we just create the function so users can manually attach it or we build a UI!
 `;
 
 async function main() {

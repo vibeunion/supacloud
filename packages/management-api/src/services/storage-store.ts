@@ -1,4 +1,7 @@
 import { sql } from "../db";
+import * as os from "node:os";
+import * as path from "node:path";
+import * as fs from "node:fs";
 
 export interface TusUpload {
     ref: string;
@@ -58,9 +61,32 @@ export class TusStore {
         await sql`DELETE FROM system_tus_uploads WHERE id = ${id}`;
     }
 
-    static async assemble(id: string): Promise<Buffer> {
-        const chunks = await sql`SELECT chunk_data FROM system_tus_chunks WHERE upload_id = ${id} ORDER BY chunk_offset ASC`;
-        return Buffer.concat(chunks.map((r: any) => r.chunk_data));
+    static async assembleToStream(id: string): Promise<{ stream: ReadableStream, cleanup: () => Promise<void> }> {
+        const tempFile = path.join(os.tmpdir(), `supacloud-tus-${id}-${Date.now()}.tmp`);
+        const file = Bun.file(tempFile);
+        const writer = file.writer();
+        
+        // Fetch ordered offsets without loading payload
+        const chunkOffsets = await sql`SELECT chunk_offset FROM system_tus_chunks WHERE upload_id = ${id} ORDER BY chunk_offset ASC`;
+        
+        for (const meta of chunkOffsets) {
+            // Load and pipe 1 chunk at a time minimizing heap density
+            const [row] = await sql`SELECT chunk_data FROM system_tus_chunks WHERE upload_id = ${id} AND chunk_offset = ${meta.chunk_offset}`;
+            if (row && row.chunk_data) {
+                writer.write(row.chunk_data);
+            }
+        }
+        
+        writer.end();
+
+        return {
+            stream: Bun.file(tempFile).stream(),
+            cleanup: async () => {
+                try {
+                    await fs.promises.unlink(tempFile);
+                } catch(e) {}
+            }
+        };
     }
 }
 

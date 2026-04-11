@@ -291,7 +291,18 @@ export class ProjectService {
                 const { realtimeService } = await import("./realtime.service");
                 const hasTenant = await realtimeService.getTenant(ref);
                 if (hasTenant) {
-                    realtimeStatus = "ACTIVE_HEALTHY";
+                    try {
+                        const { getProjectDb } = await import("../db");
+                        const dbName = project.db_name || `supa_${ref}`;
+                        const projectDb = getProjectDb(dbName);
+                        // Ensure CDC replication is actively running
+                        const repl = await projectDb`SELECT count(*) as count FROM pg_stat_replication WHERE application_name ILIKE '%realtime%'`;
+                        if (repl[0] && Number(repl[0].count) > 0) {
+                            realtimeStatus = "ACTIVE_HEALTHY";
+                        }
+                    } catch(e) {
+                        // Keep realtimeStatus as INACTIVE locally if CDC replication fetch fails
+                    }
                 }
             }
         }
