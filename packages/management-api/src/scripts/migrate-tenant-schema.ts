@@ -226,30 +226,96 @@ CREATE TABLE IF NOT EXISTS supabase_functions.migrations (
     inserted_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 11. Native Bun Realtime LISTEN/NOTIFY Emulation Triggers
-CREATE OR REPLACE FUNCTION realtime.notify_postgres_changes() RETURNS trigger AS $
+-- 11. Native Bun Realtime LISTEN/NOTIFY Emulation Triggers (P0-16 enrichment)
+-- This function emulates WAL-level postgres_changes by serializing full OLD/NEW records
+CREATE OR REPLACE FUNCTION realtime.notify_postgres_changes() RETURNS trigger AS $fn$
 DECLARE
   payload jsonb;
+  changed_columns text[];
+  col text;
 BEGIN
+  -- Detect which columns changed (for UPDATE events only)
+  IF TG_OP = 'UPDATE' THEN
+    FOR col IN SELECT column_name FROM information_schema.columns 
+      WHERE table_schema = TG_TABLE_SCHEMA AND table_name = TG_TABLE_NAME
+    LOOP
+      BEGIN
+        EXECUTE format('SELECT ($1).%I IS DISTINCT FROM ($2).%I', col, col)
+          INTO STRICT changed_columns[array_length(changed_columns, 1) + 1]
+          USING NEW, OLD;
+      EXCEPTION WHEN OTHERS THEN NULL;
+      END;
+    END LOOP;
+  END IF;
+
   payload = jsonb_build_object(
-    'topic', 'realtime:public',
+    'topic', 'realtime:' || TG_TABLE_SCHEMA,
     'event', 'postgres_changes',
     'payload', jsonb_build_object(
       'type', TG_OP,
       'schema', TG_TABLE_SCHEMA,
       'table', TG_TABLE_NAME,
-      'record', row_to_json(NEW),
-      'old_record', row_to_json(OLD)
+      'commit_timestamp', now()::text,
+      'record', CASE WHEN TG_OP IN ('INSERT', 'UPDATE') THEN row_to_json(NEW)::jsonb ELSE null END,
+      'old_record', CASE WHEN TG_OP IN ('UPDATE', 'DELETE') THEN row_to_json(OLD)::jsonb ELSE null END,
+      'columns', to_jsonb(ARRAY(
+        SELECT column_name FROM information_schema.columns 
+        WHERE table_schema = TG_TABLE_SCHEMA AND table_name = TG_TABLE_NAME 
+        ORDER BY ordinal_position
+      ))
     )
   );
   PERFORM pg_notify('realtime_changes', payload::text);
-  RETURN NEW;
+  IF TG_OP = 'DELETE' THEN RETURN OLD; ELSE RETURN NEW; END IF;
 END;
-$ LANGUAGE plpgsql;
+$fn$ LANGUAGE plpgsql SECURITY DEFINER;
 
--- Apply notify trigger to common public tables automatically (Example: only to public.profiles if exists)
--- An advanced Implementation would use an Event Trigger on ddl_command_end to attach it to all tables.
--- For SupaCloud native Edge WAL, we just create the function so users can manually attach it or we build a UI!
+-- Auto-attach the trigger to ALL existing public tables
+DO $$
+DECLARE
+  tbl RECORD;
+BEGIN
+  FOR tbl IN SELECT tablename FROM pg_tables WHERE schemaname = 'public'
+  LOOP
+    EXECUTE format(
+      'DROP TRIGGER IF EXISTS realtime_notify_trigger ON public.%I; '
+      'CREATE TRIGGER realtime_notify_trigger AFTER INSERT OR UPDATE OR DELETE ON public.%I '
+      'FOR EACH ROW EXECUTE FUNCTION realtime.notify_postgres_changes()',
+      tbl.tablename, tbl.tablename
+    );
+  END LOOP;
+END $$;
+
+-- Event Trigger: automatically attach realtime triggers to NEW tables created in public schema
+CREATE OR REPLACE FUNCTION realtime.auto_attach_notify_trigger() RETURNS event_trigger AS $fn$
+DECLARE
+  obj RECORD;
+BEGIN
+  FOR obj IN SELECT * FROM pg_event_trigger_ddl_commands() 
+    WHERE object_type = 'table' AND schema_name = 'public'
+  LOOP
+    EXECUTE format(
+      'CREATE TRIGGER realtime_notify_trigger AFTER INSERT OR UPDATE OR DELETE ON %s '
+      'FOR EACH ROW EXECUTE FUNCTION realtime.notify_postgres_changes()',
+      obj.object_identity
+    );
+  END LOOP;
+END;
+$fn$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Register the event trigger (idempotent)
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_event_trigger WHERE evtname = 'realtime_auto_attach_trigger') THEN
+    CREATE EVENT TRIGGER realtime_auto_attach_trigger ON ddl_command_end
+      WHEN TAG IN ('CREATE TABLE')
+      EXECUTE FUNCTION realtime.auto_attach_notify_trigger();
+  END IF;
+EXCEPTION WHEN insufficient_privilege THEN
+  -- Event triggers require superuser; skip if not available
+  NULL;
+END $$;
+
 `;
 
 async function main() {
