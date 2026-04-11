@@ -206,7 +206,7 @@ export class StorageRLS {
   static async withBucketRLS<T>(
     ref: string,
     token: string | null | undefined,
-    callback: (tx: any, payload: any) => Promise<T>
+    callback: (tx: import("bun").SQL, payload: Record<string, unknown>) => Promise<T>
   ): Promise<T> {
     const project = (await metaSql`SELECT db_name FROM projects WHERE ref=${ref}`)[0];
     if (!project) throw new Error("Project not found");
@@ -222,7 +222,7 @@ export class StorageRLS {
       }
     }
 
-    return await db.begin(async (tx: any) => {
+    return await db.begin(async (tx: import("bun").SQL) => {
         await tx`SELECT set_config('role', ${(payload.role as string) || 'anon'}, true)`;
         await tx`SELECT set_config('request.jwt.claims', ${JSON.stringify(payload)}, true)`;
         if (payload.sub) await tx`SELECT set_config('request.jwt.claim.sub', ${String(payload.sub)}, true)`;
@@ -522,7 +522,8 @@ export class StorageRLS {
               created: row.created_at || row.updated,
               last_accessed: row.last_accessed_at || row.updated,
               size: sizeBytes,
-              type: row.metadata?.mimetype || (row.name?.includes('.') ? row.name.split('.').pop() : 'unknown'),
+              metadata: row.metadata,
+              type: row.metadata?.mimetype || 'application/octet-stream',
               isFolder: row.isFolder
           };
       });
