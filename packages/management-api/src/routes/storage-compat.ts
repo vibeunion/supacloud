@@ -212,15 +212,23 @@ function hasTransformQuery(query: Record<string, unknown>): boolean {
 
 function getUploadMetadata(headers: Record<string, string | undefined>): Record<string, unknown> {
     const raw = headers["x-metadata"] || headers["X-Metadata"];
-    if (!raw) return {};
+    let parsed: Record<string, unknown> = {};
 
-    try {
-        const decoded = Buffer.from(raw, "base64").toString("utf-8");
-        const parsed = JSON.parse(decoded);
-        return parsed;
-    } catch {
-        return {};
+    if (raw) {
+        try {
+            const decoded = Buffer.from(raw, "base64").toString("utf-8");
+            parsed = JSON.parse(decoded);
+        } catch (e) {
+            // Ignore parse errors
+        }
     }
+
+    const cc = headers["cache-control"] || headers["Cache-Control"];
+    if (cc && !parsed.cacheControl) {
+        parsed.cacheControl = cc;
+    }
+
+    return parsed;
 }
 
 async function readUploadBody(request: Request, contentType: string | undefined): Promise<{ fileBuffer: Buffer; fileMimeType: string; customMetadata?: Record<string, unknown> }> {
@@ -1158,8 +1166,8 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
                 const permitted = await StorageRLS.authorizeAction(ref, auth, 'delete', params.bucket, p, {}, true);
                 if (!permitted.permitted) throw new Error(permitted.error || 'Forbidden');
                 
-                // Get info for the deleted object response natively matching FileObject
-                const info = await StorageRLS.getObjectInfo(ref, params.bucket, p, undefined, true);
+                // Get info for the deleted object response natively matching FileObject (respect RLS)
+                const info = await StorageRLS.getObjectInfo(ref, params.bucket, p, auth, false);
 
                 // 2. Physical delete
                 const physSuccess = await StorageService.deleteFile(ref, params.bucket, p);
@@ -1173,15 +1181,21 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         );
 
         const successfulDeletes: any[] = [];
+        const failedDeletes: string[] = [];
+
         for (let i = 0; i < results.length; i++) {
             const r = results[i];
             if (r.status === 'fulfilled' && r.value) {
                 successfulDeletes.push(r.value);
+            } else {
+                failedDeletes.push(prefixes[i]);
             }
         }
 
-        // If any failed, we might want to return an error, but partial success is generally expected.
-        // Returning standard array payload.
+        if (failedDeletes.length > 0) {
+            return status(400, { statusCode: '400', error: 'Bad Request', message: 'Failed to delete some objects', failed: failedDeletes });
+        }
+
         return successfulDeletes;
     }, {
         body: t.Optional(t.Object({
