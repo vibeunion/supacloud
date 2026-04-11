@@ -205,8 +205,13 @@ const TRANSFORM_QUERY_KEYS = new Set([
     "wm_gravity", "wm_dx", "wm_dy",
 ]);
 
-function buildSignedPath(pathname: string, expiresAt: number, token: string, transform?: Record<string, unknown>): string {
+function buildSignedPath(pathname: string, expiresAt: number, token: string, transform?: Record<string, unknown>, download?: boolean | string): string {
     const search = new URLSearchParams({ token });
+
+    if (download) {
+        if (typeof download === 'string') search.set('download', download);
+        else search.set('download', '');
+    }
 
     if (transform) {
         for (const [key, value] of Object.entries(transform)) {
@@ -218,6 +223,12 @@ function buildSignedPath(pathname: string, expiresAt: number, token: string, tra
     }
 
     return `${pathname}?${search.toString()}`;
+}
+
+function getRequestOrigin(request: Request): string {
+    const proto = request.headers?.get("x-forwarded-proto") || new URL(request.url).protocol.replace(":", "");
+    const host = request.headers?.get("x-forwarded-host") || new URL(request.url).host;
+    return `${proto}://${host}/storage/v1`;
 }
 
 function hasTransformQuery(query: Record<string, unknown>): boolean {
@@ -702,7 +713,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         const info = await StorageRLS.getObjectInfo(ref, params.bucket, filePath, undefined, true);
         if (!info) return status(404, { statusCode: '404', error: 'Not Found', message: 'Object not found' });
 
-        return info.metadata || { size: info.size, mimetype: info.content_type };
+        return info;
     })
     .get('/object/info/:bucket/*', async ({ params, headers }) => {
         const ref = getProjectRef(headers as Record<string, string | undefined>);
@@ -777,7 +788,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
     // SDK calls: POST /object/sign/{bucketId}/{filePath} with body { expiresIn }
     // ════════════════════════════════════════════════════════
 
-    .post('/object/sign/:bucket/*', async ({ params, headers, body }) => {
+    .post('/object/sign/:bucket/*', async ({ params, headers, body, request }) => {
         const ref = getProjectRef(headers as Record<string, string | undefined>);
         const payload = body || {};
         const filePath = params['*'] || String(payload.url || payload.path || '').replace(/^\//, '');
@@ -812,7 +823,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
 
     // POST /object/sign/:bucket — Batch signed URLs (no wildcard path)
     // supabase.storage.from('bucket').createSignedUrls(['path1', 'path2'], expiresIn)
-    .post('/object/sign/:bucket', async ({ params, headers, body }) => {
+    .post('/object/sign/:bucket', async ({ params, headers, body, request }) => {
         const ref = getProjectRef(headers as Record<string, string | undefined>);
         
         // If body has paths array, it's a batch request
@@ -836,10 +847,11 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
 
                 const expiresAt = Math.floor(Date.now() / 1000) + expiresIn;
                 const token = await generateSignedToken(ref, params.bucket, cleanPath, expiresAt);
+                const origin = getRequestOrigin(request as unknown as Request);
                 return {
                     error: null,
                     path: filePath,
-                    signedURL: buildSignedPath(`/object/sign/${params.bucket}/${cleanPath}`, expiresAt, token, body.transform),
+                    signedURL: origin + buildSignedPath(`/object/sign/${params.bucket}/${cleanPath}`, expiresAt, token, body.transform),
                 };
             }));
         }
@@ -866,8 +878,10 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         const expiresAt = Math.floor(Date.now() / 1000) + expiresIn;
         const token = await generateSignedToken(ref, params.bucket, filePath, expiresAt);
         
+        const origin = getRequestOrigin(request as unknown as Request);
+        const downloadOption = typeof body.download !== 'undefined' ? body.download : undefined;
         return {
-            signedURL: buildSignedPath(`/object/sign/${params.bucket}/${filePath}`, expiresAt, token, body.transform),
+            signedURL: origin + buildSignedPath(`/object/sign/${params.bucket}/${filePath}`, expiresAt, token, body.transform, downloadOption as any),
         };
     }, {
         body: t.Any()
@@ -1147,10 +1161,11 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         for (const f of files) {
             const cleanName = prefix ? f.name.slice(prefix.length).replace(/^\/+/, '') : f.name;
             if (f.isFolder) {
-                folders.push({ name: cleanName || f.name });
+                folders.push({ name: cleanName || f.name, key: cleanName || f.name });
             } else {
                 objects.push({
                     name: cleanName || f.name,
+                    key: cleanName || f.name,
                     id: f.id,
                     updated_at: f.updated || new Date().toISOString(),
                     created_at: f.created || f.updated || new Date().toISOString(),
@@ -1403,7 +1418,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
                 return status(500, { statusCode: '500', error: 'Internal', message: 'Failed to record copied object' });
             }
 
-            return { path: `${destBucket}/${destKey}` };
+            return { Key: `${destBucket}/${destKey}` };
         } catch (err: unknown) {
             return status(500, { statusCode: '500', error: 'Internal', message: err instanceof Error ? err.message : String(err) });
         }
