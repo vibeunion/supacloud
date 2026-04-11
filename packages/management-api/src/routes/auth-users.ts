@@ -21,10 +21,15 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
 
       // Pass along pagination (svadmin uses _page / _limit or standard skip/limit)
       const limit = Number(query._limit || query.limit || 50);
-      const page = Number(query._page || 1);
-      const offset = Number(query.skip || (page - 1) * limit);
+      const page = Number(query._page || 1) || Math.floor(Number(query.skip || 0) / limit) + 1;
+      const q = query.q;
       
-      const res = await fetch(`${apiUrl}/auth/v1/admin/users`, {
+      const searchParams = new URLSearchParams();
+      searchParams.set("page", String(page));
+      searchParams.set("per_page", String(limit));
+      if (q) searchParams.set("q", String(q));
+
+      const res = await fetch(`${apiUrl}/auth/v1/admin/users?${searchParams.toString()}`, {
         headers: {
           "apikey": serviceRoleKey,
           "Authorization": `Bearer ${serviceRoleKey}`,
@@ -41,12 +46,12 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
       const d = await res.json() as Record<string, unknown>;
       const allUsers = Array.isArray(d) ? d : (Array.isArray(d?.users) ? d.users : []);
       
-      // Manual pagination if GoTrue doesn't paginate automatically
-      const paginatedUsers = allUsers.slice(offset, offset + limit);
+      const totalHeader = res.headers.get('x-total-count');
+      const total = totalHeader ? Number(totalHeader) : allUsers.length;
 
       return {
-        data: paginatedUsers,
-        total: allUsers.length
+        data: allUsers,
+        total: total
       };
     },
     {
