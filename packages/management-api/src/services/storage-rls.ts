@@ -112,7 +112,7 @@ export class StorageRLS {
     }).catch(() => false);
   }
 
-  static async getObjectInfo(ref: string, bucketId: string, objectName: string, token: string | undefined): Promise<Record<string, unknown> | null> {
+  static async getObjectInfo(ref: string, bucketId: string, objectName: string, token: string | undefined, adminOverride = false): Promise<Record<string, unknown> | null> {
     if (ref === 'test_mock') {
       const obj = mockObjects.get(bucketId + '/' + objectName);
       if (!obj) return null;
@@ -130,6 +130,35 @@ export class StorageRLS {
         version: 'v1-' + Date.now(),
         metadata: obj.metadata?.userMetadata || {},
       };
+    }
+
+    if (adminOverride) {
+        const project = (await metaSql`SELECT db_name FROM projects WHERE ref=${ref}`)[0];
+        if (!project) return null;
+        const db = getProjectDb(project.db_name);
+        const rows = await db`
+          SELECT id, name, bucket_id, metadata, created_at, updated_at, version
+          FROM storage.objects
+          WHERE bucket_id = ${bucketId} AND name = ${objectName}
+          LIMIT 1
+        `;
+        if (rows.length === 0) return null;
+        const row = rows[0] as Record<string, unknown>;
+        const meta = (row.metadata || {}) as Record<string, unknown>;
+        return {
+          id: row.id,
+          name: row.name,
+          bucket_id: row.bucket_id,
+          size: meta.size || 0,
+          cache_control: meta.cacheControl || meta.cache_control || 'public, max-age=3600',
+          content_type: meta.mimetype || 'application/octet-stream',
+          created_at: row.created_at,
+          updated_at: row.updated_at,
+          last_modified: row.updated_at,
+          etag: meta.eTag || meta.etag || `"${row.id}"`,
+          version: row.version,
+          metadata: meta,
+        };
     }
 
     return await this.withBucketRLS(ref, token, async (tx) => {

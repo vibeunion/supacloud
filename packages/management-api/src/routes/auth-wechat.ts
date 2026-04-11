@@ -251,10 +251,7 @@ Deno.serve(async (req) => {
       email, email_confirm: true, user_metadata: { openid, unionid, provider: "wechat_miniprogram" }
     })
 
-    if (createError && !createError.message.includes("already registered")) {
-      const { data: { users } } = await supabaseAdmin.auth.admin.listUsers({ page: 1, perPage: 1000 })
-      const foundUser = users.find(u => u.email === email || u.user_metadata?.openid === openid)
-      if (!foundUser) {
+    if (createError && !(createError.message.toLowerCase().includes("already registered") || createError.message.toLowerCase().includes("already exists"))) {
         throw new Error(\`Cannot create or find user. Error: \${createError.message}\`)
       }
     }
@@ -342,10 +339,7 @@ Deno.serve(async (req) => {
       email, email_confirm: true, user_metadata: { openid, unionid, nickname: userData.nickname, headimgurl: userData.headimgurl, provider: "wechat_mp" }
     })
 
-    if (createError && !createError.message.includes("already registered")) {
-      const { data: { users } } = await supabaseAdmin.auth.admin.listUsers({ page: 1, perPage: 1000 })
-      const foundUser = users.find(u => u.email === email || u.user_metadata?.openid === openid)
-      if (!foundUser) {
+    if (createError && !(createError.message.toLowerCase().includes("already registered") || createError.message.toLowerCase().includes("already exists"))) {
         throw new Error(\`Cannot create or find user. Error: \${createError.message}\`)
       }
     }
