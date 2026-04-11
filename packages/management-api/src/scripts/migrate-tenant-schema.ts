@@ -316,7 +316,78 @@ EXCEPTION WHEN insufficient_privilege THEN
   NULL;
 END $$;
 
+-- 12. PostgREST db-pre-request function (P0-11)
+-- Sets RLS context variables from the JWT claims passed by PostgREST
+CREATE OR REPLACE FUNCTION public.set_request_context() RETURNS void AS $$
+DECLARE
+  claims json;
+BEGIN
+  -- PostgREST sets request.jwt.claims as a GUC variable from the JWT token
+  BEGIN
+    claims := current_setting('request.jwt.claims', true)::json;
+  EXCEPTION WHEN OTHERS THEN
+    claims := '{}'::json;
+  END;
+
+  -- Set commonly used variables for RLS policies
+  PERFORM set_config('request.jwt.claim.sub', coalesce(claims->>'sub', ''), true);
+  PERFORM set_config('request.jwt.claim.role', coalesce(claims->>'role', 'anon'), true);
+  PERFORM set_config('request.jwt.claim.email', coalesce(claims->>'email', ''), true);
+END;
+$$ LANGUAGE plpgsql STABLE SECURITY DEFINER;
+
+-- Grant execute to API roles
+GRANT EXECUTE ON FUNCTION public.set_request_context() TO anon, authenticated, service_role;
+
+-- 13. PostgREST db-root-spec function (P0-12)
+-- Returns a minimal root spec when accessing / directly
+CREATE OR REPLACE FUNCTION public.root_spec() RETURNS json AS $$
+BEGIN
+  RETURN json_build_object(
+    'info', json_build_object(
+      'title', 'SupaCloud PostgREST API',
+      'description', 'Auto-generated REST API for the tenant database',
+      'version', '1.0.0'
+    ),
+    'host', current_setting('request.header.host', true),
+    'basePath', '/'
+  );
+END;
+$$ LANGUAGE plpgsql STABLE;
+
+GRANT EXECUTE ON FUNCTION public.root_spec() TO anon, authenticated, service_role;
+
+-- 14. supabase_migrations schema (required by supabase CLI db push)
+-- The CLI needs this table to track applied migrations
+CREATE SCHEMA IF NOT EXISTS supabase_migrations;
+GRANT USAGE ON SCHEMA supabase_migrations TO postgres, anon, authenticated, service_role;
+
+CREATE TABLE IF NOT EXISTS supabase_migrations.schema_migrations (
+  version text NOT NULL PRIMARY KEY,
+  statements text[],
+  name text
+);
+GRANT ALL ON ALL TABLES IN SCHEMA supabase_migrations TO postgres;
+
+-- Backfill from legacy schema_migrations table if it exists
+DO $$
+BEGIN
+  IF EXISTS (SELECT FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'schema_migrations') THEN
+    INSERT INTO supabase_migrations.schema_migrations (version, name)
+    SELECT version, version FROM public.schema_migrations
+    ON CONFLICT DO NOTHING;
+  END IF;
+END $$;
+
+-- 15. seed.sql support schema for CLI
+CREATE TABLE IF NOT EXISTS supabase_migrations.seed_files (
+  path text NOT NULL PRIMARY KEY,
+  hash text NOT NULL
+);
+GRANT ALL ON ALL TABLES IN SCHEMA supabase_migrations TO postgres;
+
 `;
+
 
 async function main() {
   logger.info("[migrate-tenant-schema] Starting tenant migration process...");
