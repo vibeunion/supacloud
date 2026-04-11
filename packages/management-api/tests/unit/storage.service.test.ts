@@ -14,7 +14,7 @@ describe("StorageService", () => {
     });
 
     test("should return error when shell fails", async () => {
-      const spy = spyOn(shellService, "execute").mockResolvedValue({ success: false, output: "", error: "bucket creation failed" });
+      const spy = spyOn(getStorageDriver(), "createBucket").mockResolvedValue({ success: false, output: "", error: "bucket creation failed" });
       const result = await storageService.createBucket("testref");
       expect(result.success).toBe(false);
       expect(result.error).toBe("bucket creation failed");
@@ -22,7 +22,7 @@ describe("StorageService", () => {
     });
 
     test("should parse access key and secret from output", async () => {
-      const spy = spyOn(shellService, "execute").mockResolvedValue({
+      const spy = spyOn(getStorageDriver(), "createBucket").mockResolvedValue({
         success: true,
         output: "ACCESS_KEY=myaccesskey\nSECRET_KEY=mysecretkey\n",
       });
@@ -34,7 +34,7 @@ describe("StorageService", () => {
     });
 
     test("should handle output without keys", async () => {
-      const spy = spyOn(shellService, "execute").mockResolvedValue({
+      const spy = spyOn(getStorageDriver(), "createBucket").mockResolvedValue({
         success: true,
         output: "Bucket created successfully",
       });
@@ -46,7 +46,7 @@ describe("StorageService", () => {
     });
 
     test("should handle partial key output", async () => {
-      const spy = spyOn(shellService, "execute").mockResolvedValue({
+      const spy = spyOn(getStorageDriver(), "createBucket").mockResolvedValue({
         success: true,
         output: "ACCESS_KEY=onlyaccess\nsome other line",
       });
@@ -58,7 +58,7 @@ describe("StorageService", () => {
     });
 
     test("should call shell service with correct args", async () => {
-      const spy = spyOn(shellService, "execute").mockResolvedValue({ success: true, output: "" });
+      const spy = spyOn(getStorageDriver(), "createBucket").mockResolvedValue({ success: true, output: "" });
       await storageService.createBucket("myproj");
       expect(spy).toHaveBeenCalledWith("s3_manager.sh", ["create", "myproj"]);
       spy.mockRestore();
@@ -73,14 +73,14 @@ describe("StorageService", () => {
     });
 
     test("should return success when shell succeeds", async () => {
-      const spy = spyOn(shellService, "execute").mockResolvedValue({ success: true, output: "deleted" });
+      const spy = spyOn(getStorageDriver(), "createBucket").mockResolvedValue({ success: true, output: "deleted" });
       const result = await storageService.deleteBucket("testref");
       expect(result.success).toBe(true);
       spy.mockRestore();
     });
 
     test("should return error when shell fails", async () => {
-      const spy = spyOn(shellService, "execute").mockResolvedValue({ success: false, output: "", error: "delete failed" });
+      const spy = spyOn(getStorageDriver(), "createBucket").mockResolvedValue({ success: false, output: "", error: "delete failed" });
       const result = await storageService.deleteBucket("testref");
       expect(result.success).toBe(false);
       expect(result.error).toBe("delete failed");
@@ -88,7 +88,7 @@ describe("StorageService", () => {
     });
 
     test("should call shell service with correct args", async () => {
-      const spy = spyOn(shellService, "execute").mockResolvedValue({ success: true, output: "" });
+      const spy = spyOn(getStorageDriver(), "createBucket").mockResolvedValue({ success: true, output: "" });
       await storageService.deleteBucket("myproj");
       expect(spy).toHaveBeenCalledWith("s3_manager.sh", ["delete", "myproj"]);
       spy.mockRestore();
@@ -103,7 +103,7 @@ describe("StorageService", () => {
     });
 
     test("should return error when shell fails", async () => {
-      const spy = spyOn(shellService, "execute").mockResolvedValue({ success: false, output: "", error: "credentials not found" });
+      const spy = spyOn(getStorageDriver(), "createBucket").mockResolvedValue({ success: false, output: "", error: "credentials not found" });
       const result = await storageService.getCredentials("testref");
       expect(result.success).toBe(false);
       expect(result.error).toBe("credentials not found");
@@ -111,7 +111,7 @@ describe("StorageService", () => {
     });
 
     test("should parse access key and secret from output", async () => {
-      const spy = spyOn(shellService, "execute").mockResolvedValue({
+      const spy = spyOn(getStorageDriver(), "createBucket").mockResolvedValue({
         success: true,
         output: "ACCESS_KEY=credaccesskey\nSECRET_KEY=credsecretkey\n",
       });
@@ -123,7 +123,7 @@ describe("StorageService", () => {
     });
 
     test("should handle output without keys", async () => {
-      const spy = spyOn(shellService, "execute").mockResolvedValue({
+      const spy = spyOn(getStorageDriver(), "createBucket").mockResolvedValue({
         success: true,
         output: "No credentials found",
       });
@@ -135,7 +135,7 @@ describe("StorageService", () => {
     });
 
     test("should handle only secret key in output", async () => {
-      const spy = spyOn(shellService, "execute").mockResolvedValue({
+      const spy = spyOn(getStorageDriver(), "createBucket").mockResolvedValue({
         success: true,
         output: "SECRET_KEY=onlysecret\n",
       });
@@ -147,14 +147,14 @@ describe("StorageService", () => {
     });
 
     test("should call shell service with correct args", async () => {
-      const spy = spyOn(shellService, "execute").mockResolvedValue({ success: true, output: "" });
+      const spy = spyOn(getStorageDriver(), "createBucket").mockResolvedValue({ success: true, output: "" });
       await storageService.getCredentials("myproj");
       expect(spy).toHaveBeenCalledWith("s3_manager.sh", ["credentials", "myproj"]);
       spy.mockRestore();
     });
 
     test("should handle multiline output with extra content", async () => {
-      const spy = spyOn(shellService, "execute").mockResolvedValue({
+      const spy = spyOn(getStorageDriver(), "createBucket").mockResolvedValue({
         success: true,
         output: "Starting...\nACCESS_KEY=key1\nProcessing...\nSECRET_KEY=key2\nDone.",
       });
@@ -168,7 +168,7 @@ describe("StorageService", () => {
 
   describe("JuiceFS Methods", () => {
     test("getStatus should return parsed status", async () => {
-      const spy = spyOn(shellService, "execute").mockResolvedValue({
+      const spy = spyOn(getStorageDriver(), "createBucket").mockResolvedValue({
         success: true,
         output: JSON.stringify({ status: "mounted", size: "1T", used: "100G" })
       });
@@ -179,7 +179,7 @@ describe("StorageService", () => {
     });
 
     test("startMigration should trigger async sync", async () => {
-      const spy = spyOn(shellService, "execute").mockResolvedValue({ success: true, output: "" });
+      const spy = spyOn(getStorageDriver(), "createBucket").mockResolvedValue({ success: true, output: "" });
       const result = await service.startMigration("s3://bucket", { access_key: "ak", secret_key: "sk", endpoint: "ep" });
       expect(result.message).toContain("started");
       expect(spy).toHaveBeenCalled();
