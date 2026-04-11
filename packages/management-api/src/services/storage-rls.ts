@@ -410,6 +410,7 @@ export class StorageRLS {
             name,
             updated_at,
             created_at,
+            last_accessed_at,
             metadata,
             COALESCE((metadata->>'size')::bigint, 0) AS size
           FROM storage.objects
@@ -436,6 +437,7 @@ export class StorageRLS {
                         name: prefix ? `${prefix.replace(/\/$/, '')}/${folderName}` : folderName,
                         updated_at: row.updated_at,
                         created_at: row.created_at,
+                        last_accessed_at: row.last_accessed_at,
                         size: 0,
                         metadata: { mimetype: null },
                         isFolder: true,
@@ -448,6 +450,7 @@ export class StorageRLS {
                     name: rawName,
                     updated_at: row.updated_at,
                     created_at: row.created_at,
+                    last_accessed_at: row.last_accessed_at,
                     size: row.size,
                     metadata: row.metadata,
                     isFolder: false,
@@ -480,6 +483,7 @@ export class StorageRLS {
               name: row.name,
               updated: row.updated_at || row.updated,
               created: row.created_at || row.updated,
+              last_accessed: row.last_accessed_at || row.updated,
               size: sizeBytes,
               type: row.metadata?.mimetype || (row.name?.includes('.') ? row.name.split('.').pop() : 'unknown'),
               isFolder: row.isFolder
