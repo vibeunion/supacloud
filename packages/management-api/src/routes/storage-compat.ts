@@ -581,10 +581,8 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             return proxyToImaginary(ref, params.bucket, filePath, query, set as { headers: Record<string, string> });
         }
 
-        // Otherwise, run RLS and get stream
-        const auth = headers['authorization'];
-        const permitted = await StorageRLS.authorizeAction(ref, auth, 'download', params.bucket, filePath);
-        if (!permitted.permitted) return status(404, { statusCode: '404', error: 'Not Found', message: 'Object not found or access denied by RLS' });
+        const bucket = await StorageRLS.getLogicalBucket(ref, params.bucket, undefined);
+        if (!bucket || !bucket.public) return status(400, { statusCode: '400', error: 'Bad Request', message: 'Bucket is not public' });
 
         try {
             const res = await StorageService.getDownloadResponse(ref, params.bucket, filePath);
@@ -1011,8 +1009,8 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
                 name: cleanName || f.name,
                 id: f.id,
                 updated_at: f.updated || new Date().toISOString(),
-                created_at: f.updated || new Date().toISOString(),
-                last_accessed_at: f.updated || new Date().toISOString(),
+                created_at: f.created || f.updated || new Date().toISOString(),
+                last_accessed_at: f.last_accessed || f.updated || new Date().toISOString(),
                 metadata: {
                     size: f.size,
                     mimetype: f.type || 'application/octet-stream',
@@ -1080,8 +1078,8 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
                     name: cleanName || f.name,
                     id: f.id,
                     updated_at: f.updated || new Date().toISOString(),
-                    created_at: f.updated || new Date().toISOString(),
-                    last_accessed_at: f.updated || new Date().toISOString(),
+                    created_at: f.created || f.updated || new Date().toISOString(),
+                    last_accessed_at: f.last_accessed || f.updated || new Date().toISOString(),
                     metadata: {
                         size: f.size,
                         mimetype: f.type || 'application/octet-stream',
@@ -1331,6 +1329,10 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         const ref = getProjectRef(headers as Record<string, string | undefined>);
         const filePath = params['*'];
         if (!filePath) return status(400, { error: 'Missing file path' });
+
+        const bucket = await StorageRLS.getLogicalBucket(ref, params.bucket, undefined);
+        if (!bucket || !bucket.public) return status(400, { error: 'Bucket is not public' });
+
         return proxyToImaginary(ref, params.bucket, filePath, query, set as { headers: Record<string, string> });
     })
 
@@ -1364,6 +1366,22 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         const bucket = meta.bucketName || 'default';
         const objectName = meta.objectName || `upload-${Date.now()}`;
         const contentType = meta.contentType || 'application/octet-stream';
+
+        // Validations natively skipping RLS check via undefined scope.
+        const logicalBucket = await StorageRLS.getLogicalBucket(ref, bucket, undefined);
+        if (!logicalBucket) return status(404, { statusCode: '404', error: 'Not Found', message: 'Bucket not found' });
+
+        if (logicalBucket.file_size_limit && uploadLength > Number(logicalBucket.file_size_limit)) {
+            return status(413, { statusCode: '413', error: 'Payload too large', message: 'The object exceeded the maximum allowed size' });
+        }
+
+        const allowedMimes = logicalBucket.allowed_mime_types as string[] | null;
+        if (allowedMimes && Array.isArray(allowedMimes) && allowedMimes.length > 0) {
+            const uploadMime = contentType.split(';')[0]?.trim();
+            if (!allowedMimes.includes(uploadMime)) {
+                return status(415, { statusCode: '415', error: 'Unsupported Media Type', message: 'The object mime type is not allowed' });
+            }
+        }
 
         // TUS Authorization Gate (DryRun only — we don't materialize until complete)
         const auth = headers['authorization'];
