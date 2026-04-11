@@ -163,8 +163,8 @@ Deno.serve(async (req) => {
 
     const { access_token: providerAccessToken, openid, unionid } = tokenData
 
-    const SUPABASE_URL = Deno.env.get("SUPABASE_URL")
-    const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")
+    const SUPABASE_URL = Bun.env["SUPABASE_URL"]
+    const SUPABASE_SERVICE_ROLE_KEY = Bun.env["SUPABASE_SERVICE_ROLE_KEY"]
 
     const supabaseAdmin = createClient(SUPABASE_URL as string, SUPABASE_SERVICE_ROLE_KEY as string, {
       auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false },
@@ -204,7 +204,7 @@ Deno.serve(async (req) => {
     })
 
     // Explicitly link physical identity row mirroring real OAuth behavior
-    const SUPABASE_DB_URL = Deno.env.get("SUPABASE_DB_URL")
+    const SUPABASE_DB_URL = Bun.env["SUPABASE_DB_URL"]
     if (SUPABASE_DB_URL) {
       const sql = new SQL(SUPABASE_DB_URL)
       try {
