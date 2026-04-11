@@ -154,11 +154,11 @@ class TenantRuntimeService {
         const creds = await this.getTenantCredentials(ref);
 
         // Generate PostgREST .env configuration
+        // NOTE: db-extra-search-path is ONLY set in .conf to avoid precedence conflicts (P2 fix)
         const pgrstEnv = `
 # SupaCloud Tenant PostgREST Runtime: ${ref}
 PGRST_DB_URI=postgres://authenticator_${ref}:${creds.dbPassword}@${this.PG_HOST}:${this.PG_PORT}/${creds.dbName}
 PGRST_DB_SCHEMAS=public,storage,graphql_public
-PGRST_DB_EXTRA_SEARCH_PATH=public,extensions,auth
 PGRST_DB_ANON_ROLE=anon
 PGRST_JWT_SECRET=${creds.jwtSecret}
 PGRST_SERVER_PORT=${pgrstPort}
@@ -175,7 +175,7 @@ JWT_SECRET=${creds.jwtSecret}
 `.trim();
         await Bun.write(path.join(this.TENANT_CONFIG_DIR, `${ref}.env`), pgrstEnv);
 
-        // Generate PostgREST .conf configuration
+        // Generate PostgREST .conf configuration (single source of truth for all settings)
         const pgrstConf = `
 # PostgREST config for tenant: ${ref}
 db-uri = "postgres://authenticator_${ref}:${creds.dbPassword}@${this.PG_HOST}:${this.PG_PORT}/${creds.dbName}"
@@ -188,6 +188,16 @@ server-host = "0.0.0.0"
 db-pool = 10
 db-pool-acquisition-timeout = 10
 log-level = "warn"
+
+# P0-10: OpenAPI spec generation (required by Studio Table Editor & API Docs)
+openapi-mode = "follow-privileges"
+openapi-server-proxy-uri = "${creds.apiUrl}/rest/v1"
+
+# P0-11: Pre-request function for RLS context injection
+db-pre-request = "public.set_request_context"
+
+# P0-12: Root spec returns OpenAPI doc at /
+db-root-spec = "public.root_spec"
 `.trim();
         await Bun.write(path.join(this.TENANT_CONFIG_DIR, `${ref}.conf`), pgrstConf);
 
