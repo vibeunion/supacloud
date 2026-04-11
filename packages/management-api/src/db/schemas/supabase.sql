@@ -171,6 +171,9 @@ GRANT ALL ON ALL SEQUENCES IN SCHEMA storage TO anon, authenticated, service_rol
 ALTER TABLE storage.buckets ENABLE ROW LEVEL SECURITY;
 ALTER TABLE storage.objects ENABLE ROW LEVEL SECURITY;
 
+-- 插入默认 Policy 避免白板被阻击
+CREATE POLICY "Public buckets are viewable by everyone." ON storage.buckets FOR SELECT USING (true);
+
 -- 4. Realtime Schema
 CREATE SCHEMA IF NOT EXISTS realtime;
 GRANT USAGE ON SCHEMA realtime TO anon, authenticated, service_role;
