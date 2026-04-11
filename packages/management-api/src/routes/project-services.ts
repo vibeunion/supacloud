@@ -41,7 +41,7 @@ export const projectServiceRoutes = new Elysia({ prefix: "/v1/projects" })
     }
   )
 
-  // Get project usage metrics
+  // Get project usage metrics — real pg_stat data (P0-6)
   .get(
     "/:ref/usage",
     async ({ params, set }) => {
@@ -49,14 +49,65 @@ export const projectServiceRoutes = new Elysia({ prefix: "/v1/projects" })
       if (!project) {
                 return status(404, { error: "Project not found" });
       }
-      return {
-        data: {
-          database: { usage: 10, limit: 500, unit: "MB" },
-          storage: { usage: 5, limit: 1000, unit: "MB" },
-          cpu: { usage: Math.floor(Math.random() * 20), limit: 100, unit: "percent" },
-          ram: { usage: 256, limit: 1024, unit: "MB" },
-        },
-      };
+
+      try {
+        const { getProjectDb } = await import("../db");
+        const dbName = `supa_${params.ref}`;
+        const db = getProjectDb(dbName);
+
+        // Database size
+        const [dbSize] = await db`SELECT pg_database_size(current_database()) as size_bytes`;
+        const dbSizeMb = Math.round(Number(dbSize.size_bytes) / (1024 * 1024));
+
+        // Table count
+        const [tableCount] = await db`
+          SELECT count(*) as cnt FROM information_schema.tables 
+          WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
+        `;
+
+        // Active connections
+        const [connCount] = await db`
+          SELECT count(*) as cnt FROM pg_stat_activity WHERE datname = current_database()
+        `;
+
+        // Storage objects count + total size
+        let storageSizeMb = 0;
+        let storageObjectCount = 0;
+        try {
+          const [storageStats] = await db`
+            SELECT count(*) as cnt, coalesce(sum((metadata->>'size')::bigint), 0) as total_bytes
+            FROM storage.objects
+          `;
+          storageSizeMb = Math.round(Number(storageStats.total_bytes) / (1024 * 1024));
+          storageObjectCount = Number(storageStats.cnt);
+        } catch { /* storage schema may not exist */ }
+
+        // Auth user count
+        let userCount = 0;
+        try {
+          const [authStats] = await db`SELECT count(*) as cnt FROM auth.users`;
+          userCount = Number(authStats.cnt);
+        } catch { /* auth schema may not exist */ }
+
+        return {
+          data: {
+            database: { usage: dbSizeMb, limit: 500, unit: "MB" },
+            storage: { usage: storageSizeMb, limit: 1000, unit: "MB" },
+            storage_objects: { usage: storageObjectCount, limit: 0, unit: "count" },
+            auth_users: { usage: userCount, limit: 0, unit: "count" },
+            tables: { usage: Number(tableCount.cnt), limit: 0, unit: "count" },
+            connections: { usage: Number(connCount.cnt), limit: 60, unit: "count" },
+          },
+        };
+      } catch (err) {
+        // Fallback if tenant DB is unreachable
+        return {
+          data: {
+            database: { usage: 0, limit: 500, unit: "MB" },
+            storage: { usage: 0, limit: 1000, unit: "MB" },
+          },
+        };
+      }
     },
     {
       params: t.Object({
