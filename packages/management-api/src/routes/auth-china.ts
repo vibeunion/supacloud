@@ -127,8 +127,7 @@ function generateChinaOAuthFunction(provider: ChinaOAuthProvider, appId: string,
   const providerInfo = CHINA_OAUTH_PROVIDER_INFO[provider];
   const providerUpper = provider.toUpperCase();
 
-  return `import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
-import { sign } from "npm:jsonwebtoken@9.0.2"
+  return `import { createClient } from "@supabase/supabase-js"
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -164,48 +163,51 @@ Deno.serve(async (req) => {
     const { access_token: providerAccessToken, openid, unionid } = tokenData
 
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL")
+    const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")
     const JWT_SECRET = Deno.env.get("JWT_SECRET") as string
 
-    const srvPayload = {
-      role: "service_role",
-      iss: "supabase",
-      aud: "authenticated",
-      iat: Math.floor(Date.now() / 1000),
-      exp: Math.floor(Date.now() / 1000) + 300
-    }
-    const FIXED_SERVICE_KEY = sign(srvPayload, JWT_SECRET, { algorithm: 'HS256' })
-
-    const supabaseAdmin = createClient(SUPABASE_URL as string, FIXED_SERVICE_KEY, {
+    const supabaseAdmin = createClient(SUPABASE_URL as string, SUPABASE_SERVICE_ROLE_KEY as string, {
       auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false },
     })
 
     const email = \`\${(openid || unionid).toLowerCase()}@${provider}.com\`
-    let userId = ""
 
     const { data: newUser, error: createError } = await supabaseAdmin.auth.admin.createUser({
       email, email_confirm: true, user_metadata: { openid, unionid, provider: "${provider}" }
     })
 
-    if (createError) {
+    if (createError && !createError.message.includes("already registered")) {
       const { data: { users } } = await supabaseAdmin.auth.admin.listUsers({ page: 1, perPage: 1000 })
       const foundUser = users.find(u => u.email === email || u.user_metadata?.openid === openid)
-      if (foundUser) {
-        userId = foundUser.id
-      } else {
+      if (!foundUser) {
         throw new Error(\`Cannot create or find user. Error: \${createError.message}\`)
       }
-    } else {
-      userId = newUser.user.id
     }
 
-    const currentTimestamp = Math.floor(Date.now() / 1000)
-    const expiration = currentTimestamp + 60 * 60 * 24 * 7
-    const jwtPayload = { aud: "authenticated", exp: expiration, sub: userId, email: email, role: "authenticated", app_metadata: { provider: "${provider}", providers: ["${provider}"] }, user_metadata: { openid, unionid } }
-    const access_token = sign(jwtPayload, JWT_SECRET, { algorithm: 'HS256' })
+    const { data: linkData, error: linkError } = await supabaseAdmin.auth.admin.generateLink({
+      type: "magiclink",
+      email: email,
+    })
 
-    const session = { access_token, token_type: "bearer", expires_in: 60 * 60 * 24 * 7, refresh_token: access_token, user: { id: userId, email, app_metadata: jwtPayload.app_metadata, user_metadata: jwtPayload.user_metadata, aud: jwtPayload.aud, created_at: new Date().toISOString(), role: jwtPayload.role } }
+    if (linkError || !linkData?.properties?.hashed_token) {
+      throw new Error(\`Failed to generate magic link: \${linkError?.message}\`)
+    }
 
-    return new Response(JSON.stringify(session), { headers: { ...corsHeaders, "Content-Type": "application/json" } })
+    const { data: sessionData, error: verifyError } = await supabaseAdmin.auth.verifyOtp({
+      type: "magiclink",
+      token_hash: linkData.properties.hashed_token,
+    })
+
+    if (verifyError || !sessionData?.session) {
+      throw new Error(\`Failed to verify GoTrue session: \${verifyError?.message}\`)
+    }
+
+    // Force update user metadata to ensure latest OAuth provider data is present
+    await supabaseAdmin.auth.admin.updateUserById(sessionData.user.id, {
+        user_metadata: { ...sessionData.user.user_metadata, openid, unionid, provider: "${provider}" }
+    })
+
+    return new Response(JSON.stringify(sessionData.session), { headers: { ...corsHeaders, "Content-Type": "application/json" } })
   } catch (error: unknown) {
     console.error("${providerInfo.name} Login Error:", error instanceof Error ? error.message : String(error))
     return new Response(JSON.stringify({ data: { session: null, user: null }, error: (error instanceof Error ? error.message : String(error)) }), { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 })
