@@ -107,4 +107,168 @@ export const wsRoutes = new Elysia({ prefix: "/ws" })
         logger.info(`[WS] Client ${clientId} disconnected (total: ${taskSubscribers.size})`);
       }
     },
+  })
+  
+  .ws("/realtime/v1/websocket", {
+    async open(ws) {
+        try {
+            const query = (ws.data as any).query || {};
+            const apikey = query.apikey || "";
+            const vsn = query.vsn || "1.0.0";
+            
+            if (!apikey) {
+                ws.close(1008, "apikey is required to connect to Realtime");
+                return;
+            }
+
+            const { sql } = await import("../db");
+            const rows = await sql`SELECT ref FROM projects WHERE anon_key = ${apikey} OR service_role_key = ${apikey} LIMIT 1`;
+            if (rows.length === 0) {
+                ws.close(1008, "Invalid apikey");
+                return;
+            }
+            const ref = rows[0].ref;
+            (ws.data as any).projectRef = ref;
+
+            const { config } = await import("../config");
+            const hostIp = config.dockerHostIp || "127.0.0.1";
+            
+            // Proxy connection to Official Elixir Realtime for Presence & Broadcast CRDTs
+            // We connect directly to the native Elixir container (4000/socket/websocket) bypassing Kong to avoid infinite loops
+            const targetUrl = `ws://${hostIp}:4000/socket/websocket?apikey=${apikey}&vsn=${vsn}`;
+            
+            const upstream = new WebSocket(targetUrl, {
+                headers: {
+                    "Host": `${ref}.api.${config.baseDomain}`,
+                    "x-project-ref": ref
+                }
+            } as any);
+
+            (ws.data as any).__upstream = upstream;
+            (ws.data as any).__buffer = [];
+
+            // Native Bun pg_listen state
+            (ws.data as any).__bunSubscriptions = new Set<string>();
+
+            // Upstream proxying (Elixir -> Client)
+            upstream.onmessage = (event) => {
+                ws.send(event.data);
+            };
+            
+            upstream.onopen = () => {
+                const buf = (ws.data as any).__buffer || [];
+                for (const msg of buf) {
+                    upstream.send(msg);
+                }
+                (ws.data as any).__buffer = [];
+            };
+
+            upstream.onclose = () => {
+                ws.close();
+            };
+
+            upstream.onerror = (err) => {
+                import("../utils/logger").then(m => m.logger.error(`[Realtime Proxy] Upstream error for ${ref}`, { error: String(err) }));
+                try { ws.close(1011, "Upstream connection error"); } catch {}
+            };
+            
+        } catch (err: unknown) {
+            import("../utils/logger").then(m => m.logger.error("[Realtime Proxy] Fault initializing link", { error: String(err) }));
+            ws.close(1011, "Proxy initialization fault");
+        }
+    },
+    message(ws, rawMessage) {
+        const upstream = (ws.data as any).__upstream as WebSocket | undefined;
+        const ref = (ws.data as any).projectRef as string | undefined;
+
+        // --- NATIVE BUN REALTIME INTERCEPTS ---
+        try {
+            const parsed = JSON.parse(rawMessage as string);
+            
+            // P0-12: phx_leave intercept (graceful teardown locally + proxy)
+            if (parsed.event === 'phx_leave') {
+                 // Reply locally immediately to satisfy SDK
+                 ws.send(JSON.stringify({ topic: parsed.topic, event: 'phx_reply',
+                     payload: { status: 'ok', response: {} }, ref: parsed.ref }));
+                 
+                 // Clean up native bun subscription
+                 if ((ws.data as any).__bunSubscriptions && (ws.data as any).__bunSubscriptions.has(parsed.topic)) {
+                     (ws.data as any).__bunSubscriptions.delete(parsed.topic);
+                 }
+                 // We still forward it so Elixir can clean up its presence/broadcast CRDTs!
+            }
+
+            // P0-13: access_token intercept
+            if (parsed.event === 'access_token') {
+                const newToken = parsed.payload?.access_token;
+                if (newToken) {
+                    (ws.data as any).token = newToken;
+                    // Forward to Elixir for upstream tenant isolation
+                }
+            }
+
+            // P0-14: postgres_changes multiplexing
+            if (parsed.event === 'phx_join') {
+                const changes = parsed.payload?.config?.postgres_changes;
+                if (changes && Array.isArray(changes) && changes.length > 0 && ref) {
+                    // Activate Native Bun pg_listen logic
+                    const topic = parsed.topic;
+                    
+                    import("../services/realtime-bun.service").then(({ realtimeBunService }) => {
+                         realtimeBunService.subscribeTenant(ref);
+                         if (!(ws.data as any).__bunSubscriptions) (ws.data as any).__bunSubscriptions = new Set();
+                         
+                         const subs = (ws.data as any).__bunSubscriptions;
+                         if (!subs.has(topic)) {
+                             subs.add(topic);
+                             // Bind native event listener for this topic
+                             const handler = (payload: any) => {
+                                 // Basic RLS simulation filter happens here in production
+                                 // For now, raw emit
+                                 ws.send(JSON.stringify({
+                                     topic: topic,
+                                     event: 'postgres_changes',
+                                     payload: payload,
+                                     ref: null
+                                 }));
+                             };
+                             (ws.data as any)[`__handler_${topic}`] = handler;
+                             realtimeBunService.events.on(`change:${ref}`, handler);
+                         }
+                    }).catch(console.error);
+                }
+            }
+
+        } catch (err) {
+            // Not JSON or parse error, just proxy
+        }
+        
+        // --- END NATIVE INTERCEPTS ---
+
+        if (!upstream) return;
+        
+        if (upstream.readyState === WebSocket.OPEN) {
+            upstream.send(rawMessage as any);
+        } else if (upstream.readyState === WebSocket.CONNECTING) {
+            ((ws.data as Record<string,any>).__buffer || []).push(rawMessage);
+        }
+    },
+    close(ws) {
+        const upstream = (ws.data as Record<string,any>).__upstream as WebSocket | undefined;
+        if (upstream && upstream.readyState !== WebSocket.CLOSED) {
+            upstream.close();
+        }
+
+        // Cleanup Native listeners
+        const ref = (ws.data as any).projectRef;
+        const subs = (ws.data as any).__bunSubscriptions as Set<string> | undefined;
+        if (subs && ref) {
+            import("../services/realtime-bun.service").then(({ realtimeBunService }) => {
+                for (const topic of subs) {
+                    const handler = (ws.data as any)[`__handler_${topic}`];
+                    if (handler) realtimeBunService.events.off(`change:${ref}`, handler);
+                }
+            }).catch(console.error);
+        }
+    }
   });

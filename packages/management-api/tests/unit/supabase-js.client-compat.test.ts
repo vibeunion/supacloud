@@ -96,9 +96,11 @@ describe("supabase-js client request compatibility matrix", () => {
       },
     });
 
-    expect(String(client.authUrl)).toBe(`${BASE_URL}/auth/v1`);
-    expect(String(client.storageUrl)).toBe(`${BASE_URL}/storage/v1`);
-    expect(String(client.functionsUrl)).toBe(`${BASE_URL}/functions/v1`);
+    // Verify the inner configuration bound it to the mock URL
+    const mockClient = client as any;
+    expect(String(mockClient.authUrl)).toBe(`${BASE_URL}/auth/v1`);
+    expect(String(mockClient.storageUrl)).toBe(`${BASE_URL}/storage/v1`);
+    expect(String(mockClient.functionsUrl)).toBe(`${BASE_URL}/functions/v1`);
     expect((client as unknown as { realtime: { endPoint: string } }).realtime.endPoint)
       .toBe("wss://testref.api.example.com/realtime/v1/websocket");
 

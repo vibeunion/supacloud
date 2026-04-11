@@ -17,7 +17,7 @@ describe("RouterService", () => {
     });
 
     test("should accept custom domain", async () => {
-      const result = await routerService.addRoute("testref", "custom.example.com");
+      const result = await routerService.addRoute("testref", { apiDomain: "api.custom.example.com", studioDomain: "studio.custom.example.com" });
       expect(result).toHaveProperty("success");
     });
   });

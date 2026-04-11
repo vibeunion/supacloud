@@ -2,8 +2,8 @@ import { $ } from "bun";
 import { logger } from "../utils/logger";
 import { config } from "../config";
 import { sql as metaSql } from "../db";
-import fs from "node:fs/promises";
-import path from "node:path";
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
 import type { OAuthProvider, OAuthProviderConfig } from "../types/oauth";
 import { OAUTH_ENV_MAPPINGS } from "../types/oauth";
 import { tenantOAuthService } from "./tenant-oauth.service";
@@ -114,7 +114,9 @@ class TenantRuntimeService {
             dbName: project.db_name || `supa_${ref}`,
             apiUrl: this.deriveApiUrl(ref, projectConfig),
             anonKey: project.anon_key,
-            serviceRoleKey: project.service_role_key
+            serviceRoleKey: project.service_role_key,
+            siteUrl: typeof projectConfig.site_url === "string" ? projectConfig.site_url : (typeof projectConfig.siteUrl === "string" ? projectConfig.siteUrl : "http://localhost:3000"),
+            uriAllowList: Array.isArray(projectConfig.additional_redirect_urls) ? projectConfig.additional_redirect_urls.join(',') : (Array.isArray(projectConfig.additionalRedirectUrls) ? projectConfig.additionalRedirectUrls.join(',') : "")
         };
     }
 
@@ -156,7 +158,7 @@ class TenantRuntimeService {
 # SupaCloud Tenant PostgREST Runtime: ${ref}
 PGRST_DB_URI=postgres://authenticator_${ref}:${creds.dbPassword}@${this.PG_HOST}:${this.PG_PORT}/${creds.dbName}
 PGRST_DB_SCHEMAS=public,storage,graphql_public
-PGRST_DB_EXTRA_SEARCH_PATH=public
+PGRST_DB_EXTRA_SEARCH_PATH=public,extensions,auth
 PGRST_DB_ANON_ROLE=anon
 PGRST_JWT_SECRET=${creds.jwtSecret}
 PGRST_SERVER_PORT=${pgrstPort}
@@ -198,8 +200,8 @@ log-level = "warn"
 GOTRUE_API_HOST=0.0.0.0
 GOTRUE_API_PORT=${gotruePort}
 API_EXTERNAL_URL=${apiExternalUrl}
-GOTRUE_SITE_URL=${apiExternalUrl}
-GOTRUE_URI_ALLOW_LIST=*
+GOTRUE_SITE_URL=${creds.siteUrl}
+GOTRUE_URI_ALLOW_LIST=${creds.uriAllowList || creds.siteUrl}
 GOTRUE_DB_DRIVER=postgres
 GOTRUE_DB_DATABASE_URL=postgres://supabase_auth_admin:${config.pgPassword}@${this.PG_HOST}:${this.PG_PORT}/${creds.dbName}
 GOTRUE_JWT_SECRET=${creds.jwtSecret}
@@ -210,8 +212,15 @@ GOTRUE_LOG_LEVEL=info
 GOTRUE_SERVER_READ_TIMEOUT=20
 GOTRUE_SECURITY_UPDATE_PASSWORD_REQUIRE_REAUTHENTICATION=true
 GOTRUE_EXTERNAL_ANONYMOUS_USERS_ENABLED=true
+GOTRUE_EXTERNAL_EMAIL_ENABLED=true
+GOTRUE_EXTERNAL_PHONE_ENABLED=true
 GOTRUE_WEBAUTHN_ENABLED=true
-GOTRUE_WEBAUTHN_RP_ID=${apiExternalUrl.replace('https://', '').replace('http://', '').split('/')[0]}
+GOTRUE_WEBAUTHN_RP_ID=${creds.siteUrl.replace('https://', '').replace('http://', '').split('/')[0]}
+GOTRUE_WEBAUTHN_RP_ORIGINS=https://${creds.siteUrl.replace('https://', '').replace('http://', '').split('/')[0]},${apiExternalUrl}
+GOTRUE_MAILER_URLPATHS_CONFIRMATION=/auth/v1/verify
+GOTRUE_MAILER_URLPATHS_INVITE=/auth/v1/verify
+GOTRUE_MAILER_URLPATHS_RECOVERY=/auth/v1/verify
+GOTRUE_MAILER_URLPATHS_EMAIL_CHANGE=/auth/v1/verify
 `.trim();
 
         if (config.gotrueSmtpHost) {
