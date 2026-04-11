@@ -513,7 +513,10 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
 
             // Finalize Materialization after physical layer succeeds
             const finalPermit = await StorageRLS.authorizeAction(ref, auth, 'upload', params.bucket, filePath, metadata, false, upsert);
-            if (!finalPermit.permitted) return status(500, { statusCode: '500', error: 'Internal', message: 'Failed to record object' });
+            if (!finalPermit.permitted) {
+                await StorageService.deleteFile(ref, params.bucket, filePath);
+                return status(500, { statusCode: '500', error: 'Internal', message: 'Failed to record object' });
+            }
 
             return {
                 Id: `${params.bucket}/${filePath}`,
@@ -548,7 +551,10 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
 
             // Finalize Materialization after physical layer succeeds
             const finalPermit = await StorageRLS.authorizeAction(ref, auth, 'upload', params.bucket, filePath, metadata, false, true);
-            if (!finalPermit.permitted) return status(500, { statusCode: '500', error: 'Internal', message: 'Failed to record object' });
+            if (!finalPermit.permitted) {
+                await StorageService.deleteFile(ref, params.bucket, filePath);
+                return status(500, { statusCode: '500', error: 'Internal', message: 'Failed to record object' });
+            }
             return { Key: `${params.bucket}/${filePath}` };
         } catch (err: unknown) {
             return status(500, { statusCode: '500', error: 'Internal', message: 'Upsert failed' });
@@ -881,7 +887,10 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             
             // 3. Persist DB
             const finalPermit = await StorageRLS.authorizeAction(ref, effectiveAuth, 'upload', params.bucket, filePath, metadata, false, signedUpload.upsert);
-            if (!finalPermit.permitted) return status(500, { statusCode: '500', error: 'Internal', message: 'Failed to record object' });
+            if (!finalPermit.permitted) {
+                await StorageService.deleteFile(ref, params.bucket, filePath);
+                return status(500, { statusCode: '500', error: 'Internal', message: 'Failed to record object' });
+            }
 
             return { Key: `${params.bucket}/${filePath}` };
         } catch (err: unknown) {
@@ -1073,7 +1082,8 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
                 if (!physSuccess) throw new Error('Physical delete failed');
 
                 // 3. Logical delete
-                await StorageRLS.authorizeAction(ref, auth, 'delete', params.bucket, p, {}, false);
+                const postDelete = await StorageRLS.authorizeAction(ref, auth, 'delete', params.bucket, p, {}, false);
+                if (!postDelete.permitted) throw new Error(postDelete.error || 'Logical delete failed after physical wipe');
                 return physSuccess;
             })
         );
@@ -1157,7 +1167,8 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             const pDelete = await StorageService.deleteFile(ref, srcBucket, srcKey);
             if (!pDelete) return status(500, { statusCode: '500', error: 'Internal', message: 'Failed to physically delete source object' });
 
-            await StorageRLS.authorizeAction(ref, auth, 'delete', srcBucket, srcKey, {}, false);
+            const finalDelete = await StorageRLS.authorizeAction(ref, auth, 'delete', srcBucket, srcKey, {}, false);
+            if (!finalDelete.permitted) return status(500, { statusCode: '500', error: 'Internal', message: 'Move failed during logical source removal' });
 
             return { message: `Successfully moved` };
         } catch (err: unknown) {
@@ -1222,7 +1233,11 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             if (!uploaded) return status(500, { statusCode: '500', error: 'Internal', message: 'Copy failed' });
 
             // Finalize SQL Materialization
-            await StorageRLS.authorizeAction(ref, auth, 'upload', destBucket, destKey, { size: srcData.length, mimetype: contentType }, false);
+            const finalPermitted = await StorageRLS.authorizeAction(ref, auth, 'upload', destBucket, destKey, { size: srcData.length, mimetype: contentType }, false);
+            if (!finalPermitted.permitted) {
+                await StorageService.deleteFile(ref, destBucket, destKey);
+                return status(500, { statusCode: '500', error: 'Internal', message: 'Failed to record copied object' });
+            }
 
             return { Key: `${destBucket}/${destKey}`, path: `${destBucket}/${destKey}` };
         } catch (err: unknown) {
@@ -1366,7 +1381,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
                 await StorageService.uploadFile(upload.ref, upload.bucket, upload.objectName, fullBody, upload.contentType);
                 
                 // Finalize DB row now that S3 succeeded
-                await StorageRLS.authorizeAction(
+                const syncRes = await StorageRLS.authorizeAction(
                     upload.ref, 
                     upload.auth_token, 
                     'upload', 
@@ -1375,6 +1390,11 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
                     { mimetype: upload.contentType, size: upload.totalSize },
                     false
                 );
+                
+                if (!syncRes.permitted) {
+                    await StorageService.deleteFile(upload.ref, upload.bucket, upload.objectName);
+                    throw new Error(syncRes.error || 'Failed to record assembled object');
+                }
 
                 await TusStore.delete(params.uploadId);
                 return { Key: `${upload.bucket}/${upload.objectName}` };
