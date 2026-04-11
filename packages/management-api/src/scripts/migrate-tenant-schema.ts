@@ -258,11 +258,15 @@ BEGIN
       'commit_timestamp', now()::text,
       'record', CASE WHEN TG_OP IN ('INSERT', 'UPDATE') THEN row_to_json(NEW)::jsonb ELSE null END,
       'old_record', CASE WHEN TG_OP IN ('UPDATE', 'DELETE') THEN row_to_json(OLD)::jsonb ELSE null END,
-      'columns', to_jsonb(ARRAY(
-        SELECT column_name FROM information_schema.columns 
-        WHERE table_schema = TG_TABLE_SCHEMA AND table_name = TG_TABLE_NAME 
-        ORDER BY ordinal_position
-      ))
+      'columns', (
+        SELECT COALESCE(jsonb_agg(jsonb_build_object('name', column_name, 'type', udt_name)), '[]'::jsonb)
+        FROM (
+          SELECT column_name, udt_name 
+          FROM information_schema.columns 
+          WHERE table_schema = TG_TABLE_SCHEMA AND table_name = TG_TABLE_NAME 
+          ORDER BY ordinal_position
+        ) cols
+      )
     )
   );
   PERFORM pg_notify('realtime_changes', payload::text);
