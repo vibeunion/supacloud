@@ -169,6 +169,7 @@ SUPABASE_URL=${creds.apiUrl}
 SUPABASE_ANON_KEY=${creds.anonKey}
 SUPABASE_SERVICE_ROLE_KEY=${creds.serviceRoleKey}
 SUPABASE_DB_URL=postgresql://postgres:${config.pgPassword}@${this.PG_HOST}:${this.PG_PORT}/${creds.dbName}
+JWT_SECRET=${creds.jwtSecret}
 `.trim();
         await Bun.write(path.join(this.TENANT_CONFIG_DIR, `${ref}.env`), pgrstEnv);
 

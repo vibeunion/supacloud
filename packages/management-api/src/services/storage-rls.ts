@@ -139,11 +139,12 @@ export class StorageRLS {
     action: 'upload' | 'download' | 'delete',
     bucketId: string,
     objectName: string,
-    metadata: Record<string, unknown> = {}
+    metadata: Record<string, unknown> = {},
+    dryRun: boolean = false
   ): Promise<{ permitted: boolean, error?: string }> {
     if (ref === 'test_mock') {
        if (!mockBuckets.has(bucketId)) return { permitted: false, error: 'Bucket not found' };
-       if (action === 'upload') mockObjects.set(bucketId + '/' + objectName, { metadata, updated: new Date().toISOString() });
+       if (action === 'upload' && !dryRun) mockObjects.set(bucketId + '/' + objectName, { metadata, updated: new Date().toISOString() });
        if (action === 'download' || action === 'delete') {
            if (!mockObjects.has(bucketId + '/' + objectName)) return { permitted: false, error: 'Object not found' };
            if (action === 'delete') mockObjects.delete(bucketId + '/' + objectName);
@@ -206,10 +207,17 @@ export class StorageRLS {
           `;
           if (res.length === 0) throw new Error("RLS_VIOLATION_OR_NOT_FOUND");
         }
+
+        if (dryRun) {
+          throw new Error("DRY_RUN_ROLLBACK");
+        }
       });
 
       return { permitted: true };
     } catch (e: unknown) {
+      if (e instanceof Error && e.message === 'DRY_RUN_ROLLBACK') {
+        return { permitted: true };
+      }
       // If error is RLS related (row level security policy violation) or Postgres throws, deny
       logger.debug(`[StorageRLS] Action ${action} denied: ${e instanceof Error ? e.message : String(e)}`);
       return { permitted: false, error: e instanceof Error && e.message === 'RLS_VIOLATION_OR_NOT_FOUND' ? 'Object not found' : 'Row Level Security violation or bucket missing. Access Denied.' };
