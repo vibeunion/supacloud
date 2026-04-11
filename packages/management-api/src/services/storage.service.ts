@@ -151,8 +151,12 @@ export class StorageService {
     return await getStorageDriver().listFiles(projectRef, bucketName);
   }
 
-  static async uploadFile(projectRef: string, bucketName: string, fileName: string, fileData: Blob | Buffer | Uint8Array | ArrayBuffer, contentType: string): Promise<boolean> {
+  static async uploadFile(projectRef: string, bucketName: string, fileName: string, fileData: Blob | Buffer | Uint8Array | ArrayBuffer | ReadableStream, contentType: string): Promise<boolean> {
     return await getStorageDriver().uploadFile(projectRef, bucketName, fileName, fileData, contentType);
+  }
+
+  static async copyFile(projectRef: string, srcBucket: string, srcKey: string, destBucket: string, destKey: string): Promise<boolean> {
+    return await getStorageDriver().copyFile(projectRef, srcBucket, srcKey, destBucket, destKey);
   }
 
   static async deleteFile(projectRef: string, bucketName: string, fileName: string): Promise<boolean> {

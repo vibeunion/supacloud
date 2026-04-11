@@ -7,7 +7,7 @@
 import { $ } from "bun";
 import { logger } from "../utils/logger";
 import { config } from "../config";
-import path from "node:path";
+import * as path from "node:path";
 import type { OAuthProvider, OAuthProviderConfig } from "../types/oauth";
 import { OAUTH_ENV_MAPPINGS } from "../types/oauth";
 
@@ -61,12 +61,17 @@ export class TenantOAuthService {
                 continue;
             }
 
+            const enabledKey = `GOTRUE_EXTERNAL_${provider.toUpperCase()}_ENABLED`;
+
             const [key] = trimmed.split("=");
             const keyTrimmed = key?.trim();
 
             if (keyTrimmed === mapping.clientId) {
                 updatedLines.push(`${mapping.clientId}=${providerConfig.client_id}`);
                 addedKeys.add(mapping.clientId);
+            } else if (keyTrimmed === enabledKey) {
+                updatedLines.push(`${enabledKey}=true`);
+                addedKeys.add(enabledKey);
             } else if (keyTrimmed === mapping.clientSecret) {
                 updatedLines.push(`${mapping.clientSecret}=${providerConfig.client_secret}`);
                 addedKeys.add(mapping.clientSecret);
@@ -86,6 +91,10 @@ export class TenantOAuthService {
         }
 
         const newLines: string[] = [];
+        const enabledKeyNew = `GOTRUE_EXTERNAL_${provider.toUpperCase()}_ENABLED`;
+        if (!addedKeys.has(enabledKeyNew)) {
+            newLines.push(`${enabledKeyNew}=true`);
+        }
         if (!addedKeys.has(mapping.clientId)) {
             newLines.push(`${mapping.clientId}=${providerConfig.client_id}`);
         }
@@ -167,17 +176,23 @@ export class TenantOAuthService {
         const prefix = `GOTRUE_EXTERNAL_${oauthConfig.name.toUpperCase()}`;
         const customOAuthEnv = `
 # Custom OAuth Provider: ${oauthConfig.name}
+${prefix}_ENABLED=true
 ${prefix}_CLIENT_ID=${oauthConfig.client_id}
 ${prefix}_SECRET=${oauthConfig.client_secret}
 ${prefix}_REDIRECT_URI=${oauthConfig.redirect_uri}
 ${prefix}_URL=${oauthConfig.authorize_url}
+${prefix}_TOKEN_URL=${oauthConfig.token_url}
+${prefix}_USER_INFO_URL=${oauthConfig.user_url}
 `;
 
         const keysToRemove = new Set<string>([
+            `${prefix}_ENABLED`,
             `${prefix}_CLIENT_ID`,
             `${prefix}_SECRET`,
             `${prefix}_REDIRECT_URI`,
             `${prefix}_URL`,
+            `${prefix}_TOKEN_URL`,
+            `${prefix}_USER_INFO_URL`,
         ]);
 
         const lines = envContent.split("\n");

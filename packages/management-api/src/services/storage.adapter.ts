@@ -10,7 +10,8 @@ export interface StorageDriver {
   deleteBucket(projectRef: string, bucket: string): Promise<boolean>;
   emptyBucket(projectRef: string, bucket: string): Promise<boolean>;
   listBuckets(projectRef: string): Promise<{id: string, name: string, public: boolean, size: string}[]>;
-  uploadFile(projectRef: string, bucket: string, key: string, data: Blob | Buffer | Uint8Array | ArrayBuffer, contentType: string): Promise<boolean>;
+  uploadFile(projectRef: string, bucket: string, key: string, data: Blob | Buffer | Uint8Array | ArrayBuffer | ReadableStream, contentType: string): Promise<boolean>;
+  copyFile(projectRef: string, srcBucket: string, srcKey: string, destBucket: string, destKey: string): Promise<boolean>;
   deleteFile(projectRef: string, bucket: string, key: string): Promise<boolean>;
   listFiles(projectRef: string, bucket: string): Promise<{id: string, name: string, updated?: string, size: string, type: string}[]>;
   getDownloadResponse(projectRef: string, bucket: string, key: string): Promise<Response | null>;
@@ -78,14 +79,26 @@ export class JuiceFSDriver implements StorageDriver {
     }
   }
 
-  async uploadFile(projectRef: string, bucket: string, key: string, data: Blob | Buffer | Uint8Array | ArrayBuffer, contentType: string): Promise<boolean> {
+  async uploadFile(projectRef: string, bucket: string, key: string, data: Blob | Buffer | Uint8Array | ArrayBuffer | ReadableStream, contentType: string): Promise<boolean> {
     try {
       const filePath = this.getBasePath(projectRef, bucket, key);
       await fs.mkdir(path.dirname(filePath), { recursive: true });
-      await Bun.write(filePath, data);
+      await Bun.write(filePath, data as any);
       return true;
     } catch (e: unknown) {
       logger.error('JuiceFS uploadFile error:', { error: e instanceof Error ? e.message : String(e) });
+      return false;
+    }
+  }
+
+  async copyFile(projectRef: string, srcBucket: string, srcKey: string, destBucket: string, destKey: string): Promise<boolean> {
+    try {
+      const srcPath = this.getBasePath(projectRef, srcBucket, srcKey);
+      const destPath = this.getBasePath(projectRef, destBucket, destKey);
+      await fs.mkdir(path.dirname(destPath), { recursive: true });
+      await fs.copyFile(srcPath, destPath);
+      return true;
+    } catch (e) {
       return false;
     }
   }
@@ -208,18 +221,24 @@ export class S3Driver implements StorageDriver {
     }
   }
 
-  async uploadFile(projectRef: string, bucket: string, key: string, data: Blob | Buffer | Uint8Array | ArrayBuffer, contentType: string): Promise<boolean> {
+  async uploadFile(projectRef: string, bucket: string, key: string, data: Blob | Buffer | Uint8Array | ArrayBuffer | ReadableStream, contentType: string): Promise<boolean> {
     const creds = await this.getCreds(projectRef);
     if (!creds?.accessKey || !creds?.secretKey) return false;
     
     try {
       const s3 = this.getClient(creds as { accessKey: string, secretKey: string, endpoint: string, bucket: string });
       const cleanFileName = key.replace(/^\/+/, '');
-      const bytesWritten = await s3.file(`${bucket}/${cleanFileName}`).write(data, { type: contentType });
+      const bytesWritten = await s3.file(`${bucket}/${cleanFileName}`).write(data as any, { type: contentType });
       return bytesWritten > 0;
     } catch (e) {
       return false;
     }
+  }
+
+  async copyFile(projectRef: string, srcBucket: string, srcKey: string, destBucket: string, destKey: string): Promise<boolean> {
+      const srcRes = await this.getDownloadResponse(projectRef, srcBucket, srcKey);
+      if (!srcRes || !srcRes.body) return false;
+      return this.uploadFile(projectRef, destBucket, destKey, srcRes.body, srcRes.headers.get('content-type') || 'application/octet-stream');
   }
 
   async deleteFile(projectRef: string, bucket: string, key: string): Promise<boolean> {

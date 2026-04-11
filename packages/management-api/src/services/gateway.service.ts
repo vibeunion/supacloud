@@ -9,8 +9,8 @@ const DEFAULT_CORS_ORIGINS = [
   "~^https?://.*$"
 ];
 
-import path from "node:path";
-import fs from "node:fs/promises";
+import * as path from "node:path";
+import * as fs from "node:fs/promises";
 
 export interface GatewayConfig {
     rateLimitTier?: "free" | "pro" | "enterprise";
@@ -467,21 +467,31 @@ export class GatewayService {
                 hosts, 
                 projectRef, 
                 stripPath: true,
-                headers: ["Content-Profile:graphql_public"]
+                headers: ["Content-Profile:graphql_public", "Accept-Profile:graphql_public"]
             });
             await this.ensureServiceAndRoute({ name: `svc-gotrue-${projectRef}`, url: `http://${hostIp}:${gotruePort}`, paths: ["/auth/v1"], hosts, projectRef });
             await this.ensureServiceAndRoute({ name: `svc-functions-${projectRef}`, url: `http://${hostIp}:9000`, paths: ["/functions/v1"], hosts, projectRef, readTimeout: 500_000 });  // 500s for AI/OCR inference
             await this.ensureServiceAndRoute({ name: `svc-storage-${projectRef}`, url: `http://${hostIp}:9090`, paths: ["/storage/v1/"], hosts, projectRef });
             await this.ensureServiceAndRoute({
+                name: `svc-realtime-api-${projectRef}`,
+                url: `http://${hostIp}:4000/api`,
+                paths: ["/realtime/v1/api"],
+                hosts,
+                projectRef,
+                stripPath: true,
+                readTimeout: 60000,
+                protocols: ["http", "https", "grpc", "grpcs", "ws", "wss"],
+            });
+            await this.ensureServiceAndRoute({
                 name: `svc-realtime-${projectRef}`,
-                // Realtime WebSocket endpoint is /socket/websocket internally.
-                // Keep strip_path=true on /realtime/v1 and prepend /socket at service URL.
-                url: `http://${hostIp}:4000/socket`,
+                // Map Realtime WebSocket endpoint to our native Bun Management-API (9090) 
+                // It internally intercepts traffic and forwards the rest to 4000 natively.
+                url: `http://${hostIp}:9090`,
                 paths: ["/realtime/v1"],
                 hosts,
                 projectRef,
                 readTimeout: 86400000,
-                protocols: ["http", "https", "ws", "wss"],
+                protocols: ["http", "https", "grpc", "grpcs", "ws", "wss"],
             });
 
             // Ensure Studio routes (Management API proxy loopback for SPA fallback)
@@ -499,7 +509,7 @@ export class GatewayService {
 
     async addProjectDomains(projectRef: string, apiDomains: string[], studioDomains: string[]): Promise<boolean> {
         try {
-            const servicePrefixes = ["svc-pgrst-", "svc-graphql-", "svc-gotrue-", "svc-functions-", "svc-storage-", "svc-realtime-"];
+            const servicePrefixes = ["svc-pgrst-", "svc-graphql-", "svc-gotrue-", "svc-functions-", "svc-storage-", "svc-realtime-", "svc-realtime-api-"];
             for (const prefix of servicePrefixes) {
                 const routeName = `route-${prefix}${projectRef}`;
                 const route = await this.kongRequest(`/routes/${routeName}`);
@@ -528,7 +538,7 @@ export class GatewayService {
 
     async removeProjectDomains(projectRef: string, apiDomains: string[], studioDomains: string[]): Promise<boolean> {
         try {
-            const servicePrefixes = ["svc-pgrst-", "svc-graphql-", "svc-gotrue-", "svc-functions-", "svc-storage-", "svc-realtime-"];
+            const servicePrefixes = ["svc-pgrst-", "svc-graphql-", "svc-gotrue-", "svc-functions-", "svc-storage-", "svc-realtime-", "svc-realtime-api-"];
             for (const prefix of servicePrefixes) {
                 const routeName = `route-${prefix}${projectRef}`;
                 const route = await this.kongRequest(`/routes/${routeName}`);
@@ -561,7 +571,7 @@ export class GatewayService {
 
     async removeService(projectRef: string): Promise<{ success: boolean; error?: string }> {
         try {
-            const servicePrefixes = ["svc-pgrst-", "svc-graphql-", "svc-gotrue-", "svc-functions-", "svc-storage-", "svc-realtime-"];
+            const servicePrefixes = ["svc-pgrst-", "svc-graphql-", "svc-gotrue-", "svc-functions-", "svc-storage-", "svc-realtime-", "svc-realtime-api-"];
             for (const prefix of servicePrefixes) {
                 const name = `${prefix}${projectRef}`;
                 const routeName = `route-${name}`;

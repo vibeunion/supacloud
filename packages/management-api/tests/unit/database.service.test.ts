@@ -12,8 +12,8 @@ interface MockSql {
 
 function createMockSql(): MockSql {
     const fn = mock((strings: unknown) => Promise.resolve([]));
-    (fn as Record<string, unknown>).unsafe = mock(() => Promise.resolve([]));
-    (fn as Record<string, unknown>).close = mock(() => Promise.resolve());
+    (fn as unknown as Record<string, unknown>).unsafe = mock(() => Promise.resolve([]));
+    (fn as unknown as Record<string, unknown>).close = mock(() => Promise.resolve());
     return fn as unknown as MockSql;
 }
 
