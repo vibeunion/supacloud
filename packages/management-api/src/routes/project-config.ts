@@ -337,6 +337,139 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
     { params: t.Object({ ref: t.String() }) }
   )
 
+  // Get Postgres DB config — required by CLI `supabase link` (V1GetPostgresConfig)
+  .get(
+    "/:ref/config/postgres",
+    async ({ params }) => {
+      const { getProjectDb } = await import("../db");
+      const { sql: metaSql } = await import("../db");
+      
+      const [project] = await metaSql`SELECT db_name FROM projects WHERE ref=${params.ref}`;
+      if (!project) return status(404, { error: "Project not found" });
+
+      try {
+        const db = getProjectDb(project.db_name);
+        const settings = await db`
+          SELECT name, setting, unit, short_desc 
+          FROM pg_settings 
+          WHERE name IN (
+            'max_connections', 'shared_buffers', 'effective_cache_size', 
+            'maintenance_work_mem', 'work_mem', 'statement_timeout',
+            'idle_in_transaction_session_timeout', 'wal_level',
+            'max_wal_senders', 'max_replication_slots'
+          )
+        `;
+
+        const settingsMap: Record<string, string> = {};
+        for (const s of settings) {
+          settingsMap[s.name as string] = s.setting as string;
+        }
+
+        return {
+          max_connections: Number(settingsMap.max_connections || 100),
+          shared_buffers: settingsMap.shared_buffers || "128MB",
+          effective_cache_size: settingsMap.effective_cache_size || "4GB",
+          maintenance_work_mem: settingsMap.maintenance_work_mem || "64MB",
+          work_mem: settingsMap.work_mem || "4MB",
+          statement_timeout: settingsMap.statement_timeout || "0",
+          idle_in_transaction_session_timeout: settingsMap.idle_in_transaction_session_timeout || "0",
+          wal_level: settingsMap.wal_level || "replica",
+        };
+      } catch {
+        return {
+          max_connections: 100,
+          shared_buffers: "128MB",
+          effective_cache_size: "4GB",
+        };
+      }
+    },
+    { params: t.Object({ ref: t.String() }) }
+  )
+
+  // Get Pooler config — required by CLI `supabase link` (GetPoolerConfig)
+  .get(
+    "/:ref/config/pooler",
+    async ({ params }) => {
+      const { config: appConfig } = await import("../config");
+      const { sql: metaSql } = await import("../db");
+      
+      const [project] = await metaSql`SELECT db_name FROM projects WHERE ref=${params.ref}`;
+      if (!project) return status(404, { error: "Project not found" });
+
+      const dbName = project.db_name || `supa_${params.ref}`;
+      const pgHost = appConfig.pgHost || "localhost";
+      const pgPort = appConfig.pgPort || 5432;
+
+      return {
+        pool_mode: "transaction",
+        default_pool_size: 15,
+        max_client_conn: 200,
+        connection_string: `postgres://postgres.${params.ref}:${pgPort}@${pgHost}:6543/${dbName}`,
+      };
+    },
+    { params: t.Object({ ref: t.String() }) }
+  )
+
+  // Get Network Restrictions — required by CLI `supabase link` (V1GetNetworkRestrictions)
+  .get(
+    "/:ref/network-restrictions",
+    async ({ params }) => {
+      const settings = await projectService.getProjectSettings(params.ref);
+      if (!settings) return status(404, { error: "Project not found" });
+
+      return {
+        config: {
+          dbAllowedCidrs: (settings as Record<string, unknown>).network_restrictions || ["0.0.0.0/0"],
+        },
+        old_config: {},
+        status: "applied",
+        entitlement: "custom",
+      };
+    },
+    { params: t.Object({ ref: t.String() }) }
+  )
+
+  // Get Storage policies — required by Studio Storage > Policies page (P0-15)
+  .get(
+    "/:ref/storage/policies",
+    async ({ params }) => {
+      const { getProjectDb } = await import("../db");
+      const { sql: metaSql } = await import("../db");
+      
+      const [project] = await metaSql`SELECT db_name FROM projects WHERE ref=${params.ref}`;
+      if (!project) return status(404, { error: "Project not found" });
+
+      try {
+        const db = getProjectDb(project.db_name);
+        const policies = await db`
+          SELECT pol.polname as name, pol.polpermissive as permissive,
+            CASE pol.polcmd
+              WHEN 'r' THEN 'SELECT'
+              WHEN 'a' THEN 'INSERT'
+              WHEN 'w' THEN 'UPDATE'
+              WHEN 'd' THEN 'DELETE'
+              ELSE 'ALL'
+            END as command,
+            pg_get_expr(pol.polqual, pol.polrelid) as definition,
+            pg_get_expr(pol.polwithcheck, pol.polrelid) as check,
+            cls.relname as table_name,
+            nsp.nspname as schema_name,
+            ARRAY(SELECT rolname FROM pg_roles WHERE oid = ANY(pol.polroles)) as roles
+          FROM pg_policy pol
+          JOIN pg_class cls ON pol.polrelid = cls.oid
+          JOIN pg_namespace nsp ON cls.relnamespace = nsp.oid
+          WHERE nsp.nspname = 'storage'
+          ORDER BY cls.relname, pol.polname
+        `;
+        return policies;
+      } catch (err) {
+        logger.warn("[project-config] Failed to list storage policies", { error: err });
+        return [];
+      }
+    },
+    { params: t.Object({ ref: t.String() }) }
+  )
+
   // Get Typescript Types — Real schema reflection (P0-5)
   .get(
     "/:ref/types/typescript",
