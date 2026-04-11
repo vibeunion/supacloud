@@ -230,7 +230,6 @@ Deno.serve(async (req) => {
     const WECHAT_APP_SECRET = Deno.env.get("WECHAT_MINIPROGRAM_APP_SECRET") || "${appSecret}"
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL")
     const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")
-    const JWT_SECRET = Deno.env.get("JWT_SECRET") as string
 
     const tokenUrl = \`https://api.weixin.qq.com/sns/jscode2session?appid=\${WECHAT_APP_ID}&secret=\${WECHAT_APP_SECRET}&js_code=\${code}&grant_type=authorization_code\`
     const wechatRes = await fetch(tokenUrl)
@@ -241,9 +240,6 @@ Deno.serve(async (req) => {
     }
 
     const { openid, session_key, unionid } = wechatData
-
-    const SUPABASE_URL = Deno.env.get("SUPABASE_URL")
-    const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")
 
     const supabaseAdmin = createClient(SUPABASE_URL as string, SUPABASE_SERVICE_ROLE_KEY as string, {
       auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false },
