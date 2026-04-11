@@ -34,11 +34,27 @@ export class StorageRLS {
   }
 
   
-  static async listLogicalBuckets(ref: string, token: string | undefined): Promise<Record<string, unknown>[]> {
+  static async listLogicalBuckets(
+    ref: string, 
+    token: string | undefined,
+    options?: { limit?: number; offset?: number; search?: string }
+  ): Promise<Record<string, unknown>[]> {
     if (ref === 'test_mock') return Array.from(mockBuckets.values());
 
     return await this.withBucketRLS(ref, token, async (tx) => {
-        return await tx`SELECT id, name, public, created_at, updated_at, file_size_limit, allowed_mime_types FROM storage.buckets ORDER BY name`;
+        let query = tx`SELECT id, name, public, created_at, updated_at, file_size_limit, allowed_mime_types FROM storage.buckets`;
+        if (options?.search) {
+             const searchTerm = `%${options.search}%`;
+             query = tx`${query} WHERE name ILIKE ${searchTerm}`;
+        }
+        query = tx`${query} ORDER BY name`;
+        if (options?.limit) {
+            query = tx`${query} LIMIT ${options.limit}`;
+        }
+        if (options?.offset) {
+            query = tx`${query} OFFSET ${options.offset}`;
+        }
+        return await query;
     });
   }
 
@@ -175,11 +191,17 @@ export class StorageRLS {
     bucketId: string,
     objectName: string,
     metadata: Record<string, unknown> = {},
-    dryRun: boolean = false
+    dryRun: boolean = false,
+    upsert: boolean = true
   ): Promise<{ permitted: boolean, error?: string }> {
     if (ref === 'test_mock') {
        if (!mockBuckets.has(bucketId)) return { permitted: false, error: 'Bucket not found' };
-       if (action === 'upload' && !dryRun) mockObjects.set(bucketId + '/' + objectName, { metadata, updated: new Date().toISOString() });
+       if (action === 'upload') {
+           if (!upsert && mockObjects.has(bucketId + '/' + objectName)) {
+               return { permitted: false, error: 'The resource already exists' };
+           }
+           if (!dryRun) mockObjects.set(bucketId + '/' + objectName, { metadata, updated: new Date().toISOString() });
+       }
        if (action === 'download' || action === 'delete') {
            if (!mockObjects.has(bucketId + '/' + objectName)) return { permitted: false, error: 'Object not found' };
            if (action === 'delete') mockObjects.delete(bucketId + '/' + objectName);
@@ -213,16 +235,23 @@ export class StorageRLS {
         const owner = typeof payload.sub === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(payload.sub) ? payload.sub : null;
 
         if (action === 'upload') {
-          // Verify bucket exists first, otherwise foreign key fails, but bypassing for speed 
-          // RLS ON CONFLICT handles Upsert logic:
-          const res = await tx`
-            INSERT INTO storage.objects (bucket_id, name, owner, metadata)
-            VALUES (${bucketId}, ${objectName}, ${owner}, ${ { ...metadata, userMetadata: metadata.userMetadata || {} } })
-            ON CONFLICT (bucket_id, name)
-            DO UPDATE SET metadata = EXCLUDED.metadata, updated_at = now()
-            RETURNING id
-          `;
-          if (res.length === 0) throw new Error("RLS_VIOLATION");
+          if (upsert) {
+            const res = await tx`
+              INSERT INTO storage.objects (bucket_id, name, owner, metadata)
+              VALUES (${bucketId}, ${objectName}, ${owner}, ${ { ...metadata, userMetadata: metadata.userMetadata || {} } })
+              ON CONFLICT (bucket_id, name)
+              DO UPDATE SET metadata = EXCLUDED.metadata, updated_at = now()
+              RETURNING id
+            `;
+            if (res.length === 0) throw new Error("RLS_VIOLATION");
+          } else {
+            const res = await tx`
+              INSERT INTO storage.objects (bucket_id, name, owner, metadata)
+              VALUES (${bucketId}, ${objectName}, ${owner}, ${ { ...metadata, userMetadata: metadata.userMetadata || {} } })
+              RETURNING id
+            `;
+            if (res.length === 0) throw new Error("RLS_VIOLATION");
+          }
           
         } else if (action === 'download') {
           // Check if user is allowed to SELECT
@@ -252,6 +281,9 @@ export class StorageRLS {
     } catch (e: unknown) {
       if (e instanceof Error && e.message === 'DRY_RUN_ROLLBACK') {
         return { permitted: true };
+      }
+      if ((e as any).code === '23505') {
+        return { permitted: false, error: 'The resource already exists' };
       }
       // If error is RLS related (row level security policy violation) or Postgres throws, deny
       logger.debug(`[StorageRLS] Action ${action} denied: ${e instanceof Error ? e.message : String(e)}`);
@@ -366,8 +398,9 @@ export class StorageRLS {
     }
   }
 
-  static async deleteLogicalBucket(ref: string, token: string | undefined, bucketId: string): Promise<void> {
+  static async deleteLogicalBucket(ref: string, token: string | undefined, bucketId: string, dryRun: boolean = false): Promise<void> {
     if (ref === 'test_mock') {
+        if (dryRun) return;
         for (const key of Array.from(mockObjects.keys())) {
             if (key.startsWith(`${bucketId}/`)) mockObjects.delete(key);
         }
@@ -380,14 +413,17 @@ export class StorageRLS {
             await tx`DELETE FROM storage.objects WHERE bucket_id = ${bucketId}`;
             const resBuckets = await tx`DELETE FROM storage.buckets WHERE id = ${bucketId} RETURNING id`;
             if (resBuckets.length === 0) throw new Error("RLS_VIOLATION");
+            if (dryRun) throw new Error("DRY_RUN_ROLLBACK");
         });
     } catch (e: any) {
+        if (e.message === 'DRY_RUN_ROLLBACK') return;
         throw new Error(e.message === 'RLS_VIOLATION' ? "You do not have permission to delete this bucket" : (e.message || "Failed to delete bucket"));
     }
   }
 
-  static async emptyLogicalBucket(ref: string, token: string | undefined, bucketId: string): Promise<void> {
+  static async emptyLogicalBucket(ref: string, token: string | undefined, bucketId: string, dryRun: boolean = false): Promise<void> {
     if (ref === 'test_mock') {
+      if (dryRun) return;
       for (const key of Array.from(mockObjects.keys())) {
         if (key.startsWith(`${bucketId}/`)) mockObjects.delete(key);
       }
@@ -397,10 +433,10 @@ export class StorageRLS {
     try {
         await this.withBucketRLS(ref, token, async (tx) => {
             await tx`DELETE FROM storage.objects WHERE bucket_id = ${bucketId}`;
-            // Optional: checking if bucket exists/is selectable through RLS might be good,
-            // but simply deleting objects subject to DELETE policies is enough.
+            if (dryRun) throw new Error("DRY_RUN_ROLLBACK");
         });
     } catch (e: any) {
+        if (e.message === 'DRY_RUN_ROLLBACK') return;
         throw new Error(e.message || "Failed to empty bucket");
     }
   }

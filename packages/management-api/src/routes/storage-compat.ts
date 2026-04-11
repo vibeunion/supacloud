@@ -269,13 +269,18 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
     // ════════════════════════════════════════════════════════
 
     // GET /bucket — List all buckets
-    .get('/bucket', async ({ headers }) => {
+    .get('/bucket', async ({ headers, query }) => {
         const ref = getProjectRef(headers as Record<string, string | undefined>);
         if (!ref) return status(400, { statusCode: '400', error: 'Bad Request', message: 'Missing tenant reference' });
         const auth = headers['authorization'];
         
         try {
-            const buckets = await StorageRLS.listLogicalBuckets(ref, auth);
+            const options = {
+                limit: query.limit ? parseInt(query.limit) : undefined,
+                offset: query.offset ? parseInt(query.offset) : undefined,
+                search: query.search || undefined
+            };
+            const buckets = await StorageRLS.listLogicalBuckets(ref, auth, options);
             return buckets.map(b => ({
                 id: b.id,
                 name: b.name,
@@ -425,11 +430,17 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         const auth = headers['authorization'];
 
         try {
-            await StorageRLS.emptyLogicalBucket(ref, auth, params.id);
+            // 1. Dry run to ensure user can empty this bucket
+            await StorageRLS.emptyLogicalBucket(ref, auth, params.id, true);
         } catch (e: any) {
             return status(403, { statusCode: '403', error: 'Forbidden', message: e.message || 'Access Denied' });
         }
+        
+        // 2. Clear physical storage
         await StorageService.emptyBucket(ref, params.id);
+        
+        // 3. Clear logical metadata
+        await StorageRLS.emptyLogicalBucket(ref, auth, params.id, false);
         return { message: `Successfully emptied bucket ${params.id}` };
     })
 
@@ -439,12 +450,18 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         const auth = headers['authorization'];
 
         try {
-            await StorageRLS.deleteLogicalBucket(ref, auth, params.id);
+            // 1. Dry run to ensure bucket can be deleted
+            await StorageRLS.deleteLogicalBucket(ref, auth, params.id, true);
         } catch (e: any) {
             return status(403, { statusCode: '403', error: 'Forbidden', message: e.message || 'Access Denied' });
         }
+        
+        // 2. Physical delete bucket
         const result = await StorageService.deleteBucket(ref, params.id);
         if (!result.success) return status(500, { statusCode: '500', error: 'Internal', message: result.error || 'Failed to delete bucket' });
+        
+        // 3. Logical delete bucket
+        await StorageRLS.deleteLogicalBucket(ref, auth, params.id, false);
         return { message: `Successfully deleted bucket ${params.id}` };
     })
 
@@ -470,10 +487,6 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             const bucket = await StorageRLS.getLogicalBucket(ref, params.bucket, auth);
             if (!bucket) return status(404, { statusCode: '404', error: 'Not Found', message: 'Bucket not found' });
 
-            if (!upsert && await StorageRLS.objectExists(ref, params.bucket, filePath, auth)) {
-                return status(409, { statusCode: '409', error: 'Conflict', message: 'The resource already exists' });
-            }
-            
             // Check file size limit
             if (bucket.file_size_limit && fileBuffer.byteLength > Number(bucket.file_size_limit)) {
                 return status(413, { statusCode: '413', error: 'Payload too large', message: 'The object exceeded the maximum allowed size' });
@@ -490,15 +503,15 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             }
 
             const metadata = { mimetype: fileMimeType, size: fileBuffer.byteLength, userMetadata };
-            const permitted = await StorageRLS.authorizeAction(ref, auth, 'upload', params.bucket, filePath, metadata, true);
-            if (!permitted.permitted) return status(permitted.error === 'Bucket not found' || permitted.error === 'Object not found' ? 404 : 403, { statusCode: permitted.error === 'Bucket not found' || permitted.error === 'Object not found' ? '404' : '403', error: permitted.error === 'Object not found' ? 'Not Found' : 'Forbidden', message: permitted.error || 'Access Denied.' });
+            const permitted = await StorageRLS.authorizeAction(ref, auth, 'upload', params.bucket, filePath, metadata, true, upsert);
+            if (!permitted.permitted) return status(permitted.error === 'Bucket not found' || permitted.error === 'Object not found' ? 404 : (permitted.error === 'The resource already exists' ? 409 : 403), { statusCode: permitted.error === 'Bucket not found' || permitted.error === 'Object not found' ? '404' : (permitted.error === 'The resource already exists' ? '409' : '403'), error: permitted.error === 'Object not found' ? 'Not Found' : (permitted.error === 'The resource already exists' ? 'Conflict' : 'Forbidden'), message: permitted.error || 'Access Denied.' });
 
             const success = await StorageService.uploadFile(ref, params.bucket, filePath, fileBuffer, fileMimeType);
 
             if (!success) return status(500, { statusCode: '500', error: 'Internal', message: 'Failed to upload file' });
 
             // Finalize Materialization after physical layer succeeds
-            await StorageRLS.authorizeAction(ref, auth, 'upload', params.bucket, filePath, metadata, false);
+            await StorageRLS.authorizeAction(ref, auth, 'upload', params.bucket, filePath, metadata, false, upsert);
 
             return {
                 Id: `${params.bucket}/${filePath}`,
@@ -524,14 +537,15 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
 
             const auth = headers['authorization'];
             const metadata = { mimetype: fileMimeType, size: fileBuffer.byteLength, userMetadata };
-            const permitted = await StorageRLS.authorizeAction(ref, auth, 'upload', params.bucket, filePath, metadata, true);
+            // PUT essentially enforces upsert = true
+            const permitted = await StorageRLS.authorizeAction(ref, auth, 'upload', params.bucket, filePath, metadata, true, true);
             if (!permitted.permitted) return status(permitted.error === 'Bucket not found' || permitted.error === 'Object not found' ? 404 : 403, { statusCode: permitted.error === 'Bucket not found' || permitted.error === 'Object not found' ? '404' : '403', error: permitted.error === 'Object not found' ? 'Not Found' : 'Forbidden', message: permitted.error || 'Access Denied.' });
 
             const success = await StorageService.uploadFile(ref, params.bucket, filePath, fileBuffer, fileMimeType);
             if (!success) return status(500, { statusCode: '500', error: 'Internal', message: 'Upsert failed' });
 
             // Finalize Materialization after physical layer succeeds
-            await StorageRLS.authorizeAction(ref, auth, 'upload', params.bucket, filePath, metadata, false);
+            await StorageRLS.authorizeAction(ref, auth, 'upload', params.bucket, filePath, metadata, false, true);
             return { Key: `${params.bucket}/${filePath}` };
         } catch (err: unknown) {
             return status(500, { statusCode: '500', error: 'Internal', message: 'Upsert failed' });
@@ -1308,8 +1322,25 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             const fullBody = await TusStore.assemble(params.uploadId);
 
             try {
-                // Final Authorization Gate — Materializes object explicitly before backing store insertion
+                // Final Authorization Gate — Dry run first to verify rules without inserting orphan rows before S3
                 const finalPermitted = await StorageRLS.authorizeAction(
+                    upload.ref, 
+                    upload.auth_token, 
+                    'upload', 
+                    upload.bucket, 
+                    upload.objectName, 
+                    { mimetype: upload.contentType, size: upload.totalSize },
+                    true
+                );
+                
+                if (!finalPermitted.permitted) {
+                    throw new Error(finalPermitted.error || 'Access Denied during finalization');
+                }
+
+                await StorageService.uploadFile(upload.ref, upload.bucket, upload.objectName, fullBody, upload.contentType);
+                
+                // Finalize DB row now that S3 succeeded
+                await StorageRLS.authorizeAction(
                     upload.ref, 
                     upload.auth_token, 
                     'upload', 
@@ -1318,12 +1349,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
                     { mimetype: upload.contentType, size: upload.totalSize },
                     false
                 );
-                
-                if (!finalPermitted.permitted) {
-                    throw new Error(finalPermitted.error || 'Access Denied during finalization');
-                }
 
-                await StorageService.uploadFile(upload.ref, upload.bucket, upload.objectName, fullBody, upload.contentType);
                 await TusStore.delete(params.uploadId);
                 return { Key: `${upload.bucket}/${upload.objectName}` };
             } catch (err: unknown) {
