@@ -54,6 +54,8 @@ export class StorageRLS {
             query = ord === 'DESC' ? tx`${query} ORDER BY updated_at DESC` : tx`${query} ORDER BY updated_at ASC`;
         } else if (col === 'created_at') {
             query = ord === 'DESC' ? tx`${query} ORDER BY created_at DESC` : tx`${query} ORDER BY created_at ASC`;
+        } else if (col === 'id') {
+            query = ord === 'DESC' ? tx`${query} ORDER BY id DESC` : tx`${query} ORDER BY id ASC`;
         } else {
             query = ord === 'DESC' ? tx`${query} ORDER BY name DESC` : tx`${query} ORDER BY name ASC`;
         }
@@ -309,7 +311,8 @@ export class StorageRLS {
     limit: number = 100,
     offset: number = 0,
     sortBy?: { column?: string; order?: string },
-    search: string = ''
+    search: string = '',
+    with_delimiter: boolean = true
   ): Promise<any[]> {
     if (ref === 'test_mock') {
       const folders = new Set<string>();
@@ -325,7 +328,7 @@ export class StorageRLS {
             if (!nameWithoutPrefix) continue;
 
             const firstSlash = nameWithoutPrefix.indexOf('/');
-            if (firstSlash !== -1) {
+            if (with_delimiter && firstSlash !== -1) {
                 const folderName = nameWithoutPrefix.substring(0, firstSlash);
                 if (!folders.has(folderName)) {
                     folders.add(folderName);
@@ -418,7 +421,7 @@ export class StorageRLS {
             if (!nameWithoutPrefix) continue;
 
             const firstSlash = nameWithoutPrefix.indexOf('/');
-            if (firstSlash !== -1) {
+            if (with_delimiter && firstSlash !== -1) {
                 const folderName = nameWithoutPrefix.substring(0, firstSlash);
                 if (!folders.has(folderName)) {
                     folders.add(folderName);

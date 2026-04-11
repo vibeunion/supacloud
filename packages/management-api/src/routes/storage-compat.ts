@@ -994,13 +994,23 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
 
         return files.map(f => {
             const cleanName = prefix ? f.name.slice(prefix.length).replace(/^\/+/, '') : f.name;
+            if (f.isFolder) {
+                return {
+                    name: cleanName || f.name,
+                    id: null,
+                    updated_at: null,
+                    created_at: null,
+                    last_accessed_at: null,
+                    metadata: null
+                };
+            }
             return {
                 name: cleanName || f.name,
                 id: f.id,
                 updated_at: f.updated || new Date().toISOString(),
                 created_at: f.updated || new Date().toISOString(),
                 last_accessed_at: f.updated || new Date().toISOString(),
-                metadata: f.isFolder ? null : {
+                metadata: {
                     size: f.size,
                     mimetype: f.type || 'application/octet-stream',
                 },
@@ -1028,24 +1038,38 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
 
         const prefix = body?.prefix || '';
         const limit  = body?.limit || 100;
-        const offset = body?.offset || 0;
         const search = body?.search || '';
+        let offset = body?.offset || 0;
+        
+        // Decode cursor if provided overrides offset mapping
+        if (body?.cursor) {
+            try {
+                // simple base64 ascii integer decoding emulation
+                const decoded = Buffer.from(body.cursor, 'base64').toString('ascii');
+                if (!isNaN(Number(decoded))) offset = Number(decoded);
+            } catch (e) {}
+        }
+        
+        const with_delimiter = body?.with_delimiter ?? true;
 
-        // Fetch securely from RLS DB
+        // Fetch securely from RLS DB (ask for limit + 1 to test hasNext)
         let files;
         try {
-            files = await StorageRLS.listObjects(ref, auth, params.bucket, prefix, limit, offset, body?.sortBy, search);
+            files = await StorageRLS.listObjects(ref, auth, params.bucket, prefix, limit + 1, offset, body?.sortBy, search, with_delimiter);
         } catch (e: any) {
             return status(403, { statusCode: '403', error: 'Forbidden', message: e.message || 'Access Denied' });
         }
 
         const objects = [];
         const folders = [];
+        
+        const hasNext = files.length > limit;
+        if (hasNext) files.pop(); // Remove the +1 lookahead
 
         for (const f of files) {
             const cleanName = prefix ? f.name.slice(prefix.length).replace(/^\/+/, '') : f.name;
             if (f.isFolder) {
-                folders.push({ name: cleanName || f.name, id: null, updated_at: f.updated || new Date().toISOString(), created_at: f.updated || new Date().toISOString(), last_accessed_at: f.updated || new Date().toISOString(), metadata: null });
+                folders.push({ name: cleanName || f.name });
             } else {
                 objects.push({
                     name: cleanName || f.name,
@@ -1061,12 +1085,16 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             }
         }
 
-        return { next_continuation_token: null, objects: objects, folders: folders, hasNext: false };
+        const nextCursor = hasNext ? Buffer.from(String(offset + limit)).toString('base64') : null;
+
+        return { nextCursor, objects, folders };
     }, {
         body: t.Optional(t.Object({
             prefix: t.Optional(t.String()),
             limit: t.Optional(t.Number()),
             offset: t.Optional(t.Number()),
+            cursor: t.Optional(t.String()),
+            with_delimiter: t.Optional(t.Boolean()),
             search: t.Optional(t.String()),
             sortBy: t.Optional(t.Object({
                 column: t.Optional(t.String()),
