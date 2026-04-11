@@ -700,7 +700,8 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
                 }
 
                 const auth = headers['authorization'] || '';
-                if (!(await StorageRLS.authorizeAction(ref, auth, 'download', params.bucket, cleanPath))) {
+                const permittedCheck = await StorageRLS.authorizeAction(ref, auth, 'download', params.bucket, cleanPath);
+                if (!permittedCheck.permitted) {
                     return { error: 'Unauthorized', path: filePath, signedURL: null };
                 }
 
@@ -728,7 +729,8 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         }
 
         const auth = headers['authorization'] || '';
-        if (!(await StorageRLS.authorizeAction(ref, auth, 'download', params.bucket, filePath))) {
+        const permittedCheck = await StorageRLS.authorizeAction(ref, auth, 'download', params.bucket, filePath);
+        if (!permittedCheck.permitted) {
             return status(403, { statusCode: '403', error: 'Forbidden', message: 'You do not have permission to access this resource.' });
         }
 
@@ -761,8 +763,9 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         // Enforce RLS for upload URL generation
         const auth = headers['authorization'] || '';
         const action = upsert ? 'upload' : 'upload'; // authorizeAction uses 'upload'
-        if (!(await StorageRLS.authorizeAction(ref, auth, action, params.bucket, filePath))) {
-            return status(403, { statusCode: '403', error: 'Forbidden', message: 'You do not have permission to create signed upload URLs for this resource.' });
+        const permittedCheck = await StorageRLS.authorizeAction(ref, auth, action, params.bucket, filePath, {}, true);
+        if (!permittedCheck.permitted) {
+            return status(403, { statusCode: '403', error: 'Forbidden', message: permittedCheck.error || 'You do not have permission to create signed upload URLs for this resource.' });
         }
 
         const token = crypto.randomUUID();

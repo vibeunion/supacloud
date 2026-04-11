@@ -4,6 +4,7 @@ import { config } from "../../src/config";
 import { storageCompatRoutes } from "../../src/routes/storage-compat";
 import { mockBuckets, mockObjects } from "../../src/services/storage-rls";
 import { StorageService } from "../../src/services/storage.service";
+import { SignedStore, TusStore } from "../../src/services/storage-store";
 
 const BASE = "http://localhost";
 
@@ -17,6 +18,11 @@ beforeEach(() => {
   mockBuckets.clear();
   mockObjects.clear();
   config.storageSigningSecret = "test-storage-signing-secret";
+
+  spyOn(SignedStore, "set").mockResolvedValue(undefined);
+  spyOn(SignedStore, "get").mockResolvedValue({ ref: "test_mock", bucket: "avatars", objectName: "signed.txt", upsert: false, expiresAt: 4000000000 });
+  spyOn(SignedStore, "delete").mockResolvedValue(undefined);
+  spyOn(TusStore, "get").mockResolvedValue(null);
 
   mockBuckets.set("avatars", {
     id: "avatars",
