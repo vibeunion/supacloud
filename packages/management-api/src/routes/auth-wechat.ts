@@ -216,7 +216,7 @@ async function deployWeChatMPFunction(ref: string, appId: string, appSecret: str
 
 function generateWeChatMiniProgramLoginFunction(appId: string, appSecret: string): string {
   return `import { createClient } from "@supabase/supabase-js"
-import postgres from "postgres"
+import { SQL } from "bun"
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -281,18 +281,18 @@ Deno.serve(async (req) => {
     // Explicitly link physical identity row mirroring real OAuth behavior
     const SUPABASE_DB_URL = Deno.env.get("SUPABASE_DB_URL")
     if (SUPABASE_DB_URL) {
-      const sql = postgres(SUPABASE_DB_URL)
+      const sql = new SQL(SUPABASE_DB_URL)
       try {
         await sql\`
           INSERT INTO auth.identities (id, user_id, provider, identity_data, last_sign_in_at, created_at, updated_at)
-          VALUES (\${openid}, \${sessionData.user.id}, 'wechat_miniprogram', \${sql.json({ sub: openid, unionid })}, NOW(), NOW(), NOW())
+          VALUES (\${openid}, \${sessionData.user.id}, 'wechat_miniprogram', \${JSON.stringify({ sub: openid, unionid })}::jsonb, NOW(), NOW(), NOW())
           ON CONFLICT (provider, id) DO UPDATE 
           SET identity_data = EXCLUDED.identity_data, last_sign_in_at = EXCLUDED.last_sign_in_at, updated_at = EXCLUDED.updated_at
         \`
       } catch (e) {
         console.error("Identity linkage failed:", e)
       } finally {
-        await sql.end()
+        await sql.close()
       }
     }
 
@@ -306,7 +306,7 @@ Deno.serve(async (req) => {
 
 function generateWeChatMPLoginFunction(appId: string, appSecret: string, redirectUri?: string): string {
   return `import { createClient } from "@supabase/supabase-js"
-import postgres from "postgres"
+import { SQL } from "bun"
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -386,18 +386,18 @@ Deno.serve(async (req) => {
     // Explicitly link physical identity row mirroring real OAuth behavior
     const SUPABASE_DB_URL = Deno.env.get("SUPABASE_DB_URL")
     if (SUPABASE_DB_URL) {
-      const sql = postgres(SUPABASE_DB_URL)
+      const sql = new SQL(SUPABASE_DB_URL)
       try {
         await sql\`
           INSERT INTO auth.identities (id, user_id, provider, identity_data, last_sign_in_at, created_at, updated_at)
-          VALUES (\${openid}, \${sessionData.user.id}, 'wechat_mp', \${sql.json({ sub: openid, unionid, nickname: userData.nickname, headimgurl: userData.headimgurl })}, NOW(), NOW(), NOW())
+          VALUES (\${openid}, \${sessionData.user.id}, 'wechat_mp', \${JSON.stringify({ sub: openid, unionid, nickname: userData.nickname, headimgurl: userData.headimgurl })}::jsonb, NOW(), NOW(), NOW())
           ON CONFLICT (provider, id) DO UPDATE 
           SET identity_data = EXCLUDED.identity_data, last_sign_in_at = EXCLUDED.last_sign_in_at, updated_at = EXCLUDED.updated_at
         \`
       } catch (e) {
         console.error("Identity linkage failed:", e)
       } finally {
-        await sql.end()
+        await sql.close()
       }
     }
 
