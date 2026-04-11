@@ -3907,6 +3907,23 @@ CREATE OR REPLACE FUNCTION storage.extension(name text) RETURNS text AS $$
   SELECT substring(f FROM '\.([^\.]*)$') FROM filename;
 $$ LANGUAGE SQL STABLE;
 
+-- PostgREST pre-request function: sets JWT claims for RLS context
+CREATE OR REPLACE FUNCTION public.set_request_context() RETURNS void AS $$
+BEGIN
+  IF current_setting('request.jwt.claims', true) = '' THEN
+    PERFORM set_config('request.jwt.claims', '{}', true);
+  END IF;
+  IF current_setting('request.jwt.claim.role', true) = '' THEN
+    PERFORM set_config('request.jwt.claim.role', 'anon', true);
+  END IF;
+END;
+$$ LANGUAGE plpgsql;
+
+-- PostgREST root spec: returns OpenAPI spec at root path /
+CREATE OR REPLACE FUNCTION public.root_spec() RETURNS jsonb AS $$
+  SELECT null;
+$$ LANGUAGE SQL STABLE;
+
 -- 7. GraphQL Schema
 CREATE SCHEMA IF NOT EXISTS graphql_public;
 GRANT USAGE ON SCHEMA graphql_public TO anon, authenticated, service_role;

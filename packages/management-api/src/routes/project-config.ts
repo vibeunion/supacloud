@@ -404,7 +404,7 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
         pool_mode: "transaction",
         default_pool_size: 15,
         max_client_conn: 200,
-        connection_string: `postgres://postgres.${params.ref}:${pgPort}@${pgHost}:6543/${dbName}`,
+        connection_string: `postgresql://postgres.${params.ref}:${appConfig.pgPassword}@${pgHost}:${pgPort}/${dbName}`,
       };
     },
     { params: t.Object({ ref: t.String() }) }
@@ -533,6 +533,39 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
           ORDER BY n.nspname, p.proname
         `;
 
+        // 5. Fetch foreign key relationships
+        const fkeys = await db`
+          SELECT
+            ns.nspname AS source_schema,
+            cls.relname AS source_table,
+            attr.attname AS source_column,
+            ns2.nspname AS target_schema,
+            cls2.relname AS target_table,
+            attr2.attname AS target_column
+          FROM pg_constraint con
+          JOIN pg_class cls ON con.conrelid = cls.oid
+          JOIN pg_namespace ns ON cls.relnamespace = ns.oid
+          JOIN pg_class cls2 ON con.confrelid = cls2.oid
+          JOIN pg_namespace ns2 ON cls2.relnamespace = ns2.oid
+          JOIN pg_attribute attr ON attr.attrelid = con.conrelid AND attr.attnum = ANY(con.conkey)
+          JOIN pg_attribute attr2 ON attr2.attrelid = con.confrelid AND attr2.attnum = ANY(con.confkey)
+          WHERE con.contype = 'f'
+            AND ns.nspname = ANY(${includedSchemas})
+          ORDER BY ns.nspname, cls.relname, attr.attname
+        `;
+
+        const relMap = new Map<string, Array<{ source_column: string; target_schema: string; target_table: string; target_column: string }>>();
+        for (const fk of fkeys) {
+          const key = `${fk.source_schema}.${fk.source_table}`;
+          if (!relMap.has(key)) relMap.set(key, []);
+          relMap.get(key)!.push({
+            source_column: fk.source_column,
+            target_schema: fk.target_schema,
+            target_table: fk.target_table,
+            target_column: fk.target_column
+          });
+        }
+
         // Generate TypeScript
         let ts = `export type Json =\n  | string\n  | number\n  | boolean\n  | null\n  | { [key: string]: Json | undefined }\n  | Json[]\n\nexport type Database = {\n`;
 
@@ -569,7 +602,12 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
               const nullable = col.is_nullable === 'YES' ? ' | null' : '';
               ts += `          ${col.column_name}?: ${tsType}${nullable}\n`;
             }
-            ts += `        }\n        Relationships: []\n      }\n`;
+            ts += `        }\n        Relationships: [\n`;
+            const rels = relMap.get(`${schema}.${tableName}`) || [];
+            for (const rel of rels) {
+              ts += `          { source_column: "${rel.source_column}"; target_schema: "${rel.target_schema}"; target_table: "${rel.target_table}"; target_column: "${rel.target_column}" },\n`;
+            }
+            ts += `        ]\n      }\n`;
           }
 
           ts += `    }\n    Views: {\n`;
@@ -594,10 +632,10 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
 
           ts += `    }\n    Enums: {\n`;
 
-          // Enums
           for (const en of enums.filter((e: Record<string, unknown>) => e.schema === schema)) {
             const vals = (en.values as string[]).map(v => `"${v}"`).join(' | ');
-            ts += `      ${en.name}: ${vals}\n`;
+            const enumKey = `${schema}_${en.name}`;
+            ts += `      ${enumKey}: ${vals}\n`;
           }
 
           ts += `    }\n    CompositeTypes: {\n      [_ in never]: never\n    }\n  }\n`;

@@ -205,17 +205,22 @@ export const wsRoutes = new Elysia({ prefix: "/ws" })
             
             // P0-12: phx_leave intercept (graceful teardown locally + proxy)
             if (parsed.event === 'phx_leave') {
-                 // P1-3: Reply in V2 array format matching Phoenix serializer expectations
                  ws.send(JSON.stringify([
                      parsed.join_ref, parsed.ref, parsed.topic, 'phx_reply',
                      { status: 'ok', response: {} }
                  ]));
                  
-                 // Clean up native bun subscription
                  if ((ws.data as any).__bunSubscriptions && (ws.data as any).__bunSubscriptions.has(parsed.topic)) {
                      (ws.data as any).__bunSubscriptions.delete(parsed.topic);
                  }
-                 // We still forward it so Elixir can clean up its presence/broadcast CRDTs!
+            }
+
+            // P1-2: heartbeat local reply to prevent client timeout during upstream buffering
+            if (parsed.event === 'heartbeat') {
+                ws.send(JSON.stringify([
+                    parsed.join_ref, parsed.ref, parsed.topic, 'phx_reply',
+                    { status: 'ok', response: {} }
+                ]));
             }
 
             // P0-13: access_token intercept
