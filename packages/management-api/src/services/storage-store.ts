@@ -8,6 +8,7 @@ export interface TusUpload {
     totalSize: number;
     offset: number;
     createdAt: number;
+    auth_token?: string;
 }
 
 export interface SignedUpload {
@@ -16,13 +17,14 @@ export interface SignedUpload {
     objectName: string;
     upsert: boolean;
     expiresAt: number;
+    auth_token?: string;
 }
 
 export class TusStore {
     static async set(id: string, upload: TusUpload) {
         await sql`
-            INSERT INTO system_tus_uploads (id, ref, bucket, object_name, content_type, total_size, offset_size)
-            VALUES (${id}, ${upload.ref}, ${upload.bucket}, ${upload.objectName}, ${upload.contentType}, ${upload.totalSize}, ${upload.offset})
+            INSERT INTO system_tus_uploads (id, ref, bucket, object_name, content_type, total_size, offset_size, auth_token)
+            VALUES (${id}, ${upload.ref}, ${upload.bucket}, ${upload.objectName}, ${upload.contentType}, ${upload.totalSize}, ${upload.offset}, ${upload.auth_token || null})
             ON CONFLICT (id) DO UPDATE SET 
                 offset_size = EXCLUDED.offset_size, 
                 updated_at = NOW()
@@ -39,7 +41,8 @@ export class TusStore {
             contentType: row.content_type,
             totalSize: Number(row.total_size),
             offset: Number(row.offset_size),
-            createdAt: new Date(row.created_at).getTime()
+            createdAt: new Date(row.created_at).getTime(),
+            auth_token: row.auth_token
         };
     }
 
@@ -63,8 +66,8 @@ export class TusStore {
 export class SignedStore {
     static async set(token: string, upload: SignedUpload) {
         await sql`
-            INSERT INTO system_signed_uploads (token, ref, bucket, object_name, upsert, expires_at)
-            VALUES (${token}, ${upload.ref}, ${upload.bucket}, ${upload.objectName}, ${upload.upsert}, ${upload.expiresAt})
+            INSERT INTO system_signed_uploads (token, ref, bucket, object_name, upsert, expires_at, auth_token)
+            VALUES (${token}, ${upload.ref}, ${upload.bucket}, ${upload.objectName}, ${upload.upsert}, ${upload.expiresAt}, ${upload.auth_token || null})
         `;
     }
 
@@ -76,7 +79,8 @@ export class SignedStore {
             bucket: row.bucket,
             objectName: row.object_name,
             upsert: row.upsert,
-            expiresAt: Number(row.expires_at)
+            expiresAt: Number(row.expires_at),
+            auth_token: row.auth_token
         };
     }
 

@@ -116,6 +116,7 @@ export async function initDatabase() {
       created_at TIMESTAMPTZ DEFAULT NOW()
     );
 
+
     CREATE TABLE IF NOT EXISTS system_signed_uploads (
       token TEXT PRIMARY KEY,
       ref VARCHAR(50) NOT NULL,
@@ -125,6 +126,7 @@ export async function initDatabase() {
       expires_at BIGINT NOT NULL,
       created_at TIMESTAMPTZ DEFAULT NOW()
     );
+
   `;
 
 
@@ -160,6 +162,15 @@ export async function initDatabase() {
       logger.info("DDL executed successfully.");
     } else {
       logger.info("Tables already exist, skipping table creation.");
+    }
+
+    // Always apply migrations to ensure schema is up-to-date
+    try {
+      await sql`ALTER TABLE system_tus_uploads ADD COLUMN IF NOT EXISTS auth_token TEXT`;
+      await sql`ALTER TABLE system_signed_uploads ADD COLUMN IF NOT EXISTS auth_token TEXT`;
+      logger.info("Schema migrations applied.");
+    } catch (e: any) {
+      logger.error("Failed to apply migrations: " + e.message);
     }
 
     // Always apply trigger (idempotent: CREATE OR REPLACE + DROP IF EXISTS)
