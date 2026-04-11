@@ -114,7 +114,7 @@ export const wsRoutes = new Elysia({ prefix: "/ws" })
         try {
             const query = (ws.data as any).query || {};
             const apikey = query.apikey || "";
-            const vsn = query.vsn || "1.0.0";
+            const vsn = query.vsn || "2.0.0"; // P1-6: Default to 2.0.0
             
             if (!apikey) {
                 ws.close(1008, "apikey is required to connect to Realtime");
@@ -203,24 +203,42 @@ export const wsRoutes = new Elysia({ prefix: "/ws" })
                 parsed = raw;
             }
             
-            // P0-12: phx_leave intercept (graceful teardown locally + proxy)
+            // P0-12, P0-4: phx_leave intercept (graceful teardown locally + proxy)
             if (parsed.event === 'phx_leave') {
-                 ws.send(JSON.stringify([
-                     parsed.join_ref, parsed.ref, parsed.topic, 'phx_reply',
-                     { status: 'ok', response: {} }
-                 ]));
+                 // Format based on vsn
+                 const vsn = (ws.data as any).query?.vsn || "2.0.0";
+                 if (vsn === "1.0.0") {
+                     ws.send(JSON.stringify({ topic: parsed.topic, event: "phx_reply", payload: { status: "ok", response: {} }, ref: parsed.ref }));
+                 } else {
+                     ws.send(JSON.stringify([parsed.join_ref, parsed.ref, parsed.topic, 'phx_reply', { status: 'ok', response: {} }]));
+                 }
                  
                  if ((ws.data as any).__bunSubscriptions && (ws.data as any).__bunSubscriptions.has(parsed.topic)) {
                      (ws.data as any).__bunSubscriptions.delete(parsed.topic);
+                     
+                     // P0-4: Cleanup handler from events to prevent memory leak AND ghost events
+                     const handler = (ws.data as any)[`__handler_${parsed.topic}`];
+                     if (handler) {
+                         import("../services/realtime-bun.service").then(({ realtimeBunService }) => {
+                             realtimeBunService.events.off(`change:${ref}`, handler);
+                         });
+                         delete (ws.data as any)[`__handler_${parsed.topic}`];
+                     }
                  }
             }
 
-            // P1-2: heartbeat local reply to prevent client timeout during upstream buffering
+            // P0-5: heartbeat local reply ONLY if upstream is not connected to prevent client timeout.
+            // If upstream is open, we let upstream handle it to avoid duplicate replies.
             if (parsed.event === 'heartbeat') {
-                ws.send(JSON.stringify([
-                    parsed.join_ref, parsed.ref, parsed.topic, 'phx_reply',
-                    { status: 'ok', response: {} }
-                ]));
+                if (!upstream || upstream.readyState !== WebSocket.OPEN) {
+                    const vsn = (ws.data as any).query?.vsn || "2.0.0";
+                    if (vsn === "1.0.0") {
+                        ws.send(JSON.stringify({ topic: parsed.topic, event: "phx_reply", payload: { status: "ok", response: {} }, ref: parsed.ref }));
+                    } else {
+                        ws.send(JSON.stringify([parsed.join_ref, parsed.ref, parsed.topic, 'phx_reply', { status: 'ok', response: {} }]));
+                    }
+                    return; // Block from queuing to upstream since we replied
+                }
             }
 
             // P0-13: access_token intercept
@@ -252,10 +270,13 @@ export const wsRoutes = new Elysia({ prefix: "/ws" })
                          if (!subs.has(topic)) {
                              subs.add(topic);
                              const handler = (payload: any) => {
-                                 ws.send(JSON.stringify([
-                                     null, null, topic, 'postgres_changes',
-                                     payload
-                                 ]));
+                                 // P2-2: V1 fallback for postgres_changes
+                                 const vsn = (ws.data as any).query?.vsn || "2.0.0";
+                                 if (vsn === "1.0.0") {
+                                     ws.send(JSON.stringify({ topic, event: "postgres_changes", payload, ref: null }));
+                                 } else {
+                                     ws.send(JSON.stringify([null, null, topic, 'postgres_changes', payload]));
+                                 }
                              };
                              (ws.data as any)[`__handler_${topic}`] = handler;
                              realtimeBunService.events.on(`change:${ref}`, handler);
