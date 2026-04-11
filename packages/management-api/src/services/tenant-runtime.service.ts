@@ -208,6 +208,9 @@ GOTRUE_JWT_DEFAULT_GROUP_NAME=authenticated
 GOTRUE_LOG_LEVEL=info
 GOTRUE_SERVER_READ_TIMEOUT=20
 GOTRUE_SECURITY_UPDATE_PASSWORD_REQUIRE_REAUTHENTICATION=true
+GOTRUE_EXTERNAL_ANONYMOUS_USERS_ENABLED=true
+GOTRUE_WEBAUTHN_ENABLED=true
+GOTRUE_WEBAUTHN_RP_ID=${apiExternalUrl.replace('https://', '').replace('http://', '').split('/')[0]}
 `.trim();
 
         if (config.gotrueSmtpHost) {

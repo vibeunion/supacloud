@@ -18,10 +18,16 @@ export interface StorageDriver {
 
 export class JuiceFSDriver implements StorageDriver {
   private getBasePath(projectRef: string, bucket?: string, key?: string): string {
-    let p = path.join(config.storageMountPoint, `supa-${projectRef}`);
+    const root = path.resolve(config.storageMountPoint, `supa-${projectRef}`);
+    let p = root;
     if (bucket) p = path.join(p, bucket);
     if (key) p = path.join(p, key);
-    return p;
+    // Resolve to absolute path and ensure it stays within the project root (prevent .. traversal)
+    const resolved = path.resolve(p);
+    if (!resolved.startsWith(root)) {
+      throw new Error(`Path traversal blocked: ${resolved} escapes ${root}`);
+    }
+    return resolved;
   }
 
   async createBucket(projectRef: string, bucket: string): Promise<boolean> {
