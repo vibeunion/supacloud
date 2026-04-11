@@ -174,9 +174,11 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
         },
       });
 
+      let warning: string | undefined;
       try {
         await tenantRuntimeService.updateOAuthConfig(params.ref, provider, providerConfig);
       } catch (error: unknown) {
+        warning = `Saved to DB, but failed to update GoTrue config: ${error instanceof Error ? error.message : String(error)}. It may apply on next start.`;
         logger.error(`Failed to update GoTrue OAuth config for ${provider}:`, { error: error instanceof Error ? error.message : String(error) });
       }
 
@@ -186,6 +188,7 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
         client_id: providerConfig.client_id,
         redirect_uri: providerConfig.redirect_uri || null,
         message: `OAuth provider ${provider} configured successfully`,
+        ...(warning ? { warning } : {}),
       };
     },
     {
@@ -239,6 +242,7 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
         },
       });
 
+      let warning: string | undefined;
       if (updatedProviderConfig.client_id && updatedProviderConfig.client_secret) {
         try {
           await tenantRuntimeService.updateOAuthConfig(params.ref, provider, {
@@ -249,6 +253,7 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
             url: updatedProviderConfig.url,
           });
         } catch (error: unknown) {
+          warning = `Saved to DB, but failed to update GoTrue config: ${error instanceof Error ? error.message : String(error)}. It may apply on next start.`;
           logger.error(`Failed to update GoTrue OAuth config for ${provider}:`, { error: error instanceof Error ? error.message : String(error) });
         }
       }
@@ -259,6 +264,7 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
         client_id: updatedProviderConfig.client_id,
         redirect_uri: updatedProviderConfig.redirect_uri || null,
         message: `OAuth provider ${provider} updated successfully`,
+        ...(warning ? { warning } : {}),
       };
     },
     {
@@ -518,6 +524,7 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
         },
       });
 
+      let warning: string | undefined;
       if (body.enabled !== false && updatedProviderConfig.client_id && updatedProviderConfig.client_secret) {
         try {
           await tenantRuntimeService.updateOAuthConfig(params.ref, provider, {
@@ -527,6 +534,7 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
             redirect_uri: updatedProviderConfig.redirect_uri,
           });
         } catch (error: unknown) {
+          warning = `Saved to DB, but failed to update GoTrue config: ${error instanceof Error ? error.message : String(error)}. It may apply on next start.`;
           logger.error(`Failed to update GoTrue OAuth config for ${provider}:`, { error: error instanceof Error ? error.message : String(error) });
         }
       }
@@ -536,6 +544,7 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
         enabled: body.enabled !== false && !!updatedProviderConfig.client_id,
         client_id: updatedProviderConfig.client_id || null,
         redirect_uri: updatedProviderConfig.redirect_uri || null,
+        ...(warning ? { warning } : {}),
       };
     },
     {

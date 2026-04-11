@@ -16,15 +16,11 @@ export class StorageRLS {
       return;
     }
 
-    const formattedMimes = allowedMimeTypes && allowedMimeTypes.length > 0
-        ? `{${allowedMimeTypes.map((m: string) => `"${m.replace(/"/g, '\\"')}"`).join(',')}}`
-        : null;
-
     try {
         await this.withBucketRLS(ref, token, async (tx) => {
             await tx`
               INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types, created_at, updated_at)
-              VALUES (${bucketId}, ${name}, ${isPublic}, ${fileSizeLimit || null}, ${formattedMimes}, now(), now())
+              VALUES (${bucketId}, ${name}, ${isPublic}, ${fileSizeLimit || null}, ${(allowedMimeTypes && allowedMimeTypes.length > 0) ? allowedMimeTypes : null}, now(), now())
               ON CONFLICT (id) DO UPDATE SET public = EXCLUDED.public, name = EXCLUDED.name, file_size_limit = EXCLUDED.file_size_limit, allowed_mime_types = EXCLUDED.allowed_mime_types, updated_at = now()
             `;
         });
@@ -162,7 +158,8 @@ export class StorageRLS {
           metadata: {
             size: Number(meta.size || 0),
             mimetype: String(meta.mimetype || 'application/octet-stream'),
-            cacheControl: String(meta.cacheControl || meta.cache_control || 'public, max-age=3600')
+            cacheControl: String(meta.cacheControl || meta.cache_control || 'public, max-age=3600'),
+            ...(meta.userMetadata && typeof meta.userMetadata === 'object' ? meta.userMetadata as Record<string, unknown> : {})
           }
         };
     }
@@ -192,9 +189,14 @@ export class StorageRLS {
         etag: (meta.eTag || meta.etag || `"${row.id}"`) as string,
         last_accessed_at: String(row.last_accessed_at || row.updated_at),
         metadata: {
+            eTag: String(meta.eTag || meta.etag || `"${row.id}"`),
             size: Number(meta.size || 0),
             mimetype: String(meta.mimetype || 'application/octet-stream'),
-            cacheControl: String(meta.cacheControl || meta.cache_control || 'public, max-age=3600')
+            cacheControl: String(meta.cacheControl || meta.cache_control || 'public, max-age=3600'),
+            lastModified: String(row.updated_at),
+            contentLength: Number(meta.size || 0),
+            httpStatusCode: 200,
+            ...(meta.userMetadata && typeof meta.userMetadata === 'object' ? meta.userMetadata as Record<string, unknown> : {})
         }
       };
     }).catch(() => null);
@@ -246,12 +248,15 @@ export class StorageRLS {
   static async authorizeAction(
     ref: string,
     token: string | null | undefined,
-    action: 'upload' | 'download' | 'delete',
+    action: 'upload' | 'download' | 'delete' | 'update' | 'move',
     bucketId: string,
     objectName: string,
     metadata: Record<string, unknown> = {},
     dryRun: boolean = false,
-    upsert: boolean = true
+    upsert: boolean = true,
+    destBucketId?: string,
+    destObjectName?: string,
+    physicalAction?: () => Promise<void>
   ): Promise<{ permitted: boolean, error?: string }> {
     if (ref === 'test_mock') {
        if (!mockBuckets.has(bucketId)) return { permitted: false, error: 'Bucket not found' };
@@ -299,7 +304,7 @@ export class StorageRLS {
               INSERT INTO storage.objects (bucket_id, name, owner, metadata)
               VALUES (${bucketId}, ${objectName}, ${owner}, ${ { ...metadata, userMetadata: metadata.userMetadata || {} } })
               ON CONFLICT (bucket_id, name)
-              DO UPDATE SET metadata = EXCLUDED.metadata, updated_at = now()
+              DO UPDATE SET metadata = EXCLUDED.metadata, updated_at = now(), version = gen_random_uuid()
               RETURNING id
             `;
             if (res.length === 0) throw new Error("RLS_VIOLATION");
@@ -321,8 +326,30 @@ export class StorageRLS {
           `;
           if (res.length === 0) throw new Error("RLS_VIOLATION_OR_NOT_FOUND");
           
+        } else if (action === 'update') {
+          const resSel = await tx`SELECT id FROM storage.objects WHERE bucket_id = ${bucketId} AND name = ${objectName} LIMIT 1`;
+          if (resSel.length === 0) throw new Error("RLS_VIOLATION_OR_NOT_FOUND");
+          const resUpd = await tx`
+            UPDATE storage.objects 
+            SET metadata = ${ { ...metadata, userMetadata: metadata.userMetadata || {} } }, updated_at = now(), version = gen_random_uuid()
+            WHERE bucket_id = ${bucketId} AND name = ${objectName} 
+            RETURNING id
+          `;
+          if (resUpd.length === 0) throw new Error("RLS_VIOLATION");
+        } else if (action === 'move') {
+          const resSel = await tx`SELECT id FROM storage.objects WHERE bucket_id = ${bucketId} AND name = ${objectName} LIMIT 1`;
+          if (resSel.length === 0) throw new Error("RLS_VIOLATION_OR_NOT_FOUND");
+          
+          const resUpd = await tx`
+            UPDATE storage.objects 
+            SET name = ${destObjectName!}, bucket_id = ${destBucketId!}, updated_at = now(), version = gen_random_uuid()
+            WHERE bucket_id = ${bucketId} AND name = ${objectName} 
+            RETURNING id
+          `;
+          if (resUpd.length === 0) throw new Error("RLS_VIOLATION");
         } else if (action === 'delete') {
-          // Attempt DELETE, returns id if RLS allowed the deletion
+          const resSel = await tx`SELECT id FROM storage.objects WHERE bucket_id = ${bucketId} AND name = ${objectName} LIMIT 1`;
+          if (resSel.length === 0) throw new Error("RLS_VIOLATION_OR_NOT_FOUND");
           const res = await tx`
             DELETE FROM storage.objects 
             WHERE bucket_id = ${bucketId} AND name = ${objectName} 
@@ -334,6 +361,14 @@ export class StorageRLS {
         if (dryRun) {
           throw new Error("DRY_RUN_ROLLBACK");
         }
+
+        if (physicalAction) {
+           try {
+               await physicalAction();
+           } catch (e: any) {
+               throw new Error(e.message === 'PHYSICAL_UPLOAD_FAILED' ? 'PHYSICAL_UPLOAD_FAILED' : 'PHYSICAL_ACTION_FAILED');
+           }
+        }
       });
 
       return { permitted: true };
@@ -341,12 +376,28 @@ export class StorageRLS {
       if (e instanceof Error && e.message === 'DRY_RUN_ROLLBACK') {
         return { permitted: true };
       }
+      if (e instanceof Error && e.message === 'PHYSICAL_UPLOAD_FAILED') {
+        return { permitted: false, error: 'Failed to write physical object' };
+      }
       if ((e as any).code === '23505') {
         return { permitted: false, error: 'The resource already exists' };
       }
       // If error is RLS related (row level security policy violation) or Postgres throws, deny
       logger.debug(`[StorageRLS] Action ${action} denied: ${e instanceof Error ? e.message : String(e)}`);
-      return { permitted: false, error: e instanceof Error && e.message === 'RLS_VIOLATION_OR_NOT_FOUND' ? 'Object not found' : 'Row Level Security violation or bucket missing. Access Denied.' };
+      
+      if (e instanceof Error && e.message === 'RLS_VIOLATION_OR_NOT_FOUND') {
+          // P0-4: If bucket is public, we distinguish 404 vs 403. 
+          try {
+              const [{ is_public }] = await db`SELECT public AS is_public FROM storage.buckets WHERE id = ${bucketId}`;
+              if (is_public) {
+                  // Public bucket: If object exists -> 403. If not -> 404.
+                  const resRaw = await db`SELECT id FROM storage.objects WHERE bucket_id = ${bucketId} AND name = ${objectName} LIMIT 1`;
+                  if (resRaw.length > 0) return { permitted: false, error: 'Forbidden' };
+              }
+          } catch(e2) {}
+          return { permitted: false, error: 'Object not found' };
+      }
+      return { permitted: false, error: 'Row Level Security violation or bucket missing. Access Denied.' };
     }
   }
 
@@ -383,7 +434,9 @@ export class StorageRLS {
                     uniqueObjects.push({ 
                         id: null, 
                         name: prefix ? `${prefix.replace(/\/$/, '')}/${folderName}` : folderName, 
-                        updated: val.updated, 
+                        updated_at: val.updated, 
+                        created_at: val.updated,
+                        last_accessed_at: val.updated,
                         size: 0, 
                         type: null,
                         isFolder: true,
@@ -394,7 +447,9 @@ export class StorageRLS {
                 uniqueObjects.push({ 
                     id: key, 
                     name: rawName, 
-                    updated: val.updated, 
+                    updated_at: val.updated, 
+                    created_at: val.updated,
+                    last_accessed_at: val.updated,
                     size: val.metadata?.size || 0, 
                     type: val.metadata?.mimetype || (rawName.includes('.') ? rawName.split('.').pop() : 'unknown'),
                     isFolder: false,
