@@ -216,7 +216,7 @@ async function deployWeChatMPFunction(ref: string, appId: string, appSecret: str
 
 function generateWeChatMiniProgramLoginFunction(appId: string, appSecret: string): string {
   return `import { createClient } from "@supabase/supabase-js"
-import postgres from "https://deno.land/x/postgresjs@v3.4.4/mod.js"
+import postgres from "postgres"
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -306,8 +306,7 @@ Deno.serve(async (req) => {
 
 function generateWeChatMPLoginFunction(appId: string, appSecret: string, redirectUri?: string): string {
   return `import { createClient } from "@supabase/supabase-js"
-import postgres from "https://deno.land/x/postgresjs@v3.4.4/mod.js"
-import postgres from "https://deno.land/x/postgresjs@v3.4.4/mod.js"
+import postgres from "postgres"
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
