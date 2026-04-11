@@ -410,8 +410,8 @@ export class StorageRLS {
   static async deleteLogicalBucket(ref: string, token: string | undefined, bucketId: string, dryRun: boolean = false): Promise<void> {
     if (ref === 'test_mock') {
         if (dryRun) return;
-        for (const key of Array.from(mockObjects.keys())) {
-            if (key.startsWith(`${bucketId}/`)) mockObjects.delete(key);
+        if (Array.from(mockObjects.keys()).some(k => k.startsWith(`${bucketId}/`))) {
+             throw new Error("Bucket is not empty");
         }
         mockBuckets.delete(bucketId);
         return;
@@ -419,13 +419,14 @@ export class StorageRLS {
     
     try {
         await this.withBucketRLS(ref, token, async (tx) => {
-            await tx`DELETE FROM storage.objects WHERE bucket_id = ${bucketId}`;
             const resBuckets = await tx`DELETE FROM storage.buckets WHERE id = ${bucketId} RETURNING id`;
             if (resBuckets.length === 0) throw new Error("RLS_VIOLATION");
             if (dryRun) throw new Error("DRY_RUN_ROLLBACK");
         });
     } catch (e: any) {
         if (e.message === 'DRY_RUN_ROLLBACK') return;
+        // Map native Postgres FK constraint error for non-empty folders
+        if (e.code === '23503') throw new Error("Bucket is not empty");
         throw new Error(e.message === 'RLS_VIOLATION' ? "You do not have permission to delete this bucket" : (e.message || "Failed to delete bucket"));
     }
   }

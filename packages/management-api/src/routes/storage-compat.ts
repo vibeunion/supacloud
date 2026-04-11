@@ -512,7 +512,8 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             if (!success) return status(500, { statusCode: '500', error: 'Internal', message: 'Failed to upload file' });
 
             // Finalize Materialization after physical layer succeeds
-            await StorageRLS.authorizeAction(ref, auth, 'upload', params.bucket, filePath, metadata, false, upsert);
+            const finalPermit = await StorageRLS.authorizeAction(ref, auth, 'upload', params.bucket, filePath, metadata, false, upsert);
+            if (!finalPermit.permitted) return status(500, { statusCode: '500', error: 'Internal', message: 'Failed to record object' });
 
             return {
                 Id: `${params.bucket}/${filePath}`,
@@ -546,7 +547,8 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             if (!success) return status(500, { statusCode: '500', error: 'Internal', message: 'Upsert failed' });
 
             // Finalize Materialization after physical layer succeeds
-            await StorageRLS.authorizeAction(ref, auth, 'upload', params.bucket, filePath, metadata, false, true);
+            const finalPermit = await StorageRLS.authorizeAction(ref, auth, 'upload', params.bucket, filePath, metadata, false, true);
+            if (!finalPermit.permitted) return status(500, { statusCode: '500', error: 'Internal', message: 'Failed to record object' });
             return { Key: `${params.bucket}/${filePath}` };
         } catch (err: unknown) {
             return status(500, { statusCode: '500', error: 'Internal', message: 'Upsert failed' });
@@ -878,7 +880,8 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             if (!success) return status(500, { statusCode: '500', error: 'Internal', message: 'Upload failed' });
             
             // 3. Persist DB
-            await StorageRLS.authorizeAction(ref, effectiveAuth, 'upload', params.bucket, filePath, metadata, false, signedUpload.upsert);
+            const finalPermit = await StorageRLS.authorizeAction(ref, effectiveAuth, 'upload', params.bucket, filePath, metadata, false, signedUpload.upsert);
+            if (!finalPermit.permitted) return status(500, { statusCode: '500', error: 'Internal', message: 'Failed to record object' });
 
             return { Key: `${params.bucket}/${filePath}` };
         } catch (err: unknown) {
@@ -1144,11 +1147,17 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             if (!uploaded) return status(500, { statusCode: '500', error: 'Internal', message: 'Move failed: could not write destination' });
 
             // Finalize Materialization after physical layer succeeds
-            await StorageRLS.authorizeAction(ref, auth, 'upload', destBucket, destKey, { size: srcData.length, mimetype: contentType }, false);
+            const finalPermit = await StorageRLS.authorizeAction(ref, auth, 'upload', destBucket, destKey, { size: srcData.length, mimetype: contentType }, false);
+            if (!finalPermit.permitted) return status(500, { statusCode: '500', error: 'Internal', message: 'Failed to record object' });
 
-            // Step 3: Delete source (actual delete)
-            await StorageRLS.authorizeAction(ref, auth, 'delete', srcBucket, srcKey);
-            await StorageService.deleteFile(ref, srcBucket, srcKey);
+            // Step 3: Delete source (actual delete with dryRun checking)
+            const preDelete = await StorageRLS.authorizeAction(ref, auth, 'delete', srcBucket, srcKey, {}, true);
+            if (!preDelete.permitted) return status(500, { statusCode: '500', error: 'Internal', message: 'Failed to authorize source deletion' });
+            
+            const pDelete = await StorageService.deleteFile(ref, srcBucket, srcKey);
+            if (!pDelete) return status(500, { statusCode: '500', error: 'Internal', message: 'Failed to physically delete source object' });
+
+            await StorageRLS.authorizeAction(ref, auth, 'delete', srcBucket, srcKey, {}, false);
 
             return { message: `Successfully moved` };
         } catch (err: unknown) {
