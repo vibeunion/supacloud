@@ -487,7 +487,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
 
             // Validate bucket constraints (file size limit, allowed mime types)
             const auth = headers['authorization'];
-            const bucket = await StorageRLS.getLogicalBucket(ref, params.bucket, undefined);
+            const bucket = await StorageRLS.getLogicalBucket(ref, params.bucket, undefined, true);
             if (!bucket) return status(404, { statusCode: '404', error: 'Not Found', message: 'Bucket not found' });
 
             // Check file size limit
@@ -581,7 +581,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             return proxyToImaginary(ref, params.bucket, filePath, query, set as { headers: Record<string, string> });
         }
 
-        const bucket = await StorageRLS.getLogicalBucket(ref, params.bucket, undefined);
+        const bucket = await StorageRLS.getLogicalBucket(ref, params.bucket, undefined, true);
         if (!bucket || !bucket.public) return status(400, { statusCode: '400', error: 'Bad Request', message: 'Bucket is not public' });
 
         try {
@@ -666,7 +666,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         }
 
         const bucketId = params.bucket;
-        const bucket = await StorageRLS.getLogicalBucket(ref, bucketId, undefined);
+        const bucket = await StorageRLS.getLogicalBucket(ref, bucketId, undefined, true);
         if (!bucket) return status(404, { statusCode: '404', error: 'Not Found', message: 'Bucket not found' });
 
         const auth = headers['authorization'];
@@ -822,7 +822,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         const upsert = headers['x-upsert'] === 'true';
         
         // Verify the bucket exists
-        const bucket = await StorageRLS.getLogicalBucket(ref, params.bucket, undefined);
+        const bucket = await StorageRLS.getLogicalBucket(ref, params.bucket, undefined, true);
         if (!bucket) return status(404, { statusCode: '404', error: 'Not Found', message: 'Bucket not found' });
         
         // Enforce RLS for upload URL generation
@@ -1178,7 +1178,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             const contentType = srcRes.headers?.get('Content-Type') || 'application/octet-stream';
 
             // Validate destination bucket limits
-            const destBucketCheck = await StorageRLS.getLogicalBucket(ref, destBucket, undefined);
+            const destBucketCheck = await StorageRLS.getLogicalBucket(ref, destBucket, undefined, true);
             if (!destBucketCheck) return status(404, { statusCode: '404', error: 'Not Found', message: 'Destination bucket not found' });
             
             if (destBucketCheck.file_size_limit && srcData.byteLength > Number(destBucketCheck.file_size_limit)) {
@@ -1231,9 +1231,10 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             
             // Step 4: Physically Delete Source
             const pDelete = await StorageService.deleteFile(ref, srcBucket, srcKey);
-            if (!pDelete) {
-               logger.error(`CRITICAL: Orphaned physical file abandoned at ${srcBucket}/${srcKey}. Logical row was securely deleted.`);
-            }
+             if (!pDelete) {
+                logger.error(`CRITICAL: Orphaned physical file abandoned at ${srcBucket}/${srcKey}. Logical row was securely deleted.`);
+                return status(500, { statusCode: '500', error: 'Internal', message: 'Successfully moved logically, but failed to physically clean source object' });
+             }
 
             return { message: `Successfully moved` };
         } catch (err: unknown) {
@@ -1274,7 +1275,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             const contentType = srcRes.headers?.get('Content-Type') || 'application/octet-stream';
 
             // Validate destination bucket limits
-            const destBucketCheck = await StorageRLS.getLogicalBucket(ref, destBucket, undefined);
+            const destBucketCheck = await StorageRLS.getLogicalBucket(ref, destBucket, undefined, true);
             if (!destBucketCheck) return status(404, { statusCode: '404', error: 'Not Found', message: 'Destination bucket not found' });
             
             if (destBucketCheck.file_size_limit && srcData.byteLength > Number(destBucketCheck.file_size_limit)) {
@@ -1330,10 +1331,10 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         const filePath = params['*'];
         if (!filePath) return status(400, { error: 'Missing file path' });
 
-        const bucket = await StorageRLS.getLogicalBucket(ref, params.bucket, undefined);
+        const bucket = await StorageRLS.getLogicalBucket(ref, params.bucket, undefined, true);
         if (!bucket || !bucket.public) return status(400, { error: 'Bucket is not public' });
 
-        return proxyToImaginary(ref, params.bucket, filePath, query, set as { headers: Record<string, string> });
+        return proxyToImaginary(ref, params.bucket, filePath, query, set as { headers: Record<string, string> }, true);
     })
 
     // ════════════════════════════════════════════════════════
@@ -1368,7 +1369,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         const contentType = meta.contentType || 'application/octet-stream';
 
         // Validations natively skipping RLS check via undefined scope.
-        const logicalBucket = await StorageRLS.getLogicalBucket(ref, bucket, undefined);
+        const logicalBucket = await StorageRLS.getLogicalBucket(ref, bucket, undefined, true);
         if (!logicalBucket) return status(404, { statusCode: '404', error: 'Not Found', message: 'Bucket not found' });
 
         if (logicalBucket.file_size_limit && uploadLength > Number(logicalBucket.file_size_limit)) {
@@ -1464,7 +1465,8 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
                     throw new Error(finalPermitted.error || 'Access Denied during finalization');
                 }
 
-                await StorageService.uploadFile(upload.ref, upload.bucket, upload.objectName, fullBody, upload.contentType);
+                const uploaded = await StorageService.uploadFile(upload.ref, upload.bucket, upload.objectName, fullBody, upload.contentType);
+                if (!uploaded) throw new Error('Failed to physically write object. Upload aborted.');
                 
                 // Finalize DB row now that S3 succeeded
                 const syncRes = await StorageRLS.authorizeAction(
@@ -1512,7 +1514,8 @@ async function proxyToImaginary(
     logicalBucket: string,
     filePath: string,
     query: Record<string, string | undefined>,
-    set: { headers: Record<string, string> }
+    set: { headers: Record<string, string> },
+    isPublic: boolean = false
 ): Promise<Response | { error: string }> {
     // 1. Read the source image from storage
     const downloadRes = await StorageService.getDownloadResponse(ref, logicalBucket, filePath);
@@ -1526,8 +1529,10 @@ async function proxyToImaginary(
     if (query.height) imaginaryParams.set('height', String(query.height));
     imaginaryParams.set('quality', String(query.quality || 80));
 
-    const format = query.format || 'webp';
-    imaginaryParams.set('type', format);
+    const format = query.format;
+    if (format) {
+        imaginaryParams.set('type', format);
+    }
 
     const resizeMode = query.resize || 'cover';
     let operation = 'resize';
@@ -1590,8 +1595,17 @@ async function proxyToImaginary(
             return status(502, { error: `Image transform failed: ${errText}` }) as unknown as { error: string };
         }
 
-        set.headers['Content-Type'] = res.headers.get('Content-Type') || `image/${format}`;
-        set.headers['Cache-Control'] = 'public, max-age=31536000, immutable';
+        if (format) {
+            set.headers['Content-Type'] = res.headers.get('Content-Type') || `image/${format}`;
+        } else {
+            set.headers['Content-Type'] = res.headers.get('Content-Type') || sourceContentType;
+        }
+
+        if (isPublic) {
+            set.headers['Cache-Control'] = 'public, max-age=31536000, immutable';
+        } else {
+             set.headers['Cache-Control'] = 'private, max-age=3600';
+        }
         set.headers['X-Image-Engine'] = 'imaginary/libvips';
         return new Response(res.body);
     } catch (err: unknown) {
