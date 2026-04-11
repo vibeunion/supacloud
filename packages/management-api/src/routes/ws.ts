@@ -181,15 +181,35 @@ export const wsRoutes = new Elysia({ prefix: "/ws" })
         const upstream = (ws.data as any).__upstream as WebSocket | undefined;
         const ref = (ws.data as any).projectRef as string | undefined;
 
+        // P0-2: Binary frames (broadcast ArrayBuffer) — forward directly, no interception needed
+        if (typeof rawMessage !== 'string') {
+            if (upstream?.readyState === WebSocket.OPEN) {
+                upstream.send(rawMessage as any);
+            } else if (upstream?.readyState === WebSocket.CONNECTING) {
+                ((ws.data as Record<string,any>).__buffer || []).push(rawMessage);
+            }
+            return;
+        }
+
         // --- NATIVE BUN REALTIME INTERCEPTS ---
         try {
-            const parsed = JSON.parse(rawMessage as string);
+            // P0-1: Handle Phoenix V2 array format [join_ref, ref, topic, event, payload]
+            // The Supabase Realtime SDK uses V2 serialization by default (DEFAULT_VSN = '2.0.0')
+            const raw = JSON.parse(rawMessage);
+            let parsed: { join_ref?: string | null; ref?: string | null; topic: string; event: string; payload: any };
+            if (Array.isArray(raw)) {
+                parsed = { join_ref: raw[0], ref: raw[1], topic: raw[2], event: raw[3], payload: raw[4] };
+            } else {
+                parsed = raw;
+            }
             
             // P0-12: phx_leave intercept (graceful teardown locally + proxy)
             if (parsed.event === 'phx_leave') {
-                 // Reply locally immediately to satisfy SDK
-                 ws.send(JSON.stringify({ topic: parsed.topic, event: 'phx_reply',
-                     payload: { status: 'ok', response: {} }, ref: parsed.ref }));
+                 // P1-3: Reply in V2 array format matching Phoenix serializer expectations
+                 ws.send(JSON.stringify([
+                     parsed.join_ref, parsed.ref, parsed.topic, 'phx_reply',
+                     { status: 'ok', response: {} }
+                 ]));
                  
                  // Clean up native bun subscription
                  if ((ws.data as any).__bunSubscriptions && (ws.data as any).__bunSubscriptions.has(parsed.topic)) {
@@ -209,10 +229,15 @@ export const wsRoutes = new Elysia({ prefix: "/ws" })
 
             // P0-14: postgres_changes multiplexing
             if (parsed.event === 'phx_join') {
+                const joinToken = parsed.payload?.access_token;
+                if (joinToken) {
+                    (ws.data as any).token = joinToken;
+                }
+
                 const changes = parsed.payload?.config?.postgres_changes;
                 if (changes && Array.isArray(changes) && changes.length > 0 && ref) {
-                    // Activate Native Bun pg_listen logic
                     const topic = parsed.topic;
+                    const subscriptions = changes;
                     
                     import("../services/realtime-bun.service").then(({ realtimeBunService }) => {
                          realtimeBunService.subscribeTenant(ref);
@@ -221,16 +246,11 @@ export const wsRoutes = new Elysia({ prefix: "/ws" })
                          const subs = (ws.data as any).__bunSubscriptions;
                          if (!subs.has(topic)) {
                              subs.add(topic);
-                             // Bind native event listener for this topic
                              const handler = (payload: any) => {
-                                 // Basic RLS simulation filter happens here in production
-                                 // For now, raw emit
-                                 ws.send(JSON.stringify({
-                                     topic: topic,
-                                     event: 'postgres_changes',
-                                     payload: payload,
-                                     ref: null
-                                 }));
+                                 ws.send(JSON.stringify([
+                                     null, null, topic, 'postgres_changes',
+                                     payload
+                                 ]));
                              };
                              (ws.data as any)[`__handler_${topic}`] = handler;
                              realtimeBunService.events.on(`change:${ref}`, handler);
@@ -240,7 +260,7 @@ export const wsRoutes = new Elysia({ prefix: "/ws" })
             }
 
         } catch (err) {
-            // Not JSON or parse error, just proxy
+            // Not JSON or parse error, just proxy raw
         }
         
         // --- END NATIVE INTERCEPTS ---
