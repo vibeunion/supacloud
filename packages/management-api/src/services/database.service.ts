@@ -143,9 +143,13 @@ export class DatabaseService {
       await tenantDb.unsafe(`CREATE EXTENSION IF NOT EXISTS "pgcrypto"`);
       
       // Graciously attempt to create Supabase-specific extensions
-      const exts = ["pgjwt", "pg_net", "pgsodium", "vault", "pg_graphql"];
-      for (const ext of exts) {
+      // Core Supabase extensions
+      const coreExts = ["pgjwt", "pg_net", "pgsodium", "vault", "pg_graphql"];
+      // Ecosystem extensions (P1-1 ~ P1-4): available if host PostgreSQL has the packages installed
+      const ecosystemExts = ["pg_cron", "vector", "postgis", "pg_stat_statements", "pgaudit"];
+      for (const ext of [...coreExts, ...ecosystemExts]) {
          try {
+             // pg_cron must be created in postgres database first, but we create IF NOT EXISTS in tenant db as well
              await tenantDb.unsafe(`CREATE EXTENSION IF NOT EXISTS "${ext}" CASCADE`);
          } catch (e) {
              logger.warn(`[DatabaseService] Extension ${ext} not available on this Postgres cluster. Skipping.`);
