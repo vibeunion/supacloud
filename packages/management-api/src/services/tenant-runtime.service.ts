@@ -199,6 +199,7 @@ GOTRUE_API_HOST=0.0.0.0
 GOTRUE_API_PORT=${gotruePort}
 API_EXTERNAL_URL=${apiExternalUrl}
 GOTRUE_SITE_URL=${apiExternalUrl}
+GOTRUE_URI_ALLOW_LIST=*
 GOTRUE_DB_DRIVER=postgres
 GOTRUE_DB_DATABASE_URL=postgres://supabase_auth_admin:${config.pgPassword}@${this.PG_HOST}:${this.PG_PORT}/${creds.dbName}
 GOTRUE_JWT_SECRET=${creds.jwtSecret}
