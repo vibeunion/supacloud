@@ -157,9 +157,13 @@ export class StorageRLS {
           etag: (meta.eTag || meta.etag || `"${row.id}"`) as string,
           last_accessed_at: String(row.last_accessed_at || row.updated_at),
           metadata: {
+            eTag: String(meta.eTag || meta.etag || `"${row.id}"`),
             size: Number(meta.size || 0),
             mimetype: String(meta.mimetype || 'application/octet-stream'),
             cacheControl: String(meta.cacheControl || meta.cache_control || 'public, max-age=3600'),
+            lastModified: String(row.updated_at),
+            contentLength: Number(meta.size || 0),
+            httpStatusCode: 200,
             ...(meta.userMetadata && typeof meta.userMetadata === 'object' ? meta.userMetadata as Record<string, unknown> : {})
           }
         };
