@@ -5,6 +5,29 @@
 import { Elysia, t, status } from "elysia";
 import { projectService } from "../services";
 import { gatewayService } from "../services/gateway.service";
+import { logger } from "../utils/logger";
+
+/** Map PostgreSQL column types to TypeScript types */
+function pgTypeToTs(udtName: string, dataType: string): string {
+  const map: Record<string, string> = {
+    bool: 'boolean',
+    int2: 'number', int4: 'number', int8: 'number',
+    float4: 'number', float8: 'number', numeric: 'number',
+    text: 'string', varchar: 'string', char: 'string', bpchar: 'string', name: 'string', citext: 'string',
+    uuid: 'string',
+    date: 'string', time: 'string', timetz: 'string', timestamp: 'string', timestamptz: 'string',
+    interval: 'string',
+    json: 'Json', jsonb: 'Json',
+    bytea: 'string',
+    inet: 'string', cidr: 'string', macaddr: 'string',
+    oid: 'number',
+    void: 'undefined',
+    record: 'Record<string, unknown>',
+    vector: 'number[]',
+  };
+  if (udtName.startsWith('_')) return `${pgTypeToTs(udtName.slice(1), dataType)}[]`;
+  return map[udtName] || (dataType === 'ARRAY' ? 'unknown[]' : (dataType === 'USER-DEFINED' ? 'string' : 'unknown'));
+}
 
 /**
  * Factory: generates GET + PATCH routes for a project settings config section.
@@ -314,11 +337,147 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
     { params: t.Object({ ref: t.String() }) }
   )
 
-  // Get Typescript Types stub
+  // Get Typescript Types — Real schema reflection (P0-5)
   .get(
     "/:ref/types/typescript",
     async ({ params, query, set }) => {
-      return { types: "export type Json = string | number | boolean | null | { [key: string]: Json } | Json[];" };
+      const { getProjectDb } = await import("../db");
+      const { sql: metaSql } = await import("../db");
+      
+      const [project] = await metaSql`SELECT db_name FROM projects WHERE ref=${params.ref}`;
+      if (!project) return status(404, { error: "Project not found" });
+
+      try {
+        const db = getProjectDb(project.db_name);
+        const includedSchemas = (query?.included_schemas || "public").split(",").map((s: string) => s.trim());
+
+        // 1. Fetch all enums
+        const enums = await db`
+          SELECT n.nspname as schema, t.typname as name, 
+            array_agg(e.enumlabel ORDER BY e.enumsortorder) as values
+          FROM pg_type t
+          JOIN pg_enum e ON t.oid = e.enumtypid
+          JOIN pg_namespace n ON t.typnamespace = n.oid
+          WHERE n.nspname = ANY(${includedSchemas})
+          GROUP BY n.nspname, t.typname
+          ORDER BY n.nspname, t.typname
+        `;
+
+        // 2. Fetch all tables + columns
+        const columns = await db`
+          SELECT c.table_schema, c.table_name, c.column_name, c.data_type, c.udt_name,
+            c.is_nullable, c.column_default, c.is_identity, c.identity_generation,
+            c.is_generated, c.generation_expression,
+            (SELECT tc.constraint_type FROM information_schema.table_constraints tc 
+             JOIN information_schema.key_column_usage kcu ON tc.constraint_name = kcu.constraint_name 
+               AND tc.table_schema = kcu.table_schema
+             WHERE tc.table_schema = c.table_schema AND tc.table_name = c.table_name 
+               AND kcu.column_name = c.column_name AND tc.constraint_type = 'PRIMARY KEY'
+             LIMIT 1) as is_primary_key
+          FROM information_schema.columns c
+          WHERE c.table_schema = ANY(${includedSchemas})
+          ORDER BY c.table_schema, c.table_name, c.ordinal_position
+        `;
+
+        // 3. Fetch views
+        const views = await db`
+          SELECT table_schema, table_name 
+          FROM information_schema.views 
+          WHERE table_schema = ANY(${includedSchemas})
+        `;
+        const viewSet = new Set(views.map((v: Record<string, unknown>) => `${v.table_schema}.${v.table_name}`));
+
+        // 4. Fetch functions  
+        const functions = await db`
+          SELECT n.nspname as schema, p.proname as name,
+            pg_get_function_arguments(p.oid) as args,
+            pg_get_function_result(p.oid) as return_type
+          FROM pg_proc p
+          JOIN pg_namespace n ON p.pronamespace = n.oid
+          WHERE n.nspname = ANY(${includedSchemas})
+            AND p.prokind IN ('f', 'p')
+            AND NOT p.proisagg
+          ORDER BY n.nspname, p.proname
+        `;
+
+        // Generate TypeScript
+        let ts = `export type Json =\n  | string\n  | number\n  | boolean\n  | null\n  | { [key: string]: Json | undefined }\n  | Json[]\n\nexport type Database = {\n`;
+
+        for (const schema of includedSchemas) {
+          ts += `  ${schema}: {\n    Tables: {\n`;
+
+          // Group columns by table
+          const tableMap = new Map<string, Array<Record<string, unknown>>>();
+          for (const col of columns) {
+            if (col.table_schema !== schema) continue;
+            const key = col.table_name as string;
+            if (viewSet.has(`${schema}.${key}`)) continue; // skip views
+            if (!tableMap.has(key)) tableMap.set(key, []);
+            tableMap.get(key)!.push(col);
+          }
+
+          for (const [tableName, cols] of tableMap) {
+            ts += `      ${tableName}: {\n        Row: {\n`;
+            for (const col of cols) {
+              const tsType = pgTypeToTs(col.udt_name as string, col.data_type as string);
+              const nullable = col.is_nullable === 'YES' ? ' | null' : '';
+              ts += `          ${col.column_name}: ${tsType}${nullable}\n`;
+            }
+            ts += `        }\n        Insert: {\n`;
+            for (const col of cols) {
+              const tsType = pgTypeToTs(col.udt_name as string, col.data_type as string);
+              const nullable = col.is_nullable === 'YES' ? ' | null' : '';
+              const optional = col.column_default || col.is_identity === 'YES' || col.is_nullable === 'YES' ? '?' : '';
+              ts += `          ${col.column_name}${optional}: ${tsType}${nullable}\n`;
+            }
+            ts += `        }\n        Update: {\n`;
+            for (const col of cols) {
+              const tsType = pgTypeToTs(col.udt_name as string, col.data_type as string);
+              const nullable = col.is_nullable === 'YES' ? ' | null' : '';
+              ts += `          ${col.column_name}?: ${tsType}${nullable}\n`;
+            }
+            ts += `        }\n        Relationships: []\n      }\n`;
+          }
+
+          ts += `    }\n    Views: {\n`;
+
+          // Views
+          for (const view of views.filter((v: Record<string, unknown>) => v.table_schema === schema)) {
+            const viewCols = columns.filter((c: Record<string, unknown>) => c.table_schema === schema && c.table_name === view.table_name);
+            ts += `      ${view.table_name}: {\n        Row: {\n`;
+            for (const col of viewCols) {
+              const tsType = pgTypeToTs(col.udt_name as string, col.data_type as string);
+              ts += `          ${col.column_name}: ${tsType} | null\n`;
+            }
+            ts += `        }\n        Relationships: []\n      }\n`;
+          }
+
+          ts += `    }\n    Functions: {\n`;
+
+          // Functions
+          for (const fn of functions.filter((f: Record<string, unknown>) => f.schema === schema)) {
+            ts += `      ${fn.name}: {\n        Args: Record<string, unknown>\n        Returns: unknown\n      }\n`;
+          }
+
+          ts += `    }\n    Enums: {\n`;
+
+          // Enums
+          for (const en of enums.filter((e: Record<string, unknown>) => e.schema === schema)) {
+            const vals = (en.values as string[]).map(v => `"${v}"`).join(' | ');
+            ts += `      ${en.name}: ${vals}\n`;
+          }
+
+          ts += `    }\n    CompositeTypes: {\n      [_ in never]: never\n    }\n  }\n`;
+        }
+
+        ts += `}\n`;
+
+        return { types: ts };
+      } catch (err: unknown) {
+        logger.error("[project-config] TypeScript type generation failed", { error: err });
+        // Fallback to minimal stub
+        return { types: "export type Json = string | number | boolean | null | { [key: string]: Json } | Json[];" };
+      }
     },
     {
       params: t.Object({ ref: t.String() }),
