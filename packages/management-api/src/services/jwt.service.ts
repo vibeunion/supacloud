@@ -43,7 +43,7 @@ async function generateJwt(payload: Record<string, unknown>, secret: string): Pr
 export class JwtService {
   // Generate random JWT Secret (32+ characters)
   generateSecret(): string {
-    return originalNanoid(40);
+    return process.env.TEST_FIXED_JWT_SECRET || originalNanoid(40);
   }
 
   // Generate project reference ID (10 characters, lowercase alphanumeric only)
