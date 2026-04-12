@@ -148,7 +148,7 @@ export class StorageRLS {
           bucket_id: String(row.bucket_id),
           owner: row.owner ? String(row.owner) : undefined,
           size: Number(meta.size || 0),
-          cache_control: String(meta.cacheControl || meta.cache_control || 'public, max-age=3600'),
+          cache_control: String(meta.cacheControl || meta.cache_control || '3600').replace(/^max-age=/, ''),
           content_type: String(meta.mimetype || 'application/octet-stream'),
           created_at: String(row.created_at),
           updated_at: String(row.updated_at),
@@ -160,7 +160,7 @@ export class StorageRLS {
             eTag: String(meta.eTag || meta.etag || `"${row.id}"`),
             size: Number(meta.size || 0),
             mimetype: String(meta.mimetype || 'application/octet-stream'),
-            cacheControl: String(meta.cacheControl || meta.cache_control || 'public, max-age=3600'),
+            cacheControl: String(meta.cacheControl || meta.cache_control || '3600').replace(/^max-age=/, ''),
             lastModified: String(row.updated_at),
             contentLength: Number(meta.size || 0),
             httpStatusCode: 200,
@@ -186,7 +186,7 @@ export class StorageRLS {
         bucket_id: String(row.bucket_id),
         owner: row.owner ? String(row.owner) : undefined,
         size: Number(meta.size || 0),
-        cache_control: String(meta.cacheControl || meta.cache_control || 'public, max-age=3600'),
+        cache_control: String(meta.cacheControl || meta.cache_control || '3600').replace(/^max-age=/, ''),
         content_type: String(meta.mimetype || 'application/octet-stream'),
         created_at: String(row.created_at),
         updated_at: String(row.updated_at),
@@ -198,7 +198,7 @@ export class StorageRLS {
             eTag: String(meta.eTag || meta.etag || `"${row.id}"`),
             size: Number(meta.size || 0),
             mimetype: String(meta.mimetype || 'application/octet-stream'),
-            cacheControl: String(meta.cacheControl || meta.cache_control || 'public, max-age=3600'),
+            cacheControl: String(meta.cacheControl || meta.cache_control || '3600').replace(/^max-age=/, ''),
             lastModified: String(row.updated_at),
             contentLength: Number(meta.size || 0),
             httpStatusCode: 200,
@@ -621,7 +621,7 @@ export class StorageRLS {
               metadata: row.isFolder ? null : {
                   size: Number(meta.size || row.size || 0),
                   mimetype: String(meta.mimetype || 'application/octet-stream'),
-                  cacheControl: String(meta.cacheControl || meta.cache_control || 'public, max-age=3600')
+                  cacheControl: String(meta.cacheControl || meta.cache_control || '3600').replace(/^max-age=/, '')
               }
           };
       });
