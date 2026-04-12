@@ -57,7 +57,7 @@ export async function create(input: CreateProjectInput): Promise<Project> {
       ${input.s3_access_key || null},
       ${input.s3_secret_key || null},
       ${input.region || "local"},
-      ${input.config ? JSON.stringify(input.config) : sql`'{}'::jsonb`}::jsonb
+      ${input.config ? JSON.stringify(input.config) : "{}"}::jsonb
     )
     RETURNING *
   `;
