@@ -82,6 +82,7 @@ function applyCorsHeaders(proxyHeaders: Headers, request: Request) {
     proxyHeaders.set('access-control-allow-methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS, HEAD');
     proxyHeaders.set('access-control-allow-headers', DEFAULT_CORS_HEADERS.join(', '));
     proxyHeaders.set('access-control-expose-headers', DEFAULT_CORS_EXPOSED.join(', '));
+    proxyHeaders.set('access-control-max-age', '86400');
 }
 
 async function executeProxy(request: Request, targetUrl: string, interceptors: { linkOrigin?: string, ref?: string, extraHeaders?: Record<string, string> }) {
@@ -110,7 +111,8 @@ async function executeProxy(request: Request, targetUrl: string, interceptors: {
             method: request.method,
             headers: reqHeaders,
             body,
-            redirect: 'manual'
+            redirect: 'manual',
+            signal: AbortSignal.timeout(30000),
         });
         const duration = performance.now() - upstreamStart;
         if (process.env.NODE_ENV !== 'production' && duration > 500) {
@@ -134,7 +136,8 @@ async function executeProxy(request: Request, targetUrl: string, interceptors: {
             if (lowerKey === 'access-control-expose-headers') return;
 
             if (lowerKey === 'link' && interceptors.linkOrigin) {
-                proxyHeaders.set(key, val.replace(/<(https?:\/\/[^>]+)?\/admin\/users/g, `<${interceptors.linkOrigin}/auth/v1/admin/users`));
+                const rewritten = val.replace(/<(https?:\/\/[^>]+)(\/[^>]*)>/g, `<${interceptors.linkOrigin}$2>`);
+                proxyHeaders.set(key, rewritten);
                 return;
             }
 
@@ -189,7 +192,8 @@ const sdkProxyRoutesBase = new Elysia({ prefix: "" })
             let targetPath = url.pathname.replace(/^\/rest\/v1/, '');
             if (!targetPath || targetPath === '') targetPath = '/';
             const targetUrl = `http://127.0.0.1:${ports.pgrstPort}${targetPath}${url.search}`;
-            return executeProxy(request, targetUrl, {});
+            const linkOrigin = `${url.protocol}//${url.host}/rest/v1`;
+            return executeProxy(request, targetUrl, { linkOrigin });
         };
         return app.get("/*", handler).post("/*", handler).put("/*", handler).patch("/*", handler).delete("/*", handler).options("/*", handler)
                   .get("", handler).post("", handler).put("", handler).patch("", handler).delete("", handler).options("", handler);

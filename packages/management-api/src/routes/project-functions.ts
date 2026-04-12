@@ -34,7 +34,8 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         await edgeFunctionService.updateConfig(params.ref, slug, { verify_jwt: body.verify_jwt });
       }
 
-      return { id: slug, slug, name: body.name || slug, version: 1, verify_jwt: body.verify_jwt ?? true, status: "ACTIVE" };
+      const now = new Date().toISOString();
+      return { id: slug, slug, name: body.name || slug, version: 1, verify_jwt: body.verify_jwt ?? true, status: "ACTIVE", created_at: now, updated_at: now };
     },
     {
       params: t.Object({ ref: t.String() }),
