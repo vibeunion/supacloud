@@ -113,10 +113,11 @@ class TenantRuntimeService {
             jwtSecret: project.jwt_secret,
             dbName: project.db_name || `supa_${ref}`,
             apiUrl: this.deriveApiUrl(ref, projectConfig),
-            anonKey: project.anon_key,
-            serviceRoleKey: project.service_role_key,
+            anonKey: project.anonKey || project.anon_key,
+            serviceRoleKey: project.serviceRoleKey || project.service_role_key,
             siteUrl: typeof projectConfig.site_url === "string" ? projectConfig.site_url : (typeof projectConfig.siteUrl === "string" ? projectConfig.siteUrl : (projectConfig.custom_domain ? `https://${projectConfig.custom_domain}` : "http://localhost:3000")),
-            uriAllowList: Array.isArray(projectConfig.additional_redirect_urls) ? projectConfig.additional_redirect_urls.join(',') : (Array.isArray(projectConfig.additionalRedirectUrls) ? projectConfig.additionalRedirectUrls.join(',') : "")
+            uriAllowList: Array.isArray(projectConfig.additional_redirect_urls) ? projectConfig.additional_redirect_urls.join(',') : (Array.isArray(projectConfig.additionalRedirectUrls) ? projectConfig.additionalRedirectUrls.join(',') : ""),
+            authConfig: (projectConfig.auth as Record<string, unknown>) || {}
         };
     }
 
@@ -248,6 +249,9 @@ GOTRUE_SMTP_USER=${config.gotrueSmtpUser}
 GOTRUE_SMTP_PASS=${config.gotrueSmtpPass}
 GOTRUE_SMTP_SENDER_NAME=SupaCloud
 `;
+            if (creds.authConfig.mailer_autoconfirm) {
+                gotrueEnv += `GOTRUE_MAILER_AUTOCONFIRM=true\n`;
+            }
         } else {
             // P1-1: Enable auto-confirm if no SMTP is configured so users can register
             gotrueEnv += `
