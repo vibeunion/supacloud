@@ -50,6 +50,8 @@ interface Config {
   enableSsl: boolean;
   acmeClient: string;
   baseDomain: string;
+  poolerHost: string;
+  poolerPort: number;
   // Auth / SMTP
   studioUsername: string;
   studioPassword: string;
@@ -166,6 +168,8 @@ export const config = {
   enableSsl: (process.env.ENABLE_SSL || managementEnv.ENABLE_SSL || "false") === "true",
   acmeClient: process.env.ACME_CLIENT || managementEnv.ACME_CLIENT || "acme.sh",
   baseDomain: process.env.BASE_DOMAIN || managementEnv.BASE_DOMAIN || "localhost",
+  poolerHost: process.env.POOLER_HOST || managementEnv.POOLER_HOST || "",
+  poolerPort: parseInt(process.env.POOLER_PORT || managementEnv.POOLER_PORT || "6543", 10),
 
   // ── Auth / SMTP ──────────────────────────────────────────────────
   studioUsername: process.env.STUDIO_USERNAME || managementEnv.STUDIO_USERNAME || "admin",

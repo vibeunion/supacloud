@@ -56,7 +56,7 @@ jobs:
         ports:
           - 3000:3000
         env:
-          PGRST_DB_URI: postgres://postgres:postgres@postgres:5432/postgres
+          PGRST_DB_URI: postgres://supabase_admin:postgres@postgres:5432/postgres
           PGRST_DB_SCHEMA: public
           PGRST_DB_ANON_ROLE: anon
           PGRST_JWT_SECRET: super-secret-jwt-token-with-at-least-32-characters-long
@@ -71,7 +71,7 @@ jobs:
           GOTRUE_SITE_URL: http://127.0.0.1:9090
           GOTRUE_URI_ALLOW_LIST: http://127.0.0.1:9090
           GOTRUE_DB_DRIVER: postgres
-          GOTRUE_DB_DATABASE_URL: postgres://postgres:postgres@postgres:5432/postgres
+          GOTRUE_DB_DATABASE_URL: postgres://supabase_admin:postgres@postgres:5432/postgres
           GOTRUE_JWT_SECRET: super-secret-jwt-token-with-at-least-32-characters-long
           GOTRUE_JWT_AUD: authenticated
           GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
@@ -146,7 +146,7 @@ jobs:
           # Run test suites sequentially to prevent `mock.module("../../src/db")` in unit tests from poisoning E2E tests
           bun test tests/e2e
         env:
-          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
+          DATABASE_URL: postgresql://supabase_admin:postgres@localhost:5432/postgres
           TEST_FIXED_JWT_SECRET: super-secret-jwt-token-with-at-least-32-characters-long
           S3_ENDPOINT: http://127.0.0.1:9000
           S3_REGION: us-east-1
