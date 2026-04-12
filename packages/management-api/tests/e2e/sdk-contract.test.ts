@@ -80,6 +80,9 @@ describe("E2E SDK Blackbox Contracts", () => {
                     ON CONFLICT (project_ref) DO UPDATE 
                     SET postgrest_port = 3000, gotrue_port = 9999, realtime_port = 4000
                 `;
+                await sql`
+                    UPDATE projects SET db_name = 'postgres' WHERE ref = ${tenantRef};
+                `;
             }
             
             // Allow dynamic routing to settle and GoTrue to fully boot

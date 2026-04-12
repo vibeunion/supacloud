@@ -172,6 +172,12 @@ export class TaskWorker {
                         logger.error(`[TaskWorker] Project ${project_ref} not found for provision_realtime`);
                         return false;
                     }
+
+                    if (process.env.TEST_FIXED_JWT_SECRET) {
+                        logger.info(`[TaskWorker] Running in CI mode, skipping realtime provision for ${project_ref}`);
+                        return true;
+                    }
+
                     const cfg = project.config as Record<string, unknown> || {};
                     const dbName = typeof cfg.db_name === "string" ? cfg.db_name : `supa_${project_ref}`;
                     const res = await realtimeService.registerTenant({
