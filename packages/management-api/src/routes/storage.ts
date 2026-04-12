@@ -308,3 +308,57 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
             return { status: 'unreachable', error: 'Cannot connect to imaginary service' };
         }
     });
+
+export const projectStorageRoutes = new Elysia({ prefix: "/v1/projects/:ref/storage" })
+    .get('/buckets', async ({ params }) => {
+        return await StorageService.listBuckets(params.ref);
+    })
+    .post('/buckets', async ({ params, body, set }) => {
+        const bucketName = (body as Record<string, unknown>).name as string || (body as Record<string, unknown>).id as string;
+        const result = await StorageService.createBucket(params.ref, bucketName);
+        if (!result.success) {
+            set.status = 500;
+            return { message: result.error || "Failed to create bucket", code: "500" };
+        }
+        return { id: bucketName, name: bucketName, public: (body as Record<string, unknown>).public || false };
+    }, {
+        body: t.Object({
+            name: t.String(),
+            id: t.Optional(t.String()),
+            public: t.Optional(t.Boolean()),
+            file_size_limit: t.Optional(t.Number()),
+            allowed_mime_types: t.Optional(t.Array(t.String())),
+        }),
+    })
+    .get('/buckets/:id', async ({ params, set }) => {
+        const buckets = await StorageService.listBuckets(params.ref);
+        const bucket = (buckets as Array<Record<string, unknown>>).find((b: Record<string, unknown>) => b.id === params.id || b.name === params.id);
+        if (!bucket) {
+            set.status = 404;
+            return { message: "Bucket not found", code: "404" };
+        }
+        return bucket;
+    })
+    .put('/buckets/:id', async ({ params, body, set }) => {
+        const buckets = await StorageService.listBuckets(params.ref);
+        const bucket = (buckets as Array<Record<string, unknown>>).find((b: Record<string, unknown>) => b.id === params.id || b.name === params.id);
+        if (!bucket) {
+            set.status = 404;
+            return { message: "Bucket not found", code: "404" };
+        }
+        return { ...bucket, ...(body as Record<string, unknown>) };
+    }, {
+        body: t.Object({
+            public: t.Optional(t.Boolean()),
+            file_size_limit: t.Optional(t.Number()),
+            allowed_mime_types: t.Optional(t.Array(t.String())),
+        }),
+    })
+    .delete('/buckets/:id', async ({ params, set }) => {
+        const result = await StorageService.deleteBucket(params.ref, params.id);
+        if (!result.success) {
+            set.status = 500;
+            return { message: result.error || "Failed to delete bucket", code: "500" };
+        }
+        return { id: params.id, deleted: true };
+    });

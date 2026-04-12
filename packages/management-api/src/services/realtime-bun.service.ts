@@ -3,6 +3,15 @@ import { logger } from '../utils/logger';
 import { databaseService } from './database.service';
 import { resolveDbName, getProjectDb } from '../db';
 
+const IDENTIFIER_REGEX = /^[a-zA-Z_][a-zA-Z0-9_]{0,62}$/;
+
+function validatePgIdentifier(name: string, label: string): string {
+    if (!IDENTIFIER_REGEX.test(name)) {
+        throw new Error(`Invalid ${label}: ${name}`);
+    }
+    return name;
+}
+
 interface PostgresChangeConfig {
     id?: string | number;
     event: string;
@@ -105,7 +114,7 @@ class RealtimeBunService {
                 const [slotRow] = await db`
                     SELECT COUNT(*) > 0 as exists
                     FROM pg_replication_slots
-                    WHERE slot_name = 'supabase_realtime' AND active = false
+                    WHERE slot_name = ${`supabase_realtime_${projectRef}`} AND active = false
                 `;
                 const hasSlot = slotRow?.exists || false;
                 this.wal2jsonAvailable.set(projectRef, hasSlot);
@@ -125,7 +134,7 @@ class RealtimeBunService {
         const poll = async () => {
             try {
                 const changes = await db`
-                    SELECT data FROM pg_logical_slot_get_changes('supabase_realtime', NULL, NULL)
+                    SELECT data FROM pg_logical_slot_get_changes(${`supabase_realtime_${projectRef}`}, NULL, NULL)
                 `;
                 if (Array.isArray(changes) && changes.length > 0) {
                     for (const change of changes) {
@@ -249,9 +258,19 @@ class RealtimeBunService {
             `);
 
             for (const sub of subscriptions) {
-                const schema = sub.schema || 'public';
-                const table = sub.table;
-                if (!table) continue;
+                const rawSchema = sub.schema || 'public';
+                const rawTable = sub.table;
+                if (!rawTable) continue;
+
+                let schema: string;
+                let table: string;
+                try {
+                    schema = validatePgIdentifier(rawSchema, 'schema');
+                    table = validatePgIdentifier(rawTable, 'table');
+                } catch {
+                    logger.warn(`[RealtimeBun] Skipping invalid identifier: ${rawSchema}.${rawTable}`);
+                    continue;
+                }
 
                 const triggerKey = `${projectRef}:${schema}:${table}`;
                 if (this.ensuredTriggers.has(triggerKey)) continue;
@@ -259,8 +278,8 @@ class RealtimeBunService {
                 const triggerName = `supacloud_rlt_${schema}_${table}`;
                 try {
                     await db.unsafe(`
-                        DROP TRIGGER IF EXISTS ${triggerName} ON "${schema}"."${table}";
-                        CREATE TRIGGER ${triggerName}
+                        DROP TRIGGER IF EXISTS "${triggerName}" ON "${schema}"."${table}";
+                        CREATE TRIGGER "${triggerName}"
                             AFTER INSERT OR UPDATE OR DELETE ON "${schema}"."${table}"
                             FOR EACH ROW EXECUTE FUNCTION realtime_supacloud_notify();
                     `);
@@ -339,6 +358,15 @@ class RealtimeBunService {
         changeType: string
     ): Promise<boolean> {
         try {
+            let safeSchema: string;
+            let safeTable: string;
+            try {
+                safeSchema = validatePgIdentifier(schema, 'schema');
+                safeTable = validatePgIdentifier(table, 'table');
+            } catch {
+                return true;
+            }
+
             const dbName = await resolveDbName(projectRef);
             const db = getProjectDb(dbName);
             if (!db) return true;
@@ -349,28 +377,40 @@ class RealtimeBunService {
                 JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
                 JOIN pg_class c ON c.oid = i.indrelid
                 JOIN pg_namespace n ON n.oid = c.relnamespace
-                WHERE n.nspname = ${schema}
-                  AND c.relname = ${table}
+                WHERE n.nspname = ${safeSchema}
+                  AND c.relname = ${safeTable}
                   AND i.indisprimary
             `.catch(() => null);
 
             if (!pkCols || !Array.isArray(pkCols) || pkCols.length === 0) return true;
 
-            const whereParts: string[] = [];
+            const pkValues: unknown[] = [];
             for (const col of pkCols) {
-                const colName = col.attname;
+                const colName = (col as Record<string, unknown>).attname as string;
                 const val = record[colName];
                 if (val === undefined) return true;
-                const escaped = typeof val === 'number' ? val : `'${String(val).replace(/'/g, "''")}'`;
-                whereParts.push(`"${colName}" = ${escaped}`);
+                pkValues.push(val);
             }
 
+            const safeRole = role.replace(/'/g, "''");
+
+            const whereParts = pkCols.map((col, i) => {
+                const colName = validatePgIdentifier((col as Record<string, unknown>).attname as string, 'column');
+                return `"${colName}" = $${i + 1}`;
+            });
+
             const rlsCheck = await db.unsafe(`
-                SET LOCAL role = '${role.replace(/'/g, "''")}';
-                SELECT 1 FROM "${schema}"."${table}" WHERE ${whereParts.join(' AND ')} LIMIT 1;
+                SET LOCAL role = '${safeRole}';
             `).catch(() => null);
 
-            if (!rlsCheck || !Array.isArray(rlsCheck) || rlsCheck.length === 0) {
+            if (rlsCheck === null) return true;
+
+            const selectResult = await db.unsafe(
+                `SELECT 1 FROM "${safeSchema}"."${safeTable}" WHERE ${whereParts.join(' AND ')} LIMIT 1`,
+                pkValues
+            ).catch(() => null);
+
+            if (!selectResult || !Array.isArray(selectResult) || selectResult.length === 0) {
                 return false;
             }
             return true;

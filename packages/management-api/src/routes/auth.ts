@@ -60,26 +60,27 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
     async ({ params, set }) => {
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings) {
-        return status(404, { error: "Project not found" });
+        return status(404, { message: "Project not found", code: "400" });
       }
 
       const oauthConfig = ((settings.auth as Record<string, unknown>)?.external ?? {}) as Record<string, Record<string, string>>;
-      const result: Record<string, { enabled: boolean; client_id?: string; redirect_uri?: string }> = {};
+      const result: Array<{ id: string; enabled: boolean; client_id?: string; redirect_uri?: string }> = [];
 
       for (const provider of SUPPORTED_OAUTH_PROVIDERS) {
         const providerConfig = oauthConfig[provider];
         if (providerConfig && providerConfig.client_id) {
-          result[provider] = {
+          result.push({
+            id: provider,
             enabled: true,
             client_id: providerConfig.client_id,
             redirect_uri: providerConfig.redirect_uri,
-          };
+          });
         } else {
-          result[provider] = { enabled: false };
+          result.push({ id: provider, enabled: false });
         }
       }
 
-      return { providers: result };
+      return result;
     },
     {
       params: t.Object({
@@ -95,12 +96,12 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
 
       if (!SUPPORTED_OAUTH_PROVIDERS.includes(provider)) {
         set.status = 400;
-        return { error: `Unsupported OAuth provider: ${provider}` };
+        return { message: "Unsupported OAuth provider", code: "400" };
       }
 
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings) {
-        return status(404, { error: "Project not found" });
+        return status(404, { message: "Project not found", code: "400" });
       }
 
       const oauthConfig = ((settings.auth as Record<string, unknown>)?.external ?? {}) as Record<string, Record<string, string>>;
@@ -108,7 +109,7 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
 
       if (!providerConfig || !providerConfig.client_id) {
         return {
-          provider,
+          id: provider,
           enabled: false,
           client_id: null,
           redirect_uri: null,
@@ -116,7 +117,7 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
       }
 
       return {
-        provider,
+        id: provider,
         enabled: true,
         client_id: providerConfig.client_id,
         redirect_uri: providerConfig.redirect_uri || null,
@@ -137,12 +138,12 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
 
       if (!SUPPORTED_OAUTH_PROVIDERS.includes(provider)) {
         set.status = 400;
-        return { error: `Unsupported OAuth provider: ${provider}` };
+        return { message: "Unsupported OAuth provider", code: "400" };
       }
 
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings) {
-        return status(404, { error: "Project not found" });
+        return status(404, { message: "Project not found", code: "400" });
       }
 
       const currentAuth = (settings.auth as Record<string, unknown>) || {};
@@ -183,11 +184,10 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
       }
 
       return {
-        provider,
+        id: provider,
         enabled: true,
         client_id: providerConfig.client_id,
         redirect_uri: providerConfig.redirect_uri || null,
-        message: `OAuth provider ${provider} configured successfully`,
         ...(warning ? { warning } : {}),
       };
     },
@@ -212,12 +212,12 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
 
       if (!SUPPORTED_OAUTH_PROVIDERS.includes(provider)) {
         set.status = 400;
-        return { error: `Unsupported OAuth provider: ${provider}` };
+        return { message: "Unsupported OAuth provider", code: "400" };
       }
 
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings) {
-        return status(404, { error: "Project not found" });
+        return status(404, { message: "Project not found", code: "400" });
       }
 
       const currentAuth = (settings.auth as Record<string, unknown>) || {};
@@ -259,11 +259,10 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
       }
 
       return {
-        provider,
+        id: provider,
         enabled: true,
         client_id: updatedProviderConfig.client_id,
         redirect_uri: updatedProviderConfig.redirect_uri || null,
-        message: `OAuth provider ${provider} updated successfully`,
         ...(warning ? { warning } : {}),
       };
     },
@@ -288,12 +287,12 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
 
       if (!SUPPORTED_OAUTH_PROVIDERS.includes(provider)) {
         set.status = 400;
-        return { error: `Unsupported OAuth provider: ${provider}` };
+        return { message: "Unsupported OAuth provider", code: "400" };
       }
 
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings) {
-        return status(404, { error: "Project not found" });
+        return status(404, { message: "Project not found", code: "400" });
       }
 
       const currentAuth = (settings.auth as Record<string, unknown>) || {};
@@ -301,9 +300,8 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
 
       if (!currentExternal[provider]) {
         return {
-          provider,
+          id: provider,
           enabled: false,
-          message: `OAuth provider ${provider} was not configured`,
         };
       }
 
@@ -325,9 +323,8 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
       }
 
       return {
-        provider,
+        id: provider,
         enabled: false,
-        message: `OAuth provider ${provider} removed successfully`,
       };
     },
     {
@@ -343,7 +340,7 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
     async ({ params, set }) => {
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings) {
-        return status(404, { error: "Project not found" });
+        return status(404, { message: "Project not found", code: "400" });
       }
 
       const authConfig = (settings.auth as Record<string, unknown>) || {};
@@ -375,7 +372,7 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
     async ({ params, body, set }) => {
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings) {
-        return status(404, { error: "Project not found" });
+        return status(404, { message: "Project not found", code: "400" });
       }
 
       const currentAuth = (settings.auth as Record<string, unknown>) || {};
@@ -435,7 +432,7 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
     async ({ params, set }) => {
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings) {
-        return status(404, { error: "Project not found" });
+        return status(404, { message: "Project not found", code: "400" });
       }
 
       const oauthConfig = ((settings.auth as Record<string, unknown>)?.external ?? {}) as Record<string, Record<string, string>>;
@@ -485,12 +482,12 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
 
       if (!SUPPORTED_OAUTH_PROVIDERS.includes(provider)) {
         set.status = 400;
-        return { error: `Unsupported OAuth provider: ${provider}` };
+        return { message: "Unsupported OAuth provider", code: "400" };
       }
 
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings) {
-        return status(404, { error: "Project not found" });
+        return status(404, { message: "Project not found", code: "400" });
       }
 
       const currentAuth = (settings.auth as Record<string, unknown>) || {};
@@ -566,7 +563,7 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
     async ({ params, set }) => {
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings) {
-        return status(404, { error: "Project not found" });
+        return status(404, { message: "Project not found", code: "400" });
       }
 
       const oauthConfig = ((settings.auth as Record<string, unknown>)?.external ?? {}) as Record<string, Record<string, string>>;

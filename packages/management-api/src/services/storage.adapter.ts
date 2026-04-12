@@ -1,6 +1,7 @@
 import { config } from "../config";
 import { logger } from "../utils/logger";
 import { shellService } from "./shell.service";
+import { resolveBucketName } from "../db";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { S3Client } from "bun";
@@ -19,7 +20,7 @@ export interface StorageDriver {
 
 export class JuiceFSDriver implements StorageDriver {
   private getBasePath(projectRef: string, bucket?: string, key?: string): string {
-    const root = path.resolve(config.storageMountPoint, `supa-${projectRef}`);
+    const root = path.resolve(config.storageMountPoint, resolveBucketName(projectRef));
     let p = root;
     if (bucket) p = path.join(p, bucket);
     if (key) p = path.join(p, key);
@@ -151,25 +152,24 @@ export class S3Driver implements StorageDriver {
         accessKey: process.env.S3_ACCESS_KEY || "minioadmin",
         secretKey: process.env.S3_SECRET_KEY || "minioadmin",
         endpoint: config.s3Endpoint || "http://127.0.0.1:9000",
-        bucket: `supa-${projectRef}`
+        bucket: resolveBucketName(projectRef)
       };
     }
 
     const { success, output } = await shellService.execute('s3_manager.sh', ['credentials', projectRef]);
     if (!success) {
-      // Fallback
       return {
         accessKey: process.env.S3_ACCESS_KEY,
         secretKey: process.env.S3_SECRET_KEY,
         endpoint: config.s3Endpoint,
-        bucket: `supa-${projectRef}`
+        bucket: resolveBucketName(projectRef)
       };
     }
     return {
       accessKey: output.match(/ACCESS_KEY=([^\n]+)/)?.[1]?.trim(),
       secretKey: output.match(/SECRET_KEY=([^\n]+)/)?.[1]?.trim(),
       endpoint: output.match(/ENDPOINT=([^\n]+)/)?.[1]?.trim() || config.s3Endpoint,
-      bucket: output.match(/BUCKET=([^\n]+)/)?.[1]?.trim() || `supa-${projectRef}`
+      bucket: output.match(/BUCKET=([^\n]+)/)?.[1]?.trim() || resolveBucketName(projectRef)
     };
   }
 

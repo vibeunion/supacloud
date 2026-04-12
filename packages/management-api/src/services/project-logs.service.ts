@@ -52,9 +52,11 @@ export class ProjectLogService {
           if (!/^[a-zA-Z0-9_]+$/.test(ref)) {
             throw new Error("Invalid ref format");
           }
+          const { resolveDbName } = await import("../db");
+          const dbName = await resolveDbName(ref);
           const pgLogCmd = await shellService.execute("bash", [
             "-c",
-            `journalctl -u patroni -o json -n 20 --no-pager | grep supa_${ref}`,
+            `journalctl -u patroni -o json -n 20 --no-pager | grep ${dbName}`,
           ]);
           if (pgLogCmd.success && pgLogCmd.output.trim().length > 0) {
             const lines = pgLogCmd.output.trim().split('\\n').filter((l: string) => l.trim().length > 0);

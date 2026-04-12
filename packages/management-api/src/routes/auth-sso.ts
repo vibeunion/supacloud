@@ -73,9 +73,11 @@ export const authSsoRoutes = new Elysia({ prefix: "/v1/projects" })
       params: t.Object({ ref: t.String() }),
       body: t.Object({
         resource_id: t.Optional(t.String()),
+        saml_provider_name: t.Optional(t.String()),
         domains: t.Optional(t.Array(t.String())),
         metadata_xml: t.Optional(t.String()),
         metadata_url: t.Optional(t.String()),
+        metadata_attribute_url: t.Optional(t.String()),
         entity_id: t.Optional(t.String()),
         attribute_mapping: t.Optional(t.Record(t.String(), t.Unknown())),
       })
@@ -140,9 +142,11 @@ export const authSsoRoutes = new Elysia({ prefix: "/v1/projects" })
       params: t.Object({ ref: t.String(), id: t.String() }),
       body: t.Object({
         resource_id: t.Optional(t.String()),
+        saml_provider_name: t.Optional(t.String()),
         domains: t.Optional(t.Array(t.String())),
         metadata_xml: t.Optional(t.String()),
         metadata_url: t.Optional(t.String()),
+        metadata_attribute_url: t.Optional(t.String()),
         attribute_mapping: t.Optional(t.Record(t.String(), t.Unknown())),
       })
     }

@@ -2,7 +2,14 @@ import { config } from "../config";
 import { logger } from "../utils/logger";
 import { shellService } from "./shell.service";
 import { SQL } from "bun";
-import { sql as adminSql, getProjectDb, resolveDbName } from "../db";
+import {
+  sql as adminSql,
+  getProjectDb,
+  resolveDbName,
+  resolveRoleName,
+  resolveAuthenticatorName,
+  generateDbName,
+} from "../db";
 import { $ } from "bun";
 import { assertValidIdentifier, assertValidDbName } from "../utils/validation";
 
@@ -24,8 +31,9 @@ export class DatabaseService {
 
   // Generate secure random password
   generatePassword(length = 24): string {
-    const charset = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-    let ret = '';
+    const charset =
+      "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    let ret = "";
     const bytes = new Uint8Array(length);
     crypto.getRandomValues(bytes);
     for (let i = 0; i < length; i++) {
@@ -50,10 +58,12 @@ export class DatabaseService {
   }
 
   // Unified execution wrap for Tenant DB (uses cached pool)
-  private async withTenantDb<T>(dbName: string, operation: (db: SQL) => Promise<T>): Promise<T> {
+  private async withTenantDb<T>(
+    dbName: string,
+    operation: (db: SQL) => Promise<T>,
+  ): Promise<T> {
     return await operation(this.getTenantDb(dbName));
   }
-
 
   // Disk space pre-check: prevent WAL disk full which causes cluster panic
   private async checkDiskSpace(): Promise<void> {
@@ -70,27 +80,37 @@ export class DatabaseService {
     try {
       const dfOut = await $`df -k ${targetDir}`.nothrow().quiet();
       if (dfOut.exitCode === 0) {
-        const lines = dfOut.text().trim().split('\n');
+        const lines = dfOut.text().trim().split("\n");
         if (lines.length >= 2) {
           const parts = lines[1].trim().split(/\s+/);
           const availKb = parseInt(parts[3]);
 
           if (availKb < minKb) {
-            throw new Error(`Insufficient disk space on ${targetDir}. Available: ${Math.floor(availKb / 1024)}MB. Required minimum: ${minGb}GB.`);
+            throw new Error(
+              `Insufficient disk space on ${targetDir}. Available: ${Math.floor(availKb / 1024)}MB. Required minimum: ${minGb}GB.`,
+            );
           }
         }
       }
     } catch (error: unknown) {
-      if (error instanceof Error && (error instanceof Error ? error.message : String(error)).includes("Insufficient disk space")) {
+      if (
+        error instanceof Error &&
+        (error instanceof Error ? error.message : String(error)).includes(
+          "Insufficient disk space",
+        )
+      ) {
         throw error;
       }
     }
   }
 
   // Create tenant database
-  async createDatabase(projectRef: string, password: string): Promise<{ success: boolean; error?: string }> {
-    const dbName = `supa_${projectRef}`;
-    const dbUser = `role_${projectRef}`;
+  async createDatabase(
+    projectRef: string,
+    password: string,
+  ): Promise<{ success: boolean; error?: string }> {
+    const dbName = generateDbName(projectRef);
+    const dbUser = resolveRoleName(projectRef);
 
     try {
       // Verify identifiers for safety to prevent SQL injection in DDL
@@ -110,10 +130,14 @@ export class DatabaseService {
         }
 
         // Create database - use double quotes to support identifiers with hyphens
-        await adminDb.unsafe(`CREATE DATABASE "${dbName}" OWNER ${this.PG_USER}`);
+        await adminDb.unsafe(
+          `CREATE DATABASE "${dbName}" OWNER ${this.PG_USER}`,
+        );
 
         // Create role - limit connections for low-resource environments (prevent connection exhaustion)
-        await adminDb.unsafe(`CREATE ROLE "${dbUser}" LOGIN CONNECTION LIMIT 20 PASSWORD ${pgEscapePassword(password)}`);
+        await adminDb.unsafe(
+          `CREATE ROLE "${dbUser}" LOGIN CONNECTION LIMIT 20 PASSWORD ${pgEscapePassword(password)}`,
+        );
 
         // Set kernel-level configs for resource exhaustion prevention
         await adminDb.unsafe(`
@@ -123,41 +147,61 @@ export class DatabaseService {
         `);
 
         // Grant privileges
-        await adminDb.unsafe(`GRANT ALL PRIVILEGES ON DATABASE "${dbName}" TO "${dbUser}"`);
+        await adminDb.unsafe(
+          `GRANT ALL PRIVILEGES ON DATABASE "${dbName}" TO "${dbUser}"`,
+        );
       });
 
-      // Apply schema independently 
+      // Apply schema independently
       await this.applySupabaseSchema(dbName, projectRef, password);
 
       return { success: true };
     } catch (error: unknown) {
-      return { success: false, error: (error instanceof Error ? error.message : String(error)) };
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
     }
   }
 
   // Apply Supabase Schema
-  private async applySupabaseSchema(dbName: string, projectRef: string, password: string): Promise<void> {
+  private async applySupabaseSchema(
+    dbName: string,
+    projectRef: string,
+    password: string,
+  ): Promise<void> {
+    const dbUser = resolveRoleName(projectRef);
     await this.withTenantDb(dbName, async (tenantDb) => {
       // Create core extensions unconditionally (PG native)
       await tenantDb.unsafe(`CREATE EXTENSION IF NOT EXISTS "uuid-ossp"`);
       await tenantDb.unsafe(`CREATE EXTENSION IF NOT EXISTS "pgcrypto"`);
-      
+
       // Graciously attempt to create Supabase-specific extensions
       // Core Supabase extensions
       const coreExts = ["pgjwt", "pg_net", "pgsodium", "vault", "pg_graphql"];
       // Ecosystem extensions (P1-1 ~ P1-4): available if host PostgreSQL has the packages installed
-      const ecosystemExts = ["pg_cron", "vector", "postgis", "pg_stat_statements", "pgaudit"];
+      const ecosystemExts = [
+        "pg_cron",
+        "vector",
+        "postgis",
+        "pg_stat_statements",
+        "pgaudit",
+      ];
       for (const ext of [...coreExts, ...ecosystemExts]) {
-         try {
-             // pg_cron must be created in postgres database first, but we create IF NOT EXISTS in tenant db as well
-             await tenantDb.unsafe(`CREATE EXTENSION IF NOT EXISTS "${ext}" CASCADE`);
-         } catch (e) {
-             logger.warn(`[DatabaseService] Extension ${ext} not available on this Postgres cluster. Skipping.`);
-         }
+        try {
+          // pg_cron must be created in postgres database first, but we create IF NOT EXISTS in tenant db as well
+          await tenantDb.unsafe(
+            `CREATE EXTENSION IF NOT EXISTS "${ext}" CASCADE`,
+          );
+        } catch (e) {
+          logger.warn(
+            `[DatabaseService] Extension ${ext} not available on this Postgres cluster. Skipping.`,
+          );
+        }
       }
 
       // Create API roles - use double quotes to support hyphens
-      const authenticatorRole = `authenticator_${projectRef}`;
+      const authenticatorRole = resolveAuthenticatorName(projectRef);
       const anonRole = `anon`;
       const authenticatedRole = `authenticated`;
       const serviceRole = `service_role`;
@@ -220,23 +264,28 @@ export class DatabaseService {
 
       // Load and execute full Supabase schema (Auth, Storage, Realtime/Walrus, etc)
       try {
-        const { join } = await import('path');
-        const schemaPath = join(import.meta.dir, '../db/schemas/supabase.sql');
+        const { join } = await import("path");
+        const schemaPath = join(import.meta.dir, "../db/schemas/supabase.sql");
         const schemaSql = await Bun.file(schemaPath).text();
         await tenantDb.unsafe(schemaSql);
-        logger.info(`[services/database.service] Successfully applied supabase.sql to tenant ${dbName}`);
+        logger.info(
+          `[services/database.service] Successfully applied supabase.sql to tenant ${dbName}`,
+        );
       } catch (err: unknown) {
-        logger.error(`[services/database.service] Error applying Supabase schema at ${dbName}`, { error: err instanceof Error ? err.message : String(err) });
+        logger.error(
+          `[services/database.service] Error applying Supabase schema at ${dbName}`,
+          { error: err instanceof Error ? err.message : String(err) },
+        );
         throw err;
       }
 
       // Grant specific tenant roles and schema access to the project owner role to ensure isolation without cluster powers
       await tenantDb.unsafe(`
-        GRANT ${anonRole}, ${authenticatedRole}, ${serviceRole} TO "role_${projectRef}";
-        GRANT USAGE ON SCHEMA auth, storage, realtime TO "role_${projectRef}";
-        GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA auth, storage, realtime TO "role_${projectRef}";
-        GRANT ALL PRIVILEGES ON ALL ROUTINES IN SCHEMA auth, storage, realtime TO "role_${projectRef}";
-        GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA auth, storage, realtime TO "role_${projectRef}";
+        GRANT ${anonRole}, ${authenticatedRole}, ${serviceRole} TO "${dbUser}";
+        GRANT USAGE ON SCHEMA auth, storage, realtime TO "${dbUser}";
+        GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA auth, storage, realtime TO "${dbUser}";
+        GRANT ALL PRIVILEGES ON ALL ROUTINES IN SCHEMA auth, storage, realtime TO "${dbUser}";
+        GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA auth, storage, realtime TO "${dbUser}";
       `);
 
       // Grant privileges
@@ -260,9 +309,11 @@ export class DatabaseService {
   }
 
   // Delete project database
-  async deleteDatabase(projectRef: string): Promise<{ success: boolean; error?: string }> {
+  async deleteDatabase(
+    projectRef: string,
+  ): Promise<{ success: boolean; error?: string }> {
     const dbName = await resolveDbName(projectRef);
-    const dbUser = `role_${projectRef}`;
+    const dbUser = resolveRoleName(projectRef);
 
     try {
       assertValidDbName("dbName", dbName);
@@ -276,25 +327,34 @@ export class DatabaseService {
             FROM pg_stat_activity
             WHERE datname = ${dbName} AND pid <> pg_backend_pid()
           `;
-        } catch (e: unknown) { logger.debug("[services/database.service] suppressed error", { error: e instanceof Error ? e.message : String(e) }); }
+        } catch (e: unknown) {
+          logger.debug("[services/database.service] suppressed error", {
+            error: e instanceof Error ? e.message : String(e),
+          });
+        }
 
         // Drop database
         await adminDb.unsafe(`DROP DATABASE IF EXISTS "${dbName}"`);
 
         // Drop roles (both the project role and the authenticator role)
         await adminDb.unsafe(`DROP ROLE IF EXISTS "${dbUser}"`);
-        const authenticatorRole = `authenticator_${projectRef}`;
+        const authenticatorRole = resolveAuthenticatorName(projectRef);
         await adminDb.unsafe(`DROP ROLE IF EXISTS "${authenticatorRole}"`);
       });
 
       return { success: true };
     } catch (error: unknown) {
-      return { success: false, error: (error instanceof Error ? error.message : String(error)) };
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
     }
   }
 
   // Check database status
-  async checkStatus(projectRef: string): Promise<{ success: boolean; output: string; error?: string }> {
+  async checkStatus(
+    projectRef: string,
+  ): Promise<{ success: boolean; output: string; error?: string }> {
     const dbName = await resolveDbName(projectRef);
 
     try {
@@ -312,7 +372,11 @@ export class DatabaseService {
         }
       });
     } catch (error: unknown) {
-      return { success: false, output: "", error: (error instanceof Error ? error.message : String(error)) };
+      return {
+        success: false,
+        output: "",
+        error: error instanceof Error ? error.message : String(error),
+      };
     }
   }
 
@@ -320,22 +384,38 @@ export class DatabaseService {
   // Stored in supacloud_meta.project_secrets table (not files).
   // Edge Runtime reads these dynamically on every function invocation.
 
-  async getSecrets(projectRef: string): Promise<{ name: string; value: string }[]> {
+  async getSecrets(
+    projectRef: string,
+  ): Promise<{ name: string; value: string; updated_at?: string }[]> {
     try {
       const { sql: metaDb } = await import("../db");
       const rows = await metaDb`
-        SELECT name, value FROM project_secrets
+        SELECT name, value, updated_at FROM project_secrets
         WHERE project_ref = ${projectRef}
         ORDER BY name
       `;
-      return rows.map((r: Record<string, unknown>) => ({ name: r.name as string, value: r.value as string }));
+      return rows.map((r: Record<string, unknown>) => ({
+        name: r.name as string,
+        value: r.value as string,
+        updated_at:
+          (r.updated_at != null
+            ? new Date(r.updated_at as string).toISOString()
+            : null) ?? new Date().toISOString(),
+      }));
     } catch (err) {
-      logger.error("[DatabaseService] Failed to get secrets", { projectRef, error: err });
+      logger.error("[DatabaseService] Failed to get secrets", {
+        projectRef,
+        error: err,
+      });
       return [];
     }
   }
 
-  async upsertSecret(projectRef: string, name: string, value: string): Promise<boolean> {
+  async upsertSecret(
+    projectRef: string,
+    name: string,
+    value: string,
+  ): Promise<boolean> {
     try {
       const { sql: metaDb } = await import("../db");
       await metaDb`
@@ -346,7 +426,11 @@ export class DatabaseService {
       `;
       return true;
     } catch (err) {
-      logger.error("[DatabaseService] Failed to upsert secret", { projectRef, name, error: err });
+      logger.error("[DatabaseService] Failed to upsert secret", {
+        projectRef,
+        name,
+        error: err,
+      });
       return false;
     }
   }
@@ -357,7 +441,11 @@ export class DatabaseService {
       await metaDb`DELETE FROM project_secrets WHERE project_ref = ${projectRef} AND name = ${name}`;
       return true;
     } catch (err) {
-      logger.error("[DatabaseService] Failed to delete secret", { projectRef, name, error: err });
+      logger.error("[DatabaseService] Failed to delete secret", {
+        projectRef,
+        name,
+        error: err,
+      });
       return false;
     }
   }
@@ -366,7 +454,9 @@ export class DatabaseService {
   // Delegates to TenantRuntimeService (TypeScript implementation)
   // Shell-based methods removed — unified to TenantRuntimeService
 
-  async startRuntime(projectRef: string): Promise<{ success: boolean; output: string; error?: string }> {
+  async startRuntime(
+    projectRef: string,
+  ): Promise<{ success: boolean; output: string; error?: string }> {
     // Import TenantRuntimeService to avoid shell script dual-path
     const { tenantRuntimeService } = await import("./tenant-runtime.service");
     try {
@@ -374,40 +464,61 @@ export class DatabaseService {
       return {
         success: status.status === "running" || status.status === "starting",
         output: `PORT=${status.port}\nGOTRUE_PORT=${status.gotruePort}`,
-        error: status.health === "unhealthy" ? "Health check failed" : undefined,
+        error:
+          status.health === "unhealthy" ? "Health check failed" : undefined,
       };
     } catch (error: unknown) {
-      return { success: false, output: "", error: error instanceof Error ? error.message : String(error) };
+      return {
+        success: false,
+        output: "",
+        error: error instanceof Error ? error.message : String(error),
+      };
     }
   }
 
-  async stopRuntime(projectRef: string): Promise<{ success: boolean; error?: string }> {
+  async stopRuntime(
+    projectRef: string,
+  ): Promise<{ success: boolean; error?: string }> {
     const { tenantRuntimeService } = await import("./tenant-runtime.service");
     try {
       await tenantRuntimeService.stopRuntime(projectRef);
       return { success: true };
     } catch (error: unknown) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) };
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
     }
   }
 
-  async restartRuntime(projectRef: string): Promise<{ success: boolean; error?: string }> {
+  async restartRuntime(
+    projectRef: string,
+  ): Promise<{ success: boolean; error?: string }> {
     const { tenantRuntimeService } = await import("./tenant-runtime.service");
     try {
       await tenantRuntimeService.restartRuntime(projectRef);
       return { success: true };
     } catch (error: unknown) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) };
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
     }
   }
 
-  async getRuntimeStatus(projectRef: string): Promise<{ success: boolean; output: string; error?: string }> {
+  async getRuntimeStatus(
+    projectRef: string,
+  ): Promise<{ success: boolean; output: string; error?: string }> {
     const { tenantRuntimeService } = await import("./tenant-runtime.service");
     try {
       const status = await tenantRuntimeService.checkStatus(projectRef);
       return { success: true, output: JSON.stringify(status) };
     } catch (error: unknown) {
-      return { success: false, output: "", error: error instanceof Error ? error.message : String(error) };
+      return {
+        success: false,
+        output: "",
+        error: error instanceof Error ? error.message : String(error),
+      };
     }
   }
 
@@ -423,13 +534,26 @@ export class DatabaseService {
 
   // --- Kong upstream management ---
 
-  async setupUpstream(projectRef: string, pgrstPort: string, gotruePort: string): Promise<{ success: boolean; error?: string }> {
-    // Delegate to GatewayService REST API instead of shell script
+  async setupUpstream(
+    projectRef: string,
+    pgrstPort: string,
+    gotruePort: string,
+    customApiDomain?: string,
+    opts?: { functionsPort?: number; storagePort?: number; realtimeApiPort?: number; realtimeWsPort?: number },
+  ): Promise<{ success: boolean; error?: string }> {
     const { gatewayService } = await import("./gateway.service");
-    return await gatewayService.setupUpstream(projectRef, pgrstPort, gotruePort);
+    return await gatewayService.setupUpstream(
+      projectRef,
+      pgrstPort,
+      gotruePort,
+      customApiDomain,
+      opts,
+    );
   }
 
-  async removeService(projectRef: string): Promise<{ success: boolean; error?: string }> {
+  async removeService(
+    projectRef: string,
+  ): Promise<{ success: boolean; error?: string }> {
     const { gatewayService } = await import("./gateway.service");
     return await gatewayService.removeService(projectRef);
   }

@@ -1,4 +1,4 @@
-import { Elysia, status } from "elysia";
+import { Elysia, t, status } from "elysia";
 import { organizationService } from "../services/organization.service";
 import type { Organization } from "../db";
 
@@ -9,6 +9,7 @@ function formatOrg(org: Organization) {
         name: o.name,
         slug: o.slug,
         plan: o.plan || "free",
+        owner_id: o.owner_id || o.id,
     };
 }
 
@@ -25,7 +26,54 @@ export const organizationRoutes = new Elysia({ prefix: "/v1/organizations" })
         const orgs = await organizationService.listOrganizations();
         const org = orgs.find((o) => o.slug === params.slug) || orgs[0];
         if (!org) {
-                        return status(404, { error: "Organization not found" });
+                        return status(404, { message: "Organization not found", code: "404" });
         }
         return formatOrg(org);
-    });
+    })
+    .post(
+        "/",
+        async ({ body, set }) => {
+            set.status = 501;
+            return { message: "Organization creation is not supported on this SupaCloud cluster", code: "501" };
+        },
+        { body: t.Object({ name: t.String(), slug: t.Optional(t.String()) }) }
+    )
+    .patch(
+        "/:slug",
+        async ({ params, body, set }) => {
+            set.status = 501;
+            return { message: "Organization update is not supported on this SupaCloud cluster", code: "501" };
+        },
+        { params: t.Object({ slug: t.String() }), body: t.Object({ name: t.Optional(t.String()) }) }
+    )
+    .delete(
+        "/:slug",
+        async ({ params, set }) => {
+            set.status = 501;
+            return { message: "Organization deletion is not supported on this SupaCloud cluster", code: "501" };
+        },
+        { params: t.Object({ slug: t.String() }) }
+    )
+    .get(
+        "/:slug/members",
+        async ({ params }) => {
+            return [];
+        },
+        { params: t.Object({ slug: t.String() }) }
+    )
+    .post(
+        "/:slug/members",
+        async ({ params, body, set }) => {
+            set.status = 501;
+            return { message: "Member management is not supported on this SupaCloud cluster", code: "501" };
+        },
+        { params: t.Object({ slug: t.String() }), body: t.Object({ email: t.String(), role: t.Optional(t.String()) }) }
+    )
+    .delete(
+        "/:slug/members/:id",
+        async ({ params, set }) => {
+            set.status = 501;
+            return { message: "Member management is not supported on this SupaCloud cluster", code: "501" };
+        },
+        { params: t.Object({ slug: t.String(), id: t.String() }) }
+    );
