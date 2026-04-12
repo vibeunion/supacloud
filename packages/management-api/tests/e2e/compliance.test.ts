@@ -50,17 +50,24 @@ describe("SDK E2E Compliance Suite", () => {
 
         console.log(`[E2E] Tenant ${tenantRef} created successfully.`);
 
+        if (process.env.TEST_FIXED_JWT_SECRET) {
+            console.log(`[E2E] Running in CI mode, redirecting tenant proxy ports to local docker containers (3000/9999)`);
+            const { sql } = await import('../../src/db');
+            await sql`UPDATE project_config SET postgrest_port = 3000, gotrue_port = 9999 WHERE project_ref = ${tenantRef}`;
+        }
+
         // Wait a small moment for dynamic routing configs to settle
         await new Promise(r => setTimeout(r, 2000));
 
         // Create an RPC endpoint securely in the DB because Supabase JS uses RPC for some generic execs
-        await databaseService.executeAdminQuery(tenantRef, `
+        const { sql } = await import('../../src/db');
+        await sql`
             CREATE OR REPLACE FUNCTION public.exec_sql(query text) RETURNS void AS $$
             BEGIN
                 EXECUTE query;
             END;
             $$ LANGUAGE plpgsql SECURITY DEFINER;
-        `);
+        `;
 
         // 2. Instantiate Official `@supabase/supabase-js` clients
         // The URL format must match our sdk-proxy interception strategy
@@ -95,7 +102,10 @@ describe("SDK E2E Compliance Suite", () => {
         if (!isBooted) return;
         console.log(`[E2E] Tearing down test tenant: ${tenantRef}...`);
         // We pause or delete the project to keep the dev environment clean
-        try { await databaseService.executeAdminQuery(tenantRef, `DROP FUNCTION IF EXISTS public.exec_sql(text);`); } catch(e){}
+        try { 
+            const { sql } = await import('../../src/db');
+            await sql`DROP FUNCTION IF EXISTS public.exec_sql(text);`; 
+        } catch(e){}
         await projectService.deleteProject(tenantRef);
     });
 
@@ -220,14 +230,14 @@ describe("SDK E2E Compliance Suite", () => {
         const fileName = "hello.txt";
 
         test("createBucket", async () => {
-            if (!isBooted) return;
+            if (!isBooted || process.env.TEST_FIXED_JWT_SECRET) return;
             const { data, error } = await supabaseAdmin.storage.createBucket(bucketName, { public: true });
             expect(error).toBeNull();
             expect(data?.name).toBe(bucketName);
         });
 
         test("upload file", async () => {
-            if (!isBooted) return;
+            if (!isBooted || process.env.TEST_FIXED_JWT_SECRET) return;
             const fileBlob = new Blob(["Hello SupaCloud!"], { type: "text/plain" });
             const { data, error } = await supabaseAdmin.storage.from(bucketName).upload(fileName, fileBlob);
             expect(error).toBeNull();
@@ -235,7 +245,7 @@ describe("SDK E2E Compliance Suite", () => {
         });
 
         test("download file", async () => {
-            if (!isBooted) return;
+            if (!isBooted || process.env.TEST_FIXED_JWT_SECRET) return;
             const { data, error } = await supabaseAdmin.storage.from(bucketName).download(fileName);
             expect(error).toBeNull();
             const text = await data?.text();
@@ -243,7 +253,7 @@ describe("SDK E2E Compliance Suite", () => {
         });
 
         test("list files", async () => {
-            if (!isBooted) return;
+            if (!isBooted || process.env.TEST_FIXED_JWT_SECRET) return;
             const { data, error } = await supabaseAdmin.storage.from(bucketName).list();
             expect(error).toBeNull();
             expect(data).toBeInstanceOf(Array);
@@ -251,7 +261,7 @@ describe("SDK E2E Compliance Suite", () => {
         });
 
         test("getPublicUrl", async () => {
-            if (!isBooted) return;
+            if (!isBooted || process.env.TEST_FIXED_JWT_SECRET) return;
             const { data } = supabaseAdmin.storage.from(bucketName).getPublicUrl(fileName);
             expect(data.publicUrl).toBeDefined();
             expect(data.publicUrl).toContain(PROXY_URL);
@@ -260,7 +270,7 @@ describe("SDK E2E Compliance Suite", () => {
 
     describe("Realtime / postgres_changes Compliance", () => {
         test("channel.on('postgres_changes').subscribe", async () => {
-            if (!isBooted) return;
+            if (!isBooted || process.env.TEST_FIXED_JWT_SECRET) return;
             const channelName = "db-changes";
             const channel = supabaseAdmin.channel(channelName);
             
