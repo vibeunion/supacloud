@@ -1119,6 +1119,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             files = await StorageRLS.listObjects(ref, auth, params.bucket, prefix, limit, offset, body?.sortBy, search);
         } catch (e: any) {
             if (e.message === 'PROJECT_NOT_FOUND') return status(404, { statusCode: "404", error: 'Not Found', message: 'Tenant Project Not Found' });
+            if (e.message === 'BUCKET_NOT_FOUND') return status(400, { statusCode: "400", error: 'Bucket not found', message: 'The bucket does not exist' });
             if (e.message === 'Access Denied') return status(401, { statusCode: "401", error: 'Unauthorized', message: 'Invalid token' });
             return status(403, { statusCode: "403", error: 'Forbidden', message: e.message || 'Access Denied' });
         }
@@ -1186,6 +1187,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             files = await StorageRLS.listObjects(ref, auth, params.bucket, prefix, limit + 1, offset, body?.sortBy, search, with_delimiter);
         } catch (e: any) {
             if (e.message === 'PROJECT_NOT_FOUND') return status(404, { statusCode: "404", error: 'Not Found', message: 'Tenant Project Not Found' });
+            if (e.message === 'BUCKET_NOT_FOUND') return status(400, { statusCode: "400", error: 'Bucket not found', message: 'The bucket does not exist' });
             if (e.message === 'Access Denied') return status(401, { statusCode: "401", error: 'Unauthorized', message: 'Invalid token' });
             return status(403, { statusCode: "403", error: 'Forbidden', message: e.message || 'Access Denied' });
         }
