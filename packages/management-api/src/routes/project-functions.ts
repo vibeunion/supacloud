@@ -2,7 +2,6 @@ import { Elysia, t, status } from "elysia";
 import { projectService } from "../services";
 
 export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
-  // Get function list
   .get(
     "/:ref/functions",
     async ({ params }) => {
@@ -10,20 +9,17 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
       return functions;
     },
     {
-      params: t.Object({
-        ref: t.String(),
-      }),
+      params: t.Object({ ref: t.String() }),
     }
   )
 
-  // CLI `supabase functions deploy` sends POST /:ref/functions with { slug, name, body, verify_jwt }
   .post(
     "/:ref/functions",
     async ({ params, body }) => {
-      const { slug, name, body: funcBody, verify_jwt } = body;
-      const code = funcBody || '';
+      const slug = body.slug;
+      const code = body.body || body.code || '';
       if (!slug || !code) {
-        return status(400, { error: "slug and body are required" });
+        return status(400, { error: "slug and body/code are required" });
       }
 
       const success = await projectService.deployFunction(
@@ -33,25 +29,25 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         return status(500, { error: "Failed to deploy function" });
       }
 
-      if (typeof verify_jwt === 'boolean') {
+      if (typeof body.verify_jwt === 'boolean') {
         const { edgeFunctionService } = await import("../services/edge-function.service");
-        await edgeFunctionService.updateConfig(params.ref, slug, { verify_jwt });
+        await edgeFunctionService.updateConfig(params.ref, slug, { verify_jwt: body.verify_jwt });
       }
 
-      return { id: slug, slug, name: name || slug, version: 1, verify_jwt: verify_jwt ?? true, status: "ACTIVE" };
+      return { id: slug, slug, name: body.name || slug, version: 1, verify_jwt: body.verify_jwt ?? true, status: "ACTIVE" };
     },
     {
       params: t.Object({ ref: t.String() }),
       body: t.Object({
         slug: t.String(),
         name: t.Optional(t.String()),
-        body: t.String(),
+        body: t.Optional(t.String()),
+        code: t.Optional(t.String()),
         verify_jwt: t.Optional(t.Boolean()),
       }),
     }
   )
 
-  // Get function code (bundled runtime version)
   .get(
     "/:ref/functions/:slug",
     async ({ params }) => {
@@ -62,14 +58,10 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
       return { code };
     },
     {
-      params: t.Object({
-        ref: t.String(),
-        slug: t.String(),
-      }),
+      params: t.Object({ ref: t.String(), slug: t.String() }),
     }
   )
 
-  // Get function source code (original, for debugging)
   .get(
     "/:ref/functions/:slug/source",
     async ({ params }) => {
@@ -81,19 +73,16 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
       return { code };
     },
     {
-      params: t.Object({
-        ref: t.String(),
-        slug: t.String(),
-      }),
+      params: t.Object({ ref: t.String(), slug: t.String() }),
     }
   )
 
-  // Deploy single-file function code (server-side bundling)
   .post(
     "/:ref/functions/:slug",
     async ({ params, body }) => {
+      const code = body.code || body.body || '';
       const success = await projectService.deployFunction(
-        params.ref, params.slug, body.code, body.minify ?? false
+        params.ref, params.slug, code, body.minify ?? false
       );
       if (!success) {
         return status(500, { error: "Failed to deploy function" });
@@ -101,18 +90,15 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
       return { success: true, bundled: true };
     },
     {
-      params: t.Object({
-        ref: t.String(),
-        slug: t.String(),
-      }),
+      params: t.Object({ ref: t.String(), slug: t.String() }),
       body: t.Object({
-        code: t.String(),
+        code: t.Optional(t.String()),
+        body: t.Optional(t.String()),
         minify: t.Optional(t.Boolean()),
       }),
     }
   )
 
-  // Deploy multi-file function bundle (directory upload with server-side bundling)
   .post(
     "/:ref/functions/:slug/bundle",
     async ({ params, body }) => {
@@ -133,10 +119,7 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
       };
     },
     {
-      params: t.Object({
-        ref: t.String(),
-        slug: t.String(),
-      }),
+      params: t.Object({ ref: t.String(), slug: t.String() }),
       body: t.Object({
         files: t.Record(t.String(), t.String()),
         entrypoint: t.Optional(t.String()),
@@ -145,7 +128,25 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
     }
   )
 
-  // Delete function code
+  .delete(
+    "/:ref/functions",
+    async ({ params, body }) => {
+      const slug = body?.slug;
+      if (!slug) {
+        return status(400, { error: "slug is required in body" });
+      }
+      const success = await projectService.deleteFunction(params.ref, slug);
+      if (!success) {
+        return status(500, { error: "Failed to delete function" });
+      }
+      return { success: true };
+    },
+    {
+      params: t.Object({ ref: t.String() }),
+      body: t.Object({ slug: t.String() }),
+    }
+  )
+
   .delete(
     "/:ref/functions/:slug",
     async ({ params }) => {
@@ -156,14 +157,10 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
       return { success: true };
     },
     {
-      params: t.Object({
-        ref: t.String(),
-        slug: t.String(),
-      }),
+      params: t.Object({ ref: t.String(), slug: t.String() }),
     }
   )
 
-  // Get function config (verify_jwt, etc.)
   .get(
     "/:ref/functions/:slug/config",
     async ({ params }) => {
@@ -172,14 +169,10 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
       return config;
     },
     {
-      params: t.Object({
-        ref: t.String(),
-        slug: t.String(),
-      }),
+      params: t.Object({ ref: t.String(), slug: t.String() }),
     }
   )
 
-  // Update function config (verify_jwt, etc.)
   .patch(
     "/:ref/functions/:slug/config",
     async ({ params, body }) => {
@@ -188,10 +181,7 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
       return updated;
     },
     {
-      params: t.Object({
-        ref: t.String(),
-        slug: t.String(),
-      }),
+      params: t.Object({ ref: t.String(), slug: t.String() }),
       body: t.Object({
         verify_jwt: t.Optional(t.Boolean()),
       }),
