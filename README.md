@@ -272,7 +272,7 @@ Use our smart proxy to automatically connect to whatever project you are current
 }
 ```
 
-Available tools include: Database schema introspection (`list_tables`, `describe_table`), SQL Execution (`execute_sql`), and AI-assisted SQL generation using project context.
+Available tools include: Database schema introspection (`list_tables`, `describe_table`), SQL Execution (`execute_sql`), AI-assisted SQL generation using project context, Edge Function deployment & log tailing, Custom API Rate Limiting, and full lifecycle management operations.
 
 *Note: For global server administration (SSH, full cluster management), see [SupaCloud Admin MCP](packages/mcp-server/README.md).*
 
@@ -635,7 +635,7 @@ SupaCloud 现在原生通过项目的 API 网关暴露了标准 HTTP MCP 端点�
 
 > 💡 **安全模型**：读操作（查看表结构、查询数据）自动执行；写操作（INSERT/UPDATE/DDL 等）会在客户端弹出确认对话框，用户同意后才执行。无需额外配置。
 
-内置工具包括：数据库元数据内省（自动读取表结构、外键、RLS策略）、直接执行 SQL（`execute_sql`），以及带有表结构上下文的 AI SQL 生成助手。
+内置工具包括：数据库元数据内省（自动读取表结构、外键、RLS策略）、直接执行 SQL（`execute_sql`）、带有表结构上下文的 AI SQL 生成助手，以及 **云函数全生命周期管控（部署与日志获取）**、**编程式自定义限流**、**秘钥与配置管理** 等 20+ 项高阶能力。
 
 *注：如果你需要全局服务器管控能力（SSH、跨项目管理等），请参考 [SupaCloud Admin MCP](packages/mcp-server/README.md)。*
 
