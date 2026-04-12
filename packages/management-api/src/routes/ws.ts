@@ -17,6 +17,10 @@ interface WsClient {
 const taskSubscribers = new Map<string, WsClient>();
 let clientIdCounter = 0;
 
+const MAX_CONNECTIONS_PER_PROJECT = 200;
+const MAX_BROADCAST_SIZE = 1024 * 1024;
+const projectConnectionCounts = new Map<string, number>();
+
 /** Broadcast a task update to all connected WebSocket clients */
 export function broadcastTaskUpdate(event: {
   taskId: string;
@@ -55,6 +59,11 @@ export function getWsConnectionCount(): number {
 }
 
 export const wsRoutes = new Elysia({ prefix: "/ws" })
+  .get("/realtime/v1/health", () => ({
+    status: "ok",
+    timestamp: new Date().toISOString(),
+    connections: getWsConnectionCount(),
+  }))
   .ws("/tasks", {
     body: t.Optional(t.Object({
       type: t.Optional(t.String()),
@@ -130,6 +139,13 @@ export const wsRoutes = new Elysia({ prefix: "/ws" })
             const ref = rows[0].ref;
             (ws.data as any).projectRef = ref;
 
+            const currentConns = projectConnectionCounts.get(ref) || 0;
+            if (currentConns >= MAX_CONNECTIONS_PER_PROJECT) {
+                ws.close(1008, `Connection limit reached for project ${ref} (max ${MAX_CONNECTIONS_PER_PROJECT})`);
+                return;
+            }
+            projectConnectionCounts.set(ref, currentConns + 1);
+
             const { config } = await import("../config");
             const hostIp = config.dockerHostIp || "127.0.0.1";
             
@@ -203,6 +219,9 @@ export const wsRoutes = new Elysia({ prefix: "/ws" })
 
         // P0-2: Binary frames (broadcast ArrayBuffer) — forward directly, no interception needed
         if (typeof rawMessage !== 'string') {
+            if ((rawMessage as ArrayBuffer).byteLength > MAX_BROADCAST_SIZE) {
+                return;
+            }
             if (upstream?.readyState === WebSocket.OPEN) {
                 upstream.send(rawMessage as any);
             } else if (upstream?.readyState === WebSocket.CONNECTING) {
@@ -324,8 +343,16 @@ export const wsRoutes = new Elysia({ prefix: "/ws" })
             upstream.close();
         }
 
-        // Cleanup Native listeners
         const ref = (ws.data as any).projectRef;
+        if (ref) {
+            const count = projectConnectionCounts.get(ref) || 0;
+            if (count > 1) {
+                projectConnectionCounts.set(ref, count - 1);
+            } else {
+                projectConnectionCounts.delete(ref);
+            }
+        }
+
         const subs = (ws.data as any).__bunSubscriptions as Set<string> | undefined;
         if (subs && ref) {
             import("../services/realtime-bun.service").then(({ realtimeBunService }) => {

@@ -144,7 +144,7 @@ async function executeProxy(request: Request, targetUrl: string, interceptors: {
             proxyHeaders.set(key, val);
         });
 
-        proxyHeaders.set('x-supabase-api-version', '2024-01-01');
+        proxyHeaders.set('x-supabase-api-version', new Date().toISOString().slice(0, 10).replace(/-/g, '').substring(0, 8));
 
         applyCorsHeaders(proxyHeaders, request);
         
