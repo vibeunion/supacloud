@@ -133,7 +133,10 @@ jobs:
         run: |
           bun src/index.ts &
           sleep 3
-          bun test
+          # Run test suites sequentially to prevent `mock.module("../../src/db")` in unit tests from poisoning E2E tests
+          bun test tests/unit
+          bun test tests/integration
+          bun test tests/e2e
         env:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
           TEST_FIXED_JWT_SECRET: super-secret-jwt-token-with-at-least-32-characters-long
