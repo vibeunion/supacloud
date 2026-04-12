@@ -65,7 +65,7 @@ describe("SDK E2E Compliance Suite", () => {
             
             // Bootstrap Storage API schema manually since storage-api container is not running to run migrations
             await sql`CREATE SCHEMA IF NOT EXISTS storage`;
-            await sql`
+            await sql.unsafe(`
                 CREATE TABLE IF NOT EXISTS storage.buckets (
                     id text not null primary key,
                     name text not null,
@@ -80,8 +80,8 @@ describe("SDK E2E Compliance Suite", () => {
                 GRANT ALL PRIVILEGES ON SCHEMA storage TO postgres, supabase_admin;
                 GRANT USAGE ON SCHEMA storage TO anon, authenticated, service_role;
                 GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA storage TO postgres, supabase_admin, anon, authenticated, service_role;
-            `;
-            await sql`
+            `);
+            await sql.unsafe(`
                 CREATE TABLE IF NOT EXISTS storage.objects (
                     id uuid not null primary key default gen_random_uuid(),
                     bucket_id text references storage.buckets,
@@ -95,7 +95,7 @@ describe("SDK E2E Compliance Suite", () => {
                     version text default gen_random_uuid()
                 );
                 GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA storage TO postgres, supabase_admin, anon, authenticated, service_role;
-            `;
+            `);
         }
 
         // Wait a small moment for dynamic routing configs to settle
