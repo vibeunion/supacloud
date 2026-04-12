@@ -350,12 +350,12 @@ export const edgeFunctionService = {
     }
   },
 
-  /** Get function invocation logs */
   async getLogs(ref: string, slug: string, limit: number = 50, offset: number = 0): Promise<Array<{
     id: string; timestamp: string; event_type: string; severity: string; message: string; metadata: Record<string, unknown>;
   }>> {
     try {
       const logDir = path.join(FUNCTIONS_ROOT, ref, ".logs");
+      await fs.mkdir(logDir, { recursive: true }).catch(() => {});
       const logFile = path.join(logDir, `${slug}.log`);
       const content = await Bun.file(logFile).text().catch(() => "");
       if (!content) return [];

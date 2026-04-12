@@ -183,7 +183,7 @@ function getProjectRef(headers: Record<string, string | undefined>): string {
     // P1-6: Fallback to extract tenant prefix from host header if preserve_host is active
     const host = headers['host'];
     if (host) {
-        if (host.includes('.supabase.co') || (config.baseDomain && host.includes(config.baseDomain))) {
+        if (config.baseDomain && host.includes(config.baseDomain)) {
             return host.split('.')[0];
         }
     }

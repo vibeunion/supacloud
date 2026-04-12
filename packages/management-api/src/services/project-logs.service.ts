@@ -49,6 +49,9 @@ export class ProjectLogService {
 
       if (mappedType === "database" || mappedType === "all") {
         try {
+          if (!/^[a-zA-Z0-9_]+$/.test(ref)) {
+            throw new Error("Invalid ref format");
+          }
           const pgLogCmd = await shellService.execute("bash", [
             "-c",
             `journalctl -u patroni -o json -n 20 --no-pager | grep supa_${ref}`,

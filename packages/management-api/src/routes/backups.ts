@@ -1,19 +1,22 @@
 import { Elysia, t, status } from "elysia";
 import { listBackups, createBackup, restore, createLogicalBackup, restoreLogicalBackup } from '../services/backup.service';
 import type { RestoreRequest } from '../types/backup';
+import { resolveDbName } from '../db';
 
 const ErrorResponse = t.Object({ error: t.String() });
 
 export const backupRoutes = new Elysia({ prefix: "/v1/projects/:ref/database/backups" })
     .get('/', async ({ params, query }) => {
-        const stanza = query.stanza || `supa_${params.ref}`;
+        const dbName = await resolveDbName(params.ref);
+        const stanza = query.stanza || dbName;
         return await listBackups(stanza);
     }, {
         query: t.Object({ stanza: t.Optional(t.String()) }),
         response: { 200: t.Any() },
     })
     .post('/', async ({ params, body }) => {
-        const stanza = body.stanza || `supa_${params.ref}`;
+        const dbName = await resolveDbName(params.ref);
+        const stanza = body.stanza || dbName;
         return await createBackup(stanza, body.type);
     }, {
         body: t.Object({
@@ -31,7 +34,6 @@ export const backupRoutes = new Elysia({ prefix: "/v1/projects/:ref/database/bac
     }, {
         response: { 200: t.Any() },
     })
-    // --- Tenant-level logical backup routes ---
     .post('/logical', async ({ params: { ref } }) => {
         return await createLogicalBackup(ref);
     }, {
