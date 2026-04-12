@@ -102,6 +102,8 @@ describe("E2E SDK Blackbox Contracts", () => {
                     name TEXT NOT NULL,
                     created_at TIMESTAMPTZ DEFAULT NOW()
                 );
+            `;
+            await sql`
                 INSERT INTO public.e2e_items (name) VALUES ('Item A'), ('Item B'), ('Item C');
             `;
             isBooted = true;

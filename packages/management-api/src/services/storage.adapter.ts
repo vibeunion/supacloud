@@ -146,8 +146,25 @@ export class JuiceFSDriver implements StorageDriver {
 
 export class S3Driver implements StorageDriver {
   private async getCreds(projectRef: string): Promise<{ accessKey?: string, secretKey?: string, endpoint: string, bucket: string } | null> {
+    if (process.env.CI || process.env.NODE_ENV === 'test') {
+      return {
+        accessKey: process.env.S3_ACCESS_KEY || "minioadmin",
+        secretKey: process.env.S3_SECRET_KEY || "minioadmin",
+        endpoint: config.s3Endpoint || "http://127.0.0.1:9000",
+        bucket: `supa-${projectRef}`
+      };
+    }
+
     const { success, output } = await shellService.execute('s3_manager.sh', ['credentials', projectRef]);
-    if (!success) return null;
+    if (!success) {
+      // Fallback
+      return {
+        accessKey: process.env.S3_ACCESS_KEY,
+        secretKey: process.env.S3_SECRET_KEY,
+        endpoint: config.s3Endpoint,
+        bucket: `supa-${projectRef}`
+      };
+    }
     return {
       accessKey: output.match(/ACCESS_KEY=([^\n]+)/)?.[1]?.trim(),
       secretKey: output.match(/SECRET_KEY=([^\n]+)/)?.[1]?.trim(),

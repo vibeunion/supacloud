@@ -58,7 +58,8 @@ describe("SDK E2E Compliance Suite", () => {
                 VALUES (${tenantRef}, 3000, 9999, 4000) 
                 ON CONFLICT (project_ref) DO UPDATE 
                 SET postgrest_port = 3000, gotrue_port = 9999, realtime_port = 4000;
-                
+            `;
+            await sql`
                 UPDATE projects SET db_name = 'postgres' WHERE ref = ${tenantRef};
             `;
         }
@@ -196,12 +197,12 @@ describe("SDK E2E Compliance Suite", () => {
                         name TEXT NOT NULL,
                         created_at TIMESTAMPTZ DEFAULT NOW()
                     );
-                    ALTER TABLE public.${tableName} ENABLE ROW LEVEL SECURITY;
-                    CREATE POLICY "Enable read access for all users" ON public.${tableName} FOR SELECT USING (true);
-                    CREATE POLICY "Enable insert for authenticated users only" ON public.${tableName} FOR INSERT WITH CHECK (auth.role() = 'authenticated');
-                    NOTIFY pgrst, 'reload schema';
                 `
             });
+            await supabaseAdmin.rpc('exec_sql', { query: `ALTER TABLE public.${tableName} ENABLE ROW LEVEL SECURITY;` });
+            await supabaseAdmin.rpc('exec_sql', { query: `CREATE POLICY "Enable read access for all users" ON public.${tableName} FOR SELECT USING (true);` });
+            await supabaseAdmin.rpc('exec_sql', { query: `CREATE POLICY "Enable insert for authenticated users only" ON public.${tableName} FOR INSERT WITH CHECK (auth.role() = 'authenticated');` });
+            await supabaseAdmin.rpc('exec_sql', { query: `NOTIFY pgrst, 'reload schema';` });
             // Wait for PostgREST cache to actually reload asynchronously
             await new Promise(r => setTimeout(r, 1000));
         });
