@@ -164,28 +164,36 @@ async function executeProxy(request: Request, targetUrl: string, interceptors: {
 }
 
 const sdkProxyRoutesBase = new Elysia({ prefix: "" })
-    .group("/auth/v1", (app) => app.all("*", async ({ request }) => {
-        const ref = await getProjectRef(request);
-        if (!ref) return new Response(JSON.stringify({ error: 'Bad Request', message: 'Missing tenant reference' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
-        const ports = await getTenantPorts(ref);
-        if (!ports) return new Response(JSON.stringify({ error: 'Bad Gateway', message: 'Tenant backend not active' }), { status: 502, headers: { 'Content-Type': 'application/json' } });
-        
-        const url = new URL(request.url);
-        const targetUrl = `http://127.0.0.1:${ports.gotruePort}${url.pathname.replace(/^\/auth\/v1/, '')}${url.search}`;
-        return executeProxy(request, targetUrl, { linkOrigin: url.origin });
-    }))
-    .group("/rest/v1", (app) => app.all("*", async ({ request }) => {
-        const ref = await getProjectRef(request);
-        if (!ref) return new Response(JSON.stringify({ error: 'Bad Request', message: 'Missing tenant reference' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
-        const ports = await getTenantPorts(ref);
-        if (!ports) return new Response(JSON.stringify({ error: 'Bad Gateway', message: 'Tenant backend not active' }), { status: 502, headers: { 'Content-Type': 'application/json' } });
-        
-        const url = new URL(request.url);
-        let targetPath = url.pathname.replace(/^\/rest\/v1/, '');
-        if (!targetPath || targetPath === '') targetPath = '/';
-        const targetUrl = `http://127.0.0.1:${ports.pgrstPort}${targetPath}${url.search}`;
-        return executeProxy(request, targetUrl, {});
-    }));
+    .group("/auth/v1", (app) => {
+        const handler = async ({ request }: any) => {
+            const ref = await getProjectRef(request);
+            if (!ref) return new Response(JSON.stringify({ error: 'Bad Request', message: 'Missing tenant reference' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+            const ports = await getTenantPorts(ref);
+            if (!ports) return new Response(JSON.stringify({ error: 'Bad Gateway', message: 'Tenant backend not active' }), { status: 502, headers: { 'Content-Type': 'application/json' } });
+            
+            const url = new URL(request.url);
+            const targetUrl = `http://127.0.0.1:${ports.gotruePort}${url.pathname.replace(/^\/auth\/v1/, '')}${url.search}`;
+            return executeProxy(request, targetUrl, { linkOrigin: url.origin });
+        };
+        return app.get("/*", handler).post("/*", handler).put("/*", handler).patch("/*", handler).delete("/*", handler).options("/*", handler)
+                  .get("", handler).post("", handler).put("", handler).patch("", handler).delete("", handler).options("", handler);
+    })
+    .group("/rest/v1", (app) => {
+        const handler = async ({ request }: any) => {
+            const ref = await getProjectRef(request);
+            if (!ref) return new Response(JSON.stringify({ error: 'Bad Request', message: 'Missing tenant reference' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+            const ports = await getTenantPorts(ref);
+            if (!ports) return new Response(JSON.stringify({ error: 'Bad Gateway', message: 'Tenant backend not active' }), { status: 502, headers: { 'Content-Type': 'application/json' } });
+            
+            const url = new URL(request.url);
+            let targetPath = url.pathname.replace(/^\/rest\/v1/, '');
+            if (!targetPath || targetPath === '') targetPath = '/';
+            const targetUrl = `http://127.0.0.1:${ports.pgrstPort}${targetPath}${url.search}`;
+            return executeProxy(request, targetUrl, {});
+        };
+        return app.get("/*", handler).post("/*", handler).put("/*", handler).patch("/*", handler).delete("/*", handler).options("/*", handler)
+                  .get("", handler).post("", handler).put("", handler).patch("", handler).delete("", handler).options("", handler);
+    });
 
 const graphqlHandler = async ({ request }: any) => {
     const ref = await getProjectRef(request);
@@ -220,6 +228,8 @@ const functionsHandler = async ({ request }: any) => {
 };
 
 export const sdkProxyRoutes = sdkProxyRoutesBase
-    .all("/graphql/v1", graphqlHandler)
-    .group("/graphql/v1", (app) => app.all("*", graphqlHandler))
-    .group("/functions/v1", (app) => app.all("*", functionsHandler));
+    .get("/graphql/v1", graphqlHandler)
+    .post("/graphql/v1", graphqlHandler)
+    .options("/graphql/v1", graphqlHandler)
+    .group("/graphql/v1", (app) => app.get("/*", graphqlHandler).post("/*", graphqlHandler).options("/*", graphqlHandler))
+    .group("/functions/v1", (app) => app.get("/*", functionsHandler).post("/*", functionsHandler).put("/*", functionsHandler).patch("/*", functionsHandler).delete("/*", functionsHandler).options("/*", functionsHandler));
