@@ -194,6 +194,7 @@ const app = new Elysia({ strictPath: false })
 
   // Main API Routes
   .use(storageCompatRoutes)
+  .group("/storage/v1", (app) => app.use(storageCompatRoutes))
   .use((await import("./routes/sdk-proxy")).sdkProxyRoutes)
   .use(await registerAllRoutes())
 

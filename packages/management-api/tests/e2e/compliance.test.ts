@@ -197,6 +197,7 @@ describe("SDK E2E Compliance Suite", () => {
                     ALTER TABLE public.${tableName} ENABLE ROW LEVEL SECURITY;
                     CREATE POLICY "Enable read access for all users" ON public.${tableName} FOR SELECT USING (true);
                     CREATE POLICY "Enable insert for authenticated users only" ON public.${tableName} FOR INSERT WITH CHECK (auth.role() = 'authenticated');
+                    NOTIFY pgrst, 'reload schema';
                 `
             });
         });

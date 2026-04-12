@@ -889,10 +889,11 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
 
                 const expiresAt = Math.floor(Date.now() / 1000) + expiresIn;
                 const token = await generateSignedToken(ref, params.bucket, cleanPath, expiresAt);
+                const signPrefix = body.transform ? '/render/image/sign' : '/object/sign';
                 return {
                     error: null,
                     path: filePath,
-                    signedURL: buildSignedPath(`/object/sign/${params.bucket}/${cleanPath}`, expiresAt, token, body.transform),
+                    signedURL: buildSignedPath(`${signPrefix}/${params.bucket}/${cleanPath}`, expiresAt, token, body.transform),
                 };
             }));
         }

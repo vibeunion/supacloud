@@ -229,6 +229,7 @@ GOTRUE_WEBAUTHN_RP_ID=${creds.siteUrl.replace('https://', '').replace('http://',
 GOTRUE_WEBAUTHN_RP_ORIGINS=https://${creds.siteUrl.replace('https://', '').replace('http://', '').split('/')[0].split(':')[0]},${apiExternalUrl}
 GOTRUE_PASSWORD_MIN_LENGTH=8
 GOTRUE_SECURITY_REFRESH_TOKEN_ROTATION_ENABLED=true
+GOTRUE_SECURITY_REFRESH_TOKEN_ROTATION_REUSE_INTERVAL=10
 GOTRUE_MAILER_URLPATHS_CONFIRMATION=/auth/v1/verify
 GOTRUE_MAILER_URLPATHS_INVITE=/auth/v1/verify
 GOTRUE_MAILER_URLPATHS_RECOVERY=/auth/v1/verify
