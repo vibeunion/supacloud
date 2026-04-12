@@ -162,6 +162,10 @@ export class ProjectService {
       config: initialConfig,
     });
 
+    if (!project) {
+      throw new Error(`[ProjectService] Failed to create project ${projectRef}. Database returned undefined.`);
+    }
+
     // 2. Asynchronously provision resources (background)
     this.provisionResources(projectRef, dbPassword, request.domain).catch((error) => {
       logger.error(`Failed to provision resources for ${projectRef}:`, { error: error instanceof Error ? error.message : String(error) });
