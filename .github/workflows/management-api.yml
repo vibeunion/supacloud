@@ -118,7 +118,9 @@ jobs:
 
       - name: Install dependencies
         working-directory: packages/management-api
-        run: bun install
+        run: |
+          bun install
+          cd ../edge-runtime && bun install
 
       - name: Initialize Database
         working-directory: packages/management-api
