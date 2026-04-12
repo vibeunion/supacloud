@@ -56,7 +56,20 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
       if (code === null) {
         return status(404, { error: "Function not found" });
       }
-      return { code };
+      const { edgeFunctionService } = await import("../services/edge-function.service");
+      const funcConfig = await edgeFunctionService.getConfig(params.ref, params.slug);
+      const now = new Date().toISOString();
+      return {
+        id: params.slug,
+        slug: params.slug,
+        name: params.slug,
+        version: 1,
+        status: "ACTIVE",
+        verify_jwt: funcConfig.verify_jwt,
+        created_at: now,
+        updated_at: now,
+        code,
+      };
     },
     {
       params: t.Object({ ref: t.String(), slug: t.String() }),
@@ -186,5 +199,23 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
       body: t.Object({
         verify_jwt: t.Optional(t.Boolean()),
       }),
+    }
+  )
+
+  .get(
+    "/:ref/functions/:slug/logs",
+    async ({ params, query }) => {
+      const limit = Number(query.limit || 50);
+      const offset = Number(query.offset || 0);
+      const { edgeFunctionService } = await import("../services/edge-function.service");
+      const logs = await edgeFunctionService.getLogs(params.ref, params.slug, limit, offset);
+      return { logs, total: logs.length };
+    },
+    {
+      params: t.Object({ ref: t.String(), slug: t.String() }),
+      query: t.Object({
+        limit: t.Optional(t.String()),
+        offset: t.Optional(t.String()),
+      }, { additionalProperties: true }),
     }
   );
