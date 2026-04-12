@@ -16,56 +16,7 @@ if (!process.env.MANAGEMENT_API_URL) {
 
 const MASTER_TOKEN = process.env.MASTER_TOKEN || "";
 
-// ── Startup Port-Exclusivity Guard ──────────────────────────────────
-// Prevent SO_REUSEPORT ghost processes: kill ALL existing listeners on
-// our target port before binding.  This eliminates the "zombie process"
-// bug where an old Bun runtime co-exists and receives ~50 % of traffic.
-function killStaleListeners(port: number): void {
-  const myPid = process.pid;
-  try {
-    // lsof returns lines like: "bun  12345 root ... TCP *:9000 (LISTEN)"
-    const out = execSync(
-      `lsof -iTCP:${port} -sTCP:LISTEN -t 2>/dev/null || true`,
-      { encoding: "utf-8" },
-    ).trim();
-    if (!out) return;
-
-    const pids = out
-      .split("\n")
-      .map((s) => parseInt(s.trim(), 10))
-      .filter((p) => !isNaN(p) && p !== myPid);
-
-    for (const pid of pids) {
-      console.warn(
-        `[PortGuard] Killing stale listener pid=${pid} on port ${port}`,
-      );
-      try {
-        process.kill(pid, "SIGTERM");
-      } catch {
-        /* already dead */
-      }
-    }
-
-    // Brief wait for them to terminate
-    if (pids.length > 0) {
-      execSync("sleep 0.5");
-      // Force-kill any survivors
-      for (const pid of pids) {
-        try {
-          process.kill(pid, 0); // check alive
-          process.kill(pid, "SIGKILL");
-          console.warn(`[PortGuard] Force-killed pid=${pid}`);
-        } catch {
-          /* already gone */
-        }
-      }
-    }
-  } catch {
-    // lsof may not be installed — best-effort guard
-  }
-}
-
-killStaleListeners(PORT);
+// Startup Port-Exclusivity Guard is handled by edge-runtime-manager in management-api
 
 const pool = new WorkerPool({
   size: POOL_SIZE,
