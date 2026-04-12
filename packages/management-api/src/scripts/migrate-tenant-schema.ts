@@ -219,7 +219,12 @@ CREATE TABLE IF NOT EXISTS supabase_functions.hooks (
     hook_name TEXT NOT NULL,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     request_id BIGINT,
-    is_rls_enabled BOOLEAN DEFAULT FALSE
+    is_rls_enabled BOOLEAN DEFAULT FALSE,
+    hook_schema TEXT,
+    hook_table TEXT,
+    request_url TEXT,
+    request_headers JSONB DEFAULT '{}',
+    events TEXT[] DEFAULT '{}'
 );
 CREATE TABLE IF NOT EXISTS supabase_functions.migrations (
     version TEXT PRIMARY KEY,
@@ -392,10 +397,40 @@ END $$;
 
 -- 15. seed.sql support schema for CLI
 CREATE TABLE IF NOT EXISTS supabase_migrations.seed_files (
-  path text NOT NULL PRIMARY KEY,
-  hash text NOT NULL
+    path text NOT NULL PRIMARY KEY,
+    hash text NOT NULL
 );
 GRANT ALL ON ALL TABLES IN SCHEMA supabase_migrations TO postgres;
+
+-- 16. Realtime WAL logical replication support
+-- Create the supabase_realtime replication slot if wal2json is available
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_available_extensions WHERE name = 'wal2json') THEN
+    CREATE EXTENSION IF NOT EXISTS wal2json;
+  END IF;
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_available_extensions WHERE name = 'wal2json') THEN
+    IF NOT EXISTS (SELECT 1 FROM pg_replication_slots WHERE slot_name = 'supabase_realtime') THEN
+      PERFORM pg_create_logical_replication_slot('supabase_realtime', 'wal2json');
+    END IF;
+  END IF;
+EXCEPTION WHEN insufficient_privilege THEN NULL;
+  WHEN OTHERS THEN NULL;
+END $$;
+
+-- Grant replication role to supabase_admin if it exists
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'supabase_admin') THEN
+    ALTER ROLE supabase_admin WITH REPLICATION;
+  END IF;
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;
 
 `;
 

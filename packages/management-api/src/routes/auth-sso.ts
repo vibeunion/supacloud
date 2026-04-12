@@ -1,79 +1,70 @@
-/**
- * SSO/SAML Provider Management API
- * 
- * P0-3: CRUD for auth.sso_providers, auth.sso_domains, auth.saml_providers
- * Required by Studio Auth > SSO page and supabase.auth.signInWithSSO()
- */
 import { Elysia, t, status } from "elysia";
 import { projectService } from "../services";
-import { getProjectDb } from "../db";
-import { sql as metaSql } from "../db";
 import { logger } from "../utils/logger";
+
+async function getGoTrueHeaders(ref: string) {
+  const project = await projectService.getProject(ref);
+  if (!project || !project.jwt_secret) return null;
+  const { jwtService } = await import("../services/jwt.service");
+  const serviceRoleKey = await jwtService.generateServiceRoleKey(project.jwt_secret);
+  const { config } = await import("../config");
+  const apiUrl = project.api?.url || (config.kongInternal.startsWith('http') ? config.kongInternal : `http://${config.kongInternal}`);
+  return { apiUrl, serviceRoleKey, ref };
+}
 
 export const authSsoRoutes = new Elysia({ prefix: "/v1/projects" })
 
-  // List all SSO providers
   .get(
     "/:ref/auth/sso/providers",
-    async ({ params }) => {
-      const [project] = await metaSql`SELECT db_name FROM projects WHERE ref=${params.ref}`;
-      if (!project) return status(404, { error: "Project not found" });
+    async ({ params, set }) => {
+      const ctx = await getGoTrueHeaders(params.ref);
+      if (!ctx) return status(404, { error: "Project not found" });
 
       try {
-        const db = getProjectDb(project.db_name);
-        const providers = await db`
-          SELECT sp.id, sp.resource_id, sp.created_at, sp.updated_at,
-            (SELECT json_agg(json_build_object('id', sd.id, 'domain', sd.domain))
-             FROM auth.sso_domains sd WHERE sd.sso_provider_id = sp.id) as domains,
-            (SELECT json_agg(json_build_object('id', smp.id, 'entity_id', smp.entity_id, 'metadata_url', smp.metadata_url, 'attribute_mapping', smp.attribute_mapping))
-             FROM auth.saml_providers smp WHERE smp.sso_provider_id = sp.id) as saml
-          FROM auth.sso_providers sp
-          ORDER BY sp.created_at DESC
-        `;
-        return providers;
-      } catch (err) {
-        logger.warn("[auth-sso] Failed to list SSO providers — table may not exist yet", { error: err });
+        const res = await fetch(`${ctx.apiUrl}/auth/v1/admin/sso/providers`, {
+          headers: {
+            "apikey": ctx.serviceRoleKey,
+            "Authorization": `Bearer ${ctx.serviceRoleKey}`,
+            "x-project-ref": ctx.ref
+          }
+        });
+        if (!res.ok) {
+          set.status = res.status;
+          const err = await res.json().catch(() => ({}));
+          return { error: err.msg || err.message || "Failed to list SSO providers" };
+        }
+        return res.json();
+      } catch (err: unknown) {
+        logger.warn("[auth-sso] Failed to list SSO providers", { error: err instanceof Error ? err.message : String(err) });
         return [];
       }
     },
     { params: t.Object({ ref: t.String() }) }
   )
 
-  // Create SSO provider
   .post(
     "/:ref/auth/sso/providers",
-    async ({ params, body }) => {
-      const [project] = await metaSql`SELECT db_name FROM projects WHERE ref=${params.ref}`;
-      if (!project) return status(404, { error: "Project not found" });
+    async ({ params, body, set }) => {
+      const ctx = await getGoTrueHeaders(params.ref);
+      if (!ctx) return status(404, { error: "Project not found" });
 
       try {
-        const db = getProjectDb(project.db_name);
-        const providerId = crypto.randomUUID();
-
-        await db`
-          INSERT INTO auth.sso_providers (id, resource_id, created_at, updated_at)
-          VALUES (${providerId}, ${body.resource_id || null}, now(), now())
-        `;
-
-        // Create associated domains
-        if (body.domains && Array.isArray(body.domains)) {
-          for (const domain of body.domains) {
-            await db`
-              INSERT INTO auth.sso_domains (id, sso_provider_id, domain, created_at, updated_at)
-              VALUES (${crypto.randomUUID()}, ${providerId}, ${domain}, now(), now())
-            `;
-          }
+        const res = await fetch(`${ctx.apiUrl}/auth/v1/admin/sso/providers`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "apikey": ctx.serviceRoleKey,
+            "Authorization": `Bearer ${ctx.serviceRoleKey}`,
+            "x-project-ref": ctx.ref
+          },
+          body: JSON.stringify(body)
+        });
+        if (!res.ok) {
+          set.status = res.status;
+          const err = await res.json().catch(() => ({}));
+          return { error: err.msg || err.message || "Failed to create SSO provider", error_code: err.error_code, code: err.code };
         }
-
-        // Create SAML provider entry
-        if (body.metadata_xml) {
-          await db`
-            INSERT INTO auth.saml_providers (id, sso_provider_id, entity_id, metadata_xml, metadata_url, attribute_mapping, created_at, updated_at)
-            VALUES (${crypto.randomUUID()}, ${providerId}, ${body.entity_id || providerId}, ${body.metadata_xml}, ${body.metadata_url || null}, ${body.attribute_mapping ? JSON.stringify(body.attribute_mapping) : null}::jsonb, now(), now())
-          `;
-        }
-
-        return { id: providerId, resource_id: body.resource_id || null };
+        return res.json();
       } catch (err: unknown) {
         return status(500, { error: "Failed to create SSO provider", message: err instanceof Error ? err.message : String(err) });
       }
@@ -91,26 +82,26 @@ export const authSsoRoutes = new Elysia({ prefix: "/v1/projects" })
     }
   )
 
-  // Get specific SSO provider
   .get(
     "/:ref/auth/sso/providers/:id",
-    async ({ params }) => {
-      const [project] = await metaSql`SELECT db_name FROM projects WHERE ref=${params.ref}`;
-      if (!project) return status(404, { error: "Project not found" });
+    async ({ params, set }) => {
+      const ctx = await getGoTrueHeaders(params.ref);
+      if (!ctx) return status(404, { error: "Project not found" });
 
       try {
-        const db = getProjectDb(project.db_name);
-        const [provider] = await db`
-          SELECT sp.id, sp.resource_id, sp.created_at, sp.updated_at,
-            (SELECT json_agg(json_build_object('id', sd.id, 'domain', sd.domain))
-             FROM auth.sso_domains sd WHERE sd.sso_provider_id = sp.id) as domains,
-            (SELECT json_agg(json_build_object('id', smp.id, 'entity_id', smp.entity_id, 'metadata_url', smp.metadata_url))
-             FROM auth.saml_providers smp WHERE smp.sso_provider_id = sp.id) as saml
-          FROM auth.sso_providers sp
-          WHERE sp.id = ${params.id}::uuid
-        `;
-        if (!provider) return status(404, { error: "SSO provider not found" });
-        return provider;
+        const res = await fetch(`${ctx.apiUrl}/auth/v1/admin/sso/providers/${params.id}`, {
+          headers: {
+            "apikey": ctx.serviceRoleKey,
+            "Authorization": `Bearer ${ctx.serviceRoleKey}`,
+            "x-project-ref": ctx.ref
+          }
+        });
+        if (!res.ok) {
+          set.status = res.status;
+          const err = await res.json().catch(() => ({}));
+          return { error: err.msg || err.message || "SSO provider not found" };
+        }
+        return res.json();
       } catch (err: unknown) {
         return status(500, { error: "Failed to get SSO provider", message: err instanceof Error ? err.message : String(err) });
       }
@@ -118,44 +109,29 @@ export const authSsoRoutes = new Elysia({ prefix: "/v1/projects" })
     { params: t.Object({ ref: t.String(), id: t.String() }) }
   )
 
-  // Update SSO provider
   .put(
     "/:ref/auth/sso/providers/:id",
-    async ({ params, body }) => {
-      const [project] = await metaSql`SELECT db_name FROM projects WHERE ref=${params.ref}`;
-      if (!project) return status(404, { error: "Project not found" });
+    async ({ params, body, set }) => {
+      const ctx = await getGoTrueHeaders(params.ref);
+      if (!ctx) return status(404, { error: "Project not found" });
 
       try {
-        const db = getProjectDb(project.db_name);
-
-        if (body.resource_id !== undefined) {
-          await db`UPDATE auth.sso_providers SET resource_id = ${body.resource_id}, updated_at = now() WHERE id = ${params.id}::uuid`;
+        const res = await fetch(`${ctx.apiUrl}/auth/v1/admin/sso/providers/${params.id}`, {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            "apikey": ctx.serviceRoleKey,
+            "Authorization": `Bearer ${ctx.serviceRoleKey}`,
+            "x-project-ref": ctx.ref
+          },
+          body: JSON.stringify(body)
+        });
+        if (!res.ok) {
+          set.status = res.status;
+          const err = await res.json().catch(() => ({}));
+          return { error: err.msg || err.message || "Failed to update SSO provider", error_code: err.error_code, code: err.code };
         }
-
-        // Replace domains if provided
-        if (body.domains && Array.isArray(body.domains)) {
-          await db`DELETE FROM auth.sso_domains WHERE sso_provider_id = ${params.id}::uuid`;
-          for (const domain of body.domains) {
-            await db`
-              INSERT INTO auth.sso_domains (id, sso_provider_id, domain, created_at, updated_at)
-              VALUES (${crypto.randomUUID()}, ${params.id}::uuid, ${domain}, now(), now())
-            `;
-          }
-        }
-
-        // Update SAML metadata if provided
-        if (body.metadata_xml) {
-          await db`
-            UPDATE auth.saml_providers 
-            SET metadata_xml = ${body.metadata_xml}, 
-                metadata_url = ${body.metadata_url || null},
-                attribute_mapping = ${body.attribute_mapping ? JSON.stringify(body.attribute_mapping) : null}::jsonb,
-                updated_at = now()
-            WHERE sso_provider_id = ${params.id}::uuid
-          `;
-        }
-
-        return { id: params.id, updated: true };
+        return res.json();
       } catch (err: unknown) {
         return status(500, { error: "Failed to update SSO provider", message: err instanceof Error ? err.message : String(err) });
       }
@@ -172,17 +148,27 @@ export const authSsoRoutes = new Elysia({ prefix: "/v1/projects" })
     }
   )
 
-  // Delete SSO provider (cascades to domains + SAML)
   .delete(
     "/:ref/auth/sso/providers/:id",
-    async ({ params }) => {
-      const [project] = await metaSql`SELECT db_name FROM projects WHERE ref=${params.ref}`;
-      if (!project) return status(404, { error: "Project not found" });
+    async ({ params, set }) => {
+      const ctx = await getGoTrueHeaders(params.ref);
+      if (!ctx) return status(404, { error: "Project not found" });
 
       try {
-        const db = getProjectDb(project.db_name);
-        await db`DELETE FROM auth.sso_providers WHERE id = ${params.id}::uuid`;
-        return { success: true };
+        const res = await fetch(`${ctx.apiUrl}/auth/v1/admin/sso/providers/${params.id}`, {
+          method: "DELETE",
+          headers: {
+            "apikey": ctx.serviceRoleKey,
+            "Authorization": `Bearer ${ctx.serviceRoleKey}`,
+            "x-project-ref": ctx.ref
+          }
+        });
+        if (!res.ok) {
+          set.status = res.status;
+          const err = await res.json().catch(() => ({}));
+          return { error: err.msg || err.message || "Failed to delete SSO provider" };
+        }
+        return res.json();
       } catch (err: unknown) {
         return status(500, { error: "Failed to delete SSO provider", message: err instanceof Error ? err.message : String(err) });
       }
