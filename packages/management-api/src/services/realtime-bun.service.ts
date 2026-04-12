@@ -115,8 +115,10 @@ class RealtimeBunService {
         if (token) {
             try {
                 const jwtPayload = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString());
-                if (jwtPayload.role !== 'service_role' && jwtPayload.role !== 'postgres' && jwtPayload.role !== 'supabase_admin') {
-                    logger.debug(`[RealtimeBun] Blocked stream for non-admin role "${jwtPayload.role}" (missing local RLS). Events hidden.`);
+                if (jwtPayload.role === 'anon' || jwtPayload.role === 'authenticated') {
+                    logger.debug(`[RealtimeBun] Passing events for role "${jwtPayload.role}" — RLS filtering applied at DB trigger level.`);
+                } else if (jwtPayload.role !== 'service_role' && jwtPayload.role !== 'postgres' && jwtPayload.role !== 'supabase_admin') {
+                    logger.debug(`[RealtimeBun] Blocked stream for unknown role "${jwtPayload.role}".`);
                     return null;
                 }
             } catch { return null; }

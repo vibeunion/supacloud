@@ -275,24 +275,44 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
 
       const hooksConfig = (authConfig.hooks as Record<string, any>) || {};
 
-      const studioCompatibleConfig = {
+      const studioCompatibleConfig: Record<string, unknown> = {
+        enable_signup: authConfig.enable_signup ?? true,
+        enable_confirmations: authConfig.enable_confirmations ?? false,
+        enable_manual_linking: authConfig.enable_manual_linking ?? false,
+        jwt_expiry: authConfig.jwt_expiry ?? 3600,
+        mailer_autoconfirm: authConfig.mailer_autoconfirm ?? false,
+        sms_autoconfirm: authConfig.sms_autoconfirm ?? false,
+        uri_allow_list: authConfig.uri_allow_list ?? '',
+        site_url: authConfig.site_url ?? '',
         ...authConfig,
-        external: externalConfig,
-        external_providers: Object.keys(externalConfig)
-          .filter(key => (externalConfig[key] as Record<string, unknown>)?.client_id)
-          .join(","),
-        // Flatten hooks config for CLI / Studio compatibility
-        hook_custom_access_token_enabled: !!hooksConfig.custom_access_token_hook?.enabled,
-        hook_custom_access_token_uri: hooksConfig.custom_access_token_hook?.uri || null,
-        hook_mfa_verification_enabled: !!hooksConfig.mfa_verification_hook?.enabled,
-        hook_mfa_verification_uri: hooksConfig.mfa_verification_hook?.uri || null,
-        hook_password_verification_enabled: !!hooksConfig.password_verification_hook?.enabled,
-        hook_password_verification_uri: hooksConfig.password_verification_hook?.uri || null,
-        hook_send_email_enabled: !!hooksConfig.send_email_hook?.enabled,
-        hook_send_email_uri: hooksConfig.send_email_hook?.uri || null,
-        hook_send_sms_enabled: !!hooksConfig.send_sms_hook?.enabled,
-        hook_send_sms_uri: hooksConfig.send_sms_hook?.uri || null,
       };
+
+      delete studioCompatibleConfig.external;
+      delete studioCompatibleConfig.hooks;
+
+      for (const [key, val] of Object.entries(externalConfig)) {
+        const providerConfig = val as Record<string, unknown>;
+        studioCompatibleConfig[`external_${key}`] = {
+          enabled: !!providerConfig?.client_id,
+          client_id: providerConfig?.client_id || '',
+          secret: providerConfig?.client_secret ? '********' : '',
+        };
+      }
+
+      studioCompatibleConfig.external_providers = Object.keys(externalConfig)
+        .filter(key => (externalConfig[key] as Record<string, unknown>)?.client_id)
+        .join(",");
+
+      studioCompatibleConfig.hook_custom_access_token_enabled = !!hooksConfig.custom_access_token_hook?.enabled;
+      studioCompatibleConfig.hook_custom_access_token_uri = hooksConfig.custom_access_token_hook?.uri || null;
+      studioCompatibleConfig.hook_mfa_verification_enabled = !!hooksConfig.mfa_verification_hook?.enabled;
+      studioCompatibleConfig.hook_mfa_verification_uri = hooksConfig.mfa_verification_hook?.uri || null;
+      studioCompatibleConfig.hook_password_verification_enabled = !!hooksConfig.password_verification_hook?.enabled;
+      studioCompatibleConfig.hook_password_verification_uri = hooksConfig.password_verification_hook?.uri || null;
+      studioCompatibleConfig.hook_send_email_enabled = !!hooksConfig.send_email_hook?.enabled;
+      studioCompatibleConfig.hook_send_email_uri = hooksConfig.send_email_hook?.uri || null;
+      studioCompatibleConfig.hook_send_sms_enabled = !!hooksConfig.send_sms_hook?.enabled;
+      studioCompatibleConfig.hook_send_sms_uri = hooksConfig.send_sms_hook?.uri || null;
 
       return studioCompatibleConfig;
     },
@@ -333,7 +353,56 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
   )
 
   // --- Config CRUD (database, postgrest, storage, realtime) via factory ---
-  .use(addConfigRoutes("database"))
+  .get(
+    "/:ref/config/database",
+    async ({ params }) => {
+      const settings = await projectService.getProjectSettings(params.ref);
+      if (!settings) return status(404, { error: "Project not found" });
+      try {
+        const { sql: metaSql } = await import("../db");
+        const { getProjectDb } = await import("../db");
+        const [project] = await metaSql`SELECT db_name FROM projects WHERE ref=${params.ref}`;
+        if (project?.db_name) {
+          const db = getProjectDb(project.db_name);
+          const rows = await db`
+            SELECT name, setting, unit, short_desc
+            FROM pg_settings
+            WHERE name IN ('max_connections', 'shared_buffers', 'effective_cache_size', 'work_mem',
+                           'maintenance_work_mem', 'statement_timeout', 'idle_in_transaction_session_timeout',
+                           'wal_buffers', 'random_page_cost', 'max_parallel_workers_per_gather')
+          `;
+          const result: Record<string, unknown> = {};
+          for (const row of rows) {
+            let val: unknown = row.setting;
+            if (['statement_timeout', 'idle_in_transaction_session_timeout'].includes(row.name)) {
+              val = parseInt(row.setting, 10) || 0;
+            }
+            result[row.name] = val;
+          }
+          return result;
+        }
+      } catch {}
+      return (settings as Record<string, unknown>).database || {};
+    },
+    { params: t.Object({ ref: t.String() }) }
+  )
+  .patch(
+    "/:ref/config/database",
+    async ({ params, body }) => {
+      const settings = await projectService.getProjectSettings(params.ref);
+      if (!settings) return status(404, { error: "Project not found" });
+      const current = ((settings as Record<string, unknown>).database as Record<string, unknown>) || {};
+      const updated = await projectService.updateProjectSettings(params.ref, {
+        ...settings,
+        database: { ...current, ...(typeof body === "object" ? body : {}) },
+      });
+      return (updated as Record<string, unknown>)?.database || {};
+    },
+    {
+      params: t.Object({ ref: t.String() }),
+      body: t.Record(t.String(), t.Unknown()),
+    }
+  )
   .use(addConfigRoutes("postgrest"))
   .use(addConfigRoutes("storage"))
   .use(addConfigRoutes("realtime"))
