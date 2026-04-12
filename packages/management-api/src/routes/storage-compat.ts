@@ -426,7 +426,13 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         }
         
         return {
+            id: bucketId,
             name,
+            public: isPublic,
+            file_size_limit: fileSizeLimit,
+            allowed_mime_types: allowedMimeTypes,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
             type: body.type || 'STANDARD',
         };
     }, {
@@ -613,7 +619,8 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             return {
                 Id: info?.id || `${params.bucket}/${filePath}`,
                 Key: `${params.bucket}/${filePath}`,
-                path: filePath
+                path: filePath,
+                fullPath: `${params.bucket}/${filePath}`
             };
         } catch (err: unknown) {
             logger.error('SDK upload error:', { error: err instanceof Error ? err.message : String(err) });
@@ -652,7 +659,8 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             return {
                 Id: info?.id || `${params.bucket}/${filePath}`,
                 Key: `${params.bucket}/${filePath}`,
-                path: filePath
+                path: filePath,
+                fullPath: `${params.bucket}/${filePath}`
             };
         } catch (err: unknown) {
             return status(500, { statusCode: "500", error: 'Internal', message: 'Upsert failed' });
@@ -934,38 +942,37 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
     // supabase.storage.from('bucket').createSignedUploadUrl('path')
     // ════════════════════════════════════════════════════════
 
-    .post('/object/upload/sign/:bucket/*', async ({ params, headers }) => {
+    .post('/object/upload/sign/:bucket/*', async ({ params, headers, request }) => {
         const ref = getProjectRef(headers as Record<string, string | undefined>);
         const filePath = params['*'];
         if (!filePath) return status(400, { statusCode: "400", error: 'Bad Request', message: 'Missing file path' });
 
         const upsert = headers['x-upsert'] === 'true';
         
-        // Verify the bucket exists
         const bucket = await StorageRLS.getLogicalBucket(ref, params.bucket, undefined, true);
         if (!bucket) return status(404, { statusCode: "404", error: 'Not Found', message: 'Bucket not found' });
         
-        // Enforce RLS for upload URL generation
         const auth = headers['authorization'] || '';
-        const action = upsert ? 'upload' : 'upload'; // authorizeAction uses 'upload'
+        const action = upsert ? 'upload' : 'upload';
         const permittedCheck = await StorageRLS.authorizeAction(ref, auth, action, params.bucket, filePath, {}, true);
         if (!permittedCheck.permitted) {
             return status(403, { statusCode: "403", error: 'Forbidden', message: permittedCheck.error || 'You do not have permission to create signed upload URLs for this resource.' });
         }
 
         const token = crypto.randomUUID();
-        const expiresAt = Math.floor(Date.now() / 1000) + 7200; // 2 hours
+        const expiresAt = Math.floor(Date.now() / 1000) + 7200;
         await SignedStore.set(token, {
             ref,
             bucket: params.bucket,
             objectName: filePath,
             upsert,
             expiresAt,
-            auth_token: auth || '' // Snapshot minting auth constraint
+            auth_token: auth || ''
         });
 
+        const origin = getRequestOrigin(request as unknown as Request);
         return {
-            url: `/object/upload/sign/${params.bucket}/${filePath}?token=${token}`,
+            url: `${origin}/storage/v1/object/upload/sign/${params.bucket}/${filePath}?token=${token}`,
         };
     })
 
@@ -1024,7 +1031,9 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             const info = await StorageRLS.getObjectInfo(ref, params.bucket, filePath, undefined, true);
             return {
                 Id: info?.id || `${params.bucket}/${filePath}`,
-                Key: `${params.bucket}/${filePath}`
+                Key: `${params.bucket}/${filePath}`,
+                path: filePath,
+                fullPath: `${params.bucket}/${filePath}`
             };
         } catch (err: unknown) {
             return status(500, { statusCode: "500", error: 'Internal', message: err instanceof Error ? err.message : String(err) });
@@ -1567,7 +1576,8 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
                 return {
                     Id: info?.id || `${upload.bucket}/${upload.objectName}`,
                     Key: `${upload.bucket}/${upload.objectName}`,
-                    path: upload.objectName
+                    path: upload.objectName,
+                    fullPath: `${upload.bucket}/${upload.objectName}`
                 };
             } catch (err: unknown) {
                 await TusStore.delete(params.uploadId);
