@@ -100,6 +100,9 @@ describe("E2E SDK Blackbox Contracts", () => {
 
             // Ensure test table exists for REST/GraphQL testing
             await sql`
+                CREATE EXTENSION IF NOT EXISTS pg_graphql CASCADE;
+            `;
+            await sql`
                 CREATE TABLE IF NOT EXISTS public.e2e_items (
                     id SERIAL PRIMARY KEY,
                     name TEXT NOT NULL,
