@@ -5,7 +5,7 @@
 import { Elysia, t, status } from "elysia";
 import { logger } from "../utils/logger";
 import { projectService } from "../services";
-import { getProjectDb } from "../db";
+import { getProjectDb, resolveDbName } from "../db";
 
 // Available regions list
 const AVAILABLE_REGIONS = [
@@ -15,6 +15,17 @@ const AVAILABLE_REGIONS = [
   { code: "eu-west-1", name: "EU (Ireland)", continent: "emea" },
   { code: "ap-southeast-1", name: "Asia Pacific (Singapore)", continent: "apac" },
 ];
+
+function mapStatus(status: string | undefined): string {
+  if (!status) return "active_healthy";
+  const s = status.toLowerCase();
+  if (s === "active") return "active_healthy";
+  if (s === "paused") return "paused";
+  if (s === "inactive") return "inactive";
+  if (s === "creating") return "activation";
+  if (s === "deleted") return "inactive";
+  return s;
+}
 
 export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
   // Get available regions
@@ -29,11 +40,18 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
       id: p.id,
       ref: p.ref,
       name: p.name,
-      status: p.status?.toUpperCase() || "ACTIVE",
+      status: mapStatus(p.status),
       region: p.region || "local",
       organization_id: p.organization_id || "default",
+      cloud_provider: "localhost",
       created_at: p.created_at,
-      updated_at: p.updated_at
+      updated_at: p.updated_at,
+      inserted_at: p.created_at,
+      pause_status: p.status === "paused" ? "paused" : undefined,
+      preview_branch_refs: [],
+      database: {
+        host: p.database?.host || "localhost",
+      },
     }));
   })
   .get("", async () => {
@@ -42,11 +60,18 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
       id: p.id,
       ref: p.ref,
       name: p.name,
-      status: p.status?.toUpperCase() || "ACTIVE",
+      status: mapStatus(p.status),
       region: p.region || "local",
       organization_id: p.organization_id || "default",
+      cloud_provider: "localhost",
       created_at: p.created_at,
-      updated_at: p.updated_at
+      updated_at: p.updated_at,
+      inserted_at: p.created_at,
+      pause_status: p.status === "paused" ? "paused" : undefined,
+      preview_branch_refs: [],
+      database: {
+        host: p.database?.host || "localhost",
+      },
     }));
   })
 
@@ -76,15 +101,18 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params, set }) => {
       const project = await projectService.getProject(params.ref);
       if (!project) {
-                return status(404, { error: "Project not found" });
+                return status(404, { message: "Project not found", code: "404" });
       }
+
+      const ref = project.ref;
+      const dbName = await resolveDbName(ref);
 
       // Get real database version and connection count
       let dbVersion = "15.0";
       let dbSize = 0;
       let connectionCount = 0;
       try {
-        const projectDb = getProjectDb(project.database?.name || `supa_${project.ref}`);
+        const projectDb = getProjectDb(dbName);
         const versionResult = await projectDb`SHOW server_version`;
         if (versionResult[0]?.server_version) {
           dbVersion = versionResult[0].server_version.split(" ")[0];
@@ -109,7 +137,6 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
         }
       };
 
-      const ref = project.ref;
       const serviceStatuses = await Promise.all([
         checkServiceStatus("patroni").then(s => ({ id: "postgresql", name: "PostgreSQL", status: s, healthy: s === "ACTIVE_HEALTHY" })),
         checkServiceStatus(`supacloud-pgrst@${ref}`).then(s => ({ id: "postgrest", name: "PostgREST", status: s, healthy: s === "ACTIVE_HEALTHY" })),
@@ -123,7 +150,7 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
         id: project.id,
         ref: project.ref,
         name: project.name,
-        status: project.status?.toUpperCase() || "ACTIVE_HEALTHY",
+        status: mapStatus(project.status),
         region: project.region || "local",
         organization_id: (project as unknown as Record<string, unknown>).organization_id || "default",
         cloud_provider: (project as unknown as Record<string, unknown>).cloud_provider || "localhost",
@@ -133,7 +160,6 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
         pause_status: project.status === 'paused' ? 'paused' : undefined,
         preview_branch_refs: [],
         database: {
-          identifier: project.database?.name || `supa_${project.ref}`,
           host: project.database?.host || "localhost",
           port: (project.database as unknown as Record<string, unknown>)?.port || 5432,
           version: dbVersion,
@@ -144,13 +170,13 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
         },
         db_port: (project.database as unknown as Record<string, unknown>)?.port || 5432,
         db_host: project.database?.host || "localhost",
-        db_name: project.database?.name || `supa_${project.ref}`,
+        db_name: dbName,
         db_user: "postgres",
-        connectionString: `postgresql://postgres:[YOUR-PASSWORD]@${project.database?.host || 'localhost'}:${(project.database as unknown as Record<string, unknown>)?.port || 5432}/${project.database?.name || `supa_${project.ref}`}`,
+        connectionString: `postgresql://postgres:[YOUR-PASSWORD]@${project.database?.host || 'localhost'}:${(project.database as unknown as Record<string, unknown>)?.port || 5432}/${dbName}`,
         services: serviceStatuses,
         endpoint: project.api?.url || `https://${project.ref}.localhost`,
         anon_key: project.anon_key,
-        service_key: project.service_key,
+        service_role_key: project.service_role_key,
         jwt_secret: project.jwt_secret,
         api: project.api,
         studio: project.studio,
@@ -170,9 +196,33 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params, body, set }) => {
       const updated = await projectService.updateProject(params.ref, body);
       if (!updated) {
-                return status(404, { error: "Project not found" });
+                return status(404, { message: "Project not found", code: "404" });
       }
-      return { ref: params.ref };
+      const project = await projectService.getProject(params.ref);
+      if (!project) {
+                return status(404, { message: "Project not found", code: "404" });
+      }
+      return {
+        id: project.id,
+        ref: project.ref,
+        name: project.name,
+        status: mapStatus(project.status),
+        region: project.region || "local",
+        organization_id: project.organization_id || "default",
+        cloud_provider: "localhost",
+        created_at: project.created_at,
+        updated_at: project.updated_at,
+        inserted_at: project.created_at,
+        pause_status: project.status === "paused" ? "paused" : undefined,
+        preview_branch_refs: [],
+        database: {
+          host: project.database?.host || "localhost",
+        },
+        endpoint: project.api?.url || `https://${params.ref}.localhost`,
+        anon_key: project.anon_key,
+        service_role_key: project.service_role_key,
+        jwt_secret: project.jwt_secret,
+      };
     },
     {
       params: t.Object({
@@ -190,7 +240,7 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params, set }) => {
       const deleted = await projectService.deleteProject(params.ref);
       if (!deleted) {
-                return status(404, { error: "Project not found" });
+                return status(404, { message: "Project not found", code: "404" });
       }
       return { ref: params.ref };
     },
@@ -207,7 +257,7 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params, set }) => {
       const paused = await projectService.pauseProject(params.ref);
       if (!paused) {
-                return status(404, { error: "Project not found" });
+                return status(404, { message: "Project not found", code: "404" });
       }
       return { ref: params.ref, status: "paused" };
     },
@@ -224,7 +274,7 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params, set }) => {
       const restored = await projectService.restoreProject(params.ref);
       if (!restored) {
-                return status(404, { error: "Project not found" });
+                return status(404, { message: "Project not found", code: "404" });
       }
       return { ref: params.ref, status: "active" };
     },
@@ -240,7 +290,7 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
     "/:ref/branches",
     async ({ params }) => {
       const project = await projectService.getProject(params.ref);
-      if (!project) return status(404, { error: "Project not found" });
+      if (!project) return status(404, { message: "Project not found", code: "404" });
       return [];
     },
     { params: t.Object({ ref: t.String() }) }
@@ -249,9 +299,9 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
     "/:ref/branches",
     async ({ params, set }) => {
       const project = await projectService.getProject(params.ref);
-      if (!project) return status(404, { error: "Project not found" });
+      if (!project) return status(404, { message: "Project not found", code: "404" });
       set.status = 501;
-      return { error: "Preview Branches are not supported on this SupaCloud cluster" };
+      return { message: "Preview Branches are not supported on this SupaCloud cluster", code: "501" };
     },
     { params: t.Object({ ref: t.String() }) }
   )
@@ -261,7 +311,7 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
     "/:ref/read-replicas",
     async ({ params }) => {
       const project = await projectService.getProject(params.ref);
-      if (!project) return status(404, { error: "Project not found" });
+      if (!project) return status(404, { message: "Project not found", code: "404" });
       return [];
     },
     { params: t.Object({ ref: t.String() }) }
@@ -270,9 +320,9 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
     "/:ref/read-replicas",
     async ({ params, set }) => {
       const project = await projectService.getProject(params.ref);
-      if (!project) return status(404, { error: "Project not found" });
+      if (!project) return status(404, { message: "Project not found", code: "404" });
       set.status = 501;
-      return { error: "Read Replicas are not supported on this SupaCloud cluster" };
+      return { message: "Read Replicas are not supported on this SupaCloud cluster", code: "501" };
     },
     { params: t.Object({ ref: t.String() }) }
   )
@@ -280,7 +330,151 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
     "/:ref/read-replicas/:id",
     async ({ params, set }) => {
       set.status = 501;
-      return { error: "Read Replicas are not supported on this SupaCloud cluster" };
+      return { message: "Read Replicas are not supported on this SupaCloud cluster", code: "501" };
     },
     { params: t.Object({ ref: t.String(), id: t.String() }) }
+  )
+
+  // Project endpoint info (Studio compatibility)
+  .get(
+    "/:ref/endpoint",
+    async ({ params }) => {
+      const project = await projectService.getProject(params.ref);
+      if (!project) return status(404, { message: "Project not found", code: "404" });
+      return {
+        endpoint: project.api?.url || `https://${params.ref}.localhost`,
+        auto_idle_disabled: false,
+        connection_string: `postgresql://postgres:[YOUR-PASSWORD]@${project.database?.host || "localhost"}:5432/postgres`,
+      };
+    },
+    { params: t.Object({ ref: t.String() }) }
+  )
+
+  // Vanity Subdomain — stub endpoints (Studio compatibility)
+  .get(
+    "/:ref/vanity-subdomain",
+    async ({ params }) => {
+      const project = await projectService.getProject(params.ref);
+      if (!project) return status(404, { message: "Project not found", code: "404" });
+      return { vanity_subdomain: null };
+    },
+    { params: t.Object({ ref: t.String() }) }
+  )
+  .post(
+    "/:ref/vanity-subdomain/activate",
+    async ({ params, set }) => {
+      const project = await projectService.getProject(params.ref);
+      if (!project) return status(404, { message: "Project not found", code: "404" });
+      set.status = 501;
+      return { message: "Vanity subdomains are not supported on this SupaCloud cluster", code: "501" };
+    },
+    { params: t.Object({ ref: t.String() }) }
+  )
+  .delete(
+    "/:ref/vanity-subdomain",
+    async ({ params, set }) => {
+      set.status = 501;
+      return { message: "Vanity subdomains are not supported on this SupaCloud cluster", code: "501" };
+    },
+    { params: t.Object({ ref: t.String() }) }
+  )
+
+  // SSL Encryption — stub endpoint (Studio compatibility)
+  .get(
+    "/:ref/ssl-encryption",
+    async ({ params }) => {
+      const project = await projectService.getProject(params.ref);
+      if (!project) return status(404, { message: "Project not found", code: "404" });
+      return { is_ssl_enabled: true };
+    },
+    { params: t.Object({ ref: t.String() }) }
+  )
+
+  // Database Reset — stub endpoint (Studio compatibility)
+  .post(
+    "/:ref/database/reset",
+    async ({ params, set }) => {
+      set.status = 501;
+      return { message: "Database reset is not supported on this SupaCloud cluster", code: "501" };
+    },
+    { params: t.Object({ ref: t.String() }) }
+  )
+
+  // Postgres Upgrade — stub endpoints (Studio compatibility)
+  .post(
+    "/:ref/upgrade",
+    async ({ params, set }) => {
+      set.status = 501;
+      return { message: "Postgres upgrade is not supported on this SupaCloud cluster", code: "501" };
+    },
+    { params: t.Object({ ref: t.String() }) }
+  )
+  .get(
+    "/:ref/upgrade-status",
+    async ({ params }) => {
+      return { upgrade_status: "none" };
+    },
+    { params: t.Object({ ref: t.String() }) }
+  )
+
+  // Auth Email Templates — stub endpoint (Studio compatibility)
+  .get(
+    "/:ref/auth/template",
+    async ({ params }) => {
+      const project = await projectService.getProject(params.ref);
+      if (!project) return status(404, { message: "Project not found", code: "404" });
+      return {
+        confirmation_mail: { subject: "Confirm your signup", content: "" },
+        invitation_mail: { subject: "You have been invited", content: "" },
+        recovery_mail: { subject: "Reset your password", content: "" },
+        email_change: { subject: "Confirm email change", content: "" },
+        magic_link: { subject: "Your magic link", content: "" },
+      };
+    },
+    { params: t.Object({ ref: t.String() }) }
+  )
+  .put(
+    "/:ref/auth/template",
+    async ({ params, body, set }) => {
+      const project = await projectService.getProject(params.ref);
+      if (!project) return status(404, { message: "Project not found", code: "404" });
+      set.status = 501;
+      return { message: "Auth email templates are not configurable on this SupaCloud cluster", code: "501" };
+    },
+    { params: t.Object({ ref: t.String() }), body: t.Record(t.String(), t.Unknown()) }
+  )
+
+  // PostgREST config — alias without /config/ prefix (Studio compatibility)
+  .get(
+    "/:ref/postgrest",
+    async ({ params }) => {
+      const settings = await projectService.getProjectSettings(params.ref);
+      if (!settings) return status(404, { message: "Project not found", code: "404" });
+      return (settings as Record<string, unknown>).postgrest || {};
+    },
+    { params: t.Object({ ref: t.String() }) }
+  )
+  .patch(
+    "/:ref/postgrest",
+    async ({ params, body }) => {
+      const settings = await projectService.getProjectSettings(params.ref);
+      if (!settings) return status(404, { message: "Project not found", code: "404" });
+      const updated = await projectService.updateProjectSettings(params.ref, {
+        ...settings,
+        postgrest: { ...((settings as Record<string, unknown>).postgrest as Record<string, unknown> || {}), ...body },
+      });
+      return (updated as Record<string, unknown>)?.postgrest || {};
+    },
+    { params: t.Object({ ref: t.String() }), body: t.Record(t.String(), t.Unknown()) }
+  )
+
+  // PITR — stub endpoint (Studio compatibility)
+  .get(
+    "/:ref/database/backups/pitr",
+    async ({ params }) => {
+      const project = await projectService.getProject(params.ref);
+      if (!project) return status(404, { message: "Project not found", code: "404" });
+      return { available: false, earliest_physical_backup_date: null, latest_physical_backup_date: null };
+    },
+    { params: t.Object({ ref: t.String() }) }
   );

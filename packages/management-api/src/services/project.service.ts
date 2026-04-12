@@ -7,6 +7,7 @@ import { shellService } from "./shell.service";
 import { gatewayService } from "./gateway.service";
 import { taskRepository } from "../repositories/task.repository";
 import type { Project, ProjectStatus } from "../db";
+import { resolveBucketName, resolveDbName, resolveRoleName, generateDbName } from "../db";
 import { edgeFunctionService } from "./edge-function.service";
 import { logger } from "../utils/logger";
 import { config } from "../config";
@@ -18,8 +19,8 @@ export interface CreateProjectRequest {
   name: string;
   region?: string;
   organization_id?: string;
-  domain?: string;  // Base custom domain (e.g., "aorist.cn") — auto generates api.X / studio.X
-  api_domain?: string;   // Explicit API domain (e.g., "xg-api.aizhuliren.cn")
+  domain?: string; // Base custom domain (e.g., "aorist.cn") — auto generates api.X / studio.X
+  api_domain?: string; // Explicit API domain (e.g., "xg-api.aizhuliren.cn")
   studio_domain?: string; // Explicit Studio domain (e.g., "xg-studio.aizhuliren.cn")
 }
 
@@ -50,7 +51,18 @@ export interface ProjectResponse {
 }
 
 export interface ProjectCreateResponse extends ProjectResponse {
-  // Credentials returned only on creation
+  endpoint: string;
+  cloud_provider: string;
+  kubernetes_version: string;
+  infra_compute_size: string;
+  default_branch_name: string;
+  preview_branch_refs: string[];
+  pause_status: string | null;
+  connectionString: string;
+  db_port: number;
+  db_host: string;
+  db_name: string;
+  db_user: string;
   anon_key: string;
   service_role_key: string;
   jwt_secret: string;
@@ -62,7 +74,7 @@ export interface ProjectDetailResponse extends ProjectResponse {
   updated_at: Date;
   // API Keys for Studio compatibility
   anon_key?: string;
-  service_key?: string;
+  service_role_key?: string;
   jwt_secret?: string;
 }
 
@@ -77,6 +89,7 @@ export interface BackupResponse {
 export interface SecretResponse {
   name: string;
   value: string;
+  updated_at?: string;
 }
 
 export interface FunctionResponse {
@@ -86,6 +99,7 @@ export interface FunctionResponse {
   status: string;
   verify_jwt: boolean;
   created_at: string;
+  updated_at: string;
 }
 
 export interface LogEntryResponse {
@@ -112,27 +126,30 @@ export class ProjectService {
   // Get all projects
   async listProjects(): Promise<ProjectResponse[]> {
     const projects = await projectRepository.findAll();
-    return projects.map((p) => this.toResponse(p));
+    return Promise.all(projects.map((p) => this.toResponse(p)));
   }
 
   // Get project details
   async getProject(ref: string): Promise<ProjectDetailResponse | null> {
     const project = await projectRepository.findByRef(ref);
     if (!project) return null;
-    return this.toDetailResponse(project);
+    return await this.toDetailResponse(project);
   }
 
   // Create project
-  async createProject(request: CreateProjectRequest): Promise<ProjectCreateResponse> {
+  async createProject(
+    request: CreateProjectRequest,
+  ): Promise<ProjectCreateResponse> {
     const projectRef = jwtService.generateProjectRef();
 
     // Generate all necessary credentials
     const dbPassword = databaseService.generatePassword();
-    const { jwtSecret, anonKey, serviceRoleKey } = await jwtService.generateKeySet();
+    const { jwtSecret, anonKey, serviceRoleKey } =
+      await jwtService.generateKeySet();
 
-    const dbName = `supa_${projectRef}`;
-    const dbUser = `role_${projectRef}`;
-    const s3Bucket = `supa-${projectRef}`;
+    const dbName = generateDbName(projectRef);
+    const dbUser = resolveRoleName(projectRef);
+    const s3Bucket = resolveBucketName(projectRef);
 
     // Build initial config with custom domain if provided
     const initialConfig: Record<string, unknown> = {};
@@ -163,17 +180,36 @@ export class ProjectService {
     });
 
     if (!project) {
-      throw new Error(`[ProjectService] Failed to create project ${projectRef}. Database returned undefined.`);
+      throw new Error(
+        `[ProjectService] Failed to create project ${projectRef}. Database returned undefined.`,
+      );
     }
 
     // 2. Asynchronously provision resources (background)
-    this.provisionResources(projectRef, dbPassword, request.domain).catch((error) => {
-      logger.error(`Failed to provision resources for ${projectRef}:`, { error: error instanceof Error ? error.message : String(error) });
-    });
+    this.provisionResources(projectRef, dbPassword, request.domain).catch(
+      (error) => {
+        logger.error(`Failed to provision resources for ${projectRef}:`, {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      },
+    );
 
     // Return full response including credentials (only on creation)
+    const response = await this.toResponse(project);
     return {
-      ...this.toResponse(project),
+      ...response,
+      endpoint: response.api?.url || `https://${projectRef}.${config.baseDomain}`,
+      cloud_provider: "localhost",
+      kubernetes_version: "1.28.0",
+      infra_compute_size: "micro",
+      default_branch_name: "main",
+      preview_branch_refs: [],
+      pause_status: null,
+      connectionString: `postgresql://postgres:[YOUR-PASSWORD]@${response.database?.host || 'localhost'}:5432/${generateDbName(projectRef)}`,
+      db_port: 5432,
+      db_host: response.database?.host || "localhost",
+      db_name: generateDbName(projectRef),
+      db_user: "postgres",
       anon_key: anonKey,
       service_role_key: serviceRoleKey,
       jwt_secret: jwtSecret,
@@ -182,13 +218,25 @@ export class ProjectService {
   }
 
   // Asynchronously provision resources (Saga Orchestrator)
-  private async provisionResources(projectRef: string, dbPassword: string, domain?: string): Promise<void> {
+  private async provisionResources(
+    projectRef: string,
+    dbPassword: string,
+    domain?: string,
+  ): Promise<void> {
     try {
       // Start Saga by enqueuing the first task
-      await taskRepository.createTask(projectRef, "provision_db", { dbPassword, domain });
-      logger.info(`[Saga] Initiated resource provisioning for project ${projectRef}`);
+      await taskRepository.createTask(projectRef, "provision_db", {
+        dbPassword,
+        domain,
+      });
+      logger.info(
+        `[Saga] Initiated resource provisioning for project ${projectRef}`,
+      );
     } catch (error: unknown) {
-      logger.error(`Failed to initiate saga for ${projectRef}:`, error as Error);
+      logger.error(
+        `Failed to initiate saga for ${projectRef}:`,
+        error as Error,
+      );
       await projectRepository.updateStatus(projectRef, "paused");
     }
   }
@@ -203,14 +251,19 @@ export class ProjectService {
 
     // Asynchronously cleanup resources
     this.cleanupResources(ref).catch((error) => {
-      logger.error(`Failed to cleanup resources for ${ref}:`, { error: error instanceof Error ? error.message : String(error) });
+      logger.error(`Failed to cleanup resources for ${ref}:`, {
+        error: error instanceof Error ? error.message : String(error),
+      });
     });
 
     return true;
   }
 
   // Update project
-  async updateProject(ref: string, request: UpdateProjectRequest): Promise<boolean> {
+  async updateProject(
+    ref: string,
+    request: UpdateProjectRequest,
+  ): Promise<boolean> {
     const project = await projectRepository.findByRef(ref);
     if (!project) return false;
 
@@ -243,7 +296,10 @@ export class ProjectService {
   }
 
   // Get project health status
-  async getProjectHealth(ref: string): Promise<{ status: string; services: { name: string; status: string }[] } | null> {
+  async getProjectHealth(ref: string): Promise<{
+    status: string;
+    services: { name: string; status: string }[];
+  } | null> {
     const project = await projectRepository.findByRef(ref);
     if (!project) return null;
 
@@ -252,7 +308,9 @@ export class ProjectService {
     const checkService = async (unitName: string) => {
       try {
         const { $ } = await import("bun");
-        const result = await $`systemctl is-active ${unitName}`.nothrow().quiet();
+        const result = await $`systemctl is-active ${unitName}`
+          .nothrow()
+          .quiet();
         return result.exitCode === 0 ? "ACTIVE_HEALTHY" : "INACTIVE";
       } catch (err: unknown) {
         return "INACTIVE";
@@ -262,15 +320,30 @@ export class ProjectService {
     const checkGlobalDocker = async (containerName: string) => {
       try {
         const { $ } = await import("bun");
-        const res = await $`docker inspect -f '{{.State.Status}}' ${containerName} 2>/dev/null || podman inspect -f '{{.State.Status}}' ${containerName} 2>/dev/null`.nothrow().quiet();
+        const res =
+          await $`docker inspect -f '{{.State.Status}}' ${containerName} 2>/dev/null || podman inspect -f '{{.State.Status}}' ${containerName} 2>/dev/null`
+            .nothrow()
+            .quiet();
         return res.text().trim() === "running" ? "ACTIVE_HEALTHY" : "INACTIVE";
       } catch (err: unknown) {
-        logger.debug(`[ProjectService] Docker check failed for ${containerName}`, { error: err });
+        logger.debug(
+          `[ProjectService] Docker check failed for ${containerName}`,
+          { error: err },
+        );
         return "INACTIVE";
       }
     };
 
-    const [pgrstStatus, gotrueStatus, realtimePerTenant, realtimeSystemd, storagePerTenant, kongSystemd, kongDocker, realtimeDocker] = await Promise.all([
+    const [
+      pgrstStatus,
+      gotrueStatus,
+      realtimePerTenant,
+      realtimeSystemd,
+      storagePerTenant,
+      kongSystemd,
+      kongDocker,
+      realtimeDocker,
+    ] = await Promise.all([
       checkService(`supacloud-pgrst@${ref}`),
       checkService(`supacloud-gotrue@${ref}`),
       checkService(`supacloud-realtime@${ref}`),
@@ -284,53 +357,67 @@ export class ProjectService {
     let realtimeStatus = "INACTIVE";
 
     if (realtimePerTenant === "ACTIVE_HEALTHY") {
-        realtimeStatus = "ACTIVE_HEALTHY";
+      realtimeStatus = "ACTIVE_HEALTHY";
     } else {
-        // Fall back to checking global docker container, but explicitly verify tenant registration
-        if (kongDocker === "ACTIVE_HEALTHY" || kongSystemd === "ACTIVE_HEALTHY") { 
-            let globalRealtimeDocker = await checkGlobalDocker("realtime-dev.supabase-realtime");
-            if (globalRealtimeDocker === "INACTIVE") {
-                globalRealtimeDocker = await checkGlobalDocker("supacloud-realtime");
-            }
-            if (globalRealtimeDocker === "ACTIVE_HEALTHY" || realtimeDocker === "ACTIVE_HEALTHY" || realtimeSystemd === "ACTIVE_HEALTHY") {
-                const { realtimeService } = await import("./realtime.service");
-                const hasTenant = await realtimeService.getTenant(ref);
-                if (hasTenant) {
-                    if (realtimeSystemd === "ACTIVE_HEALTHY") {
-                        // Native Bun Realtime uses pg_listen (no CDC logical replication), so being registered is sufficient
-                        realtimeStatus = "ACTIVE_HEALTHY";
-                    } else {
-                        try {
-                            const { getProjectDb } = await import("../db");
-                            const dbName = project.db_name || `supa_${ref}`;
-                            const projectDb = getProjectDb(dbName);
-                            // Ensure CDC replication is actively running
-                            const repl = await projectDb`SELECT count(*) as count FROM pg_stat_replication WHERE application_name ILIKE '%realtime%'`;
-                            if (repl[0] && Number(repl[0].count) > 0) {
-                                realtimeStatus = "ACTIVE_HEALTHY";
-                            }
-                        } catch(e) {
-                            // Keep realtimeStatus as INACTIVE locally if CDC replication fetch fails
-                        }
-                    }
-                }
-            }
+      // Fall back to checking global docker container, but explicitly verify tenant registration
+      if (kongDocker === "ACTIVE_HEALTHY" || kongSystemd === "ACTIVE_HEALTHY") {
+        let globalRealtimeDocker = await checkGlobalDocker(
+          "realtime-dev.supabase-realtime",
+        );
+        if (globalRealtimeDocker === "INACTIVE") {
+          globalRealtimeDocker = await checkGlobalDocker("supacloud-realtime");
         }
+        if (
+          globalRealtimeDocker === "ACTIVE_HEALTHY" ||
+          realtimeDocker === "ACTIVE_HEALTHY" ||
+          realtimeSystemd === "ACTIVE_HEALTHY"
+        ) {
+          const { realtimeService } = await import("./realtime.service");
+          const hasTenant = await realtimeService.getTenant(ref);
+          if (hasTenant) {
+            if (realtimeSystemd === "ACTIVE_HEALTHY") {
+              // Native Bun Realtime uses pg_listen (no CDC logical replication), so being registered is sufficient
+              realtimeStatus = "ACTIVE_HEALTHY";
+            } else {
+              try {
+                const { getProjectDb, resolveDbName } = await import("../db");
+                const dbName = await resolveDbName(ref);
+                const projectDb = getProjectDb(dbName);
+                // Ensure CDC replication is actively running
+                const repl =
+                  await projectDb`SELECT count(*) as count FROM pg_stat_replication WHERE application_name ILIKE '%realtime%'`;
+                if (repl[0] && Number(repl[0].count) > 0) {
+                  realtimeStatus = "ACTIVE_HEALTHY";
+                }
+              } catch (e) {
+                // Keep realtimeStatus as INACTIVE locally if CDC replication fetch fails
+              }
+            }
+          }
+        }
+      }
     }
-    
+
     // Evaluate storage status based on checking MinIO/S3 reachability
     const isStorageReachable = await this.checkStorageHealth();
-    const storageStatus = (storagePerTenant === "ACTIVE_HEALTHY" || isStorageReachable) ? "ACTIVE_HEALTHY" : "INACTIVE";
-    
+    const storageStatus =
+      storagePerTenant === "ACTIVE_HEALTHY" || isStorageReachable
+        ? "ACTIVE_HEALTHY"
+        : "INACTIVE";
+
     // Gateway is kong (systemd/docker)
-    const kongStatus = (kongSystemd === "ACTIVE_HEALTHY" || kongDocker === "ACTIVE_HEALTHY") 
-      ? "ACTIVE_HEALTHY" 
-      : "INACTIVE";
+    const kongStatus =
+      kongSystemd === "ACTIVE_HEALTHY" || kongDocker === "ACTIVE_HEALTHY"
+        ? "ACTIVE_HEALTHY"
+        : "INACTIVE";
 
     return {
       status: project.status === "active" ? "ACTIVE_HEALTHY" : "INACTIVE",
       services: [
-        { name: "PostgreSQL", status: dbStatus.success ? "ACTIVE_HEALTHY" : "INACTIVE" },
+        {
+          name: "PostgreSQL",
+          status: dbStatus.success ? "ACTIVE_HEALTHY" : "INACTIVE",
+        },
         { name: "PostgREST", status: pgrstStatus },
         { name: "GoTrue", status: gotrueStatus },
         { name: "Realtime", status: realtimeStatus },
@@ -345,14 +432,23 @@ export class ProjectService {
   private async cleanupResources(projectRef: string): Promise<void> {
     try {
       await taskRepository.createTask(projectRef, "cleanup_runtime");
-      logger.info(`[Saga] Initiated resource cleanup for project ${projectRef}`);
+      logger.info(
+        `[Saga] Initiated resource cleanup for project ${projectRef}`,
+      );
     } catch (error: unknown) {
-      logger.error(`Cleanup saga initiation error for ${projectRef}:`, error as Error);
+      logger.error(
+        `Cleanup saga initiation error for ${projectRef}:`,
+        error as Error,
+      );
     }
   }
 
   // Get project status
-  async getProjectStatus(ref: string): Promise<{ status: ProjectStatus; database: string; storage: string } | null> {
+  async getProjectStatus(ref: string): Promise<{
+    status: ProjectStatus;
+    database: string;
+    storage: string;
+  } | null> {
     const project = await projectRepository.findByRef(ref);
     if (!project) return null;
 
@@ -361,7 +457,7 @@ export class ProjectService {
     return {
       status: project.status,
       database: dbStatus.success ? "healthy" : "unhealthy",
-      storage: await this.checkStorageHealth() ? "healthy" : "unhealthy",
+      storage: (await this.checkStorageHealth()) ? "healthy" : "unhealthy",
     };
   }
 
@@ -376,21 +472,29 @@ export class ProjectService {
       await tenantRuntimeService.restartRuntime(ref);
       logger.info(`[ProjectService] Restarted services for project ${ref}`);
     } catch (err: unknown) {
-      logger.warn(`[ProjectService] Service restart partial failure for ${ref}`, { error: err });
+      logger.warn(
+        `[ProjectService] Service restart partial failure for ${ref}`,
+        { error: err },
+      );
     }
-    
+
     return true;
   }
 
   // Get project settings
-  async getProjectSettings(ref: string): Promise<Record<string, unknown> | null> {
+  async getProjectSettings(
+    ref: string,
+  ): Promise<Record<string, unknown> | null> {
     const project = await projectRepository.findByRef(ref);
     if (!project) return null;
     return project.config;
   }
 
   // Update project settings
-  async updateProjectSettings(ref: string, config: Record<string, unknown>): Promise<Record<string, unknown> | null> {
+  async updateProjectSettings(
+    ref: string,
+    config: Record<string, unknown>,
+  ): Promise<Record<string, unknown> | null> {
     const project = await projectRepository.findByRef(ref);
     if (!project) return null;
 
@@ -403,7 +507,9 @@ export class ProjectService {
   }
 
   // Get project API keys
-  async getApiKeys(ref: string): Promise<{ anon_key: string; service_role_key: string } | null> {
+  async getApiKeys(
+    ref: string,
+  ): Promise<{ anon_key: string; service_role_key: string } | null> {
     const project = await projectRepository.findByRef(ref);
     if (!project) return null;
 
@@ -421,12 +527,19 @@ export class ProjectService {
     return await databaseService.getSecrets(ref);
   }
 
-  async upsertSecrets(ref: string, secrets: { name: string; value: string }[]): Promise<boolean> {
+  async upsertSecrets(
+    ref: string,
+    secrets: { name: string; value: string }[],
+  ): Promise<boolean> {
     const project = await projectRepository.findByRef(ref);
     if (!project) return false;
 
     for (const secret of secrets) {
-      const success = await databaseService.upsertSecret(ref, secret.name, secret.value);
+      const success = await databaseService.upsertSecret(
+        ref,
+        secret.name,
+        secret.value,
+      );
       if (!success) return false;
     }
 
@@ -458,13 +571,26 @@ export class ProjectService {
     const results: FunctionResponse[] = [];
     for (const slug of slugs) {
       const cfg = await edgeFunctionService.getConfig(ref, slug);
+      let created_at = new Date().toISOString();
+      let updated_at = created_at;
+      try {
+        const { stat } = await import("fs/promises");
+        const fileStat = await stat(
+          `${config.edgeFunctionsDir}/${ref}/${slug}.js`,
+        );
+        updated_at = fileStat.mtime.toISOString();
+        created_at = fileStat.birthtime.toISOString();
+      } catch {
+        /* file may not exist yet */
+      }
       results.push({
         id: slug,
         slug,
         name: slug,
         status: "ACTIVE",
         verify_jwt: cfg.verify_jwt,
-        created_at: new Date().toISOString(),
+        created_at,
+        updated_at,
       });
     }
     return results;
@@ -477,7 +603,12 @@ export class ProjectService {
     return await edgeFunctionService.remove(ref, slug);
   }
 
-  async deployFunction(ref: string, slug: string, code: string, minify: boolean = false): Promise<boolean> {
+  async deployFunction(
+    ref: string,
+    slug: string,
+    code: string,
+    minify: boolean = false,
+  ): Promise<boolean> {
     const project = await projectRepository.findByRef(ref);
     if (!project) return false;
 
@@ -494,22 +625,31 @@ export class ProjectService {
     const project = await projectRepository.findByRef(ref);
     if (!project) return false;
 
-    return await edgeFunctionService.deployBundle(ref, slug, files, entrypoint, minify);
+    return await edgeFunctionService.deployBundle(
+      ref,
+      slug,
+      files,
+      entrypoint,
+      minify,
+    );
   }
 
   // Convert to response format
-  private toResponse(project: Project): ProjectResponse {
+  private async toResponse(project: Project): Promise<ProjectResponse> {
     const customDomain = project.config?.custom_domain as string | undefined;
     const explicitApiDomain = project.config?.api_domain as string | undefined;
-    const explicitStudioDomain = project.config?.studio_domain as string | undefined;
+    const explicitStudioDomain = project.config?.studio_domain as
+      | string
+      | undefined;
 
-    // Explicit domains take precedence over auto-generated ones
     const apiUrl = explicitApiDomain
       ? `https://${explicitApiDomain}`
       : routerService.getProjectApiUrl(project.ref, customDomain);
     const studioUrl = explicitStudioDomain
       ? `https://${explicitStudioDomain}`
       : routerService.getProjectStudioUrl(project.ref, customDomain);
+
+    const dbName = await resolveDbName(project.ref);
 
     return {
       id: project.id,
@@ -522,7 +662,7 @@ export class ProjectService {
       updated_at: project.updated_at,
       database: {
         host: config.baseDomain,
-        name: project.db_name,
+        name: dbName,
         user: project.db_user,
       },
       api: {
@@ -535,31 +675,37 @@ export class ProjectService {
   }
 
   // Get detailed response format
-  private toDetailResponse(project: Project): ProjectDetailResponse {
+  private async toDetailResponse(project: Project): Promise<ProjectDetailResponse> {
     return {
-      ...this.toResponse(project),
+      ...(await this.toResponse(project)),
       config: project.config,
       updated_at: project.updated_at,
       // API Keys for Studio compatibility
       anon_key: project.anon_key,
-      service_key: project.service_role_key,
+      service_role_key: project.service_role_key,
       jwt_secret: project.jwt_secret,
     };
   }
 
   // --- Log Management (delegated) ---
 
-  async queryLogs(ref: string, type: string = "all"): Promise<LogEntryResponse[]> {
+  async queryLogs(
+    ref: string,
+    type: string = "all",
+  ): Promise<LogEntryResponse[]> {
     return projectLogService.queryLogs(ref, type);
   }
 
   // --- API Key Management ---
 
-  async rotateApiKeys(ref: string): Promise<{ anon_key: string, service_role_key: string } | null> {
+  async rotateApiKeys(
+    ref: string,
+  ): Promise<{ anon_key: string; service_role_key: string } | null> {
     const project = await projectRepository.findByRef(ref);
     if (!project) return null;
 
-    const { jwtSecret, anonKey, serviceRoleKey } = await jwtService.generateKeySet();
+    const { jwtSecret, anonKey, serviceRoleKey } =
+      await jwtService.generateKeySet();
 
     // 1. Update keys in master database
     await projectRepository.updateApiKeys(ref, {
@@ -571,27 +717,32 @@ export class ProjectService {
     // 2. Update keys in Edge Runtime secrets
     await databaseService.upsertSecret(ref, "JWT_SECRET", jwtSecret);
     await databaseService.upsertSecret(ref, "SUPABASE_ANON_KEY", anonKey);
-    await databaseService.upsertSecret(ref, "SUPABASE_SERVICE_ROLE_KEY", serviceRoleKey);
+    await databaseService.upsertSecret(
+      ref,
+      "SUPABASE_SERVICE_ROLE_KEY",
+      serviceRoleKey,
+    );
 
     // 3. Update Gateway JWT
     await gatewayService.setupJwt(ref, jwtSecret);
-    
+
     // 4. Update Realtime JWT
     const { realtimeService } = await import("./realtime.service");
-    const cfg = (project.config as Record<string, unknown>) || {};
-    const dbName = typeof cfg.db_name === "string" ? cfg.db_name : `supa_${ref}`;
+    const dbName = await resolveDbName(ref);
     await realtimeService.updateTenant({
-        projectRef: ref,
-        dbName,
-        dbPassword: project.db_password,
-        jwtSecret
+      projectRef: ref,
+      dbName,
+      dbPassword: project.db_password,
+      jwtSecret,
     });
 
     // 5. Restart PostgREST and GoTrue to pickup new keys
     const { tenantRuntimeService } = await import("./tenant-runtime.service");
     await tenantRuntimeService.restartRuntime(ref);
 
-    logger.info(`[ProjectService] Rotated API keys, synchronized secrets, and reloaded runtimes for ${ref}`);
+    logger.info(
+      `[ProjectService] Rotated API keys, synchronized secrets, and reloaded runtimes for ${ref}`,
+    );
 
     return { anon_key: anonKey, service_role_key: serviceRoleKey };
   }
@@ -606,7 +757,10 @@ export class ProjectService {
     return projectOpsService.restoreBackup(ref, backupId);
   }
 
-  async updateNetworkRestrictions(ref: string, allowedIps: string[]): Promise<boolean> {
+  async updateNetworkRestrictions(
+    ref: string,
+    allowedIps: string[],
+  ): Promise<boolean> {
     return projectOpsService.updateNetworkRestrictions(ref, allowedIps);
   }
 

@@ -11,7 +11,7 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
     async ({ params, query, set }) => {
       const project = await projectService.getProject(params.ref);
       if (!project || !project.jwt_secret) {
-        return status(404, { error: "Project or JWT secret not found" });
+        return status(404, { message: "Project or JWT secret not found", code: "404" });
       }
 
       const { jwtService } = await import("../services/jwt.service");
@@ -40,7 +40,7 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
       if (!res.ok) {
         set.status = res.status;
         const err = await res.json().catch(() => ({}));
-        return { error: err.msg || err.message || "Failed to fetch users", error_code: err.error_code, code: err.code };
+        return { message: err.msg || err.message || "Failed to fetch users", code: err.code || "500" };
       }
 
       // Forward link and total count headers for SDK pagination
@@ -81,7 +81,7 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
     async ({ params, body, set }) => {
       const project = await projectService.getProject(params.ref);
       if (!project || !project.jwt_secret) {
-        return status(404, { error: "Project or JWT secret not found" });
+        return status(404, { message: "Project or JWT secret not found", code: "404" });
       }
 
       const { jwtService } = await import("../services/jwt.service");
@@ -117,7 +117,7 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
       if (!res.ok) {
         set.status = res.status;
         const err = await res.json().catch(() => ({}));
-        return { error: err.msg || err.message || "Failed to create user", error_code: err.error_code, code: err.code };
+        return { message: err.msg || err.message || "Failed to create user", code: err.code || "500" };
       }
 
       return res.json();
@@ -147,7 +147,7 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
     async ({ params, body, set }) => {
       const project = await projectService.getProject(params.ref);
       if (!project || !project.jwt_secret) {
-        return status(404, { error: "Project or JWT secret not found" });
+        return status(404, { message: "Project or JWT secret not found", code: "404" });
       }
 
       const { jwtService } = await import("../services/jwt.service");
@@ -166,14 +166,15 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
         body: JSON.stringify({
           email: body.email,
           data: body.user_metadata || {},
-          ...(body.redirectTo ? { redirect_to: body.redirectTo } : {})
+          ...(body.redirectTo ? { redirect_to: body.redirectTo } : {}),
+          ...(body.app_metadata ? { app_metadata: body.app_metadata } : {}),
         })
       });
 
       if (!res.ok) {
         set.status = res.status;
         const err = await res.json().catch(() => ({}));
-        return { error: err.msg || err.message || "Failed to invite user", error_code: err.error_code, code: err.code };
+        return { message: err.msg || err.message || "Failed to invite user", code: err.code || "500" };
       }
 
       return res.json();
@@ -183,6 +184,7 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
       body: t.Object({
         email: t.String(),
         user_metadata: t.Optional(t.Any()),
+        app_metadata: t.Optional(t.Any()),
         redirectTo: t.Optional(t.String()),
       })
     }
@@ -195,7 +197,7 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
     async ({ params, set }) => {
       const project = await projectService.getProject(params.ref);
       if (!project || !project.jwt_secret) {
-        return status(404, { error: "Project or JWT secret not found" });
+        return status(404, { message: "Project or JWT secret not found", code: "404" });
       }
 
       const { jwtService } = await import("../services/jwt.service");
@@ -214,7 +216,7 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
       if (!res.ok) {
         set.status = res.status;
         const err = await res.json().catch(() => ({}));
-        return { error: err.msg || err.message || "User not found", error_code: err.error_code, code: err.code };
+        return { message: err.msg || err.message || "User not found", code: err.code || "500" };
       }
 
       return res.json();
@@ -234,7 +236,7 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
     async ({ params, body, set }) => {
       const project = await projectService.getProject(params.ref);
       if (!project || !project.jwt_secret) {
-        return status(404, { error: "Project or JWT secret not found" });
+        return status(404, { message: "Project or JWT secret not found", code: "404" });
       }
 
       const { jwtService } = await import("../services/jwt.service");
@@ -256,7 +258,7 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
       if (!res.ok) {
         set.status = res.status;
         const err = await res.json().catch(() => ({}));
-        return { error: err.msg || err.message || "Failed to update user", error_code: err.error_code, code: err.code };
+        return { message: err.msg || err.message || "Failed to update user", code: err.code || "500" };
       }
 
       return res.json();
@@ -280,12 +282,59 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
     }
   )
 
+  .patch(
+    "/users/:id",
+    async ({ params, body, set }) => {
+      const project = await projectService.getProject(params.ref);
+      if (!project || !project.jwt_secret) {
+        return status(404, { message: "Project or JWT secret not found", code: "404" });
+      }
+
+      const { jwtService } = await import("../services/jwt.service");
+      const serviceRoleKey = await jwtService.generateServiceRoleKey(project.jwt_secret);
+      const { config } = await import("../config");
+      const apiUrl = project.api?.url || (config.kongInternal.startsWith('http') ? config.kongInternal : `http://${config.kongInternal}`);
+
+      const res = await fetch(`${apiUrl}/auth/v1/admin/users/${params.id}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          "apikey": serviceRoleKey,
+          "Authorization": `Bearer ${serviceRoleKey}`,
+          "x-project-ref": params.ref
+        },
+        body: JSON.stringify(body),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        return { message: err.msg || err.message || "Failed to update user", code: err.code || "500" };
+      }
+
+      return res.json();
+    },
+    {
+      params: t.Object({ ref: t.String(), id: t.String() }),
+      body: t.Object({
+        email: t.Optional(t.String()),
+        phone: t.Optional(t.String()),
+        password: t.Optional(t.String()),
+        email_confirm: t.Optional(t.Boolean()),
+        phone_confirm: t.Optional(t.Boolean()),
+        user_metadata: t.Optional(t.Any()),
+        app_metadata: t.Optional(t.Any()),
+        ban_duration: t.Optional(t.String()),
+        role: t.Optional(t.String()),
+      })
+    }
+  )
+
   .delete(
     "/users/:id",
     async ({ params, set, body, query }) => {
       const project = await projectService.getProject(params.ref);
       if (!project || !project.jwt_secret) {
-        return status(404, { error: "Project or JWT secret not found" });
+        return status(404, { message: "Project or JWT secret not found", code: "404" });
       }
 
       const { jwtService } = await import("../services/jwt.service");
@@ -309,7 +358,7 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
       if (!res.ok) {
         set.status = res.status;
         const err = await res.json().catch(() => ({}));
-        return { error: err.msg || err.message || "Failed to delete user", error_code: err.error_code, code: err.code };
+        return { message: err.msg || err.message || "Failed to delete user", code: err.code || "500" };
       }
 
       return res.json();
@@ -328,7 +377,7 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
     async ({ params, set }) => {
       const project = await projectService.getProject(params.ref);
       if (!project || !project.jwt_secret) {
-        return status(404, { error: "Project or JWT secret not found" });
+        return status(404, { message: "Project or JWT secret not found", code: "404" });
       }
 
       const { jwtService } = await import("../services/jwt.service");
@@ -347,7 +396,7 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
       if (!res.ok) {
         set.status = res.status;
         const err = await res.json().catch(() => ({}));
-        return { error: err.msg || err.message || "Failed to list factors", error_code: err.error_code, code: err.code };
+        return { message: err.msg || err.message || "Failed to list factors", code: err.code || "500" };
       }
 
       return res.json();
@@ -365,7 +414,7 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
     async ({ params, body, set }) => {
       const project = await projectService.getProject(params.ref);
       if (!project || !project.jwt_secret) {
-        return status(404, { error: "Project or JWT secret not found" });
+        return status(404, { message: "Project or JWT secret not found", code: "404" });
       }
 
       const { jwtService } = await import("../services/jwt.service");
@@ -387,7 +436,7 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
       if (!res.ok) {
         set.status = res.status;
         const err = await res.json().catch(() => ({}));
-        return { error: err.msg || err.message || "Failed to generate link", error_code: err.error_code, code: err.code };
+        return { message: err.msg || err.message || "Failed to generate link", code: err.code || "500" };
       }
 
       return res.json();
@@ -396,11 +445,14 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
       params: t.Object({ ref: t.String() }),
       body: t.Object({
         type: t.String(),
-        email: t.String(),
+        email: t.Optional(t.String()),
         password: t.Optional(t.String()),
         new_email: t.Optional(t.String()),
+        phone: t.Optional(t.String()),
+        new_phone: t.Optional(t.String()),
         redirect_to: t.Optional(t.String()),
         data: t.Optional(t.Record(t.String(), t.Unknown())),
-      }),
+        gotrue_meta_security: t.Optional(t.Record(t.String(), t.Unknown())),
+      }, { additionalProperties: true }),
     }
   );

@@ -132,11 +132,9 @@ export async function handleMcp(request: Request): Promise<Response> {
           return jsonResponse({ error: "Project ref required. Only project-scoped tokens can use this tunnel." }, 403);
         }
 
-        const projectRows = await metaSql`SELECT db_name FROM projects WHERE ref = ${ref} LIMIT 1`;
-        if (!projectRows.length) return jsonResponse({ error: "Project not found" }, 404);
-
-        const { getProjectDb } = await import("../db");
-        const tenantDb = getProjectDb(projectRows[0].db_name as string);
+        const { getProjectDb, resolveDbName } = await import("../db");
+        const dbName = await resolveDbName(ref);
+        const tenantDb = getProjectDb(dbName);
         const result = await tenantDb.unsafe(body.sql);
         return jsonResponse(result);
       } catch (e: unknown) {
@@ -177,11 +175,9 @@ export async function handleMcp(request: Request): Promise<Response> {
         }
         if (!ref) return jsonResponse({ error: "Project ref required." }, 403);
 
-        const projectRows = await metaSql`SELECT db_name FROM projects WHERE ref = ${ref} LIMIT 1`;
-        if (!projectRows.length) return jsonResponse({ error: "Project not found" }, 404);
-
-        const { getProjectDb } = await import("../db");
-        const tenantDb = getProjectDb(projectRows[0].db_name as string);
+        const { getProjectDb, resolveDbName } = await import("../db");
+        const dbName = await resolveDbName(ref);
+        const tenantDb = getProjectDb(dbName);
 
         // Execute the migration SQL
         await tenantDb.unsafe(body.sql);
@@ -194,7 +190,7 @@ export async function handleMcp(request: Request): Promise<Response> {
             executed_at timestamptz DEFAULT now()
           )
         `);
-        await tenantDb.unsafe(`INSERT INTO public.migration_history (name) VALUES ('${body.name.replace(/'/g, "''")}')`);
+        await tenantDb`INSERT INTO public.migration_history (name) VALUES (${body.name})`;
 
         return jsonResponse({ success: true, name: body.name, message: "Migration applied" });
       } catch (e: unknown) {

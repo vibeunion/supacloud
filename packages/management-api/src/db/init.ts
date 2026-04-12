@@ -4,16 +4,20 @@ import { SQL } from "bun";
 
 export async function initDatabase() {
   logger.info("Initializing database...");
-  logger.info(`DATABASE_URL: ${config.databaseUrl.replace(/:[^:@]+@/, ":****@")}`);
+  logger.info(
+    `DATABASE_URL: ${config.databaseUrl.replace(/:[^:@]+@/, ":****@")}`,
+  );
 
   // Parse DATABASE_URL to get components
   const dbUrl = config.databaseUrl;
-  const urlMatch = dbUrl.match(/postgresql?:\/\/([^:]+):([^@]+)@([^:]+):(\d+)\/(.+)/);
-  
+  const urlMatch = dbUrl.match(
+    /postgresql?:\/\/([^:]+):([^@]+)@([^:]+):(\d+)\/(.+)/,
+  );
+
   if (!urlMatch) {
     throw new Error("Invalid DATABASE_URL format");
   }
-  
+
   const [, username, password, hostname, port, database] = urlMatch;
   logger.info(`Connecting to database: ${database} on ${hostname}:${port}`);
 
@@ -138,7 +142,6 @@ export async function initDatabase() {
 
   `;
 
-
   // Use explicit config instead of URL to ensure correct database name
   const sql = new SQL({
     hostname,
@@ -154,14 +157,15 @@ export async function initDatabase() {
     logger.info("Connected to database");
 
     // Check current database
-    const [dbInfo] = await sql`SELECT current_database() as db, current_user as user`;
+    const [dbInfo] =
+      await sql`SELECT current_database() as db, current_user as user`;
     logger.info(`Current database: ${dbInfo?.db}, user: ${dbInfo?.user}`);
 
     const result = await sql`
-      SELECT COUNT(*) as count FROM information_schema.tables 
+      SELECT COUNT(*) as count FROM information_schema.tables
       WHERE table_schema = 'public' AND table_name IN ('organizations', 'projects', 'project_tasks', 'platform_settings', 'project_secrets', 'deployment_history', 'system_tus_uploads', 'system_tus_chunks', 'system_signed_uploads', 'project_config')
     `;
-    
+
     const tableCount = Number(result[0]?.count || 0);
     logger.info(`Found ${tableCount} tables in database`);
 
@@ -177,6 +181,8 @@ export async function initDatabase() {
     try {
       await sql`ALTER TABLE system_tus_uploads ADD COLUMN IF NOT EXISTS auth_token TEXT`;
       await sql`ALTER TABLE system_signed_uploads ADD COLUMN IF NOT EXISTS auth_token TEXT`;
+      // Add updated_at to project_secrets if not present (migration for existing deployments)
+      await sql`ALTER TABLE project_secrets ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()`;
       logger.info("Schema migrations applied.");
     } catch (e: any) {
       logger.error("Failed to apply migrations: " + e.message);
@@ -207,16 +213,20 @@ export async function initDatabase() {
     logger.info("LISTEN/NOTIFY trigger applied.");
 
     const [verify] = await sql`
-      SELECT COUNT(*) as count FROM information_schema.tables 
+      SELECT COUNT(*) as count FROM information_schema.tables
       WHERE table_schema = 'public' AND table_name IN ('organizations', 'projects', 'project_tasks', 'platform_settings', 'project_secrets', 'deployment_history', 'system_tus_uploads', 'system_tus_chunks', 'system_signed_uploads', 'project_config')
     `;
-    
+
     const finalCount = Number(verify?.count || 0);
-    logger.info(`Database initialized successfully! Tables verified: ${finalCount}/10`);
-    
+    logger.info(
+      `Database initialized successfully! Tables verified: ${finalCount}/10`,
+    );
+
     // In CI mode where tests rewrite db_name to 'postgres', we must create Storage relations
     if (process.env.CI || process.env.TEST_FIXED_JWT_SECRET) {
-      logger.info("Initializing Storage schemas natively for E2E CI routing...");
+      logger.info(
+        "Initializing Storage schemas natively for E2E CI routing...",
+      );
       const storageDDL = `
         CREATE SCHEMA IF NOT EXISTS storage;
         CREATE TABLE IF NOT EXISTS storage.buckets (
@@ -276,10 +286,14 @@ export async function initDatabase() {
       }
     }
     if (finalCount < 10) {
-      throw new Error(`Table creation verified but failed. Expected 10 tables, got ${finalCount}`);
+      throw new Error(
+        `Table creation verified but failed. Expected 10 tables, got ${finalCount}`,
+      );
     }
   } catch (error: unknown) {
-    logger.error("Failed to initialize database:", { error: error instanceof Error ? error.message : String(error) });
+    logger.error("Failed to initialize database:", {
+      error: error instanceof Error ? error.message : String(error),
+    });
     throw error;
   } finally {
     await sql.close();

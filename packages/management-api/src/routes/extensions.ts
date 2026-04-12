@@ -23,14 +23,14 @@ export const extensionRoutes = new Elysia({ prefix: "/v1/projects/:ref/extension
     })
     .patch('/', async ({ params, body }) => {
         const name = body.name;
-        if (!name) return status(400, { error: "Extension name is required" });
+        if (!name) return status(400, { message: "Extension name is required", code: "400" });
         if (body.create) {
             return await extensionService.enableExtension(params.ref, name, body.schema, body.version);
         }
         if (body.drop) {
             return await extensionService.disableExtension(params.ref, name);
         }
-        return status(400, { error: "Must specify either 'create' or 'drop'" });
+        return status(400, { message: "Must specify either 'create' or 'drop'", code: "400" });
     }, {
         body: t.Object({
             name: t.String(),
@@ -43,7 +43,7 @@ export const extensionRoutes = new Elysia({ prefix: "/v1/projects/:ref/extension
     })
     .post('/', async ({ params, body }) => {
         const name = body.name;
-        if (!name) return status(400, { error: "Extension name is required" });
+        if (!name) return status(400, { message: "Extension name is required", code: "400" });
         return await extensionService.enableExtension(params.ref, name, body.schema, body.version);
     }, {
         body: t.Object({
@@ -55,7 +55,54 @@ export const extensionRoutes = new Elysia({ prefix: "/v1/projects/:ref/extension
     })
     .delete('/', async ({ params, body }) => {
         const name = body.name;
-        if (!name) return status(400, { error: "Extension name is required" });
+        if (!name) return status(400, { message: "Extension name is required", code: "400" });
+        return await extensionService.disableExtension(params.ref, name);
+    }, {
+        body: t.Object({ name: t.String() }),
+        response: { 200: t.Any(), 400: ErrorResponse },
+    });
+
+export const databaseExtensionRoutes = new Elysia({ prefix: "/v1/projects/:ref/database/extensions" })
+    .get('/', async ({ params }) => {
+        return await extensionService.listExtensions(params.ref);
+    }, {
+        response: { 200: t.Any() },
+    })
+    .post('/', async ({ params, body }) => {
+        const name = body.name;
+        if (!name) return status(400, { message: "Extension name is required", code: "400" });
+        return await extensionService.enableExtension(params.ref, name, body.schema, body.version);
+    }, {
+        body: t.Object({
+            name: t.String(),
+            schema: t.Optional(t.String()),
+            version: t.Optional(t.String()),
+        }),
+        response: { 200: t.Any(), 400: ErrorResponse },
+    })
+    .patch('/', async ({ params, body }) => {
+        const name = body.name;
+        if (!name) return status(400, { message: "Extension name is required", code: "400" });
+        if (body.create) {
+            return await extensionService.enableExtension(params.ref, name, body.schema, body.version);
+        }
+        if (body.drop) {
+            return await extensionService.disableExtension(params.ref, name);
+        }
+        return status(400, { message: "Must specify either 'create' or 'drop'", code: "400" });
+    }, {
+        body: t.Object({
+            name: t.String(),
+            create: t.Optional(t.Boolean()),
+            drop: t.Optional(t.Boolean()),
+            schema: t.Optional(t.String()),
+            version: t.Optional(t.String()),
+        }),
+        response: { 200: t.Any(), 400: ErrorResponse },
+    })
+    .delete('/', async ({ params, body }) => {
+        const name = body.name;
+        if (!name) return status(400, { message: "Extension name is required", code: "400" });
         return await extensionService.disableExtension(params.ref, name);
     }, {
         body: t.Object({ name: t.String() }),

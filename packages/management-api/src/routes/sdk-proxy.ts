@@ -216,6 +216,15 @@ const graphqlHandler = async ({ request }: any) => {
     });
 };
 
+const realtimeHandler = async ({ request }: any) => {
+    const ref = await getProjectRef(request);
+    if (!ref) return new Response(JSON.stringify({ error: 'Bad Request', message: 'Missing tenant reference' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+    
+    const url = new URL(request.url);
+    const targetUrl = `${config.realtimeAdminUrl}${url.pathname}${url.search}`;
+    return executeProxy(request, targetUrl, { ref });
+};
+
 const functionsHandler = async ({ request }: any) => {
     const ref = await getProjectRef(request);
     if (!ref) return new Response(JSON.stringify({ error: 'Bad Request', message: 'Missing tenant reference' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
@@ -236,4 +245,8 @@ export const sdkProxyRoutes = sdkProxyRoutesBase
     .post("/graphql/v1", graphqlHandler)
     .options("/graphql/v1", graphqlHandler)
     .group("/graphql/v1", (app) => app.get("/*", graphqlHandler).post("/*", graphqlHandler).options("/*", graphqlHandler))
+    .group("/realtime/v1", (app) => {
+        return app.get("/*", realtimeHandler).post("/*", realtimeHandler).put("/*", realtimeHandler).patch("/*", realtimeHandler).delete("/*", realtimeHandler).options("/*", realtimeHandler)
+                  .get("", realtimeHandler).post("", realtimeHandler).put("", realtimeHandler).patch("", realtimeHandler).delete("", realtimeHandler).options("", realtimeHandler);
+    })
     .group("/functions/v1", (app) => app.get("/*", functionsHandler).post("/*", functionsHandler).put("/*", functionsHandler).patch("/*", functionsHandler).delete("/*", functionsHandler).options("/*", functionsHandler));

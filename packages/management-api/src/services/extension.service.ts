@@ -2,6 +2,15 @@ import { logger } from "../utils/logger";
 import { getProjectDb, resolveDbName } from "../db";
 import { $ } from "bun";
 
+const IDENTIFIER_REGEX = /^[a-zA-Z_][a-zA-Z0-9_]{0,62}$/;
+
+function validatePgIdentifier(name: string, label: string): string {
+    if (!IDENTIFIER_REGEX.test(name)) {
+        throw new Error(`Invalid ${label}: ${name}`);
+    }
+    return name;
+}
+
 export interface ExtensionInfo {
     name: string;
     default_version: string;
@@ -28,10 +37,12 @@ export class ExtensionService {
     }
 
     async enableExtension(projectRef: string, extension: string, schema?: string, version?: string): Promise<ExtensionInfo> {
+        const safeExt = validatePgIdentifier(extension, 'extension');
+        const safeSchema = schema ? validatePgIdentifier(schema, 'schema') : null;
         const dbName = await resolveDbName(projectRef);
         const db = getProjectDb(dbName);
-        let sql = `CREATE EXTENSION IF NOT EXISTS "${extension}"`;
-        if (schema) sql += ` SCHEMA "${schema}"`;
+        let sql = `CREATE EXTENSION IF NOT EXISTS "${safeExt}"`;
+        if (safeSchema) sql += ` SCHEMA "${safeSchema}"`;
         if (version) sql += ` VERSION '${version.replace(/'/g, "''")}'`;
         sql += ` CASCADE`;
         await db.unsafe(sql);
@@ -45,9 +56,10 @@ export class ExtensionService {
     }
 
     async disableExtension(projectRef: string, extension: string): Promise<ExtensionInfo> {
+        const safeExt = validatePgIdentifier(extension, 'extension');
         const dbName = await resolveDbName(projectRef);
         const db = getProjectDb(dbName);
-        await db.unsafe(`DROP EXTENSION IF EXISTS "${extension}" CASCADE`);
+        await db.unsafe(`DROP EXTENSION IF EXISTS "${safeExt}" CASCADE`);
 
         const rows = await db`
             SELECT name, default_version, installed_version, comment,

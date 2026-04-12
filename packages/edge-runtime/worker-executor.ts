@@ -1,7 +1,10 @@
-import { parentPort } from "worker_threads";
+import { parentPort, MessageChannel } from "worker_threads";
 import "./port-guard";
 import "./url-import-plugin";
-import { getCapturedServeHandler, clearCapturedServeHandler } from "./deno-compat";
+import {
+  getCapturedServeHandler,
+  clearCapturedServeHandler,
+} from "./deno-compat";
 import { autoInstallDeps } from "./auto-deps";
 
 interface CachedModule {
@@ -19,8 +22,13 @@ async function loadModule(functionPath: string): Promise<{ default: unknown }> {
     return await import(functionPath);
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
-    if (msg.includes("Cannot find module") || msg.includes("Could not resolve")) {
-      console.log(`[Worker] Module load failed, attempting auto-install for ${functionPath}`);
+    if (
+      msg.includes("Cannot find module") ||
+      msg.includes("Could not resolve")
+    ) {
+      console.log(
+        `[Worker] Module load failed, attempting auto-install for ${functionPath}`,
+      );
       await autoInstallDeps(functionPath);
       // Retry after auto-install (clear Bun's internal module cache for this path)
       return await import(functionPath);
@@ -53,8 +61,13 @@ parentPort?.on("message", async (msg: WorkerMessage) => {
       if (!moduleCache.has(msg.functionId)) {
         clearCapturedServeHandler();
         const mod = await loadModule(msg.functionPath);
-        const serveHandler = getCapturedServeHandler() as CachedModule["serveHandler"];
-        moduleCache.set(msg.functionId, { mod: mod as Record<string, unknown>, serveHandler, lastUsed: Date.now() });
+        const serveHandler =
+          getCapturedServeHandler() as CachedModule["serveHandler"];
+        moduleCache.set(msg.functionId, {
+          mod: mod as Record<string, unknown>,
+          serveHandler,
+          lastUsed: Date.now(),
+        });
         if (moduleCache.size > MAX_CACHED) {
           let oldest = { key: "", time: Infinity };
           for (const [k, v] of moduleCache) {
@@ -63,16 +76,44 @@ parentPort?.on("message", async (msg: WorkerMessage) => {
           moduleCache.delete(oldest.key);
         }
       }
-      parentPort?.postMessage({ type: "preheat_done", functionId: msg.functionId });
+      parentPort?.postMessage({
+        type: "preheat_done",
+        functionId: msg.functionId,
+      });
     } catch (err: unknown) {
-      parentPort?.postMessage({ type: "preheat_error", functionId: msg.functionId, error: err instanceof Error ? err.message : String(err) });
+      parentPort?.postMessage({
+        type: "preheat_error",
+        functionId: msg.functionId,
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
     return;
   }
 
   try {
-    const { functionId, functionPath, env, url, method, headers, body } =
-      msg;
+    const { functionId, functionPath, env, url, method, headers, body } = msg;
+
+    // ── Inject Supabase runtime env vars (official: always available) ──────
+    // Extract projectRef and functionSlug from functionId (format: "{ref}_{slug}")
+    // NOTE: project refs in SupaCloud are short alphanumeric IDs (no underscores),
+    // so splitting at first underscore is reliable here.
+    const underscoreIdx = functionId.indexOf("_");
+    const projectRef =
+      underscoreIdx > 0 ? functionId.slice(0, underscoreIdx) : functionId;
+    const functionSlug =
+      underscoreIdx > 0 ? functionId.slice(underscoreIdx + 1) : functionId;
+
+    // SB_EXECUTION_ID: use the one from x-sb-execution-id header (set by server.ts) for consistency
+    const executionId =
+      (headers as Record<string, string>)["x-sb-execution-id"] ||
+      crypto.randomUUID();
+
+    // Only inject if not already set by tenant env (user secrets take precedence for SB_REGION)
+    if (!env["SB_REGION"]) env["SB_REGION"] = process.env.SB_REGION || "local";
+    if (!env["SB_EXECUTION_ID"]) env["SB_EXECUTION_ID"] = executionId;
+    if (!env["DENO_DEPLOYMENT_ID"])
+      env["DENO_DEPLOYMENT_ID"] = `${projectRef}_${functionSlug}_1`;
+    // ── End runtime env injection ──────────────────────────────────────────
 
     // Snapshot current env values for keys we're about to inject,
     // so we can restore them after execution (multi-tenant isolation)
@@ -93,8 +134,13 @@ parentPort?.on("message", async (msg: WorkerMessage) => {
       if (!cached) {
         clearCapturedServeHandler();
         const mod = await loadModule(functionPath);
-        const serveHandler = getCapturedServeHandler() as CachedModule["serveHandler"];
-        cached = { mod: mod as Record<string, unknown>, serveHandler, lastUsed: Date.now() };
+        const serveHandler =
+          getCapturedServeHandler() as CachedModule["serveHandler"];
+        cached = {
+          mod: mod as Record<string, unknown>,
+          serveHandler,
+          lastUsed: Date.now(),
+        };
         moduleCache.set(functionId, cached!);
         if (moduleCache.size > MAX_CACHED) {
           let oldest = { key: "", time: Infinity };
@@ -122,18 +168,24 @@ parentPort?.on("message", async (msg: WorkerMessage) => {
         handler &&
         typeof handler === "object" &&
         "handle" in handler &&
-        typeof (handler as { handle: (req: Request) => Promise<Response> }).handle === "function"
+        typeof (handler as { handle: (req: Request) => Promise<Response> })
+          .handle === "function"
       ) {
         // Elysia app
-        response = await (handler as { handle: (req: Request) => Promise<Response> }).handle(request);
+        response = await (
+          handler as { handle: (req: Request) => Promise<Response> }
+        ).handle(request);
       } else if (
         handler &&
         typeof handler === "object" &&
         "fetch" in handler &&
-        typeof (handler as { fetch: (req: Request) => Promise<Response> }).fetch === "function"
+        typeof (handler as { fetch: (req: Request) => Promise<Response> })
+          .fetch === "function"
       ) {
         // Hono / other fetch-based frameworks
-        response = await (handler as { fetch: (req: Request) => Promise<Response> }).fetch(request);
+        response = await (
+          handler as { fetch: (req: Request) => Promise<Response> }
+        ).fetch(request);
       } else {
         throw new Error(
           "Function must export default handler, Elysia app, or fetch-based app",
@@ -155,12 +207,74 @@ parentPort?.on("message", async (msg: WorkerMessage) => {
       if (cookies && cookies.length > 0) {
         resHeaders["set-cookie"] = cookies;
       }
-      const resBody = await response.arrayBuffer();
-      parentPort?.postMessage(
-        { status: response.status, headers: resHeaders, body: resBody },
-      );
+      // Detect streaming responses (SSE, chunked, text/stream, etc.)
+      const contentType = response.headers.get("content-type") || "";
+      const isStreaming =
+        contentType.includes("text/event-stream") ||
+        contentType.includes("application/octet-stream") ||
+        contentType.includes("application/x-ndjson") ||
+        response.headers.get("transfer-encoding") === "chunked" ||
+        !response.headers.has("content-length");
+
+      if (isStreaming && response.body) {
+        // Use MessageChannel to stream chunks back to main thread
+        const { port1, port2 } = new MessageChannel();
+        parentPort?.postMessage(
+          {
+            type: "stream_start",
+            status: response.status,
+            headers: resHeaders,
+            port: port2,
+          },
+          [port2], // transfer port2 to main thread
+        );
+
+        const reader = response.body.getReader();
+        // Capture restore function for deferred cleanup
+        const restoreEnv = () => {
+          for (const [k, prev] of savedEnv) {
+            if (prev === undefined) {
+              delete process.env[k];
+            } else {
+              process.env[k] = prev;
+            }
+          }
+        };
+
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) {
+              port1.postMessage({ done: true });
+              break;
+            }
+            port1.postMessage({ done: false, chunk: value.buffer }, [
+              value.buffer,
+            ]);
+          }
+        } catch (err) {
+          port1.postMessage({
+            done: true,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        } finally {
+          port1.close();
+          restoreEnv(); // Restore env AFTER stream ends
+        }
+
+        // Signal outer finally to skip restoration (already handled above)
+        savedEnv.clear();
+      } else {
+        const resBody = await response.arrayBuffer();
+        parentPort?.postMessage({
+          status: response.status,
+          headers: resHeaders,
+          body: resBody,
+        });
+      }
     } finally {
       // Restore previous env values to avoid cross-tenant leakage
+      // (For streaming responses, savedEnv is cleared above so this is a no-op)
       for (const [k, prev] of savedEnv) {
         if (prev === undefined) {
           delete process.env[k];
@@ -170,7 +284,8 @@ parentPort?.on("message", async (msg: WorkerMessage) => {
       }
     }
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : "Internal Worker Error";
+    const message =
+      err instanceof Error ? err.message : "Internal Worker Error";
     parentPort?.postMessage({
       status: 500,
       headers: { "Content-Type": "application/json" },
