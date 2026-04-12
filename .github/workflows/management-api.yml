@@ -39,6 +39,18 @@ jobs:
     name: Unit Tests
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    services:
+      postgres:
+        image: supabase/postgres:latest
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
 
     steps:
       - name: Checkout code
@@ -53,9 +65,17 @@ jobs:
         working-directory: packages/management-api
         run: bun install
 
+      - name: Initialize Database
+        working-directory: packages/management-api
+        run: bun src/db/init.ts
+        env:
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
+
       - name: Run tests
         working-directory: packages/management-api
         run: bun test
+        env:
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
 
   shell-scripts-lint:
     name: Shell Scripts Lint
