@@ -59,10 +59,12 @@ export async function createLogicalBackup(projectRef: string): Promise<{ success
 
         try {
             // Use tenant role, export as Custom archive format with default gzip compression
-            const tenantUri = `postgres://${project.db_user}:${project.db_password}@localhost:5432/${project.db_name}`;
+            const tenantHost = `localhost:5432`;
+            const tenantDb = project.db_name;
+            const tenantUser = project.db_user;
 
             logger.info(`[LogicalBackup] Starting dump for ${projectRef} -> ${backupPath}`);
-            await $`pg_dump ${tenantUri} -F c -Z 6 -f ${backupPath}`.quiet();
+            await $`PGPASSWORD=${project.db_password} pg_dump -h localhost -p 5432 -U ${tenantUser} -d ${tenantDb} -F c -Z 6 -f ${backupPath}`.quiet();
 
             // Try to upload to tenant's hidden backup prefix via AWS CLI (MinIO/Garage compatible)
             if (project.s3_access_key && project.s3_secret_key) {
@@ -109,11 +111,11 @@ export async function restoreLogicalBackup(projectRef: string, backupId: string)
             }
 
             // Execute pg_restore (force clean old objects and complete in single transaction)
-            const tenantUri = `postgres://${project.db_user}:${project.db_password}@localhost:5432/${project.db_name}`;
+            const tenantDb = project.db_name;
+            const tenantUser = project.db_user;
             logger.info(`[LogicalBackup] Starting restore for ${projectRef} from ${backupPath}`);
 
-            // Use -c (clean) to cleanup existing data, -1 (single-transaction)
-            await $`pg_restore -d ${tenantUri} -c -1 ${backupPath}`.quiet();
+            await $`PGPASSWORD=${project.db_password} pg_restore -h localhost -p 5432 -U ${tenantUser} -d ${tenantDb} -c -1 ${backupPath}`.quiet();
 
             logger.info(`[LogicalBackup] Restore complete for ${projectRef}`);
             return { success: true, message: "Logical restore completed successfully" };

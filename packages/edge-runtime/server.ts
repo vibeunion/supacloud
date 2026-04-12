@@ -149,11 +149,16 @@ async function verifyJwt(projectRef: string, authHeader: string | null | undefin
       headers: { Authorization: `Bearer ${MASTER_TOKEN}` },
       signal: AbortSignal.timeout(3000),
     });
-    if (!res.ok) return false;
-    const keys = await res.json() as { anon_key?: string; service_role_key?: string };
+    if (!res.ok) {
+      console.warn(`[verifyJwt] Failed to fetch api-keys for ${projectRef}: HTTP ${res.status}`);
+      return false;
+    }
+    const keysArray = await res.json() as { name: string; api_key: string }[];
+    const anonKey = keysArray?.find?.(k => k.name === "anon")?.api_key;
+    const serviceRoleKey = keysArray?.find?.(k => k.name === "service_role")?.api_key;
     
     // Allow both anon_key and service_role_key as valid bearer tokens
-    if (token === keys.anon_key || token === keys.service_role_key) return true;
+    if (token && (token === anonKey || token === serviceRoleKey)) return true;
     
     // If token is an actual JWT, verify signature via jose
     const { jwtVerify } = await import("jose");
@@ -162,19 +167,31 @@ async function verifyJwt(projectRef: string, authHeader: string | null | undefin
       headers: { Authorization: `Bearer ${MASTER_TOKEN}` },
       signal: AbortSignal.timeout(3000),
     });
-    if (!detailRes.ok) return false;
+    if (!detailRes.ok) {
+      console.warn(`[verifyJwt] Failed to fetch project detail for ${projectRef}: HTTP ${detailRes.status}`);
+      return false;
+    }
     const detail = await detailRes.json() as { jwt_secret?: string };
-    if (!detail.jwt_secret) return false;
+    if (!detail.jwt_secret) {
+      console.warn(`[verifyJwt] Project ${projectRef} has no jwt_secret or fetch failed`);
+      return false;
+    }
     
-    await jwtVerify(token, new TextEncoder().encode(detail.jwt_secret));
-    return true;
-  } catch {
+    try {
+      await jwtVerify(token, new TextEncoder().encode(detail.jwt_secret));
+      return true;
+    } catch (e) {
+      console.warn(`[verifyJwt] jwtVerify failed for token (starts with ${token.substring(0, 10)}...):`, e);
+      return false;
+    }
+  } catch (err) {
+    console.error("[verifyJwt] Uncaught error during verification:", err);
     return false;
   }
 }
 
 const app = new Elysia()
-  .get("/health", () => ({ status: "ok", runtime: "bun-edge" }))
+  .get("/health", () => ({ status: "ok", runtime: "bun-edge", mt: process.env.MASTER_TOKEN ? "present" : "missing", url: process.env.MANAGEMENT_API_URL || "missing" }))
   .get("/metrics", () => pool.getMetrics())
 
   // Cache invalidation — called by Management API after deploy
@@ -208,7 +225,7 @@ const app = new Elysia()
 
     // Check verify_jwt config
     const fnConfig = await getFunctionConfig(projectRef, c.params.functionName);
-    if (fnConfig.verify_jwt) {
+    if (c.request.method !== "OPTIONS" && fnConfig.verify_jwt) {
       const authorized = await verifyJwt(projectRef, c.headers["authorization"]);
       if (!authorized) {
         return new Response(JSON.stringify({ msg: "Invalid JWT" }), {
@@ -232,7 +249,7 @@ const app = new Elysia()
     }
 
     const fnConfig = await getFunctionConfig(projectRef, c.params.functionName);
-    if (fnConfig.verify_jwt) {
+    if (c.request.method !== "OPTIONS" && fnConfig.verify_jwt) {
       const authorized = await verifyJwt(projectRef, c.headers["authorization"]);
       if (!authorized) {
         return new Response(JSON.stringify({ msg: "Invalid JWT" }), {
@@ -258,7 +275,7 @@ const app = new Elysia()
     }
 
     const fnConfig = await getFunctionConfig(projectRef, c.params.functionName);
-    if (fnConfig.verify_jwt) {
+    if (c.request.method !== "OPTIONS" && fnConfig.verify_jwt) {
       const authorized = await verifyJwt(projectRef, c.headers["authorization"]);
       if (!authorized) {
         return new Response(JSON.stringify({ msg: "Invalid JWT" }), {
@@ -282,7 +299,7 @@ const app = new Elysia()
     }
 
     const fnConfig = await getFunctionConfig(projectRef, c.params.functionName);
-    if (fnConfig.verify_jwt) {
+    if (c.request.method !== "OPTIONS" && fnConfig.verify_jwt) {
       const authorized = await verifyJwt(projectRef, c.headers["authorization"]);
       if (!authorized) {
         return new Response(JSON.stringify({ msg: "Invalid JWT" }), {
