@@ -30,6 +30,7 @@ class RealtimeBunService {
     private tenantSubscriptions = new Map<string, PostgresChangeConfig[]>();
     private tenantTokens = new Map<string, string>();
     private subscriptionIdMap = new Map<string, Map<number, string>>();
+    private ensuredTriggers = new Set<string>();
 
     public async subscribeTenant(
         projectRef: string,
@@ -41,6 +42,10 @@ class RealtimeBunService {
         }
         if (token) {
             this.tenantTokens.set(projectRef, token);
+        }
+
+        if (subscriptions && subscriptions.length > 0) {
+            await this.ensureTriggers(projectRef, subscriptions);
         }
 
         if (this.tenantListeners.has(projectRef)) return;
@@ -56,10 +61,10 @@ class RealtimeBunService {
 
             if (!db) return;
 
-            const listener = await db.listen('realtime_changes', (payload: string) => {
+            const listener = await db.listen('realtime_changes', async (payload: string) => {
                 try {
                     const parsed = JSON.parse(payload);
-                    const filtered = this.filterAndFormat(projectRef, parsed);
+                    const filtered = await this.filterAndFormat(projectRef, parsed);
                     if (filtered) {
                         this.events.emit(`change:${projectRef}`, filtered);
                     }
@@ -75,6 +80,84 @@ class RealtimeBunService {
         }
     }
 
+    private async ensureTriggers(projectRef: string, subscriptions: PostgresChangeConfig[]) {
+        const dbName = `supa_${projectRef}`;
+        let db: any;
+        try {
+            db = (databaseService as any).getTenantDb(dbName);
+        } catch { return; }
+        if (!db) return;
+
+        try {
+            await db.unsafe(`
+                CREATE OR REPLACE FUNCTION realtime_supacloud_notify()
+                RETURNS TRIGGER AS $$
+                DECLARE
+                    payload JSONB;
+                    old_data JSONB := '{}';
+                    new_data JSONB := '{}';
+                    cols JSONB;
+                BEGIN
+                    IF TG_OP = 'INSERT' THEN
+                        new_data = to_jsonb(NEW);
+                    ELSIF TG_OP = 'UPDATE' THEN
+                        new_data = to_jsonb(NEW);
+                        old_data = to_jsonb(OLD);
+                    ELSIF TG_OP = 'DELETE' THEN
+                        old_data = to_jsonb(OLD);
+                    END IF;
+
+                    SELECT jsonb_agg(jsonb_build_object('name', col, 'type', typ))
+                    INTO cols
+                    FROM (
+                        SELECT column_name AS col, data_type AS typ
+                        FROM information_schema.columns
+                        WHERE table_schema = TG_TABLE_SCHEMA AND table_name = TG_TABLE_NAME
+                    ) sub;
+
+                    payload = jsonb_build_object(
+                        'type', TG_OP,
+                        'schema', TG_TABLE_SCHEMA,
+                        'table', TG_TABLE_NAME,
+                        'record', new_data,
+                        'old_record', old_data,
+                        'columns', COALESCE(cols, '[]'::jsonb),
+                        'commit_timestamp', now()::text
+                    );
+
+                    PERFORM pg_notify('realtime_changes', payload::text);
+                    RETURN COALESCE(NEW, OLD);
+                END;
+                $$ LANGUAGE plpgsql;
+            `);
+
+            for (const sub of subscriptions) {
+                const schema = sub.schema || 'public';
+                const table = sub.table;
+                if (!table) continue;
+
+                const triggerKey = `${projectRef}:${schema}:${table}`;
+                if (this.ensuredTriggers.has(triggerKey)) continue;
+
+                const triggerName = `supacloud_rlt_${schema}_${table}`;
+                try {
+                    await db.unsafe(`
+                        DROP TRIGGER IF EXISTS ${triggerName} ON "${schema}"."${table}";
+                        CREATE TRIGGER ${triggerName}
+                            AFTER INSERT OR UPDATE OR DELETE ON "${schema}"."${table}"
+                            FOR EACH ROW EXECUTE FUNCTION realtime_supacloud_notify();
+                    `);
+                    this.ensuredTriggers.add(triggerKey);
+                    logger.info(`[RealtimeBun] Auto-created trigger ${triggerName} on ${schema}.${table}`);
+                } catch (err: unknown) {
+                    logger.warn(`[RealtimeBun] Could not create trigger on ${schema}.${table}: ${String(err)}`);
+                }
+            }
+        } catch (err: unknown) {
+            logger.error(`[RealtimeBun] Failed to ensure triggers for ${projectRef}`, { error: String(err) });
+        }
+    }
+
     public registerSubscriptionIds(projectRef: string, mappings: Array<{ id: number; subscription_id: string }>) {
         let map = this.subscriptionIdMap.get(projectRef);
         if (!map) {
@@ -86,7 +169,7 @@ class RealtimeBunService {
         }
     }
 
-    private filterAndFormat(projectRef: string, raw: any): ChangeEvent | null {
+    private async filterAndFormat(projectRef: string, raw: any): Promise<ChangeEvent | null> {
         const inner = raw.payload || raw;
         const subs = this.tenantSubscriptions.get(projectRef);
         const changeType = inner.type || inner.event || '';
@@ -115,16 +198,52 @@ class RealtimeBunService {
         if (token) {
             try {
                 const jwtPayload = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString());
-                if (jwtPayload.role === 'anon' || jwtPayload.role === 'authenticated') {
-                    logger.debug(`[RealtimeBun] Passing events for role "${jwtPayload.role}" — RLS filtering applied at DB trigger level.`);
-                } else if (jwtPayload.role !== 'service_role' && jwtPayload.role !== 'postgres' && jwtPayload.role !== 'supabase_admin') {
-                    logger.debug(`[RealtimeBun] Blocked stream for unknown role "${jwtPayload.role}".`);
+                if (jwtPayload.role === 'service_role' || jwtPayload.role === 'postgres' || jwtPayload.role === 'supabase_admin') {
+                    return this.formatEvent(inner, matchingIds);
+                }
+                if (jwtPayload.role !== 'anon' && jwtPayload.role !== 'authenticated') {
                     return null;
                 }
+
+                const rlsOk = await this.checkRlsVisibility(projectRef, schema, table, inner.record || {}, jwtPayload.role, changeType);
+                if (!rlsOk) return null;
             } catch { return null; }
         }
 
         return this.formatEvent(inner, matchingIds);
+    }
+
+    private async checkRlsVisibility(
+        projectRef: string,
+        schema: string,
+        table: string,
+        record: Record<string, any>,
+        role: string,
+        changeType: string
+    ): Promise<boolean> {
+        try {
+            const dbName = `supa_${projectRef}`;
+            const db = (databaseService as any).getTenantDb(dbName);
+            if (!db) return true;
+
+            const hasPrimaryKey = record.id !== undefined;
+            if (!hasPrimaryKey) return true;
+
+            const pkVal = record.id;
+            const pkType = typeof pkVal === 'number' ? pkVal : `'${String(pkVal).replace(/'/g, "''")}'`;
+
+            const rlsCheck = await db.unsafe(`
+                SET LOCAL role ${role};
+                SELECT 1 FROM "${schema}"."${table}" WHERE id = ${pkType} LIMIT 1;
+            `).catch(() => null);
+
+            if (!rlsCheck || !Array.isArray(rlsCheck) || rlsCheck.length === 0) {
+                return false;
+            }
+            return true;
+        } catch {
+            return true;
+        }
     }
 
     private matchesFilter(filter: string, record: Record<string, any>): boolean {

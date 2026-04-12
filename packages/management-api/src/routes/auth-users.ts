@@ -358,4 +358,49 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
         id: t.String(),
       })
     }
+  )
+
+  .post(
+    "/generate_link",
+    async ({ params, body, set }) => {
+      const project = await projectService.getProject(params.ref);
+      if (!project || !project.jwt_secret) {
+        return status(404, { error: "Project or JWT secret not found" });
+      }
+
+      const { jwtService } = await import("../services/jwt.service");
+      const serviceRoleKey = await jwtService.generateServiceRoleKey(project.jwt_secret);
+      const { config } = await import("../config");
+      const apiUrl = project.api?.url || (config.kongInternal.startsWith('http') ? config.kongInternal : `http://${config.kongInternal}`);
+
+      const res = await fetch(`${apiUrl}/auth/v1/admin/generate_link`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "apikey": serviceRoleKey,
+          "Authorization": `Bearer ${serviceRoleKey}`,
+          "x-project-ref": params.ref
+        },
+        body: JSON.stringify(body)
+      });
+
+      if (!res.ok) {
+        set.status = res.status;
+        const err = await res.json().catch(() => ({}));
+        return { error: err.msg || err.message || "Failed to generate link", error_code: err.error_code, code: err.code };
+      }
+
+      return res.json();
+    },
+    {
+      params: t.Object({ ref: t.String() }),
+      body: t.Object({
+        type: t.String(),
+        email: t.String(),
+        password: t.Optional(t.String()),
+        new_email: t.Optional(t.String()),
+        redirect_to: t.Optional(t.String()),
+        data: t.Optional(t.Record(t.String(), t.Unknown())),
+      }),
+    }
   );
