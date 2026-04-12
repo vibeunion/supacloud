@@ -325,23 +325,22 @@ END $$;
 CREATE OR REPLACE FUNCTION public.set_request_context() RETURNS void AS $$
 DECLARE
   claims json;
+  role_claim text;
 BEGIN
-  -- PostgREST sets request.jwt.claims as a GUC variable from the JWT token
   BEGIN
     claims := current_setting('request.jwt.claims', true)::json;
   EXCEPTION WHEN OTHERS THEN
     claims := '{}'::json;
   END;
 
-  -- Set commonly used variables for RLS policies
   PERFORM set_config('request.jwt.claim.sub', coalesce(claims->>'sub', ''), true);
   PERFORM set_config('request.jwt.claim.role', coalesce(claims->>'role', 'anon'), true);
   PERFORM set_config('request.jwt.claim.email', coalesce(claims->>'email', ''), true);
 
-  -- P0-1: Switch role based on JWT to enforce RLS correctly
-  IF claims->>'role' = 'service_role' THEN
+  role_claim := coalesce(claims->>'role', 'anon');
+  IF role_claim = 'service_role' THEN
     SET LOCAL ROLE service_role;
-  ELSIF claims->>'role' = 'authenticated' THEN
+  ELSIF role_claim = 'authenticated' THEN
     SET LOCAL ROLE authenticated;
   ELSE
     SET LOCAL ROLE anon;

@@ -78,7 +78,7 @@
   async function fetchServices() {
     servicesLoading = true;
     try {
-      const res = await apiClient(`/v1/projects/${projectRef}`);
+      const res = await apiClient(`/v1/projects/${projectRef}/health`);
       if (res.ok) {
         const data = await res.json();
         services = data.services || [];
