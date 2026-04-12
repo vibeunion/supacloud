@@ -16,6 +16,41 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
     }
   )
 
+  // CLI `supabase functions deploy` sends POST /:ref/functions with { slug, name, body, verify_jwt }
+  .post(
+    "/:ref/functions",
+    async ({ params, body }) => {
+      const { slug, name, body: funcBody, verify_jwt } = body;
+      const code = funcBody || '';
+      if (!slug || !code) {
+        return status(400, { error: "slug and body are required" });
+      }
+
+      const success = await projectService.deployFunction(
+        params.ref, slug, code, false
+      );
+      if (!success) {
+        return status(500, { error: "Failed to deploy function" });
+      }
+
+      if (typeof verify_jwt === 'boolean') {
+        const { edgeFunctionService } = await import("../services/edge-function.service");
+        await edgeFunctionService.updateConfig(params.ref, slug, { verify_jwt });
+      }
+
+      return { id: slug, slug, name: name || slug, version: 1, verify_jwt: verify_jwt ?? true, status: "ACTIVE" };
+    },
+    {
+      params: t.Object({ ref: t.String() }),
+      body: t.Object({
+        slug: t.String(),
+        name: t.Optional(t.String()),
+        body: t.String(),
+        verify_jwt: t.Optional(t.Boolean()),
+      }),
+    }
+  )
+
   // Get function code (bundled runtime version)
   .get(
     "/:ref/functions/:slug",
