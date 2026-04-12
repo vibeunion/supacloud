@@ -122,7 +122,7 @@ export const config = {
     masterTokenEnv.MASTER_TOKEN ||
     managementEnv.MASTER_TOKEN ||
     "dev-master-token",
-  jwtSecret: process.env.JWT_SECRET || managementEnv.JWT_SECRET || "",
+  jwtSecret: process.env.JWT_SECRET || managementEnv.JWT_SECRET || "super-secret-jwt-token-with-at-least-32-characters-long",
   storageSigningSecret: process.env.STORAGE_SIGNING_SECRET || managementEnv.STORAGE_SIGNING_SECRET || "",
 
   // ── Paths ────────────────────────────────────────────────────────
