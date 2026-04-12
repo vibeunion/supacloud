@@ -209,11 +209,9 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
                 return { error: "Project not found" };
             }
 
-            const { name, sql } = body;
+            const dbName = `supa_${params.ref}`;
 
             try {
-                const dbName = `supa_${params.ref}`;
-
                 const migrationTableExists = await db.executeQuery(
                     dbName,
                     `SELECT EXISTS (
@@ -229,34 +227,73 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
                     await db.executeQuery(dbName, `
                         CREATE TABLE IF NOT EXISTS schema_migrations (
                             version VARCHAR(255) PRIMARY KEY,
-                            applied_at TIMESTAMPTZ DEFAULT NOW()
+                            statements TEXT[],
+                            name TEXT
                         );
                     `);
                 }
 
-                const now = new Date();
-                const ts = now.getFullYear().toString() +
-                    String(now.getMonth() + 1).padStart(2, '0') +
-                    String(now.getDate()).padStart(2, '0') +
-                    String(now.getHours()).padStart(2, '0') +
-                    String(now.getMinutes()).padStart(2, '0') +
-                    String(now.getSeconds()).padStart(2, '0');
-                const version = `${ts}_${name.replace(/[^a-zA-Z0-9_]/g, "_")}`;
-                const existingMigration = await db.executeQuery(
-                    dbName,
-                    `SELECT version FROM schema_migrations WHERE version LIKE '%${name.replace(/[^a-zA-Z0-9_]/g, "_")}%'`
-                );
+                // CLI `supabase db push` sends { query } — treat as raw SQL migration
+                // Studio / custom sends { name, sql } — structured migration
+                const isCliFormat = 'query' in body && typeof (body as Record<string, unknown>).query === 'string';
+                const isStructuredFormat = 'name' in body && 'sql' in body;
 
-                if ((existingMigration as { rows?: unknown[] }).rows && (existingMigration as { rows?: unknown[] }).rows!.length > 0) {
-                    set.status = 409;
-                    return { error: "Migration already applied", name };
+                if (isCliFormat) {
+                    const query = (body as Record<string, unknown>).query as string;
+                    const now = new Date();
+                    const ts = now.getFullYear().toString() +
+                        String(now.getMonth() + 1).padStart(2, '0') +
+                        String(now.getDate()).padStart(2, '0') +
+                        String(now.getHours()).padStart(2, '0') +
+                        String(now.getMinutes()).padStart(2, '0') +
+                        String(now.getSeconds()).padStart(2, '0');
+                    const version = ts;
+
+                    const existing = await db.executeQuery(
+                        dbName,
+                        `SELECT version FROM schema_migrations WHERE version = '${version}'`
+                    );
+                    if ((existing as { rows?: unknown[] }).rows?.length) {
+                        set.status = 409;
+                        return { error: "Migration already applied", version };
+                    }
+
+                    await db.executeQuery(dbName, query);
+                    await db.executeQuery(dbName, `INSERT INTO schema_migrations (version, statements, name) VALUES ('${version}', ARRAY['${query.replace(/'/g, "''")}'], 'cli_push');`);
+
+                    return { version, statements: [query] };
                 }
 
-                await db.executeQuery(dbName, sql);
+                if (isStructuredFormat) {
+                    const { name, sql } = body as { name: string; sql: string };
 
-                await db.executeQuery(dbName, `INSERT INTO schema_migrations (version) VALUES ('${version}');`);
+                    const now = new Date();
+                    const ts = now.getFullYear().toString() +
+                        String(now.getMonth() + 1).padStart(2, '0') +
+                        String(now.getDate()).padStart(2, '0') +
+                        String(now.getHours()).padStart(2, '0') +
+                        String(now.getMinutes()).padStart(2, '0') +
+                        String(now.getSeconds()).padStart(2, '0');
+                    const version = `${ts}_${name.replace(/[^a-zA-Z0-9_]/g, "_")}`;
 
-                return { success: true, version, name };
+                    const existingMigration = await db.executeQuery(
+                        dbName,
+                        `SELECT version FROM schema_migrations WHERE version LIKE '%${name.replace(/[^a-zA-Z0-9_]/g, "_")}%'`
+                    );
+
+                    if ((existingMigration as { rows?: unknown[] }).rows?.length) {
+                        set.status = 409;
+                        return { error: "Migration already applied", name };
+                    }
+
+                    await db.executeQuery(dbName, sql);
+                    await db.executeQuery(dbName, `INSERT INTO schema_migrations (version, statements, name) VALUES ('${version}', ARRAY['${sql.replace(/'/g, "''")}'], '${name.replace(/'/g, "''")}');`);
+
+                    return { version, name };
+                }
+
+                set.status = 400;
+                return { error: "Body must contain {query} or {name, sql}" };
             } catch (error: unknown) {
                 set.status = 500;
                 return {
@@ -269,10 +306,7 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
             params: t.Object({
                 ref: t.String({ minLength: 1 }),
             }),
-            body: t.Object({
-                name: t.String({ minLength: 1 }),
-                sql: t.String({ minLength: 1 }),
-            }),
+            body: t.Record(t.String(), t.Unknown()),
         }
     )
 
@@ -289,11 +323,16 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
                 const dbName = `supa_${params.ref}`;
                 const result = await db.executeQuery(
                     dbName,
-                    `SELECT version, applied_at FROM schema_migrations ORDER BY applied_at DESC;`
+                    `SELECT version, statements, name FROM schema_migrations ORDER BY version ASC;`
                 );
-                return result;
+                const rows = (result as { rows?: Array<Record<string, unknown>> }).rows || [];
+                return rows.map((row) => ({
+                    version: row.version,
+                    statements: row.statements || [],
+                    name: row.name || null,
+                }));
             } catch (error: unknown) {
-                return { rows: [] };
+                return [];
             }
         },
         {
