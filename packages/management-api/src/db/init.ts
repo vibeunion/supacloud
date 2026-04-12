@@ -261,6 +261,11 @@ export async function initDatabase() {
             owner_id uuid,
             created_at timestamptz not null default now()
         );
+        GRANT ALL PRIVILEGES ON SCHEMA storage TO postgres, supabase_admin;
+        GRANT USAGE ON SCHEMA storage TO anon, authenticated, service_role;
+        GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA storage TO postgres, supabase_admin, anon, authenticated, service_role;
+        GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA storage TO postgres, supabase_admin, anon, authenticated, service_role;
+        GRANT ALL PRIVILEGES ON ALL ROUTINES IN SCHEMA storage TO postgres, supabase_admin, anon, authenticated, service_role;
       `;
       try {
         await sql.unsafe(storageDDL);

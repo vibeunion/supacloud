@@ -293,7 +293,6 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
       const { config } = await import("../config");
       const apiUrl = project.api?.url || (config.kongInternal.startsWith('http') ? config.kongInternal : `http://${config.kongInternal}`);
 
-      // P1-2: should_soft_delete should be in the body, not query params
       const url = `${apiUrl}/auth/v1/admin/users/${params.id}`;
 
       const res = await fetch(url, {
@@ -321,5 +320,42 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
         id: t.String(),
       }),
       body: t.Optional(t.Any())
+    }
+  )
+
+  .get(
+    "/users/:id/factors",
+    async ({ params, set }) => {
+      const project = await projectService.getProject(params.ref);
+      if (!project || !project.jwt_secret) {
+        return status(404, { error: "Project or JWT secret not found" });
+      }
+
+      const { jwtService } = await import("../services/jwt.service");
+      const serviceRoleKey = await jwtService.generateServiceRoleKey(project.jwt_secret);
+      const { config } = await import("../config");
+      const apiUrl = project.api?.url || (config.kongInternal.startsWith('http') ? config.kongInternal : `http://${config.kongInternal}`);
+
+      const res = await fetch(`${apiUrl}/auth/v1/admin/users/${params.id}/factors`, {
+        headers: {
+          "apikey": serviceRoleKey,
+          "Authorization": `Bearer ${serviceRoleKey}`,
+          "x-project-ref": params.ref
+        }
+      });
+
+      if (!res.ok) {
+        set.status = res.status;
+        const err = await res.json().catch(() => ({}));
+        return { error: err.msg || err.message || "Failed to list factors", error_code: err.error_code, code: err.code };
+      }
+
+      return res.json();
+    },
+    {
+      params: t.Object({
+        ref: t.String(),
+        id: t.String(),
+      })
     }
   );
