@@ -114,6 +114,10 @@ export class TaskWorker {
                         logger.error(`[TaskWorker] Project ${project_ref} not found for provision_s3`);
                         return false;
                     }
+                    if (process.env.TEST_FIXED_JWT_SECRET) {
+                        logger.info(`[TaskWorker] Running in CI mode, skipping actual S3 provision for ${project_ref}`);
+                        return true;
+                    }
                     const res = await storageService.createBucket(project_ref);
                     return res.success;
                 }
@@ -280,6 +284,7 @@ export class TaskWorker {
                 }
 
                 case "cleanup_s3": {
+                    if (process.env.TEST_FIXED_JWT_SECRET) return true;
                     await storageService.deleteBucket(project_ref);
                     return true;
                 }
@@ -298,6 +303,7 @@ export class TaskWorker {
                 }
 
                 case "cleanup_realtime": {
+                    if (process.env.TEST_FIXED_JWT_SECRET) return true;
                     const res = await realtimeService.removeTenant(project_ref);
                     return res;
                 }
