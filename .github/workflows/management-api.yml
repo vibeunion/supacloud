@@ -51,6 +51,29 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+      postgrest:
+        image: postgrest/postgrest:latest
+        ports:
+          - 3000:3000
+        env:
+          PGRST_DB_URI: postgres://postgres:postgres@postgres:5432/postgres
+          PGRST_DB_SCHEMA: public
+          PGRST_DB_ANON_ROLE: anon
+          PGRST_JWT_SECRET: super-secret-jwt-token-with-at-least-32-characters-long
+      gotrue:
+        image: supabase/gotrue:latest
+        ports:
+          - 9999:9999
+        env:
+          GOTRUE_LOG_LEVEL: info
+          GOTRUE_SITE_URL: http://127.0.0.1:9090
+          GOTRUE_URI_ALLOW_LIST: http://127.0.0.1:9090
+          GOTRUE_DB_DRIVER: postgres
+          GOTRUE_DB_DATABASE_URL: postgres://postgres:postgres@postgres:5432/postgres
+          GOTRUE_API_HOST: 0.0.0.0
+          GOTRUE_API_PORT: 9999
+          GOTRUE_JWT_SECRET: super-secret-jwt-token-with-at-least-32-characters-long
+          GOTRUE_JWT_EXP: 3600
 
     steps:
       - name: Checkout code
@@ -73,9 +96,13 @@ jobs:
 
       - name: Run tests
         working-directory: packages/management-api
-        run: bun test
+        run: |
+          bun src/index.ts &
+          sleep 3
+          bun test
         env:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
+          TEST_FIXED_JWT_SECRET: super-secret-jwt-token-with-at-least-32-characters-long
 
   shell-scripts-lint:
     name: Shell Scripts Lint
