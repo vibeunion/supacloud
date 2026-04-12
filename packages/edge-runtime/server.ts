@@ -175,7 +175,7 @@ async function verifyJwt(
     await jwtVerify(token, new TextEncoder().encode(secrets.jwtSecret));
     return true;
   } catch (e) {
-    console.warn(`[verifyJwt] JWT signature check failed for ${projectRef}:`, e instanceof Error ? e.message : "unknown");
+    console.warn(`[verifyJwt] JWT error for ${projectRef}:`, e);
     return false;
   }
 }
