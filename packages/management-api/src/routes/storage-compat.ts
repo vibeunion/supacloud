@@ -594,8 +594,9 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
                 }
             }
 
-            let cc = headers['cache-control'] || (userMetadata.cacheControl as string) || 'max-age=3600';
-            if (cc && /^\d+$/.test(cc)) cc = `max-age=${cc}`;
+            let cc = headers['cache-control'] || (userMetadata.cacheControl as string) || '3600';
+            // Strip max-age= prefix if present — store raw seconds in metadata (official Supabase behavior)
+            if (cc && cc.startsWith('max-age=')) cc = cc.replace('max-age=', '');
             const metadata = { mimetype: fileMimeType, size: fileBuffer.byteLength, cacheControl: cc, userMetadata };
             const finalPermit = await StorageRLS.authorizeAction(
                 ref, auth, 'upload', params.bucket, filePath, metadata, false, upsert, undefined, undefined,
@@ -640,8 +641,9 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             const userMetadata: Record<string, unknown> = { ...headerMetadata, ...(customMetadata || {}) };
 
             const auth = headers['authorization'];
-            let cc = headers['cache-control'] || (userMetadata.cacheControl as string) || 'max-age=3600';
-            if (cc && /^\d+$/.test(cc)) cc = `max-age=${cc}`;
+            let cc = headers['cache-control'] || (userMetadata.cacheControl as string) || '3600';
+            // Strip max-age= prefix if present — store raw seconds in metadata (official Supabase behavior)
+            if (cc && cc.startsWith('max-age=')) cc = cc.replace('max-age=', '');
             const metadata = { mimetype: fileMimeType, size: fileBuffer.byteLength, cacheControl: cc, userMetadata };
             // PUT essentially enforces upsert = true
             const finalPermit = await StorageRLS.authorizeAction(
@@ -692,7 +694,8 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             if (!res) return status(404, { statusCode: "404", error: 'Not Found', message: 'Object not found internally' });
 
             set.headers['Content-Type'] = res.headers?.get('Content-Type') || 'application/octet-stream';
-            set.headers['Cache-Control'] = (info?.cache_control as string) || 'public, max-age=3600';
+            const rawCc = (info?.cache_control as string) || '3600';
+            set.headers['Cache-Control'] = /^\d+$/.test(rawCc) ? `public, max-age=${rawCc}` : rawCc;
             set.headers['Content-Length'] = res.headers?.get('Content-Length') || '';
             const etag = res.headers?.get('ETag') || (info?.id ? `"${info.id}"` : undefined);
             if (etag) set.headers['ETag'] = etag;
@@ -1000,8 +1003,9 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             // Bypass external headers — token already validates authorization
             const headerMetadata = getUploadMetadata(headers as Record<string, string | undefined>);
             const userMetadata: Record<string, unknown> = { ...headerMetadata, ...(customMetadata || {}) };
-            let cc = headers['cache-control'] || (userMetadata.cacheControl as string) || 'max-age=3600';
-            if (cc && /^\d+$/.test(cc)) cc = `max-age=${cc}`;
+            let cc = headers['cache-control'] || (userMetadata.cacheControl as string) || '3600';
+            // Strip max-age= prefix if present — store raw seconds in metadata (official Supabase behavior)
+            if (cc && cc.startsWith('max-age=')) cc = cc.replace('max-age=', '');
             const metadata = { mimetype: fileMimeType, size: fileBuffer.byteLength, cacheControl: cc, userMetadata };
             
             const effectiveAuth = signedUpload.auth_token !== undefined ? signedUpload.auth_token : headers['authorization'];
