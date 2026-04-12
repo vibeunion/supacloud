@@ -32,6 +32,8 @@ class RealtimeBunService {
     private tenantTokens = new Map<string, string>();
     private subscriptionIdMap = new Map<string, Map<number, string>>();
     private ensuredTriggers = new Set<string>();
+    private wal2jsonAvailable = new Map<string, boolean>();
+    private walPollingIntervals = new Map<string, NodeJS.Timeout>();
 
     public async subscribeTenant(
         projectRef: string,
@@ -62,23 +64,137 @@ class RealtimeBunService {
 
             if (!db) return;
 
-            const listener = await db.listen('realtime_changes', async (payload: string) => {
-                try {
-                    const parsed = JSON.parse(payload);
-                    const filtered = await this.filterAndFormat(projectRef, parsed);
-                    if (filtered) {
-                        this.events.emit(`change:${projectRef}`, filtered);
-                    }
-                } catch (err: unknown) {
-                    logger.error(`[RealtimeBun] Failed to parse NOTIFY payload for ${projectRef}`, { error: String(err) });
-                }
-            });
+            const hasWal2json = await this.detectWal2json(db, projectRef);
 
-            this.tenantListeners.set(projectRef, listener);
-            logger.info(`[RealtimeBun] Started listening to realtime_changes for tenant ${projectRef}`);
+            if (hasWal2json) {
+                this.startWalPolling(projectRef, db);
+            } else {
+                const listener = await db.listen('realtime_changes', async (payload: string) => {
+                    try {
+                        const parsed = JSON.parse(payload);
+                        const filtered = await this.filterAndFormat(projectRef, parsed);
+                        if (filtered) {
+                            this.events.emit(`change:${projectRef}`, filtered);
+                        }
+                    } catch (err: unknown) {
+                        logger.error(`[RealtimeBun] Failed to parse NOTIFY payload for ${projectRef}`, { error: String(err) });
+                    }
+                });
+
+                this.tenantListeners.set(projectRef, listener);
+            }
+
+            logger.info(`[RealtimeBun] Started listening for ${projectRef} (wal2json: ${hasWal2json})`);
         } catch (err: unknown) {
             logger.error(`[RealtimeBun] Failed to subscribe to tenant ${projectRef}`, { error: String(err) });
         }
+    }
+
+    private async detectWal2json(db: any, projectRef: string): Promise<boolean> {
+        const cached = this.wal2jsonAvailable.get(projectRef);
+        if (cached !== undefined) return cached;
+
+        try {
+            const [row] = await db`
+                SELECT COUNT(*) > 0 as available
+                FROM pg_available_extensions
+                WHERE name = 'wal2json'
+            `;
+            const available = row?.available || false;
+            if (available) {
+                const [slotRow] = await db`
+                    SELECT COUNT(*) > 0 as exists
+                    FROM pg_replication_slots
+                    WHERE slot_name = 'supabase_realtime' AND active = false
+                `;
+                const hasSlot = slotRow?.exists || false;
+                this.wal2jsonAvailable.set(projectRef, hasSlot);
+                return hasSlot;
+            }
+            this.wal2jsonAvailable.set(projectRef, false);
+            return false;
+        } catch {
+            this.wal2jsonAvailable.set(projectRef, false);
+            return false;
+        }
+    }
+
+    private startWalPolling(projectRef: string, db: any) {
+        if (this.walPollingIntervals.has(projectRef)) return;
+
+        const poll = async () => {
+            try {
+                const changes = await db`
+                    SELECT data FROM pg_logical_slot_get_changes('supabase_realtime', NULL, NULL)
+                `;
+                if (Array.isArray(changes) && changes.length > 0) {
+                    for (const change of changes) {
+                        try {
+                            const walData = typeof change.data === 'string' ? JSON.parse(change.data) : change.data;
+                            const formatted = this.wal2jsonToChangeEvent(walData);
+                            if (formatted) {
+                                const filtered = await this.filterAndFormat(projectRef, formatted);
+                                if (filtered) {
+                                    this.events.emit(`change:${projectRef}`, filtered);
+                                }
+                            }
+                        } catch { /* skip malformed WAL entries */ }
+                    }
+                }
+            } catch (err: unknown) {
+                logger.warn(`[RealtimeBun] WAL polling error for ${projectRef}`, { error: String(err) });
+            }
+        };
+
+        const interval = setInterval(poll, 100);
+        this.walPollingIntervals.set(projectRef, interval as unknown as NodeJS.Timeout);
+        poll();
+    }
+
+    private wal2jsonToChangeEvent(walData: any): any | null {
+        if (!walData?.change || !Array.isArray(walData.change)) return null;
+
+        const results: any[] = [];
+        for (const entry of walData.change) {
+            const kind = entry.kind;
+            const schema = entry.schema;
+            const table = entry.table;
+
+            let type: string;
+            if (kind === 'insert') type = 'INSERT';
+            else if (kind === 'update') type = 'UPDATE';
+            else if (kind === 'delete') type = 'DELETE';
+            else continue;
+
+            const record: Record<string, any> = {};
+            const oldRecord: Record<string, any> = {};
+
+            if (entry.columnnames && entry.columnvalues) {
+                for (let i = 0; i < entry.columnnames.length; i++) {
+                    record[entry.columnnames[i]] = entry.columnvalues[i];
+                }
+            }
+            if (entry.oldkeys?.keynames && entry.oldkeys?.keyvalues) {
+                for (let i = 0; i < entry.oldkeys.keynames.length; i++) {
+                    oldRecord[entry.oldkeys.keynames[i]] = entry.oldkeys.keyvalues[i];
+                }
+            }
+
+            results.push({
+                type,
+                schema,
+                table,
+                record: type !== 'DELETE' ? record : null,
+                old_record: type !== 'INSERT' ? oldRecord : null,
+                commit_timestamp: new Date().toISOString(),
+                columns: (entry.columnnames || []).map((name: string, i: number) => ({
+                    name,
+                    type: entry.columntypes?.[i] || 'text'
+                }))
+            });
+        }
+
+        return results.length === 1 ? results[0] : results.length > 0 ? results : null;
     }
 
     private async ensureTriggers(projectRef: string, subscriptions: PostgresChangeConfig[]) {
@@ -321,12 +437,21 @@ class RealtimeBunService {
         if (listener) {
             try {
                 await listener.unlisten();
-                this.tenantListeners.delete(projectRef);
-                this.tenantSubscriptions.delete(projectRef);
-                this.tenantTokens.delete(projectRef);
-                this.subscriptionIdMap.delete(projectRef);
-                logger.info(`[RealtimeBun] Stopped listening to tenant ${projectRef}`);
             } catch (err: unknown) {/* ignore */}
+        }
+        this.tenantListeners.delete(projectRef);
+        this.tenantSubscriptions.delete(projectRef);
+        this.tenantTokens.delete(projectRef);
+        this.subscriptionIdMap.delete(projectRef);
+
+        const walInterval = this.walPollingIntervals.get(projectRef);
+        if (walInterval) {
+            clearInterval(walInterval);
+            this.walPollingIntervals.delete(projectRef);
+        }
+
+        if (listener || walInterval) {
+            logger.info(`[RealtimeBun] Stopped listening to tenant ${projectRef}`);
         }
     }
 }

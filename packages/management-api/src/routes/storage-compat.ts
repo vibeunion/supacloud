@@ -69,17 +69,14 @@ async function getSigningSecretForTenant(ref: string): Promise<string> {
 /**
  * Generate HMAC-SHA256 signed token for a storage path + expiry.
  */
-import { jwtVerify, SignJWT } from "jose";
+import { jwtVerify } from "jose";
 
 async function generateSignedToken(ref: string, bucket: string, path: string, expiresAt: number): Promise<string> {
     const secret = await getSigningSecretForTenant(ref);
-    const jwt = await new SignJWT({ url: `${bucket}/${path}` })
-        .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
-        .setIssuedAt(Math.floor(Date.now() / 1000))
-        .setExpirationTime(expiresAt)
-        .sign(new TextEncoder().encode(secret));
-    
-    return jwt;
+    const payload = `${bucket}/${path}:${expiresAt}`;
+    const hmac = createHmac('sha256', secret);
+    hmac.update(payload);
+    return hmac.digest('hex');
 }
 
 /**
@@ -152,13 +149,27 @@ function extractMultipartFileFast(buffer: Buffer, boundary: string): { fileBuffe
 /**
  * Verify a signed token against path + expiry.
  */
-async function verifySignedToken(ref: string, bucket: string, path: string, token: string): Promise<boolean> {
+async function verifySignedToken(ref: string, bucket: string, path: string, token: string, expiresAt?: number): Promise<boolean> {
     try {
         const secret = await getSigningSecretForTenant(ref);
+
+        // Try HMAC-SHA256 verification (official Supabase format)
+        if (expiresAt && expiresAt < Math.floor(Date.now() / 1000)) {
+            return false;
+        }
+        if (expiresAt) {
+            const payload = `${bucket}/${path}:${expiresAt}`;
+            const hmac = createHmac('sha256', secret);
+            hmac.update(payload);
+            const expected = hmac.digest('hex');
+            if (token === expected) return true;
+        }
+
+        // Fallback: try JWT verification (backward compat for old tokens)
         const { payload } = await jwtVerify(token, new TextEncoder().encode(secret));
         return payload.url === `${bucket}/${path}`;
     } catch {
-        return false; // Automatically handles expiry and signature mismatch
+        return false;
     }
 }
 
@@ -229,6 +240,7 @@ const TRANSFORM_QUERY_KEYS = new Set([
 
 function buildSignedPath(pathname: string, expiresAt: number, token: string, transform?: Record<string, unknown>, download?: boolean | string): string {
     const search = new URLSearchParams({ token });
+    search.set("expiresAt", String(expiresAt));
 
     if (download) {
         if (typeof download === 'string') search.set('download', download);
@@ -1049,12 +1061,13 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         if (!filePath) return status(400, { statusCode: "400", error: 'Bad Request', message: 'Missing file path' });
 
         const token = query.token as string;
+        const expiresAt = query.expiresAt ? Number(query.expiresAt) : undefined;
 
         if (!token) {
             return status(401, { statusCode: "401", error: 'Unauthorized', message: 'Missing signed URL token' });
         }
 
-        if (!await verifySignedToken(ref, params.bucket, filePath, token)) {
+        if (!await verifySignedToken(ref, params.bucket, filePath, token, expiresAt)) {
             return status(401, { statusCode: "401", error: 'Unauthorized', message: 'Invalid or expired signed URL' });
         }
 
@@ -1084,12 +1097,13 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         if (!filePath) return status(400, { statusCode: "400", error: 'Bad Request', message: 'Missing file path' });
 
         const token = query.token as string;
+        const expiresAt = query.expiresAt ? Number(query.expiresAt) : undefined;
 
         if (!token) {
             return status(401, { statusCode: "401", error: 'Unauthorized', message: 'Missing signed URL token' });
         }
 
-        if (!await verifySignedToken(ref, params.bucket, filePath, token)) {
+        if (!await verifySignedToken(ref, params.bucket, filePath, token, expiresAt)) {
             return status(401, { statusCode: "401", error: 'Unauthorized', message: 'Invalid or expired signed URL' });
         }
 

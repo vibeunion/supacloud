@@ -233,4 +233,54 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
         ref: t.String(),
       }),
     }
+  )
+
+  // Preview Branches — stub endpoints (Studio compatibility)
+  .get(
+    "/:ref/branches",
+    async ({ params }) => {
+      const project = await projectService.getProject(params.ref);
+      if (!project) return status(404, { error: "Project not found" });
+      return [];
+    },
+    { params: t.Object({ ref: t.String() }) }
+  )
+  .post(
+    "/:ref/branches",
+    async ({ params, set }) => {
+      const project = await projectService.getProject(params.ref);
+      if (!project) return status(404, { error: "Project not found" });
+      set.status = 501;
+      return { error: "Preview Branches are not supported on this SupaCloud cluster" };
+    },
+    { params: t.Object({ ref: t.String() }) }
+  )
+
+  // Read Replicas — stub endpoints (Studio compatibility)
+  .get(
+    "/:ref/read-replicas",
+    async ({ params }) => {
+      const project = await projectService.getProject(params.ref);
+      if (!project) return status(404, { error: "Project not found" });
+      return [];
+    },
+    { params: t.Object({ ref: t.String() }) }
+  )
+  .post(
+    "/:ref/read-replicas",
+    async ({ params, set }) => {
+      const project = await projectService.getProject(params.ref);
+      if (!project) return status(404, { error: "Project not found" });
+      set.status = 501;
+      return { error: "Read Replicas are not supported on this SupaCloud cluster" };
+    },
+    { params: t.Object({ ref: t.String() }) }
+  )
+  .delete(
+    "/:ref/read-replicas/:id",
+    async ({ params, set }) => {
+      set.status = 501;
+      return { error: "Read Replicas are not supported on this SupaCloud cluster" };
+    },
+    { params: t.Object({ ref: t.String(), id: t.String() }) }
   );
