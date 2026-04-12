@@ -131,6 +131,12 @@ jobs:
       - name: Run tests
         working-directory: packages/management-api
         run: |
+          # Restart GoTrue and Realtime because they often crash if they boot faster than Postgres service in GitHub Actions parallel startup 
+          echo "Restarting Auth and Realtime Containers..."
+          docker start $(docker ps -a -q --filter "ancestor=supabase/gotrue:v2.188.1") || true
+          docker start $(docker ps -a -q --filter "ancestor=supabase/realtime:latest") || true
+          sleep 3
+
           bun src/index.ts &
           sleep 3
           # Run test suites sequentially to prevent `mock.module("../../src/db")` in unit tests from poisoning E2E tests
