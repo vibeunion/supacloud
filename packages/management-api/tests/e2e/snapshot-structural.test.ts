@@ -28,7 +28,20 @@ describe("API Structural Snapshot Compliance", () => {
             tenantRef = project.ref;
             const keys = await projectService.getApiKeys(tenantRef);
             if (keys) anonKey = keys.anon_key;
-            
+
+            // In CI mode, redirect to the local docker containers
+            if (process.env.TEST_FIXED_JWT_SECRET) {
+                const { sql } = await import("../../src/db");
+                await sql`
+                    INSERT INTO project_config (project_ref, postgrest_port, gotrue_port, realtime_port) 
+                    VALUES (${tenantRef}, 3000, 9999, 4000) 
+                    ON CONFLICT (project_ref) DO UPDATE 
+                    SET postgrest_port = 3000, gotrue_port = 9999, realtime_port = 4000
+                `;
+                await sql`
+                    UPDATE projects SET db_name = 'postgres' WHERE ref = ${tenantRef};
+                `;
+            }
             
             // Allow dynamic routing to settle
             await new Promise(r => setTimeout(r, 2000));
