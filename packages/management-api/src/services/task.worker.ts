@@ -9,6 +9,7 @@ import { logger } from "../utils/logger";
 import { createPgListener, type PgListenerHandle } from "../lib/pg-listen";
 import { config } from "../config";
 import type { ProjectTask } from "../db";
+import { resolveDbName } from "../db";
 import { broadcastTaskUpdate } from "../routes/ws";
 import { realtimeService } from "./realtime.service";
 
@@ -182,8 +183,7 @@ export class TaskWorker {
                         return true;
                     }
 
-                    const cfg = project.config as Record<string, unknown> || {};
-                    const dbName = typeof cfg.db_name === "string" ? cfg.db_name : `supa_${project_ref}`;
+                    const dbName = await resolveDbName(project_ref);
                     const res = await realtimeService.registerTenant({
                         projectRef: project_ref,
                         jwtSecret: project.jwt_secret,

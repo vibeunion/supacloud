@@ -1,4 +1,4 @@
-import { Worker } from "worker_threads";
+import { Worker, MessagePort } from "worker_threads";
 
 interface DispatchOptions {
   functionId: string;
@@ -19,9 +19,7 @@ export class WorkerPool {
   private totalRequests = 0;
   private activeWorkers = new Set<Worker>(); // Track all living workers for invalidation
 
-  constructor(
-    private config: { size: number; requestTimeout: number },
-  ) {
+  constructor(private config: { size: number; requestTimeout: number }) {
     for (let i = 0; i < config.size; i++) {
       const w = this.createWorker();
       this.idle.push(w);
@@ -30,9 +28,7 @@ export class WorkerPool {
   }
 
   private createWorker(): Worker {
-    const w = new Worker(
-      new URL("./worker-executor.ts", import.meta.url).href,
-    );
+    const w = new Worker(new URL("./worker-executor.ts", import.meta.url).href);
     this.workers.push(w);
     return w;
   }
@@ -83,27 +79,38 @@ export class WorkerPool {
     }
 
     let body: ArrayBuffer | null = null;
-    if (
-      opts.request.body &&
-      !["GET", "HEAD"].includes(opts.request.method)
-    ) {
+    if (opts.request.body && !["GET", "HEAD"].includes(opts.request.method)) {
       // Enforce body size limit to prevent OOM
-      const contentLength = opts.request.headers.get('content-length');
+      const contentLength = opts.request.headers.get("content-length");
       if (contentLength && parseInt(contentLength) > MAX_BODY_SIZE) {
-        safeResolve(new Response(JSON.stringify({ error: `Request body too large (max ${MAX_BODY_SIZE / 1024 / 1024}MB)` }), {
-          status: 413,
-          headers: { "Content-Type": "application/json" },
-        }));
+        safeResolve(
+          new Response(
+            JSON.stringify({
+              error: `Request body too large (max ${MAX_BODY_SIZE / 1024 / 1024}MB)`,
+            }),
+            {
+              status: 413,
+              headers: { "Content-Type": "application/json" },
+            },
+          ),
+        );
         this.recycle(worker);
         clearTimeout(timeout);
         return;
       }
       body = await opts.request.arrayBuffer();
       if (body.byteLength > MAX_BODY_SIZE) {
-        safeResolve(new Response(JSON.stringify({ error: `Request body too large (max ${MAX_BODY_SIZE / 1024 / 1024}MB)` }), {
-          status: 413,
-          headers: { "Content-Type": "application/json" },
-        }));
+        safeResolve(
+          new Response(
+            JSON.stringify({
+              error: `Request body too large (max ${MAX_BODY_SIZE / 1024 / 1024}MB)`,
+            }),
+            {
+              status: 413,
+              headers: { "Content-Type": "application/json" },
+            },
+          ),
+        );
         this.recycle(worker);
         clearTimeout(timeout);
         return;
@@ -121,12 +128,15 @@ export class WorkerPool {
     });
 
     const onMsg = (msg: {
+      type?: string;
       status: number;
       headers: Record<string, string | string[]>;
-      body: ArrayBuffer;
+      body?: ArrayBuffer;
+      port?: MessagePort;
     }) => {
       clearTimeout(timeout);
       worker.removeListener("error", onErr);
+
       // Reconstruct Headers from the serialized map, preserving multi-value headers
       const resHeaders = new Headers();
       for (const [k, v] of Object.entries(msg.headers)) {
@@ -136,13 +146,61 @@ export class WorkerPool {
           resHeaders.set(k, v);
         }
       }
-      safeResolve(
-        new Response(msg.body, {
-          status: msg.status,
-          headers: resHeaders,
-        }),
-      );
-      this.recycle(worker);
+
+      if (msg.type === "stream_start" && msg.port) {
+        // Streaming response: create a ReadableStream backed by the transferred MessagePort
+        const streamPort = msg.port;
+        let recycled = false;
+        const recycle = () => {
+          if (!recycled) {
+            recycled = true;
+            this.recycle(worker);
+          }
+        };
+
+        const bodyStream = new ReadableStream<Uint8Array>({
+          start(controller) {
+            streamPort.onmessage = ({
+              data,
+            }: {
+              data: { done: boolean; chunk?: ArrayBuffer; error?: string };
+            }) => {
+              if (data.done) {
+                if (data.error) {
+                  controller.error(new Error(data.error));
+                } else {
+                  controller.close();
+                }
+                recycle();
+                streamPort.close();
+              } else if (data.chunk) {
+                controller.enqueue(new Uint8Array(data.chunk));
+              }
+            };
+            streamPort.start();
+          },
+          cancel() {
+            recycle();
+            streamPort.close();
+          },
+        });
+
+        safeResolve(
+          new Response(bodyStream, {
+            status: msg.status,
+            headers: resHeaders,
+          }),
+        );
+        // Worker is recycled only after the stream ends (via recycle callback above)
+      } else {
+        safeResolve(
+          new Response(msg.body, {
+            status: msg.status,
+            headers: resHeaders,
+          }),
+        );
+        this.recycle(worker);
+      }
     };
 
     const onErr = (err: Error) => {
@@ -219,7 +277,10 @@ export class WorkerPool {
           clearTimeout(timeout);
           worker.removeListener("message", onMsg);
           resolve(true);
-        } else if (msg.type === "preheat_error" && msg.functionId === functionId) {
+        } else if (
+          msg.type === "preheat_error" &&
+          msg.functionId === functionId
+        ) {
           clearTimeout(timeout);
           worker.removeListener("message", onMsg);
           resolve(false);

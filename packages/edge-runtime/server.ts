@@ -1,5 +1,6 @@
 import "./url-import-plugin";
 import { Elysia } from "elysia";
+import cors from "@elysiajs/cors";
 import { WorkerPool } from "./worker-pool";
 import { loadTenantEnv } from "./tenant-env";
 import path from "path";
@@ -11,16 +12,23 @@ const FUNCTIONS_DIR = process.env.EDGE_FUNCTIONS_DIR || "./functions";
 const MGMT_API = process.env.MANAGEMENT_API_URL || "http://127.0.0.1:9090";
 
 if (!process.env.MANAGEMENT_API_URL) {
-  console.warn("[EdgeRuntime] WARNING: MANAGEMENT_API_URL is not set. Defaulting to http://127.0.0.1:9090. If edge-runtime runs on a different node than management-api, this will fail!");
+  console.warn(
+    "[EdgeRuntime] WARNING: MANAGEMENT_API_URL is not set. Defaulting to http://127.0.0.1:9090. If edge-runtime runs on a different node than management-api, this will fail!",
+  );
 }
 
 const MASTER_TOKEN = process.env.MASTER_TOKEN || "";
+
+// Set standard Supabase edge runtime version identifier
+if (!process.env.EDGE_RUNTIME_VERSION) {
+  process.env.EDGE_RUNTIME_VERSION = "1.58.3"; // compatible with supabase edge runtime v1.58.x
+}
 
 // Startup Port-Exclusivity Guard is handled by edge-runtime-manager in management-api
 
 const pool = new WorkerPool({
   size: POOL_SIZE,
-  requestTimeout: 300_000,  // 5 min — covers long AI streaming responses
+  requestTimeout: 300_000, // 5 min — covers long AI streaming responses
 });
 
 async function dispatchFunction(
@@ -49,11 +57,12 @@ async function dispatchFunction(
     // not a response from the user's function
     setHeaders["x-relay-error"] = "true";
 
-    const statusCode = message.includes("not found") || message.includes("ENOENT")
-      ? 404
-      : message.includes("timeout") || message.includes("Timeout")
-        ? 504
-        : 500;
+    const statusCode =
+      message.includes("not found") || message.includes("ENOENT")
+        ? 404
+        : message.includes("timeout") || message.includes("Timeout")
+          ? 504
+          : 500;
 
     return new Response(JSON.stringify({ error: message }), {
       status: statusCode,
@@ -64,10 +73,16 @@ async function dispatchFunction(
 
 // ── Function Config Cache ───────────────────────────────────────────────
 // Cache verify_jwt config per function with short TTL to avoid API calls on every invocation
-const configCache = new Map<string, { verify_jwt: boolean; expiresAt: number }>();
+const configCache = new Map<
+  string,
+  { verify_jwt: boolean; expiresAt: number }
+>();
 const CONFIG_CACHE_TTL = 10_000; // 10s
 
-async function getFunctionConfig(projectRef: string, functionName: string): Promise<{ verify_jwt: boolean }> {
+async function getFunctionConfig(
+  projectRef: string,
+  functionName: string,
+): Promise<{ verify_jwt: boolean }> {
   const key = `${projectRef}/${functionName}`;
   const cached = configCache.get(key);
   if (cached && cached.expiresAt > Date.now()) {
@@ -76,15 +91,25 @@ async function getFunctionConfig(projectRef: string, functionName: string): Prom
 
   // Try reading the config file directly (faster than API call)
   try {
-    const configPath = path.resolve(FUNCTIONS_DIR, projectRef, `${functionName}.config.json`);
+    const configPath = path.resolve(
+      FUNCTIONS_DIR,
+      projectRef,
+      `${functionName}.config.json`,
+    );
     const raw = await Bun.file(configPath).text();
     const config = JSON.parse(raw);
     const verify_jwt = config.verify_jwt !== false; // default true
-    configCache.set(key, { verify_jwt, expiresAt: Date.now() + CONFIG_CACHE_TTL });
+    configCache.set(key, {
+      verify_jwt,
+      expiresAt: Date.now() + CONFIG_CACHE_TTL,
+    });
     return { verify_jwt };
   } catch {
     // No config file = default (verify_jwt: true)
-    configCache.set(key, { verify_jwt: true, expiresAt: Date.now() + CONFIG_CACHE_TTL });
+    configCache.set(key, {
+      verify_jwt: true,
+      expiresAt: Date.now() + CONFIG_CACHE_TTL,
+    });
     return { verify_jwt: true };
   }
 }
@@ -102,7 +127,9 @@ interface ProjectSecrets {
 const secretsCache = new Map<string, ProjectSecrets>();
 const SECRETS_CACHE_TTL = 300_000; // 5 min
 
-async function getProjectSecrets(projectRef: string): Promise<ProjectSecrets | null> {
+async function getProjectSecrets(
+  projectRef: string,
+): Promise<ProjectSecrets | null> {
   const cached = secretsCache.get(projectRef);
   if (cached && cached.expiresAt > Date.now()) return cached;
 
@@ -119,25 +146,34 @@ async function getProjectSecrets(projectRef: string): Promise<ProjectSecrets | n
     ]);
 
     if (!keysRes.ok || !detailRes.ok) {
-      console.warn(`[verifyJwt] Failed to fetch secrets for ${projectRef}: keys=${keysRes.status} detail=${detailRes.status}`);
+      console.warn(
+        `[verifyJwt] Failed to fetch secrets for ${projectRef}: keys=${keysRes.status} detail=${detailRes.status}`,
+      );
       // Return stale cache if available rather than hard-failing
       if (cached) return cached;
       return null;
     }
 
-    const keysArray = await keysRes.json() as { name: string; api_key: string }[];
-    const detail = await detailRes.json() as { jwt_secret?: string };
+    const keysArray = (await keysRes.json()) as {
+      name: string;
+      api_key: string;
+    }[];
+    const detail = (await detailRes.json()) as { jwt_secret?: string };
 
     const secrets: ProjectSecrets = {
-      anonKey: keysArray?.find?.(k => k.name === "anon")?.api_key || "",
-      serviceRoleKey: keysArray?.find?.(k => k.name === "service_role")?.api_key || "",
+      anonKey: keysArray?.find?.((k) => k.name === "anon")?.api_key || "",
+      serviceRoleKey:
+        keysArray?.find?.((k) => k.name === "service_role")?.api_key || "",
       jwtSecret: detail.jwt_secret || "",
       expiresAt: Date.now() + SECRETS_CACHE_TTL,
     };
     secretsCache.set(projectRef, secrets);
     return secrets;
   } catch (err) {
-    console.warn(`[verifyJwt] Error fetching secrets for ${projectRef}:`, err instanceof Error ? err.message : err);
+    console.warn(
+      `[verifyJwt] Error fetching secrets for ${projectRef}:`,
+      err instanceof Error ? err.message : err,
+    );
     // Return stale cache on network errors
     if (cached) return cached;
     return null;
@@ -156,7 +192,11 @@ async function verifyJwt(
   if (!secrets) return false;
 
   // 1. Check apikey header (Supabase client sends anon key here)
-  if (apikeyHeader && (apikeyHeader === secrets.anonKey || apikeyHeader === secrets.serviceRoleKey)) {
+  if (
+    apikeyHeader &&
+    (apikeyHeader === secrets.anonKey ||
+      apikeyHeader === secrets.serviceRoleKey)
+  ) {
     return true;
   }
 
@@ -166,7 +206,8 @@ async function verifyJwt(
   if (!token) return false;
 
   // Direct key match (anon or service_role key used as bearer)
-  if (token === secrets.anonKey || token === secrets.serviceRoleKey) return true;
+  if (token === secrets.anonKey || token === secrets.serviceRoleKey)
+    return true;
 
   // 3. Verify as JWT signed with project's jwt_secret
   if (!secrets.jwtSecret) return false;
@@ -181,7 +222,14 @@ async function verifyJwt(
 }
 
 const app = new Elysia()
-  .get("/health", () => ({ status: "ok", runtime: "bun-edge", mt: process.env.MASTER_TOKEN ? "present" : "missing", url: process.env.MANAGEMENT_API_URL || "missing" }))
+  .use(cors())
+  .get("/health", () => ({
+    status: "ok",
+    runtime: "bun-edge",
+    version: process.env.EDGE_RUNTIME_VERSION,
+    mt: process.env.MASTER_TOKEN ? "present" : "missing",
+    url: process.env.MANAGEMENT_API_URL || "missing",
+  }))
   .get("/metrics", () => pool.getMetrics())
 
   // Cache invalidation — called by Management API after deploy
@@ -194,8 +242,16 @@ const app = new Elysia()
   // Pre-heat function — called by Management API after deploy to eliminate cold-start
   .post("/preheat/:ref/:slug", async (c) => {
     const functionId = `${c.params.ref}_${c.params.slug}`;
-    const jsPath = path.resolve(FUNCTIONS_DIR, c.params.ref, `${c.params.slug}.js`);
-    const tsPath = path.resolve(FUNCTIONS_DIR, c.params.ref, `${c.params.slug}.ts`);
+    const jsPath = path.resolve(
+      FUNCTIONS_DIR,
+      c.params.ref,
+      `${c.params.slug}.js`,
+    );
+    const tsPath = path.resolve(
+      FUNCTIONS_DIR,
+      c.params.ref,
+      `${c.params.slug}.ts`,
+    );
     const functionPath = (await Bun.file(jsPath).exists()) ? jsPath : tsPath;
     const success = await pool.preheat(functionId, functionPath);
     return { preheated: functionId, success };
@@ -209,14 +265,21 @@ const app = new Elysia()
       c.set.headers["x-relay-error"] = "true";
       return new Response(JSON.stringify({ error: "Missing x-project-ref" }), {
         status: 400,
-        headers: { "Content-Type": "application/json", "x-relay-error": "true" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-relay-error": "true",
+        },
       });
     }
 
     // Check verify_jwt config
     const fnConfig = await getFunctionConfig(projectRef, c.params.functionName);
     if (c.request.method !== "OPTIONS" && fnConfig.verify_jwt) {
-      const authorized = await verifyJwt(projectRef, c.headers["authorization"], c.headers["apikey"]);
+      const authorized = await verifyJwt(
+        projectRef,
+        c.headers["authorization"],
+        c.headers["apikey"],
+      );
       if (!authorized) {
         return new Response(JSON.stringify({ msg: "Invalid JWT" }), {
           status: 401,
@@ -225,7 +288,14 @@ const app = new Elysia()
       }
     }
 
-    return dispatchFunction(projectRef, c.params.functionName, c.request, c.set.headers as Record<string, string>);
+    const setHeaders = c.set.headers as Record<string, string>;
+    setHeaders["x-sb-execution-id"] = crypto.randomUUID();
+    return dispatchFunction(
+      projectRef,
+      c.params.functionName,
+      c.request,
+      setHeaders,
+    );
   })
 
   .all("/functions/v1/:functionName", async (c) => {
@@ -234,13 +304,20 @@ const app = new Elysia()
       c.set.headers["x-relay-error"] = "true";
       return new Response(JSON.stringify({ error: "Missing x-project-ref" }), {
         status: 400,
-        headers: { "Content-Type": "application/json", "x-relay-error": "true" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-relay-error": "true",
+        },
       });
     }
 
     const fnConfig = await getFunctionConfig(projectRef, c.params.functionName);
     if (c.request.method !== "OPTIONS" && fnConfig.verify_jwt) {
-      const authorized = await verifyJwt(projectRef, c.headers["authorization"], c.headers["apikey"]);
+      const authorized = await verifyJwt(
+        projectRef,
+        c.headers["authorization"],
+        c.headers["apikey"],
+      );
       if (!authorized) {
         return new Response(JSON.stringify({ msg: "Invalid JWT" }), {
           status: 401,
@@ -249,7 +326,14 @@ const app = new Elysia()
       }
     }
 
-    return dispatchFunction(projectRef, c.params.functionName, c.request, c.set.headers as Record<string, string>);
+    const setHeaders = c.set.headers as Record<string, string>;
+    setHeaders["x-sb-execution-id"] = crypto.randomUUID();
+    return dispatchFunction(
+      projectRef,
+      c.params.functionName,
+      c.request,
+      setHeaders,
+    );
   })
 
   // Fallback routes for Kong strip_path: true scenarios
@@ -260,13 +344,20 @@ const app = new Elysia()
       c.set.headers["x-relay-error"] = "true";
       return new Response(JSON.stringify({ error: "Missing x-project-ref" }), {
         status: 400,
-        headers: { "Content-Type": "application/json", "x-relay-error": "true" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-relay-error": "true",
+        },
       });
     }
 
     const fnConfig = await getFunctionConfig(projectRef, c.params.functionName);
     if (c.request.method !== "OPTIONS" && fnConfig.verify_jwt) {
-      const authorized = await verifyJwt(projectRef, c.headers["authorization"], c.headers["apikey"]);
+      const authorized = await verifyJwt(
+        projectRef,
+        c.headers["authorization"],
+        c.headers["apikey"],
+      );
       if (!authorized) {
         return new Response(JSON.stringify({ msg: "Invalid JWT" }), {
           status: 401,
@@ -275,7 +366,14 @@ const app = new Elysia()
       }
     }
 
-    return dispatchFunction(projectRef, c.params.functionName, c.request, c.set.headers as Record<string, string>);
+    const setHeaders = c.set.headers as Record<string, string>;
+    setHeaders["x-sb-execution-id"] = crypto.randomUUID();
+    return dispatchFunction(
+      projectRef,
+      c.params.functionName,
+      c.request,
+      setHeaders,
+    );
   })
 
   .all("/:functionName", async (c) => {
@@ -284,13 +382,20 @@ const app = new Elysia()
       c.set.headers["x-relay-error"] = "true";
       return new Response(JSON.stringify({ error: "Missing x-project-ref" }), {
         status: 400,
-        headers: { "Content-Type": "application/json", "x-relay-error": "true" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-relay-error": "true",
+        },
       });
     }
 
     const fnConfig = await getFunctionConfig(projectRef, c.params.functionName);
     if (c.request.method !== "OPTIONS" && fnConfig.verify_jwt) {
-      const authorized = await verifyJwt(projectRef, c.headers["authorization"], c.headers["apikey"]);
+      const authorized = await verifyJwt(
+        projectRef,
+        c.headers["authorization"],
+        c.headers["apikey"],
+      );
       if (!authorized) {
         return new Response(JSON.stringify({ msg: "Invalid JWT" }), {
           status: 401,
@@ -299,7 +404,14 @@ const app = new Elysia()
       }
     }
 
-    return dispatchFunction(projectRef, c.params.functionName, c.request, c.set.headers as Record<string, string>);
+    const setHeaders = c.set.headers as Record<string, string>;
+    setHeaders["x-sb-execution-id"] = crypto.randomUUID();
+    return dispatchFunction(
+      projectRef,
+      c.params.functionName,
+      c.request,
+      setHeaders,
+    );
   })
 
   .listen({ port: PORT, hostname: "0.0.0.0" });
@@ -317,7 +429,11 @@ const gracefulShutdown = (signal: string) => {
   console.log(`[EdgeRuntime] Received ${signal}, shutting down gracefully...`);
 
   // Stop accepting new connections
-  try { app.stop(); } catch { /* Elysia stop may throw if already stopped */ }
+  try {
+    app.stop();
+  } catch {
+    /* Elysia stop may throw if already stopped */
+  }
 
   // Allow in-flight requests up to 10s to complete, then force exit
   const forceExitTimeout = setTimeout(() => {

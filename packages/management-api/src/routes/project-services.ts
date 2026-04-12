@@ -13,7 +13,7 @@ export const projectServiceRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params, set }) => {
       const health = await projectService.getProjectHealth(params.ref);
       if (!health) {
-                return status(404, { error: "Project not found" });
+                return status(404, { message: "Project not found", code: "400" });
       }
       return health;
     },
@@ -30,7 +30,7 @@ export const projectServiceRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params, set }) => {
       const projectStatus = await projectService.getProjectStatus(params.ref);
       if (!projectStatus) {
-                return status(404, { error: "Project not found" });
+                return status(404, { message: "Project not found", code: "400" });
       }
       return projectStatus;
     },
@@ -47,7 +47,7 @@ export const projectServiceRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params, set }) => {
       const project = await projectService.getProject(params.ref);
       if (!project) {
-                return status(404, { error: "Project not found" });
+                return status(404, { message: "Project not found", code: "400" });
       }
 
       try {
@@ -122,7 +122,7 @@ export const projectServiceRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params, set }) => {
       const restarted = await projectService.restartProject(params.ref);
       if (!restarted) {
-                return status(404, { error: "Project not found" });
+                return status(404, { message: "Project not found", code: "400" });
       }
       return { ref: params.ref, message: "Project restart initiated" };
     },
@@ -141,7 +141,7 @@ export const projectServiceRoutes = new Elysia({ prefix: "/v1/projects" })
       const validActions = ["start", "stop", "restart"];
       if (!validActions.includes(action)) {
         set.status = 400;
-        return { error: `Invalid action: ${action}. Must be one of: ${validActions.join(", ")}` };
+        return { message: `Invalid action: ${action}. Must be one of: ${validActions.join(", ")}`, code: "400" };
       }
 
       const serviceMap: Record<string, string> = {
@@ -156,7 +156,7 @@ export const projectServiceRoutes = new Elysia({ prefix: "/v1/projects" })
       const unitName = serviceMap[service];
       if (!unitName) {
         set.status = 400;
-        return { error: `Unknown service: ${service}. Available: ${Object.keys(serviceMap).join(", ")}` };
+        return { message: `Unknown service: ${service}. Available: ${Object.keys(serviceMap).join(", ")}`, code: "400" };
       }
 
       try {
@@ -171,7 +171,7 @@ export const projectServiceRoutes = new Elysia({ prefix: "/v1/projects" })
         };
       } catch (err: unknown) {
         set.status = 500;
-        return { error: `Failed to ${action} ${service}: ${err instanceof Error ? err.message : String(err)}` };
+        return { message: `Failed to ${action} ${service}: ${err instanceof Error ? err.message : String(err)}`, code: "500" };
       }
     },
     {
@@ -181,4 +181,24 @@ export const projectServiceRoutes = new Elysia({ prefix: "/v1/projects" })
         action: t.String(),
       }),
     }
+  )
+
+  // List project services (Studio compatibility)
+  .get(
+    "/:ref/services",
+    async ({ params, set }) => {
+      const project = await projectService.getProject(params.ref);
+      if (!project) {
+                return status(404, { message: "Project not found", code: "404" });
+      }
+      return [
+        { name: "postgresql", description: "PostgreSQL database", status: "active_healthy" },
+        { name: "postgrest", description: "REST API", status: "active_healthy" },
+        { name: "gotrue", description: "Auth service", status: "active_healthy" },
+        { name: "realtime", description: "Realtime service", status: "active_healthy" },
+        { name: "storage", description: "Storage service", status: "active_healthy" },
+        { name: "kong", description: "API gateway", status: "active_healthy" },
+      ];
+    },
+    { params: t.Object({ ref: t.String() }) }
   );

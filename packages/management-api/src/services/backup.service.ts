@@ -2,6 +2,7 @@ import { $ } from 'bun';
 import { logger } from "../utils/logger";
 import type { BackupInfo, RestoreRequest } from '../types/backup';
 import { projectRepository } from '../repositories/project.repository';
+import { resolveDbName, resolveRoleName } from '../db';
 
 
     /**
@@ -60,8 +61,8 @@ export async function createLogicalBackup(projectRef: string): Promise<{ success
         try {
             // Use tenant role, export as Custom archive format with default gzip compression
             const tenantHost = `localhost:5432`;
-            const tenantDb = project.db_name;
-            const tenantUser = project.db_user;
+            const tenantDb = await resolveDbName(projectRef);
+            const tenantUser = resolveRoleName(projectRef);
 
             logger.info(`[LogicalBackup] Starting dump for ${projectRef} -> ${backupPath}`);
             await $`PGPASSWORD=${project.db_password} pg_dump -h localhost -p 5432 -U ${tenantUser} -d ${tenantDb} -F c -Z 6 -f ${backupPath}`.quiet();
@@ -111,8 +112,8 @@ export async function restoreLogicalBackup(projectRef: string, backupId: string)
             }
 
             // Execute pg_restore (force clean old objects and complete in single transaction)
-            const tenantDb = project.db_name;
-            const tenantUser = project.db_user;
+            const tenantDb = await resolveDbName(projectRef);
+            const tenantUser = resolveRoleName(projectRef);
             logger.info(`[LogicalBackup] Starting restore for ${projectRef} from ${backupPath}`);
 
             await $`PGPASSWORD=${project.db_password} pg_restore -h localhost -p 5432 -U ${tenantUser} -d ${tenantDb} -c -1 ${backupPath}`.quiet();

@@ -302,7 +302,7 @@ Deno.serve(async (req) => {
     const { data: finalUser } = await supabaseAdmin.auth.admin.getUserById(sessionData.user.id)
     const finalSession = finalUser?.user ? { ...sessionData.session, user: finalUser.user } : sessionData.session
     // Embed native OAuth provider tokens to complete the session payload matching Official Supabase
-    if (session.session_key) (finalSession as any).provider_token = session.session_key;
+    if (session_key) (finalSession as any).provider_token = session_key;
 
     return new Response(JSON.stringify(finalSession), { headers: { ...corsHeaders, "Content-Type": "application/json" } })
   } catch (error: unknown) {

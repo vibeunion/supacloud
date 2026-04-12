@@ -57,7 +57,9 @@ export class ScalingService {
     static async verticalScale(projectRef: string, tier: string): Promise<void> {
         logger.info(`Executing vertical scaling: ${projectRef} -> ${tier}`);
         const limits = tier === 'pro' ? 'cpu=4,mem=8g' : 'cpu=2,mem=4g';
-        await shellService.execute('ha_manager.sh', ['vertical_scale', `supa_${projectRef}`, limits]);
+        const { resolveDbName } = await import("../db");
+        const dbName = await resolveDbName(projectRef);
+        await shellService.execute('ha_manager.sh', ['vertical_scale', dbName, limits]);
     }
 
     /**

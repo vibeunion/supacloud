@@ -631,8 +631,6 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             return {
                 Id: `${params.bucket}/${filePath}`,
                 Key: `${params.bucket}/${filePath}`,
-                path: filePath,
-                fullPath: `${params.bucket}/${filePath}`
             };
         } catch (err: unknown) {
             logger.error('SDK upload error:', { error: err instanceof Error ? err.message : String(err) });
@@ -671,8 +669,6 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             return {
                 Id: `${params.bucket}/${filePath}`,
                 Key: `${params.bucket}/${filePath}`,
-                path: filePath,
-                fullPath: `${params.bucket}/${filePath}`
             };
         } catch (err: unknown) {
             return status(500, { statusCode: "500", error: 'Internal', message: 'Upsert failed' });
@@ -983,9 +979,9 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             auth_token: auth || ''
         });
 
-        const origin = getRequestOrigin(request as unknown as Request);
         return {
-            url: `${origin}/storage/v1/object/upload/sign/${params.bucket}/${filePath}?token=${token}`,
+            // storage-js prepends the storage base URL client-side, so this must stay relative.
+            url: `/object/upload/sign/${params.bucket}/${filePath}?token=${token}`,
         };
     })
 
@@ -1043,10 +1039,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             await SignedStore.delete(token);
 
             return {
-                Id: `${params.bucket}/${filePath}`,
                 Key: `${params.bucket}/${filePath}`,
-                path: filePath,
-                fullPath: `${params.bucket}/${filePath}`
             };
         } catch (err: unknown) {
             return status(500, { statusCode: "500", error: 'Internal', message: err instanceof Error ? err.message : String(err) });
@@ -1450,7 +1443,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         set.headers['Tus-Resumable'] = '1.0.0';
         set.headers['Tus-Version'] = '1.0.0';
         set.headers['Tus-Extension'] = 'creation,termination';
-        set.headers['Tus-Max-Size'] = String(100 * 1024 * 1024); // 100MB — limited for in-memory assembly safety
+        set.headers['Tus-Max-Size'] = String(50 * 1024 * 1024 * 1024);
         return '';
     })
 
@@ -1532,9 +1525,11 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
     })
 
     // HEAD /upload/resumable/:uploadId — Get current upload offset
-    .head('/upload/resumable/:uploadId', async ({ params, set }) => {
+    .head('/upload/resumable/:uploadId', async ({ params, headers, set }) => {
+        const ref = getProjectRef(headers as Record<string, string | undefined>);
         const upload = await TusStore.get(params.uploadId);
         if (!upload) return status(404, { error: 'Upload not found' });
+        if (upload.ref !== ref) return status(403, { error: 'Forbidden', message: 'Cross-project upload access denied' });
 
         set.headers['Tus-Resumable'] = '1.0.0';
         set.headers['Upload-Offset'] = String(upload.offset);
@@ -1545,8 +1540,10 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
 
     // PATCH /upload/resumable/:uploadId — Upload a chunk
     .patch('/upload/resumable/:uploadId', async ({ params, headers, request, set }) => {
+        const ref = getProjectRef(headers as Record<string, string | undefined>);
         const upload = await TusStore.get(params.uploadId);
         if (!upload) return status(404, { error: 'Upload not found' });
+        if (upload.ref !== ref) return status(403, { error: 'Forbidden', message: 'Cross-project upload access denied' });
 
         const clientOffset = Number(headers['upload-offset'] || 0);
         if (clientOffset !== upload.offset) {
@@ -1604,7 +1601,10 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
     })
 
     // DELETE /upload/resumable/:uploadId — Abort a resumable upload
-    .delete('/upload/resumable/:uploadId', async ({ params, set }) => {
+    .delete('/upload/resumable/:uploadId', async ({ params, headers, set }) => {
+        const ref = getProjectRef(headers as Record<string, string | undefined>);
+        const upload = await TusStore.get(params.uploadId);
+        if (upload && upload.ref !== ref) return status(403, { error: 'Forbidden', message: 'Cross-project upload access denied' });
         await TusStore.delete(params.uploadId);
         set.headers['Tus-Resumable'] = '1.0.0';
         set.status = 204;

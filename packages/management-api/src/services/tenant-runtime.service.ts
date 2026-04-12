@@ -1,7 +1,7 @@
 import { $ } from "bun";
 import { logger } from "../utils/logger";
 import { config } from "../config";
-import { sql as metaSql } from "../db";
+import { sql as metaSql, resolveDbName, resolveAuthenticatorName } from "../db";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import type { OAuthProvider, OAuthProviderConfig } from "../types/oauth";
@@ -111,7 +111,7 @@ class TenantRuntimeService {
         return {
             dbPassword: project.db_password,
             jwtSecret: project.jwt_secret,
-            dbName: project.db_name || `supa_${ref}`,
+            dbName: await resolveDbName(ref),
             apiUrl: this.deriveApiUrl(ref, projectConfig),
             anonKey: project.anonKey || project.anon_key,
             serviceRoleKey: project.serviceRoleKey || project.service_role_key,
@@ -173,7 +173,7 @@ JWT_SECRET=${creds.jwtSecret}
         // Generate PostgREST .conf configuration (single source of truth for all settings)
         const pgrstConf = `
 # PostgREST config for tenant: ${ref}
-db-uri = "postgres://authenticator_${ref}:${creds.dbPassword}@${this.PG_HOST}:${this.PG_PORT}/${creds.dbName}"
+db-uri = "postgres://${resolveAuthenticatorName(ref)}:${creds.dbPassword}@${this.PG_HOST}:${this.PG_PORT}/${creds.dbName}"
 db-schemas = "public, storage, graphql_public"
 db-extra-search-path = "public, extensions, auth"
 db-anon-role = "anon"

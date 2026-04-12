@@ -9,38 +9,50 @@
  * when users update secrets via Dashboard/MCP/API.
  */
 
-const TENANTS_DIR = process.env.TENANTS_DIR || "/etc/supabase/tenants";
+const TENANTS_DIRS = [
+  process.env.TENANTS_DIR,
+  process.env.TENANT_CONFIG_DIR,
+  "/opt/supabase/volumes/api/kong_tenants", // management API default
+  "/etc/supabase/tenants", // legacy fallback
+].filter(Boolean) as string[];
+
 const MGMT_API = process.env.MANAGEMENT_API_URL || "http://127.0.0.1:9090";
-
-if (!process.env.MANAGEMENT_API_URL) {
-  console.warn("[EdgeRuntime] WARNING: MANAGEMENT_API_URL is not set. Defaulting to http://127.0.0.1:9090. If edge-runtime runs on a different node than management-api, this will fail!");
-}
-
 const MASTER_TOKEN = process.env.MASTER_TOKEN || "";
 
 // In-memory cache with TTL to avoid hammering the API on rapid requests
-const cache = new Map<string, { env: Record<string, string>; expiresAt: number }>();
+const cache = new Map<
+  string,
+  { env: Record<string, string>; expiresAt: number }
+>();
 const CACHE_TTL_MS = 5_000; // 5 seconds — short enough to feel "instant" on update
 
-/** Load env from static .env file (base layer) */
-async function loadEnvFile(projectRef: string): Promise<Record<string, string>> {
+/** Load env from static .env file (base layer), trying multiple directories in order */
+async function loadEnvFile(
+  projectRef: string,
+): Promise<Record<string, string>> {
   const envMap: Record<string, string> = {};
-  try {
-    const text = await Bun.file(`${TENANTS_DIR}/${projectRef}.env`).text();
-    for (const line of text.split("\n")) {
-      const match = line.match(/^([^#=][^=]*)=(.*)$/);
-      if (match) {
-        envMap[match[1].trim()] = match[2].trim();
+  for (const dir of TENANTS_DIRS) {
+    try {
+      const text = await Bun.file(`${dir}/${projectRef}.env`).text();
+      for (const line of text.split("\n")) {
+        const match = line.match(/^([^#=][^=]*)=(.*)$/);
+        if (match) {
+          envMap[match[1].trim()] = match[2].trim();
+        }
       }
+      // Found a file, stop searching
+      break;
+    } catch {
+      // Try next directory
     }
-  } catch {
-    // Tenant env file may not exist — proceed without
   }
   return envMap;
 }
 
 /** Load secrets from Management API (database-backed, user-managed) */
-async function loadSecretsFromApi(projectRef: string): Promise<Record<string, string>> {
+async function loadSecretsFromApi(
+  projectRef: string,
+): Promise<Record<string, string>> {
   const envMap: Record<string, string> = {};
   if (!MASTER_TOKEN) return envMap; // Can't query without auth
 

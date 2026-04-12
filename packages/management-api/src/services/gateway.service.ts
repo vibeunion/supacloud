@@ -451,7 +451,7 @@ export class GatewayService {
 
     // --- Core reload logic ---
 
-    async setupUpstream(projectRef: string, pgrstPort: number | string, gotruePort: number | string, customApiDomain?: string): Promise<{ success: boolean; error?: string }> {
+    async setupUpstream(projectRef: string, pgrstPort: number | string, gotruePort: number | string, customApiDomain?: string, opts?: { functionsPort?: number; storagePort?: number; realtimeApiPort?: number; realtimeWsPort?: number }): Promise<{ success: boolean; error?: string }> {
         try {
             const hostIp = await this.detectHostIp();
             
@@ -470,11 +470,11 @@ export class GatewayService {
                 headers: ["Content-Profile:graphql_public", "Accept-Profile:graphql_public"]
             });
             await this.ensureServiceAndRoute({ name: `svc-gotrue-${projectRef}`, url: `http://${hostIp}:${gotruePort}`, paths: ["/auth/v1"], hosts, projectRef });
-            await this.ensureServiceAndRoute({ name: `svc-functions-${projectRef}`, url: `http://${hostIp}:9000`, paths: ["/functions/v1"], hosts, projectRef, readTimeout: 500_000 });  // 500s for AI/OCR inference
-            await this.ensureServiceAndRoute({ name: `svc-storage-${projectRef}`, url: `http://${hostIp}:9090`, paths: ["/storage/v1/"], hosts, projectRef });
+            await this.ensureServiceAndRoute({ name: `svc-functions-${projectRef}`, url: `http://${hostIp}:${opts?.functionsPort || 9000}`, paths: ["/functions/v1"], hosts, projectRef, readTimeout: 500_000 });
+            await this.ensureServiceAndRoute({ name: `svc-storage-${projectRef}`, url: `http://${hostIp}:${opts?.storagePort || 9090}`, paths: ["/storage/v1/"], hosts, projectRef });
             await this.ensureServiceAndRoute({
                 name: `svc-realtime-api-${projectRef}`,
-                url: `http://${hostIp}:4000/api`,
+                url: `http://${hostIp}:${opts?.realtimeApiPort || 4000}/api`,
                 paths: ["/realtime/v1/api"],
                 hosts,
                 projectRef,
@@ -484,9 +484,7 @@ export class GatewayService {
             });
             await this.ensureServiceAndRoute({
                 name: `svc-realtime-${projectRef}`,
-                // Map Realtime WebSocket endpoint to our native Bun Management-API (9090) 
-                // It internally intercepts traffic and forwards the rest to 4000 natively.
-                url: `http://${hostIp}:9090`,
+                url: `http://${hostIp}:${opts?.realtimeWsPort || 9090}`,
                 paths: ["/realtime/v1"],
                 hosts,
                 projectRef,
