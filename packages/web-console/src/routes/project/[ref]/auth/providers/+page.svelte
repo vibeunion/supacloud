@@ -13,11 +13,12 @@
     client_id: string;
     client_secret: string;
     redirect_uri: string;
+    auth_scheme?: string;
     expanded: boolean;
     saving: boolean;
   }
 
-  const PROVIDERS_DEF: Omit<ProviderConfig, "enabled" | "client_id" | "client_secret" | "redirect_uri" | "expanded" | "saving">[] = [
+  const PROVIDERS_DEF: Omit<ProviderConfig, "enabled" | "client_id" | "client_secret" | "redirect_uri" | "auth_scheme" | "expanded" | "saving">[] = [
     { name: "Email", key: "email", category: "built_in" },
     { name: "Phone", key: "phone", category: "built_in" },
     { name: "Apple", key: "apple", category: "social" },
@@ -77,13 +78,14 @@
           client_id: provMap[def.key]?.client_id || existing?.client_id || "",
           client_secret: existing?.client_secret || "",
           redirect_uri: provMap[def.key]?.redirect_uri || existing?.redirect_uri || "",
+          auth_scheme: provMap[def.key]?.auth_scheme || existing?.auth_scheme || "",
           expanded: existing?.expanded || false,
           saving: false,
         };
       });
     } else if (providersQuery.isError || (providers.length === 0 && !providersQuery.isPending)) {
       providers = PROVIDERS_DEF.map(def => ({
-        ...def, enabled: false, client_id: "", client_secret: "", redirect_uri: "", expanded: false, saving: false,
+        ...def, enabled: false, client_id: "", client_secret: "", redirect_uri: "", auth_scheme: "", expanded: false, saving: false,
       }));
     }
   });
@@ -107,6 +109,7 @@
           client_id: provider.client_id,
           client_secret: provider.client_secret,
           redirect_uri: provider.redirect_uri || undefined,
+          auth_scheme: provider.auth_scheme || undefined,
         }),
       });
       if (!res.ok) {
@@ -148,6 +151,7 @@
       data.provider.client_id = "";
       data.provider.client_secret = "";
       data.provider.redirect_uri = "";
+      data.provider.auth_scheme = "";
       queryClient.invalidateQueries({ queryKey: ["auth_providers", projectRef] });
       saveMsg = `${data.provider.name} 已禁用`;
       setTimeout(() => saveMsg = null, 3000);
@@ -337,10 +341,17 @@
                       </div>
                     </div>
                   </div>
-                  <div>
-                    <span class="text-[10px] font-semibold text-muted-foreground uppercase">Redirect URI (可选)</span>
-                    <input type="text" bind:value={providers[i].redirect_uri} placeholder="https://your-domain.com/auth/v1/callback"
-                      class="w-full mt-1 px-3 py-2 text-xs font-mono rounded-lg border bg-background focus:outline-none focus:ring-1 focus:ring-brand" />
+                  <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div>
+                      <span class="text-[10px] font-semibold text-muted-foreground uppercase">Redirect URI (可选)</span>
+                      <input type="text" bind:value={providers[i].redirect_uri} placeholder="https://your-domain.com/auth/v1/callback"
+                        class="w-full mt-1 px-3 py-2 text-xs font-mono rounded-lg border bg-background focus:outline-none focus:ring-1 focus:ring-brand" />
+                    </div>
+                    <div>
+                      <span class="text-[10px] font-semibold text-muted-foreground uppercase">Auth Scheme (可选)</span>
+                      <input type="text" bind:value={providers[i].auth_scheme} placeholder="Basic, Bearer, etc."
+                        class="w-full mt-1 px-3 py-2 text-xs font-mono rounded-lg border bg-background focus:outline-none focus:ring-1 focus:ring-brand" />
+                    </div>
                   </div>
                   <div class="flex items-center justify-between pt-2">
                     <p class="text-[10px] text-muted-foreground">

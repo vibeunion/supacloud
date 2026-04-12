@@ -356,7 +356,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
     
     // Inject standard Supabase compatibility headers on all API responses
     .onAfterHandle(({ set }) => {
-        set.headers['x-supabase-api-version'] = '1.0.0';
+        set.headers['x-supabase-api-version'] = '2024-01-01';
         set.headers['sb-gateway-version'] = '1.0.0';
     })
 
@@ -588,7 +588,8 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
                 }
             }
 
-            const cc = headers['cache-control'] || (userMetadata.cacheControl as string) || 'max-age=3600';
+            let cc = headers['cache-control'] || (userMetadata.cacheControl as string) || 'max-age=3600';
+            if (cc && /^\d+$/.test(cc)) cc = `max-age=${cc}`;
             const metadata = { mimetype: fileMimeType, size: fileBuffer.byteLength, cacheControl: cc, userMetadata };
             const finalPermit = await StorageRLS.authorizeAction(
                 ref, auth, 'upload', params.bucket, filePath, metadata, false, upsert, undefined, undefined,
@@ -633,7 +634,8 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             const userMetadata: Record<string, unknown> = { ...headerMetadata, ...(customMetadata || {}) };
 
             const auth = headers['authorization'];
-            const cc = headers['cache-control'] || (userMetadata.cacheControl as string) || 'max-age=3600';
+            let cc = headers['cache-control'] || (userMetadata.cacheControl as string) || 'max-age=3600';
+            if (cc && /^\d+$/.test(cc)) cc = `max-age=${cc}`;
             const metadata = { mimetype: fileMimeType, size: fileBuffer.byteLength, cacheControl: cc, userMetadata };
             // PUT essentially enforces upsert = true
             const finalPermit = await StorageRLS.authorizeAction(
@@ -992,25 +994,27 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             // Bypass external headers — token already validates authorization
             const headerMetadata = getUploadMetadata(headers as Record<string, string | undefined>);
             const userMetadata: Record<string, unknown> = { ...headerMetadata, ...(customMetadata || {}) };
-            const cc = headers['cache-control'] || (userMetadata.cacheControl as string) || 'max-age=3600';
+            let cc = headers['cache-control'] || (userMetadata.cacheControl as string) || 'max-age=3600';
+            if (cc && /^\d+$/.test(cc)) cc = `max-age=${cc}`;
             const metadata = { mimetype: fileMimeType, size: fileBuffer.byteLength, cacheControl: cc, userMetadata };
             
             const effectiveAuth = signedUpload.auth_token !== undefined ? signedUpload.auth_token : headers['authorization'];
             
-            // 1. Dry run to ensure rules permit
-            const permitted = await StorageRLS.authorizeAction(ref, effectiveAuth, 'upload', params.bucket, filePath, metadata, true, signedUpload.upsert);
-            if (!permitted.permitted) return status(permitted.error === 'The resource already exists' ? 409 : 403, { statusCode: permitted.error === 'The resource already exists' ? '409' : '403', error: permitted.error === 'The resource already exists' ? 'Conflict' : 'Forbidden', message: permitted.error || 'Access Denied.' });
+            // 1. Transactional RLS + DB persist + S3 Write
+            const finalPermit = await StorageRLS.authorizeAction(
+                ref, effectiveAuth, 'upload', params.bucket, filePath, metadata, false, signedUpload.upsert, undefined, undefined,
+                async () => {
+                    const success = await StorageService.uploadFile(ref, params.bucket, filePath, fileBuffer, fileMimeType);
+                    if (!success) throw new Error('PHYSICAL_UPLOAD_FAILED');
+                }
+            );
 
-            // 2. S3 write
-            const success = await StorageService.uploadFile(ref, params.bucket, filePath, fileBuffer, fileMimeType);
-            if (!success) return status(500, { statusCode: "500", error: 'Internal', message: 'Upload failed' });
-            
-            // 3. Persist DB
-            const finalPermit = await StorageRLS.authorizeAction(ref, effectiveAuth, 'upload', params.bucket, filePath, metadata, false, signedUpload.upsert);
             if (!finalPermit.permitted) {
-                const rolledBack = await StorageService.deleteFile(ref, params.bucket, filePath);
-                if (!rolledBack) logger.error(`CRITICAL: Orphaned physical file abandoned at ${params.bucket}/${filePath}`);
-                return status(500, { statusCode: "500", error: 'Internal', message: 'Failed to record object' });
+                return status(finalPermit.error === 'The resource already exists' ? 409 : 403, { 
+                    statusCode: finalPermit.error === 'The resource already exists' ? '409' : '403', 
+                    error: finalPermit.error === 'The resource already exists' ? 'Conflict' : 'Forbidden', 
+                    message: finalPermit.error || 'Access Denied.' 
+                });
             }
 
             // Consume the signed upload token (one-time use)
@@ -1119,10 +1123,8 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         }
 
         return files.map(f => {
-            // Supabase SDK expects `name` to be relative to the listed prefix
             const cleanName = prefix ? f.name.slice(prefix.length).replace(/^\/+/, '') : f.name;
             return {
-                bucket_id: f.bucket_id,
                 name: cleanName || f.name,
                 id: f.id,
                 updated_at: f.updated_at,
@@ -1249,21 +1251,22 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
 
         const results = await Promise.allSettled(
             prefixes.map(async (p: string) => {
-                // 1. Dry run delete (RLS check)
-                const permitted = await StorageRLS.authorizeAction(ref, auth, 'delete', params.bucket, p, {}, true);
-                if (!permitted.permitted) throw new Error(permitted.error || 'Forbidden');
-                
                 // Get info for the deleted object response natively matching FileObject (respect RLS)
+                // We MUST get info before deletion because getting info after deletion will return null
                 const info = await StorageRLS.getObjectInfo(ref, params.bucket, p, auth, false);
                 if (!info) throw new Error('Object not found (may require select permission)');
 
-                // 2. Logical delete FIRST (ensures DB consistency over physical bytes)
-                const postDelete = await StorageRLS.authorizeAction(ref, auth, 'delete', params.bucket, p, {}, false);
-                if (!postDelete.permitted) throw new Error(postDelete.error || 'Logical delete failed');
+                // Transactional RLS delete + S3 Delete
+                const finalPermit = await StorageRLS.authorizeAction(
+                    ref, auth, 'delete', params.bucket, p, {}, false, true, undefined, undefined,
+                    async () => {
+                        const physSuccess = await StorageService.deleteFile(ref, params.bucket, p);
+                        if (!physSuccess) throw new Error('PHYSICAL_UPLOAD_FAILED');
+                    }
+                );
 
-                // 3. Physical delete (if this fails, file is physically orphaned but DB is clean - official Supabase pattern)
-                const physSuccess = await StorageService.deleteFile(ref, params.bucket, p);
-                if (!physSuccess) logger.error(`[Storage] Orphaned physical file abandoned at ${params.bucket}/${p} due to delete failure`);
+                if (!finalPermit.permitted) throw new Error(finalPermit.error || 'Logical delete failed');
+                
                 return info || { name: p, bucket_id: params.bucket };
             })
         );
@@ -1310,28 +1313,25 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         }
 
         try {
-            // Check RLS Move (simulating SELECT + UPDATE exactly matching Official Supabase policies)
-            // Dry run it first to ensure they have permissions before we do physical operations
-            const permittedCheck = await StorageRLS.authorizeAction(ref, auth, 'move' as any, srcBucket, srcKey, {}, true, true, destBucket, destKey);
-            if (!permittedCheck.permitted) return status(403, { statusCode: "403", error: 'Forbidden', message: permittedCheck.error || 'Access Denied' });
+            // Check RLS Move and perform transactionally
+            const finalPermit = await StorageRLS.authorizeAction(ref, auth, 'move' as any, srcBucket, srcKey, {}, false, true, destBucket, destKey,
+                async () => {
+                    const copied = await StorageService.copyFile(ref, srcBucket, srcKey, destBucket, destKey);
+                    if (!copied) throw new Error('PHYSICAL_UPLOAD_FAILED');
+                    const deleted = await StorageService.deleteFile(ref, srcBucket, srcKey);
+                    if (!deleted) {
+                        logger.error(`CRITICAL: Orphaned physical file abandoned at ${srcBucket}/${srcKey}`);
+                    }
+                }
+            );
 
-            // 1. Physically copy to destination
-            const uploaded = await StorageService.copyFile(ref, srcBucket, srcKey, destBucket, destKey);
-            if (!uploaded) return status(500, { statusCode: "500", error: 'Internal', message: 'Move failed: could not write destination' });
-
-            // 2. Perform DB move (transactionally updates DB pointer)
-            const finalPermit = await StorageRLS.authorizeAction(ref, auth, 'move' as any, srcBucket, srcKey, {}, false, true, destBucket, destKey);
             if (!finalPermit.permitted) {
-                await StorageService.deleteFile(ref, destBucket, destKey);
-                return status(500, { statusCode: "500", error: 'Internal', message: 'Failed to record object' });
+                return status(finalPermit.error === 'Object not found' || finalPermit.error === 'Bucket not found' ? 404 : 403, { 
+                    statusCode: finalPermit.error === 'Object not found' || finalPermit.error === 'Bucket not found' ? '404' : '403', 
+                    error: finalPermit.error === 'Object not found' ? 'Not Found' : 'Forbidden', 
+                    message: finalPermit.error || 'Access Denied' 
+                });
             }
-
-            // 3. Physically delete source leaving DB pointer correctly shifted
-            const pDelete = await StorageService.deleteFile(ref, srcBucket, srcKey);
-             if (!pDelete) {
-                logger.error(`CRITICAL: Orphaned physical file abandoned at ${srcBucket}/${srcKey}. Logical row was securely moved.`);
-                return status(500, { statusCode: "500", error: 'Internal', message: 'Successfully moved logically, but failed to physically clean source object' });
-             }
 
             return { message: `Successfully moved` };
         } catch (err: unknown) {
@@ -1366,20 +1366,20 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             const permittedSrc = await StorageRLS.authorizeAction(ref, auth, 'download', srcBucket, srcKey);
             if (!permittedSrc.permitted) return status(403, { statusCode: "403", error: 'Forbidden', message: permittedSrc.error || 'Access Denied' });
 
-            // Check RLS Upload on destination (Dry Run!)
-            const permittedDest = await StorageRLS.authorizeAction(ref, auth, 'upload', destBucket, destKey, {}, true);
-            if (!permittedDest.permitted) return status(403, { statusCode: "403", error: 'Forbidden', message: permittedDest.error || 'Access Denied' });
+            // Write and finalize immediately via physicalAction inside Upload context
+            const finalPermitted = await StorageRLS.authorizeAction(ref, auth, 'upload', destBucket, destKey, {}, false, true, undefined, undefined,
+                async () => {
+                    const copied = await StorageService.copyFile(ref, srcBucket, srcKey, destBucket, destKey);
+                    if (!copied) throw new Error('PHYSICAL_UPLOAD_FAILED');
+                }
+            );
 
-            // Write directly using logical copy (avoid large buffer OOMs)
-            const uploadSuccess = await StorageService.copyFile(ref, srcBucket, srcKey, destBucket, destKey);
-            if (!uploadSuccess) return status(500, { statusCode: "500", error: 'Internal Error', message: 'Failed to write destination object' });
-
-            // Finalize SQL Materialization
-            const finalPermitted = await StorageRLS.authorizeAction(ref, auth, 'upload', destBucket, destKey, {}, false);
             if (!finalPermitted.permitted) {
-                const rolledBack = await StorageService.deleteFile(ref, destBucket, destKey);
-                if (!rolledBack) logger.error(`CRITICAL: Orphaned physical file abandoned at ${destBucket}/${destKey}`);
-                return status(500, { statusCode: "500", error: 'Internal', message: 'Failed to record copied object' });
+                return status(finalPermitted.error === 'Bucket not found' ? 404 : 403, { 
+                    statusCode: finalPermitted.error === 'Bucket not found' ? '404' : '403', 
+                    error: finalPermitted.error === 'Bucket not found' ? 'Not Found' : 'Forbidden', 
+                    message: finalPermitted.error || 'Access Denied' 
+                });
             }
 
             return { Key: `${destBucket}/${destKey}` };
@@ -1538,7 +1538,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             const asm = await TusStore.assembleToStream(params.uploadId);
 
             try {
-                // Final Authorization Gate — Dry run first to verify rules without inserting orphan rows before S3
+                // Transactional RLS Finalization
                 const finalPermitted = await StorageRLS.authorizeAction(
                     upload.ref, 
                     upload.auth_token, 
@@ -1546,33 +1546,17 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
                     upload.bucket, 
                     upload.objectName, 
                     { mimetype: upload.contentType, size: upload.totalSize, cacheControl: upload.meta?.cacheControl },
-                    true
+                    false, true, undefined, undefined,
+                    async () => {
+                        const uploaded = await StorageService.uploadFile(upload.ref, upload.bucket, upload.objectName, asm.stream, upload.contentType);
+                        if (!uploaded) throw new Error('PHYSICAL_UPLOAD_FAILED');
+                        await asm.cleanup();
+                    }
                 );
                 
                 if (!finalPermitted.permitted) {
+                    await asm.cleanup();
                     throw new Error(finalPermitted.error || 'Access Denied during finalization');
-                }
-
-                const uploaded = await StorageService.uploadFile(upload.ref, upload.bucket, upload.objectName, asm.stream, upload.contentType);
-                if (!uploaded) throw new Error('Failed to physically write object. Upload aborted.');
-                
-                await asm.cleanup();
-                
-                // Finalize DB row now that S3 succeeded
-                const syncRes = await StorageRLS.authorizeAction(
-                    upload.ref, 
-                    upload.auth_token, 
-                    'upload', 
-                    upload.bucket, 
-                    upload.objectName, 
-                    { mimetype: upload.contentType, size: upload.totalSize, cacheControl: upload.meta?.cacheControl },
-                    false
-                );
-                
-                if (!syncRes.permitted) {
-                    const rolledBack = await StorageService.deleteFile(upload.ref, upload.bucket, upload.objectName);
-                    if (!rolledBack) logger.error(`CRITICAL: Orphaned physical file abandoned at ${upload.bucket}/${upload.objectName}`);
-                    throw new Error(syncRes.error || 'Failed to record assembled object');
                 }
 
                 await TusStore.delete(params.uploadId);

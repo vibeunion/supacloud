@@ -40,10 +40,10 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
       if (!res.ok) {
         set.status = res.status;
         const err = await res.json().catch(() => ({}));
-        return { error: err.msg || err.message || "Failed to fetch users" };
+        return { error: err.msg || err.message || "Failed to fetch users", error_code: err.error_code, code: err.code };
       }
 
-      // P1-6: Forward link and total count headers for SDK pagination
+      // Forward link and total count headers for SDK pagination
       const linkHeader = res.headers.get("link");
       if (linkHeader) set.headers["link"] = linkHeader;
       const totalHeader = res.headers.get("x-total-count");
@@ -51,13 +51,11 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
 
       const d = await res.json() as Record<string, unknown>;
       
-      // If GoTrue returned an array natively (older version), wrap it in the expected paginated structure.
-      // Otherwise it already returns { users, aud, next_page, last_page, total }
       if (Array.isArray(d)) {
           const totalHeader = res.headers.get('x-total-count');
           return {
               users: d,
-              aud: '',
+              aud: 'authenticated',
               next_page: null,
               last_page: null,
               total: totalHeader ? Number(totalHeader) : d.length
@@ -119,7 +117,7 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
       if (!res.ok) {
         set.status = res.status;
         const err = await res.json().catch(() => ({}));
-        return { error: err.msg || err.message || "Failed to create user" };
+        return { error: err.msg || err.message || "Failed to create user", error_code: err.error_code, code: err.code };
       }
 
       return res.json();
@@ -175,7 +173,7 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
       if (!res.ok) {
         set.status = res.status;
         const err = await res.json().catch(() => ({}));
-        return { error: err.msg || err.message || "Failed to invite user" };
+        return { error: err.msg || err.message || "Failed to invite user", error_code: err.error_code, code: err.code };
       }
 
       return res.json();
@@ -216,7 +214,7 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
       if (!res.ok) {
         set.status = res.status;
         const err = await res.json().catch(() => ({}));
-        return { error: err.msg || err.message || "User not found" };
+        return { error: err.msg || err.message || "User not found", error_code: err.error_code, code: err.code };
       }
 
       return res.json();
@@ -258,7 +256,7 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
       if (!res.ok) {
         set.status = res.status;
         const err = await res.json().catch(() => ({}));
-        return { error: err.msg || err.message || "Failed to update user" };
+        return { error: err.msg || err.message || "Failed to update user", error_code: err.error_code, code: err.code };
       }
 
       return res.json();
@@ -312,7 +310,7 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
       if (!res.ok) {
         set.status = res.status;
         const err = await res.json().catch(() => ({}));
-        return { error: err.msg || err.message || "Failed to delete user" };
+        return { error: err.msg || err.message || "Failed to delete user", error_code: err.error_code, code: err.code };
       }
 
       return res.json();

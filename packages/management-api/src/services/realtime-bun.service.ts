@@ -19,9 +19,9 @@ interface ChangeEvent {
         schema: string;
         table: string;
         type: 'INSERT' | 'UPDATE' | 'DELETE';
-        errors: string[]; // P1-2: fix from null to string[]
+        errors: string[];
     };
-    ids: string[]; // P0-2: string IDs
+    ids: string[];
 }
 
 class RealtimeBunService {
@@ -29,6 +29,7 @@ class RealtimeBunService {
     public events = new EventEmitter();
     private tenantSubscriptions = new Map<string, PostgresChangeConfig[]>();
     private tenantTokens = new Map<string, string>();
+    private subscriptionIdMap = new Map<string, Map<number, string>>();
 
     public async subscribeTenant(
         projectRef: string,
@@ -74,42 +75,54 @@ class RealtimeBunService {
         }
     }
 
+    public registerSubscriptionIds(projectRef: string, mappings: Array<{ id: number; subscription_id: string }>) {
+        let map = this.subscriptionIdMap.get(projectRef);
+        if (!map) {
+            map = new Map();
+            this.subscriptionIdMap.set(projectRef, map);
+        }
+        for (const m of mappings) {
+            map.set(m.id, m.subscription_id);
+        }
+    }
+
     private filterAndFormat(projectRef: string, raw: any): ChangeEvent | null {
+        const inner = raw.payload || raw;
         const subs = this.tenantSubscriptions.get(projectRef);
-        const changeType = raw.type || raw.event || '';
-        const schema = raw.schema || 'public';
-        const table = raw.table || '';
+        const changeType = inner.type || inner.event || '';
+        const schema = inner.schema || 'public';
+        const table = inner.table || '';
 
         if (!subs || subs.length === 0) {
-            return this.formatEvent(raw, ["0"]);
+            return this.formatEvent(inner, []);
         }
 
-        const matchingIndices: string[] = []; // P0-2: Use string IDs
+        const matchingIds: string[] = [];
+        const idMap = this.subscriptionIdMap.get(projectRef);
         for (let i = 0; i < subs.length; i++) {
             const sub = subs[i];
             if (sub.event !== '*' && sub.event !== changeType) continue;
             if (sub.schema !== schema) continue;
             if (sub.table && sub.table !== table) continue;
-            if (sub.filter && !this.matchesFilter(sub.filter, raw.record || {})) continue;
-            matchingIndices.push(sub.id ? String(sub.id) : String(i));
+            if (sub.filter && !this.matchesFilter(sub.filter, inner.record || {})) continue;
+            const serverSubId = idMap?.get(typeof sub.id === 'number' ? sub.id : parseInt(String(sub.id), 10));
+            matchingIds.push(serverSubId || String(sub.id ?? i));
         }
 
-        if (matchingIndices.length === 0) return null;
+        if (matchingIds.length === 0) return null;
 
-        // P1-1: Basic JWT check to verify RLS safety
         const token = this.tenantTokens.get(projectRef);
         if (token) {
             try {
-                const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString());
-                if (payload.role !== 'service_role' && payload.role !== 'postgres' && payload.role !== 'supabase_admin') {
-                    // Refuse to stream everything without RLS
-                    logger.debug(`[RealtimeBun] Blocked stream for non-admin role "${payload.role}" (missing local RLS). Events hidden.`);
+                const jwtPayload = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString());
+                if (jwtPayload.role !== 'service_role' && jwtPayload.role !== 'postgres' && jwtPayload.role !== 'supabase_admin') {
+                    logger.debug(`[RealtimeBun] Blocked stream for non-admin role "${jwtPayload.role}" (missing local RLS). Events hidden.`);
                     return null;
                 }
             } catch { return null; }
         }
 
-        return this.formatEvent(raw, matchingIndices);
+        return this.formatEvent(inner, matchingIds);
     }
 
     private matchesFilter(filter: string, record: Record<string, any>): boolean {
@@ -131,36 +144,35 @@ class RealtimeBunService {
             case 'lte': return recordVal <= val;
             case 'like': return new RegExp(val.replace(/%/g, '.*')).test(recordVal);
             case 'ilike': return new RegExp(val.replace(/%/g, '.*'), 'i').test(recordVal);
-            case 'in': // P1-5
+            case 'in': {
                 const inValues = val.replace(/^\(|\)$/g, '').split(',').map(s => s.trim().replace(/^"|"$/g, ''));
                 return inValues.includes(recordVal);
+            }
             default: return true;
         }
     }
 
-    private formatEvent(raw: any, ids: string[]): ChangeEvent {
-        const record = raw.record || raw.new || {};
-        const oldRecord = raw.old_record || raw.old || null;
-        
-        // P0-3: If columns is already an array of formatted objects (from our fixed trigger), use it directly
-        // Otherwise try to fallback map it
-        const columns = Array.isArray(raw.columns) && raw.columns[0]?.name && raw.columns[0]?.type 
-            ? raw.columns 
+    private formatEvent(inner: any, ids: string[]): ChangeEvent {
+        const record = inner.record || inner.new || {};
+        const oldRecord = inner.old_record || inner.old || null;
+
+        const columns = Array.isArray(inner.columns) && inner.columns[0]?.name && inner.columns[0]?.type
+            ? inner.columns
             : Object.keys(record).map(k => ({
                 name: k,
-                type: raw.columns?.[k] || typeof record[k] === 'number' ? 'int8' : 'text'
+                type: inner.columns?.[k] || (typeof record[k] === 'number' ? 'int8' : 'text')
             }));
 
         return {
             data: {
                 columns,
-                commit_timestamp: raw.commit_timestamp || new Date().toISOString(),
+                commit_timestamp: inner.commit_timestamp || new Date().toISOString(),
                 record,
                 ...(oldRecord ? { old_record: oldRecord } : {}),
-                schema: raw.schema || 'public',
-                table: raw.table || '',
-                type: raw.type || raw.event || 'INSERT',
-                errors: [] // P1-2: returning [] instead of null
+                schema: inner.schema || 'public',
+                table: inner.table || '',
+                type: inner.type || inner.event || 'INSERT',
+                errors: []
             },
             ids
         };
@@ -174,6 +186,7 @@ class RealtimeBunService {
                 this.tenantListeners.delete(projectRef);
                 this.tenantSubscriptions.delete(projectRef);
                 this.tenantTokens.delete(projectRef);
+                this.subscriptionIdMap.delete(projectRef);
                 logger.info(`[RealtimeBun] Stopped listening to tenant ${projectRef}`);
             } catch (err: unknown) {/* ignore */}
         }
