@@ -76,7 +76,10 @@ describe("SDK E2E Compliance Suite", () => {
                     avif_autodetection boolean default false,
                     file_size_limit bigint,
                     allowed_mime_types text[]
-                )
+                );
+                GRANT ALL PRIVILEGES ON SCHEMA storage TO postgres, supabase_admin;
+                GRANT USAGE ON SCHEMA storage TO anon, authenticated, service_role;
+                GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA storage TO postgres, supabase_admin, anon, authenticated, service_role;
             `;
             await sql`
                 CREATE TABLE IF NOT EXISTS storage.objects (
@@ -90,7 +93,8 @@ describe("SDK E2E Compliance Suite", () => {
                     metadata jsonb,
                     path_tokens text[] generated always as (string_to_array(name, '/')) stored,
                     version text default gen_random_uuid()
-                )
+                );
+                GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA storage TO postgres, supabase_admin, anon, authenticated, service_role;
             `;
         }
 
