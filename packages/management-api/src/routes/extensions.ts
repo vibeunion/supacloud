@@ -20,9 +20,48 @@ export const extensionRoutes = new Elysia({ prefix: "/v1/projects/:ref/extension
     }, {
         body: t.Object({ extension: t.String() }),
         response: { 200: t.Any() },
+    })
+    .patch('/', async ({ params, body }) => {
+        const name = body.name;
+        if (!name) return status(400, { error: "Extension name is required" });
+        if (body.create) {
+            return await extensionService.enableExtension(params.ref, name, body.schema, body.version);
+        }
+        if (body.drop) {
+            return await extensionService.disableExtension(params.ref, name);
+        }
+        return status(400, { error: "Must specify either 'create' or 'drop'" });
+    }, {
+        body: t.Object({
+            name: t.String(),
+            create: t.Optional(t.Boolean()),
+            drop: t.Optional(t.Boolean()),
+            schema: t.Optional(t.String()),
+            version: t.Optional(t.String()),
+        }),
+        response: { 200: t.Any(), 400: ErrorResponse },
+    })
+    .post('/', async ({ params, body }) => {
+        const name = body.name;
+        if (!name) return status(400, { error: "Extension name is required" });
+        return await extensionService.enableExtension(params.ref, name, body.schema, body.version);
+    }, {
+        body: t.Object({
+            name: t.String(),
+            schema: t.Optional(t.String()),
+            version: t.Optional(t.String()),
+        }),
+        response: { 200: t.Any(), 400: ErrorResponse },
+    })
+    .delete('/', async ({ params, body }) => {
+        const name = body.name;
+        if (!name) return status(400, { error: "Extension name is required" });
+        return await extensionService.disableExtension(params.ref, name);
+    }, {
+        body: t.Object({ name: t.String() }),
+        response: { 200: t.Any(), 400: ErrorResponse },
     });
 
-// System-level extension management (platform admin)
 export const systemExtensionRoutes = new Elysia({ prefix: "/v1/system/extensions" })
     .get('/', async () => {
         return await extensionService.listSystemExtensions();

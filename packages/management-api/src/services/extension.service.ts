@@ -53,11 +53,15 @@ export class ExtensionService {
     /**
      * Enable extension (direct CREATE EXTENSION)
      */
-    async enableExtension(projectRef: string, extension: string): Promise<{ message: string }> {
+    async enableExtension(projectRef: string, extension: string, schema?: string, version?: string): Promise<{ message: string }> {
         const dbName = `supa_${projectRef}`;
         const db = this.getTenantDb(dbName);
         try {
-            await db.unsafe(`CREATE EXTENSION IF NOT EXISTS "${extension}" CASCADE`);
+            let sql = `CREATE EXTENSION IF NOT EXISTS "${extension}"`;
+            if (schema) sql += ` SCHEMA "${schema}"`;
+            if (version) sql += ` VERSION '${version.replace(/'/g, "''")}'`;
+            sql += ` CASCADE`;
+            await db.unsafe(sql);
             return { message: `Extension ${extension} enabled successfully` };
         } finally {
             await db.close();

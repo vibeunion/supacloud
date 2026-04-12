@@ -57,7 +57,9 @@ describe("SDK E2E Compliance Suite", () => {
                 INSERT INTO project_config (project_ref, postgrest_port, gotrue_port, realtime_port) 
                 VALUES (${tenantRef}, 3000, 9999, 4000) 
                 ON CONFLICT (project_ref) DO UPDATE 
-                SET postgrest_port = 3000, gotrue_port = 9999, realtime_port = 4000
+                SET postgrest_port = 3000, gotrue_port = 9999, realtime_port = 4000;
+                
+                UPDATE projects SET db_name = 'postgres' WHERE ref = ${tenantRef};
             `;
         }
 
@@ -200,6 +202,8 @@ describe("SDK E2E Compliance Suite", () => {
                     NOTIFY pgrst, 'reload schema';
                 `
             });
+            // Wait for PostgREST cache to actually reload asynchronously
+            await new Promise(r => setTimeout(r, 1000));
         });
 
         test("db insert & select", async () => {
