@@ -324,6 +324,13 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
       studioCompatibleConfig.hook_send_sms_enabled = !!hooksConfig.send_sms_hook?.enabled;
       studioCompatibleConfig.hook_send_sms_uri = hooksConfig.send_sms_hook?.uri || null;
 
+      const smtpConfig = (authConfig.smtp as Record<string, unknown>) || {};
+      studioCompatibleConfig.smtp_admin_email = smtpConfig.admin_email || '';
+      studioCompatibleConfig.smtp_host = smtpConfig.host || '';
+      studioCompatibleConfig.smtp_port = smtpConfig.port || 587;
+      studioCompatibleConfig.smtp_user = smtpConfig.user || '';
+      studioCompatibleConfig.smtp_pass = smtpConfig.pass ? '********' : '';
+
       return studioCompatibleConfig;
     },
     {

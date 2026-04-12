@@ -164,7 +164,7 @@ async function executeProxy(request: Request, targetUrl: string, interceptors: {
 }
 
 const sdkProxyRoutesBase = new Elysia({ prefix: "" })
-    .all("/auth/v1/*", async ({ request }) => {
+    .group("/auth/v1", (app) => app.all("*", async ({ request }) => {
         const ref = await getProjectRef(request);
         if (!ref) return new Response(JSON.stringify({ error: 'Bad Request', message: 'Missing tenant reference' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
         const ports = await getTenantPorts(ref);
@@ -173,9 +173,8 @@ const sdkProxyRoutesBase = new Elysia({ prefix: "" })
         const url = new URL(request.url);
         const targetUrl = `http://127.0.0.1:${ports.gotruePort}${url.pathname.replace(/^\/auth\/v1/, '')}${url.search}`;
         return executeProxy(request, targetUrl, { linkOrigin: url.origin });
-    })
-
-    .all("/rest/v1/*", async ({ request }) => {
+    }))
+    .group("/rest/v1", (app) => app.all("*", async ({ request }) => {
         const ref = await getProjectRef(request);
         if (!ref) return new Response(JSON.stringify({ error: 'Bad Request', message: 'Missing tenant reference' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
         const ports = await getTenantPorts(ref);
@@ -186,7 +185,7 @@ const sdkProxyRoutesBase = new Elysia({ prefix: "" })
         if (!targetPath || targetPath === '') targetPath = '/';
         const targetUrl = `http://127.0.0.1:${ports.pgrstPort}${targetPath}${url.search}`;
         return executeProxy(request, targetUrl, {});
-    });
+    }));
 
 const graphqlHandler = async ({ request }: any) => {
     const ref = await getProjectRef(request);
@@ -222,5 +221,5 @@ const functionsHandler = async ({ request }: any) => {
 
 export const sdkProxyRoutes = sdkProxyRoutesBase
     .all("/graphql/v1", graphqlHandler)
-    .all("/graphql/v1/*", graphqlHandler)
-    .all("/functions/v1/*", functionsHandler);
+    .group("/graphql/v1", (app) => app.all("*", graphqlHandler))
+    .group("/functions/v1", (app) => app.all("*", functionsHandler));
