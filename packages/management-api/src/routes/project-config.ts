@@ -107,7 +107,10 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
       if (!keys) {
                 return status(404, { error: "Project not found" });
       }
-      return keys;
+      return [
+        { name: "anon", api_key: keys.anon_key },
+        { name: "service_role", api_key: keys.service_role_key }
+      ];
     },
     {
       params: t.Object({
@@ -270,12 +273,25 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
       const authConfig = (settings.auth as Record<string, unknown>) || {};
       const externalConfig = (authConfig.external as Record<string, unknown>) || {};
 
+      const hooksConfig = (authConfig.hooks as Record<string, any>) || {};
+
       const studioCompatibleConfig = {
         ...authConfig,
         external: externalConfig,
         external_providers: Object.keys(externalConfig)
           .filter(key => (externalConfig[key] as Record<string, unknown>)?.client_id)
           .join(","),
+        // Flatten hooks config for CLI / Studio compatibility
+        hook_custom_access_token_enabled: !!hooksConfig.custom_access_token_hook?.enabled,
+        hook_custom_access_token_uri: hooksConfig.custom_access_token_hook?.uri || null,
+        hook_mfa_verification_enabled: !!hooksConfig.mfa_verification_hook?.enabled,
+        hook_mfa_verification_uri: hooksConfig.mfa_verification_hook?.uri || null,
+        hook_password_verification_enabled: !!hooksConfig.password_verification_hook?.enabled,
+        hook_password_verification_uri: hooksConfig.password_verification_hook?.uri || null,
+        hook_send_email_enabled: !!hooksConfig.send_email_hook?.enabled,
+        hook_send_email_uri: hooksConfig.send_email_hook?.uri || null,
+        hook_send_sms_enabled: !!hooksConfig.send_sms_hook?.enabled,
+        hook_send_sms_uri: hooksConfig.send_sms_hook?.uri || null,
       };
 
       return studioCompatibleConfig;
@@ -396,15 +412,16 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
       const [project] = await metaSql`SELECT db_name FROM projects WHERE ref=${params.ref}`;
       if (!project) return status(404, { error: "Project not found" });
 
-      const dbName = project.db_name || `supa_${params.ref}`;
-      const pgHost = appConfig.pgHost || "localhost";
+      // Supabase CLI expects the specific syntax `[YOUR-PASSWORD]` to substitute the password from user input
+      const pgHost = appConfig.baseDomain || "localhost";
       const pgPort = appConfig.pgPort || 5432;
+      const dbName = "postgres"; // CLI expects 'postgres' or similar for direct connections
 
       return {
         pool_mode: "transaction",
         default_pool_size: 15,
         max_client_conn: 200,
-        connection_string: `postgresql://postgres.${params.ref}:${appConfig.pgPassword}@${pgHost}:${pgPort}/${dbName}`,
+        connection_string: `postgresql://postgres.${params.ref}:[YOUR-PASSWORD]@${pgHost}:${pgPort}/${dbName}`,
       };
     },
     { params: t.Object({ ref: t.String() }) }

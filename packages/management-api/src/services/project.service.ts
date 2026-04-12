@@ -266,10 +266,11 @@ export class ProjectService {
       }
     };
 
-    const [pgrstStatus, gotrueStatus, realtimePerTenant, storagePerTenant, kongSystemd, kongDocker, realtimeDocker] = await Promise.all([
+    const [pgrstStatus, gotrueStatus, realtimePerTenant, realtimeSystemd, storagePerTenant, kongSystemd, kongDocker, realtimeDocker] = await Promise.all([
       checkService(`supacloud-pgrst@${ref}`),
       checkService(`supacloud-gotrue@${ref}`),
       checkService(`supacloud-realtime@${ref}`),
+      checkService(`supacloud-realtime`),
       checkService(`supacloud-storage@${ref}`),
       checkService("kong"),
       checkGlobalDocker("supabase-kong"),
@@ -287,21 +288,26 @@ export class ProjectService {
             if (globalRealtimeDocker === "INACTIVE") {
                 globalRealtimeDocker = await checkGlobalDocker("supacloud-realtime");
             }
-            if (globalRealtimeDocker === "ACTIVE_HEALTHY" || realtimeDocker === "ACTIVE_HEALTHY") {
+            if (globalRealtimeDocker === "ACTIVE_HEALTHY" || realtimeDocker === "ACTIVE_HEALTHY" || realtimeSystemd === "ACTIVE_HEALTHY") {
                 const { realtimeService } = await import("./realtime.service");
                 const hasTenant = await realtimeService.getTenant(ref);
                 if (hasTenant) {
-                    try {
-                        const { getProjectDb } = await import("../db");
-                        const dbName = project.db_name || `supa_${ref}`;
-                        const projectDb = getProjectDb(dbName);
-                        // Ensure CDC replication is actively running
-                        const repl = await projectDb`SELECT count(*) as count FROM pg_stat_replication WHERE application_name ILIKE '%realtime%'`;
-                        if (repl[0] && Number(repl[0].count) > 0) {
-                            realtimeStatus = "ACTIVE_HEALTHY";
+                    if (realtimeSystemd === "ACTIVE_HEALTHY") {
+                        // Native Bun Realtime uses pg_listen (no CDC logical replication), so being registered is sufficient
+                        realtimeStatus = "ACTIVE_HEALTHY";
+                    } else {
+                        try {
+                            const { getProjectDb } = await import("../db");
+                            const dbName = project.db_name || `supa_${ref}`;
+                            const projectDb = getProjectDb(dbName);
+                            // Ensure CDC replication is actively running
+                            const repl = await projectDb`SELECT count(*) as count FROM pg_stat_replication WHERE application_name ILIKE '%realtime%'`;
+                            if (repl[0] && Number(repl[0].count) > 0) {
+                                realtimeStatus = "ACTIVE_HEALTHY";
+                            }
+                        } catch(e) {
+                            // Keep realtimeStatus as INACTIVE locally if CDC replication fetch fails
                         }
-                    } catch(e) {
-                        // Keep realtimeStatus as INACTIVE locally if CDC replication fetch fails
                     }
                 }
             }
