@@ -326,7 +326,16 @@ export class S3Driver implements StorageDriver {
       const file = s3.file(`${bucket}/${cleanFileName}`);
       if (!await file.exists()) return null;
       
-      return new Response(file);
+      // Eagerly read content to avoid S3File stream consumption issues
+      // when the response body gets re-wrapped in route handlers
+      const content = await file.arrayBuffer();
+      const contentType = file.type || 'application/octet-stream';
+      return new Response(content, {
+        headers: {
+          'Content-Type': contentType,
+          'Content-Length': String(content.byteLength),
+        }
+      });
     } catch {
       return null;
     }

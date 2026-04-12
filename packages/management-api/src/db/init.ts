@@ -242,6 +242,7 @@ export async function initDatabase() {
             path_tokens text[] generated always as (string_to_array(name, '/')) stored,
             version text default gen_random_uuid()
         );
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_objects_bucketid_name ON storage.objects (bucket_id, name);
         CREATE TABLE IF NOT EXISTS storage.s3_multipart_uploads (
             id text not null primary key,
             in_progress_size bigint not null default 0,
