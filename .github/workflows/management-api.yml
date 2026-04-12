@@ -69,13 +69,13 @@ jobs:
         working-directory: packages/management-api
         run: bun src/db/init.ts
         env:
-          DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
 
       - name: Run tests
         working-directory: packages/management-api
         run: bun test
         env:
-          DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
 
   shell-scripts-lint:
     name: Shell Scripts Lint
