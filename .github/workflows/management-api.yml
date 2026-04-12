@@ -66,14 +66,23 @@ jobs:
           - 9999:9999
         env:
           GOTRUE_LOG_LEVEL: info
+          GOTRUE_API_HOST: 0.0.0.0
+          GOTRUE_API_PORT: 9999
           GOTRUE_SITE_URL: http://127.0.0.1:9090
           GOTRUE_URI_ALLOW_LIST: http://127.0.0.1:9090
           GOTRUE_DB_DRIVER: postgres
           GOTRUE_DB_DATABASE_URL: postgres://postgres:postgres@postgres:5432/postgres
-          GOTRUE_API_HOST: 0.0.0.0
-          GOTRUE_API_PORT: 9999
           GOTRUE_JWT_SECRET: super-secret-jwt-token-with-at-least-32-characters-long
+          GOTRUE_JWT_AUD: authenticated
+          GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
           GOTRUE_JWT_EXP: 3600
+          GOTRUE_MAILER_AUTOCONFIRM: "true"
+          GOTRUE_EXTERNAL_ANONYMOUS_USERS_ENABLED: "true"
+          GOTRUE_SECURITY_UPDATE_PASSWORD_REQUIRE_REAUTHENTICATION: "true"
+          GOTRUE_SECURITY_REFRESH_TOKEN_ROTATION_ENABLED: "true"
+          GOTRUE_PASSWORD_MIN_LENGTH: "6"
+          API_EXTERNAL_URL: http://127.0.0.1:9090
+          GOTRUE_OPERATOR_TOKEN: super-secret-jwt-token-with-at-least-32-characters-long
       realtime:
         image: supabase/realtime:latest
         ports:

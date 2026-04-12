@@ -138,12 +138,31 @@ describe("SDK E2E Compliance Suite", () => {
             expect(error).toBeNull();
             expect(data.session).not.toBeNull();
             expect(data.session?.access_token).toBeDefined();
+            expect(data.session?.refresh_token).toBeDefined();
+            expect(data.session?.token_type).toBe('bearer');
+            expect(data.session?.expires_in).toBeGreaterThan(0);
+        });
+
+        test("refreshSession", async () => {
+            if (!isBooted) return;
+            const { data: signInData } = await supabase.auth.signInWithPassword({
+                email: testEmail,
+                password: testPassword
+            });
+            const refreshToken = signInData.session?.refresh_token;
+            expect(refreshToken).toBeDefined();
+
+            const { data, error } = await supabase.auth.refreshSession();
+            expect(error).toBeNull();
+            expect(data.session).not.toBeNull();
+            expect(data.session?.access_token).toBeDefined();
+            expect(data.session?.refresh_token).not.toBe(refreshToken);
         });
 
         test("getSession & signOut", async () => {
             if (!isBooted) return;
             const { data: sessionData } = await supabase.auth.getSession();
-            expect(sessionData.session).toBeDefined(); // From sign in
+            expect(sessionData.session).toBeDefined();
 
             const { error: signOutError } = await supabase.auth.signOut();
             expect(signOutError).toBeNull();
@@ -152,12 +171,13 @@ describe("SDK E2E Compliance Suite", () => {
             expect(noSessionData.session).toBeNull();
         });
 
-        test("admin.listUsers", async () => {
+        test("admin.listUsers with pagination headers", async () => {
             if (!isBooted) return;
-            const { data, error } = await supabaseAdmin.auth.admin.listUsers();
+            const { data, error } = await supabaseAdmin.auth.admin.listUsers({ page: 1, perPage: 1 });
             expect(error).toBeNull();
             expect(data.users).toBeInstanceOf(Array);
             expect(data.users.length).toBeGreaterThan(0);
+            expect(data.aud).toBe('authenticated');
         });
     });
 
@@ -228,6 +248,20 @@ describe("SDK E2E Compliance Suite", () => {
 
             expect(deleteError).toBeNull();
         });
+
+        test("pagination with count and range headers", async () => {
+            if (!isBooted) return;
+            for (let i = 0; i < 5; i++) {
+                await supabaseAdmin.from(tableName).insert([{ name: `Item ${i}` }]).select();
+            }
+            const { data, error, count } = await supabaseAdmin
+                .from(tableName)
+                .select('*', { count: 'exact' })
+                .range(0, 1);
+            expect(error).toBeNull();
+            expect(data).toHaveLength(2);
+            expect(count).toBeGreaterThan(0);
+        });
     });
 
     describe("Storage API Compliance", () => {
@@ -270,6 +304,17 @@ describe("SDK E2E Compliance Suite", () => {
             const { data } = supabaseAdmin.storage.from(bucketName).getPublicUrl(fileName);
             expect(data.publicUrl).toBeDefined();
             expect(data.publicUrl).toContain(PROXY_URL);
+        });
+
+        test("createSignedUrl with transform", async () => {
+            if (!isBooted) return;
+            const { data, error } = await supabaseAdmin.storage.from(bucketName).createSignedUrl(fileName, 60, {
+                transform: { width: 100 }
+            });
+            expect(error).toBeNull();
+            expect(data?.signedUrl).toBeDefined();
+            expect(data?.signedUrl).toContain('width=100');
+            expect(data?.signedUrl).toContain('/render/image/sign/');
         });
     });
 
