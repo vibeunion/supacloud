@@ -221,7 +221,7 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
                     dbName,
                     `SELECT EXISTS (
                         SELECT FROM information_schema.tables 
-                        WHERE table_schema = 'public' 
+                        WHERE table_schema IN ('public', 'supabase_migrations')
                         AND table_name = 'schema_migrations'
                     );`
                 );
@@ -229,8 +229,16 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
                 const tableExists = (migrationTableExists as { rows?: Array<{ exists: boolean }> }).rows?.[0]?.exists ?? false;
 
                 if (!tableExists) {
+                    await db.executeQuery(dbName, `CREATE SCHEMA IF NOT EXISTS supabase_migrations`);
                     await db.executeQuery(dbName, `
-                        CREATE TABLE IF NOT EXISTS schema_migrations (
+                        CREATE TABLE IF NOT EXISTS supabase_migrations.schema_migrations (
+                            version BIGINT PRIMARY KEY,
+                            statements TEXT[],
+                            name TEXT
+                        );
+                    `);
+                    await db.executeQuery(dbName, `
+                        CREATE TABLE IF NOT EXISTS public.schema_migrations (
                             version VARCHAR(255) PRIMARY KEY,
                             statements TEXT[],
                             name TEXT
@@ -245,18 +253,11 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
 
                 if (isCliFormat) {
                     const query = (body as Record<string, unknown>).query as string;
-                    const now = new Date();
-                    const ts = now.getFullYear().toString() +
-                        String(now.getMonth() + 1).padStart(2, '0') +
-                        String(now.getDate()).padStart(2, '0') +
-                        String(now.getHours()).padStart(2, '0') +
-                        String(now.getMinutes()).padStart(2, '0') +
-                        String(now.getSeconds()).padStart(2, '0');
-                    const version = ts;
+                    const version = Math.floor(Date.now() / 1000);
 
                     const existing = await db.executeQuery(
                         dbName,
-                        `SELECT version FROM schema_migrations WHERE version = '${version}'`
+                        `SELECT version FROM supabase_migrations.schema_migrations WHERE version = ${version}`
                     );
                     if ((existing as { rows?: unknown[] }).rows?.length) {
                         set.status = 409;
@@ -264,7 +265,8 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
                     }
 
                     await db.executeQuery(dbName, query);
-                    await db.executeQuery(dbName, `INSERT INTO schema_migrations (version, statements, name) VALUES ('${version}', ARRAY['${query.replace(/'/g, "''")}'], 'cli_push');`);
+                    await db.executeQuery(dbName, `INSERT INTO supabase_migrations.schema_migrations (version, statements, name) VALUES (${version}, ARRAY['${query.replace(/'/g, "''")}'], 'cli_push');`);
+                    await db.executeQuery(dbName, `INSERT INTO public.schema_migrations (version, statements, name) VALUES ('${version}', ARRAY['${query.replace(/'/g, "''")}'], 'cli_push');`).catch(() => {});
 
                     return { version, statements: [query] };
                 }
@@ -272,18 +274,11 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
                 if (isStructuredFormat) {
                     const { name, sql } = body as { name: string; sql: string };
 
-                    const now = new Date();
-                    const ts = now.getFullYear().toString() +
-                        String(now.getMonth() + 1).padStart(2, '0') +
-                        String(now.getDate()).padStart(2, '0') +
-                        String(now.getHours()).padStart(2, '0') +
-                        String(now.getMinutes()).padStart(2, '0') +
-                        String(now.getSeconds()).padStart(2, '0');
-                    const version = `${ts}_${name.replace(/[^a-zA-Z0-9_]/g, "_")}`;
+                    const version = Math.floor(Date.now() / 1000);
 
                     const existingMigration = await db.executeQuery(
                         dbName,
-                        `SELECT version FROM schema_migrations WHERE version LIKE '%${name.replace(/[^a-zA-Z0-9_]/g, "_")}%'`
+                        `SELECT version FROM supabase_migrations.schema_migrations WHERE name = '${name.replace(/'/g, "''")}'`
                     );
 
                     if ((existingMigration as { rows?: unknown[] }).rows?.length) {
@@ -292,7 +287,8 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
                     }
 
                     await db.executeQuery(dbName, sql);
-                    await db.executeQuery(dbName, `INSERT INTO schema_migrations (version, statements, name) VALUES ('${version}', ARRAY['${sql.replace(/'/g, "''")}'], '${name.replace(/'/g, "''")}');`);
+                    await db.executeQuery(dbName, `INSERT INTO supabase_migrations.schema_migrations (version, statements, name) VALUES (${version}, ARRAY['${sql.replace(/'/g, "''")}'], '${name.replace(/'/g, "''")}');`);
+                    await db.executeQuery(dbName, `INSERT INTO public.schema_migrations (version, statements, name) VALUES ('${version}', ARRAY['${sql.replace(/'/g, "''")}'], '${name.replace(/'/g, "''")}');`).catch(() => {});
 
                     return { version, name };
                 }
@@ -326,11 +322,20 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
 
             try {
                 const dbName = `supa_${params.ref}`;
-                const result = await db.executeQuery(
-                    dbName,
-                    `SELECT version, statements, name FROM schema_migrations ORDER BY version ASC;`
-                );
-                const rows = (result as { rows?: Array<Record<string, unknown>> }).rows || [];
+                let rows: Array<Record<string, unknown>> = [];
+                try {
+                    const result = await db.executeQuery(
+                        dbName,
+                        `SELECT version, statements, name FROM supabase_migrations.schema_migrations ORDER BY version ASC;`
+                    );
+                    rows = (result as { rows?: Array<Record<string, unknown>> }).rows || [];
+                } catch {
+                    const result = await db.executeQuery(
+                        dbName,
+                        `SELECT version, statements, name FROM public.schema_migrations ORDER BY version ASC;`
+                    );
+                    rows = (result as { rows?: Array<Record<string, unknown>> }).rows || [];
+                }
                 return rows.map((row) => ({
                     version: row.version,
                     statements: row.statements || [],

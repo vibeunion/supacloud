@@ -84,17 +84,21 @@ async function bundleFunction(
   outdir: string,
   outName: string,
   minify: boolean = false,
+  importMapPath?: string,
 ): Promise<string | null> {
   try {
-    const result = await Bun.build({
+    const buildOptions: any = {
       entrypoints: [entrypoint],
       outdir,
       naming: `${outName}.[ext]`,
       target: "bun",
       minify,
-      // Inline everything — no external dependencies at runtime
       external: [],
-    });
+    };
+    if (importMapPath) {
+      buildOptions.importMap = importMapPath;
+    }
+    const result = await Bun.build(buildOptions);
 
     if (!result.success) {
       const messages = result.logs.map((l: { message?: string }) => l.message || String(l)).join("\n");
@@ -243,14 +247,26 @@ export const edgeFunctionService = {
 
       // 1. Write all files to staging
       for (const [relPath, content] of Object.entries(files)) {
-        const filePath = path.join(stageDir, relPath);
-        await fs.mkdir(path.dirname(filePath), { recursive: true });
-        await Bun.write(filePath, content);
+          const filePath = path.join(stageDir, relPath);
+          await fs.mkdir(path.dirname(filePath), { recursive: true });
+          await Bun.write(filePath, content);
       }
 
-      // 2. Bundle from entrypoint
+      // 2. Resolve import_map if present
+      let importMapPath: string | undefined;
+      const importMapCandidates = ['import_map.json', 'import_map', 'deno.json', 'deno.jsonc'];
+      for (const candidate of importMapCandidates) {
+          const candidatePath = path.join(stageDir, candidate);
+          try {
+              await fs.access(candidatePath);
+              importMapPath = candidatePath;
+              break;
+          } catch { /* not found */ }
+      }
+
+      // 3. Bundle from entrypoint
       const entrypointPath = path.join(stageDir, entrypoint);
-      const bundled = await bundleFunction(entrypointPath, dir, slug, minify);
+      const bundled = await bundleFunction(entrypointPath, dir, slug, minify, importMapPath);
 
       if (!bundled) {
         // Cleanup staging on failure

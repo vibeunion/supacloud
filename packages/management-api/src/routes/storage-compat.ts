@@ -1451,7 +1451,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         }
 
         // Hard cap: TUS in-memory assembly cannot safely handle files beyond 100MB
-        const TUS_MAX_SIZE = 100 * 1024 * 1024;
+        const TUS_MAX_SIZE = 50 * 1024 * 1024 * 1024;
         if (uploadLength > TUS_MAX_SIZE) {
             return status(413, { statusCode: "413", error: 'Payload too large', message: `TUS uploads are limited to ${TUS_MAX_SIZE / (1024 * 1024)}MB. Use standard upload for larger files.` });
         }
