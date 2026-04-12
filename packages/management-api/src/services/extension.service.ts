@@ -53,7 +53,7 @@ export class ExtensionService {
     /**
      * Enable extension (direct CREATE EXTENSION)
      */
-    async enableExtension(projectRef: string, extension: string, schema?: string, version?: string): Promise<{ message: string }> {
+    async enableExtension(projectRef: string, extension: string, schema?: string, version?: string): Promise<ExtensionInfo> {
         const dbName = `supa_${projectRef}`;
         const db = this.getTenantDb(dbName);
         try {
@@ -62,21 +62,30 @@ export class ExtensionService {
             if (version) sql += ` VERSION '${version.replace(/'/g, "''")}'`;
             sql += ` CASCADE`;
             await db.unsafe(sql);
-            return { message: `Extension ${extension} enabled successfully` };
+
+            const rows = await db`
+                SELECT name, default_version, installed_version, comment,
+                    installed_version IS NOT NULL AS is_installed
+                FROM pg_available_extensions WHERE name = ${extension}
+            `;
+            return (rows[0] as ExtensionInfo) || { name: extension, default_version: version || '', installed_version: version || null, comment: '', is_installed: true };
         } finally {
             await db.close();
         }
     }
 
-    /**
-     * Disable extension (direct DROP EXTENSION)
-     */
-    async disableExtension(projectRef: string, extension: string): Promise<{ message: string }> {
+    async disableExtension(projectRef: string, extension: string): Promise<ExtensionInfo> {
         const dbName = `supa_${projectRef}`;
         const db = this.getTenantDb(dbName);
         try {
             await db.unsafe(`DROP EXTENSION IF EXISTS "${extension}" CASCADE`);
-            return { message: `Extension ${extension} disabled successfully` };
+
+            const rows = await db`
+                SELECT name, default_version, installed_version, comment,
+                    installed_version IS NOT NULL AS is_installed
+                FROM pg_available_extensions WHERE name = ${extension}
+            `;
+            return (rows[0] as ExtensionInfo) || { name: extension, default_version: '', installed_version: null, comment: '', is_installed: false };
         } finally {
             await db.close();
         }

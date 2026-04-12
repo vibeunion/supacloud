@@ -176,12 +176,16 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
                 return { error: "Project not found" };
             }
 
-            const { sql } = body;
-
             try {
                 const dbName = `supa_${params.ref}`;
-                const result = await db.executeQuery(dbName, sql);
-                return result;
+                const sqlQuery = body.query || body.sql;
+                if (!sqlQuery) {
+                    set.status = 400;
+                    return { error: "query or sql is required" };
+                }
+                const result = await db.executeQuery(dbName, sqlQuery);
+                const rows = (result as { rows?: unknown[] }).rows || result;
+                return { result: Array.isArray(rows) ? rows : [rows] };
             } catch (error: unknown) {
                 set.status = 500;
                 return {
@@ -195,7 +199,8 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
                 ref: t.String({ minLength: 1 }),
             }),
             body: t.Object({
-                sql: t.String({ minLength: 1 }),
+                sql: t.Optional(t.String()),
+                query: t.Optional(t.String()),
             }),
         }
     )
