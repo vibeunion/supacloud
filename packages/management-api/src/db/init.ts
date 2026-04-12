@@ -127,6 +127,15 @@ export async function initDatabase() {
       created_at TIMESTAMPTZ DEFAULT NOW()
     );
 
+    CREATE TABLE IF NOT EXISTS project_config (
+      project_ref VARCHAR(20) PRIMARY KEY REFERENCES projects(ref) ON DELETE CASCADE,
+      postgrest_port INTEGER,
+      gotrue_port INTEGER,
+      realtime_port INTEGER,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
   `;
 
 
@@ -150,13 +159,13 @@ export async function initDatabase() {
 
     const result = await sql`
       SELECT COUNT(*) as count FROM information_schema.tables 
-      WHERE table_schema = 'public' AND table_name IN ('organizations', 'projects', 'project_tasks', 'platform_settings', 'project_secrets', 'deployment_history', 'system_tus_uploads', 'system_tus_chunks', 'system_signed_uploads')
+      WHERE table_schema = 'public' AND table_name IN ('organizations', 'projects', 'project_tasks', 'platform_settings', 'project_secrets', 'deployment_history', 'system_tus_uploads', 'system_tus_chunks', 'system_signed_uploads', 'project_config')
     `;
     
     const tableCount = Number(result[0]?.count || 0);
     logger.info(`Found ${tableCount} tables in database`);
 
-    if (tableCount < 9) {
+    if (tableCount < 10) {
       logger.info("Executing DDL statements...");
       await sql.unsafe(ddlQuery);
       logger.info("DDL executed successfully.");
@@ -199,14 +208,14 @@ export async function initDatabase() {
 
     const [verify] = await sql`
       SELECT COUNT(*) as count FROM information_schema.tables 
-      WHERE table_schema = 'public' AND table_name IN ('organizations', 'projects', 'project_tasks', 'platform_settings', 'project_secrets', 'deployment_history', 'system_tus_uploads', 'system_tus_chunks', 'system_signed_uploads')
+      WHERE table_schema = 'public' AND table_name IN ('organizations', 'projects', 'project_tasks', 'platform_settings', 'project_secrets', 'deployment_history', 'system_tus_uploads', 'system_tus_chunks', 'system_signed_uploads', 'project_config')
     `;
     
     const finalCount = Number(verify?.count || 0);
-    logger.info(`Database initialized successfully! Tables verified: ${finalCount}/9`);
+    logger.info(`Database initialized successfully! Tables verified: ${finalCount}/10`);
     
-    if (finalCount < 9) {
-      throw new Error(`Table creation verified but failed. Expected 9 tables, got ${finalCount}`);
+    if (finalCount < 10) {
+      throw new Error(`Table creation verified but failed. Expected 10 tables, got ${finalCount}`);
     }
   } catch (error: unknown) {
     logger.error("Failed to initialize database:", { error: error instanceof Error ? error.message : String(error) });
