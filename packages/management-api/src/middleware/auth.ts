@@ -2,10 +2,45 @@ import { config } from "../config";
 import { sql as metaSql } from "../db";
 import { verifyMcpToken } from "../mcp/token";
 
-/**
- * Validate the Authorization header. Returns error response body if invalid,
- * or undefined if the request is authorized.
- */
+async function verifyProjectJwt(token: string): Promise<{ role: string; ref: string } | null> {
+  try {
+    const parts = token.split(".");
+    if (parts.length !== 3) return null;
+
+    const header = JSON.parse(atob(parts[0]));
+    if (header.alg !== "HS256") return null;
+
+    const payload = JSON.parse(atob(parts[1]));
+    if (!payload.sub || !payload.iss) return null;
+
+    const issMatch = payload.iss.match(/supabase\.co|supacloud/);
+    if (!issMatch && !payload.role) return null;
+
+    const refFromIss = payload.iss.split(".")[0]?.replace("https://", "") || payload.ref;
+    if (!refFromIss) return null;
+
+    const [project] = await metaSql`
+      SELECT ref, jwt_secret FROM projects
+      WHERE ref = ${refFromIss} AND status = 'active'
+      LIMIT 1
+    `;
+    if (!project?.jwt_secret) return null;
+
+    const encoder = new TextEncoder();
+    const key = await crypto.subtle.importKey("raw", encoder.encode(project.jwt_secret), { name: "HMAC", hash: "SHA-256" }, false, ["verify"]);
+    const sigBuf = Buffer.from(parts[2], "base64url");
+    const data = encoder.encode(`${parts[0]}.${parts[1]}`);
+    const valid = await crypto.subtle.verify("HMAC", key, sigBuf, data);
+    if (!valid) return null;
+
+    if (payload.exp && payload.exp < Date.now() / 1000) return null;
+
+    return { role: payload.role || "authenticated", ref: refFromIss };
+  } catch {
+    return null;
+  }
+}
+
 export async function checkAuth(request: Request): Promise<{ status: number; body: { error: string } } | undefined> {
   const authorization = request.headers.get("authorization");
 
@@ -23,7 +58,6 @@ export async function checkAuth(request: Request): Promise<{ status: number; bod
     return undefined;
   }
 
-  // Verify if it's a valid Studio Session HMAC Token
   try {
     const parts = token.split(".");
     if (parts.length === 2) {
@@ -37,38 +71,41 @@ export async function checkAuth(request: Request): Promise<{ status: number; bod
         const sigBuf = Buffer.from(sigHex, 'hex');
         const expBuf = Buffer.from(expected, 'hex');
         if (sigBuf.length === expBuf.length && crypto.timingSafeEqual(sigBuf, expBuf)) {
-           return undefined; // Authorized as studio user (admin)
+           return undefined;
         }
       }
     }
-  } catch { } // Fall through to other token checks
+  } catch { }
 
-  // Verify if it's a valid MCP token
   const mcpPayload = await verifyMcpToken(token);
   let role = mcpPayload?.role;
   let ref = mcpPayload?.ref;
 
-  // If not MCP token, maybe it's service_role_key
   if (!mcpPayload && token.includes(".")) {
-    try {
-      const rows = await metaSql`
-        SELECT ref FROM projects
-        WHERE service_role_key = ${token}
-          AND status = 'active'
-        LIMIT 1
-      `;
-      if (rows.length > 0) {
-        role = "project";
-        ref = rows[0].ref as string;
+    const [project] = await metaSql`
+      SELECT ref FROM projects
+      WHERE service_role_key = ${token}
+        AND status = 'active'
+      LIMIT 1
+    `;
+    if (project) {
+      role = "project";
+      ref = project.ref as string;
+    }
+
+    if (!role) {
+      const jwtResult = await verifyProjectJwt(token);
+      if (jwtResult) {
+        role = jwtResult.role === "service_role" ? "project" : "project";
+        ref = jwtResult.ref;
       }
-    } catch { } // Ignore DB errors, fall through
+    }
   }
 
   if (role === "admin") {
     return undefined;
   }
 
-  // If tenant-scoped, strictly enforce URL path scoping
   if (role === "project" && ref) {
     const url = new URL(request.url);
     if (!url.pathname.startsWith(`/v1/projects/${ref}`)) {
