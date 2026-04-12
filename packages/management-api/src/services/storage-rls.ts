@@ -626,7 +626,12 @@ export class StorageRLS {
           };
       });
     } catch (e: unknown) {
-      logger.error(`[StorageRLS] List access denied:`, { error: e instanceof Error ? e.message : String(e) });
+      const msg = e instanceof Error ? e.message : String(e);
+      logger.error(`[StorageRLS] List access denied:`, { error: msg });
+      // Preserve specific errors so the route handler can map them correctly
+      if (msg === 'BUCKET_NOT_FOUND' || msg === 'Access Denied' || msg === 'PROJECT_NOT_FOUND') {
+        throw e;
+      }
       throw new Error("RLS_VIOLATION_OR_NOT_FOUND");
     }
   }

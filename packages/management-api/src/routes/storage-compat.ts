@@ -615,9 +615,8 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
                 );
             }
 
-            const info = await StorageRLS.getObjectInfo(ref, params.bucket, filePath, undefined, true);
             return {
-                Id: info?.id || `${params.bucket}/${filePath}`,
+                Id: `${params.bucket}/${filePath}`,
                 Key: `${params.bucket}/${filePath}`,
                 path: filePath,
                 fullPath: `${params.bucket}/${filePath}`
@@ -655,9 +654,8 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
 
             if (!finalPermit.permitted) return status(finalPermit.error === 'Bucket not found' || finalPermit.error === 'Object not found' ? 404 : (finalPermit.error === 'Failed to write physical object' ? 500 : 403), { statusCode: finalPermit.error === 'Bucket not found' || finalPermit.error === 'Object not found' ? '404' : (finalPermit.error === 'Failed to write physical object' ? '500' : '403'), error: finalPermit.error === 'Object not found' ? 'Not Found' : (finalPermit.error === 'Failed to write physical object' ? 'Internal' : 'Forbidden'), message: finalPermit.error || 'Access Denied.' });
 
-            const info = await StorageRLS.getObjectInfo(ref, params.bucket, filePath, undefined, true);
             return {
-                Id: info?.id || `${params.bucket}/${filePath}`,
+                Id: `${params.bucket}/${filePath}`,
                 Key: `${params.bucket}/${filePath}`,
                 path: filePath,
                 fullPath: `${params.bucket}/${filePath}`
@@ -1028,9 +1026,8 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             // Consume the signed upload token (one-time use)
             await SignedStore.delete(token);
 
-            const info = await StorageRLS.getObjectInfo(ref, params.bucket, filePath, undefined, true);
             return {
-                Id: info?.id || `${params.bucket}/${filePath}`,
+                Id: `${params.bucket}/${filePath}`,
                 Key: `${params.bucket}/${filePath}`,
                 path: filePath,
                 fullPath: `${params.bucket}/${filePath}`
@@ -1572,9 +1569,8 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
                 }
 
                 await TusStore.delete(params.uploadId);
-                const info = await StorageRLS.getObjectInfo(upload.ref, upload.bucket, upload.objectName, undefined, true);
                 return {
-                    Id: info?.id || `${upload.bucket}/${upload.objectName}`,
+                    Id: `${upload.bucket}/${upload.objectName}`,
                     Key: `${upload.bucket}/${upload.objectName}`,
                     path: upload.objectName,
                     fullPath: `${upload.bucket}/${upload.objectName}`
