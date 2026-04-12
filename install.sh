@@ -1015,6 +1015,7 @@ Restart=always
 RestartSec=5
 Environment=PORT=9000
 Environment=WORKER_POOL_SIZE=4
+EnvironmentFile=-/etc/supabase/management-api.env
 LimitNOFILE=65536
 
 [Install]
