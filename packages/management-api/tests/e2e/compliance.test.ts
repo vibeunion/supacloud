@@ -51,9 +51,9 @@ describe("SDK E2E Compliance Suite", () => {
         console.log(`[E2E] Tenant ${tenantRef} created successfully.`);
 
         if (process.env.TEST_FIXED_JWT_SECRET) {
-            console.log(`[E2E] Running in CI mode, redirecting tenant proxy ports to local docker containers (3000/9999)`);
+            console.log(`[E2E] Running in CI mode, redirecting tenant proxy ports to local docker containers (3000/9999/4000)`);
             const { sql } = await import('../../src/db');
-            await sql`UPDATE project_config SET postgrest_port = 3000, gotrue_port = 9999 WHERE project_ref = ${tenantRef}`;
+            await sql`UPDATE project_config SET postgrest_port = 3000, gotrue_port = 9999, realtime_port = 4000 WHERE project_ref = ${tenantRef}`;
         }
 
         // Wait a small moment for dynamic routing configs to settle
@@ -230,14 +230,14 @@ describe("SDK E2E Compliance Suite", () => {
         const fileName = "hello.txt";
 
         test("createBucket", async () => {
-            if (!isBooted || process.env.TEST_FIXED_JWT_SECRET) return;
+            if (!isBooted) return;
             const { data, error } = await supabaseAdmin.storage.createBucket(bucketName, { public: true });
             expect(error).toBeNull();
             expect(data?.name).toBe(bucketName);
         });
 
         test("upload file", async () => {
-            if (!isBooted || process.env.TEST_FIXED_JWT_SECRET) return;
+            if (!isBooted) return;
             const fileBlob = new Blob(["Hello SupaCloud!"], { type: "text/plain" });
             const { data, error } = await supabaseAdmin.storage.from(bucketName).upload(fileName, fileBlob);
             expect(error).toBeNull();
@@ -245,7 +245,7 @@ describe("SDK E2E Compliance Suite", () => {
         });
 
         test("download file", async () => {
-            if (!isBooted || process.env.TEST_FIXED_JWT_SECRET) return;
+            if (!isBooted) return;
             const { data, error } = await supabaseAdmin.storage.from(bucketName).download(fileName);
             expect(error).toBeNull();
             const text = await data?.text();
@@ -253,7 +253,7 @@ describe("SDK E2E Compliance Suite", () => {
         });
 
         test("list files", async () => {
-            if (!isBooted || process.env.TEST_FIXED_JWT_SECRET) return;
+            if (!isBooted) return;
             const { data, error } = await supabaseAdmin.storage.from(bucketName).list();
             expect(error).toBeNull();
             expect(data).toBeInstanceOf(Array);
@@ -261,7 +261,7 @@ describe("SDK E2E Compliance Suite", () => {
         });
 
         test("getPublicUrl", async () => {
-            if (!isBooted || process.env.TEST_FIXED_JWT_SECRET) return;
+            if (!isBooted) return;
             const { data } = supabaseAdmin.storage.from(bucketName).getPublicUrl(fileName);
             expect(data.publicUrl).toBeDefined();
             expect(data.publicUrl).toContain(PROXY_URL);
@@ -270,7 +270,7 @@ describe("SDK E2E Compliance Suite", () => {
 
     describe("Realtime / postgres_changes Compliance", () => {
         test("channel.on('postgres_changes').subscribe", async () => {
-            if (!isBooted || process.env.TEST_FIXED_JWT_SECRET) return;
+            if (!isBooted) return;
             const channelName = "db-changes";
             const channel = supabaseAdmin.channel(channelName);
             

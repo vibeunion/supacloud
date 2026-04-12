@@ -74,6 +74,29 @@ jobs:
           GOTRUE_API_PORT: 9999
           GOTRUE_JWT_SECRET: super-secret-jwt-token-with-at-least-32-characters-long
           GOTRUE_JWT_EXP: 3600
+      realtime:
+        image: supabase/realtime:latest
+        ports:
+          - 4000:4000
+        env:
+          PORT: 4000
+          DB_HOST: postgres
+          DB_PORT: 5432
+          DB_NAME: postgres
+          DB_USER: postgres
+          DB_PASSWORD: postgres
+          JWT_SECRET: super-secret-jwt-token-with-at-least-32-characters-long
+          REPLICATION_MODE: RLS
+          REPLICATION_POLL_INTERVAL: 100
+          SECRET_KEY_BASE: super-secret-jwt-token-with-at-least-32-characters-long-realtime-base
+      minio:
+        image: minio/minio:latest
+        ports:
+          - 9000:9000
+        env:
+          MINIO_ROOT_USER: minioadmin
+          MINIO_ROOT_PASSWORD: minioadmin
+        command: server /data
 
     steps:
       - name: Checkout code
@@ -103,6 +126,11 @@ jobs:
         env:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
           TEST_FIXED_JWT_SECRET: super-secret-jwt-token-with-at-least-32-characters-long
+          S3_ENDPOINT: http://127.0.0.1:9000
+          S3_REGION: us-east-1
+          S3_ACCESS_KEY: minioadmin
+          S3_SECRET_KEY: minioadmin
+          S3_FORCE_PATH_STYLE: true
 
   shell-scripts-lint:
     name: Shell Scripts Lint
