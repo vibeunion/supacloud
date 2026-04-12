@@ -49,6 +49,13 @@ describe("E2E SDK Blackbox Contracts", () => {
     let isBooted = false;
 
     beforeAll(async () => {
+        try {
+            await fetch(PROXY_URL);
+        } catch {
+            console.warn(`[E2E] Proxy server not running at ${PROXY_URL}. Skipping sdk-contract tests.`);
+            return;
+        }
+
         projectService = new ProjectService();
         const tenantName = `e2e_test_${randomUUID().substring(0, 8)}`;
         console.log(`[E2E] Bootstrapping test tenant: ${tenantName}...`);

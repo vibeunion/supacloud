@@ -270,11 +270,23 @@ export class StorageRLS {
            if (!upsert && mockObjects.has(bucketId + '/' + objectName)) {
                return { permitted: false, error: 'The resource already exists' };
            }
+           if (physicalAction) {
+               try {
+                   await physicalAction();
+               } catch (e: any) {
+                   return { permitted: false, error: e.message === 'PHYSICAL_UPLOAD_FAILED' ? 'Failed to write physical object' : e.message };
+               }
+           }
            if (!dryRun) mockObjects.set(bucketId + '/' + objectName, { metadata, updated: new Date().toISOString() });
        }
        if (action === 'download' || action === 'delete') {
            if (!mockObjects.has(bucketId + '/' + objectName)) return { permitted: false, error: 'Object not found' };
-           if (action === 'delete') mockObjects.delete(bucketId + '/' + objectName);
+           if (action === 'delete') {
+               if (physicalAction) {
+                   try { await physicalAction(); } catch (e) {}
+               }
+               mockObjects.delete(bucketId + '/' + objectName);
+           }
        }
        return { permitted: true };
     }

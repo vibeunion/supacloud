@@ -3,12 +3,12 @@ import { getProjectDb } from "../db";
 import { config } from "../config";
 import { sql as metaSql } from "../db";
 import { logger } from "../utils/logger";
+import { DEFAULT_CORS_HEADERS, DEFAULT_CORS_EXPOSED } from '../services/gateway.service';
 
 async function getProjectRef(request: Request): Promise<string> {
     const refHeader = request.headers.get("x-project-ref") || request.headers.get("x-supabase-project");
     if (refHeader) return refHeader;
     
-    // Parse Host header (e.g. ref.supabase.co -> ref, or ref.api.supabase.co)
     const host = request.headers.get('host');
     if (host) {
         if (host.includes('.supabase.co') || (config.baseDomain && host.includes(config.baseDomain))) {
@@ -40,7 +40,6 @@ async function getProjectRef(request: Request): Promise<string> {
         } catch(e) {}
     }
 
-    // Test backdoor
     if (process.env.NODE_ENV !== 'production') {
         if (key === 'test-token' || auth.includes('test-token') || auth.includes('jVFIR-MB7rNfUuJaUH') || key.includes('jVFIR-MB7rNfUuJaUH')) {
              return 'test_mock';
@@ -53,7 +52,6 @@ async function getProjectRef(request: Request): Promise<string> {
 async function getTenantPorts(ref: string): Promise<{ gotruePort: number, pgrstPort: number } | null> {
     if (ref === 'test_mock') return { gotruePort: 9999, pgrstPort: 3000 };
     
-    // In SupaCloud, tenant ports are stored in projects or project_config table
     try {
         const rows = await metaSql`SELECT postgrest_port, gotrue_port FROM project_config WHERE project_ref = ${ref} LIMIT 1`;
         if (rows.length > 0 && rows[0].postgrest_port && rows[0].gotrue_port) {
@@ -62,18 +60,32 @@ async function getTenantPorts(ref: string): Promise<{ gotruePort: number, pgrstP
                 gotruePort: rows[0].gotrue_port as number
             };
         }
-        // Fallback or missing
         return null;
     } catch (e) {
         logger.error(`Failed to get ports for tenant ${ref}`, { error: e instanceof Error ? e.message : String(e) });
         return null;
     }
 }
-import { DEFAULT_CORS_HEADERS, DEFAULT_CORS_EXPOSED } from '../services/gateway.service';
 
-async function executeProxy(request: Request, _set: any, targetUrl: string, interceptors: { linkOrigin?: string, ref?: string, extraHeaders?: Record<string, string> }) {
+function applyCorsHeaders(proxyHeaders: Headers, request: Request) {
+    const origin = request.headers.get('origin');
+    if (!origin) return;
+
+    const hasCredentials = request.headers.get('authorization') || request.headers.get('cookie');
+    if (hasCredentials) {
+        proxyHeaders.set('access-control-allow-origin', origin);
+        proxyHeaders.set('access-control-allow-credentials', 'true');
+        proxyHeaders.set('vary', [proxyHeaders.get('vary'), 'origin'].filter(Boolean).join(', '));
+    } else {
+        proxyHeaders.set('access-control-allow-origin', '*');
+    }
+    proxyHeaders.set('access-control-allow-methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS, HEAD');
+    proxyHeaders.set('access-control-allow-headers', DEFAULT_CORS_HEADERS.join(', '));
+    proxyHeaders.set('access-control-expose-headers', DEFAULT_CORS_EXPOSED.join(', '));
+}
+
+async function executeProxy(request: Request, targetUrl: string, interceptors: { linkOrigin?: string, ref?: string, extraHeaders?: Record<string, string> }) {
     try {
-        // Body passthrough - absolutely no deserialization!
         const body = ["GET", "HEAD"].includes(request.method) ? undefined : request.body;
         
         const reqHeaders = new Headers(request.headers);
@@ -105,10 +117,8 @@ async function executeProxy(request: Request, _set: any, targetUrl: string, inte
             logger.warn(`[SDK Proxy] Slow upstream response (${duration.toFixed(0)}ms): ${targetUrl}`);
         }
 
-        // New Paradigm: Create an independent Headers object reflecting the exact upstream shape
         const proxyHeaders = new Headers();
         
-        // Ensure Set-Cookie multi-values are perfectly reproduced.
         if (typeof response.headers.getSetCookie === 'function') {
             const cookies = response.headers.getSetCookie();
             cookies.forEach(c => proxyHeaders.append('set-cookie', c));
@@ -117,8 +127,12 @@ async function executeProxy(request: Request, _set: any, targetUrl: string, inte
         response.headers.forEach((val, key) => {
             const lowerKey = key.toLowerCase();
             if (lowerKey === 'set-cookie') return;
+            if (lowerKey === 'access-control-allow-origin') return;
+            if (lowerKey === 'access-control-allow-credentials') return;
+            if (lowerKey === 'access-control-allow-methods') return;
+            if (lowerKey === 'access-control-allow-headers') return;
+            if (lowerKey === 'access-control-expose-headers') return;
 
-            // Transform Hook: Link URL override for HATEOAS / Pagination
             if (lowerKey === 'link' && interceptors.linkOrigin) {
                 proxyHeaders.set(key, val.replace(/<(https?:\/\/[^>]+)?\/admin\/users/g, `<${interceptors.linkOrigin}/auth/v1/admin/users`));
                 return;
@@ -127,19 +141,14 @@ async function executeProxy(request: Request, _set: any, targetUrl: string, inte
             proxyHeaders.set(key, val);
         });
 
-        // Transform Hook: Force SDK Version and CORS
         proxyHeaders.set('x-supabase-api-version', '2024-01-01');
-        proxyHeaders.set('access-control-allow-origin', '*'); // Default reflective if credentials present? SDK is usually anonymous or Authorization header. '*' is safe for non-credentialed.
-        proxyHeaders.set('access-control-allow-methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS, HEAD');
-        proxyHeaders.set('access-control-allow-headers', DEFAULT_CORS_HEADERS.join(', '));
-        proxyHeaders.set('access-control-expose-headers', DEFAULT_CORS_EXPOSED.join(', '));
+
+        applyCorsHeaders(proxyHeaders, request);
         
-        // If it's an OPTIONS request, intercept it entirely and return OK immediately
         if (request.method === 'OPTIONS') {
              return new Response(null, { status: 204, headers: proxyHeaders });
         }
 
-        // Return a fully formed native Response stream. Elysia will adopt it exactly as-is.
         return new Response(response.body, {
             status: response.status,
             headers: proxyHeaders
@@ -155,60 +164,40 @@ async function executeProxy(request: Request, _set: any, targetUrl: string, inte
 }
 
 const sdkProxyRoutesBase = new Elysia({ prefix: "" })
-    // Generic ALL route for Auth API
-    .all("/auth/v1/*", async ({ request, set }) => {
+    .all("/auth/v1/*", async ({ request }) => {
         const ref = await getProjectRef(request);
-        if (!ref) {
-            set.status = 400;
-            return { error: 'Bad Request', message: 'Missing tenant reference' };
-        }
+        if (!ref) return new Response(JSON.stringify({ error: 'Bad Request', message: 'Missing tenant reference' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
         const ports = await getTenantPorts(ref);
-        if (!ports) {
-            set.status = 502;
-            return { error: 'Bad Gateway', message: 'Tenant backend not active' };
-        }
+        if (!ports) return new Response(JSON.stringify({ error: 'Bad Gateway', message: 'Tenant backend not active' }), { status: 502, headers: { 'Content-Type': 'application/json' } });
         
         const url = new URL(request.url);
         const targetUrl = `http://127.0.0.1:${ports.gotruePort}${url.pathname.replace(/^\/auth\/v1/, '')}${url.search}`;
-        return executeProxy(request, set, targetUrl, { linkOrigin: url.origin });
+        return executeProxy(request, targetUrl, { linkOrigin: url.origin });
     })
 
-    // Generic ALL route for PostgREST API
-    .all("/rest/v1/*", async ({ request, set }) => {
+    .all("/rest/v1/*", async ({ request }) => {
         const ref = await getProjectRef(request);
-        if (!ref) {
-            set.status = 400;
-            return { error: 'Bad Request', message: 'Missing tenant reference' };
-        }
+        if (!ref) return new Response(JSON.stringify({ error: 'Bad Request', message: 'Missing tenant reference' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
         const ports = await getTenantPorts(ref);
-        if (!ports) {
-            set.status = 502;
-            return { error: 'Bad Gateway', message: 'Tenant backend not active' };
-        }
+        if (!ports) return new Response(JSON.stringify({ error: 'Bad Gateway', message: 'Tenant backend not active' }), { status: 502, headers: { 'Content-Type': 'application/json' } });
         
         const url = new URL(request.url);
         let targetPath = url.pathname.replace(/^\/rest\/v1/, '');
         if (!targetPath || targetPath === '') targetPath = '/';
         const targetUrl = `http://127.0.0.1:${ports.pgrstPort}${targetPath}${url.search}`;
-        return executeProxy(request, set, targetUrl, {});
+        return executeProxy(request, targetUrl, {});
     });
 
-const graphqlHandler = async ({ request, set }: any) => {
+const graphqlHandler = async ({ request }: any) => {
     const ref = await getProjectRef(request);
-    if (!ref) {
-        set.status = 400;
-        return { error: 'Bad Request', message: 'Missing tenant reference' };
-    }
+    if (!ref) return new Response(JSON.stringify({ error: 'Bad Request', message: 'Missing tenant reference' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
     const ports = await getTenantPorts(ref);
-    if (!ports) {
-        set.status = 502;
-        return { error: 'Bad Gateway', message: 'Tenant backend not active' };
-    }
+    if (!ports) return new Response(JSON.stringify({ error: 'Bad Gateway', message: 'Tenant backend not active' }), { status: 502, headers: { 'Content-Type': 'application/json' } });
     
     const url = new URL(request.url);
     const targetUrl = `http://127.0.0.1:${ports.pgrstPort}/rpc/graphql${url.search}`;
     
-    return executeProxy(request, set, targetUrl, {
+    return executeProxy(request, targetUrl, {
         extraHeaders: {
             'Accept-Profile': 'graphql_public',
             'Content-Profile': 'graphql_public'
@@ -216,12 +205,9 @@ const graphqlHandler = async ({ request, set }: any) => {
     });
 };
 
-const functionsHandler = async ({ request, set }: any) => {
+const functionsHandler = async ({ request }: any) => {
     const ref = await getProjectRef(request);
-    if (!ref) {
-        set.status = 400;
-        return { error: 'Bad Request', message: 'Missing tenant reference' };
-    }
+    if (!ref) return new Response(JSON.stringify({ error: 'Bad Request', message: 'Missing tenant reference' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
 
     const { config } = await import("../config");
     const [edgeHost, edgePortStr] = (config.edgeRuntimeInternal || "127.0.0.1:9000").split(':');
@@ -231,7 +217,7 @@ const functionsHandler = async ({ request, set }: any) => {
     const targetPath = url.pathname.replace(/^\/functions\/v1/, '');
     const targetUrl = `http://${edgeHost}:${edgePort}${targetPath}${url.search}`;
 
-    return executeProxy(request, set, targetUrl, { ref });
+    return executeProxy(request, targetUrl, { ref });
 };
 
 export const sdkProxyRoutes = sdkProxyRoutesBase
