@@ -408,7 +408,7 @@ async function main() {
     logger.info(`[migrate-tenant-schema] Found ${projects.length} active projects to migrate.`);
 
     for (const project of projects) {
-       const dbName = `supa_${project.ref}`;
+       const dbName = project.db_name || `supa_${project.ref}`;
        const tenantDb = (databaseService as any).getTenantDb(dbName);
        try {
           await tenantDb.unsafe(ALTER_TENANT_SQL);

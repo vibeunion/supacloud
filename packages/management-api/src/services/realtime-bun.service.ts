@@ -1,6 +1,7 @@
 import { EventEmitter } from 'events';
 import { logger } from '../utils/logger';
 import { databaseService } from './database.service';
+import { resolveDbName, getProjectDb } from '../db';
 
 interface PostgresChangeConfig {
     id?: string | number;
@@ -51,10 +52,10 @@ class RealtimeBunService {
         if (this.tenantListeners.has(projectRef)) return;
 
         try {
-            const dbName = `supa_${projectRef}`;
+            const dbName = await resolveDbName(projectRef);
             let db: any;
             try {
-                db = (databaseService as any).getTenantDb(dbName);
+                db = getProjectDb(dbName);
             } catch {
                 return;
             }
@@ -81,10 +82,10 @@ class RealtimeBunService {
     }
 
     private async ensureTriggers(projectRef: string, subscriptions: PostgresChangeConfig[]) {
-        const dbName = `supa_${projectRef}`;
+        const dbName = await resolveDbName(projectRef);
         let db: any;
         try {
-            db = (databaseService as any).getTenantDb(dbName);
+            db = getProjectDb(dbName);
         } catch { return; }
         if (!db) return;
 
@@ -222,20 +223,20 @@ class RealtimeBunService {
         changeType: string
     ): Promise<boolean> {
         try {
-            const dbName = `supa_${projectRef}`;
-            const db = (databaseService as any).getTenantDb(dbName);
+            const dbName = await resolveDbName(projectRef);
+            const db = getProjectDb(dbName);
             if (!db) return true;
 
-            const pkCols = await db.unsafe(`
+            const pkCols = await db`
                 SELECT a.attname
                 FROM pg_index i
                 JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
                 JOIN pg_class c ON c.oid = i.indrelid
                 JOIN pg_namespace n ON n.oid = c.relnamespace
-                WHERE n.nspname = '${schema.replace(/'/g, "''")}'
-                  AND c.relname = '${table.replace(/'/g, "''")}'
+                WHERE n.nspname = ${schema}
+                  AND c.relname = ${table}
                   AND i.indisprimary
-            `).catch(() => null);
+            `.catch(() => null);
 
             if (!pkCols || !Array.isArray(pkCols) || pkCols.length === 0) return true;
 
@@ -249,7 +250,7 @@ class RealtimeBunService {
             }
 
             const rlsCheck = await db.unsafe(`
-                SET LOCAL role ${role};
+                SET LOCAL role = '${role.replace(/'/g, "''")}';
                 SELECT 1 FROM "${schema}"."${table}" WHERE ${whereParts.join(' AND ')} LIMIT 1;
             `).catch(() => null);
 

@@ -11,7 +11,7 @@ async function getProjectRef(request: Request): Promise<string> {
     
     const host = request.headers.get('host');
     if (host) {
-        if (host.includes('.supabase.co') || (config.baseDomain && host.includes(config.baseDomain))) {
+        if (config.baseDomain && host.includes(config.baseDomain)) {
             return host.split('.')[0];
         }
         try {
@@ -40,8 +40,8 @@ async function getProjectRef(request: Request): Promise<string> {
         } catch(e) {}
     }
 
-    if (process.env.NODE_ENV !== 'production') {
-        if (key === 'test-token' || auth.includes('test-token') || auth.includes('jVFIR-MB7rNfUuJaUH') || key.includes('jVFIR-MB7rNfUuJaUH')) {
+    if (process.env.BUN_ENV === 'test' || process.env.NODE_ENV === 'test') {
+        if (key === 'test-token' || auth.includes('test-token')) {
              return 'test_mock';
         }
     }

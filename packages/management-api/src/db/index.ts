@@ -32,25 +32,24 @@ export const sql = new SQL({
   connectTimeout: 5000,
 });
 
-const MAX_CACHED_CONNECTIONS = 20;
+const MAX_CACHED_CONNECTIONS = 50;
 
-// Project database connection cache
-const projectConnections: Map<string, { sql: SQL; lastUsed: number }> = new Map();
+const projectConnections: Map<string, { sql: SQL; lastUsed: number; inUse: number }> = new Map();
 
-// Get project database connection
 export function getProjectDb(dbName: string): SQL {
   const cached = projectConnections.get(dbName);
   if (cached) {
     cached.lastUsed = Date.now();
+    cached.inUse++;
     return cached.sql;
   }
 
-  // LRU cleanup: evict least recently used connection when exceeding max connections
   if (projectConnections.size >= MAX_CACHED_CONNECTIONS) {
     let oldestDbName = "";
     let oldestTime = Infinity;
 
     for (const [key, value] of projectConnections.entries()) {
+      if (value.inUse > 0) continue;
       if (value.lastUsed < oldestTime) {
         oldestTime = value.lastUsed;
         oldestDbName = key;
@@ -78,8 +77,37 @@ export function getProjectDb(dbName: string): SQL {
     connectTimeout: 5000,
   });
 
-  projectConnections.set(dbName, { sql: projectSql, lastUsed: Date.now() });
+  projectConnections.set(dbName, { sql: projectSql, lastUsed: Date.now(), inUse: 1 });
   return projectSql;
+}
+
+export function releaseProjectDb(dbName: string) {
+  const cached = projectConnections.get(dbName);
+  if (cached && cached.inUse > 0) {
+    cached.inUse--;
+  }
+}
+
+const dbNameCache = new Map<string, string>();
+
+export async function resolveDbName(ref: string): Promise<string> {
+  const cached = dbNameCache.get(ref);
+  if (cached) return cached;
+
+  try {
+    const [row] = await sql`SELECT db_name FROM projects WHERE ref = ${ref} LIMIT 1`;
+    if (row?.db_name) {
+      dbNameCache.set(ref, row.db_name);
+      return row.db_name;
+    }
+  } catch {}
+  const fallback = `supa_${ref}`;
+  dbNameCache.set(ref, fallback);
+  return fallback;
+}
+
+export function invalidateDbNameCache(ref: string) {
+  dbNameCache.delete(ref);
 }
 
 // Explicitly remove cache for a project (e.g., when project is deleted or paused)

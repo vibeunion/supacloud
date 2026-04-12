@@ -261,6 +261,24 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
     }
   )
 
+  .post(
+    "/:ref/custom-hostname/verify",
+    async ({ params, set }) => {
+      const domainInfo = await projectService.getCustomDomain(params.ref);
+      if (!domainInfo) {
+                return status(404, { error: "No custom hostname configured" });
+      }
+      const verified = await projectService.getCustomDomain(params.ref).then(d => !!d).catch(() => false);
+      return {
+        status: verified ? "verified" : "pending_verification",
+        custom_hostname: domainInfo,
+      };
+    },
+    {
+      params: t.Object({ ref: t.String() }),
+    }
+  )
+
   // Get Auth config (Studio compatible format)
   .get(
     "/:ref/config/auth",
@@ -436,6 +454,83 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
       return (settings as Record<string, unknown>).database || {};
     },
     { params: t.Object({ ref: t.String() }) }
+  )
+
+  .patch(
+    "/:ref/config/pooler",
+    async ({ params, body }) => {
+      const settings = await projectService.getProjectSettings(params.ref);
+      if (!settings) return status(404, { error: "Project not found" });
+      const current = ((settings as Record<string, unknown>).pooler as Record<string, unknown>) || {};
+      const updated = await projectService.updateProjectSettings(params.ref, {
+        ...settings,
+        pooler: { ...current, ...(typeof body === "object" ? body : {}) },
+      });
+      return (updated as Record<string, unknown>)?.pooler || {};
+    },
+    { params: t.Object({ ref: t.String() }), body: t.Record(t.String(), t.Unknown()) }
+  )
+
+  .get(
+    "/:ref/database/replication",
+    async ({ params }) => {
+      const { sql: metaSql } = await import("../db");
+      const { getProjectDb } = await import("../db");
+      const [project] = await metaSql`SELECT db_name FROM projects WHERE ref=${params.ref}`;
+      if (!project) return status(404, { error: "Project not found" });
+      const dbName = project.db_name || `supa_${params.ref}`;
+      const db = getProjectDb(dbName);
+      const slots = await db`
+        SELECT slot_name, slot_type, active, restart_lsn
+        FROM pg_replication_slots
+      `;
+      const publications = await db`
+        SELECT pubname, pubinsert, pubupdate, pubdelete, pubtruncate
+        FROM pg_publication
+      `;
+      return { replication_slots: slots, publications };
+    },
+    { params: t.Object({ ref: t.String() }) }
+  )
+
+  .get(
+    "/:ref/types/python",
+    async ({ params, query }) => {
+      const { sql: metaSql } = await import("../db");
+      const { getProjectDb } = await import("../db");
+      const [project] = await metaSql`SELECT db_name FROM projects WHERE ref=${params.ref}`;
+      if (!project) return status(404, { error: "Project not found" });
+      const dbName = project.db_name || `supa_${params.ref}`;
+      const db = getProjectDb(dbName);
+      const schemas = (query?.schemas || 'public').split(',');
+      let py = '';
+      for (const schema of schemas) {
+        const tables = await db`
+          SELECT table_name FROM information_schema.tables
+          WHERE table_schema = ${schema} AND table_type = 'BASE TABLE'
+          ORDER BY table_name
+        `;
+        for (const t of tables) {
+          const cols = await db`
+            SELECT column_name, data_type, is_nullable, column_default
+            FROM information_schema.columns
+            WHERE table_schema = ${schema} AND table_name = ${t.table_name}
+            ORDER BY ordinal_position
+          `;
+          py += `class ${t.table_name}(BaseModel):\n`;
+          for (const c of cols) {
+            const pyType = c.data_type === 'integer' || c.data_type === 'bigint' ? 'int' :
+              c.data_type === 'numeric' || c.data_type === 'real' || c.data_type === 'double precision' ? 'float' :
+              c.data_type === 'boolean' ? 'bool' : 'str';
+            const nullable = c.is_nullable === 'YES' ? ' | None = None' : '';
+            py += `    ${c.column_name}: ${pyType}${nullable}\n`;
+          }
+          py += '\n';
+        }
+      }
+      return { types: py };
+    },
+    { params: t.Object({ ref: t.String() }), query: t.Object({ schemas: t.Optional(t.String()) }, { additionalProperties: true }) }
   )
   .patch(
     "/:ref/config/database",

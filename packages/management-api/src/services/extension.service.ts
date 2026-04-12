@@ -1,6 +1,5 @@
-import { config } from "../config";
-import { SQL } from "bun";
 import { logger } from "../utils/logger";
+import { getProjectDb, resolveDbName } from "../db";
 import { $ } from "bun";
 
 export interface ExtensionInfo {
@@ -12,117 +11,68 @@ export interface ExtensionInfo {
 }
 
 export class ExtensionService {
-    private readonly PG_HOST = config.pgHost;
-    private readonly PG_PORT = config.pgPort;
-    private readonly PG_USER = config.pgUser;
-    private readonly PG_PASSWORD = config.pgPassword;
-
-    private getTenantDb(dbName: string): SQL {
-        return new SQL({
-            hostname: this.PG_HOST,
-            port: this.PG_PORT,
-            database: dbName,
-            username: this.PG_USER,
-            password: this.PG_PASSWORD,
-        });
-    }
-
-    /**
-     * Get extension list for project (direct query to pg_available_extensions)
-     */
     async listExtensions(projectRef: string): Promise<ExtensionInfo[]> {
-        const dbName = `supa_${projectRef}`;
-        const db = this.getTenantDb(dbName);
-        try {
-            const rows = await db`
-                SELECT
-                    name,
-                    default_version,
-                    installed_version,
-                    comment,
-                    installed_version IS NOT NULL AS is_installed
-                FROM pg_available_extensions
-                ORDER BY name
-            `;
-            return rows as ExtensionInfo[];
-        } finally {
-            await db.close();
-        }
+        const dbName = await resolveDbName(projectRef);
+        const db = getProjectDb(dbName);
+        const rows = await db`
+            SELECT
+                name,
+                default_version,
+                installed_version,
+                comment,
+                installed_version IS NOT NULL AS is_installed
+            FROM pg_available_extensions
+            ORDER BY name
+        `;
+        return rows as ExtensionInfo[];
     }
 
-    /**
-     * Enable extension (direct CREATE EXTENSION)
-     */
     async enableExtension(projectRef: string, extension: string, schema?: string, version?: string): Promise<ExtensionInfo> {
-        const dbName = `supa_${projectRef}`;
-        const db = this.getTenantDb(dbName);
-        try {
-            let sql = `CREATE EXTENSION IF NOT EXISTS "${extension}"`;
-            if (schema) sql += ` SCHEMA "${schema}"`;
-            if (version) sql += ` VERSION '${version.replace(/'/g, "''")}'`;
-            sql += ` CASCADE`;
-            await db.unsafe(sql);
+        const dbName = await resolveDbName(projectRef);
+        const db = getProjectDb(dbName);
+        let sql = `CREATE EXTENSION IF NOT EXISTS "${extension}"`;
+        if (schema) sql += ` SCHEMA "${schema}"`;
+        if (version) sql += ` VERSION '${version.replace(/'/g, "''")}'`;
+        sql += ` CASCADE`;
+        await db.unsafe(sql);
 
-            const rows = await db`
-                SELECT name, default_version, installed_version, comment,
-                    installed_version IS NOT NULL AS is_installed
-                FROM pg_available_extensions WHERE name = ${extension}
-            `;
-            return (rows[0] as ExtensionInfo) || { name: extension, default_version: version || '', installed_version: version || null, comment: '', is_installed: true };
-        } finally {
-            await db.close();
-        }
+        const rows = await db`
+            SELECT name, default_version, installed_version, comment,
+                installed_version IS NOT NULL AS is_installed
+            FROM pg_available_extensions WHERE name = ${extension}
+        `;
+        return (rows[0] as ExtensionInfo) || { name: extension, default_version: version || '', installed_version: version || null, comment: '', is_installed: true };
     }
 
     async disableExtension(projectRef: string, extension: string): Promise<ExtensionInfo> {
-        const dbName = `supa_${projectRef}`;
-        const db = this.getTenantDb(dbName);
-        try {
-            await db.unsafe(`DROP EXTENSION IF EXISTS "${extension}" CASCADE`);
+        const dbName = await resolveDbName(projectRef);
+        const db = getProjectDb(dbName);
+        await db.unsafe(`DROP EXTENSION IF EXISTS "${extension}" CASCADE`);
 
-            const rows = await db`
-                SELECT name, default_version, installed_version, comment,
-                    installed_version IS NOT NULL AS is_installed
-                FROM pg_available_extensions WHERE name = ${extension}
-            `;
-            return (rows[0] as ExtensionInfo) || { name: extension, default_version: '', installed_version: null, comment: '', is_installed: false };
-        } finally {
-            await db.close();
-        }
+        const rows = await db`
+            SELECT name, default_version, installed_version, comment,
+                installed_version IS NOT NULL AS is_installed
+            FROM pg_available_extensions WHERE name = ${extension}
+        `;
+        return (rows[0] as ExtensionInfo) || { name: extension, default_version: '', installed_version: null, comment: '', is_installed: false };
     }
 
-    // ─── System-level extension management (Pigsty pig ext) ───
-
-    /**
-     * List all extensions available to install via pig/pigsty package manager
-     */
     async listSystemExtensions(): Promise<{ name: string; version: string; status: string; description: string }[]> {
         try {
             const result = await $`pig ext list`.nothrow().quiet();
             if (result.exitCode !== 0) {
-                // Fallback: try dpkg/rpm to list installed pg extensions
-                const fallback = await $`dpkg -l 'postgresql-*' 2>/dev/null || rpm -qa 'postgresql*' 2>/dev/null || echo ''`.nothrow().quiet();
-                return [{ name: 'pig-not-available', version: '-', status: 'unavailable', description: 'pig CLI not found, install pigsty first' }];
+                return [{ name: 'pig-not-available', version: '-', status: 'unavailable', description: 'pig CLI not found' }];
             }
             const lines = result.text().split('\n').filter((l: string) => l.trim() && !l.startsWith('#') && !l.startsWith('='));
             return lines.map((line: string) => {
                 const parts = line.split(/\s+/);
-                return {
-                    name: parts[0] || '',
-                    version: parts[1] || '',
-                    status: parts[2] || 'available',
-                    description: parts.slice(3).join(' ') || '',
-                };
+                return { name: parts[0] || '', version: parts[1] || '', status: parts[2] || 'available', description: parts.slice(3).join(' ') || '' };
             }).filter((e: { name: string }) => e.name);
         } catch (err: unknown) {
-          logger.warn("[ExtensionService] Failed to parse extension version info", { error: err });
             return [];
         }
     }
 
-    /**
-     * Install an extension package at OS level via pig ext
-     */
     async installSystemExtension(name: string): Promise<{ success: boolean; message: string }> {
         try {
             const result = await $`sudo pig ext install ${name} -y`.nothrow().quiet();
@@ -135,9 +85,6 @@ export class ExtensionService {
         }
     }
 
-    /**
-     * Remove an extension package at OS level via pig ext
-     */
     async removeSystemExtension(name: string): Promise<{ success: boolean; message: string }> {
         try {
             const result = await $`sudo pig ext remove ${name} -y`.nothrow().quiet();
