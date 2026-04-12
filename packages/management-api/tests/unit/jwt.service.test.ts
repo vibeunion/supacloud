@@ -1,7 +1,11 @@
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect, beforeAll } from "bun:test";
 import { jwtService } from "../../src/services/jwt.service";
 
 describe("JwtService", () => {
+  beforeAll(() => {
+    delete process.env.TEST_FIXED_JWT_SECRET;
+  });
+
   describe("generateSecret", () => {
     test("should return a string with 40 characters", () => {
       const secret = jwtService.generateSecret();
