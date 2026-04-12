@@ -1,28 +1,26 @@
 import fs from "fs";
 import path from "path";
 
-// Recursively iterate over any JSON object to map it to its TypeScript-like schema representation
 export function buildSchemaObject(obj: any): any {
     if (obj === null) return "null";
     if (Array.isArray(obj)) {
         if (obj.length === 0) return ["any"];
-        // For array, assume uniform type, just take the first element's type
         return [buildSchemaObject(obj[0])];
     }
     if (typeof obj === "object") {
         const schema: any = {};
-        for (const key of Object.keys(obj).sort()) { // sort to ensure consistent snapshots
+        for (const key of Object.keys(obj).sort()) {
             schema[key] = buildSchemaObject(obj[key]);
         }
         return schema;
     }
-    // Return base type scalar
     return typeof obj;
 }
 
 async function capture() {
     const url = process.env.OFFICIAL_SUPABASE_URL;
     const key = process.env.OFFICIAL_SUPABASE_ANON_KEY;
+    const serviceKey = process.env.OFFICIAL_SUPABASE_SERVICE_KEY;
 
     if (!url || !key) {
         console.warn("Skipping capture: OFFICIAL_SUPABASE_URL or OFFICIAL_SUPABASE_ANON_KEY not set.");
@@ -33,19 +31,19 @@ async function capture() {
     const outputDir = path.join(__dirname, "../snapshots/ground_truth");
     fs.mkdirSync(outputDir, { recursive: true });
 
-    async function recordEndpoint(method: string, endpoint: string, bodyObj: any | undefined, name: string) {
+    async function recordEndpoint(method: string, endpoint: string, bodyObj: any | undefined, name: string, useServiceKey = false) {
         console.log(`Capturing: ${name} (${method} ${endpoint})`);
+        const effectiveKey = useServiceKey && serviceKey ? serviceKey : key;
         const res = await fetch(`${url}${endpoint}`, {
             method,
             headers: {
-                "apikey": key!,
-                "Authorization": `Bearer ${key}`,
+                "apikey": effectiveKey!,
+                "Authorization": `Bearer ${effectiveKey}`,
                 "Content-Type": "application/json",
             },
             body: bodyObj ? JSON.stringify(bodyObj) : undefined
         });
 
-        // We capture even error responses because we want to know the EXACT error payload shape!
         let data: any;
         const text = await res.text();
         try {
@@ -55,25 +53,42 @@ async function capture() {
         }
 
         const schema = buildSchemaObject(data);
+        const headers: Record<string, string> = {};
+        res.headers.forEach((val, key) => { headers[key] = val; });
+
         fs.writeFileSync(
-            path.join(outputDir, `${name}.json`), 
-            JSON.stringify({ 
-                status: res.status, 
+            path.join(outputDir, `${name}.json`),
+            JSON.stringify({
+                status: res.status,
                 payloadType: typeof data,
-                schema 
+                schema,
+                keyHeaders: {
+                    'x-supabase-api-version': res.headers.get('x-supabase-api-version'),
+                    'content-type': res.headers.get('content-type'),
+                    'link': res.headers.get('link'),
+                    'x-total-count': res.headers.get('x-total-count'),
+                    'content-range': res.headers.get('content-range'),
+                }
             }, null, 2)
         );
     }
 
-    // Capture Auth Formats - 400 Bad Request shape
     await recordEndpoint("POST", "/auth/v1/signup", { email: "invalid", password: "1" }, "auth_signup_error");
-    
-    // Capture Storage Formats - List empty bucket (or 404 bucket)
     await recordEndpoint("POST", "/storage/v1/object/list/unknown_bucket", undefined, "storage_list_error");
+
+    await recordEndpoint("GET", "/rest/v1/", undefined, "postgrest_openapi_root");
+    
+    await recordEndpoint("POST", "/auth/v1/token?grant_type=password", { email: "nonexistent@test.com", password: "wrong" }, "auth_token_error");
+
+    if (serviceKey) {
+        await recordEndpoint("GET", "/auth/v1/admin/users?page=1&per_page=1", undefined, "auth_admin_list_users", true);
+    }
 
     console.log("Snapshots captured successfully.");
 }
 
-if (require.main === module) {
+if (typeof require !== 'undefined' && require.main === module) {
     capture().catch(console.error);
 }
+
+export { capture };
