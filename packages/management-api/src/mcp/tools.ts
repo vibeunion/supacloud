@@ -3,7 +3,7 @@ import { logger } from "../utils/logger";
 import { config } from "../config";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
-import { projectService } from "../services";
+import { projectService, edgeFunctionService } from "../services";
 import { organizationService } from "../services/organization.service";
 import { StorageService } from "../services/storage.service";
 import { sql as metaSql, getProjectDb } from "../db";
@@ -625,6 +625,17 @@ export function registerMcpTools(server: McpServer, token: McpTokenPayload): voi
     const ref = resolveRef(args.ref as string | undefined);
     const fns = await projectService.listFunctions(ref);
     return { content: [{ type: "text", text: JSON.stringify(fns, null, 2) }] };
+  });
+
+  server.tool("get_edge_function_logs", "Retrieve logs for an Edge Function", {
+    ...refParam,
+    slug: z.string().describe("Function name"),
+    limit: z.number().optional().describe("Number of log entries to retrieve (default: 50)"),
+    offset: z.number().optional().describe("Number of log entries to skip (default: 0)"),
+  }, async (args: Record<string, unknown>) => {
+    const ref = resolveRef(args.ref as string | undefined);
+    const logs = await edgeFunctionService.getLogs(ref, args.slug as string, args.limit as number | undefined, args.offset as number | undefined);
+    return { content: [{ type: "text", text: JSON.stringify(logs, null, 2) }] };
   });
 
   if (isAdmin || !readOnly) {
