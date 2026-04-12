@@ -61,7 +61,7 @@ jobs:
           PGRST_DB_ANON_ROLE: anon
           PGRST_JWT_SECRET: super-secret-jwt-token-with-at-least-32-characters-long
       gotrue:
-        image: supabase/gotrue:latest
+        image: supabase/gotrue:v2.188.1
         ports:
           - 9999:9999
         env:
