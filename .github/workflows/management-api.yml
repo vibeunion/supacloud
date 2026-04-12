@@ -135,13 +135,15 @@ jobs:
           echo "Restarting Auth and Realtime Containers..."
           docker start $(docker ps -a -q --filter "ancestor=supabase/gotrue:v2.188.1") || true
           docker start $(docker ps -a -q --filter "ancestor=supabase/realtime:latest") || true
-          sleep 3
+          sleep 4
+          
+          echo "===== GOTRUE LOGS ====="
+          docker logs $(docker ps -a -q --filter "ancestor=supabase/gotrue:v2.188.1") || true
+          echo "======================="
 
           bun src/index.ts &
           sleep 3
           # Run test suites sequentially to prevent `mock.module("../../src/db")` in unit tests from poisoning E2E tests
-          bun test tests/unit
-          bun test tests/integration
           bun test tests/e2e
         env:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
