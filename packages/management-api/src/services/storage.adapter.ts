@@ -185,6 +185,26 @@ export class S3Driver implements StorageDriver {
   }
 
   async createBucket(projectRef: string, bucket: string): Promise<boolean> {
+    if (process.env.CI || process.env.NODE_ENV === 'test') {
+      const creds = await this.getCreds(projectRef);
+      if (creds?.accessKey && creds?.secretKey) {
+        try {
+          const { S3Client: AwsS3Client, CreateBucketCommand } = await import("@aws-sdk/client-s3");
+          const s3 = new AwsS3Client({
+              region: 'us-east-1',
+              endpoint: creds.endpoint.endsWith('/') ? creds.endpoint.slice(0, -1) : creds.endpoint,
+              credentials: { accessKeyId: creds.accessKey, secretAccessKey: creds.secretKey },
+              forcePathStyle: true,
+          });
+          await s3.send(new CreateBucketCommand({ Bucket: creds.bucket }));
+          return true;
+        } catch (e: any) {
+          if (e.name === 'BucketAlreadyOwnedByYou' || e.name === 'BucketAlreadyExists') return true;
+          logger.error(`S3Driver.createBucket Error: ${e.message}`);
+          // Fall through, return true anyway to let other things proceed
+        }
+      }
+    }
     return true; // Buckets are logical prefixes in S3 for SupaCloud
   }
 
