@@ -214,6 +214,61 @@ export async function initDatabase() {
     const finalCount = Number(verify?.count || 0);
     logger.info(`Database initialized successfully! Tables verified: ${finalCount}/10`);
     
+    // In CI mode where tests rewrite db_name to 'postgres', we must create Storage relations
+    if (process.env.CI || process.env.TEST_FIXED_JWT_SECRET) {
+      logger.info("Initializing Storage schemas natively for E2E CI routing...");
+      const storageDDL = `
+        CREATE SCHEMA IF NOT EXISTS storage;
+        CREATE TABLE IF NOT EXISTS storage.buckets (
+            id text not null primary key,
+            name text not null,
+            owner uuid,
+            created_at timestamptz default now(),
+            updated_at timestamptz default now(),
+            public boolean default false,
+            avif_autodetection boolean default false,
+            file_size_limit bigint,
+            allowed_mime_types text[]
+        );
+        CREATE TABLE IF NOT EXISTS storage.objects (
+            id uuid not null primary key default gen_random_uuid(),
+            bucket_id text references storage.buckets,
+            name text,
+            owner uuid,
+            created_at timestamptz default now(),
+            updated_at timestamptz default now(),
+            last_accessed_at timestamptz default now(),
+            metadata jsonb,
+            path_tokens text[] generated always as (string_to_array(name, '/')) stored,
+            version text default gen_random_uuid()
+        );
+        CREATE TABLE IF NOT EXISTS storage.s3_multipart_uploads (
+            id text not null primary key,
+            in_progress_size bigint not null default 0,
+            upload_signature text not null,
+            bucket_id text not null references storage.buckets(id),
+            key text not null,
+            version text not null,
+            owner_id uuid,
+            created_at timestamptz not null default now()
+        );
+        CREATE TABLE IF NOT EXISTS storage.s3_multipart_uploads_parts (
+            id uuid not null primary key default gen_random_uuid(),
+            upload_id text not null references storage.s3_multipart_uploads(id) on delete cascade,
+            part_number integer not null,
+            size bigint not null default 0,
+            etag text not null,
+            owner_id uuid,
+            created_at timestamptz not null default now()
+        );
+      `;
+      try {
+        await sql.unsafe(storageDDL);
+        logger.info("Storage schema injected for CI.");
+      } catch (e: any) {
+        logger.error("Failed to inject Storage schema: " + e.message);
+      }
+    }
     if (finalCount < 10) {
       throw new Error(`Table creation verified but failed. Expected 10 tables, got ${finalCount}`);
     }
