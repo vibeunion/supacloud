@@ -152,6 +152,26 @@ export const wsRoutes = new Elysia({ prefix: "/ws" })
 
             // Upstream proxying (Elixir -> Client)
             upstream.onmessage = (event) => {
+                try {
+                    const data = typeof event.data === 'string' ? event.data : '';
+                    if (data) {
+                        const raw = JSON.parse(data);
+                        let parsed: any;
+                        if (Array.isArray(raw)) {
+                            parsed = { join_ref: raw[0], ref: raw[1], topic: raw[2], event: raw[3], payload: raw[4] };
+                        } else {
+                            parsed = raw;
+                        }
+                        if (parsed.event === 'phx_reply' && parsed.payload?.response?.postgres_changes) {
+                            const mappings = parsed.payload.response.postgres_changes;
+                            if (Array.isArray(mappings) && ref) {
+                                import("../services/realtime-bun.service").then(({ realtimeBunService }) => {
+                                    realtimeBunService.registerSubscriptionIds(ref, mappings);
+                                }).catch(() => {});
+                            }
+                        }
+                    }
+                } catch {}
                 ws.send(event.data);
             };
             
@@ -263,14 +283,13 @@ export const wsRoutes = new Elysia({ prefix: "/ws" })
                     const subscriptions = changes;
                     
                     import("../services/realtime-bun.service").then(({ realtimeBunService }) => {
-                         realtimeBunService.subscribeTenant(ref);
+                         realtimeBunService.subscribeTenant(ref, subscriptions, joinToken);
                          if (!(ws.data as any).__bunSubscriptions) (ws.data as any).__bunSubscriptions = new Set();
                          
                          const subs = (ws.data as any).__bunSubscriptions;
                          if (!subs.has(topic)) {
                              subs.add(topic);
                              const handler = (payload: any) => {
-                                 // P2-2: V1 fallback for postgres_changes
                                  const vsn = (ws.data as any).query?.vsn || "2.0.0";
                                  if (vsn === "1.0.0") {
                                      ws.send(JSON.stringify({ topic, event: "postgres_changes", payload, ref: null }));

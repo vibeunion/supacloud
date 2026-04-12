@@ -69,6 +69,90 @@ async function getTenantPorts(ref: string): Promise<{ gotruePort: number, pgrstP
         return null;
     }
 }
+import { DEFAULT_CORS_HEADERS, DEFAULT_CORS_EXPOSED } from '../services/gateway.service';
+
+async function executeProxy(request: Request, _set: any, targetUrl: string, interceptors: { linkOrigin?: string, ref?: string, extraHeaders?: Record<string, string> }) {
+    try {
+        // Body passthrough - absolutely no deserialization!
+        const body = ["GET", "HEAD"].includes(request.method) ? undefined : request.body;
+        
+        const reqHeaders = new Headers(request.headers);
+        reqHeaders.delete('host');
+        
+        const url = new URL(request.url);
+        reqHeaders.set('x-forwarded-host', url.host);
+        reqHeaders.set('x-forwarded-proto', url.protocol.replace(':', ''));
+        reqHeaders.set('x-forwarded-for', request.headers.get('x-forwarded-for') || '127.0.0.1');
+        
+        if (interceptors.ref) {
+            reqHeaders.set('x-project-ref', interceptors.ref);
+        }
+        if (interceptors.extraHeaders) {
+            for (const [k, v] of Object.entries(interceptors.extraHeaders)) {
+                reqHeaders.set(k, v);
+            }
+        }
+
+        const upstreamStart = performance.now();
+        const response = await fetch(targetUrl, {
+            method: request.method,
+            headers: reqHeaders,
+            body,
+            redirect: 'manual'
+        });
+        const duration = performance.now() - upstreamStart;
+        if (process.env.NODE_ENV !== 'production' && duration > 500) {
+            logger.warn(`[SDK Proxy] Slow upstream response (${duration.toFixed(0)}ms): ${targetUrl}`);
+        }
+
+        // New Paradigm: Create an independent Headers object reflecting the exact upstream shape
+        const proxyHeaders = new Headers();
+        
+        // Ensure Set-Cookie multi-values are perfectly reproduced.
+        if (typeof response.headers.getSetCookie === 'function') {
+            const cookies = response.headers.getSetCookie();
+            cookies.forEach(c => proxyHeaders.append('set-cookie', c));
+        }
+
+        response.headers.forEach((val, key) => {
+            const lowerKey = key.toLowerCase();
+            if (lowerKey === 'set-cookie') return;
+
+            // Transform Hook: Link URL override for HATEOAS / Pagination
+            if (lowerKey === 'link' && interceptors.linkOrigin) {
+                proxyHeaders.set(key, val.replace(/<(https?:\/\/[^>]+)?\/admin\/users/g, `<${interceptors.linkOrigin}/auth/v1/admin/users`));
+                return;
+            }
+
+            proxyHeaders.set(key, val);
+        });
+
+        // Transform Hook: Force SDK Version and CORS
+        proxyHeaders.set('x-supabase-api-version', '2024-01-01');
+        proxyHeaders.set('access-control-allow-origin', '*'); // Default reflective if credentials present? SDK is usually anonymous or Authorization header. '*' is safe for non-credentialed.
+        proxyHeaders.set('access-control-allow-methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS, HEAD');
+        proxyHeaders.set('access-control-allow-headers', DEFAULT_CORS_HEADERS.join(', '));
+        proxyHeaders.set('access-control-expose-headers', DEFAULT_CORS_EXPOSED.join(', '));
+        
+        // If it's an OPTIONS request, intercept it entirely and return OK immediately
+        if (request.method === 'OPTIONS') {
+             return new Response(null, { status: 204, headers: proxyHeaders });
+        }
+
+        // Return a fully formed native Response stream. Elysia will adopt it exactly as-is.
+        return new Response(response.body, {
+            status: response.status,
+            headers: proxyHeaders
+        });
+
+    } catch (err: any) {
+        logger.error(`[SDK Proxy] Internal error:`, err.message);
+        return new Response(JSON.stringify({ error: 'Internal Proxy Error', message: err.message }), {
+            status: 500,
+            headers: { 'Content-Type': 'application/json' }
+        });
+    }
+}
 
 const sdkProxyRoutesBase = new Elysia({ prefix: "" })
     // Generic ALL route for Auth API
@@ -85,39 +169,8 @@ const sdkProxyRoutesBase = new Elysia({ prefix: "" })
         }
         
         const url = new URL(request.url);
-        // Supabase Auth SDK connects to /auth/v1/*, but GoTrue expects /* locally
         const targetUrl = `http://127.0.0.1:${ports.gotruePort}${url.pathname.replace(/^\/auth\/v1/, '')}${url.search}`;
-        
-        try {
-            const body = ["GET", "HEAD"].includes(request.method) ? undefined : await request.arrayBuffer();
-            const headers = new Headers(request.headers);
-            headers.delete('host'); // prevent host mismatch
-            // Forward required headers
-            headers.set('x-forwarded-host', url.host);
-            headers.set('x-forwarded-proto', url.protocol.replace(':', ''));
-            const forwardedFor = request.headers.get('x-forwarded-for') || '127.0.0.1';
-            headers.set('x-forwarded-for', forwardedFor);
-            
-            const response = await fetch(targetUrl, {
-                method: request.method,
-                headers,
-                body,
-                redirect: 'manual'
-            });
-            
-            // Reconstruct Elysia response
-            set.status = response.status;
-            set.headers['x-supabase-api-version'] = '1.0.0';
-            response.headers.forEach((val, key) => {
-                set.headers[key] = val;
-            });
-            
-            return response;
-        } catch (err: any) {
-             logger.error(`[SDK Proxy] Auth error for ${ref}:`, err.message);
-             set.status = 500;
-             return { error: 'Internal Proxy Error', message: err.message };
-        }
+        return executeProxy(request, set, targetUrl, { linkOrigin: url.origin });
     })
 
     // Generic ALL route for PostgREST API
@@ -134,87 +187,54 @@ const sdkProxyRoutesBase = new Elysia({ prefix: "" })
         }
         
         const url = new URL(request.url);
-        // PostgREST expects /* locally
         let targetPath = url.pathname.replace(/^\/rest\/v1/, '');
         if (!targetPath || targetPath === '') targetPath = '/';
         const targetUrl = `http://127.0.0.1:${ports.pgrstPort}${targetPath}${url.search}`;
-        
-        try {
-            const body = ["GET", "HEAD"].includes(request.method) ? undefined : await request.arrayBuffer();
-            const headers = new Headers(request.headers);
-            headers.delete('host');
-            headers.set('x-forwarded-host', url.host);
-            headers.set('x-forwarded-proto', url.protocol.replace(':', ''));
-            const forwardedFor = request.headers.get('x-forwarded-for') || '127.0.0.1';
-            headers.set('x-forwarded-for', forwardedFor);
-            
-            const response = await fetch(targetUrl, {
-                method: request.method,
-                headers,
-                body,
-                redirect: 'manual'
-            });
-            
-            set.status = response.status;
-            set.headers['x-supabase-api-version'] = '1.0.0';
-            response.headers.forEach((val, key) => {
-                set.headers[key] = val;
-            });
-            
-            return response;
-        } catch (err: any) {
-             logger.error(`[SDK Proxy] PostgREST error for ${ref}:`, err.message);
-             set.status = 500;
-             return { error: 'Internal Proxy Error', message: err.message };
-        }
+        return executeProxy(request, set, targetUrl, {});
     });
 
 const graphqlHandler = async ({ request, set }: any) => {
-        const ref = await getProjectRef(request);
-        if (!ref) {
-            set.status = 400;
-            return { error: 'Bad Request', message: 'Missing tenant reference' };
+    const ref = await getProjectRef(request);
+    if (!ref) {
+        set.status = 400;
+        return { error: 'Bad Request', message: 'Missing tenant reference' };
+    }
+    const ports = await getTenantPorts(ref);
+    if (!ports) {
+        set.status = 502;
+        return { error: 'Bad Gateway', message: 'Tenant backend not active' };
+    }
+    
+    const url = new URL(request.url);
+    const targetUrl = `http://127.0.0.1:${ports.pgrstPort}/rpc/graphql${url.search}`;
+    
+    return executeProxy(request, set, targetUrl, {
+        extraHeaders: {
+            'Accept-Profile': 'graphql_public',
+            'Content-Profile': 'graphql_public'
         }
-        const ports = await getTenantPorts(ref);
-        if (!ports) {
-            set.status = 502;
-            return { error: 'Bad Gateway', message: 'Tenant backend not active' };
-        }
-        
-        const url = new URL(request.url);
-        // GraphQL via PostgREST expects /rpc/graphql 
-        const targetUrl = `http://127.0.0.1:${ports.pgrstPort}/rpc/graphql${url.search}`;
-        
-        try {
-            const body = ["GET", "HEAD"].includes(request.method) ? undefined : await request.arrayBuffer();
-            const headers = new Headers(request.headers);
-            headers.delete('host');
-            headers.set('x-forwarded-host', url.host);
-            headers.set('x-forwarded-proto', url.protocol.replace(':', ''));
-            const forwardedFor = request.headers.get('x-forwarded-for') || '127.0.0.1';
-            headers.set('x-forwarded-for', forwardedFor);
-            headers.set('Accept-Profile', 'graphql_public');
-            headers.set('Content-Profile', 'graphql_public');
-            
-            const response = await fetch(targetUrl, {
-                method: request.method,
-                headers,
-                body,
-                redirect: 'manual'
-            });
-            
-            set.status = response.status;
-            set.headers['x-supabase-api-version'] = '1.0.0';
-            response.headers.forEach((val, key) => {
-                set.headers[key] = val;
-            });
-            
-            return response;
-        } catch (err: any) {
-             logger.error(`[SDK Proxy] GraphQL error for ${ref}:`, err.message);
-             set.status = 500;
-             return { error: 'Internal Proxy Error', message: err.message };
-        }
-    };
+    });
+};
 
-export const sdkProxyRoutes = sdkProxyRoutesBase.all("/graphql/v1", graphqlHandler).all("/graphql/v1/*", graphqlHandler);
+const functionsHandler = async ({ request, set }: any) => {
+    const ref = await getProjectRef(request);
+    if (!ref) {
+        set.status = 400;
+        return { error: 'Bad Request', message: 'Missing tenant reference' };
+    }
+
+    const { config } = await import("../config");
+    const [edgeHost, edgePortStr] = (config.edgeRuntimeInternal || "127.0.0.1:9000").split(':');
+    const edgePort = parseInt(edgePortStr, 10) || 9000;
+
+    const url = new URL(request.url);
+    const targetPath = url.pathname.replace(/^\/functions\/v1/, '');
+    const targetUrl = `http://${edgeHost}:${edgePort}${targetPath}${url.search}`;
+
+    return executeProxy(request, set, targetUrl, { ref });
+};
+
+export const sdkProxyRoutes = sdkProxyRoutesBase
+    .all("/graphql/v1", graphqlHandler)
+    .all("/graphql/v1/*", graphqlHandler)
+    .all("/functions/v1/*", functionsHandler);

@@ -131,7 +131,8 @@ export class TenantOAuthService {
             throw new Error(`Unsupported OAuth provider: ${provider}`);
         }
 
-        const keysToRemove = new Set<string>([mapping.clientId, mapping.clientSecret]);
+        const enabledKey = `GOTRUE_EXTERNAL_${provider.toUpperCase()}_ENABLED`;
+        const keysToRemove = new Set<string>([mapping.clientId, mapping.clientSecret, enabledKey]);
         if (mapping.redirectUri) keysToRemove.add(mapping.redirectUri);
         if (mapping.url) keysToRemove.add(mapping.url);
 
@@ -183,6 +184,7 @@ ${prefix}_REDIRECT_URI=${oauthConfig.redirect_uri}
 ${prefix}_URL=${oauthConfig.authorize_url}
 ${prefix}_TOKEN_URL=${oauthConfig.token_url}
 ${prefix}_USER_INFO_URL=${oauthConfig.user_url}
+${oauthConfig.auth_scheme ? `${prefix}_AUTH_SCHEME=${oauthConfig.auth_scheme}` : ''}
 `;
 
         const keysToRemove = new Set<string>([
@@ -193,6 +195,7 @@ ${prefix}_USER_INFO_URL=${oauthConfig.user_url}
             `${prefix}_URL`,
             `${prefix}_TOKEN_URL`,
             `${prefix}_USER_INFO_URL`,
+            `${prefix}_AUTH_SCHEME`,
         ]);
 
         const lines = envContent.split("\n");

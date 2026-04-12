@@ -1,0 +1,9 @@
+{
+  "status": 400,
+  "payloadType": "object",
+  "schema": {
+    "error": "string",
+    "message": "string",
+    "statusCode": "string"
+  }
+}

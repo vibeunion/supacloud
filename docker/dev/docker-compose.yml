@@ -41,8 +41,16 @@ services:
     environment:
       GOTRUE_SITE_URL: http://localhost:${KONG_HTTP_PORT:-8000}
       GOTRUE_JWT_SECRET: ${JWT_SECRET}
+      GOTRUE_JWT_AUD: authenticated
+      GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
+      GOTRUE_JWT_EXP: 3600
+      API_EXTERNAL_URL: http://localhost:${KONG_HTTP_PORT:-8000}
+      GOTRUE_OPERATOR_TOKEN: ${MASTER_TOKEN:-${JWT_SECRET}}
       GOTRUE_DB_DRIVER: postgres
       GOTRUE_DB_DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/postgres
+      GOTRUE_MAILER_AUTOCONFIRM: "true"
+      GOTRUE_EXTERNAL_ANONYMOUS_USERS_ENABLED: "true"
+      GOTRUE_SECURITY_UPDATE_PASSWORD_REQUIRE_REAUTHENTICATION: "true"
     networks:
       - supacloud-dev
 
