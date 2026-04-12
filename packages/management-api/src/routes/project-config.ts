@@ -284,6 +284,16 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
         sms_autoconfirm: authConfig.sms_autoconfirm ?? false,
         uri_allow_list: authConfig.uri_allow_list ?? '',
         site_url: authConfig.site_url ?? '',
+        password_min_length: authConfig.password_min_length ?? 8,
+        security_refresh_token_rotation_enabled: authConfig.security_refresh_token_rotation_enabled ?? true,
+        security_refresh_token_rotation_reuse_interval: authConfig.security_refresh_token_rotation_reuse_interval ?? 10,
+        mfa_enabled: authConfig.mfa_enabled ?? true,
+        webauthn_enabled: authConfig.webauthn_enabled ?? true,
+        max_enrolled_factors: authConfig.max_enrolled_factors ?? 10,
+        security_update_password_require_reauthentication: authConfig.security_update_password_require_reauthentication ?? true,
+        external_anonymous_users_enabled: authConfig.external_anonymous_users_enabled ?? true,
+        external_email_enabled: authConfig.external_email_enabled ?? true,
+        external_phone_enabled: authConfig.external_phone_enabled ?? true,
         ...authConfig,
       };
 
@@ -335,13 +345,47 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
       const currentAuth = (settings.auth as Record<string, unknown>) || {};
       const newAuth = typeof body === "object" ? body : {};
 
+      // Parse external_* keys back into nested external config
+      const externalUpdates: Record<string, unknown> = {};
+      const otherUpdates: Record<string, unknown> = {};
+      for (const [key, val] of Object.entries(newAuth)) {
+        if (key.startsWith('external_') && key !== 'external_anonymous_users_enabled' && key !== 'external_email_enabled' && key !== 'external_phone_enabled' && key !== 'external_providers') {
+          const provider = key.replace('external_', '');
+          const providerVal = val as Record<string, unknown>;
+          externalUpdates[provider] = {
+            ...((currentAuth.external as Record<string, unknown>)?.[provider] as Record<string, unknown> || {}),
+            ...(providerVal.client_id !== undefined ? { client_id: providerVal.client_id } : {}),
+            ...(providerVal.secret && providerVal.secret !== '********' ? { client_secret: providerVal.secret } : {}),
+          };
+        } else if (key !== 'external_providers') {
+          otherUpdates[key] = val;
+        }
+      }
+
+      const mergedExternal = {
+        ...((currentAuth.external as Record<string, unknown>) || {}),
+        ...externalUpdates,
+      };
+
+      const mergedAuth = {
+        ...currentAuth,
+        ...otherUpdates,
+        ...(Object.keys(externalUpdates).length > 0 ? { external: mergedExternal } : {}),
+      };
+
       const updated = await projectService.updateProjectSettings(params.ref, {
         ...settings,
-        auth: {
-          ...currentAuth,
-          ...newAuth,
-        },
+        auth: mergedAuth,
       });
+
+      // Propagate config to running services
+      try {
+        const { tenantRuntimeService } = await import("../services/tenant-runtime.service");
+        await tenantRuntimeService.restartRuntime(params.ref);
+      } catch (err) {
+        logger.warn("[project-config] Failed to propagate auth config to runtime", { error: err });
+      }
+
       return updated?.auth || {};
     },
     {
@@ -396,6 +440,14 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
         ...settings,
         database: { ...current, ...(typeof body === "object" ? body : {}) },
       });
+
+      try {
+        const { tenantRuntimeService } = await import("../services/tenant-runtime.service");
+        await tenantRuntimeService.restartRuntime(params.ref);
+      } catch (err) {
+        logger.warn("[project-config] Failed to propagate database config to runtime", { error: err });
+      }
+
       return (updated as Record<string, unknown>)?.database || {};
     },
     {
@@ -481,16 +533,17 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
       const [project] = await metaSql`SELECT db_name FROM projects WHERE ref=${params.ref}`;
       if (!project) return status(404, { error: "Project not found" });
 
-      // Supabase CLI expects the specific syntax `[YOUR-PASSWORD]` to substitute the password from user input
       const pgHost = appConfig.baseDomain || "localhost";
       const pgPort = appConfig.pgPort || 5432;
-      const dbName = "postgres"; // CLI expects 'postgres' or similar for direct connections
+      const poolerHost = appConfig.poolerHost || pgHost;
+      const poolerPort = appConfig.poolerPort || 6543;
 
       return {
         pool_mode: "transaction",
         default_pool_size: 15,
         max_client_conn: 200,
-        connection_string: `postgresql://postgres.${params.ref}:[YOUR-PASSWORD]@${pgHost}:${pgPort}/${dbName}`,
+        connection_string: `postgresql://postgres.${params.ref}:[YOUR-PASSWORD]@${poolerHost}:${poolerPort}/postgres?pgbouncer=true`,
+        direct_connection_string: `postgresql://postgres.${params.ref}:[YOUR-PASSWORD]@${pgHost}:${pgPort}/postgres`,
       };
     },
     { params: t.Object({ ref: t.String() }) }
@@ -706,6 +759,16 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
               const tsType = pgTypeToTs(col.udt_name as string, col.data_type as string);
               ts += `          ${col.column_name}: ${tsType} | null\n`;
             }
+            ts += `        }\n        Insert: {\n`;
+            for (const col of viewCols) {
+              const tsType = pgTypeToTs(col.udt_name as string, col.data_type as string);
+              ts += `          ${col.column_name}?: ${tsType} | null\n`;
+            }
+            ts += `        }\n        Update: {\n`;
+            for (const col of viewCols) {
+              const tsType = pgTypeToTs(col.udt_name as string, col.data_type as string);
+              ts += `          ${col.column_name}?: ${tsType} | null\n`;
+            }
             ts += `        }\n        Relationships: []\n      }\n`;
           }
 
@@ -720,8 +783,7 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
 
           for (const en of enums.filter((e: Record<string, unknown>) => e.schema === schema)) {
             const vals = (en.values as string[]).map(v => `"${v}"`).join(' | ');
-            const enumKey = `${schema}_${en.name}`;
-            ts += `      ${enumKey}: ${vals}\n`;
+            ts += `      ${en.name}: ${vals}\n`;
           }
 
           ts += `    }\n    CompositeTypes: {\n      [_ in never]: never\n    }\n  }\n`;
