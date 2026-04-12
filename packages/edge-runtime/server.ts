@@ -312,7 +312,7 @@ const app = new Elysia()
     return dispatchFunction(projectRef, c.params.functionName, c.request, c.set.headers as Record<string, string>);
   })
 
-  .listen(PORT);
+  .listen({ port: PORT, hostname: "0.0.0.0" });
 
 console.log(`🚀 Edge Runtime on :${PORT} (${POOL_SIZE} workers)`);
 
