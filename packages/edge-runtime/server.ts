@@ -89,54 +89,93 @@ async function getFunctionConfig(projectRef: string, functionName: string): Prom
   }
 }
 
-/** Verify JWT token against Management API's project JWT secret */
-async function verifyJwt(projectRef: string, authHeader: string | null | undefined): Promise<boolean> {
+// ── Project Secrets Cache ───────────────────────────────────────────────
+// Cache anon_key, service_role_key, jwt_secret per project with 5-min TTL.
+// Eliminates per-request HTTP calls to management API — the #1 cause of
+// TimeoutError (DOMException) under load, which silently swallowed auth.
+interface ProjectSecrets {
+  anonKey: string;
+  serviceRoleKey: string;
+  jwtSecret: string;
+  expiresAt: number;
+}
+const secretsCache = new Map<string, ProjectSecrets>();
+const SECRETS_CACHE_TTL = 300_000; // 5 min
+
+async function getProjectSecrets(projectRef: string): Promise<ProjectSecrets | null> {
+  const cached = secretsCache.get(projectRef);
+  if (cached && cached.expiresAt > Date.now()) return cached;
+
+  try {
+    const [keysRes, detailRes] = await Promise.all([
+      fetch(`${MGMT_API}/v1/projects/${projectRef}/api-keys`, {
+        headers: { Authorization: `Bearer ${MASTER_TOKEN}` },
+        signal: AbortSignal.timeout(5000),
+      }),
+      fetch(`${MGMT_API}/v1/projects/${projectRef}`, {
+        headers: { Authorization: `Bearer ${MASTER_TOKEN}` },
+        signal: AbortSignal.timeout(5000),
+      }),
+    ]);
+
+    if (!keysRes.ok || !detailRes.ok) {
+      console.warn(`[verifyJwt] Failed to fetch secrets for ${projectRef}: keys=${keysRes.status} detail=${detailRes.status}`);
+      // Return stale cache if available rather than hard-failing
+      if (cached) return cached;
+      return null;
+    }
+
+    const keysArray = await keysRes.json() as { name: string; api_key: string }[];
+    const detail = await detailRes.json() as { jwt_secret?: string };
+
+    const secrets: ProjectSecrets = {
+      anonKey: keysArray?.find?.(k => k.name === "anon")?.api_key || "",
+      serviceRoleKey: keysArray?.find?.(k => k.name === "service_role")?.api_key || "",
+      jwtSecret: detail.jwt_secret || "",
+      expiresAt: Date.now() + SECRETS_CACHE_TTL,
+    };
+    secretsCache.set(projectRef, secrets);
+    return secrets;
+  } catch (err) {
+    console.warn(`[verifyJwt] Error fetching secrets for ${projectRef}:`, err instanceof Error ? err.message : err);
+    // Return stale cache on network errors
+    if (cached) return cached;
+    return null;
+  }
+}
+
+/** Verify JWT token against cached project secrets.
+ *  Accepts both Authorization header (Bearer token) and apikey header,
+ *  matching official Supabase edge-runtime behavior. */
+async function verifyJwt(
+  projectRef: string,
+  authHeader: string | null | undefined,
+  apikeyHeader?: string | null,
+): Promise<boolean> {
+  const secrets = await getProjectSecrets(projectRef);
+  if (!secrets) return false;
+
+  // 1. Check apikey header (Supabase client sends anon key here)
+  if (apikeyHeader && (apikeyHeader === secrets.anonKey || apikeyHeader === secrets.serviceRoleKey)) {
+    return true;
+  }
+
+  // 2. Check Authorization bearer token
   if (!authHeader) return false;
   const token = authHeader.replace(/^Bearer\s+/i, "");
   if (!token) return false;
 
+  // Direct key match (anon or service_role key used as bearer)
+  if (token === secrets.anonKey || token === secrets.serviceRoleKey) return true;
+
+  // 3. Verify as JWT signed with project's jwt_secret
+  if (!secrets.jwtSecret) return false;
   try {
-    const res = await fetch(`${MGMT_API}/v1/projects/${projectRef}/api-keys`, {
-      headers: { Authorization: `Bearer ${MASTER_TOKEN}` },
-      signal: AbortSignal.timeout(3000),
-    });
-    if (!res.ok) {
-      console.warn(`[verifyJwt] Failed to fetch api-keys for ${projectRef}: HTTP ${res.status}`);
-      return false;
-    }
-    const keysArray = await res.json() as { name: string; api_key: string }[];
-    const anonKey = keysArray?.find?.(k => k.name === "anon")?.api_key;
-    const serviceRoleKey = keysArray?.find?.(k => k.name === "service_role")?.api_key;
-    
-    // Allow both anon_key and service_role_key as valid bearer tokens
-    if (token && (token === anonKey || token === serviceRoleKey)) return true;
-    
-    // If token is an actual JWT, verify signature via jose
     const { jwtVerify } = await import("jose");
-    // Fetch JWT secret
-    const detailRes = await fetch(`${MGMT_API}/v1/projects/${projectRef}`, {
-      headers: { Authorization: `Bearer ${MASTER_TOKEN}` },
-      signal: AbortSignal.timeout(3000),
-    });
-    if (!detailRes.ok) {
-      console.warn(`[verifyJwt] Failed to fetch project detail for ${projectRef}: HTTP ${detailRes.status}`);
-      return false;
-    }
-    const detail = await detailRes.json() as { jwt_secret?: string };
-    if (!detail.jwt_secret) {
-      console.warn(`[verifyJwt] Project ${projectRef} has no jwt_secret or fetch failed`);
-      return false;
-    }
-    
-    try {
-      await jwtVerify(token, new TextEncoder().encode(detail.jwt_secret));
-      return true;
-    } catch (e) {
-      console.warn(`[verifyJwt] jwtVerify failed for token (starts with ${token.substring(0, 10)}...):`, e);
-      return false;
-    }
-  } catch (err) {
-    console.error("[verifyJwt] Uncaught error during verification:", err);
+    await jwtVerify(token, new TextEncoder().encode(secrets.jwtSecret));
+    return true;
+  } catch (e) {
+    console.warn(`[verifyJwt] JWT signature check failed for ${projectRef}:`, e instanceof Error ? e.message : "unknown");
     return false;
   }
 }
@@ -177,7 +216,7 @@ const app = new Elysia()
     // Check verify_jwt config
     const fnConfig = await getFunctionConfig(projectRef, c.params.functionName);
     if (c.request.method !== "OPTIONS" && fnConfig.verify_jwt) {
-      const authorized = await verifyJwt(projectRef, c.headers["authorization"]);
+      const authorized = await verifyJwt(projectRef, c.headers["authorization"], c.headers["apikey"]);
       if (!authorized) {
         return new Response(JSON.stringify({ msg: "Invalid JWT" }), {
           status: 401,
@@ -201,7 +240,7 @@ const app = new Elysia()
 
     const fnConfig = await getFunctionConfig(projectRef, c.params.functionName);
     if (c.request.method !== "OPTIONS" && fnConfig.verify_jwt) {
-      const authorized = await verifyJwt(projectRef, c.headers["authorization"]);
+      const authorized = await verifyJwt(projectRef, c.headers["authorization"], c.headers["apikey"]);
       if (!authorized) {
         return new Response(JSON.stringify({ msg: "Invalid JWT" }), {
           status: 401,
@@ -227,7 +266,7 @@ const app = new Elysia()
 
     const fnConfig = await getFunctionConfig(projectRef, c.params.functionName);
     if (c.request.method !== "OPTIONS" && fnConfig.verify_jwt) {
-      const authorized = await verifyJwt(projectRef, c.headers["authorization"]);
+      const authorized = await verifyJwt(projectRef, c.headers["authorization"], c.headers["apikey"]);
       if (!authorized) {
         return new Response(JSON.stringify({ msg: "Invalid JWT" }), {
           status: 401,
@@ -251,7 +290,7 @@ const app = new Elysia()
 
     const fnConfig = await getFunctionConfig(projectRef, c.params.functionName);
     if (c.request.method !== "OPTIONS" && fnConfig.verify_jwt) {
-      const authorized = await verifyJwt(projectRef, c.headers["authorization"]);
+      const authorized = await verifyJwt(projectRef, c.headers["authorization"], c.headers["apikey"]);
       if (!authorized) {
         return new Response(JSON.stringify({ msg: "Invalid JWT" }), {
           status: 401,
