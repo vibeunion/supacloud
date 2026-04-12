@@ -349,4 +349,26 @@ export const edgeFunctionService = {
       return false;
     }
   },
+
+  /** Get function invocation logs */
+  async getLogs(ref: string, slug: string, limit: number = 50, offset: number = 0): Promise<Array<{
+    id: string; timestamp: string; event_type: string; severity: string; message: string; metadata: Record<string, unknown>;
+  }>> {
+    try {
+      const logDir = path.join(FUNCTIONS_ROOT, ref, ".logs");
+      const logFile = path.join(logDir, `${slug}.log`);
+      const content = await Bun.file(logFile).text().catch(() => "");
+      if (!content) return [];
+      const lines = content.trim().split("\n").filter(Boolean);
+      return lines.slice(offset, offset + limit).map((line, idx) => {
+        try {
+          return JSON.parse(line);
+        } catch {
+          return { id: String(idx), timestamp: new Date().toISOString(), event_type: "log", severity: "info", message: line, metadata: {} };
+        }
+      });
+    } catch {
+      return [];
+    }
+  },
 };

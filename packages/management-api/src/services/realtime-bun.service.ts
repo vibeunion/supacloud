@@ -226,15 +226,31 @@ class RealtimeBunService {
             const db = (databaseService as any).getTenantDb(dbName);
             if (!db) return true;
 
-            const hasPrimaryKey = record.id !== undefined;
-            if (!hasPrimaryKey) return true;
+            const pkCols = await db.unsafe(`
+                SELECT a.attname
+                FROM pg_index i
+                JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
+                JOIN pg_class c ON c.oid = i.indrelid
+                JOIN pg_namespace n ON n.oid = c.relnamespace
+                WHERE n.nspname = '${schema.replace(/'/g, "''")}'
+                  AND c.relname = '${table.replace(/'/g, "''")}'
+                  AND i.indisprimary
+            `).catch(() => null);
 
-            const pkVal = record.id;
-            const pkType = typeof pkVal === 'number' ? pkVal : `'${String(pkVal).replace(/'/g, "''")}'`;
+            if (!pkCols || !Array.isArray(pkCols) || pkCols.length === 0) return true;
+
+            const whereParts: string[] = [];
+            for (const col of pkCols) {
+                const colName = col.attname;
+                const val = record[colName];
+                if (val === undefined) return true;
+                const escaped = typeof val === 'number' ? val : `'${String(val).replace(/'/g, "''")}'`;
+                whereParts.push(`"${colName}" = ${escaped}`);
+            }
 
             const rlsCheck = await db.unsafe(`
                 SET LOCAL role ${role};
-                SELECT 1 FROM "${schema}"."${table}" WHERE id = ${pkType} LIMIT 1;
+                SELECT 1 FROM "${schema}"."${table}" WHERE ${whereParts.join(' AND ')} LIMIT 1;
             `).catch(() => null);
 
             if (!rlsCheck || !Array.isArray(rlsCheck) || rlsCheck.length === 0) {

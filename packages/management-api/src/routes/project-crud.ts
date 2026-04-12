@@ -111,12 +111,12 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
 
       const ref = project.ref;
       const serviceStatuses = await Promise.all([
-        checkServiceStatus("patroni").then(s => ({ name: "PostgreSQL", status: s })),
-        checkServiceStatus(`supacloud-pgrst@${ref}`).then(s => ({ name: "PostgREST", status: s })),
-        checkServiceStatus(`supacloud-gotrue@${ref}`).then(s => ({ name: "GoTrue", status: s })),
-        checkServiceStatus(`supacloud-realtime@${ref}`).then(s => ({ name: "Realtime", status: s })).catch(() => ({ name: "Realtime", status: "INACTIVE" })),
-        checkServiceStatus(`supacloud-storage@${ref}`).then(s => ({ name: "Storage", status: s })).catch(() => ({ name: "Storage", status: "INACTIVE" })),
-        checkServiceStatus("kong").then(s => ({ name: "Kong", status: s })).catch(() => ({ name: "Kong", status: "INACTIVE" })),
+        checkServiceStatus("patroni").then(s => ({ id: "postgresql", name: "PostgreSQL", status: s, healthy: s === "ACTIVE_HEALTHY" })),
+        checkServiceStatus(`supacloud-pgrst@${ref}`).then(s => ({ id: "postgrest", name: "PostgREST", status: s, healthy: s === "ACTIVE_HEALTHY" })),
+        checkServiceStatus(`supacloud-gotrue@${ref}`).then(s => ({ id: "gotrue", name: "GoTrue", status: s, healthy: s === "ACTIVE_HEALTHY" })),
+        checkServiceStatus(`supacloud-realtime@${ref}`).then(s => ({ id: "realtime", name: "Realtime", status: s, healthy: s === "ACTIVE_HEALTHY" })).catch(() => ({ id: "realtime", name: "Realtime", status: "INACTIVE", healthy: false })),
+        checkServiceStatus(`supacloud-storage@${ref}`).then(s => ({ id: "storage", name: "Storage", status: s, healthy: s === "ACTIVE_HEALTHY" })).catch(() => ({ id: "storage", name: "Storage", status: "INACTIVE", healthy: false })),
+        checkServiceStatus("kong").then(s => ({ id: "kong", name: "Kong", status: s, healthy: s === "ACTIVE_HEALTHY" })).catch(() => ({ id: "kong", name: "Kong", status: "INACTIVE", healthy: false })),
       ]);
 
       return {

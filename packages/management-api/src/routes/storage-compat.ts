@@ -356,7 +356,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
     
     // Inject standard Supabase compatibility headers on all API responses
     .onAfterHandle(({ set }) => {
-        set.headers['x-supabase-api-version'] = '2024-01-01';
+        set.headers['x-supabase-api-version'] = new Date().toISOString().slice(0, 10).replace(/-/g, '').substring(0, 8);
         set.headers['sb-gateway-version'] = '1.0.0';
     })
 
