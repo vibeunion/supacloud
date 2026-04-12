@@ -62,6 +62,36 @@ describe("SDK E2E Compliance Suite", () => {
             await sql`
                 UPDATE projects SET db_name = 'postgres' WHERE ref = ${tenantRef};
             `;
+            
+            // Bootstrap Storage API schema manually since storage-api container is not running to run migrations
+            await sql`CREATE SCHEMA IF NOT EXISTS storage`;
+            await sql`
+                CREATE TABLE IF NOT EXISTS storage.buckets (
+                    id text not null primary key,
+                    name text not null,
+                    owner uuid,
+                    created_at timestamptz default now(),
+                    updated_at timestamptz default now(),
+                    public boolean default false,
+                    avif_autodetection boolean default false,
+                    file_size_limit bigint,
+                    allowed_mime_types text[]
+                )
+            `;
+            await sql`
+                CREATE TABLE IF NOT EXISTS storage.objects (
+                    id uuid not null primary key default gen_random_uuid(),
+                    bucket_id text references storage.buckets,
+                    name text,
+                    owner uuid,
+                    created_at timestamptz default now(),
+                    updated_at timestamptz default now(),
+                    last_accessed_at timestamptz default now(),
+                    metadata jsonb,
+                    path_tokens text[] generated always as (string_to_array(name, '/')) stored,
+                    version text default gen_random_uuid()
+                )
+            `;
         }
 
         // Wait a small moment for dynamic routing configs to settle
