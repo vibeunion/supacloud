@@ -148,7 +148,12 @@ const app = new Elysia({ strictPath: false })
     })
   )
   // CORS
-  .use(cors())
+  .use(cors({
+    origin: true,
+    credentials: true,
+    exposeHeaders: ['x-total-count', 'link', 'content-range', 'x-supabase-api-version'],
+    maxAge: 86400,
+  }))
 
   // Health check (no auth required)
   .get("/health", () => ({ status: "ok", timestamp: new Date().toISOString() }))
@@ -372,8 +377,8 @@ export function registerStaticAssets() {
 export async function registerAllRoutes() {
   const {
     projectRoutes, projectSecretsRoutes, projectFunctionsRoutes, organizationRoutes, userRoutes, backupRoutes,
-    monitorRoutes, maintenanceRoutes, extensionRoutes, systemExtensionRoutes, securityRoutes,
-    storageRoutes, scalingRoutes, taskRoutes, databaseRoutes, authRoutes,
+    monitorRoutes, maintenanceRoutes, extensionRoutes, databaseExtensionRoutes, systemExtensionRoutes, securityRoutes,
+    storageRoutes, projectStorageRoutes, scalingRoutes, taskRoutes, databaseRoutes, authRoutes,
     wechatAuthRoutes, chinaAuthRoutes, userManagementRoutes,
     authHooksRoutes, authSsoRoutes, authMfaRoutes,
     frontendRoutes, webhookRoutes, deployRoutes,
@@ -398,9 +403,11 @@ export async function registerAllRoutes() {
     .use(monitorRoutes)
     .use(maintenanceRoutes)
     .use(extensionRoutes)
+    .use(databaseExtensionRoutes)
     .use(systemExtensionRoutes)
     .use(securityRoutes)
     .use(storageRoutes)
+    .use(projectStorageRoutes)
     .use(scalingRoutes)
     .use(taskRoutes)
     .use(databaseRoutes)
@@ -612,8 +619,97 @@ async function bootstrap() {
     const { handleMcp } = await import("./routes/mcp");
     Bun.serve({
       port: config.port,
-      async fetch(request: Request) {
+      websocket: {
+        open(ws) {
+          const { upstreamUrl, requestHeaders } = ws.data as { upstreamUrl: string; requestHeaders: Record<string, string> };
+          const upstream = new WebSocket(upstreamUrl, {
+            headers: requestHeaders,
+          });
+
+          (ws.data as Record<string, unknown>).upstream = upstream;
+
+          upstream.addEventListener('open', () => {
+            // Flush any messages buffered while upstream was connecting
+            const buffer = (ws.data as Record<string, unknown>).__buffer as string[] | undefined;
+            if (buffer) {
+              for (const msg of buffer) {
+                upstream.send(msg);
+              }
+              (ws.data as Record<string, unknown>).__buffer = [];
+            }
+          });
+
+          upstream.addEventListener('message', (event) => {
+            try {
+              ws.send(event.data as string | ArrayBufferLike);
+            } catch {
+              // downstream closed — will be cleaned up in close handler
+            }
+          });
+
+          upstream.addEventListener('close', (event) => {
+            try { ws.close(event.code, event.reason); } catch { /* already closed */ }
+          });
+
+          upstream.addEventListener('error', () => {
+            try { ws.close(1011, 'Upstream connection error'); } catch { /* already closed */ }
+          });
+        },
+        message(ws, message) {
+          const upstream = (ws.data as Record<string, unknown>)?.upstream as WebSocket | undefined;
+          if (!upstream) return;
+
+          if (upstream.readyState === WebSocket.OPEN) {
+            upstream.send(message as string | ArrayBufferLike);
+          } else if (upstream.readyState === WebSocket.CONNECTING) {
+            // Buffer messages until upstream opens
+            if (!(ws.data as Record<string, unknown>).__buffer) {
+              (ws.data as Record<string, unknown>).__buffer = [];
+            }
+            ((ws.data as Record<string, unknown>).__buffer as string[]).push(message as string);
+          }
+        },
+        close(ws, code, reason) {
+          const upstream = (ws.data as Record<string, unknown>)?.upstream as WebSocket | undefined;
+          if (upstream && upstream.readyState !== WebSocket.CLOSED) {
+            try { upstream.close(code, reason); } catch { /* already closed */ }
+          }
+        },
+      },
+      async fetch(request: Request, server: any) {
         const url = new URL(request.url);
+
+        // ── Realtime WebSocket proxy ──────────────────────────────
+        // Intercept WebSocket upgrade requests for /realtime/v1 before Elysia
+        if (url.pathname.startsWith('/realtime/v1') && request.headers.get('upgrade')?.toLowerCase() === 'websocket') {
+          // Resolve project ref from headers for upstream routing
+          const projectRef = request.headers.get('x-project-ref')
+            || request.headers.get('x-supabase-project')
+            || url.searchParams.get('ref')
+            || '';
+          // Convert the configured HTTP Realtime URL to a WS URL
+          const wsBase = config.realtimeAdminUrl
+            .replace(/^http:/, 'ws:')
+            .replace(/^https:/, 'wss:');
+          const upstreamUrl = `${wsBase}${url.pathname}${url.search}`;
+          // Forward relevant request headers (apikey, authorization, etc.)
+          const requestHeaders: Record<string, string> = {};
+          const forwardHeaders = ['apikey', 'authorization', 'x-project-ref', 'x-supabase-project', 'sec-websocket-protocol'];
+          for (const h of forwardHeaders) {
+            const val = request.headers.get(h);
+            if (val) requestHeaders[h] = val;
+          }
+          if (projectRef) {
+            requestHeaders['x-project-ref'] = projectRef;
+          }
+
+          const upgraded = server.upgrade(request, {
+            data: { upstreamUrl, requestHeaders, projectRef },
+          });
+          if (upgraded) return undefined; // Bun will handle the WebSocket
+          return new Response('WebSocket upgrade failed', { status: 500 });
+        }
+
         // Route /mcp paths directly to MCP handler (bypasses Elysia body parsing)
         if (url.pathname.startsWith("/mcp")) {
           if (url.pathname === "/mcp" || url.pathname.startsWith("/mcp/sql") || url.pathname.startsWith("/mcp/tokens") || url.pathname.startsWith("/mcp/logs") || url.pathname.startsWith("/mcp/migrations")) {

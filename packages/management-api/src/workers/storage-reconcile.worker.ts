@@ -18,7 +18,7 @@
  * (S3 orphans are handled by S3 lifecycle policies).
  */
 
-import { sql as metaSql, getProjectDb } from "../db";
+import { sql as metaSql, getProjectDb, resolveBucketName, resolveDbName } from "../db";
 import { config } from "../config";
 import { logger } from "../utils/logger";
 import * as path from "node:path";
@@ -49,7 +49,7 @@ async function reconcileProject(
     dbName: string,
     stats: ReconcileStats
 ): Promise<void> {
-    const projectRoot = path.resolve(config.storageMountPoint, `supa-${ref}`);
+    const projectRoot = path.resolve(config.storageMountPoint, resolveBucketName(ref));
 
     // Check if the project storage directory exists
     try {
@@ -221,7 +221,7 @@ export async function runReconciliation(): Promise<ReconcileStats> {
 
         for (const project of projects) {
             const ref = String(project.ref);
-            const dbName = String(project.db_name);
+            const dbName = await resolveDbName(ref);
             stats.projectsScanned++;
 
             try {

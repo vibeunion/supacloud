@@ -1,4 +1,4 @@
-import { sql } from '../db';
+import { sql, resolveDbName } from '../db';
 import { databaseService } from '../services/database.service';
 import { logger } from '../utils/logger';
 
@@ -443,7 +443,7 @@ async function main() {
     logger.info(`[migrate-tenant-schema] Found ${projects.length} active projects to migrate.`);
 
     for (const project of projects) {
-       const dbName = project.db_name || `supa_${project.ref}`;
+       const dbName = await resolveDbName(project.ref);
        const tenantDb = (databaseService as any).getTenantDb(dbName);
        try {
           await tenantDb.unsafe(ALTER_TENANT_SQL);

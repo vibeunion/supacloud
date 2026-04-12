@@ -6,7 +6,7 @@ import type { ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
 import { projectService, edgeFunctionService } from "../services";
 import { organizationService } from "../services/organization.service";
 import { StorageService } from "../services/storage.service";
-import { sql as metaSql, getProjectDb } from "../db";
+import { sql as metaSql, getProjectDb, resolveDbName } from "../db";
 import { createMcpToken, type McpTokenPayload } from "./token";
 
 // MCP tool annotations — clients use these to decide whether to prompt user
@@ -240,9 +240,8 @@ export function registerMcpTools(server: McpServer, token: McpTokenPayload): voi
 
   // Helper: get project database connection
   const getDb = async (ref: string) => {
-    const project = (await metaSql`SELECT db_name FROM projects WHERE ref=${ref}`)[0];
-    if (!project) throw new Error("Project not found");
-    return getProjectDb(project.db_name as string);
+    const dbName = await resolveDbName(ref);
+    return getProjectDb(dbName);
   };
 
   // ═══════════════════════════════════════════════

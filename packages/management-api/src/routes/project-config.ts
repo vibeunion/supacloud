@@ -39,7 +39,7 @@ function addConfigRoutes(section: string) {
       `/:ref/config/${section}`,
       async ({ params }: { params: { ref: string } }) => {
         const settings = await projectService.getProjectSettings(params.ref);
-        if (!settings) return status(404, { error: "Project not found" });
+        if (!settings) return status(404, { message: "Project not found", code: "400" });
         return (settings as Record<string, unknown>)[section] || {};
       },
       { params: t.Object({ ref: t.String() }) }
@@ -48,7 +48,7 @@ function addConfigRoutes(section: string) {
       `/:ref/config/${section}`,
       async ({ params, body }: { params: { ref: string }; body: Record<string, unknown> }) => {
         const settings = await projectService.getProjectSettings(params.ref);
-        if (!settings) return status(404, { error: "Project not found" });
+        if (!settings) return status(404, { message: "Project not found", code: "400" });
         const current = ((settings as Record<string, unknown>)[section] as Record<string, unknown>) || {};
         const updated = await projectService.updateProjectSettings(params.ref, {
           ...settings,
@@ -70,7 +70,7 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params, set }) => {
       const settings = await projectService.getProjectSettings(params.ref);
       if (settings === null) {
-                return status(404, { error: "Project not found" });
+                return status(404, { message: "Project not found", code: "400" });
       }
       return settings;
     },
@@ -87,7 +87,7 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params, body, set }) => {
       const settings = await projectService.updateProjectSettings(params.ref, body);
       if (settings === null) {
-                return status(404, { error: "Project not found" });
+                return status(404, { message: "Project not found", code: "400" });
       }
       return settings;
     },
@@ -105,7 +105,7 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params, set }) => {
       const keys = await projectService.getApiKeys(params.ref);
       if (!keys) {
-                return status(404, { error: "Project not found" });
+                return status(404, { message: "Project not found", code: "400" });
       }
       return [
         { name: "anon", api_key: keys.anon_key },
@@ -125,7 +125,7 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params, set }) => {
       const keys = await projectService.rotateApiKeys(params.ref);
       if (!keys) {
-                return status(404, { error: "Project not found" });
+                return status(404, { message: "Project not found", code: "400" });
       }
       return keys;
     },
@@ -173,7 +173,7 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params, body, set }) => {
       const success = await projectService.restoreBackup(params.ref, body.backup_id);
       if (!success) {
-                return status(500, { error: "Failed to restore backup" });
+                return status(500, { message: "Failed to restore backup", code: "400" });
       }
       return { success: true };
     },
@@ -193,9 +193,9 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params, body, set }) => {
       const success = await projectService.updateNetworkRestrictions(params.ref, body.allowed_address_ranges);
       if (!success) {
-                return status(500, { error: "Failed to update network restrictions" });
+                return status(500, { message: "Failed to update network restrictions", code: "500" });
       }
-      return { success: true };
+      return { config: { dbAllowedCidrs: body.allowed_address_ranges }, status: "applied", entitlement: "allowed" };
     },
     {
       params: t.Object({
@@ -206,6 +206,31 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
       }),
     }
   )
+  .patch(
+    "/:ref/network-restrictions",
+    async ({ params, body, set }) => {
+      const success = await projectService.updateNetworkRestrictions(params.ref, body.allowed_address_ranges);
+      if (!success) {
+                return status(500, { message: "Failed to update network restrictions", code: "500" });
+      }
+      return { config: { dbAllowedCidrs: body.allowed_address_ranges }, status: "applied", entitlement: "allowed" };
+    },
+    {
+      params: t.Object({ ref: t.String() }),
+      body: t.Object({ allowed_address_ranges: t.Array(t.String()) }),
+    }
+  )
+  .delete(
+    "/:ref/network-restrictions",
+    async ({ params, set }) => {
+      const success = await projectService.updateNetworkRestrictions(params.ref, []);
+      if (!success) {
+                return status(500, { message: "Failed to remove network restrictions", code: "500" });
+      }
+      return { config: { dbAllowedCidrs: [] }, status: "applied", entitlement: "allowed" };
+    },
+    { params: t.Object({ ref: t.String() }) }
+  )
 
   // Get custom domain
   .get(
@@ -213,7 +238,7 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params, set }) => {
       const domainInfo = await projectService.getCustomDomain(params.ref);
       if (!domainInfo) {
-                return status(404, { error: "Project not found" });
+                return status(404, { message: "Project not found", code: "400" });
       }
       return domainInfo;
     },
@@ -228,37 +253,28 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
   .post(
     "/:ref/custom-hostname",
     async ({ params, body, set }) => {
-      const success = await projectService.addCustomDomain(params.ref, body.custom_hostname);
+      const success = await projectService.addCustomDomain(params.ref, (body as Record<string, unknown>).custom_hostname as string);
       if (!success) {
-                return status(500, { error: "Failed to add custom hostname" });
+                return status(500, { message: "Failed to add custom hostname", code: "500" });
       }
-      return { success: true };
+      return { custom_hostname: (body as Record<string, unknown>).custom_hostname, status: "1_requested", data: {} };
     },
     {
-      params: t.Object({
-        ref: t.String(),
-      }),
-      body: t.Object({
-        custom_hostname: t.String(),
-      }),
+      params: t.Object({ ref: t.String() }),
+      body: t.Object({ custom_hostname: t.String() }),
     }
   )
 
-  // Delete custom domain
   .delete(
     "/:ref/custom-hostname",
     async ({ params, set }) => {
       const success = await projectService.deleteCustomDomain(params.ref);
       if (!success) {
-                return status(500, { error: "Failed to delete custom hostname" });
+                return status(500, { message: "Failed to delete custom hostname", code: "500" });
       }
-      return { success: true };
+      return { custom_hostname: null, status: "0_not_started", data: {} };
     },
-    {
-      params: t.Object({
-        ref: t.String(),
-      }),
-    }
+    { params: t.Object({ ref: t.String() }) }
   )
 
   .post(
@@ -266,7 +282,7 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params, set }) => {
       const domainInfo = await projectService.getCustomDomain(params.ref);
       if (!domainInfo) {
-                return status(404, { error: "No custom hostname configured" });
+                return status(404, { message: "No custom hostname configured", code: "400" });
       }
       const verified = await projectService.getCustomDomain(params.ref).then(d => !!d).catch(() => false);
       return {
@@ -285,7 +301,7 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params, set }) => {
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings) {
-                return status(404, { error: "Project not found" });
+                return status(404, { message: "Project not found", code: "400" });
       }
 
       const authConfig = (settings.auth as Record<string, unknown>) || {};
@@ -295,8 +311,10 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
 
       const studioCompatibleConfig: Record<string, unknown> = {
         enable_signup: authConfig.enable_signup ?? true,
+        enable_signups: authConfig.enable_signup ?? true,
         enable_confirmations: authConfig.enable_confirmations ?? false,
-        enable_manual_linking: authConfig.enable_manual_linking ?? false,
+        double_confirm_changes: authConfig.double_confirm_changes ?? true,
+        manual_linking_enabled: authConfig.manual_linking_enabled ?? authConfig.enable_manual_linking ?? false,
         jwt_expiry: authConfig.jwt_expiry ?? 3600,
         mailer_autoconfirm: authConfig.mailer_autoconfirm ?? false,
         sms_autoconfirm: authConfig.sms_autoconfirm ?? false,
@@ -306,12 +324,23 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
         security_refresh_token_rotation_enabled: authConfig.security_refresh_token_rotation_enabled ?? true,
         security_refresh_token_rotation_reuse_interval: authConfig.security_refresh_token_rotation_reuse_interval ?? 10,
         mfa_enabled: authConfig.mfa_enabled ?? true,
+        mfa_max_enrolled_factors: authConfig.mfa_max_enrolled_factors ?? authConfig.max_enrolled_factors ?? 10,
         webauthn_enabled: authConfig.webauthn_enabled ?? true,
-        max_enrolled_factors: authConfig.max_enrolled_factors ?? 10,
         security_update_password_require_reauthentication: authConfig.security_update_password_require_reauthentication ?? true,
         external_anonymous_users_enabled: authConfig.external_anonymous_users_enabled ?? true,
         external_email_enabled: authConfig.external_email_enabled ?? true,
         external_phone_enabled: authConfig.external_phone_enabled ?? true,
+        saml_enabled: authConfig.saml_enabled ?? false,
+        saml_external_url: authConfig.saml_external_url ?? '',
+        security_captcha_enabled: authConfig.security_captcha_enabled ?? false,
+        security_captcha_provider: authConfig.security_captcha_provider ?? '',
+        security_captcha_secret: authConfig.security_captcha_secret ? '********' : '',
+        rate_limit_anonymous_users: authConfig.rate_limit_anonymous_users ?? 30,
+        rate_limit_email_sent: authConfig.rate_limit_email_sent ?? 30,
+        rate_limit_sms_sent: authConfig.rate_limit_sms_sent ?? 30,
+        rate_limit_verify: authConfig.rate_limit_verify ?? 30,
+        mailer_otp_length: authConfig.mailer_otp_length ?? 6,
+        sms_provider: authConfig.sms_provider ?? '',
         ...authConfig,
       };
 
@@ -320,11 +349,10 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
 
       for (const [key, val] of Object.entries(externalConfig)) {
         const providerConfig = val as Record<string, unknown>;
-        studioCompatibleConfig[`external_${key}`] = {
-          enabled: !!providerConfig?.client_id,
-          client_id: providerConfig?.client_id || '',
-          secret: providerConfig?.client_secret ? '********' : '',
-        };
+        const upperKey = key.toUpperCase();
+        studioCompatibleConfig[`EXTERNAL_${upperKey}_ENABLED`] = !!providerConfig?.client_id;
+        studioCompatibleConfig[`EXTERNAL_${upperKey}_CLIENT_ID`] = providerConfig?.client_id || '';
+        studioCompatibleConfig[`EXTERNAL_${upperKey}_SECRET`] = providerConfig?.client_secret ? '********' : '';
       }
 
       studioCompatibleConfig.external_providers = Object.keys(externalConfig)
@@ -348,6 +376,8 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
       studioCompatibleConfig.smtp_port = smtpConfig.port || 587;
       studioCompatibleConfig.smtp_user = smtpConfig.user || '';
       studioCompatibleConfig.smtp_pass = smtpConfig.pass ? '********' : '';
+      studioCompatibleConfig.smtp_max_frequency = smtpConfig.max_frequency || '1m0s';
+      studioCompatibleConfig.smtp_sender_name = smtpConfig.sender_name || '';
 
       return studioCompatibleConfig;
     },
@@ -364,7 +394,7 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params, body, set }) => {
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings) {
-                return status(404, { error: "Project not found" });
+                return status(404, { message: "Project not found", code: "400" });
       }
 
       const currentAuth = (settings.auth as Record<string, unknown>) || {};
@@ -374,7 +404,28 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
       const externalUpdates: Record<string, unknown> = {};
       const otherUpdates: Record<string, unknown> = {};
       for (const [key, val] of Object.entries(newAuth)) {
-        if (key.startsWith('external_') && key !== 'external_anonymous_users_enabled' && key !== 'external_email_enabled' && key !== 'external_phone_enabled' && key !== 'external_providers') {
+        if (key.startsWith('EXTERNAL_') && key.endsWith('_ENABLED')) {
+          const provider = key.replace(/^EXTERNAL_/, '').replace(/_ENABLED$/, '').toLowerCase();
+          if (['anonymous_users', 'email', 'phone'].includes(provider)) {
+            otherUpdates[`external_${provider}_enabled`] = val;
+            continue;
+          }
+          const existing = ((currentAuth.external as Record<string, unknown>)?.[provider] as Record<string, unknown>) || {};
+          externalUpdates[provider] = {
+            ...existing,
+            ...(val !== undefined ? { client_id: val ? (existing.client_id || '') : '' } : {}),
+          };
+        } else if (key.startsWith('EXTERNAL_') && key.endsWith('_CLIENT_ID')) {
+          const provider = key.replace(/^EXTERNAL_/, '').replace(/_CLIENT_ID$/, '').toLowerCase();
+          const existing = ((currentAuth.external as Record<string, unknown>)?.[provider] as Record<string, unknown>) || {};
+          externalUpdates[provider] = { ...existing, client_id: val };
+        } else if (key.startsWith('EXTERNAL_') && key.endsWith('_SECRET')) {
+          const provider = key.replace(/^EXTERNAL_/, '').replace(/_SECRET$/, '').toLowerCase();
+          if (val && val !== '********') {
+            const existing = ((currentAuth.external as Record<string, unknown>)?.[provider] as Record<string, unknown>) || {};
+            externalUpdates[provider] = { ...existing, client_secret: val };
+          }
+        } else if (key.startsWith('external_') && !['external_anonymous_users_enabled', 'external_email_enabled', 'external_phone_enabled', 'external_providers'].includes(key)) {
           const provider = key.replace('external_', '');
           const providerVal = val as Record<string, unknown>;
           externalUpdates[provider] = {
@@ -411,7 +462,52 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
         logger.warn("[project-config] Failed to propagate auth config to runtime", { error: err });
       }
 
-      return updated?.auth || {};
+      const freshSettings = await projectService.getProjectSettings(params.ref);
+      const freshAuth = (freshSettings?.auth as Record<string, unknown>) || {};
+      const freshExternal = (freshAuth.external as Record<string, unknown>) || {};
+      const freshHooks = (freshAuth.hooks as Record<string, any>) || {};
+      const freshSmtp = (freshAuth.smtp as Record<string, unknown>) || {};
+
+      const response: Record<string, unknown> = {
+        ...freshAuth,
+        enable_signup: freshAuth.enable_signup ?? true,
+        enable_signups: freshAuth.enable_signup ?? true,
+        enable_confirmations: freshAuth.enable_confirmations ?? false,
+        double_confirm_changes: freshAuth.double_confirm_changes ?? true,
+        manual_linking_enabled: freshAuth.manual_linking_enabled ?? freshAuth.enable_manual_linking ?? false,
+        mfa_max_enrolled_factors: freshAuth.mfa_max_enrolled_factors ?? freshAuth.max_enrolled_factors ?? 10,
+      };
+      delete response.external;
+      delete response.hooks;
+
+      for (const [key, val] of Object.entries(freshExternal)) {
+        const providerConfig = val as Record<string, unknown>;
+        const upperKey = key.toUpperCase();
+        response[`EXTERNAL_${upperKey}_ENABLED`] = !!providerConfig?.client_id;
+        response[`EXTERNAL_${upperKey}_CLIENT_ID`] = providerConfig?.client_id || '';
+        response[`EXTERNAL_${upperKey}_SECRET`] = providerConfig?.client_secret ? '********' : '';
+      }
+
+      response.hook_custom_access_token_enabled = !!freshHooks.custom_access_token_hook?.enabled;
+      response.hook_custom_access_token_uri = freshHooks.custom_access_token_hook?.uri || null;
+      response.hook_mfa_verification_enabled = !!freshHooks.mfa_verification_hook?.enabled;
+      response.hook_mfa_verification_uri = freshHooks.mfa_verification_hook?.uri || null;
+      response.hook_password_verification_enabled = !!freshHooks.password_verification_hook?.enabled;
+      response.hook_password_verification_uri = freshHooks.password_verification_hook?.uri || null;
+      response.hook_send_email_enabled = !!freshHooks.send_email_hook?.enabled;
+      response.hook_send_email_uri = freshHooks.send_email_hook?.uri || null;
+      response.hook_send_sms_enabled = !!freshHooks.send_sms_hook?.enabled;
+      response.hook_send_sms_uri = freshHooks.send_sms_hook?.uri || null;
+
+      response.smtp_admin_email = freshSmtp.admin_email || '';
+      response.smtp_host = freshSmtp.host || '';
+      response.smtp_port = freshSmtp.port || 587;
+      response.smtp_user = freshSmtp.user || '';
+      response.smtp_pass = freshSmtp.pass ? '********' : '';
+      response.smtp_max_frequency = freshSmtp.max_frequency || '1m0s';
+      response.smtp_sender_name = freshSmtp.sender_name || '';
+
+      return response;
     },
     {
       params: t.Object({
@@ -426,14 +522,12 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
     "/:ref/config/database",
     async ({ params }) => {
       const settings = await projectService.getProjectSettings(params.ref);
-      if (!settings) return status(404, { error: "Project not found" });
+      if (!settings) return status(404, { message: "Project not found", code: "400" });
       try {
-        const { sql: metaSql } = await import("../db");
-        const { getProjectDb } = await import("../db");
-        const [project] = await metaSql`SELECT db_name FROM projects WHERE ref=${params.ref}`;
-        if (project?.db_name) {
-          const db = getProjectDb(project.db_name);
-          const rows = await db`
+        const { getProjectDb, resolveDbName } = await import("../db");
+        const dbName = await resolveDbName(params.ref);
+        const db = getProjectDb(dbName);
+        const rows = await db`
             SELECT name, setting, unit, short_desc
             FROM pg_settings
             WHERE name IN ('max_connections', 'shared_buffers', 'effective_cache_size', 'work_mem',
@@ -444,12 +538,11 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
           for (const row of rows) {
             let val: unknown = row.setting;
             if (['statement_timeout', 'idle_in_transaction_session_timeout'].includes(row.name)) {
-              val = parseInt(row.setting, 10) || 0;
+              val = row.setting;
             }
             result[row.name] = val;
           }
           return result;
-        }
       } catch {}
       return (settings as Record<string, unknown>).database || {};
     },
@@ -460,7 +553,7 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
     "/:ref/config/pooler",
     async ({ params, body }) => {
       const settings = await projectService.getProjectSettings(params.ref);
-      if (!settings) return status(404, { error: "Project not found" });
+      if (!settings) return status(404, { message: "Project not found", code: "400" });
       const current = ((settings as Record<string, unknown>).pooler as Record<string, unknown>) || {};
       const updated = await projectService.updateProjectSettings(params.ref, {
         ...settings,
@@ -474,11 +567,8 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
   .get(
     "/:ref/database/replication",
     async ({ params }) => {
-      const { sql: metaSql } = await import("../db");
-      const { getProjectDb } = await import("../db");
-      const [project] = await metaSql`SELECT db_name FROM projects WHERE ref=${params.ref}`;
-      if (!project) return status(404, { error: "Project not found" });
-      const dbName = project.db_name || `supa_${params.ref}`;
+      const { getProjectDb, resolveDbName } = await import("../db");
+      const dbName = await resolveDbName(params.ref);
       const db = getProjectDb(dbName);
       const slots = await db`
         SELECT slot_name, slot_type, active, restart_lsn
@@ -496,11 +586,8 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
   .get(
     "/:ref/types/python",
     async ({ params, query }) => {
-      const { sql: metaSql } = await import("../db");
-      const { getProjectDb } = await import("../db");
-      const [project] = await metaSql`SELECT db_name FROM projects WHERE ref=${params.ref}`;
-      if (!project) return status(404, { error: "Project not found" });
-      const dbName = project.db_name || `supa_${params.ref}`;
+      const { getProjectDb, resolveDbName } = await import("../db");
+      const dbName = await resolveDbName(params.ref);
       const db = getProjectDb(dbName);
       const schemas = (query?.schemas || 'public').split(',');
       let py = '';
@@ -536,7 +623,7 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
     "/:ref/config/database",
     async ({ params, body }) => {
       const settings = await projectService.getProjectSettings(params.ref);
-      if (!settings) return status(404, { error: "Project not found" });
+      if (!settings) return status(404, { message: "Project not found", code: "400" });
       const current = ((settings as Record<string, unknown>).database as Record<string, unknown>) || {};
       const updated = await projectService.updateProjectSettings(params.ref, {
         ...settings,
@@ -566,7 +653,7 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
     "/:ref/pgbouncer",
     async ({ params, set }) => {
       const settings = await projectService.getProjectSettings(params.ref);
-      if (!settings) return { error: "Project not found" };
+      if (!settings) return { message: "Project not found", code: "400" };
       return settings.pgbouncer || {
         pool_mode: "transaction",
         default_pool_size: 15,
@@ -580,14 +667,11 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
   .get(
     "/:ref/config/postgres",
     async ({ params }) => {
-      const { getProjectDb } = await import("../db");
-      const { sql: metaSql } = await import("../db");
-      
-      const [project] = await metaSql`SELECT db_name FROM projects WHERE ref=${params.ref}`;
-      if (!project) return status(404, { error: "Project not found" });
+      const { getProjectDb, resolveDbName } = await import("../db");
+      const dbName = await resolveDbName(params.ref);
 
       try {
-        const db = getProjectDb(project.db_name);
+        const db = getProjectDb(dbName);
         const settings = await db`
           SELECT name, setting, unit, short_desc 
           FROM pg_settings 
@@ -605,7 +689,7 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
         }
 
         return {
-          max_connections: Number(settingsMap.max_connections || 100),
+          max_connections: settingsMap.max_connections || "100",
           shared_buffers: settingsMap.shared_buffers || "128MB",
           effective_cache_size: settingsMap.effective_cache_size || "4GB",
           maintenance_work_mem: settingsMap.maintenance_work_mem || "64MB",
@@ -616,7 +700,7 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
         };
       } catch {
         return {
-          max_connections: 100,
+          max_connections: "100",
           shared_buffers: "128MB",
           effective_cache_size: "4GB",
         };
@@ -630,10 +714,6 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
     "/:ref/config/pooler",
     async ({ params }) => {
       const { config: appConfig } = await import("../config");
-      const { sql: metaSql } = await import("../db");
-      
-      const [project] = await metaSql`SELECT db_name FROM projects WHERE ref=${params.ref}`;
-      if (!project) return status(404, { error: "Project not found" });
 
       const pgHost = appConfig.baseDomain || "localhost";
       const pgPort = appConfig.pgPort || 5432;
@@ -656,7 +736,7 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
     "/:ref/network-restrictions",
     async ({ params }) => {
       const settings = await projectService.getProjectSettings(params.ref);
-      if (!settings) return status(404, { error: "Project not found" });
+      if (!settings) return status(404, { message: "Project not found", code: "400" });
 
       return {
         config: {
@@ -674,14 +754,11 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
   .get(
     "/:ref/storage/policies",
     async ({ params }) => {
-      const { getProjectDb } = await import("../db");
-      const { sql: metaSql } = await import("../db");
-      
-      const [project] = await metaSql`SELECT db_name FROM projects WHERE ref=${params.ref}`;
-      if (!project) return status(404, { error: "Project not found" });
+      const { getProjectDb, resolveDbName } = await import("../db");
+      const dbName = await resolveDbName(params.ref);
 
       try {
-        const db = getProjectDb(project.db_name);
+        const db = getProjectDb(dbName);
         const policies = await db`
           SELECT pol.polname as name, pol.polpermissive as permissive,
             CASE pol.polcmd
@@ -711,18 +788,86 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
     { params: t.Object({ ref: t.String() }) }
   )
 
+  // Get Types (Studio calls this path — delegates to /types/typescript)
+  .get(
+    "/:ref/types",
+    async ({ params, query, set }) => {
+      const { getProjectDb, resolveDbName } = await import("../db");
+      const dbName = await resolveDbName(params.ref);
+      const db = getProjectDb(dbName);
+      const includedSchemas = query?.included_schemas || 'public';
+
+      try {
+        const schemas = includedSchemas.split(',').map(s => s.trim()).filter(Boolean);
+        const tables = await db`
+          SELECT table_schema, table_name
+          FROM information_schema.tables
+          WHERE table_schema = ANY(${schemas})
+            AND table_type = 'BASE TABLE'
+          ORDER BY table_schema, table_name
+        `;
+        const columns = await db`
+          SELECT table_schema, table_name, column_name, data_type, is_nullable, udt_name
+          FROM information_schema.columns
+          WHERE table_schema = ANY(${schemas})
+          ORDER BY table_schema, table_name, ordinal_position
+        `;
+
+        let ts = `export type Json =\n  | string\n  | number\n  | boolean\n  | null\n  | { [key: string]: Json | undefined }\n  | Json[]\n\nexport type Database = {\n`;
+
+        const schemaGroups = new Map<string, typeof tables>();
+        for (const t of tables) {
+          const schema = t.table_schema as string;
+          if (!schemaGroups.has(schema)) schemaGroups.set(schema, []);
+          schemaGroups.get(schema)!.push(t);
+        }
+
+        for (const [schema, schemaTables] of schemaGroups) {
+          ts += `  ${schema}: {\n    Tables: {\n`;
+          for (const table of schemaTables) {
+            const tableName = table.table_name as string;
+            const tableCols = columns.filter(
+              (c: Record<string, unknown>) => c.table_name === tableName && c.table_schema === schema
+            );
+            ts += `      ${tableName}: {\n        Row: {\n`;
+            for (const col of tableCols) {
+              const nullable = (col as Record<string, unknown>).is_nullable === 'YES';
+              ts += `          ${(col as Record<string, unknown>).column_name}: ${pgTypeToTs((col as Record<string, unknown>).udt_name as string, (col as Record<string, unknown>).data_type as string)}${nullable ? ' | null' : ''}\n`;
+            }
+            ts += `        }\n        Insert: {\n`;
+            for (const col of tableCols) {
+              const nullable = (col as Record<string, unknown>).is_nullable === 'YES';
+              ts += `          ${(col as Record<string, unknown>).column_name}?: ${pgTypeToTs((col as Record<string, unknown>).udt_name as string, (col as Record<string, unknown>).data_type as string)}${nullable ? ' | null' : ''}\n`;
+            }
+            ts += `        }\n        Update: {\n`;
+            for (const col of tableCols) {
+              ts += `          ${(col as Record<string, unknown>).column_name}?: ${pgTypeToTs((col as Record<string, unknown>).udt_name as string, (col as Record<string, unknown>).data_type as string)} | null\n`;
+            }
+            ts += `        }\n      }\n`;
+          }
+          ts += `    }\n    Views: {\n      [_ in never]: never\n    }\n    Functions: {\n      [_ in never]: never\n    }\n    Enums: {\n      [_ in never]: never\n    }\n    CompositeTypes: {\n      [_ in never]: never\n    }\n  }\n`;
+        }
+        ts += `}\n`;
+        return { types: ts };
+      } catch (err: unknown) {
+        return { types: "export type Json = string | number | boolean | null | { [key: string]: Json } | Json[];" };
+      }
+    },
+    {
+      params: t.Object({ ref: t.String() }),
+      query: t.Optional(t.Object({ included_schemas: t.Optional(t.String()) }))
+    }
+  )
+
   // Get Typescript Types — Real schema reflection (P0-5)
   .get(
     "/:ref/types/typescript",
     async ({ params, query, set }) => {
-      const { getProjectDb } = await import("../db");
-      const { sql: metaSql } = await import("../db");
-      
-      const [project] = await metaSql`SELECT db_name FROM projects WHERE ref=${params.ref}`;
-      if (!project) return status(404, { error: "Project not found" });
+      const { getProjectDb, resolveDbName } = await import("../db");
+      const dbName = await resolveDbName(params.ref);
 
       try {
-        const db = getProjectDb(project.db_name);
+        const db = getProjectDb(dbName);
         const includedSchemas = (query?.included_schemas || "public").split(",").map((s: string) => s.trim());
 
         // 1. Fetch all enums
@@ -917,7 +1062,7 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
         jwtSecret: body.jwt_secret
       });
       if (!result.success) {
-                return status(500, { error: result.message });
+                return status(500, { message: result.message, code: "500" });
       }
       return result;
     },
@@ -958,7 +1103,7 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params }) => {
       const rateLimit = await gatewayService.getRateLimit(params.ref);
       if (rateLimit === null) {
-        return status(500, { error: "Failed to query rate limit from gateway" });
+        return status(500, { message: "Failed to query rate limit from gateway", code: "400" });
       }
       return rateLimit;
     },
@@ -983,7 +1128,7 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
         });
       }
       if (!success) {
-        return status(500, { error: "Failed to update rate limit" });
+        return status(500, { message: "Failed to update rate limit", code: "400" });
       }
       return { success: true, message: "Rate limit updated" };
     },
@@ -1007,14 +1152,14 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params, body }) => {
       // 1. Fetch current settings to persist and check limits
       const settings = await projectService.getProjectSettings(params.ref);
-      if (!settings) return status(404, { error: "Project not found" });
+      if (!settings) return status(404, { message: "Project not found", code: "400" });
 
       const currentLimits = (settings.rate_limits as Record<string, unknown>) || {};
       const customPaths = Object.keys(currentLimits);
       
       // Enforce max 20 custom rate-limit routes per project
       if (customPaths.length >= 20 && !customPaths.includes(body.path)) {
-          return status(400, { error: "Maximum of 20 custom rate limit routes allowed per project" });
+          return status(400, { message: "Maximum of 20 custom rate limit routes allowed per project", code: "400" });
       }
 
       // 2. Apply to Kong
@@ -1025,7 +1170,7 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
       });
 
       if (!success) {
-          return status(500, { error: "Failed to update custom route rate limit in gateway" });
+          return status(500, { message: "Failed to update custom route rate limit in gateway", code: "400" });
       }
 
       // 3. Persist in database
@@ -1057,12 +1202,12 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params, body }) => {
       // 1. Fetch current settings
       const settings = await projectService.getProjectSettings(params.ref);
-      if (!settings) return status(404, { error: "Project not found" });
+      if (!settings) return status(404, { message: "Project not found", code: "400" });
 
       // 2. Remove from Kong
       const success = await gatewayService.removeCustomRouteRateLimit(params.ref, body.path);
       if (!success) {
-          return status(500, { error: "Failed to remove custom route rate limit from gateway" });
+          return status(500, { message: "Failed to remove custom route rate limit from gateway", code: "400" });
       }
 
       // 3. Persist removal in DB

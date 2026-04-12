@@ -54,7 +54,8 @@ async function findMissing(deps: string[]): Promise<string[]> {
   const missing: string[] = [];
   for (const dep of deps) {
     try {
-      require.resolve(dep);
+      // Bun.resolveSync checks if module can be resolved from the current directory
+      Bun.resolveSync(dep, import.meta.dir);
     } catch {
       missing.push(dep);
     }

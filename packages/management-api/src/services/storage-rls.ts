@@ -1,4 +1,4 @@
-import { getProjectDb, sql as metaSql } from "../db";
+import { getProjectDb, sql as metaSql, resolveDbName } from "../db";
 import { jwtVerify } from "jose";
 import { logger } from "../utils/logger";
 
@@ -70,9 +70,8 @@ export class StorageRLS {
         mockBuckets.delete(bucketId);
         return;
     }
-    const project = (await metaSql`SELECT db_name FROM projects WHERE ref=${ref}`)[0];
-    if (!project) return;
-    const db = getProjectDb(project.db_name);
+    const dbName = await resolveDbName(ref);
+    const db = getProjectDb(dbName);
     await db`DELETE FROM storage.buckets WHERE id = ${bucketId}`.catch(() => {});
   }
 
@@ -81,9 +80,8 @@ export class StorageRLS {
     if (ref === 'test_mock') return mockBuckets.get(bucketId) || null;
 
     if (adminOverride) {
-        const project = (await metaSql`SELECT db_name FROM projects WHERE ref=${ref}`)[0];
-        if (!project) return null;
-        const db = getProjectDb(project.db_name);
+        const dbName = await resolveDbName(ref);
+        const db = getProjectDb(dbName);
         const rows = await db`SELECT id, name, public, created_at, updated_at, file_size_limit, allowed_mime_types FROM storage.buckets WHERE id = ${bucketId}`;
         return (rows[0] as Record<string, unknown>) || null;
     }
@@ -129,9 +127,8 @@ export class StorageRLS {
     }
 
     if (adminOverride) {
-        const project = (await metaSql`SELECT db_name FROM projects WHERE ref=${ref}`)[0];
-        if (!project) return null;
-        const db = getProjectDb(project.db_name);
+        const dbName = await resolveDbName(ref);
+        const db = getProjectDb(dbName);
         const rows = await db`
          
           SELECT id, name, bucket_id, owner, metadata, created_at, updated_at, last_accessed_at, version
@@ -227,10 +224,8 @@ export class StorageRLS {
     token: string | null | undefined,
     callback: (tx: import("bun").SQL, payload: Record<string, unknown>) => Promise<T>
   ): Promise<T> {
-    const project = (await metaSql`SELECT db_name FROM projects WHERE ref=${ref}`)[0];
-    if (!project) throw new Error("Project not found");
-    
-    const db = getProjectDb(project.db_name);
+    const dbName = await resolveDbName(ref);
+    const db = getProjectDb(dbName);
     
     let payload: Record<string, unknown> = { role: 'anon' };
     if (token) {
@@ -291,11 +286,9 @@ export class StorageRLS {
        return { permitted: true };
     }
 
-    const project = (await metaSql`SELECT db_name FROM projects WHERE ref=${ref}`)[0];
-    if (!project) return { permitted: false, error: 'Row Level Security violation or bucket missing. Access Denied.' };
-    
-    const db = getProjectDb(project.db_name);
-    
+    const dbName = await resolveDbName(ref);
+    const db = getProjectDb(dbName);
+
     let payload: Record<string, unknown> = { role: 'anon' };
     if (token) {
       try {
@@ -496,11 +489,9 @@ export class StorageRLS {
       return sorted.slice(offset, offset + limit);
     }
 
-    const project = (await metaSql`SELECT db_name FROM projects WHERE ref=${ref}`)[0];
-    if (!project) throw new Error("PROJECT_NOT_FOUND");
-    
-    const db = getProjectDb(project.db_name);
-    
+    const dbName = await resolveDbName(ref);
+    const db = getProjectDb(dbName);
+
     let payload: Record<string, unknown> = { role: 'anon' };
     if (token) {
       try {

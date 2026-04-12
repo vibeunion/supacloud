@@ -1,7 +1,8 @@
 import { Elysia, t, status } from "elysia";
-import { getProjectDb } from "../db";
+import { getProjectDb, resolveDbName } from "../db";
 import { sql as metaSql } from "../db";
 import { logger } from "../utils/logger";
+import { projectService } from "../services";
 
 async function getGotruePort(ref: string): Promise<number | null> {
     try {
@@ -16,11 +17,9 @@ export const authMfaRoutes = new Elysia({ prefix: "/v1/projects" })
   .get(
     "/:ref/auth/factors",
     async ({ params, query }) => {
-      const [project] = await metaSql`SELECT db_name FROM projects WHERE ref=${params.ref}`;
-      if (!project) return status(404, { error: "Project not found" });
-
+      const dbName = await resolveDbName(params.ref);
       try {
-        const db = getProjectDb(project.db_name);
+        const db = getProjectDb(dbName);
 
         let factors;
         if (query.user_id) {
@@ -57,21 +56,67 @@ export const authMfaRoutes = new Elysia({ prefix: "/v1/projects" })
     }
   )
 
+  .post(
+    "/:ref/auth/factors",
+    async ({ params, body, set }) => {
+      const project = await projectService.getProject(params.ref);
+      if (!project || !project.jwt_secret) {
+        return status(404, { message: "Project or JWT secret not found", code: "404" });
+      }
+
+      const { jwtService } = await import("../services/jwt.service");
+      const serviceRoleKey = await jwtService.generateServiceRoleKey(project.jwt_secret);
+      const { config } = await import("../config");
+      const apiUrl = project.api?.url || (config.kongInternal.startsWith('http') ? config.kongInternal : `http://${config.kongInternal}`);
+
+      try {
+        const res = await fetch(`${apiUrl}/auth/v1/admin/factors`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "apikey": serviceRoleKey,
+            "Authorization": `Bearer ${serviceRoleKey}`,
+            "x-project-ref": params.ref
+          },
+          body: JSON.stringify(body)
+        });
+
+        if (!res.ok) {
+          set.status = res.status;
+          const err = await res.json().catch(() => ({}));
+          return { error: err.msg || err.message || "Failed to enroll factor", error_code: err.error_code, code: err.code };
+        }
+
+        return res.json();
+      } catch (err: unknown) {
+        return status(500, { error: "Failed to enroll factor", message: err instanceof Error ? err.message : String(err) });
+      }
+    },
+    {
+      params: t.Object({ ref: t.String() }),
+      body: t.Object({
+        user_id: t.String(),
+        friendly_name: t.Optional(t.String()),
+        factor_type: t.String(),
+        secret: t.Optional(t.String()),
+      }, { additionalProperties: true })
+    }
+  )
+
   .delete(
     "/:ref/auth/factors/:id",
-    async ({ params, headers }) => {
-      const [project] = await metaSql`SELECT db_name, service_role_key FROM projects WHERE ref=${params.ref}`;
-      if (!project) return status(404, { error: "Project not found" });
+    async ({ params }) => {
+      const [project] = await metaSql`SELECT service_role_key FROM projects WHERE ref=${params.ref}`;
+      const dbName = await resolveDbName(params.ref);
 
       const gotruePort = await getGotruePort(params.ref);
       if (gotruePort) {
           try {
-              const apiKey = headers['apikey'] || headers['authorization']?.replace('Bearer ', '') || project.service_role_key;
               const res = await fetch(`http://127.0.0.1:${gotruePort}/admin/factors/${params.id}`, {
                   method: 'DELETE',
                   headers: {
-                      'apikey': project.service_role_key,
-                      'Authorization': `Bearer ${project.service_role_key}`,
+                      'apikey': project?.service_role_key,
+                      'Authorization': `Bearer ${project?.service_role_key}`,
                       'Content-Type': 'application/json'
                   }
               });
@@ -79,7 +124,7 @@ export const authMfaRoutes = new Elysia({ prefix: "/v1/projects" })
                   const data = await res.json().catch(() => ({}));
                   return { success: true, id: params.id, ...data };
               }
-              if (res.status === 404) return status(404, { error: "MFA factor not found" });
+              if (res.status === 404) return status(404, { message: "MFA factor not found", code: "404" });
               logger.warn(`[auth-mfa] GoTrue DELETE /admin/factors returned ${res.status}, falling back to direct DB`);
           } catch (err) {
               logger.warn(`[auth-mfa] GoTrue API unavailable, falling back to direct DB: ${err}`);
@@ -87,13 +132,13 @@ export const authMfaRoutes = new Elysia({ prefix: "/v1/projects" })
       }
 
       try {
-        const db = getProjectDb(project.db_name);
+        const db = getProjectDb(dbName);
         await db`DELETE FROM auth.mfa_challenges WHERE factor_id = ${params.id}::uuid`;
         const result = await db`DELETE FROM auth.mfa_factors WHERE id = ${params.id}::uuid RETURNING id`;
-        if (result.length === 0) return status(404, { error: "MFA factor not found" });
+        if (result.length === 0) return status(404, { message: "MFA factor not found", code: "404" });
         return { success: true, id: params.id };
       } catch (err: unknown) {
-        return status(500, { error: "Failed to delete MFA factor", message: err instanceof Error ? err.message : String(err) });
+        return status(500, { message: "Failed to delete MFA factor", code: "500" });
       }
     },
     { params: t.Object({ ref: t.String(), id: t.String() }) }

@@ -101,13 +101,29 @@ export async function resolveDbName(ref: string): Promise<string> {
       return row.db_name;
     }
   } catch {}
-  const fallback = `supa_${ref}`;
+  const fallback = generateDbName(ref);
   dbNameCache.set(ref, fallback);
   return fallback;
 }
 
 export function invalidateDbNameCache(ref: string) {
   dbNameCache.delete(ref);
+}
+
+export function resolveBucketName(ref: string): string {
+  return `supa-${ref}`;
+}
+
+export function resolveRoleName(ref: string): string {
+  return `role_${ref}`;
+}
+
+export function resolveAuthenticatorName(ref: string): string {
+  return `authenticator_${ref}`;
+}
+
+export function generateDbName(ref: string): string {
+  return `supa_${ref}`;
 }
 
 // Explicitly remove cache for a project (e.g., when project is deleted or paused)
@@ -124,6 +140,19 @@ export async function removeProjectDbCache(dbName: string) {
 }
 
 // Execute SQL query
+export class PgError extends Error {
+  code?: string;
+  details?: string;
+  hint?: string;
+  constructor(message: string, code?: string, details?: string, hint?: string) {
+    super(message);
+    this.name = "PgError";
+    this.code = code;
+    this.details = details;
+    this.hint = hint;
+  }
+}
+
 export async function executeQuery(dbName: string, sqlQuery: string): Promise<{ rows: unknown[]; rowCount: number; command: string }> {
   const projectDb = getProjectDb(dbName);
   try {
@@ -134,7 +163,13 @@ export async function executeQuery(dbName: string, sqlQuery: string): Promise<{ 
       command: ((result as unknown as Record<string, unknown>).command as string) || sqlQuery.trim().split(/\s+/)[0].toUpperCase(),
     };
   } catch (error: unknown) {
-    throw new Error(`SQL execution error: ${error instanceof Error ? error.message : "Unknown error"}`);
+    const pgError = error as Record<string, unknown>;
+    throw new PgError(
+      (pgError.message as string) || "Unknown error",
+      pgError.code as string | undefined,
+      pgError.details as string | undefined,
+      pgError.hint as string | undefined,
+    );
   }
 }
 

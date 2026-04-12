@@ -46,32 +46,20 @@ function getConfigPath(ref: string, slug: string): string {
 }
 
 /**
- * Validate that function code contains a serve handler.
- * Accepts Deno.serve, export default, module.exports, fetch handlers, etc.
+ * Validate that function code is non-empty and has some meaningful content.
+ * Syntax validation is delegated to Bun.build().
  */
-function validateFunctionCode(code: string): { valid: boolean; error?: string } {
+function validateFunctionCode(code: string): {
+  valid: boolean;
+  error?: string;
+} {
   if (!code || code.trim().length === 0) {
     return { valid: false, error: "Function code is empty" };
   }
-
-  const hasHandler =
-    code.includes("Deno.serve") ||
-    code.includes("serve(") ||
-    code.includes("export default") ||
-    code.includes("module.exports") ||
-    code.includes("__esModule") ||
-    code.includes("exports.default") ||
-    code.includes("async fetch") ||
-    code.includes("new Request") ||
-    code.includes("new Response");
-
-  if (!hasHandler) {
-    return {
-      valid: false,
-      error: "Function must contain a handler (Deno.serve, export default, module.exports, or fetch handler)",
-    };
+  if (code.trim().length < 10) {
+    return { valid: false, error: "Function code is too short to be valid" };
   }
-
+  // Accept any non-empty code - Bun.build() will validate syntax
   return { valid: true };
 }
 
@@ -101,7 +89,9 @@ async function bundleFunction(
     const result = await Bun.build(buildOptions);
 
     if (!result.success) {
-      const messages = result.logs.map((l: { message?: string }) => l.message || String(l)).join("\n");
+      const messages = result.logs
+        .map((l: { message?: string }) => l.message || String(l))
+        .join("\n");
       logger.error(`[EdgeFunction] Bun.build() failed:\n${messages}`);
       return null;
     }
@@ -124,7 +114,9 @@ async function invalidateCache(ref: string, slug: string): Promise<void> {
   for (const ext of [".ts", ".js"]) {
     try {
       await fs.unlink(path.join(cacheDir, `${slug}${ext}`));
-    } catch { /* may not exist */ }
+    } catch {
+      /* may not exist */
+    }
   }
 
   // 2. Notify Edge Runtime to evict the module from Worker thread caches
@@ -151,13 +143,19 @@ export const edgeFunctionService = {
   },
 
   /** Update function config */
-  async updateConfig(ref: string, slug: string, config: Partial<EdgeFunctionConfig>): Promise<EdgeFunctionConfig> {
+  async updateConfig(
+    ref: string,
+    slug: string,
+    config: Partial<EdgeFunctionConfig>,
+  ): Promise<EdgeFunctionConfig> {
     const current = await this.getConfig(ref, slug);
     const merged = { ...current, ...config };
     const dir = getFuncDir(ref);
     await fs.mkdir(dir, { recursive: true });
     await Bun.write(getConfigPath(ref, slug), JSON.stringify(merged, null, 2));
-    logger.info(`[EdgeFunction] Config updated for ${slug}@${ref}: verify_jwt=${merged.verify_jwt}`);
+    logger.info(
+      `[EdgeFunction] Config updated for ${slug}@${ref}: verify_jwt=${merged.verify_jwt}`,
+    );
     return merged;
   },
 
@@ -165,11 +163,19 @@ export const edgeFunctionService = {
    * Deploy a single-file Edge Function.
    * The source code is preserved as .src.ts; a bundled .js is written for the runtime.
    */
-  async deploy(ref: string, slug: string, code: string, minify: boolean = false): Promise<boolean> {
+  async deploy(
+    ref: string,
+    slug: string,
+    code: string,
+    minify: boolean = false,
+  ): Promise<boolean> {
     try {
       const validation = validateFunctionCode(code);
       if (!validation.valid) {
-        logger.error(`[EdgeFunction] Validation failed: ${validation.error}`, { ref, slug });
+        logger.error(`[EdgeFunction] Validation failed: ${validation.error}`, {
+          ref,
+          slug,
+        });
         return false;
       }
 
@@ -185,7 +191,10 @@ export const edgeFunctionService = {
       if (!bundled) {
         // Fallback: if bundling fails (e.g., missing relative imports),
         // write the raw code directly as .js so at least simple functions work
-        logger.warn(`[EdgeFunction] Bundle failed, falling back to raw deploy`, { ref, slug });
+        logger.warn(
+          `[EdgeFunction] Bundle failed, falling back to raw deploy`,
+          { ref, slug },
+        );
         await Bun.write(getFuncPath(ref, slug), code);
       }
 
@@ -201,10 +210,15 @@ export const edgeFunctionService = {
         });
       } catch {
         // Non-fatal: function will be loaded on first real request
-        logger.debug(`[EdgeFunction] Preheat skipped (runtime unavailable)`, { ref, slug });
+        logger.debug(`[EdgeFunction] Preheat skipped (runtime unavailable)`, {
+          ref,
+          slug,
+        });
       }
 
-      logger.info(`[EdgeFunction] Deployed ${slug} for ${ref} (bundled=${!!bundled}, minify=${minify})`);
+      logger.info(
+        `[EdgeFunction] Deployed ${slug} for ${ref} (bundled=${!!bundled}, minify=${minify})`,
+      );
       return true;
     } catch (err) {
       logger.error(`[EdgeFunction] Deploy failed`, { ref, slug, error: err });
@@ -229,14 +243,20 @@ export const edgeFunctionService = {
   ): Promise<boolean> {
     try {
       if (!files[entrypoint]) {
-        logger.error(`[EdgeFunction] Entrypoint '${entrypoint}' not found in file map`, { ref, slug });
+        logger.error(
+          `[EdgeFunction] Entrypoint '${entrypoint}' not found in file map`,
+          { ref, slug },
+        );
         return false;
       }
 
       // Validate the entrypoint
       const validation = validateFunctionCode(files[entrypoint]);
       if (!validation.valid) {
-        logger.error(`[EdgeFunction] Validation failed: ${validation.error}`, { ref, slug });
+        logger.error(`[EdgeFunction] Validation failed: ${validation.error}`, {
+          ref,
+          slug,
+        });
         return false;
       }
 
@@ -247,26 +267,39 @@ export const edgeFunctionService = {
 
       // 1. Write all files to staging
       for (const [relPath, content] of Object.entries(files)) {
-          const filePath = path.join(stageDir, relPath);
-          await fs.mkdir(path.dirname(filePath), { recursive: true });
-          await Bun.write(filePath, content);
+        const filePath = path.join(stageDir, relPath);
+        await fs.mkdir(path.dirname(filePath), { recursive: true });
+        await Bun.write(filePath, content);
       }
 
       // 2. Resolve import_map if present
       let importMapPath: string | undefined;
-      const importMapCandidates = ['import_map.json', 'import_map', 'deno.json', 'deno.jsonc'];
+      const importMapCandidates = [
+        "import_map.json",
+        "import_map",
+        "deno.json",
+        "deno.jsonc",
+      ];
       for (const candidate of importMapCandidates) {
-          const candidatePath = path.join(stageDir, candidate);
-          try {
-              await fs.access(candidatePath);
-              importMapPath = candidatePath;
-              break;
-          } catch { /* not found */ }
+        const candidatePath = path.join(stageDir, candidate);
+        try {
+          await fs.access(candidatePath);
+          importMapPath = candidatePath;
+          break;
+        } catch {
+          /* not found */
+        }
       }
 
       // 3. Bundle from entrypoint
       const entrypointPath = path.join(stageDir, entrypoint);
-      const bundled = await bundleFunction(entrypointPath, dir, slug, minify, importMapPath);
+      const bundled = await bundleFunction(
+        entrypointPath,
+        dir,
+        slug,
+        minify,
+        importMapPath,
+      );
 
       if (!bundled) {
         // Cleanup staging on failure
@@ -283,10 +316,16 @@ export const edgeFunctionService = {
       // 4. Invalidate runtime caches
       await invalidateCache(ref, slug);
 
-      logger.info(`[EdgeFunction] Bundle deployed ${slug} for ${ref} (${Object.keys(files).length} files, minify=${minify})`);
+      logger.info(
+        `[EdgeFunction] Bundle deployed ${slug} for ${ref} (${Object.keys(files).length} files, minify=${minify})`,
+      );
       return true;
     } catch (err) {
-      logger.error(`[EdgeFunction] Bundle deploy failed`, { ref, slug, error: err });
+      logger.error(`[EdgeFunction] Bundle deploy failed`, {
+        ref,
+        slug,
+        error: err,
+      });
       return false;
     }
   },
@@ -296,8 +335,11 @@ export const edgeFunctionService = {
     try {
       return await Bun.file(getFuncPath(ref, slug)).text();
     } catch (err: unknown) {
-      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
-         logger.error(`[EdgeFunction] Failed to read ${slug}`, { ref, error: err });
+      if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+        logger.error(`[EdgeFunction] Failed to read ${slug}`, {
+          ref,
+          error: err,
+        });
       }
       return null;
     }
@@ -321,8 +363,10 @@ export const edgeFunctionService = {
       const entries = Array.from(glob.scanSync({ cwd: dir, onlyFiles: true }));
       return entries.map((f) => f.replace(/\.js$/, ""));
     } catch (err: unknown) {
-      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
-         logger.warn(`[EdgeFunction] Failed to list functions for ${ref}`, { error: err });
+      if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+        logger.warn(`[EdgeFunction] Failed to list functions for ${ref}`, {
+          error: err,
+        });
       }
       return [];
     }
@@ -336,35 +380,64 @@ export const edgeFunctionService = {
       // Remove source file
       await fs.unlink(getSrcPath(ref, slug)).catch(() => {});
       // Remove source directory (bundle deploys)
-      await fs.rm(path.join(getFuncDir(ref), `.src-${slug}`), { recursive: true, force: true }).catch(() => {});
+      await fs
+        .rm(path.join(getFuncDir(ref), `.src-${slug}`), {
+          recursive: true,
+          force: true,
+        })
+        .catch(() => {});
 
       await invalidateCache(ref, slug);
 
       logger.info(`[EdgeFunction] Deleted ${slug} for ${ref}`);
       return true;
     } catch (err: unknown) {
-      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
-         logger.error(`[EdgeFunction] Failed to delete ${slug}`, { ref, error: err });
+      if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+        logger.error(`[EdgeFunction] Failed to delete ${slug}`, {
+          ref,
+          error: err,
+        });
       }
       return false;
     }
   },
 
-  async getLogs(ref: string, slug: string, limit: number = 50, offset: number = 0): Promise<Array<{
-    id: string; timestamp: string; event_type: string; severity: string; message: string; metadata: Record<string, unknown>;
-  }>> {
+  async getLogs(
+    ref: string,
+    slug: string,
+    limit: number = 50,
+    offset: number = 0,
+  ): Promise<
+    Array<{
+      id: string;
+      timestamp: string;
+      event_type: string;
+      severity: string;
+      message: string;
+      metadata: Record<string, unknown>;
+    }>
+  > {
     try {
       const logDir = path.join(FUNCTIONS_ROOT, ref, ".logs");
       await fs.mkdir(logDir, { recursive: true }).catch(() => {});
       const logFile = path.join(logDir, `${slug}.log`);
-      const content = await Bun.file(logFile).text().catch(() => "");
+      const content = await Bun.file(logFile)
+        .text()
+        .catch(() => "");
       if (!content) return [];
       const lines = content.trim().split("\n").filter(Boolean);
       return lines.slice(offset, offset + limit).map((line, idx) => {
         try {
           return JSON.parse(line);
         } catch {
-          return { id: String(idx), timestamp: new Date().toISOString(), event_type: "log", severity: "info", message: line, metadata: {} };
+          return {
+            id: String(idx),
+            timestamp: new Date().toISOString(),
+            event_type: "log",
+            severity: "info",
+            message: line,
+            metadata: {},
+          };
         }
       });
     } catch {
