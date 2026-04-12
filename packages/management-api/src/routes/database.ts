@@ -1,6 +1,6 @@
 import { Elysia, t } from "elysia";
 import { projectService } from "../services";
-import { db } from "../db";
+import { db, resolveDbName, getProjectDb } from "../db";
 
 export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" })
     .get(
@@ -13,33 +13,36 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
             }
 
             try {
-                const dbName = `supa_${params.ref}`;
+                const dbName = await resolveDbName(params.ref);
                 const limit = Number(query._limit || query.limit || 50);
                 const page = Number(query._page || 1);
                 const skip = Number(query.skip || (page - 1) * limit);
                 const search = query.q ? String(query.q) : (query.query ? String(query.query) : "");
-                
-                let whereClause = "WHERE table_schema = 'public' AND table_type = 'BASE TABLE'";
+
+                const projectDb = getProjectDb(dbName);
+                let rows: any[];
                 if (search) {
-                    // Quick safe sanitization for table names
-                    const safeSearch = search.replace(/'/g, "''");
-                    whereClause += ` AND table_name ILIKE '%${safeSearch}%'`;
+                    rows = await projectDb`
+                        SELECT table_name, table_schema, table_type,
+                        (SELECT reltuples::bigint FROM pg_class WHERE oid = ('"'||table_schema||'"."'||table_name||'"')::regclass) as row_estimate
+                        FROM information_schema.tables
+                        WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
+                        AND table_name ILIKE ${'%' + search + '%'}
+                        ORDER BY table_name
+                    `;
+                } else {
+                    rows = await projectDb`
+                        SELECT table_name, table_schema, table_type,
+                        (SELECT reltuples::bigint FROM pg_class WHERE oid = ('"'||table_schema||'"."'||table_name||'"')::regclass) as row_estimate
+                        FROM information_schema.tables
+                        WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
+                        ORDER BY table_name
+                    `;
                 }
 
-                const sql = `
-                    SELECT table_name, table_schema, table_type,
-                    (SELECT reltuples::bigint FROM pg_class WHERE oid = ('"'||table_schema||'"."'||table_name||'"')::regclass) as row_estimate
-                    FROM information_schema.tables
-                    ${whereClause}
-                    ORDER BY table_name;
-                `;
-
-                const result = await db.executeQuery(dbName, sql);
-                const allTables = ((result as unknown as { rows: Record<string, unknown>[] }).rows) || [];
-
                 return {
-                    data: allTables.slice(skip, skip + limit),
-                    total: allTables.length
+                    data: rows.slice(skip, skip + limit),
+                    total: rows.length
                 };
             } catch (error: unknown) {
                 set.status = 500;
@@ -50,9 +53,7 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
             }
         },
         {
-            params: t.Object({
-                ref: t.String({ minLength: 1 }),
-            }),
+            params: t.Object({ ref: t.String({ minLength: 1 }) }),
             query: t.Object({
                 skip: t.Optional(t.String()),
                 limit: t.Optional(t.String()),
@@ -75,23 +76,22 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
             }
 
             try {
-                const dbName = `supa_${params.ref}`;
-                // Quick and safe parameterized query logic for schema inspection
-                // Use ::regclass format if possible, or just exact string match 
-                const schema = params.schema.replace(/'/g, "''");
-                const table = params.table.replace(/'/g, "''");
+                const dbName = await resolveDbName(params.ref);
+                const regex = /^[a-zA-Z_0-9]+$/;
+                if (!regex.test(params.schema) || !regex.test(params.table)) {
+                     set.status = 400;
+                     return { error: "Invalid schema or table name format" };
+                }
 
-                const sql = `
-                    SELECT column_name, data_type, is_nullable, column_default 
-                    FROM information_schema.columns 
-                    WHERE table_schema = '${schema}' AND table_name = '${table}'
-                    ORDER BY ordinal_position;
+                const projectDb = getProjectDb(dbName);
+                const rows = await projectDb`
+                    SELECT column_name, data_type, is_nullable, column_default
+                    FROM information_schema.columns
+                    WHERE table_schema = ${params.schema} AND table_name = ${params.table}
+                    ORDER BY ordinal_position
                 `;
 
-                const result = await db.executeQuery(dbName, sql);
-                return {
-                    data: ((result as unknown as { rows: Record<string, unknown>[] }).rows) || []
-                };
+                return { data: rows };
             } catch (error: unknown) {
                 set.status = 500;
                 return {
@@ -118,29 +118,24 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
             }
 
             try {
-                const dbName = `supa_${params.ref}`;
-                const limit = Number(query._limit || query.limit || 50);
-                const page = Number(query._page || 1);
+                const dbName = await resolveDbName(params.ref);
+                const limit = Math.min(Math.max(Number(query._limit || query.limit || 50), 1), 500);
+                const page = Math.max(Number(query._page || 1), 1);
                 const skip = Number(query.skip || (page - 1) * limit);
 
-                // Sanitize schema and table to avoid injection
                 const regex = /^[a-zA-Z_0-9]+$/;
                 if (!regex.test(params.schema) || !regex.test(params.table)) {
                      set.status = 400;
                      return { error: "Invalid schema or table name format" };
                 }
 
-                const sql = `SELECT * FROM "${params.schema}"."${params.table}" LIMIT ${limit} OFFSET ${skip};`;
-                const countSql = `SELECT count(*) as count FROM "${params.schema}"."${params.table}";`;
-
-                const [resRows, resCount] = await Promise.all([
-                    db.executeQuery(dbName, sql),
-                    db.executeQuery(dbName, countSql)
-                ]);
+                const projectDb = getProjectDb(dbName);
+                const rows = await projectDb.unsafe(`SELECT * FROM "${params.schema}"."${params.table}" LIMIT ${limit} OFFSET ${skip}`);
+                const countResult = await projectDb.unsafe(`SELECT count(*) as count FROM "${params.schema}"."${params.table}"`);
 
                 return {
-                    data: ((resRows as unknown as { rows: Record<string, unknown>[] }).rows) || [],
-                    total: parseInt(((resCount as unknown as { rows: { count: string }[] }).rows)[0]?.count || "0")
+                    data: rows || [],
+                    total: parseInt(countResult?.[0]?.count || "0")
                 };
             } catch (error: unknown) {
                 set.status = 500;
@@ -177,7 +172,7 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
             }
 
             try {
-                const dbName = `supa_${params.ref}`;
+                const dbName = await resolveDbName(params.ref);
                 const sqlQuery = body.query || body.sql;
                 if (!sqlQuery) {
                     set.status = 400;
@@ -195,16 +190,13 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
             }
         },
         {
-            params: t.Object({
-                ref: t.String({ minLength: 1 }),
-            }),
+            params: t.Object({ ref: t.String({ minLength: 1 }) }),
             body: t.Object({
                 sql: t.Optional(t.String()),
                 query: t.Optional(t.String()),
             }),
         }
     )
-
     .post(
         "/migrations",
         async ({ params, body, set }) => {
@@ -214,40 +206,38 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
                 return { error: "Project not found" };
             }
 
-            const dbName = `supa_${params.ref}`;
+            const dbName = await resolveDbName(params.ref);
+            const projectDb = getProjectDb(dbName);
 
             try {
-                const migrationTableExists = await db.executeQuery(
-                    dbName,
-                    `SELECT EXISTS (
-                        SELECT FROM information_schema.tables 
+                const migrationTableExists = await projectDb`
+                    SELECT EXISTS (
+                        SELECT FROM information_schema.tables
                         WHERE table_schema IN ('public', 'supabase_migrations')
                         AND table_name = 'schema_migrations'
-                    );`
-                );
+                    ) AS exists
+                `;
 
-                const tableExists = (migrationTableExists as { rows?: Array<{ exists: boolean }> }).rows?.[0]?.exists ?? false;
+                const tableExists = (migrationTableExists as Array<{ exists: boolean }>)[0]?.exists ?? false;
 
                 if (!tableExists) {
-                    await db.executeQuery(dbName, `CREATE SCHEMA IF NOT EXISTS supabase_migrations`);
-                    await db.executeQuery(dbName, `
+                    await projectDb.unsafe(`CREATE SCHEMA IF NOT EXISTS supabase_migrations`);
+                    await projectDb`
                         CREATE TABLE IF NOT EXISTS supabase_migrations.schema_migrations (
                             version BIGINT PRIMARY KEY,
                             statements TEXT[],
                             name TEXT
-                        );
-                    `);
-                    await db.executeQuery(dbName, `
+                        )
+                    `;
+                    await projectDb`
                         CREATE TABLE IF NOT EXISTS public.schema_migrations (
                             version VARCHAR(255) PRIMARY KEY,
                             statements TEXT[],
                             name TEXT
-                        );
-                    `);
+                        )
+                    `;
                 }
 
-                // CLI `supabase db push` sends { query } — treat as raw SQL migration
-                // Studio / custom sends { name, sql } — structured migration
                 const isCliFormat = 'query' in body && typeof (body as Record<string, unknown>).query === 'string';
                 const isStructuredFormat = 'name' in body && 'sql' in body;
 
@@ -255,40 +245,37 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
                     const query = (body as Record<string, unknown>).query as string;
                     const version = Math.floor(Date.now() / 1000);
 
-                    const existing = await db.executeQuery(
-                        dbName,
-                        `SELECT version FROM supabase_migrations.schema_migrations WHERE version = ${version}`
-                    );
-                    if ((existing as { rows?: unknown[] }).rows?.length) {
+                    const existing = await projectDb`
+                        SELECT version FROM supabase_migrations.schema_migrations WHERE version = ${version}
+                    `;
+                    if (existing.length) {
                         set.status = 409;
                         return { error: "Migration already applied", version };
                     }
 
-                    await db.executeQuery(dbName, query);
-                    await db.executeQuery(dbName, `INSERT INTO supabase_migrations.schema_migrations (version, statements, name) VALUES (${version}, ARRAY['${query.replace(/'/g, "''")}'], 'cli_push');`);
-                    await db.executeQuery(dbName, `INSERT INTO public.schema_migrations (version, statements, name) VALUES ('${version}', ARRAY['${query.replace(/'/g, "''")}'], 'cli_push');`).catch(() => {});
+                    await projectDb.unsafe(query);
+                    await projectDb`INSERT INTO supabase_migrations.schema_migrations (version, statements, name) VALUES (${version}, ARRAY[${query}], 'cli_push')`;
+                    await projectDb`INSERT INTO public.schema_migrations (version, statements, name) VALUES (${String(version)}, ARRAY[${query}], 'cli_push')`.catch(() => {});
 
                     return { version, statements: [query] };
                 }
 
                 if (isStructuredFormat) {
                     const { name, sql } = body as { name: string; sql: string };
-
                     const version = Math.floor(Date.now() / 1000);
 
-                    const existingMigration = await db.executeQuery(
-                        dbName,
-                        `SELECT version FROM supabase_migrations.schema_migrations WHERE name = '${name.replace(/'/g, "''")}'`
-                    );
+                    const existingMigration = await projectDb`
+                        SELECT version FROM supabase_migrations.schema_migrations WHERE name = ${name}
+                    `;
 
-                    if ((existingMigration as { rows?: unknown[] }).rows?.length) {
+                    if (existingMigration.length) {
                         set.status = 409;
                         return { error: "Migration already applied", name };
                     }
 
-                    await db.executeQuery(dbName, sql);
-                    await db.executeQuery(dbName, `INSERT INTO supabase_migrations.schema_migrations (version, statements, name) VALUES (${version}, ARRAY['${sql.replace(/'/g, "''")}'], '${name.replace(/'/g, "''")}');`);
-                    await db.executeQuery(dbName, `INSERT INTO public.schema_migrations (version, statements, name) VALUES ('${version}', ARRAY['${sql.replace(/'/g, "''")}'], '${name.replace(/'/g, "''")}');`).catch(() => {});
+                    await projectDb.unsafe(sql);
+                    await projectDb`INSERT INTO supabase_migrations.schema_migrations (version, statements, name) VALUES (${version}, ARRAY[${sql}], ${name})`;
+                    await projectDb`INSERT INTO public.schema_migrations (version, statements, name) VALUES (${String(version)}, ARRAY[${sql}], ${name})`.catch(() => {});
 
                     return { version, name };
                 }
@@ -304,13 +291,10 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
             }
         },
         {
-            params: t.Object({
-                ref: t.String({ minLength: 1 }),
-            }),
+            params: t.Object({ ref: t.String({ minLength: 1 }) }),
             body: t.Record(t.String(), t.Unknown()),
         }
     )
-
     .get(
         "/migrations",
         async ({ params, set }) => {
@@ -321,20 +305,17 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
             }
 
             try {
-                const dbName = `supa_${params.ref}`;
+                const dbName = await resolveDbName(params.ref);
+                const projectDb = getProjectDb(dbName);
                 let rows: Array<Record<string, unknown>> = [];
                 try {
-                    const result = await db.executeQuery(
-                        dbName,
-                        `SELECT version, statements, name FROM supabase_migrations.schema_migrations ORDER BY version ASC;`
-                    );
-                    rows = (result as { rows?: Array<Record<string, unknown>> }).rows || [];
+                    rows = await projectDb`
+                        SELECT version, statements, name FROM supabase_migrations.schema_migrations ORDER BY version ASC
+                    ` as Array<Record<string, unknown>>;
                 } catch {
-                    const result = await db.executeQuery(
-                        dbName,
-                        `SELECT version, statements, name FROM public.schema_migrations ORDER BY version ASC;`
-                    );
-                    rows = (result as { rows?: Array<Record<string, unknown>> }).rows || [];
+                    rows = await projectDb`
+                        SELECT version, statements, name FROM public.schema_migrations ORDER BY version ASC
+                    ` as Array<Record<string, unknown>>;
                 }
                 return rows.map((row) => ({
                     version: row.version,
@@ -346,8 +327,6 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
             }
         },
         {
-            params: t.Object({
-                ref: t.String({ minLength: 1 }),
-            }),
+            params: t.Object({ ref: t.String({ minLength: 1 }) }),
         }
     );

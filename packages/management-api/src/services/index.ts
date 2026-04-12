@@ -6,3 +6,5 @@ export { shellService } from "./shell.service";
 export { projectService } from "./project.service";
 export { frontendService } from "./frontend.service";
 export { deployService } from "./deploy.service";
+export { extensionService } from "./extension.service";
+export { edgeFunctionService } from "./edge-function.service";

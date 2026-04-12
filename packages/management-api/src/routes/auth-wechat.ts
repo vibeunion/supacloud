@@ -159,7 +159,8 @@ export const wechatAuthRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
 
       try {
         const project = await projectService.getProject(params.ref);
-        const apiExternalUrl = project?.api?.url || `https://${params.ref}.supabase.co`;
+        const { config } = await import("../config");
+        const apiExternalUrl = project?.api?.url || `https://${params.ref}.api.${config.baseDomain || 'localhost'}`;
         const redirectUri = body.redirect_uri || `${apiExternalUrl}/auth/v1/callback`;
 
         await tenantRuntimeService.updateGoTrueCustomOAuth(params.ref, {
