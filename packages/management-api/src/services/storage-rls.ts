@@ -529,6 +529,10 @@ export class StorageRLS {
               : 'name';
         const orderDirection = (sortBy?.order || 'asc').toLowerCase() === 'desc' ? 'DESC' : 'ASC';
 
+        const [bucket] = await tx`SELECT id FROM storage.buckets WHERE id = ${bucketId}`;
+        if (!bucket) throw new Error('BUCKET_NOT_FOUND');
+
+
         const baseRows = await tx`
           SELECT
             id,
