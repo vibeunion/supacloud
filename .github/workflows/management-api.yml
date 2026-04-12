@@ -41,7 +41,7 @@ jobs:
     timeout-minutes: 10
     services:
       postgres:
-        image: supabase/postgres:15.14.1.107
+        image: supabase/postgres:17.6.1.107
         env:
           POSTGRES_PASSWORD: postgres
         ports:
