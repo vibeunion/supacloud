@@ -51,8 +51,8 @@ export const projectServiceRoutes = new Elysia({ prefix: "/v1/projects" })
       }
 
       try {
-        const { getProjectDb } = await import("../db");
-        const dbName = `supa_${params.ref}`;
+        const { getProjectDb, resolveDbName } = await import("../db");
+        const dbName = await resolveDbName(params.ref);
         const db = getProjectDb(dbName);
 
         // Database size

@@ -2,7 +2,7 @@ import { config } from "../config";
 import { logger } from "../utils/logger";
 import { shellService } from "./shell.service";
 import { SQL } from "bun";
-import { sql as adminSql, getProjectDb } from "../db";
+import { sql as adminSql, getProjectDb, resolveDbName } from "../db";
 import { $ } from "bun";
 import { assertValidIdentifier, assertValidDbName } from "../utils/validation";
 
@@ -261,7 +261,7 @@ export class DatabaseService {
 
   // Delete project database
   async deleteDatabase(projectRef: string): Promise<{ success: boolean; error?: string }> {
-    const dbName = `supa_${projectRef}`;
+    const dbName = await resolveDbName(projectRef);
     const dbUser = `role_${projectRef}`;
 
     try {
@@ -295,7 +295,7 @@ export class DatabaseService {
 
   // Check database status
   async checkStatus(projectRef: string): Promise<{ success: boolean; output: string; error?: string }> {
-    const dbName = `supa_${projectRef}`;
+    const dbName = await resolveDbName(projectRef);
 
     try {
       assertValidDbName("dbName", dbName);
