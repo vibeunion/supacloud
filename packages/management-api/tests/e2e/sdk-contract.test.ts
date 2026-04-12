@@ -71,6 +71,11 @@ describe("E2E SDK Blackbox Contracts", () => {
             
             anonKey = keys.anon_key;
             serviceKey = keys.service_role_key;
+
+            if (process.env.TEST_FIXED_JWT_SECRET) {
+                console.log(`[E2E] Running in CI mode, redirecting tenant proxy ports to local docker containers (3000/9999)`);
+                await sql`UPDATE project_config SET postgrest_port = 3000, gotrue_port = 9999 WHERE project_ref = ${tenantRef}`;
+            }
             
             // Allow dynamic routing to settle and GoTrue to fully boot
             await new Promise(r => setTimeout(r, 3000));
