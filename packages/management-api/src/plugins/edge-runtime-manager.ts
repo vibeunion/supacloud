@@ -131,4 +131,4 @@ export class EdgeRuntimeManager {
   }
 }
 
-export const edgeRuntimeManager = new EdgeRuntimeManager({ port: 9000 });
+export const edgeRuntimeManager = new EdgeRuntimeManager({ port: 9005 });
