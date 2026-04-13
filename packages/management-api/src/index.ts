@@ -902,7 +902,9 @@ async function bootstrap() {
           const wsBase = config.realtimeAdminUrl
             .replace(/^http:/, "ws:")
             .replace(/^https:/, "wss:");
-          const upstreamUrl = `${wsBase}${url.pathname}${url.search}`;
+          // Supabase Realtime container expects /socket/websocket, not /realtime/v1/websocket
+          const wsPath = url.pathname.replace(/^\/realtime\/v1/, "/socket");
+          const upstreamUrl = `${wsBase}${wsPath}${url.search}`;
           // Forward relevant request headers (apikey, authorization, etc.)
           const requestHeaders: Record<string, string> = {};
           const forwardHeaders = [
