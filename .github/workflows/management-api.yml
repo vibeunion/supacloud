@@ -12,10 +12,6 @@ on:
       - "packages/management-api/**"
   workflow_dispatch:
 
-env:
-  # Silence Node.js 20 deprecation warnings
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
 jobs:
   lint-and-typecheck:
     name: Lint & Type Check
@@ -24,7 +20,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -46,7 +42,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -143,7 +139,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -162,6 +158,27 @@ jobs:
         env:
           DATABASE_URL: postgresql://supabase_admin:postgres@localhost:5432/postgres
 
+      - name: Wait for CI services
+        run: |
+          echo "Waiting for Realtime container to be ready..."
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:4000/api/tenants > /dev/null 2>&1; then
+              echo "✅ Realtime admin API is ready"
+              break
+            fi
+            echo "  Attempt $i/30: Realtime not ready, waiting 2s..."
+            sleep 2
+          done
+          echo "Waiting for MinIO container to be ready..."
+          for i in $(seq 1 15); do
+            if curl -sf http://127.0.0.1:9001/minio/health/live > /dev/null 2>&1; then
+              echo "✅ MinIO is ready"
+              break
+            fi
+            echo "  Attempt $i/15: MinIO not ready, waiting 2s..."
+            sleep 2
+          done
+
       - name: Setup CI Tenant Bridge
         working-directory: packages/management-api
         run: |
@@ -172,6 +189,12 @@ jobs:
           DATABASE_URL: postgresql://supabase_admin:postgres@localhost:5432/postgres
           MASTER_TOKEN: super-secret-jwt-token-with-at-least-32-characters-long
           NODE_ENV: test
+          S3_ENDPOINT: http://127.0.0.1:9001
+          S3_REGION: us-east-1
+          STORAGE_TYPE: s3
+          S3_ACCESS_KEY: minioadmin
+          S3_SECRET_KEY: minioadmin
+          S3_FORCE_PATH_STYLE: true
 
       - name: Restart flaky services
         run: |
@@ -229,7 +252,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install shellcheck
         run: sudo apt-get install -y shellcheck
@@ -256,7 +279,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
