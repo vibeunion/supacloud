@@ -177,7 +177,7 @@ async function verifySignedToken(ref: string, bucket: string, path: string, toke
  * Extract project ref from request.
  * Kong forwards the x-project-ref header; also fall back to apikey-based lookup.
  */
-function getProjectRef(headers: Record<string, string | undefined>): string {
+async function getProjectRef(headers: Record<string, string | undefined>): Promise<string> {
     const auth = headers['authorization'] || '';
     const key = headers['apikey'] || '';
     
@@ -190,6 +190,27 @@ function getProjectRef(headers: Record<string, string | undefined>): string {
     
     const headerRef = headers['x-project-ref'] || headers['x-supabase-project'];
     if (headerRef) return headerRef;
+
+    // JWT payload fallback
+    if (auth.startsWith('Bearer ')) {
+        try {
+            const token = auth.slice('Bearer '.length);
+            const payloadB64 = token.split('.')[1];
+            if (payloadB64) {
+                const payload = JSON.parse(Buffer.from(payloadB64, 'base64').toString());
+                if (payload?.ref) return payload.ref;
+            }
+        } catch {}
+    }
+
+    // apikey -> project lookup (official SDK storage requests commonly only send apikey)
+    if (key) {
+        try {
+            const { sql } = await import('../db');
+            const rows = await sql`SELECT ref FROM projects WHERE anon_key = ${key} OR service_role_key = ${key} LIMIT 1`;
+            if (rows.length > 0) return String(rows[0].ref);
+        } catch {}
+    }
 
     // P1-6: Fallback to extract tenant prefix from host header if preserve_host is active
     const host = headers['host'];
@@ -356,8 +377,8 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
     // If accessed directly (bypassing Kong), getProjectRef returns '' and each
     // route already returns 400 "Missing tenant reference". This guard adds
     // defense-in-depth logging for monitoring direct-access attempts.
-    .onBeforeHandle(({ headers, request }) => {
-        const ref = getProjectRef(headers as Record<string, string | undefined>);
+    .onBeforeHandle(async ({ headers, request }) => {
+        const ref = await getProjectRef(headers as Record<string, string | undefined>);
         if (!ref) {
             logger.warn('[StorageCompat] Request without project ref detected', {
                 url: request.url,
@@ -378,7 +399,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
 
     // GET /bucket — List all buckets
     .get('/bucket', async ({ headers, query }) => {
-        const ref = getProjectRef(headers as Record<string, string | undefined>);
+        const ref = await getProjectRef(headers as Record<string, string | undefined>);
         if (!ref) return status(400, { statusCode: "400", error: 'Bad Request', message: 'Missing tenant reference' });
         const auth = headers['authorization'];
         
@@ -408,7 +429,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
 
     // POST /bucket — Create a bucket  
     .post('/bucket', async ({ headers, body }) => {
-        const ref = getProjectRef(headers as Record<string, string | undefined>);
+        const ref = await getProjectRef(headers as Record<string, string | undefined>);
         if (!ref) return status(400, { statusCode: "400", error: 'Bad Request', message: 'Missing tenant reference' });
         
         const auth = headers['authorization'];
@@ -462,7 +483,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
 
     // GET /bucket/:id — Get bucket details
     .get('/bucket/:id', async ({ params, headers }) => {
-        const ref = getProjectRef(headers as Record<string, string | undefined>);
+        const ref = await getProjectRef(headers as Record<string, string | undefined>);
         if (!ref) return status(400, { statusCode: "400", error: 'Bad Request', message: 'Missing tenant reference' });
         const auth = headers['authorization'];
 
@@ -492,7 +513,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
     
     // PUT /bucket/:id — Update bucket
     .put('/bucket/:id', async ({ params, headers, body }) => {
-        const ref = getProjectRef(headers as Record<string, string | undefined>);
+        const ref = await getProjectRef(headers as Record<string, string | undefined>);
         if (!ref) return status(400, { statusCode: "400", error: 'Bad Request', message: 'Missing tenant reference' });
         const auth = headers['authorization'];
 
@@ -528,7 +549,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
 
     // POST /bucket/:id/empty — Empty bucket
     .post('/bucket/:id/empty', async ({ params, headers }) => {
-        const ref = getProjectRef(headers as Record<string, string | undefined>);
+        const ref = await getProjectRef(headers as Record<string, string | undefined>);
         if (!ref) return status(400, { statusCode: "400", error: 'Bad Request', message: 'Missing tenant reference' });
         const auth = headers['authorization'];
 
@@ -549,7 +570,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
     })
 
     .delete('/bucket/:id', async ({ params, headers }) => {
-        const ref = getProjectRef(headers as Record<string, string | undefined>);
+        const ref = await getProjectRef(headers as Record<string, string | undefined>);
         if (!ref) return status(400, { statusCode: "400", error: 'Bad Request', message: 'Missing tenant reference' });
         const auth = headers['authorization'];
 
@@ -575,7 +596,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
     // ════════════════════════════════════════════════════════
 
     .post('/object/:bucket/*', async ({ params, headers, request, set }) => {
-        const ref = getProjectRef(headers as Record<string, string | undefined>);
+        const ref = await getProjectRef(headers as Record<string, string | undefined>);
         const filePath = params['*'];
         if (!filePath) return status(400, { statusCode: "400", error: 'Bad Request', message: 'Missing file path' });
 
@@ -641,7 +662,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
 
     // PUT /object/:bucket/* — Upsert (same as upload but always overwrites)
     .put('/object/:bucket/*', async ({ params, headers, request }) => {
-        const ref = getProjectRef(headers as Record<string, string | undefined>);
+        const ref = await getProjectRef(headers as Record<string, string | undefined>);
         const filePath = params['*'];
         if (!filePath) return status(400, { statusCode: "400", error: 'Bad Request', message: 'Missing file path' });
 
@@ -682,7 +703,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
     // ════════════════════════════════════════════════════════
 
     .get('/object/public/:bucket/*', async ({ params, headers, set, query }) => {
-        const ref = getProjectRef(headers as Record<string, string | undefined>);
+        const ref = await getProjectRef(headers as Record<string, string | undefined>);
         const filePath = params['*'];
         if (!filePath) return status(400, { statusCode: "400", error: 'Bad Request', message: 'Missing file path' });
 
@@ -719,7 +740,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
 
     // GET /object/authenticated/:bucket/* — Download (requires auth)
     .get('/object/authenticated/:bucket/*', async ({ params, headers, set, query }) => {
-        const ref = getProjectRef(headers as Record<string, string | undefined>);
+        const ref = await getProjectRef(headers as Record<string, string | undefined>);
         const filePath = params['*'];
         if (!filePath) return status(400, { statusCode: "400", error: 'Bad Request', message: 'Missing file path' });
 
@@ -755,7 +776,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
     
     // GET /object/info/:bucket/* — File metadata
     .get('/object/info/public/:bucket/*', async ({ params, headers }) => {
-        const ref = getProjectRef(headers as Record<string, string | undefined>);
+        const ref = await getProjectRef(headers as Record<string, string | undefined>);
         const filePath = params['*'];
         
         const bucket = await StorageRLS.getLogicalBucket(ref, params.bucket, undefined, true);
@@ -767,7 +788,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         return info;
     })
     .get('/object/info/:bucket/*', async ({ params, headers }) => {
-        const ref = getProjectRef(headers as Record<string, string | undefined>);
+        const ref = await getProjectRef(headers as Record<string, string | undefined>);
         const filePath = params['*'];
         
         const permitted = await StorageRLS.authorizeAction(ref, headers['authorization'], 'download', params.bucket, filePath);
@@ -781,7 +802,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
 
     // HEAD /object/:bucket/* — Check if an object exists
     .head('/object/:bucket/*', async ({ params, headers }) => {
-        const ref = getProjectRef(headers as Record<string, string | undefined>);
+        const ref = await getProjectRef(headers as Record<string, string | undefined>);
         const filePath = params['*'];
 
         if (ref === 'test_mock') {
@@ -809,7 +830,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
     // GET /object/:bucket/* — Download file (authenticated, generic path)
     // SDK calls: GET /object/{bucketId}/{filePath}
     .get('/object/:bucket/*', async ({ params, headers, set, query }) => {
-        const ref = getProjectRef(headers as Record<string, string | undefined>);
+        const ref = await getProjectRef(headers as Record<string, string | undefined>);
         const filePath = params['*'];
         if (!filePath) return status(400, { statusCode: "400", error: 'Bad Request', message: 'Missing file path' });
 
@@ -848,7 +869,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
     // ════════════════════════════════════════════════════════
 
     .post('/object/sign/:bucket/*', async ({ params, headers, body, request }) => {
-        const ref = getProjectRef(headers as Record<string, string | undefined>);
+        const ref = await getProjectRef(headers as Record<string, string | undefined>);
         const payload = body || {};
         const filePath = params['*'] || String(payload.url || payload.path || '').replace(/^\//, '');
         const expiresIn = Number(payload.expiresIn) || 3600;
@@ -883,7 +904,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
     // POST /object/sign/:bucket — Batch signed URLs (no wildcard path)
     // supabase.storage.from('bucket').createSignedUrls(['path1', 'path2'], expiresIn)
     .post('/object/sign/:bucket', async ({ params, headers, body, request }) => {
-        const ref = getProjectRef(headers as Record<string, string | undefined>);
+        const ref = await getProjectRef(headers as Record<string, string | undefined>);
         
         // If body has paths array, it's a batch request
         if (body.paths && Array.isArray(body.paths)) {
@@ -952,7 +973,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
     // ════════════════════════════════════════════════════════
 
     .post('/object/upload/sign/:bucket/*', async ({ params, headers, request }) => {
-        const ref = getProjectRef(headers as Record<string, string | undefined>);
+        const ref = await getProjectRef(headers as Record<string, string | undefined>);
         const filePath = params['*'];
         if (!filePath) return status(400, { statusCode: "400", error: 'Bad Request', message: 'Missing file path' });
 
@@ -987,7 +1008,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
 
     // PUT /object/upload/sign/:bucket/* — Upload using signed URL
     .put('/object/upload/sign/:bucket/*', async ({ params, headers, request, query }) => {
-        const ref = getProjectRef(headers as Record<string, string | undefined>);
+        const ref = await getProjectRef(headers as Record<string, string | undefined>);
         const filePath = params['*'];
         if (!filePath) return status(400, { statusCode: "400", error: 'Bad Request', message: 'Missing file path' });
 
@@ -1049,7 +1070,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
 
     // GET /object/sign/:bucket/* — Serve signed file (validates token)
     .get('/object/sign/:bucket/*', async ({ params, headers, query, set }) => {
-        const ref = getProjectRef(headers as Record<string, string | undefined>);
+        const ref = await getProjectRef(headers as Record<string, string | undefined>);
         const filePath = params['*'];
         if (!filePath) return status(400, { statusCode: "400", error: 'Bad Request', message: 'Missing file path' });
 
@@ -1085,7 +1106,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
 
     // GET /render/image/sign/:bucket/* — Serve signed transformed image
     .get('/render/image/sign/:bucket/*', async ({ params, headers, query, set }) => {
-        const ref = getProjectRef(headers as Record<string, string | undefined>);
+        const ref = await getProjectRef(headers as Record<string, string | undefined>);
         const filePath = params['*'];
         if (!filePath) return status(400, { statusCode: "400", error: 'Bad Request', message: 'Missing file path' });
 
@@ -1105,7 +1126,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
 
     // GET /render/image/authenticated/:bucket/* — Download authenticated transformed file
     .get('/render/image/authenticated/:bucket/*', async ({ params, headers, query, set }) => {
-        const ref = getProjectRef(headers as Record<string, string | undefined>);
+        const ref = await getProjectRef(headers as Record<string, string | undefined>);
         const filePath = params['*'];
         if (!filePath) return status(400, { statusCode: "400", error: 'Bad Request', message: 'Missing file path' });
 
@@ -1122,7 +1143,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
     // ════════════════════════════════════════════════════════
 
     .post('/object/list/:bucket', async ({ params, headers, body }) => {
-        const ref = getProjectRef(headers as Record<string, string | undefined>);
+        const ref = await getProjectRef(headers as Record<string, string | undefined>);
         const auth = headers['authorization'];
 
         const prefix = body?.prefix || '';
@@ -1179,7 +1200,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
     // ════════════════════════════════════════════════════════
 
     .post('/object/list-v2/:bucket', async ({ params, headers, body }) => {
-        const ref = getProjectRef(headers as Record<string, string | undefined>);
+        const ref = await getProjectRef(headers as Record<string, string | undefined>);
         const auth = headers['authorization'];
 
         const prefix = body?.prefix || '';
@@ -1265,7 +1286,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
     // ════════════════════════════════════════════════════════
 
     .delete('/object/:bucket', async ({ params, headers, body }) => {
-        const ref = getProjectRef(headers as Record<string, string | undefined>);
+        const ref = await getProjectRef(headers as Record<string, string | undefined>);
         const prefixes = body?.prefixes || [];
         const auth = headers['authorization'];
 
@@ -1319,7 +1340,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
     // ════════════════════════════════════════════════════════
 
     .post('/object/move', async ({ headers, body }) => {
-        const ref = getProjectRef(headers as Record<string, string | undefined>);
+        const ref = await getProjectRef(headers as Record<string, string | undefined>);
         if (!ref) return status(400, { statusCode: "400", error: 'Bad Request', message: 'Missing tenant reference' });
         const auth = headers['authorization'];
 
@@ -1368,7 +1389,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
     })
 
     .post('/object/copy', async ({ headers, body }) => {
-        const ref = getProjectRef(headers as Record<string, string | undefined>);
+        const ref = await getProjectRef(headers as Record<string, string | undefined>);
         if (!ref) return status(400, { statusCode: "400", error: 'Bad Request', message: 'Missing tenant reference' });
         const auth = headers['authorization'];
 
@@ -1423,7 +1444,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
     // ════════════════════════════════════════════════════════
 
     .get('/render/image/public/:bucket/*', async ({ params, headers, query, set }) => {
-        const ref = getProjectRef(headers as Record<string, string | undefined>);
+        const ref = await getProjectRef(headers as Record<string, string | undefined>);
         const filePath = params['*'];
         if (!filePath) return status(400, { message: 'Missing file path' });
 
@@ -1449,7 +1470,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
 
     // POST /upload/resumable — Create a new resumable upload
     .post('/upload/resumable', async ({ headers, set }) => {
-        const ref = getProjectRef(headers as Record<string, string | undefined>);
+        const ref = await getProjectRef(headers as Record<string, string | undefined>);
         const uploadLength = Number(headers['upload-length'] || 0);
 
         // Reject zero-byte uploads (must have a positive Upload-Length)
@@ -1526,7 +1547,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
 
     // HEAD /upload/resumable/:uploadId — Get current upload offset
     .head('/upload/resumable/:uploadId', async ({ params, headers, set }) => {
-        const ref = getProjectRef(headers as Record<string, string | undefined>);
+        const ref = await getProjectRef(headers as Record<string, string | undefined>);
         const upload = await TusStore.get(params.uploadId);
         if (!upload) return status(404, { message: 'Upload not found' });
         if (upload.ref !== ref) return status(403, { message: 'Cross-project upload access denied' });
@@ -1540,7 +1561,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
 
     // PATCH /upload/resumable/:uploadId — Upload a chunk
     .patch('/upload/resumable/:uploadId', async ({ params, headers, request, set }) => {
-        const ref = getProjectRef(headers as Record<string, string | undefined>);
+        const ref = await getProjectRef(headers as Record<string, string | undefined>);
         const upload = await TusStore.get(params.uploadId);
         if (!upload) return status(404, { message: 'Upload not found' });
         if (upload.ref !== ref) return status(403, { message: 'Cross-project upload access denied' });
@@ -1602,7 +1623,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
 
     // DELETE /upload/resumable/:uploadId — Abort a resumable upload
     .delete('/upload/resumable/:uploadId', async ({ params, headers, set }) => {
-        const ref = getProjectRef(headers as Record<string, string | undefined>);
+        const ref = await getProjectRef(headers as Record<string, string | undefined>);
         const upload = await TusStore.get(params.uploadId);
         if (upload && upload.ref !== ref) return status(403, { message: 'Cross-project upload access denied' });
         await TusStore.delete(params.uploadId);
