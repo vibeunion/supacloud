@@ -50,18 +50,25 @@ export const projectLogsRoutes = new Elysia({ prefix: "/v1/projects/:ref/logs" }
                             id: `${params.ref}-${idx}`,
                             timestamp: ts,
                             event_message: match[3],
-                            metadata: [{ key: "service", value: svc }],
+                            metadata: { service: svc },
                         };
                     }
                     return {
                         id: `${params.ref}-${idx}`,
                         timestamp: Date.now(),
                         event_message: line,
-                        metadata: [{ key: "service", value: "system" }],
+                        metadata: { service: "system" },
                     };
                 });
 
-                return parsedLogs;
+                return {
+                    result: parsedLogs,
+                    pagination: {
+                        offset: 0,
+                        limit: parseInt(limit) || 200,
+                        total: parsedLogs.length,
+                    },
+                };
             } catch (error: unknown) {
                 set.status = 500;
                 return { message: "Failed to fetch logs", code: "500" };
