@@ -43,10 +43,10 @@
     "zod": "^4.3.6"
   },
   "dependencies": {
-    "@svadmin/core": "^0.19.5",
-    "@svadmin/elysia": "^0.10.3",
-    "@svadmin/sveltekit": "^0.8.4",
-    "@svadmin/ui": "^0.27.0",
+    "@svadmin/core": "^0.23.3",
+    "@svadmin/elysia": "^0.10.5",
+    "@svadmin/sveltekit": "^0.9.2",
+    "@svadmin/ui": "^0.32.3",
     "@tanstack/svelte-query": "^6.1.10",
     "highlight.js": "^11.11.1",
     "isomorphic-dompurify": "^3.7.1",
