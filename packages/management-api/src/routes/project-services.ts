@@ -183,11 +183,11 @@ export const projectServiceRoutes = new Elysia({ prefix: "/v1/projects" })
         r.status === "fulfilled" ? r.value : "INACTIVE";
 
       return [
-        { id: "db", name: "Database", status: getResult(db) },
-        { id: "pgrest", name: "PostgREST", status: getResult(pgrst) },
-        { id: "gotrue", name: "GoTrue", status: getResult(gotrue) },
-        { id: "realtime", name: "Realtime", status: getResult(realtime) },
-        { id: "storage", name: "Storage", status: getResult(storage) },
+        { id: "db", name: "Database", status: getResult(db), healthy: getResult(db) === "ACTIVE_HEALTHY", service_host_ids: [`${ref}-db`] },
+        { id: "pgrest", name: "PostgREST", status: getResult(pgrst), healthy: getResult(pgrst) === "ACTIVE_HEALTHY", service_host_ids: [`${ref}-pgrest`] },
+        { id: "gotrue", name: "GoTrue", status: getResult(gotrue), healthy: getResult(gotrue) === "ACTIVE_HEALTHY", service_host_ids: [`${ref}-gotrue`] },
+        { id: "realtime", name: "Realtime", status: getResult(realtime), healthy: getResult(realtime) === "ACTIVE_HEALTHY", service_host_ids: [`${ref}-realtime`] },
+        { id: "storage", name: "Storage", status: getResult(storage), healthy: getResult(storage) === "ACTIVE_HEALTHY", service_host_ids: [`${ref}-storage`] },
       ];
     },
     {

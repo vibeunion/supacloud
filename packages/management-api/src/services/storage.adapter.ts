@@ -240,11 +240,10 @@ async function createS3BucketWithFetch(
 
   const now = new Date();
   // dateTime: "20240115T120000Z"
-  const dateTime =
-    now
-      .toISOString()
-      .replace(/[-:]/g, "")
-      .replace(/\.\d{3}/, "") + "Z";
+  const dateTime = now
+    .toISOString()
+    .replace(/[-:]/g, "")
+    .replace(/\.\d{3}/, "");
   const dateShort = dateTime.slice(0, 8); // "20240115"
 
   // SHA-256 of empty body
@@ -331,9 +330,7 @@ async function createS3BucketWithFetch(
 }
 
 export class S3Driver implements StorageDriver {
-  private async getCreds(
-    projectRef: string,
-  ): Promise<{
+  private async getCreds(projectRef: string): Promise<{
     accessKey?: string;
     secretKey?: string;
     endpoint: string;
