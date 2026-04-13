@@ -53,11 +53,20 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
       
       if (Array.isArray(d)) {
           const totalHeader = res.headers.get('x-total-count');
+          const linkHeader = res.headers.get('link');
+          let nextPage: number | null = null;
+          let lastPage: number | null = null;
+          if (linkHeader) {
+            const lastMatch = linkHeader.match(/page=(\d+)[^>]*>; rel="last"/);
+            const nextMatch = linkHeader.match(/page=(\d+)[^>]*>; rel="next"/);
+            if (lastMatch) lastPage = parseInt(lastMatch[1], 10);
+            if (nextMatch) nextPage = parseInt(nextMatch[1], 10);
+          }
           return {
               users: d,
               aud: 'authenticated',
-              next_page: null,
-              last_page: null,
+              next_page: nextPage,
+              last_page: lastPage,
               total: totalHeader ? Number(totalHeader) : d.length
           };
       }

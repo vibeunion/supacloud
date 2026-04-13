@@ -39,6 +39,28 @@ jobs:
     name: Unit Tests
     runs-on: ubuntu-latest
     timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        working-directory: packages/management-api
+        run: bun install
+
+      - name: Run unit tests
+        working-directory: packages/management-api
+        run: bun test tests/unit
+
+  integration-test:
+    name: Integration & Compliance Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
     services:
       postgres:
         image: supabase/postgres:17.6.1.107
@@ -128,33 +150,19 @@ jobs:
         env:
           DATABASE_URL: postgresql://supabase_admin:postgres@localhost:5432/postgres
 
-      - name: Run tests
-        working-directory: packages/management-api
+      - name: Restart flaky services
         run: |
-          # Restart GoTrue and Realtime because they often crash if they boot faster than Postgres service in GitHub Actions parallel startup 
           echo "Restarting Auth and Realtime Containers..."
           docker start $(docker ps -a -q --filter "ancestor=supabase/gotrue:v2.188.1") || true
           docker start $(docker ps -a -q --filter "ancestor=supabase/realtime:latest") || true
           sleep 4
-          
-          echo "===== GOTRUE LOGS ====="
-          docker logs $(docker ps -a -q --filter "ancestor=supabase/gotrue:v2.188.1") || true
-          echo "======================="
 
+      - name: Start Management API
+        working-directory: packages/management-api
+        run: |
           bun src/index.ts &
           sleep 3
-          # Run test suites sequentially to prevent `mock.module("../../src/db")` in unit tests from poisoning E2E tests
-          bun test tests/e2e
-          
-          # Trigger Official Hardcore Reverse Testing
-          echo "===== RUNNING OFFICIAL SDK PARITY PIPELINE ====="
-          bun run tests/scripts/run-official-sdk-compliance.ts
-          
-          echo "===== RUNNING OFFICIAL CLI COMPLIANCE ====="
-          bun run tests/scripts/run-official-cli-compliance.ts
-          
-          echo "===== RUNNING OPENAPI SCHEMA CRAWLER ====="
-          bun run tests/scripts/run-openapi-compliance.ts
+          curl -sf http://127.0.0.1:9090/health || (echo "API failed to start" && exit 1)
         env:
           DATABASE_URL: postgresql://supabase_admin:postgres@localhost:5432/postgres
           TEST_FIXED_JWT_SECRET: super-secret-jwt-token-with-at-least-32-characters-long
@@ -164,6 +172,36 @@ jobs:
           S3_ACCESS_KEY: minioadmin
           S3_SECRET_KEY: minioadmin
           S3_FORCE_PATH_STYLE: true
+
+      - name: Run E2E snapshot tests
+        working-directory: packages/management-api
+        run: bun test tests/e2e
+        env:
+          DATABASE_URL: postgresql://supabase_admin:postgres@localhost:5432/postgres
+          TEST_FIXED_JWT_SECRET: super-secret-jwt-token-with-at-least-32-characters-long
+
+      - name: Run Official SDK Compliance (Scheme A)
+        working-directory: packages/management-api
+        run: bun run tests/scripts/run-official-sdk-compliance.ts
+        env:
+          DATABASE_URL: postgresql://supabase_admin:postgres@localhost:5432/postgres
+          TEST_FIXED_JWT_SECRET: super-secret-jwt-token-with-at-least-32-characters-long
+
+      - name: Run Official CLI Compliance (Scheme C)
+        working-directory: packages/management-api
+        run: bun run tests/scripts/run-official-cli-compliance.ts
+        env:
+          DATABASE_URL: postgresql://supabase_admin:postgres@localhost:5432/postgres
+          TEST_FIXED_JWT_SECRET: super-secret-jwt-token-with-at-least-32-characters-long
+          MASTER_TOKEN: super-secret-jwt-token-with-at-least-32-characters-long
+
+      - name: Run OpenAPI Schema Compliance (Scheme B)
+        working-directory: packages/management-api
+        run: bun run tests/scripts/run-openapi-compliance.ts
+        env:
+          DATABASE_URL: postgresql://supabase_admin:postgres@localhost:5432/postgres
+          TEST_FIXED_JWT_SECRET: super-secret-jwt-token-with-at-least-32-characters-long
+          MASTER_TOKEN: super-secret-jwt-token-with-at-least-32-characters-long
 
   shell-scripts-lint:
     name: Shell Scripts Lint
@@ -193,7 +231,7 @@ jobs:
 
   build-binaries:
     name: Build Binaries
-    needs: [lint-and-typecheck, unit-test]
+    needs: [lint-and-typecheck, unit-test, integration-test]
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev')
     
@@ -213,14 +251,11 @@ jobs:
       - name: Build all platforms
         working-directory: packages/management-api
         run: |
-          # 确保构建目录存在
           mkdir -p dist
-          # 执行编译指令 (amd64, arm64, macos)
           bun run build:amd64
           bun run build:arm64
           bun run build:macos-amd64
           bun run build:macos-arm64
-          # 将产物移动到统一目录
           mv supacloud-linux-amd64 dist/
           mv supacloud-linux-arm64 dist/
           mv supacloud-macos-amd64 dist/
@@ -232,5 +267,3 @@ jobs:
           name: supacloud-binaries
           path: packages/management-api/dist/*
           retention-days: 7
-
-

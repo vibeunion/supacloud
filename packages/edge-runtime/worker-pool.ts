@@ -130,9 +130,9 @@ export class WorkerPool {
     const onMsg = (msg: {
       type?: string;
       status: number;
+      streamId?: string;
       headers: Record<string, string | string[]>;
       body?: ArrayBuffer;
-      port?: MessagePort;
     }) => {
       clearTimeout(timeout);
       worker.removeListener("error", onErr);
@@ -147,9 +147,9 @@ export class WorkerPool {
         }
       }
 
-      if (msg.type === "stream_start" && msg.port) {
-        // Streaming response: create a ReadableStream backed by the transferred MessagePort
-        const streamPort = msg.port;
+      if (msg.type === "stream_start" && msg.streamId) {
+        // Streaming response: create a ReadableStream backed by custom message events
+        const streamId = msg.streamId;
         let recycled = false;
         const recycle = () => {
           if (!recycled) {
@@ -160,28 +160,25 @@ export class WorkerPool {
 
         const bodyStream = new ReadableStream<Uint8Array>({
           start(controller) {
-            streamPort.onmessage = ({
-              data,
-            }: {
-              data: { done: boolean; chunk?: ArrayBuffer; error?: string };
-            }) => {
-              if (data.done) {
-                if (data.error) {
-                  controller.error(new Error(data.error));
-                } else {
-                  controller.close();
+            const streamListener = (streamMsg: any) => {
+              if (streamMsg.type === "stream_chunk" && streamMsg.streamId === streamId) {
+                if (streamMsg.done) {
+                  if (streamMsg.error) {
+                    controller.error(new Error(streamMsg.error));
+                  } else {
+                    controller.close();
+                  }
+                  worker.removeListener("message", streamListener);
+                  recycle();
+                } else if (streamMsg.chunk) {
+                  controller.enqueue(new Uint8Array(streamMsg.chunk));
                 }
-                recycle();
-                streamPort.close();
-              } else if (data.chunk) {
-                controller.enqueue(new Uint8Array(data.chunk));
               }
             };
-            streamPort.start();
+            worker.on("message", streamListener);
           },
           cancel() {
             recycle();
-            streamPort.close();
           },
         });
 

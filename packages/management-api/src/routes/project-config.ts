@@ -360,11 +360,26 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
       delete studioCompatibleConfig.external;
       delete studioCompatibleConfig.hooks;
 
+      const ALL_PROVIDERS = [
+        'apple', 'azure', 'bitbucket', 'discord', 'facebook', 'github', 'gitlab',
+        'google', 'keycloak', 'linkedin', 'linkedin_oidc', 'notion', 'slack',
+        'spotify', 'twitch', 'twitter', 'workos', 'zoom',
+      ];
+
+      for (const provider of ALL_PROVIDERS) {
+        const providerConfig = (externalConfig[provider] as Record<string, unknown>) || {};
+        const upperKey = provider.toUpperCase();
+        studioCompatibleConfig[`EXTERNAL_${upperKey}_ENABLED`] = !!providerConfig?.client_id;
+        studioCompatibleConfig[`EXTERNAL_${upperKey}_CLIENT_ID`] = (providerConfig?.client_id as string) || '';
+        studioCompatibleConfig[`EXTERNAL_${upperKey}_SECRET`] = providerConfig?.client_secret ? '********' : '';
+      }
+
       for (const [key, val] of Object.entries(externalConfig)) {
+        if (ALL_PROVIDERS.includes(key)) continue;
         const providerConfig = val as Record<string, unknown>;
         const upperKey = key.toUpperCase();
         studioCompatibleConfig[`EXTERNAL_${upperKey}_ENABLED`] = !!providerConfig?.client_id;
-        studioCompatibleConfig[`EXTERNAL_${upperKey}_CLIENT_ID`] = providerConfig?.client_id || '';
+        studioCompatibleConfig[`EXTERNAL_${upperKey}_CLIENT_ID`] = (providerConfig?.client_id as string) || '';
         studioCompatibleConfig[`EXTERNAL_${upperKey}_SECRET`] = providerConfig?.client_secret ? '********' : '';
       }
 
@@ -447,6 +462,53 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
             ...(providerVal.client_id !== undefined ? { client_id: providerVal.client_id } : {}),
             ...(providerVal.secret && providerVal.secret !== '********' ? { client_secret: providerVal.secret } : {}),
           };
+        } else if (key.startsWith('hook_')) {
+          const hookMap: Record<string, string> = {
+            'hook_custom_access_token_enabled': 'custom_access_token_hook',
+            'hook_custom_access_token_uri': 'custom_access_token_hook',
+            'hook_mfa_verification_enabled': 'mfa_verification_hook',
+            'hook_mfa_verification_uri': 'mfa_verification_hook',
+            'hook_password_verification_enabled': 'password_verification_hook',
+            'hook_password_verification_uri': 'password_verification_hook',
+            'hook_send_email_enabled': 'send_email_hook',
+            'hook_send_email_uri': 'send_email_hook',
+            'hook_send_sms_enabled': 'send_sms_hook',
+            'hook_send_sms_uri': 'send_sms_hook',
+          };
+          const hookName = hookMap[key];
+          if (hookName) {
+            const currentHooks = (currentAuth.hooks as Record<string, any>) || {};
+            const currentHook = currentHooks[hookName] || {};
+            if (key.endsWith('_enabled')) {
+              otherUpdates.hooks = {
+                ...(otherUpdates.hooks as Record<string, any> || {}),
+                [hookName]: { ...currentHook, enabled: !!val },
+              };
+            } else if (key.endsWith('_uri')) {
+              otherUpdates.hooks = {
+                ...(otherUpdates.hooks as Record<string, any> || {}),
+                [hookName]: { ...currentHook, uri: val },
+              };
+            }
+          }
+        } else if (key.startsWith('smtp_')) {
+          const smtpKeyMap: Record<string, string> = {
+            'smtp_admin_email': 'admin_email',
+            'smtp_host': 'host',
+            'smtp_port': 'port',
+            'smtp_user': 'user',
+            'smtp_pass': 'pass',
+            'smtp_max_frequency': 'max_frequency',
+            'smtp_sender_name': 'sender_name',
+          };
+          const smtpField = smtpKeyMap[key];
+          if (smtpField) {
+            const currentSmtp = (currentAuth.smtp as Record<string, unknown>) || {};
+            otherUpdates.smtp = {
+              ...(otherUpdates.smtp as Record<string, unknown> || {}),
+              [smtpField]: key === 'smtp_pass' && val === '********' ? currentSmtp.pass : val,
+            };
+          }
         } else if (key !== 'external_providers') {
           otherUpdates[key] = val;
         }
@@ -461,7 +523,14 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
         ...currentAuth,
         ...otherUpdates,
         ...(Object.keys(externalUpdates).length > 0 ? { external: mergedExternal } : {}),
+        ...(otherUpdates.hooks ? { hooks: { ...((currentAuth.hooks as Record<string, any>) || {}), ...(otherUpdates.hooks as Record<string, any>) } } : {}),
+        ...(otherUpdates.smtp ? { smtp: { ...((currentAuth.smtp as Record<string, unknown>) || {}), ...(otherUpdates.smtp as Record<string, unknown>) } } : {}),
       };
+
+      delete mergedAuth.hooks;
+      delete mergedAuth.smtp;
+      if (otherUpdates.hooks) mergedAuth.hooks = { ...((currentAuth.hooks as Record<string, any>) || {}), ...(otherUpdates.hooks as Record<string, any>) };
+      if (otherUpdates.smtp) mergedAuth.smtp = { ...((currentAuth.smtp as Record<string, unknown>) || {}), ...(otherUpdates.smtp as Record<string, unknown>) };
 
       const updated = await projectService.updateProjectSettings(params.ref, {
         ...settings,

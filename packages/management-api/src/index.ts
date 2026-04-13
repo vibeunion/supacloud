@@ -181,7 +181,7 @@ const app = new Elysia({ strictPath: false })
       return { success: true, token };
     }
     set.status = 401;
-    return { success: false, error: "用户名或密码错误" };
+    return { success: false, message: "Invalid username or password" };
   })
   .post("/auth/verify", async ({ body }) => {
     const { token } = body as { token: string };
@@ -228,12 +228,12 @@ const app = new Elysia({ strictPath: false })
 
     if (code === "VALIDATION") {
       set.status = 400;
-      return { message: "Validation failed", details: error.message };
+      return { message: "Validation failed", code: "validation_error", details: error.message };
     }
 
     if (code === "NOT_FOUND") {
       set.status = 404;
-      return { message: "Not found" };
+      return { message: "Not found", code: "not_found" };
     }
 
     // DB connection errors → 503 Service Unavailable (not 500)
@@ -246,11 +246,11 @@ const app = new Elysia({ strictPath: false })
     ) {
       set.status = 503;
       set.headers["Retry-After"] = "5";
-      return { message: "Service temporarily unavailable", retryAfter: 5 };
+      return { message: "Service temporarily unavailable", code: "service_unavailable", retryAfter: 5 };
     }
 
     set.status = 500;
-    return { message: "Internal server error" };
+    return { message: "Internal server error", code: "internal_error" };
   });
 
 
