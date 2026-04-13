@@ -120,7 +120,6 @@ jobs:
           DB_NAME: postgres
           DB_USER: supabase_admin
           DB_PASSWORD: postgres
-          DB_AFTER_CONNECT_QUERY: 'SET search_path TO _realtime'
           DB_ENC_KEY: supabaserealtime
           JWT_SECRET: super-secret-jwt-token-with-at-least-32-characters-long
           API_JWT_SECRET: super-secret-jwt-token-with-at-least-32-characters-long
