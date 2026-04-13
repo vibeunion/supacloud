@@ -223,7 +223,7 @@ export async function initDatabase() {
     );
 
     // In CI mode where tests rewrite db_name to 'postgres', we must create Storage relations
-    if (process.env.CI || process.env.TEST_FIXED_JWT_SECRET) {
+    if (process.env.CI || process.env.GITHUB_ACTIONS || process.env.TEST_FIXED_JWT_SECRET) {
       logger.info(
         "Initializing Storage schemas natively for E2E CI routing...",
       );

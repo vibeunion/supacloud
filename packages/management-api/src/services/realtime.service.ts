@@ -17,7 +17,7 @@ const REALTIME_API_SECRET = config.realtimeApiSecret || config.jwtSecret;
 if (!REALTIME_API_SECRET) {
     logger.error("FATAL: REALTIME_API_SECRET or JWT_SECRET must be set for RealtimeService.");
 }
-const PG_HOST = process.env.CI ? "postgres" : config.pgHost;
+const PG_HOST = (process.env.CI || process.env.GITHUB_ACTIONS) ? "postgres" : config.pgHost;
 const PG_PORT = String(config.pgPort);
 
 interface RealtimeTenantConfig {
