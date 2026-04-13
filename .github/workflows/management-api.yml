@@ -12,6 +12,10 @@ on:
       - "packages/management-api/**"
   workflow_dispatch:
 
+env:
+  # Silence Node.js 20 deprecation warnings
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   lint-and-typecheck:
     name: Lint & Type Check
