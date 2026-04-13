@@ -188,6 +188,7 @@ jobs:
         env:
           DATABASE_URL: postgresql://supabase_admin:postgres@localhost:5432/postgres
           MASTER_TOKEN: super-secret-jwt-token-with-at-least-32-characters-long
+          CI: "true"
           NODE_ENV: test
           S3_ENDPOINT: http://127.0.0.1:9001
           S3_REGION: us-east-1
@@ -238,6 +239,8 @@ jobs:
           TEST_SUPABASE_URL: http://127.0.0.1:9090
           TEST_SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0
           MASTER_TOKEN: super-secret-jwt-token-with-at-least-32-characters-long
+          CI: "true"
+          NODE_ENV: test
           S3_ENDPOINT: http://127.0.0.1:9001
           S3_REGION: us-east-1
           STORAGE_TYPE: s3
