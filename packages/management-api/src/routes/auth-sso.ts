@@ -66,7 +66,7 @@ export const authSsoRoutes = new Elysia({ prefix: "/v1/projects" })
         }
         return res.json();
       } catch (err: unknown) {
-        return status(500, { message: "Failed to create SSO provider", details: err instanceof Error ? err.message : String(err) });
+        return status(500, { message: "Failed to create SSO provider", code: "500", details: err instanceof Error ? err.message : String(err) });
       }
     },
     {
@@ -105,7 +105,7 @@ export const authSsoRoutes = new Elysia({ prefix: "/v1/projects" })
         }
         return res.json();
       } catch (err: unknown) {
-        return status(500, { message: "Failed to get SSO provider", details: err instanceof Error ? err.message : String(err) });
+        return status(500, { message: "Failed to get SSO provider", code: "500", details: err instanceof Error ? err.message : String(err) });
       }
     },
     { params: t.Object({ ref: t.String(), id: t.String() }) }
@@ -135,7 +135,7 @@ export const authSsoRoutes = new Elysia({ prefix: "/v1/projects" })
         }
         return res.json();
       } catch (err: unknown) {
-        return status(500, { message: "Failed to update SSO provider", details: err instanceof Error ? err.message : String(err) });
+        return status(500, { message: "Failed to update SSO provider", code: "500", details: err instanceof Error ? err.message : String(err) });
       }
     },
     {
@@ -174,7 +174,7 @@ export const authSsoRoutes = new Elysia({ prefix: "/v1/projects" })
         }
         return res.json();
       } catch (err: unknown) {
-        return status(500, { message: "Failed to delete SSO provider", details: err instanceof Error ? err.message : String(err) });
+        return status(500, { message: "Failed to delete SSO provider", code: "500", details: err instanceof Error ? err.message : String(err) });
       }
     },
     { params: t.Object({ ref: t.String(), id: t.String() }) }
