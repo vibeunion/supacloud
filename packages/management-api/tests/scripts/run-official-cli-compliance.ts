@@ -162,7 +162,9 @@ url = "http://127.0.0.1:4000"
         await sql`DELETE FROM project_tasks WHERE project_ref = ${rawRef}`;
         await sql`DELETE FROM projects WHERE id = ${project.id}`;
         rmSync(testDir, { recursive: true, force: true });
-        await sql.end();
+
+        // NOTE: Do NOT call sql.end() here — the OpenAPI compliance script runs next.
+        // Closing the shared connection pool would crash the background API server.
 
         // CLI compliance is a tracking metric, not a CI gate.
         // CLI binary availability and behavior varies across CI environments.
