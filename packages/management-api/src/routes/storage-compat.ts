@@ -1592,7 +1592,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
                 };
             } catch (err: unknown) {
                 await TusStore.delete(params.uploadId);
-                return status(500, { message: 'Failed to finalize upload' });
+                return status(500, { message: 'Failed to finalize upload', code: '500' });
             }
         }
 
@@ -1741,7 +1741,7 @@ async function proxyToImaginary(
         if (!res.ok) {
             const errText = await res.text();
             logger.error(`Imaginary ${operation} failed:`, { status: res.status, error: errText });
-            return status(502, { message: `Image transform failed: ${errText}` }) as unknown as { message: string };
+            return status(502, { message: `Image transform failed: ${errText}`, code: "502" }) as unknown as { message: string };
         }
 
         if (format) {
@@ -1760,6 +1760,6 @@ async function proxyToImaginary(
         return new Response(res.body);
     } catch (err: unknown) {
         logger.error('Imaginary proxy error:', { error: err instanceof Error ? err.message : String(err) });
-        return status(502, { message: 'Image processing service unavailable' }) as unknown as { message: string };
+        return status(502, { message: 'Image processing service unavailable', code: "502" }) as unknown as { message: string };
     }
 }
