@@ -23,6 +23,7 @@ const PG_PORT = String(config.pgPort);
 interface RealtimeTenantConfig {
     projectRef: string;
     dbName: string;
+    dbUser?: string;
     dbPassword: string;
     jwtSecret: string;
 }
@@ -100,7 +101,7 @@ export class RealtimeService {
                                 db_host: PG_HOST,
                                 db_port: PG_PORT,
                                 db_name: config.dbName,
-                                db_user: resolveRoleName(config.projectRef),
+                                db_user: config.dbUser || resolveRoleName(config.projectRef),
                                 db_password: config.dbPassword || globalConfig.pgPassword || "postgres",
                                 region: "us-east-1",
                                 poll_interval_ms: 100,
@@ -187,7 +188,7 @@ export class RealtimeService {
                                 db_host: PG_HOST,
                                 db_port: PG_PORT,
                                 db_name: config.dbName,
-                                db_user: resolveRoleName(config.projectRef),
+                                db_user: config.dbUser || resolveRoleName(config.projectRef),
                                 db_password: config.dbPassword || globalConfig.pgPassword || "postgres",
                                 region: "us-east-1",
                                 poll_interval_ms: 100,
