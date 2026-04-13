@@ -5,7 +5,7 @@
 import { Elysia, t, status } from "elysia";
 import { logger } from "../utils/logger";
 import { projectService } from "../services";
-import { getProjectDb, resolveDbName } from "../db";
+import { getProjectDb, resolveDbName, resolveRoleName } from "../db";
 
 // Available regions list
 const AVAILABLE_REGIONS = [
@@ -25,6 +25,92 @@ function mapStatus(status: string | undefined): string {
   if (s === "creating") return "activation";
   if (s === "deleted") return "inactive";
   return s;
+}
+
+async function buildProjectResponse(project: any, detailed = false): Promise<Record<string, unknown>> {
+  const ref = project.ref;
+  const dbName = await resolveDbName(ref);
+  const dbUser = resolveRoleName(ref);
+
+  const base: Record<string, unknown> = {
+    id: project.id,
+    ref: project.ref,
+    name: project.name,
+    status: mapStatus(project.status),
+    region: project.region || "local",
+    organization_id: project.organization_id || "default",
+    cloud_provider: (project as Record<string, unknown>).cloud_provider || "localhost",
+    created_at: project.created_at,
+    updated_at: project.updated_at,
+    inserted_at: project.created_at,
+    pause_status: project.status === "paused" ? "paused" : null,
+    preview_branch_refs: [],
+    database: {
+      host: project.database?.host || "localhost",
+    },
+    endpoint: project.api?.url || `https://${ref}.localhost`,
+  };
+
+  if (!detailed) return base;
+
+  let dbVersion = "15.0";
+  let dbSize = 0;
+  let connectionCount = 0;
+  try {
+    const projectDb = getProjectDb(dbName);
+    const versionResult = await projectDb`SHOW server_version`;
+    if (versionResult[0]?.server_version) {
+      dbVersion = versionResult[0].server_version.split(" ")[0];
+    }
+    const sizeResult = await projectDb`SELECT pg_database_size(current_database()) as size`;
+    dbSize = sizeResult[0]?.size || 0;
+    const connectionResult = await projectDb`SELECT count(*) as count FROM pg_stat_activity WHERE state = 'active'`;
+    connectionCount = connectionResult[0]?.count || 0;
+  } catch {}
+
+  const checkServiceStatus = async (serviceName: string): Promise<string> => {
+    try {
+      const result = await Bun.$`systemctl is-active ${serviceName} 2>/dev/null || echo "inactive"`.quiet();
+      const s = result.text().trim();
+      return s === "active" ? "ACTIVE_HEALTHY" : "INACTIVE";
+    } catch {
+      return "INACTIVE";
+    }
+  };
+
+  const serviceStatuses = await Promise.all([
+    checkServiceStatus("patroni").then(s => ({ id: "postgresql", name: "PostgreSQL", status: s, healthy: s === "ACTIVE_HEALTHY" })),
+    checkServiceStatus(`supacloud-pgrst@${ref}`).then(s => ({ id: "postgrest", name: "PostgREST", status: s, healthy: s === "ACTIVE_HEALTHY" })),
+    checkServiceStatus(`supacloud-gotrue@${ref}`).then(s => ({ id: "gotrue", name: "GoTrue", status: s, healthy: s === "ACTIVE_HEALTHY" })),
+    checkServiceStatus(`supacloud-realtime@${ref}`).then(s => ({ id: "realtime", name: "Realtime", status: s, healthy: s === "ACTIVE_HEALTHY" })).catch(() => ({ id: "realtime", name: "Realtime", status: "INACTIVE", healthy: false })),
+    checkServiceStatus(`supacloud-storage@${ref}`).then(s => ({ id: "storage", name: "Storage", status: s, healthy: s === "ACTIVE_HEALTHY" })).catch(() => ({ id: "storage", name: "Storage", status: "INACTIVE", healthy: false })),
+    checkServiceStatus("kong").then(s => ({ id: "kong", name: "Kong", status: s, healthy: s === "ACTIVE_HEALTHY" })).catch(() => ({ id: "kong", name: "Kong", status: "INACTIVE", healthy: false })),
+  ]);
+
+  return {
+    ...base,
+    database: {
+      host: project.database?.host || "localhost",
+      port: (project.database as Record<string, unknown>)?.port || 5432,
+      version: dbVersion,
+      postgres_engine: dbVersion.split(".")[0] + "." + dbVersion.split(".")[1],
+      release_channel: "stable",
+      size: dbSize,
+      connection_count: connectionCount,
+    },
+    db_port: (project.database as Record<string, unknown>)?.port || 5432,
+    db_host: project.database?.host || "localhost",
+    db_name: dbName,
+    db_user: dbUser,
+    connectionString: `postgresql://${dbUser}:[YOUR-PASSWORD]@${project.database?.host || 'localhost'}:${(project.database as Record<string, unknown>)?.port || 5432}/${dbName}`,
+    services: serviceStatuses,
+    anon_key: project.anon_key,
+    service_role_key: project.service_role_key,
+    jwt_secret: project.jwt_secret,
+    api: project.api,
+    studio: project.studio,
+    config: project.config,
+  };
 }
 
 export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })

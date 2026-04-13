@@ -166,6 +166,38 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
         }
     )
     .post(
+        "/query",
+        async ({ params, body, set }) => {
+            const project = await projectService.getProject(params.ref);
+            if (!project) {
+                set.status = 404;
+                return { message: "Project not found", code: "404", status: 404 };
+            }
+
+            try {
+                const dbName = await resolveDbName(params.ref);
+                const result = await db.executeQuery(dbName, body.query);
+                const rows = (result as { rows?: unknown[] }).rows || result;
+                return { result: Array.isArray(rows) ? rows : [rows] };
+            } catch (error: unknown) {
+                set.status = 400;
+                const pgErr = error as Record<string, unknown>;
+                return {
+                    code: pgErr.code || "42601",
+                    message: pgErr.message || "SQL execution failed",
+                    details: pgErr.details || null,
+                    hint: pgErr.hint || null,
+                };
+            }
+        },
+        {
+            params: t.Object({ ref: t.String({ minLength: 1 }) }),
+            body: t.Object({
+                query: t.String(),
+            }),
+        }
+    )
+    .post(
         "/sql",
         async ({ params, body, set }) => {
             const project = await projectService.getProject(params.ref);
