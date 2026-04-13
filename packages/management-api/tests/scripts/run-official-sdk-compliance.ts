@@ -1,7 +1,7 @@
 import { $ } from "bun";
 import { ProjectService } from "../../src/services/project.service";
 import { randomUUID } from "crypto";
-import { sql, getProjectDb, resolveDbName } from "../../src/db";
+import { sql, getProjectDb, resolveDbName, invalidateDbNameCache } from "../../src/db";
 import { join } from "path";
 import {
   existsSync,
@@ -46,6 +46,55 @@ async function bootstrap() {
 
   await new Promise((r) => setTimeout(r, 2000));
 
+  console.log(
+    "🌉 Wiring test tenant to shared CI containers (CI Tenant Bridge)...",
+  );
+  try {
+    // Wire the SDK test tenant to the shared CI containers first so all later
+    // schema/storage seeding targets the real shared CI database context.
+    await sql`
+            INSERT INTO project_config (project_ref, postgrest_port, gotrue_port, realtime_port)
+            VALUES (${project.ref}, 3000, 9999, 4000)
+            ON CONFLICT (project_ref) DO UPDATE SET
+                postgrest_port  = 3000,
+                gotrue_port     = 9999,
+                realtime_port   = 4000,
+                updated_at      = NOW()
+        `;
+    await sql`
+            UPDATE projects
+            SET db_name = 'postgres', status = 'active'
+            WHERE ref = ${project.ref}
+        `;
+    invalidateDbNameCache(project.ref);
+    // Register Realtime tenant so WebSocket subscriptions work
+    try {
+      const { RealtimeService } = await import("../../src/services/realtime.service");
+      const realtimeService = new RealtimeService();
+      const registered = await realtimeService.registerTenant({
+        projectRef: project.ref,
+        dbName: "postgres",
+        dbPassword: "postgres",
+        jwtSecret: OFFICIAL_JWT_SECRET,
+      });
+      if (registered) {
+        console.log(`✅ Realtime tenant registered for [${project.ref}]`);
+      } else {
+        console.warn(`⚠️ Realtime tenant registration failed for [${project.ref}]`);
+      }
+    } catch (e: any) {
+      console.warn("⚠️ Realtime tenant registration error:", e.message?.substring(0, 80));
+    }
+    console.log(
+      `✅ CI Bridge active: tenant ${project.ref} → PostgREST:3000, GoTrue:9999, Realtime:4000`,
+    );
+  } catch (err: any) {
+    console.warn(
+      "⚠️ CI Bridge wiring failed (continuing):",
+      err.message?.substring(0, 120),
+    );
+  }
+
   console.log("📦 Applying official SDK schema (same as supabase-js migrations)...");
   try {
     const dbName = await resolveDbName(project.ref);
@@ -63,48 +112,26 @@ async function bootstrap() {
     await projectDb`CREATE POLICY "Allow authenticated delete own todos" ON public.todos FOR DELETE TO authenticated USING (auth.uid() = user_id)`;
     await projectDb`GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role`;
     await projectDb`GRANT SELECT, INSERT, UPDATE, DELETE ON public.todos TO anon, authenticated, service_role`;
-    // Storage: create test-bucket
+    // Storage: seed logical bucket metadata in the bridged/shared database.
     try {
       await projectDb`INSERT INTO storage.buckets (id, name, public) VALUES ('test-bucket', 'test-bucket', false) ON CONFLICT (id) DO NOTHING`;
     } catch (_) {}
+    // Create the physical S3/MinIO bucket after the tenant bridge is active.
+    try {
+      const { StorageService } = await import("../../src/services/storage.service");
+      const s3Result = await StorageService.createBucket(project.ref);
+      if (!s3Result.success) {
+        console.warn("[SDK Compliance] S3 bucket creation warning:", s3Result.error);
+      } else {
+        console.log("✅ S3 physical bucket created for", project.ref);
+      }
+    } catch (e: any) {
+      console.warn("[SDK Compliance] S3 bucket creation skipped:", e.message?.substring(0, 80));
+    }
     await projectDb`NOTIFY pgrst, 'reload schema'`;
     console.log("✅ Official SDK schema applied to project database:", dbName);
   } catch (e: any) {
     console.warn("DB schema injection err (ignoring):", e.message);
-  }
-
-  console.log(
-    "🌉 Wiring test tenant to shared CI containers (CI Tenant Bridge)...",
-  );
-  try {
-    // Wire the SDK test tenant to the shared CI containers.
-    // This inserts into project_config so the SDK proxy can route requests to
-    // the running PostgREST:3000 and GoTrue:9999 containers.
-    await sql`
-            INSERT INTO project_config (project_ref, postgrest_port, gotrue_port, realtime_port)
-            VALUES (${project.ref}, 3000, 9999, 4000)
-            ON CONFLICT (project_ref) DO UPDATE SET
-                postgrest_port  = 3000,
-                gotrue_port     = 9999,
-                realtime_port   = 4000,
-                updated_at      = NOW()
-        `;
-    // Point the project at the shared 'postgres' database (no per-tenant DB in CI)
-    await sql`
-            UPDATE projects
-            SET db_name = 'postgres', status = 'active'
-            WHERE ref = ${project.ref}
-        `;
-    // Notify PostgREST to reload its schema cache to pick up the test tables
-    await sql`NOTIFY pgrst, 'reload schema'`;
-    console.log(
-      `✅ CI Bridge active: tenant ${project.ref} → PostgREST:3000, GoTrue:9999`,
-    );
-  } catch (err: any) {
-    console.warn(
-      "⚠️ CI Bridge wiring failed (continuing):",
-      err.message?.substring(0, 120),
-    );
   }
 
   // Clone to /tmp to completely isolate from parent project's node_modules.

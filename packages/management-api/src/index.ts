@@ -816,7 +816,7 @@ async function bootstrap() {
           const { upstreamUrl, requestHeaders } = data;
           const upstream = new WebSocket(upstreamUrl, {
             headers: requestHeaders,
-          } as unknown as string[]);
+          } as any);
 
           data.upstream = upstream;
 
@@ -951,6 +951,7 @@ async function bootstrap() {
           }
           if (projectRef) {
             requestHeaders["x-project-ref"] = projectRef;
+            requestHeaders["Host"] = `${projectRef}.api.${config.baseDomain}`;
           }
 
           const upgraded = server.upgrade(request, {

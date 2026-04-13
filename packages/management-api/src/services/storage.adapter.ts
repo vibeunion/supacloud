@@ -329,6 +329,130 @@ async function createS3BucketWithFetch(
   }
 }
 
+function toHex(buffer: ArrayBuffer): string {
+  return [...new Uint8Array(buffer)]
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+async function toUint8Array(
+  data: Blob | Buffer | Uint8Array | ArrayBuffer | ReadableStream,
+): Promise<Uint8Array> {
+  if (data instanceof Uint8Array) return data;
+  if (data instanceof ArrayBuffer) return new Uint8Array(data);
+  if (data instanceof Blob) return new Uint8Array(await data.arrayBuffer());
+  return new Uint8Array(await new Response(data as ReadableStream).arrayBuffer());
+}
+
+function encodeS3Key(key: string): string {
+  return key
+    .split("/")
+    .filter(Boolean)
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
+}
+
+async function putS3ObjectWithFetch(
+  endpoint: string,
+  bucketName: string,
+  objectKey: string,
+  data: Blob | Buffer | Uint8Array | ArrayBuffer | ReadableStream,
+  contentType: string,
+  accessKey: string,
+  secretKey: string,
+  region = "us-east-1",
+): Promise<boolean> {
+  const base = endpoint.replace(/\/+$/, "");
+  const host = new URL(base).host;
+  const encodedKey = encodeS3Key(objectKey);
+  const canonicalUri = `/${bucketName}/${encodedKey}`;
+  const url = `${base}${canonicalUri}`;
+  const bytes = await toUint8Array(data);
+  const payload = bytes.buffer.slice(
+    bytes.byteOffset,
+    bytes.byteOffset + bytes.byteLength,
+  ) as ArrayBuffer;
+
+  const now = new Date();
+  const dateTime = now
+    .toISOString()
+    .replace(/[-:]/g, "")
+    .replace(/\.\d{3}/, "");
+  const dateShort = dateTime.slice(0, 8);
+  const payloadHash = toHex(await crypto.subtle.digest("SHA-256", payload));
+
+  const canonicalHeaders =
+    [
+      `host:${host}`,
+      `x-amz-content-sha256:${payloadHash}`,
+      `x-amz-date:${dateTime}`,
+    ].join("\n") + "\n";
+  const signedHeaders = "host;x-amz-content-sha256;x-amz-date";
+  const canonicalRequest = [
+    "PUT",
+    canonicalUri,
+    "",
+    canonicalHeaders,
+    signedHeaders,
+    payloadHash,
+  ].join("\n");
+
+  const enc = new TextEncoder();
+  const canonHex = toHex(
+    await crypto.subtle.digest("SHA-256", enc.encode(canonicalRequest)),
+  );
+  const credScope = `${dateShort}/${region}/s3/aws4_request`;
+  const stringToSign = `AWS4-HMAC-SHA256\n${dateTime}\n${credScope}\n${canonHex}`;
+
+  async function hmac(key: ArrayBuffer, msg: string): Promise<ArrayBuffer> {
+    const importedKey = await crypto.subtle.importKey(
+      "raw",
+      key,
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["sign"],
+    );
+    return crypto.subtle.sign("HMAC", importedKey, enc.encode(msg));
+  }
+
+  const kDate = await hmac(
+    enc.encode(`AWS4${secretKey}`).buffer as ArrayBuffer,
+    dateShort,
+  );
+  const kRegion = await hmac(kDate, region);
+  const kService = await hmac(kRegion, "s3");
+  const kSigning = await hmac(kService, "aws4_request");
+  const signature = toHex(await hmac(kSigning, stringToSign));
+  const authorization = `AWS4-HMAC-SHA256 Credential=${accessKey}/${credScope}, SignedHeaders=${signedHeaders}, Signature=${signature}`;
+
+  try {
+    const response = await fetch(url, {
+      method: "PUT",
+      headers: {
+        Authorization: authorization,
+        "Content-Length": String(bytes.byteLength),
+        "Content-Type": contentType,
+        "x-amz-content-sha256": payloadHash,
+        "x-amz-date": dateTime,
+      },
+      body: payload,
+    });
+
+    if (response.ok) return true;
+    const body = await response.text().catch(() => "");
+    logger.warn(
+      `[S3] putObject HTTP ${response.status} for ${bucketName}/${objectKey}: ${body.slice(0, 160)}`,
+    );
+    return false;
+  } catch (err: unknown) {
+    logger.warn(
+      "[S3] putObject fetch error:",
+      err instanceof Error ? err.message : String(err),
+    );
+    return false;
+  }
+}
+
 export class S3Driver implements StorageDriver {
   private async getCreds(projectRef: string): Promise<{
     accessKey?: string;
@@ -488,6 +612,20 @@ export class S3Driver implements StorageDriver {
     if (!creds?.accessKey || !creds?.secretKey) return false;
 
     try {
+      const cleanFileName = key.replace(/^\/+/, "");
+
+      if (process.env.CI || process.env.NODE_ENV === "test") {
+        return await putS3ObjectWithFetch(
+          creds.endpoint,
+          creds.bucket,
+          `${bucket}/${cleanFileName}`,
+          data,
+          contentType,
+          creds.accessKey,
+          creds.secretKey,
+        );
+      }
+
       const s3 = this.getClient(
         creds as {
           accessKey: string;
@@ -496,12 +634,17 @@ export class S3Driver implements StorageDriver {
           bucket: string;
         },
       );
-      const cleanFileName = key.replace(/^\/+/, "");
       const bytesWritten = await s3
         .file(`${bucket}/${cleanFileName}`)
         .write(data as any, { type: contentType });
       return bytesWritten > 0;
-    } catch (e) {
+    } catch (e: unknown) {
+      logger.warn("[S3] uploadFile failed", {
+        error: e instanceof Error ? e.message : String(e),
+        projectRef,
+        bucket,
+        key,
+      });
       return false;
     }
   }
