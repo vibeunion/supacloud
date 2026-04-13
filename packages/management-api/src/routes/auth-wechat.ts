@@ -15,7 +15,7 @@ export const wechatAuthRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
     async ({ params, body, set }) => {
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings) {
-        return status(404, { error: "Project not found" });
+        return status(404, { message: "Project not found", code: "400" });
       }
 
       const currentAuth = (settings.auth as Record<string, unknown>) || {};
@@ -72,7 +72,7 @@ export const wechatAuthRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
     async ({ params, body, set }) => {
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings) {
-        return status(404, { error: "Project not found" });
+        return status(404, { message: "Project not found", code: "400" });
       }
 
       const currentAuth = (settings.auth as Record<string, unknown>) || {};
@@ -132,7 +132,7 @@ export const wechatAuthRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
     async ({ params, body, set }) => {
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings) {
-        return status(404, { error: "Project not found" });
+        return status(404, { message: "Project not found", code: "400" });
       }
 
       const currentAuth = (settings.auth as Record<string, unknown>) || {};

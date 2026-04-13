@@ -88,6 +88,11 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
         name: t.String({ minLength: 1, maxLength: 100 }),
         region: t.Optional(t.String()),
         organization_id: t.Optional(t.String()),
+        db_pass: t.Optional(t.String()),
+        plan: t.Optional(t.String()),
+        cloud_provider: t.Optional(t.String()),
+        instance_size: t.Optional(t.String()),
+        kubernetes_version: t.Optional(t.String()),
         domain: t.Optional(t.String({ description: "Base custom domain (e.g., 'aorist.cn'). Auto generates api.X / studio.X" })),
         api_domain: t.Optional(t.String({ description: "Explicit API domain (e.g., 'xg-api.example.com')" })),
         studio_domain: t.Optional(t.String({ description: "Explicit Studio domain (e.g., 'xg-studio.example.com')" })),
@@ -238,17 +243,30 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
   .delete(
     "/:ref",
     async ({ params, set }) => {
+      const project = await projectService.getProject(params.ref);
+      if (!project) {
+                return status(404, { message: "Project not found", code: "404" });
+      }
       const deleted = await projectService.deleteProject(params.ref);
       if (!deleted) {
                 return status(404, { message: "Project not found", code: "404" });
       }
-      return { ref: params.ref };
+      return {
+        id: project.id,
+        ref: project.ref,
+        name: project.name,
+        status: mapStatus(project.status),
+        region: project.region || "local",
+        organization_id: project.organization_id || "default",
+        cloud_provider: "localhost",
+        created_at: project.created_at,
+        updated_at: project.updated_at,
+        inserted_at: project.created_at,
+        database: { host: project.database?.host || "localhost" },
+        endpoint: project.api?.url || `https://${params.ref}.localhost`,
+      };
     },
-    {
-      params: t.Object({
-        ref: t.String(),
-      }),
-    }
+    { params: t.Object({ ref: t.String() }) }
   )
 
   // Pause project
@@ -259,16 +277,30 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
       if (!paused) {
                 return status(404, { message: "Project not found", code: "404" });
       }
-      return { ref: params.ref, status: "paused" };
+      const project = await projectService.getProject(params.ref);
+      if (!project) {
+                return status(404, { message: "Project not found", code: "404" });
+      }
+      return {
+        id: project.id,
+        ref: project.ref,
+        name: project.name,
+        status: mapStatus(project.status),
+        region: project.region || "local",
+        organization_id: project.organization_id || "default",
+        cloud_provider: "localhost",
+        created_at: project.created_at,
+        updated_at: project.updated_at,
+        inserted_at: project.created_at,
+        pause_status: "paused",
+        preview_branch_refs: [],
+        database: { host: project.database?.host || "localhost" },
+        endpoint: project.api?.url || `https://${params.ref}.localhost`,
+      };
     },
-    {
-      params: t.Object({
-        ref: t.String(),
-      }),
-    }
+    { params: t.Object({ ref: t.String() }) }
   )
 
-  // Restore project
   .post(
     "/:ref/restore",
     async ({ params, set }) => {
@@ -276,13 +308,28 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
       if (!restored) {
                 return status(404, { message: "Project not found", code: "404" });
       }
-      return { ref: params.ref, status: "active" };
+      const project = await projectService.getProject(params.ref);
+      if (!project) {
+                return status(404, { message: "Project not found", code: "404" });
+      }
+      return {
+        id: project.id,
+        ref: project.ref,
+        name: project.name,
+        status: mapStatus(project.status),
+        region: project.region || "local",
+        organization_id: project.organization_id || "default",
+        cloud_provider: "localhost",
+        created_at: project.created_at,
+        updated_at: project.updated_at,
+        inserted_at: project.created_at,
+        pause_status: undefined,
+        preview_branch_refs: [],
+        database: { host: project.database?.host || "localhost" },
+        endpoint: project.api?.url || `https://${params.ref}.localhost`,
+      };
     },
-    {
-      params: t.Object({
-        ref: t.String(),
-      }),
-    }
+    { params: t.Object({ ref: t.String() }) }
   )
 
   // Preview Branches — stub endpoints (Studio compatibility)
@@ -475,6 +522,17 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
       const project = await projectService.getProject(params.ref);
       if (!project) return status(404, { message: "Project not found", code: "404" });
       return { available: false, earliest_physical_backup_date: null, latest_physical_backup_date: null };
+    },
+    { params: t.Object({ ref: t.String() }) }
+  )
+
+  // Enforced project settings — stub endpoint (Studio compatibility)
+  .get(
+    "/:ref/enforced",
+    async ({ params }) => {
+      const project = await projectService.getProject(params.ref);
+      if (!project) return status(404, { message: "Project not found", code: "404" });
+      return {};
     },
     { params: t.Object({ ref: t.String() }) }
   );

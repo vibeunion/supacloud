@@ -1425,10 +1425,10 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
     .get('/render/image/public/:bucket/*', async ({ params, headers, query, set }) => {
         const ref = getProjectRef(headers as Record<string, string | undefined>);
         const filePath = params['*'];
-        if (!filePath) return status(400, { error: 'Missing file path' });
+        if (!filePath) return status(400, { message: 'Missing file path' });
 
         const bucket = await StorageRLS.getLogicalBucket(ref, params.bucket, undefined, true);
-        if (!bucket || !bucket.public) return status(400, { error: 'Bucket is not public' });
+        if (!bucket || !bucket.public) return status(400, { message: 'Bucket is not public' });
 
         return proxyToImaginary(ref, params.bucket, filePath, query, set as { headers: Record<string, string> }, true);
     })
@@ -1528,8 +1528,8 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
     .head('/upload/resumable/:uploadId', async ({ params, headers, set }) => {
         const ref = getProjectRef(headers as Record<string, string | undefined>);
         const upload = await TusStore.get(params.uploadId);
-        if (!upload) return status(404, { error: 'Upload not found' });
-        if (upload.ref !== ref) return status(403, { error: 'Forbidden', message: 'Cross-project upload access denied' });
+        if (!upload) return status(404, { message: 'Upload not found' });
+        if (upload.ref !== ref) return status(403, { message: 'Cross-project upload access denied' });
 
         set.headers['Tus-Resumable'] = '1.0.0';
         set.headers['Upload-Offset'] = String(upload.offset);
@@ -1542,12 +1542,12 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
     .patch('/upload/resumable/:uploadId', async ({ params, headers, request, set }) => {
         const ref = getProjectRef(headers as Record<string, string | undefined>);
         const upload = await TusStore.get(params.uploadId);
-        if (!upload) return status(404, { error: 'Upload not found' });
-        if (upload.ref !== ref) return status(403, { error: 'Forbidden', message: 'Cross-project upload access denied' });
+        if (!upload) return status(404, { message: 'Upload not found' });
+        if (upload.ref !== ref) return status(403, { message: 'Cross-project upload access denied' });
 
         const clientOffset = Number(headers['upload-offset'] || 0);
         if (clientOffset !== upload.offset) {
-            return status(409, { error: 'Offset mismatch', expected: upload.offset, received: clientOffset });
+            return status(409, { message: 'Offset mismatch' });
         }
 
         const chunk = Buffer.from(await request.arrayBuffer());
@@ -1592,7 +1592,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
                 };
             } catch (err: unknown) {
                 await TusStore.delete(params.uploadId);
-                return status(500, { error: 'Failed to finalize upload' });
+                return status(500, { message: 'Failed to finalize upload' });
             }
         }
 
@@ -1604,7 +1604,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
     .delete('/upload/resumable/:uploadId', async ({ params, headers, set }) => {
         const ref = getProjectRef(headers as Record<string, string | undefined>);
         const upload = await TusStore.get(params.uploadId);
-        if (upload && upload.ref !== ref) return status(403, { error: 'Forbidden', message: 'Cross-project upload access denied' });
+        if (upload && upload.ref !== ref) return status(403, { message: 'Cross-project upload access denied' });
         await TusStore.delete(params.uploadId);
         set.headers['Tus-Resumable'] = '1.0.0';
         set.status = 204;
@@ -1639,7 +1639,7 @@ async function proxyToImaginary(
     query: Record<string, string | undefined>,
     set: { headers: Record<string, string> },
     isPublic: boolean = false
-): Promise<Response | { error: string }> {
+): Promise<Response | { message: string }> {
     const now = Date.now();
     const limitState = transformRateLimits.get(ref) || { count: 0, windowStart: now };
     
@@ -1649,7 +1649,7 @@ async function proxyToImaginary(
     }
     
     if (limitState.count >= MAX_TRANSFORMS_PER_MINUTE) {
-        return status(429, { error: 'Too Many Requests for image transformations. Please try again later.' }) as unknown as { error: string };
+        return status(429, { message: 'Too Many Requests for image transformations. Please try again later.' }) as unknown as { message: string };
     }
     
     limitState.count++;

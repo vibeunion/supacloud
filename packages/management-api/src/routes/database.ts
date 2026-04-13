@@ -346,7 +346,7 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
                     ` as Array<Record<string, unknown>>;
                 }
                 return rows.map((row) => ({
-                    version: row.version,
+                    version: String(row.version),
                     statements: row.statements || [],
                     name: row.name || null,
                 }));

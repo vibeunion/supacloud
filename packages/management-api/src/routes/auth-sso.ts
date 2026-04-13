@@ -18,7 +18,7 @@ export const authSsoRoutes = new Elysia({ prefix: "/v1/projects" })
     "/:ref/auth/sso/providers",
     async ({ params, set }) => {
       const ctx = await getGoTrueHeaders(params.ref);
-      if (!ctx) return status(404, { error: "Project not found" });
+      if (!ctx) return status(404, { message: "Project not found", code: "400" });
 
       try {
         const res = await fetch(`${ctx.apiUrl}/auth/v1/admin/sso/providers`, {
@@ -31,7 +31,7 @@ export const authSsoRoutes = new Elysia({ prefix: "/v1/projects" })
         if (!res.ok) {
           set.status = res.status;
           const err = await res.json().catch(() => ({}));
-          return { error: err.msg || err.message || "Failed to list SSO providers" };
+          return { message: err.msg || err.message || "Failed to list SSO providers" };
         }
         return res.json();
       } catch (err: unknown) {
@@ -46,7 +46,7 @@ export const authSsoRoutes = new Elysia({ prefix: "/v1/projects" })
     "/:ref/auth/sso/providers",
     async ({ params, body, set }) => {
       const ctx = await getGoTrueHeaders(params.ref);
-      if (!ctx) return status(404, { error: "Project not found" });
+      if (!ctx) return status(404, { message: "Project not found", code: "400" });
 
       try {
         const res = await fetch(`${ctx.apiUrl}/auth/v1/admin/sso/providers`, {
@@ -62,11 +62,11 @@ export const authSsoRoutes = new Elysia({ prefix: "/v1/projects" })
         if (!res.ok) {
           set.status = res.status;
           const err = await res.json().catch(() => ({}));
-          return { error: err.msg || err.message || "Failed to create SSO provider", error_code: err.error_code, code: err.code };
+          return { message: err.msg || err.message || "Failed to create SSO provider", code: err.code || "500" };
         }
         return res.json();
       } catch (err: unknown) {
-        return status(500, { error: "Failed to create SSO provider", message: err instanceof Error ? err.message : String(err) });
+        return status(500, { message: "Failed to create SSO provider", details: err instanceof Error ? err.message : String(err) });
       }
     },
     {
@@ -88,7 +88,7 @@ export const authSsoRoutes = new Elysia({ prefix: "/v1/projects" })
     "/:ref/auth/sso/providers/:id",
     async ({ params, set }) => {
       const ctx = await getGoTrueHeaders(params.ref);
-      if (!ctx) return status(404, { error: "Project not found" });
+      if (!ctx) return status(404, { message: "Project not found", code: "400" });
 
       try {
         const res = await fetch(`${ctx.apiUrl}/auth/v1/admin/sso/providers/${params.id}`, {
@@ -101,11 +101,11 @@ export const authSsoRoutes = new Elysia({ prefix: "/v1/projects" })
         if (!res.ok) {
           set.status = res.status;
           const err = await res.json().catch(() => ({}));
-          return { error: err.msg || err.message || "SSO provider not found" };
+          return { message: err.msg || err.message || "SSO provider not found" };
         }
         return res.json();
       } catch (err: unknown) {
-        return status(500, { error: "Failed to get SSO provider", message: err instanceof Error ? err.message : String(err) });
+        return status(500, { message: "Failed to get SSO provider", details: err instanceof Error ? err.message : String(err) });
       }
     },
     { params: t.Object({ ref: t.String(), id: t.String() }) }
@@ -115,7 +115,7 @@ export const authSsoRoutes = new Elysia({ prefix: "/v1/projects" })
     "/:ref/auth/sso/providers/:id",
     async ({ params, body, set }) => {
       const ctx = await getGoTrueHeaders(params.ref);
-      if (!ctx) return status(404, { error: "Project not found" });
+      if (!ctx) return status(404, { message: "Project not found", code: "400" });
 
       try {
         const res = await fetch(`${ctx.apiUrl}/auth/v1/admin/sso/providers/${params.id}`, {
@@ -131,11 +131,11 @@ export const authSsoRoutes = new Elysia({ prefix: "/v1/projects" })
         if (!res.ok) {
           set.status = res.status;
           const err = await res.json().catch(() => ({}));
-          return { error: err.msg || err.message || "Failed to update SSO provider", error_code: err.error_code, code: err.code };
+          return { message: err.msg || err.message || "Failed to update SSO provider", code: err.code || "500" };
         }
         return res.json();
       } catch (err: unknown) {
-        return status(500, { error: "Failed to update SSO provider", message: err instanceof Error ? err.message : String(err) });
+        return status(500, { message: "Failed to update SSO provider", details: err instanceof Error ? err.message : String(err) });
       }
     },
     {
@@ -156,7 +156,7 @@ export const authSsoRoutes = new Elysia({ prefix: "/v1/projects" })
     "/:ref/auth/sso/providers/:id",
     async ({ params, set }) => {
       const ctx = await getGoTrueHeaders(params.ref);
-      if (!ctx) return status(404, { error: "Project not found" });
+      if (!ctx) return status(404, { message: "Project not found", code: "400" });
 
       try {
         const res = await fetch(`${ctx.apiUrl}/auth/v1/admin/sso/providers/${params.id}`, {
@@ -170,11 +170,11 @@ export const authSsoRoutes = new Elysia({ prefix: "/v1/projects" })
         if (!res.ok) {
           set.status = res.status;
           const err = await res.json().catch(() => ({}));
-          return { error: err.msg || err.message || "Failed to delete SSO provider" };
+          return { message: err.msg || err.message || "Failed to delete SSO provider" };
         }
         return res.json();
       } catch (err: unknown) {
-        return status(500, { error: "Failed to delete SSO provider", message: err instanceof Error ? err.message : String(err) });
+        return status(500, { message: "Failed to delete SSO provider", details: err instanceof Error ? err.message : String(err) });
       }
     },
     { params: t.Object({ ref: t.String(), id: t.String() }) }
