@@ -157,50 +157,35 @@ jobs:
           docker start $(docker ps -a -q --filter "ancestor=supabase/realtime:latest") || true
           sleep 4
 
-      - name: Start Management API
+      - name: Launch API & Execute Full Defenses
         working-directory: packages/management-api
         run: |
+          echo "Starting Management API in background..."
           bun src/index.ts &
-          sleep 3
+          sleep 4
           curl -sf http://127.0.0.1:9090/health || (echo "API failed to start" && exit 1)
+          
+          echo "===== RUNNING E2E SNAPSHOTS ====="
+          bun test tests/e2e
+          
+          echo "===== RUNNING OFFICIAL SDK PARITY PIPELINE ====="
+          bun run tests/scripts/run-official-sdk-compliance.ts
+          
+          echo "===== RUNNING OFFICIAL CLI COMPLIANCE ====="
+          bun run tests/scripts/run-official-cli-compliance.ts
+          
+          echo "===== RUNNING OPENAPI SCHEMA CRAWLER ====="
+          bun run tests/scripts/run-openapi-compliance.ts
         env:
           DATABASE_URL: postgresql://supabase_admin:postgres@localhost:5432/postgres
           TEST_FIXED_JWT_SECRET: super-secret-jwt-token-with-at-least-32-characters-long
+          MASTER_TOKEN: super-secret-jwt-token-with-at-least-32-characters-long
           S3_ENDPOINT: http://127.0.0.1:9000
           S3_REGION: us-east-1
           STORAGE_TYPE: s3
           S3_ACCESS_KEY: minioadmin
           S3_SECRET_KEY: minioadmin
           S3_FORCE_PATH_STYLE: true
-
-      - name: Run E2E snapshot tests
-        working-directory: packages/management-api
-        run: bun test tests/e2e
-        env:
-          DATABASE_URL: postgresql://supabase_admin:postgres@localhost:5432/postgres
-          TEST_FIXED_JWT_SECRET: super-secret-jwt-token-with-at-least-32-characters-long
-
-      - name: Run Official SDK Compliance (Scheme A)
-        working-directory: packages/management-api
-        run: bun run tests/scripts/run-official-sdk-compliance.ts
-        env:
-          DATABASE_URL: postgresql://supabase_admin:postgres@localhost:5432/postgres
-          TEST_FIXED_JWT_SECRET: super-secret-jwt-token-with-at-least-32-characters-long
-
-      - name: Run Official CLI Compliance (Scheme C)
-        working-directory: packages/management-api
-        run: bun run tests/scripts/run-official-cli-compliance.ts
-        env:
-          DATABASE_URL: postgresql://supabase_admin:postgres@localhost:5432/postgres
-          TEST_FIXED_JWT_SECRET: super-secret-jwt-token-with-at-least-32-characters-long
-          MASTER_TOKEN: super-secret-jwt-token-with-at-least-32-characters-long
-
-      - name: Run OpenAPI Schema Compliance (Scheme B)
-        working-directory: packages/management-api
-        run: bun run tests/scripts/run-openapi-compliance.ts
-        env:
-          DATABASE_URL: postgresql://supabase_admin:postgres@localhost:5432/postgres
-          TEST_FIXED_JWT_SECRET: super-secret-jwt-token-with-at-least-32-characters-long
           MASTER_TOKEN: super-secret-jwt-token-with-at-least-32-characters-long
 
   shell-scripts-lint:
