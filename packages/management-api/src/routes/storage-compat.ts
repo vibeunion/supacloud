@@ -1658,13 +1658,13 @@ async function proxyToImaginary(
     // 1. Read the source image from storage
     const downloadRes = await StorageService.getDownloadResponse(ref, logicalBucket, filePath);
     if (!downloadRes) {
-        return status(404, { error: 'Source image not found' }) as unknown as { error: string };
+        return status(404, { message: 'Source image not found' }) as unknown as { message: string };
     }
 
     // Validate source file is actually an image before wasting resources on imaginary
     const sourceContentTypeCheck = downloadRes.headers?.get('Content-Type') || '';
     if (sourceContentTypeCheck && !sourceContentTypeCheck.startsWith('image/')) {
-        return status(400, { error: `Cannot transform non-image file (Content-Type: ${sourceContentTypeCheck})` }) as unknown as { error: string };
+        return status(400, { message: `Cannot transform non-image file (Content-Type: ${sourceContentTypeCheck})` }) as unknown as { message: string };
     }
 
     // 2. Build imaginary query params
@@ -1741,7 +1741,7 @@ async function proxyToImaginary(
         if (!res.ok) {
             const errText = await res.text();
             logger.error(`Imaginary ${operation} failed:`, { status: res.status, error: errText });
-            return status(502, { error: `Image transform failed: ${errText}` }) as unknown as { error: string };
+            return status(502, { message: `Image transform failed: ${errText}` }) as unknown as { message: string };
         }
 
         if (format) {
@@ -1760,6 +1760,6 @@ async function proxyToImaginary(
         return new Response(res.body);
     } catch (err: unknown) {
         logger.error('Imaginary proxy error:', { error: err instanceof Error ? err.message : String(err) });
-        return status(502, { error: 'Image processing service unavailable' }) as unknown as { error: string };
+        return status(502, { message: 'Image processing service unavailable' }) as unknown as { message: string };
     }
 }
