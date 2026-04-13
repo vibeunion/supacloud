@@ -39,8 +39,7 @@
       return res.json();
     }
   }));
-
-  const project = $derived($projectQuery.data);
+  const project = $derived(projectQuery.data);
 
   const filteredMessages = $derived(
     filterEvent
