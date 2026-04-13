@@ -13,7 +13,7 @@ export const projectServiceRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params, set }) => {
       const project = await projectService.getProject(params.ref);
       if (!project) {
-                return status(404, { message: "Project not found", code: "404" });
+        return status(404, { message: "Project not found", code: "404" });
       }
       return { status: "healthy" };
     },
@@ -21,7 +21,7 @@ export const projectServiceRoutes = new Elysia({ prefix: "/v1/projects" })
       params: t.Object({
         ref: t.String(),
       }),
-    }
+    },
   )
 
   // Get project status (legacy compatibility)
@@ -30,7 +30,7 @@ export const projectServiceRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params, set }) => {
       const projectStatus = await projectService.getProjectStatus(params.ref);
       if (!projectStatus) {
-                return status(404, { message: "Project not found", code: "404" });
+        return status(404, { message: "Project not found", code: "404" });
       }
       return projectStatus;
     },
@@ -38,7 +38,7 @@ export const projectServiceRoutes = new Elysia({ prefix: "/v1/projects" })
       params: t.Object({
         ref: t.String(),
       }),
-    }
+    },
   )
 
   // Get project usage metrics — real pg_stat data (P0-6)
@@ -47,7 +47,7 @@ export const projectServiceRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params, set }) => {
       const project = await projectService.getProject(params.ref);
       if (!project) {
-                return status(404, { message: "Project not found", code: "404" });
+        return status(404, { message: "Project not found", code: "404" });
       }
 
       try {
@@ -56,12 +56,13 @@ export const projectServiceRoutes = new Elysia({ prefix: "/v1/projects" })
         const db = getProjectDb(dbName);
 
         // Database size
-        const [dbSize] = await db`SELECT pg_database_size(current_database()) as size_bytes`;
+        const [dbSize] =
+          await db`SELECT pg_database_size(current_database()) as size_bytes`;
         const dbSizeMb = Math.round(Number(dbSize.size_bytes) / (1024 * 1024));
 
         // Table count
         const [tableCount] = await db`
-          SELECT count(*) as cnt FROM information_schema.tables 
+          SELECT count(*) as cnt FROM information_schema.tables
           WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
         `;
 
@@ -78,25 +79,39 @@ export const projectServiceRoutes = new Elysia({ prefix: "/v1/projects" })
             SELECT count(*) as cnt, coalesce(sum((metadata->>'size')::bigint), 0) as total_bytes
             FROM storage.objects
           `;
-          storageSizeMb = Math.round(Number(storageStats.total_bytes) / (1024 * 1024));
+          storageSizeMb = Math.round(
+            Number(storageStats.total_bytes) / (1024 * 1024),
+          );
           storageObjectCount = Number(storageStats.cnt);
-        } catch { /* storage schema may not exist */ }
+        } catch {
+          /* storage schema may not exist */
+        }
 
         // Auth user count
         let userCount = 0;
         try {
           const [authStats] = await db`SELECT count(*) as cnt FROM auth.users`;
           userCount = Number(authStats.cnt);
-        } catch { /* auth schema may not exist */ }
+        } catch {
+          /* auth schema may not exist */
+        }
 
         return {
           data: {
             database: { usage: dbSizeMb, limit: 500, unit: "MB" },
             storage: { usage: storageSizeMb, limit: 1000, unit: "MB" },
-            storage_objects: { usage: storageObjectCount, limit: 0, unit: "count" },
+            storage_objects: {
+              usage: storageObjectCount,
+              limit: 0,
+              unit: "count",
+            },
             auth_users: { usage: userCount, limit: 0, unit: "count" },
             tables: { usage: Number(tableCount.cnt), limit: 0, unit: "count" },
-            connections: { usage: Number(connCount.cnt), limit: 60, unit: "count" },
+            connections: {
+              usage: Number(connCount.cnt),
+              limit: 60,
+              unit: "count",
+            },
           },
         };
       } catch (err) {
@@ -113,7 +128,7 @@ export const projectServiceRoutes = new Elysia({ prefix: "/v1/projects" })
       params: t.Object({
         ref: t.String(),
       }),
-    }
+    },
   )
 
   // Restart project
@@ -122,7 +137,7 @@ export const projectServiceRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params, set }) => {
       const restarted = await projectService.restartProject(params.ref);
       if (!restarted) {
-                return status(404, { message: "Project not found", code: "404" });
+        return status(404, { message: "Project not found", code: "404" });
       }
       return { ref: params.ref, message: "Project restart initiated" };
     },
@@ -130,7 +145,54 @@ export const projectServiceRoutes = new Elysia({ prefix: "/v1/projects" })
       params: t.Object({
         ref: t.String(),
       }),
-    }
+    },
+  )
+
+  // Get project services status list (Supabase Studio compatibility)
+  .get(
+    "/:ref/services",
+    async ({ params }) => {
+      const project = await projectService.getProject(params.ref);
+      if (!project) {
+        return status(404, { message: "Project not found" });
+      }
+
+      const ref = params.ref;
+
+      // Check each service via systemctl (fails gracefully in CI/non-systemd environments)
+      const checkService = async (unitName: string): Promise<string> => {
+        try {
+          const result = await $`systemctl is-active ${unitName} 2>/dev/null`
+            .nothrow()
+            .quiet();
+          return result.exitCode === 0 ? "ACTIVE_HEALTHY" : "INACTIVE";
+        } catch {
+          return "INACTIVE";
+        }
+      };
+
+      const [db, pgrst, gotrue, realtime, storage] = await Promise.allSettled([
+        checkService("patroni"),
+        checkService(`supacloud-pgrst@${ref}`),
+        checkService(`supacloud-gotrue@${ref}`),
+        checkService(`supacloud-realtime@${ref}`),
+        checkService(`supacloud-storage@${ref}`),
+      ]);
+
+      const getResult = (r: PromiseSettledResult<string>): string =>
+        r.status === "fulfilled" ? r.value : "INACTIVE";
+
+      return [
+        { id: "db", name: "Database", status: getResult(db) },
+        { id: "pgrest", name: "PostgREST", status: getResult(pgrst) },
+        { id: "gotrue", name: "GoTrue", status: getResult(gotrue) },
+        { id: "realtime", name: "Realtime", status: getResult(realtime) },
+        { id: "storage", name: "Storage", status: getResult(storage) },
+      ];
+    },
+    {
+      params: t.Object({ ref: t.String() }),
+    },
   )
 
   // Individual service control (start/stop/restart)
@@ -141,7 +203,10 @@ export const projectServiceRoutes = new Elysia({ prefix: "/v1/projects" })
       const validActions = ["start", "stop", "restart"];
       if (!validActions.includes(action)) {
         set.status = 400;
-        return { message: `Invalid action: ${action}. Must be one of: ${validActions.join(", ")}`, code: "400" };
+        return {
+          message: `Invalid action: ${action}. Must be one of: ${validActions.join(", ")}`,
+          code: "400",
+        };
       }
 
       const serviceMap: Record<string, string> = {
@@ -156,22 +221,31 @@ export const projectServiceRoutes = new Elysia({ prefix: "/v1/projects" })
       const unitName = serviceMap[service];
       if (!unitName) {
         set.status = 400;
-        return { message: `Unknown service: ${service}. Available: ${Object.keys(serviceMap).join(", ")}`, code: "400" };
+        return {
+          message: `Unknown service: ${service}. Available: ${Object.keys(serviceMap).join(", ")}`,
+          code: "400",
+        };
       }
 
       try {
-        const result = await $`systemctl ${action} ${unitName}`.nothrow().quiet();
+        const result = await $`systemctl ${action} ${unitName}`
+          .nothrow()
+          .quiet();
         return {
           service,
           action,
           success: result.exitCode === 0,
-          message: result.exitCode === 0 
-            ? `Service ${service} ${action} succeeded`
-            : `Service ${service} ${action} failed (exit code: ${result.exitCode})`,
+          message:
+            result.exitCode === 0
+              ? `Service ${service} ${action} succeeded`
+              : `Service ${service} ${action} failed (exit code: ${result.exitCode})`,
         };
       } catch (err: unknown) {
         set.status = 500;
-        return { message: `Failed to ${action} ${service}: ${err instanceof Error ? err.message : String(err)}`, code: "500" };
+        return {
+          message: `Failed to ${action} ${service}: ${err instanceof Error ? err.message : String(err)}`,
+          code: "500",
+        };
       }
     },
     {
@@ -180,25 +254,5 @@ export const projectServiceRoutes = new Elysia({ prefix: "/v1/projects" })
         service: t.String(),
         action: t.String(),
       }),
-    }
-  )
-
-  // List project services (Studio compatibility)
-  .get(
-    "/:ref/services",
-    async ({ params, set }) => {
-      const project = await projectService.getProject(params.ref);
-      if (!project) {
-                return status(404, { message: "Project not found", code: "404" });
-      }
-      return [
-        { name: "postgresql", description: "PostgreSQL database", status: "active_healthy" },
-        { name: "postgrest", description: "REST API", status: "active_healthy" },
-        { name: "gotrue", description: "Auth service", status: "active_healthy" },
-        { name: "realtime", description: "Realtime service", status: "active_healthy" },
-        { name: "storage", description: "Storage service", status: "active_healthy" },
-        { name: "kong", description: "API gateway", status: "active_healthy" },
-      ];
     },
-    { params: t.Object({ ref: t.String() }) }
   );

@@ -13,6 +13,30 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
     },
   )
 
+  // GET /v1/projects/:ref/functions/secrets
+  // Alias for secrets endpoint — Supabase Studio and some SDK versions call this path
+  .get(
+    "/:ref/functions/secrets",
+    async ({ params }) => {
+      // Delegate to the project secrets service
+      const { projectService: svc } = await import("../services");
+      const secrets = await svc.getSecrets(params.ref);
+      if (!secrets) {
+        return status(404, { message: "Project not found" });
+      }
+      return secrets.map(
+        (s: { name: string; value: string; updated_at?: string }) => ({
+          name: s.name,
+          value: s.value,
+          updated_at: s.updated_at ?? new Date().toISOString(),
+        }),
+      );
+    },
+    {
+      params: t.Object({ ref: t.String() }),
+    },
+  )
+
   // Deploy via multipart/form-data (supabase CLI format)
   // POST /v1/projects/:ref/functions/deploy?slug=hello-world
   .post(
@@ -20,7 +44,10 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params, body, query }) => {
       const slug = (query as Record<string, string>).slug;
       if (!slug) {
-        return status(400, { message: "slug query parameter is required", code: "400" });
+        return status(400, {
+          message: "slug query parameter is required",
+          code: "400",
+        });
       }
 
       // Parse metadata JSON string
@@ -53,7 +80,10 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         : [];
 
       if (fileList.length === 0) {
-        return status(400, { message: "No source files provided", code: "400" });
+        return status(400, {
+          message: "No source files provided",
+          code: "400",
+        });
       }
 
       const entrypoint = metadata.entrypoint_path || "index.ts";
@@ -78,7 +108,10 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         false,
       );
       if (!success) {
-        return status(500, { message: "Failed to deploy function bundle", code: "500" });
+        return status(500, {
+          message: "Failed to deploy function bundle",
+          code: "500",
+        });
       }
 
       // Persist JWT setting from metadata
@@ -145,7 +178,10 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
           false,
         );
         if (!success) {
-          return status(500, { message: "Failed to deploy function", code: "500" });
+          return status(500, {
+            message: "Failed to deploy function",
+            code: "500",
+          });
         }
       }
 
@@ -345,7 +381,10 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         body.minify ?? false,
       );
       if (!success) {
-        return status(500, { message: "Failed to deploy function", code: "500" });
+        return status(500, {
+          message: "Failed to deploy function",
+          code: "500",
+        });
       }
       return { success: true, bundled: true };
     },
@@ -375,7 +414,10 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
           false,
         );
         if (!success) {
-          return status(500, { message: "Failed to deploy function", code: "500" });
+          return status(500, {
+            message: "Failed to deploy function",
+            code: "500",
+          });
         }
       }
 
@@ -425,7 +467,10 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         body.minify ?? false,
       );
       if (!success) {
-        return status(500, { message: "Failed to deploy function bundle", code: "500" });
+        return status(500, {
+          message: "Failed to deploy function bundle",
+          code: "500",
+        });
       }
       return {
         success: true,
@@ -448,11 +493,17 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params, body }) => {
       const slug = body?.slug;
       if (!slug) {
-        return status(400, { message: "slug is required in body", code: "400" });
+        return status(400, {
+          message: "slug is required in body",
+          code: "400",
+        });
       }
       const success = await projectService.deleteFunction(params.ref, slug);
       if (!success) {
-        return status(500, { message: "Failed to delete function", code: "500" });
+        return status(500, {
+          message: "Failed to delete function",
+          code: "500",
+        });
       }
       return { success: true };
     },
@@ -470,7 +521,10 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         params.slug,
       );
       if (!success) {
-        return status(500, { message: "Failed to delete function", code: "500" });
+        return status(500, {
+          message: "Failed to delete function",
+          code: "500",
+        });
       }
       return { success: true };
     },
@@ -548,47 +602,55 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params }) => {
       const secrets = await projectService.getSecrets(params.ref);
       if (!secrets) return [];
-      return (secrets as Array<{ name: string; value: string }>).filter(
-        (s) => s.name.startsWith("EDGEFN_")
-      ).map(s => ({ name: s.name, value: s.value }));
+      return (secrets as Array<{ name: string; value: string }>)
+        .filter((s) => s.name.startsWith("EDGEFN_"))
+        .map((s) => ({ name: s.name, value: s.value }));
     },
-    { params: t.Object({ ref: t.String() }) }
+    { params: t.Object({ ref: t.String() }) },
   )
   .post(
     "/:ref/functions/secrets",
     async ({ params, body }) => {
-      const secrets = (body as Array<{ name: string; value: string }>).map((s) => ({
-        name: `EDGEFN_${s.name}`,
-        value: s.value,
-      }));
+      const secrets = (body as Array<{ name: string; value: string }>).map(
+        (s) => ({
+          name: `EDGEFN_${s.name}`,
+          value: s.value,
+        }),
+      );
       const success = await projectService.upsertSecrets(params.ref, secrets);
       if (!success) {
-        return status(500, { message: "Failed to create function secrets", code: "500" });
+        return status(500, {
+          message: "Failed to create function secrets",
+          code: "500",
+        });
       }
       return {};
     },
     {
       params: t.Object({ ref: t.String() }),
       body: t.Array(t.Object({ name: t.String(), value: t.String() })),
-    }
+    },
   )
   .delete(
     "/:ref/functions/secrets",
     async ({ params, body }) => {
       const names = (body as string[]).map((n) => `EDGEFN_${n}`);
       const results = await Promise.all(
-        names.map((name) => projectService.deleteSecret(params.ref, name))
+        names.map((name) => projectService.deleteSecret(params.ref, name)),
       );
       const failed = results.filter((r) => !r).length;
       if (failed > 0) {
-        return status(500, { message: `Failed to delete ${failed} secret(s)`, code: "500" });
+        return status(500, {
+          message: `Failed to delete ${failed} secret(s)`,
+          code: "500",
+        });
       }
       return {};
     },
     {
       params: t.Object({ ref: t.String() }),
       body: t.Array(t.String()),
-    }
+    },
   )
 
   // Function Secrets — Per-function level
@@ -597,45 +659,55 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params }) => {
       const secrets = await projectService.getSecrets(params.ref);
       if (!secrets) return [];
-      return (secrets as Array<{ name: string; value: string }>).filter(
-        (s) => s.name.startsWith(`EDGEFN_${params.slug.toUpperCase()}_`)
+      return (secrets as Array<{ name: string; value: string }>).filter((s) =>
+        s.name.startsWith(`EDGEFN_${params.slug.toUpperCase()}_`),
       );
     },
-    { params: t.Object({ ref: t.String(), slug: t.String() }) }
+    { params: t.Object({ ref: t.String(), slug: t.String() }) },
   )
   .post(
     "/:ref/functions/:slug/secrets",
     async ({ params, body }) => {
-      const secrets = (body as Array<{ name: string; value: string }>).map((s) => ({
-        name: `EDGEFN_${params.slug.toUpperCase()}_${s.name}`,
-        value: s.value,
-      }));
+      const secrets = (body as Array<{ name: string; value: string }>).map(
+        (s) => ({
+          name: `EDGEFN_${params.slug.toUpperCase()}_${s.name}`,
+          value: s.value,
+        }),
+      );
       const success = await projectService.upsertSecrets(params.ref, secrets);
       if (!success) {
-        return status(500, { message: "Failed to create function secrets", code: "500" });
+        return status(500, {
+          message: "Failed to create function secrets",
+          code: "500",
+        });
       }
       return {};
     },
     {
       params: t.Object({ ref: t.String(), slug: t.String() }),
       body: t.Array(t.Object({ name: t.String(), value: t.String() })),
-    }
+    },
   )
   .delete(
     "/:ref/functions/:slug/secrets",
     async ({ params, body }) => {
-      const names = (body as string[]).map((n) => `EDGEFN_${params.slug.toUpperCase()}_${n}`);
+      const names = (body as string[]).map(
+        (n) => `EDGEFN_${params.slug.toUpperCase()}_${n}`,
+      );
       const results = await Promise.all(
-        names.map((name) => projectService.deleteSecret(params.ref, name))
+        names.map((name) => projectService.deleteSecret(params.ref, name)),
       );
       const failed = results.filter((r) => !r).length;
       if (failed > 0) {
-        return status(500, { message: `Failed to delete ${failed} secret(s)`, code: "500" });
+        return status(500, {
+          message: `Failed to delete ${failed} secret(s)`,
+          code: "500",
+        });
       }
       return {};
     },
     {
       params: t.Object({ ref: t.String(), slug: t.String() }),
       body: t.Array(t.String()),
-    }
+    },
   );

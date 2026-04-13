@@ -33,7 +33,7 @@
 
   const projectRef = $derived(page.params.ref);
 
-  const { query: bucketsQuery } = useList<Bucket>({ 
+  const bucketsQuery = useList<Bucket>({ 
     get resource() { return `v1/storage/${projectRef}/buckets`; } 
   });
   const buckets = $derived(Array.isArray(bucketsQuery.data?.data) ? bucketsQuery.data.data : []);
@@ -44,7 +44,7 @@
     }
   });
 
-  const { query: filesQuery } = useList<StorageFile>({
+  const filesQuery = useList<StorageFile>({
     get resource() { return selectedBucketId ? `v1/storage/${projectRef}/buckets/${selectedBucketId}/files` : ""; },
     get queryOptions() { return { enabled: !!selectedBucketId }; }
   });

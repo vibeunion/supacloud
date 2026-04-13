@@ -22,7 +22,7 @@
   }
 
   const projectRef = $derived(page.params.ref);
-  const { query } = useList<Deployment>({ get resource() { return `v1/projects/${projectRef}/frontend/deployments`; } });
+  const query = useList<Deployment>({ get resource() { return `v1/projects/${projectRef}/frontend/deployments`; } });
   const deployments = $derived(Array.isArray(query.data?.data) ? query.data.data : ((query.data?.data as unknown as Record<string, unknown>)?.deployments as Deployment[] || []));
 
   let actionMsg: string | null = $state.raw(null);

@@ -79,15 +79,7 @@ export function getProjectDb(dbName: string): SQL {
   return projectSql;
 }
 
-export function removeProjectDbCache(dbName: string) {
-  const cached = projectConnections.get(dbName);
-  if (cached) {
-    try {
-      cached.sql.close().catch(() => {});
-    } catch {}
-    projectConnections.delete(dbName);
-  }
-}
+
 
 const dbNameCache = new Map<string, { name: string; cachedAt: number }>();
 const DB_NAME_CACHE_TTL = 5 * 60 * 1000;

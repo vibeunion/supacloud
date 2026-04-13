@@ -1,29 +1,35 @@
 import { Elysia } from "elysia";
 import { logger } from "./utils/logger";
 
-process.on('uncaughtException', (err: Error) => {
-    logger.error('FATAL UNCAUGHT EXCEPTION:', { message: err.message, stack: err.stack });
+process.on("uncaughtException", (err: Error) => {
+  logger.error("FATAL UNCAUGHT EXCEPTION:", {
+    message: err.message,
+    stack: err.stack,
+  });
 });
 
-process.on('unhandledRejection', (reason: unknown) => {
-    logger.error('FATAL UNHANDLED REJECTION:', { reason: reason instanceof Error ? reason.message : String(reason) });
+process.on("unhandledRejection", (reason: unknown) => {
+  logger.error("FATAL UNHANDLED REJECTION:", {
+    reason: reason instanceof Error ? reason.message : String(reason),
+  });
 });
 
 import { swagger } from "@elysiajs/swagger";
 import { cors } from "@elysiajs/cors";
 
 try {
-  const envFile = Bun.file('/opt/supacloud/config.env');
+  const envFile = Bun.file("/opt/supacloud/config.env");
   if (envFile.size > 0) {
     const text = await envFile.text();
-    for (const line of text.split('\n')) {
+    for (const line of text.split("\n")) {
       const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith('#') || !trimmed.includes('=')) continue;
-      const eqIdx = trimmed.indexOf('=');
+      if (!trimmed || trimmed.startsWith("#") || !trimmed.includes("="))
+        continue;
+      const eqIdx = trimmed.indexOf("=");
       const key = trimmed.slice(0, eqIdx).trim();
       // Strip surrounding quotes (both single and double) from the value
       const rawVal = trimmed.slice(eqIdx + 1).trim();
-      const val = rawVal.replace(/^["']|["']$/g, '');
+      const val = rawVal.replace(/^["']|["']$/g, "");
       if (key && /^[A-Z0-9_]+$/.test(key) && !process.env[key]) {
         process.env[key] = val;
       }
@@ -53,14 +59,19 @@ const MIME_TYPES: Record<string, string> = {
   ".woff2": "font/woff2",
 };
 
-let _embeddedAssets: Record<string, { content: string; encoding: string; mimeType: string }> | null = null;
+let _embeddedAssets: Record<
+  string,
+  { content: string; encoding: string; mimeType: string }
+> | null = null;
 async function getEmbeddedAssets() {
   if (!_embeddedAssets) {
     try {
-      const mod = await import("./assets.gen") as Record<string, unknown>;
+      const mod = (await import("./assets.gen")) as Record<string, unknown>;
       _embeddedAssets = (mod.EMBEDDED_ASSETS as typeof _embeddedAssets) ?? {};
     } catch {
-      logger.debug("Failed to load embedded assets (assets.gen.ts not found), using empty fallback.");
+      logger.debug(
+        "Failed to load embedded assets (assets.gen.ts not found), using empty fallback.",
+      );
       _embeddedAssets = {};
     }
   }
@@ -85,13 +96,13 @@ function staticFileExists(relativePath: string): boolean {
 
 /** Determine if a path is an immutable hashed asset (should never SPA-fallback) */
 function isImmutableAsset(path: string): boolean {
-  return path.startsWith('/_app/') || path.startsWith('/assets/');
+  return path.startsWith("/_app/") || path.startsWith("/assets/");
 }
 
 /** Determine if a path looks like a static file request (has a file extension) */
 function hasFileExtension(path: string): boolean {
-  const lastSegment = path.split('/').pop() || '';
-  return lastSegment.includes('.');
+  const lastSegment = path.split("/").pop() || "";
+  return lastSegment.includes(".");
 }
 
 /** Get index.html with mtime-based cache invalidation */
@@ -115,7 +126,10 @@ try {
   const { gatewayService } = await import("./services/gateway.service");
   await gatewayService.setupMasterRoutes();
 } catch (e) {
-  logger.error("Failed to setup master routes", e instanceof Error ? e.message : String(e));
+  logger.error(
+    "Failed to setup master routes",
+    e instanceof Error ? e.message : String(e),
+  );
 }
 
 const app = new Elysia({ strictPath: false })
@@ -130,19 +144,52 @@ const app = new Elysia({ strictPath: false })
         },
         tags: [
           { name: "projects", description: "Project management endpoints" },
-          { name: "organizations", description: "Organization management endpoints" },
+          {
+            name: "organizations",
+            description: "Organization management endpoints",
+          },
           { name: "user", description: "User profile endpoints" },
-          { name: "backups", description: "Database backup and restore endpoints" },
-          { name: "monitor", description: "Database monitoring and health endpoints" },
-          { name: "maintenance", description: "High availability and cluster maintenance" },
-          { name: "extensions", description: "PostgreSQL extension management (Market)" },
-          { name: "security", description: "Firewall and SSL security management" },
-          { name: "storage", description: "JuiceFS storage and S3 migration management" },
-          { name: "scaling", description: "Auto-scaling and vertical upgrade management" },
+          {
+            name: "backups",
+            description: "Database backup and restore endpoints",
+          },
+          {
+            name: "monitor",
+            description: "Database monitoring and health endpoints",
+          },
+          {
+            name: "maintenance",
+            description: "High availability and cluster maintenance",
+          },
+          {
+            name: "extensions",
+            description: "PostgreSQL extension management (Market)",
+          },
+          {
+            name: "security",
+            description: "Firewall and SSL security management",
+          },
+          {
+            name: "storage",
+            description: "JuiceFS storage and S3 migration management",
+          },
+          {
+            name: "scaling",
+            description: "Auto-scaling and vertical upgrade management",
+          },
           { name: "tasks", description: "Background task monitoring" },
-          { name: "auth", description: "Authentication and OAuth provider management" },
-          { name: "frontend", description: "Frontend hosting and deployment management" },
-          { name: "webhook", description: "GitHub webhook and CI/CD integration" },
+          {
+            name: "auth",
+            description: "Authentication and OAuth provider management",
+          },
+          {
+            name: "frontend",
+            description: "Frontend hosting and deployment management",
+          },
+          {
+            name: "webhook",
+            description: "GitHub webhook and CI/CD integration",
+          },
         ],
         components: {
           securitySchemes: {
@@ -154,24 +201,35 @@ const app = new Elysia({ strictPath: false })
         },
         security: [{ bearerAuth: [] }],
       },
-    })
+    }),
   )
   // CORS
-  .use(cors({
-    origin: true,
-    credentials: true,
-    exposeHeaders: ['x-total-count', 'link', 'content-range', 'x-supabase-api-version', 'x-ratelimit-limit', 'x-ratelimit-remaining', 'x-ratelimit-reset'],
-    maxAge: 86400,
-  }))
+  .use(
+    cors({
+      origin: true,
+      credentials: true,
+      exposeHeaders: [
+        "x-total-count",
+        "link",
+        "content-range",
+        "x-supabase-api-version",
+        "x-ratelimit-limit",
+        "x-ratelimit-remaining",
+        "x-ratelimit-reset",
+      ],
+      maxAge: 86400,
+    }),
+  )
 
   // Rate limit headers + API version (Studio compatibility)
   .onAfterHandle(({ set }) => {
-    if (set.headers) {
-      set.headers['x-ratelimit-limit'] = '1000';
-      set.headers['x-ratelimit-remaining'] = '999';
-      set.headers['x-ratelimit-reset'] = String(Math.ceil(Date.now() / 60000) * 60);
-      set.headers['x-supabase-api-version'] = '2024-01-01';
-    }
+    set.headers ??= {};
+    set.headers["x-ratelimit-limit"] = "1000";
+    set.headers["x-ratelimit-remaining"] = "999";
+    set.headers["x-ratelimit-reset"] = String(
+      Math.ceil(Date.now() / 60000) * 60,
+    );
+    set.headers["x-supabase-api-version"] = "2024-01-01";
   })
 
   // Health check (no auth required)
@@ -179,14 +237,38 @@ const app = new Elysia({ strictPath: false })
 
   // ─── Studio Login (no auth required) ──────────────────────────────────
   .post("/auth/login", async ({ body, set }) => {
-    const { username, password } = body as { username: string; password: string };
-    if (username === config.studioUsername && password === config.studioPassword) {
+    const { username, password } = body as {
+      username: string;
+      password: string;
+    };
+    if (
+      username === config.studioUsername &&
+      password === config.studioPassword
+    ) {
       // Generate a simple HMAC-based session token (valid for 24h)
-      const payload = JSON.stringify({ user: username, exp: Date.now() + 86400000 });
+      const payload = JSON.stringify({
+        user: username,
+        exp: Date.now() + 86400000,
+      });
       const encoder = new TextEncoder();
-      const key = await crypto.subtle.importKey("raw", encoder.encode(config.masterToken), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
-      const sig = await crypto.subtle.sign("HMAC", key, encoder.encode(payload));
-      const token = btoa(payload) + "." + Array.from(new Uint8Array(sig)).map(b => b.toString(16).padStart(2, "0")).join("");
+      const key = await crypto.subtle.importKey(
+        "raw",
+        encoder.encode(config.masterToken),
+        { name: "HMAC", hash: "SHA-256" },
+        false,
+        ["sign"],
+      );
+      const sig = await crypto.subtle.sign(
+        "HMAC",
+        key,
+        encoder.encode(payload),
+      );
+      const token =
+        btoa(payload) +
+        "." +
+        Array.from(new Uint8Array(sig))
+          .map((b) => b.toString(16).padStart(2, "0"))
+          .join("");
       return { success: true, token };
     }
     set.status = 401;
@@ -199,16 +281,32 @@ const app = new Elysia({ strictPath: false })
       const payload = JSON.parse(atob(payloadB64));
       if (payload.exp < Date.now()) return { valid: false, error: "expired" };
       const encoder = new TextEncoder();
-      const key = await crypto.subtle.importKey("raw", encoder.encode(config.masterToken), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
-      const sig = await crypto.subtle.sign("HMAC", key, encoder.encode(JSON.stringify(payload)));
-      const expected = Array.from(new Uint8Array(sig)).map(b => b.toString(16).padStart(2, "0")).join("");
+      const key = await crypto.subtle.importKey(
+        "raw",
+        encoder.encode(config.masterToken),
+        { name: "HMAC", hash: "SHA-256" },
+        false,
+        ["sign"],
+      );
+      const sig = await crypto.subtle.sign(
+        "HMAC",
+        key,
+        encoder.encode(JSON.stringify(payload)),
+      );
+      const expected = Array.from(new Uint8Array(sig))
+        .map((b) => b.toString(16).padStart(2, "0"))
+        .join("");
       // Use timing-safe comparison to prevent timing attacks
-      const sigBuf = Buffer.from(sigHex, 'hex');
-      const expBuf = Buffer.from(expected, 'hex');
-      const valid = sigBuf.length === expBuf.length && crypto.timingSafeEqual(sigBuf, expBuf);
+      const sigBuf = Buffer.from(sigHex, "hex");
+      const expBuf = Buffer.from(expected, "hex");
+      const valid =
+        sigBuf.length === expBuf.length &&
+        crypto.timingSafeEqual(sigBuf, expBuf);
       return { valid };
     } catch (err: unknown) {
-      logger.warn("[Auth] Failed to verify session token signature", { error: err });
+      logger.warn("[Auth] Failed to verify session token signature", {
+        error: err,
+      });
       return { valid: false };
     }
   })
@@ -237,7 +335,11 @@ const app = new Elysia({ strictPath: false })
 
     if (code === "VALIDATION") {
       set.status = 400;
-      return { message: "Validation failed", code: "validation_error", details: error.message };
+      return {
+        message: "Validation failed",
+        code: "validation_error",
+        details: error.message,
+      };
     }
 
     if (code === "NOT_FOUND") {
@@ -255,14 +357,16 @@ const app = new Elysia({ strictPath: false })
     ) {
       set.status = 503;
       set.headers["Retry-After"] = "5";
-      return { message: "Service temporarily unavailable", code: "service_unavailable", retryAfter: 5 };
+      return {
+        message: "Service temporarily unavailable",
+        code: "service_unavailable",
+        retryAfter: 5,
+      };
     }
 
     set.status = 500;
     return { message: "Internal server error", code: "internal_error" };
   });
-
-
 
 /**
  * Caddy/Angie-inspired try_files static asset serving.
@@ -278,10 +382,14 @@ export function registerStaticAssets() {
   try {
     const idx = Bun.file(`${WEB_CONSOLE_DIR}/index.html`);
     if (idx.size > 0) {
-      logger.info(`[StaticAssets] Serving from ${WEB_CONSOLE_DIR} (try_files mode)`);
+      logger.info(
+        `[StaticAssets] Serving from ${WEB_CONSOLE_DIR} (try_files mode)`,
+      );
     }
   } catch {
-    logger.warn(`[StaticAssets] ${WEB_CONSOLE_DIR} not found, will use embedded fallback`);
+    logger.warn(
+      `[StaticAssets] ${WEB_CONSOLE_DIR} not found, will use embedded fallback`,
+    );
   }
 
   return new Elysia({ name: "static-assets" }).get("*", async (context) => {
@@ -297,24 +405,27 @@ export function registerStaticAssets() {
 
     // --- Step 1: try_files $uri — check exact file on disk ---
     try {
-      const acceptEncoding = request.headers.get('accept-encoding') || '';
+      const acceptEncoding = request.headers.get("accept-encoding") || "";
       let diskFile: string | null = null;
-      let encoding: 'br' | 'gzip' | null = null;
+      let encoding: "br" | "gzip" | null = null;
 
       // Content-negotiation: prefer brotli > gzip > raw
-      if (acceptEncoding.includes('br') && staticFileExists(path + '.br')) {
-        diskFile = path + '.br';
-        encoding = 'br';
-      } else if (acceptEncoding.includes('gzip') && staticFileExists(path + '.gz')) {
-        diskFile = path + '.gz';
-        encoding = 'gzip';
+      if (acceptEncoding.includes("br") && staticFileExists(path + ".br")) {
+        diskFile = path + ".br";
+        encoding = "br";
+      } else if (
+        acceptEncoding.includes("gzip") &&
+        staticFileExists(path + ".gz")
+      ) {
+        diskFile = path + ".gz";
+        encoding = "gzip";
       } else if (staticFileExists(path)) {
         diskFile = path;
       }
 
       if (diskFile) {
         const file = Bun.file(`${WEB_CONSOLE_DIR}${diskFile}`);
-        
+
         // ETag / 304 Not Modified support
         const etag = `W/"${file.lastModified}-${file.size}"`;
         set.headers["ETag"] = etag;
@@ -324,12 +435,13 @@ export function registerStaticAssets() {
         }
 
         const extMatch = path.match(/\.[0-9a-z]+$/i);
-        const ext = extMatch ? extMatch[0].toLowerCase() : '';
-        set.headers["Content-Type"] = MIME_TYPES[ext] || "application/octet-stream";
+        const ext = extMatch ? extMatch[0].toLowerCase() : "";
+        set.headers["Content-Type"] =
+          MIME_TYPES[ext] || "application/octet-stream";
 
         // Cache policy: HTML always no-cache (prevents Kong from caching stale index.html);
         // immutable hashed assets get permanent cache; everything else gets short cache.
-        if (ext === '.html') {
+        if (ext === ".html") {
           set.headers["Cache-Control"] = "no-cache";
         } else if (isImmutableAsset(path) || path.match(/\.[0-9a-f]{8,}\./)) {
           set.headers["Cache-Control"] = "public, max-age=31536000, immutable";
@@ -345,7 +457,10 @@ export function registerStaticAssets() {
         return file;
       }
     } catch (e: unknown) {
-      logger.error("[StaticAssets] FS error:", { path, error: e instanceof Error ? e.message : String(e) });
+      logger.error("[StaticAssets] FS error:", {
+        path,
+        error: e instanceof Error ? e.message : String(e),
+      });
     }
 
     // --- Step 2: immutable asset miss → strict 404 (Caddy/Angie behavior) ---
@@ -360,7 +475,10 @@ export function registerStaticAssets() {
     const indexHtml = await getIndexHtml();
     if (indexHtml) {
       return new Response(indexHtml, {
-        headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-cache" }
+        headers: {
+          "Content-Type": "text/html; charset=utf-8",
+          "Cache-Control": "no-cache",
+        },
       });
     }
 
@@ -375,7 +493,7 @@ export function registerStaticAssets() {
 
         if (asset) {
           set.headers["Content-Type"] = asset.mimeType as string;
-          return Buffer.from(asset.content, 'base64');
+          return Buffer.from(asset.content, "base64");
         }
       }
 
@@ -395,55 +513,81 @@ export function registerStaticAssets() {
  */
 export async function registerAllRoutes() {
   const {
-    projectRoutes, projectSecretsRoutes, projectFunctionsRoutes, organizationRoutes, userRoutes, backupRoutes,
-    monitorRoutes, maintenanceRoutes, extensionRoutes, databaseExtensionRoutes, systemExtensionRoutes, securityRoutes,
-    storageRoutes, projectStorageRoutes, scalingRoutes, taskRoutes, databaseRoutes, authRoutes,
-    wechatAuthRoutes, chinaAuthRoutes, userManagementRoutes,
-    authHooksRoutes, authSsoRoutes, authMfaRoutes,
-    frontendRoutes, webhookRoutes, deployRoutes,
-    chatRoutes, platformSettingsRoutes, projectLogsRoutes, systemRoutes
+    projectRoutes,
+    projectSecretsRoutes,
+    projectFunctionsRoutes,
+    organizationRoutes,
+    userRoutes,
+    backupRoutes,
+    monitorRoutes,
+    maintenanceRoutes,
+    extensionRoutes,
+    databaseExtensionRoutes,
+    systemExtensionRoutes,
+    securityRoutes,
+    storageRoutes,
+    projectStorageRoutes,
+    scalingRoutes,
+    taskRoutes,
+    databaseRoutes,
+    authRoutes,
+    wechatAuthRoutes,
+    chinaAuthRoutes,
+    userManagementRoutes,
+    authHooksRoutes,
+    authSsoRoutes,
+    authMfaRoutes,
+    frontendRoutes,
+    webhookRoutes,
+    deployRoutes,
+    chatRoutes,
+    platformSettingsRoutes,
+    projectLogsRoutes,
+    systemRoutes,
   } = await import("./routes");
 
-  return new Elysia({ name: "api-routes" })
-    // Auth guard — runs before every route in this group
-    .onBeforeHandle(async ({ request, set }) => {
-      const result = await checkAuth(request);
-      if (result) {
-        set.status = result.status;
-        return result.body;
-      }
-    })
-    .use(projectRoutes)
-    .use(projectSecretsRoutes)
-    .use(projectFunctionsRoutes)
-    .use(organizationRoutes)
-    .use(userRoutes)
-    .use(backupRoutes)
-    .use(monitorRoutes)
-    .use(maintenanceRoutes)
-    .use(extensionRoutes)
-    .use(databaseExtensionRoutes)
-    .use(systemExtensionRoutes)
-    .use(securityRoutes)
-    .use(storageRoutes)
-    .use(projectStorageRoutes)
-    .use(scalingRoutes)
-    .use(taskRoutes)
-    .use(databaseRoutes)
-    .use(authRoutes)
-    .use(wechatAuthRoutes)
-    .use(chinaAuthRoutes)
-    .use(userManagementRoutes)
-    .use(authHooksRoutes)
-    .use(authSsoRoutes)
-    .use(authMfaRoutes)
-    .use(frontendRoutes)
-    .use(webhookRoutes)
-    .use(deployRoutes)
-    .use(chatRoutes)
-    .use(platformSettingsRoutes)
-    .use(projectLogsRoutes)
-    .use(systemRoutes);
+  return (
+    new Elysia({ name: "api-routes" })
+      // Auth guard — runs before every route in this group
+      .onBeforeHandle(async ({ request, set }) => {
+        const result = await checkAuth(request);
+        if (result) {
+          set.status = result.status;
+          return result.body;
+        }
+      })
+      .use(projectRoutes)
+      .use(projectSecretsRoutes)
+      .use(projectFunctionsRoutes)
+      .use(organizationRoutes)
+      .use(userRoutes)
+      .use(backupRoutes)
+      .use(monitorRoutes)
+      .use(maintenanceRoutes)
+      .use(extensionRoutes)
+      .use(databaseExtensionRoutes)
+      .use(systemExtensionRoutes)
+      .use(securityRoutes)
+      .use(storageRoutes)
+      .use(projectStorageRoutes)
+      .use(scalingRoutes)
+      .use(taskRoutes)
+      .use(databaseRoutes)
+      .use(authRoutes)
+      .use(wechatAuthRoutes)
+      .use(chinaAuthRoutes)
+      .use(userManagementRoutes)
+      .use(authHooksRoutes)
+      .use(authSsoRoutes)
+      .use(authMfaRoutes)
+      .use(frontendRoutes)
+      .use(webhookRoutes)
+      .use(deployRoutes)
+      .use(chatRoutes)
+      .use(platformSettingsRoutes)
+      .use(projectLogsRoutes)
+      .use(systemRoutes)
+  );
 }
 
 const args = process.argv.slice(2);
@@ -457,12 +601,17 @@ async function cleanupOrphanServices() {
   const { sql: metaSql } = await import("./db");
 
   // Get all active project refs from database
-  const activeProjects = await metaSql`SELECT ref FROM projects WHERE status != 'deleted'`;
-  const activeRefs = new Set(activeProjects.map((p: Record<string, unknown>) => p.ref));
+  const activeProjects =
+    await metaSql`SELECT ref FROM projects WHERE status != 'deleted'`;
+  const activeRefs = new Set(
+    activeProjects.map((p: Record<string, unknown>) => p.ref),
+  );
 
   // List running supacloud-gotrue and supacloud-pgrst services
-  const result = await $`systemctl list-units 'supacloud-gotrue@*' 'supacloud-pgrst@*' --all --plain --no-pager`
-    .nothrow().quiet();
+  const result =
+    await $`systemctl list-units 'supacloud-gotrue@*' 'supacloud-pgrst@*' --all --plain --no-pager`
+      .nothrow()
+      .quiet();
   const output = result.text();
 
   const serviceRegex = /supacloud-(gotrue|pgrst)@([^.]+)\.service/g;
@@ -499,7 +648,9 @@ async function bootstrap() {
       logger.info("Database initialized successfully!");
       process.exit(0);
     } catch (err: unknown) {
-      logger.error("Failed to initialize database:", { error: err instanceof Error ? err.message : String(err) });
+      logger.error("Failed to initialize database:", {
+        error: err instanceof Error ? err.message : String(err),
+      });
       process.exit(1);
     }
   } else if (args.includes("install") || args.includes("--install")) {
@@ -509,7 +660,9 @@ async function bootstrap() {
       await runInstall({ forceYes });
       process.exit(0);
     } catch (err: unknown) {
-      logger.error("Installation aborted:", { error: err instanceof Error ? err.message : String(err) });
+      logger.error("Installation aborted:", {
+        error: err instanceof Error ? err.message : String(err),
+      });
       process.exit(1);
     }
   } else if (args.includes("upgrade") || args.includes("--upgrade")) {
@@ -519,7 +672,9 @@ async function bootstrap() {
       await runUpgrade({ forceYes });
       process.exit(0);
     } catch (err: unknown) {
-      logger.error("Upgrade aborted:", { error: err instanceof Error ? err.message : String(err) });
+      logger.error("Upgrade aborted:", {
+        error: err instanceof Error ? err.message : String(err),
+      });
       process.exit(1);
     }
   } else if (args.includes("doctor") || args.includes("--doctor")) {
@@ -530,7 +685,9 @@ async function bootstrap() {
       await runDoctor({ skipSmokeTest, forceYes });
       process.exit(0);
     } catch (err: unknown) {
-      logger.error("Doctor scan failed:", { error: err instanceof Error ? err.message : String(err) });
+      logger.error("Doctor scan failed:", {
+        error: err instanceof Error ? err.message : String(err),
+      });
       process.exit(1);
     }
   } else if (args.includes("start") || args.includes("up")) {
@@ -547,13 +704,23 @@ async function bootstrap() {
     process.exit(0);
   } else if (args[0] === "logs") {
     const { handleLogs } = await import("./cli/lifecycle");
-    const serviceTarget = args[1] && !args[1].startsWith("-") ? args[1] : undefined;
+    const serviceTarget =
+      args[1] && !args[1].startsWith("-") ? args[1] : undefined;
     await handleLogs(serviceTarget);
     process.exit(0);
   } else if (args[0] === "project") {
-    const { handleProjectCreate, handleProjectList, handleProjectGet, handleProjectDelete,
-      handleProjectPause, handleProjectRestore, handleProjectRestart,
-      handleProjectKeys, handleProjectRotateKeys, printProjectHelp } = await import("./cli/project");
+    const {
+      handleProjectCreate,
+      handleProjectList,
+      handleProjectGet,
+      handleProjectDelete,
+      handleProjectPause,
+      handleProjectRestore,
+      handleProjectRestart,
+      handleProjectKeys,
+      handleProjectRotateKeys,
+      printProjectHelp,
+    } = await import("./cli/project");
     const subCommand = args[1];
     switch (subCommand) {
       case "create":
@@ -640,7 +807,12 @@ async function bootstrap() {
       port: config.port,
       websocket: {
         open(ws) {
-          const data = ws.data as unknown as { upstreamUrl: string; requestHeaders: Record<string, string>; upstream?: WebSocket; __buffer?: string[] };
+          const data = ws.data as unknown as {
+            upstreamUrl: string;
+            requestHeaders: Record<string, string>;
+            upstream?: WebSocket;
+            __buffer?: string[];
+          };
           const { upstreamUrl, requestHeaders } = data;
           const upstream = new WebSocket(upstreamUrl, {
             headers: requestHeaders,
@@ -648,7 +820,7 @@ async function bootstrap() {
 
           data.upstream = upstream;
 
-          upstream.addEventListener('open', () => {
+          upstream.addEventListener("open", () => {
             const buffer = data.__buffer;
             if (buffer) {
               for (const msg of buffer) {
@@ -658,7 +830,7 @@ async function bootstrap() {
             }
           });
 
-          upstream.addEventListener('message', (event) => {
+          upstream.addEventListener("message", (event) => {
             try {
               ws.send(event.data as string | ArrayBufferLike);
             } catch {
@@ -666,16 +838,27 @@ async function bootstrap() {
             }
           });
 
-          upstream.addEventListener('close', (event) => {
-            try { ws.close(event.code, event.reason); } catch { /* already closed */ }
+          upstream.addEventListener("close", (event) => {
+            try {
+              ws.close(event.code, event.reason);
+            } catch {
+              /* already closed */
+            }
           });
 
-          upstream.addEventListener('error', () => {
-            try { ws.close(1011, 'Upstream connection error'); } catch { /* already closed */ }
+          upstream.addEventListener("error", () => {
+            try {
+              ws.close(1011, "Upstream connection error");
+            } catch {
+              /* already closed */
+            }
           });
         },
         message(ws, message) {
-          const data = ws.data as unknown as { upstream?: WebSocket; __buffer?: string[] };
+          const data = ws.data as unknown as {
+            upstream?: WebSocket;
+            __buffer?: string[];
+          };
           const upstream = data.upstream;
           if (!upstream) return;
 
@@ -689,9 +872,14 @@ async function bootstrap() {
           }
         },
         close(ws, code, reason) {
-          const upstream = (ws.data as unknown as { upstream?: WebSocket })?.upstream;
+          const upstream = (ws.data as unknown as { upstream?: WebSocket })
+            ?.upstream;
           if (upstream && upstream.readyState !== WebSocket.CLOSED) {
-            try { upstream.close(code, reason); } catch { /* already closed */ }
+            try {
+              upstream.close(code, reason);
+            } catch {
+              /* already closed */
+            }
           }
         },
       },
@@ -700,38 +888,54 @@ async function bootstrap() {
 
         // ── Realtime WebSocket proxy ──────────────────────────────
         // Intercept WebSocket upgrade requests for /realtime/v1 before Elysia
-        if (url.pathname.startsWith('/realtime/v1') && request.headers.get('upgrade')?.toLowerCase() === 'websocket') {
+        if (
+          url.pathname.startsWith("/realtime/v1") &&
+          request.headers.get("upgrade")?.toLowerCase() === "websocket"
+        ) {
           // Resolve project ref from headers for upstream routing
-          const projectRef = request.headers.get('x-project-ref')
-            || request.headers.get('x-supabase-project')
-            || url.searchParams.get('ref')
-            || '';
+          const projectRef =
+            request.headers.get("x-project-ref") ||
+            request.headers.get("x-supabase-project") ||
+            url.searchParams.get("ref") ||
+            "";
           // Convert the configured HTTP Realtime URL to a WS URL
           const wsBase = config.realtimeAdminUrl
-            .replace(/^http:/, 'ws:')
-            .replace(/^https:/, 'wss:');
+            .replace(/^http:/, "ws:")
+            .replace(/^https:/, "wss:");
           const upstreamUrl = `${wsBase}${url.pathname}${url.search}`;
           // Forward relevant request headers (apikey, authorization, etc.)
           const requestHeaders: Record<string, string> = {};
-          const forwardHeaders = ['apikey', 'authorization', 'x-project-ref', 'x-supabase-project', 'sec-websocket-protocol'];
+          const forwardHeaders = [
+            "apikey",
+            "authorization",
+            "x-project-ref",
+            "x-supabase-project",
+            "sec-websocket-protocol",
+          ];
           for (const h of forwardHeaders) {
             const val = request.headers.get(h);
             if (val) requestHeaders[h] = val;
           }
           if (projectRef) {
-            requestHeaders['x-project-ref'] = projectRef;
+            requestHeaders["x-project-ref"] = projectRef;
           }
 
           const upgraded = server.upgrade(request, {
             data: { upstreamUrl, requestHeaders, projectRef },
           });
           if (upgraded) return undefined; // Bun will handle the WebSocket
-          return new Response('WebSocket upgrade failed', { status: 500 });
+          return new Response("WebSocket upgrade failed", { status: 500 });
         }
 
         // Route /mcp paths directly to MCP handler (bypasses Elysia body parsing)
         if (url.pathname.startsWith("/mcp")) {
-          if (url.pathname === "/mcp" || url.pathname.startsWith("/mcp/sql") || url.pathname.startsWith("/mcp/tokens") || url.pathname.startsWith("/mcp/logs") || url.pathname.startsWith("/mcp/migrations")) {
+          if (
+            url.pathname === "/mcp" ||
+            url.pathname.startsWith("/mcp/sql") ||
+            url.pathname.startsWith("/mcp/tokens") ||
+            url.pathname.startsWith("/mcp/logs") ||
+            url.pathname.startsWith("/mcp/migrations")
+          ) {
             return handleMcp(request);
           }
           // Rewrite /mcp/v1... to /v1... and pass to Elysia
@@ -750,15 +954,26 @@ async function bootstrap() {
     const { startQueueWorker } = await import("./workers/queue.worker");
     startQueueWorker();
 
-    const { startStorageReconcileWorker } = await import("./workers/storage-reconcile.worker");
+    const { startStorageReconcileWorker } =
+      await import("./workers/storage-reconcile.worker");
     startStorageReconcileWorker();
 
-    const { edgeRuntimeManager } = await import("./plugins/edge-runtime-manager");
-    edgeRuntimeManager.start().catch((err: unknown) => logger.error("[EdgeRuntime] Failed to start", { error: err instanceof Error ? err.message : String(err) }));
+    const { edgeRuntimeManager } =
+      await import("./plugins/edge-runtime-manager");
+    edgeRuntimeManager
+      .start()
+      .catch((err: unknown) =>
+        logger.error("[EdgeRuntime] Failed to start", {
+          error: err instanceof Error ? err.message : String(err),
+        }),
+      );
 
     // Auto-detect and stop orphan services for deleted projects
-    cleanupOrphanServices().catch(err =>
-      logger.warn("[Bootstrap] Orphan service cleanup failed (non-fatal):", err)
+    cleanupOrphanServices().catch((err) =>
+      logger.warn(
+        "[Bootstrap] Orphan service cleanup failed (non-fatal):",
+        err,
+      ),
     );
 
     logger.info(`
@@ -783,18 +998,28 @@ if (import.meta.main) {
     try {
       const { taskWorker } = await import("./services/task.worker");
       taskWorker.stop();
-      const { edgeRuntimeManager } = await import("./plugins/edge-runtime-manager");
+      const { edgeRuntimeManager } =
+        await import("./plugins/edge-runtime-manager");
       edgeRuntimeManager.stop();
       const { stopQueueWorker } = await import("./workers/queue.worker");
       stopQueueWorker();
-      const { stopStorageReconcileWorker } = await import("./workers/storage-reconcile.worker");
+      const { stopStorageReconcileWorker } =
+        await import("./workers/storage-reconcile.worker");
       stopStorageReconcileWorker();
-    } catch (e: unknown) { logger.debug("[index] suppressed error", { error: e instanceof Error ? e.message : String(e) }); }
+    } catch (e: unknown) {
+      logger.debug("[index] suppressed error", {
+        error: e instanceof Error ? e.message : String(e),
+      });
+    }
 
     try {
       await closeDb();
       logger.info("Database connections released.");
-    } catch (e: unknown) { logger.debug("[index] suppressed error", { error: e instanceof Error ? e.message : String(e) }); }
+    } catch (e: unknown) {
+      logger.debug("[index] suppressed error", {
+        error: e instanceof Error ? e.message : String(e),
+      });
+    }
 
     process.exit(0);
   };

@@ -15,7 +15,7 @@
     label: string;
   }
 
-  const { query } = useList<BackupInfo>({ resource: "v1/projects/default/database/backups" });
+  const query = useList<BackupInfo>({ resource: "v1/projects/default/database/backups" });
   const backups = $derived(Array.isArray(query.data?.data) ? query.data.data : ((query.data?.data as unknown as Record<string, unknown>)?.backups as BackupInfo[] || []));
 
   let actionMsg: string | null = $state.raw(null);
