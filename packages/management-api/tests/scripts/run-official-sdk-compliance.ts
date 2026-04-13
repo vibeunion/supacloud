@@ -63,7 +63,7 @@ async function bootstrap() {
         `;
     await sql`
             UPDATE projects
-            SET db_name = 'postgres', status = 'active'
+            SET db_name = 'postgres', db_user = 'supabase_admin', db_password = 'postgres', status = 'active'
             WHERE ref = ${project.ref}
         `;
     invalidateDbNameCache(project.ref);
@@ -71,16 +71,23 @@ async function bootstrap() {
     try {
       const { RealtimeService } = await import("../../src/services/realtime.service");
       const realtimeService = new RealtimeService();
-      const registered = await realtimeService.registerTenant({
-        projectRef: project.ref,
-        dbName: "postgres",
-        dbPassword: "postgres",
-        jwtSecret: OFFICIAL_JWT_SECRET,
-      });
+      let registered = false;
+      for (let attempt = 1; attempt <= 5; attempt++) {
+        registered = await realtimeService.registerTenant({
+          projectRef: project.ref,
+          dbName: "postgres",
+          dbUser: "supabase_admin",
+          dbPassword: "postgres",
+          jwtSecret: OFFICIAL_JWT_SECRET,
+        });
+        if (registered) break;
+        console.warn(`[SDK Compliance] Realtime registration attempt ${attempt}/5 failed, retrying in 2s...`);
+        await new Promise((r) => setTimeout(r, 2000));
+      }
       if (registered) {
         console.log(`✅ Realtime tenant registered for [${project.ref}]`);
       } else {
-        console.warn(`⚠️ Realtime tenant registration failed for [${project.ref}]`);
+        console.warn(`⚠️ Realtime tenant registration failed for [${project.ref}] after 5 attempts`);
       }
     } catch (e: any) {
       console.warn("⚠️ Realtime tenant registration error:", e.message?.substring(0, 80));

@@ -78,6 +78,8 @@ export async function setupCiBridge(sql: InstanceType<typeof SQL>): Promise<{
       service_role_key = EXCLUDED.service_role_key,
       jwt_secret      = EXCLUDED.jwt_secret,
       db_name         = 'postgres',
+      db_user         = 'supabase_admin',
+      db_password     = 'postgres',
       status          = 'active'
   `;
 
@@ -246,16 +248,23 @@ export async function setupCiBridge(sql: InstanceType<typeof SQL>): Promise<{
     try {
       const { RealtimeService } = await import("../../src/services/realtime.service");
       const realtimeService = new RealtimeService();
-      const registered = await realtimeService.registerTenant({
-        projectRef: CI_TENANT_REF,
-        dbName: "postgres",
-        dbPassword: "postgres",
-        jwtSecret: CI_JWT_SECRET,
-      });
+      let registered = false;
+      for (let attempt = 1; attempt <= 5; attempt++) {
+        registered = await realtimeService.registerTenant({
+          projectRef: CI_TENANT_REF,
+          dbName: "postgres",
+          dbUser: "supabase_admin",
+          dbPassword: "postgres",
+          jwtSecret: CI_JWT_SECRET,
+        });
+        if (registered) break;
+        console.warn(`[CIBridge] Realtime registration attempt ${attempt}/5 failed, retrying in 2s...`);
+        await new Promise((r) => setTimeout(r, 2000));
+      }
       if (registered) {
         console.log("[CIBridge] Realtime tenant registered.");
       } else {
-        console.warn("[CIBridge] Realtime tenant registration failed.");
+        console.warn("[CIBridge] Realtime tenant registration failed after 5 attempts.");
       }
     } catch (e: any) {
       console.warn("[CIBridge] Realtime tenant registration error:", e.message?.substring(0, 80));
