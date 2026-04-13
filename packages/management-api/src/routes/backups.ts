@@ -3,7 +3,7 @@ import { listBackups, createBackup, restore, createLogicalBackup, restoreLogical
 import type { RestoreRequest } from '../types/backup';
 import { resolveDbName } from '../db';
 
-const ErrorResponse = t.Object({ error: t.String() });
+const ErrorResponse = t.Object({ message: t.String() });
 
 export const backupRoutes = new Elysia({ prefix: "/v1/projects/:ref/database/backups" })
     .get('/', async ({ params, query }) => {
@@ -40,7 +40,7 @@ export const backupRoutes = new Elysia({ prefix: "/v1/projects/:ref/database/bac
         response: { 200: t.Any() },
     })
     .post('/logical/restore', async ({ params: { ref }, body }) => {
-        if (!body.backupId) return status(400, { error: "backupId is required" });
+        if (!body.backupId) return status(400, { message: "backupId is required", code: "400" });
         return await restoreLogicalBackup(ref, body.backupId);
     }, {
         body: t.Object({ backupId: t.Optional(t.String()) }),

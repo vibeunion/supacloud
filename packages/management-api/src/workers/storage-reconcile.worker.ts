@@ -216,8 +216,8 @@ export async function runReconciliation(): Promise<ReconcileStats> {
     try {
         // Fetch all active projects
         const projects = await metaSql`
-            SELECT ref, db_name FROM projects WHERE status = 'active'
-        `;
+        SELECT ref FROM projects WHERE status = 'active'
+    `;
 
         for (const project of projects) {
             const ref = String(project.ref);

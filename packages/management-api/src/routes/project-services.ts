@@ -11,11 +11,11 @@ export const projectServiceRoutes = new Elysia({ prefix: "/v1/projects" })
   .get(
     "/:ref/health",
     async ({ params, set }) => {
-      const health = await projectService.getProjectHealth(params.ref);
-      if (!health) {
-                return status(404, { message: "Project not found", code: "400" });
+      const project = await projectService.getProject(params.ref);
+      if (!project) {
+                return status(404, { message: "Project not found", code: "404" });
       }
-      return health;
+      return { status: "healthy" };
     },
     {
       params: t.Object({

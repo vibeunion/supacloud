@@ -110,7 +110,7 @@ export async function handleMcp(request: Request): Promise<Response> {
   // Auth check (all methods)
   const tokenPayload = await authenticate(request.headers);
   if (!tokenPayload) {
-    return jsonResponse({ error: "Invalid or missing MCP token" }, 401);
+    return jsonResponse({ message: "Invalid or missing MCP token" }, 401);
   }
 
   // POST /mcp — JSON-RPC and Tunnels
@@ -121,15 +121,15 @@ export async function handleMcp(request: Request): Promise<Response> {
     if (url.pathname === "/mcp/sql") {
       try {
         const body = await request.json() as { sql: string; ref?: string };
-        if (!body.sql) return jsonResponse({ error: "Missing 'sql' body field" }, 400);
+        if (!body.sql) return jsonResponse({ message: "Missing 'sql' body field" }, 400);
 
         let ref = tokenPayload.ref;
         if (!ref && body.ref) {
-          if (tokenPayload.role !== "admin") return jsonResponse({ error: "Only admins can supply custom ref." }, 403);
+          if (tokenPayload.role !== "admin") return jsonResponse({ message: "Only admins can supply custom ref." }, 403);
           ref = body.ref;
         }
         if (!ref) {
-          return jsonResponse({ error: "Project ref required. Only project-scoped tokens can use this tunnel." }, 403);
+          return jsonResponse({ message: "Project ref required. Only project-scoped tokens can use this tunnel." }, 403);
         }
 
         const { getProjectDb, resolveDbName } = await import("../db");
@@ -138,19 +138,19 @@ export async function handleMcp(request: Request): Promise<Response> {
         const result = await tenantDb.unsafe(body.sql);
         return jsonResponse(result);
       } catch (e: unknown) {
-        return jsonResponse({ error: e instanceof Error ? e.message : "Failed to execute SQL" }, 500);
+        return jsonResponse({ message: e instanceof Error ? e.message : "Failed to execute SQL" }, 500);
       }
     }
 
     // Token creation endpoint
     if (url.pathname === "/mcp/tokens") {
       if (tokenPayload.role !== "admin") {
-        return jsonResponse({ error: "Admin token required" }, 403);
+        return jsonResponse({ message: "Admin token required" }, 403);
       }
       const body = await request.json() as Record<string, unknown>;
       const { createMcpToken } = await import("../mcp/token");
       if (!body.ref) {
-        return jsonResponse({ error: "ref is required" }, 400);
+        return jsonResponse({ message: "ref is required" }, 400);
       }
       const token = await createMcpToken({
         role: "project",
@@ -166,14 +166,14 @@ export async function handleMcp(request: Request): Promise<Response> {
     if (url.pathname === "/mcp/migrations") {
       try {
         const body = await request.json() as { sql: string; name: string; ref?: string };
-        if (!body.sql || !body.name) return jsonResponse({ error: "Missing 'sql' and 'name' fields" }, 400);
+        if (!body.sql || !body.name) return jsonResponse({ message: "Missing 'sql' and 'name' fields" }, 400);
 
         let ref = tokenPayload.ref;
         if (!ref && body.ref) {
-          if (tokenPayload.role !== "admin") return jsonResponse({ error: "Only admins can supply custom ref." }, 403);
+          if (tokenPayload.role !== "admin") return jsonResponse({ message: "Only admins can supply custom ref." }, 403);
           ref = body.ref;
         }
-        if (!ref) return jsonResponse({ error: "Project ref required." }, 403);
+        if (!ref) return jsonResponse({ message: "Project ref required." }, 403);
 
         const { getProjectDb, resolveDbName } = await import("../db");
         const dbName = await resolveDbName(ref);
@@ -194,7 +194,7 @@ export async function handleMcp(request: Request): Promise<Response> {
 
         return jsonResponse({ success: true, name: body.name, message: "Migration applied" });
       } catch (e: unknown) {
-        return jsonResponse({ error: e instanceof Error ? e.message : "Migration failed" }, 500);
+        return jsonResponse({ message: e instanceof Error ? e.message : "Migration failed" }, 500);
       }
     }
 
@@ -222,7 +222,7 @@ export async function handleMcp(request: Request): Promise<Response> {
         ref = url.searchParams.get("ref") || "";
       }
       if (!ref) {
-        return jsonResponse({ error: "Project ref required. Only project-scoped tokens can use this tunnel." }, 403);
+        return jsonResponse({ message: "Project ref required. Only project-scoped tokens can use this tunnel." }, 403);
       }
       try {
         const type = url.searchParams.get("type") || "all";
@@ -230,14 +230,14 @@ export async function handleMcp(request: Request): Promise<Response> {
         const logs = await projectLogService.queryLogs(ref, type);
         return jsonResponse({ logs });
       } catch (e: unknown) {
-        return jsonResponse({ error: e instanceof Error ? e.message : "Failed to fetch logs" }, 500);
+        return jsonResponse({ message: e instanceof Error ? e.message : "Failed to fetch logs" }, 500);
       }
     }
 
     // SSE Stream
     const sessionId = request.headers.get("mcp-session-id");
     if (!sessionId || !sessions.has(sessionId)) {
-      return jsonResponse({ error: "No active session. Send POST /mcp first to initialize." }, 400);
+      return jsonResponse({ message: "No active session. Send POST /mcp first to initialize." }, 400);
     }
     const session = sessions.get(sessionId)!;
     return await session.transport.handleRequest(request);
@@ -254,5 +254,5 @@ export async function handleMcp(request: Request): Promise<Response> {
     return jsonResponse({ message: "Session closed" });
   }
 
-  return jsonResponse({ error: "Method not allowed" }, 405);
+  return jsonResponse({ message: "Method not allowed" }, 405);
 }
