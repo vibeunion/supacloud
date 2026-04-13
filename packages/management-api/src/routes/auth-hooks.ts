@@ -15,7 +15,7 @@ export const authHooksRoutes = new Elysia({ prefix: "/v1/projects" })
         const dbName = await resolveDbName(params.ref);
         const db = getProjectDb(dbName);
         const rows = await db`
-          SELECT id, hook_table_id, hook_name, hook_schema, hook_table, request_url, request_headers, events, created_at, is_rls_enabled
+          SELECT id, hook_table_id, hook_name, hook_schema, hook_table, request_url, request_headers, events, created_at, updated_at, is_rls_enabled
           FROM supabase_functions.hooks
           ORDER BY created_at DESC
         `;
@@ -148,10 +148,11 @@ export const authHooksRoutes = new Elysia({ prefix: "/v1/projects" })
       try {
         const dbName = await resolveDbName(params.ref);
         const db = getProjectDb(dbName);
-        await db`DELETE FROM supabase_functions.hooks WHERE id = ${Number(params.id)}`;
-        return { success: true };
+        const [deleted] = await db`DELETE FROM supabase_functions.hooks WHERE id = ${Number(params.id)} RETURNING *`;
+        if (!deleted) return status(404, { message: "Webhook not found", code: "404" });
+        return deleted;
       } catch (err: unknown) {
-        return status(500, { message: "Failed to delete webhook", details: err instanceof Error ? err.message : String(err) });
+        return status(500, { message: "Failed to delete webhook" });
       }
     },
     { params: t.Object({ ref: t.String(), id: t.String() }) }

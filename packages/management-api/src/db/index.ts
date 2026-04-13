@@ -40,7 +40,6 @@ export function getProjectDb(dbName: string): SQL {
   const cached = projectConnections.get(dbName);
   if (cached) {
     cached.lastUsed = Date.now();
-    cached.inUse++;
     return cached.sql;
   }
 
@@ -49,7 +48,6 @@ export function getProjectDb(dbName: string): SQL {
     let oldestTime = Infinity;
 
     for (const [key, value] of projectConnections.entries()) {
-      if (value.inUse > 0) continue;
       if (value.lastUsed < oldestTime) {
         oldestTime = value.lastUsed;
         oldestDbName = key;
@@ -77,7 +75,7 @@ export function getProjectDb(dbName: string): SQL {
     connectTimeout: 5000,
   });
 
-  projectConnections.set(dbName, { sql: projectSql, lastUsed: Date.now(), inUse: 1 });
+  projectConnections.set(dbName, { sql: projectSql, lastUsed: Date.now(), inUse: 0 });
   return projectSql;
 }
 
@@ -88,21 +86,21 @@ export function releaseProjectDb(dbName: string) {
   }
 }
 
-const dbNameCache = new Map<string, string>();
+const dbNameCache = new Map<string, { name: string; cachedAt: number }>();
+const DB_NAME_CACHE_TTL = 5 * 60 * 1000;
 
 export async function resolveDbName(ref: string): Promise<string> {
   const cached = dbNameCache.get(ref);
-  if (cached) return cached;
+  if (cached && (Date.now() - cached.cachedAt) < DB_NAME_CACHE_TTL) return cached.name;
 
   try {
     const [row] = await sql`SELECT db_name FROM projects WHERE ref = ${ref} LIMIT 1`;
     if (row?.db_name) {
-      dbNameCache.set(ref, row.db_name);
+      dbNameCache.set(ref, { name: row.db_name, cachedAt: Date.now() });
       return row.db_name;
     }
   } catch {}
   const fallback = generateDbName(ref);
-  dbNameCache.set(ref, fallback);
   return fallback;
 }
 
