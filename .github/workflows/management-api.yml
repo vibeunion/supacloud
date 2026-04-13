@@ -154,6 +154,17 @@ jobs:
         env:
           DATABASE_URL: postgresql://supabase_admin:postgres@localhost:5432/postgres
 
+      - name: Setup CI Tenant Bridge
+        working-directory: packages/management-api
+        run: |
+          echo "🌉 Setting up CI Tenant Bridge..."
+          bun run tests/scripts/ci-tenant-bridge.ts
+          echo "✅ CI Tenant Bridge configured."
+        env:
+          DATABASE_URL: postgresql://supabase_admin:postgres@localhost:5432/postgres
+          MASTER_TOKEN: super-secret-jwt-token-with-at-least-32-characters-long
+          NODE_ENV: test
+
       - name: Restart flaky services
         run: |
           echo "Restarting Auth and Realtime Containers..."
@@ -169,27 +180,32 @@ jobs:
           PID=$!
           sleep 4
           curl -sf http://127.0.0.1:9090/health || (echo "API failed to start. Logs:" && cat api-server.log && exit 1)
-          
+
           echo "===== RUNNING E2E SNAPSHOTS ====="
           bun test tests/e2e || (echo "::error title=E2E Failed! Server Logs::$(tail -n 50 api-server.log | awk '{printf "%s%%0A", $0}')" && cat api-server.log && exit 1)
-          
+
+          echo "===== RUNNING SDK PARITY TESTS (hard gate) ====="
+          bun test tests/integration/sdk-parity.test.ts || (echo "::error title=SDK Parity Failed::SDK parity tests failed. Check sdk-parity.test.ts output above." && exit 1)
+
           echo "===== RUNNING OFFICIAL SDK PARITY PIPELINE ====="
           bun run tests/scripts/run-official-sdk-compliance.ts
-          
+
           sleep 2
           curl -sf http://127.0.0.1:9090/health || echo "⚠️ API health check failed between phases"
-          
+
           echo "===== RUNNING OFFICIAL CLI COMPLIANCE ====="
           bun run tests/scripts/run-official-cli-compliance.ts
-          
+
           sleep 2
           curl -sf http://127.0.0.1:9090/health || echo "⚠️ API health check failed between phases"
-          
+
           echo "===== RUNNING OPENAPI SCHEMA CRAWLER ====="
           bun run tests/scripts/run-openapi-compliance.ts
         env:
           DATABASE_URL: postgresql://supabase_admin:postgres@localhost:5432/postgres
           TEST_FIXED_JWT_SECRET: super-secret-jwt-token-with-at-least-32-characters-long
+          TEST_SUPABASE_URL: http://127.0.0.1:9090
+          TEST_SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0
           MASTER_TOKEN: super-secret-jwt-token-with-at-least-32-characters-long
           S3_ENDPOINT: http://127.0.0.1:9000
           S3_REGION: us-east-1
@@ -229,7 +245,7 @@ jobs:
     needs: [lint-and-typecheck, unit-test, integration-test]
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev')
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4

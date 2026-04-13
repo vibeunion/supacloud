@@ -10,17 +10,47 @@ export interface StorageDriver {
   createBucket(projectRef: string, bucket: string): Promise<boolean>;
   deleteBucket(projectRef: string, bucket: string): Promise<boolean>;
   emptyBucket(projectRef: string, bucket: string): Promise<boolean>;
-  listBuckets(projectRef: string): Promise<{id: string, name: string, public: boolean, size: string}[]>;
-  uploadFile(projectRef: string, bucket: string, key: string, data: Blob | Buffer | Uint8Array | ArrayBuffer | ReadableStream, contentType: string): Promise<boolean>;
-  copyFile(projectRef: string, srcBucket: string, srcKey: string, destBucket: string, destKey: string): Promise<boolean>;
+  listBuckets(
+    projectRef: string,
+  ): Promise<{ id: string; name: string; public: boolean; size: string }[]>;
+  uploadFile(
+    projectRef: string,
+    bucket: string,
+    key: string,
+    data: Blob | Buffer | Uint8Array | ArrayBuffer | ReadableStream,
+    contentType: string,
+  ): Promise<boolean>;
+  copyFile(
+    projectRef: string,
+    srcBucket: string,
+    srcKey: string,
+    destBucket: string,
+    destKey: string,
+  ): Promise<boolean>;
   deleteFile(projectRef: string, bucket: string, key: string): Promise<boolean>;
-  listFiles(projectRef: string, bucket: string): Promise<{id: string, name: string, updated?: string, size: string, type: string}[]>;
-  getDownloadResponse(projectRef: string, bucket: string, key: string): Promise<Response | null>;
+  listFiles(
+    projectRef: string,
+    bucket: string,
+  ): Promise<
+    { id: string; name: string; updated?: string; size: string; type: string }[]
+  >;
+  getDownloadResponse(
+    projectRef: string,
+    bucket: string,
+    key: string,
+  ): Promise<Response | null>;
 }
 
 export class JuiceFSDriver implements StorageDriver {
-  private getBasePath(projectRef: string, bucket?: string, key?: string): string {
-    const root = path.resolve(config.storageMountPoint, resolveBucketName(projectRef));
+  private getBasePath(
+    projectRef: string,
+    bucket?: string,
+    key?: string,
+  ): string {
+    const root = path.resolve(
+      config.storageMountPoint,
+      resolveBucketName(projectRef),
+    );
     let p = root;
     if (bucket) p = path.join(p, bucket);
     if (key) p = path.join(p, key);
@@ -37,14 +67,19 @@ export class JuiceFSDriver implements StorageDriver {
       await fs.mkdir(this.getBasePath(projectRef, bucket), { recursive: true });
       return true;
     } catch (e: unknown) {
-      logger.error('JuiceFS createBucket error:', { error: e instanceof Error ? e.message : String(e) });
+      logger.error("JuiceFS createBucket error:", {
+        error: e instanceof Error ? e.message : String(e),
+      });
       return false;
     }
   }
 
   async deleteBucket(projectRef: string, bucket: string): Promise<boolean> {
     try {
-      await fs.rm(this.getBasePath(projectRef, bucket), { recursive: true, force: true });
+      await fs.rm(this.getBasePath(projectRef, bucket), {
+        recursive: true,
+        force: true,
+      });
       return true;
     } catch (e) {
       return false;
@@ -58,41 +93,59 @@ export class JuiceFSDriver implements StorageDriver {
       await fs.mkdir(bucketPath, { recursive: true });
       return true;
     } catch (e: unknown) {
-      logger.error('JuiceFS emptyBucket error:', { error: e instanceof Error ? e.message : String(e) });
+      logger.error("JuiceFS emptyBucket error:", {
+        error: e instanceof Error ? e.message : String(e),
+      });
       return false;
     }
   }
 
-  async listBuckets(projectRef: string): Promise<{id: string, name: string, public: boolean, size: string}[]> {
+  async listBuckets(
+    projectRef: string,
+  ): Promise<{ id: string; name: string; public: boolean; size: string }[]> {
     try {
       const dirPath = this.getBasePath(projectRef);
       const entries = await fs.readdir(dirPath, { withFileTypes: true });
       return entries
-        .filter(e => e.isDirectory())
-        .map(e => ({
+        .filter((e) => e.isDirectory())
+        .map((e) => ({
           id: e.name,
           name: e.name,
           public: false, // Defaulting to false, proper public status lives in tenant DB
-          size: '-'
+          size: "-",
         }));
     } catch (e) {
       return [];
     }
   }
 
-  async uploadFile(projectRef: string, bucket: string, key: string, data: Blob | Buffer | Uint8Array | ArrayBuffer | ReadableStream, contentType: string): Promise<boolean> {
+  async uploadFile(
+    projectRef: string,
+    bucket: string,
+    key: string,
+    data: Blob | Buffer | Uint8Array | ArrayBuffer | ReadableStream,
+    contentType: string,
+  ): Promise<boolean> {
     try {
       const filePath = this.getBasePath(projectRef, bucket, key);
       await fs.mkdir(path.dirname(filePath), { recursive: true });
       await Bun.write(filePath, data as any);
       return true;
     } catch (e: unknown) {
-      logger.error('JuiceFS uploadFile error:', { error: e instanceof Error ? e.message : String(e) });
+      logger.error("JuiceFS uploadFile error:", {
+        error: e instanceof Error ? e.message : String(e),
+      });
       return false;
     }
   }
 
-  async copyFile(projectRef: string, srcBucket: string, srcKey: string, destBucket: string, destKey: string): Promise<boolean> {
+  async copyFile(
+    projectRef: string,
+    srcBucket: string,
+    srcKey: string,
+    destBucket: string,
+    destKey: string,
+  ): Promise<boolean> {
     try {
       const srcPath = this.getBasePath(projectRef, srcBucket, srcKey);
       const destPath = this.getBasePath(projectRef, destBucket, destKey);
@@ -104,7 +157,11 @@ export class JuiceFSDriver implements StorageDriver {
     }
   }
 
-  async deleteFile(projectRef: string, bucket: string, key: string): Promise<boolean> {
+  async deleteFile(
+    projectRef: string,
+    bucket: string,
+    key: string,
+  ): Promise<boolean> {
     try {
       await fs.unlink(this.getBasePath(projectRef, bucket, key));
       return true;
@@ -113,23 +170,39 @@ export class JuiceFSDriver implements StorageDriver {
     }
   }
 
-  async listFiles(projectRef: string, bucket: string): Promise<{id: string, name: string, updated?: string, size: string, type: string}[]> {
+  async listFiles(
+    projectRef: string,
+    bucket: string,
+  ): Promise<
+    { id: string; name: string; updated?: string; size: string; type: string }[]
+  > {
     try {
       const bucketPath = this.getBasePath(projectRef, bucket);
       const { Glob } = await import("bun");
       const glob = new Glob("**/*");
-      const files: {id: string, name: string, updated?: string, size: string, type: string}[] = [];
-      
-      for (const relPath of glob.scanSync({ cwd: bucketPath, onlyFiles: true })) {
+      const files: {
+        id: string;
+        name: string;
+        updated?: string;
+        size: string;
+        type: string;
+      }[] = [];
+
+      for (const relPath of glob.scanSync({
+        cwd: bucketPath,
+        onlyFiles: true,
+      })) {
         const fullPath = path.join(bucketPath, relPath);
         const f = Bun.file(fullPath);
-        
+
         files.push({
           id: relPath,
           name: relPath,
           updated: new Date(f.lastModified).toISOString(),
-          size: Math.round(f.size / 1024) + ' KB',
-          type: relPath.includes('.') ? relPath.split('.').pop() || 'unknown' : 'unknown'
+          size: Math.round(f.size / 1024) + " KB",
+          type: relPath.includes(".")
+            ? relPath.split(".").pop() || "unknown"
+            : "unknown",
         });
       }
       return files;
@@ -138,71 +211,198 @@ export class JuiceFSDriver implements StorageDriver {
     }
   }
 
-  async getDownloadResponse(projectRef: string, bucket: string, key: string): Promise<Response | null> {
+  async getDownloadResponse(
+    projectRef: string,
+    bucket: string,
+    key: string,
+  ): Promise<Response | null> {
     const file = Bun.file(this.getBasePath(projectRef, bucket, key));
-    if (!await file.exists()) return null;
+    if (!(await file.exists())) return null;
     return new Response(file);
   }
 }
 
+/**
+ * Create an S3/MinIO bucket using raw HTTP + AWS Signature V4.
+ * Replaces @aws-sdk/client-s3 for bucket creation — uses only Bun's built-in crypto.subtle.
+ * Returns true if created or already exists (409 = BucketAlreadyOwnedByYou).
+ */
+async function createS3BucketWithFetch(
+  endpoint: string,
+  bucketName: string,
+  accessKey: string,
+  secretKey: string,
+  region = "us-east-1",
+): Promise<boolean> {
+  const base = endpoint.replace(/\/+$/, "");
+  const host = new URL(base).host;
+  const url = `${base}/${bucketName}`;
+
+  const now = new Date();
+  // dateTime: "20240115T120000Z"
+  const dateTime =
+    now
+      .toISOString()
+      .replace(/[-:]/g, "")
+      .replace(/\.\d{3}/, "") + "Z";
+  const dateShort = dateTime.slice(0, 8); // "20240115"
+
+  // SHA-256 of empty body
+  const payloadHash =
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+
+  const canonicalHeaders =
+    [
+      `host:${host}`,
+      `x-amz-content-sha256:${payloadHash}`,
+      `x-amz-date:${dateTime}`,
+    ].join("\n") + "\n";
+  const signedHeaders = "host;x-amz-content-sha256;x-amz-date";
+
+  const canonicalRequest = [
+    "PUT",
+    `/${bucketName}`,
+    "",
+    canonicalHeaders,
+    signedHeaders,
+    payloadHash,
+  ].join("\n");
+
+  const enc = new TextEncoder();
+  const canonDigest = await crypto.subtle.digest(
+    "SHA-256",
+    enc.encode(canonicalRequest),
+  );
+  const canonHex = [...new Uint8Array(canonDigest)]
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+
+  const credScope = `${dateShort}/${region}/s3/aws4_request`;
+  const stringToSign = `AWS4-HMAC-SHA256\n${dateTime}\n${credScope}\n${canonHex}`;
+
+  // Derive signing key: HMAC(HMAC(HMAC(HMAC("AWS4"+secret, date), region), service), "aws4_request")
+  async function hmac(key: ArrayBuffer, msg: string): Promise<ArrayBuffer> {
+    const k = await crypto.subtle.importKey(
+      "raw",
+      key,
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["sign"],
+    );
+    return crypto.subtle.sign("HMAC", k, enc.encode(msg));
+  }
+
+  const kDate = await hmac(
+    enc.encode(`AWS4${secretKey}`).buffer as ArrayBuffer,
+    dateShort,
+  );
+  const kRegion = await hmac(kDate, region);
+  const kService = await hmac(kRegion, "s3");
+  const kSigning = await hmac(kService, "aws4_request");
+  const sigBuf = await hmac(kSigning, stringToSign);
+  const sigHex = [...new Uint8Array(sigBuf)]
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+
+  const authHeader = `AWS4-HMAC-SHA256 Credential=${accessKey}/${credScope}, SignedHeaders=${signedHeaders}, Signature=${sigHex}`;
+
+  try {
+    const res = await fetch(url, {
+      method: "PUT",
+      headers: {
+        Authorization: authHeader,
+        "x-amz-date": dateTime,
+        "x-amz-content-sha256": payloadHash,
+        "Content-Length": "0",
+      },
+    });
+    // 200 = created, 409 = BucketAlreadyOwnedByYou (both are success for our purposes)
+    if (res.ok || res.status === 409) return true;
+    const body = await res.text().catch(() => "");
+    logger.warn(`[S3] createBucket HTTP ${res.status}: ${body.slice(0, 120)}`);
+    return false;
+  } catch (err: unknown) {
+    logger.warn(
+      "[S3] createBucket fetch error:",
+      err instanceof Error ? err.message : String(err),
+    );
+    return false;
+  }
+}
+
 export class S3Driver implements StorageDriver {
-  private async getCreds(projectRef: string): Promise<{ accessKey?: string, secretKey?: string, endpoint: string, bucket: string } | null> {
-    if (process.env.CI || process.env.NODE_ENV === 'test') {
+  private async getCreds(
+    projectRef: string,
+  ): Promise<{
+    accessKey?: string;
+    secretKey?: string;
+    endpoint: string;
+    bucket: string;
+  } | null> {
+    if (process.env.CI || process.env.NODE_ENV === "test") {
       return {
         accessKey: process.env.S3_ACCESS_KEY || "minioadmin",
         secretKey: process.env.S3_SECRET_KEY || "minioadmin",
         endpoint: config.s3Endpoint || "http://127.0.0.1:9000",
-        bucket: resolveBucketName(projectRef)
+        bucket: resolveBucketName(projectRef),
       };
     }
 
-    const { success, output } = await shellService.execute('s3_manager.sh', ['credentials', projectRef]);
+    const { success, output } = await shellService.execute("s3_manager.sh", [
+      "credentials",
+      projectRef,
+    ]);
     if (!success) {
       return {
         accessKey: process.env.S3_ACCESS_KEY,
         secretKey: process.env.S3_SECRET_KEY,
         endpoint: config.s3Endpoint,
-        bucket: resolveBucketName(projectRef)
+        bucket: resolveBucketName(projectRef),
       };
     }
     return {
       accessKey: output.match(/ACCESS_KEY=([^\n]+)/)?.[1]?.trim(),
       secretKey: output.match(/SECRET_KEY=([^\n]+)/)?.[1]?.trim(),
-      endpoint: output.match(/ENDPOINT=([^\n]+)/)?.[1]?.trim() || config.s3Endpoint,
-      bucket: output.match(/BUCKET=([^\n]+)/)?.[1]?.trim() || resolveBucketName(projectRef)
+      endpoint:
+        output.match(/ENDPOINT=([^\n]+)/)?.[1]?.trim() || config.s3Endpoint,
+      bucket:
+        output.match(/BUCKET=([^\n]+)/)?.[1]?.trim() ||
+        resolveBucketName(projectRef),
     };
   }
 
-  private getClient(creds: { accessKey: string, secretKey: string, endpoint: string, bucket: string }): S3Client {
-    const baseUrl = creds.endpoint.endsWith('/') ? creds.endpoint.slice(0, -1) : creds.endpoint;
+  private getClient(creds: {
+    accessKey: string;
+    secretKey: string;
+    endpoint: string;
+    bucket: string;
+  }): S3Client {
+    const baseUrl = creds.endpoint.endsWith("/")
+      ? creds.endpoint.slice(0, -1)
+      : creds.endpoint;
     return new S3Client({
       accessKeyId: creds.accessKey,
       secretAccessKey: creds.secretKey,
       endpoint: baseUrl,
-      region: 'us-east-1', // or config
+      region: "us-east-1", // or config
       bucket: creds.bucket,
     });
   }
 
   async createBucket(projectRef: string, bucket: string): Promise<boolean> {
-    if (process.env.CI || process.env.NODE_ENV === 'test') {
+    if (process.env.CI || process.env.NODE_ENV === "test") {
       const creds = await this.getCreds(projectRef);
       if (creds?.accessKey && creds?.secretKey) {
-        try {
-          const { S3Client: AwsS3Client, CreateBucketCommand } = await import("@aws-sdk/client-s3");
-          const s3 = new AwsS3Client({
-              region: 'us-east-1',
-              endpoint: creds.endpoint.endsWith('/') ? creds.endpoint.slice(0, -1) : creds.endpoint,
-              credentials: { accessKeyId: creds.accessKey, secretAccessKey: creds.secretKey },
-              forcePathStyle: true,
-          });
-          await s3.send(new CreateBucketCommand({ Bucket: creds.bucket }));
-          return true;
-        } catch (e: any) {
-          if (e.name === 'BucketAlreadyOwnedByYou' || e.name === 'BucketAlreadyExists') return true;
-          logger.error(`S3Driver.createBucket Error: ${e.message}`);
-          // Fall through, return true anyway to let other things proceed
-        }
+        const ok = await createS3BucketWithFetch(
+          creds.endpoint,
+          creds.bucket,
+          creds.accessKey,
+          creds.secretKey,
+        );
+        if (ok) return true;
+        logger.warn(
+          `[S3] createBucket failed for ${projectRef}, proceeding anyway`,
+        );
       }
     }
     return true; // Buckets are logical prefixes in S3 for SupaCloud
@@ -217,73 +417,137 @@ export class S3Driver implements StorageDriver {
     if (!creds?.accessKey || !creds?.secretKey) return false;
 
     try {
-      const s3 = this.getClient(creds as { accessKey: string, secretKey: string, endpoint: string, bucket: string });
+      const s3 = this.getClient(
+        creds as {
+          accessKey: string;
+          secretKey: string;
+          endpoint: string;
+          bucket: string;
+        },
+      );
       const res = await s3.list({ prefix: `${bucket}/` });
       const contents = res.contents || [];
 
-      await Promise.all(contents.map((file: Record<string, unknown>) => s3.file(String(file.key)).delete()));
+      await Promise.all(
+        contents.map((file: Record<string, unknown>) =>
+          s3.file(String(file.key)).delete(),
+        ),
+      );
       return true;
     } catch (e: unknown) {
-      logger.error('S3 emptyBucket error:', { error: e instanceof Error ? e.message : String(e) });
+      logger.error("S3 emptyBucket error:", {
+        error: e instanceof Error ? e.message : String(e),
+      });
       return false;
     }
   }
 
-  async listBuckets(projectRef: string): Promise<{id: string, name: string, public: boolean, size: string}[]> {
+  async listBuckets(
+    projectRef: string,
+  ): Promise<{ id: string; name: string; public: boolean; size: string }[]> {
     const creds = await this.getCreds(projectRef);
     if (!creds?.accessKey || !creds?.secretKey) return [];
-    
+
     try {
-      const s3 = this.getClient(creds as { accessKey: string, secretKey: string, endpoint: string, bucket: string });
+      const s3 = this.getClient(
+        creds as {
+          accessKey: string;
+          secretKey: string;
+          endpoint: string;
+          bucket: string;
+        },
+      );
       const res = await s3.list();
       const s3Contents = res.contents || [];
-      
+
       const buckets = new Set<string>();
       for (const obj of s3Contents) {
         // Find top-level directories which represent buckets in our mapping
-        const parts = obj.key.split('/');
+        const parts = obj.key.split("/");
         if (parts.length > 1) {
           buckets.add(parts[0]);
         }
       }
-      
-      return Array.from(buckets).map(b => ({
+
+      return Array.from(buckets).map((b) => ({
         id: b,
         name: b,
         public: false,
-        size: '-'
+        size: "-",
       }));
     } catch (e) {
       return [];
     }
   }
 
-  async uploadFile(projectRef: string, bucket: string, key: string, data: Blob | Buffer | Uint8Array | ArrayBuffer | ReadableStream, contentType: string): Promise<boolean> {
+  async uploadFile(
+    projectRef: string,
+    bucket: string,
+    key: string,
+    data: Blob | Buffer | Uint8Array | ArrayBuffer | ReadableStream,
+    contentType: string,
+  ): Promise<boolean> {
     const creds = await this.getCreds(projectRef);
     if (!creds?.accessKey || !creds?.secretKey) return false;
-    
+
     try {
-      const s3 = this.getClient(creds as { accessKey: string, secretKey: string, endpoint: string, bucket: string });
-      const cleanFileName = key.replace(/^\/+/, '');
-      const bytesWritten = await s3.file(`${bucket}/${cleanFileName}`).write(data as any, { type: contentType });
+      const s3 = this.getClient(
+        creds as {
+          accessKey: string;
+          secretKey: string;
+          endpoint: string;
+          bucket: string;
+        },
+      );
+      const cleanFileName = key.replace(/^\/+/, "");
+      const bytesWritten = await s3
+        .file(`${bucket}/${cleanFileName}`)
+        .write(data as any, { type: contentType });
       return bytesWritten > 0;
     } catch (e) {
       return false;
     }
   }
 
-  async copyFile(projectRef: string, srcBucket: string, srcKey: string, destBucket: string, destKey: string): Promise<boolean> {
-      const srcRes = await this.getDownloadResponse(projectRef, srcBucket, srcKey);
-      if (!srcRes || !srcRes.body) return false;
-      return this.uploadFile(projectRef, destBucket, destKey, srcRes.body, srcRes.headers.get('content-type') || 'application/octet-stream');
+  async copyFile(
+    projectRef: string,
+    srcBucket: string,
+    srcKey: string,
+    destBucket: string,
+    destKey: string,
+  ): Promise<boolean> {
+    const srcRes = await this.getDownloadResponse(
+      projectRef,
+      srcBucket,
+      srcKey,
+    );
+    if (!srcRes || !srcRes.body) return false;
+    return this.uploadFile(
+      projectRef,
+      destBucket,
+      destKey,
+      srcRes.body,
+      srcRes.headers.get("content-type") || "application/octet-stream",
+    );
   }
 
-  async deleteFile(projectRef: string, bucket: string, key: string): Promise<boolean> {
+  async deleteFile(
+    projectRef: string,
+    bucket: string,
+    key: string,
+  ): Promise<boolean> {
     const creds = await this.getCreds(projectRef);
     if (!creds?.accessKey || !creds?.secretKey) return false;
-    
+
     try {
-      const s3 = this.getClient(creds as { accessKey: string, secretKey: string, endpoint: string, bucket: string });
+      const s3 = this.getClient(
+        creds as {
+          accessKey: string;
+          secretKey: string;
+          endpoint: string;
+          bucket: string;
+        },
+      );
       await s3.file(`${bucket}/${key}`).delete();
       return true;
     } catch (e) {
@@ -294,12 +558,22 @@ export class S3Driver implements StorageDriver {
   async listFiles(projectRef: string, bucket: string): Promise<any[]> {
     const creds = await this.getCreds(projectRef);
     if (!creds?.accessKey || !creds?.secretKey) return [];
-    
+
     try {
-      const s3 = this.getClient(creds as { accessKey: string, secretKey: string, endpoint: string, bucket: string });
+      const s3 = this.getClient(
+        creds as {
+          accessKey: string;
+          secretKey: string;
+          endpoint: string;
+          bucket: string;
+        },
+      );
       const res = await s3.list();
-      const s3Contents = (res.contents || []).filter((f: Record<string, unknown>) => typeof f.key === 'string' && f.key.startsWith(`${bucket}/`));
-      
+      const s3Contents = (res.contents || []).filter(
+        (f: Record<string, unknown>) =>
+          typeof f.key === "string" && f.key.startsWith(`${bucket}/`),
+      );
+
       return s3Contents.map((file: Record<string, unknown>) => {
         const key = file.key as string;
         const relativeKey = key.substring(bucket.length + 1);
@@ -307,8 +581,10 @@ export class S3Driver implements StorageDriver {
           id: relativeKey,
           name: relativeKey,
           updated: String(file.lastModified),
-          size: Math.round((Number(file.size) ?? 0) / 1024) + ' KB',
-          type: key.includes('.') ? key.split('.').pop() || 'unknown' : 'unknown'
+          size: Math.round((Number(file.size) ?? 0) / 1024) + " KB",
+          type: key.includes(".")
+            ? key.split(".").pop() || "unknown"
+            : "unknown",
         };
       });
     } catch (e) {
@@ -316,25 +592,36 @@ export class S3Driver implements StorageDriver {
     }
   }
 
-  async getDownloadResponse(projectRef: string, bucket: string, key: string): Promise<Response | null> {
+  async getDownloadResponse(
+    projectRef: string,
+    bucket: string,
+    key: string,
+  ): Promise<Response | null> {
     const creds = await this.getCreds(projectRef);
     if (!creds?.accessKey || !creds?.secretKey) return null;
-    
+
     try {
-      const s3 = this.getClient(creds as { accessKey: string, secretKey: string, endpoint: string, bucket: string });
-      const cleanFileName = key.replace(/^\/+/, '');
+      const s3 = this.getClient(
+        creds as {
+          accessKey: string;
+          secretKey: string;
+          endpoint: string;
+          bucket: string;
+        },
+      );
+      const cleanFileName = key.replace(/^\/+/, "");
       const file = s3.file(`${bucket}/${cleanFileName}`);
-      if (!await file.exists()) return null;
-      
+      if (!(await file.exists())) return null;
+
       // Eagerly read content to avoid S3File stream consumption issues
       // when the response body gets re-wrapped in route handlers
       const content = await file.arrayBuffer();
-      const contentType = file.type || 'application/octet-stream';
+      const contentType = file.type || "application/octet-stream";
       return new Response(content, {
         headers: {
-          'Content-Type': contentType,
-          'Content-Length': String(content.byteLength),
-        }
+          "Content-Type": contentType,
+          "Content-Length": String(content.byteLength),
+        },
       });
     } catch {
       return null;
@@ -345,9 +632,10 @@ export class S3Driver implements StorageDriver {
 let activeDriver: StorageDriver | null = null;
 export function getStorageDriver(): StorageDriver {
   if (!activeDriver) {
-    activeDriver = (config.storageType === 'juicefs' || config.storageType === 'local')
-      ? new JuiceFSDriver()
-      : new S3Driver();
+    activeDriver =
+      config.storageType === "juicefs" || config.storageType === "local"
+        ? new JuiceFSDriver()
+        : new S3Driver();
   }
   return activeDriver;
 }
