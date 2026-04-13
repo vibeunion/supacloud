@@ -161,12 +161,13 @@ jobs:
         working-directory: packages/management-api
         run: |
           echo "Starting Management API in background..."
-          bun src/index.ts &
+          bun src/index.ts > api-server.log 2>&1 &
+          PID=$!
           sleep 4
-          curl -sf http://127.0.0.1:9090/health || (echo "API failed to start" && exit 1)
+          curl -sf http://127.0.0.1:9090/health || (echo "API failed to start. Logs:" && cat api-server.log && exit 1)
           
           echo "===== RUNNING E2E SNAPSHOTS ====="
-          bun test tests/e2e
+          bun test tests/e2e || (echo "E2E Failed! Server Logs:" && cat api-server.log && exit 1)
           
           echo "===== RUNNING OFFICIAL SDK PARITY PIPELINE ====="
           bun run tests/scripts/run-official-sdk-compliance.ts
