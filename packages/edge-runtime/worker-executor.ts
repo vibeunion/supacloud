@@ -217,17 +217,14 @@ parentPort?.on("message", async (msg: WorkerMessage) => {
         !response.headers.has("content-length");
 
       if (isStreaming && response.body) {
-        // Use MessageChannel to stream chunks back to main thread
-        const { port1, port2 } = new MessageChannel();
-        parentPort?.postMessage(
-          {
-            type: "stream_start",
-            status: response.status,
-            headers: resHeaders,
-            port: port2,
-          },
-          [port2], // transfer port2 to main thread
-        );
+        // Use custom message types for chunk streaming to avoid Bun 1.x MessagePort transfer bug
+        const streamId = crypto.randomUUID();
+        parentPort?.postMessage({
+          type: "stream_start",
+          status: response.status,
+          headers: resHeaders,
+          streamId,
+        });
 
         const reader = response.body.getReader();
         // Capture restore function for deferred cleanup
@@ -245,20 +242,21 @@ parentPort?.on("message", async (msg: WorkerMessage) => {
           while (true) {
             const { done, value } = await reader.read();
             if (done) {
-              port1.postMessage({ done: true });
+              parentPort?.postMessage({ type: "stream_chunk", streamId, done: true });
               break;
             }
-            port1.postMessage({ done: false, chunk: value.buffer }, [
+            parentPort?.postMessage({ type: "stream_chunk", streamId, done: false, chunk: value.buffer }, [
               value.buffer,
             ]);
           }
         } catch (err) {
-          port1.postMessage({
+          parentPort?.postMessage({
+            type: "stream_chunk",
+            streamId,
             done: true,
             error: err instanceof Error ? err.message : String(err),
           });
         } finally {
-          port1.close();
           restoreEnv(); // Restore env AFTER stream ends
         }
 
