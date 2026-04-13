@@ -171,7 +171,7 @@ jobs:
           curl -sf http://127.0.0.1:9090/health || (echo "API failed to start. Logs:" && cat api-server.log && exit 1)
           
           echo "===== RUNNING E2E SNAPSHOTS ====="
-          bun test tests/e2e || (echo "E2E Failed! Server Logs:" && cat api-server.log && exit 1)
+          bun test tests/e2e || (echo "::error title=E2E Failed! Server Logs::$(tail -n 50 api-server.log | awk '{printf "%s%%0A", $0}')" && cat api-server.log && exit 1)
           
           echo "===== RUNNING OFFICIAL SDK PARITY PIPELINE ====="
           bun run tests/scripts/run-official-sdk-compliance.ts
