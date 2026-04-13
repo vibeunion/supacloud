@@ -60,7 +60,7 @@ export interface ProjectCreateResponse extends ProjectResponse {
   default_branch_name: string;
   preview_branch_refs: string[];
   pause_status: string | null;
-  connectionString: string;
+  connection_string: string;
   db_port: number;
   db_host: string;
   db_name: string;
@@ -102,6 +102,7 @@ export interface FunctionResponse {
   version: number;
   verify_jwt: boolean;
   import_map: boolean;
+  entrypoint_path: string;
   created_at: string;
   updated_at: string;
 }
@@ -210,7 +211,7 @@ export class ProjectService {
       default_branch_name: "main",
       preview_branch_refs: [],
       pause_status: null,
-      connectionString: `postgresql://${dbUser}:[YOUR-PASSWORD]@${response.database?.host || 'localhost'}:5432/${dbName}`,
+      connection_string: `postgresql://${dbUser}:[YOUR-PASSWORD]@${response.database?.host || 'localhost'}:5432/${dbName}`,
       db_port: 5432,
       db_host: response.database?.host || "localhost",
       db_name: dbName,
@@ -600,6 +601,7 @@ export class ProjectService {
         version: 1,
         verify_jwt: cfg.verify_jwt,
         import_map: false,
+        entrypoint_path: `file:///home/deno/functions/${slug}/index.ts`,
         created_at,
         updated_at,
       });

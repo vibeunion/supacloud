@@ -20,6 +20,68 @@ const AVAILABLE_REGIONS = [
   },
 ];
 
+export const V1ProjectResponseSchema = t.Object(
+  {
+    id: t.String(),
+    ref: t.String(),
+    organization_id: t.String(),
+    organization_slug: t.String(),
+    name: t.String(),
+    region: t.String(),
+    created_at: t.String(),
+    status: t.String(),
+  },
+  { additionalProperties: false },
+);
+
+export const V1ProjectWithDatabaseResponseSchema = t.Object(
+  {
+    id: t.String(),
+    ref: t.String(),
+    organization_id: t.String(),
+    organization_slug: t.String(),
+    name: t.String(),
+    region: t.String(),
+    created_at: t.String(),
+    status: t.String(),
+    database: t.Object(
+      {
+        host: t.String(),
+        version: t.String(),
+        postgres_engine: t.String(),
+        release_channel: t.String(),
+      },
+      { additionalProperties: false },
+    ),
+  },
+  { additionalProperties: false },
+);
+
+export function toPublicV1ProjectResponse(p: any) {
+  return {
+    id: p.id,
+    ref: p.ref,
+    organization_id: p.organization_id || "default",
+    organization_slug: p.organization_slug || p.organization_id || "default",
+    name: p.name,
+    region: p.region || "local",
+    created_at: p.created_at || new Date().toISOString(),
+    status: p.status,
+  };
+}
+
+export function toPublicV1ProjectWithDatabaseResponse(p: any) {
+  return {
+    ...toPublicV1ProjectResponse(p),
+    database: {
+      host: p.database?.host || "localhost",
+      version: p.database?.version || "15",
+      postgres_engine: p.database?.postgres_engine || "15",
+      release_channel: p.database?.release_channel || "stable",
+    },
+  };
+}
+
 function mapStatus(rawStatus: string | undefined): string {
   if (!rawStatus) return "ACTIVE_HEALTHY";
   const s = rawStatus.toLowerCase();
@@ -47,6 +109,10 @@ async function buildProjectResponse(
     status: mapStatus(project.status),
     region: project.region || "local",
     organization_id: project.organization_id || "default",
+    organization_slug:
+      (project as Record<string, unknown>).organization_slug ||
+      project.organization_id ||
+      "default",
     cloud_provider:
       (project as Record<string, unknown>).cloud_provider || "localhost",
     created_at: project.created_at,
@@ -56,10 +122,9 @@ async function buildProjectResponse(
     preview_branch_refs: [],
     database: {
       host: project.database?.host || "localhost",
-      version: "15", // default, overridden in detailed=true
-      postgres_engine: "15", // default, overridden in detailed=true
-      release_channel: "stable", // always stable
-      identifier: ref, // project ref as DB identifier
+      version: "15",
+      postgres_engine: "15",
+      release_channel: "stable",
     },
     endpoint: project.api?.url || `https://${ref}.localhost`,
   };
@@ -100,18 +165,21 @@ async function buildProjectResponse(
       name: "PostgreSQL",
       status: s,
       healthy: s === "ACTIVE_HEALTHY",
+      service_host_ids: [`${ref}-postgresql`],
     })),
     checkServiceStatus(`supacloud-pgrst@${ref}`).then((s) => ({
       id: "postgrest",
       name: "PostgREST",
       status: s,
       healthy: s === "ACTIVE_HEALTHY",
+      service_host_ids: [`${ref}-postgrest`],
     })),
     checkServiceStatus(`supacloud-gotrue@${ref}`).then((s) => ({
       id: "gotrue",
       name: "GoTrue",
       status: s,
       healthy: s === "ACTIVE_HEALTHY",
+      service_host_ids: [`${ref}-gotrue`],
     })),
     checkServiceStatus(`supacloud-realtime@${ref}`)
       .then((s) => ({
@@ -119,12 +187,14 @@ async function buildProjectResponse(
         name: "Realtime",
         status: s,
         healthy: s === "ACTIVE_HEALTHY",
+        service_host_ids: [`${ref}-realtime`],
       }))
       .catch(() => ({
         id: "realtime",
         name: "Realtime",
         status: "INACTIVE",
         healthy: false,
+        service_host_ids: [`${ref}-realtime`],
       })),
     checkServiceStatus(`supacloud-storage@${ref}`)
       .then((s) => ({
@@ -132,12 +202,14 @@ async function buildProjectResponse(
         name: "Storage",
         status: s,
         healthy: s === "ACTIVE_HEALTHY",
+        service_host_ids: [`${ref}-storage`],
       }))
       .catch(() => ({
         id: "storage",
         name: "Storage",
         status: "INACTIVE",
         healthy: false,
+        service_host_ids: [`${ref}-storage`],
       })),
     checkServiceStatus("kong")
       .then((s) => ({
@@ -145,12 +217,14 @@ async function buildProjectResponse(
         name: "Kong",
         status: s,
         healthy: s === "ACTIVE_HEALTHY",
+        service_host_ids: [`${ref}-kong`],
       }))
       .catch(() => ({
         id: "kong",
         name: "Kong",
         status: "INACTIVE",
         healthy: false,
+        service_host_ids: [`${ref}-kong`],
       })),
   ]);
 
@@ -160,9 +234,8 @@ async function buildProjectResponse(
       host: project.database?.host || "localhost",
       port: (project.database as Record<string, unknown>)?.port || 5432,
       version: dbVersion,
-      postgres_engine: dbVersion.split(".")[0], // just major version "15" not "15.6"
+      postgres_engine: dbVersion.split(".")[0],
       release_channel: "stable",
-      identifier: ref, // project ref as DB identifier
       size: dbSize,
       connection_count: connectionCount,
     },
@@ -170,7 +243,7 @@ async function buildProjectResponse(
     db_host: project.database?.host || "localhost",
     db_name: dbName,
     db_user: dbUser,
-    connectionString: `postgresql://${dbUser}:[YOUR-PASSWORD]@${project.database?.host || "localhost"}:${(project.database as Record<string, unknown>)?.port || 5432}/${dbName}`,
+    connection_string: `postgresql://${dbUser}:[YOUR-PASSWORD]@${project.database?.host || "localhost"}:${(project.database as Record<string, unknown>)?.port || 5432}/${dbName}`,
     services: serviceStatuses,
     anon_key: project.anon_key,
     service_role_key: project.service_role_key,
@@ -188,14 +261,28 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
   })
 
   // Get all projects
-  .get("/", async () => {
-    const projects = await projectService.listProjects();
-    return Promise.all(projects.map((p) => buildProjectResponse(p, false)));
-  })
-  .get("", async () => {
-    const projects = await projectService.listProjects();
-    return Promise.all(projects.map((p) => buildProjectResponse(p, false)));
-  })
+  .get(
+    "/",
+    async () => {
+      const projects = await projectService.listProjects();
+      const docs = await Promise.all(
+        projects.map((p) => buildProjectResponse(p, false)),
+      );
+      return docs.map(toPublicV1ProjectResponse);
+    },
+    { response: t.Array(V1ProjectResponseSchema) },
+  )
+  .get(
+    "",
+    async () => {
+      const projects = await projectService.listProjects();
+      const docs = await Promise.all(
+        projects.map((p) => buildProjectResponse(p, false)),
+      );
+      return docs.map(toPublicV1ProjectResponse);
+    },
+    { response: { 200: t.Array(V1ProjectResponseSchema) } },
+  )
 
   // Create new project
   .post(
@@ -204,12 +291,11 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
       const project = await projectService.createProject(body);
       set.status = 201;
       const fullProject = await projectService.getProject(project.ref);
-      if (fullProject) {
-        return await buildProjectResponse(fullProject, true);
-      }
-      return project;
+      const raw = await buildProjectResponse(fullProject || project, true);
+      return toPublicV1ProjectWithDatabaseResponse(raw);
     },
     {
+      response: { 201: V1ProjectWithDatabaseResponseSchema },
       body: t.Object({
         name: t.String({ minLength: 1, maxLength: 100 }),
         region: t.Optional(t.String()),
@@ -249,9 +335,32 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
         return status(404, { message: "Project not found", code: "404" });
       }
 
+      const raw = await buildProjectResponse(project, true);
+      return toPublicV1ProjectWithDatabaseResponse(raw);
+    },
+    {
+      response: {
+        200: V1ProjectWithDatabaseResponseSchema,
+        404: t.Object({ message: t.String(), code: t.Optional(t.String()) }),
+      },
+      params: t.Object({
+        ref: t.String({ minLength: 1 }),
+      }),
+    },
+  )
+  .get(
+    "/:ref/studio-metrics",
+    async ({ params, set }) => {
+      const project = await projectService.getProject(params.ref);
+      if (!project)
+        return status(404, { message: "Project not found", code: "404" });
       return await buildProjectResponse(project, true);
     },
     {
+      response: {
+        200: t.Any(),
+        404: t.Object({ message: t.String(), code: t.Optional(t.String()) }),
+      },
       params: t.Object({
         ref: t.String({ minLength: 1 }),
       }),
@@ -413,12 +522,12 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
     { params: t.Object({ ref: t.String() }) },
   )
 
-  // ── Vanity Subdomains (/vanity-subdomains plural — official Supabase API path) ──────────
+  // ── Vanity Subdomains (/vanity-subdomain singular (official path)) ──────────
   // Store vanity_subdomain in project config; sets up a custom URL alias for the project.
 
   // GET — return current vanity subdomain config
   .get(
-    "/:ref/vanity-subdomains",
+    "/:ref/vanity-subdomain",
     async ({ params }) => {
       const project = await projectService.getProject(params.ref);
       if (!project) return status(404, { message: "Project not found" });
@@ -437,7 +546,7 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
 
   // POST check-availability — verify a subdomain is not taken
   .post(
-    "/:ref/vanity-subdomains/check-availability",
+    "/:ref/vanity-subdomain/check-availability",
     async ({ params, body }) => {
       const project = await projectService.getProject(params.ref);
       if (!project) return status(404, { message: "Project not found" });
@@ -467,7 +576,7 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
 
   // POST activate — set the vanity subdomain
   .post(
-    "/:ref/vanity-subdomains",
+    "/:ref/vanity-subdomain/activate",
     async ({ params, body }) => {
       const project = await projectService.getProject(params.ref);
       if (!project) return status(404, { message: "Project not found" });
@@ -510,7 +619,7 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
 
   // DELETE — remove vanity subdomain
   .delete(
-    "/:ref/vanity-subdomains",
+    "/:ref/vanity-subdomain",
     async ({ params }) => {
       const project = await projectService.getProject(params.ref);
       if (!project) return status(404, { message: "Project not found" });
@@ -519,85 +628,6 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
       delete updated.vanity_subdomain;
       await projectService.updateProjectSettings(params.ref, updated);
       return { custom_domain: null, vanity_subdomain: null };
-    },
-    { params: t.Object({ ref: t.String() }) },
-  )
-
-  // Legacy aliases — keep singular forms for backward compatibility
-  .get(
-    "/:ref/vanity-subdomain",
-    async ({ params }) => {
-      const project = await projectService.getProject(params.ref);
-      if (!project) return status(404, { message: "Project not found" });
-      const cfg = (project.config as Record<string, unknown>) || {};
-      return {
-        vanity_subdomain: (cfg.vanity_subdomain as string | null) || null,
-      };
-    },
-    { params: t.Object({ ref: t.String() }) },
-  )
-  .post(
-    "/:ref/vanity-subdomains/activate",
-    async ({ params, body }) => {
-      const project = await projectService.getProject(params.ref);
-      if (!project) return status(404, { message: "Project not found" });
-      const requested = (body as Record<string, string>).vanity_subdomain || "";
-      if (!requested || !/^[a-z0-9-]{3,63}$/.test(requested)) {
-        return status(400, {
-          message: "Invalid subdomain (lowercase alphanumeric + hyphens, 3-63 chars)",
-        });
-      }
-      // Check availability
-      const { sql } = await import("../db");
-      const conflict = await sql`
-        SELECT ref FROM projects
-        WHERE config->>'vanity_subdomain' = ${requested}
-          AND ref != ${params.ref}
-        LIMIT 1
-      `;
-      if (conflict.length > 0) {
-        return status(409, {
-          message: `Vanity subdomain '${requested}' is already in use`,
-        });
-      }
-      // Store in project config
-      const currentCfg = (project.config as Record<string, unknown>) || {};
-      await projectService.updateProjectSettings(params.ref, {
-        ...currentCfg,
-        vanity_subdomain: requested,
-      });
-      const domain = process.env.BASE_DOMAIN || "localhost";
-      return {
-        custom_domain: `${requested}.${domain}`,
-      };
-    },
-    {
-      params: t.Object({ ref: t.String() }),
-      body: t.Object({ vanity_subdomain: t.String() }),
-    },
-  )
-
-  // SSL Encryption — stub endpoint (Studio compatibility)
-  .get(
-    "/:ref/ssl-encryption",
-    async ({ params }) => {
-      const project = await projectService.getProject(params.ref);
-      if (!project)
-        return status(404, { message: "Project not found", code: "404" });
-      return { is_ssl_enabled: true };
-    },
-    { params: t.Object({ ref: t.String() }) },
-  )
-
-  // Database Reset — stub endpoint (Studio compatibility)
-  .post(
-    "/:ref/database/reset",
-    async ({ params, set }) => {
-      set.status = 501;
-      return {
-        message: "Database reset is not supported on this SupaCloud cluster",
-        code: "501",
-      };
     },
     { params: t.Object({ ref: t.String() }) },
   )
