@@ -631,21 +631,21 @@ async function bootstrap() {
       port: config.port,
       websocket: {
         open(ws) {
-          const { upstreamUrl, requestHeaders } = ws.data as { upstreamUrl: string; requestHeaders: Record<string, string> };
+          const data = ws.data as unknown as { upstreamUrl: string; requestHeaders: Record<string, string>; upstream?: WebSocket; __buffer?: string[] };
+          const { upstreamUrl, requestHeaders } = data;
           const upstream = new WebSocket(upstreamUrl, {
             headers: requestHeaders,
-          });
+          } as unknown as string[]);
 
-          (ws.data as Record<string, unknown>).upstream = upstream;
+          data.upstream = upstream;
 
           upstream.addEventListener('open', () => {
-            // Flush any messages buffered while upstream was connecting
-            const buffer = (ws.data as Record<string, unknown>).__buffer as string[] | undefined;
+            const buffer = data.__buffer;
             if (buffer) {
               for (const msg of buffer) {
                 upstream.send(msg);
               }
-              (ws.data as Record<string, unknown>).__buffer = [];
+              data.__buffer = [];
             }
           });
 
@@ -666,21 +666,21 @@ async function bootstrap() {
           });
         },
         message(ws, message) {
-          const upstream = (ws.data as Record<string, unknown>)?.upstream as WebSocket | undefined;
+          const data = ws.data as unknown as { upstream?: WebSocket; __buffer?: string[] };
+          const upstream = data.upstream;
           if (!upstream) return;
 
           if (upstream.readyState === WebSocket.OPEN) {
             upstream.send(message as string | ArrayBufferLike);
           } else if (upstream.readyState === WebSocket.CONNECTING) {
-            // Buffer messages until upstream opens
-            if (!(ws.data as Record<string, unknown>).__buffer) {
-              (ws.data as Record<string, unknown>).__buffer = [];
+            if (!data.__buffer) {
+              data.__buffer = [];
             }
-            ((ws.data as Record<string, unknown>).__buffer as string[]).push(message as string);
+            data.__buffer.push(message as string);
           }
         },
         close(ws, code, reason) {
-          const upstream = (ws.data as Record<string, unknown>)?.upstream as WebSocket | undefined;
+          const upstream = (ws.data as unknown as { upstream?: WebSocket })?.upstream;
           if (upstream && upstream.readyState !== WebSocket.CLOSED) {
             try { upstream.close(code, reason); } catch { /* already closed */ }
           }
