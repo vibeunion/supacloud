@@ -56,6 +56,10 @@ async function buildProjectResponse(
     preview_branch_refs: [],
     database: {
       host: project.database?.host || "localhost",
+      version: "15", // default, overridden in detailed=true
+      postgres_engine: "15", // default, overridden in detailed=true
+      release_channel: "stable", // always stable
+      identifier: ref, // project ref as DB identifier
     },
     endpoint: project.api?.url || `https://${ref}.localhost`,
   };
@@ -156,8 +160,9 @@ async function buildProjectResponse(
       host: project.database?.host || "localhost",
       port: (project.database as Record<string, unknown>)?.port || 5432,
       version: dbVersion,
-      postgres_engine: dbVersion.split(".")[0] + "." + dbVersion.split(".")[1],
+      postgres_engine: dbVersion.split(".")[0], // just major version "15" not "15.6"
       release_channel: "stable",
+      identifier: ref, // project ref as DB identifier
       size: dbSize,
       connection_count: connectionCount,
     },
@@ -408,43 +413,168 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
     { params: t.Object({ ref: t.String() }) },
   )
 
-  // Vanity Subdomain — stub endpoints (Studio compatibility)
+  // ── Vanity Subdomains (/vanity-subdomains plural — official Supabase API path) ──────────
+  // Store vanity_subdomain in project config; sets up a custom URL alias for the project.
+
+  // GET — return current vanity subdomain config
+  .get(
+    "/:ref/vanity-subdomains",
+    async ({ params }) => {
+      const project = await projectService.getProject(params.ref);
+      if (!project) return status(404, { message: "Project not found" });
+      const cfg = (project.config as Record<string, unknown>) || {};
+      const vanity = (cfg.vanity_subdomain as string | null) || null;
+      if (!vanity) {
+        return { status: "not-used" };
+      }
+      return {
+        status: "active",
+        custom_domain: `${vanity}.${process.env.BASE_DOMAIN || "localhost"}`,
+      };
+    },
+    { params: t.Object({ ref: t.String() }) },
+  )
+
+  // POST check-availability — verify a subdomain is not taken
+  .post(
+    "/:ref/vanity-subdomains/check-availability",
+    async ({ params, body }) => {
+      const project = await projectService.getProject(params.ref);
+      if (!project) return status(404, { message: "Project not found" });
+      const requested = (body as Record<string, string>).vanity_subdomain || "";
+      if (!requested || !/^[a-z0-9-]{3,63}$/.test(requested)) {
+        return {
+          available: false,
+          error:
+            "Invalid subdomain format (lowercase alphanumeric + hyphens, 3-63 chars)",
+        };
+      }
+      // Check if any OTHER project already uses this vanity subdomain
+      const { sql } = await import("../db");
+      const rows = await sql`
+        SELECT ref FROM projects
+        WHERE config->>'vanity_subdomain' = ${requested}
+          AND ref != ${params.ref}
+        LIMIT 1
+      `;
+      return { available: rows.length === 0 };
+    },
+    {
+      params: t.Object({ ref: t.String() }),
+      body: t.Object({ vanity_subdomain: t.String() }),
+    },
+  )
+
+  // POST activate — set the vanity subdomain
+  .post(
+    "/:ref/vanity-subdomains",
+    async ({ params, body }) => {
+      const project = await projectService.getProject(params.ref);
+      if (!project) return status(404, { message: "Project not found" });
+      const requested = (body as Record<string, string>).vanity_subdomain || "";
+      if (!requested || !/^[a-z0-9-]{3,63}$/.test(requested)) {
+        return status(400, {
+          message:
+            "Invalid subdomain (lowercase alphanumeric + hyphens, 3-63 chars)",
+        });
+      }
+      // Check availability
+      const { sql } = await import("../db");
+      const conflict = await sql`
+        SELECT ref FROM projects
+        WHERE config->>'vanity_subdomain' = ${requested}
+          AND ref != ${params.ref}
+        LIMIT 1
+      `;
+      if (conflict.length > 0) {
+        return status(409, {
+          message: `Vanity subdomain '${requested}' is already in use`,
+        });
+      }
+      // Store in project config
+      const currentCfg = (project.config as Record<string, unknown>) || {};
+      await projectService.updateProjectSettings(params.ref, {
+        ...currentCfg,
+        vanity_subdomain: requested,
+      });
+      const domain = process.env.BASE_DOMAIN || "localhost";
+      return {
+        custom_domain: `${requested}.${domain}`,
+      };
+    },
+    {
+      params: t.Object({ ref: t.String() }),
+      body: t.Object({ vanity_subdomain: t.String() }),
+    },
+  )
+
+  // DELETE — remove vanity subdomain
+  .delete(
+    "/:ref/vanity-subdomains",
+    async ({ params }) => {
+      const project = await projectService.getProject(params.ref);
+      if (!project) return status(404, { message: "Project not found" });
+      const currentCfg = (project.config as Record<string, unknown>) || {};
+      const updated = { ...currentCfg };
+      delete updated.vanity_subdomain;
+      await projectService.updateProjectSettings(params.ref, updated);
+      return { custom_domain: null, vanity_subdomain: null };
+    },
+    { params: t.Object({ ref: t.String() }) },
+  )
+
+  // Legacy aliases — keep singular forms for backward compatibility
   .get(
     "/:ref/vanity-subdomain",
     async ({ params }) => {
       const project = await projectService.getProject(params.ref);
-      if (!project)
-        return status(404, { message: "Project not found", code: "404" });
-      return { vanity_subdomain: null };
+      if (!project) return status(404, { message: "Project not found" });
+      const cfg = (project.config as Record<string, unknown>) || {};
+      return {
+        vanity_subdomain: (cfg.vanity_subdomain as string | null) || null,
+      };
     },
     { params: t.Object({ ref: t.String() }) },
   )
   .post(
-    "/:ref/vanity-subdomain/activate",
-    async ({ params, set }) => {
+    "/:ref/vanity-subdomains/activate",
+    async ({ params, body }) => {
       const project = await projectService.getProject(params.ref);
-      if (!project)
-        return status(404, { message: "Project not found", code: "404" });
-      set.status = 501;
+      if (!project) return status(404, { message: "Project not found" });
+      const requested = (body as Record<string, string>).vanity_subdomain || "";
+      if (!requested || !/^[a-z0-9-]{3,63}$/.test(requested)) {
+        return status(400, {
+          message: "Invalid subdomain (lowercase alphanumeric + hyphens, 3-63 chars)",
+        });
+      }
+      // Check availability
+      const { sql } = await import("../db");
+      const conflict = await sql`
+        SELECT ref FROM projects
+        WHERE config->>'vanity_subdomain' = ${requested}
+          AND ref != ${params.ref}
+        LIMIT 1
+      `;
+      if (conflict.length > 0) {
+        return status(409, {
+          message: `Vanity subdomain '${requested}' is already in use`,
+        });
+      }
+      // Store in project config
+      const currentCfg = (project.config as Record<string, unknown>) || {};
+      await projectService.updateProjectSettings(params.ref, {
+        ...currentCfg,
+        vanity_subdomain: requested,
+      });
+      const domain = process.env.BASE_DOMAIN || "localhost";
       return {
-        message:
-          "Vanity subdomains are not supported on this SupaCloud cluster",
-        code: "501",
+        custom_domain: `${requested}.${domain}`,
       };
     },
-    { params: t.Object({ ref: t.String() }) },
-  )
-  .delete(
-    "/:ref/vanity-subdomain",
-    async ({ params, set }) => {
-      set.status = 501;
-      return {
-        message:
-          "Vanity subdomains are not supported on this SupaCloud cluster",
-        code: "501",
-      };
+    {
+      params: t.Object({ ref: t.String() }),
+      body: t.Object({ vanity_subdomain: t.String() }),
     },
-    { params: t.Object({ ref: t.String() }) },
   )
 
   // SSL Encryption — stub endpoint (Studio compatibility)

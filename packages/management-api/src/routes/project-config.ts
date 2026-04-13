@@ -722,6 +722,24 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
                   : val,
             };
           }
+        } else if (key.startsWith("saml_")) {
+          const samlKeyMap: Record<string, string> = {
+            saml_enabled: "enabled",
+            saml_external_url: "external_url",
+            saml_api_base: "api_base",
+            saml_metadata_url: "metadata_url",
+            saml_metadata_xml: "metadata_xml",
+            saml_allow_encrypted_assertions: "allow_encrypted_assertions",
+          };
+          const samlField = samlKeyMap[key];
+          if (samlField) {
+            const currentSaml =
+              (currentAuth.saml as Record<string, unknown>) || {};
+            otherUpdates.saml = {
+              ...((otherUpdates.saml as Record<string, unknown>) || {}),
+              [samlField]: val,
+            };
+          }
         } else if (key !== "external_providers") {
           otherUpdates[key] = val;
         }
@@ -751,6 +769,14 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
               smtp: {
                 ...((currentAuth.smtp as Record<string, unknown>) || {}),
                 ...(otherUpdates.smtp as Record<string, unknown>),
+              },
+            }
+          : {}),
+        ...(otherUpdates.saml
+          ? {
+              saml: {
+                ...((currentAuth.saml as Record<string, unknown>) || {}),
+                ...(otherUpdates.saml as Record<string, unknown>),
               },
             }
           : {}),
