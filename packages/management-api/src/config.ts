@@ -104,6 +104,9 @@ const isGithubActions = process.env.GITHUB_ACTIONS === "true";
 const defaultEdgeRuntimeInternal = isGithubActions
   ? "127.0.0.1:9001"
   : "127.0.0.1:9000";
+const defaultS3Endpoint = isGithubActions
+  ? "http://127.0.0.1:9001"
+  : "http://localhost:9000";
 
 export const config = {
   // ── Server ───────────────────────────────────────────────────────
@@ -143,7 +146,7 @@ export const config = {
   homePath: process.env.HOME || "/root",
 
   // ── S3 / Storage ─────────────────────────────────────────────────
-  s3Endpoint: process.env.S3_ENDPOINT || managementEnv.S3_ENDPOINT || "http://localhost:9000",
+  s3Endpoint: process.env.S3_ENDPOINT || managementEnv.S3_ENDPOINT || defaultS3Endpoint,
   s3Region: process.env.S3_REGION || managementEnv.S3_REGION || "us-east-1",
   storageType: process.env.STORAGE_TYPE || managementEnv.STORAGE_TYPE || "local",
   storageMountPoint: process.env.STORAGE_MOUNT_POINT || managementEnv.STORAGE_MOUNT_POINT || "/data/storage",

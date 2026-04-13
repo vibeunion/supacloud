@@ -453,6 +453,24 @@ async function putS3ObjectWithFetch(
   }
 }
 
+async function retryAsync<T>(
+  attempts: number,
+  fn: () => Promise<T>,
+  shouldRetry: (value: T) => boolean,
+  delayMs = 250,
+): Promise<T> {
+  let lastValue: T | undefined;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    const value = await fn();
+    lastValue = value;
+    if (!shouldRetry(value) || attempt === attempts) {
+      return value;
+    }
+    await Bun.sleep(delayMs * attempt);
+  }
+  return lastValue as T;
+}
+
 export class S3Driver implements StorageDriver {
   private async getCreds(projectRef: string): Promise<{
     accessKey?: string;
@@ -514,17 +532,26 @@ export class S3Driver implements StorageDriver {
     if (process.env.CI || process.env.NODE_ENV === "test") {
       const creds = await this.getCreds(projectRef);
       if (creds?.accessKey && creds?.secretKey) {
-        const ok = await createS3BucketWithFetch(
-          creds.endpoint,
-          creds.bucket,
-          creds.accessKey,
-          creds.secretKey,
+        const { endpoint, bucket: physicalBucket, accessKey, secretKey } = creds;
+        const ok = await retryAsync(
+          4,
+          () =>
+            createS3BucketWithFetch(
+              endpoint,
+              physicalBucket,
+              accessKey,
+              secretKey,
+            ),
+          (result) => !result,
         );
         if (ok) return true;
         logger.warn(
-          `[S3] createBucket failed for ${projectRef}, proceeding anyway`,
+          `[S3] createBucket failed for ${projectRef} at ${creds.endpoint}`,
         );
+        return false;
       }
+      logger.warn(`[S3] createBucket missing credentials for ${projectRef}`);
+      return false;
     }
     return true; // Buckets are logical prefixes in S3 for SupaCloud
   }
