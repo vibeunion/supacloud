@@ -60,7 +60,7 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
     async ({ params, set }) => {
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings) {
-        return status(404, { message: "Project not found", code: "400" });
+        return status(404, { message: "Project not found", code: "404" });
       }
 
       const oauthConfig = ((settings.auth as Record<string, unknown>)?.external ?? {}) as Record<string, Record<string, string>>;
@@ -101,7 +101,7 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
 
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings) {
-        return status(404, { message: "Project not found", code: "400" });
+        return status(404, { message: "Project not found", code: "404" });
       }
 
       const oauthConfig = ((settings.auth as Record<string, unknown>)?.external ?? {}) as Record<string, Record<string, string>>;
@@ -143,7 +143,7 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
 
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings) {
-        return status(404, { message: "Project not found", code: "400" });
+        return status(404, { message: "Project not found", code: "404" });
       }
 
       const currentAuth = (settings.auth as Record<string, unknown>) || {};
@@ -217,7 +217,7 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
 
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings) {
-        return status(404, { message: "Project not found", code: "400" });
+        return status(404, { message: "Project not found", code: "404" });
       }
 
       const currentAuth = (settings.auth as Record<string, unknown>) || {};
@@ -292,7 +292,7 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
 
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings) {
-        return status(404, { message: "Project not found", code: "400" });
+        return status(404, { message: "Project not found", code: "404" });
       }
 
       const currentAuth = (settings.auth as Record<string, unknown>) || {};
@@ -340,7 +340,7 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
     async ({ params, set }) => {
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings) {
-        return status(404, { message: "Project not found", code: "400" });
+        return status(404, { message: "Project not found", code: "404" });
       }
 
       const authConfig = (settings.auth as Record<string, unknown>) || {};
@@ -372,7 +372,7 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
     async ({ params, body, set }) => {
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings) {
-        return status(404, { message: "Project not found", code: "400" });
+        return status(404, { message: "Project not found", code: "404" });
       }
 
       const currentAuth = (settings.auth as Record<string, unknown>) || {};
@@ -432,7 +432,7 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
     async ({ params, set }) => {
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings) {
-        return status(404, { message: "Project not found", code: "400" });
+        return status(404, { message: "Project not found", code: "404" });
       }
 
       const oauthConfig = ((settings.auth as Record<string, unknown>)?.external ?? {}) as Record<string, Record<string, string>>;
@@ -487,7 +487,7 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
 
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings) {
-        return status(404, { message: "Project not found", code: "400" });
+        return status(404, { message: "Project not found", code: "404" });
       }
 
       const currentAuth = (settings.auth as Record<string, unknown>) || {};
@@ -563,7 +563,7 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
     async ({ params, set }) => {
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings) {
-        return status(404, { message: "Project not found", code: "400" });
+        return status(404, { message: "Project not found", code: "404" });
       }
 
       const oauthConfig = ((settings.auth as Record<string, unknown>)?.external ?? {}) as Record<string, Record<string, string>>;

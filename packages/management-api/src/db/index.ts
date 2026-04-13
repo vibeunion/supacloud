@@ -34,7 +34,7 @@ export const sql = new SQL({
 
 const MAX_CACHED_CONNECTIONS = 50;
 
-const projectConnections: Map<string, { sql: SQL; lastUsed: number; inUse: number }> = new Map();
+const projectConnections: Map<string, { sql: SQL; lastUsed: number }> = new Map();
 
 export function getProjectDb(dbName: string): SQL {
   const cached = projectConnections.get(dbName);
@@ -75,14 +75,17 @@ export function getProjectDb(dbName: string): SQL {
     connectTimeout: 5000,
   });
 
-  projectConnections.set(dbName, { sql: projectSql, lastUsed: Date.now(), inUse: 0 });
+  projectConnections.set(dbName, { sql: projectSql, lastUsed: Date.now() });
   return projectSql;
 }
 
-export function releaseProjectDb(dbName: string) {
+export function removeProjectDbCache(dbName: string) {
   const cached = projectConnections.get(dbName);
-  if (cached && cached.inUse > 0) {
-    cached.inUse--;
+  if (cached) {
+    try {
+      cached.sql.close().catch(() => {});
+    } catch {}
+    projectConnections.delete(dbName);
   }
 }
 
@@ -118,6 +121,14 @@ export function resolveRoleName(ref: string): string {
 
 export function resolveAuthenticatorName(ref: string): string {
   return `authenticator_${ref}`;
+}
+
+export function resolveSlotName(ref: string): string {
+  return `supabase_realtime_${ref}`;
+}
+
+export function resolvePgrstChannel(ref: string): string {
+  return `pgrst_${ref}`;
 }
 
 export function generateDbName(ref: string): string {

@@ -1,7 +1,7 @@
 import { EventEmitter } from 'events';
 import { logger } from '../utils/logger';
 import { databaseService } from './database.service';
-import { resolveDbName, getProjectDb } from '../db';
+import { resolveDbName, getProjectDb, resolveSlotName } from '../db';
 
 const IDENTIFIER_REGEX = /^[a-zA-Z_][a-zA-Z0-9_]{0,62}$/;
 
@@ -114,7 +114,7 @@ class RealtimeBunService {
                 const [slotRow] = await db`
                     SELECT COUNT(*) > 0 as exists
                     FROM pg_replication_slots
-                    WHERE slot_name = ${`supabase_realtime_${projectRef}`} AND active = false
+                    WHERE slot_name = ${resolveSlotName(projectRef)} AND active = false
                 `;
                 const hasSlot = slotRow?.exists || false;
                 this.wal2jsonAvailable.set(projectRef, hasSlot);
@@ -134,7 +134,7 @@ class RealtimeBunService {
         const poll = async () => {
             try {
                 const changes = await db`
-                    SELECT data FROM pg_logical_slot_get_changes(${`supabase_realtime_${projectRef}`}, NULL, NULL)
+                    SELECT data FROM pg_logical_slot_get_changes(${resolveSlotName(projectRef)}, NULL, NULL)
                 `;
                 if (Array.isArray(changes) && changes.length > 0) {
                     for (const change of changes) {

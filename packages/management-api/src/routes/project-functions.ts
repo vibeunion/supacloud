@@ -78,7 +78,7 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         false,
       );
       if (!success) {
-        return status(500, { message: "Failed to deploy function bundle", code: "400" });
+        return status(500, { message: "Failed to deploy function bundle", code: "500" });
       }
 
       // Persist JWT setting from metadata
@@ -145,7 +145,7 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
           false,
         );
         if (!success) {
-          return status(500, { message: "Failed to deploy function", code: "400" });
+          return status(500, { message: "Failed to deploy function", code: "500" });
         }
       }
 
@@ -256,7 +256,7 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         params.slug,
       );
       if (code === null) {
-        return status(404, { message: "Function not found", code: "400" });
+        return status(404, { message: "Function not found", code: "404" });
       }
       const { edgeFunctionService } =
         await import("../services/edge-function.service");
@@ -295,7 +295,7 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         params.slug,
       );
       if (code === null) {
-        return status(404, { message: "Source not found", code: "400" });
+        return status(404, { message: "Source not found", code: "404" });
       }
       return { code };
     },
@@ -322,7 +322,7 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
       // Fall back to bundled output
       const bundled = await edgeFunctionService.read(params.ref, params.slug);
       if (bundled === null) {
-        return status(404, { message: "Function not found", code: "400" });
+        return status(404, { message: "Function not found", code: "404" });
       }
       set.headers["Content-Type"] = "application/octet-stream";
       set.headers["Content-Disposition"] =
@@ -345,7 +345,7 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         body.minify ?? false,
       );
       if (!success) {
-        return status(500, { message: "Failed to deploy function", code: "400" });
+        return status(500, { message: "Failed to deploy function", code: "500" });
       }
       return { success: true, bundled: true };
     },
@@ -375,7 +375,7 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
           false,
         );
         if (!success) {
-          return status(500, { message: "Failed to deploy function", code: "400" });
+          return status(500, { message: "Failed to deploy function", code: "500" });
         }
       }
 
@@ -425,7 +425,7 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         body.minify ?? false,
       );
       if (!success) {
-        return status(500, { message: "Failed to deploy function bundle", code: "400" });
+        return status(500, { message: "Failed to deploy function bundle", code: "500" });
       }
       return {
         success: true,
@@ -452,7 +452,7 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
       }
       const success = await projectService.deleteFunction(params.ref, slug);
       if (!success) {
-        return status(500, { message: "Failed to delete function", code: "400" });
+        return status(500, { message: "Failed to delete function", code: "500" });
       }
       return { success: true };
     },
@@ -470,7 +470,7 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         params.slug,
       );
       if (!success) {
-        return status(500, { message: "Failed to delete function", code: "400" });
+        return status(500, { message: "Failed to delete function", code: "500" });
       }
       return { success: true };
     },
