@@ -319,6 +319,13 @@ export class DatabaseService {
       assertValidDbName("dbName", dbName);
       assertValidIdentifier("dbUser", dbUser);
 
+      if (dbName === "postgres") {
+        logger.warn(
+          `[DatabaseService] Skipping DROP DATABASE for shared database ${dbName} (project ${projectRef})`,
+        );
+        return { success: true };
+      }
+
       await this.withAdminDb(async (adminDb) => {
         // Terminate connections safely
         try {

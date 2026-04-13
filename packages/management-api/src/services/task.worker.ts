@@ -115,10 +115,6 @@ export class TaskWorker {
                         logger.error(`[TaskWorker] Project ${project_ref} not found for provision_s3`);
                         return false;
                     }
-                    if (process.env.TEST_FIXED_JWT_SECRET) {
-                        logger.info(`[TaskWorker] Running in CI mode, skipping actual S3 provision for ${project_ref}`);
-                        return true;
-                    }
                     const res = await storageService.createBucket(project_ref);
                     return res.success;
                 }
@@ -176,11 +172,6 @@ export class TaskWorker {
                     if (!project) {
                         logger.error(`[TaskWorker] Project ${project_ref} not found for provision_realtime`);
                         return false;
-                    }
-
-                    if (process.env.TEST_FIXED_JWT_SECRET) {
-                        logger.info(`[TaskWorker] Running in CI mode, skipping realtime provision for ${project_ref}`);
-                        return true;
                     }
 
                     const dbName = await resolveDbName(project_ref);
