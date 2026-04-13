@@ -14,6 +14,6 @@ export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
             `;
             return tasks;
         } catch (err: unknown) {
-                        return status(500, { error: "Failed to retrieve tasks", details: (err instanceof Error ? err.message : String(err)) });
+                        return status(500, { message: "Failed to retrieve tasks", code: "500", details: (err instanceof Error ? err.message : String(err)) });
         }
     });

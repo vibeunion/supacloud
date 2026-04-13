@@ -272,7 +272,7 @@ const app = new Elysia({ strictPath: false })
       return { success: true, token };
     }
     set.status = 401;
-    return { success: false, message: "Invalid username or password" };
+    return { success: false, message: "Invalid username or password", code: "401" };
   })
   .post("/auth/verify", async ({ body }) => {
     const { token } = body as { token: string };
@@ -337,14 +337,14 @@ const app = new Elysia({ strictPath: false })
       set.status = 400;
       return {
         message: "Validation failed",
-        code: "validation_error",
+        code: "400",
         details: error.message,
       };
     }
 
     if (code === "NOT_FOUND") {
       set.status = 404;
-      return { message: "Not found", code: "not_found" };
+      return { message: "Not found", code: "404" };
     }
 
     // DB connection errors → 503 Service Unavailable (not 500)
@@ -359,13 +359,13 @@ const app = new Elysia({ strictPath: false })
       set.headers["Retry-After"] = "5";
       return {
         message: "Service temporarily unavailable",
-        code: "service_unavailable",
+        code: "503",
         retryAfter: 5,
       };
     }
 
     set.status = 500;
-    return { message: "Internal server error", code: "internal_error" };
+    return { message: "Internal server error", code: "500" };
   });
 
 /**
@@ -400,7 +400,7 @@ export function registerStaticAssets() {
     // Do NOT catch API routes
     if (path.startsWith("/api/") || path.startsWith("/v1/")) {
       set.status = 404;
-      return { message: "Route not found" };
+      return { message: "Route not found", code: "404" };
     }
 
     // --- Step 1: try_files $uri — check exact file on disk ---

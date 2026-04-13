@@ -52,7 +52,7 @@ export const authHooksRoutes = new Elysia({ prefix: "/v1/projects" })
         `;
         return rows[0] || {};
       } catch (err: unknown) {
-        return status(500, { message: "Failed to create webhook", details: err instanceof Error ? err.message : String(err) });
+        return status(500, { message: "Failed to create webhook", code: "500", details: err instanceof Error ? err.message : String(err) });
       }
     },
     {
@@ -88,7 +88,7 @@ export const authHooksRoutes = new Elysia({ prefix: "/v1/projects" })
         if (rows.length === 0) return status(404, { message: "Webhook not found", code: "404" });
         return rows[0];
       } catch (err: unknown) {
-        return status(500, { message: "Failed to get webhook", details: err instanceof Error ? err.message : String(err) });
+        return status(500, { message: "Failed to get webhook", code: "500", details: err instanceof Error ? err.message : String(err) });
       }
     },
     { params: t.Object({ ref: t.String(), id: t.String() }) }
@@ -122,7 +122,7 @@ export const authHooksRoutes = new Elysia({ prefix: "/v1/projects" })
         `;
         return updated[0];
       } catch (err: unknown) {
-        return status(500, { message: "Failed to update webhook", details: err instanceof Error ? err.message : String(err) });
+        return status(500, { message: "Failed to update webhook", code: "500", details: err instanceof Error ? err.message : String(err) });
       }
     },
     {
@@ -153,7 +153,7 @@ export const authHooksRoutes = new Elysia({ prefix: "/v1/projects" })
         if (!deleted) return status(404, { message: "Webhook not found", code: "404" });
         return deleted;
       } catch (err: unknown) {
-        return status(500, { message: "Failed to delete webhook" });
+        return status(500, { message: "Failed to delete webhook", code: "500" });
       }
     },
     { params: t.Object({ ref: t.String(), id: t.String() }) }
