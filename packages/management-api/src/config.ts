@@ -100,6 +100,10 @@ function loadEnvFile(path: string): Record<string, string> {
 // Load environment files
 const managementEnv = loadEnvFile("/etc/supabase/management-api.env");
 const masterTokenEnv = loadEnvFile("/etc/supabase/master-token.env");
+const isGithubActions = process.env.GITHUB_ACTIONS === "true";
+const defaultEdgeRuntimeInternal = isGithubActions
+  ? "127.0.0.1:9001"
+  : "127.0.0.1:9000";
 
 export const config = {
   // ── Server ───────────────────────────────────────────────────────
@@ -153,7 +157,10 @@ export const config = {
   realtimeApiSecret: process.env.REALTIME_API_SECRET || managementEnv.REALTIME_API_SECRET || "",
   managementApiInternal: process.env.MANAGEMENT_API_INTERNAL || managementEnv.MANAGEMENT_API_INTERNAL || "127.0.0.1:9090",
   studioInternal: process.env.STUDIO_INTERNAL || managementEnv.STUDIO_INTERNAL || "127.0.0.1:3000",
-  edgeRuntimeInternal: process.env.EDGE_RUNTIME_INTERNAL || managementEnv.EDGE_RUNTIME_INTERNAL || "127.0.0.1:9000",
+  edgeRuntimeInternal:
+    process.env.EDGE_RUNTIME_INTERNAL ||
+    managementEnv.EDGE_RUNTIME_INTERNAL ||
+    defaultEdgeRuntimeInternal,
   kongInternal: process.env.KONG_INTERNAL || managementEnv.KONG_INTERNAL || "127.0.0.1:8000",
 
   // ── Service Binaries / Ports ─────────────────────────────────────
@@ -183,7 +190,7 @@ export const config = {
   // ── Runtime ──────────────────────────────────────────────────────
   containerRuntime: process.env.CONTAINER_RUNTIME || managementEnv.CONTAINER_RUNTIME || "podman",
   dockerHostIp: process.env.DOCKER_HOST_IP || managementEnv.DOCKER_HOST_IP || "",
-  isGithubActions: process.env.GITHUB_ACTIONS === "true",
+  isGithubActions,
   minDiskGb: parseInt(process.env.MIN_DISK_GB || managementEnv.MIN_DISK_GB || "2", 10),
   supacloudAnsibleArgs: process.env.SUPACLOUD_ANSIBLE_ARGS || managementEnv.SUPACLOUD_ANSIBLE_ARGS || "",
   supacloudApiUrl: process.env.SUPACLOUD_API_URL || managementEnv.SUPACLOUD_API_URL || "http://127.0.0.1:9090",
