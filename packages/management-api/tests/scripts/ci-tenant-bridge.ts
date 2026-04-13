@@ -128,6 +128,11 @@ export async function setupCiBridge(sql: InstanceType<typeof SQL>): Promise<{
       CREATE POLICY "Allow anonymous insert access" ON public.todos
         FOR INSERT TO anon WITH CHECK (true)
     `;
+    // Allow anonymous users to update todos (SDK parity uses anon key for CRUD coverage)
+    await testSql`
+      CREATE POLICY "Allow anonymous update access" ON public.todos
+        FOR UPDATE TO anon USING (true) WITH CHECK (true)
+    `;
     // Allow anonymous users to delete todos (backward compat with PostgREST tests)
     await testSql`
       CREATE POLICY "Allow anonymous delete access" ON public.todos
