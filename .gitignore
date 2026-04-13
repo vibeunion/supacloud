@@ -140,3 +140,5 @@ servers.local.md
 .agents/state/
 AGENTS.md
 deploy_all.sh
+.roomodes
+.gitignore
