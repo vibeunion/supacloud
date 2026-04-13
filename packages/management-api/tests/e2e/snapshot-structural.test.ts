@@ -6,7 +6,7 @@ import { ProjectService } from "../../src/services/project.service";
 import { config } from "../../src/config";
 import { randomUUID } from "crypto";
 
-const PROXY_URL = process.env.TEST_SUPABASE_URL || `http://${config.baseDomain || '127.0.0.1'}:9090`;
+const PROXY_URL = process.env.TEST_SUPABASE_URL || `http://${(config.baseDomain === 'localhost' || !config.baseDomain) ? '127.0.0.1' : config.baseDomain}:9090`;
 const groundTruthDir = path.join(__dirname, "../snapshots/ground_truth");
 const MASTER_TOKEN = process.env.MASTER_TOKEN || process.env.TEST_FIXED_JWT_SECRET || "test";
 
