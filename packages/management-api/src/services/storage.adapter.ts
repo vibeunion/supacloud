@@ -478,7 +478,7 @@ export class S3Driver implements StorageDriver {
     endpoint: string;
     bucket: string;
   } | null> {
-    if (process.env.CI || process.env.NODE_ENV === "test") {
+    if (process.env.CI || process.env.GITHUB_ACTIONS || process.env.NODE_ENV === "test") {
       return {
         accessKey: process.env.S3_ACCESS_KEY || "minioadmin",
         secretKey: process.env.S3_SECRET_KEY || "minioadmin",
@@ -529,7 +529,7 @@ export class S3Driver implements StorageDriver {
   }
 
   async createBucket(projectRef: string, bucket: string): Promise<boolean> {
-    if (process.env.CI || process.env.NODE_ENV === "test") {
+    if (process.env.CI || process.env.GITHUB_ACTIONS || process.env.NODE_ENV === "test") {
       const creds = await this.getCreds(projectRef);
       if (creds?.accessKey && creds?.secretKey) {
         const { endpoint, bucket: physicalBucket, accessKey, secretKey } = creds;
@@ -641,11 +641,12 @@ export class S3Driver implements StorageDriver {
     try {
       const cleanFileName = key.replace(/^\/+/, "");
 
-      if (process.env.CI || process.env.NODE_ENV === "test") {
+      if (process.env.CI || process.env.GITHUB_ACTIONS || process.env.NODE_ENV === "test") {
         const s3 = this.getClient(creds as { accessKey: string; secretKey: string; endpoint: string; bucket: string });
         const s3Key = `${bucket}/${cleanFileName}`;
         const file = s3.file(s3Key);
-        await file.write(data, { type: contentType });
+        const bytes = await toUint8Array(data);
+        await file.write(bytes, { type: contentType });
         return true;
       }
 
