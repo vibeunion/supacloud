@@ -2,6 +2,7 @@ import type { Subprocess } from "bun";
 import { logger } from "../utils/logger";
 import path from "node:path";
 import { execSync } from "node:child_process";
+import { config } from "../config";
 
 /**
  * Manages the Edge Function Runner as a child Bun process.
@@ -78,9 +79,9 @@ export class EdgeRuntimeManager {
       env: {
         ...process.env,
         PORT: String(this.config.port),
-        EDGE_FUNCTIONS_DIR: require("../config").config.edgeFunctionsDir,
-        MASTER_TOKEN: require("../config").config.masterToken,
-        MANAGEMENT_API_URL: `http://127.0.0.1:${require("../config").config.port || 9090}`,
+        EDGE_FUNCTIONS_DIR: config.edgeFunctionsDir,
+        MASTER_TOKEN: config.masterToken,
+        MANAGEMENT_API_URL: `http://127.0.0.1:${config.port || 9090}`,
       },
       stdout: "inherit",
       stderr: "inherit",
@@ -131,4 +132,7 @@ export class EdgeRuntimeManager {
   }
 }
 
-export const edgeRuntimeManager = new EdgeRuntimeManager({ port: 9000 });
+const [, edgeRuntimePortStr] = (config.edgeRuntimeInternal || "127.0.0.1:9000").split(":");
+const edgeRuntimePort = parseInt(edgeRuntimePortStr, 10) || 9000;
+
+export const edgeRuntimeManager = new EdgeRuntimeManager({ port: edgeRuntimePort });
