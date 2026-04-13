@@ -14,7 +14,7 @@
 
   import { apiClient } from "$lib/api";
 
-  const { query } = useList<SystemExt>({ resource: "v1/system/extensions" });
+  const query = useList<SystemExt>({ resource: "v1/system/extensions" });
   const extensions = $derived(Array.isArray(query.data?.data) ? query.data.data : []);
 
   let actionMsg: string | null = $state.raw(null);

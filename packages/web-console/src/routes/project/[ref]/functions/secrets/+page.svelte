@@ -15,7 +15,7 @@
   }
 
   const projectRef = $derived(page.params.ref);
-  const { query } = useList<Secret>({ get resource() { return `v1/projects/${projectRef}/secrets`; } });
+  const query = useList<Secret>({ get resource() { return `v1/projects/${projectRef}/secrets`; } });
   const secrets = $derived(Array.isArray(query.data?.data) ? query.data.data : ((query.data?.data as unknown as Record<string, unknown>)?.secrets as Secret[] || []));
 
   let showAdd = $state(false);

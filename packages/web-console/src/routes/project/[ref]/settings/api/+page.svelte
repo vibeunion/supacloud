@@ -22,7 +22,7 @@
   const hostname = $derived(page.url?.hostname || "localhost");
   const apiUrl = $derived(`http://${hostname}:8000`);
 
-  const { query } = useShow({
+  const query = useShow({
     get resource() { return "v1/projects"; },
     get id() { return projectRef; }
   });
