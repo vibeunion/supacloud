@@ -66,14 +66,14 @@ function normalizeTimestamp(value: unknown): string {
 
 export function toPublicV1ProjectResponse(p: any) {
   return {
-    id: p.id,
+    id: String(p.id),
     ref: p.ref,
     organization_id: p.organization_id || "default",
     organization_slug: p.organization_slug || p.organization_id || "default",
     name: p.name,
     region: p.region || "local",
     created_at: normalizeTimestamp(p.created_at),
-    status: p.status,
+    status: mapStatus(p.status),
   };
 }
 
