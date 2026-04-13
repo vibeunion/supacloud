@@ -84,12 +84,12 @@ export const authMfaRoutes = new Elysia({ prefix: "/v1/projects" })
         if (!res.ok) {
           set.status = res.status;
           const err = await res.json().catch(() => ({}));
-          return { error: err.msg || err.message || "Failed to enroll factor", error_code: err.error_code, code: err.code };
+          return { message: err.msg || err.message || "Failed to enroll factor", code: err.code || "500" };
         }
 
         return res.json();
       } catch (err: unknown) {
-        return status(500, { error: "Failed to enroll factor", message: err instanceof Error ? err.message : String(err) });
+        return status(500, { message: "Failed to enroll factor" });
       }
     },
     {

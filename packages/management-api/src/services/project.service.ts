@@ -39,6 +39,7 @@ export interface ProjectResponse {
   updated_at: Date;
   database: {
     host: string;
+    port?: number;
     name: string;
     user: string;
   };
@@ -51,6 +52,7 @@ export interface ProjectResponse {
 }
 
 export interface ProjectCreateResponse extends ProjectResponse {
+  inserted_at: Date;
   endpoint: string;
   cloud_provider: string;
   kubernetes_version: string;
@@ -97,7 +99,9 @@ export interface FunctionResponse {
   slug: string;
   name: string;
   status: string;
+  version: number;
   verify_jwt: boolean;
+  import_map: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -198,6 +202,7 @@ export class ProjectService {
     const response = await this.toResponse(project);
     return {
       ...response,
+      inserted_at: project.created_at,
       endpoint: response.api?.url || `https://${projectRef}.${config.baseDomain}`,
       cloud_provider: "localhost",
       kubernetes_version: "1.28.0",
@@ -214,6 +219,10 @@ export class ProjectService {
       service_role_key: serviceRoleKey,
       jwt_secret: jwtSecret,
       db_password: dbPassword,
+      database: {
+        ...response.database,
+        port: 5432,
+      },
     };
   }
 
@@ -588,7 +597,9 @@ export class ProjectService {
         slug,
         name: slug,
         status: "ACTIVE",
+        version: 1,
         verify_jwt: cfg.verify_jwt,
+        import_map: false,
         created_at,
         updated_at,
       });

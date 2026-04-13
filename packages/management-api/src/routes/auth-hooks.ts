@@ -9,7 +9,7 @@ export const authHooksRoutes = new Elysia({ prefix: "/v1/projects" })
     "/:ref/database/webhooks",
     async ({ params }) => {
       const project = await projectService.getProject(params.ref);
-      if (!project) return status(404, { error: "Project not found" });
+      if (!project) return status(404, { message: "Project not found", code: "400" });
 
       try {
         const dbName = await resolveDbName(params.ref);
@@ -32,32 +32,45 @@ export const authHooksRoutes = new Elysia({ prefix: "/v1/projects" })
     "/:ref/database/webhooks",
     async ({ params, body }) => {
       const project = await projectService.getProject(params.ref);
-      if (!project) return status(404, { error: "Project not found" });
+      if (!project) return status(404, { message: "Project not found", code: "404" });
 
       try {
         const dbName = await resolveDbName(params.ref);
         const db = getProjectDb(dbName);
+        const hookTableId = (body as Record<string, unknown>).hook_table_id || (body as Record<string, unknown>).table_id;
+        const hookName = (body as Record<string, unknown>).hook_name as string;
+        const hookSchema = (body as Record<string, unknown>).hook_schema || (body as Record<string, unknown>).schema_name || 'public';
+        const hookTable = (body as Record<string, unknown>).hook_table || (body as Record<string, unknown>).table_name || '';
+        const requestUrl = (body as Record<string, unknown>).request_url || (body as Record<string, unknown>).hook_url || '';
+        const requestHeaders = (body as Record<string, unknown>).request_headers || {};
+        const events = (body as Record<string, unknown>).events || [];
+        const isRlsEnabled = (body as Record<string, unknown>).is_rls_enabled ?? (body as Record<string, unknown>).is_enabled ?? false;
         const rows = await db`
           INSERT INTO supabase_functions.hooks (hook_table_id, hook_name, hook_schema, hook_table, request_url, request_headers, events, is_rls_enabled)
-          VALUES (${body.hook_table_id}, ${body.hook_name}, ${body.hook_schema || 'public'}, ${body.hook_table || ''}, ${body.request_url || ''}, ${JSON.stringify(body.request_headers || {})}, ${body.events || []}, ${body.is_rls_enabled ?? false})
+          VALUES (${hookTableId}, ${hookName}, ${hookSchema}, ${hookTable}, ${requestUrl}, ${JSON.stringify(requestHeaders)}, ${events}, ${isRlsEnabled})
           RETURNING *
         `;
         return rows[0] || {};
       } catch (err: unknown) {
-        return status(500, { error: "Failed to create webhook", message: err instanceof Error ? err.message : String(err) });
+        return status(500, { message: "Failed to create webhook", details: err instanceof Error ? err.message : String(err) });
       }
     },
     {
       params: t.Object({ ref: t.String() }),
       body: t.Object({
-        hook_table_id: t.Number(),
+        hook_table_id: t.Optional(t.Number()),
+        table_id: t.Optional(t.Number()),
         hook_name: t.String(),
         hook_schema: t.Optional(t.String()),
+        schema_name: t.Optional(t.String()),
         hook_table: t.Optional(t.String()),
+        table_name: t.Optional(t.String()),
         request_url: t.Optional(t.String()),
+        hook_url: t.Optional(t.String()),
         request_headers: t.Optional(t.Record(t.String(), t.String())),
         events: t.Optional(t.Array(t.String())),
-        is_rls_enabled: t.Optional(t.Boolean())
+        is_rls_enabled: t.Optional(t.Boolean()),
+        is_enabled: t.Optional(t.Boolean()),
       })
     }
   )
@@ -66,16 +79,16 @@ export const authHooksRoutes = new Elysia({ prefix: "/v1/projects" })
     "/:ref/database/webhooks/:id",
     async ({ params }) => {
       const project = await projectService.getProject(params.ref);
-      if (!project) return status(404, { error: "Project not found" });
+      if (!project) return status(404, { message: "Project not found", code: "400" });
 
       try {
         const dbName = await resolveDbName(params.ref);
         const db = getProjectDb(dbName);
         const rows = await db`SELECT * FROM supabase_functions.hooks WHERE id = ${Number(params.id)}`;
-        if (rows.length === 0) return status(404, { error: "Webhook not found" });
+        if (rows.length === 0) return status(404, { message: "Webhook not found", code: "400" });
         return rows[0];
       } catch (err: unknown) {
-        return status(500, { error: "Failed to get webhook", message: err instanceof Error ? err.message : String(err) });
+        return status(500, { message: "Failed to get webhook", details: err instanceof Error ? err.message : String(err) });
       }
     },
     { params: t.Object({ ref: t.String(), id: t.String() }) }
@@ -85,13 +98,13 @@ export const authHooksRoutes = new Elysia({ prefix: "/v1/projects" })
     "/:ref/database/webhooks/:id",
     async ({ params, body }) => {
       const project = await projectService.getProject(params.ref);
-      if (!project) return status(404, { error: "Project not found" });
+      if (!project) return status(404, { message: "Project not found", code: "400" });
 
       try {
         const dbName = await resolveDbName(params.ref);
         const db = getProjectDb(dbName);
         const current = await db`SELECT * FROM supabase_functions.hooks WHERE id = ${Number(params.id)}`;
-        if (current.length === 0) return status(404, { error: "Webhook not found" });
+        if (current.length === 0) return status(404, { message: "Webhook not found", code: "400" });
 
         const existing = current[0] as Record<string, unknown>;
         const updated = await db`
@@ -108,7 +121,7 @@ export const authHooksRoutes = new Elysia({ prefix: "/v1/projects" })
         `;
         return updated[0];
       } catch (err: unknown) {
-        return status(500, { error: "Failed to update webhook", message: err instanceof Error ? err.message : String(err) });
+        return status(500, { message: "Failed to update webhook", details: err instanceof Error ? err.message : String(err) });
       }
     },
     {
@@ -130,7 +143,7 @@ export const authHooksRoutes = new Elysia({ prefix: "/v1/projects" })
     "/:ref/database/webhooks/:id",
     async ({ params }) => {
       const project = await projectService.getProject(params.ref);
-      if (!project) return status(404, { error: "Project not found" });
+      if (!project) return status(404, { message: "Project not found", code: "400" });
 
       try {
         const dbName = await resolveDbName(params.ref);
@@ -138,7 +151,7 @@ export const authHooksRoutes = new Elysia({ prefix: "/v1/projects" })
         await db`DELETE FROM supabase_functions.hooks WHERE id = ${Number(params.id)}`;
         return { success: true };
       } catch (err: unknown) {
-        return status(500, { error: "Failed to delete webhook", message: err instanceof Error ? err.message : String(err) });
+        return status(500, { message: "Failed to delete webhook", details: err instanceof Error ? err.message : String(err) });
       }
     },
     { params: t.Object({ ref: t.String(), id: t.String() }) }
@@ -148,7 +161,7 @@ export const authHooksRoutes = new Elysia({ prefix: "/v1/projects" })
     "/:ref/auth/hooks",
     async ({ params }) => {
       const settings = await projectService.getProjectSettings(params.ref);
-      if (!settings) return status(404, { error: "Project not found" });
+      if (!settings) return status(404, { message: "Project not found", code: "400" });
 
       const authConfig = (settings.auth as Record<string, unknown>) || {};
       const hooks = (authConfig.hooks as Record<string, unknown>) || {};
@@ -168,7 +181,7 @@ export const authHooksRoutes = new Elysia({ prefix: "/v1/projects" })
     "/:ref/auth/hooks",
     async ({ params, body }) => {
       const settings = await projectService.getProjectSettings(params.ref);
-      if (!settings) return status(404, { error: "Project not found" });
+      if (!settings) return status(404, { message: "Project not found", code: "400" });
 
       const authConfig = (settings.auth as Record<string, unknown>) || {};
       const currentHooks = (authConfig.hooks as Record<string, unknown>) || {};
