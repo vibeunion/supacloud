@@ -41,7 +41,7 @@ try {
 
 import { config } from "./config";
 import { checkAuth } from "./middleware/auth";
-import { closeDb } from "./db";
+import { closeDb, sql } from "./db";
 import { authRoutes, deployRoutes, storageCompatRoutes } from "./routes";
 
 const WEB_CONSOLE_DIR = "/opt/supacloud/packages/web-console/build";
@@ -892,12 +892,43 @@ async function bootstrap() {
           url.pathname.startsWith("/realtime/v1") &&
           request.headers.get("upgrade")?.toLowerCase() === "websocket"
         ) {
-          // Resolve project ref from headers for upstream routing
-          const projectRef =
+          let projectRef =
             request.headers.get("x-project-ref") ||
             request.headers.get("x-supabase-project") ||
             url.searchParams.get("ref") ||
             "";
+
+          if (!projectRef) {
+            const apikey = request.headers.get("apikey") || url.searchParams.get("apikey") || "";
+            const authorization = request.headers.get("authorization") || "";
+
+            if (authorization.startsWith("Bearer ")) {
+              try {
+                const token = authorization.slice("Bearer ".length);
+                const payloadB64 = token.split(".")[1];
+                if (payloadB64) {
+                  const payload = JSON.parse(Buffer.from(payloadB64, "base64").toString());
+                  if (payload?.ref) {
+                    projectRef = String(payload.ref);
+                  }
+                }
+              } catch {
+                // ignore malformed JWT payloads
+              }
+            }
+
+            if (!projectRef && apikey) {
+              try {
+                const rows = await sql`SELECT ref FROM projects WHERE anon_key = ${apikey} OR service_role_key = ${apikey} LIMIT 1`;
+                if (rows.length > 0) {
+                  projectRef = String(rows[0].ref);
+                }
+              } catch {
+                // fall through to anonymous/global upstream
+              }
+            }
+          }
+
           // Convert the configured HTTP Realtime URL to a WS URL
           const wsBase = config.realtimeAdminUrl
             .replace(/^http:/, "ws:")
