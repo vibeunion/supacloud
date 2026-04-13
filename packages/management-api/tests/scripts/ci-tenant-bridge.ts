@@ -215,6 +215,19 @@ export async function setupCiBridge(sql: InstanceType<typeof SQL>): Promise<{
       console.warn("[CIBridge] Storage bucket creation skipped:", e.message?.substring(0, 80));
     }
 
+    // Create physical S3 bucket in MinIO so uploads actually work
+    try {
+      const { StorageService } = await import("../../src/services/storage.service");
+      const s3Result = await StorageService.createBucket(CI_TENANT_REF);
+      if (s3Result.success) {
+        console.log("[CIBridge] S3 physical bucket created.");
+      } else {
+        console.warn("[CIBridge] S3 bucket creation warning:", s3Result.error);
+      }
+    } catch (e: any) {
+      console.warn("[CIBridge] S3 bucket creation skipped:", e.message?.substring(0, 80));
+    }
+
     // Seed data for todos table
     await testSql`
       INSERT INTO public.todos (task, is_complete) VALUES
@@ -228,6 +241,25 @@ export async function setupCiBridge(sql: InstanceType<typeof SQL>): Promise<{
 
     // 5. Notify PostgREST to refresh its schema cache so it sees the new tables
     await testSql`NOTIFY pgrst, 'reload schema'`;
+
+    // 6. Register Realtime tenant so WebSocket subscriptions work
+    try {
+      const { RealtimeService } = await import("../../src/services/realtime.service");
+      const realtimeService = new RealtimeService();
+      const registered = await realtimeService.registerTenant({
+        projectRef: CI_TENANT_REF,
+        dbName: "postgres",
+        dbPassword: "postgres",
+        jwtSecret: CI_JWT_SECRET,
+      });
+      if (registered) {
+        console.log("[CIBridge] Realtime tenant registered.");
+      } else {
+        console.warn("[CIBridge] Realtime tenant registration failed.");
+      }
+    } catch (e: any) {
+      console.warn("[CIBridge] Realtime tenant registration error:", e.message?.substring(0, 80));
+    }
 
     console.log(
       "[CIBridge] Test tables created with RLS policies and PostgREST schema cache refreshed.",
