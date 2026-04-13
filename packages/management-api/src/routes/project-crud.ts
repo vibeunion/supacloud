@@ -57,6 +57,13 @@ export const V1ProjectWithDatabaseResponseSchema = t.Object(
   { additionalProperties: false },
 );
 
+function normalizeTimestamp(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (value instanceof Date) return value.toISOString();
+  if (typeof value === "number") return new Date(value).toISOString();
+  return new Date().toISOString();
+}
+
 export function toPublicV1ProjectResponse(p: any) {
   return {
     id: p.id,
@@ -65,7 +72,7 @@ export function toPublicV1ProjectResponse(p: any) {
     organization_slug: p.organization_slug || p.organization_id || "default",
     name: p.name,
     region: p.region || "local",
-    created_at: p.created_at || new Date().toISOString(),
+    created_at: normalizeTimestamp(p.created_at),
     status: p.status,
   };
 }
