@@ -1,5 +1,14 @@
 import { Elysia } from "elysia";
 import { logger } from "./utils/logger";
+
+process.on('uncaughtException', (err: Error) => {
+    logger.error('FATAL UNCAUGHT EXCEPTION:', { message: err.message, stack: err.stack });
+});
+
+process.on('unhandledRejection', (reason: unknown) => {
+    logger.error('FATAL UNHANDLED REJECTION:', { reason: reason instanceof Error ? reason.message : String(reason) });
+});
+
 import { swagger } from "@elysiajs/swagger";
 import { cors } from "@elysiajs/cors";
 
