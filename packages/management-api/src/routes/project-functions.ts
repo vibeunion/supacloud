@@ -601,10 +601,18 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
     "/:ref/functions/secrets",
     async ({ params }) => {
       const secrets = await projectService.getSecrets(params.ref);
-      if (!secrets) return [];
-      return (secrets as Array<{ name: string; value: string }>)
-        .filter((s) => s.name.startsWith("EDGEFN_"))
-        .map((s) => ({ name: s.name, value: s.value }));
+      if (!secrets) {
+        return status(404, { message: "Project not found" });
+      }
+      return (secrets as Array<{
+        name: string;
+        value: string;
+        updated_at?: string;
+      }>).map((s) => ({
+        name: s.name,
+        value: s.value,
+        updated_at: s.updated_at ?? new Date().toISOString(),
+      }));
     },
     { params: t.Object({ ref: t.String() }) },
   )
