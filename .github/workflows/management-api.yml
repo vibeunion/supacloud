@@ -149,6 +149,12 @@ jobs:
           # Trigger Official Hardcore Reverse Testing
           echo "===== RUNNING OFFICIAL SDK PARITY PIPELINE ====="
           bun run tests/scripts/run-official-sdk-compliance.ts
+          
+          echo "===== RUNNING OFFICIAL CLI COMPLIANCE ====="
+          bun run tests/scripts/run-official-cli-compliance.ts
+          
+          echo "===== RUNNING OPENAPI SCHEMA CRAWLER ====="
+          bun run tests/scripts/run-openapi-compliance.ts
         env:
           DATABASE_URL: postgresql://supabase_admin:postgres@localhost:5432/postgres
           TEST_FIXED_JWT_SECRET: super-secret-jwt-token-with-at-least-32-characters-long
