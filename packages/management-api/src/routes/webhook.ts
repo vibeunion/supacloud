@@ -288,7 +288,7 @@ export const webhookRoutes = new Elysia({ prefix: "/v1/webhooks" })
       const authHeader = headers["authorization"] || headers["Authorization"];
 
       if (!authHeader?.startsWith("Bearer ")) {
-                return status(401, { message: "Missing or invalid authorization header", code: "400" });
+                return status(401, { message: "Missing or invalid authorization header", code: "401" });
       }
 
       const token = authHeader.replace("Bearer ", "");
@@ -296,7 +296,7 @@ export const webhookRoutes = new Elysia({ prefix: "/v1/webhooks" })
 
       const isValid = await frontendService.verifyDeployToken(project_ref, deployment_id, token);
       if (!isValid) {
-                return status(403, { message: "Invalid deploy token", code: "400" });
+                return status(403, { message: "Invalid deploy token", code: "403" });
       }
 
       const deployment = await frontendService.getDeployment(project_ref, deployment_id);
@@ -362,7 +362,7 @@ export const webhookRoutes = new Elysia({ prefix: "/v1/webhooks" })
       const authHeader = headers["authorization"] || headers["Authorization"];
 
       if (!authHeader?.startsWith("Bearer ")) {
-                return status(401, { message: "Missing or invalid authorization header", code: "400" });
+                return status(401, { message: "Missing or invalid authorization header", code: "401" });
       }
 
       const token = authHeader.replace("Bearer ", "");
@@ -370,7 +370,7 @@ export const webhookRoutes = new Elysia({ prefix: "/v1/webhooks" })
 
       const isValid = await frontendService.verifyDeployToken(project_ref, deployment_id, token);
       if (!isValid) {
-                return status(403, { message: "Invalid deploy token", code: "400" });
+                return status(403, { message: "Invalid deploy token", code: "403" });
       }
 
       await frontendService.updateDeploymentRecord(
