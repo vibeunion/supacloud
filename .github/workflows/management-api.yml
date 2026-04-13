@@ -145,6 +145,10 @@ jobs:
           sleep 3
           # Run test suites sequentially to prevent `mock.module("../../src/db")` in unit tests from poisoning E2E tests
           bun test tests/e2e
+          
+          # Trigger Official Hardcore Reverse Testing
+          echo "===== RUNNING OFFICIAL SDK PARITY PIPELINE ====="
+          bun run tests/scripts/run-official-sdk-compliance.ts
         env:
           DATABASE_URL: postgresql://supabase_admin:postgres@localhost:5432/postgres
           TEST_FIXED_JWT_SECRET: super-secret-jwt-token-with-at-least-32-characters-long
