@@ -1,7 +1,7 @@
 import { $ } from "bun";
 import { logger } from "../utils/logger";
 import { config } from "../config";
-import { sql as metaSql, resolveDbName, resolveAuthenticatorName } from "../db";
+import { sql as metaSql, resolveDbName, resolveAuthenticatorName, resolvePgrstChannel } from "../db";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import type { OAuthProvider, OAuthProviderConfig } from "../types/oauth";
@@ -198,7 +198,7 @@ db-max-rows = 1000
 server-cors-allowed-origins = "${creds.apiUrl}"
 
 # P2-4: Tenant-specific listen channel for schema cache invalidation
-db-channel = "pgrst_${ref}"
+db-channel = "${resolvePgrstChannel(ref)}"
 `.trim();
         await Bun.write(path.join(this.TENANT_CONFIG_DIR, `${ref}.conf`), pgrstConf);
 

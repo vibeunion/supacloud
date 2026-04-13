@@ -340,13 +340,36 @@ export const projectStorageRoutes = new Elysia({ prefix: "/v1/projects/:ref/stor
         return bucket;
     })
     .put('/buckets/:id', async ({ params, body, set }) => {
-        const buckets = await StorageService.listBuckets(params.ref);
-        const bucket = (buckets as Array<Record<string, unknown>>).find((b: Record<string, unknown>) => b.id === params.id || b.name === params.id);
-        if (!bucket) {
-            set.status = 404;
-            return { message: "Bucket not found", code: "404" };
+        const ref = params.ref;
+        const bucketId = params.id;
+        try {
+            const { getProjectDb, resolveDbName } = await import("../db");
+            const dbName = await resolveDbName(ref);
+            const db = getProjectDb(dbName);
+            const updates: string[] = [];
+            const bodyObj = body as Record<string, unknown>;
+            if (bodyObj.public !== undefined) {
+                updates.push(`public = ${bodyObj.public ? 'true' : 'false'}`);
+            }
+            if (bodyObj.file_size_limit !== undefined) {
+                updates.push(`file_size_limit = ${Number(bodyObj.file_size_limit)}`);
+            }
+            if (bodyObj.allowed_mime_types !== undefined) {
+                updates.push(`allowed_mime_types = '${JSON.stringify(bodyObj.allowed_mime_types)}'`);
+            }
+            if (updates.length > 0) {
+                await db.unsafe(`UPDATE storage.buckets SET ${updates.join(', ')} WHERE id = '${bucketId}'`);
+            }
+            const [updated] = await db`SELECT * FROM storage.buckets WHERE id = ${bucketId}`;
+            if (!updated) {
+                set.status = 404;
+                return { message: "Bucket not found", code: "404" };
+            }
+            return updated;
+        } catch (err: unknown) {
+            set.status = 500;
+            return { message: "Failed to update bucket", code: "500" };
         }
-        return { ...bucket, ...(body as Record<string, unknown>) };
     }, {
         body: t.Object({
             public: t.Optional(t.Boolean()),

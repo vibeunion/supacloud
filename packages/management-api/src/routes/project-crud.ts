@@ -135,6 +135,10 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ body, set }) => {
       const project = await projectService.createProject(body);
       set.status = 201;
+      const fullProject = await projectService.getProject(project.ref);
+      if (fullProject) {
+        return await buildProjectResponse(fullProject, true);
+      }
       return project;
     },
     {
