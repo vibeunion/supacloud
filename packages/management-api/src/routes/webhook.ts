@@ -301,7 +301,7 @@ export const webhookRoutes = new Elysia({ prefix: "/v1/webhooks" })
 
       const deployment = await frontendService.getDeployment(project_ref, deployment_id);
       if (!deployment) {
-                return status(404, { message: "Deployment not found", code: "400" });
+                return status(404, { message: "Deployment not found", code: "404" });
       }
 
       const recordId = await frontendService.createDeploymentRecord(

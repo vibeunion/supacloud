@@ -9,7 +9,7 @@ export const authHooksRoutes = new Elysia({ prefix: "/v1/projects" })
     "/:ref/database/webhooks",
     async ({ params }) => {
       const project = await projectService.getProject(params.ref);
-      if (!project) return status(404, { message: "Project not found", code: "400" });
+      if (!project) return status(404, { message: "Project not found", code: "404" });
 
       try {
         const dbName = await resolveDbName(params.ref);
@@ -79,13 +79,13 @@ export const authHooksRoutes = new Elysia({ prefix: "/v1/projects" })
     "/:ref/database/webhooks/:id",
     async ({ params }) => {
       const project = await projectService.getProject(params.ref);
-      if (!project) return status(404, { message: "Project not found", code: "400" });
+      if (!project) return status(404, { message: "Project not found", code: "404" });
 
       try {
         const dbName = await resolveDbName(params.ref);
         const db = getProjectDb(dbName);
         const rows = await db`SELECT * FROM supabase_functions.hooks WHERE id = ${Number(params.id)}`;
-        if (rows.length === 0) return status(404, { message: "Webhook not found", code: "400" });
+        if (rows.length === 0) return status(404, { message: "Webhook not found", code: "404" });
         return rows[0];
       } catch (err: unknown) {
         return status(500, { message: "Failed to get webhook", details: err instanceof Error ? err.message : String(err) });
@@ -98,13 +98,13 @@ export const authHooksRoutes = new Elysia({ prefix: "/v1/projects" })
     "/:ref/database/webhooks/:id",
     async ({ params, body }) => {
       const project = await projectService.getProject(params.ref);
-      if (!project) return status(404, { message: "Project not found", code: "400" });
+      if (!project) return status(404, { message: "Project not found", code: "404" });
 
       try {
         const dbName = await resolveDbName(params.ref);
         const db = getProjectDb(dbName);
         const current = await db`SELECT * FROM supabase_functions.hooks WHERE id = ${Number(params.id)}`;
-        if (current.length === 0) return status(404, { message: "Webhook not found", code: "400" });
+        if (current.length === 0) return status(404, { message: "Webhook not found", code: "404" });
 
         const existing = current[0] as Record<string, unknown>;
         const updated = await db`
@@ -115,7 +115,8 @@ export const authHooksRoutes = new Elysia({ prefix: "/v1/projects" })
             request_url = ${body.request_url ?? existing.request_url},
             request_headers = ${body.request_headers ? JSON.stringify(body.request_headers) : existing.request_headers},
             events = ${body.events ?? existing.events},
-            is_rls_enabled = ${body.is_rls_enabled ?? existing.is_rls_enabled}
+            is_rls_enabled = ${body.is_rls_enabled ?? existing.is_rls_enabled},
+            updated_at = NOW()
           WHERE id = ${Number(params.id)}
           RETURNING *
         `;
@@ -143,7 +144,7 @@ export const authHooksRoutes = new Elysia({ prefix: "/v1/projects" })
     "/:ref/database/webhooks/:id",
     async ({ params }) => {
       const project = await projectService.getProject(params.ref);
-      if (!project) return status(404, { message: "Project not found", code: "400" });
+      if (!project) return status(404, { message: "Project not found", code: "404" });
 
       try {
         const dbName = await resolveDbName(params.ref);
@@ -162,7 +163,7 @@ export const authHooksRoutes = new Elysia({ prefix: "/v1/projects" })
     "/:ref/auth/hooks",
     async ({ params }) => {
       const settings = await projectService.getProjectSettings(params.ref);
-      if (!settings) return status(404, { message: "Project not found", code: "400" });
+      if (!settings) return status(404, { message: "Project not found", code: "404" });
 
       const authConfig = (settings.auth as Record<string, unknown>) || {};
       const hooks = (authConfig.hooks as Record<string, unknown>) || {};
@@ -182,7 +183,7 @@ export const authHooksRoutes = new Elysia({ prefix: "/v1/projects" })
     "/:ref/auth/hooks",
     async ({ params, body }) => {
       const settings = await projectService.getProjectSettings(params.ref);
-      if (!settings) return status(404, { message: "Project not found", code: "400" });
+      if (!settings) return status(404, { message: "Project not found", code: "404" });
 
       const authConfig = (settings.auth as Record<string, unknown>) || {};
       const currentHooks = (authConfig.hooks as Record<string, unknown>) || {};

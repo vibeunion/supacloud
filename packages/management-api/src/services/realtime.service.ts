@@ -1,5 +1,5 @@
 import { config } from "../config";
-import { sql } from "../db";
+import { sql, resolveSlotName } from "../db";
 /**
  * RealtimeService - Manages Supabase Realtime tenant registration
  * 
@@ -106,7 +106,7 @@ export class RealtimeService {
                                 poll_interval_ms: 100,
                                 poll_max_changes: 100,
                                 poll_max_record_bytes: 1048576,
-                                slot_name: `supabase_realtime_${config.projectRef}`,
+                                slot_name: resolveSlotName(config.projectRef),
                             },
                         }],
                     },
@@ -191,7 +191,7 @@ export class RealtimeService {
                                 db_password: config.dbPassword || globalConfig.pgPassword || "postgres",
                                 region: "us-east-1",
                                 poll_interval_ms: 100,
-                                slot_name: `supabase_realtime_${config.projectRef}`,
+                                slot_name: resolveSlotName(config.projectRef),
                             },
                         }],
                     },

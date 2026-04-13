@@ -18,7 +18,7 @@ export const authSsoRoutes = new Elysia({ prefix: "/v1/projects" })
     "/:ref/auth/sso/providers",
     async ({ params, set }) => {
       const ctx = await getGoTrueHeaders(params.ref);
-      if (!ctx) return status(404, { message: "Project not found", code: "400" });
+      if (!ctx) return status(404, { message: "Project not found", code: "404" });
 
       try {
         const res = await fetch(`${ctx.apiUrl}/auth/v1/admin/sso/providers`, {
@@ -46,7 +46,7 @@ export const authSsoRoutes = new Elysia({ prefix: "/v1/projects" })
     "/:ref/auth/sso/providers",
     async ({ params, body, set }) => {
       const ctx = await getGoTrueHeaders(params.ref);
-      if (!ctx) return status(404, { message: "Project not found", code: "400" });
+      if (!ctx) return status(404, { message: "Project not found", code: "404" });
 
       try {
         const res = await fetch(`${ctx.apiUrl}/auth/v1/admin/sso/providers`, {
@@ -88,7 +88,7 @@ export const authSsoRoutes = new Elysia({ prefix: "/v1/projects" })
     "/:ref/auth/sso/providers/:id",
     async ({ params, set }) => {
       const ctx = await getGoTrueHeaders(params.ref);
-      if (!ctx) return status(404, { message: "Project not found", code: "400" });
+      if (!ctx) return status(404, { message: "Project not found", code: "404" });
 
       try {
         const res = await fetch(`${ctx.apiUrl}/auth/v1/admin/sso/providers/${params.id}`, {
@@ -115,7 +115,7 @@ export const authSsoRoutes = new Elysia({ prefix: "/v1/projects" })
     "/:ref/auth/sso/providers/:id",
     async ({ params, body, set }) => {
       const ctx = await getGoTrueHeaders(params.ref);
-      if (!ctx) return status(404, { message: "Project not found", code: "400" });
+      if (!ctx) return status(404, { message: "Project not found", code: "404" });
 
       try {
         const res = await fetch(`${ctx.apiUrl}/auth/v1/admin/sso/providers/${params.id}`, {
@@ -156,7 +156,7 @@ export const authSsoRoutes = new Elysia({ prefix: "/v1/projects" })
     "/:ref/auth/sso/providers/:id",
     async ({ params, set }) => {
       const ctx = await getGoTrueHeaders(params.ref);
-      if (!ctx) return status(404, { message: "Project not found", code: "400" });
+      if (!ctx) return status(404, { message: "Project not found", code: "404" });
 
       try {
         const res = await fetch(`${ctx.apiUrl}/auth/v1/admin/sso/providers/${params.id}`, {
