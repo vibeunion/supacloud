@@ -122,43 +122,11 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
   // Get all projects
   .get("/", async () => {
     const projects = await projectService.listProjects();
-    return projects.map(p => ({
-      id: p.id,
-      ref: p.ref,
-      name: p.name,
-      status: mapStatus(p.status),
-      region: p.region || "local",
-      organization_id: p.organization_id || "default",
-      cloud_provider: "localhost",
-      created_at: p.created_at,
-      updated_at: p.updated_at,
-      inserted_at: p.created_at,
-      pause_status: p.status === "paused" ? "paused" : undefined,
-      preview_branch_refs: [],
-      database: {
-        host: p.database?.host || "localhost",
-      },
-    }));
+    return Promise.all(projects.map(p => buildProjectResponse(p, false)));
   })
   .get("", async () => {
     const projects = await projectService.listProjects();
-    return projects.map(p => ({
-      id: p.id,
-      ref: p.ref,
-      name: p.name,
-      status: mapStatus(p.status),
-      region: p.region || "local",
-      organization_id: p.organization_id || "default",
-      cloud_provider: "localhost",
-      created_at: p.created_at,
-      updated_at: p.updated_at,
-      inserted_at: p.created_at,
-      pause_status: p.status === "paused" ? "paused" : undefined,
-      preview_branch_refs: [],
-      database: {
-        host: p.database?.host || "localhost",
-      },
-    }));
+    return Promise.all(projects.map(p => buildProjectResponse(p, false)));
   })
 
   // Create new project
@@ -195,84 +163,7 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
                 return status(404, { message: "Project not found", code: "404" });
       }
 
-      const ref = project.ref;
-      const dbName = await resolveDbName(ref);
-
-      // Get real database version and connection count
-      let dbVersion = "15.0";
-      let dbSize = 0;
-      let connectionCount = 0;
-      try {
-        const projectDb = getProjectDb(dbName);
-        const versionResult = await projectDb`SHOW server_version`;
-        if (versionResult[0]?.server_version) {
-          dbVersion = versionResult[0].server_version.split(" ")[0];
-        }
-        const sizeResult = await projectDb`SELECT pg_database_size(current_database()) as size`;
-        dbSize = sizeResult[0]?.size || 0;
-        const connectionResult = await projectDb`SELECT count(*) as count FROM pg_stat_activity WHERE state = 'active'`;
-        connectionCount = connectionResult[0]?.count || 0;
-      } catch (e: unknown) {
-        // Ignore database errors
-      }
-
-      // Check service statuses using systemd
-      const checkServiceStatus = async (serviceName: string): Promise<string> => {
-        try {
-          const result = await Bun.$`systemctl is-active ${serviceName} 2>/dev/null || echo "inactive"`.quiet();
-          const status = result.text().trim();
-          return status === "active" ? "ACTIVE_HEALTHY" : "INACTIVE";
-        } catch (err: unknown) {
-          logger.warn("[Projects] Failed to check service status", { error: err });
-          return "INACTIVE";
-        }
-      };
-
-      const serviceStatuses = await Promise.all([
-        checkServiceStatus("patroni").then(s => ({ id: "postgresql", name: "PostgreSQL", status: s, healthy: s === "ACTIVE_HEALTHY" })),
-        checkServiceStatus(`supacloud-pgrst@${ref}`).then(s => ({ id: "postgrest", name: "PostgREST", status: s, healthy: s === "ACTIVE_HEALTHY" })),
-        checkServiceStatus(`supacloud-gotrue@${ref}`).then(s => ({ id: "gotrue", name: "GoTrue", status: s, healthy: s === "ACTIVE_HEALTHY" })),
-        checkServiceStatus(`supacloud-realtime@${ref}`).then(s => ({ id: "realtime", name: "Realtime", status: s, healthy: s === "ACTIVE_HEALTHY" })).catch(() => ({ id: "realtime", name: "Realtime", status: "INACTIVE", healthy: false })),
-        checkServiceStatus(`supacloud-storage@${ref}`).then(s => ({ id: "storage", name: "Storage", status: s, healthy: s === "ACTIVE_HEALTHY" })).catch(() => ({ id: "storage", name: "Storage", status: "INACTIVE", healthy: false })),
-        checkServiceStatus("kong").then(s => ({ id: "kong", name: "Kong", status: s, healthy: s === "ACTIVE_HEALTHY" })).catch(() => ({ id: "kong", name: "Kong", status: "INACTIVE", healthy: false })),
-      ]);
-
-      return {
-        id: project.id,
-        ref: project.ref,
-        name: project.name,
-        status: mapStatus(project.status),
-        region: project.region || "local",
-        organization_id: (project as unknown as Record<string, unknown>).organization_id || "default",
-        cloud_provider: (project as unknown as Record<string, unknown>).cloud_provider || "localhost",
-        created_at: project.created_at,
-        updated_at: project.updated_at,
-        inserted_at: project.created_at,
-        pause_status: project.status === 'paused' ? 'paused' : undefined,
-        preview_branch_refs: [],
-        database: {
-          host: project.database?.host || "localhost",
-          port: (project.database as unknown as Record<string, unknown>)?.port || 5432,
-          version: dbVersion,
-          postgres_engine: dbVersion.split(".")[0] + "." + dbVersion.split(".")[1],
-          release_channel: "stable",
-          size: dbSize,
-          connection_count: connectionCount,
-        },
-        db_port: (project.database as unknown as Record<string, unknown>)?.port || 5432,
-        db_host: project.database?.host || "localhost",
-        db_name: dbName,
-        db_user: "postgres",
-        connectionString: `postgresql://postgres:[YOUR-PASSWORD]@${project.database?.host || 'localhost'}:${(project.database as unknown as Record<string, unknown>)?.port || 5432}/${dbName}`,
-        services: serviceStatuses,
-        endpoint: project.api?.url || `https://${project.ref}.localhost`,
-        anon_key: project.anon_key,
-        service_role_key: project.service_role_key,
-        jwt_secret: project.jwt_secret,
-        api: project.api,
-        studio: project.studio,
-        config: project.config,
-      };
+      return await buildProjectResponse(project, true);
     },
     {
       params: t.Object({
@@ -293,27 +184,7 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
       if (!project) {
                 return status(404, { message: "Project not found", code: "404" });
       }
-      return {
-        id: project.id,
-        ref: project.ref,
-        name: project.name,
-        status: mapStatus(project.status),
-        region: project.region || "local",
-        organization_id: project.organization_id || "default",
-        cloud_provider: "localhost",
-        created_at: project.created_at,
-        updated_at: project.updated_at,
-        inserted_at: project.created_at,
-        pause_status: project.status === "paused" ? "paused" : undefined,
-        preview_branch_refs: [],
-        database: {
-          host: project.database?.host || "localhost",
-        },
-        endpoint: project.api?.url || `https://${params.ref}.localhost`,
-        anon_key: project.anon_key,
-        service_role_key: project.service_role_key,
-        jwt_secret: project.jwt_secret,
-      };
+      return await buildProjectResponse(project, true);
     },
     {
       params: t.Object({
@@ -337,20 +208,7 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
       if (!deleted) {
                 return status(404, { message: "Project not found", code: "404" });
       }
-      return {
-        id: project.id,
-        ref: project.ref,
-        name: project.name,
-        status: mapStatus(project.status),
-        region: project.region || "local",
-        organization_id: project.organization_id || "default",
-        cloud_provider: "localhost",
-        created_at: project.created_at,
-        updated_at: project.updated_at,
-        inserted_at: project.created_at,
-        database: { host: project.database?.host || "localhost" },
-        endpoint: project.api?.url || `https://${params.ref}.localhost`,
-      };
+      return await buildProjectResponse(project, true);
     },
     { params: t.Object({ ref: t.String() }) }
   )
@@ -367,22 +225,7 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
       if (!project) {
                 return status(404, { message: "Project not found", code: "404" });
       }
-      return {
-        id: project.id,
-        ref: project.ref,
-        name: project.name,
-        status: mapStatus(project.status),
-        region: project.region || "local",
-        organization_id: project.organization_id || "default",
-        cloud_provider: "localhost",
-        created_at: project.created_at,
-        updated_at: project.updated_at,
-        inserted_at: project.created_at,
-        pause_status: "paused",
-        preview_branch_refs: [],
-        database: { host: project.database?.host || "localhost" },
-        endpoint: project.api?.url || `https://${params.ref}.localhost`,
-      };
+      return await buildProjectResponse(project, true);
     },
     { params: t.Object({ ref: t.String() }) }
   )
@@ -398,22 +241,7 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
       if (!project) {
                 return status(404, { message: "Project not found", code: "404" });
       }
-      return {
-        id: project.id,
-        ref: project.ref,
-        name: project.name,
-        status: mapStatus(project.status),
-        region: project.region || "local",
-        organization_id: project.organization_id || "default",
-        cloud_provider: "localhost",
-        created_at: project.created_at,
-        updated_at: project.updated_at,
-        inserted_at: project.created_at,
-        pause_status: undefined,
-        preview_branch_refs: [],
-        database: { host: project.database?.host || "localhost" },
-        endpoint: project.api?.url || `https://${params.ref}.localhost`,
-      };
+      return await buildProjectResponse(project, true);
     },
     { params: t.Object({ ref: t.String() }) }
   )
@@ -474,10 +302,12 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params }) => {
       const project = await projectService.getProject(params.ref);
       if (!project) return status(404, { message: "Project not found", code: "404" });
+      const dbName = await resolveDbName(params.ref);
+      const dbUser = resolveRoleName(params.ref);
       return {
         endpoint: project.api?.url || `https://${params.ref}.localhost`,
         auto_idle_disabled: false,
-        connection_string: `postgresql://postgres:[YOUR-PASSWORD]@${project.database?.host || "localhost"}:5432/postgres`,
+        connection_string: `postgresql://${dbUser}:[YOUR-PASSWORD]@${project.database?.host || "localhost"}:5432/${dbName}`,
       };
     },
     { params: t.Object({ ref: t.String() }) }
