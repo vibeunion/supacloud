@@ -814,9 +814,9 @@ async function bootstrap() {
             __buffer?: string[];
           };
           const { upstreamUrl, requestHeaders } = data;
-          const upstream = new WebSocket(upstreamUrl, {
+          const upstream = new (WebSocket as any)(upstreamUrl, {
             headers: requestHeaders,
-          } as any);
+          });
 
           data.upstream = upstream;
 
@@ -830,7 +830,7 @@ async function bootstrap() {
             }
           });
 
-          upstream.addEventListener("message", (event) => {
+          upstream.addEventListener("message", (event: any) => {
             try {
               ws.send(event.data as string | ArrayBufferLike);
             } catch {
@@ -838,7 +838,7 @@ async function bootstrap() {
             }
           });
 
-          upstream.addEventListener("close", (event) => {
+          upstream.addEventListener("close", (event: any) => {
             try {
               ws.close(event.code, event.reason);
             } catch {
