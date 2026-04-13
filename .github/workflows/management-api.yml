@@ -186,7 +186,6 @@ jobs:
           S3_ACCESS_KEY: minioadmin
           S3_SECRET_KEY: minioadmin
           S3_FORCE_PATH_STYLE: true
-          MASTER_TOKEN: super-secret-jwt-token-with-at-least-32-characters-long
 
   shell-scripts-lint:
     name: Shell Scripts Lint
