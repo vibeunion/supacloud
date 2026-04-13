@@ -346,19 +346,19 @@ export const projectStorageRoutes = new Elysia({ prefix: "/v1/projects/:ref/stor
             const { getProjectDb, resolveDbName } = await import("../db");
             const dbName = await resolveDbName(ref);
             const db = getProjectDb(dbName);
-            const updates: string[] = [];
             const bodyObj = body as Record<string, unknown>;
+            if (!/^[a-zA-Z0-9._-]+$/.test(bucketId)) {
+                set.status = 400;
+                return { message: "Invalid bucket id", code: "400" };
+            }
             if (bodyObj.public !== undefined) {
-                updates.push(`public = ${bodyObj.public ? 'true' : 'false'}`);
+                await db`UPDATE storage.buckets SET public = ${bodyObj.public ? true : false} WHERE id = ${bucketId}`;
             }
             if (bodyObj.file_size_limit !== undefined) {
-                updates.push(`file_size_limit = ${Number(bodyObj.file_size_limit)}`);
+                await db`UPDATE storage.buckets SET file_size_limit = ${Number(bodyObj.file_size_limit)} WHERE id = ${bucketId}`;
             }
             if (bodyObj.allowed_mime_types !== undefined) {
-                updates.push(`allowed_mime_types = '${JSON.stringify(bodyObj.allowed_mime_types)}'`);
-            }
-            if (updates.length > 0) {
-                await db.unsafe(`UPDATE storage.buckets SET ${updates.join(', ')} WHERE id = '${bucketId}'`);
+                await db`UPDATE storage.buckets SET allowed_mime_types = ${JSON.stringify(bodyObj.allowed_mime_types)} WHERE id = ${bucketId}`;
             }
             const [updated] = await db`SELECT * FROM storage.buckets WHERE id = ${bucketId}`;
             if (!updated) {
