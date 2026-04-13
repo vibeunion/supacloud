@@ -46,16 +46,29 @@ async function bootstrap() {
 
   await new Promise((r) => setTimeout(r, 2000));
 
-  console.log("📦 Applying dummy schema needed for official SDK tests...");
+  console.log("📦 Applying official SDK schema (same as supabase-js migrations)...");
   try {
     const dbName = await resolveDbName(project.ref);
     const projectDb = getProjectDb(dbName);
-    await projectDb`CREATE TABLE IF NOT EXISTS public.todos (id SERIAL PRIMARY KEY, task TEXT, is_complete BOOLEAN)`;
-    await projectDb`CREATE TABLE IF NOT EXISTS public.users (username TEXT PRIMARY KEY, status TEXT)`;
-    await projectDb`CREATE TABLE IF NOT EXISTS public.channels (id TEXT PRIMARY KEY, inserted_at TIMESTAMPTZ DEFAULT NOW())`;
-    await projectDb`CREATE TABLE IF NOT EXISTS public.messages (id TEXT PRIMARY KEY, message TEXT, channel_id TEXT)`;
-    await projectDb`CREATE OR REPLACE FUNCTION hello_world() RETURNS text AS $$ BEGIN RETURN 'hello world'; END; $$ LANGUAGE plpgsql`;
-    console.log("✅ Schema applied to project database:", dbName);
+    // Match official supabase-js migration: 20250422000000_create_todos_table.sql
+    await projectDb`DROP TABLE IF EXISTS public.todos CASCADE`;
+    await projectDb`CREATE TABLE IF NOT EXISTS public.todos (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), task TEXT NOT NULL, is_complete BOOLEAN NOT NULL DEFAULT false, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), user_id UUID REFERENCES auth.users(id))`;
+    await projectDb`ALTER TABLE public.todos ENABLE ROW LEVEL SECURITY`;
+    await projectDb`CREATE POLICY "Allow anonymous read access" ON public.todos FOR SELECT TO anon USING (true)`;
+    await projectDb`CREATE POLICY "Allow anonymous insert access" ON public.todos FOR INSERT TO anon WITH CHECK (true)`;
+    await projectDb`CREATE POLICY "Allow anonymous delete access" ON public.todos FOR DELETE TO anon USING (true)`;
+    await projectDb`CREATE POLICY "Allow authenticated read own todos" ON public.todos FOR SELECT TO authenticated USING (auth.uid() = user_id)`;
+    await projectDb`CREATE POLICY "Allow authenticated insert own todos" ON public.todos FOR INSERT TO authenticated WITH CHECK (auth.uid() = user_id)`;
+    await projectDb`CREATE POLICY "Allow authenticated update own todos" ON public.todos FOR UPDATE TO authenticated USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id)`;
+    await projectDb`CREATE POLICY "Allow authenticated delete own todos" ON public.todos FOR DELETE TO authenticated USING (auth.uid() = user_id)`;
+    await projectDb`GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role`;
+    await projectDb`GRANT SELECT, INSERT, UPDATE, DELETE ON public.todos TO anon, authenticated, service_role`;
+    // Storage: create test-bucket
+    try {
+      await projectDb`INSERT INTO storage.buckets (id, name, public) VALUES ('test-bucket', 'test-bucket', false) ON CONFLICT (id) DO NOTHING`;
+    } catch (_) {}
+    await projectDb`NOTIFY pgrst, 'reload schema'`;
+    console.log("✅ Official SDK schema applied to project database:", dbName);
   } catch (e: any) {
     console.warn("DB schema injection err (ignoring):", e.message);
   }
@@ -195,7 +208,7 @@ async function bootstrap() {
       }
     }
     const testResult =
-      await $`cd ${testCwd} && SUPABASE_URL=http://127.0.0.1:9090 SUPABASE_ANON_KEY=${OFFICIAL_ANON_KEY} SUPABASE_SERVICE_KEY=${OFFICIAL_SERVICE_ROLE_KEY} npx jest test/integration.test.ts --no-cache --forceExit`.nothrow();
+      await $`cd ${testCwd} && SUPABASE_URL=http://127.0.0.1:9090 SUPABASE_ANON_KEY=${OFFICIAL_ANON_KEY} SUPABASE_SERVICE_ROLE_KEY=${OFFICIAL_SERVICE_ROLE_KEY} npx jest test/integration.test.ts --no-cache --forceExit`.nothrow();
     testExitCode = testResult.exitCode;
     console.log(`📋 Test exit code: ${testExitCode}`);
   } catch (err) {
@@ -213,15 +226,10 @@ async function bootstrap() {
     // and poison subsequent test phases (CLI compliance, OpenAPI crawler).
 
     if (testExitCode !== 0) {
-      console.warn(
-        "⚠️ SDK parity compliance: some tests FAILED (non-blocking tracking metric)",
+      console.error(
+        "❌ SDK parity compliance: some tests FAILED — blocking CI gate",
       );
-      console.warn(
-        "   Known infra gaps: RLS tables, Realtime routing, Storage port — see CI docs",
-      );
-      // Exit 0 — this is a tracking metric, NOT a CI gate.
-      // The hard gate is sdk-parity.test.ts (runs separately).
-      process.exit(0);
+      process.exit(1);
     } else {
       console.log("✅ SDK parity compliance: all tests passed");
       process.exit(0);
