@@ -18,7 +18,7 @@
   }
 
   const projectRef = $derived(page.params.ref);
-  const { query } = useList<EdgeFunction>({ get resource() { return `v1/projects/${projectRef}/functions`; } });
+  const query = useList<EdgeFunction>({ get resource() { return `v1/projects/${projectRef}/functions`; } });
   const functions = $derived(Array.isArray(query.data?.data) ? query.data.data : ((query.data?.data as unknown as Record<string, unknown>)?.functions as EdgeFunction[] || []));
   let showCreate = $state(false);
   let newSlug = $state("");

@@ -3,7 +3,7 @@
   import { Loader2 } from "lucide-svelte";
   import { CreateButton } from "@svadmin/ui";
 
-  const { query } = useList({ resource: "v1/projects" });
+  const query = useList({ resource: "v1/projects" });
 </script>
 
 <div class="space-y-6">

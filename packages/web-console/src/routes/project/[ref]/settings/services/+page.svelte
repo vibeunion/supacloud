@@ -18,7 +18,7 @@
 
   const projectRef = $derived(page.params.ref);
 
-  const { query } = useShow({
+  const query = useShow({
     get resource() { return "v1/projects"; },
     get id() { return projectRef; }
   });
