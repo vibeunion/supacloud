@@ -166,14 +166,13 @@ url = "http://127.0.0.1:4000"
         // NOTE: Do NOT call sql.end() here — the OpenAPI compliance script runs next.
         // Closing the shared connection pool would crash the background API server.
 
-        // CLI compliance is a tracking metric, not a CI gate.
-        // CLI binary availability and behavior varies across CI environments.
         if (totalFailures > 0) {
-            console.warn(`⚠️ CLI compliance: ${totalFailures} tests failed (non-blocking)`);
+            console.error(`❌ CLI compliance: ${totalFailures} tests FAILED — blocking CI gate`);
+            process.exit(1);
         } else {
             console.log("\n🎉 SUCCESS: CLI Compliance achieved parity!");
+            process.exit(0);
         }
-        process.exit(0);
     }
 }
 

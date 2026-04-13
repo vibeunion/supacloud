@@ -213,7 +213,7 @@ export class ProjectService {
       connectionString: `postgresql://${dbUser}:[YOUR-PASSWORD]@${response.database?.host || 'localhost'}:5432/${dbName}`,
       db_port: 5432,
       db_host: response.database?.host || "localhost",
-      db_name: generateDbName(projectRef),
+      db_name: dbName,
       db_user: dbUser,
       anon_key: anonKey,
       service_role_key: serviceRoleKey,

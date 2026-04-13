@@ -400,22 +400,13 @@ async function run() {
   // This allows partial implementation while blocking regression.
   const tested = passCount + failureCount;
   const failureRatio = tested > 0 ? failureCount / tested : 0;
-  const FAILURE_THRESHOLD = 0.3; // 30% tolerance
 
-  if (failureRatio > FAILURE_THRESHOLD) {
+  if (failureCount > 0) {
     console.error(
-      `\n❌ FAIL: ${failureCount}/${tested} endpoints failed schema validation (>${Math.round(FAILURE_THRESHOLD * 100)}% threshold).`,
+      `\n❌ FAIL: ${failureCount}/${tested} endpoints failed schema validation.`,
     );
     console.error("Fix the schema deviations above before merging.");
     process.exit(1);
-  } else if (failureCount > 0) {
-    console.warn(
-      `\n⚠️ WARN: ${failureCount}/${tested} endpoints have schema deviations (within ${Math.round(FAILURE_THRESHOLD * 100)}% tolerance).`,
-    );
-    console.log(
-      "Non-blocking: pass rate is acceptable for current implementation stage.",
-    );
-    process.exit(0);
   } else {
     console.log(
       "\n🎉 SUCCESS: All validated Management API schemas achieve parity with official Supabase spec!",
