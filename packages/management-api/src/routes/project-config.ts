@@ -6,6 +6,7 @@ import { Elysia, t, status } from "elysia";
 import { projectService } from "../services";
 import { gatewayService } from "../services/gateway.service";
 import { logger } from "../utils/logger";
+import { resolveRoleName, resolveDbName as resolveDbNameTopLevel } from "../db";
 
 /** Map PostgreSQL column types to TypeScript types */
 function pgTypeToTs(udtName: string, dataType: string): string {
@@ -39,7 +40,7 @@ function addConfigRoutes(section: string) {
       `/:ref/config/${section}`,
       async ({ params }: { params: { ref: string } }) => {
         const settings = await projectService.getProjectSettings(params.ref);
-        if (!settings) return status(404, { message: "Project not found", code: "400" });
+        if (!settings) return status(404, { message: "Project not found", code: "404" });
         return (settings as Record<string, unknown>)[section] || {};
       },
       { params: t.Object({ ref: t.String() }) }
@@ -48,7 +49,7 @@ function addConfigRoutes(section: string) {
       `/:ref/config/${section}`,
       async ({ params, body }: { params: { ref: string }; body: Record<string, unknown> }) => {
         const settings = await projectService.getProjectSettings(params.ref);
-        if (!settings) return status(404, { message: "Project not found", code: "400" });
+        if (!settings) return status(404, { message: "Project not found", code: "404" });
         const current = ((settings as Record<string, unknown>)[section] as Record<string, unknown>) || {};
         const updated = await projectService.updateProjectSettings(params.ref, {
           ...settings,
@@ -70,7 +71,7 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params, set }) => {
       const settings = await projectService.getProjectSettings(params.ref);
       if (settings === null) {
-                return status(404, { message: "Project not found", code: "400" });
+                return status(404, { message: "Project not found", code: "404" });
       }
       return settings;
     },
@@ -87,7 +88,7 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params, body, set }) => {
       const settings = await projectService.updateProjectSettings(params.ref, body);
       if (settings === null) {
-                return status(404, { message: "Project not found", code: "400" });
+                return status(404, { message: "Project not found", code: "404" });
       }
       return settings;
     },
@@ -105,7 +106,7 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params, set }) => {
       const keys = await projectService.getApiKeys(params.ref);
       if (!keys) {
-                return status(404, { message: "Project not found", code: "400" });
+                return status(404, { message: "Project not found", code: "404" });
       }
       return [
         { name: "anon", api_key: keys.anon_key },
@@ -125,7 +126,7 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params, set }) => {
       const keys = await projectService.rotateApiKeys(params.ref);
       if (!keys) {
-                return status(404, { message: "Project not found", code: "400" });
+                return status(404, { message: "Project not found", code: "404" });
       }
       return keys;
     },
@@ -173,7 +174,7 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params, body, set }) => {
       const success = await projectService.restoreBackup(params.ref, body.backup_id);
       if (!success) {
-                return status(500, { message: "Failed to restore backup", code: "400" });
+                return status(500, { message: "Failed to restore backup", code: "500" });
       }
       return { success: true };
     },
@@ -238,7 +239,7 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params, set }) => {
       const domainInfo = await projectService.getCustomDomain(params.ref);
       if (!domainInfo) {
-                return status(404, { message: "Project not found", code: "400" });
+                return status(404, { message: "Project not found", code: "404" });
       }
       return domainInfo;
     },
@@ -282,7 +283,7 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params, set }) => {
       const domainInfo = await projectService.getCustomDomain(params.ref);
       if (!domainInfo) {
-                return status(404, { message: "No custom hostname configured", code: "400" });
+                return status(404, { message: "No custom hostname configured", code: "404" });
       }
       const verified = await projectService.getCustomDomain(params.ref).then(d => !!d).catch(() => false);
       return {
@@ -301,7 +302,7 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params, set }) => {
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings) {
-                return status(404, { message: "Project not found", code: "400" });
+                return status(404, { message: "Project not found", code: "404" });
       }
 
       const authConfig = (settings.auth as Record<string, unknown>) || {};
@@ -422,7 +423,7 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params, body, set }) => {
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings) {
-                return status(404, { message: "Project not found", code: "400" });
+                return status(404, { message: "Project not found", code: "404" });
       }
 
       const currentAuth = (settings.auth as Record<string, unknown>) || {};
@@ -620,7 +621,7 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
         return {
           pgbouncer_enabled: (dbSettings as Record<string, unknown>).pgbouncer_enabled ?? false,
           pgbouncer_settings: (dbSettings as Record<string, unknown>).pgbouncer_settings || {},
-          connection_string: `postgresql://postgres:[YOUR-PASSWORD]@localhost:5432/${dbName}`,
+          connection_string: `postgresql://${resolveRoleName(params.ref)}:[YOUR-PASSWORD]@localhost:5432/${dbName}`,
           max_connections: parseInt(pgMap.max_connections || "100"),
           statement_timeout: parseInt(pgMap.statement_timeout || "0"),
           idle_in_transaction_session_timeout: parseInt(pgMap.idle_in_transaction_session_timeout || "0"),
@@ -629,7 +630,7 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
         return {
           pgbouncer_enabled: false,
           pgbouncer_settings: {},
-          connection_string: `postgresql://postgres:[YOUR-PASSWORD]@localhost:5432/postgres`,
+          connection_string: `postgresql://${resolveRoleName(params.ref)}:[YOUR-PASSWORD]@localhost:5432/postgres`,
           max_connections: 100,
           statement_timeout: 0,
           idle_in_transaction_session_timeout: 0,
@@ -643,7 +644,7 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
     "/:ref/config/pooler",
     async ({ params, body }) => {
       const settings = await projectService.getProjectSettings(params.ref);
-      if (!settings) return status(404, { message: "Project not found", code: "400" });
+      if (!settings) return status(404, { message: "Project not found", code: "404" });
       const current = ((settings as Record<string, unknown>).pooler as Record<string, unknown>) || {};
       const updated = await projectService.updateProjectSettings(params.ref, {
         ...settings,
@@ -746,7 +747,7 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
       return {
         pgbouncer_enabled: raw.pgbouncer_enabled ?? false,
         pgbouncer_settings: raw.pgbouncer_settings || {},
-        connection_string: raw.connection_string || `postgresql://postgres:[YOUR-PASSWORD]@localhost:5432/${params.ref}`,
+        connection_string: raw.connection_string || `postgresql://${resolveRoleName(params.ref)}:[YOUR-PASSWORD]@localhost:5432/${await resolveDbNameTopLevel(params.ref)}`,
         max_connections: raw.max_connections ?? 100,
         statement_timeout: raw.statement_timeout ?? 0,
         idle_in_transaction_session_timeout: raw.idle_in_transaction_session_timeout ?? 0,
@@ -832,7 +833,7 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
     "/:ref/pgbouncer",
     async ({ params, set }) => {
       const settings = await projectService.getProjectSettings(params.ref);
-      if (!settings) return { message: "Project not found", code: "400" };
+      if (!settings) return status(404, { message: "Project not found", code: "404" });
       return settings.pgbouncer || {
         pool_mode: "transaction",
         default_pool_size: 15,
@@ -899,12 +900,14 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
       const poolerHost = appConfig.poolerHost || pgHost;
       const poolerPort = appConfig.poolerPort || 6543;
 
+      const dbUser = resolveRoleName(params.ref);
+      const dbName = await resolveDbNameTopLevel(params.ref);
       return {
         pool_mode: "transaction",
         default_pool_size: 15,
         max_client_conn: 200,
-        connection_string: `postgresql://postgres.${params.ref}:[YOUR-PASSWORD]@${poolerHost}:${poolerPort}/postgres?pgbouncer=true`,
-        direct_connection_string: `postgresql://postgres.${params.ref}:[YOUR-PASSWORD]@${pgHost}:${pgPort}/postgres`,
+        connection_string: `postgresql://${dbUser}:[YOUR-PASSWORD]@${poolerHost}:${poolerPort}/${dbName}?pgbouncer=true`,
+        direct_connection_string: `postgresql://${dbUser}:[YOUR-PASSWORD]@${pgHost}:${pgPort}/${dbName}`,
       };
     },
     { params: t.Object({ ref: t.String() }) }
@@ -915,7 +918,7 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
     "/:ref/network-restrictions",
     async ({ params }) => {
       const settings = await projectService.getProjectSettings(params.ref);
-      if (!settings) return status(404, { message: "Project not found", code: "400" });
+      if (!settings) return status(404, { message: "Project not found", code: "404" });
 
       return {
         config: {
@@ -1282,7 +1285,7 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params }) => {
       const rateLimit = await gatewayService.getRateLimit(params.ref);
       if (rateLimit === null) {
-        return status(500, { message: "Failed to query rate limit from gateway", code: "400" });
+        return status(500, { message: "Failed to query rate limit from gateway", code: "500" });
       }
       return rateLimit;
     },
@@ -1307,7 +1310,7 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
         });
       }
       if (!success) {
-        return status(500, { message: "Failed to update rate limit", code: "400" });
+        return status(500, { message: "Failed to update rate limit", code: "500" });
       }
       return { success: true, message: "Rate limit updated" };
     },
@@ -1331,7 +1334,7 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params, body }) => {
       // 1. Fetch current settings to persist and check limits
       const settings = await projectService.getProjectSettings(params.ref);
-      if (!settings) return status(404, { message: "Project not found", code: "400" });
+      if (!settings) return status(404, { message: "Project not found", code: "404" });
 
       const currentLimits = (settings.rate_limits as Record<string, unknown>) || {};
       const customPaths = Object.keys(currentLimits);
@@ -1349,7 +1352,7 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
       });
 
       if (!success) {
-          return status(500, { message: "Failed to update custom route rate limit in gateway", code: "400" });
+          return status(500, { message: "Failed to update custom route rate limit in gateway", code: "500" });
       }
 
       // 3. Persist in database
@@ -1381,12 +1384,12 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params, body }) => {
       // 1. Fetch current settings
       const settings = await projectService.getProjectSettings(params.ref);
-      if (!settings) return status(404, { message: "Project not found", code: "400" });
+      if (!settings) return status(404, { message: "Project not found", code: "404" });
 
       // 2. Remove from Kong
       const success = await gatewayService.removeCustomRouteRateLimit(params.ref, body.path);
       if (!success) {
-          return status(500, { message: "Failed to remove custom route rate limit from gateway", code: "400" });
+          return status(500, { message: "Failed to remove custom route rate limit from gateway", code: "500" });
       }
 
       // 3. Persist removal in DB

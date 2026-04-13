@@ -44,18 +44,20 @@ export const projectLogsRoutes = new Elysia({ prefix: "/v1/projects/:ref/logs" }
                 const parsedLogs = lines.map((line, idx) => {
                     const match = line.match(/^([0-9-T:+.]+)\s+\S+\s+([^:]+):\s+(.*)$/);
                     if (match) {
+                        const ts = new Date(match[1]).getTime() || Date.now();
+                        const svc = match[2].trim();
                         return {
                             id: `${params.ref}-${idx}`,
-                            timestamp: match[1],
+                            timestamp: ts,
                             event_message: match[3],
-                            metadata: { service: match[2].trim() },
+                            metadata: [{ key: "service", value: svc }],
                         };
                     }
                     return {
                         id: `${params.ref}-${idx}`,
-                        timestamp: new Date().toISOString(),
+                        timestamp: Date.now(),
                         event_message: line,
-                        metadata: { service: "system" },
+                        metadata: [{ key: "service", value: "system" }],
                     };
                 });
 

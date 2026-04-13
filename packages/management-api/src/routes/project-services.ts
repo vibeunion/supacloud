@@ -30,7 +30,7 @@ export const projectServiceRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params, set }) => {
       const projectStatus = await projectService.getProjectStatus(params.ref);
       if (!projectStatus) {
-                return status(404, { message: "Project not found", code: "400" });
+                return status(404, { message: "Project not found", code: "404" });
       }
       return projectStatus;
     },
@@ -47,7 +47,7 @@ export const projectServiceRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params, set }) => {
       const project = await projectService.getProject(params.ref);
       if (!project) {
-                return status(404, { message: "Project not found", code: "400" });
+                return status(404, { message: "Project not found", code: "404" });
       }
 
       try {
@@ -122,7 +122,7 @@ export const projectServiceRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params, set }) => {
       const restarted = await projectService.restartProject(params.ref);
       if (!restarted) {
-                return status(404, { message: "Project not found", code: "400" });
+                return status(404, { message: "Project not found", code: "404" });
       }
       return { ref: params.ref, message: "Project restart initiated" };
     },
