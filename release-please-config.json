@@ -1,0 +1,34 @@
+{
+  "bump-minor-pre-major": true,
+  "changelog-sections": [
+    {"type": "feat", "section": "🚀 Features", "hidden": false},
+    {"type": "fix", "section": "🐛 Bug Fixes", "hidden": false},
+    {"type": "refactor", "section": "💅 Elegance & Refactoring", "hidden": false},
+    {"type": "perf", "section": "⚡ Performance Improvements", "hidden": false},
+    {"type": "docs", "section": "📝 Documentation", "hidden": false},
+    {"type": "chore", "section": "🔧 Miscellaneous Chores", "hidden": false}
+  ],
+  "packages": {
+    "packages/management-api": {
+      "release-type": "node",
+      "component": "management-api",
+      "changelog-path": "CHANGELOG.md"
+    },
+    "packages/web-console": {
+      "release-type": "node",
+      "component": "web-console",
+      "changelog-path": "CHANGELOG.md"
+    },
+    "packages/edge-runtime": {
+      "release-type": "node",
+      "component": "edge-runtime",
+      "changelog-path": "CHANGELOG.md"
+    },
+    "packages/mcp-server": {
+      "release-type": "node",
+      "component": "mcp-server",
+      "changelog-path": "CHANGELOG.md"
+    }
+  },
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json"
+}
