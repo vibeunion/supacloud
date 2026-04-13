@@ -542,7 +542,56 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
     },
   )
 
-  // Function Secrets — Studio compatibility
+  // Function Secrets — Project-level (Studio compatibility)
+  .get(
+    "/:ref/functions/secrets",
+    async ({ params }) => {
+      const secrets = await projectService.getSecrets(params.ref);
+      if (!secrets) return [];
+      return (secrets as Array<{ name: string; value: string }>).filter(
+        (s) => s.name.startsWith("EDGEFN_")
+      ).map(s => ({ name: s.name, value: s.value }));
+    },
+    { params: t.Object({ ref: t.String() }) }
+  )
+  .post(
+    "/:ref/functions/secrets",
+    async ({ params, body }) => {
+      const secrets = (body as Array<{ name: string; value: string }>).map((s) => ({
+        name: `EDGEFN_${s.name}`,
+        value: s.value,
+      }));
+      const success = await projectService.upsertSecrets(params.ref, secrets);
+      if (!success) {
+        return status(500, { message: "Failed to create function secrets", code: "500" });
+      }
+      return {};
+    },
+    {
+      params: t.Object({ ref: t.String() }),
+      body: t.Array(t.Object({ name: t.String(), value: t.String() })),
+    }
+  )
+  .delete(
+    "/:ref/functions/secrets",
+    async ({ params, body }) => {
+      const names = (body as string[]).map((n) => `EDGEFN_${n}`);
+      const results = await Promise.all(
+        names.map((name) => projectService.deleteSecret(params.ref, name))
+      );
+      const failed = results.filter((r) => !r).length;
+      if (failed > 0) {
+        return status(500, { message: `Failed to delete ${failed} secret(s)`, code: "500" });
+      }
+      return {};
+    },
+    {
+      params: t.Object({ ref: t.String() }),
+      body: t.Array(t.String()),
+    }
+  )
+
+  // Function Secrets — Per-function level
   .get(
     "/:ref/functions/:slug/secrets",
     async ({ params }) => {
