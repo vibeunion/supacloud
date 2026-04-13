@@ -20,7 +20,8 @@ export const deployRoutes = new Elysia({ prefix: "/v1/deploy" })
       logger.error("Deploy failed", { error });
       return status(500, {
         success: false,
-        error: error instanceof Error ? error.message : "Unknown error",
+        message: error instanceof Error ? error.message : "Unknown error",
+        code: "500",
       });
     }
   }, {
@@ -39,7 +40,8 @@ export const deployRoutes = new Elysia({ prefix: "/v1/deploy" })
       logger.error("Rollback failed", { error });
       return status(500, {
         success: false,
-        error: error instanceof Error ? error.message : "Unknown error",
+        message: error instanceof Error ? error.message : "Unknown error",
+        code: "500",
       });
     }
   }, {
@@ -63,7 +65,8 @@ export const deployRoutes = new Elysia({ prefix: "/v1/deploy" })
       logger.error("Failed to get history", { error });
       return status(500, {
         success: false,
-        error: error instanceof Error ? error.message : "Unknown error",
+        message: error instanceof Error ? error.message : "Unknown error",
+        code: "500",
       });
     }
   }, {
@@ -77,7 +80,8 @@ export const deployRoutes = new Elysia({ prefix: "/v1/deploy" })
       if (!query.app) {
         return status(400, {
           success: false,
-          error: "Missing required query parameter: app",
+          message: "Missing required query parameter: app",
+          code: "400",
         });
       }
 
@@ -92,7 +96,8 @@ export const deployRoutes = new Elysia({ prefix: "/v1/deploy" })
       logger.error("Failed to get versions", { error });
       return status(500, {
         success: false,
-        error: error instanceof Error ? error.message : "Unknown error",
+        message: error instanceof Error ? error.message : "Unknown error",
+        code: "500",
       });
     }
   }, {
@@ -100,4 +105,3 @@ export const deployRoutes = new Elysia({ prefix: "/v1/deploy" })
       app: t.Optional(t.String()),
     }),
   });
-

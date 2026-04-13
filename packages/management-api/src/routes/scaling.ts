@@ -14,7 +14,7 @@ export const scalingRoutes = new Elysia({ prefix: "/v1/projects/:ref/upgrade" })
             await ScalingService.verticalScale(params.ref, target_tier);
             return { success: true, message: `Project ${params.ref} upgrade to ${target_tier} initiated.` };
         } catch (err: unknown) {
-                        return status(500, { success: false, error: (err instanceof Error ? err.message : String(err)) });
+                        return status(500, { success: false, message: (err instanceof Error ? err.message : String(err)), code: "500" });
         }
     }, {
         body: t.Object({
@@ -27,7 +27,7 @@ export const scalingRoutes = new Elysia({ prefix: "/v1/projects/:ref/upgrade" })
             await ScalingService.horizontalScale(params.ref, replica_ip);
             return { success: true, message: `Read replica addition for ${params.ref} initiated.` };
         } catch (err: unknown) {
-                        return status(500, { success: false, error: (err instanceof Error ? err.message : String(err)) });
+            return status(500, { success: false, message: (err instanceof Error ? err.message : String(err)), code: "500" });
         }
     }, {
         body: t.Object({

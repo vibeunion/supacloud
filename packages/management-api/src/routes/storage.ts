@@ -35,7 +35,7 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
         if (!file) return status(400, { message: 'No file provided', code: '400' });
         const fileData = Buffer.from(await file.arrayBuffer());
         const success = await StorageService.uploadFile(params.ref, params.name, file.name, fileData, file.type);
-        if (!success) return status(500, { message: 'Failed to upload file', code: '400' });
+        if (!success) return status(500, { message: 'Failed to upload file', code: '500' });
         return { success: true, message: 'File uploaded successfully' };
     }, {
         body: t.Object({ file: t.File() }),
@@ -47,7 +47,7 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
     })
     .delete('/:ref/buckets/:name/files/:filename', async ({ params }) => {
         const success = await StorageService.deleteFile(params.ref, params.name, params.filename);
-        if (!success) return status(500, { message: 'Failed to delete file', code: '400' });
+        if (!success) return status(500, { message: 'Failed to delete file', code: '500' });
         return { success: true, message: 'File deleted successfully' };
     }, {
         response: {
@@ -78,7 +78,7 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
         
         if (!job) {
             set.status = 404;
-            return { message: 'Migration job not found', code: '400' };
+            return { message: 'Migration job not found', code: '404' };
         }
         
         return {
@@ -154,7 +154,7 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
             if (!res.ok) {
                 const errText = await res.text();
                 logger.error(`Imaginary ${operation} failed:`, { status: res.status, error: errText });
-                return status(502, { message: 'Image transform failed: ${errText}', code: '400' });
+                return status(502, { message: 'Image transform failed: ${errText}', code: '502' });
             }
 
             // Stream the processed image back to client with caching headers
@@ -164,7 +164,7 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
             return new Response(res.body, { headers: set.headers as unknown as HeadersInit });
         } catch (err: unknown) {
             logger.error('Image transform proxy error:', { error: err instanceof Error ? err.message : String(err) });
-            return status(502, { message: 'Image processing service unavailable', code: '400' });
+            return status(502, { message: 'Image processing service unavailable', code: '502' });
         }
     })
 
@@ -188,12 +188,12 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
 
         try {
             const res = await fetch(`${IMAGINARY_URL}/smartcrop?${p.toString()}`);
-            if (!res.ok) return status(502, { message: await res.text() });
+            if (!res.ok) return status(502, { message: await res.text(), code: '502' });
             set.headers['Content-Type'] = res.headers.get('Content-Type') || 'image/webp';
             set.headers['Cache-Control'] = 'public, max-age=31536000, immutable';
             return new Response(res.body, { headers: set.headers as unknown as HeadersInit });
         } catch (err: unknown) {
-            return status(502, { message: 'Smartcrop service unavailable', code: '400' });
+            return status(502, { message: 'Smartcrop service unavailable', code: '502' });
         }
     })
 
@@ -218,12 +218,12 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
 
         try {
             const res = await fetch(`${IMAGINARY_URL}/watermark?${p.toString()}`);
-            if (!res.ok) return status(502, { message: await res.text() });
+            if (!res.ok) return status(502, { message: await res.text(), code: '502' });
             set.headers['Content-Type'] = res.headers.get('Content-Type') || 'image/webp';
             set.headers['Cache-Control'] = 'public, max-age=31536000, immutable';
             return new Response(res.body, { headers: set.headers as unknown as HeadersInit });
         } catch (err: unknown) {
-            return status(502, { message: 'Watermark service unavailable', code: '400' });
+            return status(502, { message: 'Watermark service unavailable', code: '502' });
         }
     })
 
@@ -245,12 +245,12 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
 
         try {
             const res = await fetch(`${IMAGINARY_URL}/blur?${p.toString()}`);
-            if (!res.ok) return status(502, { message: await res.text() });
+            if (!res.ok) return status(502, { message: await res.text(), code: '502' });
             set.headers['Content-Type'] = res.headers.get('Content-Type') || 'image/webp';
             set.headers['Cache-Control'] = 'public, max-age=31536000, immutable';
             return new Response(res.body, { headers: set.headers as unknown as HeadersInit });
         } catch (err: unknown) {
-            return status(502, { message: 'Blur service unavailable', code: '400' });
+            return status(502, { message: 'Blur service unavailable', code: '502' });
         }
     })
 
@@ -265,10 +265,10 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
 
         try {
             const res = await fetch(`${IMAGINARY_URL}/info?${p.toString()}`);
-            if (!res.ok) return status(502, { message: await res.text() });
+            if (!res.ok) return status(502, { message: await res.text(), code: '502' });
             return res.json();
         } catch (err: unknown) {
-            return status(502, { message: 'Image info service unavailable', code: '400' });
+            return status(502, { message: 'Image info service unavailable', code: '502' });
         }
     })
 
@@ -288,12 +288,12 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
 
         try {
             const res = await fetch(`${IMAGINARY_URL}/thumbnail?${p.toString()}`);
-            if (!res.ok) return status(502, { message: await res.text() });
+            if (!res.ok) return status(502, { message: await res.text(), code: '502' });
             set.headers['Content-Type'] = res.headers.get('Content-Type') || 'image/webp';
             set.headers['Cache-Control'] = 'public, max-age=31536000, immutable';
             return new Response(res.body, { headers: set.headers as unknown as HeadersInit });
         } catch (err: unknown) {
-            return status(502, { message: 'Thumbnail service unavailable', code: '400' });
+            return status(502, { message: 'Thumbnail service unavailable', code: '502' });
         }
     })
 
