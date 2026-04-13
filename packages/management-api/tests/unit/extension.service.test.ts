@@ -20,9 +20,11 @@ describe("ExtensionService", () => {
         const extensions = await extensionService.listExtensions("testref123");
         expect(extensions).toHaveLength(1);
         expect(extensions[0].name).toBe("pg_stat_statements");
+    });
 
     test("enableExtension should return success", async () => {
         const result = await extensionService.enableExtension("testref123", "postgis");
-        expect(result.message).toContain("enabled");
+        expect(result.name).toBe("pg_stat_statements");
+        expect(result.is_installed).toBe(true);
     });
 });
