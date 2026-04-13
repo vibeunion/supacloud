@@ -136,7 +136,9 @@ async function bootstrap() {
         await projectService.deleteProject(project.ref);
         rmSync(targetDir, { recursive: true, force: true });
 
-        await sql.end();
+        // NOTE: Do NOT call sql.end() here — this script runs mid-pipeline.
+        // Closing the shared connection pool would crash the background API server
+        // and poison subsequent test phases (CLI compliance, OpenAPI crawler).
 
         // SDK parity is a compliance tracking metric, not a CI gate.
         // Failures here reflect infrastructure gaps (e.g., per-tenant DB provisioning in CI),
