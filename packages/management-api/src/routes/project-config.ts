@@ -316,15 +316,20 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
         double_confirm_changes: authConfig.double_confirm_changes ?? true,
         manual_linking_enabled: authConfig.manual_linking_enabled ?? authConfig.enable_manual_linking ?? false,
         jwt_expiry: authConfig.jwt_expiry ?? 3600,
+        disable_signup: authConfig.disable_signup ?? false,
         mailer_autoconfirm: authConfig.mailer_autoconfirm ?? false,
+        mail_autoconfirm: authConfig.mailer_autoconfirm ?? false,
         sms_autoconfirm: authConfig.sms_autoconfirm ?? false,
+        phone_autoconfirm: authConfig.sms_autoconfirm ?? false,
         uri_allow_list: authConfig.uri_allow_list ?? '',
         site_url: authConfig.site_url ?? '',
         password_min_length: authConfig.password_min_length ?? 8,
         security_refresh_token_rotation_enabled: authConfig.security_refresh_token_rotation_enabled ?? true,
+        refresh_token_rotation_enabled: authConfig.security_refresh_token_rotation_enabled ?? true,
         security_refresh_token_rotation_reuse_interval: authConfig.security_refresh_token_rotation_reuse_interval ?? 10,
         mfa_enabled: authConfig.mfa_enabled ?? true,
         mfa_max_enrolled_factors: authConfig.mfa_max_enrolled_factors ?? authConfig.max_enrolled_factors ?? 10,
+        mfa_factor_expiration: authConfig.mfa_factor_expiration ?? 0,
         webauthn_enabled: authConfig.webauthn_enabled ?? true,
         security_update_password_require_reauthentication: authConfig.security_update_password_require_reauthentication ?? true,
         external_anonymous_users_enabled: authConfig.external_anonymous_users_enabled ?? true,
@@ -336,11 +341,19 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
         security_captcha_provider: authConfig.security_captcha_provider ?? '',
         security_captcha_secret: authConfig.security_captcha_secret ? '********' : '',
         rate_limit_anonymous_users: authConfig.rate_limit_anonymous_users ?? 30,
+        rate_limit_header: authConfig.rate_limit_header ?? '',
         rate_limit_email_sent: authConfig.rate_limit_email_sent ?? 30,
+        rate_limit_email: authConfig.rate_limit_email_sent ?? 30,
         rate_limit_sms_sent: authConfig.rate_limit_sms_sent ?? 30,
+        rate_limit_sms: authConfig.rate_limit_sms_sent ?? 30,
         rate_limit_verify: authConfig.rate_limit_verify ?? 30,
+        rate_limit_token_refresh: authConfig.rate_limit_token_refresh ?? 150,
+        rate_limit_otp: authConfig.rate_limit_otp ?? 30,
         mailer_otp_length: authConfig.mailer_otp_length ?? 6,
         sms_provider: authConfig.sms_provider ?? '',
+        sms_otp_length: authConfig.sms_otp_length ?? 6,
+        sms_otp_validity: authConfig.sms_otp_validity ?? 60,
+        mailer_secure_email_change_enabled: authConfig.mailer_secure_email_change_enabled ?? true,
         ...authConfig,
       };
 
@@ -411,10 +424,11 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
             continue;
           }
           const existing = ((currentAuth.external as Record<string, unknown>)?.[provider] as Record<string, unknown>) || {};
-          externalUpdates[provider] = {
-            ...existing,
-            ...(val !== undefined ? { client_id: val ? (existing.client_id || '') : '' } : {}),
-          };
+          if (val === false || val === 0) {
+            externalUpdates[provider] = { ...existing, client_id: '', client_secret: '' };
+          } else {
+            externalUpdates[provider] = { ...existing };
+          }
         } else if (key.startsWith('EXTERNAL_') && key.endsWith('_CLIENT_ID')) {
           const provider = key.replace(/^EXTERNAL_/, '').replace(/_CLIENT_ID$/, '').toLowerCase();
           const existing = ((currentAuth.external as Record<string, unknown>)?.[provider] as Record<string, unknown>) || {};
@@ -522,29 +536,36 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
     "/:ref/config/database",
     async ({ params }) => {
       const settings = await projectService.getProjectSettings(params.ref);
-      if (!settings) return status(404, { message: "Project not found", code: "400" });
+      if (!settings) return status(404, { message: "Project not found", code: "404" });
+      const dbSettings = (settings as Record<string, unknown>).database || {};
       try {
         const { getProjectDb, resolveDbName } = await import("../db");
         const dbName = await resolveDbName(params.ref);
         const db = getProjectDb(dbName);
         const rows = await db`
-            SELECT name, setting, unit, short_desc
-            FROM pg_settings
-            WHERE name IN ('max_connections', 'shared_buffers', 'effective_cache_size', 'work_mem',
-                           'maintenance_work_mem', 'statement_timeout', 'idle_in_transaction_session_timeout',
-                           'wal_buffers', 'random_page_cost', 'max_parallel_workers_per_gather')
-          `;
-          const result: Record<string, unknown> = {};
-          for (const row of rows) {
-            let val: unknown = row.setting;
-            if (['statement_timeout', 'idle_in_transaction_session_timeout'].includes(row.name)) {
-              val = row.setting;
-            }
-            result[row.name] = val;
-          }
-          return result;
-      } catch {}
-      return (settings as Record<string, unknown>).database || {};
+            SELECT name, setting FROM pg_settings
+            WHERE name IN ('max_connections', 'statement_timeout', 'idle_in_transaction_session_timeout')
+        `;
+        const pgMap: Record<string, string> = {};
+        for (const row of rows) { pgMap[row.name] = row.setting; }
+        return {
+          pgbouncer_enabled: (dbSettings as Record<string, unknown>).pgbouncer_enabled ?? false,
+          pgbouncer_settings: (dbSettings as Record<string, unknown>).pgbouncer_settings || {},
+          connection_string: `postgresql://postgres:[YOUR-PASSWORD]@localhost:5432/${dbName}`,
+          max_connections: parseInt(pgMap.max_connections || "100"),
+          statement_timeout: parseInt(pgMap.statement_timeout || "0"),
+          idle_in_transaction_session_timeout: parseInt(pgMap.idle_in_transaction_session_timeout || "0"),
+        };
+      } catch {
+        return {
+          pgbouncer_enabled: false,
+          pgbouncer_settings: {},
+          connection_string: `postgresql://postgres:[YOUR-PASSWORD]@localhost:5432/postgres`,
+          max_connections: 100,
+          statement_timeout: 0,
+          idle_in_transaction_session_timeout: 0,
+        };
+      }
     },
     { params: t.Object({ ref: t.String() }) }
   )
@@ -623,12 +644,27 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
     "/:ref/config/database",
     async ({ params, body }) => {
       const settings = await projectService.getProjectSettings(params.ref);
-      if (!settings) return status(404, { message: "Project not found", code: "400" });
+      if (!settings) return status(404, { message: "Project not found", code: "404" });
       const current = ((settings as Record<string, unknown>).database as Record<string, unknown>) || {};
+      const merged = { ...current, ...(typeof body === "object" ? body : {}) };
       const updated = await projectService.updateProjectSettings(params.ref, {
         ...settings,
-        database: { ...current, ...(typeof body === "object" ? body : {}) },
+        database: merged,
       });
+
+      try {
+        const { getProjectDb, resolveDbName } = await import("../db");
+        const dbName = await resolveDbName(params.ref);
+        const db = getProjectDb(dbName);
+        if (merged.statement_timeout !== undefined) {
+          await db.unsafe(`ALTER DATABASE "${dbName}" SET statement_timeout = '${merged.statement_timeout}'`);
+        }
+        if (merged.max_connections !== undefined) {
+          await db.unsafe(`ALTER DATABASE "${dbName}" SET max_connections = '${merged.max_connections}'`);
+        }
+      } catch (err) {
+        logger.warn("[project-config] Failed to apply database config to PostgreSQL", { error: err });
+      }
 
       try {
         const { tenantRuntimeService } = await import("../services/tenant-runtime.service");
@@ -637,7 +673,15 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
         logger.warn("[project-config] Failed to propagate database config to runtime", { error: err });
       }
 
-      return (updated as Record<string, unknown>)?.database || {};
+      const raw = ((updated as Record<string, unknown>).database as Record<string, unknown>) || {};
+      return {
+        pgbouncer_enabled: raw.pgbouncer_enabled ?? false,
+        pgbouncer_settings: raw.pgbouncer_settings || {},
+        connection_string: raw.connection_string || `postgresql://postgres:[YOUR-PASSWORD]@localhost:5432/${params.ref}`,
+        max_connections: raw.max_connections ?? 100,
+        statement_timeout: raw.statement_timeout ?? 0,
+        idle_in_transaction_session_timeout: raw.idle_in_transaction_session_timeout ?? 0,
+      };
     },
     {
       params: t.Object({ ref: t.String() }),
@@ -645,8 +689,74 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
     }
   )
   .use(addConfigRoutes("postgrest"))
-  .use(addConfigRoutes("storage"))
-  .use(addConfigRoutes("realtime"))
+
+  // Config Storage — with official default fields
+  .get(
+    "/:ref/config/storage",
+    async ({ params }) => {
+      const settings = await projectService.getProjectSettings(params.ref);
+      if (!settings) return status(404, { message: "Project not found", code: "404" });
+      const raw = ((settings as Record<string, unknown>).storage as Record<string, unknown>) || {};
+      return {
+        fileSizeLimit: raw.fileSizeLimit || raw.file_size_limit || 52428800,
+        features: raw.features || { imageTransformation: { enabled: true, maxTransformations: 100 } },
+        ...raw,
+      };
+    },
+    { params: t.Object({ ref: t.String() }) }
+  )
+  .patch(
+    "/:ref/config/storage",
+    async ({ params, body }) => {
+      const settings = await projectService.getProjectSettings(params.ref);
+      if (!settings) return status(404, { message: "Project not found", code: "404" });
+      const current = ((settings as Record<string, unknown>).storage as Record<string, unknown>) || {};
+      const merged = { ...current, ...(typeof body === "object" ? body : {}) };
+      const updated = await projectService.updateProjectSettings(params.ref, { ...settings, storage: merged });
+      const raw = ((updated as Record<string, unknown>).storage as Record<string, unknown>) || {};
+      return {
+        fileSizeLimit: raw.fileSizeLimit || raw.file_size_limit || 52428800,
+        features: raw.features || { imageTransformation: { enabled: true, maxTransformations: 100 } },
+        ...raw,
+      };
+    },
+    { params: t.Object({ ref: t.String() }), body: t.Record(t.String(), t.Unknown()) }
+  )
+
+  // Config Realtime — with official default fields
+  .get(
+    "/:ref/config/realtime",
+    async ({ params }) => {
+      const settings = await projectService.getProjectSettings(params.ref);
+      if (!settings) return status(404, { message: "Project not found", code: "404" });
+      const raw = ((settings as Record<string, unknown>).realtime as Record<string, unknown>) || {};
+      return {
+        maxConnections: raw.maxConnections || raw.max_connections || 100,
+        maxJoinsPerSecond: raw.maxJoinsPerSecond || raw.max_joins_per_second || 100,
+        maxChannelsPerClient: raw.maxChannelsPerClient || raw.max_channels_per_client || 100,
+        ...raw,
+      };
+    },
+    { params: t.Object({ ref: t.String() }) }
+  )
+  .patch(
+    "/:ref/config/realtime",
+    async ({ params, body }) => {
+      const settings = await projectService.getProjectSettings(params.ref);
+      if (!settings) return status(404, { message: "Project not found", code: "404" });
+      const current = ((settings as Record<string, unknown>).realtime as Record<string, unknown>) || {};
+      const merged = { ...current, ...(typeof body === "object" ? body : {}) };
+      const updated = await projectService.updateProjectSettings(params.ref, { ...settings, realtime: merged });
+      const raw = ((updated as Record<string, unknown>).realtime as Record<string, unknown>) || {};
+      return {
+        maxConnections: raw.maxConnections || raw.max_connections || 100,
+        maxJoinsPerSecond: raw.maxJoinsPerSecond || raw.max_joins_per_second || 100,
+        maxChannelsPerClient: raw.maxChannelsPerClient || raw.max_channels_per_client || 100,
+        ...raw,
+      };
+    },
+    { params: t.Object({ ref: t.String() }), body: t.Record(t.String(), t.Unknown()) }
+  )
 
   // Get PgBouncer config (for Studio display)
   .get(
@@ -1085,7 +1195,7 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
     async () => {
       const result = await gatewayService.rebuildAllTenantConfigs();
       if (!result.success) {
-        return { ...result, error: "Rebuild failed" };
+        return { ...result, message: "Rebuild failed" };
       }
       return result;
     },

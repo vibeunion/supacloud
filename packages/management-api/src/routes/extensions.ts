@@ -1,7 +1,7 @@
 import { Elysia, t, status } from "elysia";
 import { extensionService } from '../services/extension.service';
 
-const ErrorResponse = t.Object({ error: t.String() });
+const ErrorResponse = t.Object({ message: t.String() });
 
 export const extensionRoutes = new Elysia({ prefix: "/v1/projects/:ref/extensions" })
     .get('/', async ({ params }) => {
@@ -116,7 +116,7 @@ export const systemExtensionRoutes = new Elysia({ prefix: "/v1/system/extensions
         response: { 200: t.Any() },
     })
     .post('/install', async ({ body }) => {
-        if (!body.name) return status(400, { error: "Extension package name is required" });
+        if (!body.name) return status(400, { message: "Extension package name is required", code: "400" });
         return await extensionService.installSystemExtension(body.name);
     }, {
         body: t.Object({ name: t.Optional(t.String()) }),
@@ -126,7 +126,7 @@ export const systemExtensionRoutes = new Elysia({ prefix: "/v1/system/extensions
         },
     })
     .post('/remove', async ({ body }) => {
-        if (!body.name) return status(400, { error: "Extension package name is required" });
+        if (!body.name) return status(400, { message: "Extension package name is required", code: "400" });
         return await extensionService.removeSystemExtension(body.name);
     }, {
         body: t.Object({ name: t.Optional(t.String()) }),

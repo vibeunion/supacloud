@@ -288,7 +288,7 @@ export const webhookRoutes = new Elysia({ prefix: "/v1/webhooks" })
       const authHeader = headers["authorization"] || headers["Authorization"];
 
       if (!authHeader?.startsWith("Bearer ")) {
-                return status(401, { error: "Missing or invalid authorization header" });
+                return status(401, { message: "Missing or invalid authorization header", code: "400" });
       }
 
       const token = authHeader.replace("Bearer ", "");
@@ -296,12 +296,12 @@ export const webhookRoutes = new Elysia({ prefix: "/v1/webhooks" })
 
       const isValid = await frontendService.verifyDeployToken(project_ref, deployment_id, token);
       if (!isValid) {
-                return status(403, { error: "Invalid deploy token" });
+                return status(403, { message: "Invalid deploy token", code: "400" });
       }
 
       const deployment = await frontendService.getDeployment(project_ref, deployment_id);
       if (!deployment) {
-                return status(404, { error: "Deployment not found" });
+                return status(404, { message: "Deployment not found", code: "400" });
       }
 
       const recordId = await frontendService.createDeploymentRecord(
@@ -362,7 +362,7 @@ export const webhookRoutes = new Elysia({ prefix: "/v1/webhooks" })
       const authHeader = headers["authorization"] || headers["Authorization"];
 
       if (!authHeader?.startsWith("Bearer ")) {
-                return status(401, { error: "Missing or invalid authorization header" });
+                return status(401, { message: "Missing or invalid authorization header", code: "400" });
       }
 
       const token = authHeader.replace("Bearer ", "");
@@ -370,7 +370,7 @@ export const webhookRoutes = new Elysia({ prefix: "/v1/webhooks" })
 
       const isValid = await frontendService.verifyDeployToken(project_ref, deployment_id, token);
       if (!isValid) {
-                return status(403, { error: "Invalid deploy token" });
+                return status(403, { message: "Invalid deploy token", code: "400" });
       }
 
       await frontendService.updateDeploymentRecord(

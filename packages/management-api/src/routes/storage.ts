@@ -3,7 +3,7 @@ import { StorageService, migrationJobs } from '../services/storage.service';
 import { logger } from "../utils/logger";
 import { config } from "../config";
 
-const ErrorResponse = t.Object({ error: t.String() });
+const ErrorResponse = t.Object({ message: t.String() });
 const SuccessResponse = t.Object({ success: t.Boolean(), message: t.String() });
 
 // ── Imaginary Config ──────────────────────────────────────────────
@@ -32,10 +32,10 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
     })
     .post('/:ref/buckets/:name/upload', async ({ params, body }) => {
         const file = body.file;
-        if (!file) return status(400, { error: 'No file provided' });
+        if (!file) return status(400, { message: 'No file provided', code: '400' });
         const fileData = Buffer.from(await file.arrayBuffer());
         const success = await StorageService.uploadFile(params.ref, params.name, file.name, fileData, file.type);
-        if (!success) return status(500, { error: 'Failed to upload file' });
+        if (!success) return status(500, { message: 'Failed to upload file', code: '400' });
         return { success: true, message: 'File uploaded successfully' };
     }, {
         body: t.Object({ file: t.File() }),
@@ -47,7 +47,7 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
     })
     .delete('/:ref/buckets/:name/files/:filename', async ({ params }) => {
         const success = await StorageService.deleteFile(params.ref, params.name, params.filename);
-        if (!success) return status(500, { error: 'Failed to delete file' });
+        if (!success) return status(500, { message: 'Failed to delete file', code: '400' });
         return { success: true, message: 'File deleted successfully' };
     }, {
         response: {
@@ -56,7 +56,7 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
         },
     })
     .post('/migrate', async ({ body }) => {
-        if (!body.s3Url || !body.credentials) return status(400, { error: 'Missing migration parameters' });
+        if (!body.s3Url || !body.credentials) return status(400, { message: 'Missing migration parameters', code: '400' });
         return await StorageService.startMigration(body.s3Url, body.credentials);
     }, {
         body: t.Object({
@@ -78,7 +78,7 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
         
         if (!job) {
             set.status = 404;
-            return { error: 'Migration job not found' };
+            return { message: 'Migration job not found', code: '400' };
         }
         
         return {
@@ -112,7 +112,7 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
     .get('/:ref/render/image/public/:bucket/*', async ({ params, query, set }) => {
         const bucket = params.bucket;
         const path = params['*'];
-        if (!path) return status(400, { error: 'Missing file path' });
+        if (!path) return status(400, { message: 'Missing file path', code: '400' });
 
         const sourceUrl = buildSourceUrl(bucket, path);
 
@@ -154,7 +154,7 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
             if (!res.ok) {
                 const errText = await res.text();
                 logger.error(`Imaginary ${operation} failed:`, { status: res.status, error: errText });
-                return status(502, { error: `Image transform failed: ${errText}` });
+                return status(502, { message: 'Image transform failed: ${errText}', code: '400' });
             }
 
             // Stream the processed image back to client with caching headers
@@ -164,7 +164,7 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
             return new Response(res.body, { headers: set.headers as unknown as HeadersInit });
         } catch (err: unknown) {
             logger.error('Image transform proxy error:', { error: err instanceof Error ? err.message : String(err) });
-            return status(502, { error: 'Image processing service unavailable' });
+            return status(502, { message: 'Image processing service unavailable', code: '400' });
         }
     })
 
@@ -175,7 +175,7 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
     // GET /v1/storage/:ref/transform/smartcrop/:bucket/*?width=300&height=300
     .get('/:ref/transform/smartcrop/:bucket/*', async ({ params, query, set }) => {
         const path = params['*'];
-        if (!path) return status(400, { error: 'Missing file path' });
+        if (!path) return status(400, { message: 'Missing file path', code: '400' });
 
         const sourceUrl = buildSourceUrl(params.bucket, path);
         const p = new URLSearchParams({
@@ -188,12 +188,12 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
 
         try {
             const res = await fetch(`${IMAGINARY_URL}/smartcrop?${p.toString()}`);
-            if (!res.ok) return status(502, { error: await res.text() });
+            if (!res.ok) return status(502, { message: await res.text() });
             set.headers['Content-Type'] = res.headers.get('Content-Type') || 'image/webp';
             set.headers['Cache-Control'] = 'public, max-age=31536000, immutable';
             return new Response(res.body, { headers: set.headers as unknown as HeadersInit });
         } catch (err: unknown) {
-            return status(502, { error: 'Smartcrop service unavailable' });
+            return status(502, { message: 'Smartcrop service unavailable', code: '400' });
         }
     })
 
@@ -201,7 +201,7 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
     // GET /v1/storage/:ref/transform/watermark/:bucket/*?text=ACME&font=sans&opacity=0.5
     .get('/:ref/transform/watermark/:bucket/*', async ({ params, query, set }) => {
         const path = params['*'];
-        if (!path) return status(400, { error: 'Missing file path' });
+        if (!path) return status(400, { message: 'Missing file path', code: '400' });
 
         const sourceUrl = buildSourceUrl(params.bucket, path);
         const p = new URLSearchParams({
@@ -218,12 +218,12 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
 
         try {
             const res = await fetch(`${IMAGINARY_URL}/watermark?${p.toString()}`);
-            if (!res.ok) return status(502, { error: await res.text() });
+            if (!res.ok) return status(502, { message: await res.text() });
             set.headers['Content-Type'] = res.headers.get('Content-Type') || 'image/webp';
             set.headers['Cache-Control'] = 'public, max-age=31536000, immutable';
             return new Response(res.body, { headers: set.headers as unknown as HeadersInit });
         } catch (err: unknown) {
-            return status(502, { error: 'Watermark service unavailable' });
+            return status(502, { message: 'Watermark service unavailable', code: '400' });
         }
     })
 
@@ -231,7 +231,7 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
     // GET /v1/storage/:ref/transform/blur/:bucket/*?sigma=10&width=20
     .get('/:ref/transform/blur/:bucket/*', async ({ params, query, set }) => {
         const path = params['*'];
-        if (!path) return status(400, { error: 'Missing file path' });
+        if (!path) return status(400, { message: 'Missing file path', code: '400' });
 
         const sourceUrl = buildSourceUrl(params.bucket, path);
         const p = new URLSearchParams({
@@ -245,12 +245,12 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
 
         try {
             const res = await fetch(`${IMAGINARY_URL}/blur?${p.toString()}`);
-            if (!res.ok) return status(502, { error: await res.text() });
+            if (!res.ok) return status(502, { message: await res.text() });
             set.headers['Content-Type'] = res.headers.get('Content-Type') || 'image/webp';
             set.headers['Cache-Control'] = 'public, max-age=31536000, immutable';
             return new Response(res.body, { headers: set.headers as unknown as HeadersInit });
         } catch (err: unknown) {
-            return status(502, { error: 'Blur service unavailable' });
+            return status(502, { message: 'Blur service unavailable', code: '400' });
         }
     })
 
@@ -258,17 +258,17 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
     // GET /v1/storage/:ref/transform/info/:bucket/*
     .get('/:ref/transform/info/:bucket/*', async ({ params }) => {
         const path = params['*'];
-        if (!path) return status(400, { error: 'Missing file path' });
+        if (!path) return status(400, { message: 'Missing file path', code: '400' });
 
         const sourceUrl = buildSourceUrl(params.bucket, path);
         const p = new URLSearchParams({ url: sourceUrl });
 
         try {
             const res = await fetch(`${IMAGINARY_URL}/info?${p.toString()}`);
-            if (!res.ok) return status(502, { error: await res.text() });
+            if (!res.ok) return status(502, { message: await res.text() });
             return res.json();
         } catch (err: unknown) {
-            return status(502, { error: 'Image info service unavailable' });
+            return status(502, { message: 'Image info service unavailable', code: '400' });
         }
     })
 
@@ -276,7 +276,7 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
     // GET /v1/storage/:ref/transform/thumbnail/:bucket/*?width=150
     .get('/:ref/transform/thumbnail/:bucket/*', async ({ params, query, set }) => {
         const path = params['*'];
-        if (!path) return status(400, { error: 'Missing file path' });
+        if (!path) return status(400, { message: 'Missing file path', code: '400' });
 
         const sourceUrl = buildSourceUrl(params.bucket, path);
         const p = new URLSearchParams({
@@ -288,12 +288,12 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
 
         try {
             const res = await fetch(`${IMAGINARY_URL}/thumbnail?${p.toString()}`);
-            if (!res.ok) return status(502, { error: await res.text() });
+            if (!res.ok) return status(502, { message: await res.text() });
             set.headers['Content-Type'] = res.headers.get('Content-Type') || 'image/webp';
             set.headers['Cache-Control'] = 'public, max-age=31536000, immutable';
             return new Response(res.body, { headers: set.headers as unknown as HeadersInit });
         } catch (err: unknown) {
-            return status(502, { error: 'Thumbnail service unavailable' });
+            return status(502, { message: 'Thumbnail service unavailable', code: '400' });
         }
     })
 
@@ -305,7 +305,7 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
             return { status: 'healthy', engine: 'imaginary/libvips' };
         } catch (err: unknown) {
             logger.warn(`[Storage] Imaginary service health check failed: ${(err as Error).message}`);
-            return { status: 'unreachable', error: 'Cannot connect to imaginary service' };
+            return { status: 'unreachable', message: 'Cannot connect to imaginary service' };
         }
     });
 

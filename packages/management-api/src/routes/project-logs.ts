@@ -1,9 +1,8 @@
-import { Elysia, t } from "elysia";
+import { Elysia, t, status } from "elysia";
 import { projectService } from "../services";
 import { $ } from "bun";
 import { logger } from "../utils/logger";
 
-// --- SSE connection limiter per project ---
 const activeStreams = new Map<string, number>();
 const MAX_STREAMS_PER_PROJECT = 5;
 
@@ -28,14 +27,12 @@ function getUnits(ref: string, service?: string): string[] {
 }
 
 export const projectLogsRoutes = new Elysia({ prefix: "/v1/projects/:ref/logs" })
-    // --- Existing: one-shot GET ---
     .get(
         "",
         async ({ params, query, set }) => {
             const project = await projectService.getProject(params.ref);
             if (!project) {
-                set.status = 404;
-                return { error: "Project not found" };
+                return status(404, { message: "Project not found", code: "404" });
             }
 
             try {
@@ -44,51 +41,56 @@ export const projectLogsRoutes = new Elysia({ prefix: "/v1/projects/:ref/logs" }
                 const output = result.text();
                 const lines = output.split('\n').filter(line => line.trim() !== '' && !line.startsWith('-- '));
 
-                const parsedLogs = lines.map(line => {
+                const parsedLogs = lines.map((line, idx) => {
                     const match = line.match(/^([0-9-T:+.]+)\s+\S+\s+([^:]+):\s+(.*)$/);
                     if (match) {
-                        return { timestamp: match[1], service: match[2].trim(), message: match[3] };
+                        return {
+                            id: `${params.ref}-${idx}`,
+                            timestamp: match[1],
+                            event_message: match[3],
+                            metadata: { service: match[2].trim() },
+                        };
                     }
-                    return { timestamp: new Date().toISOString(), service: "system", message: line };
+                    return {
+                        id: `${params.ref}-${idx}`,
+                        timestamp: new Date().toISOString(),
+                        event_message: line,
+                        metadata: { service: "system" },
+                    };
                 });
 
-                return { data: parsedLogs };
+                return parsedLogs;
             } catch (error: unknown) {
                 set.status = 500;
-                return { error: "Failed to fetch logs", message: error instanceof Error ? error.message : "Unknown error" };
+                return { message: "Failed to fetch logs", code: "500" };
             }
         },
         {
             params: t.Object({ ref: t.String({ minLength: 1 }) }),
-            query: t.Object({ limit: t.Optional(t.String()) })
+            query: t.Object({ limit: t.Optional(t.String()), service: t.Optional(t.String()) })
         }
     )
 
-    // --- NEW: SSE real-time log stream ---
     .get(
         "/stream",
         async ({ params, query, set }) => {
             const { ref } = params;
 
-            // Check project exists
             const project = await projectService.getProject(ref);
             if (!project) {
-                set.status = 404;
-                return { error: "Project not found" };
+                return status(404, { message: "Project not found", code: "404" });
             }
 
-            // Enforce per-project stream limit
             const current = activeStreams.get(ref) || 0;
             if (current >= MAX_STREAMS_PER_PROJECT) {
                 set.status = 429;
-                return { error: `Too many active streams for project ${ref} (max ${MAX_STREAMS_PER_PROJECT})` };
+                return { message: `Too many active streams for project ${ref}`, code: "429" };
             }
             activeStreams.set(ref, current + 1);
 
             const units = getUnits(ref, query.service);
             const unitArgs = units.flatMap(u => ["-u", u]);
 
-            // Spawn journalctl in follow mode
             const proc = Bun.spawn(
                 ["journalctl", "--follow", "--no-pager", "-o", "short-iso", ...unitArgs],
                 { stdout: "pipe", stderr: "ignore" }
@@ -111,7 +113,6 @@ export const projectLogsRoutes = new Elysia({ prefix: "/v1/projects/:ref/logs" }
 
             const stream = new ReadableStream({
                 async start(controller) {
-                    // Send initial keepalive
                     controller.enqueue(encoder.encode(": connected\n\n"));
 
                     const reader = proc.stdout.getReader();
@@ -125,12 +126,11 @@ export const projectLogsRoutes = new Elysia({ prefix: "/v1/projects/:ref/logs" }
 
                             buffer += decoder.decode(value, { stream: true });
                             const lines = buffer.split("\n");
-                            buffer = lines.pop() || ""; // keep incomplete line in buffer
+                            buffer = lines.pop() || "";
 
                             for (const line of lines) {
                                 if (!line.trim()) continue;
 
-                                // Parse journalctl short-iso line
                                 const match = line.match(/^([0-9-T:+.]+)\s+\S+\s+([^:]+):\s+(.*)$/);
                                 const event = match
                                     ? { timestamp: match[1], service: match[2].trim(), message: match[3] }
@@ -161,7 +161,7 @@ export const projectLogsRoutes = new Elysia({ prefix: "/v1/projects/:ref/logs" }
                     "Content-Type": "text/event-stream",
                     "Cache-Control": "no-cache",
                     "Connection": "keep-alive",
-                    "X-Accel-Buffering": "no", // Disable Kong/Nginx buffering
+                    "X-Accel-Buffering": "no",
                 }
             });
         },

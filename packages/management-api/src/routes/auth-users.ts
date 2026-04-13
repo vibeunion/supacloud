@@ -20,8 +20,8 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
       const apiUrl = project.api?.url || (config.kongInternal.startsWith('http') ? config.kongInternal : `http://${config.kongInternal}`);
 
       // Pass along pagination (svadmin uses _page / _limit or standard skip/limit)
-      const limit = Number(query._limit || query.limit || 50);
-      const page = Number(query._page || 1) || Math.floor(Number(query.skip || 0) / limit) + 1;
+      const limit = Number(query.per_page || query._limit || query.limit || 50);
+      const page = Number(query.page || query._page || 1) || Math.floor(Number(query.skip || 0) / limit) + 1;
       const q = query.q;
       
       const searchParams = new URLSearchParams();
@@ -68,6 +68,8 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
       query: t.Object({
         skip: t.Optional(t.String()),
         limit: t.Optional(t.String()),
+        page: t.Optional(t.String()),
+        per_page: t.Optional(t.String()),
         _page: t.Optional(t.String()),
         _limit: t.Optional(t.String()),
         _sort: t.Optional(t.String()),

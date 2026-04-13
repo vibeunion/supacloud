@@ -159,7 +159,7 @@ async function executeProxy(request: Request, targetUrl: string, interceptors: {
 
     } catch (err: any) {
         logger.error(`[SDK Proxy] Internal error:`, err.message);
-        return new Response(JSON.stringify({ error: 'Internal Proxy Error', message: err.message }), {
+        return new Response(JSON.stringify({ message: 'Internal Proxy Error' }), {
             status: 500,
             headers: { 'Content-Type': 'application/json' }
         });
@@ -170,9 +170,9 @@ const sdkProxyRoutesBase = new Elysia({ prefix: "" })
     .group("/auth/v1", (app) => {
         const handler = async ({ request }: any) => {
             const ref = await getProjectRef(request);
-            if (!ref) return new Response(JSON.stringify({ error: 'Bad Request', message: 'Missing tenant reference' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+            if (!ref) return new Response(JSON.stringify({ message: 'Missing tenant reference' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
             const ports = await getTenantPorts(ref);
-            if (!ports) return new Response(JSON.stringify({ error: 'Bad Gateway', message: 'Tenant backend not active' }), { status: 502, headers: { 'Content-Type': 'application/json' } });
+            if (!ports) return new Response(JSON.stringify({ message: 'Tenant backend not active' }), { status: 502, headers: { 'Content-Type': 'application/json' } });
             
             const url = new URL(request.url);
             const targetUrl = `http://127.0.0.1:${ports.gotruePort}${url.pathname.replace(/^\/auth\/v1/, '')}${url.search}`;
@@ -184,9 +184,9 @@ const sdkProxyRoutesBase = new Elysia({ prefix: "" })
     .group("/rest/v1", (app) => {
         const handler = async ({ request }: any) => {
             const ref = await getProjectRef(request);
-            if (!ref) return new Response(JSON.stringify({ error: 'Bad Request', message: 'Missing tenant reference' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+            if (!ref) return new Response(JSON.stringify({ message: 'Missing tenant reference' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
             const ports = await getTenantPorts(ref);
-            if (!ports) return new Response(JSON.stringify({ error: 'Bad Gateway', message: 'Tenant backend not active' }), { status: 502, headers: { 'Content-Type': 'application/json' } });
+            if (!ports) return new Response(JSON.stringify({ message: 'Tenant backend not active' }), { status: 502, headers: { 'Content-Type': 'application/json' } });
             
             const url = new URL(request.url);
             let targetPath = url.pathname.replace(/^\/rest\/v1/, '');
@@ -201,9 +201,9 @@ const sdkProxyRoutesBase = new Elysia({ prefix: "" })
 
 const graphqlHandler = async ({ request }: any) => {
     const ref = await getProjectRef(request);
-    if (!ref) return new Response(JSON.stringify({ error: 'Bad Request', message: 'Missing tenant reference' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+    if (!ref) return new Response(JSON.stringify({ message: 'Missing tenant reference' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
     const ports = await getTenantPorts(ref);
-    if (!ports) return new Response(JSON.stringify({ error: 'Bad Gateway', message: 'Tenant backend not active' }), { status: 502, headers: { 'Content-Type': 'application/json' } });
+    if (!ports) return new Response(JSON.stringify({ message: 'Tenant backend not active' }), { status: 502, headers: { 'Content-Type': 'application/json' } });
     
     const url = new URL(request.url);
     const targetUrl = `http://127.0.0.1:${ports.pgrstPort}/rpc/graphql${url.search}`;
@@ -218,7 +218,7 @@ const graphqlHandler = async ({ request }: any) => {
 
 const realtimeHandler = async ({ request }: any) => {
     const ref = await getProjectRef(request);
-    if (!ref) return new Response(JSON.stringify({ error: 'Bad Request', message: 'Missing tenant reference' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+    if (!ref) return new Response(JSON.stringify({ message: 'Missing tenant reference' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
     
     const url = new URL(request.url);
     const targetUrl = `${config.realtimeAdminUrl}${url.pathname}${url.search}`;
@@ -227,7 +227,7 @@ const realtimeHandler = async ({ request }: any) => {
 
 const functionsHandler = async ({ request }: any) => {
     const ref = await getProjectRef(request);
-    if (!ref) return new Response(JSON.stringify({ error: 'Bad Request', message: 'Missing tenant reference' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+    if (!ref) return new Response(JSON.stringify({ message: 'Missing tenant reference' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
 
     const { config } = await import("../config");
     const [edgeHost, edgePortStr] = (config.edgeRuntimeInternal || "127.0.0.1:9000").split(':');

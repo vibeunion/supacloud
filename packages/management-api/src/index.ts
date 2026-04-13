@@ -151,9 +151,19 @@ const app = new Elysia({ strictPath: false })
   .use(cors({
     origin: true,
     credentials: true,
-    exposeHeaders: ['x-total-count', 'link', 'content-range', 'x-supabase-api-version'],
+    exposeHeaders: ['x-total-count', 'link', 'content-range', 'x-supabase-api-version', 'x-ratelimit-limit', 'x-ratelimit-remaining', 'x-ratelimit-reset'],
     maxAge: 86400,
   }))
+
+  // Rate limit headers + API version (Studio compatibility)
+  .onAfterHandle(({ set }) => {
+    if (set.headers) {
+      set.headers['x-ratelimit-limit'] = '1000';
+      set.headers['x-ratelimit-remaining'] = '999';
+      set.headers['x-ratelimit-reset'] = String(Math.ceil(Date.now() / 60000) * 60);
+      set.headers['x-supabase-api-version'] = '2024-01-01';
+    }
+  })
 
   // Health check (no auth required)
   .get("/health", () => ({ status: "ok", timestamp: new Date().toISOString() }))
@@ -218,12 +228,12 @@ const app = new Elysia({ strictPath: false })
 
     if (code === "VALIDATION") {
       set.status = 400;
-      return { error: "Validation failed", details: error.message };
+      return { message: "Validation failed", details: error.message };
     }
 
     if (code === "NOT_FOUND") {
       set.status = 404;
-      return { error: "Not found" };
+      return { message: "Not found" };
     }
 
     // DB connection errors → 503 Service Unavailable (not 500)
@@ -236,11 +246,11 @@ const app = new Elysia({ strictPath: false })
     ) {
       set.status = 503;
       set.headers["Retry-After"] = "5";
-      return { error: "Service temporarily unavailable", retryAfter: 5 };
+      return { message: "Service temporarily unavailable", retryAfter: 5 };
     }
 
     set.status = 500;
-    return { error: "Internal server error" };
+    return { message: "Internal server error" };
   });
 
 
@@ -273,7 +283,7 @@ export function registerStaticAssets() {
     // Do NOT catch API routes
     if (path.startsWith("/api/") || path.startsWith("/v1/")) {
       set.status = 404;
-      return { error: "Route not found" };
+      return { message: "Route not found" };
     }
 
     // --- Step 1: try_files $uri — check exact file on disk ---
