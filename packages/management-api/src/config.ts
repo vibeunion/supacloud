@@ -102,7 +102,7 @@ const managementEnv = loadEnvFile("/etc/supabase/management-api.env");
 const masterTokenEnv = loadEnvFile("/etc/supabase/master-token.env");
 const isGithubActions = process.env.GITHUB_ACTIONS === "true";
 const defaultEdgeRuntimeInternal = isGithubActions
-  ? "127.0.0.1:9001"
+  ? "127.0.0.1:9005"
   : "127.0.0.1:9000";
 const defaultS3Endpoint = isGithubActions
   ? "http://127.0.0.1:9000"
