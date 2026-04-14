@@ -1,5 +1,6 @@
 import { config } from "../config";
 import { logger } from "../utils/logger";
+import { normalizeCiS3Endpoint } from "../utils/sdk-parity";
 import { shellService } from "./shell.service";
 import { resolveBucketName } from "../db";
 import * as fs from "node:fs/promises";
@@ -472,6 +473,10 @@ async function retryAsync<T>(
 }
 
 export class S3Driver implements StorageDriver {
+  private normalizeEndpoint(endpoint: string): string {
+    return normalizeCiS3Endpoint(endpoint);
+  }
+
   private async getCreds(projectRef: string): Promise<{
     accessKey?: string;
     secretKey?: string;
@@ -482,7 +487,9 @@ export class S3Driver implements StorageDriver {
       return {
         accessKey: process.env.S3_ACCESS_KEY || "minioadmin",
         secretKey: process.env.S3_SECRET_KEY || "minioadmin",
-        endpoint: config.s3Endpoint || "http://127.0.0.1:9000",
+        endpoint: this.normalizeEndpoint(
+          config.s3Endpoint || "http://127.0.0.1:9000",
+        ),
         bucket: resolveBucketName(projectRef),
       };
     }
@@ -495,15 +502,16 @@ export class S3Driver implements StorageDriver {
       return {
         accessKey: process.env.S3_ACCESS_KEY,
         secretKey: process.env.S3_SECRET_KEY,
-        endpoint: config.s3Endpoint,
+        endpoint: this.normalizeEndpoint(config.s3Endpoint),
         bucket: resolveBucketName(projectRef),
       };
     }
     return {
       accessKey: output.match(/ACCESS_KEY=([^\n]+)/)?.[1]?.trim(),
       secretKey: output.match(/SECRET_KEY=([^\n]+)/)?.[1]?.trim(),
-      endpoint:
+      endpoint: this.normalizeEndpoint(
         output.match(/ENDPOINT=([^\n]+)/)?.[1]?.trim() || config.s3Endpoint,
+      ),
       bucket:
         output.match(/BUCKET=([^\n]+)/)?.[1]?.trim() ||
         resolveBucketName(projectRef),
