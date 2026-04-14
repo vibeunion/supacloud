@@ -935,7 +935,7 @@ async function bootstrap() {
             .replace(/^http:/, "ws:")
             .replace(/^https:/, "wss:");
           // Supabase Realtime container expects /websocket, not /realtime/v1/websocket
-          const wsPath = url.pathname.replace(/^\/realtime\/v1/, "");
+          const wsPath = url.pathname.replace(/^\/realtime\/v1/, "/socket");
           const upstreamUrl = `${wsBase}${wsPath}${url.search}`;
           // Forward relevant request headers and align websocket proxy headers with HTTP sdk-proxy.
           const requestHeaders: Record<string, string> = {};
