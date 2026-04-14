@@ -43,6 +43,7 @@ import { config } from "./config";
 import { checkAuth } from "./middleware/auth";
 import { closeDb, sql } from "./db";
 import { authRoutes, deployRoutes, storageCompatRoutes } from "./routes";
+import { resolveRealtimeTenantHost } from "./utils/sdk-parity";
 
 const WEB_CONSOLE_DIR = "/opt/supacloud/packages/web-console/build";
 
@@ -949,9 +950,16 @@ async function bootstrap() {
             const val = request.headers.get(h);
             if (val) requestHeaders[h] = val;
           }
-          requestHeaders["x-forwarded-host"] = url.host;
+          const tenantHost = resolveRealtimeTenantHost(
+            projectRef,
+            url.host,
+            config.baseDomain,
+          );
+          requestHeaders["host"] = tenantHost;
+          requestHeaders["x-forwarded-host"] = tenantHost;
           requestHeaders["x-forwarded-proto"] = url.protocol.replace(":", "");
-          requestHeaders["x-forwarded-for"] = request.headers.get("x-forwarded-for") || "127.0.0.1";
+          requestHeaders["x-forwarded-for"] =
+            request.headers.get("x-forwarded-for") || "127.0.0.1";
           if (projectRef) {
             requestHeaders["x-project-ref"] = projectRef;
           }

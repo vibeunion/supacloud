@@ -105,7 +105,7 @@ const defaultEdgeRuntimeInternal = isGithubActions
   ? "127.0.0.1:9001"
   : "127.0.0.1:9000";
 const defaultS3Endpoint = isGithubActions
-  ? "http://127.0.0.1:9001"
+  ? "http://127.0.0.1:9000"
   : "http://localhost:9000";
 
 export const config = {
