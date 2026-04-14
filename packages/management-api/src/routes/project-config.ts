@@ -346,7 +346,7 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
       return {
         status: domainInfo.status || "1_not_started",
         custom_hostname: domainInfo.custom_hostname || null,
-        data: domainInfo.data || { success: true, errors: [], messages: [], result: {} },
+        data: (domainInfo as any).data || { success: true, errors: [], messages: [], result: {} },
       };
     },
     {
