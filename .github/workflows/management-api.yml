@@ -161,9 +161,14 @@ jobs:
       - name: Wait for CI services
         run: |
           echo "Waiting for Realtime container to be ready..."
+          JWT_SECRET="super-secret-jwt-token-with-at-least-32-characters-long"
           for i in $(seq 1 30); do
-            if curl -sf http://127.0.0.1:4000/api/tenants > /dev/null 2>&1; then
-              echo "✅ Realtime admin API is ready"
+            # Check the health endpoint for the self-seeded tenant
+            if curl -sf -H "Authorization: Bearer ${JWT_SECRET}" "http://127.0.0.1:4000/api/tenants/realtime-dev/health" > /dev/null 2>&1; then
+              echo "✅ Realtime self-hosted tenant is ready"
+              break
+            elif curl -sf "http://127.0.0.1:4000/health" > /dev/null 2>&1; then
+              echo "✅ Realtime container is ready (basic health)"
               break
             fi
             echo "  Attempt $i/30: Realtime not ready, waiting 2s..."

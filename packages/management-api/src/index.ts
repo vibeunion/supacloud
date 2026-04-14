@@ -950,7 +950,13 @@ async function bootstrap() {
             const val = request.headers.get(h);
             if (val) requestHeaders[h] = val;
           }
-          const tenantHost = projectRef ? `${projectRef}.supabase.co` : url.host;
+          // Supabase Realtime identifies tenants by hostname subdomain.
+          // With SEED_SELF_HOST=true, the self-seeded tenant has external_id 'realtime-dev'.
+          // In CI, we always route to the self-seeded tenant.
+          const isCI = process.env.CI === "true" || process.env.GITHUB_ACTIONS === "true";
+          const tenantHost = isCI
+            ? "realtime-dev.supabase-realtime"
+            : (projectRef ? `${projectRef}.supabase.co` : url.host);
           requestHeaders["host"] = tenantHost;
           requestHeaders["x-forwarded-host"] = tenantHost;
           requestHeaders["x-forwarded-proto"] = url.protocol.replace(":", "");
