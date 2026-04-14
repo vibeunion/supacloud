@@ -342,7 +342,7 @@ function buildAuthConfigResponse(settings: Record<string, unknown>) {
     saml_enabled: authConfig.saml_enabled ?? null,
     saml_external_url: authConfig.saml_external_url ?? null,
     security_captcha_enabled: authConfig.security_captcha_enabled ?? null,
-    security_captcha_provider: authConfig.security_captcha_provider ?? "",
+    security_captcha_provider: authConfig.security_captcha_provider ?? "hcaptcha",
     security_captcha_secret: authConfig.security_captcha_secret
       ? "********"
       : null,
@@ -352,7 +352,7 @@ function buildAuthConfigResponse(settings: Record<string, unknown>) {
     rate_limit_verify: authConfig.rate_limit_verify ?? null,
     rate_limit_token_refresh: authConfig.rate_limit_token_refresh ?? null,
     rate_limit_otp: authConfig.rate_limit_otp ?? null,
-    sms_provider: authConfig.sms_provider ?? "",
+    sms_provider: authConfig.sms_provider ?? "twilio",
   };
 
   delete response.external;
