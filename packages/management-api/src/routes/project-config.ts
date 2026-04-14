@@ -6,6 +6,13 @@ import { Elysia, t, status } from "elysia";
 import { projectService } from "../services";
 import { gatewayService } from "../services/gateway.service";
 import { logger } from "../utils/logger";
+import {
+  OPENAPI_AUTH_CONFIG_RESPONSE_TEMPLATE,
+  OPENAPI_CUSTOM_HOSTNAME_RESPONSE_TEMPLATE,
+  OPENAPI_NETWORK_RESTRICTIONS_RESPONSE_TEMPLATE,
+  OPENAPI_REALTIME_CONFIG_RESPONSE_TEMPLATE,
+  OPENAPI_STORAGE_CONFIG_RESPONSE_TEMPLATE,
+} from "../utils/openapi-defaults.gen";
 import { resolveRoleName, resolveDbName as resolveDbNameTopLevel } from "../db";
 
 /** Map PostgreSQL column types to TypeScript types */
@@ -98,6 +105,318 @@ function addConfigRoutes(section: string) {
         body: t.Record(t.String(), t.Unknown()),
       },
     );
+}
+
+function cloneTemplate<T>(template: T): T {
+  return structuredClone(template);
+}
+
+function toStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((entry): entry is string => typeof entry === "string");
+}
+
+function pickFirstArray(...candidates: unknown[]): string[] {
+  for (const candidate of candidates) {
+    const values = toStringArray(candidate);
+    if (values.length > 0) return values;
+  }
+  return [];
+}
+
+function buildNetworkRestrictionsResponse(value: unknown) {
+  const response = cloneTemplate(
+    OPENAPI_NETWORK_RESTRICTIONS_RESPONSE_TEMPLATE,
+  ) as Record<string, any>;
+  const raw = (value as Record<string, unknown>) || {};
+  const config = (raw.config as Record<string, unknown>) || raw;
+  const dbAllowedCidrs = pickFirstArray(
+    raw.allowed_address_ranges,
+    config.dbAllowedCidrs,
+    raw.dbAllowedCidrs,
+  );
+  const dbAllowedCidrsV6 = pickFirstArray(
+    config.dbAllowedCidrsV6,
+    raw.dbAllowedCidrsV6,
+  );
+
+  response.config = {
+    ...(response.config as Record<string, unknown>),
+    dbAllowedCidrs,
+    dbAllowedCidrsV6,
+  };
+  response.status = "applied";
+  response.entitlement = dbAllowedCidrs.length > 0 ? "allowed" : "disallowed";
+  return response;
+}
+
+function buildCustomHostnameResponse(domainInfo: unknown) {
+  const response = cloneTemplate(
+    OPENAPI_CUSTOM_HOSTNAME_RESPONSE_TEMPLATE,
+  ) as Record<string, any>;
+  const raw = (domainInfo as Record<string, unknown>) || {};
+  const hostname =
+    typeof raw.custom_hostname === "string" ? raw.custom_hostname : "";
+  const configured = hostname.length > 0;
+  const data = (response.data as Record<string, any>) || {};
+  const result = (data.result as Record<string, any>) || {};
+  const ssl = (result.ssl as Record<string, any>) || {};
+
+  response.custom_hostname = hostname;
+  response.status = configured
+    ? "5_services_reconfigured"
+    : "1_not_started";
+  response.data = {
+    ...data,
+    success: configured,
+    result: {
+      ...result,
+      id: hostname,
+      hostname,
+      custom_origin_server: hostname,
+      status: configured ? "active" : "pending",
+      ssl: {
+        ...ssl,
+        status: configured ? "active" : ssl.status,
+      },
+    },
+  };
+  return response;
+}
+
+function buildStorageConfigResponse(raw: Record<string, unknown>) {
+  const response = cloneTemplate(
+    OPENAPI_STORAGE_CONFIG_RESPONSE_TEMPLATE,
+  ) as Record<string, any>;
+  const features = (raw.features as Record<string, any>) || {};
+
+  response.fileSizeLimit = Number(
+    raw.fileSizeLimit ?? raw.file_size_limit ?? response.fileSizeLimit,
+  );
+  response.features = {
+    ...(response.features as Record<string, unknown>),
+    ...features,
+    imageTransformation: {
+      ...((response.features as Record<string, any>).imageTransformation || {}),
+      ...((features.imageTransformation as Record<string, unknown>) || {}),
+    },
+    s3Protocol: {
+      ...((response.features as Record<string, any>).s3Protocol || {}),
+      ...((features.s3Protocol as Record<string, unknown>) || {}),
+    },
+    icebergCatalog: {
+      ...((response.features as Record<string, any>).icebergCatalog || {}),
+      ...((features.icebergCatalog as Record<string, unknown>) || {}),
+    },
+    vectorBuckets: {
+      ...((response.features as Record<string, any>).vectorBuckets || {}),
+      ...((features.vectorBuckets as Record<string, unknown>) || {}),
+    },
+  };
+  response.capabilities = {
+    ...(response.capabilities as Record<string, unknown>),
+    ...(((raw.capabilities as Record<string, unknown>) || {}) as Record<
+      string,
+      unknown
+    >),
+  };
+  response.external = {
+    ...(response.external as Record<string, unknown>),
+    ...(((raw.external as Record<string, unknown>) || {}) as Record<
+      string,
+      unknown
+    >),
+  };
+  response.migrationVersion =
+    (raw.migrationVersion as string) ??
+    (raw.migration_version as string) ??
+    response.migrationVersion;
+  response.databasePoolMode =
+    (raw.databasePoolMode as string) ??
+    (raw.database_pool_mode as string) ??
+    response.databasePoolMode;
+
+  return {
+    ...raw,
+    ...response,
+    fileSizeLimit: response.fileSizeLimit,
+    features: response.features,
+    capabilities: response.capabilities,
+    external: response.external,
+    migrationVersion: response.migrationVersion,
+    databasePoolMode: response.databasePoolMode,
+  };
+}
+
+function buildRealtimeConfigResponse(raw: Record<string, unknown>) {
+  const response = cloneTemplate(
+    OPENAPI_REALTIME_CONFIG_RESPONSE_TEMPLATE,
+  ) as Record<string, unknown>;
+
+  response.private_only = raw.private_only ?? raw.privateOnly ?? response.private_only;
+  response.connection_pool =
+    raw.connection_pool ?? raw.connectionPool ?? response.connection_pool;
+  response.max_concurrent_users =
+    raw.max_concurrent_users ??
+    raw.maxConcurrentUsers ??
+    response.max_concurrent_users;
+  response.max_events_per_second =
+    raw.max_events_per_second ??
+    raw.maxEventsPerSecond ??
+    response.max_events_per_second;
+  response.max_bytes_per_second =
+    raw.max_bytes_per_second ??
+    raw.maxBytesPerSecond ??
+    response.max_bytes_per_second;
+  response.max_channels_per_client =
+    raw.max_channels_per_client ??
+    raw.maxChannelsPerClient ??
+    response.max_channels_per_client;
+  response.max_joins_per_second =
+    raw.max_joins_per_second ??
+    raw.maxJoinsPerSecond ??
+    response.max_joins_per_second;
+  response.max_presence_events_per_second =
+    raw.max_presence_events_per_second ??
+    raw.maxPresenceEventsPerSecond ??
+    response.max_presence_events_per_second;
+  response.max_payload_size_in_kb =
+    raw.max_payload_size_in_kb ??
+    raw.maxPayloadSizeInKb ??
+    response.max_payload_size_in_kb;
+  response.suspend = raw.suspend ?? response.suspend;
+  response.presence_enabled =
+    raw.presence_enabled ?? raw.presenceEnabled ?? response.presence_enabled;
+
+  return {
+    ...raw,
+    ...response,
+  };
+}
+
+function buildAuthConfigResponse(settings: Record<string, unknown>) {
+  const authConfig = (settings.auth as Record<string, unknown>) || {};
+  const externalConfig =
+    (authConfig.external as Record<string, unknown>) || {};
+  const hooksConfig = (authConfig.hooks as Record<string, unknown>) || {};
+  const smtpConfig = (authConfig.smtp as Record<string, unknown>) || {};
+
+  const response: Record<string, unknown> = {
+    ...cloneTemplate(OPENAPI_AUTH_CONFIG_RESPONSE_TEMPLATE),
+    ...authConfig,
+    enable_signup: authConfig.enable_signup ?? true,
+    enable_signups: authConfig.enable_signup ?? true,
+    enable_confirmations: authConfig.enable_confirmations ?? false,
+    double_confirm_changes: authConfig.double_confirm_changes ?? true,
+    manual_linking_enabled:
+      authConfig.manual_linking_enabled ??
+      authConfig.enable_manual_linking ??
+      false,
+    jwt_expiry: authConfig.jwt_expiry ?? authConfig.jwt_exp ?? 3600,
+    disable_signup: authConfig.disable_signup ?? false,
+    mailer_autoconfirm: authConfig.mailer_autoconfirm ?? false,
+    mail_autoconfirm: authConfig.mailer_autoconfirm ?? false,
+    sms_autoconfirm: authConfig.sms_autoconfirm ?? false,
+    phone_autoconfirm: authConfig.sms_autoconfirm ?? false,
+    uri_allow_list: authConfig.uri_allow_list ?? null,
+    site_url: authConfig.site_url ?? null,
+    password_min_length: authConfig.password_min_length ?? null,
+    refresh_token_rotation_enabled:
+      authConfig.refresh_token_rotation_enabled ??
+      authConfig.security_refresh_token_rotation_enabled ??
+      null,
+    security_refresh_token_reuse_interval:
+      authConfig.security_refresh_token_reuse_interval ??
+      authConfig.security_refresh_token_rotation_reuse_interval ??
+      null,
+    mfa_max_enrolled_factors:
+      authConfig.mfa_max_enrolled_factors ??
+      authConfig.max_enrolled_factors ??
+      null,
+    security_update_password_require_reauthentication:
+      authConfig.security_update_password_require_reauthentication ?? null,
+    external_anonymous_users_enabled:
+      authConfig.external_anonymous_users_enabled ?? null,
+    external_email_enabled: authConfig.external_email_enabled ?? null,
+    external_phone_enabled: authConfig.external_phone_enabled ?? null,
+    saml_enabled: authConfig.saml_enabled ?? null,
+    saml_external_url: authConfig.saml_external_url ?? null,
+    security_captcha_enabled: authConfig.security_captcha_enabled ?? null,
+    security_captcha_provider: authConfig.security_captcha_provider ?? null,
+    security_captcha_secret: authConfig.security_captcha_secret
+      ? "********"
+      : null,
+    rate_limit_anonymous_users: authConfig.rate_limit_anonymous_users ?? null,
+    rate_limit_email_sent: authConfig.rate_limit_email_sent ?? null,
+    rate_limit_sms_sent: authConfig.rate_limit_sms_sent ?? null,
+    rate_limit_verify: authConfig.rate_limit_verify ?? null,
+    rate_limit_token_refresh: authConfig.rate_limit_token_refresh ?? null,
+    rate_limit_otp: authConfig.rate_limit_otp ?? null,
+    sms_provider: authConfig.sms_provider ?? null,
+  };
+
+  delete response.external;
+  delete response.hooks;
+  delete response.smtp;
+
+  for (const [key, value] of Object.entries(externalConfig)) {
+    if (!value || typeof value !== "object") continue;
+    const provider = value as Record<string, unknown>;
+    response[`external_${key}_enabled`] =
+      provider.enabled ?? !!provider.client_id;
+    if ("client_id" in provider) {
+      response[`external_${key}_client_id`] = provider.client_id ?? null;
+    }
+    if ("client_secret" in provider) {
+      response[`external_${key}_secret`] = provider.client_secret
+        ? "********"
+        : null;
+    }
+    if ("email_optional" in provider) {
+      response[`external_${key}_email_optional`] =
+        provider.email_optional ?? null;
+    }
+    if ("additional_client_ids" in provider) {
+      response[`external_${key}_additional_client_ids`] =
+        provider.additional_client_ids ?? null;
+    }
+    if ("url" in provider) {
+      response[`external_${key}_url`] = provider.url ?? null;
+    }
+    if ("skip_nonce_check" in provider) {
+      response[`external_${key}_skip_nonce_check`] =
+        provider.skip_nonce_check ?? null;
+    }
+  }
+
+  const hookMap: Record<string, string> = {
+    custom_access_token_hook: "custom_access_token",
+    mfa_verification_hook: "mfa_verification_attempt",
+    password_verification_hook: "password_verification_attempt",
+    send_sms_hook: "send_sms",
+    send_email_hook: "send_email",
+    before_user_created_hook: "before_user_created",
+    after_user_created_hook: "after_user_created",
+  };
+
+  for (const [hookName, suffix] of Object.entries(hookMap)) {
+    const hook = (hooksConfig[hookName] as Record<string, unknown>) || {};
+    response[`hook_${suffix}_enabled`] = hook.enabled ?? null;
+    response[`hook_${suffix}_uri`] = hook.uri ?? null;
+    if ("secrets" in hook) {
+      response[`hook_${suffix}_secrets`] = hook.secrets ?? null;
+    }
+  }
+
+  response.smtp_admin_email = smtpConfig.admin_email ?? null;
+  response.smtp_host = smtpConfig.host ?? null;
+  response.smtp_port = smtpConfig.port ?? null;
+  response.smtp_user = smtpConfig.user ?? null;
+  response.smtp_pass = smtpConfig.pass ? "********" : null;
+  response.smtp_max_frequency = smtpConfig.max_frequency ?? null;
+  response.smtp_sender_name = smtpConfig.sender_name ?? null;
+
+  return response;
 }
 
 export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
@@ -246,14 +565,7 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
           string,
           unknown
         >) || {};
-      return {
-        allowed_address_ranges:
-          (nr as Record<string, unknown>).allowed_address_ranges || [],
-        config: nr,
-        old_config: nr,
-        status: "applied",
-        entitlement: "allowed",
-      };
+      return buildNetworkRestrictionsResponse(nr);
     },
     {
       params: t.Object({ ref: t.String() }),
@@ -343,11 +655,7 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
       if (!domainInfo) {
         return status(404, { message: "Project not found", code: "404" });
       }
-      return {
-        status: domainInfo.status || "1_not_started",
-        custom_hostname: domainInfo.custom_hostname || null,
-        data: (domainInfo as any).data || { success: true, errors: [], messages: [], result: {} },
-      };
+      return buildCustomHostnameResponse(domainInfo);
     },
     {
       params: t.Object({
@@ -430,160 +738,7 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
         return status(404, { message: "Project not found", code: "404" });
       }
 
-      const authConfig = (settings.auth as Record<string, unknown>) || {};
-      const externalConfig =
-        (authConfig.external as Record<string, unknown>) || {};
-
-      const hooksConfig = (authConfig.hooks as Record<string, any>) || {};
-
-      const studioCompatibleConfig: Record<string, unknown> = {
-        enable_signup: authConfig.enable_signup ?? true,
-        enable_signups: authConfig.enable_signup ?? true,
-        enable_confirmations: authConfig.enable_confirmations ?? false,
-        double_confirm_changes: authConfig.double_confirm_changes ?? true,
-        manual_linking_enabled:
-          authConfig.manual_linking_enabled ??
-          authConfig.enable_manual_linking ??
-          false,
-        jwt_expiry: authConfig.jwt_expiry ?? 3600,
-        disable_signup: authConfig.disable_signup ?? false,
-        mailer_autoconfirm: authConfig.mailer_autoconfirm ?? false,
-        mail_autoconfirm: authConfig.mailer_autoconfirm ?? false,
-        sms_autoconfirm: authConfig.sms_autoconfirm ?? false,
-        phone_autoconfirm: authConfig.sms_autoconfirm ?? false,
-        uri_allow_list: authConfig.uri_allow_list ?? "",
-        site_url: authConfig.site_url ?? "",
-        password_min_length: authConfig.password_min_length ?? 8,
-        security_refresh_token_rotation_enabled:
-          authConfig.security_refresh_token_rotation_enabled ?? true,
-        refresh_token_rotation_enabled:
-          authConfig.security_refresh_token_rotation_enabled ?? true,
-        security_refresh_token_rotation_reuse_interval:
-          authConfig.security_refresh_token_rotation_reuse_interval ?? 10,
-        mfa_enabled: authConfig.mfa_enabled ?? true,
-        mfa_max_enrolled_factors:
-          authConfig.mfa_max_enrolled_factors ??
-          authConfig.max_enrolled_factors ??
-          10,
-        mfa_factor_expiration: authConfig.mfa_factor_expiration ?? 0,
-        webauthn_enabled: authConfig.webauthn_enabled ?? true,
-        security_update_password_require_reauthentication:
-          authConfig.security_update_password_require_reauthentication ?? true,
-        external_anonymous_users_enabled:
-          authConfig.external_anonymous_users_enabled ?? true,
-        external_email_enabled: authConfig.external_email_enabled ?? true,
-        external_phone_enabled: authConfig.external_phone_enabled ?? true,
-        saml_enabled: authConfig.saml_enabled ?? false,
-        saml_external_url: authConfig.saml_external_url ?? "",
-        security_captcha_enabled: authConfig.security_captcha_enabled ?? false,
-        security_captcha_provider: authConfig.security_captcha_provider ?? "",
-        security_captcha_secret: authConfig.security_captcha_secret
-          ? "********"
-          : "",
-        rate_limit_anonymous_users: authConfig.rate_limit_anonymous_users ?? 30,
-        rate_limit_header: authConfig.rate_limit_header ?? "",
-        rate_limit_email_sent: authConfig.rate_limit_email_sent ?? 30,
-        rate_limit_email: authConfig.rate_limit_email_sent ?? 30,
-        rate_limit_sms_sent: authConfig.rate_limit_sms_sent ?? 30,
-        rate_limit_sms: authConfig.rate_limit_sms_sent ?? 30,
-        rate_limit_verify: authConfig.rate_limit_verify ?? 30,
-        rate_limit_token_refresh: authConfig.rate_limit_token_refresh ?? 150,
-        rate_limit_otp: authConfig.rate_limit_otp ?? 30,
-        mailer_otp_length: authConfig.mailer_otp_length ?? 6,
-        sms_provider: authConfig.sms_provider ?? "",
-        sms_otp_length: authConfig.sms_otp_length ?? 6,
-        sms_otp_validity: authConfig.sms_otp_validity ?? 60,
-        mailer_secure_email_change_enabled:
-          authConfig.mailer_secure_email_change_enabled ?? true,
-        ...authConfig,
-      };
-
-      delete studioCompatibleConfig.external;
-      delete studioCompatibleConfig.hooks;
-
-      const ALL_PROVIDERS = [
-        "apple",
-        "azure",
-        "bitbucket",
-        "discord",
-        "facebook",
-        "github",
-        "gitlab",
-        "google",
-        "keycloak",
-        "linkedin",
-        "linkedin_oidc",
-        "notion",
-        "slack",
-        "spotify",
-        "twitch",
-        "twitter",
-        "workos",
-        "zoom",
-      ];
-
-      for (const provider of ALL_PROVIDERS) {
-        const providerConfig =
-          (externalConfig[provider] as Record<string, unknown>) || {};
-        const upperKey = provider.toUpperCase();
-        studioCompatibleConfig[`EXTERNAL_${upperKey}_ENABLED`] =
-          !!providerConfig?.client_id;
-        studioCompatibleConfig[`EXTERNAL_${upperKey}_CLIENT_ID`] =
-          (providerConfig?.client_id as string) || "";
-        studioCompatibleConfig[`EXTERNAL_${upperKey}_SECRET`] =
-          providerConfig?.client_secret ? "********" : "";
-      }
-
-      for (const [key, val] of Object.entries(externalConfig)) {
-        if (ALL_PROVIDERS.includes(key)) continue;
-        const providerConfig = val as Record<string, unknown>;
-        const upperKey = key.toUpperCase();
-        studioCompatibleConfig[`EXTERNAL_${upperKey}_ENABLED`] =
-          !!providerConfig?.client_id;
-        studioCompatibleConfig[`EXTERNAL_${upperKey}_CLIENT_ID`] =
-          (providerConfig?.client_id as string) || "";
-        studioCompatibleConfig[`EXTERNAL_${upperKey}_SECRET`] =
-          providerConfig?.client_secret ? "********" : "";
-      }
-
-      studioCompatibleConfig.external_providers = Object.keys(externalConfig)
-        .filter(
-          (key) => (externalConfig[key] as Record<string, unknown>)?.client_id,
-        )
-        .join(",");
-
-      studioCompatibleConfig.hook_custom_access_token_enabled =
-        !!hooksConfig.custom_access_token_hook?.enabled;
-      studioCompatibleConfig.hook_custom_access_token_uri =
-        hooksConfig.custom_access_token_hook?.uri || null;
-      studioCompatibleConfig.hook_mfa_verification_enabled =
-        !!hooksConfig.mfa_verification_hook?.enabled;
-      studioCompatibleConfig.hook_mfa_verification_uri =
-        hooksConfig.mfa_verification_hook?.uri || null;
-      studioCompatibleConfig.hook_password_verification_enabled =
-        !!hooksConfig.password_verification_hook?.enabled;
-      studioCompatibleConfig.hook_password_verification_uri =
-        hooksConfig.password_verification_hook?.uri || null;
-      studioCompatibleConfig.hook_send_email_enabled =
-        !!hooksConfig.send_email_hook?.enabled;
-      studioCompatibleConfig.hook_send_email_uri =
-        hooksConfig.send_email_hook?.uri || null;
-      studioCompatibleConfig.hook_send_sms_enabled =
-        !!hooksConfig.send_sms_hook?.enabled;
-      studioCompatibleConfig.hook_send_sms_uri =
-        hooksConfig.send_sms_hook?.uri || null;
-
-      const smtpConfig = (authConfig.smtp as Record<string, unknown>) || {};
-      studioCompatibleConfig.smtp_admin_email = smtpConfig.admin_email || "";
-      studioCompatibleConfig.smtp_host = smtpConfig.host || "";
-      studioCompatibleConfig.smtp_port = smtpConfig.port || 587;
-      studioCompatibleConfig.smtp_user = smtpConfig.user || "";
-      studioCompatibleConfig.smtp_pass = smtpConfig.pass ? "********" : "";
-      studioCompatibleConfig.smtp_max_frequency =
-        smtpConfig.max_frequency || "1m0s";
-      studioCompatibleConfig.smtp_sender_name = smtpConfig.sender_name || "";
-
-      return studioCompatibleConfig;
+      return buildAuthConfigResponse(settings);
     },
     {
       params: t.Object({
@@ -1109,21 +1264,7 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
           string,
           unknown
         >) || {};
-      return {
-        fileSizeLimit: raw.fileSizeLimit || raw.file_size_limit || 52428800,
-        features: {
-          imageTransformation: { enabled: (raw.features as any)?.imageTransformation?.enabled ?? true },
-          s3Protocol: { enabled: (raw.features as any)?.s3Protocol?.enabled ?? false },
-          icebergCatalog: { enabled: (raw.features as any)?.icebergCatalog?.enabled ?? false, maxNamespaces: 0, maxTables: 0, maxCatalogs: 0 },
-          vectorBuckets: { enabled: (raw.features as any)?.vectorBuckets?.enabled ?? false },
-          ...(raw.features as Record<string, unknown> || {}),
-        },
-        capabilities: (raw as any).capabilities || {},
-        external: (raw as any).external || {},
-        migrationVersion: (raw as any).migrationVersion || "1",
-        databasePoolMode: (raw as any).databasePoolMode || "transaction",
-        ...raw,
-      };
+      return buildStorageConfigResponse(raw);
     },
     { params: t.Object({ ref: t.String() }) },
   )
@@ -1174,20 +1315,7 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
           string,
           unknown
         >) || {};
-      return {
-        private_only: raw.private_only ?? null,
-        connection_pool: raw.connection_pool ?? null,
-        max_concurrent_users: raw.max_concurrent_users ?? 200,
-        max_events_per_second: raw.max_events_per_second ?? 100,
-        max_bytes_per_second: raw.max_bytes_per_second ?? 100000,
-        max_channels_per_client: raw.maxChannelsPerClient || raw.max_channels_per_client || 100,
-        max_joins_per_second: raw.maxJoinsPerSecond || raw.max_joins_per_second || 100,
-        max_presence_events_per_second: raw.max_presence_events_per_second ?? 100,
-        max_payload_size_in_kb: raw.max_payload_size_in_kb ?? 256,
-        suspend: raw.suspend ?? false,
-        maxConnections: raw.maxConnections || raw.max_connections || 100,
-        ...raw,
-      };
+      return buildRealtimeConfigResponse(raw);
     },
     { params: t.Object({ ref: t.String() }) },
   )
@@ -1324,15 +1452,9 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
       if (!settings)
         return status(404, { message: "Project not found", code: "404" });
 
-      return {
-        config: {
-          dbAllowedCidrs: (settings as Record<string, unknown>)
-            .network_restrictions || ["0.0.0.0/0"],
-        },
-        old_config: {},
-        status: "applied",
-        entitlement: "custom",
-      };
+      return buildNetworkRestrictionsResponse(
+        (settings as Record<string, unknown>).network_restrictions,
+      );
     },
     { params: t.Object({ ref: t.String() }) },
   )

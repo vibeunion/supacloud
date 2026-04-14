@@ -1,6 +1,6 @@
 import { customAlphabet, nanoid as originalNanoid } from "nanoid";
 
-// Official Supabase API requires: minLength=20, maxLength=20, pattern=^[a-z]+$
+// Supabase OpenAPI requires a 20-character lowercase project ref (`^[a-z]+$`).
 const generateProjectRefId = customAlphabet("abcdefghijklmnopqrstuvwxyz", 20);
 
 // JWT Header
@@ -46,7 +46,7 @@ export class JwtService {
     return process.env.TEST_FIXED_JWT_SECRET || originalNanoid(40);
   }
 
-  // Generate project reference ID (20 chars, lowercase only — official spec compliant)
+  // Generate project reference ID (20 lowercase letters to match official OpenAPI)
   generateProjectRef(): string {
     return generateProjectRefId();
   }
