@@ -950,11 +950,7 @@ async function bootstrap() {
             const val = request.headers.get(h);
             if (val) requestHeaders[h] = val;
           }
-          const tenantHost = resolveRealtimeTenantHost(
-            projectRef,
-            url.host,
-            config.baseDomain,
-          );
+          const tenantHost = projectRef ? `${projectRef}.supabase.co` : url.host;
           requestHeaders["host"] = tenantHost;
           requestHeaders["x-forwarded-host"] = tenantHost;
           requestHeaders["x-forwarded-proto"] = url.protocol.replace(":", "");
