@@ -29,11 +29,12 @@ describe("JwtService", () => {
   });
 
   describe("generateProjectRef", () => {
-    test("should return a lowercase string with 10 characters", () => {
+    test("should return a lowercase string with 20 characters", () => {
       const ref = jwtService.generateProjectRef();
       expect(typeof ref).toBe("string");
-      expect(ref.length).toBe(10);
+      expect(ref.length).toBe(20);
       expect(ref).toBe(ref.toLowerCase());
+      expect(ref).toMatch(/^[a-z]+$/);
     });
 
     test("should generate unique refs", () => {
