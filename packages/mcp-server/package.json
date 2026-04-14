@@ -1,6 +1,6 @@
 {
   "name": "supacloud-mcp",
-  "version": "0.6.10",
+  "version": "0.7.0",
   "description": "MCP Server for SupaCloud – AI-native Supabase infrastructure management",
   "type": "module",
   "main": "./dist/index.js",
