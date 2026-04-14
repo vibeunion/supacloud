@@ -124,7 +124,15 @@ async function bootstrap() {
     try {
       await projectDb`CREATE POLICY "authenticated can read all messages on topic" ON "realtime"."messages" FOR SELECT TO authenticated USING ( realtime.topic() like '%channel%' )`;
       await projectDb`CREATE POLICY "authenticated can insert messages on topic" ON "realtime"."messages" FOR INSERT TO authenticated WITH CHECK (realtime.topic() like '%channel%')`;
-      console.log("✅ Realtime RLS policies applied.");
+      await projectDb`CREATE POLICY "anon can read all messages on topic" ON "realtime"."messages" FOR SELECT TO anon USING ( realtime.topic() like '%channel%' )`;
+      await projectDb`CREATE POLICY "anon can insert messages on topic" ON "realtime"."messages" FOR INSERT TO anon WITH CHECK (realtime.topic() like '%channel%')`;
+      
+      await projectDb`GRANT USAGE ON SCHEMA realtime TO postgres, anon, authenticated, service_role`;
+      await projectDb`GRANT ALL ON ALL TABLES IN SCHEMA realtime TO postgres, anon, authenticated, service_role`;
+      await projectDb`GRANT ALL ON ALL ROUTINES IN SCHEMA realtime TO postgres, anon, authenticated, service_role`;
+      await projectDb`GRANT ALL ON ALL SEQUENCES IN SCHEMA realtime TO postgres, anon, authenticated, service_role`;
+      
+      console.log("✅ Realtime RLS policies and grants applied.");
     } catch (e: any) {
       console.warn("⚠️ Realtime RLS policies skipped:", e.message?.substring(0, 80));
     }
