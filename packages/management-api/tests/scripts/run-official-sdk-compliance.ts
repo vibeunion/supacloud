@@ -119,6 +119,15 @@ async function bootstrap() {
     await projectDb`CREATE POLICY "Allow authenticated update own todos" ON public.todos FOR UPDATE TO authenticated USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id)`;
     await projectDb`CREATE POLICY "Allow authenticated delete own todos" ON public.todos FOR DELETE TO authenticated USING (auth.uid() = user_id)`;
     await projectDb`GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role`;
+
+    // Add Realtime RLS policies required by the broadcast test
+    try {
+      await projectDb`CREATE POLICY "authenticated can read all messages on topic" ON "realtime"."messages" FOR SELECT TO authenticated USING ( realtime.topic() like '%channel%' )`;
+      await projectDb`CREATE POLICY "authenticated can insert messages on topic" ON "realtime"."messages" FOR INSERT TO authenticated WITH CHECK (realtime.topic() like '%channel%')`;
+      console.log("✅ Realtime RLS policies applied.");
+    } catch (e: any) {
+      console.warn("⚠️ Realtime RLS policies skipped:", e.message?.substring(0, 80));
+    }
     await projectDb`GRANT SELECT, INSERT, UPDATE, DELETE ON public.todos TO anon, authenticated, service_role`;
     // Storage: seed logical bucket metadata in the bridged/shared database.
     try {
