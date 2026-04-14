@@ -38,6 +38,7 @@ Actions: ${allActions.join(", ")}${readOnly ? " (read-only mode)" : ""}`,
             ref: projectRef ? z.string().optional() : z.string().optional().describe("Project ref"),
             // query
             sql: z.string().optional().describe("[query/apply_migration] SQL statement"),
+            file: z.string().optional().describe("[query/apply_migration] Read SQL from local file path (avoids shell escaping issues with $$ and multi-statement DDL)"),
             // schema
             schema: z.string().optional().describe("[*] Schema name (default: public)"),
             table: z.string().optional().describe("[describe_columns/indexes/constraints/rls_*] Table name"),
@@ -55,6 +56,15 @@ Actions: ${allActions.join(", ")}${readOnly ? " (read-only mode)" : ""}`,
             const ref = projectRef || args.ref;
             const schema = args.schema || "public";
             const schemas = args.schemas || ["public"];
+
+            // Resolve SQL from --file if provided (avoids shell $$ and ; escaping)
+            if (args.file && !args.sql) {
+                try {
+                    args.sql = require("fs").readFileSync(args.file, "utf-8");
+                } catch (e: any) {
+                    return { content: [{ type: "text" as const, text: `❌ Failed to read file ${args.file}: ${e.message}` }] };
+                }
+            }
 
             const execSql = async (sql: string) => http.post("/mcp/sql", { ref, sql });
 

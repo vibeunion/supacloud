@@ -78,6 +78,7 @@ if (process.argv.includes("--help") || process.argv.includes("-h")) {
 
     npx supacloud-mcp project list
     npx supacloud-mcp database query --ref abc123 --sql "SELECT 1"
+    npx supacloud-mcp database query --ref abc123 --file ./migrations/001_init.sql  # multi-statement DDL
     npx supacloud-mcp ssh diagnose
     npx supacloud-mcp edge_functions deploy --ref abc123 --slug hello --path ./func.ts
     npx supacloud-mcp edge_functions deploy --ref abc123 --slug hello --code "..."  # small inline
