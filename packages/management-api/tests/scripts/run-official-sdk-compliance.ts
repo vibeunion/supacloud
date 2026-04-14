@@ -25,7 +25,7 @@ async function bootstrap() {
   );
 
   const projectService = new ProjectService();
-  const tenantName = `sdk_hijack_${randomUUID().substring(0, 8)}`;
+  const tenantName = `sdkhijack${randomUUID().replace(/-/g, '').substring(0, 8)}`;
 
   const project = await projectService.createProject({
     name: tenantName,
