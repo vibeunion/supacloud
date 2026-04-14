@@ -6,6 +6,7 @@ import { resolveBucketName } from "../db";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { S3Client } from "bun";
+import { AwsClient } from "aws4fetch";
 
 export interface StorageDriver {
   createBucket(projectRef: string, bucket: string): Promise<boolean>;
@@ -236,88 +237,12 @@ async function createS3BucketWithFetch(
   region = "us-east-1",
 ): Promise<boolean> {
   const base = endpoint.replace(/\/+$/, "");
-  const host = new URL(base).host;
   const url = `${base}/${bucketName}`;
-
-  const now = new Date();
-  // dateTime: "20240115T120000Z"
-  const dateTime = now
-    .toISOString()
-    .replace(/[-:]/g, "")
-    .replace(/\.\d{3}/, "");
-  const dateShort = dateTime.slice(0, 8); // "20240115"
-
-  // SHA-256 of empty body
-  const payloadHash =
-    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
-
-  const canonicalHeaders =
-    [
-      `host:${host}`,
-      `x-amz-content-sha256:${payloadHash}`,
-      `x-amz-date:${dateTime}`,
-    ].join("\n") + "\n";
-  const signedHeaders = "host;x-amz-content-sha256;x-amz-date";
-
-  const canonicalRequest = [
-    "PUT",
-    `/${bucketName}`,
-    "",
-    canonicalHeaders,
-    signedHeaders,
-    payloadHash,
-  ].join("\n");
-
-  const enc = new TextEncoder();
-  const canonDigest = await crypto.subtle.digest(
-    "SHA-256",
-    enc.encode(canonicalRequest),
-  );
-  const canonHex = [...new Uint8Array(canonDigest)]
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-
-  const credScope = `${dateShort}/${region}/s3/aws4_request`;
-  const stringToSign = `AWS4-HMAC-SHA256\n${dateTime}\n${credScope}\n${canonHex}`;
-
-  // Derive signing key: HMAC(HMAC(HMAC(HMAC("AWS4"+secret, date), region), service), "aws4_request")
-  async function hmac(key: ArrayBuffer, msg: string): Promise<ArrayBuffer> {
-    const k = await crypto.subtle.importKey(
-      "raw",
-      key,
-      { name: "HMAC", hash: "SHA-256" },
-      false,
-      ["sign"],
-    );
-    return crypto.subtle.sign("HMAC", k, enc.encode(msg));
-  }
-
-  const kDate = await hmac(
-    enc.encode(`AWS4${secretKey}`).buffer as ArrayBuffer,
-    dateShort,
-  );
-  const kRegion = await hmac(kDate, region);
-  const kService = await hmac(kRegion, "s3");
-  const kSigning = await hmac(kService, "aws4_request");
-  const sigBuf = await hmac(kSigning, stringToSign);
-  const sigHex = [...new Uint8Array(sigBuf)]
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-
-  const authHeader = `AWS4-HMAC-SHA256 Credential=${accessKey}/${credScope}, SignedHeaders=${signedHeaders}, Signature=${sigHex}`;
-
+  const aws = new AwsClient({ accessKeyId: accessKey, secretAccessKey: secretKey, region, service: "s3" });
+  
   try {
-    const res = await fetch(url, {
-      method: "PUT",
-      headers: {
-        Authorization: authHeader,
-        "x-amz-date": dateTime,
-        "x-amz-content-sha256": payloadHash,
-        "Content-Length": "0",
-      },
-    });
-    // 200 = created, 409 = BucketAlreadyOwnedByYou (both are success for our purposes)
-    if (res.ok || res.status === 409) return true;
+    const res = await aws.fetch(url, { method: "PUT" });
+    if (res.ok || res.status === 409 || res.status === 200) return true;
     const body = await res.text().catch(() => "");
     logger.warn(`[S3] createBucket HTTP ${res.status}: ${body.slice(0, 120)}`);
     return false;
@@ -328,29 +253,6 @@ async function createS3BucketWithFetch(
     );
     return false;
   }
-}
-
-function toHex(buffer: ArrayBuffer): string {
-  return [...new Uint8Array(buffer)]
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-}
-
-async function toUint8Array(
-  data: Blob | Buffer | Uint8Array | ArrayBuffer | ReadableStream,
-): Promise<Uint8Array> {
-  if (data instanceof Uint8Array) return data;
-  if (data instanceof ArrayBuffer) return new Uint8Array(data);
-  if (data instanceof Blob) return new Uint8Array(await data.arrayBuffer());
-  return new Uint8Array(await new Response(data as ReadableStream).arrayBuffer());
-}
-
-function encodeS3Key(key: string): string {
-  return key
-    .split("/")
-    .filter(Boolean)
-    .map((segment) => encodeURIComponent(segment))
-    .join("/");
 }
 
 async function putS3ObjectWithFetch(
@@ -364,79 +266,18 @@ async function putS3ObjectWithFetch(
   region = "us-east-1",
 ): Promise<boolean> {
   const base = endpoint.replace(/\/+$/, "");
-  const host = new URL(base).host;
-  const encodedKey = encodeS3Key(objectKey);
-  const canonicalUri = `/${bucketName}/${encodedKey}`;
-  const url = `${base}${canonicalUri}`;
-  const bytes = await toUint8Array(data);
-  const payload = bytes.buffer.slice(
-    bytes.byteOffset,
-    bytes.byteOffset + bytes.byteLength,
-  ) as ArrayBuffer;
-
-  const now = new Date();
-  const dateTime = now
-    .toISOString()
-    .replace(/[-:]/g, "")
-    .replace(/\.\d{3}/, "");
-  const dateShort = dateTime.slice(0, 8);
-  const payloadHash = toHex(await crypto.subtle.digest("SHA-256", payload));
-
-  const canonicalHeaders =
-    [
-      `host:${host}`,
-      `x-amz-content-sha256:${payloadHash}`,
-      `x-amz-date:${dateTime}`,
-    ].join("\n") + "\n";
-  const signedHeaders = "host;x-amz-content-sha256;x-amz-date";
-  const canonicalRequest = [
-    "PUT",
-    canonicalUri,
-    "",
-    canonicalHeaders,
-    signedHeaders,
-    payloadHash,
-  ].join("\n");
-
-  const enc = new TextEncoder();
-  const canonHex = toHex(
-    await crypto.subtle.digest("SHA-256", enc.encode(canonicalRequest)),
-  );
-  const credScope = `${dateShort}/${region}/s3/aws4_request`;
-  const stringToSign = `AWS4-HMAC-SHA256\n${dateTime}\n${credScope}\n${canonHex}`;
-
-  async function hmac(key: ArrayBuffer, msg: string): Promise<ArrayBuffer> {
-    const importedKey = await crypto.subtle.importKey(
-      "raw",
-      key,
-      { name: "HMAC", hash: "SHA-256" },
-      false,
-      ["sign"],
-    );
-    return crypto.subtle.sign("HMAC", importedKey, enc.encode(msg));
-  }
-
-  const kDate = await hmac(
-    enc.encode(`AWS4${secretKey}`).buffer as ArrayBuffer,
-    dateShort,
-  );
-  const kRegion = await hmac(kDate, region);
-  const kService = await hmac(kRegion, "s3");
-  const kSigning = await hmac(kService, "aws4_request");
-  const signature = toHex(await hmac(kSigning, stringToSign));
-  const authorization = `AWS4-HMAC-SHA256 Credential=${accessKey}/${credScope}, SignedHeaders=${signedHeaders}, Signature=${signature}`;
+  const encodedKey = objectKey.split("/").filter(Boolean).map(encodeURIComponent).join("/");
+  const url = `${base}/${bucketName}/${encodedKey}`;
+  
+  const aws = new AwsClient({ accessKeyId: accessKey, secretAccessKey: secretKey, region, service: "s3" });
 
   try {
-    const response = await fetch(url, {
+    const response = await aws.fetch(url, {
       method: "PUT",
       headers: {
-        Authorization: authorization,
-        "Content-Length": String(bytes.byteLength),
         "Content-Type": contentType,
-        "x-amz-content-sha256": payloadHash,
-        "x-amz-date": dateTime,
       },
-      body: payload,
+      body: data as BodyInit,
     });
 
     if (response.ok) return true;

@@ -248,6 +248,7 @@ export async function setupCiBridge(sql: InstanceType<typeof SQL>): Promise<{
     try {
       const { RealtimeService } = await import("../../src/services/realtime.service");
       const realtimeService = new RealtimeService();
+      await realtimeService.ensureSupabaseAdminReplication();
       let registered = false;
       for (let attempt = 1; attempt <= 5; attempt++) {
         registered = await realtimeService.registerTenant({
