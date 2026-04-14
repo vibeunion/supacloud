@@ -23,7 +23,7 @@ export const CI_ANON_KEY =
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0";
 export const CI_SERVICE_KEY =
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU";
-export const CI_TENANT_REF = "cisdkbridge"; // ≤20 chars, fixed across runs
+export const CI_TENANT_REF = "cisdkbridgeautotenan"; // ≤20 chars, fixed across runs
 export const CI_PGRST_PORT = 3000;
 export const CI_GOTRUE_PORT = 9999;
 export const CI_REALTIME_PORT = 4000;
