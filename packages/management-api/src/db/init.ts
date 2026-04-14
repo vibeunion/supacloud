@@ -183,6 +183,15 @@ export async function initDatabase() {
       await sql`ALTER TABLE system_signed_uploads ADD COLUMN IF NOT EXISTS auth_token TEXT`;
       // Add updated_at to project_secrets if not present (migration for existing deployments)
       await sql`ALTER TABLE project_secrets ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()`;
+      // Fix project_tasks FK to CASCADE (original DDL may have been created without it)
+      try {
+        await sql`
+          ALTER TABLE project_tasks
+            DROP CONSTRAINT IF EXISTS project_tasks_project_ref_fkey,
+            ADD CONSTRAINT project_tasks_project_ref_fkey
+              FOREIGN KEY (project_ref) REFERENCES projects(ref) ON DELETE CASCADE
+        `;
+      } catch { /* constraint already correct */ }
       logger.info("Schema migrations applied.");
     } catch (e: any) {
       logger.error("Failed to apply migrations: " + e.message);
