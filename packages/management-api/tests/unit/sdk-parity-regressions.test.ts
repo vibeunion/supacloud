@@ -6,18 +6,18 @@ import {
 } from "../../src/utils/sdk-parity";
 
 describe("SDK parity regression guards", () => {
-  test("normalizes CI MinIO host endpoint from published port 9001 to container port 9000", () => {
+  test("does not rewrite CI MinIO host endpoint to 9000 anymore", () => {
     expect(
       normalizeCiS3Endpoint("http://127.0.0.1:9001", {
         CI: "true",
       } as NodeJS.ProcessEnv),
-    ).toBe("http://127.0.0.1:9000");
+    ).toBe("http://127.0.0.1:9001");
 
     expect(
       normalizeCiS3Endpoint("http://localhost:9001/some/path", {
         GITHUB_ACTIONS: "true",
       } as NodeJS.ProcessEnv),
-    ).toBe("http://localhost:9000/some/path");
+    ).toBe("http://localhost:9001/some/path");
   });
 
   test("does not rewrite non-CI S3 endpoints", () => {
