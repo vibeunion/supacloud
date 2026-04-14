@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.8.0](https://github.com/zuohuadong/supacloud/compare/mcp-server-v0.7.0...mcp-server-v0.8.0) (2026-04-14)
+
+
+### 🚀 Features
+
+* **mcp:** add --file parameter for database query to handle multi-statement DDL with $$ delimiters ([f7922bb](https://github.com/zuohuadong/supacloud/commit/f7922bb340ca3eb44d2d4f9c4e3be43774ab3fe3))
+
+
+### 📝 Documentation
+
+* **mcp:** clarify --path for large Edge Functions and add frontend CLI examples ([ae06e21](https://github.com/zuohuadong/supacloud/commit/ae06e21eee95d08b05f535ec9b04e5d4d925db1a))
+
 ## [0.7.0](https://github.com/zuohuadong/supacloud/compare/mcp-server-v0.6.10...mcp-server-v0.7.0) (2026-04-14)
 
 
