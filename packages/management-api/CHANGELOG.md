@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.9.1](https://github.com/zuohuadong/supacloud/compare/management-api-v0.9.0...management-api-v0.9.1) (2026-04-14)
+
+
+### 🐛 Bug Fixes
+
+* **auth:** restore empty string fallback for OpenAPI enum compliance ([f62da87](https://github.com/zuohuadong/supacloud/commit/f62da87304c3526fe50cf1684ff115e2975fac11))
+* **openapi:** satisfy strict schema enums and ref length requirements ([9f47811](https://github.com/zuohuadong/supacloud/commit/9f47811e8a834cced46e8946b620f233c41e2973))
+* **openapi:** use predefined enums for missing auth config providers instead of empty strings ([b2ebf64](https://github.com/zuohuadong/supacloud/commit/b2ebf647f4bb69d90e9745e6a3c8435f52e3d310))
+
+
+### 🔧 Miscellaneous Chores
+
+* cleanup scratch files and commit modified files ([328a728](https://github.com/zuohuadong/supacloud/commit/328a7285b5956693105c7d1086338e53194cf013))
+
 ## [0.9.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.8.0...management-api-v0.9.0) (2026-04-14)
 
 
