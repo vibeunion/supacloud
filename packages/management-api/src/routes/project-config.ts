@@ -252,7 +252,7 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
         config: nr,
         old_config: nr,
         status: "applied",
-        entitlement: "enabled",
+        entitlement: "allowed",
       };
     },
     {
@@ -343,7 +343,11 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
       if (!domainInfo) {
         return status(404, { message: "Project not found", code: "404" });
       }
-      return domainInfo;
+      return {
+        status: domainInfo.status || "1_not_started",
+        custom_hostname: domainInfo.custom_hostname || null,
+        data: domainInfo.data || { success: true, errors: [], messages: [], result: {} },
+      };
     },
     {
       params: t.Object({
@@ -1107,9 +1111,17 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
         >) || {};
       return {
         fileSizeLimit: raw.fileSizeLimit || raw.file_size_limit || 52428800,
-        features: raw.features || {
-          imageTransformation: { enabled: true, maxTransformations: 100 },
+        features: {
+          imageTransformation: { enabled: (raw.features as any)?.imageTransformation?.enabled ?? true },
+          s3Protocol: { enabled: (raw.features as any)?.s3Protocol?.enabled ?? false },
+          icebergCatalog: { enabled: (raw.features as any)?.icebergCatalog?.enabled ?? false, maxNamespaces: 0, maxTables: 0, maxCatalogs: 0 },
+          vectorBuckets: { enabled: (raw.features as any)?.vectorBuckets?.enabled ?? false },
+          ...(raw.features as Record<string, unknown> || {}),
         },
+        capabilities: (raw as any).capabilities || {},
+        external: (raw as any).external || {},
+        migrationVersion: (raw as any).migrationVersion || "1",
+        databasePoolMode: (raw as any).databasePoolMode || "transaction",
         ...raw,
       };
     },
@@ -1163,11 +1175,17 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
           unknown
         >) || {};
       return {
+        private_only: raw.private_only ?? null,
+        connection_pool: raw.connection_pool ?? null,
+        max_concurrent_users: raw.max_concurrent_users ?? 200,
+        max_events_per_second: raw.max_events_per_second ?? 100,
+        max_bytes_per_second: raw.max_bytes_per_second ?? 100000,
+        max_channels_per_client: raw.maxChannelsPerClient || raw.max_channels_per_client || 100,
+        max_joins_per_second: raw.maxJoinsPerSecond || raw.max_joins_per_second || 100,
+        max_presence_events_per_second: raw.max_presence_events_per_second ?? 100,
+        max_payload_size_in_kb: raw.max_payload_size_in_kb ?? 256,
+        suspend: raw.suspend ?? false,
         maxConnections: raw.maxConnections || raw.max_connections || 100,
-        maxJoinsPerSecond:
-          raw.maxJoinsPerSecond || raw.max_joins_per_second || 100,
-        maxChannelsPerClient:
-          raw.maxChannelsPerClient || raw.max_channels_per_client || 100,
         ...raw,
       };
     },
