@@ -15,29 +15,35 @@ interface SchemaRegistry {
 function buildSchemaRegistry(openApi: any): SchemaRegistry {
   const schemas = openApi.components?.schemas || {};
   const nameMap = new Map<string, string>();
+  const aliases: Record<string, string> = {
+    V1ApiKeyResponse: "ApiKeyResponse",
+    V1OrganizationResponse: "OrganizationResponseV1",
+    V1AuthConfigResponse: "AuthConfigResponse",
+    V1FunctionResponse: "FunctionResponse",
+    V1FunctionSecretsResponse: "SecretResponse",
+    V1ServiceResponse: "V1ServiceHealthResponse",
+    V1NetworkRestrictionsResponse: "NetworkRestrictionsResponse",
+    V1CustomHostnameResponse: "UpdateCustomHostnameResponse",
+    V1StorageConfigResponse: "StorageConfigResponse",
+    V1RealtimeConfigResponse: "RealtimeConfigResponse",
+  };
+
   for (const key of Object.keys(schemas)) {
     nameMap.set(key.toLowerCase(), key);
   }
+
   return {
     schemas,
     resolveRef(ref: string): string | null {
       const directKey = ref.replace("#/components/schemas/", "");
-      if (schemas[directKey]) return directKey;
-      const lowerKey = directKey.toLowerCase();
+      const aliasedKey = aliases[directKey] || directKey;
+      if (schemas[aliasedKey]) return aliasedKey;
+
+      const lowerKey = aliasedKey.toLowerCase();
       for (const [lk, ok] of nameMap.entries()) {
         if (lk === lowerKey) return ok;
       }
-      const partial = directKey
-        .toLowerCase()
-        .replace(/v1/i, "")
-        .replace(/response/i, "");
-      for (const [lk, ok] of nameMap.entries()) {
-        if (
-          lk.includes(partial) ||
-          partial.includes(lk.replace(/v1/i, "").replace(/response/i, ""))
-        )
-          return ok;
-      }
+
       return null;
     },
   };
@@ -131,21 +137,21 @@ async function run() {
       method: "GET",
       path: `/v1/projects/${projectRef}`,
       schemaType: "object",
-      schemaRef: "V1ProjectDetailResponse",
+      schemaRef: "V1ProjectWithDatabaseResponse",
     },
     {
       name: "GET /v1/projects/:ref/api-keys",
       method: "GET",
       path: `/v1/projects/${projectRef}/api-keys`,
       schemaType: "array",
-      schemaRef: "V1ApiKeyResponse",
+      schemaRef: "ApiKeyResponse",
     },
     {
       name: "GET /v1/organizations",
       method: "GET",
       path: "/v1/organizations",
       schemaType: "array",
-      schemaRef: "V1OrganizationResponse",
+      schemaRef: "OrganizationResponseV1",
     },
     {
       name: "GET /v1/projects/:ref/config/auth",
@@ -185,7 +191,7 @@ async function run() {
       method: "GET",
       path: `/v1/projects/${projectRef}/functions`,
       schemaType: "array",
-      schemaRef: "V1FunctionResponse",
+      schemaRef: "FunctionResponse",
       skipIfMissing: true,
     },
     {
@@ -193,7 +199,7 @@ async function run() {
       method: "GET",
       path: `/v1/projects/${projectRef}/functions/secrets`,
       schemaType: "array",
-      schemaRef: "V1FunctionSecretsResponse",
+      schemaRef: "SecretResponse",
       skipIfMissing: true,
     },
     {
@@ -217,7 +223,7 @@ async function run() {
       method: "GET",
       path: `/v1/projects/${projectRef}/services`,
       schemaType: "array",
-      schemaRef: "V1ServiceResponse",
+      schemaRef: "V1ServiceHealthResponse",
       skipIfMissing: true,
     },
     {
@@ -233,7 +239,7 @@ async function run() {
       method: "GET",
       path: `/v1/projects/${projectRef}/network-restrictions`,
       schemaType: "object",
-      schemaRef: "V1NetworkRestrictionsResponse",
+      schemaRef: "NetworkRestrictionsResponse",
       skipIfMissing: true,
     },
     {
@@ -241,7 +247,7 @@ async function run() {
       method: "GET",
       path: `/v1/projects/${projectRef}/custom-hostname`,
       schemaType: "object",
-      schemaRef: "V1CustomHostnameResponse",
+      schemaRef: "UpdateCustomHostnameResponse",
       skipIfMissing: true,
     },
     {
@@ -265,7 +271,7 @@ async function run() {
       method: "GET",
       path: `/v1/projects/${projectRef}/config/storage`,
       schemaType: "object",
-      schemaRef: "V1StorageConfigResponse",
+      schemaRef: "StorageConfigResponse",
       skipIfMissing: true,
     },
     {
@@ -273,7 +279,7 @@ async function run() {
       method: "GET",
       path: `/v1/projects/${projectRef}/config/realtime`,
       schemaType: "object",
-      schemaRef: "V1RealtimeConfigResponse",
+      schemaRef: "RealtimeConfigResponse",
       skipIfMissing: true,
     },
   ];
@@ -320,13 +326,13 @@ async function run() {
       const res = await fetch(url, fetchOpts);
       if (!res.ok) {
         console.error(`   ❌ HTTP Error ${res.status} ${res.statusText}`);
-        if (res.status >= 500) {
-          failureCount++;
-        } else {
+        if (res.status === 404 && suite.skipIfMissing) {
           console.warn(
-            `   ⚠️  Client error — endpoint may not be implemented yet. Counting as skip.`,
+            `   ⚠️  Endpoint not implemented yet. Counting as skip because skipIfMissing=true.`,
           );
           skipCount++;
+        } else {
+          failureCount++;
         }
         continue;
       }
@@ -396,17 +402,27 @@ async function run() {
     `   📈 Pass rate: ${passCount + failureCount > 0 ? Math.round((passCount / (passCount + failureCount)) * 100) : 100}%`,
   );
 
-  // OpenAPI compliance is a tracking metric, not a CI gate.
-  // Auth config alone has 192+ required fields specific to Supabase SaaS.
   const tested = passCount + failureCount;
+
+  if (tested === 0) {
+    console.error(
+      "\n❌ FAIL: no endpoints were actually validated. Check auth, test setup, and project provisioning before trusting this result.",
+    );
+    process.exit(1);
+  }
+
   if (failureCount > 0) {
-    console.warn(`\n⚠️ OpenAPI compliance: ${failureCount}/${tested} endpoints deviated (non-blocking)`);
+    console.error(
+      `\n❌ FAIL: ${failureCount}/${tested} endpoints failed schema validation.`,
+    );
+    console.error("Fix the schema deviations above before merging.");
+    process.exit(1);
   } else {
     console.log(
       "\n🎉 SUCCESS: All validated Management API schemas achieve parity with official Supabase spec!",
     );
+    process.exit(0);
   }
-  process.exit(0);
 }
 
 run();
