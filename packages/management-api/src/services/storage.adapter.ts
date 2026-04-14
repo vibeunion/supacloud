@@ -255,6 +255,15 @@ async function createS3BucketWithFetch(
   }
 }
 
+async function toUint8Array(
+  data: Blob | Buffer | Uint8Array | ArrayBuffer | ReadableStream,
+): Promise<Uint8Array> {
+  if (data instanceof Uint8Array) return data;
+  if (data instanceof ArrayBuffer) return new Uint8Array(data);
+  if (data instanceof Blob) return new Uint8Array(await data.arrayBuffer());
+  return new Uint8Array(await new Response(data as ReadableStream).arrayBuffer());
+}
+
 async function putS3ObjectWithFetch(
   endpoint: string,
   bucketName: string,
@@ -272,12 +281,14 @@ async function putS3ObjectWithFetch(
   const aws = new AwsClient({ accessKeyId: accessKey, secretAccessKey: secretKey, region, service: "s3" });
 
   try {
+    const bytes = await toUint8Array(data);
     const response = await aws.fetch(url, {
       method: "PUT",
       headers: {
         "Content-Type": contentType,
+        "Content-Length": String(bytes.byteLength),
       },
-      body: data as BodyInit,
+      body: Buffer.from(bytes),
     });
 
     if (response.ok) return true;
