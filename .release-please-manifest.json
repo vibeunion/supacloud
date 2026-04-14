@@ -1,6 +1,6 @@
 {
-  "packages/management-api": "0.8.0",
-  "packages/web-console": "0.6.2",
-  "packages/edge-runtime": "0.1.1",
-  "packages/mcp-server": "0.6.10"
+  "packages/management-api": "0.9.0",
+  "packages/web-console": "0.7.0",
+  "packages/edge-runtime": "0.2.0",
+  "packages/mcp-server": "0.7.0"
 }
