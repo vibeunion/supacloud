@@ -936,7 +936,7 @@ async function bootstrap() {
           // Supabase Realtime container expects /socket/websocket, not /realtime/v1/websocket
           const wsPath = url.pathname.replace(/^\/realtime\/v1/, "/socket");
           const upstreamUrl = `${wsBase}${wsPath}${url.search}`;
-          // Forward relevant request headers (apikey, authorization, etc.)
+          // Forward relevant request headers and align websocket proxy headers with HTTP sdk-proxy.
           const requestHeaders: Record<string, string> = {};
           const forwardHeaders = [
             "apikey",
@@ -949,9 +949,11 @@ async function bootstrap() {
             const val = request.headers.get(h);
             if (val) requestHeaders[h] = val;
           }
+          requestHeaders["x-forwarded-host"] = url.host;
+          requestHeaders["x-forwarded-proto"] = url.protocol.replace(":", "");
+          requestHeaders["x-forwarded-for"] = request.headers.get("x-forwarded-for") || "127.0.0.1";
           if (projectRef) {
             requestHeaders["x-project-ref"] = projectRef;
-            requestHeaders["Host"] = `${projectRef}.api.${config.baseDomain}`;
           }
 
           const upgraded = server.upgrade(request, {

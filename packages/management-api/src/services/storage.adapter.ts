@@ -642,12 +642,15 @@ export class S3Driver implements StorageDriver {
       const cleanFileName = key.replace(/^\/+/, "");
 
       if (process.env.CI || process.env.GITHUB_ACTIONS || process.env.NODE_ENV === "test") {
-        const s3 = this.getClient(creds as { accessKey: string; secretKey: string; endpoint: string; bucket: string });
-        const s3Key = `${bucket}/${cleanFileName}`;
-        const file = s3.file(s3Key);
-        const bytes = await toUint8Array(data);
-        await file.write(bytes, { type: contentType });
-        return true;
+        return await putS3ObjectWithFetch(
+          creds.endpoint,
+          creds.bucket,
+          `${bucket}/${cleanFileName}`,
+          data,
+          contentType,
+          creds.accessKey,
+          creds.secretKey,
+        );
       }
 
       const s3 = this.getClient(
