@@ -6,7 +6,7 @@ import { loadTenantEnv } from "./tenant-env";
 import path from "path";
 import { execSync } from "child_process";
 
-const PORT = Number(process.env.PORT) || 9000;
+const PORT = Number(process.env.EDGE_RUNTIME_PORT) || Number(process.env.PORT) || 9000;
 const POOL_SIZE = Number(process.env.WORKER_POOL_SIZE) || 4;
 const FUNCTIONS_DIR = process.env.EDGE_FUNCTIONS_DIR || "./functions";
 const MGMT_API = process.env.MANAGEMENT_API_URL || "http://127.0.0.1:9090";
