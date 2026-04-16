@@ -48,9 +48,32 @@ Actions: list, deploy, deploy_bundle, source, delete, check`,
             // Resolve code from path if provided
             if (pathArg && !code) {
                 try {
-                    code = require("fs").readFileSync(pathArg, "utf-8");
+                    const fs = require("fs");
+                    const os = require("os");
+                    const { promisify } = require("util");
+                    const execAsync = promisify(require("child_process").exec);
+
+                    const stat = fs.statSync(pathArg);
+                    let entrypoint = pathArg;
+                    if (stat.isDirectory()) {
+                        entrypoint = `${pathArg}/index.ts`;
+                        if (!fs.existsSync(entrypoint)) {
+                            throw new Error(`Directory provided but no index.ts found at ${entrypoint}`);
+                        }
+                    }
+
+                    // For edge functions, local auto-bundling is highly recommended to resolve multi-file imports
+                    // We bundle the function to a temp file, then read it as the deployment code.
+                    const tmpOut = `${os.tmpdir()}/supacloud_bundled_${Date.now()}.js`;
+                    try {
+                        const { stderr } = await execAsync(`bun build ${entrypoint} --target bun --outfile ${tmpOut}`);
+                        if (!fs.existsSync(tmpOut)) throw new Error(`Bundle failed: ${stderr}`);
+                        code = fs.readFileSync(tmpOut, "utf-8");
+                    } finally {
+                        try { fs.unlinkSync(tmpOut); } catch (e) {}
+                    }
                 } catch (e: any) {
-                    throw new Error(`Failed to read path ${pathArg}: ${e.message}`);
+                    throw new Error(`Failed to bundle/read path ${pathArg}: ${e.message}`);
                 }
             }
 
