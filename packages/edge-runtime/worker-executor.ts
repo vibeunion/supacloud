@@ -16,10 +16,18 @@ interface CachedModule {
 const moduleCache = new Map<string, CachedModule>();
 const MAX_CACHED = 20;
 
-/** Try to import a function module; on missing-dep errors, auto-install and retry once */
-async function loadModule(functionPath: string): Promise<{ default: unknown }> {
+// Track invalidation version per function to bust Bun's internal import() cache.
+// Bun caches modules by resolved specifier — appending ?v=N forces a fresh load.
+const moduleVersion = new Map<string, number>();
+
+/** Try to import a function module; on missing-dep errors, auto-install and retry once.
+ *  Appends a cache-busting query param to bypass Bun's internal import() cache
+ *  so that re-deployed functions are loaded fresh from disk. */
+async function loadModule(functionPath: string, functionId?: string): Promise<{ default: unknown }> {
+  const version = functionId ? (moduleVersion.get(functionId) || 0) : 0;
+  const cacheBustedPath = version > 0 ? `${functionPath}?v=${version}` : functionPath;
   try {
-    return await import(functionPath);
+    return await import(cacheBustedPath);
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     if (
@@ -30,8 +38,8 @@ async function loadModule(functionPath: string): Promise<{ default: unknown }> {
         `[Worker] Module load failed, attempting auto-install for ${functionPath}`,
       );
       await autoInstallDeps(functionPath);
-      // Retry after auto-install (clear Bun's internal module cache for this path)
-      return await import(functionPath);
+      // Retry after auto-install with cache-busted path
+      return await import(cacheBustedPath);
     }
     throw err;
   }
@@ -52,6 +60,9 @@ parentPort?.on("message", async (msg: WorkerMessage) => {
   // Handle cache invalidation messages from pool
   if (msg.type === "invalidate") {
     moduleCache.delete(msg.functionId);
+    // Bump version so next loadModule() uses a different import specifier,
+    // bypassing Bun's internal module cache
+    moduleVersion.set(msg.functionId, (moduleVersion.get(msg.functionId) || 0) + 1);
     return;
   }
 
@@ -60,7 +71,7 @@ parentPort?.on("message", async (msg: WorkerMessage) => {
     try {
       if (!moduleCache.has(msg.functionId)) {
         clearCapturedServeHandler();
-        const mod = await loadModule(msg.functionPath);
+        const mod = await loadModule(msg.functionPath, msg.functionId);
         const serveHandler =
           getCapturedServeHandler() as CachedModule["serveHandler"];
         moduleCache.set(msg.functionId, {
@@ -133,7 +144,7 @@ parentPort?.on("message", async (msg: WorkerMessage) => {
       let cached = moduleCache.get(functionId);
       if (!cached) {
         clearCapturedServeHandler();
-        const mod = await loadModule(functionPath);
+        const mod = await loadModule(functionPath, functionId);
         const serveHandler =
           getCapturedServeHandler() as CachedModule["serveHandler"];
         cached = {
