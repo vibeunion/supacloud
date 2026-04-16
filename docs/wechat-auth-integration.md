@@ -50,7 +50,7 @@ curl -X POST http://localhost:9090/v1/projects/abc123/auth/wechat/miniprogram \
   -H "Authorization: Bearer $MASTER_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
-    "app_id": "[REDACTED_WECHAT_APP_ID]",
+    "app_id": "YOUR_WECHAT_APP_ID",
     "app_secret": "your-app-secret",
     "deploy_function": true
   }'
@@ -95,7 +95,7 @@ curl -X POST http://localhost:9090/v1/projects/abc123/auth/wechat/mp \
   -H "Authorization: Bearer $MASTER_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
-    "app_id": "[REDACTED_WECHAT_APP_ID]",
+    "app_id": "YOUR_WECHAT_APP_ID",
     "app_secret": "your-app-secret",
     "redirect_uri": "https://your-domain.com/auth/callback",
     "deploy_function": true
@@ -142,7 +142,7 @@ curl -X POST http://localhost:9090/v1/projects/abc123/auth/wechat/open \
   -H "Authorization: Bearer $MASTER_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
-    "app_id": "[REDACTED_WECHAT_APP_ID]",
+    "app_id": "YOUR_WECHAT_APP_ID",
     "app_secret": "your-app-secret",
     "redirect_uri": "https://your-domain.com/auth/callback"
   }'
@@ -199,7 +199,7 @@ curl http://localhost:9090/v1/projects/abc123/auth/studio/providers \
     },
     "wechat": {
       "enabled": true,
-      "client_id": "[REDACTED_WECHAT_APP_ID]",
+      "client_id": "YOUR_WECHAT_APP_ID",
       "redirect_uri": "https://your-domain.com/auth/callback",
       "display_name": "微信开放平台",
       "is_custom": true,
@@ -207,7 +207,7 @@ curl http://localhost:9090/v1/projects/abc123/auth/studio/providers \
     },
     "wechat_miniprogram": {
       "enabled": true,
-      "client_id": "[REDACTED_WECHAT_APP_ID]",
+      "client_id": "YOUR_WECHAT_APP_ID",
       "redirect_uri": null,
       "display_name": "微信小程序",
       "is_custom": true,
@@ -215,7 +215,7 @@ curl http://localhost:9090/v1/projects/abc123/auth/studio/providers \
     },
     "wechat_mp": {
       "enabled": true,
-      "client_id": "[REDACTED_WECHAT_APP_ID]",
+      "client_id": "YOUR_WECHAT_APP_ID",
       "redirect_uri": "https://your-domain.com/auth/callback",
       "display_name": "微信公众号",
       "is_custom": true,
@@ -234,7 +234,7 @@ curl -X PATCH http://localhost:9090/v1/projects/abc123/auth/studio/providers/wec
   -H "Content-Type: application/json" \
   -d '{
     "enabled": true,
-    "client_id": "[REDACTED_WECHAT_APP_ID]",
+    "client_id": "YOUR_WECHAT_APP_ID",
     "client_secret": "your-app-secret"
   }'
 ```
@@ -246,14 +246,14 @@ curl -X PATCH http://localhost:9090/v1/projects/abc123/auth/studio/providers/wec
 ### 微信小程序
 
 ```env
-WECHAT_MINIPROGRAM_APP_ID=[REDACTED_WECHAT_APP_ID]
+WECHAT_MINIPROGRAM_APP_ID=YOUR_WECHAT_APP_ID
 WECHAT_MINIPROGRAM_APP_SECRET=your-app-secret
 ```
 
 ### 微信公众号
 
 ```env
-WECHAT_MP_APP_ID=[REDACTED_WECHAT_APP_ID]
+WECHAT_MP_APP_ID=YOUR_WECHAT_APP_ID
 WECHAT_MP_APP_SECRET=your-app-secret
 WECHAT_MP_REDIRECT_URI=https://your-domain.com/auth/callback
 ```
@@ -261,7 +261,7 @@ WECHAT_MP_REDIRECT_URI=https://your-domain.com/auth/callback
 ### 微信开放平台
 
 ```env
-WECHAT_OPEN_APP_ID=[REDACTED_WECHAT_APP_ID]
+WECHAT_OPEN_APP_ID=YOUR_WECHAT_APP_ID
 WECHAT_OPEN_APP_SECRET=your-app-secret
 WECHAT_OPEN_REDIRECT_URI=https://your-domain.com/auth/callback
 ```
