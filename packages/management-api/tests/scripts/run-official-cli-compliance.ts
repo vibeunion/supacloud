@@ -69,7 +69,7 @@ file_size_limit = "50MiB"
 
     console.log(`✅ Injecting CLI config and migration payload...`);
 
-    const SUPER_TOKEN = process.env.MASTER_TOKEN || 'sbp_0102030405060708091011121314151617181920';
+    const SUPER_TOKEN = process.env.MASTER_TOKEN ?? (() => { throw new Error('MASTER_TOKEN env var is required'); })();
     const cliBin = `supabase@${CLI_VERSION}`;
 
     let totalFailures = 0;
