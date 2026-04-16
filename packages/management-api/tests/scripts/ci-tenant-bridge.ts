@@ -20,9 +20,9 @@ import { config } from "../../src/config";
 export const CI_JWT_SECRET =
   "super-secret-jwt-token-with-at-least-32-characters-long";
 export const CI_ANON_KEY =
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0";
+  process.env.TEST_SUPABASE_ANON_KEY ?? "anon-key-not-set";
 export const CI_SERVICE_KEY =
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU";
+  process.env.TEST_SUPABASE_SERVICE_KEY ?? "service-key-not-set";
 export const CI_TENANT_REF = "cisdkbridgeautotenan"; // ≤20 chars, fixed across runs
 export const CI_PGRST_PORT = 3000;
 export const CI_GOTRUE_PORT = 9999;
