@@ -16,18 +16,10 @@ interface CachedModule {
 const moduleCache = new Map<string, CachedModule>();
 const MAX_CACHED = 20;
 
-// Track invalidation version per function to bust Bun's internal import() cache.
-// Bun caches modules by resolved specifier — appending ?v=N forces a fresh load.
-const moduleVersion = new Map<string, number>();
-
-/** Try to import a function module; on missing-dep errors, auto-install and retry once.
- *  Appends a cache-busting query param to bypass Bun's internal import() cache
- *  so that re-deployed functions are loaded fresh from disk. */
-async function loadModule(functionPath: string, functionId?: string): Promise<{ default: unknown }> {
-  const version = functionId ? (moduleVersion.get(functionId) || 0) : 0;
-  const cacheBustedPath = version > 0 ? `${functionPath}?v=${version}` : functionPath;
+/** Try to import a function module; on missing-dep errors, auto-install and retry once */
+async function loadModule(functionPath: string): Promise<{ default: unknown }> {
   try {
-    return await import(cacheBustedPath);
+    return await import(functionPath);
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     if (
@@ -38,8 +30,7 @@ async function loadModule(functionPath: string, functionId?: string): Promise<{ 
         `[Worker] Module load failed, attempting auto-install for ${functionPath}`,
       );
       await autoInstallDeps(functionPath);
-      // Retry after auto-install with cache-busted path
-      return await import(cacheBustedPath);
+      return await import(functionPath);
     }
     throw err;
   }
@@ -57,12 +48,11 @@ interface WorkerMessage {
 }
 
 parentPort?.on("message", async (msg: WorkerMessage) => {
-  // Handle cache invalidation messages from pool
+  // Handle cache invalidation messages from pool (belt-and-suspenders:
+  // the pool replaces workers on invalidation, but this handles edge cases
+  // where a message arrives before the worker is terminated)
   if (msg.type === "invalidate") {
     moduleCache.delete(msg.functionId);
-    // Bump version so next loadModule() uses a different import specifier,
-    // bypassing Bun's internal module cache
-    moduleVersion.set(msg.functionId, (moduleVersion.get(msg.functionId) || 0) + 1);
     return;
   }
 
@@ -71,7 +61,7 @@ parentPort?.on("message", async (msg: WorkerMessage) => {
     try {
       if (!moduleCache.has(msg.functionId)) {
         clearCapturedServeHandler();
-        const mod = await loadModule(msg.functionPath, msg.functionId);
+        const mod = await loadModule(msg.functionPath);
         const serveHandler =
           getCapturedServeHandler() as CachedModule["serveHandler"];
         moduleCache.set(msg.functionId, {
@@ -144,7 +134,7 @@ parentPort?.on("message", async (msg: WorkerMessage) => {
       let cached = moduleCache.get(functionId);
       if (!cached) {
         clearCapturedServeHandler();
-        const mod = await loadModule(functionPath, functionId);
+        const mod = await loadModule(functionPath);
         const serveHandler =
           getCapturedServeHandler() as CachedModule["serveHandler"];
         cached = {
