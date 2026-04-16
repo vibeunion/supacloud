@@ -17,7 +17,11 @@ export class WorkerPool {
     resolve: (r: Response) => void;
   }> = [];
   private totalRequests = 0;
-  private activeWorkers = new Set<Worker>(); // Track all living workers for invalidation
+  private totalInvalidations = 0;
+  private activeWorkers = new Set<Worker>();
+  // Workers marked for replacement after they finish their current request.
+  // This avoids dropping in-flight requests while ensuring stale module caches are purged.
+  private tainted = new Set<Worker>();
 
   constructor(private config: { size: number; requestTimeout: number }) {
     for (let i = 0; i < config.size; i++) {
@@ -213,6 +217,21 @@ export class WorkerPool {
   }
 
   private recycle(worker: Worker) {
+    // If the worker is tainted (stale module cache), replace it with a fresh one
+    // instead of returning it to the idle pool.
+    if (this.tainted.has(worker)) {
+      this.tainted.delete(worker);
+      this.replaceWorker(worker);
+      // The fresh worker was pushed to idle by replaceWorker;
+      // drain the queue if there are pending requests.
+      if (this.queue.length > 0 && this.idle.length > 0) {
+        const fresh = this.idle.pop()!;
+        const next = this.queue.shift()!;
+        this.execute(fresh, next.opts, next.resolve);
+      }
+      return;
+    }
+
     if (this.queue.length > 0) {
       const next = this.queue.shift()!;
       this.execute(worker, next.opts, next.resolve);
@@ -241,13 +260,46 @@ export class WorkerPool {
       `supacloud_edge_idle_workers ${this.idle.length}`,
       `supacloud_edge_queue_length ${this.queue.length}`,
       `supacloud_edge_total_requests ${this.totalRequests}`,
+      `supacloud_edge_total_invalidations ${this.totalInvalidations}`,
+      `supacloud_edge_tainted_workers ${this.tainted.size}`,
     ].join("\n");
   }
 
-  /** Notify all workers to evict a function from their module cache */
+  /**
+   * Invalidate all workers' module caches by replacing them.
+   *
+   * Strategy (graceful, zero-downtime):
+   *   - Idle workers → terminate immediately, replace with fresh ones
+   *   - Busy workers → mark as "tainted"; they'll be replaced in recycle()
+   *     after their current request completes (no in-flight drops)
+   *
+   * This is the same approach used by Deno Deploy and Cloudflare Workers:
+   * new Worker threads have completely clean module caches, eliminating
+   * Bun's import() cache staleness issue without hacks or memory leaks.
+   */
   invalidateModule(functionId: string): void {
+    this.totalInvalidations++;
+    console.log(`[Pool] Invalidating module: ${functionId} — replacing all workers`);
+
+    // 1. Replace all idle workers immediately
+    const freshIdle: Worker[] = [];
+    for (const w of this.idle) {
+      this.activeWorkers.delete(w);
+      const idx = this.workers.indexOf(w);
+      if (idx !== -1) this.workers.splice(idx, 1);
+      try { w.terminate(); } catch { /* ignore */ }
+
+      const fresh = this.createWorker();
+      this.activeWorkers.add(fresh);
+      freshIdle.push(fresh);
+    }
+    this.idle = freshIdle;
+
+    // 2. Mark all busy workers as tainted — they'll be replaced in recycle()
     for (const w of this.activeWorkers) {
-      w.postMessage({ type: "invalidate", functionId });
+      if (!this.idle.includes(w)) {
+        this.tainted.add(w);
+      }
     }
   }
 
