@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.2.1](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.2.0...edge-runtime-v0.2.1) (2026-04-16)
+
+
+### 🐛 Bug Fixes
+
+* **edge-runtime:** bust Bun import() cache on function redeploy ([fae6e90](https://github.com/zuohuadong/supacloud/commit/fae6e90ea414b38326c553d0751970e0e7386576))
+* **edge-runtime:** use EDGE_RUNTIME_PORT to avoid port conflict with management API ([69b6f44](https://github.com/zuohuadong/supacloud/commit/69b6f448c25e8e57ec68e462ed31ee0b623e5d7b))
+
+
+### 💅 Elegance & Refactoring
+
+* **edge-runtime:** replace query-param hack with Worker replacement for module invalidation ([777c7d2](https://github.com/zuohuadong/supacloud/commit/777c7d242d9ffb8d78082afbd75f3fcaf0553a16))
+
 ## [0.2.0](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.1.1...edge-runtime-v0.2.0) (2026-04-14)
 
 
