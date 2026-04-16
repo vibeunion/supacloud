@@ -12,6 +12,13 @@ on:
       - "packages/management-api/**"
   workflow_dispatch:
 
+# Demo JWT signed with the Supabase public demo key (not a real credential).
+# Source: https://supabase.com/docs/guides/self-hosting/docker#generate-api-keys
+# gitleaks:allow
+env:
+  # noqa: hardcoded-jwt — this is the Supabase public demo anon key used for local/CI testing only
+  SUPABASE_DEMO_ANON_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0" # gitleaks:allow
+
 jobs:
   lint-and-typecheck:
     name: Lint & Type Check
@@ -242,7 +249,7 @@ jobs:
           DATABASE_URL: postgresql://supabase_admin:postgres@localhost:5432/postgres
           TEST_FIXED_JWT_SECRET: super-secret-jwt-token-with-at-least-32-characters-long
           TEST_SUPABASE_URL: http://127.0.0.1:9090
-          TEST_SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0
+          TEST_SUPABASE_ANON_KEY: ${{ env.SUPABASE_DEMO_ANON_KEY }}
           MASTER_TOKEN: super-secret-jwt-token-with-at-least-32-characters-long
           CI: "true"
           NODE_ENV: test

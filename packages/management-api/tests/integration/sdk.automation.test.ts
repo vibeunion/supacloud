@@ -6,7 +6,7 @@ import { config } from "../../src/config";
 // Requires a running local instance or staging instance of the Management API
 
 const SUPABASE_URL = process.env.TEST_SUPABASE_URL || `http://${config.baseDomain}:9090`;
-const SUPABASE_ANON_KEY = process.env.TEST_SUPABASE_ANON_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRlZmF1bHQiLCJyb2xlIjoiYW5vbiIsImlhdCI6MTY4MDAwMDAwMCwiZXhwIjoxOTk1NTg0MDAwfQ.invalid-signature-for-tests-only";
+const SUPABASE_ANON_KEY = process.env.TEST_SUPABASE_ANON_KEY ?? "anon-key-not-set";
 
 describe("SDK Compatibility - Core & Realtime", () => {
   let supabase1: SupabaseClient;
