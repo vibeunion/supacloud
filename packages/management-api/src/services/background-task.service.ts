@@ -2,10 +2,11 @@ import { sql, type ProjectTask, TaskStatus, TaskType } from "../db";
 import { withRetry } from "../utils/retry";
 
 export interface BackgroundFunctionAuthContext {
+  kind: "jwt" | "apikey" | "none";
   authorization?: string | null;
   apikey?: string | null;
-  headers?: Record<string, string>;
   invoker_user_id?: string | null;
+  invoker_role?: string | null;
   apikey_kind?: string | null;
 }
 
