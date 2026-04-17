@@ -60,14 +60,51 @@ export async function initDatabase() {
       project_ref VARCHAR(20) REFERENCES projects(ref) ON DELETE CASCADE,
       task_type VARCHAR(50) NOT NULL,
       status VARCHAR(20) DEFAULT 'pending',
+      function_slug VARCHAR(255),
+      function_version VARCHAR(128),
       payload JSONB DEFAULT '{}',
+      result JSONB,
       error TEXT,
       retries INTEGER DEFAULT 0,
+      attempt INTEGER DEFAULT 0,
+      max_attempts INTEGER DEFAULT 3,
+      next_run_at TIMESTAMPTZ DEFAULT NOW(),
+      lease_until TIMESTAMPTZ,
+      started_at TIMESTAMPTZ,
+      completed_at TIMESTAMPTZ,
+      timeout_sec INTEGER,
+      idempotency_key VARCHAR(255),
+      trace_id VARCHAR(255),
       created_at TIMESTAMPTZ DEFAULT NOW(),
       updated_at TIMESTAMPTZ DEFAULT NOW()
     );
 
     CREATE INDEX IF NOT EXISTS idx_project_tasks_status ON project_tasks(status);
+    CREATE INDEX IF NOT EXISTS idx_project_tasks_project_status ON project_tasks(project_ref, status);
+    CREATE INDEX IF NOT EXISTS idx_project_tasks_next_run ON project_tasks(next_run_at);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_project_tasks_project_idempotency
+      ON project_tasks(project_ref, idempotency_key)
+      WHERE idempotency_key IS NOT NULL;
+
+    CREATE TABLE IF NOT EXISTS project_task_attempts (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      task_id UUID NOT NULL REFERENCES project_tasks(id) ON DELETE CASCADE,
+      project_ref VARCHAR(20) NOT NULL REFERENCES projects(ref) ON DELETE CASCADE,
+      attempt_no INTEGER NOT NULL,
+      status VARCHAR(20) NOT NULL DEFAULT 'running',
+      started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      completed_at TIMESTAMPTZ,
+      duration_ms INTEGER,
+      error TEXT,
+      response_status INTEGER,
+      logs JSONB DEFAULT '[]'::jsonb,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(task_id, attempt_no)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_project_task_attempts_task ON project_task_attempts(task_id, attempt_no DESC);
+    CREATE INDEX IF NOT EXISTS idx_project_task_attempts_project ON project_task_attempts(project_ref, created_at DESC);
 
     CREATE TABLE IF NOT EXISTS platform_settings (
       key VARCHAR(255) PRIMARY KEY,
@@ -183,6 +220,50 @@ export async function initDatabase() {
       await sql`ALTER TABLE system_signed_uploads ADD COLUMN IF NOT EXISTS auth_token TEXT`;
       // Add updated_at to project_secrets if not present (migration for existing deployments)
       await sql`ALTER TABLE project_secrets ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()`;
+      await sql`ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS function_slug VARCHAR(255)`;
+      await sql`ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS function_version VARCHAR(128)`;
+      await sql`ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS result JSONB`;
+      await sql`ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS attempt INTEGER DEFAULT 0`;
+      await sql`ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS max_attempts INTEGER DEFAULT 3`;
+      await sql`ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS next_run_at TIMESTAMPTZ DEFAULT NOW()`;
+      await sql`ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS lease_until TIMESTAMPTZ`;
+      await sql`ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ`;
+      await sql`ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ`;
+      await sql`ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS timeout_sec INTEGER`;
+      await sql`ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS idempotency_key VARCHAR(255)`;
+      await sql`ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS trace_id VARCHAR(255)`;
+      await sql`ALTER TABLE project_tasks ALTER COLUMN next_run_at SET DEFAULT NOW()`;
+      await sql`UPDATE project_tasks SET next_run_at = COALESCE(next_run_at, created_at, NOW())`;
+      await sql`UPDATE project_tasks SET max_attempts = COALESCE(max_attempts, 3)`;
+      await sql`UPDATE project_tasks SET attempt = COALESCE(attempt, retries, 0)`;
+      await sql`CREATE INDEX IF NOT EXISTS idx_project_tasks_project_status ON project_tasks(project_ref, status)`;
+      await sql`CREATE INDEX IF NOT EXISTS idx_project_tasks_next_run ON project_tasks(next_run_at)`;
+      await sql`
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_project_tasks_project_idempotency
+        ON project_tasks(project_ref, idempotency_key)
+        WHERE idempotency_key IS NOT NULL
+      `;
+      await sql`
+        CREATE TABLE IF NOT EXISTS project_task_attempts (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          task_id UUID NOT NULL REFERENCES project_tasks(id) ON DELETE CASCADE,
+          project_ref VARCHAR(20) NOT NULL REFERENCES projects(ref) ON DELETE CASCADE,
+          attempt_no INTEGER NOT NULL,
+          status VARCHAR(20) NOT NULL DEFAULT 'running',
+          started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          completed_at TIMESTAMPTZ,
+          duration_ms INTEGER,
+          error TEXT,
+          response_status INTEGER,
+          logs JSONB DEFAULT '[]'::jsonb,
+          created_at TIMESTAMPTZ DEFAULT NOW(),
+          updated_at TIMESTAMPTZ DEFAULT NOW(),
+          UNIQUE(task_id, attempt_no)
+        )
+      `;
+      await sql`ALTER TABLE project_task_attempts ADD COLUMN IF NOT EXISTS logs JSONB DEFAULT '[]'::jsonb`;
+      await sql`CREATE INDEX IF NOT EXISTS idx_project_task_attempts_task ON project_task_attempts(task_id, attempt_no DESC)`;
+      await sql`CREATE INDEX IF NOT EXISTS idx_project_task_attempts_project ON project_task_attempts(project_ref, created_at DESC)`;
       // Fix project_tasks FK to CASCADE (original DDL may have been created without it)
       try {
         await sql`

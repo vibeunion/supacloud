@@ -83,7 +83,7 @@ export async function updateConfig(ref: string, config: Record<string, unknown>)
   return withRetry("ProjectRepository.updateConfig", async () => {
   const [project] = await sql`
     UPDATE projects
-    SET config = ${config}, updated_at = NOW()
+    SET config = ${JSON.stringify(config)}::jsonb, updated_at = NOW()
     WHERE ref = ${ref} AND deleted_at IS NULL
     RETURNING *
   `;

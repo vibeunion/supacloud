@@ -77,6 +77,22 @@ const { data, error } = await supabase.functions.invoke('my-function', {
 });
 ```
 
+Background invocation uses the same API surface with async headers:
+
+```typescript
+const { data, error } = await supabase.functions.invoke("my-function", {
+  body: { job: "long-running" },
+  headers: {
+    "x-supacloud-async": "true",
+    "x-supacloud-retries": "3",
+    "x-supacloud-timeout": "300",
+    "x-supacloud-idempotency-key": "job-long-running-v1",
+  },
+});
+```
+
+See [Background Functions](./background-functions.md) for the full execution model, cancellation semantics, and a cancellation-aware example handler.
+
 ## Deno Compatibility
 
 Legacy Deno user code works without changes via the built-in shim layer:

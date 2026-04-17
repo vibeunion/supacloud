@@ -38,14 +38,45 @@ async function loadModule(functionPath: string): Promise<{ default: unknown }> {
 
 interface WorkerMessage {
   type?: string;
-  functionId: string;
-  functionPath: string;
-  env: Record<string, string>;
-  url: string;
-  method: string;
-  headers: Record<string, string>;
-  body: ArrayBuffer | null;
+  functionId?: string;
+  functionPath?: string;
+  env?: Record<string, string>;
+  url?: string;
+  method?: string;
+  headers?: Record<string, string>;
+  body?: ArrayBuffer | null;
 }
+
+type LogStream = "stdout" | "stderr";
+
+function postWorkerLog(stream: LogStream, args: unknown[]) {
+  try {
+    const message = args
+      .map((arg) => {
+        if (typeof arg === "string") return arg;
+        if (arg instanceof Error) return arg.stack || arg.message;
+        try {
+          return JSON.stringify(arg);
+        } catch {
+          return String(arg);
+        }
+      })
+      .join(" ");
+
+    parentPort?.postMessage({
+      type: "log",
+      stream,
+      level: stream === "stderr" ? "error" : "info",
+      timestamp: new Date().toISOString(),
+      message,
+    });
+  } catch {
+    // ignore logging failures
+  }
+}
+
+let currentAbortController: AbortController | null = null;
+let currentBackgroundTaskId: string | null = null;
 
 parentPort?.on("message", async (msg: WorkerMessage) => {
   // Handle cache invalidation messages from pool (belt-and-suspenders:
@@ -91,8 +122,53 @@ parentPort?.on("message", async (msg: WorkerMessage) => {
     return;
   }
 
+  if (msg.type === "cancel_current") {
+    if (currentAbortController && !currentAbortController.signal.aborted) {
+      currentAbortController.abort(
+        new DOMException("Task cancelled", "AbortError"),
+      );
+    }
+    parentPort?.postMessage({
+      type: "cancel_ack",
+      taskId: currentBackgroundTaskId,
+      timestamp: new Date().toISOString(),
+    });
+    return;
+  }
+
   try {
     const { functionId, functionPath, env, url, method, headers, body } = msg;
+    if (!functionId || !functionPath || !env || !url || !method || !headers) {
+      throw new Error("Invalid worker invocation payload");
+    }
+    const originalConsole = {
+      log: console.log,
+      info: console.info,
+      warn: console.warn,
+      error: console.error,
+      debug: console.debug,
+    };
+
+    console.log = (...args: unknown[]) => {
+      postWorkerLog("stdout", args);
+      originalConsole.log(...args);
+    };
+    console.info = (...args: unknown[]) => {
+      postWorkerLog("stdout", args);
+      originalConsole.info(...args);
+    };
+    console.warn = (...args: unknown[]) => {
+      postWorkerLog("stderr", args);
+      originalConsole.warn(...args);
+    };
+    console.error = (...args: unknown[]) => {
+      postWorkerLog("stderr", args);
+      originalConsole.error(...args);
+    };
+    console.debug = (...args: unknown[]) => {
+      postWorkerLog("stdout", args);
+      originalConsole.debug(...args);
+    };
 
     // ── Inject Supabase runtime env vars (official: always available) ──────
     // Extract projectRef and functionSlug from functionId (format: "{ref}_{slug}")
@@ -114,6 +190,13 @@ parentPort?.on("message", async (msg: WorkerMessage) => {
     if (!env["SB_EXECUTION_ID"]) env["SB_EXECUTION_ID"] = executionId;
     if (!env["DENO_DEPLOYMENT_ID"])
       env["DENO_DEPLOYMENT_ID"] = `${projectRef}_${functionSlug}_1`;
+    if ((headers as Record<string, string>)["x-supacloud-background"] === "true") {
+      env["SUPACLOUD_BACKGROUND_TASK_ID"] =
+        (headers as Record<string, string>)["x-supacloud-task-id"] || "";
+      env["SUPACLOUD_BACKGROUND_ATTEMPT"] =
+        (headers as Record<string, string>)["x-supacloud-attempt"] || "1";
+      env["SUPACLOUD_CANCELLATION_SIGNAL"] = "supported";
+    }
     // ── End runtime env injection ──────────────────────────────────────────
 
     // Snapshot current env values for keys we're about to inject,
@@ -130,6 +213,9 @@ parentPort?.on("message", async (msg: WorkerMessage) => {
     }
 
     try {
+      currentAbortController = new AbortController();
+      currentBackgroundTaskId = headers["x-supacloud-task-id"] || null;
+
       // Load module (LRU cache)
       let cached = moduleCache.get(functionId);
       if (!cached) {
@@ -154,7 +240,11 @@ parentPort?.on("message", async (msg: WorkerMessage) => {
       cached.lastUsed = Date.now();
 
       // Build Request
-      const init: RequestInit = { method, headers: new Headers(headers) };
+      const init: RequestInit = {
+        method,
+        headers: new Headers(headers),
+        signal: currentAbortController.signal,
+      };
       if (body && !["GET", "HEAD"].includes(method)) init.body = body;
       const request = new Request(url, init);
 
@@ -162,9 +252,7 @@ parentPort?.on("message", async (msg: WorkerMessage) => {
       const handler = cached.serveHandler || cached.mod.default;
       let response: Response;
       if (typeof handler === "function") {
-        response = await (handler as (req: Request) => Promise<Response>)(
-          request,
-        );
+        response = await (handler as (req: Request) => Promise<Response>)(request);
       } else if (
         handler &&
         typeof handler === "object" &&
@@ -272,6 +360,8 @@ parentPort?.on("message", async (msg: WorkerMessage) => {
         });
       }
     } finally {
+      currentAbortController = null;
+      currentBackgroundTaskId = null;
       // Restore previous env values to avoid cross-tenant leakage
       // (For streaming responses, savedEnv is cleared above so this is a no-op)
       for (const [k, prev] of savedEnv) {
@@ -281,12 +371,22 @@ parentPort?.on("message", async (msg: WorkerMessage) => {
           process.env[k] = prev;
         }
       }
+      console.log = originalConsole.log;
+      console.info = originalConsole.info;
+      console.warn = originalConsole.warn;
+      console.error = originalConsole.error;
+      console.debug = originalConsole.debug;
     }
   } catch (err: unknown) {
+    const isAbortError =
+      err instanceof DOMException
+        ? err.name === "AbortError"
+        : err instanceof Error && err.name === "AbortError";
+    const status = isAbortError ? 499 : 500;
     const message =
       err instanceof Error ? err.message : "Internal Worker Error";
     parentPort?.postMessage({
-      status: 500,
+      status,
       headers: { "Content-Type": "application/json" },
       body: new TextEncoder().encode(JSON.stringify({ error: message })),
     });

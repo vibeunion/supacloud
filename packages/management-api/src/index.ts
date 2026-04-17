@@ -1000,6 +1000,9 @@ async function bootstrap() {
     const { startQueueWorker } = await import("./workers/queue.worker");
     startQueueWorker();
 
+    const { backgroundFunctionWorker } = await import("./services/background-function-worker");
+    backgroundFunctionWorker.start();
+
     const { startStorageReconcileWorker } =
       await import("./workers/storage-reconcile.worker");
     startStorageReconcileWorker();

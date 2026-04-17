@@ -7,6 +7,7 @@ import fs from "fs/promises";
 export interface EdgeFunctionConfig {
   verify_jwt: boolean;
   import_map?: string;
+  version?: string;
 }
 
 const DEFAULT_FUNCTION_CONFIG: EdgeFunctionConfig = {
@@ -131,6 +132,18 @@ async function invalidateCache(ref: string, slug: string): Promise<void> {
   }
 }
 
+async function computeNextFunctionVersion(ref: string, slug: string): Promise<string> {
+  try {
+    const raw = await Bun.file(getConfigPath(ref, slug)).text();
+    const parsed = JSON.parse(raw) as EdgeFunctionConfig;
+    const current = Number.parseInt(parsed.version || "0", 10);
+    if (Number.isFinite(current)) return String(current + 1);
+  } catch {
+    // no existing config
+  }
+  return "1";
+}
+
 export const edgeFunctionService = {
   /** Read function config (verify_jwt, etc.) */
   async getConfig(ref: string, slug: string): Promise<EdgeFunctionConfig> {
@@ -181,6 +194,7 @@ export const edgeFunctionService = {
 
       const dir = getFuncDir(ref);
       await fs.mkdir(dir, { recursive: true });
+      const version = await computeNextFunctionVersion(ref, slug);
 
       // 1. Preserve source for debugging
       const srcPath = getSrcPath(ref, slug);
@@ -216,8 +230,10 @@ export const edgeFunctionService = {
         });
       }
 
+      await this.updateConfig(ref, slug, { version });
+
       logger.info(
-        `[EdgeFunction] Deployed ${slug} for ${ref} (bundled=${!!bundled}, minify=${minify})`,
+        `[EdgeFunction] Deployed ${slug} for ${ref} (bundled=${!!bundled}, minify=${minify}, version=${version})`,
       );
       return true;
     } catch (err) {
@@ -261,6 +277,7 @@ export const edgeFunctionService = {
       }
 
       const dir = getFuncDir(ref);
+      const version = await computeNextFunctionVersion(ref, slug);
       // Use a staging subdirectory to write the full file tree
       const stageDir = path.join(dir, `.staging-${slug}`);
       await fs.mkdir(stageDir, { recursive: true });
@@ -316,8 +333,13 @@ export const edgeFunctionService = {
       // 4. Invalidate runtime caches
       await invalidateCache(ref, slug);
 
+      await this.updateConfig(ref, slug, {
+        version,
+        import_map: importMapPath ? path.basename(importMapPath) : undefined,
+      });
+
       logger.info(
-        `[EdgeFunction] Bundle deployed ${slug} for ${ref} (${Object.keys(files).length} files, minify=${minify})`,
+        `[EdgeFunction] Bundle deployed ${slug} for ${ref} (${Object.keys(files).length} files, minify=${minify}, version=${version})`,
       );
       return true;
     } catch (err) {
