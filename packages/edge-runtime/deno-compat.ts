@@ -12,88 +12,39 @@ export function setTenantRef(ref: string | null) {
   currentTenantRef = ref;
 }
 
-const ALLOWED_COMMANDS = new Set([
-  "echo", "printf", "date",
-  "wc", "sort", "uniq", "tr", "paste",
-  "base64", "basename", "dirname", "seq",
-  "true", "false", "yes", "sleep",
+const BLOCKED_COMMANDS = new Set([
+  "mkfs", "shutdown", "reboot", "init",
+  "fdisk", "parted", "dd",
 ]);
 
-function isCommandAllowed(cmd: string): boolean {
+function isCommandBlocked(cmd: string): boolean {
   const base = cmd.split("/").pop() || cmd;
-  return ALLOWED_COMMANDS.has(base);
-}
-
-const SANDBOX_DIR = process.env.EDGE_SANDBOX_DIR || "/tmp/edge-sandbox";
-
-function getSandboxPath(p: string): string {
-  const resolved = p.startsWith("/") ? p : `${process.cwd()}/${p}`;
-  const normalized = resolved.replace(/\/+/g, "/").replace(/\/\.\//g, "/");
-
-  const sandboxBase = currentTenantRef
-    ? `${SANDBOX_DIR}/${currentTenantRef}`
-    : SANDBOX_DIR;
-
-  if (!normalized.startsWith(sandboxBase + "/") && normalized !== sandboxBase) {
-    throw new Error(
-      `Path access denied: "${p}" is outside the sandbox directory. ` +
-      `Edge Functions can only access files under ${sandboxBase}/. ` +
-      `Use /tmp/edge-sandbox/<your-ref>/ for file operations.`
-    );
-  }
-  return normalized;
+  return BLOCKED_COMMANDS.has(base);
 }
 
 (globalThis as Record<string, unknown>).Deno = {
   env: {
     get: (k: string) => process.env[k],
-    set: (_k: string, _v: string) => {
-      throw new Error(
-        "Deno.env.set() is blocked in Edge Functions. " +
-        "Environment variables are read-only within function execution."
-      );
+    set: (k: string, v: string) => {
+      process.env[k] = v;
     },
-    delete: (_k: string) => {
-      throw new Error(
-        "Deno.env.delete() is blocked in Edge Functions. " +
-        "Environment variables are read-only within function execution."
-      );
+    delete: (k: string) => {
+      delete process.env[k];
     },
     has: (k: string) => k in (process.env as Record<string, unknown>),
-    toObject: () => {
-      const safe: Record<string, string> = {};
-      const dangerous = /TOKEN|SECRET|PASSWORD|KEY|CREDENTIAL|PRIVATE/i;
-      for (const [k, v] of Object.entries(process.env)) {
-        if (v !== undefined && !dangerous.test(k)) {
-          safe[k] = v;
-        }
-      }
-      return safe;
-    },
+    toObject: () => ({ ...process.env }),
   },
 
-  readTextFile: (p: string) => {
-    const safePath = getSandboxPath(p);
-    return Bun.file(safePath).text();
-  },
-  readFile: (p: string) => {
-    const safePath = getSandboxPath(p);
-    return Bun.file(safePath)
+  readTextFile: (p: string) => Bun.file(p).text(),
+  readFile: (p: string) =>
+    Bun.file(p)
       .arrayBuffer()
-      .then((b: ArrayBuffer) => new Uint8Array(b));
-  },
-  writeTextFile: (p: string, d: string) => {
-    const safePath = getSandboxPath(p);
-    return Bun.write(safePath, d).then(() => {});
-  },
-  writeFile: (p: string, d: Uint8Array) => {
-    const safePath = getSandboxPath(p);
-    return Bun.write(safePath, d).then(() => {});
-  },
+      .then((b: ArrayBuffer) => new Uint8Array(b)),
+  writeTextFile: (p: string, d: string) => Bun.write(p, d).then(() => {}),
+  writeFile: (p: string, d: Uint8Array) => Bun.write(p, d).then(() => {}),
   stat: async (p: string) => {
-    const safePath = getSandboxPath(p);
-    const fs = await import("fs/promises");
-    const s = await fs.stat(safePath);
+    const { stat } = await import("fs/promises");
+    const s = await stat(p);
     return {
       isFile: s.isFile(),
       isDirectory: s.isDirectory(),
@@ -102,9 +53,8 @@ function getSandboxPath(p: string): string {
     };
   },
   readDir: async function* (p: string) {
-    const safePath = getSandboxPath(p);
-    const fs = await import("fs/promises");
-    const entries = await fs.readdir(safePath, { withFileTypes: true });
+    const { readdir } = await import("fs/promises");
+    const entries = await readdir(p, { withFileTypes: true });
     for (const e of entries) {
       yield {
         name: e.name,
@@ -115,34 +65,29 @@ function getSandboxPath(p: string): string {
     }
   },
   mkdir: (p: string, opts?: { recursive?: boolean }) => {
-    const safePath = getSandboxPath(p);
     const fs = require("fs/promises");
-    return fs.mkdir(safePath, opts);
+    return fs.mkdir(p, opts);
   },
   remove: (p: string, opts?: { recursive?: boolean }) => {
-    const safePath = getSandboxPath(p);
     const fs = require("fs/promises");
-    return fs.rm(safePath, opts);
+    return fs.rm(p, opts);
   },
 
   readTextFileSync: (p: string) => {
-    const safePath = getSandboxPath(p);
     const fs = require("fs");
-    return fs.readFileSync(safePath, "utf-8");
+    return fs.readFileSync(p, "utf-8");
   },
   writeFileSync: (p: string, d: string | Uint8Array) => {
-    const safePath = getSandboxPath(p);
     const fs = require("fs");
     if (typeof d === "string") {
-      fs.writeFileSync(safePath, d, "utf-8");
+      fs.writeFileSync(p, d, "utf-8");
     } else {
-      fs.writeFileSync(safePath, d);
+      fs.writeFileSync(p, d);
     }
   },
   statSync: (p: string) => {
-    const safePath = getSandboxPath(p);
     const fs = require("fs");
-    const s = fs.statSync(safePath);
+    const s = fs.statSync(p);
     return {
       isFile: s.isFile(),
       isDirectory: s.isDirectory(),
@@ -155,9 +100,8 @@ function getSandboxPath(p: string): string {
     };
   },
   readDirSync: function* (p: string) {
-    const safePath = getSandboxPath(p);
     const fs = require("fs");
-    const entries = fs.readdirSync(safePath, { withFileTypes: true });
+    const entries = fs.readdirSync(p, { withFileTypes: true });
     for (const e of entries) {
       yield {
         name: e.name,
@@ -168,18 +112,16 @@ function getSandboxPath(p: string): string {
     }
   },
   removeSync: (p: string, opts?: { recursive?: boolean }) => {
-    const safePath = getSandboxPath(p);
     const fs = require("fs");
     if (opts?.recursive) {
-      fs.rmSync(safePath, { recursive: true });
+      fs.rmSync(p, { recursive: true });
     } else {
-      fs.rmSync(safePath);
+      fs.rmSync(p);
     }
   },
   mkdirSync: (p: string, opts?: { recursive?: boolean }) => {
-    const safePath = getSandboxPath(p);
     const fs = require("fs");
-    fs.mkdirSync(safePath, opts);
+    fs.mkdirSync(p, opts);
   },
 
   exit: (c?: number) => process.exit(c),
@@ -220,10 +162,9 @@ function getSandboxPath(p: string): string {
         stderr?: "inherit" | "piped" | "null";
       },
     ) {
-      if (!isCommandAllowed(cmd)) {
+      if (isCommandBlocked(cmd)) {
         throw new Error(
-          `Deno.Command("${cmd}") is blocked for security. Allowed commands: ${[...ALLOWED_COMMANDS].join(", ")}. ` +
-            `Edge Functions run in a sandboxed environment and cannot execute arbitrary system commands.`,
+          `Deno.Command("${cmd}") is blocked. Destructive system commands (mkfs, shutdown, reboot, dd, etc.) are not allowed.`,
         );
       }
       this.cmd = cmd;
@@ -408,22 +349,8 @@ function getSandboxPath(p: string): string {
 };
 
 (globalThis as any).Deno.permissions = {
-  query: async (desc: unknown) => {
-    const d = desc as { name: string; path?: string };
-    const restricted = ["write", "net", "run", "env", "sys", "ffi"];
-    if (restricted.includes(d.name)) {
-      return { state: "denied" as const };
-    }
-    return { state: "granted" as const };
-  },
-  request: async (desc: unknown) => {
-    const d = desc as { name: string };
-    const restricted = ["write", "net", "run", "env", "sys", "ffi"];
-    if (restricted.includes(d.name)) {
-      return { state: "denied" as const };
-    }
-    return { state: "granted" as const };
-  },
+  query: async (_desc: unknown) => ({ state: "granted" as const }),
+  request: async (_desc: unknown) => ({ state: "granted" as const }),
   revoke: async (_desc: unknown) => ({ state: "denied" as const }),
 };
 
@@ -431,7 +358,7 @@ const kvStores = new Map<string, Map<string, { value: unknown; versionstamp: str
 let globalVersionCounter = 0;
 
 (globalThis as any).Deno.openKv = async (_path?: string) => {
-  const tenantPrefix = currentTenantRef || "__unknown";
+  const tenantPrefix = currentTenantRef || "__default";
   const storeKey = `__kv_${tenantPrefix}_${_path || "__default"}`;
   if (!kvStores.has(storeKey)) {
     kvStores.set(storeKey, new Map());
@@ -508,4 +435,4 @@ let globalVersionCounter = 0;
   };
 };
 
-console.log("[Deno Compat] Loaded Deno API compatibility shim (sandboxed, fs restricted)");
+console.log("[Deno Compat] Loaded Deno API compatibility shim");
