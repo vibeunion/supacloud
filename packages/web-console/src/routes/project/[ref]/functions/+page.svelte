@@ -3,10 +3,20 @@
 
   import { page } from "$app/state";
   import { t } from "svelte-i18n";
-  import { Loader2, Zap, Trash2, KeyRound, Clock, Plus, X, Upload, Code2 } from "lucide-svelte";
+  import { Loader2, Zap, Trash2, KeyRound, Clock, Plus, X, Upload, Code2, Copy, BookOpen, ArrowRight, Activity, RadioTower, ShieldCheck } from "lucide-svelte";
   import { toast } from "svelte-sonner";
   import { createMutation } from "@tanstack/svelte-query";
   import { useList, type BaseRecord } from "@svadmin/core";
+  import {
+    buildCurlExample,
+    buildFunctionTasksPath,
+    buildInvokeAsyncExample,
+    buildJsInvokeExample,
+    buildTsInvokeExample,
+    getStatusBadgeClass,
+    type FunctionTaskRecord,
+  } from "$lib/function-snippets";
+  import { summarizeFunctionTasks } from "$lib/function-task-summary";
 
   interface EdgeFunction extends BaseRecord {
     id: string;
@@ -21,6 +31,11 @@
   const query = useList<EdgeFunction>({ get resource() { return `v1/projects/${projectRef}/functions`; } });
   const functions = $derived(Array.isArray(query.data?.data) ? query.data.data : ((query.data?.data as unknown as Record<string, unknown>)?.functions as EdgeFunction[] || []));
   let showCreate = $state(false);
+  let selectedFunction = $state<EdgeFunction | null>(null);
+  let drawerOpen = $state(false);
+  let functionTasks = $state<FunctionTaskRecord[]>([]);
+  let tasksLoading = $state(false);
+  let tasksError = $state<string | null>(null);
   let newSlug = $state("");
   let newCode = $state(`Deno.serve(async (req) => {
   const { name } = await req.json()
@@ -35,6 +50,204 @@
 })`);
   let deploying = $state(false);
   let deployMsg = $state<string | null>(null);
+
+  const invokeAsyncHelperCode = `import type { SupabaseClient } from "@supabase/supabase-js";
+
+type InvokeAsyncOptions = {
+  body?: unknown;
+  headers?: Record<string, string>;
+  retries?: number;
+  timeoutSec?: number;
+  idempotencyKey?: string;
+  method?: string;
+};
+
+export async function invokeAsync(
+  supabase: SupabaseClient,
+  functionName: string,
+  options: InvokeAsyncOptions = {},
+) {
+  const {
+    body,
+    headers = {},
+    retries,
+    timeoutSec,
+    idempotencyKey,
+    method,
+  } = options;
+
+  const { data, error } = await supabase.functions.invoke(functionName, {
+    body,
+    method,
+    headers: {
+      ...headers,
+      "x-supacloud-async": "true",
+      ...(retries !== undefined
+        ? { "x-supacloud-retries": String(retries) }
+        : {}),
+      ...(timeoutSec !== undefined
+        ? { "x-supacloud-timeout": String(timeoutSec) }
+        : {}),
+      ...(idempotencyKey
+        ? { "x-supacloud-idempotency-key": idempotencyKey }
+        : {}),
+    },
+  });
+
+  if (error) throw error;
+
+  return data as {
+    task_id: string;
+    status: "enqueued";
+  };
+}`;
+
+  const invokeAsyncExampleCode = `const task = await invokeAsync(supabase, "mockup-generator", {
+  body: {
+    product_id: "prod_123",
+    image_url: "https://example.com/source.png",
+  },
+  retries: 3,
+  timeoutSec: 300,
+  idempotencyKey: "mockup-prod_123-v1",
+});
+
+console.log(task);
+// { task_id: "tsk_...", status: "enqueued" }`;
+
+  const currentDrawerSlug = $derived(selectedFunction?.slug || "");
+  const functionTaskSummary = $derived(summarizeFunctionTasks(functionTasks));
+
+  const taskPollingHelperCode = `async function getTask(
+  managementApiUrl: string,
+  projectRef: string,
+  taskId: string,
+  accessToken: string,
+) {
+  const response = await fetch(
+    \`\${managementApiUrl}/v1/projects/\${projectRef}/tasks/\${taskId}\`,
+    {
+      headers: {
+        authorization: \`Bearer \${accessToken}\`,
+      },
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error(\`Failed to fetch task: \${response.status}\`);
+  }
+
+  return response.json();
+}
+
+const terminalStatuses = new Set([
+  "succeeded",
+  "failed",
+  "dead_lettered",
+  "cancelled",
+]);
+
+export async function waitForTask(
+  managementApiUrl: string,
+  projectRef: string,
+  taskId: string,
+  accessToken: string,
+  intervalMs = 2000,
+) {
+  while (true) {
+    const task = await getTask(
+      managementApiUrl,
+      projectRef,
+      taskId,
+      accessToken,
+    );
+
+    if (terminalStatuses.has(task.status)) {
+      return task;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+}`;
+
+  const cancellationAwareFunctionCode = `Deno.serve(async (req) => {
+  const payload = await req.json();
+  req.signal.throwIfAborted?.();
+
+  const taskId = Deno.env.get("SUPACLOUD_BACKGROUND_TASK_ID");
+  const attempt = Deno.env.get("SUPACLOUD_BACKGROUND_ATTEMPT") || "1";
+
+  const abortController = new AbortController();
+  const onAbort = () => abortController.abort("supacloud task cancelled");
+  req.signal.addEventListener("abort", onAbort, { once: true });
+
+  try {
+    for (let step = 0; step < 5; step += 1) {
+      req.signal.throwIfAborted?.();
+      console.log(\`[task=\${taskId}] attempt=\${attempt} step=\${step}\`);
+
+      await new Promise((resolve, reject) => {
+        const timer = setTimeout(resolve, 1000);
+        abortController.signal.addEventListener("abort", () => {
+          clearTimeout(timer);
+          reject(new DOMException("Task cancelled", "AbortError"));
+        }, { once: true });
+      });
+    }
+
+    return Response.json({ ok: true, payload });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      return Response.json({ ok: false, cancelled: true }, { status: 499 });
+    }
+
+    throw error;
+  } finally {
+    req.signal.removeEventListener("abort", onAbort);
+  }
+});`;
+
+  async function copySnippet(content: string, label: string) {
+    try {
+      await navigator.clipboard.writeText(content);
+      toast.success(`${label} 已复制`);
+    } catch {
+      toast.error(`无法复制 ${label}`);
+    }
+  }
+
+  async function loadFunctionTasks(slug: string) {
+    tasksLoading = true;
+    tasksError = null;
+    try {
+      const res = await fetch(
+        buildFunctionTasksPath(String(projectRef), slug, 8),
+      );
+      const payload = await res.json().catch(() => []);
+      if (!res.ok) {
+        throw new Error(payload?.message || "获取函数任务失败");
+      }
+      functionTasks = Array.isArray(payload) ? payload : [];
+    } catch (error) {
+      functionTasks = [];
+      tasksError = error instanceof Error ? error.message : "获取函数任务失败";
+    } finally {
+      tasksLoading = false;
+    }
+  }
+
+  async function openFunctionDrawer(fn: EdgeFunction) {
+    selectedFunction = fn;
+    drawerOpen = true;
+    await loadFunctionTasks(fn.slug);
+  }
+
+  function closeFunctionDrawer() {
+    drawerOpen = false;
+    selectedFunction = null;
+    functionTasks = [];
+    tasksError = null;
+  }
 
   const deployMutation = createMutation(() => ({
     mutationFn: async () => {
@@ -127,6 +340,140 @@
     </div>
   </div>
 
+  <div class="rounded-2xl border border-brand/20 bg-gradient-to-br from-brand/5 via-background to-blue-500/5 p-5 space-y-4">
+    <div class="flex items-start justify-between gap-4">
+      <div class="space-y-2">
+        <div class="inline-flex items-center gap-2 px-2.5 py-1 rounded-full bg-brand/10 text-brand text-[11px] font-bold uppercase tracking-[0.18em]">
+          <Activity size={12} />
+          Background Functions
+        </div>
+        <div>
+          <h2 class="text-lg font-semibold text-foreground">直接把官方 `supabase.functions.invoke()` 升级成异步后台任务</h2>
+          <p class="text-sm text-muted-foreground mt-1 max-w-3xl">
+            更现实也更推荐的接入方式，是继续使用官方 `supabase-js`，通过 `x-supacloud-*` 自定义 Header 打开 SupaCloud 的异步执行层，再在租户侧封一层 `invokeAsync()` helper。
+            这样既兼容官方 SDK，又能给团队一个稳定的 `functions.invoke(async)` 体验。
+          </p>
+        </div>
+      </div>
+      <div class="shrink-0 flex items-center gap-2">
+        <a
+          href={`/project/${projectRef}/tasks`}
+          class="inline-flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-semibold hover:bg-muted/40 transition-colors"
+        >
+          <Activity size={14} />
+          打开任务面板
+        </a>
+      </div>
+    </div>
+
+    <div class="grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
+      <div class="space-y-4">
+        <div class="rounded-xl border border-border/60 bg-background/80 backdrop-blur-sm p-4 space-y-3">
+          <div class="flex items-center justify-between gap-3">
+            <div>
+              <div class="text-sm font-semibold">复制 `invokeAsync()` helper</div>
+              <p class="text-xs text-muted-foreground mt-1">保留官方 `supabase.functions.invoke()`，只额外加 SupaCloud 异步 Header。</p>
+            </div>
+            <button
+              onclick={() => copySnippet(invokeAsyncHelperCode, "invokeAsync helper")}
+              class="inline-flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-semibold hover:bg-muted/40 transition-colors"
+            >
+              <Copy size={14} />
+              复制 Helper
+            </button>
+          </div>
+          <pre class="rounded-xl bg-slate-950 text-slate-100 p-4 text-[11px] leading-5 overflow-auto border border-slate-900/80"><code>{invokeAsyncHelperCode}</code></pre>
+        </div>
+
+        <div class="flex items-center justify-between gap-3">
+          <div class="rounded-xl border border-border/60 bg-background/80 p-4 space-y-3 w-full">
+            <div class="flex items-center justify-between gap-3">
+              <div>
+                <div class="text-sm font-semibold">复制任务轮询 helper</div>
+                <p class="text-xs text-muted-foreground mt-1">给你自己的管理后台或服务端用，拿 `task_id` 轮询最终状态。</p>
+              </div>
+              <button
+                onclick={() => copySnippet(taskPollingHelperCode, "任务轮询 helper")}
+                class="inline-flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-semibold hover:bg-muted/40 transition-colors"
+              >
+                <Copy size={14} />
+                复制轮询
+              </button>
+            </div>
+            <pre class="rounded-xl bg-slate-950 text-slate-100 p-4 text-[11px] leading-5 overflow-auto border border-slate-900/80"><code>{taskPollingHelperCode}</code></pre>
+          </div>
+        </div>
+      </div>
+
+      <div class="space-y-4">
+        <div class="rounded-xl border border-border/60 bg-background/80 p-4 space-y-3">
+          <div class="flex items-center justify-between gap-3">
+            <div>
+              <div class="text-sm font-semibold">复制示例调用</div>
+              <p class="text-xs text-muted-foreground mt-1">入队后返回 `task_id`，后续在任务面板里查看状态、日志、DLQ 和重试。</p>
+            </div>
+            <button
+              onclick={() => copySnippet(invokeAsyncExampleCode, "异步调用示例")}
+              class="inline-flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-semibold hover:bg-muted/40 transition-colors"
+            >
+              <Copy size={14} />
+              复制调用
+            </button>
+          </div>
+          <pre class="rounded-xl bg-slate-950 text-slate-100 p-4 text-[11px] leading-5 overflow-auto border border-slate-900/80"><code>{invokeAsyncExampleCode}</code></pre>
+        </div>
+
+        <div class="rounded-xl border border-border/60 bg-background/80 p-4 space-y-3">
+          <div class="flex items-center justify-between gap-3">
+            <div>
+              <div class="text-sm font-semibold">复制可取消函数示例</div>
+              <p class="text-xs text-muted-foreground mt-1">长任务函数要监听 `req.signal`，这样任务取消时能优雅停止，而不是只等运行时强制中断。</p>
+            </div>
+            <button
+              onclick={() => copySnippet(cancellationAwareFunctionCode, "可取消函数示例")}
+              class="inline-flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-semibold hover:bg-muted/40 transition-colors"
+            >
+              <Copy size={14} />
+              复制函数
+            </button>
+          </div>
+          <pre class="rounded-xl bg-slate-950 text-slate-100 p-4 text-[11px] leading-5 overflow-auto border border-slate-900/80"><code>{cancellationAwareFunctionCode}</code></pre>
+        </div>
+
+        <div class="rounded-xl border border-border/60 bg-background/80 p-4 space-y-3">
+          <div class="flex items-center gap-2 text-sm font-semibold">
+            <BookOpen size={15} class="text-brand" />
+            接入建议
+          </div>
+          <div class="space-y-2 text-xs text-muted-foreground leading-5">
+            <p>1. 继续使用官方 `supabase-js`，不要 fork SDK。</p>
+            <p>2. 用 `x-supacloud-async`、`x-supacloud-retries`、`x-supacloud-timeout`、`x-supacloud-idempotency-key` 控制后台任务。</p>
+            <p>3. 长任务函数内部要监听 `req.signal`，这样任务取消时可以优雅收尾，而不是只等运行时强制中断。</p>
+          </div>
+          <div class="grid gap-2 pt-1 sm:grid-cols-2">
+            <a
+              href={`/project/${projectRef}/tasks`}
+              class="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-brand text-white text-xs font-semibold hover:bg-brand/90 transition-colors"
+            >
+              查看任务状态
+              <ArrowRight size={14} />
+            </a>
+            <a
+              href={`/project/${projectRef}/functions/secrets`}
+              class="inline-flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-semibold hover:bg-muted/40 transition-colors"
+            >
+              <ShieldCheck size={14} />
+              管理函数 Secrets
+            </a>
+          </div>
+          <div class="rounded-lg bg-muted/40 border border-border/50 px-3 py-2 text-[11px] text-muted-foreground leading-5">
+            轮询、取消、DLQ 查询更适合放在你自己的服务端或管理后台里。前台应用负责 enqueue，控制面 API 负责任务运营。
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   {#if deployMsg}
     <div class="rounded-lg border px-4 py-2 text-xs font-medium {deployMsg.startsWith('✅') ? 'bg-green-500/5 border-green-500/20 text-green-700' : deployMsg.startsWith('❌') ? 'bg-red-500/5 border-red-500/20 text-red-700' : 'bg-blue-500/5 border-blue-500/20 text-blue-700'}">
       {deployMsg}
@@ -197,16 +544,16 @@
             {#each functions as fn}
               <tr class="hover:bg-muted/5 transition-colors group">
                 <td class="px-5 py-3">
-                  <div class="flex items-center gap-2">
+                  <button
+                    onclick={() => openFunctionDrawer(fn)}
+                    class="flex items-center gap-2 text-left hover:text-brand transition-colors"
+                  >
                     <Zap size={14} class="text-brand" />
                     <span class="font-mono font-semibold text-xs">{fn.slug}</span>
-                  </div>
+                  </button>
                 </td>
                 <td class="px-5 py-3">
                   <span class="px-2 py-0.5 rounded-full text-[9px] font-bold {fn.status === 'ACTIVE' ? 'text-green-600 bg-green-500/10' : 'text-amber-600 bg-amber-500/10'}">{fn.status}</span>
-                </td>
-                <td class="px-5 py-3">
-                  <code class="text-[10px] text-muted-foreground">/functions/v1/{fn.slug}</code>
                 </td>
                 <td class="px-5 py-3">
                   <button onclick={() => toggleVerifyJwt(fn)}
@@ -214,6 +561,9 @@
                     title={fn.verify_jwt ? 'JWT 验证已开启（点击关闭）' : 'JWT 验证已关闭（点击开启）'}>
                     <span class="inline-block h-3.5 w-3.5 rounded-full bg-white transition-transform shadow-sm {fn.verify_jwt ? 'translate-x-[18px]' : 'translate-x-[3px]'}"></span>
                   </button>
+                </td>
+                <td class="px-5 py-3">
+                  <code class="text-[10px] text-muted-foreground">/functions/v1/{fn.slug}</code>
                 </td>
                 <td class="px-5 py-3 text-muted-foreground text-xs font-mono tabular-nums">
                   <div class="flex items-center gap-1"><Clock size={12} />{new Date(fn.created_at).toLocaleDateString()}</div>
@@ -233,3 +583,237 @@
     {/if}
   </div>
 </div>
+
+{#if drawerOpen && selectedFunction}
+  <button
+    type="button"
+    class="fixed inset-0 z-40 bg-slate-950/45 backdrop-blur-[1px]"
+    onclick={closeFunctionDrawer}
+    aria-label="关闭函数详情遮罩"
+  ></button>
+  <aside class="fixed right-0 top-0 z-50 h-full w-full max-w-3xl border-l border-border/60 bg-background shadow-2xl flex flex-col">
+    <div class="px-6 py-5 border-b border-border/60 flex items-start justify-between gap-4">
+      <div class="space-y-2">
+        <div class="inline-flex items-center gap-2 px-2.5 py-1 rounded-full bg-brand/10 text-brand text-[11px] font-bold uppercase tracking-[0.18em]">
+          <Zap size={12} />
+          Function Detail
+        </div>
+        <div>
+          <h2 class="text-xl font-semibold font-mono">{selectedFunction.slug}</h2>
+          <p class="text-sm text-muted-foreground mt-1">
+            在当前函数上下文里直接查看可复制调用方式、最近后台任务和失败记录，不用再跳去任务页找上下文。
+          </p>
+        </div>
+      </div>
+      <button
+        onclick={closeFunctionDrawer}
+        class="inline-flex items-center justify-center w-9 h-9 rounded-lg border hover:bg-muted/40 transition-colors"
+        aria-label="关闭函数详情"
+      >
+        <X size={16} />
+      </button>
+    </div>
+
+    <div class="flex-1 overflow-auto px-6 py-5 space-y-5">
+      <div class="grid gap-4 md:grid-cols-3">
+        <div class="rounded-xl border border-border/60 bg-muted/20 p-4">
+          <div class="text-[11px] font-bold uppercase tracking-[0.16em] text-muted-foreground">Status</div>
+          <div class="mt-2 text-sm font-semibold">{selectedFunction.status}</div>
+        </div>
+        <div class="rounded-xl border border-border/60 bg-muted/20 p-4">
+          <div class="text-[11px] font-bold uppercase tracking-[0.16em] text-muted-foreground">Endpoint</div>
+          <div class="mt-2 text-xs font-mono text-foreground break-all">/functions/v1/{selectedFunction.slug}</div>
+        </div>
+        <div class="rounded-xl border border-border/60 bg-muted/20 p-4">
+          <div class="text-[11px] font-bold uppercase tracking-[0.16em] text-muted-foreground">JWT</div>
+          <div class="mt-2 text-sm font-semibold">{selectedFunction.verify_jwt ? "Enabled" : "Disabled"}</div>
+        </div>
+      </div>
+
+      <div class="grid gap-4 xl:grid-cols-2">
+        <div class="rounded-xl border border-border/60 bg-background p-4 space-y-3">
+          <div class="flex items-center justify-between gap-3">
+            <div>
+              <div class="text-sm font-semibold">针对当前函数生成好的 `invokeAsync()` 示例</div>
+              <p class="text-xs text-muted-foreground mt-1">直接把 slug 预填成 `"{currentDrawerSlug}"`。</p>
+            </div>
+            <button
+              onclick={() => copySnippet(buildInvokeAsyncExample(currentDrawerSlug), `${currentDrawerSlug} invokeAsync 示例`)}
+              class="inline-flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-semibold hover:bg-muted/40 transition-colors"
+            >
+              <Copy size={14} />
+              复制
+            </button>
+          </div>
+          <pre class="rounded-xl bg-slate-950 text-slate-100 p-4 text-[11px] leading-5 overflow-auto border border-slate-900/80"><code>{buildInvokeAsyncExample(currentDrawerSlug)}</code></pre>
+        </div>
+
+        <div class="rounded-xl border border-border/60 bg-background p-4 space-y-3">
+          <div class="flex items-center gap-2 text-sm font-semibold">
+            <BookOpen size={15} class="text-brand" />
+            复制 cURL / JS / TS 三种调用方式
+          </div>
+
+          <div class="space-y-3">
+            <div class="rounded-lg border border-border/50 p-3 space-y-2">
+              <div class="flex items-center justify-between gap-3">
+                <div class="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">cURL</div>
+                <button
+                  onclick={() => copySnippet(buildCurlExample(currentDrawerSlug), `${currentDrawerSlug} cURL 示例`)}
+                  class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border text-[11px] font-semibold hover:bg-muted/40 transition-colors"
+                >
+                  <Copy size={12} />
+                  复制
+                </button>
+              </div>
+              <pre class="rounded-lg bg-slate-950 text-slate-100 p-3 text-[10px] leading-5 overflow-auto border border-slate-900/80"><code>{buildCurlExample(currentDrawerSlug)}</code></pre>
+            </div>
+
+            <div class="rounded-lg border border-border/50 p-3 space-y-2">
+              <div class="flex items-center justify-between gap-3">
+                <div class="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">JavaScript</div>
+                <button
+                  onclick={() => copySnippet(buildJsInvokeExample(currentDrawerSlug), `${currentDrawerSlug} JS 示例`)}
+                  class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border text-[11px] font-semibold hover:bg-muted/40 transition-colors"
+                >
+                  <Copy size={12} />
+                  复制
+                </button>
+              </div>
+              <pre class="rounded-lg bg-slate-950 text-slate-100 p-3 text-[10px] leading-5 overflow-auto border border-slate-900/80"><code>{buildJsInvokeExample(currentDrawerSlug)}</code></pre>
+            </div>
+
+            <div class="rounded-lg border border-border/50 p-3 space-y-2">
+              <div class="flex items-center justify-between gap-3">
+                <div class="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">TypeScript</div>
+                <button
+                  onclick={() => copySnippet(buildTsInvokeExample(currentDrawerSlug), `${currentDrawerSlug} TS 示例`)}
+                  class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border text-[11px] font-semibold hover:bg-muted/40 transition-colors"
+                >
+                  <Copy size={12} />
+                  复制
+                </button>
+              </div>
+              <pre class="rounded-lg bg-slate-950 text-slate-100 p-3 text-[10px] leading-5 overflow-auto border border-slate-900/80"><code>{buildTsInvokeExample(currentDrawerSlug)}</code></pre>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="rounded-xl border border-border/60 bg-background p-4 space-y-4">
+        <div class="flex items-center justify-between gap-3">
+          <div>
+            <div class="text-sm font-semibold">最近相关后台任务和失败记录</div>
+            <p class="text-xs text-muted-foreground mt-1">只看当前函数 `{currentDrawerSlug}` 的最新任务，帮助租户在函数上下文内快速排障。</p>
+          </div>
+          <a
+            href={`/project/${projectRef}/tasks`}
+            class="inline-flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-semibold hover:bg-muted/40 transition-colors"
+          >
+            打开完整任务面板
+            <ArrowRight size={14} />
+          </a>
+        </div>
+
+        <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+          <div class="rounded-lg border border-border/50 bg-muted/20 p-3">
+            <div class="text-[11px] font-bold uppercase tracking-[0.14em] text-muted-foreground">Running</div>
+            <div class="mt-2 text-lg font-semibold text-blue-700">{functionTaskSummary.running}</div>
+          </div>
+          <div class="rounded-lg border border-border/50 bg-muted/20 p-3">
+            <div class="text-[11px] font-bold uppercase tracking-[0.14em] text-muted-foreground">Retry</div>
+            <div class="mt-2 text-lg font-semibold text-amber-700">{functionTaskSummary.retryScheduled}</div>
+          </div>
+          <div class="rounded-lg border border-border/50 bg-muted/20 p-3">
+            <div class="text-[11px] font-bold uppercase tracking-[0.14em] text-muted-foreground">DLQ</div>
+            <div class="mt-2 text-lg font-semibold text-red-700">{functionTaskSummary.deadLettered}</div>
+          </div>
+          <div class="rounded-lg border border-border/50 bg-muted/20 p-3">
+            <div class="text-[11px] font-bold uppercase tracking-[0.14em] text-muted-foreground">Failed</div>
+            <div class="mt-2 text-lg font-semibold text-rose-700">{functionTaskSummary.failed}</div>
+          </div>
+          <div class="rounded-lg border border-border/50 bg-muted/20 p-3">
+            <div class="text-[11px] font-bold uppercase tracking-[0.14em] text-muted-foreground">Cancelled</div>
+            <div class="mt-2 text-lg font-semibold text-slate-700">{functionTaskSummary.cancelled}</div>
+          </div>
+        </div>
+
+        {#if tasksLoading}
+          <div class="rounded-xl border border-border/50 bg-muted/20 py-10 flex flex-col items-center justify-center gap-3 text-muted-foreground">
+            <Loader2 size={24} class="animate-spin" />
+            <p class="text-xs font-mono uppercase tracking-[0.16em]">正在加载函数相关任务...</p>
+          </div>
+        {:else if tasksError}
+          <div class="rounded-xl border border-red-500/20 bg-red-500/5 px-4 py-3 text-sm text-red-700">
+            {tasksError}
+          </div>
+        {:else if functionTasks.length === 0}
+          <div class="rounded-xl border border-border/50 bg-muted/20 py-10 text-center text-sm text-muted-foreground">
+            当前函数还没有后台任务记录。
+          </div>
+        {:else}
+          {#if functionTaskSummary.recentFailures.length > 0}
+            <div class="rounded-xl border border-red-500/20 bg-red-500/5 p-4 space-y-3">
+              <div class="text-sm font-semibold text-red-700">最近失败摘要</div>
+              <div class="space-y-2">
+                {#each functionTaskSummary.recentFailures.slice(0, 3) as failure}
+                  <div class="rounded-lg border border-red-500/15 bg-background/80 px-3 py-2">
+                    <div class="flex items-center justify-between gap-3">
+                      <div class="font-mono text-[11px] text-muted-foreground break-all">{failure.id}</div>
+                      <span class={`inline-flex items-center px-2 py-1 rounded-md border text-[10px] font-bold uppercase tracking-[0.12em] ${getStatusBadgeClass(failure.status)}`}>
+                        {failure.status}
+                      </span>
+                    </div>
+                    {#if failure.error}
+                      <div class="mt-2 text-xs text-red-700 leading-5">{failure.error}</div>
+                    {/if}
+                  </div>
+                {/each}
+              </div>
+            </div>
+          {/if}
+
+          <div class="space-y-3">
+            {#each functionTasks as task}
+              <div class="rounded-xl border border-border/50 bg-muted/20 p-4 space-y-3">
+                <div class="flex items-start justify-between gap-3">
+                  <div class="space-y-1">
+                    <div class="font-mono text-xs text-muted-foreground break-all">{task.id}</div>
+                    <div class="flex items-center gap-2 flex-wrap">
+                      <span class={`inline-flex items-center px-2.5 py-1 rounded-md border text-[11px] font-bold uppercase tracking-[0.12em] ${getStatusBadgeClass(task.status)}`}>
+                        {task.status}
+                      </span>
+                      <span class="text-[11px] text-muted-foreground">
+                        attempt {task.attempt || 0} / {task.max_attempts || "-"}
+                      </span>
+                    </div>
+                  </div>
+                  <div class="text-[11px] text-muted-foreground text-right">
+                    <div>{new Date(task.updated_at).toLocaleString()}</div>
+                    <div class="mt-1">created {new Date(task.created_at).toLocaleDateString()}</div>
+                  </div>
+                </div>
+
+                {#if task.error}
+                  <div class="rounded-lg border border-red-500/20 bg-red-500/5 px-3 py-2 text-xs text-red-700 leading-5">
+                    {task.error}
+                  </div>
+                {/if}
+
+                <div class="flex items-center gap-2">
+                  <a
+                    href={`/project/${projectRef}/tasks`}
+                    class="inline-flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-semibold hover:bg-muted/40 transition-colors"
+                  >
+                    在任务页查看详情
+                    <ArrowRight size={13} />
+                  </a>
+                </div>
+              </div>
+            {/each}
+          </div>
+        {/if}
+      </div>
+    </div>
+  </aside>
+{/if}

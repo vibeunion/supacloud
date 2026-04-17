@@ -29,6 +29,16 @@
   let activeQueries = $state<Record<string, unknown>[]>([]);
   let services = $state<ServiceInfo[]>([]);
   let servicesLoading = $state(true);
+  let taskStats = $state<{
+    running: number;
+    retryScheduled: number;
+    deadLettered: number;
+    failedLast24h: number;
+    cancelledLast24h: number;
+    topFailures: Array<{ message: string; count: number }>;
+    failedTrend: Array<{ bucket: string; failures: number }>;
+  } | null>(null);
+  let autoRefreshTimer: ReturnType<typeof setInterval> | null = null;
 
   const projectRef = $derived(page.params.ref);
 
@@ -98,6 +108,15 @@
     } catch {}
   }
 
+  async function fetchTaskStats() {
+    try {
+      const res = await apiClient(`/v1/projects/${projectRef}/tasks/stats`);
+      if (res.ok) {
+        taskStats = await res.json();
+      }
+    } catch {}
+  }
+
   $effect(() => {
     // Explicitly reference projectRef to trigger re-fetch on URL change
     const _currentRef = projectRef;
@@ -105,7 +124,20 @@
       fetchDashboard();
       fetchServices();
       fetchFunctions();
+      fetchTaskStats();
     }
+  });
+
+  onMount(() => {
+    autoRefreshTimer = setInterval(() => {
+      if (projectRef) {
+        fetchTaskStats();
+      }
+    }, 30000);
+
+    return () => {
+      if (autoRefreshTimer) clearInterval(autoRefreshTimer);
+    };
   });
 
   const QUICK_LINKS = $derived(projectRef ? [
@@ -129,6 +161,20 @@
     if (status === "INACTIVE" || status === "inactive" || status === "dead") return MinusCircle;
     return XCircle;
   }
+
+  function sparklinePath(values: number[]) {
+    if (values.length === 0) return "";
+    const width = 220;
+    const height = 48;
+    const max = Math.max(...values, 1);
+    return values
+      .map((value, index) => {
+        const x = (index / Math.max(values.length - 1, 1)) * width;
+        const y = height - (value / max) * height;
+        return `${index === 0 ? "M" : "L"} ${x.toFixed(2)} ${y.toFixed(2)}`;
+      })
+      .join(" ");
+  }
 </script>
 
 <div class="space-y-6">
@@ -137,7 +183,7 @@
       <h1 class="text-2xl font-bold">{$t("Dashboard.project_dashboard")}</h1>
       <p class="text-sm text-muted-foreground mt-1">{$t("Dashboard.subtitle") || '项目概览和快速访问导航'}</p>
     </div>
-    <button onclick={() => { fetchDashboard(); fetchServices(); fetchFunctions(); }}
+    <button onclick={() => { fetchDashboard(); fetchServices(); fetchFunctions(); fetchTaskStats(); }}
       class="flex items-center gap-2 px-3 py-2 text-xs rounded-lg border hover:bg-muted/50 transition-colors">
       <RefreshCw size={12} />
       {$t("Logs.refresh") || '刷新'}
@@ -212,6 +258,104 @@
         </div>
         <div class="mt-2 text-2xl font-bold">{storageSize}</div>
         <div class="mt-1 text-[10px] text-muted-foreground">Storage {$t("Storage.size", {default: "文件总量"})}</div>
+      </div>
+    </div>
+
+    <div class="rounded-xl border bg-card overflow-hidden">
+      <div class="border-b px-5 py-3 bg-muted/20 flex items-center justify-between">
+        <div>
+          <h2 class="text-sm font-semibold flex items-center gap-2"><Activity size={14} /> 后台任务概览</h2>
+          <p class="text-[11px] text-muted-foreground mt-1">运行中、重试中、死信数量，以及过去 24 小时失败趋势。</p>
+        </div>
+        <a href={`/project/${projectRef}/tasks`} class="text-[10px] text-brand hover:underline flex items-center gap-1">打开任务面板 <ArrowRight size={10} /></a>
+      </div>
+
+      <div class="p-5 space-y-5">
+        <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <div class="rounded-xl border bg-background p-4">
+            <div class="text-[10px] uppercase text-muted-foreground font-semibold">运行中</div>
+            <div class="mt-2 text-2xl font-bold text-blue-600">{taskStats?.running ?? 0}</div>
+          </div>
+          <div class="rounded-xl border bg-background p-4">
+            <div class="text-[10px] uppercase text-muted-foreground font-semibold">重试中</div>
+            <div class="mt-2 text-2xl font-bold text-amber-600">{taskStats?.retryScheduled ?? 0}</div>
+          </div>
+          <div class="rounded-xl border bg-background p-4">
+            <div class="text-[10px] uppercase text-muted-foreground font-semibold">死信队列</div>
+            <div class="mt-2 text-2xl font-bold text-red-600">{taskStats?.deadLettered ?? 0}</div>
+          </div>
+          <div class="rounded-xl border bg-background p-4">
+            <div class="text-[10px] uppercase text-muted-foreground font-semibold">24h 失败数</div>
+            <div class="mt-2 text-2xl font-bold text-foreground">{taskStats?.failedLast24h ?? 0}</div>
+          </div>
+          <div class="rounded-xl border bg-background p-4">
+            <div class="text-[10px] uppercase text-muted-foreground font-semibold">24h 取消数</div>
+            <div class="mt-2 text-2xl font-bold text-slate-700">{taskStats?.cancelledLast24h ?? 0}</div>
+          </div>
+        </div>
+
+        <div class="rounded-xl border bg-background p-4">
+          <div class="flex items-center justify-between mb-3">
+            <h3 class="text-sm font-semibold text-foreground">最近失败趋势</h3>
+            <span class="text-[11px] text-muted-foreground">按小时聚合</span>
+          </div>
+
+          {#if !taskStats || taskStats.failedTrend.length === 0}
+            <div class="text-sm text-muted-foreground py-6 text-center">
+              最近 24 小时没有失败任务。
+            </div>
+          {:else}
+            <div class="space-y-4">
+              <svg viewBox="0 0 220 48" class="w-full h-14 rounded bg-red-50/50 border border-red-500/10">
+                <path
+                  d={sparklinePath(taskStats.failedTrend.map((point) => point.failures))}
+                  fill="none"
+                  stroke="currentColor"
+                  class="text-red-500"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
+
+              <div class="space-y-2">
+                {#each taskStats.failedTrend as point}
+                  <div class="grid grid-cols-[88px_1fr_32px] items-center gap-3">
+                    <div class="text-[11px] font-mono text-muted-foreground">{point.bucket}</div>
+                    <div class="h-2 rounded-full bg-muted overflow-hidden">
+                      <div
+                        class="h-full bg-red-500 rounded-full"
+                        style={`width: ${Math.max(8, (point.failures / Math.max(...taskStats.failedTrend.map((p) => p.failures), 1)) * 100)}%`}
+                      ></div>
+                    </div>
+                    <div class="text-[11px] font-mono text-foreground text-right">{point.failures}</div>
+                  </div>
+                {/each}
+              </div>
+            </div>
+          {/if}
+        </div>
+
+        <div class="rounded-xl border bg-background p-4">
+          <div class="flex items-center justify-between mb-3">
+            <h3 class="text-sm font-semibold text-foreground">高频异常</h3>
+            <span class="text-[11px] text-muted-foreground">过去 24 小时 Top 5</span>
+          </div>
+          {#if !taskStats || taskStats.topFailures.length === 0}
+            <div class="text-sm text-muted-foreground py-6 text-center">
+              最近 24 小时没有异常聚合。
+            </div>
+          {:else}
+            <div class="space-y-2">
+              {#each taskStats.topFailures as item}
+                <div class="rounded-lg border border-border/60 px-3 py-2">
+                  <div class="text-xs text-foreground break-all">{item.message}</div>
+                  <div class="mt-1 text-[11px] text-muted-foreground font-mono">出现 {item.count} 次</div>
+                </div>
+              {/each}
+            </div>
+          {/if}
+        </div>
       </div>
     </div>
 

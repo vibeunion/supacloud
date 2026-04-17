@@ -274,9 +274,13 @@ export interface Project {
 // Task status and type
 export const TaskStatus = {
   PENDING: "pending",
-  PROCESSING: "processing",
-  COMPLETED: "completed",
+  LEASED: "leased",
+  RUNNING: "running",
+  RETRY_SCHEDULED: "retry_scheduled",
+  SUCCEEDED: "succeeded",
   FAILED: "failed",
+  DEAD_LETTERED: "dead_lettered",
+  CANCELLED: "cancelled",
 } as const;
 export type TaskStatus = (typeof TaskStatus)[keyof typeof TaskStatus];
 
@@ -293,6 +297,7 @@ export const TaskType = {
   CLEANUP_RUNTIME: "cleanup_runtime",
   CLEANUP_REALTIME: "cleanup_realtime",
   CLEANUP_ROUTER: "cleanup_router",
+  EDGE_FUNCTION: "edge_function",
 } as const;
 export type TaskType = (typeof TaskType)[keyof typeof TaskType];
 
@@ -304,6 +309,39 @@ export interface ProjectTask {
   payload: Record<string, unknown>;
   error: string | null;
   retries: number;
+  attempt: number;
+  max_attempts: number;
+  next_run_at: Date | null;
+  lease_until: Date | null;
+  started_at: Date | null;
+  completed_at: Date | null;
+  timeout_sec: number | null;
+  idempotency_key: string | null;
+  trace_id: string | null;
+  function_slug: string | null;
+  function_version: string | null;
+  result: Record<string, unknown> | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface ProjectTaskAttempt {
+  id: string;
+  task_id: string;
+  project_ref: string;
+  attempt_no: number;
+  status: string;
+  started_at: Date;
+  completed_at: Date | null;
+  duration_ms: number | null;
+  error: string | null;
+  response_status: number | null;
+  logs: Array<{
+    timestamp: string;
+    stream: "stdout" | "stderr";
+    level: string;
+    message: string;
+  }> | null;
   created_at: Date;
   updated_at: Date;
 }
