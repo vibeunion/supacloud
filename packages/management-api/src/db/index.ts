@@ -180,10 +180,18 @@ const DANGEROUS_SQL_PATTERNS = [
   /\bpg_write_file\b/i,
   /\bpg_ls_dir\b/i,
   /\bpg_stat_file\b/i,
+  /\bpg_catalog\b.*\bpg_read_file\b/i,
+  /\bpg_catalog\b.*\bpg_write_file\b/i,
+  /\bpg_catalog\b.*\bpg_execute_server_program\b/i,
 ];
 
 function isDangerousSQL(sqlQuery: string): boolean {
-  return DANGEROUS_SQL_PATTERNS.some(pattern => pattern.test(sqlQuery));
+  const normalized = sqlQuery
+    .replace(/\/\*[\s\S]*?\*\//g, " ")
+    .replace(/--.*$/gm, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return DANGEROUS_SQL_PATTERNS.some(pattern => pattern.test(normalized));
 }
 
 export async function executeQuery(dbName: string, sqlQuery: string): Promise<{ rows: unknown[]; rowCount: number; command: string }> {
@@ -344,6 +352,8 @@ export interface ProjectTask {
   timeout_sec: number | null;
   idempotency_key: string | null;
   trace_id: string | null;
+  cancel_requested_at: Date | null;
+  cancellation_reason: string | null;
   function_slug: string | null;
   function_version: string | null;
   result: Record<string, unknown> | null;

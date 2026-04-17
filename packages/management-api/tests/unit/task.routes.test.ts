@@ -1,11 +1,13 @@
 import { beforeEach, describe, expect, mock, test } from "bun:test";
 import { Elysia } from "elysia";
+import { TaskStatus } from "../../src/db";
 
 const listTasksByProjectFiltered = mock(() => Promise.resolve([]));
 const getTaskById = mock(() => Promise.resolve(null));
 const listTaskAttempts = mock(() => Promise.resolve([]));
 const cancelTask = mock(() => Promise.resolve(null));
 const retryTask = mock(() => Promise.resolve(null));
+const requestTaskCancellation = mock(() => Promise.resolve(null));
 const getTaskStats = mock(() => Promise.resolve({
   running: 0,
   retryScheduled: 0,
@@ -44,6 +46,7 @@ mock.module("../../src/repositories/task.repository", () => ({
     listTaskAttempts,
     cancelTask,
     retryTask,
+    requestTaskCancellation,
     getTaskStats,
   },
 }));
@@ -68,10 +71,13 @@ describe("taskRoutes", () => {
     listTaskAttempts.mockReset();
     cancelTask.mockReset();
     retryTask.mockReset();
+    requestTaskCancellation.mockReset();
     getTaskStats.mockReset();
     backgroundFunctionWorker.cancel.mockReset();
     projectService.getBackgroundTaskSettings.mockReset();
     projectService.updateBackgroundTaskSettings.mockReset();
+
+    backgroundFunctionWorker.cancel.mockResolvedValue(true);
   });
 
   test("GET /v1/projects/:ref/tasks forwards function_slug filter to repository", async () => {
@@ -131,12 +137,12 @@ describe("taskRoutes", () => {
   test("POST /:taskId/cancel triggers runtime cancellation for running tasks", async () => {
     getTaskById.mockResolvedValueOnce({
       id: "tsk_running",
-      status: "running",
+      status: TaskStatus.RUNNING,
       project_ref: "proj_1",
-    });
-    cancelTask.mockResolvedValueOnce({
+    }).mockResolvedValueOnce({
       id: "tsk_running",
-      status: "cancelled",
+      status: TaskStatus.RUNNING,
+      cancel_requested_at: "2026-04-17T12:00:00.000Z",
     });
 
     const response = await request("/v1/projects/proj_1/tasks/tsk_running/cancel", {
@@ -146,28 +152,43 @@ describe("taskRoutes", () => {
 
     expect(response.status).toBe(200);
     expect(backgroundFunctionWorker.cancel).toHaveBeenCalledWith("tsk_running");
-    expect(cancelTask).toHaveBeenCalledWith("tsk_running", "Cancelled by user");
-    expect(payload.status).toBe("cancelled");
+    expect(cancelTask).not.toHaveBeenCalled();
+    expect(payload.cancel_requested_at).toBe("2026-04-17T12:00:00.000Z");
   });
 
   test("POST /:taskId/cancel skips runtime cancellation for non-running tasks", async () => {
     getTaskById.mockResolvedValueOnce({
       id: "tsk_done",
-      status: "succeeded",
+      status: TaskStatus.PENDING,
       project_ref: "proj_1",
-    });
-    cancelTask.mockResolvedValueOnce({
+    }).mockResolvedValueOnce({
       id: "tsk_done",
-      status: "cancelled",
+      status: TaskStatus.CANCELLED,
     });
+    backgroundFunctionWorker.cancel.mockResolvedValueOnce(true);
 
     const response = await request("/v1/projects/proj_1/tasks/tsk_done/cancel", {
       method: "POST",
     });
 
     expect(response.status).toBe(200);
+    expect(backgroundFunctionWorker.cancel).toHaveBeenCalledWith("tsk_done");
+  });
+
+  test("POST /:taskId/cancel returns 409 for terminal tasks", async () => {
+    getTaskById.mockResolvedValueOnce({
+      id: "tsk_done",
+      status: TaskStatus.SUCCEEDED,
+      project_ref: "proj_1",
+    });
+
+    const response = await request("/v1/projects/proj_1/tasks/tsk_done/cancel", {
+      method: "POST",
+    });
+
+    expect(response.status).toBe(409);
     expect(backgroundFunctionWorker.cancel).not.toHaveBeenCalled();
-    expect(cancelTask).toHaveBeenCalledWith("tsk_done", "Cancelled by user");
+    expect(cancelTask).not.toHaveBeenCalled();
   });
 
   test("GET /:taskId returns attempts and latest_logs", async () => {

@@ -9,8 +9,21 @@ export interface AuthContext {
   tokenType: "master" | "session" | "mcp" | "project_jwt" | "service_role_key";
 }
 
+const PUBLIC_PATH_PREFIXES = [
+  "/v1/system/info",
+  "/v1/system/health",
+  "/health",
+  "/auth/verify",
+];
+
 const jwtCache = new Map<string, { result: AuthContext | null; expiresAt: number }>();
 const JWT_CACHE_TTL = 60_000;
+
+async function hashToken(token: string): Promise<string> {
+  const data = new TextEncoder().encode(token);
+  const hash = await crypto.subtle.digest("SHA-256", data);
+  return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, "0")).join("").substring(0, 32);
+}
 
 async function verifyProjectJwt(token: string): Promise<{ role: string; ref: string } | null> {
   try {
@@ -97,11 +110,13 @@ export async function checkAuth(request: Request): Promise<{ status: number; bod
   const token = authorization.slice(7);
 
   if (token === config.masterToken) {
+    (request as any).__authContext = { role: "admin", tokenType: "master" } as AuthContext;
     return undefined;
   }
 
   if (token.includes(".") && token.split(".").length === 2) {
     if (await verifySessionToken(token)) {
+      (request as any).__authContext = { role: "admin", tokenType: "session" } as AuthContext;
       return undefined;
     }
   }
@@ -112,10 +127,14 @@ export async function checkAuth(request: Request): Promise<{ status: number; bod
   let tokenType: AuthContext["tokenType"] = "mcp";
 
   if (!mcpPayload && token.includes(".")) {
-    const cacheKey = `srk:${token.substring(0, 16)}`;
+    const srkHash = await hashToken(token);
+    const cacheKey = `srk:${srkHash}`;
     const cached = jwtCache.get(cacheKey);
     if (cached && cached.expiresAt > Date.now()) {
-      if (cached.result) return undefined;
+      if (cached.result) {
+        (request as any).__authContext = cached.result;
+        return undefined;
+      }
     } else {
       const [project] = await metaSql`
         SELECT ref FROM projects
@@ -124,7 +143,8 @@ export async function checkAuth(request: Request): Promise<{ status: number; bod
         LIMIT 1
       `;
       if (project) {
-        jwtCache.set(cacheKey, { result: { role: "project", ref: project.ref as string, tokenType: "service_role_key" }, expiresAt: Date.now() + JWT_CACHE_TTL });
+        const ctx: AuthContext = { role: "project", ref: project.ref as string, tokenType: "service_role_key" };
+        jwtCache.set(cacheKey, { result: ctx, expiresAt: Date.now() + JWT_CACHE_TTL });
         role = "project";
         ref = project.ref as string;
         tokenType = "service_role_key";
@@ -132,13 +152,13 @@ export async function checkAuth(request: Request): Promise<{ status: number; bod
     }
 
     if (!role) {
-      const jwtCacheKey = `jwt:${token.substring(0, 16)}`;
+      const jwtHash = await hashToken(token);
+      const jwtCacheKey = `jwt:${jwtHash}`;
       const jwtCached = jwtCache.get(jwtCacheKey);
       if (jwtCached && jwtCached.expiresAt > Date.now()) {
         if (jwtCached.result) {
-          role = jwtCached.result.role;
-          ref = jwtCached.result.ref;
-          tokenType = "project_jwt";
+          (request as any).__authContext = jwtCached.result;
+          return undefined;
         }
       } else {
         const jwtResult = await verifyProjectJwt(token);
@@ -146,7 +166,8 @@ export async function checkAuth(request: Request): Promise<{ status: number; bod
           role = jwtResult.role === "service_role" ? "project" : "project";
           ref = jwtResult.ref;
           tokenType = "project_jwt";
-          jwtCache.set(jwtCacheKey, { result: { role, ref, tokenType }, expiresAt: Date.now() + JWT_CACHE_TTL });
+          const ctx: AuthContext = { role, ref, tokenType };
+          jwtCache.set(jwtCacheKey, { result: ctx, expiresAt: Date.now() + JWT_CACHE_TTL });
         } else {
           jwtCache.set(jwtCacheKey, { result: null, expiresAt: Date.now() + 30_000 });
         }
@@ -155,14 +176,17 @@ export async function checkAuth(request: Request): Promise<{ status: number; bod
   }
 
   if (role === "admin") {
+    (request as any).__authContext = { role: "admin", ref, tokenType } as AuthContext;
     return undefined;
   }
 
   if (role === "project" && ref) {
     const url = new URL(request.url);
-    if (!url.pathname.startsWith(`/v1/projects/${ref}`)) {
+    const isPublicPath = PUBLIC_PATH_PREFIXES.some(prefix => url.pathname.startsWith(prefix));
+    if (!url.pathname.startsWith(`/v1/projects/${ref}`) && !isPublicPath) {
       return { status: 403, body: { error: `Token scoped strictly to project ${ref}, cannot access ${url.pathname}` } };
     }
+    (request as any).__authContext = { role, ref, tokenType } as AuthContext;
     return undefined;
   }
 

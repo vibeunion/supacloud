@@ -1,15 +1,12 @@
 import { parentPort, workerData } from "worker_threads";
 import path from "path";
-import { getCapturedServeHandler, clearCapturedServeHandler } from "./deno-compat";
+import { getCapturedServeHandler, clearCapturedServeHandler, setTenantRef } from "./deno-compat";
 
 if (!parentPort) throw new Error("This file must be run as a Worker");
 
 const MAX_MODULE_CACHE = 20;
 
-const moduleCache = new Map<
-  string,
-  { module: any; lastUsed: number }
->();
+const moduleCache = new Map<string, { module: any; lastUsed: number }>();
 
 function evictOldestModule() {
   if (moduleCache.size <= MAX_MODULE_CACHE) return;
@@ -28,6 +25,7 @@ function evictOldestModule() {
 
 const savedEnv: Record<string, string | undefined> = {};
 let envSnapshotActive = false;
+let currentAbortController: AbortController | null = null;
 
 function injectEnv(env: Record<string, string>) {
   if (envSnapshotActive) restoreEnv();
@@ -105,10 +103,7 @@ async function loadModule(functionPath: string): Promise<any> {
   return handler;
 }
 
-async function executeFunction(
-  handler: any,
-  request: Request,
-): Promise<Response> {
+async function executeFunction(handler: any, request: Request): Promise<Response> {
   clearCapturedServeHandler();
 
   if (typeof handler === "function") {
@@ -149,9 +144,17 @@ async function executeFunction(
   );
 }
 
+function extractProjectRef(functionId: string): string | null {
+  const idx = functionId.indexOf("_");
+  if (idx === -1) return null;
+  return functionId.substring(0, idx);
+}
+
 parentPort.on("message", async (msg: any) => {
   if (msg.type === "preheat") {
     try {
+      const ref = extractProjectRef(msg.functionId);
+      setTenantRef(ref);
       await loadModule(msg.functionPath);
       parentPort!.postMessage({
         type: "preheat_done",
@@ -163,27 +166,34 @@ parentPort.on("message", async (msg: any) => {
         functionId: msg.functionId,
         error: err.message,
       });
+    } finally {
+      setTenantRef(null);
     }
     return;
   }
 
   if (msg.type === "cancel_current") {
+    currentAbortController?.abort(new DOMException("Task cancelled", "AbortError"));
     parentPort!.postMessage({ type: "cancel_ack" });
     return;
   }
 
   const { functionId, functionPath, env, url, method, headers, body } = msg;
 
+  const projectRef = extractProjectRef(functionId);
+  setTenantRef(projectRef);
   injectEnv(env);
   setupConsoleCapture(functionId);
 
   try {
     const handler = await loadModule(functionPath);
+    currentAbortController = new AbortController();
 
     const req = new Request(url, {
       method,
       headers: new Headers(headers as Record<string, string>),
       body: body ? Buffer.from(body) : undefined,
+      signal: currentAbortController.signal,
     });
 
     const response = await executeFunction(handler, req);
@@ -228,7 +238,6 @@ parentPort.on("message", async (msg: any) => {
         });
       }
 
-      restoreEnv();
       return;
     }
 
@@ -254,16 +263,19 @@ parentPort.on("message", async (msg: any) => {
       body: resBody,
     });
   } catch (err: any) {
+    const aborted = currentAbortController?.signal.aborted || err?.name === "AbortError";
     const message = err instanceof Error ? err.message : String(err);
     parentPort!.postMessage({
-      status: 500,
+      status: aborted ? 499 : 500,
       headers: { "Content-Type": "application/json" },
       body: Buffer.from(
         JSON.stringify({ error: message, name: err.name }),
       ).buffer,
     });
   } finally {
+    currentAbortController = null;
     restoreEnv();
     restoreConsole();
+    setTenantRef(null);
   }
 });

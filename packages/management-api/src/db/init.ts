@@ -75,6 +75,8 @@ export async function initDatabase() {
       timeout_sec INTEGER,
       idempotency_key VARCHAR(255),
       trace_id VARCHAR(255),
+      cancel_requested_at TIMESTAMPTZ,
+      cancellation_reason TEXT,
       created_at TIMESTAMPTZ DEFAULT NOW(),
       updated_at TIMESTAMPTZ DEFAULT NOW()
     );
@@ -183,6 +185,18 @@ export async function initDatabase() {
     max: 2,
   });
 
+  async function runMigrationStatement(statement: string, options?: { swallowError?: boolean; description?: string }) {
+    try {
+      await sql.unsafe(statement);
+    } catch (error: any) {
+      if (options?.swallowError) {
+        logger.warn(`Skipped optional migration${options.description ? ` (${options.description})` : ""}: ${error?.message || String(error)}`);
+        return;
+      }
+      throw error;
+    }
+  }
+
   try {
     await sql`SELECT 1`;
     logger.info("Connected to database");
@@ -209,68 +223,82 @@ export async function initDatabase() {
     }
 
     // Always apply migrations to ensure schema is up-to-date
-    try {
-      await sql.unsafe('ALTER TABLE system_tus_uploads ADD COLUMN IF NOT EXISTS auth_token TEXT');
-      await sql.unsafe('ALTER TABLE system_signed_uploads ADD COLUMN IF NOT EXISTS auth_token TEXT');
-      // Add updated_at to project_secrets if not present (migration for existing deployments)
-      await sql.unsafe('ALTER TABLE project_secrets ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()');
-      await sql.unsafe('ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS function_slug VARCHAR(255)');
-      await sql.unsafe('ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS function_version VARCHAR(128)');
-      await sql.unsafe('ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS result JSONB');
-      await sql.unsafe('ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS attempt INTEGER DEFAULT 0');
-      await sql.unsafe('ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS max_attempts INTEGER DEFAULT 3');
-      await sql.unsafe('ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS next_run_at TIMESTAMPTZ DEFAULT NOW()');
-      await sql.unsafe('ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS lease_until TIMESTAMPTZ');
-      await sql.unsafe('ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ');
-      await sql.unsafe('ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ');
-      await sql.unsafe('ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS timeout_sec INTEGER');
-      await sql.unsafe('ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS idempotency_key VARCHAR(255)');
-      await sql.unsafe('ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS trace_id VARCHAR(255)');
-      await sql.unsafe('ALTER TABLE project_tasks ALTER COLUMN next_run_at SET DEFAULT NOW()');
-      await sql.unsafe('UPDATE project_tasks SET next_run_at = COALESCE(next_run_at, created_at, NOW())');
-      await sql.unsafe('UPDATE project_tasks SET max_attempts = COALESCE(max_attempts, 3)');
-      await sql.unsafe('UPDATE project_tasks SET attempt = COALESCE(attempt, retries, 0)');
-      await sql.unsafe('CREATE INDEX IF NOT EXISTS idx_project_tasks_project_status ON project_tasks(project_ref, status)');
-      await sql.unsafe('CREATE INDEX IF NOT EXISTS idx_project_tasks_next_run ON project_tasks(next_run_at)');
-      await sql.unsafe(`
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_project_tasks_project_idempotency
-        ON project_tasks(project_ref, idempotency_key)
-        WHERE idempotency_key IS NOT NULL
-      `);
-      await sql.unsafe(`
-        CREATE TABLE IF NOT EXISTS project_task_attempts (
-          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-          task_id UUID NOT NULL REFERENCES project_tasks(id) ON DELETE CASCADE,
-          project_ref VARCHAR(20) NOT NULL REFERENCES projects(ref) ON DELETE CASCADE,
-          attempt_no INTEGER NOT NULL,
-          status VARCHAR(20) NOT NULL DEFAULT 'running',
-          started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-          completed_at TIMESTAMPTZ,
-          duration_ms INTEGER,
-          error TEXT,
-          response_status INTEGER,
-          logs JSONB DEFAULT '[]'::jsonb,
-          created_at TIMESTAMPTZ DEFAULT NOW(),
-          updated_at TIMESTAMPTZ DEFAULT NOW(),
-          UNIQUE(task_id, attempt_no)
-        )
-      `);
-      await sql.unsafe("ALTER TABLE project_task_attempts ADD COLUMN IF NOT EXISTS logs JSONB DEFAULT '[]'::jsonb");
-      await sql.unsafe("CREATE INDEX IF NOT EXISTS idx_project_task_attempts_task ON project_task_attempts(task_id, attempt_no DESC)");
-      await sql.unsafe("CREATE INDEX IF NOT EXISTS idx_project_task_attempts_project ON project_task_attempts(project_ref, created_at DESC)");
-      // Fix project_tasks FK to CASCADE (original DDL may have been created without it)
-      try {
-        await sql.unsafe(`
+    const migrationStatements: Array<{ statement: string; description: string; swallowError?: boolean }> = [
+      { statement: 'ALTER TABLE system_tus_uploads ADD COLUMN IF NOT EXISTS auth_token TEXT', description: "system_tus_uploads.auth_token" },
+      { statement: 'ALTER TABLE system_signed_uploads ADD COLUMN IF NOT EXISTS auth_token TEXT', description: "system_signed_uploads.auth_token" },
+      { statement: 'ALTER TABLE project_secrets ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()', description: "project_secrets.updated_at" },
+      { statement: 'ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS function_slug VARCHAR(255)', description: "project_tasks.function_slug" },
+      { statement: 'ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS function_version VARCHAR(128)', description: "project_tasks.function_version" },
+      { statement: 'ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS result JSONB', description: "project_tasks.result" },
+      { statement: 'ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS attempt INTEGER DEFAULT 0', description: "project_tasks.attempt" },
+      { statement: 'ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS max_attempts INTEGER DEFAULT 3', description: "project_tasks.max_attempts" },
+      { statement: 'ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS next_run_at TIMESTAMPTZ DEFAULT NOW()', description: "project_tasks.next_run_at" },
+      { statement: 'ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS lease_until TIMESTAMPTZ', description: "project_tasks.lease_until" },
+      { statement: 'ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ', description: "project_tasks.started_at" },
+      { statement: 'ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ', description: "project_tasks.completed_at" },
+      { statement: 'ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS timeout_sec INTEGER', description: "project_tasks.timeout_sec" },
+      { statement: 'ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS idempotency_key VARCHAR(255)', description: "project_tasks.idempotency_key" },
+      { statement: 'ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS trace_id VARCHAR(255)', description: "project_tasks.trace_id" },
+      { statement: 'ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS cancel_requested_at TIMESTAMPTZ', description: "project_tasks.cancel_requested_at" },
+      { statement: 'ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS cancellation_reason TEXT', description: "project_tasks.cancellation_reason" },
+      { statement: 'ALTER TABLE project_tasks ALTER COLUMN next_run_at SET DEFAULT NOW()', description: "project_tasks.next_run_at default", swallowError: true },
+      { statement: 'UPDATE project_tasks SET next_run_at = COALESCE(next_run_at, created_at, NOW())', description: "project_tasks.next_run_at backfill" },
+      { statement: 'UPDATE project_tasks SET max_attempts = COALESCE(max_attempts, 3)', description: "project_tasks.max_attempts backfill" },
+      { statement: 'UPDATE project_tasks SET attempt = COALESCE(attempt, retries, 0)', description: "project_tasks.attempt backfill" },
+      { statement: 'CREATE INDEX IF NOT EXISTS idx_project_tasks_project_status ON project_tasks(project_ref, status)', description: "idx_project_tasks_project_status" },
+      { statement: 'CREATE INDEX IF NOT EXISTS idx_project_tasks_next_run ON project_tasks(next_run_at)', description: "idx_project_tasks_next_run" },
+      { statement: 'CREATE INDEX IF NOT EXISTS idx_project_tasks_cancel_requested ON project_tasks(cancel_requested_at) WHERE cancel_requested_at IS NOT NULL', description: "idx_project_tasks_cancel_requested" },
+      {
+        statement: `
+          CREATE UNIQUE INDEX IF NOT EXISTS idx_project_tasks_project_idempotency
+          ON project_tasks(project_ref, idempotency_key)
+          WHERE idempotency_key IS NOT NULL
+        `,
+        description: "idx_project_tasks_project_idempotency",
+      },
+      {
+        statement: `
+          CREATE TABLE IF NOT EXISTS project_task_attempts (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            task_id UUID NOT NULL REFERENCES project_tasks(id) ON DELETE CASCADE,
+            project_ref VARCHAR(20) NOT NULL REFERENCES projects(ref) ON DELETE CASCADE,
+            attempt_no INTEGER NOT NULL,
+            status VARCHAR(20) NOT NULL DEFAULT 'running',
+            started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            completed_at TIMESTAMPTZ,
+            duration_ms INTEGER,
+            error TEXT,
+            response_status INTEGER,
+            logs JSONB DEFAULT '[]'::jsonb,
+            created_at TIMESTAMPTZ DEFAULT NOW(),
+            updated_at TIMESTAMPTZ DEFAULT NOW(),
+            UNIQUE(task_id, attempt_no)
+          )
+        `,
+        description: "project_task_attempts table",
+      },
+      { statement: "ALTER TABLE project_task_attempts ADD COLUMN IF NOT EXISTS logs JSONB DEFAULT '[]'::jsonb", description: "project_task_attempts.logs" },
+      { statement: "CREATE INDEX IF NOT EXISTS idx_project_task_attempts_task ON project_task_attempts(task_id, attempt_no DESC)", description: "idx_project_task_attempts_task" },
+      { statement: "CREATE INDEX IF NOT EXISTS idx_project_task_attempts_project ON project_task_attempts(project_ref, created_at DESC)", description: "idx_project_task_attempts_project" },
+      {
+        statement: `
           ALTER TABLE project_tasks
             DROP CONSTRAINT IF EXISTS project_tasks_project_ref_fkey,
             ADD CONSTRAINT project_tasks_project_ref_fkey
               FOREIGN KEY (project_ref) REFERENCES projects(ref) ON DELETE CASCADE
-        `);
-      } catch { /* constraint already correct */ }
-      logger.info("Schema migrations applied.");
-    } catch (e: any) {
-      logger.error("Failed to apply migrations: " + e.message);
+        `,
+        description: "project_tasks FK cascade",
+        swallowError: true,
+      },
+    ];
+
+    for (const migration of migrationStatements) {
+      await runMigrationStatement(migration.statement, {
+        swallowError: migration.swallowError,
+        description: migration.description,
+      });
     }
+    logger.info("Schema migrations applied.");
 
     // Always apply trigger (idempotent: CREATE OR REPLACE + DROP IF EXISTS)
     const notifyTriggerDDL = `

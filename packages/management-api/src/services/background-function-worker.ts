@@ -13,10 +13,14 @@ interface InvocationEnvelope {
   query?: string;
   headers?: Record<string, string>;
   body?: string | null;
+  body_encoding?: string;
   auth?: {
+    kind?: "jwt" | "apikey" | "none";
     authorization?: string | null;
     apikey?: string | null;
-    headers?: Record<string, string>;
+    invoker_user_id?: string | null;
+    invoker_role?: string | null;
+    apikey_kind?: string | null;
   };
 }
 
@@ -52,10 +56,10 @@ async function importDispatcher() {
 
 async function requestRuntimeCancellation(taskId: string): Promise<boolean> {
   try {
-    const response = await fetch(`http://${config.edgeRuntimeInternal}/internal/background/cancel/${taskId}`, {
+    const response = await fetch(`http://${config.edgeRuntimeBackgroundInternal}/internal/background/cancel/${taskId}`, {
       method: "POST",
       headers: {
-        authorization: `Bearer ${config.masterToken}`,
+        "x-supacloud-internal-auth": `Bearer ${config.masterToken}`,
       },
       signal: AbortSignal.timeout(5000),
     });
@@ -70,23 +74,33 @@ async function requestRuntimeCancellation(taskId: string): Promise<boolean> {
 function buildInvocationRequest(task: ProjectTask): Request {
   const payload = (task.payload || {}) as InvocationEnvelope;
   const headers = new Headers(payload.headers || {});
-  const authHeaders = payload.auth?.headers || {};
-
-  for (const [key, value] of Object.entries(authHeaders)) {
-    if (typeof value === "string" && value) headers.set(key, value);
-  }
-  if (payload.auth?.authorization) headers.set("authorization", payload.auth.authorization);
-  if (payload.auth?.apikey) headers.set("apikey", payload.auth.apikey);
 
   headers.set("x-project-ref", task.project_ref);
   headers.set("x-supacloud-task-id", task.id);
   if (task.trace_id) headers.set("x-supacloud-trace-id", task.trace_id);
   headers.set("x-supacloud-background", "true");
   headers.set("x-supacloud-attempt", String(task.attempt || 1));
-  headers.set("authorization", `Bearer ${config.masterToken}`);
+  headers.set("x-supacloud-function-version", task.function_version || "1");
+  headers.set("x-supacloud-auth-kind", payload.auth?.kind || "none");
+  if (payload.auth?.invoker_user_id) {
+    headers.set("x-supacloud-invoker-user-id", payload.auth.invoker_user_id);
+  }
+  if (payload.auth?.invoker_role) {
+    headers.set("x-supacloud-invoker-role", payload.auth.invoker_role);
+  }
+  if (payload.auth?.apikey_kind) {
+    headers.set("x-supacloud-apikey-kind", payload.auth.apikey_kind);
+  }
+  if (payload.auth?.authorization) {
+    headers.set("x-supacloud-auth-authorization", payload.auth.authorization);
+  }
+  if (payload.auth?.apikey) {
+    headers.set("x-supacloud-auth-apikey", payload.auth.apikey);
+  }
+  headers.set("x-supacloud-internal-auth", `Bearer ${config.masterToken}`);
 
   const url = new URL(
-    `http://${config.edgeRuntimeInternal}/internal/background/${task.project_ref}/${task.function_slug}${payload.path || ""}${payload.query || ""}`,
+    `http://${config.edgeRuntimeBackgroundInternal}/internal/background/${task.project_ref}/${task.function_slug}${payload.path || ""}${payload.query || ""}`,
   );
 
   const init: RequestInit = {
@@ -132,7 +146,6 @@ export class BackgroundFunctionWorker {
       while (this.isRunning) {
         const task = await taskRepository.claimNextTask({
           workerId: WORKER_ID,
-          concurrencyByProject: 20,
           allowedTaskTypes: [TaskType.EDGE_FUNCTION],
           leaseSeconds: 900,
         });
@@ -142,18 +155,6 @@ export class BackgroundFunctionWorker {
         if (!project || project.status !== "active") {
           await taskRepository.cancelTask(task.id, !project ? "Project not found" : `Project is ${project.status}`);
           continue;
-        }
-
-        const settings = await projectService.getBackgroundTaskSettings(task.project_ref);
-        const concurrency = settings?.concurrency || DEFAULT_CONCURRENCY_PER_PROJECT;
-        const activeCount = await taskRepository.countActiveTasksForProject(task.project_ref, [TaskType.EDGE_FUNCTION]);
-        if (activeCount > concurrency) {
-          await taskRepository.releaseTask(
-            task.id,
-            new Date(Date.now() + 2_000),
-            `Deferred: concurrency limit ${concurrency} reached`,
-          );
-          break;
         }
 
         await this.execute(task);
@@ -182,7 +183,17 @@ export class BackgroundFunctionWorker {
     }
 
     const leaseSeconds = computeLeaseSeconds(task.timeout_sec);
-    await taskRepository.extendLease(task.id, leaseSeconds);
+    const lease = await taskRepository.extendLease(task.id, leaseSeconds);
+    if (!lease) {
+      broadcastTaskUpdate({
+        taskId: task.id,
+        projectRef: task.project_ref,
+        taskType: task.task_type,
+        status: TaskStatus.CANCELLED,
+        error: task.cancellation_reason || "Cancelled before execution",
+      });
+      return;
+    }
     await taskRepository.markTaskRunning(task.id);
     await taskRepository.startTaskAttempt(task);
     broadcastTaskUpdate({
@@ -225,18 +236,18 @@ export class BackgroundFunctionWorker {
         this.cancelledTasks.delete(task.id);
         await taskRepository.completeTaskAttempt(task.id, task.attempt || 1, {
           status: "cancelled",
-          error: "Cancelled by user",
+          error: task.cancellation_reason || "Cancelled by user",
           responseStatus: response.status,
           durationMs: Date.now() - startedAt,
           logs,
         });
-        await taskRepository.cancelTask(task.id, "Cancelled by user");
+        await taskRepository.cancelTask(task.id, task.cancellation_reason || "Cancelled by user");
         broadcastTaskUpdate({
           taskId: task.id,
           projectRef: task.project_ref,
           taskType: task.task_type,
           status: TaskStatus.CANCELLED,
-          error: "Cancelled by user",
+          error: task.cancellation_reason || "Cancelled by user",
         });
         return;
       }
@@ -314,7 +325,17 @@ export class BackgroundFunctionWorker {
   }
 
   async cancel(taskId: string): Promise<boolean> {
+    const task = await taskRepository.getTaskById(taskId);
+    if (!task) return false;
+
+    await taskRepository.requestTaskCancellation(taskId, "Cancelled by user");
     this.cancelledTasks.add(taskId);
+
+    if (task.status === TaskStatus.PENDING || task.status === TaskStatus.RETRY_SCHEDULED) {
+      await taskRepository.cancelTask(taskId, "Cancelled by user");
+      return true;
+    }
+
     const cancelled = await requestRuntimeCancellation(taskId);
     if (!cancelled) {
       this.cancelledTasks.delete(taskId);
