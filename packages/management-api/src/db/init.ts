@@ -216,34 +216,34 @@ export async function initDatabase() {
 
     // Always apply migrations to ensure schema is up-to-date
     try {
-      await sql`ALTER TABLE system_tus_uploads ADD COLUMN IF NOT EXISTS auth_token TEXT`;
-      await sql`ALTER TABLE system_signed_uploads ADD COLUMN IF NOT EXISTS auth_token TEXT`;
+      await sql.unsafe('ALTER TABLE system_tus_uploads ADD COLUMN IF NOT EXISTS auth_token TEXT');
+      await sql.unsafe('ALTER TABLE system_signed_uploads ADD COLUMN IF NOT EXISTS auth_token TEXT');
       // Add updated_at to project_secrets if not present (migration for existing deployments)
-      await sql`ALTER TABLE project_secrets ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()`;
-      await sql`ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS function_slug VARCHAR(255)`;
-      await sql`ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS function_version VARCHAR(128)`;
-      await sql`ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS result JSONB`;
-      await sql`ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS attempt INTEGER DEFAULT 0`;
-      await sql`ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS max_attempts INTEGER DEFAULT 3`;
-      await sql`ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS next_run_at TIMESTAMPTZ DEFAULT NOW()`;
-      await sql`ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS lease_until TIMESTAMPTZ`;
-      await sql`ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ`;
-      await sql`ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ`;
-      await sql`ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS timeout_sec INTEGER`;
-      await sql`ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS idempotency_key VARCHAR(255)`;
-      await sql`ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS trace_id VARCHAR(255)`;
-      await sql`ALTER TABLE project_tasks ALTER COLUMN next_run_at SET DEFAULT NOW()`;
-      await sql`UPDATE project_tasks SET next_run_at = COALESCE(next_run_at, created_at, NOW())`;
-      await sql`UPDATE project_tasks SET max_attempts = COALESCE(max_attempts, 3)`;
-      await sql`UPDATE project_tasks SET attempt = COALESCE(attempt, retries, 0)`;
-      await sql`CREATE INDEX IF NOT EXISTS idx_project_tasks_project_status ON project_tasks(project_ref, status)`;
-      await sql`CREATE INDEX IF NOT EXISTS idx_project_tasks_next_run ON project_tasks(next_run_at)`;
-      await sql`
+      await sql.unsafe('ALTER TABLE project_secrets ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()');
+      await sql.unsafe('ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS function_slug VARCHAR(255)');
+      await sql.unsafe('ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS function_version VARCHAR(128)');
+      await sql.unsafe('ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS result JSONB');
+      await sql.unsafe('ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS attempt INTEGER DEFAULT 0');
+      await sql.unsafe('ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS max_attempts INTEGER DEFAULT 3');
+      await sql.unsafe('ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS next_run_at TIMESTAMPTZ DEFAULT NOW()');
+      await sql.unsafe('ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS lease_until TIMESTAMPTZ');
+      await sql.unsafe('ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ');
+      await sql.unsafe('ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ');
+      await sql.unsafe('ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS timeout_sec INTEGER');
+      await sql.unsafe('ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS idempotency_key VARCHAR(255)');
+      await sql.unsafe('ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS trace_id VARCHAR(255)');
+      await sql.unsafe('ALTER TABLE project_tasks ALTER COLUMN next_run_at SET DEFAULT NOW()');
+      await sql.unsafe('UPDATE project_tasks SET next_run_at = COALESCE(next_run_at, created_at, NOW())');
+      await sql.unsafe('UPDATE project_tasks SET max_attempts = COALESCE(max_attempts, 3)');
+      await sql.unsafe('UPDATE project_tasks SET attempt = COALESCE(attempt, retries, 0)');
+      await sql.unsafe('CREATE INDEX IF NOT EXISTS idx_project_tasks_project_status ON project_tasks(project_ref, status)');
+      await sql.unsafe('CREATE INDEX IF NOT EXISTS idx_project_tasks_next_run ON project_tasks(next_run_at)');
+      await sql.unsafe(`
         CREATE UNIQUE INDEX IF NOT EXISTS idx_project_tasks_project_idempotency
         ON project_tasks(project_ref, idempotency_key)
         WHERE idempotency_key IS NOT NULL
-      `;
-      await sql`
+      `);
+      await sql.unsafe(`
         CREATE TABLE IF NOT EXISTS project_task_attempts (
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
           task_id UUID NOT NULL REFERENCES project_tasks(id) ON DELETE CASCADE,
@@ -260,18 +260,18 @@ export async function initDatabase() {
           updated_at TIMESTAMPTZ DEFAULT NOW(),
           UNIQUE(task_id, attempt_no)
         )
-      `;
-      await sql`ALTER TABLE project_task_attempts ADD COLUMN IF NOT EXISTS logs JSONB DEFAULT '[]'::jsonb`;
-      await sql`CREATE INDEX IF NOT EXISTS idx_project_task_attempts_task ON project_task_attempts(task_id, attempt_no DESC)`;
-      await sql`CREATE INDEX IF NOT EXISTS idx_project_task_attempts_project ON project_task_attempts(project_ref, created_at DESC)`;
+      `);
+      await sql.unsafe("ALTER TABLE project_task_attempts ADD COLUMN IF NOT EXISTS logs JSONB DEFAULT '[]'::jsonb");
+      await sql.unsafe("CREATE INDEX IF NOT EXISTS idx_project_task_attempts_task ON project_task_attempts(task_id, attempt_no DESC)");
+      await sql.unsafe("CREATE INDEX IF NOT EXISTS idx_project_task_attempts_project ON project_task_attempts(project_ref, created_at DESC)");
       // Fix project_tasks FK to CASCADE (original DDL may have been created without it)
       try {
-        await sql`
+        await sql.unsafe(`
           ALTER TABLE project_tasks
             DROP CONSTRAINT IF EXISTS project_tasks_project_ref_fkey,
             ADD CONSTRAINT project_tasks_project_ref_fkey
               FOREIGN KEY (project_ref) REFERENCES projects(ref) ON DELETE CASCADE
-        `;
+        `);
       } catch { /* constraint already correct */ }
       logger.info("Schema migrations applied.");
     } catch (e: any) {
