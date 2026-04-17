@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterAll, beforeEach, describe, expect, mock, test } from "bun:test";
 import { Elysia } from "elysia";
 import { TaskStatus } from "../../src/db";
 
@@ -217,5 +217,9 @@ describe("taskRoutes", () => {
     expect(payload.latest_logs).toEqual([
       { timestamp: "2026-04-17T12:00:00.000Z", stream: "stderr", level: "error", message: "boom" },
     ]);
+  });
+
+  afterAll(() => {
+    mock.restore();
   });
 });

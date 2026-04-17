@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterAll, beforeEach, describe, expect, mock, test } from "bun:test";
 import type { ProjectTask } from "../../src/db";
 import { TaskStatus, TaskType } from "../../src/db";
 
@@ -309,4 +309,8 @@ describe("BackgroundFunctionWorker pure helpers", () => {
       expect(lease).toBe(330);
     });
   });
+});
+
+afterAll(() => {
+  mock.restore();
 });
