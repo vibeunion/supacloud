@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.0](https://github.com/zuohuadong/supacloud/compare/mcp-server-v0.9.0...mcp-server-v0.10.0) (2026-04-17)
+
+
+### 🚀 Features
+
+* updates and fixes based on recent local changes ([449c710](https://github.com/zuohuadong/supacloud/commit/449c71089721658d25737ac7df1c196b3bc9bb1d))
+
 ## [0.9.0](https://github.com/zuohuadong/supacloud/compare/mcp-server-v0.8.0...mcp-server-v0.9.0) (2026-04-16)
 
 
