@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   buildCurlExample,
+  buildFunctionTaskConsolePath,
   buildFunctionTasksPath,
   buildInvokeAsyncExample,
   buildJsInvokeExample,
@@ -31,6 +32,15 @@ describe("function snippets", () => {
   test("buildFunctionTasksPath scopes by function_slug and limit", () => {
     expect(buildFunctionTasksPath("proj_123", "hello/world", 5)).toBe(
       "/api/query?path=/v1/projects/proj_123/tasks?function_slug=hello%2Fworld&limit=5",
+    );
+  });
+
+  test("buildFunctionTaskConsolePath deep-links into the tasks console", () => {
+    expect(buildFunctionTaskConsolePath("proj_123", "hello/world")).toBe(
+      "/project/proj_123/tasks?function_slug=hello%2Fworld",
+    );
+    expect(buildFunctionTaskConsolePath("proj_123", "hello/world", "tsk_1")).toBe(
+      "/project/proj_123/tasks?function_slug=hello%2Fworld&task_id=tsk_1",
     );
   });
 
