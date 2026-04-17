@@ -17,28 +17,6 @@ process.on("unhandledRejection", (reason: unknown) => {
 import { swagger } from "@elysiajs/swagger";
 import { cors } from "@elysiajs/cors";
 
-try {
-  const envFile = Bun.file("/opt/supacloud/config.env");
-  if (envFile.size > 0) {
-    const text = await envFile.text();
-    for (const line of text.split("\n")) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith("#") || !trimmed.includes("="))
-        continue;
-      const eqIdx = trimmed.indexOf("=");
-      const key = trimmed.slice(0, eqIdx).trim();
-      // Strip surrounding quotes (both single and double) from the value
-      const rawVal = trimmed.slice(eqIdx + 1).trim();
-      const val = rawVal.replace(/^["']|["']$/g, "");
-      if (key && /^[A-Z0-9_]+$/.test(key) && !process.env[key]) {
-        process.env[key] = val;
-      }
-    }
-  }
-} catch (e: unknown) {
-  // Ignore - config.env may not exist in dev mode
-}
-
 import { config } from "./config";
 import { checkAuth } from "./middleware/auth";
 import { closeDb, sql } from "./db";
@@ -332,41 +310,35 @@ const app = new Elysia({ strictPath: false })
 
   // Error handling (with DB graceful degradation)
   .onError(({ code, error, set }) => {
+    const { isAppError, toAppError } = require("./utils/errors") as typeof import("./utils/errors");
+
+    if (isAppError(error)) {
+      set.status = error.statusCode;
+      return error.toJSON();
+    }
+
     logger.error(`Error [${code}]:`, error);
 
     if (code === "VALIDATION") {
       set.status = 400;
       return {
         message: "Validation failed",
-        code: "400",
+        code: "VALIDATION_ERROR",
         details: error.message,
       };
     }
 
     if (code === "NOT_FOUND") {
       set.status = 404;
-      return { message: "Not found", code: "404" };
+      return { message: "Not found", code: "NOT_FOUND" };
     }
 
-    // DB connection errors → 503 Service Unavailable (not 500)
-    const errMsg = error instanceof Error ? error.message : String(error);
-    if (
-      errMsg.includes("ECONNREFUSED") ||
-      errMsg.includes("Connection terminated") ||
-      errMsg.includes("connection refused") ||
-      errMsg.includes("exhausted all")
-    ) {
-      set.status = 503;
+    const appError = toAppError(error);
+    set.status = appError.statusCode;
+    if (appError.statusCode === 503) {
       set.headers["Retry-After"] = "5";
-      return {
-        message: "Service temporarily unavailable",
-        code: "503",
-        retryAfter: 5,
-      };
     }
-
-    set.status = 500;
-    return { message: "Internal server error", code: "500" };
+    return appError.toJSON();
   });
 
 /**

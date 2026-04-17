@@ -8,8 +8,19 @@ export function clearCapturedServeHandler() {
   capturedServeHandler = null;
 }
 
+const ALLOWED_COMMANDS = new Set([
+  "echo", "printf", "date", "whoami", "env", "printenv",
+  "wc", "sort", "uniq", "head", "tail", "cut", "tr", "paste",
+  "base64", "basename", "dirname", "seq", "tee", "test",
+  "true", "false", "yes", "sleep",
+]);
+
+function isCommandAllowed(cmd: string): boolean {
+  const base = cmd.split("/").pop() || cmd;
+  return ALLOWED_COMMANDS.has(base);
+}
+
 (globalThis as Record<string, unknown>).Deno = {
-  // Environment variables
   env: {
     get: (k: string) => process.env[k],
     set: (k: string, v: string) => {
@@ -22,7 +33,6 @@ export function clearCapturedServeHandler() {
     toObject: () => ({ ...process.env }),
   },
 
-  // Filesystem
   readTextFile: (p: string) => Bun.file(p).text(),
   readFile: (p: string) =>
     Bun.file(p)
@@ -53,10 +63,7 @@ export function clearCapturedServeHandler() {
   mkdir: (p: string, opts?: { recursive?: boolean }) => mkdir(p, opts),
   remove: (p: string, opts?: { recursive?: boolean }) => rm(p, opts),
 
-  // Sync filesystem
   readTextFileSync: (p: string) => {
-    const buf = Bun.file(p);
-    // Bun.file is lazy, use Node sync for actual sync reads
     const fs = require('fs');
     return fs.readFileSync(p, 'utf-8');
   },
@@ -107,7 +114,6 @@ export function clearCapturedServeHandler() {
     fs.mkdirSync(p, opts);
   },
 
-  // Process / Runtime
   exit: (c?: number) => process.exit(c),
   cwd: () => process.cwd(),
   args: process.argv.slice(2),
@@ -124,7 +130,6 @@ export function clearCapturedServeHandler() {
   hostname: () => process.env.HOSTNAME || "edge-runtime",
   version: { deno: "1.40.0-compat-bun", v8: "n/a", typescript: "5.4" },
 
-  // Network (placeholders — functions should not use these)
   listen: () => {
     throw new Error("Deno.listen() not supported, use Elysia");
   },
@@ -135,13 +140,19 @@ export function clearCapturedServeHandler() {
     private cmd: string;
     private args: string[];
     private opts: any;
-    
+
     constructor(cmd: string, opts?: { args?: string[]; cwd?: string; env?: Record<string, string>; stdin?: 'inherit' | 'piped' | 'null'; stdout?: 'inherit' | 'piped' | 'null'; stderr?: 'inherit' | 'piped' | 'null' }) {
+      if (!isCommandAllowed(cmd)) {
+        throw new Error(
+          `Deno.Command("${cmd}") is blocked for security. Allowed commands: ${[...ALLOWED_COMMANDS].join(", ")}. ` +
+          `Edge Functions run in a sandboxed environment and cannot execute arbitrary system commands.`
+        );
+      }
       this.cmd = cmd;
       this.args = opts?.args || [];
       this.opts = opts || {};
     }
-    
+
     async output() {
       const proc = Bun.spawn([this.cmd, ...this.args], {
         cwd: this.opts.cwd,
@@ -154,7 +165,7 @@ export function clearCapturedServeHandler() {
       const stderr = proc.stderr ? await new Response(proc.stderr).arrayBuffer().then(b => new Uint8Array(b)) : new Uint8Array(0);
       return { stdout, stderr, code: exitCode, success: exitCode === 0 };
     }
-    
+
     outputSync() {
       const proc = Bun.spawnSync([this.cmd, ...this.args], {
         cwd: this.opts.cwd,
@@ -169,7 +180,7 @@ export function clearCapturedServeHandler() {
         success: proc.exitCode === 0,
       };
     }
-    
+
     spawn() {
       return Bun.spawn([this.cmd, ...this.args], {
         cwd: this.opts.cwd,
@@ -182,13 +193,10 @@ export function clearCapturedServeHandler() {
   },
   serve: (handlerOrOpts: any, maybeHandler?: any) => {
     if (typeof handlerOrOpts === "function") {
-      // Form: Deno.serve(handler)
       capturedServeHandler = handlerOrOpts;
     } else if (typeof maybeHandler === "function") {
-      // Form: Deno.serve(options, handler)
       capturedServeHandler = maybeHandler;
     } else if (handlerOrOpts && typeof handlerOrOpts === "object") {
-      // Form: Deno.serve({ handler: fn }) or Deno.serve({ fetch: fn })
       capturedServeHandler =
         handlerOrOpts.handler || handlerOrOpts.fetch || null;
     }
@@ -202,175 +210,102 @@ export function clearCapturedServeHandler() {
     return mockServer;
   },
 
-  // Utility
   inspect: (v: unknown) => JSON.stringify(v, null, 2),
 
-  // WebSocket upgrade support
-  upgradeWebSocket: (req: Request, opts?: { protocol?: string | string[] }) => {
-    // In Bun, WebSocket upgrades are handled by Bun.serve()'s websocket option.
-    // For edge functions that call Deno.upgradeWebSocket(), we create a 
-    // WebSocket pair using Bun's native WebSocket.
-    // NOTE: This only works when the edge runtime server is configured with
-    // Bun.serve({ websocket: { ... } }). See server.ts.
-    
-    const protocols = opts?.protocol 
-      ? (Array.isArray(opts.protocol) ? opts.protocol : [opts.protocol])
-      : [];
-    
-    // Create a WebSocket pair using MessageChannel-like approach
-    // Bun provides WebSocket natively, so we create a client socket
-    // and return the response/socket pair as Deno would
-    
-    // For the response, we need to return a 101 Switching Protocols response
-    // The actual upgrade is handled by the Bun.serve websocket handler
-    
-    const headers = new Headers();
-    headers.set('Upgrade', 'websocket');
-    headers.set('Connection', 'Upgrade');
-    if (protocols.length > 0) {
-      headers.set('Sec-WebSocket-Protocol', protocols.join(', '));
-    }
-    
-    // Create a mock WebSocket that bridges to the real one
-    // The server.ts Bun.serve handler will intercept the upgrade
-    const ws = new WebSocket('ws://edge-runtime-internal/upgrade');
-    
-    // Return the standard Deno.upgradeWebSocket result shape
-    return {
-      response: new Response(null, { status: 101, headers }),
-      socket: ws,
-    };
+  upgradeWebSocket: (_req: Request, _opts?: { protocol?: string | string[] }) => {
+    throw new Error(
+      "Deno.upgradeWebSocket() is not supported in Bun Edge Runtime. " +
+      "Use the standard WebSocket API or return a Response with status 101 from your function handler."
+    );
   },
 };
 
-// ── Additional Deno namespace stubs ────────────────────────────────────
-// These are used by popular Deno libraries but have no direct Bun equivalent.
-// Stubs prevent ReferenceErrors while providing meaningful error messages.
-
-// Deno.errors — standard error classes
 (globalThis as any).Deno.errors = {
   NotFound: class NotFound extends Error {
-    constructor(msg?: string) {
-      super(msg);
-      this.name = "NotFound";
-    }
+    constructor(msg?: string) { super(msg); this.name = "NotFound"; }
   },
   PermissionDenied: class PermissionDenied extends Error {
-    constructor(msg?: string) {
-      super(msg);
-      this.name = "PermissionDenied";
-    }
+    constructor(msg?: string) { super(msg); this.name = "PermissionDenied"; }
   },
   ConnectionRefused: class ConnectionRefused extends Error {
-    constructor(msg?: string) {
-      super(msg);
-      this.name = "ConnectionRefused";
-    }
+    constructor(msg?: string) { super(msg); this.name = "ConnectionRefused"; }
   },
   ConnectionReset: class ConnectionReset extends Error {
-    constructor(msg?: string) {
-      super(msg);
-      this.name = "ConnectionReset";
-    }
+    constructor(msg?: string) { super(msg); this.name = "ConnectionReset"; }
   },
   ConnectionAborted: class ConnectionAborted extends Error {
-    constructor(msg?: string) {
-      super(msg);
-      this.name = "ConnectionAborted";
-    }
+    constructor(msg?: string) { super(msg); this.name = "ConnectionAborted"; }
   },
   NotConnected: class NotConnected extends Error {
-    constructor(msg?: string) {
-      super(msg);
-      this.name = "NotConnected";
-    }
+    constructor(msg?: string) { super(msg); this.name = "NotConnected"; }
   },
   AddrInUse: class AddrInUse extends Error {
-    constructor(msg?: string) {
-      super(msg);
-      this.name = "AddrInUse";
-    }
+    constructor(msg?: string) { super(msg); this.name = "AddrInUse"; }
   },
   AddrNotAvailable: class AddrNotAvailable extends Error {
-    constructor(msg?: string) {
-      super(msg);
-      this.name = "AddrNotAvailable";
-    }
+    constructor(msg?: string) { super(msg); this.name = "AddrNotAvailable"; }
   },
   BrokenPipe: class BrokenPipe extends Error {
-    constructor(msg?: string) {
-      super(msg);
-      this.name = "BrokenPipe";
-    }
+    constructor(msg?: string) { super(msg); this.name = "BrokenPipe"; }
   },
   AlreadyExists: class AlreadyExists extends Error {
-    constructor(msg?: string) {
-      super(msg);
-      this.name = "AlreadyExists";
-    }
+    constructor(msg?: string) { super(msg); this.name = "AlreadyExists"; }
   },
   InvalidData: class InvalidData extends Error {
-    constructor(msg?: string) {
-      super(msg);
-      this.name = "InvalidData";
-    }
+    constructor(msg?: string) { super(msg); this.name = "InvalidData"; }
   },
   TimedOut: class TimedOut extends Error {
-    constructor(msg?: string) {
-      super(msg);
-      this.name = "TimedOut";
-    }
+    constructor(msg?: string) { super(msg); this.name = "TimedOut"; }
   },
   Interrupted: class Interrupted extends Error {
-    constructor(msg?: string) {
-      super(msg);
-      this.name = "Interrupted";
-    }
+    constructor(msg?: string) { super(msg); this.name = "Interrupted"; }
   },
   WriteZero: class WriteZero extends Error {
-    constructor(msg?: string) {
-      super(msg);
-      this.name = "WriteZero";
-    }
+    constructor(msg?: string) { super(msg); this.name = "WriteZero"; }
   },
   UnexpectedEof: class UnexpectedEof extends Error {
-    constructor(msg?: string) {
-      super(msg);
-      this.name = "UnexpectedEof";
-    }
+    constructor(msg?: string) { super(msg); this.name = "UnexpectedEof"; }
   },
   Http: class Http extends Error {
-    constructor(msg?: string) {
-      super(msg);
-      this.name = "Http";
-    }
+    constructor(msg?: string) { super(msg); this.name = "Http"; }
   },
   Busy: class Busy extends Error {
-    constructor(msg?: string) {
-      super(msg);
-      this.name = "Busy";
-    }
+    constructor(msg?: string) { super(msg); this.name = "Busy"; }
   },
   NotSupported: class NotSupported extends Error {
-    constructor(msg?: string) {
-      super(msg);
-      this.name = "NotSupported";
-    }
+    constructor(msg?: string) { super(msg); this.name = "NotSupported"; }
   },
 };
 
-// Deno.permissions — stub (Bun doesn't have a permissions model)
 (globalThis as any).Deno.permissions = {
-  query: async (_desc: unknown) => ({ state: "granted" as const }),
-  request: async (_desc: unknown) => ({ state: "granted" as const }),
+  query: async (desc: unknown) => {
+    const d = desc as { name: string; path?: string };
+    const restricted = ["write", "net", "run", "env", "sys", "ffi"];
+    if (restricted.includes(d.name)) {
+      return { state: "denied" as const };
+    }
+    return { state: "granted" as const };
+  },
+  request: async (desc: unknown) => {
+    const d = desc as { name: string };
+    const restricted = ["write", "net", "run", "env", "sys", "ffi"];
+    if (restricted.includes(d.name)) {
+      return { state: "denied" as const };
+    }
+    return { state: "granted" as const };
+  },
   revoke: async (_desc: unknown) => ({ state: "denied" as const }),
 };
 
-// Deno.openKv — stub (Bun doesn't have built-in KV; use a simple in-memory Map)
-// This is a minimal implementation for compatibility. For production KV, use an external store.
+const kvStores = new Map<string, Map<string, { value: unknown; versionstamp: string }>>();
+let globalVersionCounter = 0;
+
 (globalThis as any).Deno.openKv = async (_path?: string) => {
-  const store = new Map<string, { value: unknown; versionstamp: string }>();
-  let versionCounter = 0;
+  const storeKey = `__kv_${_path || "__default"}`;
+  if (!kvStores.has(storeKey)) {
+    kvStores.set(storeKey, new Map());
+  }
+  const store = kvStores.get(storeKey)!;
 
   return {
     get: async (key: unknown[]) => {
@@ -382,7 +317,7 @@ export function clearCapturedServeHandler() {
     },
     set: async (key: unknown[], value: unknown) => {
       const k = JSON.stringify(key);
-      const versionstamp = String(++versionCounter).padStart(20, "0");
+      const versionstamp = String(++globalVersionCounter).padStart(20, "0");
       store.set(k, { value, versionstamp });
       return { ok: true, versionstamp };
     },
@@ -390,7 +325,7 @@ export function clearCapturedServeHandler() {
       store.delete(JSON.stringify(key));
     },
     list: async function* ({ prefix }: { prefix: unknown[] }) {
-      const prefixStr = JSON.stringify(prefix).slice(0, -1); // strip closing ]
+      const prefixStr = JSON.stringify(prefix).slice(0, -1);
       for (const [k, v] of store) {
         if (k.startsWith(prefixStr)) {
           yield {
@@ -417,7 +352,7 @@ export function clearCapturedServeHandler() {
           ops.push(() => {
             store.set(JSON.stringify(key), {
               value,
-              versionstamp: String(++versionCounter).padStart(20, "0"),
+              versionstamp: String(++globalVersionCounter).padStart(20, "0"),
             });
           });
           return tx;
@@ -431,7 +366,7 @@ export function clearCapturedServeHandler() {
           for (const op of ops) op();
           return {
             ok: true,
-            versionstamp: String(versionCounter).padStart(20, "0"),
+            versionstamp: String(globalVersionCounter).padStart(20, "0"),
           };
         },
       };
@@ -442,6 +377,4 @@ export function clearCapturedServeHandler() {
   };
 };
 
-
-
-console.log("[Deno Compat] Loaded Deno API compatibility shim");
+console.log("[Deno Compat] Loaded Deno API compatibility shim (sandboxed)");

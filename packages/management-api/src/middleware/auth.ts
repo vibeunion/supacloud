@@ -1,6 +1,16 @@
 import { config } from "../config";
 import { sql as metaSql } from "../db";
 import { verifyMcpToken } from "../mcp/token";
+import { logger } from "../utils/logger";
+
+export interface AuthContext {
+  role: "admin" | "project";
+  ref?: string;
+  tokenType: "master" | "session" | "mcp" | "project_jwt" | "service_role_key";
+}
+
+const jwtCache = new Map<string, { result: AuthContext | null; expiresAt: number }>();
+const JWT_CACHE_TTL = 60_000;
 
 async function verifyProjectJwt(token: string): Promise<{ role: string; ref: string } | null> {
   try {
@@ -41,6 +51,38 @@ async function verifyProjectJwt(token: string): Promise<{ role: string; ref: str
   }
 }
 
+function verifySessionToken(token: string): Promise<boolean> {
+  return (async () => {
+    try {
+      const parts = token.split(".");
+      if (parts.length !== 2) return false;
+
+      const [payloadB64, sigHex] = parts;
+      const payloadRaw = atob(payloadB64);
+      const payload = JSON.parse(payloadRaw);
+
+      if (!payload.exp || payload.exp <= Date.now()) return false;
+
+      const encoder = new TextEncoder();
+      const key = await crypto.subtle.importKey(
+        "raw",
+        encoder.encode(config.masterToken),
+        { name: "HMAC", hash: "SHA-256" },
+        false,
+        ["sign"]
+      );
+      const sig = await crypto.subtle.sign("HMAC", key, encoder.encode(payloadRaw));
+      const expected = Array.from(new Uint8Array(sig)).map(b => b.toString(16).padStart(2, "0")).join("");
+
+      const sigBuf = Buffer.from(sigHex, 'hex');
+      const expBuf = Buffer.from(expected, 'hex');
+      return sigBuf.length === expBuf.length && crypto.timingSafeEqual(sigBuf, expBuf);
+    } catch {
+      return false;
+    }
+  })();
+}
+
 export async function checkAuth(request: Request): Promise<{ status: number; body: { error: string } } | undefined> {
   const authorization = request.headers.get("authorization");
 
@@ -58,46 +100,56 @@ export async function checkAuth(request: Request): Promise<{ status: number; bod
     return undefined;
   }
 
-  try {
-    const parts = token.split(".");
-    if (parts.length === 2) {
-      const [payloadB64, sigHex] = parts;
-      const payload = JSON.parse(atob(payloadB64));
-      if (payload.exp > Date.now()) {
-        const encoder = new TextEncoder();
-        const key = await crypto.subtle.importKey("raw", encoder.encode(config.masterToken), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
-        const sig = await crypto.subtle.sign("HMAC", key, encoder.encode(JSON.stringify(payload)));
-        const expected = Array.from(new Uint8Array(sig)).map(b => b.toString(16).padStart(2, "0")).join("");
-        const sigBuf = Buffer.from(sigHex, 'hex');
-        const expBuf = Buffer.from(expected, 'hex');
-        if (sigBuf.length === expBuf.length && crypto.timingSafeEqual(sigBuf, expBuf)) {
-           return undefined;
-        }
-      }
+  if (token.includes(".") && token.split(".").length === 2) {
+    if (await verifySessionToken(token)) {
+      return undefined;
     }
-  } catch { }
+  }
 
   const mcpPayload = await verifyMcpToken(token);
   let role = mcpPayload?.role;
   let ref = mcpPayload?.ref;
+  let tokenType: AuthContext["tokenType"] = "mcp";
 
   if (!mcpPayload && token.includes(".")) {
-    const [project] = await metaSql`
-      SELECT ref FROM projects
-      WHERE service_role_key = ${token}
-        AND status = 'active'
-      LIMIT 1
-    `;
-    if (project) {
-      role = "project";
-      ref = project.ref as string;
+    const cacheKey = `srk:${token.substring(0, 16)}`;
+    const cached = jwtCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      if (cached.result) return undefined;
+    } else {
+      const [project] = await metaSql`
+        SELECT ref FROM projects
+        WHERE service_role_key = ${token}
+          AND status = 'active'
+        LIMIT 1
+      `;
+      if (project) {
+        jwtCache.set(cacheKey, { result: { role: "project", ref: project.ref as string, tokenType: "service_role_key" }, expiresAt: Date.now() + JWT_CACHE_TTL });
+        role = "project";
+        ref = project.ref as string;
+        tokenType = "service_role_key";
+      }
     }
 
     if (!role) {
-      const jwtResult = await verifyProjectJwt(token);
-      if (jwtResult) {
-        role = jwtResult.role === "service_role" ? "project" : "project";
-        ref = jwtResult.ref;
+      const jwtCacheKey = `jwt:${token.substring(0, 16)}`;
+      const jwtCached = jwtCache.get(jwtCacheKey);
+      if (jwtCached && jwtCached.expiresAt > Date.now()) {
+        if (jwtCached.result) {
+          role = jwtCached.result.role;
+          ref = jwtCached.result.ref;
+          tokenType = "project_jwt";
+        }
+      } else {
+        const jwtResult = await verifyProjectJwt(token);
+        if (jwtResult) {
+          role = jwtResult.role === "service_role" ? "project" : "project";
+          ref = jwtResult.ref;
+          tokenType = "project_jwt";
+          jwtCache.set(jwtCacheKey, { result: { role, ref, tokenType }, expiresAt: Date.now() + JWT_CACHE_TTL });
+        } else {
+          jwtCache.set(jwtCacheKey, { result: null, expiresAt: Date.now() + 30_000 });
+        }
       }
     }
   }
@@ -115,4 +167,8 @@ export async function checkAuth(request: Request): Promise<{ status: number; bod
   }
 
   return { status: 401, body: { error: "Invalid token" } };
+}
+
+export function getAuthContext(request: Request): AuthContext | null {
+  return (request as any).__authContext as AuthContext | null;
 }
