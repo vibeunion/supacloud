@@ -9,7 +9,7 @@ import { logger } from "../utils/logger";
 import { createPgListener, type PgListenerHandle } from "../lib/pg-listen";
 import { config } from "../config";
 import type { ProjectTask } from "../db";
-import { resolveDbName } from "../db";
+import { resolveDbName, TaskStatus, TaskType } from "../db";
 import { broadcastTaskUpdate } from "../routes/ws";
 import { realtimeService } from "./realtime.service";
 
@@ -57,23 +57,42 @@ export class TaskWorker {
         this.isProcessing = true;
 
         try {
-            const task = await taskRepository.claimNextTask();
+            const task = await taskRepository.claimNextTask({
+                workerId: `task-worker-${process.pid}`,
+                concurrencyByProject: 1,
+                allowedTaskTypes: [
+                    TaskType.PROVISION_DB,
+                    TaskType.PROVISION_S3,
+                    TaskType.PROVISION_RUNTIME,
+                    TaskType.PROVISION_REALTIME,
+                    TaskType.PROVISION_ROUTER,
+                    TaskType.PROVISION_GATEWAY,
+                    TaskType.PROVISION_SECRETS,
+                    TaskType.CLEANUP_DB,
+                    TaskType.CLEANUP_S3,
+                    TaskType.CLEANUP_RUNTIME,
+                    TaskType.CLEANUP_REALTIME,
+                    TaskType.CLEANUP_ROUTER,
+                ],
+                leaseSeconds: 600,
+            });
             if (!task) return; // No pending tasks
 
             logger.info(`[TaskWorker] Processing task: ${task.id} (${task.task_type}) for project ${task.project_ref}`);
 
             // Broadcast task start via WebSocket
-            broadcastTaskUpdate({ taskId: task.id, projectRef: task.project_ref, taskType: task.task_type, status: "processing" });
+            await taskRepository.markTaskRunning(task.id);
+            broadcastTaskUpdate({ taskId: task.id, projectRef: task.project_ref, taskType: task.task_type, status: TaskStatus.RUNNING });
 
             const success = await this.executeTask(task);
 
             if (success) {
-                await taskRepository.updateStatus(task.id, "completed");
-                broadcastTaskUpdate({ taskId: task.id, projectRef: task.project_ref, taskType: task.task_type, status: "completed" });
+                await taskRepository.markTaskSucceeded(task.id);
+                broadcastTaskUpdate({ taskId: task.id, projectRef: task.project_ref, taskType: task.task_type, status: TaskStatus.SUCCEEDED });
                 await this.handleTaskCompletion(task);
             } else {
-                await taskRepository.updateStatus(task.id, "failed", "Task execution failed");
-                broadcastTaskUpdate({ taskId: task.id, projectRef: task.project_ref, taskType: task.task_type, status: "failed", error: "Task execution failed" });
+                await taskRepository.markTaskFailed(task.id, "Task execution failed");
+                broadcastTaskUpdate({ taskId: task.id, projectRef: task.project_ref, taskType: task.task_type, status: TaskStatus.FAILED, error: "Task execution failed" });
                 await this.handleTaskFailure(task);
             }
         } catch (err: unknown) {

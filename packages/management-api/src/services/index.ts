@@ -8,3 +8,5 @@ export { frontendService } from "./frontend.service";
 export { deployService } from "./deploy.service";
 export { extensionService } from "./extension.service";
 export { edgeFunctionService } from "./edge-function.service";
+export { backgroundTaskService } from "./background-task.service";
+export { backgroundFunctionWorker } from "./background-function-worker";

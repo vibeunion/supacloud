@@ -496,7 +496,7 @@ install_base_dependencies() {
             dnf config-manager --set-enabled EPOL 2>/dev/null || true
         elif ! rpm -q epel-release &> /dev/null; then
             log_info "Installing EPEL repository..."
-            dnf install -y epel-release
+            dnf install -y epel-release || dnf install -y "https://dl.fedoraproject.org/pub/epel/epel-release-latest-$(grep -Po '(?<=VERSION_ID=\")[0-9]' /etc/os-release).noarch.rpm"
         fi
         
         # Enable PowerTools for RHEL/CentOS 8, CRB for 9, required for many EPEL packages
@@ -838,7 +838,7 @@ install_juicefs() {
             *) log_error "Unsupported architecture: ${ARCH}"; return 1 ;;
         esac
 
-        if ! curl -fsSL --progress-bar "https://gh-proxy.net/${JFS_URL}" -o /tmp/juicefs.tar.gz; then
+        if ! curl -fsSL --progress-bar "https://mirror.ghproxy.com/${JFS_URL}" -o /tmp/juicefs.tar.gz; then
             log_warn "Proxy download failed, trying direct download..."
             curl -fsSL --progress-bar "${JFS_URL}" -o /tmp/juicefs.tar.gz || {
                 log_error "JuiceFS download failed"; return 1
@@ -924,7 +924,7 @@ EOF
 install_docker_compose() {
     log_step "Checking Docker Compose..."
     
-    COMPOSE_VERSION="v5.1.0"
+    COMPOSE_VERSION="v2.29.2"
     
     # If using Podman, always install standalone docker-compose binary
     # (instead of relying on 'podman compose' which might have different behavior)
@@ -951,8 +951,7 @@ EOF
     log_info "Installing standalone docker-compose ${COMPOSE_VERSION}..."
     COMPOSE_URL="https://github.com/docker/compose/releases/download/${COMPOSE_VERSION}/docker-compose-$(uname -s)-$(uname -m)"
     
-    # Prefer gh-proxy.net for faster downloads
-    if curl -fsSL --progress-bar "https://gh-proxy.net/${COMPOSE_URL}" -o /usr/local/bin/docker-compose 2>/dev/null; then
+    if curl -fsSL --progress-bar "https://mirror.ghproxy.com/${COMPOSE_URL}" -o /usr/local/bin/docker-compose 2>/dev/null; then
         log_info "Proxy download successful"
     else
         log_warn "Proxy download failed, trying direct download..."
@@ -1105,12 +1104,12 @@ compile_acme_module() {
     { wget -q "https://mirror.ghproxy.com/https://github.com/nginx/acme/archive/refs/heads/main.tar.gz" -O nginx-acme.tar.gz && \
     tar -xzf nginx-acme.tar.gz && \
     mv nginx-acme-main nginx-acme; } || {
-        log_warn "mirror.ghproxy.com failed, trying gh-proxy.net..."
-        wget -q "https://gh-proxy.net/https://github.com/nginx/acme/archive/refs/heads/main.tar.gz" -O nginx-acme.tar.gz && \
-        tar -xzf nginx-acme.tar.gz && \
-        mv nginx-acme-main nginx-acme
-    } || {
-        log_warn "gh-proxy.net failed, trying jsdelivr CDN..."
+        log_warn "mirror.ghproxy.com 1 failed, trying mirror.ghproxy.com 2..."
+        wget -q "https://mirror.ghproxy.com/https://github.com/nginx/acme/archive/refs/heads/main.tar.gz" -O nginx-acme.tar.gz && \
+        tar -xzf nginx-acme.tar.gz && mv main.tar.gz nginx-acme.tar.gz 2>/dev/null || true
+        # Verify download structure
+        if [[ -f nginx-acme.tar.gz ]] && tar -tzf nginx-acme.tar.gz | grep -q "acme-main"; fi
+        log_warn "mirror.ghproxy.com failed, trying jsdelivr CDN..."
         wget -q "https://cdn.jsdelivr.net/gh/nginx/acme@main.tar.gz" -O nginx-acme.tar.gz && \
         tar -xzf nginx-acme.tar.gz && \
         mv nginx-acme-main nginx-acme || mv nginx-acme nginx-acme 2>/dev/null
@@ -1222,7 +1221,6 @@ EOF
 install_nginx_mainline() { install_kong_native; }
 
 
-}
 
 
 install_pigsty() {
