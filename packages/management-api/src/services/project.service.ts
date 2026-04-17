@@ -107,6 +107,14 @@ export interface FunctionResponse {
   updated_at: string;
 }
 
+export interface BackgroundTaskSettings {
+  concurrency: number;
+  max_attempts: number;
+  max_payload_bytes: number;
+  timeout_sec_default: number;
+  timeout_sec_max: number;
+}
+
 export interface LogEntryResponse {
   id: string;
   timestamp: string;
@@ -116,6 +124,14 @@ export interface LogEntryResponse {
 }
 
 export class ProjectService {
+  private readonly defaultBackgroundTaskSettings: BackgroundTaskSettings = {
+    concurrency: 2,
+    max_attempts: 3,
+    max_payload_bytes: 256 * 1024,
+    timeout_sec_default: 300,
+    timeout_sec_max: 900,
+  };
+
   /** Check if the storage backend (S3/MinIO) is reachable */
   private async checkStorageHealth(): Promise<boolean> {
     try {
@@ -514,6 +530,45 @@ export class ProjectService {
     });
 
     return updated?.config || null;
+  }
+
+  async getBackgroundTaskSettings(ref: string): Promise<BackgroundTaskSettings | null> {
+    const settings = await this.getProjectSettings(ref);
+    if (!settings) return null;
+
+    const raw = (settings.background_tasks || {}) as Record<string, unknown>;
+    const pickNumber = (value: unknown, fallback: number, min: number, max: number) => {
+      const parsed = Number(value);
+      if (!Number.isFinite(parsed)) return fallback;
+      return Math.min(max, Math.max(min, Math.floor(parsed)));
+    };
+
+    return {
+      concurrency: pickNumber(raw.concurrency, this.defaultBackgroundTaskSettings.concurrency, 1, 20),
+      max_attempts: pickNumber(raw.max_attempts, this.defaultBackgroundTaskSettings.max_attempts, 1, 10),
+      max_payload_bytes: pickNumber(raw.max_payload_bytes, this.defaultBackgroundTaskSettings.max_payload_bytes, 1024, 1024 * 1024),
+      timeout_sec_default: pickNumber(raw.timeout_sec_default, this.defaultBackgroundTaskSettings.timeout_sec_default, 1, 900),
+      timeout_sec_max: pickNumber(raw.timeout_sec_max, this.defaultBackgroundTaskSettings.timeout_sec_max, 1, 1800),
+    };
+  }
+
+  async updateBackgroundTaskSettings(
+    ref: string,
+    settings: Partial<BackgroundTaskSettings>,
+  ): Promise<BackgroundTaskSettings | null> {
+    const current = await this.getBackgroundTaskSettings(ref);
+    if (!current) return null;
+
+    const merged: BackgroundTaskSettings = {
+      ...current,
+      ...settings,
+    };
+
+    await this.updateProjectSettings(ref, {
+      background_tasks: merged,
+    });
+
+    return this.getBackgroundTaskSettings(ref);
   }
 
   // Get project API keys

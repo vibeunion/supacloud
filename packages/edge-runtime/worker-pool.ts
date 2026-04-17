@@ -5,6 +5,13 @@ interface DispatchOptions {
   functionPath: string;
   env: Record<string, string>;
   request: Request;
+  cancelKey?: string;
+  onLog?: (entry: {
+    timestamp: string;
+    stream: "stdout" | "stderr";
+    level: string;
+    message: string;
+  }) => void;
 }
 
 const MAX_BODY_SIZE = 10 * 1024 * 1024; // 10MB limit
@@ -16,9 +23,18 @@ export class WorkerPool {
     opts: DispatchOptions;
     resolve: (r: Response) => void;
   }> = [];
+  private inFlight = new Map<string, { cancel: () => void }>();
   private totalRequests = 0;
   private totalInvalidations = 0;
   private activeWorkers = new Set<Worker>();
+  private workerMetadata = new Map<
+    Worker,
+    {
+      cancelKey?: string;
+      replacementTimer?: Timer;
+      isCancelling?: boolean;
+    }
+  >();
   // Workers marked for replacement after they finish their current request.
   // This avoids dropping in-flight requests while ensuring stale module caches are purged.
   private tainted = new Set<Worker>();
@@ -34,6 +50,7 @@ export class WorkerPool {
   private createWorker(): Worker {
     const w = new Worker(new URL("./worker-executor.ts", import.meta.url).href);
     this.workers.push(w);
+    this.workerMetadata.set(w, {});
     return w;
   }
 
@@ -54,14 +71,44 @@ export class WorkerPool {
     opts: DispatchOptions,
     resolve: (r: Response) => void,
   ) {
+    const cancelGraceMs = 3_000;
+    const cancelledResponse = () =>
+      new Response(JSON.stringify({ error: "Task cancelled" }), {
+        status: 499,
+        headers: { "Content-Type": "application/json" },
+      });
+
     let resolved = false;
     const safeResolve = (r: Response) => {
       if (resolved) return; // Prevent double-resolve (e.g. timeout + late response)
       resolved = true;
       resolve(r);
     };
+    const cleanupInFlight = () => {
+      if (opts.cancelKey) this.inFlight.delete(opts.cancelKey);
+    };
+    const metadata = this.workerMetadata.get(worker) || {};
+    metadata.cancelKey = opts.cancelKey;
+    metadata.isCancelling = false;
+    if (metadata.replacementTimer) {
+      clearTimeout(metadata.replacementTimer);
+      metadata.replacementTimer = undefined;
+    }
+    this.workerMetadata.set(worker, metadata);
+    const clearCancellationState = () => {
+      const current = this.workerMetadata.get(worker);
+      if (!current) return;
+      current.cancelKey = undefined;
+      current.isCancelling = false;
+      if (current.replacementTimer) {
+        clearTimeout(current.replacementTimer);
+        current.replacementTimer = undefined;
+      }
+    };
 
     const timeout = setTimeout(() => {
+      cleanupInFlight();
+      clearCancellationState();
       safeResolve(new Response("Gateway Timeout", { status: 504 }));
       this.recycle(worker);
     }, this.config.requestTimeout);
@@ -87,6 +134,7 @@ export class WorkerPool {
       // Enforce body size limit to prevent OOM
       const contentLength = opts.request.headers.get("content-length");
       if (contentLength && parseInt(contentLength) > MAX_BODY_SIZE) {
+        clearCancellationState();
         safeResolve(
           new Response(
             JSON.stringify({
@@ -104,6 +152,7 @@ export class WorkerPool {
       }
       body = await opts.request.arrayBuffer();
       if (body.byteLength > MAX_BODY_SIZE) {
+        clearCancellationState();
         safeResolve(
           new Response(
             JSON.stringify({
@@ -131,15 +180,62 @@ export class WorkerPool {
       body,
     });
 
+    if (opts.cancelKey) {
+      this.inFlight.set(opts.cancelKey, {
+        cancel: () => {
+          const current = this.workerMetadata.get(worker);
+          if (current?.isCancelling) return;
+          if (current) current.isCancelling = true;
+          clearTimeout(timeout);
+          try {
+            worker.postMessage({ type: "cancel_current" });
+          } catch {
+            // ignore
+          }
+          cleanupInFlight();
+          if (current) {
+            current.replacementTimer = setTimeout(() => {
+              worker.removeListener("message", onMsg);
+              worker.removeListener("error", onErr);
+              clearCancellationState();
+              safeResolve(cancelledResponse());
+              this.replaceWorker(worker);
+            }, cancelGraceMs);
+          }
+        },
+      });
+    }
+
     const onMsg = (msg: {
       type?: string;
       status: number;
       streamId?: string;
       headers: Record<string, string | string[]>;
       body?: ArrayBuffer;
+      timestamp?: string;
+      stream?: "stdout" | "stderr";
+      level?: string;
+      message?: string;
     }) => {
+      if (msg.type === "log" && opts.onLog && msg.timestamp && msg.stream && msg.level && msg.message) {
+        opts.onLog({
+          timestamp: msg.timestamp,
+          stream: msg.stream,
+          level: msg.level,
+          message: msg.message,
+        });
+        return;
+      }
+
+      if (msg.type === "cancel_ack") {
+        return;
+      }
+
       clearTimeout(timeout);
+      cleanupInFlight();
+      clearCancellationState();
       worker.removeListener("error", onErr);
+      worker.removeListener("message", onMsg);
 
       // Reconstruct Headers from the serialized map, preserving multi-value headers
       const resHeaders = new Headers();
@@ -158,6 +254,7 @@ export class WorkerPool {
         const recycle = () => {
           if (!recycled) {
             recycled = true;
+            clearCancellationState();
             this.recycle(worker);
           }
         };
@@ -206,17 +303,28 @@ export class WorkerPool {
 
     const onErr = (err: Error) => {
       clearTimeout(timeout);
+      cleanupInFlight();
+      clearCancellationState();
       worker.removeListener("message", onMsg);
       console.error("[Pool] Worker error:", err);
       safeResolve(new Response("Internal Error", { status: 500 }));
       this.replaceWorker(worker);
     };
 
-    worker.once("message", onMsg);
+    worker.on("message", onMsg);
     worker.once("error", onErr);
   }
 
   private recycle(worker: Worker) {
+    const metadata = this.workerMetadata.get(worker);
+    if (metadata?.replacementTimer) {
+      clearTimeout(metadata.replacementTimer);
+      metadata.replacementTimer = undefined;
+    }
+    if (metadata) {
+      metadata.cancelKey = undefined;
+      metadata.isCancelling = false;
+    }
     // If the worker is tainted (stale module cache), replace it with a fresh one
     // instead of returning it to the idle pool.
     if (this.tainted.has(worker)) {
@@ -241,6 +349,9 @@ export class WorkerPool {
   }
 
   private replaceWorker(dead: Worker) {
+    const metadata = this.workerMetadata.get(dead);
+    if (metadata?.replacementTimer) clearTimeout(metadata.replacementTimer);
+    this.workerMetadata.delete(dead);
     const idx = this.workers.indexOf(dead);
     if (idx !== -1) this.workers.splice(idx, 1);
     this.activeWorkers.delete(dead); // Remove from tracking set
@@ -341,5 +452,35 @@ export class WorkerPool {
       worker.on("message", onMsg);
       worker.postMessage({ type: "preheat", functionId, functionPath });
     });
+  }
+
+  snapshotMetrics(prefix = "supacloud_edge"): Record<string, number> {
+    return {
+      [`${prefix}_active_workers`]: this.config.size - this.idle.length,
+      [`${prefix}_idle_workers`]: this.idle.length,
+      [`${prefix}_queue_length`]: this.queue.length,
+      [`${prefix}_total_requests`]: this.totalRequests,
+      [`${prefix}_total_invalidations`]: this.totalInvalidations,
+      [`${prefix}_tainted_workers`]: this.tainted.size,
+    };
+  }
+
+  cancel(cancelKey: string): boolean {
+    const queuedIndex = this.queue.findIndex((entry) => entry.opts.cancelKey === cancelKey);
+    if (queuedIndex >= 0) {
+      const [queued] = this.queue.splice(queuedIndex, 1);
+      queued.resolve(
+        new Response(JSON.stringify({ error: "Task cancelled" }), {
+          status: 499,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+      return true;
+    }
+
+    const inFlight = this.inFlight.get(cancelKey);
+    if (!inFlight) return false;
+    inFlight.cancel();
+    return true;
   }
 }

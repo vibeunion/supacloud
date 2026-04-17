@@ -1,0 +1,46 @@
+import { describe, expect, test } from "bun:test";
+import { buildTaskListQuery } from "../../src/repositories/task.repository";
+
+describe("TaskRepository query builders", () => {
+  test("buildTaskListQuery includes function_slug filter when provided", () => {
+    const { sqlText, values } = buildTaskListQuery("proj_1", {
+      functionSlug: "mockup-generator",
+      limit: 8,
+    });
+
+    expect(sqlText).toContain("function_slug = $2");
+    expect(values).toEqual(["proj_1", "mockup-generator", 8]);
+  });
+
+  test("buildTaskListQuery preserves status and task_type filters alongside function_slug", () => {
+    const { sqlText, values } = buildTaskListQuery("proj_1", {
+      statuses: ["failed", "dead_lettered"],
+      taskTypes: ["edge_function"],
+      functionSlug: "video-transcode",
+      limit: 5,
+    });
+
+    expect(sqlText).toContain("status = ANY($2)");
+    expect(sqlText).toContain("task_type = ANY($3)");
+    expect(sqlText).toContain("function_slug = $4");
+    expect(values).toEqual([
+      "proj_1",
+      ["failed", "dead_lettered"],
+      ["edge_function"],
+      "video-transcode",
+      5,
+    ]);
+  });
+
+  test("buildTaskListQuery prefers explicit DLQ filter over statuses", () => {
+    const { sqlText, values } = buildTaskListQuery("proj_1", {
+      statuses: ["failed"],
+      onlyDeadLettered: true,
+      limit: 10,
+    });
+
+    expect(sqlText).toContain("status = 'dead_lettered'");
+    expect(sqlText).not.toContain("status = ANY");
+    expect(values).toEqual(["proj_1", 10]);
+  });
+});

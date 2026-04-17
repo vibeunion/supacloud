@@ -8,6 +8,7 @@ import { execSync } from "child_process";
 
 const PORT = Number(process.env.EDGE_RUNTIME_PORT) || Number(process.env.PORT) || 9000;
 const POOL_SIZE = Number(process.env.WORKER_POOL_SIZE) || 4;
+const BACKGROUND_POOL_SIZE = Number(process.env.BACKGROUND_WORKER_POOL_SIZE) || Math.max(1, Math.min(POOL_SIZE, 2));
 const FUNCTIONS_DIR = process.env.EDGE_FUNCTIONS_DIR || "./functions";
 const MGMT_API = process.env.MANAGEMENT_API_URL || "http://127.0.0.1:9090";
 
@@ -31,11 +32,26 @@ const pool = new WorkerPool({
   requestTimeout: 300_000, // 5 min — covers long AI streaming responses
 });
 
+const backgroundPool = new WorkerPool({
+  size: BACKGROUND_POOL_SIZE,
+  requestTimeout: 900_000,
+});
+
 async function dispatchFunction(
   projectRef: string,
   functionName: string,
   request: Request,
   setHeaders: Record<string, string>,
+  opts?: {
+    background?: boolean;
+    cancelKey?: string;
+    onLog?: (entry: {
+      timestamp: string;
+      stream: "stdout" | "stderr";
+      level: string;
+      message: string;
+    }) => void;
+  },
 ) {
   const functionId = `${projectRef}_${functionName}`;
   // Prefer bundled .js output from server-side Bun.build(), fall back to raw .ts
@@ -44,11 +60,14 @@ async function dispatchFunction(
   const functionPath = (await Bun.file(jsPath).exists()) ? jsPath : tsPath;
 
   try {
-    return await pool.dispatch({
+    const targetPool = opts?.background ? backgroundPool : pool;
+    return await targetPool.dispatch({
       functionId,
       functionPath,
       env: await loadTenantEnv(projectRef),
       request,
+      cancelKey: opts?.cancelKey,
+      onLog: opts?.onLog,
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Internal Error";
@@ -69,6 +88,11 @@ async function dispatchFunction(
       headers: { "Content-Type": "application/json", "x-relay-error": "true" },
     });
   }
+}
+
+function verifyInternalBackgroundAuth(request: Request): boolean {
+  const token = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
+  return !!MASTER_TOKEN && token === MASTER_TOKEN;
 }
 
 // ── Function Config Cache ───────────────────────────────────────────────
@@ -229,8 +253,18 @@ const app = new Elysia()
     version: process.env.EDGE_RUNTIME_VERSION,
     mt: process.env.MASTER_TOKEN ? "present" : "missing",
     url: process.env.MANAGEMENT_API_URL || "missing",
+    pools: {
+      foreground: POOL_SIZE,
+      background: BACKGROUND_POOL_SIZE,
+    },
   }))
-  .get("/metrics", () => pool.getMetrics())
+  .get("/metrics", () => {
+    const foreground = pool.snapshotMetrics("supacloud_edge");
+    const background = backgroundPool.snapshotMetrics("supacloud_edge_background");
+    return Object.entries({ ...foreground, ...background })
+      .map(([key, value]) => `${key} ${value}`)
+      .join("\n");
+  })
 
   // Cache invalidation — called by Management API after deploy
   .post("/invalidate/:ref/:slug", (c) => {
@@ -255,6 +289,70 @@ const app = new Elysia()
     const functionPath = (await Bun.file(jsPath).exists()) ? jsPath : tsPath;
     const success = await pool.preheat(functionId, functionPath);
     return { preheated: functionId, success };
+  })
+
+  .post("/internal/background/:ref/:functionName", async (c) => {
+    if (!verifyInternalBackgroundAuth(c.request)) {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        status: 401,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    const setHeaders = c.set.headers as Record<string, string>;
+    setHeaders["x-sb-execution-id"] = crypto.randomUUID();
+    setHeaders["x-supacloud-background-pool"] = "true";
+    const logs: Array<{
+      timestamp: string;
+      stream: "stdout" | "stderr";
+      level: string;
+      message: string;
+    }> = [];
+
+    const response = await dispatchFunction(
+      c.params.ref,
+      c.params.functionName,
+      c.request,
+      setHeaders,
+      {
+        background: true,
+        cancelKey: c.request.headers.get("x-supacloud-task-id") || undefined,
+        onLog: (entry) => {
+          logs.push(entry);
+          if (logs.length > 200) logs.shift();
+        },
+      },
+    );
+    const bodyText = await response.text();
+    return new Response(
+      JSON.stringify({
+        status: response.status,
+        headers: Object.fromEntries(response.headers.entries()),
+        bodyText,
+        logs,
+      }),
+      {
+        status: 200,
+        headers: {
+          "Content-Type": "application/json",
+          "x-supacloud-background-envelope": "true",
+        },
+      },
+    );
+  })
+  .post("/internal/background/cancel/:taskId", async (c) => {
+    if (!verifyInternalBackgroundAuth(c.request)) {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        status: 401,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    const cancelled = backgroundPool.cancel(c.params.taskId);
+    return new Response(JSON.stringify({ cancelled }), {
+      status: cancelled ? 200 : 404,
+      headers: { "Content-Type": "application/json" },
+    });
   })
 
   // Main function invoke — handles supabase.functions.invoke('name', { body })

@@ -4,6 +4,130 @@ import { config } from "../config";
 import { sql as metaSql } from "../db";
 import { logger } from "../utils/logger";
 import { DEFAULT_CORS_HEADERS, DEFAULT_CORS_EXPOSED } from '../services/gateway.service';
+import { backgroundTaskService } from "../services/background-task.service";
+import { edgeFunctionService } from "../services/edge-function.service";
+import { projectService } from "../services/project.service";
+
+const MAX_ASYNC_BODY_BYTES = 256 * 1024;
+
+function parsePositiveIntHeader(value: string | null): number | undefined {
+    if (!value) return undefined;
+    const parsed = Number.parseInt(value, 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+async function maybeEnqueueAsyncFunction(request: Request, ref: string): Promise<Response | null> {
+    const asyncHeader = request.headers.get("x-supacloud-async");
+    if (asyncHeader !== "true") return null;
+
+    const url = new URL(request.url);
+    const targetPath = url.pathname.replace(/^\/functions\/v1/, "");
+    const [functionSlug, ...restPath] = targetPath.split("/").filter(Boolean);
+    if (!functionSlug) {
+        return new Response(JSON.stringify({ message: "Missing function slug" }), {
+            status: 400,
+            headers: { "Content-Type": "application/json" },
+        });
+    }
+
+    const backgroundSettings = await projectService.getBackgroundTaskSettings(ref);
+    const maxPayloadBytes = backgroundSettings?.max_payload_bytes || MAX_ASYNC_BODY_BYTES;
+    const timeoutHeader = parsePositiveIntHeader(request.headers.get("x-supacloud-timeout"));
+    const retriesHeader = parsePositiveIntHeader(request.headers.get("x-supacloud-retries"));
+    const requestedTimeout = timeoutHeader ?? backgroundSettings?.timeout_sec_default;
+    const timeoutSec = Math.min(
+        backgroundSettings?.timeout_sec_max || 900,
+        backgroundTaskService.normalizeBackgroundTaskTimeout(requestedTimeout),
+    );
+    const maxAttempts = Math.min(
+        backgroundSettings?.max_attempts || 3,
+        backgroundTaskService.normalizeBackgroundTaskMaxAttempts(retriesHeader ?? backgroundSettings?.max_attempts),
+    );
+
+    const requestClone = request.clone();
+    const bodyBuffer =
+        ["GET", "HEAD"].includes(request.method) ? null : await requestClone.arrayBuffer();
+    if (bodyBuffer && bodyBuffer.byteLength > maxPayloadBytes) {
+        return new Response(
+            JSON.stringify({
+                message: `Async payload too large. Max supported size is ${maxPayloadBytes} bytes`,
+            }),
+            {
+                status: 413,
+                headers: { "Content-Type": "application/json" },
+            },
+        );
+    }
+
+    const headers: Record<string, string> = {};
+    request.headers.forEach((value, key) => {
+        const lower = key.toLowerCase();
+        if ([
+            "host",
+            "connection",
+            "content-length",
+            "transfer-encoding",
+            "x-supacloud-async",
+            "x-supacloud-retries",
+            "x-supacloud-timeout",
+        ].includes(lower)) {
+            return;
+        }
+        headers[key] = value;
+    });
+
+    const traceId = request.headers.get("x-request-id") || crypto.randomUUID();
+    const authHeaders: Record<string, string> = {};
+    const authorization = request.headers.get("authorization");
+    const apikey = request.headers.get("apikey");
+    if (authorization) authHeaders["authorization"] = authorization;
+    if (apikey) authHeaders["apikey"] = apikey;
+
+    const fnConfig = await edgeFunctionService.getConfig(ref, functionSlug);
+
+    const task = await backgroundTaskService.enqueueBackgroundFunctionTask({
+        projectRef: ref,
+        functionSlug,
+        functionVersion: fnConfig.version || "1",
+        timeoutSec,
+        maxAttempts,
+        maxPayloadBytes,
+        idempotencyKey: request.headers.get("x-idempotency-key"),
+        traceId,
+        envelope: {
+            method: request.method,
+            path: restPath.length > 0 ? `/${restPath.join("/")}` : "",
+            query: url.search,
+            headers,
+            body: bodyBuffer ? Buffer.from(bodyBuffer).toString("utf8") : null,
+            body_encoding: "utf8",
+            requested_timeout_sec: timeoutSec,
+            auth: {
+                authorization,
+                apikey,
+                headers: authHeaders,
+            },
+        },
+    });
+
+    return new Response(
+        JSON.stringify({
+            task_id: task.id,
+            status: task.status,
+            project_ref: task.project_ref,
+            function_slug: task.function_slug,
+            attempt: task.attempt,
+            max_attempts: task.max_attempts,
+        }),
+        {
+            status: 202,
+            headers: {
+                "Content-Type": "application/json",
+                "x-supacloud-task-id": task.id,
+            },
+        },
+    );
+}
 
 async function getProjectRef(request: Request): Promise<string> {
     const refHeader = request.headers.get("x-project-ref") || request.headers.get("x-supabase-project");
@@ -228,6 +352,9 @@ const realtimeHandler = async ({ request }: any) => {
 const functionsHandler = async ({ request }: any) => {
     const ref = await getProjectRef(request);
     if (!ref) return new Response(JSON.stringify({ message: 'Missing tenant reference' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+
+    const asyncResponse = await maybeEnqueueAsyncFunction(request, ref);
+    if (asyncResponse) return asyncResponse;
 
     const { config } = await import("../config");
     const [edgeHost, edgePortStr] = (config.edgeRuntimeInternal || "127.0.0.1:9000").split(':');
