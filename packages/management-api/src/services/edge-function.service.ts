@@ -38,8 +38,16 @@ function getFuncPath(ref: string, slug: string): string {
   return path.join(getFuncDir(ref), `${slug}.js`);
 }
 
+function getVersionedFuncPath(ref: string, slug: string, version: string): string {
+  return path.join(getFuncDir(ref), `${slug}.v${version}.js`);
+}
+
 function getSrcPath(ref: string, slug: string): string {
   return path.join(getFuncDir(ref), `${slug}.src.ts`);
+}
+
+function getVersionedSrcPath(ref: string, slug: string, version: string): string {
+  return path.join(getFuncDir(ref), `${slug}.v${version}.src.ts`);
 }
 
 function getConfigPath(ref: string, slug: string): string {
@@ -199,6 +207,7 @@ export const edgeFunctionService = {
       // 1. Preserve source for debugging
       const srcPath = getSrcPath(ref, slug);
       await Bun.write(srcPath, code);
+      await Bun.write(getVersionedSrcPath(ref, slug, version), code);
 
       // 2. Bundle with Bun.build()
       const bundled = await bundleFunction(srcPath, dir, slug, minify);
@@ -210,6 +219,9 @@ export const edgeFunctionService = {
           { ref, slug },
         );
         await Bun.write(getFuncPath(ref, slug), code);
+        await Bun.write(getVersionedFuncPath(ref, slug, version), code);
+      } else {
+        await Bun.write(getVersionedFuncPath(ref, slug, version), bundled);
       }
 
       // 3. Invalidate runtime caches
@@ -329,6 +341,13 @@ export const edgeFunctionService = {
       const srcDir = path.join(dir, `.src-${slug}`);
       await fs.rm(srcDir, { recursive: true, force: true }).catch(() => {});
       await fs.rename(stageDir, srcDir);
+      await fs.rm(path.join(dir, `.src-${slug}-v${version}`), {
+        recursive: true,
+        force: true,
+      }).catch(() => {});
+      await fs.cp(srcDir, path.join(dir, `.src-${slug}-v${version}`), {
+        recursive: true,
+      });
 
       // 4. Invalidate runtime caches
       await invalidateCache(ref, slug);
@@ -399,8 +418,20 @@ export const edgeFunctionService = {
     try {
       // Remove bundled output
       await fs.unlink(getFuncPath(ref, slug)).catch(() => {});
+      const dir = getFuncDir(ref);
+      const entries = await fs.readdir(dir).catch(() => []);
+      await Promise.all(
+        entries
+          .filter((entry) => entry.startsWith(`${slug}.v`) && entry.endsWith(".js"))
+          .map((entry) => fs.unlink(path.join(dir, entry)).catch(() => {})),
+      );
       // Remove source file
       await fs.unlink(getSrcPath(ref, slug)).catch(() => {});
+      await Promise.all(
+        entries
+          .filter((entry) => entry.startsWith(`${slug}.v`) && entry.endsWith(".src.ts"))
+          .map((entry) => fs.unlink(path.join(dir, entry)).catch(() => {})),
+      );
       // Remove source directory (bundle deploys)
       await fs
         .rm(path.join(getFuncDir(ref), `.src-${slug}`), {
@@ -408,6 +439,16 @@ export const edgeFunctionService = {
           force: true,
         })
         .catch(() => {});
+      await Promise.all(
+        entries
+          .filter((entry) => entry.startsWith(`.src-${slug}-v`))
+          .map((entry) =>
+            fs.rm(path.join(getFuncDir(ref), entry), {
+              recursive: true,
+              force: true,
+            }).catch(() => {}),
+          ),
+      );
 
       await invalidateCache(ref, slug);
 

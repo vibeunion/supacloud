@@ -17,9 +17,9 @@ export interface CreateTaskInput {
 
 export interface TaskLeaseOptions {
   workerId: string;
-  concurrencyByProject?: number;
   allowedTaskTypes?: string[];
   leaseSeconds?: number;
+  concurrencyByProject?: number;
 }
 
 export interface TaskListFilters {
@@ -54,13 +54,15 @@ export function buildTaskListQuery(projectRef: string, filters: TaskListFilters 
   if (filters.onlyDeadLettered) {
     conditions.push(`status = 'dead_lettered'`);
   } else if (filters.statuses && filters.statuses.length > 0) {
-    values.push(filters.statuses);
-    conditions.push(`status = ANY($${values.length})`);
+    const placeholders = filters.statuses.map((_, index) => `$${values.length + index + 1}`).join(", ");
+    values.push(...filters.statuses);
+    conditions.push(`status IN (${placeholders})`);
   }
 
   if (filters.taskTypes && filters.taskTypes.length > 0) {
-    values.push(filters.taskTypes);
-    conditions.push(`task_type = ANY($${values.length})`);
+    const placeholders = filters.taskTypes.map((_, index) => `$${values.length + index + 1}`).join(", ");
+    values.push(...filters.taskTypes);
+    conditions.push(`task_type IN (${placeholders})`);
   }
 
   if (filters.functionSlug) {
@@ -131,7 +133,6 @@ export async function createTasks(tasks: CreateTaskInput[]): Promise<void> {
 
 export async function claimNextTask(options: TaskLeaseOptions): Promise<LeasedTask | null> {
   const leaseSeconds = options.leaseSeconds || DEFAULT_LEASE_SECONDS;
-  const concurrencyByProject = options.concurrencyByProject || 1;
   const allowedTaskTypes = options.allowedTaskTypes || [];
 
   return withRetry("TaskRepository.claimNextTask", async () => {
@@ -140,7 +141,6 @@ export async function claimNextTask(options: TaskLeaseOptions): Promise<LeasedTa
       TaskStatuses.RUNNING,
       TaskStatuses.PENDING,
       TaskStatuses.RETRY_SCHEDULED,
-      concurrencyByProject,
     ];
 
     let taskTypeFilter = "";
@@ -156,21 +156,28 @@ export async function claimNextTask(options: TaskLeaseOptions): Promise<LeasedTa
     const leaseSecondsIdx = params.length;
 
     const sqlText = `
-      WITH running_counts AS (
-        SELECT project_ref, COUNT(*)::int AS running_count
-        FROM project_tasks
-        WHERE status IN ($1, $2)
-          AND lease_until IS NOT NULL
-          AND lease_until > NOW()
-        GROUP BY project_ref
-      ),
-      candidate AS (
+      WITH candidate AS (
         SELECT pt.id
         FROM project_tasks pt
-        LEFT JOIN running_counts rc ON rc.project_ref = pt.project_ref
+        JOIN projects p ON p.ref = pt.project_ref
         WHERE pt.status IN ($3, $4)
           AND COALESCE(pt.next_run_at, pt.created_at, NOW()) <= NOW()
-          AND COALESCE(rc.running_count, 0) < $5
+          AND pt.cancel_requested_at IS NULL
+          AND (
+            SELECT COUNT(*)::int
+            FROM project_tasks active
+            WHERE active.project_ref = pt.project_ref
+              AND active.task_type = pt.task_type
+              AND active.status IN ($1, $2)
+              AND active.lease_until IS NOT NULL
+              AND active.lease_until > NOW()
+          ) < GREATEST(
+            1,
+            COALESCE(
+              NULLIF((p.config->'background_tasks'->>'concurrency'), '')::int,
+              2
+            )
+          )
           ${taskTypeFilter}
         ORDER BY COALESCE(pt.next_run_at, pt.created_at, NOW()) ASC, pt.created_at ASC
         FOR UPDATE SKIP LOCKED
@@ -217,6 +224,8 @@ export async function markTaskSucceeded(id: string, result?: Record<string, unkn
         result = ${result ? JSON.stringify(result) : null},
         error = NULL,
         lease_until = NULL,
+        cancel_requested_at = NULL,
+        cancellation_reason = NULL,
         completed_at = NOW(),
         updated_at = NOW()
       WHERE id = ${id}
@@ -235,6 +244,8 @@ export async function scheduleRetry(id: string, error: string, nextRunAt: Date):
         error = ${error},
         lease_until = NULL,
         next_run_at = ${nextRunAt},
+        cancel_requested_at = NULL,
+        cancellation_reason = NULL,
         updated_at = NOW()
       WHERE id = ${id}
       RETURNING *
@@ -251,6 +262,8 @@ export async function markTaskFailed(id: string, error: string, deadLetter = fal
         status = ${deadLetter ? TaskStatuses.DEAD_LETTERED : TaskStatuses.FAILED},
         error = ${error},
         lease_until = NULL,
+        cancel_requested_at = NULL,
+        cancellation_reason = NULL,
         completed_at = NOW(),
         updated_at = NOW()
       WHERE id = ${id}
@@ -268,6 +281,8 @@ export async function cancelTask(id: string, error?: string): Promise<ProjectTas
         status = ${TaskStatuses.CANCELLED},
         error = ${error || null},
         lease_until = NULL,
+        cancel_requested_at = NOW(),
+        cancellation_reason = ${error || "Cancelled by user"},
         completed_at = NOW(),
         updated_at = NOW()
       WHERE id = ${id}
@@ -351,6 +366,8 @@ export async function retryTask(id: string): Promise<ProjectTask | null> {
         lease_until = NULL,
         next_run_at = NOW(),
         completed_at = NULL,
+        cancel_requested_at = NULL,
+        cancellation_reason = NULL,
         updated_at = NOW()
       WHERE id = ${id}
       RETURNING *
@@ -413,6 +430,21 @@ export async function extendLease(id: string, leaseSeconds: number): Promise<Pro
       UPDATE project_tasks
       SET
         lease_until = NOW() + (${leaseSeconds} * INTERVAL '1 second'),
+        updated_at = NOW()
+      WHERE id = ${id} AND cancel_requested_at IS NULL
+      RETURNING *
+    `;
+    return task ? mapTask(task) : null;
+  });
+}
+
+export async function requestTaskCancellation(id: string, reason: string): Promise<ProjectTask | null> {
+  return withRetry("TaskRepository.requestTaskCancellation", async () => {
+    const [task] = await sql`
+      UPDATE project_tasks
+      SET
+        cancel_requested_at = NOW(),
+        cancellation_reason = ${reason},
         updated_at = NOW()
       WHERE id = ${id}
       RETURNING *
@@ -588,6 +620,7 @@ export const taskRepository = {
   countActiveTasksForProject,
   releaseTask,
   extendLease,
+  requestTaskCancellation,
   startTaskAttempt,
   completeTaskAttempt,
   listTaskAttempts,

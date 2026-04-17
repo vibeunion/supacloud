@@ -1,6 +1,7 @@
 <script lang="ts">
   import { page } from "$app/state";
   import { onMount } from "svelte";
+  import { untrack } from "svelte";
   import {
     Activity,
     AlertCircle,
@@ -314,7 +315,8 @@
       return;
     }
 
-    if (selectedTask?.id === routeTaskId) {
+    const currentSelectedTaskId = untrack(() => selectedTask?.id);
+    if (currentSelectedTaskId === routeTaskId) {
       return;
     }
 
