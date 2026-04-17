@@ -145,8 +145,9 @@ export async function claimNextTask(options: TaskLeaseOptions): Promise<LeasedTa
 
     let taskTypeFilter = "";
     if (allowedTaskTypes.length > 0) {
-      params.push(allowedTaskTypes);
-      taskTypeFilter = `AND pt.task_type = ANY($${params.length})`;
+      const typePlaceholders = allowedTaskTypes.map((_, i) => `$${params.length + i + 1}`).join(', ');
+      taskTypeFilter = `AND pt.task_type IN (${typePlaceholders})`;
+      params.push(...allowedTaskTypes);
     }
 
     params.push(TaskStatuses.LEASED);
@@ -358,23 +359,24 @@ export async function retryTask(id: string): Promise<ProjectTask | null> {
   });
 }
 
-export async function countActiveTasksForProject(projectRef: string, taskTypes?: string[]): Promise<number> {
-  return withRetry("TaskRepository.countActiveTasksForProject", async () => {
-    if (taskTypes && taskTypes.length > 0) {
-      const rows = await sql.unsafe(
-        `
-          SELECT COUNT(*)::int AS count
-          FROM project_tasks
-          WHERE project_ref = $1
-            AND status IN ($2, $3)
-            AND lease_until IS NOT NULL
-            AND lease_until > NOW()
-            AND task_type = ANY($4)
-        `,
-        [projectRef, TaskStatuses.LEASED, TaskStatuses.RUNNING, taskTypes],
-      );
-      return Number(rows[0]?.count || 0);
-    }
+  export async function countActiveTasksForProject(projectRef: string, taskTypes?: string[]): Promise<number> {
+    return withRetry("TaskRepository.countActiveTasksForProject", async () => {
+      if (taskTypes && taskTypes.length > 0) {
+        const typePlaceholders = taskTypes.map((_, i) => `$${4 + i}`).join(', ');
+        const rows = await sql.unsafe(
+          `
+            SELECT COUNT(*)::int AS count
+            FROM project_tasks
+            WHERE project_ref = $1
+              AND status IN ($2, $3)
+              AND lease_until IS NOT NULL
+              AND lease_until > NOW()
+              AND task_type IN (${typePlaceholders})
+          `,
+          [projectRef, TaskStatuses.LEASED, TaskStatuses.RUNNING, ...taskTypes],
+        );
+        return Number(rows[0]?.count || 0);
+      }
 
     const rows = await sql`
       SELECT COUNT(*)::int AS count
