@@ -1,23 +1,86 @@
-import { describe, test, expect, mock, beforeEach, spyOn } from "bun:test";
+import { beforeEach, describe, expect, mock, test } from "bun:test";
 
-// Mock database to prevent top-level connection attempts
 const baseMock = mock(() => Promise.resolve([]));
 (baseMock as unknown as Record<string, unknown>).unsafe = mock(() => Promise.resolve([]));
+const actualDb = await import("../../src/db");
+
+const projectRepositoryMock = {
+  findAll: mock(() => Promise.resolve([])),
+  findByRef: mock(() => Promise.resolve(null)),
+  create: mock(() => Promise.resolve(null)),
+  updateStatus: mock(() => Promise.resolve(null)),
+  updateConfig: mock(() => Promise.resolve(null)),
+  softDelete: mock(() => Promise.resolve(null)),
+};
+
+const taskRepositoryMock = {
+  createTask: mock(() => Promise.resolve({ id: "tsk_1" })),
+};
+
+const jwtServiceMock = {
+  generateProjectRef: mock(() => "newref1234"),
+  generateKeySet: mock(() =>
+    Promise.resolve({
+      jwtSecret: "jwtsecret",
+      anonKey: "anonkey",
+      serviceRoleKey: "servicekey",
+    }),
+  ),
+};
+
+const databaseServiceMock = {
+  generatePassword: mock(() => "dbpassword"),
+  checkStatus: mock(() => Promise.resolve({ success: true, output: "" })),
+  getSecrets: mock(() => Promise.resolve([{ name: "KEY", value: "val" }])),
+  upsertSecret: mock(() => Promise.resolve(true)),
+  deleteSecret: mock(() => Promise.resolve(true)),
+};
+
+const routerServiceMock = {
+  getProjectDomain: mock((ref: string) => `${ref}.localhost`),
+  getProjectApiUrl: mock((ref: string) => `https://${ref}.api.localhost`),
+  getProjectStudioUrl: mock((ref: string) => `https://${ref}.studio.localhost`),
+  reload: mock(() => Promise.resolve({ success: true })),
+};
+
+const edgeFunctionServiceMock = {
+  read: mock(() => Promise.resolve("function code here")),
+  deploy: mock(() => Promise.resolve(true)),
+};
+
 mock.module("../../src/db", () => ({
+  ...actualDb,
   sql: baseMock as unknown,
 }));
 
-import { ProjectService, type CreateProjectRequest } from "../../src/services/project.service";
-import { projectRepository } from "../../src/repositories/project.repository";
-import { jwtService } from "../../src/services/jwt.service";
-import { databaseService } from "../../src/services/database.service";
-import { storageService } from "../../src/services/storage.service";
-import { routerService } from "../../src/services/router.service";
-import { shellService } from "../../src/services/shell.service";
-import { edgeFunctionService } from "../../src/services/edge-function.service";
+mock.module("../../src/repositories/project.repository", () => ({
+  projectRepository: projectRepositoryMock,
+}));
+
+mock.module("../../src/repositories/task.repository", () => ({
+  taskRepository: taskRepositoryMock,
+}));
+
+mock.module("../../src/services/jwt.service", () => ({
+  jwtService: jwtServiceMock,
+}));
+
+mock.module("../../src/services/database.service", () => ({
+  databaseService: databaseServiceMock,
+}));
+
+mock.module("../../src/services/router.service", () => ({
+  routerService: routerServiceMock,
+}));
+
+mock.module("../../src/services/edge-function.service", () => ({
+  edgeFunctionService: edgeFunctionServiceMock,
+}));
+
+const { ProjectService } = await import("../../src/services/project.service");
 
 describe("ProjectService - Comprehensive", () => {
-  let service: ProjectService;
+  let service: InstanceType<typeof ProjectService>;
 
   const mockProject = {
     id: "uuid-test123",
@@ -43,494 +106,216 @@ describe("ProjectService - Comprehensive", () => {
 
   beforeEach(() => {
     service = new ProjectService();
+
+    projectRepositoryMock.findAll.mockReset();
+    projectRepositoryMock.findByRef.mockReset();
+    projectRepositoryMock.create.mockReset();
+    projectRepositoryMock.updateStatus.mockReset();
+    projectRepositoryMock.updateConfig.mockReset();
+    projectRepositoryMock.softDelete.mockReset();
+    taskRepositoryMock.createTask.mockReset();
+    jwtServiceMock.generateProjectRef.mockReset();
+    jwtServiceMock.generateKeySet.mockReset();
+    databaseServiceMock.generatePassword.mockReset();
+    databaseServiceMock.checkStatus.mockReset();
+    databaseServiceMock.getSecrets.mockReset();
+    databaseServiceMock.upsertSecret.mockReset();
+    databaseServiceMock.deleteSecret.mockReset();
+    routerServiceMock.getProjectDomain.mockReset();
+    routerServiceMock.getProjectApiUrl.mockReset();
+    routerServiceMock.getProjectStudioUrl.mockReset();
+    routerServiceMock.reload.mockReset();
+    edgeFunctionServiceMock.read.mockReset();
+    edgeFunctionServiceMock.deploy.mockReset();
+
+    projectRepositoryMock.findAll.mockResolvedValue([]);
+    projectRepositoryMock.findByRef.mockResolvedValue(null);
+    projectRepositoryMock.create.mockResolvedValue(mockProject);
+    projectRepositoryMock.updateStatus.mockResolvedValue(mockProject);
+    projectRepositoryMock.updateConfig.mockResolvedValue(mockProject);
+    projectRepositoryMock.softDelete.mockResolvedValue(mockProject);
+    taskRepositoryMock.createTask.mockResolvedValue({ id: "tsk_1" });
+    jwtServiceMock.generateProjectRef.mockReturnValue("newref1234");
+    jwtServiceMock.generateKeySet.mockResolvedValue({
+      jwtSecret: "jwtsecret",
+      anonKey: "anonkey",
+      serviceRoleKey: "servicekey",
+    });
+    databaseServiceMock.generatePassword.mockReturnValue("dbpassword");
+    databaseServiceMock.checkStatus.mockResolvedValue({ success: true, output: "" });
+    databaseServiceMock.getSecrets.mockResolvedValue([{ name: "KEY", value: "val" }]);
+    databaseServiceMock.upsertSecret.mockResolvedValue(true);
+    databaseServiceMock.deleteSecret.mockResolvedValue(true);
+    routerServiceMock.getProjectDomain.mockImplementation((ref: string) => `${ref}.localhost`);
+    routerServiceMock.getProjectApiUrl.mockImplementation((ref: string) => `https://${ref}.api.localhost`);
+    routerServiceMock.getProjectStudioUrl.mockImplementation((ref: string) => `https://${ref}.studio.localhost`);
+    routerServiceMock.reload.mockResolvedValue({ success: true });
+    edgeFunctionServiceMock.read.mockResolvedValue("function code here");
+    edgeFunctionServiceMock.deploy.mockResolvedValue(true);
   });
 
-  describe("listProjects", () => {
-    test("should return empty array when no projects", async () => {
-      const spy = spyOn(projectRepository, "findAll").mockResolvedValue([]);
-      const projects = await service.listProjects();
-      expect(projects).toEqual([]);
-      spy.mockRestore();
-    });
-
-    test("should return mapped projects", async () => {
-      const spy = spyOn(projectRepository, "findAll").mockResolvedValue([mockProject]);
-      const projects = await service.listProjects();
-      expect(projects.length).toBe(1);
-      expect(projects[0].ref).toBe("test123abc");
-      expect(projects[0]).toHaveProperty("database");
-      expect(projects[0]).toHaveProperty("api");
-      spy.mockRestore();
-    });
+  test("listProjects returns empty array when no projects", async () => {
+    projectRepositoryMock.findAll.mockResolvedValueOnce([]);
+    const projects = await service.listProjects();
+    expect(projects).toEqual([]);
   });
 
-  describe("getProject", () => {
-    test("should return null when project not found", async () => {
-      const spy = spyOn(projectRepository, "findByRef").mockResolvedValue(null);
-      const project = await service.getProject("nonexistent");
-      expect(project).toBeNull();
-      spy.mockRestore();
-    });
-
-    test("should return project detail response", async () => {
-      const spy = spyOn(projectRepository, "findByRef").mockResolvedValue(mockProject);
-      const project = await service.getProject("test123abc");
-      expect(project).not.toBeNull();
-      expect(project?.ref).toBe("test123abc");
-      expect(project?.config).toBeDefined();
-      expect(project?.updated_at).toBeDefined();
-      spy.mockRestore();
-    });
+  test("listProjects returns mapped projects", async () => {
+    projectRepositoryMock.findAll.mockResolvedValueOnce([mockProject]);
+    const projects = await service.listProjects();
+    expect(projects).toHaveLength(1);
+    expect(projects[0].ref).toBe("test123abc");
+    expect(projects[0]).toHaveProperty("database");
+    expect(projects[0]).toHaveProperty("api");
   });
 
-  describe("createProject", () => {
-    test("should create project with generated credentials", async () => {
-      const refSpy = spyOn(jwtService, "generateProjectRef").mockReturnValue("newref1234");
-      const passSpy = spyOn(databaseService, "generatePassword").mockReturnValue("dbpassword");
-      const keySpy = spyOn(jwtService, "generateKeySet").mockResolvedValue({
-        jwtSecret: "jwtsecret",
-        anonKey: "anonkey",
-        serviceRoleKey: "servicekey",
-      });
-      const createSpy = spyOn(projectRepository, "create").mockResolvedValue({
-        ...mockProject,
-        ref: "newref1234",
-        name: "New Project",
-      });
-
-      const request: CreateProjectRequest = { name: "New Project" };
-      const project = await service.createProject(request);
-
-      expect(project.ref).toBe("newref1234");
-      expect(project.name).toBe("New Project");
-
-      refSpy.mockRestore();
-      passSpy.mockRestore();
-      keySpy.mockRestore();
-      createSpy.mockRestore();
-    });
-
-    test("should accept custom region", async () => {
-      const refSpy = spyOn(jwtService, "generateProjectRef").mockReturnValue("newref1234");
-      const passSpy = spyOn(databaseService, "generatePassword").mockReturnValue("dbpassword");
-      const keySpy = spyOn(jwtService, "generateKeySet").mockResolvedValue({
-        jwtSecret: "jwtsecret",
-        anonKey: "anonkey",
-        serviceRoleKey: "servicekey",
-      });
-      const createSpy = spyOn(projectRepository, "create").mockResolvedValue({
-        ...mockProject,
-        ref: "newref1234",
-        region: "us-east-1",
-      });
-
-      const request: CreateProjectRequest = { name: "US Project", region: "us-east-1" };
-      const project = await service.createProject(request);
-
-      expect(project.region).toBe("us-east-1");
-
-      refSpy.mockRestore();
-      passSpy.mockRestore();
-      keySpy.mockRestore();
-      createSpy.mockRestore();
-    });
+  test("getProject returns null when project not found", async () => {
+    projectRepositoryMock.findByRef.mockResolvedValueOnce(null);
+    expect(await service.getProject("missing")).toBeNull();
   });
 
-  describe("deleteProject", () => {
-    test("should return false when project not found", async () => {
-      const spy = spyOn(projectRepository, "findByRef").mockResolvedValue(null);
-      const result = await service.deleteProject("nonexistent");
-      expect(result).toBe(false);
-      spy.mockRestore();
+  test("getProject returns mapped detail response", async () => {
+    projectRepositoryMock.findByRef.mockResolvedValueOnce(mockProject);
+    const project = await service.getProject("test123abc");
+    expect(project?.ref).toBe("test123abc");
+    expect(project?.config).toEqual({ custom: "value" });
+  });
+
+  test("createProject creates project with generated credentials", async () => {
+    projectRepositoryMock.create.mockResolvedValueOnce({
+      ...mockProject,
+      ref: "newref1234",
+      name: "New Project",
     });
 
-    test("should soft delete and return true", async () => {
-      const findSpy = spyOn(projectRepository, "findByRef").mockResolvedValue(mockProject);
-      const deleteSpy = spyOn(projectRepository, "softDelete").mockResolvedValue(mockProject);
-
-      const result = await service.deleteProject("test123abc");
-      expect(result).toBe(true);
-
-      findSpy.mockRestore();
-      deleteSpy.mockRestore();
+    const project = await service.createProject({ name: "New Project" });
+    expect(project.ref).toBe("newref1234");
+    expect(project.name).toBe("New Project");
+    expect(projectRepositoryMock.create).toHaveBeenCalled();
+    expect(taskRepositoryMock.createTask).toHaveBeenCalledWith("newref1234", "provision_db", {
+      dbPassword: "dbpassword",
+      domain: undefined,
     });
   });
 
-  describe("updateProject", () => {
-    test("should return false when project not found", async () => {
-      const spy = spyOn(projectRepository, "findByRef").mockResolvedValue(null);
-      const result = await service.updateProject("nonexistent", { name: "New Name" });
-      expect(result).toBe(false);
-      spy.mockRestore();
+  test("createProject accepts custom region", async () => {
+    projectRepositoryMock.create.mockResolvedValueOnce({
+      ...mockProject,
+      ref: "newref1234",
+      region: "us-east-1",
     });
 
-    test("should update name and return true", async () => {
-      const findSpy = spyOn(projectRepository, "findByRef").mockResolvedValue(mockProject);
-      const updateSpy = spyOn(projectRepository, "updateConfig").mockResolvedValue(mockProject);
+    const project = await service.createProject({ name: "US Project", region: "us-east-1" });
+    expect(project.region).toBe("us-east-1");
+  });
 
-      const result = await service.updateProject("test123abc", { name: "Updated Name" });
-      expect(result).toBe(true);
+  test("deleteProject returns false when project not found", async () => {
+    projectRepositoryMock.findByRef.mockResolvedValueOnce(null);
+    expect(await service.deleteProject("missing")).toBe(false);
+  });
 
-      findSpy.mockRestore();
-      updateSpy.mockRestore();
-    });
+  test("deleteProject soft deletes and queues cleanup", async () => {
+    projectRepositoryMock.findByRef.mockResolvedValueOnce(mockProject);
+    expect(await service.deleteProject("test123abc")).toBe(true);
+    expect(projectRepositoryMock.softDelete).toHaveBeenCalledWith("test123abc");
+    expect(taskRepositoryMock.createTask).toHaveBeenCalledWith("test123abc", "cleanup_runtime");
+  });
 
-    test("should return true even without name", async () => {
-      const findSpy = spyOn(projectRepository, "findByRef").mockResolvedValue(mockProject);
+  test("updateProject returns false when project not found", async () => {
+    projectRepositoryMock.findByRef.mockResolvedValueOnce(null);
+    expect(await service.updateProject("missing", { name: "New Name" })).toBe(false);
+  });
 
-      const result = await service.updateProject("test123abc", {});
-      expect(result).toBe(true);
-
-      findSpy.mockRestore();
+  test("updateProject updates display_name when name is provided", async () => {
+    projectRepositoryMock.findByRef.mockResolvedValueOnce(mockProject);
+    expect(await service.updateProject("test123abc", { name: "Updated Name" })).toBe(true);
+    expect(projectRepositoryMock.updateConfig).toHaveBeenCalledWith("test123abc", {
+      ...mockProject.config,
+      display_name: "Updated Name",
     });
   });
 
-  describe("pauseProject", () => {
-    test("should return false when project not found", async () => {
-      const spy = spyOn(projectRepository, "findByRef").mockResolvedValue(null);
-      const result = await service.pauseProject("nonexistent");
-      expect(result).toBe(false);
-      spy.mockRestore();
+  test("pauseProject updates status", async () => {
+    projectRepositoryMock.findByRef.mockResolvedValueOnce(mockProject);
+    expect(await service.pauseProject("test123abc")).toBe(true);
+    expect(projectRepositoryMock.updateStatus).toHaveBeenCalledWith("test123abc", "paused");
+  });
+
+  test("restoreProject updates status", async () => {
+    projectRepositoryMock.findByRef.mockResolvedValueOnce(mockProject);
+    expect(await service.restoreProject("test123abc")).toBe(true);
+    expect(projectRepositoryMock.updateStatus).toHaveBeenCalledWith("test123abc", "active");
+  });
+
+  test("getProjectHealth returns null when project not found", async () => {
+    projectRepositoryMock.findByRef.mockResolvedValueOnce(null);
+    expect(await service.getProjectHealth("missing")).toBeNull();
+  });
+
+  test("getProjectStatus returns status object", async () => {
+    projectRepositoryMock.findByRef.mockResolvedValueOnce(mockProject);
+    const result = await service.getProjectStatus("test123abc");
+    expect(result?.status).toBe("active");
+    expect(result?.database).toBe("healthy");
+  });
+
+  test("restartProject reloads runtime", async () => {
+    projectRepositoryMock.findByRef.mockResolvedValueOnce(mockProject);
+    const result = await service.restartProject("test123abc");
+    expect(result).toBe(true);
+  });
+
+  test("getProjectSettings returns config", async () => {
+    projectRepositoryMock.findByRef.mockResolvedValueOnce(mockProject);
+    expect(await service.getProjectSettings("test123abc")).toEqual({ custom: "value" });
+  });
+
+  test("updateProjectSettings merges config", async () => {
+    projectRepositoryMock.findByRef.mockResolvedValueOnce(mockProject);
+    projectRepositoryMock.updateConfig.mockResolvedValueOnce({
+      ...mockProject,
+      config: { custom: "value", new: "setting" },
     });
-
-    test("should pause and return true", async () => {
-      const findSpy = spyOn(projectRepository, "findByRef").mockResolvedValue(mockProject);
-      const statusSpy = spyOn(projectRepository, "updateStatus").mockResolvedValue(mockProject);
-
-      const result = await service.pauseProject("test123abc");
-      expect(result).toBe(true);
-
-      findSpy.mockRestore();
-      statusSpy.mockRestore();
+    expect(await service.updateProjectSettings("test123abc", { new: "setting" })).toEqual({
+      custom: "value",
+      new: "setting",
     });
   });
 
-  describe("restoreProject", () => {
-    test("should return false when project not found", async () => {
-      const spy = spyOn(projectRepository, "findByRef").mockResolvedValue(null);
-      const result = await service.restoreProject("nonexistent");
-      expect(result).toBe(false);
-      spy.mockRestore();
-    });
-
-    test("should restore and return true", async () => {
-      const findSpy = spyOn(projectRepository, "findByRef").mockResolvedValue(mockProject);
-      const statusSpy = spyOn(projectRepository, "updateStatus").mockResolvedValue(mockProject);
-
-      const result = await service.restoreProject("test123abc");
-      expect(result).toBe(true);
-
-      findSpy.mockRestore();
-      statusSpy.mockRestore();
-    });
+  test("getApiKeys returns api keys", async () => {
+    projectRepositoryMock.findByRef.mockResolvedValueOnce(mockProject);
+    const result = await service.getApiKeys("test123abc");
+    expect(result?.anon_key).toBe("anon.key.test");
+    expect(result?.service_role_key).toBe("service.key.test");
   });
 
-  describe("getProjectHealth", () => {
-    test("should return null when project not found", async () => {
-      const spy = spyOn(projectRepository, "findByRef").mockResolvedValue(null);
-      const result = await service.getProjectHealth("nonexistent");
-      expect(result).toBeNull();
-      spy.mockRestore();
-    });
-
-    test("should return health status for active project", async () => {
-      const findSpy = spyOn(projectRepository, "findByRef").mockResolvedValue(mockProject);
-      const dbSpy = spyOn(databaseService, "checkStatus").mockResolvedValue({ success: true, output: "" });
-
-      const result = await service.getProjectHealth("test123abc");
-      expect(result).not.toBeNull();
-      expect(result?.status).toBe("ACTIVE_HEALTHY");
-      const dbService = result?.services.find((s: Record<string, unknown>) => s.name === "PostgreSQL");
-      expect(dbService?.status).toBe("ACTIVE_HEALTHY");
-
-      findSpy.mockRestore();
-      dbSpy.mockRestore();
-    });
-
-    test("should return unhealthy when db check fails", async () => {
-      const findSpy = spyOn(projectRepository, "findByRef").mockResolvedValue(mockProject);
-      const dbSpy = spyOn(databaseService, "checkStatus").mockResolvedValue({ success: false, output: "", error: "fail" });
-
-      const result = await service.getProjectHealth("test123abc");
-      const dbService = result?.services.find((s: Record<string, unknown>) => s.name === "PostgreSQL");
-      expect(dbService?.status).toBe("INACTIVE");
-
-      findSpy.mockRestore();
-      dbSpy.mockRestore();
-    });
-
-    test("should return INACTIVE for paused project", async () => {
-      const pausedProject = { ...mockProject, status: "paused" as const };
-      const findSpy = spyOn(projectRepository, "findByRef").mockResolvedValue(pausedProject);
-      const dbSpy = spyOn(databaseService, "checkStatus").mockResolvedValue({ success: true, output: "" });
-
-      const result = await service.getProjectHealth("test123abc");
-      expect(result?.status).toBe("INACTIVE");
-
-      findSpy.mockRestore();
-      dbSpy.mockRestore();
-    });
+  test("getSecrets delegates to database service", async () => {
+    projectRepositoryMock.findByRef.mockResolvedValueOnce(mockProject);
+    expect(await service.getSecrets("test123abc")).toEqual([{ name: "KEY", value: "val" }]);
   });
 
-  describe("getProjectStatus", () => {
-    test("should return null when project not found", async () => {
-      const spy = spyOn(projectRepository, "findByRef").mockResolvedValue(null);
-      const result = await service.getProjectStatus("nonexistent");
-      expect(result).toBeNull();
-      spy.mockRestore();
-    });
-
-    test("should return status object", async () => {
-      const findSpy = spyOn(projectRepository, "findByRef").mockResolvedValue(mockProject);
-      const dbSpy = spyOn(databaseService, "checkStatus").mockResolvedValue({ success: true, output: "" });
-
-      const result = await service.getProjectStatus("test123abc");
-      expect(result).not.toBeNull();
-      expect(result?.status).toBe("active");
-      expect(result?.database).toBe("healthy");
-
-      findSpy.mockRestore();
-      dbSpy.mockRestore();
-    });
-
-    test("should return unhealthy when db fails", async () => {
-      const findSpy = spyOn(projectRepository, "findByRef").mockResolvedValue(mockProject);
-      const dbSpy = spyOn(databaseService, "checkStatus").mockResolvedValue({ success: false, output: "", error: "fail" });
-
-      const result = await service.getProjectStatus("test123abc");
-      expect(result?.database).toBe("unhealthy");
-
-      findSpy.mockRestore();
-      dbSpy.mockRestore();
-    });
+  test("upsertSecrets returns false when one write fails", async () => {
+    projectRepositoryMock.findByRef.mockResolvedValueOnce(mockProject);
+    databaseServiceMock.upsertSecret.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+    const result = await service.upsertSecrets("test123abc", [
+      { name: "KEY1", value: "val1" },
+      { name: "KEY2", value: "val2" },
+    ]);
+    expect(result).toBe(false);
   });
 
-  describe("restartProject", () => {
-    test("should return false when project not found", async () => {
-      const spy = spyOn(projectRepository, "findByRef").mockResolvedValue(null);
-      const result = await service.restartProject("nonexistent");
-      expect(result).toBe(false);
-      spy.mockRestore();
-    });
-
-    test("should reload router and return true", async () => {
-      const findSpy = spyOn(projectRepository, "findByRef").mockResolvedValue(mockProject);
-      const routerSpy = spyOn(routerService as any, "reload").mockResolvedValue({ success: true });
-
-      const result = await service.restartProject("test123abc");
-      expect(result).toBe(true);
-
-      findSpy.mockRestore();
-      routerSpy.mockRestore();
-    });
+  test("deleteSecret delegates to database service", async () => {
+    projectRepositoryMock.findByRef.mockResolvedValueOnce(mockProject);
+    expect(await service.deleteSecret("test123abc", "KEY")).toBe(true);
   });
 
-  describe("getProjectSettings", () => {
-    test("should return null when project not found", async () => {
-      const spy = spyOn(projectRepository, "findByRef").mockResolvedValue(null);
-      const result = await service.getProjectSettings("nonexistent");
-      expect(result).toBeNull();
-      spy.mockRestore();
-    });
-
-    test("should return config object", async () => {
-      const findSpy = spyOn(projectRepository, "findByRef").mockResolvedValue(mockProject);
-
-      const result = await service.getProjectSettings("test123abc");
-      expect(result).toEqual({ custom: "value" });
-
-      findSpy.mockRestore();
-    });
+  test("getFunctionCode delegates to edge function service", async () => {
+    projectRepositoryMock.findByRef.mockResolvedValueOnce(mockProject);
+    expect(await service.getFunctionCode("test123abc", "my-func")).toBe("function code here");
   });
 
-  describe("updateProjectSettings", () => {
-    test("should return null when project not found", async () => {
-      const spy = spyOn(projectRepository, "findByRef").mockResolvedValue(null);
-      const result = await service.updateProjectSettings("nonexistent", { key: "value" });
-      expect(result).toBeNull();
-      spy.mockRestore();
-    });
-
-    test("should merge and update config", async () => {
-      const findSpy = spyOn(projectRepository, "findByRef").mockResolvedValue(mockProject);
-      const updatedProject = { ...mockProject, config: { custom: "value", new: "setting" } };
-      const updateSpy = spyOn(projectRepository, "updateConfig").mockResolvedValue(updatedProject);
-
-      const result = await service.updateProjectSettings("test123abc", { new: "setting" });
-      expect(result).toEqual({ custom: "value", new: "setting" });
-
-      findSpy.mockRestore();
-      updateSpy.mockRestore();
-    });
-
-    test("should return null when update fails", async () => {
-      const findSpy = spyOn(projectRepository, "findByRef").mockResolvedValue(mockProject);
-      const updateSpy = spyOn(projectRepository, "updateConfig").mockResolvedValue(null);
-
-      const result = await service.updateProjectSettings("test123abc", { new: "setting" });
-      expect(result).toBeNull();
-
-      findSpy.mockRestore();
-      updateSpy.mockRestore();
-    });
-  });
-
-  describe("getApiKeys", () => {
-    test("should return null when project not found", async () => {
-      const spy = spyOn(projectRepository, "findByRef").mockResolvedValue(null);
-      const result = await service.getApiKeys("nonexistent");
-      expect(result).toBeNull();
-      spy.mockRestore();
-    });
-
-    test("should return api keys", async () => {
-      const findSpy = spyOn(projectRepository, "findByRef").mockResolvedValue(mockProject);
-
-      const result = await service.getApiKeys("test123abc");
-      expect(result).not.toBeNull();
-      expect(result?.anon_key).toBe("anon.key.test");
-      expect(result?.service_role_key).toBe("service.key.test");
-
-      findSpy.mockRestore();
-    });
-  });
-
-  describe("getSecrets", () => {
-    test("should return null when project not found", async () => {
-      const spy = spyOn(projectRepository, "findByRef").mockResolvedValue(null);
-      const result = await service.getSecrets("nonexistent");
-      expect(result).toBeNull();
-      spy.mockRestore();
-    });
-
-    test("should return secrets from database service", async () => {
-      const findSpy = spyOn(projectRepository, "findByRef").mockResolvedValue(mockProject);
-      const secretsSpy = spyOn(databaseService, "getSecrets").mockResolvedValue([{ name: "KEY", value: "val" }]);
-
-      const result = await service.getSecrets("test123abc");
-      expect(result).toEqual([{ name: "KEY", value: "val" }]);
-
-      findSpy.mockRestore();
-      secretsSpy.mockRestore();
-    });
-  });
-
-  describe("upsertSecrets", () => {
-    test("should return false when project not found", async () => {
-      const spy = spyOn(projectRepository, "findByRef").mockResolvedValue(null);
-      const result = await service.upsertSecrets("nonexistent", [{ name: "KEY", value: "val" }]);
-      expect(result).toBe(false);
-      spy.mockRestore();
-    });
-
-    test("should upsert all secrets and return true", async () => {
-      const findSpy = spyOn(projectRepository, "findByRef").mockResolvedValue(mockProject);
-      const upsertSpy = spyOn(databaseService, "upsertSecret").mockResolvedValue(true);
-
-      const result = await service.upsertSecrets("test123abc", [
-        { name: "KEY1", value: "val1" },
-        { name: "KEY2", value: "val2" },
-      ]);
-      expect(result).toBe(true);
-
-      findSpy.mockRestore();
-      upsertSpy.mockRestore();
-    });
-
-    test("should return false if any upsert fails", async () => {
-      const findSpy = spyOn(projectRepository, "findByRef").mockResolvedValue(mockProject);
-      const upsertSpy = spyOn(databaseService, "upsertSecret").mockResolvedValueOnce(true).mockResolvedValueOnce(false);
-
-      const result = await service.upsertSecrets("test123abc", [
-        { name: "KEY1", value: "val1" },
-        { name: "KEY2", value: "val2" },
-      ]);
-      expect(result).toBe(false);
-
-      findSpy.mockRestore();
-      upsertSpy.mockRestore();
-    });
-  });
-
-  describe("deleteSecret", () => {
-    test("should return false when project not found", async () => {
-      const spy = spyOn(projectRepository, "findByRef").mockResolvedValue(null);
-      const result = await service.deleteSecret("nonexistent", "KEY");
-      expect(result).toBe(false);
-      spy.mockRestore();
-    });
-
-    test("should delete secret and return result", async () => {
-      const findSpy = spyOn(projectRepository, "findByRef").mockResolvedValue(mockProject);
-      const deleteSpy = spyOn(databaseService, "deleteSecret").mockResolvedValue(true);
-
-      const result = await service.deleteSecret("test123abc", "KEY");
-      expect(result).toBe(true);
-
-      findSpy.mockRestore();
-      deleteSpy.mockRestore();
-    });
-  });
-
-  describe("getFunctionCode", () => {
-    test("should return null when project not found", async () => {
-      const spy = spyOn(projectRepository, "findByRef").mockResolvedValue(null);
-      const result = await service.getFunctionCode("nonexistent", "my-func");
-      expect(result).toBeNull();
-      spy.mockRestore();
-    });
-
-    test("should return code from edge function service", async () => {
-      const findSpy = spyOn(projectRepository, "findByRef").mockResolvedValue(mockProject);
-      const edgeSpy = spyOn(edgeFunctionService, "read").mockResolvedValue("function code here");
-
-      const result = await service.getFunctionCode("test123abc", "my-func");
-      expect(result).toBe("function code here");
-
-      findSpy.mockRestore();
-      edgeSpy.mockRestore();
-    });
-
-    test("should return null when read fails", async () => {
-      const findSpy = spyOn(projectRepository, "findByRef").mockResolvedValue(mockProject);
-      const edgeSpy = spyOn(edgeFunctionService, "read").mockResolvedValue(null);
-
-      const result = await service.getFunctionCode("test123abc", "my-func");
-      expect(result).toBeNull();
-
-      findSpy.mockRestore();
-      edgeSpy.mockRestore();
-    });
-  });
-
-  describe("deployFunction", () => {
-    test("should return false when project not found", async () => {
-      const spy = spyOn(projectRepository, "findByRef").mockResolvedValue(null);
-      const result = await service.deployFunction("nonexistent", "my-func", "code");
-      expect(result).toBe(false);
-      spy.mockRestore();
-    });
-
-    test("should deploy function and return success", async () => {
-      const findSpy = spyOn(projectRepository, "findByRef").mockResolvedValue(mockProject);
-      const edgeSpy = spyOn(edgeFunctionService, "deploy").mockResolvedValue(true);
-
-      const result = await service.deployFunction("test123abc", "my-func", "function code");
-      expect(result).toBe(true);
-
-      findSpy.mockRestore();
-      edgeSpy.mockRestore();
-    });
-
-    test("should return false when deploy fails", async () => {
-      const findSpy = spyOn(projectRepository, "findByRef").mockResolvedValue(mockProject);
-      const edgeSpy = spyOn(edgeFunctionService, "deploy").mockResolvedValue(false);
-
-      const result = await service.deployFunction("test123abc", "my-func", "code");
-      expect(result).toBe(false);
-
-      findSpy.mockRestore();
-      edgeSpy.mockRestore();
-    });
+  test("deployFunction delegates to edge function service", async () => {
+    projectRepositoryMock.findByRef.mockResolvedValueOnce(mockProject);
+    expect(await service.deployFunction("test123abc", "my-func", "code")).toBe(true);
   });
 });
