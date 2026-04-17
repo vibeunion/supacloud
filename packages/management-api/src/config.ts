@@ -173,6 +173,9 @@ export const config = {
 } satisfies Config;
 
 function validateConfig() {
+  // Allow utility scripts (db init, migrations) and CI to skip strict validation
+  const skipStrictCheck = !!process.env.SUPACLOUD_SKIP_CONFIG_CHECK || isGithubActions;
+
   const errors: string[] = [];
 
   if (!config.databaseUrl || !/^postgresql?:\/\//.test(config.databaseUrl)) {
@@ -200,7 +203,7 @@ function validateConfig() {
 
   if (errors.length > 0) {
     const msg = "Configuration validation failed:\n" + errors.map(e => `  - ${e}`).join("\n");
-    if (isDev) {
+    if (isDev || skipStrictCheck) {
       logger.warn(msg);
     } else {
       throw new Error(msg);
@@ -209,3 +212,4 @@ function validateConfig() {
 }
 
 validateConfig();
+
