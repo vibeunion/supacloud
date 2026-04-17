@@ -1,4 +1,5 @@
-import { describe, test, expect, beforeAll } from "bun:test";
+import { describe, test, expect, beforeAll, mock } from "bun:test";
+mock.restore();
 import { jwtService } from "../../src/services/jwt.service";
 
 describe("JwtService", () => {
