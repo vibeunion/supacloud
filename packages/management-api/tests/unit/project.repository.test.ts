@@ -1,5 +1,7 @@
 import { describe, test, expect, mock, beforeEach, afterEach } from "bun:test";
 
+mock.restore();
+
 // Mock the SQL module
 const mockProject = {
   id: "uuid-test123",

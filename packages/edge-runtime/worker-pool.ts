@@ -15,7 +15,7 @@ interface DispatchOptions {
 }
 
 const MAX_BODY_SIZE = 10 * 1024 * 1024;
-const MAX_QUEUE_SIZE = 200;
+const MAX_QUEUE_SIZE = Number(process.env.MAX_QUEUE_SIZE) || 200;
 
 export class WorkerPool {
   private workers: Worker[] = [];
@@ -32,7 +32,7 @@ export class WorkerPool {
     Worker,
     {
       cancelKey?: string;
-      replacementTimer?: Timer;
+      replacementTimer?: ReturnType<typeof setTimeout>;
       isCancelling?: boolean;
     }
   >();

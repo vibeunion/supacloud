@@ -1,4 +1,5 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, mock, test } from "bun:test";
+mock.restore();
 import { buildTaskListQuery } from "../../src/repositories/task.repository";
 
 describe("TaskRepository query builders", () => {
