@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.0](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.2.1...edge-runtime-v0.3.0) (2026-04-17)
+
+
+### 🚀 Features
+
+* **tasks:** deploy background task and message queue features to servers ([e66cdac](https://github.com/zuohuadong/supacloud/commit/e66cdac9c34f34990de5675ca75bfca9894cc3b4))
+* updates and fixes based on recent local changes ([449c710](https://github.com/zuohuadong/supacloud/commit/449c71089721658d25737ac7df1c196b3bc9bb1d))
+
 ## [0.2.1](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.2.0...edge-runtime-v0.2.1) (2026-04-16)
 
 
