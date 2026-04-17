@@ -471,12 +471,16 @@ if (API_URL) {
                 throw new Error(`Unauthorized: Server is scoped to project ${PROJECT_REF}`);
             }
             
+            const SAFE_SCHEMA = /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(schema) ? schema : null;
+            if (!SAFE_SCHEMA) {
+                throw new Error("Invalid schema name: must match [a-zA-Z_][a-zA-Z0-9_]*");
+            }
             const sqlCols = `
                 SELECT table_name, column_name, data_type, is_nullable, column_default 
                 FROM information_schema.columns 
-                WHERE table_schema = '${schema.replace(/'/g, "''")}';
+                WHERE table_schema = $1::text;
             `;
-            const colRes = await http.post(`/v1/projects/${ref}/database/sql`, { sql: sqlCols });
+            const colRes = await http.post(`/v1/projects/${ref}/database/sql`, { sql: sqlCols, params: [SAFE_SCHEMA] });
             
             let markdown = `# Database Schema: ${schema}\\n\\n`;
             if (colRes.ok && typeof colRes.data === 'object' && colRes.data && 'rows' in colRes.data) {

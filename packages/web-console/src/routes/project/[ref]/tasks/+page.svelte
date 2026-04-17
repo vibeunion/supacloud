@@ -22,6 +22,8 @@
   import dayjs from "dayjs";
 
   const projectRef = $derived(page.params.ref);
+  const routeFunctionSlug = $derived(page.url.searchParams.get("function_slug") ?? "");
+  const routeTaskId = $derived(page.url.searchParams.get("task_id") ?? "");
 
   type TaskRecord = {
     id: string;
@@ -78,6 +80,7 @@
   let isLoadingDetail = $state(false);
   let activeTab = $state<"all" | "dlq" | "settings">("all");
   let statusFilter = $state("");
+  let functionSlugFilter = $state("");
   let liveStatus = $state<"connected" | "connecting" | "disconnected">("connecting");
   let pollTimer: ReturnType<typeof setInterval> | null = null;
   let ws: WebSocket | null = null;
@@ -97,6 +100,7 @@
   function buildTaskPath(extra: string = "") {
     const query = new URLSearchParams();
     if (statusFilter) query.set("status", statusFilter);
+    if (functionSlugFilter) query.set("function_slug", functionSlugFilter);
     const suffix = query.toString() ? `?${query.toString()}` : "";
     return `/api/query?path=/v1/projects/${projectRef}/tasks${extra}${suffix}`;
   }
@@ -289,11 +293,32 @@
   }
 
   $effect(() => {
+    functionSlugFilter = routeFunctionSlug;
+  });
+
+  $effect(() => {
     if (autoScrollLogs && activeLogContainer) {
       queueMicrotask(() => {
         activeLogContainer!.scrollTop = activeLogContainer!.scrollHeight;
       });
     }
+  });
+
+  $effect(() => {
+    if (!routeTaskId) {
+      return;
+    }
+
+    const taskExists = [...tasks, ...dlqTasks].some((task) => task.id === routeTaskId);
+    if (!taskExists) {
+      return;
+    }
+
+    if (selectedTask?.id === routeTaskId) {
+      return;
+    }
+
+    void fetchTaskDetail(routeTaskId, true);
   });
 
   function getStatusIcon(status: string) {
@@ -410,11 +435,18 @@
         </div>
 
         {#if activeTab !== "settings"}
-          <input
-            bind:value={statusFilter}
-            placeholder="按状态筛选，例如 pending,running"
-            class="w-full sm:w-72 px-3 py-2 text-sm rounded-lg border bg-background focus:outline-none focus:ring-1 focus:ring-brand"
-          />
+          <div class="flex flex-1 flex-wrap items-center gap-2">
+            <input
+              bind:value={statusFilter}
+              placeholder="按状态筛选，例如 pending,running"
+              class="w-full sm:w-72 px-3 py-2 text-sm rounded-lg border bg-background focus:outline-none focus:ring-1 focus:ring-brand"
+            />
+            <input
+              bind:value={functionSlugFilter}
+              placeholder="按函数名筛选，例如 mockup-generator"
+              class="w-full sm:w-80 px-3 py-2 text-sm rounded-lg border bg-background focus:outline-none focus:ring-1 focus:ring-brand"
+            />
+          </div>
         {/if}
       </div>
 

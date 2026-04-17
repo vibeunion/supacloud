@@ -2,6 +2,7 @@
  * SupaCloud MCP Server – HTTP Transport Layer
  *
  * After SupaCloud is installed, manage projects via Management API (HTTP).
+ * Includes request timeout, retry with exponential backoff, and proper error handling.
  */
 
 export interface HttpConfig {
@@ -13,6 +14,43 @@ export interface HttpResult<T = unknown> {
     ok: boolean;
     status: number;
     data: T;
+}
+
+const DEFAULT_TIMEOUT = 30_000;
+const MAX_RETRIES = 2;
+const RETRY_BASE_DELAY = 500;
+
+async function fetchWithRetry(
+    url: string,
+    options: RequestInit,
+    retries = MAX_RETRIES,
+): Promise<Response> {
+    for (let attempt = 0; attempt <= retries; attempt++) {
+        try {
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT);
+            const res = await fetch(url, {
+                ...options,
+                signal: controller.signal,
+            });
+            clearTimeout(timeout);
+
+            if (res.status >= 500 && attempt < retries) {
+                const delay = RETRY_BASE_DELAY * Math.pow(2, attempt);
+                await new Promise(r => setTimeout(r, delay));
+                continue;
+            }
+            return res;
+        } catch (err: any) {
+            if (attempt < retries && (err.name === "AbortError" || err.code === "ECONNREFUSED" || err.code === "ECONNRESET")) {
+                const delay = RETRY_BASE_DELAY * Math.pow(2, attempt);
+                await new Promise(r => setTimeout(r, delay));
+                continue;
+            }
+            throw err;
+        }
+    }
+    throw new Error("Unreachable");
 }
 
 export class HttpTransport {
@@ -33,7 +71,7 @@ export class HttpTransport {
 
     async get<T = unknown>(path: string): Promise<HttpResult<T>> {
         try {
-            const res = await fetch(`${this.baseUrl}${path}`, {
+            const res = await fetchWithRetry(`${this.baseUrl}${path}`, {
                 method: "GET",
                 headers: this.headers(),
             });
@@ -46,7 +84,7 @@ export class HttpTransport {
 
     async post<T = unknown>(path: string, body?: unknown): Promise<HttpResult<T>> {
         try {
-            const res = await fetch(`${this.baseUrl}${path}`, {
+            const res = await fetchWithRetry(`${this.baseUrl}${path}`, {
                 method: "POST",
                 headers: this.headers(),
                 body: body ? JSON.stringify(body) : undefined,
@@ -61,7 +99,7 @@ export class HttpTransport {
     async postMultipart<T = unknown>(path: string, formData: FormData): Promise<HttpResult<T>> {
         try {
             const headers = { Authorization: `Bearer ${this.token}` };
-            const res = await fetch(`${this.baseUrl}${path}`, {
+            const res = await fetchWithRetry(`${this.baseUrl}${path}`, {
                 method: "POST",
                 headers,
                 body: formData,
@@ -75,7 +113,7 @@ export class HttpTransport {
 
     async patch<T = unknown>(path: string, body?: unknown): Promise<HttpResult<T>> {
         try {
-            const res = await fetch(`${this.baseUrl}${path}`, {
+            const res = await fetchWithRetry(`${this.baseUrl}${path}`, {
                 method: "PATCH",
                 headers: this.headers(),
                 body: body ? JSON.stringify(body) : undefined,
@@ -89,7 +127,7 @@ export class HttpTransport {
 
     async put<T = unknown>(path: string, body?: unknown): Promise<HttpResult<T>> {
         try {
-            const res = await fetch(`${this.baseUrl}${path}`, {
+            const res = await fetchWithRetry(`${this.baseUrl}${path}`, {
                 method: "PUT",
                 headers: this.headers(),
                 body: body ? JSON.stringify(body) : undefined,
@@ -103,7 +141,7 @@ export class HttpTransport {
 
     async delete<T = unknown>(path: string): Promise<HttpResult<T>> {
         try {
-            const res = await fetch(`${this.baseUrl}${path}`, {
+            const res = await fetchWithRetry(`${this.baseUrl}${path}`, {
                 method: "DELETE",
                 headers: this.headers(),
             });
@@ -114,7 +152,6 @@ export class HttpTransport {
         }
     }
 
-    /** Quick check if API is reachable */
     async ping(): Promise<boolean> {
         const res = await this.get("/v1/projects").catch(() => null);
         return res?.ok ?? false;
