@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.10.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.9.1...management-api-v0.10.0) (2026-04-17)
+
+
+### 🚀 Features
+
+* **tasks:** deploy background task and message queue features to servers ([e66cdac](https://github.com/zuohuadong/supacloud/commit/e66cdac9c34f34990de5675ca75bfca9894cc3b4))
+* updates and fixes based on recent local changes ([449c710](https://github.com/zuohuadong/supacloud/commit/449c71089721658d25737ac7df1c196b3bc9bb1d))
+
+
+### 🐛 Bug Fixes
+
+* **db:** remove index creation from ddlQuery to avoid execution failure on partial schema ([23a4546](https://github.com/zuohuadong/supacloud/commit/23a45468d6316b0550683e046560a6768e770890))
+* **db:** use sql.unsafe for sequential DDL execution to prevent prepared statement errors ([5e255c6](https://github.com/zuohuadong/supacloud/commit/5e255c690358e91f76507f522b8490b3cad02083))
+* **deps:** remove dredd, upgrade MCP SDK, override hono/path-to-regexp to eliminate 26 audit vulnerabilities ([695ef77](https://github.com/zuohuadong/supacloud/commit/695ef770b48f50174546f683294841da90e63223))
+* **tasks:** avoid malformed array literal issue in unsafe sql binding for ANY() ([cb2630a](https://github.com/zuohuadong/supacloud/commit/cb2630aa89ed8b2910965682d2724e971582fe7f))
+
 ## [0.9.1](https://github.com/zuohuadong/supacloud/compare/management-api-v0.9.0...management-api-v0.9.1) (2026-04-14)
 
 

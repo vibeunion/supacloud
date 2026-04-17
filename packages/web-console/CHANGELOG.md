@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.8.0](https://github.com/zuohuadong/supacloud/compare/web-console-v0.7.0...web-console-v0.8.0) (2026-04-17)
+
+
+### 🚀 Features
+
+* **tasks:** deploy background task and message queue features to servers ([e66cdac](https://github.com/zuohuadong/supacloud/commit/e66cdac9c34f34990de5675ca75bfca9894cc3b4))
+* updates and fixes based on recent local changes ([449c710](https://github.com/zuohuadong/supacloud/commit/449c71089721658d25737ac7df1c196b3bc9bb1d))
+
 ## [0.7.0](https://github.com/zuohuadong/supacloud/compare/web-console-v0.6.2...web-console-v0.7.0) (2026-04-14)
 
 
