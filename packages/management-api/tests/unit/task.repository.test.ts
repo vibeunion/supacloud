@@ -20,13 +20,14 @@ describe("TaskRepository query builders", () => {
       limit: 5,
     });
 
-    expect(sqlText).toContain("status = ANY($2)");
-    expect(sqlText).toContain("task_type = ANY($3)");
-    expect(sqlText).toContain("function_slug = $4");
+    expect(sqlText).toContain("status IN ($2, $3)");
+    expect(sqlText).toContain("task_type IN ($4)");
+    expect(sqlText).toContain("function_slug = $5");
     expect(values).toEqual([
       "proj_1",
-      ["failed", "dead_lettered"],
-      ["edge_function"],
+      "failed",
+      "dead_lettered",
+      "edge_function",
       "video-transcode",
       5,
     ]);

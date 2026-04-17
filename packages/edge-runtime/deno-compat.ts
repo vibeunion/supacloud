@@ -1,5 +1,3 @@
-import { stat, readdir, mkdir, rm } from "fs/promises";
-
 let capturedServeHandler: Function | null = null;
 export function getCapturedServeHandler() {
   return capturedServeHandler;
@@ -8,10 +6,16 @@ export function clearCapturedServeHandler() {
   capturedServeHandler = null;
 }
 
+let currentTenantRef: string | null = null;
+
+export function setTenantRef(ref: string | null) {
+  currentTenantRef = ref;
+}
+
 const ALLOWED_COMMANDS = new Set([
-  "echo", "printf", "date", "whoami", "env", "printenv",
-  "wc", "sort", "uniq", "head", "tail", "cut", "tr", "paste",
-  "base64", "basename", "dirname", "seq", "tee", "test",
+  "echo", "printf", "date",
+  "wc", "sort", "uniq", "tr", "paste",
+  "base64", "basename", "dirname", "seq",
   "true", "false", "yes", "sleep",
 ]);
 
@@ -20,28 +24,76 @@ function isCommandAllowed(cmd: string): boolean {
   return ALLOWED_COMMANDS.has(base);
 }
 
+const SANDBOX_DIR = process.env.EDGE_SANDBOX_DIR || "/tmp/edge-sandbox";
+
+function getSandboxPath(p: string): string {
+  const resolved = p.startsWith("/") ? p : `${process.cwd()}/${p}`;
+  const normalized = resolved.replace(/\/+/g, "/").replace(/\/\.\//g, "/");
+
+  const sandboxBase = currentTenantRef
+    ? `${SANDBOX_DIR}/${currentTenantRef}`
+    : SANDBOX_DIR;
+
+  if (!normalized.startsWith(sandboxBase + "/") && normalized !== sandboxBase) {
+    throw new Error(
+      `Path access denied: "${p}" is outside the sandbox directory. ` +
+      `Edge Functions can only access files under ${sandboxBase}/. ` +
+      `Use /tmp/edge-sandbox/<your-ref>/ for file operations.`
+    );
+  }
+  return normalized;
+}
+
 (globalThis as Record<string, unknown>).Deno = {
   env: {
     get: (k: string) => process.env[k],
-    set: (k: string, v: string) => {
-      process.env[k] = v;
+    set: (_k: string, _v: string) => {
+      throw new Error(
+        "Deno.env.set() is blocked in Edge Functions. " +
+        "Environment variables are read-only within function execution."
+      );
     },
-    delete: (k: string) => {
-      delete process.env[k];
+    delete: (_k: string) => {
+      throw new Error(
+        "Deno.env.delete() is blocked in Edge Functions. " +
+        "Environment variables are read-only within function execution."
+      );
     },
     has: (k: string) => k in (process.env as Record<string, unknown>),
-    toObject: () => ({ ...process.env }),
+    toObject: () => {
+      const safe: Record<string, string> = {};
+      const dangerous = /TOKEN|SECRET|PASSWORD|KEY|CREDENTIAL|PRIVATE/i;
+      for (const [k, v] of Object.entries(process.env)) {
+        if (v !== undefined && !dangerous.test(k)) {
+          safe[k] = v;
+        }
+      }
+      return safe;
+    },
   },
 
-  readTextFile: (p: string) => Bun.file(p).text(),
-  readFile: (p: string) =>
-    Bun.file(p)
+  readTextFile: (p: string) => {
+    const safePath = getSandboxPath(p);
+    return Bun.file(safePath).text();
+  },
+  readFile: (p: string) => {
+    const safePath = getSandboxPath(p);
+    return Bun.file(safePath)
       .arrayBuffer()
-      .then((b: ArrayBuffer) => new Uint8Array(b)),
-  writeTextFile: (p: string, d: string) => Bun.write(p, d).then(() => {}),
-  writeFile: (p: string, d: Uint8Array) => Bun.write(p, d).then(() => {}),
+      .then((b: ArrayBuffer) => new Uint8Array(b));
+  },
+  writeTextFile: (p: string, d: string) => {
+    const safePath = getSandboxPath(p);
+    return Bun.write(safePath, d).then(() => {});
+  },
+  writeFile: (p: string, d: Uint8Array) => {
+    const safePath = getSandboxPath(p);
+    return Bun.write(safePath, d).then(() => {});
+  },
   stat: async (p: string) => {
-    const s = await stat(p);
+    const safePath = getSandboxPath(p);
+    const fs = await import("fs/promises");
+    const s = await fs.stat(safePath);
     return {
       isFile: s.isFile(),
       isDirectory: s.isDirectory(),
@@ -50,7 +102,9 @@ function isCommandAllowed(cmd: string): boolean {
     };
   },
   readDir: async function* (p: string) {
-    const entries = await readdir(p, { withFileTypes: true });
+    const safePath = getSandboxPath(p);
+    const fs = await import("fs/promises");
+    const entries = await fs.readdir(safePath, { withFileTypes: true });
     for (const e of entries) {
       yield {
         name: e.name,
@@ -60,24 +114,35 @@ function isCommandAllowed(cmd: string): boolean {
       };
     }
   },
-  mkdir: (p: string, opts?: { recursive?: boolean }) => mkdir(p, opts),
-  remove: (p: string, opts?: { recursive?: boolean }) => rm(p, opts),
+  mkdir: (p: string, opts?: { recursive?: boolean }) => {
+    const safePath = getSandboxPath(p);
+    const fs = require("fs/promises");
+    return fs.mkdir(safePath, opts);
+  },
+  remove: (p: string, opts?: { recursive?: boolean }) => {
+    const safePath = getSandboxPath(p);
+    const fs = require("fs/promises");
+    return fs.rm(safePath, opts);
+  },
 
   readTextFileSync: (p: string) => {
-    const fs = require('fs');
-    return fs.readFileSync(p, 'utf-8');
+    const safePath = getSandboxPath(p);
+    const fs = require("fs");
+    return fs.readFileSync(safePath, "utf-8");
   },
   writeFileSync: (p: string, d: string | Uint8Array) => {
-    const fs = require('fs');
-    if (typeof d === 'string') {
-      fs.writeFileSync(p, d, 'utf-8');
+    const safePath = getSandboxPath(p);
+    const fs = require("fs");
+    if (typeof d === "string") {
+      fs.writeFileSync(safePath, d, "utf-8");
     } else {
-      fs.writeFileSync(p, d);
+      fs.writeFileSync(safePath, d);
     }
   },
   statSync: (p: string) => {
-    const fs = require('fs');
-    const s = fs.statSync(p);
+    const safePath = getSandboxPath(p);
+    const fs = require("fs");
+    const s = fs.statSync(safePath);
     return {
       isFile: s.isFile(),
       isDirectory: s.isDirectory(),
@@ -90,8 +155,9 @@ function isCommandAllowed(cmd: string): boolean {
     };
   },
   readDirSync: function* (p: string) {
-    const fs = require('fs');
-    const entries = fs.readdirSync(p, { withFileTypes: true });
+    const safePath = getSandboxPath(p);
+    const fs = require("fs");
+    const entries = fs.readdirSync(safePath, { withFileTypes: true });
     for (const e of entries) {
       yield {
         name: e.name,
@@ -102,16 +168,18 @@ function isCommandAllowed(cmd: string): boolean {
     }
   },
   removeSync: (p: string, opts?: { recursive?: boolean }) => {
-    const fs = require('fs');
+    const safePath = getSandboxPath(p);
+    const fs = require("fs");
     if (opts?.recursive) {
-      fs.rmSync(p, { recursive: true });
+      fs.rmSync(safePath, { recursive: true });
     } else {
-      fs.rmSync(p);
+      fs.rmSync(safePath);
     }
   },
   mkdirSync: (p: string, opts?: { recursive?: boolean }) => {
-    const fs = require('fs');
-    fs.mkdirSync(p, opts);
+    const safePath = getSandboxPath(p);
+    const fs = require("fs");
+    fs.mkdirSync(safePath, opts);
   },
 
   exit: (c?: number) => process.exit(c),
@@ -141,11 +209,21 @@ function isCommandAllowed(cmd: string): boolean {
     private args: string[];
     private opts: any;
 
-    constructor(cmd: string, opts?: { args?: string[]; cwd?: string; env?: Record<string, string>; stdin?: 'inherit' | 'piped' | 'null'; stdout?: 'inherit' | 'piped' | 'null'; stderr?: 'inherit' | 'piped' | 'null' }) {
+    constructor(
+      cmd: string,
+      opts?: {
+        args?: string[];
+        cwd?: string;
+        env?: Record<string, string>;
+        stdin?: "inherit" | "piped" | "null";
+        stdout?: "inherit" | "piped" | "null";
+        stderr?: "inherit" | "piped" | "null";
+      },
+    ) {
       if (!isCommandAllowed(cmd)) {
         throw new Error(
           `Deno.Command("${cmd}") is blocked for security. Allowed commands: ${[...ALLOWED_COMMANDS].join(", ")}. ` +
-          `Edge Functions run in a sandboxed environment and cannot execute arbitrary system commands.`
+            `Edge Functions run in a sandboxed environment and cannot execute arbitrary system commands.`,
         );
       }
       this.cmd = cmd;
@@ -156,22 +234,54 @@ function isCommandAllowed(cmd: string): boolean {
     async output() {
       const proc = Bun.spawn([this.cmd, ...this.args], {
         cwd: this.opts.cwd,
-        env: this.opts.env ? { ...process.env, ...this.opts.env } : process.env,
-        stdout: this.opts.stdout === 'piped' ? 'pipe' : (this.opts.stdout === 'null' ? 'ignore' : 'inherit'),
-        stderr: this.opts.stderr === 'piped' ? 'pipe' : (this.opts.stderr === 'null' ? 'ignore' : 'inherit'),
+        env: this.opts.env
+          ? { ...process.env, ...this.opts.env }
+          : process.env,
+        stdout:
+          this.opts.stdout === "piped"
+            ? "pipe"
+            : this.opts.stdout === "null"
+              ? "ignore"
+              : "inherit",
+        stderr:
+          this.opts.stderr === "piped"
+            ? "pipe"
+            : this.opts.stderr === "null"
+              ? "ignore"
+              : "inherit",
       });
       const exitCode = await proc.exited;
-      const stdout = proc.stdout ? await new Response(proc.stdout).arrayBuffer().then(b => new Uint8Array(b)) : new Uint8Array(0);
-      const stderr = proc.stderr ? await new Response(proc.stderr).arrayBuffer().then(b => new Uint8Array(b)) : new Uint8Array(0);
+      const stdout = proc.stdout
+        ? await new Response(proc.stdout)
+            .arrayBuffer()
+            .then((b) => new Uint8Array(b))
+        : new Uint8Array(0);
+      const stderr = proc.stderr
+        ? await new Response(proc.stderr)
+            .arrayBuffer()
+            .then((b) => new Uint8Array(b))
+        : new Uint8Array(0);
       return { stdout, stderr, code: exitCode, success: exitCode === 0 };
     }
 
     outputSync() {
       const proc = Bun.spawnSync([this.cmd, ...this.args], {
         cwd: this.opts.cwd,
-        env: this.opts.env ? { ...process.env, ...this.opts.env } : process.env,
-        stdout: this.opts.stdout === 'piped' ? 'pipe' : (this.opts.stdout === 'null' ? 'ignore' : 'inherit'),
-        stderr: this.opts.stderr === 'piped' ? 'pipe' : (this.opts.stderr === 'null' ? 'ignore' : 'inherit'),
+        env: this.opts.env
+          ? { ...process.env, ...this.opts.env }
+          : process.env,
+        stdout:
+          this.opts.stdout === "piped"
+            ? "pipe"
+            : this.opts.stdout === "null"
+              ? "ignore"
+              : "inherit",
+        stderr:
+          this.opts.stderr === "piped"
+            ? "pipe"
+            : this.opts.stderr === "null"
+              ? "ignore"
+              : "inherit",
       });
       return {
         stdout: new Uint8Array(proc.stdout?.buffer || new ArrayBuffer(0)),
@@ -184,10 +294,27 @@ function isCommandAllowed(cmd: string): boolean {
     spawn() {
       return Bun.spawn([this.cmd, ...this.args], {
         cwd: this.opts.cwd,
-        env: this.opts.env ? { ...process.env, ...this.opts.env } : process.env,
-        stdin: this.opts.stdin === 'piped' ? 'pipe' : (this.opts.stdin === 'null' ? 'ignore' : 'inherit'),
-        stdout: this.opts.stdout === 'piped' ? 'pipe' : (this.opts.stdout === 'null' ? 'ignore' : 'inherit'),
-        stderr: this.opts.stderr === 'piped' ? 'pipe' : (this.opts.stderr === 'null' ? 'ignore' : 'inherit'),
+        env: this.opts.env
+          ? { ...process.env, ...this.opts.env }
+          : process.env,
+        stdin:
+          this.opts.stdin === "piped"
+            ? "pipe"
+            : this.opts.stdin === "null"
+              ? "ignore"
+              : "inherit",
+        stdout:
+          this.opts.stdout === "piped"
+            ? "pipe"
+            : this.opts.stdout === "null"
+              ? "ignore"
+              : "inherit",
+        stderr:
+          this.opts.stderr === "piped"
+            ? "pipe"
+            : this.opts.stderr === "null"
+              ? "ignore"
+              : "inherit",
       });
     }
   },
@@ -212,10 +339,13 @@ function isCommandAllowed(cmd: string): boolean {
 
   inspect: (v: unknown) => JSON.stringify(v, null, 2),
 
-  upgradeWebSocket: (_req: Request, _opts?: { protocol?: string | string[] }) => {
+  upgradeWebSocket: (
+    _req: Request,
+    _opts?: { protocol?: string | string[] },
+  ) => {
     throw new Error(
       "Deno.upgradeWebSocket() is not supported in Bun Edge Runtime. " +
-      "Use the standard WebSocket API or return a Response with status 101 from your function handler."
+        "Use the standard WebSocket API or return a Response with status 101 from your function handler.",
     );
   },
 };
@@ -301,7 +431,8 @@ const kvStores = new Map<string, Map<string, { value: unknown; versionstamp: str
 let globalVersionCounter = 0;
 
 (globalThis as any).Deno.openKv = async (_path?: string) => {
-  const storeKey = `__kv_${_path || "__default"}`;
+  const tenantPrefix = currentTenantRef || "__unknown";
+  const storeKey = `__kv_${tenantPrefix}_${_path || "__default"}`;
   if (!kvStores.has(storeKey)) {
     kvStores.set(storeKey, new Map());
   }
@@ -377,4 +508,4 @@ let globalVersionCounter = 0;
   };
 };
 
-console.log("[Deno Compat] Loaded Deno API compatibility shim (sandboxed)");
+console.log("[Deno Compat] Loaded Deno API compatibility shim (sandboxed, fs restricted)");

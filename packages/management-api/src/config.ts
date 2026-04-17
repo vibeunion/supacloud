@@ -31,6 +31,7 @@ interface Config {
   managementApiInternal: string;
   studioInternal: string;
   edgeRuntimeInternal: string;
+  edgeRuntimeBackgroundInternal: string;
   kongInternal: string;
   postgrestBin: string;
   gotrueBin: string;
@@ -137,6 +138,7 @@ export const config = {
   managementApiInternal: getEnv("MANAGEMENT_API_INTERNAL", "127.0.0.1:9090"),
   studioInternal: getEnv("STUDIO_INTERNAL", "127.0.0.1:3000"),
   edgeRuntimeInternal: getEnv("EDGE_RUNTIME_INTERNAL", isGithubActions ? "127.0.0.1:9005" : "127.0.0.1:9000"),
+  edgeRuntimeBackgroundInternal: getEnv("EDGE_RUNTIME_BACKGROUND_INTERNAL", getEnv("EDGE_RUNTIME_INTERNAL", isGithubActions ? "127.0.0.1:9005" : "127.0.0.1:9000")),
   kongInternal: getEnv("KONG_INTERNAL", "127.0.0.1:8000"),
 
   postgrestBin: getEnv("POSTGREST_BIN", "postgrest"),
@@ -212,4 +214,3 @@ function validateConfig() {
 }
 
 validateConfig();
-

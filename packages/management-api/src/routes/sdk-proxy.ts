@@ -9,6 +9,19 @@ import { edgeFunctionService } from "../services/edge-function.service";
 import { projectService } from "../services/project.service";
 
 const MAX_ASYNC_BODY_BYTES = 256 * 1024;
+const SUPACLOUD_IDEMPOTENCY_HEADER = "x-supacloud-idempotency-key";
+
+function decodeJwtPayload(token: string): Record<string, unknown> | null {
+    try {
+        const [, payload] = token.split(".");
+        if (!payload) return null;
+        const normalized = payload.replace(/-/g, "+").replace(/_/g, "/");
+        const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "=");
+        return JSON.parse(Buffer.from(padded, "base64").toString("utf8"));
+    } catch {
+        return null;
+    }
+}
 
 function parsePositiveIntHeader(value: string | null): number | undefined {
     if (!value) return undefined;
@@ -70,6 +83,12 @@ async function maybeEnqueueAsyncFunction(request: Request, ref: string): Promise
             "x-supacloud-async",
             "x-supacloud-retries",
             "x-supacloud-timeout",
+            SUPACLOUD_IDEMPOTENCY_HEADER,
+            "x-idempotency-key",
+            "authorization",
+            "apikey",
+            "cookie",
+            "x-supacloud-internal-auth",
         ].includes(lower)) {
             return;
         }
@@ -80,8 +99,22 @@ async function maybeEnqueueAsyncFunction(request: Request, ref: string): Promise
     const authHeaders: Record<string, string> = {};
     const authorization = request.headers.get("authorization");
     const apikey = request.headers.get("apikey");
-    if (authorization) authHeaders["authorization"] = authorization;
-    if (apikey) authHeaders["apikey"] = apikey;
+    const projectKeys = await projectService.getApiKeys(ref);
+    const authPayload = authorization?.startsWith("Bearer ")
+        ? decodeJwtPayload(authorization.replace(/^Bearer\s+/i, ""))
+        : null;
+    const authKind = authorization
+        ? "jwt"
+        : apikey
+            ? "apikey"
+            : "none";
+    const apikeyKind = apikey
+        ? apikey === projectKeys?.anon_key
+            ? "anon"
+            : apikey === projectKeys?.service_role_key
+                ? "service_role"
+                : "unknown"
+        : null;
 
     const fnConfig = await edgeFunctionService.getConfig(ref, functionSlug);
 
@@ -92,7 +125,7 @@ async function maybeEnqueueAsyncFunction(request: Request, ref: string): Promise
         timeoutSec,
         maxAttempts,
         maxPayloadBytes,
-        idempotencyKey: request.headers.get("x-idempotency-key"),
+        idempotencyKey: request.headers.get(SUPACLOUD_IDEMPOTENCY_HEADER),
         traceId,
         envelope: {
             method: request.method,
@@ -103,9 +136,12 @@ async function maybeEnqueueAsyncFunction(request: Request, ref: string): Promise
             body_encoding: "utf8",
             requested_timeout_sec: timeoutSec,
             auth: {
+                kind: authKind,
                 authorization,
                 apikey,
-                headers: authHeaders,
+                invoker_user_id: typeof authPayload?.sub === "string" ? authPayload.sub : null,
+                invoker_role: typeof authPayload?.role === "string" ? authPayload.role : null,
+                apikey_kind: apikeyKind,
             },
         },
     });

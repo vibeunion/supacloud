@@ -4,7 +4,6 @@ import cors from "@elysiajs/cors";
 import { WorkerPool } from "./worker-pool";
 import { loadTenantEnv } from "./tenant-env";
 import path from "path";
-import { execSync } from "child_process";
 
 const PORT = Number(process.env.EDGE_RUNTIME_PORT) || Number(process.env.PORT) || 9000;
 const POOL_SIZE = Number(process.env.WORKER_POOL_SIZE) || 4;
@@ -50,10 +49,19 @@ async function dispatchFunction(
     }) => void;
   },
 ) {
-  const functionId = `${projectRef}_${functionName}`;
+  const requestedVersion = request.headers.get("x-supacloud-function-version") || null;
+  const versionSuffix = requestedVersion ? `_v${requestedVersion}` : "";
+  const functionId = `${projectRef}_${functionName}${versionSuffix}`;
+  const versionedJsPath = requestedVersion
+    ? path.resolve(FUNCTIONS_DIR, projectRef, `${functionName}.v${requestedVersion}.js`)
+    : null;
   const jsPath = path.resolve(FUNCTIONS_DIR, projectRef, `${functionName}.js`);
   const tsPath = path.resolve(FUNCTIONS_DIR, projectRef, `${functionName}.ts`);
-  const functionPath = (await Bun.file(jsPath).exists()) ? jsPath : tsPath;
+  const functionPath = versionedJsPath && (await Bun.file(versionedJsPath).exists())
+    ? versionedJsPath
+    : (await Bun.file(jsPath).exists())
+      ? jsPath
+      : tsPath;
 
   try {
     const targetPool = opts?.background ? backgroundPool : pool;
@@ -85,8 +93,38 @@ async function dispatchFunction(
 }
 
 function verifyInternalBackgroundAuth(request: Request): boolean {
-  const token = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
+  const internalHeader = request.headers.get("x-supacloud-internal-auth");
+  const token = (internalHeader || request.headers.get("authorization"))?.replace(/^Bearer\s+/i, "");
   return !!MASTER_TOKEN && token === MASTER_TOKEN;
+}
+
+function buildBackgroundForwardedRequest(request: Request): Request {
+  const headers = new Headers(request.headers);
+  const originalAuthorization = headers.get("x-supacloud-auth-authorization");
+  const originalApikey = headers.get("x-supacloud-auth-apikey");
+
+  headers.delete("x-supacloud-internal-auth");
+  headers.delete("x-supacloud-auth-authorization");
+  headers.delete("x-supacloud-auth-apikey");
+
+  if (originalAuthorization) {
+    headers.set("authorization", originalAuthorization);
+  } else {
+    headers.delete("authorization");
+  }
+
+  if (originalApikey) {
+    headers.set("apikey", originalApikey);
+  } else {
+    headers.delete("apikey");
+  }
+
+  return new Request(request.url, {
+    method: request.method,
+    headers,
+    body: ["GET", "HEAD"].includes(request.method) ? undefined : request.body,
+    duplex: ["GET", "HEAD"].includes(request.method) ? undefined : "half",
+  } as RequestInit & { duplex?: "half" });
 }
 
 const configCache = new Map<
@@ -325,10 +363,11 @@ const app = new Elysia()
       message: string;
     }> = [];
 
+    const forwardedRequest = buildBackgroundForwardedRequest(c.request);
     const response = await dispatchFunction(
       c.params.ref,
       c.params.functionName,
-      c.request,
+      forwardedRequest,
       setHeaders,
       {
         background: true,

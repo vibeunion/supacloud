@@ -1,5 +1,6 @@
 import { Elysia, status, t } from "elysia";
 import { taskRepository } from "../repositories/task.repository";
+import { TaskStatus } from "../db";
 import { backgroundFunctionWorker, projectService } from "../services";
 
 export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
@@ -107,15 +108,33 @@ export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
                 return status(404, { message: "Task not found", code: "404" });
             }
 
-            if (current.status === "running" || current.status === "leased") {
-                await backgroundFunctionWorker.cancel(params.taskId);
+            if (
+                current.status === TaskStatus.SUCCEEDED ||
+                current.status === TaskStatus.FAILED ||
+                current.status === TaskStatus.DEAD_LETTERED ||
+                current.status === TaskStatus.CANCELLED
+            ) {
+                return status(409, { message: "Task is already completed", code: "409" });
             }
 
-            const task = await taskRepository.cancelTask(params.taskId, "Cancelled by user");
+            if (current.status === TaskStatus.RUNNING || current.status === TaskStatus.LEASED) {
+                const requested = await backgroundFunctionWorker.cancel(params.taskId);
+                if (!requested) {
+                    return status(409, { message: "Task cancellation could not be scheduled", code: "409" });
+                }
+                const updated = await taskRepository.getTaskById(params.taskId, params.ref);
+                if (!updated) {
+                    return status(404, { message: "Task not found", code: "404" });
+                }
+                return updated;
+            }
+
+            const task = await backgroundFunctionWorker.cancel(params.taskId);
             if (!task) {
                 return status(404, { message: "Task not found", code: "404" });
             }
-            return task;
+            const updated = await taskRepository.getTaskById(params.taskId, params.ref);
+            return updated || status(404, { message: "Task not found", code: "404" });
         } catch (err: unknown) {
             return status(500, { message: "Failed to cancel task", code: "500", details: (err instanceof Error ? err.message : String(err)) });
         }

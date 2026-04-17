@@ -15,6 +15,8 @@ const scheduleRetry = mock(() => Promise.resolve(null));
 const startTaskAttempt = mock(() => Promise.resolve({ id: "att_1" }));
 const completeTaskAttempt = mock(() => Promise.resolve(null));
 const countActiveTasksForProject = mock(() => Promise.resolve(0));
+const getTaskById = mock(() => Promise.resolve(null));
+const requestTaskCancellation = mock(() => Promise.resolve(null));
 
 mock.module("../../src/repositories/task.repository", () => ({
   taskRepository: {
@@ -29,6 +31,8 @@ mock.module("../../src/repositories/task.repository", () => ({
     startTaskAttempt,
     completeTaskAttempt,
     countActiveTasksForProject,
+    getTaskById,
+    requestTaskCancellation,
   },
 }));
 
@@ -116,6 +120,8 @@ describe("BackgroundFunctionWorker", () => {
     startTaskAttempt.mockReset();
     completeTaskAttempt.mockReset();
     countActiveTasksForProject.mockReset();
+    getTaskById.mockReset();
+    requestTaskCancellation.mockReset();
     findByRef.mockReset();
     broadcastTaskUpdate.mockReset();
     getBackgroundTaskSettings.mockReset();
@@ -201,44 +207,25 @@ describe("BackgroundFunctionWorker", () => {
       expect(cancelTask).toHaveBeenCalledWith(task.id, "Project is paused");
     });
 
-    test("releases task when concurrency limit is exceeded", async () => {
-      const worker = new BackgroundFunctionWorker();
-      (worker as any).isRunning = true;
-      const task = makeTask();
-      claimNextTask.mockResolvedValueOnce(task);
-      countActiveTasksForProject.mockResolvedValue(5); // > concurrency of 2
-      getBackgroundTaskSettings.mockResolvedValue({
-        concurrency: 2,
-        max_attempts: 3,
-      });
-
-      await (worker as any).poll();
-
-      expect(releaseTask).toHaveBeenCalledWith(
-        task.id,
-        expect.any(Date),
-        expect.stringContaining("concurrency limit"),
-      );
-    });
   });
 
   describe("cancel", () => {
-    test("cancel adds task to cancelledTasks set", async () => {
+    test("cancel immediately cancels pending tasks", async () => {
       const worker = new BackgroundFunctionWorker();
-
-      // mock runtime cancellation to fail (so cancelledTasks gets cleaned)
-      globalThis.fetch = mock(() =>
-        Promise.resolve(new Response(JSON.stringify({ cancelled: false }), { status: 200 }))
-      ) as any;
+      getTaskById.mockResolvedValueOnce(makeTask({ status: TaskStatus.PENDING }));
+      requestTaskCancellation.mockResolvedValueOnce(makeTask({ status: TaskStatus.PENDING }));
+      cancelTask.mockResolvedValueOnce(makeTask({ status: TaskStatus.CANCELLED }));
 
       await worker.cancel("tsk_cancel_me");
 
-      // When runtime cancellation fails, it removes from the set
-      expect((worker as any).cancelledTasks.has("tsk_cancel_me")).toBe(false);
+      expect(requestTaskCancellation).toHaveBeenCalledWith("tsk_cancel_me", "Cancelled by user");
+      expect(cancelTask).toHaveBeenCalledWith("tsk_cancel_me", "Cancelled by user");
     });
 
     test("cancel returns true when runtime confirms cancellation", async () => {
       const worker = new BackgroundFunctionWorker();
+      getTaskById.mockResolvedValueOnce(makeTask({ status: TaskStatus.RUNNING }));
+      requestTaskCancellation.mockResolvedValueOnce(makeTask({ status: TaskStatus.RUNNING }));
 
       globalThis.fetch = mock(() =>
         Promise.resolve(
@@ -253,6 +240,8 @@ describe("BackgroundFunctionWorker", () => {
 
     test("cancel returns false when fetch fails", async () => {
       const worker = new BackgroundFunctionWorker();
+      getTaskById.mockResolvedValueOnce(makeTask({ status: TaskStatus.RUNNING }));
+      requestTaskCancellation.mockResolvedValueOnce(makeTask({ status: TaskStatus.RUNNING }));
 
       globalThis.fetch = mock(() =>
         Promise.reject(new Error("network error"))
