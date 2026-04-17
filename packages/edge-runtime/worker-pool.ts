@@ -14,7 +14,8 @@ interface DispatchOptions {
   }) => void;
 }
 
-const MAX_BODY_SIZE = 10 * 1024 * 1024; // 10MB limit
+const MAX_BODY_SIZE = 10 * 1024 * 1024;
+const MAX_QUEUE_SIZE = 200;
 
 export class WorkerPool {
   private workers: Worker[] = [];
@@ -35,9 +36,8 @@ export class WorkerPool {
       isCancelling?: boolean;
     }
   >();
-  // Workers marked for replacement after they finish their current request.
-  // This avoids dropping in-flight requests while ensuring stale module caches are purged.
   private tainted = new Set<Worker>();
+  private draining = false;
 
   constructor(private config: { size: number; requestTimeout: number }) {
     for (let i = 0; i < config.size; i++) {
@@ -55,8 +55,23 @@ export class WorkerPool {
   }
 
   async dispatch(opts: DispatchOptions): Promise<Response> {
+    if (this.draining) {
+      return new Response(JSON.stringify({ error: "Server is shutting down" }), {
+        status: 503,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
     this.totalRequests++;
     return new Promise<Response>((resolve, reject) => {
+      if (this.queue.length >= MAX_QUEUE_SIZE) {
+        resolve(new Response(JSON.stringify({ error: "Too many concurrent requests, please retry" }), {
+          status: 503,
+          headers: { "Content-Type": "application/json", "Retry-After": "5" },
+        }));
+        return;
+      }
+
       const worker = this.idle.pop();
       if (worker) {
         this.execute(worker, opts, resolve).catch(reject);
@@ -80,7 +95,7 @@ export class WorkerPool {
 
     let resolved = false;
     const safeResolve = (r: Response) => {
-      if (resolved) return; // Prevent double-resolve (e.g. timeout + late response)
+      if (resolved) return;
       resolved = true;
       resolve(r);
     };
@@ -113,17 +128,14 @@ export class WorkerPool {
       this.recycle(worker);
     }, this.config.requestTimeout);
 
-    // Preserve duplicate headers (e.g. set-cookie) by using getSetCookie() + entries()
     const headers: Record<string, string | string[]> = {};
     opts.request.headers.forEach((v, k) => {
       const lower = k.toLowerCase();
       if (lower === "set-cookie") {
-        // Handled below
       } else {
         headers[k] = v;
       }
     });
-    // set-cookie must be sent as an array to preserve multiple values
     const cookies = (opts.request.headers as any).getSetCookie?.();
     if (cookies && cookies.length > 0) {
       headers["set-cookie"] = cookies;
@@ -131,7 +143,6 @@ export class WorkerPool {
 
     let body: ArrayBuffer | null = null;
     if (opts.request.body && !["GET", "HEAD"].includes(opts.request.method)) {
-      // Enforce body size limit to prevent OOM
       const contentLength = opts.request.headers.get("content-length");
       if (contentLength && parseInt(contentLength) > MAX_BODY_SIZE) {
         clearCancellationState();
@@ -190,7 +201,6 @@ export class WorkerPool {
           try {
             worker.postMessage({ type: "cancel_current" });
           } catch {
-            // ignore
           }
           cleanupInFlight();
           if (current) {
@@ -237,7 +247,6 @@ export class WorkerPool {
       worker.removeListener("error", onErr);
       worker.removeListener("message", onMsg);
 
-      // Reconstruct Headers from the serialized map, preserving multi-value headers
       const resHeaders = new Headers();
       for (const [k, v] of Object.entries(msg.headers)) {
         if (Array.isArray(v)) {
@@ -248,7 +257,6 @@ export class WorkerPool {
       }
 
       if (msg.type === "stream_start" && msg.streamId) {
-        // Streaming response: create a ReadableStream backed by custom message events
         const streamId = msg.streamId;
         let recycled = false;
         const recycle = () => {
@@ -289,7 +297,6 @@ export class WorkerPool {
             headers: resHeaders,
           }),
         );
-        // Worker is recycled only after the stream ends (via recycle callback above)
       } else {
         safeResolve(
           new Response(msg.body, {
@@ -325,13 +332,9 @@ export class WorkerPool {
       metadata.cancelKey = undefined;
       metadata.isCancelling = false;
     }
-    // If the worker is tainted (stale module cache), replace it with a fresh one
-    // instead of returning it to the idle pool.
     if (this.tainted.has(worker)) {
       this.tainted.delete(worker);
       this.replaceWorker(worker);
-      // The fresh worker was pushed to idle by replaceWorker;
-      // drain the queue if there are pending requests.
       if (this.queue.length > 0 && this.idle.length > 0) {
         const fresh = this.idle.pop()!;
         const next = this.queue.shift()!;
@@ -354,14 +357,13 @@ export class WorkerPool {
     this.workerMetadata.delete(dead);
     const idx = this.workers.indexOf(dead);
     if (idx !== -1) this.workers.splice(idx, 1);
-    this.activeWorkers.delete(dead); // Remove from tracking set
+    this.activeWorkers.delete(dead);
     try {
       dead.terminate();
     } catch {
-      /* ignore */
     }
     const w = this.createWorker();
-    this.activeWorkers.add(w); // Track new worker
+    this.activeWorkers.add(w);
     this.idle.push(w);
   }
 
@@ -376,29 +378,16 @@ export class WorkerPool {
     ].join("\n");
   }
 
-  /**
-   * Invalidate all workers' module caches by replacing them.
-   *
-   * Strategy (graceful, zero-downtime):
-   *   - Idle workers → terminate immediately, replace with fresh ones
-   *   - Busy workers → mark as "tainted"; they'll be replaced in recycle()
-   *     after their current request completes (no in-flight drops)
-   *
-   * This is the same approach used by Deno Deploy and Cloudflare Workers:
-   * new Worker threads have completely clean module caches, eliminating
-   * Bun's import() cache staleness issue without hacks or memory leaks.
-   */
   invalidateModule(functionId: string): void {
     this.totalInvalidations++;
     console.log(`[Pool] Invalidating module: ${functionId} — replacing all workers`);
 
-    // 1. Replace all idle workers immediately
     const freshIdle: Worker[] = [];
     for (const w of this.idle) {
       this.activeWorkers.delete(w);
       const idx = this.workers.indexOf(w);
       if (idx !== -1) this.workers.splice(idx, 1);
-      try { w.terminate(); } catch { /* ignore */ }
+      try { w.terminate(); } catch { }
 
       const fresh = this.createWorker();
       this.activeWorkers.add(fresh);
@@ -406,7 +395,6 @@ export class WorkerPool {
     }
     this.idle = freshIdle;
 
-    // 2. Mark all busy workers as tainted — they'll be replaced in recycle()
     for (const w of this.activeWorkers) {
       if (!this.idle.includes(w)) {
         this.tainted.add(w);
@@ -414,28 +402,25 @@ export class WorkerPool {
     }
   }
 
-  /**
-   * Pre-heat a function in the worker pool — import the module ahead of time
-   * so the first real request has zero cold-start latency.
-   * Only pre-heats in one idle worker (the module will be cached in LRU).
-   */
   preheat(functionId: string, functionPath: string): Promise<boolean> {
     return new Promise((resolve) => {
-      const worker = this.idle[0]; // peek at first idle worker without removing it
+      const worker = this.idle.pop();
       if (!worker) {
-        resolve(false); // No idle workers available
+        resolve(false);
         return;
       }
 
       const timeout = setTimeout(() => {
         worker.removeListener("message", onMsg);
-        resolve(false); // Preheat timed out
+        this.idle.push(worker);
+        resolve(false);
       }, 10000);
 
       const onMsg = (msg: { type?: string; functionId?: string }) => {
         if (msg.type === "preheat_done" && msg.functionId === functionId) {
           clearTimeout(timeout);
           worker.removeListener("message", onMsg);
+          this.idle.push(worker);
           resolve(true);
         } else if (
           msg.type === "preheat_error" &&
@@ -443,10 +428,9 @@ export class WorkerPool {
         ) {
           clearTimeout(timeout);
           worker.removeListener("message", onMsg);
+          this.idle.push(worker);
           resolve(false);
         }
-        // Non-matching messages (normal request responses) are ignored;
-        // the listener stays until preheat completes or times out.
       };
 
       worker.on("message", onMsg);
@@ -482,5 +466,31 @@ export class WorkerPool {
     if (!inFlight) return false;
     inFlight.cancel();
     return true;
+  }
+
+  get activeCount(): number {
+    return this.inFlight.size;
+  }
+
+  drain(): Promise<void> {
+    this.draining = true;
+    for (const entry of this.queue) {
+      entry.resolve(new Response(JSON.stringify({ error: "Server shutting down" }), {
+        status: 503,
+        headers: { "Content-Type": "application/json" },
+      }));
+    }
+    this.queue = [];
+
+    return new Promise((resolve) => {
+      const check = () => {
+        if (this.inFlight.size === 0) {
+          resolve();
+          return;
+        }
+        setTimeout(check, 500);
+      };
+      check();
+    });
   }
 }

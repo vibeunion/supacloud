@@ -1,97 +1,111 @@
-/**
- * Load tenant-specific environment variables for Edge Function execution.
- *
- * Priority (last write wins):
- *   1. Static file: /etc/supabase/tenants/{ref}.env (base config, PostgREST etc.)
- *   2. Database: project_secrets table via Management API (user-managed Secrets)
- *
- * Secrets from DB are fetched on every function invocation — no restart needed
- * when users update secrets via Dashboard/MCP/API.
- */
-
-const TENANTS_DIRS = [
-  process.env.TENANTS_DIR,
-  process.env.TENANT_CONFIG_DIR,
-  "/opt/supabase/volumes/api/kong_tenants", // management API default
-  "/etc/supabase/tenants", // legacy fallback
-].filter(Boolean) as string[];
-
 const MGMT_API = process.env.MANAGEMENT_API_URL || "http://127.0.0.1:9090";
 const MASTER_TOKEN = process.env.MASTER_TOKEN || "";
 
-// In-memory cache with TTL to avoid hammering the API on rapid requests
-const cache = new Map<
-  string,
-  { env: Record<string, string>; expiresAt: number }
->();
-const CACHE_TTL_MS = 5_000; // 5 seconds — short enough to feel "instant" on update
+const TENANTS_DIRS = [
+  process.env.TENANTS_DIR || "/etc/supabase/tenants",
+  "/opt/supacloud/tenants",
+];
 
-/** Load env from static .env file (base layer), trying multiple directories in order */
-async function loadEnvFile(
-  projectRef: string,
-): Promise<Record<string, string>> {
-  const envMap: Record<string, string> = {};
+const envCache = new Map<string, { env: Record<string, string>; expiresAt: number }>();
+const ENV_CACHE_TTL = 5_000;
+
+function parseEnvFile(content: string): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const rawLine of content.split("\n")) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#")) continue;
+
+    const match = line.match(/^([^#=\s]+)\s*=\s*(.*)$/);
+    if (!match) continue;
+
+    const [, key, rawValue] = match;
+    let value = rawValue.trim();
+
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    } else {
+      const inlineComment = value.match(/\s+#.*$/);
+      if (inlineComment) {
+        value = value.slice(0, inlineComment.index).trimEnd();
+      }
+    }
+
+    env[key] = value;
+  }
+  return env;
+}
+
+async function loadEnvFromFile(ref: string): Promise<Record<string, string>> {
   for (const dir of TENANTS_DIRS) {
+    const envPath = `${dir}/${ref}.env`;
     try {
-      const text = await Bun.file(`${dir}/${projectRef}.env`).text();
-      for (const line of text.split("\n")) {
-        const match = line.match(/^([^#=][^=]*)=(.*)$/);
-        if (match) {
-          envMap[match[1].trim()] = match[2].trim();
-        }
+      const file = Bun.file(envPath);
+      if (await file.exists()) {
+        const content = await file.text();
+        return parseEnvFile(content);
       }
-      // Found a file, stop searching
-      break;
-    } catch {
-      // Try next directory
-    }
+    } catch {}
   }
-  return envMap;
+  return {};
 }
 
-/** Load secrets from Management API (database-backed, user-managed) */
-async function loadSecretsFromApi(
-  projectRef: string,
-): Promise<Record<string, string>> {
-  const envMap: Record<string, string> = {};
-  if (!MASTER_TOKEN) return envMap; // Can't query without auth
-
+async function loadEnvFromApi(ref: string): Promise<Record<string, string> | null> {
   try {
-    const res = await fetch(`${MGMT_API}/v1/projects/${projectRef}/secrets`, {
+    const res = await fetch(`${MGMT_API}/v1/projects/${ref}/secrets`, {
       headers: { Authorization: `Bearer ${MASTER_TOKEN}` },
-      signal: AbortSignal.timeout(3000), // Don't block function execution
+      signal: AbortSignal.timeout(5000),
     });
-    if (res.ok) {
-      const secrets: { name: string; value: string }[] = await res.json();
-      for (const s of secrets) {
-        envMap[s.name] = s.value;
-      }
+
+    if (!res.ok) {
+      console.warn(
+        `[tenant-env] API returned ${res.status} for ${ref}, falling back to stale cache or file`
+      );
+      return null;
     }
-  } catch {
-    // API unreachable — proceed with file-only env
+
+    const secrets = (await res.json()) as Array<{
+      name: string;
+      value: string;
+    }>;
+    const env: Record<string, string> = {};
+    for (const s of secrets) {
+      env[s.name] = s.value;
+    }
+    return env;
+  } catch (err) {
+    console.warn(
+      `[tenant-env] API error for ${ref}:`,
+      err instanceof Error ? err.message : err,
+    );
+    return null;
   }
-  return envMap;
 }
 
-/** Main entry: load tenant env with caching */
-export async function loadTenantEnv(
-  projectRef: string,
-): Promise<Record<string, string>> {
-  // Check cache
-  const cached = cache.get(projectRef);
+export async function loadTenantEnv(ref: string): Promise<Record<string, string>> {
+  const cached = envCache.get(ref);
   if (cached && cached.expiresAt > Date.now()) {
     return cached.env;
   }
 
-  // Layer 1: static file
-  const fileEnv = await loadEnvFile(projectRef);
-  // Layer 2: DB secrets (overrides file values)
-  const dbEnv = await loadSecretsFromApi(projectRef);
+  const fileEnv = await loadEnvFromFile(ref);
 
-  const merged = { ...fileEnv, ...dbEnv };
+  const apiEnv = await loadEnvFromApi(ref);
+  if (apiEnv === null) {
+    if (cached) {
+      return { ...fileEnv, ...cached.env };
+    }
+    return fileEnv;
+  }
 
-  // Cache result
-  cache.set(projectRef, { env: merged, expiresAt: Date.now() + CACHE_TTL_MS });
+  const merged = { ...fileEnv, ...apiEnv };
 
+  envCache.set(ref, { env: merged, expiresAt: Date.now() + ENV_CACHE_TTL });
   return merged;
+}
+
+export function invalidateTenantEnvCache(ref: string) {
+  envCache.delete(ref);
 }

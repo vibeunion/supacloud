@@ -2,6 +2,7 @@
   import { apiClient } from "$lib/api";
 
   import { page } from "$app/state";
+  import dayjs from "dayjs";
   import { t } from "svelte-i18n";
   import { Loader2, Zap, Trash2, KeyRound, Clock, Plus, X, Upload, Code2, Copy, BookOpen, ArrowRight, Activity, RadioTower, ShieldCheck } from "lucide-svelte";
   import { toast } from "svelte-sonner";
@@ -9,6 +10,7 @@
   import { useList, type BaseRecord } from "@svadmin/core";
   import {
     buildCurlExample,
+    buildFunctionTaskConsolePath,
     buildFunctionTasksPath,
     buildInvokeAsyncExample,
     buildJsInvokeExample,
@@ -16,6 +18,17 @@
     getStatusBadgeClass,
     type FunctionTaskRecord,
   } from "$lib/function-snippets";
+  import { getTaskLatestLogPreview, hasTaskLogPreview } from "$lib/function-task-details";
+  import {
+    filterFunctionRuntimeLogs,
+    getFunctionRuntimeErrorLogs,
+    getFunctionRuntimeLogClass,
+    getFunctionRuntimeSeveritySummary,
+    getRecentFunctionRuntimeLogs,
+    hasFunctionRuntimeWarnings,
+    type FunctionRuntimeSeverityFilter,
+    type FunctionRuntimeLogRecord,
+  } from "$lib/function-runtime-logs";
   import { summarizeFunctionTasks } from "$lib/function-task-summary";
 
   interface EdgeFunction extends BaseRecord {
@@ -23,8 +36,10 @@
     slug: string;
     name: string;
     status: string;
+    version: number;
     verify_jwt: boolean;
     created_at: string;
+    updated_at: string;
   }
 
   const projectRef = $derived(page.params.ref);
@@ -34,8 +49,43 @@
   let selectedFunction = $state<EdgeFunction | null>(null);
   let drawerOpen = $state(false);
   let functionTasks = $state<FunctionTaskRecord[]>([]);
+  let taskDetails = $state<Record<string, {
+    id: string;
+    status: string;
+    error?: string | null;
+    latest_logs?: Array<{
+      timestamp: string;
+      stream: "stdout" | "stderr";
+      level: string;
+      message: string;
+    }>;
+    attempts?: Array<{
+      attempt_no: number;
+      status: string;
+      started_at: string;
+      completed_at?: string | null;
+      duration_ms?: number | null;
+      error?: string | null;
+      response_status?: number | null;
+      logs?: Array<{
+        timestamp: string;
+        stream: "stdout" | "stderr";
+        level: string;
+        message: string;
+      }> | null;
+    }>;
+  }>>({});
   let tasksLoading = $state(false);
   let tasksError = $state<string | null>(null);
+  let taskDetailLoadingId = $state<string | null>(null);
+  let taskDetailError = $state<string | null>(null);
+  let functionRuntimeLogs = $state<FunctionRuntimeLogRecord[]>([]);
+  let functionLogsLoading = $state(false);
+  let functionLogsError = $state<string | null>(null);
+  let runtimeSeverityFilter = $state<FunctionRuntimeSeverityFilter>("all");
+  let runtimeLogSearch = $state("");
+  let runtimeLogLimit = $state(20);
+  let expandedTaskId = $state<string | null>(null);
   let newSlug = $state("");
   let newCode = $state(`Deno.serve(async (req) => {
   const { name } = await req.json()
@@ -117,6 +167,24 @@ console.log(task);
 
   const currentDrawerSlug = $derived(selectedFunction?.slug || "");
   const functionTaskSummary = $derived(summarizeFunctionTasks(functionTasks));
+  const filteredRuntimeLogs = $derived(
+    filterFunctionRuntimeLogs(functionRuntimeLogs, {
+      severity: runtimeSeverityFilter,
+      search: runtimeLogSearch,
+    }),
+  );
+  const functionRuntimeErrorLogs = $derived(
+    getFunctionRuntimeErrorLogs(filteredRuntimeLogs),
+  );
+  const functionRuntimeRecentLogs = $derived(
+    getRecentFunctionRuntimeLogs(filteredRuntimeLogs, runtimeLogLimit),
+  );
+  const functionHasRuntimeWarnings = $derived(
+    hasFunctionRuntimeWarnings(functionRuntimeLogs),
+  );
+  const runtimeSeveritySummary = $derived(
+    getFunctionRuntimeSeveritySummary(functionRuntimeLogs),
+  );
 
   const taskPollingHelperCode = `async function getTask(
   managementApiUrl: string,
@@ -236,17 +304,78 @@ export async function waitForTask(
     }
   }
 
+  async function loadFunctionRuntimeLogs(slug: string, limit = runtimeLogLimit) {
+    functionLogsLoading = true;
+    functionLogsError = null;
+    try {
+      const res = await apiClient(
+        `/v1/projects/${projectRef}/functions/${encodeURIComponent(slug)}/logs?limit=${limit}`,
+      );
+      const payload = await res.json().catch(() => ({ logs: [] }));
+      if (!res.ok) {
+        throw new Error(payload?.message || "获取函数日志失败");
+      }
+
+      functionRuntimeLogs = Array.isArray(payload?.logs) ? payload.logs : [];
+    } catch (error) {
+      functionRuntimeLogs = [];
+      functionLogsError = error instanceof Error ? error.message : "获取函数日志失败";
+    } finally {
+      functionLogsLoading = false;
+    }
+  }
+
+  async function loadTaskDetail(taskId: string) {
+    taskDetailLoadingId = taskId;
+    taskDetailError = null;
+    try {
+      const res = await apiClient(`/v1/projects/${projectRef}/tasks/${encodeURIComponent(taskId)}`);
+      const payload = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error(payload?.message || "获取任务详情失败");
+      }
+
+      taskDetails = {
+        ...taskDetails,
+        [taskId]: payload,
+      };
+    } catch (error) {
+      taskDetailError = error instanceof Error ? error.message : "获取任务详情失败";
+    } finally {
+      taskDetailLoadingId = null;
+    }
+  }
+
   async function openFunctionDrawer(fn: EdgeFunction) {
     selectedFunction = fn;
     drawerOpen = true;
-    await loadFunctionTasks(fn.slug);
+    taskDetailError = null;
+    runtimeSeverityFilter = "all";
+    runtimeLogSearch = "";
+    runtimeLogLimit = 20;
+    await Promise.all([loadFunctionTasks(fn.slug), loadFunctionRuntimeLogs(fn.slug, 20)]);
   }
 
   function closeFunctionDrawer() {
     drawerOpen = false;
     selectedFunction = null;
     functionTasks = [];
+    taskDetails = {};
     tasksError = null;
+    taskDetailError = null;
+    functionRuntimeLogs = [];
+    functionLogsError = null;
+    runtimeSeverityFilter = "all";
+    runtimeLogSearch = "";
+    runtimeLogLimit = 20;
+    expandedTaskId = null;
+  }
+
+  async function toggleExpandedTask(taskId: string) {
+    expandedTaskId = expandedTaskId === taskId ? null : taskId;
+    if (expandedTaskId === taskId && !taskDetails[taskId]) {
+      await loadTaskDetail(taskId);
+    }
   }
 
   const deployMutation = createMutation(() => ({
@@ -621,12 +750,24 @@ export async function waitForTask(
           <div class="mt-2 text-sm font-semibold">{selectedFunction.status}</div>
         </div>
         <div class="rounded-xl border border-border/60 bg-muted/20 p-4">
-          <div class="text-[11px] font-bold uppercase tracking-[0.16em] text-muted-foreground">Endpoint</div>
-          <div class="mt-2 text-xs font-mono text-foreground break-all">/functions/v1/{selectedFunction.slug}</div>
+          <div class="text-[11px] font-bold uppercase tracking-[0.16em] text-muted-foreground">Version</div>
+          <div class="mt-2 text-sm font-semibold">v{selectedFunction.version || 1}</div>
         </div>
         <div class="rounded-xl border border-border/60 bg-muted/20 p-4">
           <div class="text-[11px] font-bold uppercase tracking-[0.16em] text-muted-foreground">JWT</div>
           <div class="mt-2 text-sm font-semibold">{selectedFunction.verify_jwt ? "Enabled" : "Disabled"}</div>
+        </div>
+        <div class="rounded-xl border border-border/60 bg-muted/20 p-4">
+          <div class="text-[11px] font-bold uppercase tracking-[0.16em] text-muted-foreground">Endpoint</div>
+          <div class="mt-2 text-xs font-mono text-foreground break-all">/functions/v1/{selectedFunction.slug}</div>
+        </div>
+        <div class="rounded-xl border border-border/60 bg-muted/20 p-4">
+          <div class="text-[11px] font-bold uppercase tracking-[0.16em] text-muted-foreground">Last Deploy</div>
+          <div class="mt-2 text-sm font-semibold">{dayjs(selectedFunction.updated_at).format("YYYY-MM-DD HH:mm:ss")}</div>
+        </div>
+        <div class="rounded-xl border border-border/60 bg-muted/20 p-4">
+          <div class="text-[11px] font-bold uppercase tracking-[0.16em] text-muted-foreground">Created</div>
+          <div class="mt-2 text-sm font-semibold">{dayjs(selectedFunction.created_at).format("YYYY-MM-DD HH:mm:ss")}</div>
         </div>
       </div>
 
@@ -707,7 +848,7 @@ export async function waitForTask(
             <p class="text-xs text-muted-foreground mt-1">只看当前函数 `{currentDrawerSlug}` 的最新任务，帮助租户在函数上下文内快速排障。</p>
           </div>
           <a
-            href={`/project/${projectRef}/tasks`}
+            href={buildFunctionTaskConsolePath(String(projectRef), currentDrawerSlug)}
             class="inline-flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-semibold hover:bg-muted/40 transition-colors"
           >
             打开完整任务面板
@@ -801,14 +942,197 @@ export async function waitForTask(
                 {/if}
 
                 <div class="flex items-center gap-2">
+                  <button
+                    onclick={() => toggleExpandedTask(task.id)}
+                    class="inline-flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-semibold hover:bg-muted/40 transition-colors"
+                  >
+                    {expandedTaskId === task.id ? "收起日志" : "展开日志"}
+                  </button>
                   <a
-                    href={`/project/${projectRef}/tasks`}
+                    href={buildFunctionTaskConsolePath(String(projectRef), currentDrawerSlug, task.id)}
                     class="inline-flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-semibold hover:bg-muted/40 transition-colors"
                   >
                     在任务页查看详情
                     <ArrowRight size={13} />
                   </a>
                 </div>
+
+                {#if expandedTaskId === task.id}
+                  <div class="rounded-lg border border-border/50 bg-background/80 p-3 space-y-3">
+                    <div class="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">Recent Logs</div>
+                    {#if taskDetailLoadingId === task.id}
+                      <div class="rounded-lg border border-border/50 bg-muted/20 py-6 flex flex-col items-center justify-center gap-2 text-muted-foreground">
+                        <Loader2 size={18} class="animate-spin" />
+                        <div class="text-xs font-mono uppercase tracking-[0.14em]">正在加载 task detail...</div>
+                      </div>
+                    {:else if taskDetailError}
+                      <div class="rounded-lg border border-red-500/20 bg-red-500/5 px-3 py-2 text-xs text-red-700 leading-5">
+                        {taskDetailError}
+                      </div>
+                    {:else if taskDetails[task.id]?.attempts && taskDetails[task.id]!.attempts!.length > 0}
+                      <div class="space-y-3">
+                        {#each taskDetails[task.id]!.attempts!.slice(0, 2) as attempt}
+                          <div class="rounded-lg border border-border/50 bg-muted/20 p-3 space-y-2">
+                            <div class="flex items-center justify-between gap-3">
+                              <div class="flex items-center gap-2">
+                                <span class="text-xs font-semibold text-foreground">Attempt #{attempt.attempt_no}</span>
+                                <span class={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase border ${getStatusBadgeClass(attempt.status)}`}>
+                                  {attempt.status}
+                                </span>
+                              </div>
+                              <div class="text-[11px] font-mono text-muted-foreground">
+                                {#if attempt.duration_ms != null}{attempt.duration_ms} ms{:else}-{/if}
+                              </div>
+                            </div>
+
+                            {#if attempt.error}
+                              <div class="rounded-md border border-red-500/20 bg-red-500/5 px-3 py-2 text-xs text-red-700 leading-5 break-words">
+                                {attempt.error}
+                              </div>
+                            {/if}
+
+                            {#if attempt.logs && attempt.logs.length > 0}
+                              <div class="space-y-2">
+                                {#each attempt.logs.slice(0, 4) as log}
+                                  <div class={`rounded-md border px-3 py-2 text-xs leading-5 ${
+                                    log.stream === "stderr"
+                                      ? "border-red-500/20 bg-red-500/5 text-red-700"
+                                      : "border-blue-500/20 bg-blue-500/5 text-blue-700"
+                                  }`}>
+                                    <div class="flex items-center justify-between gap-3 text-[11px] font-mono text-muted-foreground">
+                                      <span>{log.stream}</span>
+                                      <span>{new Date(log.timestamp).toLocaleTimeString()}</span>
+                                    </div>
+                                    <div class="mt-1 break-words">{log.message}</div>
+                                  </div>
+                                {/each}
+                              </div>
+                            {:else}
+                              <div class="text-xs text-muted-foreground">这个 attempt 暂时没有采集到日志。</div>
+                            {/if}
+                          </div>
+                        {/each}
+                      </div>
+                    {:else if hasTaskLogPreview(task)}
+                      <div class="space-y-2">
+                        {#each getTaskLatestLogPreview(task, 5) as log}
+                          <div class={`rounded-md border px-3 py-2 text-xs leading-5 ${
+                            log.stream === "stderr"
+                              ? "border-red-500/20 bg-red-500/5 text-red-700"
+                              : "border-blue-500/20 bg-blue-500/5 text-blue-700"
+                          }`}>
+                            <div class="flex items-center justify-between gap-3 text-[11px] font-mono text-muted-foreground">
+                              <span>{log.stream}</span>
+                              <span>{new Date(log.timestamp).toLocaleTimeString()}</span>
+                            </div>
+                            <div class="mt-1 break-words">{log.message}</div>
+                          </div>
+                        {/each}
+                      </div>
+                    {:else}
+                      <div class="text-xs text-muted-foreground">当前任务还没有最近日志摘要。</div>
+                    {/if}
+                  </div>
+                {/if}
+              </div>
+            {/each}
+          </div>
+        {/if}
+      </div>
+
+      <div class="rounded-xl border border-border/60 bg-background p-4 space-y-4">
+        <div class="flex items-center justify-between gap-3">
+          <div>
+            <div class="text-sm font-semibold">原先函数运行日志与错误</div>
+            <p class="text-xs text-muted-foreground mt-1">这里展示的是函数本身最近的运行日志，不限于后台任务 attempt，所以原先函数相关的错误也能在这里看到。</p>
+          </div>
+          <div class="flex items-center gap-2 text-[11px] text-muted-foreground">
+            <RadioTower size={13} />
+            最近 20 条
+          </div>
+        </div>
+
+        <div class="grid gap-3 sm:grid-cols-3">
+          <div class="rounded-lg border border-border/50 bg-muted/20 p-3">
+            <div class="text-[11px] font-bold uppercase tracking-[0.14em] text-muted-foreground">Logs</div>
+            <div class="mt-2 text-lg font-semibold text-blue-700">{functionRuntimeLogs.length}</div>
+          </div>
+          <div class="rounded-lg border border-border/50 bg-muted/20 p-3">
+            <div class="text-[11px] font-bold uppercase tracking-[0.14em] text-muted-foreground">Errors</div>
+            <div class="mt-2 text-lg font-semibold text-red-700">{runtimeSeveritySummary.errors}</div>
+          </div>
+          <div class="rounded-lg border border-border/50 bg-muted/20 p-3">
+            <div class="text-[11px] font-bold uppercase tracking-[0.14em] text-muted-foreground">Warnings</div>
+            <div class="mt-2 text-lg font-semibold text-amber-700">{runtimeSeveritySummary.warnings || (functionHasRuntimeWarnings ? "Yes" : "0")}</div>
+          </div>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-2 rounded-xl border bg-background px-3 py-2">
+          <select bind:value={runtimeSeverityFilter} class="px-2 py-1.5 text-xs rounded border bg-background">
+            <option value="all">全部级别</option>
+            <option value="error">仅 error</option>
+            <option value="warning">仅 warning</option>
+            <option value="info">仅 info</option>
+          </select>
+          <input
+            bind:value={runtimeLogSearch}
+            placeholder="搜索函数原始日志"
+            class="flex-1 min-w-[180px] px-3 py-1.5 text-xs rounded border bg-background"
+          />
+          <button
+            onclick={() => copySnippet(JSON.stringify(functionRuntimeLogs, null, 2), `${currentDrawerSlug} 原始函数日志`)}
+            class="inline-flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-semibold hover:bg-muted/40 transition-colors"
+          >
+            <Copy size={13} />
+            复制日志
+          </button>
+          <button
+            onclick={() => selectedFunction && loadFunctionRuntimeLogs(selectedFunction.slug, runtimeLogLimit + 20)}
+            class="inline-flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-semibold hover:bg-muted/40 transition-colors"
+          >
+            加载更多
+          </button>
+        </div>
+
+        {#if functionLogsLoading}
+          <div class="rounded-xl border border-border/50 bg-muted/20 py-10 flex flex-col items-center justify-center gap-3 text-muted-foreground">
+            <Loader2 size={24} class="animate-spin" />
+            <p class="text-xs font-mono uppercase tracking-[0.16em]">正在加载函数原始日志...</p>
+          </div>
+        {:else if functionLogsError}
+          <div class="rounded-xl border border-red-500/20 bg-red-500/5 px-4 py-3 text-sm text-red-700">
+            {functionLogsError}
+          </div>
+        {:else if filteredRuntimeLogs.length === 0}
+          <div class="rounded-xl border border-border/50 bg-muted/20 py-10 text-center text-sm text-muted-foreground">
+            当前过滤条件下没有函数运行日志。
+          </div>
+        {:else}
+          {#if functionRuntimeErrorLogs.length > 0}
+            <div class="rounded-xl border border-red-500/20 bg-red-500/5 p-4 space-y-3">
+              <div class="text-sm font-semibold text-red-700">最近原始错误</div>
+              <div class="space-y-2">
+                {#each functionRuntimeErrorLogs as log}
+                  <div class="rounded-lg border border-red-500/15 bg-background/80 px-3 py-2">
+                    <div class="flex items-center justify-between gap-3 text-[11px] font-mono text-muted-foreground">
+                      <span>{log.severity}</span>
+                      <span>{new Date(log.timestamp).toLocaleString()}</span>
+                    </div>
+                    <div class="mt-2 text-xs text-red-700 leading-5 break-words">{log.message}</div>
+                  </div>
+                {/each}
+              </div>
+            </div>
+          {/if}
+
+          <div class="space-y-2">
+            {#each functionRuntimeRecentLogs as log}
+              <div class={`rounded-lg border px-3 py-2 text-xs leading-5 ${getFunctionRuntimeLogClass(log)}`}>
+                <div class="flex items-center justify-between gap-3 text-[11px] font-mono text-muted-foreground">
+                  <span>{log.severity} · {log.event_type}</span>
+                  <span>{new Date(log.timestamp).toLocaleString()}</span>
+                </div>
+                <div class="mt-1 break-words">{log.message}</div>
               </div>
             {/each}
           </div>

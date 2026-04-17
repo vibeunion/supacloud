@@ -20,16 +20,13 @@ if (!process.env.MANAGEMENT_API_URL) {
 
 const MASTER_TOKEN = process.env.MASTER_TOKEN || "";
 
-// Set standard Supabase edge runtime version identifier
 if (!process.env.EDGE_RUNTIME_VERSION) {
-  process.env.EDGE_RUNTIME_VERSION = "1.58.3"; // compatible with supabase edge runtime v1.58.x
+  process.env.EDGE_RUNTIME_VERSION = "1.58.3";
 }
-
-// Startup Port-Exclusivity Guard is handled by edge-runtime-manager in management-api
 
 const pool = new WorkerPool({
   size: POOL_SIZE,
-  requestTimeout: 300_000, // 5 min — covers long AI streaming responses
+  requestTimeout: 300_000,
 });
 
 const backgroundPool = new WorkerPool({
@@ -54,7 +51,6 @@ async function dispatchFunction(
   },
 ) {
   const functionId = `${projectRef}_${functionName}`;
-  // Prefer bundled .js output from server-side Bun.build(), fall back to raw .ts
   const jsPath = path.resolve(FUNCTIONS_DIR, projectRef, `${functionName}.js`);
   const tsPath = path.resolve(FUNCTIONS_DIR, projectRef, `${functionName}.ts`);
   const functionPath = (await Bun.file(jsPath).exists()) ? jsPath : tsPath;
@@ -72,8 +68,6 @@ async function dispatchFunction(
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Internal Error";
 
-    // x-relay-error tells the SDK this is an infrastructure error,
-    // not a response from the user's function
     setHeaders["x-relay-error"] = "true";
 
     const statusCode =
@@ -95,13 +89,11 @@ function verifyInternalBackgroundAuth(request: Request): boolean {
   return !!MASTER_TOKEN && token === MASTER_TOKEN;
 }
 
-// ── Function Config Cache ───────────────────────────────────────────────
-// Cache verify_jwt config per function with short TTL to avoid API calls on every invocation
 const configCache = new Map<
   string,
   { verify_jwt: boolean; expiresAt: number }
 >();
-const CONFIG_CACHE_TTL = 10_000; // 10s
+const CONFIG_CACHE_TTL = 10_000;
 
 async function getFunctionConfig(
   projectRef: string,
@@ -113,7 +105,6 @@ async function getFunctionConfig(
     return { verify_jwt: cached.verify_jwt };
   }
 
-  // Try reading the config file directly (faster than API call)
   try {
     const configPath = path.resolve(
       FUNCTIONS_DIR,
@@ -122,14 +113,13 @@ async function getFunctionConfig(
     );
     const raw = await Bun.file(configPath).text();
     const config = JSON.parse(raw);
-    const verify_jwt = config.verify_jwt !== false; // default true
+    const verify_jwt = config.verify_jwt !== false;
     configCache.set(key, {
       verify_jwt,
       expiresAt: Date.now() + CONFIG_CACHE_TTL,
     });
     return { verify_jwt };
   } catch {
-    // No config file = default (verify_jwt: true)
     configCache.set(key, {
       verify_jwt: true,
       expiresAt: Date.now() + CONFIG_CACHE_TTL,
@@ -138,10 +128,6 @@ async function getFunctionConfig(
   }
 }
 
-// ── Project Secrets Cache ───────────────────────────────────────────────
-// Cache anon_key, service_role_key, jwt_secret per project with 5-min TTL.
-// Eliminates per-request HTTP calls to management API — the #1 cause of
-// TimeoutError (DOMException) under load, which silently swallowed auth.
 interface ProjectSecrets {
   anonKey: string;
   serviceRoleKey: string;
@@ -149,7 +135,7 @@ interface ProjectSecrets {
   expiresAt: number;
 }
 const secretsCache = new Map<string, ProjectSecrets>();
-const SECRETS_CACHE_TTL = 300_000; // 5 min
+const SECRETS_CACHE_TTL = 300_000;
 
 async function getProjectSecrets(
   projectRef: string,
@@ -173,7 +159,6 @@ async function getProjectSecrets(
       console.warn(
         `[verifyJwt] Failed to fetch secrets for ${projectRef}: keys=${keysRes.status} detail=${detailRes.status}`,
       );
-      // Return stale cache if available rather than hard-failing
       if (cached) return cached;
       return null;
     }
@@ -198,15 +183,11 @@ async function getProjectSecrets(
       `[verifyJwt] Error fetching secrets for ${projectRef}:`,
       err instanceof Error ? err.message : err,
     );
-    // Return stale cache on network errors
     if (cached) return cached;
     return null;
   }
 }
 
-/** Verify JWT token against cached project secrets.
- *  Accepts both Authorization header (Bearer token) and apikey header,
- *  matching official Supabase edge-runtime behavior. */
 async function verifyJwt(
   projectRef: string,
   authHeader: string | null | undefined,
@@ -215,7 +196,6 @@ async function verifyJwt(
   const secrets = await getProjectSecrets(projectRef);
   if (!secrets) return false;
 
-  // 1. Check apikey header (Supabase client sends anon key here)
   if (
     apikeyHeader &&
     (apikeyHeader === secrets.anonKey ||
@@ -224,16 +204,13 @@ async function verifyJwt(
     return true;
   }
 
-  // 2. Check Authorization bearer token
   if (!authHeader) return false;
   const token = authHeader.replace(/^Bearer\s+/i, "");
   if (!token) return false;
 
-  // Direct key match (anon or service_role key used as bearer)
   if (token === secrets.anonKey || token === secrets.serviceRoleKey)
     return true;
 
-  // 3. Verify as JWT signed with project's jwt_secret
   if (!secrets.jwtSecret) return false;
   try {
     const { jwtVerify } = await import("jose");
@@ -243,6 +220,47 @@ async function verifyJwt(
     console.warn(`[verifyJwt] JWT error for ${projectRef}:`, e);
     return false;
   }
+}
+
+async function handleFunctionRequest(
+  c: { params: Record<string, string>; headers: Record<string, string | undefined>; request: Request; set: { headers: Record<string, string> } },
+  functionName: string,
+) {
+  const projectRef = c.headers["x-project-ref"];
+  if (!projectRef) {
+    c.set.headers["x-relay-error"] = "true";
+    return new Response(JSON.stringify({ error: "Missing x-project-ref" }), {
+      status: 400,
+      headers: {
+        "Content-Type": "application/json",
+        "x-relay-error": "true",
+      },
+    });
+  }
+
+  const fnConfig = await getFunctionConfig(projectRef, functionName);
+  if (c.request.method !== "OPTIONS" && fnConfig.verify_jwt) {
+    const authorized = await verifyJwt(
+      projectRef,
+      c.headers["authorization"],
+      c.headers["apikey"],
+    );
+    if (!authorized) {
+      return new Response(JSON.stringify({ msg: "Invalid JWT" }), {
+        status: 401,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+  }
+
+  const setHeaders = c.set.headers as Record<string, string>;
+  setHeaders["x-sb-execution-id"] = crypto.randomUUID();
+  return dispatchFunction(
+    projectRef,
+    functionName,
+    c.request,
+    setHeaders,
+  );
 }
 
 const app = new Elysia()
@@ -266,14 +284,12 @@ const app = new Elysia()
       .join("\n");
   })
 
-  // Cache invalidation — called by Management API after deploy
   .post("/invalidate/:ref/:slug", (c) => {
     const functionId = `${c.params.ref}_${c.params.slug}`;
     pool.invalidateModule(functionId);
     return { invalidated: functionId };
   })
 
-  // Pre-heat function — called by Management API after deploy to eliminate cold-start
   .post("/preheat/:ref/:slug", async (c) => {
     const functionId = `${c.params.ref}_${c.params.slug}`;
     const jsPath = path.resolve(
@@ -355,202 +371,74 @@ const app = new Elysia()
     });
   })
 
-  // Main function invoke — handles supabase.functions.invoke('name', { body })
-  // Supports nested paths: /functions/v1/name/sub/path
-  .all("/functions/v1/:functionName/*", async (c) => {
-    const projectRef = c.headers["x-project-ref"];
-    if (!projectRef) {
-      c.set.headers["x-relay-error"] = "true";
-      return new Response(JSON.stringify({ error: "Missing x-project-ref" }), {
-        status: 400,
-        headers: {
-          "Content-Type": "application/json",
-          "x-relay-error": "true",
-        },
-      });
-    }
-
-    // Check verify_jwt config
-    const fnConfig = await getFunctionConfig(projectRef, c.params.functionName);
-    if (c.request.method !== "OPTIONS" && fnConfig.verify_jwt) {
-      const authorized = await verifyJwt(
-        projectRef,
-        c.headers["authorization"],
-        c.headers["apikey"],
-      );
-      if (!authorized) {
-        return new Response(JSON.stringify({ msg: "Invalid JWT" }), {
-          status: 401,
-          headers: { "Content-Type": "application/json" },
-        });
-      }
-    }
-
-    const setHeaders = c.set.headers as Record<string, string>;
-    setHeaders["x-sb-execution-id"] = crypto.randomUUID();
-    return dispatchFunction(
-      projectRef,
+  .all("/functions/v1/:functionName/*", async (c) =>
+    handleFunctionRequest(
+      { params: c.params, headers: c.headers as Record<string, string | undefined>, request: c.request, set: c.set },
       c.params.functionName,
-      c.request,
-      setHeaders,
-    );
-  })
-
-  .all("/functions/v1/:functionName", async (c) => {
-    const projectRef = c.headers["x-project-ref"];
-    if (!projectRef) {
-      c.set.headers["x-relay-error"] = "true";
-      return new Response(JSON.stringify({ error: "Missing x-project-ref" }), {
-        status: 400,
-        headers: {
-          "Content-Type": "application/json",
-          "x-relay-error": "true",
-        },
-      });
-    }
-
-    const fnConfig = await getFunctionConfig(projectRef, c.params.functionName);
-    if (c.request.method !== "OPTIONS" && fnConfig.verify_jwt) {
-      const authorized = await verifyJwt(
-        projectRef,
-        c.headers["authorization"],
-        c.headers["apikey"],
-      );
-      if (!authorized) {
-        return new Response(JSON.stringify({ msg: "Invalid JWT" }), {
-          status: 401,
-          headers: { "Content-Type": "application/json" },
-        });
-      }
-    }
-
-    const setHeaders = c.set.headers as Record<string, string>;
-    setHeaders["x-sb-execution-id"] = crypto.randomUUID();
-    return dispatchFunction(
-      projectRef,
+    )
+  )
+  .all("/functions/v1/:functionName", async (c) =>
+    handleFunctionRequest(
+      { params: c.params, headers: c.headers as Record<string, string | undefined>, request: c.request, set: c.set },
       c.params.functionName,
-      c.request,
-      setHeaders,
-    );
-  })
-
-  // Fallback routes for Kong strip_path: true scenarios
-  // e.g. Kong strips /functions/v1 and sends /delegation/ocr directly
-  .all("/:functionName/*", async (c) => {
-    const projectRef = c.headers["x-project-ref"];
-    if (!projectRef) {
-      c.set.headers["x-relay-error"] = "true";
-      return new Response(JSON.stringify({ error: "Missing x-project-ref" }), {
-        status: 400,
-        headers: {
-          "Content-Type": "application/json",
-          "x-relay-error": "true",
-        },
-      });
-    }
-
-    const fnConfig = await getFunctionConfig(projectRef, c.params.functionName);
-    if (c.request.method !== "OPTIONS" && fnConfig.verify_jwt) {
-      const authorized = await verifyJwt(
-        projectRef,
-        c.headers["authorization"],
-        c.headers["apikey"],
-      );
-      if (!authorized) {
-        return new Response(JSON.stringify({ msg: "Invalid JWT" }), {
-          status: 401,
-          headers: { "Content-Type": "application/json" },
-        });
-      }
-    }
-
-    const setHeaders = c.set.headers as Record<string, string>;
-    setHeaders["x-sb-execution-id"] = crypto.randomUUID();
-    return dispatchFunction(
-      projectRef,
+    )
+  )
+  .all("/:functionName/*", async (c) =>
+    handleFunctionRequest(
+      { params: c.params, headers: c.headers as Record<string, string | undefined>, request: c.request, set: c.set },
       c.params.functionName,
-      c.request,
-      setHeaders,
-    );
-  })
-
-  .all("/:functionName", async (c) => {
-    const projectRef = c.headers["x-project-ref"];
-    if (!projectRef) {
-      c.set.headers["x-relay-error"] = "true";
-      return new Response(JSON.stringify({ error: "Missing x-project-ref" }), {
-        status: 400,
-        headers: {
-          "Content-Type": "application/json",
-          "x-relay-error": "true",
-        },
-      });
-    }
-
-    const fnConfig = await getFunctionConfig(projectRef, c.params.functionName);
-    if (c.request.method !== "OPTIONS" && fnConfig.verify_jwt) {
-      const authorized = await verifyJwt(
-        projectRef,
-        c.headers["authorization"],
-        c.headers["apikey"],
-      );
-      if (!authorized) {
-        return new Response(JSON.stringify({ msg: "Invalid JWT" }), {
-          status: 401,
-          headers: { "Content-Type": "application/json" },
-        });
-      }
-    }
-
-    const setHeaders = c.set.headers as Record<string, string>;
-    setHeaders["x-sb-execution-id"] = crypto.randomUUID();
-    return dispatchFunction(
-      projectRef,
+    )
+  )
+  .all("/:functionName", async (c) =>
+    handleFunctionRequest(
+      { params: c.params, headers: c.headers as Record<string, string | undefined>, request: c.request, set: c.set },
       c.params.functionName,
-      c.request,
-      setHeaders,
-    );
-  })
+    )
+  )
 
   .listen({ port: PORT, hostname: "0.0.0.0" });
 
 console.log(`🚀 Edge Runtime on :${PORT} (${POOL_SIZE} workers)`);
 
-// ── Graceful shutdown ───────────────────────────────────────────────
-// Allow in-flight requests to complete before exiting.
-// Without this, SIGTERM (from systemctl restart) kills immediately,
-// dropping active requests mid-flight.
 let shuttingDown = false;
-const gracefulShutdown = (signal: string) => {
+const gracefulShutdown = async (signal: string) => {
   if (shuttingDown) return;
   shuttingDown = true;
   console.log(`[EdgeRuntime] Received ${signal}, shutting down gracefully...`);
 
-  // Stop accepting new connections
   try {
     app.stop();
   } catch {
-    /* Elysia stop may throw if already stopped */
   }
 
-  // Allow in-flight requests up to 10s to complete, then force exit
-  const forceExitTimeout = setTimeout(() => {
-    console.error("[EdgeRuntime] Force exit after timeout");
-    process.exit(1);
-  }, 10_000);
-  forceExitTimeout.unref(); // Don't keep process alive just for the timeout
+  try {
+    const drainTimeout = setTimeout(() => {
+      console.error("[EdgeRuntime] Force exit after drain timeout");
+      process.exit(1);
+    }, 30_000);
+
+    await Promise.race([
+      Promise.all([pool.drain(), backgroundPool.drain()]),
+      new Promise<void>((_, reject) =>
+        setTimeout(() => reject(new Error("drain timeout")), 30_000)
+      ),
+    ]);
+
+    clearTimeout(drainTimeout);
+  } catch {
+    console.error("[EdgeRuntime] Drain timed out, forcing exit");
+  }
+
+  process.exit(0);
 };
 
 process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
 process.on("SIGINT", () => gracefulShutdown("SIGINT"));
 
-// ── Global error boundaries ─────────────────────────────────────────
-// Prevent silent crashes that leave zombie processes bound to the port.
 process.on("uncaughtException", (err) => {
   console.error("[EdgeRuntime] FATAL uncaughtException:", err);
   process.exit(1);
 });
 process.on("unhandledRejection", (reason) => {
   console.error("[EdgeRuntime] unhandledRejection:", reason);
-  // Don't exit — log and continue (may be a user function bug)
 });

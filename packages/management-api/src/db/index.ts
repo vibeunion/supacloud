@@ -2,25 +2,23 @@ import { SQL } from "bun";
 import { config } from "../config";
 import { logger } from "../utils/logger";
 
-// Parse DATABASE_URL to get components
 function parseDatabaseUrl(url: string) {
   const urlMatch = url.match(/postgresql?:\/\/([^:]+)(?::([^@]*))?@([^:]*):(\d+)\/(.+)/);
   if (!urlMatch) {
     throw new Error(`Invalid DATABASE_URL format: ${url}`);
   }
   const [, username, password, hostname, port, database] = urlMatch;
-  return { 
-    hostname: hostname || "localhost", 
-    port: parseInt(port, 10), 
-    database, 
-    username, 
-    password: password || "" 
+  return {
+    hostname: hostname || "localhost",
+    port: parseInt(port, 10),
+    database,
+    username,
+    password: password || ""
   };
 }
 
 export const dbConfig = parseDatabaseUrl(config.databaseUrl);
 
-// Create database connection - use explicit config to ensure database name is correct
 export const sql = new SQL({
   hostname: dbConfig.hostname,
   port: dbConfig.port,
@@ -35,6 +33,22 @@ export const sql = new SQL({
 const MAX_CACHED_CONNECTIONS = 50;
 
 const projectConnections: Map<string, { sql: SQL; lastUsed: number }> = new Map();
+
+const IDLE_SWEEP_INTERVAL = 60_000;
+const MAX_CONNECTION_AGE = 30 * 60_000;
+
+setInterval(() => {
+  const now = Date.now();
+  for (const [dbName, cached] of projectConnections.entries()) {
+    if (now - cached.lastUsed > MAX_CONNECTION_AGE) {
+      logger.debug(`[DB Pool] Closing idle connection for ${dbName} (age: ${Math.round((now - cached.lastUsed) / 60000)}min)`);
+      cached.sql.close().catch(e =>
+        logger.error(`Failed to close idle connection ${dbName}`, { error: e instanceof Error ? e.message : String(e) })
+      );
+      projectConnections.delete(dbName);
+    }
+  }
+}, IDLE_SWEEP_INTERVAL).unref();
 
 export function getProjectDb(dbName: string): SQL {
   const cached = projectConnections.get(dbName);
@@ -78,8 +92,6 @@ export function getProjectDb(dbName: string): SQL {
   projectConnections.set(dbName, { sql: projectSql, lastUsed: Date.now() });
   return projectSql;
 }
-
-
 
 const dbNameCache = new Map<string, { name: string; cachedAt: number }>();
 const DB_NAME_CACHE_TTL = 5 * 60 * 1000;
@@ -127,7 +139,6 @@ export function generateDbName(ref: string): string {
   return `supa_${ref}`;
 }
 
-// Explicitly remove cache for a project (e.g., when project is deleted or paused)
 export async function removeProjectDbCache(dbName: string) {
   const cached = projectConnections.get(dbName);
   if (cached) {
@@ -140,7 +151,6 @@ export async function removeProjectDbCache(dbName: string) {
   }
 }
 
-// Execute SQL query
 export class PgError extends Error {
   code?: string;
   details?: string;
@@ -154,7 +164,36 @@ export class PgError extends Error {
   }
 }
 
+const DANGEROUS_SQL_PATTERNS = [
+  /\bDROP\s+DATABASE\b/i,
+  /\bDROP\s+SCHEMA\s+public\b/i,
+  /\bDROP\s+OWNED\b/i,
+  /\bREASSIGN\s+OWNED\b/i,
+  /\bALTER\s+SYSTEM\b/i,
+  /\bCOPY\s+.*\bTO\s+PROGRAM\b/i,
+  /\bCOPY\s+.*\bFROM\s+PROGRAM\b/i,
+  /\bdblink_connect\b/i,
+  /\blo_import\b/i,
+  /\blo_export\b/i,
+  /\bpg_execute_server_program\b/i,
+  /\bpg_read_file\b/i,
+  /\bpg_write_file\b/i,
+  /\bpg_ls_dir\b/i,
+  /\bpg_stat_file\b/i,
+];
+
+function isDangerousSQL(sqlQuery: string): boolean {
+  return DANGEROUS_SQL_PATTERNS.some(pattern => pattern.test(sqlQuery));
+}
+
 export async function executeQuery(dbName: string, sqlQuery: string): Promise<{ rows: unknown[]; rowCount: number; command: string }> {
+  if (isDangerousSQL(sqlQuery)) {
+    throw new PgError(
+      "Query contains disallowed operation. DROP DATABASE, ALTER SYSTEM, file system access, and similar privileged operations are not permitted through this endpoint.",
+      "42501"
+    );
+  }
+
   const projectDb = getProjectDb(dbName);
   try {
     const result = await projectDb.unsafe(sqlQuery);
@@ -174,16 +213,12 @@ export async function executeQuery(dbName: string, sqlQuery: string): Promise<{ 
   }
 }
 
-// Database operations wrapper
 export const db = {
   sql,
   getProjectDb,
   executeQuery,
 };
 
-// --- Graceful Degradation ---
-
-/** Check if the main database connection is healthy */
 export async function isDbHealthy(): Promise<boolean> {
   try {
     await sql`SELECT 1`;
@@ -193,11 +228,6 @@ export async function isDbHealthy(): Promise<boolean> {
   }
 }
 
-/**
- * Execute a database operation with exponential backoff retry.
- * On failure, retries up to `maxRetries` times with increasing delays.
- * Useful for transient connection failures (e.g., PostgreSQL restart).
- */
 export async function withRetry<T>(
   fn: () => Promise<T>,
   opts: { maxRetries?: number; baseDelayMs?: number; label?: string } = {}
@@ -216,10 +246,10 @@ export async function withRetry<T>(
       ) && !(error instanceof Error && error.message.includes("no pg_hba.conf"));
 
       if (!isConnectionError || attempt === maxRetries) {
-        throw error; // Non-retriable error or exhausted retries
+        throw error;
       }
 
-      const delay = baseDelayMs * Math.pow(4, attempt); // 100ms → 400ms → 1600ms
+      const delay = baseDelayMs * Math.pow(4, attempt);
       logger.warn(`[DB] ${label} failed (attempt ${attempt + 1}/${maxRetries}), retrying in ${delay}ms`, {
         error: error instanceof Error ? error.message : String(error)
       });
@@ -230,7 +260,6 @@ export async function withRetry<T>(
   throw new Error(`[DB] ${label} exhausted all ${maxRetries} retries`);
 }
 
-// Project status type
 export const ProjectStatus = {
   CREATING: "creating",
   ACTIVE: "active",
@@ -239,7 +268,6 @@ export const ProjectStatus = {
 } as const;
 export type ProjectStatus = (typeof ProjectStatus)[keyof typeof ProjectStatus];
 
-// Organization type definition
 export interface Organization {
   id: string;
   name: string;
@@ -248,7 +276,6 @@ export interface Organization {
   updated_at: Date;
 }
 
-// Project type definition
 export interface Project {
   id: string;
   ref: string;
@@ -271,7 +298,6 @@ export interface Project {
   deleted_at: Date | null;
 }
 
-// Task status and type
 export const TaskStatus = {
   PENDING: "pending",
   LEASED: "leased",
@@ -346,7 +372,6 @@ export interface ProjectTaskAttempt {
   updated_at: Date;
 }
 
-// Create project input type
 export interface CreateProjectInput {
   ref: string;
   name: string;
@@ -363,11 +388,9 @@ export interface CreateProjectInput {
   config?: Record<string, unknown>;
 }
 
-// Close database connection
 export async function closeDb() {
   await sql.close();
 
-  // Clean up all cached project connections
   for (const [dbName, cached] of projectConnections.entries()) {
     try {
       await cached.sql.close();

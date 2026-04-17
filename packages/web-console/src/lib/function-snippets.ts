@@ -7,6 +7,12 @@ export type FunctionTaskRecord = {
   error: string | null;
   updated_at: string;
   created_at: string;
+  latest_logs?: Array<{
+    timestamp: string;
+    stream: "stdout" | "stderr";
+    level: string;
+    message: string;
+  }>;
 };
 
 export function buildInvokeAsyncExample(slug: string) {
@@ -103,4 +109,20 @@ export function getStatusBadgeClass(status: string) {
 
 export function buildFunctionTasksPath(projectRef: string, slug: string, limit = 8) {
   return `/api/query?path=/v1/projects/${projectRef}/tasks?function_slug=${encodeURIComponent(slug)}&limit=${limit}`;
+}
+
+export function buildFunctionTaskConsolePath(
+  projectRef: string,
+  slug: string,
+  taskId?: string,
+) {
+  const query = new URLSearchParams({
+    function_slug: slug,
+  });
+
+  if (taskId) {
+    query.set("task_id", taskId);
+  }
+
+  return `/project/${projectRef}/tasks?${query.toString()}`;
 }
