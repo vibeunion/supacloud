@@ -80,11 +80,6 @@ export async function initDatabase() {
     );
 
     CREATE INDEX IF NOT EXISTS idx_project_tasks_status ON project_tasks(status);
-    CREATE INDEX IF NOT EXISTS idx_project_tasks_project_status ON project_tasks(project_ref, status);
-    CREATE INDEX IF NOT EXISTS idx_project_tasks_next_run ON project_tasks(next_run_at);
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_project_tasks_project_idempotency
-      ON project_tasks(project_ref, idempotency_key)
-      WHERE idempotency_key IS NOT NULL;
 
     CREATE TABLE IF NOT EXISTS project_task_attempts (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -103,8 +98,7 @@ export async function initDatabase() {
       UNIQUE(task_id, attempt_no)
     );
 
-    CREATE INDEX IF NOT EXISTS idx_project_task_attempts_task ON project_task_attempts(task_id, attempt_no DESC);
-    CREATE INDEX IF NOT EXISTS idx_project_task_attempts_project ON project_task_attempts(project_ref, created_at DESC);
+
 
     CREATE TABLE IF NOT EXISTS platform_settings (
       key VARCHAR(255) PRIMARY KEY,
