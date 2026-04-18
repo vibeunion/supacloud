@@ -16,6 +16,7 @@ interface DispatchOptions {
 
 const MAX_BODY_SIZE = 10 * 1024 * 1024;
 const MAX_QUEUE_SIZE = Number(process.env.MAX_QUEUE_SIZE) || 200;
+const WORKER_SMOL = process.env.WORKER_SMOL !== "false";
 
 export class WorkerPool {
   private workers: Worker[] = [];
@@ -48,7 +49,9 @@ export class WorkerPool {
   }
 
   private createWorker(): Worker {
-    const w = new Worker(new URL("./worker-executor.ts", import.meta.url).href);
+    const w = new Worker(new URL("./worker-executor.ts", import.meta.url).href, {
+      ...(WORKER_SMOL ? { smol: true } : {}),
+    } as any);
     this.workers.push(w);
     this.workerMetadata.set(w, {});
     return w;
