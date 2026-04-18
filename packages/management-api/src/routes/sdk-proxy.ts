@@ -267,13 +267,18 @@ async function executeProxy(request: Request, targetUrl: string, interceptors: {
         }
 
         const upstreamStart = performance.now();
-        const response = await fetch(targetUrl, {
+        const fetchInit: RequestInit & { duplex?: "half" } = {
             method: request.method,
             headers: reqHeaders,
             body,
             redirect: 'manual',
             signal: AbortSignal.timeout(30000),
-        });
+        };
+        if (body) {
+            fetchInit.duplex = "half";
+        }
+
+        const response = await fetch(targetUrl, fetchInit);
         const duration = performance.now() - upstreamStart;
         if (process.env.NODE_ENV !== 'production' && duration > 500) {
             logger.warn(`[SDK Proxy] Slow upstream response (${duration.toFixed(0)}ms): ${targetUrl}`);
