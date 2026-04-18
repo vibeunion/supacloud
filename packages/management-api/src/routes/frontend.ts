@@ -3,6 +3,30 @@ import { frontendService } from "../services/frontend.service";
 import type { FrontendFramework } from "../types/frontend";
 import { FRAMEWORK_DEFAULTS } from "../types/frontend";
 
+async function readUploadedZip(request: Request, body: unknown): Promise<Uint8Array> {
+  if (body instanceof File || body instanceof Blob) {
+    return new Uint8Array(await body.arrayBuffer());
+  }
+
+  if (body && typeof body === "object") {
+    const directFile = (body as Record<string, unknown>).file;
+    if (directFile instanceof File || directFile instanceof Blob) {
+      return new Uint8Array(await directFile.arrayBuffer());
+    }
+  }
+
+  const contentType = request.headers.get("content-type") || "";
+  if (contentType.includes("multipart/form-data")) {
+    const form = await request.clone().formData();
+    const file = form.get("file");
+    if (file instanceof File) {
+      return new Uint8Array(await file.arrayBuffer());
+    }
+  }
+
+  return new Uint8Array(await request.clone().arrayBuffer());
+}
+
 export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" })
   .get(
     "/deployments",
@@ -156,29 +180,44 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
 
   .post(
     "/deployments/:id/deploy/upload",
-    async ({ params, body, set }) => {
+    async ({ params, body, request, set }) => {
       const deployment = await frontendService.getDeployment(params.ref, params.id);
       if (!deployment) {
                 return status(404, { message: "Deployment not found", code: "404" });
       }
 
-      const tempDir = `/tmp/frontend-upload-${params.id}`;
-      await Bun.write(tempDir + ".zip", body);
+      const tempBase = `/tmp/frontend-upload-${params.id}-${Date.now()}`;
+      const tempDir = tempBase;
+      const tempZip = `${tempBase}.zip`;
 
-      const extractResult = await Bun.$`unzip -o ${tempDir}.zip -d ${tempDir}`.quiet();
-      if (extractResult.exitCode !== 0) {
+      const zipBytes = await readUploadedZip(request, body);
+      if (!zipBytes.byteLength) {
+        set.status = 400;
         return {
           success: false,
           deployment_id: params.id,
           url: "",
           build_log: "",
+          message: "Empty upload payload",
+        };
+      }
+
+      await Bun.write(tempZip, zipBytes);
+
+      const extractResult = await Bun.$`unzip -o ${tempZip} -d ${tempDir}`.quiet();
+      if (extractResult.exitCode !== 0) {
+        return {
+          success: false,
+          deployment_id: params.id,
+          url: "",
+          build_log: extractResult.stderr.toString(),
           message: "Failed to extract zip file",
         };
       }
 
       const result = await frontendService.deployFromSource(params.ref, params.id, tempDir);
 
-      await Bun.$`rm -rf ${tempDir} ${tempDir}.zip`.quiet();
+      await Bun.$`rm -rf ${tempDir} ${tempZip}`.quiet();
 
       return result;
     },
@@ -187,7 +226,7 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
         ref: t.String(),
         id: t.String(),
       }),
-      body: t.File(),
+      body: t.Any(),
     }
   )
 
