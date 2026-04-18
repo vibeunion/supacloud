@@ -151,6 +151,42 @@ export class StorageService {
     return await getStorageDriver().listFiles(projectRef, bucketName);
   }
 
+  static async updateBucket(projectRef: string, bucketId: string, updates: { public?: boolean; file_size_limit?: number; allowed_mime_types?: string[] }): Promise<{ success: boolean; error?: string; bucket?: Record<string, unknown> }> {
+    if (!/^[a-zA-Z0-9._-]+$/.test(bucketId)) {
+      return { success: false, error: "Invalid bucket id" };
+    }
+
+    try {
+      const { getProjectDb, resolveDbName } = await import("../db");
+      const dbName = await resolveDbName(projectRef);
+      const db = getProjectDb(dbName);
+
+      if (updates.public !== undefined) {
+        await db`UPDATE storage.buckets SET public = ${updates.public} WHERE id = ${bucketId}`;
+      }
+      if (updates.file_size_limit !== undefined) {
+        await db`UPDATE storage.buckets SET file_size_limit = ${updates.file_size_limit} WHERE id = ${bucketId}`;
+      }
+      if (updates.allowed_mime_types !== undefined) {
+        await db`UPDATE storage.buckets SET allowed_mime_types = ${JSON.stringify(updates.allowed_mime_types)} WHERE id = ${bucketId}`;
+      }
+
+      const [bucket] = await db`SELECT * FROM storage.buckets WHERE id = ${bucketId}`;
+      if (!bucket) {
+        return { success: false, error: "Bucket not found" };
+      }
+
+      return { success: true, bucket: bucket as Record<string, unknown> };
+    } catch (error: unknown) {
+      logger.error("Failed to update bucket", {
+        projectRef,
+        bucketId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return { success: false, error: "Failed to update bucket" };
+    }
+  }
+
   static async uploadFile(projectRef: string, bucketName: string, fileName: string, fileData: Blob | Buffer | Uint8Array | ArrayBuffer | ReadableStream, contentType: string): Promise<boolean> {
     return await getStorageDriver().uploadFile(projectRef, bucketName, fileName, fileData, contentType);
   }

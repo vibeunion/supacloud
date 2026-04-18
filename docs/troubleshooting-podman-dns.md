@@ -2,7 +2,7 @@
 
 ## Problem Description
 
-In environments using **podman** instead of Docker (RHEL / OpenCloudOS / RockyLinux, etc.), older Edge Functions deployments started via `docker compose` (podman's docker compatibility layer) may fail when fetching compatibility imports from remote CDNs:
+In environments using **podman** instead of Docker (RHEL / OpenCloudOS / RockyLinux, etc.), Edge Functions deployments started via `docker compose` (podman's docker compatibility layer) may fail when fetching compatibility imports from remote CDNs:
 
 ```
 worker boot error: failed to bootstrap runtime: could not find an appropriate entrypoint
@@ -24,9 +24,9 @@ Or when making external requests inside functions:
 }
 ```
 
-This option puts podman's built-in DNS service (`aardvark-dns`) in isolated mode, **only resolving internal names between containers, not forwarding any external domain queries** (like `deno.land`, `esm.sh`, etc.).
+This option puts podman's built-in DNS service (`aardvark-dns`) in isolated mode, **only resolving internal names between containers, not forwarding any external domain queries** (like `esm.sh` and other compatibility import hosts).
 
-Therefore, the Edge Functions environment cannot resolve external compatibility imports on first load, causing startup failure.
+Therefore, the Edge Functions environment cannot resolve external compatibility imports on first load, causing startup failure. This primarily affects URL-style imports (`esm.sh`, `deno.land/std`) that the compatibility shim needs to fetch at boot time.
 
 > **Note**: If restarting an environment that already has cached compatibility imports, this issue may not trigger. The issue is easiest to reproduce after the runtime environment is recreated from scratch.
 

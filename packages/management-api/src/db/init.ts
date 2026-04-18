@@ -321,12 +321,13 @@ export async function initDatabase() {
       WHERE table_schema = 'public' AND table_name IN ('organizations', 'projects', 'project_tasks', 'platform_settings', 'project_secrets', 'deployment_history', 'system_tus_uploads', 'system_tus_chunks', 'system_signed_uploads')
     `;
 
-    const finalCount = Number(verify?.count || 0);
+    const finalPublicCount = Number(verify?.count || 0);
     logger.info(
-      `Database initialized successfully! Tables verified: ${finalCount}/9`,
+      `Database initialized successfully! Public tables verified: ${finalPublicCount}/9`,
     );
 
     // In CI mode where tests rewrite db_name to 'postgres', we must create Storage relations
+    let storageTableCount = 0;
     if (process.env.CI || process.env.GITHUB_ACTIONS || process.env.TEST_FIXED_JWT_SECRET) {
       logger.info(
         "Initializing Storage schemas natively for E2E CI routing...",
@@ -384,14 +385,27 @@ export async function initDatabase() {
       `;
       try {
         await sql.unsafe(storageDDL);
+        const [storageVerify] = await sql`
+          SELECT COUNT(*) as count FROM information_schema.tables
+          WHERE table_schema = 'storage'
+            AND table_name IN ('buckets', 'objects', 's3_multipart_uploads', 's3_multipart_uploads_parts')
+        `;
+        storageTableCount = Number(storageVerify?.count || 0);
         logger.info("Storage schema injected for CI.");
       } catch (e: any) {
         logger.error("Failed to inject Storage schema: " + e.message);
       }
     }
-    if (finalCount < 10) {
+
+    if (finalPublicCount < 9) {
       throw new Error(
-        `Table creation verified but failed. Expected 10 tables, got ${finalCount}`,
+        `Table creation verified but failed. Expected 9 public tables, got ${finalPublicCount}`,
+      );
+    }
+
+    if ((process.env.CI || process.env.GITHUB_ACTIONS || process.env.TEST_FIXED_JWT_SECRET) && storageTableCount < 4) {
+      throw new Error(
+        `Storage schema injection verified but failed. Expected 4 storage tables, got ${storageTableCount}`,
       );
     }
   } catch (error: unknown) {
