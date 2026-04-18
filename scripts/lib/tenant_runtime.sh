@@ -264,6 +264,7 @@ server-host = "0.0.0.0"
 db-pool = 3
 db-pool-acquisition-timeout = 10
 log-level = "warn"
+db-channel = "pgrst_${ref}"
 EOF
     chmod 644 "${TENANT_CONFIG_DIR}/${ref}.conf"
 
