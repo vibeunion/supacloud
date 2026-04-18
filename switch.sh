@@ -29,7 +29,8 @@ show_help() {
     echo "  external                     Edge Runtime managed by supacloud-edge-runtime.service"
     echo ""
     echo "Storage Types:"
-    echo "  minio                        Use MinIO (Pigsty default)"
+    echo "  juicefs                      Use JuiceFS S3 Gateway (default)"
+    echo "  minio                        Use MinIO (Pigsty built-in)"
     echo "  garage                       Use Garage S3"
     echo "  rustfs                       Use RustFS"
     echo "  external                     Use external S3 (requires additional config)"
@@ -197,6 +198,26 @@ switch_storage() {
             exit 1
             ;;
     esac
+}
+
+switch_to_juicefs() {
+    log_step "Switching to JuiceFS S3 Gateway..."
+    systemctl stop garage 2>/dev/null || true
+    systemctl stop rustfs 2>/dev/null || true
+
+    if ! command -v juicefs &> /dev/null; then
+        log_warn "JuiceFS not installed"
+        log_info "Please run: S3_STORAGE_TYPE=juicefs ./install.sh"
+        exit 1
+    fi
+
+    systemctl enable --now juicefs-s3 2>/dev/null || systemctl restart juicefs-s3 2>/dev/null || true
+
+    INTERNAL_IP=$(hostname -I | awk '{print $1}')
+    update_supabase_s3_config "juicefs" "http://${INTERNAL_IP}:9000" "us-east-1"
+
+    log_info "Switched to JuiceFS S3 Gateway"
+    log_info "S3 Endpoint: http://${INTERNAL_IP}:9000"
 }
 
 switch_to_minio() {

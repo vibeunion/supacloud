@@ -21,6 +21,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONFIG_FILE="${SCRIPT_DIR}/config.env"
+OPT_CONFIG_FILE="/opt/supacloud/config.env"
 
 # -- Command Line Argument Parsing --------------------------------------------
 # Parse arguments first so they can override configuration file values
@@ -60,6 +61,40 @@ log_info() { echo -e "${GREEN}[INFO]${NC} $1"; }
 log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 log_step() { echo -e "${BLUE}[STEP]${NC} $1"; }
+
+sync_runtime_config() {
+    local source_file="${1:-$CONFIG_FILE}"
+    mkdir -p "$(dirname "$OPT_CONFIG_FILE")"
+    if [[ -f "$source_file" ]]; then
+        cp "$source_file" "$OPT_CONFIG_FILE"
+    else
+        : > "$OPT_CONFIG_FILE"
+    fi
+    chmod 600 "$OPT_CONFIG_FILE"
+}
+
+append_or_replace_env() {
+    local file="$1"
+    local key="$2"
+    local value="$3"
+    mkdir -p "$(dirname "$file")"
+    touch "$file"
+    python3 - "$file" "$key" "$value" <<'PYENV'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+key = sys.argv[2]
+value = sys.argv[3]
+lines = path.read_text().splitlines() if path.exists() else []
+for i, line in enumerate(lines):
+    if line.startswith(f"{key}="):
+        lines[i] = f"{key}={value}"
+        break
+else:
+    lines.append(f"{key}={value}")
+path.write_text("\n".join(lines) + ("\n" if lines else ""))
+PYENV
+}
 
 # ========== Check Configuration ==========
 check_config() {
@@ -1117,7 +1152,9 @@ compile_acme_module() {
         wget -q "https://mirror.ghproxy.com/https://github.com/nginx/acme/archive/refs/heads/main.tar.gz" -O nginx-acme.tar.gz && \
         tar -xzf nginx-acme.tar.gz && mv main.tar.gz nginx-acme.tar.gz 2>/dev/null || true
         # Verify download structure
-        if [[ -f nginx-acme.tar.gz ]] && tar -tzf nginx-acme.tar.gz | grep -q "acme-main"; fi
+        if [[ -f nginx-acme.tar.gz ]] && tar -tzf nginx-acme.tar.gz | grep -q "acme-main"; then
+            true
+        fi
         log_warn "mirror.ghproxy.com failed, trying jsdelivr CDN..."
         wget -q "https://cdn.jsdelivr.net/gh/nginx/acme@main.tar.gz" -O nginx-acme.tar.gz && \
         tar -xzf nginx-acme.tar.gz && \
@@ -1579,8 +1616,8 @@ configure_s3_in_pigsty() {
             S3_REGION="${EXTERNAL_S3_REGION:-us-east-1}"
             ;;
         juicefs)
-            # JuiceFS S3 Gateway run on local port 9001
-            S3_ENDPOINT="http://${INTERNAL_IP}:9001"
+            # JuiceFS S3 Gateway runs on local port 9000
+            S3_ENDPOINT="http://${INTERNAL_IP}:9000"
             S3_ACCESS_KEY="${S3_ACCESS_KEY:-minioadmin}"
             S3_SECRET_KEY="${S3_SECRET_KEY:-minioadmin}"
             S3_REGION="us-east-1"
@@ -2033,6 +2070,11 @@ EOF
     fi
 
     # 5. Generate API service environment file
+    local REALTIME_SECRET_KEY_BASE
+    local REALTIME_DB_ENC_KEY
+    REALTIME_SECRET_KEY_BASE=$(openssl rand -base64 48 | tr -d '\n')
+    REALTIME_DB_ENC_KEY=$(openssl rand -hex 16)
+
     cat > /etc/supabase/management-api.env <<EOF
 # SupaCloud Management API Configuration
 PORT=9090
@@ -2042,13 +2084,20 @@ MASTER_TOKEN=${MASTER_TOKEN}
 SCRIPTS_PATH=${SCRIPTS_INSTALL_DIR}
 PIGSTY_PATH=${HOME}/pigsty
 BASE_DOMAIN=${SUPABASE_PUBLIC_DOMAIN}
+S3_STORAGE_TYPE=${S3_STORAGE_TYPE:-juicefs}
+SUPACLOUD_JWT_SECRET=${JWT_SECRET}
+REALTIME_SECRET_KEY_BASE=${REALTIME_SECRET_KEY_BASE}
+REALTIME_DB_ENC_KEY=${REALTIME_DB_ENC_KEY}
+REALTIME_API_SECRET=${JWT_SECRET}
 # Database connection environment variables (required for script execution)
 PG_HOST=${INTERNAL_IP}
 PG_PORT=5432
 PG_USER=postgres
+PG_DATABASE=postgres
 PGPASSWORD=${POSTGRES_PASSWORD}
 EOF
     chmod 600 /etc/supabase/management-api.env
+    sync_runtime_config /etc/supabase/management-api.env
 
     # 6. Execute database migration via supacloud binary itself
     log_info "Initializing metadata database schema..."
@@ -2143,7 +2192,7 @@ deploy_service_containers() {
         fi
 
         local SECRET_KEY_BASE
-        SECRET_KEY_BASE=$(openssl rand -hex 64)
+        SECRET_KEY_BASE="${REALTIME_SECRET_KEY_BASE:-$(openssl rand -hex 64)}"
 
         # Container name follows official convention: realtime constructs tenant id from subdomain
         $RUNTIME run -d \

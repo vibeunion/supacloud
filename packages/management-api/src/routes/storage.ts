@@ -340,36 +340,18 @@ export const projectStorageRoutes = new Elysia({ prefix: "/v1/projects/:ref/stor
         return bucket;
     })
     .put('/buckets/:id', async ({ params, body, set }) => {
-        const ref = params.ref;
-        const bucketId = params.id;
-        try {
-            const { getProjectDb, resolveDbName } = await import("../db");
-            const dbName = await resolveDbName(ref);
-            const db = getProjectDb(dbName);
-            const bodyObj = body as Record<string, unknown>;
-            if (!/^[a-zA-Z0-9._-]+$/.test(bucketId)) {
-                set.status = 400;
-                return { message: "Invalid bucket id", code: "400" };
-            }
-            if (bodyObj.public !== undefined) {
-                await db`UPDATE storage.buckets SET public = ${bodyObj.public ? true : false} WHERE id = ${bucketId}`;
-            }
-            if (bodyObj.file_size_limit !== undefined) {
-                await db`UPDATE storage.buckets SET file_size_limit = ${Number(bodyObj.file_size_limit)} WHERE id = ${bucketId}`;
-            }
-            if (bodyObj.allowed_mime_types !== undefined) {
-                await db`UPDATE storage.buckets SET allowed_mime_types = ${JSON.stringify(bodyObj.allowed_mime_types)} WHERE id = ${bucketId}`;
-            }
-            const [updated] = await db`SELECT * FROM storage.buckets WHERE id = ${bucketId}`;
-            if (!updated) {
-                set.status = 404;
-                return { message: "Bucket not found", code: "404" };
-            }
-            return updated;
-        } catch (err: unknown) {
-            set.status = 500;
-            return { message: "Failed to update bucket", code: "500" };
+        const result = await StorageService.updateBucket(params.ref, params.id, {
+            public: body.public,
+            file_size_limit: body.file_size_limit,
+            allowed_mime_types: body.allowed_mime_types,
+        });
+
+        if (!result.success) {
+            set.status = result.error === "Bucket not found" ? 404 : result.error === "Invalid bucket id" ? 400 : 500;
+            return { message: result.error || "Failed to update bucket", code: String(set.status) };
         }
+
+        return result.bucket;
     }, {
         body: t.Object({
             public: t.Optional(t.Boolean()),
