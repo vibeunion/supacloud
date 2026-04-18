@@ -84,6 +84,7 @@ if (process.argv.includes("--help") || process.argv.includes("-h")) {
     npx supacloud-mcp edge_functions deploy --ref abc123 --slug hello --code "..."  # small inline
     npx supacloud-mcp frontend list --ref abc123
     npx supacloud-mcp frontend deploy_git --ref abc123 --id DEPLOY_ID --git_url https://...
+    npx supacloud-mcp frontend deploy_upload --ref abc123 --id DEPLOY_ID --zip_path ./site.zip
 
   CONFIGURATION
 
