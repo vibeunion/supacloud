@@ -14,8 +14,8 @@ import { config } from "../config";
 export class EdgeRuntimeManager {
   private proc: Subprocess | null = null;
   private restartCount = 0;
-  private maxRestarts = 10;
   private restartDelay = 500; // ms
+  private stopping = false;
 
   constructor(
     private config: {
@@ -69,6 +69,8 @@ export class EdgeRuntimeManager {
   }
 
   async start() {
+    this.stopping = false;
+
     // Kill any orphan processes on the port BEFORE spawning
     this.killStaleListeners();
 
@@ -87,18 +89,26 @@ export class EdgeRuntimeManager {
       stderr: "inherit",
       onExit: (_proc, code, signal) => {
         logger.error(`[EdgeRuntime] Process exited code=${code} signal=${signal ?? "none"}`);
-        if (this.restartCount < this.maxRestarts) {
-          this.restartCount++;
-          logger.info(
-            `[EdgeRuntime] Restarting in ${this.restartDelay}ms (${this.restartCount}/${this.maxRestarts})`,
-          );
-          setTimeout(() => this.start(), this.restartDelay);
-          this.restartDelay = Math.min(this.restartDelay * 2, 30000);
-        } else {
-          logger.error(
-            "[EdgeRuntime] Max restarts reached, giving up",
-          );
+        this.proc = null;
+
+        if (this.stopping) {
+          logger.info("[EdgeRuntime] Stop requested, not restarting child process");
+          return;
         }
+
+        this.restartCount++;
+        const nextDelay = this.restartDelay;
+        logger.warn(
+          `[EdgeRuntime] Restarting in ${nextDelay}ms (attempt ${this.restartCount}, capped backoff)`,
+        );
+        setTimeout(() => {
+          this.start().catch((err: unknown) =>
+            logger.error("[EdgeRuntime] Restart attempt failed", {
+              error: err instanceof Error ? err.message : String(err),
+            }),
+          );
+        }, nextDelay);
+        this.restartDelay = Math.min(this.restartDelay * 2, 30000);
       },
     });
     logger.info(
@@ -127,7 +137,7 @@ export class EdgeRuntimeManager {
   }
 
   stop() {
-    this.maxRestarts = 0;
+    this.stopping = true;
     this.proc?.kill();
   }
 }
