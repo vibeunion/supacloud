@@ -85,8 +85,8 @@ export class EdgeRuntimeManager {
       },
       stdout: "inherit",
       stderr: "inherit",
-      onExit: (_proc, code, _signal) => {
-        logger.error(`[EdgeRuntime] Process exited code=${code}`);
+      onExit: (_proc, code, signal) => {
+        logger.error(`[EdgeRuntime] Process exited code=${code} signal=${signal ?? "none"}`);
         if (this.restartCount < this.maxRestarts) {
           this.restartCount++;
           logger.info(
