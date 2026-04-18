@@ -74,6 +74,7 @@ export class QueueWorker {
       SELECT id, project_ref, task_type, payload 
       FROM project_tasks 
       WHERE status = 'pending'
+        AND task_type <> 'edge_function'
       ORDER BY created_at ASC 
       LIMIT 10
       FOR UPDATE SKIP LOCKED;

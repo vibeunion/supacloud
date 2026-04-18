@@ -21,6 +21,7 @@ import { config } from "./config";
 import { checkAuth } from "./middleware/auth";
 import { closeDb, sql } from "./db";
 import { authRoutes, deployRoutes, storageCompatRoutes } from "./routes";
+import { migrateLegacyVersionArtifacts } from "./services/edge-function.service";
 import { resolveRealtimeTenantHost } from "./utils/sdk-parity";
 
 const WEB_CONSOLE_DIR = "/opt/supacloud/packages/web-console/build";
@@ -774,6 +775,18 @@ async function bootstrap() {
   } else if (args.includes("--help") || args.includes("-h")) {
     process.exit(0);
   } else if (args.length === 0 || args.includes("--server")) {
+    try {
+      const { moved } = await migrateLegacyVersionArtifacts();
+      if (moved > 0) {
+        logger.info(`[EdgeFunction] Migrated ${moved} legacy version artifact(s) into .versions/`);
+      }
+    } catch (err: unknown) {
+      logger.error("Failed to migrate legacy edge-function version artifacts", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+      process.exit(1);
+    }
+
     // Use Bun.serve with custom fetch to intercept /mcp before Elysia touches the body
     const { handleMcp } = await import("./routes/mcp");
     Bun.serve({
