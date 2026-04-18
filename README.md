@@ -232,10 +232,46 @@ Kong Gateway (API-driven, native OpenResty):
   Global plugins: ACME SSL, Gzip, Security Headers, Access Logs
   Per-route plugins: CORS, Rate Limiting, JWT, IP Restriction
   /api/*        → :9090
-  /functions/*  → :9000 (direct, no proxy)
+  /functions/*  → :9090 (sdk-proxy, async enqueue + sync relay)
 ```
 
 Default installs use `EDGE_RUNTIME_MODE=embedded`, meaning `supacloud.service` starts the Bun Edge Runtime child process itself. A separate `supacloud-edge-runtime.service` is available for `EDGE_RUNTIME_MODE=external`, but you should not run both modes at the same time.
+
+### Background Function Routing
+
+Public Edge Function traffic now enters through the Management API first:
+
+- `/functions/v1/*` is routed to `:9090`
+- `sdk-proxy` decides whether the call should:
+  - enqueue a background task and return `202 Accepted`
+  - or relay synchronously to the Bun Edge Runtime
+
+This gives SupaCloud a stable control point for:
+
+- async enqueue
+- retries / timeout defaults
+- idempotency
+- request envelope capture
+- per-function background route policy
+
+For `supabase-js` compatibility, foreground invokes still use the standard:
+
+```ts
+await supabase.functions.invoke("my-function", { body: {...} })
+```
+
+Background execution can be activated in two ways:
+
+- explicit request headers such as `x-supacloud-async`
+- server-side function config via `background_routes`
+
+`background_routes` is the preferred production model for heavy paths like:
+
+- `/generate/crop`
+- `/generate/matting`
+- `/generate/video`
+
+because it does not depend on the browser successfully forwarding custom headers.
 
 | Feature | Current Bun Runtime |
 |---------|---------------------|

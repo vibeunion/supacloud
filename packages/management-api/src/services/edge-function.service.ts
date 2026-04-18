@@ -8,6 +8,7 @@ export interface EdgeFunctionConfig {
   verify_jwt: boolean;
   import_map?: string;
   version?: string;
+  background_routes?: string[];
 }
 
 const DEFAULT_FUNCTION_CONFIG: EdgeFunctionConfig = {
@@ -288,7 +289,7 @@ export const edgeFunctionService = {
     await fs.mkdir(dir, { recursive: true });
     await Bun.write(getConfigPath(ref, slug), JSON.stringify(merged, null, 2));
     logger.info(
-      `[EdgeFunction] Config updated for ${slug}@${ref}: verify_jwt=${merged.verify_jwt}`,
+      `[EdgeFunction] Config updated for ${slug}@${ref}: verify_jwt=${merged.verify_jwt}, background_routes=${(merged.background_routes || []).length}`,
     );
     return merged;
   },

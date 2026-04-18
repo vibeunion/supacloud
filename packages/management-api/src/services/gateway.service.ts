@@ -9,7 +9,7 @@ import {
     resolveProjectStudioHost,
 } from "../utils/project-routing";
 
-export const DEFAULT_CORS_HEADERS = ["Accept", "Accept-Language", "Content-Language", "Authorization", "Content-Type", "X-Api-Version", "x-supabase-api-version", "X-Client-Info", "apikey", "Prefer", "Content-Profile", "accept-profile", "Range", "Range-Unit", "x-upsert", "Cache-Control", "x-retry-count", "x-metadata"];
+export const DEFAULT_CORS_HEADERS = ["Accept", "Accept-Language", "Content-Language", "Authorization", "Content-Type", "X-Api-Version", "x-supabase-api-version", "X-Client-Info", "apikey", "Prefer", "Content-Profile", "accept-profile", "Range", "Range-Unit", "x-upsert", "Cache-Control", "x-retry-count", "x-metadata", "x-supacloud-async", "x-supacloud-retries", "x-supacloud-timeout"];
 export const DEFAULT_CORS_EXPOSED = ["Content-Length", "Content-Range", "X-JSON", "x-supabase-api-version", "X-Client-Info", "Prefer", "Content-Profile", "accept-profile", "Range", "Range-Unit", "X-Relay-Error", "link", "x-total-count"];
 export const DEFAULT_CORS_ORIGINS = [
   "~^https?://.*$"
@@ -505,7 +505,7 @@ export class GatewayService {
             });
             await this.ensureServiceAndRoute({
                 name: `svc-realtime-${projectRef}`,
-                url: `http://${hostIp}:${opts?.realtimeWsPort || 9090}`,
+                url: `http://${hostIp}:${opts?.realtimeWsPort || 4000}/socket`,
                 paths: ["/realtime/v1"],
                 hosts,
                 projectRef,

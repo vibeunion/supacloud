@@ -12,6 +12,20 @@ import { resolveTenantPorts } from "../utils/project-routing";
 const MAX_ASYNC_BODY_BYTES = 256 * 1024;
 const SUPACLOUD_IDEMPOTENCY_HEADER = "x-supacloud-idempotency-key";
 
+function normalizeAsyncRoutePath(path: string): string {
+    if (!path) return "/";
+    const normalized = path.startsWith("/") ? path : `/${path}`;
+    return normalized.replace(/\/+$/, "") || "/";
+}
+
+function shouldForceAsyncRoute(targetPath: string, configuredRoutes: string[] | undefined): boolean {
+    const normalizedTarget = normalizeAsyncRoutePath(targetPath);
+    return (configuredRoutes || []).some((route) => {
+        const normalizedRoute = normalizeAsyncRoutePath(route);
+        return normalizedTarget === normalizedRoute || normalizedTarget.startsWith(`${normalizedRoute}/`);
+    });
+}
+
 function decodeJwtPayload(token: string): Record<string, unknown> | null {
     try {
         const [, payload] = token.split(".");
@@ -31,9 +45,6 @@ function parsePositiveIntHeader(value: string | null): number | undefined {
 }
 
 async function maybeEnqueueAsyncFunction(request: Request, ref: string): Promise<Response | null> {
-    const asyncHeader = request.headers.get("x-supacloud-async");
-    if (asyncHeader !== "true") return null;
-
     const url = new URL(request.url);
     const targetPath = url.pathname.replace(/^\/functions\/v1/, "");
     const [functionSlug, ...restPath] = targetPath.split("/").filter(Boolean);
@@ -43,6 +54,12 @@ async function maybeEnqueueAsyncFunction(request: Request, ref: string): Promise
             headers: { "Content-Type": "application/json" },
         });
     }
+
+    const asyncHeader = request.headers.get("x-supacloud-async");
+    const fnConfig = await edgeFunctionService.getConfig(ref, functionSlug);
+    const routePath = restPath.length > 0 ? `/${restPath.join("/")}` : "/";
+    const shouldEnqueue = asyncHeader === "true" || shouldForceAsyncRoute(routePath, fnConfig.background_routes);
+    if (!shouldEnqueue) return null;
 
     const backgroundSettings = await projectService.getBackgroundTaskSettings(ref);
     const maxPayloadBytes = backgroundSettings?.max_payload_bytes || MAX_ASYNC_BODY_BYTES;
@@ -100,7 +117,9 @@ async function maybeEnqueueAsyncFunction(request: Request, ref: string): Promise
     const authHeaders: Record<string, string> = {};
     const authorization = request.headers.get("authorization");
     const apikey = request.headers.get("apikey");
-    const projectKeys = await projectService.getApiKeys(ref);
+    const projectKeys = apikey && typeof projectService.getApiKeys === "function"
+        ? await projectService.getApiKeys(ref)
+        : null;
     const authPayload = authorization?.startsWith("Bearer ")
         ? decodeJwtPayload(authorization.replace(/^Bearer\s+/i, ""))
         : null;
@@ -116,8 +135,6 @@ async function maybeEnqueueAsyncFunction(request: Request, ref: string): Promise
                 ? "service_role"
                 : "unknown"
         : null;
-
-    const fnConfig = await edgeFunctionService.getConfig(ref, functionSlug);
 
     const task = await backgroundTaskService.enqueueBackgroundFunctionTask({
         projectRef: ref,

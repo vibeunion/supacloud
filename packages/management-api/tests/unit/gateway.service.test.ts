@@ -1,5 +1,5 @@
 import { describe, test, expect, mock } from "bun:test";
-import { gatewayService } from "../../src/services/gateway.service";
+import { DEFAULT_CORS_HEADERS, gatewayService } from "../../src/services/gateway.service";
 
 /** Type-safe mock for globalThis.fetch using two-step cast */
 function mockFetch(handler: () => Promise<Response>): void {
@@ -50,6 +50,12 @@ describe("GatewayService", () => {
         globalThis.fetch = originalFetch;
     });
 
+    test("default cors headers allow supacloud async control headers", () => {
+        expect(DEFAULT_CORS_HEADERS).toContain("x-supacloud-async");
+        expect(DEFAULT_CORS_HEADERS).toContain("x-supacloud-retries");
+        expect(DEFAULT_CORS_HEADERS).toContain("x-supacloud-timeout");
+    });
+
     test("setupUpstream should configure realtime route for supabase-js websocket", async () => {
         const originalFetch = globalThis.fetch;
         const calls: Array<{ url: string; method: string; body: Record<string, unknown> | null }> = [];
@@ -80,7 +86,7 @@ describe("GatewayService", () => {
             (c) => c.method === "PUT" && c.url.includes("/services/svc-realtime-testref123")
         );
         expect(realtimeService).toBeDefined();
-        expect(realtimeService?.body?.url).toMatch(/http:\/\/.*:9090/);
+        expect(realtimeService?.body?.url).toMatch(/http:\/\/.*:4000\/socket/);
 
         const realtimeRoute = calls.find(
             (c) => c.method === "PUT" && c.url.includes("/routes/route-svc-realtime-testref123")

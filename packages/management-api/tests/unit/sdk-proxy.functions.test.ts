@@ -2,6 +2,9 @@ import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:
 import { Elysia } from "elysia";
 import { sdkProxyRoutes } from "../../src/routes/sdk-proxy";
 import * as dbModule from "../../src/db";
+import { projectService } from "../../src/services/project.service";
+import { edgeFunctionService } from "../../src/services/edge-function.service";
+import { backgroundTaskService } from "../../src/services/background-task.service";
 
 const app = new Elysia().use(sdkProxyRoutes);
 
@@ -21,6 +24,7 @@ describe("sdkProxyRoutes functions proxy", () => {
   beforeEach(() => {
     calls.length = 0;
     originalFetch = globalThis.fetch;
+    mock.restore();
     globalThis.fetch = mock((input: string | URL | Request, init?: RequestInit & { duplex?: "half" }) => {
       const url = typeof input === "string"
         ? input
@@ -36,6 +40,7 @@ describe("sdkProxyRoutes functions proxy", () => {
 
   afterEach(() => {
     globalThis.fetch = originalFetch;
+    mock.restore();
   });
 
   test("POST /functions/v1 forwards request bodies with duplex=half", async () => {
@@ -52,6 +57,54 @@ describe("sdkProxyRoutes functions proxy", () => {
     expect(calls).toHaveLength(1);
     expect(calls[0]?.url).toBe("http://127.0.0.1:9000/hello");
     expect(calls[0]?.init?.duplex).toBe("half");
+  });
+
+  test("POST /functions/v1 auto-enqueues configured background routes without custom headers", async () => {
+    const getSettingsSpy = spyOn(projectService, "getBackgroundTaskSettings").mockResolvedValue({
+      concurrency: 2,
+      max_attempts: 3,
+      max_payload_bytes: 262144,
+      timeout_sec_default: 300,
+      timeout_sec_max: 900,
+    });
+    const getApiKeysSpy = spyOn(projectService, "getApiKeys").mockResolvedValue({
+      anon_key: "anon",
+      service_role_key: "service",
+    } as Awaited<ReturnType<typeof projectService.getApiKeys>>);
+    const getConfigSpy = spyOn(edgeFunctionService, "getConfig").mockResolvedValue({
+      verify_jwt: false,
+      version: "7",
+      background_routes: ["/generate/crop"],
+    });
+    const enqueueSpy = spyOn(backgroundTaskService, "enqueueBackgroundFunctionTask").mockResolvedValue({
+      id: "task_123",
+      project_ref: "proj_1",
+      task_type: "edge_function",
+      function_slug: "aorist-ai",
+      function_version: "7",
+      status: "pending",
+      attempt: 1,
+      max_attempts: 3,
+    } as Awaited<ReturnType<typeof backgroundTaskService.enqueueBackgroundFunctionTask>>);
+
+    const response = await request("/functions/v1/aorist-ai/generate/crop", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-project-ref": "proj_1",
+        apikey: "anon",
+        authorization: "Bearer jwt-token",
+      },
+      body: JSON.stringify({ ping: true }),
+    });
+
+    expect(response.status).toBe(202);
+    expect(response.headers.get("x-supacloud-task-id")).toBe("task_123");
+    expect(calls).toHaveLength(0);
+    expect(getConfigSpy).toHaveBeenCalledWith("proj_1", "aorist-ai");
+    expect(enqueueSpy).toHaveBeenCalledTimes(1);
+    expect(getSettingsSpy).toHaveBeenCalledWith("proj_1");
+    expect(getApiKeysSpy.mock.calls.length).toBeLessThanOrEqual(1);
   });
 
   test("auth proxy resolves tenant ports from projects.config", async () => {
