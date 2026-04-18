@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.3.1](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.3.0...edge-runtime-v0.3.1) (2026-04-18)
+
+
+### 🐛 Bug Fixes
+
+* **edge-runtime:** avoid double-managed runtime restarts ([5a27175](https://github.com/zuohuadong/supacloud/commit/5a271758fff9bbe008f8d8aade559e4d8dffab3e))
+
+
+### 💅 Elegance & Refactoring
+
+* **edge-functions:** migrate version artifacts into internal revisions ([e9c0890](https://github.com/zuohuadong/supacloud/commit/e9c0890013bb23b0189dd089c3e7d79507ee37b2))
+
+
+### 🔧 Miscellaneous Chores
+
+* **systemd:** add canonical service templates ([9f1c42c](https://github.com/zuohuadong/supacloud/commit/9f1c42c4fabd1da1d24a35c9f699f92f22e0bcad))
+
 ## [0.3.0](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.2.1...edge-runtime-v0.3.0) (2026-04-17)
 
 
