@@ -140,16 +140,19 @@ create_frontend_deployment(ref="abc123", name="my-app", framework="react", domai
 # 2. Deploy from Git
 deploy_frontend_git(ref="abc123", id="<deployment_id>", git_url="https://github.com/user/repo.git")
 
-# 3. Check build logs if something went wrong
+# 3. Or deploy from a local zip bundle
+deploy_frontend_upload(ref="abc123", id="<deployment_id>", zip_path="./dist/site.zip")
+
+# 4. Check build logs if something went wrong
 get_frontend_build_logs(ref="abc123", id="<deployment_id>")
 
-# 4. Add a custom domain
+# 5. Add a custom domain
 add_frontend_domain(ref="abc123", id="<deployment_id>", domain="www.example.com")
 
-# 5. Set build-time environment variables
+# 6. Set build-time environment variables
 set_frontend_env(ref="abc123", id="<deployment_id>", env_vars={ VITE_API_URL: "https://api.example.com" })
 
-# 6. Re-deploy after env change
+# 7. Re-deploy after env change
 redeploy_frontend(ref="abc123", id="<deployment_id>")
 \\\`\\\`\\\`
 
