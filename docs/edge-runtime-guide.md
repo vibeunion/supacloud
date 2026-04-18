@@ -2,11 +2,13 @@
 
 SupaCloud Edge Functions uses **Bun + Elysia Worker Thread Pool** as the runtime.
 
+By default, the runtime is started in **embedded mode** by `supacloud.service` (the Management API service). A standalone `supacloud-edge-runtime.service` is also available for **external mode**, but the two modes are mutually exclusive and must not own port `9000` at the same time.
+
 ## Architecture
 
 ```
 SupaCloud (:9090)             Edge Runtime (:9000)
-├── Management API       ←──  supacloud-edge-runtime.service
+├── Management API       ←──  supacloud.service (default, embedded mode)
 ├── SSE Log Stream (/logs/stream)
 ├── WebSocket (/ws/tasks)     ├── Elysia Server
 └── Static Assets (ETag/304)  ├── Worker Thread Pool (4 threads, fixed ~80MB)
@@ -20,6 +22,22 @@ Kong Gateway (API-driven, native OpenResty):
   /api/*        → :9090 (Management API)
   /functions/*  → :9000 (Edge Runtime, direct)
 ```
+
+## Runtime Ownership
+
+SupaCloud supports two deployment modes for the Bun Edge Runtime:
+
+| Mode | Owner | Default | Notes |
+|------|-------|---------|-------|
+| `embedded` | `supacloud.service` | Yes | Management API starts the Edge Runtime child process itself. |
+| `external` | `supacloud-edge-runtime.service` | No | Use only when you explicitly want a separate systemd unit. |
+
+Set the mode through `EDGE_RUNTIME_MODE` in `/etc/supabase/management-api.env`.
+
+Important:
+- `embedded` is the installer default.
+- `external` should only be enabled if you intentionally run a dedicated `supacloud-edge-runtime.service`.
+- Do **not** run both modes at once; they will compete for port `9000`.
 
 ## Performance
 
@@ -45,6 +63,8 @@ Deploy flow:
 ## Dependency Management
 
 **Edge Runtime dependencies** (Elysia etc.) are declared in `packages/edge-runtime/package.json`.
+
+The Bun entrypoint is `packages/edge-runtime/server.ts`, and the checked-in standalone unit runs `bun run server.ts` from `/opt/supacloud/edge-runtime`.
 
 **User function dependencies** are auto-scanned during deployment:
 - `npm:xxx` — Bun native support ✅
@@ -109,13 +129,22 @@ Legacy Deno user code works without changes via the built-in shim layer:
 ## Service Management
 
 ```bash
-# Check status
+# Check Management API status (default embedded mode)
+systemctl status supacloud
+
+# Check standalone Edge Runtime status (external mode only)
 systemctl status supacloud-edge-runtime
 
-# Restart
+# Restart embedded mode
+systemctl restart supacloud
+
+# Restart external mode
 systemctl restart supacloud-edge-runtime
 
-# View logs
+# View embedded mode logs
+journalctl -u supacloud -f
+
+# View external mode logs
 journalctl -u supacloud-edge-runtime -f
 
 # Deploy a function
@@ -123,3 +152,5 @@ curl -X POST http://localhost:9090/api/functions/deploy \
   -H "Content-Type: application/json" \
   -d '{"ref":"PROJECT_REF","slug":"hello","code":"export default () => new Response(\"hi\")"}'
 ```
+
+If you are using the default installer path, prefer `supacloud.service` commands because the Edge Runtime is normally embedded there.

@@ -223,7 +223,7 @@ curl http://localhost:9090/v1/projects/<ref>/api-keys \
 
 ```
 SupaCloud (:9090)          Edge Runtime (:9000)
-├── Management API    ←──  Bun.spawn() manages
+├── Management API    ←──  supacloud.service manages by default
 ├── Web Console            ├── Elysia Server
 ├── SSE Log Stream         ├── Worker Thread Pool (4 threads)
 ├── WebSocket /ws/tasks    ├── Deno Compat Shim
@@ -236,6 +236,8 @@ Kong Gateway (API-driven, native OpenResty):
   /api/*        → :9090
   /functions/*  → :9000 (direct, no proxy)
 ```
+
+Default installs use `EDGE_RUNTIME_MODE=embedded`, meaning `supacloud.service` starts the Bun Edge Runtime child process itself. A separate `supacloud-edge-runtime.service` is available for `EDGE_RUNTIME_MODE=external`, but you should not run both modes at the same time.
 
 | Feature | Deno (legacy) | Bun (recommended) |
 |---------|--------------|--------------------|
@@ -583,7 +585,7 @@ curl http://localhost:9090/v1/projects/<ref>/api-keys \
 
 ```
 SupaCloud (:9090)          Edge Runtime (:9000)
-├── Management API    ←──  Bun.spawn() 管理
+├── Management API    ←──  默认由 supacloud.service 管理
 ├── Web Console            ├── Elysia Server
 ├── SSE 日志流              ├── Worker 线程池 (4 线程，固定)
 ├── WebSocket /ws/tasks    ├── Deno 兼容层
@@ -596,6 +598,8 @@ Kong 网关 (API 驱动，原生 OpenResty):
   /api/*        → :9090 (管理 API)
   /functions/*  → :9000 (Edge Runtime 直连)
 ```
+
+默认安装使用 `EDGE_RUNTIME_MODE=embedded`，也就是由 `supacloud.service` 直接拉起 Bun Edge Runtime 子进程。`EDGE_RUNTIME_MODE=external` 时可以改用独立的 `supacloud-edge-runtime.service`，但两种模式不能同时运行，否则会争抢 `9000` 端口。
 
 | 特性 | Deno (旧版) | Bun (推荐) |
 |------|-----------|------------|
