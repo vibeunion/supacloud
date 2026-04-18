@@ -91,4 +91,40 @@ describe("GatewayService", () => {
 
         globalThis.fetch = originalFetch;
     });
+
+    test("setupUpstream should preserve /functions/v1 prefix for management sdk-proxy", async () => {
+        const originalFetch = globalThis.fetch;
+        const calls: Array<{ url: string; method: string; body: Record<string, unknown> | null }> = [];
+
+        globalThis.fetch = mock((input: string | URL | Request, init?: RequestInit) => {
+            const url = typeof input === "string"
+                ? input
+                : input instanceof URL
+                    ? input.toString()
+                    : input.url;
+            const method = init?.method || "GET";
+            let body: Record<string, unknown> | null = null;
+            if (typeof init?.body === "string" && init.body.length > 0) {
+                try {
+                    body = JSON.parse(init.body) as Record<string, unknown>;
+                } catch {
+                    body = null;
+                }
+            }
+            calls.push({ url, method, body });
+            return Promise.resolve(new Response(JSON.stringify({ data: [] })));
+        }) as unknown as typeof fetch;
+
+        const result = await gatewayService.setupUpstream("testref123", 3000, 9999);
+        expect(result.success).toBe(true);
+
+        const functionsRoute = calls.find(
+            (c) => c.method === "PUT" && c.url.includes("/routes/route-svc-functions-testref123")
+        );
+        expect(functionsRoute).toBeDefined();
+        expect(functionsRoute?.body?.paths).toEqual(["/functions/v1"]);
+        expect(functionsRoute?.body?.strip_path).toBe(false);
+
+        globalThis.fetch = originalFetch;
+    });
 });
