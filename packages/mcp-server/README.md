@@ -8,9 +8,9 @@ AI-native 的 Supabase 基础设施管理 MCP Server。让 AI Agent（Claude、C
 - 🚀 **安装后增强**：通过 Management API 管理项目全生命周期
 - 🗄️ **数据库操作**：SQL 查询、Schema 检查、RLS 策略、数据迁移（支持只读模式）
 - 🔐 **Auth 管理**：OAuth Provider 配置（含微信/QQ/微博等国内登录）、Auth 设置
-- 📦 **存储管理**：S3/MinIO 桶管理、文件操作与 Base64 测试直传
+- 📦 **存储管理**：S3 / JuiceFS / MinIO 桶管理、文件操作与 Base64 测试直传
 - 🌐 **前端托管**：静态网站 & SSR 部署、Git 部署、自定义域名、HTTPS 自动证书
-- 🏗️ **部署管理**：Docker 容器状态检查与 Web Console 部署
+- 🏗️ **部署管理**：systemd 服务状态检查、远程安装/升级与 Web Console 部署
 - 🔒 **项目范围模式**：限制 AI 只能访问指定项目，支持只读模式
 - 🤖 **AI 原生**：带有上下文资源（Resources）与超级智能指引（Prompts）的标准 MCP 协议
 - 🔑 **安全可控**：环境变量配置凭据，工具级权限隔离

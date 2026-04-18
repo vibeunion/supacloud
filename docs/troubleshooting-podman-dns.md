@@ -2,7 +2,7 @@
 
 ## Problem Description
 
-In environments using **podman** instead of Docker (RHEL / OpenCloudOS / RockyLinux, etc.), after starting Supabase Stack via `docker compose` (podman's docker compatibility layer), the Edge Functions container (`supabase-edge-functions`) fails when loading Deno functions with remote CDN dependencies:
+In environments using **podman** instead of Docker (RHEL / OpenCloudOS / RockyLinux, etc.), older Edge Functions deployments started via `docker compose` (podman's docker compatibility layer) may fail when fetching compatibility imports from remote CDNs:
 
 ```
 worker boot error: failed to bootstrap runtime: could not find an appropriate entrypoint
@@ -26,9 +26,9 @@ Or when making external requests inside functions:
 
 This option puts podman's built-in DNS service (`aardvark-dns`) in isolated mode, **only resolving internal names between containers, not forwarding any external domain queries** (like `deno.land`, `esm.sh`, etc.).
 
-Therefore, the Edge Functions container cannot download Deno module dependencies via CDN when first loading functions, causing startup failure.
+Therefore, the Edge Functions environment cannot resolve external compatibility imports on first load, causing startup failure.
 
-> **Note**: If restarting a container that already has Deno module cache, this issue won't trigger. The issue is exposed each time a container is recreated after `docker rm`.
+> **Note**: If restarting an environment that already has cached compatibility imports, this issue may not trigger. The issue is easiest to reproduce after the runtime environment is recreated from scratch.
 
 ## Fix Steps
 
@@ -75,7 +75,7 @@ docker compose up -d --force-recreate functions
 
 ```bash
 # Should return DNS resolution result (not NXDOMAIN or timeout)
-nslookup deno.land 10.89.0.1
+nslookup esm.sh 10.89.0.1
 ```
 
 ## Ongoing Maintenance
