@@ -23,7 +23,7 @@
 - **JuiceFS Storage**: Powered by PostgreSQL Large Objects (LO) for ultra-thin metadata
 - **Kong API Gateway**: DB-backed Dynamic API Router, native ACME SSL, Gzip, Security Headers, Programmable Rate Limiting, and CORS
 - **Auto-scaling Engine**: Rule-based vertical and horizontal scaling based on real-time metrics
-- **Dual Runtime**: Deno (legacy) or Bun.js Edge Runtime (recommended) for Edge Functions
+- **Bun Edge Runtime**: Bun.js + Elysia Worker Pool for Edge Functions, with built-in Deno compatibility shim for legacy user code
 - **SSE Real-time Logs**: Server-Sent Events streaming for live log tailing via `journalctl --follow`
 - **Native Queue Worker**: Pure Bun.js PostgreSQL LISTEN/NOTIFY based asynchronous worker for AI inference and MQTT events
 - **WebSocket Task Notifications**: Real-time task progress push via native Bun WebSocket
@@ -106,7 +106,7 @@ source /etc/profile.d/supacloud.sh
 | `--ip` | Server Internal IP | `--ip 10.0.0.5` |
 | `--domain` | API/Public Domain | `--domain supa.com` |
 | `--studio` | Studio Dashboard Domain| `--studio studio.com`|
-| `--s3` | Storage Type | `minio` or `juicefs`|
+| `--s3` | Storage Type | `juicefs`, `minio`, `garage`, `rustfs`, or `external`|
 | `--password`| Master Password | `--password mysecret` |
 
 ### Management
@@ -117,21 +117,19 @@ The `supacloud` binary provides full lifecycle and project management:
 
 ```bash
 # Lifecycle Management
-supacloud start              # Start all containers
-supacloud stop               # Stop the service stack
-supacloud status             # Health check & monitor ports
-supacloud logs [service]     # Diagnostic logs
+supacloud start              # Start core platform services
+supacloud stop               # Stop core platform services
+supacloud status             # Show platform status
+supacloud logs [service]     # View service logs
 
 # Project Management
-supacloud project list       # List all projects
-supacloud project create     # Create a new project
-supacloud project get <ref>  # Get project details
-supacloud project delete <ref> # Delete a project
-supacloud project pause <ref>  # Pause a project
-supacloud project restore <ref> # Restore a project
-supacloud project restart <ref> # Restart services
-supacloud project keys <ref>   # Get API keys
-supacloud project rotate-keys <ref> # Rotate API keys
+supacloud list               # List all projects
+supacloud create <name>      # Create a new project
+supacloud info <ref>         # Get project details
+supacloud delete <ref>       # Delete a project
+supacloud status <ref>       # Get project status
+supacloud restart <ref>      # Restart project services
+supacloud keys <ref>         # Get API keys
 
 # System Operations
 supacloud install            # Run installation wizard
@@ -208,18 +206,18 @@ curl http://localhost:9090/v1/projects/<ref>/api-keys \
 #### Runtime Switching
 
 ```bash
-# Switch Edge Functions runtime
-./switch.sh runtime deno   # Legacy: Deno V8 Workers
-./switch.sh runtime bun    # Recommended: Bun + Elysia Worker Pool
+# Switch Edge Runtime deployment mode
+./switch.sh runtime embedded   # Managed by supacloud.service
+./switch.sh runtime external   # Standalone supacloud-edge-runtime.service
 
 # Switch storage backend
-./switch.sh storage rustfs # or: minio, garage, external
+./switch.sh storage rustfs     # or: minio, garage, external
 
 # Show current configuration
 ./switch.sh status
 ```
 
-**Edge Runtime Architecture (Bun mode):**
+**Edge Runtime Architecture:**
 
 ```
 SupaCloud (:9090)          Edge Runtime (:9000)
@@ -239,13 +237,13 @@ Kong Gateway (API-driven, native OpenResty):
 
 Default installs use `EDGE_RUNTIME_MODE=embedded`, meaning `supacloud.service` starts the Bun Edge Runtime child process itself. A separate `supacloud-edge-runtime.service` is available for `EDGE_RUNTIME_MODE=external`, but you should not run both modes at the same time.
 
-| Feature | Deno (legacy) | Bun (recommended) |
-|---------|--------------|--------------------|
-| Memory (200 functions) | ~1.4GB | **~140MB** |
-| Cold start | 40-60ms | **< 10ms (with preheat: 0ms)** |
-| Warm latency | <1ms | <1ms |
-| Deno code compat | Native | ✅ via shim |
-| Isolation | V8 Worker | Worker Thread |
+| Feature | Current Bun Runtime |
+|---------|---------------------|
+| Memory (200 functions) | **~140MB** |
+| Cold start | **< 10ms (with preheat: 0ms)** |
+| Warm latency | <1ms |
+| Deno code compat | ✅ via shim |
+| Isolation | Worker Thread |
 
 #### MCP Server (AI Agent)
 
@@ -387,7 +385,7 @@ Key settings in `config.env`:
 - **JuiceFS 存储**: 基于 PostgreSQL Large Objects (LO) 后端，极致轻量
 - **Kong 深度集成**: DB-backed 原生动态路由，全程 API 驱动，原生 ACME SSL、Gzip 压缩、安全响应头、编程式限流
 - **自动扩缩容**: 基于负载指标的垂直提升与水平副本扩展
-- **双运行时**: Deno（旧版兼容）或 Bun.js Edge Runtime（推荐，内存占用减少 92%）
+- **Bun Edge Runtime**: 基于 Bun.js + Elysia Worker Pool，内置 Deno 兼容层以兼容旧函数代码
 - **SSE 实时日志**: 基于 Server-Sent Events 的实时日志流，`journalctl --follow` 推送
 - **原生异步队列**: 基于 PostgreSQL LISTEN/NOTIFY 的零依赖高并发调度底座，支持 AI 大模型任务与 MQTT 消息队列
 - **WebSocket 任务通知**: 基于 Bun 原生 WebSocket 的实时任务进度推送
@@ -470,7 +468,7 @@ source /etc/profile.d/supacloud.sh
 | `--ip` | 指定内网 IP | `--ip 10.0.0.5` |
 | `--domain` | 指定 API 域名 | `--domain supa.com` |
 | `--studio` | 指定 Studio 域名| `--studio studio.com`|
-| `--s3` | 指定存储类型 | `minio` 或 `juicefs`|
+| `--s3` | 指定存储类型 | `juicefs`、`minio`、`garage`、`rustfs` 或 `external`|
 | `--password`| 统一设置初始密码 | `--password mysecret` |
 
 ### 项目管理
@@ -481,21 +479,19 @@ source /etc/profile.d/supacloud.sh
 
 ```bash
 # 平台管控
-supacloud start              # 拉起全栈容器
-supacloud stop               # 优雅停止并清理
-supacloud status             # 检查核心组件与端口存活
-supacloud logs [service]     # 查看诊断日志
+supacloud start              # 启动平台核心服务
+supacloud stop               # 停止平台核心服务
+supacloud status             # 查看平台状态
+supacloud logs [service]     # 查看服务日志
 
 # 项目管理
-supacloud project list       # 列出所有项目
-supacloud project create     # 创建新项目
-supacloud project get <ref>  # 查看项目详情
-supacloud project delete <ref> # 删除项目
-supacloud project pause <ref>  # 暂停项目
-supacloud project restore <ref> # 恢复项目
-supacloud project restart <ref> # 重启服务
-supacloud project keys <ref>   # 获取 API 密钥
-supacloud project rotate-keys <ref> # 轮换 API 密钥
+supacloud list               # 列出所有项目
+supacloud create <name>      # 创建新项目
+supacloud info <ref>         # 获取项目详情
+supacloud delete <ref>       # 删除项目
+supacloud status <ref>       # 获取项目状态
+supacloud restart <ref>      # 重启项目服务
+supacloud keys <ref>         # 获取 API 密钥
 
 # 系统运维
 supacloud install            # 交互式安装向导
@@ -570,12 +566,12 @@ curl http://localhost:9090/v1/projects/<ref>/api-keys \
 #### 运行时切换
 
 ```bash
-# 切换云函数运行时
-./switch.sh runtime deno   # 旧版: Deno V8 Workers
-./switch.sh runtime bun    # 推荐: Bun + Elysia Worker Pool
+# 切换 Edge Runtime 部署模式
+./switch.sh runtime embedded   # 由 supacloud.service 管理
+./switch.sh runtime external   # 独立 supacloud-edge-runtime.service
 
 # 切换存储后端
-./switch.sh storage rustfs # 或: minio, garage, external
+./switch.sh storage rustfs     # 或: minio, garage, external
 
 # 查看当前配置
 ./switch.sh status
@@ -601,14 +597,14 @@ Kong 网关 (API 驱动，原生 OpenResty):
 
 默认安装使用 `EDGE_RUNTIME_MODE=embedded`，也就是由 `supacloud.service` 直接拉起 Bun Edge Runtime 子进程。`EDGE_RUNTIME_MODE=external` 时可以改用独立的 `supacloud-edge-runtime.service`，但两种模式不能同时运行，否则会争抢 `9000` 端口。
 
-| 特性 | Deno (旧版) | Bun (推荐) |
-|------|-----------|------------|
-| 内存 (200 函数) | ~1.4GB | **~140MB** |
-| 冷启动 | 40-60ms | **< 10ms (预热后: 0ms)** |
-| 预热延迟 | <1ms | <1ms |
-| Deno 代码兼容 | 原生 | ✅ 兼容层 |
-| 隔离级别 | V8 Worker | Worker 线程 |
-| 用户函数改动 | — | **零改动** |
+| 特性 | 当前 Bun Runtime |
+|------|------------------|
+| 内存 (200 函数) | **~140MB** |
+| 冷启动 | **< 10ms (预热后: 0ms)** |
+| 预热延迟 | <1ms |
+| Deno 代码兼容 | ✅ 兼容层 |
+| 隔离级别 | Worker 线程 |
+| 用户函数改动 | **零改动** |
 
 #### MCP Server (AI Agent)
 

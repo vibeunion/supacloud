@@ -2,7 +2,7 @@
 
 SupaCloud Edge Functions uses **Bun + Elysia Worker Thread Pool** as the runtime.
 
-By default, the runtime is started in **embedded mode** by `supacloud.service` (the Management API service). A standalone `supacloud-edge-runtime.service` is also available for **external mode**, but the two modes are mutually exclusive and must not own port `9000` at the same time.
+By default, the runtime runs in **embedded mode** under `supacloud.service` together with the Management API. A standalone `supacloud-edge-runtime.service` is also available for **external mode**, but the two modes are mutually exclusive and must not own port `9000` at the same time.
 
 ## Architecture
 
@@ -12,8 +12,8 @@ SupaCloud (:9090)             Edge Runtime (:9000)
 ├── SSE Log Stream (/logs/stream)
 ├── WebSocket (/ws/tasks)     ├── Elysia Server
 └── Static Assets (ETag/304)  ├── Worker Thread Pool (4 threads, fixed ~80MB)
-                              ├── Deno Compat Shim (globalThis.Deno)
-                              ├── URL Import Plugin (deno.land/esm.sh → npm)
+                              ├── Compatibility Shim (globalThis.Deno)
+                              ├── URL Import Mapping (compat imports → npm/shims)
                               └── /preheat endpoint (zero cold-start)
 
 Kong Gateway (API-driven, native OpenResty):
@@ -68,8 +68,8 @@ The Bun entrypoint is `packages/edge-runtime/server.ts`, and the checked-in stan
 
 **User function dependencies** are auto-scanned during deployment:
 - `npm:xxx` — Bun native support ✅
-- `https://esm.sh/xxx` — URL Plugin converts to npm package ✅
-- `https://deno.land/std/...` — Mapped to local shims ✅
+- `https://esm.sh/xxx` — URL import mapping converts to npm package ✅
+- `https://deno.land/std/...` — Mapped to local shims for compatibility ✅
 - Other npm imports — Auto-scanned and installed ✅
 
 ## Function Examples
@@ -113,39 +113,36 @@ const { data, error } = await supabase.functions.invoke("my-function", {
 
 See [Background Functions](./background-functions.md) for the full execution model, cancellation semantics, and a cancellation-aware example handler.
 
-## Deno Compatibility
+## Compatibility Shim
 
-Legacy Deno user code works without changes via the built-in shim layer:
+The runtime is Bun-native. Compatibility shims allow legacy Deno-oriented user code to keep running while the recommended authoring model stays on standard Bun/Request/Response APIs.
 
-| Deno API | Bun Equivalent |
-|----------|---------------|
-| `Deno.serve()` | `Elysia().listen()` (runtime handles this) |
+| Legacy Pattern | Recommended Pattern |
+|----------------|---------------------|
+| `Deno.serve()` | default exported handler |
 | `Deno.readTextFile(path)` | `Bun.file(path).text()` |
 | `Deno.env.get(key)` | `process.env[key]` |
 | `Deno.stat(path)` | `fs/promises.stat()` |
-| `import "https://esm.sh/xxx"` | `import "xxx"` (auto) |
-| `import "https://deno.land/std/..."` | Local shim (auto) |
+| `import "https://esm.sh/xxx"` | `import "xxx"` |
+| `import "https://deno.land/std/..."` | built-in shim or platform-native API |
 
 ## Service Management
 
 ```bash
-# Check Management API status (default embedded mode)
-systemctl status supacloud
+# Check overall platform status
+supacloud status
 
-# Check standalone Edge Runtime status (external mode only)
-systemctl status supacloud-edge-runtime
+# View platform logs
+supacloud logs
 
-# Restart embedded mode
+# View dedicated runtime logs when external mode is enabled
+supacloud logs supacloud-edge-runtime
+
+# Restart the platform entrypoint
 systemctl restart supacloud
 
-# Restart external mode
+# Restart standalone runtime only in external mode
 systemctl restart supacloud-edge-runtime
-
-# View embedded mode logs
-journalctl -u supacloud -f
-
-# View external mode logs
-journalctl -u supacloud-edge-runtime -f
 
 # Deploy a function
 curl -X POST http://localhost:9090/api/functions/deploy \
@@ -153,4 +150,4 @@ curl -X POST http://localhost:9090/api/functions/deploy \
   -d '{"ref":"PROJECT_REF","slug":"hello","code":"export default () => new Response(\"hi\")"}'
 ```
 
-If you are using the default installer path, prefer `supacloud.service` commands because the Edge Runtime is normally embedded there.
+If you use the default installer path, prefer `supacloud` lifecycle commands for status and logs, and only interact with `supacloud-edge-runtime.service` directly when `EDGE_RUNTIME_MODE=external`.
