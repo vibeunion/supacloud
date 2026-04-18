@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.10.1](https://github.com/zuohuadong/supacloud/compare/management-api-v0.10.0...management-api-v0.10.1) (2026-04-18)
+
+
+### 🐛 Bug Fixes
+
+* **edge-runtime:** avoid double-managed runtime restarts ([5a27175](https://github.com/zuohuadong/supacloud/commit/5a271758fff9bbe008f8d8aade559e4d8dffab3e))
+* **gateway:** preserve functions proxy path prefix ([f51bb1f](https://github.com/zuohuadong/supacloud/commit/f51bb1fa76be90ead2b065802650a14121f79b36))
+* **proxy:** forward function POST bodies with duplex ([7784522](https://github.com/zuohuadong/supacloud/commit/7784522331003fd97ab04b62ace90035eb79d385))
+* **routing:** unify tenant domain and port resolution ([5911e97](https://github.com/zuohuadong/supacloud/commit/5911e97cc39007ceea95a79b3c4b6d4db7a2b344))
+* **tasks:** patch tenant queue schema compatibility ([370adfa](https://github.com/zuohuadong/supacloud/commit/370adfa6009dc72d956a47e3c69e9cda99acd7f0))
+
+
+### 💅 Elegance & Refactoring
+
+* **edge-functions:** migrate version artifacts into internal revisions ([e9c0890](https://github.com/zuohuadong/supacloud/commit/e9c0890013bb23b0189dd089c3e7d79507ee37b2))
+
 ## [0.10.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.9.1...management-api-v0.10.0) (2026-04-17)
 
 
