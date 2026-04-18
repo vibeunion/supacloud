@@ -1,6 +1,8 @@
 import { describe, expect, mock, test } from "bun:test";
 mock.restore();
-import { buildTaskListQuery } from "../../src/repositories/task.repository";
+import * as repo from "../../src/repositories/task.repository";
+
+const { buildTaskListQuery } = repo;
 
 describe("TaskRepository query builders", () => {
   test("buildTaskListQuery includes function_slug filter when provided", () => {

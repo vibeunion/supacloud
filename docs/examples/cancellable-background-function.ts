@@ -1,5 +1,3 @@
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-
 function sleep(ms: number, signal?: AbortSignal) {
   return new Promise<void>((resolve, reject) => {
     const timer = setTimeout(() => {
@@ -16,12 +14,12 @@ function sleep(ms: number, signal?: AbortSignal) {
   });
 }
 
-serve(async (req) => {
+export default async function handler(req: Request) {
   const payload = await req.json();
   req.signal.throwIfAborted?.();
 
-  const taskId = Deno.env.get("SUPACLOUD_BACKGROUND_TASK_ID") || "unknown";
-  const attempt = Deno.env.get("SUPACLOUD_BACKGROUND_ATTEMPT") || "1";
+  const taskId = process.env.SUPACLOUD_BACKGROUND_TASK_ID || "unknown";
+  const attempt = process.env.SUPACLOUD_BACKGROUND_ATTEMPT || "1";
 
   const abortController = new AbortController();
   const onAbort = () => abortController.abort("supacloud task cancelled");
@@ -61,4 +59,4 @@ serve(async (req) => {
   } finally {
     req.signal.removeEventListener("abort", onAbort);
   }
-});
+}

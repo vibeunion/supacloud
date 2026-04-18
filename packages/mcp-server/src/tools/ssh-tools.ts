@@ -94,8 +94,8 @@ Actions: ping, setup, install, upgrade, diagnose, exec, troubleshoot, container_
                     const envLines = [
                         `SUPABASE_PUBLIC_DOMAIN=${args.public_domain}`,
                         `SUPABASE_STUDIO_DOMAIN=${args.studio_domain ?? args.public_domain}`,
-                        `EDGE_RUNTIME=${args.edge_runtime || "deno"}`,
-                        `S3_STORAGE_TYPE=${args.storage_type || "garage"}`,
+                        `EDGE_RUNTIME=${args.edge_runtime || "bun"}`,
+                        `S3_STORAGE_TYPE=${args.storage_type || "juicefs"}`, 
                         args.postgres_password ? `POSTGRES_PASSWORD=${args.postgres_password}` : "",
                         args.dashboard_password ? `DASHBOARD_PASSWORD=${args.dashboard_password}` : "",
                     ].filter(Boolean).join("\n");

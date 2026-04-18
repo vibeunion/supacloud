@@ -256,18 +256,18 @@ jwt_manager.sh generate <project_ref>
 
 ```ini
 [Unit]
-Description=SupaCloud Management API
-After=network.target postgresql.service
+Description=SupaCloud Management API Server
+After=network.target patroni.service
+Wants=patroni.service
 
 [Service]
 Type=simple
-User=supacloud
-WorkingDirectory=/opt/supacloud/management-api
-ExecStart=/usr/local/bin/bun run src/index.ts
+EnvironmentFile=-/etc/supabase/management-api.env
+EnvironmentFile=-/opt/supacloud/config.env
+ExecStartPre=/opt/supacloud/scripts/pre_start_recovery.sh
+ExecStart=/usr/local/bin/supacloud
 Restart=on-failure
-RestartSec=5
-Environment=NODE_ENV=production
-EnvironmentFile=/etc/supabase/management-api.env
+RestartSec=10
 
 [Install]
 WantedBy=multi-user.target
