@@ -13,8 +13,8 @@
 
 [Unit]
 Description=SupaCloud Realtime Service (Supabase/Phoenix, Multi-Tenant)
-After=network.target supacloud-management-api.service
-Wants=supacloud-management-api.service
+After=network.target supacloud.service
+Wants=supacloud.service
 
 [Service]
 Type=simple

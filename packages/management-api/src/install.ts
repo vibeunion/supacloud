@@ -1,12 +1,24 @@
 
-import { EMBEDDED_ASSETS } from "./assets.gen";
 import { $ } from "bun";
 import os from "node:os";
+import path from "node:path";
+import { existsSync } from "node:fs";
 import * as p from "@clack/prompts";
 import { config as appConfig } from "./config";
 
 const INSTALL_BASE_DIR = "/opt/supacloud";
-const CONFIG_FILE = `${INSTALL_BASE_DIR}/config.env`;
+
+function resolveInstallerPath() {
+    const candidates = [
+        path.join(process.cwd(), "install.sh"),
+        path.join(INSTALL_BASE_DIR, "install.sh")
+    ];
+    return candidates.find(candidate => existsSync(candidate)) || null;
+}
+
+function getConfigFilePath(installerPath: string) {
+    return path.join(path.dirname(installerPath), "config.env");
+}
 
 /**
  * Generate secure random string using Bun native API
@@ -23,17 +35,8 @@ function generateSecurePassword(length = 24) {
     return ret;
 }
 
-async function extractAssets() {
-    for (const [path, asset] of Object.entries(EMBEDDED_ASSETS)) {
-        const targetPath = `${INSTALL_BASE_DIR}/${path.startsWith("/") ? path.substring(1) : path}`;
-        // Use Bun.write instead of fs.writeFile, it can handle various buffers and optimize at system level
-        const buffer = Buffer.from(asset.content, 'base64');
-        await Bun.write(targetPath, buffer);
-
-        if (path.endsWith(".sh") || path.includes("/scripts/")) {
-            await $`chmod +x ${targetPath}`;
-        }
-    }
+async function ensureInstallerAvailable(installerPath: string) {
+    await $`chmod +x ${installerPath}`.quiet();
 }
 
 
@@ -61,53 +64,62 @@ function getSpinner() {
 }
 
 export async function runInstall(options: { forceYes?: boolean } = {}) {
-    p.intro("\x1b[45m SupaCloud Unified Node Deployment Bus (Bun Ascension) \x1b[0m");
+    p.intro("\x1b[45m SupaCloud Installer \x1b[0m");
 
     const isDryRun = process.argv.includes("--dry-run");
-    if (isDryRun) {
-        p.log.warn("⚠️ Detected --dry-run flag, will skip actual service installation and system changes.");
-    }
+    const installerPath = resolveInstallerPath();
 
     try {
         await checkSystem();
-        const s = getSpinner();
-        s.start("Base system dehydrated execution state awakening");
-        await extractAssets();
-        s.stop("SupaCloud control plane binary extracted successfully");
 
-        await performPreFlightChecks(options.forceYes);
-        const config = await runInteractiveConfig(options.forceYes);
-
-        if (!isDryRun) {
-            p.log.step(">>> Native Kong configuration is handled via install.sh ...");
+        if (!installerPath) {
+            throw new Error("install.sh not found. Please run from the repository root or install to /opt/supacloud first.");
         }
+
+        await ensureInstallerAvailable(installerPath);
+        await performPreFlightChecks(options.forceYes);
+        const config = await runInteractiveConfig(installerPath, options.forceYes);
 
         if (isDryRun) {
-            p.log.warn("[Dry Run] Skipping Systemd service registration.");
-        } else {
-            p.log.step(">>> Registering Management API as system service ...");
-            const selfPath = process.argv[0];
-            await ServiceManager.register(
-                "supacloud",
-                "SupaCloud Management API Server",
-                selfPath,
-                ["start"]
-            );
+            p.log.warn("[Dry Run] install.sh will not be executed.");
+            p.log.info(`Prepared config at ${getConfigFilePath(installerPath)}`);
+            return;
         }
 
-        p.log.success(`🎉 SupaCloud control stack deployment complete`);
+        p.log.step(`>>> Running canonical installer: ${installerPath}`);
+        const args = ["--ip", config.internalIp, "--domain", config.publicDomain, "--studio", config.studioDomain, "--s3", config.storageType, "--password", config.postgresPass];
+        const proc = Bun.spawn(["bash", installerPath, ...args], {
+            cwd: path.dirname(installerPath),
+            stdout: "inherit",
+            stderr: "inherit",
+            stdin: "inherit",
+            env: {
+                ...process.env,
+                EDGE_RUNTIME: "bun",
+                EDGE_RUNTIME_MODE: process.env.EDGE_RUNTIME_MODE || "embedded",
+                S3_STORAGE_TYPE: config.storageType,
+                INTERNAL_IP: config.internalIp,
+                SUPABASE_PUBLIC_DOMAIN: config.publicDomain,
+                SUPABASE_STUDIO_DOMAIN: config.studioDomain,
+                POSTGRES_PASSWORD: config.postgresPass,
+                DASHBOARD_PASSWORD: config.dashboardPass,
+                GRAFANA_PASSWORD: config.grafanaPass,
+                JWT_SECRET: config.jwtSecret,
+            },
+        });
+        const exitCode = await proc.exited;
+        if (exitCode !== 0) {
+            throw new Error(`install.sh exited with code ${exitCode}`);
+        }
 
-        // --- Immediate post-install inspection ---
-        const { runDoctor } = await import("./doctor");
-        await runDoctor({ forceYes: options.forceYes });
+        p.log.success(`🎉 SupaCloud installation complete via canonical install.sh`);
     } catch (error: unknown) {
         p.log.error(`Deployment failed: ${error instanceof Error ? error.message : String(error)}`);
         process.exit(1);
     }
 }
 
-import { install as pigstyInstall, type PigstyConfig } from "./infra/pigsty";
-import { ServiceManager } from "./infra/service";
+import type { PigstyConfig } from "./infra/pigsty";
 
 async function performPreFlightChecks(forceYes = false) {
     const s = getSpinner();
@@ -158,8 +170,9 @@ async function performPreFlightChecks(forceYes = false) {
     }
 }
 
-async function runInteractiveConfig(forceYes = false): Promise<PigstyConfig> {
+async function runInteractiveConfig(installerPath: string, forceYes = false): Promise<PigstyConfig> {
     const s = getSpinner();
+    const configFile = getConfigFilePath(installerPath);
 
     // ── Command line argument parsing ──────────────────────────────────────────────────────────
     const args = process.argv.slice(2);
@@ -334,7 +347,7 @@ BASE_DOMAIN="${publicDomain.replace(/^api\./, "")}"
 ANGIE_SITES_DIR="/etc/angie/http.d"
 KONG_INTERNAL="127.0.0.1:8000"
 `;
-    await Bun.write(CONFIG_FILE, envContent.trim());
+    await Bun.write(configFile, envContent.trim());
     sEnv.stop("Core configuration group persisted!");
 
     p.note(`API Domain: ${publicDomain}\nConsole: ${studioDomain}\nDashboard Password: ${studioPass}\nDatabase Password: ${dbPass}`, "⚠️ Key Credentials (Please screenshot to save)");

@@ -98,8 +98,6 @@ req.signal.addEventListener("abort", onAbort, { once: true });
 ## Example: End-To-End Handler
 
 ```ts
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-
 function sleep(ms: number, signal?: AbortSignal) {
   return new Promise<void>((resolve, reject) => {
     const timer = setTimeout(() => {
@@ -116,12 +114,12 @@ function sleep(ms: number, signal?: AbortSignal) {
   });
 }
 
-serve(async (req) => {
+export default async function handler(req: Request) {
   const payload = await req.json();
   req.signal.throwIfAborted?.();
 
-  const taskId = Deno.env.get("SUPACLOUD_BACKGROUND_TASK_ID");
-  const attempt = Deno.env.get("SUPACLOUD_BACKGROUND_ATTEMPT") || "1";
+  const taskId = process.env.SUPACLOUD_BACKGROUND_TASK_ID;
+  const attempt = process.env.SUPACLOUD_BACKGROUND_ATTEMPT || "1";
 
   const abortController = new AbortController();
   const onAbort = () => abortController.abort("supacloud task cancelled");
@@ -135,7 +133,6 @@ serve(async (req) => {
       await sleep(1000, abortController.signal);
     }
 
-    // Make the write idempotent in your own database layer.
     return Response.json({
       ok: true,
       task_id: taskId,
@@ -152,7 +149,7 @@ serve(async (req) => {
   } finally {
     req.signal.removeEventListener("abort", onAbort);
   }
-});
+}
 ```
 
 ## Task Semantics To Document To Your Team
