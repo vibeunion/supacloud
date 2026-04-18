@@ -1,6 +1,12 @@
 import { logger } from "../utils/logger";
 import { config } from "../config";
 import { gatewayService } from "./gateway.service";
+import {
+  resolveProjectApiHost,
+  resolveProjectApiUrl,
+  resolveProjectStudioHost,
+  resolveProjectStudioUrl,
+} from "../utils/project-routing";
 
 export interface ProjectDomains {
   apiDomain: string;
@@ -11,11 +17,11 @@ export class RouterService {
   private get BASE_DOMAIN() { return config.baseDomain; }
 
   getProjectApiUrl(projectRef: string, customDomain?: string): string {
-    return customDomain ? `https://api.${customDomain}` : `https://${projectRef}.api.${this.BASE_DOMAIN}`;
+    return resolveProjectApiUrl(projectRef, { custom_domain: customDomain });
   }
 
   getProjectStudioUrl(projectRef: string, customDomain?: string): string {
-    return customDomain ? `https://studio.${customDomain}` : `https://studio-${projectRef}.${this.BASE_DOMAIN}`;
+    return resolveProjectStudioUrl(projectRef, { custom_domain: customDomain });
   }
 
   getProjectDomain(projectRef: string): string {
@@ -50,8 +56,8 @@ export class RouterService {
 
   async bindCustomDomain(projectRef: string, customDomain: string): Promise<{ success: boolean; error?: string }> {
     try {
-      const apiDomain = `api.${customDomain}`;
-      const studioDomain = `studio.${customDomain}`;
+      const apiDomain = resolveProjectApiHost(projectRef, { custom_domain: customDomain });
+      const studioDomain = resolveProjectStudioHost(projectRef, { custom_domain: customDomain });
       await gatewayService.addProjectDomains(projectRef, [apiDomain], [studioDomain]);
       return { success: true };
     } catch (error: unknown) {
@@ -61,8 +67,8 @@ export class RouterService {
 
   async removeCustomDomain(projectRef: string, customDomain: string): Promise<{ success: boolean; error?: string }> {
     try {
-      const apiDomain = `api.${customDomain}`;
-      const studioDomain = `studio.${customDomain}`;
+      const apiDomain = resolveProjectApiHost(projectRef, { custom_domain: customDomain });
+      const studioDomain = resolveProjectStudioHost(projectRef, { custom_domain: customDomain });
       await gatewayService.removeProjectDomains(projectRef, [apiDomain], [studioDomain]);
       return { success: true };
     } catch (error: unknown) {

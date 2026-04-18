@@ -7,6 +7,7 @@ import * as path from "node:path";
 import type { OAuthProvider, OAuthProviderConfig } from "../types/oauth";
 import { OAUTH_ENV_MAPPINGS } from "../types/oauth";
 import { tenantOAuthService } from "./tenant-oauth.service";
+import { resolveProjectApiUrl } from "../utils/project-routing";
 
 export interface RuntimeStatus {
     status: "running" | "stopped" | "starting" | "error";
@@ -35,15 +36,7 @@ class TenantRuntimeService {
     })();
 
     private deriveApiUrl(ref: string, projectConfig: Record<string, unknown> | null | undefined): string {
-        const explicitApiDomain = typeof projectConfig?.api_domain === "string" ? projectConfig.api_domain.trim() : "";
-        if (explicitApiDomain) return `https://${explicitApiDomain}`;
-
-        const customDomain = typeof projectConfig?.custom_domain === "string" ? projectConfig.custom_domain.trim() : "";
-        if (customDomain) return `https://api.${customDomain}`;
-
-        if (config.gotrueApiExternalUrl) return config.gotrueApiExternalUrl.replace(/\/+$/, "");
-
-        return `https://${ref}.api.${config.baseDomain}`;
+        return resolveProjectApiUrl(ref, projectConfig);
     }
 
     /**
