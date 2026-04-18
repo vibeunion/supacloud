@@ -223,7 +223,7 @@ export class WorkerPool {
       type?: string;
       status: number;
       streamId?: string;
-      headers: Record<string, string | string[]>;
+      headers?: Record<string, string | string[]>;
       body?: ArrayBuffer;
       timestamp?: string;
       stream?: "stdout" | "stderr";
@@ -244,6 +244,12 @@ export class WorkerPool {
         return;
       }
 
+      const isResponseMessage =
+        typeof msg.status === "number" || msg.type === "stream_start";
+      if (!isResponseMessage) {
+        return;
+      }
+
       clearTimeout(timeout);
       cleanupInFlight();
       clearCancellationState();
@@ -251,7 +257,7 @@ export class WorkerPool {
       worker.removeListener("message", onMsg);
 
       const resHeaders = new Headers();
-      for (const [k, v] of Object.entries(msg.headers)) {
+      for (const [k, v] of Object.entries(msg.headers ?? {})) {
         if (Array.isArray(v)) {
           for (const val of v) resHeaders.append(k, val);
         } else {

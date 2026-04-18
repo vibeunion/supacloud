@@ -979,15 +979,19 @@ async function bootstrap() {
       await import("./workers/storage-reconcile.worker");
     startStorageReconcileWorker();
 
-    const { edgeRuntimeManager } =
-      await import("./plugins/edge-runtime-manager");
-    edgeRuntimeManager
-      .start()
-      .catch((err: unknown) =>
-        logger.error("[EdgeRuntime] Failed to start", {
-          error: err instanceof Error ? err.message : String(err),
-        }),
-      );
+    if (config.edgeRuntimeMode === "embedded") {
+      const { edgeRuntimeManager } =
+        await import("./plugins/edge-runtime-manager");
+      edgeRuntimeManager
+        .start()
+        .catch((err: unknown) =>
+          logger.error("[EdgeRuntime] Failed to start", {
+            error: err instanceof Error ? err.message : String(err),
+          }),
+        );
+    } else {
+      logger.info("[EdgeRuntime] External runtime mode enabled; skipping embedded child process startup.");
+    }
 
     // Auto-detect and stop orphan services for deleted projects
     cleanupOrphanServices().catch((err) =>
@@ -1019,9 +1023,11 @@ if (import.meta.main) {
     try {
       const { taskWorker } = await import("./services/task.worker");
       taskWorker.stop();
-      const { edgeRuntimeManager } =
-        await import("./plugins/edge-runtime-manager");
-      edgeRuntimeManager.stop();
+      if (config.edgeRuntimeMode === "embedded") {
+        const { edgeRuntimeManager } =
+          await import("./plugins/edge-runtime-manager");
+        edgeRuntimeManager.stop();
+      }
       const { stopQueueWorker } = await import("./workers/queue.worker");
       stopQueueWorker();
       const { stopStorageReconcileWorker } =

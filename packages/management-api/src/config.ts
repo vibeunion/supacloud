@@ -32,6 +32,7 @@ interface Config {
   studioInternal: string;
   edgeRuntimeInternal: string;
   edgeRuntimeBackgroundInternal: string;
+  edgeRuntimeMode: "embedded" | "external";
   kongInternal: string;
   postgrestBin: string;
   gotrueBin: string;
@@ -139,6 +140,9 @@ export const config = {
   studioInternal: getEnv("STUDIO_INTERNAL", "127.0.0.1:3000"),
   edgeRuntimeInternal: getEnv("EDGE_RUNTIME_INTERNAL", isGithubActions ? "127.0.0.1:9005" : "127.0.0.1:9000"),
   edgeRuntimeBackgroundInternal: getEnv("EDGE_RUNTIME_BACKGROUND_INTERNAL", getEnv("EDGE_RUNTIME_INTERNAL", isGithubActions ? "127.0.0.1:9005" : "127.0.0.1:9000")),
+  edgeRuntimeMode: getEnv("EDGE_RUNTIME_MODE", "embedded").toLowerCase() === "external"
+    ? "external"
+    : "embedded",
   kongInternal: getEnv("KONG_INTERNAL", "127.0.0.1:8000"),
 
   postgrestBin: getEnv("POSTGREST_BIN", "postgrest"),

@@ -965,6 +965,7 @@ EOF
 # ========== Edge Functions Runtime Configuration ==========
 install_edge_runtime() {
     log_step "Installing Edge Runtime (Bun + Elysia Worker Pool)..."
+    local EDGE_RUNTIME_MODE="${EDGE_RUNTIME_MODE:-embedded}"
     
     # 1. Install Bun binary
     if ! command -v bun &> /dev/null; then
@@ -1025,9 +1026,13 @@ WantedBy=multi-user.target
 SVCEOF
     fi
     systemctl daemon-reload
-    systemctl enable supacloud-edge-runtime 2>/dev/null || true
-    
-    log_info "Edge Runtime on port 9000 (Bun + Elysia Worker Pool)"
+    if [[ "$EDGE_RUNTIME_MODE" == "external" ]]; then
+        systemctl enable supacloud-edge-runtime 2>/dev/null || true
+        log_info "Edge Runtime on port 9000 (standalone systemd service mode)"
+    else
+        systemctl disable --now supacloud-edge-runtime 2>/dev/null || true
+        log_info "Edge Runtime installed in embedded mode (managed by supacloud.service)"
+    fi
 }
 
 
@@ -2032,6 +2037,7 @@ EOF
 # SupaCloud Management API Configuration
 PORT=9090
 DATABASE_URL=postgresql://postgres:${POSTGRES_PASSWORD}@${INTERNAL_IP}:5432/supacloud_meta
+EDGE_RUNTIME_MODE=${EDGE_RUNTIME_MODE:-embedded}
 MASTER_TOKEN=${MASTER_TOKEN}
 SCRIPTS_PATH=${SCRIPTS_INSTALL_DIR}
 PIGSTY_PATH=${HOME}/pigsty
