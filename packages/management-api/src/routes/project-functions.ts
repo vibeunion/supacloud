@@ -124,12 +124,13 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
       }
 
       const funcConfig = await edgeFunctionService.getConfig(params.ref, slug);
+      const version = Number.parseInt(funcConfig.version || "1", 10) || 1;
       const now = new Date().toISOString();
       return {
         id: slug,
         slug,
         name: metadata.name || slug,
-        version: 1,
+        version,
         status: "ACTIVE",
         verify_jwt: funcConfig.verify_jwt,
         entrypoint_path: entrypoint,
@@ -190,13 +191,15 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
       await edgeFunctionService.updateConfig(params.ref, slug, {
         verify_jwt: verifyJwt,
       });
+      const funcConfig = await edgeFunctionService.getConfig(params.ref, slug);
+      const version = Number.parseInt(funcConfig.version || "1", 10) || 1;
 
       const now = new Date().toISOString();
       return {
         id: slug,
         slug,
         name: name || slug,
-        version: 1,
+        version,
         verify_jwt: verifyJwt,
         status: "ACTIVE",
         created_at: now,
@@ -300,12 +303,13 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         params.ref,
         params.slug,
       );
+      const version = Number.parseInt(funcConfig.version || "1", 10) || 1;
       const now = new Date().toISOString();
       return {
         id: params.slug,
         slug: params.slug,
         name: params.slug,
-        version: 1,
+        version,
         status: "ACTIVE",
         verify_jwt: funcConfig.verify_jwt,
         entrypoint_path: `${params.slug}/index.ts`,
@@ -433,12 +437,13 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         params.ref,
         params.slug,
       );
+      const version = Number.parseInt(funcConfig.version || "1", 10) || 1;
       const now = new Date().toISOString();
       return {
         id: params.slug,
         slug: params.slug,
         name: body.name || params.slug,
-        version: 1,
+        version,
         status: "ACTIVE",
         verify_jwt: funcConfig.verify_jwt,
         created_at: now,

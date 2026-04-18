@@ -37,11 +37,65 @@ export interface LeasedTask extends ProjectTask {
 const DEFAULT_LEASE_SECONDS = 330;
 
 function mapTask(row: unknown): ProjectTask {
-  return row as ProjectTask;
+  const task = row as ProjectTask & {
+    payload?: Record<string, unknown> | string | null;
+    result?: Record<string, unknown> | string | null;
+  };
+
+  return {
+    ...task,
+    payload: parseJsonObject(task.payload),
+    result: parseOptionalJsonObject(task.result),
+  } as ProjectTask;
 }
 
 function mapAttempt(row: unknown): ProjectTaskAttempt {
-  return row as ProjectTaskAttempt;
+  const attempt = row as ProjectTaskAttempt & {
+    logs?: ProjectTaskAttempt["logs"] | string | null;
+  };
+
+  return {
+    ...attempt,
+    logs: parseAttemptLogs(attempt.logs),
+  } as ProjectTaskAttempt;
+}
+
+function parseJsonObject(value: Record<string, unknown> | string | null | undefined): Record<string, unknown> {
+  if (!value) return {};
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+        ? (parsed as Record<string, unknown>)
+        : {};
+    } catch {
+      return {};
+    }
+  }
+  return value;
+}
+
+function parseOptionalJsonObject(
+  value: Record<string, unknown> | string | null | undefined,
+): Record<string, unknown> | null {
+  if (value == null) return null;
+  const parsed = parseJsonObject(value);
+  return Object.keys(parsed).length > 0 ? parsed : null;
+}
+
+function parseAttemptLogs(
+  value: ProjectTaskAttempt["logs"] | string | null | undefined,
+): ProjectTaskAttempt["logs"] {
+  if (!value) return [];
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? (parsed as ProjectTaskAttempt["logs"]) : [];
+    } catch {
+      return [];
+    }
+  }
+  return Array.isArray(value) ? value : [];
 }
 
 export function buildTaskListQuery(projectRef: string, filters: TaskListFilters = {}): {
