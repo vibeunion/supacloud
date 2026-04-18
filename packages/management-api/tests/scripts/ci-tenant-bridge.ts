@@ -9,7 +9,7 @@
  *
  * Architecture:
  *   SDK request → Management API sdk-proxy
- *     → looks up project_config → finds {pgrstPort:3000, gotruePort:9999}
+ *     → looks up projects.config → finds {pgrstPort:3000, gotruePort:9999}
  *     → proxies to shared CI containers ✅
  */
 import { SQL } from "bun";
@@ -83,19 +83,24 @@ export async function setupCiBridge(sql: InstanceType<typeof SQL>): Promise<{
       status          = 'active'
   `;
 
-  // 3. Wire to shared CI containers via project_config
+  // 3. Wire to shared CI containers via projects.config
   await sql`
-    INSERT INTO project_config (project_ref, postgrest_port, gotrue_port, realtime_port)
-    VALUES (${CI_TENANT_REF}, ${CI_PGRST_PORT}, ${CI_GOTRUE_PORT}, ${CI_REALTIME_PORT})
-    ON CONFLICT (project_ref) DO UPDATE SET
-      postgrest_port  = EXCLUDED.postgrest_port,
-      gotrue_port     = EXCLUDED.gotrue_port,
-      realtime_port   = EXCLUDED.realtime_port,
-      updated_at      = NOW()
+    UPDATE projects
+    SET
+      db_name = 'postgres',
+      db_user = 'supabase_admin',
+      db_password = 'postgres',
+      status = 'active',
+      config = COALESCE(config, '{}'::jsonb) || jsonb_build_object(
+        'postgrest_port', ${CI_PGRST_PORT},
+        'gotrue_port', ${CI_GOTRUE_PORT},
+        'realtime_port', ${CI_REALTIME_PORT}
+      )
+    WHERE ref = ${CI_TENANT_REF}
   `;
 
   console.log(
-    `[CIBridge] project_config wired: PostgREST=${CI_PGRST_PORT}, GoTrue=${CI_GOTRUE_PORT}`,
+    `[CIBridge] projects.config wired: PostgREST=${CI_PGRST_PORT}, GoTrue=${CI_GOTRUE_PORT}`,
   );
 
   // 4. Create test tables in the shared 'postgres' DB

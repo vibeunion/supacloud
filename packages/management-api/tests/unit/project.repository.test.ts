@@ -33,10 +33,6 @@ mock.module("../../src/db", () => ({
   sql: mockSql,
 }));
 
-mock.module("../../src/utils/retry", () => ({
-  withRetry: (_name: string, fn: Function) => fn(),
-}));
-
 // Import the object after mocking
 import { projectRepository } from "../../src/repositories/project.repository";
 

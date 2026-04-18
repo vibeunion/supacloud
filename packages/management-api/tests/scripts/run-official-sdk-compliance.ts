@@ -53,17 +53,16 @@ async function bootstrap() {
     // Wire the SDK test tenant to the shared CI containers first so all later
     // schema/storage seeding targets the real shared CI database context.
     await sql`
-            INSERT INTO project_config (project_ref, postgrest_port, gotrue_port, realtime_port)
-            VALUES (${project.ref}, 3000, 9999, 4000)
-            ON CONFLICT (project_ref) DO UPDATE SET
-                postgrest_port  = 3000,
-                gotrue_port     = 9999,
-                realtime_port   = 4000,
-                updated_at      = NOW()
-        `;
-    await sql`
             UPDATE projects
-            SET db_name = 'postgres', db_user = 'supabase_admin', db_password = 'postgres', status = 'active'
+            SET db_name = 'postgres',
+                db_user = 'supabase_admin',
+                db_password = 'postgres',
+                status = 'active',
+                config = COALESCE(config, '{}'::jsonb) || jsonb_build_object(
+                  'postgrest_port', 3000,
+                  'gotrue_port', 9999,
+                  'realtime_port', 4000
+                )
             WHERE ref = ${project.ref}
         `;
     invalidateDbNameCache(project.ref);
