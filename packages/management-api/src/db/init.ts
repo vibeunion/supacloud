@@ -163,16 +163,6 @@ export async function initDatabase() {
       expires_at BIGINT NOT NULL,
       created_at TIMESTAMPTZ DEFAULT NOW()
     );
-
-    CREATE TABLE IF NOT EXISTS project_config (
-      project_ref VARCHAR(20) PRIMARY KEY REFERENCES projects(ref) ON DELETE CASCADE,
-      postgrest_port INTEGER,
-      gotrue_port INTEGER,
-      realtime_port INTEGER,
-      created_at TIMESTAMPTZ DEFAULT NOW(),
-      updated_at TIMESTAMPTZ DEFAULT NOW()
-    );
-
   `;
 
   // Use explicit config instead of URL to ensure correct database name
@@ -208,13 +198,13 @@ export async function initDatabase() {
 
     const result = await sql`
       SELECT COUNT(*) as count FROM information_schema.tables
-      WHERE table_schema = 'public' AND table_name IN ('organizations', 'projects', 'project_tasks', 'platform_settings', 'project_secrets', 'deployment_history', 'system_tus_uploads', 'system_tus_chunks', 'system_signed_uploads', 'project_config')
+      WHERE table_schema = 'public' AND table_name IN ('organizations', 'projects', 'project_tasks', 'platform_settings', 'project_secrets', 'deployment_history', 'system_tus_uploads', 'system_tus_chunks', 'system_signed_uploads')
     `;
 
     const tableCount = Number(result[0]?.count || 0);
     logger.info(`Found ${tableCount} tables in database`);
 
-    if (tableCount < 10) {
+    if (tableCount < 9) {
       logger.info("Executing DDL statements...");
       await sql.unsafe(ddlQuery);
       logger.info("DDL executed successfully.");
@@ -328,12 +318,12 @@ export async function initDatabase() {
 
     const [verify] = await sql`
       SELECT COUNT(*) as count FROM information_schema.tables
-      WHERE table_schema = 'public' AND table_name IN ('organizations', 'projects', 'project_tasks', 'platform_settings', 'project_secrets', 'deployment_history', 'system_tus_uploads', 'system_tus_chunks', 'system_signed_uploads', 'project_config')
+      WHERE table_schema = 'public' AND table_name IN ('organizations', 'projects', 'project_tasks', 'platform_settings', 'project_secrets', 'deployment_history', 'system_tus_uploads', 'system_tus_chunks', 'system_signed_uploads')
     `;
 
     const finalCount = Number(verify?.count || 0);
     logger.info(
-      `Database initialized successfully! Tables verified: ${finalCount}/10`,
+      `Database initialized successfully! Tables verified: ${finalCount}/9`,
     );
 
     // In CI mode where tests rewrite db_name to 'postgres', we must create Storage relations

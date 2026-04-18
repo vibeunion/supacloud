@@ -3,11 +3,18 @@ import { getProjectDb, resolveDbName } from "../db";
 import { sql as metaSql } from "../db";
 import { logger } from "../utils/logger";
 import { projectService } from "../services";
+import { resolveTenantPorts } from "../utils/project-routing";
 
 async function getGotruePort(ref: string): Promise<number | null> {
     try {
-        const rows = await metaSql`SELECT gotrue_port FROM project_config WHERE project_ref = ${ref} LIMIT 1`;
-        if (rows.length > 0 && rows[0].gotrue_port) return rows[0].gotrue_port as number;
+        const rows = await metaSql`
+          SELECT config
+          FROM projects
+          WHERE ref = ${ref} AND deleted_at IS NULL
+          LIMIT 1
+        `;
+        const ports = resolveTenantPorts(rows[0]?.config as Record<string, unknown> | undefined);
+        if (ports?.gotruePort) return ports.gotruePort;
     } catch {}
     return null;
 }

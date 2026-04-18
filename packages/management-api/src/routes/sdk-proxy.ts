@@ -7,6 +7,7 @@ import { DEFAULT_CORS_HEADERS, DEFAULT_CORS_EXPOSED } from '../services/gateway.
 import { backgroundTaskService } from "../services/background-task.service";
 import { edgeFunctionService } from "../services/edge-function.service";
 import { projectService } from "../services/project.service";
+import { resolveTenantPorts } from "../utils/project-routing";
 
 const MAX_ASYNC_BODY_BYTES = 256 * 1024;
 const SUPACLOUD_IDEMPOTENCY_HEADER = "x-supacloud-idempotency-key";
@@ -169,14 +170,25 @@ async function getProjectRef(request: Request): Promise<string> {
     const refHeader = request.headers.get("x-project-ref") || request.headers.get("x-supabase-project");
     if (refHeader) return refHeader;
     
-    const host = request.headers.get('host');
-    if (host) {
+    const forwardedHost = request.headers.get('x-forwarded-host');
+    const rawHosts = [forwardedHost, request.headers.get('host')].filter(Boolean) as string[];
+    for (const rawHost of rawHosts) {
+        const host = rawHost.split(',')[0].trim();
+        if (!host) continue;
+
         if (config.baseDomain && host.includes(config.baseDomain)) {
             return host.split('.')[0];
         }
         try {
             const hostWithoutPort = host.split(':')[0];
-            const rows = await metaSql`SELECT ref FROM projects WHERE config->>'custom_domain' = ${hostWithoutPort} OR config->>'api_domain' = ${hostWithoutPort} OR config->>'custom_domain' = ${hostWithoutPort.replace(/^api\./, '')} LIMIT 1`;
+            const rows = await metaSql`
+                SELECT ref
+                FROM projects
+                WHERE config->>'custom_domain' = ${hostWithoutPort}
+                   OR config->>'api_domain' = ${hostWithoutPort}
+                   OR config->>'custom_domain' = ${hostWithoutPort.replace(/^api\./, '')}
+                LIMIT 1
+            `;
             if (rows.length > 0) return rows[0].ref;
         } catch(e) {}
     }
@@ -213,14 +225,13 @@ async function getTenantPorts(ref: string): Promise<{ gotruePort: number, pgrstP
     if (ref === 'test_mock') return { gotruePort: 9999, pgrstPort: 3000 };
     
     try {
-        const rows = await metaSql`SELECT postgrest_port, gotrue_port FROM project_config WHERE project_ref = ${ref} LIMIT 1`;
-        if (rows.length > 0 && rows[0].postgrest_port && rows[0].gotrue_port) {
-            return {
-                pgrstPort: rows[0].postgrest_port as number,
-                gotruePort: rows[0].gotrue_port as number
-            };
-        }
-        return null;
+        const projectRows = await metaSql`
+            SELECT config
+            FROM projects
+            WHERE ref = ${ref} AND deleted_at IS NULL
+            LIMIT 1
+        `;
+        return resolveTenantPorts(projectRows[0]?.config as Record<string, unknown> | undefined);
     } catch (e) {
         logger.error(`Failed to get ports for tenant ${ref}`, { error: e instanceof Error ? e.message : String(e) });
         return null;

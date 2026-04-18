@@ -2,6 +2,12 @@ import { config } from "../config";
 import { $ } from "bun";
 import { logger } from "../utils/logger";
 import { sql } from "../db";
+import {
+    type ProjectRoutingConfig,
+    normalizeProjectRoutingConfig,
+    resolveProjectApiHost,
+    resolveProjectStudioHost,
+} from "../utils/project-routing";
 
 export const DEFAULT_CORS_HEADERS = ["Accept", "Accept-Language", "Content-Language", "Authorization", "Content-Type", "X-Api-Version", "x-supabase-api-version", "X-Client-Info", "apikey", "Prefer", "Content-Profile", "accept-profile", "Range", "Range-Unit", "x-upsert", "Cache-Control", "x-retry-count", "x-metadata"];
 export const DEFAULT_CORS_EXPOSED = ["Content-Length", "Content-Range", "X-JSON", "x-supabase-api-version", "X-Client-Info", "Prefer", "Content-Profile", "accept-profile", "Range", "Range-Unit", "X-Relay-Error", "link", "x-total-count"];
@@ -451,13 +457,17 @@ export class GatewayService {
 
     // --- Core reload logic ---
 
-    async setupUpstream(projectRef: string, pgrstPort: number | string, gotruePort: number | string, customApiDomain?: string, opts?: { functionsPort?: number; storagePort?: number; realtimeApiPort?: number; realtimeWsPort?: number }): Promise<{ success: boolean; error?: string }> {
+    async setupUpstream(projectRef: string, pgrstPort: number | string, gotruePort: number | string, projectRouting?: ProjectRoutingConfig | string, opts?: { functionsPort?: number; storagePort?: number; realtimeApiPort?: number; realtimeWsPort?: number }): Promise<{ success: boolean; error?: string }> {
         try {
             const hostIp = await this.detectHostIp();
             
             // Get base domains
             const baseApiDomain = `${projectRef}.api.${config.baseDomain}`;
-            const hosts = customApiDomain ? [baseApiDomain, `api.${customApiDomain}`] : [baseApiDomain];
+            const routingConfig = normalizeProjectRoutingConfig(projectRouting);
+            const hosts = Array.from(new Set([
+                baseApiDomain,
+                resolveProjectApiHost(projectRef, routingConfig),
+            ]));
 
             await this.ensureServiceAndRoute({ name: `svc-pgrst-${projectRef}`, url: `http://${hostIp}:${pgrstPort}`, paths: ["/rest/v1"], hosts, projectRef });
             await this.ensureServiceAndRoute({ 
@@ -497,7 +507,10 @@ export class GatewayService {
 
             // Ensure Studio routes (Management API proxy loopback for SPA fallback)
             const studioDomain = `studio-${projectRef}.${config.baseDomain}`;
-            const studioHosts = customApiDomain ? [studioDomain, `studio.${customApiDomain}`] : [studioDomain];
+            const studioHosts = Array.from(new Set([
+                studioDomain,
+                resolveProjectStudioHost(projectRef, routingConfig),
+            ]));
             await this.ensureServiceAndRoute({ name: `svc-studio-${projectRef}`, url: `http://${hostIp}:${config.port}`, paths: ["/"], hosts: studioHosts, projectRef, stripPath: false });
 
             logger.info(`Kong upstream dynamically registered via REST for ${projectRef} (pgrst:${pgrstPort}, gotrue:${gotruePort})`);
@@ -656,13 +669,7 @@ export class GatewayService {
                 }
 
                 try {
-                    const customApiDomain = cfg.api_domain as string | undefined;
-                    let targetDomain = customApiDomain;
-                    // If the config explicitly binds something like "api.dbbaby.top", extract the base "dbbaby.top"
-                    if (targetDomain && targetDomain.startsWith("api.")) {
-                        targetDomain = targetDomain.slice(4);
-                    }
-                    await this.setupUpstream(ref, pgrstPort, gotruePort, targetDomain);
+                    await this.setupUpstream(ref, pgrstPort, gotruePort, cfg);
                     
                     // Re-apply keys & limits if configured (assuming user will call applyConfig separately or we re-trigger it)
                     // (Omitted for brevity, typically applyConfig runs on tenant boot)
