@@ -337,10 +337,11 @@ CREATE TABLE tasks (
   id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   name           text NOT NULL,
   type           text NOT NULL
-                 CHECK (type IN ('pattern','mockup','title','video','export','agent')),
+                 CHECK (type IN ('pattern','mockup','title','video','export','agent','crop','matting')),
   status         text NOT NULL DEFAULT 'queued'
                  CHECK (status IN ('queued','processing','completed','failed')),
   progress       int DEFAULT 0,
+  payload        jsonb NOT NULL DEFAULT '{}'::jsonb,
   user_id        uuid REFERENCES profiles(id) ON DELETE SET NULL,
   error_message  text,
   duration_ms    int,
