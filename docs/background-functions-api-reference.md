@@ -13,14 +13,16 @@ Use this page together with:
 For JavaScript tenants, the recommended production pattern is:
 
 1. keep using the official `supabase.functions.invoke()`
-2. enable background mode via `x-supacloud-*` headers
-3. wrap that call in your own `invokeAsync()` helper
+2. enable background mode via either:
+   - `x-supacloud-*` headers
+   - function config `background_routes`
+3. use task APIs or Realtime to observe status changes
 
-This keeps your integration compatible with stock `supabase-js` while still giving your team a clean `functions.invoke(async)` style API.
+This keeps your integration compatible with stock `supabase-js` while letting SupaCloud decide, server-side, which heavy paths must be persisted and retried as background work.
 
 ## Invocation Request
 
-Background mode is enabled by adding:
+Background mode can be enabled explicitly by adding:
 
 ```http
 x-supacloud-async: true
@@ -42,6 +44,20 @@ const { data, error } = await supabase.functions.invoke("video-transcode", {
   },
 });
 ```
+
+Or implicitly through function config:
+
+```json
+{
+  "verify_jwt": false,
+  "background_routes": [
+    "/generate/crop",
+    "/generate/matting"
+  ]
+}
+```
+
+When a request path matches a configured `background_routes` entry, SupaCloud enqueues the task even if the browser did not send custom `x-supacloud-*` headers.
 
 ## Supported Async Headers
 
