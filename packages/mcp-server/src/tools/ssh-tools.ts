@@ -6,6 +6,68 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { SshTransport } from "../transports/ssh";
 
+const SAFE_CONTAINER_NAME = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/;
+const SAFE_PROJECT_REF = /^[a-z0-9-]{1,20}$/;
+const SAFE_TIMEOUT_SECONDS = 300;
+const ALLOWED_EXEC_PREFIXES = [
+    "systemctl ",
+    "journalctl ",
+    "docker ps",
+    "docker logs ",
+    "podman ps",
+    "podman logs ",
+    "ps ",
+    "ss ",
+    "df ",
+    "free ",
+    "uname ",
+    "cat /etc/os-release",
+    "tail ",
+    "ls ",
+    "du ",
+    "pg_isready",
+    "curl ",
+    "grep ",
+    "find ",
+    "hostname",
+];
+
+function assertSafeProjectRef(value: string, fieldName: string): string {
+    if (!SAFE_PROJECT_REF.test(value)) {
+        throw new Error(`Invalid ${fieldName}`);
+    }
+    return value;
+}
+
+function assertSafeContainerName(value: string): string {
+    if (!SAFE_CONTAINER_NAME.test(value)) {
+        throw new Error("Invalid container name");
+    }
+    return value;
+}
+
+function getExecTimeoutMs(timeoutSeconds?: number): number {
+    const seconds = timeoutSeconds || 60;
+    if (!Number.isFinite(seconds) || seconds <= 0 || seconds > SAFE_TIMEOUT_SECONDS) {
+        throw new Error(`timeout_seconds must be between 1 and ${SAFE_TIMEOUT_SECONDS}`);
+    }
+    return seconds * 1000;
+}
+
+function assertSafeExecCommand(command: string): string {
+    const trimmed = command.trim();
+    if (!trimmed) {
+        throw new Error("'command' required");
+    }
+    if (/[\n\r;&|`$<>]/.test(trimmed)) {
+        throw new Error("Unsafe shell metacharacters are not allowed in exec command");
+    }
+    if (!ALLOWED_EXEC_PREFIXES.some(prefix => trimmed === prefix.trimEnd() || trimmed.startsWith(prefix))) {
+        throw new Error("Command is outside the allowed diagnostic command set");
+    }
+    return trimmed;
+}
+
 export function registerSshTools(server: McpServer, ssh: SshTransport): void {
     server.tool(
         "ssh",
@@ -17,27 +79,20 @@ Actions: ping, setup, install, upgrade, diagnose, exec, troubleshoot, container_
                 "troubleshoot", "container_logs",
                 "tenant_manage", "tenant_list", "tenant_inspect", "tenant_diagnose", "tenant_migrate",
             ]).describe("Action to perform"),
-            // exec params
-            command: z.string().optional().describe("[exec] Shell command to execute"),
+            command: z.string().optional().describe("[exec] Restricted shell command to execute"),
             timeout_seconds: z.number().optional().describe("[exec] Timeout in seconds (default: 60)"),
-            // install params
             public_domain: z.string().optional().describe("[install] API domain, e.g. api.example.com"),
             studio_domain: z.string().optional().describe("[install] Studio domain"),
             postgres_password: z.string().optional().describe("[install] DB password (auto-generated if empty)"),
             dashboard_password: z.string().optional().describe("[install] Console password"),
-            edge_runtime: z.enum(["deno", "bun"]).optional().describe("[install] Runtime (default: deno)"),
-            storage_type: z.enum(["garage", "rustfs", "minio", "external"]).optional().describe("[install] Storage backend"),
-            // upgrade
+            edge_runtime: z.enum(["bun"]).optional().describe("[install] Runtime (default: bun)"),
+            storage_type: z.enum(["juicefs", "garage", "rustfs", "minio", "external"]).optional().describe("[install] Storage backend"),
             version: z.string().optional().describe("[upgrade] Specific version"),
-            // troubleshoot
             focus: z.enum(["all", "containers", "database", "network", "disk", "logs"]).optional().describe("[troubleshoot] Focus area"),
-            // container_logs
             container: z.string().optional().describe("[container_logs] Container name"),
             lines: z.number().optional().describe("[container_logs] Number of log lines (default: 100)"),
-            // tenant params
             project_ref: z.string().optional().describe("[tenant_*] Project reference ID"),
             tenant_action: z.enum(["start", "stop", "restart", "status"]).optional().describe("[tenant_manage] Action"),
-            // tenant_migrate
             source_ref: z.string().optional().describe("[tenant_migrate] Source tenant"),
             target_ref: z.string().optional().describe("[tenant_migrate] Target tenant"),
             schemas: z.string().optional().describe("[tenant_migrate] Schemas (default: public,auth,storage)"),
@@ -95,7 +150,7 @@ Actions: ping, setup, install, upgrade, diagnose, exec, troubleshoot, container_
                         `SUPABASE_PUBLIC_DOMAIN=${args.public_domain}`,
                         `SUPABASE_STUDIO_DOMAIN=${args.studio_domain ?? args.public_domain}`,
                         `EDGE_RUNTIME=${args.edge_runtime || "bun"}`,
-                        `S3_STORAGE_TYPE=${args.storage_type || "juicefs"}`, 
+                        `S3_STORAGE_TYPE=${args.storage_type || "juicefs"}`,
                         args.postgres_password ? `POSTGRES_PASSWORD=${args.postgres_password}` : "",
                         args.dashboard_password ? `DASHBOARD_PASSWORD=${args.dashboard_password}` : "",
                     ].filter(Boolean).join("\n");
@@ -129,7 +184,8 @@ Actions: ping, setup, install, upgrade, diagnose, exec, troubleshoot, container_
                 }
                 case "exec": {
                     if (!args.command) throw new Error("'command' required");
-                    const r = await ssh.exec(args.command, (args.timeout_seconds || 60) * 1000);
+                    const command = assertSafeExecCommand(args.command);
+                    const r = await ssh.exec(command, getExecTimeoutMs(args.timeout_seconds));
                     text = `exit: ${r.code}\n\nstdout:\n${r.stdout.slice(-2000)}\n\nstderr:\n${r.stderr.slice(-500)}`;
                     break;
                 }
@@ -165,14 +221,17 @@ Actions: ping, setup, install, upgrade, diagnose, exec, troubleshoot, container_
                 case "container_logs": {
                     if (!args.container) throw new Error("'container' required");
                     const n = args.lines || 100;
-                    const r = await ssh.exec(`(docker logs --tail ${n} ${args.container} 2>&1 || echo 'Container not found')`, 30_000);
-                    text = `📋 ${args.container} last ${n} lines:\n\n${r.stdout || r.stderr}`;
+                    if (!Number.isFinite(n) || n <= 0 || n > 1000) throw new Error("'lines' must be between 1 and 1000");
+                    const container = assertSafeContainerName(args.container);
+                    const r = await ssh.exec(`docker logs --tail ${n} ${container} 2>&1 || echo 'Container not found'`, 30_000);
+                    text = `📋 ${container} last ${n} lines:\n\n${r.stdout || r.stderr}`;
                     break;
                 }
                 case "tenant_manage": {
                     if (!args.project_ref || !args.tenant_action) throw new Error("'project_ref' and 'tenant_action' required");
-                    const r = await ssh.exec(`bash /opt/supacloud/scripts/lib/tenant_runtime.sh ${args.tenant_action} ${args.project_ref}`, 60_000);
-                    text = `${r.success ? "✅" : "❌"} Tenant ${args.tenant_action} [${args.project_ref}]\n${r.stdout}`;
+                    const projectRef = assertSafeProjectRef(args.project_ref, "project_ref");
+                    const r = await ssh.exec(`bash /opt/supacloud/scripts/lib/tenant_runtime.sh ${args.tenant_action} ${projectRef}`, 60_000);
+                    text = `${r.success ? "✅" : "❌"} Tenant ${args.tenant_action} [${projectRef}]\n${r.stdout}`;
                     break;
                 }
                 case "tenant_list": {
@@ -194,8 +253,9 @@ Actions: ping, setup, install, upgrade, diagnose, exec, troubleshoot, container_
                 }
                 case "tenant_inspect": {
                     if (!args.project_ref) throw new Error("'project_ref' required");
-                    const r = await ssh.exec(`cat /etc/supabase/kong_tenants/${args.project_ref}.yml 2>/dev/null || echo 'Not found'`, 10_000);
-                    text = `📄 ${args.project_ref} gateway config:\n\n${r.stdout || r.stderr}`;
+                    const projectRef = assertSafeProjectRef(args.project_ref, "project_ref");
+                    const r = await ssh.exec(`cat /etc/supabase/kong_tenants/${projectRef}.yml 2>/dev/null || echo 'Not found'`, 10_000);
+                    text = `📄 ${projectRef} gateway config:\n\n${r.stdout || r.stderr}`;
                     break;
                 }
                 case "tenant_diagnose": {
@@ -206,9 +266,10 @@ Actions: ping, setup, install, upgrade, diagnose, exec, troubleshoot, container_
                         "ls -l /etc/supabase/kong_tenants/*.yml 2>/dev/null || echo 'No config'",
                     ];
                     if (args.project_ref) {
+                        const projectRef = assertSafeProjectRef(args.project_ref, "project_ref");
                         checks.push(
-                            `systemctl status supacloud-pgrst@${args.project_ref} --no-pager 2>/dev/null || echo 'Not found'`,
-                            `cat /etc/supabase/tenants/${args.project_ref}.env 2>/dev/null | grep -v PASSWORD | grep -v SECRET || echo 'N/A'`,
+                            `systemctl status supacloud-pgrst@${projectRef} --no-pager 2>/dev/null || echo 'Not found'`,
+                            `cat /etc/supabase/tenants/${projectRef}.env 2>/dev/null | grep -v PASSWORD | grep -v SECRET || echo 'N/A'`,
                         );
                     }
                     const r = await ssh.exec(checks.join("\n"), 30_000);
@@ -217,13 +278,16 @@ Actions: ping, setup, install, upgrade, diagnose, exec, troubleshoot, container_
                 }
                 case "tenant_migrate": {
                     if (!args.source_ref || !args.target_ref) throw new Error("'source_ref' and 'target_ref' required");
+                    const sourceRef = assertSafeProjectRef(args.source_ref, "source_ref");
+                    const targetRef = assertSafeProjectRef(args.target_ref, "target_ref");
                     const s = args.schemas || "public,auth,storage";
-                    const schemaArgs = s.split(",").map(x => `-n ${x.trim()}`).join(" ");
+                    if (!/^[a-z_,\s]+$/.test(s)) throw new Error("Invalid schemas");
+                    const schemaArgs = s.split(",").map(x => x.trim()).filter(Boolean).map(x => `-n ${x}`).join(" ");
                     const df = args.data_only ? "--data-only" : "";
                     const cmd = [
-                        `echo 'Migrating: supa_${args.source_ref} → supa_${args.target_ref}'`,
-                        `pg_dump -h localhost -U postgres -d supa_${args.source_ref} ${schemaArgs} ${df} -Fc -f /tmp/migrate.dump 2>&1`,
-                        `pg_restore -h localhost -U postgres -d supa_${args.target_ref} --no-owner --no-acl /tmp/migrate.dump 2>&1 || true`,
+                        `echo 'Migrating: supa_${sourceRef} → supa_${targetRef}'`,
+                        `pg_dump -h localhost -U postgres -d supa_${sourceRef} ${schemaArgs} ${df} -Fc -f /tmp/migrate.dump 2>&1`,
+                        `pg_restore -h localhost -U postgres -d supa_${targetRef} --no-owner --no-acl /tmp/migrate.dump 2>&1 || true`,
                         `rm -f /tmp/migrate.dump && echo '✅ Done'`,
                     ].join("\n");
                     const r = await ssh.exec(cmd, 600_000);

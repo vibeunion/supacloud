@@ -38,6 +38,10 @@ run_sql() {
     psql -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -d "$PG_DATABASE" -t -A -c "$1" 2>/dev/null
 }
 
+escape_sql_literal() {
+    printf "%s" "$1" | sed "s/'/''/g"
+}
+
 # Disk space pre-check (prevent disk full causing WAL write failure leading to cluster crash)
 check_disk_space() {
     local data_dir="${PG_DATA_DIR:-/var/lib/pgsql/data}"
@@ -85,11 +89,16 @@ create_database() {
     # Disk space pre-check
     check_disk_space
 
+    local escaped_db_password
+    escaped_db_password=$(escape_sql_literal "$DB_PASSWORD")
+
     # Create role
     run_sql "DO \$\$
     BEGIN
         IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '${DB_USER}') THEN
-            CREATE ROLE ${DB_USER} LOGIN PASSWORD '${DB_PASSWORD}';
+            EXECUTE format('CREATE ROLE %I LOGIN PASSWORD %L', '${DB_USER}', '${escaped_db_password}');
+        ELSE
+            EXECUTE format('ALTER ROLE %I LOGIN PASSWORD %L', '${DB_USER}', '${escaped_db_password}');
         END IF;
     END
     \$\$;"
@@ -115,15 +124,17 @@ EXTENSIONS
     # Initialize Supabase core Schema (auth, storage, realtime)
     echo "Initializing Supabase schema for ${DB_NAME}..."
     
+    local auth_role="authenticator_${PROJECT_REF}"
+
     # First create authenticator role (needs variable substitution)
     psql -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -d "$DB_NAME" <<EOF
 -- Create tenant-specific authenticator role
 DO \$\$
 BEGIN
-    IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'authenticator_${PROJECT_REF}') THEN
-        CREATE ROLE authenticator_${PROJECT_REF} NOINHERIT LOGIN PASSWORD '${DB_PASSWORD}';
+    IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '${auth_role}') THEN
+        EXECUTE format('CREATE ROLE %I NOINHERIT LOGIN PASSWORD %L', '${auth_role}', '${escaped_db_password}');
     ELSE
-        ALTER ROLE authenticator_${PROJECT_REF} WITH PASSWORD '${DB_PASSWORD}';
+        EXECUTE format('ALTER ROLE %I WITH PASSWORD %L', '${auth_role}', '${escaped_db_password}');
     END IF;
 END
 \$\$;

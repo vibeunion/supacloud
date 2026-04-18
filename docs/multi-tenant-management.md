@@ -6,7 +6,7 @@ This document details the technical solution design for multi-project management
 
 ## 1. Architecture Overview
 
-Multiple Supabase projects are run with logical isolation by sharing infrastructure (Pigsty PostgreSQL, Nginx gateway, and S3 storage).
+Multiple Supabase projects are run with logical isolation by sharing infrastructure (Pigsty PostgreSQL, Kong API gateway, and object storage).
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -15,19 +15,19 @@ Multiple Supabase projects are run with logical isolation by sharing infrastruct
 ├─────────────────────────────────────────────────────────────┤
 │                                                              │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐       │
-│  │ JwtService   │  │ DbService    │  │ S3Service    │       │
+│  │ JwtService   │  │ DbService    │  │ StorageSvc   │       │
 │  └──────────────┘  └──────────────┘  └──────────────┘       │
 │         │                 │                 │                │
 │         ▼                 ▼                 ▼                │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐       │
-│  │jwt_manager.sh│  │db_manager.sh │  │s3_manager.sh │       │
+│  │jwt_manager.sh│  │db_manager.sh │  │storage_mgr.sh│       │
 │  └──────────────┘  └──────────────┘  └──────────────┘       │
 │                                                              │
 ├─────────────────────────────────────────────────────────────┤
 │                    Shared Infrastructure                     │
 │  ┌────────────┐  ┌────────────┐  ┌────────────┐             │
-│  │ PostgreSQL │  │   Nginx    │  │  S3 Storage│             │
-│  │  (Pigsty)  │  │  (ACME)    │  │(RustFS/etc)│             │
+│  │ PostgreSQL │  │   Kong     │  │ Obj Storage│             │
+│  │  (Pigsty)  │  │  Gateway   │  │(JuiceFS/…) │             │
 │  └────────────┘  └────────────┘  └────────────┘             │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -78,15 +78,15 @@ CREATE INDEX idx_projects_ref ON projects(ref);
 CREATE INDEX idx_projects_status ON projects(status);
 ```
 
-### 2.3 Storage Isolation (S3)
+### 2.3 Storage Isolation
 
 - **Bucket Naming**: `supa-<project_ref>`
 - **Credentials**: Independent Access Key / Secret Key per project
-- **Supported Backends**: RustFS, Garage, MinIO, External S3
+- **Supported Backends**: JuiceFS (default), RustFS, Garage, MinIO, External S3
 
 ### 2.4 DNS and Routing Isolation
 
-Dynamic Vhost generation, Management API generates config snippets in `/etc/nginx/sites-enabled/supa-tenants/`.
+Dynamic Vhost generation via Kong API-driven routing. Management API configures Kong routes programmatically.
 
 | Domain Pattern | Routing Target |
 |----------------|----------------|
@@ -193,8 +193,8 @@ Kong dynamically validates JWT keys for different projects based on `Host` Heade
 ```
 /opt/supacloud/scripts/lib/
 ├── db_manager.sh      # Database management
-├── s3_manager.sh      # Storage management
-├── router_manager.sh  # Nginx routing management
+├── storage_manager.sh # Storage management (JuiceFS/S3)
+├── router_manager.sh  # Kong routing management
 └── jwt_manager.sh     # JWT key management
 ```
 
@@ -213,17 +213,17 @@ db_manager.sh delete <project_ref>
 db_manager.sh status <project_ref>
 ```
 
-#### s3_manager.sh
+#### storage_manager.sh
 
 ```bash
-# Create project Bucket
-s3_manager.sh create <project_ref>
+# Create project bucket
+storage_manager.sh create <project_ref>
 
-# Delete project Bucket
-s3_manager.sh delete <project_ref>
+# Delete project bucket
+storage_manager.sh delete <project_ref>
 
 # Get credentials
-s3_manager.sh credentials <project_ref>
+storage_manager.sh credentials <project_ref>
 ```
 
 #### router_manager.sh
@@ -235,7 +235,7 @@ router_manager.sh add <project_ref> <domain>
 # Remove project route
 router_manager.sh remove <project_ref>
 
-# Reload Nginx
+# Reload Kong routes
 router_manager.sh reload
 ```
 
@@ -318,17 +318,17 @@ supacloud_project_storage_bytes{project_ref="abc123"}
 1. Generate project_ref
 2. Insert into projects table (status: creating)
 3. Create database → Rollback on failure
-4. Create S3 Bucket → Rollback database on failure
+4. Create storage bucket → Rollback database on failure
 5. Generate JWT keys
-6. Configure Nginx routing
+6. Configure Kong routing
 7. Update status: active
 ```
 
 ### 8.2 Rollback Strategy
 
 - Database creation failed: Delete projects record only
-- S3 creation failed: Delete database + projects record
-- Routing config failed: Delete S3 + database + projects record
+- Storage creation failed: Delete database + projects record
+- Routing config failed: Delete storage + database + projects record
 
 ---
 
@@ -338,7 +338,7 @@ supacloud_project_storage_bytes{project_ref="abc123"}
 |-------|------|--------|
 | 1 | Basic API + Database layer | Runnable CRUD API |
 | 2 | Shell script integration | Complete project creation flow |
-| 3 | Nginx dynamic routing | Multi-tenant domain support |
+| 3 | Kong dynamic routing | Multi-tenant domain support |
 | 4 | Monitoring integration | Grafana multi-project dashboard |
 | 5 | MCP Server | AI Agent native infrastructure control |
 
