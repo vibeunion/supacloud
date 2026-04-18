@@ -44,6 +44,10 @@ class FrontendService {
     return parts.join("/").replace(/\/+/g, "/");
   }
 
+  private normalizePath(path: string): string {
+    return path.replace(/\/+$/, "");
+  }
+
   private generateId(): string {
     return crypto.randomUUID().substring(0, 8);
   }
@@ -177,7 +181,12 @@ class FrontendService {
     const sourceDir = this.joinPath(deploymentDir, "source");
 
     try {
-      await $`cp -r ${sourcePath}/. ${sourceDir}`.quiet();
+      const sameSource = this.normalizePath(sourcePath) === this.normalizePath(sourceDir);
+      if (!sameSource) {
+        await $`rm -rf ${sourceDir}`.quiet();
+        await $`mkdir -p ${sourceDir}`.quiet();
+        await $`cp -r ${sourcePath}/. ${sourceDir}`.quiet();
+      }
       return await this.buildDeployment(projectRef, deploymentId, sourceDir);
     } catch (error: unknown) {
       const errorMsg = error instanceof Error ? error.message : String(error);
@@ -206,11 +215,24 @@ class FrontendService {
     let buildLog = "";
 
     try {
+      await this.domainService.setGitConfig(projectRef, deploymentId, gitUrl, branch);
+      await this.updateDeployment(projectRef, deploymentId, {
+        status: "building",
+      } as Partial<FrontendDeployment>);
+
       await $`rm -rf ${sourceDir}`.quiet();
 
       buildLog += `$ git clone --branch ${branch} ${gitUrl}\n`;
-      const cloneResult = await $`git clone --branch ${branch} --depth 1 ${gitUrl} ${sourceDir}`.quiet();
-      buildLog += cloneResult.stdout.toString() + "\n";
+      const cloneResult = await $`git clone --branch ${branch} --depth 1 ${gitUrl} ${sourceDir}`
+        .env({
+          ...process.env,
+          GIT_TERMINAL_PROMPT: "0",
+          GIT_ASKPASS: "echo",
+        })
+        .quiet();
+      buildLog += cloneResult.stdout.toString();
+      buildLog += cloneResult.stderr.toString();
+      buildLog += "\n";
 
       if (cloneResult.exitCode !== 0) {
         throw new Error(`Git clone failed: ${cloneResult.stderr.toString()}`);

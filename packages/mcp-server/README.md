@@ -255,6 +255,7 @@ Management API 内嵌了 Streamable HTTP MCP 端点，无需安装任何东西�
 | `update_frontend_deployment` | 更新部署配置 |
 | `delete_frontend_deployment` | 删除部署 |
 | `deploy_frontend_git` | 从 Git 仓库部署（克隆→安装→构建→上线） |
+| `deploy_frontend_upload` | 从本地 zip 包部署（上传→解压→构建→上线） |
 | `redeploy_frontend` | 重新构建已有部署 |
 | `get_frontend_build_logs` | 查看构建日志 |
 | `add_frontend_domain` | 添加自定义域名（自动 HTTPS） |

@@ -1,6 +1,7 @@
 /**
  * Frontend Hosting — Compound tool (13→1)
  */
+import { basename } from "node:path";
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { HttpTransport } from "../transports/http";
@@ -9,11 +10,11 @@ export function registerFrontendTools(server: McpServer, http: HttpTransport): v
     server.tool(
         "frontend",
         `Frontend hosting (static sites & SSR). Supports: static, react, vue, svelte, sveltekit, nextjs, nuxt, astro.
-Actions: list, get, create, update, delete, deploy_git, redeploy, build_logs, add_domain, remove_domain, set_env, list_frameworks, list_records`,
+Actions: list, get, create, update, delete, deploy_git, deploy_upload, redeploy, build_logs, add_domain, remove_domain, set_env, list_frameworks, list_records`,
         {
             action: z.enum([
                 "list", "get", "create", "update", "delete",
-                "deploy_git", "redeploy", "build_logs",
+                "deploy_git", "deploy_upload", "redeploy", "build_logs",
                 "add_domain", "remove_domain", "set_env",
                 "list_frameworks", "list_records",
             ]).describe("Action"),
@@ -31,8 +32,9 @@ Actions: list, get, create, update, delete, deploy_git, redeploy, build_logs, ad
             // deploy_git params
             git_url: z.string().optional().describe("[deploy_git] Git repository URL"),
             branch: z.string().optional().describe("[deploy_git] Branch (default: main)"),
+            zip_path: z.string().optional().describe("[deploy_upload] Local zip file path"),
         },
-        async ({ action, ref, id, name, framework, domain, build_command, output_dir, install_command, node_version, env_vars, git_url, branch }) => {
+        async ({ action, ref, id, name, framework, domain, build_command, output_dir, install_command, node_version, env_vars, git_url, branch, zip_path }) => {
             const need = (f: string, v: any) => { if (!v) throw new Error(`'${f}' required for '${action}'`); };
             const ok = (res: any) => res.ok ? JSON.stringify(res.data, null, 2) : `❌ Failed (${res.status}): ${JSON.stringify(res.data)}`;
 
@@ -65,6 +67,26 @@ Actions: list, get, create, update, delete, deploy_git, redeploy, build_logs, ad
                 case "deploy_git":
                     need("ref", ref); need("id", id); need("git_url", git_url);
                     text = ok(await http.post(`/v1/projects/${ref}/frontend/deployments/${id}/deploy/git`, { git_url, branch }));
+                    break;
+                case "deploy_upload":
+                    need("ref", ref); need("id", id); need("zip_path", zip_path);
+                    const file = Bun.file(zip_path!);
+                    if (!(await file.exists())) {
+                        throw new Error(`Zip file not found: ${zip_path}`);
+                    }
+                    const form = new FormData();
+                    form.append(
+                        "file",
+                        new File([await file.arrayBuffer()], basename(zip_path!), {
+                            type: "application/zip",
+                        }),
+                    );
+                    text = ok(
+                        await http.postMultipart(
+                            `/v1/projects/${ref}/frontend/deployments/${id}/deploy/upload`,
+                            form,
+                        ),
+                    );
                     break;
                 case "redeploy":
                     need("ref", ref); need("id", id);
