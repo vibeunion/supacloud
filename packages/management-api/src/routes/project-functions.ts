@@ -55,6 +55,7 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         entrypoint_path?: string;
         import_map_path?: string;
         verify_jwt?: boolean;
+        background_routes?: string[];
         name?: string;
       } = {};
       if (body.metadata) {
@@ -123,6 +124,15 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         });
       }
 
+      if (Array.isArray(metadata.background_routes)) {
+        await edgeFunctionService.updateConfig(params.ref, slug, {
+          background_routes: metadata.background_routes.filter(
+            (route): route is string =>
+              typeof route === "string" && route.trim().length > 0,
+          ),
+        });
+      }
+
       const funcConfig = await edgeFunctionService.getConfig(params.ref, slug);
       const version = Number.parseInt(funcConfig.version || "1", 10) || 1;
       const now = new Date().toISOString();
@@ -133,6 +143,7 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         version,
         status: "ACTIVE",
         verify_jwt: funcConfig.verify_jwt,
+        background_routes: funcConfig.background_routes || [],
         entrypoint_path: entrypoint,
         import_map: !!metadata.import_map_path,
         import_map_path: metadata.import_map_path ?? null,
@@ -166,6 +177,12 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         ((query as Record<string, string>).verify_jwt === "false"
           ? false
           : true);
+      const backgroundRoutes = Array.isArray(body?.background_routes)
+        ? body.background_routes.filter(
+            (route): route is string =>
+              typeof route === "string" && route.trim().length > 0,
+          )
+        : undefined;
 
       if (!slug) {
         return status(400, { message: "slug is required", code: "400" });
@@ -190,6 +207,7 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         await import("../services/edge-function.service");
       await edgeFunctionService.updateConfig(params.ref, slug, {
         verify_jwt: verifyJwt,
+        ...(backgroundRoutes ? { background_routes: backgroundRoutes } : {}),
       });
       const funcConfig = await edgeFunctionService.getConfig(params.ref, slug);
       const version = Number.parseInt(funcConfig.version || "1", 10) || 1;
@@ -201,6 +219,7 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         name: name || slug,
         version,
         verify_jwt: verifyJwt,
+        background_routes: funcConfig.background_routes || [],
         status: "ACTIVE",
         created_at: now,
         updated_at: now,
@@ -219,6 +238,7 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
           verify_jwt: t.Optional(t.String()),
           entrypoint_path: t.Optional(t.String()),
           import_map_path: t.Optional(t.String()),
+          background_routes: t.Optional(t.Array(t.String())),
         },
         { additionalProperties: true },
       ),
@@ -229,6 +249,7 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
           body: t.Optional(t.String()),
           code: t.Optional(t.String()),
           verify_jwt: t.Optional(t.Boolean()),
+          background_routes: t.Optional(t.Array(t.String())),
         }),
       ),
     },
@@ -263,6 +284,17 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
           });
         }
 
+        if (success && Array.isArray((fn as { background_routes?: unknown[] }).background_routes)) {
+          const { edgeFunctionService } =
+            await import("../services/edge-function.service");
+          await edgeFunctionService.updateConfig(params.ref, fn.slug, {
+            background_routes: ((fn as { background_routes?: unknown[] }).background_routes || []).filter(
+              (route): route is string =>
+                typeof route === "string" && route.trim().length > 0,
+            ),
+          });
+        }
+
         const now = new Date().toISOString();
         results.push({
           slug: fn.slug,
@@ -282,6 +314,7 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
           body: t.Optional(t.String()),
           code: t.Optional(t.String()),
           verify_jwt: t.Optional(t.Boolean()),
+          background_routes: t.Optional(t.Array(t.String())),
         }),
       ),
     },
@@ -312,6 +345,7 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         version,
         status: "ACTIVE",
         verify_jwt: funcConfig.verify_jwt,
+        background_routes: funcConfig.background_routes || [],
         entrypoint_path: `${params.slug}/index.ts`,
         import_map: false,
         import_map_path: null,
@@ -432,6 +466,15 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         });
       }
 
+      if (Array.isArray(body.background_routes)) {
+        await edgeFunctionService.updateConfig(params.ref, params.slug, {
+          background_routes: body.background_routes.filter(
+            (route): route is string =>
+              typeof route === "string" && route.trim().length > 0,
+          ),
+        });
+      }
+
       // Return updated function info
       const funcConfig = await edgeFunctionService.getConfig(
         params.ref,
@@ -446,6 +489,7 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         version,
         status: "ACTIVE",
         verify_jwt: funcConfig.verify_jwt,
+        background_routes: funcConfig.background_routes || [],
         created_at: now,
         updated_at: now,
       };
@@ -457,6 +501,7 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         body: t.Optional(t.String()),
         code: t.Optional(t.String()),
         verify_jwt: t.Optional(t.Boolean()),
+        background_routes: t.Optional(t.Array(t.String())),
       }),
     },
   )
@@ -570,6 +615,7 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
       params: t.Object({ ref: t.String(), slug: t.String() }),
       body: t.Object({
         verify_jwt: t.Optional(t.Boolean()),
+        background_routes: t.Optional(t.Array(t.String())),
       }),
     },
   )

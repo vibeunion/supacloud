@@ -8,7 +8,7 @@ The platform persists the invocation as a task, executes it in the background po
 
 Your function code still receives a normal `Request`.
 
-The main change is at the caller:
+The main change is at the platform boundary:
 
 ```ts
 const { data, error } = await supabase.functions.invoke("mockup-generator", {
@@ -28,15 +28,17 @@ console.log(data);
 // { task_id: "tsk_...", status: "enqueued" }
 ```
 
-In practice, the recommended tenant integration is:
+In practice, SupaCloud supports two background activation modes:
 
 1. keep using official `supabase.functions.invoke()`
-2. enable SupaCloud background execution through `x-supacloud-*` headers
-3. wrap that call in a small `invokeAsync()` helper inside your app or SDK layer
+2. choose either:
+   - explicit `x-supacloud-*` headers
+   - server-side function config via `background_routes`
+3. use Realtime or task APIs for status updates
 
-That gives you a `functions.invoke(async)` style developer experience without giving up compatibility with the official Supabase JavaScript client.
+For browser-heavy apps, `background_routes` is the preferred production model because it does not depend on custom headers surviving CDN, cache, or frontend bundle drift.
 
-When `x-supacloud-async: true` is present:
+When a request is accepted for background execution, whether by header or by configured route:
 
 - The request returns `202 Accepted`
 - The function runs in the background pool

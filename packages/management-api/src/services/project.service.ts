@@ -106,6 +106,7 @@ export interface FunctionResponse {
   status: string;
   version: number;
   verify_jwt: boolean;
+  background_routes?: string[];
   import_map: boolean;
   entrypoint_path: string;
   created_at: string;
@@ -663,6 +664,7 @@ export class ProjectService {
         status: "ACTIVE",
         version: Number.parseInt(cfg.version || "1", 10) || 1,
         verify_jwt: cfg.verify_jwt,
+        background_routes: cfg.background_routes || [],
         import_map: !!cfg.import_map,
         entrypoint_path: `file:///home/deno/functions/${slug}/index.ts`,
         created_at,
