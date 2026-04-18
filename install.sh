@@ -995,8 +995,13 @@ install_edge_runtime() {
         log_warn "Edge Runtime source not found at $EDGE_RT_SRC"
     fi
 
-    # 4. Register systemd service
-    cat > /etc/systemd/system/supacloud-edge-runtime.service <<SVCEOF
+    # 4. Register systemd service (from infrastructure/systemd/ if available, else inline)
+    local SYSTEMD_SRC="${SCRIPT_DIR}/infrastructure/systemd"
+    if [[ -f "${SYSTEMD_SRC}/supacloud-edge-runtime.service" ]]; then
+        cp "${SYSTEMD_SRC}/supacloud-edge-runtime.service" /etc/systemd/system/supacloud-edge-runtime.service
+        log_info "Using checked-in supacloud-edge-runtime.service"
+    else
+        cat > /etc/systemd/system/supacloud-edge-runtime.service <<SVCEOF
 [Unit]
 Description=SupaCloud Edge Runtime (Bun + Elysia)
 After=supacloud.service
@@ -1005,10 +1010,8 @@ Wants=supacloud.service
 [Service]
 Type=simple
 WorkingDirectory=/opt/supacloud/edge-runtime
-# Kill any orphan bun processes on port 9000 before starting (prevents SO_REUSEPORT ghost processes)
 ExecStartPre=/bin/bash -c 'for pid in \$(lsof -iTCP:9000 -sTCP:LISTEN -t 2>/dev/null); do echo "[EdgeRT] Killing stale pid=\$pid"; kill -9 \$pid 2>/dev/null || true; done; sleep 0.3; true'
 ExecStart=/usr/local/bin/bun run server.ts
-# Ensure cleanup on stop: kill any remaining bun processes on port 9000
 ExecStopPost=/bin/bash -c 'for pid in \$(lsof -iTCP:9000 -sTCP:LISTEN -t 2>/dev/null); do kill -9 \$pid 2>/dev/null || true; done; true'
 Restart=always
 RestartSec=5
@@ -1020,6 +1023,7 @@ LimitNOFILE=65536
 [Install]
 WantedBy=multi-user.target
 SVCEOF
+    fi
     systemctl daemon-reload
     systemctl enable supacloud-edge-runtime 2>/dev/null || true
     
@@ -2046,9 +2050,15 @@ EOF
     $BIN_TARGET --init-db 2>/dev/null || log_warn "Database initialization failed, please execute manually: supacloud --init-db"
     unset DATABASE_URL
     
-    # 7. Register Systemd service (points to global binary and executes start command)
+    # 7. Register Systemd service (from infrastructure/systemd/ if available, else inline)
     log_info "Registering Systemd service unit (supacloud.service)..."
-    cat > /etc/systemd/system/supacloud.service <<EOF
+    local SYSTEMD_SRC="${SCRIPT_DIR}/infrastructure/systemd"
+    if [[ -f "${SYSTEMD_SRC}/supacloud.service" ]]; then
+        sed "s|ExecStart=/usr/local/bin/supacloud|ExecStart=$BIN_TARGET|" \
+            "${SYSTEMD_SRC}/supacloud.service" > /etc/systemd/system/supacloud.service
+        log_info "Using checked-in supacloud.service (with ExecStart patched to $BIN_TARGET)"
+    else
+        cat > /etc/systemd/system/supacloud.service <<EOF
 [Unit]
 Description=SupaCloud Management API Server
 Documentation=https://github.com/supacloud/supacloud
@@ -2070,6 +2080,7 @@ LimitNOFILE=65536
 [Install]
 WantedBy=multi-user.target
 EOF
+    fi
     systemctl daemon-reload
     systemctl enable supacloud
     systemctl start supacloud || log_warn "Service start failed, please check journalctl -u supacloud"

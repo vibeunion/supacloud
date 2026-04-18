@@ -1,0 +1,63 @@
+# SupaCloud Management API Service
+#
+# This is the CANONICAL systemd unit for the management API.
+# The installer (install.sh) deploys this file to /etc/systemd/system/supacloud.service.
+#
+# Two startup modes are supported:
+#   1. Production (default): Uses the compiled global CLI binary ($BIN_TARGET)
+#   2. Development: Uses bun directly (set EXEC_MODE=bun in environment)
+#
+# The installer writes this file with ExecStart pointing to the compiled binary.
+# To switch to dev mode, override ExecStart in an override file:
+#   systemctl edit supacloud
+#   [Service]
+#   ExecStart=/usr/local/bin/bun run src/index.ts
+#   WorkingDirectory=/opt/supacloud/management-api
+
+[Unit]
+Description=SupaCloud Management API Server
+Documentation=https://github.com/supacloud/supacloud
+After=network.target patroni.service
+Wants=patroni.service
+
+[Service]
+Type=simple
+EnvironmentFile=-/etc/supabase/management-api.env
+EnvironmentFile=-/opt/supacloud/config.env
+
+ExecStartPre=/opt/supacloud/scripts/pre_start_recovery.sh
+ExecStart=/usr/local/bin/supacloud
+Restart=on-failure
+RestartSec=10
+StartLimitBurst=5
+StartLimitIntervalSec=60
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=supacloud
+
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=false
+ReadWritePaths=/etc/supabase /opt/supacloud /tmp /var/log/supacloud
+
+SystemCallFilter=@system-service
+SystemCallFilter=~@mount @reboot @swap @privileged @raw-io @keyring
+SystemCallArchitectures=native
+
+MemoryMax=4G
+MemoryHigh=3G
+CPUQuota=400%
+TasksMax=4096
+
+LimitNOFILE=65536
+LimitNPROC=4096
+
+PrivateTmp=false
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target
