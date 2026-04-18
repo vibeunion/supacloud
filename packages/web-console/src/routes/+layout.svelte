@@ -11,7 +11,7 @@
 
   import "../app.css";
   import "$lib/i18n"; // Ensure svelte-i18n is initialized synchronously
-  import { onMount, type Snippet } from "svelte";
+  import { onMount, type Snippet, untrack } from "svelte";
   import { goto } from "$app/navigation";
   import { page } from "$app/stores";
   import { isLoading, t } from 'svelte-i18n';
@@ -98,11 +98,24 @@
   setTheme("system");
   setLocale("zh-CN");
   
-  // Provide base resources synchronously, then update via effect when refFromUrl changes
-  const _syncResources = $derived.by(() => {
-    const freshResources = refFromUrl ? [...defaultResources, ...getTenantResources(refFromUrl)] : defaultResources;
-    setResources(freshResources);
-    return freshResources;
+  let lastResourcesKey = $state("");
+
+  // Keep SVAdmin resources in sync with the current tenant route without mutating
+  // global provider state from inside a derived computation.
+  $effect(() => {
+    const freshResources = refFromUrl
+      ? [...defaultResources, ...getTenantResources(refFromUrl)]
+      : defaultResources;
+    const nextKey = freshResources.map((resource) => resource.identifier ?? resource.name).join("|");
+
+    if (nextKey === lastResourcesKey) {
+      return;
+    }
+
+    lastResourcesKey = nextKey;
+    untrack(() => {
+      setResources(freshResources);
+    });
   });
 
   onMount(async () => {
