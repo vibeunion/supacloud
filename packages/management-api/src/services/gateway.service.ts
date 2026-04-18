@@ -470,7 +470,10 @@ export class GatewayService {
                 headers: ["Content-Profile:graphql_public", "Accept-Profile:graphql_public"]
             });
             await this.ensureServiceAndRoute({ name: `svc-gotrue-${projectRef}`, url: `http://${hostIp}:${gotruePort}`, paths: ["/auth/v1"], hosts, projectRef });
-            await this.ensureServiceAndRoute({ name: `svc-functions-${projectRef}`, url: `http://${hostIp}:${opts?.functionsPort || 9000}`, paths: ["/functions/v1"], hosts, projectRef, readTimeout: 500_000 });
+            // Route public function traffic through management-api first so sdk-proxy can
+            // consume x-supacloud-async and enqueue background tasks before forwarding
+            // synchronous invokes to the edge runtime.
+            await this.ensureServiceAndRoute({ name: `svc-functions-${projectRef}`, url: `http://${hostIp}:${config.port}`, paths: ["/functions/v1"], hosts, projectRef, readTimeout: 500_000 });
             await this.ensureServiceAndRoute({ name: `svc-storage-${projectRef}`, url: `http://${hostIp}:${opts?.storagePort || 9090}`, paths: ["/storage/v1/"], hosts, projectRef });
             await this.ensureServiceAndRoute({
                 name: `svc-realtime-api-${projectRef}`,

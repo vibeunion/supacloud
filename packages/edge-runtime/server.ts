@@ -10,6 +10,7 @@ const POOL_SIZE = Number(process.env.WORKER_POOL_SIZE) || 4;
 const BACKGROUND_POOL_SIZE = Number(process.env.BACKGROUND_WORKER_POOL_SIZE) || Math.max(1, Math.min(POOL_SIZE, 2));
 const FUNCTIONS_DIR = process.env.EDGE_FUNCTIONS_DIR || "./functions";
 const MGMT_API = process.env.MANAGEMENT_API_URL || "http://127.0.0.1:9090";
+const VERSIONED_DIR = ".versions";
 
 if (!process.env.MANAGEMENT_API_URL) {
   console.warn(
@@ -53,7 +54,7 @@ async function dispatchFunction(
   const versionSuffix = requestedVersion ? `_v${requestedVersion}` : "";
   const functionId = `${projectRef}_${functionName}${versionSuffix}`;
   const versionedJsPath = requestedVersion
-    ? path.resolve(FUNCTIONS_DIR, projectRef, `${functionName}.v${requestedVersion}.js`)
+    ? path.resolve(FUNCTIONS_DIR, projectRef, VERSIONED_DIR, functionName, requestedVersion, "index.js")
     : null;
   const jsPath = path.resolve(FUNCTIONS_DIR, projectRef, `${functionName}.js`);
   const tsPath = path.resolve(FUNCTIONS_DIR, projectRef, `${functionName}.ts`);
@@ -345,6 +346,56 @@ const app = new Elysia()
     return { preheated: functionId, success };
   })
 
+  .post("/internal/background/:ref/:functionName/*", async (c) => {
+    if (!verifyInternalBackgroundAuth(c.request)) {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        status: 401,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    const setHeaders = c.set.headers as Record<string, string>;
+    setHeaders["x-sb-execution-id"] = crypto.randomUUID();
+    setHeaders["x-supacloud-background-pool"] = "true";
+    const logs: Array<{
+      timestamp: string;
+      stream: "stdout" | "stderr";
+      level: string;
+      message: string;
+    }> = [];
+
+    const forwardedRequest = buildBackgroundForwardedRequest(c.request);
+    const response = await dispatchFunction(
+      c.params.ref,
+      c.params.functionName,
+      forwardedRequest,
+      setHeaders,
+      {
+        background: true,
+        cancelKey: c.request.headers.get("x-supacloud-task-id") || undefined,
+        onLog: (entry) => {
+          logs.push(entry);
+          if (logs.length > 200) logs.shift();
+        },
+      },
+    );
+    const bodyText = await response.text();
+    return new Response(
+      JSON.stringify({
+        status: response.status,
+        headers: Object.fromEntries(response.headers.entries()),
+        bodyText,
+        logs,
+      }),
+      {
+        status: 200,
+        headers: {
+          "Content-Type": "application/json",
+          "x-supacloud-background-envelope": "true",
+        },
+      },
+    );
+  })
   .post("/internal/background/:ref/:functionName", async (c) => {
     if (!verifyInternalBackgroundAuth(c.request)) {
       return new Response(JSON.stringify({ error: "Unauthorized" }), {

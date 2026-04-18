@@ -29,6 +29,7 @@ const DEFAULT_FUNCTION_CONFIG: EdgeFunctionConfig = {
  */
 
 const FUNCTIONS_ROOT = config.edgeFunctionsDir;
+const VERSIONED_DIR = ".versions";
 
 function getFuncDir(ref: string): string {
   return path.join(FUNCTIONS_ROOT, ref);
@@ -39,7 +40,7 @@ function getFuncPath(ref: string, slug: string): string {
 }
 
 function getVersionedFuncPath(ref: string, slug: string, version: string): string {
-  return path.join(getFuncDir(ref), `${slug}.v${version}.js`);
+  return path.join(getFuncDir(ref), VERSIONED_DIR, slug, version, "index.js");
 }
 
 function getSrcPath(ref: string, slug: string): string {
@@ -47,11 +48,20 @@ function getSrcPath(ref: string, slug: string): string {
 }
 
 function getVersionedSrcPath(ref: string, slug: string, version: string): string {
-  return path.join(getFuncDir(ref), `${slug}.v${version}.src.ts`);
+  return path.join(getFuncDir(ref), VERSIONED_DIR, slug, version, "index.src.ts");
 }
 
 function getConfigPath(ref: string, slug: string): string {
   return path.join(getFuncDir(ref), `${slug}.config.json`);
+}
+
+async function fileExists(filePath: string): Promise<boolean> {
+  try {
+    await fs.access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -152,6 +162,109 @@ async function computeNextFunctionVersion(ref: string, slug: string): Promise<st
   return "1";
 }
 
+async function readVersionedFunctionCode(ref: string, slug: string, version: string): Promise<string | null> {
+  const candidate = getVersionedFuncPath(ref, slug, version);
+  if (!(await fileExists(candidate))) return null;
+  return await Bun.file(candidate).text();
+}
+
+async function readVersionedFunctionSource(ref: string, slug: string, version: string): Promise<string | null> {
+  const candidate = getVersionedSrcPath(ref, slug, version);
+  if (!(await fileExists(candidate))) return null;
+  return await Bun.file(candidate).text();
+}
+
+export async function getVersionedArtifactPath(
+  ref: string,
+  slug: string,
+  version: string,
+): Promise<string | null> {
+  const modern = getVersionedFuncPath(ref, slug, version);
+  if (await fileExists(modern)) return modern;
+  return null;
+}
+
+async function listVersionDirectories(ref: string, slug: string): Promise<string[]> {
+  const dir = path.join(getFuncDir(ref), VERSIONED_DIR, slug);
+  try {
+    const entries = await fs.readdir(dir, { withFileTypes: true });
+    return entries
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+      .sort((a, b) => Number.parseInt(a, 10) - Number.parseInt(b, 10));
+  } catch {
+    return [];
+  }
+}
+
+function parseLegacyVersionedFile(entry: string): { slug: string; version: string; kind: "js" | "src" } | null {
+  const jsMatch = entry.match(/^(.*)\.v(\d+)\.js$/);
+  if (jsMatch) {
+    return { slug: jsMatch[1], version: jsMatch[2], kind: "js" };
+  }
+
+  const srcMatch = entry.match(/^(.*)\.v(\d+)\.src\.ts$/);
+  if (srcMatch) {
+    return { slug: srcMatch[1], version: srcMatch[2], kind: "src" };
+  }
+
+  return null;
+}
+
+function parseLegacyVersionedSourceDir(entry: string): { slug: string; version: string } | null {
+  const match = entry.match(/^\.src-(.*)-v(\d+)$/);
+  if (!match) return null;
+  return { slug: match[1], version: match[2] };
+}
+
+export async function migrateLegacyVersionArtifacts(): Promise<{ moved: number }> {
+  let moved = 0;
+  const projectDirs = await fs.readdir(FUNCTIONS_ROOT, { withFileTypes: true }).catch(() => []);
+
+  for (const projectDir of projectDirs) {
+    if (!projectDir.isDirectory() || projectDir.name === ".cache") continue;
+
+    const ref = projectDir.name;
+    const dir = getFuncDir(ref);
+    const entries = await fs.readdir(dir).catch(() => []);
+
+    for (const entry of entries) {
+      const parsed = parseLegacyVersionedFile(entry);
+      if (parsed) {
+        const sourcePath = path.join(dir, entry);
+        const targetPath = parsed.kind === "js"
+          ? getVersionedFuncPath(ref, parsed.slug, parsed.version)
+          : getVersionedSrcPath(ref, parsed.slug, parsed.version);
+
+        await fs.mkdir(path.dirname(targetPath), { recursive: true });
+        await fs.rm(targetPath, { force: true }).catch(() => {});
+        await fs.rename(sourcePath, targetPath);
+        moved += 1;
+        continue;
+      }
+
+      const parsedSourceDir = parseLegacyVersionedSourceDir(entry);
+      if (!parsedSourceDir) continue;
+
+      const sourceDir = path.join(dir, entry);
+      const targetDir = path.join(
+        dir,
+        VERSIONED_DIR,
+        parsedSourceDir.slug,
+        parsedSourceDir.version,
+        "src",
+      );
+
+      await fs.mkdir(path.dirname(targetDir), { recursive: true });
+      await fs.rm(targetDir, { recursive: true, force: true }).catch(() => {});
+      await fs.rename(sourceDir, targetDir);
+      moved += 1;
+    }
+  }
+
+  return { moved };
+}
+
 export const edgeFunctionService = {
   /** Read function config (verify_jwt, etc.) */
   async getConfig(ref: string, slug: string): Promise<EdgeFunctionConfig> {
@@ -203,6 +316,9 @@ export const edgeFunctionService = {
       const dir = getFuncDir(ref);
       await fs.mkdir(dir, { recursive: true });
       const version = await computeNextFunctionVersion(ref, slug);
+      await fs.mkdir(path.dirname(getVersionedFuncPath(ref, slug, version)), {
+        recursive: true,
+      });
 
       // 1. Preserve source for debugging
       const srcPath = getSrcPath(ref, slug);
@@ -221,6 +337,7 @@ export const edgeFunctionService = {
         await Bun.write(getFuncPath(ref, slug), code);
         await Bun.write(getVersionedFuncPath(ref, slug, version), code);
       } else {
+        await Bun.write(getFuncPath(ref, slug), bundled);
         await Bun.write(getVersionedFuncPath(ref, slug, version), bundled);
       }
 
@@ -341,13 +458,17 @@ export const edgeFunctionService = {
       const srcDir = path.join(dir, `.src-${slug}`);
       await fs.rm(srcDir, { recursive: true, force: true }).catch(() => {});
       await fs.rename(stageDir, srcDir);
-      await fs.rm(path.join(dir, `.src-${slug}-v${version}`), {
+      const versionedSrcDir = path.join(dir, VERSIONED_DIR, slug, version, "src");
+      await fs.rm(versionedSrcDir, {
         recursive: true,
         force: true,
       }).catch(() => {});
-      await fs.cp(srcDir, path.join(dir, `.src-${slug}-v${version}`), {
+      await fs.mkdir(path.dirname(versionedSrcDir), { recursive: true });
+      await fs.cp(srcDir, versionedSrcDir, {
         recursive: true,
       });
+      await Bun.write(getFuncPath(ref, slug), bundled);
+      await Bun.write(getVersionedFuncPath(ref, slug, version), bundled);
 
       // 4. Invalidate runtime caches
       await invalidateCache(ref, slug);
@@ -374,6 +495,11 @@ export const edgeFunctionService = {
   /** Read function bundled code (runtime version) */
   async read(ref: string, slug: string): Promise<string | null> {
     try {
+      const cfg = await this.getConfig(ref, slug);
+      if (cfg.version) {
+        const versioned = await readVersionedFunctionCode(ref, slug, cfg.version);
+        if (versioned !== null) return versioned;
+      }
       return await Bun.file(getFuncPath(ref, slug)).text();
     } catch (err: unknown) {
       if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
@@ -389,6 +515,11 @@ export const edgeFunctionService = {
   /** Read function original source (for debugging) */
   async readSource(ref: string, slug: string): Promise<string | null> {
     try {
+      const cfg = await this.getConfig(ref, slug);
+      if (cfg.version) {
+        const versioned = await readVersionedFunctionSource(ref, slug, cfg.version);
+        if (versioned !== null) return versioned;
+      }
       return await Bun.file(getSrcPath(ref, slug)).text();
     } catch {
       return null;
@@ -402,7 +533,21 @@ export const edgeFunctionService = {
       const { Glob } = await import("bun");
       const glob = new Glob("*.js");
       const entries = Array.from(glob.scanSync({ cwd: dir, onlyFiles: true }));
-      return entries.map((f) => f.replace(/\.js$/, ""));
+      const slugs = new Set<string>();
+
+      for (const entry of entries) {
+        const parsedLegacy = parseLegacyVersionedFile(entry);
+        if (parsedLegacy) continue;
+        slugs.add(entry.replace(/\.js$/, ""));
+      }
+
+      const versionsRoot = path.join(dir, VERSIONED_DIR);
+      const versionedEntries = await fs.readdir(versionsRoot, { withFileTypes: true }).catch(() => []);
+      for (const entry of versionedEntries) {
+        if (entry.isDirectory()) slugs.add(entry.name);
+      }
+
+      return Array.from(slugs).sort();
     } catch (err: unknown) {
       if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
         logger.warn(`[EdgeFunction] Failed to list functions for ${ref}`, {
@@ -420,18 +565,22 @@ export const edgeFunctionService = {
       await fs.unlink(getFuncPath(ref, slug)).catch(() => {});
       const dir = getFuncDir(ref);
       const entries = await fs.readdir(dir).catch(() => []);
+      const versions = await listVersionDirectories(ref, slug);
+      await Promise.all(
+        versions.map((version) =>
+          fs.rm(path.join(dir, VERSIONED_DIR, slug, version), {
+            recursive: true,
+            force: true,
+          }).catch(() => {}),
+        ),
+      );
       await Promise.all(
         entries
-          .filter((entry) => entry.startsWith(`${slug}.v`) && entry.endsWith(".js"))
+          .filter((entry) => entry.startsWith(`${slug}.v`) && (entry.endsWith(".js") || entry.endsWith(".src.ts")))
           .map((entry) => fs.unlink(path.join(dir, entry)).catch(() => {})),
       );
       // Remove source file
       await fs.unlink(getSrcPath(ref, slug)).catch(() => {});
-      await Promise.all(
-        entries
-          .filter((entry) => entry.startsWith(`${slug}.v`) && entry.endsWith(".src.ts"))
-          .map((entry) => fs.unlink(path.join(dir, entry)).catch(() => {})),
-      );
       // Remove source directory (bundle deploys)
       await fs
         .rm(path.join(getFuncDir(ref), `.src-${slug}`), {
@@ -449,6 +598,10 @@ export const edgeFunctionService = {
             }).catch(() => {}),
           ),
       );
+      await fs.rm(path.join(getFuncDir(ref), VERSIONED_DIR, slug), {
+        recursive: true,
+        force: true,
+      }).catch(() => {});
 
       await invalidateCache(ref, slug);
 

@@ -9,6 +9,7 @@ import { taskRepository } from "../repositories/task.repository";
 import type { Project, ProjectStatus } from "../db";
 import { resolveBucketName, resolveDbName, resolveRoleName, generateDbName } from "../db";
 import { edgeFunctionService } from "./edge-function.service";
+import { getVersionedArtifactPath } from "./edge-function.service";
 import { logger } from "../utils/logger";
 import { config } from "../config";
 import { $ } from "bun";
@@ -640,8 +641,11 @@ export class ProjectService {
       let updated_at = created_at;
       try {
         const { stat } = await import("fs/promises");
+        const activePath = cfg.version
+          ? await getVersionedArtifactPath(ref, slug, cfg.version)
+          : null;
         const fileStat = await stat(
-          `${config.edgeFunctionsDir}/${ref}/${slug}.js`,
+          activePath || `${config.edgeFunctionsDir}/${ref}/${slug}.js`,
         );
         updated_at = fileStat.mtime.toISOString();
         created_at = fileStat.birthtime.toISOString();
