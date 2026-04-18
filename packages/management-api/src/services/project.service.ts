@@ -2,7 +2,6 @@ import { projectRepository } from "../repositories/project.repository";
 import { jwtService } from "./jwt.service";
 import { databaseService } from "./database.service";
 import { storageService } from "./storage.service";
-import { routerService } from "./router.service";
 import { shellService } from "./shell.service";
 import { gatewayService } from "./gateway.service";
 import { taskRepository } from "../repositories/task.repository";
@@ -15,6 +14,11 @@ import { config } from "../config";
 import { $ } from "bun";
 import { projectLogService } from "./project-logs.service";
 import { projectOpsService } from "./project-ops.service";
+import {
+  normalizeProjectRoutingConfig,
+  resolveProjectApiUrl,
+  resolveProjectStudioUrl,
+} from "../utils/project-routing";
 
 export interface CreateProjectRequest {
   name: string;
@@ -708,18 +712,11 @@ export class ProjectService {
 
   // Convert to response format
   private async toResponse(project: Project): Promise<ProjectResponse> {
-    const customDomain = project.config?.custom_domain as string | undefined;
-    const explicitApiDomain = project.config?.api_domain as string | undefined;
-    const explicitStudioDomain = project.config?.studio_domain as
-      | string
-      | undefined;
-
-    const apiUrl = explicitApiDomain
-      ? `https://${explicitApiDomain}`
-      : routerService.getProjectApiUrl(project.ref, customDomain);
-    const studioUrl = explicitStudioDomain
-      ? `https://${explicitStudioDomain}`
-      : routerService.getProjectStudioUrl(project.ref, customDomain);
+    const routingConfig = normalizeProjectRoutingConfig(
+      (project.config as Record<string, unknown> | null | undefined) || undefined,
+    );
+    const apiUrl = resolveProjectApiUrl(project.ref, routingConfig);
+    const studioUrl = resolveProjectStudioUrl(project.ref, routingConfig);
 
     const dbName = await resolveDbName(project.ref);
 

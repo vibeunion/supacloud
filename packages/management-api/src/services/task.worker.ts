@@ -12,6 +12,12 @@ import type { ProjectTask } from "../db";
 import { resolveDbName, TaskStatus, TaskType } from "../db";
 import { broadcastTaskUpdate } from "../routes/ws";
 import { realtimeService } from "./realtime.service";
+import {
+    normalizeProjectRoutingConfig,
+    resolveProjectApiHost,
+    resolveProjectApiUrl,
+    resolveProjectStudioHost,
+} from "../utils/project-routing";
 
 export class TaskWorker {
     private isRunning = false;
@@ -211,24 +217,19 @@ export class TaskWorker {
                         logger.info(`[TaskWorker] Running in CI mode, skipping actual router provision for ${project_ref}`);
                         return true;
                     }
-                    // Get domain from project config or task payload
-                    const domain = project?.config?.custom_domain as string | undefined || payload?.domain as string | undefined;
-                    const explicitApiDomain = project?.config?.api_domain as string | undefined;
-                    const explicitStudioDomain = project?.config?.studio_domain as string | undefined;
-
-                    let domains: { apiDomain: string; studioDomain: string } | undefined;
-                    if (explicitApiDomain || explicitStudioDomain) {
-                        // Explicit domains take precedence
-                        domains = {
-                            apiDomain: explicitApiDomain || `api.${domain || config.baseDomain}`,
-                            studioDomain: explicitStudioDomain || `studio.${domain || config.baseDomain}`,
-                        };
-                    } else if (domain) {
-                        domains = {
-                            apiDomain: `api.${domain}`,
-                            studioDomain: `studio.${domain}`,
-                        };
+                    const routingConfig = normalizeProjectRoutingConfig(
+                        (project?.config as Record<string, unknown> | null | undefined) || undefined,
+                    ) || {};
+                    if (!routingConfig.custom_domain && typeof payload?.domain === "string" && payload.domain.trim()) {
+                        routingConfig.custom_domain = payload.domain.trim();
                     }
+
+                    const domains = routingConfig.custom_domain || routingConfig.api_domain || routingConfig.studio_domain
+                        ? {
+                            apiDomain: resolveProjectApiHost(project_ref, routingConfig),
+                            studioDomain: resolveProjectStudioHost(project_ref, routingConfig),
+                        }
+                        : undefined;
 
                     const res = await routerService.addRoute(project_ref, domains);
                     // API driven gateway no longer requires reload
@@ -264,12 +265,10 @@ export class TaskWorker {
                     }
                     // Auto-inject standard environment variables into project_secrets
                     // so Edge Functions can verify JWTs, access Supabase APIs, etc.
-                    const cfg = (project.config as Record<string, unknown>) || {};
-                    const explicitApiDomain = typeof cfg.api_domain === "string" ? cfg.api_domain : undefined;
-                    const customDomain = typeof cfg.custom_domain === "string" ? cfg.custom_domain : undefined;
-                    const supabaseUrl = explicitApiDomain
-                      ? `https://${explicitApiDomain}`
-                      : routerService.getProjectApiUrl(project_ref, customDomain);
+                    const routingConfig = normalizeProjectRoutingConfig(
+                        (project.config as Record<string, unknown> | null | undefined) || undefined,
+                    );
+                    const supabaseUrl = resolveProjectApiUrl(project_ref, routingConfig);
                     const standardSecrets = [
                         { name: "SUPABASE_URL", value: supabaseUrl },
                         { name: "SUPABASE_ANON_KEY", value: project.anon_key },

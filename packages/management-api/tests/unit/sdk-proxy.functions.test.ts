@@ -1,6 +1,7 @@
-import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { Elysia } from "elysia";
 import { sdkProxyRoutes } from "../../src/routes/sdk-proxy";
+import * as dbModule from "../../src/db";
 
 const app = new Elysia().use(sdkProxyRoutes);
 
@@ -51,5 +52,64 @@ describe("sdkProxyRoutes functions proxy", () => {
     expect(calls).toHaveLength(1);
     expect(calls[0]?.url).toBe("http://127.0.0.1:9000/hello");
     expect(calls[0]?.init?.duplex).toBe("half");
+  });
+
+  test("auth proxy resolves tenant ports from projects.config", async () => {
+    const sqlSpy = spyOn(dbModule, "sql");
+    sqlSpy.mockImplementation(async (...args: unknown[]) => {
+      const text = String(args[0] ?? "");
+      if (text.includes("FROM projects")) {
+        return [{
+          config: {
+            postgrest_port: 7361,
+            gotrue_port: 8361,
+          },
+        }];
+      }
+      return [];
+    });
+
+    const response = await request("/auth/v1/health", {
+      method: "GET",
+      headers: {
+        "x-project-ref": "proj_1",
+      },
+    });
+
+    expect(response.status).toBe(200);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.url).toBe("http://127.0.0.1:8361/health");
+    sqlSpy.mockRestore();
+  });
+
+  test("auth proxy resolves project ref from forwarded custom API host", async () => {
+    const sqlSpy = spyOn(dbModule, "sql");
+    sqlSpy.mockImplementation(async (...args: unknown[]) => {
+      const text = String(args[0] ?? "");
+      if (text.includes("SELECT ref")) {
+        return [{ ref: "proj_1" }];
+      }
+      if (text.includes("SELECT config")) {
+        return [{
+          config: {
+            postgrest_port: 7361,
+            gotrue_port: 8361,
+          },
+        }];
+      }
+      return [];
+    });
+
+    const response = await request("/auth/v1/health", {
+      method: "GET",
+      headers: {
+        "x-forwarded-host": "api.aorist.net",
+      },
+    });
+
+    expect(response.status).toBe(200);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.url).toBe("http://127.0.0.1:8361/health");
+    sqlSpy.mockRestore();
   });
 });
