@@ -1,16 +1,33 @@
+# SupaCloud Realtime - Global Single Instance
+#
+# The official supabase/realtime container supports MULTI-TENANCY natively
+# through its Tenant Management API. A single container instance serves ALL
+# projects — each project is registered as a "tenant" via the Admin API
+# (see management-api/src/services/realtime.service.ts).
+#
+# Do NOT create multiple instances of this service on the same host.
+# Each project does NOT get its own container; instead, it gets its own
+# tenant entry inside this single container.
+#
+# If using Bun-native Realtime (realtime-bun.service.ts), this file is not needed.
+
 [Unit]
-Description=SupaCloud Realtime Service (Supabase/Phoenix)
-After=network.target
+Description=SupaCloud Realtime Service (Supabase/Phoenix, Multi-Tenant)
+After=network.target supacloud-management-api.service
+Wants=supacloud-management-api.service
 
 [Service]
 Type=simple
 TimeoutStartSec=0
-Restart=always
+Restart=on-failure
 RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=supacloud-realtime
 
-EnvironmentFile=/etc/supabase/management-api.env
+EnvironmentFile=-/etc/supabase/management-api.env
+EnvironmentFile=-/opt/supacloud/config.env
 
-# Run using podman (or docker alias)
 ExecStartPre=-/usr/bin/podman rm -f supacloud-realtime
 ExecStart=/usr/bin/podman run --name supacloud-realtime --network host \
   -e PORT=4000 \
@@ -30,6 +47,18 @@ ExecStart=/usr/bin/podman run --name supacloud-realtime --network host \
   public.ecr.aws/supabase/realtime:v2.33.3
 
 ExecStop=/usr/bin/podman stop -t 10 supacloud-realtime
+
+NoNewPrivileges=true
+ProtectSystem=full
+ReadWritePaths=/etc/supabase /opt/supacloud /tmp /var/log/supacloud
+
+SystemCallFilter=@system-service
+SystemCallFilter=~@mount @reboot @swap @privileged @raw-io @keyring
+
+MemoryMax=4G
+MemoryHigh=3G
+CPUQuota=400%
+TasksMax=4096
 
 [Install]
 WantedBy=multi-user.target
