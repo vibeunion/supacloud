@@ -20,7 +20,7 @@ Kong Gateway (API-driven, native OpenResty):
   Global: ACME SSL, Gzip, Security Headers
   Per-route: CORS, Rate Limiting, JWT
   /api/*        → :9090 (Management API)
-  /functions/*  → :9000 (Edge Runtime, direct)
+  /functions/*  → :9090 (Management API sdk-proxy)
 ```
 
 ## Runtime Ownership
@@ -97,7 +97,12 @@ const { data, error } = await supabase.functions.invoke('my-function', {
 });
 ```
 
-Background invocation uses the same API surface with async headers:
+Background invocation uses the same API surface. SupaCloud supports two activation modes:
+
+- explicit request headers
+- server-side per-function `background_routes`
+
+Explicit headers remain available:
 
 ```typescript
 const { data, error } = await supabase.functions.invoke("my-function", {
@@ -112,6 +117,22 @@ const { data, error } = await supabase.functions.invoke("my-function", {
 ```
 
 See [Background Functions](./background-functions.md) for the full execution model, cancellation semantics, and a cancellation-aware example handler.
+
+### Recommended Background Strategy
+
+For production heavy routes, prefer function config over browser-only headers:
+
+```json
+{
+  "verify_jwt": false,
+  "background_routes": [
+    "/generate/crop",
+    "/generate/matting"
+  ]
+}
+```
+
+With `background_routes`, requests that hit those subpaths will be enqueued even if the browser does not forward custom `x-supacloud-*` headers. This is the recommended model for `supabase-js` clients running behind CDNs, browser caches, or mixed frontend bundle versions.
 
 ## Compatibility Shim
 
