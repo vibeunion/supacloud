@@ -11,9 +11,18 @@ type FetchCall = {
   init?: RequestInit & { duplex?: "half" };
 };
 
-function request(path: string, init?: RequestInit) {
+function request(path: string, init?: RequestInit & { duplex?: "half" }) {
   const app = new Elysia().use(sdkProxyRoutes);
-  return app.handle(new Request(`http://localhost${path}`, init));
+  const method = init?.method?.toUpperCase() ?? "GET";
+  const hasBody =
+    init?.body !== undefined && init?.body !== null && !["GET", "HEAD"].includes(method);
+
+  return app.handle(
+    new Request(`http://localhost${path}`, {
+      ...init,
+      ...(hasBody ? { duplex: "half" as const } : {}),
+    }),
+  );
 }
 
 let serialQueue = Promise.resolve();
