@@ -88,7 +88,6 @@ set_cors() {
     local origins="${1:-*}"
     local route_name="route-${PROJECT_REF}"
     
-    # Get existing cors plugin ID
     local plugin_id
     plugin_id=$(curl -s "${KONG_ADMIN_URL}/routes/${route_name}/plugins?name=cors" | grep -oP '"id":"\K[^"]+' | head -1 || true)
 
@@ -96,17 +95,21 @@ set_cors() {
         curl -s -X PATCH "${KONG_ADMIN_URL}/plugins/${plugin_id}" \
             -d "config.origins=${origins}" \
             -d "config.methods=GET,POST,PUT,PATCH,DELETE,OPTIONS" \
-            -d "config.headers=Accept,Accept-Version,Content-Length,Content-MD5,Content-Type,Date,X-Api-Version,X-Response-Time,X-PINGOTHER,X-CSRF-Token,Authorization" \
-            -d "config.exposed_headers=Content-Length,X-JSON" \
-            -d "config.credentials=true" \
-            -d "config.max_age=3600" > /dev/null
+            -d "config.headers=Accept,Accept-Language,Authorization,Content-Language,Content-Type,apikey,x-client-info,x-project-ref" \
+            -d "config.exposed_headers=Content-Length,Content-Range,X-Content-Range" \
+            -d "config.credentials=false" \
+            -d "config.max_age=86400" \
+            -d "config.preflight_continue=false" > /dev/null
     else
         curl -s -X POST "${KONG_ADMIN_URL}/routes/${route_name}/plugins" \
             -d "name=cors" \
             -d "config.origins=${origins}" \
             -d "config.methods=GET,POST,PUT,PATCH,DELETE,OPTIONS" \
-            -d "config.credentials=true" \
-            -d "config.max_age=3600" > /dev/null
+            -d "config.headers=Accept,Accept-Language,Authorization,Content-Language,Content-Type,apikey,x-client-info,x-project-ref" \
+            -d "config.exposed_headers=Content-Length,Content-Range,X-Content-Range" \
+            -d "config.credentials=false" \
+            -d "config.max_age=86400" \
+            -d "config.preflight_continue=false" > /dev/null
     fi
 }
 
@@ -215,16 +218,44 @@ setup_upstream() {
     write_timeout: 60000
     routes:
       - name: route-pgrst-${PROJECT_REF}
-        # Complete fix: strip_path must be true, otherwise Kong will pass path prefix to downstream causing 404
         strip_path: true
         preserve_host: true
         paths:
           - /rest/v1
           - /graphql/v1
         headers:
-
           x-project-ref:
             - ${PROJECT_REF}
+    plugins:
+      - name: cors
+        config:
+          origins:
+            - "~^https?://.*\\.dbbaby\\.top$"
+            - "~^https?://localhost(:[0-9]+)?$"
+            - "~^https?://127\\.0\\.0\\.1(:[0-9]+)?$"
+          methods:
+            - GET
+            - POST
+            - PUT
+            - PATCH
+            - DELETE
+            - OPTIONS
+          headers:
+            - Accept
+            - Accept-Language
+            - Authorization
+            - Content-Language
+            - Content-Type
+            - apikey
+            - x-client-info
+            - x-project-ref
+          exposed_headers:
+            - Content-Length
+            - Content-Range
+            - X-Content-Range
+          credentials: false
+          max_age: 86400
+          preflight_continue: false
   - name: svc-gotrue-${PROJECT_REF}
     url: http://${host_ip}:${gotrue_port}
     connect_timeout: 5000
@@ -237,9 +268,38 @@ setup_upstream() {
         paths:
           - /auth/v1
         headers:
-
           x-project-ref:
             - ${PROJECT_REF}
+    plugins:
+      - name: cors
+        config:
+          origins:
+            - "~^https?://.*\\.dbbaby\\.top$"
+            - "~^https?://localhost(:[0-9]+)?$"
+            - "~^https?://127\\.0\\.0\\.1(:[0-9]+)?$"
+          methods:
+            - GET
+            - POST
+            - PUT
+            - PATCH
+            - DELETE
+            - OPTIONS
+          headers:
+            - Accept
+            - Accept-Language
+            - Authorization
+            - Content-Language
+            - Content-Type
+            - apikey
+            - x-client-info
+            - x-project-ref
+          exposed_headers:
+            - Content-Length
+            - Content-Range
+            - X-Content-Range
+          credentials: false
+          max_age: 86400
+          preflight_continue: false
 EOF
 
     # Optional service: Edge Functions
@@ -258,9 +318,38 @@ EOF
           - /functions/v1
           - /functions/v1/
         headers:
-
           x-project-ref:
             - ${PROJECT_REF}
+    plugins:
+      - name: cors
+        config:
+          origins:
+            - "~^https?://.*\\.dbbaby\\.top$"
+            - "~^https?://localhost(:[0-9]+)?$"
+            - "~^https?://127\\.0\\.0\\.1(:[0-9]+)?$"
+          methods:
+            - GET
+            - POST
+            - PUT
+            - PATCH
+            - DELETE
+            - OPTIONS
+          headers:
+            - Accept
+            - Accept-Language
+            - Authorization
+            - Content-Language
+            - Content-Type
+            - apikey
+            - x-client-info
+            - x-project-ref
+          exposed_headers:
+            - Content-Length
+            - Content-Range
+            - X-Content-Range
+          credentials: false
+          max_age: 86400
+          preflight_continue: false
 EOF
     fi
 
@@ -279,9 +368,38 @@ EOF
         paths:
           - /storage/v1
         headers:
-
           x-project-ref:
             - ${PROJECT_REF}
+    plugins:
+      - name: cors
+        config:
+          origins:
+            - "~^https?://.*\\.dbbaby\\.top$"
+            - "~^https?://localhost(:[0-9]+)?$"
+            - "~^https?://127\\.0\\.0\\.1(:[0-9]+)?$"
+          methods:
+            - GET
+            - POST
+            - PUT
+            - PATCH
+            - DELETE
+            - OPTIONS
+          headers:
+            - Accept
+            - Accept-Language
+            - Authorization
+            - Content-Language
+            - Content-Type
+            - apikey
+            - x-client-info
+            - x-project-ref
+          exposed_headers:
+            - Content-Length
+            - Content-Range
+            - X-Content-Range
+          credentials: false
+          max_age: 86400
+          preflight_continue: false
 EOF
     fi
 
@@ -300,9 +418,38 @@ EOF
         paths:
           - /realtime/v1
         headers:
-
           x-project-ref:
             - ${PROJECT_REF}
+    plugins:
+      - name: cors
+        config:
+          origins:
+            - "~^https?://.*\\.dbbaby\\.top$"
+            - "~^https?://localhost(:[0-9]+)?$"
+            - "~^https?://127\\.0\\.0\\.1(:[0-9]+)?$"
+          methods:
+            - GET
+            - POST
+            - PUT
+            - PATCH
+            - DELETE
+            - OPTIONS
+          headers:
+            - Accept
+            - Accept-Language
+            - Authorization
+            - Content-Language
+            - Content-Type
+            - apikey
+            - x-client-info
+            - x-project-ref
+          exposed_headers:
+            - Content-Length
+            - Content-Range
+            - X-Content-Range
+          credentials: false
+          max_age: 86400
+          preflight_continue: false
 EOF
     fi
 
