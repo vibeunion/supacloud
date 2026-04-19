@@ -3,7 +3,6 @@
  * SQL execution, schema introspection, RLS, migrations, stats
  */
 import { z } from "zod";
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { HttpTransport } from "../transports/http";
 
 export interface DatabaseToolsConfig {
@@ -11,8 +10,23 @@ export interface DatabaseToolsConfig {
     projectRef?: string;
 }
 
+function normalizeSqlResponse(result: Awaited<ReturnType<HttpTransport["post"]>>) {
+    if (!result.ok) return result;
+    const data = result.data as { rows?: unknown[]; result?: unknown[] };
+    if (Array.isArray(data?.result) && !Array.isArray(data.rows)) {
+        return {
+            ...result,
+            data: {
+                rows: data.result,
+                rowCount: data.result.length,
+            },
+        };
+    }
+    return result;
+}
+
 export function registerDatabaseTools(
-    server: McpServer,
+    server: { tool: (...args: any[]) => void },
     http: HttpTransport,
     config: DatabaseToolsConfig = {}
 ): void {
@@ -51,7 +65,7 @@ Actions: ${allActions.join(", ")}${readOnly ? " (read-only mode)" : ""}`,
             // create_table_rls
             columns: z.string().optional().describe("[create_table_rls] Column definitions"),
         },
-        async (args) => {
+        async (args: any) => {
             const { action } = args;
             const ref = projectRef || args.ref;
             const schema = args.schema || "public";
@@ -66,7 +80,7 @@ Actions: ${allActions.join(", ")}${readOnly ? " (read-only mode)" : ""}`,
                 }
             }
 
-            const execSql = async (sql: string) => http.post("/mcp/sql", { ref, sql });
+            const execSql = async (sql: string) => normalizeSqlResponse(await http.post(`/v1/projects/${ref}/database/sql`, { sql }));
 
             let text: string;
             switch (action) {
@@ -83,7 +97,7 @@ Actions: ${allActions.join(", ")}${readOnly ? " (read-only mode)" : ""}`,
                     break;
                 }
                 case "list_tables": {
-                    const sql = `SELECT schemaname as schema, tablename as table, tableowner as owner FROM pg_tables WHERE schemaname = ANY(ARRAY[${schemas.map(s => `'${s}'`).join(",")}]) ORDER BY schemaname, tablename;`;
+                    const sql = `SELECT schemaname as schema, tablename as table, tableowner as owner FROM pg_tables WHERE schemaname = ANY(ARRAY[${schemas.map((s: string) => `'${s}'`).join(",")}]) ORDER BY schemaname, tablename;`;
                     const r = await execSql(sql);
                     text = r.ok ? formatTableList(r.data, schemas) : `❌ Failed (${r.status})`;
                     break;
@@ -171,14 +185,14 @@ Actions: ${allActions.join(", ")}${readOnly ? " (read-only mode)" : ""}`,
                     break;
                 }
                 case "generate_types": {
-                    const sql = `SELECT t.table_schema, t.table_name, c.column_name, c.data_type, c.is_nullable, c.column_default FROM information_schema.tables t JOIN information_schema.columns c ON t.table_name = c.table_name AND t.table_schema = c.table_schema WHERE t.table_schema = ANY(ARRAY[${schemas.map(s => `'${s}'`).join(",")}]) AND t.table_type = 'BASE TABLE' ORDER BY t.table_schema, t.table_name, c.ordinal_position;`;
+                    const sql = `SELECT t.table_schema, t.table_name, c.column_name, c.data_type, c.is_nullable, c.column_default FROM information_schema.tables t JOIN information_schema.columns c ON t.table_name = c.table_name AND t.table_schema = c.table_schema WHERE t.table_schema = ANY(ARRAY[${schemas.map((s: string) => `'${s}'`).join(",")}]) AND t.table_type = 'BASE TABLE' ORDER BY t.table_schema, t.table_name, c.ordinal_position;`;
                     const r = await execSql(sql);
                     text = r.ok ? generateTypeScriptTypes(r.data, schemas) : `❌ Failed (${r.status})`;
                     break;
                 }
                 case "apply_migration": {
                     if (!args.name || !args.sql) throw new Error("'name' and 'sql' required");
-                    const r = await http.post("/mcp/migrations", { ref, name: args.name, sql: args.sql });
+                    const r = await http.post(`/v1/projects/${ref}/database/migrations`, { name: args.name, sql: args.sql });
                     text = r.ok ? `✅ Migration '${args.name}' applied` : `❌ Failed (${r.status}): ${JSON.stringify(r.data)}`;
                     break;
                 }

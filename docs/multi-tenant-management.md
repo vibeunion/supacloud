@@ -340,63 +340,15 @@ supacloud_project_storage_bytes{project_ref="abc123"}
 | 2 | Shell script integration | Complete project creation flow |
 | 3 | Kong dynamic routing | Multi-tenant domain support |
 | 4 | Monitoring integration | Grafana multi-project dashboard |
-| 5 | MCP Server | AI Agent native infrastructure control |
+| 5 | CLI segmentation | Separate operator and project-user workflows |
 
 ---
 
-## 10. MCP Server (AI Agent Integration)
+## 10. CLI Segmentation
 
-### 10.1 Architecture Design
+SupaCloud now splits human operators into two explicit command-line surfaces:
 
-MCP Server runs as an **npm package** locally on user's machine (Cursor / Claude Desktop), connecting to target server via two channels:
+- `@supacloud/cli` / `supacloud` for project-scoped workflows
+- `@supacloud/admin` / `supacloud-admin` for installation, SSH, and platform operations
 
-```
-User's Machine (AI IDE)
-┌───────────────────────────────┐
-│  @supacloud/mcp-server (stdio)│
-│  ┌──────────┐  ┌────────────┐│
-│  │ SSH Channel│  │ HTTP Channel││
-│  └────┬─────┘  └─────┬──────┘│
-└───────┼──────────────┼───────┘
-        │              │
-   ═════╪══════════════╪═════ Network
-        │              │
-┌───────▼──────────────▼───────┐
-│         Target Server          │
-│  Port 22 (SSH)  Port 9090 (API)│
-│  install.sh     Management API │
-└──────────────────────────────┘
-```
-
-### 10.2 Two-Phase Tool Model
-
-| Phase | SupaCloud Status | Transport Channel | Available Tools |
-|-------|------------------|-------------------|-----------------|
-| Pre-installation | Not installed | SSH | `ping_server` `install_supacloud` `upgrade_supacloud` `diagnose_server` `ssh_exec` |
-| Post-installation | Running | HTTP API | Project CRUD, function deployment, Auth config, Secrets, backup, monitoring, etc. 23 tools |
-
-### 10.3 Configuration
-
-```json
-{
-  "mcpServers": {
-    "supacloud": {
-      "command": "npx",
-      "args": ["-y", "@supacloud/mcp-server"],
-      "env": {
-        "SUPACLOUD_HOST": "Server IP",
-        "SUPACLOUD_SSH_KEY": "~/.ssh/id_rsa",
-        "SUPACLOUD_API_TOKEN": "Master Token (fill in after installation)"
-      }
-    }
-  }
-}
-```
-
-### 10.4 Security Policy
-
-- SSH key/password injected via environment variables, not persisted
-- API Token matches Management API's Master Token
-- Tool-level permission separation: SSH tools and HTTP tools registered independently based on environment variables
-- Sensitive operations (`ssh_exec`, `delete_project`) marked with risk in tool description
-
+This keeps project deploy/log/database tasks separate from tenant lifecycle and server management.

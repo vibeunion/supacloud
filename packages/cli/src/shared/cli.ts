@@ -1,3 +1,5 @@
+import { z } from "zod";
+
 interface CliRunOptions {
     commandName?: string;
 }
@@ -7,7 +9,7 @@ export async function runCli(
     args: string[],
     options: CliRunOptions = {}
 ) {
-    const commandName = options.commandName || "supacloud-mcp";
+    const commandName = options.commandName || "supacloud";
     const formatAvailableCommands = () =>
         Object.keys(cliTools)
             .filter((k) => !["setup_help", "deploy_web_console"].includes(k))
@@ -15,6 +17,11 @@ export async function runCli(
 
     const getSchemaShape = (schema: any): Record<string, any> => {
         if (!schema) return {};
+        if (typeof schema?.safeParse === "function") {
+            const shape = schema?._def?.shape;
+            if (typeof shape === "function") return shape();
+            return shape || {};
+        }
         if (
             typeof schema === "object" &&
             !Array.isArray(schema) &&
@@ -145,7 +152,30 @@ export async function runCli(
     }
     
     try {
-        const result = await tool.callback(parsedArgs);
+        const validator = (() => {
+            if (!tool.schema) return null;
+            if (typeof tool.schema.safeParse === "function") return tool.schema;
+            if (typeof tool.schema === "object" && !Array.isArray(tool.schema)) {
+                return z.object(tool.schema).strict();
+            }
+            return null;
+        })();
+
+        const validatedArgs = validator
+            ? (() => {
+                const result = validator.safeParse(parsedArgs);
+                if (!result.success) {
+                    const details = result.error.issues.map((issue: { path: Array<string | number>; message: string }) => {
+                        const path = issue.path.length ? issue.path.join(".") : "args";
+                        return `- ${path}: ${issue.message}`;
+                    }).join("\n");
+                    throw new Error(`Invalid arguments:\n${details}`);
+                }
+                return result.data;
+            })()
+            : parsedArgs;
+
+        const result = await tool.callback(validatedArgs);
         if (result && result.content && Array.isArray(result.content)) {
             for (const c of result.content) {
                 if (c.type === "text") {

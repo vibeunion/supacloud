@@ -1,5 +1,5 @@
 /**
- * SupaCloud MCP Server – HTTP Transport Layer
+ * SupaCloud CLI HTTP transport layer.
  *
  * After SupaCloud is installed, manage projects via Management API (HTTP).
  * Includes request timeout, retry with exponential backoff, and proper error handling.

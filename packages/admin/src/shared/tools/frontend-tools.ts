@@ -3,10 +3,9 @@
  */
 import { basename } from "node:path";
 import { z } from "zod";
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { HttpTransport } from "../transports/http";
 
-export function registerFrontendTools(server: McpServer, http: HttpTransport): void {
+export function registerFrontendTools(server: { tool: (...args: any[]) => void }, http: HttpTransport): void {
     server.tool(
         "frontend",
         `Frontend hosting (static sites & SSR). Supports: static, react, vue, svelte, sveltekit, nextjs, nuxt, astro.
@@ -34,7 +33,8 @@ Actions: list, get, create, update, delete, deploy_git, deploy_upload, redeploy,
             branch: z.string().optional().describe("[deploy_git] Branch (default: main)"),
             zip_path: z.string().optional().describe("[deploy_upload] Local zip file path"),
         },
-        async ({ action, ref, id, name, framework, domain, build_command, output_dir, install_command, node_version, env_vars, git_url, branch, zip_path }) => {
+        async (args: any) => {
+            const { action, ref, id, name, framework, domain, build_command, output_dir, install_command, node_version, env_vars, git_url, branch, zip_path } = args;
             const need = (f: string, v: any) => { if (!v) throw new Error(`'${f}' required for '${action}'`); };
             const ok = (res: any) => res.ok ? JSON.stringify(res.data, null, 2) : `❌ Failed (${res.status}): ${JSON.stringify(res.data)}`;
 

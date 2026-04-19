@@ -733,16 +733,7 @@ export class GatewayService {
                 write_timeout: 60000
             });
 
-            // 2. Map /mcp route directly
-            await this.kongRequest(`/routes/route-mcp-new`, "PUT", {
-                name: "route-mcp-new",
-                service: { name: "svc-management-api" },
-                paths: ["/mcp"],
-                strip_path: false,
-                preserve_host: true,
-            });
-
-            logger.info(`[GatewayService] Rebuilt Global Master Routes for /mcp to port ${config.port}`);
+            logger.info(`[GatewayService] Rebuilt global management routes to port ${config.port}`);
         } catch (error: unknown) {
             const msg = error instanceof Error ? error.message : String(error);
             logger.error(`[GatewayService] Failed to setup Master Routes:`, msg);

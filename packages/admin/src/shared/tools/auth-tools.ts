@@ -2,7 +2,6 @@
  * Auth — Compound tool (10→1)
  */
 import { z } from "zod";
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { HttpTransport } from "../transports/http";
 
 function formatProviders(data: unknown): string {
@@ -19,7 +18,7 @@ function formatProviders(data: unknown): string {
     return out;
 }
 
-export function registerAuthTools(server: McpServer, http: HttpTransport): void {
+export function registerAuthTools(server: { tool: (...args: any[]) => void }, http: HttpTransport): void {
     server.tool(
         "auth",
         `Auth & OAuth provider management.
@@ -42,7 +41,8 @@ Actions: list_providers, get_provider, configure_provider, update_provider, disa
             app_secret: z.string().optional().describe("[wechat_*] WeChat App Secret"),
             config: z.record(z.unknown()).optional().describe("[update_settings/update_config] Config fields"),
         },
-        async ({ action, ref, provider, client_id, client_secret, redirect_uri, url, app_id, app_secret, config }) => {
+        async (args: any) => {
+            const { action, ref, provider, client_id, client_secret, redirect_uri, url, app_id, app_secret, config } = args;
             const need = (f: string) => { if (!ref) throw new Error(`'ref' required for '${action}'`); };
             const ok = (res: any) => res.ok ? JSON.stringify(res.data, null, 2) : `❌ Failed (${res.status}): ${JSON.stringify(res.data)}`;
 

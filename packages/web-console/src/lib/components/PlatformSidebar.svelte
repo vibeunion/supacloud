@@ -8,7 +8,6 @@
     Network, 
     HardDrive, 
     Terminal,
-    Bot,
     Languages,
     Home
   } from "lucide-svelte";
@@ -29,7 +28,6 @@
     { title: $t("Platform.connection_pool"), icon: Network, href: `/platform/pooling` },
     { title: $t("Platform.storage_juicefs"), icon: HardDrive, href: `/platform/storage` },
     { title: $t("Platform.operations_console"), icon: Terminal, href: `/platform/operations` },
-    { title: "MCP 配置", icon: Bot, href: `/platform/mcp` },
     { title: $t("Platform.settings") || "系统设置", icon: Settings2, href: `/platform/settings` },
   ]);
 
