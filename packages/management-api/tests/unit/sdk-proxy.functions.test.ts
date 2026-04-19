@@ -6,14 +6,13 @@ import { projectService } from "../../src/services/project.service";
 import { edgeFunctionService } from "../../src/services/edge-function.service";
 import { backgroundTaskService } from "../../src/services/background-task.service";
 
-const app = new Elysia().use(sdkProxyRoutes);
-
 type FetchCall = {
   url: string;
   init?: RequestInit & { duplex?: "half" };
 };
 
 function request(path: string, init?: RequestInit) {
+  const app = new Elysia().use(sdkProxyRoutes);
   return app.handle(new Request(`http://localhost${path}`, init));
 }
 
