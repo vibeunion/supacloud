@@ -1,0 +1,28 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "outDir": "dist",
+    "rootDir": "..",
+    "declaration": true,
+    "typeRoots": [
+      "../mcp-server/node_modules/@types",
+      "../mcp-server/node_modules"
+    ],
+    "types": [
+      "bun"
+    ]
+  },
+  "include": [
+    "src",
+    "../mcp-server/src/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist"
+  ]
+}

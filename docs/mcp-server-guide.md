@@ -2,6 +2,11 @@
 
 SupaCloud MCP (Model Context Protocol) Server allows you to manage your self-hosted Supabase platform using natural language through AI assistants like Claude, Cursor, or Windsurf.
 
+For human-facing command-line workflows, use the dedicated CLIs instead:
+
+- `@supacloud/cli` / `supacloud`: project-scoped user CLI with local `.env` auto-link
+- `@supacloud/admin` / `supacloud-admin`: platform and server administration CLI
+
 ## 1. Configuration Guide
 
 ### 1.1 Configure in Cursor

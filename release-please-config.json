@@ -33,6 +33,16 @@
       "release-type": "node",
       "component": "supacloud-js",
       "changelog-path": "CHANGELOG.md"
+    },
+    "packages/cli": {
+      "release-type": "node",
+      "component": "cli",
+      "changelog-path": "CHANGELOG.md"
+    },
+    "packages/admin": {
+      "release-type": "node",
+      "component": "admin",
+      "changelog-path": "CHANGELOG.md"
     }
   },
   "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json"
