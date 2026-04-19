@@ -1,0 +1,37 @@
+{
+  "name": "@supacloud/js",
+  "version": "0.10.0",
+  "description": "Platform SDK for SupaCloud, built on top of supabase-js",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "bun build src/index.ts --outdir dist --target node",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "supacloud",
+    "supabase",
+    "sdk",
+    "background-tasks",
+    "realtime"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/zuohuadong/supacloud.git",
+    "directory": "packages/supacloud-js"
+  },
+  "peerDependencies": {
+    "@supabase/supabase-js": "^2.103.0"
+  },
+  "devDependencies": {
+    "@supabase/supabase-js": "^2.103.0",
+    "typescript": "^5.9.3"
+  }
+}

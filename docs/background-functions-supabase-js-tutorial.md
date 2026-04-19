@@ -1,6 +1,6 @@
 # Background Functions With `supabase-js`
 
-This guide shows the tenant-facing integration flow for SupaCloud Background Functions using the standard `supabase-js` client plus a thin helper layer.
+This guide shows the tenant-facing integration flow for SupaCloud Background Functions using the standard `supabase-js` client plus `@supacloud/js`.
 
 It covers:
 
@@ -20,8 +20,7 @@ Yes, with one important distinction:
 So the practical integration pattern is:
 
 1. use stock `supabase.functions.invoke()`
-2. pass SupaCloud async headers
-3. wrap that in your own `invokeAsync()` helper for ergonomics
+2. let `@supacloud/js` wrap SupaCloud task semantics for you
 
 That is the recommended integration for SupaCloud tenants because it preserves compatibility with the official SDK instead of depending on a forked client or undocumented client patch.
 
@@ -44,56 +43,27 @@ Used by your trusted backend, admin panel, or platform tooling to:
 
 Do not expose control-plane admin credentials directly in the browser.
 
-## Step 1: Create A Small Async Helper
+## Step 1: Create A SupaCloud Client
 
 ```ts
-import type { SupabaseClient } from "@supabase/supabase-js";
+import { createClient } from "@supabase/supabase-js";
+import { createSupaCloudClient } from "@supacloud/js";
 
-type InvokeAsyncOptions = {
-  body?: unknown;
-  headers?: Record<string, string>;
-  retries?: number;
-  timeoutSec?: number;
-  idempotencyKey?: string;
-  method?: string;
-};
+const supabase = createClient("https://api.example.com", "anon-key");
 
-export async function invokeAsync(
-  supabase: SupabaseClient,
-  functionName: string,
-  options: InvokeAsyncOptions = {},
-) {
-  const { body, headers = {}, retries, timeoutSec, idempotencyKey, method } = options;
-
-  const { data, error } = await supabase.functions.invoke(functionName, {
-    body,
-    method,
-    headers: {
-      ...headers,
-      "x-supacloud-async": "true",
-      ...(retries !== undefined ? { "x-supacloud-retries": String(retries) } : {}),
-      ...(timeoutSec !== undefined ? { "x-supacloud-timeout": String(timeoutSec) } : {}),
-      ...(idempotencyKey
-        ? { "x-supacloud-idempotency-key": idempotencyKey }
-        : {}),
-    },
-  });
-
-  if (error) throw error;
-
-  return data as {
-    task_id: string;
-    status: "enqueued";
-  };
-}
+const supacloud = createSupaCloudClient({
+  supabase,
+  managementApiUrl: "https://admin.example.com",
+  projectRef: "abcd1234",
+});
 ```
 
-This helper is intentionally small. The goal is not to replace `supabase-js`, but to keep the official client as the transport layer and add only the SupaCloud-specific headers that switch execution into background mode.
+`@supacloud/js` does not replace `supabase-js`. It layers SupaCloud task semantics on top of it so app teams do not need to keep rewriting the same helper code.
 
 ## Step 2: Enqueue A Background Function
 
 ```ts
-const task = await invokeAsync(supabase, "mockup-generator", {
+const task = await supacloud.tasks.submit("mockup-generator", {
   body: {
     product_id: "prod_123",
     image_url: "https://example.com/source.png",
@@ -117,94 +87,16 @@ Expected response:
 
 ## Step 3: Poll Task Status
 
-Task polling is a control-plane concern, so this call should usually come from your trusted backend or admin UI.
+Task polling is still a control-plane concern, so this call should usually come from your trusted backend or admin UI.
 
 ```ts
-type TaskAttempt = {
-  attempt_no: number;
-  status: string;
-  started_at: string | null;
-  completed_at: string | null;
-  duration_ms: number | null;
-  response_status: number | null;
-  error: string | null;
-  logs: Array<{
-    timestamp: string;
-    stream: "stdout" | "stderr";
-    level: string;
-    message: string;
-  }>;
-};
-
-type TaskDetail = {
-  id: string;
-  status:
-    | "pending"
-    | "leased"
-    | "running"
-    | "retry_scheduled"
-    | "succeeded"
-    | "failed"
-    | "dead_lettered"
-    | "cancelled";
-  function_slug: string | null;
-  attempt: number | null;
-  max_attempts: number | null;
-  error: string | null;
-  result: unknown;
-  attempts: TaskAttempt[];
-};
-
-async function getTask(
-  managementApiUrl: string,
-  projectRef: string,
-  taskId: string,
-  accessToken: string,
-) {
-  const response = await fetch(
-    `${managementApiUrl}/v1/projects/${projectRef}/tasks/${taskId}`,
-    {
-      headers: {
-        authorization: `Bearer ${accessToken}`,
-      },
-    },
-  );
-
-  if (!response.ok) {
-    throw new Error(`Failed to fetch task: ${response.status}`);
-  }
-
-  return (await response.json()) as TaskDetail;
-}
+const detail = await task.get();
 ```
 
-Simple polling helper:
+Simple waiting helper:
 
 ```ts
-const terminalStatuses = new Set([
-  "succeeded",
-  "failed",
-  "dead_lettered",
-  "cancelled",
-]);
-
-export async function waitForTask(
-  managementApiUrl: string,
-  projectRef: string,
-  taskId: string,
-  accessToken: string,
-  intervalMs = 2000,
-) {
-  while (true) {
-    const task = await getTask(managementApiUrl, projectRef, taskId, accessToken);
-
-    if (terminalStatuses.has(task.status)) {
-      return task;
-    }
-
-    await new Promise((resolve) => setTimeout(resolve, intervalMs));
-  }
-}
+const finalTask = await task.wait({ intervalMs: 2000 });
 ```
 
 ## Step 4: Cancel A Running Task
@@ -212,28 +104,7 @@ export async function waitForTask(
 If the task is no longer needed, cancel it through the control plane:
 
 ```ts
-export async function cancelTask(
-  managementApiUrl: string,
-  projectRef: string,
-  taskId: string,
-  accessToken: string,
-) {
-  const response = await fetch(
-    `${managementApiUrl}/v1/projects/${projectRef}/tasks/${taskId}/cancel`,
-    {
-      method: "POST",
-      headers: {
-        authorization: `Bearer ${accessToken}`,
-      },
-    },
-  );
-
-  if (!response.ok) {
-    throw new Error(`Failed to cancel task: ${response.status}`);
-  }
-
-  return response.json();
-}
+await task.cancel();
 ```
 
 On the function side, SupaCloud will abort `req.signal` before forcefully recycling the worker. That means your handler should watch `req.signal` and stop expensive work quickly.
@@ -248,54 +119,37 @@ See:
 If the task reaches `dead_lettered`, list DLQ items:
 
 ```ts
-export async function listDlq(
-  managementApiUrl: string,
-  projectRef: string,
-  accessToken: string,
-) {
-  const response = await fetch(
-    `${managementApiUrl}/v1/projects/${projectRef}/tasks/dlq`,
-    {
-      headers: {
-        authorization: `Bearer ${accessToken}`,
-      },
-    },
-  );
-
-  if (!response.ok) {
-    throw new Error(`Failed to fetch DLQ: ${response.status}`);
-  }
-
-  return response.json();
-}
+const dlq = await supacloud.tasks.listDlq();
 ```
 
 Retry a dead-lettered task:
 
 ```ts
-export async function retryTask(
-  managementApiUrl: string,
-  projectRef: string,
-  taskId: string,
-  accessToken: string,
-) {
-  const response = await fetch(
-    `${managementApiUrl}/v1/projects/${projectRef}/tasks/${taskId}/retry`,
-    {
-      method: "POST",
-      headers: {
-        authorization: `Bearer ${accessToken}`,
-      },
-    },
-  );
-
-  if (!response.ok) {
-    throw new Error(`Failed to retry task: ${response.status}`);
-  }
-
-  return response.json();
-}
+await supacloud.tasks.retry(task.taskId);
 ```
+
+## Step 6: Subscribe With Realtime Fallback
+
+```ts
+const subscription = task.subscribe({
+  onUpdate(snapshot) {
+    console.log(snapshot.status, snapshot.progress);
+  },
+  onStateChange(state) {
+    console.log("connection", state);
+  },
+});
+
+// later
+subscription.unsubscribe();
+```
+
+`@supacloud/js` will:
+
+1. try `postgres_changes` on `public.tasks`
+2. switch to polling if the channel times out or errors
+
+This keeps task UX alive even when Realtime is degraded.
 
 ## Full Tutorial Flow
 
