@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.1](https://github.com/zuohuadong/supacloud/compare/supacloud-js-v0.11.0...supacloud-js-v0.11.1) (2026-04-19)
+
+
+### 🐛 Bug Fixes
+
+* **supacloud-js:** stop injecting async headers for background routes ([00e5eb7](https://github.com/zuohuadong/supacloud/commit/00e5eb7a4d692e9a1d9e81d3f1451177242417f7))
+
 ## [0.11.0](https://github.com/zuohuadong/supacloud/compare/supacloud-js-v0.10.0...supacloud-js-v0.11.0) (2026-04-19)
 
 
