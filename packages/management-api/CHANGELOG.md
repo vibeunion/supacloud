@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.10.2](https://github.com/zuohuadong/supacloud/compare/management-api-v0.10.1...management-api-v0.10.2) (2026-04-19)
+
+
+### 🐛 Bug Fixes
+
+* **edge-runtime:** keep embedded child restarting ([7ca588a](https://github.com/zuohuadong/supacloud/commit/7ca588ad211c28c3f7ddff9b550d3fdb304d1feb))
+* **realtime:** connect tenants with admin database credentials ([e1ae210](https://github.com/zuohuadong/supacloud/commit/e1ae210134942c04d4d5a4dbdc6d46e6f154d245))
+* **realtime:** proxy websocket traffic via management ws ([de062c0](https://github.com/zuohuadong/supacloud/commit/de062c08bd543c5867f2fe592f815ea735c8bb95))
+* **realtime:** reconcile missing tenants and use valid enc key ([5cc41df](https://github.com/zuohuadong/supacloud/commit/5cc41df549ca6a8ee18bd06a7d090d4ebaa41738))
+* **realtime:** reconcile tenant schema privileges ([f2dc5b7](https://github.com/zuohuadong/supacloud/commit/f2dc5b703dd9c7b64041af07e419c8f42e5a2c24))
+* **realtime:** route websocket through root proxy ([73f6501](https://github.com/zuohuadong/supacloud/commit/73f6501f2fd4b5653752767dcb57b14623e9ad51))
+* **realtime:** sign tenant reconcile admin tokens correctly ([03c3207](https://github.com/zuohuadong/supacloud/commit/03c320787b1bdaef0ef05de81a5f350108d0fd7f))
+* **realtime:** use node crypto for admin JWT signing ([601e951](https://github.com/zuohuadong/supacloud/commit/601e951d76548131b02404319c68d4224a627df8))
+
+
+### 🔧 Miscellaneous Chores
+
+* **ts:** finish TypeScript 6 typecheck migration ([5e2ae90](https://github.com/zuohuadong/supacloud/commit/5e2ae9024cf356eb6892402a62bf4036b8ad00dc))
+
 ## [0.10.1](https://github.com/zuohuadong/supacloud/compare/management-api-v0.10.0...management-api-v0.10.1) (2026-04-18)
 
 
