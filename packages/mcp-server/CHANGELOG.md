@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.1](https://github.com/zuohuadong/supacloud/compare/mcp-server-v0.10.0...mcp-server-v0.10.1) (2026-04-19)
+
+
+### 🔧 Miscellaneous Chores
+
+* **ts:** finish TypeScript 6 typecheck migration ([5e2ae90](https://github.com/zuohuadong/supacloud/commit/5e2ae9024cf356eb6892402a62bf4036b8ad00dc))
+
 ## [0.10.0](https://github.com/zuohuadong/supacloud/compare/mcp-server-v0.9.0...mcp-server-v0.10.0) (2026-04-17)
 
 
