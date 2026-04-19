@@ -43,7 +43,7 @@ ExecStart=/usr/bin/podman run --name supacloud-realtime --network host \
   -e MAX_HEADER_LENGTH=8192 \
   -e RLIMIT_NOFILE=10000 \
   -e APP_NAME=realtime \
-  -e DB_ENC_KEY=${REALTIME_DB_ENC_KEY:-supabaserealtime} \
+  -e DB_ENC_KEY=${REALTIME_DB_ENC_KEY:-0123456789abcdef} \
   public.ecr.aws/supabase/realtime:v2.33.3
 
 ExecStop=/usr/bin/podman stop -t 10 supacloud-realtime
