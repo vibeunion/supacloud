@@ -1,6 +1,7 @@
 import { config } from "../src/config";
 import { sql, resolveDbName, resolveRoleName } from "../src/db";
 import { logger } from "../src/utils/logger";
+import { createHmac } from "node:crypto";
 
 type ProjectRow = {
   ref: string;
@@ -29,12 +30,9 @@ function adminJwt(secret: string): string {
       exp: now + 3600,
     }),
   ).toString("base64url");
-  const signature = Bun.CryptoHasher.hmac(
-    "sha256",
-    secret,
-    `${header}.${payload}`,
-    "base64url",
-  );
+  const signature = createHmac("sha256", secret)
+    .update(`${header}.${payload}`)
+    .digest("base64url");
   return `${header}.${payload}.${signature}`;
 }
 
