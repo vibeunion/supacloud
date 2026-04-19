@@ -8,6 +8,7 @@
     "start": "bun run src/index.ts",
     "db:init": "bun run src/db/init.ts",
     "realtime:reconcile": "bun run scripts/reconcile-realtime-tenants.ts",
+    "realtime:reconcile-schema": "bun run scripts/reconcile-realtime-schema-privileges.ts",
     "tsc": "tsc",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
