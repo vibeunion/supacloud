@@ -1,7 +1,13 @@
+interface CliRunOptions {
+    commandName?: string;
+}
+
 export async function runCli(
     cliTools: Record<string, { schema: any; callback: (args: any) => Promise<any> }>,
-    args: string[]
+    args: string[],
+    options: CliRunOptions = {}
 ) {
+    const commandName = options.commandName || "supacloud-mcp";
     const formatAvailableCommands = () =>
         Object.keys(cliTools)
             .filter((k) => !["setup_help", "deploy_web_console"].includes(k))
@@ -55,7 +61,7 @@ export async function runCli(
             : "  (no additional flags)";
 
         return [
-            `Usage: supacloud-mcp ${toolName} <action> [--flags]`,
+            `Usage: ${commandName} ${toolName} <action> [--flags]`,
             "",
             actionLines,
             "",
@@ -83,7 +89,7 @@ export async function runCli(
             : "  (no documented action-specific flags)";
 
         return [
-            `Usage: supacloud-mcp ${toolName} ${action} [--flags]`,
+            `Usage: ${commandName} ${toolName} ${action} [--flags]`,
             "",
             "Flags:",
             argLines,

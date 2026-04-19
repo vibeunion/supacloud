@@ -324,7 +324,7 @@ SupaCloud now natively exposes an HTTP MCP endpoint via the project's API Gatewa
   - `Authorization: Bearer <YOUR_SERVICE_ROLE_KEY>`
 
 **Project-scoped mode: Option 2 (Smart Proxy for Claude Desktop / StdIO)**:
-Use our smart proxy to automatically connect to whatever project you are currently working on. It instantly sniffs the `.env` in your active code directory.
+Use our MCP package to automatically connect to whatever project you are currently working on. It instantly sniffs the `.env` in your active code directory.
 
 ```json
 // claude_desktop_config.json or IDE MCP settings
@@ -340,7 +340,12 @@ Use our smart proxy to automatically connect to whatever project you are current
 
 Available tools include: Database schema introspection (`list_tables`, `describe_table`), SQL Execution (`execute_sql`), AI-assisted SQL generation using project context, Edge Function deployment & log tailing, Custom API Rate Limiting, and full lifecycle management operations.
 
-*Note: For global server administration (SSH, full cluster management), see [SupaCloud Admin MCP](packages/mcp-server/README.md).*
+For human operators, the CLI split is now:
+
+- `@supacloud/cli` / `supacloud`: project-scoped user CLI with `.env` auto-link defaults
+- `@supacloud/admin` / `supacloud-admin`: server and platform administration CLI
+
+*Note: AI agent access is still provided by the MCP package in [packages/mcp-server](packages/mcp-server/README.md).*
 
 
 ### Project Structure
@@ -685,7 +690,7 @@ SupaCloud 现在原生通过项目的 API 网关暴露了标准 HTTP MCP 端点�
   - `Authorization: Bearer <你的 SERVICE_ROLE_KEY>`
 
 **如何接入（方案 2：智能本地代理，Claude Desktop / 命令行 IDE 推荐）**:
-如果你在同时开发多个项目，可以使用官方提供的智能代理包。它会自动**嗅探你当前 IDE 所打开代码库**里的 `.env` 变量，实现无缝切换对应项目数据库。
+如果你在同时开发多个项目，可以使用官方提供的 MCP 智能代理包。它会自动**嗅探你当前 IDE 所打开代码库**里的 `.env` 变量，实现无缝切换对应项目数据库。
 
 ```json
 // claude_desktop_config.json 或是任意要求提供 command 的环境
@@ -703,7 +708,12 @@ SupaCloud 现在原生通过项目的 API 网关暴露了标准 HTTP MCP 端点�
 
 内置工具包括：数据库元数据内省（自动读取表结构、外键、RLS策略）、直接执行 SQL（`execute_sql`）、带有表结构上下文的 AI SQL 生成助手，以及 **云函数全生命周期管控（部署与日志获取）**、**编程式自定义限流**、**秘钥与配置管理** 等 20+ 项高阶能力。
 
-*注：如果你需要全局服务器管控能力（SSH、跨项目管理等），请参考 [SupaCloud Admin MCP](packages/mcp-server/README.md)。*
+面向真人操作者的命令行现已拆分为：
+
+- `@supacloud/cli` / `supacloud`：项目使用者 CLI，默认从当前目录 `.env` 自动绑定项目
+- `@supacloud/admin` / `supacloud-admin`：服务器管理员 CLI，处理 SSH、安装、升级、租户运维
+
+*注：AI Agent 的 MCP 接入能力仍由 [packages/mcp-server](packages/mcp-server/README.md) 提供。*
 
 
 ### 项目结构
