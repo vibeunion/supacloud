@@ -849,7 +849,11 @@ async function bootstrap() {
           if (!upstream) return;
 
           if (upstream.readyState === WebSocket.OPEN) {
-            upstream.send(message as string | ArrayBufferLike);
+            if (typeof message === "string") {
+              upstream.send(message);
+            } else {
+              upstream.send(message as unknown as ArrayBuffer);
+            }
           } else if (upstream.readyState === WebSocket.CONNECTING) {
             if (!data.__buffer) {
               data.__buffer = [];
@@ -935,28 +939,20 @@ async function bootstrap() {
             const val = request.headers.get(h);
             if (val) requestHeaders[h] = val;
           }
-          // Supabase Realtime identifies tenants by hostname subdomain.
-          // Resolve the actual API host for this project, respecting custom domains
-          // configured via the web console (custom_domain / api_domain in project config).
+          // Supabase Realtime identifies tenants by extracting the first subdomain
+          // from the Host header and matching it against registered external_id
+          // (which is the project ref). Custom domains like "sapi.aorist.net" would
+          // extract "sapi" instead of the project ref, breaking tenant resolution.
+          // Therefore, the Host header to Elixir must always use the ref-based format.
           const isCI = process.env.CI === "true" || process.env.GITHUB_ACTIONS === "true";
-          let tenantHost: string;
-          if (isCI) {
-            tenantHost = "realtime-dev.supabase-realtime";
-          } else if (projectRef) {
-            try {
-              const { resolveProjectApiHost, normalizeProjectRoutingConfig } = await import("./utils/project-routing");
-              const rows = await sql`SELECT config FROM projects WHERE ref = ${projectRef} LIMIT 1`;
-              const projectConfig = rows.length > 0 ? rows[0].config : null;
-              const routingConfig = normalizeProjectRoutingConfig(projectConfig as any);
-              tenantHost = resolveProjectApiHost(projectRef, routingConfig);
-            } catch {
-              tenantHost = `${projectRef}.api.${config.baseDomain}`;
-            }
-          } else {
-            tenantHost = url.host;
-          }
+          const tenantHost = isCI
+            ? "realtime-dev.supabase-realtime"
+            : (projectRef ? `${projectRef}.api.${config.baseDomain}` : url.host);
           requestHeaders["host"] = tenantHost;
-          requestHeaders["x-forwarded-host"] = tenantHost;
+          requestHeaders["x-forwarded-host"] = url.host;
+          if (projectRef) {
+            requestHeaders["x-project-ref"] = projectRef;
+          }
           requestHeaders["x-forwarded-proto"] = url.protocol.replace(":", "");
           requestHeaders["x-forwarded-for"] =
             request.headers.get("x-forwarded-for") || "127.0.0.1";
