@@ -252,6 +252,8 @@ class SupaCloudTasksClient<TClient extends SupabaseClient = SupabaseClient> {
     options: SupaCloudTaskSubmitOptions = {},
   ) {
     const { body, headers = {}, retries: _retries, timeoutSec: _timeoutSec, idempotencyKey: _idempotencyKey, method } = options;
+    // Background execution is selected by server-side background_routes.
+    // The SDK intentionally avoids injecting custom async headers here.
     const { data, error } = await this.options.supabase.functions.invoke(functionName, {
       body,
       method,
