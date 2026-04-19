@@ -86,6 +86,8 @@ export class RealtimeService {
      */
     async registerTenant(config: RealtimeTenantConfig): Promise<boolean> {
         const globalConfig = (await import("../config")).config;
+        const adminDbUser = "supabase_admin";
+        const adminDbPassword = globalConfig.pgPassword || config.dbPassword || "postgres";
         try {
             const res = await fetch(`${this.adminUrl}/api/tenants`, {
                 method: "POST",
@@ -101,8 +103,8 @@ export class RealtimeService {
                                 db_host: PG_HOST,
                                 db_port: PG_PORT,
                                 db_name: config.dbName,
-                                db_user: config.dbUser || resolveRoleName(config.projectRef),
-                                db_password: config.dbPassword || globalConfig.pgPassword || "postgres",
+                                db_user: adminDbUser,
+                                db_password: adminDbPassword,
                                 region: "us-east-1",
                                 poll_interval_ms: 100,
                                 poll_max_changes: 100,
@@ -175,6 +177,8 @@ export class RealtimeService {
      */
     async updateTenant(config: RealtimeTenantConfig): Promise<boolean> {
         const globalConfig = (await import("../config")).config;
+        const adminDbUser = "supabase_admin";
+        const adminDbPassword = globalConfig.pgPassword || config.dbPassword || "postgres";
         try {
             const res = await fetch(`${this.adminUrl}/api/tenants/${config.projectRef}`, {
                 method: "PUT",
@@ -188,8 +192,8 @@ export class RealtimeService {
                                 db_host: PG_HOST,
                                 db_port: PG_PORT,
                                 db_name: config.dbName,
-                                db_user: config.dbUser || resolveRoleName(config.projectRef),
-                                db_password: config.dbPassword || globalConfig.pgPassword || "postgres",
+                                db_user: adminDbUser,
+                                db_password: adminDbPassword,
                                 region: "us-east-1",
                                 poll_interval_ms: 100,
                                 slot_name: resolveSlotName(config.projectRef),
