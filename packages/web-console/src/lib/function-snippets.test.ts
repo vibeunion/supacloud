@@ -16,17 +16,17 @@ describe("function snippets", () => {
     expect(snippet).toContain(`video-transcode-job_123-v1`);
   });
 
-  test("buildCurlExample generates async invocation headers", () => {
+  test("buildCurlExample points to a background route without custom async headers", () => {
     const snippet = buildCurlExample("mockup-generator");
-    expect(snippet).toContain(`/functions/v1/mockup-generator`);
-    expect(snippet).toContain(`x-supacloud-async: true`);
-    expect(snippet).toContain(`mockup-generator-job_123-v1`);
+    expect(snippet).toContain(`/functions/v1/mockup-generator/generate`);
+    expect(snippet).not.toContain(`x-supacloud-async`);
   });
 
   test("build JS and TS examples preserve official supabase.functions.invoke usage", () => {
     expect(buildJsInvokeExample("image-render")).toContain(`supabase.functions.invoke("image-render"`);
     expect(buildTsInvokeExample("image-render")).toContain(`type AsyncTaskResponse`);
-    expect(buildTsInvokeExample("image-render")).toContain(`"x-supacloud-idempotency-key": "image-render-job_123-v1"`);
+    expect(buildJsInvokeExample("image-render")).not.toContain(`x-supacloud-async`);
+    expect(buildTsInvokeExample("image-render")).not.toContain(`x-supacloud-idempotency-key`);
   });
 
   test("buildFunctionTasksPath scopes by function_slug and limit", () => {

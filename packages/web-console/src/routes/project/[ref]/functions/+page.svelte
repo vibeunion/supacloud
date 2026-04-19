@@ -129,19 +129,7 @@ export async function invokeAsync(
   const { data, error } = await supabase.functions.invoke(functionName, {
     body,
     method,
-    headers: {
-      ...headers,
-      "x-supacloud-async": "true",
-      ...(retries !== undefined
-        ? { "x-supacloud-retries": String(retries) }
-        : {}),
-      ...(timeoutSec !== undefined
-        ? { "x-supacloud-timeout": String(timeoutSec) }
-        : {}),
-      ...(idempotencyKey
-        ? { "x-supacloud-idempotency-key": idempotencyKey }
-        : {}),
-    },
+    headers,
   });
 
   if (error) throw error;
@@ -477,10 +465,10 @@ export async function waitForTask(
           Background Functions
         </div>
         <div>
-          <h2 class="text-lg font-semibold text-foreground">直接把官方 `supabase.functions.invoke()` 升级成异步后台任务</h2>
+          <h2 class="text-lg font-semibold text-foreground">直接把官方 `supabase.functions.invoke()` 接到后台任务路由</h2>
           <p class="text-sm text-muted-foreground mt-1 max-w-3xl">
-            更现实也更推荐的接入方式，是继续使用官方 `supabase-js`，通过 `x-supacloud-*` 自定义 Header 打开 SupaCloud 的异步执行层，再在租户侧封一层 `invokeAsync()` helper。
-            这样既兼容官方 SDK，又能给团队一个稳定的 `functions.invoke(async)` 体验。
+            更现实也更推荐的接入方式，是继续使用官方 `supabase-js`，直接请求你配置进 `background_routes` 的函数路径，再在租户侧封一层 `invokeAsync()` helper。
+            这样既兼容官方 SDK，也不会因为浏览器额外自定义 Header 触发 CORS 预检失败。
           </p>
         </div>
       </div>
@@ -501,7 +489,7 @@ export async function waitForTask(
           <div class="flex items-center justify-between gap-3">
             <div>
               <div class="text-sm font-semibold">复制 `invokeAsync()` helper</div>
-              <p class="text-xs text-muted-foreground mt-1">保留官方 `supabase.functions.invoke()`，只额外加 SupaCloud 异步 Header。</p>
+              <p class="text-xs text-muted-foreground mt-1">保留官方 `supabase.functions.invoke()`，把异步判定交给平台的 `background_routes`。</p>
             </div>
             <button
               onclick={() => copySnippet(invokeAsyncHelperCode, "invokeAsync helper")}
@@ -576,7 +564,7 @@ export async function waitForTask(
           </div>
           <div class="space-y-2 text-xs text-muted-foreground leading-5">
             <p>1. 继续使用官方 `supabase-js`，不要 fork SDK。</p>
-            <p>2. 用 `x-supacloud-async`、`x-supacloud-retries`、`x-supacloud-timeout`、`x-supacloud-idempotency-key` 控制后台任务。</p>
+            <p>2. 浏览器和前台应用优先直接命中 `background_routes`，是否入队由平台决定，避免额外 CORS 预检。</p>
             <p>3. 长任务函数内部要监听 `req.signal`，这样任务取消时可以优雅收尾，而不是只等运行时强制中断。</p>
           </div>
           <div class="grid gap-2 pt-1 sm:grid-cols-2">

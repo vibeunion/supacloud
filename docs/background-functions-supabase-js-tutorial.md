@@ -14,8 +14,7 @@ It covers:
 Yes, with one important distinction:
 
 - `supabase.functions.invoke()` already supports custom `headers`, `body`, `method`, and other fetch-like options
-- SupaCloud's background execution mode is activated by `x-supacloud-*` headers
-- official `supabase-js` does **not** currently expose a first-class `async: true` option in the documented `invoke()` API
+- on browsers, the safest pattern is to invoke a function path already listed in `background_routes`
 
 So the practical integration pattern is:
 
@@ -219,7 +218,7 @@ Cause:
 
 Fix:
 
-- use `x-supacloud-idempotency-key`
+- use a stable idempotency key when the caller is a trusted backend
 - make writes idempotent in Postgres or your application layer
 
 ### 2. External API Timeout
@@ -230,7 +229,7 @@ Cause:
 
 Fix:
 
-- increase `x-supacloud-timeout` within project limits
+- increase the task timeout from a trusted backend or raise the project default within configured limits
 - checkpoint partial progress
 - watch `req.signal` so cancellation exits quickly
 
@@ -259,6 +258,7 @@ Fix:
 ## Recommendation For SupaCloud Tenants
 
 If you want `functions.invoke(async)` ergonomics, implement it as your own helper rather than waiting on upstream SDK changes.
+Point that helper at a path covered by `background_routes` instead of sending custom async headers.
 
 That gives you:
 

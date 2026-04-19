@@ -251,23 +251,11 @@ class SupaCloudTasksClient<TClient extends SupabaseClient = SupabaseClient> {
     functionName: string,
     options: SupaCloudTaskSubmitOptions = {},
   ) {
-    const { body, headers = {}, retries, timeoutSec, idempotencyKey, method } = options;
+    const { body, headers = {}, retries: _retries, timeoutSec: _timeoutSec, idempotencyKey: _idempotencyKey, method } = options;
     const { data, error } = await this.options.supabase.functions.invoke(functionName, {
       body,
       method,
-      headers: {
-        ...headers,
-        "x-supacloud-async": "true",
-        ...(retries !== undefined
-          ? { "x-supacloud-retries": String(retries) }
-          : {}),
-        ...(timeoutSec !== undefined
-          ? { "x-supacloud-timeout": String(timeoutSec) }
-          : {}),
-        ...(idempotencyKey
-          ? { "x-supacloud-idempotency-key": idempotencyKey }
-          : {}),
-      },
+      headers,
     });
 
     if (error) throw error;

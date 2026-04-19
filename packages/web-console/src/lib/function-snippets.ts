@@ -31,14 +31,10 @@ console.log(task);
 }
 
 export function buildCurlExample(slug: string) {
-  return `curl -X POST "\${SUPABASE_URL}/functions/v1/${slug}" \\
+  return `curl -X POST "\${SUPABASE_URL}/functions/v1/${slug}/generate" \\
   -H "Authorization: Bearer \${SUPABASE_ANON_KEY}" \\
   -H "apikey: \${SUPABASE_ANON_KEY}" \\
   -H "Content-Type: application/json" \\
-  -H "x-supacloud-async: true" \\
-  -H "x-supacloud-retries: 3" \\
-  -H "x-supacloud-timeout: 300" \\
-  -H "x-supacloud-idempotency-key: ${slug}-job_123-v1" \\
   -d '{
     "job_id": "job_123",
     "input": "replace-me"
@@ -50,12 +46,6 @@ export function buildJsInvokeExample(slug: string) {
   body: {
     job_id: "job_123",
     input: "replace-me",
-  },
-  headers: {
-    "x-supacloud-async": "true",
-    "x-supacloud-retries": "3",
-    "x-supacloud-timeout": "300",
-    "x-supacloud-idempotency-key": "${slug}-job_123-v1",
   },
 });
 
@@ -73,12 +63,6 @@ const { data, error } = await supabase.functions.invoke("${slug}", {
   body: {
     job_id: "job_123",
     input: "replace-me",
-  },
-  headers: {
-    "x-supacloud-async": "true",
-    "x-supacloud-retries": "3",
-    "x-supacloud-timeout": "300",
-    "x-supacloud-idempotency-key": "${slug}-job_123-v1",
   },
 });
 

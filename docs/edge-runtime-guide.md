@@ -100,20 +100,13 @@ const { data, error } = await supabase.functions.invoke('my-function', {
 
 Background invocation uses the same API surface. SupaCloud supports two activation modes:
 
-- explicit request headers
 - server-side per-function `background_routes`
 
-Explicit headers remain available:
+For browser-facing apps, prefer `background_routes` so the request stays free of custom async headers:
 
 ```typescript
-const { data, error } = await supabase.functions.invoke("my-function", {
+const { data, error } = await supabase.functions.invoke("my-function/generate", {
   body: { job: "long-running" },
-  headers: {
-    "x-supacloud-async": "true",
-    "x-supacloud-retries": "3",
-    "x-supacloud-timeout": "300",
-    "x-supacloud-idempotency-key": "job-long-running-v1",
-  },
 });
 ```
 
@@ -121,7 +114,7 @@ See [Background Functions](./background-functions.md) for the full execution mod
 
 ### Recommended Background Strategy
 
-For production heavy routes, prefer function config over browser-only headers:
+For production heavy routes, use function config:
 
 ```json
 {

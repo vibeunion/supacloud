@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { Elysia } from "elysia";
-import { sdkProxyRoutes } from "../../src/routes/sdk-proxy";
+import { sdkProxyRoutes, setSdkProxyFetchForTests } from "../../src/routes/sdk-proxy";
 import * as dbModule from "../../src/db";
 import { projectService } from "../../src/services/project.service";
 import { edgeFunctionService } from "../../src/services/edge-function.service";
@@ -18,14 +18,12 @@ function request(path: string, init?: RequestInit) {
 }
 
 describe("sdkProxyRoutes functions proxy", () => {
-  let originalFetch: typeof fetch;
   const calls: FetchCall[] = [];
 
   beforeEach(() => {
     calls.length = 0;
-    originalFetch = globalThis.fetch;
     mock.restore();
-    globalThis.fetch = mock((input: string | URL | Request, init?: RequestInit & { duplex?: "half" }) => {
+    setSdkProxyFetchForTests(mock((input: string | URL | Request, init?: RequestInit & { duplex?: "half" }) => {
       const url = typeof input === "string"
         ? input
         : input instanceof URL
@@ -35,11 +33,11 @@ describe("sdkProxyRoutes functions proxy", () => {
       return Promise.resolve(new Response(JSON.stringify({ ok: true }), {
         headers: { "Content-Type": "application/json" },
       }));
-    }) as unknown as typeof fetch;
+    }) as unknown as typeof fetch);
   });
 
   afterEach(() => {
-    globalThis.fetch = originalFetch;
+    setSdkProxyFetchForTests();
     mock.restore();
   });
 
