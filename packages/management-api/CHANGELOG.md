@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.3](https://github.com/zuohuadong/supacloud/compare/management-api-v0.10.2...management-api-v0.10.3) (2026-04-19)
+
+
+### 🐛 Bug Fixes
+
+* **management-api:** harden sdk proxy unit test isolation ([4a5fd35](https://github.com/zuohuadong/supacloud/commit/4a5fd353ad8c25003c2f37d8c582c682c2acf81c))
+
 ## [0.10.2](https://github.com/zuohuadong/supacloud/compare/management-api-v0.10.1...management-api-v0.10.2) (2026-04-19)
 
 
