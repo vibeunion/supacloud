@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { Elysia } from "elysia";
 import { sdkProxyRoutes, setSdkProxyFetchForTests } from "../../src/routes/sdk-proxy";
 import * as dbModule from "../../src/db";
@@ -72,14 +72,6 @@ async function withSdkProxyTestContext(
 }
 
 describe("sdkProxyRoutes functions proxy", () => {
-  beforeEach(() => {
-    serialQueue = Promise.resolve();
-  });
-
-  afterEach(() => {
-    setSdkProxyFetchForTests();
-  });
-
   test("POST /functions/v1 forwards request bodies with duplex=half", async () => {
     await withSdkProxyTestContext(async ({ calls }) => {
       const response = await request("/functions/v1/hello", {
