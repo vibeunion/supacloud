@@ -294,10 +294,7 @@ For `supabase-js` compatibility, foreground invokes still use the standard:
 await supabase.functions.invoke("my-function", { body: {...} })
 ```
 
-Background execution can be activated in two ways:
-
-- explicit request headers such as `x-supacloud-async`
-- server-side function config via `background_routes`
+Background execution is activated through server-side function config via `background_routes`.
 
 `background_routes` is the preferred production model for heavy paths like:
 

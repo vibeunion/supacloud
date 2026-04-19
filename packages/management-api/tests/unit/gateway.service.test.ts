@@ -50,10 +50,10 @@ describe("GatewayService", () => {
         globalThis.fetch = originalFetch;
     });
 
-    test("default cors headers allow supacloud async control headers", () => {
-        expect(DEFAULT_CORS_HEADERS).toContain("x-supacloud-async");
-        expect(DEFAULT_CORS_HEADERS).toContain("x-supacloud-retries");
-        expect(DEFAULT_CORS_HEADERS).toContain("x-supacloud-timeout");
+    test("default cors headers stay limited to standard client headers", () => {
+        expect(DEFAULT_CORS_HEADERS).not.toContain("x-supacloud-async");
+        expect(DEFAULT_CORS_HEADERS).not.toContain("x-supacloud-retries");
+        expect(DEFAULT_CORS_HEADERS).not.toContain("x-supacloud-timeout");
     });
 
     test("setupUpstream should configure realtime route through management websocket proxy", async () => {

@@ -70,19 +70,7 @@ export async function invokeAsync(
   const { data, error } = await supabase.functions.invoke(functionName, {
     body,
     method,
-    headers: {
-      ...headers,
-      "x-supacloud-async": "true",
-      ...(retries !== undefined
-        ? { "x-supacloud-retries": String(retries) }
-        : {}),
-      ...(timeoutSec !== undefined
-        ? { "x-supacloud-timeout": String(timeoutSec) }
-        : {}),
-      ...(idempotencyKey
-        ? { "x-supacloud-idempotency-key": idempotencyKey }
-        : {}),
-    },
+    headers,
   });
 
   if (error) throw error;

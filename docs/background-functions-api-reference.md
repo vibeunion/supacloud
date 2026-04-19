@@ -13,39 +13,14 @@ Use this page together with:
 For JavaScript tenants, the recommended production pattern is:
 
 1. keep using the official `supabase.functions.invoke()`
-2. enable background mode via either:
-   - `x-supacloud-*` headers
-   - function config `background_routes`
+2. enable background mode through function config `background_routes`
 3. use task APIs or Realtime to observe status changes
 
 This keeps your integration compatible with stock `supabase-js` while letting SupaCloud decide, server-side, which heavy paths must be persisted and retried as background work.
 
 ## Invocation Request
 
-Background mode can be enabled explicitly by adding:
-
-```http
-x-supacloud-async: true
-```
-
-Example:
-
-```ts
-const { data, error } = await supabase.functions.invoke("video-transcode", {
-  body: {
-    asset_id: "ast_123",
-    source_url: "https://example.com/video.mp4",
-  },
-  headers: {
-    "x-supacloud-async": "true",
-    "x-supacloud-retries": "3",
-    "x-supacloud-timeout": "300",
-    "x-supacloud-idempotency-key": "video-transcode-ast_123-v1",
-  },
-});
-```
-
-Or implicitly through function config:
+Background mode is enabled through function config:
 
 ```json
 {
@@ -57,69 +32,9 @@ Or implicitly through function config:
 }
 ```
 
-When a request path matches a configured `background_routes` entry, SupaCloud enqueues the task even if the browser did not send custom `x-supacloud-*` headers.
+When a request path matches a configured `background_routes` entry, SupaCloud enqueues the task automatically.
 
-This is the preferred integration model for `supabase-js` browser clients.
-
-## Supported Async Headers
-
-### `x-supacloud-async`
-
-Type:
-
-- string
-
-Allowed values:
-
-- `"true"`
-
-Meaning:
-
-- switches the invocation from foreground execution to background task enqueue
-
-### `x-supacloud-retries`
-
-Type:
-
-- integer encoded as string
-
-Meaning:
-
-- requested maximum retry attempts for this task
-
-Notes:
-
-- project-level limits still apply
-- if omitted, the project default is used
-
-### `x-supacloud-timeout`
-
-Type:
-
-- integer seconds encoded as string
-
-Meaning:
-
-- requested execution timeout for this task
-
-Notes:
-
-- project-level limits still apply
-- if omitted, the project default is used
-
-### `x-supacloud-idempotency-key`
-
-Type:
-
-- string
-
-Meaning:
-
-- caller-provided deduplication key for side-effecting work
-
-Recommendation:
-
-- always set this for billing, AI generation, email, webhook, and payment-adjacent tasks
+This is the preferred integration model for browser and app clients.
 
 ## Enqueue Response
 
@@ -346,7 +261,7 @@ The project background task config controls:
 - `timeout_sec_default`
 - `timeout_sec_max`
 
-Per-invocation headers can request values, but project-level limits remain authoritative.
+These project-level limits remain authoritative for all background routes.
 
 ## Error Handling Guidance
 
@@ -390,7 +305,7 @@ Recommended pattern:
 ## Best-Practice Summary
 
 - keep using official `supabase-js`
-- use SupaCloud async headers to activate background mode
+- activate background mode with `background_routes`
 - wrap the pattern in your own `invokeAsync()` helper
 - always use idempotency for side effects
 - watch `req.signal` in long-running functions

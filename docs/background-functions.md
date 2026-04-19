@@ -16,29 +16,21 @@ const { data, error } = await supabase.functions.invoke("mockup-generator", {
     product_id: "prod_123",
     image_url: "https://example.com/source.png",
   },
-  headers: {
-    "x-supacloud-async": "true",
-    "x-supacloud-retries": "3",
-    "x-supacloud-timeout": "300",
-    "x-supacloud-idempotency-key": "mockup-prod_123-v1",
-  },
 });
 
 console.log(data);
 // { task_id: "tsk_...", status: "enqueued" }
 ```
 
-In practice, SupaCloud supports two background activation modes:
+In practice, SupaCloud background execution is activated like this:
 
 1. keep using official `supabase.functions.invoke()`
-2. choose either:
-   - explicit `x-supacloud-*` headers
-   - server-side function config via `background_routes`
+2. mark heavy subpaths with server-side `background_routes`
 3. use Realtime or task APIs for status updates
 
 For browser-heavy apps, `background_routes` is the preferred production model because it does not depend on custom headers surviving CDN, cache, or frontend bundle drift.
 
-When a request is accepted for background execution, whether by header or by configured route:
+When a request is accepted for background execution through a configured route:
 
 - The request returns `202 Accepted`
 - The function runs in the background pool
