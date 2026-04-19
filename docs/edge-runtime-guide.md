@@ -21,6 +21,7 @@ Kong Gateway (API-driven, native OpenResty):
   Per-route: CORS, Rate Limiting, JWT
   /api/*        → :9090 (Management API)
   /functions/*  → :9090 (Management API sdk-proxy)
+  /realtime/*   → :9090 (Management API websocket proxy)
 ```
 
 ## Runtime Ownership
@@ -133,6 +134,50 @@ For production heavy routes, prefer function config over browser-only headers:
 ```
 
 With `background_routes`, requests that hit those subpaths will be enqueued even if the browser does not forward custom `x-supacloud-*` headers. This is the recommended model for `supabase-js` clients running behind CDNs, browser caches, or mixed frontend bundle versions.
+
+## Realtime Gateway Model
+
+Browser websocket traffic should enter through the Management API first:
+
+- public route: `/realtime/v1/websocket`
+- upstream owner: Management API websocket proxy on `:9090`
+- Realtime container remains the internal upstream
+
+Do not route browser websocket traffic straight from Kong to the Elixir Realtime container's `/socket` path. That older topology is prone to:
+
+- tenant host/path mismatches
+- wrong upstream rewrite behavior
+- websocket handshakes succeeding while channel joins fail against the wrong tenant context
+
+The current supported model is:
+
+```text
+browser -> Kong -> Management API (:9090) -> Realtime upstream
+```
+
+## Realtime Tenant Recovery
+
+If a project's Realtime channel fails after install, migration, or manual environment edits, use:
+
+```bash
+cd /opt/supacloud/packages/management-api
+bun run realtime:reconcile
+bun run realtime:reconcile-schema
+```
+
+`realtime:reconcile`:
+
+- registers missing tenants
+- updates tenant connection metadata
+- repairs tenant DB credentials
+
+`realtime:reconcile-schema`:
+
+- ensures the `realtime` schema exists in project databases
+- grants required schema/table/sequence/routine privileges
+- sets default privileges for future objects
+
+For new installs, `install.sh` now generates a valid `REALTIME_DB_ENC_KEY`. Older installs that used an invalid key may need a one-time env fix plus the reconciliation commands above.
 
 ## Compatibility Shim
 
