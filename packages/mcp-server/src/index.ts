@@ -53,11 +53,7 @@ import { registerAuthTools } from "./tools/auth-tools";
 import { registerStorageTools } from "./tools/storage-tools";
 import { registerFrontendTools } from "./tools/frontend-tools";
 import { registerDocsResources } from "./resources/docs";
-import { resolve } from "path";
-import { homedir } from "os";
-
-const { readFileSync, existsSync } = require("fs");
-const { resolve: pathResolve } = require("path");
+import { resolveSupaCloudContext } from "./context";
 
 // ── top-level --help flag ──
 const cliArgs = process.argv.slice(2);
@@ -172,39 +168,16 @@ if (showTopLevelHelp) {
 
 
 
-// ── Auto-detect .env logic for Thick Client ──
-let tempUrl = process.env.SUPABASE_URL || process.env.SUPACLOUD_API_URL || "";
-let tempKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPACLOUD_API_TOKEN || "";
-
-const envPath = pathResolve(process.cwd(), ".env");
-if ((!tempUrl || !tempKey) && existsSync(envPath)) {
-    try {
-        const envContent = readFileSync(envPath, "utf-8");
-        for (const line of envContent.split("\n")) {
-            const match = line.trim().match(/^([^=]+)=(.*)$/);
-            if (match) {
-                const k = match[1].trim();
-                const v = match[2].trim().replace(/^["']|["']$/g, "");
-                if ((k === "SUPABASE_URL" || k === "SUPACLOUD_API_URL") && !tempUrl) tempUrl = v;
-                if ((k === "SUPABASE_SERVICE_ROLE_KEY" || k === "SUPACLOUD_API_TOKEN") && !tempKey) tempKey = v;
-            }
-        }
-    } catch { /* ignore */ }
-}
-
-// ── Parse environment variables ──
-const HOST = process.env.SUPACLOUD_HOST ?? (tempUrl ? new URL(tempUrl).hostname : "");
-const SSH_USER = process.env.SUPACLOUD_SSH_USER ?? "root";
-const SSH_PORT = parseInt(process.env.SUPACLOUD_SSH_PORT ?? "22", 10);
-const SSH_KEY = process.env.SUPACLOUD_SSH_KEY ?? resolve(homedir(), ".ssh", "id_rsa");
-const SSH_PASS = process.env.SUPACLOUD_SSH_PASS ?? "";
-
-// For tenant setups, API_URL maps directly to the project domain gateway.
-// Note: Management API runs on port 9090 natively, but tenant APIs proxy via standard HTTP/HTTPS.
-let API_URL = process.env.SUPACLOUD_API_URL ?? (tempUrl ? tempUrl.replace(/\/+$/, "") : (HOST ? `http://${HOST}:9090` : ""));
-const API_TOKEN = process.env.SUPACLOUD_API_TOKEN ?? tempKey ?? "";
-const PROJECT_REF = process.env.SUPACLOUD_PROJECT_REF ?? "";
-const READ_ONLY = process.env.SUPACLOUD_READ_ONLY === "true";
+const context = resolveSupaCloudContext();
+const HOST = context.host;
+const SSH_USER = context.sshUser;
+const SSH_PORT = context.sshPort;
+const SSH_KEY = context.sshKey;
+const SSH_PASS = context.sshPass;
+const API_URL = context.apiUrl;
+const API_TOKEN = context.apiToken;
+const PROJECT_REF = context.projectRef;
+const READ_ONLY = context.readOnly;
 
 // ── Create MCP Server ──
 const serverName = PROJECT_REF ? `supacloud-${PROJECT_REF}` : "supacloud";

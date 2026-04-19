@@ -172,16 +172,12 @@ export const wsRoutes = new Elysia({ prefix: "/ws" })
             const { config } = await import("../config");
             const hostIp = config.dockerHostIp || "127.0.0.1";
             
-            let tenantHost = `${ref}.api.${config.baseDomain}`;
-            try {
-                const configRows = await sql`SELECT config FROM projects WHERE ref = ${ref} LIMIT 1`;
-                if (configRows.length > 0 && configRows[0].config) {
-                    const { resolveProjectApiHost, normalizeProjectRoutingConfig } = await import("../utils/project-routing");
-                    const routingConfig = normalizeProjectRoutingConfig(configRows[0].config as any);
-                    tenantHost = resolveProjectApiHost(ref, routingConfig);
-                }
-            } catch {}
-
+            // Elixir Realtime resolves tenants by extracting the first subdomain
+            // from the Host header. The registered external_id is the project ref,
+            // so the Host must always be "{ref}.api.{baseDomain}" — custom domains
+            // would extract the wrong subdomain and break tenant resolution.
+            const tenantHost = `${ref}.api.${config.baseDomain}`;
+            
             const targetUrl = `ws://${hostIp}:4000/socket/websocket?apikey=${apikey}&vsn=${vsn}`;
             
             const upstream = new WebSocket(targetUrl, {
