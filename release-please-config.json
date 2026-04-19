@@ -28,6 +28,11 @@
       "release-type": "node",
       "component": "mcp-server",
       "changelog-path": "CHANGELOG.md"
+    },
+    "packages/supacloud-js": {
+      "release-type": "node",
+      "component": "supacloud-js",
+      "changelog-path": "CHANGELOG.md"
     }
   },
   "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json"
