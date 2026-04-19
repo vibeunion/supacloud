@@ -59,6 +59,8 @@ Or implicitly through function config:
 
 When a request path matches a configured `background_routes` entry, SupaCloud enqueues the task even if the browser did not send custom `x-supacloud-*` headers.
 
+This is the preferred integration model for `supabase-js` browser clients.
+
 ## Supported Async Headers
 
 ### `x-supacloud-async`
@@ -182,6 +184,25 @@ Tenant handlers should therefore be:
 - idempotent
 - retry-safe
 - cancellation-aware
+
+## Realtime Observation Model
+
+Task enqueue and task observation are different responsibilities:
+
+- enqueue: `POST /functions/v1/...`
+- observe: Realtime or task polling
+
+SupaCloud recommends:
+
+1. create the task through `functions.invoke()`
+2. observe status through Realtime
+3. fall back to polling when Realtime is unavailable
+
+Realtime transport problems should not change the enqueue contract:
+
+- accepted background requests still return `202 Accepted`
+- task processing still runs through the background worker
+- only the freshness of status delivery changes
 
 ## Runtime Metadata Exposed To Functions
 

@@ -245,6 +245,7 @@ Public Edge Function traffic now enters through the Management API first:
 - `sdk-proxy` decides whether the call should:
   - enqueue a background task and return `202 Accepted`
   - or relay synchronously to the Bun Edge Runtime
+- browser and `supabase-js` callers can keep using the stock `functions.invoke()` API
 
 This gives SupaCloud a stable control point for:
 
@@ -272,6 +273,35 @@ Background execution can be activated in two ways:
 - `/generate/video`
 
 because it does not depend on the browser successfully forwarding custom headers.
+
+### Realtime Routing And Recovery
+
+Realtime traffic also enters through the Management API first:
+
+- `/realtime/v1/websocket` is routed to `:9090`
+- the Management API owns the websocket upgrade and proxies upstream Realtime traffic
+- Kong should not point browser websocket traffic directly at the Elixir Realtime container
+
+This avoids tenant/path mismatches such as:
+
+- `/realtime/v1/websocket` being rewritten into the wrong upstream `/socket` path
+- browser websocket requests being interpreted as the wrong tenant
+
+If Realtime subscriptions fail after installation or migration, SupaCloud now includes one-off reconciliation commands:
+
+```bash
+cd packages/management-api
+bun run realtime:reconcile
+bun run realtime:reconcile-schema
+```
+
+Use them to:
+
+- register any missing Realtime tenants
+- repair tenant connection metadata
+- grant required `realtime` schema privileges in project databases
+
+For new installs, `install.sh` now generates a valid `REALTIME_DB_ENC_KEY`, which prevents the historical `Bad key size` failure during tenant registration.
 
 | Feature | Current Bun Runtime |
 |---------|---------------------|

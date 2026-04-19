@@ -44,6 +44,22 @@ When a request is accepted for background execution, whether by header or by con
 - The function runs in the background pool
 - The platform tracks attempts, logs, retries, cancellation, and DLQ state
 
+## Recommended Production Shape
+
+For `supabase-js` apps, the cleanest production model is:
+
+1. keep the public invoke call standard
+2. mark heavy subpaths with server-side `background_routes`
+3. use Realtime for status notifications
+4. keep polling as a fallback rather than as the primary state channel
+
+This avoids making browser correctness depend on custom `x-supacloud-*` headers surviving:
+
+- old frontend bundles
+- CDN caches
+- cross-origin edge proxies
+- browser preflight/header differences
+
 ## Execution Model
 
 Background Functions are intentionally bounded:
@@ -186,3 +202,28 @@ Each task exposes:
 - retry history
 
 The Web Console task page is the best place to inspect a running or failed background function.
+
+## Realtime Status Delivery
+
+Background execution and Realtime are intentionally separate concerns:
+
+- task creation still happens through HTTP invoke and background enqueue
+- Realtime is only the status transport
+
+That means Realtime issues should degrade task UX, not task correctness:
+
+- websocket/channel healthy → live task status updates
+- websocket/channel unhealthy → fallback polling against task APIs or `public.tasks`
+
+If task status subscriptions fail, first verify the platform side:
+
+```bash
+cd packages/management-api
+bun run realtime:reconcile
+bun run realtime:reconcile-schema
+```
+
+These commands repair the two historical failure modes:
+
+- missing Realtime tenants
+- missing `realtime` schema/database privileges
