@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.10.4](https://github.com/zuohuadong/supacloud/compare/management-api-v0.10.3...management-api-v0.10.4) (2026-04-19)
+
+
+### 🐛 Bug Fixes
+
+* **management-api:** set duplex on sdk-proxy test requests ([80f852d](https://github.com/zuohuadong/supacloud/commit/80f852d709294204bb502d537ceaf5ec5f86cf1c))
+
+
+### 🔧 Miscellaneous Chores
+
+* release main ([239aea7](https://github.com/zuohuadong/supacloud/commit/239aea7e22bae05cc3c7840bc6c0fd7b322a8862))
+* release main ([8d020be](https://github.com/zuohuadong/supacloud/commit/8d020be4e8d374f0cf0498a97e4beb6a88e57fb0))
+
 ## [0.10.3](https://github.com/zuohuadong/supacloud/compare/management-api-v0.10.2...management-api-v0.10.3) (2026-04-19)
 
 
