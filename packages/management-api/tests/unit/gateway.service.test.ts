@@ -86,14 +86,14 @@ describe("GatewayService", () => {
             (c) => c.method === "PUT" && c.url.includes("/services/svc-realtime-testref123")
         );
         expect(realtimeService).toBeDefined();
-        expect(realtimeService?.body?.url).toMatch(/http:\/\/.*:(8080|9090)\/ws/);
+        expect(realtimeService?.body?.url).toMatch(/http:\/\/.*:(8080|9090)$/);
 
         const realtimeRoute = calls.find(
             (c) => c.method === "PUT" && c.url.includes("/routes/route-svc-realtime-testref123")
         );
         expect(realtimeRoute).toBeDefined();
         expect(realtimeRoute?.body?.paths).toEqual(["/realtime/v1/websocket"]);
-        expect(realtimeRoute?.body?.protocols).toEqual(["http", "https", "ws", "wss"]);
+        expect(realtimeRoute?.body?.protocols).toEqual(["http", "https"]);
         expect(realtimeRoute?.body?.strip_path).toBe(false);
 
         globalThis.fetch = originalFetch;

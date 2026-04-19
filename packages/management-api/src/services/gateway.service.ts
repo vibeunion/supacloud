@@ -520,13 +520,17 @@ export class GatewayService {
             });
             await this.ensureServiceAndRoute({
                 name: `svc-realtime-${projectRef}`,
-                url: `http://${hostIp}:${config.port}/ws`,
+                url: `http://${hostIp}:${config.port}`,
                 paths: ["/realtime/v1/websocket"],
                 hosts,
                 projectRef,
                 stripPath: false,
                 readTimeout: 86400000,
-                protocols: ["http", "https", "ws", "wss"],
+                // Kong models websocket proxying through the http/https protocols.
+                // The management API's Bun.serve fetch handler upgrades /realtime/v1/*
+                // requests directly, so route this path to the root server rather than
+                // the Elysia /ws helper routes.
+                protocols: ["http", "https"],
             });
 
             // Ensure Studio routes (Management API proxy loopback for SPA fallback)
