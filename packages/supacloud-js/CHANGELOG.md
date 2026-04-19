@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.2](https://github.com/zuohuadong/supacloud/compare/supacloud-js-v0.11.1...supacloud-js-v0.11.2) (2026-04-19)
+
+
+### 🐛 Bug Fixes
+
+* **supacloud-js:** publish built dist artifacts ([8f36534](https://github.com/zuohuadong/supacloud/commit/8f365342e7c8bffcf45f69445474a62bc81fb042))
+
 ## [0.11.1](https://github.com/zuohuadong/supacloud/compare/supacloud-js-v0.11.0...supacloud-js-v0.11.1) (2026-04-19)
 
 
