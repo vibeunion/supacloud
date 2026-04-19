@@ -45,6 +45,9 @@ This SDK is intentionally thin:
 - `supabase-js` still owns auth, storage, database, Realtime transport, and plain function invokes
 - `@supacloud/js` owns SupaCloud platform semantics layered on top of that transport
 
+`tasks.submit()` expects the target function path to be configured in `background_routes`.
+That keeps frontend calls compatible with strict CORS deployments while preserving the same task receipt API.
+
 The current package focuses on:
 
 - `tasks.submit`

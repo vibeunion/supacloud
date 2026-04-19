@@ -48,7 +48,7 @@ describe("@supacloud/js", () => {
     mock.restore();
   });
 
-  test("submit injects supacloud async headers and returns a receipt", async () => {
+  test("submit preserves plain invoke options and returns a receipt", async () => {
     const { supabase } = createFakeSupabase();
     supabase.functions.invoke.mockResolvedValue({
       data: { task_id: "tsk_123", status: "enqueued" },
@@ -72,12 +72,7 @@ describe("@supacloud/js", () => {
     expect(supabase.functions.invoke).toHaveBeenCalledTimes(1);
     expect(supabase.functions.invoke.mock.calls[0]?.[1]).toMatchObject({
       body: { imageId: "img_1" },
-      headers: {
-        "x-supacloud-async": "true",
-        "x-supacloud-retries": "2",
-        "x-supacloud-timeout": "300",
-        "x-supacloud-idempotency-key": "crop-img_1-v1",
-      },
+      headers: {},
     });
   });
 
