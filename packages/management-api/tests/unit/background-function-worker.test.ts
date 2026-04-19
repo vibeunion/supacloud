@@ -1,4 +1,4 @@
-import { afterAll, beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterAll, afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import type { ProjectTask } from "../../src/db";
 import { TaskStatus, TaskType } from "../../src/db";
 
@@ -108,6 +108,8 @@ function makeTask(overrides: Partial<ProjectTask> = {}): ProjectTask {
 // ─── Tests ──────────────────────────────────────────────────────────────────
 
 describe("BackgroundFunctionWorker", () => {
+  const originalFetch = globalThis.fetch;
+
   beforeEach(() => {
     claimNextTask.mockReset();
     cancelTask.mockReset();
@@ -136,6 +138,11 @@ describe("BackgroundFunctionWorker", () => {
     startTaskAttempt.mockResolvedValue({ id: "att_1" } as any);
     extendLease.mockResolvedValue(null);
     markTaskRunning.mockResolvedValue(null);
+    globalThis.fetch = originalFetch;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
   });
 
   describe("start / stop lifecycle", () => {
