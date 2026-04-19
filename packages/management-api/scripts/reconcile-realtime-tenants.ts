@@ -29,10 +29,10 @@ function adminJwt(secret: string): string {
       exp: now + 3600,
     }),
   ).toString("base64url");
-  const signature = Bun.CryptoHasher.hash(
+  const signature = Bun.CryptoHasher.hmac(
     "sha256",
+    secret,
     `${header}.${payload}`,
-    config.realtimeApiSecret || config.jwtSecret,
     "base64url",
   );
   return `${header}.${payload}.${signature}`;
