@@ -169,7 +169,12 @@ export const config: Config = {
   tenantConfigDir: getEnv("TENANT_CONFIG_DIR", "/opt/supabase/volumes/api/kong_tenants"),
   edgeFunctionsDir: getEnv("EDGE_FUNCTIONS_DIR", "/opt/supacloud/functions"),
   homePath: getEnv("HOME", "/root"),
-  masterToken: getEnv("MASTER_TOKEN", ""),
+  masterToken: getEnv(
+    "MASTER_TOKEN",
+    process.env.NODE_ENV === "test" || process.env.BUN_ENV === "test"
+      ? "dev-master-token"
+      : "",
+  ),
   logLevel: getEnv("LOG_LEVEL", "info"),
   dockerHostIp: getEnv("DOCKER_HOST_IP", getEnv("INTERNAL_IP", "127.0.0.1")),
 
@@ -208,6 +213,14 @@ export const config: Config = {
   edgeRuntimePort,
   edgeRuntimeInternal,
   edgeRuntimeBackgroundInternal: getEnv("EDGE_RUNTIME_BACKGROUND_INTERNAL", edgeRuntimeInternal),
-  edgeRuntimeMasterKey: getEnv("EDGE_RUNTIME_MASTER_KEY", getEnv("MASTER_TOKEN", "")),
+  edgeRuntimeMasterKey: getEnv(
+    "EDGE_RUNTIME_MASTER_KEY",
+    getEnv(
+      "MASTER_TOKEN",
+      process.env.NODE_ENV === "test" || process.env.BUN_ENV === "test"
+        ? "dev-master-token"
+        : "",
+    ),
+  ),
   bunPath: getEnv("BUN_PATH", "bun"),
 };
