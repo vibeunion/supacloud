@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.1](https://github.com/zuohuadong/supacloud/compare/web-console-v0.8.0...web-console-v0.8.1) (2026-04-19)
+
+
+### 🔧 Miscellaneous Chores
+
+* **ts:** finish TypeScript 6 typecheck migration ([5e2ae90](https://github.com/zuohuadong/supacloud/commit/5e2ae9024cf356eb6892402a62bf4036b8ad00dc))
+
 ## [0.8.0](https://github.com/zuohuadong/supacloud/compare/web-console-v0.7.0...web-console-v0.8.0) (2026-04-17)
 
 
