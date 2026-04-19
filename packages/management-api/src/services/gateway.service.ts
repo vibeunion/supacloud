@@ -9,10 +9,23 @@ import {
     resolveProjectStudioHost,
 } from "../utils/project-routing";
 
-export const DEFAULT_CORS_HEADERS = ["Accept", "Accept-Language", "Content-Language", "Authorization", "Content-Type", "X-Api-Version", "x-supabase-api-version", "X-Client-Info", "apikey", "Prefer", "Content-Profile", "accept-profile", "Range", "Range-Unit", "x-upsert", "Cache-Control", "x-retry-count", "x-metadata", "x-supacloud-async", "x-supacloud-retries", "x-supacloud-timeout"];
-export const DEFAULT_CORS_EXPOSED = ["Content-Length", "Content-Range", "X-JSON", "x-supabase-api-version", "X-Client-Info", "Prefer", "Content-Profile", "accept-profile", "Range", "Range-Unit", "X-Relay-Error", "link", "x-total-count"];
+export const DEFAULT_CORS_HEADERS = [
+    "Accept", "Accept-Language", "Authorization", "Content-Language", "Content-Type",
+    "apikey", "x-client-info", "x-project-ref", "X-Api-Version", "x-supabase-api-version",
+    "Prefer", "Content-Profile", "accept-profile", "Range", "Range-Unit",
+    "x-upsert", "Cache-Control", "x-retry-count", "x-metadata",
+    "x-supacloud-async", "x-supacloud-retries", "x-supacloud-timeout",
+];
+export const DEFAULT_CORS_EXPOSED = [
+    "Content-Length", "Content-Range", "X-Content-Range", "X-JSON",
+    "x-supabase-api-version", "X-Client-Info", "Prefer",
+    "Content-Profile", "accept-profile", "Range", "Range-Unit",
+    "X-Relay-Error", "link", "x-total-count",
+];
 export const DEFAULT_CORS_ORIGINS = [
-  "~^https?://.*$"
+    "~^https?://.*\\.dbbaby\\.top$",
+    "~^https?://localhost(:[0-9]+)?$",
+    "~^https?://127\\.0\\.0\\.1(:[0-9]+)?$",
 ];
 
 import * as path from "node:path";
@@ -280,8 +293,9 @@ export class GatewayService {
                             methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
                             headers: DEFAULT_CORS_HEADERS,
                             exposed_headers: DEFAULT_CORS_EXPOSED,
-                            credentials: true,
-                            max_age: 3600,
+                            credentials: false,
+                            max_age: 86400,
+                            preflight_continue: false,
                         },
                     };
 
@@ -432,8 +446,9 @@ export class GatewayService {
             methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
             headers: DEFAULT_CORS_HEADERS,
             exposed_headers: DEFAULT_CORS_EXPOSED,
-            credentials: true,
-            max_age: 3600,
+            credentials: false,
+            max_age: 86400,
+            preflight_continue: false,
         });
 
         // 5. Removed: Access-Control-Allow-Origin:* via response-transformer

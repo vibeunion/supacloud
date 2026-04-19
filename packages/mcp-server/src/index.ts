@@ -59,8 +59,12 @@ import { homedir } from "os";
 const { readFileSync, existsSync } = require("fs");
 const { resolve: pathResolve } = require("path");
 
-// ── --help flag ──
-if (process.argv.includes("--help") || process.argv.includes("-h")) {
+// ── top-level --help flag ──
+const cliArgs = process.argv.slice(2);
+const showTopLevelHelp =
+    cliArgs.length === 1 && (cliArgs[0] === "--help" || cliArgs[0] === "-h");
+
+if (showTopLevelHelp) {
     const pkg = require("../package.json");
     process.stderr.write(`
   ╔═══════════════════════════════════════════════════════════╗
