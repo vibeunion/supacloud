@@ -55,6 +55,7 @@ jobs:
         working-directory: packages/supacloud-js
         run: |
           bun install
+          bun run build
           bunx npm publish --provenance --access public
 
       - name: Publish cli to NPM
@@ -62,6 +63,7 @@ jobs:
         working-directory: packages/cli
         run: |
           bun install
+          bun run build
           bunx npm publish --provenance --access public
 
       - name: Publish admin to NPM
@@ -69,4 +71,5 @@ jobs:
         working-directory: packages/admin
         run: |
           bun install
+          bun run build
           bunx npm publish --provenance --access public
