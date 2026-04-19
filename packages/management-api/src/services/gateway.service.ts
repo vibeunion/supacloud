@@ -520,12 +520,13 @@ export class GatewayService {
             });
             await this.ensureServiceAndRoute({
                 name: `svc-realtime-${projectRef}`,
-                url: `http://${hostIp}:${opts?.realtimeWsPort || 4000}/socket`,
-                paths: ["/realtime/v1"],
+                url: `http://${hostIp}:${config.port}/ws`,
+                paths: ["/realtime/v1/websocket"],
                 hosts,
                 projectRef,
+                stripPath: false,
                 readTimeout: 86400000,
-                protocols: ["http", "https", "grpc", "grpcs", "ws", "wss"],
+                protocols: ["http", "https", "ws", "wss"],
             });
 
             // Ensure Studio routes (Management API proxy loopback for SPA fallback)

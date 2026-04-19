@@ -56,7 +56,7 @@ describe("GatewayService", () => {
         expect(DEFAULT_CORS_HEADERS).toContain("x-supacloud-timeout");
     });
 
-    test("setupUpstream should configure realtime route for supabase-js websocket", async () => {
+    test("setupUpstream should configure realtime route through management websocket proxy", async () => {
         const originalFetch = globalThis.fetch;
         const calls: Array<{ url: string; method: string; body: Record<string, unknown> | null }> = [];
 
@@ -86,14 +86,15 @@ describe("GatewayService", () => {
             (c) => c.method === "PUT" && c.url.includes("/services/svc-realtime-testref123")
         );
         expect(realtimeService).toBeDefined();
-        expect(realtimeService?.body?.url).toMatch(/http:\/\/.*:4000\/socket/);
+        expect(realtimeService?.body?.url).toMatch(/http:\/\/.*:(8080|9090)\/ws/);
 
         const realtimeRoute = calls.find(
             (c) => c.method === "PUT" && c.url.includes("/routes/route-svc-realtime-testref123")
         );
         expect(realtimeRoute).toBeDefined();
-        expect(realtimeRoute?.body?.paths).toEqual(["/realtime/v1"]);
-        expect(realtimeRoute?.body?.protocols).toEqual(["http", "https", "grpc", "grpcs", "ws", "wss"]);
+        expect(realtimeRoute?.body?.paths).toEqual(["/realtime/v1/websocket"]);
+        expect(realtimeRoute?.body?.protocols).toEqual(["http", "https", "ws", "wss"]);
+        expect(realtimeRoute?.body?.strip_path).toBe(false);
 
         globalThis.fetch = originalFetch;
     });
