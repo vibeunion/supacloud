@@ -71,12 +71,19 @@ export type SupaCloudTaskListFilters = {
 };
 
 export type SupaCloudTaskSubmitOptions = {
-  body?: unknown;
+  body?:
+    | string
+    | Blob
+    | ArrayBuffer
+    | FormData
+    | File
+    | ReadableStream<Uint8Array>
+    | Record<string, unknown>;
   headers?: Record<string, string>;
   retries?: number;
   timeoutSec?: number;
   idempotencyKey?: string;
-  method?: string;
+  method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 };
 
 export type SupaCloudTaskWaitOptions = {

@@ -3,7 +3,13 @@ import { createSupaCloudClient, SupaCloudTaskSubmitError } from "./index";
 
 function createFakeSupabase() {
   const removeChannel = mock(async () => "ok");
-  const channelInstance = {
+  type FakeChannel = {
+    on: ReturnType<typeof mock>;
+    subscribe: ReturnType<typeof mock>;
+  };
+
+  let channelInstance: FakeChannel;
+  channelInstance = {
     on: mock(function () {
       return channelInstance;
     }),
@@ -172,7 +178,8 @@ describe("@supacloud/js", () => {
       | ((status: string, error?: unknown) => void | Promise<void>)
       | undefined;
 
-    channelInstance.subscribe.mockImplementation((handler) => {
+    channelInstance.subscribe.mockImplementation((...args: unknown[]) => {
+      const [handler] = args as [((status: string, error?: unknown) => void | Promise<void>)?];
       subscribeHandler = handler;
       return channelInstance;
     });
