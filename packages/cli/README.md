@@ -12,8 +12,18 @@ Examples:
 ```bash
 npx @supacloud/cli status
 npx @supacloud/cli project get
+npx @supacloud/cli project logs --log_type database
 npx @supacloud/cli database query --sql "select now()"
 npx @supacloud/cli frontend list --ref abc123
 ```
+
+Project commands owned by this CLI:
+
+- `project get`
+- `project health`
+- `project logs`
+- `project api_keys`
+- `project settings`
+- `project tasks`
 
 For server installation, SSH diagnostics, and tenant administration, use `@supacloud/admin`.

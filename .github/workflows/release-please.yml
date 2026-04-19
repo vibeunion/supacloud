@@ -16,8 +16,9 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       releases_created: ${{ steps.release.outputs.releases_created }}
-      mcp_server_released: ${{ steps.release.outputs['packages/mcp-server--release_created'] }}
       supacloud_js_released: ${{ steps.release.outputs['packages/supacloud-js--release_created'] }}
+      cli_released: ${{ steps.release.outputs['packages/cli--release_created'] }}
+      admin_released: ${{ steps.release.outputs['packages/admin--release_created'] }}
     steps:
       - uses: googleapis/release-please-action@v4
         id: release
@@ -49,16 +50,23 @@ jobs:
         with:
           bun-version: latest
 
-      - name: Publish mcp-server to NPM
-        if: ${{ needs.release-please.outputs.mcp_server_released == 'true' }}
-        working-directory: packages/mcp-server
+      - name: Publish supacloud-js to NPM
+        if: ${{ needs.release-please.outputs.supacloud_js_released == 'true' }}
+        working-directory: packages/supacloud-js
         run: |
           bun install
           bunx npm publish --provenance --access public
 
-      - name: Publish supacloud-js to NPM
-        if: ${{ needs.release-please.outputs.supacloud_js_released == 'true' }}
-        working-directory: packages/supacloud-js
+      - name: Publish cli to NPM
+        if: ${{ needs.release-please.outputs.cli_released == 'true' }}
+        working-directory: packages/cli
+        run: |
+          bun install
+          bunx npm publish --provenance --access public
+
+      - name: Publish admin to NPM
+        if: ${{ needs.release-please.outputs.admin_released == 'true' }}
+        working-directory: packages/admin
         run: |
           bun install
           bunx npm publish --provenance --access public

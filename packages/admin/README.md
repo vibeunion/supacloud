@@ -17,5 +17,16 @@ Examples:
 npx @supacloud/admin status
 npx @supacloud/admin ssh ping
 npx @supacloud/admin ssh diagnose
+npx @supacloud/admin project create --name my-app
 npx @supacloud/admin project list
 ```
+
+Project commands owned by this CLI:
+
+- `project list`
+- `project create`
+- `project delete`
+- `project pause`
+- `project restore`
+- `project restart`
+- `project update_settings`

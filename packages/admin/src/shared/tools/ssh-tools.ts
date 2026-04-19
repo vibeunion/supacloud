@@ -3,7 +3,6 @@
  * Install, upgrade, diagnose, exec, tenant mgmt — all via SSH
  */
 import { z } from "zod";
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { SshTransport } from "../transports/ssh";
 
 const SAFE_CONTAINER_NAME = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/;
@@ -68,7 +67,7 @@ function assertSafeExecCommand(command: string): string {
     return trimmed;
 }
 
-export function registerSshTools(server: McpServer, ssh: SshTransport): void {
+export function registerSshTools(server: { tool: (...args: any[]) => void }, ssh: SshTransport): void {
     server.tool(
         "ssh",
         `Server management via SSH. Available before & after SupaCloud installation.
@@ -98,7 +97,7 @@ Actions: ping, setup, install, upgrade, diagnose, exec, troubleshoot, container_
             schemas: z.string().optional().describe("[tenant_migrate] Schemas (default: public,auth,storage)"),
             data_only: z.boolean().optional().describe("[tenant_migrate] Data only, no structure"),
         },
-        async (args) => {
+        async (args: any) => {
             const { action } = args;
             let text: string;
 
@@ -282,7 +281,7 @@ Actions: ping, setup, install, upgrade, diagnose, exec, troubleshoot, container_
                     const targetRef = assertSafeProjectRef(args.target_ref, "target_ref");
                     const s = args.schemas || "public,auth,storage";
                     if (!/^[a-z_,\s]+$/.test(s)) throw new Error("Invalid schemas");
-                    const schemaArgs = s.split(",").map(x => x.trim()).filter(Boolean).map(x => `-n ${x}`).join(" ");
+                    const schemaArgs = s.split(",").map((x: string) => x.trim()).filter(Boolean).map((x: string) => `-n ${x}`).join(" ");
                     const df = args.data_only ? "--data-only" : "";
                     const cmd = [
                         `echo 'Migrating: supa_${sourceRef} → supa_${targetRef}'`,

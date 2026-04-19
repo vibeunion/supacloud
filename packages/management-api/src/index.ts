@@ -787,8 +787,6 @@ async function bootstrap() {
       process.exit(1);
     }
 
-    // Use Bun.serve with custom fetch to intercept /mcp before Elysia touches the body
-    const { handleMcp } = await import("./routes/mcp");
     Bun.serve({
       port: config.port,
       websocket: {
@@ -967,23 +965,6 @@ async function bootstrap() {
           return new Response("WebSocket upgrade failed", { status: 500 });
         }
 
-        // Route /mcp paths directly to MCP handler (bypasses Elysia body parsing)
-        if (url.pathname.startsWith("/mcp")) {
-          if (
-            url.pathname === "/mcp" ||
-            url.pathname.startsWith("/mcp/sql") ||
-            url.pathname.startsWith("/mcp/tokens") ||
-            url.pathname.startsWith("/mcp/logs") ||
-            url.pathname.startsWith("/mcp/migrations")
-          ) {
-            return handleMcp(request);
-          }
-          // Rewrite /mcp/v1... to /v1... and pass to Elysia
-          const newUrl = new URL(request.url);
-          newUrl.pathname = newUrl.pathname.replace(/^\/mcp/, "");
-          const newReq = new Request(newUrl.toString(), request);
-          return app.fetch(newReq);
-        }
         // Everything else goes through Elysia
         return app.fetch(request);
       },
