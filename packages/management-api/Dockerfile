@@ -14,7 +14,7 @@ COPY packages/management-api ./packages/management-api
 
 WORKDIR /app/packages/management-api
 
-# Build MCP server and API
+# Build management API
 RUN bun run build
 
 EXPOSE 9090

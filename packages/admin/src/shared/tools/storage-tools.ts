@@ -2,10 +2,9 @@
  * Storage — Compound tool (5→1)
  */
 import { z } from "zod";
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { HttpTransport } from "../transports/http";
 
-export function registerStorageTools(server: McpServer, http: HttpTransport): void {
+export function registerStorageTools(server: { tool: (...args: any[]) => void }, http: HttpTransport): void {
     server.tool(
         "storage",
         `S3/MinIO storage management.
@@ -18,7 +17,8 @@ Actions: status, list_buckets, list_files, upload_base64, delete_file`,
             base64_content: z.string().optional().describe("[upload_base64] Base64 encoded content"),
             mime_type: z.string().optional().describe("[upload_base64] MIME type (default: application/octet-stream)"),
         },
-        async ({ action, ref, bucket, filename, base64_content, mime_type }) => {
+        async (args: any) => {
+            const { action, ref, bucket, filename, base64_content, mime_type } = args;
             const need = (f: string, v: any) => { if (!v) throw new Error(`'${f}' required for '${action}'`); };
             const fmt = (data: unknown, label: string, fmtFn: (d: any) => string) => {
                 return Array.isArray(data) ? fmtFn(data) : JSON.stringify(data, null, 2);

@@ -2,10 +2,9 @@
  * Advanced — Split into 3 compound tools: edge_functions, secrets, platform
  */
 import { z } from "zod";
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { HttpTransport } from "../transports/http";
 
-export function registerAdvancedTools(server: McpServer, http: HttpTransport): void {
+export function registerAdvancedTools(server: { tool: (...args: any[]) => void }, http: HttpTransport): void {
 
     // ═══ Edge Functions (5→1) ═══
     server.tool(
@@ -22,7 +21,9 @@ Actions: list, deploy, deploy_bundle, source, delete, check`,
             entrypoint: z.string().optional().describe("[deploy_bundle] Entrypoint file (default: index.ts)"),
             minify: z.boolean().optional().describe("[deploy/deploy_bundle] Minify bundle"),
         },
-        async ({ action, ref, slug, code, path: pathArg, files, entrypoint, minify }) => {
+        async (args: any) => {
+            const { action, ref, slug, path: pathArg, files, entrypoint, minify } = args;
+            let code = args.code as string | undefined;
             const need = (f: string, v: any) => { if (!v) throw new Error(`'${f}' required for '${action}'`); };
 
             let text: string;
@@ -132,7 +133,8 @@ Actions: list, upsert, delete`,
                 .describe("[upsert] Secret list: [{name:'KEY', value:'...'}]"),
             name: z.string().optional().describe("[delete] Secret name to delete"),
         },
-        async ({ action, ref, secrets, name }) => {
+        async (args: any) => {
+            const { action, ref, secrets, name } = args;
             let text: string;
             switch (action) {
                 case "list":
@@ -169,7 +171,8 @@ Actions: metrics, list_backups, create_backup, network, update_network, list_org
             slug: z.string().optional().describe("[get_org] Organization slug"),
             allowed_cidrs: z.array(z.string()).optional().describe("[update_network] Allowed CIDRs"),
         },
-        async ({ action, ref, slug, allowed_cidrs }) => {
+        async (args: any) => {
+            const { action, ref, slug, allowed_cidrs } = args;
             const need = (f: string, v: any) => { if (!v) throw new Error(`'${f}' required for '${action}'`); };
             let text: string;
             switch (action) {
