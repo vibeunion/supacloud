@@ -936,12 +936,25 @@ async function bootstrap() {
             if (val) requestHeaders[h] = val;
           }
           // Supabase Realtime identifies tenants by hostname subdomain.
-          // With SEED_SELF_HOST=true, the self-seeded tenant has external_id 'realtime-dev'.
-          // In CI, we always route to the self-seeded tenant.
+          // Resolve the actual API host for this project, respecting custom domains
+          // configured via the web console (custom_domain / api_domain in project config).
           const isCI = process.env.CI === "true" || process.env.GITHUB_ACTIONS === "true";
-          const tenantHost = isCI
-            ? "realtime-dev.supabase-realtime"
-            : (projectRef ? `${projectRef}.supabase.co` : url.host);
+          let tenantHost: string;
+          if (isCI) {
+            tenantHost = "realtime-dev.supabase-realtime";
+          } else if (projectRef) {
+            try {
+              const { resolveProjectApiHost, normalizeProjectRoutingConfig } = await import("./utils/project-routing");
+              const rows = await sql`SELECT config FROM projects WHERE ref = ${projectRef} LIMIT 1`;
+              const projectConfig = rows.length > 0 ? rows[0].config : null;
+              const routingConfig = normalizeProjectRoutingConfig(projectConfig as any);
+              tenantHost = resolveProjectApiHost(projectRef, routingConfig);
+            } catch {
+              tenantHost = `${projectRef}.api.${config.baseDomain}`;
+            }
+          } else {
+            tenantHost = url.host;
+          }
           requestHeaders["host"] = tenantHost;
           requestHeaders["x-forwarded-host"] = tenantHost;
           requestHeaders["x-forwarded-proto"] = url.protocol.replace(":", "");

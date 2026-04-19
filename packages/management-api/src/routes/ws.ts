@@ -59,11 +59,34 @@ export function getWsConnectionCount(): number {
 }
 
 export const wsRoutes = new Elysia({ prefix: "/ws" })
-  .get("/realtime/v1/health", () => ({
-    status: "ok",
-    timestamp: new Date().toISOString(),
-    connections: getWsConnectionCount(),
-  }))
+  .get("/realtime/v1/health", () => {
+    const projectConnections: Record<string, number> = {};
+    for (const [ref, count] of projectConnectionCounts) {
+      if (count > 0) projectConnections[ref] = count;
+    }
+    return {
+      status: "ok",
+      timestamp: new Date().toISOString(),
+      task_subscribers: taskSubscribers.size,
+      realtime_projects: Object.keys(projectConnections).length,
+      realtime_connections: Object.values(projectConnections).reduce((a, b) => a + b, 0),
+      project_connections: projectConnections,
+    };
+  })
+  .get("/realtime/v1/status", ({ query, set }) => {
+    const ref = query.project_ref;
+    if (!ref) {
+      set.status = 400;
+      return { error: "project_ref query parameter required" };
+    }
+    const connections = projectConnectionCounts.get(ref) || 0;
+    return {
+      project_ref: ref,
+      realtime_connections: connections,
+      max_connections: MAX_CONNECTIONS_PER_PROJECT,
+      connection_available: connections < MAX_CONNECTIONS_PER_PROJECT,
+    };
+  })
   .ws("/tasks", {
     body: t.Optional(t.Object({
       type: t.Optional(t.String()),
@@ -149,13 +172,21 @@ export const wsRoutes = new Elysia({ prefix: "/ws" })
             const { config } = await import("../config");
             const hostIp = config.dockerHostIp || "127.0.0.1";
             
-            // Proxy connection to Official Elixir Realtime for Presence & Broadcast CRDTs
-            // We connect directly to the native Elixir container (4000/socket/websocket) bypassing Kong to avoid infinite loops
+            let tenantHost = `${ref}.api.${config.baseDomain}`;
+            try {
+                const configRows = await sql`SELECT config FROM projects WHERE ref = ${ref} LIMIT 1`;
+                if (configRows.length > 0 && configRows[0].config) {
+                    const { resolveProjectApiHost, normalizeProjectRoutingConfig } = await import("../utils/project-routing");
+                    const routingConfig = normalizeProjectRoutingConfig(configRows[0].config as any);
+                    tenantHost = resolveProjectApiHost(ref, routingConfig);
+                }
+            } catch {}
+
             const targetUrl = `ws://${hostIp}:4000/socket/websocket?apikey=${apikey}&vsn=${vsn}`;
             
             const upstream = new WebSocket(targetUrl, {
                 headers: {
-                    "Host": `${ref}.api.${config.baseDomain}`,
+                    "Host": tenantHost,
                     "x-project-ref": ref
                 }
             } as any);
