@@ -1,17 +1,21 @@
 #!/usr/bin/env node
 
-import { runCli } from "../../mcp-server/src/cli";
-import { resolveSupaCloudContext } from "../../mcp-server/src/context";
-import { HttpTransport } from "../../mcp-server/src/transports/http";
-import { registerDatabaseTools } from "../../mcp-server/src/tools/database-tools";
-import { registerAuthTools } from "../../mcp-server/src/tools/auth-tools";
-import { registerStorageTools } from "../../mcp-server/src/tools/storage-tools";
-import { registerAdvancedTools } from "../../mcp-server/src/tools/advanced-tools";
-import { registerFrontendTools } from "../../mcp-server/src/tools/frontend-tools";
-import { registerProjectTools } from "../../mcp-server/src/tools/project-tools";
+import { z } from "zod";
+import { runCli } from "./shared/cli";
+import { resolveSupaCloudContext } from "./shared/context";
+import { HttpTransport } from "./shared/transports/http";
+import { registerDatabaseTools } from "./shared/tools/database-tools";
+import { registerAuthTools } from "./shared/tools/auth-tools";
+import { registerStorageTools } from "./shared/tools/storage-tools";
+import { registerAdvancedTools } from "./shared/tools/advanced-tools";
+import { registerFrontendTools } from "./shared/tools/frontend-tools";
+import { registerUserProjectCliTools } from "./shared/tools/project-cli-tools";
 
 type ToolEntry = { schema: any; callback: (args: any) => Promise<any> };
 type ToolMap = Record<string, ToolEntry>;
+
+const projectActionSchema = z.enum(["get", "health", "logs", "api_keys", "settings", "tasks"]);
+const genericActionSchema = z.string();
 
 function captureTools(register: (server: { tool: (...args: any[]) => void }) => void): ToolMap {
     const tools: ToolMap = {};
@@ -58,6 +62,7 @@ EXAMPLES
 
   supacloud status
   supacloud project get
+  supacloud project logs --log_type database
   supacloud frontend list --ref abc123
   supacloud database query --sql "select now()"
   supacloud edge_functions deploy --ref abc123 --slug hello --path ./supabase/functions/hello
@@ -98,7 +103,45 @@ function createCliTools(): ToolMap {
         },
     };
 
+    const registerContextAwareHelp = () => {
+        tools.project = {
+            schema: { action: projectActionSchema },
+            callback: async () => ({
+                content: [
+                    {
+                        type: "text" as const,
+                        text: [
+                            "⚠️ Project commands need a project-scoped API context.",
+                            "",
+                            "Provide one of these sources:",
+                            "  - .env with SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY",
+                            "  - SUPACLOUD_API_URL + SUPACLOUD_API_TOKEN",
+                            "",
+                            "Then retry commands such as:",
+                            "  supacloud project get",
+                            "  supacloud project logs --log_type database",
+                        ].join("\n"),
+                    },
+                ],
+            }),
+        };
+        for (const name of ["database", "auth", "storage", "edge_functions", "secrets", "frontend"]) {
+            tools[name] = {
+                schema: { action: genericActionSchema },
+                callback: async () => ({
+                    content: [
+                        {
+                            type: "text" as const,
+                            text: "⚠️ This command requires project-scoped API context. Run `supacloud status` to inspect current detection.",
+                        },
+                    ],
+                }),
+            };
+        }
+    };
+
     if (!context.apiUrl || !context.apiToken) {
+        registerContextAwareHelp();
         tools.setup_help = {
             schema: {},
             callback: async () => ({
@@ -136,6 +179,9 @@ function createCliTools(): ToolMap {
 
     const assign = (extra: ToolMap) => Object.assign(tools, extra);
 
+    assign(captureTools((server) => registerUserProjectCliTools(server as any, http, {
+        projectRef: context.projectRef || undefined,
+    })));
     assign(captureTools((server) => registerDatabaseTools(server as any, http, {
         projectRef: context.projectRef || undefined,
         readOnly: context.readOnly,
@@ -144,10 +190,6 @@ function createCliTools(): ToolMap {
     assign(captureTools((server) => registerStorageTools(server as any, http)));
     assign(captureTools((server) => registerAdvancedTools(server as any, http)));
     assign(captureTools((server) => registerFrontendTools(server as any, http)));
-
-    if (!context.projectRef) {
-        assign(captureTools((server) => registerProjectTools(server as any, http)));
-    }
 
     delete tools.platform;
     return tools;

@@ -1,15 +1,32 @@
 #!/usr/bin/env node
 
-import { runCli } from "../../mcp-server/src/cli";
-import { resolveSupaCloudContext } from "../../mcp-server/src/context";
-import { HttpTransport } from "../../mcp-server/src/transports/http";
-import { SshTransport } from "../../mcp-server/src/transports/ssh";
-import { registerSshTools } from "../../mcp-server/src/tools/ssh-tools";
-import { registerProjectTools } from "../../mcp-server/src/tools/project-tools";
-import { registerAdvancedTools } from "../../mcp-server/src/tools/advanced-tools";
+import { z } from "zod";
+import { runCli } from "./shared/cli";
+import { resolveSupaCloudContext } from "./shared/context";
+import { HttpTransport } from "./shared/transports/http";
+import { SshTransport } from "./shared/transports/ssh";
+import { registerSshTools } from "./shared/tools/ssh-tools";
+import { registerAdvancedTools } from "./shared/tools/advanced-tools";
+import { registerAdminProjectCliTools } from "./shared/tools/project-cli-tools";
 
 type ToolEntry = { schema: any; callback: (args: any) => Promise<any> };
 type ToolMap = Record<string, ToolEntry>;
+
+const adminProjectActionSchema = z.enum([
+    "list", "create", "get", "delete", "pause", "restore",
+    "restart", "settings", "update_settings", "api_keys",
+    "health", "logs", "tasks",
+]);
+const platformActionSchema = z.enum([
+    "metrics", "list_backups", "create_backup",
+    "network", "update_network",
+    "list_orgs", "get_org",
+]);
+const sshActionSchema = z.enum([
+    "ping", "setup", "install", "upgrade", "diagnose", "exec",
+    "troubleshoot", "container_logs",
+    "tenant_manage", "tenant_list", "tenant_inspect", "tenant_diagnose", "tenant_migrate",
+]);
 
 function captureTools(register: (server: { tool: (...args: any[]) => void }) => void): ToolMap {
     const tools: ToolMap = {};
@@ -55,6 +72,7 @@ EXAMPLES
   supacloud-admin status
   supacloud-admin ssh ping
   supacloud-admin ssh install --public_domain api.example.com --studio_domain studio.example.com
+  supacloud-admin project create --name my-app
   supacloud-admin project list
   supacloud-admin platform metrics
 `);
@@ -87,6 +105,44 @@ function createAdminTools(): ToolMap {
         },
     };
 
+    const registerAdminHelp = () => {
+        tools.project = {
+            schema: { action: adminProjectActionSchema },
+            callback: async () => ({
+                content: [
+                    {
+                        type: "text" as const,
+                        text: "⚠️ Project lifecycle commands require SUPACLOUD_API_URL and SUPACLOUD_API_TOKEN.",
+                    },
+                ],
+            }),
+        };
+        tools.platform = {
+            schema: { action: platformActionSchema },
+            callback: async () => ({
+                content: [
+                    {
+                        type: "text" as const,
+                        text: "⚠️ Platform commands require SUPACLOUD_API_URL and SUPACLOUD_API_TOKEN.",
+                    },
+                ],
+            }),
+        };
+        tools.ssh = {
+            schema: { action: sshActionSchema },
+            callback: async () => ({
+                content: [
+                    {
+                        type: "text" as const,
+                        text: "⚠️ SSH commands require SUPACLOUD_HOST plus SSH credentials.",
+                    },
+                ],
+            }),
+        };
+    };
+
+    registerAdminHelp();
+
     if (context.host) {
         const ssh = new SshTransport({
             host: context.host,
@@ -104,7 +160,7 @@ function createAdminTools(): ToolMap {
             token: context.apiToken,
         });
 
-        Object.assign(tools, captureTools((server) => registerProjectTools(server as any, http)));
+        Object.assign(tools, captureTools((server) => registerAdminProjectCliTools(server as any, http)));
 
         const advancedTools = captureTools((server) => registerAdvancedTools(server as any, http));
         if (advancedTools.platform) {

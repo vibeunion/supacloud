@@ -1,10 +1,11 @@
 /**
- * SupaCloud MCP Server – SSH Transport Layer
+ * SupaCloud admin SSH transport layer.
  *
  * When SupaCloud is not yet installed, execute ops tasks on target server via SSH.
  * Includes command auditing, allowlist enforcement, and connection pooling.
  */
 import { Client } from "ssh2";
+type SftpClient = { fastPut: (localPath: string, remotePath: string, cb: (err?: Error | null) => void) => void };
 
 export interface SshConfig {
     host: string;
@@ -74,7 +75,7 @@ class SshConnectionPool {
                     clearTimeout(timeout);
                     resolve(conn);
                 })
-                .on("error", (err) => {
+                .on("error", (err: Error) => {
                     clearTimeout(timeout);
                     reject(err);
                 })
@@ -140,7 +141,7 @@ export class SshTransport {
                 success: false,
                 stdout: "",
                 stderr: `Command blocked by security policy: "${command.substring(0, 100)}". ` +
-                    `Destructive or system-altering commands are not allowed via MCP.`,
+                    `Destructive or system-altering commands are not allowed via supacloud-admin.`,
                 code: 126,
             };
         }
@@ -158,7 +159,7 @@ export class SshTransport {
                     reject(new Error(`SSH command timed out after ${timeoutMs}ms`));
                 }, timeoutMs);
 
-                conn.exec(command, (err, stream) => {
+                conn.exec(command, (err: Error | undefined, stream: any) => {
                     if (err) {
                         clearTimeout(timer);
                         return reject(err);
@@ -185,9 +186,9 @@ export class SshTransport {
         const conn = await this.pool.acquire();
         try {
             return await new Promise<void>((resolve, reject) => {
-                conn.sftp((err, sftp) => {
+                conn.sftp((err: Error | undefined, sftp: SftpClient) => {
                     if (err) return reject(err);
-                    sftp.fastPut(localPath, remotePath, (err2) => {
+                    sftp.fastPut(localPath, remotePath, (err2: Error | null | undefined) => {
                         if (err2) return reject(err2);
                         resolve();
                     });

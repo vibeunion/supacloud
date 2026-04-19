@@ -15,8 +15,7 @@
 - **Management API**: Full REST API (60+ endpoints) for complete project lifecycle management
 - **Web Console**: Modern SvelteKit management dashboard with authentication
 - **CLI Compatibility**: Native support for the official `supabase` CLI (login, gen types, edge functions)
-- **CLI Tool**: `supacloud` binary with full project management, install, upgrade, and diagnostics
-- **MCP Server**: AI-native infrastructure management – let Claude/Cursor manage your Supabase via conversation
+- **CLI Tools**: `supacloud` for project users, `supacloud-admin` for server operators
 - **SupaCloud Pages**: Frontend static site hosting with GitHub webhook auto-deploy
 - **Pigsty Powered**: Enterprise-grade PostgreSQL with built-in monitoring (Grafana)
 - **One-Click Installation**: Fully automated setup via `install.sh`
@@ -75,7 +74,34 @@
 | Disk | 40GB | 100GB+ SSD |
 | OS | CentOS 9, Ubuntu 22/24, Debian 12 | CentOS 9 |
 
-#### Installation
+#### Human Entrypoints
+
+**Project user CLI**
+
+```bash
+npx @supacloud/cli status
+npx @supacloud/cli project get
+npx @supacloud/cli project logs --log_type database
+npx @supacloud/cli frontend list --ref <project-ref>
+```
+
+`supacloud` defaults to project context and auto-links from the current workspace `.env` when available:
+
+- `SUPABASE_URL` or `SUPACLOUD_API_URL`
+- `SUPABASE_SERVICE_ROLE_KEY` or `SUPACLOUD_API_TOKEN`
+
+**Server admin CLI**
+
+```bash
+npx @supacloud/admin status
+npx @supacloud/admin ssh ping
+npx @supacloud/admin ssh install --public_domain api.example.com --studio_domain studio.example.com
+npx @supacloud/admin project create --name my-app
+```
+
+Use `supacloud-admin` for installation, upgrades, tenant runtime operations, and platform-wide project lifecycle control.
+
+#### Server Installation
 
 **One-Click Installation (Recommended)**
 
@@ -111,31 +137,38 @@ source /etc/profile.d/supacloud.sh
 
 ### Management
 
-#### CLI Tool
+#### User CLI: `supacloud`
 
-The `supacloud` binary provides full lifecycle and project management:
+The `supacloud` CLI is project-scoped by default and is intended for deploy/build/log/database workflows around a single project:
 
 ```bash
-# Lifecycle Management
-supacloud start              # Start core platform services
-supacloud stop               # Stop core platform services
-supacloud status             # Show platform status
-supacloud logs [service]     # View service logs
+supacloud status
+supacloud project get
+supacloud project logs --log_type database
+supacloud project tasks
+supacloud database query --sql "select now()"
+supacloud auth list_providers --ref <ref>
+supacloud frontend list --ref <ref>
+supacloud edge_functions list --ref <ref>
+supacloud storage list_buckets --ref <ref>
+```
 
-# Project Management
-supacloud list               # List all projects
-supacloud create <name>      # Create a new project
-supacloud info <ref>         # Get project details
-supacloud delete <ref>       # Delete a project
-supacloud status <ref>       # Get project status
-supacloud restart <ref>      # Restart project services
-supacloud keys <ref>         # Get API keys
+`supacloud` intentionally does **not** own platform installation, upgrades, SSH diagnostics, tenant runtime management, or destructive project lifecycle commands.
 
-# System Operations
-supacloud install            # Run installation wizard
-supacloud upgrade            # Upgrade to latest version
-supacloud doctor             # System diagnostics & health check
-supacloud --version          # Show version
+#### Admin CLI: `supacloud-admin`
+
+The `supacloud-admin` CLI is for server and platform operators:
+
+```bash
+supacloud-admin status
+supacloud-admin ssh ping
+supacloud-admin ssh install --public_domain api.example.com --studio_domain studio.example.com
+supacloud-admin ssh diagnose
+supacloud-admin project list
+supacloud-admin project create --name my-app
+supacloud-admin project delete --ref <ref>
+supacloud-admin project pause --ref <ref>
+supacloud-admin platform metrics
 ```
 
 #### Management API
@@ -311,41 +344,12 @@ For new installs, `install.sh` now generates a valid `REALTIME_DB_ENC_KEY`, whic
 | Deno code compat | ✅ via shim |
 | Isolation | Worker Thread |
 
-#### MCP Server (AI Agent)
-
-Let AI assistants (Claude, Cursor, Windsurf) manage your SupaCloud database and services via natural language without risking other tenants' data.
-
-SupaCloud now natively exposes an HTTP MCP endpoint via the project's API Gateway. **No installation required**.
-
-**Project-scoped mode: Option 1 (IDE with Native SSE support, e.g. Cursor / Windsurf)**:
-- **Type**: `sse`
-- **URL**: `https://<YOUR_API_DOMAIN>/mcp`
-- **Headers**: 
-  - `Authorization: Bearer <YOUR_SERVICE_ROLE_KEY>`
-
-**Project-scoped mode: Option 2 (Smart Proxy for Claude Desktop / StdIO)**:
-Use our MCP package to automatically connect to whatever project you are currently working on. It instantly sniffs the `.env` in your active code directory.
-
-```json
-// claude_desktop_config.json or IDE MCP settings
-{
-  "mcpServers": {
-    "my-supacloud-link": {
-      "command": "npx",
-      "args": ["-y", "supacloud-mcp@latest", "--local"]
-    }
-  }
-}
-```
-
-Available tools include: Database schema introspection (`list_tables`, `describe_table`), SQL Execution (`execute_sql`), AI-assisted SQL generation using project context, Edge Function deployment & log tailing, Custom API Rate Limiting, and full lifecycle management operations.
+#### CLI Entry Points
 
 For human operators, the CLI split is now:
 
 - `@supacloud/cli` / `supacloud`: project-scoped user CLI with `.env` auto-link defaults
 - `@supacloud/admin` / `supacloud-admin`: server and platform administration CLI
-
-*Note: AI agent access is still provided by the MCP package in [packages/mcp-server](packages/mcp-server/README.md).*
 
 
 ### Project Structure
@@ -370,10 +374,10 @@ supacloud/
 │   │   │   ├── upgrade.ts      # Upgrade wizard
 │   │   │   └── doctor.ts       # System diagnostics
 │   │   └── tests/              # Unit (17) & integration tests
-│   ├── mcp-server/             # MCP Server for AI agents
+│   ├── cli/                    # Project user CLI
 │   │   └── src/
-│   │       ├── tools/          # 5 tool modules (ssh, project, advanced, database, deployment)
-│   │       └── transports/     # SSH & HTTP transports
+│   ├── admin/                  # Platform admin CLI
+│   │   └── src/
 │   ├── edge-runtime/           # Bun Edge Functions runtime
 │   │   ├── server.ts           # Elysia server (:9000) + /preheat endpoint
 │   │   ├── worker-pool.ts      # Fixed-size Worker Thread Pool + preheat()
@@ -431,7 +435,6 @@ Key settings in `config.env`:
 - [Deployment Guide](docs/deploy-guide.md)
 - [Multi-Tenant Architecture](docs/architecture-multi-tenant.md)
 - [China OAuth Integration](docs/china-oauth-integration.md)
-- [MCP Server (AI Agent)](packages/mcp-server/README.md)
 - [Pigsty Documentation](https://pigsty.cc/)
 - [Supabase Self-Hosting](https://supabase.com/docs/guides/self-hosting)
 
@@ -448,8 +451,7 @@ Key settings in `config.env`:
 - **Management API**: 完整的 REST API（60+ 个端点）管理项目及周边配置生命周期
 - **Web 管理面板**: 现代 SvelteKit 管理面板，内置登录认证
 - **CLI 生态兼容**: 完全兼容 Supabase 官方命令行体系（登录鉴权、数据库类型推导、云函数发布）
-- **CLI 工具**: `supacloud` 二进制工具，支持项目管理、安装、升级、诊断
-- **MCP Server**: AI 原生基础设施管理 — 让 Claude/Cursor 通过对话操控你的 Supabase
+- **CLI 工具**: `supacloud` 面向项目使用者，`supacloud-admin` 面向服务器管理员
 - **SupaCloud Pages**: 前端静态站点托管，支持 GitHub Webhook 自动部署
 - **Pigsty 驱动**: 企业级 PostgreSQL，内置 Grafana 监控
 - **一键部署**: 通过 `install.sh` 全自动安装
@@ -508,6 +510,33 @@ Key settings in `config.env`:
 | 磁盘 | 40GB | 100GB+ SSD |
 | 系统 | CentOS 9, Ubuntu 22/24, Debian 12 | CentOS 9 |
 
+#### 人类入口
+
+**项目使用者 CLI**
+
+```bash
+npx @supacloud/cli status
+npx @supacloud/cli project get
+npx @supacloud/cli project logs --log_type database
+npx @supacloud/cli frontend list --ref <project-ref>
+```
+
+`supacloud` 默认是项目级 CLI，会优先从当前目录 `.env` 自动绑定项目：
+
+- `SUPABASE_URL` 或 `SUPACLOUD_API_URL`
+- `SUPABASE_SERVICE_ROLE_KEY` 或 `SUPACLOUD_API_TOKEN`
+
+**服务器管理员 CLI**
+
+```bash
+npx @supacloud/admin status
+npx @supacloud/admin ssh ping
+npx @supacloud/admin ssh install --public_domain api.example.com --studio_domain studio.example.com
+npx @supacloud/admin project create --name my-app
+```
+
+安装、升级、SSH 诊断、tenant 运维、平台级项目管理都应放在 `supacloud-admin`。
+
 #### 安装部署
 
 **一键安装（推荐）**
@@ -544,31 +573,36 @@ source /etc/profile.d/supacloud.sh
 
 ### 项目管理
 
-#### CLI 命令行工具
+#### 用户 CLI：`supacloud`
 
-`supacloud` 二进制工具提供全栈生命周期与项目管理：
+`supacloud` 默认是项目级 CLI，用于围绕单个项目的部署、日志、数据库与资源管理：
 
 ```bash
-# 平台管控
-supacloud start              # 启动平台核心服务
-supacloud stop               # 停止平台核心服务
-supacloud status             # 查看平台状态
-supacloud logs [service]     # 查看服务日志
+supacloud status
+supacloud project get
+supacloud project logs --log_type database
+supacloud project tasks
+supacloud database query --sql "select now()"
+supacloud auth list_providers --ref <ref>
+supacloud frontend list --ref <ref>
+supacloud edge_functions list --ref <ref>
+supacloud storage list_buckets --ref <ref>
+```
 
-# 项目管理
-supacloud list               # 列出所有项目
-supacloud create <name>      # 创建新项目
-supacloud info <ref>         # 获取项目详情
-supacloud delete <ref>       # 删除项目
-supacloud status <ref>       # 获取项目状态
-supacloud restart <ref>      # 重启项目服务
-supacloud keys <ref>         # 获取 API 密钥
+`supacloud` 有意不承载平台安装、升级、SSH 诊断、tenant runtime 管理，以及项目创建/删除/暂停这类平台级命令。
 
-# 系统运维
-supacloud install            # 交互式安装向导
-supacloud upgrade            # 升级到最新版本
-supacloud doctor             # 系统诊断与健康检查
-supacloud --version          # 查看版本
+#### 管理员 CLI：`supacloud-admin`
+
+```bash
+supacloud-admin status
+supacloud-admin ssh ping
+supacloud-admin ssh install --public_domain api.example.com --studio_domain studio.example.com
+supacloud-admin ssh diagnose
+supacloud-admin project list
+supacloud-admin project create --name my-app
+supacloud-admin project delete --ref <ref>
+supacloud-admin project pause --ref <ref>
+supacloud-admin platform metrics
 ```
 
 #### Management API
@@ -677,43 +711,12 @@ Kong 网关 (API 驱动，原生 OpenResty):
 | 隔离级别 | Worker 线程 |
 | 用户函数改动 | **零改动** |
 
-#### MCP Server (AI Agent)
-
-让 AI 助手（Claude、Cursor、Windsurf）通过自然语言管理你的专属 SupaCloud 数据库与服务，多租户安全隔离，绝不会影响机器上的其他项目。
-
-SupaCloud 现在原生通过项目的 API 网关暴露了标准 HTTP MCP 端点，**无需任何安装配置**。
-
-**如何接入（方案 1：直接接入，Cursor / Windsurf 推荐）**:
-- **Type**: `sse`
-- **URL**: `https://<你的项目API域名>/mcp`
-- **Headers**: 
-  - `Authorization: Bearer <你的 SERVICE_ROLE_KEY>`
-
-**如何接入（方案 2：智能本地代理，Claude Desktop / 命令行 IDE 推荐）**:
-如果你在同时开发多个项目，可以使用官方提供的 MCP 智能代理包。它会自动**嗅探你当前 IDE 所打开代码库**里的 `.env` 变量，实现无缝切换对应项目数据库。
-
-```json
-// claude_desktop_config.json 或是任意要求提供 command 的环境
-{
-  "mcpServers": {
-    "supacloud-auto-link": {
-      "command": "npx",
-      "args": ["-y", "supacloud-mcp@latest", "--local"]
-    }
-  }
-}
-```
-
-> 💡 **安全模型**：读操作（查看表结构、查询数据）自动执行；写操作（INSERT/UPDATE/DDL 等）会在客户端弹出确认对话框，用户同意后才执行。无需额外配置。
-
-内置工具包括：数据库元数据内省（自动读取表结构、外键、RLS策略）、直接执行 SQL（`execute_sql`）、带有表结构上下文的 AI SQL 生成助手，以及 **云函数全生命周期管控（部署与日志获取）**、**编程式自定义限流**、**秘钥与配置管理** 等 20+ 项高阶能力。
+#### CLI 入口
 
 面向真人操作者的命令行现已拆分为：
 
 - `@supacloud/cli` / `supacloud`：项目使用者 CLI，默认从当前目录 `.env` 自动绑定项目
 - `@supacloud/admin` / `supacloud-admin`：服务器管理员 CLI，处理 SSH、安装、升级、租户运维
-
-*注：AI Agent 的 MCP 接入能力仍由 [packages/mcp-server](packages/mcp-server/README.md) 提供。*
 
 
 ### 项目结构
@@ -738,10 +741,10 @@ supacloud/
 │   │   │   ├── upgrade.ts      # 升级向导
 │   │   │   └── doctor.ts       # 系统诊断
 │   │   └── tests/              # 单元测试 (17) & 集成测试
-│   ├── mcp-server/             # MCP Server (AI Agent 集成)
+│   ├── cli/                    # 项目使用者 CLI
 │   │   └── src/
-│   │       ├── tools/          # 5 个工具模块 (ssh, project, advanced, database, deployment)
-│   │       └── transports/     # SSH & HTTP 传输层
+│   ├── admin/                  # 服务器管理员 CLI
+│   │   └── src/
 │   ├── edge-runtime/           # Bun 云函数运行时
 │   │   ├── server.ts           # Elysia 服务 (:9000) + /preheat 预热端点
 │   │   ├── worker-pool.ts      # 固定大小 Worker 线程池 + preheat()
@@ -799,7 +802,6 @@ supacloud/
 - [部署指南](docs/deploy-guide.md)
 - [多租户架构设计](docs/architecture-multi-tenant.md)
 - [国内 OAuth 集成](docs/china-oauth-integration.md)
-- [MCP Server 文档 (AI Agent 集成)](packages/mcp-server/README.md)
 - [Pigsty 官方文档](https://pigsty.cc/)
 - [Supabase 自托管文档](https://supabase.com/docs/guides/self-hosting)
 

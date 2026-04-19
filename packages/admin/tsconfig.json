@@ -7,19 +7,14 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "outDir": "dist",
-    "rootDir": "..",
+    "rootDir": "src",
     "declaration": true,
-    "typeRoots": [
-      "../mcp-server/node_modules/@types",
-      "../mcp-server/node_modules"
-    ],
     "types": [
       "bun"
     ]
   },
   "include": [
-    "src",
-    "../mcp-server/src/**/*.ts"
+    "src"
   ],
   "exclude": [
     "node_modules",

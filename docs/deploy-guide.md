@@ -10,6 +10,13 @@ SupaCloud 部署系统提供配置驱动的自动化部署能力，支持：
 
 ## 快速开始
 
+如果你是通过命令行操作 SupaCloud，建议优先区分两个入口：
+
+- `@supacloud/cli` / `supacloud`：项目使用者
+- `@supacloud/admin` / `supacloud-admin`：服务器管理员
+
+本篇文档更偏部署流程本身；CLI 边界请参考 [CLI Guide](./cli-guide.md)。
+
 ### 1. 创建配置文件
 
 在项目根目录创建 `supacloud.yml`：

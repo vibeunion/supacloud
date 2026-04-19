@@ -1801,53 +1801,6 @@ fix_container_healthchecks() {
     log_info "Healthcheck fixes complete"
 }
  
-# ========== Deploy MCP Function ==========
-deploy_mcp_function() {
-    log_step "Deploying MCP Edge Function..."
-    
-    # MCP function source (Bun-compatible)
-    MCP_INDEX_TS=$(cat << 'EOF'
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
-import { StreamableHTTPTransport } from '@hono/mcp'
-import { Hono } from 'hono'
-import { z } from 'zod'
-
-const app = new Hono()
-
-const server = new McpServer({
-  name: 'mcp',
-  version: '0.1.0',
-})
-
-server.registerTool(
-  'add',
-  {
-    title: 'Addition Tool',
-    description: 'Add two numbers together',
-    inputSchema: { a: z.number(), b: z.number() },
-  },
-  ({ a, b }) => ({
-    content: [{ type: 'text', text: String(a + b) }],
-  })
-)
-
-app.all('/', async (c) => {
-  const transport = new StreamableHTTPTransport()
-  await server.connect(transport)
-  return transport.handleRequest(c)
-})
-
-export default app
-EOF
-)
-
-    # Deploy to Edge Runtime functions directory
-    local MCP_DIR="/opt/supacloud/edge-runtime/functions/global/mcp"
-    mkdir -p "$MCP_DIR"
-    echo "$MCP_INDEX_TS" > "$MCP_DIR/mcp.ts"
-    log_info "Deployed MCP Function to Edge Runtime: $MCP_DIR"
-}
- 
 # ========== Configure PG HBA Whitelist ==========
 configure_pg_hba() {
     log_step "Configuring database access whitelist (pg_hba.conf)..."
@@ -2420,7 +2373,6 @@ main() {
     install_s3_storage
     install_edge_runtime
     install_pigsty      # Pigsty nginx suppressed via nginx_enabled: false
-    deploy_mcp_function
     configure_analytics
     configure_pg_hba
     

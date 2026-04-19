@@ -1,12 +1,11 @@
 import { config } from "../config";
 import { sql as metaSql } from "../db";
-import { verifyMcpToken } from "../mcp/token";
 import { logger } from "../utils/logger";
 
 export interface AuthContext {
   role: "admin" | "project";
   ref?: string;
-  tokenType: "master" | "session" | "mcp" | "project_jwt" | "service_role_key";
+  tokenType: "master" | "session" | "project_jwt" | "service_role_key";
 }
 
 const PUBLIC_PATH_PREFIXES = [
@@ -121,12 +120,11 @@ export async function checkAuth(request: Request): Promise<{ status: number; bod
     }
   }
 
-  const mcpPayload = await verifyMcpToken(token);
-  let role = mcpPayload?.role;
-  let ref = mcpPayload?.ref;
-  let tokenType: AuthContext["tokenType"] = "mcp";
+  let role: AuthContext["role"] | undefined;
+  let ref: string | undefined;
+  let tokenType: AuthContext["tokenType"] | undefined;
 
-  if (!mcpPayload && token.includes(".")) {
+  if (token.includes(".")) {
     const srkHash = await hashToken(token);
     const cacheKey = `srk:${srkHash}`;
     const cached = jwtCache.get(cacheKey);
@@ -175,12 +173,12 @@ export async function checkAuth(request: Request): Promise<{ status: number; bod
     }
   }
 
-  if (role === "admin") {
+  if (role === "admin" && tokenType) {
     (request as any).__authContext = { role: "admin", ref, tokenType } as AuthContext;
     return undefined;
   }
 
-  if (role === "project" && ref) {
+  if (role === "project" && ref && tokenType) {
     const url = new URL(request.url);
     const isPublicPath = PUBLIC_PATH_PREFIXES.some(prefix => url.pathname.startsWith(prefix));
     if (!url.pathname.startsWith(`/v1/projects/${ref}`) && !isPublicPath) {
