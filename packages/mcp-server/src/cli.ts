@@ -2,13 +2,115 @@ export async function runCli(
     cliTools: Record<string, { schema: any; callback: (args: any) => Promise<any> }>,
     args: string[]
 ) {
+    const formatAvailableCommands = () =>
+        Object.keys(cliTools)
+            .filter((k) => !["setup_help", "deploy_web_console"].includes(k))
+            .join("\n  ");
+
+    const getSchemaShape = (schema: any): Record<string, any> => {
+        if (!schema) return {};
+        if (
+            typeof schema === "object" &&
+            !Array.isArray(schema) &&
+            !schema.shape &&
+            !schema._def
+        ) {
+            return schema;
+        }
+        if (schema.shape) return schema.shape;
+        if (schema._def?.shape) {
+            return typeof schema._def.shape === "function" ? schema._def.shape() : schema._def.shape;
+        }
+        return {};
+    };
+
+    const getEnumOptions = (field: any): string[] => {
+        if (Array.isArray(field?.options)) return field.options;
+        if (Array.isArray(field?._def?.values)) return field._def.values;
+        if (Array.isArray(field?._def?.entries)) return field._def.entries;
+        return [];
+    };
+
+    const unwrapField = (field: any): any => field?._def?.innerType ?? field;
+
+    const getDescription = (field: any): string => field?.description ?? field?._def?.description ?? "";
+
+    const formatToolHelp = (toolName: string, tool: { schema: any }) => {
+        const shape = getSchemaShape(tool.schema);
+        const actionField = shape.action;
+        const actionOptions = getEnumOptions(actionField);
+        const otherFields = Object.entries(shape).filter(([name]) => name !== "action");
+
+        const actionLines = actionOptions.length
+            ? `Available actions:\n  ${actionOptions.join("\n  ")}`
+            : "This command does not declare action metadata.";
+
+        const argLines = otherFields.length
+            ? otherFields
+                .map(([name, field]) => {
+                    const description = getDescription(field) || "(no description)";
+                    return `  --${name}  ${description}`;
+                })
+                .join("\n")
+            : "  (no additional flags)";
+
+        return [
+            `Usage: supacloud-mcp ${toolName} <action> [--flags]`,
+            "",
+            actionLines,
+            "",
+            "Flags:",
+            argLines,
+        ].join("\n");
+    };
+
+    const formatActionHelp = (
+        toolName: string,
+        action: string,
+        tool: { schema: any }
+    ) => {
+        const shape = getSchemaShape(tool.schema);
+        const otherFields = Object.entries(shape).filter(([name]) => name !== "action");
+        const relevantFields = otherFields.filter(([, field]) => {
+            const description = getDescription(field);
+            return description.includes(`[${action}]`) || description.includes("[*]");
+        });
+
+        const argLines = relevantFields.length
+            ? relevantFields
+                .map(([name, field]) => `  --${name}  ${getDescription(field) || "(no description)"}`)
+                .join("\n")
+            : "  (no documented action-specific flags)";
+
+        return [
+            `Usage: supacloud-mcp ${toolName} ${action} [--flags]`,
+            "",
+            "Flags:",
+            argLines,
+        ].join("\n");
+    };
+
     const toolName = args[0];
     const tool = cliTools[toolName];
     
     if (!tool) {
         console.error(`❌ Unknown command: ${toolName}`);
-        console.error(`Available commands: \n  ${Object.keys(cliTools).filter(k => !['setup_help', 'deploy_web_console'].includes(k)).join("\n  ")}`);
+        console.error(`Available commands: \n  ${formatAvailableCommands()}`);
         process.exit(1);
+    }
+
+    if (args.length === 1 || args[1] === "--help" || args[1] === "-h") {
+        console.error(formatToolHelp(toolName, tool));
+        process.exit(0);
+    }
+
+    if (
+        args.length > 2 &&
+        !args[1].startsWith("--") &&
+        (args[2] === "--help" || args[2] === "-h")
+    ) {
+        console.error(formatActionHelp(toolName, args[1], tool));
+        process.exit(0);
     }
     
     const parsedArgs: Record<string, any> = {};
