@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { Elysia } from "elysia";
 import { sdkProxyRoutes, setSdkProxyFetchForTests } from "../../src/routes/sdk-proxy";
 import * as dbModule from "../../src/db";
@@ -19,11 +19,11 @@ function request(path: string, init?: RequestInit) {
 
 describe("sdkProxyRoutes functions proxy", () => {
   const calls: FetchCall[] = [];
+  const restoredSpies: Array<{ mockRestore: () => void }> = [];
 
   beforeEach(() => {
     calls.length = 0;
-    mock.restore();
-    setSdkProxyFetchForTests(mock((input: string | URL | Request, init?: RequestInit & { duplex?: "half" }) => {
+    setSdkProxyFetchForTests(((input: string | URL | Request, init?: RequestInit & { duplex?: "half" }) => {
       const url = typeof input === "string"
         ? input
         : input instanceof URL
@@ -33,12 +33,14 @@ describe("sdkProxyRoutes functions proxy", () => {
       return Promise.resolve(new Response(JSON.stringify({ ok: true }), {
         headers: { "Content-Type": "application/json" },
       }));
-    }) as unknown as typeof fetch);
+    }) as typeof fetch);
   });
 
   afterEach(() => {
     setSdkProxyFetchForTests();
-    mock.restore();
+    while (restoredSpies.length > 0) {
+      restoredSpies.pop()?.mockRestore();
+    }
   });
 
   test("POST /functions/v1 forwards request bodies with duplex=half", async () => {
@@ -65,15 +67,18 @@ describe("sdkProxyRoutes functions proxy", () => {
       timeout_sec_default: 300,
       timeout_sec_max: 900,
     });
+    restoredSpies.push(getSettingsSpy);
     const getApiKeysSpy = spyOn(projectService, "getApiKeys").mockResolvedValue({
       anon_key: "anon",
       service_role_key: "service",
     } as Awaited<ReturnType<typeof projectService.getApiKeys>>);
+    restoredSpies.push(getApiKeysSpy);
     const getConfigSpy = spyOn(edgeFunctionService, "getConfig").mockResolvedValue({
       verify_jwt: false,
       version: "7",
       background_routes: ["/generate/crop"],
     });
+    restoredSpies.push(getConfigSpy);
     const enqueueSpy = spyOn(backgroundTaskService, "enqueueBackgroundFunctionTask").mockResolvedValue({
       id: "task_123",
       project_ref: "proj_1",
@@ -84,6 +89,7 @@ describe("sdkProxyRoutes functions proxy", () => {
       attempt: 1,
       max_attempts: 3,
     } as Awaited<ReturnType<typeof backgroundTaskService.enqueueBackgroundFunctionTask>>);
+    restoredSpies.push(enqueueSpy);
 
     const response = await request("/functions/v1/aorist-ai/generate/crop", {
       method: "POST",
@@ -107,6 +113,7 @@ describe("sdkProxyRoutes functions proxy", () => {
 
   test("auth proxy resolves tenant ports from projects.config", async () => {
     const sqlSpy = spyOn(dbModule, "sql");
+    restoredSpies.push(sqlSpy);
     sqlSpy.mockImplementation(async (...args: unknown[]) => {
       const text = String(args[0] ?? "");
       if (text.includes("FROM projects")) {
@@ -130,11 +137,11 @@ describe("sdkProxyRoutes functions proxy", () => {
     expect(response.status).toBe(200);
     expect(calls).toHaveLength(1);
     expect(calls[0]?.url).toBe("http://127.0.0.1:8361/health");
-    sqlSpy.mockRestore();
   });
 
   test("auth proxy resolves project ref from forwarded custom API host", async () => {
     const sqlSpy = spyOn(dbModule, "sql");
+    restoredSpies.push(sqlSpy);
     sqlSpy.mockImplementation(async (...args: unknown[]) => {
       const text = String(args[0] ?? "");
       if (text.includes("SELECT ref")) {
@@ -161,6 +168,5 @@ describe("sdkProxyRoutes functions proxy", () => {
     expect(response.status).toBe(200);
     expect(calls).toHaveLength(1);
     expect(calls[0]?.url).toBe("http://127.0.0.1:8361/health");
-    sqlSpy.mockRestore();
   });
 });
