@@ -14,7 +14,6 @@ export const DEFAULT_CORS_HEADERS = [
     "apikey", "x-client-info", "x-project-ref", "X-Api-Version", "x-supabase-api-version",
     "Prefer", "Content-Profile", "accept-profile", "Range", "Range-Unit",
     "x-upsert", "Cache-Control", "x-retry-count", "x-metadata",
-    "x-supacloud-async", "x-supacloud-retries", "x-supacloud-timeout",
 ];
 export const DEFAULT_CORS_EXPOSED = [
     "Content-Length", "Content-Range", "X-Content-Range", "X-JSON",
@@ -496,8 +495,8 @@ export class GatewayService {
             });
             await this.ensureServiceAndRoute({ name: `svc-gotrue-${projectRef}`, url: `http://${hostIp}:${gotruePort}`, paths: ["/auth/v1"], hosts, projectRef });
             // Route public function traffic through management-api first so sdk-proxy can
-            // consume x-supacloud-async and enqueue background tasks before forwarding
-            // synchronous invokes to the edge runtime.
+            // apply background_routes policy before forwarding synchronous invokes to the
+            // edge runtime.
             await this.ensureServiceAndRoute({
                 name: `svc-functions-${projectRef}`,
                 url: `http://${hostIp}:${config.port}`,

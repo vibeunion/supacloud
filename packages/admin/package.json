@@ -5,7 +5,7 @@
   "type": "module",
   "main": "./dist/index.js",
   "bin": {
-    "supacloud-admin": "./dist/index.js"
+    "supacloud-admin": "dist/index.js"
   },
   "files": [
     "dist",

@@ -10,7 +10,13 @@ import { projectService } from "../services/project.service";
 import { resolveTenantPorts } from "../utils/project-routing";
 
 const MAX_ASYNC_BODY_BYTES = 256 * 1024;
-const SUPACLOUD_IDEMPOTENCY_HEADER = "x-supacloud-idempotency-key";
+let sdkProxyFetch: typeof fetch = ((input: RequestInfo | URL, init?: RequestInit) =>
+    globalThis.fetch(input, init)) as typeof fetch;
+
+export function setSdkProxyFetchForTests(fetchImpl?: typeof fetch): void {
+    sdkProxyFetch = fetchImpl || (((input: RequestInfo | URL, init?: RequestInit) =>
+        globalThis.fetch(input, init)) as typeof fetch);
+}
 
 function normalizeAsyncRoutePath(path: string): string {
     if (!path) return "/";
@@ -38,12 +44,6 @@ function decodeJwtPayload(token: string): Record<string, unknown> | null {
     }
 }
 
-function parsePositiveIntHeader(value: string | null): number | undefined {
-    if (!value) return undefined;
-    const parsed = Number.parseInt(value, 10);
-    return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
-}
-
 async function maybeEnqueueAsyncFunction(request: Request, ref: string): Promise<Response | null> {
     const url = new URL(request.url);
     const targetPath = url.pathname.replace(/^\/functions\/v1/, "");
@@ -55,24 +55,21 @@ async function maybeEnqueueAsyncFunction(request: Request, ref: string): Promise
         });
     }
 
-    const asyncHeader = request.headers.get("x-supacloud-async");
     const fnConfig = await edgeFunctionService.getConfig(ref, functionSlug);
     const routePath = restPath.length > 0 ? `/${restPath.join("/")}` : "/";
-    const shouldEnqueue = asyncHeader === "true" || shouldForceAsyncRoute(routePath, fnConfig.background_routes);
+    const shouldEnqueue = shouldForceAsyncRoute(routePath, fnConfig.background_routes);
     if (!shouldEnqueue) return null;
 
     const backgroundSettings = await projectService.getBackgroundTaskSettings(ref);
     const maxPayloadBytes = backgroundSettings?.max_payload_bytes || MAX_ASYNC_BODY_BYTES;
-    const timeoutHeader = parsePositiveIntHeader(request.headers.get("x-supacloud-timeout"));
-    const retriesHeader = parsePositiveIntHeader(request.headers.get("x-supacloud-retries"));
-    const requestedTimeout = timeoutHeader ?? backgroundSettings?.timeout_sec_default;
+    const requestedTimeout = backgroundSettings?.timeout_sec_default;
     const timeoutSec = Math.min(
         backgroundSettings?.timeout_sec_max || 900,
         backgroundTaskService.normalizeBackgroundTaskTimeout(requestedTimeout),
     );
     const maxAttempts = Math.min(
         backgroundSettings?.max_attempts || 3,
-        backgroundTaskService.normalizeBackgroundTaskMaxAttempts(retriesHeader ?? backgroundSettings?.max_attempts),
+        backgroundTaskService.normalizeBackgroundTaskMaxAttempts(backgroundSettings?.max_attempts),
     );
 
     const requestClone = request.clone();
@@ -98,11 +95,6 @@ async function maybeEnqueueAsyncFunction(request: Request, ref: string): Promise
             "connection",
             "content-length",
             "transfer-encoding",
-            "x-supacloud-async",
-            "x-supacloud-retries",
-            "x-supacloud-timeout",
-            SUPACLOUD_IDEMPOTENCY_HEADER,
-            "x-idempotency-key",
             "authorization",
             "apikey",
             "cookie",
@@ -143,7 +135,7 @@ async function maybeEnqueueAsyncFunction(request: Request, ref: string): Promise
         timeoutSec,
         maxAttempts,
         maxPayloadBytes,
-        idempotencyKey: request.headers.get(SUPACLOUD_IDEMPOTENCY_HEADER),
+        idempotencyKey: null,
         traceId,
         envelope: {
             method: request.method,
@@ -306,7 +298,7 @@ async function executeProxy(request: Request, targetUrl: string, interceptors: {
             fetchInit.duplex = "half";
         }
 
-        const response = await fetch(targetUrl, fetchInit);
+        const response = await sdkProxyFetch(targetUrl, fetchInit);
         const duration = performance.now() - upstreamStart;
         if (process.env.NODE_ENV !== 'production' && duration > 500) {
             logger.warn(`[SDK Proxy] Slow upstream response (${duration.toFixed(0)}ms): ${targetUrl}`);

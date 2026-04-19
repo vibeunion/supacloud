@@ -33,6 +33,9 @@ In short:
 - `supabase-js` is the transport and data SDK
 - `@supacloud/js` is the platform enhancement layer
 
+`client.tasks.submit(...)` assumes the invoked function path is already covered by the project's `background_routes`.
+That keeps frontend calls compatible with strict CORS gateways without any special async headers.
+
 ## Package Shape
 
 Current entrypoint:
@@ -136,7 +139,7 @@ This is important because task correctness should not depend on websocket health
 
 Without `@supacloud/js`, every frontend ends up hand-writing the same glue:
 
-- custom background headers
+- browser-safe background route invocation
 - task status polling
 - cancel/retry fetches
 - Realtime-to-polling fallback
