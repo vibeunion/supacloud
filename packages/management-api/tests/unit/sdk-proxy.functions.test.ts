@@ -16,12 +16,32 @@ function request(path: string, init?: RequestInit) {
   return app.handle(new Request(`http://localhost${path}`, init));
 }
 
-describe("sdkProxyRoutes functions proxy", () => {
-  const calls: FetchCall[] = [];
-  const restoredSpies: Array<{ mockRestore: () => void }> = [];
+let serialQueue = Promise.resolve();
 
-  beforeEach(() => {
-    calls.length = 0;
+async function runSerial<T>(fn: () => Promise<T>): Promise<T> {
+  const previous = serialQueue;
+  let release!: () => void;
+  serialQueue = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await previous;
+  try {
+    return await fn();
+  } finally {
+    release();
+  }
+}
+
+async function withSdkProxyTestContext(
+  run: (context: {
+    calls: FetchCall[];
+    trackSpy: <T extends { mockRestore: () => void }>(spy: T) => T;
+  }) => Promise<void>,
+): Promise<void> {
+  return runSerial(async () => {
+    const calls: FetchCall[] = [];
+    const restoredSpies: Array<{ mockRestore: () => void }> = [];
+
     setSdkProxyFetchForTests(((input: string | URL | Request, init?: RequestInit & { duplex?: "half" }) => {
       const url = typeof input === "string"
         ? input
@@ -33,139 +53,159 @@ describe("sdkProxyRoutes functions proxy", () => {
         headers: { "Content-Type": "application/json" },
       }));
     }) as typeof fetch);
+
+    try {
+      await run({
+        calls,
+        trackSpy<T extends { mockRestore: () => void }>(spy: T): T {
+          restoredSpies.push(spy);
+          return spy;
+        },
+      });
+    } finally {
+      setSdkProxyFetchForTests();
+      while (restoredSpies.length > 0) {
+        restoredSpies.pop()?.mockRestore();
+      }
+    }
+  });
+}
+
+describe("sdkProxyRoutes functions proxy", () => {
+  beforeEach(() => {
+    serialQueue = Promise.resolve();
   });
 
   afterEach(() => {
     setSdkProxyFetchForTests();
-    while (restoredSpies.length > 0) {
-      restoredSpies.pop()?.mockRestore();
-    }
   });
 
   test("POST /functions/v1 forwards request bodies with duplex=half", async () => {
-    const response = await request("/functions/v1/hello", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-project-ref": "proj_1",
-      },
-      body: JSON.stringify({ ping: true }),
-    });
+    await withSdkProxyTestContext(async ({ calls }) => {
+      const response = await request("/functions/v1/hello", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-project-ref": "proj_1",
+        },
+        body: JSON.stringify({ ping: true }),
+      });
 
-    expect(response.status).toBe(200);
-    expect(calls).toHaveLength(1);
-    expect(calls[0]?.url).toBe("http://127.0.0.1:9000/hello");
-    expect(calls[0]?.init?.duplex).toBe("half");
+      expect(response.status).toBe(200);
+      expect(calls).toHaveLength(1);
+      expect(calls[0]?.url).toBe("http://127.0.0.1:9000/hello");
+      expect(calls[0]?.init?.duplex).toBe("half");
+    });
   });
 
   test("POST /functions/v1 auto-enqueues configured background routes without custom headers", async () => {
-    const getSettingsSpy = spyOn(projectService, "getBackgroundTaskSettings").mockResolvedValue({
-      concurrency: 2,
-      max_attempts: 3,
-      max_payload_bytes: 262144,
-      timeout_sec_default: 300,
-      timeout_sec_max: 900,
-    });
-    restoredSpies.push(getSettingsSpy);
-    const getApiKeysSpy = spyOn(projectService, "getApiKeys").mockResolvedValue({
-      anon_key: "anon",
-      service_role_key: "service",
-    } as Awaited<ReturnType<typeof projectService.getApiKeys>>);
-    restoredSpies.push(getApiKeysSpy);
-    const getConfigSpy = spyOn(edgeFunctionService, "getConfig").mockResolvedValue({
-      verify_jwt: false,
-      version: "7",
-      background_routes: ["/generate/crop"],
-    });
-    restoredSpies.push(getConfigSpy);
-    const enqueueSpy = spyOn(backgroundTaskService, "enqueueBackgroundFunctionTask").mockResolvedValue({
-      id: "task_123",
-      project_ref: "proj_1",
-      task_type: "edge_function",
-      function_slug: "aorist-ai",
-      function_version: "7",
-      status: "pending",
-      attempt: 1,
-      max_attempts: 3,
-    } as Awaited<ReturnType<typeof backgroundTaskService.enqueueBackgroundFunctionTask>>);
-    restoredSpies.push(enqueueSpy);
+    await withSdkProxyTestContext(async ({ calls, trackSpy }) => {
+      const getSettingsSpy = trackSpy(spyOn(projectService, "getBackgroundTaskSettings").mockResolvedValue({
+        concurrency: 2,
+        max_attempts: 3,
+        max_payload_bytes: 262144,
+        timeout_sec_default: 300,
+        timeout_sec_max: 900,
+      }));
+      const getApiKeysSpy = trackSpy(spyOn(projectService, "getApiKeys").mockResolvedValue({
+        anon_key: "anon",
+        service_role_key: "service",
+      } as Awaited<ReturnType<typeof projectService.getApiKeys>>));
+      const getConfigSpy = trackSpy(spyOn(edgeFunctionService, "getConfig").mockResolvedValue({
+        verify_jwt: false,
+        version: "7",
+        background_routes: ["/generate/crop"],
+      }));
+      const enqueueSpy = trackSpy(spyOn(backgroundTaskService, "enqueueBackgroundFunctionTask").mockResolvedValue({
+        id: "task_123",
+        project_ref: "proj_1",
+        task_type: "edge_function",
+        function_slug: "aorist-ai",
+        function_version: "7",
+        status: "pending",
+        attempt: 1,
+        max_attempts: 3,
+      } as Awaited<ReturnType<typeof backgroundTaskService.enqueueBackgroundFunctionTask>>));
 
-    const response = await request("/functions/v1/aorist-ai/generate/crop", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-project-ref": "proj_1",
-        apikey: "anon",
-        authorization: "Bearer jwt-token",
-      },
-      body: JSON.stringify({ ping: true }),
-    });
+      const response = await request("/functions/v1/aorist-ai/generate/crop", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-project-ref": "proj_1",
+          apikey: "anon",
+          authorization: "Bearer jwt-token",
+        },
+        body: JSON.stringify({ ping: true }),
+      });
 
-    expect(response.status).toBe(202);
-    expect(response.headers.get("x-supacloud-task-id")).toBe("task_123");
-    expect(calls).toHaveLength(0);
-    expect(getConfigSpy).toHaveBeenCalledWith("proj_1", "aorist-ai");
-    expect(enqueueSpy).toHaveBeenCalledTimes(1);
-    expect(getSettingsSpy).toHaveBeenCalledWith("proj_1");
-    expect(getApiKeysSpy.mock.calls.length).toBeLessThanOrEqual(1);
+      expect(response.status).toBe(202);
+      expect(response.headers.get("x-supacloud-task-id")).toBe("task_123");
+      expect(calls).toHaveLength(0);
+      expect(getConfigSpy).toHaveBeenCalledWith("proj_1", "aorist-ai");
+      expect(enqueueSpy).toHaveBeenCalledTimes(1);
+      expect(getSettingsSpy).toHaveBeenCalledWith("proj_1");
+      expect(getApiKeysSpy.mock.calls.length).toBeLessThanOrEqual(1);
+    });
   });
 
   test("auth proxy resolves tenant ports from projects.config", async () => {
-    const sqlSpy = spyOn(dbModule, "sql");
-    restoredSpies.push(sqlSpy);
-    sqlSpy.mockImplementation(async (...args: unknown[]) => {
-      const text = String(args[0] ?? "");
-      if (text.includes("FROM projects")) {
-        return [{
-          config: {
-            postgrest_port: 7361,
-            gotrue_port: 8361,
-          },
-        }];
-      }
-      return [];
-    });
+    await withSdkProxyTestContext(async ({ calls, trackSpy }) => {
+      const sqlSpy = trackSpy(spyOn(dbModule, "sql"));
+      sqlSpy.mockImplementation(async (...args: unknown[]) => {
+        const text = String(args[0] ?? "");
+        if (text.includes("FROM projects")) {
+          return [{
+            config: {
+              postgrest_port: 7361,
+              gotrue_port: 8361,
+            },
+          }];
+        }
+        return [];
+      });
 
-    const response = await request("/auth/v1/health", {
-      method: "GET",
-      headers: {
-        "x-project-ref": "proj_1",
-      },
-    });
+      const response = await request("/auth/v1/health", {
+        method: "GET",
+        headers: {
+          "x-project-ref": "proj_1",
+        },
+      });
 
-    expect(response.status).toBe(200);
-    expect(calls).toHaveLength(1);
-    expect(calls[0]?.url).toBe("http://127.0.0.1:8361/health");
+      expect(response.status).toBe(200);
+      expect(calls).toHaveLength(1);
+      expect(calls[0]?.url).toBe("http://127.0.0.1:8361/health");
+    });
   });
 
   test("auth proxy resolves project ref from forwarded custom API host", async () => {
-    const sqlSpy = spyOn(dbModule, "sql");
-    restoredSpies.push(sqlSpy);
-    sqlSpy.mockImplementation(async (...args: unknown[]) => {
-      const text = String(args[0] ?? "");
-      if (text.includes("SELECT ref")) {
-        return [{ ref: "proj_1" }];
-      }
-      if (text.includes("SELECT config")) {
-        return [{
-          config: {
-            postgrest_port: 7361,
-            gotrue_port: 8361,
-          },
-        }];
-      }
-      return [];
-    });
+    await withSdkProxyTestContext(async ({ calls, trackSpy }) => {
+      const sqlSpy = trackSpy(spyOn(dbModule, "sql"));
+      sqlSpy.mockImplementation(async (...args: unknown[]) => {
+        const text = String(args[0] ?? "");
+        if (text.includes("SELECT ref")) {
+          return [{ ref: "proj_1" }];
+        }
+        if (text.includes("SELECT config")) {
+          return [{
+            config: {
+              postgrest_port: 7361,
+              gotrue_port: 8361,
+            },
+          }];
+        }
+        return [];
+      });
 
-    const response = await request("/auth/v1/health", {
-      method: "GET",
-      headers: {
-        "x-forwarded-host": "api.aorist.net",
-      },
-    });
+      const response = await request("/auth/v1/health", {
+        method: "GET",
+        headers: {
+          "x-forwarded-host": "api.aorist.net",
+        },
+      });
 
-    expect(response.status).toBe(200);
-    expect(calls).toHaveLength(1);
-    expect(calls[0]?.url).toBe("http://127.0.0.1:8361/health");
+      expect(response.status).toBe(200);
+      expect(calls).toHaveLength(1);
+      expect(calls[0]?.url).toBe("http://127.0.0.1:8361/health");
+    });
   });
 });

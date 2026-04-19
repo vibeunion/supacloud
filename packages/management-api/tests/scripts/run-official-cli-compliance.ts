@@ -6,6 +6,33 @@ import { writeFileSync, existsSync, rmSync, mkdirSync } from "fs";
 
 const CLI_VERSION = "2.20.5";
 
+async function rekeyCliHarnessProject(projectId: string, originalRef: string, targetRef: string): Promise<void> {
+    const maxAttempts = 10;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+        try {
+            // createProject() kicks off saga provisioning in the background. That saga can
+            // enqueue a project_tasks row after we create the project but before we rewrite
+            // the ref to the fixed 20-char value required by the official CLI harness.
+            await sql`DELETE FROM project_tasks WHERE project_ref = ${originalRef}`;
+            await sql`UPDATE projects SET ref = ${targetRef} WHERE id = ${projectId}`;
+            return;
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            const code = typeof error === "object" && error && "code" in error ? String((error as { code?: unknown }).code ?? "") : "";
+            const isProjectTaskFkRace =
+                code === "ERR_POSTGRES_SERVER_ERROR" &&
+                message.includes("project_tasks_project_ref_fkey");
+
+            if (!isProjectTaskFkRace || attempt === maxAttempts) {
+                throw error;
+            }
+
+            await new Promise((resolve) => setTimeout(resolve, 250 * attempt));
+        }
+    }
+}
+
 async function run() {
     console.log("\n🚀 [CLI Compliance] Starting Supabase Official CLI Validation Protocol...");
 
@@ -22,10 +49,7 @@ async function run() {
             region: "local"
         });
 
-        // Delete any saga-spawned tasks referencing the old ref before updating it,
-        // since project_tasks.project_ref has a FK constraint on projects.ref.
-        await sql`DELETE FROM project_tasks WHERE project_ref = ${project.ref}`;
-        await sql`UPDATE projects SET ref = ${rawRef} WHERE id = ${project.id}`;
+        await rekeyCliHarnessProject(project.id, project.ref, rawRef);
         project.ref = rawRef;
 
         console.log(`✅ Provisioned 20-char CLI Project Ref [${rawRef}]`);
