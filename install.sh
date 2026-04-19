@@ -2073,7 +2073,10 @@ EOF
     local REALTIME_SECRET_KEY_BASE
     local REALTIME_DB_ENC_KEY
     REALTIME_SECRET_KEY_BASE=$(openssl rand -base64 48 | tr -d '\n')
-    REALTIME_DB_ENC_KEY=$(openssl rand -hex 16)
+    # Realtime tenant encryption uses AES-128 and expects a 16-byte key.
+    # `openssl rand -hex 16` returns 32 ASCII chars, which crashes tenant
+    # registration with "Bad key size". Generate a literal 16-char secret instead.
+    REALTIME_DB_ENC_KEY=$(openssl rand -base64 18 | tr -d '\n=+/ ' | cut -c1-16)
 
     cat > /etc/supabase/management-api.env <<EOF
 # SupaCloud Management API Configuration
