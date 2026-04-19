@@ -1,17 +1,27 @@
 {
   "name": "@supacloud/js",
-  "version": "0.11.1",
+  "version": "0.11.2",
   "description": "Platform SDK for SupaCloud, built on top of supabase-js",
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
   "files": [
     "dist",
     "README.md"
   ],
   "scripts": {
-    "build": "bun build src/index.ts --outdir dist --target node",
+    "build": "bun run clean && bun run build:js && bun run build:types",
+    "build:js": "bun build src/index.ts --outdir dist --target node",
+    "build:types": "tsc -p tsconfig.json --emitDeclarationOnly",
+    "clean": "rm -rf dist",
     "prepublishOnly": "bun run build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "typecheck:test": "tsc -p tsconfig.test.json --noEmit"
