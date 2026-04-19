@@ -1,5 +1,5 @@
 import { config } from "../src/config";
-import { sql, resolveDbName, resolveRoleName } from "../src/db";
+import { sql, resolveDbName } from "../src/db";
 import { logger } from "../src/utils/logger";
 import { createHmac } from "node:crypto";
 
@@ -86,10 +86,10 @@ function pickRoutingHost(projectRef: string, projectConfig: unknown): string {
   return host;
 }
 
-async function registerTenant(project: ProjectRow): Promise<void> {
+async function tenantPayload(project: ProjectRow) {
   const dbName = project.db_name || (await resolveDbName(project.ref));
-  const dbUser = project.db_user || resolveRoleName(project.ref);
-  const dbPassword = project.db_password || config.pgPassword;
+  const dbUser = "supabase_admin";
+  const dbPassword = config.pgPassword || project.db_password;
   const jwtSecret = project.jwt_secret;
 
   if (!dbPassword || !jwtSecret) {
@@ -98,7 +98,7 @@ async function registerTenant(project: ProjectRow): Promise<void> {
     );
   }
 
-  const payload = {
+  return {
     tenant: {
       external_id: project.ref,
       name: `Project ${project.ref}`,
@@ -123,6 +123,10 @@ async function registerTenant(project: ProjectRow): Promise<void> {
       ],
     },
   };
+}
+
+async function registerTenant(project: ProjectRow): Promise<void> {
+  const payload = await tenantPayload(project);
 
   const res = await realtimeFetch("/api/tenants", {
     method: "POST",
@@ -141,6 +145,36 @@ async function registerTenant(project: ProjectRow): Promise<void> {
   });
 }
 
+async function updateTenant(project: ProjectRow): Promise<void> {
+  const payload = await tenantPayload(project);
+
+  const res = await realtimeFetch(`/api/tenants/${project.ref}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`update failed (${res.status}): ${body}`);
+  }
+
+  const host = pickRoutingHost(project.ref, project.config);
+  logger.info("[RealtimeReconcile] tenant updated", {
+    projectRef: project.ref,
+    apiHost: host,
+  });
+}
+
+async function upsertTenant(project: ProjectRow): Promise<"created" | "updated"> {
+  const exists = await getTenant(project.ref);
+  if (exists) {
+    await updateTenant(project);
+    return "updated";
+  }
+  await registerTenant(project);
+  return "created";
+}
+
 async function main() {
   const rows = await sql<ProjectRow[]>`
     SELECT ref, db_name, db_user, db_password, jwt_secret, config
@@ -155,21 +189,17 @@ async function main() {
   });
 
   let created = 0;
-  let skipped = 0;
+  let updated = 0;
   const failed: Array<{ ref: string; error: string }> = [];
 
   for (const project of rows) {
     try {
-      if (await getTenant(project.ref)) {
-        skipped += 1;
-        logger.info("[RealtimeReconcile] tenant already present", {
-          projectRef: project.ref,
-        });
-        continue;
+      const action = await upsertTenant(project);
+      if (action === "created") {
+        created += 1;
+      } else {
+        updated += 1;
       }
-
-      await registerTenant(project);
-      created += 1;
     } catch (error) {
       const message =
         error instanceof Error ? error.message : String(error);
@@ -183,7 +213,7 @@ async function main() {
 
   logger.info("[RealtimeReconcile] complete", {
     created,
-    skipped,
+    updated,
     failed: failed.length,
   });
 
