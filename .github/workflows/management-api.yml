@@ -4,6 +4,7 @@ on:
   push:
     branches: ["main", "dev"]
     paths:
+      # Keep this workflow easy to retrigger after management-api-only fixes land on main.
       - "packages/management-api/**"
       - ".github/workflows/management-api.yml"
   pull_request:
