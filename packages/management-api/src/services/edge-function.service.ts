@@ -11,6 +11,24 @@ export interface EdgeFunctionConfig {
   background_routes?: string[];
 }
 
+export interface EdgeFunctionVersionRecord {
+  version: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+  bundle_path: string | null;
+  source_path: string | null;
+  source_dir_path: string | null;
+  has_bundle: boolean;
+  has_source: boolean;
+  has_source_dir: boolean;
+}
+
+export interface EdgeFunctionVersionDetail extends EdgeFunctionVersionRecord {
+  bundle_code: string | null;
+  source_code: string | null;
+}
+
 const DEFAULT_FUNCTION_CONFIG: EdgeFunctionConfig = {
   verify_jwt: true, // Default: require JWT (same as Supabase)
 };
@@ -195,6 +213,16 @@ async function listVersionDirectories(ref: string, slug: string): Promise<string
       .sort((a, b) => Number.parseInt(a, 10) - Number.parseInt(b, 10));
   } catch {
     return [];
+  }
+}
+
+async function statIso(filePath: string | null): Promise<string | null> {
+  if (!filePath) return null;
+  try {
+    const stats = await fs.stat(filePath);
+    return stats.mtime.toISOString();
+  } catch {
+    return null;
   }
 }
 
@@ -527,6 +555,115 @@ export const edgeFunctionService = {
     }
   },
 
+  async listVersions(ref: string, slug: string): Promise<EdgeFunctionVersionRecord[]> {
+    const cfg = await this.getConfig(ref, slug);
+    const activeVersion = cfg.version || null;
+    const versions = await listVersionDirectories(ref, slug);
+
+    const records = await Promise.all(
+      versions.map(async (version) => {
+        const bundlePath = getVersionedFuncPath(ref, slug, version);
+        const sourcePath = getVersionedSrcPath(ref, slug, version);
+        const sourceDirPath = path.join(getFuncDir(ref), VERSIONED_DIR, slug, version, "src");
+        const [hasBundle, hasSource, hasSourceDir] = await Promise.all([
+          fileExists(bundlePath),
+          fileExists(sourcePath),
+          fileExists(sourceDirPath),
+        ]);
+
+        const updatedAt =
+          (await statIso(bundlePath)) ||
+          (await statIso(sourcePath)) ||
+          (await statIso(sourceDirPath)) ||
+          new Date().toISOString();
+
+        const createdAt = updatedAt;
+
+        return {
+          version,
+          is_active: version === activeVersion,
+          created_at: createdAt,
+          updated_at: updatedAt,
+          bundle_path: hasBundle ? bundlePath : null,
+          source_path: hasSource ? sourcePath : null,
+          source_dir_path: hasSourceDir ? sourceDirPath : null,
+          has_bundle: hasBundle,
+          has_source: hasSource,
+          has_source_dir: hasSourceDir,
+        } satisfies EdgeFunctionVersionRecord;
+      }),
+    );
+
+    return records.sort(
+      (a, b) => Number.parseInt(b.version, 10) - Number.parseInt(a.version, 10),
+    );
+  },
+
+  async getVersion(
+    ref: string,
+    slug: string,
+    version: string,
+  ): Promise<EdgeFunctionVersionDetail | null> {
+    const versions = await this.listVersions(ref, slug);
+    const record = versions.find((item) => item.version === version);
+    if (!record) return null;
+
+    const [bundleCode, sourceCode] = await Promise.all([
+      record.has_bundle ? readVersionedFunctionCode(ref, slug, version) : Promise.resolve(null),
+      record.has_source ? readVersionedFunctionSource(ref, slug, version) : Promise.resolve(null),
+    ]);
+
+    return {
+      ...record,
+      bundle_code: bundleCode,
+      source_code: sourceCode,
+    };
+  },
+
+  async activateVersion(ref: string, slug: string, version: string): Promise<EdgeFunctionConfig | null> {
+    const detail = await this.getVersion(ref, slug, version);
+    if (!detail || !detail.has_bundle) return null;
+
+    const bundleCode = detail.bundle_code ?? (await readVersionedFunctionCode(ref, slug, version));
+    if (bundleCode == null) return null;
+
+    const dir = getFuncDir(ref);
+    await fs.mkdir(dir, { recursive: true });
+    await Bun.write(getFuncPath(ref, slug), bundleCode);
+
+    const sourceCode =
+      detail.source_code ?? (detail.has_source ? await readVersionedFunctionSource(ref, slug, version) : null);
+    if (sourceCode != null) {
+      await Bun.write(getSrcPath(ref, slug), sourceCode);
+    }
+
+    if (detail.has_source_dir && detail.source_dir_path) {
+      const srcDir = path.join(dir, `.src-${slug}`);
+      await fs.rm(srcDir, { recursive: true, force: true }).catch(() => {});
+      await fs.cp(detail.source_dir_path, srcDir, { recursive: true });
+    }
+
+    await invalidateCache(ref, slug);
+
+    try {
+      const runtimeUrl = `http://${config.edgeRuntimeInternal}`;
+      await fetch(`${runtimeUrl}/preheat/${ref}/${slug}`, {
+        method: "POST",
+        signal: AbortSignal.timeout(10_000),
+      });
+    } catch {
+      logger.debug("[EdgeFunction] Preheat skipped during version activation", {
+        ref,
+        slug,
+        version,
+      });
+    }
+
+    const updated = await this.updateConfig(ref, slug, { version });
+    logger.info(`[EdgeFunction] Activated version ${version} for ${slug}@${ref}`);
+    return updated;
+  },
+
   /** List all function slugs for a project */
   async list(ref: string): Promise<string[]> {
     try {
@@ -624,6 +761,7 @@ export const edgeFunctionService = {
     slug: string,
     limit: number = 50,
     offset: number = 0,
+    version?: string | null,
   ): Promise<
     Array<{
       id: string;
@@ -643,7 +781,7 @@ export const edgeFunctionService = {
         .catch(() => "");
       if (!content) return [];
       const lines = content.trim().split("\n").filter(Boolean);
-      return lines.slice(offset, offset + limit).map((line, idx) => {
+      const parsed = lines.map((line, idx) => {
         try {
           return JSON.parse(line);
         } catch {
@@ -657,6 +795,10 @@ export const edgeFunctionService = {
           };
         }
       });
+      const filtered = version
+        ? parsed.filter((entry) => entry?.metadata?.function_version === version)
+        : parsed;
+      return filtered.slice(offset, offset + limit);
     } catch {
       return [];
     }

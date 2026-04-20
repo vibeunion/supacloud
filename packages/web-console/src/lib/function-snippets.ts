@@ -2,6 +2,7 @@ export type FunctionTaskRecord = {
   id: string;
   status: string;
   function_slug: string | null;
+  function_version?: string | null;
   attempt: number | null;
   max_attempts: number | null;
   error: string | null;
@@ -91,8 +92,22 @@ export function getStatusBadgeClass(status: string) {
   }
 }
 
-export function buildFunctionTasksPath(projectRef: string, slug: string, limit = 8) {
-  return `/api/query?path=/v1/projects/${projectRef}/tasks?function_slug=${encodeURIComponent(slug)}&limit=${limit}`;
+export function buildFunctionTasksPath(
+  projectRef: string,
+  slug: string,
+  limit = 8,
+  version?: string | null,
+) {
+  const query = new URLSearchParams({
+    function_slug: slug,
+    limit: String(limit),
+  });
+
+  if (version) {
+    query.set("function_version", version);
+  }
+
+  return `/api/query?path=/v1/projects/${projectRef}/tasks?${query.toString()}`;
 }
 
 export function buildFunctionTaskConsolePath(

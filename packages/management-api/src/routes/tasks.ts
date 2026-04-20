@@ -15,11 +15,15 @@ export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
             const functionSlug = typeof query.function_slug === "string" && query.function_slug.trim().length > 0
               ? query.function_slug.trim()
               : undefined;
+            const functionVersion = typeof query.function_version === "string" && query.function_version.trim().length > 0
+              ? query.function_version.trim()
+              : undefined;
             const limit = typeof query.limit === "string" ? Number.parseInt(query.limit, 10) : 50;
             const tasks = await taskRepository.listTasksByProjectFiltered(params.ref, {
               statuses,
               taskTypes,
               functionSlug,
+              functionVersion,
               onlyDeadLettered: query.dlq === "true",
               limit: Number.isFinite(limit) ? limit : 50,
             });
@@ -32,6 +36,7 @@ export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
             status: t.Optional(t.String()),
             task_type: t.Optional(t.String()),
             function_slug: t.Optional(t.String()),
+            function_version: t.Optional(t.String()),
             dlq: t.Optional(t.String()),
             limit: t.Optional(t.String()),
         })),
