@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.10.5](https://github.com/zuohuadong/supacloud/compare/management-api-v0.10.4...management-api-v0.10.5) (2026-04-20)
+
+
+### 🐛 Bug Fixes
+
+* **queue:** migrate foundation worker to stable pg-listen ([fa90fe3](https://github.com/zuohuadong/supacloud/commit/fa90fe3e27238a0f9f79beaa8e881e78ea631c0e))
+
+
+### 💅 Elegance & Refactoring
+
+* **queue:** remove legacy pg-listen implementation ([9707808](https://github.com/zuohuadong/supacloud/commit/9707808c945d214f0f9477df2bfc31d4ce83840e))
+
 ## [0.10.4](https://github.com/zuohuadong/supacloud/compare/management-api-v0.10.3...management-api-v0.10.4) (2026-04-19)
 
 
