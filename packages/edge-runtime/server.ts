@@ -4,6 +4,7 @@ import cors from "@elysiajs/cors";
 import { WorkerPool } from "./worker-pool";
 import { loadTenantEnv } from "./tenant-env";
 import path from "path";
+import fs from "fs/promises";
 
 const PORT = Number(process.env.EDGE_RUNTIME_PORT) || Number(process.env.PORT) || 9000;
 const POOL_SIZE = Number(process.env.WORKER_POOL_SIZE) || 4;
@@ -51,6 +52,8 @@ async function dispatchFunction(
   },
 ) {
   const requestedVersion = request.headers.get("x-supacloud-function-version") || null;
+  const resolvedConfig = await getFunctionConfig(projectRef, functionName);
+  const activeVersion = requestedVersion || resolvedConfig.version || null;
   const versionSuffix = requestedVersion ? `_v${requestedVersion}` : "";
   const functionId = `${projectRef}_${functionName}${versionSuffix}`;
   const versionedJsPath = requestedVersion
@@ -66,13 +69,21 @@ async function dispatchFunction(
 
   try {
     const targetPool = opts?.background ? backgroundPool : pool;
+    const runtimeLogContext = {
+      functionVersion: activeVersion,
+      executionId: setHeaders["x-sb-execution-id"] || null,
+      background: opts?.background === true,
+    };
     return await targetPool.dispatch({
       functionId,
       functionPath,
       env: await loadTenantEnv(projectRef),
       request,
       cancelKey: opts?.cancelKey,
-      onLog: opts?.onLog,
+      onLog: (entry) => {
+        void appendFunctionRuntimeLog(projectRef, functionName, entry, runtimeLogContext);
+        opts?.onLog?.(entry);
+      },
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Internal Error";
@@ -90,6 +101,49 @@ async function dispatchFunction(
       status: statusCode,
       headers: { "Content-Type": "application/json", "x-relay-error": "true" },
     });
+  }
+}
+
+async function appendFunctionRuntimeLog(
+  projectRef: string,
+  functionName: string,
+  entry: {
+    timestamp: string;
+    stream: "stdout" | "stderr";
+    level: string;
+    message: string;
+  },
+  context: {
+    functionVersion: string | null;
+    executionId: string | null;
+    background: boolean;
+  },
+) {
+  try {
+    const logDir = path.resolve(FUNCTIONS_DIR, projectRef, ".logs");
+    await fs.mkdir(logDir, { recursive: true });
+    const logFile = path.join(logDir, `${functionName}.log`);
+    const payload = {
+      id: crypto.randomUUID(),
+      timestamp: entry.timestamp,
+      event_type: "runtime_log",
+      severity: entry.level,
+      message: entry.message,
+      metadata: {
+        stream: entry.stream,
+        project_ref: projectRef,
+        function_slug: functionName,
+        function_version: context.functionVersion,
+        execution_id: context.executionId,
+        background: context.background,
+      },
+    };
+    await fs.appendFile(logFile, `${JSON.stringify(payload)}\n`, "utf8");
+  } catch (error) {
+    console.warn(
+      `[EdgeRuntime] Failed to persist runtime log for ${projectRef}/${functionName}:`,
+      error instanceof Error ? error.message : String(error),
+    );
   }
 }
 
@@ -130,18 +184,18 @@ function buildBackgroundForwardedRequest(request: Request): Request {
 
 const configCache = new Map<
   string,
-  { verify_jwt: boolean; expiresAt: number }
+  { verify_jwt: boolean; version: string | null; expiresAt: number }
 >();
 const CONFIG_CACHE_TTL = 10_000;
 
 async function getFunctionConfig(
   projectRef: string,
   functionName: string,
-): Promise<{ verify_jwt: boolean }> {
+): Promise<{ verify_jwt: boolean; version: string | null }> {
   const key = `${projectRef}/${functionName}`;
   const cached = configCache.get(key);
   if (cached && cached.expiresAt > Date.now()) {
-    return { verify_jwt: cached.verify_jwt };
+    return { verify_jwt: cached.verify_jwt, version: cached.version };
   }
 
   try {
@@ -153,17 +207,23 @@ async function getFunctionConfig(
     const raw = await Bun.file(configPath).text();
     const config = JSON.parse(raw);
     const verify_jwt = config.verify_jwt !== false;
+    const version =
+      typeof config.version === "string" && config.version.trim().length > 0
+        ? config.version.trim()
+        : null;
     configCache.set(key, {
       verify_jwt,
+      version,
       expiresAt: Date.now() + CONFIG_CACHE_TTL,
     });
-    return { verify_jwt };
+    return { verify_jwt, version };
   } catch {
     configCache.set(key, {
       verify_jwt: true,
+      version: null,
       expiresAt: Date.now() + CONFIG_CACHE_TTL,
     });
-    return { verify_jwt: true };
+    return { verify_jwt: true, version: null };
   }
 }
 

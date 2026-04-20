@@ -4,7 +4,9 @@ export type FunctionRuntimeLogRecord = {
   event_type: string;
   severity: string;
   message: string;
-  metadata: Record<string, unknown>;
+  metadata: Record<string, unknown> & {
+    function_version?: string | null;
+  };
 };
 
 const ERROR_SEVERITIES = new Set(["error", "fatal", "critical"]);
