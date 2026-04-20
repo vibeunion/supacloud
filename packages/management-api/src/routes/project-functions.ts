@@ -378,6 +378,70 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
     },
   )
 
+  .get(
+    "/:ref/functions/:slug/versions",
+    async ({ params }) => {
+      const { edgeFunctionService } =
+        await import("../services/edge-function.service");
+      return edgeFunctionService.listVersions(params.ref, params.slug);
+    },
+    {
+      params: t.Object({ ref: t.String(), slug: t.String() }),
+    },
+  )
+
+  .get(
+    "/:ref/functions/:slug/versions/:version",
+    async ({ params }) => {
+      const { edgeFunctionService } =
+        await import("../services/edge-function.service");
+      const version = await edgeFunctionService.getVersion(
+        params.ref,
+        params.slug,
+        params.version,
+      );
+      if (!version) {
+        return status(404, { message: "Function version not found", code: "404" });
+      }
+      return version;
+    },
+    {
+      params: t.Object({
+        ref: t.String(),
+        slug: t.String(),
+        version: t.String(),
+      }),
+    },
+  )
+
+  .post(
+    "/:ref/functions/:slug/versions/:version/activate",
+    async ({ params }) => {
+      const { edgeFunctionService } =
+        await import("../services/edge-function.service");
+      const updated = await edgeFunctionService.activateVersion(
+        params.ref,
+        params.slug,
+        params.version,
+      );
+      if (!updated) {
+        return status(404, { message: "Function version not found", code: "404" });
+      }
+      return {
+        success: true,
+        version: params.version,
+        config: updated,
+      };
+    },
+    {
+      params: t.Object({
+        ref: t.String(),
+        slug: t.String(),
+        version: t.String(),
+      }),
+    },
+  )
+
   // Download function source body (supabase CLI compatibility)
   // Official: GET /v1/projects/:ref/functions/:slug/body → octet-stream
   .get(
@@ -625,6 +689,10 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params, query }) => {
       const limit = Number(query.limit || 50);
       const offset = Number(query.offset || 0);
+      const version =
+        typeof query.version === "string" && query.version.trim().length > 0
+          ? query.version.trim()
+          : undefined;
       const { edgeFunctionService } =
         await import("../services/edge-function.service");
       const logs = await edgeFunctionService.getLogs(
@@ -632,6 +700,7 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         params.slug,
         limit,
         offset,
+        version,
       );
       return { logs, total: logs.length };
     },
@@ -641,6 +710,7 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         {
           limit: t.Optional(t.String()),
           offset: t.Optional(t.String()),
+          version: t.Optional(t.String()),
         },
         { additionalProperties: true },
       ),
