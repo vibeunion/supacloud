@@ -26,6 +26,7 @@ export interface TaskListFilters {
   statuses?: string[];
   taskTypes?: string[];
   functionSlug?: string;
+  functionVersion?: string;
   onlyDeadLettered?: boolean;
   limit?: number;
 }
@@ -122,6 +123,11 @@ export function buildTaskListQuery(projectRef: string, filters: TaskListFilters 
   if (filters.functionSlug) {
     values.push(filters.functionSlug);
     conditions.push(`function_slug = $${values.length}`);
+  }
+
+  if (filters.functionVersion) {
+    values.push(filters.functionVersion);
+    conditions.push(`function_version = $${values.length}`);
   }
 
   values.push(filters.limit || 50);
