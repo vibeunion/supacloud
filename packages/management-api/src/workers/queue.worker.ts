@@ -1,7 +1,7 @@
 import { logger } from "../utils/logger";
 import { config } from "../config";
 import { db, TaskStatus } from "../db/index";
-import { createPgListener, type PgListenerHandle } from "../utils/pg-listen";
+import { createPgListener, type PgListenerHandle } from "../lib/pg-listen";
 
 /**
  * A general-purpose long-running task / message queue foundation (Queue Base)
@@ -17,17 +17,18 @@ export class QueueWorker {
     logger.info("[QueueWorker] Starting foundation queue worker...");
 
     // 1. Establish LISTEN/NOTIFY subscription
-    this.listener = createPgListener(
-      config.databaseUrl,
-      ["task_pending"], // `project_tasks` trigger broadcasts insert events via `task_pending`
-      (channel, payload) => {
+    this.listener = createPgListener({
+      url: config.databaseUrl,
+      channels: ["task_pending"], // `project_tasks` trigger broadcasts insert events via `task_pending`
+      onNotification: (channel, payload) => {
         logger.debug(`[QueueWorker] Received event on ${channel}: ${payload}`);
         if (channel === "task_pending") {
           // Immediately dispatch new tasks to the microtask/async pool to prevent blocking the socket
           setImmediate(() => this.triggerSweep());
         }
-      }
-    );
+      },
+      applicationName: "supacloud-queue-worker",
+    });
 
     // 2. Start a 10s fallback sweep timer
     // Prevents missed events due to network jitter/disconnects (LISTEN cannot detect records inserted during disconnects)
