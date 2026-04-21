@@ -7,7 +7,7 @@ import * as path from "node:path";
 import type { OAuthProvider, OAuthProviderConfig } from "../types/oauth";
 import { OAUTH_ENV_MAPPINGS } from "../types/oauth";
 import { tenantOAuthService } from "./tenant-oauth.service";
-import { resolveProjectApiUrl } from "../utils/project-routing";
+import { resolveProjectApiUrl, resolveProjectStudioUrl } from "../utils/project-routing";
 
 export interface RuntimeStatus {
     status: "running" | "stopped" | "starting" | "error";
@@ -108,7 +108,11 @@ class TenantRuntimeService {
             apiUrl: this.deriveApiUrl(ref, projectConfig),
             anonKey: project.anonKey || project.anon_key,
             serviceRoleKey: project.serviceRoleKey || project.service_role_key,
-            siteUrl: typeof projectConfig.site_url === "string" ? projectConfig.site_url : (typeof projectConfig.siteUrl === "string" ? projectConfig.siteUrl : (projectConfig.custom_domain ? `https://${projectConfig.custom_domain}` : "http://localhost:3000")),
+            siteUrl: typeof projectConfig.site_url === "string"
+                ? projectConfig.site_url
+                : (typeof projectConfig.siteUrl === "string"
+                    ? projectConfig.siteUrl
+                    : resolveProjectStudioUrl(ref, projectConfig)),
             uriAllowList: Array.isArray(projectConfig.additional_redirect_urls) ? projectConfig.additional_redirect_urls.join(',') : (Array.isArray(projectConfig.additionalRedirectUrls) ? projectConfig.additionalRedirectUrls.join(',') : ""),
             authConfig: (projectConfig.auth as Record<string, unknown>) || {}
         };
