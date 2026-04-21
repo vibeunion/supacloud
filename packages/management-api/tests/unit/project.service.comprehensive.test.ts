@@ -48,6 +48,10 @@ const edgeFunctionServiceMock = {
   deploy: mock(() => Promise.resolve(true)),
 };
 
+const tenantRuntimeServiceMock = {
+  restartRuntime: mock(() => Promise.resolve({ status: "running" })),
+};
+
 mock.module("../../src/db", () => ({
   ...actualDb,
   sql: baseMock as unknown,
@@ -75,6 +79,10 @@ mock.module("../../src/services/router.service", () => ({
 
 mock.module("../../src/services/edge-function.service", () => ({
   edgeFunctionService: edgeFunctionServiceMock,
+}));
+
+mock.module("../../src/services/tenant-runtime.service", () => ({
+  tenantRuntimeService: tenantRuntimeServiceMock,
 }));
 
 const { ProjectService } = await import("../../src/services/project.service");
@@ -127,6 +135,7 @@ describe("ProjectService - Comprehensive", () => {
     routerServiceMock.reload.mockReset();
     edgeFunctionServiceMock.read.mockReset();
     edgeFunctionServiceMock.deploy.mockReset();
+    tenantRuntimeServiceMock.restartRuntime.mockReset();
 
     projectRepositoryMock.findAll.mockResolvedValue([]);
     projectRepositoryMock.findByRef.mockResolvedValue(null);
@@ -152,6 +161,7 @@ describe("ProjectService - Comprehensive", () => {
     routerServiceMock.reload.mockResolvedValue({ success: true });
     edgeFunctionServiceMock.read.mockResolvedValue("function code here");
     edgeFunctionServiceMock.deploy.mockResolvedValue(true);
+    tenantRuntimeServiceMock.restartRuntime.mockResolvedValue({ status: "running" });
   });
 
   test("listProjects returns empty array when no projects", async () => {
@@ -280,6 +290,24 @@ describe("ProjectService - Comprehensive", () => {
       custom: "value",
       new: "setting",
     });
+  });
+
+  test("updateProjectSettings restarts runtime when routing settings change", async () => {
+    projectRepositoryMock.findByRef.mockResolvedValueOnce(mockProject);
+    projectRepositoryMock.updateConfig.mockResolvedValueOnce({
+      ...mockProject,
+      config: { custom: "value", api_domain: "xgapi.aizhuliren.cn" },
+    });
+
+    const result = await service.updateProjectSettings("test123abc", {
+      api_domain: "xgapi.aizhuliren.cn",
+    });
+
+    expect(result).toEqual({
+      custom: "value",
+      api_domain: "xgapi.aizhuliren.cn",
+    });
+    expect(tenantRuntimeServiceMock.restartRuntime).toHaveBeenCalledWith("test123abc");
   });
 
   test("getApiKeys returns api keys", async () => {

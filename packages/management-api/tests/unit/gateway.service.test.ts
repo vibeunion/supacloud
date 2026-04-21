@@ -134,4 +134,49 @@ describe("GatewayService", () => {
 
         globalThis.fetch = originalFetch;
     });
+
+    test("setupUpstream should reserve API root paths for ACME-safe host routing", async () => {
+        const originalFetch = globalThis.fetch;
+        const calls: Array<{ url: string; method: string; body: Record<string, unknown> | null }> = [];
+
+        globalThis.fetch = mock((input: string | URL | Request, init?: RequestInit) => {
+            const url = typeof input === "string"
+                ? input
+                : input instanceof URL
+                    ? input.toString()
+                    : input.url;
+            const method = init?.method || "GET";
+            let body: Record<string, unknown> | null = null;
+            if (typeof init?.body === "string" && init.body.length > 0) {
+                try {
+                    body = JSON.parse(init.body) as Record<string, unknown>;
+                } catch {
+                    body = null;
+                }
+            }
+            calls.push({ url, method, body });
+            return Promise.resolve(new Response(JSON.stringify({ data: [] })));
+        }) as unknown as typeof fetch;
+
+        const result = await gatewayService.setupUpstream("testref123", 3000, 9999);
+        expect(result.success).toBe(true);
+
+        const apiRootRoute = calls.find(
+            (c) => c.method === "PUT" && c.url.includes("/routes/route-svc-api-root-testref123")
+        );
+        expect(apiRootRoute).toBeDefined();
+        expect(apiRootRoute?.body?.paths).toEqual(["/.well-known/acme-challenge"]);
+        expect(apiRootRoute?.body?.strip_path).toBe(false);
+        expect(apiRootRoute?.body?.hosts).toContain("testref123.api.example.com");
+
+        const studioTransformer = calls.find(
+            (c) => c.method === "POST"
+                && c.url.includes("/routes/route-svc-studio-testref123/plugins")
+                && c.body?.name === "request-transformer"
+        );
+        expect(studioTransformer).toBeDefined();
+        expect(((studioTransformer?.body?.config as Record<string, unknown>)?.add as Record<string, unknown>)?.headers).toContain("x-supacloud-ui-host:studio");
+
+        globalThis.fetch = originalFetch;
+    });
 });

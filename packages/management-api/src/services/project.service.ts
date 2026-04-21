@@ -535,6 +535,30 @@ export class ProjectService {
       ...config,
     });
 
+    const currentConfig = (project.config as Record<string, unknown>) || {};
+    const routingKeys: Array<keyof typeof config> = [
+      "custom_domain",
+      "api_domain",
+      "studio_domain",
+      "site_url",
+      "siteUrl",
+      "additional_redirect_urls",
+      "additionalRedirectUrls",
+    ];
+    const shouldRestartRuntime = routingKeys.some((key) => currentConfig[key as string] !== config[key as string]);
+
+    if (shouldRestartRuntime) {
+      try {
+        const { tenantRuntimeService } = await import("./tenant-runtime.service");
+        await tenantRuntimeService.restartRuntime(ref);
+      } catch (err) {
+        logger.warn("[ProjectService] Failed to propagate routing settings to runtime", {
+          ref,
+          error: err,
+        });
+      }
+    }
+
     return updated?.config || null;
   }
 

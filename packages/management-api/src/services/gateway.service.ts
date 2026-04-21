@@ -278,7 +278,7 @@ export class GatewayService {
 
     async setCors(projectRef: string, origins: string[] = DEFAULT_CORS_ORIGINS): Promise<boolean> {
         try {
-            const routes = ['pgrst', 'graphql', 'gotrue', 'realtime', 'storage', 'functions'].map(r => `route-svc-${r}-${projectRef}`);
+            const routes = ['pgrst', 'graphql', 'gotrue', 'realtime', 'storage', 'functions', 'api-root'].map(r => `route-svc-${r}-${projectRef}`);
             let allSuccess = true;
             for (const routeName of routes) {
                 try {
@@ -319,7 +319,7 @@ export class GatewayService {
 
     async enableJwtAuth(projectRef: string): Promise<boolean> {
         try {
-            const routes = ['pgrst', 'graphql', 'gotrue', 'realtime', 'storage', 'functions'].map(r => `route-svc-${r}-${projectRef}`);
+            const routes = ['pgrst', 'graphql', 'gotrue', 'realtime', 'storage', 'functions', 'api-root'].map(r => `route-svc-${r}-${projectRef}`);
             let allSuccess = true;
             for (const routeName of routes) {
                 try {
@@ -531,6 +531,14 @@ export class GatewayService {
                 // the Elysia /ws helper routes.
                 protocols: ["http", "https"],
             });
+            await this.ensureServiceAndRoute({
+                name: `svc-api-root-${projectRef}`,
+                url: `http://${hostIp}:${config.port}`,
+                paths: ["/.well-known/acme-challenge"],
+                hosts,
+                projectRef,
+                stripPath: false,
+            });
 
             // Ensure Studio routes (Management API proxy loopback for SPA fallback)
             const studioDomain = `studio-${projectRef}.${config.baseDomain}`;
@@ -538,7 +546,15 @@ export class GatewayService {
                 studioDomain,
                 resolveProjectStudioHost(projectRef, routingConfig),
             ]));
-            await this.ensureServiceAndRoute({ name: `svc-studio-${projectRef}`, url: `http://${hostIp}:${config.port}`, paths: ["/"], hosts: studioHosts, projectRef, stripPath: false });
+            await this.ensureServiceAndRoute({
+                name: `svc-studio-${projectRef}`,
+                url: `http://${hostIp}:${config.port}`,
+                paths: ["/"],
+                hosts: studioHosts,
+                projectRef,
+                stripPath: false,
+                headers: ["x-supacloud-ui-host:studio"],
+            });
 
             logger.info(`Kong upstream dynamically registered via REST for ${projectRef} (pgrst:${pgrstPort}, gotrue:${gotruePort})`);
             return { success: true };
@@ -550,7 +566,7 @@ export class GatewayService {
 
     async addProjectDomains(projectRef: string, apiDomains: string[], studioDomains: string[]): Promise<boolean> {
         try {
-            const servicePrefixes = ["svc-pgrst-", "svc-graphql-", "svc-gotrue-", "svc-functions-", "svc-storage-", "svc-realtime-", "svc-realtime-api-"];
+            const servicePrefixes = ["svc-pgrst-", "svc-graphql-", "svc-gotrue-", "svc-functions-", "svc-storage-", "svc-realtime-", "svc-realtime-api-", "svc-api-root-"];
             for (const prefix of servicePrefixes) {
                 const routeName = `route-${prefix}${projectRef}`;
                 const route = await this.kongRequest(`/routes/${routeName}`);
@@ -579,7 +595,7 @@ export class GatewayService {
 
     async removeProjectDomains(projectRef: string, apiDomains: string[], studioDomains: string[]): Promise<boolean> {
         try {
-            const servicePrefixes = ["svc-pgrst-", "svc-graphql-", "svc-gotrue-", "svc-functions-", "svc-storage-", "svc-realtime-", "svc-realtime-api-"];
+            const servicePrefixes = ["svc-pgrst-", "svc-graphql-", "svc-gotrue-", "svc-functions-", "svc-storage-", "svc-realtime-", "svc-realtime-api-", "svc-api-root-"];
             for (const prefix of servicePrefixes) {
                 const routeName = `route-${prefix}${projectRef}`;
                 const route = await this.kongRequest(`/routes/${routeName}`);
