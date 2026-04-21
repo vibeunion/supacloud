@@ -1,0 +1,23 @@
+FROM oven/bun:1.3.12
+
+WORKDIR /app
+
+COPY package.json bun.lock* ./
+COPY packages/management-api/package.json ./packages/management-api/package.json
+COPY packages/web-console/package.json ./packages/web-console/package.json
+
+RUN bun install
+
+COPY packages/management-api ./packages/management-api
+COPY packages/web-console ./packages/web-console
+
+RUN cd /app/packages/web-console && bun install && bun run build
+
+WORKDIR /app/packages/management-api
+
+EXPOSE 9090
+
+ENV PORT=9090
+ENV NODE_ENV=production
+
+CMD ["sh", "-lc", "bun run src/index.ts --init-db && exec bun run src/index.ts"]
