@@ -126,6 +126,16 @@ sudo bash install.sh --ip 1.2.3.4 --domain api.example.com --s3 juicefs
 source /etc/profile.d/supacloud.sh
 ```
 
+**Docker Compose Self-Host (PostgreSQL 18)**
+
+```bash
+cd docker/self-host
+python3 init-env.py --public-url https://api.example.com --studio-url https://studio.example.com > .env
+docker compose up -d --build
+```
+
+The compose stack is isolated under [`docker/self-host`](/Volumes/Data/workspace/supacloud/docker/self-host) and ships a PostgreSQL 18 image with common extensions preinstalled.
+
 **Available CLI Options:**
 | Option | Description | Example |
 |--------|-------------|---------|
