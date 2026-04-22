@@ -53,8 +53,29 @@ export const V1ProjectWithDatabaseResponseSchema = t.Object(
       },
       { additionalProperties: false },
     ),
+    api: t.Optional(
+      t.Object(
+        {
+          url: t.String(),
+        },
+        { additionalProperties: true },
+      ),
+    ),
+    studio: t.Optional(
+      t.Object(
+        {
+          url: t.String(),
+        },
+        { additionalProperties: true },
+      ),
+    ),
+    config: t.Optional(t.Any()),
+    anon_key: t.Optional(t.String()),
+    service_role_key: t.Optional(t.String()),
+    jwt_secret: t.Optional(t.String()),
+    services: t.Optional(t.Array(t.Any())),
   },
-  { additionalProperties: false },
+  { additionalProperties: true },
 );
 
 function normalizeTimestamp(value: unknown): string {
@@ -86,6 +107,13 @@ export function toPublicV1ProjectWithDatabaseResponse(p: any) {
       postgres_engine: p.database?.postgres_engine || "15",
       release_channel: p.database?.release_channel || "stable",
     },
+    api: p.api,
+    studio: p.studio,
+    config: p.config,
+    anon_key: p.anon_key,
+    service_role_key: p.service_role_key,
+    jwt_secret: p.jwt_secret,
+    services: p.services,
   };
 }
 

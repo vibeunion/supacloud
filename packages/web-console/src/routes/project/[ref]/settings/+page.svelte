@@ -27,6 +27,19 @@
 
   const project = $derived(query.data?.data || null);
   const isLoading = $derived(query.isLoading);
+  const routingConfig = $derived(
+    ((project as Record<string, unknown> | null)?.config as Record<string, unknown> | undefined) || {}
+  );
+  const projectApiUrl = $derived(
+    ((project as Record<string, unknown> | null)?.api as Record<string, unknown> | undefined)?.url as string
+      || (routingConfig?.api_domain ? `https://${routingConfig.api_domain}` : "")
+      || (routingConfig?.custom_domain ? `https://${routingConfig.custom_domain}` : "")
+  );
+  const projectStudioUrl = $derived(
+    ((project as Record<string, unknown> | null)?.studio as Record<string, unknown> | undefined)?.url as string
+      || (routingConfig?.studio_domain ? `https://${routingConfig.studio_domain}` : "")
+      || (typeof window !== 'undefined' ? `${window.location.origin}/project/${projectRef}` : "")
+  );
 
   const queryClient = useQueryClient();
 
@@ -194,39 +207,50 @@
       <div class="border rounded-xl bg-card p-6 space-y-4">
         <h2 class="text-lg font-semibold">API 地址</h2>
         <div class="space-y-3 text-sm">
-          {#if (project as Record<string, unknown>)?.config}
-            {@const config = (project as Record<string, unknown>).config as Record<string, unknown>}
-            {#if config?.custom_domain}
+          {#if Object.keys(routingConfig).length > 0}
+            {#if routingConfig?.custom_domain}
               <div>
                 <span class="text-xs text-muted-foreground">自定义域名 (Custom Domain)</span>
-                <p class="font-mono text-xs bg-muted/50 rounded px-3 py-2 mt-1 select-all">{config.custom_domain}</p>
+                <p class="font-mono text-xs bg-muted/50 rounded px-3 py-2 mt-1 select-all">{String(routingConfig.custom_domain)}</p>
+              </div>
+            {/if}
+            {#if routingConfig?.api_domain}
+              <div>
+                <span class="text-xs text-muted-foreground">API Domain</span>
+                <p class="font-mono text-xs bg-muted/50 rounded px-3 py-2 mt-1 select-all">{String(routingConfig.api_domain)}</p>
+              </div>
+            {/if}
+            {#if routingConfig?.studio_domain}
+              <div>
+                <span class="text-xs text-muted-foreground">Studio Domain</span>
+                <p class="font-mono text-xs bg-muted/50 rounded px-3 py-2 mt-1 select-all">{String(routingConfig.studio_domain)}</p>
               </div>
             {/if}
             <div>
               <span class="text-xs text-muted-foreground">API URL</span>
-              <p class="font-mono text-xs bg-muted/50 rounded px-3 py-2 mt-1 select-all">{config?.custom_domain ? `https://${config.custom_domain}` : `http://82.157.196.165:8000`}</p>
+              <p class="font-mono text-xs bg-muted/50 rounded px-3 py-2 mt-1 select-all">{projectApiUrl || "N/A"}</p>
             </div>
-            {#if config?.postgrest_port}
+            {#if routingConfig?.postgrest_port}
               <div>
                 <span class="text-xs text-muted-foreground">PostgREST Port</span>
-                <p class="font-mono text-xs">{config.postgrest_port}</p>
+                <p class="font-mono text-xs">{String(routingConfig.postgrest_port)}</p>
               </div>
             {/if}
-            {#if config?.gotrue_port}
+            {#if routingConfig?.gotrue_port}
               <div>
                 <span class="text-xs text-muted-foreground">GoTrue Port</span>
-                <p class="font-mono text-xs">{config.gotrue_port}</p>
+                <p class="font-mono text-xs">{String(routingConfig.gotrue_port)}</p>
               </div>
             {/if}
           {:else}
             <div>
               <span class="text-xs text-muted-foreground">API URL</span>
-              <p class="font-mono text-xs bg-muted/50 rounded px-3 py-2 mt-1 select-all">http://82.157.196.165:8000</p>
+              <p class="font-mono text-xs bg-muted/50 rounded px-3 py-2 mt-1 select-all">{projectApiUrl || "N/A"}</p>
             </div>
           {/if}
           <div>
             <span class="text-xs text-muted-foreground">Studio URL</span>
-            <p class="font-mono text-xs bg-muted/50 rounded px-3 py-2 mt-1 select-all">{`${typeof window !== 'undefined' ? window.location.origin : ''}/project/${projectRef}`}</p>
+            <p class="font-mono text-xs bg-muted/50 rounded px-3 py-2 mt-1 select-all">{projectStudioUrl || "N/A"}</p>
           </div>
         </div>
       </div>
@@ -385,4 +409,3 @@
     </div>
   {/if}
 </div>
-
