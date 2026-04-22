@@ -422,6 +422,7 @@
     "platform_admin": "平台管理",
     "infrastructure": "基础设施",
     "back_to_projects": "返回项目列表",
+    "return_to_projects": "返回项目列表",
     "database_advisor": "数据库顾问"
   },
   "Realtime": {

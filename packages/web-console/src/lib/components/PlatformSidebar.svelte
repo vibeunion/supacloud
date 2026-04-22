@@ -9,16 +9,20 @@
     HardDrive, 
     Terminal,
     Languages,
-    Home
+    Home,
+    SunMoon
   } from "lucide-svelte";
   import { page } from '$app/stores';
   import { t, locale } from "svelte-i18n";
+  import { mode, toggleMode } from "mode-watcher";
 
   let { className = "" } = $props();
 
   function toggleLanguage() {
     locale.set($locale === 'zh' ? 'en' : 'zh');
   }
+
+  const themeToggleLabel = $derived($mode === 'dark' ? '切换到浅色模式' : '切换到深色模式');
 
   const navItems = $derived([
     { title: $t("Platform.extensions_market"), icon: Box, href: `/platform/extensions` },
@@ -64,8 +68,15 @@
       class="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm font-medium text-brand bg-brand/5 hover:bg-brand/10 transition-colors cursor-pointer"
     >
       <Home size={18} />
-      <span>{$t("Sidebar.return_to_projects") || "返回项目列表"}</span>
+      <span>{$t("Sidebar.back_to_projects") || "返回项目列表"}</span>
     </a>
+    <button
+      onclick={toggleMode}
+      class="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition-colors cursor-pointer"
+    >
+      <SunMoon size={18} />
+      <span>{themeToggleLabel}</span>
+    </button>
     <button 
       onclick={toggleLanguage}
       class="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition-colors cursor-pointer"
