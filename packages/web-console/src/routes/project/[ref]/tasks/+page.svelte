@@ -1,5 +1,6 @@
 <script lang="ts">
   import { page } from "$app/state";
+  import { apiClient } from "$lib/api";
   import { onMount } from "svelte";
   import { untrack } from "svelte";
   import {
@@ -103,7 +104,7 @@
     if (statusFilter) query.set("status", statusFilter);
     if (functionSlugFilter) query.set("function_slug", functionSlugFilter);
     const suffix = query.toString() ? `?${query.toString()}` : "";
-    return `/api/query?path=/v1/projects/${projectRef}/tasks${extra}${suffix}`;
+    return `/v1/projects/${projectRef}/tasks${extra}${suffix}`;
   }
 
   async function fetchTasks(silent = false) {
@@ -112,9 +113,9 @@
 
     try {
       const [tasksRes, dlqRes, settingsRes] = await Promise.all([
-        fetch(buildTaskPath()),
-        fetch(`/api/query?path=/v1/projects/${projectRef}/tasks/dlq`),
-        fetch(`/api/query?path=/v1/projects/${projectRef}/tasks/settings/background`)
+        apiClient(buildTaskPath()),
+        apiClient(`/v1/projects/${projectRef}/tasks/dlq`),
+        apiClient(`/v1/projects/${projectRef}/tasks/settings/background`)
       ]);
 
       const [tasksData, dlqData, settingsData] = await Promise.all([
@@ -184,7 +185,7 @@
   async function fetchTaskDetail(taskId: string, silent = false) {
     if (!silent) isLoadingDetail = true;
     try {
-      const res = await fetch(`/api/query?path=/v1/projects/${projectRef}/tasks/${taskId}`);
+      const res = await apiClient(`/v1/projects/${projectRef}/tasks/${taskId}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || "获取任务详情失败");
       selectedTask = data;
@@ -197,7 +198,7 @@
 
   async function retryTask(taskId: string) {
     try {
-      const res = await fetch(`/api/query?path=/v1/projects/${projectRef}/tasks/${taskId}/retry`, {
+      const res = await apiClient(`/v1/projects/${projectRef}/tasks/${taskId}/retry`, {
         method: "POST"
       });
       const data = await res.json();
@@ -212,7 +213,7 @@
 
   async function cancelTask(taskId: string) {
     try {
-      const res = await fetch(`/api/query?path=/v1/projects/${projectRef}/tasks/${taskId}/cancel`, {
+      const res = await apiClient(`/v1/projects/${projectRef}/tasks/${taskId}/cancel`, {
         method: "POST"
       });
       const data = await res.json();
@@ -228,7 +229,7 @@
   async function saveSettings() {
     try {
       isSavingSettings = true;
-      const res = await fetch(`/api/query?path=/v1/projects/${projectRef}/tasks/settings/background`, {
+      const res = await apiClient(`/v1/projects/${projectRef}/tasks/settings/background`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(draftSettings)

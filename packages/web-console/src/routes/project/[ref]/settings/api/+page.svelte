@@ -3,6 +3,7 @@
 
 
   import { page } from "$app/state";
+  import { apiClient } from "$lib/api";
   import { Loader2, Copy, Eye, EyeOff, Tag, Link2, ShieldAlert, Trash2, Plus } from "lucide-svelte";
   import { toast } from "svelte-sonner";
   import { getContext } from "svelte";
@@ -47,7 +48,7 @@
 
     try {
       isSubmittingLimit = true;
-      const res = await fetch(`/api/query?path=/v1/projects/${projectRef}/gateway/custom-rate-limits`, {
+      const res = await apiClient(`/v1/projects/${projectRef}/gateway/custom-rate-limits`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -75,7 +76,7 @@
   async function removeCustomRateLimit(path: string) {
     if (!confirm(`确定要删除路径 ${path} 的限流规则吗？`)) return;
     try {
-      const res = await fetch(`/api/query?path=/v1/projects/${projectRef}/gateway/custom-rate-limits`, {
+      const res = await apiClient(`/v1/projects/${projectRef}/gateway/custom-rate-limits`, {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ path })

@@ -20,9 +20,11 @@
     Radio,
     Globe,
     Glasses,
-    Activity
+    Activity,
+    SunMoon
   } from "lucide-svelte";
   import { page } from '$app/stores';
+  import { mode, toggleMode } from "mode-watcher";
 
   import ProjectSwitcher from "./ProjectSwitcher.svelte";
 
@@ -31,6 +33,8 @@
   function toggleLanguage() {
     locale.set($locale === 'zh' ? 'en' : 'zh');
   }
+
+  const themeToggleLabel = $derived($mode === 'dark' ? '切换到浅色模式' : '切换到深色模式');
 
   const navItems = $derived(currentProject?.ref ? [
     { title: $t("Navigation.table_editor"), icon: Table, href: `/project/${currentProject.ref}/tables` },
@@ -121,6 +125,13 @@
       <Shield fill="currentColor" strokeWidth={1.5} class="w-4 h-4 group-hover:scale-110 transition-transform" />
       <span>{$t("Sidebar.platform_admin")}</span>
     </a>
+    <button
+      onclick={(e) => { e.preventDefault(); toggleMode(); }}
+      class="flex w-full items-center gap-3 px-3 py-2.5 text-sm font-medium rounded-xl text-muted-foreground hover:bg-secondary/50 hover:text-foreground transition-all duration-300"
+    >
+      <SunMoon class="w-4 h-4" />
+      <span>{themeToggleLabel}</span>
+    </button>
     <button
       onclick={(e) => { e.preventDefault(); toggleLanguage(); }}
       class="flex w-full items-center gap-3 px-3 py-2.5 text-sm font-medium rounded-xl text-muted-foreground hover:bg-secondary/50 hover:text-foreground transition-all duration-300"
