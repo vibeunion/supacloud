@@ -422,6 +422,7 @@
     "platform_admin": "Platform Admin",
     "infrastructure": "Infrastructure",
     "back_to_projects": "Back to Projects",
+    "return_to_projects": "Back to Projects",
     "database_advisor": "Database Advisor"
   },
   "Realtime": {
