@@ -32,28 +32,4 @@ describe("storage management routes", () => {
     expect(String(mimeType)).toContain("text/plain");
     uploadSpy.mockRestore();
   });
-
-  test("management raw upload streams large files to explicit object path", async () => {
-    const uploadSpy = spyOn(StorageService, "uploadFile").mockResolvedValue(true);
-
-    const res = await request("/v1/storage/test-ref/buckets/manuals/files/nested/large.bin", {
-      method: "PUT",
-      headers: {
-        "content-type": "application/octet-stream",
-        "content-length": "3",
-      },
-      body: "abc",
-    });
-
-    expect(res.status).toBe(200);
-    expect(uploadSpy).toHaveBeenCalled();
-    const [projectRef, bucket, objectPath, fileData, mimeType] = uploadSpy.mock.calls.at(-1)!;
-    expect(projectRef).toBe("test-ref");
-    expect(bucket).toBe("manuals");
-    expect(objectPath).toBe("nested/large.bin");
-    expect(fileData).toBeTruthy();
-    expect(typeof (fileData as ReadableStream).getReader).toBe("function");
-    expect(String(mimeType)).toContain("application/octet-stream");
-    uploadSpy.mockRestore();
-  });
 });

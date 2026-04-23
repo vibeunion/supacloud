@@ -58,28 +58,6 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
             500: ErrorResponse,
         },
     })
-    .put('/:ref/buckets/:name/files/*', async ({ params, request }) => {
-        const targetPath = params['*']?.replace(/^\/+/, '');
-        if (!targetPath) return status(400, { message: 'No file path provided', code: '400' });
-        if (!request.body) return status(400, { message: 'No file body provided', code: '400' });
-
-        const success = await StorageService.uploadFile(
-            params.ref,
-            params.name,
-            targetPath,
-            request.body,
-            request.headers.get('content-type') || 'application/octet-stream',
-        );
-
-        if (!success) return status(500, { message: 'Failed to upload file', code: '500' });
-        return { success: true, message: 'File uploaded successfully' };
-    }, {
-        response: {
-            200: SuccessResponse,
-            400: ErrorResponse,
-            500: ErrorResponse,
-        },
-    })
     .delete('/:ref/buckets/:name/files/:filename', async ({ params }) => {
         const success = await StorageService.deleteFile(params.ref, params.name, params.filename);
         if (!success) return status(500, { message: 'Failed to delete file', code: '500' });
