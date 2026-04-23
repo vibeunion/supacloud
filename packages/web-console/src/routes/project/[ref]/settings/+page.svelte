@@ -11,6 +11,9 @@
 
   let actionInProgress = $state<string | null>(null);
   let actionMsg = $state<string | null>(null);
+  let customDomainInput = $state("");
+  let apiDomainInput = $state("");
+  let studioDomainInput = $state("");
 
   // Custom domain state
   let domainHostname = $state("");
@@ -43,8 +46,61 @@
 
   const queryClient = useQueryClient();
 
+  $effect(() => {
+    customDomainInput = typeof routingConfig?.custom_domain === "string" ? routingConfig.custom_domain : "";
+    apiDomainInput = typeof routingConfig?.api_domain === "string" ? routingConfig.api_domain : "";
+    studioDomainInput = typeof routingConfig?.studio_domain === "string" ? routingConfig.studio_domain : "";
+  });
+
   async function refetchProject() {
     await queryClient.invalidateQueries({ queryKey: ["v1/projects", "getOne", projectRef] });
+  }
+
+  function normalizeDomainValue(value: string) {
+    const normalized = value.trim();
+    return normalized.length > 0 ? normalized : null;
+  }
+
+  const routingMutation = createMutation(() => ({
+    mutationFn: async () => {
+      const res = await apiClient(`/v1/projects/${projectRef}/settings`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          custom_domain: normalizeDomainValue(customDomainInput),
+          api_domain: normalizeDomainValue(apiDomainInput),
+          studio_domain: normalizeDomainValue(studioDomainInput),
+        }),
+      });
+      if (!res.ok) {
+        let message = "保存 Routing 配置失败";
+        try {
+          const err = await res.json();
+          message = err?.message || err?.error || message;
+        } catch {}
+        throw new Error(message);
+      }
+      return res.json();
+    },
+    onMutate: () => {
+      actionInProgress = "routing";
+    },
+    onSuccess: async () => {
+      actionMsg = "✅ Routing 配置已保存";
+      await queryClient.invalidateQueries({ queryKey: ["custom_hostname", projectRef] });
+      await refetchProject();
+    },
+    onError: (err: unknown) => {
+      actionMsg = `❌ ${err instanceof Error ? err.message : "保存 Routing 配置失败"}`;
+    },
+    onSettled: () => {
+      actionInProgress = null;
+      setTimeout(() => actionMsg = null, 4000);
+    }
+  }));
+
+  function saveRoutingSettings() {
+    routingMutation.mutate();
   }
 
   const projectActionMutation = createMutation(() => ({
@@ -252,6 +308,59 @@
             <span class="text-xs text-muted-foreground">Studio URL</span>
             <p class="font-mono text-xs bg-muted/50 rounded px-3 py-2 mt-1 select-all">{projectStudioUrl || "N/A"}</p>
           </div>
+        </div>
+      </div>
+
+      <div class="border rounded-xl bg-card p-6 space-y-4">
+        <div class="flex items-center justify-between gap-4">
+          <div>
+            <h2 class="text-lg font-semibold">Routing / Domains</h2>
+            <p class="text-xs text-muted-foreground mt-1">
+              修改 API、Studio 和主域名绑定。保存后会自动刷新项目运行时配置。
+            </p>
+          </div>
+          <button
+            onclick={saveRoutingSettings}
+            disabled={routingMutation.isPending}
+            class="px-4 py-2 text-sm font-semibold rounded-lg bg-brand text-white hover:bg-brand/90 transition-colors disabled:opacity-50 flex items-center gap-2"
+          >
+            {#if routingMutation.isPending}
+              <Loader2 size={14} class="animate-spin" />
+            {/if}
+            保存
+          </button>
+        </div>
+
+        <div class="grid gap-4 md:grid-cols-3">
+          <label class="space-y-2">
+            <span class="text-xs text-muted-foreground">Custom Domain</span>
+            <input
+              type="text"
+              bind:value={customDomainInput}
+              placeholder="e.g. app.example.com"
+              class="w-full px-3 py-2 text-sm rounded-lg border bg-background focus:outline-none focus:ring-2 focus:ring-brand/50 font-mono"
+            />
+          </label>
+
+          <label class="space-y-2">
+            <span class="text-xs text-muted-foreground">API Domain</span>
+            <input
+              type="text"
+              bind:value={apiDomainInput}
+              placeholder="e.g. api.example.com"
+              class="w-full px-3 py-2 text-sm rounded-lg border bg-background focus:outline-none focus:ring-2 focus:ring-brand/50 font-mono"
+            />
+          </label>
+
+          <label class="space-y-2">
+            <span class="text-xs text-muted-foreground">Studio Domain</span>
+            <input
+              type="text"
+              bind:value={studioDomainInput}
+              placeholder="e.g. studio.example.com"
+              class="w-full px-3 py-2 text-sm rounded-lg border bg-background focus:outline-none focus:ring-2 focus:ring-brand/50 font-mono"
+            />
+          </label>
         </div>
       </div>
 
