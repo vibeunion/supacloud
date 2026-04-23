@@ -106,11 +106,11 @@ function extractMultipartFileFast(buffer: Buffer, boundary: string): { fileBuffe
             let fileEnd = nextBoundaryPos - 2;
 
             // Check for metadata field (name="metadata")
-            if (headersRow.includes('name="metadata"') && fileEnd > fileStart) {
+            if (headersRow.includes('name="metadata"') && fileEnd >= fileStart) {
                 metadataStr = buffer.subarray(fileStart, fileEnd).toString('utf-8');
             }
             // Skip known text fields (cacheControl, etc)
-            else if (headersRow.includes('name="cacheControl"') && fileEnd > fileStart) {
+            else if (headersRow.includes('name="cacheControl"') && fileEnd >= fileStart) {
                 cacheControlStr = buffer.subarray(fileStart, fileEnd).toString('utf-8');
             }
             // If it has filename= or Content-Type: header, it's the file
@@ -119,7 +119,7 @@ function extractMultipartFileFast(buffer: Buffer, boundary: string): { fileBuffe
                 const typeMatch = headersRow.match(/Content-Type:\s*([^\r\n]+)/i);
                 if (typeMatch) mimeType = typeMatch[1].trim();
 
-                if (fileEnd > fileStart) {
+                if (fileEnd >= fileStart) {
                     bestFile = { fileBuffer: buffer.subarray(fileStart, fileEnd), mimeType };
                 }
             }
@@ -338,7 +338,6 @@ function parseContentLength(value: string | null | undefined): number | null {
 function isMultipartContentType(contentType: string | undefined): boolean {
     return (contentType || "").toLowerCase().includes("multipart/form-data");
 }
-
 async function readUploadBody(
     request: Request,
     contentType: string | undefined,
@@ -392,6 +391,7 @@ async function readUploadBody(
         customMetadata = extracted.metadata;
     }
 
+    return { fileData: fileBuffer, fileMimeType, size: fileBuffer.byteLength, customMetadata };
     return { fileData: fileBuffer, fileMimeType, size: fileBuffer.byteLength, customMetadata };
 }
 
@@ -1612,15 +1612,14 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         const upload = await TusStore.get(params.uploadId);
         if (!upload) return status(404, { message: 'Upload not found' });
         if (upload.ref !== ref) return status(403, { message: 'Cross-project upload access denied' });
+        if (!request.body) return status(400, { message: 'Missing upload chunk body' });
 
         const clientOffset = Number(headers['upload-offset'] || 0);
         if (clientOffset !== upload.offset) {
             return status(409, { message: 'Offset mismatch' });
         }
 
-        const chunk = Buffer.from(await request.arrayBuffer());
-        await TusStore.updateOffset(params.uploadId, upload.offset + chunk.length, chunk);
-        upload.offset += chunk.length;
+        upload.offset = await TusStore.appendChunk(params.uploadId, upload.offset, request.body);
 
         set.headers['Tus-Resumable'] = '1.0.0';
         set.headers['Upload-Offset'] = String(upload.offset);

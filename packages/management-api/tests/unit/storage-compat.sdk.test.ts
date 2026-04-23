@@ -23,6 +23,7 @@ beforeEach(() => {
   spyOn(SignedStore, "get").mockResolvedValue({ ref: "test_mock", bucket: "avatars", objectName: "signed.txt", upsert: false, expiresAt: 4000000000 });
   spyOn(SignedStore, "delete").mockResolvedValue(undefined);
   spyOn(TusStore, "get").mockResolvedValue(null);
+  spyOn(TusStore, "delete").mockResolvedValue(undefined);
 
   mockBuckets.set("avatars", {
     id: "avatars",
@@ -143,6 +144,45 @@ describe("storageCompatRoutes supabase-js compatibility", () => {
     uploadSpy.mockRestore();
   });
 
+  test("multipart zero-byte upload is accepted", async () => {
+    const uploadSpy = spyOn(StorageService, "uploadFile").mockResolvedValue(true);
+    const formData = new FormData();
+    formData.append("file", new Blob([], { type: "text/plain" }), "empty.txt");
+
+    const res = await request("/storage/v1/object/avatars/empty.txt", {
+      method: "POST",
+      headers: {
+        apikey: "test-token",
+      },
+      body: formData,
+    });
+
+    expect(res.status).toBe(200);
+    expect(uploadSpy).toHaveBeenCalled();
+    uploadSpy.mockRestore();
+  });
+
+  test("raw object upload forwards a stream for non-multipart bodies", async () => {
+    const uploadSpy = spyOn(StorageService, "uploadFile").mockResolvedValue(true);
+
+    const res = await request("/storage/v1/object/avatars/raw.txt", {
+      method: "POST",
+      headers: {
+        apikey: "test-token",
+        "content-type": "text/plain",
+        "content-length": "3",
+      },
+      body: "abc",
+    });
+
+    expect(res.status).toBe(200);
+    expect(uploadSpy).toHaveBeenCalled();
+    const streamArg = uploadSpy.mock.calls.at(-1)?.[3] as ReadableStream | undefined;
+    expect(streamArg).toBeDefined();
+    expect(typeof (streamArg as ReadableStream).getReader).toBe("function");
+    uploadSpy.mockRestore();
+  });
+
   test("duplicate upload without upsert is rejected", async () => {
     mockObjects.set("avatars/existing.txt", {
       metadata: { size: 5, mimetype: "text/plain" },
@@ -241,5 +281,72 @@ describe("storageCompatRoutes supabase-js compatibility", () => {
     expect(payload.nextCursor).toBeNull();
     expect(payload.objects).toHaveLength(1);
     expect(payload.objects[0].name).toBe("b.txt");
+  });
+
+  test("resumable upload appends streamed chunks without buffering the whole request", async () => {
+    const uploadSpy = spyOn(StorageService, "uploadFile").mockResolvedValue(true);
+    const setSpy = spyOn(TusStore, "set");
+    const appendSpy = spyOn(TusStore, "appendChunk");
+    const assembleSpy = spyOn(TusStore, "assembleToStream");
+
+    let uploadState: any = null;
+    let uploadId = "";
+    setSpy.mockImplementation(async (id: string, upload: any) => {
+      uploadId = id;
+      uploadState = { ...upload };
+    });
+    (TusStore.get as any).mockImplementation(async (id: string) => id === uploadId && uploadState ? { ...uploadState } : null);
+    appendSpy.mockImplementation(async (_id: string, expectedOffset: number, chunk: ReadableStream<Uint8Array>) => {
+      expect(expectedOffset).toBe(0);
+      expect(typeof chunk.getReader).toBe("function");
+      const payload = await new Response(chunk).text();
+      expect(payload).toBe("chunk");
+      uploadState.offset = expectedOffset + payload.length;
+      return uploadState.offset;
+    });
+    assembleSpy.mockResolvedValue({
+      stream: new Response("chunk").body!,
+      cleanup: async () => {},
+    });
+
+    const uploadMeta = [
+      `bucketName ${Buffer.from("avatars").toString("base64")}`,
+      `objectName ${Buffer.from("folder/resumable.bin").toString("base64")}`,
+      `contentType ${Buffer.from("application/octet-stream").toString("base64")}`,
+    ].join(",");
+
+    const createRes = await request("/storage/v1/upload/resumable", {
+      method: "POST",
+      headers: {
+        apikey: "test-token",
+        authorization: "Bearer test-token",
+        "upload-length": "5",
+        "upload-metadata": uploadMeta,
+      },
+    });
+
+    expect(createRes.status).toBe(201);
+    const location = createRes.headers.get("Location");
+    expect(location).toBeTruthy();
+
+    const patchRes = await request(location!, {
+      method: "PATCH",
+      headers: {
+        apikey: "test-token",
+        authorization: "Bearer test-token",
+        "upload-offset": "0",
+        "content-type": "application/offset+octet-stream",
+        "content-length": "5",
+      },
+      body: "chunk",
+    });
+
+    expect(patchRes.status).toBe(200);
+    expect(appendSpy).toHaveBeenCalled();
+    expect(uploadSpy).toHaveBeenCalled();
+    setSpy.mockRestore();
+    appendSpy.mockRestore();
+    assembleSpy.mockRestore();
+    uploadSpy.mockRestore();
   });
 });
