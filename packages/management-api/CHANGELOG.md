@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.11.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.10.5...management-api-v0.11.0) (2026-04-23)
+
+
+### 🚀 Features
+
+* **self-host:** add PG18 compose stack and refresh tenant env ([d865bdb](https://github.com/zuohuadong/supacloud/commit/d865bdb96b29ec8abdea6a0e93190d0cbd7d8371))
+
+
+### 🐛 Bug Fixes
+
+* **storage:** stream large uploads through kong ([5001aa0](https://github.com/zuohuadong/supacloud/commit/5001aa0ddfb3e8556d5d03d155d677986376a962))
+* **web-console:** restore settings and task management UI ([3f7ef75](https://github.com/zuohuadong/supacloud/commit/3f7ef756f3e151a9678f998d8e638f324ab7f77a))
+
 ## [0.10.5](https://github.com/zuohuadong/supacloud/compare/management-api-v0.10.4...management-api-v0.10.5) (2026-04-20)
 
 
