@@ -18,6 +18,7 @@ import {
     resolveProjectApiUrl,
     resolveProjectStudioHost,
 } from "../utils/project-routing";
+import { mergeProjectConfig, normalizeProjectConfig } from "../utils/project-config";
 
 export class TaskWorker {
     private isRunning = false;
@@ -152,12 +153,11 @@ export class TaskWorker {
 
                     if (process.env.TEST_FIXED_JWT_SECRET) {
                         logger.info(`[TaskWorker] Running in CI mode, skipping actual runtime provision for ${project_ref}`);
-                        await projectRepository.updateConfig(project_ref, {
-                            ...(project.config as Record<string, unknown> || {}),
+                        await projectRepository.updateConfig(project_ref, mergeProjectConfig(project.config, {
                             postgrest_port: 3000,
                             gotrue_port: 9999,
                             realtime_port: 4000
-                        });
+                        }));
                         return true;
                     }
 
@@ -183,11 +183,10 @@ export class TaskWorker {
                     }
 
                     // Save ports to project config
-                    await projectRepository.updateConfig(project_ref, {
-                        ...project.config,
+                    await projectRepository.updateConfig(project_ref, mergeProjectConfig(project.config, {
                         postgrest_port: parseInt(port),
                         gotrue_port: parseInt(gotruePort),
-                    });
+                    }));
 
                     logger.info(`[TaskWorker] Runtime started for ${project_ref} on ports (pgrst:${port}, gotrue:${gotruePort})`);
                     return true;
@@ -218,7 +217,7 @@ export class TaskWorker {
                         return true;
                     }
                     const routingConfig = normalizeProjectRoutingConfig(
-                        (project?.config as Record<string, unknown> | null | undefined) || undefined,
+                        normalizeProjectConfig(project?.config),
                     ) || {};
                     if (!routingConfig.custom_domain && typeof payload?.domain === "string" && payload.domain.trim()) {
                         routingConfig.custom_domain = payload.domain.trim();
@@ -266,7 +265,7 @@ export class TaskWorker {
                     // Auto-inject standard environment variables into project_secrets
                     // so Edge Functions can verify JWTs, access Supabase APIs, etc.
                     const routingConfig = normalizeProjectRoutingConfig(
-                        (project.config as Record<string, unknown> | null | undefined) || undefined,
+                        normalizeProjectConfig(project.config),
                     );
                     const supabaseUrl = resolveProjectApiUrl(project_ref, routingConfig);
                     const standardSecrets = [

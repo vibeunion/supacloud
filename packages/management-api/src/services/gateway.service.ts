@@ -8,6 +8,7 @@ import {
     resolveProjectApiHost,
     resolveProjectStudioHost,
 } from "../utils/project-routing";
+import { normalizeProjectConfig } from "../utils/project-config";
 
 export const DEFAULT_CORS_HEADERS = [
     "Accept", "Accept-Language", "Authorization", "Content-Language", "Content-Type",
@@ -713,7 +714,7 @@ export class GatewayService {
 
             for (const project of projects) {
                 const ref = project.ref as string;
-                const cfg = (project.config || {}) as Record<string, unknown>;
+                const cfg = normalizeProjectConfig(project.config);
                 const pgrstPort = cfg.postgrest_port as number | undefined;
                 const gotruePort = cfg.gotrue_port as number | undefined;
 
