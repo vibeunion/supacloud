@@ -32,6 +32,20 @@
 - **CI/CD Integration**: GitHub webhook for automated deployments
 - **Comprehensive Tests**: 17 unit tests + integration test suite
 
+### SupaCloud vs Supabase
+
+SupaCloud is best understood as a **self-hosted multi-tenant control plane for Supabase-style projects**, not as a clone of Supabase Cloud.
+
+Short version:
+
+- **SupaCloud**: best when you want to run many isolated projects on your own servers with a built-in operator API, web console, project lifecycle management, task queue surface, and frontend hosting.
+- **Supabase Cloud**: best when you want a fully managed platform, hosted backups/PITR, hosted logs explorer, and hosted branching.
+- **Supabase Self-Hosted**: best when you want the official upstream stack on your own infra and are comfortable operating Docker/services directly.
+
+Detailed feature comparison:
+
+- [docs/supacloud-vs-supabase.md](./docs/supacloud-vs-supabase.md)
+
 ### Architecture
 
 ```text
@@ -474,6 +488,20 @@ Key settings in `config.env`:
 - **国内 OAuth**: 内置微信、支付宝、钉钉登录集成
 - **CI/CD 集成**: GitHub Webhook 自动化部署
 - **完善测试**: 17 个单元测试 + 集成测试套件
+
+### SupaCloud 与 Supabase 的区别
+
+SupaCloud 更准确的定位是：**面向自托管场景的多租户 Supabase 控制平面**，而不是 Supabase Cloud 的镜像复刻。
+
+简版结论：
+
+- **SupaCloud**: 适合你在自有服务器上托管多个隔离项目，并需要内置控制台、项目生命周期 API、任务队列能力和前端托管能力。
+- **Supabase Cloud**: 适合你直接购买托管平台，需要托管备份/PITR、托管日志和官方 Branching。
+- **Supabase Self-Hosted**: 适合你要官方原生自托管栈，并愿意自己承担 Docker 与基础设施运维。
+
+详细功能对比：
+
+- [docs/supacloud-vs-supabase.md](./docs/supacloud-vs-supabase.md)
 
 ### 架构设计
 

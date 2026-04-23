@@ -177,8 +177,10 @@ setup_upstream() {
     local pgrst_port="${1:-}"
     local gotrue_port="${2:-}"
     
-    # [Change] Edge Functions now use single instance global entry, no longer depend on individual tenant port allocation 
-    local functions_port="9000"
+    # Public /functions/v1 traffic must go through management-api first so sdk-proxy
+    # can resolve tenant refs and apply background_routes before forwarding to the
+    # shared edge runtime.
+    local functions_port="${3:-${PORT:-9090}}"
     
     local storage_port="${4:-}"
     local realtime_port="${5:-}"
@@ -308,11 +310,11 @@ EOF
   - name: svc-functions-${PROJECT_REF}
     url: http://${host_ip}:${functions_port}
     connect_timeout: 5000
-    read_timeout: 60000
-    write_timeout: 60000
+    read_timeout: 500000
+    write_timeout: 500000
     routes:
       - name: route-functions-${PROJECT_REF}
-        strip_path: true
+        strip_path: false
         preserve_host: true
         paths:
           - /functions/v1
