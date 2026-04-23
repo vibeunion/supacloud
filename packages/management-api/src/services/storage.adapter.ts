@@ -524,7 +524,7 @@ export class S3Driver implements StorageDriver {
       const bytesWritten = await s3
         .file(`${bucket}/${cleanFileName}`)
         .write(data as any, { type: contentType });
-      return bytesWritten > 0;
+      return typeof bytesWritten === "number" ? bytesWritten >= 0 : true;
     } catch (e: unknown) {
       logger.warn("[S3] uploadFile failed", {
         error: e instanceof Error ? e.message : String(e),
