@@ -33,18 +33,25 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
     .post('/:ref/buckets/:name/upload', async ({ params, body }) => {
         const file = body.file;
         if (!file) return status(400, { message: 'No file provided', code: '400' });
+        const targetPath = typeof body.path === 'string' && body.path.trim().length > 0
+            ? body.path.replace(/^\/+/, '')
+            : file.name;
+        if (!targetPath) return status(400, { message: 'No file path provided', code: '400' });
         const fileData = typeof file.stream === 'function' ? file.stream() : file;
         const success = await StorageService.uploadFile(
             params.ref,
             params.name,
-            file.name,
+            targetPath,
             fileData,
             file.type || 'application/octet-stream',
         );
         if (!success) return status(500, { message: 'Failed to upload file', code: '500' });
         return { success: true, message: 'File uploaded successfully' };
     }, {
-        body: t.Object({ file: t.File() }),
+        body: t.Object({
+            file: t.File(),
+            path: t.Optional(t.String()),
+        }),
         response: {
             200: SuccessResponse,
             400: ErrorResponse,
