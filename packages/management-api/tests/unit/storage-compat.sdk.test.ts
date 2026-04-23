@@ -143,6 +143,45 @@ describe("storageCompatRoutes supabase-js compatibility", () => {
     uploadSpy.mockRestore();
   });
 
+  test("multipart zero-byte upload is accepted", async () => {
+    const uploadSpy = spyOn(StorageService, "uploadFile").mockResolvedValue(true);
+    const formData = new FormData();
+    formData.append("file", new Blob([], { type: "text/plain" }), "empty.txt");
+
+    const res = await request("/storage/v1/object/avatars/empty.txt", {
+      method: "POST",
+      headers: {
+        apikey: "test-token",
+      },
+      body: formData,
+    });
+
+    expect(res.status).toBe(200);
+    expect(uploadSpy).toHaveBeenCalled();
+    uploadSpy.mockRestore();
+  });
+
+  test("raw object upload forwards a stream for non-multipart bodies", async () => {
+    const uploadSpy = spyOn(StorageService, "uploadFile").mockResolvedValue(true);
+
+    const res = await request("/storage/v1/object/avatars/raw.txt", {
+      method: "POST",
+      headers: {
+        apikey: "test-token",
+        "content-type": "text/plain",
+        "content-length": "3",
+      },
+      body: "abc",
+    });
+
+    expect(res.status).toBe(200);
+    expect(uploadSpy).toHaveBeenCalled();
+    const streamArg = uploadSpy.mock.calls.at(-1)?.[3] as ReadableStream | undefined;
+    expect(streamArg).toBeDefined();
+    expect(typeof (streamArg as ReadableStream).getReader).toBe("function");
+    uploadSpy.mockRestore();
+  });
+
   test("duplicate upload without upsert is rejected", async () => {
     mockObjects.set("avatars/existing.txt", {
       metadata: { size: 5, mimetype: "text/plain" },
