@@ -2,6 +2,26 @@ import { Elysia, t } from "elysia";
 import { projectService } from "../services";
 import { db, resolveDbName, getProjectDb } from "../db";
 
+export type MigrationBody =
+  | { query: string; version?: number | string }
+  | { name: string; sql?: string; statements?: string[]; version?: number | string };
+
+export function resolveMigrationStatements(body: MigrationBody): string[] {
+  if ("query" in body && typeof body.query === "string") {
+    return [body.query];
+  }
+
+  if ("statements" in body && Array.isArray(body.statements) && body.statements.length > 0) {
+    return body.statements.filter((statement: unknown): statement is string => typeof statement === "string" && statement.trim().length > 0);
+  }
+
+  if ("sql" in body && typeof body.sql === "string" && body.sql.trim().length > 0) {
+    return [body.sql];
+  }
+
+  return [];
+}
+
 export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" })
     .get(
         "/tables",
@@ -284,56 +304,56 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
                     const version = (body as Record<string, unknown>).version
                         ? Number((body as Record<string, unknown>).version)
                         : Math.floor(Date.now() / 1000);
+                    const statements = resolveMigrationStatements(body as MigrationBody);
 
-                    const existing = await projectDb`
-                        SELECT version FROM supabase_migrations.schema_migrations WHERE version = ${version}
-                    `;
-                    if (existing.length) {
+                    const txnResult = await projectDb.begin(async (tx) => {
+                        const existing = await tx`
+                            SELECT version FROM supabase_migrations.schema_migrations WHERE version = ${version}
+                        `;
+                        if (existing.length) {
+                            return { conflict: true as const };
+                        }
+
+                        await tx.unsafe(query);
+                        await tx`INSERT INTO supabase_migrations.schema_migrations (version, statements, name) VALUES (${version}, ARRAY[${statements[0]}]::text[], 'cli_push')`;
+                        await tx`INSERT INTO public.schema_migrations (version, statements, name) VALUES (${String(version)}, ARRAY[${statements[0]}]::text[], 'cli_push')`.catch(() => {});
+                        return { conflict: false as const };
+                    });
+
+                    if (txnResult.conflict) {
                         set.status = 409;
                         return { message: "Migration already applied", code: "409", version };
                     }
 
-                    await projectDb.unsafe('BEGIN');
-                    try {
-                        await projectDb.unsafe(query);
-                        const stmts = [query];
-                        await projectDb`INSERT INTO supabase_migrations.schema_migrations (version, statements, name) VALUES (${version}, ${stmts}, 'cli_push')`;
-                        await projectDb`INSERT INTO public.schema_migrations (version, statements, name) VALUES (${String(version)}, ${stmts}, 'cli_push')`.catch(() => {});
-                        await projectDb.unsafe('COMMIT');
-                    } catch (txnErr) {
-                        await projectDb.unsafe('ROLLBACK').catch(() => {});
-                        throw txnErr;
-                    }
-
-                    return { version, statements: [query] };
+                    return { version, statements };
                 }
 
                 if (isStructuredFormat) {
                     const { name } = body as { name: string; version?: number | string; statements?: string[]; sql?: string };
-                    const sql = (body as { sql?: string }).sql || ((body as { statements?: string[] }).statements || []).join(';');
+                    const statements = resolveMigrationStatements(body as MigrationBody);
+                    const sql = statements.join(';');
                     const version = (body as Record<string, unknown>).version
                         ? Number((body as Record<string, unknown>).version)
                         : Math.floor(Date.now() / 1000);
 
-                    const existingMigration = await projectDb`
-                        SELECT version FROM supabase_migrations.schema_migrations WHERE name = ${name}
-                    `;
+                    const txnResult = await projectDb.begin(async (tx) => {
+                        const existingMigration = await tx`
+                            SELECT version FROM supabase_migrations.schema_migrations WHERE name = ${name}
+                        `;
 
-                    if (existingMigration.length) {
+                        if (existingMigration.length) {
+                            return { conflict: true as const };
+                        }
+
+                        await tx.unsafe(sql);
+                        await tx`INSERT INTO supabase_migrations.schema_migrations (version, statements, name) VALUES (${version}, ARRAY[${sql}]::text[], ${name})`;
+                        await tx`INSERT INTO public.schema_migrations (version, statements, name) VALUES (${String(version)}, ARRAY[${sql}]::text[], ${name})`.catch(() => {});
+                        return { conflict: false as const };
+                    });
+
+                    if (txnResult.conflict) {
                         set.status = 409;
                         return { message: "Migration already applied", code: "409", name };
-                    }
-
-                    await projectDb.unsafe('BEGIN');
-                    try {
-                        await projectDb.unsafe(sql);
-                        const stmts = [sql];
-                        await projectDb`INSERT INTO supabase_migrations.schema_migrations (version, statements, name) VALUES (${version}, ${stmts}, ${name})`;
-                        await projectDb`INSERT INTO public.schema_migrations (version, statements, name) VALUES (${String(version)}, ${stmts}, ${name})`.catch(() => {});
-                        await projectDb.unsafe('COMMIT');
-                    } catch (txnErr) {
-                        await projectDb.unsafe('ROLLBACK').catch(() => {});
-                        throw txnErr;
                     }
 
                     return { version, name };
