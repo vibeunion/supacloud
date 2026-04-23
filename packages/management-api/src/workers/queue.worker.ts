@@ -74,6 +74,10 @@ export class QueueWorker {
       SELECT id, project_ref, task_type, payload 
       FROM project_tasks 
       WHERE status = 'pending'
+        AND (
+          task_type LIKE 'ai\_%' ESCAPE '\'
+          OR task_type IN ('edge_function', 'mqtt_event', 'ws_push')
+        )
       ORDER BY created_at ASC 
       LIMIT 10
       FOR UPDATE SKIP LOCKED;
@@ -172,9 +176,7 @@ export class QueueWorker {
         await Bun.sleep(200); // Placeholder logic
     } 
     else {
-        // [Management Foundation Dispatch] E.g., provision_db, provision_s3 and other infrastructure tasks
-        logger.info(`[QueueWorker] Processing infrastructure task [${taskType}] for Project [${task.project_ref}]`);
-        await Bun.sleep(500); // Placeholder logic
+        throw new Error(`Unsupported task type for QueueWorker: ${taskType}`);
     }
 
     // Update task as completed

@@ -14,6 +14,7 @@ import { config } from "../config";
 import { $ } from "bun";
 import { projectLogService } from "./project-logs.service";
 import { projectOpsService } from "./project-ops.service";
+import { mergeProjectConfig, normalizeProjectConfig } from "../utils/project-config";
 
 export interface CreateProjectRequest {
   name: string;
@@ -278,10 +279,9 @@ export class ProjectService {
     if (!project) return false;
 
     if (request.name) {
-      await projectRepository.updateConfig(ref, {
-        ...project.config,
+      await projectRepository.updateConfig(ref, mergeProjectConfig(project.config, {
         display_name: request.name,
-      });
+      }));
     }
 
     return true;
@@ -497,7 +497,7 @@ export class ProjectService {
   ): Promise<Record<string, unknown> | null> {
     const project = await projectRepository.findByRef(ref);
     if (!project) return null;
-    return project.config;
+    return normalizeProjectConfig(project.config);
   }
 
   // Update project settings
@@ -508,12 +508,12 @@ export class ProjectService {
     const project = await projectRepository.findByRef(ref);
     if (!project) return null;
 
-    const updated = await projectRepository.updateConfig(ref, {
-      ...project.config,
-      ...config,
-    });
+    const updated = await projectRepository.updateConfig(
+      ref,
+      mergeProjectConfig(project.config, config),
+    );
 
-    return updated?.config || null;
+    return updated ? normalizeProjectConfig(updated.config) : null;
   }
 
   // Get project API keys
@@ -649,9 +649,10 @@ export class ProjectService {
 
   // Convert to response format
   private async toResponse(project: Project): Promise<ProjectResponse> {
-    const customDomain = project.config?.custom_domain as string | undefined;
-    const explicitApiDomain = project.config?.api_domain as string | undefined;
-    const explicitStudioDomain = project.config?.studio_domain as
+    const projectConfig = normalizeProjectConfig(project.config);
+    const customDomain = projectConfig.custom_domain as string | undefined;
+    const explicitApiDomain = projectConfig.api_domain as string | undefined;
+    const explicitStudioDomain = projectConfig.studio_domain as
       | string
       | undefined;
 
@@ -691,7 +692,7 @@ export class ProjectService {
   private async toDetailResponse(project: Project): Promise<ProjectDetailResponse> {
     return {
       ...(await this.toResponse(project)),
-      config: project.config,
+      config: normalizeProjectConfig(project.config),
       updated_at: project.updated_at,
       // API Keys for Studio compatibility
       anon_key: project.anon_key,

@@ -7,6 +7,7 @@ import * as path from "node:path";
 import type { OAuthProvider, OAuthProviderConfig } from "../types/oauth";
 import { OAUTH_ENV_MAPPINGS } from "../types/oauth";
 import { tenantOAuthService } from "./tenant-oauth.service";
+import { normalizeProjectConfig } from "../utils/project-config";
 
 export interface RuntimeStatus {
     status: "running" | "stopped" | "starting" | "error";
@@ -60,33 +61,28 @@ class TenantRuntimeService {
 
         // Port collision detection logic
         const maxTries = 100;
-        try {
-            await fs.access(this.TENANT_CONFIG_DIR);
-            for (let tryIdx = 0; tryIdx < maxTries; tryIdx++) {
-                let conflict = false;
-                const files = await fs.readdir(this.TENANT_CONFIG_DIR);
+        await fs.mkdir(this.TENANT_CONFIG_DIR, { recursive: true });
+        for (let tryIdx = 0; tryIdx < maxTries; tryIdx++) {
+            let conflict = false;
+            const files = await fs.readdir(this.TENANT_CONFIG_DIR);
 
-                for (const file of files) {
-                    if (!file.endsWith(".env")) continue;
+            for (const file of files) {
+                if (!file.endsWith(".env")) continue;
 
-                    const existingRef = file.replace(/\.env$/, "").replace(/_gotrue$/, "");
-                    if (existingRef === ref) continue; // Same tenant
+                const existingRef = file.replace(/\.env$/, "").replace(/_gotrue$/, "");
+                if (existingRef === ref) continue; // Same tenant
 
-                    const content = await Bun.file(path.join(this.TENANT_CONFIG_DIR, file)).text();
-                    const searchStr = type === "gotrue" ? `GOTRUE_API_PORT=${port}` : `PGRST_SERVER_PORT=${port}`;
+                const content = await Bun.file(path.join(this.TENANT_CONFIG_DIR, file)).text();
+                const searchStr = type === "gotrue" ? `GOTRUE_API_PORT=${port}` : `PGRST_SERVER_PORT=${port}`;
 
-                    if (content.includes(searchStr)) {
-                        conflict = true;
-                        break;
-                    }
+                if (content.includes(searchStr)) {
+                    conflict = true;
+                    break;
                 }
-
-                if (!conflict) return port;
-                port++;
             }
-        } catch (e: unknown) {
-            // Config directory missing, return the first calculated port
-            throw e;
+
+            if (!conflict) return port;
+            port++;
         }
 
         throw new Error(`Cannot find available port for ${ref} (${type})`);
@@ -107,7 +103,7 @@ class TenantRuntimeService {
             throw new Error(`Cannot find valid credentials for project ${ref} in supacloud_meta`);
         }
 
-        const projectConfig = (project.config as Record<string, unknown> | null | undefined) || {};
+        const projectConfig = normalizeProjectConfig(project.config);
         return {
             dbPassword: project.db_password,
             jwtSecret: project.jwt_secret,
