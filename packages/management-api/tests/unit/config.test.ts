@@ -7,6 +7,10 @@ describe("Config", () => {
     expect(config.port).toBeLessThan(65536);
   });
 
+  test("should default max request body size above Bun's 128 MiB default", () => {
+    expect(config.maxRequestBodySize).toBeGreaterThan(128 * 1024 * 1024);
+  });
+
   test("should have database URL", () => {
     expect(config.databaseUrl).toBeDefined();
     expect(config.databaseUrl.length).toBeGreaterThan(0);
