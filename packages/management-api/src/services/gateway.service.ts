@@ -181,7 +181,7 @@ export class GatewayService {
         if (basePath.startsWith("/graphql/v1")) return `svc-graphql-${projectRef}`;
         if (basePath.startsWith("/auth/v1")) return `svc-gotrue-${projectRef}`;
         if (basePath.startsWith("/functions/v1")) return `svc-functions-${projectRef}`;
-        if (basePath.startsWith("/storage/v1/")) return `svc-storage-${projectRef}`;
+        if (basePath.startsWith("/storage/v1")) return `svc-storage-${projectRef}`;
         if (basePath.startsWith("/realtime/v1")) return `svc-realtime-${projectRef}`;
         return null;
     }
@@ -408,6 +408,8 @@ export class GatewayService {
         readTimeout?: number;
         protocols?: string[];
         headers?: string[];
+        requestBuffering?: boolean;
+        responseBuffering?: boolean;
     }): Promise<void> {
         // 1. Upsert Service
         await this.kongRequest(`/services/${opts.name}`, "PUT", {
@@ -428,6 +430,8 @@ export class GatewayService {
             strip_path: opts.stripPath ?? true,
             preserve_host: true,
             protocols: opts.protocols || ["http", "https"],
+            request_buffering: opts.requestBuffering,
+            response_buffering: opts.responseBuffering,
         });
 
         // 3. Inject x-project-ref and any custom headers using request-transformer plugin
@@ -506,7 +510,15 @@ export class GatewayService {
                 stripPath: false,
                 readTimeout: 500_000,
             });
-            await this.ensureServiceAndRoute({ name: `svc-storage-${projectRef}`, url: `http://${hostIp}:${opts?.storagePort || 9090}`, paths: ["/storage/v1/"], hosts, projectRef });
+            await this.ensureServiceAndRoute({
+                name: `svc-storage-${projectRef}`,
+                url: `http://${hostIp}:${opts?.storagePort || config.port}`,
+                paths: ["/storage/v1/"],
+                hosts,
+                projectRef,
+                requestBuffering: false,
+                responseBuffering: false,
+            });
             await this.ensureServiceAndRoute({
                 name: `svc-realtime-api-${projectRef}`,
                 url: `http://${hostIp}:${opts?.realtimeApiPort || 4000}/api`,

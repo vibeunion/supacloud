@@ -76,7 +76,7 @@ export async function handleStatus() {
 
     // Port probing
     const activePorts = [];
-    const ports = [8000, 3000, 5432, 9090];
+    const ports = [8000, 3000, 5432, 8080, 9090];
     for (const port of ports) {
         const isUp = (await $`ss -tuln | grep :${port} `.nothrow().quiet()).exitCode === 0;
         if (isUp) activePorts.push(port);
