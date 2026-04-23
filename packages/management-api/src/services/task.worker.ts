@@ -390,13 +390,22 @@ export class TaskWorker {
 
         logger.error(`[TaskWorker] Saga compensation triggered for ${project_ref} failed permanently at ${task_type}`);
 
-        // Mark project as paused/error (Only for creation process)
-        if (task_type.startsWith("provision_")) {
+        if (task_type === "provision_realtime") {
+            // Realtime is optional for the current tenant model. Preserve DB/runtime
+            // and continue the remaining provisioning pipeline instead of destroying
+            // the tenant database after a later-stage addon failure.
+            logger.warn(`[TaskWorker] Realtime provisioning failed for ${project_ref}. Preserving core resources and continuing without realtime.`);
+            await taskRepository.createTask(project_ref, "provision_router");
+            return;
+        }
+
+        // Mark project as paused/error (Only for critical creation tasks)
+        if (task_type === "provision_db" || task_type === "provision_s3" || task_type === "provision_runtime") {
             await projectRepository.updateStatus(project_ref, "paused");
         }
 
         // Saga Compensation Logic
-        if (task_type === "provision_s3" || task_type === "provision_runtime" || task_type === "provision_realtime") {
+        if (task_type === "provision_s3" || task_type === "provision_runtime") {
             // If S3 or runtime provision failed, we need to rollback DB and S3
             logger.info(`[TaskWorker] Rolling back resources for ${project_ref} due to provisioning failure.`);
             await taskRepository.createTask(project_ref, "cleanup_runtime");

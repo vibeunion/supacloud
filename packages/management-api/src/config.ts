@@ -44,8 +44,9 @@ loadEnvFile(LOCAL_ENV);
 
 export interface Config {
   port: number;
-  databaseUrl: string;
+  maxRequestBodySize: number;
   nodeEnv: string;
+  databaseUrl: string;
   isGithubActions: boolean;
   jwtSecret: string;
   jwtIssuer: string;
@@ -135,6 +136,7 @@ const edgeRuntimeInternal = getEnv("EDGE_RUNTIME_INTERNAL", `127.0.0.1:${edgeRun
 
 export const config: Config = {
   port,
+  maxRequestBodySize: Number(getEnv("MANAGEMENT_API_MAX_REQUEST_BODY_SIZE", String(1024 * 1024 * 1024))),
   databaseUrl: getEnv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/postgres"),
   nodeEnv: getEnv("NODE_ENV", "development"),
   isGithubActions,
@@ -225,3 +227,17 @@ export const config: Config = {
   ),
   bunPath: getEnv("BUN_PATH", "bun"),
 };
+
+function validateConfig() {
+  if (!config.databaseUrl || !/^postgresql?:\/\//.test(config.databaseUrl)) {
+    throw new Error("Invalid or missing DATABASE_URL configuration. Must be a valid postgres DSN string.");
+  }
+  if (!Number.isFinite(config.maxRequestBodySize) || config.maxRequestBodySize <= 0) {
+    throw new Error("Invalid MANAGEMENT_API_MAX_REQUEST_BODY_SIZE configuration. Must be a positive integer.");
+  }
+  if (!config.masterToken || config.masterToken.length < 8) {
+    console.warn("WARNING: MASTER_TOKEN is dangerously short or missing. Set properly for production security.");
+  }
+}
+
+validateConfig();
