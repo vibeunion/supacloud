@@ -19,6 +19,7 @@ import {
   resolveProjectApiUrl,
   resolveProjectStudioUrl,
 } from "../utils/project-routing";
+import { mergeProjectConfig, normalizeProjectConfig } from "../utils/project-config";
 
 export interface CreateProjectRequest {
   name: string;
@@ -300,10 +301,9 @@ export class ProjectService {
     if (!project) return false;
 
     if (request.name) {
-      await projectRepository.updateConfig(ref, {
-        ...project.config,
+      await projectRepository.updateConfig(ref, mergeProjectConfig(project.config, {
         display_name: request.name,
-      });
+      }));
     }
 
     return true;
@@ -519,7 +519,7 @@ export class ProjectService {
   ): Promise<Record<string, unknown> | null> {
     const project = await projectRepository.findByRef(ref);
     if (!project) return null;
-    return project.config;
+    return normalizeProjectConfig(project.config);
   }
 
   // Update project settings
@@ -530,12 +530,12 @@ export class ProjectService {
     const project = await projectRepository.findByRef(ref);
     if (!project) return null;
 
-    const updated = await projectRepository.updateConfig(ref, {
-      ...project.config,
-      ...config,
-    });
+    const updated = await projectRepository.updateConfig(
+      ref,
+      mergeProjectConfig(project.config, config),
+    );
 
-    const currentConfig = (project.config as Record<string, unknown>) || {};
+    const currentConfig = normalizeProjectConfig(project.config);
     const routingKeys: Array<keyof typeof config> = [
       "custom_domain",
       "api_domain",
@@ -559,7 +559,7 @@ export class ProjectService {
       }
     }
 
-    return updated?.config || null;
+    return updated ? normalizeProjectConfig(updated.config) : null;
   }
 
   async getBackgroundTaskSettings(ref: string): Promise<BackgroundTaskSettings | null> {
@@ -777,7 +777,7 @@ export class ProjectService {
   // Convert to response format
   private async toResponse(project: Project): Promise<ProjectResponse> {
     const routingConfig = normalizeProjectRoutingConfig(
-      (project.config as Record<string, unknown> | null | undefined) || undefined,
+      normalizeProjectConfig(project.config),
     );
     const apiUrl = resolveProjectApiUrl(project.ref, routingConfig);
     const studioUrl = resolveProjectStudioUrl(project.ref, routingConfig);
@@ -811,7 +811,7 @@ export class ProjectService {
   private async toDetailResponse(project: Project): Promise<ProjectDetailResponse> {
     return {
       ...(await this.toResponse(project)),
-      config: project.config,
+      config: normalizeProjectConfig(project.config),
       updated_at: project.updated_at,
       // API Keys for Studio compatibility
       anon_key: project.anon_key,
