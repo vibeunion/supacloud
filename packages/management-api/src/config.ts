@@ -125,6 +125,7 @@ const edgeRuntimePort = Number(getEnv("EDGE_RUNTIME_PORT", "9000"));
 const edgeRuntimeMode = getEnv("EDGE_RUNTIME_MODE", "embedded") === "external" ? "external" : "embedded";
 const dashboardUsername = getEnv("DASHBOARD_USERNAME", getEnv("STUDIO_USERNAME", "admin"));
 const dashboardPassword = getEnv("DASHBOARD_PASSWORD", getEnv("STUDIO_PASSWORD", "supabase"));
+const port = Number(getEnv("PORT", "8080"));
 const pgHost = getEnv("PG_HOST", "127.0.0.1");
 const pgPort = Number(getEnv("PG_PORT", "5432"));
 const pgUser = getEnv("PG_USER", "postgres");
@@ -133,7 +134,7 @@ const pgDatabase = getEnv("PG_DATABASE", "postgres");
 const edgeRuntimeInternal = getEnv("EDGE_RUNTIME_INTERNAL", `127.0.0.1:${edgeRuntimePort}`);
 
 export const config: Config = {
-  port: Number(getEnv("PORT", "8080")),
+  port,
   databaseUrl: getEnv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/postgres"),
   nodeEnv: getEnv("NODE_ENV", "development"),
   isGithubActions,
@@ -147,7 +148,7 @@ export const config: Config = {
   studioUsername: getEnv("STUDIO_USERNAME", dashboardUsername),
   studioPassword: getEnv("STUDIO_PASSWORD", dashboardPassword),
   studioInternal: getEnv("STUDIO_INTERNAL", "127.0.0.1:3000"),
-  supacloudApiUrl: getEnv("SUPACLOUD_API_URL", `http://${getEnv("MANAGEMENT_API_INTERNAL", "127.0.0.1:9090")}`),
+  supacloudApiUrl: getEnv("SUPACLOUD_API_URL", `http://${getEnv("MANAGEMENT_API_INTERNAL", `127.0.0.1:${port}`)}`),
 
   s3Endpoint: getEnv("S3_ENDPOINT", isGithubActions ? "http://127.0.0.1:9000" : "http://localhost:9000"),
   s3Region: getEnv("S3_REGION", "us-east-1"),
@@ -161,7 +162,7 @@ export const config: Config = {
   victoriaMetricsUrl: getEnv("VICTORIAMETRICS_URL", "http://127.0.0.1:8428"),
   realtimeAdminUrl: getEnv("REALTIME_ADMIN_URL", "http://127.0.0.1:4000"),
   realtimeApiSecret: getEnv("REALTIME_API_SECRET", ""),
-  managementApiInternal: getEnv("MANAGEMENT_API_INTERNAL", "127.0.0.1:9090"),
+  managementApiInternal: getEnv("MANAGEMENT_API_INTERNAL", `127.0.0.1:${port}`),
   storageSigningSecret: getEnv("STORAGE_SIGNING_SECRET", ""),
 
   scriptsPath: getEnv("SCRIPTS_PATH", "/opt/supacloud/scripts/lib"),

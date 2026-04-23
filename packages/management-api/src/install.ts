@@ -126,7 +126,7 @@ async function performPreFlightChecks(forceYes = false) {
     s.start("Executing environment pre-flight checks");
 
     // 1. Check critical port occupation
-    const ports = [5432, 80, 443, 9090];
+    const ports = [5432, 80, 443, 8080, 9090];
     const conflictingPorts = [];
     for (const port of ports) {
         const isOccupied = (await $`ss -tuln | grep :${port} `.nothrow().quiet()).exitCode === 0;
@@ -363,6 +363,5 @@ KONG_INTERNAL="127.0.0.1:8000"
         storageType: storageType,
     };
 }
-
 
 
