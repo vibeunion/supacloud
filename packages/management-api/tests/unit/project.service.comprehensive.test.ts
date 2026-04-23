@@ -1,21 +1,8 @@
-import { beforeEach, describe, expect, mock, test } from "bun:test";
+import { beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 
 const baseMock = mock(() => Promise.resolve([]));
 (baseMock as unknown as Record<string, unknown>).unsafe = mock(() => Promise.resolve([]));
 const actualDb = await import("../../src/db");
-
-const projectRepositoryMock = {
-  findAll: mock(() => Promise.resolve([])),
-  findByRef: mock(() => Promise.resolve(null)),
-  create: mock(() => Promise.resolve(null)),
-  updateStatus: mock(() => Promise.resolve(null)),
-  updateConfig: mock(() => Promise.resolve(null)),
-  softDelete: mock(() => Promise.resolve(null)),
-};
-
-const taskRepositoryMock = {
-  createTask: mock(() => Promise.resolve({ id: "tsk_1" })),
-};
 
 const jwtServiceMock = {
   generateProjectRef: mock(() => "newref1234"),
@@ -80,14 +67,6 @@ mock.module("../../src/db", () => ({
   sql: baseMock as unknown,
 }));
 
-mock.module("../../src/repositories/project.repository", () => ({
-  projectRepository: projectRepositoryMock,
-}));
-
-mock.module("../../src/repositories/task.repository", () => ({
-  taskRepository: taskRepositoryMock,
-}));
-
 mock.module("../../src/services/jwt.service", () => ({
   jwtService: jwtServiceMock,
 }));
@@ -108,6 +87,22 @@ mock.module("../../src/services/edge-function.service", () => ({
 mock.module("../../src/services/tenant-runtime.service", () => ({
   tenantRuntimeService: tenantRuntimeServiceMock,
 }));
+
+const { projectRepository } = await import("../../src/repositories/project.repository");
+const { taskRepository } = await import("../../src/repositories/task.repository");
+
+const projectRepositoryMock = {
+  findAll: spyOn(projectRepository, "findAll"),
+  findByRef: spyOn(projectRepository, "findByRef"),
+  create: spyOn(projectRepository, "create"),
+  updateStatus: spyOn(projectRepository, "updateStatus"),
+  updateConfig: spyOn(projectRepository, "updateConfig"),
+  softDelete: spyOn(projectRepository, "softDelete"),
+};
+
+const taskRepositoryMock = {
+  createTask: spyOn(taskRepository, "createTask"),
+};
 
 const { ProjectService } = await import("../../src/services/project.service");
 

@@ -1,4 +1,4 @@
-import { afterAll, beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterAll, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { Elysia } from "elysia";
 import { TaskStatus } from "../../src/db";
 
@@ -39,24 +39,33 @@ const projectService = {
   })),
 };
 
-mock.module("../../src/repositories/task.repository", () => ({
-  taskRepository: {
-    listTasksByProjectFiltered,
-    getTaskById,
-    listTaskAttempts,
-    cancelTask,
-    retryTask,
-    requestTaskCancellation,
-    getTaskStats,
-  },
-}));
+const { taskRepository } = await import("../../src/repositories/task.repository");
+const services = await import("../../src/services");
 
-mock.module("../../src/services", () => ({
-  backgroundFunctionWorker,
-  projectService,
-}));
+spyOn(taskRepository, "listTasksByProjectFiltered").mockImplementation(
+  listTasksByProjectFiltered as typeof taskRepository.listTasksByProjectFiltered,
+);
+spyOn(taskRepository, "getTaskById").mockImplementation(getTaskById as typeof taskRepository.getTaskById);
+spyOn(taskRepository, "listTaskAttempts").mockImplementation(
+  listTaskAttempts as typeof taskRepository.listTaskAttempts,
+);
+spyOn(taskRepository, "cancelTask").mockImplementation(cancelTask as typeof taskRepository.cancelTask);
+spyOn(taskRepository, "retryTask").mockImplementation(retryTask as typeof taskRepository.retryTask);
+spyOn(taskRepository, "requestTaskCancellation").mockImplementation(
+  requestTaskCancellation as typeof taskRepository.requestTaskCancellation,
+);
+spyOn(taskRepository, "getTaskStats").mockImplementation(getTaskStats as typeof taskRepository.getTaskStats);
+spyOn(services.backgroundFunctionWorker, "cancel").mockImplementation(
+  backgroundFunctionWorker.cancel as typeof services.backgroundFunctionWorker.cancel,
+);
+spyOn(services.projectService, "getBackgroundTaskSettings").mockImplementation(
+  projectService.getBackgroundTaskSettings as typeof services.projectService.getBackgroundTaskSettings,
+);
+spyOn(services.projectService, "updateBackgroundTaskSettings").mockImplementation(
+  projectService.updateBackgroundTaskSettings as typeof services.projectService.updateBackgroundTaskSettings,
+);
 
-import { taskRoutes } from "../../src/routes/tasks";
+const { taskRoutes } = await import("../../src/routes/tasks");
 
 const app = new Elysia().use(taskRoutes);
 
