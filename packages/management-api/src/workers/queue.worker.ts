@@ -76,7 +76,7 @@ export class QueueWorker {
       WHERE status = 'pending'
         AND (
           task_type LIKE 'ai\_%' ESCAPE '\'
-          OR task_type IN ('edge_function', 'mqtt_event', 'ws_push')
+          OR task_type IN ('mqtt_event', 'ws_push')
         )
       ORDER BY created_at ASC 
       LIMIT 10
