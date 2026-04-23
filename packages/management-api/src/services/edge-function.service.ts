@@ -29,6 +29,15 @@ export interface EdgeFunctionVersionDetail extends EdgeFunctionVersionRecord {
   source_code: string | null;
 }
 
+export interface EdgeFunctionDeployResult {
+  success: boolean;
+  version?: string;
+  bundled?: boolean;
+  files?: number;
+  import_map?: string | null;
+  error?: string;
+}
+
 const DEFAULT_FUNCTION_CONFIG: EdgeFunctionConfig = {
   verify_jwt: true, // Default: require JWT (same as Supabase)
 };
@@ -332,6 +341,16 @@ export const edgeFunctionService = {
     code: string,
     minify: boolean = false,
   ): Promise<boolean> {
+    const result = await this.deployDetailed(ref, slug, code, minify);
+    return result.success;
+  },
+
+  async deployDetailed(
+    ref: string,
+    slug: string,
+    code: string,
+    minify: boolean = false,
+  ): Promise<EdgeFunctionDeployResult> {
     try {
       const validation = validateFunctionCode(code);
       if (!validation.valid) {
@@ -339,7 +358,7 @@ export const edgeFunctionService = {
           ref,
           slug,
         });
-        return false;
+        return { success: false, error: validation.error };
       }
 
       const dir = getFuncDir(ref);
@@ -393,10 +412,13 @@ export const edgeFunctionService = {
       logger.info(
         `[EdgeFunction] Deployed ${slug} for ${ref} (bundled=${!!bundled}, minify=${minify}, version=${version})`,
       );
-      return true;
+      return { success: true, bundled: !!bundled, version };
     } catch (err) {
       logger.error(`[EdgeFunction] Deploy failed`, { ref, slug, error: err });
-      return false;
+      return {
+        success: false,
+        error: err instanceof Error ? err.message : String(err),
+      };
     }
   },
 
@@ -415,13 +437,31 @@ export const edgeFunctionService = {
     entrypoint: string = "index.ts",
     minify: boolean = false,
   ): Promise<boolean> {
+    const result = await this.deployBundleDetailed(
+      ref,
+      slug,
+      files,
+      entrypoint,
+      minify,
+    );
+    return result.success;
+  },
+
+  async deployBundleDetailed(
+    ref: string,
+    slug: string,
+    files: Record<string, string>,
+    entrypoint: string = "index.ts",
+    minify: boolean = false,
+  ): Promise<EdgeFunctionDeployResult> {
     try {
       if (!files[entrypoint]) {
+        const error = `Entrypoint '${entrypoint}' not found in file map`;
         logger.error(
-          `[EdgeFunction] Entrypoint '${entrypoint}' not found in file map`,
+          `[EdgeFunction] ${error}`,
           { ref, slug },
         );
-        return false;
+        return { success: false, error };
       }
 
       // Validate the entrypoint
@@ -431,7 +471,7 @@ export const edgeFunctionService = {
           ref,
           slug,
         });
-        return false;
+        return { success: false, error: validation.error };
       }
 
       const dir = getFuncDir(ref);
@@ -480,7 +520,11 @@ export const edgeFunctionService = {
         // Cleanup staging on failure
         await fs.rm(stageDir, { recursive: true, force: true });
         logger.error(`[EdgeFunction] Bundle deploy failed`, { ref, slug });
-        return false;
+        return {
+          success: false,
+          error:
+            "Bun.build() failed while bundling the function. Check Management API logs for [EdgeFunction] Bun.build() details.",
+        };
       }
 
       // 3. Preserve the source tree (rename staging → .src-{slug})
@@ -510,14 +554,97 @@ export const edgeFunctionService = {
       logger.info(
         `[EdgeFunction] Bundle deployed ${slug} for ${ref} (${Object.keys(files).length} files, minify=${minify}, version=${version})`,
       );
-      return true;
+      return {
+        success: true,
+        bundled: true,
+        version,
+        files: Object.keys(files).length,
+        import_map: importMapPath ? path.basename(importMapPath) : null,
+      };
     } catch (err) {
       logger.error(`[EdgeFunction] Bundle deploy failed`, {
         ref,
         slug,
         error: err,
       });
-      return false;
+      return {
+        success: false,
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
+  },
+
+  async runtimeCheck(
+    ref: string,
+    slug: string,
+  ): Promise<{
+    runtime_url: string;
+    active_version: string | null;
+    active_artifact_path: string | null;
+    artifact_exists: boolean;
+    runtime_healthy: boolean;
+    preheat_ok: boolean;
+    preheat_status?: number;
+    preheat_body?: unknown;
+    error?: string;
+  }> {
+    const runtimeUrl = `http://${config.edgeRuntimeInternal}`;
+    const cfg = await this.getConfig(ref, slug);
+    const activeVersion = cfg.version || null;
+    const activeArtifactPath = activeVersion
+      ? await getVersionedArtifactPath(ref, slug, activeVersion)
+      : getFuncPath(ref, slug);
+    const artifactExists = activeArtifactPath
+      ? await fileExists(activeArtifactPath)
+      : false;
+
+    let runtimeHealthy = false;
+    try {
+      const healthRes = await fetch(`${runtimeUrl}/health`, {
+        signal: AbortSignal.timeout(2000),
+      });
+      runtimeHealthy = healthRes.ok;
+    } catch {
+      runtimeHealthy = false;
+    }
+
+    try {
+      const preheatRes = await fetch(`${runtimeUrl}/preheat/${ref}/${slug}`, {
+        method: "POST",
+        signal: AbortSignal.timeout(5000),
+      });
+      let preheatBody: unknown = null;
+      try {
+        preheatBody = await preheatRes.json();
+      } catch {
+        preheatBody = await preheatRes.text();
+      }
+      return {
+        runtime_url: runtimeUrl,
+        active_version: activeVersion,
+        active_artifact_path: activeArtifactPath,
+        artifact_exists: artifactExists,
+        runtime_healthy: runtimeHealthy,
+        preheat_ok:
+          preheatRes.ok &&
+          typeof preheatBody === "object" &&
+          preheatBody !== null &&
+          "success" in (preheatBody as Record<string, unknown>)
+            ? Boolean((preheatBody as Record<string, unknown>).success)
+            : preheatRes.ok,
+        preheat_status: preheatRes.status,
+        preheat_body: preheatBody,
+      };
+    } catch (err) {
+      return {
+        runtime_url: runtimeUrl,
+        active_version: activeVersion,
+        active_artifact_path: activeArtifactPath,
+        artifact_exists: artifactExists,
+        runtime_healthy: runtimeHealthy,
+        preheat_ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      };
     }
   },
 

@@ -1052,6 +1052,7 @@ ExecStopPost=/bin/bash -c 'for pid in \$(lsof -iTCP:9000 -sTCP:LISTEN -t 2>/dev/
 Restart=always
 RestartSec=5
 Environment=PORT=9000
+Environment=MANAGEMENT_API_URL=http://127.0.0.1:9090
 Environment=WORKER_POOL_SIZE=4
 EnvironmentFile=-/etc/supabase/management-api.env
 LimitNOFILE=65536
@@ -2034,6 +2035,7 @@ EOF
     cat > /etc/supabase/management-api.env <<EOF
 # SupaCloud Management API Configuration
 PORT=9090
+MANAGEMENT_API_URL=http://127.0.0.1:9090
 DATABASE_URL=postgresql://postgres:${POSTGRES_PASSWORD}@${INTERNAL_IP}:5432/supacloud_meta
 EDGE_RUNTIME_MODE=${EDGE_RUNTIME_MODE:-embedded}
 MASTER_TOKEN=${MASTER_TOKEN}

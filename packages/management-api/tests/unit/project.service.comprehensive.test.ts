@@ -46,6 +46,29 @@ const routerServiceMock = {
 const edgeFunctionServiceMock = {
   read: mock(() => Promise.resolve("function code here")),
   deploy: mock(() => Promise.resolve(true)),
+  deployDetailed: mock(() =>
+    Promise.resolve({ success: true, version: "1", bundled: true }),
+  ),
+  deployBundle: mock(() => Promise.resolve(true)),
+  deployBundleDetailed: mock(() =>
+    Promise.resolve({
+      success: true,
+      version: "2",
+      bundled: true,
+      files: 2,
+      import_map: null,
+    }),
+  ),
+  runtimeCheck: mock(() =>
+    Promise.resolve({
+      runtime_url: "http://127.0.0.1:9000",
+      active_version: "2",
+      active_artifact_path: "/tmp/index.js",
+      artifact_exists: true,
+      runtime_healthy: true,
+      preheat_ok: true,
+    }),
+  ),
 };
 
 const tenantRuntimeServiceMock = {
@@ -79,6 +102,7 @@ mock.module("../../src/services/router.service", () => ({
 
 mock.module("../../src/services/edge-function.service", () => ({
   edgeFunctionService: edgeFunctionServiceMock,
+  getVersionedArtifactPath: mock(() => Promise.resolve(null)),
 }));
 
 mock.module("../../src/services/tenant-runtime.service", () => ({
@@ -135,6 +159,10 @@ describe("ProjectService - Comprehensive", () => {
     routerServiceMock.reload.mockReset();
     edgeFunctionServiceMock.read.mockReset();
     edgeFunctionServiceMock.deploy.mockReset();
+    edgeFunctionServiceMock.deployDetailed.mockReset();
+    edgeFunctionServiceMock.deployBundle.mockReset();
+    edgeFunctionServiceMock.deployBundleDetailed.mockReset();
+    edgeFunctionServiceMock.runtimeCheck.mockReset();
     tenantRuntimeServiceMock.restartRuntime.mockReset();
 
     projectRepositoryMock.findAll.mockResolvedValue([]);
@@ -161,6 +189,27 @@ describe("ProjectService - Comprehensive", () => {
     routerServiceMock.reload.mockResolvedValue({ success: true });
     edgeFunctionServiceMock.read.mockResolvedValue("function code here");
     edgeFunctionServiceMock.deploy.mockResolvedValue(true);
+    edgeFunctionServiceMock.deployDetailed.mockResolvedValue({
+      success: true,
+      version: "1",
+      bundled: true,
+    });
+    edgeFunctionServiceMock.deployBundle.mockResolvedValue(true);
+    edgeFunctionServiceMock.deployBundleDetailed.mockResolvedValue({
+      success: true,
+      version: "2",
+      bundled: true,
+      files: 2,
+      import_map: null,
+    });
+    edgeFunctionServiceMock.runtimeCheck.mockResolvedValue({
+      runtime_url: "http://127.0.0.1:9000",
+      active_version: "2",
+      active_artifact_path: "/tmp/index.js",
+      artifact_exists: true,
+      runtime_healthy: true,
+      preheat_ok: true,
+    });
     tenantRuntimeServiceMock.restartRuntime.mockResolvedValue({ status: "running" });
   });
 
@@ -345,5 +394,36 @@ describe("ProjectService - Comprehensive", () => {
   test("deployFunction delegates to edge function service", async () => {
     projectRepositoryMock.findByRef.mockResolvedValueOnce(mockProject);
     expect(await service.deployFunction("test123abc", "my-func", "code")).toBe(true);
+  });
+
+  test("deployFunctionBundleDetailed returns edge function deploy details", async () => {
+    projectRepositoryMock.findByRef.mockResolvedValueOnce(mockProject);
+    const result = await service.deployFunctionBundleDetailed(
+      "test123abc",
+      "my-func",
+      { "index.ts": "export default () => new Response('ok')" },
+      "index.ts",
+      false,
+    );
+    expect(result).toMatchObject({
+      success: true,
+      version: "2",
+      bundled: true,
+    });
+    expect(edgeFunctionServiceMock.deployBundleDetailed).toHaveBeenCalled();
+  });
+
+  test("checkFunctionRuntime proxies runtime check details", async () => {
+    projectRepositoryMock.findByRef.mockResolvedValueOnce(mockProject);
+    const result = await service.checkFunctionRuntime("test123abc", "my-func");
+    expect(result).toMatchObject({
+      runtime_url: "http://127.0.0.1:9000",
+      active_version: "2",
+      preheat_ok: true,
+    });
+    expect(edgeFunctionServiceMock.runtimeCheck).toHaveBeenCalledWith(
+      "test123abc",
+      "my-func",
+    );
   });
 });
