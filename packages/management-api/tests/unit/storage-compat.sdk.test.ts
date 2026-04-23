@@ -161,6 +161,31 @@ describe("storageCompatRoutes supabase-js compatibility", () => {
     expect(res.status).toBe(409);
   });
 
+  test("raw object uploads stream body to storage instead of buffering", async () => {
+    let streamedBody: unknown = null;
+    const uploadSpy = spyOn(StorageService, "uploadFile").mockImplementation(async (_ref, _bucket, _key, data) => {
+      streamedBody = data;
+      return true;
+    });
+
+    const res = await request("/storage/v1/object/avatars/raw.bin", {
+      method: "POST",
+      headers: {
+        apikey: "test-token",
+        "content-type": "application/octet-stream",
+        "content-length": "11",
+      },
+      body: "hello world",
+      duplex: "half" as RequestDuplex,
+    });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ Id: "avatars/raw.bin", Key: "avatars/raw.bin" });
+    expect(streamedBody).toBeDefined();
+    expect(streamedBody instanceof ReadableStream).toBe(true);
+    uploadSpy.mockRestore();
+  });
+
   test("generic authenticated download path works for sdk download()", async () => {
     mockObjects.set("avatars/private.txt", {
       metadata: { size: 7, mimetype: "text/plain" },

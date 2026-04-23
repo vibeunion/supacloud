@@ -359,12 +359,14 @@ EOF
   - name: svc-storage-${PROJECT_REF}
     url: http://${host_ip}:${storage_port}
     connect_timeout: 5000
-    read_timeout: 60000
-    write_timeout: 60000
+    read_timeout: 500000
+    write_timeout: 500000
     routes:
       - name: route-storage-${PROJECT_REF}
         strip_path: true
         preserve_host: true
+        request_buffering: false
+        response_buffering: false
         paths:
           - /storage/v1
         headers:
