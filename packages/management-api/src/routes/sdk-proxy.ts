@@ -422,8 +422,11 @@ const functionsHandler = async ({ request }: any) => {
     const edgePort = parseInt(edgePortStr, 10) || 9000;
 
     const url = new URL(request.url);
-    const targetPath = url.pathname.replace(/^\/functions\/v1/, '');
-    const targetUrl = `http://${edgeHost}:${edgePort}${targetPath}${url.search}`;
+    // Preserve the /functions/v1 prefix when forwarding to edge-runtime.
+    // The runtime exposes both /functions/v1/:slug and bare /:slug routes, but
+    // stripping the prefix causes function names like "health" to collide with
+    // runtime diagnostics endpoints such as /health.
+    const targetUrl = `http://${edgeHost}:${edgePort}${url.pathname}${url.search}`;
 
     return executeProxy(request, targetUrl, { ref });
 };

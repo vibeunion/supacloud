@@ -717,6 +717,18 @@ export class ProjectService {
     return await edgeFunctionService.deploy(ref, slug, code, minify);
   }
 
+  async deployFunctionDetailed(
+    ref: string,
+    slug: string,
+    code: string,
+    minify: boolean = false,
+  ) {
+    const project = await projectRepository.findByRef(ref);
+    if (!project) return { success: false, error: "Project not found" };
+
+    return await edgeFunctionService.deployDetailed(ref, slug, code, minify);
+  }
+
   async deployFunctionBundle(
     ref: string,
     slug: string,
@@ -734,6 +746,32 @@ export class ProjectService {
       entrypoint,
       minify,
     );
+  }
+
+  async deployFunctionBundleDetailed(
+    ref: string,
+    slug: string,
+    files: Record<string, string>,
+    entrypoint: string = "index.ts",
+    minify: boolean = false,
+  ) {
+    const project = await projectRepository.findByRef(ref);
+    if (!project) return { success: false, error: "Project not found" };
+
+    return await edgeFunctionService.deployBundleDetailed(
+      ref,
+      slug,
+      files,
+      entrypoint,
+      minify,
+    );
+  }
+
+  async checkFunctionRuntime(ref: string, slug: string) {
+    const project = await projectRepository.findByRef(ref);
+    if (!project) return null;
+
+    return await edgeFunctionService.runtimeCheck(ref, slug);
   }
 
   // Convert to response format
