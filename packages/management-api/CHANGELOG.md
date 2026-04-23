@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.11.1](https://github.com/zuohuadong/supacloud/compare/management-api-v0.11.0...management-api-v0.11.1) (2026-04-23)
+
+
+### 🐛 Bug Fixes
+
+* **functions:** harden runtime routing and diagnostics ([41bade2](https://github.com/zuohuadong/supacloud/commit/41bade2ccef44f581aa1a6c6d0678f912084b6c0))
+* **queue:** keep edge functions on dedicated worker ([693b1e3](https://github.com/zuohuadong/supacloud/commit/693b1e30274f426cadb9638ff96b9dba87b98361))
+
 ## [0.11.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.10.5...management-api-v0.11.0) (2026-04-23)
 
 
