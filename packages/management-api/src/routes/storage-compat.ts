@@ -1586,15 +1586,14 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         const upload = await TusStore.get(params.uploadId);
         if (!upload) return status(404, { message: 'Upload not found' });
         if (upload.ref !== ref) return status(403, { message: 'Cross-project upload access denied' });
+        if (!request.body) return status(400, { message: 'Missing upload chunk body' });
 
         const clientOffset = Number(headers['upload-offset'] || 0);
         if (clientOffset !== upload.offset) {
             return status(409, { message: 'Offset mismatch' });
         }
 
-        const chunk = Buffer.from(await request.arrayBuffer());
-        await TusStore.updateOffset(params.uploadId, upload.offset + chunk.length, chunk);
-        upload.offset += chunk.length;
+        upload.offset = await TusStore.appendChunk(params.uploadId, upload.offset, request.body);
 
         set.headers['Tus-Resumable'] = '1.0.0';
         set.headers['Upload-Offset'] = String(upload.offset);
