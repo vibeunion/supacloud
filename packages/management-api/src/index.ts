@@ -806,6 +806,7 @@ async function bootstrap() {
     const { handleMcp } = await import("./routes/mcp");
     Bun.serve({
       port: config.port,
+      maxRequestBodySize: config.maxRequestBodySize,
       websocket: {
         open(ws) {
           const data = ws.data as unknown as {

@@ -3,6 +3,7 @@ import { logger } from "./utils/logger";
 interface Config {
   // Server
   port: number;
+  maxRequestBodySize: number;
   nodeEnv: string;
   // Database
   databaseUrl: string;
@@ -111,6 +112,12 @@ const defaultS3Endpoint = isGithubActions
 export const config = {
   // ── Server ───────────────────────────────────────────────────────
   port: parseInt(process.env.PORT || managementEnv.PORT || "9090", 10),
+  maxRequestBodySize: parseInt(
+    process.env.MANAGEMENT_API_MAX_REQUEST_BODY_SIZE ||
+      managementEnv.MANAGEMENT_API_MAX_REQUEST_BODY_SIZE ||
+      String(1024 * 1024 * 1024),
+    10,
+  ),
   nodeEnv: process.env.NODE_ENV || "production",
 
   // ── Database ─────────────────────────────────────────────────────
@@ -208,6 +215,9 @@ export const config = {
 function validateConfig() {
   if (!config.databaseUrl || !/^postgresql?:\/\//.test(config.databaseUrl)) {
     throw new Error("Invalid or missing DATABASE_URL configuration. Must be a valid postgres DSN string.");
+  }
+  if (!Number.isFinite(config.maxRequestBodySize) || config.maxRequestBodySize <= 0) {
+    throw new Error("Invalid MANAGEMENT_API_MAX_REQUEST_BODY_SIZE configuration. Must be a positive integer.");
   }
   if (!config.masterToken || config.masterToken.length < 8) {
     logger.warn("WARNING: MASTER_TOKEN is dangerously short or missing. Set properly for production security.");
