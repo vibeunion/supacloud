@@ -1,6 +1,8 @@
 import { describe, expect, mock, test } from "bun:test";
 mock.restore();
-import * as repo from "../../src/repositories/task.repository";
+const repo = await import(
+  new URL("../../src/repositories/task.repository.ts?task-repository-test", import.meta.url).href
+);
 
 const { buildTaskListQuery } = repo;
 
