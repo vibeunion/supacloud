@@ -26,15 +26,18 @@ const mockProject = {
 };
 
 // Mock the SQL module
-const mockSql: unknown = mock(() => Promise.resolve([mockProject]));
-(mockSql as Record<string, unknown>).unsafe = mock(() => Promise.resolve([mockProject]));
+const mockSql: unknown = mock(() => Promise.resolve([]));
+(mockSql as Record<string, unknown>).unsafe = mock(() => Promise.resolve([]));
 
 mock.module("../../src/db", () => ({
   sql: mockSql,
 }));
 
-// Import the object after mocking
-import { projectRepository } from "../../src/repositories/project.repository";
+// Import the object after mocking and after clearing any cross-file mock cache.
+const { projectRepository } = await import(
+  new URL("../../src/repositories/project.repository.ts?project-repository-test", import.meta.url)
+    .href
+);
 
 describe("ProjectRepository", () => {
   beforeEach(() => {

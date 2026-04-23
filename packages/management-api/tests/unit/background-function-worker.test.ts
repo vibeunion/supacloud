@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterAll, afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import type { ProjectTask } from "../../src/db";
 import { TaskStatus, TaskType } from "../../src/db";
 
@@ -18,36 +18,9 @@ const countActiveTasksForProject = mock(() => Promise.resolve(0));
 const getTaskById = mock(() => Promise.resolve(null));
 const requestTaskCancellation = mock(() => Promise.resolve(null));
 
-mock.module("../../src/repositories/task.repository", () => ({
-  taskRepository: {
-    claimNextTask,
-    cancelTask,
-    releaseTask,
-    extendLease,
-    markTaskRunning,
-    markTaskSucceeded,
-    markTaskFailed,
-    scheduleRetry,
-    startTaskAttempt,
-    completeTaskAttempt,
-    countActiveTasksForProject,
-    getTaskById,
-    requestTaskCancellation,
-  },
-}));
-
 const findByRef = mock(() =>
   Promise.resolve({ ref: "proj_1", status: "active" })
 );
-
-mock.module("../../src/repositories/project.repository", () => ({
-  projectRepository: { findByRef },
-}));
-
-const broadcastTaskUpdate = mock(() => {});
-mock.module("../../src/routes/ws", () => ({
-  broadcastTaskUpdate,
-}));
 
 const getBackgroundTaskSettings = mock(() =>
   Promise.resolve({
@@ -59,9 +32,33 @@ const getBackgroundTaskSettings = mock(() =>
   })
 );
 
-mock.module("../../src/services/project.service", () => ({
-  projectService: { getBackgroundTaskSettings },
-}));
+const { taskRepository } = await import("../../src/repositories/task.repository");
+const { projectRepository } = await import("../../src/repositories/project.repository");
+const wsModule = await import("../../src/routes/ws");
+const { projectService } = await import("../../src/services/project.service");
+
+spyOn(taskRepository, "claimNextTask").mockImplementation(claimNextTask as typeof taskRepository.claimNextTask);
+spyOn(taskRepository, "cancelTask").mockImplementation(cancelTask as typeof taskRepository.cancelTask);
+spyOn(taskRepository, "releaseTask").mockImplementation(releaseTask as typeof taskRepository.releaseTask);
+spyOn(taskRepository, "extendLease").mockImplementation(extendLease as typeof taskRepository.extendLease);
+spyOn(taskRepository, "markTaskRunning").mockImplementation(markTaskRunning as typeof taskRepository.markTaskRunning);
+spyOn(taskRepository, "markTaskSucceeded").mockImplementation(markTaskSucceeded as typeof taskRepository.markTaskSucceeded);
+spyOn(taskRepository, "markTaskFailed").mockImplementation(markTaskFailed as typeof taskRepository.markTaskFailed);
+spyOn(taskRepository, "scheduleRetry").mockImplementation(scheduleRetry as typeof taskRepository.scheduleRetry);
+spyOn(taskRepository, "startTaskAttempt").mockImplementation(startTaskAttempt as typeof taskRepository.startTaskAttempt);
+spyOn(taskRepository, "completeTaskAttempt").mockImplementation(completeTaskAttempt as typeof taskRepository.completeTaskAttempt);
+spyOn(taskRepository, "countActiveTasksForProject").mockImplementation(
+  countActiveTasksForProject as typeof taskRepository.countActiveTasksForProject,
+);
+spyOn(taskRepository, "getTaskById").mockImplementation(getTaskById as typeof taskRepository.getTaskById);
+spyOn(taskRepository, "requestTaskCancellation").mockImplementation(
+  requestTaskCancellation as typeof taskRepository.requestTaskCancellation,
+);
+spyOn(projectRepository, "findByRef").mockImplementation(findByRef as typeof projectRepository.findByRef);
+const broadcastTaskUpdate = spyOn(wsModule, "broadcastTaskUpdate").mockImplementation(() => {});
+spyOn(projectService, "getBackgroundTaskSettings").mockImplementation(
+  getBackgroundTaskSettings as typeof projectService.getBackgroundTaskSettings,
+);
 
 // We import the worker AFTER mocks are set up
 // so the module resolves against mocks
