@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.2](https://github.com/zuohuadong/supacloud/compare/management-api-v0.11.1...management-api-v0.11.2) (2026-04-23)
+
+
+### 🐛 Bug Fixes
+
+* **auth:** accept project service role on management routes ([eac98e5](https://github.com/zuohuadong/supacloud/commit/eac98e557450e997bf2f4a41146f9deaf1230c90))
+
 ## [0.11.1](https://github.com/zuohuadong/supacloud/compare/management-api-v0.11.0...management-api-v0.11.1) (2026-04-23)
 
 
