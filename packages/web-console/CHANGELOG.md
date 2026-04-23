@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.8.3](https://github.com/zuohuadong/supacloud/compare/web-console-v0.8.2...web-console-v0.8.3) (2026-04-23)
+
+
+### 🐛 Bug Fixes
+
+* **web-console:** allow editing project routing domains ([7ea7eb7](https://github.com/zuohuadong/supacloud/commit/7ea7eb7b28168a329fdc2a9a936d06654579aa48))
+* **web-console:** restore settings and task management UI ([3f7ef75](https://github.com/zuohuadong/supacloud/commit/3f7ef756f3e151a9678f998d8e638f324ab7f77a))
+
 ## [0.8.2](https://github.com/zuohuadong/supacloud/compare/web-console-v0.8.1...web-console-v0.8.2) (2026-04-19)
 
 
