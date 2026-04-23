@@ -9,6 +9,7 @@ import { shellService } from "./shell.service";
 import { routerService } from "./router.service";
 import { logger } from "../utils/logger";
 import type { BackupResponse } from "./project.service";
+import { mergeProjectConfig, normalizeProjectConfig } from "../utils/project-config";
 
 export class ProjectOpsService {
   // --- Backup Management ---
@@ -51,7 +52,8 @@ export class ProjectOpsService {
     const project = await projectRepository.findByRef(ref);
     if (!project) return null;
 
-    const domain = project.config?.custom_domain as string | undefined;
+    const projectConfig = normalizeProjectConfig(project.config);
+    const domain = projectConfig.custom_domain as string | undefined;
     if (domain) {
       return { custom_hostname: domain, status: "active" };
     }
@@ -64,7 +66,10 @@ export class ProjectOpsService {
 
     const result = await routerService.bindCustomDomain(ref, domain);
     if (result.success) {
-      await projectRepository.updateConfig(ref, { ...project.config, custom_domain: domain });
+      await projectRepository.updateConfig(
+        ref,
+        mergeProjectConfig(project.config, { custom_domain: domain }),
+      );
       try {
         const { tenantRuntimeService } = await import("./tenant-runtime.service");
         await tenantRuntimeService.restartRuntime(ref);
@@ -79,12 +84,13 @@ export class ProjectOpsService {
     const project = await projectRepository.findByRef(ref);
     if (!project) return false;
 
-    const domain = project.config?.custom_domain as string | undefined;
+    const projectConfig = normalizeProjectConfig(project.config);
+    const domain = projectConfig.custom_domain as string | undefined;
     if (!domain) return true;
 
     const result = await routerService.removeCustomDomain(ref, domain);
     if (result.success) {
-      const newConfig = { ...project.config };
+      const newConfig = normalizeProjectConfig(project.config);
       delete newConfig.custom_domain;
       await projectRepository.updateConfig(ref, newConfig);
       try {
