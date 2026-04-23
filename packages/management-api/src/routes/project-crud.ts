@@ -6,6 +6,7 @@ import { Elysia, t, status } from "elysia";
 import { logger } from "../utils/logger";
 import { projectService } from "../services";
 import { getProjectDb, resolveDbName, resolveRoleName } from "../db";
+import { normalizeProjectConfig } from "../utils/project-config";
 
 // Available regions list
 const AVAILABLE_REGIONS = [
@@ -285,7 +286,7 @@ async function buildProjectResponse(
     jwt_secret: project.jwt_secret,
     api: project.api,
     studio: project.studio,
-    config: project.config,
+    config: normalizeProjectConfig(project.config),
   };
 }
 
@@ -566,7 +567,7 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params }) => {
       const project = await projectService.getProject(params.ref);
       if (!project) return status(404, { message: "Project not found" });
-      const cfg = (project.config as Record<string, unknown>) || {};
+      const cfg = normalizeProjectConfig(project.config);
       const vanity = (cfg.vanity_subdomain as string | null) || null;
       if (!vanity) {
         return { status: "not-used" };
@@ -636,7 +637,7 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
         });
       }
       // Store in project config
-      const currentCfg = (project.config as Record<string, unknown>) || {};
+      const currentCfg = normalizeProjectConfig(project.config);
       await projectService.updateProjectSettings(params.ref, {
         ...currentCfg,
         vanity_subdomain: requested,
@@ -658,7 +659,7 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params }) => {
       const project = await projectService.getProject(params.ref);
       if (!project) return status(404, { message: "Project not found" });
-      const currentCfg = (project.config as Record<string, unknown>) || {};
+      const currentCfg = normalizeProjectConfig(project.config);
       const updated = { ...currentCfg };
       delete updated.vanity_subdomain;
       await projectService.updateProjectSettings(params.ref, updated);
