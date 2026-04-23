@@ -24,7 +24,7 @@ describe("storage management routes", () => {
 
     expect(res.status).toBe(200);
     expect(uploadSpy).toHaveBeenCalled();
-    const [projectRef, bucket, objectPath, fileData, mimeType] = uploadSpy.mock.calls[0]!;
+    const [projectRef, bucket, objectPath, fileData, mimeType] = uploadSpy.mock.calls.at(-1)!;
     expect(projectRef).toBe("test-ref");
     expect(bucket).toBe("manuals");
     expect(objectPath).toBe("nested/empty.txt");
@@ -47,7 +47,7 @@ describe("storage management routes", () => {
 
     expect(res.status).toBe(200);
     expect(uploadSpy).toHaveBeenCalled();
-    const [projectRef, bucket, objectPath, fileData, mimeType] = uploadSpy.mock.calls[0]!;
+    const [projectRef, bucket, objectPath, fileData, mimeType] = uploadSpy.mock.calls.at(-1)!;
     expect(projectRef).toBe("test-ref");
     expect(bucket).toBe("manuals");
     expect(objectPath).toBe("nested/large.bin");
