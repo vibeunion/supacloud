@@ -94,8 +94,24 @@ describe("sdkProxyRoutes functions proxy", () => {
 
       expect(response.status).toBe(200);
       expect(calls).toHaveLength(1);
-      expect(calls[0]?.url).toBe("http://127.0.0.1:9000/hello");
+      expect(calls[0]?.url).toBe("http://127.0.0.1:9000/functions/v1/hello");
       expect(calls[0]?.init?.duplex).toBe("half");
+    });
+  });
+
+  test("GET /functions/v1/health preserves function path instead of hitting runtime health", async () => {
+    await withSdkProxyTestContext(async ({ calls }) => {
+      const response = await request("/functions/v1/health", {
+        method: "GET",
+        headers: {
+          "x-project-ref": "proj_1",
+          authorization: "Bearer token",
+        },
+      });
+
+      expect(response.status).toBe(200);
+      expect(calls).toHaveLength(1);
+      expect(calls[0]?.url).toBe("http://127.0.0.1:9000/functions/v1/health");
     });
   });
 

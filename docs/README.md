@@ -6,6 +6,7 @@
 - [Deploy Guide](./deploy-guide.md) - Complete deployment guide
 - [Deploy API](./deploy-api.md) - Deployment API reference
 - [Configuration Example](./supacloud.yml.example) - Configuration file example
+- [SupaCloud vs Supabase](./supacloud-vs-supabase.md) - Product positioning and feature comparison
 
 ## Architecture
 
@@ -38,3 +39,7 @@
 - [Background Functions With supabase-js](./background-functions-supabase-js-tutorial.md) - Tenant SDK tutorial for invoke, polling, cancel, and DLQ
 - [Background Functions API Reference](./background-functions-api-reference.md) - Headers, task states, control-plane endpoints, and runtime semantics
 - [@supacloud/js](./supacloud-js.md) - Official platform SDK layered on top of `supabase-js`
+
+## Product Positioning
+
+- [SupaCloud vs Supabase](./supacloud-vs-supabase.md) - When to choose SupaCloud, Supabase Cloud, or official self-hosted Supabase
