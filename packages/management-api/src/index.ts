@@ -789,6 +789,7 @@ async function bootstrap() {
 
     Bun.serve({
       port: config.port,
+      maxRequestBodySize: config.maxRequestBodySize,
       websocket: {
         open(ws) {
           const data = ws.data as unknown as {

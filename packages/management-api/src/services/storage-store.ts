@@ -1,7 +1,7 @@
 import { sql } from "../db";
 import * as os from "node:os";
 import * as path from "node:path";
-import * as fs from "node:fs";
+import * as fsp from "node:fs/promises";
 
 export interface TusUpload {
     ref: string;
@@ -25,6 +25,10 @@ export interface SignedUpload {
 }
 
 export class TusStore {
+    static getTempFilePath(id: string): string {
+        return path.join(os.tmpdir(), `supacloud-tus-${id}.part`);
+    }
+
     static async set(id: string, upload: TusUpload) {
         await sql`
             INSERT INTO system_tus_uploads (id, ref, bucket, object_name, content_type, total_size, offset_size, auth_token)
@@ -50,40 +54,54 @@ export class TusStore {
         };
     }
 
-    static async updateOffset(id: string, offset: number, newChunk: Buffer) {
-        await sql.begin(async (tx) => {
-            await tx`UPDATE system_tus_uploads SET offset_size = ${offset}, updated_at = NOW() WHERE id = ${id}`;
-            await tx`INSERT INTO system_tus_chunks (upload_id, chunk_data, chunk_offset) VALUES (${id}, ${newChunk}, ${offset - newChunk.length})`;
-        });
+    static async appendChunk(id: string, expectedOffset: number, chunk: ReadableStream<Uint8Array>): Promise<number> {
+        const tempFile = this.getTempFilePath(id);
+        await fsp.mkdir(path.dirname(tempFile), { recursive: true });
+
+        const existingSize = await fsp.stat(tempFile).then((stat) => stat.size).catch(() => 0);
+        if (existingSize !== expectedOffset) {
+            throw new Error(`Offset mismatch: expected ${expectedOffset}, actual ${existingSize}`);
+        }
+
+        const handle = await fsp.open(tempFile, expectedOffset === 0 ? "w" : "r+");
+        let bytesWritten = 0;
+        let position = expectedOffset;
+
+        try {
+            const reader = chunk.getReader();
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                const data = value instanceof Uint8Array ? value : new Uint8Array(value);
+                if (data.byteLength === 0) continue;
+                await handle.write(data, 0, data.byteLength, position);
+                position += data.byteLength;
+                bytesWritten += data.byteLength;
+            }
+        } finally {
+            await handle.close();
+        }
+
+        const nextOffset = expectedOffset + bytesWritten;
+        await sql`UPDATE system_tus_uploads SET offset_size = ${nextOffset}, updated_at = NOW() WHERE id = ${id}`;
+        return nextOffset;
     }
 
     static async delete(id: string) {
+        await fsp.unlink(this.getTempFilePath(id)).catch(() => {});
+        await sql`DELETE FROM system_tus_chunks WHERE upload_id = ${id}`.catch(() => {});
         await sql`DELETE FROM system_tus_uploads WHERE id = ${id}`;
     }
 
     static async assembleToStream(id: string): Promise<{ stream: ReadableStream, cleanup: () => Promise<void> }> {
-        const tempFile = path.join(os.tmpdir(), `supacloud-tus-${id}-${Date.now()}.tmp`);
-        const file = Bun.file(tempFile);
-        const writer = file.writer();
-        
-        // Fetch ordered offsets without loading payload
-        const chunkOffsets = await sql`SELECT chunk_offset FROM system_tus_chunks WHERE upload_id = ${id} ORDER BY chunk_offset ASC`;
-        
-        for (const meta of chunkOffsets) {
-            // Load and pipe 1 chunk at a time minimizing heap density
-            const [row] = await sql`SELECT chunk_data FROM system_tus_chunks WHERE upload_id = ${id} AND chunk_offset = ${meta.chunk_offset}`;
-            if (row && row.chunk_data) {
-                writer.write(row.chunk_data);
-            }
-        }
-        
-        writer.end();
+        const tempFile = this.getTempFilePath(id);
+        await fsp.access(tempFile);
 
         return {
             stream: Bun.file(tempFile).stream(),
             cleanup: async () => {
                 try {
-                    await fs.promises.unlink(tempFile);
+                    await fsp.unlink(tempFile);
                 } catch(e) {}
             }
         };
@@ -120,6 +138,11 @@ export class SignedStore {
 export function startStorageCleanupJob() {
     setInterval(async () => {
         try {
+            const expiredTusUploads = await sql`SELECT id FROM system_tus_uploads WHERE created_at < NOW() - INTERVAL '1 hour'`;
+            for (const upload of expiredTusUploads as Array<{ id: string }>) {
+                await fsp.unlink(TusStore.getTempFilePath(upload.id)).catch(() => {});
+            }
+            await sql`DELETE FROM system_tus_chunks WHERE upload_id IN (SELECT id FROM system_tus_uploads WHERE created_at < NOW() - INTERVAL '1 hour')`.catch(() => {});
             await sql`DELETE FROM system_tus_uploads WHERE created_at < NOW() - INTERVAL '1 hour'`;
             await sql`DELETE FROM system_signed_uploads WHERE expires_at < extract(epoch from NOW())`;
         } catch (e) {}
