@@ -106,11 +106,11 @@ function extractMultipartFileFast(buffer: Buffer, boundary: string): { fileBuffe
             let fileEnd = nextBoundaryPos - 2;
 
             // Check for metadata field (name="metadata")
-            if (headersRow.includes('name="metadata"') && fileEnd > fileStart) {
+            if (headersRow.includes('name="metadata"') && fileEnd >= fileStart) {
                 metadataStr = buffer.subarray(fileStart, fileEnd).toString('utf-8');
             }
             // Skip known text fields (cacheControl, etc)
-            else if (headersRow.includes('name="cacheControl"') && fileEnd > fileStart) {
+            else if (headersRow.includes('name="cacheControl"') && fileEnd >= fileStart) {
                 cacheControlStr = buffer.subarray(fileStart, fileEnd).toString('utf-8');
             }
             // If it has filename= or Content-Type: header, it's the file
@@ -119,7 +119,7 @@ function extractMultipartFileFast(buffer: Buffer, boundary: string): { fileBuffe
                 const typeMatch = headersRow.match(/Content-Type:\s*([^\r\n]+)/i);
                 if (typeMatch) mimeType = typeMatch[1].trim();
 
-                if (fileEnd > fileStart) {
+                if (fileEnd >= fileStart) {
                     bestFile = { fileBuffer: buffer.subarray(fileStart, fileEnd), mimeType };
                 }
             }
@@ -311,16 +311,32 @@ function getUploadMetadata(headers: Record<string, string | undefined>): Record<
     return parsed;
 }
 
-async function readUploadBody(request: Request, contentType: string | undefined): Promise<{ fileBuffer: Buffer; fileMimeType: string; customMetadata?: Record<string, unknown> }> {
+async function readUploadBody(
+    request: Request,
+    contentType: string | undefined,
+    contentLengthHeader?: string | undefined,
+): Promise<{ fileData: Buffer | ReadableStream; fileSize: number; fileMimeType: string; customMetadata?: Record<string, unknown> }> {
+    const normalizedContentType = contentType || "application/octet-stream";
+    const declaredSize = Number(contentLengthHeader ?? "");
+    const isMultipartByHeader = normalizedContentType.includes("multipart/form-data");
+
+    if (!isMultipartByHeader && request.body && Number.isFinite(declaredSize) && declaredSize >= 0) {
+        return {
+            fileData: request.body,
+            fileSize: declaredSize,
+            fileMimeType: normalizedContentType,
+        };
+    }
+
     let fileBuffer = Buffer.from(await request.arrayBuffer());
-    let fileMimeType = contentType || "application/octet-stream";
+    let fileMimeType = normalizedContentType;
     let customMetadata: Record<string, unknown> | undefined;
 
     const isActuallyMultipart = fileBuffer.length > 20
         && fileBuffer.subarray(0, 2).toString("utf-8") === "--"
         && fileBuffer.indexOf(Buffer.from("Content-Disposition: form-data;")) !== -1;
 
-    if ((contentType || "").includes("multipart/form-data") || isActuallyMultipart) {
+    if (isMultipartByHeader || isActuallyMultipart) {
         const boundaryMatch = (contentType || "").match(/boundary=(?:"([^"]+)"|([^;]+))/i);
         let boundary = boundaryMatch ? (boundaryMatch[1] || boundaryMatch[2]) : "";
 
@@ -345,7 +361,12 @@ async function readUploadBody(request: Request, contentType: string | undefined)
         customMetadata = extracted.metadata;
     }
 
-    return { fileBuffer, fileMimeType, customMetadata };
+    return {
+        fileData: fileBuffer,
+        fileSize: fileBuffer.byteLength,
+        fileMimeType,
+        customMetadata,
+    };
 }
 
 function parseFileSizeLimit(value: unknown): number | null {
@@ -602,7 +623,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
 
         try {
             const contentType = headers['content-type'];
-            const { fileBuffer, fileMimeType, customMetadata } = await readUploadBody(request, contentType);
+            const { fileData, fileSize, fileMimeType, customMetadata } = await readUploadBody(request, contentType, headers['content-length']);
             const headerMetadata = getUploadMetadata(headers as Record<string, string | undefined>);
             const userMetadata: Record<string, unknown> = { ...headerMetadata, ...(customMetadata || {}) };
             const upsert = headers['x-upsert'] === 'true';
@@ -613,7 +634,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             if (!bucket) return status(404, { statusCode: "404", error: 'Not Found', message: 'Bucket not found' });
 
             // Check file size limit
-            if (bucket.file_size_limit && fileBuffer.byteLength > Number(bucket.file_size_limit)) {
+            if (bucket.file_size_limit && fileSize > Number(bucket.file_size_limit)) {
                 return status(413, { statusCode: "413", error: 'Payload too large', message: 'The object exceeded the maximum allowed size' });
             }
             
@@ -630,11 +651,11 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             let cc = headers['cache-control'] || (userMetadata.cacheControl as string) || '3600';
             // Strip max-age= prefix if present — store raw seconds in metadata (official Supabase behavior)
             if (cc && cc.startsWith('max-age=')) cc = cc.replace('max-age=', '');
-            const metadata = { mimetype: fileMimeType, size: fileBuffer.byteLength, cacheControl: cc, userMetadata };
+            const metadata = { mimetype: fileMimeType, size: fileSize, cacheControl: cc, userMetadata };
             const finalPermit = await StorageRLS.authorizeAction(
                 ref, auth, 'upload', params.bucket, filePath, metadata, false, upsert, undefined, undefined,
                 async () => {
-                    const success = await StorageService.uploadFile(ref, params.bucket, filePath, fileBuffer, fileMimeType);
+                    const success = await StorageService.uploadFile(ref, params.bucket, filePath, fileData, fileMimeType);
                     if (!success) throw new Error('PHYSICAL_UPLOAD_FAILED');
                 }
             );
@@ -667,7 +688,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         if (!filePath) return status(400, { statusCode: "400", error: 'Bad Request', message: 'Missing file path' });
 
         try {
-            const { fileBuffer, fileMimeType, customMetadata } = await readUploadBody(request, headers['content-type']);
+            const { fileData, fileSize, fileMimeType, customMetadata } = await readUploadBody(request, headers['content-type'], headers['content-length']);
             const headerMetadata = getUploadMetadata(headers as Record<string, string | undefined>);
             const userMetadata: Record<string, unknown> = { ...headerMetadata, ...(customMetadata || {}) };
 
@@ -675,12 +696,12 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             let cc = headers['cache-control'] || (userMetadata.cacheControl as string) || '3600';
             // Strip max-age= prefix if present — store raw seconds in metadata (official Supabase behavior)
             if (cc && cc.startsWith('max-age=')) cc = cc.replace('max-age=', '');
-            const metadata = { mimetype: fileMimeType, size: fileBuffer.byteLength, cacheControl: cc, userMetadata };
+            const metadata = { mimetype: fileMimeType, size: fileSize, cacheControl: cc, userMetadata };
             // PUT essentially enforces upsert = true
             const finalPermit = await StorageRLS.authorizeAction(
                 ref, auth, 'update', params.bucket, filePath, metadata, false, true, undefined, undefined,
                 async () => {
-                    const success = await StorageService.uploadFile(ref, params.bucket, filePath, fileBuffer, fileMimeType);
+                    const success = await StorageService.uploadFile(ref, params.bucket, filePath, fileData, fileMimeType);
                     if (!success) throw new Error('PHYSICAL_UPLOAD_FAILED');
                 }
             );
@@ -1027,7 +1048,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         }
 
         try {
-            const { fileBuffer, fileMimeType, customMetadata } = await readUploadBody(request, headers['content-type']);
+            const { fileData, fileSize, fileMimeType, customMetadata } = await readUploadBody(request, headers['content-type'], headers['content-length']);
 
             // Bypass external headers — token already validates authorization
             const headerMetadata = getUploadMetadata(headers as Record<string, string | undefined>);
@@ -1035,7 +1056,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             let cc = headers['cache-control'] || (userMetadata.cacheControl as string) || '3600';
             // Strip max-age= prefix if present — store raw seconds in metadata (official Supabase behavior)
             if (cc && cc.startsWith('max-age=')) cc = cc.replace('max-age=', '');
-            const metadata = { mimetype: fileMimeType, size: fileBuffer.byteLength, cacheControl: cc, userMetadata };
+            const metadata = { mimetype: fileMimeType, size: fileSize, cacheControl: cc, userMetadata };
             
             const effectiveAuth = signedUpload.auth_token !== undefined ? signedUpload.auth_token : headers['authorization'];
             
@@ -1043,7 +1064,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             const finalPermit = await StorageRLS.authorizeAction(
                 ref, effectiveAuth, 'upload', params.bucket, filePath, metadata, false, signedUpload.upsert, undefined, undefined,
                 async () => {
-                    const success = await StorageService.uploadFile(ref, params.bucket, filePath, fileBuffer, fileMimeType);
+                    const success = await StorageService.uploadFile(ref, params.bucket, filePath, fileData, fileMimeType);
                     if (!success) throw new Error('PHYSICAL_UPLOAD_FAILED');
                 }
             );
