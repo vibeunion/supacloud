@@ -1,12 +1,13 @@
 import { Elysia, t, status } from "elysia";
 import { projectService } from "../services";
 import { logger } from "../utils/logger";
+import { resolveProjectServiceRoleKey } from "../utils/service-role";
 
 async function getGoTrueHeaders(ref: string) {
   const project = await projectService.getProject(ref);
-  if (!project || !project.jwt_secret) return null;
-  const { jwtService } = await import("../services/jwt.service");
-  const serviceRoleKey = await jwtService.generateServiceRoleKey(project.jwt_secret);
+  if (!project) return null;
+  const serviceRoleKey = await resolveProjectServiceRoleKey(project);
+  if (!serviceRoleKey) return null;
   const { config } = await import("../config");
   const apiUrl = project.api?.url || (config.kongInternal.startsWith('http') ? config.kongInternal : `http://${config.kongInternal}`);
   return { apiUrl, serviceRoleKey, ref };

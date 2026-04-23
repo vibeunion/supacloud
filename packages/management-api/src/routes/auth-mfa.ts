@@ -3,6 +3,7 @@ import { getProjectDb, resolveDbName } from "../db";
 import { sql as metaSql } from "../db";
 import { logger } from "../utils/logger";
 import { projectService } from "../services";
+import { resolveProjectServiceRoleKey } from "../utils/service-role";
 
 async function getGotruePort(ref: string): Promise<number | null> {
     try {
@@ -60,12 +61,14 @@ export const authMfaRoutes = new Elysia({ prefix: "/v1/projects" })
     "/:ref/auth/factors",
     async ({ params, body, set }) => {
       const project = await projectService.getProject(params.ref);
-      if (!project || !project.jwt_secret) {
-        return status(404, { message: "Project or JWT secret not found", code: "404" });
+      if (!project) {
+        return status(404, { message: "Project not found", code: "404" });
       }
 
-      const { jwtService } = await import("../services/jwt.service");
-      const serviceRoleKey = await jwtService.generateServiceRoleKey(project.jwt_secret);
+      const serviceRoleKey = await resolveProjectServiceRoleKey(project);
+      if (!serviceRoleKey) {
+        return status(404, { message: "Project service role key not found", code: "404" });
+      }
       const { config } = await import("../config");
       const apiUrl = project.api?.url || (config.kongInternal.startsWith('http') ? config.kongInternal : `http://${config.kongInternal}`);
 

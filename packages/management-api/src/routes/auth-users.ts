@@ -1,6 +1,24 @@
 import { Elysia, t, status } from "elysia";
 import { logger } from "../utils/logger";
 import { projectService } from "../services";
+import { resolveProjectServiceRoleKey } from "../utils/service-role";
+
+async function getGoTrueAdminContext(ref: string) {
+  const project = await projectService.getProject(ref);
+  if (!project) return null;
+
+  const serviceRoleKey = await resolveProjectServiceRoleKey(project);
+  if (!serviceRoleKey) return null;
+
+  const { config } = await import("../config");
+  const apiUrl =
+    project.api?.url ||
+    (config.kongInternal.startsWith("http")
+      ? config.kongInternal
+      : `http://${config.kongInternal}`);
+
+  return { project, apiUrl, serviceRoleKey };
+}
 
 /**
  * User Management routes — Admin API proxy to GoTrue
@@ -9,15 +27,11 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
   .get(
     "/users",
     async ({ params, query, set }) => {
-      const project = await projectService.getProject(params.ref);
-      if (!project || !project.jwt_secret) {
-        return status(404, { message: "Project or JWT secret not found", code: "404" });
+      const ctx = await getGoTrueAdminContext(params.ref);
+      if (!ctx) {
+        return status(404, { message: "Project service role key not found", code: "404" });
       }
-
-      const { jwtService } = await import("../services/jwt.service");
-      const serviceRoleKey = await jwtService.generateServiceRoleKey(project.jwt_secret);
-      const { config } = await import("../config");
-      const apiUrl = project.api?.url || (config.kongInternal.startsWith('http') ? config.kongInternal : `http://${config.kongInternal}`);
+      const { apiUrl, serviceRoleKey } = ctx;
 
       // Pass along pagination (svadmin uses _page / _limit or standard skip/limit)
       const limit = Number(query.per_page || query._limit || query.limit || 50);
@@ -90,15 +104,11 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
   .post(
     "/users",
     async ({ params, body, set }) => {
-      const project = await projectService.getProject(params.ref);
-      if (!project || !project.jwt_secret) {
-        return status(404, { message: "Project or JWT secret not found", code: "404" });
+      const ctx = await getGoTrueAdminContext(params.ref);
+      if (!ctx) {
+        return status(404, { message: "Project service role key not found", code: "404" });
       }
-
-      const { jwtService } = await import("../services/jwt.service");
-      const serviceRoleKey = await jwtService.generateServiceRoleKey(project.jwt_secret);
-      const { config } = await import("../config");
-      const apiUrl = project.api?.url || (config.kongInternal.startsWith('http') ? config.kongInternal : `http://${config.kongInternal}`);
+      const { apiUrl, serviceRoleKey } = ctx;
 
       const res = await fetch(`${apiUrl}/auth/v1/admin/users`, {
         method: "POST",
@@ -156,15 +166,11 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
   .post(
     "/users/invite",
     async ({ params, body, set }) => {
-      const project = await projectService.getProject(params.ref);
-      if (!project || !project.jwt_secret) {
-        return status(404, { message: "Project or JWT secret not found", code: "404" });
+      const ctx = await getGoTrueAdminContext(params.ref);
+      if (!ctx) {
+        return status(404, { message: "Project service role key not found", code: "404" });
       }
-
-      const { jwtService } = await import("../services/jwt.service");
-      const serviceRoleKey = await jwtService.generateServiceRoleKey(project.jwt_secret);
-      const { config } = await import("../config");
-      const apiUrl = project.api?.url || (config.kongInternal.startsWith('http') ? config.kongInternal : `http://${config.kongInternal}`);
+      const { apiUrl, serviceRoleKey } = ctx;
 
       const res = await fetch(`${apiUrl}/auth/v1/invite`, {
         method: "POST",
@@ -206,15 +212,11 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
   .get(
     "/users/:id",
     async ({ params, set }) => {
-      const project = await projectService.getProject(params.ref);
-      if (!project || !project.jwt_secret) {
-        return status(404, { message: "Project or JWT secret not found", code: "404" });
+      const ctx = await getGoTrueAdminContext(params.ref);
+      if (!ctx) {
+        return status(404, { message: "Project service role key not found", code: "404" });
       }
-
-      const { jwtService } = await import("../services/jwt.service");
-      const serviceRoleKey = await jwtService.generateServiceRoleKey(project.jwt_secret);
-      const { config } = await import("../config");
-      const apiUrl = project.api?.url || (config.kongInternal.startsWith('http') ? config.kongInternal : `http://${config.kongInternal}`);
+      const { apiUrl, serviceRoleKey } = ctx;
 
       const res = await fetch(`${apiUrl}/auth/v1/admin/users/${params.id}`, {
         headers: {
@@ -245,15 +247,11 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
   .put(
     "/users/:id",
     async ({ params, body, set }) => {
-      const project = await projectService.getProject(params.ref);
-      if (!project || !project.jwt_secret) {
-        return status(404, { message: "Project or JWT secret not found", code: "404" });
+      const ctx = await getGoTrueAdminContext(params.ref);
+      if (!ctx) {
+        return status(404, { message: "Project service role key not found", code: "404" });
       }
-
-      const { jwtService } = await import("../services/jwt.service");
-      const serviceRoleKey = await jwtService.generateServiceRoleKey(project.jwt_secret);
-      const { config } = await import("../config");
-      const apiUrl = project.api?.url || (config.kongInternal.startsWith('http') ? config.kongInternal : `http://${config.kongInternal}`);
+      const { apiUrl, serviceRoleKey } = ctx;
 
       const res = await fetch(`${apiUrl}/auth/v1/admin/users/${params.id}`, {
         method: "PUT",
@@ -296,15 +294,11 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
   .patch(
     "/users/:id",
     async ({ params, body, set }) => {
-      const project = await projectService.getProject(params.ref);
-      if (!project || !project.jwt_secret) {
-        return status(404, { message: "Project or JWT secret not found", code: "404" });
+      const ctx = await getGoTrueAdminContext(params.ref);
+      if (!ctx) {
+        return status(404, { message: "Project service role key not found", code: "404" });
       }
-
-      const { jwtService } = await import("../services/jwt.service");
-      const serviceRoleKey = await jwtService.generateServiceRoleKey(project.jwt_secret);
-      const { config } = await import("../config");
-      const apiUrl = project.api?.url || (config.kongInternal.startsWith('http') ? config.kongInternal : `http://${config.kongInternal}`);
+      const { apiUrl, serviceRoleKey } = ctx;
 
       const res = await fetch(`${apiUrl}/auth/v1/admin/users/${params.id}`, {
         method: "PATCH",
@@ -343,15 +337,11 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
   .delete(
     "/users/:id",
     async ({ params, set, body, query }) => {
-      const project = await projectService.getProject(params.ref);
-      if (!project || !project.jwt_secret) {
-        return status(404, { message: "Project or JWT secret not found", code: "404" });
+      const ctx = await getGoTrueAdminContext(params.ref);
+      if (!ctx) {
+        return status(404, { message: "Project service role key not found", code: "404" });
       }
-
-      const { jwtService } = await import("../services/jwt.service");
-      const serviceRoleKey = await jwtService.generateServiceRoleKey(project.jwt_secret);
-      const { config } = await import("../config");
-      const apiUrl = project.api?.url || (config.kongInternal.startsWith('http') ? config.kongInternal : `http://${config.kongInternal}`);
+      const { apiUrl, serviceRoleKey } = ctx;
 
       const url = `${apiUrl}/auth/v1/admin/users/${params.id}`;
 
@@ -386,15 +376,11 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
   .get(
     "/users/:id/factors",
     async ({ params, set }) => {
-      const project = await projectService.getProject(params.ref);
-      if (!project || !project.jwt_secret) {
-        return status(404, { message: "Project or JWT secret not found", code: "404" });
+      const ctx = await getGoTrueAdminContext(params.ref);
+      if (!ctx) {
+        return status(404, { message: "Project service role key not found", code: "404" });
       }
-
-      const { jwtService } = await import("../services/jwt.service");
-      const serviceRoleKey = await jwtService.generateServiceRoleKey(project.jwt_secret);
-      const { config } = await import("../config");
-      const apiUrl = project.api?.url || (config.kongInternal.startsWith('http') ? config.kongInternal : `http://${config.kongInternal}`);
+      const { apiUrl, serviceRoleKey } = ctx;
 
       const res = await fetch(`${apiUrl}/auth/v1/admin/users/${params.id}/factors`, {
         headers: {
@@ -423,15 +409,11 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
   .post(
     "/generate_link",
     async ({ params, body, set }) => {
-      const project = await projectService.getProject(params.ref);
-      if (!project || !project.jwt_secret) {
-        return status(404, { message: "Project or JWT secret not found", code: "404" });
+      const ctx = await getGoTrueAdminContext(params.ref);
+      if (!ctx) {
+        return status(404, { message: "Project service role key not found", code: "404" });
       }
-
-      const { jwtService } = await import("../services/jwt.service");
-      const serviceRoleKey = await jwtService.generateServiceRoleKey(project.jwt_secret);
-      const { config } = await import("../config");
-      const apiUrl = project.api?.url || (config.kongInternal.startsWith('http') ? config.kongInternal : `http://${config.kongInternal}`);
+      const { apiUrl, serviceRoleKey } = ctx;
 
       const res = await fetch(`${apiUrl}/auth/v1/admin/generate_link`, {
         method: "POST",
