@@ -11,6 +11,7 @@ import {
   generateDbName,
 } from "../db";
 import { $ } from "bun";
+import * as path from "node:path";
 import { assertValidIdentifier, assertValidDbName } from "../utils/validation";
 
 /** Escape a string value for use inside PostgreSQL dollar-quoted strings */
@@ -40,6 +41,27 @@ export class DatabaseService {
       ret += charset[bytes[i] % charset.length];
     }
     return ret;
+  }
+
+  private async loadSupabaseSchema(): Promise<string> {
+    const candidates = [
+      process.env.SUPABASE_SCHEMA_PATH,
+      path.join(import.meta.dir, "../db/schemas/supabase.sql"),
+      path.join(process.cwd(), "src/db/schemas/supabase.sql"),
+      path.join(process.cwd(), "db/schemas/supabase.sql"),
+      path.join(process.cwd(), "packages/management-api/src/db/schemas/supabase.sql"),
+    ].filter((candidate): candidate is string => Boolean(candidate));
+
+    for (const candidate of candidates) {
+      const file = Bun.file(candidate);
+      if (await file.exists()) {
+        return await file.text();
+      }
+    }
+
+    throw new Error(
+      `Unable to locate supabase.sql. Looked in: ${candidates.join(", ")}`,
+    );
   }
 
   // Reuse global admin connection pool from db/index.ts
@@ -264,9 +286,7 @@ export class DatabaseService {
 
       // Load and execute full Supabase schema (Auth, Storage, Realtime/Walrus, etc)
       try {
-        const { join } = await import("path");
-        const schemaPath = join(import.meta.dir, "../db/schemas/supabase.sql");
-        const schemaSql = await Bun.file(schemaPath).text();
+        const schemaSql = await this.loadSupabaseSchema();
         await tenantDb.unsafe(schemaSql);
         logger.info(
           `[services/database.service] Successfully applied supabase.sql to tenant ${dbName}`,
