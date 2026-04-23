@@ -3938,8 +3938,9 @@ BEGIN
     'anon'
   );
 
+  -- PostgREST and RLS rely on request.jwt.claim.role; switching the SQL role
+  -- here breaks SECURITY DEFINER functions on newer Postgres versions.
   PERFORM set_config('request.jwt.claim.role', role_claim, true);
-  EXECUTE format('SET LOCAL ROLE %I', role_claim);
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
