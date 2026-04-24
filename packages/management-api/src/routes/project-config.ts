@@ -468,7 +468,7 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
       }
       return [
         { name: "anon", api_key: keys.anon_key },
-        { name: "service_role", api_key: keys.service_role_key },
+        { name: "service_role", api_key: keys.service_role_key ? "********" : "" },
       ];
     },
     {

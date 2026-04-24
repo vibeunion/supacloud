@@ -4,13 +4,29 @@ on:
   push:
     branches: ["main", "dev"]
     paths:
-      # Keep this workflow easy to retrigger after management-api-only fixes land on main.
       - "packages/management-api/**"
+      - "packages/web-console/**"
+      - "packages/supacloud-js/**"
+      - "packages/edge-runtime/**"
+      - "docker/**"
+      - "scripts/**"
+      - "install.sh"
+      - "setup.sh"
+      - "switch.sh"
       - ".github/workflows/management-api.yml"
   pull_request:
     branches: ["main", "dev"]
     paths:
       - "packages/management-api/**"
+      - "packages/web-console/**"
+      - "packages/supacloud-js/**"
+      - "packages/edge-runtime/**"
+      - "docker/**"
+      - "scripts/**"
+      - "install.sh"
+      - "setup.sh"
+      - "switch.sh"
+      - ".github/workflows/management-api.yml"
   workflow_dispatch:
 
 # Demo JWT signed with the Supabase public demo key (not a real credential).
@@ -44,6 +60,64 @@ jobs:
       - name: Type check
         working-directory: packages/management-api
         run: bun run tsc --noEmit
+
+  package-checks:
+    name: Package Checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Check web console
+        working-directory: packages/web-console
+        run: |
+          bun install
+          bun run check
+
+      - name: Check SupaCloud JS SDK
+        working-directory: packages/supacloud-js
+        run: |
+          bun install
+          bun run typecheck
+          bun run typecheck:test
+          bun test src/index.test.ts
+
+      - name: Check edge runtime
+        working-directory: packages/edge-runtime
+        run: |
+          bun install
+          bun run typecheck
+
+  docker-and-scripts-checks:
+    name: Docker & Scripts Checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Validate Docker Compose files
+        run: |
+          docker compose -f docker/dev/docker-compose.yml config --quiet
+          docker compose -f docker/self-host/docker-compose.yml config --quiet
+
+      - name: Validate Kong declarative configs
+        run: |
+          docker run --rm -v "$PWD/docker/dev/kong/kong.yml:/kong.yml:ro" kong:3.9 kong config parse /kong.yml
+          docker run --rm -v "$PWD/docker/self-host/kong/kong.yml:/kong.yml:ro" kong:3.9 kong config parse /kong.yml
+
+      - name: Validate shell script syntax
+        run: |
+          bash -n install.sh setup.sh switch.sh deploy_all.sh scripts/pre_start_recovery.sh
+          find scripts -name "*.sh" -print0 | xargs -0 -n1 bash -n
 
   unit-test:
     name: Unit Tests
@@ -284,21 +358,19 @@ jobs:
 
       - name: Lint shell scripts
         run: |
-          echo "=== Checking scripts/lib/*.sh ==="
-          shellcheck -s bash scripts/lib/*.sh || true
+          echo "=== Checking scripts/*.sh and scripts/lib/*.sh ==="
+          shellcheck -s bash \
+            -e SC2086,SC2034,SC2155,SC2046,SC2012,SC1091 \
+            scripts/*.sh scripts/lib/*.sh
 
-          echo "=== Checking install.sh ==="
-          shellcheck -s bash -e SC2086,SC2034,SC2155,SC2046,SC2012 install.sh || true
-
-          echo "=== Checking switch.sh ==="
-          shellcheck -s bash -e SC2086,SC2034,SC2155 switch.sh || true
-
-          echo "=== Checking supacloud CLI ==="
-          shellcheck -s bash supacloud || true
+          echo "=== Checking root shell scripts ==="
+          shellcheck -s bash \
+            -e SC2086,SC2034,SC2155,SC2046,SC2012,SC1091 \
+            install.sh setup.sh switch.sh deploy_all.sh supacloud
 
   build-binaries:
     name: Build Binaries
-    needs: [lint-and-typecheck, unit-test, integration-test]
+    needs: [lint-and-typecheck, package-checks, docker-and-scripts-checks, unit-test, integration-test, shell-scripts-lint]
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev')
 

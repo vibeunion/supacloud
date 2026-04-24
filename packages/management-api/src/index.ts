@@ -26,6 +26,20 @@ import { resolveRealtimeTenantHost } from "./utils/sdk-parity";
 
 const WEB_CONSOLE_DIR = "/opt/supacloud/packages/web-console/build";
 
+const configuredCorsOrigins = config.corsOrigins
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
+const corsOrigin = configuredCorsOrigins.length > 0
+  ? ({ headers }: { headers: Headers }) => {
+      const origin = headers.get("origin");
+      return origin ? configuredCorsOrigins.includes(origin) : false;
+    }
+  : config.nodeEnv === "production"
+    ? false
+    : true;
+
 const MIME_TYPES: Record<string, string> = {
   ".html": "text/html",
   ".js": "application/javascript",
@@ -186,8 +200,8 @@ const app = new Elysia({ strictPath: false })
   // CORS
   .use(
     cors({
-      origin: true,
-      credentials: true,
+      origin: corsOrigin,
+      credentials: configuredCorsOrigins.length > 0,
       exposeHeaders: [
         "x-total-count",
         "link",

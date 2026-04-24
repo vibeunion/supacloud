@@ -1240,7 +1240,7 @@ pg_user = kong
 pg_password = kong
 pg_database = kong
 proxy_listen = 0.0.0.0:80, 0.0.0.0:443 ssl
-admin_listen = 0.0.0.0:8001
+admin_listen = 127.0.0.1:8001
 plugins = bundled, acme
 EOF
 
@@ -2047,6 +2047,9 @@ SUPACLOUD_JWT_SECRET=${JWT_SECRET}
 REALTIME_SECRET_KEY_BASE=${REALTIME_SECRET_KEY_BASE}
 REALTIME_DB_ENC_KEY=${REALTIME_DB_ENC_KEY}
 REALTIME_API_SECRET=${JWT_SECRET}
+REALTIME_IMAGE=${REALTIME_IMAGE:-public.ecr.aws/supabase/realtime:v2.76.5}
+REALTIME_CONTAINER_NAME=${REALTIME_CONTAINER_NAME:-supacloud-realtime}
+REALTIME_DB_USER=supabase_admin
 # Database connection environment variables (required for script execution)
 PG_HOST=${INTERNAL_IP}
 PG_PORT=5432
@@ -2136,40 +2139,44 @@ deploy_service_containers() {
     fi
 
     # --- 2. Deploy Supabase Realtime (Multi-tenant WebSocket) ---
-    if $RUNTIME ps -a --format '{{.Names}}' 2>/dev/null | grep -q supabase-realtime; then
+    local REALTIME_UNIT_SRC="${SCRIPT_DIR}/infrastructure/systemd/supacloud-realtime.service"
+    if [[ -f "$REALTIME_UNIT_SRC" ]]; then
+        log_info "Registering SupaCloud Realtime systemd unit..."
+        cp "$REALTIME_UNIT_SRC" /etc/systemd/system/supacloud-realtime.service
+        systemctl daemon-reload
+        systemctl enable supacloud-realtime
+        systemctl restart supacloud-realtime || log_warn "Realtime service start failed, please check journalctl -u supacloud-realtime"
+    elif $RUNTIME ps -a --format '{{.Names}}' 2>/dev/null | grep -qx "${REALTIME_CONTAINER_NAME:-supacloud-realtime}"; then
         log_info "Realtime container already exists, skipping"
     else
         log_info "Pulling and deploying Supabase Realtime (multi-tenant)..."
-        $RUNTIME pull "${MIRROR_PREFIX}supabase/realtime:v2.76.5" 2>/dev/null || \
-            $RUNTIME pull supabase/realtime:v2.76.5
+        local REALTIME_IMAGE_VALUE="${REALTIME_IMAGE:-public.ecr.aws/supabase/realtime:v2.76.5}"
+        $RUNTIME pull "$REALTIME_IMAGE_VALUE"
 
-        # Create _realtime schema in postgres database
         if [[ -n "${POSTGRES_PASSWORD:-}" ]]; then
             PGPASSWORD="${POSTGRES_PASSWORD}" psql -h "${INTERNAL_IP}" -U supabase_admin -d postgres \
                 -c "CREATE SCHEMA IF NOT EXISTS _realtime;" 2>/dev/null || true
         fi
 
-        local SECRET_KEY_BASE
-        SECRET_KEY_BASE="${REALTIME_SECRET_KEY_BASE:-$(openssl rand -hex 64)}"
-
-        # Container name follows official convention: realtime constructs tenant id from subdomain
+        $RUNTIME rm -f "${REALTIME_CONTAINER_NAME:-supacloud-realtime}" >/dev/null 2>&1 || true
         $RUNTIME run -d \
-            --name realtime-dev.supabase-realtime \
+            --name "${REALTIME_CONTAINER_NAME:-supacloud-realtime}" \
             --restart=always \
             --privileged \
             -p 127.0.0.1:4000:4000 \
             -e PORT=4000 \
             -e DB_HOST="${INTERNAL_IP}" \
             -e DB_PORT=5432 \
-            -e DB_USER=supabase_admin \
+            -e DB_USER="${REALTIME_DB_USER:-supabase_admin}" \
             -e DB_PASSWORD="${POSTGRES_PASSWORD}" \
             -e DB_NAME=postgres \
             -e "DB_AFTER_CONNECT_QUERY=SET search_path TO _realtime" \
-            -e DB_ENC_KEY=supabaserealtime \
+            -e DB_ENC_KEY="${REALTIME_DB_ENC_KEY}" \
             -e DB_SSL=false \
-            -e API_JWT_SECRET="${JWT_SECRET:-super-secret-jwt-token}" \
-            -e SECRET_KEY_BASE="${SECRET_KEY_BASE}" \
-            -e METRICS_JWT_SECRET="${JWT_SECRET:-super-secret-jwt-token}" \
+            -e API_JWT_SECRET="${JWT_SECRET}" \
+            -e JWT_SECRET="${JWT_SECRET}" \
+            -e SECRET_KEY_BASE="${REALTIME_SECRET_KEY_BASE}" \
+            -e METRICS_JWT_SECRET="${JWT_SECRET}" \
             -e ERL_AFLAGS="-proto_dist inet_tcp" \
             -e "DNS_NODES=''" \
             -e RLIMIT_NOFILE=10000 \
@@ -2178,7 +2185,7 @@ deploy_service_containers() {
             -e RUN_JANITOR=true \
             -e SECURE_CHANNELS=false \
             -e DISABLE_HEALTHCHECK_LOGGING=true \
-            "${MIRROR_PREFIX}supabase/realtime:v2.76.5"
+            "$REALTIME_IMAGE_VALUE"
 
         log_info "Realtime deployed on port 4000 (multi-tenant mode)"
     fi

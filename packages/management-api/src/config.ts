@@ -121,6 +121,10 @@ function getEnv(key: string, defaultValue = ""): string {
   return process.env[key] ?? defaultValue;
 }
 
+const DEFAULT_JWT_SECRET = "super-secret-jwt-token-with-at-least-32-characters-long";
+const DEFAULT_DASHBOARD_PASSWORDS = new Set(["supabase", "supacloud", "admin", "password", "changeme"]);
+const DEVELOPMENT_ENVS = new Set(["development", "test"]);
+
 const isGithubActions = getEnv("GITHUB_ACTIONS") === "true";
 const edgeRuntimePort = Number(getEnv("EDGE_RUNTIME_PORT", "9000"));
 const edgeRuntimeMode = getEnv("EDGE_RUNTIME_MODE", "embedded") === "external" ? "external" : "embedded";
@@ -141,7 +145,7 @@ export const config: Config = {
   nodeEnv: getEnv("NODE_ENV", "development"),
   isGithubActions,
 
-  jwtSecret: getEnv("JWT_SECRET", "super-secret-jwt-token-with-at-least-32-characters-long"),
+  jwtSecret: getEnv("JWT_SECRET", DEFAULT_JWT_SECRET),
   jwtIssuer: getEnv("JWT_ISSUER", "supacloud"),
   jwtEnabled: getEnv("JWT_ENABLED", "false") === "true",
   baseDomain: getEnv("BASE_DOMAIN", "example.com"),
@@ -235,8 +239,33 @@ function validateConfig() {
   if (!Number.isFinite(config.maxRequestBodySize) || config.maxRequestBodySize <= 0) {
     throw new Error("Invalid MANAGEMENT_API_MAX_REQUEST_BODY_SIZE configuration. Must be a positive integer.");
   }
-  if (!config.masterToken || config.masterToken.length < 8) {
-    console.warn("WARNING: MASTER_TOKEN is dangerously short or missing. Set properly for production security.");
+
+  const isDevelopment = DEVELOPMENT_ENVS.has(config.nodeEnv) || process.env.BUN_ENV === "test" || config.isGithubActions;
+  const weakMasterToken = !config.masterToken || config.masterToken.length < 32 || config.masterToken === "dev-master-token";
+  const weakJwtSecret = !config.jwtSecret || config.jwtSecret.length < 32 || config.jwtSecret === DEFAULT_JWT_SECRET;
+  const weakDashboardPassword = !config.dashboardPassword || config.dashboardPassword.length < 12 || DEFAULT_DASHBOARD_PASSWORDS.has(config.dashboardPassword.toLowerCase());
+
+  if (isDevelopment) {
+    if (weakMasterToken) {
+      console.warn("WARNING: MASTER_TOKEN is weak or missing. Set a 32+ character random value before production use.");
+    }
+    if (weakJwtSecret) {
+      console.warn("WARNING: JWT_SECRET uses a development default. Set a high-entropy secret before production use.");
+    }
+    if (weakDashboardPassword) {
+      console.warn("WARNING: DASHBOARD_PASSWORD is weak or default. Set a stronger password before production use.");
+    }
+    return;
+  }
+
+  if (weakMasterToken) {
+    throw new Error("MASTER_TOKEN must be set to a non-default random value of at least 32 characters in production.");
+  }
+  if (weakJwtSecret) {
+    throw new Error("JWT_SECRET must be set to a non-default random value of at least 32 characters in production.");
+  }
+  if (weakDashboardPassword) {
+    throw new Error("DASHBOARD_PASSWORD must be set to a non-default password of at least 12 characters in production.");
   }
 }
 

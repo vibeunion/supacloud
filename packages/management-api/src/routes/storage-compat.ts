@@ -177,6 +177,16 @@ async function verifySignedToken(ref: string, bucket: string, path: string, toke
  * Extract project ref from request.
  * Kong forwards the x-project-ref header; also fall back to apikey-based lookup.
  */
+async function resolveProjectRefFromApiKey(key: string): Promise<string> {
+    if (!key) return '';
+    try {
+        const { sql } = await import('../db');
+        const rows = await sql`SELECT ref FROM projects WHERE anon_key = ${key} OR service_role_key = ${key} LIMIT 1`;
+        if (rows.length > 0) return String(rows[0].ref);
+    } catch {}
+    return '';
+}
+
 async function getProjectRef(headers: Record<string, string | undefined>): Promise<string> {
     const auth = headers['authorization'] || '';
     const key = headers['apikey'] || '';
@@ -189,8 +199,12 @@ async function getProjectRef(headers: Record<string, string | undefined>): Promi
         }
     }
     
+    const apiKeyRef = await resolveProjectRefFromApiKey(key);
     const headerRef = headers['x-project-ref'] || headers['x-supabase-project'];
-    if (headerRef) return headerRef;
+    if (headerRef) {
+        if (apiKeyRef && apiKeyRef !== headerRef) return '';
+        return headerRef;
+    }
 
     // JWT payload fallback
     if (auth.startsWith('Bearer ')) {
@@ -199,19 +213,16 @@ async function getProjectRef(headers: Record<string, string | undefined>): Promi
             const payloadB64 = token.split('.')[1];
             if (payloadB64) {
                 const payload = JSON.parse(Buffer.from(payloadB64, 'base64').toString());
-                if (payload?.ref) return payload.ref;
+                if (payload?.ref) {
+                    if (apiKeyRef && apiKeyRef !== payload.ref) return '';
+                    return payload.ref;
+                }
             }
         } catch {}
     }
 
     // apikey -> project lookup (official SDK storage requests commonly only send apikey)
-    if (key) {
-        try {
-            const { sql } = await import('../db');
-            const rows = await sql`SELECT ref FROM projects WHERE anon_key = ${key} OR service_role_key = ${key} LIMIT 1`;
-            if (rows.length > 0) return String(rows[0].ref);
-        } catch {}
-    }
+    if (apiKeyRef) return apiKeyRef;
 
     // Host -> project lookup fallback for storage requests. This keeps uploads working
     // even when Kong request-transformer fails to inject x-project-ref.
@@ -233,7 +244,9 @@ async function getProjectRef(headers: Record<string, string | undefined>): Promi
     // P1-6: Fallback to extract tenant prefix from host header if preserve_host is active
     if (host) {
         if (config.baseDomain && host.includes(config.baseDomain)) {
-            return host.split('.')[0];
+            const hostRef = host.split('.')[0];
+            if (apiKeyRef && apiKeyRef !== hostRef) return '';
+            return hostRef;
         }
     }
     return '';

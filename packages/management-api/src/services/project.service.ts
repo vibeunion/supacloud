@@ -82,8 +82,6 @@ export interface ProjectDetailResponse extends ProjectResponse {
   updated_at: Date;
   // API Keys for Studio compatibility
   anon_key?: string;
-  service_role_key?: string;
-  jwt_secret?: string;
 }
 
 export interface BackupResponse {
@@ -369,7 +367,6 @@ export class ProjectService {
     const [
       pgrstStatus,
       gotrueStatus,
-      realtimePerTenant,
       realtimeSystemd,
       storagePerTenant,
       kongSystemd,
@@ -378,52 +375,36 @@ export class ProjectService {
     ] = await Promise.all([
       checkService(`supacloud-pgrst@${ref}`),
       checkService(`supacloud-gotrue@${ref}`),
-      checkService(`supacloud-realtime@${ref}`),
-      checkService(`supacloud-realtime`),
+      checkService("supacloud-realtime"),
       checkService(`supacloud-storage@${ref}`),
       checkService("kong"),
       checkGlobalDocker("supabase-kong"),
-      checkGlobalDocker("realtime-dev.supabase-realtime"),
+      checkGlobalDocker("supacloud-realtime"),
     ]);
 
     let realtimeStatus = "INACTIVE";
 
-    if (realtimePerTenant === "ACTIVE_HEALTHY") {
+    if (realtimeSystemd === "ACTIVE_HEALTHY") {
       realtimeStatus = "ACTIVE_HEALTHY";
     } else {
       // Fall back to checking global docker container, but explicitly verify tenant registration
       if (kongDocker === "ACTIVE_HEALTHY" || kongSystemd === "ACTIVE_HEALTHY") {
-        let globalRealtimeDocker = await checkGlobalDocker(
-          "realtime-dev.supabase-realtime",
-        );
-        if (globalRealtimeDocker === "INACTIVE") {
-          globalRealtimeDocker = await checkGlobalDocker("supacloud-realtime");
-        }
-        if (
-          globalRealtimeDocker === "ACTIVE_HEALTHY" ||
-          realtimeDocker === "ACTIVE_HEALTHY" ||
-          realtimeSystemd === "ACTIVE_HEALTHY"
-        ) {
+        if (realtimeDocker === "ACTIVE_HEALTHY") {
           const { realtimeService } = await import("./realtime.service");
           const hasTenant = await realtimeService.getTenant(ref);
           if (hasTenant) {
-            if (realtimeSystemd === "ACTIVE_HEALTHY") {
-              // Native Bun Realtime uses pg_listen (no CDC logical replication), so being registered is sufficient
-              realtimeStatus = "ACTIVE_HEALTHY";
-            } else {
-              try {
-                const { getProjectDb, resolveDbName } = await import("../db");
-                const dbName = await resolveDbName(ref);
-                const projectDb = getProjectDb(dbName);
-                // Ensure CDC replication is actively running
-                const repl =
-                  await projectDb`SELECT count(*) as count FROM pg_stat_replication WHERE application_name ILIKE '%realtime%'`;
-                if (repl[0] && Number(repl[0].count) > 0) {
-                  realtimeStatus = "ACTIVE_HEALTHY";
-                }
-              } catch (e) {
-                // Keep realtimeStatus as INACTIVE locally if CDC replication fetch fails
+            try {
+              const { getProjectDb, resolveDbName } = await import("../db");
+              const dbName = await resolveDbName(ref);
+              const projectDb = getProjectDb(dbName);
+              // Ensure CDC replication is actively running
+              const repl =
+                await projectDb`SELECT count(*) as count FROM pg_stat_replication WHERE application_name ILIKE '%realtime%'`;
+              if (repl[0] && Number(repl[0].count) > 0) {
+                realtimeStatus = "ACTIVE_HEALTHY";
               }
+            } catch (e) {
+              // Keep realtimeStatus as INACTIVE locally if CDC replication fetch fails
             }
           }
         }
@@ -815,8 +796,6 @@ export class ProjectService {
       updated_at: project.updated_at,
       // API Keys for Studio compatibility
       anon_key: project.anon_key,
-      service_role_key: project.service_role_key,
-      jwt_secret: project.jwt_secret,
     };
   }
 

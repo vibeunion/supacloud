@@ -72,7 +72,7 @@ export const authMfaRoutes = new Elysia({ prefix: "/v1/projects" })
         return status(404, { message: "Project not found", code: "404" });
       }
 
-      const serviceRoleKey = await resolveProjectServiceRoleKey(project);
+      const serviceRoleKey = await resolveProjectServiceRoleKey(params.ref);
       if (!serviceRoleKey) {
         return status(404, { message: "Project service role key not found", code: "404" });
       }

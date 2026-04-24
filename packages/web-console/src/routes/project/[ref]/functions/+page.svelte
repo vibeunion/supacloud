@@ -180,6 +180,7 @@ console.log(task);
 // { task_id: "tsk_...", status: "enqueued" }`;
 
   const currentDrawerSlug = $derived(selectedFunction?.slug || "");
+  const selectedVersionSnapshot = $derived(selectedVersion);
   const functionTaskSummary = $derived(summarizeFunctionTasks(functionTasks));
   const filteredRuntimeLogs = $derived(
     filterFunctionRuntimeLogs(functionRuntimeLogs, {
@@ -921,14 +922,14 @@ export async function waitForTask(
                       </div>
                       <div class="flex items-center gap-2">
                         <button
-                          onclick={() => loadVersionDetail(selectedFunction.slug, versionRecord.version)}
+                          onclick={() => loadVersionDetail(currentDrawerSlug, versionRecord.version)}
                           class="inline-flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-semibold hover:bg-muted/40 transition-colors"
                         >
                           <Bug size={13} />
                           查看详情
                         </button>
                         <button
-                          onclick={() => activateFunctionVersion(selectedFunction.slug, versionRecord.version)}
+                          onclick={() => activateFunctionVersion(currentDrawerSlug, versionRecord.version)}
                           disabled={versionRecord.is_active || versionSwitching === versionRecord.version}
                           class="inline-flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-semibold hover:bg-muted/40 transition-colors disabled:opacity-50"
                         >
@@ -973,20 +974,20 @@ export async function waitForTask(
                   <div class="rounded-xl border border-red-500/20 bg-red-500/5 px-4 py-3 text-sm text-red-700">
                     {versionDetailError}
                   </div>
-                {:else if selectedVersion}
+                {:else if selectedVersionSnapshot}
                   <div class="space-y-4">
                     <div class="grid gap-3 sm:grid-cols-3">
                       <div class="rounded-lg border border-border/50 bg-background/70 p-3">
                         <div class="text-[11px] font-bold uppercase tracking-[0.14em] text-muted-foreground">Version</div>
-                        <div class="mt-2 text-lg font-semibold">v{selectedVersion.version}</div>
+                        <div class="mt-2 text-lg font-semibold">v{selectedVersionSnapshot.version}</div>
                       </div>
                       <div class="rounded-lg border border-border/50 bg-background/70 p-3">
                         <div class="text-[11px] font-bold uppercase tracking-[0.14em] text-muted-foreground">Bundle</div>
-                        <div class="mt-2 text-lg font-semibold">{selectedVersion.has_bundle ? "Ready" : "Missing"}</div>
+                        <div class="mt-2 text-lg font-semibold">{selectedVersionSnapshot.has_bundle ? "Ready" : "Missing"}</div>
                       </div>
                       <div class="rounded-lg border border-border/50 bg-background/70 p-3">
                         <div class="text-[11px] font-bold uppercase tracking-[0.14em] text-muted-foreground">Source</div>
-                        <div class="mt-2 text-lg font-semibold">{selectedVersion.has_source ? "Ready" : "Missing"}</div>
+                        <div class="mt-2 text-lg font-semibold">{selectedVersionSnapshot.has_source ? "Ready" : "Missing"}</div>
                       </div>
                     </div>
 
@@ -994,9 +995,9 @@ export async function waitForTask(
                       <div>
                         <div class="flex items-center justify-between gap-3">
                           <div class="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">Source Code</div>
-                          {#if selectedVersion.source_code}
+                          {#if selectedVersionSnapshot.source_code}
                             <button
-                              onclick={() => copySnippet(selectedVersion.source_code || "", `v${selectedVersion.version} source code`)}
+                              onclick={() => copySnippet(selectedVersionSnapshot.source_code || "", `v${selectedVersionSnapshot.version} source code`)}
                               class="inline-flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-semibold hover:bg-muted/40 transition-colors"
                             >
                               <Copy size={13} />
@@ -1004,8 +1005,8 @@ export async function waitForTask(
                             </button>
                           {/if}
                         </div>
-                        {#if selectedVersion.source_code}
-                          <pre class="mt-2 rounded-xl bg-slate-950 text-slate-100 p-4 text-[11px] leading-5 overflow-auto border border-slate-900/80 max-h-72"><code>{selectedVersion.source_code}</code></pre>
+                        {#if selectedVersionSnapshot.source_code}
+                          <pre class="mt-2 rounded-xl bg-slate-950 text-slate-100 p-4 text-[11px] leading-5 overflow-auto border border-slate-900/80 max-h-72"><code>{selectedVersionSnapshot.source_code}</code></pre>
                         {:else}
                           <div class="mt-2 rounded-lg border border-border/50 bg-background/70 px-3 py-2 text-xs text-muted-foreground">这个版本没有保留源码快照。</div>
                         {/if}
@@ -1014,9 +1015,9 @@ export async function waitForTask(
                       <div>
                         <div class="flex items-center justify-between gap-3">
                           <div class="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">Bundled Output</div>
-                          {#if selectedVersion.bundle_code}
+                          {#if selectedVersionSnapshot.bundle_code}
                             <button
-                              onclick={() => copySnippet(selectedVersion.bundle_code || "", `v${selectedVersion.version} bundle output`)}
+                              onclick={() => copySnippet(selectedVersionSnapshot.bundle_code || "", `v${selectedVersionSnapshot.version} bundle output`)}
                               class="inline-flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-semibold hover:bg-muted/40 transition-colors"
                             >
                               <Copy size={13} />
@@ -1024,8 +1025,8 @@ export async function waitForTask(
                             </button>
                           {/if}
                         </div>
-                        {#if selectedVersion.bundle_code}
-                          <pre class="mt-2 rounded-xl bg-slate-950 text-slate-100 p-4 text-[11px] leading-5 overflow-auto border border-slate-900/80 max-h-72"><code>{selectedVersion.bundle_code}</code></pre>
+                        {#if selectedVersionSnapshot.bundle_code}
+                          <pre class="mt-2 rounded-xl bg-slate-950 text-slate-100 p-4 text-[11px] leading-5 overflow-auto border border-slate-900/80 max-h-72"><code>{selectedVersionSnapshot.bundle_code}</code></pre>
                         {:else}
                           <div class="mt-2 rounded-lg border border-border/50 bg-background/70 px-3 py-2 text-xs text-muted-foreground">这个版本没有可用的编译产物。</div>
                         {/if}
