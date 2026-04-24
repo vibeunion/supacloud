@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.11.3](https://github.com/zuohuadong/supacloud/compare/management-api-v0.11.2...management-api-v0.11.3) (2026-04-24)
+
+
+### 🐛 Bug Fixes
+
+* harden realtime tasks and data-plane boundaries ([f6bdfd1](https://github.com/zuohuadong/supacloud/commit/f6bdfd1b92d501507e27ad6ed73ecd3b46cc3e97))
+* **management-api:** default to port 9090 ([c842879](https://github.com/zuohuadong/supacloud/commit/c842879db34f256651c0845ce70b6f1c7640f329))
+
 ## [0.11.2](https://github.com/zuohuadong/supacloud/compare/management-api-v0.11.1...management-api-v0.11.2) (2026-04-23)
 
 
