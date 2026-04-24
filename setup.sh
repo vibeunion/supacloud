@@ -134,7 +134,7 @@ generate_config() {
     if [[ -z "$SUPABASE_PUBLIC_DOMAIN" ]]; then
         if [ -t 0 ]; then
             echo -e "${YELLOW}Please enter your Supabase API domain (press Enter to use api.${INTERNAL_IP}.nip.io)${NC}"
-            read -p "Domain: " SUPABASE_PUBLIC_DOMAIN
+            read -r -p "Domain: " SUPABASE_PUBLIC_DOMAIN
         fi
         
         if [[ -z "$SUPABASE_PUBLIC_DOMAIN" ]]; then
