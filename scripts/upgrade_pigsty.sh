@@ -12,7 +12,7 @@ echo ""
 echo "Warning: Before upgrading infrastructure, it is strongly recommended to backup important database data!"
 echo "The upgrade process will pull the latest Pigsty v4.1.0 code and reapply cluster configuration."
 echo ""
-read -p "Have you confirmed backup and are ready to upgrade? [y/N] " confirm
+read -r -p "Have you confirmed backup and are ready to upgrade? [y/N] " confirm
 if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
     echo "Upgrade cancelled."
     exit 0
