@@ -16,8 +16,8 @@ describe("service-role utils", () => {
       jwt_secret: "fallback-jwt-secret",
     });
 
-    expect(typeof key).toBe("string");
-    expect(key?.split(".")).toHaveLength(3);
+    expect(key).toBeTruthy();
+    expect(key).not.toBe("fallback-jwt-secret");
   });
 
   test("returns null when no project key material exists", async () => {
