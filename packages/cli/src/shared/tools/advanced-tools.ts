@@ -1,8 +1,51 @@
 /**
  * Advanced — Split into 3 compound tools: edge_functions, secrets, platform
  */
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { basename, join, resolve } from "node:path";
+import { promisify } from "node:util";
+import { execFile } from "node:child_process";
 import { z } from "zod";
 import type { HttpTransport } from "../transports/http";
+
+const execFileAsync = promisify(execFile);
+
+async function runBunBuild(args: string[]): Promise<{ stdout: string; stderr: string }> {
+    try {
+        return await execFileAsync("bun", ["build", ...args], { maxBuffer: 10 * 1024 * 1024 });
+    } catch (error) {
+        const e = error as NodeJS.ErrnoException & { stdout?: string; stderr?: string };
+        if (e.code === "ENOENT") {
+            throw new Error("Bun is required for local edge function bundling. Install Bun or use deploy_bundle with explicit files.");
+        }
+        throw error;
+    }
+}
+
+async function bundleEdgeFunctionPath(pathArg: string): Promise<string> {
+    const entrypoint = resolveEntrypoint(pathArg);
+    const tmpDir = mkdtempSync(join(tmpdir(), "supacloud-edge-"));
+    const outfile = join(tmpDir, `${basename(entrypoint).replace(/\.[^.]+$/, "") || "index"}.js`);
+    try {
+        const { stderr } = await runBunBuild([entrypoint, "--target", "bun", "--outfile", outfile]);
+        if (!existsSync(outfile)) throw new Error(`Bundle failed: ${stderr}`);
+        return readFileSync(outfile, "utf-8");
+    } finally {
+        rmSync(tmpDir, { recursive: true, force: true });
+    }
+}
+
+function resolveEntrypoint(pathArg: string): string {
+    const resolved = resolve(pathArg);
+    const stat = statSync(resolved);
+    if (!stat.isDirectory()) return resolved;
+    const entrypoint = join(resolved, "index.ts");
+    if (!existsSync(entrypoint)) {
+        throw new Error(`Directory provided but no index.ts found at ${entrypoint}`);
+    }
+    return entrypoint;
+}
 
 export function registerAdvancedTools(server: { tool: (...args: any[]) => void }, http: HttpTransport): void {
 
@@ -28,51 +71,23 @@ Actions: list, deploy, deploy_bundle, source, delete, check`,
 
             let text: string;
 
-            // Helper for local TS syntax check
             const checkSyntax = async (sourceCode: string): Promise<{ ok: boolean; err?: string }> => {
-                const fs = require("fs");
-                const os = require("os");
-                const { promisify } = require("util");
-                const execAsync = promisify(require("child_process").exec);
-                const tmpFile = `${os.tmpdir()}/supacloud_edge_${Date.now()}.ts`;
-                fs.writeFileSync(tmpFile, sourceCode);
+                const tmpDir = mkdtempSync(join(tmpdir(), "supacloud-edge-check-"));
+                const tmpFile = join(tmpDir, "index.ts");
+                writeFileSync(tmpFile, sourceCode);
                 try {
-                    await execAsync(`bun build ${tmpFile} --external='*'`);
+                    await runBunBuild([tmpFile, "--external", "*"]);
                     return { ok: true };
                 } catch (e: any) {
-                    return { ok: false, err: e.stdout + "\n" + (e.stderr || e.message) };
+                    return { ok: false, err: `${e.stdout || ""}\n${e.stderr || e.message}` };
                 } finally {
-                    try { fs.unlinkSync(tmpFile); } catch (e) {}
+                    rmSync(tmpDir, { recursive: true, force: true });
                 }
             };
 
-            // Resolve code from path if provided
             if (pathArg && !code) {
                 try {
-                    const fs = require("fs");
-                    const os = require("os");
-                    const { promisify } = require("util");
-                    const execAsync = promisify(require("child_process").exec);
-
-                    const stat = fs.statSync(pathArg);
-                    let entrypoint = pathArg;
-                    if (stat.isDirectory()) {
-                        entrypoint = `${pathArg}/index.ts`;
-                        if (!fs.existsSync(entrypoint)) {
-                            throw new Error(`Directory provided but no index.ts found at ${entrypoint}`);
-                        }
-                    }
-
-                    // For edge functions, local auto-bundling is highly recommended to resolve multi-file imports
-                    // We bundle the function to a temp file, then read it as the deployment code.
-                    const tmpOut = `${os.tmpdir()}/supacloud_bundled_${Date.now()}.js`;
-                    try {
-                        const { stderr } = await execAsync(`bun build ${entrypoint} --target bun --outfile ${tmpOut}`);
-                        if (!fs.existsSync(tmpOut)) throw new Error(`Bundle failed: ${stderr}`);
-                        code = fs.readFileSync(tmpOut, "utf-8");
-                    } finally {
-                        try { fs.unlinkSync(tmpOut); } catch (e) {}
-                    }
+                    code = await bundleEdgeFunctionPath(pathArg);
                 } catch (e: any) {
                     throw new Error(`Failed to bundle/read path ${pathArg}: ${e.message}`);
                 }
