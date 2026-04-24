@@ -6,6 +6,7 @@ const actualDb = await import("../../src/db");
 
 const jwtServiceMock = {
   generateProjectRef: mock(() => "newref1234"),
+  generateServiceRoleKey: mock(() => Promise.resolve("generated-servicekey")),
   generateKeySet: mock(() =>
     Promise.resolve({
       jwtSecret: "jwtsecret",
