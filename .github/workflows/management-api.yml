@@ -111,8 +111,14 @@ jobs:
 
       - name: Validate Kong declarative configs
         run: |
-          docker run --rm -v "$PWD/docker/dev/kong/kong.yml:/kong.yml:ro" kong:3.9 kong config parse /kong.yml
-          docker run --rm -v "$PWD/docker/self-host/kong/kong.yml:/kong.yml:ro" kong:3.9 kong config parse /kong.yml
+          docker run --rm \
+            -e KONG_DATABASE=off \
+            -v "$PWD/docker/dev/kong/kong.yml:/kong.yml:ro" \
+            kong:3.9 kong config parse /kong.yml
+          docker run --rm \
+            -e KONG_DATABASE=off \
+            -v "$PWD/docker/self-host/kong/kong.yml:/kong.yml:ro" \
+            kong:3.9 kong config parse /kong.yml
 
       - name: Validate shell script syntax
         run: |
