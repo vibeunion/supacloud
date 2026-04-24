@@ -422,6 +422,23 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
   .get(
     "/deployments/:id/records",
     async ({ params, set }) => {
+      const records = await frontendService.listDnsRecords(params.ref, params.id);
+      if (!records) {
+        return status(404, { message: "Deployment not found", code: "404" });
+      }
+      return { records };
+    },
+    {
+      params: t.Object({
+        ref: t.String(),
+        id: t.String(),
+      }),
+    }
+  )
+
+  .get(
+    "/deployments/:id/deployment-records",
+    async ({ params, set }) => {
       const records = await frontendService.listDeploymentRecords(params.ref, params.id);
       return { records };
     },
@@ -434,7 +451,7 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
   )
 
   .get(
-    "/deployments/:id/records/:recordId",
+    "/deployments/:id/deployment-records/:recordId",
     async ({ params, set }) => {
       const record = await frontendService.getDeploymentRecord(params.ref, params.id, params.recordId);
       if (!record) {
