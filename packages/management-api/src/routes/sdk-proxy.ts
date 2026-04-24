@@ -175,9 +175,24 @@ async function maybeEnqueueAsyncFunction(request: Request, ref: string): Promise
     );
 }
 
+async function resolveProjectRefFromApiKey(key: string): Promise<string> {
+    if (!key) return '';
+    try {
+        const rows = await metaSql`SELECT ref FROM projects WHERE anon_key = ${key} OR service_role_key = ${key} LIMIT 1`;
+        if (rows.length > 0) return rows[0].ref;
+    } catch(e) {}
+    return '';
+}
+
 async function getProjectRef(request: Request): Promise<string> {
+    const auth = request.headers.get('authorization') || '';
+    const key = request.headers.get('apikey') || '';
+    const apiKeyRef = await resolveProjectRefFromApiKey(key);
     const refHeader = request.headers.get("x-project-ref") || request.headers.get("x-supabase-project");
-    if (refHeader) return refHeader;
+    if (refHeader) {
+        if (apiKeyRef && apiKeyRef !== refHeader) return '';
+        return refHeader;
+    }
     
     const forwardedHost = request.headers.get('x-forwarded-host');
     const rawHosts = [forwardedHost, request.headers.get('host')].filter(Boolean) as string[];
@@ -186,7 +201,9 @@ async function getProjectRef(request: Request): Promise<string> {
         if (!host) continue;
 
         if (config.baseDomain && host.includes(config.baseDomain)) {
-            return host.split('.')[0];
+            const hostRef = host.split('.')[0];
+            if (apiKeyRef && apiKeyRef !== hostRef) return '';
+            return hostRef;
         }
         try {
             const hostWithoutPort = host.split(':')[0];
@@ -198,28 +215,28 @@ async function getProjectRef(request: Request): Promise<string> {
                    OR config->>'custom_domain' = ${hostWithoutPort.replace(/^api\./, '')}
                 LIMIT 1
             `;
-            if (rows.length > 0) return rows[0].ref;
+            if (rows.length > 0) {
+                const hostRef = rows[0].ref;
+                if (apiKeyRef && apiKeyRef !== hostRef) return '';
+                return hostRef;
+            }
         } catch(e) {}
     }
 
-    const auth = request.headers.get('authorization') || '';
     if (auth.startsWith('Bearer ')) {
         try {
            const payloadB64 = auth.split('.')[1];
            if (payloadB64) {
                const payload = JSON.parse(Buffer.from(payloadB64, 'base64').toString());
-               if (payload.ref) return payload.ref;
+               if (payload.ref) {
+                   if (apiKeyRef && apiKeyRef !== payload.ref) return '';
+                   return payload.ref;
+               }
            }
         } catch(e) {}
     }
 
-    const key = request.headers.get('apikey') || '';
-    if (key) {
-        try {
-            const rows = await metaSql`SELECT ref FROM projects WHERE anon_key = ${key} OR service_role_key = ${key} LIMIT 1`;
-            if (rows.length > 0) return rows[0].ref;
-        } catch(e) {}
-    }
+    if (apiKeyRef) return apiKeyRef;
 
     if (process.env.BUN_ENV === 'test' || process.env.NODE_ENV === 'test') {
         if (key === 'test-token' || auth.includes('test-token')) {
@@ -271,11 +288,15 @@ async function executeProxy(request: Request, targetUrl: string, interceptors: {
         
         const reqHeaders = new Headers(request.headers);
         reqHeaders.delete('host');
+        reqHeaders.delete('x-forwarded-host');
+        reqHeaders.delete('x-forwarded-proto');
+        reqHeaders.delete('x-forwarded-for');
+        reqHeaders.delete('x-real-ip');
         
         const url = new URL(request.url);
         reqHeaders.set('x-forwarded-host', url.host);
         reqHeaders.set('x-forwarded-proto', url.protocol.replace(':', ''));
-        reqHeaders.set('x-forwarded-for', request.headers.get('x-forwarded-for') || '127.0.0.1');
+        reqHeaders.set('x-forwarded-for', '127.0.0.1');
         
         if (interceptors.ref) {
             reqHeaders.set('x-project-ref', interceptors.ref);

@@ -72,8 +72,6 @@ export const V1ProjectWithDatabaseResponseSchema = t.Object(
     ),
     config: t.Optional(t.Any()),
     anon_key: t.Optional(t.String()),
-    service_role_key: t.Optional(t.String()),
-    jwt_secret: t.Optional(t.String()),
     services: t.Optional(t.Array(t.Any())),
   },
   { additionalProperties: true },
@@ -112,8 +110,6 @@ export function toPublicV1ProjectWithDatabaseResponse(p: any) {
     studio: p.studio,
     config: p.config,
     anon_key: p.anon_key,
-    service_role_key: p.service_role_key,
-    jwt_secret: p.jwt_secret,
     services: p.services,
   };
 }
@@ -217,7 +213,7 @@ async function buildProjectResponse(
       healthy: s === "ACTIVE_HEALTHY",
       service_host_ids: [`${ref}-gotrue`],
     })),
-    checkServiceStatus(`supacloud-realtime@${ref}`)
+    checkServiceStatus("supacloud-realtime")
       .then((s) => ({
         id: "realtime",
         name: "Realtime",
@@ -282,8 +278,6 @@ async function buildProjectResponse(
     connection_string: `postgresql://${dbUser}:[YOUR-PASSWORD]@${project.database?.host || "localhost"}:${(project.database as Record<string, unknown>)?.port || 5432}/${dbName}`,
     services: serviceStatuses,
     anon_key: project.anon_key,
-    service_role_key: project.service_role_key,
-    jwt_secret: project.jwt_secret,
     api: project.api,
     studio: project.studio,
     config: normalizeProjectConfig(project.config),

@@ -10,7 +10,7 @@ function getUnits(ref: string, service?: string): string[] {
     const all = [
         `supacloud-gotrue@${ref}`,
         `supacloud-pgrst@${ref}`,
-        `supacloud-realtime@${ref}`,
+        "supacloud-realtime",
         `supacloud-storage@${ref}`,
     ];
     if (!service || service === "all") return all;
@@ -19,7 +19,7 @@ function getUnits(ref: string, service?: string): string[] {
         gotrue: `supacloud-gotrue@${ref}`,
         api: `supacloud-pgrst@${ref}`,
         postgrest: `supacloud-pgrst@${ref}`,
-        realtime: `supacloud-realtime@${ref}`,
+        realtime: "supacloud-realtime",
         storage: `supacloud-storage@${ref}`,
     };
     const unit = map[service];
@@ -37,7 +37,7 @@ export const projectLogsRoutes = new Elysia({ prefix: "/v1/projects/:ref/logs" }
 
             try {
                 const limit = query.limit || "200";
-                const result = await $`journalctl -u supacloud-gotrue@${params.ref} -u supacloud-pgrst@${params.ref} -u supacloud-postgres@${params.ref} -u supacloud-realtime@${params.ref} -u supacloud-storage@${params.ref} -u supacloud-kong@${params.ref} -n ${limit} --output short-iso --no-pager`.nothrow().quiet();
+                const result = await $`journalctl -u supacloud-gotrue@${params.ref} -u supacloud-pgrst@${params.ref} -u supacloud-postgres@${params.ref} -u supacloud-realtime -u supacloud-storage@${params.ref} -u supacloud-kong@${params.ref} -n ${limit} --output short-iso --no-pager`.nothrow().quiet();
                 const output = result.text();
                 const lines = output.split('\n').filter(line => line.trim() !== '' && !line.startsWith('-- '));
 
