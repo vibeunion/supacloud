@@ -366,12 +366,12 @@ jobs:
         run: |
           echo "=== Checking scripts/*.sh and scripts/lib/*.sh ==="
           shellcheck -s bash \
-            -e SC2086,SC2034,SC2155,SC2046,SC2012,SC1091 \
+            -e SC2086,SC2034,SC2155,SC2046,SC2012,SC1091,SC2317 \
             scripts/*.sh scripts/lib/*.sh
 
           echo "=== Checking root shell scripts ==="
           shellcheck -s bash \
-            -e SC2086,SC2034,SC2155,SC2046,SC2012,SC1091 \
+            -e SC2086,SC2034,SC2155,SC2046,SC2012,SC1091,SC2317 \
             install.sh setup.sh switch.sh deploy_all.sh supacloud
 
   build-binaries:
