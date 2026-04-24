@@ -1,6 +1,7 @@
 /**
  * Frontend Hosting — Compound tool (13→1)
  */
+import { existsSync, readFileSync } from "node:fs";
 import { basename } from "node:path";
 import { z } from "zod";
 import type { HttpTransport } from "../transports/http";
@@ -70,16 +71,15 @@ Actions: list, get, create, update, delete, deploy_git, deploy_upload, redeploy,
                     break;
                 case "deploy_upload":
                     need("ref", ref); need("id", id); need("zip_path", zip_path);
-                    const file = Bun.file(zip_path!);
-                    if (!(await file.exists())) {
+                    if (!existsSync(zip_path!)) {
                         throw new Error(`Zip file not found: ${zip_path}`);
                     }
+                    const zipBuffer = readFileSync(zip_path!);
                     const form = new FormData();
                     form.append(
                         "file",
-                        new File([await file.arrayBuffer()], basename(zip_path!), {
-                            type: "application/zip",
-                        }),
+                        new Blob([zipBuffer], { type: "application/zip" }),
+                        basename(zip_path!),
                     );
                     text = ok(
                         await http.postMultipart(

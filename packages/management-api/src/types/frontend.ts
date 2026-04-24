@@ -48,6 +48,22 @@ export interface DeploymentRecord {
   duration?: number;
 }
 
+export type FrontendDnsRecordType = "A" | "CNAME";
+
+export type FrontendDnsRecordStatus = "managed" | "expected";
+
+export interface FrontendDnsRecord {
+  id: string;
+  deployment_id: string;
+  project_ref: string;
+  hostname: string;
+  type: FrontendDnsRecordType;
+  name: string;
+  value: string;
+  status: FrontendDnsRecordStatus;
+  source: "temporary_domain" | "custom_domain";
+}
+
 export interface GitHubWebhookConfig {
   deployment_id: string;
   project_ref: string;
