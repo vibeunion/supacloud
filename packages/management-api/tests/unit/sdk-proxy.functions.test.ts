@@ -225,4 +225,65 @@ describe("sdkProxyRoutes functions proxy", () => {
       expect(calls[0]?.url).toBe("http://127.0.0.1:8361/health");
     });
   });
+
+  test("proxy rejects mismatched project header and apikey", async () => {
+    await withSdkProxyTestContext(async ({ calls, trackSpy }) => {
+      const sqlSpy = trackSpy(spyOn(dbModule, "sql"));
+      sqlSpy.mockImplementation(async (...args: unknown[]) => {
+        const text = String(args[0] ?? "");
+        if (text.includes("anon_key")) {
+          return [{ ref: "proj_from_key" }];
+        }
+        return [];
+      });
+
+      const response = await request("/auth/v1/health", {
+        method: "GET",
+        headers: {
+          "x-project-ref": "proj_from_header",
+          apikey: "anon-from-other-project",
+        },
+      });
+
+      expect(response.status).toBe(400);
+      expect(calls).toHaveLength(0);
+    });
+  });
+
+  test("proxy replaces client supplied forwarding headers", async () => {
+    await withSdkProxyTestContext(async ({ calls, trackSpy }) => {
+      const sqlSpy = trackSpy(spyOn(dbModule, "sql"));
+      sqlSpy.mockImplementation(async (...args: unknown[]) => {
+        const text = String(args[0] ?? "");
+        if (text.includes("SELECT config")) {
+          return [{
+            config: {
+              postgrest_port: 7361,
+              gotrue_port: 8361,
+            },
+          }];
+        }
+        return [];
+      });
+
+      const response = await request("/auth/v1/health", {
+        method: "GET",
+        headers: {
+          "x-project-ref": "proj_1",
+          "x-forwarded-host": "evil.example.com",
+          "x-forwarded-proto": "http",
+          "x-forwarded-for": "203.0.113.10",
+          "x-real-ip": "203.0.113.11",
+        },
+      });
+
+      expect(response.status).toBe(200);
+      expect(calls).toHaveLength(1);
+      const headers = new Headers(calls[0]?.init?.headers);
+      expect(headers.get("x-forwarded-host")).toBe("localhost");
+      expect(headers.get("x-forwarded-proto")).toBe("http");
+      expect(headers.get("x-forwarded-for")).toBe("127.0.0.1");
+      expect(headers.get("x-real-ip")).toBeNull();
+    });
+  });
 });

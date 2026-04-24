@@ -130,7 +130,7 @@ ensure_service_containers_running() {
     local RUNTIME="podman"
     command -v podman &>/dev/null || RUNTIME="docker"
 
-    for container in supacloud-imaginary realtime-dev.supabase-realtime; do
+    for container in supacloud-imaginary supacloud-realtime; do
         local status
         status=$($RUNTIME ps -a --filter "name=${container}" --format '{{.Status}}' 2>/dev/null || echo "")
 

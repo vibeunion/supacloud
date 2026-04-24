@@ -175,7 +175,7 @@ export const projectServiceRoutes = new Elysia({ prefix: "/v1/projects" })
         checkService("patroni"),
         checkService(`supacloud-pgrst@${ref}`),
         checkService(`supacloud-gotrue@${ref}`),
-        checkService(`supacloud-realtime@${ref}`),
+        checkService("supacloud-realtime"),
         checkService(`supacloud-storage@${ref}`),
       ]);
 
@@ -213,7 +213,7 @@ export const projectServiceRoutes = new Elysia({ prefix: "/v1/projects" })
         postgresql: "patroni",
         postgrest: `supacloud-pgrst@${ref}`,
         gotrue: `supacloud-gotrue@${ref}`,
-        realtime: `supacloud-realtime@${ref}`,
+        realtime: "supacloud-realtime",
         storage: `supacloud-storage@${ref}`,
         kong: "kong",
       };

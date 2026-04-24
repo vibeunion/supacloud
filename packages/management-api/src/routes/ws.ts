@@ -5,6 +5,7 @@
  * Auth: query parameter ?token=<session_token> (WebSocket can't send custom headers)
  */
 import { Elysia, t } from "elysia";
+import { checkAuth } from "../middleware/auth";
 import { logger } from "../utils/logger";
 
 // --- Subscriber registry ---
@@ -92,13 +93,35 @@ export const wsRoutes = new Elysia({ prefix: "/ws" })
       type: t.Optional(t.String()),
       projectRef: t.Optional(t.String()),
     })),
-    open(ws) {
+    async open(ws) {
       const id = `ws-${++clientIdCounter}`;
-      // Extract project filter from query params if present
       const url = new URL(ws.data.request?.url || "http://localhost", "http://localhost");
       const projectFilter = url.searchParams.get("project") || undefined;
+      const token = url.searchParams.get("token") || "";
 
-      // Store clientId on the ws instance for reliable cleanup
+      if (!token) {
+        ws.close(1008, "Authentication token required");
+        return;
+      }
+
+      const authUrl = new URL(url.toString());
+      if (projectFilter) {
+        authUrl.pathname = `/v1/projects/${projectFilter}`;
+      }
+      const authRequest = new Request(authUrl.toString(), {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const authError = await checkAuth(authRequest);
+      if (authError) {
+        ws.close(authError.status === 403 ? 1008 : 1002, authError.body.error);
+        return;
+      }
+
+      if (!projectFilter && token !== (await import("../config")).config.masterToken) {
+        ws.close(1008, "Project filter required for non-admin websocket sessions");
+        return;
+      }
+
       (ws.data as Record<string, unknown>).__clientId = id;
 
       taskSubscribers.set(id, {

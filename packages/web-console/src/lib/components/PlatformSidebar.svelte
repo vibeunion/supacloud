@@ -22,7 +22,7 @@
     locale.set($locale === 'zh' ? 'en' : 'zh');
   }
 
-  const themeToggleLabel = $derived($mode === 'dark' ? '切换到浅色模式' : '切换到深色模式');
+  const themeToggleLabel = $derived(mode.current === 'dark' ? '切换到浅色模式' : '切换到深色模式');
 
   const navItems = $derived([
     { title: $t("Platform.extensions_market"), icon: Box, href: `/platform/extensions` },

@@ -83,8 +83,11 @@
   let activeTab = $state<"all" | "dlq" | "settings">("all");
   let statusFilter = $state("");
   let functionSlugFilter = $state("");
-  let liveStatus = $state<"connected" | "connecting" | "disconnected">("connecting");
+  let liveStatus = $state<"connected" | "connecting" | "reconnecting" | "polling" | "disconnected">("connecting");
   let pollTimer: ReturnType<typeof setInterval> | null = null;
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  let reconnectAttempts = 0;
+  let shouldReconnect = true;
   let ws: WebSocket | null = null;
   let logFilter = $state<"all" | "stdout" | "stderr">("all");
   let logSearch = $state("");
@@ -147,19 +150,44 @@
     }
   }
 
-  function setupRealtime() {
+  function scheduleReconnect() {
+    if (!shouldReconnect || typeof window === "undefined") return;
+    if (reconnectTimer) clearTimeout(reconnectTimer);
+    liveStatus = reconnectAttempts === 0 ? "polling" : "reconnecting";
+    const delay = Math.min(30000, 1000 * 2 ** reconnectAttempts);
+    reconnectAttempts += 1;
+    reconnectTimer = setTimeout(() => {
+      setupRealtime(true);
+    }, delay);
+  }
+
+  function setupRealtime(isReconnect = false) {
     if (typeof window === "undefined") return;
     if (ws) {
+      ws.onclose = null;
+      ws.onerror = null;
       ws.close();
       ws = null;
     }
 
-    liveStatus = "connecting";
+    liveStatus = isReconnect ? "reconnecting" : "connecting";
+    const token = localStorage.getItem("supacloud_session");
+    if (!token) {
+      liveStatus = "disconnected";
+      return;
+    }
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    ws = new WebSocket(`${protocol}//${window.location.host}/ws/tasks?project=${projectRef}`);
+    const params = new URLSearchParams({ project: projectRef ?? "", token });
+    ws = new WebSocket(`${protocol}//${window.location.host}/ws/tasks?${params.toString()}`);
 
     ws.onopen = () => {
+      reconnectAttempts = 0;
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
       liveStatus = "connected";
+      void fetchTasks(true);
     };
 
     ws.onmessage = async (event) => {
@@ -169,16 +197,17 @@
           await fetchTasks(true);
         }
       } catch {
-        // ignore malformed frames
       }
     };
 
     ws.onclose = () => {
-      liveStatus = "disconnected";
+      void fetchTasks(true);
+      scheduleReconnect();
     };
 
     ws.onerror = () => {
-      liveStatus = "disconnected";
+      liveStatus = "polling";
+      ws?.close();
     };
   }
 
@@ -371,11 +400,17 @@
       if (liveStatus !== "connected") {
         fetchTasks(true);
       }
-    }, 15000);
+    }, 5000);
 
     return () => {
+      shouldReconnect = false;
       if (pollTimer) clearInterval(pollTimer);
-      if (ws) ws.close();
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      if (ws) {
+        ws.onclose = null;
+        ws.onerror = null;
+        ws.close();
+      }
     };
   });
 </script>
@@ -403,13 +438,17 @@
   </div>
 
   <div class="flex items-center gap-2 text-xs text-muted-foreground">
-    <span class={`inline-block w-2 h-2 rounded-full ${liveStatus === "connected" ? "bg-emerald-500" : liveStatus === "connecting" ? "bg-amber-500" : "bg-red-500"}`}></span>
+    <span class={`inline-block w-2 h-2 rounded-full ${liveStatus === "connected" ? "bg-emerald-500" : liveStatus === "connecting" || liveStatus === "reconnecting" ? "bg-amber-500" : liveStatus === "polling" ? "bg-sky-500" : "bg-red-500"}`}></span>
     {#if liveStatus === "connected"}
       任务流实时连接中
     {:else if liveStatus === "connecting"}
       正在连接任务流
+    {:else if liveStatus === "reconnecting"}
+      正在重连任务流，轮询同步中
+    {:else if liveStatus === "polling"}
+      实时连接暂不可用，已降级为轮询刷新
     {:else}
-      实时连接断开，已回退到轮询刷新
+      实时连接不可用
     {/if}
   </div>
 

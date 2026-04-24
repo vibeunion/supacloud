@@ -7,7 +7,7 @@ async function getGoTrueAdminContext(ref: string) {
   const project = await projectService.getProject(ref);
   if (!project) return null;
 
-  const serviceRoleKey = await resolveProjectServiceRoleKey(project);
+  const serviceRoleKey = await resolveProjectServiceRoleKey(ref);
   if (!serviceRoleKey) return null;
 
   const { config } = await import("../config");

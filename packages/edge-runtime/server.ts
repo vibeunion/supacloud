@@ -322,7 +322,7 @@ async function verifyJwt(
 }
 
 async function handleFunctionRequest(
-  c: { params: Record<string, string>; headers: Record<string, string | undefined>; request: Request; set: { headers: Record<string, string> } },
+  c: { params: Record<string, string>; headers: Record<string, string | undefined>; request: Request; set: { headers: Record<string, string | number> } },
   functionName: string,
 ) {
   const projectRef = c.headers["x-project-ref"];
@@ -352,13 +352,12 @@ async function handleFunctionRequest(
     }
   }
 
-  const setHeaders = c.set.headers as Record<string, string>;
-  setHeaders["x-sb-execution-id"] = crypto.randomUUID();
+  c.set.headers["x-sb-execution-id"] = crypto.randomUUID();
   return dispatchFunction(
     projectRef,
     functionName,
     c.request,
-    setHeaders,
+    c.set.headers as Record<string, string>,
   );
 }
 
