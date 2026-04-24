@@ -126,7 +126,7 @@ const edgeRuntimePort = Number(getEnv("EDGE_RUNTIME_PORT", "9000"));
 const edgeRuntimeMode = getEnv("EDGE_RUNTIME_MODE", "embedded") === "external" ? "external" : "embedded";
 const dashboardUsername = getEnv("DASHBOARD_USERNAME", getEnv("STUDIO_USERNAME", "admin"));
 const dashboardPassword = getEnv("DASHBOARD_PASSWORD", getEnv("STUDIO_PASSWORD", "supabase"));
-const port = Number(getEnv("PORT", "8080"));
+const port = Number(getEnv("PORT", "9090"));
 const pgHost = getEnv("PG_HOST", "127.0.0.1");
 const pgPort = Number(getEnv("PG_PORT", "5432"));
 const pgUser = getEnv("PG_USER", "postgres");
