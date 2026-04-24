@@ -8,6 +8,7 @@
  * This file handles: CRUD, build, Angie config, SSR process management
  */
 import { $ } from "bun";
+import { readdir } from "node:fs/promises";
 import { logger } from "../utils/logger";
 import { config } from "../config";
 import type {
@@ -15,6 +16,7 @@ import type {
   FrontendDeploymentConfig,
   FrontendBuildResult,
   DeploymentRecord,
+  FrontendDnsRecord,
 } from "../types/frontend";
 import {
   FRAMEWORK_DEFAULTS,
@@ -23,9 +25,8 @@ import { FrontendDomainService } from "./frontend-domain.service";
 import { FrontendRecordService } from "./frontend-record.service";
 
 const FRONTEND_BASE_DIR = "/var/supacloud/frontends";
-const ANGIE_SITES_DIR = "/etc/angie/http.d";
 
-class FrontendService {
+export class FrontendService {
   private baseDir: string;
   private domainService: FrontendDomainService;
   private recordService: FrontendRecordService;
@@ -59,12 +60,11 @@ class FrontendService {
     const deployments: FrontendDeployment[] = [];
 
     try {
-      const dir = Bun.file(deploymentsDir);
-      if (!(await dir.exists())) return [];
-
-      const dirs = (await $`ls ${deploymentsDir}`.quiet()).text().trim().split("\n").filter(Boolean);
+      const dirs = await readdir(deploymentsDir, { withFileTypes: true });
       
-      for (const name of dirs) {
+      for (const entry of dirs) {
+        if (!entry.isDirectory()) continue;
+        const name = entry.name;
         const configPath = this.joinPath(deploymentsDir, name, "deployment.json");
         try {
           const cfg = await Bun.file(configPath).json();
@@ -123,6 +123,8 @@ class FrontendService {
       JSON.stringify(deployment, null, 2)
     );
 
+    await this.ensureDeploymentRoute(deployment);
+
     return deployment;
   }
 
@@ -163,6 +165,43 @@ class FrontendService {
       logger.warn("[FrontendService] Failed to delete deployment", { error: err });
       return false;
     }
+  }
+
+  async listDnsRecords(projectRef: string, deploymentId: string): Promise<FrontendDnsRecord[] | null> {
+    const deployment = await this.getDeployment(projectRef, deploymentId);
+    if (!deployment) return null;
+
+    const records: FrontendDnsRecord[] = [];
+    const apexValue = config.dockerHostIp || config.baseDomain;
+    const temporaryHost = deployment.domain || `${deployment.id}.${deployment.project_ref}.app`;
+
+    records.push({
+      id: `${deployment.id}-temporary-domain`,
+      deployment_id: deployment.id,
+      project_ref: deployment.project_ref,
+      hostname: temporaryHost,
+      type: "A",
+      name: temporaryHost,
+      value: apexValue,
+      status: "managed",
+      source: "temporary_domain",
+    });
+
+    for (const hostname of deployment.custom_domains) {
+      records.push({
+        id: `${deployment.id}-${hostname.replace(/[^a-zA-Z0-9-]/g, "-")}`,
+        deployment_id: deployment.id,
+        project_ref: deployment.project_ref,
+        hostname,
+        type: "CNAME",
+        name: hostname,
+        value: temporaryHost,
+        status: "expected",
+        source: "custom_domain",
+      });
+    }
+
+    return records;
   }
 
   // ── Build Pipeline ────────────────────────────────────────────────
@@ -302,7 +341,7 @@ class FrontendService {
       await $`rm -rf ${buildDir} && cp -r ${outputDir} ${buildDir}`.quiet();
 
       await this.startSSRProcess(projectRef, deploymentId, deployment, buildDir, defaults.is_ssr);
-      await this.configureKongRoute(deployment, buildDir, defaults.is_ssr);
+      await this.ensureDeploymentRoute(deployment);
 
       await this.updateDeployment(projectRef, deploymentId, {
         status: "success",
@@ -329,6 +368,15 @@ class FrontendService {
   }
 
   // ── Kong (Web Server) Config ─────────────────────────────────────
+
+  private async ensureDeploymentRoute(deployment: FrontendDeployment): Promise<void> {
+    const defaults = FRAMEWORK_DEFAULTS[deployment.framework];
+    await this.configureKongRoute(
+      deployment,
+      this.joinPath(this.baseDir, deployment.project_ref, deployment.id, "build"),
+      defaults.is_ssr,
+    );
+  }
 
   async configureKongRoute(deployment: FrontendDeployment, buildDir: string, isSSR: boolean): Promise<void> {
     const port = 30000 + parseInt(deployment.id, 16) % 10000;
