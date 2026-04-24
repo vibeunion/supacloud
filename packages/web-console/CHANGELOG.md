@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.4](https://github.com/zuohuadong/supacloud/compare/web-console-v0.8.3...web-console-v0.8.4) (2026-04-24)
+
+
+### 🐛 Bug Fixes
+
+* harden realtime tasks and data-plane boundaries ([f6bdfd1](https://github.com/zuohuadong/supacloud/commit/f6bdfd1b92d501507e27ad6ed73ecd3b46cc3e97))
+
 ## [0.8.3](https://github.com/zuohuadong/supacloud/compare/web-console-v0.8.2...web-console-v0.8.3) (2026-04-23)
 
 
