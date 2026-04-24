@@ -3,6 +3,7 @@ import { Elysia } from "elysia";
 import { config } from "../../src/config";
 import { storageCompatRoutes } from "../../src/routes/storage-compat";
 import { mockBuckets, mockObjects } from "../../src/services/storage-rls";
+import * as dbModule from "../../src/db";
 import { StorageService } from "../../src/services/storage.service";
 import { SignedStore, TusStore } from "../../src/services/storage-store";
 
@@ -42,6 +43,48 @@ afterEach(() => {
 });
 
 describe("storageCompatRoutes supabase-js compatibility", () => {
+  test("rejects mismatched project header and apikey", async () => {
+    const sqlSpy = spyOn(dbModule, "sql");
+    sqlSpy.mockImplementation(async (...args: unknown[]) => {
+      const text = String(args[0] ?? "");
+      if (text.includes("anon_key")) {
+        return [{ ref: "proj_from_key" }];
+      }
+      return [];
+    });
+
+    const res = await request("/storage/v1/bucket", {
+      headers: {
+        apikey: "anon-from-other-project",
+        "x-project-ref": "proj_from_header",
+      },
+    });
+
+    expect(res.status).toBe(400);
+    sqlSpy.mockRestore();
+  });
+
+  test("rejects mismatched host tenant and apikey", async () => {
+    const sqlSpy = spyOn(dbModule, "sql");
+    sqlSpy.mockImplementation(async (...args: unknown[]) => {
+      const text = String(args[0] ?? "");
+      if (text.includes("anon_key")) {
+        return [{ ref: "proj_from_key" }];
+      }
+      return [];
+    });
+
+    const res = await request("/storage/v1/bucket", {
+      headers: {
+        apikey: "anon-from-other-project",
+        host: "proj_from_host.api.example.com",
+      },
+    });
+
+    expect(res.status).toBe(403);
+    sqlSpy.mockRestore();
+  });
+
   test("createSignedUrl returns an SDK-relative path and signed download works", async () => {
     mockObjects.set("avatars/folder/cat.png", {
       metadata: { size: 3, mimetype: "image/png" },

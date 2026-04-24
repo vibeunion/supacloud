@@ -198,4 +198,90 @@ describe("@supacloud/js", () => {
     subscription.unsubscribe();
     expect(getSpy).toHaveBeenCalled();
   });
+
+  test("subscribe falls back to polling when realtime does not connect in time", async () => {
+    const { supabase, channelInstance, removeChannel } = createFakeSupabase();
+    const states: string[] = [];
+    const snapshots: string[] = [];
+
+    const client = createSupaCloudClient({
+      supabase: supabase as never,
+      managementApiUrl: "https://admin.example.com",
+      projectRef: "proj_1",
+      pollingIntervalMs: 1,
+    });
+
+    const getSpy = spyOn(client.tasks, "get")
+      .mockResolvedValueOnce({ id: "tsk_123", status: "running", progress: 10 })
+      .mockResolvedValueOnce({ id: "tsk_123", status: "completed", progress: 100 });
+
+    channelInstance.subscribe.mockImplementation(() => channelInstance);
+
+    const subscription = client.tasks.subscribe("tsk_123", {
+      realtimeTimeoutMs: 1,
+      onUpdate(snapshot) {
+        snapshots.push(String(snapshot.status));
+      },
+      onStateChange(state) {
+        states.push(state);
+      },
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    expect(states).toContain("polling");
+    expect(snapshots).toContain("completed");
+    expect(removeChannel).toHaveBeenCalledTimes(1);
+
+    subscription.unsubscribe();
+    expect(getSpy).toHaveBeenCalled();
+  });
+
+  test("subscribe reconciles while realtime is connected", async () => {
+    const { supabase, channelInstance } = createFakeSupabase();
+    const states: string[] = [];
+    const snapshots: number[] = [];
+
+    const client = createSupaCloudClient({
+      supabase: supabase as never,
+      managementApiUrl: "https://admin.example.com",
+      projectRef: "proj_1",
+      pollingIntervalMs: 1,
+    });
+
+    const getSpy = spyOn(client.tasks, "get")
+      .mockResolvedValueOnce({ id: "tsk_123", status: "running", progress: 10 })
+      .mockResolvedValueOnce({ id: "tsk_123", status: "running", progress: 20 });
+
+    let subscribeHandler:
+      | ((status: string, error?: unknown) => void | Promise<void>)
+      | undefined;
+
+    channelInstance.subscribe.mockImplementation((...args: unknown[]) => {
+      const [handler] = args as [((status: string, error?: unknown) => void | Promise<void>)?];
+      subscribeHandler = handler;
+      return channelInstance;
+    });
+
+    const subscription = client.tasks.subscribe("tsk_123", {
+      reconcileIntervalMs: 1,
+      stopOnTerminal: false,
+      onUpdate(snapshot) {
+        snapshots.push(Number(snapshot.progress));
+      },
+      onStateChange(state) {
+        states.push(state);
+      },
+    });
+
+    await subscribeHandler?.("SUBSCRIBED");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    expect(states).toContain("realtime");
+    expect(snapshots).toContain(10);
+    expect(snapshots).toContain(20);
+    expect(getSpy.mock.calls.length >= 2).toBe(true);
+
+    subscription.unsubscribe();
+  });
 });

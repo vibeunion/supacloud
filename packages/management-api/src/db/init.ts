@@ -301,7 +301,8 @@ export async function initDatabase() {
           json_build_object(
             'id', NEW.id,
             'project_ref', NEW.project_ref,
-            'task_type', NEW.task_type
+            'task_type', NEW.task_type,
+            'next_run_at', NEW.next_run_at
           )::text
         );
         RETURN NEW;

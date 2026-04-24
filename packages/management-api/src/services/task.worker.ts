@@ -24,6 +24,7 @@ export class TaskWorker {
     private isRunning = false;
     private isProcessing = false;
     private intervalId?: Timer;
+    private delayedWakeupId?: Timer;
     private listener?: PgListenerHandle;
 
     start(intervalMs = 10000) {
@@ -35,8 +36,12 @@ export class TaskWorker {
         try {
             this.listener = createPgListener({
                 url: config.databaseUrl,
-                channels: ["task_pending"],
-                onNotification: (_channel, _payload) => {
+                channels: ["task_pending", "task_retry_scheduled"],
+                onNotification: (channel, payload) => {
+                    if (channel === "task_retry_scheduled") {
+                        this.scheduleDelayedWakeup(payload);
+                        return;
+                    }
                     logger.info(`[TaskWorker] NOTIFY received, triggering immediate poll`);
                     this.poll();
                 },
@@ -55,8 +60,39 @@ export class TaskWorker {
         this.listener = undefined;
         if (this.intervalId) {
             clearInterval(this.intervalId);
+            this.intervalId = undefined;
+        }
+        if (this.delayedWakeupId) {
+            clearTimeout(this.delayedWakeupId);
+            this.delayedWakeupId = undefined;
         }
         logger.info("Task Worker stopped.");
+    }
+
+    private scheduleDelayedWakeup(payload?: string) {
+        if (!this.isRunning) return;
+        const nextRunAt = this.extractNextRunAt(payload);
+        if (!nextRunAt) return;
+        const delayMs = Math.max(0, nextRunAt.getTime() - Date.now());
+        if (this.delayedWakeupId) {
+            clearTimeout(this.delayedWakeupId);
+        }
+        this.delayedWakeupId = setTimeout(() => {
+            this.delayedWakeupId = undefined;
+            void this.poll();
+        }, delayMs);
+    }
+
+    private extractNextRunAt(payload?: string): Date | null {
+        if (!payload) return null;
+        try {
+            const parsed = JSON.parse(payload) as { next_run_at?: unknown };
+            if (typeof parsed.next_run_at !== "string") return null;
+            const nextRunAt = new Date(parsed.next_run_at);
+            return Number.isNaN(nextRunAt.getTime()) ? null : nextRunAt;
+        } catch {
+            return null;
+        }
     }
 
     private async poll() {

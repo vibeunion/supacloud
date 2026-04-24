@@ -4,17 +4,21 @@ import { projectService } from "../services";
 export const projectSecretsRoutes = new Elysia({ prefix: "/v1/projects" })
   .get(
     "/:ref/secrets",
-    async ({ params }) => {
+    async ({ params, query }) => {
       const secrets = await projectService.getSecrets(params.ref);
       if (!secrets) {
         return status(404, { message: "Project not found", code: "404" });
       }
+      const reveal = query.reveal === "true";
       return secrets.map((s: { name: string; value: string }) => ({
         name: s.name,
-        value: s.value,
+        value: reveal ? s.value : "********",
       }));
     },
-    { params: t.Object({ ref: t.String() }) },
+    {
+      params: t.Object({ ref: t.String() }),
+      query: t.Object({ reveal: t.Optional(t.String()) }),
+    },
   )
 
   .post(
