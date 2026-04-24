@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.3](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.3.2...edge-runtime-v0.3.3) (2026-04-24)
+
+
+### 🐛 Bug Fixes
+
+* harden realtime tasks and data-plane boundaries ([f6bdfd1](https://github.com/zuohuadong/supacloud/commit/f6bdfd1b92d501507e27ad6ed73ecd3b46cc3e97))
+
 ## [0.3.2](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.3.1...edge-runtime-v0.3.2) (2026-04-19)
 
 
