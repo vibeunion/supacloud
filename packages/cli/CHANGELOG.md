@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.2](https://github.com/zuohuadong/supacloud/compare/cli-v0.1.1...cli-v0.1.2) (2026-04-25)
+
+
+### 🐛 Bug Fixes
+
+* **cli:** push migrations through management API ([cee9927](https://github.com/zuohuadong/supacloud/commit/cee9927d29cb0ef514ae5a33080e6cf1c74bdecc))
+* **cli:** push migrations via management api ([5b06fa2](https://github.com/zuohuadong/supacloud/commit/5b06fa249802335fbb3c4e77d3f5cefe8c4336b8))
+
 ## [0.1.1](https://github.com/zuohuadong/supacloud/compare/cli-v0.1.0...cli-v0.1.1) (2026-04-19)
 
 
