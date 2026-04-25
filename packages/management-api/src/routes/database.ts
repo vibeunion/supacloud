@@ -22,6 +22,46 @@ export function resolveMigrationStatements(body: MigrationBody): string[] {
   return [];
 }
 
+const ensuredMigrationTables = new Set<string>();
+
+export function resetEnsuredMigrationTablesForTests(): void {
+  ensuredMigrationTables.clear();
+}
+
+export async function ensureMigrationTables(dbName: string, projectDb: ReturnType<typeof getProjectDb>): Promise<void> {
+  if (ensuredMigrationTables.has(dbName)) return;
+
+  const existing = await projectDb<{ exists: boolean }[]>`
+    SELECT EXISTS (
+      SELECT 1
+      FROM information_schema.tables
+      WHERE table_schema = 'supabase_migrations'
+        AND table_name = 'schema_migrations'
+    ) AS exists
+  `;
+
+  if (!existing[0]?.exists) {
+    await projectDb.unsafe(`CREATE SCHEMA IF NOT EXISTS supabase_migrations`);
+    await projectDb`
+      CREATE TABLE IF NOT EXISTS supabase_migrations.schema_migrations (
+        version BIGINT PRIMARY KEY,
+        statements TEXT[],
+        name TEXT
+      )
+    `;
+  }
+
+  await projectDb`
+    CREATE TABLE IF NOT EXISTS public.schema_migrations (
+      version VARCHAR(255) PRIMARY KEY,
+      statements TEXT[],
+      name TEXT
+    )
+  `;
+
+  ensuredMigrationTables.add(dbName);
+}
+
 export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" })
     .get(
         "/tables",
@@ -268,21 +308,7 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
             const projectDb = getProjectDb(dbName);
 
             try {
-                await projectDb.unsafe(`CREATE SCHEMA IF NOT EXISTS supabase_migrations`);
-                await projectDb`
-                    CREATE TABLE IF NOT EXISTS supabase_migrations.schema_migrations (
-                        version BIGINT PRIMARY KEY,
-                        statements TEXT[],
-                        name TEXT
-                    )
-                `;
-                await projectDb`
-                    CREATE TABLE IF NOT EXISTS public.schema_migrations (
-                        version VARCHAR(255) PRIMARY KEY,
-                        statements TEXT[],
-                        name TEXT
-                    )
-                `;
+                await ensureMigrationTables(dbName, projectDb);
 
                 const isCliFormat = 'query' in body && typeof (body as Record<string, unknown>).query === 'string';
                 const isStructuredFormat = ('name' in body && 'sql' in body) || ('name' in body && 'statements' in body);
