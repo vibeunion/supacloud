@@ -27,6 +27,24 @@ function normalizeSqlResponse(result: Awaited<ReturnType<HttpTransport["post"]>>
     return result;
 }
 
+export function migrationVersionFromFilename(file: string, fallbackIndex = 0): number {
+    const match = basename(file).match(/^(\d{8,20})[_-]/);
+    if (match) return Number(match[1]);
+    return Date.now() * 1000 + fallbackIndex;
+}
+
+function appliedMigrationKeys(data: unknown): Set<string> {
+    const rows = Array.isArray(data) ? data : (data as { rows?: unknown[] })?.rows || [];
+    const keys = new Set<string>();
+    for (const row of rows) {
+        if (!row || typeof row !== "object") continue;
+        const migration = row as { version?: unknown; name?: unknown };
+        if (migration.version != null) keys.add(String(migration.version));
+        if (migration.name != null) keys.add(String(migration.name));
+    }
+    return keys;
+}
+
 export function registerDatabaseTools(
     server: { tool: (...args: any[]) => void },
     http: HttpTransport,
@@ -215,18 +233,36 @@ Actions: ${allActions.join(", ")}${readOnly ? " (read-only mode)" : ""}`,
                         break;
                     }
 
+                    const migrationFiles = files.map((file, i) => ({
+                        file,
+                        name: basename(file, ".sql"),
+                        version: migrationVersionFromFilename(file, i),
+                    }));
+
                     if (args.dry_run) {
-                        text = [`Found ${files.length} migration file(s) in ${dir}:`, ...files.map((file) => `  - ${file}`)].join("\n");
+                        const r = await http.get(`/v1/projects/${ref}/database/migrations`);
+                        if (!r.ok) {
+                            text = `❌ Failed to load applied migrations (${r.status}): ${JSON.stringify(r.data)}`;
+                            break;
+                        }
+                        const appliedKeys = appliedMigrationKeys(r.data);
+                        const pending = migrationFiles.filter(({ name, version }) => !appliedKeys.has(name) && !appliedKeys.has(String(version)));
+                        const alreadyApplied = migrationFiles.filter(({ name, version }) => appliedKeys.has(name) || appliedKeys.has(String(version)));
+                        text = [
+                            `Migration dry run for ${dir}`,
+                            `Total: ${migrationFiles.length}`,
+                            `Pending: ${pending.length}`,
+                            `Already applied: ${alreadyApplied.length}`,
+                            ...(pending.length ? ["", "Would apply:", ...pending.map(({ file, version }) => `  - ${file} (${version})`)] : []),
+                            ...(alreadyApplied.length ? ["", "Already applied:", ...alreadyApplied.map(({ file, version }) => `  - ${file} (${version})`)] : []),
+                        ].join("\n");
                         break;
                     }
 
                     const applied: string[] = [];
                     const skipped: string[] = [];
-                    for (let i = 0; i < files.length; i++) {
-                        const file = files[i];
-                        const name = basename(file, ".sql");
+                    for (const { file, name, version } of migrationFiles) {
                         const sql = readFileSync(join(dir, file), "utf-8");
-                        const version = Date.now() * 1000 + i;
                         const r = await http.post(`/v1/projects/${ref}/database/migrations`, { name, sql, version });
                         if (r.ok) {
                             applied.push(file);
