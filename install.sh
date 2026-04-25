@@ -168,7 +168,7 @@ EOF
         if [[ ${#IPS[@]} -eq 0 ]]; then
             log_warn "Could not automatically detect IP address"
             while [[ -z "$INTERNAL_IP" || "$INTERNAL_IP" == "10.6.0.9" ]]; do
-                read -p "Please enter server internal IP: " INTERNAL_IP
+                read -r -p "Please enter server internal IP: " INTERNAL_IP
             done
         elif [[ ${#IPS[@]} -eq 1 ]]; then
             INTERNAL_IP="${IPS[0]}"
@@ -185,7 +185,7 @@ EOF
                 log_info "Non-interactive mode, automatically selecting first IP: $INTERNAL_IP"
             else
                 while true; do
-                    read -p "Please enter selection (1-${#IPS[@]}) or enter IP directly: " selection
+                    read -r -p "Please enter selection (1-${#IPS[@]}) or enter IP directly: " selection
                     if [[ "$selection" =~ ^[0-9]+$ ]] && (( selection >= 1 && selection <= ${#IPS[@]} )); then
                         INTERNAL_IP="${IPS[$((selection-1))]}"
                         break
@@ -212,7 +212,7 @@ EOF
         if [ -t 0 ]; then
             log_warn "API/Public domain not configured (SUPABASE_PUBLIC_DOMAIN)"
             while [[ -z "$SUPABASE_PUBLIC_DOMAIN" || "$SUPABASE_PUBLIC_DOMAIN" == "supa.example.com" ]]; do
-                read -p "Please enter Supabase API domain [leave empty for api.${INTERNAL_IP}.nip.io]: " INPUT_DOMAIN
+                read -r -p "Please enter Supabase API domain [leave empty for api.${INTERNAL_IP}.nip.io]: " INPUT_DOMAIN
                 if [[ -z "$INPUT_DOMAIN" ]]; then
                     SUPABASE_PUBLIC_DOMAIN="api.${INTERNAL_IP}.nip.io"
                 else
@@ -237,7 +237,7 @@ EOF
         
         if [ -t 0 ]; then
             log_info "Configure Studio domain (optional)"
-            read -p "Please enter Studio domain [default is $DEFAULT_STUDIO_DOMAIN]: " INPUT_STUDIO_DOMAIN
+            read -r -p "Please enter Studio domain [default is $DEFAULT_STUDIO_DOMAIN]: " INPUT_STUDIO_DOMAIN
             
             if [[ -n "$INPUT_STUDIO_DOMAIN" ]]; then
                 SUPABASE_STUDIO_DOMAIN="$INPUT_STUDIO_DOMAIN"
