@@ -268,33 +268,21 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
             const projectDb = getProjectDb(dbName);
 
             try {
-                const migrationTableExists = await projectDb`
-                    SELECT EXISTS (
-                        SELECT FROM information_schema.tables
-                        WHERE table_schema IN ('public', 'supabase_migrations')
-                        AND table_name = 'schema_migrations'
-                    ) AS exists
+                await projectDb.unsafe(`CREATE SCHEMA IF NOT EXISTS supabase_migrations`);
+                await projectDb`
+                    CREATE TABLE IF NOT EXISTS supabase_migrations.schema_migrations (
+                        version BIGINT PRIMARY KEY,
+                        statements TEXT[],
+                        name TEXT
+                    )
                 `;
-
-                const tableExists = (migrationTableExists as Array<{ exists: boolean }>)[0]?.exists ?? false;
-
-                if (!tableExists) {
-                    await projectDb.unsafe(`CREATE SCHEMA IF NOT EXISTS supabase_migrations`);
-                    await projectDb`
-                        CREATE TABLE IF NOT EXISTS supabase_migrations.schema_migrations (
-                            version BIGINT PRIMARY KEY,
-                            statements TEXT[],
-                            name TEXT
-                        )
-                    `;
-                    await projectDb`
-                        CREATE TABLE IF NOT EXISTS public.schema_migrations (
-                            version VARCHAR(255) PRIMARY KEY,
-                            statements TEXT[],
-                            name TEXT
-                        )
-                    `;
-                }
+                await projectDb`
+                    CREATE TABLE IF NOT EXISTS public.schema_migrations (
+                        version VARCHAR(255) PRIMARY KEY,
+                        statements TEXT[],
+                        name TEXT
+                    )
+                `;
 
                 const isCliFormat = 'query' in body && typeof (body as Record<string, unknown>).query === 'string';
                 const isStructuredFormat = ('name' in body && 'sql' in body) || ('name' in body && 'statements' in body);
@@ -363,8 +351,10 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
                 return { message: "Body must contain {query} or {name, sql}", code: "400", status: 400 };
             } catch (error: unknown) {
                 set.status = 500;
+                const detail = error instanceof Error ? error.message : String(error);
                 return {
                     message: "Migration failed",
+                    detail,
                     code: "500",
                     status: 500,
                 };
