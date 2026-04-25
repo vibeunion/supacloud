@@ -2,6 +2,8 @@
  * Database — Compound tool (18→1)
  * SQL execution, schema introspection, RLS, migrations, stats
  */
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { basename, join } from "node:path";
 import { z } from "zod";
 import type { HttpTransport } from "../transports/http";
 
@@ -40,7 +42,7 @@ export function registerDatabaseTools(
         "connections", "stats", "slow_queries",
         "list_migrations", "project_url", "generate_types",
     ] as const;
-    const writeActions = ["apply_migration", "create_table_rls"] as const;
+    const writeActions = ["apply_migration", "push_migrations", "create_table_rls"] as const;
     const allActions = readOnly ? actions : [...actions, ...writeActions];
 
     server.tool(
@@ -53,6 +55,8 @@ Actions: ${allActions.join(", ")}${readOnly ? " (read-only mode)" : ""}`,
             // query
             sql: z.string().optional().describe("[query/apply_migration] SQL statement"),
             file: z.string().optional().describe("[query/apply_migration] Read SQL from local file path (avoids shell escaping issues with $$ and multi-statement DDL)"),
+            dir: z.string().optional().describe("[push_migrations] Directory containing .sql migration files (default: supabase/migrations)"),
+            dry_run: z.boolean().optional().describe("[push_migrations] List pending migration files without applying them"),
             // schema
             schema: z.string().optional().describe("[*] Schema name (default: public)"),
             table: z.string().optional().describe("[describe_columns/indexes/constraints/rls_*] Table name"),
@@ -74,7 +78,7 @@ Actions: ${allActions.join(", ")}${readOnly ? " (read-only mode)" : ""}`,
             // Resolve SQL from --file if provided (avoids shell $$ and ; escaping)
             if (args.file && !args.sql) {
                 try {
-                    args.sql = require("fs").readFileSync(args.file, "utf-8");
+                    args.sql = readFileSync(args.file, "utf-8");
                 } catch (e: any) {
                     return { content: [{ type: "text" as const, text: `❌ Failed to read file ${args.file}: ${e.message}` }] };
                 }
@@ -194,6 +198,59 @@ Actions: ${allActions.join(", ")}${readOnly ? " (read-only mode)" : ""}`,
                     if (!args.name || !args.sql) throw new Error("'name' and 'sql' required");
                     const r = await http.post(`/v1/projects/${ref}/database/migrations`, { name: args.name, sql: args.sql });
                     text = r.ok ? `✅ Migration '${args.name}' applied` : `❌ Failed (${r.status}): ${JSON.stringify(r.data)}`;
+                    break;
+                }
+                case "push_migrations": {
+                    const dir = args.dir || "supabase/migrations";
+                    if (!existsSync(dir) || !statSync(dir).isDirectory()) {
+                        throw new Error(`Migration directory not found: ${dir}`);
+                    }
+
+                    const files = readdirSync(dir)
+                        .filter((file) => file.endsWith(".sql"))
+                        .sort();
+
+                    if (!files.length) {
+                        text = `No .sql migration files found in ${dir}`;
+                        break;
+                    }
+
+                    if (args.dry_run) {
+                        text = [`Found ${files.length} migration file(s) in ${dir}:`, ...files.map((file) => `  - ${file}`)].join("\n");
+                        break;
+                    }
+
+                    const applied: string[] = [];
+                    const skipped: string[] = [];
+                    for (let i = 0; i < files.length; i++) {
+                        const file = files[i];
+                        const name = basename(file, ".sql");
+                        const sql = readFileSync(join(dir, file), "utf-8");
+                        const version = Date.now() * 1000 + i;
+                        const r = await http.post(`/v1/projects/${ref}/database/migrations`, { name, sql, version });
+                        if (r.ok) {
+                            applied.push(file);
+                        } else if (r.status === 409) {
+                            skipped.push(file);
+                        } else {
+                            text = [
+                                `❌ Failed to apply ${file} (${r.status})`,
+                                JSON.stringify(r.data, null, 2),
+                                "",
+                                `Applied before failure: ${applied.length}`,
+                                `Skipped before failure: ${skipped.length}`,
+                            ].join("\n");
+                            return { content: [{ type: "text" as const, text }] };
+                        }
+                    }
+
+                    text = [
+                        `✅ Migration push completed for ${dir}`,
+                        `Applied: ${applied.length}`,
+                        `Skipped: ${skipped.length}`,
+                        ...(applied.length ? ["", "Applied files:", ...applied.map((file) => `  - ${file}`)] : []),
+                        ...(skipped.length ? ["", "Skipped files:", ...skipped.map((file) => `  - ${file}`)] : []),
+                    ].join("\n");
                     break;
                 }
                 case "create_table_rls": {
