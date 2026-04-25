@@ -17,6 +17,16 @@ type ToolMap = Record<string, ToolEntry>;
 const projectActionSchema = z.enum(["get", "health", "logs", "api_keys", "settings", "tasks"]);
 const genericActionSchema = z.string();
 
+function unwrapMcpSchema(schema: any): any {
+    if (schema && typeof schema === "object" && !Array.isArray(schema) && "args" in schema) {
+        const argsSchema = schema.args;
+        if (argsSchema && typeof argsSchema === "object" && !Array.isArray(argsSchema)) {
+            return argsSchema;
+        }
+    }
+    return schema;
+}
+
 function captureTools(register: (server: { tool: (...args: any[]) => void }) => void): ToolMap {
     const tools: ToolMap = {};
     const server = {
@@ -24,7 +34,7 @@ function captureTools(register: (server: { tool: (...args: any[]) => void }) => 
             if (typeof schemaOrCallback === "function") {
                 tools[name] = { schema: {}, callback: schemaOrCallback };
             } else {
-                tools[name] = { schema: schemaOrCallback, callback };
+                tools[name] = { schema: unwrapMcpSchema(schemaOrCallback), callback };
             }
         },
     };
@@ -182,10 +192,11 @@ function createCliTools(): ToolMap {
     assign(captureTools((server) => registerUserProjectCliTools(server as any, http, {
         projectRef: context.projectRef || undefined,
     })));
-    assign(captureTools((server) => registerDatabaseTools(server as any, http, {
+    const databaseTools = captureTools((server) => registerDatabaseTools(server as any, http, {
         projectRef: context.projectRef || undefined,
         readOnly: context.readOnly,
-    })));
+    }));
+    assign(databaseTools);
     assign(captureTools((server) => registerAuthTools(server as any, http)));
     assign(captureTools((server) => registerStorageTools(server as any, http)));
     assign(captureTools((server) => registerAdvancedTools(server as any, http)));
