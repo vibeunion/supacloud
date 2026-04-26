@@ -76,6 +76,7 @@ EXAMPLES
   supacloud frontend list --ref abc123
   supacloud database query --sql "select now()"
   supacloud edge_functions deploy --ref abc123 --slug hello --path ./supabase/functions/hello
+  supacloud edge_functions config --ref abc123 --slug hello --verify_jwt false --background_routes "/queue/*,/render/*"
 
 SEPARATE ADMIN CLI
 
