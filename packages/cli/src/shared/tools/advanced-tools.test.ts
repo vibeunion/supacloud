@@ -31,6 +31,31 @@ describe("edge_functions CLI tool", () => {
         expect(parsed.background_routes).toEqual(["/queue/*", "/render/*"]);
     });
 
+    test("parses background routes from JSON array input", () => {
+        const { schema } = captureEdgeFunctionsTool({});
+        const parsed = z.object(schema as any).parse({
+            action: "config",
+            ref: "proj",
+            slug: "render",
+            background_routes: '["/queue/*","/render/*"]',
+        });
+
+        expect(parsed.background_routes).toEqual(["/queue/*", "/render/*"]);
+    });
+
+    test("returns a friendly error for invalid background route JSON", () => {
+        const { schema } = captureEdgeFunctionsTool({});
+        const result = z.object(schema as any).safeParse({
+            action: "config",
+            ref: "proj",
+            slug: "render",
+            background_routes: "[invalid",
+        });
+
+        expect(result.success).toBe(false);
+        expect(result.error?.issues[0]?.message).toContain("Invalid background_routes JSON array");
+    });
+
     test("updates Edge Function config through the management API", async () => {
         const calls: Array<{ path: string; body: unknown }> = [];
         const { callback } = captureEdgeFunctionsTool({

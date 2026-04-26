@@ -51,9 +51,24 @@ const backgroundRoutesSchema = z.preprocess((value) => {
     if (typeof value !== "string") return value;
     const trimmed = value.trim();
     if (!trimmed) return [];
-    if (trimmed.startsWith("[")) return JSON.parse(trimmed);
-    return trimmed.split(",").map((route) => route.trim()).filter(Boolean);
-}, z.array(z.string()).optional());
+    if (!trimmed.startsWith("[")) return trimmed.split(",").map((route) => route.trim()).filter(Boolean);
+    try {
+        return JSON.parse(trimmed);
+    } catch {
+        return [trimmed];
+    }
+}, z.array(z.string()).optional().superRefine((routes, ctx) => {
+    if (!routes) return;
+    for (const route of routes) {
+        if (route.trim().startsWith("[")) {
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                message: "Invalid background_routes JSON array. Use a valid JSON array or comma-separated routes like /queue/*,/render/*.",
+            });
+            return;
+        }
+    }
+}));
 
 type EdgeFunctionConfigInput = {
     verify_jwt?: boolean;
