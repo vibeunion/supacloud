@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.0](https://github.com/zuohuadong/supacloud/compare/cli-v0.1.2...cli-v0.2.0) (2026-04-26)
+
+
+### 🚀 Features
+
+* **cli:** configure edge function runtime flags ([fa0be85](https://github.com/zuohuadong/supacloud/commit/fa0be85be7843425868cc9f991813650a33b2b34))
+* configure edge function runtime flags from CLI ([4992d8d](https://github.com/zuohuadong/supacloud/commit/4992d8d363f83b32db5fd4d7f93934f6d3273b9c))
+
 ## [0.1.2](https://github.com/zuohuadong/supacloud/compare/cli-v0.1.1...cli-v0.1.2) (2026-04-25)
 
 
