@@ -47,29 +47,62 @@ function resolveEntrypoint(pathArg: string): string {
     return entrypoint;
 }
 
+const backgroundRoutesSchema = z.preprocess((value) => {
+    if (typeof value !== "string") return value;
+    const trimmed = value.trim();
+    if (!trimmed) return [];
+    if (trimmed.startsWith("[")) return JSON.parse(trimmed);
+    return trimmed.split(",").map((route) => route.trim()).filter(Boolean);
+}, z.array(z.string()).optional());
+
+type EdgeFunctionConfigInput = {
+    verify_jwt?: boolean;
+    background_routes?: string[];
+};
+
 export function registerAdvancedTools(server: { tool: (...args: any[]) => void }, http: HttpTransport): void {
 
     // ═══ Edge Functions (5→1) ═══
     server.tool(
         "edge_functions",
         `Edge Function management (Deno/Bun serverless). Server auto-bundles dependencies.
-Actions: list, deploy, deploy_bundle, source, delete, check`,
+Actions: list, deploy, deploy_bundle, config, source, delete, check`,
         {
-            action: z.enum(["list", "deploy", "deploy_bundle", "source", "delete", "check"]).describe("Action"),
+            action: z.enum(["list", "deploy", "deploy_bundle", "config", "source", "delete", "check"]).describe("Action"),
             ref: z.string().describe("Project ref"),
-            slug: z.string().optional().describe("[deploy/deploy_bundle/source/delete/check] Function name"),
+            slug: z.string().optional().describe("[deploy/deploy_bundle/config/source/delete/check] Function name"),
             code: z.string().optional().describe("[deploy/check] Function source code (TypeScript)"),
             path: z.string().optional().describe("[deploy/check] Local file path to read code from (alternative to code)"),
             files: z.record(z.string()).optional().describe("[deploy_bundle] File map: { 'index.ts': '...', '_shared/x.ts': '...' }"),
             entrypoint: z.string().optional().describe("[deploy_bundle] Entrypoint file (default: index.ts)"),
             minify: z.boolean().optional().describe("[deploy/deploy_bundle] Minify bundle"),
+            verify_jwt: z.boolean().optional().describe("[deploy/deploy_bundle/config] Set JWT verification for this function"),
+            background_routes: backgroundRoutesSchema.describe("[deploy/deploy_bundle/config] Background route paths; pass comma-separated or JSON array in CLI"),
         },
         async (args: any) => {
-            const { action, ref, slug, path: pathArg, files, entrypoint, minify } = args;
+            const { action, ref, slug, path: pathArg, files, entrypoint, minify, verify_jwt, background_routes } = args;
             let code = args.code as string | undefined;
             const need = (f: string, v: any) => { if (!v) throw new Error(`'${f}' required for '${action}'`); };
 
             let text: string;
+
+            const functionConfig = (): EdgeFunctionConfigInput => ({
+                ...(typeof verify_jwt === "boolean" ? { verify_jwt } : {}),
+                ...(Array.isArray(background_routes) ? { background_routes } : {}),
+            });
+
+            const hasFunctionConfig = () => Object.keys(functionConfig()).length > 0;
+
+            const updateFunctionConfig = async (): Promise<string> => {
+                need("slug", slug);
+                if (!hasFunctionConfig()) {
+                    throw new Error("'verify_jwt' or 'background_routes' required for 'config'");
+                }
+                const cr = await http.patch(`/v1/projects/${ref}/functions/${slug}/config`, functionConfig());
+                return cr.ok
+                    ? `✅ Function ${slug} config updated\n${JSON.stringify(cr.data, null, 2)}`
+                    : `❌ Config update failed (${cr.status}): ${JSON.stringify(cr.data)}`;
+            };
 
             const checkSyntax = async (sourceCode: string): Promise<{ ok: boolean; err?: string }> => {
                 const tmpDir = mkdtempSync(join(tmpdir(), "supacloud-edge-check-"));
@@ -114,12 +147,27 @@ Actions: list, deploy, deploy_bundle, source, delete, check`,
                         break;
                     }
                     const dr = await http.post(`/v1/projects/${ref}/functions/${slug}`, { code, minify });
-                    text = dr.ok ? `✅ Function ${slug} deployed` : `❌ Failed (${dr.status}): ${JSON.stringify(dr.data)}`;
+                    if (!dr.ok) {
+                        text = `❌ Failed (${dr.status}): ${JSON.stringify(dr.data)}`;
+                        break;
+                    }
+                    text = hasFunctionConfig()
+                        ? `✅ Function ${slug} deployed\n${await updateFunctionConfig()}`
+                        : `✅ Function ${slug} deployed`;
                     break;
                 case "deploy_bundle":
                     need("slug", slug); need("files", files);
                     const br = await http.post(`/v1/projects/${ref}/functions/${slug}/bundle`, { files, entrypoint, minify });
-                    text = br.ok ? `✅ Function ${slug} bundle deployed (${Object.keys(files!).length} files)` : `❌ Failed (${br.status}): ${JSON.stringify(br.data)}`;
+                    if (!br.ok) {
+                        text = `❌ Failed (${br.status}): ${JSON.stringify(br.data)}`;
+                        break;
+                    }
+                    text = hasFunctionConfig()
+                        ? `✅ Function ${slug} bundle deployed (${Object.keys(files!).length} files)\n${await updateFunctionConfig()}`
+                        : `✅ Function ${slug} bundle deployed (${Object.keys(files!).length} files)`;
+                    break;
+                case "config":
+                    text = await updateFunctionConfig();
                     break;
                 case "source":
                     need("slug", slug);
