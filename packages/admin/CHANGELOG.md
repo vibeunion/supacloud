@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.2](https://github.com/zuohuadong/supacloud/compare/admin-v0.1.1...admin-v0.1.2) (2026-04-27)
+
+
+### 🐛 Bug Fixes
+
+* make production upgrades binary-first ([08e9046](https://github.com/zuohuadong/supacloud/commit/08e9046aa2f91def72b2a8796aa1aeb719240f66))
+* support github proxies for binary upgrades ([598269c](https://github.com/zuohuadong/supacloud/commit/598269c26e9a04ea1c7c5dd543c13206c58e5f9d))
+
 ## [0.1.1](https://github.com/zuohuadong/supacloud/compare/admin-v0.1.0...admin-v0.1.1) (2026-04-19)
 
 
