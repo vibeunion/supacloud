@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.11.5](https://github.com/zuohuadong/supacloud/compare/management-api-v0.11.4...management-api-v0.11.5) (2026-04-27)
+
+
+### 🐛 Bug Fixes
+
+* make production upgrades binary-first ([08e9046](https://github.com/zuohuadong/supacloud/commit/08e9046aa2f91def72b2a8796aa1aeb719240f66))
+* support github proxies for binary upgrades ([598269c](https://github.com/zuohuadong/supacloud/commit/598269c26e9a04ea1c7c5dd543c13206c58e5f9d))
+
 ## [0.11.4](https://github.com/zuohuadong/supacloud/compare/management-api-v0.11.3...management-api-v0.11.4) (2026-04-25)
 
 
