@@ -15,6 +15,9 @@ export const DEFAULT_CORS_HEADERS = [
     "apikey", "x-client-info", "x-project-ref", "X-Api-Version", "x-supabase-api-version",
     "Prefer", "Content-Profile", "accept-profile", "Range", "Range-Unit",
     "x-upsert", "Cache-Control", "x-retry-count", "x-metadata",
+    "x-supacloud-async", "x-supacloud-timeout", "x-supacloud-retries",
+    "x-supacloud-idempotency-key", "x-supacloud-function-version",
+    "x-supacloud-trace-id",
 ];
 export const DEFAULT_CORS_EXPOSED = [
     "Content-Length", "Content-Range", "X-Content-Range", "X-JSON",
