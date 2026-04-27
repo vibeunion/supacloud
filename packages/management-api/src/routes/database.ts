@@ -72,6 +72,15 @@ export async function ensureMigrationTables(dbName: string, projectDb: ReturnTyp
   ensuredMigrationTables.add(dbName);
 }
 
+export async function ensureTasksRealtimePublication(projectDb: ReturnType<typeof getProjectDb>): Promise<void> {
+  try {
+    await projectDb`SELECT realtime.ensure_tasks_publication()`;
+  } catch {
+    // Older tenants may not have the helper yet, and some deployments run without
+    // logical Realtime enabled. Migrations must remain authoritative even then.
+  }
+}
+
 export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" })
     .get(
         "/tables",
@@ -349,6 +358,8 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
                         return { message: "Migration already applied", code: "409", version };
                     }
 
+                    await ensureTasksRealtimePublication(projectDb);
+
                     return { version, statements };
                 }
 
@@ -379,6 +390,8 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
                         set.status = 409;
                         return { message: "Migration already applied", code: "409", name };
                     }
+
+                    await ensureTasksRealtimePublication(projectDb);
 
                     return { version, name };
                 }
