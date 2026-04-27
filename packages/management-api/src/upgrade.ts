@@ -10,6 +10,10 @@ const BIN_TARGET = "/usr/local/bin/supacloud";
 const MANAGEMENT_ENV_FILE = "/etc/supabase/management-api.env";
 const LEGACY_CONFIG_FILE = "/opt/supacloud/config.env";
 const DEFAULT_GITHUB_PROXY = "https://ghproxy.net/";
+const WEB_CONSOLE_ASSET = "web-console-build.tar.gz";
+const WEB_CONSOLE_ROOT = "/opt/supacloud/web-console";
+const WEB_CONSOLE_RELEASES_DIR = `${WEB_CONSOLE_ROOT}/releases`;
+const WEB_CONSOLE_CURRENT_LINK = `${WEB_CONSOLE_ROOT}/current`;
 
 type GithubEndpoint = {
     label: string;
@@ -178,6 +182,52 @@ async function installBinary(downloadUrl: string, binaryName: string, preferredE
     }
 }
 
+async function downloadAsset(downloadUrl: string, localPath: string, preferredEndpoint: GithubEndpoint, forceYes?: boolean) {
+    let lastError = "";
+    let endpoints = buildGithubEndpoints(preferredEndpoint.proxyPrefix || undefined);
+
+    while (true) {
+        for (const endpoint of endpoints) {
+            const requestUrl = withGithubProxy(downloadUrl, endpoint);
+            const result = await $`curl -fsSL ${requestUrl} -o ${localPath}`.nothrow().quiet();
+            if (result.exitCode === 0) return endpoint;
+            lastError = `${endpoint.label}: ${result.stderr.toString().trim() || `curl exited ${result.exitCode}`}`;
+        }
+
+        if (forceYes) {
+            throw new Error(`Unable to download asset. Last error: ${lastError}`);
+        }
+
+        const customProxy = await promptForGithubProxy(lastError);
+        endpoints = buildGithubEndpoints(customProxy);
+    }
+}
+
+async function installWebConsoleBuild(downloadUrl: string, version: string, preferredEndpoint: GithubEndpoint, forceYes?: boolean) {
+    const safeVersion = version.replace(/[^a-zA-Z0-9._-]/g, "_");
+    const archivePath = path.join(os.tmpdir(), `${WEB_CONSOLE_ASSET}-${Date.now()}`);
+    const releaseDir = path.join(WEB_CONSOLE_RELEASES_DIR, safeVersion);
+    const stagingDir = `${releaseDir}.tmp-${process.pid}`;
+
+    const endpoint = await downloadAsset(downloadUrl, archivePath, preferredEndpoint, forceYes);
+
+    await $`rm -rf ${stagingDir}`.nothrow().quiet();
+    await $`mkdir -p ${stagingDir} ${WEB_CONSOLE_RELEASES_DIR}`;
+    const extract = await $`tar -xzf ${archivePath} -C ${stagingDir}`.nothrow().quiet();
+    await $`rm -f ${archivePath}`.nothrow().quiet();
+    if (extract.exitCode !== 0) {
+        throw new Error(`Failed to extract ${WEB_CONSOLE_ASSET}: ${extract.stderr.toString().slice(-500)}`);
+    }
+    if (!existsSync(path.join(stagingDir, "index.html"))) {
+        throw new Error(`${WEB_CONSOLE_ASSET} is invalid: index.html not found at archive root`);
+    }
+
+    await $`rm -rf ${releaseDir}`.nothrow().quiet();
+    await $`mv ${stagingDir} ${releaseDir}`;
+    await $`ln -sfn ${releaseDir} ${WEB_CONSOLE_CURRENT_LINK}`;
+    return endpoint;
+}
+
 async function runInitDb(env: Record<string, string | undefined>) {
     const proc = Bun.spawn([BIN_TARGET, "--init-db"], {
         stdout: "inherit",
@@ -240,6 +290,12 @@ export async function runUpgrade(options: { forceYes?: boolean; targetVersion?: 
         const releaseUrl = typeof releaseAsset?.browser_download_url === "string"
             ? releaseAsset.browser_download_url
             : null;
+        const webConsoleAsset = Array.isArray(data.assets)
+            ? data.assets.find((asset: Record<string, unknown>) => asset.name === WEB_CONSOLE_ASSET)
+            : null;
+        const webConsoleUrl = typeof webConsoleAsset?.browser_download_url === "string"
+            ? webConsoleAsset.browser_download_url
+            : null;
 
         if (!releaseUrl) {
             throw new Error(`Release ${remoteVersion} does not contain required asset: ${binaryName}`);
@@ -260,6 +316,14 @@ export async function runUpgrade(options: { forceYes?: boolean; targetVersion?: 
         s.start(`Downloading and installing ${binaryName}`);
         const downloadEndpoint = await installBinary(releaseUrl, binaryName, endpoint, options.forceYes);
 
+        let webConsoleEndpoint: GithubEndpoint | null = null;
+        if (webConsoleUrl) {
+            s.start(`Downloading and installing ${WEB_CONSOLE_ASSET}`);
+            webConsoleEndpoint = await installWebConsoleBuild(webConsoleUrl, remoteVersion, endpoint, options.forceYes);
+        } else {
+            p.log.warn(`${WEB_CONSOLE_ASSET} not found in ${remoteVersion}; keeping existing web console assets.`);
+        }
+
         const env = {
             ...process.env,
             ...(await readEnvFile(LEGACY_CONFIG_FILE)),
@@ -275,7 +339,7 @@ export async function runUpgrade(options: { forceYes?: boolean; targetVersion?: 
         s.start("Restarting SupaCloud services");
         await restartServices();
 
-        p.outro(`SupaCloud upgraded to ${remoteVersion} via ${binaryName} (${downloadEndpoint.label})`);
+        p.outro(`SupaCloud upgraded to ${remoteVersion} via ${binaryName} (${downloadEndpoint.label})${webConsoleEndpoint ? ` and ${WEB_CONSOLE_ASSET} (${webConsoleEndpoint.label})` : ""}`);
     } catch (error: unknown) {
         s.stop(`Upgrade failed: ${error instanceof Error ? error.message : String(error)}`);
         process.exit(1);
