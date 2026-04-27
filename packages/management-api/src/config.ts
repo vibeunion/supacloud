@@ -115,6 +115,8 @@ export interface Config {
   edgeRuntimeBackgroundInternal: string;
   edgeRuntimeMasterKey: string;
   bunPath: string;
+  sdkProxyTimeoutMs: number;
+  restProxyTimeoutMs: number;
 }
 
 function getEnv(key: string, defaultValue = ""): string {
@@ -230,6 +232,8 @@ export const config: Config = {
     ),
   ),
   bunPath: getEnv("BUN_PATH", "bun"),
+  sdkProxyTimeoutMs: Number(getEnv("SDK_PROXY_TIMEOUT_MS", "30000")),
+  restProxyTimeoutMs: Number(getEnv("REST_PROXY_TIMEOUT_MS", "300000")),
 };
 
 function validateConfig() {
@@ -238,6 +242,12 @@ function validateConfig() {
   }
   if (!Number.isFinite(config.maxRequestBodySize) || config.maxRequestBodySize <= 0) {
     throw new Error("Invalid MANAGEMENT_API_MAX_REQUEST_BODY_SIZE configuration. Must be a positive integer.");
+  }
+  if (!Number.isFinite(config.sdkProxyTimeoutMs) || config.sdkProxyTimeoutMs <= 0) {
+    throw new Error("Invalid SDK_PROXY_TIMEOUT_MS configuration. Must be a positive integer.");
+  }
+  if (!Number.isFinite(config.restProxyTimeoutMs) || config.restProxyTimeoutMs <= 0) {
+    throw new Error("Invalid REST_PROXY_TIMEOUT_MS configuration. Must be a positive integer.");
   }
 
   const isDevelopment = DEVELOPMENT_ENVS.has(config.nodeEnv) || process.env.BUN_ENV === "test" || config.isGithubActions;

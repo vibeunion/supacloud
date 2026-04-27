@@ -5,6 +5,7 @@ import * as dbModule from "../../src/db";
 import { projectService } from "../../src/services/project.service";
 import { edgeFunctionService } from "../../src/services/edge-function.service";
 import { backgroundTaskService } from "../../src/services/background-task.service";
+import { config } from "../../src/config";
 
 type FetchCall = {
   url: string;
@@ -284,6 +285,49 @@ describe("sdkProxyRoutes functions proxy", () => {
       expect(headers.get("x-forwarded-proto")).toBe("http");
       expect(headers.get("x-forwarded-for")).toBe("127.0.0.1");
       expect(headers.get("x-real-ip")).toBeNull();
+    });
+  });
+
+  test("rest proxy uses the REST timeout and reports upstream aborts as 504", async () => {
+    await withSdkProxyTestContext(async ({ trackSpy }) => {
+      const originalRestTimeout = config.restProxyTimeoutMs;
+      config.restProxyTimeoutMs = 1;
+
+      const sqlSpy = trackSpy(spyOn(dbModule, "sql"));
+      sqlSpy.mockImplementation(async (...args: unknown[]) => {
+        const text = String(args[0] ?? "");
+        if (text.includes("SELECT config")) {
+          return [{
+            config: {
+              postgrest_port: 7361,
+              gotrue_port: 8361,
+            },
+          }];
+        }
+        return [];
+      });
+
+      setSdkProxyFetchForTests(((input: string | URL | Request, init?: RequestInit & { duplex?: "half" }) => {
+        return new Promise<Response>((_, reject) => {
+          init?.signal?.addEventListener("abort", () => {
+            reject(new DOMException("aborted", "AbortError"));
+          }, { once: true });
+        });
+      }) as typeof fetch);
+
+      try {
+        const response = await request("/rest/v1/todos?select=*", {
+          method: "GET",
+          headers: {
+            "x-project-ref": "proj_1",
+          },
+        });
+
+        expect(response.status).toBe(504);
+        expect(await response.json()).toEqual({ message: "Upstream Proxy Timeout" });
+      } finally {
+        config.restProxyTimeoutMs = originalRestTimeout;
+      }
     });
   });
 });
