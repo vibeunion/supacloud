@@ -75,6 +75,8 @@ EXAMPLES
   supacloud project logs --log_type database
   supacloud frontend list --ref abc123
   supacloud database query --sql "select now()"
+  supacloud database query --ref abc123 --file ./queries/vector-search.sql
+  supacloud database push_migrations --ref abc123 --dir supabase/migrations --dry_run
   supacloud edge_functions deploy --ref abc123 --slug hello --path ./supabase/functions/hello
   supacloud edge_functions config --ref abc123 --slug hello --verify_jwt false --background_routes "/queue/*,/render/*"
 

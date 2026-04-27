@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test } from "bun:test";
-import { ensureMigrationTables, resetEnsuredMigrationTablesForTests, resolveMigrationStatements } from "../../src/routes/database";
+import { ensureMigrationTables, resetEnsuredMigrationTablesForTests, resolveMigrationStatements, sqlRouteResponse } from "../../src/routes/database";
 
 describe("database route helpers", () => {
   beforeEach(() => {
@@ -73,5 +73,24 @@ describe("database route helpers", () => {
 
     expect(calls.some((sql) => sql.includes("CREATE SCHEMA IF NOT EXISTS supabase_migrations"))).toBe(false);
     expect(calls.filter((sql) => sql.includes("CREATE TABLE IF NOT EXISTS")).length).toBe(1);
+  });
+
+  test("sqlRouteResponse keeps stable shape and legacy result field", () => {
+    const response = sqlRouteResponse({
+      rows: [{ ok: 1 }],
+      rowCount: 1,
+      command: "SELECT",
+      fields: ["ok"],
+      notices: [],
+    });
+
+    expect(response).toEqual({
+      rows: [{ ok: 1 }],
+      rowCount: 1,
+      command: "SELECT",
+      fields: ["ok"],
+      notices: [],
+      result: [{ ok: 1 }],
+    });
   });
 });

@@ -191,10 +191,44 @@ supacloud project get
 supacloud project logs --log_type database
 supacloud project tasks
 supacloud database query --sql "select now()"
+supacloud database query --ref <ref> --file ./queries/vector-search.sql
+supacloud database push_migrations --ref <ref> --dir supabase/migrations --dry_run
 supacloud auth list_providers --ref <ref>
 supacloud frontend list --ref <ref>
 supacloud edge_functions list --ref <ref>
 supacloud storage list_buckets --ref <ref>
+```
+
+For complex SQL, pgvector queries, and single-request transaction blocks, prefer `--file` instead of shell-escaped inline SQL.
+
+```sql
+BEGIN;
+INSERT INTO audit_events(message) VALUES ('started');
+INSERT INTO audit_events(message) VALUES ('finished');
+COMMIT;
+```
+
+SupaCloud supports transaction blocks inside one SQL request and wraps migrations in a transaction. It does not expose long-lived HTTP transaction sessions such as `/transaction/begin` and `/transaction/commit`; application-side long transactions should use the direct Postgres DSN with `pg`, `postgres.js`, or equivalent drivers.
+
+pgvector example:
+
+```sql
+CREATE EXTENSION IF NOT EXISTS vector;
+
+CREATE TABLE documents (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  content text NOT NULL,
+  embedding vector(1536)
+);
+
+CREATE INDEX documents_embedding_hnsw_idx
+ON documents
+USING hnsw (embedding vector_cosine_ops);
+
+SELECT id, content
+FROM documents
+ORDER BY embedding <=> '[0.1,0.2,0.3]'::vector
+LIMIT 5;
 ```
 
 `supacloud` intentionally does **not** own platform installation, upgrades, SSH diagnostics, tenant runtime management, or destructive project lifecycle commands.
@@ -658,10 +692,44 @@ supacloud project get
 supacloud project logs --log_type database
 supacloud project tasks
 supacloud database query --sql "select now()"
+supacloud database query --ref <ref> --file ./queries/vector-search.sql
+supacloud database push_migrations --ref <ref> --dir supabase/migrations --dry_run
 supacloud auth list_providers --ref <ref>
 supacloud frontend list --ref <ref>
 supacloud edge_functions list --ref <ref>
 supacloud storage list_buckets --ref <ref>
+```
+
+复杂 SQL、pgvector 查询、单请求事务块建议使用 `--file`，不要依赖 shell 字符串转义。
+
+```sql
+BEGIN;
+INSERT INTO audit_events(message) VALUES ('started');
+INSERT INTO audit_events(message) VALUES ('finished');
+COMMIT;
+```
+
+SupaCloud 支持单个 SQL 请求内的事务块，也会在 migration endpoint 内部使用事务；不建议提供 `/transaction/begin`、`/transaction/query`、`/transaction/commit` 这类长连接 HTTP 事务 API。应用侧长事务请使用 Postgres 直连 DSN 配合 `pg`、`postgres.js` 等驱动。
+
+pgvector 示例：
+
+```sql
+CREATE EXTENSION IF NOT EXISTS vector;
+
+CREATE TABLE documents (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  content text NOT NULL,
+  embedding vector(1536)
+);
+
+CREATE INDEX documents_embedding_hnsw_idx
+ON documents
+USING hnsw (embedding vector_cosine_ops);
+
+SELECT id, content
+FROM documents
+ORDER BY embedding <=> '[0.1,0.2,0.3]'::vector
+LIMIT 5;
 ```
 
 `supacloud` 有意不承载平台安装、升级、SSH 诊断、tenant runtime 管理，以及项目创建/删除/暂停这类平台级命令。
