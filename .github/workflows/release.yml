@@ -27,13 +27,13 @@ jobs:
         working-directory: packages/management-api
         run: bun install
 
-      - name: Build all platforms
+      - name: Build Linux primary binaries
         working-directory: packages/management-api
-        run: |
-          bun run build:amd64
-          bun run build:arm64
-          bun run build:macos-amd64
-          bun run build:macos-arm64
+        run: bun run build:linux
+
+      - name: Build macOS developer binaries
+        working-directory: packages/management-api
+        run: bun run build:macos
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
@@ -43,4 +43,10 @@ jobs:
             packages/management-api/supacloud-linux-arm64
             packages/management-api/supacloud-macos-amd64
             packages/management-api/supacloud-macos-arm64
+          body: |
+            Production installs and upgrades use the Linux binaries:
+            - supacloud-linux-amd64
+            - supacloud-linux-arm64
+
+            macOS binaries are published for local development and diagnostics only.
           generate_release_notes: true

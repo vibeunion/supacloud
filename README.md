@@ -140,6 +140,19 @@ sudo bash install.sh --ip 1.2.3.4 --domain api.example.com --s3 juicefs
 source /etc/profile.d/supacloud.sh
 ```
 
+**Production Upgrades**
+
+Production servers upgrade by replacing the released Linux binary at `/usr/local/bin/supacloud`; they do not need to `git pull` application source during normal upgrades.
+
+```bash
+sudo supacloud upgrade --yes
+```
+
+Published release assets:
+
+- `supacloud-linux-amd64` and `supacloud-linux-arm64` are the production install/upgrade binaries.
+- `supacloud-macos-amd64` and `supacloud-macos-arm64` are published for local development and diagnostics.
+
 **Docker Compose Self-Host (PostgreSQL 18)**
 
 ```bash
@@ -596,6 +609,19 @@ sudo bash install.sh --ip 1.2.3.4 --domain api.example.com --s3 juicefs
 # 3. 启用命令行工具
 source /etc/profile.d/supacloud.sh
 ```
+
+**生产环境升级**
+
+生产服务器升级时直接替换 `/usr/local/bin/supacloud` 中的 Linux Release 二进制文件，常规升级不需要在服务器上 `git pull` 源码。
+
+```bash
+sudo supacloud upgrade --yes
+```
+
+发布产物约定：
+
+- `supacloud-linux-amd64` 和 `supacloud-linux-arm64` 用于生产安装和升级。
+- `supacloud-macos-amd64` 和 `supacloud-macos-arm64` 仅用于本地开发、诊断和验证。
 
 **命令行参数详解:**
 | 参数 | 说明 | 示例 |
