@@ -53,6 +53,22 @@ function assertSafeReleaseTag(value: string): string {
     return value;
 }
 
+function assertSafeGithubProxy(value: string): string {
+    const trimmed = value.trim();
+    if (/[\s\n\r;&|`$<>]/.test(trimmed)) {
+        throw new Error("Invalid github_proxy");
+    }
+    if (trimmed.toLowerCase() === "direct" || trimmed.toLowerCase() === "none") {
+        return trimmed;
+    }
+
+    const parsed = new URL(trimmed);
+    if (!["http:", "https:"].includes(parsed.protocol)) {
+        throw new Error("Invalid github_proxy protocol");
+    }
+    return parsed.toString();
+}
+
 function getExecTimeoutMs(timeoutSeconds?: number): number {
     const seconds = timeoutSeconds || 60;
     if (!Number.isFinite(seconds) || seconds <= 0 || seconds > SAFE_TIMEOUT_SECONDS) {
@@ -95,6 +111,7 @@ Actions: ping, setup, install, upgrade, diagnose, exec, troubleshoot, container_
             edge_runtime: z.enum(["bun"]).optional().describe("[install] Runtime (default: bun)"),
             storage_type: z.enum(["juicefs", "garage", "rustfs", "minio", "external"]).optional().describe("[install] Storage backend"),
             version: z.string().optional().describe("[upgrade] Specific version"),
+            github_proxy: z.string().optional().describe("[upgrade] GitHub proxy prefix, e.g. https://ghproxy.net/ or direct"),
             focus: z.enum(["all", "containers", "database", "network", "disk", "logs"]).optional().describe("[troubleshoot] Focus area"),
             container: z.string().optional().describe("[container_logs] Container name"),
             lines: z.number().optional().describe("[container_logs] Number of log lines (default: 100)"),
@@ -169,12 +186,14 @@ Actions: ping, setup, install, upgrade, diagnose, exec, troubleshoot, container_
                     break;
                 }
                 case "upgrade": {
-                    const versionEnv = args.version
-                        ? `SUPACLOUD_UPGRADE_TAG=${assertSafeReleaseTag(args.version)} `
-                        : "";
+                    const envParts = [
+                        args.version ? `SUPACLOUD_UPGRADE_TAG=${assertSafeReleaseTag(args.version)}` : "",
+                        args.github_proxy ? `SUPACLOUD_GITHUB_PROXY=${assertSafeGithubProxy(args.github_proxy)}` : "",
+                    ].filter(Boolean);
+                    const envPrefix = envParts.length > 0 ? `${envParts.join(" ")} ` : "";
                     const cmd = "if [ ! -x /usr/local/bin/supacloud ]; then " +
                         "echo 'SupaCloud binary not found at /usr/local/bin/supacloud; run ssh install first.' >&2; exit 127; " +
-                        `fi; ${versionEnv}/usr/local/bin/supacloud upgrade --yes`;
+                        `fi; ${envPrefix}/usr/local/bin/supacloud upgrade --yes`;
                     const r = await ssh.exec(cmd, 600_000);
                     text = r.success ? `✅ Upgrade done\n${r.stdout.slice(-300)}` : `❌ Failed (exit ${r.code})\n${r.stderr.slice(-500)}`;
                     break;

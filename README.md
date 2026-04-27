@@ -148,6 +148,13 @@ Production servers upgrade by replacing the released Linux binary at `/usr/local
 sudo supacloud upgrade --yes
 ```
 
+The upgrade command tries `https://ghproxy.net/` before direct GitHub access, which is the recommended path for mainland China servers. Override it when needed:
+
+```bash
+sudo SUPACLOUD_GITHUB_PROXY=https://ghproxy.net/ supacloud upgrade --yes
+sudo SUPACLOUD_GITHUB_PROXY=direct supacloud upgrade --yes
+```
+
 Published release assets:
 
 - `supacloud-linux-amd64` and `supacloud-linux-arm64` are the production install/upgrade binaries.
@@ -616,6 +623,13 @@ source /etc/profile.d/supacloud.sh
 
 ```bash
 sudo supacloud upgrade --yes
+```
+
+升级命令会优先尝试 `https://ghproxy.net/`，然后再尝试直连 GitHub，适合国内服务器。代理失效时可以指定其它代理或强制直连：
+
+```bash
+sudo SUPACLOUD_GITHUB_PROXY=https://ghproxy.net/ supacloud upgrade --yes
+sudo SUPACLOUD_GITHUB_PROXY=direct supacloud upgrade --yes
 ```
 
 发布产物约定：
