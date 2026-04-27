@@ -10,21 +10,6 @@ export interface DatabaseToolsConfig {
     projectRef?: string;
 }
 
-function normalizeSqlResponse(result: Awaited<ReturnType<HttpTransport["post"]>>) {
-    if (!result.ok) return result;
-    const data = result.data as { rows?: unknown[]; result?: unknown[] };
-    if (Array.isArray(data?.result) && !Array.isArray(data.rows)) {
-        return {
-            ...result,
-            data: {
-                rows: data.result,
-                rowCount: data.result.length,
-            },
-        };
-    }
-    return result;
-}
-
 export function registerDatabaseTools(
     server: { tool: (...args: any[]) => void },
     http: HttpTransport,
@@ -80,7 +65,7 @@ Actions: ${allActions.join(", ")}${readOnly ? " (read-only mode)" : ""}`,
                 }
             }
 
-            const execSql = async (sql: string) => normalizeSqlResponse(await http.post(`/v1/projects/${ref}/database/sql`, { sql }));
+            const execSql = async (sql: string) => http.post(`/v1/projects/${ref}/database/sql`, { sql });
 
             let text: string;
             switch (action) {

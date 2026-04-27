@@ -75,7 +75,7 @@ describe("database route helpers", () => {
     expect(calls.filter((sql) => sql.includes("CREATE TABLE IF NOT EXISTS")).length).toBe(1);
   });
 
-  test("sqlRouteResponse keeps stable shape and legacy result field", () => {
+  test("sqlRouteResponse returns stable SQL shape without legacy aliases", () => {
     const response = sqlRouteResponse({
       rows: [{ ok: 1 }],
       rowCount: 1,
@@ -90,7 +90,6 @@ describe("database route helpers", () => {
       command: "SELECT",
       fields: ["ok"],
       notices: [],
-      result: [{ ok: 1 }],
     });
   });
 });
