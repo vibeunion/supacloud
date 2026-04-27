@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.2](https://github.com/zuohuadong/supacloud/compare/management-api-v0.12.1...management-api-v0.12.2) (2026-04-27)
+
+
+### 🐛 Bug Fixes
+
+* ship web console with binary upgrades ([c96e44a](https://github.com/zuohuadong/supacloud/commit/c96e44a17aa88948498cbdab7743c1d834a4ba8b))
+
 ## [0.12.1](https://github.com/zuohuadong/supacloud/compare/management-api-v0.12.0...management-api-v0.12.1) (2026-04-27)
 
 
