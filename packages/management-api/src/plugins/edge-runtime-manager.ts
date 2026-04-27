@@ -23,6 +23,28 @@ export class EdgeRuntimeManager {
     },
   ) {}
 
+  private async resolveRunnerPath(): Promise<string> {
+    const candidates = [
+      process.env.EDGE_RUNTIME_SERVER_PATH,
+      path.resolve(process.cwd(), "../edge-runtime/server.ts"),
+      path.resolve(process.cwd(), "packages/edge-runtime/server.ts"),
+      path.resolve(import.meta.dir, "../../../edge-runtime/server.ts"),
+      "/opt/supacloud/packages/edge-runtime/server.ts",
+      "/opt/supacloud/edge-runtime/server.ts",
+    ].filter((candidate): candidate is string => !!candidate);
+
+    for (const candidate of candidates) {
+      if (await Bun.file(candidate).exists()) {
+        return candidate;
+      }
+    }
+
+    throw new Error(
+      `Edge Runtime server.ts not found. Tried: ${candidates.join(", ")}. ` +
+      "Set EDGE_RUNTIME_SERVER_PATH or EDGE_RUNTIME_MODE=external.",
+    );
+  }
+
   /**
    * Kill any stale processes listening on our target port.
    * Prevents SO_REUSEPORT ghost processes from co-existing with the new runtime,
@@ -71,11 +93,10 @@ export class EdgeRuntimeManager {
   async start() {
     this.stopping = false;
 
+    const runnerPath = await this.resolveRunnerPath();
+
     // Kill any orphan processes on the port BEFORE spawning
     this.killStaleListeners();
-
-    // Determine runner path (cwd may be project root)
-    const runnerPath = path.resolve(import.meta.dir, "../../../edge-runtime/server.ts");
 
     this.proc = Bun.spawn(["bun", "run", runnerPath], {
       env: {
