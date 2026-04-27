@@ -134,6 +134,66 @@ describe("@supacloud/js", () => {
     expect((calls[0]?.init?.headers as Record<string, string>)?.authorization).toBe("Bearer token-123");
   });
 
+  test("queue client builds management-api requests with bearer auth", async () => {
+    const { supabase } = createFakeSupabase();
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+
+    globalThis.fetch = mock((input: string | URL | Request, init?: RequestInit) => {
+      const url =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : input.url;
+      calls.push({ url, init });
+      return Promise.resolve(
+        new Response(JSON.stringify({ id: "msg_123", status: "leased", payload: { hello: "world" } }), {
+          headers: { "content-type": "application/json" },
+        }),
+      );
+    }) as typeof fetch;
+
+    const client = createSupaCloudClient({
+      supabase: supabase as never,
+      managementApiUrl: "https://admin.example.com/",
+      projectRef: "proj_1",
+    });
+    const queue = client.queue("emails");
+
+    await queue.send({ hello: "world" }, { delayMs: 1000, maxAttempts: 5, idempotencyKey: "email-1" });
+    await queue.receive({ visibilityTimeoutSec: 60 });
+    await queue.list({ status: ["pending", "leased"], limit: 10 });
+    await queue.get("msg_123");
+    await queue.ack("msg_123", { ok: true });
+    await queue.release("msg_123", { delayMs: 5000, error: "retry later" });
+    await queue.fail("msg_123", { error: "boom" });
+    await queue.delete("msg_123");
+
+    expect(calls[0]?.url).toBe("https://admin.example.com/v1/projects/proj_1/tasks/queues/emails/messages");
+    expect(calls[1]?.url).toBe("https://admin.example.com/v1/projects/proj_1/tasks/queues/emails/messages/receive");
+    expect(calls[2]?.url).toBe("https://admin.example.com/v1/projects/proj_1/tasks/queues/emails/messages?status=pending%2Cleased&limit=10");
+    expect(calls[3]?.url).toBe("https://admin.example.com/v1/projects/proj_1/tasks/queues/emails/messages/msg_123");
+    expect(calls[4]?.url).toBe("https://admin.example.com/v1/projects/proj_1/tasks/queues/emails/messages/msg_123/ack");
+    expect(calls[5]?.url).toBe("https://admin.example.com/v1/projects/proj_1/tasks/queues/emails/messages/msg_123/release");
+    expect(calls[6]?.url).toBe("https://admin.example.com/v1/projects/proj_1/tasks/queues/emails/messages/msg_123/fail");
+    expect(calls[7]?.url).toBe("https://admin.example.com/v1/projects/proj_1/tasks/queues/emails/messages/msg_123");
+    expect(calls[7]?.init?.method).toBe("DELETE");
+    expect((calls[0]?.init?.headers as Record<string, string>)?.authorization).toBe("Bearer token-123");
+  });
+
+  test("queue receive returns null when no message is available", async () => {
+    const { supabase } = createFakeSupabase();
+    globalThis.fetch = mock(() => Promise.resolve(new Response(null, { status: 204 }))) as typeof fetch;
+
+    const client = createSupaCloudClient({
+      supabase: supabase as never,
+      managementApiUrl: "https://admin.example.com/",
+      projectRef: "proj_1",
+    });
+
+    await expect(client.queue("emails").receive()).resolves.toBeNull();
+  });
+
   test("wait polls until a terminal task status is reached", async () => {
     const { supabase } = createFakeSupabase();
     const client = createSupaCloudClient({
