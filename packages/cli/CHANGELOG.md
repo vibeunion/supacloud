@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/zuohuadong/supacloud/compare/cli-v0.3.0...cli-v0.3.1) (2026-04-27)
+
+
+### 🐛 Bug Fixes
+
+* **database:** consume sql rows response only ([75c3f68](https://github.com/zuohuadong/supacloud/commit/75c3f6818211cf326954cb75c530ef25e48b901b))
+
 ## [0.3.0](https://github.com/zuohuadong/supacloud/compare/cli-v0.2.0...cli-v0.3.0) (2026-04-27)
 
 
