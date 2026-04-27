@@ -22,6 +22,17 @@ export function resolveMigrationStatements(body: MigrationBody): string[] {
   return [];
 }
 
+export function sqlRouteResponse(result: Awaited<ReturnType<typeof db.executeQuery>>) {
+  return {
+    rows: result.rows,
+    rowCount: result.rowCount,
+    command: result.command,
+    fields: result.fields || [],
+    notices: result.notices || [],
+    result: result.rows,
+  };
+}
+
 const ensuredMigrationTables = new Set<string>();
 
 export function resetEnsuredMigrationTablesForTests(): void {
@@ -237,8 +248,7 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
             try {
                 const dbName = await resolveDbName(params.ref);
                 const result = await db.executeQuery(dbName, body.query);
-                const rows = (result as { rows?: unknown[] }).rows || result;
-                return { result: Array.isArray(rows) ? rows : [rows] };
+                return sqlRouteResponse(result);
             } catch (error: unknown) {
                 set.status = 400;
                 const pgErr = error as Record<string, unknown>;
@@ -247,6 +257,7 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
                     message: pgErr.message || "SQL execution failed",
                     details: pgErr.details || null,
                     hint: pgErr.hint || null,
+                    status: 400,
                 };
             }
         },
@@ -274,8 +285,7 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
                     return { message: "query or sql is required", code: "400", status: 400 };
                 }
                 const result = await db.executeQuery(dbName, sqlQuery);
-                const rows = (result as { rows?: unknown[] }).rows || result;
-                return { result: Array.isArray(rows) ? rows : [rows] };
+                return sqlRouteResponse(result);
             } catch (error: unknown) {
                 set.status = 400;
                 const pgErr = error as Record<string, unknown>;
@@ -284,6 +294,7 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
                     message: pgErr.message || "SQL execution failed",
                     details: pgErr.details || null,
                     hint: pgErr.hint || null,
+                    status: 400,
                 };
             }
         },

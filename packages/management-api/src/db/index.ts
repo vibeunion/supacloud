@@ -194,7 +194,44 @@ function isDangerousSQL(sqlQuery: string): boolean {
   return DANGEROUS_SQL_PATTERNS.some(pattern => pattern.test(normalized));
 }
 
-export async function executeQuery(dbName: string, sqlQuery: string): Promise<{ rows: unknown[]; rowCount: number; command: string }> {
+export type SqlExecutionResult = {
+  rows: unknown[];
+  rowCount: number;
+  command: string;
+  fields?: string[];
+  notices?: string[];
+};
+
+function inferSqlCommand(sqlQuery: string): string {
+  return sqlQuery.trim().split(/\s+/)[0]?.toUpperCase() || "SQL";
+}
+
+function normalizeSqlExecutionResult(sqlQuery: string, result: unknown): SqlExecutionResult {
+  const rows = Array.isArray(result) ? result as unknown[] : [];
+  const metadata = result as {
+    command?: unknown;
+    count?: unknown;
+    rowCount?: unknown;
+  };
+  const metadataRowCount = Number(metadata?.rowCount ?? metadata?.count);
+  const firstRow = rows[0];
+  const fields =
+    firstRow && typeof firstRow === "object" && !Array.isArray(firstRow)
+      ? Object.keys(firstRow as Record<string, unknown>)
+      : undefined;
+
+  return {
+    rows,
+    rowCount: Number.isFinite(metadataRowCount) ? metadataRowCount : rows.length,
+    command: typeof metadata?.command === "string" && metadata.command
+      ? metadata.command
+      : inferSqlCommand(sqlQuery),
+    ...(fields ? { fields } : {}),
+    notices: [],
+  };
+}
+
+export async function executeQuery(dbName: string, sqlQuery: string): Promise<SqlExecutionResult> {
   if (isDangerousSQL(sqlQuery)) {
     throw new PgError(
       "Query contains disallowed operation. DROP DATABASE, ALTER SYSTEM, file system access, and similar privileged operations are not permitted through this endpoint.",
@@ -205,11 +242,7 @@ export async function executeQuery(dbName: string, sqlQuery: string): Promise<{ 
   const projectDb = getProjectDb(dbName);
   try {
     const result = await projectDb.unsafe(sqlQuery);
-    return {
-      rows: result as unknown[],
-      rowCount: result.length,
-      command: ((result as unknown as Record<string, unknown>).command as string) || sqlQuery.trim().split(/\s+/)[0].toUpperCase(),
-    };
+    return normalizeSqlExecutionResult(sqlQuery, result);
   } catch (error: unknown) {
     const pgError = error as Record<string, unknown>;
     throw new PgError(

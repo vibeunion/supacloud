@@ -23,8 +23,68 @@ npx @supacloud/cli status
 npx @supacloud/cli project get
 npx @supacloud/cli project logs --log_type database
 npx @supacloud/cli database query --sql "select now()"
+npx @supacloud/cli database query --ref abc123 --file ./queries/vector-search.sql
+npx @supacloud/cli database push_migrations --ref abc123 --dir supabase/migrations --dry_run
 npx @supacloud/cli frontend list --ref abc123
 ```
+
+### Database SQL files
+
+For complex SQL, pgvector queries, and transaction blocks, prefer `--file`:
+
+```bash
+npx @supacloud/cli database query --ref abc123 --file ./queries/vector-search.sql
+```
+
+The Management API response shape is stable:
+
+```json
+{
+  "rows": [],
+  "rowCount": 0,
+  "command": "SELECT",
+  "fields": [],
+  "notices": []
+}
+```
+
+`result` is also returned as a compatibility alias for older callers.
+
+### pgvector example
+
+```sql
+CREATE EXTENSION IF NOT EXISTS vector;
+
+CREATE TABLE documents (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  content text NOT NULL,
+  embedding vector(1536)
+);
+
+CREATE INDEX documents_embedding_hnsw_idx
+ON documents
+USING hnsw (embedding vector_cosine_ops);
+
+SELECT id, content
+FROM documents
+ORDER BY embedding <=> '[0.1,0.2,0.3]'::vector
+LIMIT 5;
+```
+
+`push_migrations --dry_run` checks pending migration files and warns when pgvector usage is detected while the `vector` extension is not enabled.
+
+### Transaction boundary
+
+Supported:
+
+- Migration endpoint execution is transactional.
+- A single SQL request may contain its own transaction block: `BEGIN; ... COMMIT;`.
+
+Not supported:
+
+- Long-lived HTTP transaction APIs such as `/transaction/begin`, `/transaction/query`, and `/transaction/commit`.
+
+Use a direct Postgres DSN with `pg`, `postgres.js`, or equivalent drivers for application-side long transactions.
 
 ### Owned command areas
 
