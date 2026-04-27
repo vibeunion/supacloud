@@ -59,7 +59,7 @@
       });
       const data = await res.json();
       if (data.error) throw new Error(data.message || data.error);
-      const rows: ColumnPrivilege[] = Array.isArray(data) ? data : data.rows || [];
+      const rows: ColumnPrivilege[] = data.rows || [];
 
       const tableMap = new Map<string, Map<string, ColumnInfo>>();
       for (const row of rows) {

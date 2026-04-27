@@ -34,7 +34,7 @@
       });
       if (!res.ok) throw new Error("Failed to fetch stats");
       const data = await res.json();
-      const rows = Array.isArray(data) ? data : data.rows || [];
+      const rows = data.rows || [];
       
       let statsObj: ApiStat | null = null;
       if (rows.length > 0) {
@@ -60,7 +60,7 @@
       });
       if (!res2.ok) throw new Error("Failed to fetch active connections");
       const data2 = await res2.json();
-      const recentReqs: Record<string, unknown>[] = Array.isArray(data2) ? data2 : data2.rows || [];
+      const recentReqs: Record<string, unknown>[] = data2.rows || [];
 
       return { stats: statsObj, recentRequests: recentReqs };
     }

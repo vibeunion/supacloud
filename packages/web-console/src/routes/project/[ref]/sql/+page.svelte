@@ -194,7 +194,7 @@
       });
       const data = await res.json();
       if (data.error) throw new Error(data.message || data.error);
-      const rows = Array.isArray(data) ? data : data.rows || [];
+      const rows = data.rows || [];
       return { rows, command: data.command || null, rowCount: data.rowCount ?? rows.length };
     },
     onMutate: () => { isRunning = true; },

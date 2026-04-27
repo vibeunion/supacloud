@@ -45,7 +45,7 @@
         body: JSON.stringify({ sql })
       });
       const data = await res.json();
-      return Array.isArray(data) ? data : data.rows || [];
+      return data.rows || [];
     } catch { return []; }
   }
 
