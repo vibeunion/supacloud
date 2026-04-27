@@ -131,7 +131,7 @@ export class JuiceFSDriver implements StorageDriver {
     try {
       const filePath = this.getBasePath(projectRef, bucket, key);
       await fs.mkdir(path.dirname(filePath), { recursive: true });
-      await Bun.write(filePath, data as any);
+      await Bun.write(filePath, await toUint8Array(data));
       return true;
     } catch (e: unknown) {
       logger.error("JuiceFS uploadFile error:", {
