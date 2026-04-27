@@ -580,6 +580,17 @@ export async function registerAllRoutes() {
 
 const args = process.argv.slice(2);
 
+function readArgValue(...names: string[]) {
+  for (const name of names) {
+    const index = args.indexOf(name);
+    if (index >= 0 && index + 1 < args.length) {
+      const value = args[index + 1];
+      if (value && !value.startsWith("-")) return value;
+    }
+  }
+  return undefined;
+}
+
 /**
  * Auto-detect and stop orphan systemd services for deleted/missing projects.
  * Runs on startup to prevent resource waste from failed cleanup sagas.
@@ -656,8 +667,9 @@ async function bootstrap() {
   } else if (args.includes("upgrade") || args.includes("--upgrade")) {
     const { runUpgrade } = await import("./upgrade");
     const forceYes = args.includes("--yes") || args.includes("-y");
+    const targetVersion = readArgValue("--target-version", "--release", "--version");
     try {
-      await runUpgrade({ forceYes });
+      await runUpgrade({ forceYes, targetVersion });
       process.exit(0);
     } catch (err: unknown) {
       logger.error("Upgrade aborted:", {

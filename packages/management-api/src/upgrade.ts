@@ -5,71 +5,136 @@ import path from "node:path";
 import { existsSync } from "node:fs";
 import { logger } from "./utils/logger";
 
-const REPO_URL = "https://api.github.com/repos/zuohuadong/supacloud/releases/latest";
-const INSTALL_BASE_DIR = "/opt/supacloud";
+const RELEASES_API = "https://api.github.com/repos/zuohuadong/supacloud/releases";
+const BIN_TARGET = "/usr/local/bin/supacloud";
+const MANAGEMENT_ENV_FILE = "/etc/supabase/management-api.env";
+const LEGACY_CONFIG_FILE = "/opt/supacloud/config.env";
 
-function resolveInstallerPath() {
-    const candidates = [
-        path.join(process.cwd(), "install.sh"),
-        path.join(INSTALL_BASE_DIR, "install.sh")
-    ];
-    return candidates.find(candidate => existsSync(candidate)) || null;
-}
-
-function getConfigFilePath(installerPath: string) {
-    return path.join(path.dirname(installerPath), "config.env");
-}
-
-async function ensureInstallerAvailable(installerPath: string) {
-    await $`chmod +x ${installerPath}`.quiet();
-}
-
-async function readCurrentConfig(installerPath: string) {
-    const configFile = Bun.file(getConfigFilePath(installerPath));
-    if (!(await configFile.exists())) {
-        return null;
+function resolveLinuxBinaryName() {
+    if (os.platform() !== "linux") {
+        throw new Error("Production binary upgrades are supported on Linux only. Use macOS binaries for local diagnostics.");
     }
-    const text = await configFile.text();
+
+    const arch = os.arch();
+    if (arch === "arm64") return "supacloud-linux-arm64";
+    if (arch === "x64") return "supacloud-linux-amd64";
+    throw new Error(`Unsupported Linux architecture: ${arch}`);
+}
+
+function normalizeTag(tag: string) {
+    const trimmed = tag.trim();
+    if (!trimmed || trimmed === "latest") return "";
+    return trimmed.startsWith("v") ? trimmed : `v${trimmed}`;
+}
+
+function resolveReleaseApiUrl(targetVersion?: string) {
+    const tag = normalizeTag(targetVersion || process.env.SUPACLOUD_UPGRADE_TAG || process.env.SUPACLOUD_UPGRADE_VERSION || "");
+    return tag ? `${RELEASES_API}/tags/${encodeURIComponent(tag)}` : `${RELEASES_API}/latest`;
+}
+
+function parseEnv(text: string) {
     return Object.fromEntries(
         text
             .split(/\r?\n/)
             .map(line => line.trim())
             .filter(line => line && !line.startsWith("#") && line.includes("="))
             .map(line => {
-                const idx = line.indexOf("=");
-                const key = line.slice(0, idx);
-                const raw = line.slice(idx + 1).trim();
-                const value = raw.replace(/^"|"$/g, "");
+                const normalized = line.startsWith("export ") ? line.slice("export ".length).trim() : line;
+                const idx = normalized.indexOf("=");
+                const key = normalized.slice(0, idx).trim();
+                const raw = normalized.slice(idx + 1).trim();
+                const value = raw.replace(/^"|"$/g, "").replace(/^'|'$/g, "");
                 return [key, value];
             })
+            .filter(([key]) => key.length > 0)
     );
 }
 
-export async function runUpgrade(options: { forceYes?: boolean } = {}) {
-    p.intro("\x1b[46m SupaCloud Upgrade \x1b[0m");
+async function readEnvFile(filePath: string) {
+    const file = Bun.file(filePath);
+    if (!(await file.exists())) return {};
+    return parseEnv(await file.text());
+}
+
+async function installBinary(downloadUrl: string, binaryName: string) {
+    const tmpBinary = path.join(os.tmpdir(), `${binaryName}-${Date.now()}`);
+    const stagedBinary = `${BIN_TARGET}.new`;
+    const backupBinary = `${BIN_TARGET}.bak`;
+
+    await $`curl -fsSL ${downloadUrl} -o ${tmpBinary}`;
+    await $`chmod 0755 ${tmpBinary}`;
+
+    if (existsSync(BIN_TARGET)) {
+        await $`cp -f ${BIN_TARGET} ${backupBinary}`;
+    }
+
+    await $`install -m 0755 ${tmpBinary} ${stagedBinary}`;
+    await $`mv -f ${stagedBinary} ${BIN_TARGET}`;
+    await $`rm -f ${tmpBinary}`.nothrow().quiet();
+}
+
+async function runInitDb(env: Record<string, string | undefined>) {
+    const proc = Bun.spawn([BIN_TARGET, "--init-db"], {
+        stdout: "inherit",
+        stderr: "inherit",
+        env,
+    });
+    const exitCode = await proc.exited;
+    if (exitCode !== 0) {
+        throw new Error(`supacloud --init-db exited with code ${exitCode}`);
+    }
+}
+
+async function restartServices() {
+    const management = await $`systemctl restart supacloud`.nothrow().quiet();
+    if (management.exitCode !== 0) {
+        logger.warn("[Upgrade] Failed to restart supacloud.service", {
+            stderr: management.stderr.toString().slice(-500),
+        });
+        throw new Error("Failed to restart supacloud.service");
+    }
+
+    await $`systemctl try-restart supacloud-edge-runtime`.nothrow().quiet();
+}
+
+export async function runUpgrade(options: { forceYes?: boolean; targetVersion?: string } = {}) {
+    p.intro("\x1b[46m SupaCloud Binary Upgrade \x1b[0m");
 
     const s = p.spinner();
-    s.start("Retrieving latest GitHub release version");
+    s.start("Retrieving GitHub release metadata");
 
     try {
-        const installerPath = resolveInstallerPath();
-        if (!installerPath) {
-            throw new Error("install.sh not found. Please run from the repository root or install to /opt/supacloud first.");
+        if (os.userInfo().uid !== 0) {
+            throw new Error("Please run the upgrade with root privileges (sudo).");
         }
 
-        const response = await fetch(REPO_URL, {
-            headers: { "User-Agent": "SupaCloud-CLI" }
+        const binaryName = resolveLinuxBinaryName();
+        const response = await fetch(resolveReleaseApiUrl(options.targetVersion), {
+            headers: { "User-Agent": "SupaCloud-CLI" },
         });
 
-        if (!response.ok) throw new Error("Unable to connect to GitHub Release API");
+        if (!response.ok) {
+            throw new Error(`Unable to retrieve GitHub release metadata (${response.status})`);
+        }
 
         const data = await response.json();
-        const remoteVersion = String(data.tag_name || "latest").replace('v', '');
-        s.stop(`Latest version available: ${remoteVersion}`);
+        const remoteVersion = String(data.tag_name || "latest");
+        const releaseAsset = Array.isArray(data.assets)
+            ? data.assets.find((asset: Record<string, unknown>) => asset.name === binaryName)
+            : null;
+        const releaseUrl = typeof releaseAsset?.browser_download_url === "string"
+            ? releaseAsset.browser_download_url
+            : null;
+
+        if (!releaseUrl) {
+            throw new Error(`Release ${remoteVersion} does not contain required asset: ${binaryName}`);
+        }
+
+        s.stop(`Latest binary available: ${remoteVersion} (${binaryName})`);
 
         const confirm = options.forceYes || await p.confirm({
-            message: `Upgrade SupaCloud to ${remoteVersion} via canonical install.sh now?`,
-            initialValue: true
+            message: `Replace ${BIN_TARGET} with ${binaryName} from ${remoteVersion}?`,
+            initialValue: true,
         });
 
         if (!confirm || p.isCancel(confirm)) {
@@ -77,49 +142,22 @@ export async function runUpgrade(options: { forceYes?: boolean } = {}) {
             return;
         }
 
-        await ensureInstallerAvailable(installerPath);
-        const currentConfig = await readCurrentConfig(installerPath);
-        const cwd = path.dirname(installerPath);
-        const arch = os.arch();
-        const binaryName = `supacloud-linux-${arch === "arm64" ? "arm64" : "amd64"}`;
-        const releaseAsset = Array.isArray(data.assets)
-            ? data.assets.find((a: Record<string, unknown>) => a.name === binaryName)
-            : null;
-        const releaseUrl = typeof releaseAsset?.browser_download_url === "string"
-            ? releaseAsset.browser_download_url
-            : null;
-
-        s.start("Refreshing repository and bootstrap assets");
-        await $`git -C ${cwd} fetch --all --tags`.nothrow();
-        await $`git -C ${cwd} reset --hard origin/main`;
-
-        if (releaseUrl) {
-            s.message(`Downloading latest binary asset: ${binaryName}`);
-            await $`mkdir -p ${path.join(cwd, "dist")}`;
-            await $`curl -fsSL ${releaseUrl} -o ${path.join(cwd, "dist", binaryName)}`;
-        } else {
-            logger.warn("[Upgrade] No matching release binary found, install.sh will use existing local artifact or fallback logic.");
-        }
+        s.start(`Downloading and installing ${binaryName}`);
+        await installBinary(releaseUrl, binaryName);
 
         const env = {
             ...process.env,
-            ...(currentConfig || {}),
+            ...(await readEnvFile(LEGACY_CONFIG_FILE)),
+            ...(await readEnvFile(MANAGEMENT_ENV_FILE)),
         };
 
-        s.start("Running canonical install.sh upgrade flow");
-        const proc = Bun.spawn(["bash", installerPath], {
-            cwd,
-            stdout: "inherit",
-            stderr: "inherit",
-            stdin: "inherit",
-            env,
-        });
-        const exitCode = await proc.exited;
-        if (exitCode !== 0) {
-            throw new Error(`install.sh exited with code ${exitCode}`);
-        }
+        s.start("Applying metadata database migrations");
+        await runInitDb(env);
 
-        p.outro(`🎉 Upgrade successful via canonical install.sh`);
+        s.start("Restarting SupaCloud services");
+        await restartServices();
+
+        p.outro(`SupaCloud upgraded to ${remoteVersion} via ${binaryName}`);
     } catch (error: unknown) {
         s.stop(`Upgrade failed: ${error instanceof Error ? error.message : String(error)}`);
         process.exit(1);
