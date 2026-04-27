@@ -14,6 +14,19 @@ function adminDatabaseUrl(dbName: string): string {
   return url.toString();
 }
 
+function resolveProjectDbName(project: ProjectRow): string {
+  return project.db_name || `supa_${project.ref}`;
+}
+
+async function databaseExists(dbName: string): Promise<boolean> {
+  const rows = await sql<{ exists: boolean }[]>`
+    SELECT EXISTS (
+      SELECT 1 FROM pg_database WHERE datname = ${dbName}
+    ) AS exists
+  `;
+  return Boolean(rows[0]?.exists);
+}
+
 async function runPsql(dbName: string, sqlText: string) {
   const proc = Bun.spawn(
     [
@@ -48,7 +61,7 @@ async function runPsql(dbName: string, sqlText: string) {
 }
 
 async function reconcileProject(project: ProjectRow) {
-  const dbName = project.db_name || `supa_${project.ref}`;
+  const dbName = resolveProjectDbName(project);
   const roleName = project.db_user || `role_${project.ref}`;
 
   const statements = [
@@ -108,9 +121,24 @@ async function main() {
   });
 
   const failures: Array<{ ref: string; error: string }> = [];
+  const skipped: Array<{ ref: string; dbName: string; reason: string }> = [];
 
   for (const row of rows) {
     try {
+      const dbName = resolveProjectDbName(row);
+      if (!(await databaseExists(dbName))) {
+        skipped.push({
+          ref: row.ref,
+          dbName,
+          reason: "tenant database does not exist",
+        });
+        logger.warn("[RealtimeSchemaReconcile] skipped missing tenant database", {
+          projectRef: row.ref,
+          dbName,
+        });
+        continue;
+      }
+
       await reconcileProject(row);
     } catch (error) {
       const message =
@@ -125,8 +153,13 @@ async function main() {
 
   logger.info("[RealtimeSchemaReconcile] complete", {
     total: rows.length,
+    skipped: skipped.length,
     failed: failures.length,
   });
+
+  if (skipped.length > 0) {
+    console.warn(JSON.stringify({ skipped }, null, 2));
+  }
 
   if (failures.length > 0) {
     console.error(JSON.stringify({ failures }, null, 2));
