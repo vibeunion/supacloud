@@ -239,7 +239,9 @@ describe("API Structural Snapshot Compliance", () => {
 
     expect(res.status).toBe(200);
     const data = (await res.json()) as Record<string, unknown>;
-    expect(data.result).toBeDefined();
+    expect(data.rows).toBeDefined();
+    expect(data.rowCount).toBe(1);
+    expect(data.command).toBe("SELECT");
   });
 
   test("Management API - GET /v1/projects/:ref/database/migrations returns array", async () => {
