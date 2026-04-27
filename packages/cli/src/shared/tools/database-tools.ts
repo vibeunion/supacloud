@@ -14,13 +14,23 @@ export interface DatabaseToolsConfig {
 
 function normalizeSqlResponse(result: Awaited<ReturnType<HttpTransport["post"]>>) {
     if (!result.ok) return result;
-    const data = result.data as { rows?: unknown[]; result?: unknown[] };
+    const data = result.data as {
+        rows?: unknown[];
+        result?: unknown[];
+        rowCount?: number;
+        command?: string;
+        fields?: string[];
+        notices?: string[];
+    };
     if (Array.isArray(data?.result) && !Array.isArray(data.rows)) {
         return {
             ...result,
             data: {
                 rows: data.result,
-                rowCount: data.result.length,
+                rowCount: data.rowCount ?? data.result.length,
+                command: data.command,
+                fields: data.fields,
+                notices: data.notices,
             },
         };
     }
@@ -43,6 +53,53 @@ function appliedMigrationKeys(data: unknown): Set<string> {
         if (migration.name != null) keys.add(String(migration.name));
     }
     return keys;
+}
+
+function sqlReferencesVector(sql: string): boolean {
+    return /\bvector\s*\(\s*\d+\s*\)/i.test(sql)
+        || /::\s*vector\b/i.test(sql)
+        || /\bvector_(cosine|l2|ip)_ops\b/i.test(sql)
+        || /<=>|<#>|<->/.test(sql);
+}
+
+function sqlCreatesVectorExtension(sql: string): boolean {
+    return /\bCREATE\s+EXTENSION\s+(?:IF\s+NOT\s+EXISTS\s+)?["']?vector["']?/i.test(sql);
+}
+
+function extensionRows(data: unknown): Array<Record<string, unknown>> {
+    if (Array.isArray(data)) return data as Array<Record<string, unknown>>;
+    const shaped = data as { rows?: unknown[]; result?: unknown[] };
+    const rows = shaped?.rows || shaped?.result || [];
+    return Array.isArray(rows) ? rows as Array<Record<string, unknown>> : [];
+}
+
+export function vectorWarningsForPendingMigrations(
+    migrations: Array<{ file: string; sql: string }>,
+    vectorEnabled: boolean | null,
+): string[] {
+    const warnings: string[] = [];
+    const vectorUsers = migrations.filter(({ sql }) => sqlReferencesVector(sql));
+    const vectorCreators = migrations.filter(({ sql }) => sqlCreatesVectorExtension(sql));
+
+    if (!vectorUsers.length && !vectorCreators.length) return warnings;
+
+    if (vectorEnabled === false && vectorUsers.length && !vectorCreators.length) {
+        warnings.push(
+            `vector extension is not enabled, but pending migrations use vector types/operators: ${vectorUsers.map(({ file }) => file).join(", ")}`,
+        );
+    }
+
+    if (vectorEnabled === false && vectorCreators.length) {
+        warnings.push(
+            `pending migrations will enable pgvector: ${vectorCreators.map(({ file }) => file).join(", ")}`,
+        );
+    }
+
+    if (vectorEnabled === null) {
+        warnings.push("could not verify whether vector extension is enabled");
+    }
+
+    return warnings;
 }
 
 export function registerDatabaseTools(
@@ -248,13 +305,28 @@ Actions: ${allActions.join(", ")}${readOnly ? " (read-only mode)" : ""}`,
                         const appliedKeys = appliedMigrationKeys(r.data);
                         const pending = migrationFiles.filter(({ name, version }) => !appliedKeys.has(name) && !appliedKeys.has(String(version)));
                         const alreadyApplied = migrationFiles.filter(({ name, version }) => appliedKeys.has(name) || appliedKeys.has(String(version)));
+                        const pendingWithSql = pending.map((migration) => ({
+                            ...migration,
+                            sql: readFileSync(join(dir, migration.file), "utf-8"),
+                        }));
+                        let vectorEnabled: boolean | null = null;
+                        if (pendingWithSql.some(({ sql }) => sqlReferencesVector(sql) || sqlCreatesVectorExtension(sql))) {
+                            const extResult = await execSql("SELECT extname AS name FROM pg_extension WHERE extname = 'vector';");
+                            vectorEnabled = extResult.ok
+                                ? extensionRows(extResult.data).some((row) => row.name === "vector" || row.extname === "vector")
+                                : null;
+                        }
+                        const warnings = vectorWarningsForPendingMigrations(pendingWithSql, vectorEnabled);
                         text = [
                             `Migration dry run for ${dir}`,
                             `Total: ${migrationFiles.length}`,
-                            `Pending: ${pending.length}`,
-                            `Already applied: ${alreadyApplied.length}`,
-                            ...(pending.length ? ["", "Would apply:", ...pending.map(({ file, version }) => `  - ${file} (${version})`)] : []),
-                            ...(alreadyApplied.length ? ["", "Already applied:", ...alreadyApplied.map(({ file, version }) => `  - ${file} (${version})`)] : []),
+                            "",
+                            "Pending:",
+                            ...(pending.length ? pending.map(({ file, version }) => `  - ${file} (${version})`) : ["  - none"]),
+                            "",
+                            "Already applied:",
+                            ...(alreadyApplied.length ? alreadyApplied.map(({ file, version }) => `  - ${file} (${version})`) : ["  - none"]),
+                            ...(warnings.length ? ["", "Warnings:", ...warnings.map((warning) => `  - ${warning}`)] : []),
                         ].join("\n");
                         break;
                     }
