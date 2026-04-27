@@ -295,6 +295,37 @@ BEGIN
   END LOOP;
 END $$;
 
+-- Ensure the tenant-facing background task table can be consumed through
+-- Supabase-compatible postgres_changes channels.
+CREATE OR REPLACE FUNCTION realtime.ensure_tasks_publication() RETURNS void AS $fn$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_publication WHERE pubname = 'supabase_realtime') THEN
+    CREATE PUBLICATION supabase_realtime;
+  END IF;
+
+  IF to_regclass('public.tasks') IS NOT NULL THEN
+    ALTER TABLE public.tasks REPLICA IDENTITY FULL;
+
+    IF NOT EXISTS (
+      SELECT 1
+      FROM pg_publication_tables
+      WHERE pubname = 'supabase_realtime'
+        AND schemaname = 'public'
+        AND tablename = 'tasks'
+    ) THEN
+      ALTER PUBLICATION supabase_realtime ADD TABLE public.tasks;
+    END IF;
+  END IF;
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+  WHEN insufficient_privilege THEN NULL;
+  WHEN undefined_table THEN NULL;
+  WHEN OTHERS THEN NULL;
+END;
+$fn$ LANGUAGE plpgsql SECURITY DEFINER;
+
+SELECT realtime.ensure_tasks_publication();
+
 -- Event Trigger: automatically attach realtime triggers to NEW tables created in public schema
 CREATE OR REPLACE FUNCTION realtime.auto_attach_notify_trigger() RETURNS event_trigger AS $fn$
 DECLARE
@@ -312,6 +343,13 @@ BEGIN
 END;
 $fn$ LANGUAGE plpgsql SECURITY DEFINER;
 
+-- Event Trigger: automatically publish public.tasks when applications create it later.
+CREATE OR REPLACE FUNCTION realtime.auto_publish_tasks_table() RETURNS event_trigger AS $fn$
+BEGIN
+  PERFORM realtime.ensure_tasks_publication();
+END;
+$fn$ LANGUAGE plpgsql SECURITY DEFINER;
+
 -- Register the event trigger (idempotent)
 DO $$
 BEGIN
@@ -319,6 +357,18 @@ BEGIN
     CREATE EVENT TRIGGER realtime_auto_attach_trigger ON ddl_command_end
       WHEN TAG IN ('CREATE TABLE')
       EXECUTE FUNCTION realtime.auto_attach_notify_trigger();
+  END IF;
+EXCEPTION WHEN insufficient_privilege THEN
+  -- Event triggers require superuser; skip if not available
+  NULL;
+END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_event_trigger WHERE evtname = 'realtime_auto_publish_tasks_trigger') THEN
+    CREATE EVENT TRIGGER realtime_auto_publish_tasks_trigger ON ddl_command_end
+      WHEN TAG IN ('CREATE TABLE')
+      EXECUTE FUNCTION realtime.auto_publish_tasks_table();
   END IF;
 EXCEPTION WHEN insufficient_privilege THEN
   -- Event triggers require superuser; skip if not available
