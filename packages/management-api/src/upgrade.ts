@@ -9,6 +9,12 @@ const RELEASES_API = "https://api.github.com/repos/zuohuadong/supacloud/releases
 const BIN_TARGET = "/usr/local/bin/supacloud";
 const MANAGEMENT_ENV_FILE = "/etc/supabase/management-api.env";
 const LEGACY_CONFIG_FILE = "/opt/supacloud/config.env";
+const DEFAULT_GITHUB_PROXY = "https://ghproxy.net/";
+
+type GithubEndpoint = {
+    label: string;
+    proxyPrefix: string;
+};
 
 function resolveLinuxBinaryName() {
     if (os.platform() !== "linux") {
@@ -30,6 +36,86 @@ function normalizeTag(tag: string) {
 function resolveReleaseApiUrl(targetVersion?: string) {
     const tag = normalizeTag(targetVersion || process.env.SUPACLOUD_UPGRADE_TAG || process.env.SUPACLOUD_UPGRADE_VERSION || "");
     return tag ? `${RELEASES_API}/tags/${encodeURIComponent(tag)}` : `${RELEASES_API}/latest`;
+}
+
+function normalizeProxyPrefix(value: string) {
+    const trimmed = value.trim();
+    if (!trimmed || trimmed.toLowerCase() === "direct" || trimmed.toLowerCase() === "none") return "";
+    return trimmed.endsWith("/") ? trimmed : `${trimmed}/`;
+}
+
+function buildGithubEndpoints(extraProxy?: string): GithubEndpoint[] {
+    const rawProxies = [
+        extraProxy,
+        process.env.SUPACLOUD_GITHUB_PROXY,
+        ...(process.env.SUPACLOUD_GITHUB_PROXIES || "").split(","),
+        DEFAULT_GITHUB_PROXY,
+        "",
+    ];
+
+    const seen = new Set<string>();
+    return rawProxies
+        .map(value => normalizeProxyPrefix(value || ""))
+        .filter(proxyPrefix => {
+            if (seen.has(proxyPrefix)) return false;
+            seen.add(proxyPrefix);
+            return true;
+        })
+        .map(proxyPrefix => ({
+            proxyPrefix,
+            label: proxyPrefix ? proxyPrefix.replace(/\/$/, "") : "direct GitHub",
+        }));
+}
+
+function withGithubProxy(url: string, endpoint: GithubEndpoint) {
+    return endpoint.proxyPrefix ? `${endpoint.proxyPrefix}${url}` : url;
+}
+
+async function promptForGithubProxy(lastError: string) {
+    p.log.warn(`GitHub download failed: ${lastError}`);
+    const value = await p.text({
+        message: "Enter another GitHub proxy URL, or type direct to retry GitHub directly",
+        placeholder: DEFAULT_GITHUB_PROXY,
+        defaultValue: DEFAULT_GITHUB_PROXY,
+    });
+    if (p.isCancel(value)) {
+        p.cancel("Upgrade cancelled.");
+        process.exit(1);
+    }
+    return String(value);
+}
+
+async function fetchReleaseMetadata(apiUrl: string, forceYes?: boolean) {
+    let lastError = "";
+    let endpoints = buildGithubEndpoints();
+
+    while (true) {
+        for (const endpoint of endpoints) {
+            const requestUrl = withGithubProxy(apiUrl, endpoint);
+            try {
+                const response = await fetch(requestUrl, {
+                    headers: { "User-Agent": "SupaCloud-CLI" },
+                });
+                if (!response.ok) {
+                    lastError = `${endpoint.label} returned HTTP ${response.status}`;
+                    continue;
+                }
+                return {
+                    data: await response.json(),
+                    endpoint,
+                };
+            } catch (error: unknown) {
+                lastError = `${endpoint.label}: ${error instanceof Error ? error.message : String(error)}`;
+            }
+        }
+
+        if (forceYes) {
+            throw new Error(`Unable to retrieve GitHub release metadata. Last error: ${lastError}`);
+        }
+
+        const customProxy = await promptForGithubProxy(lastError);
+        endpoints = buildGithubEndpoints(customProxy);
+    }
 }
 
 function parseEnv(text: string) {
@@ -56,21 +142,40 @@ async function readEnvFile(filePath: string) {
     return parseEnv(await file.text());
 }
 
-async function installBinary(downloadUrl: string, binaryName: string) {
+async function installBinary(downloadUrl: string, binaryName: string, preferredEndpoint: GithubEndpoint, forceYes?: boolean) {
     const tmpBinary = path.join(os.tmpdir(), `${binaryName}-${Date.now()}`);
     const stagedBinary = `${BIN_TARGET}.new`;
     const backupBinary = `${BIN_TARGET}.bak`;
+    let lastError = "";
+    let endpoints = buildGithubEndpoints(preferredEndpoint.proxyPrefix || undefined);
 
-    await $`curl -fsSL ${downloadUrl} -o ${tmpBinary}`;
-    await $`chmod 0755 ${tmpBinary}`;
+    while (true) {
+        for (const endpoint of endpoints) {
+            const requestUrl = withGithubProxy(downloadUrl, endpoint);
+            const result = await $`curl -fsSL ${requestUrl} -o ${tmpBinary}`.nothrow().quiet();
+            if (result.exitCode === 0) {
+                await $`chmod 0755 ${tmpBinary}`;
 
-    if (existsSync(BIN_TARGET)) {
-        await $`cp -f ${BIN_TARGET} ${backupBinary}`;
+                if (existsSync(BIN_TARGET)) {
+                    await $`cp -f ${BIN_TARGET} ${backupBinary}`;
+                }
+
+                await $`install -m 0755 ${tmpBinary} ${stagedBinary}`;
+                await $`mv -f ${stagedBinary} ${BIN_TARGET}`;
+                await $`rm -f ${tmpBinary}`.nothrow().quiet();
+                return endpoint;
+            }
+            lastError = `${endpoint.label}: ${result.stderr.toString().trim() || `curl exited ${result.exitCode}`}`;
+        }
+
+        await $`rm -f ${tmpBinary}`.nothrow().quiet();
+        if (forceYes) {
+            throw new Error(`Unable to download ${binaryName}. Last error: ${lastError}`);
+        }
+
+        const customProxy = await promptForGithubProxy(lastError);
+        endpoints = buildGithubEndpoints(customProxy);
     }
-
-    await $`install -m 0755 ${tmpBinary} ${stagedBinary}`;
-    await $`mv -f ${stagedBinary} ${BIN_TARGET}`;
-    await $`rm -f ${tmpBinary}`.nothrow().quiet();
 }
 
 async function runInitDb(env: Record<string, string | undefined>) {
@@ -109,15 +214,7 @@ export async function runUpgrade(options: { forceYes?: boolean; targetVersion?: 
         }
 
         const binaryName = resolveLinuxBinaryName();
-        const response = await fetch(resolveReleaseApiUrl(options.targetVersion), {
-            headers: { "User-Agent": "SupaCloud-CLI" },
-        });
-
-        if (!response.ok) {
-            throw new Error(`Unable to retrieve GitHub release metadata (${response.status})`);
-        }
-
-        const data = await response.json();
+        const { data, endpoint } = await fetchReleaseMetadata(resolveReleaseApiUrl(options.targetVersion), options.forceYes);
         const remoteVersion = String(data.tag_name || "latest");
         const releaseAsset = Array.isArray(data.assets)
             ? data.assets.find((asset: Record<string, unknown>) => asset.name === binaryName)
@@ -130,7 +227,7 @@ export async function runUpgrade(options: { forceYes?: boolean; targetVersion?: 
             throw new Error(`Release ${remoteVersion} does not contain required asset: ${binaryName}`);
         }
 
-        s.stop(`Latest binary available: ${remoteVersion} (${binaryName})`);
+        s.stop(`Latest binary available: ${remoteVersion} (${binaryName}, via ${endpoint.label})`);
 
         const confirm = options.forceYes || await p.confirm({
             message: `Replace ${BIN_TARGET} with ${binaryName} from ${remoteVersion}?`,
@@ -143,7 +240,7 @@ export async function runUpgrade(options: { forceYes?: boolean; targetVersion?: 
         }
 
         s.start(`Downloading and installing ${binaryName}`);
-        await installBinary(releaseUrl, binaryName);
+        const downloadEndpoint = await installBinary(releaseUrl, binaryName, endpoint, options.forceYes);
 
         const env = {
             ...process.env,
@@ -157,7 +254,7 @@ export async function runUpgrade(options: { forceYes?: boolean; targetVersion?: 
         s.start("Restarting SupaCloud services");
         await restartServices();
 
-        p.outro(`SupaCloud upgraded to ${remoteVersion} via ${binaryName}`);
+        p.outro(`SupaCloud upgraded to ${remoteVersion} via ${binaryName} (${downloadEndpoint.label})`);
     } catch (error: unknown) {
         s.stop(`Upgrade failed: ${error instanceof Error ? error.message : String(error)}`);
         process.exit(1);
