@@ -93,13 +93,16 @@ Detailed feature comparison:
 **Project user CLI**
 
 ```bash
-npx @supacloud/cli status
-npx @supacloud/cli project get
-npx @supacloud/cli project logs --log_type database
-npx @supacloud/cli frontend list --ref <project-ref>
+npm install -g @supacloud/cli
+
+supacloud-cli status
+supacloud-cli project get
+supacloud-cli project logs --log_type database
+supacloud-cli frontend list --ref <project-ref>
 ```
 
-`supacloud` defaults to project context and auto-links from the current workspace `.env` when available:
+`supacloud-cli` defaults to project context and auto-links from the current workspace `.env` when available.
+The old `supacloud` command name remains a compatibility alias, but avoid it because the server binary is also named `/usr/local/bin/supacloud`.
 
 - `SUPABASE_URL` or `SUPACLOUD_API_URL`
 - `SUPABASE_SERVICE_ROLE_KEY` or `SUPACLOUD_API_TOKEN`
@@ -181,22 +184,22 @@ The compose stack is isolated under [`docker/self-host`](/Volumes/Data/workspace
 
 ### Management
 
-#### User CLI: `supacloud`
+#### User CLI: `supacloud-cli`
 
-The `supacloud` CLI is project-scoped by default and is intended for deploy/build/log/database workflows around a single project:
+The `supacloud-cli` command is project-scoped by default and is intended for deploy/build/log/database workflows around a single project:
 
 ```bash
-supacloud status
-supacloud project get
-supacloud project logs --log_type database
-supacloud project tasks
-supacloud database query --sql "select now()"
-supacloud database query --ref <ref> --file ./queries/vector-search.sql
-supacloud database push_migrations --ref <ref> --dir supabase/migrations --dry_run
-supacloud auth list_providers --ref <ref>
-supacloud frontend list --ref <ref>
-supacloud edge_functions list --ref <ref>
-supacloud storage list_buckets --ref <ref>
+supacloud-cli status
+supacloud-cli project get
+supacloud-cli project logs --log_type database
+supacloud-cli project tasks
+supacloud-cli database query --sql "select now()"
+supacloud-cli database query --ref <ref> --file ./queries/vector-search.sql
+supacloud-cli database push_migrations --ref <ref> --dir supabase/migrations --dry_run
+supacloud-cli auth list_providers --ref <ref>
+supacloud-cli frontend list --ref <ref>
+supacloud-cli edge_functions list --ref <ref>
+supacloud-cli storage list_buckets --ref <ref>
 ```
 
 For complex SQL, pgvector queries, and single-request transaction blocks, prefer `--file` instead of shell-escaped inline SQL.
@@ -424,7 +427,8 @@ For new installs, `install.sh` now generates a valid `REALTIME_DB_ENC_KEY`, whic
 
 For human operators, the CLI split is now:
 
-- `@supacloud/cli` / `supacloud`: project-scoped user CLI with `.env` auto-link defaults
+- `@supacloud/cli` / `supacloud-cli`: project-scoped user CLI with `.env` auto-link defaults
+- Preferred command: `supacloud-cli`. The bare `supacloud` name is only a backward-compatible alias because `/usr/local/bin/supacloud` is the server binary.
 - `@supacloud/admin` / `supacloud-admin`: server and platform administration CLI
 
 
@@ -605,13 +609,16 @@ SupaCloud 更准确的定位是：**面向自托管场景的多租户 Supabase �
 **项目使用者 CLI**
 
 ```bash
-npx @supacloud/cli status
-npx @supacloud/cli project get
-npx @supacloud/cli project logs --log_type database
-npx @supacloud/cli frontend list --ref <project-ref>
+npm install -g @supacloud/cli
+
+supacloud-cli status
+supacloud-cli project get
+supacloud-cli project logs --log_type database
+supacloud-cli frontend list --ref <project-ref>
 ```
 
-`supacloud` 默认是项目级 CLI，会优先从当前目录 `.env` 自动绑定项目：
+`supacloud-cli` 默认是项目级 CLI，会优先从当前目录 `.env` 自动绑定项目。
+旧的 `supacloud` 命令名仅作为兼容别名保留；生产服务器上的 `/usr/local/bin/supacloud` 是服务端二进制，文档和客户操作应避免使用裸 `supacloud` 指代项目 CLI。
 
 - `SUPABASE_URL` 或 `SUPACLOUD_API_URL`
 - `SUPABASE_SERVICE_ROLE_KEY` 或 `SUPACLOUD_API_TOKEN`
@@ -683,22 +690,22 @@ sudo SUPACLOUD_GITHUB_PROXY=direct supacloud upgrade --yes
 
 ### 项目管理
 
-#### 用户 CLI：`supacloud`
+#### 用户 CLI：`supacloud-cli`
 
-`supacloud` 默认是项目级 CLI，用于围绕单个项目的部署、日志、数据库与资源管理：
+`supacloud-cli` 默认是项目级 CLI，用于围绕单个项目的部署、日志、数据库与资源管理：
 
 ```bash
-supacloud status
-supacloud project get
-supacloud project logs --log_type database
-supacloud project tasks
-supacloud database query --sql "select now()"
-supacloud database query --ref <ref> --file ./queries/vector-search.sql
-supacloud database push_migrations --ref <ref> --dir supabase/migrations --dry_run
-supacloud auth list_providers --ref <ref>
-supacloud frontend list --ref <ref>
-supacloud edge_functions list --ref <ref>
-supacloud storage list_buckets --ref <ref>
+supacloud-cli status
+supacloud-cli project get
+supacloud-cli project logs --log_type database
+supacloud-cli project tasks
+supacloud-cli database query --sql "select now()"
+supacloud-cli database query --ref <ref> --file ./queries/vector-search.sql
+supacloud-cli database push_migrations --ref <ref> --dir supabase/migrations --dry_run
+supacloud-cli auth list_providers --ref <ref>
+supacloud-cli frontend list --ref <ref>
+supacloud-cli edge_functions list --ref <ref>
+supacloud-cli storage list_buckets --ref <ref>
 ```
 
 复杂 SQL、pgvector 查询、单请求事务块建议使用 `--file`，不要依赖 shell 字符串转义。
@@ -859,7 +866,7 @@ Kong 网关 (API 驱动，原生 OpenResty):
 
 面向真人操作者的命令行现已拆分为：
 
-- `@supacloud/cli` / `supacloud`：项目使用者 CLI，默认从当前目录 `.env` 自动绑定项目
+- `@supacloud/cli` / `supacloud-cli`：项目使用者 CLI，默认从当前目录 `.env` 自动绑定项目；裸 `supacloud` 仅为兼容别名
 - `@supacloud/admin` / `supacloud-admin`：服务器管理员 CLI，处理 SSH、安装、升级、租户运维
 
 

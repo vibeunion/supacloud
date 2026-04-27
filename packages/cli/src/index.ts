@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import path from "node:path";
 import { z } from "zod";
 import { runCli } from "./shared/cli";
 import { resolveSupaCloudContext } from "./shared/context";
@@ -14,6 +15,9 @@ import { registerUserProjectCliTools } from "./shared/tools/project-cli-tools";
 type ToolEntry = { schema: any; callback: (args: any) => Promise<any> };
 type ToolMap = Record<string, ToolEntry>;
 
+const invokedCommand = path.basename(process.argv[1] || "supacloud-cli");
+const commandName = invokedCommand === "supacloud" ? "supacloud" : "supacloud-cli";
+const preferredCommand = "supacloud-cli";
 const projectActionSchema = z.enum(["get", "health", "logs", "api_keys", "settings", "tasks"]);
 const genericActionSchema = z.string();
 
@@ -49,15 +53,17 @@ function printHelp(context = resolveSupaCloudContext()) {
 
     console.error(`
 ╔═══════════════════════════════════════════════════════════╗
-║  supacloud                                               ║
+║  supacloud-cli                                           ║
 ║  Project CLI for SupaCloud users                         ║
 ╚═══════════════════════════════════════════════════════════╝
 
+${commandName === "supacloud" ? "NOTE\n\n  `supacloud` is kept as a compatibility alias. Prefer `supacloud-cli`\n  to avoid confusion with the server binary at /usr/local/bin/supacloud.\n" : ""}
+
 USAGE
 
-  supacloud <module> <action> [--flags]
-  supacloud status
-  supacloud --help
+  ${preferredCommand} <module> <action> [--flags]
+  ${preferredCommand} status
+  ${preferredCommand} --help
 
 DEFAULT CONTEXT
 
@@ -70,15 +76,15 @@ DEFAULT CONTEXT
 
 EXAMPLES
 
-  supacloud status
-  supacloud project get
-  supacloud project logs --log_type database
-  supacloud frontend list --ref abc123
-  supacloud database query --sql "select now()"
-  supacloud database query --ref abc123 --file ./queries/vector-search.sql
-  supacloud database push_migrations --ref abc123 --dir supabase/migrations --dry_run
-  supacloud edge_functions deploy --ref abc123 --slug hello --path ./supabase/functions/hello
-  supacloud edge_functions config --ref abc123 --slug hello --verify_jwt false --background_routes "/queue/*,/render/*"
+  ${preferredCommand} status
+  ${preferredCommand} project get
+  ${preferredCommand} project logs --log_type database
+  ${preferredCommand} frontend list --ref abc123
+  ${preferredCommand} database query --sql "select now()"
+  ${preferredCommand} database query --ref abc123 --file ./queries/vector-search.sql
+  ${preferredCommand} database push_migrations --ref abc123 --dir supabase/migrations --dry_run
+  ${preferredCommand} edge_functions deploy --ref abc123 --slug hello --path ./supabase/functions/hello
+  ${preferredCommand} edge_functions config --ref abc123 --slug hello --verify_jwt false --background_routes "/queue/*,/render/*"
 
 SEPARATE ADMIN CLI
 
@@ -131,8 +137,8 @@ function createCliTools(): ToolMap {
                             "  - SUPACLOUD_API_URL + SUPACLOUD_API_TOKEN",
                             "",
                             "Then retry commands such as:",
-                            "  supacloud project get",
-                            "  supacloud project logs --log_type database",
+                            `  ${preferredCommand} project get`,
+                            `  ${preferredCommand} project logs --log_type database`,
                         ].join("\n"),
                     },
                 ],
@@ -145,7 +151,7 @@ function createCliTools(): ToolMap {
                     content: [
                         {
                             type: "text" as const,
-                            text: "⚠️ This command requires project-scoped API context. Run `supacloud status` to inspect current detection.",
+                            text: `⚠️ This command requires project-scoped API context. Run \`${preferredCommand} status\` to inspect current detection.`,
                         },
                     ],
                 }),
@@ -162,9 +168,9 @@ function createCliTools(): ToolMap {
                     {
                         type: "text" as const,
                         text: [
-                            "⚠️ No project context found for supacloud.",
+                            `⚠️ No project context found for ${preferredCommand}.`,
                             "",
-                            "supacloud expects project-scoped credentials by default.",
+                            `${preferredCommand} expects project-scoped credentials by default.`,
                             "Provide one of these sources:",
                             "",
                             "  1. Current workspace .env",
@@ -230,10 +236,10 @@ async function main() {
         console.log(JSON.stringify(result, null, 2));
         return;
     }
-    await runCli(cliTools, args, { commandName: "supacloud" });
+    await runCli(cliTools, args, { commandName });
 }
 
 main().catch((error) => {
-    console.error("supacloud failed:", error);
+    console.error(`${commandName} failed:`, error);
     process.exit(1);
 });
