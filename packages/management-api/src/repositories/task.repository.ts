@@ -31,6 +31,12 @@ export interface TaskListFilters {
   limit?: number;
 }
 
+export interface ClaimQueueMessageOptions {
+  projectRef: string;
+  queueName: string;
+  visibilityTimeoutSec?: number;
+}
+
 export interface LeasedTask extends ProjectTask {
   worker_id?: string;
 }
@@ -191,6 +197,40 @@ export async function createTasks(tasks: CreateTaskInput[]): Promise<void> {
   }
 }
 
+export async function claimQueueMessage(options: ClaimQueueMessageOptions): Promise<LeasedTask | null> {
+  const leaseSeconds = options.visibilityTimeoutSec || DEFAULT_LEASE_SECONDS;
+
+  return withRetry("TaskRepository.claimQueueMessage", async () => {
+    const [task] = await sql`
+      WITH candidate AS (
+        SELECT id
+        FROM project_tasks
+        WHERE project_ref = ${options.projectRef}
+          AND task_type = ${options.queueName}
+          AND status IN (${TaskStatuses.PENDING}, ${TaskStatuses.RETRY_SCHEDULED})
+          AND COALESCE(next_run_at, created_at, NOW()) <= NOW()
+          AND cancel_requested_at IS NULL
+        ORDER BY COALESCE(next_run_at, created_at, NOW()) ASC, created_at ASC
+        FOR UPDATE SKIP LOCKED
+        LIMIT 1
+      )
+      UPDATE project_tasks pt
+      SET
+        status = ${TaskStatuses.LEASED},
+        attempt = COALESCE(pt.attempt, 0) + 1,
+        retries = GREATEST(COALESCE(pt.attempt, 0), COALESCE(pt.retries, 0)) + 1,
+        lease_until = NOW() + (${leaseSeconds} * INTERVAL '1 second'),
+        started_at = COALESCE(pt.started_at, NOW()),
+        updated_at = NOW()
+      FROM candidate
+      WHERE pt.id = candidate.id
+      RETURNING pt.*
+    `;
+
+    return task ? (mapTask(task) as LeasedTask) : null;
+  });
+}
+
 export async function claimNextTask(options: TaskLeaseOptions): Promise<LeasedTask | null> {
   const leaseSeconds = options.leaseSeconds || DEFAULT_LEASE_SECONDS;
   const allowedTaskTypes = options.allowedTaskTypes || [];
@@ -295,6 +335,29 @@ export async function markTaskSucceeded(id: string, result?: Record<string, unkn
   });
 }
 
+export async function acknowledgeQueueMessage(id: string, result?: Record<string, unknown> | null): Promise<ProjectTask | null> {
+  return withRetry("TaskRepository.acknowledgeQueueMessage", async () => {
+    const [task] = await sql`
+      UPDATE project_tasks
+      SET
+        status = ${TaskStatuses.SUCCEEDED},
+        result = ${result ? JSON.stringify(result) : null},
+        error = NULL,
+        lease_until = NULL,
+        cancel_requested_at = NULL,
+        cancellation_reason = NULL,
+        completed_at = NOW(),
+        updated_at = NOW()
+      WHERE id = ${id}
+        AND status IN (${TaskStatuses.LEASED}, ${TaskStatuses.RUNNING})
+        AND lease_until IS NOT NULL
+        AND lease_until > NOW()
+      RETURNING *
+    `;
+    return task ? mapTask(task) : null;
+  });
+}
+
 export async function scheduleRetry(id: string, error: string, nextRunAt: Date): Promise<ProjectTask | null> {
   return withRetry("TaskRepository.scheduleRetry", async () => {
     const [task] = await sql`
@@ -392,6 +455,20 @@ export async function getTaskById(id: string, projectRef?: string): Promise<Proj
       ? await sql`SELECT * FROM project_tasks WHERE id = ${id} AND project_ref = ${projectRef} LIMIT 1`
       : await sql`SELECT * FROM project_tasks WHERE id = ${id} LIMIT 1`;
     return rows[0] ? mapTask(rows[0]) : null;
+  });
+}
+
+export async function getTaskByIdAndType(id: string, projectRef: string, taskType: string): Promise<ProjectTask | null> {
+  return withRetry("TaskRepository.getTaskByIdAndType", async () => {
+    const [task] = await sql`
+      SELECT *
+      FROM project_tasks
+      WHERE id = ${id}
+        AND project_ref = ${projectRef}
+        AND task_type = ${taskType}
+      LIMIT 1
+    `;
+    return task ? mapTask(task) : null;
   });
 }
 
@@ -664,15 +741,18 @@ export async function getTaskStats(projectRef: string): Promise<{
 export const taskRepository = {
   createTask,
   createTasks,
+  claimQueueMessage,
   claimNextTask,
   markTaskRunning,
   markTaskSucceeded,
+  acknowledgeQueueMessage,
   scheduleRetry,
   markTaskFailed,
   cancelTask,
   updateStatus,
   updateTaskError,
   getTaskById,
+  getTaskByIdAndType,
   listTasksByProject,
   listTasksByProjectFiltered,
   buildTaskListQuery,
