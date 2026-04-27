@@ -116,6 +116,27 @@ describe("sdkProxyRoutes functions proxy", () => {
     });
   });
 
+  test("OPTIONS /functions/v1 allows SupaCloud async browser headers", async () => {
+    await withSdkProxyTestContext(async ({ calls }) => {
+      const response = await request("/functions/v1/aorist-generation/generate/crop", {
+        method: "OPTIONS",
+        headers: {
+          origin: "https://aorist.net",
+          "access-control-request-method": "POST",
+          "access-control-request-headers": "authorization, content-type, x-supacloud-async",
+          "x-project-ref": "proj_1",
+        },
+      });
+
+      expect(response.status).toBe(204);
+      expect(calls).toHaveLength(1);
+      const allowedHeaders = response.headers.get("access-control-allow-headers") || "";
+      expect(allowedHeaders).toContain("x-supacloud-async");
+      expect(allowedHeaders).toContain("x-supacloud-timeout");
+      expect(allowedHeaders).toContain("x-supacloud-retries");
+    });
+  });
+
   test("POST /functions/v1 auto-enqueues configured background routes without custom headers", async () => {
     await withSdkProxyTestContext(async ({ calls, trackSpy }) => {
       const getSettingsSpy = trackSpy(spyOn(projectService, "getBackgroundTaskSettings").mockResolvedValue({
