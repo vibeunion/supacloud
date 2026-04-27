@@ -48,8 +48,6 @@ The Management API response shape is stable:
 }
 ```
 
-`result` is also returned as a compatibility alias for older callers.
-
 ### pgvector example
 
 ```sql

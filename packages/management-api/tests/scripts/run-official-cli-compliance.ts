@@ -169,8 +169,8 @@ file_size_limit = "50MiB"
                 body: JSON.stringify({ query: "SELECT 1 as ok" }),
             });
             if (queryRes.ok) {
-                const data = await queryRes.json() as { result?: any[] };
-                console.log(`✅ Management API [database/query] Success! Result:`, data.result?.[0] || "ok");
+                const data = await queryRes.json() as { rows?: any[] };
+                console.log(`✅ Management API [database/query] Success! Rows:`, data.rows?.[0] || "ok");
             } else {
                 console.warn("⚠️  Management API [database/query] returned:", queryRes.status);
             }
