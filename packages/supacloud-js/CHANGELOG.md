@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.0](https://github.com/zuohuadong/supacloud/compare/supacloud-js-v0.11.4...supacloud-js-v0.12.0) (2026-04-27)
+
+
+### 🚀 Features
+
+* add queue client api ([1463b8d](https://github.com/zuohuadong/supacloud/commit/1463b8db899c0762e680b3ed1894dfbd5e1463df))
+
 ## [0.11.4](https://github.com/zuohuadong/supacloud/compare/supacloud-js-v0.11.3...supacloud-js-v0.11.4) (2026-04-24)
 
 
