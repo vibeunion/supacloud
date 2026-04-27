@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.1](https://github.com/zuohuadong/supacloud/compare/management-api-v0.12.0...management-api-v0.12.1) (2026-04-27)
+
+
+### 🐛 Bug Fixes
+
+* stabilize edge runtime under binary upgrades ([428453a](https://github.com/zuohuadong/supacloud/commit/428453a0fa15a0cf77e3e7db3939f766ad94cbcb))
+
 ## [0.12.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.11.7...management-api-v0.12.0) (2026-04-27)
 
 
