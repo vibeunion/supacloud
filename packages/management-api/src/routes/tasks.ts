@@ -3,7 +3,230 @@ import { taskRepository } from "../repositories/task.repository";
 import { TaskStatus } from "../db";
 import { backgroundFunctionWorker, projectService } from "../services";
 
+const QUEUE_TASK_TYPE_PREFIX = "queue:";
+const DEFAULT_QUEUE_MAX_ATTEMPTS = 3;
+const DEFAULT_QUEUE_VISIBILITY_TIMEOUT_SEC = 330;
+const MAX_QUEUE_DELAY_MS = 30 * 24 * 60 * 60 * 1000;
+
+function normalizeQueueName(name: string): string | null {
+    const value = name.trim();
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value)) return null;
+    return value;
+}
+
+function queueTaskType(name: string): string {
+    return `${QUEUE_TASK_TYPE_PREFIX}${name}`;
+}
+
+function normalizePositiveInteger(value: unknown, fallback: number, min: number, max: number): number {
+    const numberValue = typeof value === "number" ? value : Number(value);
+    if (!Number.isFinite(numberValue)) return fallback;
+    return Math.max(min, Math.min(max, Math.floor(numberValue)));
+}
+
+function buildQueueListFilters(queueName: string, query: Record<string, unknown>) {
+    const statuses = typeof query.status === "string"
+      ? query.status.split(",").map((value) => value.trim()).filter(Boolean)
+      : undefined;
+    const limit = normalizePositiveInteger(query.limit, 50, 1, 500);
+    return {
+        statuses,
+        taskTypes: [queueTaskType(queueName)],
+        onlyDeadLettered: query.dlq === "true",
+        limit,
+    };
+}
+
 export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
+    .post("/queues/:queueName/messages", async ({ params, body }) => {
+        try {
+            const queueName = normalizeQueueName(params.queueName);
+            if (!queueName) {
+                return status(400, { message: "Invalid queue name", code: "400" });
+            }
+
+            const input = body as {
+                payload?: Record<string, unknown>;
+                delayMs?: number;
+                maxAttempts?: number;
+                idempotencyKey?: string;
+                traceId?: string;
+            };
+            const delayMs = normalizePositiveInteger(input.delayMs, 0, 0, MAX_QUEUE_DELAY_MS);
+            const task = await taskRepository.createTask({
+                ref: params.ref,
+                type: queueTaskType(queueName),
+                payload: input.payload || {},
+                maxAttempts: normalizePositiveInteger(input.maxAttempts, DEFAULT_QUEUE_MAX_ATTEMPTS, 1, 10),
+                nextRunAt: new Date(Date.now() + delayMs),
+                idempotencyKey: input.idempotencyKey || null,
+                traceId: input.traceId || null,
+            });
+            return status(202, task);
+        } catch (err: unknown) {
+            return status(500, { message: "Failed to enqueue queue message", code: "500", details: (err instanceof Error ? err.message : String(err)) });
+        }
+    }, {
+        body: t.Object({
+            payload: t.Optional(t.Record(t.String(), t.Unknown())),
+            delayMs: t.Optional(t.Number()),
+            maxAttempts: t.Optional(t.Number()),
+            idempotencyKey: t.Optional(t.String()),
+            traceId: t.Optional(t.String()),
+        }),
+    })
+    .post("/queues/:queueName/messages/receive", async ({ params, body }) => {
+        try {
+            const queueName = normalizeQueueName(params.queueName);
+            if (!queueName) {
+                return status(400, { message: "Invalid queue name", code: "400" });
+            }
+
+            const input = body as { visibilityTimeoutSec?: number } | undefined;
+            const task = await taskRepository.claimQueueMessage({
+                projectRef: params.ref,
+                queueName: queueTaskType(queueName),
+                visibilityTimeoutSec: normalizePositiveInteger(input?.visibilityTimeoutSec, DEFAULT_QUEUE_VISIBILITY_TIMEOUT_SEC, 1, 1800),
+            });
+            if (!task) return status(204);
+            return task;
+        } catch (err: unknown) {
+            return status(500, { message: "Failed to receive queue message", code: "500", details: (err instanceof Error ? err.message : String(err)) });
+        }
+    }, {
+        body: t.Optional(t.Object({
+            visibilityTimeoutSec: t.Optional(t.Number()),
+        })),
+    })
+    .get("/queues/:queueName/messages", async ({ params, query }) => {
+        try {
+            const queueName = normalizeQueueName(params.queueName);
+            if (!queueName) {
+                return status(400, { message: "Invalid queue name", code: "400" });
+            }
+
+            return await taskRepository.listTasksByProjectFiltered(params.ref, buildQueueListFilters(queueName, query));
+        } catch (err: unknown) {
+            return status(500, { message: "Failed to list queue messages", code: "500", details: (err instanceof Error ? err.message : String(err)) });
+        }
+    }, {
+        query: t.Optional(t.Object({
+            status: t.Optional(t.String()),
+            dlq: t.Optional(t.String()),
+            limit: t.Optional(t.String()),
+        })),
+    })
+    .get("/queues/:queueName/messages/:messageId", async ({ params }) => {
+        try {
+            const queueName = normalizeQueueName(params.queueName);
+            if (!queueName) {
+                return status(400, { message: "Invalid queue name", code: "400" });
+            }
+
+            const task = await taskRepository.getTaskByIdAndType(params.messageId, params.ref, queueTaskType(queueName));
+            if (!task) {
+                return status(404, { message: "Queue message not found", code: "404" });
+            }
+            const attempts = await taskRepository.listTaskAttempts(params.messageId);
+            const latestAttempt = attempts[0] || null;
+            return {
+                ...task,
+                attempts,
+                latest_logs: latestAttempt?.logs || [],
+            };
+        } catch (err: unknown) {
+            return status(500, { message: "Failed to retrieve queue message", code: "500", details: (err instanceof Error ? err.message : String(err)) });
+        }
+    })
+    .post("/queues/:queueName/messages/:messageId/ack", async ({ params, body }) => {
+        try {
+            const queueName = normalizeQueueName(params.queueName);
+            if (!queueName) {
+                return status(400, { message: "Invalid queue name", code: "400" });
+            }
+
+            const current = await taskRepository.getTaskByIdAndType(params.messageId, params.ref, queueTaskType(queueName));
+            if (!current) {
+                return status(404, { message: "Queue message not found", code: "404" });
+            }
+            const input = body as { result?: Record<string, unknown> } | undefined;
+            const task = await taskRepository.acknowledgeQueueMessage(params.messageId, input?.result || null);
+            if (!task) {
+                return status(409, { message: "Queue message is not currently leased", code: "409" });
+            }
+            return task;
+        } catch (err: unknown) {
+            return status(500, { message: "Failed to acknowledge queue message", code: "500", details: (err instanceof Error ? err.message : String(err)) });
+        }
+    }, {
+        body: t.Optional(t.Object({
+            result: t.Optional(t.Record(t.String(), t.Unknown())),
+        })),
+    })
+    .post("/queues/:queueName/messages/:messageId/release", async ({ params, body }) => {
+        try {
+            const queueName = normalizeQueueName(params.queueName);
+            if (!queueName) {
+                return status(400, { message: "Invalid queue name", code: "400" });
+            }
+
+            const current = await taskRepository.getTaskByIdAndType(params.messageId, params.ref, queueTaskType(queueName));
+            if (!current) {
+                return status(404, { message: "Queue message not found", code: "404" });
+            }
+            const input = body as { delayMs?: number; error?: string } | undefined;
+            const delayMs = normalizePositiveInteger(input?.delayMs, 0, 0, MAX_QUEUE_DELAY_MS);
+            const task = await taskRepository.releaseTask(params.messageId, new Date(Date.now() + delayMs), input?.error);
+            return task || status(404, { message: "Queue message not found", code: "404" });
+        } catch (err: unknown) {
+            return status(500, { message: "Failed to release queue message", code: "500", details: (err instanceof Error ? err.message : String(err)) });
+        }
+    }, {
+        body: t.Optional(t.Object({
+            delayMs: t.Optional(t.Number()),
+            error: t.Optional(t.String()),
+        })),
+    })
+    .post("/queues/:queueName/messages/:messageId/fail", async ({ params, body }) => {
+        try {
+            const queueName = normalizeQueueName(params.queueName);
+            if (!queueName) {
+                return status(400, { message: "Invalid queue name", code: "400" });
+            }
+
+            const current = await taskRepository.getTaskByIdAndType(params.messageId, params.ref, queueTaskType(queueName));
+            if (!current) {
+                return status(404, { message: "Queue message not found", code: "404" });
+            }
+            const input = body as { error?: string; deadLetter?: boolean } | undefined;
+            const task = await taskRepository.markTaskFailed(params.messageId, input?.error || "Queue message failed", input?.deadLetter ?? true);
+            return task || status(404, { message: "Queue message not found", code: "404" });
+        } catch (err: unknown) {
+            return status(500, { message: "Failed to fail queue message", code: "500", details: (err instanceof Error ? err.message : String(err)) });
+        }
+    }, {
+        body: t.Optional(t.Object({
+            error: t.Optional(t.String()),
+            deadLetter: t.Optional(t.Boolean()),
+        })),
+    })
+    .delete("/queues/:queueName/messages/:messageId", async ({ params }) => {
+        try {
+            const queueName = normalizeQueueName(params.queueName);
+            if (!queueName) {
+                return status(400, { message: "Invalid queue name", code: "400" });
+            }
+
+            const current = await taskRepository.getTaskByIdAndType(params.messageId, params.ref, queueTaskType(queueName));
+            if (!current) {
+                return status(404, { message: "Queue message not found", code: "404" });
+            }
+            await taskRepository.cancelTask(params.messageId, "Deleted by queue client");
+            return status(204);
+        } catch (err: unknown) {
+            return status(500, { message: "Failed to delete queue message", code: "500", details: (err instanceof Error ? err.message : String(err)) });
+        }
+    })
     .get("/", async ({ params, query }) => {
         try {
             const statuses = typeof query.status === "string"

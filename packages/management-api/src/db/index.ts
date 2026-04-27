@@ -333,12 +333,12 @@ export const TaskType = {
   CLEANUP_ROUTER: "cleanup_router",
   EDGE_FUNCTION: "edge_function",
 } as const;
-export type TaskType = (typeof TaskType)[keyof typeof TaskType];
+export type TaskType = (typeof TaskType)[keyof typeof TaskType] | (string & {});
 
 export interface ProjectTask {
   id: string;
   project_ref: string;
-  task_type: TaskType;
+  task_type: string;
   status: TaskStatus;
   payload: Record<string, unknown>;
   error: string | null;

@@ -4,7 +4,13 @@ import { TaskStatus } from "../../src/db";
 
 const listTasksByProjectFiltered = mock(() => Promise.resolve([]));
 const getTaskById = mock(() => Promise.resolve(null));
+const getTaskByIdAndType = mock(() => Promise.resolve(null));
 const listTaskAttempts = mock(() => Promise.resolve([]));
+const createTask = mock(() => Promise.resolve(null));
+const claimQueueMessage = mock(() => Promise.resolve(null));
+const acknowledgeQueueMessage = mock(() => Promise.resolve(null));
+const releaseTask = mock(() => Promise.resolve(null));
+const markTaskFailed = mock(() => Promise.resolve(null));
 const cancelTask = mock(() => Promise.resolve(null));
 const retryTask = mock(() => Promise.resolve(null));
 const requestTaskCancellation = mock(() => Promise.resolve(null));
@@ -46,9 +52,15 @@ spyOn(taskRepository, "listTasksByProjectFiltered").mockImplementation(
   listTasksByProjectFiltered as typeof taskRepository.listTasksByProjectFiltered,
 );
 spyOn(taskRepository, "getTaskById").mockImplementation(getTaskById as typeof taskRepository.getTaskById);
+spyOn(taskRepository, "getTaskByIdAndType").mockImplementation(getTaskByIdAndType as typeof taskRepository.getTaskByIdAndType);
 spyOn(taskRepository, "listTaskAttempts").mockImplementation(
   listTaskAttempts as typeof taskRepository.listTaskAttempts,
 );
+spyOn(taskRepository, "createTask").mockImplementation(createTask as typeof taskRepository.createTask);
+spyOn(taskRepository, "claimQueueMessage").mockImplementation(claimQueueMessage as typeof taskRepository.claimQueueMessage);
+spyOn(taskRepository, "acknowledgeQueueMessage").mockImplementation(acknowledgeQueueMessage as typeof taskRepository.acknowledgeQueueMessage);
+spyOn(taskRepository, "releaseTask").mockImplementation(releaseTask as typeof taskRepository.releaseTask);
+spyOn(taskRepository, "markTaskFailed").mockImplementation(markTaskFailed as typeof taskRepository.markTaskFailed);
 spyOn(taskRepository, "cancelTask").mockImplementation(cancelTask as typeof taskRepository.cancelTask);
 spyOn(taskRepository, "retryTask").mockImplementation(retryTask as typeof taskRepository.retryTask);
 spyOn(taskRepository, "requestTaskCancellation").mockImplementation(
@@ -77,7 +89,13 @@ describe("taskRoutes", () => {
   beforeEach(() => {
     listTasksByProjectFiltered.mockReset();
     getTaskById.mockReset();
+    getTaskByIdAndType.mockReset();
     listTaskAttempts.mockReset();
+    createTask.mockReset();
+    claimQueueMessage.mockReset();
+    acknowledgeQueueMessage.mockReset();
+    releaseTask.mockReset();
+    markTaskFailed.mockReset();
     cancelTask.mockReset();
     retryTask.mockReset();
     requestTaskCancellation.mockReset();
@@ -87,6 +105,101 @@ describe("taskRoutes", () => {
     projectService.updateBackgroundTaskSettings.mockReset();
 
     backgroundFunctionWorker.cancel.mockResolvedValue(true);
+  });
+
+  test("POST /queues/:queueName/messages enqueues a JSON message", async () => {
+    createTask.mockResolvedValueOnce({ id: "msg_1", task_type: "queue:emails", status: "pending" });
+
+    const response = await request("/v1/projects/proj_1/tasks/queues/emails/messages", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ payload: { hello: "world" }, delayMs: 1000, maxAttempts: 5 }),
+    });
+    const payload = await response.json();
+
+    expect(response.status).toBe(202);
+    expect(payload.id).toBe("msg_1");
+    expect(createTask).toHaveBeenCalledWith(expect.objectContaining({
+      ref: "proj_1",
+      type: "queue:emails",
+      payload: { hello: "world" },
+      maxAttempts: 5,
+    }));
+  });
+
+  test("POST /queues/:queueName/messages/receive leases the next available message", async () => {
+    claimQueueMessage.mockResolvedValueOnce({ id: "msg_1", task_type: "queue:emails", status: "leased" });
+
+    const response = await request("/v1/projects/proj_1/tasks/queues/emails/messages/receive", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ visibilityTimeoutSec: 60 }),
+    });
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.id).toBe("msg_1");
+    expect(claimQueueMessage).toHaveBeenCalledWith({
+      projectRef: "proj_1",
+      queueName: "queue:emails",
+      visibilityTimeoutSec: 60,
+    });
+  });
+
+  test("POST /queues/:queueName/messages/receive returns 204 when empty", async () => {
+    claimQueueMessage.mockResolvedValueOnce(null);
+
+    const response = await request("/v1/projects/proj_1/tasks/queues/emails/messages/receive", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({}),
+    });
+
+    expect(response.status).toBe(204);
+  });
+
+  test("POST /queues/:queueName/messages/:messageId/ack acknowledges a leased message", async () => {
+    getTaskByIdAndType.mockResolvedValueOnce({ id: "msg_1", task_type: "queue:emails", status: "leased" });
+    acknowledgeQueueMessage.mockResolvedValueOnce({ id: "msg_1", task_type: "queue:emails", status: "succeeded" });
+
+    const response = await request("/v1/projects/proj_1/tasks/queues/emails/messages/msg_1/ack", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ result: { ok: true } }),
+    });
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.status).toBe("succeeded");
+    expect(acknowledgeQueueMessage).toHaveBeenCalledWith("msg_1", { ok: true });
+  });
+
+  test("GET /queues/:queueName/messages lists only that queue", async () => {
+    listTasksByProjectFiltered.mockResolvedValueOnce([
+      { id: "msg_1", task_type: "queue:emails", status: "dead_lettered" },
+    ]);
+
+    const response = await request("/v1/projects/proj_1/tasks/queues/emails/messages?dlq=true&limit=5");
+
+    expect(response.status).toBe(200);
+    expect(listTasksByProjectFiltered).toHaveBeenCalledWith("proj_1", {
+      statuses: undefined,
+      taskTypes: ["queue:emails"],
+      onlyDeadLettered: true,
+      limit: 5,
+    });
+  });
+
+  test("DELETE /queues/:queueName/messages/:messageId marks queue message deleted", async () => {
+    getTaskByIdAndType.mockResolvedValueOnce({ id: "msg_1", task_type: "queue:emails", status: "leased" });
+    cancelTask.mockResolvedValueOnce({ id: "msg_1", status: "cancelled" });
+
+    const response = await request("/v1/projects/proj_1/tasks/queues/emails/messages/msg_1", {
+      method: "DELETE",
+    });
+
+    expect(response.status).toBe(204);
+    expect(cancelTask).toHaveBeenCalledWith("msg_1", "Deleted by queue client");
   });
 
   test("GET /v1/projects/:ref/tasks forwards function_slug filter to repository", async () => {
