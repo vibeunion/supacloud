@@ -2,10 +2,14 @@
 
 SupaCloud now exposes two human-facing CLIs with strict ownership boundaries:
 
-- `@supacloud/cli` / `supacloud`
+- `@supacloud/cli` / `supacloud-cli`
 - `@supacloud/admin` / `supacloud-admin`
 
-## `supacloud`
+Avoid using the bare `supacloud` name for project workflows. SupaCloud also ships
+a server binary named `supacloud`, usually installed at `/usr/local/bin/supacloud`,
+so the explicit project command is `supacloud-cli`.
+
+## `supacloud-cli`
 
 Project-scoped by default. Intended for project users and developers.
 
@@ -19,13 +23,21 @@ Project-scoped by default. Intended for project users and developers.
 ### Typical commands
 
 ```bash
-npx @supacloud/cli status
-npx @supacloud/cli project get
-npx @supacloud/cli project logs --log_type database
-npx @supacloud/cli database query --sql "select now()"
-npx @supacloud/cli database query --ref abc123 --file ./queries/vector-search.sql
-npx @supacloud/cli database push_migrations --ref abc123 --dir supabase/migrations --dry_run
-npx @supacloud/cli frontend list --ref abc123
+npm install -g @supacloud/cli
+
+supacloud-cli status
+supacloud-cli project get
+supacloud-cli project logs --log_type database
+supacloud-cli database query --sql "select now()"
+supacloud-cli database query --ref abc123 --file ./queries/vector-search.sql
+supacloud-cli database push_migrations --ref abc123 --dir supabase/migrations --dry_run
+supacloud-cli frontend list --ref abc123
+```
+
+One-off execution without global install:
+
+```bash
+npm exec --package @supacloud/cli -- supacloud-cli status
 ```
 
 ### Database SQL files
@@ -33,7 +45,7 @@ npx @supacloud/cli frontend list --ref abc123
 For complex SQL, pgvector queries, and transaction blocks, prefer `--file`:
 
 ```bash
-npx @supacloud/cli database query --ref abc123 --file ./queries/vector-search.sql
+supacloud-cli database query --ref abc123 --file ./queries/vector-search.sql
 ```
 
 The Management API response shape is stable:
