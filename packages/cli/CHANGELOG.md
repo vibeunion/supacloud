@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.0](https://github.com/zuohuadong/supacloud/compare/cli-v0.2.0...cli-v0.3.0) (2026-04-27)
+
+
+### 🚀 Features
+
+* improve database sql cli workflows ([1d1ac83](https://github.com/zuohuadong/supacloud/commit/1d1ac83d7518f223e048b8caedd1420460b1e70e))
+
+
+### 💅 Elegance & Refactoring
+
+* remove legacy sql result alias ([3565c00](https://github.com/zuohuadong/supacloud/commit/3565c00f197a35e129785cce299ee48b9f91f7b8))
+
 ## [0.2.0](https://github.com/zuohuadong/supacloud/compare/cli-v0.1.2...cli-v0.2.0) (2026-04-26)
 
 
