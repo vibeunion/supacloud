@@ -397,22 +397,24 @@ jobs:
         working-directory: packages/management-api
         run: bun install
 
-      - name: Build all platforms
+      - name: Build Linux primary binaries
         working-directory: packages/management-api
         run: |
           mkdir -p dist
-          bun run build:amd64
-          bun run build:arm64
-          bun run build:macos-amd64
-          bun run build:macos-arm64
+          bun run build:linux
           mv supacloud-linux-amd64 dist/
           mv supacloud-linux-arm64 dist/
+
+      - name: Build macOS developer binaries
+        working-directory: packages/management-api
+        run: |
+          bun run build:macos
           mv supacloud-macos-amd64 dist/
           mv supacloud-macos-arm64 dist/
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: supacloud-binaries
+          name: supacloud-binaries-linux-primary-macos-dev
           path: packages/management-api/dist/*
           retention-days: 7
