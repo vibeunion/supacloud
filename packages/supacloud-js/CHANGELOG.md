@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.1](https://github.com/zuohuadong/supacloud/compare/supacloud-js-v0.12.0...supacloud-js-v0.12.1) (2026-04-27)
+
+
+### 🐛 Bug Fixes
+
+* avoid unsupported test resolves matcher ([ddb21ca](https://github.com/zuohuadong/supacloud/commit/ddb21ca65ea1fc18a0ec198ae1eceb04812ae027))
+
 ## [0.12.0](https://github.com/zuohuadong/supacloud/compare/supacloud-js-v0.11.4...supacloud-js-v0.12.0) (2026-04-27)
 
 
