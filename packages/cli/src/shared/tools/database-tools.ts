@@ -19,7 +19,7 @@ export function migrationVersionFromFilename(file: string, fallbackIndex = 0): n
 }
 
 function appliedMigrationKeys(data: unknown): Set<string> {
-    const rows = Array.isArray(data) ? data : (data as { rows?: unknown[] })?.rows || [];
+    const rows = (data as { rows?: unknown[] })?.rows || [];
     const keys = new Set<string>();
     for (const row of rows) {
         if (!row || typeof row !== "object") continue;
@@ -42,7 +42,6 @@ function sqlCreatesVectorExtension(sql: string): boolean {
 }
 
 function extensionRows(data: unknown): Array<Record<string, unknown>> {
-    if (Array.isArray(data)) return data as Array<Record<string, unknown>>;
     const shaped = data as { rows?: unknown[] };
     const rows = shaped?.rows || [];
     return Array.isArray(rows) ? rows as Array<Record<string, unknown>> : [];

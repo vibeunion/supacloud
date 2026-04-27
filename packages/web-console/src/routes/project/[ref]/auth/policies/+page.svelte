@@ -64,7 +64,7 @@
       });
       const data = await res.json();
       if (data.error) throw new Error(data.message || data.error);
-      return (Array.isArray(data) ? data : data.rows || []) as RlsPolicy[];
+      return (data.rows || []) as RlsPolicy[];
     }
   }));
 
@@ -85,8 +85,8 @@
       const roleData = await roleRes.json();
       let tables: string[] = [];
       let roles: string[] = [];
-      if (!tblData.error) tables = (Array.isArray(tblData) ? tblData : tblData.rows || []).map((r: Record<string, unknown>) => r.tablename as string);
-      if (!roleData.error) roles = (Array.isArray(roleData) ? roleData : roleData.rows || []).map((r: Record<string, unknown>) => r.rolname as string);
+      if (!tblData.error) tables = (tblData.rows || []).map((r: Record<string, unknown>) => r.tablename as string);
+      if (!roleData.error) roles = (roleData.rows || []).map((r: Record<string, unknown>) => r.rolname as string);
       return { tables, roles };
     }
   }));

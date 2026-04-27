@@ -46,7 +46,7 @@
           }
           
           // Success
-          return Array.isArray(data) ? data : data.rows || [];
+          return data.rows || [];
 
         } catch (err: unknown) {
           lastError = { message: (err instanceof Error ? err.message : String(err)) };

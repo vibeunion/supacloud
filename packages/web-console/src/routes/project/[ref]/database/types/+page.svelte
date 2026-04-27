@@ -39,7 +39,7 @@
       });
       const data = await res.json();
       if (data.error) throw new Error(data.message || data.error);
-      return (Array.isArray(data) ? data : data.rows || []) as EnumType[];
+      return (data.rows || []) as EnumType[];
     }
   }));
 

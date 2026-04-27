@@ -28,7 +28,7 @@
       });
       if (!res.ok) throw new Error("Failed to fetch auth stats");
       const data = await res.json();
-      const rows = Array.isArray(data) ? data : data.rows || [];
+      const rows = data.rows || [];
       const stats = rows.length > 0 ? rows[0] : null;
 
       // Recent signups
@@ -43,7 +43,7 @@
       });
       if (!res2.ok) throw new Error("Failed to fetch recent users");
       const data2 = await res2.json();
-      const users = Array.isArray(data2) ? data2 : data2.rows || [];
+      const users = data2.rows || [];
       
       return { stats, users };
     }

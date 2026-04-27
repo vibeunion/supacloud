@@ -52,7 +52,7 @@
       });
       if (!res.ok) throw new Error("Failed to fetch endpoints");
       const data = await res.json();
-      const rows = Array.isArray(data) ? data : data.rows || [];
+      const rows = data.rows || [];
       return rows.map((r: Record<string, unknown>) => ({
         table_name: r.table_name,
         table_schema: r.table_schema,
