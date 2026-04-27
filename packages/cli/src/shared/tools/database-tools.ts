@@ -12,31 +12,6 @@ export interface DatabaseToolsConfig {
     projectRef?: string;
 }
 
-function normalizeSqlResponse(result: Awaited<ReturnType<HttpTransport["post"]>>) {
-    if (!result.ok) return result;
-    const data = result.data as {
-        rows?: unknown[];
-        result?: unknown[];
-        rowCount?: number;
-        command?: string;
-        fields?: string[];
-        notices?: string[];
-    };
-    if (Array.isArray(data?.result) && !Array.isArray(data.rows)) {
-        return {
-            ...result,
-            data: {
-                rows: data.result,
-                rowCount: data.rowCount ?? data.result.length,
-                command: data.command,
-                fields: data.fields,
-                notices: data.notices,
-            },
-        };
-    }
-    return result;
-}
-
 export function migrationVersionFromFilename(file: string, fallbackIndex = 0): number {
     const match = basename(file).match(/^(\d{8,20})[_-]/);
     if (match) return Number(match[1]);
@@ -68,8 +43,8 @@ function sqlCreatesVectorExtension(sql: string): boolean {
 
 function extensionRows(data: unknown): Array<Record<string, unknown>> {
     if (Array.isArray(data)) return data as Array<Record<string, unknown>>;
-    const shaped = data as { rows?: unknown[]; result?: unknown[] };
-    const rows = shaped?.rows || shaped?.result || [];
+    const shaped = data as { rows?: unknown[] };
+    const rows = shaped?.rows || [];
     return Array.isArray(rows) ? rows as Array<Record<string, unknown>> : [];
 }
 
@@ -159,7 +134,7 @@ Actions: ${allActions.join(", ")}${readOnly ? " (read-only mode)" : ""}`,
                 }
             }
 
-            const execSql = async (sql: string) => normalizeSqlResponse(await http.post(`/v1/projects/${ref}/database/sql`, { sql }));
+            const execSql = async (sql: string) => http.post(`/v1/projects/${ref}/database/sql`, { sql });
 
             let text: string;
             switch (action) {

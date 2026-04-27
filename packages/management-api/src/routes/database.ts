@@ -29,7 +29,6 @@ export function sqlRouteResponse(result: Awaited<ReturnType<typeof db.executeQue
     command: result.command,
     fields: result.fields || [],
     notices: result.notices || [],
-    result: result.rows,
   };
 }
 
