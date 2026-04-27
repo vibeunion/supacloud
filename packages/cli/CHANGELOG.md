@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.2](https://github.com/zuohuadong/supacloud/compare/cli-v0.3.1...cli-v0.3.2) (2026-04-27)
+
+
+### 🐛 Bug Fixes
+
+* clarify project cli command name ([e715e59](https://github.com/zuohuadong/supacloud/commit/e715e597e7773dae98f3868f179139a510e6f54a))
+
 ## [0.3.1](https://github.com/zuohuadong/supacloud/compare/cli-v0.3.0...cli-v0.3.1) (2026-04-27)
 
 
