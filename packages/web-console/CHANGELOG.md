@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.5](https://github.com/zuohuadong/supacloud/compare/web-console-v0.8.4...web-console-v0.8.5) (2026-04-27)
+
+
+### 🐛 Bug Fixes
+
+* **database:** consume sql rows response only ([75c3f68](https://github.com/zuohuadong/supacloud/commit/75c3f6818211cf326954cb75c530ef25e48b901b))
+
 ## [0.8.4](https://github.com/zuohuadong/supacloud/compare/web-console-v0.8.3...web-console-v0.8.4) (2026-04-24)
 
 
