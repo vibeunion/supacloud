@@ -30,7 +30,7 @@
       });
       if (!res.ok) throw new Error("Failed to fetch storage stats");
       const data = await res.json();
-      return Array.isArray(data) ? data : data.rows || [];
+      return data.rows || [];
     }
   }));
 

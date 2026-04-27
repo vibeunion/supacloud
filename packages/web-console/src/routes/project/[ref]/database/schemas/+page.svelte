@@ -36,7 +36,7 @@
       });
       const data = await res.json();
       if (data.error) throw new Error(data.message || data.error);
-      return (Array.isArray(data) ? data : data.rows || []) as SchemaInfo[];
+      return (data.rows || []) as SchemaInfo[];
     }
   }));
 

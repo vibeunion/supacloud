@@ -47,7 +47,7 @@
       });
       const data = await res.json();
       if (data.error) throw new Error(data.message || data.error);
-      return (Array.isArray(data) ? data : data.rows || []) as Wrapper[];
+      return (data.rows || []) as Wrapper[];
     }
   }));
 

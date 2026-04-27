@@ -32,7 +32,7 @@
       });
       if (!res.ok) throw new Error("Failed to fetch DB stats");
       const data = await res.json();
-      const dbStatsData = Array.isArray(data) ? data : data.rows || [];
+      const dbStatsData = data.rows || [];
 
       const res2 = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
         method: "POST",
@@ -55,7 +55,7 @@
       });
       if (!res2.ok) throw new Error("Failed to fetch table stats");
       const data2 = await res2.json();
-      const tableStatsData = Array.isArray(data2) ? data2 : data2.rows || [];
+      const tableStatsData = data2.rows || [];
 
       return { dbStats: dbStatsData, tableStats: tableStatsData };
     }
