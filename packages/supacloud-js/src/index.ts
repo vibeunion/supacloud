@@ -86,6 +86,37 @@ export type SupaCloudTaskSubmitOptions = {
   method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 };
 
+export type SupaCloudQueueSendOptions = {
+  delayMs?: number;
+  maxAttempts?: number;
+  idempotencyKey?: string;
+  traceId?: string;
+};
+
+export type SupaCloudQueueReceiveOptions = {
+  visibilityTimeoutSec?: number;
+};
+
+export type SupaCloudQueueReleaseOptions = {
+  delayMs?: number;
+  error?: string;
+};
+
+export type SupaCloudQueueFailOptions = {
+  error?: string;
+  deadLetter?: boolean;
+};
+
+export type SupaCloudQueueListFilters = {
+  status?: string | string[];
+  dlq?: boolean;
+  limit?: number;
+};
+
+export type SupaCloudQueueMessage = SupaCloudTaskDetail & {
+  payload: Record<string, unknown>;
+};
+
 export type SupaCloudTaskWaitOptions = {
   intervalMs?: number;
   signal?: AbortSignal;
@@ -140,7 +171,7 @@ export class SupaCloudTaskSubmitError extends Error {
   }
 }
 
-type HttpMethod = "GET" | "POST";
+type HttpMethod = "GET" | "POST" | "DELETE";
 
 const TERMINAL_STATUSES = new Set<string>([
   "succeeded",
@@ -168,6 +199,18 @@ function createQueryString(filters: SupaCloudTaskListFilters = {}): string {
   if (statuses?.length) params.set("status", statuses.join(","));
   if (taskTypes?.length) params.set("task_type", taskTypes.join(","));
   if (filters.functionSlug) params.set("function_slug", filters.functionSlug);
+  if (filters.dlq) params.set("dlq", "true");
+  if (filters.limit !== undefined) params.set("limit", String(filters.limit));
+
+  const query = params.toString();
+  return query.length > 0 ? `?${query}` : "";
+}
+
+function createQueueQueryString(filters: SupaCloudQueueListFilters = {}): string {
+  const params = new URLSearchParams();
+  const statuses = toArray(filters.status);
+
+  if (statuses?.length) params.set("status", statuses.join(","));
   if (filters.dlq) params.set("dlq", "true");
   if (filters.limit !== undefined) params.set("limit", String(filters.limit));
 
@@ -205,10 +248,10 @@ function normalizeTaskSnapshot(task: unknown): SupaCloudTaskSnapshot {
   };
 }
 
-class SupaCloudTasksClient<TClient extends SupabaseClient = SupabaseClient> {
-  constructor(private readonly options: Required<SupaCloudClientOptions<TClient>>) {}
+class SupaCloudManagementClient<TClient extends SupabaseClient = SupabaseClient> {
+  constructor(protected readonly options: Required<SupaCloudClientOptions<TClient>>) {}
 
-  private async resolveAccessToken(): Promise<string> {
+  protected async resolveAccessToken(): Promise<string> {
     const token = await this.options.getAccessToken();
     if (!token) {
       throw new Error(
@@ -218,7 +261,7 @@ class SupaCloudTasksClient<TClient extends SupabaseClient = SupabaseClient> {
     return token;
   }
 
-  private async request<T>(path: string, method: HttpMethod, body?: unknown): Promise<T> {
+  protected async request<T>(path: string, method: HttpMethod, body?: unknown): Promise<T> {
     const accessToken = await this.resolveAccessToken();
     const response = await fetch(`${this.options.managementApiUrl}${path}`, {
       method,
@@ -233,9 +276,13 @@ class SupaCloudTasksClient<TClient extends SupabaseClient = SupabaseClient> {
       throw new Error(`SupaCloud request failed (${response.status})`);
     }
 
+    if (response.status === 204) return undefined as T;
+
     return (await response.json()) as T;
   }
+}
 
+class SupaCloudTasksClient<TClient extends SupabaseClient = SupabaseClient> extends SupaCloudManagementClient<TClient> {
   private createReceipt(taskId: string, status: string): SupaCloudTaskReceipt {
     return {
       taskId,
@@ -533,6 +580,105 @@ class SupaCloudTasksClient<TClient extends SupabaseClient = SupabaseClient> {
   }
 }
 
+class SupaCloudQueueClient<TClient extends SupabaseClient = SupabaseClient> extends SupaCloudManagementClient<TClient> {
+  constructor(
+    options: Required<SupaCloudClientOptions<TClient>>,
+    private readonly name: string,
+  ) {
+    super(options);
+  }
+
+  private get encodedName(): string {
+    return encodeURIComponent(this.name);
+  }
+
+  async send(
+    payload: Record<string, unknown> = {},
+    options: SupaCloudQueueSendOptions = {},
+  ): Promise<SupaCloudQueueMessage> {
+    return this.request<SupaCloudQueueMessage>(
+      `/v1/projects/${this.options.projectRef}/tasks/queues/${this.encodedName}/messages`,
+      "POST",
+      {
+        payload,
+        delayMs: options.delayMs,
+        maxAttempts: options.maxAttempts,
+        idempotencyKey: options.idempotencyKey,
+        traceId: options.traceId,
+      },
+    );
+  }
+
+  async receive(
+    options: SupaCloudQueueReceiveOptions = {},
+  ): Promise<SupaCloudQueueMessage | null> {
+    const message = await this.request<SupaCloudQueueMessage | undefined>(
+      `/v1/projects/${this.options.projectRef}/tasks/queues/${this.encodedName}/messages/receive`,
+      "POST",
+      options,
+    );
+    return message ?? null;
+  }
+
+  async list(filters: SupaCloudQueueListFilters = {}): Promise<SupaCloudQueueMessage[]> {
+    return this.request<SupaCloudQueueMessage[]>(
+      `/v1/projects/${this.options.projectRef}/tasks/queues/${this.encodedName}/messages${createQueueQueryString(filters)}`,
+      "GET",
+    );
+  }
+
+  async listFailed(limit = 100): Promise<SupaCloudQueueMessage[]> {
+    return this.list({ dlq: true, limit });
+  }
+
+  async get(messageId: string): Promise<SupaCloudQueueMessage> {
+    return this.request<SupaCloudQueueMessage>(
+      `/v1/projects/${this.options.projectRef}/tasks/queues/${this.encodedName}/messages/${messageId}`,
+      "GET",
+    );
+  }
+
+  async ack(
+    messageId: string,
+    result?: Record<string, unknown>,
+  ): Promise<SupaCloudQueueMessage> {
+    return this.request<SupaCloudQueueMessage>(
+      `/v1/projects/${this.options.projectRef}/tasks/queues/${this.encodedName}/messages/${messageId}/ack`,
+      "POST",
+      result ? { result } : {},
+    );
+  }
+
+  async delete(messageId: string): Promise<void> {
+    await this.request<void>(
+      `/v1/projects/${this.options.projectRef}/tasks/queues/${this.encodedName}/messages/${messageId}`,
+      "DELETE",
+    );
+  }
+
+  async release(
+    messageId: string,
+    options: SupaCloudQueueReleaseOptions = {},
+  ): Promise<SupaCloudQueueMessage> {
+    return this.request<SupaCloudQueueMessage>(
+      `/v1/projects/${this.options.projectRef}/tasks/queues/${this.encodedName}/messages/${messageId}/release`,
+      "POST",
+      options,
+    );
+  }
+
+  async fail(
+    messageId: string,
+    options: SupaCloudQueueFailOptions = {},
+  ): Promise<SupaCloudQueueMessage> {
+    return this.request<SupaCloudQueueMessage>(
+      `/v1/projects/${this.options.projectRef}/tasks/queues/${this.encodedName}/messages/${messageId}/fail`,
+      "POST",
+      options,
+    );
+  }
+}
+
 export function createSupaCloudClient<TClient extends SupabaseClient = SupabaseClient>(
   options: SupaCloudClientOptions<TClient>,
 ) {
@@ -552,6 +698,7 @@ export function createSupaCloudClient<TClient extends SupabaseClient = SupabaseC
     projectRef: normalized.projectRef,
     managementApiUrl: normalized.managementApiUrl,
     tasks,
+    queue: (name: string) => new SupaCloudQueueClient(normalized, name),
     functions: {
       invokeBackground: (
         functionName: string,

@@ -38,6 +38,18 @@ describe("TaskRepository query builders", () => {
     ]);
   });
 
+  test("buildTaskListQuery supports queue task type filters", () => {
+    const { sqlText, values } = buildTaskListQuery("proj_1", {
+      taskTypes: ["queue:emails"],
+      statuses: ["pending", "leased"],
+      limit: 20,
+    });
+
+    expect(sqlText).toContain("status IN ($2, $3)");
+    expect(sqlText).toContain("task_type IN ($4)");
+    expect(values).toEqual(["proj_1", "pending", "leased", "queue:emails", 20]);
+  });
+
   test("buildTaskListQuery prefers explicit DLQ filter over statuses", () => {
     const { sqlText, values } = buildTaskListQuery("proj_1", {
       statuses: ["failed"],
