@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.12.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.11.7...management-api-v0.12.0) (2026-04-27)
+
+
+### 🚀 Features
+
+* add queue client api ([1463b8d](https://github.com/zuohuadong/supacloud/commit/1463b8db899c0762e680b3ed1894dfbd5e1463df))
+* improve database sql cli workflows ([1d1ac83](https://github.com/zuohuadong/supacloud/commit/1d1ac83d7518f223e048b8caedd1420460b1e70e))
+
+
+### 🐛 Bug Fixes
+
+* publish background tasks for realtime ([16582be](https://github.com/zuohuadong/supacloud/commit/16582be1fe7f0a74ea94a31af1d5d0ee526b991e))
+* skip missing tenant dbs during realtime reconcile ([300ce92](https://github.com/zuohuadong/supacloud/commit/300ce923eea65e21a280e29954f58a3d4945aa98))
+
+
+### 💅 Elegance & Refactoring
+
+* remove legacy sql result alias ([3565c00](https://github.com/zuohuadong/supacloud/commit/3565c00f197a35e129785cce299ee48b9f91f7b8))
+
 ## [0.11.7](https://github.com/zuohuadong/supacloud/compare/management-api-v0.11.6...management-api-v0.11.7) (2026-04-27)
 
 
