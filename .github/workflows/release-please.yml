@@ -54,6 +54,14 @@ jobs:
         working-directory: packages/management-api
         run: bun install
 
+      - name: Build web console static artifact
+        run: |
+          cd packages/web-console
+          bun install
+          bun run build
+          mkdir -p ../management-api/dist
+          tar -czf ../management-api/dist/web-console-build.tar.gz -C build .
+
       - name: Build release binaries
         working-directory: packages/management-api
         run: |
@@ -66,7 +74,7 @@ jobs:
           mv supacloud-macos-arm64 dist/
           chmod 0755 dist/supacloud-*
           cd dist
-          sha256sum supacloud-* > SHA256SUMS
+          sha256sum supacloud-* web-console-build.tar.gz > SHA256SUMS
 
       - name: Upload binaries to GitHub Release
         working-directory: packages/management-api

@@ -24,7 +24,20 @@ import { authRoutes, deployRoutes, storageCompatRoutes } from "./routes";
 import { migrateLegacyVersionArtifacts } from "./services/edge-function.service";
 import { resolveRealtimeTenantHost } from "./utils/sdk-parity";
 
-const WEB_CONSOLE_DIR = "/opt/supacloud/packages/web-console/build";
+const WEB_CONSOLE_CURRENT_DIR = "/opt/supacloud/web-console/current";
+const WEB_CONSOLE_LEGACY_DIR = "/opt/supacloud/packages/web-console/build";
+
+function getWebConsoleDir(): string {
+  if (process.env.WEB_CONSOLE_DIR) return process.env.WEB_CONSOLE_DIR;
+  try {
+    if (Bun.file(`${WEB_CONSOLE_CURRENT_DIR}/index.html`).size > 0) {
+      return WEB_CONSOLE_CURRENT_DIR;
+    }
+  } catch {
+    // Fall back to the legacy source-tree build path for pre-binary installs.
+  }
+  return WEB_CONSOLE_LEGACY_DIR;
+}
 
 const configuredCorsOrigins = config.corsOrigins
   .split(",")
@@ -81,7 +94,7 @@ let _indexHtmlMtime: number = 0;
 /** Check if a static asset exists on disk (O(1) syscall) */
 function staticFileExists(relativePath: string): boolean {
   try {
-    const f = Bun.file(`${WEB_CONSOLE_DIR}${relativePath}`);
+    const f = Bun.file(`${getWebConsoleDir()}${relativePath}`);
     return f.size > 0;
   } catch {
     return false;
@@ -102,7 +115,7 @@ function hasFileExtension(path: string): boolean {
 /** Get index.html with mtime-based cache invalidation */
 async function getIndexHtml(): Promise<string | null> {
   try {
-    const file = Bun.file(`${WEB_CONSOLE_DIR}/index.html`);
+    const file = Bun.file(`${getWebConsoleDir()}/index.html`);
     const mtime = file.lastModified;
     if (!_cachedIndexHtml || mtime !== _indexHtmlMtime) {
       _cachedIndexHtml = await file.text();
@@ -368,15 +381,16 @@ const app = new Elysia({ strictPath: false })
 export function registerStaticAssets() {
   // Log directory presence once at startup (no full directory scan)
   try {
-    const idx = Bun.file(`${WEB_CONSOLE_DIR}/index.html`);
+    const webConsoleDir = getWebConsoleDir();
+    const idx = Bun.file(`${webConsoleDir}/index.html`);
     if (idx.size > 0) {
       logger.info(
-        `[StaticAssets] Serving from ${WEB_CONSOLE_DIR} (try_files mode)`,
+        `[StaticAssets] Serving from ${webConsoleDir} (try_files mode)`,
       );
     }
   } catch {
     logger.warn(
-      `[StaticAssets] ${WEB_CONSOLE_DIR} not found, will use embedded fallback`,
+      `[StaticAssets] ${getWebConsoleDir()} not found, will use embedded fallback`,
     );
   }
 
@@ -412,7 +426,7 @@ export function registerStaticAssets() {
       }
 
       if (diskFile) {
-        const file = Bun.file(`${WEB_CONSOLE_DIR}${diskFile}`);
+        const file = Bun.file(`${getWebConsoleDir()}${diskFile}`);
 
         // ETag / 304 Not Modified support
         const etag = `W/"${file.lastModified}-${file.size}"`;
