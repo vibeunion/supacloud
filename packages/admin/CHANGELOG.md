@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.3](https://github.com/zuohuadong/supacloud/compare/admin-v0.1.2...admin-v0.1.3) (2026-04-27)
+
+
+### 💅 Elegance & Refactoring
+
+* remove legacy sql result alias ([3565c00](https://github.com/zuohuadong/supacloud/commit/3565c00f197a35e129785cce299ee48b9f91f7b8))
+
 ## [0.1.2](https://github.com/zuohuadong/supacloud/compare/admin-v0.1.1...admin-v0.1.2) (2026-04-27)
 
 
