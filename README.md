@@ -408,6 +408,7 @@ Use them to:
 - register any missing Realtime tenants
 - repair tenant connection metadata
 - grant required `realtime` schema privileges in project databases
+- add `public.tasks` to the `supabase_realtime` publication and set `REPLICA IDENTITY FULL`
 
 For new installs, `install.sh` now generates a valid `REALTIME_DB_ENC_KEY`, which prevents the historical `Bad key size` failure during tenant registration.
 
