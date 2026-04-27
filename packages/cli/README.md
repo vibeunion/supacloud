@@ -2,7 +2,24 @@
 
 Project-scoped CLI for SupaCloud users.
 
-`supacloud` defaults to the current workspace's project context. If you do not pass explicit flags, it tries to auto-link from `.env`:
+Use the explicit `supacloud-cli` command for project workflows. The old `supacloud`
+binary name is kept as a compatibility alias only; it is easy to confuse with the
+server binary installed at `/usr/local/bin/supacloud`.
+
+Install:
+
+```bash
+npm install -g @supacloud/cli
+supacloud-cli status
+```
+
+One-off execution:
+
+```bash
+npm exec --package @supacloud/cli -- supacloud-cli status
+```
+
+`supacloud-cli` defaults to the current workspace's project context. If you do not pass explicit flags, it tries to auto-link from `.env`:
 
 - `SUPABASE_URL` or `SUPACLOUD_API_URL`
 - `SUPABASE_SERVICE_ROLE_KEY` or `SUPACLOUD_API_TOKEN`
@@ -10,13 +27,13 @@ Project-scoped CLI for SupaCloud users.
 Examples:
 
 ```bash
-npx @supacloud/cli status
-npx @supacloud/cli project get
-npx @supacloud/cli project logs --log_type database
-npx @supacloud/cli database query --sql "select now()"
-npx @supacloud/cli database query --ref abc123 --file ./queries/vector-search.sql
-npx @supacloud/cli database push_migrations --ref abc123 --dir supabase/migrations --dry_run
-npx @supacloud/cli frontend list --ref abc123
+supacloud-cli status
+supacloud-cli project get
+supacloud-cli project logs --log_type database
+supacloud-cli database query --sql "select now()"
+supacloud-cli database query --ref abc123 --file ./queries/vector-search.sql
+supacloud-cli database push_migrations --ref abc123 --dir supabase/migrations --dry_run
+supacloud-cli frontend list --ref abc123
 ```
 
 Use `database query --file` for complex SQL, pgvector queries, and single-request transaction blocks.
