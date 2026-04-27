@@ -51,7 +51,7 @@
       });
       const data = await res.json();
       if (data.error) return [];
-      return Array.isArray(data) ? data : data.rows || [];
+      return data.rows || [];
     } catch { return []; }
   }
 

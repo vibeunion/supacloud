@@ -49,7 +49,7 @@
       });
       const data = await res.json();
       if (data.error) throw new Error(data.message || data.error);
-      return (Array.isArray(data) ? data : data.rows || []) as Trigger[];
+      return (data.rows || []) as Trigger[];
     }
   }));
 

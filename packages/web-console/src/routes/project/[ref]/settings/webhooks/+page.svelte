@@ -53,7 +53,7 @@
       });
       if (!res.ok) throw new Error("Failed to fetch webhooks");
       const data = await res.json();
-      const rows = Array.isArray(data) ? data : data.rows || [];
+      const rows = data.rows || [];
       
       const endpoints: WebhookEndpoint[] = rows.map((r: Record<string, unknown>) => {
         const events = [];
@@ -75,7 +75,7 @@
         body: JSON.stringify({ sql: "SELECT tablename FROM pg_catalog.pg_tables WHERE schemaname = 'public' ORDER BY tablename;" })
       });
       const tblData = await tblRes.json();
-      const tables = (Array.isArray(tblData) ? tblData : tblData.rows || []).map((t: Record<string, unknown>) => t.tablename as string);
+      const tables = (tblData.rows || []).map((t: Record<string, unknown>) => t.tablename as string);
 
       return { endpoints, tables };
     }

@@ -55,7 +55,7 @@
       });
       const data = await res.json();
       if (data.error) throw new Error(data.message || data.error);
-      const jobs = Array.isArray(data) ? data : data.rows || [];
+      const jobs = data.rows || [];
 
       let runs: CronRun[] = [];
       try {
@@ -65,7 +65,7 @@
         });
         const data2 = await res2.json();
         if (!data2.error) {
-          runs = Array.isArray(data2) ? data2 : data2.rows || [];
+          runs = data2.rows || [];
         }
       } catch (e) {
         // Run details might not be present or accessible

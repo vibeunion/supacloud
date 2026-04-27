@@ -31,7 +31,7 @@
         body: JSON.stringify({ sql: "SELECT pg_size_pretty(pg_database_size(current_database())) as size;" })
       });
       const sizeData = await sizeRes.json();
-      const rows = Array.isArray(sizeData) ? sizeData : sizeData.rows || [];
+      const rows = sizeData.rows || [];
       const dbSize = rows[0]?.size || "Unknown";
 
       // Simulate backup schedule info since actual backups are platform-managed
