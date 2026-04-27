@@ -191,7 +191,8 @@ describe("@supacloud/js", () => {
       projectRef: "proj_1",
     });
 
-    await expect(client.queue("emails").receive()).resolves.toBeNull();
+    const message = await client.queue("emails").receive();
+    expect(message).toBe(null);
   });
 
   test("wait polls until a terminal task status is reached", async () => {
