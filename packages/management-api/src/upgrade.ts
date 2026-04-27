@@ -2,7 +2,7 @@ import { $ } from "bun";
 import * as p from "@clack/prompts";
 import os from "node:os";
 import path from "node:path";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { logger } from "./utils/logger";
 
 const RELEASES_API = "https://api.github.com/repos/zuohuadong/supacloud/releases";
@@ -190,6 +190,24 @@ async function runInitDb(env: Record<string, string | undefined>) {
     }
 }
 
+function upsertEnvFileValue(filePath: string, key: string, value: string) {
+    mkdirSync(path.dirname(filePath), { recursive: true });
+    const existing = existsSync(filePath) ? readFileSync(filePath, "utf8") : "";
+    const line = `${key}=${value}`;
+    const next = new RegExp(`^${key}=.*$`, "m").test(existing)
+        ? existing.replace(new RegExp(`^${key}=.*$`, "m"), line)
+        : `${existing}${existing && !existing.endsWith("\n") ? "\n" : ""}${line}\n`;
+    writeFileSync(filePath, next, { mode: 0o600 });
+}
+
+async function ensureRuntimeModeForBinaryUpgrade() {
+    const edgeUnit = await $`systemctl list-unit-files supacloud-edge-runtime.service --no-legend`.nothrow().quiet();
+    const edgeServiceKnown = edgeUnit.exitCode === 0 && edgeUnit.stdout.toString().includes("supacloud-edge-runtime.service");
+    if (!edgeServiceKnown) return;
+
+    upsertEnvFileValue(MANAGEMENT_ENV_FILE, "EDGE_RUNTIME_MODE", "external");
+}
+
 async function restartServices() {
     const management = await $`systemctl restart supacloud`.nothrow().quiet();
     if (management.exitCode !== 0) {
@@ -250,6 +268,9 @@ export async function runUpgrade(options: { forceYes?: boolean; targetVersion?: 
 
         s.start("Applying metadata database migrations");
         await runInitDb(env);
+
+        s.start("Ensuring binary runtime service ownership");
+        await ensureRuntimeModeForBinaryUpgrade();
 
         s.start("Restarting SupaCloud services");
         await restartServices();
