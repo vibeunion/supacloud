@@ -282,7 +282,14 @@ function applyCorsHeaders(proxyHeaders: Headers, request: Request) {
     proxyHeaders.set('access-control-max-age', '86400');
 }
 
-async function executeProxy(request: Request, targetUrl: string, interceptors: { linkOrigin?: string, ref?: string, extraHeaders?: Record<string, string> }) {
+type ProxyInterceptors = {
+    linkOrigin?: string;
+    ref?: string;
+    extraHeaders?: Record<string, string>;
+    timeoutMs?: number;
+};
+
+async function executeProxy(request: Request, targetUrl: string, interceptors: ProxyInterceptors) {
     try {
         const body = ["GET", "HEAD"].includes(request.method) ? undefined : request.body;
         
@@ -313,7 +320,7 @@ async function executeProxy(request: Request, targetUrl: string, interceptors: {
             headers: reqHeaders,
             body,
             redirect: 'manual',
-            signal: AbortSignal.timeout(30000),
+            signal: AbortSignal.timeout(interceptors.timeoutMs ?? config.sdkProxyTimeoutMs),
         };
         if (body) {
             fetchInit.duplex = "half";
@@ -364,7 +371,17 @@ async function executeProxy(request: Request, targetUrl: string, interceptors: {
         });
 
     } catch (err: any) {
-        logger.error(`[SDK Proxy] Internal error:`, err.message);
+        const message = err instanceof Error ? err.message : String(err);
+        const name = err instanceof Error ? err.name : "";
+        if (name === "TimeoutError" || name === "AbortError" || /abort|timeout/i.test(message)) {
+            logger.warn(`[SDK Proxy] Upstream timeout: ${targetUrl}`, { error: message });
+            return new Response(JSON.stringify({ message: 'Upstream Proxy Timeout' }), {
+                status: 504,
+                headers: { 'Content-Type': 'application/json' }
+            });
+        }
+
+        logger.error(`[SDK Proxy] Internal error:`, message);
         return new Response(JSON.stringify({ message: 'Internal Proxy Error' }), {
             status: 500,
             headers: { 'Content-Type': 'application/json' }
@@ -399,7 +416,7 @@ const sdkProxyRoutesBase = new Elysia({ prefix: "" })
             if (!targetPath || targetPath === '') targetPath = '/';
             const targetUrl = `http://127.0.0.1:${ports.pgrstPort}${targetPath}${url.search}`;
             const linkOrigin = `${url.protocol}//${url.host}/rest/v1`;
-            return executeProxy(request, targetUrl, { linkOrigin });
+            return executeProxy(request, targetUrl, { linkOrigin, timeoutMs: config.restProxyTimeoutMs });
         };
         return app.get("/*", handler).post("/*", handler).put("/*", handler).patch("/*", handler).delete("/*", handler).options("/*", handler)
                   .get("", handler).post("", handler).put("", handler).patch("", handler).delete("", handler).options("", handler);
