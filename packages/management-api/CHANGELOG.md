@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.11.7](https://github.com/zuohuadong/supacloud/compare/management-api-v0.11.6...management-api-v0.11.7) (2026-04-27)
+
+
+### 🐛 Bug Fixes
+
+* allow supacloud async cors headers ([b27af99](https://github.com/zuohuadong/supacloud/commit/b27af995e9e4ff209df63b72652ca18d25186217))
+* materialize juicefs upload streams ([4378f9c](https://github.com/zuohuadong/supacloud/commit/4378f9cab99e9c11f8714a82232de71f7c82a8da))
+* materialize storage upload streams ([a55ba02](https://github.com/zuohuadong/supacloud/commit/a55ba02b6735b3df92971d79ede6da01706a92a6))
+
 ## [0.11.6](https://github.com/zuohuadong/supacloud/compare/management-api-v0.11.5...management-api-v0.11.6) (2026-04-27)
 
 
