@@ -219,3 +219,6 @@ These commands repair the two historical failure modes:
 
 - missing Realtime tenants
 - missing `realtime` schema/database privileges
+- missing `public.tasks` publication membership for `postgres_changes`
+
+New tenant migrations also call SupaCloud's Realtime repair helper after SQL migrations, so projects that create `public.tasks` later are made subscribable without requiring a manual step.

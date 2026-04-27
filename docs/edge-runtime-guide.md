@@ -169,6 +169,7 @@ bun run realtime:reconcile-schema
 - ensures the `realtime` schema exists in project databases
 - grants required schema/table/sequence/routine privileges
 - sets default privileges for future objects
+- ensures `public.tasks` is published through `supabase_realtime` with full row images
 
 For new installs, `install.sh` now generates a valid `REALTIME_DB_ENC_KEY`. Older installs that used an invalid key may need a one-time env fix plus the reconciliation commands above.
 

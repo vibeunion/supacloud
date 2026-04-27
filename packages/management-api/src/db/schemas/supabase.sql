@@ -422,6 +422,52 @@ BEGIN
 END
 $$;
 
+CREATE OR REPLACE FUNCTION realtime.ensure_tasks_publication() RETURNS void AS $fn$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_publication WHERE pubname = 'supabase_realtime') THEN
+    CREATE PUBLICATION supabase_realtime;
+  END IF;
+
+  IF to_regclass('public.tasks') IS NOT NULL THEN
+    ALTER TABLE public.tasks REPLICA IDENTITY FULL;
+
+    IF NOT EXISTS (
+      SELECT 1
+      FROM pg_publication_tables
+      WHERE pubname = 'supabase_realtime'
+        AND schemaname = 'public'
+        AND tablename = 'tasks'
+    ) THEN
+      ALTER PUBLICATION supabase_realtime ADD TABLE public.tasks;
+    END IF;
+  END IF;
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+  WHEN insufficient_privilege THEN NULL;
+  WHEN undefined_table THEN NULL;
+  WHEN OTHERS THEN NULL;
+END;
+$fn$ LANGUAGE plpgsql SECURITY DEFINER;
+
+SELECT realtime.ensure_tasks_publication();
+
+CREATE OR REPLACE FUNCTION realtime.auto_publish_tasks_table() RETURNS event_trigger AS $fn$
+BEGIN
+  PERFORM realtime.ensure_tasks_publication();
+END;
+$fn$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_event_trigger WHERE evtname = 'realtime_auto_publish_tasks_trigger') THEN
+    CREATE EVENT TRIGGER realtime_auto_publish_tasks_trigger ON ddl_command_end
+      WHEN TAG IN ('CREATE TABLE')
+      EXECUTE FUNCTION realtime.auto_publish_tasks_table();
+  END IF;
+EXCEPTION WHEN insufficient_privilege THEN
+  NULL;
+END $$;
+
 CREATE TABLE IF NOT EXISTS realtime.messages (
     id BIGSERIAL PRIMARY KEY,
     topic TEXT NOT NULL,
