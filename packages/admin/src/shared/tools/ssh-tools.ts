@@ -7,6 +7,7 @@ import type { SshTransport } from "../transports/ssh";
 
 const SAFE_CONTAINER_NAME = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/;
 const SAFE_PROJECT_REF = /^[a-z0-9-]{1,20}$/;
+const SAFE_RELEASE_TAG = /^[a-zA-Z0-9._-]{1,80}$/;
 const SAFE_TIMEOUT_SECONDS = 300;
 const ALLOWED_EXEC_PREFIXES = [
     "systemctl ",
@@ -41,6 +42,13 @@ function assertSafeProjectRef(value: string, fieldName: string): string {
 function assertSafeContainerName(value: string): string {
     if (!SAFE_CONTAINER_NAME.test(value)) {
         throw new Error("Invalid container name");
+    }
+    return value;
+}
+
+function assertSafeReleaseTag(value: string): string {
+    if (!SAFE_RELEASE_TAG.test(value)) {
+        throw new Error("Invalid release version");
     }
     return value;
 }
@@ -161,9 +169,12 @@ Actions: ping, setup, install, upgrade, diagnose, exec, troubleshoot, container_
                     break;
                 }
                 case "upgrade": {
-                    const cmd = args.version
-                        ? `cd ~/supacloud && git fetch && git checkout ${args.version} && bash install.sh`
-                        : `cd ~/supacloud && git pull && bash install.sh`;
+                    const versionEnv = args.version
+                        ? `SUPACLOUD_UPGRADE_TAG=${assertSafeReleaseTag(args.version)} `
+                        : "";
+                    const cmd = "if [ ! -x /usr/local/bin/supacloud ]; then " +
+                        "echo 'SupaCloud binary not found at /usr/local/bin/supacloud; run ssh install first.' >&2; exit 127; " +
+                        `fi; ${versionEnv}/usr/local/bin/supacloud upgrade --yes`;
                     const r = await ssh.exec(cmd, 600_000);
                     text = r.success ? `✅ Upgrade done\n${r.stdout.slice(-300)}` : `❌ Failed (exit ${r.code})\n${r.stderr.slice(-500)}`;
                     break;
