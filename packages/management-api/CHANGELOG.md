@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.6](https://github.com/zuohuadong/supacloud/compare/management-api-v0.11.5...management-api-v0.11.6) (2026-04-27)
+
+
+### 🐛 Bug Fixes
+
+* extend rest proxy timeout ([716839d](https://github.com/zuohuadong/supacloud/commit/716839db4170023e7f4f2044fd9318ac4f84f7b7))
+
 ## [0.11.5](https://github.com/zuohuadong/supacloud/compare/management-api-v0.11.4...management-api-v0.11.5) (2026-04-27)
 
 
