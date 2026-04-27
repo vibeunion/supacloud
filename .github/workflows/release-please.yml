@@ -20,6 +20,8 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       releases_created: ${{ steps.release.outputs.releases_created }}
+      management_api_released: ${{ steps.release.outputs['packages/management-api--release_created'] }}
+      management_api_tag_name: ${{ steps.release.outputs['packages/management-api--tag_name'] }}
       supacloud_js_released: ${{ steps.release.outputs['packages/supacloud-js--release_created'] }}
       cli_released: ${{ steps.release.outputs['packages/cli--release_created'] }}
       admin_released: ${{ steps.release.outputs['packages/admin--release_created'] }}
@@ -30,6 +32,48 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+
+  publish-management-api-binaries:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.management_api_released == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.release-please.outputs.management_api_tag_name }}
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        working-directory: packages/management-api
+        run: bun install
+
+      - name: Build release binaries
+        working-directory: packages/management-api
+        run: |
+          mkdir -p dist
+          bun run build:linux
+          bun run build:macos
+          mv supacloud-linux-amd64 dist/
+          mv supacloud-linux-arm64 dist/
+          mv supacloud-macos-amd64 dist/
+          mv supacloud-macos-arm64 dist/
+          chmod 0755 dist/supacloud-*
+          cd dist
+          sha256sum supacloud-* > SHA256SUMS
+
+      - name: Upload binaries to GitHub Release
+        working-directory: packages/management-api
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ needs.release-please.outputs.management_api_tag_name }}
+        run: gh release upload "$RELEASE_TAG" dist/* --clobber
 
   publish-npm:
     needs: release-please
