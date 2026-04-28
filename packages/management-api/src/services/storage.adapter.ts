@@ -8,6 +8,17 @@ import * as path from "node:path";
 import { S3Client } from "bun";
 import { AwsClient } from "aws4fetch";
 
+function normalizeObjectKey(key: string): string {
+  const normalized = key.replace(/^\/+/, "");
+  if (!normalized || normalized.includes("\\") || /[\x00-\x1f\x7f]/.test(normalized)) {
+    throw new Error("Invalid object key");
+  }
+  if (path.isAbsolute(normalized) || normalized.split("/").some((segment) => segment === ".." || segment === "")) {
+    throw new Error("Invalid object key");
+  }
+  return normalized;
+}
+
 export interface StorageDriver {
   createBucket(projectRef: string, bucket: string): Promise<boolean>;
   deleteBucket(projectRef: string, bucket: string): Promise<boolean>;
@@ -55,7 +66,7 @@ export class JuiceFSDriver implements StorageDriver {
     );
     let p = root;
     if (bucket) p = path.join(p, bucket);
-    if (key) p = path.join(p, key);
+    if (key) p = path.join(p, normalizeObjectKey(key));
     // Resolve to absolute path and ensure it stays within the project root (prevent .. traversal)
     const resolved = path.resolve(p);
     if (!resolved.startsWith(root)) {
@@ -499,7 +510,7 @@ export class S3Driver implements StorageDriver {
     if (!creds?.accessKey || !creds?.secretKey) return false;
 
     try {
-      const cleanFileName = key.replace(/^\/+/, "");
+      const cleanFileName = normalizeObjectKey(key);
 
       if (process.env.CI || process.env.GITHUB_ACTIONS || process.env.NODE_ENV === "test") {
         return await putS3ObjectWithFetch(
@@ -568,6 +579,7 @@ export class S3Driver implements StorageDriver {
     if (!creds?.accessKey || !creds?.secretKey) return false;
 
     try {
+      const cleanFileName = normalizeObjectKey(key);
       const s3 = this.getClient(
         creds as {
           accessKey: string;
@@ -576,7 +588,7 @@ export class S3Driver implements StorageDriver {
           bucket: string;
         },
       );
-      await s3.file(`${bucket}/${key}`).delete();
+      await s3.file(`${bucket}/${cleanFileName}`).delete();
       return true;
     } catch (e) {
       return false;
@@ -637,7 +649,7 @@ export class S3Driver implements StorageDriver {
           bucket: string;
         },
       );
-      const cleanFileName = key.replace(/^\/+/, "");
+      const cleanFileName = normalizeObjectKey(key);
       const file = s3.file(`${bucket}/${cleanFileName}`);
       if (!(await file.exists())) return null;
 

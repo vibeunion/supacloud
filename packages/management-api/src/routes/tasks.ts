@@ -2,6 +2,7 @@ import { Elysia, status, t } from "elysia";
 import { taskRepository } from "../repositories/task.repository";
 import { TaskStatus } from "../db";
 import { backgroundFunctionWorker, projectService } from "../services";
+import { requireProjectOrAdminAuth } from "../middleware/auth";
 
 const QUEUE_TASK_TYPE_PREFIX = "queue:";
 const DEFAULT_QUEUE_MAX_ATTEMPTS = 3;
@@ -38,6 +39,10 @@ function buildQueueListFilters(queueName: string, query: Record<string, unknown>
 }
 
 export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
+    .onBeforeHandle(async ({ params, request }) => {
+        const authError = await requireProjectOrAdminAuth(request, params.ref);
+        if (authError) return status(authError.status, authError.body);
+    })
     .post("/queues/:queueName/messages", async ({ params, body }) => {
         try {
             const queueName = normalizeQueueName(params.queueName);

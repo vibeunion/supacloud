@@ -1,9 +1,12 @@
 import { Elysia, t, status } from "elysia";
 import { deployService } from "../services/deploy.service";
 import { logger } from "../utils/logger";
+import { requireAdminAuth } from "../middleware/auth";
 
 export const deployRoutes = new Elysia({ prefix: "/v1/deploy" })
-  .post("/", async ({ body }) => {
+  .post("/", async ({ body, request }) => {
+    const authError = await requireAdminAuth(request);
+    if (authError) return status(authError.status, authError.body);
     try {
       const result = await deployService.deploy(
         {
@@ -32,7 +35,9 @@ export const deployRoutes = new Elysia({ prefix: "/v1/deploy" })
       config: t.Any(),
     }),
   })
-  .post("/rollback", async ({ body }) => {
+  .post("/rollback", async ({ body, request }) => {
+    const authError = await requireAdminAuth(request);
+    if (authError) return status(authError.status, authError.body);
     try {
       const result = await deployService.rollback(body.app, body.version);
       return result;

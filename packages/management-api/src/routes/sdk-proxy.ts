@@ -1,4 +1,6 @@
 import { Elysia, t } from "elysia";
+import { jwtVerify } from "jose";
+import { encryptSecretIfNeeded } from "../utils/secret-crypto";
 import { getProjectDb } from "../db";
 import { config } from "../config";
 import { sql as metaSql } from "../db";
@@ -33,13 +35,13 @@ function shouldForceAsyncRoute(targetPath: string, configuredRoutes: string[] | 
     });
 }
 
-function decodeJwtPayload(token: string): Record<string, unknown> | null {
+async function verifyJwtPayload(ref: string, token: string): Promise<Record<string, unknown> | null> {
     try {
-        const [, payload] = token.split(".");
-        if (!payload) return null;
-        const normalized = payload.replace(/-/g, "+").replace(/_/g, "/");
-        const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "=");
-        return JSON.parse(Buffer.from(padded, "base64").toString("utf8"));
+        const rows = await metaSql`SELECT jwt_secret FROM projects WHERE ref = ${ref} AND deleted_at IS NULL AND status = 'active' LIMIT 1`;
+        const secret = rows[0]?.jwt_secret;
+        if (!secret) return null;
+        const { payload } = await jwtVerify(token, new TextEncoder().encode(String(secret)));
+        return payload as Record<string, unknown>;
     } catch {
         return null;
     }
@@ -114,7 +116,7 @@ async function maybeEnqueueAsyncFunction(request: Request, ref: string): Promise
         ? await projectService.getApiKeys(ref)
         : null;
     const authPayload = authorization?.startsWith("Bearer ")
-        ? decodeJwtPayload(authorization.replace(/^Bearer\s+/i, ""))
+        ? await verifyJwtPayload(ref, authorization.replace(/^Bearer\s+/i, ""))
         : null;
     const authKind = authorization
         ? "jwt"
@@ -148,8 +150,8 @@ async function maybeEnqueueAsyncFunction(request: Request, ref: string): Promise
             requested_timeout_sec: timeoutSec,
             auth: {
                 kind: authKind,
-                authorization,
-                apikey,
+                authorization: authorization ? encryptSecretIfNeeded(authorization) : null,
+                apikey: apikey ? encryptSecretIfNeeded(apikey) : null,
                 invoker_user_id: typeof authPayload?.sub === "string" ? authPayload.sub : null,
                 invoker_role: typeof authPayload?.role === "string" ? authPayload.role : null,
                 apikey_kind: apikeyKind,

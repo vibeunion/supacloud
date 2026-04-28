@@ -1,15 +1,19 @@
 import { Elysia, t, status } from "elysia";
 import { projectService } from "../services";
+import { requireProjectOrAdminAuth } from "../middleware/auth";
 
 export const projectSecretsRoutes = new Elysia({ prefix: "/v1/projects" })
   .get(
     "/:ref/secrets",
-    async ({ params, query }) => {
+    async ({ params, query, request }) => {
+      const authError = await requireProjectOrAdminAuth(request, params.ref);
+      if (authError) return status(authError.status, authError.body);
+      const reveal = query.reveal === "true";
+
       const secrets = await projectService.getSecrets(params.ref);
       if (!secrets) {
         return status(404, { message: "Project not found", code: "404" });
       }
-      const reveal = query.reveal === "true";
       return secrets.map((s: { name: string; value: string }) => ({
         name: s.name,
         value: reveal ? s.value : "********",
@@ -23,7 +27,9 @@ export const projectSecretsRoutes = new Elysia({ prefix: "/v1/projects" })
 
   .post(
     "/:ref/secrets",
-    async ({ params, body }) => {
+    async ({ params, body, request }) => {
+      const authError = await requireProjectOrAdminAuth(request, params.ref);
+      if (authError) return status(authError.status, authError.body);
       const reserved = (body as { name: string; value: string }[]).filter((s) =>
         s.name.toUpperCase().startsWith("SUPABASE_"),
       );
@@ -56,7 +62,9 @@ export const projectSecretsRoutes = new Elysia({ prefix: "/v1/projects" })
 
   .delete(
     "/:ref/secrets",
-    async ({ params, body }) => {
+    async ({ params, body, request }) => {
+      const authError = await requireProjectOrAdminAuth(request, params.ref);
+      if (authError) return status(authError.status, authError.body);
       if (!body || !Array.isArray(body) || body.length === 0) {
         return status(400, {
           message: "Body must be a non-empty array of secret name strings",
@@ -83,7 +91,9 @@ export const projectSecretsRoutes = new Elysia({ prefix: "/v1/projects" })
 
   .delete(
     "/:ref/secrets/:name",
-    async ({ params }) => {
+    async ({ params, request }) => {
+      const authError = await requireProjectOrAdminAuth(request, params.ref);
+      if (authError) return status(authError.status, authError.body);
       const success = await projectService.deleteSecret(params.ref, params.name);
       if (!success) {
         return status(500, { message: "Failed to delete secret", code: "500" });

@@ -1,7 +1,7 @@
 import { Elysia, t } from "elysia";
 import { projectService } from "../services";
 import { db, getProjectDb, getProjectRoleDb, resolveDbName, sql as metaSql, type SqlExecutionMode } from "../db";
-import { requireAdminAuth } from "../middleware/auth";
+import { requireAdminAuth, requireProjectOrAdminAuth } from "../middleware/auth";
 
 export type MigrationBody =
   | { query: string; version?: number | string }
@@ -113,10 +113,18 @@ export async function ensureTasksRealtimePublication(projectDb: ReturnType<typeo
   }
 }
 
+function projectAuthResponse(authError: { status: number; body: { error: string } }, set: { status?: number | string }) {
+  set.status = authError.status;
+  return { message: authError.body.error, code: String(authError.status), status: authError.status };
+}
+
 export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" })
     .get(
         "/tables",
-        async ({ params, query, set }) => {
+        async ({ params, query, set, request }) => {
+            const authError = await requireProjectOrAdminAuth(request, params.ref);
+            if (authError) return projectAuthResponse(authError, set);
+
             const project = await projectService.getProject(params.ref);
             if (!project) {
                 set.status = 404;
@@ -183,7 +191,10 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
     )
     .get(
         "/tables/:schema/:table/columns",
-        async ({ params, set }) => {
+        async ({ params, set, request }) => {
+            const authError = await requireProjectOrAdminAuth(request, params.ref);
+            if (authError) return projectAuthResponse(authError, set);
+
             const project = await projectService.getProject(params.ref);
             if (!project) {
                 set.status = 404;
@@ -229,7 +240,10 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
     )
     .get(
         "/tables/:schema/:table/rows",
-        async ({ params, query, set }) => {
+        async ({ params, query, set, request }) => {
+            const authError = await requireProjectOrAdminAuth(request, params.ref);
+            if (authError) return projectAuthResponse(authError, set);
+
             const project = await projectService.getProject(params.ref);
             if (!project) {
                 set.status = 404;
@@ -287,7 +301,10 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
     )
     .post(
         "/query",
-        async ({ params, body, set }) => {
+        async ({ params, body, set, request }) => {
+            const authError = await requireProjectOrAdminAuth(request, params.ref);
+            if (authError) return projectAuthResponse(authError, set);
+
             const project = await projectService.getProject(params.ref);
             if (!project) {
                 set.status = 404;
@@ -341,6 +358,9 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
                     return { message: "query or sql is required", code: "400", status: 400 };
                 }
                 const mode = resolveSqlMode(body as Record<string, unknown>);
+                const authError = await requireProjectOrAdminAuth(request, params.ref);
+                if (authError) return projectAuthResponse(authError, set);
+
                 if (mode === "admin") {
                     if (!requireAdminMode(body as Record<string, unknown>)) {
                         set.status = 403;
@@ -387,7 +407,13 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
     )
     .post(
         "/migrations",
-        async ({ params, body, set }) => {
+        async ({ params, body, request, set }) => {
+            const authError = await requireProjectOrAdminAuth(request, params.ref);
+            if (authError) {
+                set.status = authError.status;
+                return { message: authError.body.error, code: String(authError.status), status: authError.status };
+            }
+
             const project = await projectService.getProject(params.ref);
             if (!project) {
                 set.status = 404;
@@ -487,7 +513,10 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
     )
     .get(
         "/migrations",
-        async ({ params, set }) => {
+        async ({ params, set, request }) => {
+            const authError = await requireProjectOrAdminAuth(request, params.ref);
+            if (authError) return projectAuthResponse(authError, set);
+
             const project = await projectService.getProject(params.ref);
             if (!project) {
                 set.status = 404;
@@ -525,7 +554,10 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
     )
     .get(
         "/constraints",
-        async ({ params, set }) => {
+        async ({ params, set, request }) => {
+            const authError = await requireProjectOrAdminAuth(request, params.ref);
+            if (authError) return projectAuthResponse(authError, set);
+
             const project = await projectService.getProject(params.ref);
             if (!project) {
                 set.status = 404;
@@ -575,7 +607,10 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
     )
     .get(
         "/functions",
-        async ({ params, set }) => {
+        async ({ params, set, request }) => {
+            const authError = await requireProjectOrAdminAuth(request, params.ref);
+            if (authError) return projectAuthResponse(authError, set);
+
             const project = await projectService.getProject(params.ref);
             if (!project) {
                 set.status = 404;
@@ -623,7 +658,10 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
     )
     .get(
         "/triggers",
-        async ({ params, set }) => {
+        async ({ params, set, request }) => {
+            const authError = await requireProjectOrAdminAuth(request, params.ref);
+            if (authError) return projectAuthResponse(authError, set);
+
             const project = await projectService.getProject(params.ref);
             if (!project) {
                 set.status = 404;
@@ -681,7 +719,10 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
     )
     .get(
         "/publications",
-        async ({ params, set }) => {
+        async ({ params, set, request }) => {
+            const authError = await requireProjectOrAdminAuth(request, params.ref);
+            if (authError) return projectAuthResponse(authError, set);
+
             const project = await projectService.getProject(params.ref);
             if (!project) {
                 set.status = 404;
