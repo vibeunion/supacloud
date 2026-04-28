@@ -11,10 +11,10 @@ describe("withRetry", () => {
 
   test("retries on failure and succeeds on 2nd attempt", async () => {
     let calls = 0;
-    const fn = mock(() => {
+    const fn = mock(async () => {
       calls++;
-      if (calls === 1) return Promise.reject(new Error("transient"));
-      return Promise.resolve("recovered");
+      if (calls === 1) throw new Error("transient");
+      return "recovered";
     });
 
     const result = await withRetry("test-op", fn, {
@@ -26,7 +26,9 @@ describe("withRetry", () => {
   });
 
   test("throws after exhausting all retries", async () => {
-    const fn = mock(() => Promise.reject(new Error("permanent failure")));
+    const fn = mock(async () => {
+      throw new Error("permanent failure");
+    });
 
     await expect(
       withRetry("test-op", fn, { maxRetries: 2, initialDelayMs: 1 })
@@ -37,7 +39,9 @@ describe("withRetry", () => {
   });
 
   test("respects shouldRetry predicate — stops early when false", async () => {
-    const fn = mock(() => Promise.reject(new Error("non-retryable")));
+    const fn = mock(async () => {
+      throw new Error("non-retryable");
+    });
 
     await expect(
       withRetry("test-op", fn, {
@@ -53,10 +57,10 @@ describe("withRetry", () => {
 
   test("respects shouldRetry predicate — retries when true", async () => {
     let calls = 0;
-    const fn = mock(() => {
+    const fn = mock(async () => {
       calls++;
-      if (calls <= 2) return Promise.reject(new Error("retryable"));
-      return Promise.resolve("done");
+      if (calls <= 2) throw new Error("retryable");
+      return "done";
     });
 
     const result = await withRetry("test-op", fn, {
@@ -70,7 +74,9 @@ describe("withRetry", () => {
   });
 
   test("default maxRetries is 3", async () => {
-    const fn = mock(() => Promise.reject(new Error("fail")));
+    const fn = mock(async () => {
+      throw new Error("fail");
+    });
 
     await expect(
       withRetry("test-op", fn, { initialDelayMs: 1 })
@@ -81,15 +87,11 @@ describe("withRetry", () => {
   });
 
   test("applies exponential backoff (delay increases)", async () => {
-    const delays: number[] = [];
-    const originalSetTimeout = globalThis.setTimeout;
-
-    // Patch setTimeout to track delays
     let callCount = 0;
-    const fn = mock(() => {
+    const fn = mock(async () => {
       callCount++;
-      if (callCount <= 3) return Promise.reject(new Error("fail"));
-      return Promise.resolve("ok");
+      if (callCount <= 3) throw new Error("fail");
+      return "ok";
     });
 
     const result = await withRetry("test-op", fn, {

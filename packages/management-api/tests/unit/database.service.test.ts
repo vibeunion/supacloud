@@ -61,6 +61,9 @@ describe("DatabaseService", () => {
       const result = await databaseService.createDatabase("testref123", "testpass");
       expect(result.success).toBe(true);
       expect(mockSql.unsafe).toHaveBeenCalled();
+      expect(mockSql.unsafe).toHaveBeenCalledWith(expect.stringContaining(
+        'GRANT CONNECT, TEMPORARY ON DATABASE "supa_testref123" TO "authenticator_testref123"',
+      ));
     });
   });
 

@@ -60,6 +60,12 @@ describe("API Structural Snapshot Compliance", () => {
       }
 
       await new Promise((r) => setTimeout(r, 2000));
+      const health = await fetch(`${PROXY_URL}/health`, {
+        signal: AbortSignal.timeout(1000),
+      });
+      if (!health.ok) {
+        throw new Error(`Snapshot proxy is not ready: ${health.status}`);
+      }
       isBooted = true;
     } catch (e) {
       console.error(

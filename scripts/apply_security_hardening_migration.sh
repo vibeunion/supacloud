@@ -60,11 +60,12 @@ tenant_base_url="${DATABASE_URL%/*}"
 
 echo "[tenants] applying existing database isolation patch"
 "$PSQL" "$DATABASE_URL" -AtF $'\t' -v ON_ERROR_STOP=1 -c \
-  "SELECT db_name, db_user FROM projects WHERE deleted_at IS NULL AND db_name IS NOT NULL AND db_user IS NOT NULL ORDER BY ref" |
-while IFS=$'\t' read -r db_name db_user; do
+  "SELECT ref, db_name, db_user FROM projects WHERE deleted_at IS NULL AND db_name IS NOT NULL AND db_user IS NOT NULL ORDER BY ref" |
+while IFS=$'\t' read -r ref db_name db_user; do
   if [[ -z "$db_name" || -z "$db_user" ]]; then
     continue
   fi
+  authenticator_role="authenticator_${ref}"
 
   db_name_literal="${db_name//\'/\'\'}"
   db_exists="$("$PSQL" "$DATABASE_URL" -At -v ON_ERROR_STOP=1 -c "SELECT 1 FROM pg_database WHERE datname = '${db_name_literal}'")"
@@ -72,6 +73,8 @@ while IFS=$'\t' read -r db_name db_user; do
     echo "[tenant:$db_name] skipped missing database"
     continue
   fi
+  authenticator_literal="${authenticator_role//\'/\'\'}"
+  authenticator_exists="$("$PSQL" "$DATABASE_URL" -At -v ON_ERROR_STOP=1 -c "SELECT 1 FROM pg_roles WHERE rolname = '${authenticator_literal}'")"
 
   echo "[tenant:$db_name] database grants"
   "$PSQL" "$DATABASE_URL" -v ON_ERROR_STOP=1 \
@@ -84,6 +87,16 @@ GRANT CONNECT, TEMPORARY ON DATABASE :"dbname" TO supabase_auth_admin;
 GRANT CONNECT, TEMPORARY ON DATABASE :"dbname" TO supabase_admin;
 GRANT ALL PRIVILEGES ON DATABASE :"dbname" TO :"adminuser";
 SQL
+
+  if [[ -n "$authenticator_exists" ]]; then
+    "$PSQL" "$DATABASE_URL" -v ON_ERROR_STOP=1 \
+      -v dbname="$db_name" \
+      -v authenticator="$authenticator_role" <<'SQL'
+GRANT CONNECT, TEMPORARY ON DATABASE :"dbname" TO :"authenticator";
+SQL
+  else
+    echo "[tenant:$db_name] skipped authenticator grant; missing role $authenticator_role"
+  fi
 
   echo "[tenant:$db_name] schema grants"
   "$PSQL" "${tenant_base_url}/${db_name}" -v ON_ERROR_STOP=1 -v dbuser="$db_user" <<'SQL'

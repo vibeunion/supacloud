@@ -178,7 +178,10 @@ export class DatabaseService {
       await this.applySupabaseSchema(dbName, projectRef, password);
 
       await this.withAdminDb(async (adminDb) => {
+        const authenticatorRole = resolveAuthenticatorName(projectRef);
+        assertValidIdentifier("authenticatorRole", authenticatorRole);
         await adminDb.unsafe(`
+          GRANT CONNECT, TEMPORARY ON DATABASE "${dbName}" TO "${authenticatorRole}";
           GRANT CONNECT, TEMPORARY ON DATABASE "${dbName}" TO supabase_auth_admin;
           GRANT CONNECT, TEMPORARY ON DATABASE "${dbName}" TO supabase_admin;
         `);
