@@ -169,3 +169,11 @@ export async function requireAdminAuth(request: Request): Promise<{ status: numb
   if (auth.role === "master" || auth.role === "admin") return undefined;
   return { status: 403, body: { error: "Admin privileges required" } };
 }
+
+export async function requireProjectOrAdminAuth(request: Request, ref: string): Promise<{ status: number; body: { error: string } } | undefined> {
+  const auth = await getAuthContext(request);
+  if ("status" in auth) return auth;
+  if (auth.role === "master" || auth.role === "admin") return undefined;
+  if (auth.role === "project" && auth.ref === ref) return undefined;
+  return { status: 403, body: { error: "Project service role or admin privileges required" } };
+}

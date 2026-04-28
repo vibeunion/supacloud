@@ -2,6 +2,7 @@ import { Elysia, t, status } from "elysia";
 import { logger } from "../utils/logger";
 import { projectService } from "../services";
 import { resolveProjectServiceRoleKey } from "../utils/service-role";
+import { requireProjectOrAdminAuth } from "../middleware/auth";
 
 async function getGoTrueAdminContext(ref: string) {
   const project = await projectService.getProject(ref);
@@ -26,7 +27,9 @@ async function getGoTrueAdminContext(ref: string) {
 export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
   .get(
     "/users",
-    async ({ params, query, set }) => {
+    async ({ params, query, set, request }) => {
+      const authError = await requireProjectOrAdminAuth(request, params.ref);
+      if (authError) return status(authError.status, authError.body);
       const ctx = await getGoTrueAdminContext(params.ref);
       if (!ctx) {
         return status(404, { message: "Project service role key not found", code: "404" });
@@ -103,7 +106,9 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
   )
   .post(
     "/users",
-    async ({ params, body, set }) => {
+    async ({ params, body, set, request }) => {
+      const authError = await requireProjectOrAdminAuth(request, params.ref);
+      if (authError) return status(authError.status, authError.body);
       const ctx = await getGoTrueAdminContext(params.ref);
       if (!ctx) {
         return status(404, { message: "Project service role key not found", code: "404" });
@@ -165,7 +170,9 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
 
   .post(
     "/users/invite",
-    async ({ params, body, set }) => {
+    async ({ params, body, set, request }) => {
+      const authError = await requireProjectOrAdminAuth(request, params.ref);
+      if (authError) return status(authError.status, authError.body);
       const ctx = await getGoTrueAdminContext(params.ref);
       if (!ctx) {
         return status(404, { message: "Project service role key not found", code: "404" });
@@ -211,7 +218,9 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
   // supabase.auth.admin.getUserById(id)
   .get(
     "/users/:id",
-    async ({ params, set }) => {
+    async ({ params, set, request }) => {
+      const authError = await requireProjectOrAdminAuth(request, params.ref);
+      if (authError) return status(authError.status, authError.body);
       const ctx = await getGoTrueAdminContext(params.ref);
       if (!ctx) {
         return status(404, { message: "Project service role key not found", code: "404" });
@@ -246,7 +255,9 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
   // supabase.auth.admin.updateUserById(id, { email, password, user_metadata, ... })
   .put(
     "/users/:id",
-    async ({ params, body, set }) => {
+    async ({ params, body, set, request }) => {
+      const authError = await requireProjectOrAdminAuth(request, params.ref);
+      if (authError) return status(authError.status, authError.body);
       const ctx = await getGoTrueAdminContext(params.ref);
       if (!ctx) {
         return status(404, { message: "Project service role key not found", code: "404" });
@@ -293,7 +304,9 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
 
   .patch(
     "/users/:id",
-    async ({ params, body, set }) => {
+    async ({ params, body, set, request }) => {
+      const authError = await requireProjectOrAdminAuth(request, params.ref);
+      if (authError) return status(authError.status, authError.body);
       const ctx = await getGoTrueAdminContext(params.ref);
       if (!ctx) {
         return status(404, { message: "Project service role key not found", code: "404" });
@@ -336,7 +349,9 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
 
   .delete(
     "/users/:id",
-    async ({ params, set, body, query }) => {
+    async ({ params, set, body, query, request }) => {
+      const authError = await requireProjectOrAdminAuth(request, params.ref);
+      if (authError) return status(authError.status, authError.body);
       const ctx = await getGoTrueAdminContext(params.ref);
       if (!ctx) {
         return status(404, { message: "Project service role key not found", code: "404" });
@@ -375,7 +390,9 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
 
   .get(
     "/users/:id/factors",
-    async ({ params, set }) => {
+    async ({ params, set, request }) => {
+      const authError = await requireProjectOrAdminAuth(request, params.ref);
+      if (authError) return status(authError.status, authError.body);
       const ctx = await getGoTrueAdminContext(params.ref);
       if (!ctx) {
         return status(404, { message: "Project service role key not found", code: "404" });
@@ -408,7 +425,9 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
 
   .post(
     "/generate_link",
-    async ({ params, body, set }) => {
+    async ({ params, body, set, request }) => {
+      const authError = await requireProjectOrAdminAuth(request, params.ref);
+      if (authError) return status(authError.status, authError.body);
       const ctx = await getGoTrueAdminContext(params.ref);
       if (!ctx) {
         return status(404, { message: "Project service role key not found", code: "404" });

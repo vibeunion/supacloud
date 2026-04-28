@@ -1,4 +1,4 @@
-import { sql, resolveDbName } from '../db';
+import { sql, resolveDbName, resolveSlotName } from '../db';
 import { databaseService } from '../services/database.service';
 import { logger } from '../utils/logger';
 
@@ -453,24 +453,12 @@ CREATE TABLE IF NOT EXISTS supabase_migrations.seed_files (
 GRANT ALL ON ALL TABLES IN SCHEMA supabase_migrations TO postgres;
 
 -- 16. Realtime WAL logical replication support
--- Create the supabase_realtime replication slot if wal2json is available
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_available_extensions WHERE name = 'wal2json') THEN
     CREATE EXTENSION IF NOT EXISTS wal2json;
   END IF;
 EXCEPTION WHEN OTHERS THEN NULL;
-END $$;
-
-DO $$
-BEGIN
-  IF EXISTS (SELECT 1 FROM pg_available_extensions WHERE name = 'wal2json') THEN
-    IF NOT EXISTS (SELECT 1 FROM pg_replication_slots WHERE slot_name = 'supabase_realtime') THEN
-      PERFORM pg_create_logical_replication_slot('supabase_realtime', 'wal2json');
-    END IF;
-  END IF;
-EXCEPTION WHEN insufficient_privilege THEN NULL;
-  WHEN OTHERS THEN NULL;
 END $$;
 
 -- Grant replication role to supabase_admin if it exists
@@ -489,7 +477,7 @@ async function main() {
   logger.info("[migrate-tenant-schema] Starting tenant migration process...");
   
   try {
-    const projects = await sql`SELECT id, ref FROM projects WHERE is_deleted = false`;
+    const projects = await sql`SELECT id, ref FROM projects WHERE deleted_at IS NULL AND COALESCE(status, '') <> 'deleted'`;
     logger.info(`[migrate-tenant-schema] Found ${projects.length} active projects to migrate.`);
 
     for (const project of projects) {
@@ -497,6 +485,16 @@ async function main() {
        const tenantDb = (databaseService as any).getTenantDb(dbName);
        try {
           await tenantDb.unsafe(ALTER_TENANT_SQL);
+          const slotName = resolveSlotName(project.ref);
+          try {
+            const [wal2json] = await tenantDb`SELECT EXISTS (SELECT 1 FROM pg_available_extensions WHERE name = 'wal2json') AS available`;
+            if (wal2json?.available) {
+              const [slot] = await tenantDb`SELECT EXISTS (SELECT 1 FROM pg_replication_slots WHERE slot_name = ${slotName}) AS exists`;
+              if (!slot?.exists) {
+                await tenantDb`SELECT pg_create_logical_replication_slot(${slotName}, 'wal2json')`;
+              }
+            }
+          } catch {}
           logger.info(`[migrate-tenant-schema] Successfully migrated tenant ${project.ref}`);
        } catch (err: unknown) {
           logger.error(`[migrate-tenant-schema] Failed to migrate tenant ${project.ref}`, { error: err instanceof Error ? err.message : String(err) });

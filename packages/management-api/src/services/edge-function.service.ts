@@ -189,6 +189,10 @@ async function bundleFunction(
 /**
  * Clear module caches so Worker threads pick up the new version.
  */
+function runtimeInternalHeaders(): Record<string, string> {
+  return { "x-supacloud-internal-auth": config.edgeRuntimeMasterKey || config.masterToken };
+}
+
 async function invalidateCache(ref: string, slug: string): Promise<void> {
   // 1. Clear the transform file cache
   const cacheDir = path.join(FUNCTIONS_ROOT, ".cache", ref);
@@ -203,10 +207,14 @@ async function invalidateCache(ref: string, slug: string): Promise<void> {
   // 2. Notify Edge Runtime to evict the module from Worker thread caches
   try {
     const runtimeUrl = `http://${config.edgeRuntimeInternal}`;
-    await fetch(`${runtimeUrl}/invalidate/${ref}/${slug}`, {
+    const res = await fetch(`${runtimeUrl}/invalidate/${ref}/${slug}`, {
       method: "POST",
+      headers: runtimeInternalHeaders(),
       signal: AbortSignal.timeout(2000),
     });
+    if (!res.ok) {
+      logger.warn(`[EdgeFunction] Runtime invalidate failed`, { ref, slug, status: res.status });
+    }
   } catch {
     // Edge Runtime may not be running — modules will load fresh on next start
   }
@@ -430,10 +438,14 @@ export const edgeFunctionService = {
       // 4. Pre-heat the function in the worker pool (zero cold-start)
       try {
         const runtimeUrl = `http://${config.edgeRuntimeInternal}`;
-        await fetch(`${runtimeUrl}/preheat/${ref}/${slug}`, {
+        const preheatRes = await fetch(`${runtimeUrl}/preheat/${ref}/${slug}`, {
           method: "POST",
+          headers: runtimeInternalHeaders(),
           signal: AbortSignal.timeout(10000),
         });
+        if (!preheatRes.ok) {
+          logger.warn(`[EdgeFunction] Runtime preheat failed`, { ref, slug, status: preheatRes.status });
+        }
       } catch {
         // Non-fatal: function will be loaded on first real request
         logger.debug(`[EdgeFunction] Preheat skipped (runtime unavailable)`, {
@@ -648,6 +660,7 @@ export const edgeFunctionService = {
     try {
       const preheatRes = await fetch(`${runtimeUrl}/preheat/${ref}/${slug}`, {
         method: "POST",
+        headers: runtimeInternalHeaders(),
         signal: AbortSignal.timeout(5000),
       });
       let preheatBody: unknown = null;
@@ -812,10 +825,14 @@ export const edgeFunctionService = {
 
     try {
       const runtimeUrl = `http://${config.edgeRuntimeInternal}`;
-      await fetch(`${runtimeUrl}/preheat/${ref}/${slug}`, {
+      const preheatRes = await fetch(`${runtimeUrl}/preheat/${ref}/${slug}`, {
         method: "POST",
+        headers: runtimeInternalHeaders(),
         signal: AbortSignal.timeout(10_000),
       });
+      if (!preheatRes.ok) {
+        logger.warn("[EdgeFunction] Runtime preheat failed during version activation", { ref, slug, version, status: preheatRes.status });
+      }
     } catch {
       logger.debug("[EdgeFunction] Preheat skipped during version activation", {
         ref,

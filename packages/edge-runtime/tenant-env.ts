@@ -1,5 +1,5 @@
 const MGMT_API = process.env.MANAGEMENT_API_URL || "http://127.0.0.1:9090";
-const MASTER_TOKEN = process.env.MASTER_TOKEN || "";
+const MASTER_TOKEN = process.env.EDGE_RUNTIME_MASTER_KEY || process.env.MASTER_TOKEN || "";
 
 const TENANTS_DIRS = [
   process.env.TENANTS_DIR || "/etc/supabase/tenants",
@@ -54,7 +54,7 @@ async function loadEnvFromFile(ref: string): Promise<Record<string, string>> {
 
 async function loadEnvFromApi(ref: string): Promise<Record<string, string> | null> {
   try {
-    const res = await fetch(`${MGMT_API}/v1/projects/${ref}/secrets`, {
+    const res = await fetch(`${MGMT_API}/v1/projects/${ref}/secrets?reveal=true`, {
       headers: { Authorization: `Bearer ${MASTER_TOKEN}` },
       signal: AbortSignal.timeout(5000),
     });

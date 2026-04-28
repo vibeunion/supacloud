@@ -40,16 +40,6 @@ const TUS_MAX_CHUNK_SIZE = Number(process.env.TUS_MAX_CHUNK_SIZE || Math.min(TUS
 // ── Imaginary Config ──────────────────────────────────────────────
 const IMAGINARY_URL = config.imaginaryUrl;
 
-// Lazy-init: validate signing secret on first use, not at module load
-// This prevents test suites from crashing when importing the app module
-let _cachedSigningSecret: string | undefined;
-function getGlobalSigningSecret(): string | null {
-    if (!_cachedSigningSecret) {
-        _cachedSigningSecret = config.jwtSecret || config.storageSigningSecret || '';
-    }
-    return _cachedSigningSecret || null;
-}
-
 import { createHmac, randomUUID } from "crypto";
 
 /**
@@ -57,11 +47,16 @@ import { createHmac, randomUUID } from "crypto";
  * Falls back to global signing secret if tenant-specific one is not available.
  */
 async function getSigningSecretForTenant(ref: string): Promise<string | null> {
-    const globalSecret = getGlobalSigningSecret();
-    if (globalSecret) return globalSecret;
-
-    const tenantSecret = await StorageRLS.getTenantJwtSecret(ref);
+    const tenantSecret = await StorageRLS.getTenantJwtSecret(ref).catch(() => null);
     if (tenantSecret) return tenantSecret;
+
+    if (config.storageSigningSecret) {
+        return createHmac('sha256', config.storageSigningSecret).update(ref).digest('hex');
+    }
+
+    if ((process.env.NODE_ENV === 'test' || process.env.BUN_ENV === 'test') && config.jwtSecret) {
+        return createHmac('sha256', config.jwtSecret).update(ref).digest('hex');
+    }
 
     return null;
 }
@@ -186,9 +181,8 @@ async function verifySignedToken(ref: string, bucket: string, path: string, toke
 async function resolveProjectRefFromApiKey(key: string): Promise<string> {
     if (!key) return '';
     try {
-        const { sql } = await import('../db');
-        const rows = await sql`SELECT ref FROM projects WHERE anon_key = ${key} OR service_role_key = ${key} LIMIT 1`;
-        if (rows.length > 0) return String(rows[0].ref);
+        const { resolveProjectRefFromApiKey: resolveActiveProjectRefFromApiKey } = await import('../utils/project-auth');
+        return (await resolveActiveProjectRefFromApiKey(key)) || '';
     } catch {}
     return '';
 }
@@ -805,14 +799,13 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         const filePath = params['*'];
         if (!filePath) return status(400, { statusCode: "400", error: 'Bad Request', message: 'Missing file path' });
 
-        // Transform support
-        if (hasTransformQuery(query as Record<string, unknown>)) {
-            return proxyToImaginary(ref, params.bucket, filePath, query, set as { headers: Record<string, string> });
-        }
-
         const auth = headers['authorization'];
         const permitted = await StorageRLS.authorizeAction(ref, auth, 'download', params.bucket, filePath);
         if (!permitted.permitted) return status(permitted.error === 'Bucket not found' || permitted.error === 'Object not found' ? 404 : 403, { statusCode: permitted.error === 'Bucket not found' || permitted.error === 'Object not found' ? '404' : '403', error: permitted.error === 'Object not found' ? 'Not Found' : 'Forbidden', message: permitted.error || 'Access Denied.' });
+
+        if (hasTransformQuery(query as Record<string, unknown>)) {
+            return proxyToImaginary(ref, params.bucket, filePath, query, set as { headers: Record<string, string> });
+        }
 
         try {
             const res = await StorageService.getDownloadResponse(ref, params.bucket, filePath);
@@ -895,13 +888,13 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         const filePath = params['*'];
         if (!filePath) return status(400, { statusCode: "400", error: 'Bad Request', message: 'Missing file path' });
 
-        if (hasTransformQuery(query as Record<string, unknown>)) {
-            return proxyToImaginary(ref, params.bucket, filePath, query, set as { headers: Record<string, string> });
-        }
-
         const auth = headers['authorization'];
         const permitted = await StorageRLS.authorizeAction(ref, auth, 'download', params.bucket, filePath);
         if (!permitted.permitted) return status(permitted.error === 'Object not found' ? 404 : 403, { statusCode: permitted.error === 'Object not found' ? '404' : '403', error: permitted.error === 'Object not found' ? 'Not Found' : 'Forbidden', message: permitted.error || 'Access Denied.' });
+
+        if (hasTransformQuery(query as Record<string, unknown>)) {
+            return proxyToImaginary(ref, params.bucket, filePath, query, set as { headers: Record<string, string> });
+        }
 
         try {
             const res = await StorageService.getDownloadResponse(ref, params.bucket, filePath);

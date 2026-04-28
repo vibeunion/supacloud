@@ -2,25 +2,28 @@ import { Elysia, t, status } from "elysia";
 import { listBackups, createBackup, restore, createLogicalBackup, restoreLogicalBackup } from '../services/backup.service';
 import type { RestoreRequest } from '../types/backup';
 import { resolveDbName } from '../db';
+import { requireAdminAuth, requireProjectOrAdminAuth } from '../middleware/auth';
 
 const ErrorResponse = t.Object({ message: t.String() });
 
 export const backupRoutes = new Elysia({ prefix: "/v1/projects/:ref/database/backups" })
-    .get('/', async ({ params, query }) => {
+    .get('/', async ({ params, request }) => {
+        const authError = await requireProjectOrAdminAuth(request, params.ref);
+        if (authError) return status(authError.status, authError.body);
+
         const dbName = await resolveDbName(params.ref);
-        const stanza = query.stanza || dbName;
-        return await listBackups(stanza);
+        return await listBackups(dbName);
     }, {
-        query: t.Object({ stanza: t.Optional(t.String()) }),
         response: { 200: t.Any() },
     })
-    .post('/', async ({ params, body }) => {
+    .post('/', async ({ params, body, request }) => {
+        const authError = await requireAdminAuth(request);
+        if (authError) return status(authError.status, authError.body);
+
         const dbName = await resolveDbName(params.ref);
-        const stanza = body.stanza || dbName;
-        return await createBackup(stanza, body.type);
+        return await createBackup(dbName, body.type);
     }, {
         body: t.Object({
-            stanza: t.Optional(t.String()),
             type: t.Optional(t.Union([
                 t.Literal('full'),
                 t.Literal('incr'),
@@ -29,17 +32,32 @@ export const backupRoutes = new Elysia({ prefix: "/v1/projects/:ref/database/bac
         }),
         response: { 200: t.Any() },
     })
-    .post('/restore', async ({ body }) => {
-        return await restore(body as RestoreRequest);
+    .post('/restore', async ({ body, request }) => {
+        const authError = await requireAdminAuth(request);
+        if (authError) return status(authError.status, authError.body);
+        try {
+            return await restore(body as RestoreRequest);
+        } catch (err) {
+            return status(400, { message: err instanceof Error ? err.message : "Invalid restore request" });
+        }
     }, {
-        response: { 200: t.Any() },
+        body: t.Object({ target: t.String() }),
+        response: {
+            200: t.Any(),
+            400: ErrorResponse,
+        },
     })
-    .post('/logical', async ({ params: { ref } }) => {
+    .post('/logical', async ({ params: { ref }, request }) => {
+        const authError = await requireAdminAuth(request);
+        if (authError) return status(authError.status, authError.body);
+
         return await createLogicalBackup(ref);
     }, {
         response: { 200: t.Any() },
     })
-    .post('/logical/restore', async ({ params: { ref }, body }) => {
+    .post('/logical/restore', async ({ params: { ref }, body, request }) => {
+        const authError = await requireAdminAuth(request);
+        if (authError) return status(authError.status, authError.body);
         if (!body.backupId) return status(400, { message: "backupId is required", code: "400" });
         return await restoreLogicalBackup(ref, body.backupId);
     }, {

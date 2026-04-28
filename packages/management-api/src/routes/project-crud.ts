@@ -7,7 +7,7 @@ import { logger } from "../utils/logger";
 import { projectService } from "../services";
 import { getProjectDb, resolveDbName, resolveRoleName } from "../db";
 import { normalizeProjectConfig } from "../utils/project-config";
-import { requireAdminAuth } from "../middleware/auth";
+import { getAuthContext, requireAdminAuth, requireProjectOrAdminAuth } from "../middleware/auth";
 
 // Available regions list
 const AVAILABLE_REGIONS = [
@@ -294,31 +294,54 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
   // Get all projects
   .get(
     "/",
-    async () => {
-      const projects = await projectService.listProjects();
+    async ({ request }) => {
+      const auth = await getAuthContext(request);
+      if ("status" in auth) return status(auth.status as 401 | 403, { message: auth.body.error, code: String(auth.status) });
+      const projects = auth.role === "project"
+        ? [await projectService.getProject(auth.ref)].filter(Boolean)
+        : await projectService.listProjects();
       const docs = await Promise.all(
         projects.map((p) => buildProjectResponse(p, false)),
       );
       return docs.map(toPublicV1ProjectResponse);
     },
-    { response: t.Array(V1ProjectResponseSchema) },
+    {
+      response: {
+        200: t.Array(V1ProjectResponseSchema),
+        401: t.Object({ message: t.String(), code: t.String() }),
+        403: t.Object({ message: t.String(), code: t.String() }),
+      },
+    },
   )
   .get(
     "",
-    async () => {
-      const projects = await projectService.listProjects();
+    async ({ request }) => {
+      const auth = await getAuthContext(request);
+      if ("status" in auth) return status(auth.status as 401 | 403, { message: auth.body.error, code: String(auth.status) });
+      const projects = auth.role === "project"
+        ? [await projectService.getProject(auth.ref)].filter(Boolean)
+        : await projectService.listProjects();
       const docs = await Promise.all(
         projects.map((p) => buildProjectResponse(p, false)),
       );
       return docs.map(toPublicV1ProjectResponse);
     },
-    { response: { 200: t.Array(V1ProjectResponseSchema) } },
+    {
+      response: {
+        200: t.Array(V1ProjectResponseSchema),
+        401: t.Object({ message: t.String(), code: t.String() }),
+        403: t.Object({ message: t.String(), code: t.String() }),
+      },
+    },
   )
 
   // Create new project
   .post(
     "/",
-    async ({ body, set }) => {
+    async ({ body, set, request }) => {
+      const authError = await requireAdminAuth(request);
+      if (authError) return status(authError.status as 401 | 403, { message: authError.body.error, code: String(authError.status) });
+
       const project = await projectService.createProject(body);
       set.status = 201;
       const fullProject = await projectService.getProject(project.ref);
@@ -381,7 +404,9 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
   )
   .get(
     "/:ref/studio-metrics",
-    async ({ params, set }) => {
+    async ({ params, request }) => {
+      const authError = await requireProjectOrAdminAuth(request, params.ref);
+      if (authError) return status(authError.status as 401 | 403, { message: authError.body.error, code: String(authError.status) });
       const project = await projectService.getProject(params.ref);
       if (!project)
         return status(404, { message: "Project not found", code: "404" });
@@ -407,7 +432,10 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
   // Update project (PATCH)
   .patch(
     "/:ref",
-    async ({ params, body, set }) => {
+    async ({ params, body, set, request }) => {
+      const authError = await requireProjectOrAdminAuth(request, params.ref);
+      if (authError) return status(authError.status as 401 | 403, { message: authError.body.error, code: String(authError.status) });
+
       const updated = await projectService.updateProject(params.ref, body);
       if (!updated) {
         return status(404, { message: "Project not found", code: "404" });
@@ -626,7 +654,10 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
   // POST activate — set the vanity subdomain
   .post(
     "/:ref/vanity-subdomain/activate",
-    async ({ params, body }) => {
+    async ({ params, body, request }) => {
+      const authError = await requireProjectOrAdminAuth(request, params.ref);
+      if (authError) return status(authError.status as 401 | 403, { message: authError.body.error, code: String(authError.status) });
+
       const project = await projectService.getProject(params.ref);
       if (!project) return status(404, { message: "Project not found" });
       const requested = (body as Record<string, string>).vanity_subdomain || "";
@@ -669,7 +700,10 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
   // DELETE — remove vanity subdomain
   .delete(
     "/:ref/vanity-subdomain",
-    async ({ params }) => {
+    async ({ params, request }) => {
+      const authError = await requireProjectOrAdminAuth(request, params.ref);
+      if (authError) return status(authError.status as 401 | 403, { message: authError.body.error, code: String(authError.status) });
+
       const project = await projectService.getProject(params.ref);
       if (!project) return status(404, { message: "Project not found" });
       const currentCfg = normalizeProjectConfig(project.config);
@@ -750,7 +784,10 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
   )
   .patch(
     "/:ref/postgrest",
-    async ({ params, body }) => {
+    async ({ params, body, request }) => {
+      const authError = await requireProjectOrAdminAuth(request, params.ref);
+      if (authError) return status(authError.status as 401 | 403, { message: authError.body.error, code: String(authError.status) });
+
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings)
         return status(404, { message: "Project not found", code: "404" });

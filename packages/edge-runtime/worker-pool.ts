@@ -413,7 +413,7 @@ export class WorkerPool {
     }
   }
 
-  preheat(functionId: string, functionPath: string): Promise<boolean> {
+  preheat(functionId: string, functionPath: string, projectRoot: string, env: Record<string, string>): Promise<boolean> {
     return new Promise((resolve) => {
       const worker = this.idle.pop();
       if (!worker) {
@@ -445,7 +445,7 @@ export class WorkerPool {
       };
 
       worker.on("message", onMsg);
-      worker.postMessage({ type: "preheat", functionId, functionPath });
+      worker.postMessage({ type: "preheat", functionId, functionPath, projectRoot, env });
     });
   }
 

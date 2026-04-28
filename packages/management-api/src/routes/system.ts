@@ -1,5 +1,6 @@
-import { Elysia } from "elysia";
+import { Elysia, status } from "elysia";
 import { logger } from "../utils/logger";
+import { requireAdminAuth } from "../middleware/auth";
 import { realtimeService } from "../services/realtime.service";
 import os from "node:os";
 
@@ -77,7 +78,9 @@ export const systemRoutes = new Elysia({ name: "system" })
   })
 
   // Ensure supabase_admin role has REPLICATION attribute, then return latest check
-  .post("/v1/system/realtime/prerequisites/ensure", async () => {
+  .post("/v1/system/realtime/prerequisites/ensure", async ({ request }) => {
+    const authError = await requireAdminAuth(request);
+    if (authError) return status(authError.status, authError.body);
     const ensure = await realtimeService.ensureSupabaseAdminReplication();
     const current = await realtimeService.checkCdcPrerequisites();
     return { ensure, current };
