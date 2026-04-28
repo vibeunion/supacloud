@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.12.4](https://github.com/zuohuadong/supacloud/compare/management-api-v0.12.3...management-api-v0.12.4) (2026-04-28)
+
+
+### 🐛 Bug Fixes
+
+* **management-api:** grant auth roles tenant database access ([196ec92](https://github.com/zuohuadong/supacloud/commit/196ec922bd876bf42081e1fbfbb5ad28f84f710e))
+* **management-api:** isolate background auth encryption regression ([d447a84](https://github.com/zuohuadong/supacloud/commit/d447a847177f23590c35fa721e002d24e893fe8d))
+* **management-api:** stabilize encrypted background task regression ([70e4c44](https://github.com/zuohuadong/supacloud/commit/70e4c44c72fad7eb88c0662750b6d4ac56bfcdc8))
+* **management-api:** use node random uuid in sdk proxy ([5ceb267](https://github.com/zuohuadong/supacloud/commit/5ceb2671020fea9413d99fca883b11d46271bb31))
+
 ## [0.12.3](https://github.com/zuohuadong/supacloud/compare/management-api-v0.12.2...management-api-v0.12.3) (2026-04-28)
 
 
