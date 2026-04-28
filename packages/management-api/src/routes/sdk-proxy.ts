@@ -36,6 +36,23 @@ function shouldForceAsyncRoute(targetPath: string, configuredRoutes: string[] | 
     });
 }
 
+function buildEncryptedBackgroundAuth(input: {
+    authKind: "jwt" | "apikey" | "none";
+    authorization: string | null;
+    apikey: string | null;
+    authPayload: Record<string, unknown> | null;
+    apikeyKind: "anon" | "service_role" | "unknown" | null;
+}) {
+    return {
+        kind: input.authKind,
+        authorization: input.authorization ? encryptSecretIfNeeded(input.authorization) : null,
+        apikey: input.apikey ? encryptSecretIfNeeded(input.apikey) : null,
+        invoker_user_id: typeof input.authPayload?.sub === "string" ? input.authPayload.sub : null,
+        invoker_role: typeof input.authPayload?.role === "string" ? input.authPayload.role : null,
+        apikey_kind: input.apikeyKind,
+    };
+}
+
 async function verifyJwtPayload(ref: string, token: string): Promise<Record<string, unknown> | null> {
     try {
         const rows = await metaSql`SELECT jwt_secret FROM projects WHERE ref = ${ref} AND deleted_at IS NULL AND status = 'active' LIMIT 1`;
@@ -149,14 +166,13 @@ async function maybeEnqueueAsyncFunction(request: Request, ref: string): Promise
             body: bodyBuffer ? Buffer.from(bodyBuffer).toString("utf8") : null,
             body_encoding: "utf8",
             requested_timeout_sec: timeoutSec,
-            auth: {
-                kind: authKind,
-                authorization: authorization ? encryptSecretIfNeeded(authorization) : null,
-                apikey: apikey ? encryptSecretIfNeeded(apikey) : null,
-                invoker_user_id: typeof authPayload?.sub === "string" ? authPayload.sub : null,
-                invoker_role: typeof authPayload?.role === "string" ? authPayload.role : null,
-                apikey_kind: apikeyKind,
-            },
+            auth: buildEncryptedBackgroundAuth({
+                authKind,
+                authorization,
+                apikey,
+                authPayload,
+                apikeyKind,
+            }),
         },
     });
 
@@ -182,6 +198,7 @@ async function maybeEnqueueAsyncFunction(request: Request, ref: string): Promise
 export const sdkProxyInternals = {
     resolveProjectRefFromApiKey,
     maybeEnqueueAsyncFunction,
+    buildEncryptedBackgroundAuth,
 };
 
 async function getProjectRef(request: Request): Promise<string> {
