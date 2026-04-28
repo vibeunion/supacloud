@@ -2,6 +2,7 @@ import { Elysia, t, status } from "elysia";
 import { StorageService, migrationJobs } from '../services/storage.service';
 import { logger } from "../utils/logger";
 import { config } from "../config";
+import { requireProjectOrAdminAuth } from "../middleware/auth";
 
 const ErrorResponse = t.Object({ message: t.String() });
 const SuccessResponse = t.Object({ success: t.Boolean(), message: t.String() });
@@ -24,13 +25,19 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
     .get('/status', async () => {
         return await StorageService.getStatus();
     })
-    .get('/:ref/buckets', async ({ params }) => {
+    .get('/:ref/buckets', async ({ params, request }) => {
+        const authError = await requireProjectOrAdminAuth(request, params.ref);
+        if (authError) return status(authError.status, authError.body);
         return await StorageService.listBuckets(params.ref);
     })
-    .get('/:ref/buckets/:name/files', async ({ params }) => {
+    .get('/:ref/buckets/:name/files', async ({ params, request }) => {
+        const authError = await requireProjectOrAdminAuth(request, params.ref);
+        if (authError) return status(authError.status, authError.body);
         return await StorageService.listFiles(params.ref, params.name);
     })
-    .post('/:ref/buckets/:name/upload', async ({ params, body }) => {
+    .post('/:ref/buckets/:name/upload', async ({ params, body, request }) => {
+        const authError = await requireProjectOrAdminAuth(request, params.ref);
+        if (authError) return status(authError.status as 401 | 403, { message: authError.body.error, code: String(authError.status) });
         const file = body.file;
         if (!file) return status(400, { message: 'No file provided', code: '400' });
         const targetPath = typeof body.path === 'string' && body.path.trim().length > 0
@@ -55,16 +62,22 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
         response: {
             200: SuccessResponse,
             400: ErrorResponse,
+            401: ErrorResponse,
+            403: ErrorResponse,
             500: ErrorResponse,
         },
     })
-    .delete('/:ref/buckets/:name/files/:filename', async ({ params }) => {
+    .delete('/:ref/buckets/:name/files/:filename', async ({ params, request }) => {
+        const authError = await requireProjectOrAdminAuth(request, params.ref);
+        if (authError) return status(authError.status as 401 | 403, { message: authError.body.error, code: String(authError.status) });
         const success = await StorageService.deleteFile(params.ref, params.name, params.filename);
         if (!success) return status(500, { message: 'Failed to delete file', code: '500' });
         return { success: true, message: 'File deleted successfully' };
     }, {
         response: {
             200: SuccessResponse,
+            401: ErrorResponse,
+            403: ErrorResponse,
             500: ErrorResponse,
         },
     })
@@ -323,10 +336,14 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
     });
 
 export const projectStorageRoutes = new Elysia({ prefix: "/v1/projects/:ref/storage" })
-    .get('/buckets', async ({ params }) => {
+    .get('/buckets', async ({ params, request }) => {
+        const authError = await requireProjectOrAdminAuth(request, params.ref);
+        if (authError) return status(authError.status, authError.body);
         return await StorageService.listBuckets(params.ref);
     })
-    .post('/buckets', async ({ params, body, set }) => {
+    .post('/buckets', async ({ params, body, set, request }) => {
+        const authError = await requireProjectOrAdminAuth(request, params.ref);
+        if (authError) return status(authError.status, authError.body);
         const bucketName = (body as Record<string, unknown>).name as string || (body as Record<string, unknown>).id as string;
         const result = await StorageService.createBucket(params.ref, bucketName);
         if (!result.success) {
@@ -343,7 +360,9 @@ export const projectStorageRoutes = new Elysia({ prefix: "/v1/projects/:ref/stor
             allowed_mime_types: t.Optional(t.Array(t.String())),
         }),
     })
-    .get('/buckets/:id', async ({ params, set }) => {
+    .get('/buckets/:id', async ({ params, set, request }) => {
+        const authError = await requireProjectOrAdminAuth(request, params.ref);
+        if (authError) return status(authError.status, authError.body);
         const buckets = await StorageService.listBuckets(params.ref);
         const bucket = (buckets as Array<Record<string, unknown>>).find((b: Record<string, unknown>) => b.id === params.id || b.name === params.id);
         if (!bucket) {
@@ -352,7 +371,9 @@ export const projectStorageRoutes = new Elysia({ prefix: "/v1/projects/:ref/stor
         }
         return bucket;
     })
-    .put('/buckets/:id', async ({ params, body, set }) => {
+    .put('/buckets/:id', async ({ params, body, set, request }) => {
+        const authError = await requireProjectOrAdminAuth(request, params.ref);
+        if (authError) return status(authError.status, authError.body);
         const result = await StorageService.updateBucket(params.ref, params.id, {
             public: body.public,
             file_size_limit: body.file_size_limit,
@@ -372,7 +393,9 @@ export const projectStorageRoutes = new Elysia({ prefix: "/v1/projects/:ref/stor
             allowed_mime_types: t.Optional(t.Array(t.String())),
         }),
     })
-    .delete('/buckets/:id', async ({ params, set }) => {
+    .delete('/buckets/:id', async ({ params, set, request }) => {
+        const authError = await requireProjectOrAdminAuth(request, params.ref);
+        if (authError) return status(authError.status, authError.body);
         const result = await StorageService.deleteBucket(params.ref, params.id);
         if (!result.success) {
             set.status = 500;

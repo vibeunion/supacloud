@@ -81,8 +81,14 @@ const { taskRoutes } = await import("../../src/routes/tasks");
 
 const app = new Elysia().use(taskRoutes);
 
-function request(path: string, init?: RequestInit) {
-  return app.handle(new Request(`http://localhost${path}`, init));
+const authHeaders = { Authorization: "Bearer dev-master-token" };
+
+function request(path: string, init: RequestInit = {}) {
+  const headers = new Headers(init.headers);
+  for (const [key, value] of Object.entries(authHeaders)) {
+    if (!headers.has(key)) headers.set(key, value);
+  }
+  return app.handle(new Request(`http://localhost${path}`, { ...init, headers }));
 }
 
 describe("taskRoutes", () => {

@@ -7,6 +7,7 @@ import path from "path";
 import fs from "fs/promises";
 
 const PORT = Number(process.env.EDGE_RUNTIME_PORT) || Number(process.env.PORT) || 9000;
+const HOST = process.env.EDGE_RUNTIME_HOST || process.env.HOST || "127.0.0.1";
 const POOL_SIZE = Number(process.env.WORKER_POOL_SIZE) || 4;
 const BACKGROUND_POOL_SIZE = Number(process.env.BACKGROUND_WORKER_POOL_SIZE) || Math.max(1, Math.min(POOL_SIZE, 2));
 const FUNCTIONS_DIR = path.resolve(process.env.EDGE_FUNCTIONS_DIR || "./functions");
@@ -498,9 +499,9 @@ const app = new Elysia()
     if (authError) return authError;
 
     try {
-      const { functionPath } = await resolveFunctionPath(c.params.ref, c.params.slug);
+      const { functionPath, projectRoot } = await resolveFunctionPath(c.params.ref, c.params.slug);
       const functionId = `${c.params.ref}_${c.params.slug}`;
-      const success = await pool.preheat(functionId, functionPath);
+      const success = await pool.preheat(functionId, functionPath, projectRoot, await loadTenantEnv(c.params.ref));
       return { preheated: functionId, success };
     } catch (error) {
       return badRequest(error instanceof Error ? error.message : "Invalid function path");
@@ -635,9 +636,9 @@ const app = new Elysia()
     )
   )
 
-  .listen({ port: PORT, hostname: "0.0.0.0" });
+  .listen({ port: PORT, hostname: HOST });
 
-console.log(`🚀 Edge Runtime on :${PORT} (${POOL_SIZE} workers)`);
+console.log(`🚀 Edge Runtime on ${HOST}:${PORT} (${POOL_SIZE} workers)`);
 
 let shuttingDown = false;
 const gracefulShutdown = async (signal: string) => {

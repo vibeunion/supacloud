@@ -25,6 +25,7 @@ import { closeDb, sql } from "./db";
 import { authRoutes, deployRoutes, storageCompatRoutes } from "./routes";
 import { migrateLegacyVersionArtifacts } from "./services/edge-function.service";
 import { resolveRealtimeTenantHost } from "./utils/sdk-parity";
+import { resolveProjectRefFromApiKey } from "./utils/project-auth";
 
 const WEB_CONSOLE_CURRENT_DIR = "/opt/supacloud/web-console/current";
 const WEB_CONSOLE_LEGACY_DIR = "/opt/supacloud/packages/web-console/build";
@@ -948,45 +949,24 @@ async function bootstrap() {
           url.pathname.startsWith("/realtime/v1") &&
           request.headers.get("upgrade")?.toLowerCase() === "websocket"
         ) {
-          let projectRef =
+          const apikey = request.headers.get("apikey") || url.searchParams.get("apikey") || "";
+          if (!apikey) {
+            return new Response("Missing apikey", { status: 401 });
+          }
+
+          const projectRef = await resolveProjectRefFromApiKey(apikey) || "";
+
+          if (!projectRef) {
+            return new Response("Invalid apikey", { status: 401 });
+          }
+
+          const requestedRef =
             request.headers.get("x-project-ref") ||
             request.headers.get("x-supabase-project") ||
             url.searchParams.get("ref") ||
             "";
-
-          if (!projectRef) {
-            const apikey = request.headers.get("apikey") || url.searchParams.get("apikey") || "";
-            const authorization = request.headers.get("authorization") || "";
-
-            if (authorization.startsWith("Bearer ")) {
-              try {
-                const token = authorization.slice("Bearer ".length);
-                const payloadB64 = token.split(".")[1];
-                if (payloadB64) {
-                  const payload = JSON.parse(Buffer.from(payloadB64, "base64").toString());
-                  if (payload?.ref) {
-                    projectRef = String(payload.ref);
-                  }
-                }
-              } catch {
-                // ignore malformed JWT payloads
-              }
-            }
-
-            if (!projectRef && apikey) {
-              try {
-                const rows = await sql`SELECT ref FROM projects WHERE anon_key = ${apikey} OR service_role_key = ${apikey} LIMIT 1`;
-                if (rows.length > 0) {
-                  projectRef = String(rows[0].ref);
-                }
-              } catch {
-                // fall through to anonymous/global upstream
-              }
-            }
-          }
-
-          if (!projectRef) {
-            return new Response("Missing project reference", { status: 400 });
+          if (requestedRef && requestedRef !== projectRef) {
+            return new Response("Project reference does not match apikey", { status: 403 });
           }
 
           // Convert the configured HTTP Realtime URL to a WS URL
@@ -1001,8 +981,6 @@ async function bootstrap() {
           const forwardHeaders = [
             "apikey",
             "authorization",
-            "x-project-ref",
-            "x-supabase-project",
             "sec-websocket-protocol",
           ];
           for (const h of forwardHeaders) {
@@ -1020,15 +998,10 @@ async function bootstrap() {
             : `${projectRef}.api.${config.baseDomain}`;
           requestHeaders["host"] = tenantHost;
           requestHeaders["x-forwarded-host"] = url.host;
-          if (projectRef) {
-            requestHeaders["x-project-ref"] = projectRef;
-          }
+          requestHeaders["x-project-ref"] = projectRef;
           requestHeaders["x-forwarded-proto"] = url.protocol.replace(":", "");
           requestHeaders["x-forwarded-for"] =
             request.headers.get("x-forwarded-for") || "127.0.0.1";
-          if (projectRef) {
-            requestHeaders["x-project-ref"] = projectRef;
-          }
 
           const upgraded = server.upgrade(request, {
             data: { upstreamUrl, requestHeaders, projectRef },

@@ -6,6 +6,7 @@ import { broadcastTaskUpdate } from "../routes/ws";
 import { logger } from "../utils/logger";
 import { config } from "../config";
 import { projectService } from "./project.service";
+import { decryptSecretIfNeeded } from "../utils/secret-crypto";
 
 interface InvocationEnvelope {
   method?: string;
@@ -92,10 +93,10 @@ function buildInvocationRequest(task: ProjectTask): Request {
     headers.set("x-supacloud-apikey-kind", payload.auth.apikey_kind);
   }
   if (payload.auth?.authorization) {
-    headers.set("x-supacloud-auth-authorization", payload.auth.authorization);
+    headers.set("x-supacloud-auth-authorization", decryptSecretIfNeeded(payload.auth.authorization));
   }
   if (payload.auth?.apikey) {
-    headers.set("x-supacloud-auth-apikey", payload.auth.apikey);
+    headers.set("x-supacloud-auth-apikey", decryptSecretIfNeeded(payload.auth.apikey));
   }
   headers.set("x-supacloud-internal-auth", `Bearer ${config.masterToken}`);
 

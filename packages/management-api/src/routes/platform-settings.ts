@@ -1,6 +1,7 @@
-import { Elysia, t } from "elysia";
+import { Elysia, t, status } from "elysia";
 import { sql } from "../db";
 import { logger } from "../utils/logger";
+import { requireAdminAuth } from "../middleware/auth";
 
 /**
  * Platform Settings Routes
@@ -45,7 +46,10 @@ export const platformSettingsRoutes = new Elysia({ name: "platform-settings" })
   })
 
   // ─── PUT /v1/platform/settings ─────────────────────────────────
-  .put("/v1/platform/settings", async ({ body }) => {
+  .put("/v1/platform/settings", async ({ body, request }) => {
+    const authError = await requireAdminAuth(request);
+    if (authError) return status(authError.status, authError.body);
+
     const items = body.items;
 
     if (items.length === 0) {

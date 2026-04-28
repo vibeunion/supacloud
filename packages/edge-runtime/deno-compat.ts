@@ -64,16 +64,18 @@ const envWriteLog: Set<string> = new Set();
 
 (globalThis as Record<string, unknown>).Deno = {
   env: {
-    get: (k: string) => process.env[k],
+    get: (k: string) => injectedEnvRef[k],
     set: (k: string, v: string) => {
       envWriteLog.add(k);
+      injectedEnvRef[k] = v;
       process.env[k] = v;
     },
     delete: (k: string) => {
       envWriteLog.add(k);
+      delete injectedEnvRef[k];
       delete process.env[k];
     },
-    has: (k: string) => k in (process.env as Record<string, unknown>),
+    has: (k: string) => k in injectedEnvRef,
     toObject: () => ({ ...injectedEnvRef }),
   },
 

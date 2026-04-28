@@ -14,6 +14,7 @@ import {
   OPENAPI_STORAGE_CONFIG_RESPONSE_TEMPLATE,
 } from "../utils/openapi-defaults.gen";
 import { resolveRoleName, resolveDbName as resolveDbNameTopLevel } from "../db";
+import { requireAdminAuth, requireProjectOrAdminAuth } from "../middleware/auth";
 
 /** Map PostgreSQL column types to TypeScript types */
 function pgTypeToTs(udtName: string, dataType: string): string {
@@ -82,10 +83,14 @@ function addConfigRoutes(section: string) {
       async ({
         params,
         body,
+        request,
       }: {
         params: { ref: string };
         body: Record<string, unknown>;
+        request: Request;
       }) => {
+        const authError = await requireProjectOrAdminAuth(request, params.ref);
+        if (authError) return status(authError.status, authError.body);
         const settings = await projectService.getProjectSettings(params.ref);
         if (!settings)
           return status(404, { message: "Project not found", code: "404" });
@@ -423,7 +428,9 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
   // Get project settings
   .get(
     "/:ref/settings",
-    async ({ params, set }) => {
+    async ({ params, request }) => {
+      const authError = await requireProjectOrAdminAuth(request, params.ref);
+      if (authError) return status(authError.status, authError.body);
       const settings = await projectService.getProjectSettings(params.ref);
       if (settings === null) {
         return status(404, { message: "Project not found", code: "404" });
@@ -440,7 +447,9 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
   // Update project settings
   .put(
     "/:ref/settings",
-    async ({ params, body, set }) => {
+    async ({ params, body, request }) => {
+      const authError = await requireProjectOrAdminAuth(request, params.ref);
+      if (authError) return status(authError.status, authError.body);
       const settings = await projectService.updateProjectSettings(
         params.ref,
         body,
@@ -461,7 +470,9 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
   // Get project API keys
   .get(
     "/:ref/api-keys",
-    async ({ params, set }) => {
+    async ({ params, request }) => {
+      const authError = await requireProjectOrAdminAuth(request, params.ref);
+      if (authError) return status(authError.status, authError.body);
       const keys = await projectService.getApiKeys(params.ref);
       if (!keys) {
         return status(404, { message: "Project not found", code: "404" });
@@ -481,7 +492,9 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
   // Rotate API keys
   .post(
     "/:ref/api-keys/rotate",
-    async ({ params, set }) => {
+    async ({ params, request }) => {
+      const authError = await requireAdminAuth(request);
+      if (authError) return status(authError.status, authError.body);
       const keys = await projectService.rotateApiKeys(params.ref);
       if (!keys) {
         return status(404, { message: "Project not found", code: "404" });
@@ -518,7 +531,9 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
   // Get backup list
   .get(
     "/:ref/database/backups",
-    async ({ params, set }) => {
+    async ({ params, request }) => {
+      const authError = await requireProjectOrAdminAuth(request, params.ref);
+      if (authError) return status(authError.status, authError.body);
       const backups = await projectService.listBackups(params.ref);
       return backups;
     },
@@ -532,7 +547,9 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
   // Restore backup
   .post(
     "/:ref/database/backups/restore",
-    async ({ params, body, set }) => {
+    async ({ params, body, request }) => {
+      const authError = await requireAdminAuth(request);
+      if (authError) return status(authError.status, authError.body);
       const success = await projectService.restoreBackup(
         params.ref,
         body.backup_id,
@@ -558,7 +575,9 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
   // Get network restrictions
   .get(
     "/:ref/network-restrictions",
-    async ({ params }) => {
+    async ({ params, request }) => {
+      const authError = await requireProjectOrAdminAuth(request, params.ref);
+      if (authError) return status(authError.status, authError.body);
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings) {
         return status(404, { message: "Project not found" });
@@ -578,7 +597,9 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
   // Update network restrictions
   .post(
     "/:ref/network-restrictions",
-    async ({ params, body, set }) => {
+    async ({ params, body, request }) => {
+      const authError = await requireAdminAuth(request);
+      if (authError) return status(authError.status, authError.body);
       const success = await projectService.updateNetworkRestrictions(
         params.ref,
         body.allowed_address_ranges,
@@ -606,7 +627,9 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
   )
   .patch(
     "/:ref/network-restrictions",
-    async ({ params, body, set }) => {
+    async ({ params, body, request }) => {
+      const authError = await requireAdminAuth(request);
+      if (authError) return status(authError.status, authError.body);
       const success = await projectService.updateNetworkRestrictions(
         params.ref,
         body.allowed_address_ranges,
@@ -630,7 +653,9 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
   )
   .delete(
     "/:ref/network-restrictions",
-    async ({ params, set }) => {
+    async ({ params, request }) => {
+      const authError = await requireAdminAuth(request);
+      if (authError) return status(authError.status, authError.body);
       const success = await projectService.updateNetworkRestrictions(
         params.ref,
         [],
@@ -653,7 +678,9 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
   // Get custom domain
   .get(
     "/:ref/custom-hostname",
-    async ({ params, set }) => {
+    async ({ params, request }) => {
+      const authError = await requireAdminAuth(request);
+      if (authError) return status(authError.status, authError.body);
       const domainInfo = await projectService.getCustomDomain(params.ref);
       if (!domainInfo) {
         return status(404, { message: "Project not found", code: "404" });
@@ -670,7 +697,9 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
   // Add custom domain
   .post(
     "/:ref/custom-hostname",
-    async ({ params, body, set }) => {
+    async ({ params, body, request }) => {
+      const authError = await requireAdminAuth(request);
+      if (authError) return status(authError.status, authError.body);
       const success = await projectService.addCustomDomain(
         params.ref,
         (body as Record<string, unknown>).custom_hostname as string,
@@ -695,7 +724,9 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
 
   .delete(
     "/:ref/custom-hostname",
-    async ({ params, set }) => {
+    async ({ params, request }) => {
+      const authError = await requireAdminAuth(request);
+      if (authError) return status(authError.status, authError.body);
       const success = await projectService.deleteCustomDomain(params.ref);
       if (!success) {
         return status(500, {
@@ -710,7 +741,9 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
 
   .post(
     "/:ref/custom-hostname/verify",
-    async ({ params, set }) => {
+    async ({ params, request }) => {
+      const authError = await requireAdminAuth(request);
+      if (authError) return status(authError.status, authError.body);
       const domainInfo = await projectService.getCustomDomain(params.ref);
       if (!domainInfo) {
         return status(404, {
@@ -753,7 +786,9 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
   // Modify Auth config (supports deep copy override for third-party Providers)
   .patch(
     "/:ref/config/auth",
-    async ({ params, body, set }) => {
+    async ({ params, body, request }) => {
+      const authError = await requireProjectOrAdminAuth(request, params.ref);
+      if (authError) return status(authError.status, authError.body);
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings) {
         return status(404, { message: "Project not found", code: "404" });
@@ -1093,7 +1128,9 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
 
   .patch(
     "/:ref/config/pooler",
-    async ({ params, body }) => {
+    async ({ params, body, request }) => {
+      const authError = await requireProjectOrAdminAuth(request, params.ref);
+      if (authError) return status(authError.status, authError.body);
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings)
         return status(404, { message: "Project not found", code: "404" });
@@ -1116,7 +1153,9 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
 
   .get(
     "/:ref/database/replication",
-    async ({ params }) => {
+    async ({ params, request }) => {
+      const authError = await requireProjectOrAdminAuth(request, params.ref);
+      if (authError) return status(authError.status, authError.body);
       const { getProjectDb, resolveDbName } = await import("../db");
       const dbName = await resolveDbName(params.ref);
       const db = getProjectDb(dbName);
@@ -1135,7 +1174,9 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
 
   .get(
     "/:ref/types/python",
-    async ({ params, query }) => {
+    async ({ params, query, request }) => {
+      const authError = await requireProjectOrAdminAuth(request, params.ref);
+      if (authError) return status(authError.status, authError.body);
       const { getProjectDb, resolveDbName } = await import("../db");
       const dbName = await resolveDbName(params.ref);
       const db = getProjectDb(dbName);
@@ -1184,7 +1225,9 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
   )
   .patch(
     "/:ref/config/database",
-    async ({ params, body }) => {
+    async ({ params, body, request }) => {
+      const authError = await requireProjectOrAdminAuth(request, params.ref);
+      if (authError) return status(authError.status, authError.body);
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings)
         return status(404, { message: "Project not found", code: "404" });
@@ -1273,7 +1316,9 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
   )
   .patch(
     "/:ref/config/storage",
-    async ({ params, body }) => {
+    async ({ params, body, request }) => {
+      const authError = await requireProjectOrAdminAuth(request, params.ref);
+      if (authError) return status(authError.status, authError.body);
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings)
         return status(404, { message: "Project not found", code: "404" });
@@ -1324,7 +1369,9 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
   )
   .patch(
     "/:ref/config/realtime",
-    async ({ params, body }) => {
+    async ({ params, body, request }) => {
+      const authError = await requireProjectOrAdminAuth(request, params.ref);
+      if (authError) return status(authError.status, authError.body);
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings)
         return status(404, { message: "Project not found", code: "404" });
@@ -1361,7 +1408,9 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
   // Get PgBouncer config (for Studio display)
   .get(
     "/:ref/pgbouncer",
-    async ({ params, set }) => {
+    async ({ params, request }) => {
+      const authError = await requireProjectOrAdminAuth(request, params.ref);
+      if (authError) return status(authError.status, authError.body);
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings)
         return status(404, { message: "Project not found", code: "404" });
@@ -1585,7 +1634,9 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
   // Get Typescript Types — Real schema reflection (P0-5)
   .get(
     "/:ref/types/typescript",
-    async ({ params, query, set }) => {
+    async ({ params, query, request }) => {
+      const authError = await requireProjectOrAdminAuth(request, params.ref);
+      if (authError) return status(authError.status, authError.body);
       const { getProjectDb, resolveDbName } = await import("../db");
       const dbName = await resolveDbName(params.ref);
 
@@ -1830,7 +1881,9 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
   // Update gateway config (rate limiting, CORS, JWT)
   .post(
     "/:ref/gateway/config",
-    async ({ params, body, set }) => {
+    async ({ params, body, request }) => {
+      const authError = await requireAdminAuth(request);
+      if (authError) return status(authError.status, authError.body);
       const result = await gatewayService.applyConfig(params.ref, {
         rateLimitTier: body.rate_limit_tier as
           | "free"
@@ -1868,7 +1921,9 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
   // Rebuild ALL tenant Kong configs (propagate CORS / template changes)
   .post(
     "/:ref/gateway/rebuild-all",
-    async () => {
+    async ({ request }) => {
+      const authError = await requireAdminAuth(request);
+      if (authError) return status(authError.status, authError.body);
       const result = await gatewayService.rebuildAllTenantConfigs();
       if (!result.success) {
         return { ...result, message: "Rebuild failed" };
@@ -1908,7 +1963,9 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
   // Set rate limit — supports tier presets OR custom values
   .put(
     "/:ref/gateway/rate-limit",
-    async ({ params, body }) => {
+    async ({ params, body, request }) => {
+      const authError = await requireAdminAuth(request);
+      if (authError) return status(authError.status, authError.body);
       let success: boolean;
       if (body.tier) {
         success = await gatewayService.setRateLimit(params.ref, body.tier);
@@ -1950,7 +2007,9 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
   // Set custom rate limit for a specific path
   .put(
     "/:ref/gateway/custom-rate-limits",
-    async ({ params, body }) => {
+    async ({ params, body, request }) => {
+      const authError = await requireAdminAuth(request);
+      if (authError) return status(authError.status, authError.body);
       // 1. Fetch current settings to persist and check limits
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings)
@@ -2024,7 +2083,9 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
   // Remove custom rate limit for a specific path
   .delete(
     "/:ref/gateway/custom-rate-limits",
-    async ({ params, body }) => {
+    async ({ params, body, request }) => {
+      const authError = await requireAdminAuth(request);
+      if (authError) return status(authError.status, authError.body);
       // 1. Fetch current settings
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings)

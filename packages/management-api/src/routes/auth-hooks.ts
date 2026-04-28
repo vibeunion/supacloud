@@ -2,12 +2,15 @@ import { Elysia, t, status } from "elysia";
 import { projectService } from "../services";
 import { resolveDbName, getProjectDb } from "../db";
 import { logger } from "../utils/logger";
+import { requireProjectOrAdminAuth } from "../middleware/auth";
 
 export const authHooksRoutes = new Elysia({ prefix: "/v1/projects" })
 
   .get(
     "/:ref/database/webhooks",
-    async ({ params }) => {
+    async ({ params, request }) => {
+      const authError = await requireProjectOrAdminAuth(request, params.ref);
+      if (authError) return status(authError.status, authError.body);
       const project = await projectService.getProject(params.ref);
       if (!project) return status(404, { message: "Project not found", code: "404" });
 
@@ -30,7 +33,9 @@ export const authHooksRoutes = new Elysia({ prefix: "/v1/projects" })
 
   .post(
     "/:ref/database/webhooks",
-    async ({ params, body }) => {
+    async ({ params, body, request }) => {
+      const authError = await requireProjectOrAdminAuth(request, params.ref);
+      if (authError) return status(authError.status, authError.body);
       const project = await projectService.getProject(params.ref);
       if (!project) return status(404, { message: "Project not found", code: "404" });
 
@@ -96,7 +101,9 @@ export const authHooksRoutes = new Elysia({ prefix: "/v1/projects" })
 
   .patch(
     "/:ref/database/webhooks/:id",
-    async ({ params, body }) => {
+    async ({ params, body, request }) => {
+      const authError = await requireProjectOrAdminAuth(request, params.ref);
+      if (authError) return status(authError.status, authError.body);
       const project = await projectService.getProject(params.ref);
       if (!project) return status(404, { message: "Project not found", code: "404" });
 
@@ -142,7 +149,9 @@ export const authHooksRoutes = new Elysia({ prefix: "/v1/projects" })
 
   .delete(
     "/:ref/database/webhooks/:id",
-    async ({ params }) => {
+    async ({ params, request }) => {
+      const authError = await requireProjectOrAdminAuth(request, params.ref);
+      if (authError) return status(authError.status, authError.body);
       const project = await projectService.getProject(params.ref);
       if (!project) return status(404, { message: "Project not found", code: "404" });
 
@@ -181,7 +190,9 @@ export const authHooksRoutes = new Elysia({ prefix: "/v1/projects" })
 
   .patch(
     "/:ref/auth/hooks",
-    async ({ params, body }) => {
+    async ({ params, body, request }) => {
+      const authError = await requireProjectOrAdminAuth(request, params.ref);
+      if (authError) return status(authError.status, authError.body);
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings) return status(404, { message: "Project not found", code: "404" });
 

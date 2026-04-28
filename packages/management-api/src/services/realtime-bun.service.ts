@@ -344,7 +344,8 @@ class RealtimeBunService {
 
             if (matchingIds.length === 0) continue;
 
-            if (!(await this.isVisibleForSubscription(projectRef, schema, table, inner.record || {}, changeType, state.token))) {
+            const visibilityRecord = changeType === 'DELETE' ? inner.old_record || {} : inner.record || {};
+            if (!(await this.isVisibleForSubscription(projectRef, schema, table, visibilityRecord, changeType, state.token))) {
                 continue;
             }
 
@@ -366,14 +367,15 @@ class RealtimeBunService {
         const jwtPayload = await this.verifyRealtimeJwt(projectRef, token);
         if (!jwtPayload) return false;
 
-        if (jwtPayload.role === 'service_role' || jwtPayload.role === 'postgres' || jwtPayload.role === 'supabase_admin') {
+        const allowServiceRole = (jwtPayload as Record<string, unknown>).__allow_service_role === true;
+        if (allowServiceRole && jwtPayload.role === 'service_role') {
             return true;
         }
         if (jwtPayload.role !== 'anon' && jwtPayload.role !== 'authenticated') {
             return false;
         }
 
-        return this.checkRlsVisibility(projectRef, schema, table, record, jwtPayload.role, changeType);
+        return this.checkRlsVisibility(projectRef, schema, table, record, jwtPayload, changeType);
     }
 
     private async verifyRealtimeJwt(projectRef: string, token: string): Promise<JWTPayload | null> {
@@ -393,7 +395,12 @@ class RealtimeBunService {
             const { payload, protectedHeader } = await jwtVerify(token, new TextEncoder().encode(secret));
             if (protectedHeader.alg !== 'HS256') return null;
             if (typeof payload.role !== 'string') return null;
-            return payload;
+            const [keys] = await metaSql`
+                SELECT service_role_key FROM projects
+                WHERE ref = ${projectRef} AND status = 'active'
+                LIMIT 1
+            `;
+            return { ...payload, __allow_service_role: token === keys?.service_role_key };
         } catch {
             return null;
         }
@@ -404,7 +411,7 @@ class RealtimeBunService {
         schema: string,
         table: string,
         record: Record<string, any>,
-        role: string,
+        jwtPayload: JWTPayload,
         changeType: string
     ): Promise<boolean> {
         try {
@@ -442,28 +449,28 @@ class RealtimeBunService {
                 pkValues.push(val);
             }
 
-            const safeRole = role.replace(/'/g, "''");
+            const allowServiceRole = (jwtPayload as Record<string, unknown>).__allow_service_role === true;
+            const role = jwtPayload.role === 'authenticated' || (allowServiceRole && jwtPayload.role === 'service_role') ? jwtPayload.role : 'anon';
+            const claims = JSON.stringify({ ...jwtPayload, role });
 
             const whereParts = pkCols.map((col, i) => {
                 const colName = validatePgIdentifier((col as Record<string, unknown>).attname as string, 'column');
                 return `"${colName}" = $${i + 1}`;
             });
 
-            const rlsCheck = await db.unsafe(`
-                SET LOCAL role = '${safeRole}';
-            `).catch(() => null);
+            return await db.begin(async (tx) => {
+                await tx.unsafe(`SET LOCAL ROLE "${role}"`);
+                await tx`SELECT set_config('request.jwt.claims', ${claims}, true)`;
+                await tx`SELECT set_config('request.jwt.claim.sub', ${String(jwtPayload.sub || '')}, true)`;
+                await tx`SELECT set_config('request.jwt.claim.role', ${role}, true)`;
 
-            if (rlsCheck === null) return false;
+                const selectResult = await tx.unsafe(
+                    `SELECT 1 FROM "${safeSchema}"."${safeTable}" WHERE ${whereParts.join(' AND ')} LIMIT 1`,
+                    pkValues
+                );
 
-            const selectResult = await db.unsafe(
-                `SELECT 1 FROM "${safeSchema}"."${safeTable}" WHERE ${whereParts.join(' AND ')} LIMIT 1`,
-                pkValues
-            ).catch(() => null);
-
-            if (!selectResult || !Array.isArray(selectResult) || selectResult.length === 0) {
-                return false;
-            }
-            return true;
+                return Array.isArray(selectResult) && selectResult.length > 0;
+            });
         } catch {
             return false;
         }
@@ -471,11 +478,11 @@ class RealtimeBunService {
 
     private matchesFilter(filter: string, record: Record<string, any>): boolean {
         const parts = filter.split('=');
-        if (parts.length !== 2) return true;
+        if (parts.length !== 2) return false;
         const column = parts[0].trim();
         const valuePart = parts[1].trim();
         const dotIdx = valuePart.indexOf('.');
-        if (dotIdx === -1) return true;
+        if (dotIdx === -1) return false;
         const op = valuePart.substring(0, dotIdx);
         const val = valuePart.substring(dotIdx + 1);
         const recordVal = String(record[column] ?? '');
@@ -492,7 +499,7 @@ class RealtimeBunService {
                 const inValues = val.replace(/^\(|\)$/g, '').split(',').map(s => s.trim().replace(/^"|"$/g, ''));
                 return inValues.includes(recordVal);
             }
-            default: return true;
+            default: return false;
         }
     }
 

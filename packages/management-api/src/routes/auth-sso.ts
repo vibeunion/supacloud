@@ -2,6 +2,7 @@ import { Elysia, t, status } from "elysia";
 import { projectService } from "../services";
 import { logger } from "../utils/logger";
 import { resolveProjectServiceRoleKey } from "../utils/service-role";
+import { requireProjectOrAdminAuth } from "../middleware/auth";
 
 async function getGoTrueHeaders(ref: string) {
   const project = await projectService.getProject(ref);

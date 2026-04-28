@@ -1,5 +1,6 @@
 import { Elysia, t, status } from "elysia";
 import { projectService } from "../services";
+import { requireProjectOrAdminAuth } from "../middleware/auth";
 
 export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
   .get(
@@ -17,13 +18,15 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
   // Alias for secrets endpoint — Supabase Studio and some SDK versions call this path
   .get(
     "/:ref/functions/secrets",
-    async ({ params, query }) => {
+    async ({ params, query, request }) => {
+      const authError = await requireProjectOrAdminAuth(request, params.ref);
+      if (authError) return status(authError.status, authError.body);
+      const reveal = query.reveal === "true";
       const { projectService: svc } = await import("../services");
       const secrets = await svc.getSecrets(params.ref);
       if (!secrets) {
         return status(404, { message: "Project not found" });
       }
-      const reveal = query.reveal === "true";
       return secrets.map(
         (s: { name: string; value: string; updated_at?: string }) => ({
           name: s.name,
@@ -42,7 +45,9 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
   // POST /v1/projects/:ref/functions/deploy?slug=hello-world
   .post(
     "/:ref/functions/deploy",
-    async ({ params, body, query }) => {
+    async ({ params, body, query, request }) => {
+      const authError = await requireProjectOrAdminAuth(request, params.ref);
+      if (authError) return status(authError.status, authError.body);
       const slug = (query as Record<string, string>).slug;
       if (!slug) {
         return status(400, {
@@ -169,7 +174,9 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
 
   .post(
     "/:ref/functions",
-    async ({ params, body, query }) => {
+    async ({ params, body, query, request }) => {
+      const authError = await requireProjectOrAdminAuth(request, params.ref);
+      if (authError) return status(authError.status, authError.body);
       // Support both JSON body and query param approaches (official Supabase Management API)
       const slug = body?.slug || (query as Record<string, string>).slug;
       const code = body?.body || body?.code || "";
@@ -261,7 +268,9 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
   // Bulk upsert functions (official Management API)
   .put(
     "/:ref/functions",
-    async ({ params, body }) => {
+    async ({ params, body, request }) => {
+      const authError = await requireProjectOrAdminAuth(request, params.ref);
+      if (authError) return status(authError.status, authError.body);
       const results = [];
       for (const fn of body as Array<{
         slug: string;
@@ -419,7 +428,9 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
 
   .post(
     "/:ref/functions/:slug/versions/:version/activate",
-    async ({ params }) => {
+    async ({ params, request }) => {
+      const authError = await requireProjectOrAdminAuth(request, params.ref);
+      if (authError) return status(authError.status, authError.body);
       const { edgeFunctionService } =
         await import("../services/edge-function.service");
       const updated = await edgeFunctionService.activateVersion(
@@ -477,7 +488,9 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
 
   .post(
     "/:ref/functions/:slug",
-    async ({ params, body }) => {
+    async ({ params, body, request }) => {
+      const authError = await requireProjectOrAdminAuth(request, params.ref);
+      if (authError) return status(authError.status, authError.body);
       const code = body.code || body.body || "";
       const success = await projectService.deployFunction(
         params.ref,
@@ -505,7 +518,9 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
 
   .patch(
     "/:ref/functions/:slug",
-    async ({ params, body }) => {
+    async ({ params, body, request }) => {
+      const authError = await requireProjectOrAdminAuth(request, params.ref);
+      if (authError) return status(authError.status, authError.body);
       const { edgeFunctionService } =
         await import("../services/edge-function.service");
 
@@ -575,7 +590,9 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
 
   .post(
     "/:ref/functions/:slug/bundle",
-    async ({ params, body }) => {
+    async ({ params, body, request }) => {
+      const authError = await requireProjectOrAdminAuth(request, params.ref);
+      if (authError) return status(authError.status, authError.body);
       const result = await projectService.deployFunctionBundleDetailed(
         params.ref,
         params.slug,
@@ -610,7 +627,9 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
 
   .delete(
     "/:ref/functions",
-    async ({ params, body }) => {
+    async ({ params, body, request }) => {
+      const authError = await requireProjectOrAdminAuth(request, params.ref);
+      if (authError) return status(authError.status, authError.body);
       const slug = body?.slug;
       if (!slug) {
         return status(400, {
@@ -635,7 +654,9 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
 
   .delete(
     "/:ref/functions/:slug",
-    async ({ params }) => {
+    async ({ params, request }) => {
+      const authError = await requireProjectOrAdminAuth(request, params.ref);
+      if (authError) return status(authError.status, authError.body);
       const success = await projectService.deleteFunction(
         params.ref,
         params.slug,
@@ -691,7 +712,9 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
 
   .patch(
     "/:ref/functions/:slug/config",
-    async ({ params, body }) => {
+    async ({ params, body, request }) => {
+      const authError = await requireProjectOrAdminAuth(request, params.ref);
+      if (authError) return status(authError.status, authError.body);
       const { edgeFunctionService } =
         await import("../services/edge-function.service");
       const updated = await edgeFunctionService.updateConfig(
@@ -746,12 +769,14 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
   // Function Secrets — Project-level (Studio compatibility)
   .get(
     "/:ref/functions/secrets",
-    async ({ params, query }) => {
+    async ({ params, query, request }) => {
+      const authError = await requireProjectOrAdminAuth(request, params.ref);
+      if (authError) return status(authError.status, authError.body);
+      const reveal = query.reveal === "true";
       const secrets = await projectService.getSecrets(params.ref);
       if (!secrets) {
         return status(404, { message: "Project not found" });
       }
-      const reveal = query.reveal === "true";
       return (secrets as Array<{
         name: string;
         value: string;
@@ -766,7 +791,9 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
   )
   .post(
     "/:ref/functions/secrets",
-    async ({ params, body }) => {
+    async ({ params, body, request }) => {
+      const authError = await requireProjectOrAdminAuth(request, params.ref);
+      if (authError) return status(authError.status, authError.body);
       const secrets = (body as Array<{ name: string; value: string }>).map(
         (s) => ({
           name: `EDGEFN_${s.name}`,
@@ -789,7 +816,9 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
   )
   .delete(
     "/:ref/functions/secrets",
-    async ({ params, body }) => {
+    async ({ params, body, request }) => {
+      const authError = await requireProjectOrAdminAuth(request, params.ref);
+      if (authError) return status(authError.status, authError.body);
       const names = (body as string[]).map((n) => `EDGEFN_${n}`);
       const results = await Promise.all(
         names.map((name) => projectService.deleteSecret(params.ref, name)),
@@ -812,18 +841,27 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
   // Function Secrets — Per-function level
   .get(
     "/:ref/functions/:slug/secrets",
-    async ({ params }) => {
+    async ({ params, query, request }) => {
+      const authError = await requireProjectOrAdminAuth(request, params.ref);
+      if (authError) return status(authError.status, authError.body);
+      const reveal = query.reveal === "true";
       const secrets = await projectService.getSecrets(params.ref);
       if (!secrets) return [];
-      return (secrets as Array<{ name: string; value: string }>).filter((s) =>
-        s.name.startsWith(`EDGEFN_${params.slug.toUpperCase()}_`),
-      );
+      return (secrets as Array<{ name: string; value: string; updated_at?: string }>)
+        .filter((s) => s.name.startsWith(`EDGEFN_${params.slug.toUpperCase()}_`))
+        .map((s) => ({
+          name: s.name,
+          value: reveal ? s.value : "********",
+          updated_at: s.updated_at ?? new Date().toISOString(),
+        }));
     },
-    { params: t.Object({ ref: t.String(), slug: t.String() }) },
+    { params: t.Object({ ref: t.String(), slug: t.String() }), query: t.Object({ reveal: t.Optional(t.String()) }) },
   )
   .post(
     "/:ref/functions/:slug/secrets",
-    async ({ params, body }) => {
+    async ({ params, body, request }) => {
+      const authError = await requireProjectOrAdminAuth(request, params.ref);
+      if (authError) return status(authError.status, authError.body);
       const secrets = (body as Array<{ name: string; value: string }>).map(
         (s) => ({
           name: `EDGEFN_${params.slug.toUpperCase()}_${s.name}`,
@@ -846,7 +884,9 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
   )
   .delete(
     "/:ref/functions/:slug/secrets",
-    async ({ params, body }) => {
+    async ({ params, body, request }) => {
+      const authError = await requireProjectOrAdminAuth(request, params.ref);
+      if (authError) return status(authError.status, authError.body);
       const names = (body as string[]).map(
         (n) => `EDGEFN_${params.slug.toUpperCase()}_${n}`,
       );

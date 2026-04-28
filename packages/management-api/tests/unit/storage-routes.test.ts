@@ -17,9 +17,20 @@ describe("storage management routes", () => {
     formData.append("file", new Blob([], { type: "text/plain" }), "empty.txt");
     formData.append("path", "nested/empty.txt");
 
-    const res = await request("/v1/storage/test-ref/buckets/manuals/upload", {
+    const unauthenticated = await request("/v1/storage/test-ref/buckets/manuals/upload", {
       method: "POST",
       body: formData,
+    });
+    expect(unauthenticated.status).toBe(401);
+
+    const authorizedFormData = new FormData();
+    authorizedFormData.append("file", new Blob([], { type: "text/plain" }), "empty.txt");
+    authorizedFormData.append("path", "nested/empty.txt");
+
+    const res = await request("/v1/storage/test-ref/buckets/manuals/upload", {
+      method: "POST",
+      body: authorizedFormData,
+      headers: { Authorization: "Bearer dev-master-token" },
     });
 
     expect(res.status).toBe(200);
