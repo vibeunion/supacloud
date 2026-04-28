@@ -1,5 +1,6 @@
 import { config } from "../config";
 import { logger } from "../utils/logger";
+import { decryptSecretIfNeeded, encryptSecretIfNeeded } from "../utils/secret-crypto";
 import { shellService } from "./shell.service";
 import { SQL } from "bun";
 import {
@@ -168,10 +169,9 @@ export class DatabaseService {
           ALTER ROLE "${dbUser}" SET work_mem = '4MB';
         `);
 
-        // Grant privileges
-        await adminDb.unsafe(
-          `GRANT ALL PRIVILEGES ON DATABASE "${dbName}" TO "${dbUser}"`,
-        );
+        await adminDb.unsafe(`REVOKE CONNECT ON DATABASE "${dbName}" FROM PUBLIC`);
+        await adminDb.unsafe(`GRANT CONNECT, TEMPORARY ON DATABASE "${dbName}" TO "${dbUser}"`);
+        await adminDb.unsafe(`GRANT ALL PRIVILEGES ON DATABASE "${dbName}" TO ${this.PG_USER}`);
       });
 
       // Apply schema independently
@@ -308,6 +308,17 @@ export class DatabaseService {
         GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA auth, storage, realtime TO "${dbUser}";
       `);
 
+      await tenantDb.unsafe(`
+        REVOKE ALL ON SCHEMA public FROM PUBLIC;
+        GRANT USAGE, CREATE ON SCHEMA public TO "${dbUser}";
+        GRANT SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON ALL TABLES IN SCHEMA public TO "${dbUser}";
+        GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO "${dbUser}";
+        GRANT EXECUTE ON ALL ROUTINES IN SCHEMA public TO "${dbUser}";
+        ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON TABLES TO "${dbUser}";
+        ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO "${dbUser}";
+        ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT EXECUTE ON ROUTINES TO "${dbUser}";
+      `);
+
       // Grant privileges
       await tenantDb.unsafe(`
         GRANT USAGE ON SCHEMA public TO ${anonRole}, ${authenticatedRole}, ${serviceRole};
@@ -423,7 +434,7 @@ export class DatabaseService {
       `;
       return rows.map((r: Record<string, unknown>) => ({
         name: r.name as string,
-        value: r.value as string,
+        value: decryptSecretIfNeeded(r.value as string),
         updated_at:
           (r.updated_at != null
             ? new Date(r.updated_at as string).toISOString()
@@ -445,9 +456,10 @@ export class DatabaseService {
   ): Promise<boolean> {
     try {
       const { sql: metaDb } = await import("../db");
+      const encryptedValue = encryptSecretIfNeeded(value);
       await metaDb`
         INSERT INTO project_secrets (project_ref, name, value)
-        VALUES (${projectRef}, ${name}, ${value})
+        VALUES (${projectRef}, ${name}, ${encryptedValue})
         ON CONFLICT (project_ref, name)
         DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
       `;

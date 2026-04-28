@@ -3,6 +3,7 @@ import { Worker, MessagePort } from "worker_threads";
 interface DispatchOptions {
   functionId: string;
   functionPath: string;
+  projectRoot: string;
   env: Record<string, string>;
   request: Request;
   cancelKey?: string;
@@ -187,6 +188,7 @@ export class WorkerPool {
     worker.postMessage({
       functionId: opts.functionId,
       functionPath: opts.functionPath,
+      projectRoot: opts.projectRoot,
       env: opts.env,
       url: opts.request.url,
       method: opts.request.method,

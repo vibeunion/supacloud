@@ -163,6 +163,24 @@ export async function initDatabase() {
       expires_at BIGINT NOT NULL,
       created_at TIMESTAMPTZ DEFAULT NOW()
     );
+
+    CREATE TABLE IF NOT EXISTS audit_logs (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      project_ref VARCHAR(50),
+      actor TEXT NOT NULL DEFAULT 'unknown',
+      action TEXT NOT NULL,
+      method VARCHAR(16) NOT NULL,
+      path TEXT NOT NULL,
+      status INTEGER,
+      ip_address TEXT,
+      user_agent TEXT,
+      request_id TEXT,
+      metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_audit_logs_project_created ON audit_logs(project_ref, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_audit_logs_action_created ON audit_logs(action, created_at DESC);
   `;
 
   // Use explicit config instead of URL to ensure correct database name
@@ -198,7 +216,7 @@ export async function initDatabase() {
 
     const result = await sql`
       SELECT COUNT(*) as count FROM information_schema.tables
-      WHERE table_schema = 'public' AND table_name IN ('organizations', 'projects', 'project_tasks', 'platform_settings', 'project_secrets', 'deployment_history', 'system_tus_uploads', 'system_tus_chunks', 'system_signed_uploads')
+      WHERE table_schema = 'public' AND table_name IN ('organizations', 'projects', 'project_tasks', 'platform_settings', 'project_secrets', 'deployment_history', 'system_tus_uploads', 'system_tus_chunks', 'system_signed_uploads', 'audit_logs')
     `;
 
     const tableCount = Number(result[0]?.count || 0);
@@ -217,6 +235,31 @@ export async function initDatabase() {
       { statement: 'ALTER TABLE system_tus_uploads ADD COLUMN IF NOT EXISTS auth_token TEXT', description: "system_tus_uploads.auth_token" },
       { statement: 'ALTER TABLE system_signed_uploads ADD COLUMN IF NOT EXISTS auth_token TEXT', description: "system_signed_uploads.auth_token" },
       { statement: 'ALTER TABLE project_secrets ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()', description: "project_secrets.updated_at" },
+      { statement: 'ALTER TABLE projects ADD COLUMN IF NOT EXISTS db_password_encrypted TEXT', description: "projects.db_password_encrypted" },
+      { statement: 'ALTER TABLE projects ADD COLUMN IF NOT EXISTS jwt_secret_encrypted TEXT', description: "projects.jwt_secret_encrypted" },
+      { statement: 'ALTER TABLE projects ADD COLUMN IF NOT EXISTS service_role_key_encrypted TEXT', description: "projects.service_role_key_encrypted" },
+      { statement: 'ALTER TABLE projects ADD COLUMN IF NOT EXISTS s3_secret_key_encrypted TEXT', description: "projects.s3_secret_key_encrypted" },
+      {
+        statement: `
+          CREATE TABLE IF NOT EXISTS audit_logs (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            project_ref VARCHAR(50),
+            actor TEXT NOT NULL DEFAULT 'unknown',
+            action TEXT NOT NULL,
+            method VARCHAR(16) NOT NULL,
+            path TEXT NOT NULL,
+            status INTEGER,
+            ip_address TEXT,
+            user_agent TEXT,
+            request_id TEXT,
+            metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+            created_at TIMESTAMPTZ DEFAULT NOW()
+          )
+        `,
+        description: "audit_logs table",
+      },
+      { statement: 'CREATE INDEX IF NOT EXISTS idx_audit_logs_project_created ON audit_logs(project_ref, created_at DESC)', description: "idx_audit_logs_project_created" },
+      { statement: 'CREATE INDEX IF NOT EXISTS idx_audit_logs_action_created ON audit_logs(action, created_at DESC)', description: "idx_audit_logs_action_created" },
       { statement: 'ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS function_slug VARCHAR(255)', description: "project_tasks.function_slug" },
       { statement: 'ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS function_version VARCHAR(128)', description: "project_tasks.function_version" },
       { statement: 'ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS payload JSONB DEFAULT \'{}\'::jsonb', description: "project_tasks.payload" },
@@ -319,12 +362,12 @@ export async function initDatabase() {
 
     const [verify] = await sql`
       SELECT COUNT(*) as count FROM information_schema.tables
-      WHERE table_schema = 'public' AND table_name IN ('organizations', 'projects', 'project_tasks', 'platform_settings', 'project_secrets', 'deployment_history', 'system_tus_uploads', 'system_tus_chunks', 'system_signed_uploads')
+      WHERE table_schema = 'public' AND table_name IN ('organizations', 'projects', 'project_tasks', 'platform_settings', 'project_secrets', 'deployment_history', 'system_tus_uploads', 'system_tus_chunks', 'system_signed_uploads', 'audit_logs')
     `;
 
     const finalPublicCount = Number(verify?.count || 0);
     logger.info(
-      `Database initialized successfully! Public tables verified: ${finalPublicCount}/9`,
+      `Database initialized successfully! Public tables verified: ${finalPublicCount}/10`,
     );
 
     // In CI mode where tests rewrite db_name to 'postgres', we must create Storage relations
@@ -398,9 +441,9 @@ export async function initDatabase() {
       }
     }
 
-    if (finalPublicCount < 9) {
+    if (finalPublicCount < 10) {
       throw new Error(
-        `Table creation verified but failed. Expected 9 public tables, got ${finalPublicCount}`,
+        `Table creation verified but failed. Expected 10 public tables, got ${finalPublicCount}`,
       );
     }
 

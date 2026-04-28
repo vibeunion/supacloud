@@ -1,7 +1,8 @@
 import { EventEmitter } from 'events';
+import { jwtVerify, type JWTPayload } from 'jose';
 import { logger } from '../utils/logger';
 import { databaseService } from './database.service';
-import { resolveDbName, getProjectDb, resolveSlotName } from '../db';
+import { resolveDbName, getProjectDb, resolveSlotName, sql as metaSql } from '../db';
 
 const IDENTIFIER_REGEX = /^[a-zA-Z_][a-zA-Z0-9_]{0,62}$/;
 
@@ -34,33 +35,41 @@ interface ChangeEvent {
     ids: string[];
 }
 
+interface RealtimeSubscriptionState {
+    id: string;
+    subscriptions: PostgresChangeConfig[];
+    token?: string;
+}
+
 class RealtimeBunService {
     private tenantListeners = new Map<string, any>();
     public events = new EventEmitter();
-    private tenantSubscriptions = new Map<string, PostgresChangeConfig[]>();
-    private tenantTokens = new Map<string, string>();
+    private tenantSubscriptions = new Map<string, RealtimeSubscriptionState[]>();
     private subscriptionIdMap = new Map<string, Map<number, string>>();
     private ensuredTriggers = new Set<string>();
     private wal2jsonAvailable = new Map<string, boolean>();
     private walPollingIntervals = new Map<string, NodeJS.Timeout>();
+    private jwtSecretCache = new Map<string, string>();
+    private subscriptionCounter = 0;
 
     public async subscribeTenant(
         projectRef: string,
         subscriptions?: PostgresChangeConfig[],
         token?: string
-    ) {
+    ): Promise<string | null> {
+        let subscriptionStateId: string | null = null;
         if (subscriptions) {
-            this.tenantSubscriptions.set(projectRef, subscriptions);
-        }
-        if (token) {
-            this.tenantTokens.set(projectRef, token);
+            const states = this.tenantSubscriptions.get(projectRef) || [];
+            subscriptionStateId = `${projectRef}:${++this.subscriptionCounter}`;
+            states.push({ id: subscriptionStateId, subscriptions, token });
+            this.tenantSubscriptions.set(projectRef, states);
         }
 
         if (subscriptions && subscriptions.length > 0) {
             await this.ensureTriggers(projectRef, subscriptions);
         }
 
-        if (this.tenantListeners.has(projectRef)) return;
+        if (this.tenantListeners.has(projectRef)) return subscriptionStateId;
 
         try {
             const dbName = await resolveDbName(projectRef);
@@ -68,10 +77,10 @@ class RealtimeBunService {
             try {
                 db = getProjectDb(dbName);
             } catch {
-                return;
+                return subscriptionStateId;
             }
 
-            if (!db) return;
+            if (!db) return subscriptionStateId;
 
             const hasWal2json = await this.detectWal2json(db, projectRef);
 
@@ -81,10 +90,7 @@ class RealtimeBunService {
                 const listener = await db.listen('realtime_changes', async (payload: string) => {
                     try {
                         const parsed = JSON.parse(payload);
-                        const filtered = await this.filterAndFormat(projectRef, parsed);
-                        if (filtered) {
-                            this.events.emit(`change:${projectRef}`, filtered);
-                        }
+                        await this.filterAndEmit(projectRef, parsed);
                     } catch (err: unknown) {
                         logger.error(`[RealtimeBun] Failed to parse NOTIFY payload for ${projectRef}`, { error: String(err) });
                     }
@@ -97,6 +103,8 @@ class RealtimeBunService {
         } catch (err: unknown) {
             logger.error(`[RealtimeBun] Failed to subscribe to tenant ${projectRef}`, { error: String(err) });
         }
+
+        return subscriptionStateId;
     }
 
     private async detectWal2json(db: any, projectRef: string): Promise<boolean> {
@@ -142,10 +150,7 @@ class RealtimeBunService {
                             const walData = typeof change.data === 'string' ? JSON.parse(change.data) : change.data;
                             const formatted = this.wal2jsonToChangeEvent(walData);
                             if (formatted) {
-                                const filtered = await this.filterAndFormat(projectRef, formatted);
-                                if (filtered) {
-                                    this.events.emit(`change:${projectRef}`, filtered);
-                                }
+                                await this.filterAndEmit(projectRef, formatted);
                             }
                         } catch { /* skip malformed WAL entries */ }
                     }
@@ -305,48 +310,93 @@ class RealtimeBunService {
         }
     }
 
-    private async filterAndFormat(projectRef: string, raw: any): Promise<ChangeEvent | null> {
+    public unsubscribeSubscription(projectRef: string, subscriptionStateId: string): void {
+        const states = this.tenantSubscriptions.get(projectRef);
+        if (!states) return;
+        const idx = states.findIndex((state) => state.id === subscriptionStateId);
+        if (idx >= 0) states.splice(idx, 1);
+        if (states.length === 0) {
+            this.tenantSubscriptions.delete(projectRef);
+        }
+    }
+
+    private async filterAndEmit(projectRef: string, raw: any): Promise<void> {
         const inner = raw.payload || raw;
-        const subs = this.tenantSubscriptions.get(projectRef);
+        const states = this.tenantSubscriptions.get(projectRef);
         const changeType = inner.type || inner.event || '';
         const schema = inner.schema || 'public';
         const table = inner.table || '';
 
-        if (!subs || subs.length === 0) {
-            return this.formatEvent(inner, []);
-        }
+        if (!states || states.length === 0) return;
 
-        const matchingIds: string[] = [];
         const idMap = this.subscriptionIdMap.get(projectRef);
-        for (let i = 0; i < subs.length; i++) {
-            const sub = subs[i];
-            if (sub.event !== '*' && sub.event !== changeType) continue;
-            if (sub.schema !== schema) continue;
-            if (sub.table && sub.table !== table) continue;
-            if (sub.filter && !this.matchesFilter(sub.filter, inner.record || {})) continue;
-            const serverSubId = idMap?.get(typeof sub.id === 'number' ? sub.id : parseInt(String(sub.id), 10));
-            matchingIds.push(serverSubId || String(sub.id ?? i));
+        for (const state of states) {
+            const matchingIds: string[] = [];
+            for (let i = 0; i < state.subscriptions.length; i++) {
+                const sub = state.subscriptions[i];
+                if (sub.event !== '*' && sub.event !== changeType) continue;
+                if (sub.schema !== schema) continue;
+                if (sub.table && sub.table !== table) continue;
+                if (sub.filter && !this.matchesFilter(sub.filter, inner.record || {})) continue;
+                const serverSubId = idMap?.get(typeof sub.id === 'number' ? sub.id : parseInt(String(sub.id), 10));
+                matchingIds.push(serverSubId || String(sub.id ?? i));
+            }
+
+            if (matchingIds.length === 0) continue;
+
+            if (!(await this.isVisibleForSubscription(projectRef, schema, table, inner.record || {}, changeType, state.token))) {
+                continue;
+            }
+
+            const formatted = this.formatEvent(inner, matchingIds);
+            this.events.emit(`change:${state.id}`, formatted);
+        }
+    }
+
+    private async isVisibleForSubscription(
+        projectRef: string,
+        schema: string,
+        table: string,
+        record: Record<string, any>,
+        changeType: string,
+        token?: string
+    ): Promise<boolean> {
+        if (!token) return false;
+
+        const jwtPayload = await this.verifyRealtimeJwt(projectRef, token);
+        if (!jwtPayload) return false;
+
+        if (jwtPayload.role === 'service_role' || jwtPayload.role === 'postgres' || jwtPayload.role === 'supabase_admin') {
+            return true;
+        }
+        if (jwtPayload.role !== 'anon' && jwtPayload.role !== 'authenticated') {
+            return false;
         }
 
-        if (matchingIds.length === 0) return null;
+        return this.checkRlsVisibility(projectRef, schema, table, record, jwtPayload.role, changeType);
+    }
 
-        const token = this.tenantTokens.get(projectRef);
-        if (token) {
-            try {
-                const jwtPayload = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString());
-                if (jwtPayload.role === 'service_role' || jwtPayload.role === 'postgres' || jwtPayload.role === 'supabase_admin') {
-                    return this.formatEvent(inner, matchingIds);
-                }
-                if (jwtPayload.role !== 'anon' && jwtPayload.role !== 'authenticated') {
-                    return null;
-                }
+    private async verifyRealtimeJwt(projectRef: string, token: string): Promise<JWTPayload | null> {
+        try {
+            let secret = this.jwtSecretCache.get(projectRef);
+            if (!secret) {
+                const [project] = await metaSql`
+                    SELECT jwt_secret FROM projects
+                    WHERE ref = ${projectRef} AND status = 'active'
+                    LIMIT 1
+                `;
+                if (!project?.jwt_secret) return null;
+                secret = String(project.jwt_secret);
+                this.jwtSecretCache.set(projectRef, secret);
+            }
 
-                const rlsOk = await this.checkRlsVisibility(projectRef, schema, table, inner.record || {}, jwtPayload.role, changeType);
-                if (!rlsOk) return null;
-            } catch { return null; }
+            const { payload, protectedHeader } = await jwtVerify(token, new TextEncoder().encode(secret));
+            if (protectedHeader.alg !== 'HS256') return null;
+            if (typeof payload.role !== 'string') return null;
+            return payload;
+        } catch {
+            return null;
         }
-
-        return this.formatEvent(inner, matchingIds);
     }
 
     private async checkRlsVisibility(
@@ -364,12 +414,12 @@ class RealtimeBunService {
                 safeSchema = validatePgIdentifier(schema, 'schema');
                 safeTable = validatePgIdentifier(table, 'table');
             } catch {
-                return true;
+                return false;
             }
 
             const dbName = await resolveDbName(projectRef);
             const db = getProjectDb(dbName);
-            if (!db) return true;
+            if (!db) return false;
 
             const pkCols = await db`
                 SELECT a.attname
@@ -382,13 +432,13 @@ class RealtimeBunService {
                   AND i.indisprimary
             `.catch(() => null);
 
-            if (!pkCols || !Array.isArray(pkCols) || pkCols.length === 0) return true;
+            if (!pkCols || !Array.isArray(pkCols) || pkCols.length === 0) return false;
 
             const pkValues: unknown[] = [];
             for (const col of pkCols) {
                 const colName = (col as Record<string, unknown>).attname as string;
                 const val = record[colName];
-                if (val === undefined) return true;
+                if (val === undefined) return false;
                 pkValues.push(val);
             }
 
@@ -403,7 +453,7 @@ class RealtimeBunService {
                 SET LOCAL role = '${safeRole}';
             `).catch(() => null);
 
-            if (rlsCheck === null) return true;
+            if (rlsCheck === null) return false;
 
             const selectResult = await db.unsafe(
                 `SELECT 1 FROM "${safeSchema}"."${safeTable}" WHERE ${whereParts.join(' AND ')} LIMIT 1`,
@@ -415,7 +465,7 @@ class RealtimeBunService {
             }
             return true;
         } catch {
-            return true;
+            return false;
         }
     }
 
@@ -481,8 +531,8 @@ class RealtimeBunService {
         }
         this.tenantListeners.delete(projectRef);
         this.tenantSubscriptions.delete(projectRef);
-        this.tenantTokens.delete(projectRef);
         this.subscriptionIdMap.delete(projectRef);
+        this.jwtSecretCache.delete(projectRef);
 
         const walInterval = this.walPollingIntervals.get(projectRef);
         if (walInterval) {
