@@ -1,5 +1,6 @@
 import { Elysia, t, status } from "elysia";
 import { extensionService } from '../services/extension.service';
+import { requireAdminAuth } from '../middleware/auth';
 
 const ErrorResponse = t.Object({ message: t.String() });
 
@@ -115,7 +116,9 @@ export const systemExtensionRoutes = new Elysia({ prefix: "/v1/system/extensions
     }, {
         response: { 200: t.Any() },
     })
-    .post('/install', async ({ body }) => {
+    .post('/install', async ({ body, request }) => {
+        const authError = await requireAdminAuth(request);
+        if (authError) return status(authError.status, authError.body);
         if (!body.name) return status(400, { message: "Extension package name is required", code: "400" });
         return await extensionService.installSystemExtension(body.name);
     }, {
@@ -125,7 +128,9 @@ export const systemExtensionRoutes = new Elysia({ prefix: "/v1/system/extensions
             400: ErrorResponse,
         },
     })
-    .post('/remove', async ({ body }) => {
+    .post('/remove', async ({ body, request }) => {
+        const authError = await requireAdminAuth(request);
+        if (authError) return status(authError.status, authError.body);
         if (!body.name) return status(400, { message: "Extension package name is required", code: "400" });
         return await extensionService.removeSystemExtension(body.name);
     }, {

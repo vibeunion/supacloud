@@ -3,6 +3,7 @@ import { logger } from "../utils/logger";
 import { projectService } from "../services";
 import { tenantRuntimeService } from "../services/tenant-runtime.service";
 import { shellService } from "../services/shell.service";
+import { requireProjectOrAdminAuth } from "../middleware/auth";
 import type {
   OAuthProvider,
   OAuthProviderConfig,
@@ -91,7 +92,9 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
 
   .get(
     "/providers/:provider",
-    async ({ params, set }) => {
+    async ({ params, set, request }) => {
+      const authError = await requireProjectOrAdminAuth(request, params.ref);
+      if (authError) return status(authError.status, authError.body);
       const provider = params.provider as OAuthProvider;
 
       if (!SUPPORTED_OAUTH_PROVIDERS.includes(provider)) {
@@ -133,7 +136,9 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
 
   .post(
     "/providers/:provider",
-    async ({ params, body, set }) => {
+    async ({ params, body, set, request }) => {
+      const authError = await requireProjectOrAdminAuth(request, params.ref);
+      if (authError) return status(authError.status, authError.body);
       const provider = params.provider as OAuthProvider;
 
       if (!SUPPORTED_OAUTH_PROVIDERS.includes(provider)) {
@@ -207,7 +212,9 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
 
   .patch(
     "/providers/:provider",
-    async ({ params, body, set }) => {
+    async ({ params, body, set, request }) => {
+      const authError = await requireProjectOrAdminAuth(request, params.ref);
+      if (authError) return status(authError.status, authError.body);
       const provider = params.provider as OAuthProvider;
 
       if (!SUPPORTED_OAUTH_PROVIDERS.includes(provider)) {
@@ -282,7 +289,9 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
 
   .delete(
     "/providers/:provider",
-    async ({ params, set }) => {
+    async ({ params, set, request }) => {
+      const authError = await requireProjectOrAdminAuth(request, params.ref);
+      if (authError) return status(authError.status, authError.body);
       const provider = params.provider as OAuthProvider;
 
       if (!SUPPORTED_OAUTH_PROVIDERS.includes(provider)) {
@@ -369,7 +378,9 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
 
   .patch(
     "/config",
-    async ({ params, body, set }) => {
+    async ({ params, body, set, request }) => {
+      const authError = await requireProjectOrAdminAuth(request, params.ref);
+      if (authError) return status(authError.status, authError.body);
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings) {
         return status(404, { message: "Project not found", code: "404" });
@@ -477,7 +488,9 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
 
   .patch(
     "/studio/providers/:provider",
-    async ({ params, body, set }) => {
+    async ({ params, body, set, request }) => {
+      const authError = await requireProjectOrAdminAuth(request, params.ref);
+      if (authError) return status(authError.status, authError.body);
       const provider = params.provider as OAuthProvider;
 
       if (!SUPPORTED_OAUTH_PROVIDERS.includes(provider)) {

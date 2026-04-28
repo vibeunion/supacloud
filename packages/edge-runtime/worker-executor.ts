@@ -27,39 +27,23 @@ function evictOldestModule() {
   }
 }
 
-const savedEnv: Record<string, string | undefined> = {};
+const originalProcessEnv = process.env;
 let envSnapshotActive = false;
 let currentAbortController: AbortController | null = null;
 let currentInjectedEnv: Record<string, string> = {};
 
 function injectEnv(env: Record<string, string>) {
   if (envSnapshotActive) restoreEnv();
-  for (const [k, v] of Object.entries(env)) {
-    savedEnv[k] = process.env[k];
-    process.env[k] = v;
-  }
   currentInjectedEnv = { ...env };
+  process.env = { ...env } as NodeJS.ProcessEnv;
   envSnapshotActive = true;
 }
 
 function restoreEnv() {
   if (!envSnapshotActive) return;
-  for (const [k, original] of Object.entries(savedEnv)) {
-    if (original === undefined) {
-      delete process.env[k];
-    } else {
-      process.env[k] = original;
-    }
-  }
-  for (const k of Object.keys(savedEnv)) {
-    delete savedEnv[k];
-  }
-  for (const k of envWriteLog) {
-    if (!(k in savedEnv)) {
-      delete process.env[k];
-    }
-  }
+  process.env = originalProcessEnv;
   envWriteLog.clear();
+  currentInjectedEnv = {};
   envSnapshotActive = false;
 }
 
@@ -166,7 +150,11 @@ parentPort.on("message", async (msg: any) => {
   if (msg.type === "preheat") {
     try {
       const ref = extractProjectRef(msg.functionId);
+      const env = msg.env || {};
       setTenantRef(ref);
+      setProjectRoot(msg.projectRoot || path.dirname(msg.functionPath));
+      injectEnv(env);
+      setInjectedEnv(env);
       await loadModule(msg.functionPath);
       parentPort!.postMessage({
         type: "preheat_done",
@@ -179,7 +167,10 @@ parentPort.on("message", async (msg: any) => {
         error: err.message,
       });
     } finally {
+      restoreEnv();
       setTenantRef(null);
+      setProjectRoot(null);
+      setInjectedEnv({});
     }
     return;
   }

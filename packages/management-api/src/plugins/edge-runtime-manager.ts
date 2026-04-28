@@ -103,6 +103,7 @@ export class EdgeRuntimeManager {
         ...process.env,
         PORT: String(this.config.port),
         EDGE_FUNCTIONS_DIR: config.edgeFunctionsDir,
+        EDGE_RUNTIME_MASTER_KEY: config.edgeRuntimeMasterKey,
         MASTER_TOKEN: config.masterToken,
         MANAGEMENT_API_URL: `http://127.0.0.1:${config.port || 9090}`,
       },

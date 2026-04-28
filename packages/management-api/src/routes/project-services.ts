@@ -4,6 +4,7 @@
  */
 import { Elysia, t, status } from "elysia";
 import { projectService } from "../services";
+import { getAuthContext, requireProjectOrAdminAuth } from "../middleware/auth";
 import { $ } from "bun";
 
 export const projectServiceRoutes = new Elysia({ prefix: "/v1/projects" })
@@ -151,7 +152,9 @@ export const projectServiceRoutes = new Elysia({ prefix: "/v1/projects" })
   // Get project services status list (Supabase Studio compatibility)
   .get(
     "/:ref/services",
-    async ({ params }) => {
+    async ({ params, request }) => {
+      const authError = await requireProjectOrAdminAuth(request, params.ref);
+      if (authError) return status(authError.status, authError.body);
       const project = await projectService.getProject(params.ref);
       if (!project) {
         return status(404, { message: "Project not found" });
@@ -198,8 +201,13 @@ export const projectServiceRoutes = new Elysia({ prefix: "/v1/projects" })
   // Individual service control (start/stop/restart)
   .post(
     "/:ref/services/:service/:action",
-    async ({ params, set }) => {
+    async ({ params, request, set }) => {
       const { ref, service, action } = params;
+      const authError = await requireProjectOrAdminAuth(request, params.ref);
+      if (authError) return status(authError.status, authError.body);
+      const auth = await getAuthContext(request);
+      if ("status" in auth) return status(auth.status, auth.body);
+
       const validActions = ["start", "stop", "restart"];
       if (!validActions.includes(action)) {
         set.status = 400;
@@ -209,14 +217,21 @@ export const projectServiceRoutes = new Elysia({ prefix: "/v1/projects" })
         };
       }
 
-      const serviceMap: Record<string, string> = {
-        postgresql: "patroni",
+      const projectUnitMap: Record<string, string> = {
         postgrest: `supacloud-pgrst@${ref}`,
         gotrue: `supacloud-gotrue@${ref}`,
-        realtime: "supacloud-realtime",
         storage: `supacloud-storage@${ref}`,
+      };
+      const sharedUnitMap: Record<string, string> = {
+        postgresql: "patroni",
+        realtime: "supacloud-realtime",
         kong: "kong",
       };
+      const serviceMap: Record<string, string> = { ...projectUnitMap, ...sharedUnitMap };
+
+      if (auth.role === "project" && !(service in projectUnitMap)) {
+        return status(403, { message: "Admin privileges required for shared services", code: "403" });
+      }
 
       const unitName = serviceMap[service];
       if (!unitName) {

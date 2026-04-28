@@ -18,6 +18,7 @@ StandardError=journal
 SyslogIdentifier=supacloud-edge
 
 Environment=PORT=9000
+Environment=EDGE_RUNTIME_HOST=127.0.0.1
 EnvironmentFile=-/etc/supabase/management-api.env
 EnvironmentFile=-/opt/supacloud/config.env
 

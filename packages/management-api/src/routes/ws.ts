@@ -5,7 +5,7 @@
  * Auth: query parameter ?token=<session_token> (WebSocket can't send custom headers)
  */
 import { Elysia, t } from "elysia";
-import { checkAuth } from "../middleware/auth";
+import { checkAuth, getAuthContext, requireAdminAuth } from "../middleware/auth";
 import { logger } from "../utils/logger";
 
 // --- Subscriber registry ---
@@ -60,7 +60,13 @@ export function getWsConnectionCount(): number {
 }
 
 export const wsRoutes = new Elysia({ prefix: "/ws" })
-  .get("/realtime/v1/health", () => {
+  .get("/realtime/v1/health", async ({ request, set }) => {
+    const authError = await requireAdminAuth(request);
+    if (authError) {
+      set.status = authError.status;
+      return { error: authError.body.error };
+    }
+
     const projectConnections: Record<string, number> = {};
     for (const [ref, count] of projectConnectionCounts) {
       if (count > 0) projectConnections[ref] = count;
@@ -74,7 +80,13 @@ export const wsRoutes = new Elysia({ prefix: "/ws" })
       project_connections: projectConnections,
     };
   })
-  .get("/realtime/v1/status", ({ query, set }) => {
+  .get("/realtime/v1/status", async ({ query, set, request }) => {
+    const authError = await requireAdminAuth(request);
+    if (authError) {
+      set.status = authError.status;
+      return { error: authError.body.error };
+    }
+
     const ref = query.project_ref;
     if (!ref) {
       set.status = 400;
@@ -111,20 +123,21 @@ export const wsRoutes = new Elysia({ prefix: "/ws" })
       const authRequest = new Request(authUrl.toString(), {
         headers: { Authorization: `Bearer ${token}` },
       });
-      const authError = await checkAuth(authRequest);
-      if (authError) {
-        ws.close(authError.status === 403 ? 1008 : 1002, authError.body.error);
+      const auth = await getAuthContext(authRequest);
+      if ("status" in auth) {
+        ws.close(auth.status === 403 ? 1008 : 1002, auth.body.error);
         return;
       }
 
-      if (!projectFilter && token !== (await import("../config")).config.masterToken) {
+      const isAdmin = auth.role === "master" || auth.role === "admin";
+      if (!projectFilter && !isAdmin) {
         ws.close(1008, "Project filter required for non-admin websocket sessions");
         return;
       }
 
       (ws.data as Record<string, unknown>).__clientId = id;
       (ws.data as Record<string, unknown>).__authToken = token;
-      (ws.data as Record<string, unknown>).__isAdmin = !projectFilter;
+      (ws.data as Record<string, unknown>).__isAdmin = isAdmin;
 
       taskSubscribers.set(id, {
         id,
@@ -194,13 +207,17 @@ export const wsRoutes = new Elysia({ prefix: "/ws" })
                 return;
             }
 
-            const { sql } = await import("../db");
-            const rows = await sql`SELECT ref FROM projects WHERE anon_key = ${apikey} OR service_role_key = ${apikey} LIMIT 1`;
-            if (rows.length === 0) {
+            const { resolveProjectRefFromApiKey } = await import("../utils/project-auth");
+            const ref = await resolveProjectRefFromApiKey(apikey);
+            if (!ref) {
                 ws.close(1008, "Invalid apikey");
                 return;
             }
-            const ref = rows[0].ref;
+            const requestedRef = ws.data.request?.headers?.get("x-project-ref") || ws.data.request?.headers?.get("x-supabase-project") || query.ref || "";
+            if (requestedRef && requestedRef !== ref) {
+                ws.close(1008, "Project reference does not match apikey");
+                return;
+            }
             (ws.data as any).projectRef = ref;
             (ws.data as any).apikey = apikey;
 

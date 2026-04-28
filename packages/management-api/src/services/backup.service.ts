@@ -1,4 +1,6 @@
 import { $ } from 'bun';
+import { mkdir } from "node:fs/promises";
+import { basename, resolve } from "node:path";
 import { logger } from "../utils/logger";
 import type { BackupInfo, RestoreRequest } from '../types/backup';
 import { projectRepository } from '../repositories/project.repository';
@@ -40,12 +42,39 @@ export async function createBackup(stanza: string = 'db-main', type: 'full' | 'i
         });
         return { message: `${type} backup task started` };
     }
+const PITR_TARGET_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z$/;
+
 export async function restore(request: RestoreRequest): Promise<{ message: string }> {
+        if (!PITR_TARGET_PATTERN.test(request.target)) {
+            throw new Error("Invalid PITR target");
+        }
         $`sudo -u postgres pig pitr ${request.target}`.nothrow().quiet().catch(err => {
             logger.error('[Backup] Async restore task failed:', { error: err instanceof Error ? err.message : String(err) });
         });
         return { message: `Point-in-time recovery (PITR) task started, target: ${request.target}` };
     }
+
+const LOGICAL_BACKUP_DIR = process.env.SUPACLOUD_LOGICAL_BACKUP_DIR || "/tmp/supacloud-backups";
+const LOGICAL_BACKUP_FILE_PATTERN = /^backup_[A-Za-z0-9_-]{1,64}_\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z\.sql\.gz$/;
+
+async function ensureLogicalBackupDir(): Promise<string> {
+        const baseDir = resolve(LOGICAL_BACKUP_DIR);
+        await mkdir(baseDir, { recursive: true, mode: 0o700 });
+        return baseDir;
+    }
+
+async function resolveLogicalBackupPath(filename: string): Promise<string> {
+        if (filename !== basename(filename) || !LOGICAL_BACKUP_FILE_PATTERN.test(filename)) {
+            throw new Error("Invalid backup id");
+        }
+        const baseDir = await ensureLogicalBackupDir();
+        const fullPath = resolve(baseDir, filename);
+        if (!fullPath.startsWith(`${baseDir}/`)) {
+            throw new Error("Invalid backup path");
+        }
+        return fullPath;
+    }
+
     /**
      * Execute logical backup per tenant level (pg_dump)
      * Export dedicated data and upload to corresponding S3 bucket
@@ -56,7 +85,7 @@ export async function createLogicalBackup(projectRef: string): Promise<{ success
 
         const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
         const filename = `backup_${projectRef}_${timestamp}.sql.gz`;
-        const backupPath = `/tmp/${filename}`;
+        const backupPath = await resolveLogicalBackupPath(filename);
 
         try {
             // Use tenant role, export as Custom archive format with default gzip compression
@@ -89,10 +118,15 @@ export async function createLogicalBackup(projectRef: string): Promise<{ success
      * Execute logical restore per tenant level (pg_restore)
      */
 export async function restoreLogicalBackup(projectRef: string, backupId: string): Promise<{ success: boolean; message: string }> {
+        let backupPath: string;
+        try {
+            backupPath = await resolveLogicalBackupPath(backupId);
+        } catch {
+            return { success: false, message: "Invalid backup id" };
+        }
+
         const project = await projectRepository.findByRef(projectRef);
         if (!project) throw new Error("Project not found");
-
-        const backupPath = `/tmp/${backupId}`;
 
         try {
             // Try downloading from S3 first

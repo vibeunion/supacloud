@@ -7,6 +7,19 @@ import { logger } from "../utils/logger";
 export const mockBuckets = new Map<string, any>();
 export const mockObjects = new Map<string, any>();
 
+function normalizeSqlRole(role: unknown, allowServiceRole = false): 'anon' | 'authenticated' | 'service_role' {
+  if (allowServiceRole && role === 'service_role') return 'service_role';
+  return role === 'authenticated' ? 'authenticated' : 'anon';
+}
+
+async function applyRlsContext(tx: import("bun").SQL, payload: Record<string, unknown>): Promise<void> {
+  const role = normalizeSqlRole(payload.role, payload.__allow_service_role === true);
+  await tx.unsafe(`SET LOCAL ROLE "${role}"`);
+  await tx`SELECT set_config('request.jwt.claims', ${JSON.stringify({ ...payload, role })}, true)`;
+  await tx`SELECT set_config('request.jwt.claim.sub', ${String(payload.sub || '')}, true)`;
+  await tx`SELECT set_config('request.jwt.claim.role', ${role}, true)`;
+}
+
 export class StorageRLS {
 
   
@@ -211,10 +224,15 @@ export class StorageRLS {
   }
 
   static async verifyToken(ref: string, token: string) {
-    const secret = await this.getTenantJwtSecret(ref);
+    const cleanToken = token.replace('Bearer ', '');
+    const keys = await metaSql`SELECT service_role_key, jwt_secret FROM projects WHERE ref=${ref} AND deleted_at IS NULL AND status = 'active' LIMIT 1`;
+    const secret = keys[0]?.jwt_secret;
     if (!secret) throw new Error("tenant not found");
-    const { payload } = await jwtVerify(token, new TextEncoder().encode(secret));
-    return payload;
+    const { payload } = await jwtVerify(cleanToken, new TextEncoder().encode(secret));
+    return {
+      ...payload,
+      __allow_service_role: cleanToken === keys[0]?.service_role_key,
+    };
   }
 
   
@@ -230,19 +248,15 @@ export class StorageRLS {
     let payload: Record<string, unknown> = { role: 'anon' };
     if (token) {
       try {
-        payload = await this.verifyToken(ref, token.replace('Bearer ', ''));
+        payload = await this.verifyToken(ref, token);
       } catch (e) {
         throw new Error('Access Denied');
       }
     }
 
     return await db.begin(async (tx: import("bun").SQL) => {
-        await tx`SELECT set_config('role', ${(payload.role as string) || 'anon'}, true)`;
-        await tx`SELECT set_config('request.jwt.claims', ${JSON.stringify(payload)}, true)`;
-        if (payload.sub) await tx`SELECT set_config('request.jwt.claim.sub', ${String(payload.sub)}, true)`;
-        if (payload.role) await tx`SELECT set_config('request.jwt.claim.role', ${String(payload.role)}, true)`;
-
-        return await callback(tx, payload);
+        await applyRlsContext(tx, payload);
+        return await callback(tx, { ...payload, role: normalizeSqlRole(payload.role, payload.__allow_service_role === true) });
     });
   }
 
@@ -292,7 +306,7 @@ export class StorageRLS {
     let payload: Record<string, unknown> = { role: 'anon' };
     if (token) {
       try {
-        payload = await this.verifyToken(ref, token.replace('Bearer ', ''));
+        payload = await this.verifyToken(ref, token);
       } catch (e) {
         return { permitted: false, error: 'Row Level Security violation or bucket missing. Access Denied.' }; // Auth token invalid
       }
@@ -301,10 +315,7 @@ export class StorageRLS {
     try {
       // Use a transaction so we respect standard RLS contexts
       await db.begin(async (tx) => {
-        await tx`SELECT set_config('role', ${(payload.role as string) || 'anon'}, true)`;
-        await tx`SELECT set_config('request.jwt.claims', ${JSON.stringify(payload)}, true)`;
-        if (payload.sub) await tx`SELECT set_config('request.jwt.claim.sub', ${String(payload.sub)}, true)`;
-        if (payload.role) await tx`SELECT set_config('request.jwt.claim.role', ${String(payload.role)}, true)`;
+        await applyRlsContext(tx, payload);
 
         // Prepare owner uuid safely (sometimes sub is not uuid)
         const owner = typeof payload.sub === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(payload.sub) ? payload.sub : null;
@@ -495,7 +506,7 @@ export class StorageRLS {
     let payload: Record<string, unknown> = { role: 'anon' };
     if (token) {
       try {
-        payload = await this.verifyToken(ref, token.replace('Bearer ', ''));
+        payload = await this.verifyToken(ref, token);
       } catch (e) {
         throw new Error('Access Denied');
       }
@@ -504,10 +515,7 @@ export class StorageRLS {
     try {
       let results: any[] = [];
       await db.begin(async (tx) => {
-        await tx`SELECT set_config('role', ${String(payload.role) || 'anon'}, true)`;
-        await tx`SELECT set_config('request.jwt.claims', ${JSON.stringify(payload)}, true)`;
-        if (payload.sub) await tx`SELECT set_config('request.jwt.claim.sub', ${String(payload.sub)}, true)`;
-        if (payload.role) await tx`SELECT set_config('request.jwt.claim.role', ${String(payload.role)}, true)`;
+        await applyRlsContext(tx, payload);
 
         const searchPrefix = prefix + '%';
         const searchTerm = `%${search}%`;

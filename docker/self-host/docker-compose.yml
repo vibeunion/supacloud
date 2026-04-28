@@ -121,7 +121,7 @@ services:
       - tenant-config:/etc/supabase/tenants
       - functions-data:/data/functions
     ports:
-      - "${EDGE_RUNTIME_PORT:-9000}:9000"
+      - "127.0.0.1:${EDGE_RUNTIME_PORT:-9000}:9000"
     healthcheck:
       test: ["CMD", "bun", "-e", "const r=await fetch('http://127.0.0.1:9000/health'); if(!r.ok) process.exit(1)"]
       interval: 15s

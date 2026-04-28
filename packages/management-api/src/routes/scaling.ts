@@ -1,9 +1,13 @@
 import { Elysia, t, status } from "elysia";
 import { logger } from "../utils/logger";
 import { ScalingService } from "../services/scaling.service";
+import { requireAdminAuth } from "../middleware/auth";
 
 export const scalingRoutes = new Elysia({ prefix: "/v1/projects/:ref/upgrade" })
-    .post("/", async ({ params, body }) => {
+    .post("/", async ({ params, body, request }) => {
+        const authError = await requireAdminAuth(request);
+        if (authError) return status(authError.status, authError.body);
+
         // Since ScalingService.checkAndScale is currently designed for automatic metric-based decisions,
         // here we provide a manual upgrade trigger wrapper
         const { target_tier } = body as { target_tier: string };
@@ -21,7 +25,10 @@ export const scalingRoutes = new Elysia({ prefix: "/v1/projects/:ref/upgrade" })
             target_tier: t.String()
         })
     })
-    .post("/replicas", async ({ params, body }) => {
+    .post("/replicas", async ({ params, body, request }) => {
+        const authError = await requireAdminAuth(request);
+        if (authError) return status(authError.status, authError.body);
+
         const { replica_ip } = body as { replica_ip: string };
         try {
             await ScalingService.horizontalScale(params.ref, replica_ip);
