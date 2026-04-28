@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.5](https://github.com/zuohuadong/supacloud/compare/management-api-v0.12.4...management-api-v0.12.5) (2026-04-28)
+
+
+### 🐛 Bug Fixes
+
+* **management-api:** grant postgrest authenticator database access ([f64e7d8](https://github.com/zuohuadong/supacloud/commit/f64e7d8988293dd8cec0626147e819532cc9c086))
+
 ## [0.12.4](https://github.com/zuohuadong/supacloud/compare/management-api-v0.12.3...management-api-v0.12.4) (2026-04-28)
 
 
