@@ -177,6 +177,13 @@ export class DatabaseService {
       // Apply schema independently
       await this.applySupabaseSchema(dbName, projectRef, password);
 
+      await this.withAdminDb(async (adminDb) => {
+        await adminDb.unsafe(`
+          GRANT CONNECT, TEMPORARY ON DATABASE "${dbName}" TO supabase_auth_admin;
+          GRANT CONNECT, TEMPORARY ON DATABASE "${dbName}" TO supabase_admin;
+        `);
+      });
+
       return { success: true };
     } catch (error: unknown) {
       return {
