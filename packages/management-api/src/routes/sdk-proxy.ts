@@ -181,6 +181,7 @@ async function maybeEnqueueAsyncFunction(request: Request, ref: string): Promise
 
 export const sdkProxyInternals = {
     resolveProjectRefFromApiKey,
+    maybeEnqueueAsyncFunction,
 };
 
 async function getProjectRef(request: Request): Promise<string> {
