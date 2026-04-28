@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.3](https://github.com/zuohuadong/supacloud/compare/management-api-v0.12.2...management-api-v0.12.3) (2026-04-28)
+
+
+### 🐛 Bug Fixes
+
+* **management-api:** encrypt background task credentials ([7f7b815](https://github.com/zuohuadong/supacloud/commit/7f7b815ceb2b7b5a5f7368772b6483882f0a7b36))
+
 ## [0.12.2](https://github.com/zuohuadong/supacloud/compare/management-api-v0.12.1...management-api-v0.12.2) (2026-04-27)
 
 
