@@ -1,5 +1,6 @@
 import { Elysia, t } from "elysia";
 import { jwtVerify } from "jose";
+import { randomUUID } from "node:crypto";
 import { encryptSecretIfNeeded } from "../utils/secret-crypto";
 import { getProjectDb } from "../db";
 import { config } from "../config";
@@ -108,7 +109,7 @@ async function maybeEnqueueAsyncFunction(request: Request, ref: string): Promise
         headers[key] = value;
     });
 
-    const traceId = request.headers.get("x-request-id") || crypto.randomUUID();
+    const traceId = request.headers.get("x-request-id") || randomUUID();
     const authHeaders: Record<string, string> = {};
     const authorization = request.headers.get("authorization");
     const apikey = request.headers.get("apikey");
