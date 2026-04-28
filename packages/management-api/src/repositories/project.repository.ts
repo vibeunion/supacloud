@@ -1,5 +1,6 @@
 import { sql, type Project, type CreateProjectInput, type ProjectStatus } from "../db";
 import { withRetry } from "../utils/retry";
+import { encryptSecretIfNeeded } from "../utils/secret-crypto";
 
 export async function findAll(): Promise<Project[]> {
   return withRetry("ProjectRepository.findAll", async () => {
@@ -43,7 +44,8 @@ export async function create(input: CreateProjectInput): Promise<Project> {
       ref, name, db_name, db_user, db_password,
       jwt_secret, anon_key, service_role_key,
       s3_bucket, s3_access_key, s3_secret_key,
-      region, config
+      region, config,
+      db_password_encrypted, jwt_secret_encrypted, service_role_key_encrypted, s3_secret_key_encrypted
     ) VALUES (
       ${input.ref},
       ${input.name},
@@ -57,7 +59,11 @@ export async function create(input: CreateProjectInput): Promise<Project> {
       ${input.s3_access_key || null},
       ${input.s3_secret_key || null},
       ${input.region || "local"},
-      ${input.config ? JSON.stringify(input.config) : "{}"}::jsonb
+      ${input.config ? JSON.stringify(input.config) : "{}"}::jsonb,
+      ${encryptSecretIfNeeded(input.db_password)},
+      ${encryptSecretIfNeeded(input.jwt_secret)},
+      ${encryptSecretIfNeeded(input.service_role_key)},
+      ${input.s3_secret_key ? encryptSecretIfNeeded(input.s3_secret_key) : null}
     )
     RETURNING *
   `;
@@ -100,6 +106,8 @@ export async function updateApiKeys(ref: string, keys: { jwt_secret: string, ano
       jwt_secret = ${keys.jwt_secret},
       anon_key = ${keys.anon_key},
       service_role_key = ${keys.service_role_key},
+      jwt_secret_encrypted = ${encryptSecretIfNeeded(keys.jwt_secret)},
+      service_role_key_encrypted = ${encryptSecretIfNeeded(keys.service_role_key)},
       updated_at = NOW()
     WHERE ref = ${ref} AND deleted_at IS NULL
     RETURNING *

@@ -1,6 +1,10 @@
 import { parentPort, workerData } from "worker_threads";
 import path from "path";
-import { getCapturedServeHandler, clearCapturedServeHandler, setTenantRef } from "./deno-compat";
+import { getCapturedServeHandler, clearCapturedServeHandler, setTenantRef, setProjectRoot, setInjectedEnv, envWriteLog } from "./deno-compat";
+
+export function getInjectedEnv(): Record<string, string> {
+  return currentInjectedEnv;
+}
 
 if (!parentPort) throw new Error("This file must be run as a Worker");
 
@@ -26,6 +30,7 @@ function evictOldestModule() {
 const savedEnv: Record<string, string | undefined> = {};
 let envSnapshotActive = false;
 let currentAbortController: AbortController | null = null;
+let currentInjectedEnv: Record<string, string> = {};
 
 function injectEnv(env: Record<string, string>) {
   if (envSnapshotActive) restoreEnv();
@@ -33,6 +38,7 @@ function injectEnv(env: Record<string, string>) {
     savedEnv[k] = process.env[k];
     process.env[k] = v;
   }
+  currentInjectedEnv = { ...env };
   envSnapshotActive = true;
 }
 
@@ -48,6 +54,12 @@ function restoreEnv() {
   for (const k of Object.keys(savedEnv)) {
     delete savedEnv[k];
   }
+  for (const k of envWriteLog) {
+    if (!(k in savedEnv)) {
+      delete process.env[k];
+    }
+  }
+  envWriteLog.clear();
   envSnapshotActive = false;
 }
 
@@ -178,11 +190,13 @@ parentPort.on("message", async (msg: any) => {
     return;
   }
 
-  const { functionId, functionPath, env, url, method, headers, body } = msg;
+  const { functionId, functionPath, projectRoot, env, url, method, headers, body } = msg;
 
   const projectRef = extractProjectRef(functionId);
   setTenantRef(projectRef);
+  setProjectRoot(projectRoot || path.dirname(functionPath));
   injectEnv(env);
+  setInjectedEnv(env);
   setupConsoleCapture(functionId);
 
   try {
@@ -277,5 +291,7 @@ parentPort.on("message", async (msg: any) => {
     restoreEnv();
     restoreConsole();
     setTenantRef(null);
+    setProjectRoot(null);
+    setInjectedEnv({});
   }
 });

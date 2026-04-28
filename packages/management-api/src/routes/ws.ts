@@ -123,6 +123,8 @@ export const wsRoutes = new Elysia({ prefix: "/ws" })
       }
 
       (ws.data as Record<string, unknown>).__clientId = id;
+      (ws.data as Record<string, unknown>).__authToken = token;
+      (ws.data as Record<string, unknown>).__isAdmin = !projectFilter;
 
       taskSubscribers.set(id, {
         id,
@@ -141,13 +143,29 @@ export const wsRoutes = new Elysia({ prefix: "/ws" })
     },
 
     message(ws, message) {
-      // Client can dynamically update project filter
       if (typeof message === "object" && message !== null) {
         const msg = message as Record<string, unknown>;
         if (msg.type === "subscribe" && typeof msg.projectRef === "string") {
           const clientId = (ws.data as Record<string, unknown>).__clientId as string;
           const client = clientId ? taskSubscribers.get(clientId) : undefined;
           if (client) {
+            const isAdmin = (ws.data as Record<string, unknown>).__isAdmin as boolean;
+            if (!isAdmin) {
+              const token = (ws.data as Record<string, unknown>).__authToken as string;
+              const authUrl = new URL(`http://localhost/v1/projects/${msg.projectRef}`);
+              const authRequest = new Request(authUrl.toString(), {
+                headers: { Authorization: `Bearer ${token}` },
+              });
+              checkAuth(authRequest).then((authError) => {
+                if (authError) {
+                  ws.send(JSON.stringify({ type: "error", message: `No access to project ${msg.projectRef}` }));
+                } else {
+                  client.projectFilter = msg.projectRef as string;
+                  ws.send(JSON.stringify({ type: "subscribed", projectRef: msg.projectRef }));
+                }
+              });
+              return;
+            }
             client.projectFilter = msg.projectRef as string;
             ws.send(JSON.stringify({ type: "subscribed", projectRef: msg.projectRef }));
           }
@@ -184,6 +202,7 @@ export const wsRoutes = new Elysia({ prefix: "/ws" })
             }
             const ref = rows[0].ref;
             (ws.data as any).projectRef = ref;
+            (ws.data as any).apikey = apikey;
 
             const currentConns = projectConnectionCounts.get(ref) || 0;
             if (currentConns >= MAX_CONNECTIONS_PER_PROJECT) {
@@ -309,8 +328,11 @@ export const wsRoutes = new Elysia({ prefix: "/ws" })
                      const handler = (ws.data as any)[`__handler_${parsed.topic}`];
                      if (handler) {
                          import("../services/realtime-bun.service").then(({ realtimeBunService }) => {
-                             realtimeBunService.events.off(`change:${ref}`, handler);
+                             const state = ((ws.data as any).__bunSubscriptionStates as Map<string, any> | undefined)?.get(parsed.topic);
+                             if (state) realtimeBunService.events.off(`change:${state.id}`, handler);
+                             if (ref && state) realtimeBunService.unsubscribeSubscription(ref, state.id);
                          });
+                         ((ws.data as any).__bunSubscriptionStates as Map<string, any> | undefined)?.delete(parsed.topic);
                          delete (ws.data as any)[`__handler_${parsed.topic}`];
                      }
                  }
@@ -341,7 +363,7 @@ export const wsRoutes = new Elysia({ prefix: "/ws" })
 
             // P0-14: postgres_changes multiplexing
             if (parsed.event === 'phx_join') {
-                const joinToken = parsed.payload?.access_token;
+                const joinToken = parsed.payload?.access_token || (ws.data as any).token || (ws.data as any).apikey;
                 if (joinToken) {
                     (ws.data as any).token = joinToken;
                 }
@@ -351,11 +373,15 @@ export const wsRoutes = new Elysia({ prefix: "/ws" })
                     const topic = parsed.topic;
                     const subscriptions = changes;
                     
-                    import("../services/realtime-bun.service").then(({ realtimeBunService }) => {
-                         realtimeBunService.subscribeTenant(ref, subscriptions, joinToken);
+                    import("../services/realtime-bun.service").then(async ({ realtimeBunService }) => {
+                         const subscriptionStateId = await realtimeBunService.subscribeTenant(ref, subscriptions, joinToken);
+                         if (!subscriptionStateId) return;
                          if (!(ws.data as any).__bunSubscriptions) (ws.data as any).__bunSubscriptions = new Set();
+                         if (!(ws.data as any).__bunSubscriptionStates) (ws.data as any).__bunSubscriptionStates = new Map();
                          
                          const subs = (ws.data as any).__bunSubscriptions;
+                         const subscriptionStates = (ws.data as any).__bunSubscriptionStates as Map<string, { id: string }>;
+                         subscriptionStates.set(topic, { id: subscriptionStateId });
                          if (!subs.has(topic)) {
                              subs.add(topic);
                              const handler = (payload: any) => {
@@ -367,7 +393,7 @@ export const wsRoutes = new Elysia({ prefix: "/ws" })
                                  }
                              };
                              (ws.data as any)[`__handler_${topic}`] = handler;
-                             realtimeBunService.events.on(`change:${ref}`, handler);
+                             realtimeBunService.events.on(`change:${subscriptionStateId}`, handler);
                          }
                     }).catch(console.error);
                 }
@@ -404,11 +430,14 @@ export const wsRoutes = new Elysia({ prefix: "/ws" })
         }
 
         const subs = (ws.data as any).__bunSubscriptions as Set<string> | undefined;
+        const subscriptionStates = (ws.data as any).__bunSubscriptionStates as Map<string, any> | undefined;
         if (subs && ref) {
             import("../services/realtime-bun.service").then(({ realtimeBunService }) => {
                 for (const topic of subs) {
                     const handler = (ws.data as any)[`__handler_${topic}`];
-                    if (handler) realtimeBunService.events.off(`change:${ref}`, handler);
+                    const state = subscriptionStates?.get(topic);
+                    if (handler && state) realtimeBunService.events.off(`change:${state.id}`, handler);
+                    if (state) realtimeBunService.unsubscribeSubscription(ref, state.id);
                 }
             }).catch(console.error);
         }

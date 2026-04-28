@@ -7,6 +7,7 @@ import { logger } from "../utils/logger";
 import { projectService } from "../services";
 import { getProjectDb, resolveDbName, resolveRoleName } from "../db";
 import { normalizeProjectConfig } from "../utils/project-config";
+import { requireAdminAuth } from "../middleware/auth";
 
 // Available regions list
 const AVAILABLE_REGIONS = [
@@ -384,7 +385,13 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
       const project = await projectService.getProject(params.ref);
       if (!project)
         return status(404, { message: "Project not found", code: "404" });
-      return await buildProjectResponse(project, true);
+      const full = await buildProjectResponse(project, true);
+      const { database, services, db_port, db_host, db_name, db_user, connection_string, anon_key, ...safe } = full;
+      return {
+        ...safe,
+        database: database ? { version: (database as Record<string, unknown>).version, size: (database as Record<string, unknown>).size, connection_count: (database as Record<string, unknown>).connection_count } : undefined,
+        services,
+      };
     },
     {
       response: {
@@ -424,7 +431,11 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
   // Delete project
   .delete(
     "/:ref",
-    async ({ params, set }) => {
+    async ({ params, set, request }) => {
+      const authError = await requireAdminAuth(request);
+      if (authError) {
+        return status(authError.status as 401 | 403, { message: authError.body.error, code: String(authError.status) });
+      }
       const project = await projectService.getProject(params.ref);
       if (!project) {
         return status(404, { message: "Project not found", code: "404" });
@@ -441,7 +452,11 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
   // Pause project
   .post(
     "/:ref/pause",
-    async ({ params, set }) => {
+    async ({ params, set, request }) => {
+      const authError = await requireAdminAuth(request);
+      if (authError) {
+        return status(authError.status as 401 | 403, { message: authError.body.error, code: String(authError.status) });
+      }
       const paused = await projectService.pauseProject(params.ref);
       if (!paused) {
         return status(404, { message: "Project not found", code: "404" });
@@ -457,7 +472,11 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
 
   .post(
     "/:ref/restore",
-    async ({ params, set }) => {
+    async ({ params, set, request }) => {
+      const authError = await requireAdminAuth(request);
+      if (authError) {
+        return status(authError.status as 401 | 403, { message: authError.body.error, code: String(authError.status) });
+      }
       const restored = await projectService.restoreProject(params.ref);
       if (!restored) {
         return status(404, { message: "Project not found", code: "404" });

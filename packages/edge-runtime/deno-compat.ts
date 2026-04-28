@@ -1,3 +1,5 @@
+import path from "path";
+
 let capturedServeHandler: Function | null = null;
 export function getCapturedServeHandler() {
   return capturedServeHandler;
@@ -7,14 +9,50 @@ export function clearCapturedServeHandler() {
 }
 
 let currentTenantRef: string | null = null;
+let currentProjectRoot: string | null = null;
+let injectedEnvRef: Record<string, string> = {};
 
 export function setTenantRef(ref: string | null) {
   currentTenantRef = ref;
 }
 
+export function setProjectRoot(root: string | null) {
+  currentProjectRoot = root;
+}
+
+export function setInjectedEnv(env: Record<string, string>) {
+  injectedEnvRef = env;
+}
+
+function isPathInside(candidate: string, base: string): boolean {
+  const relative = path.relative(base, candidate);
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+function assertPathInProject(p: string): void {
+  if (!currentProjectRoot) return;
+  const resolved = path.resolve(p);
+  if (!isPathInside(resolved, currentProjectRoot)) {
+    throw new Error(`Access denied: path "${p}" is outside the project directory`);
+  }
+}
+
 const BLOCKED_COMMANDS = new Set([
   "mkfs", "shutdown", "reboot", "init",
   "fdisk", "parted", "dd",
+  "cat", "head", "tail", "less", "more",
+  "curl", "wget", "nc", "ncat", "netcat",
+  "ssh", "scp", "sftp", "telnet",
+  "env", "printenv", "export",
+  "ps", "top", "htop", "lsof", "ss", "netstat",
+  "whoami", "id", "hostname", "uname",
+  "crontab", "at", "batch",
+  "passwd", "su", "sudo", "doas",
+  "chmod", "chown", "chgrp",
+  "kill", "killall", "pkill",
+  "docker", "podman", "kubectl",
+  "python", "python3", "perl", "ruby", "node", "bun", "bash", "sh", "zsh", "fish",
+  "rm", "rmdir",
 ]);
 
 function isCommandBlocked(cmd: string): boolean {
@@ -22,27 +60,43 @@ function isCommandBlocked(cmd: string): boolean {
   return BLOCKED_COMMANDS.has(base);
 }
 
+const envWriteLog: Set<string> = new Set();
+
 (globalThis as Record<string, unknown>).Deno = {
   env: {
     get: (k: string) => process.env[k],
     set: (k: string, v: string) => {
+      envWriteLog.add(k);
       process.env[k] = v;
     },
     delete: (k: string) => {
+      envWriteLog.add(k);
       delete process.env[k];
     },
     has: (k: string) => k in (process.env as Record<string, unknown>),
-    toObject: () => ({ ...process.env }),
+    toObject: () => ({ ...injectedEnvRef }),
   },
 
-  readTextFile: (p: string) => Bun.file(p).text(),
-  readFile: (p: string) =>
-    Bun.file(p)
+  readTextFile: (p: string) => {
+    assertPathInProject(p);
+    return Bun.file(p).text();
+  },
+  readFile: (p: string) => {
+    assertPathInProject(p);
+    return Bun.file(p)
       .arrayBuffer()
-      .then((b: ArrayBuffer) => new Uint8Array(b)),
-  writeTextFile: (p: string, d: string) => Bun.write(p, d).then(() => {}),
-  writeFile: (p: string, d: Uint8Array) => Bun.write(p, d).then(() => {}),
+      .then((b: ArrayBuffer) => new Uint8Array(b));
+  },
+  writeTextFile: (p: string, d: string) => {
+    assertPathInProject(p);
+    return Bun.write(p, d).then(() => {});
+  },
+  writeFile: (p: string, d: Uint8Array) => {
+    assertPathInProject(p);
+    return Bun.write(p, d).then(() => {});
+  },
   stat: async (p: string) => {
+    assertPathInProject(p);
     const { stat } = await import("fs/promises");
     const s = await stat(p);
     return {
@@ -53,6 +107,7 @@ function isCommandBlocked(cmd: string): boolean {
     };
   },
   readDir: async function* (p: string) {
+    assertPathInProject(p);
     const { readdir } = await import("fs/promises");
     const entries = await readdir(p, { withFileTypes: true });
     for (const e of entries) {
@@ -65,19 +120,23 @@ function isCommandBlocked(cmd: string): boolean {
     }
   },
   mkdir: (p: string, opts?: { recursive?: boolean }) => {
+    assertPathInProject(p);
     const fs = require("fs/promises");
     return fs.mkdir(p, opts);
   },
   remove: (p: string, opts?: { recursive?: boolean }) => {
+    assertPathInProject(p);
     const fs = require("fs/promises");
     return fs.rm(p, opts);
   },
 
   readTextFileSync: (p: string) => {
+    assertPathInProject(p);
     const fs = require("fs");
     return fs.readFileSync(p, "utf-8");
   },
   writeFileSync: (p: string, d: string | Uint8Array) => {
+    assertPathInProject(p);
     const fs = require("fs");
     if (typeof d === "string") {
       fs.writeFileSync(p, d, "utf-8");
@@ -86,6 +145,7 @@ function isCommandBlocked(cmd: string): boolean {
     }
   },
   statSync: (p: string) => {
+    assertPathInProject(p);
     const fs = require("fs");
     const s = fs.statSync(p);
     return {
@@ -100,6 +160,7 @@ function isCommandBlocked(cmd: string): boolean {
     };
   },
   readDirSync: function* (p: string) {
+    assertPathInProject(p);
     const fs = require("fs");
     const entries = fs.readdirSync(p, { withFileTypes: true });
     for (const e of entries) {
@@ -112,6 +173,7 @@ function isCommandBlocked(cmd: string): boolean {
     }
   },
   removeSync: (p: string, opts?: { recursive?: boolean }) => {
+    assertPathInProject(p);
     const fs = require("fs");
     if (opts?.recursive) {
       fs.rmSync(p, { recursive: true });
@@ -120,6 +182,7 @@ function isCommandBlocked(cmd: string): boolean {
     }
   },
   mkdirSync: (p: string, opts?: { recursive?: boolean }) => {
+    assertPathInProject(p);
     const fs = require("fs");
     fs.mkdirSync(p, opts);
   },
@@ -164,7 +227,7 @@ function isCommandBlocked(cmd: string): boolean {
     ) {
       if (isCommandBlocked(cmd)) {
         throw new Error(
-          `Deno.Command("${cmd}") is blocked. Destructive system commands (mkfs, shutdown, reboot, dd, etc.) are not allowed.`,
+          `Deno.Command("${cmd}") is blocked for security reasons.`,
         );
       }
       this.cmd = cmd;
@@ -434,5 +497,7 @@ let globalVersionCounter = 0;
     [Symbol.asyncDispose]: async () => {},
   };
 };
+
+export { envWriteLog };
 
 console.log("[Deno Compat] Loaded Deno API compatibility shim");

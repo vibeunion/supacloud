@@ -56,31 +56,65 @@ const DEFAULT_FUNCTION_CONFIG: EdgeFunctionConfig = {
  *   - Optional minification
  */
 
-const FUNCTIONS_ROOT = config.edgeFunctionsDir;
+const FUNCTIONS_ROOT = path.resolve(config.edgeFunctionsDir);
 const VERSIONED_DIR = ".versions";
+const SAFE_REF_REGEX = /^[a-zA-Z0-9_-]{1,64}$/;
+const SAFE_SLUG_REGEX = /^[a-zA-Z0-9_-]{1,128}$/;
+
+function validateRef(ref: string): string {
+  if (!SAFE_REF_REGEX.test(ref)) {
+    throw new Error("Invalid project ref");
+  }
+  return ref;
+}
+
+function validateSlug(slug: string): string {
+  if (!SAFE_SLUG_REGEX.test(slug)) {
+    throw new Error("Invalid function slug");
+  }
+  return slug;
+}
+
+function assertInside(base: string, target: string): string {
+  const resolvedBase = path.resolve(base);
+  const resolvedTarget = path.resolve(target);
+  const relative = path.relative(resolvedBase, resolvedTarget);
+  if (relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative))) {
+    return resolvedTarget;
+  }
+  throw new Error("Path escapes function root");
+}
+
+function resolveInside(base: string, relPath: string): string {
+  const normalized = relPath.replace(/\\/g, "/");
+  if (!normalized || path.isAbsolute(normalized) || normalized.split("/").includes("..")) {
+    throw new Error("Invalid bundle file path");
+  }
+  return assertInside(base, path.resolve(base, normalized));
+}
 
 function getFuncDir(ref: string): string {
-  return path.join(FUNCTIONS_ROOT, ref);
+  return assertInside(FUNCTIONS_ROOT, path.join(FUNCTIONS_ROOT, validateRef(ref)));
 }
 
 function getFuncPath(ref: string, slug: string): string {
-  return path.join(getFuncDir(ref), `${slug}.js`);
+  return assertInside(getFuncDir(ref), path.join(getFuncDir(ref), `${validateSlug(slug)}.js`));
 }
 
 function getVersionedFuncPath(ref: string, slug: string, version: string): string {
-  return path.join(getFuncDir(ref), VERSIONED_DIR, slug, version, "index.js");
+  return assertInside(getFuncDir(ref), path.join(getFuncDir(ref), VERSIONED_DIR, validateSlug(slug), version, "index.js"));
 }
 
 function getSrcPath(ref: string, slug: string): string {
-  return path.join(getFuncDir(ref), `${slug}.src.ts`);
+  return assertInside(getFuncDir(ref), path.join(getFuncDir(ref), `${validateSlug(slug)}.src.ts`));
 }
 
 function getVersionedSrcPath(ref: string, slug: string, version: string): string {
-  return path.join(getFuncDir(ref), VERSIONED_DIR, slug, version, "index.src.ts");
+  return assertInside(getFuncDir(ref), path.join(getFuncDir(ref), VERSIONED_DIR, validateSlug(slug), version, "index.src.ts"));
 }
 
 function getConfigPath(ref: string, slug: string): string {
-  return path.join(getFuncDir(ref), `${slug}.config.json`);
+  return assertInside(getFuncDir(ref), path.join(getFuncDir(ref), `${validateSlug(slug)}.config.json`));
 }
 
 async function fileExists(filePath: string): Promise<boolean> {
@@ -213,7 +247,7 @@ export async function getVersionedArtifactPath(
 }
 
 async function listVersionDirectories(ref: string, slug: string): Promise<string[]> {
-  const dir = path.join(getFuncDir(ref), VERSIONED_DIR, slug);
+  const dir = assertInside(getFuncDir(ref), path.join(getFuncDir(ref), VERSIONED_DIR, validateSlug(slug)));
   try {
     const entries = await fs.readdir(dir, { withFileTypes: true });
     return entries
@@ -269,7 +303,7 @@ export async function migrateLegacyVersionArtifacts(): Promise<{ moved: number }
     for (const entry of entries) {
       const parsed = parseLegacyVersionedFile(entry);
       if (parsed) {
-        const sourcePath = path.join(dir, entry);
+        const sourcePath = resolveInside(dir, entry);
         const targetPath = parsed.kind === "js"
           ? getVersionedFuncPath(ref, parsed.slug, parsed.version)
           : getVersionedSrcPath(ref, parsed.slug, parsed.version);
@@ -284,14 +318,14 @@ export async function migrateLegacyVersionArtifacts(): Promise<{ moved: number }
       const parsedSourceDir = parseLegacyVersionedSourceDir(entry);
       if (!parsedSourceDir) continue;
 
-      const sourceDir = path.join(dir, entry);
-      const targetDir = path.join(
+      const sourceDir = resolveInside(dir, entry);
+      const targetDir = assertInside(dir, path.join(
         dir,
         VERSIONED_DIR,
-        parsedSourceDir.slug,
+        validateSlug(parsedSourceDir.slug),
         parsedSourceDir.version,
         "src",
-      );
+      ));
 
       await fs.mkdir(path.dirname(targetDir), { recursive: true });
       await fs.rm(targetDir, { recursive: true, force: true }).catch(() => {});
@@ -362,19 +396,20 @@ export const edgeFunctionService = {
       }
 
       const dir = getFuncDir(ref);
+      const safeSlug = validateSlug(slug);
       await fs.mkdir(dir, { recursive: true });
-      const version = await computeNextFunctionVersion(ref, slug);
-      await fs.mkdir(path.dirname(getVersionedFuncPath(ref, slug, version)), {
+      const version = await computeNextFunctionVersion(ref, safeSlug);
+      await fs.mkdir(path.dirname(getVersionedFuncPath(ref, safeSlug, version)), {
         recursive: true,
       });
 
       // 1. Preserve source for debugging
-      const srcPath = getSrcPath(ref, slug);
+      const srcPath = getSrcPath(ref, safeSlug);
       await Bun.write(srcPath, code);
-      await Bun.write(getVersionedSrcPath(ref, slug, version), code);
+      await Bun.write(getVersionedSrcPath(ref, safeSlug, version), code);
 
       // 2. Bundle with Bun.build()
-      const bundled = await bundleFunction(srcPath, dir, slug, minify);
+      const bundled = await bundleFunction(srcPath, dir, safeSlug, minify);
       if (!bundled) {
         // Fallback: if bundling fails (e.g., missing relative imports),
         // write the raw code directly as .js so at least simple functions work
@@ -382,11 +417,11 @@ export const edgeFunctionService = {
           `[EdgeFunction] Bundle failed, falling back to raw deploy`,
           { ref, slug },
         );
-        await Bun.write(getFuncPath(ref, slug), code);
-        await Bun.write(getVersionedFuncPath(ref, slug, version), code);
+        await Bun.write(getFuncPath(ref, safeSlug), code);
+        await Bun.write(getVersionedFuncPath(ref, safeSlug, version), code);
       } else {
-        await Bun.write(getFuncPath(ref, slug), bundled);
-        await Bun.write(getVersionedFuncPath(ref, slug, version), bundled);
+        await Bun.write(getFuncPath(ref, safeSlug), bundled);
+        await Bun.write(getVersionedFuncPath(ref, safeSlug, version), bundled);
       }
 
       // 3. Invalidate runtime caches
@@ -407,7 +442,7 @@ export const edgeFunctionService = {
         });
       }
 
-      await this.updateConfig(ref, slug, { version });
+      await this.updateConfig(ref, safeSlug, { version });
 
       logger.info(
         `[EdgeFunction] Deployed ${slug} for ${ref} (bundled=${!!bundled}, minify=${minify}, version=${version})`,
@@ -475,14 +510,16 @@ export const edgeFunctionService = {
       }
 
       const dir = getFuncDir(ref);
-      const version = await computeNextFunctionVersion(ref, slug);
+      const safeSlug = validateSlug(slug);
+      const version = await computeNextFunctionVersion(ref, safeSlug);
       // Use a staging subdirectory to write the full file tree
-      const stageDir = path.join(dir, `.staging-${slug}`);
+      const stageDir = assertInside(dir, path.join(dir, `.staging-${safeSlug}`));
+      await fs.rm(stageDir, { recursive: true, force: true }).catch(() => {});
       await fs.mkdir(stageDir, { recursive: true });
 
       // 1. Write all files to staging
       for (const [relPath, content] of Object.entries(files)) {
-        const filePath = path.join(stageDir, relPath);
+        const filePath = resolveInside(stageDir, relPath);
         await fs.mkdir(path.dirname(filePath), { recursive: true });
         await Bun.write(filePath, content);
       }
@@ -496,7 +533,7 @@ export const edgeFunctionService = {
         "deno.jsonc",
       ];
       for (const candidate of importMapCandidates) {
-        const candidatePath = path.join(stageDir, candidate);
+        const candidatePath = resolveInside(stageDir, candidate);
         try {
           await fs.access(candidatePath);
           importMapPath = candidatePath;
@@ -507,7 +544,7 @@ export const edgeFunctionService = {
       }
 
       // 3. Bundle from entrypoint
-      const entrypointPath = path.join(stageDir, entrypoint);
+      const entrypointPath = resolveInside(stageDir, entrypoint);
       const bundled = await bundleFunction(
         entrypointPath,
         dir,
@@ -528,10 +565,10 @@ export const edgeFunctionService = {
       }
 
       // 3. Preserve the source tree (rename staging → .src-{slug})
-      const srcDir = path.join(dir, `.src-${slug}`);
+      const srcDir = assertInside(dir, path.join(dir, `.src-${safeSlug}`));
       await fs.rm(srcDir, { recursive: true, force: true }).catch(() => {});
       await fs.rename(stageDir, srcDir);
-      const versionedSrcDir = path.join(dir, VERSIONED_DIR, slug, version, "src");
+      const versionedSrcDir = assertInside(dir, path.join(dir, VERSIONED_DIR, safeSlug, version, "src"));
       await fs.rm(versionedSrcDir, {
         recursive: true,
         force: true,
@@ -691,7 +728,7 @@ export const edgeFunctionService = {
       versions.map(async (version) => {
         const bundlePath = getVersionedFuncPath(ref, slug, version);
         const sourcePath = getVersionedSrcPath(ref, slug, version);
-        const sourceDirPath = path.join(getFuncDir(ref), VERSIONED_DIR, slug, version, "src");
+        const sourceDirPath = assertInside(getFuncDir(ref), path.join(getFuncDir(ref), VERSIONED_DIR, validateSlug(slug), version, "src"));
         const [hasBundle, hasSource, hasSourceDir] = await Promise.all([
           fileExists(bundlePath),
           fileExists(sourcePath),
@@ -755,17 +792,18 @@ export const edgeFunctionService = {
     if (bundleCode == null) return null;
 
     const dir = getFuncDir(ref);
+    const safeSlug = validateSlug(slug);
     await fs.mkdir(dir, { recursive: true });
-    await Bun.write(getFuncPath(ref, slug), bundleCode);
+    await Bun.write(getFuncPath(ref, safeSlug), bundleCode);
 
     const sourceCode =
       detail.source_code ?? (detail.has_source ? await readVersionedFunctionSource(ref, slug, version) : null);
     if (sourceCode != null) {
-      await Bun.write(getSrcPath(ref, slug), sourceCode);
+      await Bun.write(getSrcPath(ref, safeSlug), sourceCode);
     }
 
     if (detail.has_source_dir && detail.source_dir_path) {
-      const srcDir = path.join(dir, `.src-${slug}`);
+      const srcDir = assertInside(dir, path.join(dir, `.src-${safeSlug}`));
       await fs.rm(srcDir, { recursive: true, force: true }).catch(() => {});
       await fs.cp(detail.source_dir_path, srcDir, { recursive: true });
     }
@@ -829,11 +867,12 @@ export const edgeFunctionService = {
       // Remove bundled output
       await fs.unlink(getFuncPath(ref, slug)).catch(() => {});
       const dir = getFuncDir(ref);
+      const safeSlug = validateSlug(slug);
       const entries = await fs.readdir(dir).catch(() => []);
-      const versions = await listVersionDirectories(ref, slug);
+      const versions = await listVersionDirectories(ref, safeSlug);
       await Promise.all(
         versions.map((version) =>
-          fs.rm(path.join(dir, VERSIONED_DIR, slug, version), {
+          fs.rm(assertInside(dir, path.join(dir, VERSIONED_DIR, safeSlug, version)), {
             recursive: true,
             force: true,
           }).catch(() => {}),
@@ -841,29 +880,29 @@ export const edgeFunctionService = {
       );
       await Promise.all(
         entries
-          .filter((entry) => entry.startsWith(`${slug}.v`) && (entry.endsWith(".js") || entry.endsWith(".src.ts")))
-          .map((entry) => fs.unlink(path.join(dir, entry)).catch(() => {})),
+          .filter((entry) => entry.startsWith(`${safeSlug}.v`) && (entry.endsWith(".js") || entry.endsWith(".src.ts")))
+          .map((entry) => fs.unlink(resolveInside(dir, entry)).catch(() => {})),
       );
       // Remove source file
       await fs.unlink(getSrcPath(ref, slug)).catch(() => {});
       // Remove source directory (bundle deploys)
       await fs
-        .rm(path.join(getFuncDir(ref), `.src-${slug}`), {
+        .rm(assertInside(dir, path.join(dir, `.src-${safeSlug}`)), {
           recursive: true,
           force: true,
         })
         .catch(() => {});
       await Promise.all(
         entries
-          .filter((entry) => entry.startsWith(`.src-${slug}-v`))
+          .filter((entry) => entry.startsWith(`.src-${safeSlug}-v`))
           .map((entry) =>
-            fs.rm(path.join(getFuncDir(ref), entry), {
+            fs.rm(resolveInside(dir, entry), {
               recursive: true,
               force: true,
             }).catch(() => {}),
           ),
       );
-      await fs.rm(path.join(getFuncDir(ref), VERSIONED_DIR, slug), {
+      await fs.rm(assertInside(dir, path.join(dir, VERSIONED_DIR, safeSlug)), {
         recursive: true,
         force: true,
       }).catch(() => {});

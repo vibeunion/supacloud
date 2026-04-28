@@ -1,6 +1,7 @@
 import { config } from "../config";
 import { sql as metaSql } from "../db";
 import { verifyMcpToken } from "../mcp/token";
+import { timingSafeEqual } from "crypto";
 import {
   extractProjectRefCandidates,
   extractProjectRefFromPath,
@@ -58,7 +59,12 @@ async function verifyProjectJwt(
   }
 }
 
-export async function checkAuth(request: Request): Promise<{ status: number; body: { error: string } } | undefined> {
+export type AuthContext =
+  | { role: "master" }
+  | { role: "admin" }
+  | { role: "project"; ref: string };
+
+export async function getAuthContext(request: Request): Promise<AuthContext | { status: number; body: { error: string } }> {
   const authorization = request.headers.get("authorization");
 
   if (!authorization) {
@@ -69,12 +75,20 @@ export async function checkAuth(request: Request): Promise<{ status: number; bod
     return { status: 401, body: { error: "Invalid Authorization format" } };
   }
 
-  const token = authorization.slice(7);
+  const token = authorization.slice(7).trim();
   const url = new URL(request.url);
   const scopedRef = extractProjectRefFromPath(url.pathname);
 
-  if (token === config.masterToken) {
-    return undefined;
+  if (!token) {
+    return { status: 401, body: { error: "Invalid token" } };
+  }
+
+  if (config.masterToken) {
+    const tokenBuf = Buffer.from(token, "utf8");
+    const masterBuf = Buffer.from(config.masterToken, "utf8");
+    if (tokenBuf.length === masterBuf.length && timingSafeEqual(tokenBuf, masterBuf)) {
+      return { role: "master" };
+    }
   }
 
   try {
@@ -90,7 +104,7 @@ export async function checkAuth(request: Request): Promise<{ status: number; bod
         const sigBuf = Buffer.from(sigHex, 'hex');
         const expBuf = Buffer.from(expected, 'hex');
         if (sigBuf.length === expBuf.length && crypto.timingSafeEqual(sigBuf, expBuf)) {
-           return undefined;
+           return { role: "admin" };
         }
       }
     }
@@ -130,15 +144,28 @@ export async function checkAuth(request: Request): Promise<{ status: number; bod
   }
 
   if (role === "admin") {
-    return undefined;
+    return { role: "admin" };
   }
 
   if (role === "project" && ref) {
-    if (!url.pathname.startsWith(`/v1/projects/${ref}`)) {
+    const pathRef = extractProjectRefFromPath(url.pathname);
+    if (pathRef !== ref) {
       return { status: 403, body: { error: `Token scoped strictly to project ${ref}, cannot access ${url.pathname}` } };
     }
-    return undefined;
+    return { role: "project", ref };
   }
 
   return { status: 401, body: { error: "Invalid token" } };
+}
+
+export async function checkAuth(request: Request): Promise<{ status: number; body: { error: string } } | undefined> {
+  const auth = await getAuthContext(request);
+  return "status" in auth ? auth : undefined;
+}
+
+export async function requireAdminAuth(request: Request): Promise<{ status: number; body: { error: string } } | undefined> {
+  const auth = await getAuthContext(request);
+  if ("status" in auth) return auth;
+  if (auth.role === "master" || auth.role === "admin") return undefined;
+  return { status: 403, body: { error: "Admin privileges required" } };
 }
