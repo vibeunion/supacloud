@@ -80,6 +80,8 @@ while IFS=$'\t' read -r db_name db_user; do
     -v adminuser="$admin_user" <<'SQL'
 REVOKE CONNECT ON DATABASE :"dbname" FROM PUBLIC;
 GRANT CONNECT, TEMPORARY ON DATABASE :"dbname" TO :"dbuser";
+GRANT CONNECT, TEMPORARY ON DATABASE :"dbname" TO supabase_auth_admin;
+GRANT CONNECT, TEMPORARY ON DATABASE :"dbname" TO supabase_admin;
 GRANT ALL PRIVILEGES ON DATABASE :"dbname" TO :"adminuser";
 SQL
 

@@ -47,6 +47,8 @@ ALTER TABLE project_secrets ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFA
 -- Example:
 --   REVOKE CONNECT ON DATABASE "supa_projectref" FROM PUBLIC;
 --   GRANT CONNECT, TEMPORARY ON DATABASE "supa_projectref" TO "role_projectref";
+--   GRANT CONNECT, TEMPORARY ON DATABASE "supa_projectref" TO supabase_auth_admin;
+--   GRANT CONNECT, TEMPORARY ON DATABASE "supa_projectref" TO supabase_admin;
 --   GRANT ALL PRIVILEGES ON DATABASE "supa_projectref" TO postgres;
 --
 -- Run inside the tenant database:
@@ -72,6 +74,8 @@ ALTER TABLE project_secrets ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFA
 --   db_user,
 --   format('REVOKE CONNECT ON DATABASE %I FROM PUBLIC;', db_name) AS revoke_db_connect,
 --   format('GRANT CONNECT, TEMPORARY ON DATABASE %I TO %I;', db_name, db_user) AS grant_db_connect,
+--   format('GRANT CONNECT, TEMPORARY ON DATABASE %I TO supabase_auth_admin;', db_name) AS grant_auth_connect,
+--   format('GRANT CONNECT, TEMPORARY ON DATABASE %I TO supabase_admin;', db_name) AS grant_supabase_admin_connect,
 --   format('GRANT ALL PRIVILEGES ON DATABASE %I TO postgres;', db_name) AS grant_admin_db
 -- FROM projects
 -- WHERE deleted_at IS NULL
