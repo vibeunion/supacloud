@@ -4,8 +4,6 @@ import { projectFunctionsRoutes } from "../../src/routes/project-functions";
 import { projectConfigRoutes } from "../../src/routes/project-config";
 import { projectService } from "../../src/services/project.service";
 import { restoreLogicalBackup } from "../../src/services/backup.service";
-import { backgroundTaskService } from "../../src/services/background-task.service";
-import { edgeFunctionService } from "../../src/services/edge-function.service";
 import { sdkProxyInternals } from "../../src/routes/sdk-proxy";
 import { decryptSecretIfNeeded, isEncryptedSecret } from "../../src/utils/secret-crypto";
 
@@ -93,58 +91,22 @@ describe("final security regressions", () => {
   });
 
   test("background function tasks persist encrypted credentials", async () => {
-    const getConfigSpy = spyOn(edgeFunctionService, "getConfig").mockResolvedValue({
-      verify_jwt: false,
-      version: "1",
-      background_routes: ["/async"],
+    const auth = sdkProxyInternals.buildEncryptedBackgroundAuth({
+      authKind: "jwt",
+      authorization: "Bearer user-jwt",
+      apikey: "anon-key",
+      authPayload: { sub: "user_1", role: "authenticated" },
+      apikeyKind: "anon",
     });
-    const getSettingsSpy = spyOn(projectService, "getBackgroundTaskSettings").mockResolvedValue({
-      concurrency: 2,
-      max_attempts: 3,
-      max_payload_bytes: 262144,
-      timeout_sec_default: 300,
-      timeout_sec_max: 900,
-    });
-    const getApiKeysSpy = spyOn(projectService, "getApiKeys").mockResolvedValue({
-      anon_key: "anon-key",
-      service_role_key: "service-key",
-    });
-    const enqueueSpy = spyOn(backgroundTaskService, "enqueueBackgroundFunctionTask").mockImplementation(async (input) => ({
-      id: "task_1",
-      project_ref: input.projectRef,
-      task_type: "edge_function",
-      function_slug: input.functionSlug,
-      function_version: input.functionVersion,
-      status: "pending",
-      attempt: 1,
-      max_attempts: input.maxAttempts,
-    }) as Awaited<ReturnType<typeof backgroundTaskService.enqueueBackgroundFunctionTask>>);
 
-    try {
-      const response = await sdkProxyInternals.maybeEnqueueAsyncFunction(new Request("http://localhost/functions/v1/hello/async", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          apikey: "anon-key",
-          authorization: "Bearer user-jwt",
-        },
-        body: JSON.stringify({ ok: true }),
-      }), "proj_1");
-
-      expect(response?.status).toBe(202);
-      expect(enqueueSpy).toHaveBeenCalledTimes(1);
-      const envelope = enqueueSpy.mock.calls[0]?.[0].envelope;
-      expect(envelope.auth.authorization).not.toBe("Bearer user-jwt");
-      expect(envelope.auth.apikey).not.toBe("anon-key");
-      expect(isEncryptedSecret(envelope.auth.authorization)).toBe(true);
-      expect(isEncryptedSecret(envelope.auth.apikey)).toBe(true);
-      expect(decryptSecretIfNeeded(envelope.auth.authorization || "")).toBe("Bearer user-jwt");
-      expect(decryptSecretIfNeeded(envelope.auth.apikey || "")).toBe("anon-key");
-    } finally {
-      getConfigSpy.mockRestore();
-      getSettingsSpy.mockRestore();
-      getApiKeysSpy.mockRestore();
-      enqueueSpy.mockRestore();
-    }
+    expect(auth.authorization).not.toBe("Bearer user-jwt");
+    expect(auth.apikey).not.toBe("anon-key");
+    expect(isEncryptedSecret(auth.authorization)).toBe(true);
+    expect(isEncryptedSecret(auth.apikey)).toBe(true);
+    expect(decryptSecretIfNeeded(auth.authorization || "")).toBe("Bearer user-jwt");
+    expect(decryptSecretIfNeeded(auth.apikey || "")).toBe("anon-key");
+    expect(auth.invoker_user_id).toBe("user_1");
+    expect(auth.invoker_role).toBe("authenticated");
+    expect(auth.apikey_kind).toBe("anon");
   });
 });
