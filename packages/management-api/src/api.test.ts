@@ -1,9 +1,5 @@
 import { describe, it, expect, beforeAll, mock } from "bun:test";
 
-mock.module("../src/utils/retry", () => ({
-    withRetry: (name: string, fn: () => unknown) => fn(),
-}));
-
 const mockSql = mock((strings: string | TemplateStringsArray) => {
     const sqlStr = Array.isArray(strings) ? strings.join("") : String(strings);
     if (sqlStr.toLowerCase().includes("organizations")) {
