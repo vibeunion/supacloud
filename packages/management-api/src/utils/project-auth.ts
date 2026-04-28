@@ -1,3 +1,14 @@
+import { sql as metaSql } from "../db";
+
+export async function resolveProjectRefFromApiKey(key: string): Promise<string | null> {
+  if (!key) return null;
+  try {
+    const rows = await metaSql`SELECT ref FROM projects WHERE anon_key = ${key} OR service_role_key = ${key} LIMIT 1`;
+    if (rows.length > 0) return String(rows[0].ref);
+  } catch {}
+  return null;
+}
+
 export function extractProjectRefFromPath(pathname: string): string | null {
   const match = pathname.match(/^\/v1\/projects\/([^/]+)(?:\/|$)/);
   return match?.[1] || null;

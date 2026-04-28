@@ -131,8 +131,14 @@ function generateChinaOAuthFunction(provider: ChinaOAuthProvider, appId: string,
 import { SQL } from "bun"
 
 const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Vary": "Origin",
+}
+
+function corsOriginHeader(req: Request): Record<string, string> {
+  const origin = req.headers.get("origin") || "";
+  if (!origin) return {};
+  return { "Access-Control-Allow-Origin": origin, "Vary": "Origin" };
 }
 
 const ${providerUpper}_APP_ID = "${appId}"
@@ -150,7 +156,7 @@ Deno.serve(async (req) => {
     if (!code) {
       const state = url.searchParams.get("state") || Math.random().toString(36).substring(7)
       const authUrl = \`${providerInfo.oauthUrl}/authorize?client_id=\${${providerUpper}_APP_ID}&redirect_uri=\${encodeURIComponent(REDIRECT_URI)}&response_type=code&state=\${state}\`
-      return new Response(JSON.stringify({ auth_url: authUrl }), { headers: { ...corsHeaders, "Content-Type": "application/json" } })
+      return new Response(JSON.stringify({ auth_url: authUrl }), { headers: { ...corsHeaders, ...corsOriginHeader(req), "Content-Type": "application/json" } })
     }
 
     const tokenUrl = \`${providerInfo.oauthUrl}/token?grant_type=authorization_code&client_id=\${${providerUpper}_APP_ID}&client_secret=\${${providerUpper}_APP_SECRET}&code=\${code}&redirect_uri=\${encodeURIComponent(REDIRECT_URI)}\`
@@ -229,10 +235,10 @@ Deno.serve(async (req) => {
     if (tokenData.access_token) (finalSession as any).provider_token = tokenData.access_token;
     if (tokenData.refresh_token) (finalSession as any).provider_refresh_token = tokenData.refresh_token;
 
-    return new Response(JSON.stringify(finalSession), { headers: { ...corsHeaders, "Content-Type": "application/json" } })
+    return new Response(JSON.stringify(finalSession), { headers: { ...corsHeaders, ...corsOriginHeader(req), "Content-Type": "application/json" } })
   } catch (error: unknown) {
     console.error("${providerInfo.name} Login Error:", error instanceof Error ? error.message : String(error))
-    return new Response(JSON.stringify({ data: { session: null, user: null }, error: (error instanceof Error ? error.message : String(error)) }), { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 })
+    return new Response(JSON.stringify({ data: { session: null, user: null }, error: (error instanceof Error ? error.message : String(error)) }), { headers: { ...corsHeaders, ...corsOriginHeader(req), "Content-Type": "application/json" }, status: 400 })
   }
 })`;
 }

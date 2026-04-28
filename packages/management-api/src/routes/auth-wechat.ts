@@ -220,8 +220,15 @@ function generateWeChatMiniProgramLoginFunction(appId: string, appSecret: string
 import { SQL } from "bun"
 
 const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Origin": "",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Vary": "Origin",
+}
+
+function corsOriginHeader(req: Request): Record<string, string> {
+  const origin = req.headers.get("origin") || "";
+  if (!origin) return {};
+  return { "Access-Control-Allow-Origin": origin, "Vary": "Origin" };
 }
 
 Deno.serve(async (req) => {
@@ -304,10 +311,10 @@ Deno.serve(async (req) => {
     // Embed native OAuth provider tokens to complete the session payload matching Official Supabase
     if (session_key) (finalSession as any).provider_token = session_key;
 
-    return new Response(JSON.stringify(finalSession), { headers: { ...corsHeaders, "Content-Type": "application/json" } })
+    return new Response(JSON.stringify(finalSession), { headers: { ...corsHeaders, ...corsOriginHeader(req), "Content-Type": "application/json" } })
   } catch (error: unknown) {
     console.error("WeChat MiniProgram Login Error:", error instanceof Error ? error.message : String(error))
-    return new Response(JSON.stringify({ data: { session: null, user: null }, error: (error instanceof Error ? error.message : String(error)) }), { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 })
+    return new Response(JSON.stringify({ data: { session: null, user: null }, error: (error instanceof Error ? error.message : String(error)) }), { headers: { ...corsHeaders, ...corsOriginHeader(req), "Content-Type": "application/json" }, status: 400 })
   }
 })`;
 }
@@ -317,8 +324,14 @@ function generateWeChatMPLoginFunction(appId: string, appSecret: string, redirec
 import { SQL } from "bun"
 
 const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Vary": "Origin",
+}
+
+function corsOriginHeader(req: Request): Record<string, string> {
+  const origin = req.headers.get("origin") || "";
+  if (!origin) return {};
+  return { "Access-Control-Allow-Origin": origin, "Vary": "Origin" };
 }
 
 const WECHAT_MP_APP_ID = "${appId}"
@@ -336,7 +349,7 @@ Deno.serve(async (req) => {
       const redirectUri = "${redirectUri || ''}"
       const state = url.searchParams.get("state") || Math.random().toString(36).substring(7)
       const authUrl = \`https://open.weixin.qq.com/connect/oauth2/authorize?appid=\${WECHAT_MP_APP_ID}&redirect_uri=\${encodeURIComponent(redirectUri)}&response_type=code&scope=snsapi_userinfo&state=\${state}#wechat_redirect\`
-      return new Response(JSON.stringify({ auth_url: authUrl }), { headers: { ...corsHeaders, "Content-Type": "application/json" } })
+      return new Response(JSON.stringify({ auth_url: authUrl }), { headers: { ...corsHeaders, ...corsOriginHeader(req), "Content-Type": "application/json" } })
     }
 
     const tokenUrl = \`https://api.weixin.qq.com/sns/oauth2/access_token?appid=\${WECHAT_MP_APP_ID}&secret=\${WECHAT_MP_APP_SECRET}&code=\${code}&grant_type=authorization_code\`
@@ -417,10 +430,10 @@ Deno.serve(async (req) => {
     if (tokenData.access_token) (finalSession as any).provider_token = tokenData.access_token;
     if (tokenData.refresh_token) (finalSession as any).provider_refresh_token = tokenData.refresh_token;
 
-    return new Response(JSON.stringify(finalSession), { headers: { ...corsHeaders, "Content-Type": "application/json" } })
+    return new Response(JSON.stringify(finalSession), { headers: { ...corsHeaders, ...corsOriginHeader(req), "Content-Type": "application/json" } })
   } catch (error: unknown) {
     console.error("WeChat MP Login Error:", error instanceof Error ? error.message : String(error))
-    return new Response(JSON.stringify({ data: { session: null, user: null }, error: (error instanceof Error ? error.message : String(error)) }), { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 })
+    return new Response(JSON.stringify({ data: { session: null, user: null }, error: (error instanceof Error ? error.message : String(error)) }), { headers: { ...corsHeaders, ...corsOriginHeader(req), "Content-Type": "application/json" }, status: 400 })
   }
 })`;
 }

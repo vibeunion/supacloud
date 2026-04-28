@@ -68,6 +68,11 @@ def main() -> None:
         help="Management API master token",
     )
     parser.add_argument(
+        "--secrets-encryption-key",
+        default=secrets.token_urlsafe(32),
+        help="Management API secret encryption key",
+    )
+    parser.add_argument(
         "--timezone",
         default="Asia/Shanghai",
         help="Container timezone",
@@ -108,6 +113,7 @@ def main() -> None:
     print(f"ANON_KEY={anon_key}")
     print(f"SERVICE_ROLE_KEY={service_role_key}")
     print(f"MASTER_TOKEN={args.master_token}")
+    print(f"SECRETS_ENCRYPTION_KEY={args.secrets_encryption_key}")
     print(f"PUBLIC_URL={args.public_url}")
     print(f"STUDIO_URL={args.studio_url}")
     print(f"BASE_DOMAIN={derive_base_domain(args.public_url)}")

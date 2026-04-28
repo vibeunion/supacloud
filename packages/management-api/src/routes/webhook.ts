@@ -2,6 +2,14 @@ import { Elysia, t, type Static, status } from "elysia";
 import { logger } from "../utils/logger";
 import { frontendService } from "../services/frontend.service";
 import type { FrontendDeployment } from "../types/frontend";
+import { timingSafeEqual } from "crypto";
+
+function safeTokenEqual(a: string, b: string): boolean {
+  const bufA = Buffer.from(a, "utf8");
+  const bufB = Buffer.from(b, "utf8");
+  if (bufA.length !== bufB.length) return false;
+  return timingSafeEqual(bufA, bufB);
+}
 
 // Shared TypeBox schema for Git webhook payloads (GitHub/GitLab/Gitee/GitCode)
 const WebhookBodySchema = t.Object({
@@ -104,7 +112,10 @@ async function verifyGitHubSignature(
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("")}`;
 
-  return signature === expectedSignature;
+  const sigBuf = Buffer.from(signature, "utf8");
+  const expBuf = Buffer.from(expectedSignature, "utf8");
+  if (sigBuf.length !== expBuf.length) return false;
+  return timingSafeEqual(sigBuf, expBuf);
 }
 
 export const webhookRoutes = new Elysia({ prefix: "/v1/webhooks" })
@@ -119,6 +130,9 @@ export const webhookRoutes = new Elysia({ prefix: "/v1/webhooks" })
       }
 
       const payload = body as GitHubPushEvent;
+      if (!payload.ref || !payload.repository?.full_name || !payload.repository?.clone_url) {
+        return status(400, { message: "Invalid webhook payload", code: "400" });
+      }
       const branch = payload.ref.replace("refs/heads/", "");
       const commitSha = payload.after;
       const commitMessage = payload.commits?.[0]?.message || "";
@@ -144,9 +158,8 @@ export const webhookRoutes = new Elysia({ prefix: "/v1/webhooks" })
           const tokens = deployment.deploy_tokens || [];
           
           if (tokens.length === 0) {
-            // If no tokens exist, we might allow it (or reject depending on strictness). 
-            // For security, if tokens exist, it must match. If none exist, allow (backwards compatibility).
-            isValidSignature = true;
+            results.push({ deployment_id: deployment.id, success: false, error: "Webhook secret is required" });
+            continue;
           } else {
             const payloadStr = JSON.stringify(body);
             const safeSignature = signature || "";
@@ -449,15 +462,17 @@ async function triggerDeployForGit(
   const results = [];
   for (const deployment of deployments) {
     try {
-      if (token && deployment.deploy_tokens && deployment.deploy_tokens.length > 0) {
-        const isValid = deployment.deploy_tokens.some(t => t.token === token);
-        if (!isValid) {
-          results.push({ deployment_id: deployment.id, project_ref: deployment.project_ref, success: false, error: "Invalid webhook token" });
-          continue;
-        }
-      } else if (deployment.deploy_tokens && deployment.deploy_tokens.length > 0 && !token) {
-        // If deployment has tokens configured but no token was provided
+      if (!deployment.deploy_tokens || deployment.deploy_tokens.length === 0) {
+        results.push({ deployment_id: deployment.id, project_ref: deployment.project_ref, success: false, error: "Webhook secret is required" });
+        continue;
+      }
+      if (!token) {
         results.push({ deployment_id: deployment.id, project_ref: deployment.project_ref, success: false, error: "Missing webhook token" });
+        continue;
+      }
+      const isValid = deployment.deploy_tokens.some(t => safeTokenEqual(t.token, token!));
+      if (!isValid) {
+        results.push({ deployment_id: deployment.id, project_ref: deployment.project_ref, success: false, error: "Invalid webhook token" });
         continue;
       }
 

@@ -1,6 +1,6 @@
 import { describe, expect, spyOn, test } from "bun:test";
 import { Elysia } from "elysia";
-import { sdkProxyRoutes, setSdkProxyFetchForTests } from "../../src/routes/sdk-proxy";
+import { sdkProxyInternals, sdkProxyRoutes, setSdkProxyFetchForTests } from "../../src/routes/sdk-proxy";
 import * as dbModule from "../../src/db";
 import { projectService } from "../../src/services/project.service";
 import { edgeFunctionService } from "../../src/services/edge-function.service";
@@ -52,6 +52,12 @@ async function withSdkProxyTestContext(
     const calls: FetchCall[] = [];
     const restoredSpies: Array<{ mockRestore: () => void }> = [];
 
+    const resolveKeySpy = spyOn(sdkProxyInternals, "resolveProjectRefFromApiKey").mockImplementation((key: string) => {
+      if (!key || key === "anon-from-other-project") return Promise.resolve(null);
+      return Promise.resolve("proj_1");
+    });
+    restoredSpies.push(resolveKeySpy);
+
     setSdkProxyFetchForTests(((input: string | URL | Request, init?: RequestInit & { duplex?: "half" }) => {
       const url = typeof input === "string"
         ? input
@@ -89,6 +95,7 @@ describe("sdkProxyRoutes functions proxy", () => {
         headers: {
           "Content-Type": "application/json",
           "x-project-ref": "proj_1",
+          apikey: "anon",
         },
         body: JSON.stringify({ ping: true }),
       });
@@ -106,6 +113,7 @@ describe("sdkProxyRoutes functions proxy", () => {
         method: "GET",
         headers: {
           "x-project-ref": "proj_1",
+          apikey: "anon",
           authorization: "Bearer token",
         },
       });
@@ -125,6 +133,7 @@ describe("sdkProxyRoutes functions proxy", () => {
           "access-control-request-method": "POST",
           "access-control-request-headers": "authorization, content-type, x-supacloud-async",
           "x-project-ref": "proj_1",
+          apikey: "anon",
         },
       });
 
@@ -207,6 +216,7 @@ describe("sdkProxyRoutes functions proxy", () => {
         method: "GET",
         headers: {
           "x-project-ref": "proj_1",
+          apikey: "anon",
         },
       });
 
@@ -239,6 +249,7 @@ describe("sdkProxyRoutes functions proxy", () => {
         method: "GET",
         headers: {
           "x-forwarded-host": "api.aorist.net",
+          apikey: "anon",
         },
       });
 
@@ -292,7 +303,8 @@ describe("sdkProxyRoutes functions proxy", () => {
         method: "GET",
         headers: {
           "x-project-ref": "proj_1",
-          "x-forwarded-host": "evil.example.com",
+          apikey: "anon",
+          "x-forwarded-host": "proj_1.localhost",
           "x-forwarded-proto": "http",
           "x-forwarded-for": "203.0.113.10",
           "x-real-ip": "203.0.113.11",
@@ -341,6 +353,7 @@ describe("sdkProxyRoutes functions proxy", () => {
           method: "GET",
           headers: {
             "x-project-ref": "proj_1",
+            apikey: "anon",
           },
         });
 

@@ -33,6 +33,7 @@ export const sql = new SQL({
 const MAX_CACHED_CONNECTIONS = 50;
 
 const projectConnections: Map<string, { sql: SQL; lastUsed: number }> = new Map();
+const projectRoleConnections: Map<string, { sql: SQL; lastUsed: number }> = new Map();
 
 const IDLE_SWEEP_INTERVAL = 60_000;
 const MAX_CONNECTION_AGE = 30 * 60_000;
@@ -48,7 +49,39 @@ setInterval(() => {
       projectConnections.delete(dbName);
     }
   }
+  for (const [key, cached] of projectRoleConnections.entries()) {
+    if (now - cached.lastUsed > MAX_CONNECTION_AGE) {
+      logger.debug(`[DB Pool] Closing idle role connection for ${key} (age: ${Math.round((now - cached.lastUsed) / 60000)}min)`);
+      cached.sql.close().catch(e =>
+        logger.error(`Failed to close idle role connection ${key}`, { error: e instanceof Error ? e.message : String(e) })
+      );
+      projectRoleConnections.delete(key);
+    }
+  }
 }, IDLE_SWEEP_INTERVAL).unref();
+
+function evictOldestConnection(connections: Map<string, { sql: SQL; lastUsed: number }>, label: string) {
+  if (connections.size < MAX_CACHED_CONNECTIONS) return;
+
+  let oldestKey = "";
+  let oldestTime = Infinity;
+
+  for (const [key, value] of connections.entries()) {
+    if (value.lastUsed < oldestTime) {
+      oldestTime = value.lastUsed;
+      oldestKey = key;
+    }
+  }
+
+  if (oldestKey) {
+    const conn = connections.get(oldestKey);
+    if (conn) {
+      logger.debug(`Evicting ${label} connection cache for ${oldestKey} due to limit.`);
+      conn.sql.close().catch(e => logger.error(`Failed to close evicted ${label} connection ${oldestKey}`, { error: e instanceof Error ? e.message : String(e) }));
+    }
+    connections.delete(oldestKey);
+  }
+}
 
 export function getProjectDb(dbName: string): SQL {
   const cached = projectConnections.get(dbName);
@@ -57,26 +90,7 @@ export function getProjectDb(dbName: string): SQL {
     return cached.sql;
   }
 
-  if (projectConnections.size >= MAX_CACHED_CONNECTIONS) {
-    let oldestDbName = "";
-    let oldestTime = Infinity;
-
-    for (const [key, value] of projectConnections.entries()) {
-      if (value.lastUsed < oldestTime) {
-        oldestTime = value.lastUsed;
-        oldestDbName = key;
-      }
-    }
-
-    if (oldestDbName) {
-      const conn = projectConnections.get(oldestDbName);
-      if (conn) {
-        logger.debug(`Evicting project connection cache for ${oldestDbName} due to limit.`);
-        conn.sql.close().catch(e => logger.error(`Failed to close evicted connection ${oldestDbName}`, { error: e instanceof Error ? e.message : String(e) }));
-      }
-      projectConnections.delete(oldestDbName);
-    }
-  }
+  evictOldestConnection(projectConnections, "project admin");
 
   const projectSql = new SQL({
     hostname: dbConfig.hostname,
@@ -90,6 +104,31 @@ export function getProjectDb(dbName: string): SQL {
   });
 
   projectConnections.set(dbName, { sql: projectSql, lastUsed: Date.now() });
+  return projectSql;
+}
+
+export function getProjectRoleDb(dbName: string, username: string, password: string): SQL {
+  const key = `${dbName}:${username}`;
+  const cached = projectRoleConnections.get(key);
+  if (cached) {
+    cached.lastUsed = Date.now();
+    return cached.sql;
+  }
+
+  evictOldestConnection(projectRoleConnections, "project role");
+
+  const projectSql = new SQL({
+    hostname: dbConfig.hostname,
+    port: dbConfig.port,
+    database: dbName,
+    username,
+    password,
+    max: 5,
+    idleTimeout: 30,
+    connectTimeout: 5000,
+  });
+
+  projectRoleConnections.set(key, { sql: projectSql, lastUsed: Date.now() });
   return projectSql;
 }
 
@@ -149,6 +188,17 @@ export async function removeProjectDbCache(dbName: string) {
     }
     projectConnections.delete(dbName);
   }
+
+  for (const [key, roleCached] of projectRoleConnections.entries()) {
+    if (key.startsWith(`${dbName}:`)) {
+      try {
+        await roleCached.sql.close();
+      } catch (e: unknown) {
+        logger.error(`Failed to close role connection for ${key} during cache removal`, e as Error);
+      }
+      projectRoleConnections.delete(key);
+    }
+  }
 }
 
 export class PgError extends Error {
@@ -164,34 +214,72 @@ export class PgError extends Error {
   }
 }
 
+export type SqlExecutionMode = "read" | "migration" | "admin";
+
+const WRITE_SQL_PATTERN = /^\s*(INSERT|UPDATE|DELETE|MERGE|UPSERT|CREATE|ALTER|DROP|TRUNCATE|GRANT|REVOKE|COMMENT|REINDEX|VACUUM|ANALYZE|REFRESH|CALL|DO|COPY|SET|RESET|LOCK)\b/i;
+const MULTI_STATEMENT_PATTERN = /;\s*\S/;
+
 const DANGEROUS_SQL_PATTERNS = [
   /\bDROP\s+DATABASE\b/i,
   /\bDROP\s+SCHEMA\s+public\b/i,
   /\bDROP\s+OWNED\b/i,
+  /\bDROP\s+(TABLE|ROLE|USER)\b/i,
   /\bREASSIGN\s+OWNED\b/i,
-  /\bALTER\s+SYSTEM\b/i,
+  /\bTRUNCATE\b/i,
+  /\bGRANT\b/i,
+  /\bREVOKE\b/i,
+  /\bALTER\s+(ROLE|USER|SYSTEM)\b/i,
+  /\bCREATE\s+(FUNCTION|PROCEDURE|RULE)\b/i,
+  /\bDO\s+\$[^$]*\$/i,
   /\bCOPY\s+.*\bTO\s+PROGRAM\b/i,
   /\bCOPY\s+.*\bFROM\s+PROGRAM\b/i,
-  /\bdblink_connect\b/i,
+  /\bdblink_(connect|exec|open|fetch|send_query)\b/i,
   /\blo_import\b/i,
   /\blo_export\b/i,
+  /\bLOAD\b/i,
   /\bpg_execute_server_program\b/i,
   /\bpg_read_file\b/i,
   /\bpg_write_file\b/i,
   /\bpg_ls_dir\b/i,
   /\bpg_stat_file\b/i,
+  /\bpg_terminate_backend\b/i,
+  /\bpg_cancel_backend\b/i,
   /\bpg_catalog\b.*\bpg_read_file\b/i,
   /\bpg_catalog\b.*\bpg_write_file\b/i,
   /\bpg_catalog\b.*\bpg_execute_server_program\b/i,
 ];
 
-function isDangerousSQL(sqlQuery: string): boolean {
-  const normalized = sqlQuery
+function normalizeSqlForPolicy(sqlQuery: string): string {
+  return sqlQuery
     .replace(/\/\*[\s\S]*?\*\//g, " ")
     .replace(/--.*$/gm, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function isDangerousSQL(sqlQuery: string): boolean {
+  const normalized = normalizeSqlForPolicy(sqlQuery);
   return DANGEROUS_SQL_PATTERNS.some(pattern => pattern.test(normalized));
+}
+
+function assertSqlExecutionAllowed(sqlQuery: string, mode: SqlExecutionMode) {
+  const normalized = normalizeSqlForPolicy(sqlQuery);
+  if (!normalized) {
+    throw new PgError("Query is empty", "42601");
+  }
+
+  if (mode === "read") {
+    if (MULTI_STATEMENT_PATTERN.test(normalized) || WRITE_SQL_PATTERN.test(normalized) || !/^\s*(SELECT|WITH|EXPLAIN|SHOW)\b/i.test(normalized)) {
+      throw new PgError("Read-only SQL endpoint only allows SELECT, WITH, EXPLAIN, or SHOW statements. Use the migration endpoint for schema/data changes.", "42501");
+    }
+  }
+
+  if (mode !== "admin" && isDangerousSQL(normalized)) {
+    throw new PgError(
+      "Query contains disallowed privileged operation. Use an explicitly authorized admin path for privileged maintenance.",
+      "42501"
+    );
+  }
 }
 
 export type SqlExecutionResult = {
@@ -231,15 +319,17 @@ function normalizeSqlExecutionResult(sqlQuery: string, result: unknown): SqlExec
   };
 }
 
-export async function executeQuery(dbName: string, sqlQuery: string): Promise<SqlExecutionResult> {
-  if (isDangerousSQL(sqlQuery)) {
-    throw new PgError(
-      "Query contains disallowed operation. DROP DATABASE, ALTER SYSTEM, file system access, and similar privileged operations are not permitted through this endpoint.",
-      "42501"
-    );
-  }
+export async function executeQuery(
+  dbName: string,
+  sqlQuery: string,
+  opts: { mode?: SqlExecutionMode; username?: string; password?: string } = {},
+): Promise<SqlExecutionResult> {
+  const mode = opts.mode || "read";
+  assertSqlExecutionAllowed(sqlQuery, mode);
 
-  const projectDb = getProjectDb(dbName);
+  const projectDb = opts.username && opts.password
+    ? getProjectRoleDb(dbName, opts.username, opts.password)
+    : getProjectDb(dbName);
   try {
     const result = await projectDb.unsafe(sqlQuery);
     return normalizeSqlExecutionResult(sqlQuery, result);
@@ -257,6 +347,7 @@ export async function executeQuery(dbName: string, sqlQuery: string): Promise<Sq
 export const db = {
   sql,
   getProjectDb,
+  getProjectRoleDb,
   executeQuery,
 };
 
@@ -442,4 +533,13 @@ export async function closeDb() {
     }
   }
   projectConnections.clear();
+
+  for (const [key, cached] of projectRoleConnections.entries()) {
+    try {
+      await cached.sql.close();
+    } catch (e: unknown) {
+      logger.error(`Failed to close cached role connection for ${key} during shutdown`, e as Error);
+    }
+  }
+  projectRoleConnections.clear();
 }

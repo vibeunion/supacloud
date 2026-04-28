@@ -8,6 +8,7 @@ import { backgroundTaskService } from "../services/background-task.service";
 import { edgeFunctionService } from "../services/edge-function.service";
 import { projectService } from "../services/project.service";
 import { resolveTenantPorts } from "../utils/project-routing";
+import { resolveProjectRefFromApiKey } from "../utils/project-auth";
 
 const MAX_ASYNC_BODY_BYTES = 256 * 1024;
 let sdkProxyFetch: typeof fetch = ((input: RequestInfo | URL, init?: RequestInit) =>
@@ -175,68 +176,45 @@ async function maybeEnqueueAsyncFunction(request: Request, ref: string): Promise
     );
 }
 
-async function resolveProjectRefFromApiKey(key: string): Promise<string> {
-    if (!key) return '';
-    try {
-        const rows = await metaSql`SELECT ref FROM projects WHERE anon_key = ${key} OR service_role_key = ${key} LIMIT 1`;
-        if (rows.length > 0) return rows[0].ref;
-    } catch(e) {}
-    return '';
-}
+export const sdkProxyInternals = {
+    resolveProjectRefFromApiKey,
+};
 
 async function getProjectRef(request: Request): Promise<string> {
     const auth = request.headers.get('authorization') || '';
     const key = request.headers.get('apikey') || '';
-    const apiKeyRef = await resolveProjectRefFromApiKey(key);
-    const refHeader = request.headers.get("x-project-ref") || request.headers.get("x-supabase-project");
-    if (refHeader) {
-        if (apiKeyRef && apiKeyRef !== refHeader) return '';
-        return refHeader;
-    }
-    
-    const forwardedHost = request.headers.get('x-forwarded-host');
-    const rawHosts = [forwardedHost, request.headers.get('host')].filter(Boolean) as string[];
-    for (const rawHost of rawHosts) {
-        const host = rawHost.split(',')[0].trim();
-        if (!host) continue;
+    const apiKeyRef = await sdkProxyInternals.resolveProjectRefFromApiKey(key) || '';
 
-        if (config.baseDomain && host.includes(config.baseDomain)) {
-            const hostRef = host.split('.')[0];
-            if (apiKeyRef && apiKeyRef !== hostRef) return '';
-            return hostRef;
-        }
-        try {
-            const hostWithoutPort = host.split(':')[0];
-            const rows = await metaSql`
-                SELECT ref
-                FROM projects
-                WHERE config->>'custom_domain' = ${hostWithoutPort}
-                   OR config->>'api_domain' = ${hostWithoutPort}
-                   OR config->>'custom_domain' = ${hostWithoutPort.replace(/^api\./, '')}
-                LIMIT 1
-            `;
-            if (rows.length > 0) {
-                const hostRef = rows[0].ref;
-                if (apiKeyRef && apiKeyRef !== hostRef) return '';
-                return hostRef;
+    if (apiKeyRef) {
+        const refHeader = request.headers.get("x-project-ref") || request.headers.get("x-supabase-project");
+        if (refHeader && refHeader !== apiKeyRef) return '';
+
+        const forwardedHost = request.headers.get('x-forwarded-host');
+        const rawHosts = [forwardedHost, request.headers.get('host')].filter(Boolean) as string[];
+        for (const rawHost of rawHosts) {
+            const host = rawHost.split(',')[0].trim();
+            if (!host) continue;
+
+            if (config.baseDomain && host.includes(config.baseDomain)) {
+                const hostRef = host.split('.')[0];
+                if (hostRef && hostRef !== apiKeyRef) return '';
             }
-        } catch(e) {}
-    }
+            try {
+                const hostWithoutPort = host.split(':')[0];
+                const rows = await metaSql`
+                    SELECT ref
+                    FROM projects
+                    WHERE config->>'custom_domain' = ${hostWithoutPort}
+                       OR config->>'api_domain' = ${hostWithoutPort}
+                       OR config->>'custom_domain' = ${hostWithoutPort.replace(/^api\./, '')}
+                    LIMIT 1
+                `;
+                if (rows.length > 0 && rows[0].ref !== apiKeyRef) return '';
+            } catch(e) {}
+        }
 
-    if (auth.startsWith('Bearer ')) {
-        try {
-           const payloadB64 = auth.split('.')[1];
-           if (payloadB64) {
-               const payload = JSON.parse(Buffer.from(payloadB64, 'base64').toString());
-               if (payload.ref) {
-                   if (apiKeyRef && apiKeyRef !== payload.ref) return '';
-                   return payload.ref;
-               }
-           }
-        } catch(e) {}
+        return apiKeyRef;
     }
-
-    if (apiKeyRef) return apiKeyRef;
 
     if (process.env.BUN_ENV === 'test' || process.env.NODE_ENV === 'test') {
         if (key === 'test-token' || auth.includes('test-token')) {

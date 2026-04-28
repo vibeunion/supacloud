@@ -81,7 +81,7 @@ describe("storageCompatRoutes supabase-js compatibility", () => {
       },
     });
 
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(400);
     sqlSpy.mockRestore();
   });
 
