@@ -1,5 +1,6 @@
 import { sql, type ProjectTask, TaskStatus, TaskType } from "../db";
 import { withRetry } from "../utils/retry";
+import { encryptSecretIfNeeded } from "../utils/secret-crypto";
 
 export interface BackgroundFunctionAuthContext {
   kind: "jwt" | "apikey" | "none";
@@ -55,7 +56,19 @@ export async function enqueueBackgroundFunctionTask(
 ): Promise<ProjectTask> {
   const timeoutSec = normalizeBackgroundTaskTimeout(input.timeoutSec);
   const maxAttempts = normalizeBackgroundTaskMaxAttempts(input.maxAttempts);
-  const payloadBytes = Buffer.byteLength(JSON.stringify(input.envelope), "utf8");
+  const envelope: BackgroundFunctionInvocationEnvelope = {
+    ...input.envelope,
+    auth: {
+      ...input.envelope.auth,
+      authorization: input.envelope.auth.authorization
+        ? encryptSecretIfNeeded(input.envelope.auth.authorization)
+        : null,
+      apikey: input.envelope.auth.apikey
+        ? encryptSecretIfNeeded(input.envelope.auth.apikey)
+        : null,
+    },
+  };
+  const payloadBytes = Buffer.byteLength(JSON.stringify(envelope), "utf8");
   const maxPayloadBytes = input.maxPayloadBytes || 256 * 1024;
   if (payloadBytes > maxPayloadBytes) {
     throw new Error(`Async payload too large (${payloadBytes} bytes > ${maxPayloadBytes} bytes)`);
@@ -82,7 +95,7 @@ export async function enqueueBackgroundFunctionTask(
         ${input.functionSlug},
         ${input.functionVersion || null},
         ${TaskStatus.PENDING},
-        ${JSON.stringify(input.envelope)},
+        ${JSON.stringify(envelope)},
         ${maxAttempts},
         NOW(),
         ${timeoutSec},
