@@ -17,23 +17,24 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
   // Alias for secrets endpoint — Supabase Studio and some SDK versions call this path
   .get(
     "/:ref/functions/secrets",
-    async ({ params }) => {
-      // Delegate to the project secrets service
+    async ({ params, query }) => {
       const { projectService: svc } = await import("../services");
       const secrets = await svc.getSecrets(params.ref);
       if (!secrets) {
         return status(404, { message: "Project not found" });
       }
+      const reveal = query.reveal === "true";
       return secrets.map(
         (s: { name: string; value: string; updated_at?: string }) => ({
           name: s.name,
-          value: s.value,
+          value: reveal ? s.value : "********",
           updated_at: s.updated_at ?? new Date().toISOString(),
         }),
       );
     },
     {
       params: t.Object({ ref: t.String() }),
+      query: t.Object({ reveal: t.Optional(t.String()) }),
     },
   )
 
@@ -745,22 +746,23 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
   // Function Secrets — Project-level (Studio compatibility)
   .get(
     "/:ref/functions/secrets",
-    async ({ params }) => {
+    async ({ params, query }) => {
       const secrets = await projectService.getSecrets(params.ref);
       if (!secrets) {
         return status(404, { message: "Project not found" });
       }
+      const reveal = query.reveal === "true";
       return (secrets as Array<{
         name: string;
         value: string;
         updated_at?: string;
       }>).map((s) => ({
         name: s.name,
-        value: s.value,
+        value: reveal ? s.value : "********",
         updated_at: s.updated_at ?? new Date().toISOString(),
       }));
     },
-    { params: t.Object({ ref: t.String() }) },
+    { params: t.Object({ ref: t.String() }), query: t.Object({ reveal: t.Optional(t.String()) }) },
   )
   .post(
     "/:ref/functions/secrets",

@@ -9,9 +9,53 @@ import fs from "fs/promises";
 const PORT = Number(process.env.EDGE_RUNTIME_PORT) || Number(process.env.PORT) || 9000;
 const POOL_SIZE = Number(process.env.WORKER_POOL_SIZE) || 4;
 const BACKGROUND_POOL_SIZE = Number(process.env.BACKGROUND_WORKER_POOL_SIZE) || Math.max(1, Math.min(POOL_SIZE, 2));
-const FUNCTIONS_DIR = process.env.EDGE_FUNCTIONS_DIR || "./functions";
+const FUNCTIONS_DIR = path.resolve(process.env.EDGE_FUNCTIONS_DIR || "./functions");
+const FUNCTIONS_BASE_DIR = path.resolve(process.env.EDGE_FUNCTIONS_BASE_DIR || FUNCTIONS_DIR);
 const MGMT_API = process.env.MANAGEMENT_API_URL || "http://127.0.0.1:9090";
 const VERSIONED_DIR = ".versions";
+const FUNCTION_REQUEST_TIMEOUT_MS = Number(process.env.EDGE_FUNCTION_TIMEOUT_MS) || 60_000;
+const BACKGROUND_FUNCTION_TIMEOUT_MS = Number(process.env.EDGE_BACKGROUND_FUNCTION_TIMEOUT_MS) || 300_000;
+const INTERNAL_TOKEN = process.env.EDGE_RUNTIME_MASTER_KEY || process.env.MASTER_TOKEN || "";
+const PROJECT_REF_PATTERN = /^[a-zA-Z0-9_-]{1,64}$/;
+const FUNCTION_SLUG_PATTERN = /^[a-zA-Z0-9_-]{1,128}$/;
+const VERSION_PATTERN = /^[a-zA-Z0-9._-]{1,128}$/;
+const FUNCTIONS_BASE_REALPATH = await fs.realpath(FUNCTIONS_BASE_DIR);
+const FUNCTIONS_DIR_REALPATH = await fs.realpath(FUNCTIONS_DIR);
+
+if (!isPathInside(FUNCTIONS_DIR_REALPATH, FUNCTIONS_BASE_REALPATH)) {
+  throw new Error(`EDGE_FUNCTIONS_DIR must be inside EDGE_FUNCTIONS_BASE_DIR`);
+}
+
+function isPathInside(candidate: string, base: string): boolean {
+  const relative = path.relative(base, candidate);
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+function isSafeProjectRef(value: string): boolean {
+  return PROJECT_REF_PATTERN.test(value);
+}
+
+function isSafeFunctionSlug(value: string): boolean {
+  return FUNCTION_SLUG_PATTERN.test(value);
+}
+
+function isSafeVersion(value: string): boolean {
+  return VERSION_PATTERN.test(value);
+}
+
+function badRequest(message: string): Response {
+  return new Response(JSON.stringify({ error: message }), {
+    status: 400,
+    headers: { "Content-Type": "application/json", "x-relay-error": "true" },
+  });
+}
+
+function unauthorized(): Response {
+  return new Response(JSON.stringify({ error: "Unauthorized" }), {
+    status: 401,
+    headers: { "Content-Type": "application/json" },
+  });
+}
 
 if (!process.env.MANAGEMENT_API_URL) {
   console.warn(
@@ -19,7 +63,7 @@ if (!process.env.MANAGEMENT_API_URL) {
   );
 }
 
-const MASTER_TOKEN = process.env.MASTER_TOKEN || "";
+const MASTER_TOKEN = INTERNAL_TOKEN;
 
 if (!process.env.EDGE_RUNTIME_VERSION) {
   process.env.EDGE_RUNTIME_VERSION = "1.58.3";
@@ -27,13 +71,69 @@ if (!process.env.EDGE_RUNTIME_VERSION) {
 
 const pool = new WorkerPool({
   size: POOL_SIZE,
-  requestTimeout: 300_000,
+  requestTimeout: FUNCTION_REQUEST_TIMEOUT_MS,
 });
 
 const backgroundPool = new WorkerPool({
   size: BACKGROUND_POOL_SIZE,
-  requestTimeout: 900_000,
+  requestTimeout: BACKGROUND_FUNCTION_TIMEOUT_MS,
 });
+
+async function resolveProjectRoot(projectRef: string): Promise<string> {
+  if (!isSafeProjectRef(projectRef)) {
+    throw new Error("Invalid project reference");
+  }
+
+  const projectRoot = path.resolve(FUNCTIONS_DIR, projectRef);
+  if (!isPathInside(projectRoot, FUNCTIONS_DIR)) {
+    throw new Error("Invalid project root");
+  }
+
+  const realProjectRoot = await fs.realpath(projectRoot);
+  if (!isPathInside(realProjectRoot, FUNCTIONS_DIR_REALPATH)) {
+    throw new Error("Project root escapes functions directory");
+  }
+
+  return realProjectRoot;
+}
+
+async function resolveFunctionPath(projectRef: string, functionName: string, requestedVersion?: string | null): Promise<{ functionPath: string; projectRoot: string; activeVersion: string | null }> {
+  if (!isSafeFunctionSlug(functionName)) {
+    throw new Error("Invalid function slug");
+  }
+  if (requestedVersion && !isSafeVersion(requestedVersion)) {
+    throw new Error("Invalid function version");
+  }
+
+  const projectRoot = await resolveProjectRoot(projectRef);
+  const resolvedConfig = await getFunctionConfig(projectRef, functionName, projectRoot);
+  const activeVersion = requestedVersion || resolvedConfig.version || null;
+  const candidates = requestedVersion
+    ? [path.resolve(projectRoot, VERSIONED_DIR, functionName, requestedVersion, "index.js")]
+    : [path.resolve(projectRoot, `${functionName}.js`), path.resolve(projectRoot, `${functionName}.ts`)];
+
+  for (const candidate of candidates) {
+    if (!isPathInside(candidate, projectRoot)) {
+      throw new Error("Function path escapes project root");
+    }
+
+    try {
+      const realCandidate = await fs.realpath(candidate);
+      if (!isPathInside(realCandidate, projectRoot)) {
+        throw new Error("Function path escapes project root");
+      }
+      const stat = await fs.stat(realCandidate);
+      if (!stat.isFile()) {
+        continue;
+      }
+      return { functionPath: realCandidate, projectRoot, activeVersion };
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("escapes")) throw error;
+    }
+  }
+
+  throw new Error("Function not found");
+}
 
 async function dispatchFunction(
   projectRef: string,
@@ -52,22 +152,11 @@ async function dispatchFunction(
   },
 ) {
   const requestedVersion = request.headers.get("x-supacloud-function-version") || null;
-  const resolvedConfig = await getFunctionConfig(projectRef, functionName);
-  const activeVersion = requestedVersion || resolvedConfig.version || null;
-  const versionSuffix = requestedVersion ? `_v${requestedVersion}` : "";
-  const functionId = `${projectRef}_${functionName}${versionSuffix}`;
-  const versionedJsPath = requestedVersion
-    ? path.resolve(FUNCTIONS_DIR, projectRef, VERSIONED_DIR, functionName, requestedVersion, "index.js")
-    : null;
-  const jsPath = path.resolve(FUNCTIONS_DIR, projectRef, `${functionName}.js`);
-  const tsPath = path.resolve(FUNCTIONS_DIR, projectRef, `${functionName}.ts`);
-  const functionPath = versionedJsPath && (await Bun.file(versionedJsPath).exists())
-    ? versionedJsPath
-    : (await Bun.file(jsPath).exists())
-      ? jsPath
-      : tsPath;
 
   try {
+    const { functionPath, projectRoot, activeVersion } = await resolveFunctionPath(projectRef, functionName, requestedVersion);
+    const versionSuffix = requestedVersion ? `_v${requestedVersion}` : "";
+    const functionId = `${projectRef}_${functionName}${versionSuffix}`;
     const targetPool = opts?.background ? backgroundPool : pool;
     const runtimeLogContext = {
       functionVersion: activeVersion,
@@ -77,6 +166,7 @@ async function dispatchFunction(
     return await targetPool.dispatch({
       functionId,
       functionPath,
+      projectRoot,
       env: await loadTenantEnv(projectRef),
       request,
       cancelKey: opts?.cancelKey,
@@ -97,7 +187,13 @@ async function dispatchFunction(
           ? 504
           : 500;
 
-    return new Response(JSON.stringify({ error: message }), {
+    const safeMessage = statusCode === 404
+      ? "Function not found"
+      : statusCode === 504
+        ? "Function execution timed out"
+        : "Internal Server Error";
+
+    return new Response(JSON.stringify({ error: safeMessage }), {
       status: statusCode,
       headers: { "Content-Type": "application/json", "x-relay-error": "true" },
     });
@@ -147,10 +243,14 @@ async function appendFunctionRuntimeLog(
   }
 }
 
-function verifyInternalBackgroundAuth(request: Request): boolean {
-  const internalHeader = request.headers.get("x-supacloud-internal-auth");
-  const token = (internalHeader || request.headers.get("authorization"))?.replace(/^Bearer\s+/i, "");
-  return !!MASTER_TOKEN && token === MASTER_TOKEN;
+function verifyInternalAuth(request: Request): boolean {
+  const internalHeader = request.headers.get("x-supacloud-internal-auth") || request.headers.get("x-supacloud-internal-token");
+  const token = (internalHeader || request.headers.get("authorization"))?.replace(/^Bearer\s+/i, "").trim();
+  return !!INTERNAL_TOKEN && token === INTERNAL_TOKEN;
+}
+
+function requireInternalAuth(request: Request): Response | undefined {
+  return verifyInternalAuth(request) ? undefined : unauthorized();
 }
 
 function buildBackgroundForwardedRequest(request: Request): Request {
@@ -191,6 +291,7 @@ const CONFIG_CACHE_TTL = 10_000;
 async function getFunctionConfig(
   projectRef: string,
   functionName: string,
+  projectRoot?: string,
 ): Promise<{ verify_jwt: boolean; version: string | null }> {
   const key = `${projectRef}/${functionName}`;
   const cached = configCache.get(key);
@@ -199,12 +300,16 @@ async function getFunctionConfig(
   }
 
   try {
-    const configPath = path.resolve(
-      FUNCTIONS_DIR,
-      projectRef,
-      `${functionName}.config.json`,
-    );
-    const raw = await Bun.file(configPath).text();
+    const root = projectRoot || await resolveProjectRoot(projectRef);
+    const configPath = path.resolve(root, `${functionName}.config.json`);
+    if (!isPathInside(configPath, root)) {
+      throw new Error("Function config path escapes project root");
+    }
+    const realConfigPath = await fs.realpath(configPath);
+    if (!isPathInside(realConfigPath, root)) {
+      throw new Error("Function config path escapes project root");
+    }
+    const raw = await Bun.file(realConfigPath).text();
     const config = JSON.parse(raw);
     const verify_jwt = config.verify_jwt !== false;
     const version =
@@ -328,16 +433,15 @@ async function handleFunctionRequest(
   const projectRef = c.headers["x-project-ref"];
   if (!projectRef) {
     c.set.headers["x-relay-error"] = "true";
-    return new Response(JSON.stringify({ error: "Missing x-project-ref" }), {
-      status: 400,
-      headers: {
-        "Content-Type": "application/json",
-        "x-relay-error": "true",
-      },
-    });
+    return badRequest("Missing x-project-ref");
+  }
+  if (!isSafeProjectRef(projectRef) || !isSafeFunctionSlug(functionName)) {
+    c.set.headers["x-relay-error"] = "true";
+    return badRequest("Invalid project reference or function slug");
   }
 
-  const fnConfig = await getFunctionConfig(projectRef, functionName);
+  const projectRoot = await resolveProjectRoot(projectRef);
+  const fnConfig = await getFunctionConfig(projectRef, functionName, projectRoot);
   if (c.request.method !== "OPTIONS" && fnConfig.verify_jwt) {
     const authorized = await verifyJwt(
       projectRef,
@@ -365,16 +469,11 @@ const app = new Elysia()
   .use(cors())
   .get("/health", () => ({
     status: "ok",
-    runtime: "bun-edge",
-    version: process.env.EDGE_RUNTIME_VERSION,
-    mt: process.env.MASTER_TOKEN ? "present" : "missing",
-    url: process.env.MANAGEMENT_API_URL || "missing",
-    pools: {
-      foreground: POOL_SIZE,
-      background: BACKGROUND_POOL_SIZE,
-    },
   }))
-  .get("/metrics", () => {
+  .get("/metrics", (c) => {
+    const authError = requireInternalAuth(c.request);
+    if (authError) return authError;
+
     const foreground = pool.snapshotMetrics("supacloud_edge");
     const background = backgroundPool.snapshotMetrics("supacloud_edge_background");
     return Object.entries({ ...foreground, ...background })
@@ -383,35 +482,34 @@ const app = new Elysia()
   })
 
   .post("/invalidate/:ref/:slug", (c) => {
+    const authError = requireInternalAuth(c.request);
+    if (authError) return authError;
+    if (!isSafeProjectRef(c.params.ref) || !isSafeFunctionSlug(c.params.slug)) {
+      return badRequest("Invalid project reference or function slug");
+    }
+
     const functionId = `${c.params.ref}_${c.params.slug}`;
     pool.invalidateModule(functionId);
     return { invalidated: functionId };
   })
 
   .post("/preheat/:ref/:slug", async (c) => {
-    const functionId = `${c.params.ref}_${c.params.slug}`;
-    const jsPath = path.resolve(
-      FUNCTIONS_DIR,
-      c.params.ref,
-      `${c.params.slug}.js`,
-    );
-    const tsPath = path.resolve(
-      FUNCTIONS_DIR,
-      c.params.ref,
-      `${c.params.slug}.ts`,
-    );
-    const functionPath = (await Bun.file(jsPath).exists()) ? jsPath : tsPath;
-    const success = await pool.preheat(functionId, functionPath);
-    return { preheated: functionId, success };
+    const authError = requireInternalAuth(c.request);
+    if (authError) return authError;
+
+    try {
+      const { functionPath } = await resolveFunctionPath(c.params.ref, c.params.slug);
+      const functionId = `${c.params.ref}_${c.params.slug}`;
+      const success = await pool.preheat(functionId, functionPath);
+      return { preheated: functionId, success };
+    } catch (error) {
+      return badRequest(error instanceof Error ? error.message : "Invalid function path");
+    }
   })
 
   .post("/internal/background/:ref/:functionName/*", async (c) => {
-    if (!verifyInternalBackgroundAuth(c.request)) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401,
-        headers: { "Content-Type": "application/json" },
-      });
-    }
+    const authError = requireInternalAuth(c.request);
+    if (authError) return authError;
 
     const setHeaders = c.set.headers as Record<string, string>;
     setHeaders["x-sb-execution-id"] = crypto.randomUUID();
@@ -456,12 +554,8 @@ const app = new Elysia()
     );
   })
   .post("/internal/background/:ref/:functionName", async (c) => {
-    if (!verifyInternalBackgroundAuth(c.request)) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401,
-        headers: { "Content-Type": "application/json" },
-      });
-    }
+    const authError = requireInternalAuth(c.request);
+    if (authError) return authError;
 
     const setHeaders = c.set.headers as Record<string, string>;
     setHeaders["x-sb-execution-id"] = crypto.randomUUID();
@@ -506,12 +600,8 @@ const app = new Elysia()
     );
   })
   .post("/internal/background/cancel/:taskId", async (c) => {
-    if (!verifyInternalBackgroundAuth(c.request)) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401,
-        headers: { "Content-Type": "application/json" },
-      });
-    }
+    const authError = requireInternalAuth(c.request);
+    if (authError) return authError;
 
     const cancelled = backgroundPool.cancel(c.params.taskId);
     return new Response(JSON.stringify({ cancelled }), {

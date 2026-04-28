@@ -33,6 +33,10 @@ import { StorageRLS, mockObjects } from "../services/storage-rls";
 import { logger } from "../utils/logger";
 import { config } from "../config";
 
+const STORAGE_UPLOAD_MAX_BYTES = Number(process.env.STORAGE_UPLOAD_MAX_BYTES || config.maxRequestBodySize || 100 * 1024 * 1024);
+const TUS_MAX_SIZE = Number(process.env.TUS_MAX_SIZE || 100 * 1024 * 1024);
+const TUS_MAX_CHUNK_SIZE = Number(process.env.TUS_MAX_CHUNK_SIZE || Math.min(TUS_MAX_SIZE, 16 * 1024 * 1024));
+
 // ── Imaginary Config ──────────────────────────────────────────────
 const IMAGINARY_URL = config.imaginaryUrl;
 
@@ -46,24 +50,20 @@ function getGlobalSigningSecret(): string | null {
     return _cachedSigningSecret || null;
 }
 
-import { createHmac } from "crypto";
+import { createHmac, randomUUID } from "crypto";
 
 /**
  * Get the signing secret for a specific tenant (project ref).
  * Falls back to global signing secret if tenant-specific one is not available.
  */
-async function getSigningSecretForTenant(ref: string): Promise<string> {
-    // Try global secret first (fastest)
+async function getSigningSecretForTenant(ref: string): Promise<string | null> {
     const globalSecret = getGlobalSigningSecret();
     if (globalSecret) return globalSecret;
-    
-    // Fall back to tenant-specific JWT secret from DB
 
     const tenantSecret = await StorageRLS.getTenantJwtSecret(ref);
     if (tenantSecret) return tenantSecret;
-    
-    // Ultimate fallback: use a deterministic secret derived from the ref
-    return `supacloud-storage-sign-${ref}`;
+
+    return null;
 }
 
 /**
@@ -71,9 +71,14 @@ async function getSigningSecretForTenant(ref: string): Promise<string> {
  */
 import { jwtVerify } from "jose";
 
+function signedUrlPayload(ref: string, bucket: string, path: string, expiresAt: number): string {
+    return `${ref}:${bucket}/${path}:${expiresAt}`;
+}
+
 async function generateSignedToken(ref: string, bucket: string, path: string, expiresAt: number): Promise<string> {
     const secret = await getSigningSecretForTenant(ref);
-    const payload = `${bucket}/${path}:${expiresAt}`;
+    if (!secret) throw new Error('Storage signing secret unavailable');
+    const payload = signedUrlPayload(ref, bucket, path, expiresAt);
     const hmac = createHmac('sha256', secret);
     hmac.update(payload);
     return hmac.digest('hex');
@@ -152,22 +157,23 @@ function extractMultipartFileFast(buffer: Buffer, boundary: string): { fileBuffe
 async function verifySignedToken(ref: string, bucket: string, path: string, token: string, expiresAt?: number): Promise<boolean> {
     try {
         const secret = await getSigningSecretForTenant(ref);
+        if (!secret) return false;
 
-        // Try HMAC-SHA256 verification (official Supabase format)
         if (expiresAt && expiresAt < Math.floor(Date.now() / 1000)) {
             return false;
         }
         if (expiresAt) {
-            const payload = `${bucket}/${path}:${expiresAt}`;
+            const payload = signedUrlPayload(ref, bucket, path, expiresAt);
             const hmac = createHmac('sha256', secret);
             hmac.update(payload);
             const expected = hmac.digest('hex');
-            if (token === expected) return true;
+            const tokenBuffer = Buffer.from(token, 'hex');
+            const expectedBuffer = Buffer.from(expected, 'hex');
+            if (tokenBuffer.length === expectedBuffer.length && crypto.timingSafeEqual(tokenBuffer, expectedBuffer)) return true;
         }
 
-        // Fallback: try JWT verification (backward compat for old tokens)
         const { payload } = await jwtVerify(token, new TextEncoder().encode(secret));
-        return payload.url === `${bucket}/${path}`;
+        return payload.url === `${bucket}/${path}` && payload.ref === ref;
     } catch {
         return false;
     }
@@ -191,41 +197,19 @@ async function getProjectRef(headers: Record<string, string | undefined>): Promi
     const auth = headers['authorization'] || '';
     const key = headers['apikey'] || '';
     const host = headers['host']?.replace(/:\d+$/, '') || '';
-    
-    // P0-13 & P0-14: Test-mode backdoor locked behind strict Bun env, and removed hardcoded jVF keys
+
     if (process.env.BUN_ENV === 'test' || process.env.NODE_ENV === 'test') {
         if (key === 'test-token' || auth === 'Bearer test-token') {
              return 'test_mock';
         }
     }
-    
+
     const apiKeyRef = await resolveProjectRefFromApiKey(key);
+    if (!apiKeyRef) return '';
+
     const headerRef = headers['x-project-ref'] || headers['x-supabase-project'];
-    if (headerRef) {
-        if (apiKeyRef && apiKeyRef !== headerRef) return '';
-        return headerRef;
-    }
+    if (headerRef && apiKeyRef !== headerRef) return '';
 
-    // JWT payload fallback
-    if (auth.startsWith('Bearer ')) {
-        try {
-            const token = auth.slice('Bearer '.length);
-            const payloadB64 = token.split('.')[1];
-            if (payloadB64) {
-                const payload = JSON.parse(Buffer.from(payloadB64, 'base64').toString());
-                if (payload?.ref) {
-                    if (apiKeyRef && apiKeyRef !== payload.ref) return '';
-                    return payload.ref;
-                }
-            }
-        } catch {}
-    }
-
-    // apikey -> project lookup (official SDK storage requests commonly only send apikey)
-    if (apiKeyRef) return apiKeyRef;
-
-    // Host -> project lookup fallback for storage requests. This keeps uploads working
-    // even when Kong request-transformer fails to inject x-project-ref.
     if (host) {
         try {
             const { sql } = await import('../db');
@@ -237,19 +221,16 @@ async function getProjectRef(headers: Record<string, string | undefined>): Promi
                    OR config->>'studio_domain' = ${host}
                 LIMIT 1
             `;
-            if (rows.length > 0) return String(rows[0].ref);
+            if (rows.length > 0 && String(rows[0].ref) !== apiKeyRef) return '';
         } catch {}
-    }
 
-    // P1-6: Fallback to extract tenant prefix from host header if preserve_host is active
-    if (host) {
         if (config.baseDomain && host.includes(config.baseDomain)) {
             const hostRef = host.split('.')[0];
-            if (apiKeyRef && apiKeyRef !== hostRef) return '';
-            return hostRef;
+            if (hostRef && apiKeyRef !== hostRef) return '';
         }
     }
-    return '';
+
+    return apiKeyRef;
 }
 
 function isMimeAllowed(allowedMimes: string[], actualMime: string): boolean {
@@ -351,27 +332,40 @@ function parseContentLength(value: string | null | undefined): number | null {
 function isMultipartContentType(contentType: string | undefined): boolean {
     return (contentType || "").toLowerCase().includes("multipart/form-data");
 }
+
+function validateUploadSize(size: number | null | undefined, maxSize = STORAGE_UPLOAD_MAX_BYTES): { ok: true } | { ok: false; response: Response } {
+    if (size !== null && size !== undefined && size > maxSize) {
+        return { ok: false, response: status(413, { statusCode: "413", error: 'Payload too large', message: `Upload is limited to ${maxSize} bytes` }) as unknown as Response };
+    }
+    return { ok: true };
+}
 async function readUploadBody(
     request: Request,
     contentType: string | undefined,
     contentLengthHeader?: string | undefined,
 ): Promise<{ fileData: Buffer | ReadableStream; fileMimeType: string; size: number; customMetadata?: Record<string, unknown> }> {
     const normalizedMime = contentType?.split(";")[0]?.trim() || "application/octet-stream";
+    const declaredLength = parseContentLength(contentLengthHeader || request.headers.get("content-length"));
+    if (declaredLength !== null && declaredLength > STORAGE_UPLOAD_MAX_BYTES) {
+        throw new Error("UPLOAD_TOO_LARGE");
+    }
 
     // For direct SDK/raw uploads, stream the body through instead of materializing the
     // entire payload in memory. Multipart requests still need full parsing.
     if (!isMultipartContentType(contentType) && request.body) {
-        const contentLength = parseContentLength(contentLengthHeader || request.headers.get("content-length"));
-        if (contentLength !== null) {
+        if (declaredLength !== null) {
             return {
                 fileData: request.body,
                 fileMimeType: normalizedMime,
-                size: contentLength,
+                size: declaredLength,
             };
         }
     }
 
     let fileBuffer = Buffer.from(await request.arrayBuffer());
+    if (fileBuffer.byteLength > STORAGE_UPLOAD_MAX_BYTES) {
+        throw new Error("UPLOAD_TOO_LARGE");
+    }
     let fileMimeType = normalizedMime;
     let customMetadata: Record<string, unknown> | undefined;
 
@@ -444,6 +438,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
                 url: request.url,
                 remoteAddr: request.headers.get('x-forwarded-for') || 'unknown',
             });
+            return status(400, { statusCode: "400", error: 'Bad Request', message: 'Missing or invalid project reference' });
         }
     })
     
@@ -714,6 +709,9 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
                 Key: `${params.bucket}/${filePath}`,
             };
         } catch (err: unknown) {
+            if (err instanceof Error && err.message === "UPLOAD_TOO_LARGE") {
+                return status(413, { statusCode: "413", error: 'Payload too large', message: `Upload is limited to ${STORAGE_UPLOAD_MAX_BYTES} bytes` });
+            }
             logger.error('SDK upload error:', { error: err instanceof Error ? err.message : String(err) });
             return status(500, { statusCode: "500", error: 'Internal', message: 'Upload failed' });
         }
@@ -752,6 +750,9 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
                 Key: `${params.bucket}/${filePath}`,
             };
         } catch (err: unknown) {
+            if (err instanceof Error && err.message === "UPLOAD_TOO_LARGE") {
+                return status(413, { statusCode: "413", error: 'Payload too large', message: `Upload is limited to ${STORAGE_UPLOAD_MAX_BYTES} bytes` });
+            }
             return status(500, { statusCode: "500", error: 'Internal', message: 'Upsert failed' });
         }
     }, // @ts-ignore
@@ -1524,7 +1525,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         set.headers['Tus-Resumable'] = '1.0.0';
         set.headers['Tus-Version'] = '1.0.0';
         set.headers['Tus-Extension'] = 'creation,termination';
-        set.headers['Tus-Max-Size'] = String(50 * 1024 * 1024 * 1024);
+        set.headers['Tus-Max-Size'] = String(TUS_MAX_SIZE);
         return '';
     })
 
@@ -1538,8 +1539,6 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             return status(400, { statusCode: "400", error: 'Bad Request', message: 'Upload-Length must be greater than 0' });
         }
 
-        // Hard cap: TUS in-memory assembly cannot safely handle files beyond 100MB
-        const TUS_MAX_SIZE = 50 * 1024 * 1024 * 1024;
         if (uploadLength > TUS_MAX_SIZE) {
             return status(413, { statusCode: "413", error: 'Payload too large', message: `TUS uploads are limited to ${TUS_MAX_SIZE / (1024 * 1024)}MB. Use standard upload for larger files.` });
         }
@@ -1584,7 +1583,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             });
         }
 
-        const uploadId = `${ref}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+        const uploadId = `${ref}_${randomUUID()}`;
 
         // Store upload state
         await TusStore.set(uploadId, {
@@ -1627,12 +1626,21 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         if (upload.ref !== ref) return status(403, { message: 'Cross-project upload access denied' });
         if (!request.body) return status(400, { message: 'Missing upload chunk body' });
 
+        const chunkLength = parseContentLength(headers['content-length']);
+        if (chunkLength !== null && chunkLength > TUS_MAX_CHUNK_SIZE) {
+            return status(413, { statusCode: "413", error: 'Payload too large', message: `TUS chunks are limited to ${TUS_MAX_CHUNK_SIZE} bytes` });
+        }
+
         const clientOffset = Number(headers['upload-offset'] || 0);
         if (clientOffset !== upload.offset) {
             return status(409, { message: 'Offset mismatch' });
         }
 
         upload.offset = await TusStore.appendChunk(params.uploadId, upload.offset, request.body);
+        if (upload.offset > upload.totalSize || upload.offset > TUS_MAX_SIZE) {
+            await TusStore.delete(params.uploadId);
+            return status(413, { statusCode: "413", error: 'Payload too large', message: 'Upload exceeded declared size limit' });
+        }
 
         set.headers['Tus-Resumable'] = '1.0.0';
         set.headers['Upload-Offset'] = String(upload.offset);

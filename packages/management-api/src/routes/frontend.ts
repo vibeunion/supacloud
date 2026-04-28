@@ -1,7 +1,61 @@
 import { Elysia, t, status } from "elysia";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { frontendService } from "../services/frontend.service";
 import type { FrontendFramework } from "../types/frontend";
 import { FRAMEWORK_DEFAULTS } from "../types/frontend";
+
+const FRONTEND_UPLOAD_MAX_BYTES = Number(process.env.FRONTEND_UPLOAD_MAX_BYTES || 100 * 1024 * 1024);
+const FRONTEND_UPLOAD_MAX_FILES = Number(process.env.FRONTEND_UPLOAD_MAX_FILES || 10_000);
+const FRONTEND_UPLOAD_MAX_UNCOMPRESSED_BYTES = Number(process.env.FRONTEND_UPLOAD_MAX_UNCOMPRESSED_BYTES || 300 * 1024 * 1024);
+const SAFE_ID_PATTERN = /^[a-zA-Z0-9_-]{1,128}$/;
+
+function isSafeZipEntryName(name: string): boolean {
+  const normalized = name.replace(/\\/g, "/");
+  return !!normalized && !normalized.startsWith("/") && !normalized.includes("../") && normalized !== ".." && !normalized.split("/").includes("..");
+}
+
+async function validateZipArchive(zipPath: string): Promise<{ ok: true } | { ok: false; message: string }> {
+  const namesResult = await Bun.$`unzip -Z -1 ${zipPath}`.quiet();
+  if (namesResult.exitCode !== 0) {
+    return { ok: false, message: "Invalid zip archive" };
+  }
+
+  const entries = namesResult.stdout.toString().split(/\r?\n/).filter(Boolean);
+  if (entries.length > FRONTEND_UPLOAD_MAX_FILES) {
+    return { ok: false, message: `Zip file count exceeds ${FRONTEND_UPLOAD_MAX_FILES}` };
+  }
+
+  for (const entry of entries) {
+    if (!isSafeZipEntryName(entry)) {
+      return { ok: false, message: "Zip archive contains unsafe paths" };
+    }
+  }
+
+  const listResult = await Bun.$`unzip -Z -l ${zipPath}`.quiet();
+  if (listResult.exitCode !== 0) {
+    return { ok: false, message: "Invalid zip archive" };
+  }
+
+  let totalSize = 0;
+  for (const line of listResult.stdout.toString().split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("Archive:") || trimmed.startsWith("---") || trimmed.includes(" files,")) continue;
+    if (trimmed[0] === "l") {
+      return { ok: false, message: "Zip archive must not contain symlinks" };
+    }
+    const match = trimmed.match(/^(\S+)\s+\S+\s+(\d+)\s+/);
+    if (match) {
+      totalSize += Number(match[2]);
+      if (totalSize > FRONTEND_UPLOAD_MAX_UNCOMPRESSED_BYTES) {
+        return { ok: false, message: `Uncompressed zip size exceeds ${FRONTEND_UPLOAD_MAX_UNCOMPRESSED_BYTES}` };
+      }
+    }
+  }
+
+  return { ok: true };
+}
 
 async function readUploadedZip(request: Request, body: unknown): Promise<Uint8Array> {
   if (body instanceof File || body instanceof Blob) {
@@ -186,40 +240,84 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
                 return status(404, { message: "Deployment not found", code: "404" });
       }
 
-      const tempBase = `/tmp/frontend-upload-${params.id}-${Date.now()}`;
-      const tempDir = tempBase;
-      const tempZip = `${tempBase}.zip`;
-
-      const zipBytes = await readUploadedZip(request, body);
-      if (!zipBytes.byteLength) {
+      if (!SAFE_ID_PATTERN.test(params.ref) || !SAFE_ID_PATTERN.test(params.id)) {
         set.status = 400;
         return {
           success: false,
           deployment_id: params.id,
           url: "",
           build_log: "",
-          message: "Empty upload payload",
+          message: "Invalid project reference or deployment id",
         };
       }
 
-      await Bun.write(tempZip, zipBytes);
+      const tempDir = await mkdtemp(path.join(tmpdir(), "supacloud-frontend-upload-"));
+      const extractDir = path.join(tempDir, "extract");
+      const tempZip = path.join(tempDir, "upload.zip");
 
-      const extractResult = await Bun.$`unzip -o ${tempZip} -d ${tempDir}`.quiet();
-      if (extractResult.exitCode !== 0) {
-        return {
-          success: false,
-          deployment_id: params.id,
-          url: "",
-          build_log: extractResult.stderr.toString(),
-          message: "Failed to extract zip file",
-        };
+      try {
+        const contentLength = Number(request.headers.get("content-length") || 0);
+        if (contentLength > FRONTEND_UPLOAD_MAX_BYTES) {
+          set.status = 413;
+          return {
+            success: false,
+            deployment_id: params.id,
+            url: "",
+            build_log: "",
+            message: `Upload payload exceeds ${FRONTEND_UPLOAD_MAX_BYTES} bytes`,
+          };
+        }
+
+        const zipBytes = await readUploadedZip(request, body);
+        if (!zipBytes.byteLength) {
+          set.status = 400;
+          return {
+            success: false,
+            deployment_id: params.id,
+            url: "",
+            build_log: "",
+            message: "Empty upload payload",
+          };
+        }
+        if (zipBytes.byteLength > FRONTEND_UPLOAD_MAX_BYTES) {
+          set.status = 413;
+          return {
+            success: false,
+            deployment_id: params.id,
+            url: "",
+            build_log: "",
+            message: `Upload payload exceeds ${FRONTEND_UPLOAD_MAX_BYTES} bytes`,
+          };
+        }
+
+        await Bun.write(tempZip, zipBytes);
+        const validation = await validateZipArchive(tempZip);
+        if (!validation.ok) {
+          set.status = 400;
+          return {
+            success: false,
+            deployment_id: params.id,
+            url: "",
+            build_log: "",
+            message: validation.message,
+          };
+        }
+
+        const extractResult = await Bun.$`unzip -q ${tempZip} -d ${extractDir}`.quiet();
+        if (extractResult.exitCode !== 0) {
+          return {
+            success: false,
+            deployment_id: params.id,
+            url: "",
+            build_log: extractResult.stderr.toString(),
+            message: "Failed to extract zip file",
+          };
+        }
+
+        return await frontendService.deployFromSource(params.ref, params.id, extractDir);
+      } finally {
+        await rm(tempDir, { recursive: true, force: true });
       }
-
-      const result = await frontendService.deployFromSource(params.ref, params.id, tempDir);
-
-      await Bun.$`rm -rf ${tempDir} ${tempZip}`.quiet();
-
-      return result;
     },
     {
       params: t.Object({

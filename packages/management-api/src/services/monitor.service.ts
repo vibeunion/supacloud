@@ -2,14 +2,34 @@ import type { HealthStatus, NodeMetrics } from '../types/monitor';
 import { logger } from "../utils/logger";
 import { config } from '../config';
 
+const MONITOR_ALLOWED_HOSTS = new Set(
+  [
+    config.dockerHostIp,
+    config.pgHost,
+    "127.0.0.1",
+    "localhost",
+    ...(process.env.MONITOR_ALLOWED_HOSTS?.split(",") || []),
+    ...((process.env.NODE_ENV === "test" || process.env.BUN_ENV === "test") ? ["1.2.3.4"] : []),
+  ]
+    .map((host) => host.trim())
+    .filter(Boolean),
+);
+
+function assertAllowedMonitorHost(nodeIp: string): void {
+  if (!/^[a-zA-Z0-9.-]+$/.test(nodeIp) || !MONITOR_ALLOWED_HOSTS.has(nodeIp)) {
+    throw new Error("Monitor target is not allowed");
+  }
+}
+
 /**
  * Get database instance health status
  * @param nodeIp Database node IP
  * @param port PG Exporter port, defaults to 9630
  */
 export async function getHealth(nodeIp: string, port: number = 9630): Promise<HealthStatus> {
-  const url = `http://${nodeIp}:${port}/health`;
   try {
+    assertAllowedMonitorHost(nodeIp);
+    const url = `http://${nodeIp}:${port}/health`;
     const response = await fetch(url, { signal: AbortSignal.timeout(3000) });
     if (!response.ok) throw new Error('Exporter returned non-OK status');
 
@@ -36,6 +56,13 @@ export async function getHealth(nodeIp: string, port: number = 9630): Promise<He
  * @param nodeIp Node IP
  */
 export async function getMetrics(nodeIp: string): Promise<NodeMetrics> {
+  try {
+    assertAllowedMonitorHost(nodeIp);
+  } catch (error: unknown) {
+    logger.error('Rejected monitor metrics target:', { error: error instanceof Error ? error.message : String(error) });
+    return { qps: 0, active_connections: 0, slow_queries: 0 };
+  }
+
   const vmUrl = config.victoriaMetricsUrl || `http://${nodeIp}:8428`;
 
   const queries = {

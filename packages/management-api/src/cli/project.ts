@@ -311,10 +311,10 @@ export async function handleProjectRotateKeys(ref: string, args: string[]) {
 
         console.log("\n");
         console.log(`  New anon key: ${result.anon_key}`);
-        console.log(`  New service_role key: ${result.service_role_key}`);
+        console.log(`  New service_role key: ${result.service_role_key || "********"}`);
         console.log("");
 
-        p.outro("✅ API keys have been rotated. Update your applications!");
+        p.outro("✅ API keys have been rotated. Existing keys are revoked; retrieve the service_role key securely from the server if needed.");
     } catch (error: unknown) {
         s.stop("Failed to rotate API keys");
         p.log.error((error instanceof Error ? error.message : String(error)));

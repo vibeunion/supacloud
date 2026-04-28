@@ -117,6 +117,7 @@ export interface Config {
   bunPath: string;
   sdkProxyTimeoutMs: number;
   restProxyTimeoutMs: number;
+  secretsEncryptionKey: string;
 }
 
 function getEnv(key: string, defaultValue = ""): string {
@@ -234,6 +235,7 @@ export const config: Config = {
   bunPath: getEnv("BUN_PATH", "bun"),
   sdkProxyTimeoutMs: Number(getEnv("SDK_PROXY_TIMEOUT_MS", "30000")),
   restProxyTimeoutMs: Number(getEnv("REST_PROXY_TIMEOUT_MS", "300000")),
+  secretsEncryptionKey: getEnv("SECRETS_ENCRYPTION_KEY", getEnv("MASTER_TOKEN", "")),
 };
 
 function validateConfig() {
@@ -254,6 +256,7 @@ function validateConfig() {
   const weakMasterToken = !config.masterToken || config.masterToken.length < 32 || config.masterToken === "dev-master-token";
   const weakJwtSecret = !config.jwtSecret || config.jwtSecret.length < 32 || config.jwtSecret === DEFAULT_JWT_SECRET;
   const weakDashboardPassword = !config.dashboardPassword || config.dashboardPassword.length < 12 || DEFAULT_DASHBOARD_PASSWORDS.has(config.dashboardPassword.toLowerCase());
+  const weakSecretsEncryptionKey = !config.secretsEncryptionKey || config.secretsEncryptionKey.length < 32 || config.secretsEncryptionKey === "dev-master-token";
 
   if (isDevelopment) {
     if (weakMasterToken) {
@@ -264,6 +267,9 @@ function validateConfig() {
     }
     if (weakDashboardPassword) {
       console.warn("WARNING: DASHBOARD_PASSWORD is weak or default. Set a stronger password before production use.");
+    }
+    if (weakSecretsEncryptionKey) {
+      console.warn("WARNING: SECRETS_ENCRYPTION_KEY is weak or missing. Set a 32+ character random value before production use.");
     }
     return;
   }
@@ -276,6 +282,9 @@ function validateConfig() {
   }
   if (weakDashboardPassword) {
     throw new Error("DASHBOARD_PASSWORD must be set to a non-default password of at least 12 characters in production.");
+  }
+  if (weakSecretsEncryptionKey) {
+    throw new Error("SECRETS_ENCRYPTION_KEY must be set to a non-default random value of at least 32 characters in production.");
   }
 }
 

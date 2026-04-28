@@ -19,6 +19,8 @@ import { cors } from "@elysiajs/cors";
 
 import { config } from "./config";
 import { checkAuth } from "./middleware/auth";
+import { checkRateLimit } from "./middleware/rate-limit";
+import { logAuditEvent, shouldAuditRequest } from "./services/audit.service";
 import { closeDb, sql } from "./db";
 import { authRoutes, deployRoutes, storageCompatRoutes } from "./routes";
 import { migrateLegacyVersionArtifacts } from "./services/edge-function.service";
@@ -552,10 +554,35 @@ export async function registerAllRoutes() {
     new Elysia({ name: "api-routes" })
       // Auth guard — runs before every route in this group
       .onBeforeHandle(async ({ request, set }) => {
+        const rateLimit = checkRateLimit(request);
+        for (const [key, value] of Object.entries(rateLimit.headers)) {
+          set.headers[key] = value;
+        }
+        if (!rateLimit.allowed) {
+          set.status = rateLimit.status;
+          if (shouldAuditRequest(request)) {
+            await logAuditEvent({ request, status: rateLimit.status, action: "rate_limit_denied" });
+          }
+          return rateLimit.body;
+        }
+
         const result = await checkAuth(request);
         if (result) {
           set.status = result.status;
+          if (shouldAuditRequest(request)) {
+            await logAuditEvent({ request, status: result.status, action: "auth_denied" });
+          }
           return result.body;
+        }
+      })
+      .onAfterHandle(async ({ request, set }) => {
+        if (shouldAuditRequest(request)) {
+          await logAuditEvent({ request, status: Number(set.status || 200) });
+        }
+      })
+      .onError(async ({ request, code, set }) => {
+        if (shouldAuditRequest(request)) {
+          await logAuditEvent({ request, status: Number(set.status || 500), action: `error:${code}` });
         }
       })
       .use(projectRoutes)
@@ -958,6 +985,10 @@ async function bootstrap() {
             }
           }
 
+          if (!projectRef) {
+            return new Response("Missing project reference", { status: 400 });
+          }
+
           // Convert the configured HTTP Realtime URL to a WS URL
           const wsBase = config.realtimeAdminUrl
             .replace(/^http:/, "ws:")
@@ -986,7 +1017,7 @@ async function bootstrap() {
           const isCI = process.env.CI === "true" || process.env.GITHUB_ACTIONS === "true";
           const tenantHost = isCI
             ? "realtime-dev.supabase-realtime"
-            : (projectRef ? `${projectRef}.api.${config.baseDomain}` : url.host);
+            : `${projectRef}.api.${config.baseDomain}`;
           requestHeaders["host"] = tenantHost;
           requestHeaders["x-forwarded-host"] = url.host;
           if (projectRef) {

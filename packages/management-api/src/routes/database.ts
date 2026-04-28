@@ -1,6 +1,7 @@
 import { Elysia, t } from "elysia";
 import { projectService } from "../services";
-import { db, resolveDbName, getProjectDb } from "../db";
+import { db, getProjectDb, getProjectRoleDb, resolveDbName, sql as metaSql, type SqlExecutionMode } from "../db";
+import { requireAdminAuth } from "../middleware/auth";
 
 export type MigrationBody =
   | { query: string; version?: number | string }
@@ -30,6 +31,37 @@ export function sqlRouteResponse(result: Awaited<ReturnType<typeof db.executeQue
     fields: result.fields || [],
     notices: result.notices || [],
   };
+}
+
+async function getProjectDatabaseCredentials(ref: string) {
+  const [project] = await metaSql`
+    SELECT db_name, db_user, db_password
+    FROM projects
+    WHERE ref = ${ref} AND deleted_at IS NULL
+    LIMIT 1
+  `;
+  if (!project) return null;
+  return {
+    db_name: String(project.db_name),
+    db_user: String(project.db_user),
+    db_password: String(project.db_password),
+  };
+}
+
+async function getProjectSql(ref: string) {
+  const credentials = await getProjectDatabaseCredentials(ref);
+  if (!credentials) return null;
+  return getProjectRoleDb(credentials.db_name, credentials.db_user, credentials.db_password);
+}
+
+function resolveSqlMode(body: Record<string, unknown>): SqlExecutionMode {
+  const mode = typeof body.mode === "string" ? body.mode : "read";
+  if (mode === "migration" || mode === "admin") return mode;
+  return "read";
+}
+
+function requireAdminMode(body: Record<string, unknown>): boolean {
+  return body.mode === "admin" && body.admin === true;
 }
 
 const ensuredMigrationTables = new Set<string>();
@@ -92,13 +124,16 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
             }
 
             try {
-                const dbName = await resolveDbName(params.ref);
                 const limit = Number(query._limit || query.limit || 50);
                 const page = Number(query._page || 1);
                 const skip = Number(query.skip || (page - 1) * limit);
                 const search = query.q ? String(query.q) : (query.query ? String(query.query) : "");
 
-                const projectDb = getProjectDb(dbName);
+                const projectDb = await getProjectSql(params.ref);
+                if (!projectDb) {
+                    set.status = 404;
+                    return { message: "Project database credentials not found", code: "404", status: 404 };
+                }
                 let rows: any[];
                 if (search) {
                     rows = await projectDb`
@@ -156,14 +191,17 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
             }
 
             try {
-                const dbName = await resolveDbName(params.ref);
                 const regex = /^[a-zA-Z_0-9]+$/;
                 if (!regex.test(params.schema) || !regex.test(params.table)) {
                      set.status = 400;
                      return { message: "Invalid schema or table name format", code: "400", status: 400 };
                 }
 
-                const projectDb = getProjectDb(dbName);
+                const projectDb = await getProjectSql(params.ref);
+                if (!projectDb) {
+                    set.status = 404;
+                    return { message: "Project database credentials not found", code: "404", status: 404 };
+                }
                 const rows = await projectDb`
                     SELECT column_name, data_type, is_nullable, column_default
                     FROM information_schema.columns
@@ -199,7 +237,6 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
             }
 
             try {
-                const dbName = await resolveDbName(params.ref);
                 const limit = Math.min(Math.max(Number(query._limit || query.limit || 50), 1), 500);
                 const page = Math.max(Number(query._page || 1), 1);
                 const skip = Number(query.skip || (page - 1) * limit);
@@ -210,7 +247,11 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
                      return { message: "Invalid schema or table name format", code: "400", status: 400 };
                 }
 
-                const projectDb = getProjectDb(dbName);
+                const projectDb = await getProjectSql(params.ref);
+                if (!projectDb) {
+                    set.status = 404;
+                    return { message: "Project database credentials not found", code: "404", status: 404 };
+                }
                 const rows = await projectDb.unsafe(`SELECT * FROM "${params.schema}"."${params.table}" LIMIT ${limit} OFFSET ${skip}`);
                 const countResult = await projectDb.unsafe(`SELECT count(*) as count FROM "${params.schema}"."${params.table}"`);
 
@@ -254,8 +295,16 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
             }
 
             try {
-                const dbName = await resolveDbName(params.ref);
-                const result = await db.executeQuery(dbName, body.query);
+                const credentials = await getProjectDatabaseCredentials(params.ref);
+                if (!credentials) {
+                    set.status = 404;
+                    return { message: "Project database credentials not found", code: "404", status: 404 };
+                }
+                const result = await db.executeQuery(credentials.db_name, body.query, {
+                    mode: "read",
+                    username: credentials.db_user,
+                    password: credentials.db_password,
+                });
                 return sqlRouteResponse(result);
             } catch (error: unknown) {
                 set.status = 400;
@@ -278,7 +327,7 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
     )
     .post(
         "/sql",
-        async ({ params, body, set }) => {
+        async ({ params, body, set, request }) => {
             const project = await projectService.getProject(params.ref);
             if (!project) {
                 set.status = 404;
@@ -286,13 +335,33 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
             }
 
             try {
-                const dbName = await resolveDbName(params.ref);
                 const sqlQuery = body.query || body.sql;
                 if (!sqlQuery) {
                     set.status = 400;
                     return { message: "query or sql is required", code: "400", status: 400 };
                 }
-                const result = await db.executeQuery(dbName, sqlQuery);
+                const mode = resolveSqlMode(body as Record<string, unknown>);
+                if (mode === "admin") {
+                    if (!requireAdminMode(body as Record<string, unknown>)) {
+                        set.status = 403;
+                        return { message: "Admin SQL requires mode=admin and admin=true", code: "403", status: 403 };
+                    }
+                    const authError = await requireAdminAuth(request);
+                    if (authError) {
+                        set.status = authError.status;
+                        return { message: authError.body.error, code: String(authError.status), status: authError.status };
+                    }
+                }
+                const credentials = await getProjectDatabaseCredentials(params.ref);
+                if (!credentials) {
+                    set.status = 404;
+                    return { message: "Project database credentials not found", code: "404", status: 404 };
+                }
+                const useRoleConnection = mode !== "admin";
+                const result = await db.executeQuery(credentials.db_name, sqlQuery, {
+                    mode,
+                    ...(useRoleConnection ? { username: credentials.db_user, password: credentials.db_password } : {}),
+                });
                 return sqlRouteResponse(result);
             } catch (error: unknown) {
                 set.status = 400;
@@ -311,6 +380,8 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
             body: t.Object({
                 sql: t.Optional(t.String()),
                 query: t.Optional(t.String()),
+                mode: t.Optional(t.Union([t.Literal("read"), t.Literal("migration"), t.Literal("admin")])),
+                admin: t.Optional(t.Boolean()),
             }),
         }
     )
@@ -424,8 +495,11 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
             }
 
             try {
-                const dbName = await resolveDbName(params.ref);
-                const projectDb = getProjectDb(dbName);
+                const projectDb = await getProjectSql(params.ref);
+                if (!projectDb) {
+                    set.status = 404;
+                    return { message: "Project database credentials not found", code: "404", status: 404 };
+                }
                 let rows: Array<Record<string, unknown>> = [];
                 try {
                     rows = await projectDb`
@@ -458,8 +532,11 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
                 return { message: "Project not found", code: "404", status: 404 };
             }
             try {
-                const dbName = await resolveDbName(params.ref);
-                const projectDb = getProjectDb(dbName);
+                const projectDb = await getProjectSql(params.ref);
+                if (!projectDb) {
+                    set.status = 404;
+                    return { message: "Project database credentials not found", code: "404", status: 404 };
+                }
                 const rows = await projectDb`
                     SELECT
                         c.oid as id,
@@ -505,8 +582,11 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
                 return { message: "Project not found", code: "404", status: 404 };
             }
             try {
-                const dbName = await resolveDbName(params.ref);
-                const projectDb = getProjectDb(dbName);
+                const projectDb = await getProjectSql(params.ref);
+                if (!projectDb) {
+                    set.status = 404;
+                    return { message: "Project database credentials not found", code: "404", status: 404 };
+                }
                 const rows = await projectDb`
                     SELECT
                         p.oid as id,
@@ -550,8 +630,11 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
                 return { message: "Project not found", code: "404", status: 404 };
             }
             try {
-                const dbName = await resolveDbName(params.ref);
-                const projectDb = getProjectDb(dbName);
+                const projectDb = await getProjectSql(params.ref);
+                if (!projectDb) {
+                    set.status = 404;
+                    return { message: "Project database credentials not found", code: "404", status: 404 };
+                }
                 const rows = await projectDb`
                     SELECT
                         t.oid as id,
@@ -605,8 +688,11 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
                 return { message: "Project not found", code: "404", status: 404 };
             }
             try {
-                const dbName = await resolveDbName(params.ref);
-                const projectDb = getProjectDb(dbName);
+                const projectDb = await getProjectSql(params.ref);
+                if (!projectDb) {
+                    set.status = 404;
+                    return { message: "Project database credentials not found", code: "404", status: 404 };
+                }
                 const rows = await projectDb`
                     SELECT
                         p.oid as id,

@@ -486,7 +486,10 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
       if (!keys) {
         return status(404, { message: "Project not found", code: "404" });
       }
-      return keys;
+      return {
+        anon_key: keys.anon_key,
+        service_role_key: keys.service_role_key ? "********" : "",
+      };
     },
     {
       params: t.Object({
