@@ -6,7 +6,7 @@ import { projectService } from "../../src/services/project.service";
 import { restoreLogicalBackup } from "../../src/services/backup.service";
 import { backgroundTaskService } from "../../src/services/background-task.service";
 import { edgeFunctionService } from "../../src/services/edge-function.service";
-import { sdkProxyInternals, sdkProxyRoutes } from "../../src/routes/sdk-proxy";
+import { sdkProxyInternals } from "../../src/routes/sdk-proxy";
 import { decryptSecretIfNeeded, isEncryptedSecret } from "../../src/utils/secret-crypto";
 
 const masterHeaders = { Authorization: "Bearer dev-master-token" };
@@ -93,7 +93,6 @@ describe("final security regressions", () => {
   });
 
   test("background function tasks persist encrypted credentials", async () => {
-    const resolveSpy = spyOn(sdkProxyInternals, "resolveProjectRefFromApiKey").mockResolvedValue("proj_1");
     const getConfigSpy = spyOn(edgeFunctionService, "getConfig").mockResolvedValue({
       verify_jwt: false,
       version: "1",
@@ -120,10 +119,9 @@ describe("final security regressions", () => {
       attempt: 1,
       max_attempts: input.maxAttempts,
     }) as Awaited<ReturnType<typeof backgroundTaskService.enqueueBackgroundFunctionTask>>);
-    const request = appWith(sdkProxyRoutes);
 
     try {
-      const response = await request("/functions/v1/hello/async", {
+      const response = await sdkProxyInternals.maybeEnqueueAsyncFunction(new Request("http://localhost/functions/v1/hello/async", {
         method: "POST",
         headers: {
           "content-type": "application/json",
@@ -131,9 +129,9 @@ describe("final security regressions", () => {
           authorization: "Bearer user-jwt",
         },
         body: JSON.stringify({ ok: true }),
-      });
+      }), "proj_1");
 
-      expect(response.status).toBe(202);
+      expect(response?.status).toBe(202);
       expect(enqueueSpy).toHaveBeenCalledTimes(1);
       const envelope = enqueueSpy.mock.calls[0]?.[0].envelope;
       expect(envelope.auth.authorization).not.toBe("Bearer user-jwt");
@@ -143,7 +141,6 @@ describe("final security regressions", () => {
       expect(decryptSecretIfNeeded(envelope.auth.authorization || "")).toBe("Bearer user-jwt");
       expect(decryptSecretIfNeeded(envelope.auth.apikey || "")).toBe("anon-key");
     } finally {
-      resolveSpy.mockRestore();
       getConfigSpy.mockRestore();
       getSettingsSpy.mockRestore();
       getApiKeysSpy.mockRestore();
