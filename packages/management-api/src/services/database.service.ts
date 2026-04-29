@@ -342,6 +342,9 @@ export class DatabaseService {
         ALTER DEFAULT PRIVILEGES IN SCHEMA auth GRANT ALL ON SEQUENCES TO supabase_auth_admin;
 
         -- Ensure service_role has access to all tables created by postgres
+        GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO service_role;
+        GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO service_role;
+        GRANT ALL PRIVILEGES ON ALL ROUTINES IN SCHEMA public TO service_role;
         ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT ALL ON TABLES TO postgres, anon, authenticated, service_role;
         ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT ALL ON SEQUENCES TO postgres, anon, authenticated, service_role;
         ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT ALL ON FUNCTIONS TO postgres, anon, authenticated, service_role;
