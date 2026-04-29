@@ -33,6 +33,7 @@ on:
 # Source: https://supabase.com/docs/guides/self-hosting/docker#generate-api-keys
 # gitleaks:allow
 env:
+  NODE_VERSION: "24.x"
   # noqa: hardcoded-jwt — these are the Supabase public demo keys used for local/CI testing only
   # Source: https://supabase.com/docs/guides/self-hosting/docker#generate-api-keys
   SUPABASE_DEMO_ANON_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0" # gitleaks:allow
@@ -48,10 +49,20 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
+
+      - name: Show runtime versions
+        run: |
+          node --version
+          bun --version
 
       - name: Install dependencies
         working-directory: packages/management-api
@@ -70,10 +81,20 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
+
+      - name: Show runtime versions
+        run: |
+          node --version
+          bun --version
 
       - name: Check web console
         working-directory: packages/web-console
@@ -134,10 +155,20 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
+
+      - name: Show runtime versions
+        run: |
+          node --version
+          bun --version
 
       - name: Install dependencies
         working-directory: packages/management-api
@@ -234,10 +265,20 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
+
+      - name: Show runtime versions
+        run: |
+          node --version
+          bun --version
 
       - name: Install dependencies
         working-directory: packages/management-api
@@ -388,10 +429,20 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
+
+      - name: Show runtime versions
+        run: |
+          node --version
+          bun --version
 
       - name: Install dependencies
         working-directory: packages/management-api
