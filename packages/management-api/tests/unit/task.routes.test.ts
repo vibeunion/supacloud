@@ -13,6 +13,8 @@ const releaseTask = mock(() => Promise.resolve(null));
 const markTaskFailed = mock(() => Promise.resolve(null));
 const cancelTask = mock(() => Promise.resolve(null));
 const retryTask = mock(() => Promise.resolve(null));
+const retryQueueMessage = mock(() => Promise.resolve(null));
+const countQueueMessagesCreatedSince = mock(() => Promise.resolve(0));
 const requestTaskCancellation = mock(() => Promise.resolve(null));
 const getTaskStats = mock(() => Promise.resolve({
   running: 0,
@@ -22,6 +24,17 @@ const getTaskStats = mock(() => Promise.resolve({
   cancelledLast24h: 0,
   topFailures: [],
   failedTrend: [],
+}));
+const getQueueStats = mock(() => Promise.resolve({
+  pending: 0,
+  leased: 0,
+  running: 0,
+  retryScheduled: 0,
+  succeededLast24h: 0,
+  failedLast24h: 0,
+  deadLettered: 0,
+  oldestPendingAgeSec: null,
+  inFlight: 0,
 }));
 
 const backgroundFunctionWorker = {
@@ -43,6 +56,18 @@ const projectService = {
     timeout_sec_default: 300,
     timeout_sec_max: 900,
   })),
+  getQueueSettings: mock(() => Promise.resolve({
+    max_in_flight: 10,
+    default_visibility_timeout_sec: 330,
+    max_attempts: 3,
+    rate_limit_per_minute: 600,
+  })),
+  updateQueueSettings: mock(() => Promise.resolve({
+    max_in_flight: 20,
+    default_visibility_timeout_sec: 120,
+    max_attempts: 5,
+    rate_limit_per_minute: 1200,
+  })),
 };
 
 const { taskRepository } = await import("../../src/repositories/task.repository");
@@ -63,10 +88,15 @@ spyOn(taskRepository, "releaseTask").mockImplementation(releaseTask as typeof ta
 spyOn(taskRepository, "markTaskFailed").mockImplementation(markTaskFailed as typeof taskRepository.markTaskFailed);
 spyOn(taskRepository, "cancelTask").mockImplementation(cancelTask as typeof taskRepository.cancelTask);
 spyOn(taskRepository, "retryTask").mockImplementation(retryTask as typeof taskRepository.retryTask);
+spyOn(taskRepository, "retryQueueMessage").mockImplementation(retryQueueMessage as typeof taskRepository.retryQueueMessage);
+spyOn(taskRepository, "countQueueMessagesCreatedSince").mockImplementation(
+  countQueueMessagesCreatedSince as typeof taskRepository.countQueueMessagesCreatedSince,
+);
 spyOn(taskRepository, "requestTaskCancellation").mockImplementation(
   requestTaskCancellation as typeof taskRepository.requestTaskCancellation,
 );
 spyOn(taskRepository, "getTaskStats").mockImplementation(getTaskStats as typeof taskRepository.getTaskStats);
+spyOn(taskRepository, "getQueueStats").mockImplementation(getQueueStats as typeof taskRepository.getQueueStats);
 spyOn(services.backgroundFunctionWorker, "cancel").mockImplementation(
   backgroundFunctionWorker.cancel as typeof services.backgroundFunctionWorker.cancel,
 );
@@ -75,6 +105,12 @@ spyOn(services.projectService, "getBackgroundTaskSettings").mockImplementation(
 );
 spyOn(services.projectService, "updateBackgroundTaskSettings").mockImplementation(
   projectService.updateBackgroundTaskSettings as typeof services.projectService.updateBackgroundTaskSettings,
+);
+spyOn(services.projectService, "getQueueSettings").mockImplementation(
+  projectService.getQueueSettings as typeof services.projectService.getQueueSettings,
+);
+spyOn(services.projectService, "updateQueueSettings").mockImplementation(
+  projectService.updateQueueSettings as typeof services.projectService.updateQueueSettings,
 );
 
 const { taskRoutes } = await import("../../src/routes/tasks");
@@ -104,13 +140,31 @@ describe("taskRoutes", () => {
     markTaskFailed.mockReset();
     cancelTask.mockReset();
     retryTask.mockReset();
+    retryQueueMessage.mockReset();
+    countQueueMessagesCreatedSince.mockReset();
     requestTaskCancellation.mockReset();
     getTaskStats.mockReset();
+    getQueueStats.mockReset();
     backgroundFunctionWorker.cancel.mockReset();
     projectService.getBackgroundTaskSettings.mockReset();
     projectService.updateBackgroundTaskSettings.mockReset();
+    projectService.getQueueSettings.mockReset();
+    projectService.updateQueueSettings.mockReset();
 
     backgroundFunctionWorker.cancel.mockResolvedValue(true);
+    projectService.getQueueSettings.mockResolvedValue({
+      max_in_flight: 10,
+      default_visibility_timeout_sec: 330,
+      max_attempts: 3,
+      rate_limit_per_minute: 600,
+    });
+    projectService.updateQueueSettings.mockResolvedValue({
+      max_in_flight: 20,
+      default_visibility_timeout_sec: 120,
+      max_attempts: 5,
+      rate_limit_per_minute: 1200,
+    });
+    countQueueMessagesCreatedSince.mockResolvedValue(0);
   });
 
   test("POST /queues/:queueName/messages enqueues a JSON message", async () => {
@@ -131,6 +185,32 @@ describe("taskRoutes", () => {
       payload: { hello: "world" },
       maxAttempts: 5,
     }));
+    expect(countQueueMessagesCreatedSince).toHaveBeenCalledWith(
+      "proj_1",
+      "queue:emails",
+      expect.any(Date),
+    );
+  });
+
+  test("POST /queues/:queueName/messages enforces queue rate limit", async () => {
+    projectService.getQueueSettings.mockResolvedValueOnce({
+      max_in_flight: 10,
+      default_visibility_timeout_sec: 330,
+      max_attempts: 3,
+      rate_limit_per_minute: 1,
+    });
+    countQueueMessagesCreatedSince.mockResolvedValueOnce(1);
+
+    const response = await request("/v1/projects/proj_1/tasks/queues/crawl/messages", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ payload: { url: "https://example.com" } }),
+    });
+    const payload = await response.json();
+
+    expect(response.status).toBe(429);
+    expect(payload.message).toBe("Queue rate limit exceeded");
+    expect(createTask).not.toHaveBeenCalled();
   });
 
   test("POST /queues/:queueName/messages/receive leases the next available message", async () => {
@@ -149,6 +229,7 @@ describe("taskRoutes", () => {
       projectRef: "proj_1",
       queueName: "queue:emails",
       visibilityTimeoutSec: 60,
+      maxInFlight: 10,
     });
   });
 
@@ -196,6 +277,50 @@ describe("taskRoutes", () => {
     });
   });
 
+  test("GET /queues/:queueName/stats returns queue-level metrics", async () => {
+    getQueueStats.mockResolvedValueOnce({
+      pending: 4,
+      leased: 1,
+      running: 0,
+      retryScheduled: 2,
+      succeededLast24h: 8,
+      failedLast24h: 1,
+      deadLettered: 3,
+      oldestPendingAgeSec: 42,
+      inFlight: 1,
+    });
+
+    const response = await request("/v1/projects/proj_1/tasks/queues/crawl/stats");
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.pending).toBe(4);
+    expect(getQueueStats).toHaveBeenCalledWith("proj_1", "queue:crawl");
+  });
+
+  test("PATCH /queues/:queueName/settings updates queue reliability controls", async () => {
+    const response = await request("/v1/projects/proj_1/tasks/queues/crawl/settings", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        max_in_flight: 20,
+        default_visibility_timeout_sec: 120,
+        max_attempts: 5,
+        rate_limit_per_minute: 1200,
+      }),
+    });
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.max_in_flight).toBe(20);
+    expect(projectService.updateQueueSettings).toHaveBeenCalledWith("proj_1", "crawl", {
+      max_in_flight: 20,
+      default_visibility_timeout_sec: 120,
+      max_attempts: 5,
+      rate_limit_per_minute: 1200,
+    });
+  });
+
   test("DELETE /queues/:queueName/messages/:messageId marks queue message deleted", async () => {
     getTaskByIdAndType.mockResolvedValueOnce({ id: "msg_1", task_type: "queue:emails", status: "leased" });
     cancelTask.mockResolvedValueOnce({ id: "msg_1", status: "cancelled" });
@@ -206,6 +331,19 @@ describe("taskRoutes", () => {
 
     expect(response.status).toBe(204);
     expect(cancelTask).toHaveBeenCalledWith("msg_1", "Deleted by queue client");
+  });
+
+  test("POST /queues/:queueName/messages/:messageId/retry replays DLQ messages", async () => {
+    retryQueueMessage.mockResolvedValueOnce({ id: "msg_1", task_type: "queue:crawl", status: "pending" });
+
+    const response = await request("/v1/projects/proj_1/tasks/queues/crawl/messages/msg_1/retry", {
+      method: "POST",
+    });
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.status).toBe("pending");
+    expect(retryQueueMessage).toHaveBeenCalledWith("msg_1", "proj_1", "queue:crawl");
   });
 
   test("GET /v1/projects/:ref/tasks forwards function_slug filter to repository", async () => {
