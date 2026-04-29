@@ -70,6 +70,27 @@ const backgroundRoutesSchema = z.preprocess((value) => {
     }
 }));
 
+const secretsSchema = z.preprocess((value) => {
+    if (typeof value !== "string") return value;
+    const trimmed = value.trim();
+    if (!trimmed) return [];
+    if (trimmed.startsWith("[")) {
+        try {
+            return JSON.parse(trimmed);
+        } catch {
+            return trimmed;
+        }
+    }
+    return trimmed.split(",").map((entry) => {
+        const separator = entry.indexOf("=");
+        if (separator <= 0) return { name: entry.trim(), value: "" };
+        return {
+            name: entry.slice(0, separator).trim(),
+            value: entry.slice(separator + 1),
+        };
+    }).filter((entry) => entry.name);
+}, z.array(z.object({ name: z.string(), value: z.string() })).optional());
+
 type EdgeFunctionConfigInput = {
     verify_jwt?: boolean;
     background_routes?: string[];
@@ -207,8 +228,8 @@ Actions: list, upsert, delete`,
         {
             action: z.enum(["list", "upsert", "delete"]).describe("Action"),
             ref: z.string().describe("Project ref"),
-            secrets: z.array(z.object({ name: z.string(), value: z.string() })).optional()
-                .describe("[upsert] Secret list: [{name:'KEY', value:'...'}]"),
+            secrets: secretsSchema
+                .describe("[upsert] Secret list as JSON array or KEY=VALUE,KEY2=VALUE2"),
             name: z.string().optional().describe("[delete] Secret name to delete"),
         },
         async (args: any) => {
