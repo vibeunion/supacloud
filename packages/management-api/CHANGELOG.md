@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.10](https://github.com/zuohuadong/supacloud/compare/management-api-v0.12.9...management-api-v0.12.10) (2026-04-29)
+
+
+### 🐛 Bug Fixes
+
+* **management-api:** expose unmasked runtime env internally ([713702b](https://github.com/zuohuadong/supacloud/commit/713702bb3950e4df9cd5ed18850073e5710fd040))
+
 ## [0.12.9](https://github.com/zuohuadong/supacloud/compare/management-api-v0.12.8...management-api-v0.12.9) (2026-04-29)
 
 
