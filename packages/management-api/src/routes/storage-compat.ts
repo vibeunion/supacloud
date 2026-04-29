@@ -187,10 +187,36 @@ async function resolveProjectRefFromApiKey(key: string): Promise<string> {
     return '';
 }
 
+async function resolveProjectRefFromHeaderAndHost(ref: string, host: string): Promise<string> {
+    if (!ref || !host) return '';
+    try {
+        const { sql } = await import('../db');
+        const rows = await sql`
+            SELECT ref
+            FROM projects
+            WHERE ref = ${ref}
+              AND (
+                config->>'api_domain' = ${host}
+                OR config->>'custom_domain' = ${host}
+                OR config->>'studio_domain' = ${host}
+              )
+            LIMIT 1
+        `;
+        if (rows.length > 0 && String(rows[0].ref) === ref) return ref;
+    } catch {}
+
+    if (config.baseDomain && host === `${ref}.api.${config.baseDomain}`) {
+        return ref;
+    }
+
+    return '';
+}
+
 async function getProjectRef(headers: Record<string, string | undefined>): Promise<string> {
     const auth = headers['authorization'] || '';
     const key = headers['apikey'] || '';
     const host = headers['host']?.replace(/:\d+$/, '') || '';
+    const headerRef = headers['x-project-ref'] || headers['x-supabase-project'] || '';
 
     if (process.env.BUN_ENV === 'test' || process.env.NODE_ENV === 'test') {
         if (key === 'test-token' || auth === 'Bearer test-token') {
@@ -199,9 +225,10 @@ async function getProjectRef(headers: Record<string, string | undefined>): Promi
     }
 
     const apiKeyRef = await resolveProjectRefFromApiKey(key);
-    if (!apiKeyRef) return '';
+    if (!apiKeyRef) {
+        return await resolveProjectRefFromHeaderAndHost(headerRef, host);
+    }
 
-    const headerRef = headers['x-project-ref'] || headers['x-supabase-project'];
     if (headerRef && apiKeyRef !== headerRef) return '';
 
     if (host) {
@@ -786,7 +813,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             const lastModified = res.headers?.get('Last-Modified') || info?.updated_at || info?.created_at;
             if (lastModified) set.headers['Last-Modified'] = new Date(lastModified as string | number).toUTCString();
             setDownloadDisposition(query as Record<string, string | undefined>, filePath, set as { headers: Record<string, string> });
-            const newRes = new Response(res.body);
+            const newRes = new Response(await res.arrayBuffer());
             return newRes;
         } catch (err: unknown) {
             return status(500, { statusCode: "500", error: 'Internal', message: 'Download failed' });
@@ -820,7 +847,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             const lastModified = res.headers?.get('Last-Modified') || info?.updated_at || info?.created_at;
             if (lastModified) set.headers['Last-Modified'] = new Date(lastModified as string | number).toUTCString();
             setDownloadDisposition(query as Record<string, string | undefined>, filePath, set as { headers: Record<string, string> });
-            const newRes = new Response(res.body);
+            const newRes = new Response(await res.arrayBuffer());
             return newRes;
         } catch (err: unknown) {
             return status(500, { statusCode: "500", error: 'Internal', message: 'Download failed' });
@@ -909,7 +936,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             const lastModified = res.headers?.get('Last-Modified') || info?.updated_at || info?.created_at;
             if (lastModified) set.headers['Last-Modified'] = new Date(lastModified as string | number).toUTCString();
             setDownloadDisposition(query as Record<string, string | undefined>, filePath, set as { headers: Record<string, string> });
-            const newRes = new Response(res.body);
+            const newRes = new Response(await res.arrayBuffer());
             return newRes;
         } catch (err: unknown) {
             return status(500, { statusCode: "500", error: 'Internal', message: 'Download failed' });
@@ -1151,7 +1178,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             set.headers['Content-Type'] = res.headers?.get('Content-Type') || 'application/octet-stream';
             set.headers['Cache-Control'] = 'private, no-store';
             setDownloadDisposition(query as Record<string, string | undefined>, filePath, set as { headers: Record<string, string> });
-            const newRes = new Response(res.body);
+            const newRes = new Response(await res.arrayBuffer());
             return newRes;
         } catch (err: unknown) {
             return status(500, { statusCode: "500", error: 'Internal', message: 'Download failed' });
@@ -1838,7 +1865,7 @@ async function proxyToImaginary(
         }
         setDownloadDisposition(query as Record<string, string | undefined>, filePath, set as { headers: Record<string, string> });
         set.headers['X-Image-Engine'] = 'imaginary/libvips';
-        return new Response(res.body);
+        return new Response(await res.arrayBuffer());
     } catch (err: unknown) {
         logger.error('Imaginary proxy error:', { error: err instanceof Error ? err.message : String(err) });
         return status(502, { message: 'Image processing service unavailable', code: "502" }) as unknown as { message: string };

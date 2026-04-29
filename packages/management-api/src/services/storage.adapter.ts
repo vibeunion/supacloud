@@ -231,7 +231,13 @@ export class JuiceFSDriver implements StorageDriver {
   ): Promise<Response | null> {
     const file = Bun.file(this.getBasePath(projectRef, bucket, key));
     if (!(await file.exists())) return null;
-    return new Response(file);
+    const content = await file.arrayBuffer();
+    return new Response(content, {
+      headers: {
+        "Content-Type": file.type || "application/octet-stream",
+        "Content-Length": String(content.byteLength),
+      },
+    });
   }
 }
 
