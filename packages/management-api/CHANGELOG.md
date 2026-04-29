@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.12.12](https://github.com/zuohuadong/supacloud/compare/management-api-v0.12.11...management-api-v0.12.12) (2026-04-29)
+
+
+### 🐛 Bug Fixes
+
+* **ci:** provide websocket for sdk compliance ([26ffa43](https://github.com/zuohuadong/supacloud/commit/26ffa437772b99d3fb02fc770c3097e24414d012))
+* **ci:** retry official cli bootstrap downloads ([420f0ad](https://github.com/zuohuadong/supacloud/commit/420f0ada19af72b74b6b981979098603551cc6d2))
+
 ## [0.12.11](https://github.com/zuohuadong/supacloud/compare/management-api-v0.12.10...management-api-v0.12.11) (2026-04-29)
 
 
