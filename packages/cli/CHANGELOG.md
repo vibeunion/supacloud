@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.3](https://github.com/zuohuadong/supacloud/compare/cli-v0.3.2...cli-v0.3.3) (2026-04-29)
+
+
+### 🐛 Bug Fixes
+
+* **cli:** handle migration list arrays ([6d5ab05](https://github.com/zuohuadong/supacloud/commit/6d5ab05995590d974d255a1edeb13899ad5d9d2b))
+
 ## [0.3.2](https://github.com/zuohuadong/supacloud/compare/cli-v0.3.1...cli-v0.3.2) (2026-04-27)
 
 
