@@ -196,6 +196,10 @@ async function bootstrap() {
       /http:\/\/localhost:54321/g,
       "http://127.0.0.1:9090",
     );
+    testContent = testContent.replace(
+      "    wsTransport = require('ws')",
+      "    wsTransport = require('ws')\n    ;(globalThis as any).WebSocket ??= wsTransport",
+    );
     writeFileSync(testFilePath, testContent, "utf8");
     console.log(`✅ Patched test file: ${testFilePath}`);
   } else {
@@ -216,6 +220,10 @@ async function bootstrap() {
           /http:\/\/localhost:54321/g,
           "http://127.0.0.1:9090",
         );
+        testContent = testContent.replace(
+          "    wsTransport = require('ws')",
+          "    wsTransport = require('ws')\n    ;(globalThis as any).WebSocket ??= wsTransport",
+        );
         writeFileSync(found[0], testContent, "utf8");
         console.log(`✅ Patched discovered test file: ${found[0]}`);
       } else {
@@ -232,6 +240,7 @@ async function bootstrap() {
   try {
     // supabase-js is a monorepo — we need to install and build all workspaces
     await $`cd ${targetDir} && npm install --no-fund --no-audit`.quiet();
+    await $`cd ${targetDir} && npm install --no-save --no-fund --no-audit ws@^8`.quiet();
     await $`cd ${targetDir} && npm run build --workspaces --if-present`
       .quiet()
       .nothrow();
