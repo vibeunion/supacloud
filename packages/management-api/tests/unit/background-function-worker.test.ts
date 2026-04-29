@@ -62,7 +62,7 @@ spyOn(projectService, "getBackgroundTaskSettings").mockImplementation(
 
 // We import the worker AFTER mocks are set up
 // so the module resolves against mocks
-const { BackgroundFunctionWorker } = await import(
+const { BackgroundFunctionWorker, buildInvocationRequest } = await import(
   "../../src/services/background-function-worker"
 );
 
@@ -253,6 +253,39 @@ describe("BackgroundFunctionWorker", () => {
 
       const result = await worker.cancel("tsk_net_fail");
       expect(result).toBe(false);
+    });
+  });
+
+  describe("background invocation contract", () => {
+    test("buildInvocationRequest signs trusted background invoker headers", async () => {
+      const request = buildInvocationRequest(makeTask({
+        id: "tsk_signed",
+        project_ref: "proj_1",
+        function_slug: "my-function",
+        attempt: 2,
+        payload: {
+          method: "POST",
+          path: "/work",
+          query: "?a=1",
+          headers: {},
+          body: null,
+          auth: {
+            kind: "jwt",
+            invoker_user_id: "user_1",
+            invoker_role: "authenticated",
+          },
+        },
+      }));
+
+      expect(request.url).toContain("/internal/background/proj_1/my-function/work?a=1");
+      expect(request.headers.get("x-supacloud-background")).toBe("true");
+      expect(request.headers.get("x-supacloud-task-id")).toBe("tsk_signed");
+      expect(request.headers.get("x-supacloud-attempt")).toBe("2");
+      expect(request.headers.get("x-supacloud-invoker-user-id")).toBe("user_1");
+      expect(request.headers.get("x-supacloud-invoker-role")).toBe("authenticated");
+      expect(request.headers.get("x-supacloud-signature-version")).toBe("v1");
+      expect(request.headers.get("x-supacloud-signature-timestamp")).toBeTruthy();
+      expect(request.headers.get("x-supacloud-signature")).toMatch(/^[a-f0-9]{64}$/);
     });
   });
 });

@@ -7,6 +7,7 @@ import { logger } from "../utils/logger";
 import { config } from "../config";
 import { projectService } from "./project.service";
 import { decryptSecretIfNeeded } from "../utils/secret-crypto";
+import { createHmac } from "node:crypto";
 
 interface InvocationEnvelope {
   method?: string;
@@ -51,6 +52,23 @@ function scheduleLeaseHeartbeat(taskId: string, leaseSeconds: number): Timer {
   }, intervalMs);
 }
 
+function signBackgroundInvocation(input: {
+  taskId: string;
+  projectRef: string;
+  functionSlug: string | null;
+  attempt: number;
+  timestamp: string;
+}): string {
+  const canonical = [
+    input.taskId,
+    input.projectRef,
+    input.functionSlug || "",
+    String(input.attempt),
+    input.timestamp,
+  ].join("\n");
+  return createHmac("sha256", config.masterToken).update(canonical).digest("hex");
+}
+
 async function importDispatcher() {
   return import("./background-runtime-dispatcher");
 }
@@ -72,15 +90,17 @@ async function requestRuntimeCancellation(taskId: string): Promise<boolean> {
   }
 }
 
-function buildInvocationRequest(task: ProjectTask): Request {
+export function buildInvocationRequest(task: ProjectTask): Request {
   const payload = (task.payload || {}) as InvocationEnvelope;
   const headers = new Headers(payload.headers || {});
+  const attempt = task.attempt || 1;
+  const signatureTimestamp = new Date().toISOString();
 
   headers.set("x-project-ref", task.project_ref);
   headers.set("x-supacloud-task-id", task.id);
   if (task.trace_id) headers.set("x-supacloud-trace-id", task.trace_id);
   headers.set("x-supacloud-background", "true");
-  headers.set("x-supacloud-attempt", String(task.attempt || 1));
+  headers.set("x-supacloud-attempt", String(attempt));
   headers.set("x-supacloud-function-version", task.function_version || "1");
   headers.set("x-supacloud-auth-kind", payload.auth?.kind || "none");
   if (payload.auth?.invoker_user_id) {
@@ -99,6 +119,15 @@ function buildInvocationRequest(task: ProjectTask): Request {
     headers.set("x-supacloud-auth-apikey", decryptSecretIfNeeded(payload.auth.apikey));
   }
   headers.set("x-supacloud-internal-auth", `Bearer ${config.masterToken}`);
+  headers.set("x-supacloud-signature-version", "v1");
+  headers.set("x-supacloud-signature-timestamp", signatureTimestamp);
+  headers.set("x-supacloud-signature", signBackgroundInvocation({
+    taskId: task.id,
+    projectRef: task.project_ref,
+    functionSlug: task.function_slug,
+    attempt,
+    timestamp: signatureTimestamp,
+  }));
 
   const url = new URL(
     `http://${config.edgeRuntimeBackgroundInternal}/internal/background/${task.project_ref}/${task.function_slug}${payload.path || ""}${payload.query || ""}`,
