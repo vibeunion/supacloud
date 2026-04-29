@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.11](https://github.com/zuohuadong/supacloud/compare/management-api-v0.12.10...management-api-v0.12.11) (2026-04-29)
+
+
+### 🐛 Bug Fixes
+
+* **edge-runtime:** inject Bun function env ([54aefe5](https://github.com/zuohuadong/supacloud/commit/54aefe576cb351fe2dd37c4a9b8e74ed4c34f517))
+
 ## [0.12.10](https://github.com/zuohuadong/supacloud/compare/management-api-v0.12.9...management-api-v0.12.10) (2026-04-29)
 
 
