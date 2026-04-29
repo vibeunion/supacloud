@@ -19,6 +19,12 @@ import {
     resolveProjectStudioHost,
 } from "../utils/project-routing";
 import { mergeProjectConfig, normalizeProjectConfig } from "../utils/project-config";
+import { jwtService } from "./jwt.service";
+import { decryptSecretIfNeeded } from "../utils/secret-crypto";
+
+function isJwtLike(value: string | null | undefined): value is string {
+    return typeof value === "string" && value.split(".").length === 3;
+}
 
 export class TaskWorker {
     private isRunning = false;
@@ -304,11 +310,40 @@ export class TaskWorker {
                         normalizeProjectConfig(project.config),
                     );
                     const supabaseUrl = resolveProjectApiUrl(project_ref, routingConfig);
+                    const projectApiHost = resolveProjectApiHost(project_ref, routingConfig);
+                    const internalSupabaseUrl = `http://127.0.0.1:${config.port}`;
+                    let serviceRoleKey = project.service_role_key;
+                    const encryptedServiceRoleKey = (project as unknown as { service_role_key_encrypted?: string | null }).service_role_key_encrypted;
+
+                    if (!isJwtLike(serviceRoleKey) && encryptedServiceRoleKey) {
+                        try {
+                            const decrypted = decryptSecretIfNeeded(encryptedServiceRoleKey);
+                            if (isJwtLike(decrypted)) serviceRoleKey = decrypted;
+                        } catch {
+                            // Fall through to deterministic repair from jwt_secret below.
+                        }
+                    }
+
+                    if (!isJwtLike(serviceRoleKey)) {
+                        serviceRoleKey = await jwtService.generateServiceRoleKey(project.jwt_secret);
+                        await projectRepository.updateApiKeys(project_ref, {
+                            jwt_secret: project.jwt_secret,
+                            anon_key: project.anon_key,
+                            service_role_key: serviceRoleKey,
+                        });
+                        logger.warn(`[TaskWorker] Repaired invalid service_role_key while seeding secrets for ${project_ref}`);
+                    }
+
                     const standardSecrets = [
                         { name: "SUPABASE_URL", value: supabaseUrl },
                         { name: "SUPABASE_ANON_KEY", value: project.anon_key },
-                        { name: "SUPABASE_SERVICE_ROLE_KEY", value: project.service_role_key },
+                        { name: "SUPABASE_SERVICE_ROLE_KEY", value: serviceRoleKey },
                         { name: "JWT_SECRET", value: project.jwt_secret },
+                        { name: "SUPACLOUD_INTERNAL_SUPABASE_URL", value: internalSupabaseUrl },
+                        { name: "SUPACLOUD_INTERNAL_AUTH_URL", value: `${internalSupabaseUrl}/auth/v1` },
+                        { name: "SUPACLOUD_INTERNAL_REST_URL", value: `${internalSupabaseUrl}/rest/v1` },
+                        { name: "SUPACLOUD_PROJECT_REF", value: project_ref },
+                        { name: "SUPACLOUD_PROJECT_API_HOST", value: projectApiHost },
                         { name: "X_PROJECT_REF", value: project_ref },
                     ];
                     for (const s of standardSecrets) {
