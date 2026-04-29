@@ -6,6 +6,45 @@ import { writeFileSync, existsSync, rmSync, mkdirSync } from "fs";
 
 const CLI_VERSION = "2.20.5";
 
+function isTransientCliBootstrapFailure(result: { stdout?: unknown; stderr?: unknown }): boolean {
+    const output = `${result.stdout?.toString?.() ?? ""}\n${result.stderr?.toString?.() ?? ""}`.toLowerCase();
+    return [
+        "socket hang up",
+        "fetcherror",
+        "fetch failed",
+        "econnreset",
+        "etimedout",
+        "eai_again",
+        "enotfound",
+        "temporarily unavailable",
+        "tls connection",
+    ].some((needle) => output.includes(needle));
+}
+
+async function runCliWithRetry(
+    label: string,
+    command: () => Promise<{ exitCode: number; stdout: unknown; stderr: unknown }>,
+    maxAttempts = 3,
+) {
+    let lastResult: { exitCode: number; stdout: unknown; stderr: unknown } | null = null;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+        const result = await command();
+        lastResult = result;
+        if (result.exitCode === 0 || !isTransientCliBootstrapFailure(result) || attempt === maxAttempts) {
+            return result;
+        }
+
+        const delayMs = 1500 * attempt;
+        console.warn(
+            `⚠️  CLI [${label}] transient bootstrap/download failure, retrying ${attempt + 1}/${maxAttempts} in ${delayMs}ms...`,
+        );
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+
+    return lastResult!;
+}
+
 async function rekeyCliHarnessProject(projectId: string, originalRef: string, targetRef: string): Promise<void> {
     const maxAttempts = 10;
 
@@ -101,7 +140,10 @@ file_size_limit = "50MiB"
     try {
         // Test 1: supabase db push --db-url (self-hosted mode, no link needed)
         console.log(`\n⬆️  Test 1: [supabase db push --db-url]...`);
-        const pushResult = await $`SUPABASE_ACCESS_TOKEN=${SUPER_TOKEN} bunx ${cliBin} db push --db-url ${dbUrl} --workdir ${testDir}`.nothrow();
+        const pushResult = await runCliWithRetry(
+            "db push",
+            () => $`SUPABASE_ACCESS_TOKEN=${SUPER_TOKEN} bunx ${cliBin} db push --db-url ${dbUrl} --workdir ${testDir}`.nothrow(),
+        );
 
         if (pushResult.exitCode !== 0) {
             const stderr = pushResult.stderr.toString();
@@ -118,7 +160,10 @@ file_size_limit = "50MiB"
 
         // Test 2: supabase migration list --db-url
         console.log(`\n📋 Test 2: [supabase migration list --db-url]...`);
-        const listResult = await $`SUPABASE_ACCESS_TOKEN=${SUPER_TOKEN} bunx ${cliBin} migration list --db-url ${dbUrl} --workdir ${testDir}`.nothrow();
+        const listResult = await runCliWithRetry(
+            "migration list",
+            () => $`SUPABASE_ACCESS_TOKEN=${SUPER_TOKEN} bunx ${cliBin} migration list --db-url ${dbUrl} --workdir ${testDir}`.nothrow(),
+        );
 
         if (listResult.exitCode !== 0) {
             console.warn("⚠️  CLI [migration list] Failed (non-fatal):", listResult.stderr.toString());
@@ -128,7 +173,10 @@ file_size_limit = "50MiB"
 
         // Test 3: supabase db pull --db-url
         console.log(`\n🔍 Test 3: [supabase db pull --db-url]...`);
-        const pullResult = await $`SUPABASE_ACCESS_TOKEN=${SUPER_TOKEN} bunx ${cliBin} db pull --db-url ${dbUrl} --workdir ${testDir}`.nothrow();
+        const pullResult = await runCliWithRetry(
+            "db pull",
+            () => $`SUPABASE_ACCESS_TOKEN=${SUPER_TOKEN} bunx ${cliBin} db pull --db-url ${dbUrl} --workdir ${testDir}`.nothrow(),
+        );
 
         if (pullResult.exitCode !== 0) {
             const stderr = pullResult.stderr.toString();
@@ -144,7 +192,10 @@ file_size_limit = "50MiB"
 
         // Test 4: supabase gen types typescript --db-url
         console.log(`\n🔧 Test 4: [supabase gen types typescript --db-url]...`);
-        const genResult = await $`SUPABASE_ACCESS_TOKEN=${SUPER_TOKEN} bunx ${cliBin} gen types typescript --db-url ${dbUrl} --workdir ${testDir}`.nothrow();
+        const genResult = await runCliWithRetry(
+            "gen types",
+            () => $`SUPABASE_ACCESS_TOKEN=${SUPER_TOKEN} bunx ${cliBin} gen types typescript --db-url ${dbUrl} --workdir ${testDir}`.nothrow(),
+        );
 
         if (genResult.exitCode !== 0) {
             console.warn("⚠️  CLI [gen types] Failed (non-fatal):", genResult.stderr.toString());
