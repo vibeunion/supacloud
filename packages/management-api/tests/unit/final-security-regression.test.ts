@@ -1,8 +1,10 @@
 import { describe, expect, mock, spyOn, test } from "bun:test";
 import { Elysia } from "elysia";
 import { projectFunctionsRoutes } from "../../src/routes/project-functions";
+import { projectSecretsRoutes } from "../../src/routes/project-secrets";
 import { projectConfigRoutes } from "../../src/routes/project-config";
 import { projectService } from "../../src/services/project.service";
+import { runtimeEnvService } from "../../src/services/runtime-env.service";
 import { restoreLogicalBackup } from "../../src/services/backup.service";
 import { sdkProxyInternals } from "../../src/routes/sdk-proxy";
 import { decryptSecretIfNeeded, isEncryptedSecret } from "../../src/utils/secret-crypto";
@@ -59,6 +61,28 @@ describe("final security regressions", () => {
       ]);
     } finally {
       getSecretsSpy.mockRestore();
+    }
+  });
+
+  test("internal runtime env endpoint requires master auth and returns unmasked values", async () => {
+    const runtimeEnvSpy = spyOn(runtimeEnvService, "buildProjectRuntimeEnv").mockResolvedValue({
+      SUPACLOUD_PROJECT_REF: "proj_1",
+      SUPABASE_SERVICE_ROLE_KEY: "header.payload.signature",
+    });
+    const request = appWith(projectSecretsRoutes);
+
+    try {
+      const unauthenticated = await request("/v1/projects/proj_1/internal/runtime-env");
+      expect(unauthenticated.status).toBe(401);
+
+      const authenticated = await request("/v1/projects/proj_1/internal/runtime-env", { headers: masterHeaders });
+      expect(authenticated.status).toBe(200);
+      expect(await authenticated.json()).toEqual({
+        SUPACLOUD_PROJECT_REF: "proj_1",
+        SUPABASE_SERVICE_ROLE_KEY: "header.payload.signature",
+      });
+    } finally {
+      runtimeEnvSpy.mockRestore();
     }
   });
 
