@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.7](https://github.com/zuohuadong/supacloud/compare/management-api-v0.12.6...management-api-v0.12.7) (2026-04-29)
+
+
+### 🐛 Bug Fixes
+
+* **management-api:** resolve functions tenants from custom domains ([5baf0d5](https://github.com/zuohuadong/supacloud/commit/5baf0d5ec4e75089228167963d3b96261f2ef75f))
+
 ## [0.12.6](https://github.com/zuohuadong/supacloud/compare/management-api-v0.12.5...management-api-v0.12.6) (2026-04-29)
 
 
