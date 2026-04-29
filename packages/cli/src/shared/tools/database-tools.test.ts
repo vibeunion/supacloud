@@ -85,4 +85,82 @@ describe("database migration helpers", () => {
             rmSync(dir, { recursive: true, force: true });
         }
     });
+
+    test("previews baseline repair without executing SQL", async () => {
+        const dir = mkdtempSync(join(tmpdir(), "supacloud-migrations-"));
+        const posts: Array<{ path: string; body: unknown }> = [];
+        try {
+            writeFileSync(join(dir, "20260425123000_create_users.sql"), "CREATE TABLE users (id uuid);\n");
+            writeFileSync(join(dir, "20260425124000_create_tasks.sql"), "CREATE TABLE tasks (id uuid);\n");
+
+            const callback = captureDatabaseTool({
+                get: async () => ({
+                    ok: true,
+                    status: 200,
+                    data: [
+                        { version: "20260425123000", name: "20260425123000_create_users" },
+                    ],
+                }),
+                post: async (path: string, body: unknown) => {
+                    posts.push({ path, body });
+                    return { ok: true, status: 200, data: { rows: [] } };
+                },
+            });
+
+            const result = await callback({
+                action: "baseline_migrations",
+                ref: "proj",
+                dir,
+                dry_run: true,
+            });
+            const text = result.content[0].text;
+
+            expect(text).toContain("Migration baseline dry run");
+            expect(text).toContain("Would mark as applied:\n  - 20260425124000_create_tasks.sql (20260425124000)");
+            expect(text).toContain("Already applied:\n  - 20260425123000_create_users.sql (20260425123000)");
+            expect(posts).toHaveLength(0);
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
+    });
+
+    test("baselines missing migrations through migration-mode SQL", async () => {
+        const dir = mkdtempSync(join(tmpdir(), "supacloud-migrations-"));
+        const posts: Array<{ path: string; body: any }> = [];
+        try {
+            writeFileSync(join(dir, "20260425123000_create_users.sql"), "CREATE TABLE users (id uuid);\n");
+            writeFileSync(join(dir, "20260425124000_create_tasks.sql"), "CREATE TABLE tasks (id uuid);\n");
+
+            const callback = captureDatabaseTool({
+                get: async (path: string) => {
+                    expect(path).toBe("/v1/projects/proj/database/migrations");
+                    return { ok: true, status: 200, data: [] };
+                },
+                post: async (path: string, body: unknown) => {
+                    posts.push({ path, body });
+                    return { ok: true, status: 200, data: { rows: [] } };
+                },
+            });
+
+            const result = await callback({
+                action: "baseline_migrations",
+                ref: "proj",
+                dir,
+            });
+            const text = result.content[0].text;
+
+            expect(text).toContain("Migration baseline completed");
+            expect(text).toContain("Marked applied: 2");
+            expect(posts).toHaveLength(1);
+            expect(posts[0].path).toBe("/v1/projects/proj/database/sql");
+            expect(posts[0].body.mode).toBe("migration");
+            expect(posts[0].body.sql).toContain("CREATE SCHEMA IF NOT EXISTS supabase_migrations");
+            expect(posts[0].body.sql).toContain("CREATE TABLE IF NOT EXISTS public.schema_migrations");
+            expect(posts[0].body.sql).toContain("20260425123000_create_users");
+            expect(posts[0].body.sql).toContain("20260425124000_create_tasks");
+            expect(posts[0].body.sql).toContain("ON CONFLICT (version) DO UPDATE");
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
+    });
 });
