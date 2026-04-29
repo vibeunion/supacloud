@@ -17,6 +17,21 @@ function captureEdgeFunctionsTool(http: Record<string, unknown>) {
     return { schema, callback };
 }
 
+function captureSecretsTool(http: Record<string, unknown>) {
+    let schema: Record<string, unknown> | undefined;
+    let callback: ((args: Record<string, unknown>) => Promise<{ content: Array<{ text: string }> }>) | undefined;
+    registerAdvancedTools({
+        tool(name: string, _description: string, toolSchema: Record<string, unknown>, toolCallback: typeof callback) {
+            if (name !== "secrets") return;
+            schema = toolSchema;
+            callback = toolCallback;
+        },
+    }, http as any);
+
+    if (!schema || !callback) throw new Error("secrets tool was not registered");
+    return { schema, callback };
+}
+
 describe("edge_functions CLI tool", () => {
     test("parses background routes from CLI-friendly comma-separated input", () => {
         const { schema } = captureEdgeFunctionsTool({});
@@ -118,5 +133,32 @@ describe("edge_functions CLI tool", () => {
         ]);
         expect(result.content[0].text).toContain("Function worker bundle deployed");
         expect(result.content[0].text).toContain("Function worker config updated");
+    });
+});
+
+describe("secrets CLI tool", () => {
+    test("parses JSON array secrets passed as a CLI string", () => {
+        const { schema } = captureSecretsTool({});
+        const parsed = z.object(schema as any).parse({
+            action: "upsert",
+            ref: "proj",
+            secrets: '[{"name":"API_KEY","value":"secret"}]',
+        });
+
+        expect(parsed.secrets).toEqual([{ name: "API_KEY", value: "secret" }]);
+    });
+
+    test("parses comma-separated KEY=VALUE secrets", () => {
+        const { schema } = captureSecretsTool({});
+        const parsed = z.object(schema as any).parse({
+            action: "upsert",
+            ref: "proj",
+            secrets: "API_KEY=secret,OTHER=value=with=equals",
+        });
+
+        expect(parsed.secrets).toEqual([
+            { name: "API_KEY", value: "secret" },
+            { name: "OTHER", value: "value=with=equals" },
+        ]);
     });
 });
