@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.5](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.3.4...edge-runtime-v0.3.5) (2026-04-29)
+
+
+### 🐛 Bug Fixes
+
+* **edge-runtime:** inject Bun function env ([54aefe5](https://github.com/zuohuadong/supacloud/commit/54aefe576cb351fe2dd37c4a9b8e74ed4c34f517))
+
 ## [0.3.4](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.3.3...edge-runtime-v0.3.4) (2026-04-29)
 
 
