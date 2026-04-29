@@ -1,8 +1,28 @@
 import { Elysia, t, status } from "elysia";
 import { projectService } from "../services";
 import { requireProjectOrAdminAuth } from "../middleware/auth";
+import { getAuthContext } from "../middleware/auth";
+import { runtimeEnvService } from "../services/runtime-env.service";
 
 export const projectSecretsRoutes = new Elysia({ prefix: "/v1/projects" })
+  .get(
+    "/:ref/internal/runtime-env",
+    async ({ params, request }) => {
+      const auth = await getAuthContext(request);
+      if ("status" in auth) return status(auth.status, auth.body);
+      if (auth.role !== "master") return status(403, { message: "Master token required", code: "403" });
+
+      const env = await runtimeEnvService.buildProjectRuntimeEnv(params.ref);
+      if (!env) {
+        return status(404, { message: "Project not found", code: "404" });
+      }
+      return env;
+    },
+    {
+      params: t.Object({ ref: t.String() }),
+    },
+  )
+
   .get(
     "/:ref/secrets",
     async ({ params, query, request }) => {
