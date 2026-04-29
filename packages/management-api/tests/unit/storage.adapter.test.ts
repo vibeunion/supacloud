@@ -95,4 +95,26 @@ describe("JuiceFSDriver uploadFile", () => {
       await rm(root, { recursive: true, force: true });
     }
   });
+
+  test("rejects stringified ReadableStream marker instead of persisting corrupt objects", async () => {
+    const root = await mkdtemp(join(tmpdir(), "supacloud-storage-"));
+    try {
+      const driver = new JuiceFSDriver();
+      (driver as unknown as { getBasePath: (...parts: string[]) => string }).getBasePath =
+        (_projectRef: string, bucket?: string, key?: string) =>
+          join(root, bucket || "", key || "");
+
+      const uploaded = await driver.uploadFile(
+        "testref",
+        "gallery",
+        "bad.png",
+        new TextEncoder().encode("[object ReadableStream]"),
+        "image/png",
+      );
+
+      expect(uploaded).toBe(false);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
 });
