@@ -91,7 +91,7 @@ export function registerDatabaseTools(
         "connections", "stats", "slow_queries",
         "list_migrations", "project_url", "generate_types",
     ] as const;
-    const writeActions = ["apply_migration", "push_migrations", "create_table_rls"] as const;
+    const writeActions = ["apply_migration", "push_migrations", "baseline_migrations", "create_table_rls"] as const;
     const allActions = readOnly ? actions : [...actions, ...writeActions];
 
     server.tool(
@@ -104,8 +104,8 @@ Actions: ${allActions.join(", ")}${readOnly ? " (read-only mode)" : ""}`,
             // query
             sql: z.string().optional().describe("[query/apply_migration] SQL statement"),
             file: z.string().optional().describe("[query/apply_migration] Read SQL from local file path (avoids shell escaping issues with $$ and multi-statement DDL)"),
-            dir: z.string().optional().describe("[push_migrations] Directory containing .sql migration files (default: supabase/migrations)"),
-            dry_run: z.boolean().optional().describe("[push_migrations] List pending migration files without applying them"),
+            dir: z.string().optional().describe("[push_migrations/baseline_migrations] Directory containing .sql migration files (default: supabase/migrations)"),
+            dry_run: z.boolean().optional().describe("[push_migrations/baseline_migrations] Preview changes without applying them"),
             // schema
             schema: z.string().optional().describe("[*] Schema name (default: public)"),
             table: z.string().optional().describe("[describe_columns/indexes/constraints/rls_*] Table name"),
@@ -133,7 +133,8 @@ Actions: ${allActions.join(", ")}${readOnly ? " (read-only mode)" : ""}`,
                 }
             }
 
-            const execSql = async (sql: string) => http.post(`/v1/projects/${ref}/database/sql`, { sql });
+            const execSql = async (sql: string, mode?: "read" | "migration" | "admin") =>
+                http.post(`/v1/projects/${ref}/database/sql`, mode ? { sql, mode } : { sql });
 
             let text: string;
             switch (action) {
@@ -335,6 +336,73 @@ Actions: ${allActions.join(", ")}${readOnly ? " (read-only mode)" : ""}`,
                     ].join("\n");
                     break;
                 }
+                case "baseline_migrations": {
+                    const dir = args.dir || "supabase/migrations";
+                    if (!existsSync(dir) || !statSync(dir).isDirectory()) {
+                        throw new Error(`Migration directory not found: ${dir}`);
+                    }
+
+                    const files = readdirSync(dir)
+                        .filter((file) => file.endsWith(".sql"))
+                        .sort();
+
+                    if (!files.length) {
+                        text = `No .sql migration files found in ${dir}`;
+                        break;
+                    }
+
+                    const migrationFiles = files.map((file, i) => ({
+                        file,
+                        name: basename(file, ".sql"),
+                        version: migrationVersionFromFilename(file, i),
+                    }));
+
+                    const r = await http.get(`/v1/projects/${ref}/database/migrations`);
+                    if (!r.ok) {
+                        text = `❌ Failed to load applied migrations (${r.status}): ${JSON.stringify(r.data)}`;
+                        break;
+                    }
+
+                    const appliedKeys = appliedMigrationKeys(r.data);
+                    const missing = migrationFiles.filter(({ name, version }) => !appliedKeys.has(name) && !appliedKeys.has(String(version)));
+                    const alreadyApplied = migrationFiles.filter(({ name, version }) => appliedKeys.has(name) || appliedKeys.has(String(version)));
+
+                    if (args.dry_run) {
+                        text = [
+                            `Migration baseline dry run for ${dir}`,
+                            `Total: ${migrationFiles.length}`,
+                            "",
+                            "Would mark as applied:",
+                            ...(missing.length ? missing.map(({ file, version }) => `  - ${file} (${version})`) : ["  - none"]),
+                            "",
+                            "Already applied:",
+                            ...(alreadyApplied.length ? alreadyApplied.map(({ file, version }) => `  - ${file} (${version})`) : ["  - none"]),
+                        ].join("\n");
+                        break;
+                    }
+
+                    if (!missing.length) {
+                        text = [
+                            `✅ Migration baseline already aligned for ${dir}`,
+                            `Already applied: ${alreadyApplied.length}`,
+                        ].join("\n");
+                        break;
+                    }
+
+                    const baselineSql = buildMigrationBaselineSql(missing);
+                    const baselineResult = await execSql(baselineSql, "migration");
+                    text = baselineResult.ok
+                        ? [
+                            `✅ Migration baseline completed for ${dir}`,
+                            `Marked applied: ${missing.length}`,
+                            `Already applied: ${alreadyApplied.length}`,
+                            "",
+                            "Marked files:",
+                            ...missing.map(({ file, version }) => `  - ${file} (${version})`),
+                        ].join("\n")
+                        : `❌ Failed (${baselineResult.status}): ${JSON.stringify(baselineResult.data)}`;
+                    break;
+                }
                 case "create_table_rls": {
                     if (!args.table || !args.columns) throw new Error("'table' and 'columns' required");
                     const sql = `BEGIN; CREATE TABLE IF NOT EXISTS "${schema}"."${args.table}" (${args.columns}); ALTER TABLE "${schema}"."${args.table}" ENABLE ROW LEVEL SECURITY; CREATE POLICY "Enable ALL for authenticated" ON "${schema}"."${args.table}" FOR ALL TO authenticated USING (true) WITH CHECK (true); COMMIT;`;
@@ -347,6 +415,52 @@ Actions: ${allActions.join(", ")}${readOnly ? " (read-only mode)" : ""}`,
             return { content: [{ type: "text" as const, text }] };
         }
     );
+}
+
+function sqlString(value: string): string {
+    return `'${value.replace(/'/g, "''")}'`;
+}
+
+function buildMigrationBaselineSql(migrations: Array<{ name: string; version: number }>): string {
+    const values = migrations
+        .map(({ name, version }) => `(${version}, ${sqlString(name)}, ARRAY[${sqlString(`baseline:${name}`)}]::text[])`)
+        .join(",\n    ");
+
+    return `
+CREATE SCHEMA IF NOT EXISTS supabase_migrations;
+
+CREATE TABLE IF NOT EXISTS supabase_migrations.schema_migrations (
+  version BIGINT PRIMARY KEY,
+  statements TEXT[],
+  name TEXT
+);
+
+CREATE TABLE IF NOT EXISTS public.schema_migrations (
+  version VARCHAR(255) PRIMARY KEY,
+  statements TEXT[],
+  name TEXT
+);
+
+WITH baseline(version, name, statements) AS (
+  VALUES
+    ${values}
+)
+INSERT INTO supabase_migrations.schema_migrations (version, statements, name)
+SELECT version, statements, name FROM baseline
+ON CONFLICT (version) DO UPDATE
+SET statements = EXCLUDED.statements,
+    name = EXCLUDED.name;
+
+WITH baseline(version, name, statements) AS (
+  VALUES
+    ${values}
+)
+INSERT INTO public.schema_migrations (version, statements, name)
+SELECT version::text, statements, name FROM baseline
+ON CONFLICT (version) DO UPDATE
+SET statements = EXCLUDED.statements,
+    name = EXCLUDED.name;
+`.trim();
 }
 
 // ── Format Helpers ──
