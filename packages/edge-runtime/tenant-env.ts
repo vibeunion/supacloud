@@ -8,6 +8,23 @@ const TENANTS_DIRS = [
 
 const envCache = new Map<string, { env: Record<string, string>; expiresAt: number }>();
 const ENV_CACHE_TTL = 5_000;
+const MASKED_SECRET_VALUE = "********";
+
+export function isMaskedSecretValue(value: unknown): boolean {
+  return typeof value === "string" && value.trim() === MASKED_SECRET_VALUE;
+}
+
+export function stripMaskedSecretValues(env: Record<string, string>): Record<string, string> {
+  const clean: Record<string, string> = {};
+  for (const [key, value] of Object.entries(env)) {
+    if (isMaskedSecretValue(value)) {
+      console.warn(`[tenant-env] ignoring masked secret value for ${key}`);
+      continue;
+    }
+    clean[key] = value;
+  }
+  return clean;
+}
 
 function parseEnvFile(content: string): Record<string, string> {
   const env: Record<string, string> = {};
@@ -54,7 +71,7 @@ async function loadEnvFromFile(ref: string): Promise<Record<string, string>> {
 
 async function loadEnvFromApi(ref: string): Promise<Record<string, string> | null> {
   try {
-    const res = await fetch(`${MGMT_API}/v1/projects/${ref}/secrets?reveal=true`, {
+    const res = await fetch(`${MGMT_API}/v1/projects/${ref}/internal/runtime-env`, {
       headers: { Authorization: `Bearer ${MASTER_TOKEN}` },
       signal: AbortSignal.timeout(5000),
     });
@@ -66,15 +83,11 @@ async function loadEnvFromApi(ref: string): Promise<Record<string, string> | nul
       return null;
     }
 
-    const secrets = (await res.json()) as Array<{
-      name: string;
-      value: string;
-    }>;
-    const env: Record<string, string> = {};
-    for (const s of secrets) {
-      env[s.name] = s.value;
+    const payload = await res.json();
+    if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+      return stripMaskedSecretValues(payload as Record<string, string>);
     }
-    return env;
+    return null;
   } catch (err) {
     console.warn(
       `[tenant-env] API error for ${ref}:`,
@@ -90,7 +103,7 @@ export async function loadTenantEnv(ref: string): Promise<Record<string, string>
     return cached.env;
   }
 
-  const fileEnv = await loadEnvFromFile(ref);
+  const fileEnv = stripMaskedSecretValues(await loadEnvFromFile(ref));
 
   const apiEnv = await loadEnvFromApi(ref);
   if (apiEnv === null) {
