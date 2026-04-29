@@ -204,10 +204,10 @@ export const sdkProxyInternals = {
 async function getProjectRef(request: Request): Promise<string> {
     const auth = request.headers.get('authorization') || '';
     const key = request.headers.get('apikey') || '';
+    const refHeader = request.headers.get("x-project-ref") || request.headers.get("x-supabase-project") || "";
     const apiKeyRef = await sdkProxyInternals.resolveProjectRefFromApiKey(key) || '';
 
     if (apiKeyRef) {
-        const refHeader = request.headers.get("x-project-ref") || request.headers.get("x-supabase-project");
         if (refHeader && refHeader !== apiKeyRef) return '';
 
         const forwardedHost = request.headers.get('x-forwarded-host');
@@ -237,12 +237,51 @@ async function getProjectRef(request: Request): Promise<string> {
         return apiKeyRef;
     }
 
+    if (refHeader) {
+        const trustedRef = await resolveProjectRefFromHeaderAndHost(refHeader, request);
+        if (trustedRef) return trustedRef;
+    }
+
     if (process.env.BUN_ENV === 'test' || process.env.NODE_ENV === 'test') {
         if (key === 'test-token' || auth.includes('test-token')) {
              return 'test_mock';
         }
     }
     
+    return '';
+}
+
+async function resolveProjectRefFromHeaderAndHost(ref: string, request: Request): Promise<string> {
+    const forwardedHost = request.headers.get('x-forwarded-host');
+    const rawHosts = [forwardedHost, request.headers.get('host')].filter(Boolean) as string[];
+
+    for (const rawHost of rawHosts) {
+        const host = rawHost.split(',')[0].trim().split(':')[0];
+        if (!host) continue;
+
+        if (config.baseDomain && host === `${ref}.api.${config.baseDomain}`) {
+            return ref;
+        }
+
+        try {
+            const rows = await metaSql`
+                SELECT ref
+                FROM projects
+                WHERE ref = ${ref}
+                  AND deleted_at IS NULL
+                  AND status = 'active'
+                  AND (
+                    config->>'custom_domain' = ${host}
+                    OR config->>'api_domain' = ${host}
+                    OR config->>'studio_domain' = ${host}
+                    OR config->>'custom_domain' = ${host.replace(/^api\./, '')}
+                  )
+                LIMIT 1
+            `;
+            if (rows.length > 0 && rows[0].ref === ref) return ref;
+        } catch {}
+    }
+
     return '';
 }
 
