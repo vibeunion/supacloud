@@ -35,6 +35,7 @@ export interface ClaimQueueMessageOptions {
   projectRef: string;
   queueName: string;
   visibilityTimeoutSec?: number;
+  maxInFlight?: number;
 }
 
 export interface LeasedTask extends ProjectTask {
@@ -184,6 +185,9 @@ export async function createTask(inputOrRef: CreateTaskInput | string, type?: Ta
         ${input.idempotencyKey || null},
         ${input.traceId || null}
       )
+      ON CONFLICT (project_ref, idempotency_key)
+      WHERE idempotency_key IS NOT NULL
+      DO UPDATE SET updated_at = NOW()
       RETURNING *
     `;
 
@@ -199,8 +203,12 @@ export async function createTasks(tasks: CreateTaskInput[]): Promise<void> {
 
 export async function claimQueueMessage(options: ClaimQueueMessageOptions): Promise<LeasedTask | null> {
   const leaseSeconds = options.visibilityTimeoutSec || DEFAULT_LEASE_SECONDS;
+  await recoverExpiredLeases(options.projectRef, [options.queueName]);
 
   return withRetry("TaskRepository.claimQueueMessage", async () => {
+    const maxInFlight = Number.isFinite(options.maxInFlight)
+      ? Math.max(1, Math.floor(options.maxInFlight || 1))
+      : null;
     const [task] = await sql`
       WITH candidate AS (
         SELECT id
@@ -210,6 +218,18 @@ export async function claimQueueMessage(options: ClaimQueueMessageOptions): Prom
           AND status IN (${TaskStatuses.PENDING}, ${TaskStatuses.RETRY_SCHEDULED})
           AND COALESCE(next_run_at, created_at, NOW()) <= NOW()
           AND cancel_requested_at IS NULL
+          AND (
+            ${maxInFlight}::int IS NULL
+            OR (
+              SELECT COUNT(*)::int
+              FROM project_tasks active
+              WHERE active.project_ref = ${options.projectRef}
+                AND active.task_type = ${options.queueName}
+                AND active.status IN (${TaskStatuses.LEASED}, ${TaskStatuses.RUNNING})
+                AND active.lease_until IS NOT NULL
+                AND active.lease_until > NOW()
+            ) < ${maxInFlight}::int
+          )
         ORDER BY COALESCE(next_run_at, created_at, NOW()) ASC, created_at ASC
         FOR UPDATE SKIP LOCKED
         LIMIT 1
@@ -234,6 +254,7 @@ export async function claimQueueMessage(options: ClaimQueueMessageOptions): Prom
 export async function claimNextTask(options: TaskLeaseOptions): Promise<LeasedTask | null> {
   const leaseSeconds = options.leaseSeconds || DEFAULT_LEASE_SECONDS;
   const allowedTaskTypes = options.allowedTaskTypes || [];
+  await recoverExpiredLeases(undefined, allowedTaskTypes.length > 0 ? allowedTaskTypes : undefined);
 
   return withRetry("TaskRepository.claimNextTask", async () => {
     const params: unknown[] = [
@@ -493,6 +514,59 @@ export async function listTasksByProjectFiltered(projectRef: string, filters: Ta
   });
 }
 
+export async function recoverExpiredLeases(projectRef?: string, taskTypes?: string[]): Promise<number> {
+  return withRetry("TaskRepository.recoverExpiredLeases", async () => {
+    const params: unknown[] = [
+      TaskStatuses.LEASED,
+      TaskStatuses.RUNNING,
+      TaskStatuses.RETRY_SCHEDULED,
+      TaskStatuses.DEAD_LETTERED,
+    ];
+
+    const conditions = [
+      `status IN ($1, $2)`,
+      `lease_until IS NOT NULL`,
+      `lease_until <= NOW()`,
+      `cancel_requested_at IS NULL`,
+    ];
+
+    if (projectRef) {
+      params.push(projectRef);
+      conditions.push(`project_ref = $${params.length}`);
+    }
+
+    if (taskTypes && taskTypes.length > 0) {
+      const placeholders = taskTypes.map((_, index) => `$${params.length + index + 1}`).join(", ");
+      params.push(...taskTypes);
+      conditions.push(`task_type IN (${placeholders})`);
+    }
+
+    const sqlText = `
+      UPDATE project_tasks
+      SET
+        status = CASE
+          WHEN COALESCE(attempt, 0) < COALESCE(max_attempts, 3) THEN $3
+          ELSE $4
+        END,
+        error = COALESCE(NULLIF(error, ''), 'Lease expired before acknowledgement'),
+        lease_until = NULL,
+        next_run_at = CASE
+          WHEN COALESCE(attempt, 0) < COALESCE(max_attempts, 3) THEN NOW()
+          ELSE next_run_at
+        END,
+        completed_at = CASE
+          WHEN COALESCE(attempt, 0) < COALESCE(max_attempts, 3) THEN completed_at
+          ELSE NOW()
+        END,
+        updated_at = NOW()
+      WHERE ${conditions.join(" AND ")}
+      RETURNING id
+    `;
+    const rows = await sql.unsafe(sqlText, params);
+    return rows.length;
+  });
+}
+
 export async function retryTask(id: string): Promise<ProjectTask | null> {
   return withRetry("TaskRepository.retryTask", async () => {
     const [task] = await sql`
@@ -513,7 +587,43 @@ export async function retryTask(id: string): Promise<ProjectTask | null> {
   });
 }
 
-  export async function countActiveTasksForProject(projectRef: string, taskTypes?: string[]): Promise<number> {
+export async function retryQueueMessage(id: string, projectRef: string, queueName: string): Promise<ProjectTask | null> {
+  return withRetry("TaskRepository.retryQueueMessage", async () => {
+    const [task] = await sql`
+      UPDATE project_tasks
+      SET
+        status = ${TaskStatuses.PENDING},
+        error = NULL,
+        lease_until = NULL,
+        next_run_at = NOW(),
+        completed_at = NULL,
+        cancel_requested_at = NULL,
+        cancellation_reason = NULL,
+        updated_at = NOW()
+      WHERE id = ${id}
+        AND project_ref = ${projectRef}
+        AND task_type = ${queueName}
+        AND status IN (${TaskStatuses.FAILED}, ${TaskStatuses.DEAD_LETTERED}, ${TaskStatuses.CANCELLED})
+      RETURNING *
+    `;
+    return task ? mapTask(task) : null;
+  });
+}
+
+export async function countQueueMessagesCreatedSince(projectRef: string, queueName: string, since: Date): Promise<number> {
+  return withRetry("TaskRepository.countQueueMessagesCreatedSince", async () => {
+    const [row] = await sql`
+      SELECT COUNT(*)::int AS count
+      FROM project_tasks
+      WHERE project_ref = ${projectRef}
+        AND task_type = ${queueName}
+        AND created_at >= ${since}
+    `;
+    return Number(row?.count || 0);
+  });
+}
+
+export async function countActiveTasksForProject(projectRef: string, taskTypes?: string[]): Promise<number> {
     return withRetry("TaskRepository.countActiveTasksForProject", async () => {
       if (taskTypes && taskTypes.length > 0) {
         const typePlaceholders = taskTypes.map((_, i) => `$${4 + i}`).join(', ');
@@ -738,6 +848,58 @@ export async function getTaskStats(projectRef: string): Promise<{
   });
 }
 
+export async function getQueueStats(projectRef: string, queueName: string): Promise<{
+  pending: number;
+  leased: number;
+  running: number;
+  retryScheduled: number;
+  succeededLast24h: number;
+  failedLast24h: number;
+  deadLettered: number;
+  oldestPendingAgeSec: number | null;
+  inFlight: number;
+}> {
+  return withRetry("TaskRepository.getQueueStats", async () => {
+    const [summary] = await sql`
+      SELECT
+        COUNT(*) FILTER (WHERE status = ${TaskStatuses.PENDING})::int AS pending,
+        COUNT(*) FILTER (WHERE status = ${TaskStatuses.LEASED})::int AS leased,
+        COUNT(*) FILTER (WHERE status = ${TaskStatuses.RUNNING})::int AS running,
+        COUNT(*) FILTER (WHERE status = ${TaskStatuses.RETRY_SCHEDULED})::int AS retry_scheduled,
+        COUNT(*) FILTER (
+          WHERE status = ${TaskStatuses.SUCCEEDED}
+            AND updated_at >= NOW() - INTERVAL '24 hours'
+        )::int AS succeeded_last_24h,
+        COUNT(*) FILTER (
+          WHERE status IN (${TaskStatuses.FAILED}, ${TaskStatuses.DEAD_LETTERED})
+            AND updated_at >= NOW() - INTERVAL '24 hours'
+        )::int AS failed_last_24h,
+        COUNT(*) FILTER (WHERE status = ${TaskStatuses.DEAD_LETTERED})::int AS dead_lettered,
+        EXTRACT(EPOCH FROM (NOW() - MIN(created_at) FILTER (
+          WHERE status IN (${TaskStatuses.PENDING}, ${TaskStatuses.RETRY_SCHEDULED})
+            AND COALESCE(next_run_at, created_at, NOW()) <= NOW()
+        )))::int AS oldest_pending_age_sec
+      FROM project_tasks
+      WHERE project_ref = ${projectRef}
+        AND task_type = ${queueName}
+    `;
+
+    const leased = Number(summary?.leased || 0);
+    const running = Number(summary?.running || 0);
+    return {
+      pending: Number(summary?.pending || 0),
+      leased,
+      running,
+      retryScheduled: Number(summary?.retry_scheduled || 0),
+      succeededLast24h: Number(summary?.succeeded_last_24h || 0),
+      failedLast24h: Number(summary?.failed_last_24h || 0),
+      deadLettered: Number(summary?.dead_lettered || 0),
+      oldestPendingAgeSec: summary?.oldest_pending_age_sec == null ? null : Number(summary.oldest_pending_age_sec),
+      inFlight: leased + running,
+    };
+  });
+}
+
 export const taskRepository = {
   createTask,
   createTasks,
@@ -756,7 +918,10 @@ export const taskRepository = {
   listTasksByProject,
   listTasksByProjectFiltered,
   buildTaskListQuery,
+  recoverExpiredLeases,
   retryTask,
+  retryQueueMessage,
+  countQueueMessagesCreatedSince,
   countActiveTasksForProject,
   releaseTask,
   extendLease,
@@ -765,4 +930,5 @@ export const taskRepository = {
   completeTaskAttempt,
   listTaskAttempts,
   getTaskStats,
+  getQueueStats,
 };
