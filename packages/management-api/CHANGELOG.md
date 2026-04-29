@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.12.8](https://github.com/zuohuadong/supacloud/compare/management-api-v0.12.7...management-api-v0.12.8) (2026-04-29)
+
+
+### 🐛 Bug Fixes
+
+* **management-api:** harden project queue reliability ([0f857e3](https://github.com/zuohuadong/supacloud/commit/0f857e3e2ec937eaff63d163017fdafb93135027))
+* **management-api:** harden storage and background contracts ([d952a86](https://github.com/zuohuadong/supacloud/commit/d952a86fcc112fb8c44c105e82a41f9b5c56790b))
+
 ## [0.12.7](https://github.com/zuohuadong/supacloud/compare/management-api-v0.12.6...management-api-v0.12.7) (2026-04-29)
 
 
