@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.5](https://github.com/zuohuadong/supacloud/compare/cli-v0.3.4...cli-v0.3.5) (2026-04-29)
+
+
+### 🐛 Bug Fixes
+
+* **cli:** parse secrets upsert strings ([6677a74](https://github.com/zuohuadong/supacloud/commit/6677a74a90a3b3c0cb9506bf6a44644e7f69fd09))
+
 ## [0.3.4](https://github.com/zuohuadong/supacloud/compare/cli-v0.3.3...cli-v0.3.4) (2026-04-29)
 
 
