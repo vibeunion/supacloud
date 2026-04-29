@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.4](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.3.3...edge-runtime-v0.3.4) (2026-04-29)
+
+
+### 🐛 Bug Fixes
+
+* **edge-runtime:** reject masked runtime secrets ([9ecc6f1](https://github.com/zuohuadong/supacloud/commit/9ecc6f1de03fc7e49f5569e6fd52427c56c1ed4c))
+
 ## [0.3.3](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.3.2...edge-runtime-v0.3.3) (2026-04-24)
 
 
