@@ -3,6 +3,7 @@ import { taskRepository } from "../../src/repositories/task.repository";
 import { projectRepository } from "../../src/repositories/project.repository";
 import { TaskWorker } from "../../src/services/task.worker";
 import { databaseService } from "../../src/services/database.service";
+import { jwtService } from "../../src/services/jwt.service";
 
 describe("TaskWorker delayed retry wakeup", () => {
   afterEach(() => {
@@ -95,6 +96,7 @@ describe("TaskWorker provision_secrets", () => {
     const worker = new TaskWorker();
     const upsertSecretSpy = spyOn(databaseService, "upsertSecret").mockResolvedValue(true);
     spyOn(databaseService, "getSecrets").mockResolvedValue([]);
+    spyOn(jwtService, "generateServiceRoleKey").mockResolvedValue("generated.service.role");
     const updateApiKeysSpy = spyOn(projectRepository, "updateApiKeys").mockResolvedValue({} as any);
     spyOn(projectRepository, "findByRef").mockResolvedValue({
       ref: "proj-ref",
