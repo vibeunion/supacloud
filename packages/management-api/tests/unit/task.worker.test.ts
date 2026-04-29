@@ -94,6 +94,7 @@ describe("TaskWorker provision_secrets", () => {
   test("repairs invalid service role keys and injects internal runtime SupaCloud variables", async () => {
     const worker = new TaskWorker();
     const upsertSecretSpy = spyOn(databaseService, "upsertSecret").mockResolvedValue(true);
+    spyOn(databaseService, "getSecrets").mockResolvedValue([]);
     const updateApiKeysSpy = spyOn(projectRepository, "updateApiKeys").mockResolvedValue({} as any);
     spyOn(projectRepository, "findByRef").mockResolvedValue({
       ref: "proj-ref",
