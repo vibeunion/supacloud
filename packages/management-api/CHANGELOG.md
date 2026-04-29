@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.9](https://github.com/zuohuadong/supacloud/compare/management-api-v0.12.8...management-api-v0.12.9) (2026-04-29)
+
+
+### 🐛 Bug Fixes
+
+* **management-api:** inject internal supabase runtime secrets ([13c9f15](https://github.com/zuohuadong/supacloud/commit/13c9f15483083e8a14d6c708276f6a322a786992))
+
 ## [0.12.8](https://github.com/zuohuadong/supacloud/compare/management-api-v0.12.7...management-api-v0.12.8) (2026-04-29)
 
 
