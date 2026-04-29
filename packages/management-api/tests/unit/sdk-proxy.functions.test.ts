@@ -259,6 +259,31 @@ describe("sdkProxyRoutes functions proxy", () => {
     });
   });
 
+  test("functions proxy accepts Kong-injected project ref on trusted custom API host without apikey", async () => {
+    await withSdkProxyTestContext(async ({ calls, trackSpy }) => {
+      const sqlSpy = trackSpy(spyOn(dbModule, "sql"));
+      sqlSpy.mockImplementation(async (...args: unknown[]) => {
+        const text = String(args[0] ?? "");
+        if (text.includes("SELECT ref")) {
+          return [{ ref: "proj_1" }];
+        }
+        return [];
+      });
+
+      const response = await request("/functions/v1/aorist-platform/me/identity", {
+        method: "GET",
+        headers: {
+          host: "api.aorist.net",
+          "x-project-ref": "proj_1",
+        },
+      });
+
+      expect(response.status).toBe(200);
+      expect(calls).toHaveLength(1);
+      expect(calls[0]?.url).toBe("http://127.0.0.1:9000/functions/v1/aorist-platform/me/identity");
+    });
+  });
+
   test("proxy rejects mismatched project header and apikey", async () => {
     await withSdkProxyTestContext(async ({ calls, trackSpy }) => {
       const sqlSpy = trackSpy(spyOn(dbModule, "sql"));
