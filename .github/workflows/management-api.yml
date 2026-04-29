@@ -34,6 +34,7 @@ on:
 # gitleaks:allow
 env:
   NODE_VERSION: "24.x"
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
   # noqa: hardcoded-jwt — these are the Supabase public demo keys used for local/CI testing only
   # Source: https://supabase.com/docs/guides/self-hosting/docker#generate-api-keys
   SUPABASE_DEMO_ANON_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0" # gitleaks:allow
