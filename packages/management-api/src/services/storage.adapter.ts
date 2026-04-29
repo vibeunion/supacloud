@@ -275,10 +275,20 @@ async function createS3BucketWithFetch(
 async function toUint8Array(
   data: Blob | Buffer | Uint8Array | ArrayBuffer | ReadableStream,
 ): Promise<Uint8Array> {
-  if (data instanceof Uint8Array) return data;
-  if (data instanceof ArrayBuffer) return new Uint8Array(data);
-  if (data instanceof Blob) return new Uint8Array(await data.arrayBuffer());
-  return new Uint8Array(await new Response(data as ReadableStream).arrayBuffer());
+  const bytes = data instanceof Uint8Array
+    ? data
+    : data instanceof ArrayBuffer
+      ? new Uint8Array(data)
+      : data instanceof Blob
+        ? new Uint8Array(await data.arrayBuffer())
+        : new Uint8Array(await new Response(data as ReadableStream).arrayBuffer());
+
+  const marker = "[object ReadableStream]";
+  if (bytes.byteLength === marker.length && new TextDecoder().decode(bytes) === marker) {
+    throw new Error("Refusing to persist stringified ReadableStream marker as object bytes");
+  }
+
+  return bytes;
 }
 
 async function putS3ObjectWithFetch(
