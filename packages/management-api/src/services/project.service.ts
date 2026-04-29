@@ -120,6 +120,13 @@ export interface BackgroundTaskSettings {
   timeout_sec_max: number;
 }
 
+export interface QueueSettings {
+  max_in_flight: number;
+  default_visibility_timeout_sec: number;
+  max_attempts: number;
+  rate_limit_per_minute: number;
+}
+
 export interface LogEntryResponse {
   id: string;
   timestamp: string;
@@ -135,6 +142,13 @@ export class ProjectService {
     max_payload_bytes: 256 * 1024,
     timeout_sec_default: 300,
     timeout_sec_max: 900,
+  };
+
+  private readonly defaultQueueSettings: QueueSettings = {
+    max_in_flight: 10,
+    default_visibility_timeout_sec: 330,
+    max_attempts: 3,
+    rate_limit_per_minute: 600,
   };
 
   /** Check if the storage backend (S3/MinIO) is reachable */
@@ -580,6 +594,59 @@ export class ProjectService {
     });
 
     return this.getBackgroundTaskSettings(ref);
+  }
+
+  async getQueueSettings(ref: string, queueName: string): Promise<QueueSettings | null> {
+    const settings = await this.getProjectSettings(ref);
+    if (!settings) return null;
+
+    const queueSettings = settings.queue_settings as Record<string, unknown> | undefined;
+    const raw = (queueSettings?.[queueName] || {}) as Record<string, unknown>;
+    const pickNumber = (value: unknown, fallback: number, min: number, max: number) => {
+      const parsed = Number(value);
+      if (!Number.isFinite(parsed)) return fallback;
+      return Math.min(max, Math.max(min, Math.floor(parsed)));
+    };
+
+    return {
+      max_in_flight: pickNumber(raw.max_in_flight, this.defaultQueueSettings.max_in_flight, 1, 100),
+      default_visibility_timeout_sec: pickNumber(
+        raw.default_visibility_timeout_sec,
+        this.defaultQueueSettings.default_visibility_timeout_sec,
+        1,
+        1800,
+      ),
+      max_attempts: pickNumber(raw.max_attempts, this.defaultQueueSettings.max_attempts, 1, 10),
+      rate_limit_per_minute: pickNumber(
+        raw.rate_limit_per_minute,
+        this.defaultQueueSettings.rate_limit_per_minute,
+        1,
+        60_000,
+      ),
+    };
+  }
+
+  async updateQueueSettings(
+    ref: string,
+    queueName: string,
+    settings: Partial<QueueSettings>,
+  ): Promise<QueueSettings | null> {
+    const currentProjectSettings = await this.getProjectSettings(ref);
+    if (!currentProjectSettings) return null;
+
+    const current = await this.getQueueSettings(ref, queueName);
+    if (!current) return null;
+
+    const queueSettings = {
+      ...((currentProjectSettings.queue_settings || {}) as Record<string, unknown>),
+      [queueName]: {
+        ...current,
+        ...settings,
+      },
+    };
+
+    await this.updateProjectSettings(ref, { queue_settings: queueSettings });
+    return this.getQueueSettings(ref, queueName);
   }
 
   // Get project API keys
