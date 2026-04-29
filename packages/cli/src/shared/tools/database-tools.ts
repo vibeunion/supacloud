@@ -19,7 +19,7 @@ export function migrationVersionFromFilename(file: string, fallbackIndex = 0): n
 }
 
 function appliedMigrationKeys(data: unknown): Set<string> {
-    const rows = (data as { rows?: unknown[] })?.rows || [];
+    const rows = Array.isArray(data) ? data : (data as { rows?: unknown[] })?.rows || [];
     const keys = new Set<string>();
     for (const row of rows) {
         if (!row || typeof row !== "object") continue;

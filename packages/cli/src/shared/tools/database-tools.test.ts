@@ -1,5 +1,21 @@
 import { describe, expect, test } from "bun:test";
-import { migrationVersionFromFilename, vectorWarningsForPendingMigrations } from "./database-tools";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { migrationVersionFromFilename, registerDatabaseTools, vectorWarningsForPendingMigrations } from "./database-tools";
+
+function captureDatabaseTool(http: Record<string, unknown>) {
+    let callback: ((args: Record<string, unknown>) => Promise<{ content: Array<{ text: string }> }>) | undefined;
+    registerDatabaseTools({
+        tool(name: string, _description: string, _schema: Record<string, unknown>, toolCallback: typeof callback) {
+            if (name !== "database") return;
+            callback = toolCallback;
+        },
+    }, http as any);
+
+    if (!callback) throw new Error("database tool was not registered");
+    return callback;
+}
 
 describe("database migration helpers", () => {
     test("uses Supabase timestamp prefix as migration version", () => {
@@ -34,5 +50,39 @@ describe("database migration helpers", () => {
         ], false);
 
         expect(warnings[0]).toContain("will enable pgvector");
+    });
+
+    test("recognizes applied migrations when API returns a bare array", async () => {
+        const dir = mkdtempSync(join(tmpdir(), "supacloud-migrations-"));
+        try {
+            writeFileSync(join(dir, "20260425123000_create_users.sql"), "CREATE TABLE users (id uuid);\n");
+            writeFileSync(join(dir, "20260425124000_create_tasks.sql"), "CREATE TABLE tasks (id uuid);\n");
+
+            const callback = captureDatabaseTool({
+                get: async (path: string) => {
+                    expect(path).toBe("/v1/projects/proj/database/migrations");
+                    return {
+                        ok: true,
+                        status: 200,
+                        data: [
+                            { version: "20260425123000", name: "20260425123000_create_users" },
+                        ],
+                    };
+                },
+            });
+
+            const result = await callback({
+                action: "push_migrations",
+                ref: "proj",
+                dir,
+                dry_run: true,
+            });
+            const text = result.content[0].text;
+
+            expect(text).toContain("Pending:\n  - 20260425124000_create_tasks.sql (20260425124000)");
+            expect(text).toContain("Already applied:\n  - 20260425123000_create_users.sql (20260425123000)");
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
     });
 });
