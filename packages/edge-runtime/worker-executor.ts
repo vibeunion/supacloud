@@ -28,6 +28,8 @@ function evictOldestModule() {
 }
 
 const originalProcessEnv = process.env;
+const bunRuntime = (globalThis as unknown as { Bun?: { env: Record<string, string | undefined> } }).Bun;
+const originalBunEnv = bunRuntime ? { ...bunRuntime.env } : null;
 let envSnapshotActive = false;
 let currentAbortController: AbortController | null = null;
 let currentInjectedEnv: Record<string, string> = {};
@@ -36,12 +38,28 @@ function injectEnv(env: Record<string, string>) {
   if (envSnapshotActive) restoreEnv();
   currentInjectedEnv = { ...env };
   process.env = { ...env } as NodeJS.ProcessEnv;
+  if (bunRuntime) {
+    for (const key of Object.keys(bunRuntime.env)) {
+      delete bunRuntime.env[key];
+    }
+    for (const [key, value] of Object.entries(env)) {
+      bunRuntime.env[key] = value;
+    }
+  }
   envSnapshotActive = true;
 }
 
 function restoreEnv() {
   if (!envSnapshotActive) return;
   process.env = originalProcessEnv;
+  if (bunRuntime && originalBunEnv) {
+    for (const key of Object.keys(bunRuntime.env)) {
+      delete bunRuntime.env[key];
+    }
+    for (const [key, value] of Object.entries(originalBunEnv)) {
+      bunRuntime.env[key] = value;
+    }
+  }
   envWriteLog.clear();
   currentInjectedEnv = {};
   envSnapshotActive = false;
