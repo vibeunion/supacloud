@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.4](https://github.com/zuohuadong/supacloud/compare/cli-v0.3.3...cli-v0.3.4) (2026-04-29)
+
+
+### 🐛 Bug Fixes
+
+* **cli:** add migration baseline repair ([739a118](https://github.com/zuohuadong/supacloud/commit/739a118ab5bae4a4d63b6a593d71640a48835604))
+
 ## [0.3.3](https://github.com/zuohuadong/supacloud/compare/cli-v0.3.2...cli-v0.3.3) (2026-04-29)
 
 
