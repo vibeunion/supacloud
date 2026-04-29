@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.6](https://github.com/zuohuadong/supacloud/compare/management-api-v0.12.5...management-api-v0.12.6) (2026-04-29)
+
+
+### 🐛 Bug Fixes
+
+* **management-api:** allow public storage reads on custom domains ([db33913](https://github.com/zuohuadong/supacloud/commit/db33913ed919c63549732a0c4f6d3c98a50f4a45))
+
 ## [0.12.5](https://github.com/zuohuadong/supacloud/compare/management-api-v0.12.4...management-api-v0.12.5) (2026-04-28)
 
 
