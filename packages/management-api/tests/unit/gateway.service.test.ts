@@ -1,5 +1,5 @@
 import { describe, test, expect, mock } from "bun:test";
-import { DEFAULT_CORS_HEADERS, gatewayService } from "../../src/services/gateway.service";
+import { DEFAULT_CORS_HEADERS, buildTenantCorsOrigins, gatewayService } from "../../src/services/gateway.service";
 
 /** Type-safe mock for globalThis.fetch using two-step cast */
 function mockFetch(handler: () => Promise<Response>): void {
@@ -57,6 +57,16 @@ describe("GatewayService", () => {
         expect(DEFAULT_CORS_HEADERS).toContain("x-supacloud-idempotency-key");
         expect(DEFAULT_CORS_HEADERS).toContain("x-supacloud-function-version");
         expect(DEFAULT_CORS_HEADERS).toContain("x-supacloud-trace-id");
+    });
+
+    test("tenant cors origins include exact api and studio custom domains", () => {
+        const origins = buildTenantCorsOrigins("dbbabyref", {
+            api_domain: "sapi.dbbaby.top",
+            studio_domain: "sadmin.dbbaby.top",
+        });
+
+        expect(origins).toContain("https://sapi.dbbaby.top");
+        expect(origins).toContain("https://sadmin.dbbaby.top");
     });
 
     test("setupUpstream should configure realtime route through management websocket proxy", async () => {
@@ -216,6 +226,48 @@ describe("GatewayService", () => {
         );
         expect(studioTransformer).toBeDefined();
         expect(((studioTransformer?.body?.config as Record<string, unknown>)?.add as Record<string, unknown>)?.headers).toContain("x-supacloud-ui-host:studio");
+
+        globalThis.fetch = originalFetch;
+    });
+
+    test("setupUpstream applies exact studio origin to auth cors plugin", async () => {
+        const originalFetch = globalThis.fetch;
+        const calls: Array<{ url: string; method: string; body: Record<string, unknown> | null }> = [];
+
+        globalThis.fetch = mock((input: string | URL | Request, init?: RequestInit) => {
+            const url = typeof input === "string"
+                ? input
+                : input instanceof URL
+                    ? input.toString()
+                    : input.url;
+            const method = init?.method || "GET";
+            let body: Record<string, unknown> | null = null;
+            if (typeof init?.body === "string" && init.body.length > 0) {
+                try {
+                    body = JSON.parse(init.body) as Record<string, unknown>;
+                } catch {
+                    body = null;
+                }
+            }
+            calls.push({ url, method, body });
+            return Promise.resolve(new Response(JSON.stringify({ data: [] })));
+        }) as unknown as typeof fetch;
+
+        const result = await gatewayService.setupUpstream("dbbabyref", 3000, 9999, {
+            api_domain: "sapi.dbbaby.top",
+            studio_domain: "sadmin.dbbaby.top",
+        });
+        expect(result.success).toBe(true);
+
+        const authCors = calls.find(
+            (c) => c.method === "POST"
+                && c.url.includes("/routes/route-svc-gotrue-dbbabyref/plugins")
+                && c.body?.name === "cors"
+        );
+        expect(authCors).toBeDefined();
+        const origins = ((authCors?.body?.config as Record<string, unknown>)?.origins as string[]) || [];
+        expect(origins).toContain("https://sapi.dbbaby.top");
+        expect(origins).toContain("https://sadmin.dbbaby.top");
 
         globalThis.fetch = originalFetch;
     });
