@@ -386,6 +386,7 @@ export class FrontendService {
     const routeName = `route-frontend-${deployment.project_ref}-${deployment.id}`;
 
     const { gatewayService } = await import("./gateway.service");
+    await gatewayService.addCorsOriginsForHosts(deployment.project_ref, hosts);
 
     await gatewayService['kongRequest'](`/services/${serviceName}`, 'PUT', {
         name: serviceName,
