@@ -31,6 +31,43 @@ export const DEFAULT_CORS_ORIGINS = [
     "~^https?://127\\.0\\.0\\.1(:[0-9]+)?$",
 ];
 
+function hostToCorsOrigins(host: string): string[] {
+    const trimmed = host.trim();
+    if (!trimmed) return [];
+
+    try {
+        const parsed = new URL(trimmed.includes("://") ? trimmed : `https://${trimmed}`);
+        const hostname = parsed.host;
+        if (!hostname) return [];
+        if (hostname.startsWith("localhost") || hostname.startsWith("127.0.0.1")) {
+            return [`http://${hostname}`, `https://${hostname}`];
+        }
+        return [`https://${hostname}`];
+    } catch {
+        return [];
+    }
+}
+
+export function buildTenantCorsOrigins(
+    projectRef: string,
+    projectRouting?: ProjectRoutingConfig | string,
+    extraHosts: string[] = [],
+): string[] {
+    const routingConfig = normalizeProjectRoutingConfig(projectRouting);
+    const hosts = [
+        `${projectRef}.api.${config.baseDomain}`,
+        resolveProjectApiHost(projectRef, routingConfig),
+        `studio-${projectRef}.${config.baseDomain}`,
+        resolveProjectStudioHost(projectRef, routingConfig),
+        ...extraHosts,
+    ];
+
+    return Array.from(new Set([
+        ...DEFAULT_CORS_ORIGINS,
+        ...hosts.flatMap(hostToCorsOrigins),
+    ]));
+}
+
 import * as path from "node:path";
 import * as fs from "node:fs/promises";
 
@@ -282,7 +319,7 @@ export class GatewayService {
 
     async setCors(projectRef: string, origins: string[] = DEFAULT_CORS_ORIGINS): Promise<boolean> {
         try {
-            const routes = ['pgrst', 'graphql', 'gotrue', 'realtime', 'storage', 'functions', 'api-root'].map(r => `route-svc-${r}-${projectRef}`);
+            const routes = ['pgrst', 'graphql', 'gotrue', 'realtime', 'realtime-api', 'storage', 'functions', 'api-root'].map(r => `route-svc-${r}-${projectRef}`);
             let allSuccess = true;
             for (const routeName of routes) {
                 try {
@@ -319,11 +356,15 @@ export class GatewayService {
         }
     }
 
+    async addCorsOriginsForHosts(projectRef: string, hosts: string[]): Promise<boolean> {
+        return this.setCors(projectRef, buildTenantCorsOrigins(projectRef, undefined, hosts));
+    }
+
     // --- JWT Auth Plugin ---
 
     async enableJwtAuth(projectRef: string): Promise<boolean> {
         try {
-            const routes = ['pgrst', 'graphql', 'gotrue', 'realtime', 'storage', 'functions', 'api-root'].map(r => `route-svc-${r}-${projectRef}`);
+            const routes = ['pgrst', 'graphql', 'gotrue', 'realtime', 'realtime-api', 'storage', 'functions', 'api-root'].map(r => `route-svc-${r}-${projectRef}`);
             let allSuccess = true;
             for (const routeName of routes) {
                 try {
@@ -414,6 +455,7 @@ export class GatewayService {
         headers?: string[];
         requestBuffering?: boolean;
         responseBuffering?: boolean;
+        corsOrigins?: string[];
     }): Promise<void> {
         // 1. Upsert Service
         await this.kongRequest(`/services/${opts.name}`, "PUT", {
@@ -449,7 +491,7 @@ export class GatewayService {
 
         // 4. Attach CORS plugin globally for this route
         await this.upsertRoutePlugin(routeName, "cors", {
-            origins: DEFAULT_CORS_ORIGINS,
+            origins: opts.corsOrigins || DEFAULT_CORS_ORIGINS,
             methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
             headers: DEFAULT_CORS_HEADERS,
             exposed_headers: DEFAULT_CORS_EXPOSED,
@@ -490,8 +532,14 @@ export class GatewayService {
                 baseApiDomain,
                 resolveProjectApiHost(projectRef, routingConfig),
             ]));
+            const studioDomain = `studio-${projectRef}.${config.baseDomain}`;
+            const studioHosts = Array.from(new Set([
+                studioDomain,
+                resolveProjectStudioHost(projectRef, routingConfig),
+            ]));
+            const corsOrigins = buildTenantCorsOrigins(projectRef, routingConfig, [...hosts, ...studioHosts]);
 
-            await this.ensureServiceAndRoute({ name: `svc-pgrst-${projectRef}`, url: `http://${hostIp}:${pgrstPort}`, paths: ["/rest/v1"], hosts, projectRef });
+            await this.ensureServiceAndRoute({ name: `svc-pgrst-${projectRef}`, url: `http://${hostIp}:${pgrstPort}`, paths: ["/rest/v1"], hosts, projectRef, corsOrigins });
             await this.ensureServiceAndRoute({ 
                 name: `svc-graphql-${projectRef}`, 
                 url: `http://${hostIp}:${pgrstPort}/rpc/graphql`, 
@@ -499,9 +547,10 @@ export class GatewayService {
                 hosts, 
                 projectRef, 
                 stripPath: true,
-                headers: ["Content-Profile:graphql_public", "Accept-Profile:graphql_public"]
+                headers: ["Content-Profile:graphql_public", "Accept-Profile:graphql_public"],
+                corsOrigins,
             });
-            await this.ensureServiceAndRoute({ name: `svc-gotrue-${projectRef}`, url: `http://${hostIp}:${gotruePort}`, paths: ["/auth/v1"], hosts, projectRef });
+            await this.ensureServiceAndRoute({ name: `svc-gotrue-${projectRef}`, url: `http://${hostIp}:${gotruePort}`, paths: ["/auth/v1"], hosts, projectRef, corsOrigins });
             // Route public function traffic through management-api first so sdk-proxy can
             // apply background_routes policy before forwarding synchronous invokes to the
             // edge runtime.
@@ -513,6 +562,7 @@ export class GatewayService {
                 projectRef,
                 stripPath: false,
                 readTimeout: 500_000,
+                corsOrigins,
             });
             await this.ensureServiceAndRoute({
                 name: `svc-storage-${projectRef}`,
@@ -522,6 +572,7 @@ export class GatewayService {
                 projectRef,
                 requestBuffering: false,
                 responseBuffering: false,
+                corsOrigins,
             });
             await this.ensureServiceAndRoute({
                 name: `svc-realtime-api-${projectRef}`,
@@ -532,6 +583,7 @@ export class GatewayService {
                 stripPath: true,
                 readTimeout: 60000,
                 protocols: ["http", "https", "grpc", "grpcs", "ws", "wss"],
+                corsOrigins,
             });
             await this.ensureServiceAndRoute({
                 name: `svc-realtime-${projectRef}`,
@@ -546,6 +598,7 @@ export class GatewayService {
                 // requests directly, so route this path to the root server rather than
                 // the Elysia /ws helper routes.
                 protocols: ["http", "https"],
+                corsOrigins,
             });
             await this.ensureServiceAndRoute({
                 name: `svc-api-root-${projectRef}`,
@@ -554,14 +607,10 @@ export class GatewayService {
                 hosts,
                 projectRef,
                 stripPath: false,
+                corsOrigins,
             });
 
             // Ensure Studio routes (Management API proxy loopback for SPA fallback)
-            const studioDomain = `studio-${projectRef}.${config.baseDomain}`;
-            const studioHosts = Array.from(new Set([
-                studioDomain,
-                resolveProjectStudioHost(projectRef, routingConfig),
-            ]));
             await this.ensureServiceAndRoute({
                 name: `svc-studio-${projectRef}`,
                 url: `http://${hostIp}:${config.port}`,
@@ -570,6 +619,7 @@ export class GatewayService {
                 projectRef,
                 stripPath: false,
                 headers: ["x-supacloud-ui-host:studio"],
+                corsOrigins,
             });
 
             logger.info(`Kong upstream dynamically registered via REST for ${projectRef} (pgrst:${pgrstPort}, gotrue:${gotruePort})`);
@@ -592,6 +642,7 @@ export class GatewayService {
                     await this.kongRequest(`/routes/${route.id}`, "PATCH", { hosts: uniqueHosts });
                 }
             }
+            await this.setCors(projectRef, buildTenantCorsOrigins(projectRef, undefined, [...apiDomains, ...studioDomains]));
             
             // Studio domains
             const studioRouteName = `route-svc-studio-${projectRef}`;
