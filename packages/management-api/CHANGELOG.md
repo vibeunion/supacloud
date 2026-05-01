@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.13](https://github.com/zuohuadong/supacloud/compare/management-api-v0.12.12...management-api-v0.12.13) (2026-05-01)
+
+
+### 🐛 Bug Fixes
+
+* **gateway:** include hosted frontend origins in cors ([672b764](https://github.com/zuohuadong/supacloud/commit/672b764ad066ad5751ec98210175fdd9053b9a5a))
+
 ## [0.12.12](https://github.com/zuohuadong/supacloud/compare/management-api-v0.12.11...management-api-v0.12.12) (2026-04-29)
 
 
