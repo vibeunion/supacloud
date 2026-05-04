@@ -1,8 +1,9 @@
 import { Elysia, t, status } from "elysia";
 import { StorageService, migrationJobs } from '../services/storage.service';
+import { StorageRLS } from "../services/storage-rls";
 import { logger } from "../utils/logger";
 import { config } from "../config";
-import { requireProjectOrAdminAuth } from "../middleware/auth";
+import { requireAdminAuth, requireProjectOrAdminAuth } from "../middleware/auth";
 
 const ErrorResponse = t.Object({ message: t.String() });
 const SuccessResponse = t.Object({ success: t.Boolean(), message: t.String() });
@@ -15,9 +16,29 @@ const S3_ENDPOINT  = config.s3Endpoint;
  * Build the internal S3 URL for imaginary to fetch the source image from.
  * imaginary will pull the image via HTTP from this URL.
  */
+function isValidBucketName(bucket: string): boolean {
+    return /^[a-zA-Z0-9._-]+$/.test(bucket);
+}
+
+function normalizeObjectPath(path: string): string | null {
+    const normalized = path.replace(/^\/+/, "");
+    if (!normalized || normalized.includes("\\") || /[\x00-\x1f\x7f]/.test(normalized)) return null;
+    if (normalized.startsWith("/") || normalized.split("/").some((segment) => segment === "" || segment === "." || segment === "..")) return null;
+    return normalized;
+}
+
+async function ensureImageTransformAccess(request: Request, ref: string, bucket: string) {
+    const logicalBucket = await StorageRLS.getLogicalBucket(ref, bucket, undefined, true).catch(() => null);
+    if (logicalBucket?.public === true) return undefined;
+    return await requireProjectOrAdminAuth(request, ref);
+}
+
 function buildSourceUrl(bucket: string, path: string): string {
+    if (!isValidBucketName(bucket)) throw new Error("Invalid bucket name");
+    const normalizedPath = normalizeObjectPath(path);
+    if (!normalizedPath) throw new Error("Invalid object path");
     const base = S3_ENDPOINT.endsWith('/') ? S3_ENDPOINT.slice(0, -1) : S3_ENDPOINT;
-    return `${base}/${bucket}/${path}`;
+    return `${base}/${encodeURIComponent(bucket)}/${normalizedPath.split("/").map(encodeURIComponent).join("/")}`;
 }
 
 // ── Storage Routes ────────────────────────────────────────────────
@@ -81,7 +102,12 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
             500: ErrorResponse,
         },
     })
-    .post('/migrate', async ({ body }) => {
+    .post('/migrate', async ({ body, request, set }) => {
+        const authError = await requireAdminAuth(request);
+        if (authError) {
+            set.status = authError.status;
+            return { message: authError.body.error, code: String(authError.status) };
+        }
         if (!body.s3Url || !body.credentials) return status(400, { message: 'Missing migration parameters', code: '400' });
         return await StorageService.startMigration(body.s3Url, body.credentials);
     }, {
@@ -96,9 +122,16 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
         response: {
             200: t.Any(),
             400: ErrorResponse,
+            401: ErrorResponse,
+            403: ErrorResponse,
         },
     })
-    .get('/migrate/:jobId', async ({ params, set }) => {
+    .get('/migrate/:jobId', async ({ params, request, set }) => {
+        const authError = await requireAdminAuth(request);
+        if (authError) {
+            set.status = authError.status;
+            return { message: authError.body.error, code: String(authError.status) };
+        }
         const jobId = params.jobId;
         const job = migrationJobs.get(jobId);
         
@@ -128,6 +161,8 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
                 createdAt: t.Any(),
                 updatedAt: t.Any()
             }),
+            401: ErrorResponse,
+            403: ErrorResponse,
             404: ErrorResponse
         }
     })
@@ -135,12 +170,19 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
     // ── Supabase-compatible Image Transform (via imaginary) ──────
     // Matches: GET /v1/storage/:ref/render/image/public/:bucket/*
     // This is the exact pattern that supabase-js SDK sends for .download(path, { transform })
-    .get('/:ref/render/image/public/:bucket/*', async ({ params, query, set }) => {
+    .get('/:ref/render/image/public/:bucket/*', async ({ params, query, request, set }) => {
         const bucket = params.bucket;
         const path = params['*'];
         if (!path) return status(400, { message: 'Missing file path', code: '400' });
+        const authError = await ensureImageTransformAccess(request, params.ref, bucket);
+        if (authError) return status(authError.status as 401 | 403, { message: authError.body.error, code: String(authError.status) });
 
-        const sourceUrl = buildSourceUrl(bucket, path);
+        let sourceUrl: string;
+        try {
+            sourceUrl = buildSourceUrl(bucket, path);
+        } catch {
+            return status(400, { message: 'Invalid source path', code: '400' });
+        }
 
         // ── Map Supabase transform params → imaginary params ──
         const imaginaryParams = new URLSearchParams();
@@ -199,11 +241,18 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
 
     // Smart Crop: intelligent focus-point detection
     // GET /v1/storage/:ref/transform/smartcrop/:bucket/*?width=300&height=300
-    .get('/:ref/transform/smartcrop/:bucket/*', async ({ params, query, set }) => {
+    .get('/:ref/transform/smartcrop/:bucket/*', async ({ params, query, request, set }) => {
         const path = params['*'];
         if (!path) return status(400, { message: 'Missing file path', code: '400' });
+        const authError = await ensureImageTransformAccess(request, params.ref, params.bucket);
+        if (authError) return status(authError.status as 401 | 403, { message: authError.body.error, code: String(authError.status) });
 
-        const sourceUrl = buildSourceUrl(params.bucket, path);
+        let sourceUrl: string;
+        try {
+            sourceUrl = buildSourceUrl(params.bucket, path);
+        } catch {
+            return status(400, { message: 'Invalid source path', code: '400' });
+        }
         const p = new URLSearchParams({
             url: sourceUrl,
             width:   String(query.width  || 300),
@@ -225,11 +274,18 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
 
     // Watermark: overlay text or image watermark
     // GET /v1/storage/:ref/transform/watermark/:bucket/*?text=ACME&font=sans&opacity=0.5
-    .get('/:ref/transform/watermark/:bucket/*', async ({ params, query, set }) => {
+    .get('/:ref/transform/watermark/:bucket/*', async ({ params, query, request, set }) => {
         const path = params['*'];
         if (!path) return status(400, { message: 'Missing file path', code: '400' });
+        const authError = await ensureImageTransformAccess(request, params.ref, params.bucket);
+        if (authError) return status(authError.status as 401 | 403, { message: authError.body.error, code: String(authError.status) });
 
-        const sourceUrl = buildSourceUrl(params.bucket, path);
+        let sourceUrl: string;
+        try {
+            sourceUrl = buildSourceUrl(params.bucket, path);
+        } catch {
+            return status(400, { message: 'Invalid source path', code: '400' });
+        }
         const p = new URLSearchParams({
             url: sourceUrl,
             text:      query.text   || 'SupaCloud',
@@ -255,11 +311,18 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
 
     // Blur: apply gaussian blur (useful for placeholder images / LQIP)
     // GET /v1/storage/:ref/transform/blur/:bucket/*?sigma=10&width=20
-    .get('/:ref/transform/blur/:bucket/*', async ({ params, query, set }) => {
+    .get('/:ref/transform/blur/:bucket/*', async ({ params, query, request, set }) => {
         const path = params['*'];
         if (!path) return status(400, { message: 'Missing file path', code: '400' });
+        const authError = await ensureImageTransformAccess(request, params.ref, params.bucket);
+        if (authError) return status(authError.status as 401 | 403, { message: authError.body.error, code: String(authError.status) });
 
-        const sourceUrl = buildSourceUrl(params.bucket, path);
+        let sourceUrl: string;
+        try {
+            sourceUrl = buildSourceUrl(params.bucket, path);
+        } catch {
+            return status(400, { message: 'Invalid source path', code: '400' });
+        }
         const p = new URLSearchParams({
             url: sourceUrl,
             sigma:   String(query.sigma || 10),
@@ -282,11 +345,18 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
 
     // Image Info: extract metadata (dimensions, EXIF, color space) without downloading full image
     // GET /v1/storage/:ref/transform/info/:bucket/*
-    .get('/:ref/transform/info/:bucket/*', async ({ params }) => {
+    .get('/:ref/transform/info/:bucket/*', async ({ params, request }) => {
         const path = params['*'];
         if (!path) return status(400, { message: 'Missing file path', code: '400' });
+        const authError = await ensureImageTransformAccess(request, params.ref, params.bucket);
+        if (authError) return status(authError.status as 401 | 403, { message: authError.body.error, code: String(authError.status) });
 
-        const sourceUrl = buildSourceUrl(params.bucket, path);
+        let sourceUrl: string;
+        try {
+            sourceUrl = buildSourceUrl(params.bucket, path);
+        } catch {
+            return status(400, { message: 'Invalid source path', code: '400' });
+        }
         const p = new URLSearchParams({ url: sourceUrl });
 
         try {
@@ -300,11 +370,18 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
 
     // Thumbnail: generate a small, fast thumbnail (great for file browsers / galleries)
     // GET /v1/storage/:ref/transform/thumbnail/:bucket/*?width=150
-    .get('/:ref/transform/thumbnail/:bucket/*', async ({ params, query, set }) => {
+    .get('/:ref/transform/thumbnail/:bucket/*', async ({ params, query, request, set }) => {
         const path = params['*'];
         if (!path) return status(400, { message: 'Missing file path', code: '400' });
+        const authError = await ensureImageTransformAccess(request, params.ref, params.bucket);
+        if (authError) return status(authError.status as 401 | 403, { message: authError.body.error, code: String(authError.status) });
 
-        const sourceUrl = buildSourceUrl(params.bucket, path);
+        let sourceUrl: string;
+        try {
+            sourceUrl = buildSourceUrl(params.bucket, path);
+        } catch {
+            return status(400, { message: 'Invalid source path', code: '400' });
+        }
         const p = new URLSearchParams({
             url: sourceUrl,
             width:   String(query.width  || 150),

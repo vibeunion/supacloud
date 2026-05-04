@@ -187,6 +187,17 @@ async function resolveProjectRefFromApiKey(key: string): Promise<string> {
     return '';
 }
 
+function hostBelongsToBaseDomain(host: string): boolean {
+    const baseDomain = config.baseDomain?.toLowerCase();
+    if (!baseDomain || !host) return false;
+    return host === baseDomain || host.endsWith(`.${baseDomain}`);
+}
+
+function isLoopbackHost(host: string): boolean {
+    if (!host) return true;
+    return host === "localhost" || host === "127.0.0.1" || host === "::1";
+}
+
 async function resolveProjectRefFromHeaderAndHost(ref: string, host: string): Promise<string> {
     if (!ref || !host) return '';
     try {
@@ -195,6 +206,8 @@ async function resolveProjectRefFromHeaderAndHost(ref: string, host: string): Pr
             SELECT ref
             FROM projects
             WHERE ref = ${ref}
+              AND deleted_at IS NULL
+              AND status = 'active'
               AND (
                 config->>'api_domain' = ${host}
                 OR config->>'custom_domain' = ${host}
@@ -203,7 +216,14 @@ async function resolveProjectRefFromHeaderAndHost(ref: string, host: string): Pr
             LIMIT 1
         `;
         if (rows.length > 0 && String(rows[0].ref) === ref) return ref;
-    } catch {}
+    } catch (error: unknown) {
+        logger.warn("[StorageCompat] Failed to validate project header host binding", {
+            ref,
+            host,
+            error: error instanceof Error ? error.message : String(error),
+        });
+        return '';
+    }
 
     if (config.baseDomain && host === `${ref}.api.${config.baseDomain}`) {
         return ref;
@@ -218,7 +238,7 @@ async function getProjectRef(headers: Record<string, string | undefined>): Promi
     const host = headers['host']?.replace(/:\d+$/, '') || '';
     const headerRef = headers['x-project-ref'] || headers['x-supabase-project'] || '';
 
-    if (process.env.BUN_ENV === 'test' || process.env.NODE_ENV === 'test') {
+    if ((process.env.BUN_ENV === 'test' || process.env.NODE_ENV === 'test') && isLoopbackHost(host)) {
         if (key === 'test-token' || auth === 'Bearer test-token') {
              return 'test_mock';
         }
@@ -237,15 +257,26 @@ async function getProjectRef(headers: Record<string, string | undefined>): Promi
             const rows = await sql`
                 SELECT ref
                 FROM projects
-                WHERE config->>'api_domain' = ${host}
-                   OR config->>'custom_domain' = ${host}
-                   OR config->>'studio_domain' = ${host}
+                WHERE deleted_at IS NULL
+                  AND status = 'active'
+                  AND (
+                    config->>'api_domain' = ${host}
+                    OR config->>'custom_domain' = ${host}
+                    OR config->>'studio_domain' = ${host}
+                  )
                 LIMIT 1
             `;
             if (rows.length > 0 && String(rows[0].ref) !== apiKeyRef) return '';
-        } catch {}
+        } catch (error: unknown) {
+            logger.warn("[StorageCompat] Failed to validate API key host binding", {
+                apiKeyRef,
+                host,
+                error: error instanceof Error ? error.message : String(error),
+            });
+            if (!hostBelongsToBaseDomain(host)) return '';
+        }
 
-        if (config.baseDomain && host.includes(config.baseDomain)) {
+        if (hostBelongsToBaseDomain(host)) {
             const hostRef = host.split('.')[0];
             if (hostRef && apiKeyRef !== hostRef) return '';
         }
@@ -419,7 +450,6 @@ async function readUploadBody(
         customMetadata = extracted.metadata;
     }
 
-    return { fileData: fileBuffer, fileMimeType, size: fileBuffer.byteLength, customMetadata };
     return { fileData: fileBuffer, fileMimeType, size: fileBuffer.byteLength, customMetadata };
 }
 

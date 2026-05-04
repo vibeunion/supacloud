@@ -96,7 +96,10 @@ export async function getAuthContext(request: Request): Promise<AuthContext | { 
     if (parts.length === 2) {
       const [payloadB64, sigHex] = parts;
       const payload = JSON.parse(atob(payloadB64));
-      if (payload.exp > Date.now()) {
+      const expMs = typeof payload.exp === "number" && payload.exp < 10_000_000_000
+        ? payload.exp * 1000
+        : payload.exp;
+      if (config.masterToken && typeof expMs === "number" && expMs > Date.now()) {
         const encoder = new TextEncoder();
         const key = await crypto.subtle.importKey("raw", encoder.encode(config.masterToken), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
         const sig = await crypto.subtle.sign("HMAC", key, encoder.encode(JSON.stringify(payload)));

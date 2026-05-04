@@ -25,6 +25,44 @@ import { FrontendDomainService } from "./frontend-domain.service";
 import { FrontendRecordService } from "./frontend-record.service";
 
 const FRONTEND_BASE_DIR = "/var/supacloud/frontends";
+const UNSAFE_COMMAND_PATTERN = /[\n\r;&|`$<>]/;
+const SAFE_GIT_SSH_PATTERN = /^git@[A-Za-z0-9.-]+:[A-Za-z0-9._~/-]+\.git$/;
+
+function assertSafeBuildCommand(command: string): void {
+  if (process.env.SUPACLOUD_RESTRICT_BUILD_COMMANDS !== "true") return;
+  if (command.length > 200 || UNSAFE_COMMAND_PATTERN.test(command)) {
+    throw new Error("Build command contains unsupported shell syntax");
+  }
+}
+
+function assertSafeGitUrl(gitUrl: string): void {
+  if (SAFE_GIT_SSH_PATTERN.test(gitUrl)) return;
+  let parsed: URL;
+  try {
+    parsed = new URL(gitUrl);
+  } catch {
+    throw new Error("Invalid git URL");
+  }
+  if (!["https:", "http:", "ssh:"].includes(parsed.protocol)) {
+    throw new Error("Unsupported git URL protocol");
+  }
+  const host = parsed.hostname.toLowerCase();
+  if (!host || host === "localhost" || host === "127.0.0.1" || host === "::1") {
+    throw new Error("Git URL host is not allowed");
+  }
+  if (/^(169\.254\.169\.254|metadata\.google\.internal)$/i.test(host)) {
+    throw new Error("Git URL metadata service targets are not allowed");
+  }
+  if (process.env.SUPACLOUD_RESTRICT_GIT_PRIVATE_NETWORKS === "true" && /^(10\.|127\.|169\.254\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.)/.test(host)) {
+    throw new Error("Git URL private network targets are not allowed");
+  }
+}
+
+function assertSafeGitBranch(branch: string): void {
+  if (!/^[A-Za-z0-9._/-]{1,128}$/.test(branch) || branch.includes("..") || branch.startsWith("-")) {
+    throw new Error("Invalid git branch");
+  }
+}
 
 export class FrontendService {
   private baseDir: string;
@@ -254,6 +292,8 @@ export class FrontendService {
     let buildLog = "";
 
     try {
+      assertSafeGitUrl(gitUrl);
+      assertSafeGitBranch(branch);
       await this.domainService.setGitConfig(projectRef, deploymentId, gitUrl, branch);
       await this.updateDeployment(projectRef, deploymentId, {
         status: "building",
@@ -313,6 +353,7 @@ export class FrontendService {
 
     try {
       if (deployment.install_command) {
+        assertSafeBuildCommand(deployment.install_command);
         buildLog += `$ ${deployment.install_command}\n`;
         const installResult = await $`${deployment.install_command}`
           .cwd(sourceDir)
@@ -325,6 +366,7 @@ export class FrontendService {
       }
 
       if (deployment.build_command) {
+        assertSafeBuildCommand(deployment.build_command);
         buildLog += `$ ${deployment.build_command}\n`;
         const buildResult = await $`${deployment.build_command}`
           .cwd(sourceDir)
