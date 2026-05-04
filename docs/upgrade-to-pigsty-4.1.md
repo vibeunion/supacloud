@@ -1,6 +1,6 @@
-# Upgrade to Pigsty 4.1 and Garage Compatibility Guide
+# Upgrade to Pigsty 4.3
 
-This guide aims to help existing SupaCloud users (installed based on earlier Pigsty versions) smoothly upgrade to the latest Pigsty v4.1 for latest PostgreSQL support, better performance, and system security improvements.
+This guide helps existing SupaCloud users upgrade the Pigsty foundation to v4.3 while preserving SupaCloud's own Kong, Edge Runtime, task, and JuiceFS-backed storage integration.
 
 ## Important Notes
 
@@ -18,8 +18,8 @@ bash scripts/upgrade_pigsty.sh
 ```
 
 This script will automatically:
-1. Download and build the latest v4.1.0 release codebase in your current user's home directory (`$HOME/pigsty`).
-2. Automatically run `./configure`.
+1. Download the Pigsty v4.3 release codebase in your current user's home directory (`$HOME/pigsty`).
+2. Automatically run `./configure -c app/supa`, preserving SupaCloud's own gateway/runtime/storage components. Operators may explicitly set `PIGSTY_CONFIG_TEMPLATE=supabase` to test Pigsty's full upstream Supabase template.
 3. Execute `ansible-playbook` to redeploy updates for each component, completing in-place upgrade.
 
 ## Upgrade Method 2: Manual Upgrade (Follow Official Guide)
@@ -28,12 +28,12 @@ If you maintain a large number of custom host configuration items, or wish to ex
 
 1. **Download and checkout latest code**:
    ```bash
-   curl -fsSL https://repo.pigsty.io/get | bash -s v4.1.0
+   curl -fsSL https://repo.pigsty.io/get | bash -s v4.3.0
    cd ~/pigsty
    ```
 2. **Apply reconfiguration**:
    ```bash
-   ./configure
+   ./configure -c app/supa
    ```
 3. **Step-by-step playbook upgrade**:
    Run playbooks individually according to the parts you need to update. For full system-wide application:
@@ -41,20 +41,6 @@ If you maintain a large number of custom host configuration items, or wish to ex
    ansible-playbook -i pigsty.yml install.yml
    ```
 
-## Garage S3 Important Change Compatibility Supplement
+## Storage Note
 
-The latest SupaCloud `install.sh` changed the default Region setting for self-hosted Garage S3 to enhance its API compatibility interaction with MinIO and standard S3 clients (which often use default configs like `us-east-1`).
-
-If your older version encountered **AuthorizationHeaderMalformed** (auth signature header abnormal) errors from clients due to Garage S3's Region value (previously defaulted to `garage`), you can manually correct it for compatibility:
-
-1. **Modify config file**: Edit `/etc/garage/garage.toml`, find the `[s3_api]` section
-   Change `s3_region = "garage"` to:
-   ```toml
-   s3_region = "us-east-1"
-   ```
-2. **Modify credential environment variables (if used)**:
-   Edit `/etc/garage/s3-credentials.env` and corresponding environment variable files in your projects, correct the `S3_REGION` value to `us-east-1`.
-3. **Restart the engine**:
-   ```bash
-   systemctl restart garage
-   ```
+SupaCloud defaults to `S3_STORAGE_TYPE=juicefs`. The Pigsty upgrade flow should preserve that default and should not re-enable historical Garage storage paths. Use `minio` or `external` only when explicitly configured.
