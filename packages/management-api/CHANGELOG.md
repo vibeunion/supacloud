@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.14](https://github.com/zuohuadong/supacloud/compare/management-api-v0.12.13...management-api-v0.12.14) (2026-05-04)
+
+
+### 🐛 Bug Fixes
+
+* **security:** harden storage and proxy surfaces ([03e0efa](https://github.com/zuohuadong/supacloud/commit/03e0efad117902d014dc855732a0d337bce1c764))
+
 ## [0.12.13](https://github.com/zuohuadong/supacloud/compare/management-api-v0.12.12...management-api-v0.12.13) (2026-05-01)
 
 
