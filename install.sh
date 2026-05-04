@@ -956,6 +956,42 @@ EOF
     return 0
 }
 
+# Configure pgbackrest to use JuiceFS-backed local path as repo (not S3/MinIO)
+configure_pgbackrest_juicefs() {
+    log_step "Configuring pgbackrest for JuiceFS mode..."
+    if ! command -v pgbackrest &> /dev/null; then
+        log_warn "pgbackrest not installed, skipping configuration"
+        return 0
+    fi
+
+    local PG_BACKREST_DIR="/var/lib/pgbackrest"
+    mkdir -p "${PG_BACKREST_DIR}"
+    chown -R postgres:postgres "${PG_BACKREST_DIR}"
+
+    # Create pgbackrest config for local-file repo
+    cat > /etc/pgbackrest.conf << "PGCONF"
+[global]
+repo1-path=/var/lib/pgbackrest
+repo1-retention-full=2
+repo1-retention-diff=7
+
+[db-main]
+pg1-path=/pg/data
+pg1-port=5432
+pg1-user=postgres
+PGCONF
+    chown postgres:postgres /etc/pgbackrest.conf 2>/dev/null || true
+
+    # Create stanza if postgres is running
+    if sudo -u postgres pg_isready &>/dev/null; then
+        log_info "Creating pgbackrest stanza db-main..."
+        sudo -u postgres pgbackrest --stanza=db-main stanza-create 2>/dev/null || log_warn "pgbackrest stanza-create failed, may need manual setup after PG is fully ready"
+    fi
+
+    log_info "pgbackrest configured for JuiceFS local repo at ${PG_BACKREST_DIR}"
+}
+
+
 install_docker_compose() {
     log_step "Checking Docker Compose..."
     
@@ -1625,8 +1661,8 @@ configure_s3_in_pigsty() {
         juicefs)
             # JuiceFS S3 Gateway runs on local port 9000
             S3_ENDPOINT="http://${INTERNAL_IP}:9000"
-            S3_ACCESS_KEY="${S3_ACCESS_KEY:-minioadmin}"
-            S3_SECRET_KEY="${S3_SECRET_KEY:-minioadmin}"
+            S3_ACCESS_KEY="${S3_ACCESS_KEY:-s3user_data}"
+            S3_SECRET_KEY="${S3_SECRET_KEY:-S3User.Data}"
             S3_REGION="us-east-1"
             log_info "JuiceFS mode: S3 Endpoint set to ${S3_ENDPOINT}"
             ;;
@@ -2034,6 +2070,8 @@ EOF
     local REALTIME_DB_ENC_KEY
     REALTIME_SECRET_KEY_BASE=$(openssl rand -base64 48 | tr -d '\n')
     # Realtime tenant encryption uses AES-128 and expects a 16-byte key.
+    local SECRETS_ENCRYPTION_KEY
+    SECRETS_ENCRYPTION_KEY=$(openssl rand -base64 48 | tr -d "\n" | cut -c1-64)
     # `openssl rand -hex 16` returns 32 ASCII chars, which crashes tenant
     # registration with "Bad key size". Generate a literal 16-char secret instead.
     REALTIME_DB_ENC_KEY=$(openssl rand -base64 18 | tr -d '\n=+/ ' | cut -c1-16)
@@ -2062,6 +2100,7 @@ PG_PORT=5432
 PG_USER=postgres
 PG_DATABASE=postgres
 PGPASSWORD=${POSTGRES_PASSWORD}
+SECRETS_ENCRYPTION_KEY=${SECRETS_ENCRYPTION_KEY}
 EOF
     chmod 600 /etc/supabase/management-api.env
     sync_runtime_config /etc/supabase/management-api.env
@@ -2086,7 +2125,7 @@ Description=SupaCloud Management API Server
 Documentation=https://github.com/supacloud/supacloud
 After=network.target patroni.service
 Wants=patroni.service
-Requires=patroni.service
+# Requires removed: patroni is a soft dependency (Wants= above), not a hard requirement
 
 [Service]
 Type=simple
@@ -2401,6 +2440,7 @@ main() {
     if [[ -f /etc/supabase/.init_juicefs ]] && [[ "$S3_STORAGE_TYPE" == "juicefs" ]]; then
         init_juicefs_s3_gateway
         rm -f /etc/supabase/.init_juicefs
+        configure_pgbackrest_juicefs
     fi
 
     # Install Management API
