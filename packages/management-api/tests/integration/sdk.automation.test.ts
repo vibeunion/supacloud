@@ -18,7 +18,7 @@ describe("SDK Compatibility - Core & Realtime", () => {
       if (process.env.TEST_FIXED_JWT_SECRET) {
           throw new Error("Skipping legacy hardcoded automation tests in favor of compliance dynamic tenant tests in CI.");
       }
-      await fetch(SUPABASE_URL);
+      await fetch(SUPABASE_URL, { signal: AbortSignal.timeout(1000) });
       isAvailable = true;
     } catch {
       console.warn("API server not available or CI environment detected. Skipping realtime tests.");
