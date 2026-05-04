@@ -53,6 +53,68 @@ function buildEncryptedBackgroundAuth(input: {
     };
 }
 
+function firstForwardedHost(request: Request): string {
+    const forwardedHost = request.headers.get('x-forwarded-host');
+    const rawHost = (forwardedHost || request.headers.get('host') || "").split(",")[0].trim();
+    return rawHost.split(":")[0].toLowerCase();
+}
+
+function hostBelongsToBaseDomain(host: string): boolean {
+    const baseDomain = config.baseDomain?.toLowerCase();
+    if (!baseDomain || !host) return false;
+    return host === baseDomain || host.endsWith(`.${baseDomain}`);
+}
+
+function isLoopbackRequestHost(request: Request): boolean {
+    const host = firstForwardedHost(request);
+    if (!host) return true;
+    return host === "localhost" || host === "127.0.0.1" || host === "::1";
+}
+
+function isTestTenantAuthAllowed(request: Request): boolean {
+    return (process.env.BUN_ENV === 'test' || process.env.NODE_ENV === 'test') && isLoopbackRequestHost(request);
+}
+
+async function isCredentialedOriginAllowed(origin: string, ref: string | undefined): Promise<boolean> {
+    if (!ref) return false;
+    let originHost = "";
+    try {
+        const parsed = new URL(origin);
+        if (!["http:", "https:"].includes(parsed.protocol)) return false;
+        originHost = parsed.hostname.toLowerCase();
+    } catch {
+        return false;
+    }
+
+    if (originHost === "localhost" || originHost === "127.0.0.1" || originHost === "::1") return true;
+    if (hostBelongsToBaseDomain(originHost)) return true;
+
+    try {
+        const rows = await metaSql`
+            SELECT ref
+            FROM projects
+            WHERE ref = ${ref}
+              AND deleted_at IS NULL
+              AND status = 'active'
+              AND (
+                config->>'custom_domain' = ${originHost}
+                OR config->>'api_domain' = ${originHost}
+                OR config->>'studio_domain' = ${originHost}
+                OR config->>'custom_domain' = ${originHost.replace(/^api\./, '')}
+              )
+            LIMIT 1
+        `;
+        return rows.length > 0;
+    } catch (error: unknown) {
+        logger.warn("[SDK Proxy] Failed to verify credentialed CORS origin", {
+            ref,
+            originHost,
+            error: error instanceof Error ? error.message : String(error),
+        });
+        return false;
+    }
+}
+
 async function verifyJwtPayload(ref: string, token: string): Promise<Record<string, unknown> | null> {
     try {
         const rows = await metaSql`SELECT jwt_secret FROM projects WHERE ref = ${ref} AND deleted_at IS NULL AND status = 'active' LIMIT 1`;
@@ -216,7 +278,7 @@ async function getProjectRef(request: Request): Promise<string> {
             const host = rawHost.split(',')[0].trim();
             if (!host) continue;
 
-            if (config.baseDomain && host.includes(config.baseDomain)) {
+            if (hostBelongsToBaseDomain(host.split(':')[0].toLowerCase())) {
                 const hostRef = host.split('.')[0];
                 if (hostRef && hostRef !== apiKeyRef) return '';
             }
@@ -225,13 +287,24 @@ async function getProjectRef(request: Request): Promise<string> {
                 const rows = await metaSql`
                     SELECT ref
                     FROM projects
-                    WHERE config->>'custom_domain' = ${hostWithoutPort}
-                       OR config->>'api_domain' = ${hostWithoutPort}
-                       OR config->>'custom_domain' = ${hostWithoutPort.replace(/^api\./, '')}
+                    WHERE deleted_at IS NULL
+                      AND status = 'active'
+                      AND (
+                        config->>'custom_domain' = ${hostWithoutPort}
+                        OR config->>'api_domain' = ${hostWithoutPort}
+                        OR config->>'custom_domain' = ${hostWithoutPort.replace(/^api\./, '')}
+                      )
                     LIMIT 1
                 `;
                 if (rows.length > 0 && rows[0].ref !== apiKeyRef) return '';
-            } catch(e) {}
+            } catch(error: unknown) {
+                logger.warn("[SDK Proxy] Failed to validate API key host binding", {
+                    apiKeyRef,
+                    host,
+                    error: error instanceof Error ? error.message : String(error),
+                });
+                if (!hostBelongsToBaseDomain(host.split(':')[0].toLowerCase())) return '';
+            }
         }
 
         return apiKeyRef;
@@ -242,7 +315,7 @@ async function getProjectRef(request: Request): Promise<string> {
         if (trustedRef) return trustedRef;
     }
 
-    if (process.env.BUN_ENV === 'test' || process.env.NODE_ENV === 'test') {
+    if (isTestTenantAuthAllowed(request)) {
         if (key === 'test-token' || auth.includes('test-token')) {
              return 'test_mock';
         }
@@ -279,7 +352,14 @@ async function resolveProjectRefFromHeaderAndHost(ref: string, request: Request)
                 LIMIT 1
             `;
             if (rows.length > 0 && rows[0].ref === ref) return ref;
-        } catch {}
+        } catch (error: unknown) {
+            logger.warn("[SDK Proxy] Failed to validate project header host binding", {
+                ref,
+                host,
+                error: error instanceof Error ? error.message : String(error),
+            });
+            return '';
+        }
     }
 
     return '';
@@ -302,12 +382,12 @@ async function getTenantPorts(ref: string): Promise<{ gotruePort: number, pgrstP
     }
 }
 
-function applyCorsHeaders(proxyHeaders: Headers, request: Request) {
+async function applyCorsHeaders(proxyHeaders: Headers, request: Request, ref?: string) {
     const origin = request.headers.get('origin');
     if (!origin) return;
 
     const hasCredentials = request.headers.get('authorization') || request.headers.get('cookie');
-    if (hasCredentials) {
+    if (hasCredentials && await isCredentialedOriginAllowed(origin, ref)) {
         proxyHeaders.set('access-control-allow-origin', origin);
         proxyHeaders.set('access-control-allow-credentials', 'true');
         proxyHeaders.set('vary', [proxyHeaders.get('vary'), 'origin'].filter(Boolean).join(', '));
@@ -397,7 +477,7 @@ async function executeProxy(request: Request, targetUrl: string, interceptors: P
 
         proxyHeaders.set('x-supabase-api-version', new Date().toISOString().slice(0, 10).replace(/-/g, '').substring(0, 8));
 
-        applyCorsHeaders(proxyHeaders, request);
+        await applyCorsHeaders(proxyHeaders, request, interceptors.ref);
         
         if (request.method === 'OPTIONS') {
              return new Response(null, { status: 204, headers: proxyHeaders });
