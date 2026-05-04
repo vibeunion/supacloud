@@ -1,16 +1,19 @@
 #!/bin/bash
 # ============================================================
-# Pigsty 4.1 Upgrade Script for SupaCloud
+# Pigsty Upgrade Script for SupaCloud
 # ============================================================
 
 set -e
 
 echo "=========================================================="
-echo "          SupaCloud - Pigsty 4.1 Upgrade Tool            "
+PIGSTY_VERSION="${PIGSTY_VERSION:-v4.3.0}"
+PIGSTY_CONFIG_TEMPLATE="${PIGSTY_CONFIG_TEMPLATE:-app/supa}"
+
+echo "          SupaCloud - Pigsty Upgrade Tool                "
 echo "=========================================================="
 echo ""
 echo "Warning: Before upgrading infrastructure, it is strongly recommended to backup important database data!"
-echo "The upgrade process will pull the latest Pigsty v4.1.0 code and reapply cluster configuration."
+echo "The upgrade process will pull Pigsty ${PIGSTY_VERSION} and reapply cluster configuration."
 echo ""
 read -r -p "Have you confirmed backup and are ready to upgrade? [y/N] " confirm
 if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
@@ -19,14 +22,17 @@ if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
 fi
 
 echo "=> Starting to download latest Pigsty source code..."
-curl -fsSL https://repo.pigsty.io/get | bash -s v4.2.2
+curl -fsSL https://repo.pigsty.io/get | bash -s "${PIGSTY_VERSION}"
 
 if [ -d "$HOME/pigsty" ]; then
     echo "=> Switching to Pigsty directory..."
     cd $HOME/pigsty
     
-    echo "=> Configuring Pigsty v4.1..."
-    ./configure
+    echo "=> Configuring Pigsty (${PIGSTY_CONFIG_TEMPLATE} template)..."
+    if ! ./configure -c "${PIGSTY_CONFIG_TEMPLATE}"; then
+        echo "=> Primary template failed, trying legacy app/supa template..."
+        ./configure -c app/supa || ./configure
+    fi
     
     echo "=> Applying Pigsty upgrade on this machine..."
     echo "   This may take a few minutes, please wait patiently."
