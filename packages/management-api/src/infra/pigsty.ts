@@ -80,7 +80,12 @@ export async function install(config: PigstyConfig) {
         // Ensure no .nothrow(), if bootstrap fails must throw exception
         await $`cd ${pigstyDir} && ./bootstrap`;
 
-        await $`cd ${pigstyDir} && ./configure -i ${config.internalIp} -c app/supa`;
+        const template = process.env.PIGSTY_CONFIG_TEMPLATE || "app/supa";
+        const configured = await $`cd ${pigstyDir} && ./configure -i ${config.internalIp} -c ${template}`.nothrow();
+        if (configured.exitCode !== 0) {
+            logger.warn(`[PigstyManager] Supabase template "${template}" failed, trying legacy app/supa template...`);
+            await $`cd ${pigstyDir} && ./configure -i ${config.internalIp} -c app/supa`;
+        }
     }
 
     // 3. Map variables into YML (with rollback protection)

@@ -1076,9 +1076,9 @@ SVCEOF
 
 # ========== S3 Storage Installation ==========
 install_s3_storage() {
-    log_step "Configuring S3 storage (${S3_STORAGE_TYPE:-minio})..."
+    log_step "Configuring S3 storage (${S3_STORAGE_TYPE:-juicefs})..."
     
-    case "${S3_STORAGE_TYPE:-minio}" in
+    case "${S3_STORAGE_TYPE:-juicefs}" in
         minio)
             log_info "Using Pigsty built-in MinIO, no extra installation needed"
             ;;
@@ -1354,9 +1354,15 @@ install_pigsty() {
         ./bootstrap
     fi
     
-    # Use Supabase configuration templates
+    # Use the legacy Supabase app scaffold by default because SupaCloud replaces
+    # gateway/runtime/storage orchestration with its own components after Pigsty
+    # provisions Postgres and the base app env. Operators may explicitly set
+    # PIGSTY_CONFIG_TEMPLATE=supabase to test Pigsty's full upstream template.
     log_info "Configuring Supabase templates..."
-    ./configure -i "$INTERNAL_IP" -c app/supa
+    if ! ./configure -i "$INTERNAL_IP" -c "${PIGSTY_CONFIG_TEMPLATE:-app/supa}"; then
+        log_warn "Primary Supabase template failed, trying legacy app/supa template..."
+        ./configure -i "$INTERNAL_IP" -c app/supa
+    fi
     
     # OpenCloudOS Special Handling: Disable Pigsty repo features, use system packages
     if [[ "$IS_OPENCLOUDOS" == "true" ]]; then
@@ -1554,7 +1560,7 @@ update_pigsty_config() {
     fi
     
     # Configure non-MinIO S3 storage
-    if [[ "${S3_STORAGE_TYPE:-minio}" != "minio" ]]; then
+    if [[ "${S3_STORAGE_TYPE:-juicefs}" != "minio" ]]; then
         configure_s3_in_pigsty
     fi
     # Container/CI environment detection limit variables now moved to ansible-playbook command line (EXTRA_ARGS)
