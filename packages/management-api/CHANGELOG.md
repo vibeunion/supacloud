@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.15](https://github.com/zuohuadong/supacloud/compare/management-api-v0.12.14...management-api-v0.12.15) (2026-05-04)
+
+
+### 🐛 Bug Fixes
+
+* **pigsty:** align 4.3 upgrade with supacloud storage defaults ([e3e6881](https://github.com/zuohuadong/supacloud/commit/e3e68818aad04c9d967d83d05a03cb58331bf453))
+
 ## [0.12.14](https://github.com/zuohuadong/supacloud/compare/management-api-v0.12.13...management-api-v0.12.14) (2026-05-04)
 
 
