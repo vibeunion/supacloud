@@ -179,7 +179,7 @@ The compose stack is isolated under [`docker/self-host`](/Volumes/Data/workspace
 | `--ip` | Server Internal IP | `--ip 10.0.0.5` |
 | `--domain` | API/Public Domain | `--domain supa.com` |
 | `--studio` | Studio Dashboard Domain| `--studio studio.com`|
-| `--s3` | Storage Type | `juicefs`, `minio`, `garage`, `rustfs`, or `external`|
+| `--s3` | Storage Type | `juicefs`, `minio`, or `external` |
 | `--password`| Master Password | `--password mysecret` |
 
 ### Management
@@ -325,7 +325,7 @@ curl http://localhost:9090/v1/projects/<ref>/api-keys \
 ./switch.sh runtime external   # Standalone supacloud-edge-runtime.service
 
 # Switch storage backend
-./switch.sh storage rustfs     # or: minio, garage, external
+./switch.sh storage juicefs    # or: minio, external
 
 # Show current configuration
 ./switch.sh status
@@ -685,7 +685,7 @@ sudo SUPACLOUD_GITHUB_PROXY=direct supacloud upgrade --yes
 | `--ip` | 指定内网 IP | `--ip 10.0.0.5` |
 | `--domain` | 指定 API 域名 | `--domain supa.com` |
 | `--studio` | 指定 Studio 域名| `--studio studio.com`|
-| `--s3` | 指定存储类型 | `juicefs`、`minio`、`garage`、`rustfs` 或 `external`|
+| `--s3` | 指定存储类型 | `juicefs`、`minio` 或 `external` |
 | `--password`| 统一设置初始密码 | `--password mysecret` |
 
 ### 项目管理
@@ -827,7 +827,7 @@ curl http://localhost:9090/v1/projects/<ref>/api-keys \
 ./switch.sh runtime external   # 独立 supacloud-edge-runtime.service
 
 # 切换存储后端
-./switch.sh storage rustfs     # 或: minio, garage, external
+./switch.sh storage juicefs    # 或: minio, external
 
 # 查看当前配置
 ./switch.sh status
