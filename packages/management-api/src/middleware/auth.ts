@@ -34,7 +34,7 @@ async function verifyProjectJwt(
     for (const ref of candidateRefs) {
       const [project] = await metaSql`
         SELECT ref, jwt_secret FROM projects
-        WHERE ref = ${ref} AND status = 'active'
+        WHERE ref = ${ref} AND lower(status) = 'active'
         LIMIT 1
       `;
       if (!project?.jwt_secret) continue;
@@ -106,13 +106,13 @@ export async function checkAuth(request: Request): Promise<{ status: number; bod
           SELECT ref FROM projects
           WHERE ref = ${scopedRef}
             AND service_role_key = ${token}
-            AND status = 'active'
+            AND lower(status) = 'active'
           LIMIT 1
         `
       : await metaSql`
           SELECT ref FROM projects
           WHERE service_role_key = ${token}
-            AND status = 'active'
+            AND lower(status) = 'active'
           LIMIT 1
         `;
     if (project) {

@@ -28,6 +28,17 @@ export function normalizeProjectRoutingConfig(
 ): ProjectRoutingConfig | undefined {
   if (!projectConfig) return undefined;
   if (typeof projectConfig === "string") {
+    const trimmed = projectConfig.trim();
+    if (trimmed.startsWith("{")) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          return parsed as ProjectRoutingConfig;
+        }
+      } catch {
+        // Fall through to legacy string-as-domain behavior.
+      }
+    }
     return { custom_domain: projectConfig };
   }
   return projectConfig;
