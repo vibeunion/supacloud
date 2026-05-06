@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { config } from "../../src/config";
 import {
+  normalizeProjectRoutingConfig,
   normalizeBaseDomain,
+  resolveTenantPorts,
   resolveProjectApiHost,
   resolveProjectBaseHost,
   resolveProjectStudioHost,
@@ -25,5 +27,22 @@ describe("project routing", () => {
     expect(resolveProjectBaseHost("77az24zz7p")).toBe("77az24zz7p.82.157.196.165.sslip.io");
     expect(resolveProjectApiHost("77az24zz7p", null)).toBe("77az24zz7p.api.82.157.196.165.sslip.io");
     expect(resolveProjectStudioHost("77az24zz7p", null)).toBe("studio-77az24zz7p.82.157.196.165.sslip.io");
+  });
+
+  test("parses JSON string routing config before legacy string-as-domain fallback", () => {
+    const configJson = '{"postgrest_port":3234,"gotrue_port":4234,"custom_domain":"example.com"}';
+
+    expect(normalizeProjectRoutingConfig(configJson)).toEqual({
+      postgrest_port: 3234,
+      gotrue_port: 4234,
+      custom_domain: "example.com",
+    });
+    expect(resolveTenantPorts(configJson)).toEqual({ pgrstPort: 3234, gotruePort: 4234 });
+    expect(resolveProjectApiHost("77az24zz7p", configJson)).toBe("api.example.com");
+  });
+
+  test("keeps non-JSON strings as legacy custom domains", () => {
+    expect(normalizeProjectRoutingConfig("example.com")).toEqual({ custom_domain: "example.com" });
+    expect(normalizeProjectRoutingConfig("{bad json")).toEqual({ custom_domain: "{bad json" });
   });
 });
