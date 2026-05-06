@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.12.17](https://github.com/zuohuadong/supacloud/compare/management-api-v0.12.16...management-api-v0.12.17) (2026-05-06)
+
+
+### 🐛 Bug Fixes
+
+* **management-api:** accept serialized routing config ([edb5e4d](https://github.com/zuohuadong/supacloud/commit/edb5e4d329e255e22ee48c5c8bab7b6c833ad2ac))
+* **tasks:** allow invoker jwt to read task detail ([e99cf7b](https://github.com/zuohuadong/supacloud/commit/e99cf7b1e7994f738a446410ca0f5f5ac98f5042))
+
 ## [0.12.16](https://github.com/zuohuadong/supacloud/compare/management-api-v0.12.15...management-api-v0.12.16) (2026-05-06)
 
 
