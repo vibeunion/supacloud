@@ -23,6 +23,14 @@ function pickPort(value: unknown): number | undefined {
   return Math.trunc(parsed);
 }
 
+export function normalizeBaseDomain(baseDomain: string): string {
+  return baseDomain.trim().replace(/^(?:api|studio)\./i, "");
+}
+
+export function resolveProjectBaseHost(projectRef: string): string {
+  return `${projectRef}.${normalizeBaseDomain(config.baseDomain)}`;
+}
+
 export function normalizeProjectRoutingConfig(
   projectConfig: ProjectRoutingConfig | string | null | undefined,
 ): ProjectRoutingConfig | undefined {
@@ -46,7 +54,7 @@ export function resolveProjectApiHost(
     return customDomain.startsWith("api.") ? customDomain : `api.${customDomain}`;
   }
 
-  return `${projectRef}.api.${config.baseDomain}`;
+  return `${projectRef}.api.${normalizeBaseDomain(config.baseDomain)}`;
 }
 
 export function resolveProjectStudioHost(
@@ -62,7 +70,7 @@ export function resolveProjectStudioHost(
     return customDomain.startsWith("studio.") ? customDomain : `studio.${customDomain}`;
   }
 
-  return `studio-${projectRef}.${config.baseDomain}`;
+  return `studio-${projectRef}.${normalizeBaseDomain(config.baseDomain)}`;
 }
 
 export function resolveProjectApiUrl(
@@ -98,11 +106,12 @@ export function matchProjectRefFromHost(
   const normalizedHost = host.split(":")[0].trim().toLowerCase();
   if (!normalizedHost) return false;
 
-  if (config.baseDomain && normalizedHost.endsWith(config.baseDomain.toLowerCase())) {
+  const baseDomain = normalizeBaseDomain(config.baseDomain).toLowerCase();
+  if (baseDomain && normalizedHost.endsWith(baseDomain)) {
     return normalizedHost === resolveProjectApiHost(projectRef, normalizedConfig).toLowerCase()
       || normalizedHost === resolveProjectStudioHost(projectRef, normalizedConfig).toLowerCase()
-      || normalizedHost === `${projectRef}.${config.baseDomain}`.toLowerCase()
-      || normalizedHost === `${projectRef}.api.${config.baseDomain}`.toLowerCase();
+      || normalizedHost === `${projectRef}.${baseDomain}`.toLowerCase()
+      || normalizedHost === `${projectRef}.api.${baseDomain}`.toLowerCase();
   }
 
   return normalizedHost === resolveProjectApiHost(projectRef, normalizedConfig).toLowerCase()

@@ -283,8 +283,8 @@ Actions: ping, setup, install, upgrade, diagnose, exec, troubleshoot, container_
                 case "tenant_inspect": {
                     if (!args.project_ref) throw new Error("'project_ref' required");
                     const projectRef = assertSafeProjectRef(args.project_ref, "project_ref");
-                    const r = await ssh.exec(`cat /etc/supabase/kong_tenants/${projectRef}.yml 2>/dev/null || echo 'Not found'`, 10_000);
-                    text = `📄 ${projectRef} gateway config:\n\n${r.stdout || r.stderr}`;
+                    const r = await ssh.exec(`cat /etc/supabase/tenants/${projectRef}.env 2>/dev/null || echo 'Not found'`, 10_000);
+                    text = `📄 ${projectRef} tenant config:\n\n${r.stdout || r.stderr}`;
                     break;
                 }
                 case "tenant_diagnose": {
@@ -292,7 +292,7 @@ Actions: ping, setup, install, upgrade, diagnose, exec, troubleshoot, container_
                         "echo '══════ Multi-tenant Diagnostic ══════'",
                         "ps aux | grep -E 'postgrest|gotrue' | grep -v grep || echo 'No processes'",
                         "systemctl list-units 'supacloud-pgrst@*' 'supacloud-gotrue@*' --no-pager 2>/dev/null || echo 'N/A'",
-                        "ls -l /etc/supabase/kong_tenants/*.yml 2>/dev/null || echo 'No config'",
+                        "ls -l /etc/supabase/tenants/*.env 2>/dev/null || echo 'No config'",
                     ];
                     if (args.project_ref) {
                         const projectRef = assertSafeProjectRef(args.project_ref, "project_ref");

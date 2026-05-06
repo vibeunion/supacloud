@@ -361,7 +361,7 @@ export class ProjectService {
       }
     };
 
-    const checkGlobalDocker = async (containerName: string) => {
+    const checkContainer = async (containerName: string) => {
       try {
         const { $ } = await import("bun");
         const res =
@@ -371,7 +371,7 @@ export class ProjectService {
         return res.text().trim() === "running" ? "ACTIVE_HEALTHY" : "INACTIVE";
       } catch (err: unknown) {
         logger.debug(
-          `[ProjectService] Docker check failed for ${containerName}`,
+          `[ProjectService] container check failed for ${containerName}`,
           { error: err },
         );
         return "INACTIVE";
@@ -384,7 +384,6 @@ export class ProjectService {
       realtimeSystemd,
       storagePerTenant,
       kongSystemd,
-      kongDocker,
       realtimeDocker,
     ] = await Promise.all([
       checkService(`supacloud-pgrst@${ref}`),
@@ -392,8 +391,7 @@ export class ProjectService {
       checkService("supacloud-realtime"),
       checkService(`supacloud-storage@${ref}`),
       checkService("kong"),
-      checkGlobalDocker("supabase-kong"),
-      checkGlobalDocker("supacloud-realtime"),
+      checkContainer("supacloud-realtime"),
     ]);
 
     let realtimeStatus = "INACTIVE";
@@ -401,8 +399,8 @@ export class ProjectService {
     if (realtimeSystemd === "ACTIVE_HEALTHY") {
       realtimeStatus = "ACTIVE_HEALTHY";
     } else {
-      // Fall back to checking global docker container, but explicitly verify tenant registration
-      if (kongDocker === "ACTIVE_HEALTHY" || kongSystemd === "ACTIVE_HEALTHY") {
+      // Fall back to the global Realtime container, but only when native Kong is healthy.
+      if (kongSystemd === "ACTIVE_HEALTHY") {
         if (realtimeDocker === "ACTIVE_HEALTHY") {
           const { realtimeService } = await import("./realtime.service");
           const hasTenant = await realtimeService.getTenant(ref);
@@ -432,12 +430,6 @@ export class ProjectService {
         ? "ACTIVE_HEALTHY"
         : "INACTIVE";
 
-    // Gateway is kong (systemd/docker)
-    const kongStatus =
-      kongSystemd === "ACTIVE_HEALTHY" || kongDocker === "ACTIVE_HEALTHY"
-        ? "ACTIVE_HEALTHY"
-        : "INACTIVE";
-
     return {
       status: project.status === "active" ? "ACTIVE_HEALTHY" : "INACTIVE",
       services: [
@@ -449,7 +441,7 @@ export class ProjectService {
         { name: "GoTrue", status: gotrueStatus },
         { name: "Realtime", status: realtimeStatus },
         { name: "Storage", status: storageStatus },
-        { name: "Kong", status: kongStatus },
+        { name: "Kong", status: kongSystemd },
       ],
     };
   }
