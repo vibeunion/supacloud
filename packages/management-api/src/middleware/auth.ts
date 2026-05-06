@@ -7,10 +7,16 @@ import {
   extractProjectRefFromPath,
 } from "../utils/project-auth";
 
-async function verifyProjectJwt(
+export interface ProjectJwtContext {
+  role: string;
+  ref: string;
+  sub?: string;
+}
+
+export async function verifyProjectJwt(
   token: string,
   scopedRef?: string | null,
-): Promise<{ role: string; ref: string } | null> {
+): Promise<ProjectJwtContext | null> {
   try {
     const parts = token.split(".");
     if (parts.length !== 3) return null;
@@ -49,7 +55,11 @@ async function verifyProjectJwt(
       );
       const valid = await crypto.subtle.verify("HMAC", key, sigBuf, data);
       if (valid) {
-        return { role: payload.role, ref };
+        return {
+          role: payload.role,
+          ref,
+          sub: typeof payload.sub === "string" ? payload.sub : undefined,
+        };
       }
     }
 

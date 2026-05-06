@@ -72,6 +72,7 @@ const projectService = {
 
 const { taskRepository } = await import("../../src/repositories/task.repository");
 const services = await import("../../src/services");
+const authModule = await import("../../src/middleware/auth");
 
 spyOn(taskRepository, "listTasksByProjectFiltered").mockImplementation(
   listTasksByProjectFiltered as typeof taskRepository.listTasksByProjectFiltered,
@@ -113,6 +114,11 @@ spyOn(services.projectService, "updateQueueSettings").mockImplementation(
   projectService.updateQueueSettings as typeof services.projectService.updateQueueSettings,
 );
 
+const verifyProjectJwt = mock(() => Promise.resolve(null));
+spyOn(authModule, "verifyProjectJwt").mockImplementation(
+  verifyProjectJwt as typeof authModule.verifyProjectJwt,
+);
+
 const { taskRoutes } = await import("../../src/routes/tasks");
 
 const app = new Elysia().use(taskRoutes);
@@ -146,6 +152,8 @@ describe("taskRoutes", () => {
     getTaskStats.mockReset();
     getQueueStats.mockReset();
     backgroundFunctionWorker.cancel.mockReset();
+    verifyProjectJwt.mockReset();
+    verifyProjectJwt.mockResolvedValue(null);
     projectService.getBackgroundTaskSettings.mockReset();
     projectService.updateBackgroundTaskSettings.mockReset();
     projectService.getQueueSettings.mockReset();
@@ -483,6 +491,62 @@ describe("taskRoutes", () => {
     expect(payload.latest_logs).toEqual([
       { timestamp: "2026-04-17T12:00:00.000Z", stream: "stderr", level: "error", message: "boom" },
     ]);
+  });
+
+  test("GET /:taskId allows the invoking user JWT and redacts stored credentials", async () => {
+    verifyProjectJwt.mockResolvedValue({
+      role: "authenticated",
+      ref: "proj_1",
+      sub: "user_1",
+    });
+    getTaskById.mockResolvedValueOnce({
+      id: "tsk_user",
+      status: "succeeded",
+      project_ref: "proj_1",
+      payload: {
+        auth: {
+          invoker_user_id: "user_1",
+          authorization: "enc:token",
+          apikey: "enc:key",
+        },
+      },
+    });
+    listTaskAttempts.mockResolvedValueOnce([]);
+
+    const response = await request("/v1/projects/proj_1/tasks/tsk_user", {
+      headers: { Authorization: "Bearer user.jwt.token" },
+    });
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.payload.auth.invoker_user_id).toBe("user_1");
+    expect(payload.payload.auth.authorization).toBeNull();
+    expect(payload.payload.auth.apikey).toBeNull();
+  });
+
+  test("GET /:taskId rejects authenticated users that did not invoke the task", async () => {
+    verifyProjectJwt.mockResolvedValue({
+      role: "authenticated",
+      ref: "proj_1",
+      sub: "user_2",
+    });
+    getTaskById.mockResolvedValueOnce({
+      id: "tsk_user",
+      status: "succeeded",
+      project_ref: "proj_1",
+      payload: {
+        auth: {
+          invoker_user_id: "user_1",
+        },
+      },
+    });
+
+    const response = await request("/v1/projects/proj_1/tasks/tsk_user", {
+      headers: { Authorization: "Bearer user.jwt.token" },
+    });
+
+    expect(response.status).toBe(403);
+    expect(listTaskAttempts).not.toHaveBeenCalled();
   });
 
   afterAll(() => {
