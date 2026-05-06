@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.4](https://github.com/zuohuadong/supacloud/compare/admin-v0.1.3...admin-v0.1.4) (2026-05-06)
+
+
+### 🐛 Bug Fixes
+
+* **install:** skip legacy supabase compose stack ([4bcf1fa](https://github.com/zuohuadong/supacloud/commit/4bcf1faacc036ddf55aa17c5124ca87e2d8083fa))
+
 ## [0.1.3](https://github.com/zuohuadong/supacloud/compare/admin-v0.1.2...admin-v0.1.3) (2026-04-27)
 
 
