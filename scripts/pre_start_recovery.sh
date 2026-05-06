@@ -57,30 +57,14 @@ fix_gotrue_search_path() {
 }
 
 ensure_kong_running() {
-    if command -v podman &>/dev/null; then
-        local kong_status
-        kong_status=$(podman ps -a --filter name=supabase-kong --format '{{.Status}}' 2>/dev/null || echo "")
-        
-        if [[ -n "$kong_status" ]]; then
-            if [[ "$kong_status" != *"Up"* ]] && [[ "$kong_status" != *"Running"* ]]; then
-                log_warn "Kong container not running, starting..."
-                podman start supabase-kong 2>/dev/null || true
-                log_info "Kong container started"
-            else
-                log_info "Kong container already running"
-            fi
-        fi
-    elif command -v docker &>/dev/null; then
-        local kong_status
-        kong_status=$(docker ps -a --filter name=supabase-kong --format '{{.Status}}' 2>/dev/null || echo "")
-        
-        if [[ -n "$kong_status" ]]; then
-            if [[ "$kong_status" != *"Up"* ]]; then
-                log_warn "Kong container not running, starting..."
-                docker start supabase-kong 2>/dev/null || true
-                log_info "Kong container started"
-            else
-                log_info "Kong container already running"
+    if systemctl list-unit-files kong.service &>/dev/null || systemctl list-units kong.service &>/dev/null; then
+        if systemctl is-active --quiet kong 2>/dev/null; then
+            log_info "Kong service already running"
+        else
+            log_warn "Kong service not running, starting..."
+            systemctl start kong 2>/dev/null || true
+            if systemctl is-active --quiet kong 2>/dev/null; then
+                log_info "Kong service started"
             fi
         fi
     fi

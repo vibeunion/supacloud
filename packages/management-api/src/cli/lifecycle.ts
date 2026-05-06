@@ -1,108 +1,107 @@
 import { $ } from "bun";
 import * as p from "@clack/prompts";
-import fs from "node:fs/promises";
 import { logger } from "../utils/logger";
-import { config } from "../config";
 
-// According to shell branch convention, Supabase Pigsty configuration directory
-const PIGSTY_SUPABASE_DIR = `${config.homePath}/pigsty/app/supabase`;
+const CONTROL_UNITS = ["supacloud", "kong", "supacloud-realtime"];
 
-async function getComposeCmd() {
-    const hasDockerCompose = await $`command -v docker-compose`.quiet().nothrow();
-    if (hasDockerCompose.exitCode === 0) return "docker-compose";
-    const hasDockerComposePlugin = await $`docker compose version`.quiet().nothrow();
-    if (hasDockerComposePlugin.exitCode === 0) return "docker compose";
-    return null;
+async function unitExists(unit: string): Promise<boolean> {
+  const normalized = unit.endsWith(".service") ? unit : `${unit}.service`;
+  return (await $`systemctl cat ${normalized}`.quiet().nothrow()).exitCode === 0;
+}
+
+async function runSystemctl(action: "start" | "stop" | "restart", units: string[]) {
+  const results: string[] = [];
+
+  for (const unit of units) {
+    if (!(await unitExists(unit))) {
+      results.push(`${unit}: not installed`);
+      continue;
+    }
+
+    const result = await $`systemctl ${action} ${unit}`.quiet().nothrow();
+    const past = action === "stop" ? "stopped" : action === "start" ? "started" : "restarted";
+    results.push(`${unit}: ${result.exitCode === 0 ? past : "failed"}`);
+  }
+
+  return results;
+}
+
+async function listSupaCloudContainers(): Promise<string> {
+  if ((await $`command -v podman`.quiet().nothrow()).exitCode === 0) {
+    return await $`podman ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"`.quiet().text().catch(() => "");
+  }
+  if ((await $`command -v docker`.quiet().nothrow()).exitCode === 0) {
+    return await $`docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"`.quiet().text().catch(() => "");
+  }
+  return "";
 }
 
 export async function handleStart() {
-    p.intro("🚀 Starting SupaCloud service stack...");
-    const composeCmd = await getComposeCmd();
-    if (!composeCmd) {
-        p.log.error("docker-compose not found, please ensure environment initialization was completed via install.sh.");
-        process.exit(1);
-    }
+  p.intro("Starting SupaCloud control plane...");
 
-    const s = p.spinner();
-    s.start("Pulling up component containers (docker-compose up -d)...");
-    try {
-        await $`cd ${PIGSTY_SUPABASE_DIR} && ${composeCmd} up -d`.quiet();
-        s.stop("Component start command execution complete.");
-    } catch (e: unknown) {
-        s.stop("Startup failed.");
-        p.log.error(e instanceof Error ? e.message : String(e));
-        process.exit(1);
-    }
-    p.outro("✅ Services are running in background.");
+  const s = p.spinner();
+  s.start("Starting systemd services...");
+  const results = await runSystemctl("start", CONTROL_UNITS);
+  s.stop("Service start command complete.");
+
+  for (const line of results) p.log.info(line);
+  p.outro("SupaCloud control plane start complete.");
 }
 
 export async function handleStop() {
-    p.intro("🛑 Stopping SupaCloud service stack...");
-    const composeCmd = await getComposeCmd();
-    if (!composeCmd) {
-        p.log.error("docker-compose not found.");
-        process.exit(1);
-    }
+  p.intro("Stopping SupaCloud control plane...");
 
-    const s = p.spinner();
-    s.start("Executing graceful shutdown (docker-compose down)...");
-    try {
-        await $`cd ${PIGSTY_SUPABASE_DIR} && ${composeCmd} down`.quiet();
-        s.stop("Service stack fully stopped.");
-    } catch (e: unknown) {
-        s.stop("Error during shutdown.");
-        p.log.error(e instanceof Error ? e.message : String(e));
-        process.exit(1);
-    }
-    p.outro("✅ Environment cleaned up.");
+  const s = p.spinner();
+  s.start("Stopping systemd services...");
+  const results = await runSystemctl("stop", ["supacloud", "supacloud-realtime"]);
+  s.stop("Service stop command complete.");
+
+  for (const line of results) p.log.info(line);
+  p.log.warn("Tenant PostgREST/GoTrue units are not stopped by this command; use project pause/delete for tenant lifecycle.");
+  p.outro("SupaCloud control plane stop complete.");
 }
 
 export async function handleStatus() {
-    p.intro("🩺 Checking SupaCloud control plane status...");
-    const composeCmd = await getComposeCmd();
+  p.intro("Checking SupaCloud control plane status...");
 
-    if (composeCmd) {
-        const s = p.spinner();
-        s.start("Fetching local container list...");
-        try {
-            const out = await $`cd ${PIGSTY_SUPABASE_DIR} && ${composeCmd} ps --format "table {{.Name}}\t{{.Status}}\t{{.Ports}}"`.quiet().text();
-            s.stop("Container running status:");
-            console.log(out);
-        } catch (err: unknown) {
-          logger.warn("[CLI] Failed to execute lifecycle command", { error: err });
-            s.stop("Unable to get status via docker-compose.");
-        }
+  for (const unit of CONTROL_UNITS) {
+    if (!(await unitExists(unit))) {
+      p.log.warn(`${unit}: not installed`);
+      continue;
     }
 
-    // Port probing
-    const activePorts = [];
-    const ports = [8000, 3000, 5432, 8080, 9090];
-    for (const port of ports) {
-        const isUp = (await $`ss -tuln | grep :${port} `.nothrow().quiet()).exitCode === 0;
-        if (isUp) activePorts.push(port);
-    }
+    const status = await $`systemctl is-active ${unit}`.quiet().nothrow();
+    p.log.info(`${unit}: ${status.exitCode === 0 ? "active" : "inactive"}`);
+  }
 
-    if (activePorts.length > 0) {
-        p.log.success(`Detected active business ports: ${activePorts.join(", ")}`);
-    } else {
-        p.log.warn("No active business ports detected, services may not have started yet.");
-    }
+  const tenantUnits = await $`systemctl list-units 'supacloud-pgrst@*' 'supacloud-gotrue@*' --state=running --no-legend`.quiet().text().catch(() => "");
+  if (tenantUnits) {
+    const count = tenantUnits.split("\n").filter((line) => line.trim()).length;
+    p.log.info(`running tenant runtime units: ${count}`);
+  }
 
-    p.outro("Inspection complete.");
+  const containers = await listSupaCloudContainers();
+  if (containers.trim()) {
+    p.log.info("Container status:");
+    console.log(containers);
+  }
+
+  p.outro("Inspection complete.");
 }
 
 export async function handleLogs(serviceTarget?: string) {
-    p.intro("📂 Getting diagnostic logs...");
-    const composeCmd = await getComposeCmd();
-    if (!composeCmd) {
-        p.log.error("docker-compose not found.");
-        process.exit(1);
-    }
+  p.intro("Getting diagnostic logs...");
 
-    const target = serviceTarget || "";
-    try {
-        await $`cd ${PIGSTY_SUPABASE_DIR} && ${composeCmd} logs --tail 50 ${target}`.nothrow();
-    } catch (e: unknown) {
-        p.log.error(`Log read failed: ${e instanceof Error ? e.message : String(e)}`);
-    }
+  const target = serviceTarget || "supacloud";
+  if (!(await unitExists(target))) {
+    p.log.error(`systemd unit not found: ${target}`);
+    process.exit(1);
+  }
+
+  try {
+    await $`journalctl -u ${target} -n 80 --no-pager`.nothrow();
+  } catch (e: unknown) {
+    logger.warn("[CLI] Failed to read service logs", { target, error: e });
+    p.log.error(`Log read failed: ${e instanceof Error ? e.message : String(e)}`);
+  }
 }
