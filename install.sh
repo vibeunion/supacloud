@@ -1304,6 +1304,76 @@ EOF
 install_nginx_mainline() { install_kong_native; }
 
 
+cleanup_legacy_supabase_compose_stack() {
+    log_step "Cleaning legacy Supabase compose residues..."
+
+    local runtime="${CONTAINER_RUNTIME:-}"
+    if [[ -z "$runtime" ]]; then
+        if command -v podman >/dev/null 2>&1; then
+            runtime="podman"
+        elif command -v docker >/dev/null 2>&1; then
+            runtime="docker"
+        else
+            log_warn "No container runtime found, skipping legacy compose cleanup"
+            return
+        fi
+    fi
+
+    if ! command -v "$runtime" >/dev/null 2>&1; then
+        log_warn "Container runtime ${runtime} is unavailable, skipping legacy compose cleanup"
+        return
+    fi
+
+    local safe_remove=(
+        supabase-kong
+        supabase-studio
+        supabase-meta
+        supabase-analytics
+        supabase-vector
+        supabase-imgproxy
+    )
+    local data_plane=(
+        supabase-rest
+        supabase-auth
+        supabase-storage
+        supabase-edge-functions
+        supabase-realtime
+        realtime-dev.supabase-realtime
+    )
+
+    local existing
+    existing="$($runtime ps -a --format '{{.Names}}' 2>/dev/null || true)"
+
+    local name
+    for name in "${safe_remove[@]}"; do
+        if printf '%s\n' "$existing" | grep -qx "$name"; then
+            log_info "Removing legacy compose container: ${name}"
+            "$runtime" rm -f "$name" >/dev/null 2>&1 || log_warn "Failed to remove ${name}"
+        fi
+    done
+
+    if [[ "${SUPACLOUD_REMOVE_LEGACY_DATA_PLANE:-false}" == "true" ]]; then
+        for name in "${data_plane[@]}"; do
+            if printf '%s\n' "$existing" | grep -qx "$name"; then
+                log_info "Removing legacy data-plane container: ${name}"
+                "$runtime" rm -f "$name" >/dev/null 2>&1 || log_warn "Failed to remove ${name}"
+            fi
+        done
+    else
+        local leftovers=()
+        for name in "${data_plane[@]}"; do
+            if printf '%s\n' "$existing" | grep -qx "$name"; then
+                leftovers+=("$name")
+            fi
+        done
+        if [[ ${#leftovers[@]} -gt 0 ]]; then
+            log_warn "Leaving possible legacy data-plane containers in place: ${leftovers[*]}"
+            log_warn "After confirming per-project supacloud-pgrst@*/supacloud-gotrue@* services are healthy, rerun with SUPACLOUD_REMOVE_LEGACY_DATA_PLANE=true to remove them."
+        fi
+    fi
+}
+
+
 
 
 install_pigsty() {
@@ -1390,12 +1460,11 @@ install_pigsty() {
         ./bootstrap
     fi
     
-    # Use the legacy Supabase app scaffold by default because SupaCloud replaces
-    # gateway/runtime/storage orchestration with its own components after Pigsty
-    # provisions Postgres and the base app env. Operators may explicitly set
-    # PIGSTY_CONFIG_TEMPLATE=supabase to test Pigsty's full upstream template.
+    # Prefer Pigsty 4.3's supabase template. SupaCloud still skips Pigsty's
+    # app.yml by default because gateway/runtime/storage orchestration is owned
+    # by SupaCloud multi-project services.
     log_info "Configuring Supabase templates..."
-    if ! ./configure -i "$INTERNAL_IP" -c "${PIGSTY_CONFIG_TEMPLATE:-app/supa}"; then
+    if ! ./configure -i "$INTERNAL_IP" -c "${PIGSTY_CONFIG_TEMPLATE:-supabase}"; then
         log_warn "Primary Supabase template failed, trying legacy app/supa template..."
         ./configure -i "$INTERNAL_IP" -c app/supa
     fi
@@ -1491,21 +1560,26 @@ install_pigsty() {
         fi
     fi
  
-    log_info "Starting Supabase..."
-    install_docker_compose
-    if [[ -x "./app.yml" ]]; then
-        ./app.yml || {
-            log_warn "app.yml failed, trying manual start..."
+    if [[ "${SUPACLOUD_INSTALL_LEGACY_SUPABASE_STACK:-false}" == "true" ]]; then
+        log_warn "Starting Pigsty's legacy Supabase compose stack because SUPACLOUD_INSTALL_LEGACY_SUPABASE_STACK=true"
+        install_docker_compose
+        if [[ -x "./app.yml" ]]; then
+            ./app.yml || {
+                log_warn "app.yml failed, trying manual start..."
+                manual_start_supabase
+            }
+        elif [[ -f "app.yml" ]] && command -v ansible-playbook &> /dev/null; then
+            ansible-playbook app.yml $EXTRA_ARGS || {
+                log_warn "app.yml failed, trying manual start..."
+                manual_start_supabase
+            }
+        else
+            log_warn "app.yml not found, trying manual start..."
             manual_start_supabase
-        }
-    elif [[ -f "app.yml" ]] && command -v ansible-playbook &> /dev/null; then
-        ansible-playbook app.yml $EXTRA_ARGS || {
-            log_warn "app.yml failed, trying manual start..."
-            manual_start_supabase
-        }
+        fi
     else
-        log_warn "app.yml not found, trying manual start..."
-        manual_start_supabase
+        log_info "Skipping Pigsty legacy Supabase compose stack; SupaCloud uses multi-project runtime services."
+        cleanup_legacy_supabase_compose_stack
     fi
 }
 
@@ -1718,6 +1792,11 @@ configure_analytics() {
     log_step "Configuring Analytics (Logflare)..."
     
     SUPABASE_ENV=~/pigsty/app/supabase/.env
+
+    if [[ "${SUPACLOUD_INSTALL_LEGACY_SUPABASE_STACK:-false}" != "true" ]]; then
+        log_info "Skipping Pigsty Logflare compose configuration; legacy Supabase compose stack is disabled by default."
+        return
+    fi
     
     if [[ "${ENABLE_ANALYTICS:-true}" == "true" ]]; then
         log_info "Enabling Analytics..."
@@ -1802,7 +1881,7 @@ manual_start_supabase() {
     fix_container_healthchecks
     
     # Restart affected containers to apply healthcheck fixes
-    log_info "Restarting Studio and Analytics containers to apply healthcheck fixes..."
+    log_info "Restarting legacy Studio and Analytics containers to apply healthcheck fixes..."
     docker restart supabase-studio supabase-analytics 2>/dev/null || true
 }
  
@@ -2068,7 +2147,10 @@ EOF
     # 5. Generate API service environment file
     local REALTIME_SECRET_KEY_BASE
     local REALTIME_DB_ENC_KEY
+    local BASE_DOMAIN_VALUE="${BASE_DOMAIN:-$SUPABASE_PUBLIC_DOMAIN}"
     REALTIME_SECRET_KEY_BASE=$(openssl rand -base64 48 | tr -d '\n')
+    BASE_DOMAIN_VALUE="${BASE_DOMAIN_VALUE#api.}"
+    BASE_DOMAIN_VALUE="${BASE_DOMAIN_VALUE#studio.}"
     # Realtime tenant encryption uses AES-128 and expects a 16-byte key.
     local SECRETS_ENCRYPTION_KEY
     SECRETS_ENCRYPTION_KEY=$(openssl rand -base64 48 | tr -d "\n" | cut -c1-64)
@@ -2085,7 +2167,7 @@ EDGE_RUNTIME_MODE=${EDGE_RUNTIME_MODE:-embedded}
 MASTER_TOKEN=${MASTER_TOKEN}
 SCRIPTS_PATH=${SCRIPTS_INSTALL_DIR}
 PIGSTY_PATH=${HOME}/pigsty
-BASE_DOMAIN=${SUPABASE_PUBLIC_DOMAIN}
+BASE_DOMAIN=${BASE_DOMAIN_VALUE}
 S3_STORAGE_TYPE=${S3_STORAGE_TYPE:-juicefs}
 SUPACLOUD_JWT_SECRET=${JWT_SECRET}
 REALTIME_SECRET_KEY_BASE=${REALTIME_SECRET_KEY_BASE}
@@ -2256,12 +2338,12 @@ show_completion() {
     
     echo ""
     echo "============================================================"
-    echo -e "${GREEN}Pigsty Supabase Installed Successfully!${NC}"
+    echo -e "${GREEN}SupaCloud Installed Successfully!${NC}"
     echo "============================================================"
     echo ""
     echo "Access Addresses:"
-    echo "  Supabase Studio: http://${INTERNAL_IP}:8000"
-    echo "  Supabase Studio: https://${SUPABASE_STUDIO_DOMAIN} (DNS and HTTPS required)"
+    echo "  Project API:     https://${SUPABASE_PUBLIC_DOMAIN} (DNS and HTTPS required)"
+    echo "  Web Console:     https://${SUPABASE_STUDIO_DOMAIN} (DNS and HTTPS required)"
     echo "  Management API:  http://${INTERNAL_IP}:9090"
     echo "  Swagger Docs:    http://${INTERNAL_IP}:9090/swagger"
     echo "  Grafana Monitoring: http://${INTERNAL_IP}:3000"
@@ -2286,7 +2368,7 @@ show_completion() {
     echo "Common Commands:"
     echo "  Check container status: podman ps or docker ps"
     echo "  Check logs: podman logs <container_name>"
-    echo "  Restart services: cd ~/pigsty/app/supabase && docker-compose restart"
+    echo "  Restart services: systemctl restart supacloud kong"
     echo ""
     echo "Multi-tenant Management:"
     echo "  sc list              - List all projects"
@@ -2448,6 +2530,7 @@ main() {
 
     # Deploy Imaginary + Realtime containers
     deploy_service_containers
+    cleanup_legacy_supabase_compose_stack
 
     # Save all credentials
     save_all_credentials

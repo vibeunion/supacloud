@@ -1,7 +1,7 @@
 import { logger } from "../utils/logger";
-import { config } from "../config";
 import { gatewayService } from "./gateway.service";
 import {
+  resolveProjectBaseHost,
   resolveProjectApiHost,
   resolveProjectApiUrl,
   resolveProjectStudioHost,
@@ -14,8 +14,6 @@ export interface ProjectDomains {
 }
 
 export class RouterService {
-  private get BASE_DOMAIN() { return config.baseDomain; }
-
   getProjectApiUrl(projectRef: string, customDomain?: string): string {
     return resolveProjectApiUrl(projectRef, { custom_domain: customDomain });
   }
@@ -25,13 +23,13 @@ export class RouterService {
   }
 
   getProjectDomain(projectRef: string): string {
-    return `${projectRef}.${this.BASE_DOMAIN}`;
+    return resolveProjectBaseHost(projectRef);
   }
 
   async addRoute(projectRef: string, domains?: ProjectDomains): Promise<{ success: boolean; error?: string }> {
     try {
-      const apiDomain = domains?.apiDomain || `${projectRef}.api.${this.BASE_DOMAIN}`;
-      const studioDomain = domains?.studioDomain || `studio-${projectRef}.${this.BASE_DOMAIN}`;
+      const apiDomain = domains?.apiDomain || resolveProjectApiHost(projectRef, null);
+      const studioDomain = domains?.studioDomain || resolveProjectStudioHost(projectRef, null);
       
       // We map the domain through Native Kong API using GatewayService
       // This function now delegates domain registration to Kong

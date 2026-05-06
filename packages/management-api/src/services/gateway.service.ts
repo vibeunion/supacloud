@@ -92,7 +92,6 @@ interface RateLimitConfig {
 
 export class GatewayService {
     private readonly KONG_ADMIN_URL = config.kongAdminUrl;
-    private readonly KONG_YML = config.kongYml;
     private readonly TENANT_DIR = config.tenantConfigDir;
 
     // --- Kong Admin API helper methods ---

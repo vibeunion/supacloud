@@ -7,7 +7,7 @@ set -e
 
 echo "=========================================================="
 PIGSTY_VERSION="${PIGSTY_VERSION:-v4.3.0}"
-PIGSTY_CONFIG_TEMPLATE="${PIGSTY_CONFIG_TEMPLATE:-app/supa}"
+PIGSTY_CONFIG_TEMPLATE="${PIGSTY_CONFIG_TEMPLATE:-supabase}"
 
 echo "          SupaCloud - Pigsty Upgrade Tool                "
 echo "=========================================================="

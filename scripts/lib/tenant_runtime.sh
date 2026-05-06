@@ -116,18 +116,6 @@ ensure_postgrest() {
 
     echo "PostgREST binary not found. Installing..."
 
-    # Extract from container (if Supabase container is running)
-    local container_id
-    container_id=$(docker ps -q -f "name=supabase-rest" 2>/dev/null || true)
-    if [ -n "$container_id" ]; then
-        echo "Extracting PostgREST from running container..."
-        docker cp "${container_id}:/usr/local/bin/postgrest" "$POSTGREST_BIN" 2>/dev/null || true
-        if [ -x "$POSTGREST_BIN" ]; then
-            echo "PostgREST extracted successfully"
-            return
-        fi
-    fi
-
     # Direct download
     local arch
     arch=$(uname -m)
