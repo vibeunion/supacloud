@@ -1,8 +1,8 @@
 import { Elysia, status, t } from "elysia";
 import { taskRepository } from "../repositories/task.repository";
-import { TaskStatus } from "../db";
+import { TaskStatus, type ProjectTask } from "../db";
 import { backgroundFunctionWorker, projectService } from "../services";
-import { requireProjectOrAdminAuth } from "../middleware/auth";
+import * as authMiddleware from "../middleware/auth";
 
 const QUEUE_TASK_TYPE_PREFIX = "queue:";
 const DEFAULT_QUEUE_MAX_ATTEMPTS = 3;
@@ -38,9 +38,63 @@ function buildQueueListFilters(queueName: string, query: Record<string, unknown>
     };
 }
 
+function isTaskDetailRead(request: Request, projectRef: string): boolean {
+    if (request.method !== "GET") return false;
+    const pathname = new URL(request.url).pathname;
+    const prefix = `/v1/projects/${projectRef}/tasks/`;
+    if (!pathname.startsWith(prefix)) return false;
+    const suffix = pathname.slice(prefix.length);
+    return suffix.length > 0 && !suffix.includes("/");
+}
+
+function taskInvokerUserId(task: ProjectTask): string | null {
+    const auth = task.payload?.auth;
+    if (!auth || typeof auth !== "object" || Array.isArray(auth)) return null;
+    const userId = (auth as Record<string, unknown>).invoker_user_id;
+    return typeof userId === "string" && userId.length > 0 ? userId : null;
+}
+
+function redactTaskPayloadForInvoker(payload: Record<string, unknown>): Record<string, unknown> {
+    const auth = payload.auth;
+    if (!auth || typeof auth !== "object" || Array.isArray(auth)) return payload;
+    return {
+        ...payload,
+        auth: {
+            ...(auth as Record<string, unknown>),
+            authorization: null,
+            apikey: null,
+        },
+    };
+}
+
+async function getTaskDetailAuth(
+    request: Request,
+    projectRef: string,
+    task: ProjectTask,
+): Promise<{ allowed: true; invoker: boolean } | { allowed: false; status: number; body: { error: string } }> {
+    const authorization = request.headers.get("authorization") || "";
+    const token = authorization.startsWith("Bearer ") ? authorization.slice(7).trim() : "";
+    if (token) {
+        const jwt = await authMiddleware.verifyProjectJwt(token, projectRef);
+        const invokerUserId = taskInvokerUserId(task);
+        if (jwt?.ref === projectRef && jwt.role !== "anon" && jwt.sub && invokerUserId === jwt.sub) {
+            return { allowed: true, invoker: true };
+        }
+        if (jwt?.ref === projectRef && jwt.role !== "anon" && jwt.sub) {
+            return { allowed: false, status: 403, body: { error: "Task belongs to another user" } };
+        }
+    }
+
+    const projectAuthError = await authMiddleware.requireProjectOrAdminAuth(request, projectRef);
+    if (!projectAuthError) return { allowed: true, invoker: false };
+
+    return { allowed: false, status: projectAuthError.status, body: projectAuthError.body };
+}
+
 export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
     .onBeforeHandle(async ({ params, request }) => {
-        const authError = await requireProjectOrAdminAuth(request, params.ref);
+        if (isTaskDetailRead(request, params.ref)) return;
+        const authError = await authMiddleware.requireProjectOrAdminAuth(request, params.ref);
         if (authError) return status(authError.status, authError.body);
     })
     .post("/queues/:queueName/messages", async ({ params, body }) => {
@@ -418,16 +472,20 @@ export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
             timeout_sec_max: t.Optional(t.Number()),
         }),
     })
-    .get("/:taskId", async ({ params }) => {
+    .get("/:taskId", async ({ params, request }) => {
         try {
             const task = await taskRepository.getTaskById(params.taskId, params.ref);
             if (!task) {
                 return status(404, { message: "Task not found", code: "404" });
             }
+            const auth = await getTaskDetailAuth(request, params.ref, task);
+            if (!auth.allowed) return status(auth.status, auth.body);
+
             const attempts = await taskRepository.listTaskAttempts(params.taskId);
             const latestAttempt = attempts[0] || null;
             return {
                 ...task,
+                payload: auth.invoker ? redactTaskPayloadForInvoker(task.payload) : task.payload,
                 attempts,
                 latest_logs: latestAttempt?.logs || [],
             };
