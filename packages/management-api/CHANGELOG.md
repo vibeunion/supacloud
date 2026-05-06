@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.16](https://github.com/zuohuadong/supacloud/compare/management-api-v0.12.15...management-api-v0.12.16) (2026-05-06)
+
+
+### 🐛 Bug Fixes
+
+* **install:** skip legacy supabase compose stack ([4bcf1fa](https://github.com/zuohuadong/supacloud/commit/4bcf1faacc036ddf55aa17c5124ca87e2d8083fa))
+
 ## [0.12.15](https://github.com/zuohuadong/supacloud/compare/management-api-v0.12.14...management-api-v0.12.15) (2026-05-04)
 
 
