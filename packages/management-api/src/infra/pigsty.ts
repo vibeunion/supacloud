@@ -80,7 +80,7 @@ export async function install(config: PigstyConfig) {
         // Ensure no .nothrow(), if bootstrap fails must throw exception
         await $`cd ${pigstyDir} && ./bootstrap`;
 
-        const template = process.env.PIGSTY_CONFIG_TEMPLATE || "app/supa";
+        const template = process.env.PIGSTY_CONFIG_TEMPLATE || "supabase";
         const configured = await $`cd ${pigstyDir} && ./configure -i ${config.internalIp} -c ${template}`.nothrow();
         if (configured.exitCode !== 0) {
             logger.warn(`[PigstyManager] Supabase template "${template}" failed, trying legacy app/supa template...`);
@@ -126,12 +126,15 @@ export async function install(config: PigstyConfig) {
             );
         }
 
-        if ((await $`test -f ${pigstyDir}/app.yml`.nothrow()).exitCode === 0) {
-            logger.info("[PigstyManager] Starting Supabase integration cluster...");
+        const enableLegacySupabaseStack = process.env.SUPACLOUD_INSTALL_LEGACY_SUPABASE_STACK === "true";
+        if (enableLegacySupabaseStack && (await $`test -f ${pigstyDir}/app.yml`.nothrow()).exitCode === 0) {
+            logger.warn("[PigstyManager] Starting legacy Pigsty Supabase compose stack because SUPACLOUD_INSTALL_LEGACY_SUPABASE_STACK=true.");
             await runCommandWithStreaming(
                 ["ansible-playbook", "app.yml", ...extraArgsArray],
                 pigstyDir
             );
+        } else {
+            logger.info("[PigstyManager] Skipping Pigsty legacy Supabase compose stack; SupaCloud manages multi-project runtimes itself.");
         }
 
         // Mark installation successful

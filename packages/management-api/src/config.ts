@@ -64,7 +64,6 @@ export interface Config {
   storageMountPoint: string;
   imaginaryUrl: string;
   kongAdminUrl: string;
-  kongYml: string;
   kongInternal: string;
   victoriaMetricsUrl: string;
   realtimeAdminUrl: string;
@@ -166,7 +165,6 @@ export const config: Config = {
 
   imaginaryUrl: getEnv("IMAGINARY_URL", "http://127.0.0.1:9010"),
   kongAdminUrl: getEnv("KONG_ADMIN_URL", "http://localhost:8001"),
-  kongYml: getEnv("KONG_YML", "/opt/supabase/volumes/api/kong.yml"),
   kongInternal: getEnv("KONG_INTERNAL", "127.0.0.1:8000"),
   victoriaMetricsUrl: getEnv("VICTORIAMETRICS_URL", "http://127.0.0.1:8428"),
   realtimeAdminUrl: getEnv("REALTIME_ADMIN_URL", "http://127.0.0.1:4000"),
@@ -176,7 +174,7 @@ export const config: Config = {
 
   scriptsPath: getEnv("SCRIPTS_PATH", "/opt/supacloud/scripts/lib"),
   pigstyPath: getEnv("PIGSTY_PATH", "/root/pigsty"),
-  tenantConfigDir: getEnv("TENANT_CONFIG_DIR", "/opt/supabase/volumes/api/kong_tenants"),
+  tenantConfigDir: getEnv("TENANT_CONFIG_DIR", "/etc/supabase/tenants"),
   edgeFunctionsDir: getEnv("EDGE_FUNCTIONS_DIR", "/opt/supacloud/functions"),
   homePath: getEnv("HOME", "/root"),
   masterToken: getEnv(
