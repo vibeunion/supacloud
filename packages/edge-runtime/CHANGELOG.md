@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.6](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.3.5...edge-runtime-v0.3.6) (2026-05-07)
+
+
+### 🐛 Bug Fixes
+
+* **edge-runtime:** preserve env for waitUntil tasks ([1e43fbf](https://github.com/zuohuadong/supacloud/commit/1e43fbf6eb22a8fff3218326dae4c6e0b8fb4176))
+* **edge-runtime:** preserve env for waitUntil tasks ([424152c](https://github.com/zuohuadong/supacloud/commit/424152c21265e67ec5812453d3cfc2a5ed064b87))
+
 ## [0.3.5](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.3.4...edge-runtime-v0.3.5) (2026-04-29)
 
 
