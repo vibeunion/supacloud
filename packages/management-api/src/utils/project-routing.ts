@@ -88,14 +88,14 @@ export function resolveProjectApiUrl(
   projectRef: string,
   projectConfig: ProjectRoutingConfig | string | null | undefined,
 ): string {
-  return `https://${resolveProjectApiHost(projectRef, projectConfig)}`;
+  return `${config.enableSsl ? "https" : "http"}://${resolveProjectApiHost(projectRef, projectConfig)}`;
 }
 
 export function resolveProjectStudioUrl(
   projectRef: string,
   projectConfig: ProjectRoutingConfig | string | null | undefined,
 ): string {
-  return `https://${resolveProjectStudioHost(projectRef, projectConfig)}`;
+  return `${config.enableSsl ? "https" : "http"}://${resolveProjectStudioHost(projectRef, projectConfig)}`;
 }
 
 export function resolveTenantPorts(

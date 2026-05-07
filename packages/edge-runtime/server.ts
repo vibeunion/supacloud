@@ -682,3 +682,7 @@ process.on("uncaughtException", (err) => {
 process.on("unhandledRejection", (reason) => {
   console.error("[EdgeRuntime] unhandledRejection:", reason);
 });
+
+// Keep the main runtime process alive so systemd can supervise the actual server
+// process instead of observing Bun's temporary bootstrap completion.
+await new Promise<void>(() => {});
