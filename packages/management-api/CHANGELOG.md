@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.12.18](https://github.com/zuohuadong/supacloud/compare/management-api-v0.12.17...management-api-v0.12.18) (2026-05-07)
+
+
+### 🐛 Bug Fixes
+
+* **edge-runtime:** preserve env for waitUntil tasks ([1e43fbf](https://github.com/zuohuadong/supacloud/commit/1e43fbf6eb22a8fff3218326dae4c6e0b8fb4176))
+* **edge-runtime:** preserve env for waitUntil tasks ([424152c](https://github.com/zuohuadong/supacloud/commit/424152c21265e67ec5812453d3cfc2a5ed064b87))
+
 ## [0.12.17](https://github.com/zuohuadong/supacloud/compare/management-api-v0.12.16...management-api-v0.12.17) (2026-05-06)
 
 
