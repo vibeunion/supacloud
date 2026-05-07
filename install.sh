@@ -1083,11 +1083,13 @@ Wants=supacloud.service
 Type=simple
 WorkingDirectory=/opt/supacloud/edge-runtime
 ExecStartPre=/bin/bash -c 'for pid in \$(lsof -iTCP:9000 -sTCP:LISTEN -t 2>/dev/null); do echo "[EdgeRT] Killing stale pid=\$pid"; kill -9 \$pid 2>/dev/null || true; done; sleep 0.3; true'
-ExecStart=/usr/local/bin/bun run server.ts
+ExecStart=/usr/local/bin/bun server.ts
 ExecStopPost=/bin/bash -c 'for pid in \$(lsof -iTCP:9000 -sTCP:LISTEN -t 2>/dev/null); do kill -9 \$pid 2>/dev/null || true; done; true'
 Restart=always
 RestartSec=5
 Environment=PORT=9000
+Environment=EDGE_FUNCTIONS_DIR=/opt/supacloud/functions
+Environment=EDGE_FUNCTIONS_BASE_DIR=/opt/supacloud/functions
 Environment=MANAGEMENT_API_URL=http://127.0.0.1:9090
 Environment=WORKER_POOL_SIZE=4
 EnvironmentFile=-/etc/supabase/management-api.env

@@ -5,14 +5,18 @@ import {
   normalizeBaseDomain,
   resolveTenantPorts,
   resolveProjectApiHost,
+  resolveProjectApiUrl,
   resolveProjectBaseHost,
   resolveProjectStudioHost,
+  resolveProjectStudioUrl,
 } from "../../src/utils/project-routing";
 
 const originalBaseDomain = config.baseDomain;
+const originalEnableSsl = config.enableSsl;
 
 afterEach(() => {
   config.baseDomain = originalBaseDomain;
+  config.enableSsl = originalEnableSsl;
 });
 
 describe("project routing", () => {
@@ -44,5 +48,17 @@ describe("project routing", () => {
   test("keeps non-JSON strings as legacy custom domains", () => {
     expect(normalizeProjectRoutingConfig("example.com")).toEqual({ custom_domain: "example.com" });
     expect(normalizeProjectRoutingConfig("{bad json")).toEqual({ custom_domain: "{bad json" });
+  });
+
+  test("uses ENABLE_SSL to resolve public API and Studio URL schemes", () => {
+    config.baseDomain = "192.168.1.168.sslip.io";
+
+    config.enableSsl = true;
+    expect(resolveProjectApiUrl("dglewlzugrtygzysqrce", null)).toBe("https://dglewlzugrtygzysqrce.api.192.168.1.168.sslip.io");
+    expect(resolveProjectStudioUrl("dglewlzugrtygzysqrce", null)).toBe("https://studio-dglewlzugrtygzysqrce.192.168.1.168.sslip.io");
+
+    config.enableSsl = false;
+    expect(resolveProjectApiUrl("dglewlzugrtygzysqrce", null)).toBe("http://dglewlzugrtygzysqrce.api.192.168.1.168.sslip.io");
+    expect(resolveProjectStudioUrl("dglewlzugrtygzysqrce", null)).toBe("http://studio-dglewlzugrtygzysqrce.192.168.1.168.sslip.io");
   });
 });
