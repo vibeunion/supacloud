@@ -198,8 +198,47 @@ function isLoopbackHost(host: string): boolean {
     return host === "localhost" || host === "127.0.0.1" || host === "::1";
 }
 
+function isPrivateIpv4Host(host: string): boolean {
+    const parts = host.split(".").map((part) => Number(part));
+    if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return false;
+    const [a, b] = parts;
+    return a === 10
+        || a === 127
+        || (a === 172 && b >= 16 && b <= 31)
+        || (a === 192 && b === 168)
+        || (a === 169 && b === 254);
+}
+
+function isGatewayHost(host: string): boolean {
+    if (isLoopbackHost(host) || isPrivateIpv4Host(host)) return true;
+    const baseDomain = config.baseDomain?.toLowerCase();
+    return Boolean(baseDomain && (host === baseDomain || host === `api.${baseDomain}`));
+}
+
 async function resolveProjectRefFromHeaderAndHost(ref: string, host: string): Promise<string> {
     if (!ref || !host) return '';
+    if (isGatewayHost(host)) {
+        try {
+            const { sql } = await import('../db');
+            const rows = await sql`
+                SELECT ref
+                FROM projects
+                WHERE ref = ${ref}
+                  AND deleted_at IS NULL
+                  AND status = 'active'
+                LIMIT 1
+            `;
+            return rows.length > 0 && String(rows[0].ref) === ref ? ref : '';
+        } catch (error: unknown) {
+            logger.warn("[StorageCompat] Failed to validate project header on gateway host", {
+                ref,
+                host,
+                error: error instanceof Error ? error.message : String(error),
+            });
+            return '';
+        }
+    }
+
     try {
         const { sql } = await import('../db');
         const rows = await sql`

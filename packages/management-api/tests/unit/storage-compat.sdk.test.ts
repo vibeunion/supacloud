@@ -113,6 +113,37 @@ describe("storageCompatRoutes supabase-js compatibility", () => {
     sqlSpy.mockRestore();
   });
 
+  test("accepts project ref on an internal gateway host without apikey", async () => {
+    const sqlSpy = spyOn(dbModule, "sql");
+    sqlSpy.mockImplementation(async (...args: unknown[]) => {
+      const text = String(args[0] ?? "");
+      if (text.includes("FROM projects")) {
+        return [{ ref: "proj_from_header" }];
+      }
+      return [];
+    });
+    const listSpy = spyOn(StorageRLS, "listLogicalBuckets").mockResolvedValue([{
+      id: "manuals",
+      name: "manuals",
+      public: false,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }]);
+
+    const res = await request("/storage/v1/bucket", {
+      headers: {
+        host: "192.168.1.168:9090",
+        "x-project-ref": "proj_from_header",
+      },
+    });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual([expect.objectContaining({ id: "manuals" })]);
+    expect(listSpy).toHaveBeenCalledWith("proj_from_header", undefined, expect.any(Object));
+    sqlSpy.mockRestore();
+    listSpy.mockRestore();
+  });
+
   test("rejects mismatched host tenant and apikey", async () => {
     const sqlSpy = spyOn(dbModule, "sql");
     sqlSpy.mockImplementation(async (...args: unknown[]) => {

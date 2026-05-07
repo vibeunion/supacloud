@@ -284,6 +284,39 @@ describe("sdkProxyRoutes functions proxy", () => {
     });
   });
 
+  test("rest proxy accepts project ref on an internal gateway host without apikey", async () => {
+    await withSdkProxyTestContext(async ({ calls, trackSpy }) => {
+      const sqlSpy = trackSpy(spyOn(dbModule, "sql"));
+      sqlSpy.mockImplementation(async (...args: unknown[]) => {
+        const text = String(args[0] ?? "");
+        if (text.includes("SELECT ref")) {
+          return [{ ref: "proj_1" }];
+        }
+        if (text.includes("SELECT config")) {
+          return [{
+            config: {
+              postgrest_port: 7361,
+              gotrue_port: 8361,
+            },
+          }];
+        }
+        return [];
+      });
+
+      const response = await request("/rest/v1/todos?select=*", {
+        method: "GET",
+        headers: {
+          host: "192.168.1.168:4100",
+          "x-project-ref": "proj_1",
+        },
+      });
+
+      expect(response.status).toBe(200);
+      expect(calls).toHaveLength(1);
+      expect(calls[0]?.url).toBe("http://127.0.0.1:7361/todos?select=*");
+    });
+  });
+
   test("proxy rejects mismatched project header and apikey", async () => {
     await withSdkProxyTestContext(async ({ calls, trackSpy }) => {
       const sqlSpy = trackSpy(spyOn(dbModule, "sql"));

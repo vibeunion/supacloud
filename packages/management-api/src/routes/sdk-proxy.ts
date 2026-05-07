@@ -65,10 +65,30 @@ function hostBelongsToBaseDomain(host: string): boolean {
     return host === baseDomain || host.endsWith(`.${baseDomain}`);
 }
 
-function isLoopbackRequestHost(request: Request): boolean {
-    const host = firstForwardedHost(request);
+function isPrivateIpv4Host(host: string): boolean {
+    const parts = host.split(".").map((part) => Number(part));
+    if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return false;
+    const [a, b] = parts;
+    return a === 10
+        || a === 127
+        || (a === 172 && b >= 16 && b <= 31)
+        || (a === 192 && b === 168)
+        || (a === 169 && b === 254);
+}
+
+function isLoopbackOrPrivateHost(host: string): boolean {
     if (!host) return true;
-    return host === "localhost" || host === "127.0.0.1" || host === "::1";
+    return host === "localhost" || host === "127.0.0.1" || host === "::1" || isPrivateIpv4Host(host);
+}
+
+function isGatewayHost(host: string): boolean {
+    if (isLoopbackOrPrivateHost(host)) return true;
+    const baseDomain = config.baseDomain?.toLowerCase();
+    return Boolean(baseDomain && (host === baseDomain || host === `api.${baseDomain}`));
+}
+
+function isLoopbackRequestHost(request: Request): boolean {
+    return isLoopbackOrPrivateHost(firstForwardedHost(request));
 }
 
 function isTestTenantAuthAllowed(request: Request): boolean {
@@ -331,6 +351,18 @@ async function resolveProjectRefFromHeaderAndHost(ref: string, request: Request)
     for (const rawHost of rawHosts) {
         const host = rawHost.split(',')[0].trim().split(':')[0];
         if (!host) continue;
+
+        if (isGatewayHost(host)) {
+            const rows = await metaSql`
+                SELECT ref
+                FROM projects
+                WHERE ref = ${ref}
+                  AND deleted_at IS NULL
+                  AND status = 'active'
+                LIMIT 1
+            `;
+            return rows.length > 0 && rows[0].ref === ref ? ref : '';
+        }
 
         if (config.baseDomain && host === `${ref}.api.${config.baseDomain}`) {
             return ref;
