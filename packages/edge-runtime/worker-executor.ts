@@ -33,6 +33,7 @@ const originalBunEnv = bunRuntime ? { ...bunRuntime.env } : null;
 let envSnapshotActive = false;
 let currentAbortController: AbortController | null = null;
 let currentInjectedEnv: Record<string, string> = {};
+let currentWaitUntilTasks: Promise<unknown>[] = [];
 
 function injectEnv(env: Record<string, string>) {
   if (envSnapshotActive) restoreEnv();
@@ -100,6 +101,35 @@ function restoreConsole() {
   console.error = originalConsole.error;
   console.info = originalConsole.info;
   console.debug = originalConsole.debug;
+}
+
+function setupEdgeRuntimeCompat() {
+  currentWaitUntilTasks = [];
+  (globalThis as any).EdgeRuntime = {
+    waitUntil(promise: PromiseLike<unknown> | unknown) {
+      const task = Promise.resolve(promise).catch((error) => {
+        console.error("[EdgeRuntime.waitUntil] background task failed", error);
+      });
+      currentWaitUntilTasks.push(task);
+    },
+  };
+}
+
+async function flushWaitUntilTasks(functionId: string) {
+  if (currentWaitUntilTasks.length === 0) return;
+  while (currentWaitUntilTasks.length > 0) {
+    const tasks = currentWaitUntilTasks.splice(0);
+    await Promise.allSettled(tasks);
+  }
+  parentPort!.postMessage({
+    type: "wait_until_done",
+    functionId,
+  });
+}
+
+function clearEdgeRuntimeCompat() {
+  currentWaitUntilTasks = [];
+  delete (globalThis as any).EdgeRuntime;
 }
 
 async function loadModule(functionPath: string): Promise<any> {
@@ -207,6 +237,7 @@ parentPort.on("message", async (msg: any) => {
   injectEnv(env);
   setInjectedEnv(env);
   setupConsoleCapture(functionId);
+  setupEdgeRuntimeCompat();
 
   try {
     const handler = await loadModule(functionPath);
@@ -284,7 +315,9 @@ parentPort.on("message", async (msg: any) => {
       status: response.status,
       headers: resHeaders,
       body: resBody,
+      waitUntilPending: currentWaitUntilTasks.length > 0,
     });
+    await flushWaitUntilTasks(functionId);
   } catch (err: any) {
     const aborted = currentAbortController?.signal.aborted || err?.name === "AbortError";
     const message = err instanceof Error ? err.message : String(err);
@@ -297,6 +330,7 @@ parentPort.on("message", async (msg: any) => {
     });
   } finally {
     currentAbortController = null;
+    clearEdgeRuntimeCompat();
     restoreEnv();
     restoreConsole();
     setTenantRef(null);
