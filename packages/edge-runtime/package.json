@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "bun run --watch server.ts",
     "start": "bun run server.ts",
-    "typecheck": "bun x tsc --noEmit --skipLibCheck --allowImportingTsExtensions --moduleResolution bundler --module esnext --target esnext --types bun --strict server.ts auto-deps.ts deno-compat.ts url-import-plugin.ts shims/*.ts"
+    "typecheck": "bun x tsc --noEmit --skipLibCheck --allowImportingTsExtensions --moduleResolution bundler --module esnext --target esnext --types bun --strict server.ts worker-executor.ts worker-pool.ts auto-deps.ts deno-compat.ts url-import-plugin.ts shims/*.ts"
   },
   "dependencies": {
     "@elysiajs/cors": "^1.4.0",
