@@ -18,6 +18,7 @@ interface DispatchOptions {
 const MAX_BODY_SIZE = 10 * 1024 * 1024;
 const MAX_QUEUE_SIZE = Number(process.env.MAX_QUEUE_SIZE) || 200;
 const WORKER_SMOL = process.env.WORKER_SMOL !== "false";
+const WAIT_UNTIL_TIMEOUT_MS = Number(process.env.EDGE_WAIT_UNTIL_TIMEOUT_MS) || 300_000;
 
 export class WorkerPool {
   private workers: Worker[] = [];
@@ -221,6 +222,8 @@ export class WorkerPool {
       });
     }
 
+    let waitUntilTimeout: ReturnType<typeof setTimeout> | undefined;
+
     const onMsg = (msg: {
       type?: string;
       status: number;
@@ -231,6 +234,7 @@ export class WorkerPool {
       stream?: "stdout" | "stderr";
       level?: string;
       message?: string;
+      waitUntilPending?: boolean;
     }) => {
       if (msg.type === "log" && opts.onLog && msg.timestamp && msg.stream && msg.level && msg.message) {
         opts.onLog({
@@ -239,6 +243,16 @@ export class WorkerPool {
           level: msg.level,
           message: msg.message,
         });
+        return;
+      }
+
+      if (msg.type === "wait_until_done") {
+        clearTimeout(timeout);
+        cleanupInFlight();
+        clearCancellationState();
+        worker.removeListener("error", onErr);
+        worker.removeListener("message", onMsg);
+        this.recycle(worker);
         return;
       }
 
@@ -255,8 +269,19 @@ export class WorkerPool {
       clearTimeout(timeout);
       cleanupInFlight();
       clearCancellationState();
-      worker.removeListener("error", onErr);
-      worker.removeListener("message", onMsg);
+      const waitUntilPending = msg.waitUntilPending === true;
+      if (!waitUntilPending) {
+        worker.removeListener("error", onErr);
+        worker.removeListener("message", onMsg);
+      } else {
+        waitUntilTimeout = setTimeout(() => {
+          worker.removeAllListeners("message");
+          worker.removeListener("error", onErr);
+          clearCancellationState();
+          console.error("[Pool] EdgeRuntime.waitUntil timed out; replacing worker");
+          this.replaceWorker(worker);
+        }, WAIT_UNTIL_TIMEOUT_MS);
+      }
 
       const resHeaders = new Headers();
       for (const [k, v] of Object.entries(msg.headers ?? {})) {
@@ -315,12 +340,34 @@ export class WorkerPool {
             headers: resHeaders,
           }),
         );
-        this.recycle(worker);
+        if (waitUntilPending) {
+          worker.removeListener("message", onMsg);
+          const waitUntilListener = (waitMsg: any) => {
+            if (waitMsg.type === "log" && opts.onLog && waitMsg.timestamp && waitMsg.stream && waitMsg.level && waitMsg.message) {
+              opts.onLog({
+                timestamp: waitMsg.timestamp,
+                stream: waitMsg.stream,
+                level: waitMsg.level,
+                message: waitMsg.message,
+              });
+              return;
+            }
+            if (waitMsg.type !== "wait_until_done") return;
+            if (waitUntilTimeout) clearTimeout(waitUntilTimeout);
+            worker.removeListener("message", waitUntilListener);
+            worker.removeListener("error", onErr);
+            this.recycle(worker);
+          };
+          worker.on("message", waitUntilListener);
+        } else {
+          this.recycle(worker);
+        }
       }
     };
 
     const onErr = (err: Error) => {
       clearTimeout(timeout);
+      if (waitUntilTimeout) clearTimeout(waitUntilTimeout);
       cleanupInFlight();
       clearCancellationState();
       worker.removeListener("message", onMsg);
