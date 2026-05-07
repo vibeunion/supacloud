@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.12.19](https://github.com/zuohuadong/supacloud/compare/management-api-v0.12.18...management-api-v0.12.19) (2026-05-07)
+
+
+### 🐛 Bug Fixes
+
+* **runtime:** respect ssl config for tenant urls ([d8ace81](https://github.com/zuohuadong/supacloud/commit/d8ace81412b4caa87fe00982539310452faeaaa1))
+* **runtime:** respect ssl config for tenant urls ([d0852b2](https://github.com/zuohuadong/supacloud/commit/d0852b2e3d95a1c4ab33a30916df68aa15a41a64))
+
 ## [0.12.18](https://github.com/zuohuadong/supacloud/compare/management-api-v0.12.17...management-api-v0.12.18) (2026-05-07)
 
 

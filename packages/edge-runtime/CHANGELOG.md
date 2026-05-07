@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.7](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.3.6...edge-runtime-v0.3.7) (2026-05-07)
+
+
+### 🐛 Bug Fixes
+
+* **runtime:** respect ssl config for tenant urls ([d8ace81](https://github.com/zuohuadong/supacloud/commit/d8ace81412b4caa87fe00982539310452faeaaa1))
+* **runtime:** respect ssl config for tenant urls ([d0852b2](https://github.com/zuohuadong/supacloud/commit/d0852b2e3d95a1c4ab33a30916df68aa15a41a64))
+
 ## [0.3.6](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.3.5...edge-runtime-v0.3.6) (2026-05-07)
 
 
