@@ -29,6 +29,8 @@ export interface PgListenerOptions {
   reconnectDelay?: number;
   /** Maximum reconnect delay in ms (default: 300000 = 5 minutes) */
   maxReconnectDelay?: number;
+  /** Keep the LISTEN TCP connection alive with a lightweight SELECT (default: 45000ms). Set 0 to disable. */
+  keepaliveIntervalMs?: number;
   /** Application name for pg_stat_activity */
   applicationName?: string;
 }
@@ -243,6 +245,7 @@ export function createPgListener(opts: PgListenerOptions): PgListenerHandle {
   const { url, channels, onNotification, applicationName } = opts;
   const reconnectDelay = opts.reconnectDelay ?? 3000;
   const maxReconnectDelay = opts.maxReconnectDelay ?? 300_000; // 5 minutes
+  const keepaliveIntervalMs = opts.keepaliveIntervalMs ?? 45_000;
   const connInfo = parseConnectionUrl(url);
 
   let closed = false;
@@ -250,10 +253,32 @@ export function createPgListener(opts: PgListenerOptions): PgListenerHandle {
   let currentDelay = reconnectDelay;
   let socket: ReturnType<typeof Bun.connect> | null = null;
   let reconnectTimer: Timer | null = null;
+  let keepaliveTimer: Timer | null = null;
+
+  function clearKeepalive() {
+    if (!keepaliveTimer) return;
+    clearInterval(keepaliveTimer);
+    keepaliveTimer = null;
+  }
+
+  function startKeepalive(sock: { write: (data: Buffer) => unknown }) {
+    clearKeepalive();
+    if (keepaliveIntervalMs <= 0) return;
+    keepaliveTimer = setInterval(() => {
+      try {
+        sock.write(buildQuery("SELECT 1;"));
+      } catch (err: unknown) {
+        logger.warn("[PgListener] Keepalive query failed", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }, keepaliveIntervalMs);
+  }
 
   function connect() {
     if (closed || fatalError) return;
 
+    clearKeepalive();
     let buffer: Uint8Array = new Uint8Array(0);
     let authenticated = false;
     let scramClientNonce = "";
@@ -345,6 +370,7 @@ export function createPgListener(opts: PgListenerOptions): PgListenerHandle {
                   logger.info(
                     `[PgListener] Connected and listening on: ${channels.join(", ")}`
                   );
+                  startKeepalive(sock);
                   // Reset backoff delay on successful connection
                   currentDelay = reconnectDelay;
                   // Only send LISTEN once (on first ReadyForQuery after auth)
@@ -382,16 +408,19 @@ export function createPgListener(opts: PgListenerOptions): PgListenerHandle {
         },
 
         close() {
+          clearKeepalive();
           logger.warn(`[PgListener] Connection closed.`);
           scheduleReconnect();
         },
 
         error(_sock, err) {
+          clearKeepalive();
           logger.error(`[PgListener] Socket error: ${err instanceof Error ? err.message : String(err)}`);
           scheduleReconnect();
         },
 
         connectError(_sock, err) {
+          clearKeepalive();
           logger.error(`[PgListener] Connect error: ${err instanceof Error ? err.message : String(err)}`);
           scheduleReconnect();
         },
@@ -422,6 +451,7 @@ export function createPgListener(opts: PgListenerOptions): PgListenerHandle {
         clearTimeout(reconnectTimer);
         reconnectTimer = null;
       }
+      clearKeepalive();
       try {
         // socket is the return value of Bun.connect — use type assertion for end()
         (socket as { end?: () => void })?.end?.();
