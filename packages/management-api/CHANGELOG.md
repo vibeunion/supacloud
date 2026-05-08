@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.12.19...management-api-v0.13.0) (2026-05-08)
+
+
+### 🚀 Features
+
+* **gateway:** manage certificates through Kong ([3d5930f](https://github.com/zuohuadong/supacloud/commit/3d5930fb5eb78ed32fb96b06d0f824446504ae22))
+
 ## [0.12.19](https://github.com/zuohuadong/supacloud/compare/management-api-v0.12.18...management-api-v0.12.19) (2026-05-07)
 
 
