@@ -5,7 +5,7 @@
  * - FrontendDomainService — custom domains, deploy tokens, env vars, git config
  * - FrontendRecordService — deployment records (history/audit trail)
  *
- * This file handles: CRUD, build, Angie config, SSR process management
+ * This file handles: CRUD, build, Kong routing, SSR process management
  */
 import { $ } from "bun";
 import { readdir } from "node:fs/promises";

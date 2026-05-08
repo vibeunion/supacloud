@@ -1154,101 +1154,11 @@ configure_external_s3() {
 }
 
 # ========== Install Pigsty ==========
-# ========== [Deprecated] Compile ACME Module ==========
-# ngx_http_acme_module.so has ABI incompatibility issues with Nginx on Rocky Linux 9,
-# leading to Segfaults (Cloudflare 521 errors). This approach is officially deprecated.
-# SSL is now managed via static certificates in /etc/pigsty/cert/ or traditional Let's Encrypt directories.
-compile_acme_module() {
-    log_warn "[Deprecated] compile_acme_module: ACME .so module causes Segfault, disabled, skipping"
-    return 0
-    
-    # Install Rust
-    log_info "Installing Rust toolchain..."
-    if ! command -v cargo &> /dev/null; then
-        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-        source "$HOME/.cargo/env" 2>/dev/null || source /root/.cargo/env 2>/dev/null || true
-    fi
-    
-    # Verify Rust installation
-    if ! command -v cargo &> /dev/null; then
-        log_error "Rust installation failed"
-        return 1
-    fi
-    
-    log_info "Rust version: $(rustc --version)"
-    
-    # Download ACME module source
-    cd /tmp
-    log_info "Downloading Nginx ACME module source..."
-    rm -rf nginx-acme nginx-acme.tar.gz 2>/dev/null
-    
-    # Try multiple download methods (using multiple proxies)
-    log_info "Method 1: Using mirror.ghproxy.com..."
-    { wget -q "https://mirror.ghproxy.com/https://github.com/nginx/acme/archive/refs/heads/main.tar.gz" -O nginx-acme.tar.gz && \
-    tar -xzf nginx-acme.tar.gz && \
-    mv nginx-acme-main nginx-acme; } || {
-        log_warn "mirror.ghproxy.com 1 failed, trying mirror.ghproxy.com 2..."
-        wget -q "https://mirror.ghproxy.com/https://github.com/nginx/acme/archive/refs/heads/main.tar.gz" -O nginx-acme.tar.gz && \
-        tar -xzf nginx-acme.tar.gz && mv main.tar.gz nginx-acme.tar.gz 2>/dev/null || true
-        # Verify download structure
-        if [[ -f nginx-acme.tar.gz ]] && tar -tzf nginx-acme.tar.gz | grep -q "acme-main"; then
-            true
-        fi
-        log_warn "mirror.ghproxy.com failed, trying jsdelivr CDN..."
-        wget -q "https://cdn.jsdelivr.net/gh/nginx/acme@main.tar.gz" -O nginx-acme.tar.gz && \
-        tar -xzf nginx-acme.tar.gz && \
-        mv nginx-acme-main nginx-acme || mv nginx-acme nginx-acme 2>/dev/null
-    } || {
-        log_warn "CDN failed, trying direct download..."
-        wget -q https://github.com/nginx/acme/archive/refs/heads/main.tar.gz -O nginx-acme.tar.gz && \
-        tar -xzf nginx-acme.tar.gz && \
-        mv nginx-acme-main nginx-acme
-    }
-    
-    # Verify directory exists
-    if [ ! -d "/tmp/nginx-acme" ]; then
-        log_error "ACME module source download failed"
-        return 1
-    fi
-    
-    log_info "ACME module source downloaded to /tmp/nginx-acme"
-    
-    # Compile module
-    cd /tmp/nginx-acme
-    log_info "Compiling ACME module (this may take a few minutes)..."
-    
-    export NGINX_SOURCE=/tmp/nginx-1.26.3
-    
-    # Build
-    cargo build --release 2>&1 || {
-        log_error "ACME module compilation failed"
-        return 1
-    }
-    
-    # Copy module to Nginx modules directory
-    mkdir -p /usr/lib64/nginx/modules
-    cp /tmp/nginx-acme/target/release/libngx_http_acme_module.so /usr/lib64/nginx/modules/ngx_http_acme_module.so 2>/dev/null || \
-    cp /tmp/nginx-acme/target/release/ngx_http_acme_module.so /usr/lib64/nginx/modules/ngx_http_acme_module.so 2>/dev/null || {
-        log_warn "Compiled module not found, trying other paths..."
-        find /tmp/nginx-acme -name "*.so" -exec cp {} /usr/lib64/nginx/modules/ngx_http_acme_module.so \;
-    }
-    
-    # Verify
-    if [ -f /usr/lib64/nginx/modules/ngx_http_acme_module.so ]; then
-        log_info "ACME module compiled successfully: /usr/lib64/nginx/modules/ngx_http_acme_module.so"
-        return 0
-    else
-        log_error "ACME module file not found"
-        return 1
-    fi
-}
-
-
-# ========== Install Kong Native Gateway (Unified Edge proxy + ACME) ==========
+# ========== Install Kong Native Gateway (Unified Edge proxy + TLS) ==========
 install_kong_native() {
     log_step "Installing Kong Native Gateway (DB-Backed)..."
 
-    # 1. Disable existing Nginx/Angie if present
+    # 1. Disable legacy host web gateways so Kong can own 80/443
     if command -v nginx &>/dev/null || systemctl list-unit-files nginx.service &>/dev/null 2>&1; then
         systemctl stop nginx 2>/dev/null || true
         systemctl disable nginx 2>/dev/null || true
@@ -1290,21 +1200,28 @@ EOF
     systemctl enable kong
     systemctl restart kong
     
-    log_info "Initializing Global Let's Encrypt (ACME) for Kong..."
-    sleep 3 # Wait for Kong Admin API to come up
-    curl -s -X POST http://127.0.0.1:8001/plugins \
-        --data "name=acme" \
-        --data "config.account_email=admin@${BASE_DOMAIN:-dbbaby.top}" \
-        --data "config.tos_accepted=true" \
-        --data "config.domains\[\]=*" \
-        --data "config.allow_any_domain=true" || true
+    log_info "Preparing lego ACME client for Kong certificate automation..."
+    if ! command -v lego >/dev/null 2>&1; then
+        local LEGO_VERSION="${LEGO_VERSION:-4.25.2}"
+        local LEGO_ARCH="amd64"
+        case "$(uname -m)" in
+            aarch64|arm64) LEGO_ARCH="arm64" ;;
+        esac
+        local LEGO_URL="https://github.com/go-acme/lego/releases/download/v${LEGO_VERSION}/lego_v${LEGO_VERSION}_linux_${LEGO_ARCH}.tar.gz"
+        mkdir -p /tmp/supacloud-lego
+        if curl -fsSL "https://ghproxy.net/${LEGO_URL}" -o /tmp/supacloud-lego/lego.tar.gz 2>/dev/null || \
+           curl -fsSL "$LEGO_URL" -o /tmp/supacloud-lego/lego.tar.gz; then
+            tar -xzf /tmp/supacloud-lego/lego.tar.gz -C /tmp/supacloud-lego lego
+            install -m 0755 /tmp/supacloud-lego/lego /usr/local/bin/lego
+        else
+            log_warn "lego download failed; certificate automation can still use an existing LEGO_BIN later"
+        fi
+        rm -rf /tmp/supacloud-lego
+    fi
+    mkdir -p /var/lib/supacloud/lego /var/lib/supacloud/acme-challenges
     
     log_info "Kong Native Gateway Installation completed."
 }
-
-# Keep this function alias for compatibility
-install_nginx_mainline() { install_kong_native; }
-
 
 cleanup_legacy_supabase_compose_stack() {
     log_step "Cleaning legacy Supabase compose residues..."
@@ -1677,7 +1594,7 @@ update_pigsty_config() {
     fi
     # Container/CI environment detection limit variables now moved to ansible-playbook command line (EXTRA_ARGS)
     
-    # -- Disable Pigsty's Nginx management (Angie takes over 80/443) -----
+    # -- Disable Pigsty's Nginx management (Kong owns 80/443) -----
     # Must be injected after ./configure and before bootstrap/install, otherwise Pigsty will still try to install Nginx
     if [[ -f "$PIGSTY_YML" ]]; then
         if ! grep -q 'nginx_enabled' "$PIGSTY_YML"; then
@@ -2185,6 +2102,10 @@ PG_USER=postgres
 PG_DATABASE=postgres
 PGPASSWORD=${POSTGRES_PASSWORD}
 SECRETS_ENCRYPTION_KEY=${SECRETS_ENCRYPTION_KEY}
+ACME_CLIENT=lego
+LEGO_BIN=${LEGO_BIN:-lego}
+ACME_STATE_DIR=${ACME_STATE_DIR:-/var/lib/supacloud/lego}
+ACME_HTTP_WEBROOT=${ACME_HTTP_WEBROOT:-/var/lib/supacloud/acme-challenges}
 EOF
     chmod 600 /etc/supabase/management-api.env
     sync_runtime_config /etc/supabase/management-api.env
@@ -2365,7 +2286,7 @@ show_completion() {
     echo ""
     echo "Next Steps:"
     echo "  1. Point the DNS A record for ${SUPABASE_PUBLIC_DOMAIN} to the server's public IP"
-    echo "  2. Angie will automatically request and manage HTTPS certificates, no manual action required"
+    echo "  2. Configure certificates in the console; SupaCloud uses lego and Kong certificates/SNI"
     echo ""
     echo "Common Commands:"
     echo "  Check container status: podman ps or docker ps"
@@ -2514,7 +2435,7 @@ main() {
     configure_analytics
     configure_pg_hba
     
-    # Kong native replaced Angie and Docker-Kong. It relies on Pigsty Postgres so must be executed after install_pigsty
+    # Kong native relies on Pigsty Postgres so it must be executed after install_pigsty.
     install_kong_native
 
     # Performance tuning after Pigsty PG initialization
