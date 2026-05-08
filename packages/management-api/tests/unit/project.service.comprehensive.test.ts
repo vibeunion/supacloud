@@ -91,6 +91,7 @@ mock.module("../../src/services/tenant-runtime.service", () => ({
 
 const { projectRepository } = await import("../../src/repositories/project.repository");
 const { taskRepository } = await import("../../src/repositories/task.repository");
+const { gatewayService } = await import("../../src/services/gateway.service");
 
 const projectRepositoryMock = {
   findAll: spyOn(projectRepository, "findAll"),
@@ -103,6 +104,10 @@ const projectRepositoryMock = {
 
 const taskRepositoryMock = {
   createTask: spyOn(taskRepository, "createTask"),
+};
+
+const gatewayServiceMock = {
+  setupUpstream: spyOn(gatewayService, "setupUpstream"),
 };
 
 const { ProjectService } = await import("../../src/services/project.service");
@@ -142,6 +147,7 @@ describe("ProjectService - Comprehensive", () => {
     projectRepositoryMock.updateConfig.mockReset();
     projectRepositoryMock.softDelete.mockReset();
     taskRepositoryMock.createTask.mockReset();
+    gatewayServiceMock.setupUpstream.mockReset();
     jwtServiceMock.generateProjectRef.mockReset();
     jwtServiceMock.generateKeySet.mockReset();
     databaseServiceMock.generatePassword.mockReset();
@@ -168,6 +174,7 @@ describe("ProjectService - Comprehensive", () => {
     projectRepositoryMock.updateConfig.mockResolvedValue(mockProject);
     projectRepositoryMock.softDelete.mockResolvedValue(mockProject);
     taskRepositoryMock.createTask.mockResolvedValue({ id: "tsk_1" });
+    gatewayServiceMock.setupUpstream.mockResolvedValue({ success: true });
     jwtServiceMock.generateProjectRef.mockReturnValue("newref1234");
     jwtServiceMock.generateKeySet.mockResolvedValue({
       jwtSecret: "jwtsecret",
@@ -320,6 +327,35 @@ describe("ProjectService - Comprehensive", () => {
     expect(result).toBe(true);
   });
 
+  test("restartProject reconciles Kong routes when tenant ports are known", async () => {
+    projectRepositoryMock.findByRef.mockResolvedValueOnce({
+      ...mockProject,
+      config: {
+        postgrest_port: 3234,
+        gotrue_port: 4234,
+        custom_domain: "xg.aizhuliren.cn",
+        api_domain: "api.xg.aizhuliren.cn",
+        studio_domain: "studio.xg.aizhuliren.cn",
+      },
+    });
+
+    const result = await service.restartProject("test123abc");
+
+    expect(result).toBe(true);
+    expect(gatewayServiceMock.setupUpstream).toHaveBeenCalledWith(
+      "test123abc",
+      3234,
+      4234,
+      {
+        postgrest_port: 3234,
+        gotrue_port: 4234,
+        custom_domain: "xg.aizhuliren.cn",
+        api_domain: "api.xg.aizhuliren.cn",
+        studio_domain: "studio.xg.aizhuliren.cn",
+      },
+    );
+  });
+
   test("getProjectSettings returns config", async () => {
     projectRepositoryMock.findByRef.mockResolvedValueOnce(mockProject);
     expect(await service.getProjectSettings("test123abc")).toEqual({ custom: "value" });
@@ -353,6 +389,53 @@ describe("ProjectService - Comprehensive", () => {
       api_domain: "xgapi.aizhuliren.cn",
     });
     expect(tenantRuntimeServiceMock.restartRuntime).toHaveBeenCalledWith("test123abc");
+  });
+
+  test("updateProjectSettings reconciles Kong routes for custom domain changes", async () => {
+    projectRepositoryMock.findByRef.mockResolvedValueOnce({
+      ...mockProject,
+      config: {
+        postgrest_port: 3234,
+        gotrue_port: 4234,
+        custom_domain: "old.example.com",
+      },
+    });
+    projectRepositoryMock.updateConfig.mockResolvedValueOnce({
+      ...mockProject,
+      config: {
+        postgrest_port: 3234,
+        gotrue_port: 4234,
+        custom_domain: "xg.aizhuliren.cn",
+        api_domain: "api.xg.aizhuliren.cn",
+        studio_domain: "studio.xg.aizhuliren.cn",
+      },
+    });
+
+    const result = await service.updateProjectSettings("test123abc", {
+      custom_domain: "xg.aizhuliren.cn",
+      api_domain: "api.xg.aizhuliren.cn",
+      studio_domain: "studio.xg.aizhuliren.cn",
+    });
+
+    expect(result).toEqual({
+      postgrest_port: 3234,
+      gotrue_port: 4234,
+      custom_domain: "xg.aizhuliren.cn",
+      api_domain: "api.xg.aizhuliren.cn",
+      studio_domain: "studio.xg.aizhuliren.cn",
+    });
+    expect(gatewayServiceMock.setupUpstream).toHaveBeenCalledWith(
+      "test123abc",
+      3234,
+      4234,
+      {
+        postgrest_port: 3234,
+        gotrue_port: 4234,
+        custom_domain: "xg.aizhuliren.cn",
+        api_domain: "api.xg.aizhuliren.cn",
+        studio_domain: "studio.xg.aizhuliren.cn",
+      },
+    );
   });
 
   test("getApiKeys returns api keys", async () => {
