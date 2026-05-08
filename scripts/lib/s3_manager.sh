@@ -11,13 +11,17 @@ PROJECT_REF="${2:-}"
 S3_ENDPOINT="${S3_ENDPOINT:-http://localhost:9000}"
 S3_ACCESS_KEY="${S3_ACCESS_KEY:-}"
 S3_SECRET_KEY="${S3_SECRET_KEY:-}"
-S3_STORAGE_TYPE="${S3_STORAGE_TYPE:-rustfs}"
+S3_STORAGE_TYPE="${S3_STORAGE_TYPE:-juicefs}"
 
 BUCKET_NAME="supa-${PROJECT_REF}"
 
 # Load storage credentials
 load_credentials() {
     case "$S3_STORAGE_TYPE" in
+        juicefs)
+            S3_ACCESS_KEY="${S3_ACCESS_KEY:-s3user_data}"
+            S3_SECRET_KEY="${S3_SECRET_KEY:-S3User.Data}"
+            ;;
         rustfs)
             if [ -f /etc/rustfs-credentials.env ]; then
                 source /etc/rustfs-credentials.env
