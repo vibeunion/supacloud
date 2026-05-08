@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.6](https://github.com/zuohuadong/supacloud/compare/admin-v0.1.5...admin-v0.1.6) (2026-05-08)
+
+
+### 🐛 Bug Fixes
+
+* **cli:** infer management URL from project API domains ([41de422](https://github.com/zuohuadong/supacloud/commit/41de422003627bedaae2056916dedad7d012ee54))
+
 ## [0.1.5](https://github.com/zuohuadong/supacloud/compare/admin-v0.1.4...admin-v0.1.5) (2026-05-08)
 
 
