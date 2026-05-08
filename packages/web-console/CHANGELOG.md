@@ -8,6 +8,7 @@
 * **deps-dev:** bump vite from 8.0.3 to 8.0.11 in /packages/web-console ([#87](https://github.com/zuohuadong/supacloud/issues/87)) ([86a3c6c](https://github.com/zuohuadong/supacloud/commit/86a3c6ce6ff0015a1c844cdcd2e1a71286c0f36a))
 * **deps:** bump @svadmin/core in /packages/web-console ([#90](https://github.com/zuohuadong/supacloud/issues/90)) ([b216a3c](https://github.com/zuohuadong/supacloud/commit/b216a3c2cf01f98fdfe3b8c3da43d4b164ae0929))
 * **deps:** bump @svadmin/ui in /packages/web-console ([#89](https://github.com/zuohuadong/supacloud/issues/89)) ([8ca36cd](https://github.com/zuohuadong/supacloud/commit/8ca36cdddc51108d531b69cf67772a65cfee4384))
+* **deps:** bump lucide-svelte from 0.577.0 to 1.0.1 in /packages/web-console ([#88](https://github.com/zuohuadong/supacloud/issues/88)) ([155cd3d](https://github.com/zuohuadong/supacloud/commit/155cd3dc9484caef3267d963961585971130359d))
 * **deps:** bump marked from 17.0.6 to 18.0.3 in /packages/web-console ([#85](https://github.com/zuohuadong/supacloud/issues/85)) ([0419294](https://github.com/zuohuadong/supacloud/commit/04192949a6eaeb6671f296cf8d169e4e5f508f34))
 
 ## [0.9.0](https://github.com/zuohuadong/supacloud/compare/web-console-v0.8.5...web-console-v0.9.0) (2026-05-08)
