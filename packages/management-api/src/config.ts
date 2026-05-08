@@ -104,6 +104,9 @@ export interface Config {
   supacloudAnsibleArgs: string;
   enableSsl: boolean;
   acmeClient: string;
+  legoBin: string;
+  acmeStateDir: string;
+  acmeHttpWebroot: string;
   llmApiKey: string;
   llmEndpoint: string;
   llmModel: string;
@@ -211,7 +214,10 @@ export const config: Config = {
   containerRuntime: getEnv("CONTAINER_RUNTIME", "podman"),
   supacloudAnsibleArgs: getEnv("SUPACLOUD_ANSIBLE_ARGS", ""),
   enableSsl: getEnv("ENABLE_SSL", "true") !== "false",
-  acmeClient: getEnv("ACME_CLIENT", "le"),
+  acmeClient: getEnv("ACME_CLIENT", "lego"),
+  legoBin: getEnv("LEGO_BIN", "lego"),
+  acmeStateDir: getEnv("ACME_STATE_DIR", "/var/lib/supacloud/lego"),
+  acmeHttpWebroot: getEnv("ACME_HTTP_WEBROOT", "/var/lib/supacloud/acme-challenges"),
   llmApiKey: getEnv("LLM_API_KEY", ""),
   llmEndpoint: getEnv("LLM_ENDPOINT", "https://api.openai.com/v1/chat/completions"),
   llmModel: getEnv("LLM_MODEL", "gpt-4o-mini"),

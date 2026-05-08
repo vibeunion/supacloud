@@ -81,7 +81,7 @@ log "内核版本: $(uname -r)，io_uring 支持: $(${IO_URING_SUPPORTED} && ech
 
 # ── 动态计算各参数值 ─────────────────────────────────────────────────────────
 
-# shared_buffers: 在微小机型上缩减至 10%-15%，尽量腾出内存给 Angie 和 JuiceFS OSM 缓存
+# shared_buffers: 在微小机型上缩减至 10%-15%，尽量腾出内存给 Kong 和 JuiceFS OSM 缓存
 SHARED_BUFFERS_GB=$(awk "BEGIN {printf \"%.0f\", ${TOTAL_MEM_GB} * 0.12}")
 [[ ${SHARED_BUFFERS_GB} -lt 1 ]] && SHARED_BUFFERS_GB=1
 SHARED_BUFFERS="256MB" # 强制在微型机器上保守设定

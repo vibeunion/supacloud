@@ -194,7 +194,7 @@ Kong dynamically validates JWT keys for different projects based on `Host` Heade
 /opt/supacloud/scripts/lib/
 ├── db_manager.sh      # Database management
 ├── storage_manager.sh # Storage management (JuiceFS/S3)
-├── router_manager.sh  # Kong routing management
+├── gateway_manager.sh # Kong routing management
 └── jwt_manager.sh     # JWT key management
 ```
 
@@ -226,17 +226,17 @@ storage_manager.sh delete <project_ref>
 storage_manager.sh credentials <project_ref>
 ```
 
-#### router_manager.sh
+#### gateway_manager.sh
 
 ```bash
-# Add project route
-router_manager.sh add <project_ref> <domain>
+# Provision Kong consumer/JWT settings for a project
+gateway_manager.sh setup-project <project_ref> <jwt_secret>
 
-# Remove project route
-router_manager.sh remove <project_ref>
+# Update rate limiting profile
+gateway_manager.sh set-rate-limit <project_ref> <free|pro|enterprise>
 
-# Reload Kong routes
-router_manager.sh reload
+# Configure CORS origins
+gateway_manager.sh set-cors <project_ref> <origins>
 ```
 
 #### jwt_manager.sh

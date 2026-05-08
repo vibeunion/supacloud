@@ -471,7 +471,6 @@ supacloud/
 │   └── lib/                    # Shell script modules
 │       ├── db_manager.sh       # Database lifecycle
 │       ├── gateway_manager.sh  # Kong gateway configuration
-│       ├── router_manager.sh   # Route definitions
 │       ├── tenant_runtime.sh   # Tenant PostgREST & GoTrue runtime
 │       ├── function_manager.sh # Edge Functions management
 │       ├── s3_manager.sh       # Storage backend management
@@ -909,7 +908,6 @@ supacloud/
 │   └── lib/                    # Shell 脚本模块
 │       ├── db_manager.sh       # 数据库生命周期
 │       ├── gateway_manager.sh  # Kong 网关配置
-│       ├── router_manager.sh   # 路由定义
 │       ├── tenant_runtime.sh   # 租户 PostgREST & GoTrue 运行时
 │       ├── function_manager.sh # 云函数管理
 │       ├── s3_manager.sh       # 存储后端管理

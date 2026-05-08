@@ -415,7 +415,7 @@
         {:else}
           <!-- Add domain form -->
           <div class="space-y-3">
-            <p class="text-xs text-muted-foreground">Bind a custom domain for your project API. SSL certificates will be automatically provisioned via ACME.</p>
+            <p class="text-xs text-muted-foreground">Bind a custom domain for your project API. TLS certificates are managed through Kong certificates/SNI.</p>
             <div class="flex gap-2">
               <input type="text" bind:value={newDomain} placeholder="e.g. api.example.com"
                 class="flex-1 px-3 py-2 text-sm rounded-lg border bg-background focus:outline-none focus:ring-2 focus:ring-brand/50 font-mono"

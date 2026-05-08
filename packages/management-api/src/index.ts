@@ -88,7 +88,7 @@ async function getEmbeddedAssets() {
   return _embeddedAssets;
 }
 
-// --- Caddy/Angie-style try_files static asset serving ---
+// --- Gateway-style try_files static asset serving ---
 // No pre-warmed Set. Direct disk checks per request (Bun.file is near-zero-cost).
 // index.html is cached in memory with mtime-based invalidation.
 let _cachedIndexHtml: string | null = null;
@@ -245,6 +245,28 @@ const app = new Elysia({ strictPath: false })
   // Health check (no auth required)
   .get("/health", () => ({ status: "ok", timestamp: new Date().toISOString() }))
 
+  // ACME HTTP-01 challenge files for lego --http.webroot. Kong routes
+  // /.well-known/acme-challenge for tenant hosts back to this service.
+  .get("/.well-known/acme-challenge/:token", async ({ params, set }) => {
+    const token = String(params.token || "");
+    if (!/^[A-Za-z0-9_-]+$/.test(token)) {
+      set.status = 400;
+      return "invalid token";
+    }
+    const file = Bun.file(`${config.acmeHttpWebroot}/${token}`);
+    try {
+      if (file.size <= 0) {
+        set.status = 404;
+        return "not found";
+      }
+      set.headers["content-type"] = "text/plain; charset=utf-8";
+      return await file.text();
+    } catch {
+      set.status = 404;
+      return "not found";
+    }
+  })
+
   // ─── Studio Login (no auth required) ──────────────────────────────────
   .post("/auth/login", async ({ body, set }) => {
     const { username, password } = body as {
@@ -373,7 +395,7 @@ const app = new Elysia({ strictPath: false })
   });
 
 /**
- * Caddy/Angie-inspired try_files static asset serving.
+ * Gateway-inspired try_files static asset serving.
  *
  * Strategy (mirrors `try_files $uri $uri/ /index.html`):
  *   1. If exact file exists on disk → serve it (with content-negotiation for br/gzip)
@@ -468,7 +490,7 @@ export function registerStaticAssets() {
       });
     }
 
-    // --- Step 2: immutable asset miss → strict 404 (Caddy/Angie behavior) ---
+    // --- Step 2: immutable asset miss → strict 404 (gateway behavior) ---
     // /_app/immutable/... files are content-hashed; if they don't exist, it's a stale reference.
     // Returning index.html here would cause "Expected JS but got text/html" browser errors.
     if (isImmutableAsset(path) || hasFileExtension(path)) {
