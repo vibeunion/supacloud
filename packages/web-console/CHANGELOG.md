@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.2](https://github.com/zuohuadong/supacloud/compare/web-console-v0.9.1...web-console-v0.9.2) (2026-05-08)
+
+
+### 📝 Documentation
+
+* **web-console:** add lucide dependency changelog entry ([d048be4](https://github.com/zuohuadong/supacloud/commit/d048be4194978b2511da5ffbd4725ed6b249a041))
+
 ## [0.9.1](https://github.com/zuohuadong/supacloud/compare/web-console-v0.9.0...web-console-v0.9.1) (2026-05-08)
 
 
