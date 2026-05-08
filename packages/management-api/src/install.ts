@@ -35,6 +35,15 @@ function generateSecurePassword(length = 24) {
     return ret;
 }
 
+function deriveBaseDomain(domain: string) {
+    return domain.trim().replace(/^(?:api|studio)\./i, "");
+}
+
+function deriveStudioDomain(apiDomain: string, internalIp: string) {
+    if (!apiDomain.trim()) return `studio.${internalIp}.nip.io`;
+    return `studio.${deriveBaseDomain(apiDomain)}`;
+}
+
 async function ensureInstallerAvailable(installerPath: string) {
     await $`chmod +x ${installerPath}`.quiet();
 }
@@ -278,8 +287,7 @@ async function runInteractiveConfig(installerPath: string, forceYes = false): Pr
         p.log.info(`Using config: IP=${internalIp}, Domain=${publicDomain}, Storage=${storageType}, SSL=${enableSsl}`);
     }
 
-    const isTestDomain = publicDomain.includes("nip.io");
-    const defaultStudio = isTestDomain ? `studio.${internalIp}.nip.io` : `studio.${publicDomain.replace(/^api\./, '')}`;
+    const defaultStudio = deriveStudioDomain(publicDomain, internalIp);
     let studioDomain = argStudio || defaultStudio;
 
     if (!forceYes && !argStudio) {
@@ -343,7 +351,7 @@ JWT_SECRET="${jwtSecret}"
 # SSL & ACME Sync
 ENABLE_SSL="${enableSsl}"
 ACME_CLIENT="${acmeClient}"
-BASE_DOMAIN="${publicDomain.replace(/^api\./, "")}"
+BASE_DOMAIN="${deriveBaseDomain(publicDomain)}"
 LEGO_BIN="lego"
 ACME_STATE_DIR="/var/lib/supacloud/lego"
 ACME_HTTP_WEBROOT="/var/lib/supacloud/acme-challenges"
@@ -365,4 +373,3 @@ KONG_INTERNAL="127.0.0.1:8000"
         storageType: storageType,
     };
 }
-
