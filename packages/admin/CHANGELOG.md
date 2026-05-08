@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.7](https://github.com/zuohuadong/supacloud/compare/admin-v0.1.6...admin-v0.1.7) (2026-05-08)
+
+
+### 🔧 Miscellaneous Chores
+
+* **deps:** bump zod from 3.25.76 to 4.4.3 in /packages/admin ([#83](https://github.com/zuohuadong/supacloud/issues/83)) ([5838201](https://github.com/zuohuadong/supacloud/commit/583820146b57be2cc1165a118b94f329c8a5aed3))
+
 ## [0.1.6](https://github.com/zuohuadong/supacloud/compare/admin-v0.1.5...admin-v0.1.6) (2026-05-08)
 
 
