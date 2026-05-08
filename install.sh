@@ -135,6 +135,9 @@ DASHBOARD_USERNAME=${DASHBOARD_USERNAME:-admin}
 DASHBOARD_PASSWORD=${DASHBOARD_PASSWORD:-pigsty}
 GRAFANA_PASSWORD=${GRAFANA_PASSWORD:-pigsty}
 S3_STORAGE_TYPE=${S3_STORAGE_TYPE:-juicefs}
+PIGSTY_CONFIG_TEMPLATE=${PIGSTY_CONFIG_TEMPLATE:-supabase}
+SUPACLOUD_INSTALL_LEGACY_SUPABASE_STACK=${SUPACLOUD_INSTALL_LEGACY_SUPABASE_STACK:-false}
+IMAGINARY_IMAGE=${IMAGINARY_IMAGE:-h2non/imaginary:1.2.4}
 # Edge Runtime: Bun (built-in, no configuration needed)
 EOF
              log_info "Configuration file generated: $CONFIG_FILE"
@@ -1392,13 +1395,18 @@ install_pigsty() {
         ./bootstrap
     fi
     
-    # Prefer Pigsty 4.3's supabase template. SupaCloud still skips Pigsty's
-    # app.yml by default because gateway/runtime/storage orchestration is owned
-    # by SupaCloud multi-project services.
+    # Prefer Pigsty's official supabase template for PostgreSQL roles/extensions.
+    # SupaCloud skips Pigsty's app.yml by default because gateway/runtime/storage
+    # orchestration is owned by SupaCloud multi-project services.
     log_info "Configuring Supabase templates..."
     if ! ./configure -i "$INTERNAL_IP" -c "${PIGSTY_CONFIG_TEMPLATE:-supabase}"; then
-        log_warn "Primary Supabase template failed, trying legacy app/supa template..."
-        ./configure -i "$INTERNAL_IP" -c app/supa
+        if [[ "${SUPACLOUD_INSTALL_LEGACY_SUPABASE_STACK:-false}" == "true" ]]; then
+            log_warn "Primary Supabase template failed, trying legacy app/supa template..."
+            ./configure -i "$INTERNAL_IP" -c app/supa
+        else
+            log_warn "Primary Supabase template failed, falling back to Pigsty default template."
+            ./configure -i "$INTERNAL_IP"
+        fi
     fi
     
     # OpenCloudOS Special Handling: Disable Pigsty repo features, use system packages
@@ -1537,30 +1545,28 @@ update_pigsty_config() {
         sed -i "s|10.2.0.14|${INTERNAL_IP}|g" "$PIGSTY_YML"
     fi
  
-    # Update domain configuration
-    # SITE_URL -> Studio (Dashboard)
-    sed -i "s|SITE_URL: https://supa.pigsty|SITE_URL: https://${SUPABASE_STUDIO_DOMAIN}|g" "$PIGSTY_YML"
-    
-    # API URL -> Public Domain (API Gateway)
-    sed -i "s|API_EXTERNAL_URL: https://supa.pigsty|API_EXTERNAL_URL: https://${SUPABASE_PUBLIC_DOMAIN}|g" "$PIGSTY_YML"
-    sed -i "s|SUPABASE_PUBLIC_URL: https://supa.pigsty|SUPABASE_PUBLIC_URL: https://${SUPABASE_PUBLIC_DOMAIN}|g" "$PIGSTY_YML"
-    
-    # Nginx domain and certificate configuration
-    # Note: In Pigsty's simple mode, the 'domain' variable usually controls the main server name.
-    # To support two domains, we need to ensure certbot requests both domains separated by commas,
-    # and Nginx is configured to listen on both domains.
-    # Here we modify the domain to Public Domain (as the main domain)
-    sed -i "s|domain: supa.pigsty|domain: ${SUPABASE_PUBLIC_DOMAIN}|g" "$PIGSTY_YML"
-    
-    # Update certbot request list to include both Public and Studio domains
-    if [[ "$SUPABASE_PUBLIC_DOMAIN" != "$SUPABASE_STUDIO_DOMAIN" ]]; then
-        sed -i "s|certbot: supa.pigsty|certbot: ${SUPABASE_PUBLIC_DOMAIN},${SUPABASE_STUDIO_DOMAIN}|g" "$PIGSTY_YML"
+    if [[ "${SUPACLOUD_INSTALL_LEGACY_SUPABASE_STACK:-false}" == "true" ]]; then
+        log_info "Patching Pigsty legacy Supabase app domains"
+        # SITE_URL -> Studio (Dashboard)
+        sed -i "s|SITE_URL: https://supa.pigsty|SITE_URL: https://${SUPABASE_STUDIO_DOMAIN}|g" "$PIGSTY_YML"
+
+        # API URL -> Public Domain (API Gateway)
+        sed -i "s|API_EXTERNAL_URL: https://supa.pigsty|API_EXTERNAL_URL: https://${SUPABASE_PUBLIC_DOMAIN}|g" "$PIGSTY_YML"
+        sed -i "s|SUPABASE_PUBLIC_URL: https://supa.pigsty|SUPABASE_PUBLIC_URL: https://${SUPABASE_PUBLIC_DOMAIN}|g" "$PIGSTY_YML"
+
+        # Nginx/certbot belongs only to the legacy Pigsty Supabase app stack.
+        sed -i "s|domain: supa.pigsty|domain: ${SUPABASE_PUBLIC_DOMAIN}|g" "$PIGSTY_YML"
+
+        if [[ "$SUPABASE_PUBLIC_DOMAIN" != "$SUPABASE_STUDIO_DOMAIN" ]]; then
+            sed -i "s|certbot: supa.pigsty|certbot: ${SUPABASE_PUBLIC_DOMAIN},${SUPABASE_STUDIO_DOMAIN}|g" "$PIGSTY_YML"
+        else
+            sed -i "s|certbot: supa.pigsty|certbot: ${SUPABASE_PUBLIC_DOMAIN}|g" "$PIGSTY_YML"
+        fi
+
+        sed -i "s|supa.pigsty|${SUPABASE_PUBLIC_DOMAIN}|g" "$PIGSTY_YML"
     else
-        sed -i "s|certbot: supa.pigsty|certbot: ${SUPABASE_PUBLIC_DOMAIN}|g" "$PIGSTY_YML"
+        log_info "Skipping Pigsty app domain/certbot patch; Kong/lego owns public HTTP(S)."
     fi
-    
-    # Update /etc/hosts configuration (only as placeholder replacement, actual DNS configured by user)
-    sed -i "s|supa.pigsty|${SUPABASE_PUBLIC_DOMAIN}|g" "$PIGSTY_YML"
     
     # Update password configuration
     if [[ -n "$DASHBOARD_PASSWORD" && "$DASHBOARD_PASSWORD" != "your-strong-password" ]]; then
@@ -1601,10 +1607,7 @@ update_pigsty_config() {
         sed -i 's/^\([[:space:]]*\)DASHBOARD_PASSWORD:.*$/&\n\1patroni:\n\1  postgresql:\n\1    parameters:\n\1      max_wal_size: 2GB\n\1      min_wal_size: 1GB/' "$PIGSTY_YML"
     fi
     
-    # Configure non-MinIO S3 storage
-    if [[ "${S3_STORAGE_TYPE:-juicefs}" != "minio" ]]; then
-        configure_s3_in_pigsty
-    fi
+    configure_s3_in_pigsty
     # Container/CI environment detection limit variables now moved to ansible-playbook command line (EXTRA_ARGS)
     
     # -- Disable Pigsty's Nginx management (Kong owns 80/443) -----
@@ -1687,8 +1690,8 @@ configure_s3_in_pigsty() {
         sed -i '/minio:/,/vars:/ { s/^#     hosts:/      hosts:/ }' "$PIGSTY_YML"
     fi
     
-    # Update Supabase .env file (if exists)
-    if [[ -f "$SUPABASE_ENV" ]]; then
+    # Update Pigsty's legacy Supabase compose .env only when explicitly enabled.
+    if [[ "${SUPACLOUD_INSTALL_LEGACY_SUPABASE_STACK:-false}" == "true" && -f "$SUPABASE_ENV" ]]; then
         log_info "Updating Supabase S3 configuration..."
         
         # Update S3 endpoint
@@ -1711,6 +1714,8 @@ configure_s3_in_pigsty() {
         if [[ "$S3_STORAGE_TYPE" == "minio" ]]; then
             sed -i "s|S3_FORCE_PATH_STYLE=.*|S3_FORCE_PATH_STYLE=true|g" "$SUPABASE_ENV"
         fi
+    else
+        log_info "Skipping Pigsty Supabase .env S3 patch; legacy compose stack is disabled."
     fi
     
     
@@ -2100,6 +2105,7 @@ SCRIPTS_PATH=${SCRIPTS_INSTALL_DIR}
 PIGSTY_PATH=${HOME}/pigsty
 BASE_DOMAIN=${BASE_DOMAIN_VALUE}
 S3_STORAGE_TYPE=${S3_STORAGE_TYPE:-juicefs}
+IMAGINARY_IMAGE=${IMAGINARY_IMAGE:-h2non/imaginary:1.2.4}
 SUPACLOUD_JWT_SECRET=${JWT_SECRET}
 REALTIME_SECRET_KEY_BASE=${REALTIME_SECRET_KEY_BASE}
 REALTIME_DB_ENC_KEY=${REALTIME_DB_ENC_KEY}
@@ -2179,21 +2185,25 @@ deploy_service_containers() {
     log_step "Deploying SupaCloud service containers..."
 
     local RUNTIME="${CONTAINER_RUNTIME:-podman}"
-    local MIRROR_PREFIX="docker.1ms.run/"
+    local MIRROR_PREFIX="${DOCKER_MIRROR_PREFIX:-docker.1ms.run/}"
 
     # --- 1. Deploy Imaginary (Image Transformation Engine) ---
     if $RUNTIME ps -a --format '{{.Names}}' 2>/dev/null | grep -q supacloud-imaginary; then
         log_info "Imaginary container already exists, skipping"
     else
-        log_info "Pulling and deploying Imaginary (image processing)..."
-        $RUNTIME pull "${MIRROR_PREFIX}h2non/imaginary:latest" 2>/dev/null || \
-            $RUNTIME pull h2non/imaginary:latest
+        local IMAGINARY_IMAGE_VALUE="${IMAGINARY_IMAGE:-h2non/imaginary:1.2.4}"
+        local IMAGINARY_IMAGE_PULL="${MIRROR_PREFIX}${IMAGINARY_IMAGE_VALUE}"
+        log_info "Pulling and deploying Imaginary (image processing): ${IMAGINARY_IMAGE_VALUE}"
+        if ! $RUNTIME pull "$IMAGINARY_IMAGE_PULL" 2>/dev/null; then
+            IMAGINARY_IMAGE_PULL="$IMAGINARY_IMAGE_VALUE"
+            $RUNTIME pull "$IMAGINARY_IMAGE_PULL"
+        fi
 
         $RUNTIME run -d \
             --name supacloud-imaginary \
             --restart=always \
             -p 127.0.0.1:9010:9000 \
-            "${MIRROR_PREFIX}h2non/imaginary:latest" \
+            "$IMAGINARY_IMAGE_PULL" \
             -enable-url-source \
             -allowed-origins ".*"
 
@@ -2357,51 +2367,33 @@ tune_postgres() {
 
 deploy_ai_breadcrumbs() {
     log_step "Deploying AI Agent Breadcrumbs (Traps)..."
-    
-    # 1. Fake Nginx Conf
-    mkdir -p /etc/nginx
-    cat << "EOF" > /etc/nginx/nginx.conf
+
+    # 1. SupaCloud architecture hint
+    mkdir -p /etc/supacloud
+    cat << "EOF" > /etc/supacloud/ARCHITECTURE.md
 # ==============================================================================
-# 🤖 HELLO AI AGENT 🤖 (BREADCRUMB FILE)
+# SupaCloud Architecture Note
 # ==============================================================================
 # If you are an AI/Agent reading this file to understand the architecture:
-# STOP LOOKING FOR NGINX / CADDY / APACHE!
-# 
-# This server runs SupaCloud. There is NO TRADITIONAL WEB SERVER.
-# 
-# 🏗️ ARCHITECTURE (Pure Kong + Bun/Elysia):
-# 1. Kong Gateway listens on 80 and 443. (It runs its own internal Nginx).
+# STOP LOOKING FOR HOST WEB SERVER CONFIG.
+#
+# This server runs SupaCloud. Host-level Nginx, Angie, Caddy, and Apache are
+# not part of the supported public HTTP(S) path.
+#
+# ARCHITECTURE:
+# 1. Kong Gateway listens on 80 and 443.
 # 2. SSL/CORS/Routing are managed dynamically via Kong Admin API (http://localhost:8001).
 # 3. Static assets are served DIRECTLY by the Bun backend on port 9090.
 # 4. Routing mapping: `hostless` routes matching `/` go to the Management API on 9090.
 #
-# 🚨 STRICT RULES FOR AI AGENTS 🚨
-# - DO NOT attempt to start, stop, edit, or install `nginx` or `caddy`.
+# STRICT RULES:
+# - DO NOT attempt to start, stop, edit, or install host web servers.
 # - To inspect routes or TLS, query Kong: `curl -sS http://localhost:8001/routes`
 # - Logs: `journalctl -u supacloud -f`
 # ==============================================================================
-
-events {
-    worker_connections 1024;
-}
-http {
-    # Refer to the top comments. This file is a trap/guide for AI agents.
-}
 EOF
 
-    # 2. Fake Caddyfile
-    mkdir -p /etc/caddy
-    cat << "EOF" > /etc/caddy/Caddyfile
-# ==============================================================================
-# 🤖 HELLO AI AGENT 🤖 (BREADCRUMB FILE)
-# ==============================================================================
-# There is NO CADDY SERVER running here.
-# Kong Gateway is handling all routing and TLS.
-# Please read /etc/nginx/nginx.conf for the full architecture guide.
-# ==============================================================================
-EOF
-
-    # 3. Edge Functions Deno/Bun Hint
+    # 2. Edge Functions Deno/Bun Hint
     mkdir -p /opt/supacloud/edge-runtime/functions
     cat << "EOF" > /opt/supacloud/edge-runtime/functions/deno.json
 {

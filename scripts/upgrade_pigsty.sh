@@ -8,6 +8,7 @@ set -e
 echo "=========================================================="
 PIGSTY_VERSION="${PIGSTY_VERSION:-v4.3.0}"
 PIGSTY_CONFIG_TEMPLATE="${PIGSTY_CONFIG_TEMPLATE:-supabase}"
+SUPACLOUD_INSTALL_LEGACY_SUPABASE_STACK="${SUPACLOUD_INSTALL_LEGACY_SUPABASE_STACK:-false}"
 
 echo "          SupaCloud - Pigsty Upgrade Tool                "
 echo "=========================================================="
@@ -38,8 +39,13 @@ if [ -d "$HOME/pigsty" ]; then
 
     echo "=> Configuring Pigsty (${PIGSTY_CONFIG_TEMPLATE} template)..."
     if ! ./configure -c "${PIGSTY_CONFIG_TEMPLATE}"; then
-        echo "=> Primary template failed, trying legacy app/supa template..."
-        ./configure -c app/supa || ./configure
+        if [[ "$SUPACLOUD_INSTALL_LEGACY_SUPABASE_STACK" == "true" ]]; then
+            echo "=> Primary template failed, trying legacy app/supa template..."
+            ./configure -c app/supa || ./configure
+        else
+            echo "=> Primary template failed, falling back to Pigsty default template..."
+            ./configure
+        fi
     fi
 
     # Restore SupaCloud-specific patches that configure wiped out
@@ -52,6 +58,9 @@ if [ -d "$HOME/pigsty" ]; then
         # Re-apply pgbouncer tuning
         if ! grep -q 'pgbouncer_max_client_conn' "$PIGSTY_YML"; then
             sed -i '/^  vars:/a\    pgbouncer_max_client_conn: 10000\n    pgbouncer_default_pool_size: 20' "$PIGSTY_YML" || true
+        fi
+        if [[ "$SUPACLOUD_INSTALL_LEGACY_SUPABASE_STACK" != "true" ]]; then
+            echo "=> Keeping Pigsty nginx/certbot disabled; SupaCloud owns HTTP(S) through Kong/lego"
         fi
         # Re-apply storage type
         STORAGE_TYPE=$(grep 'S3_STORAGE_TYPE' /etc/supabase/management-api.env 2>/dev/null | cut -d= -f2 || echo "juicefs")

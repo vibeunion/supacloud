@@ -83,8 +83,13 @@ export async function install(config: PigstyConfig) {
         const template = process.env.PIGSTY_CONFIG_TEMPLATE || "supabase";
         const configured = await $`cd ${pigstyDir} && ./configure -i ${config.internalIp} -c ${template}`.nothrow();
         if (configured.exitCode !== 0) {
-            logger.warn(`[PigstyManager] Supabase template "${template}" failed, trying legacy app/supa template...`);
-            await $`cd ${pigstyDir} && ./configure -i ${config.internalIp} -c app/supa`;
+            if (process.env.SUPACLOUD_INSTALL_LEGACY_SUPABASE_STACK === "true") {
+                logger.warn(`[PigstyManager] Supabase template "${template}" failed, trying legacy app/supa template...`);
+                await $`cd ${pigstyDir} && ./configure -i ${config.internalIp} -c app/supa`;
+            } else {
+                logger.warn(`[PigstyManager] Supabase template "${template}" failed, falling back to Pigsty default template.`);
+                await $`cd ${pigstyDir} && ./configure -i ${config.internalIp}`;
+            }
         }
     }
 
@@ -210,19 +215,23 @@ async function updatePigstyConfig(config: PigstyConfig, ymlPath: string) {
         yml = yml.replace(/10\.6\.0\.9/g, config.internalIp);
         yml = yml.replace(/10\.2\.0\.14/g, config.internalIp);
 
-        // [ROBUST FIX] Only use simple regex to fix some clearly defined Supabase domain parameters
-        yml = yml.replace(/SITE_URL: https:\/\/supa.pigsty/g, `SITE_URL: https://${config.studioDomain}`);
-        yml = yml.replace(/API_EXTERNAL_URL: https:\/\/supa.pigsty/g, `API_EXTERNAL_URL: https://${config.publicDomain}`);
-        yml = yml.replace(/SUPABASE_PUBLIC_URL: https:\/\/supa.pigsty/g, `SUPABASE_PUBLIC_URL: https://${config.publicDomain}`);
-        yml = yml.replace(/domain: supa.pigsty/g, `domain: ${config.publicDomain}`);
+        if (process.env.SUPACLOUD_INSTALL_LEGACY_SUPABASE_STACK === "true") {
+            // [ROBUST FIX] Only use simple regex to fix some clearly defined Supabase domain parameters
+            yml = yml.replace(/SITE_URL: https:\/\/supa.pigsty/g, `SITE_URL: https://${config.studioDomain}`);
+            yml = yml.replace(/API_EXTERNAL_URL: https:\/\/supa.pigsty/g, `API_EXTERNAL_URL: https://${config.publicDomain}`);
+            yml = yml.replace(/SUPABASE_PUBLIC_URL: https:\/\/supa.pigsty/g, `SUPABASE_PUBLIC_URL: https://${config.publicDomain}`);
+            yml = yml.replace(/domain: supa.pigsty/g, `domain: ${config.publicDomain}`);
 
-        // Certbot multiple subdomains
-        const certbotDomains = config.publicDomain === config.studioDomain
-            ? config.publicDomain
-            : `${config.publicDomain},${config.studioDomain}`;
-        yml = yml.replace(/certbot: supa.pigsty/g, `certbot: ${certbotDomains}`);
+            // Certbot multiple subdomains
+            const certbotDomains = config.publicDomain === config.studioDomain
+                ? config.publicDomain
+                : `${config.publicDomain},${config.studioDomain}`;
+            yml = yml.replace(/certbot: supa.pigsty/g, `certbot: ${certbotDomains}`);
 
-        yml = yml.replace(/supa.pigsty/g, config.publicDomain); // Generic placeholder replacement
+            yml = yml.replace(/supa.pigsty/g, config.publicDomain); // Generic placeholder replacement
+        } else {
+            logger.info("[PigstyManager] Skipping Pigsty app domain/certbot patch; Kong/lego owns public HTTP(S).");
+        }
 
         // Passwords and security certificates
         yml = yml.replace(/DASHBOARD_PASSWORD: pigsty/g, `DASHBOARD_PASSWORD: ${config.dashboardPass}`);

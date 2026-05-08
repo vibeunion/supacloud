@@ -58,11 +58,12 @@ check_service "Management API (9090)" "curl -sf http://localhost:9090/health"
 # Check Kong API Gateway
 check_service "Kong Gateway (8000)" "curl -sf http://localhost:8000"
 
-# Check Supabase Studio
-check_service "Supabase Studio (3003)" "curl -sf http://localhost:3003"
-
 # Check Kong Admin API
 check_service "Kong Admin API (8001)" "curl -sf http://localhost:8001/status"
+
+# Check SupaCloud service runtimes
+check_service "Image Service (9010)" "ss -ltn | grep -q ':9010 '"
+check_service "Realtime Admin (4000)" "ss -ltn | grep -q ':4000 '"
 
 # Check active tenant runtimes
 active_tenants=$(systemctl list-units 'supacloud-gotrue@*.service' --state=running --no-legend 2>/dev/null | wc -l)
@@ -73,10 +74,10 @@ else
 fi
 
 # Check S3 Storage
-if systemctl is-active --quiet rustfs 2>/dev/null; then
+if systemctl is-active --quiet juicefs-s3 2>/dev/null; then
+    check_service "JuiceFS S3 Gateway (9000)" "curl -sf http://localhost:9000/minio/health/live"
+elif systemctl is-active --quiet rustfs 2>/dev/null; then
     check_service "RustFS (9000)" "curl -sf http://localhost:9000"
-elif systemctl is-active --quiet garage 2>/dev/null; then
-    check_service "Garage (9000)" "curl -sf http://localhost:9000"
 elif systemctl is-active --quiet minio 2>/dev/null; then
     check_service "MinIO (9000)" "curl -sf http://localhost:9000"
 else
