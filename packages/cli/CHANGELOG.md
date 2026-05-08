@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.7](https://github.com/zuohuadong/supacloud/compare/cli-v0.3.6...cli-v0.3.7) (2026-05-08)
+
+
+### 🔧 Miscellaneous Chores
+
+* **deps:** bump zod from 3.25.76 to 4.4.3 in /packages/cli ([#80](https://github.com/zuohuadong/supacloud/issues/80)) ([db1075a](https://github.com/zuohuadong/supacloud/commit/db1075a35c32e129c705e74a069c4e53eb17f0db))
+
 ## [0.3.6](https://github.com/zuohuadong/supacloud/compare/cli-v0.3.5...cli-v0.3.6) (2026-05-08)
 
 
