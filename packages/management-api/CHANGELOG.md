@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.1](https://github.com/zuohuadong/supacloud/compare/management-api-v0.13.0...management-api-v0.13.1) (2026-05-08)
+
+
+### 🐛 Bug Fixes
+
+* **installer:** derive studio domain from API host ([4d94d49](https://github.com/zuohuadong/supacloud/commit/4d94d49f0e3615e7dfe420dea7cc72ba91fc41d9))
+
 ## [0.13.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.12.19...management-api-v0.13.0) (2026-05-08)
 
 
