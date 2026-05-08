@@ -247,7 +247,7 @@ async function runInteractiveConfig(installerPath: string, forceYes = false): Pr
                 ]
             }),
             enableSsl: () => p.confirm({
-                message: 'Enable automatic SSL/HTTPS (via Angie ACME)?',
+                message: 'Enable automatic SSL/HTTPS (via lego + Kong certificates)?',
                 initialValue: true
             }),
             acmeClient: ({ results }) => results.enableSsl ? p.select({
@@ -344,7 +344,9 @@ JWT_SECRET="${jwtSecret}"
 ENABLE_SSL="${enableSsl}"
 ACME_CLIENT="${acmeClient}"
 BASE_DOMAIN="${publicDomain.replace(/^api\./, "")}"
-ANGIE_SITES_DIR="/etc/angie/http.d"
+LEGO_BIN="lego"
+ACME_STATE_DIR="/var/lib/supacloud/lego"
+ACME_HTTP_WEBROOT="/var/lib/supacloud/acme-challenges"
 KONG_INTERNAL="127.0.0.1:8000"
 `;
     await Bun.write(configFile, envContent.trim());
@@ -363,5 +365,4 @@ KONG_INTERNAL="127.0.0.1:8000"
         storageType: storageType,
     };
 }
-
 

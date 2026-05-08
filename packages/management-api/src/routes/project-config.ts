@@ -5,6 +5,7 @@
 import { Elysia, t, status } from "elysia";
 import { projectService } from "../services";
 import { gatewayService } from "../services/gateway.service";
+import { certificateService } from "../services/certificate.service";
 import { logger } from "../utils/logger";
 import {
   OPENAPI_AUTH_CONFIG_RESPONSE_TEMPLATE,
@@ -1915,6 +1916,105 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
         jwt_enabled: t.Optional(t.Boolean()),
         jwt_secret: t.Optional(t.String()),
       }),
+    },
+  )
+
+  // Get Kong certificate automation settings
+  .get(
+    "/:ref/gateway/certificate",
+    async ({ params, request }) => {
+      const authError = await requireAdminAuth(request);
+      if (authError) return status(authError.status, authError.body);
+      const settings = await certificateService.getSettings(params.ref);
+      if (!settings) {
+        return status(404, { message: "Project not found", code: "404" });
+      }
+      return settings;
+    },
+    {
+      params: t.Object({ ref: t.String() }),
+      detail: { tags: ["projects"], summary: "Get project gateway certificate settings" },
+    },
+  )
+
+  // Save certificate automation settings
+  .put(
+    "/:ref/gateway/certificate",
+    async ({ params, body, request }) => {
+      const authError = await requireAdminAuth(request);
+      if (authError) return status(authError.status, authError.body);
+      const settings = await certificateService.updateSettings(params.ref, body);
+      if (!settings) {
+        return status(404, { message: "Project not found", code: "404" });
+      }
+      return settings;
+    },
+    {
+      params: t.Object({ ref: t.String() }),
+      body: t.Object({
+        mode: t.Optional(t.Union([t.Literal("lego"), t.Literal("manual")])),
+        challenge: t.Optional(t.Union([t.Literal("dns-01"), t.Literal("http-01")])),
+        email: t.Optional(t.String()),
+        dns_provider: t.Optional(t.String()),
+        dns_env: t.Optional(t.Array(t.String())),
+        domains: t.Optional(t.Array(t.String())),
+        auto_renew: t.Optional(t.Boolean()),
+      }),
+      detail: { tags: ["projects"], summary: "Save project gateway certificate settings" },
+    },
+  )
+
+  // Issue or renew a certificate with lego, then deploy it into Kong certificates/SNIs.
+  .post(
+    "/:ref/gateway/certificate/issue",
+    async ({ params, body, request }) => {
+      const authError = await requireAdminAuth(request);
+      if (authError) return status(authError.status, authError.body);
+      const result = await certificateService.issueWithLego(params.ref, body);
+      if (!result.success) {
+        return status(500, { message: result.error || "Certificate issuance failed", output: result.output, code: "500" });
+      }
+      return result;
+    },
+    {
+      params: t.Object({ ref: t.String() }),
+      body: t.Object({
+        challenge: t.Optional(t.Union([t.Literal("dns-01"), t.Literal("http-01")])),
+        email: t.Optional(t.String()),
+        dns_provider: t.Optional(t.String()),
+        dns_env: t.Optional(t.Array(t.String())),
+        domains: t.Optional(t.Array(t.String())),
+        auto_renew: t.Optional(t.Boolean()),
+        renew: t.Optional(t.Boolean()),
+      }),
+      detail: { tags: ["projects"], summary: "Issue or renew a Kong certificate with lego" },
+    },
+  )
+
+  // Upload an existing certificate/key pair and bind it to Kong SNIs.
+  .post(
+    "/:ref/gateway/certificate/deploy",
+    async ({ params, body, request }) => {
+      const authError = await requireAdminAuth(request);
+      if (authError) return status(authError.status, authError.body);
+      const result = await certificateService.deployCertificate(params.ref, {
+        cert: body.cert,
+        key: body.key,
+        domains: body.domains,
+      });
+      if (!result.success) {
+        return status(500, { message: result.error || "Certificate deployment failed", code: "500" });
+      }
+      return result;
+    },
+    {
+      params: t.Object({ ref: t.String() }),
+      body: t.Object({
+        cert: t.String(),
+        key: t.String(),
+        domains: t.Optional(t.Array(t.String())),
+      }),
+      detail: { tags: ["projects"], summary: "Deploy an existing certificate into Kong" },
     },
   )
 
