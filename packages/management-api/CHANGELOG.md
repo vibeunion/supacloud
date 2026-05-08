@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.13.2](https://github.com/zuohuadong/supacloud/compare/management-api-v0.13.1...management-api-v0.13.2) (2026-05-08)
+
+
+### 🐛 Bug Fixes
+
+* **installer:** align pigsty supabase install path ([a14e33a](https://github.com/zuohuadong/supacloud/commit/a14e33a7a9b0b44f138c219fcf779a9a8d5cc242))
+* **management-api:** reconcile custom domain runtime routes ([6a0b8de](https://github.com/zuohuadong/supacloud/commit/6a0b8def0215407f14508916866944ac54b6225a))
+
 ## [0.13.1](https://github.com/zuohuadong/supacloud/compare/management-api-v0.13.0...management-api-v0.13.1) (2026-05-08)
 
 
