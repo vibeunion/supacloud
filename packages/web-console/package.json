@@ -50,7 +50,7 @@
     "@tanstack/svelte-query": "^6.1.10",
     "highlight.js": "^11.11.1",
     "isomorphic-dompurify": "^3.7.1",
-    "lucide-svelte": "^0.577.0",
+    "lucide-svelte": "^1.0.1",
     "marked": "^18.0.3",
     "marked-highlight": "^2.2.3",
     "monaco-editor": "^0.55.1",
