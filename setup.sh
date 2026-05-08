@@ -20,6 +20,23 @@ log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 log_step() { echo -e "${BLUE}[STEP]${NC} $1"; }
 
+derive_base_domain() {
+    local domain="${1:-}"
+    domain="${domain#api.}"
+    domain="${domain#studio.}"
+    printf '%s' "$domain"
+}
+
+derive_studio_domain() {
+    local api_domain="${1:-}"
+    local internal_ip="${2:-}"
+    if [[ -z "$api_domain" ]]; then
+        printf 'studio.%s.nip.io' "$internal_ip"
+        return
+    fi
+    printf 'studio.%s' "$(derive_base_domain "$api_domain")"
+}
+
 # Check root privileges
 if [[ $EUID -ne 0 ]]; then
     log_error "Please run this script as root"
@@ -155,7 +172,7 @@ generate_config() {
 
 INTERNAL_IP="${INTERNAL_IP}"
 SUPABASE_PUBLIC_DOMAIN="${SUPABASE_PUBLIC_DOMAIN}"
-SUPABASE_STUDIO_DOMAIN="${SUPABASE_STUDIO_DOMAIN:-studio.${SUPABASE_PUBLIC_DOMAIN}}"
+SUPABASE_STUDIO_DOMAIN="${SUPABASE_STUDIO_DOMAIN:-$(derive_studio_domain "$SUPABASE_PUBLIC_DOMAIN" "$INTERNAL_IP")}"
 
 DASHBOARD_USERNAME="${DASHBOARD_USERNAME:-admin}"
 DASHBOARD_PASSWORD="${DASHBOARD_PASSWORD}"
