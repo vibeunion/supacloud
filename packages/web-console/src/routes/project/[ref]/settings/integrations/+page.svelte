@@ -1,6 +1,6 @@
 <script lang="ts">
   import { page } from "$app/state";
-  import { ExternalLink, Github, Globe, Webhook, Puzzle, ToggleRight } from "lucide-svelte";
+  import { ExternalLink, Globe, Webhook, Puzzle, ToggleRight } from "lucide-svelte";
 
   interface Integration {
     id: string;
