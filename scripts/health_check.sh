@@ -61,14 +61,8 @@ check_service "Kong Gateway (8000)" "curl -sf http://localhost:8000"
 # Check Supabase Studio
 check_service "Supabase Studio (3003)" "curl -sf http://localhost:3003"
 
-# Check Angie (Nginx fork)
-if command -v angie &>/dev/null; then
-    check_service "Angie" "angie -t"
-elif command -v nginx &>/dev/null; then
-    check_service "Nginx" "nginx -t"
-else
-    echo -e "${YELLOW}?${NC} Web Server (Not detected)"
-fi
+# Check Kong Admin API
+check_service "Kong Admin API (8001)" "curl -sf http://localhost:8001/status"
 
 # Check active tenant runtimes
 active_tenants=$(systemctl list-units 'supacloud-gotrue@*.service' --state=running --no-legend 2>/dev/null | wc -l)

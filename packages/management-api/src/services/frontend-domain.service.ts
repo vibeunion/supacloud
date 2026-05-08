@@ -18,7 +18,7 @@ export class FrontendDomainService {
   constructor(
     private baseDir: string,
     private getDeployment: (projectRef: string, deploymentId: string) => Promise<FrontendDeployment | null>,
-    private configureAngie: (deployment: FrontendDeployment, buildDir: string, isSSR: boolean) => Promise<void>,
+    private configureGatewayRoute: (deployment: FrontendDeployment, buildDir: string, isSSR: boolean) => Promise<void>,
   ) {}
 
   private joinPath(...parts: string[]): string {
@@ -72,7 +72,7 @@ export class FrontendDomainService {
 
     const buildDir = this.joinPath(this.baseDir, projectRef, deploymentId, "build");
     const defaults = FRAMEWORK_DEFAULTS[deployment.framework];
-    await this.configureAngie(updated, buildDir, defaults.is_ssr);
+    await this.configureGatewayRoute(updated, buildDir, defaults.is_ssr);
 
     return updated;
   }
@@ -98,7 +98,7 @@ export class FrontendDomainService {
 
     const buildDir = this.joinPath(this.baseDir, projectRef, deploymentId, "build");
     const defaults = FRAMEWORK_DEFAULTS[deployment.framework];
-    await this.configureAngie(updated, buildDir, defaults.is_ssr);
+    await this.configureGatewayRoute(updated, buildDir, defaults.is_ssr);
 
     return updated;
   }

@@ -113,6 +113,70 @@ export class GatewayService {
 
     // --- Consumer & JWT ---
 
+    async upsertCertificateForSnis(opts: {
+        projectRef: string;
+        cert: string;
+        key: string;
+        snis: string[];
+        existingCertificateId?: string;
+    }): Promise<{ success: boolean; certificateId?: string; error?: string }> {
+        const snis = Array.from(new Set(opts.snis.map((sni) => sni.trim().toLowerCase()).filter(Boolean)));
+        if (!opts.cert.trim() || !opts.key.trim()) {
+            return { success: false, error: "Certificate and private key are required" };
+        }
+        if (snis.length === 0) {
+            return { success: false, error: "At least one SNI is required" };
+        }
+
+        const tags = [`supacloud`, `supacloud-project:${opts.projectRef}`];
+        const payload = {
+            cert: opts.cert,
+            key: opts.key,
+            tags,
+        };
+
+        try {
+            let certificateId = opts.existingCertificateId || "";
+
+            if (certificateId) {
+                const patched = await this.kongRequest(`/certificates/${certificateId}`, "PATCH", payload);
+                certificateId = String(patched.id || certificateId);
+            }
+
+            if (!certificateId) {
+                const existing = await this.kongRequest(`/certificates?tags=supacloud-project:${encodeURIComponent(opts.projectRef)}`);
+                const match = existing.data?.find((item) => Array.isArray(item.tags) && (item.tags as string[]).includes(`supacloud-project:${opts.projectRef}`));
+                if (match?.id) {
+                    const patched = await this.kongRequest(`/certificates/${match.id}`, "PATCH", payload);
+                    certificateId = String(patched.id || match.id);
+                }
+            }
+
+            if (!certificateId) {
+                const created = await this.kongRequest("/certificates", "POST", payload);
+                certificateId = String(created.id || "");
+            }
+
+            if (!certificateId) {
+                return { success: false, error: "Kong did not return a certificate id" };
+            }
+
+            for (const name of snis) {
+                await this.kongRequest(`/snis/${encodeURIComponent(name)}`, "PUT", {
+                    name,
+                    certificate: { id: certificateId },
+                    tags,
+                });
+            }
+
+            return { success: true, certificateId };
+        } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : String(error);
+            logger.error(`[GatewayService] Failed to upsert certificate for ${opts.projectRef}`, { error: message });
+            return { success: false, error: message };
+        }
+    }
+
     async ensureConsumer(projectRef: string): Promise<void> {
         await this.kongRequest("/consumers", "POST", {
             username: projectRef,
@@ -603,7 +667,7 @@ export class GatewayService {
                 name: `svc-api-root-${projectRef}`,
                 url: `http://${hostIp}:${config.port}`,
                 paths: ["/.well-known/acme-challenge"],
-                hosts,
+                hosts: Array.from(new Set([...hosts, ...studioHosts])),
                 projectRef,
                 stripPath: false,
                 corsOrigins,

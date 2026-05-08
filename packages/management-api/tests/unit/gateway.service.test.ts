@@ -218,6 +218,7 @@ describe("GatewayService", () => {
         expect(apiRootRoute?.body?.paths).toEqual(["/.well-known/acme-challenge"]);
         expect(apiRootRoute?.body?.strip_path).toBe(false);
         expect(apiRootRoute?.body?.hosts).toContain("testref123.api.example.com");
+        expect(apiRootRoute?.body?.hosts).toContain("studio-testref123.example.com");
 
         const studioTransformer = calls.find(
             (c) => c.method === "POST"
@@ -226,6 +227,52 @@ describe("GatewayService", () => {
         );
         expect(studioTransformer).toBeDefined();
         expect(((studioTransformer?.body?.config as Record<string, unknown>)?.add as Record<string, unknown>)?.headers).toContain("x-supacloud-ui-host:studio");
+
+        globalThis.fetch = originalFetch;
+    });
+
+    test("upsertCertificateForSnis writes Kong certificate and SNI bindings", async () => {
+        const originalFetch = globalThis.fetch;
+        const calls: Array<{ url: string; method: string; body: Record<string, unknown> | null }> = [];
+
+        globalThis.fetch = mock((input: string | URL | Request, init?: RequestInit) => {
+            const url = typeof input === "string"
+                ? input
+                : input instanceof URL
+                    ? input.toString()
+                    : input.url;
+            const method = init?.method || "GET";
+            let body: Record<string, unknown> | null = null;
+            if (typeof init?.body === "string" && init.body.length > 0) {
+                body = JSON.parse(init.body) as Record<string, unknown>;
+            }
+            calls.push({ url, method, body });
+            if (url.includes("/certificates?")) {
+                return Promise.resolve(new Response(JSON.stringify({ data: [] })));
+            }
+            if (url.endsWith("/certificates")) {
+                return Promise.resolve(new Response(JSON.stringify({ id: "cert_123" })));
+            }
+            return Promise.resolve(new Response(JSON.stringify({ id: "ok" })));
+        }) as unknown as typeof fetch;
+
+        const result = await gatewayService.upsertCertificateForSnis({
+            projectRef: "testref123",
+            cert: "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----",
+            key: "-----BEGIN PRIVATE KEY-----\nMIIB\n-----END PRIVATE KEY-----",
+            snis: ["api.example.com", "studio.example.com"],
+        });
+
+        expect(result).toEqual({ success: true, certificateId: "cert_123" });
+
+        const certCreate = calls.find((c) => c.method === "POST" && c.url.endsWith("/certificates"));
+        expect(certCreate?.body?.cert).toContain("BEGIN CERTIFICATE");
+        expect(certCreate?.body?.tags).toContain("supacloud-project:testref123");
+
+        const sniCalls = calls.filter((c) => c.method === "PUT" && c.url.includes("/snis/"));
+        expect(sniCalls).toHaveLength(2);
+        expect(sniCalls.map((c) => c.body?.name)).toEqual(["api.example.com", "studio.example.com"]);
+        expect((sniCalls[0]?.body?.certificate as Record<string, unknown>)?.id).toBe("cert_123");
 
         globalThis.fetch = originalFetch;
     });
