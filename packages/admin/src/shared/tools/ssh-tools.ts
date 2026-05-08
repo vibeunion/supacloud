@@ -69,6 +69,10 @@ function assertSafeGithubProxy(value: string): string {
     return parsed.toString();
 }
 
+function deriveStudioDomain(publicDomain: string): string {
+    return `studio.${publicDomain.trim().replace(/^(?:api|studio)\./i, "")}`;
+}
+
 function getExecTimeoutMs(timeoutSeconds?: number): number {
     const seconds = timeoutSeconds || 60;
     if (!Number.isFinite(seconds) || seconds <= 0 || seconds > SAFE_TIMEOUT_SECONDS) {
@@ -172,7 +176,7 @@ Actions: ping, setup, install, upgrade, diagnose, exec, troubleshoot, container_
                     if (!clone.stdout.includes("CLONE_OK")) { text = `❌ Clone failed\n${clone.stderr.slice(-500)}`; break; }
                     const envLines = [
                         `SUPABASE_PUBLIC_DOMAIN=${args.public_domain}`,
-                        `SUPABASE_STUDIO_DOMAIN=${args.studio_domain ?? args.public_domain}`,
+                        `SUPABASE_STUDIO_DOMAIN=${args.studio_domain ?? deriveStudioDomain(args.public_domain)}`,
                         `EDGE_RUNTIME=${args.edge_runtime || "bun"}`,
                         `S3_STORAGE_TYPE=${args.storage_type || "juicefs"}`,
                         args.postgres_password ? `POSTGRES_PASSWORD=${args.postgres_password}` : "",

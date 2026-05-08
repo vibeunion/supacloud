@@ -500,8 +500,8 @@ Key settings in `config.env`:
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `SUPABASE_PUBLIC_DOMAIN` | API domain | (required) |
-| `SUPABASE_STUDIO_DOMAIN` | Studio domain | (optional) |
+| `SUPABASE_PUBLIC_DOMAIN` | Global API gateway domain | Production required; installer can auto-generate |
+| `SUPABASE_STUDIO_DOMAIN` | Global console domain | Auto-derived from API domain if empty |
 | `S3_STORAGE_TYPE` | Storage backend | `juicefs` |
 | `EDGE_RUNTIME` | Functions runtime | `bun` |
 | `PG_VERSION` | PostgreSQL version | `18` |
@@ -937,8 +937,8 @@ supacloud/
 
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
-| `SUPABASE_PUBLIC_DOMAIN` | API 域名 | （必填） |
-| `SUPABASE_STUDIO_DOMAIN` | Studio 域名 | （可选） |
+| `SUPABASE_PUBLIC_DOMAIN` | 全局 API 网关域名 | 生产必填；安装器可自动生成 |
+| `SUPABASE_STUDIO_DOMAIN` | 全局控制台域名 | 可留空，默认从 API 域名派生 |
 | `S3_STORAGE_TYPE` | 存储后端 | `juicefs` |
 | `EDGE_RUNTIME` | 云函数运行时 | `bun` |
 | `PG_VERSION` | PostgreSQL 版本 | `18` |

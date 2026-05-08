@@ -96,6 +96,23 @@ path.write_text("\n".join(lines) + ("\n" if lines else ""))
 PYENV
 }
 
+derive_base_domain() {
+    local domain="${1:-}"
+    domain="${domain#api.}"
+    domain="${domain#studio.}"
+    printf '%s' "$domain"
+}
+
+derive_studio_domain() {
+    local api_domain="${1:-}"
+    local internal_ip="${2:-}"
+    if [[ -z "$api_domain" ]]; then
+        printf 'studio.%s.nip.io' "$internal_ip"
+        return
+    fi
+    printf 'studio.%s' "$(derive_base_domain "$api_domain")"
+}
+
 # ========== Check Configuration ==========
 check_config() {
     log_step "Checking configuration..."
@@ -103,12 +120,13 @@ check_config() {
     if [[ ! -f "$CONFIG_FILE" ]]; then
         # Enhanced logic: auto-generate config.env if critical env vars exist
         if [[ -n "$INTERNAL_IP" || -n "$SUPABASE_PUBLIC_DOMAIN" ]]; then
+             GENERATED_STUDIO_DOMAIN="${SUPABASE_STUDIO_DOMAIN:-$(derive_studio_domain "${SUPABASE_PUBLIC_DOMAIN:-api.${INTERNAL_IP}.nip.io}" "${INTERNAL_IP:-}")}"
              log_info "Environment variables detected, generating configuration file..."
              cat > "$CONFIG_FILE" << EOF
 # Auto-generated configuration - $(date)
 INTERNAL_IP=${INTERNAL_IP}
 SUPABASE_PUBLIC_DOMAIN=${SUPABASE_PUBLIC_DOMAIN}
-SUPABASE_STUDIO_DOMAIN=${SUPABASE_STUDIO_DOMAIN:-$SUPABASE_PUBLIC_DOMAIN}
+SUPABASE_STUDIO_DOMAIN=${GENERATED_STUDIO_DOMAIN}
 DB_PASSWORD=${DB_PASSWORD:-DBUser.Supa}
 JWT_SECRET=${JWT_SECRET}
 ANON_KEY=${ANON_KEY}
@@ -228,12 +246,7 @@ EOF
 
     # Get Studio Domain
     if [[ -z "$SUPABASE_STUDIO_DOMAIN" ]]; then
-        # Default suggestion: studio.xxx
-        DEFAULT_STUDIO_DOMAIN="studio.${SUPABASE_PUBLIC_DOMAIN#api.}"
-        # Fallback handling if prefix is not api.
-        if [[ "$SUPABASE_PUBLIC_DOMAIN" != *"api."* ]]; then
-            DEFAULT_STUDIO_DOMAIN="studio.${SUPABASE_PUBLIC_DOMAIN}"
-        fi
+        DEFAULT_STUDIO_DOMAIN="$(derive_studio_domain "$SUPABASE_PUBLIC_DOMAIN" "$INTERNAL_IP")"
         
         if [ -t 0 ]; then
             log_info "Configure Studio domain (optional)"
@@ -2068,8 +2081,7 @@ EOF
     local REALTIME_DB_ENC_KEY
     local BASE_DOMAIN_VALUE="${BASE_DOMAIN:-$SUPABASE_PUBLIC_DOMAIN}"
     REALTIME_SECRET_KEY_BASE=$(openssl rand -base64 48 | tr -d '\n')
-    BASE_DOMAIN_VALUE="${BASE_DOMAIN_VALUE#api.}"
-    BASE_DOMAIN_VALUE="${BASE_DOMAIN_VALUE#studio.}"
+    BASE_DOMAIN_VALUE="$(derive_base_domain "$BASE_DOMAIN_VALUE")"
     # Realtime tenant encryption uses AES-128 and expects a 16-byte key.
     local SECRETS_ENCRYPTION_KEY
     SECRETS_ENCRYPTION_KEY=$(openssl rand -base64 48 | tr -d "\n" | cut -c1-64)
