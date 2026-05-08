@@ -318,4 +318,54 @@ describe("GatewayService", () => {
 
         globalThis.fetch = originalFetch;
     });
+
+    test("setupUpstream propagates explicit custom API and Studio hosts to Kong routes", async () => {
+        const originalFetch = globalThis.fetch;
+        const calls: Array<{ url: string; method: string; body: Record<string, unknown> | null }> = [];
+
+        globalThis.fetch = mock((input: string | URL | Request, init?: RequestInit) => {
+            const url = typeof input === "string"
+                ? input
+                : input instanceof URL
+                    ? input.toString()
+                    : input.url;
+            const method = init?.method || "GET";
+            let body: Record<string, unknown> | null = null;
+            if (typeof init?.body === "string" && init.body.length > 0) {
+                try {
+                    body = JSON.parse(init.body) as Record<string, unknown>;
+                } catch {
+                    body = null;
+                }
+            }
+            calls.push({ url, method, body });
+            return Promise.resolve(new Response(JSON.stringify({ data: [] })));
+        }) as unknown as typeof fetch;
+
+        const result = await gatewayService.setupUpstream("seagooref", 3000, 9999, {
+            custom_domain: "xg.aizhuliren.cn",
+            api_domain: "api.xg.aizhuliren.cn",
+            studio_domain: "studio.xg.aizhuliren.cn",
+        });
+        expect(result.success).toBe(true);
+
+        const authRoute = calls.find(
+            (c) => c.method === "PUT" && c.url.includes("/routes/route-svc-gotrue-seagooref")
+        );
+        expect(authRoute?.body?.hosts).toContain("seagooref.api.example.com");
+        expect(authRoute?.body?.hosts).toContain("api.xg.aizhuliren.cn");
+
+        const functionsRoute = calls.find(
+            (c) => c.method === "PUT" && c.url.includes("/routes/route-svc-functions-seagooref")
+        );
+        expect(functionsRoute?.body?.hosts).toContain("api.xg.aizhuliren.cn");
+
+        const studioRoute = calls.find(
+            (c) => c.method === "PUT" && c.url.includes("/routes/route-svc-studio-seagooref")
+        );
+        expect(studioRoute?.body?.hosts).toContain("studio-seagooref.example.com");
+        expect(studioRoute?.body?.hosts).toContain("studio.xg.aizhuliren.cn");
+
+        globalThis.fetch = originalFetch;
+    });
 });

@@ -130,9 +130,9 @@ describe("TaskWorker provision_secrets", () => {
 
     const secrets = new Map(upsertSecretSpy.mock.calls.map((call) => [call[1], call[2]]));
     expect(secrets.get("SUPABASE_SERVICE_ROLE_KEY")).toMatch(/^[^.]+\.[^.]+\.[^.]+$/);
-    expect(secrets.get("SUPACLOUD_INTERNAL_SUPABASE_URL")).toBe("http://127.0.0.1:9090");
-    expect(secrets.get("SUPACLOUD_INTERNAL_AUTH_URL")).toBe("http://127.0.0.1:9090/auth/v1");
-    expect(secrets.get("SUPACLOUD_INTERNAL_REST_URL")).toBe("http://127.0.0.1:9090/rest/v1");
+    expect(secrets.get("SUPACLOUD_INTERNAL_SUPABASE_URL")).toBe("http://127.0.0.1");
+    expect(secrets.get("SUPACLOUD_INTERNAL_AUTH_URL")).toBe("http://127.0.0.1/auth/v1");
+    expect(secrets.get("SUPACLOUD_INTERNAL_REST_URL")).toBe("http://127.0.0.1/rest/v1");
     expect(secrets.get("SUPACLOUD_PROJECT_REF")).toBe("proj-ref");
     expect(secrets.get("SUPACLOUD_PROJECT_API_HOST")).toBe("api.app.example.com");
     expect(secrets.get("X_PROJECT_REF")).toBe("proj-ref");

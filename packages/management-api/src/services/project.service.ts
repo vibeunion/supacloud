@@ -18,6 +18,7 @@ import {
   normalizeProjectRoutingConfig,
   resolveProjectApiUrl,
   resolveProjectStudioUrl,
+  resolveTenantPorts,
 } from "../utils/project-routing";
 import { mergeProjectConfig, normalizeProjectConfig } from "../utils/project-config";
 
@@ -150,6 +151,30 @@ export class ProjectService {
     max_attempts: 3,
     rate_limit_per_minute: 600,
   };
+
+  private async reconcileGatewayRoutes(
+    ref: string,
+    rawConfig: Record<string, unknown>,
+  ): Promise<void> {
+    const routingConfig = normalizeProjectRoutingConfig(rawConfig);
+    const tenantPorts = resolveTenantPorts(routingConfig);
+    if (!tenantPorts) {
+      logger.warn("[ProjectService] Skipping gateway route reconcile: missing tenant ports", {
+        ref,
+      });
+      return;
+    }
+
+    const result = await gatewayService.setupUpstream(
+      ref,
+      tenantPorts.pgrstPort,
+      tenantPorts.gotruePort,
+      routingConfig,
+    );
+    if (!result.success) {
+      throw new Error(result.error || "gateway route reconcile failed");
+    }
+  }
 
   /** Check if the storage backend (S3/MinIO) is reachable */
   private async checkStorageHealth(): Promise<boolean> {
@@ -489,6 +514,7 @@ export class ProjectService {
     const { tenantRuntimeService } = await import("./tenant-runtime.service");
     try {
       await tenantRuntimeService.restartRuntime(ref);
+      await this.reconcileGatewayRoutes(ref, normalizeProjectConfig(project.config));
       logger.info(`[ProjectService] Restarted services for project ${ref}`);
     } catch (err: unknown) {
       logger.warn(
@@ -538,6 +564,9 @@ export class ProjectService {
       try {
         const { tenantRuntimeService } = await import("./tenant-runtime.service");
         await tenantRuntimeService.restartRuntime(ref);
+        if (updated) {
+          await this.reconcileGatewayRoutes(ref, normalizeProjectConfig(updated.config));
+        }
       } catch (err) {
         logger.warn("[ProjectService] Failed to propagate routing settings to runtime", {
           ref,
