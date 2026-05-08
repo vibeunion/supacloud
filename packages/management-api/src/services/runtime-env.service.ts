@@ -1,7 +1,6 @@
 import { projectRepository } from "../repositories/project.repository";
 import { databaseService } from "./database.service";
 import { jwtService } from "./jwt.service";
-import { config } from "../config";
 import { normalizeProjectConfig } from "../utils/project-config";
 import {
   normalizeProjectRoutingConfig,
@@ -24,7 +23,11 @@ export async function buildProjectRuntimeEnv(projectRef: string): Promise<Record
   );
   const supabaseUrl = resolveProjectApiUrl(projectRef, routingConfig);
   const projectApiHost = resolveProjectApiHost(projectRef, routingConfig);
-  const internalSupabaseUrl = `http://127.0.0.1:${config.port}`;
+  const internalSupabaseUrl = (
+    process.env.SUPACLOUD_INTERNAL_SUPABASE_URL ||
+    process.env.INTERNAL_SUPABASE_URL ||
+    "http://127.0.0.1"
+  ).replace(/\/+$/, "");
 
   let serviceRoleKey = project.service_role_key;
   const encryptedServiceRoleKey = (project as unknown as { service_role_key_encrypted?: string | null }).service_role_key_encrypted;
