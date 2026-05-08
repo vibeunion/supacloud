@@ -41,7 +41,7 @@ jobs:
       contents: write
     steps:
       - name: Checkout release tag
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           ref: ${{ needs.release-please.outputs.management_api_tag_name }}
 
@@ -93,7 +93,7 @@ jobs:
       id-token: write  # required for npm OIDC Trusted Publisher
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
