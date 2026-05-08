@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.0](https://github.com/zuohuadong/supacloud/compare/web-console-v0.8.5...web-console-v0.9.0) (2026-05-08)
+
+
+### 🚀 Features
+
+* **gateway:** manage certificates through Kong ([3d5930f](https://github.com/zuohuadong/supacloud/commit/3d5930fb5eb78ed32fb96b06d0f824446504ae22))
+
 ## [0.8.5](https://github.com/zuohuadong/supacloud/compare/web-console-v0.8.4...web-console-v0.8.5) (2026-04-27)
 
 
