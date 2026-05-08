@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.5](https://github.com/zuohuadong/supacloud/compare/admin-v0.1.4...admin-v0.1.5) (2026-05-08)
+
+
+### 🐛 Bug Fixes
+
+* **installer:** derive studio domain from API host ([4d94d49](https://github.com/zuohuadong/supacloud/commit/4d94d49f0e3615e7dfe420dea7cc72ba91fc41d9))
+
 ## [0.1.4](https://github.com/zuohuadong/supacloud/compare/admin-v0.1.3...admin-v0.1.4) (2026-05-06)
 
 
