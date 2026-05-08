@@ -31,7 +31,7 @@
     "directory": "packages/cli"
   },
   "dependencies": {
-    "zod": "^3.24.4"
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/bun": "^1.3.9",
