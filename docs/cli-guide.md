@@ -20,6 +20,12 @@ Project-scoped by default. Intended for project users and developers.
 - Reads `SUPABASE_SERVICE_ROLE_KEY` or `SUPACLOUD_API_TOKEN`
 - Can still accept explicit `--ref` when needed
 
+When auto-linking from `SUPABASE_URL`, the CLI accepts tenant API domains and
+derives the matching Management API host. For example,
+`https://api.example.com` maps to `https://studio.example.com`, and
+`https://abc123.api.example.com` maps to `https://studio-abc123.example.com`.
+Set `SUPACLOUD_API_URL` explicitly to override this inference.
+
 ### Typical commands
 
 ```bash

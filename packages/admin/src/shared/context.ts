@@ -65,31 +65,81 @@ function detectSource(sources: Array<"env" | "dotenv" | "none">): ResolvedContex
     return "mixed";
 }
 
+function normalizeUrl(value: string): string {
+    const trimmed = value.trim().replace(/\/+$/, "");
+    if (!trimmed) return "";
+    try {
+        return new URL(trimmed).toString().replace(/\/+$/, "");
+    } catch {
+        return "";
+    }
+}
+
+function hostFromUrl(value: string): string {
+    try {
+        return new URL(value).hostname;
+    } catch {
+        return "";
+    }
+}
+
+function inferManagementApiUrlFromSupabaseUrl(value: string, projectRef = ""): string {
+    const normalized = normalizeUrl(value);
+    if (!normalized) return "";
+
+    const url = new URL(normalized);
+    const host = url.hostname;
+    if (host.startsWith("api.")) {
+        url.hostname = `studio.${host.slice("api.".length)}`;
+        return url.toString().replace(/\/+$/, "");
+    }
+
+    const ref = projectRef.trim();
+    if (ref && host.startsWith(`${ref}.api.`)) {
+        url.hostname = `studio-${ref}.${host.slice(`${ref}.api.`.length)}`;
+        return url.toString().replace(/\/+$/, "");
+    }
+
+    const managedHostMatch = host.match(/^([a-z0-9-]+)\.api\.(.+)$/i);
+    if (managedHostMatch) {
+        url.hostname = `studio-${managedHostMatch[1]}.${managedHostMatch[2]}`;
+        return url.toString().replace(/\/+$/, "");
+    }
+
+    return normalized;
+}
+
 export function resolveSupaCloudContext(
     env: NodeJS.ProcessEnv = process.env,
     cwd: string = process.cwd(),
 ): ResolvedContext {
     const dotenv = readDotEnvFile(cwd);
-    const inferredUrl = pickValue(env, dotenv, ["SUPABASE_URL", "SUPACLOUD_API_URL"]);
+    const supabaseUrl = pickValue(env, dotenv, ["SUPABASE_URL"]);
+    const explicitApiUrl = pickValue(env, dotenv, ["SUPACLOUD_API_URL", "SUPACLOUD_MANAGEMENT_API_URL", "MANAGEMENT_API_URL"]);
     const inferredToken = pickValue(env, dotenv, ["SUPABASE_SERVICE_ROLE_KEY", "SUPACLOUD_API_TOKEN"]);
+    const projectRef = pickValue(env, dotenv, ["SUPACLOUD_PROJECT_REF", "X_PROJECT_REF"]).value;
 
     const hostFromEnv = env.SUPACLOUD_HOST;
-    const hostFromUrl = inferredUrl.value ? new URL(inferredUrl.value).hostname : "";
+    const normalizedSupabaseUrl = normalizeUrl(supabaseUrl.value);
+    const apiUrl = normalizeUrl(explicitApiUrl.value)
+        || inferManagementApiUrlFromSupabaseUrl(normalizedSupabaseUrl, projectRef)
+        || (hostFromEnv ? `http://${hostFromEnv}:9090` : "");
+    const resolvedHostFromUrl = hostFromUrl(apiUrl || normalizedSupabaseUrl);
 
     return {
-        host: hostFromEnv ?? hostFromUrl,
+        host: hostFromEnv ?? resolvedHostFromUrl,
         sshUser: env.SUPACLOUD_SSH_USER ?? "root",
         sshPort: parseInt(env.SUPACLOUD_SSH_PORT ?? "22", 10),
         sshKey: env.SUPACLOUD_SSH_KEY ?? resolve(homedir(), ".ssh", "id_rsa"),
         sshPass: env.SUPACLOUD_SSH_PASS ?? "",
-        apiUrl: env.SUPACLOUD_API_URL ?? (inferredUrl.value ? inferredUrl.value.replace(/\/+$/, "") : (hostFromEnv ? `http://${hostFromEnv}:9090` : "")),
+        apiUrl,
         apiToken: env.SUPACLOUD_API_TOKEN ?? inferredToken.value,
-        projectRef: env.SUPACLOUD_PROJECT_REF ?? "",
+        projectRef,
         readOnly: env.SUPACLOUD_READ_ONLY === "true",
-        inferredSupabaseUrl: inferredUrl.value,
+        inferredSupabaseUrl: normalizedSupabaseUrl,
         inferredServiceRoleKey: inferredToken.value,
         source: detectSource([
-            inferredUrl.value ? inferredUrl.source : "none",
+            (supabaseUrl.value || explicitApiUrl.value) ? (supabaseUrl.value ? supabaseUrl.source : explicitApiUrl.source) : "none",
             inferredToken.value ? inferredToken.source : "none",
         ]),
     };
