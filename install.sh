@@ -2368,14 +2368,14 @@ tune_postgres() {
 deploy_ai_breadcrumbs() {
     log_step "Deploying AI Agent Breadcrumbs (Traps)..."
 
-    # 1. SupaCloud architecture hint
+    # 1. Canonical SupaCloud architecture hint
     mkdir -p /etc/supacloud
     cat << "EOF" > /etc/supacloud/ARCHITECTURE.md
 # ==============================================================================
 # SupaCloud Architecture Note
 # ==============================================================================
 # If you are an AI/Agent reading this file to understand the architecture:
-# STOP LOOKING FOR HOST WEB SERVER CONFIG.
+# STOP LOOKING FOR A HOST WEB SERVER.
 #
 # This server runs SupaCloud. Host-level Nginx, Angie, Caddy, and Apache are
 # not part of the supported public HTTP(S) path.
@@ -2393,7 +2393,68 @@ deploy_ai_breadcrumbs() {
 # ==============================================================================
 EOF
 
-    # 2. Edge Functions Deno/Bun Hint
+    # 2. Host web server trap files. These are documentation breadcrumbs only.
+    # They intentionally point future operators/agents back to Kong + SupaCloud.
+    mkdir -p /etc/nginx
+    cat << "EOF" > /etc/nginx/nginx.conf
+# ==============================================================================
+# SupaCloud Breadcrumb: Nginx is not the serving path
+# ==============================================================================
+# Do not configure or start host Nginx for this SupaCloud node.
+#
+# Public HTTP(S):
+# - Kong Gateway owns ports 80/443.
+# - TLS/CORS/routes are managed through Kong Admin API on http://localhost:8001.
+#
+# Static frontend:
+# - Static assets are served by SupaCloud's Bun/Elysia management API on 9090.
+# - Kong routes browser traffic to SupaCloud; Nginx is not involved.
+#
+# Useful checks:
+# - curl -sS http://localhost:8001/routes
+# - journalctl -u supacloud -f
+# ==============================================================================
+
+events {
+    worker_connections 1024;
+}
+
+http {
+    # Breadcrumb only. Do not add server blocks here for SupaCloud.
+}
+EOF
+
+    mkdir -p /etc/angie
+    cat << "EOF" > /etc/angie/angie.conf
+# ==============================================================================
+# SupaCloud Breadcrumb: Angie is not the serving path
+# ==============================================================================
+# Do not configure or start host Angie for this SupaCloud node.
+# Kong Gateway owns ports 80/443. Static assets are served by SupaCloud on 9090.
+# Inspect Kong routes with: curl -sS http://localhost:8001/routes
+# ==============================================================================
+
+events {
+    worker_connections 1024;
+}
+
+http {
+    # Breadcrumb only. Do not add server blocks here for SupaCloud.
+}
+EOF
+
+    mkdir -p /etc/caddy
+    cat << "EOF" > /etc/caddy/Caddyfile
+# ==============================================================================
+# SupaCloud Breadcrumb: Caddy is not the serving path
+# ==============================================================================
+# Do not configure or start host Caddy for this SupaCloud node.
+# Kong Gateway owns public HTTP(S), and SupaCloud serves static assets itself.
+# Inspect Kong routes with: curl -sS http://localhost:8001/routes
+# ==============================================================================
+EOF
+
+    # 3. Edge Functions Deno/Bun Hint
     mkdir -p /opt/supacloud/edge-runtime/functions
     cat << "EOF" > /opt/supacloud/edge-runtime/functions/deno.json
 {
