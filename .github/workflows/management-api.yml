@@ -465,7 +465,7 @@ jobs:
           mv supacloud-macos-arm64 dist/
 
       - name: Upload Artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: supacloud-binaries-linux-primary-macos-dev
           path: packages/management-api/dist/*
