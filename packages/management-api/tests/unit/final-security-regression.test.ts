@@ -17,6 +17,39 @@ function appWith(routes: Elysia) {
 }
 
 describe("final security regressions", () => {
+  test("function management read endpoints require auth but preserve authenticated access", async () => {
+    const listFunctionsSpy = spyOn(projectService, "listFunctions").mockResolvedValue([
+      { slug: "hello", name: "hello" },
+    ] as Awaited<ReturnType<typeof projectService.listFunctions>>);
+    const request = appWith(projectFunctionsRoutes);
+
+    try {
+      const protectedPaths = [
+        "/v1/projects/proj_1/functions",
+        "/v1/projects/proj_1/functions/hello",
+        "/v1/projects/proj_1/functions/hello/source",
+        "/v1/projects/proj_1/functions/hello/versions",
+        "/v1/projects/proj_1/functions/hello/versions/1",
+        "/v1/projects/proj_1/functions/hello/body",
+        "/v1/projects/proj_1/functions/hello/check",
+        "/v1/projects/proj_1/functions/hello/config",
+        "/v1/projects/proj_1/functions/hello/logs",
+      ];
+
+      for (const path of protectedPaths) {
+        const unauthenticated = await request(path);
+        expect(unauthenticated.status).toBe(401);
+      }
+
+      expect(listFunctionsSpy).not.toHaveBeenCalled();
+      const authenticated = await request("/v1/projects/proj_1/functions", { headers: masterHeaders });
+      expect(authenticated.status).toBe(200);
+      expect(await authenticated.json()).toEqual([{ slug: "hello", name: "hello" }]);
+    } finally {
+      listFunctionsSpy.mockRestore();
+    }
+  });
+
   test("function secrets GET requires auth and masks by default", async () => {
     const getSecretsSpy = spyOn(projectService, "getSecrets").mockResolvedValue([
       { name: "EDGEFN_SECRET", value: "plain-secret" },

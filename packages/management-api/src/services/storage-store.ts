@@ -109,6 +109,17 @@ export class TusStore {
 }
 
 export class SignedStore {
+    private static fromRow(row: Record<string, unknown>): SignedUpload {
+        return {
+            ref: String(row.ref),
+            bucket: String(row.bucket),
+            objectName: String(row.object_name),
+            upsert: Boolean(row.upsert),
+            expiresAt: Number(row.expires_at),
+            auth_token: row.auth_token == null ? undefined : String(row.auth_token)
+        };
+    }
+
     static async set(token: string, upload: SignedUpload) {
         await sql`
             INSERT INTO system_signed_uploads (token, ref, bucket, object_name, upsert, expires_at, auth_token)
@@ -119,14 +130,18 @@ export class SignedStore {
     static async get(token: string): Promise<SignedUpload | null> {
         const [row] = await sql`SELECT * FROM system_signed_uploads WHERE token = ${token}`;
         if (!row) return null;
-        return {
-            ref: row.ref,
-            bucket: row.bucket,
-            objectName: row.object_name,
-            upsert: row.upsert,
-            expiresAt: Number(row.expires_at),
-            auth_token: row.auth_token
-        };
+        return this.fromRow(row as Record<string, unknown>);
+    }
+
+    static async consume(token: string): Promise<SignedUpload | null> {
+        const [row] = await sql`
+            DELETE FROM system_signed_uploads
+            WHERE token = ${token}
+              AND expires_at >= extract(epoch from NOW())
+            RETURNING *
+        `;
+        if (!row) return null;
+        return this.fromRow(row as Record<string, unknown>);
     }
 
     static async delete(token: string) {

@@ -118,6 +118,25 @@ function projectAuthResponse(authError: { status: number; body: { error: string 
   return { message: authError.body.error, code: String(authError.status), status: authError.status };
 }
 
+function normalizePositiveInteger(value: unknown, fallback: number, min: number, max: number): number {
+  if (value === undefined || value === null || value === "") return fallback;
+  const parsed = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(min, Math.min(max, Math.floor(parsed)));
+}
+
+function normalizePagination(
+  query: Record<string, unknown>,
+  defaultLimit = 50,
+  maxLimit = Number.MAX_SAFE_INTEGER,
+) {
+  const limit = normalizePositiveInteger(query._limit ?? query.limit, defaultLimit, 1, maxLimit);
+  const page = normalizePositiveInteger(query._page, 1, 1, Number.MAX_SAFE_INTEGER);
+  const defaultSkip = (page - 1) * limit;
+  const skip = normalizePositiveInteger(query.skip, defaultSkip, 0, Number.MAX_SAFE_INTEGER);
+  return { limit, page, skip };
+}
+
 export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" })
     .get(
         "/tables",
@@ -132,9 +151,7 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
             }
 
             try {
-                const limit = Number(query._limit || query.limit || 50);
-                const page = Number(query._page || 1);
-                const skip = Number(query.skip || (page - 1) * limit);
+                const { limit, skip } = normalizePagination(query as Record<string, unknown>);
                 const search = query.q ? String(query.q) : (query.query ? String(query.query) : "");
 
                 const projectDb = await getProjectSql(params.ref);
@@ -251,9 +268,7 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
             }
 
             try {
-                const limit = Math.min(Math.max(Number(query._limit || query.limit || 50), 1), 500);
-                const page = Math.max(Number(query._page || 1), 1);
-                const skip = Number(query.skip || (page - 1) * limit);
+                const { limit, skip } = normalizePagination(query as Record<string, unknown>, 50, 500);
 
                 const regex = /^[a-zA-Z_0-9]+$/;
                 if (!regex.test(params.schema) || !regex.test(params.table)) {

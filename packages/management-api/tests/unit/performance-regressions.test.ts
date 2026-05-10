@@ -40,4 +40,15 @@ describe("performance regressions", () => {
     expect(storageRlsSource).toContain("WITH candidates AS");
     expect(storageRlsSource).toContain("LIMIT $7 OFFSET $8");
   });
+
+  test("storage size casts and database pagination stay defensive", async () => {
+    const dashboardSource = await read("../../src/routes/project-dashboard.ts");
+    const storageRlsSource = await read("../../src/services/storage-rls.ts");
+    const databaseSource = await read("../../src/routes/database.ts");
+
+    expect(dashboardSource).toContain("metadata->>'size' ~ '^[0-9]+$'");
+    expect(storageRlsSource).toContain("metadata->>'size' ~ '^[0-9]+$'");
+    expect(databaseSource).toContain("function normalizePagination");
+    expect(databaseSource).toContain("Number.isFinite(parsed)");
+  });
 });
