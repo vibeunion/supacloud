@@ -2,10 +2,38 @@ import { Elysia, t, status } from "elysia";
 import { projectService } from "../services";
 import { requireProjectOrAdminAuth } from "../middleware/auth";
 
+async function requireFunctionManagementAuth(request: Request, ref: string) {
+  const authError = await requireProjectOrAdminAuth(request, ref);
+  if (authError) return status(authError.status, authError.body);
+  return undefined;
+}
+
+function normalizeLimitOffset(
+  limitValue: unknown,
+  offsetValue: unknown,
+  defaults = { limit: 50, offset: 0, maxLimit: 500 },
+) {
+  const rawLimit = limitValue === undefined || limitValue === null || limitValue === ""
+    ? NaN
+    : typeof limitValue === "number" ? limitValue : Number(limitValue);
+  const rawOffset = offsetValue === undefined || offsetValue === null || offsetValue === ""
+    ? NaN
+    : typeof offsetValue === "number" ? offsetValue : Number(offsetValue);
+  const limit = Number.isFinite(rawLimit)
+    ? Math.max(1, Math.min(defaults.maxLimit, Math.floor(rawLimit)))
+    : defaults.limit;
+  const offset = Number.isFinite(rawOffset)
+    ? Math.max(0, Math.floor(rawOffset))
+    : defaults.offset;
+  return { limit, offset };
+}
+
 export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
   .get(
     "/:ref/functions",
-    async ({ params }) => {
+    async ({ params, request }) => {
+      const authError = await requireFunctionManagementAuth(request, params.ref);
+      if (authError) return authError;
       const functions = await projectService.listFunctions(params.ref);
       return functions;
     },
@@ -334,7 +362,9 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
 
   .get(
     "/:ref/functions/:slug",
-    async ({ params }) => {
+    async ({ params, request }) => {
+      const authError = await requireFunctionManagementAuth(request, params.ref);
+      if (authError) return authError;
       const code = await projectService.getFunctionCode(
         params.ref,
         params.slug,
@@ -373,7 +403,9 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
 
   .get(
     "/:ref/functions/:slug/source",
-    async ({ params }) => {
+    async ({ params, request }) => {
+      const authError = await requireFunctionManagementAuth(request, params.ref);
+      if (authError) return authError;
       const { edgeFunctionService } =
         await import("../services/edge-function.service");
       const code = await edgeFunctionService.readSource(
@@ -392,7 +424,9 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
 
   .get(
     "/:ref/functions/:slug/versions",
-    async ({ params }) => {
+    async ({ params, request }) => {
+      const authError = await requireFunctionManagementAuth(request, params.ref);
+      if (authError) return authError;
       const { edgeFunctionService } =
         await import("../services/edge-function.service");
       return edgeFunctionService.listVersions(params.ref, params.slug);
@@ -404,7 +438,9 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
 
   .get(
     "/:ref/functions/:slug/versions/:version",
-    async ({ params }) => {
+    async ({ params, request }) => {
+      const authError = await requireFunctionManagementAuth(request, params.ref);
+      if (authError) return authError;
       const { edgeFunctionService } =
         await import("../services/edge-function.service");
       const version = await edgeFunctionService.getVersion(
@@ -460,7 +496,9 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
   // Official: GET /v1/projects/:ref/functions/:slug/body → octet-stream
   .get(
     "/:ref/functions/:slug/body",
-    async ({ params, set }) => {
+    async ({ params, request, set }) => {
+      const authError = await requireFunctionManagementAuth(request, params.ref);
+      if (authError) return authError;
       const { edgeFunctionService } =
         await import("../services/edge-function.service");
       // Prefer the original source TypeScript over bundled JS
@@ -676,7 +714,9 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
 
   .get(
     "/:ref/functions/:slug/check",
-    async ({ params }) => {
+    async ({ params, request }) => {
+      const authError = await requireFunctionManagementAuth(request, params.ref);
+      if (authError) return authError;
       const result = await projectService.checkFunctionRuntime(
         params.ref,
         params.slug,
@@ -696,7 +736,9 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
 
   .get(
     "/:ref/functions/:slug/config",
-    async ({ params }) => {
+    async ({ params, request }) => {
+      const authError = await requireFunctionManagementAuth(request, params.ref);
+      if (authError) return authError;
       const { edgeFunctionService } =
         await import("../services/edge-function.service");
       const config = await edgeFunctionService.getConfig(
@@ -735,9 +777,10 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
 
   .get(
     "/:ref/functions/:slug/logs",
-    async ({ params, query }) => {
-      const limit = Number(query.limit || 50);
-      const offset = Number(query.offset || 0);
+    async ({ params, query, request }) => {
+      const authError = await requireFunctionManagementAuth(request, params.ref);
+      if (authError) return authError;
+      const { limit, offset } = normalizeLimitOffset(query.limit, query.offset);
       const version =
         typeof query.version === "string" && query.version.trim().length > 0
           ? query.version.trim()
