@@ -3,6 +3,19 @@ import { extractProjectRefFromPath } from "../utils/project-auth";
 import { logger } from "../utils/logger";
 
 const WRITE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+const AUDIT_FLUSH_INTERVAL_MS = Number(process.env.AUDIT_FLUSH_INTERVAL_MS || 100);
+const AUDIT_BATCH_SIZE = Math.max(1, Number(process.env.AUDIT_BATCH_SIZE || 25));
+
+type AuditInput = {
+  request: Request;
+  status?: number;
+  action?: string;
+  metadata?: Record<string, unknown>;
+};
+
+const auditQueue: AuditInput[] = [];
+let auditFlushTimer: ReturnType<typeof setTimeout> | null = null;
+let auditFlushInFlight = false;
 
 function actorFromRequest(request: Request): string {
   const auth = request.headers.get("authorization") || "";
@@ -21,12 +34,16 @@ export function shouldAuditRequest(request: Request): boolean {
   return url.pathname.startsWith("/v1") && WRITE_METHODS.has(request.method.toUpperCase());
 }
 
-export async function logAuditEvent(input: {
-  request: Request;
-  status?: number;
-  action?: string;
-  metadata?: Record<string, unknown>;
-}) {
+function scheduleAuditFlush(): void {
+  if (auditFlushTimer) return;
+  auditFlushTimer = setTimeout(() => {
+    auditFlushTimer = null;
+    void flushAuditEvents();
+  }, AUDIT_FLUSH_INTERVAL_MS);
+  auditFlushTimer.unref?.();
+}
+
+async function writeAuditEvent(input: AuditInput) {
   try {
     const url = new URL(input.request.url);
     const action = input.action || `${input.request.method.toUpperCase()} ${url.pathname}`;
@@ -49,4 +66,41 @@ export async function logAuditEvent(input: {
   } catch (error: unknown) {
     logger.warn("Failed to write audit log", { error: error instanceof Error ? error.message : String(error) });
   }
+}
+
+async function flushAuditEvents(): Promise<void> {
+  if (auditFlushInFlight) {
+    scheduleAuditFlush();
+    return;
+  }
+
+  auditFlushInFlight = true;
+  try {
+    while (auditQueue.length > 0) {
+      const batch = auditQueue.splice(0, AUDIT_BATCH_SIZE);
+      for (const event of batch) {
+        await writeAuditEvent(event);
+      }
+    }
+  } finally {
+    auditFlushInFlight = false;
+    if (auditQueue.length > 0) scheduleAuditFlush();
+  }
+}
+
+export async function logAuditEvent(input: AuditInput) {
+  auditQueue.push(input);
+  if (auditQueue.length >= AUDIT_BATCH_SIZE) {
+    void flushAuditEvents();
+  } else {
+    scheduleAuditFlush();
+  }
+}
+
+export async function flushAuditEventsForTests(): Promise<void> {
+  if (auditFlushTimer) {
+    clearTimeout(auditFlushTimer);
+    auditFlushTimer = null;
+  }
+  await flushAuditEvents();
 }
