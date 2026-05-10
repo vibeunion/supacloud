@@ -370,6 +370,27 @@ describe("taskRoutes", () => {
       functionSlug: "mockup-generator",
       onlyDeadLettered: false,
       limit: 8,
+      summary: false,
+    });
+  });
+
+  test("GET /v1/projects/:ref/tasks forwards summary list mode to repository", async () => {
+    listTasksByProjectFiltered.mockResolvedValueOnce([
+      { id: "tsk_1", function_slug: "mockup-generator", status: "running" },
+    ]);
+
+    const response = await request(
+      "/v1/projects/proj_1/tasks?function_slug=mockup-generator&limit=8&summary=true",
+    );
+
+    expect(response.status).toBe(200);
+    expect(listTasksByProjectFiltered).toHaveBeenCalledWith("proj_1", {
+      statuses: undefined,
+      taskTypes: undefined,
+      functionSlug: "mockup-generator",
+      onlyDeadLettered: false,
+      limit: 8,
+      summary: true,
     });
   });
 

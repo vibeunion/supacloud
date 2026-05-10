@@ -29,6 +29,7 @@ export interface TaskListFilters {
   functionVersion?: string;
   onlyDeadLettered?: boolean;
   limit?: number;
+  summary?: boolean;
 }
 
 export interface ClaimQueueMessageOptions {
@@ -112,6 +113,33 @@ export function buildTaskListQuery(projectRef: string, filters: TaskListFilters 
 } {
   const conditions = [`project_ref = $1`];
   const values: unknown[] = [projectRef];
+  const selectClause = filters.summary
+    ? `
+      id,
+      project_ref,
+      task_type,
+      status,
+      '{}'::jsonb AS payload,
+      NULL::jsonb AS result,
+      error,
+      retries,
+      attempt,
+      max_attempts,
+      next_run_at,
+      lease_until,
+      started_at,
+      completed_at,
+      timeout_sec,
+      idempotency_key,
+      trace_id,
+      cancel_requested_at,
+      cancellation_reason,
+      function_slug,
+      function_version,
+      created_at,
+      updated_at
+    `
+    : "*";
 
   if (filters.onlyDeadLettered) {
     conditions.push(`status = 'dead_lettered'`);
@@ -141,7 +169,7 @@ export function buildTaskListQuery(projectRef: string, filters: TaskListFilters 
 
   return {
     sqlText: `
-      SELECT *
+      SELECT ${selectClause}
       FROM project_tasks
       WHERE ${conditions.join(" AND ")}
       ORDER BY created_at DESC
