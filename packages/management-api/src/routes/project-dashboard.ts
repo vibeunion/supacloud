@@ -102,7 +102,12 @@ export const projectDashboardRoutes = new Elysia({ prefix: "/v1/projects" })
           SELECT count(*)::int AS cnt FROM pg_stat_user_indexes
         `),
         safeRead<DashboardRow[]>("storage size", [], () => projectDb`
-          SELECT pg_size_pretty(coalesce(sum((metadata->>'size')::bigint), 0)) AS size
+          SELECT pg_size_pretty(coalesce(sum(
+            CASE
+              WHEN metadata->>'size' ~ '^[0-9]+$' THEN (metadata->>'size')::bigint
+              ELSE 0
+            END
+          ), 0)) AS size
           FROM storage.objects
         `),
         safeRead<DashboardRow[]>("recent users", [], () => projectDb`

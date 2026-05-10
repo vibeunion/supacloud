@@ -1,4 +1,4 @@
-import { TusStore, SignedStore, startStorageCleanupJob } from "../services/storage-store";
+import { TusStore, SignedStore, startStorageCleanupJob, type SignedUpload } from "../services/storage-store";
 /**
  * Supabase-JS SDK Compatible Storage Routes
  * 
@@ -493,6 +493,10 @@ function parseAllowedMimeTypes(value: unknown): string[] | null {
     return value.filter((entry): entry is string => typeof entry === "string");
 }
 
+function signedUploadMatches(upload: SignedUpload | null, ref: string, bucket: string, objectName: string): upload is SignedUpload {
+    return !!upload && upload.ref === ref && upload.bucket === bucket && upload.objectName === objectName;
+}
+
 export const storageCompatRoutes = new Elysia({ prefix: "" })
 
     // ── Origin Guard: reject requests without a valid project reference ──
@@ -760,6 +764,9 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
                 async () => {
                     const success = await StorageService.uploadFile(ref, params.bucket, filePath, fileData, fileMimeType);
                     if (!success) throw new Error('PHYSICAL_UPLOAD_FAILED');
+                },
+                upsert ? undefined : async () => {
+                    await StorageService.deleteFile(ref, params.bucket, filePath);
                 }
             );
 
@@ -1147,7 +1154,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         }
 
         const signedUpload = await SignedStore.get(token);
-        if (!signedUpload || signedUpload.ref !== ref || signedUpload.bucket !== params.bucket || signedUpload.objectName !== filePath) {
+        if (!signedUploadMatches(signedUpload, ref, params.bucket, filePath)) {
             return status(401, { statusCode: "401", error: 'Unauthorized', message: 'Invalid or expired signed URL' });
         }
         if (signedUpload.expiresAt < Math.floor(Date.now() / 1000)) {
@@ -1165,15 +1172,23 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             // Strip max-age= prefix if present — store raw seconds in metadata (official Supabase behavior)
             if (cc && cc.startsWith('max-age=')) cc = cc.replace('max-age=', '');
             const metadata = { mimetype: fileMimeType, size, cacheControl: cc, userMetadata };
+
+            const consumedUpload = await SignedStore.consume(token);
+            if (!signedUploadMatches(consumedUpload, ref, params.bucket, filePath)) {
+                return status(401, { statusCode: "401", error: 'Unauthorized', message: 'Invalid or expired signed URL' });
+            }
             
-            const effectiveAuth = signedUpload.auth_token !== undefined ? signedUpload.auth_token : headers['authorization'];
+            const effectiveAuth = consumedUpload.auth_token !== undefined ? consumedUpload.auth_token : headers['authorization'];
             
             // 1. Transactional RLS + DB persist + S3 Write
             const finalPermit = await StorageRLS.authorizeAction(
-                ref, effectiveAuth, 'upload', params.bucket, filePath, metadata, false, signedUpload.upsert, undefined, undefined,
+                ref, effectiveAuth, 'upload', params.bucket, filePath, metadata, false, consumedUpload.upsert, undefined, undefined,
                 async () => {
                     const success = await StorageService.uploadFile(ref, params.bucket, filePath, fileData, fileMimeType);
                     if (!success) throw new Error('PHYSICAL_UPLOAD_FAILED');
+                },
+                consumedUpload.upsert ? undefined : async () => {
+                    await StorageService.deleteFile(ref, params.bucket, filePath);
                 }
             );
 
@@ -1184,9 +1199,6 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
                     message: finalPermit.error || 'Access Denied.' 
                 });
             }
-
-            // Consume the signed upload token (one-time use)
-            await SignedStore.delete(token);
 
             return {
                 Key: `${params.bucket}/${filePath}`,
@@ -1494,10 +1506,9 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
                 async () => {
                     const copied = await StorageService.copyFile(ref, srcBucket, srcKey, destBucket, destKey);
                     if (!copied) throw new Error('PHYSICAL_UPLOAD_FAILED');
-                    const deleted = await StorageService.deleteFile(ref, srcBucket, srcKey);
-                    if (!deleted) {
-                        logger.error(`CRITICAL: Orphaned physical file abandoned at ${srcBucket}/${srcKey}`);
-                    }
+                },
+                async () => {
+                    await StorageService.deleteFile(ref, destBucket, destKey);
                 }
             );
 
@@ -1507,6 +1518,11 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
                     error: finalPermit.error === 'Object not found' ? 'Not Found' : 'Forbidden', 
                     message: finalPermit.error || 'Access Denied' 
                 });
+            }
+
+            const deleted = await StorageService.deleteFile(ref, srcBucket, srcKey);
+            if (!deleted) {
+                logger.error(`CRITICAL: Orphaned physical file abandoned at ${srcBucket}/${srcKey}`);
             }
 
             return { message: `Successfully moved` };

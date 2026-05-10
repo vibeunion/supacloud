@@ -271,8 +271,10 @@ export class StorageRLS {
     upsert: boolean = true,
     destBucketId?: string,
     destObjectName?: string,
-    physicalAction?: () => Promise<void>
+    physicalAction?: () => Promise<void>,
+    compensatePhysicalAction?: () => Promise<void>
   ): Promise<{ permitted: boolean, error?: string }> {
+    let physicalActionCompleted = false;
     if (ref === 'test_mock') {
        if (!mockBuckets.has(bucketId)) return { permitted: false, error: 'Bucket not found' };
        if (action === 'upload') {
@@ -282,6 +284,7 @@ export class StorageRLS {
            if (physicalAction) {
                try {
                    await physicalAction();
+                   physicalActionCompleted = true;
                } catch (e: any) {
                    return { permitted: false, error: e.message === 'PHYSICAL_UPLOAD_FAILED' ? 'Failed to write physical object' : e.message };
                }
@@ -385,16 +388,29 @@ export class StorageRLS {
         }
 
         if (physicalAction) {
-           try {
-               await physicalAction();
-           } catch (e: any) {
-               throw new Error(e.message === 'PHYSICAL_UPLOAD_FAILED' ? 'PHYSICAL_UPLOAD_FAILED' : 'PHYSICAL_ACTION_FAILED');
-           }
+          try {
+            await physicalAction();
+            physicalActionCompleted = true;
+          } catch (e: any) {
+            throw new Error(e.message === 'PHYSICAL_UPLOAD_FAILED' ? 'PHYSICAL_UPLOAD_FAILED' : 'PHYSICAL_ACTION_FAILED');
+          }
         }
       });
 
       return { permitted: true };
     } catch (e: unknown) {
+      if (physicalActionCompleted && compensatePhysicalAction) {
+        try {
+          await compensatePhysicalAction();
+        } catch (compensationError) {
+          logger.warn("[StorageRLS] Physical compensation failed after metadata transaction failure", {
+            action,
+            bucketId,
+            objectName,
+            error: compensationError instanceof Error ? compensationError.message : String(compensationError),
+          });
+        }
+      }
       if (e instanceof Error && e.message === 'DRY_RUN_ROLLBACK') {
         return { permitted: true };
       }
@@ -543,7 +559,10 @@ export class StorageRLS {
               last_accessed_at,
               owner,
               metadata,
-              COALESCE((metadata->>'size')::bigint, 0) AS size,
+              CASE
+                WHEN metadata->>'size' ~ '^[0-9]+$' THEN (metadata->>'size')::bigint
+                ELSE 0
+              END AS size,
               regexp_replace(substr(name, $5::int), '^/+', '') AS relative_name
             FROM storage.objects
             WHERE bucket_id = $1
