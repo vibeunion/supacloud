@@ -527,84 +527,90 @@ export class StorageRLS {
               ? 'size'
               : 'name';
         const orderDirection = (sortBy?.order || 'asc').toLowerCase() === 'desc' ? 'DESC' : 'ASC';
+        const orderTarget = orderColumn === 'name' ? 'sort_key' : orderColumn;
+        const orderClause = `${orderTarget} ${orderDirection}${orderTarget === 'sort_key' ? '' : ', sort_key ASC'}`;
 
         const [bucket] = await tx`SELECT id FROM storage.buckets WHERE id = ${bucketId}`;
         if (!bucket) throw new Error('BUCKET_NOT_FOUND');
 
-
-        const baseRows = await tx`
-          SELECT
-            id,
-            name,
-            updated_at,
-            created_at,
-            last_accessed_at,
-            owner,
-            metadata,
-            COALESCE((metadata->>'size')::bigint, 0) AS size
-          FROM storage.objects
-          WHERE bucket_id = ${bucketId}
-            AND name LIKE ${searchPrefix}
-            AND (${search === ''} OR name ILIKE ${searchTerm})
-        `;
-
-        const folders = new Set<string>();
-        const uniqueObjects: any[] = [];
-
-        for (const row of baseRows) {
-            const rawName = String(row.name);
-            const nameWithoutPrefix = rawName.slice(prefix.length).replace(/^\/+/, '');
-            if (!nameWithoutPrefix) continue;
-
-            const firstSlash = nameWithoutPrefix.indexOf('/');
-            if (with_delimiter && firstSlash !== -1) {
-                const folderName = nameWithoutPrefix.substring(0, firstSlash);
-                if (!folders.has(folderName)) {
-                    folders.add(folderName);
-                    uniqueObjects.push({
-                        id: null,
-                        name: prefix ? `${prefix.replace(/\/$/, '')}/${folderName}` : folderName,
-                        updated_at: row.updated_at,
-                        created_at: row.created_at,
-                        last_accessed_at: row.last_accessed_at,
-                        owner: null,
-                        size: 0,
-                        metadata: { mimetype: null },
-                        isFolder: true,
-                        sortKey: folderName
-                    });
-                }
-            } else {
-                uniqueObjects.push({
-                    id: row.id,
-                    name: rawName,
-                    updated_at: row.updated_at,
-                    created_at: row.created_at,
-                    last_accessed_at: row.last_accessed_at,
-                    owner: row.owner,
-                    size: row.size,
-                    metadata: row.metadata,
-                    isFolder: false,
-                    sortKey: nameWithoutPrefix
-                });
-            }
-        }
-
-        results = uniqueObjects
-          .sort((a: any, b: any) => {
-            const order = orderDirection === 'DESC' ? -1 : 1;
-            if (orderColumn === 'updated_at') {
-              return (new Date(String(a.updated_at)).getTime() - new Date(String(b.updated_at)).getTime()) * order;
-            }
-            if (orderColumn === 'created_at') {
-              return (new Date(String(a.created_at)).getTime() - new Date(String(b.created_at)).getTime()) * order;
-            }
-            if (orderColumn === 'size') {
-              return ((Number(a.size) || 0) - (Number(b.size) || 0)) * order;
-            }
-            return String(a.sortKey).localeCompare(String(b.sortKey)) * order;
-          })
-          .slice(offset, offset + limit);
+        results = await tx.unsafe(`
+          WITH candidates AS (
+            SELECT
+              id,
+              name,
+              updated_at,
+              created_at,
+              last_accessed_at,
+              owner,
+              metadata,
+              COALESCE((metadata->>'size')::bigint, 0) AS size,
+              regexp_replace(substr(name, $5::int), '^/+', '') AS relative_name
+            FROM storage.objects
+            WHERE bucket_id = $1
+              AND name LIKE $2
+              AND ($3::boolean OR name ILIKE $4)
+          ),
+          normalized AS (
+            SELECT
+              *,
+              CASE
+                WHEN $9::boolean AND position('/' in relative_name) > 0
+                  THEN split_part(relative_name, '/', 1)
+                ELSE NULL
+              END AS folder_name
+            FROM candidates
+            WHERE relative_name <> ''
+          ),
+          folders AS (
+            SELECT
+              NULL::uuid AS id,
+              ($6::text || folder_name) AS name,
+              max(updated_at) AS updated_at,
+              min(created_at) AS created_at,
+              max(last_accessed_at) AS last_accessed_at,
+              NULL::uuid AS owner,
+              jsonb_build_object('mimetype', NULL) AS metadata,
+              0::bigint AS size,
+              TRUE AS is_folder,
+              folder_name AS sort_key
+            FROM normalized
+            WHERE folder_name IS NOT NULL
+            GROUP BY folder_name
+          ),
+          files AS (
+            SELECT
+              id,
+              name,
+              updated_at,
+              created_at,
+              last_accessed_at,
+              owner,
+              metadata,
+              size,
+              FALSE AS is_folder,
+              relative_name AS sort_key
+            FROM normalized
+            WHERE folder_name IS NULL
+          )
+          SELECT *
+          FROM (
+            SELECT * FROM folders
+            UNION ALL
+            SELECT * FROM files
+          ) listed_objects
+          ORDER BY ${orderClause}
+          LIMIT $7 OFFSET $8
+        `, [
+          bucketId,
+          searchPrefix,
+          search === '',
+          searchTerm,
+          prefix.length + 1,
+          prefix ? `${prefix.replace(/\/$/, '')}/` : '',
+          limit,
+          offset,
+          with_delimiter,
+        ]);
       });
 
       return results.map(row => {
@@ -617,7 +623,7 @@ export class StorageRLS {
               last_accessed_at: row.last_accessed_at || row.last_accessed || row.updated,
               bucket_id: bucketId,
               owner: row.owner ? String(row.owner) : undefined,
-              metadata: row.isFolder ? null : {
+              metadata: row.is_folder || row.isFolder ? null : {
                   size: Number(meta.size || row.size || 0),
                   mimetype: String(meta.mimetype || 'application/octet-stream'),
                   cacheControl: String(meta.cacheControl || meta.cache_control || '3600').replace(/^max-age=/, '')

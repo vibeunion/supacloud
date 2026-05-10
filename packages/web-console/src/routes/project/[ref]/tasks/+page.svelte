@@ -86,6 +86,8 @@
   let liveStatus = $state<"connected" | "connecting" | "reconnecting" | "polling" | "disconnected">("connecting");
   let pollTimer: ReturnType<typeof setInterval> | null = null;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  let taskListRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+  let selectedTaskRefreshTimer: ReturnType<typeof setTimeout> | null = null;
   let reconnectAttempts = 0;
   let shouldReconnect = true;
   let ws: WebSocket | null = null;
@@ -104,6 +106,7 @@
 
   function buildTaskPath(extra: string = "") {
     const query = new URLSearchParams();
+    query.set("summary", "true");
     if (statusFilter) query.set("status", statusFilter);
     if (functionSlugFilter) query.set("function_slug", functionSlugFilter);
     const suffix = query.toString() ? `?${query.toString()}` : "";
@@ -117,7 +120,7 @@
     try {
       const [tasksRes, dlqRes, settingsRes] = await Promise.all([
         apiClient(buildTaskPath()),
-        apiClient(`/v1/projects/${projectRef}/tasks/dlq`),
+        apiClient(`/v1/projects/${projectRef}/tasks/dlq?summary=true`),
         apiClient(`/v1/projects/${projectRef}/tasks/settings/background`)
       ]);
 
@@ -147,6 +150,77 @@
     } finally {
       isLoading = false;
       isRefreshing = false;
+    }
+  }
+
+  function scheduleTaskListRefresh(delay = 750) {
+    if (taskListRefreshTimer) return;
+    taskListRefreshTimer = setTimeout(() => {
+      taskListRefreshTimer = null;
+      void fetchTasks(true);
+    }, delay);
+  }
+
+  function scheduleSelectedTaskRefresh(taskId: string, delay = 750) {
+    if (selectedTaskRefreshTimer) clearTimeout(selectedTaskRefreshTimer);
+    selectedTaskRefreshTimer = setTimeout(() => {
+      selectedTaskRefreshTimer = null;
+      void fetchTaskDetail(taskId, true);
+    }, delay);
+  }
+
+  function patchTaskList(list: TaskRecord[], payload: Record<string, unknown>) {
+    let found = false;
+    let updatedTask: TaskRecord | null = null;
+    const updatedAt = typeof payload.timestamp === "string" ? payload.timestamp : new Date().toISOString();
+    const next = list.map((task) => {
+      if (task.id !== payload.taskId) return task;
+      found = true;
+      updatedTask = {
+        ...task,
+        task_type: typeof payload.taskType === "string" ? payload.taskType : task.task_type,
+        status: typeof payload.status === "string" ? payload.status : task.status,
+        error: typeof payload.error === "string" || payload.error === null ? payload.error : task.error,
+        updated_at: updatedAt,
+      };
+      return updatedTask;
+    });
+    return { found, updatedTask, next };
+  }
+
+  function applyTaskUpdate(payload: Record<string, unknown>) {
+    if (payload.type !== "task_update" || payload.projectRef !== projectRef || typeof payload.taskId !== "string") {
+      return;
+    }
+
+    const primary = patchTaskList(tasks, payload);
+    const dlq = patchTaskList(dlqTasks, payload);
+    tasks = primary.next;
+    dlqTasks = dlq.next;
+
+    const updatedTask = primary.updatedTask || dlq.updatedTask;
+    const status = typeof payload.status === "string" ? payload.status : "";
+
+    if (updatedTask && status === "dead_lettered" && !dlq.found) {
+      dlqTasks = [updatedTask, ...dlqTasks].slice(0, 100);
+    } else if (dlq.found && status && status !== "dead_lettered") {
+      dlqTasks = dlqTasks.filter((task) => task.id !== payload.taskId);
+    }
+
+    if (selectedTask?.id === payload.taskId) {
+      selectedTask = {
+        ...selectedTask,
+        ...(updatedTask || {}),
+        status: status || selectedTask.status,
+        error: typeof payload.error === "string" || payload.error === null ? payload.error : selectedTask.error,
+      };
+      scheduleSelectedTaskRefresh(selectedTask.id, 900);
+    }
+
+    if (!primary.found && !dlq.found) {
+      scheduleTaskListRefresh(500);
+    } else if (["succeeded", "failed", "dead_lettered", "cancelled"].includes(status)) {
+      scheduleTaskListRefresh(1200);
     }
   }
 
@@ -193,9 +267,7 @@
     ws.onmessage = async (event) => {
       try {
         const payload = JSON.parse(event.data);
-        if (payload.type === "task_update" && payload.projectRef === projectRef) {
-          await fetchTasks(true);
-        }
+        applyTaskUpdate(payload);
       } catch {
       }
     };
@@ -406,6 +478,8 @@
       shouldReconnect = false;
       if (pollTimer) clearInterval(pollTimer);
       if (reconnectTimer) clearTimeout(reconnectTimer);
+      if (taskListRefreshTimer) clearTimeout(taskListRefreshTimer);
+      if (selectedTaskRefreshTimer) clearTimeout(selectedTaskRefreshTimer);
       if (ws) {
         ws.onclose = null;
         ws.onerror = null;

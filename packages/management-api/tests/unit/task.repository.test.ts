@@ -61,4 +61,16 @@ describe("TaskRepository query builders", () => {
     expect(sqlText).not.toContain("status = ANY");
     expect(values).toEqual(["proj_1", 10]);
   });
+
+  test("buildTaskListQuery can omit heavy payload columns for summary lists", () => {
+    const { sqlText, values } = buildTaskListQuery("proj_1", {
+      summary: true,
+      limit: 25,
+    });
+
+    expect(sqlText).toContain("'{}'::jsonb AS payload");
+    expect(sqlText).toContain("NULL::jsonb AS result");
+    expect(sqlText).not.toContain("SELECT *");
+    expect(values).toEqual(["proj_1", 25]);
+  });
 });

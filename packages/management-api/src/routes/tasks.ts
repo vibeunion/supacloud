@@ -409,6 +409,7 @@ export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
               functionVersion,
               onlyDeadLettered: query.dlq === "true",
               limit: Number.isFinite(limit) ? limit : 50,
+              summary: query.summary === "true",
             });
             return tasks;
         } catch (err: unknown) {
@@ -422,6 +423,7 @@ export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
             function_version: t.Optional(t.String()),
             dlq: t.Optional(t.String()),
             limit: t.Optional(t.String()),
+            summary: t.Optional(t.String()),
         })),
     })
     .get("/settings/background", async ({ params }) => {
@@ -435,16 +437,21 @@ export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
             return status(500, { message: "Failed to retrieve background task settings", code: "500", details: (err instanceof Error ? err.message : String(err)) });
         }
     })
-    .get("/dlq", async ({ params }) => {
+    .get("/dlq", async ({ params, query }) => {
         try {
             const tasks = await taskRepository.listTasksByProjectFiltered(params.ref, {
                 onlyDeadLettered: true,
                 limit: 100,
+                summary: query.summary === "true",
             });
             return tasks;
         } catch (err: unknown) {
             return status(500, { message: "Failed to retrieve DLQ tasks", code: "500", details: (err instanceof Error ? err.message : String(err)) });
         }
+    }, {
+        query: t.Optional(t.Object({
+            summary: t.Optional(t.String()),
+        })),
     })
     .get("/stats", async ({ params }) => {
         try {

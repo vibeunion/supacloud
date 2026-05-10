@@ -42,6 +42,29 @@
 
   const projectRef = $derived(page.params.ref);
 
+  type DashboardSummary = {
+    database?: {
+      size?: string;
+      cache_hit_ratio?: number;
+      connections?: number;
+      max_connections?: number;
+      table_count?: number;
+      index_count?: number;
+    };
+    auth?: {
+      total_users?: number;
+      recent_users?: Record<string, unknown>[];
+    };
+    storage?: {
+      size?: string;
+    };
+    functions?: {
+      count?: number;
+    };
+    tasks?: typeof taskStats;
+    active_queries?: Record<string, unknown>[];
+  };
+
   async function runSql(sql: string): Promise<Record<string, unknown>[]> {
     try {
       const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
@@ -55,9 +78,38 @@
     } catch { return []; }
   }
 
-  async function fetchDashboard() {
-    isLoading = true;
+  function applyDashboardSummary(summary: DashboardSummary) {
+    const database = summary.database || {};
+    const auth = summary.auth || {};
+    const storage = summary.storage || {};
+    const functions = summary.functions || {};
 
+    dbSize = String(database.size || "-");
+    cacheHitRatio = Number(database.cache_hit_ratio || 0);
+    connections = Number(database.connections || 0);
+    maxConnections = Number(database.max_connections || 100);
+    totalUsers = Number(auth.total_users || 0);
+    tableCount = Number(database.table_count || 0);
+    indexCount = Number(database.index_count || 0);
+    storageSize = String(storage.size || "0 bytes");
+    functionsCount = Number(functions.count || 0);
+    recentUsers = auth.recent_users || [];
+    activeQueries = summary.active_queries || [];
+    taskStats = summary.tasks || null;
+  }
+
+  async function fetchFunctionsCountLegacy() {
+    try {
+      const res = await apiClient(`/v1/projects/${projectRef}/functions`);
+      if (!res.ok) return 0;
+      const data = await res.json();
+      return Array.isArray(data) ? data.length : 0;
+    } catch {
+      return 0;
+    }
+  }
+
+  async function fetchDashboardLegacy() {
     const [dbInfo, connInfo, userInfo, tableInfo, indexInfo, storageInfo, recentUserInfo, activeInfo] = await Promise.all([
       runSql(`SELECT pg_size_pretty(pg_database_size(current_database())) as size,
               (SELECT round(100.0 * blks_hit / NULLIF(blks_hit + blks_read, 0), 1) FROM pg_stat_database WHERE datname = current_database()) as cache_ratio;`),
@@ -81,8 +133,21 @@
     if (storageInfo[0]) storageSize = String(storageInfo[0].size || "0 bytes");
     recentUsers = recentUserInfo;
     activeQueries = activeInfo;
+    functionsCount = await fetchFunctionsCountLegacy();
+    await fetchTaskStats();
+  }
 
-    isLoading = false;
+  async function fetchDashboard() {
+    isLoading = true;
+    try {
+      const res = await apiClient(`/v1/projects/${projectRef}/dashboard/summary`);
+      if (!res.ok) throw new Error("summary unavailable");
+      applyDashboardSummary(await res.json());
+    } catch {
+      await fetchDashboardLegacy();
+    } finally {
+      isLoading = false;
+    }
   }
 
   async function fetchServices() {
@@ -95,17 +160,6 @@
       }
     } catch {}
     servicesLoading = false;
-  }
-
-  // Fetch functions count
-  async function fetchFunctions() {
-    try {
-      const res = await apiClient(`/v1/projects/${projectRef}/functions`);
-      if (res.ok) {
-        const data = await res.json();
-        functionsCount = Array.isArray(data) ? data.length : 0;
-      }
-    } catch {}
   }
 
   async function fetchTaskStats() {
@@ -123,8 +177,6 @@
     if (_currentRef) {
       fetchDashboard();
       fetchServices();
-      fetchFunctions();
-      fetchTaskStats();
     }
   });
 
@@ -183,7 +235,7 @@
       <h1 class="text-2xl font-bold">{$t("Dashboard.project_dashboard")}</h1>
       <p class="text-sm text-muted-foreground mt-1">{$t("Dashboard.subtitle") || '项目概览和快速访问导航'}</p>
     </div>
-    <button onclick={() => { fetchDashboard(); fetchServices(); fetchFunctions(); fetchTaskStats(); }}
+    <button onclick={() => { fetchDashboard(); fetchServices(); }}
       class="flex items-center gap-2 px-3 py-2 text-xs rounded-lg border hover:bg-muted/50 transition-colors">
       <RefreshCw size={12} />
       {$t("Logs.refresh") || '刷新'}

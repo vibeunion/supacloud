@@ -1,4 +1,5 @@
 export { projectRoutes } from "./projects";
+export { projectDashboardRoutes } from "./project-dashboard";
 export { projectSecretsRoutes } from "./project-secrets";
 export { projectFunctionsRoutes } from "./project-functions";
 export { organizationRoutes } from "./organizations";
