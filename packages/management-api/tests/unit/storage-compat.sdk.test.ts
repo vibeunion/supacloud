@@ -22,6 +22,7 @@ beforeEach(() => {
 
   spyOn(SignedStore, "set").mockResolvedValue(undefined);
   spyOn(SignedStore, "get").mockResolvedValue({ ref: "test_mock", bucket: "avatars", objectName: "signed.txt", upsert: false, expiresAt: 4000000000 });
+  spyOn(SignedStore, "consume").mockResolvedValue({ ref: "test_mock", bucket: "avatars", objectName: "signed.txt", upsert: false, expiresAt: 4000000000 });
   spyOn(SignedStore, "delete").mockResolvedValue(undefined);
   spyOn(TusStore, "get").mockResolvedValue(null);
   spyOn(TusStore, "delete").mockResolvedValue(undefined);
@@ -231,8 +232,37 @@ describe("storageCompatRoutes supabase-js compatibility", () => {
     expect(uploadRes.status).toBe(200);
     expect(await uploadRes.json()).toEqual({ Key: "avatars/signed.txt" });
     expect(uploadSpy).toHaveBeenCalled();
-    // Fix-2: Verify the signed upload token was consumed (one-time use)
-    expect(SignedStore.delete).toHaveBeenCalled();
+    expect(SignedStore.consume).toHaveBeenCalled();
+    uploadSpy.mockRestore();
+  });
+
+  test("signed upload token can only be consumed once", async () => {
+    const signedUpload = { ref: "test_mock", bucket: "avatars", objectName: "signed.txt", upsert: false, expiresAt: 4000000000 };
+    spyOn(SignedStore, "consume")
+      .mockResolvedValueOnce(signedUpload)
+      .mockResolvedValueOnce(null);
+    const uploadSpy = spyOn(StorageService, "uploadFile").mockResolvedValue(true);
+
+    const first = await request("/storage/v1/object/upload/sign/avatars/signed.txt?token=one-time", {
+      method: "PUT",
+      headers: {
+        apikey: "test-token",
+        "content-type": "text/plain",
+      },
+      body: "first",
+    });
+    const second = await request("/storage/v1/object/upload/sign/avatars/signed.txt?token=one-time", {
+      method: "PUT",
+      headers: {
+        apikey: "test-token",
+        "content-type": "text/plain",
+      },
+      body: "second",
+    });
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(401);
+    expect(uploadSpy).toHaveBeenCalledTimes(1);
     uploadSpy.mockRestore();
   });
 
