@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.4](https://github.com/zuohuadong/supacloud/compare/management-api-v0.13.3...management-api-v0.13.4) (2026-05-10)
+
+
+### ⚡ Performance Improvements
+
+* reduce management hot path load ([e5f4c82](https://github.com/zuohuadong/supacloud/commit/e5f4c82f58cb1d515c9c6f94d77fe8032ecdbe26))
+
 ## [0.13.3](https://github.com/zuohuadong/supacloud/compare/management-api-v0.13.2...management-api-v0.13.3) (2026-05-08)
 
 
