@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.3](https://github.com/zuohuadong/supacloud/compare/web-console-v0.9.2...web-console-v0.9.3) (2026-05-10)
+
+
+### ⚡ Performance Improvements
+
+* reduce management hot path load ([e5f4c82](https://github.com/zuohuadong/supacloud/commit/e5f4c82f58cb1d515c9c6f94d77fe8032ecdbe26))
+
 ## [0.9.2](https://github.com/zuohuadong/supacloud/compare/web-console-v0.9.1...web-console-v0.9.2) (2026-05-08)
 
 
