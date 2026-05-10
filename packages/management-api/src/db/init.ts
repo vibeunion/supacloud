@@ -281,7 +281,39 @@ export async function initDatabase() {
       { statement: 'UPDATE project_tasks SET attempt = COALESCE(attempt, retries, 0)', description: "project_tasks.attempt backfill" },
       { statement: "UPDATE project_tasks SET payload = COALESCE(payload, '{}'::jsonb)", description: "project_tasks.payload backfill" },
       { statement: 'CREATE INDEX IF NOT EXISTS idx_project_tasks_project_status ON project_tasks(project_ref, status)', description: "idx_project_tasks_project_status" },
+      { statement: 'CREATE INDEX IF NOT EXISTS idx_project_tasks_project_created_desc ON project_tasks(project_ref, created_at DESC)', description: "idx_project_tasks_project_created_desc" },
       { statement: 'CREATE INDEX IF NOT EXISTS idx_project_tasks_next_run ON project_tasks(next_run_at)', description: "idx_project_tasks_next_run" },
+      {
+        statement: `
+          CREATE INDEX IF NOT EXISTS idx_project_tasks_queue_ready
+          ON project_tasks(project_ref, task_type, status, next_run_at, created_at)
+          WHERE status IN ('pending', 'retry_scheduled') AND cancel_requested_at IS NULL
+        `,
+        description: "idx_project_tasks_queue_ready",
+      },
+      {
+        statement: `
+          CREATE INDEX IF NOT EXISTS idx_project_tasks_active_lease
+          ON project_tasks(project_ref, task_type, status, lease_until)
+          WHERE status IN ('leased', 'running')
+        `,
+        description: "idx_project_tasks_active_lease",
+      },
+      {
+        statement: `
+          CREATE INDEX IF NOT EXISTS idx_project_tasks_project_updated_status
+          ON project_tasks(project_ref, updated_at DESC, status)
+        `,
+        description: "idx_project_tasks_project_updated_status",
+      },
+      {
+        statement: `
+          CREATE INDEX IF NOT EXISTS idx_project_tasks_project_function_created
+          ON project_tasks(project_ref, function_slug, created_at DESC)
+          WHERE function_slug IS NOT NULL
+        `,
+        description: "idx_project_tasks_project_function_created",
+      },
       { statement: 'CREATE INDEX IF NOT EXISTS idx_project_tasks_cancel_requested ON project_tasks(cancel_requested_at) WHERE cancel_requested_at IS NOT NULL', description: "idx_project_tasks_cancel_requested" },
       {
         statement: `

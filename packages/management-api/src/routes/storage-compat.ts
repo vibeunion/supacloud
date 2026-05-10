@@ -36,11 +36,29 @@ import { config } from "../config";
 const STORAGE_UPLOAD_MAX_BYTES = Number(process.env.STORAGE_UPLOAD_MAX_BYTES || config.maxRequestBodySize || 100 * 1024 * 1024);
 const TUS_MAX_SIZE = Number(process.env.TUS_MAX_SIZE || 100 * 1024 * 1024);
 const TUS_MAX_CHUNK_SIZE = Number(process.env.TUS_MAX_CHUNK_SIZE || Math.min(TUS_MAX_SIZE, 16 * 1024 * 1024));
+const STORAGE_BATCH_CONCURRENCY = Math.max(1, Number(process.env.STORAGE_BATCH_CONCURRENCY || 12));
 
 // ── Imaginary Config ──────────────────────────────────────────────
 const IMAGINARY_URL = config.imaginaryUrl;
 
 import { createHmac, randomUUID } from "crypto";
+
+async function mapWithConcurrency<T, R>(
+    items: T[],
+    concurrency: number,
+    mapper: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+    const results = new Array<R>(items.length);
+    let nextIndex = 0;
+    const workerCount = Math.min(concurrency, items.length);
+    await Promise.all(Array.from({ length: workerCount }, async () => {
+        while (nextIndex < items.length) {
+            const index = nextIndex++;
+            results[index] = await mapper(items[index], index);
+        }
+    }));
+    return results;
+}
 
 /**
  * Get the signing secret for a specific tenant (project ref).
@@ -1022,7 +1040,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             const paths = body.paths;
             const expiresIn = Number(body.expiresIn) || 3600;
 
-            return Promise.all(paths.map(async (filePath: string) => {
+            return mapWithConcurrency(paths, STORAGE_BATCH_CONCURRENCY, async (filePath: string) => {
                 const cleanPath = filePath.replace(/^\//, '');
                 
                 const auth = headers['authorization'] || '';
@@ -1044,7 +1062,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
                     path: filePath,
                     signedURL: buildSignedPath(`${signPrefix}/${params.bucket}/${cleanPath}`, expiresAt, token, body.transform),
                 };
-            }));
+            });
         }
         
         // Single sign with path in body
@@ -1401,26 +1419,32 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         const prefixes = body?.prefixes || [];
         const auth = headers['authorization'];
 
-        const results = await Promise.allSettled(
-            prefixes.map(async (p: string) => {
+        const results = await mapWithConcurrency(
+            prefixes,
+            STORAGE_BATCH_CONCURRENCY,
+            async (p: string) => {
                 // Get info for the deleted object response natively matching FileObject (respect RLS)
                 // We MUST get info before deletion because getting info after deletion will return null
-                const info = await StorageRLS.getObjectInfo(ref, params.bucket, p, auth, false);
-                if (!info) throw new Error('Object not found (may require select permission)');
+                try {
+                    const info = await StorageRLS.getObjectInfo(ref, params.bucket, p, auth, false);
+                    if (!info) throw new Error('Object not found (may require select permission)');
 
-                // Transactional RLS delete + S3 Delete
-                const finalPermit = await StorageRLS.authorizeAction(
-                    ref, auth, 'delete', params.bucket, p, {}, false, true, undefined, undefined,
-                    async () => {
-                        const physSuccess = await StorageService.deleteFile(ref, params.bucket, p);
-                        if (!physSuccess) throw new Error('PHYSICAL_UPLOAD_FAILED');
-                    }
-                );
+                    // Transactional RLS delete + S3 Delete
+                    const finalPermit = await StorageRLS.authorizeAction(
+                        ref, auth, 'delete', params.bucket, p, {}, false, true, undefined, undefined,
+                        async () => {
+                            const physSuccess = await StorageService.deleteFile(ref, params.bucket, p);
+                            if (!physSuccess) throw new Error('PHYSICAL_UPLOAD_FAILED');
+                        }
+                    );
 
-                if (!finalPermit.permitted) throw new Error(finalPermit.error || 'Logical delete failed');
-                
-                return info || { name: p, bucket_id: params.bucket };
-            })
+                    if (!finalPermit.permitted) throw new Error(finalPermit.error || 'Logical delete failed');
+
+                    return { status: 'fulfilled' as const, value: info || { name: p, bucket_id: params.bucket } };
+                } catch (reason) {
+                    return { status: 'rejected' as const, reason };
+                }
+            }
         );
 
         const successfulDeletes: any[] = [];

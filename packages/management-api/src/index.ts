@@ -541,6 +541,7 @@ export function registerStaticAssets() {
 export async function registerAllRoutes() {
   const {
     projectRoutes,
+    projectDashboardRoutes: registeredProjectDashboardRoutes,
     projectSecretsRoutes,
     projectFunctionsRoutes,
     organizationRoutes,
@@ -609,6 +610,7 @@ export async function registerAllRoutes() {
         }
       })
       .use(projectRoutes)
+      .use(registeredProjectDashboardRoutes)
       .use(projectSecretsRoutes)
       .use(projectFunctionsRoutes)
       .use(organizationRoutes)
