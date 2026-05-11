@@ -405,6 +405,72 @@ describe("storageCompatRoutes supabase-js compatibility", () => {
     expect(payload.objects[0].name).toBe("b.txt");
   });
 
+  test("list responses preserve numeric metadata sizes and sanitize malformed sizes", async () => {
+    mockObjects.set("avatars/good.txt", {
+      metadata: { size: "5", mimetype: "text/plain" },
+      updated: "2024-01-01T00:00:00.000Z",
+    });
+    mockObjects.set("avatars/bad.txt", {
+      metadata: { size: "not-a-number", mimetype: "text/plain" },
+      updated: "2024-01-02T00:00:00.000Z",
+    });
+
+    const objectInfo = await StorageRLS.getObjectInfo("test_mock", "avatars", "bad.txt", undefined);
+    expect(objectInfo?.size).toBe(0);
+
+    const res = await request("/storage/v1/object/list/avatars", {
+      method: "POST",
+      headers: {
+        apikey: "test-token",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ sortBy: { column: "name", order: "asc" } }),
+    });
+
+    expect(res.status).toBe(200);
+    const payload = await res.json();
+    const bad = payload.find((item: { name: string }) => item.name === "bad.txt");
+    const good = payload.find((item: { name: string }) => item.name === "good.txt");
+
+    expect(good?.metadata.size).toBe(5);
+    expect(good?.metadata.contentLength).toBe(5);
+    expect(bad?.metadata.size).toBe(0);
+    expect(bad?.metadata.contentLength).toBe(0);
+  });
+
+  test("list endpoints normalize invalid pagination inputs", async () => {
+    mockObjects.set("avatars/one.txt", {
+      metadata: { size: 1, mimetype: "text/plain" },
+      updated: "2024-01-01T00:00:00.000Z",
+    });
+
+    const listRes = await request("/storage/v1/object/list/avatars", {
+      method: "POST",
+      headers: {
+        apikey: "test-token",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ limit: -5, offset: -10 }),
+    });
+
+    expect(listRes.status).toBe(200);
+    expect(await listRes.json()).toHaveLength(1);
+
+    const listV2Res = await request("/storage/v1/object/list-v2/avatars", {
+      method: "POST",
+      headers: {
+        apikey: "test-token",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ limit: -5, offset: -10, cursor: Buffer.from("-9").toString("base64") }),
+    });
+
+    expect(listV2Res.status).toBe(200);
+    const listV2Payload = await listV2Res.json();
+    expect(listV2Payload.objects).toHaveLength(1);
+    expect(listV2Payload.hasNext).toBe(false);
+  });
+
   test("resumable upload appends streamed chunks without buffering the whole request", async () => {
     const uploadSpy = spyOn(StorageService, "uploadFile").mockResolvedValue(true);
     const setSpy = spyOn(TusStore, "set");

@@ -12,6 +12,20 @@ function normalizeSqlRole(role: unknown, allowServiceRole = false): 'anon' | 'au
   return role === 'authenticated' ? 'authenticated' : 'anon';
 }
 
+export function normalizeStorageObjectSize(value: unknown, fallback = 0): number {
+  const parsed =
+    typeof value === 'bigint'
+      ? Number(value)
+      : typeof value === 'number'
+        ? value
+        : typeof value === 'string' && value.trim() !== ''
+          ? Number(value)
+          : fallback;
+
+  if (!Number.isFinite(parsed) || parsed < 0) return fallback;
+  return Math.floor(parsed);
+}
+
 async function applyRlsContext(tx: import("bun").SQL, payload: Record<string, unknown>): Promise<void> {
   const role = normalizeSqlRole(payload.role, payload.__allow_service_role === true);
   await tx.unsafe(`SET LOCAL ROLE "${role}"`);
@@ -123,11 +137,12 @@ export class StorageRLS {
     if (ref === 'test_mock') {
       const obj = mockObjects.get(bucketId + '/' + objectName);
       if (!obj) return null;
+      const size = normalizeStorageObjectSize(obj.metadata?.size);
       return {
         id: bucketId + '/' + objectName,
         name: objectName,
         bucket_id: bucketId,
-        size: obj.metadata?.size || 0,
+        size,
         cache_control: 'no-cache',
         content_type: obj.metadata?.mimetype || 'application/octet-stream',
         created_at: obj.updated || new Date().toISOString(),
@@ -152,12 +167,13 @@ export class StorageRLS {
         if (rows.length === 0) return null;
         const row = rows[0] as Record<string, unknown>;
         const meta = (row.metadata || {}) as Record<string, unknown>;
+        const size = normalizeStorageObjectSize(meta.size);
         return {
           id: row.id ? String(row.id) : null,
           name: String(row.name),
           bucket_id: String(row.bucket_id),
           owner: row.owner ? String(row.owner) : undefined,
-          size: Number(meta.size || 0),
+          size,
           cache_control: String(meta.cacheControl || meta.cache_control || '3600').replace(/^max-age=/, ''),
           content_type: String(meta.mimetype || 'application/octet-stream'),
           created_at: String(row.created_at),
@@ -168,11 +184,11 @@ export class StorageRLS {
           last_accessed_at: String(row.last_accessed_at || row.updated_at),
           metadata: {
             eTag: String(meta.eTag || meta.etag || `"${row.id}"`),
-            size: Number(meta.size || 0),
+            size,
             mimetype: String(meta.mimetype || 'application/octet-stream'),
             cacheControl: String(meta.cacheControl || meta.cache_control || '3600').replace(/^max-age=/, ''),
             lastModified: String(row.updated_at),
-            contentLength: Number(meta.size || 0),
+            contentLength: size,
             httpStatusCode: 200,
             ...(meta.userMetadata && typeof meta.userMetadata === 'object' ? meta.userMetadata as Record<string, unknown> : {})
           }
@@ -190,12 +206,13 @@ export class StorageRLS {
 
       const row = rows[0] as Record<string, unknown>;
       const meta = (row.metadata || {}) as Record<string, unknown>;
+      const size = normalizeStorageObjectSize(meta.size);
       return {
         id: row.id ? String(row.id) : null,
         name: String(row.name),
         bucket_id: String(row.bucket_id),
         owner: row.owner ? String(row.owner) : undefined,
-        size: Number(meta.size || 0),
+        size,
         cache_control: String(meta.cacheControl || meta.cache_control || '3600').replace(/^max-age=/, ''),
         content_type: String(meta.mimetype || 'application/octet-stream'),
         created_at: String(row.created_at),
@@ -206,11 +223,11 @@ export class StorageRLS {
         last_accessed_at: String(row.last_accessed_at || row.updated_at),
         metadata: {
             eTag: String(meta.eTag || meta.etag || `"${row.id}"`),
-            size: Number(meta.size || 0),
+            size,
             mimetype: String(meta.mimetype || 'application/octet-stream'),
             cacheControl: String(meta.cacheControl || meta.cache_control || '3600').replace(/^max-age=/, ''),
             lastModified: String(row.updated_at),
-            contentLength: Number(meta.size || 0),
+            contentLength: size,
             httpStatusCode: 200,
             ...(meta.userMetadata && typeof meta.userMetadata === 'object' ? meta.userMetadata as Record<string, unknown> : {})
         }
@@ -482,14 +499,21 @@ export class StorageRLS {
                     });
                 }
             } else {
+                const size = normalizeStorageObjectSize(val.metadata?.size);
+                const mimetype = val.metadata?.mimetype || (rawName.includes('.') ? rawName.split('.').pop() : 'unknown');
                 uniqueObjects.push({ 
                     id: key, 
                     name: rawName, 
                     updated_at: val.updated, 
                     created_at: val.updated,
                     last_accessed_at: val.updated,
-                    size: val.metadata?.size || 0, 
-                    type: val.metadata?.mimetype || (rawName.includes('.') ? rawName.split('.').pop() : 'unknown'),
+                    size,
+                    type: mimetype,
+                    metadata: {
+                        size,
+                        mimetype,
+                        cacheControl: String(val.metadata?.cacheControl || val.metadata?.cache_control || '3600').replace(/^max-age=/, '')
+                    },
                     isFolder: false,
                     sortKey: nameWithoutPrefix
                 });
@@ -502,10 +526,10 @@ export class StorageRLS {
         const order = (sortBy?.order || 'asc').toLowerCase() === 'desc' ? -1 : 1;
 
         if (column === 'updated_at' || column === 'updated') {
-          return (new Date(a.updated).getTime() - new Date(b.updated).getTime()) * order;
+          return (new Date(a.updated_at || a.updated).getTime() - new Date(b.updated_at || b.updated).getTime()) * order;
         }
         if (column === 'created_at' || column === 'created') {
-          return (new Date(a.updated).getTime() - new Date(b.updated).getTime()) * order; // Map to mock val.updated since mock obj only has updated
+          return (new Date(a.created_at || a.updated_at || a.updated).getTime() - new Date(b.created_at || b.updated_at || b.updated).getTime()) * order;
         }
         if (column === 'metadata.size' || column === 'size') {
           return (a.size - b.size) * order;
@@ -634,6 +658,7 @@ export class StorageRLS {
 
       return results.map(row => {
           const meta = row.metadata || {};
+          const size = normalizeStorageObjectSize(row.size ?? meta.size);
           return {
               name: row.name,
               id: row.id ? String(row.id) : null,
@@ -642,8 +667,9 @@ export class StorageRLS {
               last_accessed_at: row.last_accessed_at || row.last_accessed || row.updated,
               bucket_id: bucketId,
               owner: row.owner ? String(row.owner) : undefined,
+              size,
               metadata: row.is_folder || row.isFolder ? null : {
-                  size: Number(meta.size || row.size || 0),
+                  size,
                   mimetype: String(meta.mimetype || 'application/octet-stream'),
                   cacheControl: String(meta.cacheControl || meta.cache_control || '3600').replace(/^max-age=/, '')
               }
