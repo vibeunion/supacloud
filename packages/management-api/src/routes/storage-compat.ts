@@ -29,7 +29,7 @@ import { TusStore, SignedStore, startStorageCleanupJob, type SignedUpload } from
  */
 import { Elysia, t, status } from "elysia";
 import { StorageService } from "../services/storage.service";
-import { StorageRLS, mockObjects } from "../services/storage-rls";
+import { StorageRLS, mockObjects, normalizeStorageObjectSize } from "../services/storage-rls";
 import { logger } from "../utils/logger";
 import { config } from "../config";
 
@@ -214,6 +214,18 @@ function hostBelongsToBaseDomain(host: string): boolean {
 function isLoopbackHost(host: string): boolean {
     if (!host) return true;
     return host === "localhost" || host === "127.0.0.1" || host === "::1";
+}
+
+function normalizeListInteger(value: unknown, fallback: number, min: number, max: number): number {
+    const parsed =
+        typeof value === 'number'
+            ? value
+            : typeof value === 'string' && value.trim() !== ''
+                ? Number(value)
+                : fallback;
+
+    if (!Number.isFinite(parsed)) return fallback;
+    return Math.min(Math.max(Math.floor(parsed), min), max);
 }
 
 async function resolveProjectRefFromHeaderAndHost(ref: string, host: string): Promise<string> {
@@ -533,8 +545,8 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         
         try {
             const options = {
-                limit: query.limit ? parseInt(query.limit as string) : undefined,
-                offset: query.offset ? parseInt(query.offset as string) : undefined,
+                limit: query.limit !== undefined ? normalizeListInteger(query.limit, 100, 1, 1000) : undefined,
+                offset: query.offset !== undefined ? normalizeListInteger(query.offset, 0, 0, Number.MAX_SAFE_INTEGER) : undefined,
                 search: (query.search as string) || undefined,
                 sortBy: query.sortColumn ? { column: query.sortColumn as string, order: (query.sortOrder as string) || 'asc' } : undefined
             };
@@ -1288,8 +1300,8 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         const auth = headers['authorization'];
 
         const prefix = body?.prefix || '';
-        const limit  = body?.limit || 100;
-        const offset = body?.offset || 0;
+        const limit = normalizeListInteger(body?.limit, 100, 1, 1000);
+        const offset = normalizeListInteger(body?.offset, 0, 0, Number.MAX_SAFE_INTEGER);
         const search = body?.search || '';
 
         // Fetch securely from RLS DB
@@ -1305,6 +1317,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
 
         return files.map(f => {
             const cleanName = prefix ? f.name.slice(prefix.length).replace(/^\/+/, '') : f.name;
+            const size = normalizeStorageObjectSize(f.size ?? f.metadata?.size);
             return {
                 name: cleanName || f.name,
                 id: f.id,
@@ -1313,12 +1326,12 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
                 last_accessed_at: f.last_accessed_at,
                 metadata: f.metadata ? {
                     ...f.metadata,
-                    size: f.size,
+                    size,
                     mimetype: f.metadata.mimetype || 'application/octet-stream',
                     cacheControl: f.metadata.cacheControl || f.metadata.cache_control,
                     eTag: f.metadata.eTag || f.metadata.etag || `"${f.id}"`,
                     lastModified: f.updated_at,
-                    contentLength: f.size,
+                    contentLength: size,
                     httpStatusCode: 200
                 } : null
             };
@@ -1345,16 +1358,18 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         const auth = headers['authorization'];
 
         const prefix = body?.prefix || '';
-        const limit  = body?.limit || 1000;
+        const limit = normalizeListInteger(body?.limit, 1000, 1, 1000);
         const search = body?.search || '';
-        let offset = body?.offset || 0;
+        let offset = normalizeListInteger(body?.offset, 0, 0, Number.MAX_SAFE_INTEGER);
         
         // Decode cursor if provided overrides offset mapping
         if (body?.cursor) {
             try {
                 // simple base64 ascii integer decoding emulation
                 const decoded = Buffer.from(body.cursor, 'base64').toString('ascii');
-                if (!isNaN(Number(decoded))) offset = Number(decoded);
+                if (!isNaN(Number(decoded))) {
+                    offset = normalizeListInteger(decoded, offset, 0, Number.MAX_SAFE_INTEGER);
+                }
             } catch (e) {}
         }
         
@@ -1382,6 +1397,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             if (f.isFolder) {
                 folders.push({ name: cleanName || f.name, key: f.name });
             } else {
+                const size = normalizeStorageObjectSize(f.size ?? f.metadata?.size);
                 objects.push({
                     name: cleanName || f.name,
                     key: f.name,
@@ -1391,12 +1407,12 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
                     last_accessed_at: f.last_accessed_at || f.updated_at || new Date().toISOString(),
                     metadata: f.metadata ? {
                         ...f.metadata,
-                        size: f.size,
+                        size,
                         mimetype: f.metadata.mimetype || 'application/octet-stream',
                         cacheControl: f.metadata.cacheControl || f.metadata.cache_control,
                         eTag: f.metadata.eTag || f.metadata.etag || `"${f.id}"`,
                         lastModified: f.updated_at,
-                        contentLength: f.size,
+                        contentLength: size,
                         httpStatusCode: 200
                     } : null,
                 });
