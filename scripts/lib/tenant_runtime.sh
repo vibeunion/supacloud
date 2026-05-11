@@ -18,6 +18,9 @@ PGRST_PORT_BASE="${PGRST_PORT_BASE:-3100}"
 GOTRUE_PORT_BASE="${GOTRUE_PORT_BASE:-4100}"
 PORT_RANGE="${PORT_RANGE:-10000}"
 SUPACLOUD_META_DB="${SUPACLOUD_META_DB:-supacloud_meta}"
+POSTGREST_RTS="${POSTGREST_RTS:--N1 -M256m -I0.5 -A4m}"
+POSTGREST_MEMORY_MAX="${POSTGREST_MEMORY_MAX:-384M}"
+POSTGREST_CPU_WEIGHT="${POSTGREST_CPU_WEIGHT:-40}"
 
 # Validate parameters
 validate_params() {
@@ -306,7 +309,7 @@ EOF
 # ========== Install systemd template unit ==========
 install_systemd_template() {
     local pgrst_unit="/etc/systemd/system/supacloud-pgrst@.service"
-    if [ ! -f "$pgrst_unit" ]; then
+    if [ ! -f "$pgrst_unit" ] || grep -Eq -- '-M30m|MemoryMax=45M' "$pgrst_unit"; then
         cat > "$pgrst_unit" <<EOF
 [Unit]
 Description=SupaCloud PostgREST for tenant %i
@@ -319,9 +322,9 @@ Type=simple
 User=nobody
 Group=nobody
 EnvironmentFile=/etc/supabase/tenants/%i.env
-# Extreme squeeze: limit to single thread, force Haskell runtime to aggressively reclaim memory (-M30m cap, -I0.1 idle 0.1s triggers GC)
-Environment="GHCRTS=-N1 -M30m -I0.1 -A1m"
-ExecStart=${POSTGREST_BIN} /etc/supabase/tenants/%i.conf +RTS -N1 -M30m -I0.1 -A1m -RTS
+# Keep PostgREST bounded without starving large REST reads/upserts.
+Environment="GHCRTS=${POSTGREST_RTS}"
+ExecStart=${POSTGREST_BIN} /etc/supabase/tenants/%i.conf +RTS ${POSTGREST_RTS} -RTS
 Restart=on-failure
 RestartSec=5
 StartLimitBurst=3
@@ -332,8 +335,8 @@ NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
 ReadOnlyPaths=/etc/supabase/tenants
-MemoryMax=45M
-CPUWeight=20
+MemoryMax=${POSTGREST_MEMORY_MAX}
+CPUWeight=${POSTGREST_CPU_WEIGHT}
 
 [Install]
 WantedBy=multi-user.target

@@ -20,6 +20,9 @@ export interface RuntimeStatus {
 class TenantRuntimeService {
     private readonly TENANT_CONFIG_DIR = config.tenantConfigDir;
     private readonly POSTGREST_BIN = config.postgrestBin;
+    private readonly POSTGREST_RTS = config.postgrestRts;
+    private readonly POSTGREST_MEMORY_MAX = config.postgrestMemoryMax;
+    private readonly POSTGREST_CPU_WEIGHT = config.postgrestCpuWeight;
     private readonly GOTRUE_BIN = config.gotrueBin;
     private readonly PG_HOST = config.pgHost;
     private readonly PG_PORT = String(config.pgPort);
@@ -261,9 +264,10 @@ GOTRUE_MAILER_AUTOCONFIRM=true
         const pgrstUnitPath = "/etc/systemd/system/supacloud-pgrst@.service";
         const gotrueUnitPath = "/etc/systemd/system/supacloud-gotrue@.service";
 
-        // Avoid redundant disk IO if units already exist
+        // Avoid redundant disk IO unless upgrading the old 30 MB PostgREST unit.
         const pgrstExists = await Bun.file(pgrstUnitPath).exists();
-        if (!pgrstExists) {
+        const shouldWritePgrstUnit = !pgrstExists || await unitHasLegacyPostgrestMemoryLimit(pgrstUnitPath);
+        if (shouldWritePgrstUnit) {
             const pgrstUnit = `
 [Unit]
 Description=SupaCloud PostgREST for tenant %i
@@ -276,8 +280,8 @@ Type=simple
 User=nobody
 Group=nobody
 EnvironmentFile=${this.TENANT_CONFIG_DIR}/%i.env
-Environment="GHCRTS=-N1 -M30m -I0.1 -A1m"
-ExecStart=${this.POSTGREST_BIN} ${this.TENANT_CONFIG_DIR}/%i.conf +RTS -N1 -M30m -I0.1 -A1m -RTS
+Environment="GHCRTS=${this.POSTGREST_RTS}"
+ExecStart=${this.POSTGREST_BIN} ${this.TENANT_CONFIG_DIR}/%i.conf +RTS ${this.POSTGREST_RTS} -RTS
 Restart=on-failure
 RestartSec=5
 StartLimitBurst=3
@@ -287,8 +291,8 @@ NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
 ReadOnlyPaths=${this.TENANT_CONFIG_DIR}
-MemoryMax=45M
-CPUWeight=20
+MemoryMax=${this.POSTGREST_MEMORY_MAX}
+CPUWeight=${this.POSTGREST_CPU_WEIGHT}
 
 [Install]
 WantedBy=multi-user.target
@@ -475,3 +479,8 @@ WantedBy=multi-user.target
 }
 
 export const tenantRuntimeService = new TenantRuntimeService();
+
+async function unitHasLegacyPostgrestMemoryLimit(unitPath: string): Promise<boolean> {
+    const content = await Bun.file(unitPath).text();
+    return content.includes("-M30m") || content.includes("MemoryMax=45M");
+}
