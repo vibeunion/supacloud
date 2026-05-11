@@ -41,4 +41,10 @@ describe("Config", () => {
     expect(Number.isInteger(config.port)).toBe(true);
     expect(config.port).toBeGreaterThan(0);
   });
+
+  test("PostgREST runtime budget should handle large REST payloads", () => {
+    expect(config.postgrestRts).toContain("-M256m");
+    expect(config.postgrestMemoryMax).toBe("384M");
+    expect(config.postgrestCpuWeight).toBeGreaterThanOrEqual(40);
+  });
 });
