@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.6](https://github.com/zuohuadong/supacloud/compare/management-api-v0.13.5...management-api-v0.13.6) (2026-05-11)
+
+
+### 🐛 Bug Fixes
+
+* **management-api:** harden storage list metadata parsing ([5b596ff](https://github.com/zuohuadong/supacloud/commit/5b596ff4436a666aec1d232c9858a4173785671e))
+
 ## [0.13.5](https://github.com/zuohuadong/supacloud/compare/management-api-v0.13.4...management-api-v0.13.5) (2026-05-10)
 
 
