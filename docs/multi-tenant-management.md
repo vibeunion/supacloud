@@ -121,6 +121,8 @@ Kong dynamically validates JWT keys for different projects based on `Host` Heade
 
 - **Master Token**: Stored in `/etc/supabase/master-token.env`
 - **Header**: `Authorization: Bearer <MASTER_TOKEN>`
+- **Project Scoped Access**: project service-role tokens can access only their own `/v1/projects/:ref/*` routes.
+- **Function Management Reads**: `/v1/projects/:ref/functions*` management endpoints require project service-role or admin authentication. Public `/functions/v1/*` runtime invokes are separate and keep the standard Supabase function auth model.
 
 ### 4.2 API Endpoints
 
@@ -134,6 +136,7 @@ Kong dynamically validates JWT keys for different projects based on `Host` Heade
 | DELETE | `/v1/projects/:ref` | Delete project (soft delete) |
 | GET | `/v1/projects/:ref/settings` | Get project config |
 | PUT | `/v1/projects/:ref/settings` | Update project config |
+| GET | `/v1/projects/:ref/dashboard/summary` | Cached dashboard aggregate for web console hot path |
 | GET | `/v1/projects/:ref/status` | Get project running status |
 | POST | `/v1/projects/:ref/restart` | Restart project services |
 | GET | `/v1/projects/:ref/types/typescript`| Get database TS types (for CLI) |
@@ -150,6 +153,13 @@ Kong dynamically validates JWT keys for different projects based on `Host` Heade
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/v1/projects/:ref/api-keys` | Get project API keys |
+
+#### Operational Hardening
+
+- Database list routes normalize pagination inputs before constructing SQL `LIMIT/OFFSET`, so malformed values fall back to safe defaults instead of producing 500 responses.
+- Storage signed upload URLs are one-time tokens. The Management API atomically consumes each token with delete-and-return semantics before accepting the upload body.
+- Storage object size metadata is cast defensively; non-numeric `metadata->>'size'` values are treated as zero for dashboard and list calculations.
+- Storage metadata writes can register a physical compensation action, allowing the service to remove newly copied/uploaded objects if the metadata transaction fails after the physical write.
 
 ### 4.3 Request/Response Examples
 
