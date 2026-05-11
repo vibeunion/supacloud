@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.2](https://github.com/zuohuadong/supacloud/compare/supacloud-js-v0.12.1...supacloud-js-v0.12.2) (2026-05-11)
+
+
+### 📝 Documentation
+
+* refresh hardening and runtime notes ([d5eba46](https://github.com/zuohuadong/supacloud/commit/d5eba460190d41ec1c938441fa28e62aac19be03))
+
 ## [0.12.1](https://github.com/zuohuadong/supacloud/compare/supacloud-js-v0.12.0...supacloud-js-v0.12.1) (2026-04-27)
 
 
