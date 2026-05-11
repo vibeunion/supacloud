@@ -62,7 +62,7 @@ describe("@supacloud/js", () => {
     });
 
     const receipt = await client.tasks.submit("aorist-ai/generate/crop", {
-      body: { imageId: "img_1" },
+      body: { image_id: "img_1" },
       retries: 2,
       timeoutSec: 300,
       idempotencyKey: "crop-img_1-v1",
@@ -71,7 +71,7 @@ describe("@supacloud/js", () => {
     expect(receipt.taskId).toBe("tsk_123");
     expect(supabase.functions.invoke).toHaveBeenCalledTimes(1);
     expect(supabase.functions.invoke.mock.calls[0]?.[1]).toMatchObject({
-      body: { imageId: "img_1" },
+      body: { image_id: "img_1" },
       headers: {},
     });
   });

@@ -11,7 +11,7 @@
 ## Architecture
 
 - [Multi-Tenant Architecture](./architecture-multi-tenant.md) - Multi-tenant architecture design
-- [Multi-Tenant Management](./multi-tenant-management.md) - Multi-tenant management specification
+- [Multi-Tenant Management](./multi-tenant-management.md) - Management API specification, auth boundaries, and operational hardening
 
 ## Deployment
 

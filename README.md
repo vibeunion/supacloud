@@ -27,10 +27,11 @@
 - **Native Queue Worker**: Pure Bun.js PostgreSQL LISTEN/NOTIFY based asynchronous worker for AI inference and MQTT events
 - **WebSocket Task Notifications**: Real-time task progress push via native Bun WebSocket
 - **DB Graceful Degradation**: Exponential backoff retry + 503 Service Unavailable on transient DB failures
+- **Hardened Control Plane**: Authenticated function management reads, one-time signed uploads, defensive pagination, and safe storage metadata parsing
 - **Edge Function Preheating**: Zero cold-start via worker module pre-import on deploy
 - **China OAuth**: Built-in WeChat, Alipay, DingTalk login integration
 - **CI/CD Integration**: GitHub webhook for automated deployments
-- **Comprehensive Tests**: 17 unit tests + integration test suite
+- **Comprehensive Tests**: 400+ unit, integration, and structural regression tests
 
 ### SupaCloud vs Supabase
 
@@ -285,6 +286,7 @@ curl http://localhost:9090/v1/projects/<ref>/api-keys \
 | POST | `/v1/projects/:ref/restore` | Restore project |
 | GET | `/v1/projects/:ref/status` | Get status |
 | GET | `/v1/projects/:ref/health` | Get health |
+| GET | `/v1/projects/:ref/dashboard/summary` | Cached dashboard summary |
 | POST | `/v1/projects/:ref/restart` | Restart services |
 | GET | `/v1/projects/:ref/settings` | Get settings |
 | PUT | `/v1/projects/:ref/settings` | Update settings |
@@ -297,22 +299,24 @@ curl http://localhost:9090/v1/projects/<ref>/api-keys \
 | DELETE | `/v1/projects/:ref/secrets/:name` | Delete Secret |
 | GET | `/v1/oauth/authorize` | CLI OAuth Login |
 
+Function management read endpoints under `/v1/projects/:ref/functions*` require project service-role or admin authentication. Public runtime invokes remain on `/functions/v1/*` and continue to use the normal Supabase function auth model.
+
 **Extended API Endpoints:**
 
 | Category | Endpoints | Description |
 |----------|-----------|-------------|
-| Database | `/v1/projects/:ref/database/*` | SQL query, schema inspection, migrations |
+| Database | `/v1/projects/:ref/database/*` | SQL query, schema inspection, migrations, defensive pagination |
 | Auth | `/v1/projects/:ref/config/auth` | OAuth providers, WeChat/Alipay/DingTalk |
 | Frontend | `/v1/projects/:ref/frontend/*` | Pages hosting, deployments, custom domains |
 | Webhook | `/v1/webhooks/github` | GitHub webhook for CI/CD auto-deploy |
-| Storage | `/v1/storage/*` | Bucket management, file upload, S3 migration |
+| Storage | `/v1/storage/*` | Bucket management, file upload, one-time signed uploads, S3 migration |
 | Extensions | `/v1/extensions/*` | PostgreSQL extension marketplace |
 | Scaling | `/v1/projects/:ref/scaling/*` | Vertical upgrade & horizontal replicas |
 | Backups | `/v1/projects/:ref/backups/*` | Database backup & restore |
 | Monitor | `/v1/monitor/*` | Database monitoring & health |
 | Security | `/v1/security/*` | Firewall rules & SSL certificates |
 | Deploy | `/v1/deploy/*` | Edge Function deployment |
-| Tasks | `/v1/projects/:ref/tasks/*` | Background task monitoring |
+| Tasks | `/v1/projects/:ref/tasks/*` | Background task monitoring, including lightweight `summary=true` list mode |
 | **Logs SSE** | `GET /v1/projects/:ref/logs/stream` | **Real-time log streaming via Server-Sent Events** |
 | **Rate Limit** | `GET/PUT /v1/projects/:ref/gateway/rate-limit` | **Programmable per-project rate limiting (Kong Admin API)** |
 | **WebSocket** | `ws://host/ws/tasks` | **Real-time task progress notifications** |
@@ -542,10 +546,11 @@ Key settings in `config.env`:
 - **原生异步队列**: 基于 PostgreSQL LISTEN/NOTIFY 的零依赖高并发调度底座，支持 AI 大模型任务与 MQTT 消息队列
 - **WebSocket 任务通知**: 基于 Bun 原生 WebSocket 的实时任务进度推送
 - **DB 优雅降级**: 指数退避重试 + 503 Service Unavailable，PostgreSQL 短暂不可用时不丢请求
+- **控制平面加固**: 函数管理读接口鉴权、一次性 signed upload、防御性分页和安全的存储元数据解析
 - **Edge Function 预热**: 部署后自动预导入模块，消除首次请求冷启动
 - **国内 OAuth**: 内置微信、支付宝、钉钉登录集成
 - **CI/CD 集成**: GitHub Webhook 自动化部署
-- **完善测试**: 17 个单元测试 + 集成测试套件
+- **完善测试**: 400+ 单元、集成和结构回归测试
 
 ### SupaCloud 与 Supabase 的区别
 
@@ -788,6 +793,7 @@ curl http://localhost:9090/v1/projects/<ref>/api-keys \
 | POST | `/v1/projects/:ref/restore` | 恢复项目 |
 | GET | `/v1/projects/:ref/status` | 获取状态 |
 | GET | `/v1/projects/:ref/health` | 获取健康状态 |
+| GET | `/v1/projects/:ref/dashboard/summary` | 获取带缓存的控制台汇总数据 |
 | POST | `/v1/projects/:ref/restart` | 重启服务 |
 | GET | `/v1/projects/:ref/settings` | 获取配置 |
 | PUT | `/v1/projects/:ref/settings` | 更新配置 |
@@ -798,22 +804,24 @@ curl http://localhost:9090/v1/projects/<ref>/api-keys \
 | GET | `/v1/projects/:ref/secrets` | 管理 Edge Functions Secrets |
 | GET | `/v1/oauth/authorize` | 授权官方 CLI OAuth 登录 |
 
+`/v1/projects/:ref/functions*` 下的函数管理读取接口需要 project service role 或 admin 鉴权。公开函数调用仍走 `/functions/v1/*`，继续使用标准 Supabase 函数鉴权模型。
+
 **扩展 API 端点：**
 
 | 分类 | 端点 | 说明 |
 |------|------|------|
-| 数据库 | `/v1/projects/:ref/database/*` | SQL 查询、Schema 检查、数据迁移 |
+| 数据库 | `/v1/projects/:ref/database/*` | SQL 查询、Schema 检查、数据迁移、防御性分页 |
 | 鉴权 | `/v1/projects/:ref/config/auth` | OAuth 登录、微信/支付宝/钉钉 |
 | 前端托管 | `/v1/projects/:ref/frontend/*` | Pages 托管、自动部署、自定义域名 |
 | Webhook | `/v1/webhooks/github` | GitHub Webhook CI/CD 自动部署 |
-| 存储 | `/v1/storage/*` | Bucket 管理、文件上传、S3 迁移 |
+| 存储 | `/v1/storage/*` | Bucket 管理、文件上传、一次性 signed upload、S3 迁移 |
 | 扩展 | `/v1/extensions/*` | PostgreSQL 扩展市场 |
 | 扩缩容 | `/v1/projects/:ref/scaling/*` | 垂直升级与水平副本 |
 | 备份 | `/v1/projects/:ref/backups/*` | 数据库备份与恢复 |
 | 监控 | `/v1/monitor/*` | 数据库监控与健康检查 |
 | 安全 | `/v1/security/*` | 防火墙规则与 SSL 证书 |
 | 部署 | `/v1/deploy/*` | Edge Function 部署 |
-| 任务 | `/v1/projects/:ref/tasks/*` | 后台 AI/通用异步任务生命周期观测与监控 |
+| 任务 | `/v1/projects/:ref/tasks/*` | 后台 AI/通用异步任务生命周期观测与监控，支持 `summary=true` 轻量列表 |
 | **日志 SSE** | `GET /v1/projects/:ref/logs/stream` | **实时日志流（Server-Sent Events）** |
 | **限流** | `GET/PUT /v1/projects/:ref/gateway/rate-limit` 及 `custom-rate-limits` | **编程式架构与客户端路由自定限流（Kong Admin API 驱动）** |
 | **WebSocket** | `ws://host/ws/tasks` | **实时任务进度推送** |
@@ -847,7 +855,7 @@ Kong 网关 (API 驱动，原生 OpenResty):
   全局插件: ACME SSL, Gzip 压缩, 安全响应头, 访问日志
   路由级插件: CORS, 限流, JWT, IP 限制
   /api/*        → :9090 (管理 API)
-  /functions/*  → :9000 (Edge Runtime 直连)
+  /functions/*  → :9090 (sdk-proxy，异步入队 + 同步转发)
 ```
 
 默认安装使用 `EDGE_RUNTIME_MODE=embedded`，也就是由 `supacloud.service` 直接拉起 Bun Edge Runtime 子进程。`EDGE_RUNTIME_MODE=external` 时可以改用独立的 `supacloud-edge-runtime.service`，但两种模式不能同时运行，否则会争抢 `9000` 端口。
@@ -860,6 +868,32 @@ Kong 网关 (API 驱动，原生 OpenResty):
 | Deno 代码兼容 | ✅ 兼容层 |
 | 隔离级别 | Worker 线程 |
 | 用户函数改动 | **零改动** |
+
+### 后台函数路由
+
+公开 Edge Function 流量先进入 Management API：
+
+- `/functions/v1/*` 路由到 `:9090`
+- `sdk-proxy` 根据函数配置决定异步入队并返回 `202 Accepted`，或同步转发到 Bun Edge Runtime
+- 浏览器和 `supabase-js` 调用方继续使用标准 `functions.invoke()`
+
+后台执行通过服务端函数配置 `background_routes` 开启。对 `/generate/crop`、`/generate/matting`、`/generate/video` 这类耗时路径，推荐使用 `background_routes`，避免依赖浏览器自定义请求头。
+
+### Realtime 路由与恢复
+
+Realtime 流量也先进入 Management API：
+
+- `/realtime/v1/websocket` 路由到 `:9090`
+- Management API 负责 websocket upgrade 并代理到上游 Realtime
+- Kong 不应把浏览器 websocket 流量直接指向 Elixir Realtime 容器
+
+安装或迁移后如果 Realtime 订阅异常，可以运行：
+
+```bash
+cd packages/management-api
+bun run realtime:reconcile
+bun run realtime:reconcile-schema
+```
 
 #### CLI 入口
 
