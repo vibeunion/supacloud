@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.4](https://github.com/zuohuadong/supacloud/compare/web-console-v0.9.3...web-console-v0.9.4) (2026-05-11)
+
+
+### 📝 Documentation
+
+* refresh hardening and runtime notes ([d5eba46](https://github.com/zuohuadong/supacloud/commit/d5eba460190d41ec1c938441fa28e62aac19be03))
+
 ## [0.9.3](https://github.com/zuohuadong/supacloud/compare/web-console-v0.9.2...web-console-v0.9.3) (2026-05-10)
 
 
