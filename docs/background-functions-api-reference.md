@@ -214,6 +214,7 @@ Supported query parameters:
 - `task_type`
 - `dlq`
 - `limit`
+- `summary=true`: return lightweight task rows for list views. Heavy `payload` and `result` columns are omitted from the list response; use `GET /v1/projects/:ref/tasks/:taskId` when full task detail is needed.
 
 ### Cancel Task
 
@@ -232,6 +233,8 @@ POST /v1/projects/:ref/tasks/:taskId/retry
 ```http
 GET /v1/projects/:ref/tasks/dlq
 ```
+
+`summary=true` is also supported on the DLQ list endpoint.
 
 ### Get Background Settings
 

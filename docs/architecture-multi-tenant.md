@@ -1,7 +1,7 @@
 # SupaCloud Multi-Tenant Architecture
 
 > **Status**: Implemented (Option C+ with Kong Native API-Driven Gateway)  
-> **Last Updated**: 2026-04-06
+> **Last Updated**: 2026-05-11
 
 ## Current Architecture
 
@@ -46,11 +46,16 @@ Kong runs in **DB-backed mode** (PostgreSQL) as a native systemd service, fully 
 - No manual YAML editing or `kong reload` — all changes take effect immediately via Admin API.
 
 ### 3. Storage API
-The Node.js based Storage API handles binary uploads to Object Storage AND metadata insertions into PostgreSQL (including Row Level Security checks).
-If globally shared, tenant uploads would pollute the default database's `storage.objects` table and bypass tenant RLS.
-**Status**: To be fully isolated, Storage API must eventually be separated into per-tenant processes just like GoTrue, connecting to the specific tenant's database.
+SupaCloud serves Supabase-compatible Storage through Management API storage routes. Binary data is written to the configured physical backend, while metadata is written to the tenant database with Row Level Security context applied.
 
-### 3. Real-Time Features ⭐ Implemented
+Current safeguards:
+
+- tenant resolution is derived from trusted project headers, API keys, or host routing and rejects mismatches
+- signed upload URLs are one-time tokens consumed atomically before accepting the upload body
+- object size metadata is cast defensively so malformed metadata cannot break dashboard or list queries
+- upload and move paths can register compensation cleanup for newly written physical objects when metadata persistence fails
+
+### 4. Real-Time Features ⭐ Implemented
 
 | Feature | Protocol | Description |
 |---------|----------|-------------|
@@ -58,17 +63,18 @@ If globally shared, tenant uploads would pollute the default database's `storage
 | **WebSocket Tasks** | `ws://` | `ws://host/ws/tasks` — real-time task progress broadcast from TaskWorker |
 | **DB Graceful Degradation** | HTTP | `503 + Retry-After` on transient DB failures, exponential backoff retry (100ms → 400ms → 1600ms) |
 
-### 4. Storage API
-The Node.js based Storage API handles binary uploads to Object Storage AND metadata insertions into PostgreSQL (including Row Level Security checks).
-If globally shared, tenant uploads would pollute the default database's `storage.objects` table and bypass tenant RLS.
-**Status**: To be fully isolated, Storage API must eventually be separated into per-tenant processes just like GoTrue, connecting to the specific tenant's database.
+### 5. Dashboard And Storage Hot Paths
 
-### 5. Realtime API & Admin Console
+The Web Console project dashboard uses `GET /v1/projects/:ref/dashboard/summary` for the initial aggregate view. The endpoint caches short-lived dashboard metrics and keeps partial failures isolated, which avoids issuing many tenant SQL queries from the browser hot path.
+
+Storage object listing is paginated and sorted in SQL rather than loading full object sets into application memory.
+
+### 6. Realtime API & Admin Console
 - **Realtime (Elixir)**: Very resource-intensive as it listens to PostgreSQL logical replication slots. Recommended to remain a shared premium feature or require dedicated high-tier clusters.
 - **Web Console (SVAdmin Hybrid Mount)**: The central dashboard (`web-console`) is fully multi-tenant aware via URL routing parameter `[ref]`. It acts as the Host/SuperAdmin dashboard, but internally relies on the `@svadmin/core` `DataProvider`. When standard CRUD is requested (e.g. Auth Users or DB Tables), the root `+layout.svelte` dynamically bridges SvelteKit routing into SVAdmin's resources array. 
   - This allows the UI to render `svadmin` `<AutoTable>` and `useList` hooks seamlessly while hitting RESTful routes securely proxied to the tenant specific GoTrue / PostgREST instances via the Kong proxy.
 
-### 6. Edge Function Preheating ⭐ Implemented
+### 7. Edge Function Preheating ⭐ Implemented
 When a function is deployed via the Management API:
 1. `Bun.build()` bundles the source into a self-contained `.js`
 2. `invalidateCache()` evicts the old version from Worker thread caches
