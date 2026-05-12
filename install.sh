@@ -19,6 +19,8 @@
 
 set -e
 
+export DEBIAN_FRONTEND=noninteractive
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONFIG_FILE="${SCRIPT_DIR}/config.env"
 OPT_CONFIG_FILE="/opt/supacloud/config.env"
@@ -532,6 +534,7 @@ install_base_dependencies() {
         # SSH tools (ssh-keygen, sshd) — Ansible required
         ! command -v ssh-keygen &> /dev/null && PACKAGES="$PACKAGES openssh-clients"
         ! command -v sshd &> /dev/null && PACKAGES="$PACKAGES openssh-server"
+        ! command -v unzip &> /dev/null && PACKAGES="$PACKAGES unzip"
 
         if [[ -n "$PACKAGES" ]]; then
             log_info "Installing missing packages: $PACKAGES"
@@ -576,6 +579,7 @@ install_base_dependencies() {
         # SSH tools — Required for Ansible
         ! command -v ssh-keygen &> /dev/null && PACKAGES="$PACKAGES openssh-client"
         ! command -v sshd &> /dev/null && PACKAGES="$PACKAGES openssh-server"
+        ! command -v unzip &> /dev/null && PACKAGES="$PACKAGES unzip"
 
         if [[ -n "$PACKAGES" ]]; then
             log_info "Installing missing base packages: $PACKAGES"
@@ -889,7 +893,7 @@ install_juicefs() {
             *) log_error "Unsupported architecture: ${ARCH}"; return 1 ;;
         esac
 
-        if ! curl -fsSL --progress-bar "https://mirror.ghproxy.com/${JFS_URL}" -o /tmp/juicefs.tar.gz; then
+        if ! curl -fsSL --progress-bar "https://ghproxy.net/${JFS_URL}" -o /tmp/juicefs.tar.gz; then
             log_warn "Proxy download failed, trying direct download..."
             curl -fsSL --progress-bar "${JFS_URL}" -o /tmp/juicefs.tar.gz || {
                 log_error "JuiceFS download failed"; return 1
@@ -1038,7 +1042,7 @@ EOF
     log_info "Installing standalone docker-compose ${COMPOSE_VERSION}..."
     COMPOSE_URL="https://github.com/docker/compose/releases/download/${COMPOSE_VERSION}/docker-compose-$(uname -s)-$(uname -m)"
     
-    if curl -fsSL --progress-bar "https://mirror.ghproxy.com/${COMPOSE_URL}" -o /usr/local/bin/docker-compose 2>/dev/null; then
+    if curl -fsSL --progress-bar "https://ghproxy.net/${COMPOSE_URL}" -o /usr/local/bin/docker-compose 2>/dev/null; then
         log_info "Proxy download successful"
     else
         log_warn "Proxy download failed, trying direct download..."
@@ -1051,39 +1055,59 @@ EOF
 
 # ========== Edge Functions Runtime Configuration ==========
 install_edge_runtime() {
-    log_step "Installing Edge Runtime (Bun + Elysia Worker Pool)..."
+    log_step "Installing Edge Runtime..."
     local EDGE_RUNTIME_MODE="${EDGE_RUNTIME_MODE:-embedded}"
-    
-    # 1. Install Bun binary
-    if ! command -v bun &> /dev/null; then
-        log_info "Installing Bun binary..."
-        if [[ "${USE_CHINA_MIRROR:-false}" == "true" ]] || [[ "${CN:-false}" == "true" ]]; then
-            curl -fsSL https://bunjs.cn/install | bash
-        else
-            curl -fsSL https://bun.sh/install | bash
-        fi
-        ln -sf ~/.bun/bin/bun /usr/local/bin/bun 2>/dev/null || true
-        ln -sf ~/.bun/bin/bunx /usr/local/bin/bunx 2>/dev/null || true
-        command -v bun &> /dev/null && log_info "Bun installed: $(bun --version)" || log_warn "Bun at ~/.bun/bin/bun, reload shell"
-    else
-        log_info "Bun already installed: $(bun --version)"
-    fi
 
-    # 2. Create directories
-    mkdir -p /var/supacloud/frontends /opt/supacloud/edge-runtime /etc/supabase
-    touch /etc/supabase/.bun_installed
+    # 1. Create directories
+    mkdir -p /var/supacloud/frontends /opt/supacloud/edge-runtime /opt/supacloud/functions /etc/supabase
 
-    # 3. Deploy Edge Runtime from source
+    # 2. Deploy Edge Runtime from source
     local EDGE_RT_SRC="${SCRIPT_DIR}/packages/edge-runtime"
     if [[ -d "$EDGE_RT_SRC" ]]; then
         cp -rf "$EDGE_RT_SRC"/* /opt/supacloud/edge-runtime/
-        cd /opt/supacloud/edge-runtime && bun install --frozen-lockfile 2>/dev/null || bun install
+
+        if [[ "$EDGE_RUNTIME_MODE" == "external" ]]; then
+            # External mode requires system Bun for running `bun server.ts`
+            if ! command -v bun &> /dev/null; then
+                log_info "External Edge Runtime mode requires Bun, installing..."
+                if ! command -v unzip &> /dev/null; then
+                    log_info "Installing unzip (required by Bun installer)..."
+                    if command -v apt-get &>/dev/null; then
+                        apt-get install -y unzip
+                    elif command -v dnf &>/dev/null; then
+                        dnf install -y unzip
+                    fi
+                fi
+                if [[ "${USE_CHINA_MIRROR:-false}" == "true" ]] || [[ "${CN:-false}" == "true" ]]; then
+                    curl -fsSL https://bunjs.cn/install | bash
+                else
+                    curl -fsSL https://bun.sh/install | bash
+                fi
+                ln -sf ~/.bun/bin/bun /usr/local/bin/bun 2>/dev/null || true
+                ln -sf ~/.bun/bin/bunx /usr/local/bin/bunx 2>/dev/null || true
+                command -v bun &> /dev/null && log_info "Bun installed: $(bun --version)" || log_warn "Bun installed at ~/.bun/bin/bun"
+            else
+                log_info "Bun already installed: $(bun --version)"
+            fi
+            cd /opt/supacloud/edge-runtime && bun install --frozen-lockfile 2>/dev/null || bun install
+            touch /etc/supabase/.bun_installed
+        else
+            # Embedded mode: Bun is NOT required (compiled supacloud binary has built-in runtime)
+            # Pre-install node_modules so they're ready if user switches to external mode later
+            if command -v bun &> /dev/null; then
+                cd /opt/supacloud/edge-runtime && bun install --frozen-lockfile 2>/dev/null || bun install
+                log_info "Edge Runtime dependencies installed (Bun available)"
+            else
+                log_info "Edge Runtime deployed (embedded mode, skipping Bun install)"
+                log_info "Note: If switching to external mode later, install Bun manually"
+            fi
+        fi
         log_info "Edge Runtime deployed to /opt/supacloud/edge-runtime"
     else
-        log_warn "Edge Runtime source not found at $EDGE_RT_SRC"
+        log_warn "Edge Runtime source not found at $EDGE_RT_SRC, skipping"
     fi
 
-    # 4. Register systemd service (from infrastructure/systemd/ if available, else inline)
+    # 3. Register systemd service (from infrastructure/systemd/ if available, else inline)
     local SYSTEMD_SRC="${SCRIPT_DIR}/infrastructure/systemd"
     if [[ -f "${SYSTEMD_SRC}/supacloud-edge-runtime.service" ]]; then
         cp "${SYSTEMD_SRC}/supacloud-edge-runtime.service" /etc/systemd/system/supacloud-edge-runtime.service
@@ -1121,7 +1145,7 @@ SVCEOF
         log_info "Edge Runtime on port 9000 (standalone systemd service mode)"
     else
         systemctl disable --now supacloud-edge-runtime 2>/dev/null || true
-        log_info "Edge Runtime installed in embedded mode (managed by supacloud.service)"
+        log_info "Edge Runtime in embedded mode (managed by supacloud binary, no system Bun needed)"
     fi
 }
 
@@ -1185,13 +1209,36 @@ install_kong_native() {
     fi
 
     # 2. Package installation
-        log_info "Skipping DNF/APT fetch since Kong was installed natively via repo."
+    if command -v kong &>/dev/null; then
+        log_info "Kong already installed: $(kong version 2>&1 | head -1)"
+    elif command -v apt-get &>/dev/null; then
+        log_info "Installing Kong via apt (Ubuntu/Debian)..."
+        local KONG_MAJOR="${KONG_MAJOR:-3.9}"
+        curl -1sLf "https://packages.konghq.com/public/gateway-${KONG_MAJOR}/setup.deb.sh" | bash
+        apt-get update -y
+        DEBIAN_FRONTEND=noninteractive apt-get install -y -o Dpkg::Options::="--force-confnew" kong
+    elif command -v dnf &>/dev/null; then
+        log_info "Installing Kong via dnf (RHEL/CentOS)..."
+        local KONG_MAJOR="${KONG_MAJOR:-3.9}"
+        curl -1sLf "https://packages.konghq.com/public/gateway-${KONG_MAJOR}/setup.rpm.sh" | bash
+        dnf install -y kong
+    else
+        log_error "No supported package manager found for Kong installation"
+        return 1
+    fi
 
     # 3. Provision DB (Assuming Postgres is up via Pigsty at 127.0.0.1:5432)
     log_info "Provisioning Kong database on PostgreSQL..."
     # Local postgres user comes from PG_ADMIN_PASSWORD or default Pigsty 'postgres'
     sudo -u postgres psql -c "CREATE USER kong WITH PASSWORD 'kong';" || true
+    sudo -u postgres psql -c "ALTER USER kong WITH SUPERUSER;" || true
     sudo -u postgres psql -c "CREATE DATABASE kong OWNER kong;" || true
+
+    if ! grep -q "kong.*kong" /pg/data/pg_hba.conf 2>/dev/null; then
+        log_info "Adding kong access to pg_hba.conf..."
+        printf 'host  kong  kong  127.0.0.1/32  scram-sha-256\nlocal  kong  kong  all  scram-sha-256\n' >> /pg/data/pg_hba.conf
+        sudo -u postgres psql -c "SELECT pg_reload_conf();" 2>/dev/null || true
+    fi
 
     # 4. Kong Configuration
     log_info "Configuring Native Kong..."
@@ -2040,15 +2087,15 @@ install_management_api() {
         CI_BIN="supacloud-linux-arm64"
     fi
 
-    if [[ -f "$BIN_SOURCE" ]]; then
-        log_info "Found local precompiled binary ($BIN_SOURCE), installing..."
-        cp "$BIN_SOURCE" "$BIN_TARGET"
-    elif [[ -n "$CI_BIN" ]] && [[ -f "${SCRIPT_DIR}/dist/${CI_BIN}" ]]; then
-        log_info "Found CI build artifact (${CI_BIN}), installing..."
+    if [[ -n "$CI_BIN" ]] && [[ -f "${SCRIPT_DIR}/dist/${CI_BIN}" ]]; then
+        log_info "Found CI build artifact (dist/${CI_BIN}), installing..."
         cp "${SCRIPT_DIR}/dist/${CI_BIN}" "$BIN_TARGET"
     elif [[ -n "$CI_BIN" ]] && [[ -f "${SCRIPT_DIR}/${CI_BIN}" ]]; then
         log_info "Found platform binary in root (${CI_BIN}), installing..."
         cp "${SCRIPT_DIR}/${CI_BIN}" "$BIN_TARGET"
+    elif [[ -f "$BIN_SOURCE" ]] && file "$BIN_SOURCE" | grep -q "ELF"; then
+        log_info "Found local ELF binary ($BIN_SOURCE), installing..."
+        cp "$BIN_SOURCE" "$BIN_TARGET"
     else
         log_error "Could not find core binary file. Please ensure: 1. Locally ran bun run build or 2. Downloaded CI artifacts to dist directory."
         exit 1
@@ -2056,7 +2103,7 @@ install_management_api() {
     chmod +x "$BIN_TARGET"
 
     # 2. Copy management scripts (Pigsty adapter)
-    if [[ -d "${SCRIPT_DIR}/scripts/lib" ]]; then
+    if [[ -d "${SCRIPT_DIR}/scripts/lib" ]] && [[ "${SCRIPT_DIR}/scripts/lib" != "$SCRIPTS_INSTALL_DIR" ]]; then
         cp -rf "${SCRIPT_DIR}/scripts/lib/"* "$SCRIPTS_INSTALL_DIR/"
         chmod +x "$SCRIPTS_INSTALL_DIR"/*.sh
         log_info "Underlying script link ready: $SCRIPTS_INSTALL_DIR"
@@ -2076,7 +2123,10 @@ EOF
 
     # 4. Initialize Management API database (via native psql)
     log_info "Executing database pre-check..."
-    su - postgres -c "psql -tAc \"SELECT 1 FROM pg_database WHERE datname='supacloud_meta'\" | grep -q 1 || psql -c 'CREATE DATABASE supacloud_meta'" 2>/dev/null || true
+    su - postgres -c "psql -tAc \"SELECT 1 FROM pg_database WHERE datname='supacloud_meta'\" | grep -q 1 || psql -c 'CREATE DATABASE supacloud_meta'" 2>/dev/null \
+        || sudo -u postgres psql -c "CREATE DATABASE supacloud_meta" 2>/dev/null \
+        || psql -h 127.0.0.1 -U postgres -c "CREATE DATABASE supacloud_meta" 2>/dev/null \
+        || log_warn "Could not create supacloud_meta database, management API will attempt auto-init"
     if [[ -n "${POSTGRES_PASSWORD:-}" ]]; then
         su - postgres -c "psql -c \"ALTER USER postgres PASSWORD '${POSTGRES_PASSWORD}'\"" 2>/dev/null || true
     fi
