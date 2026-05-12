@@ -3,6 +3,9 @@ import { logger } from "../utils/logger";
 import { projectService } from "../services";
 import { resolveProjectServiceRoleKey } from "../utils/service-role";
 import { requireProjectOrAdminAuth } from "../middleware/auth";
+import { sql as metaSql } from "../db";
+import { resolveTenantPorts, normalizeProjectRoutingConfig } from "../utils/project-routing";
+import { normalizeProjectConfig } from "../utils/project-config";
 
 async function getGoTrueAdminContext(ref: string) {
   const project = await projectService.getProject(ref);
@@ -12,13 +15,41 @@ async function getGoTrueAdminContext(ref: string) {
   if (!serviceRoleKey) return null;
 
   const { config } = await import("../config");
-  const apiUrl =
-    project.api?.url ||
-    (config.kongInternal.startsWith("http")
+
+  let apiUrl: string;
+  try {
+    const rows = await metaSql`
+      SELECT config FROM projects WHERE ref = ${ref} AND deleted_at IS NULL LIMIT 1
+    `;
+    const projectConfig = normalizeProjectConfig(rows[0]?.config);
+    const routingConfig = normalizeProjectRoutingConfig(projectConfig);
+    const ports = resolveTenantPorts(routingConfig);
+    if (ports?.gotruePort) {
+      apiUrl = `http://127.0.0.1:${ports.gotruePort}`;
+    } else {
+      apiUrl = config.kongInternal.startsWith("http")
+        ? config.kongInternal
+        : `http://${config.kongInternal}`;
+    }
+  } catch {
+    apiUrl = config.kongInternal.startsWith("http")
       ? config.kongInternal
-      : `http://${config.kongInternal}`);
+      : `http://${config.kongInternal}`;
+  }
 
   return { project, apiUrl, serviceRoleKey };
+}
+
+async function gotrueFetch(url: string, init?: RequestInit): Promise<Response> {
+  try {
+    return await fetch(url, init);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg.includes("self signed certificate") || msg.includes("CERT") || msg.includes("ECONNREFUSED") || msg.includes("connect")) {
+      throw new Error(`Auth service unavailable: ${msg}`);
+    }
+    throw err;
+  }
 }
 
 /**
@@ -36,7 +67,6 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
       }
       const { apiUrl, serviceRoleKey } = ctx;
 
-      // Pass along pagination (svadmin uses _page / _limit or standard skip/limit)
       const limit = Number(query.per_page || query._limit || query.limit || 50);
       const page = Number(query.page || query._page || 1) || Math.floor(Number(query.skip || 0) / limit) + 1;
       const q = query.q;
@@ -46,7 +76,7 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
       searchParams.set("per_page", String(limit));
       if (q) searchParams.set("q", String(q));
 
-      const res = await fetch(`${apiUrl}/auth/v1/admin/users?${searchParams.toString()}`, {
+      const res = await gotrueFetch(`${apiUrl}/admin/users?${searchParams.toString()}`, {
         headers: {
           "apikey": serviceRoleKey,
           "Authorization": `Bearer ${serviceRoleKey}`,
@@ -60,7 +90,6 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
         return { message: err.msg || err.message || "Failed to fetch users", code: err.code || "500" };
       }
 
-      // Forward link and total count headers for SDK pagination
       const linkHeader = res.headers.get("link");
       if (linkHeader) set.headers["link"] = linkHeader;
       const totalHeader = res.headers.get("x-total-count");
@@ -115,7 +144,7 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
       }
       const { apiUrl, serviceRoleKey } = ctx;
 
-      const res = await fetch(`${apiUrl}/auth/v1/admin/users`, {
+      const res = await gotrueFetch(`${apiUrl}/admin/users`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -179,7 +208,7 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
       }
       const { apiUrl, serviceRoleKey } = ctx;
 
-      const res = await fetch(`${apiUrl}/auth/v1/invite`, {
+      const res = await gotrueFetch(`${apiUrl}/invite`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -214,8 +243,6 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
     }
   )
 
-  // GET /users/:id — Get a single user by ID
-  // supabase.auth.admin.getUserById(id)
   .get(
     "/users/:id",
     async ({ params, set, request }) => {
@@ -227,7 +254,7 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
       }
       const { apiUrl, serviceRoleKey } = ctx;
 
-      const res = await fetch(`${apiUrl}/auth/v1/admin/users/${params.id}`, {
+      const res = await gotrueFetch(`${apiUrl}/admin/users/${params.id}`, {
         headers: {
           "apikey": serviceRoleKey,
           "Authorization": `Bearer ${serviceRoleKey}`,
@@ -251,8 +278,6 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
     }
   )
 
-  // PUT /users/:id — Update a user by ID
-  // supabase.auth.admin.updateUserById(id, { email, password, user_metadata, ... })
   .put(
     "/users/:id",
     async ({ params, body, set, request }) => {
@@ -264,7 +289,7 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
       }
       const { apiUrl, serviceRoleKey } = ctx;
 
-      const res = await fetch(`${apiUrl}/auth/v1/admin/users/${params.id}`, {
+      const res = await gotrueFetch(`${apiUrl}/admin/users/${params.id}`, {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
@@ -313,7 +338,7 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
       }
       const { apiUrl, serviceRoleKey } = ctx;
 
-      const res = await fetch(`${apiUrl}/auth/v1/admin/users/${params.id}`, {
+      const res = await gotrueFetch(`${apiUrl}/admin/users/${params.id}`, {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
@@ -358,9 +383,9 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
       }
       const { apiUrl, serviceRoleKey } = ctx;
 
-      const url = `${apiUrl}/auth/v1/admin/users/${params.id}`;
+      const url = `${apiUrl}/admin/users/${params.id}`;
 
-      const res = await fetch(url, {
+      const res = await gotrueFetch(url, {
         method: "DELETE",
         headers: {
           "Content-Type": "application/json",
@@ -399,7 +424,7 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
       }
       const { apiUrl, serviceRoleKey } = ctx;
 
-      const res = await fetch(`${apiUrl}/auth/v1/admin/users/${params.id}/factors`, {
+      const res = await gotrueFetch(`${apiUrl}/admin/users/${params.id}/factors`, {
         headers: {
           "apikey": serviceRoleKey,
           "Authorization": `Bearer ${serviceRoleKey}`,
@@ -434,7 +459,7 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
       }
       const { apiUrl, serviceRoleKey } = ctx;
 
-      const res = await fetch(`${apiUrl}/auth/v1/admin/generate_link`, {
+      const res = await gotrueFetch(`${apiUrl}/admin/generate_link`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

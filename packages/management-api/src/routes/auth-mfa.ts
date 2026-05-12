@@ -77,10 +77,17 @@ export const authMfaRoutes = new Elysia({ prefix: "/v1/projects" })
         return status(404, { message: "Project service role key not found", code: "404" });
       }
       const { config } = await import("../config");
-      const apiUrl = project.api?.url || (config.kongInternal.startsWith('http') ? config.kongInternal : `http://${config.kongInternal}`);
+
+      let apiUrl: string;
+      const gotruePort = await getGotruePort(params.ref);
+      if (gotruePort) {
+        apiUrl = `http://127.0.0.1:${gotruePort}`;
+      } else {
+        apiUrl = config.kongInternal.startsWith('http') ? config.kongInternal : `http://${config.kongInternal}`;
+      }
 
       try {
-        const res = await fetch(`${apiUrl}/auth/v1/admin/factors`, {
+        const res = await fetch(`${apiUrl}/admin/factors`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
