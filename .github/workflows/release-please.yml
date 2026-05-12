@@ -91,18 +91,18 @@ jobs:
           chmod 0755 dist/supacloud-edge-runtime-*
 
       - name: Generate SHA256SUMS
-        working-directory: packages/management-api
         run: |
-          cd dist
-          sha256sum supacloud-* web-console-build.tar.gz > SHA256SUMS
-          cp SHA256SUMS ../../edge-runtime/dist/
+          mkdir -p release-assets
+          cp packages/management-api/dist/* release-assets/
+          cp packages/edge-runtime/dist/* release-assets/
+          cd release-assets
+          sha256sum * > SHA256SUMS
 
       - name: Upload binaries to GitHub Release
-        working-directory: packages/management-api
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ needs.release-please.outputs.management_api_tag_name }}
-        run: gh release upload "$RELEASE_TAG" dist/* ../edge-runtime/dist/* --clobber
+        run: gh release upload "$RELEASE_TAG" release-assets/* --clobber
 
   publish-npm:
     needs: release-please
