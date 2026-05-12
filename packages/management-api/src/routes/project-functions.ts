@@ -401,6 +401,44 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
     },
   )
 
+  .post(
+    "/:ref/functions/:slug/invoke",
+    async ({ params, request, body }) => {
+      const authError = await requireProjectOrAdminAuth(request, params.ref);
+      if (authError) return status(authError.status, authError.body);
+      try {
+        const { config } = await import("../config");
+        const edgeUrl = `${config.edgeRuntimeUrl}/functions/v1/${params.slug}`;
+        const headers: Record<string, string> = {
+          "Content-Type": "application/json",
+          "x-project-ref": params.ref,
+          "x-region": config.region || "local",
+        };
+        const authHeader = request.headers.get("Authorization");
+        if (authHeader) headers["Authorization"] = authHeader;
+        const apiKey = request.headers.get("apikey");
+        if (apiKey) headers["apikey"] = apiKey;
+        const resp = await fetch(edgeUrl, {
+          method: "POST",
+          headers,
+          body: body ? JSON.stringify(body) : undefined,
+        });
+        const respBody = await resp.text();
+        return new Response(respBody, {
+          status: resp.status,
+          headers: { "Content-Type": resp.headers.get("Content-Type") || "application/json" },
+        });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return status(502, { message: `Edge Runtime unreachable: ${msg}`, code: "502" });
+      }
+    },
+    {
+      params: t.Object({ ref: t.String(), slug: t.String() }),
+      body: t.Optional(t.Any()),
+    },
+  )
+
   .get(
     "/:ref/functions/:slug/source",
     async ({ params, request }) => {
