@@ -1057,57 +1057,98 @@ EOF
 install_edge_runtime() {
     log_step "Installing Edge Runtime..."
     local EDGE_RUNTIME_MODE="${EDGE_RUNTIME_MODE:-embedded}"
+    local EDGE_RT_BIN_NAME=""
+    local EDGE_RT_BIN_SOURCE=""
+    local EDGE_RT_BIN_TARGET="/usr/local/bin/supacloud-edge-runtime"
+    local USE_COMPILED_BINARY=false
+
+    local ARCH=$(uname -m)
+    if [[ "$ARCH" == "x86_64" ]]; then
+        EDGE_RT_BIN_NAME="supacloud-edge-runtime-linux-amd64"
+    elif [[ "$ARCH" == "aarch64" ]]; then
+        EDGE_RT_BIN_NAME="supacloud-edge-runtime-linux-arm64"
+    fi
 
     # 1. Create directories
     mkdir -p /var/supacloud/frontends /opt/supacloud/edge-runtime /opt/supacloud/functions /etc/supabase
 
-    # 2. Deploy Edge Runtime from source
+    # 2. Try to find compiled edge-runtime binary
+    if [[ -n "$EDGE_RT_BIN_NAME" ]]; then
+        if [[ -f "${SCRIPT_DIR}/dist/${EDGE_RT_BIN_NAME}" ]]; then
+            EDGE_RT_BIN_SOURCE="${SCRIPT_DIR}/dist/${EDGE_RT_BIN_NAME}"
+        elif [[ -f "${SCRIPT_DIR}/packages/edge-runtime/dist/${EDGE_RT_BIN_NAME}" ]]; then
+            EDGE_RT_BIN_SOURCE="${SCRIPT_DIR}/packages/edge-runtime/dist/${EDGE_RT_BIN_NAME}"
+        elif [[ -f "${SCRIPT_DIR}/packages/edge-runtime/${EDGE_RT_BIN_NAME}" ]]; then
+            EDGE_RT_BIN_SOURCE="${SCRIPT_DIR}/packages/edge-runtime/${EDGE_RT_BIN_NAME}"
+        fi
+    fi
+
+    if [[ -n "$EDGE_RT_BIN_SOURCE" ]] && file "$EDGE_RT_BIN_SOURCE" | grep -q "ELF"; then
+        log_info "Found compiled Edge Runtime binary ($EDGE_RT_BIN_NAME), installing..."
+        cp "$EDGE_RT_BIN_SOURCE" "$EDGE_RT_BIN_TARGET"
+        chmod +x "$EDGE_RT_BIN_TARGET"
+        USE_COMPILED_BINARY=true
+        log_info "Compiled Edge Runtime binary installed to $EDGE_RT_BIN_TARGET"
+    fi
+
+    # 3. Deploy Edge Runtime source (fallback for non-compiled mode)
     local EDGE_RT_SRC="${SCRIPT_DIR}/packages/edge-runtime"
     if [[ -d "$EDGE_RT_SRC" ]]; then
         cp -rf "$EDGE_RT_SRC"/* /opt/supacloud/edge-runtime/
 
-        if [[ "$EDGE_RUNTIME_MODE" == "external" ]]; then
-            # External mode requires system Bun for running `bun server.ts`
-            if ! command -v bun &> /dev/null; then
-                log_info "External Edge Runtime mode requires Bun, installing..."
-                if ! command -v unzip &> /dev/null; then
-                    log_info "Installing unzip (required by Bun installer)..."
-                    if command -v apt-get &>/dev/null; then
-                        apt-get install -y unzip
-                    elif command -v dnf &>/dev/null; then
-                        dnf install -y unzip
+        if [[ "$USE_COMPILED_BINARY" == "false" ]]; then
+            if [[ "$EDGE_RUNTIME_MODE" == "external" ]]; then
+                if ! command -v bun &> /dev/null; then
+                    log_info "External Edge Runtime mode requires Bun, installing..."
+                    if ! command -v unzip &> /dev/null; then
+                        log_info "Installing unzip (required by Bun installer)..."
+                        if command -v apt-get &>/dev/null; then
+                            apt-get install -y unzip
+                        elif command -v dnf &>/dev/null; then
+                            dnf install -y unzip
+                        fi
                     fi
-                fi
-                if [[ "${USE_CHINA_MIRROR:-false}" == "true" ]] || [[ "${CN:-false}" == "true" ]]; then
-                    curl -fsSL https://bunjs.cn/install | bash
+                    if [[ "${USE_CHINA_MIRROR:-false}" == "true" ]] || [[ "${CN:-false}" == "true" ]]; then
+                        curl -fsSL https://bunjs.cn/install | bash
+                    else
+                        curl -fsSL https://bun.sh/install | bash
+                    fi
+                    ln -sf ~/.bun/bin/bun /usr/local/bin/bun 2>/dev/null || true
+                    ln -sf ~/.bun/bin/bunx /usr/local/bin/bunx 2>/dev/null || true
+                    command -v bun &> /dev/null && log_info "Bun installed: $(bun --version)" || log_warn "Bun installed at ~/.bun/bin/bun"
                 else
-                    curl -fsSL https://bun.sh/install | bash
+                    log_info "Bun already installed: $(bun --version)"
                 fi
-                ln -sf ~/.bun/bin/bun /usr/local/bin/bun 2>/dev/null || true
-                ln -sf ~/.bun/bin/bunx /usr/local/bin/bunx 2>/dev/null || true
-                command -v bun &> /dev/null && log_info "Bun installed: $(bun --version)" || log_warn "Bun installed at ~/.bun/bin/bun"
-            else
-                log_info "Bun already installed: $(bun --version)"
-            fi
-            cd /opt/supacloud/edge-runtime && bun install --frozen-lockfile 2>/dev/null || bun install
-            touch /etc/supabase/.bun_installed
-        else
-            # Embedded mode: Bun is NOT required (compiled supacloud binary has built-in runtime)
-            # Pre-install node_modules so they're ready if user switches to external mode later
-            if command -v bun &> /dev/null; then
                 cd /opt/supacloud/edge-runtime && bun install --frozen-lockfile 2>/dev/null || bun install
-                log_info "Edge Runtime dependencies installed (Bun available)"
+                touch /etc/supabase/.bun_installed
             else
-                log_info "Edge Runtime deployed (embedded mode, skipping Bun install)"
-                log_info "Note: If switching to external mode later, install Bun manually"
+                if command -v bun &> /dev/null; then
+                    cd /opt/supacloud/edge-runtime && bun install --frozen-lockfile 2>/dev/null || bun install
+                    log_info "Edge Runtime dependencies installed (Bun available)"
+                else
+                    log_info "Edge Runtime deployed (embedded mode, no compiled binary found, no Bun available)"
+                    log_info "Note: Edge Functions will not work until Bun is installed or a compiled binary is provided"
+                fi
             fi
+        else
+            log_info "Edge Runtime source deployed to /opt/supacloud/edge-runtime (functions directory)"
         fi
         log_info "Edge Runtime deployed to /opt/supacloud/edge-runtime"
     else
-        log_warn "Edge Runtime source not found at $EDGE_RT_SRC, skipping"
+        log_warn "Edge Runtime source not found at $EDGE_RT_SRC, skipping source deployment"
     fi
 
-    # 3. Register systemd service (from infrastructure/systemd/ if available, else inline)
+    # 4. Determine ExecStart command
+    local EXEC_START_CMD=""
+    if [[ "$USE_COMPILED_BINARY" == "true" ]]; then
+        EXEC_START_CMD="$EDGE_RT_BIN_TARGET"
+        log_info "Using compiled binary for Edge Runtime service"
+    else
+        EXEC_START_CMD="/usr/local/bin/bun server.ts"
+        log_info "Using Bun source mode for Edge Runtime service"
+    fi
+
+    # 5. Register systemd service
     local SYSTEMD_SRC="${SCRIPT_DIR}/infrastructure/systemd"
     if [[ -f "${SYSTEMD_SRC}/supacloud-edge-runtime.service" ]]; then
         cp "${SYSTEMD_SRC}/supacloud-edge-runtime.service" /etc/systemd/system/supacloud-edge-runtime.service
@@ -1115,7 +1156,7 @@ install_edge_runtime() {
     else
         cat > /etc/systemd/system/supacloud-edge-runtime.service <<SVCEOF
 [Unit]
-Description=SupaCloud Edge Runtime (Bun + Elysia)
+Description=SupaCloud Edge Runtime
 After=supacloud.service
 Wants=supacloud.service
 
@@ -1123,7 +1164,7 @@ Wants=supacloud.service
 Type=simple
 WorkingDirectory=/opt/supacloud/edge-runtime
 ExecStartPre=/bin/bash -c 'for pid in \$(lsof -iTCP:9000 -sTCP:LISTEN -t 2>/dev/null); do echo "[EdgeRT] Killing stale pid=\$pid"; kill -9 \$pid 2>/dev/null || true; done; sleep 0.3; true'
-ExecStart=/usr/local/bin/bun server.ts
+ExecStart=${EXEC_START_CMD}
 ExecStopPost=/bin/bash -c 'for pid in \$(lsof -iTCP:9000 -sTCP:LISTEN -t 2>/dev/null); do kill -9 \$pid 2>/dev/null || true; done; true'
 Restart=always
 RestartSec=5
@@ -1145,7 +1186,11 @@ SVCEOF
         log_info "Edge Runtime on port 9000 (standalone systemd service mode)"
     else
         systemctl disable --now supacloud-edge-runtime 2>/dev/null || true
-        log_info "Edge Runtime in embedded mode (managed by supacloud binary, no system Bun needed)"
+        if [[ "$USE_COMPILED_BINARY" == "true" ]]; then
+            log_info "Edge Runtime in embedded mode (compiled binary available for external mode switch)"
+        else
+            log_info "Edge Runtime in embedded mode (managed by supacloud binary)"
+        fi
     fi
 }
 
