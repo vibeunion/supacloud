@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.13.7](https://github.com/zuohuadong/supacloud/compare/management-api-v0.13.6...management-api-v0.13.7) (2026-05-12)
+
+
+### 🐛 Bug Fixes
+
+* add function invoke route, repair stale projects, web-console deployment ([dedab66](https://github.com/zuohuadong/supacloud/commit/dedab667e4a200470a1d6c5d4dfada8df17e32ea))
+* improve one-click install robustness, add function invoke route, repair stale projects ([5cdbe8a](https://github.com/zuohuadong/supacloud/commit/5cdbe8a0f7800e3b1b1e903976bcc8c33e61d1b1))
+* use direct GoTrue port instead of HTTPS API URL to avoid self-signed cert errors ([73f1902](https://github.com/zuohuadong/supacloud/commit/73f19020218aa08e5fcfc430be039cc512833ef6))
+
 ## [0.13.6](https://github.com/zuohuadong/supacloud/compare/management-api-v0.13.5...management-api-v0.13.6) (2026-05-11)
 
 
