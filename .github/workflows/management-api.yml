@@ -449,6 +449,10 @@ jobs:
         working-directory: packages/management-api
         run: bun install
 
+      - name: Install edge-runtime dependencies
+        working-directory: packages/edge-runtime
+        run: bun install
+
       - name: Build Linux primary binaries
         working-directory: packages/management-api
         run: |
@@ -464,9 +468,26 @@ jobs:
           mv supacloud-macos-amd64 dist/
           mv supacloud-macos-arm64 dist/
 
+      - name: Build edge-runtime Linux binaries
+        working-directory: packages/edge-runtime
+        run: |
+          mkdir -p dist
+          bun run build:linux
+          mv supacloud-edge-runtime-linux-amd64 dist/
+          mv supacloud-edge-runtime-linux-arm64 dist/
+
+      - name: Build edge-runtime macOS binaries
+        working-directory: packages/edge-runtime
+        run: |
+          bun run build:macos
+          mv supacloud-edge-runtime-macos-amd64 dist/
+          mv supacloud-edge-runtime-macos-arm64 dist/
+
       - name: Upload Artifacts
         uses: actions/upload-artifact@v7
         with:
           name: supacloud-binaries-linux-primary-macos-dev
-          path: packages/management-api/dist/*
+          path: |
+            packages/management-api/dist/*
+            packages/edge-runtime/dist/*
           retention-days: 7
