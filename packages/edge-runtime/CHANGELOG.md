@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.9](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.3.8...edge-runtime-v0.3.9) (2026-05-12)
+
+
+### 🐛 Bug Fixes
+
+* add function invoke route, repair stale projects, web-console deployment ([dedab66](https://github.com/zuohuadong/supacloud/commit/dedab667e4a200470a1d6c5d4dfada8df17e32ea))
+* improve one-click install robustness, add function invoke route, repair stale projects ([5cdbe8a](https://github.com/zuohuadong/supacloud/commit/5cdbe8a0f7800e3b1b1e903976bcc8c33e61d1b1))
+
 ## [0.3.8](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.3.7...edge-runtime-v0.3.8) (2026-05-12)
 
 
