@@ -54,6 +54,10 @@ jobs:
         working-directory: packages/management-api
         run: bun install
 
+      - name: Install edge-runtime dependencies
+        working-directory: packages/edge-runtime
+        run: bun install
+
       - name: Build web console static artifact
         run: |
           cd packages/web-console
@@ -73,15 +77,32 @@ jobs:
           mv supacloud-macos-amd64 dist/
           mv supacloud-macos-arm64 dist/
           chmod 0755 dist/supacloud-*
+
+      - name: Build edge-runtime release binaries
+        working-directory: packages/edge-runtime
+        run: |
+          mkdir -p dist
+          bun run build:linux
+          bun run build:macos
+          mv supacloud-edge-runtime-linux-amd64 dist/
+          mv supacloud-edge-runtime-linux-arm64 dist/
+          mv supacloud-edge-runtime-macos-amd64 dist/
+          mv supacloud-edge-runtime-macos-arm64 dist/
+          chmod 0755 dist/supacloud-edge-runtime-*
+
+      - name: Generate SHA256SUMS
+        working-directory: packages/management-api
+        run: |
           cd dist
           sha256sum supacloud-* web-console-build.tar.gz > SHA256SUMS
+          cp SHA256SUMS ../../edge-runtime/dist/
 
       - name: Upload binaries to GitHub Release
         working-directory: packages/management-api
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ needs.release-please.outputs.management_api_tag_name }}
-        run: gh release upload "$RELEASE_TAG" dist/* --clobber
+        run: gh release upload "$RELEASE_TAG" dist/* ../edge-runtime/dist/* --clobber
 
   publish-npm:
     needs: release-please
