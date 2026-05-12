@@ -2275,6 +2275,58 @@ EOF
     log_info "SupaCloud Control Plane deployed successfully!"
 }
 
+# ========== Install Web Console (Studio UI) ==========
+install_web_console() {
+    log_step "Installing Web Console (Studio UI)..."
+
+    local WEB_CONSOLE_DIR="/opt/supacloud/web-console/current"
+    local WEB_CONSOLE_SRC="${SCRIPT_DIR}/packages/web-console/build"
+    local WEB_CONSOLE_TAR="${SCRIPT_DIR}/dist/web-console-build.tar.gz"
+    local GH_PROXY="${GH_PROXY:-https://ghproxy.net}"
+
+    mkdir -p "$WEB_CONSOLE_DIR"
+
+    if [[ -f "$WEB_CONSOLE_DIR/index.html" ]]; then
+        log_info "Web Console already deployed at $WEB_CONSOLE_DIR, skipping"
+        return 0
+    fi
+
+    if [[ -d "$WEB_CONSOLE_SRC" ]] && [[ -f "$WEB_CONSOLE_SRC/index.html" ]]; then
+        cp -rf "$WEB_CONSOLE_SRC"/* "$WEB_CONSOLE_DIR/"
+        log_info "Web Console deployed from local source build"
+    elif [[ -f "$WEB_CONSOLE_TAR" ]]; then
+        tar -xzf "$WEB_CONSOLE_TAR" -C "$WEB_CONSOLE_DIR/"
+        log_info "Web Console deployed from local tarball"
+    else
+        log_info "Downloading Web Console from GitHub Releases..."
+        local DOWNLOAD_URL="${GH_PROXY}/https://github.com/zuohuadong/supacloud/releases/latest/download/web-console-build.tar.gz"
+        local TMP_TAR="/tmp/web-console-build.tar.gz"
+        curl -fSL -o "$TMP_TAR" "$DOWNLOAD_URL" 2>/dev/null || {
+            DOWNLOAD_URL="https://github.com/zuohuadong/supacloud/releases/latest/download/web-console-build.tar.gz"
+            curl -fSL -o "$TMP_TAR" "$DOWNLOAD_URL" || {
+                log_warn "Web Console download failed, Studio UI will not be available"
+                log_warn "You can manually build and deploy: bun run build (in packages/web-console) then copy to $WEB_CONSOLE_DIR"
+                return 1
+            }
+        }
+        if file "$TMP_TAR" | grep -q "gzip"; then
+            tar -xzf "$TMP_TAR" -C "$WEB_CONSOLE_DIR/"
+            rm -f "$TMP_TAR"
+            log_info "Web Console deployed from GitHub Release"
+        else
+            rm -f "$TMP_TAR"
+            log_warn "Downloaded file is not a valid gzip archive, skipping Web Console deployment"
+            return 1
+        fi
+    fi
+
+    if [[ -f "$WEB_CONSOLE_DIR/index.html" ]]; then
+        log_info "Web Console (Studio UI) installed successfully"
+    else
+        log_warn "Web Console deployment incomplete - index.html not found"
+    fi
+}
+
 # ========== Deploy Service Containers (Imaginary + Realtime) ==========
 deploy_service_containers() {
     log_step "Deploying SupaCloud service containers..."
@@ -2610,6 +2662,7 @@ main() {
 
     # Install Management API
     install_management_api
+    install_web_console
 
     # Deploy Imaginary + Realtime containers
     deploy_service_containers
