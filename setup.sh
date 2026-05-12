@@ -8,7 +8,7 @@
 
 set -e
 
-# Color definitions
+export DEBIAN_FRONTEND=noninteractive
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -46,7 +46,7 @@ fi
 # Check and install base dependencies
 install_base_deps() {
     log_step "Checking base dependencies..."
-    if command -v git &>/dev/null && command -v curl &>/dev/null; then
+    if command -v git &>/dev/null && command -v curl &>/dev/null && command -v unzip &>/dev/null; then
         log_info "Base dependencies ready"
         return
     fi
@@ -55,10 +55,10 @@ install_base_deps() {
         source /etc/os-release
         case "$ID" in
             rocky|almalinux|centos|rhel)
-                yum install -y git curl
+                yum install -y git curl unzip
                 ;;
             ubuntu|debian)
-                apt-get update && apt-get install -y git curl
+                apt-get update && apt-get install -y git curl unzip
                 ;;
             *)
                 log_warn "Unrecognized system, please ensure git and curl are installed"
@@ -76,7 +76,7 @@ clone_repo() {
         git pull || log_warn "Code update failed, will use existing version"
     else
         log_step "Cloning SupaCloud repository to $INSTALL_DIR..."
-        git clone --depth 1 https://gh-proxy.net/https://github.com/zuohuadong/supacloud.git "$INSTALL_DIR"
+        git clone --depth 1 https://ghproxy.net/https://github.com/zuohuadong/supacloud.git "$INSTALL_DIR"
         cd "$INSTALL_DIR"
     fi
 }
@@ -105,7 +105,7 @@ download_binaries() {
     # Download from GitHub. Note: Here we assume the latest build on main branch
     # In production, usually download from Release page or specific CDN
     log_info "Downloading latest binary from GitHub ($BIN_NAME)..."
-    local DOWNLOAD_URL="https://gh-proxy.net/https://github.com/zuohuadong/supacloud/releases/latest/download/${BIN_NAME}"
+    local DOWNLOAD_URL="https://ghproxy.net/https://github.com/zuohuadong/supacloud/releases/latest/download/${BIN_NAME}"
     
     # If there are no releases yet, you can try from git repository's dist directory (if exists)
     # Here demonstrates the download logic
