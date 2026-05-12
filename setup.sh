@@ -8,7 +8,7 @@
 
 set -e
 
-# Color definitions
+export DEBIAN_FRONTEND=noninteractive
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -46,7 +46,7 @@ fi
 # Check and install base dependencies
 install_base_deps() {
     log_step "Checking base dependencies..."
-    if command -v git &>/dev/null && command -v curl &>/dev/null; then
+    if command -v git &>/dev/null && command -v curl &>/dev/null && command -v unzip &>/dev/null; then
         log_info "Base dependencies ready"
         return
     fi
@@ -55,10 +55,10 @@ install_base_deps() {
         source /etc/os-release
         case "$ID" in
             rocky|almalinux|centos|rhel)
-                yum install -y git curl
+                yum install -y git curl unzip
                 ;;
             ubuntu|debian)
-                apt-get update && apt-get install -y git curl
+                apt-get update && apt-get install -y git curl unzip
                 ;;
             *)
                 log_warn "Unrecognized system, please ensure git and curl are installed"
@@ -76,7 +76,7 @@ clone_repo() {
         git pull || log_warn "Code update failed, will use existing version"
     else
         log_step "Cloning SupaCloud repository to $INSTALL_DIR..."
-        git clone --depth 1 https://gh-proxy.net/https://github.com/zuohuadong/supacloud.git "$INSTALL_DIR"
+        git clone --depth 1 https://ghproxy.net/https://github.com/zuohuadong/supacloud.git "$INSTALL_DIR"
         cd "$INSTALL_DIR"
     fi
 }
@@ -86,11 +86,14 @@ download_binaries() {
     log_step "Detecting CPU architecture and downloading core binaries..."
     local ARCH=$(uname -m)
     local BIN_NAME=""
+    local EDGE_RT_BIN_NAME=""
     
     if [[ "$ARCH" == "x86_64" ]]; then
         BIN_NAME="supacloud-linux-amd64"
+        EDGE_RT_BIN_NAME="supacloud-edge-runtime-linux-amd64"
     elif [[ "$ARCH" == "aarch64" ]]; then
         BIN_NAME="supacloud-linux-arm64"
+        EDGE_RT_BIN_NAME="supacloud-edge-runtime-linux-arm64"
     else
         log_error "Unsupported CPU architecture: $ARCH"
         exit 1
@@ -98,21 +101,39 @@ download_binaries() {
 
     # Prefer detecting if local binary exists (e.g., locally built)
     if [[ -f "./$BIN_NAME" ]] || [[ -f "./dist/$BIN_NAME" ]]; then
-        log_info "Local binary artifact found, skipping download"
-        return
+        log_info "Local management API binary artifact found, skipping download"
+    else
+        log_info "Downloading latest management API binary from GitHub ($BIN_NAME)..."
+        local DOWNLOAD_URL="https://ghproxy.net/https://github.com/zuohuadong/supacloud/releases/latest/download/${BIN_NAME}"
+        mkdir -p dist
+        curl -Lo "dist/${BIN_NAME}" "$DOWNLOAD_URL" || {
+            log_warn "Download from Release failed (may not be published yet), please ensure local binary has been generated via bun run build"
+        }
     fi
 
-    # Download from GitHub. Note: Here we assume the latest build on main branch
-    # In production, usually download from Release page or specific CDN
-    log_info "Downloading latest binary from GitHub ($BIN_NAME)..."
-    local DOWNLOAD_URL="https://gh-proxy.net/https://github.com/zuohuadong/supacloud/releases/latest/download/${BIN_NAME}"
-    
-    # If there are no releases yet, you can try from git repository's dist directory (if exists)
-    # Here demonstrates the download logic
-    mkdir -p dist
-    curl -Lo "dist/${BIN_NAME}" "$DOWNLOAD_URL" || {
-        log_warn "Download from Release failed (may not be published yet), please ensure local binary has been generated via bun run build"
-    }
+    # Download edge-runtime binary
+    if [[ -f "./$EDGE_RT_BIN_NAME" ]] || [[ -f "./dist/$EDGE_RT_BIN_NAME" ]] || [[ -f "./packages/edge-runtime/dist/$EDGE_RT_BIN_NAME" ]]; then
+        log_info "Local edge-runtime binary artifact found, skipping download"
+    else
+        log_info "Downloading latest edge-runtime binary from GitHub ($EDGE_RT_BIN_NAME)..."
+        local EDGE_RT_DOWNLOAD_URL="https://ghproxy.net/https://github.com/zuohuadong/supacloud/releases/latest/download/${EDGE_RT_BIN_NAME}"
+        mkdir -p dist
+        curl -Lo "dist/${EDGE_RT_BIN_NAME}" "$EDGE_RT_DOWNLOAD_URL" || {
+            log_warn "Edge-runtime binary download failed, will fall back to source mode"
+        }
+    fi
+
+    # Download web-console static build
+    if [[ -f "./dist/web-console-build.tar.gz" ]] || [[ -f "./packages/web-console/build/index.html" ]]; then
+        log_info "Local Web Console build found, skipping download"
+    else
+        log_info "Downloading Web Console (Studio UI) from GitHub Releases..."
+        local WC_DOWNLOAD_URL="https://ghproxy.net/https://github.com/zuohuadong/supacloud/releases/latest/download/web-console-build.tar.gz"
+        mkdir -p dist
+        curl -Lo "dist/web-console-build.tar.gz" "$WC_DOWNLOAD_URL" || {
+            log_warn "Web Console download failed, Studio UI may not be available"
+        }
+    fi
 }
 
 # ⚠️ OpenCloudOS compatibility pre-check
