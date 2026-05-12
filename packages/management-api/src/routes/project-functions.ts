@@ -408,11 +408,15 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
       if (authError) return status(authError.status, authError.body);
       try {
         const { config } = await import("../config");
+        const project = await projectService.getProject(params.ref);
+        if (!project) {
+          return status(404, { message: "Project not found", code: "404" });
+        }
         const edgeUrl = `${config.edgeRuntimeUrl}/functions/v1/${params.slug}`;
         const headers: Record<string, string> = {
           "Content-Type": "application/json",
           "x-project-ref": params.ref,
-          "x-region": config.region || "local",
+          "x-region": project.region || "local",
         };
         const authHeader = request.headers.get("Authorization");
         if (authHeader) headers["Authorization"] = authHeader;
