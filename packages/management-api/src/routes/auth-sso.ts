@@ -3,6 +3,9 @@ import { projectService } from "../services";
 import { logger } from "../utils/logger";
 import { resolveProjectServiceRoleKey } from "../utils/service-role";
 import { requireProjectOrAdminAuth } from "../middleware/auth";
+import { sql as metaSql } from "../db";
+import { resolveTenantPorts, normalizeProjectRoutingConfig } from "../utils/project-routing";
+import { normalizeProjectConfig } from "../utils/project-config";
 
 async function getGoTrueHeaders(ref: string) {
   const project = await projectService.getProject(ref);
@@ -10,7 +13,24 @@ async function getGoTrueHeaders(ref: string) {
   const serviceRoleKey = await resolveProjectServiceRoleKey(ref);
   if (!serviceRoleKey) return null;
   const { config } = await import("../config");
-  const apiUrl = project.api?.url || (config.kongInternal.startsWith('http') ? config.kongInternal : `http://${config.kongInternal}`);
+
+  let apiUrl: string;
+  try {
+    const rows = await metaSql`
+      SELECT config FROM projects WHERE ref = ${ref} AND deleted_at IS NULL LIMIT 1
+    `;
+    const projectConfig = normalizeProjectConfig(rows[0]?.config);
+    const routingConfig = normalizeProjectRoutingConfig(projectConfig);
+    const ports = resolveTenantPorts(routingConfig);
+    if (ports?.gotruePort) {
+      apiUrl = `http://127.0.0.1:${ports.gotruePort}`;
+    } else {
+      apiUrl = config.kongInternal.startsWith("http") ? config.kongInternal : `http://${config.kongInternal}`;
+    }
+  } catch {
+    apiUrl = config.kongInternal.startsWith("http") ? config.kongInternal : `http://${config.kongInternal}`;
+  }
+
   return { apiUrl, serviceRoleKey, ref };
 }
 
@@ -23,7 +43,7 @@ export const authSsoRoutes = new Elysia({ prefix: "/v1/projects" })
       if (!ctx) return status(404, { message: "Project not found", code: "404" });
 
       try {
-        const res = await fetch(`${ctx.apiUrl}/auth/v1/admin/sso/providers`, {
+        const res = await fetch(`${ctx.apiUrl}/admin/sso/providers`, {
           headers: {
             "apikey": ctx.serviceRoleKey,
             "Authorization": `Bearer ${ctx.serviceRoleKey}`,
@@ -51,7 +71,7 @@ export const authSsoRoutes = new Elysia({ prefix: "/v1/projects" })
       if (!ctx) return status(404, { message: "Project not found", code: "404" });
 
       try {
-        const res = await fetch(`${ctx.apiUrl}/auth/v1/admin/sso/providers`, {
+        const res = await fetch(`${ctx.apiUrl}/admin/sso/providers`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -93,7 +113,7 @@ export const authSsoRoutes = new Elysia({ prefix: "/v1/projects" })
       if (!ctx) return status(404, { message: "Project not found", code: "404" });
 
       try {
-        const res = await fetch(`${ctx.apiUrl}/auth/v1/admin/sso/providers/${params.id}`, {
+        const res = await fetch(`${ctx.apiUrl}/admin/sso/providers/${params.id}`, {
           headers: {
             "apikey": ctx.serviceRoleKey,
             "Authorization": `Bearer ${ctx.serviceRoleKey}`,
@@ -120,7 +140,7 @@ export const authSsoRoutes = new Elysia({ prefix: "/v1/projects" })
       if (!ctx) return status(404, { message: "Project not found", code: "404" });
 
       try {
-        const res = await fetch(`${ctx.apiUrl}/auth/v1/admin/sso/providers/${params.id}`, {
+        const res = await fetch(`${ctx.apiUrl}/admin/sso/providers/${params.id}`, {
           method: "PUT",
           headers: {
             "Content-Type": "application/json",
@@ -161,7 +181,7 @@ export const authSsoRoutes = new Elysia({ prefix: "/v1/projects" })
       if (!ctx) return status(404, { message: "Project not found", code: "404" });
 
       try {
-        const res = await fetch(`${ctx.apiUrl}/auth/v1/admin/sso/providers/${params.id}`, {
+        const res = await fetch(`${ctx.apiUrl}/admin/sso/providers/${params.id}`, {
           method: "DELETE",
           headers: {
             "apikey": ctx.serviceRoleKey,
