@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.3.8](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.3.7...edge-runtime-v0.3.8) (2026-05-12)
+
+
+### 🐛 Bug Fixes
+
+* **edge-runtime:** normalize fallback tenant env ([c72379f](https://github.com/zuohuadong/supacloud/commit/c72379fc12576132edcd19fe59cc69da6d1ad4fa))
+* **edge-runtime:** normalize fallback tenant env ([e55a526](https://github.com/zuohuadong/supacloud/commit/e55a5260b61070cf33d99033c8ed9bbf7afa250b))
+* improve one-click install robustness and compile edge-runtime as standalone binary ([aeccd2f](https://github.com/zuohuadong/supacloud/commit/aeccd2f4a57540cdd801bb0206dade92a67bbd6f))
+* improve one-click install robustness and compile edge-runtime binary ([0328040](https://github.com/zuohuadong/supacloud/commit/03280408e260ed8e86cdb103e25d347713b4cbcb))
+
 ## [0.3.7](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.3.6...edge-runtime-v0.3.7) (2026-05-07)
 
 
