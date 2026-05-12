@@ -122,6 +122,18 @@ download_binaries() {
             log_warn "Edge-runtime binary download failed, will fall back to source mode"
         }
     fi
+
+    # Download web-console static build
+    if [[ -f "./dist/web-console-build.tar.gz" ]] || [[ -f "./packages/web-console/build/index.html" ]]; then
+        log_info "Local Web Console build found, skipping download"
+    else
+        log_info "Downloading Web Console (Studio UI) from GitHub Releases..."
+        local WC_DOWNLOAD_URL="https://ghproxy.net/https://github.com/zuohuadong/supacloud/releases/latest/download/web-console-build.tar.gz"
+        mkdir -p dist
+        curl -Lo "dist/web-console-build.tar.gz" "$WC_DOWNLOAD_URL" || {
+            log_warn "Web Console download failed, Studio UI may not be available"
+        }
+    fi
 }
 
 # ⚠️ OpenCloudOS compatibility pre-check
