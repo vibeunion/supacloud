@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.8](https://github.com/zuohuadong/supacloud/compare/management-api-v0.13.7...management-api-v0.13.8) (2026-05-12)
+
+
+### 🐛 Bug Fixes
+
+* **ci:** repair release asset upload ([98d5537](https://github.com/zuohuadong/supacloud/commit/98d5537ad77ab381e42d91ab011cedeea38498f9))
+
 ## [0.13.7](https://github.com/zuohuadong/supacloud/compare/management-api-v0.13.6...management-api-v0.13.7) (2026-05-12)
 
 
