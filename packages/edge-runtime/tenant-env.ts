@@ -55,6 +55,47 @@ function parseEnvFile(content: string): Record<string, string> {
   return env;
 }
 
+function stripTrailingSlash(value: string): string {
+  return value.replace(/\/+$/, "");
+}
+
+function hostFromUrl(value: string | undefined): string {
+  if (!value) return "";
+  try {
+    return new URL(value).host;
+  } catch {
+    return "";
+  }
+}
+
+function defaultInternalSupabaseUrl(): string {
+  return stripTrailingSlash(
+    process.env.SUPACLOUD_INTERNAL_SUPABASE_URL ||
+      process.env.INTERNAL_SUPABASE_URL ||
+      "http://127.0.0.1",
+  );
+}
+
+export function normalizeTenantEnv(ref: string, env: Record<string, string>): Record<string, string> {
+  const normalized = { ...env };
+  const internalSupabaseUrl = stripTrailingSlash(
+    normalized.SUPACLOUD_INTERNAL_SUPABASE_URL || defaultInternalSupabaseUrl(),
+  );
+  const apiHost =
+    normalized.SUPACLOUD_PROJECT_API_HOST ||
+    hostFromUrl(normalized.SUPABASE_URL) ||
+    hostFromUrl(normalized.SUPACLOUD_EXTERNAL_SUPABASE_URL);
+
+  normalized.SUPACLOUD_PROJECT_REF ||= ref;
+  normalized.X_PROJECT_REF ||= ref;
+  normalized.SUPACLOUD_INTERNAL_SUPABASE_URL = internalSupabaseUrl;
+  normalized.SUPACLOUD_INTERNAL_AUTH_URL ||= `${internalSupabaseUrl}/auth/v1`;
+  normalized.SUPACLOUD_INTERNAL_REST_URL ||= `${internalSupabaseUrl}/rest/v1`;
+  if (apiHost) normalized.SUPACLOUD_PROJECT_API_HOST = apiHost;
+
+  return normalized;
+}
+
 async function loadEnvFromFile(ref: string): Promise<Record<string, string>> {
   for (const dir of TENANTS_DIRS) {
     const envPath = `${dir}/${ref}.env`;
@@ -108,12 +149,12 @@ export async function loadTenantEnv(ref: string): Promise<Record<string, string>
   const apiEnv = await loadEnvFromApi(ref);
   if (apiEnv === null) {
     if (cached) {
-      return { ...fileEnv, ...cached.env };
+      return normalizeTenantEnv(ref, { ...fileEnv, ...cached.env });
     }
-    return fileEnv;
+    return normalizeTenantEnv(ref, fileEnv);
   }
 
-  const merged = { ...fileEnv, ...apiEnv };
+  const merged = normalizeTenantEnv(ref, { ...fileEnv, ...apiEnv });
 
   envCache.set(ref, { env: merged, expiresAt: Date.now() + ENV_CACHE_TTL });
   return merged;
