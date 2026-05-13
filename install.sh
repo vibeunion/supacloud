@@ -2439,6 +2439,52 @@ EOF
     log_info "Service containers deployed successfully!"
 }
 
+# ========== Repair Stale Projects ==========
+repair_stale_projects() {
+    log_step "Checking for stale projects needing database provisioning..."
+    local ADMIN_SQL="sudo -u postgres psql -d postgres -t -A"
+
+    local PROJECTS=$($ADMIN_SQL -c "SELECT ref, db_name, db_user, db_password, status FROM projects WHERE status IN ('creating','paused') OR status IS NULL;" 2>/dev/null)
+
+    if [[ -z "$PROJECTS" ]]; then
+        log_info "No stale projects found"
+        return 0
+    fi
+
+    while IFS='|' read -r REF DB_NAME DB_USER DB_PASS PSTATUS; do
+        REF=$(echo "$REF" | tr -d ' ')
+        DB_NAME=$(echo "$DB_NAME" | tr -d ' ')
+        DB_USER=$(echo "$DB_USER" | tr -d ' ')
+        DB_PASS=$(echo "$DB_PASS" | tr -d ' ')
+        PSTATUS=$(echo "$PSTATUS" | tr -d ' ')
+
+        if [[ -z "$REF" || -z "$DB_NAME" ]]; then
+            continue
+        fi
+
+        local DB_EXISTS=$($ADMIN_SQL -c "SELECT 1 FROM pg_database WHERE datname='$DB_NAME';" 2>/dev/null | tr -d ' ')
+
+        if [[ "$DB_EXISTS" != "1" ]]; then
+            log_info "Provisioning database $DB_NAME for project $REF (status: $PSTATUS)..."
+            sudo -u postgres psql -d postgres -c "CREATE DATABASE \"$DB_NAME\";" 2>/dev/null
+            sudo -u postgres psql -d postgres -c "CREATE ROLE \"$DB_USER\" LOGIN CONNECTION LIMIT 20 PASSWORD '$DB_PASS';" 2>/dev/null || true
+            sudo -u postgres psql -d postgres -c "GRANT ALL PRIVILEGES ON DATABASE \"$DB_NAME\" TO \"$DB_USER\";" 2>/dev/null
+            sudo -u postgres psql -d "$DB_NAME" -c "GRANT ALL ON SCHEMA public TO \"$DB_USER\";" 2>/dev/null
+            sudo -u postgres psql -d "$DB_NAME" -c "CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\";" 2>/dev/null
+            sudo -u postgres psql -d "$DB_NAME" -c "CREATE EXTENSION IF NOT EXISTS \"pgcrypto\";" 2>/dev/null
+            sudo -u postgres psql -d supacloud_meta -c "UPDATE projects SET status='active' WHERE ref='$REF';" 2>/dev/null
+            log_info "Project $REF: database $DB_NAME created and activated"
+        else
+            if [[ "$PSTATUS" != "active" ]]; then
+                sudo -u postgres psql -d supacloud_meta -c "UPDATE projects SET status='active' WHERE ref='$REF';" 2>/dev/null
+                log_info "Project $REF: database exists, status updated to active"
+            fi
+        fi
+    done <<< "$PROJECTS"
+
+    log_info "Stale project repair complete"
+}
+
 # ========== Show Completion Message ==========
 show_completion() {
     log_step "Installation Complete!"
@@ -2686,7 +2732,8 @@ main() {
     # Save all credentials
     save_all_credentials
 
-    # Deploy AI Breadcrumbs
+    repair_stale_projects
+
     deploy_ai_breadcrumbs
 
     show_completion
