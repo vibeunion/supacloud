@@ -2004,12 +2004,17 @@ configure_pg_hba() {
         return
     fi
     
-    # 3. Add rules
-    # host all all <CIDR> scram-sha-256
+    # 3. Add rules.
+    # Management API and tenant runtimes usually run on the database host. Some
+    # installs set DATABASE_URL/PG_HOST to INTERNAL_IP instead of loopback, so
+    # PostgreSQL sees the connection as coming from that host IP and rejects it
+    # unless pg_hba.conf explicitly allows it.
     CONFIG_LINE="host all all ${CONTAINER_NET} scram-sha-256"
-    
-    # Add localhost password auth rule (required by management-api)
     LOCALHOST_RULE="host    all             all             127.0.0.1/32            scram-sha-256"
+    HOST_RULE=""
+    if [[ -n "${INTERNAL_IP:-}" && "$INTERNAL_IP" != "127.0.0.1" && "$INTERNAL_IP" != "localhost" ]]; then
+        HOST_RULE="host    all             all             ${INTERNAL_IP}/32            scram-sha-256"
+    fi
     
     if grep -qF "$CONTAINER_NET" "$PG_HBA"; then
         log_info "Rule already exists: $CONFIG_LINE"
@@ -2025,6 +2030,16 @@ configure_pg_hba() {
     if ! grep -qF "127.0.0.1/32" "$PG_HBA"; then
         log_info "Adding localhost password authentication rule..."
         echo "$LOCALHOST_RULE" >> "$PG_HBA"
+    fi
+
+    # Add host self-IP rule when management services use INTERNAL_IP.
+    if [[ -n "$HOST_RULE" ]]; then
+        if grep -qF "${INTERNAL_IP}/32" "$PG_HBA"; then
+            log_info "Rule already exists for host IP: ${INTERNAL_IP}/32"
+        else
+            log_info "Adding host self-IP authentication rule: ${INTERNAL_IP}/32"
+            echo "$HOST_RULE" >> "$PG_HBA"
+        fi
     fi
         
     # 4. Reload configuration
@@ -2193,7 +2208,7 @@ EOF
 # SupaCloud Management API Configuration
 PORT=9090
 MANAGEMENT_API_URL=http://127.0.0.1:9090
-DATABASE_URL=postgresql://postgres:${POSTGRES_PASSWORD}@${INTERNAL_IP}:5432/supacloud_meta
+DATABASE_URL=postgresql://postgres:${POSTGRES_PASSWORD}@127.0.0.1:5432/supacloud_meta
 EDGE_RUNTIME_MODE=${EDGE_RUNTIME_MODE:-embedded}
 MASTER_TOKEN=${MASTER_TOKEN}
 SCRIPTS_PATH=${SCRIPTS_INSTALL_DIR}
@@ -2209,7 +2224,7 @@ REALTIME_IMAGE=${REALTIME_IMAGE:-public.ecr.aws/supabase/realtime:v2.76.5}
 REALTIME_CONTAINER_NAME=${REALTIME_CONTAINER_NAME:-supacloud-realtime}
 REALTIME_DB_USER=supabase_admin
 # Database connection environment variables (required for script execution)
-PG_HOST=${INTERNAL_IP}
+PG_HOST=127.0.0.1
 PG_PORT=5432
 PG_USER=postgres
 PG_DATABASE=postgres
@@ -2225,7 +2240,7 @@ EOF
 
     # 6. Execute database migration via supacloud binary itself
     log_info "Initializing metadata database schema..."
-    export DATABASE_URL="postgresql://postgres:${POSTGRES_PASSWORD}@${INTERNAL_IP}:5432/supacloud_meta"
+    export DATABASE_URL="postgresql://postgres:${POSTGRES_PASSWORD}@127.0.0.1:5432/supacloud_meta"
     $BIN_TARGET --init-db 2>/dev/null || log_warn "Database initialization failed, please execute manually: supacloud --init-db"
     unset DATABASE_URL
     
