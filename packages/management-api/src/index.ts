@@ -596,7 +596,7 @@ export async function registerAllRoutes() {
           if (shouldAuditRequest(request)) {
             await logAuditEvent({ request, status: result.status, action: "auth_denied" });
           }
-          return result.body;
+          return { message: result.body.error, code: String(result.status) };
         }
       })
       .onAfterHandle(async ({ request, set }) => {
