@@ -1,5 +1,8 @@
 # SupaCloud OAuth Provider 配置指南
 
+> 说明：本文档讲的是“第三方登录 Provider”（Google、GitHub、微信等）的配置。
+> 如果你要把某个 SupaCloud 项目本身迁移成 OAuth 2.1 / OIDC Provider，请看 [OAuth 2.1 / OIDC Provider](./oauth-oidc-provider.md)。
+
 本文档介绍如何在 SupaCloud 中配置第三方 OAuth 登录。
 
 ## 支持的 Provider

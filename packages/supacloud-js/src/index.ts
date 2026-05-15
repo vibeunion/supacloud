@@ -161,6 +161,78 @@ export type SupaCloudClientOptions<TClient extends SupabaseClient = SupabaseClie
   pollingIntervalMs?: number;
 };
 
+export type SupaCloudOAuthServerStatus = {
+  project_ref: string;
+  organization_id?: string;
+  account_isolated: boolean;
+  enabled: boolean;
+  allow_dynamic_registration: boolean;
+  issuer: string;
+  discovery_url: string;
+  oauth_authorization_server_metadata_url?: string;
+  jwks_url: string;
+  authorization_endpoint: string;
+  token_endpoint: string;
+  userinfo_endpoint?: string;
+  registration_endpoint?: string;
+  signing_alg?: string;
+  oidc_id_token_ready?: boolean;
+  migration_status?: string;
+  warnings?: string[];
+};
+
+export type SupaCloudOAuthClientType = "public" | "confidential";
+export type SupaCloudOAuthClientAuthMethod =
+  | "none"
+  | "client_secret_basic"
+  | "client_secret_post";
+
+export type SupaCloudOAuthClient = {
+  client_id: string;
+  client_secret?: string;
+  client_type?: SupaCloudOAuthClientType | string;
+  redirect_uris?: string[];
+  token_endpoint_auth_method?: SupaCloudOAuthClientAuthMethod | string;
+  grant_types?: string[];
+  response_types?: string[];
+  client_name?: string;
+  client_uri?: string;
+  logo_uri?: string;
+  registration_type?: string;
+  created_at?: string;
+  updated_at?: string;
+  [key: string]: unknown;
+};
+
+export type SupaCloudOAuthClientList = {
+  clients?: SupaCloudOAuthClient[];
+  [key: string]: unknown;
+};
+
+export type SupaCloudOAuthClientCreate = {
+  redirect_uris: string[];
+  client_type?: SupaCloudOAuthClientType;
+  token_endpoint_auth_method?: SupaCloudOAuthClientAuthMethod;
+  grant_types?: string[];
+  client_name?: string;
+  client_uri?: string;
+  logo_uri?: string;
+};
+
+export type SupaCloudOAuthClientUpdate = Partial<Omit<SupaCloudOAuthClientCreate, "client_type">>;
+
+export type SupaCloudAuthorizeUrlOptions = {
+  clientId: string;
+  redirectUri: string;
+  scope?: string | string[];
+  state?: string;
+  codeChallenge?: string;
+  codeChallengeMethod?: "S256" | "plain";
+  nonce?: string;
+  responseType?: "code";
+  resource?: string;
+};
+
 export class SupaCloudTaskSubmitError extends Error {
   readonly responseBody: unknown;
 
@@ -171,7 +243,7 @@ export class SupaCloudTaskSubmitError extends Error {
   }
 }
 
-type HttpMethod = "GET" | "POST" | "DELETE";
+type HttpMethod = "GET" | "POST" | "PUT" | "DELETE";
 
 const TERMINAL_STATUSES = new Set<string>([
   "succeeded",
@@ -679,6 +751,99 @@ class SupaCloudQueueClient<TClient extends SupabaseClient = SupabaseClient> exte
   }
 }
 
+class SupaCloudOAuthServerClient<TClient extends SupabaseClient = SupabaseClient> extends SupaCloudManagementClient<TClient> {
+  async getStatus(): Promise<SupaCloudOAuthServerStatus> {
+    return this.request<SupaCloudOAuthServerStatus>(
+      `/v1/projects/${this.options.projectRef}/auth/oauth-server`,
+      "GET",
+    );
+  }
+
+  async migrateToOidc(options: { allowDynamicRegistration?: boolean } = {}): Promise<SupaCloudOAuthServerStatus> {
+    return this.request<SupaCloudOAuthServerStatus>(
+      `/v1/projects/${this.options.projectRef}/auth/oauth-server/migrate`,
+      "POST",
+      { allow_dynamic_registration: options.allowDynamicRegistration === true },
+    );
+  }
+
+  async getDiscovery(): Promise<Record<string, unknown>> {
+    const status = await this.getStatus();
+    const response = await fetch(status.discovery_url);
+    if (!response.ok) throw new Error(`SupaCloud OIDC discovery failed (${response.status})`);
+    return await response.json() as Record<string, unknown>;
+  }
+
+  async getJwks(): Promise<Record<string, unknown>> {
+    const status = await this.getStatus();
+    const response = await fetch(status.jwks_url);
+    if (!response.ok) throw new Error(`SupaCloud JWKS fetch failed (${response.status})`);
+    return await response.json() as Record<string, unknown>;
+  }
+
+  async buildAuthorizeUrl(options: SupaCloudAuthorizeUrlOptions): Promise<string> {
+    const status = await this.getStatus();
+    const url = new URL(status.authorization_endpoint);
+    url.searchParams.set("client_id", options.clientId);
+    url.searchParams.set("redirect_uri", options.redirectUri);
+    url.searchParams.set("response_type", options.responseType ?? "code");
+    const scope = Array.isArray(options.scope) ? options.scope.join(" ") : options.scope;
+    if (scope) url.searchParams.set("scope", scope);
+    if (options.state) url.searchParams.set("state", options.state);
+    if (options.codeChallenge) url.searchParams.set("code_challenge", options.codeChallenge);
+    if (options.codeChallengeMethod) url.searchParams.set("code_challenge_method", options.codeChallengeMethod);
+    if (options.nonce) url.searchParams.set("nonce", options.nonce);
+    if (options.resource) url.searchParams.set("resource", options.resource);
+    return url.toString();
+  }
+}
+
+class SupaCloudOAuthClientsClient<TClient extends SupabaseClient = SupabaseClient> extends SupaCloudManagementClient<TClient> {
+  async list(): Promise<SupaCloudOAuthClientList> {
+    return this.request<SupaCloudOAuthClientList>(
+      `/v1/projects/${this.options.projectRef}/auth/oauth-clients`,
+      "GET",
+    );
+  }
+
+  async create(input: SupaCloudOAuthClientCreate): Promise<SupaCloudOAuthClient> {
+    return this.request<SupaCloudOAuthClient>(
+      `/v1/projects/${this.options.projectRef}/auth/oauth-clients`,
+      "POST",
+      input,
+    );
+  }
+
+  async get(clientId: string): Promise<SupaCloudOAuthClient> {
+    return this.request<SupaCloudOAuthClient>(
+      `/v1/projects/${this.options.projectRef}/auth/oauth-clients/${encodeURIComponent(clientId)}`,
+      "GET",
+    );
+  }
+
+  async update(clientId: string, patch: SupaCloudOAuthClientUpdate): Promise<SupaCloudOAuthClient> {
+    return this.request<SupaCloudOAuthClient>(
+      `/v1/projects/${this.options.projectRef}/auth/oauth-clients/${encodeURIComponent(clientId)}`,
+      "PUT",
+      patch,
+    );
+  }
+
+  async delete(clientId: string): Promise<void> {
+    await this.request<void>(
+      `/v1/projects/${this.options.projectRef}/auth/oauth-clients/${encodeURIComponent(clientId)}`,
+      "DELETE",
+    );
+  }
+
+  async regenerateSecret(clientId: string): Promise<SupaCloudOAuthClient> {
+    return this.request<SupaCloudOAuthClient>(
+      `/v1/projects/${this.options.projectRef}/auth/oauth-clients/${encodeURIComponent(clientId)}/regenerate-secret`,
+      "POST",
+    );
+  }
+}
+
 export function createSupaCloudClient<TClient extends SupabaseClient = SupabaseClient>(
   options: SupaCloudClientOptions<TClient>,
 ) {
@@ -692,11 +857,17 @@ export function createSupaCloudClient<TClient extends SupabaseClient = SupabaseC
   };
 
   const tasks = new SupaCloudTasksClient(normalized);
+  const oauthServer = new SupaCloudOAuthServerClient(normalized);
+  const oauthClients = new SupaCloudOAuthClientsClient(normalized);
 
   return {
     supabase: options.supabase,
     projectRef: normalized.projectRef,
     managementApiUrl: normalized.managementApiUrl,
+    auth: {
+      oauthServer,
+      oauthClients,
+    },
     tasks,
     queue: (name: string) => new SupaCloudQueueClient(normalized, name),
     functions: {

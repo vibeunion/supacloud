@@ -11,6 +11,7 @@ Examples:
 - task cancellation
 - Realtime status subscription with polling fallback
 - project-aware management API routing
+- project OAuth/OIDC migration and OAuth client management
 
 ## Design Goal
 
@@ -55,6 +56,12 @@ Current first-class API surface:
 - `client.tasks.wait(...)`
 - `client.tasks.subscribe(...)`
 - `client.functions.invokeBackground(...)`
+- `client.auth.oauthServer.getStatus()`
+- `client.auth.oauthServer.migrateToOidc()`
+- `client.auth.oauthServer.getDiscovery()`
+- `client.auth.oauthServer.getJwks()`
+- `client.auth.oauthServer.buildAuthorizeUrl()`
+- `client.auth.oauthClients.list()/create()/get()/update()/delete()/regenerateSecret()`
 
 ## Example
 
@@ -134,6 +141,12 @@ This removes the need for each product codebase to keep its own:
 3. keep task UX alive even when Realtime is degraded
 
 This is important because task correctness should not depend on websocket health.
+
+## OAuth/OIDC Helpers
+
+`client.auth.oauthServer` handles project-scoped OAuth 2.1 / OIDC migration, discovery, and client registration workflows.
+
+The SDK stays account-isolated. It does not let callers supply a global account scope; it forwards the normal Management API Bearer token and the server decides project access.
 
 ## Why This Package Exists
 

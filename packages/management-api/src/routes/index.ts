@@ -20,6 +20,7 @@ export { chinaAuthRoutes } from "./auth-china";
 export { userManagementRoutes } from "./auth-users";
 export { authHooksRoutes } from "./auth-hooks";
 export { authSsoRoutes } from "./auth-sso";
+export { authOAuthServerRoutes } from "./auth-oauth-server";
 export { authMfaRoutes } from "./auth-mfa";
 export { frontendRoutes } from "./frontend";
 export { webhookRoutes } from "./webhook";

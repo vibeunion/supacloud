@@ -9,6 +9,16 @@ import { OAUTH_ENV_MAPPINGS } from "../types/oauth";
 import { tenantOAuthService } from "./tenant-oauth.service";
 import { resolveProjectApiUrl, resolveProjectStudioUrl } from "../utils/project-routing";
 import { normalizeProjectConfig } from "../utils/project-config";
+import { normalizeProjectJwtJwks, normalizeProjectJwtKeys } from "../utils/project-jwt";
+
+function stringifyJsonConfig(value: unknown): string | null {
+    if (!value) return null;
+    return typeof value === "string" ? value : JSON.stringify(value);
+}
+
+function quoteSystemdEnvValue(value: string): string {
+    return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+}
 
 export interface RuntimeStatus {
     status: "running" | "stopped" | "starting" | "error";
@@ -101,9 +111,15 @@ class TenantRuntimeService {
         }
 
         const projectConfig = normalizeProjectConfig(project.config);
+        const authConfig = (projectConfig.auth as Record<string, unknown>) || {};
+        const oauthServerConfig = (authConfig.oauth_server || {}) as Record<string, unknown>;
+        const jwtKeys = stringifyJsonConfig(normalizeProjectJwtKeys(oauthServerConfig.jwt_keys));
+        const jwtJwks = stringifyJsonConfig(normalizeProjectJwtJwks(oauthServerConfig.jwt_jwks));
         return {
             dbPassword: project.db_password,
             jwtSecret: project.jwt_secret,
+            jwtKeys,
+            jwtJwks,
             dbName: await resolveDbName(ref),
             apiUrl: this.deriveApiUrl(ref, projectConfig),
             anonKey: project.anonKey || project.anon_key,
@@ -114,7 +130,7 @@ class TenantRuntimeService {
                     ? projectConfig.siteUrl
                     : resolveProjectStudioUrl(ref, projectConfig)),
             uriAllowList: Array.isArray(projectConfig.additional_redirect_urls) ? projectConfig.additional_redirect_urls.join(',') : (Array.isArray(projectConfig.additionalRedirectUrls) ? projectConfig.additionalRedirectUrls.join(',') : ""),
-            authConfig: (projectConfig.auth as Record<string, unknown>) || {}
+            authConfig
         };
     }
 
@@ -151,6 +167,10 @@ class TenantRuntimeService {
 
         const creds = await this.getTenantCredentials(ref);
 
+        const jwtVerifierSecret = creds.jwtJwks || creds.jwtSecret;
+        const jwtJwksEnv = creds.jwtJwks ? `\nJWT_JWKS=${quoteSystemdEnvValue(creds.jwtJwks)}` : "";
+        const jwtKeysEnv = creds.jwtKeys ? `\nJWT_KEYS=${quoteSystemdEnvValue(creds.jwtKeys)}` : "";
+
         // Generate PostgREST .env configuration
         // Edge runtime and other services consume these env vars
         const pgrstEnv = `
@@ -164,6 +184,7 @@ SUPABASE_ANON_KEY=${creds.anonKey}
 SUPABASE_SERVICE_ROLE_KEY=${creds.serviceRoleKey}
 SUPABASE_DB_URL=postgresql://${resolveAuthenticatorName(ref)}:${creds.dbPassword}@${this.PG_HOST}:${this.PG_PORT}/${creds.dbName}
 JWT_SECRET=${creds.jwtSecret}
+${jwtJwksEnv}${jwtKeysEnv}
 `.trim();
         await Bun.write(path.join(this.TENANT_CONFIG_DIR, `${ref}.env`), pgrstEnv);
 
@@ -174,7 +195,7 @@ db-uri = "postgres://${resolveAuthenticatorName(ref)}:${creds.dbPassword}@${this
 db-schemas = "public, storage, graphql_public"
 db-extra-search-path = "public, extensions, auth"
 db-anon-role = "anon"
-jwt-secret = "${creds.jwtSecret}"
+jwt-secret = ${JSON.stringify(jwtVerifierSecret)}
 server-port = ${pgrstPort}
 server-host = "0.0.0.0"
 db-pool = ${this.POSTGREST_DB_POOL}
@@ -235,6 +256,18 @@ GOTRUE_MAILER_URLPATHS_EMAIL_CHANGE=/auth/v1/verify
 # Admin Operator Token (P0-6)
 GOTRUE_OPERATOR_TOKEN=${config.masterToken || creds.serviceRoleKey}
 `.trim();
+
+        const oauthServerConfig = (creds.authConfig.oauth_server || {}) as Record<string, unknown>;
+        if (oauthServerConfig.enabled === true) {
+            gotrueEnv += `
+
+# OAuth 2.1 / OIDC Provider Configuration
+GOTRUE_OAUTH_SERVER_ENABLED=true
+GOTRUE_OAUTH_SERVER_ALLOW_DYNAMIC_REGISTRATION=${oauthServerConfig.allow_dynamic_registration === true ? "true" : "false"}
+GOTRUE_JWT_ISSUER=${oauthServerConfig.issuer || `${apiExternalUrl}/auth/v1`}
+${creds.jwtKeys ? `GOTRUE_JWT_KEYS=${quoteSystemdEnvValue(creds.jwtKeys)}\nJWT_KEYS=${quoteSystemdEnvValue(creds.jwtKeys)}` : ""}
+`;
+        }
 
         if (config.gotrueSmtpHost) {
             gotrueEnv += `
