@@ -1,5 +1,9 @@
 name: Release Please
 
+env:
+  LANG: C.UTF-8
+  LC_ALL: C.UTF-8
+
 on:
   push:
     branches: [main]

@@ -56,68 +56,68 @@
 ## [0.3.7](https://github.com/zuohuadong/supacloud/compare/cli-v0.3.6...cli-v0.3.7) (2026-05-08)
 
 
-### 🔧 Miscellaneous Chores
+### Miscellaneous Chores
 
 * **deps:** bump zod from 3.25.76 to 4.4.3 in /packages/cli ([#80](https://github.com/zuohuadong/supacloud/issues/80)) ([db1075a](https://github.com/zuohuadong/supacloud/commit/db1075a35c32e129c705e74a069c4e53eb17f0db))
 
 ## [0.3.6](https://github.com/zuohuadong/supacloud/compare/cli-v0.3.5...cli-v0.3.6) (2026-05-08)
 
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 * **cli:** infer management URL from project API domains ([41de422](https://github.com/zuohuadong/supacloud/commit/41de422003627bedaae2056916dedad7d012ee54))
 
 ## [0.3.5](https://github.com/zuohuadong/supacloud/compare/cli-v0.3.4...cli-v0.3.5) (2026-04-29)
 
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 * **cli:** parse secrets upsert strings ([6677a74](https://github.com/zuohuadong/supacloud/commit/6677a74a90a3b3c0cb9506bf6a44644e7f69fd09))
 
 ## [0.3.4](https://github.com/zuohuadong/supacloud/compare/cli-v0.3.3...cli-v0.3.4) (2026-04-29)
 
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 * **cli:** add migration baseline repair ([739a118](https://github.com/zuohuadong/supacloud/commit/739a118ab5bae4a4d63b6a593d71640a48835604))
 
 ## [0.3.3](https://github.com/zuohuadong/supacloud/compare/cli-v0.3.2...cli-v0.3.3) (2026-04-29)
 
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 * **cli:** handle migration list arrays ([6d5ab05](https://github.com/zuohuadong/supacloud/commit/6d5ab05995590d974d255a1edeb13899ad5d9d2b))
 
 ## [0.3.2](https://github.com/zuohuadong/supacloud/compare/cli-v0.3.1...cli-v0.3.2) (2026-04-27)
 
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 * clarify project cli command name ([e715e59](https://github.com/zuohuadong/supacloud/commit/e715e597e7773dae98f3868f179139a510e6f54a))
 
 ## [0.3.1](https://github.com/zuohuadong/supacloud/compare/cli-v0.3.0...cli-v0.3.1) (2026-04-27)
 
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 * **database:** consume sql rows response only ([75c3f68](https://github.com/zuohuadong/supacloud/commit/75c3f6818211cf326954cb75c530ef25e48b901b))
 
 ## [0.3.0](https://github.com/zuohuadong/supacloud/compare/cli-v0.2.0...cli-v0.3.0) (2026-04-27)
 
 
-### 🚀 Features
+### Features
 
 * improve database sql cli workflows ([1d1ac83](https://github.com/zuohuadong/supacloud/commit/1d1ac83d7518f223e048b8caedd1420460b1e70e))
 
 
-### 💅 Elegance & Refactoring
+### Elegance & Refactoring
 
 * remove legacy sql result alias ([3565c00](https://github.com/zuohuadong/supacloud/commit/3565c00f197a35e129785cce299ee48b9f91f7b8))
 
 ## [0.2.0](https://github.com/zuohuadong/supacloud/compare/cli-v0.1.2...cli-v0.2.0) (2026-04-26)
 
 
-### 🚀 Features
+### Features
 
 * **cli:** configure edge function runtime flags ([fa0be85](https://github.com/zuohuadong/supacloud/commit/fa0be85be7843425868cc9f991813650a33b2b34))
 * configure edge function runtime flags from CLI ([4992d8d](https://github.com/zuohuadong/supacloud/commit/4992d8d363f83b32db5fd4d7f93934f6d3273b9c))
@@ -125,7 +125,7 @@
 ## [0.1.2](https://github.com/zuohuadong/supacloud/compare/cli-v0.1.1...cli-v0.1.2) (2026-04-25)
 
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 * **cli:** push migrations through management API ([cee9927](https://github.com/zuohuadong/supacloud/commit/cee9927d29cb0ef514ae5a33080e6cf1c74bdecc))
 * **cli:** push migrations via management api ([5b06fa2](https://github.com/zuohuadong/supacloud/commit/5b06fa249802335fbb3c4e77d3f5cefe8c4336b8))
@@ -133,7 +133,7 @@
 ## [0.1.1](https://github.com/zuohuadong/supacloud/compare/cli-v0.1.0...cli-v0.1.1) (2026-04-19)
 
 
-### 🔧 Miscellaneous Chores
+### Miscellaneous Chores
 
 * release main ([239aea7](https://github.com/zuohuadong/supacloud/commit/239aea7e22bae05cc3c7840bc6c0fd7b322a8862))
 * release main ([8d020be](https://github.com/zuohuadong/supacloud/commit/8d020be4e8d374f0cf0498a97e4beb6a88e57fb0))
