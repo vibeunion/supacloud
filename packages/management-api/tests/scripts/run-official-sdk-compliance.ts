@@ -18,6 +18,8 @@ const OFFICIAL_SERVICE_ROLE_KEY =
   process.env.TEST_SUPABASE_SERVICE_KEY ?? "service-key-not-set";
 const OFFICIAL_JWT_SECRET =
   "super-secret-jwt-token-with-at-least-32-characters-long";
+const SUPABASE_JS_COMPLIANCE_REF =
+  process.env.SUPABASE_JS_COMPLIANCE_REF ?? "v2.103.0";
 
 async function bootstrap() {
   console.log(
@@ -167,9 +169,9 @@ async function bootstrap() {
   }
 
   console.log(
-    "📥 Downloading @supabase/supabase-js master branch to memory cache...",
+    `📥 Downloading @supabase/supabase-js ${SUPABASE_JS_COMPLIANCE_REF} to memory cache...`,
   );
-  await $`git clone --depth 1 https://github.com/supabase/supabase-js.git ${targetDir}`.quiet();
+  await $`git clone --depth 1 --branch ${SUPABASE_JS_COMPLIANCE_REF} https://github.com/supabase/supabase-js.git ${targetDir}`.quiet();
 
   console.log("💉 Altering test bindings to target supacloud proxy at 9090...");
   const possibleTestPaths = [
