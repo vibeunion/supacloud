@@ -1,5 +1,4 @@
 import { Elysia, t } from "elysia";
-import { jwtVerify } from "jose";
 import { randomUUID } from "node:crypto";
 import { encryptSecretIfNeeded } from "../utils/secret-crypto";
 import { getProjectDb } from "../db";
@@ -12,6 +11,7 @@ import { edgeFunctionService } from "../services/edge-function.service";
 import { projectService } from "../services/project.service";
 import { resolveTenantPorts } from "../utils/project-routing";
 import { resolveProjectRefFromApiKey } from "../utils/project-auth";
+import { verifyProjectJwtPayload } from "../utils/project-jwt";
 
 const MAX_ASYNC_BODY_BYTES = 256 * 1024;
 let sdkProxyFetch: typeof fetch = ((input: RequestInfo | URL, init?: RequestInit) =>
@@ -116,15 +116,8 @@ async function isCredentialedOriginAllowed(origin: string, ref: string | undefin
 }
 
 async function verifyJwtPayload(ref: string, token: string): Promise<Record<string, unknown> | null> {
-    try {
-        const rows = await metaSql`SELECT jwt_secret FROM projects WHERE ref = ${ref} AND deleted_at IS NULL AND status = 'active' LIMIT 1`;
-        const secret = rows[0]?.jwt_secret;
-        if (!secret) return null;
-        const { payload } = await jwtVerify(token, new TextEncoder().encode(String(secret)));
-        return payload as Record<string, unknown>;
-    } catch {
-        return null;
-    }
+    const result = await verifyProjectJwtPayload(ref, token);
+    return result?.payload as Record<string, unknown> | null;
 }
 
 async function maybeEnqueueAsyncFunction(request: Request, ref: string): Promise<Response | null> {

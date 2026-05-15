@@ -8,6 +8,7 @@ It does **not** replace [`@supabase/supabase-js`](https://www.npmjs.com/package/
 - task detail and list APIs
 - cancel / retry helpers
 - Realtime subscription with polling fallback
+- project OAuth/OIDC migration and OAuth client management
 
 ## Install
 
@@ -58,6 +59,12 @@ The current package focuses on:
 - `tasks.retry`
 - `tasks.wait`
 - `tasks.subscribe`
+- `auth.oauthServer.getStatus`
+- `auth.oauthServer.migrateToOidc`
+- `auth.oauthServer.getDiscovery`
+- `auth.oauthServer.getJwks`
+- `auth.oauthServer.buildAuthorizeUrl`
+- `auth.oauthClients.list/create/get/update/delete/regenerateSecret`
 
 ## Status Subscription
 
@@ -67,3 +74,9 @@ The current package focuses on:
 2. if Realtime is unavailable, fall back to polling the management API
 
 This lets apps degrade gracefully when websocket or channel health is transient.
+
+## OAuth/OIDC Helpers
+
+`client.auth.oauthServer` is the SupaCloud SDK surface for project-scoped OAuth 2.1 / OIDC migration and discovery.
+
+It does **not** take a global account scope. The SDK always sends the normal Management API Bearer token and lets the server enforce project ownership.

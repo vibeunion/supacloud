@@ -30,6 +30,7 @@ Legend:
 | Capability | SupaCloud | Supabase Cloud | Supabase Self-Hosted |
 |---|---|---|---|
 | Core Postgres + REST API + Auth + Realtime + Storage | **Built-in** | **Built-in** | **Built-in** |
+| OAuth 2.1 / OIDC Provider | **Built-in** (project-scoped, Supabase-compatible beta surface) | **Built-in** (beta) | Partial / operator-configured |
 | Edge Functions runtime | **Built-in** (Bun-based, Deno-compat layer) | **Built-in** | **Built-in** |
 | Multi-project control plane on one cluster/server | **Built-in** | **Built-in** | **External / manual** |
 | Project lifecycle API (create/pause/restore/restart/settings) | **Built-in** | **Built-in** via Management API | **External / manual** |
@@ -169,6 +170,7 @@ A more precise statement is:
 - [Frontend deployment routes](../packages/management-api/src/routes/frontend.ts)
 - [Webhook deployment routes](../packages/management-api/src/routes/webhook.ts)
 - [Task routes](../packages/management-api/src/routes/tasks.ts)
+- [OAuth/OIDC Provider routes](../packages/management-api/src/routes/auth-oauth-server.ts)
 
 ### Supabase official documentation
 

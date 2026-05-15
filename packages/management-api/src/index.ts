@@ -568,6 +568,7 @@ export async function registerAllRoutes() {
     userManagementRoutes,
     authHooksRoutes,
     authSsoRoutes,
+    authOAuthServerRoutes,
     authMfaRoutes,
     frontendRoutes,
     webhookRoutes,
@@ -637,6 +638,7 @@ export async function registerAllRoutes() {
       .use(userManagementRoutes)
       .use(authHooksRoutes)
       .use(authSsoRoutes)
+      .use(authOAuthServerRoutes)
       .use(authMfaRoutes)
       .use(frontendRoutes)
       .use(webhookRoutes)
