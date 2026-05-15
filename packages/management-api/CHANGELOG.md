@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.1](https://github.com/zuohuadong/supacloud/compare/management-api-v0.14.0...management-api-v0.14.1) (2026-05-15)
+
+
+### 🐛 Bug Fixes
+
+* restore project reprovisions missing resources ([a8b3ec3](https://github.com/zuohuadong/supacloud/commit/a8b3ec3eed145628f5551880f705b2b97b769d1b))
+
 ## [0.14.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.13.8...management-api-v0.14.0) (2026-05-15)
 
 
