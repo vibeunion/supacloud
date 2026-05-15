@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.14.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.13.8...management-api-v0.14.0) (2026-05-15)
+
+
+### 🚀 Features
+
+* **management-api:** add Swagger detail annotations to all 121 route handlers ([02f049c](https://github.com/zuohuadong/supacloud/commit/02f049c515d716edb2fe3ec6a914cfea78235689))
+
+
+### 🐛 Bug Fixes
+
+* auth middleware response format mismatch with route schemas ([#107](https://github.com/zuohuadong/supacloud/issues/107)) ([c76a6f8](https://github.com/zuohuadong/supacloud/commit/c76a6f84f3788d754db7f94accf7c178cd6907cb))
+* **management-api:** enforce Swagger route coverage ([4ec22db](https://github.com/zuohuadong/supacloud/commit/4ec22db97820ae8b75b73d10d9f659593c842482))
+* **management-api:** pin Supabase JS compliance ref ([205e57d](https://github.com/zuohuadong/supacloud/commit/205e57d36409eb58c99db2804b162248d9dbb592))
+
 ## [0.13.8](https://github.com/zuohuadong/supacloud/compare/management-api-v0.13.7...management-api-v0.13.8) (2026-05-12)
 
 
