@@ -360,7 +360,19 @@ export class ProjectService {
     const project = await projectRepository.findByRef(ref);
     if (!project) return false;
 
-    await projectRepository.updateStatus(ref, "active");
+    // Check if tenant database exists; if not, re-trigger the provisioning saga
+    // to ensure all resources (DB, S3, runtime, etc.) are available.
+    const dbExists = await databaseService.checkDatabaseExists(ref);
+    if (!dbExists) {
+      logger.info(`[ProjectService] Tenant DB missing for ${ref}, re-provisioning resources`);
+      this.provisionResources(ref, project.db_password).catch((error) => {
+        logger.error(`Failed to re-provision resources for ${ref}:`, {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
+    } else {
+      await projectRepository.updateStatus(ref, "active");
+    }
     return true;
   }
 
