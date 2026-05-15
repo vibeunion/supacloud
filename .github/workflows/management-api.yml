@@ -73,6 +73,10 @@ jobs:
         working-directory: packages/management-api
         run: bun run tsc --noEmit
 
+      - name: Check Swagger route coverage
+        working-directory: packages/management-api
+        run: bun run scripts/check-swagger-coverage.ts --strict
+
   package-checks:
     name: Package Checks
     runs-on: ubuntu-latest

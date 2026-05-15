@@ -200,6 +200,10 @@ const app = new Elysia({ strictPath: false })
             name: "webhook",
             description: "GitHub webhook and CI/CD integration",
           },
+          {
+            name: "sdk-proxy",
+            description: "Supabase SDK compatibility proxy endpoints",
+          },
         ],
         components: {
           securitySchemes: {
