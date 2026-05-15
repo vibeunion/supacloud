@@ -116,8 +116,12 @@ async function isCredentialedOriginAllowed(origin: string, ref: string | undefin
 }
 
 async function verifyJwtPayload(ref: string, token: string): Promise<Record<string, unknown> | null> {
-    const result = await verifyProjectJwtPayload(ref, token);
-    return result?.payload as Record<string, unknown> | null;
+    try {
+        const result = await verifyProjectJwtPayload(ref, token);
+        return result?.payload as Record<string, unknown> | null;
+    } catch {
+        return null;
+    }
 }
 
 async function maybeEnqueueAsyncFunction(request: Request, ref: string): Promise<Response | null> {
