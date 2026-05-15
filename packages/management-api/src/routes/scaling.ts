@@ -23,7 +23,8 @@ export const scalingRoutes = new Elysia({ prefix: "/v1/projects/:ref/upgrade" })
     }, {
         body: t.Object({
             target_tier: t.String()
-        })
+        }),
+        detail: { tags: ["scaling"], summary: "Upgrade project compute tier" },
     })
     .post("/replicas", async ({ params, body, request }) => {
         const authError = await requireAdminAuth(request);
@@ -39,5 +40,6 @@ export const scalingRoutes = new Elysia({ prefix: "/v1/projects/:ref/upgrade" })
     }, {
         body: t.Object({
             replica_ip: t.String()
-        })
+        }),
+        detail: { tags: ["scaling"], summary: "Add a read replica to project" },
     });

@@ -203,7 +203,8 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
                 _order: t.Optional(t.String()),
                 query: t.Optional(t.String()),
                 q: t.Optional(t.String()),
-            }, { additionalProperties: true })
+            }, { additionalProperties: true }),
+            detail: { tags: ["projects"], summary: "List database tables" },
         }
     )
     .get(
@@ -252,7 +253,8 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
                 ref: t.String({ minLength: 1 }),
                 schema: t.String({ minLength: 1 }),
                 table: t.String({ minLength: 1 }),
-            })
+            }),
+            detail: { tags: ["projects"], summary: "List columns for a database table" },
         }
     )
     .get(
@@ -311,7 +313,8 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
                 _sort: t.Optional(t.String()),
                 _order: t.Optional(t.String()),
                 q: t.Optional(t.String()),
-            }, { additionalProperties: true })
+            }, { additionalProperties: true }),
+            detail: { tags: ["projects"], summary: "List rows in a database table" },
         }
     )
     .post(
@@ -355,6 +358,7 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
             body: t.Object({
                 query: t.String(),
             }),
+            detail: { tags: ["projects"], summary: "Execute a read-only SQL query" },
         }
     )
     .post(
@@ -418,6 +422,7 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
                 mode: t.Optional(t.Union([t.Literal("read"), t.Literal("migration"), t.Literal("admin")])),
                 admin: t.Optional(t.Boolean()),
             }),
+            detail: { tags: ["projects"], summary: "Execute a SQL statement with mode control" },
         }
     )
     .post(
@@ -524,6 +529,7 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
         {
             params: t.Object({ ref: t.String({ minLength: 1 }) }),
             body: t.Record(t.String(), t.Unknown()),
+            detail: { tags: ["projects"], summary: "Apply a database migration" },
         }
     )
     .get(
@@ -565,6 +571,7 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
         },
         {
             params: t.Object({ ref: t.String({ minLength: 1 }) }),
+            detail: { tags: ["projects"], summary: "List applied database migrations" },
         }
     )
     .get(
@@ -618,7 +625,7 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
                 return [];
             }
         },
-        { params: t.Object({ ref: t.String({ minLength: 1 }) }) }
+        { params: t.Object({ ref: t.String({ minLength: 1 }) }), detail: { tags: ["projects"], summary: "List database constraints" } }
     )
     .get(
         "/functions",
@@ -669,7 +676,7 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
                 return [];
             }
         },
-        { params: t.Object({ ref: t.String({ minLength: 1 }) }) }
+        { params: t.Object({ ref: t.String({ minLength: 1 }) }), detail: { tags: ["projects"], summary: "List database functions" } }
     )
     .get(
         "/triggers",
@@ -730,7 +737,7 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
                 return [];
             }
         },
-        { params: t.Object({ ref: t.String({ minLength: 1 }) }) }
+        { params: t.Object({ ref: t.String({ minLength: 1 }) }), detail: { tags: ["projects"], summary: "List database triggers" } }
     )
     .get(
         "/publications",
@@ -788,5 +795,5 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
                 return [];
             }
         },
-        { params: t.Object({ ref: t.String({ minLength: 1 }) }) }
+        { params: t.Object({ ref: t.String({ minLength: 1 }) }), detail: { tags: ["projects"], summary: "List database publications" } }
     );

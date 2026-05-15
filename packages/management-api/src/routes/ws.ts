@@ -79,7 +79,7 @@ export const wsRoutes = new Elysia({ prefix: "/ws" })
       realtime_connections: Object.values(projectConnections).reduce((a, b) => a + b, 0),
       project_connections: projectConnections,
     };
-  })
+  }, { detail: { tags: ["projects"], summary: "Get WebSocket realtime health status" } })
   .get("/realtime/v1/status", async ({ query, set, request }) => {
     const authError = await requireAdminAuth(request);
     if (authError) {
@@ -99,7 +99,7 @@ export const wsRoutes = new Elysia({ prefix: "/ws" })
       max_connections: MAX_CONNECTIONS_PER_PROJECT,
       connection_available: connections < MAX_CONNECTIONS_PER_PROJECT,
     };
-  })
+  }, { detail: { tags: ["projects"], summary: "Get realtime connection status for a project" } })
   .ws("/tasks", {
     body: t.Optional(t.Object({
       type: t.Optional(t.String()),

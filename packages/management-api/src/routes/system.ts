@@ -70,11 +70,15 @@ export const systemRoutes = new Elysia({ name: "system" })
         version: "-",
       };
     }
+  }, {
+    detail: { tags: ["monitor"], summary: "Get system information" },
   })
 
   // Check Realtime CDC prerequisites on Postgres cluster
   .get("/v1/system/realtime/prerequisites", async () => {
     return await realtimeService.checkCdcPrerequisites();
+  }, {
+    detail: { tags: ["monitor"], summary: "Check Realtime CDC prerequisites" },
   })
 
   // Ensure supabase_admin role has REPLICATION attribute, then return latest check
@@ -84,4 +88,6 @@ export const systemRoutes = new Elysia({ name: "system" })
     const ensure = await realtimeService.ensureSupabaseAdminReplication();
     const current = await realtimeService.checkCdcPrerequisites();
     return { ensure, current };
+  }, {
+    detail: { tags: ["monitor"], summary: "Ensure Realtime replication is configured" },
   });

@@ -60,7 +60,8 @@ export const authMfaRoutes = new Elysia({ prefix: "/v1/projects" })
       params: t.Object({ ref: t.String() }),
       query: t.Object({
         user_id: t.Optional(t.String()),
-      }, { additionalProperties: true })
+      }, { additionalProperties: true }),
+      detail: { tags: ["auth"], summary: "List MFA factors" },
     }
   )
 
@@ -116,7 +117,8 @@ export const authMfaRoutes = new Elysia({ prefix: "/v1/projects" })
         friendly_name: t.Optional(t.String()),
         factor_type: t.String(),
         secret: t.Optional(t.String()),
-      }, { additionalProperties: true })
+      }, { additionalProperties: true }),
+      detail: { tags: ["auth"], summary: "Enroll MFA factor" },
     }
   )
 
@@ -158,5 +160,5 @@ export const authMfaRoutes = new Elysia({ prefix: "/v1/projects" })
         return status(500, { message: "Failed to delete MFA factor", code: "500" });
       }
     },
-    { params: t.Object({ ref: t.String(), id: t.String() }) }
+    { params: t.Object({ ref: t.String(), id: t.String() }), detail: { tags: ["auth"], summary: "Delete MFA factor" } }
   );

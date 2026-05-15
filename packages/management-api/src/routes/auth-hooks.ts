@@ -28,7 +28,7 @@ export const authHooksRoutes = new Elysia({ prefix: "/v1/projects" })
         return [];
       }
     },
-    { params: t.Object({ ref: t.String() }) }
+    { params: t.Object({ ref: t.String() }), detail: { tags: ["auth"], summary: "List database webhooks" } }
   )
 
   .post(
@@ -76,7 +76,8 @@ export const authHooksRoutes = new Elysia({ prefix: "/v1/projects" })
         events: t.Optional(t.Array(t.String())),
         is_rls_enabled: t.Optional(t.Boolean()),
         is_enabled: t.Optional(t.Boolean()),
-      })
+      }),
+      detail: { tags: ["auth"], summary: "Create database webhook" },
     }
   )
 
@@ -96,7 +97,7 @@ export const authHooksRoutes = new Elysia({ prefix: "/v1/projects" })
         return status(500, { message: "Failed to get webhook", code: "500", details: err instanceof Error ? err.message : String(err) });
       }
     },
-    { params: t.Object({ ref: t.String(), id: t.String() }) }
+    { params: t.Object({ ref: t.String(), id: t.String() }), detail: { tags: ["auth"], summary: "Get database webhook" } }
   )
 
   .patch(
@@ -142,8 +143,9 @@ export const authHooksRoutes = new Elysia({ prefix: "/v1/projects" })
         request_url: t.Optional(t.String()),
         request_headers: t.Optional(t.Record(t.String(), t.String())),
         events: t.Optional(t.Array(t.String())),
-        is_rls_enabled: t.Optional(t.Boolean())
-      })
+        is_rls_enabled: t.Optional(t.Boolean()),
+      }),
+      detail: { tags: ["auth"], summary: "Update database webhook" },
     }
   )
 
@@ -165,7 +167,7 @@ export const authHooksRoutes = new Elysia({ prefix: "/v1/projects" })
         return status(500, { message: "Failed to delete webhook", code: "500" });
       }
     },
-    { params: t.Object({ ref: t.String(), id: t.String() }) }
+    { params: t.Object({ ref: t.String(), id: t.String() }), detail: { tags: ["auth"], summary: "Delete database webhook" } }
   )
 
   .get(
@@ -185,7 +187,7 @@ export const authHooksRoutes = new Elysia({ prefix: "/v1/projects" })
         send_email_hook: hooks.send_email_hook || { enabled: false },
       };
     },
-    { params: t.Object({ ref: t.String() }) }
+    { params: t.Object({ ref: t.String() }), detail: { tags: ["auth"], summary: "List auth hooks" } }
   )
 
   .patch(
@@ -217,5 +219,6 @@ export const authHooksRoutes = new Elysia({ prefix: "/v1/projects" })
     {
       params: t.Object({ ref: t.String() }),
       body: t.Record(t.String(), t.Unknown()),
+      detail: { tags: ["auth"], summary: "Update auth hooks" },
     }
   );

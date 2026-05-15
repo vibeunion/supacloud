@@ -442,7 +442,9 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
       params: t.Object({
         ref: t.String(),
       }),
-    },
+    
+      detail: { tags: ["projects"], summary: "Get project settings" },
+},
   )
 
   // Update project settings
@@ -465,6 +467,7 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
         ref: t.String(),
       }),
       body: t.Record(t.String(), t.Unknown()),
+      detail: { tags: ["projects"], summary: "Update project settings" },
     },
   )
 
@@ -487,7 +490,9 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
       params: t.Object({
         ref: t.String(),
       }),
-    },
+    
+      detail: { tags: ["projects"], summary: "Get project API keys" },
+},
   )
 
   // Rotate API keys
@@ -509,7 +514,9 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
       params: t.Object({
         ref: t.String(),
       }),
-    },
+    
+      detail: { tags: ["projects"], summary: "Rotate API keys" },
+},
   )
 
   // Get logs
@@ -526,7 +533,9 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
       query: t.Object({
         type: t.Optional(t.String()),
       }),
-    },
+    
+      detail: { tags: ["projects"], summary: "Get project logs" },
+},
   )
 
   // Get backup list
@@ -542,7 +551,9 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
       params: t.Object({
         ref: t.String(),
       }),
-    },
+    
+      detail: { tags: ["projects"], summary: "List database backups" },
+},
   )
 
   // Restore backup
@@ -570,7 +581,9 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
       body: t.Object({
         backup_id: t.String(),
       }),
-    },
+    
+      detail: { tags: ["projects"], summary: "Restore a database backup" },
+},
   )
 
   // Get network restrictions
@@ -592,7 +605,9 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
     },
     {
       params: t.Object({ ref: t.String() }),
-    },
+    
+      detail: { tags: ["projects"], summary: "Get network restrictions" },
+},
   )
 
   // Update network restrictions
@@ -624,7 +639,9 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
       body: t.Object({
         allowed_address_ranges: t.Array(t.String()),
       }),
-    },
+    
+      detail: { tags: ["projects"], summary: "Update network restrictions" },
+},
   )
   .patch(
     "/:ref/network-restrictions",
@@ -650,7 +667,9 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
     {
       params: t.Object({ ref: t.String() }),
       body: t.Object({ allowed_address_ranges: t.Array(t.String()) }),
-    },
+    
+      detail: { tags: ["projects"], summary: "Patch network restrictions" },
+},
   )
   .delete(
     "/:ref/network-restrictions",
@@ -673,7 +692,13 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
         entitlement: "allowed",
       };
     },
-    { params: t.Object({ ref: t.String() }) },
+    {
+
+      params: t.Object({ ref: t.String() }),
+
+      detail: { tags: ["projects"], summary: "Remove network restrictions" },
+
+    },
   )
 
   // Get custom domain
@@ -692,7 +717,9 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
       params: t.Object({
         ref: t.String(),
       }),
-    },
+    
+      detail: { tags: ["projects"], summary: "Get custom hostname" },
+},
   )
 
   // Add custom domain
@@ -720,7 +747,9 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
     {
       params: t.Object({ ref: t.String() }),
       body: t.Object({ custom_hostname: t.String() }),
-    },
+    
+      detail: { tags: ["projects"], summary: "Add custom hostname" },
+},
   )
 
   .delete(
@@ -737,7 +766,13 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
       }
       return { custom_hostname: null, status: "0_not_started", data: {} };
     },
-    { params: t.Object({ ref: t.String() }) },
+    {
+
+      params: t.Object({ ref: t.String() }),
+
+      detail: { tags: ["projects"], summary: "Delete custom hostname" },
+
+    },
   )
 
   .post(
@@ -763,7 +798,9 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
     },
     {
       params: t.Object({ ref: t.String() }),
-    },
+    
+      detail: { tags: ["projects"], summary: "Verify custom hostname" },
+},
   )
 
   // Get Auth config (Studio compatible format)
@@ -781,7 +818,9 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
       params: t.Object({
         ref: t.String(),
       }),
-    },
+    
+      detail: { tags: ["projects"], summary: "Get auth config" },
+},
   )
 
   // Modify Auth config (supports deep copy override for third-party Providers)
@@ -1078,7 +1117,9 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
         ref: t.String(),
       }),
       body: t.Record(t.String(), t.Unknown()),
-    },
+    
+      detail: { tags: ["projects"], summary: "Update auth config" },
+},
   )
 
   // --- Config CRUD (database, postgrest, storage, realtime) via factory ---
@@ -1124,7 +1165,13 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
         };
       }
     },
-    { params: t.Object({ ref: t.String() }) },
+    {
+
+      params: t.Object({ ref: t.String() }),
+
+      detail: { tags: ["projects"], summary: "Get database config" },
+
+    },
   )
 
   .patch(
@@ -1149,7 +1196,9 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
     {
       params: t.Object({ ref: t.String() }),
       body: t.Record(t.String(), t.Unknown()),
-    },
+    
+      detail: { tags: ["projects"], summary: "Update pooler config" },
+},
   )
 
   .get(
@@ -1170,7 +1219,13 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
       `;
       return { replication_slots: slots, publications };
     },
-    { params: t.Object({ ref: t.String() }) },
+    {
+
+      params: t.Object({ ref: t.String() }),
+
+      detail: { tags: ["projects"], summary: "Get database replication info" },
+
+    },
   )
 
   .get(
@@ -1222,7 +1277,9 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
         { schemas: t.Optional(t.String()) },
         { additionalProperties: true },
       ),
-    },
+    
+      detail: { tags: ["projects"], summary: "Generate Python types" },
+},
   )
   .patch(
     "/:ref/config/database",
@@ -1295,7 +1352,9 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
     {
       params: t.Object({ ref: t.String() }),
       body: t.Record(t.String(), t.Unknown()),
-    },
+    
+      detail: { tags: ["projects"], summary: "Update database config" },
+},
   )
   .use(addConfigRoutes("postgrest"))
 
@@ -1313,7 +1372,13 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
         >) || {};
       return buildStorageConfigResponse(raw);
     },
-    { params: t.Object({ ref: t.String() }) },
+    {
+
+      params: t.Object({ ref: t.String() }),
+
+      detail: { tags: ["projects"], summary: "Get storage config" },
+
+    },
   )
   .patch(
     "/:ref/config/storage",
@@ -1349,7 +1414,9 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
     {
       params: t.Object({ ref: t.String() }),
       body: t.Record(t.String(), t.Unknown()),
-    },
+    
+      detail: { tags: ["projects"], summary: "Update storage config" },
+},
   )
 
   // Config Realtime — with official default fields
@@ -1366,7 +1433,13 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
         >) || {};
       return buildRealtimeConfigResponse(raw);
     },
-    { params: t.Object({ ref: t.String() }) },
+    {
+
+      params: t.Object({ ref: t.String() }),
+
+      detail: { tags: ["projects"], summary: "Get realtime config" },
+
+    },
   )
   .patch(
     "/:ref/config/realtime",
@@ -1403,7 +1476,9 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
     {
       params: t.Object({ ref: t.String() }),
       body: t.Record(t.String(), t.Unknown()),
-    },
+    
+      detail: { tags: ["projects"], summary: "Update realtime config" },
+},
   )
 
   // Get PgBouncer config (for Studio display)
@@ -1423,7 +1498,13 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
         }
       );
     },
-    { params: t.Object({ ref: t.String() }) },
+    {
+
+      params: t.Object({ ref: t.String() }),
+
+      detail: { tags: ["projects"], summary: "Get PgBouncer config" },
+
+    },
   )
 
   // Get Postgres DB config — required by CLI `supabase link` (V1GetPostgresConfig)
@@ -1470,7 +1551,13 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
         };
       }
     },
-    { params: t.Object({ ref: t.String() }) },
+    {
+
+      params: t.Object({ ref: t.String() }),
+
+      detail: { tags: ["projects"], summary: "Get Postgres config" },
+
+    },
   )
 
   // Get Pooler config — required by CLI `supabase link` (GetPoolerConfig)
@@ -1494,7 +1581,13 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
         direct_connection_string: `postgresql://${dbUser}:[YOUR-PASSWORD]@${pgHost}:${pgPort}/${dbName}`,
       };
     },
-    { params: t.Object({ ref: t.String() }) },
+    {
+
+      params: t.Object({ ref: t.String() }),
+
+      detail: { tags: ["projects"], summary: "Get pooler config" },
+
+    },
   )
 
   // Get Network Restrictions — required by CLI `supabase link` (V1GetNetworkRestrictions)
@@ -1509,7 +1602,13 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
         (settings as Record<string, unknown>).network_restrictions,
       );
     },
-    { params: t.Object({ ref: t.String() }) },
+    {
+
+      params: t.Object({ ref: t.String() }),
+
+      detail: { tags: ["projects"], summary: "Get network restrictions" },
+
+    },
   )
 
   // Get Storage policies — required by Studio Storage > Policies page (P0-15)
@@ -1549,7 +1648,13 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
         return [];
       }
     },
-    { params: t.Object({ ref: t.String() }) },
+    {
+
+      params: t.Object({ ref: t.String() }),
+
+      detail: { tags: ["projects"], summary: "Get storage policies" },
+
+    },
   )
 
   // Get Types (Studio calls this path — delegates to /types/typescript)
@@ -1629,7 +1734,9 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
     {
       params: t.Object({ ref: t.String() }),
       query: t.Optional(t.Object({ included_schemas: t.Optional(t.String()) })),
-    },
+    
+      detail: { tags: ["projects"], summary: "Get generated types" },
+},
   )
 
   // Get Typescript Types — Real schema reflection (P0-5)
@@ -1876,7 +1983,9 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
     {
       params: t.Object({ ref: t.String() }),
       query: t.Optional(t.Object({ included_schemas: t.Optional(t.String()) })),
-    },
+    
+      detail: { tags: ["projects"], summary: "Generate TypeScript types" },
+},
   )
 
   // Update gateway config (rate limiting, CORS, JWT)
@@ -1916,7 +2025,9 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
         jwt_enabled: t.Optional(t.Boolean()),
         jwt_secret: t.Optional(t.String()),
       }),
-    },
+    
+      detail: { tags: ["projects"], summary: "Update gateway config" },
+},
   )
 
   // Get Kong certificate automation settings

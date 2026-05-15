@@ -22,6 +22,7 @@ export const projectServiceRoutes = new Elysia({ prefix: "/v1/projects" })
       params: t.Object({
         ref: t.String(),
       }),
+      detail: { tags: ["projects"], summary: "Get project health status" },
     },
   )
 
@@ -39,6 +40,7 @@ export const projectServiceRoutes = new Elysia({ prefix: "/v1/projects" })
       params: t.Object({
         ref: t.String(),
       }),
+      detail: { tags: ["projects"], summary: "Get project status" },
     },
   )
 
@@ -129,6 +131,7 @@ export const projectServiceRoutes = new Elysia({ prefix: "/v1/projects" })
       params: t.Object({
         ref: t.String(),
       }),
+      detail: { tags: ["projects"], summary: "Get project usage metrics" },
     },
   )
 
@@ -146,6 +149,7 @@ export const projectServiceRoutes = new Elysia({ prefix: "/v1/projects" })
       params: t.Object({
         ref: t.String(),
       }),
+      detail: { tags: ["projects"], summary: "Restart project" },
     },
   )
 
@@ -195,6 +199,7 @@ export const projectServiceRoutes = new Elysia({ prefix: "/v1/projects" })
     },
     {
       params: t.Object({ ref: t.String() }),
+      detail: { tags: ["projects"], summary: "List project services status" },
     },
   )
 
@@ -269,5 +274,6 @@ export const projectServiceRoutes = new Elysia({ prefix: "/v1/projects" })
         service: t.String(),
         action: t.String(),
       }),
+      detail: { tags: ["projects"], summary: "Control a project service" },
     },
   );

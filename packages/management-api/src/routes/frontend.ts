@@ -92,6 +92,7 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
       params: t.Object({
         ref: t.String(),
       }),
+      detail: { tags: ["frontend"], summary: "List frontend deployments" },
     }
   )
 
@@ -109,6 +110,7 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
         ref: t.String(),
         id: t.String(),
       }),
+      detail: { tags: ["frontend"], summary: "Get a frontend deployment" },
     }
   )
 
@@ -145,6 +147,7 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
         node_version: t.Optional(t.String()),
         env_vars: t.Optional(t.Record(t.String(), t.String())),
       }),
+      detail: { tags: ["frontend"], summary: "Create a frontend deployment" },
     }
   )
 
@@ -183,6 +186,7 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
         node_version: t.Optional(t.String()),
         env_vars: t.Optional(t.Record(t.String(), t.String())),
       }),
+      detail: { tags: ["frontend"], summary: "Update a frontend deployment" },
     }
   )
 
@@ -200,6 +204,7 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
         ref: t.String(),
         id: t.String(),
       }),
+      detail: { tags: ["frontend"], summary: "Delete a frontend deployment" },
     }
   )
 
@@ -229,6 +234,7 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
         git_url: t.String(),
         branch: t.Optional(t.String({ default: "main" })),
       }),
+      detail: { tags: ["frontend"], summary: "Deploy from git repository" },
     }
   )
 
@@ -325,6 +331,7 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
         id: t.String(),
       }),
       body: t.Any(),
+      detail: { tags: ["frontend"], summary: "Deploy from uploaded zip" },
     }
   )
 
@@ -347,6 +354,7 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
         ref: t.String(),
         id: t.String(),
       }),
+      detail: { tags: ["frontend"], summary: "Redeploy a frontend deployment" },
     }
   )
 
@@ -361,6 +369,7 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
         ref: t.String(),
         id: t.String(),
       }),
+      detail: { tags: ["frontend"], summary: "Get deployment build logs" },
     }
   )
 
@@ -381,6 +390,7 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
       body: t.Object({
         env_vars: t.Record(t.String(), t.String()),
       }),
+      detail: { tags: ["frontend"], summary: "Set deployment environment variables" },
     }
   )
 
@@ -401,6 +411,7 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
       body: t.Object({
         domain: t.String(),
       }),
+      detail: { tags: ["frontend"], summary: "Add a custom domain" },
     }
   )
 
@@ -423,6 +434,7 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
         id: t.String(),
         domain: t.String(),
       }),
+      detail: { tags: ["frontend"], summary: "Remove a custom domain" },
     }
   )
 
@@ -436,7 +448,8 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
           defaults: config,
         })),
       };
-    }
+    },
+    { detail: { tags: ["frontend"], summary: "List supported frontend frameworks" } }
   )
 
   .post(
@@ -456,6 +469,7 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
       body: t.Object({
         name: t.String({ minLength: 1 }),
       }),
+      detail: { tags: ["frontend"], summary: "Create a deploy token" },
     }
   )
 
@@ -470,6 +484,7 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
         ref: t.String(),
         id: t.String(),
       }),
+      detail: { tags: ["frontend"], summary: "List deploy tokens" },
     }
   )
 
@@ -488,6 +503,7 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
         id: t.String(),
         tokenId: t.String(),
       }),
+      detail: { tags: ["frontend"], summary: "Delete a deploy token" },
     }
   )
 
@@ -514,6 +530,7 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
         git_url: t.String(),
         branch: t.Optional(t.String({ default: "main" })),
       }),
+      detail: { tags: ["frontend"], summary: "Set git configuration" },
     }
   )
 
@@ -531,6 +548,7 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
         ref: t.String(),
         id: t.String(),
       }),
+      detail: { tags: ["frontend"], summary: "List DNS records" },
     }
   )
 
@@ -545,6 +563,7 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
         ref: t.String(),
         id: t.String(),
       }),
+      detail: { tags: ["frontend"], summary: "List deployment records" },
     }
   )
 
@@ -563,5 +582,6 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
         id: t.String(),
         recordId: t.String(),
       }),
+      detail: { tags: ["frontend"], summary: "Get a deployment record" },
     }
   );

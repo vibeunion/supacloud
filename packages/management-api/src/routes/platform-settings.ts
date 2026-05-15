@@ -25,6 +25,8 @@ export const platformSettingsRoutes = new Elysia({ name: "platform-settings" })
       logger.error("[PlatformSettings] Failed to read settings", { error });
       return { data: [], error: "Failed to read settings" };
     }
+  }, {
+    detail: { tags: ["projects"], summary: "List all platform settings" },
   })
 
   // ─── GET /v1/platform/settings/:key ────────────────────────────
@@ -43,6 +45,8 @@ export const platformSettingsRoutes = new Elysia({ name: "platform-settings" })
       logger.error(`[PlatformSettings] Failed to read key=${params.key}`, { error });
       return { data: null, error: "Failed to read setting" };
     }
+  }, {
+    detail: { tags: ["projects"], summary: "Get a platform setting by key" },
   })
 
   // ─── PUT /v1/platform/settings ─────────────────────────────────
@@ -82,7 +86,8 @@ export const platformSettingsRoutes = new Elysia({ name: "platform-settings" })
         description: t.Optional(t.String()),
         is_secret: t.Optional(t.Boolean())
       }))
-    })
+    }),
+    detail: { tags: ["projects"], summary: "Bulk update platform settings" },
   });
 
 /**
