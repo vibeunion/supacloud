@@ -1,6 +1,6 @@
 {
   "name": "@supacloud/js",
-  "version": "0.13.0",
+  "version": "0.14.0",
   "description": "Platform SDK for SupaCloud, built on top of supabase-js",
   "type": "module",
   "main": "./dist/index.js",

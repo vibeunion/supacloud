@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.9](https://github.com/zuohuadong/supacloud/compare/admin-v0.1.8...admin-v0.1.9) (2026-05-15)
+
+
+### Bug Fixes
+
+* **ci:** normalize release changelog headings ([a446d69](https://github.com/zuohuadong/supacloud/commit/a446d692c12257753da8603617c3313982a56f87))
+* **ci:** use ascii release notes sections ([fc1e24c](https://github.com/zuohuadong/supacloud/commit/fc1e24cc6e549da308a9d312b918eefbc1e9b418))
+
 ## [0.1.8](https://github.com/zuohuadong/supacloud/compare/admin-v0.1.7...admin-v0.1.8) (2026-05-15)
 
 
