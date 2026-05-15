@@ -3,7 +3,7 @@
 ## [0.16.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.15.0...management-api-v0.16.0) (2026-05-15)
 
 
-### 🚀 Features
+### Features
 
 * add project OAuth/OIDC migration ([0315760](https://github.com/zuohuadong/supacloud/commit/0315760c7864b17dd0433a0f9b918be8a64931cd))
 * add queue client api ([b07be9c](https://github.com/zuohuadong/supacloud/commit/b07be9cf0b8f74d8fa3291ee7b563da88a6f46f7))
@@ -44,7 +44,7 @@
 * **web-console:** integrate realtime health, custom domains and oauth panels ([f7d0e13](https://github.com/zuohuadong/supacloud/commit/f7d0e13f4b5b8e6938cccc988c828dd06c316a91))
 
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 * add function invoke route, repair stale projects, web-console deployment ([3ed37ee](https://github.com/zuohuadong/supacloud/commit/3ed37ee7825fa060ca9ac11dab9ada16b923ddb8))
 * add global error handlers to prevent silent crashes and log fatal errors ([b008860](https://github.com/zuohuadong/supacloud/commit/b008860f1b4a52806edc85634ce7b0e113a4e207))
@@ -219,7 +219,7 @@
 * **web-console:** restore settings and task management UI ([c7c1e7d](https://github.com/zuohuadong/supacloud/commit/c7c1e7dacb82b427ec59d84aa5574ab30a524128))
 
 
-### 💅 Elegance & Refactoring
+### Elegance & Refactoring
 
 * **api:** standardize error payload schemas across all routes for Stripe parity ([17a8164](https://github.com/zuohuadong/supacloud/commit/17a8164c0f39eaf318b4e8961ec67f0b26f9e32d))
 * **auth:** use GoTrue magic link verification for miniprogram and upgrade edge fn syntax ([29a71da](https://github.com/zuohuadong/supacloud/commit/29a71da7ddbc326f0b16b7eeb4bb159784e347c7))
@@ -230,12 +230,12 @@
 * remove legacy sql result alias ([d9c85e3](https://github.com/zuohuadong/supacloud/commit/d9c85e3916de88bb38b86e943a63a903789379bd))
 
 
-### ⚡ Performance Improvements
+### Performance Improvements
 
 * reduce management hot path load ([2309d46](https://github.com/zuohuadong/supacloud/commit/2309d46b5f4ecfaad69742dcc7bfe80834615afe))
 
 
-### 🔧 Miscellaneous Chores
+### Miscellaneous Chores
 
 * align error codes and resolve DB roles in management API ([90cffb5](https://github.com/zuohuadong/supacloud/commit/90cffb50fbec47665c284b91407844322fe4f336))
 * bump version (+0.0.1) for management-api and mcp-server ([c94f4af](https://github.com/zuohuadong/supacloud/commit/c94f4af59caf2423d422a99a99aa8fbc6dff7709))

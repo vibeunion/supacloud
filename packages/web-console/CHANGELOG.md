@@ -3,7 +3,7 @@
 ## [0.10.0](https://github.com/zuohuadong/supacloud/compare/web-console-v0.9.4...web-console-v0.10.0) (2026-05-15)
 
 
-### 🚀 Features
+### Features
 
 * **edge-functions:** implement per-function verify_jwt configuration ([adf6746](https://github.com/zuohuadong/supacloud/commit/adf67468b4ccb225aaf3dc50e0fd0bf2f10cb304))
 * **gateway:** manage certificates through Kong ([49c1426](https://github.com/zuohuadong/supacloud/commit/49c1426c576ad2364c965f9d81d54d586b556905))
@@ -13,10 +13,10 @@
 * **tasks:** deploy background task and message queue features to servers ([dc85b34](https://github.com/zuohuadong/supacloud/commit/dc85b340db81f0866195b51d1aaeb81731b0824a))
 * updates and fixes based on recent local changes ([fe495ba](https://github.com/zuohuadong/supacloud/commit/fe495baf4c7be6b469eb245a8c2bc62503f09a8e))
 * **web-console:** integrate realtime health, custom domains and oauth panels ([f7d0e13](https://github.com/zuohuadong/supacloud/commit/f7d0e13f4b5b8e6938cccc988c828dd06c316a91))
-* **web-console:** rewrite home page — real API data, solid icons, system status panel, quick actions ([1012eaf](https://github.com/zuohuadong/supacloud/commit/1012eafd4f62c514d06035d2083787f9621fa070))
+* **web-console:** rewrite home page - real API data, solid icons, system status panel, quick actions ([1012eaf](https://github.com/zuohuadong/supacloud/commit/1012eafd4f62c514d06035d2083787f9621fa070))
 
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 * **auth,infra:** 401 pre-flight and all-in-one local docker ([bc0a047](https://github.com/zuohuadong/supacloud/commit/bc0a0473cc7c580750a0af717502f15a01039a8f))
 * **database:** consume sql rows response only ([3c829df](https://github.com/zuohuadong/supacloud/commit/3c829df24894cbbb184bfb4cb57da9d1506ff31c))
@@ -26,23 +26,23 @@
 * **web-console:** restore settings and task management UI ([c7c1e7d](https://github.com/zuohuadong/supacloud/commit/c7c1e7dacb82b427ec59d84aa5574ab30a524128))
 
 
-### 💅 Elegance & Refactoring
+### Elegance & Refactoring
 
 * **auth:** use GoTrue magic link verification for miniprogram and upgrade edge fn syntax ([29a71da](https://github.com/zuohuadong/supacloud/commit/29a71da7ddbc326f0b16b7eeb4bb159784e347c7))
 
 
-### ⚡ Performance Improvements
+### Performance Improvements
 
 * reduce management hot path load ([2309d46](https://github.com/zuohuadong/supacloud/commit/2309d46b5f4ecfaad69742dcc7bfe80834615afe))
 
 
-### 📝 Documentation
+### Documentation
 
 * refresh hardening and runtime notes ([5d4a995](https://github.com/zuohuadong/supacloud/commit/5d4a995fa196b706fbb7f09b154cd3026ee7357f))
 * **web-console:** add lucide dependency changelog entry ([b1d4f95](https://github.com/zuohuadong/supacloud/commit/b1d4f95042bf3e9d82b705d3e83ae93ca5aa7e21))
 
 
-### 🔧 Miscellaneous Chores
+### Miscellaneous Chores
 
 * **deps-dev:** bump vite from 8.0.3 to 8.0.11 in /packages/web-console ([#87](https://github.com/zuohuadong/supacloud/issues/87)) ([3489923](https://github.com/zuohuadong/supacloud/commit/34899234e42dc5eaf53cc5311379f068ebe62ad5))
 * **deps:** bump @svadmin/core in /packages/web-console ([#90](https://github.com/zuohuadong/supacloud/issues/90)) ([8590de8](https://github.com/zuohuadong/supacloud/commit/8590de859a08d59e6de1a2f6c484e99f93249138))
