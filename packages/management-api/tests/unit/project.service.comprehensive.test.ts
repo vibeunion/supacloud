@@ -18,6 +18,7 @@ const jwtServiceMock = {
 
 const databaseServiceMock = {
   generatePassword: mock(() => "dbpassword"),
+  checkDatabaseExists: mock(() => Promise.resolve(true)),
   checkStatus: mock(() => Promise.resolve({ success: true, output: "" })),
   getSecrets: mock(() => Promise.resolve([{ name: "KEY", value: "val" }])),
   upsertSecret: mock(() => Promise.resolve(true)),
@@ -151,6 +152,7 @@ describe("ProjectService - Comprehensive", () => {
     jwtServiceMock.generateProjectRef.mockReset();
     jwtServiceMock.generateKeySet.mockReset();
     databaseServiceMock.generatePassword.mockReset();
+    databaseServiceMock.checkDatabaseExists.mockReset();
     databaseServiceMock.checkStatus.mockReset();
     databaseServiceMock.getSecrets.mockReset();
     databaseServiceMock.upsertSecret.mockReset();
@@ -182,6 +184,7 @@ describe("ProjectService - Comprehensive", () => {
       serviceRoleKey: "servicekey",
     });
     databaseServiceMock.generatePassword.mockReturnValue("dbpassword");
+    databaseServiceMock.checkDatabaseExists.mockResolvedValue(true);
     databaseServiceMock.checkStatus.mockResolvedValue({ success: true, output: "" });
     databaseServiceMock.getSecrets.mockResolvedValue([{ name: "KEY", value: "val" }]);
     databaseServiceMock.upsertSecret.mockResolvedValue(true);
@@ -306,7 +309,21 @@ describe("ProjectService - Comprehensive", () => {
   test("restoreProject updates status", async () => {
     projectRepositoryMock.findByRef.mockResolvedValueOnce(mockProject);
     expect(await service.restoreProject("test123abc")).toBe(true);
+    expect(databaseServiceMock.checkDatabaseExists).toHaveBeenCalledWith("test123abc");
     expect(projectRepositoryMock.updateStatus).toHaveBeenCalledWith("test123abc", "active");
+  });
+
+  test("restoreProject re-provisions resources when tenant database is missing", async () => {
+    projectRepositoryMock.findByRef.mockResolvedValueOnce(mockProject);
+    databaseServiceMock.checkDatabaseExists.mockResolvedValueOnce(false);
+
+    expect(await service.restoreProject("test123abc")).toBe(true);
+
+    expect(projectRepositoryMock.updateStatus).not.toHaveBeenCalledWith("test123abc", "active");
+    expect(taskRepositoryMock.createTask).toHaveBeenCalledWith("test123abc", "provision_db", {
+      dbPassword: "password123",
+      domain: undefined,
+    });
   });
 
   test("getProjectHealth returns null when project not found", async () => {
