@@ -89,6 +89,7 @@ export interface Config {
   postgrestRts: string;
   postgrestMemoryMax: string;
   postgrestCpuWeight: number;
+  postgrestDbPool: number;
   gotrueBin: string;
   pgrstPortBase: number;
   gotruePortBase: number;
@@ -203,6 +204,7 @@ export const config: Config = {
   postgrestRts: getEnv("POSTGREST_RTS", "-N1 -M256m -I0.5 -A4m"),
   postgrestMemoryMax: getEnv("POSTGREST_MEMORY_MAX", "384M"),
   postgrestCpuWeight: Number(getEnv("POSTGREST_CPU_WEIGHT", "40")),
+  postgrestDbPool: Number(getEnv("POSTGREST_DB_POOL", "10")),
   gotrueBin: getEnv("GOTRUE_BIN", "/usr/local/bin/gotrue"),
   pgrstPortBase: Number(getEnv("PGRST_PORT_BASE", "3100")),
   gotruePortBase: Number(getEnv("GOTRUE_PORT_BASE", "3200")),
