@@ -165,6 +165,7 @@ export const projectDashboardRoutes = new Elysia({ prefix: "/v1/projects" })
     },
     {
       params: t.Object({ ref: t.String() }),
+      detail: { tags: ["projects"], summary: "Get project dashboard summary" },
     },
   );
 

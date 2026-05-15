@@ -9,18 +9,21 @@ export const extensionRoutes = new Elysia({ prefix: "/v1/projects/:ref/extension
         return await extensionService.listExtensions(params.ref);
     }, {
         response: { 200: t.Any() },
+        detail: { tags: ["extensions"], summary: "List project extensions" },
     })
     .post('/enable', async ({ params, body }) => {
         return await extensionService.enableExtension(params.ref, body.extension);
     }, {
         body: t.Object({ extension: t.String() }),
         response: { 200: t.Any() },
+        detail: { tags: ["extensions"], summary: "Enable a project extension" },
     })
     .post('/disable', async ({ params, body }) => {
         return await extensionService.disableExtension(params.ref, body.extension);
     }, {
         body: t.Object({ extension: t.String() }),
         response: { 200: t.Any() },
+        detail: { tags: ["extensions"], summary: "Disable a project extension" },
     })
     .patch('/', async ({ params, body }) => {
         const name = body.name;
@@ -41,6 +44,7 @@ export const extensionRoutes = new Elysia({ prefix: "/v1/projects/:ref/extension
             version: t.Optional(t.String()),
         }),
         response: { 200: t.Any(), 400: ErrorResponse },
+        detail: { tags: ["extensions"], summary: "Create or drop a project extension" },
     })
     .post('/', async ({ params, body }) => {
         const name = body.name;
@@ -53,6 +57,7 @@ export const extensionRoutes = new Elysia({ prefix: "/v1/projects/:ref/extension
             version: t.Optional(t.String()),
         }),
         response: { 200: t.Any(), 400: ErrorResponse },
+        detail: { tags: ["extensions"], summary: "Create a project extension with options" },
     })
     .delete('/', async ({ params, body }) => {
         const name = body.name;
@@ -61,6 +66,7 @@ export const extensionRoutes = new Elysia({ prefix: "/v1/projects/:ref/extension
     }, {
         body: t.Object({ name: t.String() }),
         response: { 200: t.Any(), 400: ErrorResponse },
+        detail: { tags: ["extensions"], summary: "Delete a project extension" },
     });
 
 export const databaseExtensionRoutes = new Elysia({ prefix: "/v1/projects/:ref/database/extensions" })
@@ -68,6 +74,7 @@ export const databaseExtensionRoutes = new Elysia({ prefix: "/v1/projects/:ref/d
         return await extensionService.listExtensions(params.ref);
     }, {
         response: { 200: t.Any() },
+        detail: { tags: ["extensions"], summary: "List database extensions" },
     })
     .post('/', async ({ params, body }) => {
         const name = body.name;
@@ -80,6 +87,7 @@ export const databaseExtensionRoutes = new Elysia({ prefix: "/v1/projects/:ref/d
             version: t.Optional(t.String()),
         }),
         response: { 200: t.Any(), 400: ErrorResponse },
+        detail: { tags: ["extensions"], summary: "Create a database extension" },
     })
     .patch('/', async ({ params, body }) => {
         const name = body.name;
@@ -100,6 +108,7 @@ export const databaseExtensionRoutes = new Elysia({ prefix: "/v1/projects/:ref/d
             version: t.Optional(t.String()),
         }),
         response: { 200: t.Any(), 400: ErrorResponse },
+        detail: { tags: ["extensions"], summary: "Create or drop a database extension" },
     })
     .delete('/', async ({ params, body }) => {
         const name = body.name;
@@ -108,6 +117,7 @@ export const databaseExtensionRoutes = new Elysia({ prefix: "/v1/projects/:ref/d
     }, {
         body: t.Object({ name: t.String() }),
         response: { 200: t.Any(), 400: ErrorResponse },
+        detail: { tags: ["extensions"], summary: "Delete a database extension" },
     });
 
 export const systemExtensionRoutes = new Elysia({ prefix: "/v1/system/extensions" })
@@ -115,6 +125,7 @@ export const systemExtensionRoutes = new Elysia({ prefix: "/v1/system/extensions
         return await extensionService.listSystemExtensions();
     }, {
         response: { 200: t.Any() },
+        detail: { tags: ["extensions"], summary: "List available system extensions" },
     })
     .post('/install', async ({ body, request }) => {
         const authError = await requireAdminAuth(request);
@@ -126,6 +137,7 @@ export const systemExtensionRoutes = new Elysia({ prefix: "/v1/system/extensions
         response: {
             200: t.Any(),
             400: ErrorResponse,
+        detail: { tags: ["extensions"], summary: "Install a system extension" },
         },
     })
     .post('/remove', async ({ body, request }) => {
@@ -138,5 +150,6 @@ export const systemExtensionRoutes = new Elysia({ prefix: "/v1/system/extensions
         response: {
             200: t.Any(),
             400: ErrorResponse,
+        detail: { tags: ["extensions"], summary: "Remove a system extension" },
         },
     });

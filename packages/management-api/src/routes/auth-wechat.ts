@@ -64,6 +64,7 @@ export const wechatAuthRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
         app_secret: t.String({ minLength: 1 }),
         deploy_function: t.Optional(t.Boolean({ default: true })),
       }),
+      detail: { tags: ["auth"], summary: "Configure WeChat Mini Program login" },
     }
   )
 
@@ -124,6 +125,7 @@ export const wechatAuthRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
         redirect_uri: t.Optional(t.String()),
         deploy_function: t.Optional(t.Boolean({ default: true })),
       }),
+      detail: { tags: ["auth"], summary: "Configure WeChat Official Account login" },
     }
   )
 
@@ -194,6 +196,7 @@ export const wechatAuthRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
         app_secret: t.String({ minLength: 1 }),
         redirect_uri: t.Optional(t.String()),
       }),
+      detail: { tags: ["auth"], summary: "Configure WeChat Open Platform login" },
     }
   );
 

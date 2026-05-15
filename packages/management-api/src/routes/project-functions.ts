@@ -39,6 +39,7 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
     },
     {
       params: t.Object({ ref: t.String() }),
+      detail: { tags: ["frontend"], summary: "List edge functions" },
     },
   )
 
@@ -66,6 +67,7 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
     {
       params: t.Object({ ref: t.String() }),
       query: t.Object({ reveal: t.Optional(t.String()) }),
+      detail: { tags: ["frontend"], summary: "List function secrets (project-level)" },
     },
   )
 
@@ -197,6 +199,7 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         file: t.Optional(t.Any()),
       }),
       type: "multipart",
+      detail: { tags: ["frontend"], summary: "Deploy function via multipart upload" },
     },
   )
 
@@ -290,6 +293,7 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
           background_routes: t.Optional(t.Array(t.String())),
         }),
       ),
+      detail: { tags: ["frontend"], summary: "Create or deploy an edge function" },
     },
   )
 
@@ -357,6 +361,7 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
           background_routes: t.Optional(t.Array(t.String())),
         }),
       ),
+      detail: { tags: ["frontend"], summary: "Bulk upsert edge functions" },
     },
   )
 
@@ -398,6 +403,7 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
     },
     {
       params: t.Object({ ref: t.String(), slug: t.String() }),
+      detail: { tags: ["frontend"], summary: "Get edge function details" },
     },
   )
 
@@ -440,6 +446,7 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
     {
       params: t.Object({ ref: t.String(), slug: t.String() }),
       body: t.Optional(t.Any()),
+      detail: { tags: ["frontend"], summary: "Invoke an edge function" },
     },
   )
 
@@ -461,6 +468,7 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
     },
     {
       params: t.Object({ ref: t.String(), slug: t.String() }),
+      detail: { tags: ["frontend"], summary: "Get function source code" },
     },
   )
 
@@ -475,6 +483,7 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
     },
     {
       params: t.Object({ ref: t.String(), slug: t.String() }),
+      detail: { tags: ["frontend"], summary: "List function versions" },
     },
   )
 
@@ -501,6 +510,7 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         slug: t.String(),
         version: t.String(),
       }),
+      detail: { tags: ["frontend"], summary: "Get a specific function version" },
     },
   )
 
@@ -531,6 +541,7 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         slug: t.String(),
         version: t.String(),
       }),
+      detail: { tags: ["frontend"], summary: "Activate a function version" },
     },
   )
 
@@ -563,6 +574,7 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
     },
     {
       params: t.Object({ ref: t.String(), slug: t.String() }),
+      detail: { tags: ["frontend"], summary: "Download function source body" },
     },
   )
 
@@ -593,6 +605,7 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         body: t.Optional(t.String()),
         minify: t.Optional(t.Boolean()),
       }),
+      detail: { tags: ["frontend"], summary: "Deploy function code by slug" },
     },
   )
 
@@ -665,6 +678,7 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         verify_jwt: t.Optional(t.Boolean()),
         background_routes: t.Optional(t.Array(t.String())),
       }),
+      detail: { tags: ["frontend"], summary: "Update function code or config" },
     },
   )
 
@@ -702,6 +716,7 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         entrypoint: t.Optional(t.String()),
         minify: t.Optional(t.Boolean()),
       }),
+      detail: { tags: ["frontend"], summary: "Deploy function bundle" },
     },
   )
 
@@ -729,6 +744,7 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
     {
       params: t.Object({ ref: t.String() }),
       body: t.Object({ slug: t.String() }),
+      detail: { tags: ["frontend"], summary: "Delete function by slug in body" },
     },
   )
 
@@ -751,6 +767,7 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
     },
     {
       params: t.Object({ ref: t.String(), slug: t.String() }),
+      detail: { tags: ["frontend"], summary: "Delete an edge function" },
     },
   )
 
@@ -773,6 +790,7 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
     },
     {
       params: t.Object({ ref: t.String(), slug: t.String() }),
+      detail: { tags: ["frontend"], summary: "Check function runtime status" },
     },
   )
 
@@ -791,6 +809,7 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
     },
     {
       params: t.Object({ ref: t.String(), slug: t.String() }),
+      detail: { tags: ["frontend"], summary: "Get function configuration" },
     },
   )
 
@@ -814,6 +833,7 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         verify_jwt: t.Optional(t.Boolean()),
         background_routes: t.Optional(t.Array(t.String())),
       }),
+      detail: { tags: ["frontend"], summary: "Update function configuration" },
     },
   )
 
@@ -848,6 +868,7 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         },
         { additionalProperties: true },
       ),
+      detail: { tags: ["frontend"], summary: "Get function logs" },
     },
   )
 
@@ -872,7 +893,7 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         updated_at: s.updated_at ?? new Date().toISOString(),
       }));
     },
-    { params: t.Object({ ref: t.String() }), query: t.Object({ reveal: t.Optional(t.String()) }) },
+    { params: t.Object({ ref: t.String() }), query: t.Object({ reveal: t.Optional(t.String()) }), detail: { tags: ["frontend"], summary: "List function secrets (project-level)" } },
   )
   .post(
     "/:ref/functions/secrets",
@@ -897,6 +918,7 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
     {
       params: t.Object({ ref: t.String() }),
       body: t.Array(t.Object({ name: t.String(), value: t.String() })),
+      detail: { tags: ["frontend"], summary: "Create function secrets" },
     },
   )
   .delete(
@@ -920,6 +942,7 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
     {
       params: t.Object({ ref: t.String() }),
       body: t.Array(t.String()),
+      detail: { tags: ["frontend"], summary: "Delete function secrets" },
     },
   )
 
@@ -940,7 +963,7 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
           updated_at: s.updated_at ?? new Date().toISOString(),
         }));
     },
-    { params: t.Object({ ref: t.String(), slug: t.String() }), query: t.Object({ reveal: t.Optional(t.String()) }) },
+    { params: t.Object({ ref: t.String(), slug: t.String() }), query: t.Object({ reveal: t.Optional(t.String()) }), detail: { tags: ["frontend"], summary: "List per-function secrets" } },
   )
   .post(
     "/:ref/functions/:slug/secrets",
@@ -965,6 +988,7 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
     {
       params: t.Object({ ref: t.String(), slug: t.String() }),
       body: t.Array(t.Object({ name: t.String(), value: t.String() })),
+      detail: { tags: ["frontend"], summary: "Create per-function secrets" },
     },
   )
   .delete(
@@ -990,5 +1014,6 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
     {
       params: t.Object({ ref: t.String(), slug: t.String() }),
       body: t.Array(t.String()),
+      detail: { tags: ["frontend"], summary: "Delete per-function secrets" },
     },
   );

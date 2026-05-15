@@ -289,7 +289,11 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
   // Get available regions
   .get("/available-regions", () => {
     return AVAILABLE_REGIONS;
-  })
+  },
+  {
+    detail: { tags: ["projects"], summary: "List available regions" },
+  },
+  )
 
   // Get all projects
   .get(
@@ -311,6 +315,7 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
         401: t.Object({ message: t.String(), code: t.String() }),
         403: t.Object({ message: t.String(), code: t.String() }),
       },
+      detail: { tags: ["projects"], summary: "List projects" },
     },
   )
   .get(
@@ -332,6 +337,7 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
         401: t.Object({ message: t.String(), code: t.String() }),
         403: t.Object({ message: t.String(), code: t.String() }),
       },
+      detail: { tags: ["projects"], summary: "List projects" },
     },
   )
 
@@ -377,6 +383,7 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
           }),
         ),
       }),
+      detail: { tags: ["projects"], summary: "Create project" },
     },
   )
 
@@ -400,6 +407,7 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
       params: t.Object({
         ref: t.String({ minLength: 1 }),
       }),
+      detail: { tags: ["projects"], summary: "Get project details" },
     },
   )
   .get(
@@ -426,6 +434,7 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
       params: t.Object({
         ref: t.String({ minLength: 1 }),
       }),
+      detail: { tags: ["projects"], summary: "Get project studio metrics" },
     },
   )
 
@@ -453,6 +462,7 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
       body: t.Object({
         name: t.Optional(t.String({ minLength: 1, maxLength: 100 })),
       }),
+      detail: { tags: ["projects"], summary: "Update project" },
     },
   )
 
@@ -474,7 +484,10 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
       }
       return await buildProjectResponse(project, true);
     },
-    { params: t.Object({ ref: t.String() }) },
+    {
+      params: t.Object({ ref: t.String() }),
+      detail: { tags: ["projects"], summary: "Delete project" },
+    },
   )
 
   // Pause project
@@ -495,7 +508,10 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
       }
       return await buildProjectResponse(project, true);
     },
-    { params: t.Object({ ref: t.String() }) },
+    {
+      params: t.Object({ ref: t.String() }),
+      detail: { tags: ["projects"], summary: "Pause project" },
+    },
   )
 
   .post(
@@ -515,7 +531,10 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
       }
       return await buildProjectResponse(project, true);
     },
-    { params: t.Object({ ref: t.String() }) },
+    {
+      params: t.Object({ ref: t.String() }),
+      detail: { tags: ["projects"], summary: "Restore project" },
+    },
   )
 
   // Preview Branches — stub endpoints (Studio compatibility)
@@ -527,7 +546,10 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
         return status(404, { message: "Project not found", code: "404" });
       return [];
     },
-    { params: t.Object({ ref: t.String() }) },
+    {
+      params: t.Object({ ref: t.String() }),
+      detail: { tags: ["projects"], summary: "List preview branches" },
+    },
   )
   .post(
     "/:ref/branches",
@@ -541,7 +563,10 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
         code: "501",
       };
     },
-    { params: t.Object({ ref: t.String() }) },
+    {
+      params: t.Object({ ref: t.String() }),
+      detail: { tags: ["projects"], summary: "Create preview branch" },
+    },
   )
 
   // Read Replicas — stub endpoints (Studio compatibility)
@@ -553,7 +578,10 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
         return status(404, { message: "Project not found", code: "404" });
       return [];
     },
-    { params: t.Object({ ref: t.String() }) },
+    {
+      params: t.Object({ ref: t.String() }),
+      detail: { tags: ["projects"], summary: "List read replicas" },
+    },
   )
   .post(
     "/:ref/read-replicas",
@@ -567,7 +595,10 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
         code: "501",
       };
     },
-    { params: t.Object({ ref: t.String() }) },
+    {
+      params: t.Object({ ref: t.String() }),
+      detail: { tags: ["projects"], summary: "Create read replica" },
+    },
   )
   .delete(
     "/:ref/read-replicas/:id",
@@ -578,7 +609,10 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
         code: "501",
       };
     },
-    { params: t.Object({ ref: t.String(), id: t.String() }) },
+    {
+      params: t.Object({ ref: t.String(), id: t.String() }),
+      detail: { tags: ["projects"], summary: "Delete read replica" },
+    },
   )
 
   // Project endpoint info (Studio compatibility)
@@ -596,7 +630,10 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
         connection_string: `postgresql://${dbUser}:[YOUR-PASSWORD]@${project.database?.host || "localhost"}:5432/${dbName}`,
       };
     },
-    { params: t.Object({ ref: t.String() }) },
+    {
+      params: t.Object({ ref: t.String() }),
+      detail: { tags: ["projects"], summary: "Get project endpoint info" },
+    },
   )
 
   // ── Vanity Subdomains (/vanity-subdomain singular (official path)) ──────────
@@ -618,7 +655,10 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
         custom_domain: `${vanity}.${process.env.BASE_DOMAIN || "localhost"}`,
       };
     },
-    { params: t.Object({ ref: t.String() }) },
+    {
+      params: t.Object({ ref: t.String() }),
+      detail: { tags: ["projects"], summary: "Get vanity subdomain config" },
+    },
   )
 
   // POST check-availability — verify a subdomain is not taken
@@ -648,6 +688,7 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
     {
       params: t.Object({ ref: t.String() }),
       body: t.Object({ vanity_subdomain: t.String() }),
+      detail: { tags: ["projects"], summary: "Check vanity subdomain availability" },
     },
   )
 
@@ -694,6 +735,7 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
     {
       params: t.Object({ ref: t.String() }),
       body: t.Object({ vanity_subdomain: t.String() }),
+      detail: { tags: ["projects"], summary: "Activate vanity subdomain" },
     },
   )
 
@@ -712,7 +754,10 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
       await projectService.updateProjectSettings(params.ref, updated);
       return { custom_domain: null, vanity_subdomain: null };
     },
-    { params: t.Object({ ref: t.String() }) },
+    {
+      params: t.Object({ ref: t.String() }),
+      detail: { tags: ["projects"], summary: "Remove vanity subdomain" },
+    },
   )
 
   // Postgres Upgrade — stub endpoints (Studio compatibility)
@@ -725,14 +770,20 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
         code: "501",
       };
     },
-    { params: t.Object({ ref: t.String() }) },
+    {
+      params: t.Object({ ref: t.String() }),
+      detail: { tags: ["projects"], summary: "Upgrade Postgres version" },
+    },
   )
   .get(
     "/:ref/upgrade-status",
     async ({ params }) => {
       return { upgrade_status: "none" };
     },
-    { params: t.Object({ ref: t.String() }) },
+    {
+      params: t.Object({ ref: t.String() }),
+      detail: { tags: ["projects"], summary: "Get Postgres upgrade status" },
+    },
   )
 
   // Auth Email Templates — stub endpoint (Studio compatibility)
@@ -750,7 +801,10 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
         magic_link: { subject: "Your magic link", content: "" },
       };
     },
-    { params: t.Object({ ref: t.String() }) },
+    {
+      params: t.Object({ ref: t.String() }),
+      detail: { tags: ["projects"], summary: "Get auth email templates" },
+    },
   )
   .put(
     "/:ref/auth/template",
@@ -768,6 +822,7 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
     {
       params: t.Object({ ref: t.String() }),
       body: t.Record(t.String(), t.Unknown()),
+      detail: { tags: ["projects"], summary: "Update auth email templates" },
     },
   )
 
@@ -780,7 +835,10 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
         return status(404, { message: "Project not found", code: "404" });
       return (settings as Record<string, unknown>).postgrest || {};
     },
-    { params: t.Object({ ref: t.String() }) },
+    {
+      params: t.Object({ ref: t.String() }),
+      detail: { tags: ["projects"], summary: "Get PostgREST config" },
+    },
   )
   .patch(
     "/:ref/postgrest",
@@ -806,6 +864,7 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
     {
       params: t.Object({ ref: t.String() }),
       body: t.Record(t.String(), t.Unknown()),
+      detail: { tags: ["projects"], summary: "Update PostgREST config" },
     },
   )
 
@@ -822,7 +881,10 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
         latest_physical_backup_date: null,
       };
     },
-    { params: t.Object({ ref: t.String() }) },
+    {
+      params: t.Object({ ref: t.String() }),
+      detail: { tags: ["projects"], summary: "Get PITR backup status" },
+    },
   )
 
   // Enforced project settings — stub endpoint (Studio compatibility)
@@ -834,5 +896,8 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
         return status(404, { message: "Project not found", code: "404" });
       return {};
     },
-    { params: t.Object({ ref: t.String() }) },
+    {
+      params: t.Object({ ref: t.String() }),
+      detail: { tags: ["projects"], summary: "Get enforced project settings" },
+    },
   );

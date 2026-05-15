@@ -130,7 +130,8 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
         _sort: t.Optional(t.String()),
         _order: t.Optional(t.String()),
         q: t.Optional(t.String()),
-      }, { additionalProperties: true })
+      }, { additionalProperties: true }),
+      detail: { tags: ["auth"], summary: "List users" },
     }
   )
   .post(
@@ -193,7 +194,8 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
         password_hash: t.Optional(t.String()),
         id: t.Optional(t.String()),
         current_password: t.Optional(t.String()),
-      })
+      }),
+      detail: { tags: ["auth"], summary: "Create user" },
     }
   )
 
@@ -239,7 +241,8 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
         user_metadata: t.Optional(t.Any()),
         app_metadata: t.Optional(t.Any()),
         redirectTo: t.Optional(t.String()),
-      })
+      }),
+      detail: { tags: ["auth"], summary: "Invite user by email" },
     }
   )
 
@@ -274,7 +277,8 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
       params: t.Object({
         ref: t.String(),
         id: t.String(),
-      })
+      }),
+      detail: { tags: ["auth"], summary: "Get user" },
     }
   )
 
@@ -323,7 +327,8 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
         app_metadata: t.Optional(t.Any()),
         ban_duration: t.Optional(t.String()),
         role: t.Optional(t.String()),
-      })
+      }),
+      detail: { tags: ["auth"], summary: "Replace user" },
     }
   )
 
@@ -368,7 +373,8 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
         app_metadata: t.Optional(t.Any()),
         ban_duration: t.Optional(t.String()),
         role: t.Optional(t.String()),
-      })
+      }),
+      detail: { tags: ["auth"], summary: "Update user" },
     }
   )
 
@@ -409,7 +415,8 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
         ref: t.String(),
         id: t.String(),
       }),
-      body: t.Optional(t.Any())
+      body: t.Optional(t.Any()),
+      detail: { tags: ["auth"], summary: "Delete user" },
     }
   )
 
@@ -444,7 +451,8 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
       params: t.Object({
         ref: t.String(),
         id: t.String(),
-      })
+      }),
+      detail: { tags: ["auth"], summary: "List user MFA factors" },
     }
   )
 
@@ -491,5 +499,6 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
         data: t.Optional(t.Record(t.String(), t.Unknown())),
         gotrue_meta_security: t.Optional(t.Record(t.String(), t.Unknown())),
       }, { additionalProperties: true }),
+      detail: { tags: ["auth"], summary: "Generate auth link" },
     }
   );

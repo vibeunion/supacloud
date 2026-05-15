@@ -61,7 +61,7 @@ export const authSsoRoutes = new Elysia({ prefix: "/v1/projects" })
         return [];
       }
     },
-    { params: t.Object({ ref: t.String() }) }
+    { params: t.Object({ ref: t.String() }), detail: { tags: ["auth"], summary: "List SSO providers" } }
   )
 
   .post(
@@ -102,7 +102,8 @@ export const authSsoRoutes = new Elysia({ prefix: "/v1/projects" })
         metadata_attribute_url: t.Optional(t.String()),
         entity_id: t.Optional(t.String()),
         attribute_mapping: t.Optional(t.Record(t.String(), t.Unknown())),
-      })
+      }),
+      detail: { tags: ["auth"], summary: "Create SSO provider" },
     }
   )
 
@@ -130,7 +131,7 @@ export const authSsoRoutes = new Elysia({ prefix: "/v1/projects" })
         return status(500, { message: "Failed to get SSO provider", code: "500", details: err instanceof Error ? err.message : String(err) });
       }
     },
-    { params: t.Object({ ref: t.String(), id: t.String() }) }
+    { params: t.Object({ ref: t.String(), id: t.String() }), detail: { tags: ["auth"], summary: "Get SSO provider" } }
   )
 
   .put(
@@ -170,7 +171,8 @@ export const authSsoRoutes = new Elysia({ prefix: "/v1/projects" })
         metadata_url: t.Optional(t.String()),
         metadata_attribute_url: t.Optional(t.String()),
         attribute_mapping: t.Optional(t.Record(t.String(), t.Unknown())),
-      })
+      }),
+      detail: { tags: ["auth"], summary: "Update SSO provider" },
     }
   )
 
@@ -199,5 +201,5 @@ export const authSsoRoutes = new Elysia({ prefix: "/v1/projects" })
         return status(500, { message: "Failed to delete SSO provider", code: "500", details: err instanceof Error ? err.message : String(err) });
       }
     },
-    { params: t.Object({ ref: t.String(), id: t.String() }) }
+    { params: t.Object({ ref: t.String(), id: t.String() }), detail: { tags: ["auth"], summary: "Delete SSO provider" } }
   );

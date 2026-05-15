@@ -45,17 +45,17 @@ function buildSourceUrl(bucket: string, path: string): string {
 export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
     .get('/status', async () => {
         return await StorageService.getStatus();
-    })
+    }, { detail: { tags: ["storage"], summary: "Get storage service status" } })
     .get('/:ref/buckets', async ({ params, request }) => {
         const authError = await requireProjectOrAdminAuth(request, params.ref);
         if (authError) return status(authError.status, authError.body);
         return await StorageService.listBuckets(params.ref);
-    })
+    }, { detail: { tags: ["storage"], summary: "List storage buckets for a project" } })
     .get('/:ref/buckets/:name/files', async ({ params, request }) => {
         const authError = await requireProjectOrAdminAuth(request, params.ref);
         if (authError) return status(authError.status, authError.body);
         return await StorageService.listFiles(params.ref, params.name);
-    })
+    }, { detail: { tags: ["storage"], summary: "List files in a storage bucket" } })
     .post('/:ref/buckets/:name/upload', async ({ params, body, request }) => {
         const authError = await requireProjectOrAdminAuth(request, params.ref);
         if (authError) return status(authError.status as 401 | 403, { message: authError.body.error, code: String(authError.status) });
@@ -87,6 +87,7 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
             403: ErrorResponse,
             500: ErrorResponse,
         },
+        detail: { tags: ["storage"], summary: "Upload a file to a storage bucket" },
     })
     .delete('/:ref/buckets/:name/files/:filename', async ({ params, request }) => {
         const authError = await requireProjectOrAdminAuth(request, params.ref);
@@ -101,6 +102,7 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
             403: ErrorResponse,
             500: ErrorResponse,
         },
+        detail: { tags: ["storage"], summary: "Delete a file from a storage bucket" },
     })
     .post('/migrate', async ({ body, request, set }) => {
         const authError = await requireAdminAuth(request);
@@ -125,6 +127,7 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
             401: ErrorResponse,
             403: ErrorResponse,
         },
+        detail: { tags: ["storage"], summary: "Start a storage migration job" },
     })
     .get('/migrate/:jobId', async ({ params, request, set }) => {
         const authError = await requireAdminAuth(request);
@@ -164,7 +167,8 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
             401: ErrorResponse,
             403: ErrorResponse,
             404: ErrorResponse
-        }
+        },
+        detail: { tags: ["storage"], summary: "Get storage migration job status" },
     })
 
     // ── Supabase-compatible Image Transform (via imaginary) ──────
@@ -234,7 +238,7 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
             logger.error('Image transform proxy error:', { error: err instanceof Error ? err.message : String(err) });
             return status(502, { message: 'Image processing service unavailable', code: '502' });
         }
-    })
+    }, { detail: { tags: ["storage"], summary: "Render a public image with transforms" } })
 
     // ── Enhanced imaginary Features (beyond Supabase standard) ───
     // These routes expose imaginary's unique superpowers that imgproxy Pro charges for.
@@ -270,7 +274,7 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
         } catch (err: unknown) {
             return status(502, { message: 'Smartcrop service unavailable', code: '502' });
         }
-    })
+    }, { detail: { tags: ["storage"], summary: "Smart crop an image with focus detection" } })
 
     // Watermark: overlay text or image watermark
     // GET /v1/storage/:ref/transform/watermark/:bucket/*?text=ACME&font=sans&opacity=0.5
@@ -307,7 +311,7 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
         } catch (err: unknown) {
             return status(502, { message: 'Watermark service unavailable', code: '502' });
         }
-    })
+    }, { detail: { tags: ["storage"], summary: "Apply watermark to an image" } })
 
     // Blur: apply gaussian blur (useful for placeholder images / LQIP)
     // GET /v1/storage/:ref/transform/blur/:bucket/*?sigma=10&width=20
@@ -341,7 +345,7 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
         } catch (err: unknown) {
             return status(502, { message: 'Blur service unavailable', code: '502' });
         }
-    })
+    }, { detail: { tags: ["storage"], summary: "Apply gaussian blur to an image" } })
 
     // Image Info: extract metadata (dimensions, EXIF, color space) without downloading full image
     // GET /v1/storage/:ref/transform/info/:bucket/*
@@ -366,7 +370,7 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
         } catch (err: unknown) {
             return status(502, { message: 'Image info service unavailable', code: '502' });
         }
-    })
+    }, { detail: { tags: ["storage"], summary: "Get image metadata and dimensions" } })
 
     // Thumbnail: generate a small, fast thumbnail (great for file browsers / galleries)
     // GET /v1/storage/:ref/transform/thumbnail/:bucket/*?width=150
@@ -398,7 +402,7 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
         } catch (err: unknown) {
             return status(502, { message: 'Thumbnail service unavailable', code: '502' });
         }
-    })
+    }, { detail: { tags: ["storage"], summary: "Generate a thumbnail for an image" } })
 
     // Health check for imaginary service
     .get('/imaginary/health', async () => {
@@ -410,14 +414,14 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
             logger.warn(`[Storage] Imaginary service health check failed: ${(err as Error).message}`);
             return { status: 'unreachable', message: 'Cannot connect to imaginary service' };
         }
-    });
+    }, { detail: { tags: ["storage"], summary: "Check imaginary image service health" } });
 
 export const projectStorageRoutes = new Elysia({ prefix: "/v1/projects/:ref/storage" })
     .get('/buckets', async ({ params, request }) => {
         const authError = await requireProjectOrAdminAuth(request, params.ref);
         if (authError) return status(authError.status, authError.body);
         return await StorageService.listBuckets(params.ref);
-    })
+    }, { detail: { tags: ["storage"], summary: "List project storage buckets" } })
     .post('/buckets', async ({ params, body, set, request }) => {
         const authError = await requireProjectOrAdminAuth(request, params.ref);
         if (authError) return status(authError.status, authError.body);
@@ -436,6 +440,7 @@ export const projectStorageRoutes = new Elysia({ prefix: "/v1/projects/:ref/stor
             file_size_limit: t.Optional(t.Number()),
             allowed_mime_types: t.Optional(t.Array(t.String())),
         }),
+        detail: { tags: ["storage"], summary: "Create a storage bucket" },
     })
     .get('/buckets/:id', async ({ params, set, request }) => {
         const authError = await requireProjectOrAdminAuth(request, params.ref);
@@ -447,7 +452,7 @@ export const projectStorageRoutes = new Elysia({ prefix: "/v1/projects/:ref/stor
             return { message: "Bucket not found", code: "404" };
         }
         return bucket;
-    })
+    }, { detail: { tags: ["storage"], summary: "Get a storage bucket by ID" } })
     .put('/buckets/:id', async ({ params, body, set, request }) => {
         const authError = await requireProjectOrAdminAuth(request, params.ref);
         if (authError) return status(authError.status, authError.body);
@@ -469,6 +474,7 @@ export const projectStorageRoutes = new Elysia({ prefix: "/v1/projects/:ref/stor
             file_size_limit: t.Optional(t.Number()),
             allowed_mime_types: t.Optional(t.Array(t.String())),
         }),
+        detail: { tags: ["storage"], summary: "Update a storage bucket" },
     })
     .delete('/buckets/:id', async ({ params, set, request }) => {
         const authError = await requireProjectOrAdminAuth(request, params.ref);
@@ -479,4 +485,4 @@ export const projectStorageRoutes = new Elysia({ prefix: "/v1/projects/:ref/stor
             return { message: result.error || "Failed to delete bucket", code: "500" };
         }
         return { id: params.id, deleted: true };
-    });
+    }, { detail: { tags: ["storage"], summary: "Delete a storage bucket" } });
