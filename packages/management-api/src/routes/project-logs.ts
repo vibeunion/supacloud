@@ -76,7 +76,8 @@ export const projectLogsRoutes = new Elysia({ prefix: "/v1/projects/:ref/logs" }
         },
         {
             params: t.Object({ ref: t.String({ minLength: 1 }) }),
-            query: t.Object({ limit: t.Optional(t.String()), service: t.Optional(t.String()) })
+            query: t.Object({ limit: t.Optional(t.String()), service: t.Optional(t.String()) }),
+            detail: { tags: ["projects"], summary: "Get project logs" }
         }
     )
 
@@ -176,6 +177,7 @@ export const projectLogsRoutes = new Elysia({ prefix: "/v1/projects/:ref/logs" }
         },
         {
             params: t.Object({ ref: t.String({ minLength: 1 }) }),
-            query: t.Object({ service: t.Optional(t.String()) })
+            query: t.Object({ service: t.Optional(t.String()) }),
+            detail: { tags: ["projects"], summary: "Stream project logs via SSE" }
         }
     );

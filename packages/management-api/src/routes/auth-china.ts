@@ -41,6 +41,7 @@ export const chinaAuthRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
       params: t.Object({
         ref: t.String(),
       }),
+      detail: { tags: ["auth"], summary: "List China OAuth providers" },
     }
   )
 
@@ -110,6 +111,7 @@ export const chinaAuthRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
         redirect_uri: t.Optional(t.String()),
         deploy_function: t.Optional(t.Boolean({ default: true })),
       }),
+      detail: { tags: ["auth"], summary: "Configure China OAuth provider" },
     }
   );
 

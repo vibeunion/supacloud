@@ -15,6 +15,7 @@ export const maintenanceRoutes = new Elysia({ prefix: "/v1/maintenance" })
             candidate: t.Optional(t.String()),
         }),
         response: { 200: t.Any() },
+        detail: { tags: ["maintenance"], summary: "Perform database switchover" },
     })
     .post('/reload', async ({ body, request }) => {
         const authError = await requireAdminAuth(request);
@@ -27,6 +28,7 @@ export const maintenanceRoutes = new Elysia({ prefix: "/v1/maintenance" })
             200: t.Any(),
             400: ErrorResponse,
         },
+        detail: { tags: ["maintenance"], summary: "Reload node configuration" },
     })
     .post('/replicas', async ({ body, request }) => {
         const authError = await requireAdminAuth(request);
@@ -39,4 +41,5 @@ export const maintenanceRoutes = new Elysia({ prefix: "/v1/maintenance" })
             200: t.Any(),
             400: ErrorResponse,
         },
+        detail: { tags: ["maintenance"], summary: "Add a read replica" },
     });

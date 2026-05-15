@@ -20,6 +20,7 @@ export const projectSecretsRoutes = new Elysia({ prefix: "/v1/projects" })
     },
     {
       params: t.Object({ ref: t.String() }),
+      detail: { tags: ["projects"], summary: "Get project runtime environment" },
     },
   )
 
@@ -42,6 +43,7 @@ export const projectSecretsRoutes = new Elysia({ prefix: "/v1/projects" })
     {
       params: t.Object({ ref: t.String() }),
       query: t.Object({ reveal: t.Optional(t.String()) }),
+      detail: { tags: ["projects"], summary: "List project secrets" },
     },
   )
 
@@ -77,6 +79,7 @@ export const projectSecretsRoutes = new Elysia({ prefix: "/v1/projects" })
           value: t.String({ maxLength: 24576 }),
         }),
       ),
+      detail: { tags: ["projects"], summary: "Create or update project secrets" },
     },
   )
 
@@ -106,6 +109,7 @@ export const projectSecretsRoutes = new Elysia({ prefix: "/v1/projects" })
     {
       params: t.Object({ ref: t.String() }),
       body: t.Array(t.Union([t.String(), t.Object({ name: t.String() })])),
+      detail: { tags: ["projects"], summary: "Bulk delete project secrets" },
     },
   )
 
@@ -120,5 +124,8 @@ export const projectSecretsRoutes = new Elysia({ prefix: "/v1/projects" })
       }
       return {};
     },
-    { params: t.Object({ ref: t.String(), name: t.String() }) },
+    {
+      params: t.Object({ ref: t.String(), name: t.String() }),
+      detail: { tags: ["projects"], summary: "Delete a project secret by name" },
+    },
   );

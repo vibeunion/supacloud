@@ -150,6 +150,7 @@ export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
             idempotencyKey: t.Optional(t.String()),
             traceId: t.Optional(t.String()),
         }),
+        detail: { tags: ["tasks"], summary: "Enqueue a message to a queue" },
     })
     .post("/queues/:queueName/messages/receive", async ({ params, body }) => {
         try {
@@ -183,6 +184,7 @@ export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
         body: t.Optional(t.Object({
             visibilityTimeoutSec: t.Optional(t.Number()),
         })),
+        detail: { tags: ["tasks"], summary: "Receive a message from a queue" },
     })
     .get("/queues/:queueName/messages", async ({ params, query }) => {
         try {
@@ -201,6 +203,7 @@ export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
             dlq: t.Optional(t.String()),
             limit: t.Optional(t.String()),
         })),
+        detail: { tags: ["tasks"], summary: "List messages in a queue" },
     })
     .get("/queues/:queueName/stats", async ({ params }) => {
         try {
@@ -213,7 +216,7 @@ export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
         } catch (err: unknown) {
             return status(500, { message: "Failed to retrieve queue stats", code: "500", details: (err instanceof Error ? err.message : String(err)) });
         }
-    })
+    }, { detail: { tags: ["tasks"], summary: "Get queue statistics" } })
     .get("/queues/:queueName/settings", async ({ params }) => {
         try {
             const queueName = normalizeQueueName(params.queueName);
@@ -227,7 +230,7 @@ export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
         } catch (err: unknown) {
             return status(500, { message: "Failed to retrieve queue settings", code: "500", details: (err instanceof Error ? err.message : String(err)) });
         }
-    })
+    }, { detail: { tags: ["tasks"], summary: "Get queue settings" } })
     .patch("/queues/:queueName/settings", async ({ params, body }) => {
         try {
             const queueName = normalizeQueueName(params.queueName);
@@ -259,6 +262,7 @@ export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
             max_attempts: t.Optional(t.Number()),
             rate_limit_per_minute: t.Optional(t.Number()),
         }),
+        detail: { tags: ["tasks"], summary: "Update queue settings" },
     })
     .get("/queues/:queueName/messages/:messageId", async ({ params }) => {
         try {
@@ -281,7 +285,7 @@ export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
         } catch (err: unknown) {
             return status(500, { message: "Failed to retrieve queue message", code: "500", details: (err instanceof Error ? err.message : String(err)) });
         }
-    })
+    }, { detail: { tags: ["tasks"], summary: "Get a queue message by ID" } })
     .post("/queues/:queueName/messages/:messageId/ack", async ({ params, body }) => {
         try {
             const queueName = normalizeQueueName(params.queueName);
@@ -306,6 +310,7 @@ export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
         body: t.Optional(t.Object({
             result: t.Optional(t.Record(t.String(), t.Unknown())),
         })),
+        detail: { tags: ["tasks"], summary: "Acknowledge a queue message" },
     })
     .post("/queues/:queueName/messages/:messageId/release", async ({ params, body }) => {
         try {
@@ -330,6 +335,7 @@ export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
             delayMs: t.Optional(t.Number()),
             error: t.Optional(t.String()),
         })),
+        detail: { tags: ["tasks"], summary: "Release a queue message back to the queue" },
     })
     .post("/queues/:queueName/messages/:messageId/fail", async ({ params, body }) => {
         try {
@@ -353,6 +359,7 @@ export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
             error: t.Optional(t.String()),
             deadLetter: t.Optional(t.Boolean()),
         })),
+        detail: { tags: ["tasks"], summary: "Mark a queue message as failed" },
     })
     .post("/queues/:queueName/messages/:messageId/retry", async ({ params }) => {
         try {
@@ -369,7 +376,7 @@ export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
         } catch (err: unknown) {
             return status(500, { message: "Failed to retry queue message", code: "500", details: (err instanceof Error ? err.message : String(err)) });
         }
-    })
+    }, { detail: { tags: ["tasks"], summary: "Retry a dead-lettered queue message" } })
     .delete("/queues/:queueName/messages/:messageId", async ({ params }) => {
         try {
             const queueName = normalizeQueueName(params.queueName);
@@ -386,7 +393,7 @@ export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
         } catch (err: unknown) {
             return status(500, { message: "Failed to delete queue message", code: "500", details: (err instanceof Error ? err.message : String(err)) });
         }
-    })
+    }, { detail: { tags: ["tasks"], summary: "Delete a queue message" } })
     .get("/", async ({ params, query }) => {
         try {
             const statuses = typeof query.status === "string"
@@ -425,6 +432,7 @@ export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
             limit: t.Optional(t.String()),
             summary: t.Optional(t.String()),
         })),
+        detail: { tags: ["tasks"], summary: "List project tasks" },
     })
     .get("/settings/background", async ({ params }) => {
         try {
@@ -436,7 +444,7 @@ export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
         } catch (err: unknown) {
             return status(500, { message: "Failed to retrieve background task settings", code: "500", details: (err instanceof Error ? err.message : String(err)) });
         }
-    })
+    }, { detail: { tags: ["tasks"], summary: "Get background task settings" } })
     .get("/dlq", async ({ params, query }) => {
         try {
             const tasks = await taskRepository.listTasksByProjectFiltered(params.ref, {
@@ -452,6 +460,7 @@ export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
         query: t.Optional(t.Object({
             summary: t.Optional(t.String()),
         })),
+        detail: { tags: ["tasks"], summary: "List dead-lettered tasks" },
     })
     .get("/stats", async ({ params }) => {
         try {
@@ -459,7 +468,7 @@ export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
         } catch (err: unknown) {
             return status(500, { message: "Failed to retrieve task stats", code: "500", details: (err instanceof Error ? err.message : String(err)) });
         }
-    })
+    }, { detail: { tags: ["tasks"], summary: "Get task statistics" } })
     .patch("/settings/background", async ({ params, body }) => {
         try {
             const settings = await projectService.updateBackgroundTaskSettings(params.ref, body as Record<string, number>);
@@ -478,6 +487,7 @@ export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
             timeout_sec_default: t.Optional(t.Number()),
             timeout_sec_max: t.Optional(t.Number()),
         }),
+        detail: { tags: ["tasks"], summary: "Update background task settings" },
     })
     .get("/:taskId", async ({ params, request }) => {
         try {
@@ -499,7 +509,7 @@ export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
         } catch (err: unknown) {
             return status(500, { message: "Failed to retrieve task", code: "500", details: (err instanceof Error ? err.message : String(err)) });
         }
-    })
+    }, { detail: { tags: ["tasks"], summary: "Get task details by ID" } })
     .post("/:taskId/cancel", async ({ params }) => {
         try {
             const current = await taskRepository.getTaskById(params.taskId, params.ref);
@@ -537,7 +547,7 @@ export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
         } catch (err: unknown) {
             return status(500, { message: "Failed to cancel task", code: "500", details: (err instanceof Error ? err.message : String(err)) });
         }
-    })
+    }, { detail: { tags: ["tasks"], summary: "Cancel a running task" } })
     .post("/:taskId/retry", async ({ params }) => {
         try {
             const task = await taskRepository.retryTask(params.taskId);
@@ -548,4 +558,4 @@ export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
         } catch (err: unknown) {
             return status(500, { message: "Failed to retry task", code: "500", details: (err instanceof Error ? err.message : String(err)) });
         }
-    });
+    }, { detail: { tags: ["tasks"], summary: "Retry a failed task" } });

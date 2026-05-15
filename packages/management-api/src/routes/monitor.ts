@@ -13,6 +13,7 @@ export const monitorRoutes = new Elysia({ prefix: "/v1/monitor" })
             200: t.Any(),
             400: ErrorResponse,
         },
+        detail: { tags: ["monitor"], summary: "Check node health" },
     })
     .get('/metrics', async ({ query }) => {
         if (!query.ip) return status(400, { error: 'IP is required' });
@@ -23,4 +24,5 @@ export const monitorRoutes = new Elysia({ prefix: "/v1/monitor" })
             200: t.Any(),
             400: ErrorResponse,
         },
+        detail: { tags: ["monitor"], summary: "Get node metrics" },
     });
