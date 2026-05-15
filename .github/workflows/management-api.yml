@@ -183,7 +183,8 @@ jobs:
         working-directory: packages/management-api
         run: |
           bun test tests/unit/sdk-proxy.functions.test.ts
-          bun test $(find tests/unit -name "*.test.ts" ! -name "sdk-proxy.functions.test.ts" | sort)
+          bun test tests/unit/gateway.service.test.ts
+          bun test $(find tests/unit -name "*.test.ts" ! -name "sdk-proxy.functions.test.ts" ! -name "gateway.service.test.ts" | sort)
 
   integration-test:
     name: Integration & Compliance Tests
