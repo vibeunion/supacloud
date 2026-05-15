@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.15.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.14.1...management-api-v0.15.0) (2026-05-15)
+
+
+### 🚀 Features
+
+* optimize tenant runtime lifecycle ([c5fcf96](https://github.com/zuohuadong/supacloud/commit/c5fcf962f6f6689400ee920a44d22c35970bb268))
+
+
+### 🐛 Bug Fixes
+
+* provision_runtime fails on Ubuntu due to Group=nobody and missing auth schema ([#110](https://github.com/zuohuadong/supacloud/issues/110)) ([0bef1c6](https://github.com/zuohuadong/supacloud/commit/0bef1c6e81578071c7a23cf621f17dc8594881c9))
+
 ## [0.14.1](https://github.com/zuohuadong/supacloud/compare/management-api-v0.14.0...management-api-v0.14.1) (2026-05-15)
 
 
