@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.15.0...management-api-v0.16.0) (2026-05-15)
+
+
+### 🚀 Features
+
+* add project OAuth/OIDC migration ([995a55d](https://github.com/zuohuadong/supacloud/commit/995a55d7addd0a615615fcbe40d7979b82979f63))
+
 ## [0.15.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.14.1...management-api-v0.15.0) (2026-05-15)
 
 
