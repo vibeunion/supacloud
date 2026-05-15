@@ -1,8 +1,9 @@
 import { EventEmitter } from 'events';
-import { jwtVerify, type JWTPayload } from 'jose';
+import type { JWTPayload } from 'jose';
 import { logger } from '../utils/logger';
 import { databaseService } from './database.service';
-import { resolveDbName, getProjectDb, resolveSlotName, sql as metaSql } from '../db';
+import { resolveDbName, getProjectDb, resolveSlotName } from '../db';
+import { verifyProjectJwtPayload } from '../utils/project-jwt';
 
 const IDENTIFIER_REGEX = /^[a-zA-Z_][a-zA-Z0-9_]{0,62}$/;
 
@@ -49,7 +50,6 @@ class RealtimeBunService {
     private ensuredTriggers = new Set<string>();
     private wal2jsonAvailable = new Map<string, boolean>();
     private walPollingIntervals = new Map<string, NodeJS.Timeout>();
-    private jwtSecretCache = new Map<string, string>();
     private subscriptionCounter = 0;
 
     public async subscribeTenant(
@@ -380,27 +380,9 @@ class RealtimeBunService {
 
     private async verifyRealtimeJwt(projectRef: string, token: string): Promise<JWTPayload | null> {
         try {
-            let secret = this.jwtSecretCache.get(projectRef);
-            if (!secret) {
-                const [project] = await metaSql`
-                    SELECT jwt_secret FROM projects
-                    WHERE ref = ${projectRef} AND status = 'active'
-                    LIMIT 1
-                `;
-                if (!project?.jwt_secret) return null;
-                secret = String(project.jwt_secret);
-                this.jwtSecretCache.set(projectRef, secret);
-            }
-
-            const { payload, protectedHeader } = await jwtVerify(token, new TextEncoder().encode(secret));
-            if (protectedHeader.alg !== 'HS256') return null;
-            if (typeof payload.role !== 'string') return null;
-            const [keys] = await metaSql`
-                SELECT service_role_key FROM projects
-                WHERE ref = ${projectRef} AND status = 'active'
-                LIMIT 1
-            `;
-            return { ...payload, __allow_service_role: token === keys?.service_role_key };
+            const verification = await verifyProjectJwtPayload(projectRef, token);
+            if (!verification || typeof verification.payload.role !== 'string') return null;
+            return { ...verification.payload, __allow_service_role: verification.isServiceRole };
         } catch {
             return null;
         }
@@ -539,7 +521,6 @@ class RealtimeBunService {
         this.tenantListeners.delete(projectRef);
         this.tenantSubscriptions.delete(projectRef);
         this.subscriptionIdMap.delete(projectRef);
-        this.jwtSecretCache.delete(projectRef);
 
         const walInterval = this.walPollingIntervals.get(projectRef);
         if (walInterval) {

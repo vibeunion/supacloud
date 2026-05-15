@@ -6,6 +6,7 @@ import {
   extractProjectRefCandidates,
   extractProjectRefFromPath,
 } from "../utils/project-auth";
+import { verifyProjectJwtPayload } from "../utils/project-jwt";
 
 export interface ProjectJwtContext {
   role: string;
@@ -21,8 +22,8 @@ export async function verifyProjectJwt(
     const parts = token.split(".");
     if (parts.length !== 3) return null;
 
-    const header = JSON.parse(Buffer.from(parts[0], "base64url").toString("utf8"));
-    if (header.alg !== "HS256") return null;
+    const header = JSON.parse(Buffer.from(parts[0], "base64url").toString("utf8")) as Record<string, unknown>;
+    if (typeof header.alg !== "string") return null;
 
     const payload = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8")) as Record<string, unknown>;
     if (typeof payload.role !== "string" || !payload.role) return null;
@@ -34,31 +35,13 @@ export async function verifyProjectJwt(
     const candidateRefs = extractProjectRefCandidates(payload, scopedRef);
     if (candidateRefs.length === 0) return null;
 
-    const encoder = new TextEncoder();
-    const sigBuf = Buffer.from(parts[2], "base64url");
-    const data = encoder.encode(`${parts[0]}.${parts[1]}`);
-
     for (const ref of candidateRefs) {
-      const [project] = await metaSql`
-        SELECT ref, jwt_secret FROM projects
-        WHERE ref = ${ref} AND lower(status) = 'active'
-        LIMIT 1
-      `;
-      if (!project?.jwt_secret) continue;
-
-      const key = await crypto.subtle.importKey(
-        "raw",
-        encoder.encode(project.jwt_secret),
-        { name: "HMAC", hash: "SHA-256" },
-        false,
-        ["verify"],
-      );
-      const valid = await crypto.subtle.verify("HMAC", key, sigBuf, data);
-      if (valid) {
+      const verification = await verifyProjectJwtPayload(ref, token);
+      if (verification) {
         return {
-          role: payload.role,
+          role: String(verification.payload.role),
           ref,
-          sub: typeof payload.sub === "string" ? payload.sub : undefined,
+          sub: typeof verification.payload.sub === "string" ? verification.payload.sub : undefined,
         };
       }
     }

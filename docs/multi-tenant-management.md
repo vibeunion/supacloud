@@ -109,7 +109,19 @@ JWT_SECRET → ANON_KEY (role: anon, exp: 10 years)
 JWT_SECRET → SERVICE_ROLE_KEY (role: service_role, exp: 10 years)
 ```
 
-### 3.3 Kong Integration
+### 3.3 OAuth/OIDC Migration
+
+Projects can be migrated to the Supabase-compatible OAuth 2.1 / OIDC Provider model through:
+
+```http
+POST /v1/projects/:ref/auth/oauth-server/migrate
+```
+
+Migration is project-scoped and writes ES256 `JWT_KEYS` / `JWT_JWKS` material into the project's Auth config. GoTrue signs new OIDC tokens with `GOTRUE_JWT_KEYS`; PostgREST, Storage, Realtime, SDK proxy, and Management API validators verify through the project JWKS.
+
+Existing `anon` and `service_role` API keys remain project-scoped and verifiable during migration. They are not shared across projects or accounts.
+
+### 3.4 Kong Integration
 
 Kong dynamically validates JWT keys for different projects based on `Host` Header.
 

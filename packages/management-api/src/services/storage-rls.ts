@@ -1,6 +1,6 @@
 import { getProjectDb, sql as metaSql, resolveDbName } from "../db";
-import { jwtVerify } from "jose";
 import { logger } from "../utils/logger";
+import { verifyProjectJwtPayload } from "../utils/project-jwt";
 
 
 // ── TEST MOCK STATE ──
@@ -242,13 +242,11 @@ export class StorageRLS {
 
   static async verifyToken(ref: string, token: string) {
     const cleanToken = token.replace('Bearer ', '');
-    const keys = await metaSql`SELECT service_role_key, jwt_secret FROM projects WHERE ref=${ref} AND deleted_at IS NULL AND status = 'active' LIMIT 1`;
-    const secret = keys[0]?.jwt_secret;
-    if (!secret) throw new Error("tenant not found");
-    const { payload } = await jwtVerify(cleanToken, new TextEncoder().encode(secret));
+    const verification = await verifyProjectJwtPayload(ref, cleanToken);
+    if (!verification) throw new Error("tenant not found");
     return {
-      ...payload,
-      __allow_service_role: cleanToken === keys[0]?.service_role_key,
+      ...verification.payload,
+      __allow_service_role: verification.isServiceRole,
     };
   }
 

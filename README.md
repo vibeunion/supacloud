@@ -29,6 +29,7 @@
 - **DB Graceful Degradation**: Exponential backoff retry + 503 Service Unavailable on transient DB failures
 - **Hardened Control Plane**: Authenticated function management reads, one-time signed uploads, defensive pagination, and safe storage metadata parsing
 - **Edge Function Preheating**: Zero cold-start via worker module pre-import on deploy
+- **Project OAuth/OIDC Provider**: Per-project OAuth 2.1 / OIDC migration with ES256 signing keys, discovery, JWKS, authorize/token/userinfo endpoints, and OAuth client CRUD
 - **China OAuth**: Built-in WeChat, Alipay, DingTalk login integration
 - **CI/CD Integration**: GitHub webhook for automated deployments
 - **Comprehensive Tests**: 400+ unit, integration, and structural regression tests
@@ -292,6 +293,9 @@ curl http://localhost:9090/v1/projects/<ref>/api-keys \
 | PUT | `/v1/projects/:ref/settings` | Update settings |
 | GET | `/v1/projects/:ref/api-keys` | Get API keys |
 | POST | `/v1/projects/:ref/rotate-keys` | Rotate API keys |
+| GET | `/v1/projects/:ref/auth/oauth-server` | Get project OAuth/OIDC status |
+| POST | `/v1/projects/:ref/auth/oauth-server/migrate` | Migrate project to OIDC signing keys |
+| GET/POST/PUT/DELETE | `/v1/projects/:ref/auth/oauth-clients*` | OAuth client CRUD for the project runtime |
 | GET | `/v1/projects/:ref/types/typescript` | Generate TS types |
 | PATCH | `/v1/projects/:ref/config/auth` | Configure Auth & Providers |
 | GET | `/v1/projects/:ref/secrets` | List Edge Function Secrets |
@@ -306,7 +310,7 @@ Function management read endpoints under `/v1/projects/:ref/functions*` require 
 | Category | Endpoints | Description |
 |----------|-----------|-------------|
 | Database | `/v1/projects/:ref/database/*` | SQL query, schema inspection, migrations, defensive pagination |
-| Auth | `/v1/projects/:ref/config/auth` | OAuth providers, WeChat/Alipay/DingTalk |
+| Auth | `/v1/projects/:ref/config/auth`, `/v1/projects/:ref/auth/*` | OAuth providers, OAuth/OIDC Provider migration, WeChat/Alipay/DingTalk |
 | Frontend | `/v1/projects/:ref/frontend/*` | Pages hosting, deployments, custom domains |
 | Webhook | `/v1/webhooks/github` | GitHub webhook for CI/CD auto-deploy |
 | Storage | `/v1/storage/*` | Bucket management, file upload, one-time signed uploads, S3 migration |
@@ -448,7 +452,7 @@ supacloud/
 ├── packages/
 │   ├── management-api/         # REST API server (Bun + Elysia)
 │   │   ├── src/
-│   │   │   ├── routes/         # 19 route modules (projects, auth, frontend, webhook, ws, logs, etc.)
+│   │   │   ├── routes/         # 20 route modules (projects, auth, frontend, webhook, ws, logs, etc.)
 │   │   │   ├── services/       # 20 service modules
 │   │   │   ├── cli/            # CLI subcommands (lifecycle, project)
 │   │   │   ├── db/             # Database layer, migrations, withRetry & graceful degradation
@@ -489,7 +493,7 @@ supacloud/
 ├── infra/
 │   ├── os/                     # OS-level configurations
 │   └── postgres/               # PostgreSQL configurations
-├── docs/                       # 14 documentation files
+├── docs/                       # 15 documentation files
 │   ├── deploy-guide.md         # Deployment guide
 │   ├── architecture-multi-tenant.md  # Architecture design
 │   ├── china-oauth-integration.md    # China OAuth (WeChat, etc.)
@@ -517,6 +521,7 @@ Key settings in `config.env`:
 - [Documentation Index](docs/README.md)
 - [Deployment Guide](docs/deploy-guide.md)
 - [Multi-Tenant Architecture](docs/architecture-multi-tenant.md)
+- [OAuth 2.1 / OIDC Provider](docs/oauth-oidc-provider.md)
 - [China OAuth Integration](docs/china-oauth-integration.md)
 - [Pigsty Documentation](https://pigsty.cc/)
 - [Supabase Self-Hosting](https://supabase.com/docs/guides/self-hosting)
@@ -548,6 +553,7 @@ Key settings in `config.env`:
 - **DB 优雅降级**: 指数退避重试 + 503 Service Unavailable，PostgreSQL 短暂不可用时不丢请求
 - **控制平面加固**: 函数管理读接口鉴权、一次性 signed upload、防御性分页和安全的存储元数据解析
 - **Edge Function 预热**: 部署后自动预导入模块，消除首次请求冷启动
+- **项目级 OAuth/OIDC Provider**: 支持项目迁移到 ES256 OIDC signing keys、授权端点、JWKS 和 OAuth client 管理
 - **国内 OAuth**: 内置微信、支付宝、钉钉登录集成
 - **CI/CD 集成**: GitHub Webhook 自动化部署
 - **完善测试**: 400+ 单元、集成和结构回归测试
@@ -799,6 +805,9 @@ curl http://localhost:9090/v1/projects/<ref>/api-keys \
 | PUT | `/v1/projects/:ref/settings` | 更新配置 |
 | GET | `/v1/projects/:ref/api-keys` | 获取 API 密钥 |
 | POST | `/v1/projects/:ref/rotate-keys` | 轮换 API 密钥 |
+| GET | `/v1/projects/:ref/auth/oauth-server` | 获取项目 OAuth/OIDC 状态 |
+| POST | `/v1/projects/:ref/auth/oauth-server/migrate` | 将项目迁移到 OIDC 签名密钥 |
+| GET/POST/PUT/DELETE | `/v1/projects/:ref/auth/oauth-clients*` | 项目运行时的 OAuth 客户端管理 |
 | GET | `/v1/projects/:ref/types/typescript` | 自动生成 TypeScript 类型 |
 | PATCH | `/v1/projects/:ref/config/auth` | 自定义鉴权及三方 OAuth |
 | GET | `/v1/projects/:ref/secrets` | 管理 Edge Functions Secrets |
@@ -811,7 +820,7 @@ curl http://localhost:9090/v1/projects/<ref>/api-keys \
 | 分类 | 端点 | 说明 |
 |------|------|------|
 | 数据库 | `/v1/projects/:ref/database/*` | SQL 查询、Schema 检查、数据迁移、防御性分页 |
-| 鉴权 | `/v1/projects/:ref/config/auth` | OAuth 登录、微信/支付宝/钉钉 |
+| 鉴权 | `/v1/projects/:ref/config/auth`, `/v1/projects/:ref/auth/*` | OAuth 登录、OAuth/OIDC Provider 迁移、微信/支付宝/钉钉 |
 | 前端托管 | `/v1/projects/:ref/frontend/*` | Pages 托管、自动部署、自定义域名 |
 | Webhook | `/v1/webhooks/github` | GitHub Webhook CI/CD 自动部署 |
 | 存储 | `/v1/storage/*` | Bucket 管理、文件上传、一次性 signed upload、S3 迁移 |
@@ -915,7 +924,7 @@ supacloud/
 ├── packages/
 │   ├── management-api/         # REST API 服务 (Bun + Elysia)
 │   │   ├── src/
-│   │   │   ├── routes/         # 19 个路由模块 (projects, auth, frontend, webhook, ws, logs 等)
+│   │   │   ├── routes/         # 20 个路由模块 (projects, auth, frontend, webhook, ws, logs 等)
 │   │   │   ├── services/       # 20 个服务模块
 │   │   │   ├── cli/            # CLI 子命令 (lifecycle, project)
 │   │   │   ├── db/             # 数据库层、迁移、withRetry 优雅降级
@@ -956,7 +965,7 @@ supacloud/
 ├── infra/
 │   ├── os/                     # 操作系统配置
 │   └── postgres/               # PostgreSQL 配置
-├── docs/                       # 14 篇技术文档
+├── docs/                       # 15 篇技术文档
 │   ├── deploy-guide.md         # 部署指南
 │   ├── architecture-multi-tenant.md  # 架构设计
 │   ├── china-oauth-integration.md    # 国内 OAuth 集成
@@ -984,6 +993,7 @@ supacloud/
 - [文档索引](docs/README.md)
 - [部署指南](docs/deploy-guide.md)
 - [多租户架构设计](docs/architecture-multi-tenant.md)
+- [OAuth 2.1 / OIDC Provider](docs/oauth-oidc-provider.md)
 - [国内 OAuth 集成](docs/china-oauth-integration.md)
 - [Pigsty 官方文档](https://pigsty.cc/)
 - [Supabase 自托管文档](https://supabase.com/docs/guides/self-hosting)
