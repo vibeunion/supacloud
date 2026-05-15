@@ -1,5 +1,50 @@
 # Changelog
 
+## [0.13.0](https://github.com/zuohuadong/supacloud/compare/supacloud-js-v0.12.2...supacloud-js-v0.13.0) (2026-05-15)
+
+
+### 🚀 Features
+
+* add project OAuth/OIDC migration ([0315760](https://github.com/zuohuadong/supacloud/commit/0315760c7864b17dd0433a0f9b918be8a64931cd))
+* add queue client api ([b07be9c](https://github.com/zuohuadong/supacloud/commit/b07be9cf0b8f74d8fa3291ee7b563da88a6f46f7))
+* **sdk:** add @supacloud/js task client ([9bce0a1](https://github.com/zuohuadong/supacloud/commit/9bce0a1b3ce2bcc6c6f5e9805096884088d9f799))
+
+
+### 🐛 Bug Fixes
+
+* avoid unsupported test resolves matcher ([811a4ef](https://github.com/zuohuadong/supacloud/commit/811a4ef42323f364028aa19d1e9d9c06519d12e7))
+* harden realtime tasks and data-plane boundaries ([f396257](https://github.com/zuohuadong/supacloud/commit/f396257e4c442d7cfb581824b15080bf6dfe64bf))
+* **supacloud-js:** publish built dist artifacts ([58cee43](https://github.com/zuohuadong/supacloud/commit/58cee434b0882a588a7b0462e76edcba37426d55))
+* **supacloud-js:** stop injecting async headers for background routes ([258c760](https://github.com/zuohuadong/supacloud/commit/258c760723878f292f09686416289c057f50a766))
+
+
+### 📝 Documentation
+
+* refresh hardening and runtime notes ([5d4a995](https://github.com/zuohuadong/supacloud/commit/5d4a995fa196b706fbb7f09b154cd3026ee7357f))
+
+
+### 🔧 Miscellaneous Chores
+
+* release main ([b5fb260](https://github.com/zuohuadong/supacloud/commit/b5fb2606814d00ea1f822a5f907dbd403d2a4185))
+* release main ([9fbd756](https://github.com/zuohuadong/supacloud/commit/9fbd756acec93ead2fe6bddb274b3a1368f0a1a3))
+* release main ([649c715](https://github.com/zuohuadong/supacloud/commit/649c715c223c57fb6b609c5300576bbc5eb7df45))
+* release main ([82d0642](https://github.com/zuohuadong/supacloud/commit/82d0642f5f069d18677419459b0dae5d7a17c7f8))
+* release main ([eedd89d](https://github.com/zuohuadong/supacloud/commit/eedd89d3cccda79b9a939dbb03e252f262b06fcf))
+* release main ([b6756c9](https://github.com/zuohuadong/supacloud/commit/b6756c9c1ffee750f1750ae19630d7b15eff0961))
+* release main ([83229a7](https://github.com/zuohuadong/supacloud/commit/83229a71488b1de5f33105ab53f3be31bdefb4d9))
+* release main ([e9101e0](https://github.com/zuohuadong/supacloud/commit/e9101e0120f7ccb84ac7584051c7f556bbdf84a6))
+* release main ([519e551](https://github.com/zuohuadong/supacloud/commit/519e5518f0b23aca34ffc4488cf41c6bd320b08b))
+* release main ([28dd468](https://github.com/zuohuadong/supacloud/commit/28dd46854718e4cc7ce0484098cea9051be75814))
+* release main ([71845b0](https://github.com/zuohuadong/supacloud/commit/71845b0e1da740825cef3131ec89f4962bfeb268))
+* release main ([7065db9](https://github.com/zuohuadong/supacloud/commit/7065db93a028d9b48ed093cc5f00f6c21547f2ee))
+* release main ([d04482e](https://github.com/zuohuadong/supacloud/commit/d04482e175f5217f5463a6fad9c6b3a76eea4c8d))
+* release main ([96de653](https://github.com/zuohuadong/supacloud/commit/96de653b31ee198f04943c7050b6083f8d64e7a8))
+* release main ([16b3a45](https://github.com/zuohuadong/supacloud/commit/16b3a452b95c8d432cd05eb0e8ed0eea47583882))
+* release main ([703cca4](https://github.com/zuohuadong/supacloud/commit/703cca486a15808b9c5666216d6ff41c4a4f0641))
+* release main ([97d3e7b](https://github.com/zuohuadong/supacloud/commit/97d3e7b673c61a6925743754887581e1fb53bdac))
+* release main ([c1fb3b8](https://github.com/zuohuadong/supacloud/commit/c1fb3b8757cb80d86b8bde559458f0f5693b0f19))
+* **ts:** finish TypeScript 6 typecheck migration ([b34fa1a](https://github.com/zuohuadong/supacloud/commit/b34fa1aa93dff56a1a9347c33f9691098cb708f5))
+
 ## [0.12.2](https://github.com/zuohuadong/supacloud/compare/supacloud-js-v0.12.1...supacloud-js-v0.12.2) (2026-05-11)
 
 
