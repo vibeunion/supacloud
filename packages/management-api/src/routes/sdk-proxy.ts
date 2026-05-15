@@ -519,8 +519,8 @@ const sdkProxyRoutesBase = new Elysia({ prefix: "" })
             const targetUrl = `http://127.0.0.1:${ports.gotruePort}${url.pathname.replace(/^\/auth\/v1/, '')}${url.search}`;
             return executeProxy(request, targetUrl, { linkOrigin: url.origin });
         };
-        return app.get("/*", handler).post("/*", handler).put("/*", handler).patch("/*", handler).delete("/*", handler).options("/*", handler)
-                  .get("", handler).post("", handler).put("", handler).patch("", handler).delete("", handler).options("", handler);
+        return app.get("/*", handler, { detail: { tags: ["sdk-proxy"], summary: "Proxy Auth request" } }).post("/*", handler, { detail: { tags: ["sdk-proxy"], summary: "Proxy Auth request" } }).put("/*", handler, { detail: { tags: ["sdk-proxy"], summary: "Proxy Auth request" } }).patch("/*", handler, { detail: { tags: ["sdk-proxy"], summary: "Proxy Auth request" } }).delete("/*", handler, { detail: { tags: ["sdk-proxy"], summary: "Proxy Auth request" } }).options("/*", handler)
+                  .get("", handler, { detail: { tags: ["sdk-proxy"], summary: "Proxy Auth request" } }).post("", handler, { detail: { tags: ["sdk-proxy"], summary: "Proxy Auth request" } }).put("", handler, { detail: { tags: ["sdk-proxy"], summary: "Proxy Auth request" } }).patch("", handler, { detail: { tags: ["sdk-proxy"], summary: "Proxy Auth request" } }).delete("", handler, { detail: { tags: ["sdk-proxy"], summary: "Proxy Auth request" } }).options("", handler);
     })
     .group("/rest/v1", (app) => {
         const handler = async ({ request }: any) => {
@@ -536,8 +536,8 @@ const sdkProxyRoutesBase = new Elysia({ prefix: "" })
             const linkOrigin = `${url.protocol}//${url.host}/rest/v1`;
             return executeProxy(request, targetUrl, { linkOrigin, timeoutMs: config.restProxyTimeoutMs });
         };
-        return app.get("/*", handler).post("/*", handler).put("/*", handler).patch("/*", handler).delete("/*", handler).options("/*", handler)
-                  .get("", handler).post("", handler).put("", handler).patch("", handler).delete("", handler).options("", handler);
+        return app.get("/*", handler, { detail: { tags: ["sdk-proxy"], summary: "Proxy REST request" } }).post("/*", handler, { detail: { tags: ["sdk-proxy"], summary: "Proxy REST request" } }).put("/*", handler, { detail: { tags: ["sdk-proxy"], summary: "Proxy REST request" } }).patch("/*", handler, { detail: { tags: ["sdk-proxy"], summary: "Proxy REST request" } }).delete("/*", handler, { detail: { tags: ["sdk-proxy"], summary: "Proxy REST request" } }).options("/*", handler)
+                  .get("", handler, { detail: { tags: ["sdk-proxy"], summary: "Proxy REST request" } }).post("", handler, { detail: { tags: ["sdk-proxy"], summary: "Proxy REST request" } }).put("", handler, { detail: { tags: ["sdk-proxy"], summary: "Proxy REST request" } }).patch("", handler, { detail: { tags: ["sdk-proxy"], summary: "Proxy REST request" } }).delete("", handler, { detail: { tags: ["sdk-proxy"], summary: "Proxy REST request" } }).options("", handler);
     });
 
 const graphqlHandler = async ({ request }: any) => {
@@ -588,12 +588,12 @@ const functionsHandler = async ({ request }: any) => {
 };
 
 export const sdkProxyRoutes = sdkProxyRoutesBase
-    .get("/graphql/v1", graphqlHandler)
-    .post("/graphql/v1", graphqlHandler)
+    .get("/graphql/v1", graphqlHandler, { detail: { tags: ["sdk-proxy"], summary: "Proxy GraphQL request" } })
+    .post("/graphql/v1", graphqlHandler, { detail: { tags: ["sdk-proxy"], summary: "Proxy GraphQL request" } })
     .options("/graphql/v1", graphqlHandler)
-    .group("/graphql/v1", (app) => app.get("/*", graphqlHandler).post("/*", graphqlHandler).options("/*", graphqlHandler))
+    .group("/graphql/v1", (app) => app.get("/*", graphqlHandler, { detail: { tags: ["sdk-proxy"], summary: "Proxy GraphQL request" } }).post("/*", graphqlHandler, { detail: { tags: ["sdk-proxy"], summary: "Proxy GraphQL request" } }).options("/*", graphqlHandler))
     .group("/realtime/v1", (app) => {
-        return app.get("/*", realtimeHandler).post("/*", realtimeHandler).put("/*", realtimeHandler).patch("/*", realtimeHandler).delete("/*", realtimeHandler).options("/*", realtimeHandler)
-                  .get("", realtimeHandler).post("", realtimeHandler).put("", realtimeHandler).patch("", realtimeHandler).delete("", realtimeHandler).options("", realtimeHandler);
+        return app.get("/*", realtimeHandler, { detail: { tags: ["sdk-proxy"], summary: "Proxy Realtime request" } }).post("/*", realtimeHandler, { detail: { tags: ["sdk-proxy"], summary: "Proxy Realtime request" } }).put("/*", realtimeHandler, { detail: { tags: ["sdk-proxy"], summary: "Proxy Realtime request" } }).patch("/*", realtimeHandler, { detail: { tags: ["sdk-proxy"], summary: "Proxy Realtime request" } }).delete("/*", realtimeHandler, { detail: { tags: ["sdk-proxy"], summary: "Proxy Realtime request" } }).options("/*", realtimeHandler)
+                  .get("", realtimeHandler, { detail: { tags: ["sdk-proxy"], summary: "Proxy Realtime request" } }).post("", realtimeHandler, { detail: { tags: ["sdk-proxy"], summary: "Proxy Realtime request" } }).put("", realtimeHandler, { detail: { tags: ["sdk-proxy"], summary: "Proxy Realtime request" } }).patch("", realtimeHandler, { detail: { tags: ["sdk-proxy"], summary: "Proxy Realtime request" } }).delete("", realtimeHandler, { detail: { tags: ["sdk-proxy"], summary: "Proxy Realtime request" } }).options("", realtimeHandler);
     })
-    .group("/functions/v1", (app) => app.get("/*", functionsHandler).post("/*", functionsHandler).put("/*", functionsHandler).patch("/*", functionsHandler).delete("/*", functionsHandler).options("/*", functionsHandler));
+    .group("/functions/v1", (app) => app.get("/*", functionsHandler, { detail: { tags: ["sdk-proxy"], summary: "Proxy Edge Function request" } }).post("/*", functionsHandler, { detail: { tags: ["sdk-proxy"], summary: "Proxy Edge Function request" } }).put("/*", functionsHandler, { detail: { tags: ["sdk-proxy"], summary: "Proxy Edge Function request" } }).patch("/*", functionsHandler, { detail: { tags: ["sdk-proxy"], summary: "Proxy Edge Function request" } }).delete("/*", functionsHandler, { detail: { tags: ["sdk-proxy"], summary: "Proxy Edge Function request" } }).options("/*", functionsHandler));

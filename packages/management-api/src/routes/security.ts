@@ -36,7 +36,8 @@ export const securityRoutes = new Elysia({ prefix: "/v1/security" })
         }
         return await addFirewallRule(port, ip);
     }, {
-        body: t.Object({ port: t.Number(), ip: t.String() })
+        body: t.Object({ port: t.Number(), ip: t.String() }),
+        detail: { tags: ["security"], summary: "Add firewall allow rule" },
     })
     .post('/firewall/deny', async ({ body, request }) => {
         const denied = await adminOnly(request);
@@ -47,7 +48,8 @@ export const securityRoutes = new Elysia({ prefix: "/v1/security" })
         }
         return await removeFirewallRule(port, ip);
     }, {
-        body: t.Object({ port: t.Number(), ip: t.String() })
+        body: t.Object({ port: t.Number(), ip: t.String() }),
+        detail: { tags: ["security"], summary: "Remove firewall allow rule" },
     })
     .post('/ssl/request', async ({ body, request }) => {
         const denied = await adminOnly(request);
@@ -58,5 +60,6 @@ export const securityRoutes = new Elysia({ prefix: "/v1/security" })
         }
         return await requestSsl(domain);
     }, {
-        body: t.Object({ domain: t.String() })
+        body: t.Object({ domain: t.String() }),
+        detail: { tags: ["security"], summary: "Request SSL certificate for domain" },
     });

@@ -15,6 +15,7 @@ export const backupRoutes = new Elysia({ prefix: "/v1/projects/:ref/database/bac
         return await listBackups(dbName);
     }, {
         response: { 200: t.Any() },
+        detail: { tags: ["backups"], summary: "List project backups" },
     })
     .post('/', async ({ params, body, request }) => {
         const authError = await requireAdminAuth(request);
@@ -31,6 +32,7 @@ export const backupRoutes = new Elysia({ prefix: "/v1/projects/:ref/database/bac
             ])),
         }),
         response: { 200: t.Any() },
+        detail: { tags: ["backups"], summary: "Create a database backup" },
     })
     .post('/restore', async ({ body, request }) => {
         const authError = await requireAdminAuth(request);
@@ -46,6 +48,7 @@ export const backupRoutes = new Elysia({ prefix: "/v1/projects/:ref/database/bac
             200: t.Any(),
             400: ErrorResponse,
         },
+        detail: { tags: ["backups"], summary: "Restore from backup" },
     })
     .post('/logical', async ({ params: { ref }, request }) => {
         const authError = await requireAdminAuth(request);
@@ -54,6 +57,7 @@ export const backupRoutes = new Elysia({ prefix: "/v1/projects/:ref/database/bac
         return await createLogicalBackup(ref);
     }, {
         response: { 200: t.Any() },
+        detail: { tags: ["backups"], summary: "Create a logical backup" },
     })
     .post('/logical/restore', async ({ params: { ref }, body, request }) => {
         const authError = await requireAdminAuth(request);
@@ -66,4 +70,5 @@ export const backupRoutes = new Elysia({ prefix: "/v1/projects/:ref/database/bac
             200: t.Any(),
             400: ErrorResponse,
         },
+        detail: { tags: ["backups"], summary: "Restore from logical backup" },
     });

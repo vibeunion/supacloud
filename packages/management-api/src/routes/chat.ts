@@ -97,7 +97,8 @@ export const chatRoutes = new Elysia({ name: "chat-proxy" })
     body: t.Object({
       model: t.Optional(t.String()),
       stream: t.Optional(t.Boolean())
-    }, { additionalProperties: true })
+    }, { additionalProperties: true }),
+    detail: { tags: ["tasks"], summary: "Proxy chat completion request" },
   })
 
   // ─── GET /v1/chat/config ───────────────────────────────────────
@@ -112,4 +113,6 @@ export const chatRoutes = new Elysia({ name: "chat-proxy" })
       apiBase: aiApiBase || null,
       model: aiModel || null,
     };
+  }, {
+    detail: { tags: ["tasks"], summary: "Get chat proxy configuration" },
   });

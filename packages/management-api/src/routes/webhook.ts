@@ -232,6 +232,7 @@ export const webhookRoutes = new Elysia({ prefix: "/v1/webhooks" })
     },
     {
       body: WebhookBodySchema,
+      detail: { tags: ["webhook"], summary: "Handle GitHub push webhook" },
     }
   )
 
@@ -252,7 +253,7 @@ export const webhookRoutes = new Elysia({ prefix: "/v1/webhooks" })
 
       return await triggerDeployForGit(gitUrl, branch, commitSha, commitMessage, repoName, "gitlab", token);
     },
-    { body: WebhookBodySchema }
+    { body: WebhookBodySchema, detail: { tags: ["webhook"], summary: "Handle GitLab push webhook" } }
   )
 
   // ─── Gitee Webhook ───
@@ -272,7 +273,7 @@ export const webhookRoutes = new Elysia({ prefix: "/v1/webhooks" })
 
       return await triggerDeployForGit(gitUrl, branch, commitSha, commitMessage, repoName, "gitee", token);
     },
-    { body: WebhookBodySchema }
+    { body: WebhookBodySchema, detail: { tags: ["webhook"], summary: "Handle Gitee push webhook" } }
   )
 
   // ─── GitCode (CSDN) Webhook ───
@@ -292,7 +293,7 @@ export const webhookRoutes = new Elysia({ prefix: "/v1/webhooks" })
 
       return await triggerDeployForGit(gitUrl, branch, commitSha, commitMessage, repoName, "gitcode", token);
     },
-    { body: WebhookBodySchema }
+    { body: WebhookBodySchema, detail: { tags: ["webhook"], summary: "Handle GitCode push webhook" } }
   )
 
   .post(
@@ -366,6 +367,7 @@ export const webhookRoutes = new Elysia({ prefix: "/v1/webhooks" })
         commit_sha: t.Optional(t.String()),
         commit_message: t.Optional(t.String()),
       }),
+      detail: { tags: ["webhook"], summary: "Trigger deployment via API token" },
     }
   )
 
@@ -406,6 +408,7 @@ export const webhookRoutes = new Elysia({ prefix: "/v1/webhooks" })
         status: t.Enum({ pending: "pending", building: "building", success: "success", failed: "failed" }),
         build_log: t.Optional(t.String()),
       }),
+      detail: { tags: ["webhook"], summary: "Receive deployment build callback" },
     }
   );
 

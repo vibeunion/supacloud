@@ -87,6 +87,7 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
       params: t.Object({
         ref: t.String(),
       }),
+      detail: { tags: ["auth"], summary: "List OAuth providers" },
     }
   )
 
@@ -131,6 +132,7 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
         ref: t.String(),
         provider: t.String(),
       }),
+      detail: { tags: ["auth"], summary: "Get OAuth provider" },
     }
   )
 
@@ -207,6 +209,7 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
         redirect_uri: t.Optional(t.String()),
         url: t.Optional(t.String()),
       }),
+      detail: { tags: ["auth"], summary: "Create OAuth provider" },
     }
   )
 
@@ -284,6 +287,7 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
         redirect_uri: t.Optional(t.String()),
         url: t.Optional(t.String()),
       }),
+      detail: { tags: ["auth"], summary: "Update OAuth provider" },
     }
   )
 
@@ -341,6 +345,7 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
         ref: t.String(),
         provider: t.String(),
       }),
+      detail: { tags: ["auth"], summary: "Delete OAuth provider" },
     }
   )
 
@@ -373,6 +378,7 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
       params: t.Object({
         ref: t.String(),
       }),
+      detail: { tags: ["auth"], summary: "Get auth config" },
     }
   )
 
@@ -410,6 +416,7 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
         ref: t.String(),
       }),
       body: t.Record(t.String(), t.Unknown()),
+      detail: { tags: ["auth"], summary: "Update auth config" },
     }
   )
 
@@ -435,7 +442,8 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
           };
         }),
       };
-    }
+    },
+    { detail: { tags: ["auth"], summary: "List supported OAuth providers" } }
   )
 
   .get(
@@ -483,6 +491,7 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
       params: t.Object({
         ref: t.String(),
       }),
+      detail: { tags: ["auth"], summary: "List providers for Studio" },
     }
   )
 
@@ -568,6 +577,7 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
         client_secret: t.Optional(t.String()),
         redirect_uri: t.Optional(t.String()),
       }),
+      detail: { tags: ["auth"], summary: "Update provider for Studio" },
     }
   )
 
@@ -602,5 +612,6 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
       params: t.Object({
         ref: t.String(),
       }),
+      detail: { tags: ["auth"], summary: "List WeChat providers" },
     }
   );

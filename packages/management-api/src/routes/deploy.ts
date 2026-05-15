@@ -34,6 +34,7 @@ export const deployRoutes = new Elysia({ prefix: "/v1/deploy" })
       artifact: t.String(),
       config: t.Any(),
     }),
+    detail: { tags: ["frontend"], summary: "Trigger a deployment" },
   })
   .post("/rollback", async ({ body, request }) => {
     const authError = await requireAdminAuth(request);
@@ -54,6 +55,7 @@ export const deployRoutes = new Elysia({ prefix: "/v1/deploy" })
       app: t.String(),
       version: t.Optional(t.String()),
     }),
+    detail: { tags: ["frontend"], summary: "Rollback a deployment" },
   })
   .get("/history", async ({ query }) => {
     try {
@@ -79,6 +81,7 @@ export const deployRoutes = new Elysia({ prefix: "/v1/deploy" })
       app: t.Optional(t.String()),
       limit: t.Optional(t.String()),
     }),
+    detail: { tags: ["frontend"], summary: "Get deployment history" },
   })
   .get("/versions", async ({ query }) => {
     try {
@@ -109,4 +112,5 @@ export const deployRoutes = new Elysia({ prefix: "/v1/deploy" })
     query: t.Object({
       app: t.Optional(t.String()),
     }),
+    detail: { tags: ["frontend"], summary: "List available deployment versions" },
   });
