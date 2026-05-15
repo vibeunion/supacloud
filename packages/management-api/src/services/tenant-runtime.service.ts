@@ -23,6 +23,7 @@ class TenantRuntimeService {
     private readonly POSTGREST_RTS = config.postgrestRts;
     private readonly POSTGREST_MEMORY_MAX = config.postgrestMemoryMax;
     private readonly POSTGREST_CPU_WEIGHT = config.postgrestCpuWeight;
+    private readonly POSTGREST_DB_POOL = config.postgrestDbPool;
     private readonly GOTRUE_BIN = config.gotrueBin;
     private readonly PG_HOST = config.pgHost;
     private readonly PG_PORT = String(config.pgPort);
@@ -176,7 +177,7 @@ db-anon-role = "anon"
 jwt-secret = "${creds.jwtSecret}"
 server-port = ${pgrstPort}
 server-host = "0.0.0.0"
-db-pool = 10
+db-pool = ${this.POSTGREST_DB_POOL}
 db-pool-acquisition-timeout = 10
 log-level = "warn"
 
@@ -598,14 +599,15 @@ ON CONFLICT DO NOTHING;
         return { status: "starting", port: pgrstPort, gotruePort, health: "degraded" };
     }
 
-    public async stopRuntime(ref: string): Promise<void> {
+    private async stopRuntimeUnits(ref: string): Promise<void> {
         await $`systemctl stop supacloud-pgrst@${ref}`.nothrow().quiet();
         await $`systemctl disable supacloud-pgrst@${ref}`.nothrow().quiet();
 
         await $`systemctl stop supacloud-gotrue@${ref}`.nothrow().quiet();
         await $`systemctl disable supacloud-gotrue@${ref}`.nothrow().quiet();
+    }
 
-        // Clean up configuration files
+    private async removeRuntimeConfig(ref: string): Promise<void> {
         const pgrstEnvFile = Bun.file(path.join(this.TENANT_CONFIG_DIR, `${ref}.env`));
         const pgrstConfFile = Bun.file(path.join(this.TENANT_CONFIG_DIR, `${ref}.conf`));
         const gotrueEnvFile = Bun.file(path.join(this.TENANT_CONFIG_DIR, `${ref}_gotrue.env`));
@@ -613,6 +615,20 @@ ON CONFLICT DO NOTHING;
         if (await pgrstEnvFile.exists()) await fs.unlink(pgrstEnvFile.name!);
         if (await pgrstConfFile.exists()) await fs.unlink(pgrstConfFile.name!);
         if (await gotrueEnvFile.exists()) await fs.unlink(gotrueEnvFile.name!);
+    }
+
+    public async pauseProjectRuntime(ref: string): Promise<void> {
+        await this.stopRuntimeUnits(ref);
+        logger.info(`Runtime paused for ${ref}`);
+    }
+
+    public async resumeProjectRuntime(ref: string): Promise<RuntimeStatus> {
+        return this.startRuntime(ref);
+    }
+
+    public async stopRuntime(ref: string): Promise<void> {
+        await this.stopRuntimeUnits(ref);
+        await this.removeRuntimeConfig(ref);
 
         logger.info(`Runtime stopped for ${ref}`);
     }
@@ -665,6 +681,56 @@ ON CONFLICT DO NOTHING;
         }
 
         return { status: "stopped", port, gotruePort, health: "unknown" };
+    }
+
+    public async reconcileInactiveRuntimes(): Promise<{ checked: number; stopped: number; errors: number }> {
+        const projects = await metaSql`
+          SELECT ref, status
+          FROM projects
+          WHERE deleted_at IS NULL
+        `;
+        const projectStatus = new Map<string, string>(
+            projects.map((project: Record<string, unknown>) => [
+                String(project.ref),
+                String(project.status || ""),
+            ]),
+        );
+
+        const units = await $`systemctl list-units 'supacloud-pgrst@*' 'supacloud-gotrue@*' --plain --no-pager`
+            .nothrow()
+            .quiet();
+        const unitOutput = units.text();
+        const serviceRegex = /supacloud-(?:gotrue|pgrst)@([^.]+)\.service/g;
+        const refs = new Set<string>();
+        let match: RegExpExecArray | null;
+
+        while ((match = serviceRegex.exec(unitOutput)) !== null) {
+            refs.add(match[1]);
+        }
+
+        let stopped = 0;
+        let errors = 0;
+        for (const ref of refs) {
+            const status = projectStatus.get(ref);
+            if (status === "active" || status === "creating") continue;
+
+            try {
+                if (status) {
+                    await this.pauseProjectRuntime(ref);
+                } else {
+                    await this.stopRuntime(ref);
+                }
+                stopped++;
+            } catch (error: unknown) {
+                errors++;
+                logger.warn(`[TenantRuntime] Failed to stop inactive runtime ${ref}`, {
+                    status: status || "missing",
+                    error: error instanceof Error ? error.message : String(error),
+                });
+            }
+        }
+
+        return { checked: refs.size, stopped, errors };
     }
 
     public async updateOAuthConfig(ref: string, provider: OAuthProvider, providerConfig: OAuthProviderConfig): Promise<void> {
