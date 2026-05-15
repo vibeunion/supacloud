@@ -278,7 +278,7 @@ Wants=patroni.service
 [Service]
 Type=simple
 User=nobody
-Group=nobody
+Group=nogroup
 EnvironmentFile=${this.TENANT_CONFIG_DIR}/%i.env
 Environment="GHCRTS=${this.POSTGREST_RTS}"
 ExecStart=${this.POSTGREST_BIN} ${this.TENANT_CONFIG_DIR}/%i.conf +RTS ${this.POSTGREST_RTS} -RTS
@@ -312,7 +312,7 @@ Wants=patroni.service
 [Service]
 Type=simple
 User=nobody
-Group=nobody
+Group=nogroup
 EnvironmentFile=${this.TENANT_CONFIG_DIR}/%i_gotrue.env
 Environment="GOMEMLIMIT=15MiB"
 Environment="GOGC=20"
@@ -341,9 +341,220 @@ WantedBy=multi-user.target
         }
     }
 
+    private async ensureAuthSchema(ref: string): Promise<void> {
+        const dbName = await resolveDbName(ref);
+        const dbUrl = `postgres://postgres:${config.pgPassword}@${this.PG_HOST}:${this.PG_PORT}/${dbName}`;
+
+        const result = await $`psql ${dbUrl} -t -A -c "SELECT 1 FROM pg_namespace WHERE nspname = 'auth'"`.nothrow().quiet();
+        const schemaExists = result.stdout.toString().trim() === "1";
+
+        if (!schemaExists) {
+            logger.info(`Creating auth schema in tenant database ${dbName}`);
+            await $`psql ${dbUrl} -c "CREATE SCHEMA IF NOT EXISTS auth"`.nothrow().quiet();
+            await $`psql ${dbUrl} -c "GRANT ALL ON SCHEMA auth TO supabase_auth_admin"`.nothrow().quiet();
+            await $`psql ${dbUrl} -c "GRANT USAGE ON SCHEMA auth TO authenticated"`.nothrow().quiet();
+            await $`psql ${dbUrl} -c "GRANT USAGE ON SCHEMA auth TO anon"`.nothrow().quiet();
+            await $`psql ${dbUrl} -c "ALTER ROLE supabase_auth_admin SET search_path = auth, public"`.nothrow().quiet();
+        }
+
+        const usersTableResult = await $`psql ${dbUrl} -t -A -c "SELECT 1 FROM pg_tables WHERE schemaname = 'auth' AND tablename = 'users'"`.nothrow().quiet();
+        const usersTableExists = usersTableResult.stdout.toString().trim() === "1";
+
+        if (!usersTableExists) {
+            logger.info(`Initializing auth schema tables in tenant database ${dbName}`);
+            const initSql = `
+CREATE TABLE IF NOT EXISTS auth.users (
+    instance_id uuid NULL,
+    id uuid NOT NULL UNIQUE,
+    aud varchar(255) NULL,
+    "role" varchar(255) NULL,
+    email varchar(255) NULL UNIQUE,
+    encrypted_password varchar(255) NULL,
+    email_confirmed_at timestamptz NULL,
+    invited_at timestamptz NULL,
+    confirmation_token varchar(255) NULL,
+    confirmation_sent_at timestamptz NULL,
+    recovery_token varchar(255) NULL,
+    recovery_sent_at timestamptz NULL,
+    email_change_token_new varchar(255) NULL DEFAULT '',
+    email_change varchar(255) NULL DEFAULT '',
+    email_change_sent_at timestamptz NULL,
+    last_sign_in_at timestamptz NULL,
+    raw_app_meta_data jsonb NULL,
+    raw_user_meta_data jsonb NULL,
+    is_super_admin bool NULL,
+    created_at timestamptz NULL,
+    updated_at timestamptz NULL,
+    phone varchar(15) NULL UNIQUE DEFAULT NULL,
+    phone_confirmed_at timestamptz NULL DEFAULT NULL,
+    phone_change varchar(15) NULL DEFAULT '',
+    phone_change_token varchar(255) NULL DEFAULT '',
+    phone_change_sent_at timestamptz NULL DEFAULT NULL,
+    confirmed_at timestamptz NULL,
+    email_change_token_current varchar(255) NULL DEFAULT '',
+    email_change_confirm_status smallint DEFAULT 0,
+    banned_until timestamptz NULL,
+    reauthentication_token varchar(255) NULL DEFAULT '',
+    reauthentication_sent_at timestamptz NULL DEFAULT NULL,
+    is_anonymous bool NULL DEFAULT FALSE,
+    is_sso_user bool NOT NULL DEFAULT FALSE,
+    deleted_at timestamptz NULL,
+    CONSTRAINT users_pkey PRIMARY KEY (id)
+);
+CREATE INDEX IF NOT EXISTS users_instance_id_email_idx ON auth.users USING btree (instance_id, email);
+CREATE INDEX IF NOT EXISTS users_instance_id_idx ON auth.users USING btree (instance_id);
+
+CREATE TABLE IF NOT EXISTS auth.refresh_tokens (
+    instance_id uuid NULL,
+    id bigserial NOT NULL,
+    "token" varchar(255) NULL,
+    user_id uuid NULL,
+    revoked bool NULL,
+    created_at timestamptz NULL,
+    updated_at timestamptz NULL,
+    parent varchar(255) NULL,
+    session_id uuid NULL,
+    CONSTRAINT refresh_tokens_pkey PRIMARY KEY (id)
+);
+CREATE INDEX IF NOT EXISTS refresh_tokens_instance_id_idx ON auth.refresh_tokens USING btree (instance_id);
+CREATE INDEX IF NOT EXISTS refresh_tokens_instance_id_user_id_idx ON auth.refresh_tokens USING btree (instance_id, user_id);
+CREATE INDEX IF NOT EXISTS refresh_tokens_token_idx ON auth.refresh_tokens USING btree (token);
+
+CREATE TABLE IF NOT EXISTS auth.instances (
+    id uuid NOT NULL,
+    uuid uuid NULL,
+    raw_base_config text NULL,
+    created_at timestamptz NULL,
+    updated_at timestamptz NULL,
+    CONSTRAINT instances_pkey PRIMARY KEY (id)
+);
+
+CREATE TABLE IF NOT EXISTS auth.audit_log_entries (
+    instance_id uuid NULL,
+    id uuid NOT NULL,
+    payload json NULL,
+    created_at timestamptz NULL,
+    CONSTRAINT audit_log_entries_pkey PRIMARY KEY (id)
+);
+CREATE INDEX IF NOT EXISTS audit_logs_instance_id_idx ON auth.audit_log_entries USING btree (instance_id);
+
+CREATE TABLE IF NOT EXISTS auth.identities (
+    id uuid NOT NULL,
+    user_id uuid NOT NULL,
+    provider_id text NOT NULL,
+    provider text NOT NULL,
+    identity_data jsonb NOT NULL DEFAULT '{}',
+    last_sign_in_at timestamptz NULL,
+    created_at timestamptz NULL,
+    updated_at timestamptz NULL,
+    CONSTRAINT identities_pkey PRIMARY KEY (id),
+    CONSTRAINT identities_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS identities_user_id_idx ON auth.identities(user_id);
+
+CREATE TABLE IF NOT EXISTS auth.sessions (
+    id uuid NOT NULL,
+    user_id uuid NOT NULL,
+    created_at timestamptz NULL,
+    updated_at timestamptz NULL,
+    CONSTRAINT sessions_pkey PRIMARY KEY (id),
+    CONSTRAINT sessions_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS auth.mfa_factors (
+    id uuid NOT NULL,
+    user_id uuid NOT NULL,
+    friendly_name text NULL,
+    factor_type text NOT NULL,
+    status text NOT NULL,
+    secret text NULL,
+    created_at timestamptz NULL,
+    updated_at timestamptz NULL,
+    CONSTRAINT mfa_factors_pkey PRIMARY KEY (id),
+    CONSTRAINT mfa_factors_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS auth.mfa_challenges (
+    id uuid NOT NULL,
+    factor_id uuid NOT NULL,
+    created_at timestamptz NULL,
+    verified_at timestamptz NULL,
+    ip_address inet NULL,
+    CONSTRAINT mfa_challenges_pkey PRIMARY KEY (id),
+    CONSTRAINT mfa_challenges_factor_id_fkey FOREIGN KEY (factor_id) REFERENCES auth.mfa_factors(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS auth.flow_state (
+    id uuid NOT NULL,
+    user_id uuid NULL,
+    auth_code varchar(255) NULL,
+    code_challenge_method varchar(255) NULL,
+    code_challenge varchar(255) NULL,
+    provider_type text NOT NULL,
+    provider_access_token text NULL,
+    provider_refresh_token text NULL,
+    created_at timestamptz NULL,
+    updated_at timestamptz NULL,
+    authentication_method text NOT NULL,
+    CONSTRAINT flow_state_pkey PRIMARY KEY (id)
+);
+
+CREATE TABLE IF NOT EXISTS auth.sso_providers (
+    id uuid NOT NULL,
+    resource_id text NULL,
+    created_at timestamptz NULL,
+    updated_at timestamptz NULL,
+    CONSTRAINT sso_providers_pkey PRIMARY KEY (id)
+);
+
+CREATE TABLE IF NOT EXISTS auth.sso_domains (
+    id uuid NOT NULL,
+    sso_provider_id uuid NOT NULL,
+    domain text NOT NULL,
+    created_at timestamptz NULL,
+    CONSTRAINT sso_domains_pkey PRIMARY KEY (id),
+    CONSTRAINT sso_domains_sso_provider_id_fkey FOREIGN KEY (sso_provider_id) REFERENCES auth.sso_providers(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS auth.schema_migrations (
+    "version" varchar(255) NOT NULL,
+    CONSTRAINT schema_migrations_pkey PRIMARY KEY ("version")
+);
+
+CREATE OR REPLACE FUNCTION auth.uid() returns uuid as $$ select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid; $$ language sql stable;
+CREATE OR REPLACE FUNCTION auth.role() returns text as $$ select nullif(current_setting('request.jwt.claim.role', true), '')::text; $$ language sql stable;
+
+GRANT ALL ON ALL TABLES IN SCHEMA auth TO supabase_auth_admin;
+GRANT ALL ON ALL SEQUENCES IN SCHEMA auth TO supabase_auth_admin;
+GRANT USAGE ON SCHEMA auth TO authenticated;
+GRANT USAGE ON SCHEMA auth TO anon;
+
+INSERT INTO auth.schema_migrations (version) VALUES
+    ('00'), ('20210710035447'), ('20210722035447'), ('20210730183235'),
+    ('20210909172000'), ('20210927181326'), ('20211122151130'), ('20211124214934'),
+    ('20211202183645'), ('20220114185221'), ('20220114185340'), ('20220224000811'),
+    ('20220323170000'), ('20220429102000'), ('20220531120530'), ('20220614074123'),
+    ('20220811173540'), ('20221003041449'), ('20221007042446'), ('20221020192200'),
+    ('20221027105044'), ('20221114183602'), ('20221114183603'), ('20221215193445'),
+    ('20230114183602'), ('20230114183603'), ('20230207200153'), ('20230216171608'),
+    ('20230417165000'), ('20230526153447'), ('20230529173540'), ('20230710143444'),
+    ('20230725155344'), ('20230815173540'), ('20230817143444'), ('20230914161444'),
+    ('20231016084244'), ('20231020155344'), ('20231113183444'), ('20231116155344'),
+    ('20231201155344'), ('20231208084244'), ('20240313155344'), ('20240417163444'),
+    ('20240429155344'), ('20240604084244')
+ON CONFLICT DO NOTHING;
+`.trim();
+            const tmpFile = `/tmp/auth-schema-init-${ref}.sql`;
+            await Bun.write(tmpFile, initSql);
+            await $`psql ${dbUrl} -f ${tmpFile}`.nothrow().quiet();
+            await $`rm -f ${tmpFile}`.nothrow().quiet();
+        }
+    }
+
     public async startRuntime(ref: string): Promise<RuntimeStatus> {
         await this.ensureBinaries();
         await this.installSystemdTemplate();
+        await this.ensureAuthSchema(ref);
 
         const pgrstPort = await this.getTenantPort(ref, "pgrst");
         const gotruePort = await this.getTenantPort(ref, "gotrue");
