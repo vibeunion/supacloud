@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.0](https://github.com/zuohuadong/supacloud/compare/supacloud-js-v0.12.2...supacloud-js-v0.13.0) (2026-05-15)
+
+
+### 🚀 Features
+
+* add project OAuth/OIDC migration ([995a55d](https://github.com/zuohuadong/supacloud/commit/995a55d7addd0a615615fcbe40d7979b82979f63))
+
 ## [0.12.2](https://github.com/zuohuadong/supacloud/compare/supacloud-js-v0.12.1...supacloud-js-v0.12.2) (2026-05-11)
 
 
