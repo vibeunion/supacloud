@@ -3,7 +3,7 @@
 ## [0.1.8](https://github.com/zuohuadong/supacloud/compare/admin-v0.1.7...admin-v0.1.8) (2026-05-15)
 
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 * **cli:** infer management URL from project API domains ([c5eb874](https://github.com/zuohuadong/supacloud/commit/c5eb874ec4d108f9bb0a8bb530b35269de8cca41))
 * **installer:** derive studio domain from API host ([00a0008](https://github.com/zuohuadong/supacloud/commit/00a0008b4cd492afa27f92ec05dfb9977c92a57e))
@@ -12,12 +12,12 @@
 * support github proxies for binary upgrades ([2a65cdf](https://github.com/zuohuadong/supacloud/commit/2a65cdf241c3e5389a13437fd280991f81e2ca39))
 
 
-### 💅 Elegance & Refactoring
+### Elegance & Refactoring
 
 * remove legacy sql result alias ([d9c85e3](https://github.com/zuohuadong/supacloud/commit/d9c85e3916de88bb38b86e943a63a903789379bd))
 
 
-### 🔧 Miscellaneous Chores
+### Miscellaneous Chores
 
 * **deps:** bump zod from 3.25.76 to 4.4.3 in /packages/admin ([#83](https://github.com/zuohuadong/supacloud/issues/83)) ([ed0231e](https://github.com/zuohuadong/supacloud/commit/ed0231e9dc25b0b9fc61cfb627fd08741e8c8e42))
 * release main ([7537614](https://github.com/zuohuadong/supacloud/commit/7537614cbe0428dc53c44d4e47129938f99d55a2))

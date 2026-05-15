@@ -3,14 +3,14 @@
 ## [0.13.0](https://github.com/zuohuadong/supacloud/compare/supacloud-js-v0.12.2...supacloud-js-v0.13.0) (2026-05-15)
 
 
-### 🚀 Features
+### Features
 
 * add project OAuth/OIDC migration ([0315760](https://github.com/zuohuadong/supacloud/commit/0315760c7864b17dd0433a0f9b918be8a64931cd))
 * add queue client api ([b07be9c](https://github.com/zuohuadong/supacloud/commit/b07be9cf0b8f74d8fa3291ee7b563da88a6f46f7))
 * **sdk:** add @supacloud/js task client ([9bce0a1](https://github.com/zuohuadong/supacloud/commit/9bce0a1b3ce2bcc6c6f5e9805096884088d9f799))
 
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 * avoid unsupported test resolves matcher ([811a4ef](https://github.com/zuohuadong/supacloud/commit/811a4ef42323f364028aa19d1e9d9c06519d12e7))
 * harden realtime tasks and data-plane boundaries ([f396257](https://github.com/zuohuadong/supacloud/commit/f396257e4c442d7cfb581824b15080bf6dfe64bf))
@@ -18,12 +18,12 @@
 * **supacloud-js:** stop injecting async headers for background routes ([258c760](https://github.com/zuohuadong/supacloud/commit/258c760723878f292f09686416289c057f50a766))
 
 
-### 📝 Documentation
+### Documentation
 
 * refresh hardening and runtime notes ([5d4a995](https://github.com/zuohuadong/supacloud/commit/5d4a995fa196b706fbb7f09b154cd3026ee7357f))
 
 
-### 🔧 Miscellaneous Chores
+### Miscellaneous Chores
 
 * release main ([b5fb260](https://github.com/zuohuadong/supacloud/commit/b5fb2606814d00ea1f822a5f907dbd403d2a4185))
 * release main ([9fbd756](https://github.com/zuohuadong/supacloud/commit/9fbd756acec93ead2fe6bddb274b3a1368f0a1a3))

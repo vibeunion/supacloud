@@ -3,7 +3,7 @@
 ## [0.4.0](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.3.9...edge-runtime-v0.4.0) (2026-05-15)
 
 
-### 🚀 Features
+### Features
 
 * **core:** Native Supabase compatibility fixes for Realtime, Storage RLS, and Edge Functions ([fd83e88](https://github.com/zuohuadong/supacloud/commit/fd83e88a67ec1736c1066707a7a2d3b9692a0f4b))
 * **edge-functions:** implement per-function verify_jwt configuration ([adf6746](https://github.com/zuohuadong/supacloud/commit/adf67468b4ccb225aaf3dc50e0fd0bf2f10cb304))
@@ -14,7 +14,7 @@
 * updates and fixes based on recent local changes ([fe495ba](https://github.com/zuohuadong/supacloud/commit/fe495baf4c7be6b469eb245a8c2bc62503f09a8e))
 
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 * add function invoke route, repair stale projects, web-console deployment ([3ed37ee](https://github.com/zuohuadong/supacloud/commit/3ed37ee7825fa060ca9ac11dab9ada16b923ddb8))
 * **auth,infra:** 401 pre-flight and all-in-one local docker ([bc0a047](https://github.com/zuohuadong/supacloud/commit/bc0a0473cc7c580750a0af717502f15a01039a8f))
@@ -42,13 +42,13 @@
 * **runtime:** respect ssl config for tenant urls ([8520e5d](https://github.com/zuohuadong/supacloud/commit/8520e5d2661b043efcdd681a2f699c4c72bf5dfd))
 
 
-### 💅 Elegance & Refactoring
+### Elegance & Refactoring
 
 * **edge-functions:** migrate version artifacts into internal revisions ([bd475aa](https://github.com/zuohuadong/supacloud/commit/bd475aa89989eea6a94668362b41b7fbee050765))
 * **edge-runtime:** replace query-param hack with Worker replacement for module invalidation ([7f9246f](https://github.com/zuohuadong/supacloud/commit/7f9246f1dcbd5500de5666c2a94defdfe466e25f))
 
 
-### 🔧 Miscellaneous Chores
+### Miscellaneous Chores
 
 * better jwt error logging ([94c05a4](https://github.com/zuohuadong/supacloud/commit/94c05a47080bb65996a4a78dc033ca3ca655bab7))
 * flush remaining test suite fixes and project modifications ([686ad4b](https://github.com/zuohuadong/supacloud/commit/686ad4bb59b1e087c9bf621d9663b259f0f33d27))
