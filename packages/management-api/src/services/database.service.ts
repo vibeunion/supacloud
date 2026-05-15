@@ -555,6 +555,36 @@ export class DatabaseService {
     }
   }
 
+  async pauseRuntime(
+    projectRef: string,
+  ): Promise<{ success: boolean; error?: string }> {
+    const { tenantRuntimeService } = await import("./tenant-runtime.service");
+    try {
+      await tenantRuntimeService.pauseProjectRuntime(projectRef);
+      return { success: true };
+    } catch (error: unknown) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+
+  async resumeRuntime(
+    projectRef: string,
+  ): Promise<{ success: boolean; error?: string }> {
+    const { tenantRuntimeService } = await import("./tenant-runtime.service");
+    try {
+      await tenantRuntimeService.resumeProjectRuntime(projectRef);
+      return { success: true };
+    } catch (error: unknown) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+
   async restartRuntime(
     projectRef: string,
   ): Promise<{ success: boolean; error?: string }> {

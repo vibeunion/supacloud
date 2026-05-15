@@ -46,5 +46,6 @@ describe("Config", () => {
     expect(config.postgrestRts).toContain("-M256m");
     expect(config.postgrestMemoryMax).toBe("384M");
     expect(config.postgrestCpuWeight).toBeGreaterThanOrEqual(40);
+    expect(config.postgrestDbPool).toBe(10);
   });
 });

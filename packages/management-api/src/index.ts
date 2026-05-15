@@ -1055,6 +1055,10 @@ async function bootstrap() {
       await import("./workers/storage-reconcile.worker");
     startStorageReconcileWorker();
 
+    const { startRuntimeReconcileWorker } =
+      await import("./workers/runtime-reconcile.worker");
+    startRuntimeReconcileWorker();
+
     if (config.edgeRuntimeMode === "embedded") {
       const { edgeRuntimeManager } =
         await import("./plugins/edge-runtime-manager");
@@ -1109,6 +1113,9 @@ if (import.meta.main) {
       const { stopStorageReconcileWorker } =
         await import("./workers/storage-reconcile.worker");
       stopStorageReconcileWorker();
+      const { stopRuntimeReconcileWorker } =
+        await import("./workers/runtime-reconcile.worker");
+      stopRuntimeReconcileWorker();
     } catch (e: unknown) {
       logger.debug("[index] suppressed error", {
         error: e instanceof Error ? e.message : String(e),
