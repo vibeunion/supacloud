@@ -352,6 +352,13 @@ export class ProjectService {
     if (!project) return false;
 
     await projectRepository.updateStatus(ref, "paused");
+    try {
+      await databaseService.pauseRuntime(ref);
+    } catch (err: unknown) {
+      logger.warn(`[ProjectService] Failed to pause runtime for ${ref}`, {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
     return true;
   }
 
@@ -372,6 +379,13 @@ export class ProjectService {
       });
     } else {
       await projectRepository.updateStatus(ref, "active");
+      try {
+        await databaseService.resumeRuntime(ref);
+      } catch (err: unknown) {
+        logger.warn(`[ProjectService] Failed to resume runtime for ${ref}`, {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
     }
     return true;
   }

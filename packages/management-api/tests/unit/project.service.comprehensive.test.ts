@@ -20,6 +20,8 @@ const databaseServiceMock = {
   generatePassword: mock(() => "dbpassword"),
   checkDatabaseExists: mock(() => Promise.resolve(true)),
   checkStatus: mock(() => Promise.resolve({ success: true, output: "" })),
+  pauseRuntime: mock(() => Promise.resolve({ success: true })),
+  resumeRuntime: mock(() => Promise.resolve({ success: true })),
   getSecrets: mock(() => Promise.resolve([{ name: "KEY", value: "val" }])),
   upsertSecret: mock(() => Promise.resolve(true)),
   deleteSecret: mock(() => Promise.resolve(true)),
@@ -61,6 +63,8 @@ const edgeFunctionServiceMock = {
 };
 
 const tenantRuntimeServiceMock = {
+  pauseProjectRuntime: mock(() => Promise.resolve()),
+  resumeProjectRuntime: mock(() => Promise.resolve({ status: "running" })),
   restartRuntime: mock(() => Promise.resolve({ status: "running" })),
 };
 
@@ -154,6 +158,8 @@ describe("ProjectService - Comprehensive", () => {
     databaseServiceMock.generatePassword.mockReset();
     databaseServiceMock.checkDatabaseExists.mockReset();
     databaseServiceMock.checkStatus.mockReset();
+    databaseServiceMock.pauseRuntime.mockReset();
+    databaseServiceMock.resumeRuntime.mockReset();
     databaseServiceMock.getSecrets.mockReset();
     databaseServiceMock.upsertSecret.mockReset();
     databaseServiceMock.deleteSecret.mockReset();
@@ -167,6 +173,8 @@ describe("ProjectService - Comprehensive", () => {
     edgeFunctionServiceMock.deployBundle.mockReset();
     edgeFunctionServiceMock.deployBundleDetailed.mockReset();
     edgeFunctionServiceMock.runtimeCheck.mockReset();
+    tenantRuntimeServiceMock.pauseProjectRuntime.mockReset();
+    tenantRuntimeServiceMock.resumeProjectRuntime.mockReset();
     tenantRuntimeServiceMock.restartRuntime.mockReset();
 
     projectRepositoryMock.findAll.mockResolvedValue([]);
@@ -186,6 +194,8 @@ describe("ProjectService - Comprehensive", () => {
     databaseServiceMock.generatePassword.mockReturnValue("dbpassword");
     databaseServiceMock.checkDatabaseExists.mockResolvedValue(true);
     databaseServiceMock.checkStatus.mockResolvedValue({ success: true, output: "" });
+    databaseServiceMock.pauseRuntime.mockResolvedValue({ success: true });
+    databaseServiceMock.resumeRuntime.mockResolvedValue({ success: true });
     databaseServiceMock.getSecrets.mockResolvedValue([{ name: "KEY", value: "val" }]);
     databaseServiceMock.upsertSecret.mockResolvedValue(true);
     databaseServiceMock.deleteSecret.mockResolvedValue(true);
@@ -216,6 +226,8 @@ describe("ProjectService - Comprehensive", () => {
       runtime_healthy: true,
       preheat_ok: true,
     });
+    tenantRuntimeServiceMock.pauseProjectRuntime.mockResolvedValue(undefined);
+    tenantRuntimeServiceMock.resumeProjectRuntime.mockResolvedValue({ status: "running" });
     tenantRuntimeServiceMock.restartRuntime.mockResolvedValue({ status: "running" });
   });
 
@@ -304,6 +316,7 @@ describe("ProjectService - Comprehensive", () => {
     projectRepositoryMock.findByRef.mockResolvedValueOnce(mockProject);
     expect(await service.pauseProject("test123abc")).toBe(true);
     expect(projectRepositoryMock.updateStatus).toHaveBeenCalledWith("test123abc", "paused");
+    expect(databaseServiceMock.pauseRuntime).toHaveBeenCalledWith("test123abc");
   });
 
   test("restoreProject updates status", async () => {
@@ -311,6 +324,7 @@ describe("ProjectService - Comprehensive", () => {
     expect(await service.restoreProject("test123abc")).toBe(true);
     expect(databaseServiceMock.checkDatabaseExists).toHaveBeenCalledWith("test123abc");
     expect(projectRepositoryMock.updateStatus).toHaveBeenCalledWith("test123abc", "active");
+    expect(databaseServiceMock.resumeRuntime).toHaveBeenCalledWith("test123abc");
   });
 
   test("restoreProject re-provisions resources when tenant database is missing", async () => {
