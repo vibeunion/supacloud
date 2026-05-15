@@ -127,6 +127,17 @@ packages/web-console/*.log
 # Root-level test/debug scripts
 test_*.ts
 wechat_login_patch_local.ts
+scratch*.ts
+test-bun-*.ts
+test-gotrue.sh
+**/scratch*.ts
+**/fetch_proj.ts
+*.bak
+*.swp
+*~
+
+# Local editor settings
+.vscode/
 
 # AI assistant directories
 .claude/
