@@ -128,6 +128,18 @@ export class DatabaseService {
   }
 
   // Create tenant database
+  async checkDatabaseExists(projectRef: string): Promise<boolean> {
+    const dbName = generateDbName(projectRef);
+    try {
+      return await this.withAdminDb(async (adminDb) => {
+        const [row] = await adminDb`SELECT 1 FROM pg_database WHERE datname = ${dbName}`;
+        return !!row;
+      });
+    } catch {
+      return false;
+    }
+  }
+
   async createDatabase(
     projectRef: string,
     password: string,
