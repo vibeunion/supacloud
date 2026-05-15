@@ -195,6 +195,168 @@ describe("@supacloud/js", () => {
     expect(message).toBe(null);
   });
 
+  test("oauth helpers call management api and build authorize urls", async () => {
+    const { supabase } = createFakeSupabase();
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const statusPayload = {
+      project_ref: "proj_1",
+      organization_id: "org_1",
+      account_isolated: true,
+      enabled: true,
+      allow_dynamic_registration: true,
+      issuer: "https://proj.example.com/auth/v1",
+      discovery_url: "https://proj.example.com/auth/v1/.well-known/openid-configuration",
+      jwks_url: "https://proj.example.com/auth/v1/.well-known/jwks.json",
+      authorization_endpoint: "https://proj.example.com/auth/v1/oauth/authorize",
+      token_endpoint: "https://proj.example.com/auth/v1/oauth/token",
+      registration_endpoint: "https://proj.example.com/auth/v1/oauth/clients/register",
+      signing_alg: "ES256",
+      oidc_id_token_ready: true,
+      migration_status: "oidc_es256_migrated",
+      warnings: [],
+    };
+
+    globalThis.fetch = mock((input: string | URL | Request, init?: RequestInit) => {
+      const url =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : input.url;
+      calls.push({ url, init });
+
+      if (
+        url.endsWith("/auth/oauth-server")
+        || url.endsWith("/auth/oauth-server/migrate")
+      ) {
+        return Promise.resolve(
+          new Response(JSON.stringify(statusPayload), {
+            headers: { "content-type": "application/json" },
+          }),
+        );
+      }
+
+      if (url === statusPayload.discovery_url) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ issuer: statusPayload.issuer, authorization_endpoint: statusPayload.authorization_endpoint }), {
+            headers: { "content-type": "application/json" },
+          }),
+        );
+      }
+
+      if (url === statusPayload.jwks_url) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ keys: [] }), {
+            headers: { "content-type": "application/json" },
+          }),
+        );
+      }
+
+      if (url.endsWith("/auth/oauth-clients")) {
+        if ((init?.method ?? "GET") === "POST") {
+          return Promise.resolve(
+            new Response(JSON.stringify({ client_id: "client_1", client_name: "App" }), {
+              headers: { "content-type": "application/json" },
+            }),
+          );
+        }
+        return Promise.resolve(
+          new Response(JSON.stringify({ clients: [{ client_id: "client_1" }] }), {
+            headers: { "content-type": "application/json" },
+          }),
+        );
+      }
+
+      if (url.endsWith("/auth/oauth-clients/client_1/regenerate-secret")) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ client_id: "client_1", client_secret: "secret_2" }), {
+            headers: { "content-type": "application/json" },
+          }),
+        );
+      }
+
+      if (url.endsWith("/auth/oauth-clients/client_1")) {
+        if ((init?.method ?? "GET") === "PUT") {
+          return Promise.resolve(
+            new Response(JSON.stringify({ client_id: "client_1", client_name: "App 2" }), {
+              headers: { "content-type": "application/json" },
+            }),
+          );
+        }
+        if ((init?.method ?? "GET") === "DELETE") {
+          return Promise.resolve(new Response(null, { status: 204 }));
+        }
+        return Promise.resolve(
+          new Response(JSON.stringify({ client_id: "client_1", client_name: "App" }), {
+            headers: { "content-type": "application/json" },
+          }),
+        );
+      }
+
+      return Promise.resolve(
+        new Response(JSON.stringify({ ok: true }), {
+          headers: { "content-type": "application/json" },
+        }),
+      );
+    }) as typeof fetch;
+
+    const client = createSupaCloudClient({
+      supabase: supabase as never,
+      managementApiUrl: "https://admin.example.com/",
+      projectRef: "proj_1",
+    });
+
+    const status = await client.auth.oauthServer.getStatus();
+    await client.auth.oauthServer.migrateToOidc({ allowDynamicRegistration: true });
+    const discovery = await client.auth.oauthServer.getDiscovery();
+    const jwks = await client.auth.oauthServer.getJwks();
+    const authorizeUrl = await client.auth.oauthServer.buildAuthorizeUrl({
+      clientId: "client_1",
+      redirectUri: "https://app.example.com/callback",
+      scope: ["openid", "email"],
+      state: "state_1",
+      codeChallenge: "challenge_1",
+      codeChallengeMethod: "S256",
+      nonce: "nonce_1",
+      resource: "https://api.example.com",
+    });
+    await client.auth.oauthClients.list();
+    await client.auth.oauthClients.create({
+      redirect_uris: ["https://app.example.com/callback"],
+      client_name: "App",
+      client_type: "public",
+      token_endpoint_auth_method: "none",
+    });
+    await client.auth.oauthClients.get("client_1");
+    await client.auth.oauthClients.update("client_1", { client_name: "App 2" });
+    await client.auth.oauthClients.regenerateSecret("client_1");
+    await client.auth.oauthClients.delete("client_1");
+
+    expect(status.account_isolated).toBe(true);
+    expect(status.signing_alg).toBe("ES256");
+    expect(status.oidc_id_token_ready).toBe(true);
+    expect(discovery.issuer).toBe(statusPayload.issuer);
+    expect(jwks).toMatchObject({ keys: [] });
+
+    const authUrl = new URL(authorizeUrl);
+    expect(authUrl.origin + authUrl.pathname).toBe(statusPayload.authorization_endpoint);
+    expect(authUrl.searchParams.get("client_id")).toBe("client_1");
+    expect(authUrl.searchParams.get("redirect_uri")).toBe("https://app.example.com/callback");
+    expect(authUrl.searchParams.get("scope")).toBe("openid email");
+    expect(authUrl.searchParams.get("state")).toBe("state_1");
+    expect(authUrl.searchParams.get("code_challenge")).toBe("challenge_1");
+    expect(authUrl.searchParams.get("code_challenge_method")).toBe("S256");
+    expect(authUrl.searchParams.get("nonce")).toBe("nonce_1");
+    expect(authUrl.searchParams.get("resource")).toBe("https://api.example.com");
+
+    expect(calls[0]?.url).toBe("https://admin.example.com/v1/projects/proj_1/auth/oauth-server");
+    expect(calls[0]?.init?.headers instanceof Headers || typeof calls[0]?.init?.headers === "object").toBe(true);
+    expect(new Headers(calls[0]?.init?.headers).get("authorization")).toBe("Bearer token-123");
+    expect(calls.some((call) => call.url.endsWith("/auth/oauth-server/migrate"))).toBe(true);
+    expect(calls.some((call) => call.url.endsWith("/auth/oauth-clients"))).toBe(true);
+    expect(calls.some((call) => call.url.endsWith("/auth/oauth-clients/client_1"))).toBe(true);
+  });
+
   test("wait polls until a terminal task status is reached", async () => {
     const { supabase } = createFakeSupabase();
     const client = createSupaCloudClient({
