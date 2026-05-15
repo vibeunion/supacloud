@@ -353,31 +353,31 @@
 ## [0.15.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.14.1...management-api-v0.15.0) (2026-05-15)
 
 
-### 🚀 Features
+### Features
 
 * optimize tenant runtime lifecycle ([c5fcf96](https://github.com/zuohuadong/supacloud/commit/c5fcf962f6f6689400ee920a44d22c35970bb268))
 
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 * provision_runtime fails on Ubuntu due to Group=nobody and missing auth schema ([#110](https://github.com/zuohuadong/supacloud/issues/110)) ([0bef1c6](https://github.com/zuohuadong/supacloud/commit/0bef1c6e81578071c7a23cf621f17dc8594881c9))
 
 ## [0.14.1](https://github.com/zuohuadong/supacloud/compare/management-api-v0.14.0...management-api-v0.14.1) (2026-05-15)
 
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 * restore project reprovisions missing resources ([a8b3ec3](https://github.com/zuohuadong/supacloud/commit/a8b3ec3eed145628f5551880f705b2b97b769d1b))
 
 ## [0.14.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.13.8...management-api-v0.14.0) (2026-05-15)
 
 
-### 🚀 Features
+### Features
 
 * **management-api:** add Swagger detail annotations to all 121 route handlers ([02f049c](https://github.com/zuohuadong/supacloud/commit/02f049c515d716edb2fe3ec6a914cfea78235689))
 
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 * auth middleware response format mismatch with route schemas ([#107](https://github.com/zuohuadong/supacloud/issues/107)) ([c76a6f8](https://github.com/zuohuadong/supacloud/commit/c76a6f84f3788d754db7f94accf7c178cd6907cb))
 * **management-api:** enforce Swagger route coverage ([4ec22db](https://github.com/zuohuadong/supacloud/commit/4ec22db97820ae8b75b73d10d9f659593c842482))
@@ -386,14 +386,14 @@
 ## [0.13.8](https://github.com/zuohuadong/supacloud/compare/management-api-v0.13.7...management-api-v0.13.8) (2026-05-12)
 
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 * **ci:** repair release asset upload ([98d5537](https://github.com/zuohuadong/supacloud/commit/98d5537ad77ab381e42d91ab011cedeea38498f9))
 
 ## [0.13.7](https://github.com/zuohuadong/supacloud/compare/management-api-v0.13.6...management-api-v0.13.7) (2026-05-12)
 
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 * add function invoke route, repair stale projects, web-console deployment ([dedab66](https://github.com/zuohuadong/supacloud/commit/dedab667e4a200470a1d6c5d4dfada8df17e32ea))
 * improve one-click install robustness, add function invoke route, repair stale projects ([5cdbe8a](https://github.com/zuohuadong/supacloud/commit/5cdbe8a0f7800e3b1b1e903976bcc8c33e61d1b1))
@@ -402,28 +402,28 @@
 ## [0.13.6](https://github.com/zuohuadong/supacloud/compare/management-api-v0.13.5...management-api-v0.13.6) (2026-05-11)
 
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 * **management-api:** harden storage list metadata parsing ([5b596ff](https://github.com/zuohuadong/supacloud/commit/5b596ff4436a666aec1d232c9858a4173785671e))
 
 ## [0.13.5](https://github.com/zuohuadong/supacloud/compare/management-api-v0.13.4...management-api-v0.13.5) (2026-05-10)
 
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 * harden management API edge cases ([d938f51](https://github.com/zuohuadong/supacloud/commit/d938f51b52f4762a2c55068b59f23616b9d7df3e))
 
 ## [0.13.4](https://github.com/zuohuadong/supacloud/compare/management-api-v0.13.3...management-api-v0.13.4) (2026-05-10)
 
 
-### ⚡ Performance Improvements
+### Performance Improvements
 
 * reduce management hot path load ([e5f4c82](https://github.com/zuohuadong/supacloud/commit/e5f4c82f58cb1d515c9c6f94d77fe8032ecdbe26))
 
 ## [0.13.3](https://github.com/zuohuadong/supacloud/compare/management-api-v0.13.2...management-api-v0.13.3) (2026-05-08)
 
 
-### 🔧 Miscellaneous Chores
+### Miscellaneous Chores
 
 * **deps:** bump @svadmin/core in /packages/management-api ([#81](https://github.com/zuohuadong/supacloud/issues/81)) ([dd6cba3](https://github.com/zuohuadong/supacloud/commit/dd6cba30a7882e35ec8114e90091f94ec05c47bc))
 * **deps:** bump zod from 3.25.76 to 4.4.3 in /packages/management-api ([#86](https://github.com/zuohuadong/supacloud/issues/86)) ([49b03f5](https://github.com/zuohuadong/supacloud/commit/49b03f554cadd557595436e7112535f6250d3a2d))
@@ -431,7 +431,7 @@
 ## [0.13.2](https://github.com/zuohuadong/supacloud/compare/management-api-v0.13.1...management-api-v0.13.2) (2026-05-08)
 
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 * **installer:** align pigsty supabase install path ([a14e33a](https://github.com/zuohuadong/supacloud/commit/a14e33a7a9b0b44f138c219fcf779a9a8d5cc242))
 * **management-api:** reconcile custom domain runtime routes ([6a0b8de](https://github.com/zuohuadong/supacloud/commit/6a0b8def0215407f14508916866944ac54b6225a))
@@ -439,21 +439,21 @@
 ## [0.13.1](https://github.com/zuohuadong/supacloud/compare/management-api-v0.13.0...management-api-v0.13.1) (2026-05-08)
 
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 * **installer:** derive studio domain from API host ([4d94d49](https://github.com/zuohuadong/supacloud/commit/4d94d49f0e3615e7dfe420dea7cc72ba91fc41d9))
 
 ## [0.13.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.12.19...management-api-v0.13.0) (2026-05-08)
 
 
-### 🚀 Features
+### Features
 
 * **gateway:** manage certificates through Kong ([3d5930f](https://github.com/zuohuadong/supacloud/commit/3d5930fb5eb78ed32fb96b06d0f824446504ae22))
 
 ## [0.12.19](https://github.com/zuohuadong/supacloud/compare/management-api-v0.12.18...management-api-v0.12.19) (2026-05-07)
 
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 * **runtime:** respect ssl config for tenant urls ([d8ace81](https://github.com/zuohuadong/supacloud/commit/d8ace81412b4caa87fe00982539310452faeaaa1))
 * **runtime:** respect ssl config for tenant urls ([d0852b2](https://github.com/zuohuadong/supacloud/commit/d0852b2e3d95a1c4ab33a30916df68aa15a41a64))
@@ -461,7 +461,7 @@
 ## [0.12.18](https://github.com/zuohuadong/supacloud/compare/management-api-v0.12.17...management-api-v0.12.18) (2026-05-07)
 
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 * **edge-runtime:** preserve env for waitUntil tasks ([1e43fbf](https://github.com/zuohuadong/supacloud/commit/1e43fbf6eb22a8fff3218326dae4c6e0b8fb4176))
 * **edge-runtime:** preserve env for waitUntil tasks ([424152c](https://github.com/zuohuadong/supacloud/commit/424152c21265e67ec5812453d3cfc2a5ed064b87))
@@ -469,7 +469,7 @@
 ## [0.12.17](https://github.com/zuohuadong/supacloud/compare/management-api-v0.12.16...management-api-v0.12.17) (2026-05-06)
 
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 * **management-api:** accept serialized routing config ([edb5e4d](https://github.com/zuohuadong/supacloud/commit/edb5e4d329e255e22ee48c5c8bab7b6c833ad2ac))
 * **tasks:** allow invoker jwt to read task detail ([e99cf7b](https://github.com/zuohuadong/supacloud/commit/e99cf7b1e7994f738a446410ca0f5f5ac98f5042))
@@ -477,35 +477,35 @@
 ## [0.12.16](https://github.com/zuohuadong/supacloud/compare/management-api-v0.12.15...management-api-v0.12.16) (2026-05-06)
 
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 * **install:** skip legacy supabase compose stack ([4bcf1fa](https://github.com/zuohuadong/supacloud/commit/4bcf1faacc036ddf55aa17c5124ca87e2d8083fa))
 
 ## [0.12.15](https://github.com/zuohuadong/supacloud/compare/management-api-v0.12.14...management-api-v0.12.15) (2026-05-04)
 
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 * **pigsty:** align 4.3 upgrade with supacloud storage defaults ([e3e6881](https://github.com/zuohuadong/supacloud/commit/e3e68818aad04c9d967d83d05a03cb58331bf453))
 
 ## [0.12.14](https://github.com/zuohuadong/supacloud/compare/management-api-v0.12.13...management-api-v0.12.14) (2026-05-04)
 
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 * **security:** harden storage and proxy surfaces ([03e0efa](https://github.com/zuohuadong/supacloud/commit/03e0efad117902d014dc855732a0d337bce1c764))
 
 ## [0.12.13](https://github.com/zuohuadong/supacloud/compare/management-api-v0.12.12...management-api-v0.12.13) (2026-05-01)
 
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 * **gateway:** include hosted frontend origins in cors ([672b764](https://github.com/zuohuadong/supacloud/commit/672b764ad066ad5751ec98210175fdd9053b9a5a))
 
 ## [0.12.12](https://github.com/zuohuadong/supacloud/compare/management-api-v0.12.11...management-api-v0.12.12) (2026-04-29)
 
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 * **ci:** provide websocket for sdk compliance ([26ffa43](https://github.com/zuohuadong/supacloud/commit/26ffa437772b99d3fb02fc770c3097e24414d012))
 * **ci:** retry official cli bootstrap downloads ([420f0ad](https://github.com/zuohuadong/supacloud/commit/420f0ada19af72b74b6b981979098603551cc6d2))
@@ -513,28 +513,28 @@
 ## [0.12.11](https://github.com/zuohuadong/supacloud/compare/management-api-v0.12.10...management-api-v0.12.11) (2026-04-29)
 
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 * **edge-runtime:** inject Bun function env ([54aefe5](https://github.com/zuohuadong/supacloud/commit/54aefe576cb351fe2dd37c4a9b8e74ed4c34f517))
 
 ## [0.12.10](https://github.com/zuohuadong/supacloud/compare/management-api-v0.12.9...management-api-v0.12.10) (2026-04-29)
 
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 * **management-api:** expose unmasked runtime env internally ([713702b](https://github.com/zuohuadong/supacloud/commit/713702bb3950e4df9cd5ed18850073e5710fd040))
 
 ## [0.12.9](https://github.com/zuohuadong/supacloud/compare/management-api-v0.12.8...management-api-v0.12.9) (2026-04-29)
 
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 * **management-api:** inject internal supabase runtime secrets ([13c9f15](https://github.com/zuohuadong/supacloud/commit/13c9f15483083e8a14d6c708276f6a322a786992))
 
 ## [0.12.8](https://github.com/zuohuadong/supacloud/compare/management-api-v0.12.7...management-api-v0.12.8) (2026-04-29)
 
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 * **management-api:** harden project queue reliability ([0f857e3](https://github.com/zuohuadong/supacloud/commit/0f857e3e2ec937eaff63d163017fdafb93135027))
 * **management-api:** harden storage and background contracts ([d952a86](https://github.com/zuohuadong/supacloud/commit/d952a86fcc112fb8c44c105e82a41f9b5c56790b))
@@ -542,28 +542,28 @@
 ## [0.12.7](https://github.com/zuohuadong/supacloud/compare/management-api-v0.12.6...management-api-v0.12.7) (2026-04-29)
 
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 * **management-api:** resolve functions tenants from custom domains ([5baf0d5](https://github.com/zuohuadong/supacloud/commit/5baf0d5ec4e75089228167963d3b96261f2ef75f))
 
 ## [0.12.6](https://github.com/zuohuadong/supacloud/compare/management-api-v0.12.5...management-api-v0.12.6) (2026-04-29)
 
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 * **management-api:** allow public storage reads on custom domains ([db33913](https://github.com/zuohuadong/supacloud/commit/db33913ed919c63549732a0c4f6d3c98a50f4a45))
 
 ## [0.12.5](https://github.com/zuohuadong/supacloud/compare/management-api-v0.12.4...management-api-v0.12.5) (2026-04-28)
 
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 * **management-api:** grant postgrest authenticator database access ([f64e7d8](https://github.com/zuohuadong/supacloud/commit/f64e7d8988293dd8cec0626147e819532cc9c086))
 
 ## [0.12.4](https://github.com/zuohuadong/supacloud/compare/management-api-v0.12.3...management-api-v0.12.4) (2026-04-28)
 
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 * **management-api:** grant auth roles tenant database access ([196ec92](https://github.com/zuohuadong/supacloud/commit/196ec922bd876bf42081e1fbfbb5ad28f84f710e))
 * **management-api:** isolate background auth encryption regression ([d447a84](https://github.com/zuohuadong/supacloud/commit/d447a847177f23590c35fa721e002d24e893fe8d))
@@ -573,47 +573,47 @@
 ## [0.12.3](https://github.com/zuohuadong/supacloud/compare/management-api-v0.12.2...management-api-v0.12.3) (2026-04-28)
 
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 * **management-api:** encrypt background task credentials ([7f7b815](https://github.com/zuohuadong/supacloud/commit/7f7b815ceb2b7b5a5f7368772b6483882f0a7b36))
 
 ## [0.12.2](https://github.com/zuohuadong/supacloud/compare/management-api-v0.12.1...management-api-v0.12.2) (2026-04-27)
 
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 * ship web console with binary upgrades ([c96e44a](https://github.com/zuohuadong/supacloud/commit/c96e44a17aa88948498cbdab7743c1d834a4ba8b))
 
 ## [0.12.1](https://github.com/zuohuadong/supacloud/compare/management-api-v0.12.0...management-api-v0.12.1) (2026-04-27)
 
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 * stabilize edge runtime under binary upgrades ([428453a](https://github.com/zuohuadong/supacloud/commit/428453a0fa15a0cf77e3e7db3939f766ad94cbcb))
 
 ## [0.12.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.11.7...management-api-v0.12.0) (2026-04-27)
 
 
-### 🚀 Features
+### Features
 
 * add queue client api ([1463b8d](https://github.com/zuohuadong/supacloud/commit/1463b8db899c0762e680b3ed1894dfbd5e1463df))
 * improve database sql cli workflows ([1d1ac83](https://github.com/zuohuadong/supacloud/commit/1d1ac83d7518f223e048b8caedd1420460b1e70e))
 
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 * publish background tasks for realtime ([16582be](https://github.com/zuohuadong/supacloud/commit/16582be1fe7f0a74ea94a31af1d5d0ee526b991e))
 * skip missing tenant dbs during realtime reconcile ([300ce92](https://github.com/zuohuadong/supacloud/commit/300ce923eea65e21a280e29954f58a3d4945aa98))
 
 
-### 💅 Elegance & Refactoring
+### Elegance & Refactoring
 
 * remove legacy sql result alias ([3565c00](https://github.com/zuohuadong/supacloud/commit/3565c00f197a35e129785cce299ee48b9f91f7b8))
 
 ## [0.11.7](https://github.com/zuohuadong/supacloud/compare/management-api-v0.11.6...management-api-v0.11.7) (2026-04-27)
 
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 * allow supacloud async cors headers ([b27af99](https://github.com/zuohuadong/supacloud/commit/b27af995e9e4ff209df63b72652ca18d25186217))
 * materialize juicefs upload streams ([4378f9c](https://github.com/zuohuadong/supacloud/commit/4378f9cab99e9c11f8714a82232de71f7c82a8da))
@@ -622,14 +622,14 @@
 ## [0.11.6](https://github.com/zuohuadong/supacloud/compare/management-api-v0.11.5...management-api-v0.11.6) (2026-04-27)
 
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 * extend rest proxy timeout ([716839d](https://github.com/zuohuadong/supacloud/commit/716839db4170023e7f4f2044fd9318ac4f84f7b7))
 
 ## [0.11.5](https://github.com/zuohuadong/supacloud/compare/management-api-v0.11.4...management-api-v0.11.5) (2026-04-27)
 
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 * make production upgrades binary-first ([08e9046](https://github.com/zuohuadong/supacloud/commit/08e9046aa2f91def72b2a8796aa1aeb719240f66))
 * support github proxies for binary upgrades ([598269c](https://github.com/zuohuadong/supacloud/commit/598269c26e9a04ea1c7c5dd543c13206c58e5f9d))
@@ -637,7 +637,7 @@
 ## [0.11.4](https://github.com/zuohuadong/supacloud/compare/management-api-v0.11.3...management-api-v0.11.4) (2026-04-25)
 
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 * **cli:** push migrations through management API ([cee9927](https://github.com/zuohuadong/supacloud/commit/cee9927d29cb0ef514ae5a33080e6cf1c74bdecc))
 * **cli:** push migrations via management api ([5b06fa2](https://github.com/zuohuadong/supacloud/commit/5b06fa249802335fbb3c4e77d3f5cefe8c4336b8))
@@ -645,7 +645,7 @@
 ## [0.11.3](https://github.com/zuohuadong/supacloud/compare/management-api-v0.11.2...management-api-v0.11.3) (2026-04-24)
 
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 * harden realtime tasks and data-plane boundaries ([f6bdfd1](https://github.com/zuohuadong/supacloud/commit/f6bdfd1b92d501507e27ad6ed73ecd3b46cc3e97))
 * **management-api:** default to port 9090 ([c842879](https://github.com/zuohuadong/supacloud/commit/c842879db34f256651c0845ce70b6f1c7640f329))
@@ -653,14 +653,14 @@
 ## [0.11.2](https://github.com/zuohuadong/supacloud/compare/management-api-v0.11.1...management-api-v0.11.2) (2026-04-23)
 
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 * **auth:** accept project service role on management routes ([eac98e5](https://github.com/zuohuadong/supacloud/commit/eac98e557450e997bf2f4a41146f9deaf1230c90))
 
 ## [0.11.1](https://github.com/zuohuadong/supacloud/compare/management-api-v0.11.0...management-api-v0.11.1) (2026-04-23)
 
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 * **functions:** harden runtime routing and diagnostics ([41bade2](https://github.com/zuohuadong/supacloud/commit/41bade2ccef44f581aa1a6c6d0678f912084b6c0))
 * **queue:** keep edge functions on dedicated worker ([693b1e3](https://github.com/zuohuadong/supacloud/commit/693b1e30274f426cadb9638ff96b9dba87b98361))
@@ -668,12 +668,12 @@
 ## [0.11.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.10.5...management-api-v0.11.0) (2026-04-23)
 
 
-### 🚀 Features
+### Features
 
 * **self-host:** add PG18 compose stack and refresh tenant env ([d865bdb](https://github.com/zuohuadong/supacloud/commit/d865bdb96b29ec8abdea6a0e93190d0cbd7d8371))
 
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 * **storage:** stream large uploads through kong ([5001aa0](https://github.com/zuohuadong/supacloud/commit/5001aa0ddfb3e8556d5d03d155d677986376a962))
 * **web-console:** restore settings and task management UI ([3f7ef75](https://github.com/zuohuadong/supacloud/commit/3f7ef756f3e151a9678f998d8e638f324ab7f77a))
@@ -681,24 +681,24 @@
 ## [0.10.5](https://github.com/zuohuadong/supacloud/compare/management-api-v0.10.4...management-api-v0.10.5) (2026-04-20)
 
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 * **queue:** migrate foundation worker to stable pg-listen ([fa90fe3](https://github.com/zuohuadong/supacloud/commit/fa90fe3e27238a0f9f79beaa8e881e78ea631c0e))
 
 
-### 💅 Elegance & Refactoring
+### Elegance & Refactoring
 
 * **queue:** remove legacy pg-listen implementation ([9707808](https://github.com/zuohuadong/supacloud/commit/9707808c945d214f0f9477df2bfc31d4ce83840e))
 
 ## [0.10.4](https://github.com/zuohuadong/supacloud/compare/management-api-v0.10.3...management-api-v0.10.4) (2026-04-19)
 
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 * **management-api:** set duplex on sdk-proxy test requests ([80f852d](https://github.com/zuohuadong/supacloud/commit/80f852d709294204bb502d537ceaf5ec5f86cf1c))
 
 
-### 🔧 Miscellaneous Chores
+### Miscellaneous Chores
 
 * release main ([239aea7](https://github.com/zuohuadong/supacloud/commit/239aea7e22bae05cc3c7840bc6c0fd7b322a8862))
 * release main ([8d020be](https://github.com/zuohuadong/supacloud/commit/8d020be4e8d374f0cf0498a97e4beb6a88e57fb0))
@@ -706,14 +706,14 @@
 ## [0.10.3](https://github.com/zuohuadong/supacloud/compare/management-api-v0.10.2...management-api-v0.10.3) (2026-04-19)
 
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 * **management-api:** harden sdk proxy unit test isolation ([4a5fd35](https://github.com/zuohuadong/supacloud/commit/4a5fd353ad8c25003c2f37d8c582c682c2acf81c))
 
 ## [0.10.2](https://github.com/zuohuadong/supacloud/compare/management-api-v0.10.1...management-api-v0.10.2) (2026-04-19)
 
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 * **edge-runtime:** keep embedded child restarting ([7ca588a](https://github.com/zuohuadong/supacloud/commit/7ca588ad211c28c3f7ddff9b550d3fdb304d1feb))
 * **realtime:** connect tenants with admin database credentials ([e1ae210](https://github.com/zuohuadong/supacloud/commit/e1ae210134942c04d4d5a4dbdc6d46e6f154d245))
@@ -725,14 +725,14 @@
 * **realtime:** use node crypto for admin JWT signing ([601e951](https://github.com/zuohuadong/supacloud/commit/601e951d76548131b02404319c68d4224a627df8))
 
 
-### 🔧 Miscellaneous Chores
+### Miscellaneous Chores
 
 * **ts:** finish TypeScript 6 typecheck migration ([5e2ae90](https://github.com/zuohuadong/supacloud/commit/5e2ae9024cf356eb6892402a62bf4036b8ad00dc))
 
 ## [0.10.1](https://github.com/zuohuadong/supacloud/compare/management-api-v0.10.0...management-api-v0.10.1) (2026-04-18)
 
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 * **edge-runtime:** avoid double-managed runtime restarts ([5a27175](https://github.com/zuohuadong/supacloud/commit/5a271758fff9bbe008f8d8aade559e4d8dffab3e))
 * **gateway:** preserve functions proxy path prefix ([f51bb1f](https://github.com/zuohuadong/supacloud/commit/f51bb1fa76be90ead2b065802650a14121f79b36))
@@ -741,20 +741,20 @@
 * **tasks:** patch tenant queue schema compatibility ([370adfa](https://github.com/zuohuadong/supacloud/commit/370adfa6009dc72d956a47e3c69e9cda99acd7f0))
 
 
-### 💅 Elegance & Refactoring
+### Elegance & Refactoring
 
 * **edge-functions:** migrate version artifacts into internal revisions ([e9c0890](https://github.com/zuohuadong/supacloud/commit/e9c0890013bb23b0189dd089c3e7d79507ee37b2))
 
 ## [0.10.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.9.1...management-api-v0.10.0) (2026-04-17)
 
 
-### 🚀 Features
+### Features
 
 * **tasks:** deploy background task and message queue features to servers ([e66cdac](https://github.com/zuohuadong/supacloud/commit/e66cdac9c34f34990de5675ca75bfca9894cc3b4))
 * updates and fixes based on recent local changes ([449c710](https://github.com/zuohuadong/supacloud/commit/449c71089721658d25737ac7df1c196b3bc9bb1d))
 
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 * **db:** remove index creation from ddlQuery to avoid execution failure on partial schema ([23a4546](https://github.com/zuohuadong/supacloud/commit/23a45468d6316b0550683e046560a6768e770890))
 * **db:** use sql.unsafe for sequential DDL execution to prevent prepared statement errors ([5e255c6](https://github.com/zuohuadong/supacloud/commit/5e255c690358e91f76507f522b8490b3cad02083))
@@ -764,21 +764,21 @@
 ## [0.9.1](https://github.com/zuohuadong/supacloud/compare/management-api-v0.9.0...management-api-v0.9.1) (2026-04-14)
 
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 * **auth:** restore empty string fallback for OpenAPI enum compliance ([f62da87](https://github.com/zuohuadong/supacloud/commit/f62da87304c3526fe50cf1684ff115e2975fac11))
 * **openapi:** satisfy strict schema enums and ref length requirements ([9f47811](https://github.com/zuohuadong/supacloud/commit/9f47811e8a834cced46e8946b620f233c41e2973))
 * **openapi:** use predefined enums for missing auth config providers instead of empty strings ([b2ebf64](https://github.com/zuohuadong/supacloud/commit/b2ebf647f4bb69d90e9745e6a3c8435f52e3d310))
 
 
-### 🔧 Miscellaneous Chores
+### Miscellaneous Chores
 
 * cleanup scratch files and commit modified files ([328a728](https://github.com/zuohuadong/supacloud/commit/328a7285b5956693105c7d1086338e53194cf013))
 
 ## [0.9.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.8.0...management-api-v0.9.0) (2026-04-14)
 
 
-### 🚀 Features
+### Features
 
 * add /auth/session API for Studio auth support ([0235e89](https://github.com/zuohuadong/supacloud/commit/0235e89352b545c231ea62e71e698f7e90f519da))
 * add ACME SSL support for Angie ([b6c94fa](https://github.com/zuohuadong/supacloud/commit/b6c94fa5b9dc061969dd0568f0e0df9cc0d70b5f))
@@ -855,7 +855,7 @@
 * **web-console:** integrate realtime health, custom domains and oauth panels ([b316f93](https://github.com/zuohuadong/supacloud/commit/b316f938906863fa7563e33ebe92d1ee656c006a))
 
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 * /platform/projects/default returns first project for Studio compatibility ([e8afdd3](https://github.com/zuohuadong/supacloud/commit/e8afdd3efefe7c095e5e5ea7b43a6d1a4562f445))
 * add /api/auth/* route hijack to router.service.ts for Studio auth support ([b38d60a](https://github.com/zuohuadong/supacloud/commit/b38d60aa00c5df0374f1b6f044b3208667e9a232))
@@ -1023,7 +1023,7 @@
 * **workflow:** restore build-binaries triggers and fix tests mock isolation ([9b53c0a](https://github.com/zuohuadong/supacloud/commit/9b53c0af784f60b61446c4a68553dccd858ce6cf))
 
 
-### 💅 Elegance & Refactoring
+### Elegance & Refactoring
 
 * **api:** standardize error payload schemas across all routes for Stripe parity ([dc0955c](https://github.com/zuohuadong/supacloud/commit/dc0955ced1ca18264ee748a2d30f6c2e78c95f39))
 * **auth:** use GoTrue magic link verification for miniprogram and upgrade edge fn syntax ([75c7dfd](https://github.com/zuohuadong/supacloud/commit/75c7dfd272ee2c9ca4f638a8493596c20a4ae4bf))
@@ -1031,7 +1031,7 @@
 * **core:** use resolveDbName and parameterized queries for schema routing and postgres reflection ([4e493e7](https://github.com/zuohuadong/supacloud/commit/4e493e7b6779bf130a9ab2bacdd3c0639efe8c8a))
 * **cors:** move CORS from edge functions to Angie gateway layer ([2ce8c41](https://github.com/zuohuadong/supacloud/commit/2ce8c41b3aa28db8a72ed3eab473e9b4d42484fc))
 * eliminate all [@ts-ignore](https://github.com/ts-ignore), implement all TODOs, centralize remaining env ([514f1f0](https://github.com/zuohuadong/supacloud/commit/514f1f027c3cd73795f8bbda2861c43c470ab12b))
-* eliminate technical debt — split projects.ts, centralize env vars, remove all any types ([13500d1](https://github.com/zuohuadong/supacloud/commit/13500d172805cfe3af14dac3f250de3550a8b7b0))
+* eliminate technical debt - split projects.ts, centralize env vars, remove all any types ([13500d1](https://github.com/zuohuadong/supacloud/commit/13500d172805cfe3af14dac3f250de3550a8b7b0))
 * **gateway:** complete migration to native Kong Gateway and remove legacy Angie ([e966862](https://github.com/zuohuadong/supacloud/commit/e966862ddea6504a35be2e454375cd591895c7ba))
 * **gateway:** unify edge proxy to native kong rest api ([eb1a97a](https://github.com/zuohuadong/supacloud/commit/eb1a97ab82b9a6deeb961e5a7c4ca4f87a79f192))
 * **realtime:** revert native realtime and restore official docker integration ([42d7a78](https://github.com/zuohuadong/supacloud/commit/42d7a78d018f388098624b0d32cf9dd69483cdec))
@@ -1043,13 +1043,13 @@
 * **web-console:** finalize AutoTable hybrid migration for auth and tables pages ([209608b](https://github.com/zuohuadong/supacloud/commit/209608b1f53e2cefb3f1b39dd33614c70b83ab34))
 
 
-### ⚡ Performance Improvements
+### Performance Improvements
 
 * **api:** implement O(1) memory caching and pre-compression for static assets ([a0bd52e](https://github.com/zuohuadong/supacloud/commit/a0bd52e426a619324c7aa6bb07cc7a18e20e8138))
 * replace node:fs legacy I/O with fully-optimized Bun native APIs across the project ([4bc99c8](https://github.com/zuohuadong/supacloud/commit/4bc99c84173c1859cb3a095c2d007c343fdbc754))
 
 
-### 🔧 Miscellaneous Chores
+### Miscellaneous Chores
 
 * align error codes and resolve DB roles in management API ([7fbece6](https://github.com/zuohuadong/supacloud/commit/7fbece6c322c13820bde368b52ffc73fcb952ee5))
 * bump version (+0.0.1) for management-api and mcp-server ([16a7624](https://github.com/zuohuadong/supacloud/commit/16a76241fb7d7416ab9c25d331e471d6221fb9bc))

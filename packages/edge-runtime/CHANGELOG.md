@@ -84,7 +84,7 @@
 ## [0.3.9](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.3.8...edge-runtime-v0.3.9) (2026-05-12)
 
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 * add function invoke route, repair stale projects, web-console deployment ([dedab66](https://github.com/zuohuadong/supacloud/commit/dedab667e4a200470a1d6c5d4dfada8df17e32ea))
 * improve one-click install robustness, add function invoke route, repair stale projects ([5cdbe8a](https://github.com/zuohuadong/supacloud/commit/5cdbe8a0f7800e3b1b1e903976bcc8c33e61d1b1))
@@ -92,7 +92,7 @@
 ## [0.3.8](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.3.7...edge-runtime-v0.3.8) (2026-05-12)
 
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 * **edge-runtime:** normalize fallback tenant env ([c72379f](https://github.com/zuohuadong/supacloud/commit/c72379fc12576132edcd19fe59cc69da6d1ad4fa))
 * **edge-runtime:** normalize fallback tenant env ([e55a526](https://github.com/zuohuadong/supacloud/commit/e55a5260b61070cf33d99033c8ed9bbf7afa250b))
@@ -102,7 +102,7 @@
 ## [0.3.7](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.3.6...edge-runtime-v0.3.7) (2026-05-07)
 
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 * **runtime:** respect ssl config for tenant urls ([d8ace81](https://github.com/zuohuadong/supacloud/commit/d8ace81412b4caa87fe00982539310452faeaaa1))
 * **runtime:** respect ssl config for tenant urls ([d0852b2](https://github.com/zuohuadong/supacloud/commit/d0852b2e3d95a1c4ab33a30916df68aa15a41a64))
@@ -110,7 +110,7 @@
 ## [0.3.6](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.3.5...edge-runtime-v0.3.6) (2026-05-07)
 
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 * **edge-runtime:** preserve env for waitUntil tasks ([1e43fbf](https://github.com/zuohuadong/supacloud/commit/1e43fbf6eb22a8fff3218326dae4c6e0b8fb4176))
 * **edge-runtime:** preserve env for waitUntil tasks ([424152c](https://github.com/zuohuadong/supacloud/commit/424152c21265e67ec5812453d3cfc2a5ed064b87))
@@ -118,28 +118,28 @@
 ## [0.3.5](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.3.4...edge-runtime-v0.3.5) (2026-04-29)
 
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 * **edge-runtime:** inject Bun function env ([54aefe5](https://github.com/zuohuadong/supacloud/commit/54aefe576cb351fe2dd37c4a9b8e74ed4c34f517))
 
 ## [0.3.4](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.3.3...edge-runtime-v0.3.4) (2026-04-29)
 
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 * **edge-runtime:** reject masked runtime secrets ([9ecc6f1](https://github.com/zuohuadong/supacloud/commit/9ecc6f1de03fc7e49f5569e6fd52427c56c1ed4c))
 
 ## [0.3.3](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.3.2...edge-runtime-v0.3.3) (2026-04-24)
 
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 * harden realtime tasks and data-plane boundaries ([f6bdfd1](https://github.com/zuohuadong/supacloud/commit/f6bdfd1b92d501507e27ad6ed73ecd3b46cc3e97))
 
 ## [0.3.2](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.3.1...edge-runtime-v0.3.2) (2026-04-19)
 
 
-### 🔧 Miscellaneous Chores
+### Miscellaneous Chores
 
 * release main ([239aea7](https://github.com/zuohuadong/supacloud/commit/239aea7e22bae05cc3c7840bc6c0fd7b322a8862))
 * release main ([8d020be](https://github.com/zuohuadong/supacloud/commit/8d020be4e8d374f0cf0498a97e4beb6a88e57fb0))
@@ -147,24 +147,24 @@
 ## [0.3.1](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.3.0...edge-runtime-v0.3.1) (2026-04-18)
 
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 * **edge-runtime:** avoid double-managed runtime restarts ([5a27175](https://github.com/zuohuadong/supacloud/commit/5a271758fff9bbe008f8d8aade559e4d8dffab3e))
 
 
-### 💅 Elegance & Refactoring
+### Elegance & Refactoring
 
 * **edge-functions:** migrate version artifacts into internal revisions ([e9c0890](https://github.com/zuohuadong/supacloud/commit/e9c0890013bb23b0189dd089c3e7d79507ee37b2))
 
 
-### 🔧 Miscellaneous Chores
+### Miscellaneous Chores
 
 * **systemd:** add canonical service templates ([9f1c42c](https://github.com/zuohuadong/supacloud/commit/9f1c42c4fabd1da1d24a35c9f699f92f22e0bcad))
 
 ## [0.3.0](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.2.1...edge-runtime-v0.3.0) (2026-04-17)
 
 
-### 🚀 Features
+### Features
 
 * **tasks:** deploy background task and message queue features to servers ([e66cdac](https://github.com/zuohuadong/supacloud/commit/e66cdac9c34f34990de5675ca75bfca9894cc3b4))
 * updates and fixes based on recent local changes ([449c710](https://github.com/zuohuadong/supacloud/commit/449c71089721658d25737ac7df1c196b3bc9bb1d))
@@ -172,20 +172,20 @@
 ## [0.2.1](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.2.0...edge-runtime-v0.2.1) (2026-04-16)
 
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 * **edge-runtime:** bust Bun import() cache on function redeploy ([fae6e90](https://github.com/zuohuadong/supacloud/commit/fae6e90ea414b38326c553d0751970e0e7386576))
 * **edge-runtime:** use EDGE_RUNTIME_PORT to avoid port conflict with management API ([69b6f44](https://github.com/zuohuadong/supacloud/commit/69b6f448c25e8e57ec68e462ed31ee0b623e5d7b))
 
 
-### 💅 Elegance & Refactoring
+### Elegance & Refactoring
 
 * **edge-runtime:** replace query-param hack with Worker replacement for module invalidation ([777c7d2](https://github.com/zuohuadong/supacloud/commit/777c7d242d9ffb8d78082afbd75f3fcaf0553a16))
 
 ## [0.2.0](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.1.1...edge-runtime-v0.2.0) (2026-04-14)
 
 
-### 🚀 Features
+### Features
 
 * add Signed URLs, TUS resumable upload, and Edge Functions SDK compatibility ([cdaeca1](https://github.com/zuohuadong/supacloud/commit/cdaeca12094796ac92f38114cf23b6728e63a057))
 * **api:** complete architecture hardening and Elysia schema validation implementation ([5d93b9a](https://github.com/zuohuadong/supacloud/commit/5d93b9ad1303efda36a3069e208096c5187f70ed))
@@ -201,7 +201,7 @@
 * **supacloud:** UI/UX optimization, CORS resolution, and AI agent breadcrumbs ([def0c30](https://github.com/zuohuadong/supacloud/commit/def0c30fe63502a6717a760f19d98c0962ba76ab))
 
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 * **auth,infra:** 401 pre-flight and all-in-one local docker ([b7fb005](https://github.com/zuohuadong/supacloud/commit/b7fb00575e04cfec3a46df4209e214c6016f0bea))
 * **edge-runtime:** add missing jose dependency ([67e75fb](https://github.com/zuohuadong/supacloud/commit/67e75fb40be325ec93f72c9fa8b5c4aa302946e8))
@@ -216,12 +216,12 @@
 * **gw:** route mcp over native gateway internally, bump dep ([19084ea](https://github.com/zuohuadong/supacloud/commit/19084ea79c9e2a18f0548c2d9d45ffa7fcaa6af7))
 
 
-### 💅 Elegance & Refactoring
+### Elegance & Refactoring
 
 * remove legacy supabase-vector/auth container deps, fix ASSETS null guard ([4bb0323](https://github.com/zuohuadong/supacloud/commit/4bb032334fea13bc09eb99042100c14d6bab1ba9))
 
 
-### 🔧 Miscellaneous Chores
+### Miscellaneous Chores
 
 * better jwt error logging ([7d9e862](https://github.com/zuohuadong/supacloud/commit/7d9e862f435e93281c4ae35ca4b21241c52eb5e4))
 * flush remaining test suite fixes and project modifications ([b678a77](https://github.com/zuohuadong/supacloud/commit/b678a77bf72e4bcaf75f9963153f8802ec0d869e))

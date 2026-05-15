@@ -84,28 +84,28 @@
 ## [0.9.4](https://github.com/zuohuadong/supacloud/compare/web-console-v0.9.3...web-console-v0.9.4) (2026-05-11)
 
 
-### 📝 Documentation
+### Documentation
 
 * refresh hardening and runtime notes ([d5eba46](https://github.com/zuohuadong/supacloud/commit/d5eba460190d41ec1c938441fa28e62aac19be03))
 
 ## [0.9.3](https://github.com/zuohuadong/supacloud/compare/web-console-v0.9.2...web-console-v0.9.3) (2026-05-10)
 
 
-### ⚡ Performance Improvements
+### Performance Improvements
 
 * reduce management hot path load ([e5f4c82](https://github.com/zuohuadong/supacloud/commit/e5f4c82f58cb1d515c9c6f94d77fe8032ecdbe26))
 
 ## [0.9.2](https://github.com/zuohuadong/supacloud/compare/web-console-v0.9.1...web-console-v0.9.2) (2026-05-08)
 
 
-### 📝 Documentation
+### Documentation
 
 * **web-console:** add lucide dependency changelog entry ([d048be4](https://github.com/zuohuadong/supacloud/commit/d048be4194978b2511da5ffbd4725ed6b249a041))
 
 ## [0.9.1](https://github.com/zuohuadong/supacloud/compare/web-console-v0.9.0...web-console-v0.9.1) (2026-05-08)
 
 
-### 🔧 Miscellaneous Chores
+### Miscellaneous Chores
 
 * **deps-dev:** bump vite from 8.0.3 to 8.0.11 in /packages/web-console ([#87](https://github.com/zuohuadong/supacloud/issues/87)) ([86a3c6c](https://github.com/zuohuadong/supacloud/commit/86a3c6ce6ff0015a1c844cdcd2e1a71286c0f36a))
 * **deps:** bump @svadmin/core in /packages/web-console ([#90](https://github.com/zuohuadong/supacloud/issues/90)) ([b216a3c](https://github.com/zuohuadong/supacloud/commit/b216a3c2cf01f98fdfe3b8c3da43d4b164ae0929))
@@ -116,28 +116,28 @@
 ## [0.9.0](https://github.com/zuohuadong/supacloud/compare/web-console-v0.8.5...web-console-v0.9.0) (2026-05-08)
 
 
-### 🚀 Features
+### Features
 
 * **gateway:** manage certificates through Kong ([3d5930f](https://github.com/zuohuadong/supacloud/commit/3d5930fb5eb78ed32fb96b06d0f824446504ae22))
 
 ## [0.8.5](https://github.com/zuohuadong/supacloud/compare/web-console-v0.8.4...web-console-v0.8.5) (2026-04-27)
 
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 * **database:** consume sql rows response only ([75c3f68](https://github.com/zuohuadong/supacloud/commit/75c3f6818211cf326954cb75c530ef25e48b901b))
 
 ## [0.8.4](https://github.com/zuohuadong/supacloud/compare/web-console-v0.8.3...web-console-v0.8.4) (2026-04-24)
 
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 * harden realtime tasks and data-plane boundaries ([f6bdfd1](https://github.com/zuohuadong/supacloud/commit/f6bdfd1b92d501507e27ad6ed73ecd3b46cc3e97))
 
 ## [0.8.3](https://github.com/zuohuadong/supacloud/compare/web-console-v0.8.2...web-console-v0.8.3) (2026-04-23)
 
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 * **web-console:** allow editing project routing domains ([7ea7eb7](https://github.com/zuohuadong/supacloud/commit/7ea7eb7b28168a329fdc2a9a936d06654579aa48))
 * **web-console:** restore settings and task management UI ([3f7ef75](https://github.com/zuohuadong/supacloud/commit/3f7ef756f3e151a9678f998d8e638f324ab7f77a))
@@ -145,7 +145,7 @@
 ## [0.8.2](https://github.com/zuohuadong/supacloud/compare/web-console-v0.8.1...web-console-v0.8.2) (2026-04-19)
 
 
-### 🔧 Miscellaneous Chores
+### Miscellaneous Chores
 
 * release main ([239aea7](https://github.com/zuohuadong/supacloud/commit/239aea7e22bae05cc3c7840bc6c0fd7b322a8862))
 * release main ([8d020be](https://github.com/zuohuadong/supacloud/commit/8d020be4e8d374f0cf0498a97e4beb6a88e57fb0))
@@ -153,14 +153,14 @@
 ## [0.8.1](https://github.com/zuohuadong/supacloud/compare/web-console-v0.8.0...web-console-v0.8.1) (2026-04-19)
 
 
-### 🔧 Miscellaneous Chores
+### Miscellaneous Chores
 
 * **ts:** finish TypeScript 6 typecheck migration ([5e2ae90](https://github.com/zuohuadong/supacloud/commit/5e2ae9024cf356eb6892402a62bf4036b8ad00dc))
 
 ## [0.8.0](https://github.com/zuohuadong/supacloud/compare/web-console-v0.7.0...web-console-v0.8.0) (2026-04-17)
 
 
-### 🚀 Features
+### Features
 
 * **tasks:** deploy background task and message queue features to servers ([e66cdac](https://github.com/zuohuadong/supacloud/commit/e66cdac9c34f34990de5675ca75bfca9894cc3b4))
 * updates and fixes based on recent local changes ([449c710](https://github.com/zuohuadong/supacloud/commit/449c71089721658d25737ac7df1c196b3bc9bb1d))
@@ -168,7 +168,7 @@
 ## [0.7.0](https://github.com/zuohuadong/supacloud/compare/web-console-v0.6.2...web-console-v0.7.0) (2026-04-14)
 
 
-### 🚀 Features
+### Features
 
 * add MCP settings page in Web Console platform sidebar ([150a7b0](https://github.com/zuohuadong/supacloud/commit/150a7b051b026aa4ea85827cdb8790a7660ce619))
 * **api:** complete architecture hardening and Elysia schema validation implementation ([5d93b9a](https://github.com/zuohuadong/supacloud/commit/5d93b9ad1303efda36a3069e208096c5187f70ed))
@@ -186,10 +186,10 @@
 * **v0.5.1:** add provider toggle switch, ignore .claude/.agents ([b89f4c9](https://github.com/zuohuadong/supacloud/commit/b89f4c976d6483ea32d6d6cadfdc82a8cbb60751))
 * **web-console:** integrate ChatDialog AI assistant globally ([1d7abbf](https://github.com/zuohuadong/supacloud/commit/1d7abbf5b8c93c6bd429be3978927b681cd3bc8c))
 * **web-console:** integrate realtime health, custom domains and oauth panels ([b316f93](https://github.com/zuohuadong/supacloud/commit/b316f938906863fa7563e33ebe92d1ee656c006a))
-* **web-console:** rewrite home page — real API data, solid icons, system status panel, quick actions ([04fd67f](https://github.com/zuohuadong/supacloud/commit/04fd67fa7168afbc2ef258fa5cf9fa52405afc5a))
+* **web-console:** rewrite home page - real API data, solid icons, system status panel, quick actions ([04fd67f](https://github.com/zuohuadong/supacloud/commit/04fd67fa7168afbc2ef258fa5cf9fa52405afc5a))
 
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 * **auth,infra:** 401 pre-flight and all-in-one local docker ([b7fb005](https://github.com/zuohuadong/supacloud/commit/b7fb00575e04cfec3a46df4209e214c6016f0bea))
 * repair 2 failing getProjectHealth tests, fix providers page undefined variable, bump v0.5.2 ([c3883a5](https://github.com/zuohuadong/supacloud/commit/c3883a5a67e85340de081b130d8dd9940fc9322f))
@@ -209,23 +209,23 @@
 * **web-console:** restore original custom Sidebar and layout shell while retaining svadmin data provider pipelines ([2b1b1ea](https://github.com/zuohuadong/supacloud/commit/2b1b1eaa19bb6875c3d172dc8219e8e64b70dc76))
 
 
-### 💅 Elegance & Refactoring
+### Elegance & Refactoring
 
 * **auth:** use GoTrue magic link verification for miniprogram and upgrade edge fn syntax ([75c7dfd](https://github.com/zuohuadong/supacloud/commit/75c7dfd272ee2c9ca4f638a8493596c20a4ae4bf))
-* eliminate technical debt — split projects.ts, centralize env vars, remove all any types ([13500d1](https://github.com/zuohuadong/supacloud/commit/13500d172805cfe3af14dac3f250de3550a8b7b0))
+* eliminate technical debt - split projects.ts, centralize env vars, remove all any types ([13500d1](https://github.com/zuohuadong/supacloud/commit/13500d172805cfe3af14dac3f250de3550a8b7b0))
 * simplify AutoTable with columns map definition ([a6a40f8](https://github.com/zuohuadong/supacloud/commit/a6a40f8a2b2f26384f27a225886fe8939b340c2f))
 * **web-console:** complete svadmin migration with functions, secrets, and hosting lists ([4e5ef12](https://github.com/zuohuadong/supacloud/commit/4e5ef12c921bc6ad2fad275e92dcc53c2af125de))
 * **web-console:** finalize AutoTable hybrid migration for auth and tables pages ([209608b](https://github.com/zuohuadong/supacloud/commit/209608b1f53e2cefb3f1b39dd33614c70b83ab34))
 * **web-console:** finalize svadmin migration for all previously modified and untracked components ([d9ff5ba](https://github.com/zuohuadong/supacloud/commit/d9ff5ba8585ce08e8a614c43c2ee36a806a6453e))
 
 
-### 📝 Documentation
+### Documentation
 
 * document SVAdmin Hybrid Mount architecture and useList patterns ([ca5435d](https://github.com/zuohuadong/supacloud/commit/ca5435d7df15aa014f8df927c2ea1b62c701afca))
 * **web-console:** add pure SPA architecture annotations and adapter-static compatibility instructions ([1d2fc73](https://github.com/zuohuadong/supacloud/commit/1d2fc73d2c0ea822dbbbbe6d2b2a9abb9d09c76c))
 
 
-### 🔧 Miscellaneous Chores
+### Miscellaneous Chores
 
 * **deps:** update [@svadmin](https://github.com/svadmin) components to latest versions in console and api ([0d30e5b](https://github.com/zuohuadong/supacloud/commit/0d30e5b73b63875bd9f5763a2a17ff1c5487e774))
 * flush remaining test suite fixes and project modifications ([b678a77](https://github.com/zuohuadong/supacloud/commit/b678a77bf72e4bcaf75f9963153f8802ec0d869e))
