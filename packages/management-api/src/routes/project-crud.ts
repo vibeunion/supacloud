@@ -8,7 +8,7 @@ import { projectService } from "../services";
 import { getProjectDb, resolveDbName, resolveRoleName } from "../db";
 import { normalizeProjectConfig } from "../utils/project-config";
 import { getAuthContext, requireAdminAuth, requireProjectOrAdminAuth } from "../middleware/auth";
-import { tenantRuntimeService, type PostgrestRuntimeStatus } from "../services/tenant-runtime.service";
+import { tenantRuntimeService } from "../services/tenant-runtime.service";
 
 // Available regions list
 const AVAILABLE_REGIONS = [
@@ -128,31 +128,6 @@ function mapStatus(rawStatus: string | undefined): string {
   return rawStatus.toUpperCase();
 }
 
-function mapPostgrestStatus(runtime: PostgrestRuntimeStatus): string {
-  if (runtime.health === "healthy") return "ACTIVE_HEALTHY";
-  if (runtime.actual === "stopped") return "INACTIVE";
-  return "UNHEALTHY";
-}
-
-function buildPostgrestService(ref: string, runtime: PostgrestRuntimeStatus) {
-  const status = mapPostgrestStatus(runtime);
-  return {
-    id: "postgrest",
-    name: "PostgREST",
-    status,
-    healthy: status === "ACTIVE_HEALTHY",
-    service_host_ids: [`${ref}-postgrest`],
-    desired_state: runtime.desired,
-    actual_state: runtime.actual,
-    health: runtime.health,
-    port: runtime.port,
-    unit: runtime.unit,
-    last_error: runtime.last_error,
-    updated_at: runtime.updated_at,
-    last_reconciled_at: runtime.last_reconciled_at,
-  };
-}
-
 async function buildProjectResponse(
   project: any,
   detailed = false,
@@ -207,87 +182,7 @@ async function buildProjectResponse(
     connectionCount = connectionResult[0]?.count || 0;
   } catch {}
 
-  const checkServiceStatus = async (serviceName: string): Promise<string> => {
-    try {
-      const result =
-        await Bun.$`systemctl is-active ${serviceName} 2>/dev/null || echo "inactive"`.quiet();
-      const s = result.text().trim();
-      return s === "active" ? "ACTIVE_HEALTHY" : "INACTIVE";
-    } catch {
-      return "INACTIVE";
-    }
-  };
-
-  const serviceStatuses = await Promise.all([
-    checkServiceStatus("patroni").then((s) => ({
-      id: "postgresql",
-      name: "PostgreSQL",
-      status: s,
-      healthy: s === "ACTIVE_HEALTHY",
-      service_host_ids: [`${ref}-postgresql`],
-    })),
-    tenantRuntimeService.statusPostgrest(ref)
-      .then((runtime) => buildPostgrestService(ref, runtime))
-      .catch(() => ({
-        id: "postgrest",
-        name: "PostgREST",
-        status: "UNHEALTHY",
-        healthy: false,
-        service_host_ids: [`${ref}-postgrest`],
-      })),
-    checkServiceStatus(`supacloud-gotrue@${ref}`).then((s) => ({
-      id: "gotrue",
-      name: "GoTrue",
-      status: s,
-      healthy: s === "ACTIVE_HEALTHY",
-      service_host_ids: [`${ref}-gotrue`],
-    })),
-    checkServiceStatus("supacloud-realtime")
-      .then((s) => ({
-        id: "realtime",
-        name: "Realtime",
-        status: s,
-        healthy: s === "ACTIVE_HEALTHY",
-        service_host_ids: [`${ref}-realtime`],
-      }))
-      .catch(() => ({
-        id: "realtime",
-        name: "Realtime",
-        status: "INACTIVE",
-        healthy: false,
-        service_host_ids: [`${ref}-realtime`],
-      })),
-    checkServiceStatus(`supacloud-storage@${ref}`)
-      .then((s) => ({
-        id: "storage",
-        name: "Storage",
-        status: s,
-        healthy: s === "ACTIVE_HEALTHY",
-        service_host_ids: [`${ref}-storage`],
-      }))
-      .catch(() => ({
-        id: "storage",
-        name: "Storage",
-        status: "INACTIVE",
-        healthy: false,
-        service_host_ids: [`${ref}-storage`],
-      })),
-    checkServiceStatus("kong")
-      .then((s) => ({
-        id: "kong",
-        name: "Kong",
-        status: s,
-        healthy: s === "ACTIVE_HEALTHY",
-        service_host_ids: [`${ref}-kong`],
-      }))
-      .catch(() => ({
-        id: "kong",
-        name: "Kong",
-        status: "INACTIVE",
-        healthy: false,
-        service_host_ids: [`${ref}-kong`],
-      })),
-  ]);
+  const serviceStatuses = await tenantRuntimeService.getProjectServiceStatuses(ref, "detail");
 
   return {
     ...base,

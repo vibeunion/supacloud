@@ -430,7 +430,7 @@ Each project keeps a dedicated PostgREST unit, but Management API now treats it 
 - `GET /v1/projects/:ref/services/postgrest/status`
 - `POST /v1/projects/:ref/services/postgrest/start|stop|restart|pause|resume`
 
-The desired state is stored on the project config, and the runtime reconcile worker keeps actual systemd state aligned with it. This is explicit lifecycle management, not idle auto-shrinking, so request-path performance stays unchanged.
+The desired state is stored in dedicated project metadata columns (`postgrest_desired`, `postgrest_actual`, `postgrest_health`, and related timestamps), and the runtime reconcile worker keeps actual systemd state aligned with it. This is explicit lifecycle management, not idle auto-shrinking, so request-path performance stays unchanged.
 
 | Feature | Current Bun Runtime |
 |---------|---------------------|
@@ -920,7 +920,7 @@ bun run realtime:reconcile-schema
 - `GET /v1/projects/:ref/services/postgrest/status`
 - `POST /v1/projects/:ref/services/postgrest/start|stop|restart|pause|resume`
 
-desired state 保存在项目配置里，runtime reconcile worker 会把实际 systemd 状态对齐到它。这里是显式生命周期管理，不做空闲自动收缩，所以请求路径性能不变。
+desired state 保存在项目专用元数据列里（`postgrest_desired`、`postgrest_actual`、`postgrest_health` 及相关时间戳），runtime reconcile worker 会把实际 systemd 状态对齐到它。这里是显式生命周期管理，不做空闲自动收缩，所以请求路径性能不变。
 
 #### CLI 入口
 

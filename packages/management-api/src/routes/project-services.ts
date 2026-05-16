@@ -6,33 +6,7 @@ import { Elysia, t, status } from "elysia";
 import { projectService } from "../services";
 import { getAuthContext, requireProjectOrAdminAuth } from "../middleware/auth";
 import { $ } from "bun";
-import { tenantRuntimeService, type PostgrestRuntimeStatus } from "../services/tenant-runtime.service";
-
-function mapPostgrestStatus(runtime: PostgrestRuntimeStatus): string {
-  if (runtime.health === "healthy") return "ACTIVE_HEALTHY";
-  if (runtime.actual === "stopped") return "INACTIVE";
-  return "UNHEALTHY";
-}
-
-function toPostgrestServiceEntry(ref: string, runtime: PostgrestRuntimeStatus) {
-  const mappedStatus = mapPostgrestStatus(runtime);
-  return {
-    id: "rest",
-    name: "rest",
-    status: mappedStatus,
-    healthy: mappedStatus === "ACTIVE_HEALTHY",
-    service_host_ids: [`${ref}-rest`],
-    component: "postgrest",
-    desired_state: runtime.desired,
-    actual_state: runtime.actual,
-    health: runtime.health,
-    port: runtime.port,
-    unit: runtime.unit,
-    last_error: runtime.last_error,
-    updated_at: runtime.updated_at,
-    last_reconciled_at: runtime.last_reconciled_at,
-  };
-}
+import { tenantRuntimeService } from "../services/tenant-runtime.service";
 
 export const projectServiceRoutes = new Elysia({ prefix: "/v1/projects" })
   // Get project health status
@@ -191,49 +165,7 @@ export const projectServiceRoutes = new Elysia({ prefix: "/v1/projects" })
         return status(404, { message: "Project not found" });
       }
 
-      const ref = params.ref;
-
-      // Check each service via systemctl (fails gracefully in CI/non-systemd environments)
-      const checkService = async (unitName: string): Promise<string> => {
-        try {
-          const result = await $`systemctl is-active ${unitName} 2>/dev/null`
-            .nothrow()
-            .quiet();
-          return result.exitCode === 0 ? "ACTIVE_HEALTHY" : "INACTIVE";
-        } catch {
-          return "INACTIVE";
-        }
-      };
-
-      const [db, pgrst, gotrue, realtime, storage] = await Promise.allSettled([
-        checkService("patroni"),
-        tenantRuntimeService.statusPostgrest(ref),
-        checkService(`supacloud-gotrue@${ref}`),
-        checkService("supacloud-realtime"),
-        checkService(`supacloud-storage@${ref}`),
-      ]);
-
-      const getResult = (r: PromiseSettledResult<string>): string =>
-        r.status === "fulfilled" ? r.value : "INACTIVE";
-      const postgrestService =
-        pgrst.status === "fulfilled"
-          ? toPostgrestServiceEntry(ref, pgrst.value)
-          : {
-              id: "rest",
-              name: "rest",
-              status: "UNHEALTHY",
-              healthy: false,
-              service_host_ids: [`${ref}-rest`],
-              component: "postgrest",
-            };
-
-      return [
-        { id: "db", name: "db", status: getResult(db) === "ACTIVE_HEALTHY" ? "ACTIVE_HEALTHY" : "UNHEALTHY", healthy: getResult(db) === "ACTIVE_HEALTHY", service_host_ids: [`${ref}-db`] },
-        postgrestService,
-        { id: "auth", name: "auth", status: getResult(gotrue) === "ACTIVE_HEALTHY" ? "ACTIVE_HEALTHY" : "UNHEALTHY", healthy: getResult(gotrue) === "ACTIVE_HEALTHY", service_host_ids: [`${ref}-auth`] },
-        { id: "realtime", name: "realtime", status: getResult(realtime) === "ACTIVE_HEALTHY" ? "ACTIVE_HEALTHY" : "UNHEALTHY", healthy: getResult(realtime) === "ACTIVE_HEALTHY", service_host_ids: [`${ref}-realtime`] },
-        { id: "storage", name: "storage", status: getResult(storage) === "ACTIVE_HEALTHY" ? "ACTIVE_HEALTHY" : "UNHEALTHY", healthy: getResult(storage) === "ACTIVE_HEALTHY", service_host_ids: [`${ref}-storage`] },
-      ];
+      return tenantRuntimeService.getProjectServiceStatuses(params.ref, "studio");
     },
     {
       params: t.Object({ ref: t.String() }),

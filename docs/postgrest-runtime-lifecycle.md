@@ -10,23 +10,17 @@ This keeps request-path performance unchanged:
 
 ## State Model
 
-PostgREST desired and observed state is stored on the project record:
+PostgREST desired and observed state is stored as dedicated metadata columns on the project record, not inside the JSON project config:
 
-```json
-{
-  "runtime": {
-    "postgrest": {
-      "desired": "running",
-      "actual": "running",
-      "health": "healthy",
-      "port": 3101,
-      "last_error": null,
-      "updated_at": "2026-05-16T00:00:00.000Z",
-      "last_reconciled_at": "2026-05-16T00:00:00.000Z"
-    }
-  }
-}
-```
+| Column | Example |
+|--------|---------|
+| `postgrest_desired` | `running` |
+| `postgrest_actual` | `running` |
+| `postgrest_health` | `healthy` |
+| `postgrest_port` | `3101` |
+| `postgrest_last_error` | `null` |
+| `postgrest_updated_at` | `2026-05-16T00:00:00.000Z` |
+| `postgrest_last_reconciled_at` | `2026-05-16T00:00:00.000Z` |
 
 Valid desired states:
 

@@ -177,7 +177,7 @@ Kong dynamically validates JWT keys for different projects based on `Host` Heade
 - Storage signed upload URLs are one-time tokens. The Management API atomically consumes each token with delete-and-return semantics before accepting the upload body.
 - Storage object size metadata is cast defensively; non-numeric `metadata->>'size'` values are treated as zero for dashboard and list calculations.
 - Storage metadata writes can register a physical compensation action, allowing the service to remove newly copied/uploaded objects if the metadata transaction fails after the physical write.
-- PostgREST desired state is stored on the project config and reconciled against systemd actual state. The first version is explicit lifecycle management only; it does not idle-pause active projects, so REST request-path performance is unchanged.
+- PostgREST desired state is stored in dedicated project runtime columns and reconciled against systemd actual state. The first version is explicit lifecycle management only; it does not idle-pause active projects, so REST request-path performance is unchanged.
 
 ### 4.3 Request/Response Examples
 

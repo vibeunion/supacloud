@@ -424,6 +424,13 @@ export interface Project {
   s3_secret_key: string | null;
   region: string;
   status: ProjectStatus;
+  postgrest_desired: string | null;
+  postgrest_actual: string | null;
+  postgrest_health: string | null;
+  postgrest_port: number | null;
+  postgrest_last_error: string | null;
+  postgrest_updated_at: Date | string | null;
+  postgrest_last_reconciled_at: Date | string | null;
   config: Record<string, unknown>;
   created_at: Date;
   updated_at: Date;

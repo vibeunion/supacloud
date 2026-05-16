@@ -46,6 +46,13 @@ export async function initDatabase() {
       s3_secret_key VARCHAR(100),
       region VARCHAR(50) DEFAULT 'local',
       status VARCHAR(20) DEFAULT 'creating',
+      postgrest_desired VARCHAR(20),
+      postgrest_actual VARCHAR(20),
+      postgrest_health VARCHAR(20),
+      postgrest_port INTEGER,
+      postgrest_last_error TEXT,
+      postgrest_updated_at TIMESTAMPTZ,
+      postgrest_last_reconciled_at TIMESTAMPTZ,
       config JSONB DEFAULT '{}',
       created_at TIMESTAMPTZ DEFAULT NOW(),
       updated_at TIMESTAMPTZ DEFAULT NOW(),
@@ -239,6 +246,13 @@ export async function initDatabase() {
       { statement: 'ALTER TABLE projects ADD COLUMN IF NOT EXISTS jwt_secret_encrypted TEXT', description: "projects.jwt_secret_encrypted" },
       { statement: 'ALTER TABLE projects ADD COLUMN IF NOT EXISTS service_role_key_encrypted TEXT', description: "projects.service_role_key_encrypted" },
       { statement: 'ALTER TABLE projects ADD COLUMN IF NOT EXISTS s3_secret_key_encrypted TEXT', description: "projects.s3_secret_key_encrypted" },
+      { statement: 'ALTER TABLE projects ADD COLUMN IF NOT EXISTS postgrest_desired VARCHAR(20)', description: "projects.postgrest_desired" },
+      { statement: 'ALTER TABLE projects ADD COLUMN IF NOT EXISTS postgrest_actual VARCHAR(20)', description: "projects.postgrest_actual" },
+      { statement: 'ALTER TABLE projects ADD COLUMN IF NOT EXISTS postgrest_health VARCHAR(20)', description: "projects.postgrest_health" },
+      { statement: 'ALTER TABLE projects ADD COLUMN IF NOT EXISTS postgrest_port INTEGER', description: "projects.postgrest_port" },
+      { statement: 'ALTER TABLE projects ADD COLUMN IF NOT EXISTS postgrest_last_error TEXT', description: "projects.postgrest_last_error" },
+      { statement: 'ALTER TABLE projects ADD COLUMN IF NOT EXISTS postgrest_updated_at TIMESTAMPTZ', description: "projects.postgrest_updated_at" },
+      { statement: 'ALTER TABLE projects ADD COLUMN IF NOT EXISTS postgrest_last_reconciled_at TIMESTAMPTZ', description: "projects.postgrest_last_reconciled_at" },
       {
         statement: `
           CREATE TABLE IF NOT EXISTS audit_logs (

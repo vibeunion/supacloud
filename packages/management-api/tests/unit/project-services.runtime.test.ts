@@ -69,15 +69,54 @@ describe("project service PostgREST runtime controls", () => {
 
   test("lists PostgREST observability fields in project services", async () => {
     const originalGetProject = projectService.getProject;
-    const originalStatusPostgrest = tenantRuntimeService.statusPostgrest;
+    const originalGetProjectServiceStatuses = tenantRuntimeService.getProjectServiceStatuses;
     projectService.getProject = async () => project() as never;
-    tenantRuntimeService.statusPostgrest = async () =>
-      postgrestStatus({
-        desired: "running",
-        actual: "error",
+    tenantRuntimeService.getProjectServiceStatuses = async () => [
+      {
+        id: "db",
+        name: "db",
+        status: "ACTIVE_HEALTHY",
+        healthy: true,
+        service_host_ids: ["proj_1-db"],
+      },
+      {
+        id: "rest",
+        name: "rest",
+        status: "UNHEALTHY",
+        healthy: false,
+        service_host_ids: ["proj_1-rest"],
+        component: "postgrest",
+        desired_state: "running",
+        actual_state: "error",
         health: "unhealthy",
+        port: 3101,
+        unit: "supacloud-pgrst@proj_1",
         last_error: "connect ECONNREFUSED 127.0.0.1:3101",
-      });
+        updated_at: "2026-05-16T00:00:00.000Z",
+        last_reconciled_at: "2026-05-16T00:00:00.000Z",
+      },
+      {
+        id: "auth",
+        name: "auth",
+        status: "ACTIVE_HEALTHY",
+        healthy: true,
+        service_host_ids: ["proj_1-auth"],
+      },
+      {
+        id: "realtime",
+        name: "realtime",
+        status: "ACTIVE_HEALTHY",
+        healthy: true,
+        service_host_ids: ["proj_1-realtime"],
+      },
+      {
+        id: "storage",
+        name: "storage",
+        status: "ACTIVE_HEALTHY",
+        healthy: true,
+        service_host_ids: ["proj_1-storage"],
+      },
+    ] as never;
 
     try {
       const response = await request("/v1/projects/proj_1/services");
@@ -92,7 +131,7 @@ describe("project service PostgREST runtime controls", () => {
       expect(rest.last_error).toContain("ECONNREFUSED");
     } finally {
       projectService.getProject = originalGetProject;
-      tenantRuntimeService.statusPostgrest = originalStatusPostgrest;
+      tenantRuntimeService.getProjectServiceStatuses = originalGetProjectServiceStatuses;
     }
   });
 
