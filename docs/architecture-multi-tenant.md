@@ -36,6 +36,9 @@ We spin up a unique `postgrest` AND `gotrue` process for *every* tenant dynamica
 - They bind to unique deterministically generated ports (e.g., PostgREST starts from 3100, GoTrue starts from 4100).
 - They connect securely to the tenant's isolated Postgres database (`supa_<ref>`) using unique credentials.
 - They possess isolated `JWT_SECRET`s to ensure cryptographic boundary security (users from Tenant A cannot authenticate into Tenant B).
+- PostgREST now has a component-level lifecycle controller in Management API: `pausePostgrest`, `resumePostgrest`, `statusPostgrest`, and `restartPostgrest`.
+- Desired state is stored per project under `projects.config.runtime.postgrest.desired` and is reconciled to actual systemd state in the runtime worker.
+- PostgREST-only lifecycle actions do not restart GoTrue, so REST-only repairs do not disturb authentication traffic.
 
 ### 2. Kong API-Driven Gateway ⭐ Implemented
 Kong runs in **DB-backed mode** (PostgreSQL) as a native systemd service, fully managed via the Kong Admin API:

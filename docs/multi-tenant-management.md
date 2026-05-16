@@ -151,6 +151,11 @@ Kong dynamically validates JWT keys for different projects based on `Host` Heade
 | GET | `/v1/projects/:ref/dashboard/summary` | Cached dashboard aggregate for web console hot path |
 | GET | `/v1/projects/:ref/status` | Get project running status |
 | POST | `/v1/projects/:ref/restart` | Restart project services |
+| GET | `/v1/projects/:ref/services` | List service status, including PostgREST desired/actual state and last error |
+| GET | `/v1/projects/:ref/services/postgrest/status` | Get PostgREST-only runtime status |
+| POST | `/v1/projects/:ref/services/postgrest/start` | Set PostgREST desired state to running and start/repair the unit |
+| POST | `/v1/projects/:ref/services/postgrest/stop` | Set PostgREST desired state to stopped and stop/disable the unit |
+| POST | `/v1/projects/:ref/services/postgrest/restart` | Restart only the PostgREST unit |
 | GET | `/v1/projects/:ref/types/typescript`| Get database TS types (for CLI) |
 | PATCH| `/v1/projects/:ref/config/auth` | Set Auth/OAuth/SMTP providers |
 | GET | `/v1/projects/:ref/secrets` | Control sensitive variables like edge functions |
@@ -172,6 +177,7 @@ Kong dynamically validates JWT keys for different projects based on `Host` Heade
 - Storage signed upload URLs are one-time tokens. The Management API atomically consumes each token with delete-and-return semantics before accepting the upload body.
 - Storage object size metadata is cast defensively; non-numeric `metadata->>'size'` values are treated as zero for dashboard and list calculations.
 - Storage metadata writes can register a physical compensation action, allowing the service to remove newly copied/uploaded objects if the metadata transaction fails after the physical write.
+- PostgREST desired state is stored on the project config and reconciled against systemd actual state. The first version is explicit lifecycle management only; it does not idle-pause active projects, so REST request-path performance is unchanged.
 
 ### 4.3 Request/Response Examples
 

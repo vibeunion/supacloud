@@ -8,6 +8,7 @@ import { projectService } from "../services";
 import { getProjectDb, resolveDbName, resolveRoleName } from "../db";
 import { normalizeProjectConfig } from "../utils/project-config";
 import { getAuthContext, requireAdminAuth, requireProjectOrAdminAuth } from "../middleware/auth";
+import { tenantRuntimeService, type PostgrestRuntimeStatus } from "../services/tenant-runtime.service";
 
 // Available regions list
 const AVAILABLE_REGIONS = [
@@ -127,6 +128,31 @@ function mapStatus(rawStatus: string | undefined): string {
   return rawStatus.toUpperCase();
 }
 
+function mapPostgrestStatus(runtime: PostgrestRuntimeStatus): string {
+  if (runtime.health === "healthy") return "ACTIVE_HEALTHY";
+  if (runtime.actual === "stopped") return "INACTIVE";
+  return "UNHEALTHY";
+}
+
+function buildPostgrestService(ref: string, runtime: PostgrestRuntimeStatus) {
+  const status = mapPostgrestStatus(runtime);
+  return {
+    id: "postgrest",
+    name: "PostgREST",
+    status,
+    healthy: status === "ACTIVE_HEALTHY",
+    service_host_ids: [`${ref}-postgrest`],
+    desired_state: runtime.desired,
+    actual_state: runtime.actual,
+    health: runtime.health,
+    port: runtime.port,
+    unit: runtime.unit,
+    last_error: runtime.last_error,
+    updated_at: runtime.updated_at,
+    last_reconciled_at: runtime.last_reconciled_at,
+  };
+}
+
 async function buildProjectResponse(
   project: any,
   detailed = false,
@@ -200,13 +226,15 @@ async function buildProjectResponse(
       healthy: s === "ACTIVE_HEALTHY",
       service_host_ids: [`${ref}-postgresql`],
     })),
-    checkServiceStatus(`supacloud-pgrst@${ref}`).then((s) => ({
-      id: "postgrest",
-      name: "PostgREST",
-      status: s,
-      healthy: s === "ACTIVE_HEALTHY",
-      service_host_ids: [`${ref}-postgrest`],
-    })),
+    tenantRuntimeService.statusPostgrest(ref)
+      .then((runtime) => buildPostgrestService(ref, runtime))
+      .catch(() => ({
+        id: "postgrest",
+        name: "PostgREST",
+        status: "UNHEALTHY",
+        healthy: false,
+        service_host_ids: [`${ref}-postgrest`],
+      })),
     checkServiceStatus(`supacloud-gotrue@${ref}`).then((s) => ({
       id: "gotrue",
       name: "GoTrue",

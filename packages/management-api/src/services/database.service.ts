@@ -616,6 +616,70 @@ export class DatabaseService {
     }
   }
 
+  async pausePostgrest(
+    projectRef: string,
+  ): Promise<{ success: boolean; output: string; error?: string }> {
+    const { tenantRuntimeService } = await import("./tenant-runtime.service");
+    try {
+      const status = await tenantRuntimeService.pausePostgrest(projectRef);
+      return { success: status.actual !== "error", output: JSON.stringify(status) };
+    } catch (error: unknown) {
+      return {
+        success: false,
+        output: "",
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+
+  async resumePostgrest(
+    projectRef: string,
+  ): Promise<{ success: boolean; output: string; error?: string }> {
+    const { tenantRuntimeService } = await import("./tenant-runtime.service");
+    try {
+      const status = await tenantRuntimeService.resumePostgrest(projectRef);
+      return { success: status.actual !== "error", output: JSON.stringify(status) };
+    } catch (error: unknown) {
+      return {
+        success: false,
+        output: "",
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+
+  async restartPostgrest(
+    projectRef: string,
+  ): Promise<{ success: boolean; output: string; error?: string }> {
+    const { tenantRuntimeService } = await import("./tenant-runtime.service");
+    try {
+      const status = await tenantRuntimeService.restartPostgrest(projectRef);
+      return { success: status.actual !== "error", output: JSON.stringify(status) };
+    } catch (error: unknown) {
+      return {
+        success: false,
+        output: "",
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+
+  async getPostgrestStatus(
+    projectRef: string,
+  ): Promise<{ success: boolean; output: string; error?: string }> {
+    const { tenantRuntimeService } = await import("./tenant-runtime.service");
+    try {
+      const status = await tenantRuntimeService.statusPostgrest(projectRef);
+      return { success: true, output: JSON.stringify(status) };
+    } catch (error: unknown) {
+      return {
+        success: false,
+        output: "",
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+
   async getRuntimePort(projectRef: string): Promise<string> {
     const { tenantRuntimeService } = await import("./tenant-runtime.service");
     try {

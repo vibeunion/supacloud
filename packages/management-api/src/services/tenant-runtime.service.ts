@@ -27,6 +27,20 @@ export interface RuntimeStatus {
     health: "healthy" | "degraded" | "unhealthy" | "unknown";
 }
 
+export type RuntimeDesiredState = "running" | "stopped";
+
+export interface PostgrestRuntimeStatus {
+    component: "postgrest";
+    desired: RuntimeDesiredState;
+    actual: RuntimeStatus["status"];
+    port: number;
+    unit: string;
+    health: "healthy" | "unhealthy" | "unknown";
+    last_error: string | null;
+    updated_at: string | null;
+    last_reconciled_at: string | null;
+}
+
 class TenantRuntimeService {
     private readonly TENANT_CONFIG_DIR = config.tenantConfigDir;
     private readonly POSTGREST_BIN = config.postgrestBin;
@@ -138,8 +152,7 @@ class TenantRuntimeService {
      * Ensure binaries exist at their configured paths.
      * PostgREST and GoTrue must be pre-installed — no container fallback.
      */
-    private async ensureBinaries() {
-        // Check PostgREST binary
+    private async ensurePostgrestBinary() {
         const pgrstCheck = await $`which postgrest`.nothrow().quiet();
         const hasPgrstBin = await Bun.file(this.POSTGREST_BIN).exists();
 
@@ -149,8 +162,9 @@ class TenantRuntimeService {
                 `Install it manually: curl -L https://github.com/PostgREST/postgrest/releases/latest -o ${this.POSTGREST_BIN} && chmod +x ${this.POSTGREST_BIN}`
             );
         }
+    }
 
-        // Check GoTrue binary
+    private async ensureGotrueBinary() {
         const gotrueCheck = await $`which gotrue`.nothrow().quiet();
         const hasGotrueBin = await Bun.file(this.GOTRUE_BIN).exists();
 
@@ -160,6 +174,11 @@ class TenantRuntimeService {
                 `Install it manually: curl -L https://github.com/supabase/gotrue/releases/latest -o ${this.GOTRUE_BIN} && chmod +x ${this.GOTRUE_BIN}`
             );
         }
+    }
+
+    private async ensureBinaries() {
+        await this.ensurePostgrestBinary();
+        await this.ensureGotrueBinary();
     }
 
     private async generateTenantConfig(ref: string, pgrstPort: number, gotruePort: number) {
@@ -369,7 +388,7 @@ WantedBy=multi-user.target
             await Bun.write(gotrueUnitPath, gotrueUnit);
         }
 
-        if (!pgrstExists || !gotrueExists) {
+        if (shouldWritePgrstUnit || !gotrueExists) {
             await $`systemctl daemon-reload`.nothrow().quiet();
             logger.info("systemd template units installed");
         }
@@ -623,12 +642,28 @@ ON CONFLICT DO NOTHING;
             }
 
             if (pgrstOk && gotrueOk) {
+                await this.updatePostgrestRuntimeConfig(ref, {
+                    desired: "running",
+                    actual: "running",
+                    health: "healthy",
+                    port: pgrstPort,
+                    last_error: null,
+                    updated_at: new Date().toISOString(),
+                });
                 return { status: "running", port: pgrstPort, gotruePort, health: "healthy" };
             }
             await Bun.sleep(1000);
         }
 
         logger.warn("WARNING: Health check timeout, some services may still be starting");
+        await this.updatePostgrestRuntimeConfig(ref, {
+            desired: "running",
+            actual: pgrstOk ? "running" : "starting",
+            health: pgrstOk ? "healthy" : "unhealthy",
+            port: pgrstPort,
+            last_error: pgrstOk ? null : "PostgREST health check timeout during runtime start",
+            updated_at: new Date().toISOString(),
+        });
         return { status: "starting", port: pgrstPort, gotruePort, health: "degraded" };
     }
 
@@ -650,8 +685,182 @@ ON CONFLICT DO NOTHING;
         if (await gotrueEnvFile.exists()) await fs.unlink(gotrueEnvFile.name!);
     }
 
+    private getRuntimeControlConfig(configValue: unknown): Record<string, unknown> {
+        const projectConfig = normalizeProjectConfig(configValue);
+        const runtime = (projectConfig.runtime || {}) as Record<string, unknown>;
+        const postgrest = (runtime.postgrest || {}) as Record<string, unknown>;
+        return postgrest;
+    }
+
+    private getPostgrestDesiredState(project: { status?: unknown; config?: unknown }): RuntimeDesiredState {
+        const runtimeConfig = this.getRuntimeControlConfig(project.config);
+        if (runtimeConfig.desired === "running" || runtimeConfig.desired === "stopped") {
+            return runtimeConfig.desired;
+        }
+        return String(project.status || "").toLowerCase() === "active" ? "running" : "stopped";
+    }
+
+    private async updatePostgrestRuntimeConfig(ref: string, patch: Record<string, unknown>): Promise<void> {
+        await metaSql`
+          UPDATE projects
+          SET config = jsonb_set(
+            jsonb_set(
+              COALESCE(config, '{}'::jsonb),
+              '{runtime}',
+              COALESCE(config->'runtime', '{}'::jsonb),
+              true
+            ),
+            '{runtime,postgrest}',
+            COALESCE(config #> '{runtime,postgrest}', '{}'::jsonb) || ${JSON.stringify(patch)}::jsonb,
+            true
+          ),
+          updated_at = NOW()
+          WHERE ref = ${ref} AND deleted_at IS NULL
+        `;
+    }
+
+    private async readPostgrestRuntimeStatus(ref: string): Promise<PostgrestRuntimeStatus> {
+        const [project] = await metaSql`
+          SELECT config, status, updated_at
+          FROM projects
+          WHERE ref = ${ref} AND deleted_at IS NULL
+          LIMIT 1
+        `;
+
+        const runtimeConfig = this.getRuntimeControlConfig(project?.config);
+        const desired = this.getPostgrestDesiredState({
+            status: project?.status,
+            config: project?.config,
+        });
+        const unit = `supacloud-pgrst@${ref}`;
+        const port = await this.getTenantPort(ref, "pgrst");
+        const active = (await $`systemctl is-active ${unit}`.nothrow().quiet()).exitCode === 0;
+        let actual: RuntimeStatus["status"] = active ? "running" : "stopped";
+        let health: PostgrestRuntimeStatus["health"] = "unknown";
+        let observedError = typeof runtimeConfig.last_error === "string" ? runtimeConfig.last_error : null;
+
+        if (active) {
+            try {
+                const res = await fetch(`http://127.0.0.1:${port}/`);
+                if (res.ok) {
+                    health = "healthy";
+                    observedError = null;
+                } else {
+                    health = "unhealthy";
+                    actual = "error";
+                    observedError = `PostgREST health check failed with HTTP ${res.status}`;
+                    await this.updatePostgrestRuntimeConfig(ref, {
+                        last_error: observedError,
+                        actual,
+                        health,
+                        port,
+                        updated_at: new Date().toISOString(),
+                    });
+                }
+            } catch (error: unknown) {
+                health = "unhealthy";
+                actual = "error";
+                observedError = error instanceof Error ? error.message : String(error);
+                await this.updatePostgrestRuntimeConfig(ref, {
+                    last_error: observedError,
+                    actual,
+                    health,
+                    port,
+                    updated_at: new Date().toISOString(),
+                });
+            }
+        }
+
+        return {
+            component: "postgrest",
+            desired,
+            actual,
+            port,
+            unit,
+            health,
+            last_error: observedError,
+            updated_at: typeof runtimeConfig.updated_at === "string"
+                ? runtimeConfig.updated_at
+                : (project?.updated_at ? new Date(project.updated_at).toISOString() : null),
+            last_reconciled_at: typeof runtimeConfig.last_reconciled_at === "string" ? runtimeConfig.last_reconciled_at : null,
+        };
+    }
+
+    private getPostgrestUnit(ref: string): string {
+        return `supacloud-pgrst@${ref}`;
+    }
+
+    private async preparePostgrestRuntime(ref: string): Promise<void> {
+        await this.ensurePostgrestBinary();
+        await this.installSystemdTemplate();
+
+        const pgrstPort = await this.getTenantPort(ref, "pgrst");
+        const gotruePort = await this.getTenantPort(ref, "gotrue");
+        await this.generateTenantConfig(ref, pgrstPort, gotruePort);
+    }
+
+    private async waitForPostgrestHealth(ref: string, attempts = 10, delayMs = 500): Promise<PostgrestRuntimeStatus> {
+        let status = await this.statusPostgrest(ref);
+        for (let tryIdx = 0; tryIdx < attempts && status.health !== "healthy"; tryIdx++) {
+            await Bun.sleep(delayMs);
+            status = await this.statusPostgrest(ref);
+        }
+        return status;
+    }
+
+    private async persistPostgrestObservation(
+        ref: string,
+        status: PostgrestRuntimeStatus,
+        fallbackError: string | null,
+    ): Promise<void> {
+        await this.updatePostgrestRuntimeConfig(ref, {
+            actual: status.actual,
+            health: status.health,
+            port: status.port,
+            last_error: status.health === "healthy" || status.actual === "stopped"
+                ? null
+                : status.last_error || fallbackError,
+            updated_at: new Date().toISOString(),
+        });
+    }
+
+    private async persistPostgrestFailure(ref: string, error: unknown): Promise<void> {
+        const message = error instanceof Error ? error.message : String(error);
+        await this.updatePostgrestRuntimeConfig(ref, {
+            actual: "error",
+            health: "unhealthy",
+            last_error: message,
+            updated_at: new Date().toISOString(),
+        });
+    }
+
+    private async startPreparedPostgrest(ref: string, mode: "restart" | "repair"): Promise<PostgrestRuntimeStatus> {
+        const unit = this.getPostgrestUnit(ref);
+        const active = (await $`systemctl is-active ${unit}`.nothrow().quiet()).exitCode === 0;
+        const shouldRestart = active && (
+            mode === "restart" ||
+            (mode === "repair" && (await this.statusPostgrest(ref)).health !== "healthy")
+        );
+
+        await $`systemctl enable ${unit}`.nothrow().quiet();
+        if (shouldRestart) {
+            await $`systemctl restart ${unit}`.nothrow().quiet();
+        } else if (!active) {
+            await $`systemctl start ${unit}`.nothrow().quiet();
+        }
+
+        return this.waitForPostgrestHealth(ref);
+    }
+
     public async pauseProjectRuntime(ref: string): Promise<void> {
         await this.stopRuntimeUnits(ref);
+        await this.updatePostgrestRuntimeConfig(ref, {
+            desired: "stopped",
+            actual: "stopped",
+            health: "unknown",
+            last_error: null,
+            updated_at: new Date().toISOString(),
+        });
         logger.info(`Runtime paused for ${ref}`);
     }
 
@@ -662,8 +871,82 @@ ON CONFLICT DO NOTHING;
     public async stopRuntime(ref: string): Promise<void> {
         await this.stopRuntimeUnits(ref);
         await this.removeRuntimeConfig(ref);
+        await this.updatePostgrestRuntimeConfig(ref, {
+            desired: "stopped",
+            actual: "stopped",
+            health: "unknown",
+            last_error: null,
+            updated_at: new Date().toISOString(),
+        });
 
         logger.info(`Runtime stopped for ${ref}`);
+    }
+
+    public async pausePostgrest(ref: string): Promise<PostgrestRuntimeStatus> {
+        await this.updatePostgrestRuntimeConfig(ref, {
+            desired: "stopped",
+            updated_at: new Date().toISOString(),
+        });
+
+        const unit = this.getPostgrestUnit(ref);
+        await $`systemctl stop ${unit}`.nothrow().quiet();
+        await $`systemctl disable ${unit}`.nothrow().quiet();
+        const status = await this.statusPostgrest(ref);
+        await this.persistPostgrestObservation(
+            ref,
+            status,
+            "PostgREST did not stop after pause request",
+        );
+        logger.info(`PostgREST paused for ${ref}`);
+        return this.statusPostgrest(ref);
+    }
+
+    public async resumePostgrest(ref: string): Promise<PostgrestRuntimeStatus> {
+        await this.updatePostgrestRuntimeConfig(ref, {
+            desired: "running",
+            updated_at: new Date().toISOString(),
+        });
+
+        try {
+            await this.preparePostgrestRuntime(ref);
+            const status = await this.startPreparedPostgrest(ref, "repair");
+            await this.persistPostgrestObservation(
+                ref,
+                status,
+                "PostgREST health check did not become healthy",
+            );
+            logger.info(`PostgREST resumed for ${ref}`);
+            return this.statusPostgrest(ref);
+        } catch (error: unknown) {
+            await this.persistPostgrestFailure(ref, error);
+            throw error;
+        }
+    }
+
+    public async restartPostgrest(ref: string): Promise<PostgrestRuntimeStatus> {
+        await this.updatePostgrestRuntimeConfig(ref, {
+            desired: "running",
+            updated_at: new Date().toISOString(),
+        });
+
+        try {
+            await this.preparePostgrestRuntime(ref);
+            const status = await this.startPreparedPostgrest(ref, "restart");
+            await this.persistPostgrestObservation(
+                ref,
+                status,
+                "PostgREST health check did not become healthy",
+            );
+            logger.info(`PostgREST restarted for ${ref}`);
+            return this.statusPostgrest(ref);
+        } catch (error: unknown) {
+            await this.persistPostgrestFailure(ref, error);
+            throw error;
+        }
+    }
+
+    public async statusPostgrest(ref: string): Promise<PostgrestRuntimeStatus> {
+        return this.readPostgrestRuntimeStatus(ref);
     }
 
     public async restartRuntime(ref: string): Promise<RuntimeStatus> {
@@ -681,6 +964,15 @@ ON CONFLICT DO NOTHING;
             await $`systemctl restart supacloud-pgrst@${ref}`.nothrow().quiet();
             await $`systemctl restart supacloud-gotrue@${ref}`.nothrow().quiet();
 
+            const postgrestStatus = await this.statusPostgrest(ref);
+            await this.updatePostgrestRuntimeConfig(ref, {
+                desired: "running",
+                actual: postgrestStatus.actual,
+                health: postgrestStatus.health,
+                port: postgrestStatus.port,
+                last_error: postgrestStatus.health === "healthy" ? null : "PostgREST health check did not become healthy after runtime restart",
+                updated_at: new Date().toISOString(),
+            });
             return await this.checkStatus(ref);
         } else {
             return await this.startRuntime(ref);
@@ -716,12 +1008,18 @@ ON CONFLICT DO NOTHING;
         return { status: "stopped", port, gotruePort, health: "unknown" };
     }
 
-    public async reconcileInactiveRuntimes(): Promise<{ checked: number; stopped: number; errors: number }> {
+    public async reconcileInactiveRuntimes(): Promise<{ checked: number; stopped: number; started: number; updated: number; errors: number }> {
         const projects = await metaSql`
-          SELECT ref, status
+          SELECT ref, status, config
           FROM projects
           WHERE deleted_at IS NULL
         `;
+        const projectByRef = new Map<string, Record<string, unknown>>(
+            projects.map((project: Record<string, unknown>) => [
+                String(project.ref),
+                project,
+            ]),
+        );
         const projectStatus = new Map<string, string>(
             projects.map((project: Record<string, unknown>) => [
                 String(project.ref),
@@ -740,30 +1038,76 @@ ON CONFLICT DO NOTHING;
         while ((match = serviceRegex.exec(unitOutput)) !== null) {
             refs.add(match[1]);
         }
+        for (const project of projects as Record<string, unknown>[]) {
+            refs.add(String(project.ref));
+        }
 
         let stopped = 0;
+        let started = 0;
+        let updated = 0;
         let errors = 0;
         for (const ref of refs) {
             const status = projectStatus.get(ref);
-            if (status === "active" || status === "creating") continue;
+            const project = projectByRef.get(ref);
 
             try {
-                if (status) {
-                    await this.pauseProjectRuntime(ref);
-                } else {
+                if (!project) {
                     await this.stopRuntime(ref);
+                    stopped++;
+                    continue;
                 }
-                stopped++;
+
+                if (status !== "active" && status !== "creating") {
+                    await this.pauseProjectRuntime(ref);
+                    stopped++;
+                    continue;
+                }
+
+                const desired = this.getPostgrestDesiredState(project);
+                const actual = await this.statusPostgrest(ref);
+
+                if (desired === "stopped" && actual.actual !== "stopped") {
+                    await this.pausePostgrest(ref);
+                    stopped++;
+                    continue;
+                }
+
+                if (desired === "running" && status === "active" && actual.health !== "healthy") {
+                    await this.resumePostgrest(ref);
+                    started++;
+                    continue;
+                }
+
+                await this.updatePostgrestRuntimeConfig(ref, {
+                    desired,
+                    actual: actual.actual,
+                    health: actual.health,
+                    port: actual.port,
+                    last_error: actual.health === "healthy" ? null : actual.last_error,
+                    last_reconciled_at: new Date().toISOString(),
+                    updated_at: new Date().toISOString(),
+                });
+                updated++;
             } catch (error: unknown) {
                 errors++;
-                logger.warn(`[TenantRuntime] Failed to stop inactive runtime ${ref}`, {
+                const message = error instanceof Error ? error.message : String(error);
+                if (status) {
+                    await this.updatePostgrestRuntimeConfig(ref, {
+                        actual: "error",
+                        health: "unhealthy",
+                        last_error: message,
+                        last_reconciled_at: new Date().toISOString(),
+                        updated_at: new Date().toISOString(),
+                    }).catch(() => {});
+                }
+                logger.warn(`[TenantRuntime] Failed to reconcile PostgREST runtime ${ref}`, {
                     status: status || "missing",
-                    error: error instanceof Error ? error.message : String(error),
+                    error: message,
                 });
             }
         }
 
-        return { checked: refs.size, stopped, errors };
+        return { checked: refs.size, stopped, started, updated, errors };
     }
 
     public async updateOAuthConfig(ref: string, provider: OAuthProvider, providerConfig: OAuthProviderConfig): Promise<void> {

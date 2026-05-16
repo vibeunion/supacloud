@@ -6,6 +6,33 @@ import { Elysia, t, status } from "elysia";
 import { projectService } from "../services";
 import { getAuthContext, requireProjectOrAdminAuth } from "../middleware/auth";
 import { $ } from "bun";
+import { tenantRuntimeService, type PostgrestRuntimeStatus } from "../services/tenant-runtime.service";
+
+function mapPostgrestStatus(runtime: PostgrestRuntimeStatus): string {
+  if (runtime.health === "healthy") return "ACTIVE_HEALTHY";
+  if (runtime.actual === "stopped") return "INACTIVE";
+  return "UNHEALTHY";
+}
+
+function toPostgrestServiceEntry(ref: string, runtime: PostgrestRuntimeStatus) {
+  const mappedStatus = mapPostgrestStatus(runtime);
+  return {
+    id: "rest",
+    name: "rest",
+    status: mappedStatus,
+    healthy: mappedStatus === "ACTIVE_HEALTHY",
+    service_host_ids: [`${ref}-rest`],
+    component: "postgrest",
+    desired_state: runtime.desired,
+    actual_state: runtime.actual,
+    health: runtime.health,
+    port: runtime.port,
+    unit: runtime.unit,
+    last_error: runtime.last_error,
+    updated_at: runtime.updated_at,
+    last_reconciled_at: runtime.last_reconciled_at,
+  };
+}
 
 export const projectServiceRoutes = new Elysia({ prefix: "/v1/projects" })
   // Get project health status
@@ -180,7 +207,7 @@ export const projectServiceRoutes = new Elysia({ prefix: "/v1/projects" })
 
       const [db, pgrst, gotrue, realtime, storage] = await Promise.allSettled([
         checkService("patroni"),
-        checkService(`supacloud-pgrst@${ref}`),
+        tenantRuntimeService.statusPostgrest(ref),
         checkService(`supacloud-gotrue@${ref}`),
         checkService("supacloud-realtime"),
         checkService(`supacloud-storage@${ref}`),
@@ -188,10 +215,21 @@ export const projectServiceRoutes = new Elysia({ prefix: "/v1/projects" })
 
       const getResult = (r: PromiseSettledResult<string>): string =>
         r.status === "fulfilled" ? r.value : "INACTIVE";
+      const postgrestService =
+        pgrst.status === "fulfilled"
+          ? toPostgrestServiceEntry(ref, pgrst.value)
+          : {
+              id: "rest",
+              name: "rest",
+              status: "UNHEALTHY",
+              healthy: false,
+              service_host_ids: [`${ref}-rest`],
+              component: "postgrest",
+            };
 
       return [
         { id: "db", name: "db", status: getResult(db) === "ACTIVE_HEALTHY" ? "ACTIVE_HEALTHY" : "UNHEALTHY", healthy: getResult(db) === "ACTIVE_HEALTHY", service_host_ids: [`${ref}-db`] },
-        { id: "rest", name: "rest", status: getResult(pgrst) === "ACTIVE_HEALTHY" ? "ACTIVE_HEALTHY" : "UNHEALTHY", healthy: getResult(pgrst) === "ACTIVE_HEALTHY", service_host_ids: [`${ref}-rest`] },
+        postgrestService,
         { id: "auth", name: "auth", status: getResult(gotrue) === "ACTIVE_HEALTHY" ? "ACTIVE_HEALTHY" : "UNHEALTHY", healthy: getResult(gotrue) === "ACTIVE_HEALTHY", service_host_ids: [`${ref}-auth`] },
         { id: "realtime", name: "realtime", status: getResult(realtime) === "ACTIVE_HEALTHY" ? "ACTIVE_HEALTHY" : "UNHEALTHY", healthy: getResult(realtime) === "ACTIVE_HEALTHY", service_host_ids: [`${ref}-realtime`] },
         { id: "storage", name: "storage", status: getResult(storage) === "ACTIVE_HEALTHY" ? "ACTIVE_HEALTHY" : "UNHEALTHY", healthy: getResult(storage) === "ACTIVE_HEALTHY", service_host_ids: [`${ref}-storage`] },
@@ -200,6 +238,24 @@ export const projectServiceRoutes = new Elysia({ prefix: "/v1/projects" })
     {
       params: t.Object({ ref: t.String() }),
       detail: { tags: ["projects"], summary: "List project services status" },
+    },
+  )
+
+  // PostgREST runtime status (desired/actual state and last error)
+  .get(
+    "/:ref/services/postgrest/status",
+    async ({ params, request }) => {
+      const authError = await requireProjectOrAdminAuth(request, params.ref);
+      if (authError) return status(authError.status, authError.body);
+      const project = await projectService.getProject(params.ref);
+      if (!project) {
+        return status(404, { message: "Project not found" });
+      }
+      return tenantRuntimeService.statusPostgrest(params.ref);
+    },
+    {
+      params: t.Object({ ref: t.String() }),
+      detail: { tags: ["projects"], summary: "Get PostgREST runtime status" },
     },
   )
 
@@ -213,7 +269,7 @@ export const projectServiceRoutes = new Elysia({ prefix: "/v1/projects" })
       const auth = await getAuthContext(request);
       if ("status" in auth) return status(auth.status, auth.body);
 
-      const validActions = ["start", "stop", "restart"];
+      const validActions = ["start", "stop", "restart", "pause", "resume", "status"];
       if (!validActions.includes(action)) {
         set.status = 400;
         return {
@@ -224,6 +280,7 @@ export const projectServiceRoutes = new Elysia({ prefix: "/v1/projects" })
 
       const projectUnitMap: Record<string, string> = {
         postgrest: `supacloud-pgrst@${ref}`,
+        rest: `supacloud-pgrst@${ref}`,
         gotrue: `supacloud-gotrue@${ref}`,
         storage: `supacloud-storage@${ref}`,
       };
@@ -236,6 +293,41 @@ export const projectServiceRoutes = new Elysia({ prefix: "/v1/projects" })
 
       if (auth.role === "project" && !(service in projectUnitMap)) {
         return status(403, { message: "Admin privileges required for shared services", code: "403" });
+      }
+
+      if (service === "postgrest" || service === "rest") {
+        try {
+          const runtime =
+            action === "stop" || action === "pause"
+              ? await tenantRuntimeService.pausePostgrest(ref)
+              : action === "start" || action === "resume"
+                ? await tenantRuntimeService.resumePostgrest(ref)
+                : action === "restart"
+                  ? await tenantRuntimeService.restartPostgrest(ref)
+                  : await tenantRuntimeService.statusPostgrest(ref);
+
+          return {
+            service: "postgrest",
+            action,
+            success: action === "status" || runtime.actual !== "error",
+            runtime,
+            message: `PostgREST ${action} ${runtime.actual === "error" ? "failed" : "succeeded"}`,
+          };
+        } catch (err: unknown) {
+          set.status = 500;
+          return {
+            message: `Failed to ${action} PostgREST: ${err instanceof Error ? err.message : String(err)}`,
+            code: "500",
+          };
+        }
+      }
+
+      if (action === "pause" || action === "resume" || action === "status") {
+        set.status = 400;
+        return {
+          message: `Action ${action} is only supported for PostgREST`,
+          code: "400",
+        };
       }
 
       const unitName = serviceMap[service];

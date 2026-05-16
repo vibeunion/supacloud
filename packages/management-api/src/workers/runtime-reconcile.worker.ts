@@ -9,10 +9,10 @@ let reconcileTimer: Timer | null = null;
 export async function runRuntimeReconciliation(): Promise<void> {
     try {
         const stats = await tenantRuntimeService.reconcileInactiveRuntimes();
-        if (stats.stopped > 0 || stats.errors > 0) {
+        if (stats.stopped > 0 || stats.started > 0 || stats.updated > 0 || stats.errors > 0) {
             logger.info("[RuntimeReconcile] Completed", stats);
         } else {
-            logger.debug("[RuntimeReconcile] No inactive runtimes to stop", stats);
+            logger.debug("[RuntimeReconcile] No runtime drift detected", stats);
         }
     } catch (error: unknown) {
         logger.warn("[RuntimeReconcile] Reconciliation failed", {

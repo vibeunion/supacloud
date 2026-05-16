@@ -30,6 +30,7 @@
 ## Operations
 
 - [CLI Guide](./cli-guide.md) - `@supacloud/cli` and `@supacloud/admin`
+- [PostgREST Runtime Lifecycle](./postgrest-runtime-lifecycle.md) - Component-level PostgREST desired state, pause/resume/status, and reconciliation
 - [Upgrade to Pigsty 4.1](./upgrade-to-pigsty-4.1.md) - Pigsty upgrade guide
 - [Troubleshooting Podman DNS](./troubleshooting-podman-dns.md) - Podman DNS troubleshooting
 

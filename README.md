@@ -423,6 +423,15 @@ Use them to:
 
 For new installs, `install.sh` now generates a valid `REALTIME_DB_ENC_KEY`, which prevents the historical `Bad key size` failure during tenant registration.
 
+### PostgREST Runtime Lifecycle
+
+Each project keeps a dedicated PostgREST unit, but Management API now treats it as a managed runtime component with explicit desired state:
+
+- `GET /v1/projects/:ref/services/postgrest/status`
+- `POST /v1/projects/:ref/services/postgrest/start|stop|restart|pause|resume`
+
+The desired state is stored on the project config, and the runtime reconcile worker keeps actual systemd state aligned with it. This is explicit lifecycle management, not idle auto-shrinking, so request-path performance stays unchanged.
+
 | Feature | Current Bun Runtime |
 |---------|---------------------|
 | Memory (200 functions) | **~140MB** |
@@ -903,6 +912,15 @@ cd packages/management-api
 bun run realtime:reconcile
 bun run realtime:reconcile-schema
 ```
+
+### PostgREST 运行时生命周期
+
+每个项目仍然使用独立的 PostgREST 进程，但 Management API 现在把它当成受控运行时组件管理，支持显式 desired state：
+
+- `GET /v1/projects/:ref/services/postgrest/status`
+- `POST /v1/projects/:ref/services/postgrest/start|stop|restart|pause|resume`
+
+desired state 保存在项目配置里，runtime reconcile worker 会把实际 systemd 状态对齐到它。这里是显式生命周期管理，不做空闲自动收缩，所以请求路径性能不变。
 
 #### CLI 入口
 
