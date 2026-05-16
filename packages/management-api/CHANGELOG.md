@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.1](https://github.com/zuohuadong/supacloud/compare/management-api-v0.18.0...management-api-v0.18.1) (2026-05-16)
+
+
+### Bug Fixes
+
+* runtime bootstrap fixes for v0.18.0 ([#118](https://github.com/zuohuadong/supacloud/issues/118)) ([848e17c](https://github.com/zuohuadong/supacloud/commit/848e17c6296e96e2fd03cb7c5961a55d544e2af5))
+
 ## [0.18.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.17.0...management-api-v0.18.0) (2026-05-16)
 
 
