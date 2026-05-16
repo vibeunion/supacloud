@@ -1,5 +1,89 @@
 # Changelog
 
+## [0.5.0](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.4.1...edge-runtime-v0.5.0) (2026-05-16)
+
+
+### Features
+
+* **core:** Native Supabase compatibility fixes for Realtime, Storage RLS, and Edge Functions ([8a76cf8](https://github.com/zuohuadong/supacloud/commit/8a76cf87e05a01db81c1e037eefb9d6a3419c6dc))
+* **edge-functions:** implement per-function verify_jwt configuration ([7dcddf1](https://github.com/zuohuadong/supacloud/commit/7dcddf1a80c40f3023e38af9e7ed2d4ff5e14c22))
+* **edge-runtime:** add jsr/npm import matching and expand Deno std lib shims ([e4be6ae](https://github.com/zuohuadong/supacloud/commit/e4be6ae629032476e7485ce81b3f0fa26a93c55d))
+* **platform:** massive stabilization update across edge-runtime, mcp, routing, and sdk-proxy compatibility ([a94d84f](https://github.com/zuohuadong/supacloud/commit/a94d84f056714eff210739ef0cef3da7f0b5f0be))
+* **tasks:** deploy background task and message queue features to servers ([83d9062](https://github.com/zuohuadong/supacloud/commit/83d90626df765c99a96b5d93ed103e4452a5db4d))
+* updates and fixes based on recent local changes ([79940f4](https://github.com/zuohuadong/supacloud/commit/79940f47578d4db4f4f133c08645d0c635c71a8d))
+
+
+### Bug Fixes
+
+* add function invoke route, repair stale projects, web-console deployment ([7cf073b](https://github.com/zuohuadong/supacloud/commit/7cf073b2b31cf2cf814fd2e5dcffbf55cc9fc224))
+* **auth,infra:** 401 pre-flight and all-in-one local docker ([e201d45](https://github.com/zuohuadong/supacloud/commit/e201d458280e084837c3d690c6296ed3f4545598))
+* **ci:** normalize release changelog headings ([63f3f4d](https://github.com/zuohuadong/supacloud/commit/63f3f4d37c951f7493cada1cd09e37dfa7eb19ca))
+* **ci:** use ascii release notes sections ([2fde822](https://github.com/zuohuadong/supacloud/commit/2fde8225e9a01077e09308c88dd982e81368c90e))
+* **edge-runtime:** add missing jose dependency ([f611c8a](https://github.com/zuohuadong/supacloud/commit/f611c8aeede400dee11616efbc843893dd01343e))
+* **edge-runtime:** add stripped path routing fallbacks to support Kong strip_path: true ([4885310](https://github.com/zuohuadong/supacloud/commit/48853108fdf1db3f57418531045999ff783602d4))
+* **edge-runtime:** avoid double-managed runtime restarts ([ff3c82c](https://github.com/zuohuadong/supacloud/commit/ff3c82c4f9f96f51eeec6411b8351d61743445b1))
+* **edge-runtime:** bust Bun import() cache on function redeploy ([323e0b7](https://github.com/zuohuadong/supacloud/commit/323e0b7c1f3b0717409282078cc99d09c17f97b3))
+* **edge-runtime:** bypass verifyJwt for CORS preflight OPTIONS requests to prevent 401 errors ([c1f2164](https://github.com/zuohuadong/supacloud/commit/c1f21643b9337919699d605c5f4e0dfc8e99f934))
+* **edge-runtime:** cache project secrets to prevent DOMException TimeoutError under load and accept apikey header ([0b1a74b](https://github.com/zuohuadong/supacloud/commit/0b1a74bc767a08375993e0c66c50c27a730f7dac))
+* **edge-runtime:** exact ipv4 binding for localhost healthchecks ([0fcd47a](https://github.com/zuohuadong/supacloud/commit/0fcd47a4e4bdfb6ee145d9ef07550eeca8eb20aa))
+* **edge-runtime:** inject Bun function env ([63656e1](https://github.com/zuohuadong/supacloud/commit/63656e107850628d5fa03cde5f1d3432974755d3))
+* **edge-runtime:** normalize fallback tenant env ([00757b2](https://github.com/zuohuadong/supacloud/commit/00757b2086bc12a18de6ab9c54e736f572a1bed2))
+* **edge-runtime:** normalize fallback tenant env ([1ac8e95](https://github.com/zuohuadong/supacloud/commit/1ac8e954ad11f1e2340271986bb523058e991d28))
+* **edge-runtime:** preserve env for waitUntil tasks ([d72cacc](https://github.com/zuohuadong/supacloud/commit/d72cacc3cffb59cc89af97ce6412f21c2cd82a98))
+* **edge-runtime:** preserve env for waitUntil tasks ([2a0f33e](https://github.com/zuohuadong/supacloud/commit/2a0f33ecd17874047c25400aafd7f4d4c9788a6f))
+* **edge-runtime:** reject masked runtime secrets ([ef05aa0](https://github.com/zuohuadong/supacloud/commit/ef05aa07750c467fb4b437104ff42e3d60205d39))
+* **edge-runtime:** remove suicidal killStaleListeners to break restart loop ([7cb53ca](https://github.com/zuohuadong/supacloud/commit/7cb53cacce75732df67e30b0c92d022710aad272))
+* **edge-runtime:** use EDGE_RUNTIME_PORT to avoid port conflict with management API ([73d6a24](https://github.com/zuohuadong/supacloud/commit/73d6a2495377467f1e80c70ee896b43cebe0120a))
+* explicit @sinclair/typebox dependency to prevent elysia/edge-runtime crash during CI e2e tests proxy boot ([1d38a09](https://github.com/zuohuadong/supacloud/commit/1d38a095904ac29d0cc120b945cd1366a41b3c0d))
+* harden realtime tasks and data-plane boundaries ([c830dc5](https://github.com/zuohuadong/supacloud/commit/c830dc5f9b7b1f7721412864765e6ae1f1dd4a01))
+* improve one-click install robustness and compile edge-runtime as standalone binary ([7fcc5c1](https://github.com/zuohuadong/supacloud/commit/7fcc5c15ffd076387d712d9a347a6f59e6640d4f))
+* improve one-click install robustness and compile edge-runtime binary ([9686a2f](https://github.com/zuohuadong/supacloud/commit/9686a2fd25a600385c90adde6630950bb773aa61))
+* improve one-click install robustness, add function invoke route, repair stale projects ([acf3365](https://github.com/zuohuadong/supacloud/commit/acf3365c6ee6b4c1fc490ab0eac216e861ff2101))
+* **runtime:** respect ssl config for tenant urls ([bbfa23e](https://github.com/zuohuadong/supacloud/commit/bbfa23e4c004f86f5cf75d7d248a274c95a54e3f))
+* **runtime:** respect ssl config for tenant urls ([ce976fe](https://github.com/zuohuadong/supacloud/commit/ce976fe825bc775501d65b8a7bc6291466ec840d))
+
+
+### Elegance & Refactoring
+
+* **edge-functions:** migrate version artifacts into internal revisions ([0eae21c](https://github.com/zuohuadong/supacloud/commit/0eae21c3b7577fe01c403bf5a54d458099fe362d))
+* **edge-runtime:** replace query-param hack with Worker replacement for module invalidation ([e279883](https://github.com/zuohuadong/supacloud/commit/e279883e5fbb32c70c0a68864522024137e32bb6))
+
+
+### Miscellaneous Chores
+
+* better jwt error logging ([ce49953](https://github.com/zuohuadong/supacloud/commit/ce499535f585e402eee979343a801698025caa3c))
+* flush remaining test suite fixes and project modifications ([e1b625c](https://github.com/zuohuadong/supacloud/commit/e1b625c707b304f753ebbbd466ddb0046cdfd740))
+* push all accumulated compliance and runtime integrations ([4cb93dd](https://github.com/zuohuadong/supacloud/commit/4cb93dd0a1d21bd0ecdd32a2751fe57fd4374355))
+* release main ([0ad39c2](https://github.com/zuohuadong/supacloud/commit/0ad39c25703950b1fbafe492d148dc10fd95cd8c))
+* release main ([2a4e9fa](https://github.com/zuohuadong/supacloud/commit/2a4e9fa0c8dd368baf844420e5b216ebbdb87828))
+* release main ([a74e431](https://github.com/zuohuadong/supacloud/commit/a74e431e8782208d969b51b4db797fe4f1ba158a))
+* release main ([5592191](https://github.com/zuohuadong/supacloud/commit/55921916298238fda51026ba66ff10469c012da3))
+* release main ([a0c1c3e](https://github.com/zuohuadong/supacloud/commit/a0c1c3e6d098ac1e789b5495faa1b91faae238c0))
+* release main ([44cace4](https://github.com/zuohuadong/supacloud/commit/44cace4ff79f412dab23780e0d155a8ff46d2b3d))
+* release main ([9c4b4ab](https://github.com/zuohuadong/supacloud/commit/9c4b4ab4e0776bc6f0929d2a2b1d008c7b3a4701))
+* release main ([94f669a](https://github.com/zuohuadong/supacloud/commit/94f669a68c88b2ef6c09e53e5812a36e82ffdf20))
+* release main ([510d73c](https://github.com/zuohuadong/supacloud/commit/510d73c6b77e815e1210a7a2bdcd999f5f80226e))
+* release main ([5876a87](https://github.com/zuohuadong/supacloud/commit/5876a87aa04c79d8a23d73e39b9cec108963cae1))
+* release main ([010fefe](https://github.com/zuohuadong/supacloud/commit/010fefe044a1165c16591e10e74613898c5a96de))
+* release main ([cc6432a](https://github.com/zuohuadong/supacloud/commit/cc6432aa987f17b011e357584816945cf80ec533))
+* release main ([58b455a](https://github.com/zuohuadong/supacloud/commit/58b455a45ffa22c638ec2c1aa59292096b0014cb))
+* release main ([7180516](https://github.com/zuohuadong/supacloud/commit/71805164f96869842f27919373521d88f5a4a341))
+* release main ([77cbf82](https://github.com/zuohuadong/supacloud/commit/77cbf824d2120f59af592ce44300f587c2657913))
+* release main ([03a4bfa](https://github.com/zuohuadong/supacloud/commit/03a4bfa21a066aa0ce52b1c14e4cf5daa7f3057d))
+* release main ([d2757c8](https://github.com/zuohuadong/supacloud/commit/d2757c800d0f8116bd484e307adf8390e2aba9da))
+* release main ([eb82b4d](https://github.com/zuohuadong/supacloud/commit/eb82b4dc38dc4e00401a259030b007ce3d986272))
+* release main ([647e652](https://github.com/zuohuadong/supacloud/commit/647e6524e435d72c08f64723783da224498507b8))
+* release main ([f5d59fe](https://github.com/zuohuadong/supacloud/commit/f5d59fe86049a71a7010627756ec41037ebeaca6))
+* release main ([549c0fd](https://github.com/zuohuadong/supacloud/commit/549c0fd4df7bb2ed1d8aa4e25dfda17e3f093cf9))
+* release main ([79c9288](https://github.com/zuohuadong/supacloud/commit/79c92889c99db9d8bcada29e8d521050a7dc4f93))
+* release main ([59ea7a6](https://github.com/zuohuadong/supacloud/commit/59ea7a61481821d2265a679dd2785eafe204ae95))
+* release main ([fbd5548](https://github.com/zuohuadong/supacloud/commit/fbd554816e5e519b3a3c3310e6096a71c92ba2fa))
+* release main ([11c5eb1](https://github.com/zuohuadong/supacloud/commit/11c5eb1f6f488c3a3ef02ca531e3556ba635ed17))
+* release main ([d0c6b59](https://github.com/zuohuadong/supacloud/commit/d0c6b59815aa11ae90b15ec79af3b3e3bfadbdd4))
+* release main ([#113](https://github.com/zuohuadong/supacloud/issues/113)) ([3c98a4c](https://github.com/zuohuadong/supacloud/commit/3c98a4c9353f5d53ad1517e4e56a779cece4aded))
+* release main ([#114](https://github.com/zuohuadong/supacloud/issues/114)) ([02b89e6](https://github.com/zuohuadong/supacloud/commit/02b89e6d9d1ff7ac85148342415d3f6ae9277fd8))
+* **systemd:** add canonical service templates ([2c3e629](https://github.com/zuohuadong/supacloud/commit/2c3e6299d6b22a36f7eb826d53d36567c47be1e5))
+
 ## [0.4.1](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.4.0...edge-runtime-v0.4.1) (2026-05-15)
 
 

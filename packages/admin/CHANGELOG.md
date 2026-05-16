@@ -1,5 +1,44 @@
 # Changelog
 
+## [0.1.10](https://github.com/zuohuadong/supacloud/compare/admin-v0.1.9...admin-v0.1.10) (2026-05-16)
+
+
+### Bug Fixes
+
+* **ci:** normalize release changelog headings ([63f3f4d](https://github.com/zuohuadong/supacloud/commit/63f3f4d37c951f7493cada1cd09e37dfa7eb19ca))
+* **ci:** use ascii release notes sections ([2fde822](https://github.com/zuohuadong/supacloud/commit/2fde8225e9a01077e09308c88dd982e81368c90e))
+* **cli:** infer management URL from project API domains ([3ec0087](https://github.com/zuohuadong/supacloud/commit/3ec008799ecf259643141d8c24620b638d21be12))
+* **installer:** derive studio domain from API host ([20acff7](https://github.com/zuohuadong/supacloud/commit/20acff72f543dd84a0082fe68640a605f5a5a1c0))
+* **install:** skip legacy supabase compose stack ([4d9ab5b](https://github.com/zuohuadong/supacloud/commit/4d9ab5b3098e99f6829bc930cf71b16ec539bdae))
+* make production upgrades binary-first ([6d8e401](https://github.com/zuohuadong/supacloud/commit/6d8e40131b88bd6f3a19f8b6c0f6f422dbc20875))
+* support github proxies for binary upgrades ([254cb47](https://github.com/zuohuadong/supacloud/commit/254cb474bcd8ac98da7dccc67fce8829c0cca30e))
+
+
+### Elegance & Refactoring
+
+* remove legacy sql result alias ([3b14b89](https://github.com/zuohuadong/supacloud/commit/3b14b894dfb6cdd03304fbec0a5060439e52d3db))
+
+
+### Miscellaneous Chores
+
+* **deps:** bump zod from 3.25.76 to 4.4.3 in /packages/admin ([#83](https://github.com/zuohuadong/supacloud/issues/83)) ([a20d827](https://github.com/zuohuadong/supacloud/commit/a20d8271ebca6b6e7d0bf3b973b09c6616eb6619))
+* release main ([c36b94e](https://github.com/zuohuadong/supacloud/commit/c36b94e213199b32cfb1d1ce0bb97ad579512b81))
+* release main ([e7e6560](https://github.com/zuohuadong/supacloud/commit/e7e6560517e13baf3f72f5553bdb784c1b561d2e))
+* release main ([b783711](https://github.com/zuohuadong/supacloud/commit/b783711ebf1aff4e3d244d5f67f126a461949db9))
+* release main ([68c8362](https://github.com/zuohuadong/supacloud/commit/68c83624cba53efd1e2b1338304288336a86f98b))
+* release main ([4c02b71](https://github.com/zuohuadong/supacloud/commit/4c02b7122fc26d4a43cb45576621b94e9073addc))
+* release main ([cf795eb](https://github.com/zuohuadong/supacloud/commit/cf795eb4acc0de5e947c23cafe22ab93fe06ed0d))
+* release main ([d79a138](https://github.com/zuohuadong/supacloud/commit/d79a1381e52e8231f8b0eeec9efc403e7ade68ce))
+* release main ([939c0a4](https://github.com/zuohuadong/supacloud/commit/939c0a44d8d828831cc3b9da26f0d4a538536b72))
+* release main ([77cbf82](https://github.com/zuohuadong/supacloud/commit/77cbf824d2120f59af592ce44300f587c2657913))
+* release main ([03a4bfa](https://github.com/zuohuadong/supacloud/commit/03a4bfa21a066aa0ce52b1c14e4cf5daa7f3057d))
+* release main ([d2757c8](https://github.com/zuohuadong/supacloud/commit/d2757c800d0f8116bd484e307adf8390e2aba9da))
+* release main ([eb82b4d](https://github.com/zuohuadong/supacloud/commit/eb82b4dc38dc4e00401a259030b007ce3d986272))
+* release main ([#113](https://github.com/zuohuadong/supacloud/issues/113)) ([3c98a4c](https://github.com/zuohuadong/supacloud/commit/3c98a4c9353f5d53ad1517e4e56a779cece4aded))
+* release main ([#114](https://github.com/zuohuadong/supacloud/issues/114)) ([02b89e6](https://github.com/zuohuadong/supacloud/commit/02b89e6d9d1ff7ac85148342415d3f6ae9277fd8))
+* release main ([#75](https://github.com/zuohuadong/supacloud/issues/75)) ([6e10ff2](https://github.com/zuohuadong/supacloud/commit/6e10ff2d2c15077b2cdf87c161f5285e4d1240c2))
+* release main ([#91](https://github.com/zuohuadong/supacloud/issues/91)) ([2e4376a](https://github.com/zuohuadong/supacloud/commit/2e4376a43affe224eb83c3d2c0f7761eb5fb204a))
+
 ## [0.1.9](https://github.com/zuohuadong/supacloud/compare/admin-v0.1.8...admin-v0.1.9) (2026-05-15)
 
 
