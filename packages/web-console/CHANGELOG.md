@@ -1,5 +1,86 @@
 # Changelog
 
+## [0.11.0](https://github.com/zuohuadong/supacloud/compare/web-console-v0.10.1...web-console-v0.11.0) (2026-05-16)
+
+
+### Features
+
+* **edge-functions:** implement per-function verify_jwt configuration ([7dcddf1](https://github.com/zuohuadong/supacloud/commit/7dcddf1a80c40f3023e38af9e7ed2d4ff5e14c22))
+* **gateway:** manage certificates through Kong ([b76d519](https://github.com/zuohuadong/supacloud/commit/b76d519953732f1dc5a827abbffd8f2a3e95fe65))
+* **management-api:** add web console tasks tracking & custom rate limits UI ([7891f83](https://github.com/zuohuadong/supacloud/commit/7891f83981ae2f476f8faf293bc60d1f89478285))
+* **sdk/e2e:** finalize sdk proxy passthrough and structural snapshot tests ([1fe15b4](https://github.com/zuohuadong/supacloud/commit/1fe15b4e726602f7255ba2b64dbd0be8fc7252ee))
+* **tasks:** deploy background task and message queue features to servers ([83d9062](https://github.com/zuohuadong/supacloud/commit/83d90626df765c99a96b5d93ed103e4452a5db4d))
+* updates and fixes based on recent local changes ([79940f4](https://github.com/zuohuadong/supacloud/commit/79940f47578d4db4f4f133c08645d0c635c71a8d))
+* **web-console:** integrate realtime health, custom domains and oauth panels ([1fe15b4](https://github.com/zuohuadong/supacloud/commit/1fe15b4e726602f7255ba2b64dbd0be8fc7252ee))
+
+
+### Bug Fixes
+
+* **auth,infra:** 401 pre-flight and all-in-one local docker ([e201d45](https://github.com/zuohuadong/supacloud/commit/e201d458280e084837c3d690c6296ed3f4545598))
+* **ci:** normalize release changelog headings ([63f3f4d](https://github.com/zuohuadong/supacloud/commit/63f3f4d37c951f7493cada1cd09e37dfa7eb19ca))
+* **ci:** use ascii release notes sections ([2fde822](https://github.com/zuohuadong/supacloud/commit/2fde8225e9a01077e09308c88dd982e81368c90e))
+* **database:** consume sql rows response only ([98fede7](https://github.com/zuohuadong/supacloud/commit/98fede7ba3ed80a5d51f9bbb1f1e79eeab901eef))
+* harden realtime tasks and data-plane boundaries ([c830dc5](https://github.com/zuohuadong/supacloud/commit/c830dc5f9b7b1f7721412864765e6ae1f1dd4a01))
+* **web-console:** allow editing project routing domains ([1660361](https://github.com/zuohuadong/supacloud/commit/1660361efbfcc3fc9987d2a6cb62834a1c01dddd))
+* **web-console:** correct Svelte 5 store syntax for svelte-query rune data access ([e55b2f7](https://github.com/zuohuadong/supacloud/commit/e55b2f74c02d49ec254df482071885d989a091a4))
+* **web-console:** restore settings and task management UI ([f27519e](https://github.com/zuohuadong/supacloud/commit/f27519e0c2b7189caf19e842173c892ee8e8a790))
+
+
+### Elegance & Refactoring
+
+* **auth:** use GoTrue magic link verification for miniprogram and upgrade edge fn syntax ([7aa6894](https://github.com/zuohuadong/supacloud/commit/7aa68945bee02aa15447698e5990866e36af30d2))
+
+
+### Performance Improvements
+
+* reduce management hot path load ([954497f](https://github.com/zuohuadong/supacloud/commit/954497fe7b312ac3cdc4778ef4b21bb0e6097a4b))
+
+
+### Documentation
+
+* refresh hardening and runtime notes ([2c81d08](https://github.com/zuohuadong/supacloud/commit/2c81d0815bed50c06be3fb0ed311ce09bc8c4b01))
+* **web-console:** add lucide dependency changelog entry ([12b0100](https://github.com/zuohuadong/supacloud/commit/12b0100f481cbe1234ff5a93a6eb32befb7d3da5))
+
+
+### Miscellaneous Chores
+
+* **deps-dev:** bump vite from 8.0.3 to 8.0.11 in /packages/web-console ([#87](https://github.com/zuohuadong/supacloud/issues/87)) ([b1d29a8](https://github.com/zuohuadong/supacloud/commit/b1d29a81f1db0d703cee9e9a6d9875174142ade5))
+* **deps:** bump @svadmin/core in /packages/web-console ([#90](https://github.com/zuohuadong/supacloud/issues/90)) ([22663e4](https://github.com/zuohuadong/supacloud/commit/22663e44596778da2f3fec242fdc710ec89bd924))
+* **deps:** bump @svadmin/ui in /packages/web-console ([#89](https://github.com/zuohuadong/supacloud/issues/89)) ([d43b235](https://github.com/zuohuadong/supacloud/commit/d43b2359afd4dc3dc9a994fcc210ff3d20ed0c9b))
+* **deps:** bump lucide-svelte from 0.577.0 to 1.0.1 in /packages/web-console ([#88](https://github.com/zuohuadong/supacloud/issues/88)) ([e056f2b](https://github.com/zuohuadong/supacloud/commit/e056f2bfc6fefb860e2036ccc5d92385e0297ea6))
+* **deps:** bump marked from 17.0.6 to 18.0.3 in /packages/web-console ([#85](https://github.com/zuohuadong/supacloud/issues/85)) ([247fb57](https://github.com/zuohuadong/supacloud/commit/247fb57ae16b519821adac2eccf36af0ff0d5346))
+* flush remaining test suite fixes and project modifications ([e1b625c](https://github.com/zuohuadong/supacloud/commit/e1b625c707b304f753ebbbd466ddb0046cdfd740))
+* release main ([02165d4](https://github.com/zuohuadong/supacloud/commit/02165d4da828b6af2d684c456040bf65341f8f1e))
+* release main ([a939bbb](https://github.com/zuohuadong/supacloud/commit/a939bbb36a1c5ba6e59fe13ff1e1f5ec8b276edb))
+* release main ([e0317fa](https://github.com/zuohuadong/supacloud/commit/e0317fa71adab2925153c8b7a8460ccf3c21d126))
+* release main ([f75e8cd](https://github.com/zuohuadong/supacloud/commit/f75e8cd02814d439a583ee30a5c64005b00eb04a))
+* release main ([42ac39f](https://github.com/zuohuadong/supacloud/commit/42ac39f6d77a49f88755a3b7fe70f4dd236d5312))
+* release main ([fa8b990](https://github.com/zuohuadong/supacloud/commit/fa8b990a9fb44ce6784c07f7d5ef4bccff103952))
+* release main ([9fddfb3](https://github.com/zuohuadong/supacloud/commit/9fddfb327fd5e62c20e620d0d9046a13722a94e2))
+* release main ([1ecbc25](https://github.com/zuohuadong/supacloud/commit/1ecbc254d4f9cc95c56da279c50ac5e8186cba90))
+* release main ([58b455a](https://github.com/zuohuadong/supacloud/commit/58b455a45ffa22c638ec2c1aa59292096b0014cb))
+* release main ([7180516](https://github.com/zuohuadong/supacloud/commit/71805164f96869842f27919373521d88f5a4a341))
+* release main ([80f9e49](https://github.com/zuohuadong/supacloud/commit/80f9e49271bf9a67d57f165baab37230a52c21dc))
+* release main ([18b53e1](https://github.com/zuohuadong/supacloud/commit/18b53e191a034ed65ce0dda04e392a1906562818))
+* release main ([77cbf82](https://github.com/zuohuadong/supacloud/commit/77cbf824d2120f59af592ce44300f587c2657913))
+* release main ([03a4bfa](https://github.com/zuohuadong/supacloud/commit/03a4bfa21a066aa0ce52b1c14e4cf5daa7f3057d))
+* release main ([d2757c8](https://github.com/zuohuadong/supacloud/commit/d2757c800d0f8116bd484e307adf8390e2aba9da))
+* release main ([eb82b4d](https://github.com/zuohuadong/supacloud/commit/eb82b4dc38dc4e00401a259030b007ce3d986272))
+* release main ([34e53e4](https://github.com/zuohuadong/supacloud/commit/34e53e408e15779759d33eaf8e91b9753eec5b1f))
+* release main ([f533d2c](https://github.com/zuohuadong/supacloud/commit/f533d2cb3b93e5143c8066f671d7413ab97fedae))
+* release main ([549c0fd](https://github.com/zuohuadong/supacloud/commit/549c0fd4df7bb2ed1d8aa4e25dfda17e3f093cf9))
+* release main ([79c9288](https://github.com/zuohuadong/supacloud/commit/79c92889c99db9d8bcada29e8d521050a7dc4f93))
+* release main ([11c5eb1](https://github.com/zuohuadong/supacloud/commit/11c5eb1f6f488c3a3ef02ca531e3556ba635ed17))
+* release main ([d0c6b59](https://github.com/zuohuadong/supacloud/commit/d0c6b59815aa11ae90b15ec79af3b3e3bfadbdd4))
+* release main ([#113](https://github.com/zuohuadong/supacloud/issues/113)) ([3c98a4c](https://github.com/zuohuadong/supacloud/commit/3c98a4c9353f5d53ad1517e4e56a779cece4aded))
+* release main ([#114](https://github.com/zuohuadong/supacloud/issues/114)) ([02b89e6](https://github.com/zuohuadong/supacloud/commit/02b89e6d9d1ff7ac85148342415d3f6ae9277fd8))
+* release main ([#91](https://github.com/zuohuadong/supacloud/issues/91)) ([2e4376a](https://github.com/zuohuadong/supacloud/commit/2e4376a43affe224eb83c3d2c0f7761eb5fb204a))
+* release main ([#93](https://github.com/zuohuadong/supacloud/issues/93)) ([ad30dda](https://github.com/zuohuadong/supacloud/commit/ad30dda44e9ade3ce786032cfba1969629fa83f4))
+* remove obsolete debug artifacts ([b090cf9](https://github.com/zuohuadong/supacloud/commit/b090cf9c5ee74d37c4221e8a9a019b86a88d4447))
+* setup release-please for automated versioning and update svadmin dependencies ([ff8b5b3](https://github.com/zuohuadong/supacloud/commit/ff8b5b337c7aa6aece97c1ed626d692df91a1494))
+* **ts:** finish TypeScript 6 typecheck migration ([1226a03](https://github.com/zuohuadong/supacloud/commit/1226a03dc40909a2e5dc7e2fb90a3aee4daad855))
+* upgrade svadmin to latest version and fix breaking changes in query/mutation hooks ([67b5bb8](https://github.com/zuohuadong/supacloud/commit/67b5bb87286c8f5ce97399f99db6d4fb174b44f0))
+
 ## [0.10.1](https://github.com/zuohuadong/supacloud/compare/web-console-v0.10.0...web-console-v0.10.1) (2026-05-15)
 
 
