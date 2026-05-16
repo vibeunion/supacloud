@@ -901,6 +901,19 @@ export class GatewayService {
                 write_timeout: 60000
             });
 
+            const baseDomain = config.baseDomain;
+            const apiHosts = [hostIp];
+
+            await this.ensureServiceAndRoute({
+                name: "svc-management-api",
+                url: `http://${hostIp}:${config.port}`,
+                paths: ["/api"],
+                hosts: apiHosts,
+                projectRef: "_management",
+                stripPath: true,
+                corsOrigins: apiHosts,
+            });
+
             logger.info(`[GatewayService] Rebuilt global management routes to port ${config.port}`);
         } catch (error: unknown) {
             const msg = error instanceof Error ? error.message : String(error);
