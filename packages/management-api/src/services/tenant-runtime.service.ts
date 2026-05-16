@@ -726,10 +726,39 @@ ON CONFLICT DO NOTHING;
         }
     }
 
+    private async ensurePostgrestPrerequest(ref: string): Promise<void> {
+        const dbName = await resolveDbName(ref);
+        const dbUrl = `postgres://postgres:${config.pgPassword}@${this.PG_HOST}:${this.PG_PORT}/${dbName}`;
+
+        const fnSql = `
+CREATE OR REPLACE FUNCTION public.set_request_context() RETURNS void AS $$
+DECLARE
+  role_claim text;
+BEGIN
+  IF current_setting('request.jwt.claims', true) = '' THEN
+    PERFORM set_config('request.jwt.claims', '{}', true);
+  END IF;
+  role_claim := COALESCE(
+    nullif(current_setting('request.jwt.claim.role', true), ''),
+    (nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'role'),
+    'anon'
+  );
+  PERFORM set_config('request.jwt.claim.role', role_claim, true);
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+`.trim();
+        const tmpFile = `/tmp/pgrst-prerequest-${ref}.sql`;
+        await Bun.write(tmpFile, fnSql);
+        await $`psql ${dbUrl} -f ${tmpFile}`.nothrow().quiet();
+        await $`rm -f ${tmpFile}`.nothrow().quiet();
+        logger.info(`[tenant-runtime] Ensured public.set_request_context() for ${ref}`);
+    }
+
     public async startRuntime(ref: string): Promise<RuntimeStatus> {
         await this.ensureBinaries();
         await this.installSystemdTemplate();
         await this.ensureAuthSchema(ref);
+        await this.ensurePostgrestPrerequest(ref);
 
         const pgrstPort = await this.getTenantPort(ref, "pgrst");
         const gotruePort = await this.getTenantPort(ref, "gotrue");
