@@ -665,7 +665,7 @@ export class GatewayService {
                 projectRef,
                 stripPath: true,
                 readTimeout: 60000,
-                protocols: ["http", "https", "grpc", "grpcs", "ws", "wss"],
+                protocols: ["http", "https"],
                 corsOrigins,
             });
             await this.ensureServiceAndRoute({
@@ -899,6 +899,19 @@ export class GatewayService {
                 connect_timeout: 5000,
                 read_timeout: 60000,
                 write_timeout: 60000
+            });
+
+            const baseDomain = config.baseDomain;
+            const apiHosts = [hostIp];
+
+            await this.ensureServiceAndRoute({
+                name: "svc-management-api",
+                url: `http://${hostIp}:${config.port}`,
+                paths: ["/api"],
+                hosts: apiHosts,
+                projectRef: "_management",
+                stripPath: true,
+                corsOrigins: apiHosts,
             });
 
             logger.info(`[GatewayService] Rebuilt global management routes to port ${config.port}`);
