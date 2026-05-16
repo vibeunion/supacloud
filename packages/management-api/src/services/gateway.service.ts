@@ -886,6 +886,9 @@ export class GatewayService {
 
     // --- Global Master Routes ---
     async setupMasterRoutes(): Promise<void> {
+        const kongOk = await this.checkKongConnectivity();
+        if (!kongOk) return;
+
         try {
             const hostIp = await this.detectHostIp();
             
