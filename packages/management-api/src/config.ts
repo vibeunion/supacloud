@@ -154,7 +154,7 @@ export const config: Config = {
   nodeEnv: getEnv("NODE_ENV", "development"),
   isGithubActions,
 
-  jwtSecret: getEnv("JWT_SECRET", DEFAULT_JWT_SECRET),
+  jwtSecret: getEnv("JWT_SECRET", getEnv("SUPACLOUD_JWT_SECRET", DEFAULT_JWT_SECRET)),
   jwtIssuer: getEnv("JWT_ISSUER", "supacloud"),
   jwtEnabled: getEnv("JWT_ENABLED", "false") === "true",
   baseDomain: getEnv("BASE_DOMAIN", "example.com"),

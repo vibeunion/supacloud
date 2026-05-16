@@ -2216,6 +2216,7 @@ PIGSTY_PATH=${HOME}/pigsty
 BASE_DOMAIN=${BASE_DOMAIN_VALUE}
 S3_STORAGE_TYPE=${S3_STORAGE_TYPE:-juicefs}
 IMAGINARY_IMAGE=${IMAGINARY_IMAGE:-h2non/imaginary:1.2.4}
+JWT_SECRET=${JWT_SECRET}
 SUPACLOUD_JWT_SECRET=${JWT_SECRET}
 REALTIME_SECRET_KEY_BASE=${REALTIME_SECRET_KEY_BASE}
 REALTIME_DB_ENC_KEY=${REALTIME_DB_ENC_KEY}
@@ -2234,6 +2235,8 @@ ACME_CLIENT=lego
 LEGO_BIN=${LEGO_BIN:-lego}
 ACME_STATE_DIR=${ACME_STATE_DIR:-/var/lib/supacloud/lego}
 ACME_HTTP_WEBROOT=${ACME_HTTP_WEBROOT:-/var/lib/supacloud/acme-challenges}
+KONG_ADMIN_URL=http://127.0.0.1:8001
+KONG_INTERNAL=127.0.0.1:8000
 EOF
     chmod 600 /etc/supabase/management-api.env
     sync_runtime_config /etc/supabase/management-api.env

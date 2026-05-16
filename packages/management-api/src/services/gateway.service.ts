@@ -111,6 +111,26 @@ export class GatewayService {
         return text ? JSON.parse(text) : {};
     }
 
+    async checkKongConnectivity(): Promise<boolean> {
+        try {
+            const res = await fetch(`${this.KONG_ADMIN_URL}/status`, {
+                method: "GET",
+                signal: AbortSignal.timeout(5000),
+            });
+            if (res.ok) {
+                logger.info(`[GatewayService] Kong Admin API is reachable at ${this.KONG_ADMIN_URL}`);
+                return true;
+            }
+            logger.warn(`[GatewayService] Kong Admin API returned ${res.status} at ${this.KONG_ADMIN_URL}`);
+            return false;
+        } catch (error: unknown) {
+            const msg = error instanceof Error ? error.message : String(error);
+            logger.error(`[GatewayService] Kong Admin API is unreachable at ${this.KONG_ADMIN_URL}: ${msg}`);
+            logger.error(`[GatewayService] Ensure Kong is running and KONG_ADMIN_URL is correctly configured`);
+            return false;
+        }
+    }
+
     // --- Consumer & JWT ---
 
     async upsertCertificateForSnis(opts: {
