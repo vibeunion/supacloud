@@ -2167,6 +2167,17 @@ install_management_api() {
         cp -rf "${SCRIPT_DIR}/scripts/lib/"* "$SCRIPTS_INSTALL_DIR/"
         chmod +x "$SCRIPTS_INSTALL_DIR"/*.sh
         log_info "Underlying script link ready: $SCRIPTS_INSTALL_DIR"
+
+    # 2b. Copy database schema files (required for project provisioning)
+    local SCHEMA_SRC="${SCRIPT_DIR}/packages/management-api/src/db/schemas"
+    local SCHEMA_DST="/opt/supacloud/packages/management-api/src/db/schemas"
+    if [[ -d "$SCHEMA_SRC" ]]; then
+        mkdir -p "$SCHEMA_DST"
+        cp -rf "$SCHEMA_SRC"/* "$SCHEMA_DST/"
+        log_info "Database schema files deployed to $SCHEMA_DST"
+    else
+        log_warn "Schema source directory not found: $SCHEMA_SRC"
+    fi
     fi
 
     # 3. Generate management credentials
@@ -2231,6 +2242,7 @@ PG_USER=postgres
 PG_DATABASE=postgres
 PGPASSWORD=${POSTGRES_PASSWORD}
 SECRETS_ENCRYPTION_KEY=${SECRETS_ENCRYPTION_KEY}
+SUPABASE_SCHEMA_PATH=/opt/supacloud/packages/management-api/src/db/schemas/supabase.sql
 ACME_CLIENT=lego
 LEGO_BIN=${LEGO_BIN:-lego}
 ACME_STATE_DIR=${ACME_STATE_DIR:-/var/lib/supacloud/lego}
