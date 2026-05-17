@@ -1506,11 +1506,16 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 
         try {
             await Bun.write(tmpFile, ALTER_TENANT_SQL);
-            await $`psql ${dbUrl} -f ${tmpFile}`.nothrow().quiet();
-            logger.info(`[tenant-runtime] Ensured tenant schema migrations for ${ref}`);
+            const result = await $`psql ${dbUrl} -f ${tmpFile}`.nothrow();
+            if (result.exitCode !== 0) {
+                const stderr = result.stderr.toString().trim();
+                logger.error(`[tenant-runtime] Tenant schema migration FAILED for ${ref} (exitCode=${result.exitCode}): ${stderr}`);
+            } else {
+                logger.info(`[tenant-runtime] Ensured tenant schema migrations for ${ref}`);
+            }
         } catch (error: unknown) {
             const msg = error instanceof Error ? error.message : String(error);
-            logger.warn(`[tenant-runtime] Tenant schema migration warning for ${ref}: ${msg}`);
+            logger.error(`[tenant-runtime] Tenant schema migration error for ${ref}: ${msg}`);
         } finally {
             try { await $`rm -f ${tmpFile}`.nothrow().quiet(); } catch {}
         }
