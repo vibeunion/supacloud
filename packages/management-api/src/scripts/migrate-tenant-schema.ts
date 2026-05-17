@@ -212,6 +212,28 @@ DO $$ BEGIN ALTER TABLE auth.sessions ADD COLUMN IF NOT EXISTS not_after TIMESTA
 -- auth.one_time_tokens: add user_id column (old schema may lack this)
 DO $$ BEGIN ALTER TABLE auth.one_time_tokens ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
 
+-- auth.one_time_tokens: backfill user_id via relates_to -> auth.users.email
+UPDATE auth.one_time_tokens t
+SET user_id = u.id
+FROM auth.users u
+WHERE t.user_id IS NULL
+  AND u.email = t.relates_to;
+
+-- auth.one_time_tokens: clean up orphan rows that cannot be backfilled
+DELETE FROM auth.one_time_tokens WHERE user_id IS NULL;
+
+-- auth.one_time_tokens: enforce NOT NULL on user_id
+DO $$ BEGIN
+  ALTER TABLE auth.one_time_tokens ALTER COLUMN user_id SET NOT NULL;
+EXCEPTION WHEN others THEN NULL; END $$;
+
+-- auth.one_time_tokens: add FK constraint for tables that have the column but not the FK
+DO $$ BEGIN
+  ALTER TABLE auth.one_time_tokens
+    ADD CONSTRAINT one_time_tokens_user_id_fkey
+    FOREIGN KEY (user_id) REFERENCES auth.users ON DELETE CASCADE;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
 -- auth.identities: add email and phone columns (old schema may lack these)
 DO $$ BEGIN ALTER TABLE auth.identities ADD COLUMN IF NOT EXISTS email TEXT; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
 DO $$ BEGIN ALTER TABLE auth.identities ADD COLUMN IF NOT EXISTS phone TEXT; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
@@ -518,7 +540,57 @@ CREATE TABLE IF NOT EXISTS supabase_migrations.seed_files (
 );
 GRANT ALL ON ALL TABLES IN SCHEMA supabase_migrations TO postgres;
 
--- 16. Realtime WAL logical replication support
+-- 16. GraphQL fallback stub. Never replace the real pg_graphql RPC when it exists.
+CREATE SCHEMA IF NOT EXISTS graphql_public;
+GRANT USAGE ON SCHEMA graphql_public TO anon, authenticated, service_role;
+
+DO $graphql_fallback$
+BEGIN
+  IF to_regprocedure('graphql_public.graphql(text,text,jsonb,jsonb)') IS NULL
+     AND to_regprocedure('graphql_public.graphql(text,text,jsonb)') IS NULL THEN
+    EXECUTE $fn$
+      CREATE FUNCTION graphql_public.graphql(
+        "operationName" text DEFAULT NULL,
+        query text DEFAULT NULL,
+        variables jsonb DEFAULT NULL,
+        extensions jsonb DEFAULT NULL
+      )
+      RETURNS jsonb
+      LANGUAGE plpgsql
+      STABLE
+      AS $body$
+      BEGIN
+        IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_graphql') THEN
+          RETURN jsonb_build_object(
+            'errors', jsonb_build_array(
+              jsonb_build_object(
+                'message', 'pg_graphql is installed but the graphql function was not properly created. Re-run: CREATE EXTENSION pg_graphql CASCADE;'
+              )
+            )
+          );
+        END IF;
+
+        RETURN jsonb_build_object(
+          'errors', jsonb_build_array(
+            jsonb_build_object(
+              'message', 'GraphQL is not available on this project. The pg_graphql PostgreSQL extension is not installed on the host cluster.'
+            )
+          )
+        );
+      END;
+      $body$;
+    $fn$;
+  END IF;
+
+  IF to_regprocedure('graphql_public.graphql(text,text,jsonb,jsonb)') IS NOT NULL THEN
+    EXECUTE 'GRANT EXECUTE ON FUNCTION graphql_public.graphql(text,text,jsonb,jsonb) TO anon, authenticated, service_role';
+  ELSIF to_regprocedure('graphql_public.graphql(text,text,jsonb)') IS NOT NULL THEN
+    EXECUTE 'GRANT EXECUTE ON FUNCTION graphql_public.graphql(text,text,jsonb) TO anon, authenticated, service_role';
+  END IF;
+END;
+$graphql_fallback$;
+
+-- 17. Realtime WAL logical replication support
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_available_extensions WHERE name = 'wal2json') THEN

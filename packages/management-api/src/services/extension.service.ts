@@ -41,6 +41,20 @@ export class ExtensionService {
         const safeSchema = schema ? validatePgIdentifier(schema, 'schema') : null;
         const dbName = await resolveDbName(projectRef);
         const db = getProjectDb(dbName);
+        if (safeExt === "pg_graphql") {
+            const rows = await db`
+                SELECT installed_version
+                FROM pg_available_extensions
+                WHERE name = 'pg_graphql'
+            `;
+            const isInstalled = rows.some((row: { installed_version?: string | null }) => row.installed_version);
+            if (!isInstalled) {
+                await db.unsafe(`
+                    DROP FUNCTION IF EXISTS graphql_public.graphql(text, text, jsonb, jsonb);
+                    DROP FUNCTION IF EXISTS graphql_public.graphql(text, text, jsonb);
+                `);
+            }
+        }
         let sql = `CREATE EXTENSION IF NOT EXISTS "${safeExt}"`;
         if (safeSchema) sql += ` SCHEMA "${safeSchema}"`;
         if (version) sql += ` VERSION '${version.replace(/'/g, "''")}'`;
