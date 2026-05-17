@@ -2,13 +2,13 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
+function readRepoFile(relativePath: string): string {
+  return readFileSync(resolve(import.meta.dir, "../..", relativePath), "utf8");
+}
+
 describe("supabase bootstrap schema", () => {
   test("does not switch SQL role inside set_request_context", () => {
-    const schemaPath = resolve(
-      import.meta.dir,
-      "../../src/db/schemas/supabase.sql",
-    );
-    const schema = readFileSync(schemaPath, "utf8");
+    const schema = readRepoFile("src/db/schemas/supabase.sql");
     const start = schema.indexOf(
       "CREATE OR REPLACE FUNCTION public.set_request_context()",
     );
@@ -22,5 +22,49 @@ describe("supabase bootstrap schema", () => {
       "PERFORM set_config('request.jwt.claim.role', role_claim, true);",
     );
     expect(fnBody).not.toContain("SET LOCAL ROLE");
+  });
+
+  test("tenant schema migration adds columns before dependent indexes", () => {
+    for (const filePath of [
+      "src/services/tenant-runtime.service.ts",
+      "src/scripts/migrate-tenant-schema.ts",
+    ]) {
+      const source = readRepoFile(filePath);
+      const userIdAlter = source.indexOf(
+        "ALTER TABLE auth.one_time_tokens ADD COLUMN IF NOT EXISTS user_id",
+      );
+      const userIdIndex = source.indexOf(
+        "CREATE UNIQUE INDEX IF NOT EXISTS one_time_tokens_user_id_token_type_key",
+      );
+
+      expect(userIdAlter).toBeGreaterThanOrEqual(0);
+      expect(userIdIndex).toBeGreaterThanOrEqual(0);
+      expect(userIdAlter).toBeLessThan(userIdIndex);
+    }
+  });
+
+  test("tenant runtime migration stops on psql errors", () => {
+    const source = readRepoFile("src/services/tenant-runtime.service.ts");
+
+    expect(source).toContain("-v ON_ERROR_STOP=1");
+    expect(source).toContain("throw new Error(`psql exited with code");
+  });
+
+  test("tenant schema migration creates realtime schema before realtime objects", () => {
+    for (const filePath of [
+      "src/services/tenant-runtime.service.ts",
+      "src/scripts/migrate-tenant-schema.ts",
+    ]) {
+      const source = readRepoFile(filePath);
+      const schema = source.indexOf("CREATE SCHEMA IF NOT EXISTS realtime;");
+      const messages = source.indexOf("CREATE TABLE IF NOT EXISTS realtime.messages");
+      const notifyFn = source.indexOf(
+        "CREATE OR REPLACE FUNCTION realtime.notify_postgres_changes()",
+      );
+
+      expect(schema).toBeGreaterThanOrEqual(0);
+      expect(messages).toBeGreaterThan(schema);
+      expect(notifyFn).toBeGreaterThan(schema);
+    }
   });
 });

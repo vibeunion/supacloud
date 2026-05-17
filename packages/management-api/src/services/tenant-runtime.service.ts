@@ -326,9 +326,6 @@ CREATE TABLE IF NOT EXISTS auth.one_time_tokens (
     updated_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
     CHECK (char_length(token_hash) > 0)
 );
-CREATE INDEX IF NOT EXISTS one_time_tokens_token_hash_hash_idx ON auth.one_time_tokens USING hash (token_hash);
-CREATE INDEX IF NOT EXISTS one_time_tokens_relates_to_hash_idx ON auth.one_time_tokens USING hash (relates_to);
-CREATE UNIQUE INDEX IF NOT EXISTS one_time_tokens_user_id_token_type_key ON auth.one_time_tokens (user_id, token_type);
 
 
 -- Post-CREATE TABLE column additions for existing tables with missing columns
@@ -342,11 +339,35 @@ DO $$ BEGIN ALTER TABLE auth.mfa_factors ADD COLUMN IF NOT EXISTS web_authn_cred
 DO $$ BEGIN ALTER TABLE auth.mfa_factors ADD COLUMN IF NOT EXISTS web_authn_aaguid UUID; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
 
 -- auth.mfa_amr_claims: add id and factor_id columns (old schema only had session_id + authentication_method composite PK)
-DO $$ BEGIN ALTER TABLE auth.mfa_amr_claims ADD COLUMN IF NOT EXISTS id UUID PRIMARY KEY DEFAULT gen_random_uuid(); EXCEPTION WHEN duplicate_column THEN NULL; END $$;
-DO $$ BEGIN ALTER TABLE auth.mfa_amr_claims ADD COLUMN IF NOT EXISTS factor_id UUID REFERENCES auth.mfa_factors(id) ON DELETE CASCADE; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+DO $$
+BEGIN
+  ALTER TABLE auth.mfa_amr_claims ADD COLUMN IF NOT EXISTS id UUID DEFAULT gen_random_uuid();
+  UPDATE auth.mfa_amr_claims SET id = gen_random_uuid() WHERE id IS NULL;
+  ALTER TABLE auth.mfa_amr_claims ALTER COLUMN id SET NOT NULL;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid = 'auth.mfa_amr_claims'::regclass AND contype = 'p'
+  ) THEN
+    ALTER TABLE auth.mfa_amr_claims ADD CONSTRAINT mfa_amr_claims_pkey PRIMARY KEY (id);
+  END IF;
+END $$;
+
+DO $$
+BEGIN
+  ALTER TABLE auth.mfa_amr_claims ADD COLUMN IF NOT EXISTS factor_id UUID;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid = 'auth.mfa_amr_claims'::regclass
+      AND conname = 'mfa_amr_claims_factor_id_fkey'
+  ) THEN
+    ALTER TABLE auth.mfa_amr_claims
+      ADD CONSTRAINT mfa_amr_claims_factor_id_fkey
+      FOREIGN KEY (factor_id) REFERENCES auth.mfa_factors(id) ON DELETE CASCADE;
+  END IF;
+END $$;
 
 -- auth.sessions: add aal and not_after columns (old schema had aal_level instead of aal)
-DO $$ BEGIN ALTER TABLE auth.sessions ADD COLUMN IF NOT EXISTS aal TEXT; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE auth.sessions ADD COLUMN IF NOT EXISTS aal VARCHAR(10); EXCEPTION WHEN duplicate_column THEN NULL; END $$;
 DO $$ BEGIN ALTER TABLE auth.sessions ADD COLUMN IF NOT EXISTS not_after TIMESTAMPTZ; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
 
 -- auth.one_time_tokens: add user_id column (old schema may lack this)
@@ -362,6 +383,10 @@ DO $$ BEGIN ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP
 
 -- auth.refresh_tokens: add session_id column (newer GoTrue needs this)
 DO $$ BEGIN ALTER TABLE auth.refresh_tokens ADD COLUMN IF NOT EXISTS session_id UUID REFERENCES auth.sessions(id) ON DELETE CASCADE; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+
+CREATE INDEX IF NOT EXISTS one_time_tokens_token_hash_hash_idx ON auth.one_time_tokens USING hash (token_hash);
+CREATE INDEX IF NOT EXISTS one_time_tokens_relates_to_hash_idx ON auth.one_time_tokens USING hash (relates_to);
+CREATE UNIQUE INDEX IF NOT EXISTS one_time_tokens_user_id_token_type_key ON auth.one_time_tokens (user_id, token_type);
 
 -- 8. Storage
 CREATE TABLE IF NOT EXISTS storage.s3_multipart_uploads (
@@ -392,6 +417,7 @@ CREATE INDEX IF NOT EXISTS idx_multipart_uploads_list ON storage.s3_multipart_up
 GRANT ALL ON ALL TABLES IN SCHEMA storage TO supabase_storage_admin;
 
 -- 9. Realtime
+CREATE SCHEMA IF NOT EXISTS realtime;
 CREATE TABLE IF NOT EXISTS realtime.messages (
     id BIGSERIAL PRIMARY KEY,
     topic TEXT NOT NULL,
@@ -1539,16 +1565,18 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 
         try {
             await Bun.write(tmpFile, ALTER_TENANT_SQL);
-            const result = await $`psql ${dbUrl} -f ${tmpFile}`.nothrow();
+            const result = await $`psql ${dbUrl} -v ON_ERROR_STOP=1 -f ${tmpFile}`.nothrow();
             if (result.exitCode !== 0) {
                 const stderr = result.stderr.toString().trim();
-                logger.error(`[tenant-runtime] Tenant schema migration FAILED for ${ref} (exitCode=${result.exitCode}): ${stderr}`);
-            } else {
-                logger.info(`[tenant-runtime] Ensured tenant schema migrations for ${ref}`);
+                const stdout = result.stdout.toString().trim();
+                const detail = stderr || stdout || "psql exited without output";
+                throw new Error(`psql exited with code ${result.exitCode}: ${detail}`);
             }
+            logger.info(`[tenant-runtime] Ensured tenant schema migrations for ${ref}`);
         } catch (error: unknown) {
             const msg = error instanceof Error ? error.message : String(error);
             logger.error(`[tenant-runtime] Tenant schema migration error for ${ref}: ${msg}`);
+            throw error;
         } finally {
             try { await $`rm -f ${tmpFile}`.nothrow().quiet(); } catch {}
         }
