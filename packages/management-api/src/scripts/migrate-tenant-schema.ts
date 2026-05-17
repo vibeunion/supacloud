@@ -210,7 +210,7 @@ DO $$ BEGIN ALTER TABLE auth.sessions ADD COLUMN IF NOT EXISTS aal VARCHAR(10); 
 DO $$ BEGIN ALTER TABLE auth.sessions ADD COLUMN IF NOT EXISTS not_after TIMESTAMPTZ; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
 
 -- auth.one_time_tokens: add user_id column (old schema may lack this)
-DO $$ BEGIN ALTER TABLE auth.one_time_tokens ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE auth.one_time_tokens ADD COLUMN IF NOT EXISTS user_id UUID; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
 
 -- auth.one_time_tokens: backfill user_id via relates_to -> auth.users.email
 UPDATE auth.one_time_tokens t
@@ -228,11 +228,22 @@ DO $$ BEGIN
 EXCEPTION WHEN others THEN NULL; END $$;
 
 -- auth.one_time_tokens: add FK constraint for tables that have the column but not the FK
-DO $$ BEGIN
-  ALTER TABLE auth.one_time_tokens
-    ADD CONSTRAINT one_time_tokens_user_id_fkey
-    FOREIGN KEY (user_id) REFERENCES auth.users ON DELETE CASCADE;
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint c
+    WHERE c.conrelid = 'auth.one_time_tokens'::regclass
+      AND c.confrelid = 'auth.users'::regclass
+      AND c.contype = 'f'
+      AND c.conkey = ARRAY[(SELECT attnum FROM pg_attribute WHERE attrelid = 'auth.one_time_tokens'::regclass AND attname = 'user_id')]
+      AND c.confkey = ARRAY[(SELECT attnum FROM pg_attribute WHERE attrelid = 'auth.users'::regclass AND attname = 'id')]
+  ) THEN
+    ALTER TABLE auth.one_time_tokens
+      ADD CONSTRAINT one_time_tokens_user_id_fkey
+      FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE;
+  END IF;
+END $$;
 
 -- auth.identities: add email and phone columns (old schema may lack these)
 DO $$ BEGIN ALTER TABLE auth.identities ADD COLUMN IF NOT EXISTS email TEXT; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
