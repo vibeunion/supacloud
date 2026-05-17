@@ -901,7 +901,6 @@ export class GatewayService {
                 write_timeout: 60000
             });
 
-            const baseDomain = config.baseDomain;
             const apiHosts = [hostIp];
 
             await this.ensureServiceAndRoute({
@@ -912,6 +911,37 @@ export class GatewayService {
                 projectRef: "_management",
                 stripPath: true,
                 corsOrigins: apiHosts,
+            });
+
+            // Patch the existing management API route instead of creating
+            // a second /api route with a different request-transformer config.
+            try {
+                const existingRoute = await this.kongRequest(`/routes/route-svc-management-api`, "GET");
+                if (existingRoute) {
+                    const existingHosts = Array.isArray(existingRoute.hosts)
+                        ? existingRoute.hosts.filter((host): host is string => typeof host === "string")
+                        : [];
+                    const desiredHosts = [hostIp, ...(config.baseDomain ? [config.baseDomain] : [])];
+                    const missingHosts = desiredHosts.filter(h => !existingHosts.includes(h));
+                    if (missingHosts.length > 0) {
+                        await this.kongRequest(`/routes/route-svc-management-api`, "PATCH", {
+                            hosts: [...existingHosts, ...missingHosts],
+                        });
+                        logger.info(`[GatewayService] Patched route-svc-management-api hosts: +${missingHosts.join(", ")}`);
+                    }
+                }
+            } catch {
+                // Route may not exist yet if no project has been created; skip silently
+            }
+
+            // Create Studio root route for bare IP access
+            await this.ensureServiceAndRoute({
+                name: "studio-root",
+                url: `http://${hostIp}:${config.port}`,
+                paths: ["/"],
+                hosts: [hostIp],
+                projectRef: "_system",
+                stripPath: false,
             });
 
             logger.info(`[GatewayService] Rebuilt global management routes to port ${config.port}`);
