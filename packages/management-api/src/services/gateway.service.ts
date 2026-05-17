@@ -901,7 +901,6 @@ export class GatewayService {
                 write_timeout: 60000
             });
 
-            const baseDomain = config.baseDomain;
             const apiHosts = [hostIp];
 
             await this.ensureServiceAndRoute({
@@ -914,11 +913,14 @@ export class GatewayService {
                 corsOrigins: apiHosts,
             });
 
-                        // Patch existing management API route to include bare IP host
+            // Patch the existing management API route instead of creating
+            // a second /api route with a different request-transformer config.
             try {
                 const existingRoute = await this.kongRequest(`/routes/route-svc-management-api`, "GET");
                 if (existingRoute) {
-                    const existingHosts: string[] = existingRoute.hosts || [];
+                    const existingHosts = Array.isArray(existingRoute.hosts)
+                        ? existingRoute.hosts.filter((host): host is string => typeof host === "string")
+                        : [];
                     const desiredHosts = [hostIp, ...(config.baseDomain ? [config.baseDomain] : [])];
                     const missingHosts = desiredHosts.filter(h => !existingHosts.includes(h));
                     if (missingHosts.length > 0) {
