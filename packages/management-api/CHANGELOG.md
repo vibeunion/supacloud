@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.18.2](https://github.com/zuohuadong/supacloud/compare/management-api-v0.18.1...management-api-v0.18.2) (2026-05-17)
+
+
+### Bug Fixes
+
+* add Studio root route and management API route to setupMasterRoutes ([#123](https://github.com/zuohuadong/supacloud/issues/123)) ([1a3fb40](https://github.com/zuohuadong/supacloud/commit/1a3fb40a93077ca55ea41166a5a7f451b9ca2ede))
+* auto-run tenant schema migrations during startRuntime ([#121](https://github.com/zuohuadong/supacloud/issues/121)) ([ba4f8cb](https://github.com/zuohuadong/supacloud/commit/ba4f8cb96fbf98b927e556868f39d7cf73530571))
+
 ## [0.18.1](https://github.com/zuohuadong/supacloud/compare/management-api-v0.18.0...management-api-v0.18.1) (2026-05-16)
 
 
