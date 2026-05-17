@@ -1261,37 +1261,51 @@ CREATE UNIQUE INDEX IF NOT EXISTS one_time_tokens_user_id_token_type_key ON auth
 CREATE SCHEMA IF NOT EXISTS graphql_public;
 GRANT USAGE ON SCHEMA graphql_public TO anon, authenticated, service_role;
 
-CREATE OR REPLACE FUNCTION graphql_public.graphql(
-  "operationName" text DEFAULT NULL,
-  query text DEFAULT NULL,
-  variables jsonb DEFAULT NULL
-)
-RETURNS jsonb
-LANGUAGE plpgsql
-STABLE
-AS $$
+DO $graphql_fallback$
 BEGIN
-  IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_graphql') THEN
-    RETURN jsonb_build_object(
-      'errors', jsonb_build_array(
-        jsonb_build_object(
-          'message', 'pg_graphql is installed but the graphql function was not properly created. Re-run: CREATE EXTENSION pg_graphql CASCADE;'
-        )
+  IF to_regprocedure('graphql_public.graphql(text,text,jsonb,jsonb)') IS NULL
+     AND to_regprocedure('graphql_public.graphql(text,text,jsonb)') IS NULL THEN
+    EXECUTE $fn$
+      CREATE FUNCTION graphql_public.graphql(
+        "operationName" text DEFAULT NULL,
+        query text DEFAULT NULL,
+        variables jsonb DEFAULT NULL,
+        extensions jsonb DEFAULT NULL
       )
-    );
+      RETURNS jsonb
+      LANGUAGE plpgsql
+      STABLE
+      AS $body$
+      BEGIN
+        IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_graphql') THEN
+          RETURN jsonb_build_object(
+            'errors', jsonb_build_array(
+              jsonb_build_object(
+                'message', 'pg_graphql is installed but the graphql function was not properly created. Re-run: CREATE EXTENSION pg_graphql CASCADE;'
+              )
+            )
+          );
+        END IF;
+
+        RETURN jsonb_build_object(
+          'errors', jsonb_build_array(
+            jsonb_build_object(
+              'message', 'GraphQL is not available on this project. The pg_graphql PostgreSQL extension is not installed on the host cluster.'
+            )
+          )
+        );
+      END;
+      $body$;
+    $fn$;
   END IF;
 
-  RETURN jsonb_build_object(
-    'errors', jsonb_build_array(
-      jsonb_build_object(
-        'message', 'GraphQL is not available on this project. The pg_graphql PostgreSQL extension is not installed on the host cluster.'
-      )
-    )
-  );
+  IF to_regprocedure('graphql_public.graphql(text,text,jsonb,jsonb)') IS NOT NULL THEN
+    EXECUTE 'GRANT EXECUTE ON FUNCTION graphql_public.graphql(text,text,jsonb,jsonb) TO anon, authenticated, service_role';
+  ELSIF to_regprocedure('graphql_public.graphql(text,text,jsonb)') IS NOT NULL THEN
+    EXECUTE 'GRANT EXECUTE ON FUNCTION graphql_public.graphql(text,text,jsonb) TO anon, authenticated, service_role';
+  END IF;
 END;
-$$;
-
-GRANT EXECUTE ON FUNCTION graphql_public.graphql(text, text, jsonb) TO anon, authenticated, service_role;
+$graphql_fallback$;
 
 CREATE OR REPLACE FUNCTION auth.uid() returns uuid as $$ select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid; $$ language sql stable;
 CREATE OR REPLACE FUNCTION auth.role() returns text as $$ select nullif(current_setting('request.jwt.claim.role', true), '')::text; $$ language sql stable;
@@ -1377,43 +1391,70 @@ CREATE UNIQUE INDEX IF NOT EXISTS one_time_tokens_user_id_token_type_key ON auth
 CREATE SCHEMA IF NOT EXISTS graphql_public;
 GRANT USAGE ON SCHEMA graphql_public TO anon, authenticated, service_role;
 
-CREATE OR REPLACE FUNCTION graphql_public.graphql(
-  "operationName" text DEFAULT NULL,
-  query text DEFAULT NULL,
-  variables jsonb DEFAULT NULL
-)
-RETURNS jsonb
-LANGUAGE plpgsql
-STABLE
-AS $$
+DO $graphql_fallback$
 BEGIN
-  IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_graphql') THEN
-    RETURN jsonb_build_object(
-      'errors', jsonb_build_array(
-        jsonb_build_object(
-          'message', 'pg_graphql is installed but the graphql function was not properly created. Re-run: CREATE EXTENSION pg_graphql CASCADE;'
-        )
+  IF to_regprocedure('graphql_public.graphql(text,text,jsonb,jsonb)') IS NULL
+     AND to_regprocedure('graphql_public.graphql(text,text,jsonb)') IS NULL THEN
+    EXECUTE $fn$
+      CREATE FUNCTION graphql_public.graphql(
+        "operationName" text DEFAULT NULL,
+        query text DEFAULT NULL,
+        variables jsonb DEFAULT NULL,
+        extensions jsonb DEFAULT NULL
       )
-    );
+      RETURNS jsonb
+      LANGUAGE plpgsql
+      STABLE
+      AS $body$
+      BEGIN
+        IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_graphql') THEN
+          RETURN jsonb_build_object(
+            'errors', jsonb_build_array(
+              jsonb_build_object(
+                'message', 'pg_graphql is installed but the graphql function was not properly created. Re-run: CREATE EXTENSION pg_graphql CASCADE;'
+              )
+            )
+          );
+        END IF;
+
+        RETURN jsonb_build_object(
+          'errors', jsonb_build_array(
+            jsonb_build_object(
+              'message', 'GraphQL is not available on this project. The pg_graphql PostgreSQL extension is not installed on the host cluster.'
+            )
+          )
+        );
+      END;
+      $body$;
+    $fn$;
   END IF;
 
-  RETURN jsonb_build_object(
-    'errors', jsonb_build_array(
-      jsonb_build_object(
-        'message', 'GraphQL is not available on this project. The pg_graphql PostgreSQL extension is not installed on the host cluster.'
-      )
-    )
-  );
+  IF to_regprocedure('graphql_public.graphql(text,text,jsonb,jsonb)') IS NOT NULL THEN
+    EXECUTE 'GRANT EXECUTE ON FUNCTION graphql_public.graphql(text,text,jsonb,jsonb) TO anon, authenticated, service_role';
+  ELSIF to_regprocedure('graphql_public.graphql(text,text,jsonb)') IS NOT NULL THEN
+    EXECUTE 'GRANT EXECUTE ON FUNCTION graphql_public.graphql(text,text,jsonb) TO anon, authenticated, service_role';
+  END IF;
 END;
-$$;
-
-GRANT EXECUTE ON FUNCTION graphql_public.graphql(text, text, jsonb) TO anon, authenticated, service_role;
+$graphql_fallback$;
 `.trim();
         const tmpFile = `/tmp/ott-graphql-migration-${ref}.sql`;
-        await Bun.write(tmpFile, migrationSql);
-        await $`psql ${dbUrl} -f ${tmpFile}`.nothrow().quiet();
-        await $`rm -f ${tmpFile}`.nothrow().quiet();
-        logger.info(`[tenant-runtime] Ensured one_time_tokens + graphql_public.graphql() for ${ref}`);
+        try {
+            await Bun.write(tmpFile, migrationSql);
+            const result = await $`psql ${dbUrl} -v ON_ERROR_STOP=1 -f ${tmpFile}`.nothrow();
+            if (result.exitCode !== 0) {
+                const stderr = result.stderr.toString().trim();
+                const stdout = result.stdout.toString().trim();
+                const detail = stderr || stdout || "psql exited without output";
+                throw new Error(`psql exited with code ${result.exitCode}: ${detail}`);
+            }
+            logger.info(`[tenant-runtime] Ensured one_time_tokens + graphql_public.graphql() for ${ref}`);
+        } catch (error: unknown) {
+            const msg = error instanceof Error ? error.message : String(error);
+            logger.error(`[tenant-runtime] one_time_tokens/graphql migration error for ${ref}: ${msg}`);
+            throw error;
+        } finally {
+            try { await $`rm -f ${tmpFile}`.nothrow().quiet(); } catch {}
+        }
     }
 
     private async ensurePostgrestPrerequest(ref: string): Promise<void> {

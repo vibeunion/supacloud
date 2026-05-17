@@ -540,41 +540,55 @@ CREATE TABLE IF NOT EXISTS supabase_migrations.seed_files (
 );
 GRANT ALL ON ALL TABLES IN SCHEMA supabase_migrations TO postgres;
 
--- 16. GraphQL fallback stub (only active when pg_graphql extension is NOT installed)
+-- 16. GraphQL fallback stub. Never replace the real pg_graphql RPC when it exists.
 CREATE SCHEMA IF NOT EXISTS graphql_public;
 GRANT USAGE ON SCHEMA graphql_public TO anon, authenticated, service_role;
 
-CREATE OR REPLACE FUNCTION graphql_public.graphql(
-  "operationName" text DEFAULT NULL,
-  query text DEFAULT NULL,
-  variables jsonb DEFAULT NULL
-)
-RETURNS jsonb
-LANGUAGE plpgsql
-STABLE
-AS $$
+DO $graphql_fallback$
 BEGIN
-  IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_graphql') THEN
-    RETURN jsonb_build_object(
-      'errors', jsonb_build_array(
-        jsonb_build_object(
-          'message', 'pg_graphql is installed but the graphql function was not properly created. Re-run: CREATE EXTENSION pg_graphql CASCADE;'
-        )
+  IF to_regprocedure('graphql_public.graphql(text,text,jsonb,jsonb)') IS NULL
+     AND to_regprocedure('graphql_public.graphql(text,text,jsonb)') IS NULL THEN
+    EXECUTE $fn$
+      CREATE FUNCTION graphql_public.graphql(
+        "operationName" text DEFAULT NULL,
+        query text DEFAULT NULL,
+        variables jsonb DEFAULT NULL,
+        extensions jsonb DEFAULT NULL
       )
-    );
+      RETURNS jsonb
+      LANGUAGE plpgsql
+      STABLE
+      AS $body$
+      BEGIN
+        IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_graphql') THEN
+          RETURN jsonb_build_object(
+            'errors', jsonb_build_array(
+              jsonb_build_object(
+                'message', 'pg_graphql is installed but the graphql function was not properly created. Re-run: CREATE EXTENSION pg_graphql CASCADE;'
+              )
+            )
+          );
+        END IF;
+
+        RETURN jsonb_build_object(
+          'errors', jsonb_build_array(
+            jsonb_build_object(
+              'message', 'GraphQL is not available on this project. The pg_graphql PostgreSQL extension is not installed on the host cluster.'
+            )
+          )
+        );
+      END;
+      $body$;
+    $fn$;
   END IF;
 
-  RETURN jsonb_build_object(
-    'errors', jsonb_build_array(
-      jsonb_build_object(
-        'message', 'GraphQL is not available on this project. The pg_graphql PostgreSQL extension is not installed on the host cluster.'
-      )
-    )
-  );
+  IF to_regprocedure('graphql_public.graphql(text,text,jsonb,jsonb)') IS NOT NULL THEN
+    EXECUTE 'GRANT EXECUTE ON FUNCTION graphql_public.graphql(text,text,jsonb,jsonb) TO anon, authenticated, service_role';
+  ELSIF to_regprocedure('graphql_public.graphql(text,text,jsonb)') IS NOT NULL THEN
+    EXECUTE 'GRANT EXECUTE ON FUNCTION graphql_public.graphql(text,text,jsonb) TO anon, authenticated, service_role';
+  END IF;
 END;
-$$;
-
-GRANT EXECUTE ON FUNCTION graphql_public.graphql(text, text, jsonb) TO anon, authenticated, service_role;
+$graphql_fallback$;
 
 -- 17. Realtime WAL logical replication support
 DO $$

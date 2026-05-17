@@ -50,6 +50,37 @@ describe("supabase bootstrap schema", () => {
     expect(source).toContain("throw new Error(`psql exited with code");
   });
 
+  test("one_time_tokens/graphql runtime migration stops on psql errors", () => {
+    const source = readRepoFile("src/services/tenant-runtime.service.ts");
+    const start = source.indexOf("private async ensureOneTimeTokensAndGraphQL");
+    const end = source.indexOf("private async ensurePostgrestPrerequest", start);
+
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(end).toBeGreaterThan(start);
+
+    const migrationBody = source.slice(start, end);
+    expect(migrationBody).toContain("-v ON_ERROR_STOP=1");
+    expect(migrationBody).toContain("throw new Error(`psql exited with code");
+  });
+
+  test("graphql fallback does not replace an existing pg_graphql RPC", () => {
+    for (const filePath of [
+      "src/db/schemas/supabase.sql",
+      "src/services/tenant-runtime.service.ts",
+      "src/scripts/migrate-tenant-schema.ts",
+    ]) {
+      const source = readRepoFile(filePath);
+
+      expect(source).not.toContain(
+        "CREATE OR REPLACE FUNCTION graphql_public.graphql",
+      );
+      expect(source).toContain(
+        "to_regprocedure('graphql_public.graphql(text,text,jsonb,jsonb)')",
+      );
+      expect(source).toContain("extensions jsonb DEFAULT NULL");
+    }
+  });
+
   test("tenant schema migration creates realtime schema before realtime objects", () => {
     for (const filePath of [
       "src/services/tenant-runtime.service.ts",
