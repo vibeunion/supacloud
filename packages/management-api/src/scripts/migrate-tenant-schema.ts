@@ -169,6 +169,33 @@ CREATE INDEX IF NOT EXISTS one_time_tokens_token_hash_hash_idx ON auth.one_time_
 CREATE INDEX IF NOT EXISTS one_time_tokens_relates_to_hash_idx ON auth.one_time_tokens USING hash (relates_to);
 CREATE UNIQUE INDEX IF NOT EXISTS one_time_tokens_user_id_token_type_key ON auth.one_time_tokens (user_id, token_type);
 
+-- 7a. one_time_tokens: 增量补列（防御旧表缺失 user_id 的情况）
+DO $$ BEGIN
+  ALTER TABLE auth.one_time_tokens ADD COLUMN user_id UUID;
+EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+
+-- 7b. 回填：将 user_id IS NULL 的行通过 relates_to 反查 auth.users 关联到正确用户
+UPDATE auth.one_time_tokens t
+SET user_id = u.id
+FROM auth.users u
+WHERE t.user_id IS NULL
+  AND u.email = t.relates_to;
+
+-- 7c. 清理无法回填的孤儿行（relates_to 无对应用户）
+DELETE FROM auth.one_time_tokens WHERE user_id IS NULL;
+
+-- 7d. 加 NOT NULL 约束（仅当列中无 NULL 时生效）
+DO $$ BEGIN
+  ALTER TABLE auth.one_time_tokens ALTER COLUMN user_id SET NOT NULL;
+EXCEPTION WHEN others THEN NULL; END $$;
+
+-- 7e. 加外键约束（防御旧表缺少 FK 的情况）
+DO $$ BEGIN
+  ALTER TABLE auth.one_time_tokens
+    ADD CONSTRAINT one_time_tokens_user_id_fkey
+    FOREIGN KEY (user_id) REFERENCES auth.users ON DELETE CASCADE;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
 -- 8. Storage
 CREATE TABLE IF NOT EXISTS storage.s3_multipart_uploads (
     id TEXT PRIMARY KEY,

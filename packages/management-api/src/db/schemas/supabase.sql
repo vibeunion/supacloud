@@ -3997,6 +3997,41 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 CREATE SCHEMA IF NOT EXISTS graphql_public;
 GRANT USAGE ON SCHEMA graphql_public TO anon, authenticated, service_role;
 
+-- 7a. GraphQL fallback stub (only active when pg_graphql extension is NOT installed)
+-- When pg_graphql extension is installed, CREATE EXTENSION ... CASCADE will overwrite this
+-- with the extension's own graphql() function.
+CREATE OR REPLACE FUNCTION graphql_public.graphql(
+  "operationName" text DEFAULT NULL,
+  query text DEFAULT NULL,
+  variables jsonb DEFAULT NULL
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+STABLE
+AS $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_graphql') THEN
+    RETURN jsonb_build_object(
+      'errors', jsonb_build_array(
+        jsonb_build_object(
+          'message', 'pg_graphql is installed but the graphql function was not properly created. Re-run: CREATE EXTENSION pg_graphql CASCADE;'
+        )
+      )
+    );
+  END IF;
+
+  RETURN jsonb_build_object(
+    'errors', jsonb_build_array(
+      jsonb_build_object(
+        'message', 'GraphQL is not available on this project. The pg_graphql PostgreSQL extension is not installed on the host cluster.'
+      )
+    )
+  );
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION graphql_public.graphql(text, text, jsonb) TO anon, authenticated, service_role;
+
 -- 8. Functions Schema (Webhooks)
 CREATE SCHEMA IF NOT EXISTS supabase_functions;
 GRANT USAGE ON SCHEMA supabase_functions TO postgres, anon, authenticated, service_role;
