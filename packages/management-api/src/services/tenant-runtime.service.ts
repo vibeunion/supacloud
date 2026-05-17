@@ -330,6 +330,39 @@ CREATE INDEX IF NOT EXISTS one_time_tokens_token_hash_hash_idx ON auth.one_time_
 CREATE INDEX IF NOT EXISTS one_time_tokens_relates_to_hash_idx ON auth.one_time_tokens USING hash (relates_to);
 CREATE UNIQUE INDEX IF NOT EXISTS one_time_tokens_user_id_token_type_key ON auth.one_time_tokens (user_id, token_type);
 
+
+-- Post-CREATE TABLE column additions for existing tables with missing columns
+-- These handle the case where CREATE TABLE IF NOT EXISTS skips because the table
+-- already exists but with an older schema that lacks new columns.
+
+-- auth.mfa_factors: add columns needed by GoTrue v2.x
+DO $$ BEGIN ALTER TABLE auth.mfa_factors ADD COLUMN IF NOT EXISTS phone TEXT; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE auth.mfa_factors ADD COLUMN IF NOT EXISTS last_challenged_at TIMESTAMPTZ; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE auth.mfa_factors ADD COLUMN IF NOT EXISTS web_authn_credential JSONB; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE auth.mfa_factors ADD COLUMN IF NOT EXISTS web_authn_aaguid UUID; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+
+-- auth.mfa_amr_claims: add id and factor_id columns (old schema only had session_id + authentication_method composite PK)
+DO $$ BEGIN ALTER TABLE auth.mfa_amr_claims ADD COLUMN IF NOT EXISTS id UUID PRIMARY KEY DEFAULT gen_random_uuid(); EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE auth.mfa_amr_claims ADD COLUMN IF NOT EXISTS factor_id UUID REFERENCES auth.mfa_factors(id) ON DELETE CASCADE; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+
+-- auth.sessions: add aal and not_after columns (old schema had aal_level instead of aal)
+DO $$ BEGIN ALTER TABLE auth.sessions ADD COLUMN IF NOT EXISTS aal TEXT; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE auth.sessions ADD COLUMN IF NOT EXISTS not_after TIMESTAMPTZ; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+
+-- auth.one_time_tokens: add user_id column (old schema may lack this)
+DO $$ BEGIN ALTER TABLE auth.one_time_tokens ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+
+-- auth.identities: add email and phone columns (old schema may lack these)
+DO $$ BEGIN ALTER TABLE auth.identities ADD COLUMN IF NOT EXISTS email TEXT; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE auth.identities ADD COLUMN IF NOT EXISTS phone TEXT; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+
+-- auth.users: add is_sso_user and deleted_at columns
+DO $$ BEGIN ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS is_sso_user BOOLEAN DEFAULT FALSE; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+
+-- auth.refresh_tokens: add session_id column (newer GoTrue needs this)
+DO $$ BEGIN ALTER TABLE auth.refresh_tokens ADD COLUMN IF NOT EXISTS session_id UUID REFERENCES auth.sessions(id) ON DELETE CASCADE; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+
 -- 8. Storage
 CREATE TABLE IF NOT EXISTS storage.s3_multipart_uploads (
     id TEXT PRIMARY KEY,
