@@ -914,15 +914,23 @@ export class GatewayService {
                 corsOrigins: apiHosts,
             });
 
-                        // Create management API route (/api path with strip_path)
-            await this.ensureServiceAndRoute({
-                name: "management-api",
-                url: `http://${hostIp}:${config.port}`,
-                paths: ["/api"],
-                hosts: [hostIp, config.baseDomain || `${hostIp}.nip.io`].filter(Boolean),
-                projectRef: "_system",
-                stripPath: true,
-            });
+                        // Patch existing management API route to include bare IP host
+            try {
+                const existingRoute = await this.kongRequest(`/routes/route-svc-management-api`, "GET");
+                if (existingRoute) {
+                    const existingHosts: string[] = existingRoute.hosts || [];
+                    const desiredHosts = [hostIp, ...(config.baseDomain ? [config.baseDomain] : [])];
+                    const missingHosts = desiredHosts.filter(h => !existingHosts.includes(h));
+                    if (missingHosts.length > 0) {
+                        await this.kongRequest(`/routes/route-svc-management-api`, "PATCH", {
+                            hosts: [...existingHosts, ...missingHosts],
+                        });
+                        logger.info(`[GatewayService] Patched route-svc-management-api hosts: +${missingHosts.join(", ")}`);
+                    }
+                }
+            } catch {
+                // Route may not exist yet if no project has been created; skip silently
+            }
 
             // Create Studio root route for bare IP access
             await this.ensureServiceAndRoute({
