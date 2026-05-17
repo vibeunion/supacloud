@@ -1233,6 +1233,66 @@ CREATE TABLE IF NOT EXISTS auth.schema_migrations (
     CONSTRAINT schema_migrations_pkey PRIMARY KEY ("version")
 );
 
+DO $$ BEGIN
+  CREATE TYPE auth.one_time_token_type AS ENUM (
+    'confirmation_token',
+    'reauthentication_token',
+    'recovery_token',
+    'email_change_token_new',
+    'email_change_token_current',
+    'phone_change_token'
+  );
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+CREATE TABLE IF NOT EXISTS auth.one_time_tokens (
+    id UUID PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES auth.users ON DELETE CASCADE,
+    token_type auth.one_time_token_type NOT NULL,
+    token_hash TEXT NOT NULL,
+    relates_to TEXT NOT NULL,
+    created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
+    CHECK (char_length(token_hash) > 0)
+);
+CREATE INDEX IF NOT EXISTS one_time_tokens_token_hash_hash_idx ON auth.one_time_tokens USING hash (token_hash);
+CREATE INDEX IF NOT EXISTS one_time_tokens_relates_to_hash_idx ON auth.one_time_tokens USING hash (relates_to);
+CREATE UNIQUE INDEX IF NOT EXISTS one_time_tokens_user_id_token_type_key ON auth.one_time_tokens (user_id, token_type);
+
+CREATE SCHEMA IF NOT EXISTS graphql_public;
+GRANT USAGE ON SCHEMA graphql_public TO anon, authenticated, service_role;
+
+CREATE OR REPLACE FUNCTION graphql_public.graphql(
+  "operationName" text DEFAULT NULL,
+  query text DEFAULT NULL,
+  variables jsonb DEFAULT NULL
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+STABLE
+AS $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_graphql') THEN
+    RETURN jsonb_build_object(
+      'errors', jsonb_build_array(
+        jsonb_build_object(
+          'message', 'pg_graphql is installed but the graphql function was not properly created. Re-run: CREATE EXTENSION pg_graphql CASCADE;'
+        )
+      )
+    );
+  END IF;
+
+  RETURN jsonb_build_object(
+    'errors', jsonb_build_array(
+      jsonb_build_object(
+        'message', 'GraphQL is not available on this project. The pg_graphql PostgreSQL extension is not installed on the host cluster.'
+      )
+    )
+  );
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION graphql_public.graphql(text, text, jsonb) TO anon, authenticated, service_role;
+
 CREATE OR REPLACE FUNCTION auth.uid() returns uuid as $$ select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid; $$ language sql stable;
 CREATE OR REPLACE FUNCTION auth.role() returns text as $$ select nullif(current_setting('request.jwt.claim.role', true), '')::text; $$ language sql stable;
 
@@ -1261,6 +1321,99 @@ ON CONFLICT DO NOTHING;
             await $`psql ${dbUrl} -f ${tmpFile}`.nothrow().quiet();
             await $`rm -f ${tmpFile}`.nothrow().quiet();
         }
+    }
+
+    private async ensureOneTimeTokensAndGraphQL(ref: string): Promise<void> {
+        const dbName = await resolveDbName(ref);
+        const dbUrl = `postgres://postgres:${config.pgPassword}@${this.PG_HOST}:${this.PG_PORT}/${dbName}`;
+
+        const migrationSql = `
+DO $$ BEGIN
+  CREATE TYPE auth.one_time_token_type AS ENUM (
+    'confirmation_token',
+    'reauthentication_token',
+    'recovery_token',
+    'email_change_token_new',
+    'email_change_token_current',
+    'phone_change_token'
+  );
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+CREATE TABLE IF NOT EXISTS auth.one_time_tokens (
+    id UUID PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES auth.users ON DELETE CASCADE,
+    token_type auth.one_time_token_type NOT NULL,
+    token_hash TEXT NOT NULL,
+    relates_to TEXT NOT NULL,
+    created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
+    CHECK (char_length(token_hash) > 0)
+);
+
+DO $$ BEGIN ALTER TABLE auth.one_time_tokens ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+
+UPDATE auth.one_time_tokens t
+SET user_id = u.id
+FROM auth.users u
+WHERE t.user_id IS NULL
+  AND u.email = t.relates_to;
+
+DELETE FROM auth.one_time_tokens WHERE user_id IS NULL;
+
+DO $$ BEGIN
+  ALTER TABLE auth.one_time_tokens ALTER COLUMN user_id SET NOT NULL;
+EXCEPTION WHEN others THEN NULL; END $$;
+
+DO $$ BEGIN
+  ALTER TABLE auth.one_time_tokens
+    ADD CONSTRAINT one_time_tokens_user_id_fkey
+    FOREIGN KEY (user_id) REFERENCES auth.users ON DELETE CASCADE;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+CREATE INDEX IF NOT EXISTS one_time_tokens_token_hash_hash_idx ON auth.one_time_tokens USING hash (token_hash);
+CREATE INDEX IF NOT EXISTS one_time_tokens_relates_to_hash_idx ON auth.one_time_tokens USING hash (relates_to);
+CREATE UNIQUE INDEX IF NOT EXISTS one_time_tokens_user_id_token_type_key ON auth.one_time_tokens (user_id, token_type);
+
+CREATE SCHEMA IF NOT EXISTS graphql_public;
+GRANT USAGE ON SCHEMA graphql_public TO anon, authenticated, service_role;
+
+CREATE OR REPLACE FUNCTION graphql_public.graphql(
+  "operationName" text DEFAULT NULL,
+  query text DEFAULT NULL,
+  variables jsonb DEFAULT NULL
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+STABLE
+AS $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_graphql') THEN
+    RETURN jsonb_build_object(
+      'errors', jsonb_build_array(
+        jsonb_build_object(
+          'message', 'pg_graphql is installed but the graphql function was not properly created. Re-run: CREATE EXTENSION pg_graphql CASCADE;'
+        )
+      )
+    );
+  END IF;
+
+  RETURN jsonb_build_object(
+    'errors', jsonb_build_array(
+      jsonb_build_object(
+        'message', 'GraphQL is not available on this project. The pg_graphql PostgreSQL extension is not installed on the host cluster.'
+      )
+    )
+  );
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION graphql_public.graphql(text, text, jsonb) TO anon, authenticated, service_role;
+`.trim();
+        const tmpFile = `/tmp/ott-graphql-migration-${ref}.sql`;
+        await Bun.write(tmpFile, migrationSql);
+        await $`psql ${dbUrl} -f ${tmpFile}`.nothrow().quiet();
+        await $`rm -f ${tmpFile}`.nothrow().quiet();
+        logger.info(`[tenant-runtime] Ensured one_time_tokens + graphql_public.graphql() for ${ref}`);
     }
 
     private async ensurePostgrestPrerequest(ref: string): Promise<void> {
@@ -1295,6 +1448,7 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
         await this.ensureBinaries();
         await this.installSystemdTemplate();
         await this.ensureAuthSchema(ref);
+        await this.ensureOneTimeTokensAndGraphQL(ref);
         await this.ensureTenantSchemaMigrations(ref);
         await this.ensurePostgrestPrerequest(ref);
 
