@@ -914,6 +914,26 @@ export class GatewayService {
                 corsOrigins: apiHosts,
             });
 
+                        // Create management API route (/api path with strip_path)
+            await this.ensureServiceAndRoute({
+                name: "management-api",
+                url: `http://${hostIp}:${config.port}`,
+                paths: ["/api"],
+                hosts: [hostIp, config.baseDomain || `${hostIp}.nip.io`].filter(Boolean),
+                projectRef: "_system",
+                stripPath: true,
+            });
+
+            // Create Studio root route for bare IP access
+            await this.ensureServiceAndRoute({
+                name: "studio-root",
+                url: `http://${hostIp}:${config.port}`,
+                paths: ["/"],
+                hosts: [hostIp],
+                projectRef: "_system",
+                stripPath: false,
+            });
+
             logger.info(`[GatewayService] Rebuilt global management routes to port ${config.port}`);
         } catch (error: unknown) {
             const msg = error instanceof Error ? error.message : String(error);
