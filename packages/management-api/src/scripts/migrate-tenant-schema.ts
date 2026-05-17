@@ -6,18 +6,35 @@ const ALTER_TENANT_SQL = `
 -- 1. auth.users adds
 DO $$ BEGIN ALTER TABLE auth.users ADD COLUMN is_anonymous BOOLEAN NOT NULL DEFAULT false; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
 
+-- 1b. Create enum types early (needed by section 2 ALTER TABLE auth.sessions ADD COLUMN aal)
+DO $$ BEGIN CREATE TYPE auth.factor_type AS ENUM('totp', 'webauthn'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE TYPE auth.factor_status AS ENUM('unverified', 'verified'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE TYPE auth.aal_level AS ENUM('aal1', 'aal2', 'aal3'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
 -- 2. auth.sessions adds
 -- Rename legacy columns to match current GoTrue binary schema
 -- Older GoTrue versions used aal_level/ip_address; current binary expects aal/ip
--- sqlx StructScan fails on unrecognized columns, so we must rename them
+-- sqlx StructScan fails on unrecognized columns, so we must handle old columns.
+-- If target column already exists alongside old one, copy data then drop old.
+-- If only old column exists, rename it. If only new exists, nothing to do.
 DO $$ BEGIN
   IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'auth' AND table_name = 'sessions' AND column_name = 'aal_level') THEN
-    ALTER TABLE auth.sessions RENAME COLUMN aal_level TO aal;
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'auth' AND table_name = 'sessions' AND column_name = 'aal') THEN
+      UPDATE auth.sessions SET aal = aal_level WHERE aal IS NULL AND aal_level IS NOT NULL;
+      ALTER TABLE auth.sessions DROP COLUMN aal_level;
+    ELSE
+      ALTER TABLE auth.sessions RENAME COLUMN aal_level TO aal;
+    END IF;
   END IF;
 END $$;
 DO $$ BEGIN
   IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'auth' AND table_name = 'sessions' AND column_name = 'ip_address') THEN
-    ALTER TABLE auth.sessions RENAME COLUMN ip_address TO ip;
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'auth' AND table_name = 'sessions' AND column_name = 'ip') THEN
+      UPDATE auth.sessions SET ip = ip_address WHERE ip IS NULL AND ip_address IS NOT NULL;
+      ALTER TABLE auth.sessions DROP COLUMN ip_address;
+    ELSE
+      ALTER TABLE auth.sessions RENAME COLUMN ip_address TO ip;
+    END IF;
   END IF;
 END $$;
 DO $$ BEGIN ALTER TABLE auth.sessions ADD COLUMN tag VARCHAR(255); EXCEPTION WHEN duplicate_column THEN NULL; END $$;
@@ -34,9 +51,7 @@ DO $$ BEGIN ALTER TABLE storage.objects ADD COLUMN user_metadata JSONB; EXCEPTIO
 DO $$ BEGIN ALTER TABLE storage.objects ADD COLUMN version UUID NOT NULL DEFAULT gen_random_uuid(); EXCEPTION WHEN duplicate_column THEN NULL; END $$;
 
 -- 4. MFA schemas
-DO $$ BEGIN CREATE TYPE auth.factor_type AS ENUM('totp', 'webauthn'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-DO $$ BEGIN CREATE TYPE auth.factor_status AS ENUM('unverified', 'verified'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-DO $$ BEGIN CREATE TYPE auth.aal_level AS ENUM('aal1', 'aal2', 'aal3'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+-- Enum types (factor_type, factor_status, aal_level) created in section 1b above
 
 CREATE TABLE IF NOT EXISTS auth.mfa_factors(
        id UUID NOT NULL,
@@ -194,6 +209,8 @@ CREATE TABLE IF NOT EXISTS auth.one_time_tokens (
 );
 CREATE INDEX IF NOT EXISTS one_time_tokens_token_hash_hash_idx ON auth.one_time_tokens USING hash (token_hash);
 CREATE INDEX IF NOT EXISTS one_time_tokens_relates_to_hash_idx ON auth.one_time_tokens USING hash (relates_to);
+-- Ensure user_id column exists before creating unique index (CREATE TABLE IF NOT EXISTS skips if table exists)
+DO $$ BEGIN ALTER TABLE auth.one_time_tokens ADD COLUMN IF NOT EXISTS user_id UUID NOT NULL DEFAULT gen_random_uuid(); EXCEPTION WHEN duplicate_column THEN NULL; END $$;
 CREATE UNIQUE INDEX IF NOT EXISTS one_time_tokens_user_id_token_type_key ON auth.one_time_tokens (user_id, token_type);
 
 -- Add missing columns for current GoTrue version (CREATE TABLE IF NOT EXISTS skips if table exists)
