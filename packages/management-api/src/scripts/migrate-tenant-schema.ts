@@ -7,10 +7,27 @@ const ALTER_TENANT_SQL = `
 DO $$ BEGIN ALTER TABLE auth.users ADD COLUMN is_anonymous BOOLEAN NOT NULL DEFAULT false; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
 
 -- 2. auth.sessions adds
+-- Rename legacy columns to match current GoTrue binary schema
+-- Older GoTrue versions used aal_level/ip_address; current binary expects aal/ip
+-- sqlx StructScan fails on unrecognized columns, so we must rename them
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'auth' AND table_name = 'sessions' AND column_name = 'aal_level') THEN
+    ALTER TABLE auth.sessions RENAME COLUMN aal_level TO aal;
+  END IF;
+END $$;
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'auth' AND table_name = 'sessions' AND column_name = 'ip_address') THEN
+    ALTER TABLE auth.sessions RENAME COLUMN ip_address TO ip;
+  END IF;
+END $$;
 DO $$ BEGIN ALTER TABLE auth.sessions ADD COLUMN tag VARCHAR(255); EXCEPTION WHEN duplicate_column THEN NULL; END $$;
 DO $$ BEGIN ALTER TABLE auth.sessions ADD COLUMN refreshed_at TIMESTAMPTZ; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
 DO $$ BEGIN ALTER TABLE auth.sessions ADD COLUMN user_agent TEXT; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
 DO $$ BEGIN ALTER TABLE auth.sessions ADD COLUMN ip TEXT; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE auth.sessions ADD COLUMN aal auth.aal_level; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE auth.sessions ADD COLUMN not_after TIMESTAMPTZ; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+-- Drop columns not recognized by current GoTrue binary (causes sqlx StructScan "missing destination name" errors)
+DO $$ BEGIN ALTER TABLE auth.sessions DROP COLUMN IF EXISTS oauth_client_id; EXCEPTION WHEN OTHERS THEN NULL; END $$;
 
 -- 3. storage.objects adds
 DO $$ BEGIN ALTER TABLE storage.objects ADD COLUMN user_metadata JSONB; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
@@ -36,6 +53,12 @@ CREATE TABLE IF NOT EXISTS auth.mfa_factors(
 CREATE UNIQUE INDEX IF NOT EXISTS mfa_factors_user_friendly_name_unique ON auth.mfa_factors (friendly_name, user_id) WHERE trim(friendly_name) <> '';
 CREATE INDEX IF NOT EXISTS mfa_factors_user_id_idx ON auth.mfa_factors (user_id);
 
+-- Add missing columns for current GoTrue version (CREATE TABLE IF NOT EXISTS skips if table exists)
+DO $$ BEGIN ALTER TABLE auth.mfa_factors ADD COLUMN IF NOT EXISTS phone TEXT; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE auth.mfa_factors ADD COLUMN IF NOT EXISTS last_challenged_at TIMESTAMPTZ; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE auth.mfa_factors ADD COLUMN IF NOT EXISTS web_authn_credential JSONB; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE auth.mfa_factors ADD COLUMN IF NOT EXISTS web_authn_aaguid UUID; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+
 CREATE TABLE IF NOT EXISTS auth.mfa_challenges(
        id UUID NOT NULL,
        factor_id UUID NOT NULL,
@@ -54,6 +77,10 @@ CREATE TABLE IF NOT EXISTS auth.mfa_amr_claims(
     CONSTRAINT mfa_amr_claims_session_id_authentication_method_pkey UNIQUE(session_id, authentication_method),
     CONSTRAINT mfa_amr_claims_session_id_fkey FOREIGN KEY(session_id) REFERENCES auth.sessions(id) ON DELETE CASCADE
 );
+
+-- Add missing columns for current GoTrue version (CREATE TABLE IF NOT EXISTS skips if table exists)
+DO $$ BEGIN ALTER TABLE auth.mfa_amr_claims ADD COLUMN IF NOT EXISTS id UUID; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE auth.mfa_amr_claims ADD COLUMN IF NOT EXISTS factor_id UUID; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
 
 -- 5. SSO schemas
 CREATE TABLE IF NOT EXISTS auth.sso_providers (
@@ -169,6 +196,13 @@ CREATE INDEX IF NOT EXISTS one_time_tokens_token_hash_hash_idx ON auth.one_time_
 CREATE INDEX IF NOT EXISTS one_time_tokens_relates_to_hash_idx ON auth.one_time_tokens USING hash (relates_to);
 CREATE UNIQUE INDEX IF NOT EXISTS one_time_tokens_user_id_token_type_key ON auth.one_time_tokens (user_id, token_type);
 
+-- Add missing columns for current GoTrue version (CREATE TABLE IF NOT EXISTS skips if table exists)
+DO $$ BEGIN ALTER TABLE auth.refresh_tokens ADD COLUMN IF NOT EXISTS session_id UUID; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE auth.identities ADD COLUMN IF NOT EXISTS email VARCHAR(255); EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE auth.identities ADD COLUMN IF NOT EXISTS phone VARCHAR(255); EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS is_sso_user BOOLEAN NOT NULL DEFAULT false; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+
 -- 8. Storage
 CREATE TABLE IF NOT EXISTS storage.s3_multipart_uploads (
     id TEXT PRIMARY KEY,
@@ -196,6 +230,10 @@ CREATE TABLE IF NOT EXISTS storage.s3_multipart_uploads_parts (
 );
 CREATE INDEX IF NOT EXISTS idx_multipart_uploads_list ON storage.s3_multipart_uploads (bucket_id, (key COLLATE "C"), created_at ASC);
 GRANT ALL ON ALL TABLES IN SCHEMA storage TO supabase_storage_admin;
+
+GRANT USAGE ON SCHEMA storage TO anon, authenticated, service_role;
+GRANT ALL ON ALL TABLES IN SCHEMA storage TO anon, authenticated, service_role;
+GRANT ALL ON ALL SEQUENCES IN SCHEMA storage TO anon, authenticated, service_role;
 
 -- 9. Realtime
 CREATE TABLE IF NOT EXISTS realtime.messages (
@@ -237,6 +275,21 @@ CREATE TABLE IF NOT EXISTS supabase_functions.migrations (
     version TEXT PRIMARY KEY,
     inserted_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- 10b. GraphQL Public Schema (required by PostgREST v12+ for GraphQL endpoint)
+CREATE SCHEMA IF NOT EXISTS graphql_public;
+GRANT USAGE ON SCHEMA graphql_public TO postgres, anon, authenticated, service_role;
+CREATE OR REPLACE FUNCTION graphql_public.graphql(
+  "operationName" text DEFAULT null,
+  query text DEFAULT null,
+  variables jsonb DEFAULT null,
+  extensions jsonb DEFAULT null
+) RETURNS jsonb
+LANGUAGE sql STABLE SECURITY DEFINER
+AS $$
+  SELECT null::jsonb;
+$$;
+GRANT EXECUTE ON FUNCTION graphql_public.graphql(text, text, jsonb, jsonb) TO anon, authenticated, service_role;
 
 -- 11. Native Bun Realtime LISTEN/NOTIFY Emulation Triggers (P0-16 enrichment)
 -- This function emulates WAL-level postgres_changes by serializing full OLD/NEW records
