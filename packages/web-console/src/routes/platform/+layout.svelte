@@ -1,19 +1,20 @@
 <script lang="ts">
   import { page } from "$app/state";
   import { Package, HardDrive, Activity, SlidersHorizontal, BarChart3, Database, Wrench, Settings } from "lucide-svelte";
+  import { t } from "svelte-i18n";
 
   let { children } = $props();
 
-  const TABS = [
-    { id: "extensions", label: "扩展市场", icon: Package },
-    { id: "backups", label: "物理备份", icon: HardDrive },
-    { id: "tuning", label: "参数调优", icon: SlidersHorizontal },
-    { id: "monitoring", label: "Grafana 监控", icon: BarChart3 },
-    { id: "pooling", label: "连接池诊断", icon: Activity },
-    { id: "storage", label: "存储管理", icon: Database },
-    { id: "operations", label: "运维操作", icon: Wrench },
-    { id: "settings", label: "系统设置", icon: Settings },
-  ];
+  const TABS = $derived([
+    { id: "extensions", label: $t("Platform.extensions_market"), icon: Package },
+    { id: "backups", label: $t("Platform.backups_pitr"), icon: HardDrive },
+    { id: "tuning", label: $t("Platform.engine_tuning"), icon: SlidersHorizontal },
+    { id: "monitoring", label: $t("Platform.monitoring"), icon: BarChart3 },
+    { id: "pooling", label: $t("Platform.connection_pool"), icon: Activity },
+    { id: "storage", label: $t("Platform.storage_juicefs"), icon: Database },
+    { id: "operations", label: $t("Platform.operations_console"), icon: Wrench },
+    { id: "settings", label: $t("Platform.settings"), icon: Settings },
+  ]);
 
   const currentTab = $derived(page.url.pathname.split("/platform/")[1]?.split("/")[0] || "");
 </script>
@@ -22,8 +23,8 @@
   <div class="px-6 mb-6">
     <div class="flex items-center justify-between mb-4">
       <div>
-        <h1 class="text-2xl font-bold">平台管理</h1>
-        <p class="text-sm text-muted-foreground mt-1">Pigsty 基础设施级的全局管控面板</p>
+        <h1 class="text-2xl font-bold">{$t("Platform.title")}</h1>
+        <p class="text-sm text-muted-foreground mt-1">{$t("Platform.subtitle", { default: "Global control panel for Pigsty infrastructure." })}</p>
       </div>
       <span class="px-2 py-1 text-[10px] font-bold rounded-full bg-amber-500/10 text-amber-600 border border-amber-500/20">SYSTEM</span>
     </div>

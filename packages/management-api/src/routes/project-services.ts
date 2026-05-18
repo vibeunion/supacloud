@@ -219,7 +219,7 @@ export const projectServiceRoutes = new Elysia({ prefix: "/v1/projects" })
         postgrest: `supacloud-pgrst@${ref}`,
         rest: `supacloud-pgrst@${ref}`,
         gotrue: `supacloud-gotrue@${ref}`,
-        storage: `supacloud-storage@${ref}`,
+        storage: "supacloud-storage",
       };
       const sharedUnitMap: Record<string, string> = {
         postgresql: "patroni",

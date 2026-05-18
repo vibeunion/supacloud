@@ -14,7 +14,7 @@
   import { onMount, type Snippet, untrack } from "svelte";
   import { goto } from "$app/navigation";
   import { page } from "$app/stores";
-  import { isLoading, t, waitLocale } from 'svelte-i18n';
+  import { isLoading, t, waitLocale, locale } from 'svelte-i18n';
   import Sidebar from "$lib/components/Sidebar.svelte";
   import PlatformSidebar from "$lib/components/PlatformSidebar.svelte";
   import { ModeWatcher } from "mode-watcher";
@@ -97,7 +97,17 @@
   setRouterProvider(routerProvider);
   setChatProvider(chatProvider);
   setTheme("system");
-  setLocale("zh-CN");
+  const readLocale = () => {
+    if (typeof localStorage === "undefined") return "zh-CN";
+    return localStorage.getItem("selected-locale") || "zh-CN";
+  };
+
+  const mapToSvadminLocale = (value: string) => {
+    const normalized = value.toLowerCase();
+    return normalized.startsWith("zh") ? "zh-CN" : "en";
+  };
+
+  setLocale(mapToSvadminLocale(readLocale()));
   
   let lastResourcesKey = "";
 
@@ -120,6 +130,11 @@
   });
 
   onMount(async () => {
+    const unsubscribeLocale = locale.subscribe((value) => {
+      if (!value) return;
+      setLocale(mapToSvadminLocale(value));
+    });
+
     // Wait for i18n to be ready
     try { await waitLocale(); } catch { /* non-critical */ }
     const guardTimer = setTimeout(() => {
@@ -130,6 +145,7 @@
     if (isRawPage) {
       projectsLoading = false;
       clearTimeout(guardTimer);
+      unsubscribeLocale();
       return;
     }
 
@@ -138,6 +154,7 @@
       projectsLoading = false;
       window.location.href = "/login";
       clearTimeout(guardTimer);
+      unsubscribeLocale();
       return;
     }
 
@@ -154,12 +171,14 @@
         projectsLoading = false;
         window.location.href = "/login";
         clearTimeout(guardTimer);
+        unsubscribeLocale();
         return;
       }
     } catch {
       projectsLoading = false;
       window.location.href = "/login";
       clearTimeout(guardTimer);
+      unsubscribeLocale();
       return;
     }
 
@@ -171,7 +190,7 @@
         projects = await response.json();
       }
     } catch (err: unknown) {
-      toast.error("网络错误 during project loading");
+      toast.error($t("Common.network_error") || "Network error");
     } finally {
       projectsLoading = false;
       clearTimeout(guardTimer);
@@ -180,6 +199,10 @@
     if (!projectsLoading && !projects.length && window.location.pathname.includes('/project/')) {
        goto('/');
     }
+
+    return () => {
+      unsubscribeLocale();
+    };
   });
 </script>
 
@@ -196,11 +219,11 @@
     {:else if isCoreLoading}
       <div class="flex-1 flex flex-col items-center justify-center space-y-4">
         <div class="w-12 h-12 border-4 border-brand border-t-transparent rounded-full animate-spin"></div>
-        <p class="text-muted-foreground animate-pulse text-sm">Initializing Studio Core...</p>
+        <p class="text-muted-foreground animate-pulse text-sm">{$t("Common.loading") || "Loading..."}</p>
       </div>
     {:else if !isAuthenticated}
       <div class="flex-1 flex flex-col items-center justify-center space-y-4">
-        <p class="text-muted-foreground text-sm">正在跳转到登录页面…</p>
+        <p class="text-muted-foreground text-sm">{$t("Login.redirecting", { default: "Redirecting to login..." })}</p>
       </div>
     {:else}
       {#if isPlatformRoute}
@@ -213,9 +236,9 @@
         <div class="sticky top-0 z-40 flex h-16 shrink-0 items-center gap-x-4 border-b bg-background px-4 shadow-sm sm:gap-x-6 sm:px-6 lg:px-8">
           <div class="flex flex-1 gap-x-4 self-stretch lg:gap-x-6">
             <div class="flex items-center gap-2 text-sm text-muted-foreground">
-              <span class="hover:text-foreground cursor-pointer transition-colors">Default Organization</span>
+              <span class="hover:text-foreground cursor-pointer transition-colors">{$t("Dashboard.org_default") || "Default Organization"}</span>
               <span>/</span>
-              <span class="text-foreground font-medium">{isPlatformRoute ? 'Platform Admin' : (currentProject?.name || 'Home')}</span>
+              <span class="text-foreground font-medium">{isPlatformRoute ? ($t("Sidebar.platform_admin") || "Platform Admin") : (currentProject?.name || ($t("Project.home") || "Home"))}</span>
             </div>
           </div>
           <button

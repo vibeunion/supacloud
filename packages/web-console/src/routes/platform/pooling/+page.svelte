@@ -3,6 +3,7 @@
 
   import { onMount } from "svelte";
   import { Loader2, Activity, RefreshCw, Trash2, AlertTriangle, Wifi, WifiOff } from "lucide-svelte";
+  import { locale } from "svelte-i18n";
 
   interface PoolInfo {
     database: string;
@@ -29,6 +30,8 @@
   let clients: ClientInfo[] = $state.raw([]);
   let isLoading = $state(true);
   let actionMsg: string | null = $state.raw(null);
+  const isZh = $derived(($locale ?? "").toLowerCase().startsWith("zh"));
+  const tr = (zh: string, en: string) => isZh ? zh : en;
 
   async function runBouncerSql(sql: string): Promise<Record<string, unknown>[]> {
     try {
@@ -71,11 +74,11 @@
   }
 
   async function killIdleConnections() {
-    if (!confirm("确定要断开所有空闲连接吗？这不会影响正在执行查询的连接。")) return;
+    if (!confirm(tr("确定要断开所有空闲连接吗？这不会影响正在执行查询的连接。", "Disconnect all idle connections? This will not affect currently executing queries."))) return;
     actionMsg = null;
     try {
       const result = await runBouncerSql(`SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE state = 'idle' AND backend_type = 'client backend' AND pid != pg_backend_pid();`);
-      actionMsg = `✅ 已断开 ${result.length} 个空闲连接`;
+      actionMsg = `✅ ${tr("已断开", "Disconnected")} ${result.length} ${tr("个空闲连接", "idle connections")}`;
     } catch (err: unknown) {
       actionMsg = `❌ ${(err instanceof Error ? err.message : String(err))}`;
     }
@@ -86,7 +89,7 @@
   async function terminateConnection(addr: string, port: string) {
     try {
       await runBouncerSql(`SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE client_addr = '${addr}' AND client_port = ${port};`);
-      actionMsg = `✅ 已断开来自 ${addr}:${port} 的连接`;
+      actionMsg = `✅ ${tr("已断开来自", "Disconnected connection from")} ${addr}:${port}`;
       setTimeout(() => actionMsg = null, 4000);
       await fetchDiagnostics();
     } catch {}
@@ -103,15 +106,15 @@
 <div class="space-y-4">
   <div class="flex items-center justify-between">
     <div>
-      <h2 class="text-xl font-bold">连接池诊断</h2>
-      <p class="text-xs text-muted-foreground mt-1">实时监控 PgBouncer / PostgreSQL 连接池状况，快速定位连接泄露</p>
+      <h2 class="text-xl font-bold">{tr("连接池诊断", "Connection Pool Diagnostics")}</h2>
+      <p class="text-xs text-muted-foreground mt-1">{tr("实时监控 PgBouncer / PostgreSQL 连接池状况，快速定位连接泄露", "Monitor PgBouncer / PostgreSQL pooling status in real time and quickly locate connection leaks")}</p>
     </div>
     <div class="flex items-center gap-2">
       <button onclick={killIdleConnections} class="flex items-center gap-2 px-3 py-2 text-xs rounded-lg border border-red-500/20 text-red-500 hover:bg-red-500/10 transition-colors">
-        <Trash2 size={12} /> 断开空闲连接
+        <Trash2 size={12} /> {tr("断开空闲连接", "Disconnect Idle")}
       </button>
       <button onclick={() => fetchDiagnostics()} class="flex items-center gap-2 px-3 py-2 text-xs rounded-lg border hover:bg-muted/50 transition-colors">
-        <RefreshCw size={12} /> 刷新
+        <RefreshCw size={12} /> {tr("刷新", "Refresh")}
       </button>
     </div>
   </div>
@@ -130,19 +133,19 @@
     <!-- Stats Overview -->
     <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
       <div class="rounded-xl border bg-card p-4 text-center">
-        <div class="flex items-center justify-center gap-2 text-green-600 mb-1"><Wifi size={14} /><span class="text-[10px] font-bold uppercase">活跃</span></div>
+        <div class="flex items-center justify-center gap-2 text-green-600 mb-1"><Wifi size={14} /><span class="text-[10px] font-bold uppercase">{tr("活跃", "Active")}</span></div>
         <div class="text-2xl font-bold">{totalActive}</div>
       </div>
       <div class="rounded-xl border bg-card p-4 text-center">
-        <div class="flex items-center justify-center gap-2 text-amber-600 mb-1"><Activity size={14} /><span class="text-[10px] font-bold uppercase">等待</span></div>
+        <div class="flex items-center justify-center gap-2 text-amber-600 mb-1"><Activity size={14} /><span class="text-[10px] font-bold uppercase">{tr("等待", "Waiting")}</span></div>
         <div class="text-2xl font-bold">{totalWaiting}</div>
       </div>
       <div class="rounded-xl border bg-card p-4 text-center">
-        <div class="flex items-center justify-center gap-2 text-muted-foreground mb-1"><WifiOff size={14} /><span class="text-[10px] font-bold uppercase">空闲</span></div>
+        <div class="flex items-center justify-center gap-2 text-muted-foreground mb-1"><WifiOff size={14} /><span class="text-[10px] font-bold uppercase">{tr("空闲", "Idle")}</span></div>
         <div class="text-2xl font-bold">{totalIdle}</div>
       </div>
       <div class="rounded-xl border bg-card p-4 text-center">
-        <div class="flex items-center justify-center gap-2 text-brand mb-1"><Activity size={14} /><span class="text-[10px] font-bold uppercase">总连接</span></div>
+        <div class="flex items-center justify-center gap-2 text-brand mb-1"><Activity size={14} /><span class="text-[10px] font-bold uppercase">{tr("总连接", "Total")}</span></div>
         <div class="text-2xl font-bold">{totalUsed}</div>
       </div>
     </div>
@@ -150,22 +153,22 @@
     <!-- Pools Table -->
     <div class="rounded-xl border bg-card overflow-hidden">
       <div class="border-b px-5 py-3 bg-muted/20">
-        <h3 class="text-sm font-semibold">连接池分布</h3>
+        <h3 class="text-sm font-semibold">{tr("连接池分布", "Pool Distribution")}</h3>
       </div>
       {#if pools.length === 0}
-        <div class="p-8 text-center text-muted-foreground text-xs">暂无活跃连接池数据</div>
+        <div class="p-8 text-center text-muted-foreground text-xs">{tr("暂无活跃连接池数据", "No active pool data yet")}</div>
       {:else}
         <div class="overflow-auto">
           <table class="w-full text-left text-xs">
             <thead class="bg-muted/30 border-b">
               <tr>
-                <th class="px-4 py-2.5 font-semibold text-muted-foreground">数据库</th>
-                <th class="px-3 py-2.5 font-semibold text-muted-foreground">用户</th>
-                <th class="px-3 py-2.5 font-semibold text-muted-foreground text-center">活跃</th>
-                <th class="px-3 py-2.5 font-semibold text-muted-foreground text-center">等待</th>
-                <th class="px-3 py-2.5 font-semibold text-muted-foreground text-center">空闲</th>
-                <th class="px-3 py-2.5 font-semibold text-muted-foreground text-center">总数</th>
-                <th class="px-3 py-2.5 font-semibold text-muted-foreground">模式</th>
+                <th class="px-4 py-2.5 font-semibold text-muted-foreground">{tr("数据库", "Database")}</th>
+                <th class="px-3 py-2.5 font-semibold text-muted-foreground">{tr("用户", "User")}</th>
+                <th class="px-3 py-2.5 font-semibold text-muted-foreground text-center">{tr("活跃", "Active")}</th>
+                <th class="px-3 py-2.5 font-semibold text-muted-foreground text-center">{tr("等待", "Waiting")}</th>
+                <th class="px-3 py-2.5 font-semibold text-muted-foreground text-center">{tr("空闲", "Idle")}</th>
+                <th class="px-3 py-2.5 font-semibold text-muted-foreground text-center">{tr("总数", "Total")}</th>
+                <th class="px-3 py-2.5 font-semibold text-muted-foreground">{tr("模式", "Mode")}</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-border/20">
@@ -189,21 +192,21 @@
     <!-- Clients Table -->
     <div class="rounded-xl border bg-card overflow-hidden">
       <div class="border-b px-5 py-3 bg-muted/20">
-        <h3 class="text-sm font-semibold">客户端连接明细（最近 50 条）</h3>
+        <h3 class="text-sm font-semibold">{tr("客户端连接明细（最近 50 条）", "Client Connection Details (Latest 50)")}</h3>
       </div>
       {#if clients.length === 0}
-        <div class="p-8 text-center text-muted-foreground text-xs">没有活跃的客户端连接</div>
+        <div class="p-8 text-center text-muted-foreground text-xs">{tr("没有活跃的客户端连接", "No active client connections")}</div>
       {:else}
         <div class="overflow-auto max-h-80">
           <table class="w-full text-left text-xs">
             <thead class="bg-muted/30 border-b sticky top-0">
               <tr>
-                <th class="px-4 py-2.5 font-semibold text-muted-foreground">用户</th>
-                <th class="px-3 py-2.5 font-semibold text-muted-foreground">数据库</th>
-                <th class="px-3 py-2.5 font-semibold text-muted-foreground">状态</th>
-                <th class="px-3 py-2.5 font-semibold text-muted-foreground">来源 IP</th>
-                <th class="px-3 py-2.5 font-semibold text-muted-foreground">连接时间</th>
-                <th class="px-3 py-2.5 font-semibold text-muted-foreground text-right">操作</th>
+                <th class="px-4 py-2.5 font-semibold text-muted-foreground">{tr("用户", "User")}</th>
+                <th class="px-3 py-2.5 font-semibold text-muted-foreground">{tr("数据库", "Database")}</th>
+                <th class="px-3 py-2.5 font-semibold text-muted-foreground">{tr("状态", "Status")}</th>
+                <th class="px-3 py-2.5 font-semibold text-muted-foreground">{tr("来源 IP", "Source IP")}</th>
+                <th class="px-3 py-2.5 font-semibold text-muted-foreground">{tr("连接时间", "Connected At")}</th>
+                <th class="px-3 py-2.5 font-semibold text-muted-foreground text-right">{tr("操作", "Actions")}</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-border/20">
@@ -219,7 +222,7 @@
                   <td class="px-3 py-2.5 text-right">
                     {#if client.state === 'idle' && client.addr}
                       <button onclick={() => terminateConnection(client.addr, client.port)} class="px-2 py-1 text-[10px] rounded border border-red-500/20 text-red-500 hover:bg-red-500/10 transition-colors">
-                        断开
+                        {tr("断开", "Disconnect")}
                       </button>
                     {/if}
                   </td>

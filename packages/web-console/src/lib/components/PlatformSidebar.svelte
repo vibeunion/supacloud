@@ -18,11 +18,19 @@
 
   let { className = "" } = $props();
 
-  function toggleLanguage() {
-    locale.set($locale === 'zh' ? 'en' : 'zh');
+  function isZhLocale(value: string | null | undefined) {
+    return (value ?? "").toLowerCase().startsWith("zh");
   }
 
-  const themeToggleLabel = $derived(mode.current === 'dark' ? ($t(''Common.light_mode'', {{default: ''Light mode''}}) || ''Light mode'') : ($t(''Common.dark_mode'', {{default: ''Dark mode''}}) || ''Dark mode''));
+  function toggleLanguage() {
+    locale.set(isZhLocale($locale) ? "en" : "zh-CN");
+  }
+
+  const themeToggleLabel = $derived(
+    mode.current === "dark"
+      ? ($t("Common.light_mode") || "Light mode")
+      : ($t("Common.dark_mode") || "Dark mode")
+  );
 
   const navItems = $derived([
     { title: $t("Platform.extensions_market"), icon: Box, href: `/platform/extensions` },
@@ -82,7 +90,7 @@
       class="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition-colors cursor-pointer"
     >
       <Languages size={18} />
-      <span>{$locale === 'zh' ? 'English' : ($t(''Common.chinese'', {{default: ''Chinese''}}) || ''Chinese'')}</span>
+      <span>{isZhLocale($locale) ? "English" : ($t("Common.chinese") || "中文")}</span>
     </button>
   </div>
 </aside>

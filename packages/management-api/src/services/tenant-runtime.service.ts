@@ -1899,7 +1899,7 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
     }
 
     private systemServiceEntry(ref: string, id: string, name: string, status: string): ProjectServiceStatus {
-        const normalized = status === "ACTIVE_HEALTHY" ? "ACTIVE_HEALTHY" : "UNHEALTHY";
+        const normalized = status === "ACTIVE_HEALTHY" ? "ACTIVE_HEALTHY" : status === "INACTIVE" ? "INACTIVE" : "UNHEALTHY";
         return {
             id,
             name,
@@ -1918,13 +1918,13 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
                 { id: "db", name: "db", unit: "patroni" },
                 { id: "auth", name: "auth", unit: `supacloud-gotrue@${ref}` },
                 { id: "realtime", name: "realtime", unit: "supacloud-realtime" },
-                { id: "storage", name: "storage", unit: `supacloud-storage@${ref}` },
+                { id: "storage", name: "storage", unit: "supacloud-storage" },
             ]
             : [
                 { id: "postgresql", name: "PostgreSQL", unit: "patroni" },
                 { id: "gotrue", name: "GoTrue", unit: `supacloud-gotrue@${ref}` },
                 { id: "realtime", name: "Realtime", unit: "supacloud-realtime" },
-                { id: "storage", name: "Storage", unit: `supacloud-storage@${ref}` },
+                { id: "storage", name: "Storage", unit: "supacloud-storage" },
                 { id: "kong", name: "Kong", unit: "kong" },
             ];
 
