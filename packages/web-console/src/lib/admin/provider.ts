@@ -56,24 +56,55 @@ export const chatProvider: ChatProvider = {
       const reader = res.body?.getReader();
       const decoder = new TextDecoder();
 
-      if (!reader) throw new Error('No readable stream');
+      if (!reader) {
+        const fallback = await res.json().catch(() => null);
+        const content = fallback?.choices?.[0]?.message?.content;
+        if (content) {
+          yield content;
+          return;
+        }
+        throw new Error('No readable stream');
+      }
+
+      let buffered = "";
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
 
-        const lines = decoder.decode(value).split('\n');
+        buffered += decoder.decode(value, { stream: true });
+        const lines = buffered.split('\n');
+        buffered = lines.pop() ?? "";
+
         for (const line of lines) {
-          if (line.startsWith('data: ') && line !== 'data: [DONE]') {
+          const trimmed = line.trim();
+          if (!trimmed.startsWith('data:') || trimmed === 'data: [DONE]') continue;
+          const payload = trimmed.slice(5).trim();
+          if (!payload || payload === '[DONE]') continue;
+          try {
+            const data = JSON.parse(payload);
+            if (data.choices?.[0]?.delta?.content) {
+              yield data.choices[0].delta.content;
+            }
+          } catch {
+            // Ignore malformed stream fragments.
+          }
+        }
+      }
+
+      buffered += decoder.decode();
+      const tail = buffered.trim();
+      if (tail.startsWith('data:') && tail !== 'data: [DONE]') {
+        const payload = tail.slice(5).trim();
+        if (payload && payload !== '[DONE]') {
             try {
-              const data = JSON.parse(line.slice(6));
+              const data = JSON.parse(payload);
               if (data.choices?.[0]?.delta?.content) {
                 yield data.choices[0].delta.content;
               }
             } catch {
-              // Ignore parse errors on partial chunks
+              // Ignore malformed tail payload.
             }
-          }
         }
       }
     } catch (e: any) {
@@ -82,4 +113,3 @@ export const chatProvider: ChatProvider = {
     }
   }
 };
-

@@ -153,8 +153,8 @@ export const systemExtensionRoutes = new Elysia({ prefix: "/v1/system/extensions
         response: {
             200: t.Any(),
             400: ErrorResponse,
-        detail: { tags: ["extensions"], summary: "Install a system extension" },
         },
+        detail: { tags: ["extensions"], summary: "Install a system extension" },
     })
     .post('/remove', async ({ body, request }) => {
         const authError = await requireAdminAuth(request);
@@ -166,6 +166,6 @@ export const systemExtensionRoutes = new Elysia({ prefix: "/v1/system/extensions
         response: {
             200: t.Any(),
             400: ErrorResponse,
-        detail: { tags: ["extensions"], summary: "Remove a system extension" },
         },
+        detail: { tags: ["extensions"], summary: "Remove a system extension" },
     });
