@@ -135,6 +135,38 @@ describe("project service PostgREST runtime controls", () => {
     }
   });
 
+  test("normalizes project service statuses to the official enum", async () => {
+    const originalReadPostgrestRuntimeStatus = (tenantRuntimeService as unknown as {
+      readPostgrestRuntimeStatus: typeof tenantRuntimeService.statusPostgrest;
+    }).readPostgrestRuntimeStatus;
+    const originalCheckSystemService = (tenantRuntimeService as unknown as {
+      checkSystemService: (unitName: string) => Promise<string>;
+    }).checkSystemService;
+
+    (tenantRuntimeService as unknown as {
+      readPostgrestRuntimeStatus: typeof tenantRuntimeService.statusPostgrest;
+    }).readPostgrestRuntimeStatus = async () =>
+      postgrestStatus({ actual: "stopped", health: "unknown" });
+    (tenantRuntimeService as unknown as {
+      checkSystemService: (unitName: string) => Promise<string>;
+    }).checkSystemService = async () => "INACTIVE";
+
+    try {
+      const services = await tenantRuntimeService.getProjectServiceStatuses("proj_1", "studio");
+
+      expect(services.every((service) => ["COMING_UP", "ACTIVE_HEALTHY", "UNHEALTHY"].includes(service.status))).toBe(true);
+      expect(services.map((service) => service.status)).not.toContain("INACTIVE");
+      expect(services.find((service) => service.id === "rest")?.status).toBe("UNHEALTHY");
+    } finally {
+      (tenantRuntimeService as unknown as {
+        readPostgrestRuntimeStatus: typeof tenantRuntimeService.statusPostgrest;
+      }).readPostgrestRuntimeStatus = originalReadPostgrestRuntimeStatus;
+      (tenantRuntimeService as unknown as {
+        checkSystemService: (unitName: string) => Promise<string>;
+      }).checkSystemService = originalCheckSystemService;
+    }
+  });
+
   test("routes PostgREST stop action through pausePostgrest only", async () => {
     const originalGetProject = projectService.getProject;
     const originalPausePostgrest = tenantRuntimeService.pausePostgrest;

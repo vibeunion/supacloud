@@ -1857,8 +1857,8 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
         const serviceStatus =
             runtime.health === "healthy"
                 ? "ACTIVE_HEALTHY"
-                : runtime.actual === "stopped"
-                    ? "INACTIVE"
+                : runtime.actual === "starting"
+                    ? "COMING_UP"
                     : "UNHEALTHY";
 
         return {
@@ -1899,7 +1899,7 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
     }
 
     private systemServiceEntry(ref: string, id: string, name: string, status: string): ProjectServiceStatus {
-        const normalized = status === "ACTIVE_HEALTHY" ? "ACTIVE_HEALTHY" : status === "INACTIVE" ? "INACTIVE" : "UNHEALTHY";
+        const normalized = status === "ACTIVE_HEALTHY" ? "ACTIVE_HEALTHY" : status === "COMING_UP" ? "COMING_UP" : "UNHEALTHY";
         return {
             id,
             name,
