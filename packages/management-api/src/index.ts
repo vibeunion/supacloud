@@ -609,10 +609,27 @@ export async function registerAllRoutes() {
           await logAuditEvent({ request, status: Number(set.status || 200) });
         }
       })
-      .onError(async ({ request, code, set }) => {
+      .onError(async ({ request, code, error, set }) => {
         if (shouldAuditRequest(request)) {
           await logAuditEvent({ request, status: Number(set.status || 500), action: `error:${code}` });
         }
+        const { isAppError, toAppError } = require("./utils/errors") as typeof import("./utils/errors");
+        if (isAppError(error)) {
+          set.status = error.statusCode;
+          return error.toJSON();
+        }
+        logger.error(`[API] Unhandled error [${code}]:`, error);
+        if (code === "VALIDATION") {
+          set.status = 400;
+          return { message: "Validation failed", code: "VALIDATION_ERROR", details: error.message };
+        }
+        if (code === "NOT_FOUND") {
+          set.status = 404;
+          return { message: "Not found", code: "NOT_FOUND" };
+        }
+        const appError = toAppError(error);
+        set.status = appError.statusCode;
+        return appError.toJSON();
       })
       .use(projectRoutes)
       .use(registeredProjectDashboardRoutes)

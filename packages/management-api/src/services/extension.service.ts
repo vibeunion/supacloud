@@ -3,6 +3,7 @@ import { getProjectDb, resolveDbName } from "../db";
 import { $ } from "bun";
 
 const IDENTIFIER_REGEX = /^[a-zA-Z_][a-zA-Z0-9_]{0,62}$/;
+type SystemExtensionInfo = { name: string; version: string; status: string; description: string };
 
 function validatePgIdentifier(name: string, label: string): string {
     if (!IDENTIFIER_REGEX.test(name)) {
@@ -17,6 +18,27 @@ export interface ExtensionInfo {
     installed_version: string | null;
     comment: string;
     is_installed: boolean;
+}
+
+export function parsePigExtensionList(text: string): SystemExtensionInfo[] {
+    const lines = text.split('\n').filter((l: string) => l.trim());
+    const isPsqlTable = lines.some((l: string) => l.includes('|'));
+    if (isPsqlTable) {
+        return lines
+            .filter((l: string) => l.includes('|') && !l.match(/^\s*(name|Name)\s*\|/i))
+            .map((l: string) => {
+                const parts = l.split('|').map((p: string) => p.trim());
+                return { name: parts[0] || '', version: parts[1] || '', status: parts[2] || 'available', description: parts.slice(3).join(' | ').trim() || '' };
+            })
+            .filter((e: { name: string }) => e.name);
+    }
+    return lines
+        .filter((l: string) => l.trim() && !l.startsWith('#') && !l.startsWith('=') && !l.match(/^\(\d+ rows?\)$/))
+        .map((l: string) => {
+            const parts = l.split(/\s+/);
+            return { name: parts[0] || '', version: parts[1] || '', status: parts[2] || 'available', description: parts.slice(3).join(' ') || '' };
+        })
+        .filter((e: { name: string }) => e.name);
 }
 
 export class ExtensionService {
@@ -83,18 +105,33 @@ export class ExtensionService {
         return (rows[0] as ExtensionInfo) || { name: extension, default_version: '', installed_version: null, comment: '', is_installed: false };
     }
 
-    async listSystemExtensions(): Promise<{ name: string; version: string; status: string; description: string }[]> {
+    async listSystemExtensions(): Promise<SystemExtensionInfo[]> {
         try {
             const result = await $`pig ext list`.nothrow().quiet();
             if (result.exitCode !== 0) {
-                return [{ name: 'pig-not-available', version: '-', status: 'unavailable', description: 'pig CLI not found' }];
+                return await this.listSystemExtensionsFromDb();
             }
-            const lines = result.text().split('\n').filter((l: string) => l.trim() && !l.startsWith('#') && !l.startsWith('='));
-            return lines.map((line: string) => {
-                const parts = line.split(/\s+/);
-                return { name: parts[0] || '', version: parts[1] || '', status: parts[2] || 'available', description: parts.slice(3).join(' ') || '' };
-            }).filter((e: { name: string }) => e.name);
-        } catch (err: unknown) {
+            return parsePigExtensionList(result.text());
+        } catch {
+            return await this.listSystemExtensionsFromDb();
+        }
+    }
+
+    private async listSystemExtensionsFromDb(): Promise<SystemExtensionInfo[]> {
+        try {
+            const { sql } = await import("../db");
+            const rows = await sql`
+                SELECT name, default_version, installed_version, comment
+                FROM pg_available_extensions
+                ORDER BY name
+            `;
+            return (rows as Array<{ name: string; default_version: string | null; installed_version: string | null; comment: string | null }>).map(row => ({
+                name: row.name,
+                version: row.default_version || '-',
+                status: row.installed_version ? 'installed' : 'available',
+                description: row.comment || '',
+            }));
+        } catch {
             return [];
         }
     }
