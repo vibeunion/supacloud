@@ -14,7 +14,7 @@
   import { onMount, type Snippet, untrack } from "svelte";
   import { goto } from "$app/navigation";
   import { page } from "$app/stores";
-  import { isLoading, t } from 'svelte-i18n';
+  import { isLoading, t, waitLocale } from 'svelte-i18n';
   import Sidebar from "$lib/components/Sidebar.svelte";
   import PlatformSidebar from "$lib/components/PlatformSidebar.svelte";
   import { ModeWatcher } from "mode-watcher";
@@ -67,7 +67,7 @@
   let isAuthenticated = $state(false);
   let i18nLoadGuardExpired = $state(false);
   
-  let isCoreLoading = $derived(projectsLoading || ($isLoading && !i18nLoadGuardExpired));
+  let isCoreLoading = $derived(projectsLoading);
 
   // Route Detection
   let isRawPage = $derived(($page.url.pathname as string) === "/login" || ($page.url.pathname as string) === "/register");
@@ -99,7 +99,7 @@
   setTheme("system");
   setLocale("zh-CN");
   
-  let lastResourcesKey = $state("");
+  let lastResourcesKey = "";
 
   // Keep SVAdmin resources in sync with the current tenant route without mutating
   // global provider state from inside a derived computation.
@@ -120,6 +120,8 @@
   });
 
   onMount(async () => {
+    // Wait for i18n to be ready
+    try { await waitLocale(); } catch { /* non-critical */ }
     const guardTimer = setTimeout(() => {
       i18nLoadGuardExpired = true;
     }, 4000);

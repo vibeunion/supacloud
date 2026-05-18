@@ -416,7 +416,8 @@
     "monitoring": "系统监控",
     "connection_pool": "连接池",
     "storage_juicefs": "存储 (JuiceFS)",
-    "operations_console": "运维控制台"
+    "operations_console": "运维控制",
+    "settings": "AI 服务配置"
   },
   "Sidebar": {
     "platform_admin": "平台管理",
