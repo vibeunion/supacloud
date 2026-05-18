@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.5](https://github.com/zuohuadong/supacloud/compare/management-api-v0.18.4...management-api-v0.18.5) (2026-05-18)
+
+
+### Bug Fixes
+
+* improve error handling, extension parsing, and static assets fallback ([#134](https://github.com/zuohuadong/supacloud/issues/134)) ([8d9289e](https://github.com/zuohuadong/supacloud/commit/8d9289e0e70e74d8855fe75617350abea5d0f1d7))
+
 ## [0.18.4](https://github.com/zuohuadong/supacloud/compare/management-api-v0.18.3...management-api-v0.18.4) (2026-05-18)
 
 
