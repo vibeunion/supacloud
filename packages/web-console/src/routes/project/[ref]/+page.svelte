@@ -153,10 +153,10 @@
   async function fetchServices() {
     servicesLoading = true;
     try {
-      const res = await apiClient(`/v1/projects/${projectRef}/health`);
+      const res = await apiClient(`/v1/projects/${projectRef}/services`);
       if (res.ok) {
         const data = await res.json();
-        services = data.services || [];
+        services = Array.isArray(data) ? data : (data.services || []);
       }
     } catch {}
     servicesLoading = false;

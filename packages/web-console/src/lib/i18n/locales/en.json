@@ -416,7 +416,8 @@
     "monitoring": "Monitoring",
     "connection_pool": "Connection Pool",
     "storage_juicefs": "Storage (JuiceFS)",
-    "operations_console": "Operations Console"
+    "operations_console": "Operations Console",
+    "settings": "AI Service Settings"
   },
   "Sidebar": {
     "platform_admin": "Platform Admin",
