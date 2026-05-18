@@ -12,7 +12,20 @@ import { resolveDbName, resolveRoleName } from '../db';
      * @param stanza Database name/instance name, defaults to db-main
      */
 export async function listBackups(stanza: string = 'db-main'): Promise<BackupInfo[]> {
-        const result = await $`sudo -u postgres pgbackrest --stanza=${stanza} info --output=json`.nothrow().quiet();
+        let result;
+        try {
+            result = await Promise.race([
+                $`sudo -u postgres pgbackrest --stanza=${stanza} info --output=json`.nothrow().quiet(),
+                Bun.sleep(5000).then(() => null),
+            ]);
+        } catch {
+            logger.warn('[Backup] pgbackrest command failed');
+            return [];
+        }
+        if (result === null) {
+            logger.warn('[Backup] pgbackrest command timed out after 5s');
+            return [];
+        }
 
         if (result.exitCode !== 0) {
             // Return empty list when pgbackrest is not installed
