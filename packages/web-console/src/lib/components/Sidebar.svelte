@@ -45,22 +45,22 @@
   );
 
   const navItems = $derived(currentProject?.ref ? [
-    { title: $t("Navigation.table_editor"), icon: Table, href: `/project/${currentProject.ref}/tables` },
-    { title: $t("Navigation.sql_editor"), icon: Code2, href: `/project/${currentProject.ref}/sql` },
-    { title: $t("Navigation.auth"), icon: Users, href: `/project/${currentProject.ref}/auth` },
-    { title: $t("Navigation.storage"), icon: Box, href: `/project/${currentProject.ref}/storage` },
-    { title: $t("Navigation.edge_functions"), icon: Zap, href: `/project/${currentProject.ref}/functions` },
-    { title: $t("Hosting.title"), icon: Globe, href: `/project/${currentProject.ref}/hosting` },
-    { title: $t("Realtime.title"), icon: Radio, href: `/project/${currentProject.ref}/realtime` },
-    { title: $t("Navigation.database"), icon: Database, href: `/project/${currentProject.ref}/database` },
-    { title: $t("Navigation.api_docs"), icon: Files, href: `/project/${currentProject.ref}/api` },
-    { title: $t("Navigation.query_performance"), icon: LineChart, href: `/project/${currentProject.ref}/reports/query-performance` },
-    { title: $t("Navigation.database_linter"), icon: ShieldCheck, href: `/project/${currentProject.ref}/reports/database-linter` },
-    { title: $t("Sidebar.database_advisor"), icon: ShieldCheck, href: `/project/${currentProject.ref}/reports/advisors` },
-    { title: $t("Navigation.reports"), icon: Glasses, href: `/project/${currentProject.ref}/reports/api-overview` },
-    { title: $t("Navigation.logs"), icon: ScrollText, href: `/project/${currentProject.ref}/logs` },
-    { title: $t("Navigation.tasks"), icon: Activity, href: `/project/${currentProject.ref}/tasks` },
-    { title: $t("Navigation.settings"), icon: Settings, href: `/project/${currentProject.ref}/settings` },
+    { titleKey: "Navigation.table_editor", icon: Table, href: `/project/${currentProject.ref}/tables` },
+    { titleKey: "Navigation.sql_editor", icon: Code2, href: `/project/${currentProject.ref}/sql` },
+    { titleKey: "Navigation.auth", icon: Users, href: `/project/${currentProject.ref}/auth` },
+    { titleKey: "Navigation.storage", icon: Box, href: `/project/${currentProject.ref}/storage` },
+    { titleKey: "Navigation.edge_functions", icon: Zap, href: `/project/${currentProject.ref}/functions` },
+    { titleKey: "Hosting.title", icon: Globe, href: `/project/${currentProject.ref}/hosting` },
+    { titleKey: "Realtime.title", icon: Radio, href: `/project/${currentProject.ref}/realtime` },
+    { titleKey: "Navigation.database", icon: Database, href: `/project/${currentProject.ref}/database` },
+    { titleKey: "Navigation.api_docs", icon: Files, href: `/project/${currentProject.ref}/api` },
+    { titleKey: "Navigation.query_performance", icon: LineChart, href: `/project/${currentProject.ref}/reports/query-performance` },
+    { titleKey: "Navigation.database_linter", icon: ShieldCheck, href: `/project/${currentProject.ref}/reports/database-linter` },
+    { titleKey: "Sidebar.database_advisor", icon: ShieldCheck, href: `/project/${currentProject.ref}/reports/advisors` },
+    { titleKey: "Navigation.reports", icon: Glasses, href: `/project/${currentProject.ref}/reports/api-overview` },
+    { titleKey: "Navigation.logs", icon: ScrollText, href: `/project/${currentProject.ref}/logs` },
+    { titleKey: "Navigation.tasks", icon: Activity, href: `/project/${currentProject.ref}/tasks` },
+    { titleKey: "Navigation.settings", icon: Settings, href: `/project/${currentProject.ref}/settings` },
   ] : []);
 
   function isActive(href: string) {
@@ -101,7 +101,7 @@
         )}
       >
         <item.icon fill="currentColor" strokeWidth={1.5} class={cn("w-4 h-4 transition-colors", isActive(item.href) ? "text-brand" : "group-hover:text-brand")} />
-        {item.title}
+        {$t(item.titleKey)}
       </a>
     {/each}
 

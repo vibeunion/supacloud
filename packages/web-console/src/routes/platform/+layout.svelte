@@ -6,14 +6,14 @@
   let { children } = $props();
 
   const TABS = $derived([
-    { id: "extensions", label: $t("Platform.extensions_market"), icon: Package },
-    { id: "backups", label: $t("Platform.backups_pitr"), icon: HardDrive },
-    { id: "tuning", label: $t("Platform.engine_tuning"), icon: SlidersHorizontal },
-    { id: "monitoring", label: $t("Platform.monitoring"), icon: BarChart3 },
-    { id: "pooling", label: $t("Platform.connection_pool"), icon: Activity },
-    { id: "storage", label: $t("Platform.storage_juicefs"), icon: Database },
-    { id: "operations", label: $t("Platform.operations_console"), icon: Wrench },
-    { id: "settings", label: $t("Platform.settings"), icon: Settings },
+    { id: "extensions", labelKey: "Platform.extensions_market", icon: Package },
+    { id: "backups", labelKey: "Platform.backups_pitr", icon: HardDrive },
+    { id: "tuning", labelKey: "Platform.engine_tuning", icon: SlidersHorizontal },
+    { id: "monitoring", labelKey: "Platform.monitoring", icon: BarChart3 },
+    { id: "pooling", labelKey: "Platform.connection_pool", icon: Activity },
+    { id: "storage", labelKey: "Platform.storage_juicefs", icon: Database },
+    { id: "operations", labelKey: "Platform.operations_console", icon: Wrench },
+    { id: "settings", labelKey: "Platform.settings", icon: Settings },
   ]);
 
   const currentTab = $derived(page.url.pathname.split("/platform/")[1]?.split("/")[0] || "");
@@ -36,7 +36,7 @@
           class="flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-full whitespace-nowrap transition-colors {currentTab === tab.id ? 'bg-brand text-white shadow-md' : 'bg-muted/50 text-muted-foreground hover:bg-muted hover:text-foreground'}"
         >
           <Icon size={14} />
-          {tab.label}
+          {$t(tab.labelKey)}
         </a>
       {/each}
     </div>

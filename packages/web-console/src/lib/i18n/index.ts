@@ -5,12 +5,28 @@ register('zh', () => import('./locales/zh.json'));
 register('zh-CN', () => import('./locales/zh.json'));
 register('en-US', () => import('./locales/en.json'));
 
+const SUPPORTED = new Set(["en", "en-US", "zh", "zh-CN"]);
+
+function normalizeLocale(value: string | null | undefined): string {
+  if (!value) return "zh-CN";
+  const trimmed = value.trim();
+  if (SUPPORTED.has(trimmed)) return trimmed;
+  const lower = trimmed.toLowerCase();
+  if (lower.startsWith("zh")) return "zh-CN";
+  if (lower.startsWith("en")) return "en";
+  return "zh-CN";
+}
+
 const savedLocale = typeof localStorage !== 'undefined' ? localStorage.getItem('selected-locale') : null;
+const initialLocale = normalizeLocale(savedLocale || getLocaleFromNavigator());
 
 init({
   fallbackLocale: 'en',
-  initialLocale: savedLocale || getLocaleFromNavigator() || 'zh-CN',
+  initialLocale,
 });
+
+// Guard against race conditions where templates call $t() before locale settles.
+locale.set(initialLocale);
 
 // 在客戶端環境下導出一個等待函數
 export { waitLocale };
@@ -18,6 +34,6 @@ export { waitLocale };
 // 持久化語言選擇
 if (typeof localStorage !== 'undefined') {
   locale.subscribe(val => {
-    if (val) localStorage.setItem('selected-locale', val);
+    if (val) localStorage.setItem('selected-locale', normalizeLocale(val));
   });
 }
