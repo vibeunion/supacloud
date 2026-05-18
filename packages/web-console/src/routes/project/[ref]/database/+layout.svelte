@@ -8,21 +8,21 @@
   const projectRef = $derived(page.params.ref);
 
   const TABS = $derived([
-    { id: "roles", label: $t("Roles.title"), icon: Users },
-    { id: "extensions", label: $t("Extensions.title"), icon: Package },
-    { id: "triggers", label: $t("Triggers.title"), icon: Zap },
-    { id: "functions", label: $t("DbFunctions.title"), icon: Braces },
-    { id: "indexes", label: $t("Indexes.title"), icon: Hash },
-    { id: "schemas", label: $t("Schemas.title"), icon: FolderOpen },
-    { id: "types", label: $t("EnumTypes.title"), icon: Tag },
-    { id: "column-privileges", label: $t("ColumnPrivileges.title"), icon: ShieldCheck },
-    { id: "publications", label: $t("Publications.title"), icon: Radio },
-    { id: "hooks", label: $t("Hooks.title"), icon: Webhook },
-    { id: "migrations", label: $t("Migrations.title"), icon: GitCommitVertical },
-    { id: "backups", label: $t("Backups.title"), icon: HardDrive },
-    { id: "cron", label: $t("CronJobs.title"), icon: CalendarClock },
-    { id: "wrappers", label: "Wrappers", icon: Globe },
-    { id: "settings", label: "Settings", icon: Settings },
+    { id: "roles", labelKey: "Roles.title", icon: Users },
+    { id: "extensions", labelKey: "Extensions.title", icon: Package },
+    { id: "triggers", labelKey: "Triggers.title", icon: Zap },
+    { id: "functions", labelKey: "DbFunctions.title", icon: Braces },
+    { id: "indexes", labelKey: "Indexes.title", icon: Hash },
+    { id: "schemas", labelKey: "Schemas.title", icon: FolderOpen },
+    { id: "types", labelKey: "EnumTypes.title", icon: Tag },
+    { id: "column-privileges", labelKey: "ColumnPrivileges.title", icon: ShieldCheck },
+    { id: "publications", labelKey: "Publications.title", icon: Radio },
+    { id: "hooks", labelKey: "Hooks.title", icon: Webhook },
+    { id: "migrations", labelKey: "Migrations.title", icon: GitCommitVertical },
+    { id: "backups", labelKey: "Backups.title", icon: HardDrive },
+    { id: "cron", labelKey: "CronJobs.title", icon: CalendarClock },
+    { id: "wrappers", labelKey: null, labelFallback: "Wrappers", icon: Globe },
+    { id: "settings", labelKey: null, labelFallback: "Settings", icon: Settings },
   ]);
 
   const currentTab = $derived(page.url.pathname.split("/database/")[1]?.split("/")[0] || "");
@@ -34,7 +34,8 @@
       <a href={`/project/${projectRef}/database`} class="hover:text-foreground transition-colors">{$t("Navigation.database")}</a>
       {#if currentTab}
         <span>/</span>
-        <span class="text-foreground capitalize">{TABS.find(t => t.id === currentTab)?.label || currentTab}</span>
+        {@const activeTab = TABS.find(t => t.id === currentTab)}
+        <span class="text-foreground capitalize">{activeTab?.labelKey ? $t(activeTab.labelKey) : (activeTab?.labelFallback || currentTab)}</span>
       {/if}
     </div>
     <div class="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-hide">
@@ -44,7 +45,7 @@
           class="flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-full whitespace-nowrap transition-colors {currentTab === tab.id ? 'bg-brand text-white shadow-md' : 'bg-muted/50 text-muted-foreground hover:bg-muted hover:text-foreground'}"
         >
           <tab.icon size={14} />
-          {tab.label}
+          {tab.labelKey ? $t(tab.labelKey) : tab.labelFallback}
         </a>
       {/each}
     </div>

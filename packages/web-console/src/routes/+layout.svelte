@@ -1,4 +1,6 @@
 <script module>
+  import "$lib/i18n";
+
   if (typeof window !== "undefined") {
     if (window.location.hash.includes("/login")) {
       window.location.replace("/login");
@@ -10,7 +12,7 @@
   import { apiClient } from "$lib/api";
 
   import "../app.css";
-  import "$lib/i18n"; // Ensure svelte-i18n is initialized synchronously
+  import "$lib/i18n";
   import { onMount, type Snippet, untrack } from "svelte";
   import { goto } from "$app/navigation";
   import { page } from "$app/stores";
