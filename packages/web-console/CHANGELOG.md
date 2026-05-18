@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.7](https://github.com/zuohuadong/supacloud/compare/web-console-v0.11.6...web-console-v0.11.7) (2026-05-18)
+
+
+### Bug Fixes
+
+* **web-console:** avoid invalid platform SQL calls ([#146](https://github.com/zuohuadong/supacloud/issues/146)) ([6e28949](https://github.com/zuohuadong/supacloud/commit/6e28949bdad2a916cddfd58341ca8d51242c5332))
+
 ## [0.11.6](https://github.com/zuohuadong/supacloud/compare/web-console-v0.11.5...web-console-v0.11.6) (2026-05-18)
 
 
