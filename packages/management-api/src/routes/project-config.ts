@@ -68,7 +68,8 @@ function pgTypeToTs(udtName: string, dataType: string): string {
  * Eliminates repeated boilerplate for database/postgrest/storage/realtime configs.
  */
 function addConfigRoutes(section: string) {
-  return new Elysia({ prefix: "/v1/projects" })
+  // Mounted under projectConfigRoutes, which already has the /v1/projects prefix.
+  return new Elysia()
     .get(
       `/:ref/config/${section}`,
       async ({ params }: { params: { ref: string } }) => {

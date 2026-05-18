@@ -65,8 +65,9 @@
   let projects = $state<Record<string, unknown>[]>([]);
   let projectsLoading = $state(true);
   let isAuthenticated = $state(false);
+  let i18nLoadGuardExpired = $state(false);
   
-  let isCoreLoading = $derived($isLoading || projectsLoading);
+  let isCoreLoading = $derived(projectsLoading || ($isLoading && !i18nLoadGuardExpired));
 
   // Route Detection
   let isRawPage = $derived(($page.url.pathname as string) === "/login" || ($page.url.pathname as string) === "/register");
@@ -119,9 +120,14 @@
   });
 
   onMount(async () => {
+    const guardTimer = setTimeout(() => {
+      i18nLoadGuardExpired = true;
+    }, 4000);
+
     // Skip auth check on raw pages (login/register)
     if (isRawPage) {
       projectsLoading = false;
+      clearTimeout(guardTimer);
       return;
     }
 
@@ -129,6 +135,7 @@
     if (!token) {
       projectsLoading = false;
       window.location.href = "/login";
+      clearTimeout(guardTimer);
       return;
     }
 
@@ -144,11 +151,13 @@
         localStorage.removeItem("supacloud_master_token");
         projectsLoading = false;
         window.location.href = "/login";
+        clearTimeout(guardTimer);
         return;
       }
     } catch {
       projectsLoading = false;
       window.location.href = "/login";
+      clearTimeout(guardTimer);
       return;
     }
 
@@ -163,6 +172,7 @@
       toast.error("网络错误 during project loading");
     } finally {
       projectsLoading = false;
+      clearTimeout(guardTimer);
     }
 
     if (!projectsLoading && !projects.length && window.location.pathname.includes('/project/')) {

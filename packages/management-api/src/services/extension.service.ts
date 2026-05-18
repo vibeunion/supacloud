@@ -21,6 +21,9 @@ export interface ExtensionInfo {
 }
 
 export function parsePigExtensionList(text: string): SystemExtensionInfo[] {
+    const hasStatusVersionHeader = text
+        .split('\n')
+        .some((line: string) => /^name\s+status\s+version\b/i.test(line.trim()));
     const rows = text
         .split('\n')
         .map((line: string) => line.trim())
@@ -28,7 +31,8 @@ export function parsePigExtensionList(text: string): SystemExtensionInfo[] {
             if (!line) return false;
             if (/^[\s\u2500-\u257F\-+|]+$/.test(line)) return false;
             if (/^\(\d+\s+rows?\)$/i.test(line)) return false;
-            if (/^[\u2713\u2714]\s*Found\s+\d+\s+extensions?/i.test(line)) return false;
+            if (/^[\u2713\u2714\u2611]?\s*Found\s+\d+\s+extensions?/i.test(line)) return false;
+            if (/^name\s+(status|version|cate|flags)\b/i.test(line)) return false;
             if (/^[#=]/.test(line)) return false;
             return true;
         });
@@ -58,6 +62,14 @@ export function parsePigExtensionList(text: string): SystemExtensionInfo[] {
     return rows
         .map((line: string) => {
             const parts = line.split(/\s+/);
+            if (hasStatusVersionHeader) {
+                return {
+                    name: parts[0] || '',
+                    version: parts[2] || '',
+                    status: parts[1] || 'available',
+                    description: parts.slice(5).join(' ') || parts.slice(3).join(' ') || '',
+                };
+            }
             return { name: parts[0] || '', version: parts[1] || '', status: parts[2] || 'available', description: parts.slice(3).join(' ') || '' };
         })
         .filter((extension: SystemExtensionInfo) => extension.name);

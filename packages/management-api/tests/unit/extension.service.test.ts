@@ -87,4 +87,18 @@ describe("ExtensionService", () => {
             { name: "pg_stat_statements", version: "1.10", status: "1.10", description: "track planning stats" },
         ]);
     });
+
+    test("parsePigExtensionList should ignore non-pipe banners and headers", () => {
+        const extensions = parsePigExtensionList(`
+Found 2 extensions
+Name Status Version Categories Flags Description
+pg_graphql available 1.5 analytics - GraphQL support
+pg_stat_statements installed 1.10 metrics - track planning stats
+`);
+
+        expect(extensions).toEqual([
+            { name: "pg_graphql", version: "1.5", status: "available", description: "GraphQL support" },
+            { name: "pg_stat_statements", version: "1.10", status: "installed", description: "track planning stats" },
+        ]);
+    });
 });
