@@ -576,7 +576,8 @@
     "status": "Status",
     "description": "Description",
     "actions": "Actions",
-    "uninstall": "Uninstall"
+    "uninstall": "Uninstall",
+    "confirm_uninstall": "Are you sure you want to uninstall extension package \"{name}\" from the system? This will affect all databases using this extension."
   },
   "PlatformMonitoring": {
     "dashboard_pgsql-overview": "Cluster-wide database metrics overview",
@@ -726,7 +727,8 @@
     "start_migration": "Start Migration",
     "pigsty_storage_capabilities": "Pigsty storage capabilities:",
     "supports_local_filesystem_builtin_minio": "Supports local filesystem, built-in MinIO object storage, AWS S3, OSS, Cloudflare R2, JuiceFS and more.",
-    "pgbackrest_backups_also_support_direct": "pgBackRest backups also support direct writes to S3-compatible storage for cross-site disaster recovery."
+    "pgbackrest_backups_also_support_direct": "pgBackRest backups also support direct writes to S3-compatible storage for cross-site disaster recovery.",
+    "configure_migration": "Configure Migration"
   },
   "PlatformTuning": {
     "no_parameter_changes_detected": "No parameter changes detected",
@@ -743,6 +745,7 @@
     "restart_required_1": "Restart Required",
     "hot_reload": "Hot Reload",
     "current": "Current",
-    "modified": "Modified"
+    "modified": "Modified",
+    "after_editing_parameters_clicking_save_changes_will_execute": "After editing parameters, clicking Save Changes will execute"
   }
 }

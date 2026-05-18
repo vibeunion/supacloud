@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { BarChart3, ExternalLink, Maximize2, RefreshCw } from "lucide-svelte";
-  import { locale } from "svelte-i18n";
+  import { t } from "svelte-i18n";
 
   let grafanaHost = $state("");
   let selectedDashboard = $state("pgsql-overview");
@@ -69,7 +69,7 @@
         class="flex flex-col items-start px-3 py-2 text-[10px] rounded-lg border whitespace-nowrap transition-all {selectedDashboard === db.id ? 'border-brand bg-brand/5 text-brand' : 'bg-muted/30 text-muted-foreground hover:bg-muted/50 hover:text-foreground'}"
       >
         <span class="font-bold">{db.label}</span>
-        <span class="text-[9px] opacity-70">{tr(db.descZh, db.descEn)}</span>
+        <span class="text-[9px] opacity-70">{$t("PlatformMonitoring.dashboard_" + db.id)}</span>
       </button>
     {/each}
   </div>

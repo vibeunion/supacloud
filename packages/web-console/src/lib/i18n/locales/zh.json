@@ -576,7 +576,8 @@
     "status": "状态",
     "description": "描述",
     "actions": "操作",
-    "uninstall": "卸载"
+    "uninstall": "卸载",
+    "confirm_uninstall": "???????????? \"{name}\" ??????????????????"
   },
   "PlatformMonitoring": {
     "dashboard_pgsql-overview": "???????????",
@@ -726,7 +727,8 @@
     "start_migration": "开始迁移",
     "pigsty_storage_capabilities": "Pigsty 存储能力：",
     "supports_local_filesystem_builtin_minio": "支持本地文件系统、MinIO 内置对象存储、AWS S3、阿里云 OSS、Cloudflare R2、JuiceFS 分布式文件系统等。",
-    "pgbackrest_backups_also_support_direct": "pgBackRest 备份也支持直接写入 S3 兼容存储，实现异地容灾。"
+    "pgbackrest_backups_also_support_direct": "pgBackRest 备份也支持直接写入 S3 兼容存储，实现异地容灾。",
+    "configure_migration": "????"
   },
   "PlatformTuning": {
     "no_parameter_changes_detected": "没有检测到任何参数变更",
@@ -743,6 +745,7 @@
     "restart_required_1": "需重启",
     "hot_reload": "热加载",
     "current": "当前值",
-    "modified": "已修改"
+    "modified": "已修改",
+    "after_editing_parameters_clicking_save_changes_will_execute": "修改参数后点击保存变更将执行"
   }
 }

@@ -3,7 +3,7 @@
 
   import { onMount } from "svelte";
   import { Loader2, SlidersHorizontal, Save, RefreshCw, AlertTriangle, CheckCircle2 } from "lucide-svelte";
-  import { locale } from "svelte-i18n";
+  import { t, locale } from "svelte-i18n";
   let projectRef = $state("");
   async function resolveProjectRef() {
     try {
@@ -142,7 +142,7 @@
 
   <div class="rounded-lg border bg-blue-500/5 border-blue-500/20 p-3 flex items-start gap-2">
     <SlidersHorizontal size={14} class="text-blue-600 mt-0.5 shrink-0" />
-    <p class="text-xs text-blue-700">{tr("修改参数后点击「保存变更」将执行 ", "After editing parameters, clicking \"Save Changes\" will execute ")}<code class="px-1 py-0.5 rounded bg-blue-500/10">ALTER SYSTEM SET</code> {$t("PlatformTuning.and_call")} <code class="px-1 py-0.5 rounded bg-blue-500/10">pg_reload_conf()</code>。{$t("PlatformTuning.parameters_marked")} <span class="text-red-600 font-bold">{$t("PlatformTuning.restart_required")}</span> {$t("PlatformTuning.require_postgresql_restart_to_take")}</p>
+    <p class="text-xs text-blue-700">{$t("PlatformTuning.after_editing_parameters_clicking_save_changes_will_execute")} <code class="px-1 py-0.5 rounded bg-blue-500/10">ALTER SYSTEM SET</code> {$t("PlatformTuning.and_call")} <code class="px-1 py-0.5 rounded bg-blue-500/10">pg_reload_conf()</code>。{$t("PlatformTuning.parameters_marked")} <span class="text-red-600 font-bold">{$t("PlatformTuning.restart_required")}</span> {$t("PlatformTuning.require_postgresql_restart_to_take")}</p>
   </div>
 
   {#if isLoading}

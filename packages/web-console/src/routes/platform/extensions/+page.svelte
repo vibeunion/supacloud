@@ -1,7 +1,7 @@
 <script lang="ts">
   import { useList } from "@svadmin/core";
   import { Loader2, Package, Download, Trash2, RefreshCw, Search, AlertTriangle } from "lucide-svelte";
-  import { locale } from "svelte-i18n";
+  import { t } from "svelte-i18n";
 
   import type { BaseRecord } from '@svadmin/core';
 
@@ -44,7 +44,7 @@
   }
 
   async function removeExt(name: string) {
-    if (!confirm(tr(`确定要从系统中卸载扩展包 "${name}" 吗？这将影响所有使用该扩展的数据库。`, `Are you sure you want to uninstall extension package "${name}" from the system? This will affect all databases using this extension.`))) return;
+    if (!confirm($t("PlatformExtensions.confirm_uninstall", { values: { name } }) || `Are you sure you want to uninstall "${name}"?`)) return;
     actionTarget = name;
     actionMsg = null;
     try {

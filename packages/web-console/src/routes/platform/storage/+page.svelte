@@ -3,7 +3,7 @@
 
   import { onMount } from "svelte";
   import { Loader2, Database, HardDrive, Cloud, RefreshCw, ArrowRight, AlertTriangle, CheckCircle2, FolderOpen, Server } from "lucide-svelte";
-  import { locale } from "svelte-i18n";
+  import { t } from "svelte-i18n";
 
   interface StorageStatus {
     backend: string;
@@ -51,7 +51,7 @@
 
     // Fetch buckets
     try {
-      try { const res2 = await apiClient("/v1/storage/default/buckets"); if (res2.ok) { const data2 = await res2.json(); buckets = Array.isArray(data2) ? data2 : []; } } catch {}
+      const res = await apiClient("/v1/storage/default/buckets");
       if (res.ok) {
         const data = await res.json();
         buckets = Array.isArray(data) ? data : [];
@@ -63,7 +63,7 @@
 
   async function startMigration() {
     if (!migEndpoint || !migAccessKey || !migSecretKey) {
-      actionMsg = `❌ ${$t("PlatformStorage.please_fill_in_complete_s3")}`;
+      actionMsg = `ERROR: ${$t("PlatformStorage.please_fill_in_complete_s3")}`;
       return;
     }
     if (!confirm($t("PlatformStorage.start_storage_migration_this_will"))) return;
@@ -84,10 +84,10 @@
         })
       });
       const data = await res.json();
-      actionMsg = data instanceof Error ? data.message : String(data) ? `✅ ${data.message}` : `✅ ${$t("PlatformStorage.migration_task_started")}`;
+      actionMsg = data instanceof Error ? String(data.message || "") : String(data) ? `SUCCESS: ${data.message}` : `SUCCESS: ${$t("PlatformStorage.migration_task_started")}`;
       showMigration = false;
     } catch (err: unknown) {
-      actionMsg = `❌ ${(err instanceof Error ? err.message : String(err))}`;
+      actionMsg = `ERROR: ${err instanceof Error ? err.message : String(err)}`;
     } finally {
       isMigrating = false;
       setTimeout(() => actionMsg = null, 8000);
@@ -109,7 +109,7 @@
   </div>
 
   {#if actionMsg}
-    <div class="rounded-lg border px-4 py-3 text-xs font-medium {actionMsg.startsWith('✅') ? 'bg-green-500/10 border-green-500/20 text-green-700' : 'bg-red-500/10 border-red-500/20 text-red-700'}">
+    <div class="rounded-lg border px-4 py-3 text-xs font-medium {actionMsg.startsWith('SUCCESS:') ? 'bg-green-500/10 border-green-500/20 text-green-700' : 'bg-red-500/10 border-red-500/20 text-red-700'}">
       {actionMsg}
     </div>
   {/if}
@@ -124,7 +124,7 @@
       <div class="rounded-xl border bg-card p-4">
         <div class="flex items-center gap-2 text-muted-foreground mb-2"><Server size={14} /><span class="text-[10px] font-bold uppercase">{$t("PlatformStorage.backend_type")}</span></div>
         <div class="text-lg font-bold capitalize">{status?.backend || 'local'}</div>
-        <div class="text-[10px] text-muted-foreground mt-1">{status?.backend === 'local' ? tr('本地文件系统', 'Local filesystem') : status?.backend === 's3' ? tr('S3 兼容存储', 'S3-compatible storage') : status?.backend === 'minio' ? tr('MinIO 对象存储', 'MinIO object storage') : tr('本地存储', 'Local storage')}</div>
+        <div class="text-[10px] text-muted-foreground mt-1">{status?.backend === 'local' ? $t("Common.local_filesystem") : status?.backend === 's3' ? $t("Common.s3_compatible_storage") : status?.backend === 'minio' ? $t("Common.minio_object_storage") : $t("Common.local_storage")}</div>
       </div>
       <div class="rounded-xl border bg-card p-4">
         <div class="flex items-center gap-2 text-muted-foreground mb-2"><HardDrive size={14} /><span class="text-[10px] font-bold uppercase">{$t("PlatformStorage.used_space")}</span></div>
@@ -140,7 +140,7 @@
           {#if status?.healthy}<CheckCircle2 size={14} class="text-green-500" />{:else}<AlertTriangle size={14} class="text-red-500" />{/if}
           <span class="text-[10px] font-bold uppercase">{$t("PlatformStorage.health")}</span>
         </div>
-        <div class="text-lg font-bold {status?.healthy ? 'text-green-600' : 'text-red-600'}">{status?.healthy ? tr('正常', 'Healthy') : tr('异常', 'Unhealthy')}</div>
+        <div class="text-lg font-bold {status?.healthy ? 'text-green-600' : 'text-red-600'}">{status?.healthy ? $t("Common.healthy") : $t("Common.unhealthy")}</div>
       </div>
     </div>
 
@@ -169,7 +169,7 @@
                   <td class="px-3 py-2.5 text-muted-foreground">{bucket.size || '-'}</td>
                   <td class="px-3 py-2.5 text-muted-foreground">{bucket.objects || 0}</td>
                   <td class="px-3 py-2.5">
-                    <span class="px-2 py-0.5 rounded-full text-[10px] font-bold {bucket.public ? 'bg-amber-500/10 text-amber-600' : 'bg-green-500/10 text-green-600'}">{bucket.public ? tr('公开', 'Public') : tr('私有', 'Private')}</span>
+                    <span class="px-2 py-0.5 rounded-full text-[10px] font-bold {bucket.public ? 'bg-amber-500/10 text-amber-600' : 'bg-green-500/10 text-green-600'}">{bucket.public ? $t("Common.public") : $t("Common.private")}</span>
                   </td>
                 </tr>
               {/each}
@@ -184,7 +184,7 @@
       <div class="border-b px-5 py-3 bg-muted/20 flex items-center justify-between">
         <h3 class="text-sm font-semibold flex items-center gap-2"><Cloud size={16} /> {$t("PlatformStorage.storage_migration_local_s3minio")}</h3>
         <button onclick={() => showMigration = !showMigration} class="px-3 py-1 text-[10px] font-semibold rounded-md border hover:bg-muted/50 transition-colors">
-          {showMigration ? tr('收起', 'Collapse') : tr('配置迁移', 'Configure Migration')}
+          {showMigration ? $t("Common.collapse") : $t("PlatformStorage.configure_migration")}
         </button>
       </div>
       {#if !showMigration}

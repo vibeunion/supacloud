@@ -3,7 +3,7 @@
 
   import { onMount } from "svelte";
   import { Loader2, Wrench, Play, RefreshCw, AlertTriangle, CheckCircle2, Server, ArrowRightLeft, Plus, Shield, Clock, Terminal } from "lucide-svelte";
-  import { locale } from "svelte-i18n";
+  import { t, locale } from "svelte-i18n";
 
   interface Operation {
     id: string;

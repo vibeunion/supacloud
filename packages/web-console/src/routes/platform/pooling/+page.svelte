@@ -3,7 +3,7 @@
 
   import { onMount } from "svelte";
   import { Loader2, Activity, RefreshCw, Trash2, AlertTriangle, Wifi, WifiOff } from "lucide-svelte";
-  import { locale } from "svelte-i18n";
+  import { t } from "svelte-i18n";
   let projectRef = $state("");
   async function resolveProjectRef() {
     try {

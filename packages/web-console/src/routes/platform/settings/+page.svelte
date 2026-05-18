@@ -2,7 +2,7 @@
   import { onMount } from "svelte";
   import { apiClient } from "$lib/api";
   import { Save, RefreshCw, Bot, Key, Globe, Cpu, CheckCircle, AlertTriangle } from "lucide-svelte";
-  import { locale } from "svelte-i18n";
+  import { t } from "svelte-i18n";
 
   interface SettingItem {
     key: string;
@@ -59,7 +59,7 @@
         body: JSON.stringify({
           items: [
             { key: "ai_api_base", value: aiApiBase, description: "AI API Base URL", is_secret: false },
-            ...(aiApiKey && !aiApiKey.startsWith("••") ? [{ key: "ai_api_key", value: aiApiKey, description: "AI API Key", is_secret: true }] : []),
+            ...(aiApiKey ? [{ key: "ai_api_key", value: aiApiKey, description: "AI API Key", is_secret: true }] : []),
             { key: "ai_model", value: aiModel, description: "Default AI Model", is_secret: false },
           ],
         }),
@@ -131,7 +131,7 @@
             onclick={() => applyPreset(p)}
             class="px-4 py-2 text-xs font-medium rounded-xl border transition-all hover:border-brand hover:bg-brand/5 hover:text-brand hover:shadow-sm {aiApiBase === p.base ? 'border-brand bg-brand/10 text-brand shadow-sm' : 'bg-card text-muted-foreground'}"
           >
-            {tr(p.labelZh, p.labelEn)}
+            {$t("PlatformSettings.provider_" + p.labelEn.toLowerCase())}
           </button>
         {/each}
       </div>
