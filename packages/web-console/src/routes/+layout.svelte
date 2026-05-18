@@ -129,79 +129,92 @@
     });
   });
 
-  onMount(async () => {
-    const unsubscribeLocale = locale.subscribe((value) => {
+  onMount(() => {
+    let guardTimer: ReturnType<typeof setTimeout> | undefined;
+    let unsubscribeLocale: (() => void) | undefined = locale.subscribe((value) => {
       if (!value) return;
       setLocale(mapToSvadminLocale(value));
     });
 
-    // Wait for i18n to be ready
-    try { await waitLocale(); } catch { /* non-critical */ }
-    const guardTimer = setTimeout(() => {
-      i18nLoadGuardExpired = true;
-    }, 4000);
+    const cleanupLocale = () => {
+      unsubscribeLocale?.();
+      unsubscribeLocale = undefined;
+    };
+    const clearGuardTimer = () => {
+      if (guardTimer) clearTimeout(guardTimer);
+      guardTimer = undefined;
+    };
 
-    // Skip auth check on raw pages (login/register)
-    if (isRawPage) {
-      projectsLoading = false;
-      clearTimeout(guardTimer);
-      unsubscribeLocale();
-      return;
-    }
+    void (async () => {
+      // Wait for i18n to be ready
+      try { await waitLocale(); } catch { /* non-critical */ }
+      guardTimer = setTimeout(() => {
+        i18nLoadGuardExpired = true;
+      }, 4000);
 
-    const token = localStorage.getItem("supacloud_session");
-    if (!token) {
-      projectsLoading = false;
-      window.location.href = "/login";
-      clearTimeout(guardTimer);
-      unsubscribeLocale();
-      return;
-    }
-
-    try {
-      const res = await apiClient("/auth/verify", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token })
-      });
-      const data = await res.json();
-      if (!data.valid) {
-        localStorage.removeItem("supacloud_session");
-        localStorage.removeItem("supacloud_master_token");
+      // Skip auth check on raw pages (login/register)
+      if (isRawPage) {
         projectsLoading = false;
-        window.location.href = "/login";
-        clearTimeout(guardTimer);
-        unsubscribeLocale();
+        clearGuardTimer();
+        cleanupLocale();
         return;
       }
-    } catch {
-      projectsLoading = false;
-      window.location.href = "/login";
-      clearTimeout(guardTimer);
-      unsubscribeLocale();
-      return;
-    }
 
-    isAuthenticated = true;
-
-    try {
-      const response = await apiClient('/v1/projects');
-      if (response.ok) {
-        projects = await response.json();
+      const token = localStorage.getItem("supacloud_session");
+      if (!token) {
+        projectsLoading = false;
+        window.location.href = "/login";
+        clearGuardTimer();
+        cleanupLocale();
+        return;
       }
-    } catch (err: unknown) {
-      toast.error($t("Common.network_error") || "Network error");
-    } finally {
-      projectsLoading = false;
-      clearTimeout(guardTimer);
-    }
 
-    if (!projectsLoading && !projects.length && window.location.pathname.includes('/project/')) {
-       goto('/');
-    }
+      try {
+        const res = await apiClient("/auth/verify", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ token })
+        });
+        const data = await res.json();
+        if (!data.valid) {
+          localStorage.removeItem("supacloud_session");
+          localStorage.removeItem("supacloud_master_token");
+          projectsLoading = false;
+          window.location.href = "/login";
+          clearGuardTimer();
+          cleanupLocale();
+          return;
+        }
+      } catch {
+        projectsLoading = false;
+        window.location.href = "/login";
+        clearGuardTimer();
+        cleanupLocale();
+        return;
+      }
+
+      isAuthenticated = true;
+
+      try {
+        const response = await apiClient('/v1/projects');
+        if (response.ok) {
+          projects = await response.json();
+        }
+      } catch (err: unknown) {
+        toast.error($t("Common.network_error") || "Network error");
+      } finally {
+        projectsLoading = false;
+        clearGuardTimer();
+      }
+
+      if (!projectsLoading && !projects.length && window.location.pathname.includes('/project/')) {
+         goto('/');
+      }
+    })();
 
     return () => {
-      unsubscribeLocale();
+      clearGuardTimer();
+      cleanupLocale();
     };
   });
 </script>

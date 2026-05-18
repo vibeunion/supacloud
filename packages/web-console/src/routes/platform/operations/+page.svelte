@@ -80,7 +80,7 @@
         return String(data.message || JSON.stringify(data));
       }
     },
-  ];
+  ]);
 
   async function executeOp(op: Operation) {
     // Validate required fields

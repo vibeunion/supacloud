@@ -1,4 +1,4 @@
-﻿<script lang="ts">
+<script lang="ts">
   import { apiClient } from "$lib/api";
 
   import { onMount } from "svelte";

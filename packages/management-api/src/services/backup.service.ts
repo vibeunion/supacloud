@@ -12,17 +12,14 @@ import { resolveDbName, resolveRoleName } from '../db';
      * @param stanza Database name/instance name, defaults to db-main
      */
 export async function listBackups(stanza: string = 'db-main'): Promise<BackupInfo[]> {
-        let result;
+        let result: { exitCode: number; stdout: string; timedOut: boolean };
         try {
-            result = await Promise.race([
-                $`sudo -u postgres pgbackrest --stanza=${stanza} info --output=json`.nothrow().quiet(),
-                Bun.sleep(5000).then(() => null),
-            ]);
+            result = await runPgBackrestInfo(stanza, 5000);
         } catch {
             logger.warn('[Backup] pgbackrest command failed');
             return [];
         }
-        if (result === null) {
+        if (result.timedOut) {
             logger.warn('[Backup] pgbackrest command timed out after 5s');
             return [];
         }
@@ -34,7 +31,7 @@ export async function listBackups(stanza: string = 'db-main'): Promise<BackupInf
         }
 
         try {
-            const rawData = JSON.parse(result.text());
+            const rawData = JSON.parse(result.stdout);
             if (!Array.isArray(rawData) || rawData.length === 0) return [];
             const backups = rawData[0].backup || [];
             return backups.map((b: Record<string, unknown>) => ({
@@ -47,6 +44,46 @@ export async function listBackups(stanza: string = 'db-main'): Promise<BackupInf
         } catch (e: unknown) {
             logger.error('Failed to parse backup list:', { error: e instanceof Error ? e.message : String(e) });
             throw new Error('Failed to parse backup list');
+        }
+    }
+
+async function runPgBackrestInfo(stanza: string, timeoutMs: number): Promise<{ exitCode: number; stdout: string; timedOut: boolean }> {
+        let timedOut = false;
+        const proc = Bun.spawn([
+            "sudo",
+            "-u",
+            "postgres",
+            "pgbackrest",
+            `--stanza=${stanza}`,
+            "info",
+            "--output=json",
+        ], {
+            stdout: "pipe",
+            stderr: "pipe",
+        });
+        const stdout = new Response(proc.stdout).text();
+        const stderr = new Response(proc.stderr).text();
+        const timeout = setTimeout(() => {
+            timedOut = true;
+            try {
+                proc.kill();
+            } catch {
+                // Process may already have exited.
+            }
+        }, timeoutMs);
+
+        try {
+            const [exitCode, output, errorOutput] = await Promise.all([
+                proc.exited,
+                stdout,
+                stderr,
+            ]);
+            if (errorOutput.trim()) {
+                logger.debug("[Backup] pgbackrest stderr:", { stderr: errorOutput.trim() });
+            }
+            return { exitCode, stdout: output, timedOut };
+        } finally {
+            clearTimeout(timeout);
         }
     }
 export async function createBackup(stanza: string = 'db-main', type: 'full' | 'incr' | 'diff' = 'incr'): Promise<{ message: string }> {
@@ -175,4 +212,3 @@ export async function restoreLogicalBackup(projectRef: string, backupId: string)
             await $`rm -f ${backupPath}`.nothrow().quiet();
         }
     }
-
