@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.9](https://github.com/zuohuadong/supacloud/compare/management-api-v0.18.8...management-api-v0.18.9) (2026-05-18)
+
+
+### Bug Fixes
+
+* backup timeout and dashboard i18n hardcoded Chinese ([#142](https://github.com/zuohuadong/supacloud/issues/142)) ([05c4bc4](https://github.com/zuohuadong/supacloud/commit/05c4bc492eff9597f56ec60c288f33f460658efe))
+
 ## [0.18.8](https://github.com/zuohuadong/supacloud/compare/management-api-v0.18.7...management-api-v0.18.8) (2026-05-18)
 
 
