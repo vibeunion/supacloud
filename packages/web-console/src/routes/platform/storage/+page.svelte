@@ -44,14 +44,14 @@
           totalSize: data.totalSize || data.total || "-",
           usedSize: data.usedSize || data.used || "-",
           mountPoint: data.mountPoint || data.path || "/var/lib/supabase/storage",
-          healthy: data.healthy !== false
+          healthy: data.healthy === true && data.status !== "unmounted"
         };
       }
     } catch {}
 
     // Fetch buckets
     try {
-      const res = await apiClient("/v1/storage/default/buckets");
+      try { const res2 = await apiClient("/v1/storage/default/buckets"); if (res2.ok) { const data2 = await res2.json(); buckets = Array.isArray(data2) ? data2 : []; } } catch {}
       if (res.ok) {
         const data = await res.json();
         buckets = Array.isArray(data) ? data : [];

@@ -4,6 +4,16 @@
   import { onMount } from "svelte";
   import { Loader2, SlidersHorizontal, Save, RefreshCw, AlertTriangle, CheckCircle2 } from "lucide-svelte";
   import { locale } from "svelte-i18n";
+  let projectRef = $state("");
+  async function resolveProjectRef() {
+    try {
+      const res = await apiClient("/v1/projects");
+      const projects = await res.json();
+      if (Array.isArray(projects) && projects.length > 0) {
+        projectRef = projects[0].ref;
+      }
+    } catch {}
+  }
 
   interface PgSetting {
     name: string;
@@ -52,7 +62,7 @@
 
   async function runSql(sql: string): Promise<Record<string, unknown>[]> {
     try {
-      const res = await apiClient("/v1/projects/default/database/sql", {
+      const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sql })
@@ -102,7 +112,7 @@
     setTimeout(() => saveMsg = null, 5000);
   }
 
-  onMount(() => fetchSettings());
+  onMount(async () => { await resolveProjectRef(); if (projectRef) await fetchSettings(); });
 
   const groups = $derived([...new Set(TUNING_PARAMS.map(p => p.groupZh))]);
 </script>

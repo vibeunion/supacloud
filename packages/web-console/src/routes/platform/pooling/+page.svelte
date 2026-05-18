@@ -4,6 +4,16 @@
   import { onMount } from "svelte";
   import { Loader2, Activity, RefreshCw, Trash2, AlertTriangle, Wifi, WifiOff } from "lucide-svelte";
   import { locale } from "svelte-i18n";
+  let projectRef = $state("");
+  async function resolveProjectRef() {
+    try {
+      const res = await apiClient("/v1/projects");
+      const projects = await res.json();
+      if (Array.isArray(projects) && projects.length > 0) {
+        projectRef = projects[0].ref;
+      }
+    } catch {}
+  }
 
   interface PoolInfo {
     database: string;
@@ -34,7 +44,7 @@
   async function runBouncerSql(sql: string): Promise<Record<string, unknown>[]> {
     try {
       // Query pgbouncer admin port via management API SQL endpoint
-      const res = await apiClient("/v1/projects/default/database/sql", {
+      const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sql })
@@ -93,7 +103,7 @@
     } catch {}
   }
 
-  onMount(() => fetchDiagnostics());
+  onMount(async () => { await resolveProjectRef(); if (projectRef) await fetchDiagnostics(); });
 
   const totalActive = $derived(pools.reduce((a, p) => a + parseInt(p.cl_active || "0"), 0));
   const totalWaiting = $derived(pools.reduce((a, p) => a + parseInt(p.cl_waiting || "0"), 0));
