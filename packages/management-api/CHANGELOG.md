@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.4](https://github.com/zuohuadong/supacloud/compare/management-api-v0.18.3...management-api-v0.18.4) (2026-05-18)
+
+
+### Bug Fixes
+
+* API error handling - prevent connection reset on DB errors ([#132](https://github.com/zuohuadong/supacloud/issues/132)) ([5a63da1](https://github.com/zuohuadong/supacloud/commit/5a63da1e168e91b1d8bd995c41094da1e51d04af))
+
 ## [0.18.3](https://github.com/zuohuadong/supacloud/compare/management-api-v0.18.2...management-api-v0.18.3) (2026-05-17)
 
 
