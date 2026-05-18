@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.6](https://github.com/zuohuadong/supacloud/compare/web-console-v0.11.5...web-console-v0.11.6) (2026-05-18)
+
+
+### Bug Fixes
+
+* **i18n:** add missing Dashboard.cache_hit_ratio translation ([#144](https://github.com/zuohuadong/supacloud/issues/144)) ([a3eceeb](https://github.com/zuohuadong/supacloud/commit/a3eceeb08808563ff8c19d487bb9b0b04eee0af0))
+
 ## [0.11.5](https://github.com/zuohuadong/supacloud/compare/web-console-v0.11.4...web-console-v0.11.5) (2026-05-18)
 
 
