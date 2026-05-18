@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.6](https://github.com/zuohuadong/supacloud/compare/management-api-v0.18.5...management-api-v0.18.6) (2026-05-18)
+
+
+### Bug Fixes
+
+* harden web console API and stream handling ([#136](https://github.com/zuohuadong/supacloud/issues/136)) ([f208679](https://github.com/zuohuadong/supacloud/commit/f20867956d32866f2d8ee99272f697f42d0c3f58))
+
 ## [0.18.5](https://github.com/zuohuadong/supacloud/compare/management-api-v0.18.4...management-api-v0.18.5) (2026-05-18)
 
 
