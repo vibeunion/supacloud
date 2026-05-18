@@ -3,6 +3,7 @@
 
   import { onMount } from "svelte";
   import { Loader2, Database, HardDrive, Cloud, RefreshCw, ArrowRight, AlertTriangle, CheckCircle2, FolderOpen, Server } from "lucide-svelte";
+  import { t } from "svelte-i18n";
 
   interface StorageStatus {
     backend: string;
@@ -31,7 +32,7 @@
   let migSecretKey = $state("");
   let migBucket = $state("");
   let isMigrating = $state(false);
-
+    
   async function fetchStatus() {
     isLoading = true;
     try {
@@ -43,7 +44,7 @@
           totalSize: data.totalSize || data.total || "-",
           usedSize: data.usedSize || data.used || "-",
           mountPoint: data.mountPoint || data.path || "/var/lib/supabase/storage",
-          healthy: data.healthy !== false
+          healthy: data.healthy === true && data.status !== "unmounted"
         };
       }
     } catch {}
@@ -62,10 +63,10 @@
 
   async function startMigration() {
     if (!migEndpoint || !migAccessKey || !migSecretKey) {
-      actionMsg = "❌ 请填写完整的 S3 连接信息";
+      actionMsg = `ERROR: ${$t("PlatformStorage.please_fill_in_complete_s3")}`;
       return;
     }
-    if (!confirm("⚠️ 确定要开始存储迁移吗？此操作将把当前本地存储的数据迁移到指定的 S3 兼容存储。")) return;
+    if (!confirm($t("PlatformStorage.start_storage_migration_this_will"))) return;
 
     isMigrating = true;
     actionMsg = null;
@@ -83,10 +84,10 @@
         })
       });
       const data = await res.json();
-      actionMsg = data instanceof Error ? data.message : String(data) ? `✅ ${data.message}` : "✅ 迁移任务已启动";
+      actionMsg = data instanceof Error ? String(data.message || "") : String(data) ? `SUCCESS: ${data.message}` : `SUCCESS: ${$t("PlatformStorage.migration_task_started")}`;
       showMigration = false;
     } catch (err: unknown) {
-      actionMsg = `❌ ${(err instanceof Error ? err.message : String(err))}`;
+      actionMsg = `ERROR: ${err instanceof Error ? err.message : String(err)}`;
     } finally {
       isMigrating = false;
       setTimeout(() => actionMsg = null, 8000);
@@ -99,16 +100,16 @@
 <div class="space-y-4">
   <div class="flex items-center justify-between">
     <div>
-      <h2 class="text-xl font-bold">存储管理</h2>
-      <p class="text-xs text-muted-foreground mt-1">管理 Supabase Storage 后端、MinIO/S3 兼容存储和数据迁移</p>
+      <h2 class="text-xl font-bold">{$t("PlatformStorage.storage_management")}</h2>
+      <p class="text-xs text-muted-foreground mt-1">{$t("PlatformStorage.manage_supabase_storage_backend_minios3compatible")}</p>
     </div>
     <button onclick={() => fetchStatus()} class="flex items-center gap-2 px-3 py-2 text-xs rounded-lg border hover:bg-muted/50 transition-colors">
-      <RefreshCw size={12} /> 刷新
+      <RefreshCw size={12} /> {$t("PlatformStorage.refresh")}
     </button>
   </div>
 
   {#if actionMsg}
-    <div class="rounded-lg border px-4 py-3 text-xs font-medium {actionMsg.startsWith('✅') ? 'bg-green-500/10 border-green-500/20 text-green-700' : 'bg-red-500/10 border-red-500/20 text-red-700'}">
+    <div class="rounded-lg border px-4 py-3 text-xs font-medium {actionMsg.startsWith('SUCCESS:') ? 'bg-green-500/10 border-green-500/20 text-green-700' : 'bg-red-500/10 border-red-500/20 text-red-700'}">
       {actionMsg}
     </div>
   {/if}
@@ -121,44 +122,44 @@
     <!-- Storage Status Overview -->
     <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
       <div class="rounded-xl border bg-card p-4">
-        <div class="flex items-center gap-2 text-muted-foreground mb-2"><Server size={14} /><span class="text-[10px] font-bold uppercase">后端类型</span></div>
+        <div class="flex items-center gap-2 text-muted-foreground mb-2"><Server size={14} /><span class="text-[10px] font-bold uppercase">{$t("PlatformStorage.backend_type")}</span></div>
         <div class="text-lg font-bold capitalize">{status?.backend || 'local'}</div>
-        <div class="text-[10px] text-muted-foreground mt-1">{status?.backend === 'local' ? '本地文件系统' : status?.backend === 's3' ? 'S3 兼容存储' : status?.backend === 'minio' ? 'MinIO 对象存储' : '本地存储'}</div>
+        <div class="text-[10px] text-muted-foreground mt-1">{status?.backend === 'local' ? $t("Common.local_filesystem") : status?.backend === 's3' ? $t("Common.s3_compatible_storage") : status?.backend === 'minio' ? $t("Common.minio_object_storage") : $t("Common.local_storage")}</div>
       </div>
       <div class="rounded-xl border bg-card p-4">
-        <div class="flex items-center gap-2 text-muted-foreground mb-2"><HardDrive size={14} /><span class="text-[10px] font-bold uppercase">已用空间</span></div>
+        <div class="flex items-center gap-2 text-muted-foreground mb-2"><HardDrive size={14} /><span class="text-[10px] font-bold uppercase">{$t("PlatformStorage.used_space")}</span></div>
         <div class="text-lg font-bold">{status?.usedSize || '-'}</div>
-        <div class="text-[10px] text-muted-foreground mt-1">总计: {status?.totalSize || '-'}</div>
+        <div class="text-[10px] text-muted-foreground mt-1">{$t("PlatformStorage.total")}: {status?.totalSize || '-'}</div>
       </div>
       <div class="rounded-xl border bg-card p-4">
-        <div class="flex items-center gap-2 text-muted-foreground mb-2"><FolderOpen size={14} /><span class="text-[10px] font-bold uppercase">挂载点</span></div>
+        <div class="flex items-center gap-2 text-muted-foreground mb-2"><FolderOpen size={14} /><span class="text-[10px] font-bold uppercase">{$t("PlatformStorage.mount_point")}</span></div>
         <div class="text-sm font-mono font-bold truncate">{status?.mountPoint || '-'}</div>
       </div>
       <div class="rounded-xl border bg-card p-4">
         <div class="flex items-center gap-2 text-muted-foreground mb-2">
           {#if status?.healthy}<CheckCircle2 size={14} class="text-green-500" />{:else}<AlertTriangle size={14} class="text-red-500" />{/if}
-          <span class="text-[10px] font-bold uppercase">健康状态</span>
+          <span class="text-[10px] font-bold uppercase">{$t("PlatformStorage.health")}</span>
         </div>
-        <div class="text-lg font-bold {status?.healthy ? 'text-green-600' : 'text-red-600'}">{status?.healthy ? '正常' : '异常'}</div>
+        <div class="text-lg font-bold {status?.healthy ? 'text-green-600' : 'text-red-600'}">{status?.healthy ? $t("Common.healthy") : $t("Common.unhealthy")}</div>
       </div>
     </div>
 
     <!-- Storage Buckets -->
     <div class="rounded-xl border bg-card overflow-hidden">
       <div class="border-b px-5 py-3 bg-muted/20">
-        <h3 class="text-sm font-semibold flex items-center gap-2"><Database size={16} /> 存储桶列表</h3>
+        <h3 class="text-sm font-semibold flex items-center gap-2"><Database size={16} /> {$t("PlatformStorage.bucket_list")}</h3>
       </div>
       {#if buckets.length === 0}
-        <div class="p-8 text-center text-muted-foreground text-xs">暂无存储桶数据。存储桶由 Supabase Storage 服务管理。</div>
+        <div class="p-8 text-center text-muted-foreground text-xs">{$t("PlatformStorage.no_bucket_data_yet_buckets")}</div>
       {:else}
         <div class="overflow-auto">
           <table class="w-full text-left text-xs">
             <thead class="bg-muted/30 border-b">
               <tr>
-                <th class="px-4 py-2.5 font-semibold text-muted-foreground">名称</th>
-                <th class="px-3 py-2.5 font-semibold text-muted-foreground">大小</th>
-                <th class="px-3 py-2.5 font-semibold text-muted-foreground">对象数</th>
-                <th class="px-3 py-2.5 font-semibold text-muted-foreground">访问</th>
+                <th class="px-4 py-2.5 font-semibold text-muted-foreground">{$t("PlatformStorage.name")}</th>
+                <th class="px-3 py-2.5 font-semibold text-muted-foreground">{$t("PlatformStorage.size")}</th>
+                <th class="px-3 py-2.5 font-semibold text-muted-foreground">{$t("PlatformStorage.objects")}</th>
+                <th class="px-3 py-2.5 font-semibold text-muted-foreground">{$t("PlatformStorage.access")}</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-border/20">
@@ -168,7 +169,7 @@
                   <td class="px-3 py-2.5 text-muted-foreground">{bucket.size || '-'}</td>
                   <td class="px-3 py-2.5 text-muted-foreground">{bucket.objects || 0}</td>
                   <td class="px-3 py-2.5">
-                    <span class="px-2 py-0.5 rounded-full text-[10px] font-bold {bucket.public ? 'bg-amber-500/10 text-amber-600' : 'bg-green-500/10 text-green-600'}">{bucket.public ? '公开' : '私有'}</span>
+                    <span class="px-2 py-0.5 rounded-full text-[10px] font-bold {bucket.public ? 'bg-amber-500/10 text-amber-600' : 'bg-green-500/10 text-green-600'}">{bucket.public ? $t("Common.public") : $t("Common.private")}</span>
                   </td>
                 </tr>
               {/each}
@@ -181,20 +182,20 @@
     <!-- Storage Migration -->
     <div class="rounded-xl border bg-card overflow-hidden">
       <div class="border-b px-5 py-3 bg-muted/20 flex items-center justify-between">
-        <h3 class="text-sm font-semibold flex items-center gap-2"><Cloud size={16} /> 存储迁移（本地 → S3/MinIO）</h3>
+        <h3 class="text-sm font-semibold flex items-center gap-2"><Cloud size={16} /> {$t("PlatformStorage.storage_migration_local_s3minio")}</h3>
         <button onclick={() => showMigration = !showMigration} class="px-3 py-1 text-[10px] font-semibold rounded-md border hover:bg-muted/50 transition-colors">
-          {showMigration ? '收起' : '配置迁移'}
+          {showMigration ? $t("Common.collapse") : $t("PlatformStorage.configure_migration")}
         </button>
       </div>
       {#if !showMigration}
         <div class="p-4">
-          <p class="text-xs text-muted-foreground">将本地存储中的文件数据迁移到 S3 兼容的对象存储（如 MinIO、阿里云 OSS、Cloudflare R2 等）。Pigsty 支持一键切换存储后端。</p>
+          <p class="text-xs text-muted-foreground">{$t("PlatformStorage.migrate_local_storage_files_to")}</p>
         </div>
       {:else}
         <div class="p-5 space-y-4">
           <div class="rounded-lg border bg-amber-500/5 border-amber-500/20 p-3 flex items-start gap-2">
             <AlertTriangle size={14} class="text-amber-600 mt-0.5 shrink-0" />
-            <p class="text-xs text-amber-700">迁移过程中存储服务将短暂不可用。请在低峰期执行，并确保目标存储有足够空间。</p>
+            <p class="text-xs text-amber-700">{$t("PlatformStorage.storage_service_will_be_briefly")}</p>
           </div>
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
@@ -202,7 +203,7 @@
               <input id="a11y-routes-platform-storage--page-svelte-201" bind:value={migEndpoint} placeholder="https://s3.us-east-1.amazonaws.com" class="w-full px-3 py-2 text-xs font-mono rounded-md border bg-muted/30 focus:outline-none focus:ring-1 focus:ring-brand" />
             </div>
             <div>
-              <label for="a11y-routes-platform-storage--page-svelte-205" class="text-xs font-semibold text-muted-foreground block mb-1">Bucket 名称</label>
+              <label for="a11y-routes-platform-storage--page-svelte-205" class="text-xs font-semibold text-muted-foreground block mb-1">{$t("PlatformStorage.bucket_name")}</label>
               <input id="a11y-routes-platform-storage--page-svelte-205" bind:value={migBucket} placeholder="supacloud-storage" class="w-full px-3 py-2 text-xs font-mono rounded-md border bg-muted/30 focus:outline-none focus:ring-1 focus:ring-brand" />
             </div>
             <div>
@@ -216,7 +217,7 @@
           </div>
           <button onclick={startMigration} disabled={isMigrating} class="px-4 py-2 text-xs font-semibold rounded-lg bg-brand text-white hover:bg-brand/90 transition-colors flex items-center gap-2 disabled:opacity-50">
             {#if isMigrating}<Loader2 size={14} class="animate-spin" />{:else}<ArrowRight size={14} />{/if}
-            开始迁移
+            {$t("PlatformStorage.start_migration")}
           </button>
         </div>
       {/if}
@@ -226,9 +227,9 @@
     <div class="rounded-lg border bg-blue-500/5 border-blue-500/20 p-3 flex items-start gap-2">
       <Database size={14} class="text-blue-600 mt-0.5 shrink-0" />
       <div class="text-xs text-blue-700">
-        <b>Pigsty 存储能力：</b>
-        支持本地文件系统、MinIO 内置对象存储、AWS S3、阿里云 OSS、Cloudflare R2、JuiceFS 分布式文件系统等。
-        pgBackRest 备份也支持直接写入 S3 兼容存储，实现异地容灾。
+        <b>{$t("PlatformStorage.pigsty_storage_capabilities")}</b>
+        {$t("PlatformStorage.supports_local_filesystem_builtin_minio")}
+        {$t("PlatformStorage.pgbackrest_backups_also_support_direct")}
       </div>
     </div>
   {/if}

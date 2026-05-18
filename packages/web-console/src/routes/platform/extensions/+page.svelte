@@ -1,6 +1,7 @@
 <script lang="ts">
   import { useList } from "@svadmin/core";
   import { Loader2, Package, Download, Trash2, RefreshCw, Search, AlertTriangle } from "lucide-svelte";
+  import { t } from "svelte-i18n";
 
   import type { BaseRecord } from '@svadmin/core';
 
@@ -21,6 +22,7 @@
   let actionTarget: string | null = $state.raw(null);
   let searchQuery = $state("");
 
+    
   async function installExt(name: string) {
     actionTarget = name;
     actionMsg = null;
@@ -42,7 +44,7 @@
   }
 
   async function removeExt(name: string) {
-    if (!confirm(`确定要从系统中卸载扩展包 "${name}" 吗？这将影响所有使用该扩展的数据库。`)) return;
+    if (!confirm($t("PlatformExtensions.confirm_uninstall", { values: { name } }) || `Are you sure you want to uninstall "${name}"?`)) return;
     actionTarget = name;
     actionMsg = null;
     try {
@@ -70,31 +72,31 @@
 
   // Popular extensions quick-install list
   const POPULAR = [
-    { name: "pgvector", desc: "向量数据库扩展，AI/ML 嵌入搜索" },
-    { name: "postgis", desc: "地理空间数据类型与查询" },
-    { name: "timescaledb", desc: "时序数据库扩展" },
-    { name: "pg_cron", desc: "数据库内置定时任务" },
-    { name: "pg_stat_statements", desc: "查询性能统计" },
-    { name: "pgrouting", desc: "地理路径分析" },
-    { name: "pg_trgm", desc: "模糊文本搜索" },
-    { name: "zhparser", desc: "中文全文检索分词" },
+    { name: "pgvector", desc: () => $t("PlatformExtensions.vector_database_extension_for_aiml") },
+    { name: "postgis", desc: () => $t("PlatformExtensions.geospatial_data_types_and_queries") },
+    { name: "timescaledb", desc: () => $t("PlatformExtensions.timeseries_database_extension") },
+    { name: "pg_cron", desc: () => $t("PlatformExtensions.builtin_scheduled_jobs_for_postgresql") },
+    { name: "pg_stat_statements", desc: () => $t("PlatformExtensions.query_performance_statistics") },
+    { name: "pgrouting", desc: () => $t("PlatformExtensions.geospatial_routing_analysis") },
+    { name: "pg_trgm", desc: () => $t("PlatformExtensions.fuzzy_text_search") },
+    { name: "zhparser", desc: () => $t("PlatformExtensions.chinese_fulltext_search_tokenizer") },
   ];
 </script>
 
 <div class="space-y-4">
   <div class="flex items-center justify-between">
     <div>
-      <h2 class="text-xl font-bold">扩展市场 (Pigsty)</h2>
-      <p class="text-xs text-muted-foreground mt-1">通过 <code class="px-1 py-0.5 rounded bg-muted text-[10px]">pig ext</code> 在操作系统层面安装/卸载 PostgreSQL 扩展包</p>
+      <h2 class="text-xl font-bold">{$t("PlatformExtensions.extensions_marketplace_pigsty")}</h2>
+      <p class="text-xs text-muted-foreground mt-1">{$t("PlatformExtensions.use")} <code class="px-1 py-0.5 rounded bg-muted text-[10px]">pig ext</code> {$t("PlatformExtensions.to_installuninstall_postgresql_extension_packages")}</p>
     </div>
     <button onclick={() => query.refetch()} class="flex items-center gap-2 px-3 py-2 text-xs rounded-lg border hover:bg-muted/50 transition-colors">
-      <RefreshCw size={12} /> 刷新
+      <RefreshCw size={12} /> {$t("PlatformExtensions.refresh")}
     </button>
   </div>
 
   <div class="rounded-lg border bg-amber-500/5 border-amber-500/20 p-3 flex items-start gap-2">
     <AlertTriangle size={14} class="text-amber-600 mt-0.5 shrink-0" />
-    <p class="text-xs text-amber-700">系统级操作：安装/卸载扩展包会影响整个 PostgreSQL 实例。安装后需在项目的 <b>数据库 → 扩展</b> 页面中通过 <code>CREATE EXTENSION</code> 启用。</p>
+    <p class="text-xs text-amber-700">{$t("PlatformExtensions.systemlevel_operation_installinguninstalling_packages_affects")}<b>{$t("PlatformExtensions.database_extensions")}</b> {$t("PlatformExtensions.with")}<code>CREATE EXTENSION</code>.</p>
   </div>
 
   {#if actionMsg}
@@ -106,7 +108,7 @@
   <!-- Popular Extensions Quick Install -->
   <div class="rounded-xl border bg-card overflow-hidden">
     <div class="border-b px-5 py-3 bg-muted/20">
-      <h3 class="text-sm font-semibold">🔥 热门扩展快速安装</h3>
+      <h3 class="text-sm font-semibold">🔥 {$t("PlatformExtensions.popular_extensions_quick_install")}</h3>
     </div>
     <div class="p-4 grid grid-cols-2 md:grid-cols-4 gap-2">
       {#each POPULAR as ext}
@@ -119,11 +121,11 @@
             <Package size={14} class="text-brand" />
             <span class="text-xs font-bold">{ext.name}</span>
           </div>
-          <span class="text-[10px] text-muted-foreground">{ext.desc}</span>
+          <span class="text-[10px] text-muted-foreground">{ext.desc()}</span>
           {#if actionTarget === ext.name}
             <Loader2 size={12} class="animate-spin text-brand mt-1" />
           {:else}
-            <span class="text-[9px] text-brand font-semibold mt-1 flex items-center gap-1"><Download size={10} /> 安装</span>
+            <span class="text-[9px] text-brand font-semibold mt-1 flex items-center gap-1"><Download size={10} /> {$t("PlatformExtensions.install")}</span>
           {/if}
         </button>
       {/each}
@@ -133,10 +135,10 @@
   <!-- System Extensions List -->
   <div class="rounded-xl border bg-card overflow-hidden">
     <div class="border-b px-5 py-3 bg-muted/20 flex items-center justify-between">
-      <h3 class="text-sm font-semibold">已安装的系统扩展包</h3>
+      <h3 class="text-sm font-semibold">{$t("PlatformExtensions.installed_system_extensions")}</h3>
       <div class="relative w-48">
         <Search size={12} class="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
-        <input bind:value={searchQuery} placeholder="搜索扩展..." class="w-full pl-8 pr-3 py-1.5 text-xs rounded-md border bg-muted/30 focus:outline-none focus:ring-1 focus:ring-brand" />
+        <input bind:value={searchQuery} placeholder={$t("PlatformExtensions.search_extensions")} class="w-full pl-8 pr-3 py-1.5 text-xs rounded-md border bg-muted/30 focus:outline-none focus:ring-1 focus:ring-brand" />
       </div>
     </div>
 
@@ -150,18 +152,18 @@
       </div>
     {:else if filtered.length === 0}
       <div class="p-8 text-center text-muted-foreground text-xs">
-        {searchQuery ? '未找到匹配的扩展包' : '暂未通过 pig 安装任何系统级扩展。可使用上方热门列表快速安装。'}
+        {searchQuery ? $t("PlatformExtensions.no_matching_extensions_found") : $t("PlatformExtensions.no_systemlevel_extensions_installed_via")}
       </div>
     {:else}
       <div class="overflow-auto max-h-96">
         <table class="w-full text-left text-xs">
           <thead class="bg-muted/30 border-b sticky top-0 z-10">
             <tr>
-              <th class="px-4 py-2.5 font-semibold text-muted-foreground">包名</th>
-              <th class="px-3 py-2.5 font-semibold text-muted-foreground">版本</th>
-              <th class="px-3 py-2.5 font-semibold text-muted-foreground">状态</th>
-              <th class="px-3 py-2.5 font-semibold text-muted-foreground">描述</th>
-              <th class="px-4 py-2.5 font-semibold text-muted-foreground text-right">操作</th>
+              <th class="px-4 py-2.5 font-semibold text-muted-foreground">{$t("PlatformExtensions.package")}</th>
+              <th class="px-3 py-2.5 font-semibold text-muted-foreground">{$t("PlatformExtensions.version")}</th>
+              <th class="px-3 py-2.5 font-semibold text-muted-foreground">{$t("PlatformExtensions.status")}</th>
+              <th class="px-3 py-2.5 font-semibold text-muted-foreground">{$t("PlatformExtensions.description")}</th>
+              <th class="px-4 py-2.5 font-semibold text-muted-foreground text-right">{$t("PlatformExtensions.actions")}</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-border/20">
@@ -179,7 +181,7 @@
                     disabled={actionTarget === ext.name}
                     class="px-2 py-1 text-[10px] rounded border border-red-500/20 text-red-500 hover:bg-red-500/10 transition-colors flex items-center gap-1 ml-auto disabled:opacity-50"
                   >
-                    {#if actionTarget === ext.name}<Loader2 size={10} class="animate-spin" />{:else}<Trash2 size={10} />{/if} 卸载
+                    {#if actionTarget === ext.name}<Loader2 size={10} class="animate-spin" />{:else}<Trash2 size={10} />{/if} {$t("PlatformExtensions.uninstall")}
                   </button>
                 </td>
               </tr>

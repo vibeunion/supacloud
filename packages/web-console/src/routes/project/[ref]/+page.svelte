@@ -316,45 +316,45 @@
     <div class="rounded-xl border bg-card overflow-hidden">
       <div class="border-b px-5 py-3 bg-muted/20 flex items-center justify-between">
         <div>
-          <h2 class="text-sm font-semibold flex items-center gap-2"><Activity size={14} /> 后台任务概览</h2>
-          <p class="text-[11px] text-muted-foreground mt-1">运行中、重试中、死信数量，以及过去 24 小时失败趋势。</p>
+          <h2 class="text-sm font-semibold flex items-center gap-2"><Activity size={14} /> {$t("DashboardTasks.title")}</h2>
+          <p class="text-[11px] text-muted-foreground mt-1">{$t("DashboardTasks.subtitle")}</p>
         </div>
-        <a href={`/project/${projectRef}/tasks`} class="text-[10px] text-brand hover:underline flex items-center gap-1">打开任务面板 <ArrowRight size={10} /></a>
+        <a href={`/project/${projectRef}/tasks`} class="text-[10px] text-brand hover:underline flex items-center gap-1">{$t("DashboardTasks.open_panel")} <ArrowRight size={10} /></a>
       </div>
 
       <div class="p-5 space-y-5">
         <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
           <div class="rounded-xl border bg-background p-4">
-            <div class="text-[10px] uppercase text-muted-foreground font-semibold">运行中</div>
+            <div class="text-[10px] uppercase text-muted-foreground font-semibold">{$t("DashboardTasks.running")}</div>
             <div class="mt-2 text-2xl font-bold text-blue-600">{taskStats?.running ?? 0}</div>
           </div>
           <div class="rounded-xl border bg-background p-4">
-            <div class="text-[10px] uppercase text-muted-foreground font-semibold">重试中</div>
+            <div class="text-[10px] uppercase text-muted-foreground font-semibold">{$t("DashboardTasks.retrying")}</div>
             <div class="mt-2 text-2xl font-bold text-amber-600">{taskStats?.retryScheduled ?? 0}</div>
           </div>
           <div class="rounded-xl border bg-background p-4">
-            <div class="text-[10px] uppercase text-muted-foreground font-semibold">死信队列</div>
+            <div class="text-[10px] uppercase text-muted-foreground font-semibold">{$t("DashboardTasks.dead_letter")}</div>
             <div class="mt-2 text-2xl font-bold text-red-600">{taskStats?.deadLettered ?? 0}</div>
           </div>
           <div class="rounded-xl border bg-background p-4">
-            <div class="text-[10px] uppercase text-muted-foreground font-semibold">24h 失败数</div>
+            <div class="text-[10px] uppercase text-muted-foreground font-semibold">{$t("DashboardTasks.failures_24h")}</div>
             <div class="mt-2 text-2xl font-bold text-foreground">{taskStats?.failedLast24h ?? 0}</div>
           </div>
           <div class="rounded-xl border bg-background p-4">
-            <div class="text-[10px] uppercase text-muted-foreground font-semibold">24h 取消数</div>
+            <div class="text-[10px] uppercase text-muted-foreground font-semibold">{$t("DashboardTasks.cancelled_24h")}</div>
             <div class="mt-2 text-2xl font-bold text-slate-700">{taskStats?.cancelledLast24h ?? 0}</div>
           </div>
         </div>
 
         <div class="rounded-xl border bg-background p-4">
           <div class="flex items-center justify-between mb-3">
-            <h3 class="text-sm font-semibold text-foreground">最近失败趋势</h3>
-            <span class="text-[11px] text-muted-foreground">按小时聚合</span>
+            <h3 class="text-sm font-semibold text-foreground">{$t("DashboardTasks.failure_trend")}</h3>
+            <span class="text-[11px] text-muted-foreground">{$t("DashboardTasks.hourly_aggregation")}</span>
           </div>
 
           {#if !taskStats || taskStats.failedTrend.length === 0}
             <div class="text-sm text-muted-foreground py-6 text-center">
-              最近 24 小时没有失败任务。
+              {$t("DashboardTasks.no_failures")}
             </div>
           {:else}
             <div class="space-y-4">
@@ -390,19 +390,19 @@
 
         <div class="rounded-xl border bg-background p-4">
           <div class="flex items-center justify-between mb-3">
-            <h3 class="text-sm font-semibold text-foreground">高频异常</h3>
-            <span class="text-[11px] text-muted-foreground">过去 24 小时 Top 5</span>
+            <h3 class="text-sm font-semibold text-foreground">{$t("DashboardTasks.top_failures")}</h3>
+            <span class="text-[11px] text-muted-foreground">{$t("DashboardTasks.top_5_24h")}</span>
           </div>
           {#if !taskStats || taskStats.topFailures.length === 0}
             <div class="text-sm text-muted-foreground py-6 text-center">
-              最近 24 小时没有异常聚合。
+              {$t("DashboardTasks.no_anomalies")}
             </div>
           {:else}
             <div class="space-y-2">
               {#each taskStats.topFailures as item}
                 <div class="rounded-lg border border-border/60 px-3 py-2">
                   <div class="text-xs text-foreground break-all">{item.message}</div>
-                  <div class="mt-1 text-[11px] text-muted-foreground font-mono">出现 {item.count} 次</div>
+                  <div class="mt-1 text-[11px] text-muted-foreground font-mono">{$t("DashboardTasks.occurrences", { default: `出现 ${item.count} 次` })}</div>
                 </div>
               {/each}
             </div>
@@ -415,8 +415,8 @@
       <!-- Left: Services Status -->
       <div class="rounded-xl border bg-card overflow-hidden">
         <div class="border-b px-5 py-3 bg-muted/20 flex items-center justify-between">
-          <h2 class="text-sm font-semibold flex items-center gap-2"><Server size={14} /> 服务状态</h2>
-          <a href={`/project/${projectRef}/settings/services`} class="text-[10px] text-brand hover:underline flex items-center gap-1">管理 <ArrowRight size={10} /></a>
+          <h2 class="text-sm font-semibold flex items-center gap-2"><Server size={14} /> {$t("DashboardServices.title")} </h2>
+          <a href={`/project/${projectRef}/settings/services`} class="text-[10px] text-brand hover:underline flex items-center gap-1">{$t("DashboardServices.manage")} <ArrowRight size={10} /></a>
         </div>
         <div class="divide-y divide-border/20">
           {#if servicesLoading}
@@ -424,7 +424,7 @@
               <Loader2 size={16} class="animate-spin text-brand opacity-50" />
             </div>
           {:else if services.length === 0}
-            <div class="p-4 text-xs text-muted-foreground text-center">无法获取服务状态</div>
+            <div class="p-4 text-xs text-muted-foreground text-center">{$t("DashboardServices.unavailable")}</div>
           {:else}
             {#each services as svc}
               {@const StatusIcon = getStatusIcon(svc.status)}
@@ -443,13 +443,13 @@
       <!-- Middle: Recent Users -->
       <div class="rounded-xl border bg-card overflow-hidden">
         <div class="border-b px-5 py-3 bg-muted/20 flex items-center justify-between">
-          <h2 class="text-sm font-semibold flex items-center gap-2"><Users size={14} /> 最近注册</h2>
-          <a href={`/project/${projectRef}/auth`} class="text-[10px] text-brand hover:underline flex items-center gap-1">全部 <ArrowRight size={10} /></a>
+          <h2 class="text-sm font-semibold flex items-center gap-2"><Users size={14} /> {$t("DashboardRecentUsers.title")} </h2>
+          <a href={`/project/${projectRef}/auth`} class="text-[10px] text-brand hover:underline flex items-center gap-1">{$t("DashboardRecentUsers.view_all")} <ArrowRight size={10} /></a>
         </div>
         {#if recentUsers.length === 0}
           <div class="flex flex-col items-center justify-center py-10 text-muted-foreground gap-2 opacity-40">
             <Users size={24} strokeWidth={1} />
-            <p class="text-xs">暂无用户</p>
+            <p class="text-xs">{$t("DashboardRecentUsers.no_users")}</p>
           </div>
         {:else}
           <div class="divide-y divide-border/20">
@@ -471,13 +471,13 @@
       <!-- Right: Active Queries -->
       <div class="rounded-xl border bg-card overflow-hidden">
         <div class="border-b px-5 py-3 bg-muted/20 flex items-center justify-between">
-          <h2 class="text-sm font-semibold flex items-center gap-2"><Code2 size={14} /> 活跃查询</h2>
-          <a href={`/project/${projectRef}/reports/api-overview`} class="text-[10px] text-brand hover:underline flex items-center gap-1">详情 <ArrowRight size={10} /></a>
+          <h2 class="text-sm font-semibold flex items-center gap-2"><Code2 size={14} /> {$t("DashboardActiveQueries.title")} </h2>
+          <a href={`/project/${projectRef}/reports/api-overview`} class="text-[10px] text-brand hover:underline flex items-center gap-1">{$t("DashboardActiveQueries.details")} <ArrowRight size={10} /></a>
         </div>
         {#if activeQueries.length === 0}
           <div class="flex flex-col items-center justify-center py-10 text-muted-foreground gap-2 opacity-40">
             <Activity size={24} strokeWidth={1} />
-            <p class="text-xs">无活跃查询</p>
+            <p class="text-xs">{$t("DashboardActiveQueries.no_queries")}</p>
           </div>
         {:else}
           <div class="divide-y divide-border/20">
@@ -497,7 +497,7 @@
 
     <!-- Quick Links -->
     <div>
-      <h2 class="text-sm font-semibold mb-3 flex items-center gap-2"><ArrowRight size={14} /> 快速入口</h2>
+      <h2 class="text-sm font-semibold mb-3 flex items-center gap-2"><ArrowRight size={14} /> {$t("DashboardQuickAccess.title")} </h2>
       <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
         {#each QUICK_LINKS as link}
           <a href={`/project/${projectRef}/${link.href}`}

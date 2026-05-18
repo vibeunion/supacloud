@@ -3,6 +3,17 @@
 
   import { onMount } from "svelte";
   import { Loader2, SlidersHorizontal, Save, RefreshCw, AlertTriangle, CheckCircle2 } from "lucide-svelte";
+  import { t, locale } from "svelte-i18n";
+  let projectRef = $state("");
+  async function resolveProjectRef() {
+    try {
+      const res = await apiClient("/v1/projects");
+      const projects = await res.json();
+      if (Array.isArray(projects) && projects.length > 0) {
+        projectRef = projects[0].ref;
+      }
+    } catch {}
+  }
 
   interface PgSetting {
     name: string;
@@ -18,17 +29,17 @@
 
   // Key tunable parameters grouped
   const TUNING_PARAMS = [
-    { name: "shared_buffers", label: "共享缓冲区", group: "内存", desc: "PostgreSQL 用于缓存表数据的内存大小" },
-    { name: "work_mem", label: "工作内存", group: "内存", desc: "排序和哈希操作的工作内存" },
-    { name: "maintenance_work_mem", label: "维护内存", group: "内存", desc: "VACUUM、CREATE INDEX 等维护操作的内存" },
-    { name: "effective_cache_size", label: "有效缓存大小", group: "内存", desc: "操作系统和 PostgreSQL 缓存的总估计大小" },
-    { name: "max_connections", label: "最大连接数", group: "连接", desc: "允许的最大并发连接数（需重启）" },
-    { name: "max_parallel_workers_per_gather", label: "并行查询工人数", group: "执行", desc: "每个查询可使用的最大并行工人数" },
-    { name: "random_page_cost", label: "随机页面代价", group: "执行", desc: "随机 I/O 的相对代价估计（SSD 建议 1.1）" },
-    { name: "effective_io_concurrency", label: "I/O 并发度", group: "执行", desc: "磁盘 I/O 并发请求数（SSD 建议 200）" },
-    { name: "wal_buffers", label: "WAL 缓冲区", group: "WAL", desc: "WAL 日志使用的共享内存" },
-    { name: "checkpoint_completion_target", label: "检查点完成目标", group: "WAL", desc: "检查点写入间隔的百分比（建议 0.9）" },
-    { name: "log_min_duration_statement", label: "慢查询阈值 (ms)", group: "日志", desc: "超过此耗时的语句将被记录（-1 禁用）" },
+    { name: "shared_buffers", labelZh: "共享缓冲区", labelEn: "Shared Buffers", groupZh: "内存", groupEn: "Memory", descZh: "PostgreSQL 用于缓存表数据的内存大小", descEn: "Memory used by PostgreSQL to cache table data" },
+    { name: "work_mem", labelZh: "工作内存", labelEn: "Work Mem", groupZh: "内存", groupEn: "Memory", descZh: "排序和哈希操作的工作内存", descEn: "Working memory for sort and hash operations" },
+    { name: "maintenance_work_mem", labelZh: "维护内存", labelEn: "Maintenance Work Mem", groupZh: "内存", groupEn: "Memory", descZh: "VACUUM、CREATE INDEX 等维护操作的内存", descEn: "Memory used for maintenance operations like VACUUM and CREATE INDEX" },
+    { name: "effective_cache_size", labelZh: "有效缓存大小", labelEn: "Effective Cache Size", groupZh: "内存", groupEn: "Memory", descZh: "操作系统和 PostgreSQL 缓存的总估计大小", descEn: "Estimated total cache available to the OS and PostgreSQL" },
+    { name: "max_connections", labelZh: "最大连接数", labelEn: "Max Connections", groupZh: "连接", groupEn: "Connections", descZh: "允许的最大并发连接数（需重启）", descEn: "Maximum number of concurrent connections allowed (restart required)" },
+    { name: "max_parallel_workers_per_gather", labelZh: "并行查询工人数", labelEn: "Parallel Workers Per Gather", groupZh: "执行", groupEn: "Execution", descZh: "每个查询可使用的最大并行工人数", descEn: "Maximum parallel workers a single query can use" },
+    { name: "random_page_cost", labelZh: "随机页面代价", labelEn: "Random Page Cost", groupZh: "执行", groupEn: "Execution", descZh: "随机 I/O 的相对代价估计（SSD 建议 1.1）", descEn: "Relative cost of random I/O (1.1 recommended for SSDs)" },
+    { name: "effective_io_concurrency", labelZh: "I/O 并发度", labelEn: "I/O Concurrency", groupZh: "执行", groupEn: "Execution", descZh: "磁盘 I/O 并发请求数（SSD 建议 200）", descEn: "Concurrent disk I/O requests (200 recommended for SSDs)" },
+    { name: "wal_buffers", labelZh: "WAL 缓冲区", labelEn: "WAL Buffers", groupZh: "WAL", groupEn: "WAL", descZh: "WAL 日志使用的共享内存", descEn: "Shared memory used by WAL" },
+    { name: "checkpoint_completion_target", labelZh: "检查点完成目标", labelEn: "Checkpoint Completion Target", groupZh: "WAL", groupEn: "WAL", descZh: "检查点写入间隔的百分比（建议 0.9）", descEn: "Percentage of checkpoint write interval (0.9 recommended)" },
+    { name: "log_min_duration_statement", labelZh: "慢查询阈值 (ms)", labelEn: "Slow Query Threshold (ms)", groupZh: "日志", groupEn: "Logging", descZh: "超过此耗时的语句将被记录（-1 禁用）", descEn: "Statements slower than this are logged (-1 disables)" },
   ];
 
   let settings: Record<string, PgSetting> = $state.raw({});
@@ -36,10 +47,22 @@
   let isLoading = $state(true);
   let isSaving = $state(false);
   let saveMsg: string | null = $state.raw(null);
+  const isZh = $derived(($locale ?? "").toLowerCase().startsWith("zh"));
+    
+  function groupLabel(group: string) {
+    const map: Record<string, string> = {
+      "内存": "Memory",
+      "连接": "Connections",
+      "执行": "Execution",
+      "WAL": "WAL",
+      "日志": "Logging",
+    };
+    return isZh ? group : (map[group] || group);
+  }
 
   async function runSql(sql: string): Promise<Record<string, unknown>[]> {
     try {
-      const res = await apiClient("/v1/projects/default/database/sql", {
+      const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sql })
@@ -76,37 +99,37 @@
       }
     }
     if (stmts.length === 0) {
-      saveMsg = "⚠️ 没有检测到任何参数变更";
+      saveMsg = `⚠️ ${$t("PlatformTuning.no_parameter_changes_detected")}`;
       setTimeout(() => saveMsg = null, 3000);
       isSaving = false;
       return;
     }
     stmts.push("SELECT pg_reload_conf();");
     const result = await runSql(stmts.join("\n"));
-    saveMsg = `✅ 已保存 ${stmts.length - 1} 项参数变更并重载配置`;
+    saveMsg = `✅ ${$t("PlatformTuning.saved")} ${stmts.length - 1} ${$t("PlatformTuning.parameter_changes_and_reloaded_configuration")}`;
     await fetchSettings();
     isSaving = false;
     setTimeout(() => saveMsg = null, 5000);
   }
 
-  onMount(() => fetchSettings());
+  onMount(async () => { await resolveProjectRef(); if (projectRef) await fetchSettings(); });
 
-  const groups = $derived([...new Set(TUNING_PARAMS.map(p => p.group))]);
+  const groups = $derived([...new Set(TUNING_PARAMS.map(p => p.groupZh))]);
 </script>
 
 <div class="space-y-4">
   <div class="flex items-center justify-between">
     <div>
-      <h2 class="text-xl font-bold">引擎参数调优</h2>
-      <p class="text-xs text-muted-foreground mt-1">直接调整 PostgreSQL 核心运行参数（ALTER SYSTEM SET）</p>
+      <h2 class="text-xl font-bold">{$t("PlatformTuning.engine_tuning")}</h2>
+      <p class="text-xs text-muted-foreground mt-1">{$t("PlatformTuning.adjust_core_postgresql_runtime_parameters")}</p>
     </div>
     <div class="flex items-center gap-2">
       <button onclick={() => fetchSettings()} class="flex items-center gap-2 px-3 py-2 text-xs rounded-lg border hover:bg-muted/50 transition-colors">
-        <RefreshCw size={12} /> 刷新
+        <RefreshCw size={12} /> {$t("PlatformTuning.refresh")}
       </button>
       <button onclick={saveAll} disabled={isSaving} class="flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg bg-brand text-white hover:bg-brand/90 transition-colors disabled:opacity-50">
         {#if isSaving}<Loader2 size={14} class="animate-spin" />{:else}<Save size={14} />{/if}
-        保存变更
+        {$t("PlatformTuning.save_changes")}
       </button>
     </div>
   </div>
@@ -119,7 +142,7 @@
 
   <div class="rounded-lg border bg-blue-500/5 border-blue-500/20 p-3 flex items-start gap-2">
     <SlidersHorizontal size={14} class="text-blue-600 mt-0.5 shrink-0" />
-    <p class="text-xs text-blue-700">修改参数后点击「保存变更」将执行 <code class="px-1 py-0.5 rounded bg-blue-500/10">ALTER SYSTEM SET</code> 并调用 <code class="px-1 py-0.5 rounded bg-blue-500/10">pg_reload_conf()</code>。标注 <span class="text-red-600 font-bold">(需重启)</span> 的参数需要重启 PostgreSQL 才能生效。</p>
+    <p class="text-xs text-blue-700">{$t("PlatformTuning.after_editing_parameters_clicking_save_changes_will_execute")} <code class="px-1 py-0.5 rounded bg-blue-500/10">ALTER SYSTEM SET</code> {$t("PlatformTuning.and_call")} <code class="px-1 py-0.5 rounded bg-blue-500/10">pg_reload_conf()</code>。{$t("PlatformTuning.parameters_marked")} <span class="text-red-600 font-bold">{$t("PlatformTuning.restart_required")}</span> {$t("PlatformTuning.require_postgresql_restart_to_take")}</p>
   </div>
 
   {#if isLoading}
@@ -130,24 +153,24 @@
     {#each groups as group}
       <div class="rounded-xl border bg-card overflow-hidden">
         <div class="border-b px-5 py-3 bg-muted/20">
-          <h3 class="text-sm font-semibold">{group}</h3>
+          <h3 class="text-sm font-semibold">{groupLabel(group)}</h3>
         </div>
         <div class="divide-y divide-border/20">
-          {#each TUNING_PARAMS.filter(p => p.group === group) as param}
+          {#each TUNING_PARAMS.filter(p => p.groupZh === group) as param}
             {@const s = settings[param.name]}
             <div class="flex items-center justify-between px-5 py-4">
               <div class="flex-1">
                 <div class="flex items-center gap-2">
-                  <span class="font-mono text-sm font-semibold">{param.name}</span>
+                <span class="font-mono text-sm font-semibold">{param.name}</span>
                   {#if s?.context === "postmaster"}
-                    <span class="px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-red-500/10 text-red-600 border border-red-500/20">需重启</span>
+                    <span class="px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-red-500/10 text-red-600 border border-red-500/20">{$t("PlatformTuning.restart_required_1")}</span>
                   {:else}
-                    <span class="px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-green-500/10 text-green-600">热加载</span>
+                    <span class="px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-green-500/10 text-green-600">{$t("PlatformTuning.hot_reload")}</span>
                   {/if}
                 </div>
-                <p class="text-[10px] text-muted-foreground mt-0.5">{param.desc}</p>
+                <p class="text-[10px] text-muted-foreground mt-0.5">{isZh ? param.descZh : param.descEn}</p>
                 {#if s}
-                  <p class="text-[10px] text-muted-foreground/60 mt-0.5">当前值: <span class="font-mono">{s.setting}{s.unit ? ` ${s.unit}` : ''}</span></p>
+                  <p class="text-[10px] text-muted-foreground/60 mt-0.5">{$t("PlatformTuning.current")}: <span class="font-mono">{s.setting}{s.unit ? ` ${s.unit}` : ''}</span></p>
                 {/if}
               </div>
               <div class="flex items-center gap-2">
@@ -159,7 +182,7 @@
                   <span class="text-[10px] text-muted-foreground font-mono w-8">{s.unit}</span>
                 {/if}
                 {#if editValues[param.name] !== s?.setting}
-                  <span class="w-2 h-2 rounded-full bg-amber-500 animate-pulse" title="已修改"></span>
+                  <span class="w-2 h-2 rounded-full bg-amber-500 animate-pulse" title={$t("PlatformTuning.modified")}></span>
                 {/if}
               </div>
             </div>

@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import { apiClient } from "$lib/api";
   import { Save, RefreshCw, Bot, Key, Globe, Cpu, CheckCircle, AlertTriangle } from "lucide-svelte";
+  import { t } from "svelte-i18n";
 
   interface SettingItem {
     key: string;
@@ -22,14 +23,14 @@
   let testing = $state(false);
   let testResult = $state<{ ok: boolean; message: string } | null>(null);
   let saveSuccess = $state(false);
-
+    
   // Preset providers
   const PROVIDERS = [
-    { label: "OpenAI", base: "https://api.openai.com/v1", model: "gpt-4o-mini" },
-    { label: "DeepSeek", base: "https://api.deepseek.com/v1", model: "deepseek-chat" },
-    { label: "通义千问", base: "https://dashscope.aliyuncs.com/compatible-mode/v1", model: "qwen-plus" },
-    { label: "Moonshot", base: "https://api.moonshot.cn/v1", model: "moonshot-v1-8k" },
-    { label: "硅基流动", base: "https://api.siliconflow.cn/v1", model: "Qwen/Qwen3-8B" },
+    { labelZh: "OpenAI", labelEn: "OpenAI", base: "https://api.openai.com/v1", model: "gpt-4o-mini" },
+    { labelZh: "DeepSeek", labelEn: "DeepSeek", base: "https://api.deepseek.com/v1", model: "deepseek-chat" },
+    { labelZh: "通义千问", labelEn: "Qwen", base: "https://dashscope.aliyuncs.com/compatible-mode/v1", model: "qwen-plus" },
+    { labelZh: "Moonshot", labelEn: "Moonshot", base: "https://api.moonshot.cn/v1", model: "moonshot-v1-8k" },
+    { labelZh: "硅基流动", labelEn: "SiliconFlow", base: "https://api.siliconflow.cn/v1", model: "Qwen/Qwen3-8B" },
   ];
 
   async function loadSettings() {
@@ -58,7 +59,7 @@
         body: JSON.stringify({
           items: [
             { key: "ai_api_base", value: aiApiBase, description: "AI API Base URL", is_secret: false },
-            ...(aiApiKey && !aiApiKey.startsWith("••") ? [{ key: "ai_api_key", value: aiApiKey, description: "AI API Key", is_secret: true }] : []),
+            ...(aiApiKey ? [{ key: "ai_api_key", value: aiApiKey, description: "AI API Key", is_secret: true }] : []),
             { key: "ai_model", value: aiModel, description: "Default AI Model", is_secret: false },
           ],
         }),
@@ -66,7 +67,7 @@
       saveSuccess = true;
       setTimeout(() => (saveSuccess = false), 3000);
     } catch (err: unknown) {
-      alert("保存失败: " + (err instanceof Error ? err.message : String(err)));
+      alert($t("PlatformSettings.save_failed") + (err instanceof Error ? err.message : String(err)));
     }
     saving = false;
   }
@@ -86,12 +87,12 @@
       });
       const res = await response.json() as { choices?: { message?: { content?: string } }[]; error?: { message?: string } };
       if (res?.choices?.[0]?.message?.content) {
-        testResult = { ok: true, message: `✅ 连接成功！AI 回复: "${res.choices[0].message.content}"` };
+        testResult = { ok: true, message: `✅ ${$t("PlatformSettings.connected_successfully_ai_replied")}"${res.choices[0].message.content}"` };
       } else {
-        testResult = { ok: false, message: "返回格式异常：" + JSON.stringify(res).slice(0, 200) };
+        testResult = { ok: false, message: $t("PlatformSettings.unexpected_response_format") + JSON.stringify(res).slice(0, 200) };
       }
     } catch (err: unknown) {
-      testResult = { ok: false, message: "连接失败: " + (err instanceof Error ? err.message : String(err)) };
+      testResult = { ok: false, message: $t("PlatformSettings.connection_failed") + (err instanceof Error ? err.message : String(err)) };
     }
     testing = false;
   }
@@ -111,26 +112,26 @@
       <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-brand to-purple-600 flex items-center justify-center shadow-lg">
         <Bot size={20} class="text-white" />
       </div>
-      AI 服务配置
+      {$t("PlatformSettings.ai_service_settings")}
     </h2>
-    <p class="text-sm text-muted-foreground mt-2">配置平台内置 AI 助手使用的大语言模型接口地址与鉴权密钥。支持任何兼容 OpenAI 协议的服务商。</p>
+    <p class="text-sm text-muted-foreground mt-2">{$t("PlatformSettings.configure_api_base_url_and")}</p>
   </div>
 
   {#if loading}
     <div class="flex items-center justify-center py-20 text-muted-foreground">
-      <RefreshCw size={20} class="animate-spin mr-2" /> 加载配置中...
+      <RefreshCw size={20} class="animate-spin mr-2" /> {$t("PlatformSettings.loading_settings")}
     </div>
   {:else}
     <!-- Quick Provider Presets -->
     <div class="space-y-3">
-      <span class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">快速选择服务商</span>
+      <span class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">{$t("PlatformSettings.quick_provider_presets")}</span>
       <div class="flex flex-wrap gap-2">
         {#each PROVIDERS as p}
           <button
             onclick={() => applyPreset(p)}
             class="px-4 py-2 text-xs font-medium rounded-xl border transition-all hover:border-brand hover:bg-brand/5 hover:text-brand hover:shadow-sm {aiApiBase === p.base ? 'border-brand bg-brand/10 text-brand shadow-sm' : 'bg-card text-muted-foreground'}"
           >
-            {p.label}
+            {$t("PlatformSettings.provider_" + p.labelEn.toLowerCase())}
           </button>
         {/each}
       </div>
@@ -141,7 +142,7 @@
       <!-- API Base -->
       <div class="space-y-2">
         <label for="ai-api-base" class="flex items-center gap-2 text-sm font-semibold">
-          <Globe size={15} class="text-brand" /> API 接口地址
+          <Globe size={15} class="text-brand" /> {$t("PlatformSettings.api_base_url")}
         </label>
         <input
           id="ai-api-base"
@@ -149,13 +150,13 @@
           class="w-full px-4 py-2.5 text-sm font-mono rounded-xl border bg-background focus:outline-none focus:ring-2 focus:ring-brand/50 transition-shadow"
           placeholder="https://api.openai.com/v1"
         />
-        <p class="text-[11px] text-muted-foreground">兼容 OpenAI 协议的 Chat Completions 端点地址（无需包含 /chat/completions 后缀）</p>
+        <p class="text-[11px] text-muted-foreground">{$t("PlatformSettings.openaicompatible_chat_completions_base_url")}</p>
       </div>
 
       <!-- API Key -->
       <div class="space-y-2">
         <label for="ai-api-key" class="flex items-center gap-2 text-sm font-semibold">
-          <Key size={15} class="text-amber-500" /> 鉴权密钥 (API Key)
+          <Key size={15} class="text-amber-500" /> {$t("PlatformSettings.api_key")}
         </label>
         <input
           id="ai-api-key"
@@ -164,13 +165,13 @@
           class="w-full px-4 py-2.5 text-sm font-mono rounded-xl border bg-background focus:outline-none focus:ring-2 focus:ring-brand/50 transition-shadow"
           placeholder="sk-..."
         />
-        <p class="text-[11px] text-muted-foreground">密钥仅存储在您的服务器数据库中，通过后端代理访问，不会暴露给前端浏览器</p>
+        <p class="text-[11px] text-muted-foreground">{$t("PlatformSettings.keys_are_stored_only_in")}</p>
       </div>
 
       <!-- Model -->
       <div class="space-y-2">
         <label for="ai-model" class="flex items-center gap-2 text-sm font-semibold">
-          <Cpu size={15} class="text-purple-500" /> 默认模型
+          <Cpu size={15} class="text-purple-500" /> {$t("PlatformSettings.default_model")}
         </label>
         <input
           id="ai-model"
@@ -178,7 +179,7 @@
           class="w-full px-4 py-2.5 text-sm font-mono rounded-xl border bg-background focus:outline-none focus:ring-2 focus:ring-brand/50 transition-shadow"
           placeholder="gpt-4o-mini"
         />
-        <p class="text-[11px] text-muted-foreground">AI 助手发送消息时使用的模型标识符，如 gpt-4o-mini、qwen-plus、deepseek-chat 等</p>
+        <p class="text-[11px] text-muted-foreground">{$t("PlatformSettings.model_identifier_used_by_the")}</p>
       </div>
     </div>
 
@@ -196,7 +197,7 @@
         {:else}
           <Save size={16} />
         {/if}
-        {saveSuccess ? '已保存' : '保存配置'}
+        {saveSuccess ? $t("PlatformSettings.saved") : $t("PlatformSettings.save_settings")}
       </button>
 
       <button
@@ -209,7 +210,7 @@
         {:else}
           <Bot size={16} />
         {/if}
-        测试连接
+        {$t("PlatformSettings.test_connection")}
       </button>
     </div>
 

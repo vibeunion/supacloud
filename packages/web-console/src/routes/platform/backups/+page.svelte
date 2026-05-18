@@ -2,6 +2,7 @@
   import { apiClient } from "$lib/api";
 
   import { onMount } from "svelte";
+  import { t } from "svelte-i18n";
   import { Loader2, HardDrive, Play, RotateCcw, Calendar, Clock, AlertTriangle, CheckCircle2, RefreshCw } from "lucide-svelte";
 
   import { useList, type BaseRecord } from "@svadmin/core";
@@ -28,6 +29,16 @@
   let pitrTime = $state("");
   let isRestoring = $state(false);
 
+  const backupTypes = $derived([
+    { v: "full", label: $t("PlatformBackups.full") || "Full", desc: $t("PlatformBackups.full_desc") || "" },
+    { v: "incr", label: $t("PlatformBackups.incr") || "Incremental", desc: $t("PlatformBackups.incr_desc") || "" },
+    { v: "diff", label: $t("PlatformBackups.diff") || "Differential", desc: $t("PlatformBackups.diff_desc") || "" },
+  ]);
+
+  function backupLabel(value: string) {
+    return backupTypes.find((item) => item.v === value)?.label || value;
+  }
+
 
 
   async function createBackup() {
@@ -40,7 +51,9 @@
         body: JSON.stringify({ type: backupType })
       });
       const data = await res.json();
-      actionMsg = data.success !== false ? `✅ 物理备份已触发 (${backupType})` : `❌ ${data.message || '备份失败'}`;
+      actionMsg = data.success !== false
+        ? `✅ ${$t("PlatformBackups.backup_triggered")} (${backupLabel(backupType)})`
+        : `❌ ${data.message || ($t("PlatformBackups.backup_failed") || "Backup failed")}`;
       query.refetch();
     } catch (err: unknown) {
       actionMsg = `❌ ${(err instanceof Error ? err.message : String(err))}`;
@@ -52,11 +65,11 @@
 
   async function restorePitr() {
     if (!pitrDate || !pitrTime) {
-      actionMsg = "❌ 请选择日期和时间";
+      actionMsg = `❌ ${$t("PlatformBackups.choose_datetime") || "Please choose a date and time"}`;
       return;
     }
     const target = `${pitrDate} ${pitrTime}`;
-    if (!confirm(`⚠️ 危险操作：将数据库恢复到 ${target}\n\n这将停止数据库并回退所有后续数据，确定继续？`)) return;
+    if (!confirm(`⚠️ ${$t("PlatformBackups.restore_confirm", { values: { target } }) || `Restore database to ${target}?`}\n\n${$t("PlatformBackups.restore_warning") || "This will stop the database and roll back all later data. Continue?"}`)) return;
 
     isRestoring = true;
     actionMsg = null;
@@ -67,7 +80,9 @@
         body: JSON.stringify({ target_time: target })
       });
       const data = await res.json();
-      actionMsg = data.success !== false ? "✅ PITR 恢复命令已发送" : `❌ ${data.message}`;
+      actionMsg = data.success !== false
+        ? `✅ ${$t("PlatformBackups.restore_sent") || "PITR restore command sent"}`
+        : `❌ ${data.message}`;
       showPitr = false;
     } catch (err: unknown) {
       actionMsg = `❌ ${(err instanceof Error ? err.message : String(err))}`;
@@ -89,11 +104,11 @@
 <div class="space-y-4">
   <div class="flex items-center justify-between">
     <div>
-      <h2 class="text-xl font-bold">物理备份 & PITR</h2>
-      <p class="text-xs text-muted-foreground mt-1">基于 pgBackRest 的全量/增量物理备份与任意时间点恢复</p>
+      <h2 class="text-xl font-bold">{$t("PlatformBackups.title") || "Physical Backups & PITR"}</h2>
+      <p class="text-xs text-muted-foreground mt-1">{$t("PlatformBackups.subtitle") || "pgBackRest based full/incremental backups and point-in-time recovery"}</p>
     </div>
     <button onclick={() => query.refetch()} disabled={query.isFetching} class="flex items-center gap-2 px-3 py-2 text-xs rounded-lg border hover:bg-muted/50 transition-colors disabled:opacity-50">
-      <RefreshCw size={12} class={query.isFetching ? 'animate-spin' : ''} /> 刷新
+      <RefreshCw size={12} class={query.isFetching ? 'animate-spin' : ''} /> {$t("Common.refresh")}
     </button>
   </div>
 
@@ -106,13 +121,13 @@
   <!-- Create Backup -->
   <div class="rounded-xl border bg-card overflow-hidden">
     <div class="border-b px-5 py-3 bg-muted/20 flex items-center justify-between">
-      <h3 class="text-sm font-semibold flex items-center gap-2"><HardDrive size={16} /> 创建物理备份</h3>
+      <h3 class="text-sm font-semibold flex items-center gap-2"><HardDrive size={16} /> {$t("PlatformBackups.create_backup") || "Create Backup"}</h3>
     </div>
     <div class="p-5 flex items-end gap-4">
       <div class="flex-1">
-        <label for="a11y-routes-platform-backups--page-svelte-120" class="text-xs font-semibold text-muted-foreground block mb-1.5">备份类型</label>
+        <label for="a11y-routes-platform-backups--page-svelte-120" class="text-xs font-semibold text-muted-foreground block mb-1.5">{$t("PlatformBackups.backup_type") || "Backup Type"}</label>
         <div class="flex gap-1 bg-muted/30 rounded-lg p-0.5 w-fit">
-          {#each [{ v: "full", label: "全量 (Full)" }, { v: "incr", label: "增量 (Incr)" }, { v: "diff", label: "差异 (Diff)" }] as opt}
+          {#each backupTypes as opt}
             <button
               class="px-3 py-1.5 text-xs font-semibold rounded-md transition-colors {backupType === opt.v ? 'bg-brand text-white' : 'text-muted-foreground hover:text-foreground'}"
               onclick={() => backupType = opt.v}
@@ -120,7 +135,7 @@
           {/each}
         </div>
         <p class="text-[10px] text-muted-foreground mt-2">
-          {#if backupType === "full"}全量备份整个数据库集群，耗时最长但恢复最快{:else if backupType === "incr"}仅备份自上次备份以来变更的数据，速度最快{:else}备份自上次全量以来的所有变更{/if}
+          {#if backupType === "full"}{$t("PlatformBackups.full_desc") || "Full backup of the whole cluster, slowest but fastest restore."}{:else if backupType === "incr"}{$t("PlatformBackups.incr_desc") || "Back up only data changed since the last backup, fastest to run."}{:else}{$t("PlatformBackups.diff_desc") || "Back up all changes since the last full backup."}{/if}
         </p>
       </div>
       <button
@@ -129,7 +144,7 @@
         class="px-4 py-2 text-xs font-semibold rounded-lg bg-brand text-white hover:bg-brand/90 transition-colors flex items-center gap-2 disabled:opacity-50"
       >
         {#if isCreating}<Loader2 size={14} class="animate-spin" />{:else}<Play size={14} />{/if}
-        执行备份
+        {$t("PlatformBackups.execute_backup") || "Run Backup"}
       </button>
     </div>
   </div>
@@ -137,24 +152,24 @@
   <!-- PITR Panel -->
   <div class="rounded-xl border bg-card overflow-hidden">
     <div class="border-b px-5 py-3 bg-muted/20 flex items-center justify-between">
-      <h3 class="text-sm font-semibold flex items-center gap-2"><Clock size={16} /> 时间点恢复 (PITR)</h3>
+      <h3 class="text-sm font-semibold flex items-center gap-2"><Clock size={16} /> {$t("PlatformBackups.pitr_title") || "Point-in-Time Recovery (PITR)"}</h3>
       <button onclick={() => showPitr = !showPitr} class="px-3 py-1 text-[10px] font-semibold rounded-md border hover:bg-muted/50 transition-colors">
-        {showPitr ? '收起' : '展开恢复面板'}
+        {showPitr ? ($t("PlatformBackups.collapse") || "Collapse") : ($t("PlatformBackups.expand") || "Expand")}
       </button>
     </div>
     {#if showPitr}
       <div class="p-5">
         <div class="rounded-lg border bg-red-500/5 border-red-500/20 p-3 mb-4 flex items-start gap-2">
           <AlertTriangle size={14} class="text-red-500 mt-0.5 shrink-0" />
-          <p class="text-xs text-red-600">此操作极其危险！将停止数据库并恢复到指定时间点，恢复后所有该时间点之后的变更将永久丢失。</p>
+          <p class="text-xs text-red-600">{$t("PlatformBackups.restore_warning") || "This is extremely dangerous. The database will be stopped and restored to the selected point in time, and all changes after that point will be permanently lost."}</p>
         </div>
         <div class="flex items-end gap-4">
           <div>
-            <label for="a11y-routes-platform-backups--page-svelte-160" class="text-xs font-semibold text-muted-foreground block mb-1.5">恢复到日期</label>
+            <label for="a11y-routes-platform-backups--page-svelte-160" class="text-xs font-semibold text-muted-foreground block mb-1.5">{$t("PlatformBackups.restore_to_date") || "Restore to Date"}</label>
             <input id="a11y-routes-platform-backups--page-svelte-160" type="date" bind:value={pitrDate} class="px-3 py-2 text-xs rounded-md border bg-muted/30 focus:outline-none focus:ring-1 focus:ring-brand" />
           </div>
           <div>
-            <label for="a11y-routes-platform-backups--page-svelte-164" class="text-xs font-semibold text-muted-foreground block mb-1.5">时间</label>
+            <label for="a11y-routes-platform-backups--page-svelte-164" class="text-xs font-semibold text-muted-foreground block mb-1.5">{$t("Common.time") || "Time"}</label>
             <input id="a11y-routes-platform-backups--page-svelte-164" type="time" step="1" bind:value={pitrTime} class="px-3 py-2 text-xs rounded-md border bg-muted/30 focus:outline-none focus:ring-1 focus:ring-brand" />
           </div>
           <button
@@ -163,7 +178,7 @@
             class="px-4 py-2 text-xs font-semibold rounded-lg bg-red-600 text-white hover:bg-red-700 transition-colors flex items-center gap-2 disabled:opacity-50"
           >
             {#if isRestoring}<Loader2 size={14} class="animate-spin" />{:else}<RotateCcw size={14} />{/if}
-            执行恢复
+            {$t("PlatformBackups.execute_restore") || "Run Restore"}
           </button>
         </div>
       </div>
@@ -173,24 +188,24 @@
   <!-- Backup History -->
   <div class="rounded-xl border bg-card overflow-hidden">
     <div class="border-b px-5 py-3 bg-muted/20">
-      <h3 class="text-sm font-semibold flex items-center gap-2"><Calendar size={16} /> 备份历史</h3>
+      <h3 class="text-sm font-semibold flex items-center gap-2"><Calendar size={16} /> {$t("PlatformBackups.history") || "Backup History"}</h3>
     </div>
     {#if query.isLoading}
       <div class="flex items-center justify-center py-16">
         <Loader2 size={24} class="animate-spin text-brand opacity-50" />
       </div>
     {:else if backups.length === 0}
-      <div class="p-8 text-center text-muted-foreground text-xs">暂无备份历史记录。执行上方备份操作后会在此显示。</div>
+      <div class="p-8 text-center text-muted-foreground text-xs">{$t("PlatformBackups.no_history") || "No backup history yet. Run a backup above and it will appear here."}</div>
     {:else}
       <div class="overflow-auto max-h-80">
         <table class="w-full text-left text-xs">
           <thead class="bg-muted/30 border-b sticky top-0">
             <tr>
-              <th class="px-4 py-2.5 font-semibold text-muted-foreground">标签</th>
-              <th class="px-3 py-2.5 font-semibold text-muted-foreground">类型</th>
-              <th class="px-3 py-2.5 font-semibold text-muted-foreground">状态</th>
-              <th class="px-3 py-2.5 font-semibold text-muted-foreground">时间</th>
-              <th class="px-3 py-2.5 font-semibold text-muted-foreground">大小</th>
+              <th class="px-4 py-2.5 font-semibold text-muted-foreground">{$t("PlatformBackups.label") || "Label"}</th>
+              <th class="px-3 py-2.5 font-semibold text-muted-foreground">{$t("PlatformBackups.type") || "Type"}</th>
+              <th class="px-3 py-2.5 font-semibold text-muted-foreground">{$t("PlatformBackups.status") || "Status"}</th>
+              <th class="px-3 py-2.5 font-semibold text-muted-foreground">{$t("PlatformBackups.time") || "Time"}</th>
+              <th class="px-3 py-2.5 font-semibold text-muted-foreground">{$t("PlatformBackups.size") || "Size"}</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-border/20">
