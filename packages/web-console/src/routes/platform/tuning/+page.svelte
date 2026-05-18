@@ -61,6 +61,12 @@
   }
 
   async function runSql(sql: string): Promise<Record<string, unknown>[]> {
+    if (!projectRef || projectRef === "default") {
+      await resolveProjectRef();
+    }
+    if (!projectRef || projectRef === "default") {
+      return [];
+    }
     try {
       const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
         method: "POST",

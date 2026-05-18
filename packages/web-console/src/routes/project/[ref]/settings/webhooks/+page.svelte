@@ -31,9 +31,10 @@
   const webhooksQuery = createQuery(() => ({
     queryKey: ["webhooks", projectRef],
     queryFn: async () => {
+      // Ensure pg_net exists once, using migration mode (read mode blocks DDL).
       await apiClient(`/v1/projects/${projectRef}/database/sql`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sql: "CREATE EXTENSION IF NOT EXISTS pg_net;" })
+        body: JSON.stringify({ sql: "CREATE EXTENSION IF NOT EXISTS pg_net;", mode: "migration" })
       });
 
       const sql = `
@@ -49,7 +50,7 @@
       `;
       const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sql })
+        body: JSON.stringify({ sql, mode: "migration" })
       });
       if (!res.ok) throw new Error("Failed to fetch webhooks");
       const data = await res.json();
@@ -74,6 +75,7 @@
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sql: "SELECT tablename FROM pg_catalog.pg_tables WHERE schemaname = 'public' ORDER BY tablename;" })
       });
+      if (!tblRes.ok) throw new Error("Failed to fetch tables");
       const tblData = await tblRes.json();
       const tables = (tblData.rows || []).map((t: Record<string, unknown>) => t.tablename as string);
 
@@ -115,7 +117,7 @@
 
       const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sql })
+        body: JSON.stringify({ sql, mode: "migration" })
       });
       const data = await res.json();
       if (data.error) throw new Error(data.message || data.error);
@@ -152,9 +154,12 @@
       `;
       const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sql })
+        body: JSON.stringify({ sql, mode: "migration" })
       });
-      if (!res.ok) throw new Error("Delete failed");
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data?.message || data?.error || "Delete failed");
+      }
       return res.json();
     },
     onSuccess: () => {
