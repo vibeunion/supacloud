@@ -34,7 +34,7 @@
     locale.set($locale === 'zh' ? 'en' : 'zh');
   }
 
-  const themeToggleLabel = $derived(mode.current === 'dark' ? '切换到浅色模式' : '切换到深色模式');
+  const themeToggleLabel = $derived(mode.current === 'dark' ? ($t(''Common.light_mode'', {{default: ''Light mode''}}) || ''Light mode'') : ($t(''Common.dark_mode'', {{default: ''Dark mode''}}) || ''Dark mode''));
 
   const navItems = $derived(currentProject?.ref ? [
     { title: $t("Navigation.table_editor"), icon: Table, href: `/project/${currentProject.ref}/tables` },
@@ -51,7 +51,7 @@
     { title: $t("Sidebar.database_advisor"), icon: ShieldCheck, href: `/project/${currentProject.ref}/reports/advisors` },
     { title: $t("Navigation.reports"), icon: Glasses, href: `/project/${currentProject.ref}/reports/api-overview` },
     { title: $t("Navigation.logs"), icon: ScrollText, href: `/project/${currentProject.ref}/logs` },
-    { title: "后台任务 (Tasks)", icon: Activity, href: `/project/${currentProject.ref}/tasks` },
+    { title: $t("Navigation.tasks", {default: "Tasks"}), icon: Activity, href: `/project/${currentProject.ref}/tasks` },
     { title: $t("Navigation.settings"), icon: Settings, href: `/project/${currentProject.ref}/settings` },
   ] : []);
 
@@ -137,7 +137,7 @@
       class="flex w-full items-center gap-3 px-3 py-2.5 text-sm font-medium rounded-xl text-muted-foreground hover:bg-secondary/50 hover:text-foreground transition-all duration-300"
     >
       <Languages class="w-4 h-4" />
-      <span>{$locale === 'zh' ? 'English' : '简体中文'}</span>
+      <span>{$locale === 'zh' ? 'English' : ($t(''Common.chinese'', {{default: ''Chinese''}}) || ''Chinese'')}</span>
     </button>
 
     <div class="flex items-center gap-3 px-3 py-3 mt-1 bg-secondary/30 rounded-xl border border-border/30">

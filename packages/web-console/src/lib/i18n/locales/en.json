@@ -34,7 +34,8 @@
                        "database_linter":  "Database Linter",
                        "logs":  "Logs",
                        "settings":  "Settings",
-                       "reports":  "Reports \u0026 Analytics"
+                       "reports":  "Reports \u0026 Analytics",
+                       "tasks":  "Tasks"
                    },
     "Project":  {
                     "home":  "Home",
@@ -447,7 +448,10 @@
                    "close":  "Close",
                    "ago_minutes":  "minutes ago",
                    "ago_hours":  "hours ago",
-                   "ago_days":  "days ago"
+                   "ago_days":  "days ago",
+                   "light_mode":  "Switch to light mode",
+                   "dark_mode":  "Switch to dark mode",
+                   "chinese":  "Chinese"
                },
     "chat":  {
                  "title":  "SupaCloud AI Assistant",

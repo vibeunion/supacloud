@@ -22,7 +22,7 @@
     locale.set($locale === 'zh' ? 'en' : 'zh');
   }
 
-  const themeToggleLabel = $derived(mode.current === 'dark' ? '切换到浅色模式' : '切换到深色模式');
+  const themeToggleLabel = $derived(mode.current === 'dark' ? ($t(''Common.light_mode'', {{default: ''Light mode''}}) || ''Light mode'') : ($t(''Common.dark_mode'', {{default: ''Dark mode''}}) || ''Dark mode''));
 
   const navItems = $derived([
     { title: $t("Platform.extensions_market"), icon: Box, href: `/platform/extensions` },
@@ -82,7 +82,7 @@
       class="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition-colors cursor-pointer"
     >
       <Languages size={18} />
-      <span>{$locale === 'zh' ? 'English' : '中文'}</span>
+      <span>{$locale === 'zh' ? 'English' : ($t(''Common.chinese'', {{default: ''Chinese''}}) || ''Chinese'')}</span>
     </button>
   </div>
 </aside>

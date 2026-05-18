@@ -34,7 +34,8 @@
                        "database_linter":  "表结构体检",
                        "logs":  "日志",
                        "settings":  "项目设置",
-                       "reports":  "各类监控报表"
+                       "reports":  "各类监控报表",
+                       "tasks":  "后台任务"
                    },
     "Project":  {
                     "home":  "首页",
@@ -447,7 +448,10 @@
                    "close":  "关闭",
                    "ago_minutes":  "分钟前",
                    "ago_hours":  "小时前",
-                   "ago_days":  "天前"
+                   "ago_days":  "天前",
+                   "light_mode":  "切换到浅色模式",
+                   "dark_mode":  "切换到深色模式",
+                   "chinese":  "简体中文"
                },
     "chat":  {
                  "title":  "SupaCloud AI 助手",
