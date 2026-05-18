@@ -87,14 +87,63 @@ export class ExtensionService {
         try {
             const result = await $`pig ext list`.nothrow().quiet();
             if (result.exitCode !== 0) {
-                return [{ name: 'pig-not-available', version: '-', status: 'unavailable', description: 'pig CLI not found' }];
+                return await this.listSystemExtensionsFromDb();
             }
-            const lines = result.text().split('\n').filter((l: string) => l.trim() && !l.startsWith('#') && !l.startsWith('='));
-            return lines.map((line: string) => {
-                const parts = line.split(/\s+/);
-                return { name: parts[0] || '', version: parts[1] || '', status: parts[2] || 'available', description: parts.slice(3).join(' ') || '' };
-            }).filter((e: { name: string }) => e.name);
-        } catch (err: unknown) {
+            const text = result.text();
+            const rawLines = text.split('\n');
+            // Filter out decorative/header/summary lines from pig ext list output
+            const isDataLine = (l: string): boolean => {
+                const trimmed = l.trim();
+                if (!trimmed) return false;
+                // Skip Unicode box-drawing separator lines
+                if (/^[\s\u2500-\u257F\-+|]+$/.test(trimmed)) return false;
+                // Skip header row (Name | Version | ...)
+                if (/^\s*name\s*\|/i.test(trimmed)) return false;
+                // Skip summary lines like "(464 Rows)"
+                if (/^\(\d+\s+Rows?\)/.test(trimmed)) return false;
+                // Skip banner lines like checkmark + "Found N extensions"
+                if (/^\u2713/.test(trimmed)) return false;
+                // Skip comment and decoration lines
+                if (/^[#=]/.test(trimmed)) return false;
+                return true;
+            };
+            const dataLines = rawLines.filter(isDataLine);
+            // Try pipe-delimited parsing first (table output)
+            if (dataLines.some((l: string) => l.includes('|'))) {
+                return dataLines
+                    .map((l: string) => {
+                        const parts = l.split('|').map((p: string) => p.trim());
+                        return { name: parts[0] || '', version: parts[1] || '', status: parts[2] || 'available', description: parts.slice(3).join(' | ').trim() || '' };
+                    })
+                    .filter((e: { name: string }) => e.name);
+            }
+            // Fallback: space-delimited parsing
+            return dataLines
+                .map((l: string) => {
+                    const parts = l.split(/\s+/);
+                    return { name: parts[0] || '', version: parts[1] || '', status: parts[2] || 'available', description: parts.slice(3).join(' ') || '' };
+                })
+                .filter((e: { name: string }) => e.name);
+        } catch {
+            return await this.listSystemExtensionsFromDb();
+        }
+    }
+
+    private async listSystemExtensionsFromDb(): Promise<{ name: string; version: string; status: string; description: string }[]> {
+        try {
+            const { sql } = await import("../db");
+            const rows = await sql`
+                SELECT name, default_version, installed_version, comment
+                FROM pg_available_extensions
+                ORDER BY name
+            `;
+            return (rows as Array<{ name: string; default_version: string | null; installed_version: string | null; comment: string | null }>).map(row => ({
+                name: row.name,
+                version: row.default_version || '-',
+                status: row.installed_version ? 'installed' : 'available',
+                description: row.comment || '',
+            }));
+        } catch {
             return [];
         }
     }

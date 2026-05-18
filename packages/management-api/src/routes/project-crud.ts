@@ -209,7 +209,21 @@ async function buildProjectResponse(
 }
 
 export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
-  // Get available regions
+  .onError(({ code, error, set }) => {
+    logger.error(`[ProjectCRUD] Unhandled error [${code}]:`, error);
+    if (code === "VALIDATION") {
+      set.status = 400;
+      return { message: "Validation failed", code: "VALIDATION_ERROR", details: error.message };
+    }
+    if (code === "NOT_FOUND") {
+      set.status = 404;
+      return { message: "Not found", code: "NOT_FOUND" };
+    }
+    const { toAppError } = require("../utils/errors") as typeof import("../utils/errors");
+    const appError = toAppError(error);
+    set.status = appError.statusCode;
+    return appError.toJSON();
+  })
   .get("/available-regions", () => {
     return AVAILABLE_REGIONS;
   },
