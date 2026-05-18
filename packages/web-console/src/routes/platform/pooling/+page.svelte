@@ -42,6 +42,12 @@
   let actionMsg: string | null = $state.raw(null);
     
   async function runBouncerSql(sql: string): Promise<Record<string, unknown>[]> {
+    if (!projectRef || projectRef === "default") {
+      await resolveProjectRef();
+    }
+    if (!projectRef || projectRef === "default") {
+      return [];
+    }
     try {
       // Query pgbouncer admin port via management API SQL endpoint
       const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {

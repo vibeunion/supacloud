@@ -19,6 +19,22 @@
   const statsQuery = createQuery(() => ({
     queryKey: ["query-performance", projectRef],
     queryFn: async () => {
+      const extensionCheck = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sql: `SELECT EXISTS(SELECT 1 FROM pg_extension WHERE extname = 'pg_stat_statements') AS installed;`
+        })
+      });
+      const extensionData = await extensionCheck.json();
+      if (!extensionCheck.ok) {
+        throw new Error(extensionData?.message || extensionData?.error || "Failed to check extension status");
+      }
+      const installed = Boolean(extensionData?.rows?.[0]?.installed);
+      if (!installed) {
+        throw new Error("MISSING_EXTENSION");
+      }
+
       const schemasToTry = ['', 'monitor.', 'extensions.'];
       let lastError = null;
 
@@ -34,6 +50,14 @@
             })
           });
           const data = await res.json();
+
+          if (!res.ok) {
+            lastError = data;
+            if (data?.message?.includes("pg_stat_statements") && data?.message?.includes("does not exist")) {
+              continue;
+            }
+            throw new Error(data?.message || data?.error || "Failed to query pg_stat_statements");
+          }
           
           if (data.error) {
             lastError = data;
@@ -72,7 +96,8 @@
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          sql: `CREATE EXTENSION IF NOT EXISTS pg_stat_statements;`
+          sql: `CREATE EXTENSION IF NOT EXISTS pg_stat_statements;`,
+          mode: "migration"
         })
       });
       const data = await res.json();
