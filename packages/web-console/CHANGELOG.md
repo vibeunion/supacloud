@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.8](https://github.com/zuohuadong/supacloud/compare/web-console-v0.11.7...web-console-v0.11.8) (2026-05-18)
+
+
+### Bug Fixes
+
+* **web-console:** prevent i18n race after login ([#148](https://github.com/zuohuadong/supacloud/issues/148)) ([c38da4f](https://github.com/zuohuadong/supacloud/commit/c38da4fc639a3db2dbf8ac597e0176e1326cf8f0))
+
 ## [0.11.7](https://github.com/zuohuadong/supacloud/compare/web-console-v0.11.6...web-console-v0.11.7) (2026-05-18)
 
 
