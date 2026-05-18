@@ -20,7 +20,8 @@
     "storage_used": "已用存储",
     "auth_users": "认证用户",
     "api_health": "API 监控",
-    "healthy": "健康"
+    "healthy": "健康",
+    "cache_hit_ratio": "缓存命中率"
   },
   "Navigation": {
     "table_editor": "表编辑器",
