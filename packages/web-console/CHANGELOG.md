@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.2](https://github.com/zuohuadong/supacloud/compare/web-console-v0.11.1...web-console-v0.11.2) (2026-05-18)
+
+
+### Bug Fixes
+
+* harden web console API and stream handling ([#136](https://github.com/zuohuadong/supacloud/issues/136)) ([f208679](https://github.com/zuohuadong/supacloud/commit/f20867956d32866f2d8ee99272f697f42d0c3f58))
+
 ## [0.11.1](https://github.com/zuohuadong/supacloud/compare/web-console-v0.11.0...web-console-v0.11.1) (2026-05-16)
 
 
