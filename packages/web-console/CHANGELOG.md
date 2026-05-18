@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.3](https://github.com/zuohuadong/supacloud/compare/web-console-v0.11.2...web-console-v0.11.3) (2026-05-18)
+
+
+### Bug Fixes
+
+* correct config routes and console init guard ([#138](https://github.com/zuohuadong/supacloud/issues/138)) ([1811293](https://github.com/zuohuadong/supacloud/commit/18112931562b3a5dba75b89ecf1e71c0f7262835))
+
 ## [0.11.2](https://github.com/zuohuadong/supacloud/compare/web-console-v0.11.1...web-console-v0.11.2) (2026-05-18)
 
 

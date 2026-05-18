@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.7](https://github.com/zuohuadong/supacloud/compare/management-api-v0.18.6...management-api-v0.18.7) (2026-05-18)
+
+
+### Bug Fixes
+
+* correct config routes and console init guard ([#138](https://github.com/zuohuadong/supacloud/issues/138)) ([1811293](https://github.com/zuohuadong/supacloud/commit/18112931562b3a5dba75b89ecf1e71c0f7262835))
+
 ## [0.18.6](https://github.com/zuohuadong/supacloud/compare/management-api-v0.18.5...management-api-v0.18.6) (2026-05-18)
 
 
