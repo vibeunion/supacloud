@@ -497,7 +497,8 @@ export function registerStaticAssets() {
     // --- Step 2: immutable asset miss → strict 404 (gateway behavior) ---
     // /_app/immutable/... files are content-hashed; if they don't exist, it's a stale reference.
     // Returning index.html here would cause "Expected JS but got text/html" browser errors.
-    if (isImmutableAsset(path) || hasFileExtension(path)) {
+    const isRootIndexFallback = url.pathname === "/" && path === "/index.html";
+    if ((isImmutableAsset(path) || hasFileExtension(path)) && !isRootIndexFallback) {
       set.status = 404;
       return "";
     }

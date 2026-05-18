@@ -21,24 +21,46 @@ export interface ExtensionInfo {
 }
 
 export function parsePigExtensionList(text: string): SystemExtensionInfo[] {
-    const lines = text.split('\n').filter((l: string) => l.trim());
-    const isPsqlTable = lines.some((l: string) => l.includes('|'));
-    if (isPsqlTable) {
-        return lines
-            .filter((l: string) => l.includes('|') && !l.match(/^\s*(name|Name)\s*\|/i))
-            .map((l: string) => {
-                const parts = l.split('|').map((p: string) => p.trim());
-                return { name: parts[0] || '', version: parts[1] || '', status: parts[2] || 'available', description: parts.slice(3).join(' | ').trim() || '' };
+    const rows = text
+        .split('\n')
+        .map((line: string) => line.trim())
+        .filter((line: string) => {
+            if (!line) return false;
+            if (/^[\s\u2500-\u257F\-+|]+$/.test(line)) return false;
+            if (/^\(\d+\s+rows?\)$/i.test(line)) return false;
+            if (/^[\u2713\u2714]\s*Found\s+\d+\s+extensions?/i.test(line)) return false;
+            if (/^[#=]/.test(line)) return false;
+            return true;
+        });
+
+    const tableRows = rows
+        .map((line: string) => line.replace(/\u2502/g, '|'))
+        .filter((line: string) => line.includes('|'));
+
+    if (tableRows.length > 0) {
+        return tableRows
+            .map((line: string) => {
+                const parts = line.split('|').map((part: string) => part.trim());
+                if (parts[0] === '') parts.shift();
+                if (parts[parts.length - 1] === '') parts.pop();
+                return parts;
             })
-            .filter((e: { name: string }) => e.name);
+            .filter((parts: string[]) => parts.length > 0 && !/^name$/i.test(parts[0] || ''))
+            .map((parts: string[]) => ({
+                name: parts[0] || '',
+                version: parts[1] || '',
+                status: parts[2] || 'available',
+                description: parts.slice(3).join(' | ').trim() || '',
+            }))
+            .filter((extension: SystemExtensionInfo) => extension.name);
     }
-    return lines
-        .filter((l: string) => l.trim() && !l.startsWith('#') && !l.startsWith('=') && !l.match(/^\(\d+ rows?\)$/))
-        .map((l: string) => {
-            const parts = l.split(/\s+/);
+
+    return rows
+        .map((line: string) => {
+            const parts = line.split(/\s+/);
             return { name: parts[0] || '', version: parts[1] || '', status: parts[2] || 'available', description: parts.slice(3).join(' ') || '' };
         })
-        .filter((e: { name: string }) => e.name);
+        .filter((extension: SystemExtensionInfo) => extension.name);
 }
 
 export class ExtensionService {
