@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.8](https://github.com/zuohuadong/supacloud/compare/management-api-v0.18.7...management-api-v0.18.8) (2026-05-18)
+
+
+### Bug Fixes
+
+* resolve Studio Core infinite loop and multiple UI bugs ([#140](https://github.com/zuohuadong/supacloud/issues/140)) ([0bd82a1](https://github.com/zuohuadong/supacloud/commit/0bd82a1f45dca7503f5ba2a877aab750a5f70c76))
+
 ## [0.18.7](https://github.com/zuohuadong/supacloud/compare/management-api-v0.18.6...management-api-v0.18.7) (2026-05-18)
 
 
