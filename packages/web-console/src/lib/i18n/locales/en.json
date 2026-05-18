@@ -20,7 +20,8 @@
     "storage_used": "Storage Used",
     "auth_users": "Auth Users",
     "api_health": "API Health",
-    "healthy": "Healthy"
+    "healthy": "Healthy",
+    "cache_hit_ratio": "Cache Hit Ratio"
   },
   "Navigation": {
     "table_editor": "Table Editor",
