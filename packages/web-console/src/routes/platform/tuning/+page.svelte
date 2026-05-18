@@ -38,8 +38,7 @@
   let isSaving = $state(false);
   let saveMsg: string | null = $state.raw(null);
   const isZh = $derived(($locale ?? "").toLowerCase().startsWith("zh"));
-  const tr = (zh: string, en: string) => isZh ? zh : en;
-
+    
   function groupLabel(group: string) {
     const map: Record<string, string> = {
       "内存": "Memory",
@@ -90,14 +89,14 @@
       }
     }
     if (stmts.length === 0) {
-      saveMsg = `⚠️ ${tr("没有检测到任何参数变更", "No parameter changes detected")}`;
+      saveMsg = `⚠️ ${$t("PlatformTuning.no_parameter_changes_detected")}`;
       setTimeout(() => saveMsg = null, 3000);
       isSaving = false;
       return;
     }
     stmts.push("SELECT pg_reload_conf();");
     const result = await runSql(stmts.join("\n"));
-    saveMsg = `✅ ${tr("已保存", "Saved")} ${stmts.length - 1} ${tr("项参数变更并重载配置", "parameter changes and reloaded configuration")}`;
+    saveMsg = `✅ ${$t("PlatformTuning.saved")} ${stmts.length - 1} ${$t("PlatformTuning.parameter_changes_and_reloaded_configuration")}`;
     await fetchSettings();
     isSaving = false;
     setTimeout(() => saveMsg = null, 5000);
@@ -111,16 +110,16 @@
 <div class="space-y-4">
   <div class="flex items-center justify-between">
     <div>
-      <h2 class="text-xl font-bold">{tr("引擎参数调优", "Engine Tuning")}</h2>
-      <p class="text-xs text-muted-foreground mt-1">{tr("直接调整 PostgreSQL 核心运行参数（ALTER SYSTEM SET）", "Adjust core PostgreSQL runtime parameters directly (ALTER SYSTEM SET)")}</p>
+      <h2 class="text-xl font-bold">{$t("PlatformTuning.engine_tuning")}</h2>
+      <p class="text-xs text-muted-foreground mt-1">{$t("PlatformTuning.adjust_core_postgresql_runtime_parameters")}</p>
     </div>
     <div class="flex items-center gap-2">
       <button onclick={() => fetchSettings()} class="flex items-center gap-2 px-3 py-2 text-xs rounded-lg border hover:bg-muted/50 transition-colors">
-        <RefreshCw size={12} /> {tr("刷新", "Refresh")}
+        <RefreshCw size={12} /> {$t("PlatformTuning.refresh")}
       </button>
       <button onclick={saveAll} disabled={isSaving} class="flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg bg-brand text-white hover:bg-brand/90 transition-colors disabled:opacity-50">
         {#if isSaving}<Loader2 size={14} class="animate-spin" />{:else}<Save size={14} />{/if}
-        {tr("保存变更", "Save Changes")}
+        {$t("PlatformTuning.save_changes")}
       </button>
     </div>
   </div>
@@ -133,7 +132,7 @@
 
   <div class="rounded-lg border bg-blue-500/5 border-blue-500/20 p-3 flex items-start gap-2">
     <SlidersHorizontal size={14} class="text-blue-600 mt-0.5 shrink-0" />
-    <p class="text-xs text-blue-700">{tr("修改参数后点击「保存变更」将执行 ", "After editing parameters, clicking \"Save Changes\" will execute ")}<code class="px-1 py-0.5 rounded bg-blue-500/10">ALTER SYSTEM SET</code> {tr("并调用", "and call")} <code class="px-1 py-0.5 rounded bg-blue-500/10">pg_reload_conf()</code>。{tr("标注", "Parameters marked")} <span class="text-red-600 font-bold">{tr("(需重启)", "(Restart Required)")}</span> {tr("的参数需要重启 PostgreSQL 才能生效。", "require PostgreSQL restart to take effect.")}</p>
+    <p class="text-xs text-blue-700">{tr("修改参数后点击「保存变更」将执行 ", "After editing parameters, clicking \"Save Changes\" will execute ")}<code class="px-1 py-0.5 rounded bg-blue-500/10">ALTER SYSTEM SET</code> {$t("PlatformTuning.and_call")} <code class="px-1 py-0.5 rounded bg-blue-500/10">pg_reload_conf()</code>。{$t("PlatformTuning.parameters_marked")} <span class="text-red-600 font-bold">{$t("PlatformTuning.restart_required")}</span> {$t("PlatformTuning.require_postgresql_restart_to_take")}</p>
   </div>
 
   {#if isLoading}
@@ -154,14 +153,14 @@
                 <div class="flex items-center gap-2">
                 <span class="font-mono text-sm font-semibold">{param.name}</span>
                   {#if s?.context === "postmaster"}
-                    <span class="px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-red-500/10 text-red-600 border border-red-500/20">{tr("需重启", "Restart Required")}</span>
+                    <span class="px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-red-500/10 text-red-600 border border-red-500/20">{$t("PlatformTuning.restart_required_1")}</span>
                   {:else}
-                    <span class="px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-green-500/10 text-green-600">{tr("热加载", "Hot Reload")}</span>
+                    <span class="px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-green-500/10 text-green-600">{$t("PlatformTuning.hot_reload")}</span>
                   {/if}
                 </div>
                 <p class="text-[10px] text-muted-foreground mt-0.5">{isZh ? param.descZh : param.descEn}</p>
                 {#if s}
-                  <p class="text-[10px] text-muted-foreground/60 mt-0.5">{tr("当前值", "Current")}: <span class="font-mono">{s.setting}{s.unit ? ` ${s.unit}` : ''}</span></p>
+                  <p class="text-[10px] text-muted-foreground/60 mt-0.5">{$t("PlatformTuning.current")}: <span class="font-mono">{s.setting}{s.unit ? ` ${s.unit}` : ''}</span></p>
                 {/if}
               </div>
               <div class="flex items-center gap-2">
@@ -173,7 +172,7 @@
                   <span class="text-[10px] text-muted-foreground font-mono w-8">{s.unit}</span>
                 {/if}
                 {#if editValues[param.name] !== s?.setting}
-                  <span class="w-2 h-2 rounded-full bg-amber-500 animate-pulse" title={tr("已修改", "Modified")}></span>
+                  <span class="w-2 h-2 rounded-full bg-amber-500 animate-pulse" title={$t("PlatformTuning.modified")}></span>
                 {/if}
               </div>
             </div>

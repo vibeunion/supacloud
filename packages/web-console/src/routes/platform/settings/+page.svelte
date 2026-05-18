@@ -23,9 +23,7 @@
   let testing = $state(false);
   let testResult = $state<{ ok: boolean; message: string } | null>(null);
   let saveSuccess = $state(false);
-  const isZh = $derived(($locale ?? "").toLowerCase().startsWith("zh"));
-  const tr = (zh: string, en: string) => isZh ? zh : en;
-
+    
   // Preset providers
   const PROVIDERS = [
     { labelZh: "OpenAI", labelEn: "OpenAI", base: "https://api.openai.com/v1", model: "gpt-4o-mini" },
@@ -69,7 +67,7 @@
       saveSuccess = true;
       setTimeout(() => (saveSuccess = false), 3000);
     } catch (err: unknown) {
-      alert(tr("保存失败: ", "Save failed: ") + (err instanceof Error ? err.message : String(err)));
+      alert($t("PlatformSettings.save_failed") + (err instanceof Error ? err.message : String(err)));
     }
     saving = false;
   }
@@ -89,12 +87,12 @@
       });
       const res = await response.json() as { choices?: { message?: { content?: string } }[]; error?: { message?: string } };
       if (res?.choices?.[0]?.message?.content) {
-        testResult = { ok: true, message: `✅ ${tr("连接成功！AI 回复: ", "Connected successfully! AI replied: ")}"${res.choices[0].message.content}"` };
+        testResult = { ok: true, message: `✅ ${$t("PlatformSettings.connected_successfully_ai_replied")}"${res.choices[0].message.content}"` };
       } else {
-        testResult = { ok: false, message: tr("返回格式异常：", "Unexpected response format: ") + JSON.stringify(res).slice(0, 200) };
+        testResult = { ok: false, message: $t("PlatformSettings.unexpected_response_format") + JSON.stringify(res).slice(0, 200) };
       }
     } catch (err: unknown) {
-      testResult = { ok: false, message: tr("连接失败: ", "Connection failed: ") + (err instanceof Error ? err.message : String(err)) };
+      testResult = { ok: false, message: $t("PlatformSettings.connection_failed") + (err instanceof Error ? err.message : String(err)) };
     }
     testing = false;
   }
@@ -114,19 +112,19 @@
       <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-brand to-purple-600 flex items-center justify-center shadow-lg">
         <Bot size={20} class="text-white" />
       </div>
-      {tr("AI 服务配置", "AI Service Settings")}
+      {$t("PlatformSettings.ai_service_settings")}
     </h2>
-    <p class="text-sm text-muted-foreground mt-2">{tr("配置平台内置 AI 助手使用的大语言模型接口地址与鉴权密钥。支持任何兼容 OpenAI 协议的服务商。", "Configure API base URL and keys for the built-in AI assistant. Supports any OpenAI-compatible provider.")}</p>
+    <p class="text-sm text-muted-foreground mt-2">{$t("PlatformSettings.configure_api_base_url_and")}</p>
   </div>
 
   {#if loading}
     <div class="flex items-center justify-center py-20 text-muted-foreground">
-      <RefreshCw size={20} class="animate-spin mr-2" /> {tr("加载配置中...", "Loading settings...")}
+      <RefreshCw size={20} class="animate-spin mr-2" /> {$t("PlatformSettings.loading_settings")}
     </div>
   {:else}
     <!-- Quick Provider Presets -->
     <div class="space-y-3">
-      <span class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">{tr("快速选择服务商", "Quick provider presets")}</span>
+      <span class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">{$t("PlatformSettings.quick_provider_presets")}</span>
       <div class="flex flex-wrap gap-2">
         {#each PROVIDERS as p}
           <button
@@ -144,7 +142,7 @@
       <!-- API Base -->
       <div class="space-y-2">
         <label for="ai-api-base" class="flex items-center gap-2 text-sm font-semibold">
-          <Globe size={15} class="text-brand" /> {tr("API 接口地址", "API Base URL")}
+          <Globe size={15} class="text-brand" /> {$t("PlatformSettings.api_base_url")}
         </label>
         <input
           id="ai-api-base"
@@ -152,13 +150,13 @@
           class="w-full px-4 py-2.5 text-sm font-mono rounded-xl border bg-background focus:outline-none focus:ring-2 focus:ring-brand/50 transition-shadow"
           placeholder="https://api.openai.com/v1"
         />
-        <p class="text-[11px] text-muted-foreground">{tr("兼容 OpenAI 协议的 Chat Completions 端点地址（无需包含 /chat/completions 后缀）", "OpenAI-compatible Chat Completions base URL (without /chat/completions suffix)")}</p>
+        <p class="text-[11px] text-muted-foreground">{$t("PlatformSettings.openaicompatible_chat_completions_base_url")}</p>
       </div>
 
       <!-- API Key -->
       <div class="space-y-2">
         <label for="ai-api-key" class="flex items-center gap-2 text-sm font-semibold">
-          <Key size={15} class="text-amber-500" /> {tr("鉴权密钥 (API Key)", "API Key")}
+          <Key size={15} class="text-amber-500" /> {$t("PlatformSettings.api_key")}
         </label>
         <input
           id="ai-api-key"
@@ -167,13 +165,13 @@
           class="w-full px-4 py-2.5 text-sm font-mono rounded-xl border bg-background focus:outline-none focus:ring-2 focus:ring-brand/50 transition-shadow"
           placeholder="sk-..."
         />
-        <p class="text-[11px] text-muted-foreground">{tr("密钥仅存储在您的服务器数据库中，通过后端代理访问，不会暴露给前端浏览器", "Keys are stored only in your server database and accessed via backend proxy, never exposed to browsers")}</p>
+        <p class="text-[11px] text-muted-foreground">{$t("PlatformSettings.keys_are_stored_only_in")}</p>
       </div>
 
       <!-- Model -->
       <div class="space-y-2">
         <label for="ai-model" class="flex items-center gap-2 text-sm font-semibold">
-          <Cpu size={15} class="text-purple-500" /> {tr("默认模型", "Default Model")}
+          <Cpu size={15} class="text-purple-500" /> {$t("PlatformSettings.default_model")}
         </label>
         <input
           id="ai-model"
@@ -181,7 +179,7 @@
           class="w-full px-4 py-2.5 text-sm font-mono rounded-xl border bg-background focus:outline-none focus:ring-2 focus:ring-brand/50 transition-shadow"
           placeholder="gpt-4o-mini"
         />
-        <p class="text-[11px] text-muted-foreground">{tr("AI 助手发送消息时使用的模型标识符，如 gpt-4o-mini、qwen-plus、deepseek-chat 等", "Model identifier used by the AI assistant, e.g. gpt-4o-mini, qwen-plus, deepseek-chat")}</p>
+        <p class="text-[11px] text-muted-foreground">{$t("PlatformSettings.model_identifier_used_by_the")}</p>
       </div>
     </div>
 
@@ -199,7 +197,7 @@
         {:else}
           <Save size={16} />
         {/if}
-        {saveSuccess ? tr("已保存", "Saved") : tr("保存配置", "Save Settings")}
+        {saveSuccess ? $t("PlatformSettings.saved") : $t("PlatformSettings.save_settings")}
       </button>
 
       <button
@@ -212,7 +210,7 @@
         {:else}
           <Bot size={16} />
         {/if}
-        {tr("测试连接", "Test Connection")}
+        {$t("PlatformSettings.test_connection")}
       </button>
     </div>
 

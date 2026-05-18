@@ -6,9 +6,7 @@
   let grafanaHost = $state("");
   let selectedDashboard = $state("pgsql-overview");
   let isFullscreen = $state(false);
-  const isZh = $derived(($locale ?? "").toLowerCase().startsWith("zh"));
-  const tr = (zh: string, en: string) => isZh ? zh : en;
-
+    
   const DASHBOARDS = [
     { id: "pgsql-overview", label: "PG Overview", descZh: "数据库集群全局指标概览", descEn: "Cluster-wide database metrics overview" },
     { id: "pgsql-instance", label: "PG Instance", descZh: "单实例详细指标", descEn: "Detailed metrics for a single instance" },
@@ -44,22 +42,22 @@
 <div class="space-y-4">
   <div class="flex items-center justify-between">
     <div>
-      <h2 class="text-xl font-bold">{tr("Grafana 监控大屏", "Grafana Monitoring Dashboard")}</h2>
-      <p class="text-xs text-muted-foreground mt-1">{tr("嵌入 Pigsty 的 Prometheus + Grafana 监控面板，实时观测数据库与系统指标", "Embedded Pigsty Prometheus + Grafana dashboards for real-time DB and system metrics")}</p>
+      <h2 class="text-xl font-bold">{$t("PlatformMonitoring.grafana_monitoring_dashboard")}</h2>
+      <p class="text-xs text-muted-foreground mt-1">{$t("PlatformMonitoring.embedded_pigsty_prometheus_grafana_dashboards")}</p>
     </div>
     <div class="flex items-center gap-2">
       <a href={grafanaHost} target="_blank" rel="noopener noreferrer" class="flex items-center gap-2 px-3 py-2 text-xs rounded-lg border hover:bg-muted/50 transition-colors">
-        <ExternalLink size={12} /> {tr("新窗口打开", "Open in new window")}
+        <ExternalLink size={12} /> {$t("PlatformMonitoring.open_in_new_window")}
       </a>
       <button onclick={() => isFullscreen = !isFullscreen} class="flex items-center gap-2 px-3 py-2 text-xs rounded-lg border hover:bg-muted/50 transition-colors">
-        <Maximize2 size={12} /> {isFullscreen ? tr("退出全屏", "Exit fullscreen") : tr("全屏", "Fullscreen")}
+        <Maximize2 size={12} /> {isFullscreen ? $t("PlatformMonitoring.exit_fullscreen") : $t("PlatformMonitoring.fullscreen")}
       </button>
     </div>
   </div>
 
   <!-- Grafana Host Input -->
   <div class="flex items-center gap-3">
-    <label for="a11y-routes-platform-monitoring--page-svelte-53" class="text-xs font-semibold text-muted-foreground shrink-0">{tr("Grafana 地址:", "Grafana URL:")}</label>
+    <label for="a11y-routes-platform-monitoring--page-svelte-53" class="text-xs font-semibold text-muted-foreground shrink-0">{$t("PlatformMonitoring.grafana_url")}</label>
     <input id="a11y-routes-platform-monitoring--page-svelte-53" bind:value={grafanaHost} class="flex-1 max-w-md px-3 py-1.5 text-xs font-mono rounded-md border bg-muted/30 focus:outline-none focus:ring-1 focus:ring-brand" placeholder="http://your-server:3000" />
   </div>
 
@@ -88,8 +86,8 @@
     {:else}
       <div class="flex flex-col items-center justify-center py-24 text-muted-foreground gap-3">
         <BarChart3 size={40} class="opacity-30" />
-        <p class="text-sm">{tr("请在上方输入 Grafana 服务器地址以加载监控面板", "Please enter the Grafana server URL above to load dashboards")}</p>
-        <p class="text-xs opacity-60">{tr("Pigsty 默认部署在同一台服务器的 3000 端口", "Pigsty is typically deployed on port 3000 of the same server")}</p>
+        <p class="text-sm">{$t("PlatformMonitoring.please_enter_the_grafana_server")}</p>
+        <p class="text-xs opacity-60">{$t("PlatformMonitoring.pigsty_is_typically_deployed_on")}</p>
       </div>
     {/if}
   </div>
