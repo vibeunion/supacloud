@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.18.4](https://github.com/zuohuadong/supacloud/compare/management-api-v0.18.3...management-api-v0.18.4) (2026-05-18)
+
+
+### Bug Fixes
+
+* API error handling - prevent connection reset on DB errors ([#132](https://github.com/zuohuadong/supacloud/issues/132)) ([5a63da1](https://github.com/zuohuadong/supacloud/commit/5a63da1e168e91b1d8bd995c41094da1e51d04af))
+
+## [0.18.3](https://github.com/zuohuadong/supacloud/compare/management-api-v0.18.2...management-api-v0.18.3) (2026-05-17)
+
+
+### Bug Fixes
+
+* guard one_time_tokens user fk migration ([#130](https://github.com/zuohuadong/supacloud/issues/130)) ([4d3019f](https://github.com/zuohuadong/supacloud/commit/4d3019f7cff9ef768b4e277b43fb4fb295ecd719))
+* make ALTER_TENANT_SQL idempotent for existing tables with missing columns ([#125](https://github.com/zuohuadong/supacloud/issues/125)) ([d6d4f73](https://github.com/zuohuadong/supacloud/commit/d6d4f734287124239d6f73d82df6715fe45ffeda))
+* resolve PR [#126](https://github.com/zuohuadong/supacloud/issues/126) blocking issues (user_id backfill + GraphQL stub) ([#129](https://github.com/zuohuadong/supacloud/issues/129)) ([e9f2a07](https://github.com/zuohuadong/supacloud/commit/e9f2a07d594e92543839f5c55e40cd61e0d740cd))
+
 ## [0.18.2](https://github.com/zuohuadong/supacloud/compare/management-api-v0.18.1...management-api-v0.18.2) (2026-05-17)
 
 

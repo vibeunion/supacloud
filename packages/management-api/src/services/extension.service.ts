@@ -3,6 +3,7 @@ import { getProjectDb, resolveDbName } from "../db";
 import { $ } from "bun";
 
 const IDENTIFIER_REGEX = /^[a-zA-Z_][a-zA-Z0-9_]{0,62}$/;
+type SystemExtensionInfo = { name: string; version: string; status: string; description: string };
 
 function validatePgIdentifier(name: string, label: string): string {
     if (!IDENTIFIER_REGEX.test(name)) {
@@ -17,6 +18,49 @@ export interface ExtensionInfo {
     installed_version: string | null;
     comment: string;
     is_installed: boolean;
+}
+
+export function parsePigExtensionList(text: string): SystemExtensionInfo[] {
+    const rows = text
+        .split('\n')
+        .map((line: string) => line.trim())
+        .filter((line: string) => {
+            if (!line) return false;
+            if (/^[\s\u2500-\u257F\-+|]+$/.test(line)) return false;
+            if (/^\(\d+\s+rows?\)$/i.test(line)) return false;
+            if (/^[\u2713\u2714]\s*Found\s+\d+\s+extensions?/i.test(line)) return false;
+            if (/^[#=]/.test(line)) return false;
+            return true;
+        });
+
+    const tableRows = rows
+        .map((line: string) => line.replace(/\u2502/g, '|'))
+        .filter((line: string) => line.includes('|'));
+
+    if (tableRows.length > 0) {
+        return tableRows
+            .map((line: string) => {
+                const parts = line.split('|').map((part: string) => part.trim());
+                if (parts[0] === '') parts.shift();
+                if (parts[parts.length - 1] === '') parts.pop();
+                return parts;
+            })
+            .filter((parts: string[]) => parts.length > 0 && !/^name$/i.test(parts[0] || ''))
+            .map((parts: string[]) => ({
+                name: parts[0] || '',
+                version: parts[1] || '',
+                status: parts[2] || 'available',
+                description: parts.slice(3).join(' | ').trim() || '',
+            }))
+            .filter((extension: SystemExtensionInfo) => extension.name);
+    }
+
+    return rows
+        .map((line: string) => {
+            const parts = line.split(/\s+/);
+            return { name: parts[0] || '', version: parts[1] || '', status: parts[2] || 'available', description: parts.slice(3).join(' ') || '' };
+        })
+        .filter((extension: SystemExtensionInfo) => extension.name);
 }
 
 export class ExtensionService {
@@ -83,53 +127,19 @@ export class ExtensionService {
         return (rows[0] as ExtensionInfo) || { name: extension, default_version: '', installed_version: null, comment: '', is_installed: false };
     }
 
-    async listSystemExtensions(): Promise<{ name: string; version: string; status: string; description: string }[]> {
+    async listSystemExtensions(): Promise<SystemExtensionInfo[]> {
         try {
             const result = await $`pig ext list`.nothrow().quiet();
             if (result.exitCode !== 0) {
                 return await this.listSystemExtensionsFromDb();
             }
-            const text = result.text();
-            const rawLines = text.split('\n');
-            // Filter out decorative/header/summary lines from pig ext list output
-            const isDataLine = (l: string): boolean => {
-                const trimmed = l.trim();
-                if (!trimmed) return false;
-                // Skip Unicode box-drawing separator lines
-                if (/^[\s\u2500-\u257F\-+|]+$/.test(trimmed)) return false;
-                // Skip header row (Name | Version | ...)
-                if (/^\s*name\s*\|/i.test(trimmed)) return false;
-                // Skip summary lines like "(464 Rows)"
-                if (/^\(\d+\s+Rows?\)/.test(trimmed)) return false;
-                // Skip banner lines like checkmark + "Found N extensions"
-                if (/^\u2713/.test(trimmed)) return false;
-                // Skip comment and decoration lines
-                if (/^[#=]/.test(trimmed)) return false;
-                return true;
-            };
-            const dataLines = rawLines.filter(isDataLine);
-            // Try pipe-delimited parsing first (table output)
-            if (dataLines.some((l: string) => l.includes('|'))) {
-                return dataLines
-                    .map((l: string) => {
-                        const parts = l.split('|').map((p: string) => p.trim());
-                        return { name: parts[0] || '', version: parts[1] || '', status: parts[2] || 'available', description: parts.slice(3).join(' | ').trim() || '' };
-                    })
-                    .filter((e: { name: string }) => e.name);
-            }
-            // Fallback: space-delimited parsing
-            return dataLines
-                .map((l: string) => {
-                    const parts = l.split(/\s+/);
-                    return { name: parts[0] || '', version: parts[1] || '', status: parts[2] || 'available', description: parts.slice(3).join(' ') || '' };
-                })
-                .filter((e: { name: string }) => e.name);
+            return parsePigExtensionList(result.text());
         } catch {
             return await this.listSystemExtensionsFromDb();
         }
     }
 
-    private async listSystemExtensionsFromDb(): Promise<{ name: string; version: string; status: string; description: string }[]> {
+    private async listSystemExtensionsFromDb(): Promise<SystemExtensionInfo[]> {
         try {
             const { sql } = await import("../db");
             const rows = await sql`

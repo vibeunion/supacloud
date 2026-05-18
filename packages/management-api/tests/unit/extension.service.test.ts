@@ -24,7 +24,7 @@ mock.module("../../src/db", () => ({
     resolveDbName: async () => "project_testref123"
 }));
 
-import { extensionService } from "../../src/services/extension.service";
+import { extensionService, parsePigExtensionList } from "../../src/services/extension.service";
 
 describe("ExtensionService", () => {
     beforeEach(() => {
@@ -53,5 +53,38 @@ describe("ExtensionService", () => {
             "DROP FUNCTION IF EXISTS graphql_public.graphql(text, text, jsonb)",
         );
         expect(unsafeCalls[1]).toBe('CREATE EXTENSION IF NOT EXISTS "pg_graphql" CASCADE');
+    });
+
+    test("parsePigExtensionList should ignore psql table footers", () => {
+        const extensions = parsePigExtensionList(`
+ name               | default_version | installed_version | comment
+--------------------+-----------------+-------------------+-------------------------
+ pg_graphql         | 1.5             |                   | GraphQL support
+ pg_stat_statements | 1.10            | 1.10              | track planning stats
+(2 rows)
+`);
+
+        expect(extensions).toEqual([
+            { name: "pg_graphql", version: "1.5", status: "available", description: "GraphQL support" },
+            { name: "pg_stat_statements", version: "1.10", status: "1.10", description: "track planning stats" },
+        ]);
+    });
+
+    test("parsePigExtensionList should ignore pig banners and unicode table separators", () => {
+        const extensions = parsePigExtensionList(`
+✓ Found 2 extensions
+┌────────────────────┬─────────────────┬───────────────────┬──────────────────────┐
+│ Name               │ Default Version │ Installed Version │ Comment              │
+├────────────────────┼─────────────────┼───────────────────┼──────────────────────┤
+│ pg_graphql         │ 1.5             │                   │ GraphQL support      │
+│ pg_stat_statements │ 1.10            │ 1.10              │ track planning stats │
+└────────────────────┴─────────────────┴───────────────────┴──────────────────────┘
+(2 Rows)
+`);
+
+        expect(extensions).toEqual([
+            { name: "pg_graphql", version: "1.5", status: "available", description: "GraphQL support" },
+            { name: "pg_stat_statements", version: "1.10", status: "1.10", description: "track planning stats" },
+        ]);
     });
 });

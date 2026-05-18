@@ -43,6 +43,29 @@ describe("supabase bootstrap schema", () => {
     }
   });
 
+  test("one_time_tokens user_id migration adds the foreign key separately", () => {
+    for (const filePath of [
+      "src/services/tenant-runtime.service.ts",
+      "src/scripts/migrate-tenant-schema.ts",
+    ]) {
+      const source = readRepoFile(filePath);
+
+      expect(source).toContain(
+        "ALTER TABLE auth.one_time_tokens ADD COLUMN IF NOT EXISTS user_id UUID;",
+      );
+      expect(source).not.toContain(
+        "ALTER TABLE auth.one_time_tokens ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES auth.users",
+      );
+      expect(source).toContain("c.confrelid = 'auth.users'::regclass");
+      expect(source).toContain(
+        "c.conkey = ARRAY[(SELECT attnum FROM pg_attribute WHERE attrelid = 'auth.one_time_tokens'::regclass AND attname = 'user_id')]",
+      );
+      expect(source).toContain(
+        "FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE",
+      );
+    }
+  });
+
   test("tenant runtime migration stops on psql errors", () => {
     const source = readRepoFile("src/services/tenant-runtime.service.ts");
 
