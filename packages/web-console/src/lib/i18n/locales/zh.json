@@ -331,6 +331,8 @@
     "rows": "返回行数",
     "extension_required": "需要开启系统扩展",
     "extension_desc": "您需要开启 pg_stat_statements 扩展才能查看慢查询指标。",
+    "access_unavailable_title": "指标暂时不可访问",
+    "access_unavailable_desc": "pg_stat_statements 已安装，但当前数据库角色无权读取其统计信息。请为扩展所在 schema 授权，或改用权限更高的数据库角色。",
     "enable_now": "立即开启 pg_stat_statements",
     "loading": "正在加载性能指标...",
     "error": "加载指标时发生错误"
@@ -428,6 +430,26 @@
     "back_to_projects": "返回项目列表",
     "return_to_projects": "返回项目列表",
     "database_advisor": "数据库顾问"
+  },
+  "Reports": {
+    "title": "报表与分析",
+    "subtitle": "查看项目各服务的使用统计、性能指标和优化建议。",
+    "api_overview": "API 概览",
+    "api_overview_desc": "API 网关请求量、延迟、错误率统计。",
+    "database": "数据库",
+    "database_desc": "数据库连接数、磁盘利用率、缓存命中率统计。",
+    "query_performance": "查询性能",
+    "query_performance_desc": "慢查询分析、执行统计，基于 pg_stat_statements。",
+    "auth": "Auth 报表",
+    "auth_desc": "用户注册、登录、认证事件统计。",
+    "storage": "Storage 报表",
+    "storage_desc": "文件上传下载量、存储空间使用统计。",
+    "advisors": "性能顾问",
+    "advisors_desc": "数据库性能优化建议和安全审计。",
+    "database_linter": "数据库检查",
+    "database_linter_desc": "表结构、索引、RLS 策略的健康检查。",
+    "data_sources_note": "报表数据来源于 PostgreSQL 内部统计视图（如",
+    "data_sources_note_suffix": "）和 systemd 日志。部分统计需要启用对应扩展。"
   },
   "Realtime": {
     "title": "实时订阅",

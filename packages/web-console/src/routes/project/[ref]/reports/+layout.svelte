@@ -1,5 +1,6 @@
 <script lang="ts">
   import { page } from "$app/state";
+  import { t } from "svelte-i18n";
   import { BarChart3, Activity, Database, Shield, Zap, HardDrive, Clock, TrendingUp } from "lucide-svelte";
 
   let { children } = $props();
@@ -7,13 +8,13 @@
   const projectRef = $derived(page.params.ref);
 
   const TABS = $derived([
-    { id: "api-overview", label: "API 概览", icon: Activity },
-    { id: "database", label: "数据库", icon: Database },
-    { id: "query-performance", label: "查询性能", icon: Clock },
-    { id: "auth", label: "Auth 报表", icon: Shield },
-    { id: "storage", label: "Storage 报表", icon: HardDrive },
-    { id: "advisors", label: "性能顾问", icon: TrendingUp },
-    { id: "database-linter", label: "数据库检查", icon: BarChart3 },
+    { id: "api-overview", labelKey: "Reports.api_overview", icon: Activity },
+    { id: "database", labelKey: "Reports.database", icon: Database },
+    { id: "query-performance", labelKey: "Reports.query_performance", icon: Clock },
+    { id: "auth", labelKey: "Reports.auth", icon: Shield },
+    { id: "storage", labelKey: "Reports.storage", icon: HardDrive },
+    { id: "advisors", labelKey: "Reports.advisors", icon: TrendingUp },
+    { id: "database-linter", labelKey: "Reports.database_linter", icon: BarChart3 },
   ]);
 
   const currentTab = $derived(page.url.pathname.split("/reports/")[1]?.split("/")[0] || "");
@@ -22,10 +23,10 @@
 <div class="h-full flex flex-col pt-4">
   <div class="px-6 mb-6">
     <div class="flex items-center gap-2 text-sm text-muted-foreground mb-4">
-      <a href={`/project/${projectRef}/reports`} class="hover:text-foreground transition-colors">报表</a>
+      <a href={`/project/${projectRef}/reports`} class="hover:text-foreground transition-colors">{$t("Navigation.reports")}</a>
       {#if currentTab}
         <span>/</span>
-        <span class="text-foreground">{TABS.find(t => t.id === currentTab)?.label || currentTab}</span>
+        <span class="text-foreground">{$t(TABS.find((tab) => tab.id === currentTab)?.labelKey || "Navigation.reports")}</span>
       {/if}
     </div>
     <div class="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-hide">
@@ -35,7 +36,7 @@
           class="flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-full whitespace-nowrap transition-colors {currentTab === tab.id ? 'bg-brand text-white shadow-md' : 'bg-muted/50 text-muted-foreground hover:bg-muted hover:text-foreground'}"
         >
           <tab.icon size={14} />
-          {tab.label}
+          {$t(tab.labelKey)}
         </a>
       {/each}
     </div>
