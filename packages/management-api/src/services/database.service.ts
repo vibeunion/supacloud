@@ -283,7 +283,14 @@ export class DatabaseService {
       // Create Schema and grant access
       await tenantDb.unsafe(`
         CREATE SCHEMA IF NOT EXISTS extensions;
-        GRANT USAGE ON SCHEMA extensions TO ${anonRole}, ${authenticatedRole}, ${serviceRole};
+        GRANT USAGE ON SCHEMA extensions TO ${anonRole}, ${authenticatedRole}, ${serviceRole}, "${dbUser}";
+        DO $$
+        BEGIN
+          IF EXISTS (SELECT 1 FROM pg_catalog.pg_namespace WHERE nspname = 'monitor') THEN
+            GRANT USAGE ON SCHEMA monitor TO ${anonRole}, ${authenticatedRole}, ${serviceRole}, "${dbUser}";
+          END IF;
+        END
+        $$;
       `);
 
       // Ensure global admin roles exist with LOGIN capability and global password

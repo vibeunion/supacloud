@@ -26,7 +26,12 @@
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          sql: `SELECT EXISTS(SELECT 1 FROM pg_extension WHERE extname = 'pg_stat_statements') AS installed;`
+          sql: `SELECT EXISTS(SELECT 1 FROM pg_extension WHERE extname = 'pg_stat_statements') AS installed,
+                       (SELECT n.nspname
+                        FROM pg_extension e
+                        JOIN pg_namespace n ON n.oid = e.extnamespace
+                        WHERE e.extname = 'pg_stat_statements'
+                        LIMIT 1) AS schema_name;`
         })
       });
       const extensionData = await extensionCheck.json();
@@ -34,11 +39,12 @@
         throw new Error(extensionData?.message || extensionData?.error || "Failed to check extension status");
       }
       const installed = Boolean(extensionData?.rows?.[0]?.installed);
+      const schemaName = String(extensionData?.rows?.[0]?.schema_name || "");
       if (!installed) {
         throw new Error("MISSING_EXTENSION");
       }
 
-      const schemasToTry = ["", "monitor.", "extensions."];
+      const schemasToTry = schemaName ? [`${schemaName}.`, "monitor.", "extensions."] : ["monitor.", "extensions."];
       let sawMissingRelation = false;
       let sawPermissionDenied = false;
       let lastErrorMessage: string | null = null;
