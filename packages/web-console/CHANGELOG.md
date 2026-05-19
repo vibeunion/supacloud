@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.9](https://github.com/zuohuadong/supacloud/compare/web-console-v0.11.8...web-console-v0.11.9) (2026-05-19)
+
+
+### Bug Fixes
+
+* polish reports i18n and query performance errors ([#150](https://github.com/zuohuadong/supacloud/issues/150)) ([fa54130](https://github.com/zuohuadong/supacloud/commit/fa541307f963ed63584d836ba0d7e280f0a7f50e))
+
 ## [0.11.8](https://github.com/zuohuadong/supacloud/compare/web-console-v0.11.7...web-console-v0.11.8) (2026-05-18)
 
 
