@@ -1,4 +1,5 @@
 import { Worker, MessagePort } from "worker_threads";
+import path from "path";
 
 interface DispatchOptions {
   functionId: string;
@@ -51,7 +52,8 @@ export class WorkerPool {
   }
 
   private createWorker(): Worker {
-    const w = new Worker(new URL("./worker-executor.ts", import.meta.url).href, {
+    const workerEntry = path.resolve(process.cwd(), "worker-executor.ts");
+    const w = new Worker(workerEntry, {
       ...(WORKER_SMOL ? { smol: true } : {}),
     } as any);
     this.workers.push(w);
