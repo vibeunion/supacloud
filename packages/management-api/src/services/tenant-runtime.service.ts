@@ -480,8 +480,9 @@ CREATE TABLE IF NOT EXISTS supabase_functions.migrations (
 CREATE OR REPLACE FUNCTION realtime.notify_postgres_changes() RETURNS trigger AS $fn$
 DECLARE
   payload jsonb;
-  changed_columns text[];
+  changed_columns text[] := '{}';
   col text;
+  is_distinct boolean;
 BEGIN
   -- Detect which columns changed (for UPDATE events only)
   IF TG_OP = 'UPDATE' THEN
@@ -490,8 +491,11 @@ BEGIN
     LOOP
       BEGIN
         EXECUTE format('SELECT ($1).%I IS DISTINCT FROM ($2).%I', col, col)
-          INTO STRICT changed_columns[array_length(changed_columns, 1) + 1]
+          INTO STRICT is_distinct
           USING NEW, OLD;
+        IF is_distinct THEN
+          changed_columns := array_append(changed_columns, col);
+        END IF;
       EXCEPTION WHEN OTHERS THEN NULL;
       END;
     END LOOP;
@@ -826,7 +830,7 @@ class TenantRuntimeService {
 
     /**
      * Ensure binaries exist at their configured paths.
-     * PostgREST and GoTrue must be pre-installed — no container fallback.
+     * PostgREST and GoTrue must be pre-installed; no container fallback.
      */
     private async ensurePostgrestBinary() {
         const pgrstCheck = await $`which postgrest`.nothrow().quiet();
@@ -1898,6 +1902,41 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
         }
     }
 
+    /** Check DB health: try systemd first, then SQL probe as fallback */
+    private async checkDbHealth(ref: string): Promise<string> {
+        const systemdResult = await this.checkSystemService("patroni");
+        if (systemdResult === "ACTIVE_HEALTHY") return "ACTIVE_HEALTHY";
+        // Fallback: try a lightweight SQL query on the meta database
+        try {
+            await metaSql`SELECT 1`;
+            return "ACTIVE_HEALTHY";
+        } catch {
+            return "INACTIVE";
+        }
+    }
+
+    /** Check storage health: try systemd first, then S3 endpoint as fallback */
+    private async checkStorageHealth(): Promise<string> {
+        const systemdResult = await this.checkSystemService("supacloud-storage");
+        if (systemdResult === "ACTIVE_HEALTHY") return "ACTIVE_HEALTHY";
+        // Fallback: probe the S3 health endpoint (accept any response, not just 2xx)
+        try {
+            const res = await fetch(`${config.s3Endpoint}/minio/health/live`, {
+                signal: AbortSignal.timeout(3000),
+            });
+            // Any response (even 4xx) means the storage service is reachable
+            return "ACTIVE_HEALTHY";
+        } catch { /* ignore */ }
+        // Final fallback: for juicefs mode, check the mount directory
+        if (config.storageType === "juicefs") {
+            try {
+                const result = await $`test -d /var/lib/juicefs`.nothrow().quiet();
+                if (result.exitCode === 0) return "ACTIVE_HEALTHY";
+            } catch { /* ignore */ }
+        }
+        return "INACTIVE";
+    }
+
     private systemServiceEntry(ref: string, id: string, name: string, status: string): ProjectServiceStatus {
         const normalized = status === "ACTIVE_HEALTHY" ? "ACTIVE_HEALTHY" : status === "COMING_UP" ? "COMING_UP" : "UNHEALTHY";
         return {
@@ -1928,9 +1967,12 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
                 { id: "kong", name: "Kong", unit: "kong" },
             ];
 
-        const [postgrest, ...systemResults] = await Promise.allSettled([
+        const [postgrest, dbHealth, storageHealth, ...otherSystemResults] = await Promise.allSettled([
             this.readPostgrestRuntimeStatus(ref),
-            ...serviceDefs.map((service) => this.checkSystemService(service.unit)),
+            this.checkDbHealth(ref),
+            this.checkStorageHealth(),
+            ...serviceDefs.filter(s => s.id !== "db" && s.id !== "storage" && s.id !== "postgresql")
+                .map((service) => this.checkSystemService(service.unit)),
         ]);
 
         const restId = mode === "studio" ? "rest" : "postgrest";
@@ -1942,18 +1984,26 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
                 component: "postgrest" as const,
             };
 
-        const systemEntries = serviceDefs.map((service, idx) => {
-            const result = systemResults[idx];
-            const serviceStatus = result?.status === "fulfilled" ? result.value : "INACTIVE";
-            return this.systemServiceEntry(ref, service.id, service.name, serviceStatus);
-        });
+        const dbStatus = dbHealth.status === "fulfilled" ? dbHealth.value : "INACTIVE";
+        const storageStatus = storageHealth.status === "fulfilled" ? storageHealth.value : "INACTIVE";
+        const otherEntries = serviceDefs
+            .filter(s => s.id !== "db" && s.id !== "storage" && s.id !== "postgresql")
+            .map((service, idx) => {
+                const result = otherSystemResults[idx];
+                const serviceStatus = result?.status === "fulfilled" ? result.value : "INACTIVE";
+                return this.systemServiceEntry(ref, service.id, service.name, serviceStatus);
+            });
 
         if (mode === "studio") {
-            const [db, auth, realtime, storage] = systemEntries;
+            const db = this.systemServiceEntry(ref, "db", "db", dbStatus);
+            const storage = this.systemServiceEntry(ref, "storage", "storage", storageStatus);
+            const [auth, realtime] = otherEntries;
             return [db, postgrestEntry, auth, realtime, storage];
         }
 
-        const [postgresql, gotrue, realtime, storage, kong] = systemEntries;
+        const postgresql = this.systemServiceEntry(ref, "postgresql", "PostgreSQL", dbStatus);
+        const storage = this.systemServiceEntry(ref, "storage", "Storage", storageStatus);
+        const [gotrue, realtime, kong] = otherEntries;
         return [postgresql, postgrestEntry, gotrue, realtime, storage, kong];
     }
 

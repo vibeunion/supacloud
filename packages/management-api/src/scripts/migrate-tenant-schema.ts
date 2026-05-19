@@ -335,8 +335,9 @@ CREATE TABLE IF NOT EXISTS supabase_functions.migrations (
 CREATE OR REPLACE FUNCTION realtime.notify_postgres_changes() RETURNS trigger AS $fn$
 DECLARE
   payload jsonb;
-  changed_columns text[];
+  changed_columns text[] := '{}';
   col text;
+  is_distinct boolean;
 BEGIN
   -- Detect which columns changed (for UPDATE events only)
   IF TG_OP = 'UPDATE' THEN
@@ -345,8 +346,11 @@ BEGIN
     LOOP
       BEGIN
         EXECUTE format('SELECT ($1).%I IS DISTINCT FROM ($2).%I', col, col)
-          INTO STRICT changed_columns[array_length(changed_columns, 1) + 1]
+          INTO STRICT is_distinct
           USING NEW, OLD;
+        IF is_distinct THEN
+          changed_columns := array_append(changed_columns, col);
+        END IF;
       EXCEPTION WHEN OTHERS THEN NULL;
       END;
     END LOOP;
