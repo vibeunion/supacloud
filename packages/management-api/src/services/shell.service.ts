@@ -28,13 +28,40 @@ export class ShellService {
       PGPASSWORD: config.pgPassword,
     };
 
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    let timedOut = false;
+    const proc = Bun.spawn(["bash", scriptPath, ...args], {
+      env,
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const timer = setTimeout(() => {
+      timedOut = true;
+      proc.kill();
+    }, timeoutMs);
+
     try {
-      const result = await $`bash ${scriptPath} ${args}`.env(env).abort(controller.signal).text();
-      return { success: true, output: result.trim() };
+      const [exitCode, stdout, stderr] = await Promise.all([
+        proc.exited,
+        new Response(proc.stdout).text(),
+        new Response(proc.stderr).text(),
+      ]);
+
+      if (timedOut) {
+        logger.warn(`[ShellService] Script ${script} timed out after ${timeoutMs}ms`);
+        return { success: false, output: "", error: `timeout after ${timeoutMs}ms` };
+      }
+
+      if (exitCode === 0) {
+        return { success: true, output: stdout.trim() };
+      }
+
+      return {
+        success: false,
+        output: "",
+        error: stderr.trim() || stdout.trim() || `Script exited with code ${exitCode}`,
+      };
     } catch (error: unknown) {
-      if (controller.signal.aborted) {
+      if (timedOut) {
         logger.warn(`[ShellService] Script ${script} timed out after ${timeoutMs}ms`);
         return { success: false, output: "", error: `timeout after ${timeoutMs}ms` };
       }

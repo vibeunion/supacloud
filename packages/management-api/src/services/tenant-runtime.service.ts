@@ -830,7 +830,7 @@ class TenantRuntimeService {
 
     /**
      * Ensure binaries exist at their configured paths.
-     * PostgREST and GoTrue must be pre-installed 鈥?no container fallback.
+     * PostgREST and GoTrue must be pre-installed; no container fallback.
      */
     private async ensurePostgrestBinary() {
         const pgrstCheck = await $`which postgrest`.nothrow().quiet();
