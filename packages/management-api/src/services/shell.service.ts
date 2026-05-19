@@ -12,7 +12,7 @@ export class ShellService {
   }
 
   // Execute script and return result
-  async execute(script: string, args: string[]): Promise<{ success: boolean; output: string; error?: string }> {
+  async execute(script: string, args: string[], timeoutMs: number = 30_000): Promise<{ success: boolean; output: string; error?: string }> {
     const scriptPath = `${this.scriptsPath}/${script}`;
 
     // Parse database connection info from DATABASE_URL
@@ -28,15 +28,23 @@ export class ShellService {
       PGPASSWORD: config.pgPassword,
     };
 
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      const result = await $`bash ${scriptPath} ${args}`.env(env).text();
+      const result = await $`bash ${scriptPath} ${args}`.env(env).abort(controller.signal).text();
       return { success: true, output: result.trim() };
     } catch (error: unknown) {
+      if (controller.signal.aborted) {
+        logger.warn(`[ShellService] Script ${script} timed out after ${timeoutMs}ms`);
+        return { success: false, output: "", error: `timeout after ${timeoutMs}ms` };
+      }
       return {
         success: false,
         output: "",
         error: (error as ShellError).stderr?.toString() || (error instanceof Error ? error.message : String(error)) || "Unknown error",
       };
+    } finally {
+      clearTimeout(timer);
     }
   }
 

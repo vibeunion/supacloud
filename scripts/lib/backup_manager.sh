@@ -23,7 +23,7 @@ case $COMMAND in
             echo "[]"
             exit 0
         fi
-        sudo -u postgres pgbackrest --stanza="$STANZA" info --output=json
+        timeout 15 sudo -u postgres pgbackrest --stanza="$STANZA" info --output=json 2>/dev/null || echo "[]"
         ;;
 
     create)
