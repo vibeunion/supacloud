@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.18.10](https://github.com/zuohuadong/supacloud/compare/management-api-v0.18.9...management-api-v0.18.10) (2026-05-19)
+
+
+### Bug Fixes
+
+* **edge-runtime:** tolerate runtime env version skew ([6e19758](https://github.com/zuohuadong/supacloud/commit/6e19758f3370c683ed5d1e8a71f696c42555f150))
+* harden backup timeout, shell abort, realtime trigger, and service health checks ([#154](https://github.com/zuohuadong/supacloud/issues/154)) ([e0e2d1e](https://github.com/zuohuadong/supacloud/commit/e0e2d1e947ca639213123faef012281ad7ee4600))
+
 ## [0.18.9](https://github.com/zuohuadong/supacloud/compare/management-api-v0.18.8...management-api-v0.18.9) (2026-05-18)
 
 
