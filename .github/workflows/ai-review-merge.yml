@@ -1,0 +1,38 @@
+﻿name: AI Review & Auto-Merge PR
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  ai-review-and-merge:
+    name: AI Review & Auto-Merge
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24.x
+
+      - name: AI Review & Merge
+        env:
+          AI_API_KEY: ${{ secrets.AI_API_KEY }}
+          AI_API_BASE: ${{ secrets.AI_API_BASE }}
+          AI_MODEL: ${{ secrets.AI_MODEL }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_BASE_REF: ${{ github.base_ref }}
+          GITHUB_HEAD_REF: ${{ github.head_ref }}
+        run: node .github/scripts/ai-review-merge.mjs
