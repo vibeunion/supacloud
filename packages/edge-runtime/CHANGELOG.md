@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.1](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.5.0...edge-runtime-v0.5.1) (2026-05-19)
+
+
+### Bug Fixes
+
+* **edge-runtime:** tolerate runtime env version skew ([6e19758](https://github.com/zuohuadong/supacloud/commit/6e19758f3370c683ed5d1e8a71f696c42555f150))
+
 ## [0.5.0](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.4.1...edge-runtime-v0.5.0) (2026-05-16)
 
 
