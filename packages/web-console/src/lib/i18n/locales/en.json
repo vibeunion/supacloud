@@ -331,6 +331,8 @@
     "rows": "Rows",
     "extension_required": "Extension Required",
     "extension_desc": "You need to enable the pg_stat_statements extension to view query performance metrics.",
+    "access_unavailable_title": "Metrics Temporarily Unavailable",
+    "access_unavailable_desc": "pg_stat_statements is installed, but the current database role cannot read its metrics. Grant access to the extension schema or use a more privileged database role.",
     "enable_now": "Enable pg_stat_statements",
     "loading": "Loading performance metrics...",
     "error": "Error loading metrics"
@@ -428,6 +430,26 @@
     "back_to_projects": "Back to Projects",
     "return_to_projects": "Back to Projects",
     "database_advisor": "Database Advisor"
+  },
+  "Reports": {
+    "title": "Reports & Analytics",
+    "subtitle": "View service usage, performance metrics, and optimization hints across the project.",
+    "api_overview": "API Overview",
+    "api_overview_desc": "Gateway request volume, latency, and error-rate statistics.",
+    "database": "Database",
+    "database_desc": "Database connections, disk utilization, and cache hit-rate statistics.",
+    "query_performance": "Query Performance",
+    "query_performance_desc": "Slow-query analysis and execution statistics powered by pg_stat_statements.",
+    "auth": "Auth Reports",
+    "auth_desc": "User sign-up, sign-in, and authentication event statistics.",
+    "storage": "Storage Reports",
+    "storage_desc": "Upload/download traffic and storage-space usage statistics.",
+    "advisors": "Performance Advisor",
+    "advisors_desc": "Database optimization suggestions and security audit insights.",
+    "database_linter": "Database Linter",
+    "database_linter_desc": "Health checks for schema design, indexes, and RLS policies.",
+    "data_sources_note": "Report data comes from PostgreSQL internal statistics views such as",
+    "data_sources_note_suffix": "and systemd logs. Some metrics require the corresponding extension to be enabled."
   },
   "Realtime": {
     "title": "Realtime",

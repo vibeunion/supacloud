@@ -14,6 +14,9 @@
     rows: number;
   }
 
+  const MISSING_EXTENSION = "MISSING_EXTENSION";
+  const ACCESS_UNAVAILABLE = "ACCESS_UNAVAILABLE";
+
   const projectRef = $derived(page.params.ref);
 
   const statsQuery = createQuery(() => ({
@@ -35,55 +38,53 @@
         throw new Error("MISSING_EXTENSION");
       }
 
-      const schemasToTry = ['', 'monitor.', 'extensions.'];
-      let lastError = null;
+      const schemasToTry = ["", "monitor.", "extensions."];
+      let sawMissingRelation = false;
+      let sawPermissionDenied = false;
+      let lastErrorMessage: string | null = null;
 
       for (const schemaPrefix of schemasToTry) {
-        try {
-          const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              sql: `SELECT query, calls, total_exec_time, mean_exec_time, rows 
-                    FROM ${schemaPrefix}pg_stat_statements 
-                    ORDER BY total_exec_time DESC LIMIT 100;`
-            })
-          });
-          const data = await res.json();
+        const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sql: `SELECT query, calls, total_exec_time, mean_exec_time, rows 
+                  FROM ${schemaPrefix}pg_stat_statements 
+                  ORDER BY total_exec_time DESC LIMIT 100;`
+          })
+        });
+        const data = await res.json();
 
-          if (!res.ok) {
-            lastError = data;
-            if (data?.message?.includes("pg_stat_statements") && data?.message?.includes("does not exist")) {
-              continue;
-            }
-            throw new Error(data?.message || data?.error || "Failed to query pg_stat_statements");
-          }
-          
-          if (data.error) {
-            lastError = data;
-            // If it's a "does not exist" error, continue to the next schema prefix
-            if (data.message?.includes("pg_stat_statements") && data.message?.includes("does not exist")) {
-              continue;
-            } else {
-              throw new Error(data.message || data.error);
-            }
-          }
-          
-          // Success
-          return data.rows || [];
+        if (!res.ok || data.error) {
+          const message = data?.message || data?.error || "Failed to query pg_stat_statements";
+          lastErrorMessage = message;
 
-        } catch (err: unknown) {
-          lastError = { message: (err instanceof Error ? err.message : String(err)) };
-          break; // Stop on non-recoverable error
+          if (message.includes("pg_stat_statements") && message.includes("does not exist")) {
+            sawMissingRelation = true;
+            continue;
+          }
+
+          if (message.includes("permission denied for schema")) {
+            sawPermissionDenied = true;
+            continue;
+          }
+
+          throw new Error(message);
         }
+
+        return data.rows || [];
       }
 
-      if (lastError) {
-         if (lastError.message?.includes("pg_stat_statements") && lastError.message?.includes("does not exist")) {
-           throw new Error("MISSING_EXTENSION");
-         } else {
-           throw new Error(lastError instanceof Error ? lastError.message : String(lastError) || lastError.error || "Unknown error");
-         }
+      if (sawPermissionDenied) {
+        throw new Error(ACCESS_UNAVAILABLE);
+      }
+
+      if (sawMissingRelation) {
+        throw new Error(MISSING_EXTENSION);
+      }
+
+      if (lastErrorMessage) {
+        throw new Error(lastErrorMessage);
       }
 
       return [];
@@ -116,8 +117,13 @@
   const stats = $derived((statsQuery.data || []) as QueryStat[]);
   const isLoading = $derived(statsQuery.isPending);
   const isEnabling = $derived(enableMutation.isPending);
-  const missingExtension = $derived(statsQuery.error?.message === "MISSING_EXTENSION");
-  const error = $derived(statsQuery.error && statsQuery.error.message !== "MISSING_EXTENSION" ? statsQuery.error.message : (enableMutation.error ? enableMutation.error.message : null));
+  const missingExtension = $derived(statsQuery.error?.message === MISSING_EXTENSION);
+  const accessUnavailable = $derived(statsQuery.error?.message === ACCESS_UNAVAILABLE);
+  const error = $derived(
+    statsQuery.error && statsQuery.error.message !== MISSING_EXTENSION && statsQuery.error.message !== ACCESS_UNAVAILABLE
+      ? statsQuery.error.message
+      : (enableMutation.error ? enableMutation.error.message : null)
+  );
 
   function formatMs(ms: number): string {
     if (ms < 1) return ms.toFixed(2) + " ms";
@@ -168,6 +174,14 @@
             <span>{$t("QueryPerformance.enable_now")}</span>
           {/if}
         </button>
+      </div>
+    {:else if accessUnavailable}
+      <div class="flex-1 flex flex-col items-center justify-center text-center gap-4 py-24 max-w-md mx-auto">
+        <div class="w-16 h-16 rounded-full bg-yellow-500/10 text-yellow-600 flex items-center justify-center mb-2">
+          <AlertTriangle size={32} />
+        </div>
+        <h3 class="text-lg font-semibold">{$t("QueryPerformance.access_unavailable_title")}</h3>
+        <p class="text-sm text-muted-foreground">{$t("QueryPerformance.access_unavailable_desc")}</p>
       </div>
     {:else}
       <div class="overflow-x-auto flex-1">
