@@ -48,8 +48,8 @@
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            sql: `SELECT query, calls, total_exec_time, mean_exec_time, rows 
-                  FROM ${schemaPrefix}pg_stat_statements 
+            sql: `SELECT query, calls, total_exec_time, mean_exec_time, rows
+                  FROM ${schemaPrefix}pg_stat_statements
                   ORDER BY total_exec_time DESC LIMIT 100;`
           })
         });
