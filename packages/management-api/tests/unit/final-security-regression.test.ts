@@ -119,6 +119,35 @@ describe("final security regressions", () => {
     }
   });
 
+  test("project secrets writes invalidate Edge Runtime env cache", async () => {
+    const originalFetch = globalThis.fetch;
+    const upsertSecretsSpy = spyOn(projectService, "upsertSecrets").mockResolvedValue(true);
+    const fetchMock = mock((input: string | URL | Request, init?: RequestInit) => {
+      expect(String(input)).toContain("/invalidate-env/proj_1");
+      expect(init?.method).toBe("POST");
+      return Promise.resolve(Response.json({ invalidated: "proj_1" }));
+    });
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    const request = appWith(projectSecretsRoutes);
+
+    try {
+      const response = await request("/v1/projects/proj_1/secrets", {
+        method: "POST",
+        headers: { ...masterHeaders, "Content-Type": "application/json" },
+        body: JSON.stringify([{ name: "RESULT_S3_ENDPOINT", value: "http://new-s3.local" }]),
+      });
+
+      expect(response.status).toBe(200);
+      expect(upsertSecretsSpy).toHaveBeenCalledWith("proj_1", [
+        { name: "RESULT_S3_ENDPOINT", value: "http://new-s3.local" },
+      ]);
+      expect(fetchMock).toHaveBeenCalled();
+    } finally {
+      upsertSecretsSpy.mockRestore();
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   test("API keys GET requires project or admin auth", async () => {
     const getApiKeysSpy = spyOn(projectService, "getApiKeys").mockResolvedValue({
       anon_key: "anon-key",

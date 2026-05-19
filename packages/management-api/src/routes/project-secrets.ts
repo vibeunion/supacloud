@@ -3,6 +3,7 @@ import { projectService } from "../services";
 import { requireProjectOrAdminAuth } from "../middleware/auth";
 import { getAuthContext } from "../middleware/auth";
 import { runtimeEnvService } from "../services/runtime-env.service";
+import { runtimeCacheService } from "../services/runtime-cache.service";
 
 export const projectSecretsRoutes = new Elysia({ prefix: "/v1/projects" })
   .get(
@@ -69,6 +70,7 @@ export const projectSecretsRoutes = new Elysia({ prefix: "/v1/projects" })
       if (!success) {
         return status(500, { message: "Failed to update secrets", code: "500" });
       }
+      await runtimeCacheService.invalidateProjectRuntimeEnv(params.ref);
       return {};
     },
     {
@@ -104,6 +106,7 @@ export const projectSecretsRoutes = new Elysia({ prefix: "/v1/projects" })
       if (failed > 0) {
         return status(500, { message: `Failed to delete ${failed} secret(s)`, code: "500" });
       }
+      await runtimeCacheService.invalidateProjectRuntimeEnv(params.ref);
       return {};
     },
     {
@@ -122,6 +125,7 @@ export const projectSecretsRoutes = new Elysia({ prefix: "/v1/projects" })
       if (!success) {
         return status(500, { message: "Failed to delete secret", code: "500" });
       }
+      await runtimeCacheService.invalidateProjectRuntimeEnv(params.ref);
       return {};
     },
     {

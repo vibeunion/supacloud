@@ -8,6 +8,7 @@ const TENANTS_DIRS = [
 
 const envCache = new Map<string, { env: Record<string, string>; expiresAt: number }>();
 const ENV_CACHE_TTL = 5_000;
+const ENV_FALLBACK_CACHE_TTL = 30_000;
 const MASKED_SECRET_VALUE = "********";
 
 export function isMaskedSecretValue(value: unknown): boolean {
@@ -117,6 +118,13 @@ async function loadEnvFromApi(ref: string): Promise<Record<string, string> | nul
       signal: AbortSignal.timeout(5000),
     });
 
+    if (res.status === 404) {
+      console.warn(
+        `[tenant-env] runtime-env endpoint missing for ${ref}, trying legacy secrets endpoint`,
+      );
+      return await loadEnvFromLegacySecretsApi(ref);
+    }
+
     if (!res.ok) {
       console.warn(
         `[tenant-env] API returned ${res.status} for ${ref}, falling back to stale cache or file`
@@ -138,6 +146,46 @@ async function loadEnvFromApi(ref: string): Promise<Record<string, string> | nul
   }
 }
 
+async function loadEnvFromLegacySecretsApi(ref: string): Promise<Record<string, string> | null> {
+  try {
+    const res = await fetch(`${MGMT_API}/v1/projects/${ref}/secrets?reveal=true`, {
+      headers: { Authorization: `Bearer ${MASTER_TOKEN}` },
+      signal: AbortSignal.timeout(5000),
+    });
+
+    if (!res.ok) {
+      console.warn(
+        `[tenant-env] legacy secrets API returned ${res.status} for ${ref}, falling back to stale cache or file`
+      );
+      return null;
+    }
+
+    const secrets = (await res.json()) as unknown;
+    if (!Array.isArray(secrets)) return null;
+
+    const env: Record<string, string> = {};
+    for (const secret of secrets) {
+      if (
+        secret &&
+        typeof secret === "object" &&
+        "name" in secret &&
+        "value" in secret &&
+        typeof secret.name === "string" &&
+        typeof secret.value === "string"
+      ) {
+        env[secret.name] = secret.value;
+      }
+    }
+    return stripMaskedSecretValues(env);
+  } catch (err) {
+    console.warn(
+      `[tenant-env] legacy secrets API error for ${ref}:`,
+      err instanceof Error ? err.message : err,
+    );
+    return null;
+  }
+}
+
 export async function loadTenantEnv(ref: string): Promise<Record<string, string>> {
   const cached = envCache.get(ref);
   if (cached && cached.expiresAt > Date.now()) {
@@ -148,10 +196,12 @@ export async function loadTenantEnv(ref: string): Promise<Record<string, string>
 
   const apiEnv = await loadEnvFromApi(ref);
   if (apiEnv === null) {
+    const fallback = normalizeTenantEnv(ref, cached ? { ...fileEnv, ...cached.env } : fileEnv);
+    envCache.set(ref, { env: fallback, expiresAt: Date.now() + ENV_FALLBACK_CACHE_TTL });
     if (cached) {
-      return normalizeTenantEnv(ref, { ...fileEnv, ...cached.env });
+      return fallback;
     }
-    return normalizeTenantEnv(ref, fileEnv);
+    return fallback;
   }
 
   const merged = normalizeTenantEnv(ref, { ...fileEnv, ...apiEnv });

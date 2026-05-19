@@ -2,7 +2,7 @@ import "./url-import-plugin";
 import { Elysia } from "elysia";
 import cors from "@elysiajs/cors";
 import { WorkerPool } from "./worker-pool";
-import { loadTenantEnv } from "./tenant-env";
+import { invalidateTenantEnvCache, loadTenantEnv } from "./tenant-env";
 import path from "path";
 import fs from "fs/promises";
 
@@ -490,8 +490,23 @@ const app = new Elysia()
     }
 
     const functionId = `${c.params.ref}_${c.params.slug}`;
+    invalidateTenantEnvCache(c.params.ref);
     pool.invalidateModule(functionId);
+    backgroundPool.invalidateModule(functionId);
     return { invalidated: functionId };
+  })
+
+  .post("/invalidate-env/:ref", (c) => {
+    const authError = requireInternalAuth(c.request);
+    if (authError) return authError;
+    if (!isSafeProjectRef(c.params.ref)) {
+      return badRequest("Invalid project reference");
+    }
+
+    invalidateTenantEnvCache(c.params.ref);
+    pool.invalidateModule(`${c.params.ref}_env`);
+    backgroundPool.invalidateModule(`${c.params.ref}_env`);
+    return { invalidated: c.params.ref };
   })
 
   .post("/preheat/:ref/:slug", async (c) => {
