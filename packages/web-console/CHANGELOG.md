@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.0](https://github.com/zuohuadong/supacloud/compare/web-console-v0.11.9...web-console-v0.12.0) (2026-05-20)
+
+
+### Features
+
+* add diagnostics and oauth jwks support ([96e619a](https://github.com/zuohuadong/supacloud/commit/96e619a532f5f16b4b0d08ed9662bc6c6053dbb2))
+
 ## [0.11.9](https://github.com/zuohuadong/supacloud/compare/web-console-v0.11.8...web-console-v0.11.9) (2026-05-19)
 
 
