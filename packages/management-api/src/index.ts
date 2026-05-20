@@ -1,4 +1,4 @@
-import { Elysia } from "elysia";
+import { Elysia, t } from "elysia";
 import { logger } from "./utils/logger";
 
 process.on("uncaughtException", (err: Error) => {
@@ -309,6 +309,12 @@ const app = new Elysia({ strictPath: false })
     }
     set.status = 401;
     return { success: false, message: "Invalid username or password", code: "401" };
+  }, {
+    body: t.Object({
+      username: t.String(),
+      password: t.String(),
+    }),
+    detail: { tags: ["auth"], summary: "Studio login" },
   })
   .post("/auth/verify", async ({ body }) => {
     const { token } = body as { token: string };
@@ -345,6 +351,11 @@ const app = new Elysia({ strictPath: false })
       });
       return { valid: false };
     }
+  }, {
+    body: t.Object({
+      token: t.String(),
+    }),
+    detail: { tags: ["auth"], summary: "Verify session token" },
   })
 
   // WebSocket routes (no HTTP auth guard; WS uses query token)
