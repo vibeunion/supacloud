@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.2](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.5.1...edge-runtime-v0.5.2) (2026-05-20)
+
+
+### Bug Fixes
+
+* **edge-runtime:** load worker entry from deploy directory ([a3fa1e7](https://github.com/zuohuadong/supacloud/commit/a3fa1e74a41b73edb17eacb66080c020446158c1))
+
 ## [0.5.1](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.5.0...edge-runtime-v0.5.1) (2026-05-19)
 
 
