@@ -347,7 +347,7 @@ const app = new Elysia({ strictPath: false })
     }
   })
 
-  // WebSocket routes (no HTTP auth guard �?WS uses query token)
+  // WebSocket routes (no HTTP auth guard; WS uses query token)
   .use((await import("./routes/ws")).wsRoutes)
 
   // Main API Routes
@@ -402,9 +402,9 @@ const app = new Elysia({ strictPath: false })
  * Gateway-inspired try_files static asset serving.
  *
  * Strategy (mirrors `try_files $uri $uri/ /index.html`):
- *   1. If exact file exists on disk �?serve it (with content-negotiation for br/gzip)
- *   2. If path is an immutable asset (/_app/, /assets/) but missing �?404 (NEVER fallback to HTML)
- *   3. If path has no file extension (SPA route like /project/xxx/tables) �?serve index.html
+ *   1. If exact file exists on disk, serve it (with content-negotiation for br/gzip)
+ *   2. If path is an immutable asset (/_app/, /assets/) but missing, return 404 (NEVER fallback to HTML)
+ *   3. If path has no file extension (SPA route like /project/xxx/tables), serve index.html
  *   4. Last resort: embedded assets fallback
  */
 export function registerStaticAssets() {
@@ -434,7 +434,7 @@ export function registerStaticAssets() {
       return { message: "Route not found", code: "404" };
     }
 
-    // --- Step 1: try_files $uri �?check exact file on disk ---
+    // --- Step 1: try_files $uri, check exact file on disk ---
     try {
       const acceptEncoding = request.headers.get("accept-encoding") || "";
       let diskFile: string | null = null;
@@ -494,7 +494,7 @@ export function registerStaticAssets() {
       });
     }
 
-    // --- Step 2: immutable asset miss �?strict 404 (gateway behavior) ---
+    // --- Step 2: immutable asset miss, strict 404 (gateway behavior) ---
     // /_app/immutable/... files are content-hashed; if they don't exist, it's a stale reference.
     // Returning index.html here would cause "Expected JS but got text/html" browser errors.
     const isRootIndexFallback = url.pathname === "/" && path === "/index.html";
@@ -503,7 +503,7 @@ export function registerStaticAssets() {
       return "";
     }
 
-    // --- Step 3: SPA fallback �?serve index.html (only for navigation routes) ---
+    // --- Step 3: SPA fallback, serve index.html (only for navigation routes) ---
     const indexHtml = await getIndexHtml();
     if (indexHtml) {
       return new Response(indexHtml, {
@@ -582,7 +582,7 @@ export async function registerAllRoutes() {
 
   return (
     new Elysia({ name: "api-routes" })
-      // Auth guard �?runs before every route in this group
+      // Auth guard runs before every route in this group
       .onBeforeHandle(async ({ request, set }) => {
         const rateLimit = checkRateLimit(request);
         for (const [key, value] of Object.entries(rateLimit.headers)) {
@@ -936,7 +936,7 @@ async function bootstrap() {
             try {
               ws.send(event.data as string | ArrayBufferLike);
             } catch {
-              // downstream closed �?will be cleaned up in close handler
+              // downstream closed, will be cleaned up in close handler
             }
           });
 
@@ -1103,7 +1103,13 @@ async function bootstrap() {
     );
 
     logger.info(`
-    ╔═══════════════════════════════════════════════════════════�?    �?         SupaCloud Management API                         �?    ╠═══════════════════════════════════════════════════════════�?    �? Server running at: http://localhost:${config.port}                �?    �? Swagger docs at:   http://localhost:${config.port}/swagger        �?    ╚═══════════════════════════════════════════════════════════�?    `);
+    ============================================================
+             SupaCloud Management API
+    ------------------------------------------------------------
+      Server running at: http://localhost:${config.port}
+      Swagger docs at:   http://localhost:${config.port}/swagger
+    ============================================================
+    `);
   } else {
     logger.error(`Unknown command or argument: ${args.join(" ")}`);
     process.exit(1);
