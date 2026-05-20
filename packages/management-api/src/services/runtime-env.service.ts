@@ -9,6 +9,10 @@ import {
 } from "../utils/project-routing";
 import { decryptSecretIfNeeded } from "../utils/secret-crypto";
 import { logger } from "../utils/logger";
+import {
+  normalizeProjectJwtJwks,
+  normalizeProjectJwtKeys,
+} from "../utils/project-jwt";
 
 function isJwtLike(value: string | null | undefined): value is string {
   return typeof value === "string" && value.split(".").length === 3;
@@ -18,9 +22,14 @@ export async function buildProjectRuntimeEnv(projectRef: string): Promise<Record
   const project = await projectRepository.findByRef(projectRef);
   if (!project) return null;
 
+  const projectConfig = normalizeProjectConfig(project.config);
   const routingConfig = normalizeProjectRoutingConfig(
-    normalizeProjectConfig(project.config),
+    projectConfig,
   );
+  const authConfig = (projectConfig.auth || {}) as Record<string, unknown>;
+  const oauthServerConfig = (authConfig.oauth_server || {}) as Record<string, unknown>;
+  const jwtKeys = normalizeProjectJwtKeys(oauthServerConfig.jwt_keys);
+  const jwtJwks = normalizeProjectJwtJwks(oauthServerConfig.jwt_jwks);
   const supabaseUrl = resolveProjectApiUrl(projectRef, routingConfig);
   const projectApiHost = resolveProjectApiHost(projectRef, routingConfig);
   const internalSupabaseUrl = (
@@ -63,6 +72,8 @@ export async function buildProjectRuntimeEnv(projectRef: string): Promise<Record
     SUPABASE_ANON_KEY: project.anon_key,
     SUPABASE_SERVICE_ROLE_KEY: serviceRoleKey,
     JWT_SECRET: project.jwt_secret,
+    ...(jwtKeys ? { JWT_KEYS: JSON.stringify(jwtKeys) } : {}),
+    ...(jwtJwks ? { JWT_JWKS: JSON.stringify(jwtJwks) } : {}),
     SUPACLOUD_INTERNAL_SUPABASE_URL: internalSupabaseUrl,
     SUPACLOUD_INTERNAL_AUTH_URL: `${internalSupabaseUrl}/auth/v1`,
     SUPACLOUD_INTERNAL_REST_URL: `${internalSupabaseUrl}/rest/v1`,

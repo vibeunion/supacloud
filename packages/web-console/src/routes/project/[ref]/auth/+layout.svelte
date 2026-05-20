@@ -1,6 +1,6 @@
 <script lang="ts">
   import { page } from "$app/state";
-  import { Users, Shield, KeyRound, Link2, Mail, Clock, Webhook } from "lucide-svelte";
+  import { Users, Shield, KeyRound, Link2, Mail, Clock, Webhook, BadgeCheck } from "lucide-svelte";
 
   const projectRef = $derived(page.params.ref);
   const currentPath = $derived(page.url.pathname);
@@ -8,6 +8,7 @@
   const AUTH_TABS = [
     { name: "用户", path: "", icon: Users },
     { name: "提供者", path: "providers", icon: KeyRound },
+    { name: "OAuth Server", path: "oauth-server", icon: BadgeCheck },
     { name: "RLS 策略", path: "policies", icon: Shield },
     { name: "URL 配置", path: "url-configuration", icon: Link2 },
     { name: "邮件模板", path: "templates", icon: Mail },

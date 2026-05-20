@@ -33,6 +33,7 @@
     "api_docs": "API 文档",
     "query_performance": "慢查询看板",
     "database_linter": "表结构体检",
+    "diagnostics": "项目自检",
     "logs": "日志",
     "settings": "项目设置",
     "reports": "各类监控报表",
@@ -421,6 +422,7 @@
     "connection_pool": "连接池",
     "storage_juicefs": "存储 (JuiceFS)",
     "operations_console": "运维控制",
+    "diagnostics": "自检中心",
     "settings": "AI 服务配置",
     "subtitle": "Pigsty ????????????"
   },
@@ -448,6 +450,8 @@
     "advisors_desc": "数据库性能优化建议和安全审计。",
     "database_linter": "数据库检查",
     "database_linter_desc": "表结构、索引、RLS 策略的健康检查。",
+    "diagnostics": "项目自检",
+    "diagnostics_desc": "只读诊断数据库结构、接口、服务和可信基线。",
     "data_sources_note": "报表数据来源于 PostgreSQL 内部统计视图（如",
     "data_sources_note_suffix": "）和 systemd 日志。部分统计需要启用对应扩展。"
   },

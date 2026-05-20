@@ -33,6 +33,7 @@
     "api_docs": "API Docs",
     "query_performance": "Query Performance",
     "database_linter": "Database Linter",
+    "diagnostics": "Project Diagnostics",
     "logs": "Logs",
     "settings": "Settings",
     "reports": "Reports & Analytics",
@@ -421,6 +422,7 @@
     "connection_pool": "Connection Pool",
     "storage_juicefs": "Storage (JuiceFS)",
     "operations_console": "Operations Console",
+    "diagnostics": "Diagnostics Center",
     "settings": "AI Service Settings",
     "subtitle": "Global control panel for Pigsty infrastructure."
   },
@@ -448,6 +450,8 @@
     "advisors_desc": "Database optimization suggestions and security audit insights.",
     "database_linter": "Database Linter",
     "database_linter_desc": "Health checks for schema design, indexes, and RLS policies.",
+    "diagnostics": "Project Diagnostics",
+    "diagnostics_desc": "Read-only checks for database structure, APIs, services, and trusted baselines.",
     "data_sources_note": "Report data comes from PostgreSQL internal statistics views such as",
     "data_sources_note_suffix": "and systemd logs. Some metrics require the corresponding extension to be enabled."
   },

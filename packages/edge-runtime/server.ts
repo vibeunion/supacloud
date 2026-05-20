@@ -3,6 +3,7 @@ import { Elysia } from "elysia";
 import cors from "@elysiajs/cors";
 import { WorkerPool } from "./worker-pool";
 import { invalidateTenantEnvCache, loadTenantEnv } from "./tenant-env";
+import { normalizeJwtJwks, verifyEdgeRuntimeJwt } from "./jwt-verifier";
 import path from "path";
 import fs from "fs/promises";
 
@@ -337,6 +338,7 @@ interface ProjectSecrets {
   anonKey: string;
   serviceRoleKey: string;
   jwtSecret: string;
+  jwtJwks: ReturnType<typeof normalizeJwtJwks>;
   expiresAt: number;
 }
 const secretsCache = new Map<string, ProjectSecrets>();
@@ -349,6 +351,24 @@ async function getProjectSecrets(
   if (cached && cached.expiresAt > Date.now()) return cached;
 
   try {
+    const runtimeEnv = await loadTenantEnv(projectRef);
+    if (
+      runtimeEnv.SUPABASE_ANON_KEY ||
+      runtimeEnv.SUPABASE_SERVICE_ROLE_KEY ||
+      runtimeEnv.JWT_SECRET ||
+      runtimeEnv.JWT_JWKS
+    ) {
+      const secrets: ProjectSecrets = {
+        anonKey: runtimeEnv.SUPABASE_ANON_KEY || "",
+        serviceRoleKey: runtimeEnv.SUPABASE_SERVICE_ROLE_KEY || "",
+        jwtSecret: runtimeEnv.JWT_SECRET || "",
+        jwtJwks: normalizeJwtJwks(runtimeEnv.JWT_JWKS),
+        expiresAt: Date.now() + SECRETS_CACHE_TTL,
+      };
+      secretsCache.set(projectRef, secrets);
+      return secrets;
+    }
+
     const [keysRes, detailRes] = await Promise.all([
       fetch(`${MGMT_API}/v1/projects/${projectRef}/api-keys`, {
         headers: { Authorization: `Bearer ${MASTER_TOKEN}` },
@@ -372,13 +392,17 @@ async function getProjectSecrets(
       name: string;
       api_key: string;
     }[];
-    const detail = (await detailRes.json()) as { jwt_secret?: string };
+    const detail = (await detailRes.json()) as {
+      jwt_secret?: string;
+      config?: { auth?: { oauth_server?: { jwt_jwks?: unknown } } };
+    };
 
     const secrets: ProjectSecrets = {
       anonKey: keysArray?.find?.((k) => k.name === "anon")?.api_key || "",
       serviceRoleKey:
         keysArray?.find?.((k) => k.name === "service_role")?.api_key || "",
       jwtSecret: detail.jwt_secret || "",
+      jwtJwks: normalizeJwtJwks(detail.config?.auth?.oauth_server?.jwt_jwks),
       expiresAt: Date.now() + SECRETS_CACHE_TTL,
     };
     secretsCache.set(projectRef, secrets);
@@ -401,30 +425,11 @@ async function verifyJwt(
   const secrets = await getProjectSecrets(projectRef);
   if (!secrets) return false;
 
-  if (
-    apikeyHeader &&
-    (apikeyHeader === secrets.anonKey ||
-      apikeyHeader === secrets.serviceRoleKey)
-  ) {
-    return true;
+  const verified = await verifyEdgeRuntimeJwt(secrets, authHeader, apikeyHeader);
+  if (!verified) {
+    console.warn(`[verifyJwt] JWT verification failed for ${projectRef}`);
   }
-
-  if (!authHeader) return false;
-  const token = authHeader.replace(/^Bearer\s+/i, "");
-  if (!token) return false;
-
-  if (token === secrets.anonKey || token === secrets.serviceRoleKey)
-    return true;
-
-  if (!secrets.jwtSecret) return false;
-  try {
-    const { jwtVerify } = await import("jose");
-    await jwtVerify(token, new TextEncoder().encode(secrets.jwtSecret));
-    return true;
-  } catch (e) {
-    console.warn(`[verifyJwt] JWT error for ${projectRef}:`, e);
-    return false;
-  }
+  return verified;
 }
 
 async function handleFunctionRequest(

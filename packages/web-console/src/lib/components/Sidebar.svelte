@@ -56,6 +56,7 @@
     { titleKey: "Navigation.api_docs", icon: Files, href: `/project/${currentProject.ref}/api` },
     { titleKey: "Navigation.query_performance", icon: LineChart, href: `/project/${currentProject.ref}/reports/query-performance` },
     { titleKey: "Navigation.database_linter", icon: ShieldCheck, href: `/project/${currentProject.ref}/reports/database-linter` },
+    { titleKey: "Navigation.diagnostics", icon: ShieldCheck, href: `/project/${currentProject.ref}/reports/diagnostics` },
     { titleKey: "Sidebar.database_advisor", icon: ShieldCheck, href: `/project/${currentProject.ref}/reports/advisors` },
     { titleKey: "Navigation.reports", icon: Glasses, href: `/project/${currentProject.ref}/reports/api-overview` },
     { titleKey: "Navigation.logs", icon: ScrollText, href: `/project/${currentProject.ref}/logs` },

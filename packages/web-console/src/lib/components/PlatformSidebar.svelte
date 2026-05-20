@@ -10,7 +10,9 @@
     Terminal,
     Languages,
     Home,
-    SunMoon
+    SunMoon,
+    ChevronDown,
+    ShieldCheck
   } from "lucide-svelte";
   import { page } from "$app/stores";
   import { t, locale } from "svelte-i18n";
@@ -40,8 +42,13 @@
     { titleKey: "Platform.connection_pool", icon: Network, href: "/platform/pooling" },
     { titleKey: "Platform.storage_juicefs", icon: HardDrive, href: "/platform/storage" },
     { titleKey: "Platform.operations_console", icon: Terminal, href: "/platform/operations" },
-    { titleKey: "Platform.settings", icon: Settings2, href: "/platform/settings" },
+    { titleKey: "Platform.diagnostics", icon: ShieldCheck, href: "/platform/diagnostics" },
   ]);
+
+  const isPlatformSettingsActive = $derived(
+    $page.url.pathname === "/platform/settings" || $page.url.pathname.startsWith("/platform/settings/")
+  );
+  let isDisplaySettingsOpen = $state(false);
 
   function isActive(href: string) {
     return $page.url.pathname === href || $page.url.pathname.startsWith(href);
@@ -78,19 +85,62 @@
       <Home size={18} />
       <span>{$t("Sidebar.back_to_projects") || "Back to projects"}</span>
     </a>
+
+    {#if isDisplaySettingsOpen || isPlatformSettingsActive}
+      <div class="space-y-1 rounded-md border bg-muted/20 p-2">
+        <a
+          href="/platform/settings"
+          class={cn(
+            "flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors cursor-pointer",
+            isActive("/platform/settings")
+              ? "bg-accent text-accent-foreground"
+              : "text-muted-foreground hover:bg-muted hover:text-foreground"
+          )}
+        >
+          <Settings2 size={16} />
+          <span>{$t("Platform.settings") || "Settings"}</span>
+        </a>
+        <button
+          type="button"
+          onclick={toggleMode}
+          class="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition-colors cursor-pointer"
+        >
+          <SunMoon size={16} />
+          <span>{themeToggleLabel}</span>
+        </button>
+        <button
+          type="button"
+          onclick={toggleLanguage}
+          class="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition-colors cursor-pointer"
+        >
+          <Languages size={16} />
+          <span>{isZhLocale($locale) ? "English" : ($t("Common.chinese") || "中文")}</span>
+        </button>
+      </div>
+    {/if}
+
     <button
-      onclick={toggleMode}
-      class="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition-colors cursor-pointer"
+      type="button"
+      onclick={() => { isDisplaySettingsOpen = !isDisplaySettingsOpen; }}
+      class="flex w-full items-center justify-between gap-2 rounded-md border bg-muted/20 px-3 py-2 hover:bg-muted/40 transition-colors cursor-pointer"
+      aria-expanded={isDisplaySettingsOpen || isPlatformSettingsActive}
     >
-      <SunMoon size={18} />
-      <span>{themeToggleLabel}</span>
-    </button>
-    <button
-      onclick={toggleLanguage}
-      class="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition-colors cursor-pointer"
-    >
-      <Languages size={18} />
-      <span>{isZhLocale($locale) ? "English" : ($t("Common.chinese") || "中文")}</span>
+      <span class="flex items-center gap-3 min-w-0">
+        <span class="w-8 h-8 shrink-0 rounded-full bg-gradient-to-tr from-brand to-emerald-400 flex items-center justify-center text-white font-bold text-xs">
+          SC
+        </span>
+        <span class="flex flex-col min-w-0 text-left">
+          <span class="text-sm font-semibold truncate text-foreground">Platform Admin</span>
+          <span class="text-[10px] text-muted-foreground truncate">admin@supacloud.local</span>
+        </span>
+      </span>
+      <ChevronDown
+        size={16}
+        class={cn(
+          "shrink-0 text-muted-foreground transition-transform",
+          (isDisplaySettingsOpen || isPlatformSettingsActive) ? "rotate-180" : ""
+        )}
+      />
     </button>
   </div>
 </aside>

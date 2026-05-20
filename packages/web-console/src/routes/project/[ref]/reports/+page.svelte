@@ -1,7 +1,7 @@
 <script lang="ts">
   import { page } from "$app/state";
   import { t } from "svelte-i18n";
-  import { BarChart3, Activity, Database, Shield, Zap, HardDrive, Clock, TrendingUp, ArrowRight } from "lucide-svelte";
+  import { BarChart3, Activity, Database, Shield, HardDrive, Clock, TrendingUp, ArrowRight, ShieldCheck } from "lucide-svelte";
 
   const projectRef = $derived(page.params.ref);
 
@@ -61,6 +61,14 @@
       icon: BarChart3,
       color: "text-orange-600 bg-orange-500/10",
       href: "database-linter",
+    },
+    {
+      id: "diagnostics",
+      titleKey: "Reports.diagnostics",
+      descKey: "Reports.diagnostics_desc",
+      icon: ShieldCheck,
+      color: "text-red-600 bg-red-500/10",
+      href: "diagnostics",
     },
   ];
 </script>

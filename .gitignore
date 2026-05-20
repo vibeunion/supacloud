@@ -156,3 +156,11 @@ AGENTS.md
 deploy_all.sh
 .roomodes
 .gitignore
+tasks.md
+.agents/automations/
+.cursorrules
+CLAUDE.md
+HERMES.md
+OPENCODE.md
+.goosehints
+.zed/CONVENTIONS.md

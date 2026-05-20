@@ -30,3 +30,4 @@ export { platformSettingsRoutes } from "./platform-settings";
 export { projectLogsRoutes } from "./project-logs";
 export { systemRoutes } from "./system";
 export { wsRoutes } from "./ws";
+export { diagnosticsRoutes } from "./diagnostics";

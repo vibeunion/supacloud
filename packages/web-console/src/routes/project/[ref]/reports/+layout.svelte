@@ -1,7 +1,7 @@
 <script lang="ts">
   import { page } from "$app/state";
   import { t } from "svelte-i18n";
-  import { BarChart3, Activity, Database, Shield, Zap, HardDrive, Clock, TrendingUp } from "lucide-svelte";
+  import { BarChart3, Activity, Database, Shield, HardDrive, Clock, TrendingUp, ShieldCheck } from "lucide-svelte";
 
   let { children } = $props();
 
@@ -15,6 +15,7 @@
     { id: "storage", labelKey: "Reports.storage", icon: HardDrive },
     { id: "advisors", labelKey: "Reports.advisors", icon: TrendingUp },
     { id: "database-linter", labelKey: "Reports.database_linter", icon: BarChart3 },
+    { id: "diagnostics", labelKey: "Reports.diagnostics", icon: ShieldCheck },
   ]);
 
   const currentTab = $derived(page.url.pathname.split("/reports/")[1]?.split("/")[0] || "");

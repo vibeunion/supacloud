@@ -231,6 +231,42 @@ describe("GatewayService", () => {
         globalThis.fetch = originalFetch;
     });
 
+    test("setupUpstream should route OAuth 2.1 metadata discovery to GoTrue", async () => {
+        const originalFetch = globalThis.fetch;
+        const calls: Array<{ url: string; method: string; body: Record<string, unknown> | null }> = [];
+
+        globalThis.fetch = mock((input: string | URL | Request, init?: RequestInit) => {
+            const url = typeof input === "string"
+                ? input
+                : input instanceof URL
+                    ? input.toString()
+                    : input.url;
+            const method = init?.method || "GET";
+            let body: Record<string, unknown> | null = null;
+            if (typeof init?.body === "string" && init.body.length > 0) {
+                try {
+                    body = JSON.parse(init.body) as Record<string, unknown>;
+                } catch {
+                    body = null;
+                }
+            }
+            calls.push({ url, method, body });
+            return Promise.resolve(new Response(JSON.stringify({ data: [] })));
+        }) as unknown as typeof fetch;
+
+        const result = await gatewayService.setupUpstream("testref123", 3000, 9999);
+        expect(result.success).toBe(true);
+
+        const oauthMetadataRoute = calls.find(
+            (c) => c.method === "PUT" && c.url.includes("/routes/route-svc-gotrue-well-known-testref123")
+        );
+        expect(oauthMetadataRoute).toBeDefined();
+        expect(oauthMetadataRoute?.body?.paths).toEqual(["/.well-known/oauth-authorization-server/auth/v1"]);
+        expect(oauthMetadataRoute?.body?.strip_path).toBe(false);
+
+        globalThis.fetch = originalFetch;
+    });
+
     test("upsertCertificateForSnis writes Kong certificate and SNI bindings", async () => {
         const originalFetch = globalThis.fetch;
         const calls: Array<{ url: string; method: string; body: Record<string, unknown> | null }> = [];

@@ -578,6 +578,7 @@ export async function registerAllRoutes() {
     platformSettingsRoutes,
     projectLogsRoutes,
     systemRoutes,
+    diagnosticsRoutes,
   } = await import("./routes");
 
   return (
@@ -665,6 +666,7 @@ export async function registerAllRoutes() {
       .use(platformSettingsRoutes)
       .use(projectLogsRoutes)
       .use(systemRoutes)
+      .use(diagnosticsRoutes)
   );
 }
 

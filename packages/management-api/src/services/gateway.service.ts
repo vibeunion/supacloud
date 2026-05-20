@@ -402,7 +402,7 @@ export class GatewayService {
 
     async setCors(projectRef: string, origins: string[] = DEFAULT_CORS_ORIGINS): Promise<boolean> {
         try {
-            const routes = ['pgrst', 'graphql', 'gotrue', 'realtime', 'realtime-api', 'storage', 'functions', 'api-root'].map(r => `route-svc-${r}-${projectRef}`);
+            const routes = ['pgrst', 'graphql', 'gotrue', 'gotrue-well-known', 'realtime', 'realtime-api', 'storage', 'functions', 'api-root'].map(r => `route-svc-${r}-${projectRef}`);
             let allSuccess = true;
             for (const routeName of routes) {
                 try {
@@ -634,6 +634,15 @@ export class GatewayService {
                 corsOrigins,
             });
             await this.ensureServiceAndRoute({ name: `svc-gotrue-${projectRef}`, url: `http://${hostIp}:${gotruePort}`, paths: ["/auth/v1"], hosts, projectRef, corsOrigins });
+            await this.ensureServiceAndRoute({
+                name: `svc-gotrue-well-known-${projectRef}`,
+                url: `http://${hostIp}:${gotruePort}`,
+                paths: ["/.well-known/oauth-authorization-server/auth/v1"],
+                hosts,
+                projectRef,
+                stripPath: false,
+                corsOrigins,
+            });
             // Route public function traffic through management-api first so sdk-proxy can
             // apply background_routes policy before forwarding synchronous invokes to the
             // edge runtime.
@@ -715,7 +724,7 @@ export class GatewayService {
 
     async addProjectDomains(projectRef: string, apiDomains: string[], studioDomains: string[]): Promise<boolean> {
         try {
-            const servicePrefixes = ["svc-pgrst-", "svc-graphql-", "svc-gotrue-", "svc-functions-", "svc-storage-", "svc-realtime-", "svc-realtime-api-", "svc-api-root-"];
+            const servicePrefixes = ["svc-pgrst-", "svc-graphql-", "svc-gotrue-", "svc-gotrue-well-known-", "svc-functions-", "svc-storage-", "svc-realtime-", "svc-realtime-api-", "svc-api-root-"];
             for (const prefix of servicePrefixes) {
                 const routeName = `route-${prefix}${projectRef}`;
                 const route = await this.kongRequest(`/routes/${routeName}`);
@@ -745,7 +754,7 @@ export class GatewayService {
 
     async removeProjectDomains(projectRef: string, apiDomains: string[], studioDomains: string[]): Promise<boolean> {
         try {
-            const servicePrefixes = ["svc-pgrst-", "svc-graphql-", "svc-gotrue-", "svc-functions-", "svc-storage-", "svc-realtime-", "svc-realtime-api-", "svc-api-root-"];
+            const servicePrefixes = ["svc-pgrst-", "svc-graphql-", "svc-gotrue-", "svc-gotrue-well-known-", "svc-functions-", "svc-storage-", "svc-realtime-", "svc-realtime-api-", "svc-api-root-"];
             for (const prefix of servicePrefixes) {
                 const routeName = `route-${prefix}${projectRef}`;
                 const route = await this.kongRequest(`/routes/${routeName}`);

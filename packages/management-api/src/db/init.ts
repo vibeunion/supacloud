@@ -328,6 +328,78 @@ export async function initDatabase() {
         `,
         description: "idx_project_tasks_project_function_created",
       },
+      {
+        statement: `
+          CREATE TABLE IF NOT EXISTS diagnostic_runs (
+            id TEXT PRIMARY KEY,
+            scope VARCHAR(20) NOT NULL,
+            project_ref VARCHAR(20),
+            status VARCHAR(20) NOT NULL DEFAULT 'running',
+            started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            completed_at TIMESTAMPTZ,
+            summary JSONB
+          )
+        `,
+        description: "diagnostic_runs table",
+      },
+      {
+        statement: `CREATE INDEX IF NOT EXISTS idx_diagnostic_runs_scope ON diagnostic_runs(scope, started_at DESC)`,
+        description: "idx_diagnostic_runs_scope",
+      },
+      {
+        statement: `
+          CREATE TABLE IF NOT EXISTS diagnostic_results (
+            id TEXT PRIMARY KEY,
+            run_id TEXT NOT NULL REFERENCES diagnostic_runs(id) ON DELETE CASCADE,
+            check_id TEXT NOT NULL,
+            status VARCHAR(20) NOT NULL,
+            message TEXT NOT NULL,
+            detail TEXT,
+            repair_preview TEXT,
+            repair_command TEXT,
+            metadata JSONB,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+          )
+        `,
+        description: "diagnostic_results table",
+      },
+      {
+        statement: `CREATE INDEX IF NOT EXISTS idx_diagnostic_results_run ON diagnostic_results(run_id)`,
+        description: "idx_diagnostic_results_run",
+      },
+      {
+        statement: `
+          CREATE TABLE IF NOT EXISTS diagnostic_baselines (
+            check_id TEXT NOT NULL,
+            scope VARCHAR(20) NOT NULL,
+            project_ref VARCHAR(20) NOT NULL DEFAULT '',
+            expected_status VARCHAR(20),
+            expected_hash TEXT,
+            snapshot_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            PRIMARY KEY (check_id, scope, project_ref)
+          )
+        `,
+        description: "diagnostic_baselines table",
+      },
+      {
+        statement: "UPDATE diagnostic_baselines SET project_ref = '' WHERE project_ref IS NULL",
+        description: "diagnostic_baselines.project_ref backfill",
+        swallowError: true,
+      },
+      {
+        statement: `
+          CREATE TABLE IF NOT EXISTS diagnostic_repair_logs (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            result_id TEXT NOT NULL,
+            check_id TEXT NOT NULL,
+            success BOOLEAN NOT NULL,
+            message TEXT NOT NULL,
+            applied_command TEXT,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+          )
+        `,
+        description: "diagnostic_repair_logs table",
+      },
       { statement: 'CREATE INDEX IF NOT EXISTS idx_project_tasks_cancel_requested ON project_tasks(cancel_requested_at) WHERE cancel_requested_at IS NOT NULL', description: "idx_project_tasks_cancel_requested" },
       {
         statement: `
