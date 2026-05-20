@@ -13,7 +13,7 @@ S3_ACCESS_KEY="${S3_ACCESS_KEY:-}"
 S3_SECRET_KEY="${S3_SECRET_KEY:-}"
 S3_STORAGE_TYPE="${S3_STORAGE_TYPE:-juicefs}"
 
-BUCKET_NAME="supa-${PROJECT_REF}"
+BUCKET_NAME="${S3_BUCKET:-supa-${PROJECT_REF}}"
 
 # Load storage credentials
 load_credentials() {
