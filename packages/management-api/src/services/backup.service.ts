@@ -48,44 +48,33 @@ export async function listBackups(stanza: string = 'db-main'): Promise<BackupInf
     }
 
 async function runPgBackrestInfo(stanza: string, timeoutMs: number): Promise<{ exitCode: number; stdout: string; timedOut: boolean }> {
-        let timedOut = false;
-        const proc = Bun.spawn([
-            "sudo",
-            "-u",
-            "postgres",
-            "pgbackrest",
-            `--stanza=${stanza}`,
-            "info",
-            "--output=json",
-        ], {
-            stdout: "pipe",
-            stderr: "pipe",
-        });
-        const stdout = new Response(proc.stdout).text();
-        const stderr = new Response(proc.stderr).text();
-        const timeout = setTimeout(() => {
-            timedOut = true;
-            try {
-                proc.kill();
-            } catch {
-                // Process may already have exited.
-            }
-        }, timeoutMs);
+    const proc = Bun.spawn([
+        "timeout",
+        String(Math.ceil(timeoutMs / 1000)),
+        "sudo",
+        "-u",
+        "postgres",
+        "pgbackrest",
+        `--stanza=${stanza}`,
+        "info",
+        "--output=json",
+    ], {
+        stdout: "pipe",
+        stderr: "pipe",
+    });
 
-        try {
-            const [exitCode, output, errorOutput] = await Promise.all([
-                proc.exited,
-                stdout,
-                stderr,
-            ]);
-            if (errorOutput.trim()) {
-                logger.debug("[Backup] pgbackrest stderr:", { stderr: errorOutput.trim() });
-            }
-            return { exitCode, stdout: output, timedOut };
-        } finally {
-            clearTimeout(timeout);
-        }
+    const exitCode = await proc.exited;
+    const output = await new Response(proc.stdout).text();
+    const errorOutput = await new Response(proc.stderr).text();
+    const timedOut = exitCode === 124;
+
+    if (timedOut) {
+        logger.warn("[Backup] pgbackrest timed out after " + timeoutMs + "ms");
+    } else if (errorOutput.trim()) {
+        logger.debug("[Backup] pgbackrest stderr:", { stderr: errorOutput.trim() });
     }
+    return { exitCode, stdout: output, timedOut };
+}
 export async function createBackup(stanza: string = 'db-main', type: 'full' | 'incr' | 'diff' = 'incr'): Promise<{ message: string }> {
         $`sudo -u postgres pgbackrest --stanza=${stanza} --type=${type} backup`.nothrow().quiet().catch(err => {
             logger.error('[Backup] Async backup task failed:', { error: err instanceof Error ? err.message : String(err) });
