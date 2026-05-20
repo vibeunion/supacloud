@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.5.2...edge-runtime-v0.6.0) (2026-05-20)
+
+
+### Features
+
+* add diagnostics and oauth jwks support ([96e619a](https://github.com/zuohuadong/supacloud/commit/96e619a532f5f16b4b0d08ed9662bc6c6053dbb2))
+
 ## [0.5.2](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.5.1...edge-runtime-v0.5.2) (2026-05-20)
 
 
