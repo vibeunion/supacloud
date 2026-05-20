@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.11](https://github.com/zuohuadong/supacloud/compare/management-api-v0.18.10...management-api-v0.18.11) (2026-05-20)
+
+
+### Bug Fixes
+
+* harden backup timeout with system command and add WebSocket idle timeout ([#157](https://github.com/zuohuadong/supacloud/issues/157)) ([12543c2](https://github.com/zuohuadong/supacloud/commit/12543c2afb9ee0af4b4547a934f9f7502dd737a1))
+
 ## [0.18.10](https://github.com/zuohuadong/supacloud/compare/management-api-v0.18.9...management-api-v0.18.10) (2026-05-19)
 
 
