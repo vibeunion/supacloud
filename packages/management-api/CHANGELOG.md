@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.19.1](https://github.com/zuohuadong/supacloud/compare/management-api-v0.19.0...management-api-v0.19.1) (2026-05-20)
+
+
+### Bug Fixes
+
+* add body schema to /auth/login and /auth/verify routes ([#159](https://github.com/zuohuadong/supacloud/issues/159)) ([5ff346d](https://github.com/zuohuadong/supacloud/commit/5ff346d7167eb338d2531c672b4fa9b7b14b5de5))
+
 ## [0.19.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.18.11...management-api-v0.19.0) (2026-05-20)
 
 
