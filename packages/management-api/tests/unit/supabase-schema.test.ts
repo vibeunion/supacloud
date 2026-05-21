@@ -121,4 +121,24 @@ describe("supabase bootstrap schema", () => {
       expect(notifyFn).toBeGreaterThan(schema);
     }
   });
+
+  test("AoristCross initial schema includes task queue compatibility patch", () => {
+    const initialSchema = readFileSync(
+      resolve(import.meta.dir, "../../../../scripts/001_initial_schema.sql"),
+      "utf8",
+    );
+    const compatibilityPatch = readFileSync(
+      resolve(import.meta.dir, "../../../../scripts/002_tasks_queue_schema_patch.sql"),
+      "utf8",
+    );
+
+    for (const source of [initialSchema, compatibilityPatch]) {
+      expect(source).toContain("payload");
+      expect(source).toContain("'crop'");
+      expect(source).toContain("'matting'");
+      expect(source).toContain("'cancelled'");
+      expect(source).toContain("idx_tasks_user_created_desc");
+      expect(source).toContain("idx_tasks_user_status_created_desc");
+    }
+  });
 });

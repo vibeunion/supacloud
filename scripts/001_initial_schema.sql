@@ -339,7 +339,7 @@ CREATE TABLE tasks (
   type           text NOT NULL
                  CHECK (type IN ('pattern','mockup','title','video','export','agent','crop','matting')),
   status         text NOT NULL DEFAULT 'queued'
-                 CHECK (status IN ('queued','processing','completed','failed')),
+                 CHECK (status IN ('queued','processing','completed','failed','cancelled')),
   progress       int DEFAULT 0,
   payload        jsonb NOT NULL DEFAULT '{}'::jsonb,
   user_id        uuid REFERENCES profiles(id) ON DELETE SET NULL,
@@ -354,6 +354,8 @@ CREATE INDEX idx_tasks_user_id    ON tasks(user_id);
 CREATE INDEX idx_tasks_type       ON tasks(type);
 CREATE INDEX idx_tasks_status     ON tasks(status);
 CREATE INDEX idx_tasks_created_at ON tasks(created_at);
+CREATE INDEX idx_tasks_user_created_desc ON tasks(user_id, created_at DESC);
+CREATE INDEX idx_tasks_user_status_created_desc ON tasks(user_id, status, created_at DESC);
 
 
 -- ============================================================
