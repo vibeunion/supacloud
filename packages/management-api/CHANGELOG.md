@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.19.2](https://github.com/zuohuadong/supacloud/compare/management-api-v0.19.1...management-api-v0.19.2) (2026-05-21)
+
+
+### Bug Fixes
+
+* **schema:** fold task queue patch into baseline ([2fd702b](https://github.com/zuohuadong/supacloud/commit/2fd702bbdf7357b81cca000213386e3453995e25))
+
 ## [0.19.1](https://github.com/zuohuadong/supacloud/compare/management-api-v0.19.0...management-api-v0.19.1) (2026-05-20)
 
 
