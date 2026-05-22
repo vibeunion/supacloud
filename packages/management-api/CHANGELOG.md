@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.19.4](https://github.com/zuohuadong/supacloud/compare/management-api-v0.19.3...management-api-v0.19.4) (2026-05-22)
+
+
+### Bug Fixes
+
+* **db:** add migration for legacy deployment_history schema ([#163](https://github.com/zuohuadong/supacloud/issues/163)) ([dfdf811](https://github.com/zuohuadong/supacloud/commit/dfdf811a554c1713f95e74c3154b30244d310d25))
+* **management-api:** run background function tasks concurrently ([fad97e5](https://github.com/zuohuadong/supacloud/commit/fad97e50ed043f3119defbd2b0f8b253274e70d0))
+
 ## [0.19.3](https://github.com/zuohuadong/supacloud/compare/management-api-v0.19.2...management-api-v0.19.3) (2026-05-22)
 
 
