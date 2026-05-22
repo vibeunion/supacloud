@@ -16,14 +16,15 @@
  *   bun run bun-static-serve.ts /path/to/build 3000 --workers=4
  *   bun run bun-static-serve.ts /path/to/build 3000 --workers=auto
  *
- * Behavior mirrors Nginx `try_files $uri $uri/index.html /index.html`:
- *   1. Exact file match → serve with proper MIME + cache headers
+ * Behavior mirrors Nginx `try_files $uri $uri.html $uri/index.html /index.html`:
+ *   1. Exact file or route file match → serve with proper MIME + cache headers
  *   2. Hashed asset miss → 404 (never SPA-fallback for /_app/ etc.)
  *   3. No extension (SPA route) → serve /index.html with no-cache
  */
 
 import { availableParallelism } from "os";
 import { spawn } from "bun";
+import { statSync } from "node:fs";
 
 const MIME_TYPES: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -65,19 +66,48 @@ function hasFileExtension(path: string): boolean {
   return last.includes(".");
 }
 
-/** Check if a file exists on disk (fast stat, no content read) */
+/** Check if a real file exists on disk. Directories must not be served as files. */
 function fileExists(fullPath: string): boolean {
   try {
-    const f = Bun.file(fullPath);
-    return f.size > 0;
+    return statSync(fullPath).isFile();
   } catch {
     return false;
   }
 }
 
+function unique(paths: string[]): string[] {
+  return Array.from(new Set(paths));
+}
+
+function getRouteCandidates(path: string): string[] {
+  if (path === "/") return ["/index.html"];
+  if (hasFileExtension(path)) return [path];
+
+  const trimmed = path.replace(/\/+$/, "");
+  if (!trimmed) return ["/index.html"];
+
+  return unique([trimmed, `${trimmed}.html`, `${trimmed}/index.html`]);
+}
+
+function resolveStaticFile(root: string, requestPath: string, acceptEncoding: string) {
+  for (const path of getRouteCandidates(requestPath)) {
+    if (acceptEncoding.includes("br") && fileExists(`${root}${path}.br`)) {
+      return { diskPath: `${root}${path}.br`, logicalPath: path, encoding: "br" };
+    }
+    if (acceptEncoding.includes("gzip") && fileExists(`${root}${path}.gz`)) {
+      return { diskPath: `${root}${path}.gz`, logicalPath: path, encoding: "gzip" };
+    }
+    if (fileExists(`${root}${path}`)) {
+      return { diskPath: `${root}${path}`, logicalPath: path, encoding: null };
+    }
+  }
+
+  return null;
+}
+
 // ─── Worker: HTTP request handler ───────────────────────────────────────────
 
-function createFetchHandler(root: string) {
+export function createFetchHandler(root: string) {
   return async function fetch(req: Request): Promise<Response> {
     const url = new URL(req.url);
     let path = decodeURIComponent(url.pathname);
@@ -93,28 +123,12 @@ function createFetchHandler(root: string) {
       return new Response("Forbidden", { status: 403 });
     }
 
-    // Normalize: / → /index.html
-    if (path === "/") path = "/index.html";
-
-    // --- Step 1: try exact file on disk ---
     const acceptEncoding = req.headers.get("accept-encoding") || "";
-    let diskPath: string | null = null;
-    let encoding: string | null = null;
+    const resolved = resolveStaticFile(root, path, acceptEncoding);
 
-    // Content negotiation: brotli > gzip > raw
-    if (acceptEncoding.includes("br") && fileExists(`${root}${path}.br`)) {
-      diskPath = `${root}${path}.br`;
-      encoding = "br";
-    } else if (acceptEncoding.includes("gzip") && fileExists(`${root}${path}.gz`)) {
-      diskPath = `${root}${path}.gz`;
-      encoding = "gzip";
-    } else if (fileExists(`${root}${path}`)) {
-      diskPath = `${root}${path}`;
-    }
-
-    if (diskPath) {
-      const file = Bun.file(diskPath);
-      const ext = getExt(path);
+    if (resolved) {
+      const file = Bun.file(resolved.diskPath);
+      const ext = getExt(resolved.logicalPath);
       // Use hardcoded table first, then Bun's built-in MIME detection as fallback
       const mime = MIME_TYPES[ext] || file.type || "application/octet-stream";
 
@@ -128,7 +142,7 @@ function createFetchHandler(root: string) {
       let cacheControl: string;
       if (ext === ".html") {
         cacheControl = "no-cache";
-      } else if (isImmutableAsset(path) || /\.[0-9a-f]{8,}\./i.test(path)) {
+      } else if (isImmutableAsset(resolved.logicalPath) || /\.[0-9a-f]{8,}\./i.test(resolved.logicalPath)) {
         cacheControl = "public, max-age=31536000, immutable";
       } else {
         cacheControl = "public, max-age=3600";
@@ -174,8 +188,8 @@ function createFetchHandler(root: string) {
         headers["Content-Length"] = (end - start + 1).toString();
       }
 
-      if (encoding) {
-        headers["Content-Encoding"] = encoding;
+      if (resolved.encoding) {
+        headers["Content-Encoding"] = resolved.encoding;
         headers["Vary"] = "Accept-Encoding";
       }
 
