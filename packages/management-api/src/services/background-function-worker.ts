@@ -187,7 +187,13 @@ export class BackgroundFunctionWorker {
           continue;
         }
 
-        await this.execute(task);
+        void this.execute(task).catch((error: unknown) => {
+          logger.error("[BackgroundFunctionWorker] unhandled task execution failure", {
+            taskId: task.id,
+            projectRef: task.project_ref,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
       }
     } catch (error: unknown) {
       logger.error("[BackgroundFunctionWorker] poll failed", {

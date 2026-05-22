@@ -36,6 +36,7 @@ const { taskRepository } = await import("../../src/repositories/task.repository"
 const { projectRepository } = await import("../../src/repositories/project.repository");
 const wsModule = await import("../../src/routes/ws");
 const { projectService } = await import("../../src/services/project.service");
+const dispatcherModule = await import("../../src/services/background-runtime-dispatcher");
 
 spyOn(taskRepository, "claimNextTask").mockImplementation(claimNextTask as typeof taskRepository.claimNextTask);
 spyOn(taskRepository, "cancelTask").mockImplementation(cancelTask as typeof taskRepository.cancelTask);
@@ -58,6 +59,9 @@ spyOn(projectRepository, "findByRef").mockImplementation(findByRef as typeof pro
 const broadcastTaskUpdate = spyOn(wsModule, "broadcastTaskUpdate").mockImplementation(() => {});
 spyOn(projectService, "getBackgroundTaskSettings").mockImplementation(
   getBackgroundTaskSettings as typeof projectService.getBackgroundTaskSettings,
+);
+const dispatchBackgroundFunction = spyOn(dispatcherModule, "dispatchBackgroundFunction").mockImplementation(
+  () => Promise.resolve({ status: 200, headers: {}, bodyText: "", logs: [] }),
 );
 
 // We import the worker AFTER mocks are set up
@@ -102,6 +106,25 @@ function makeTask(overrides: Partial<ProjectTask> = {}): ProjectTask {
   };
 }
 
+function deferred<T = void>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+async function waitUntil(predicate: () => boolean, timeoutMs = 250): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error("Timed out waiting for condition");
+}
+
 // ─── Tests ──────────────────────────────────────────────────────────────────
 
 describe("BackgroundFunctionWorker", () => {
@@ -124,6 +147,7 @@ describe("BackgroundFunctionWorker", () => {
     findByRef.mockReset();
     broadcastTaskUpdate.mockReset();
     getBackgroundTaskSettings.mockReset();
+    dispatchBackgroundFunction.mockReset();
 
     // Defaults
     findByRef.mockResolvedValue({ ref: "proj_1", status: "active" } as any);
@@ -132,6 +156,7 @@ describe("BackgroundFunctionWorker", () => {
       concurrency: 2,
       max_attempts: 3,
     });
+    dispatchBackgroundFunction.mockResolvedValue({ status: 200, headers: {}, bodyText: "", logs: [] });
     startTaskAttempt.mockResolvedValue({ id: "att_1" } as any);
     extendLease.mockResolvedValue(null);
     markTaskRunning.mockResolvedValue(null);
@@ -209,6 +234,45 @@ describe("BackgroundFunctionWorker", () => {
       await (worker as any).poll();
 
       expect(cancelTask).toHaveBeenCalledWith(task.id, "Project is paused");
+    });
+
+    test("starts the next claimed task without waiting for the previous one to finish", async () => {
+      const worker = new BackgroundFunctionWorker();
+      (worker as any).isRunning = true;
+      const firstTask = makeTask({ id: "tsk_1" });
+      const secondTask = makeTask({ id: "tsk_2" });
+      const firstTaskStarted = deferred();
+      const releaseFirstTask = deferred();
+      const startedTaskIds: string[] = [];
+
+      claimNextTask
+        .mockResolvedValueOnce(firstTask)
+        .mockResolvedValueOnce(secondTask)
+        .mockResolvedValueOnce(null);
+      extendLease.mockResolvedValue({} as any);
+      dispatchBackgroundFunction.mockImplementation(async ({ request }) => {
+        const taskId = request.headers.get("x-supacloud-task-id") || "";
+        startedTaskIds.push(taskId);
+        if (taskId === firstTask.id) {
+          firstTaskStarted.resolve();
+          await releaseFirstTask.promise;
+        }
+        return { status: 200, headers: {}, bodyText: "", logs: [] };
+      });
+
+      const pollPromise = (worker as any).poll();
+      await firstTaskStarted.promise;
+
+      try {
+        await waitUntil(() => startedTaskIds.includes(secondTask.id));
+        expect(claimNextTask).toHaveBeenCalledTimes(3);
+        expect(startedTaskIds).toContain(firstTask.id);
+        expect(startedTaskIds).toContain(secondTask.id);
+      } finally {
+        releaseFirstTask.resolve();
+        await pollPromise;
+        await waitUntil(() => markTaskSucceeded.mock.calls.length >= 2);
+      }
     });
 
   });
