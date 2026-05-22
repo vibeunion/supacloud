@@ -444,7 +444,7 @@ export async function initDatabase() {
         swallowError: true,
       },
       {
-        statement: DO 
+        statement: `DO $$
           BEGIN
             IF EXISTS (
               SELECT 1 FROM information_schema.columns
@@ -463,9 +463,9 @@ export async function initDatabase() {
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
               );
             END IF;
-          END;,
+          END
+        $$;`,
         description: "deployment_history schema migration (legacy project_ref -> new app/tenant schema)",
-        swallowError: true,
       },
     ];
 
