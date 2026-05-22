@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.1](https://github.com/zuohuadong/supacloud/compare/supacloud-js-v0.15.0...supacloud-js-v0.15.1) (2026-05-22)
+
+
+### Bug Fixes
+
+* propagate background idempotency keys ([1365f13](https://github.com/zuohuadong/supacloud/commit/1365f13b7e6f6811bb3fec5ded1aaf2a63c161b1))
+
 ## [0.15.0](https://github.com/zuohuadong/supacloud/compare/supacloud-js-v0.14.0...supacloud-js-v0.15.0) (2026-05-16)
 
 
