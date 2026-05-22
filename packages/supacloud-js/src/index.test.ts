@@ -72,7 +72,9 @@ describe("@supacloud/js", () => {
     expect(supabase.functions.invoke).toHaveBeenCalledTimes(1);
     expect(supabase.functions.invoke.mock.calls[0]?.[1]).toMatchObject({
       body: { image_id: "img_1" },
-      headers: {},
+      headers: {
+        "x-supacloud-idempotency-key": "crop-img_1-v1",
+      },
     });
   });
 

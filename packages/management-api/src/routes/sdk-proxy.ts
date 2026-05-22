@@ -186,6 +186,7 @@ async function maybeEnqueueAsyncFunction(request: Request, ref: string): Promise
     });
 
     const traceId = request.headers.get("x-request-id") || randomUUID();
+    const idempotencyKey = request.headers.get("x-supacloud-idempotency-key")?.trim() || null;
     const authHeaders: Record<string, string> = {};
     const authorization = request.headers.get("authorization");
     const apikey = request.headers.get("apikey");
@@ -215,7 +216,7 @@ async function maybeEnqueueAsyncFunction(request: Request, ref: string): Promise
         timeoutSec,
         maxAttempts,
         maxPayloadBytes,
-        idempotencyKey: null,
+        idempotencyKey,
         traceId,
         envelope: {
             method: request.method,

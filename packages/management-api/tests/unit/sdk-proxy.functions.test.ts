@@ -196,6 +196,56 @@ describe("sdkProxyRoutes functions proxy", () => {
     });
   });
 
+  test("POST /functions/v1 uses SupaCloud idempotency header for background route enqueue", async () => {
+    await withSdkProxyTestContext(async ({ calls, trackSpy }) => {
+      trackSpy(spyOn(projectService, "getBackgroundTaskSettings").mockResolvedValue({
+        concurrency: 2,
+        max_attempts: 3,
+        max_payload_bytes: 262144,
+        timeout_sec_default: 300,
+        timeout_sec_max: 900,
+      }));
+      trackSpy(spyOn(projectService, "getApiKeys").mockResolvedValue({
+        anon_key: "anon",
+        service_role_key: "service",
+      } as Awaited<ReturnType<typeof projectService.getApiKeys>>));
+      trackSpy(spyOn(edgeFunctionService, "getConfig").mockResolvedValue({
+        verify_jwt: false,
+        version: "7",
+        background_routes: ["/generate/crop"],
+      }));
+      const enqueueSpy = trackSpy(spyOn(backgroundTaskService, "enqueueBackgroundFunctionTask").mockResolvedValue({
+        id: "task_123",
+        project_ref: "proj_1",
+        task_type: "edge_function",
+        function_slug: "aorist-ai",
+        function_version: "7",
+        status: "pending",
+        attempt: 1,
+        max_attempts: 3,
+      } as Awaited<ReturnType<typeof backgroundTaskService.enqueueBackgroundFunctionTask>>));
+
+      const response = await request("/functions/v1/aorist-ai/generate/crop", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-project-ref": "proj_1",
+          "x-supacloud-idempotency-key": "aorist:user_1:crop-img_1",
+          apikey: "anon",
+          authorization: "Bearer jwt-token",
+        },
+        body: JSON.stringify({ ping: true }),
+      });
+
+      expect(response.status).toBe(202);
+      expect(calls).toHaveLength(0);
+      expect(enqueueSpy).toHaveBeenCalledTimes(1);
+      expect(enqueueSpy.mock.calls[0]?.[0]).toMatchObject({
+        idempotencyKey: "aorist:user_1:crop-img_1",
+      });
+    });
+  });
+
   test("auth proxy resolves tenant ports from projects.config", async () => {
     await withSdkProxyTestContext(async ({ calls, trackSpy }) => {
       const sqlSpy = trackSpy(spyOn(dbModule, "sql"));

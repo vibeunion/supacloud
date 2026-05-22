@@ -265,7 +265,8 @@ registerCheck({
 
       const inconsistent: string[] = [];
       for (const p of projects as any[]) {
-        if (p.postgrest_health === "unhealthy" || p.postgrest_actual === "error") {
+        const desired = p.postgrest_desired ?? "running";
+        if (desired !== "running" || p.postgrest_actual !== "running" || p.postgrest_health !== "healthy") {
           inconsistent.push(
             `${p.ref}: desired=${p.postgrest_desired ?? "?"} actual=${p.postgrest_actual ?? "?"} health=${p.postgrest_health ?? "?"} err=${p.postgrest_last_error ?? "none"}`,
           );
@@ -302,7 +303,11 @@ registerCheck({
       const projects = await ctx.metaDb`
         SELECT ref FROM projects
         WHERE deleted_at IS NULL AND lower(status) = 'active'
-          AND postgrest_health = 'unhealthy'
+          AND (
+            COALESCE(postgrest_desired, 'running') <> 'running'
+            OR COALESCE(postgrest_actual, '') <> 'running'
+            OR COALESCE(postgrest_health, '') <> 'healthy'
+          )
         LIMIT 20
       `;
 

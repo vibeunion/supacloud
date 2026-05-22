@@ -372,13 +372,18 @@ class SupaCloudTasksClient<TClient extends SupabaseClient = SupabaseClient> exte
     functionName: string,
     options: SupaCloudTaskSubmitOptions = {},
   ) {
-    const { body, headers = {}, retries: _retries, timeoutSec: _timeoutSec, idempotencyKey: _idempotencyKey, method } = options;
+    const { body, headers = {}, retries: _retries, timeoutSec: _timeoutSec, idempotencyKey, method } = options;
     // Background execution is selected by server-side background_routes.
-    // The SDK intentionally avoids injecting custom async headers here.
+    // Keep the async decision server-side, but forward the logical idempotency key
+    // so management-api can dedupe background-route submissions.
+    const invokeHeaders = {
+      ...headers,
+      ...(idempotencyKey ? { "x-supacloud-idempotency-key": idempotencyKey } : {}),
+    };
     const { data, error } = await this.options.supabase.functions.invoke(functionName, {
       body,
       method,
-      headers,
+      headers: invokeHeaders,
     });
 
     if (error) throw error;
