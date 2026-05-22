@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.19.3](https://github.com/zuohuadong/supacloud/compare/management-api-v0.19.2...management-api-v0.19.3) (2026-05-22)
+
+
+### Bug Fixes
+
+* propagate background idempotency keys ([1365f13](https://github.com/zuohuadong/supacloud/commit/1365f13b7e6f6811bb3fec5ded1aaf2a63c161b1))
+
 ## [0.19.2](https://github.com/zuohuadong/supacloud/compare/management-api-v0.19.1...management-api-v0.19.2) (2026-05-21)
 
 
