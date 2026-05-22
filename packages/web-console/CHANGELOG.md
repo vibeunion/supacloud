@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.1](https://github.com/zuohuadong/supacloud/compare/web-console-v0.12.0...web-console-v0.12.1) (2026-05-22)
+
+
+### Bug Fixes
+
+* **config:** raise background task concurrency default to 20 ([1c3cf09](https://github.com/zuohuadong/supacloud/commit/1c3cf099e20b07f96684409451bdcadbfebacfc9))
+
 ## [0.12.0](https://github.com/zuohuadong/supacloud/compare/web-console-v0.11.9...web-console-v0.12.0) (2026-05-20)
 
 
