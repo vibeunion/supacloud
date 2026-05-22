@@ -1,4 +1,5 @@
 import { sql, type ProjectTask, type ProjectTaskAttempt, type TaskStatus, type TaskType, TaskStatus as TaskStatuses } from "../db";
+import { DEFAULT_BACKGROUND_TASK_SETTINGS } from "../config/background-task-settings";
 import { withRetry } from "../utils/retry";
 
 export interface CreateTaskInput {
@@ -299,6 +300,8 @@ export async function claimNextTask(options: TaskLeaseOptions): Promise<LeasedTa
       params.push(...allowedTaskTypes);
     }
 
+    params.push(DEFAULT_BACKGROUND_TASK_SETTINGS.concurrency);
+    const defaultConcurrencyIdx = params.length;
     params.push(TaskStatuses.LEASED);
     const leasedStatusIdx = params.length;
     params.push(leaseSeconds);
@@ -324,7 +327,7 @@ export async function claimNextTask(options: TaskLeaseOptions): Promise<LeasedTa
             1,
             COALESCE(
               NULLIF((p.config->'background_tasks'->>'concurrency'), '')::int,
-              2
+              $${defaultConcurrencyIdx}
             )
           )
           ${taskTypeFilter}

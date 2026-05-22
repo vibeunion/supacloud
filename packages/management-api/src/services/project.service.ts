@@ -21,6 +21,10 @@ import {
   resolveTenantPorts,
 } from "../utils/project-routing";
 import { mergeProjectConfig, normalizeProjectConfig } from "../utils/project-config";
+import {
+  BACKGROUND_TASK_SETTING_LIMITS,
+  DEFAULT_BACKGROUND_TASK_SETTINGS,
+} from "../config/background-task-settings";
 
 export interface CreateProjectRequest {
   name: string;
@@ -137,13 +141,7 @@ export interface LogEntryResponse {
 }
 
 export class ProjectService {
-  private readonly defaultBackgroundTaskSettings: BackgroundTaskSettings = {
-    concurrency: 2,
-    max_attempts: 3,
-    max_payload_bytes: 256 * 1024,
-    timeout_sec_default: 300,
-    timeout_sec_max: 900,
-  };
+  private readonly defaultBackgroundTaskSettings: BackgroundTaskSettings = { ...DEFAULT_BACKGROUND_TASK_SETTINGS };
 
   private readonly defaultQueueSettings: QueueSettings = {
     max_in_flight: 10,
@@ -616,11 +614,11 @@ export class ProjectService {
     };
 
     return {
-      concurrency: pickNumber(raw.concurrency, this.defaultBackgroundTaskSettings.concurrency, 1, 20),
-      max_attempts: pickNumber(raw.max_attempts, this.defaultBackgroundTaskSettings.max_attempts, 1, 10),
-      max_payload_bytes: pickNumber(raw.max_payload_bytes, this.defaultBackgroundTaskSettings.max_payload_bytes, 1024, 1024 * 1024),
-      timeout_sec_default: pickNumber(raw.timeout_sec_default, this.defaultBackgroundTaskSettings.timeout_sec_default, 1, 900),
-      timeout_sec_max: pickNumber(raw.timeout_sec_max, this.defaultBackgroundTaskSettings.timeout_sec_max, 1, 1800),
+      concurrency: pickNumber(raw.concurrency, this.defaultBackgroundTaskSettings.concurrency, BACKGROUND_TASK_SETTING_LIMITS.concurrency.min, BACKGROUND_TASK_SETTING_LIMITS.concurrency.max),
+      max_attempts: pickNumber(raw.max_attempts, this.defaultBackgroundTaskSettings.max_attempts, BACKGROUND_TASK_SETTING_LIMITS.max_attempts.min, BACKGROUND_TASK_SETTING_LIMITS.max_attempts.max),
+      max_payload_bytes: pickNumber(raw.max_payload_bytes, this.defaultBackgroundTaskSettings.max_payload_bytes, BACKGROUND_TASK_SETTING_LIMITS.max_payload_bytes.min, BACKGROUND_TASK_SETTING_LIMITS.max_payload_bytes.max),
+      timeout_sec_default: pickNumber(raw.timeout_sec_default, this.defaultBackgroundTaskSettings.timeout_sec_default, BACKGROUND_TASK_SETTING_LIMITS.timeout_sec_default.min, BACKGROUND_TASK_SETTING_LIMITS.timeout_sec_default.max),
+      timeout_sec_max: pickNumber(raw.timeout_sec_max, this.defaultBackgroundTaskSettings.timeout_sec_max, BACKGROUND_TASK_SETTING_LIMITS.timeout_sec_max.min, BACKGROUND_TASK_SETTING_LIMITS.timeout_sec_max.max),
     };
   }
 

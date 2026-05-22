@@ -96,13 +96,7 @@
   let autoScrollLogs = $state(true);
   let activeLogContainer = $state<HTMLDivElement | null>(null);
 
-  let draftSettings = $state<BackgroundSettings>({
-    concurrency: 2,
-    max_attempts: 3,
-    max_payload_bytes: 262144,
-    timeout_sec_default: 300,
-    timeout_sec_max: 900,
-  });
+  let draftSettings = $state<BackgroundSettings | null>(null);
 
   function buildTaskPath(extra: string = "") {
     const query = new URLSearchParams();
@@ -328,6 +322,8 @@
   }
 
   async function saveSettings() {
+    if (!draftSettings) return;
+
     try {
       isSavingSettings = true;
       const res = await apiClient(`/v1/projects/${projectRef}/tasks/settings/background`, {
@@ -568,28 +564,30 @@
 
       {#if activeTab === "settings"}
         <div class="p-6 space-y-5 overflow-auto">
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <label class="space-y-2">
-              <span class="text-sm font-medium text-foreground">项目后台并发</span>
-              <input type="number" min="1" max="20" bind:value={draftSettings.concurrency} class="w-full px-3 py-2 text-sm rounded-lg border bg-background" />
-            </label>
-            <label class="space-y-2">
-              <span class="text-sm font-medium text-foreground">最大重试次数</span>
-              <input type="number" min="1" max="10" bind:value={draftSettings.max_attempts} class="w-full px-3 py-2 text-sm rounded-lg border bg-background" />
-            </label>
-            <label class="space-y-2">
-              <span class="text-sm font-medium text-foreground">默认超时（秒）</span>
-              <input type="number" min="1" max="900" bind:value={draftSettings.timeout_sec_default} class="w-full px-3 py-2 text-sm rounded-lg border bg-background" />
-            </label>
-            <label class="space-y-2">
-              <span class="text-sm font-medium text-foreground">最大超时（秒）</span>
-              <input type="number" min="1" max="1800" bind:value={draftSettings.timeout_sec_max} class="w-full px-3 py-2 text-sm rounded-lg border bg-background" />
-            </label>
-            <label class="space-y-2 md:col-span-2">
-              <span class="text-sm font-medium text-foreground">最大 Payload（字节）</span>
-              <input type="number" min="1024" max="1048576" bind:value={draftSettings.max_payload_bytes} class="w-full px-3 py-2 text-sm rounded-lg border bg-background" />
-            </label>
-          </div>
+          {#if draftSettings}
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <label class="space-y-2">
+                <span class="text-sm font-medium text-foreground">项目后台并发</span>
+                <input type="number" min="1" max="20" bind:value={draftSettings.concurrency} class="w-full px-3 py-2 text-sm rounded-lg border bg-background" />
+              </label>
+              <label class="space-y-2">
+                <span class="text-sm font-medium text-foreground">最大重试次数</span>
+                <input type="number" min="1" max="10" bind:value={draftSettings.max_attempts} class="w-full px-3 py-2 text-sm rounded-lg border bg-background" />
+              </label>
+              <label class="space-y-2">
+                <span class="text-sm font-medium text-foreground">默认超时（秒）</span>
+                <input type="number" min="1" max="900" bind:value={draftSettings.timeout_sec_default} class="w-full px-3 py-2 text-sm rounded-lg border bg-background" />
+              </label>
+              <label class="space-y-2">
+                <span class="text-sm font-medium text-foreground">最大超时（秒）</span>
+                <input type="number" min="1" max="1800" bind:value={draftSettings.timeout_sec_max} class="w-full px-3 py-2 text-sm rounded-lg border bg-background" />
+              </label>
+              <label class="space-y-2 md:col-span-2">
+                <span class="text-sm font-medium text-foreground">最大 Payload（字节）</span>
+                <input type="number" min="1024" max="1048576" bind:value={draftSettings.max_payload_bytes} class="w-full px-3 py-2 text-sm rounded-lg border bg-background" />
+              </label>
+            </div>
+          {/if}
 
           <div class="rounded-xl border border-amber-500/20 bg-amber-500/5 px-4 py-3 text-sm text-amber-900/80">
             项目级后台任务设置会直接影响异步 `functions.invoke()` 的入队限制和调度并发。建议先小步调高并发，再观察 DLQ 和 attempt 耗时。
@@ -597,7 +595,7 @@
 
           <button
             onclick={saveSettings}
-            disabled={isSavingSettings}
+            disabled={isSavingSettings || !draftSettings}
             class="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-brand text-white text-sm font-medium hover:bg-brand/90 disabled:opacity-50"
           >
             <Save size={16} />

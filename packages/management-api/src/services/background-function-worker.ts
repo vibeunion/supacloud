@@ -5,6 +5,7 @@ import { projectRepository } from "../repositories/project.repository";
 import { broadcastTaskUpdate } from "../routes/ws";
 import { logger } from "../utils/logger";
 import { config } from "../config";
+import { DEFAULT_BACKGROUND_TASK_SETTINGS } from "../config/background-task-settings";
 import { projectService } from "./project.service";
 import { decryptSecretIfNeeded } from "../utils/secret-crypto";
 import { createHmac } from "node:crypto";
@@ -26,7 +27,9 @@ interface InvocationEnvelope {
   };
 }
 
-const DEFAULT_CONCURRENCY_PER_PROJECT = Number(process.env.BACKGROUND_TASKS_PER_PROJECT || "2");
+const DEFAULT_CONCURRENCY_PER_PROJECT = Number(
+  process.env.BACKGROUND_TASKS_PER_PROJECT || String(DEFAULT_BACKGROUND_TASK_SETTINGS.concurrency),
+);
 const WORKER_ID = `bgw-${process.pid}`;
 
 function computeRetryDelayMs(attempt: number): number {

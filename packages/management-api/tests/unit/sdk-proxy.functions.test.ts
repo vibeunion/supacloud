@@ -6,6 +6,7 @@ import { projectService } from "../../src/services/project.service";
 import { edgeFunctionService } from "../../src/services/edge-function.service";
 import { backgroundTaskService } from "../../src/services/background-task.service";
 import { config } from "../../src/config";
+import { DEFAULT_BACKGROUND_TASK_SETTINGS } from "../../src/config/background-task-settings";
 
 type FetchCall = {
   url: string;
@@ -149,11 +150,7 @@ describe("sdkProxyRoutes functions proxy", () => {
   test("POST /functions/v1 auto-enqueues configured background routes without custom headers", async () => {
     await withSdkProxyTestContext(async ({ calls, trackSpy }) => {
       const getSettingsSpy = trackSpy(spyOn(projectService, "getBackgroundTaskSettings").mockResolvedValue({
-        concurrency: 2,
-        max_attempts: 3,
-        max_payload_bytes: 262144,
-        timeout_sec_default: 300,
-        timeout_sec_max: 900,
+        ...DEFAULT_BACKGROUND_TASK_SETTINGS,
       }));
       const getApiKeysSpy = trackSpy(spyOn(projectService, "getApiKeys").mockResolvedValue({
         anon_key: "anon",
@@ -199,11 +196,7 @@ describe("sdkProxyRoutes functions proxy", () => {
   test("POST /functions/v1 uses SupaCloud idempotency header for background route enqueue", async () => {
     await withSdkProxyTestContext(async ({ calls, trackSpy }) => {
       trackSpy(spyOn(projectService, "getBackgroundTaskSettings").mockResolvedValue({
-        concurrency: 2,
-        max_attempts: 3,
-        max_payload_bytes: 262144,
-        timeout_sec_default: 300,
-        timeout_sec_max: 900,
+        ...DEFAULT_BACKGROUND_TASK_SETTINGS,
       }));
       trackSpy(spyOn(projectService, "getApiKeys").mockResolvedValue({
         anon_key: "anon",

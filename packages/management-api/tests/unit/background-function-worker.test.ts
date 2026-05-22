@@ -1,6 +1,7 @@
 import { afterAll, afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import type { ProjectTask } from "../../src/db";
 import { TaskStatus, TaskType } from "../../src/db";
+import { DEFAULT_BACKGROUND_TASK_SETTINGS } from "../../src/config/background-task-settings";
 
 // ─── Mock all heavy dependencies ────────────────────────────────────────────
 
@@ -24,11 +25,7 @@ const findByRef = mock(() =>
 
 const getBackgroundTaskSettings = mock(() =>
   Promise.resolve({
-    concurrency: 2,
-    max_attempts: 3,
-    max_payload_bytes: 262144,
-    timeout_sec_default: 300,
-    timeout_sec_max: 900,
+    ...DEFAULT_BACKGROUND_TASK_SETTINGS,
   })
 );
 
@@ -153,8 +150,7 @@ describe("BackgroundFunctionWorker", () => {
     findByRef.mockResolvedValue({ ref: "proj_1", status: "active" } as any);
     countActiveTasksForProject.mockResolvedValue(0);
     getBackgroundTaskSettings.mockResolvedValue({
-      concurrency: 2,
-      max_attempts: 3,
+      ...DEFAULT_BACKGROUND_TASK_SETTINGS,
     });
     dispatchBackgroundFunction.mockResolvedValue({ status: 200, headers: {}, bodyText: "", logs: [] });
     startTaskAttempt.mockResolvedValue({ id: "att_1" } as any);

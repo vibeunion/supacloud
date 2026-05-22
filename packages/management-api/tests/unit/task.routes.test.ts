@@ -1,6 +1,7 @@
 import { afterAll, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { Elysia } from "elysia";
 import { TaskStatus } from "../../src/db";
+import { DEFAULT_BACKGROUND_TASK_SETTINGS } from "../../src/config/background-task-settings";
 
 const listTasksByProjectFiltered = mock(() => Promise.resolve([]));
 const getTaskById = mock(() => Promise.resolve(null));
@@ -43,11 +44,7 @@ const backgroundFunctionWorker = {
 
 const projectService = {
   getBackgroundTaskSettings: mock(() => Promise.resolve({
-    concurrency: 2,
-    max_attempts: 3,
-    max_payload_bytes: 262144,
-    timeout_sec_default: 300,
-    timeout_sec_max: 900,
+    ...DEFAULT_BACKGROUND_TASK_SETTINGS,
   })),
   updateBackgroundTaskSettings: mock(() => Promise.resolve({
     concurrency: 4,
@@ -396,11 +393,7 @@ describe("taskRoutes", () => {
 
   test("static task routes win over dynamic :taskId route", async () => {
     projectService.getBackgroundTaskSettings.mockResolvedValueOnce({
-      concurrency: 2,
-      max_attempts: 3,
-      max_payload_bytes: 262144,
-      timeout_sec_default: 300,
-      timeout_sec_max: 900,
+      ...DEFAULT_BACKGROUND_TASK_SETTINGS,
     });
 
     const response = await request("/v1/projects/proj_1/tasks/settings/background");
