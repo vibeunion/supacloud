@@ -9,8 +9,7 @@ import {
 } from "./tenant-env";
 import { normalizeJwtJwks, verifyEdgeRuntimeJwt } from "./jwt-verifier";
 import {
-  buildBackgroundForwardedRequest,
-  createBackgroundInvocationToken,
+  buildBackgroundForwardDispatch,
 } from "./background-forward";
 import path from "path";
 import fs from "fs/promises";
@@ -153,6 +152,7 @@ async function dispatchFunction(
   opts?: {
     background?: boolean;
     backgroundInternalToken?: string;
+    tenantEnv?: Record<string, string>;
     cancelKey?: string;
     onLog?: (entry: {
       timestamp: string;
@@ -169,7 +169,7 @@ async function dispatchFunction(
     const versionSuffix = requestedVersion ? `_v${requestedVersion}` : "";
     const functionId = `${projectRef}_${functionName}${versionSuffix}`;
     const targetPool = opts?.background ? backgroundPool : pool;
-    const tenantEnv = await loadTenantEnv(projectRef);
+    const tenantEnv = opts?.tenantEnv || await loadTenantEnv(projectRef);
     const backgroundInternalToken = opts?.backgroundInternalToken || INTERNAL_TOKEN;
     const runtimeLogContext = {
       functionVersion: activeVersion,
@@ -526,16 +526,19 @@ const app = new Elysia()
       message: string;
     }> = [];
 
-    const backgroundInternalToken = createBackgroundInvocationToken();
-    const forwardedRequest = buildBackgroundForwardedRequest(c.request, backgroundInternalToken);
+    const backgroundDispatch = buildBackgroundForwardDispatch(
+      c.request,
+      await loadTenantEnv(c.params.ref),
+    );
     const response = await dispatchFunction(
       c.params.ref,
       c.params.functionName,
-      forwardedRequest,
+      backgroundDispatch.forwardedRequest,
       setHeaders,
       {
         background: true,
-        backgroundInternalToken,
+        backgroundInternalToken: backgroundDispatch.backgroundInternalToken,
+        tenantEnv: backgroundDispatch.tenantEnv,
         cancelKey: c.request.headers.get("x-supacloud-task-id") || undefined,
         onLog: (entry) => {
           logs.push(entry);
@@ -574,16 +577,19 @@ const app = new Elysia()
       message: string;
     }> = [];
 
-    const backgroundInternalToken = createBackgroundInvocationToken();
-    const forwardedRequest = buildBackgroundForwardedRequest(c.request, backgroundInternalToken);
+    const backgroundDispatch = buildBackgroundForwardDispatch(
+      c.request,
+      await loadTenantEnv(c.params.ref),
+    );
     const response = await dispatchFunction(
       c.params.ref,
       c.params.functionName,
-      forwardedRequest,
+      backgroundDispatch.forwardedRequest,
       setHeaders,
       {
         background: true,
-        backgroundInternalToken,
+        backgroundInternalToken: backgroundDispatch.backgroundInternalToken,
+        tenantEnv: backgroundDispatch.tenantEnv,
         cancelKey: c.request.headers.get("x-supacloud-task-id") || undefined,
         onLog: (entry) => {
           logs.push(entry);

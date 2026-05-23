@@ -1,3 +1,11 @@
+import { withBackgroundInternalToken } from "./tenant-env";
+
+export interface BackgroundForwardDispatch {
+  forwardedRequest: Request;
+  backgroundInternalToken: string;
+  tenantEnv: Record<string, string>;
+}
+
 export function createBackgroundInvocationToken(): string {
   return crypto.randomUUID();
 }
@@ -37,4 +45,16 @@ export function buildBackgroundForwardedRequest(
     body: ["GET", "HEAD"].includes(request.method) ? undefined : request.body,
     duplex: ["GET", "HEAD"].includes(request.method) ? undefined : "half",
   } as RequestInit & { duplex?: "half" });
+}
+
+export function buildBackgroundForwardDispatch(
+  request: Request,
+  tenantEnv: Record<string, string>,
+  backgroundInternalToken = createBackgroundInvocationToken(),
+): BackgroundForwardDispatch {
+  return {
+    forwardedRequest: buildBackgroundForwardedRequest(request, backgroundInternalToken),
+    backgroundInternalToken,
+    tenantEnv: withBackgroundInternalToken(tenantEnv, backgroundInternalToken),
+  };
 }
