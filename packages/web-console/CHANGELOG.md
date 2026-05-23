@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.2](https://github.com/zuohuadong/supacloud/compare/web-console-v0.12.1...web-console-v0.12.2) (2026-05-23)
+
+
+### Miscellaneous Chores
+
+* **deps-dev:** bump vite in /packages/web-console ([#166](https://github.com/zuohuadong/supacloud/issues/166)) ([a2e1e02](https://github.com/zuohuadong/supacloud/commit/a2e1e02984fd208aeef43f6ee988ec50c1f60ffe))
+
 ## [0.12.1](https://github.com/zuohuadong/supacloud/compare/web-console-v0.12.0...web-console-v0.12.1) (2026-05-22)
 
 
