@@ -491,7 +491,7 @@ WorkingDirectory=${buildDir}
 Environment="PORT=${port}"
 Environment="NODE_ENV=production"
 EnvironmentFile=${envFile}
-ExecStart=${isSSR ? `${bunPath} run ${buildDir}/index.js` : `${bunPath} run /opt/supacloud/packages/management-api/src/utils/bun-static-serve.ts ${buildDir} ${port} --workers=auto`}
+ExecStart=${isSSR ? `${bunPath} run ${buildDir}/index.js` : `${config.supacloudBinaryPath} static-serve ${buildDir} ${port} --workers=auto`}
 Restart=always
 RestartSec=5
 LimitNOFILE=65536

@@ -897,6 +897,9 @@ async function bootstrap() {
         process.exit(0);
     }
     process.exit(0);
+  } else if (args[0] === "static-serve") {
+    const { runStaticServeCli } = await import("./utils/bun-static-serve");
+    runStaticServeCli(args.slice(1));
   } else if (args.includes("--version") || args.includes("-v")) {
     const pkg = await import("../package.json");
     logger.info(`SupaCloud Version: ${pkg.version}`);

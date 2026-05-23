@@ -121,6 +121,7 @@ export interface Config {
   edgeRuntimeBackgroundInternal: string;
   edgeRuntimeMasterKey: string;
   bunPath: string;
+  supacloudBinaryPath: string;
   sdkProxyTimeoutMs: number;
   restProxyTimeoutMs: number;
   secretsEncryptionKey: string;
@@ -245,6 +246,7 @@ export const config: Config = {
     ),
   ),
   bunPath: getEnv("BUN_PATH", "bun"),
+  supacloudBinaryPath: getEnv("SUPACLOUD_BINARY_PATH", "/opt/supacloud/supacloud"),
   sdkProxyTimeoutMs: Number(getEnv("SDK_PROXY_TIMEOUT_MS", "30000")),
   restProxyTimeoutMs: Number(getEnv("REST_PROXY_TIMEOUT_MS", "300000")),
   secretsEncryptionKey: getEnv("SECRETS_ENCRYPTION_KEY", getEnv("MASTER_TOKEN", "")),

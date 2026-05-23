@@ -12,9 +12,10 @@
  * This matches (and can exceed) Caddy/Nginx throughput on multi-core servers.
  *
  * Usage:
- *   bun run bun-static-serve.ts /path/to/build 3000
- *   bun run bun-static-serve.ts /path/to/build 3000 --workers=4
- *   bun run bun-static-serve.ts /path/to/build 3000 --workers=auto
+ *   supacloud static-serve /path/to/build 3000
+ *   supacloud static-serve /path/to/build 3000 --workers=4
+ *   supacloud static-serve /path/to/build 3000 --workers=auto
+ *   (backward compat: bun run bun-static-serve.ts /path/to/build 3000 --workers=auto)
  *
  * Behavior mirrors Nginx `try_files $uri $uri.html $uri/index.html /index.html`:
  *   1. Exact file or route file match → serve with proper MIME + cache headers
@@ -242,6 +243,26 @@ export function startStaticServer(root: string, port: number, reusePort = false)
 
 // ─── Cluster Manager: spawns N workers sharing the same port ─────────────────
 
+function getSpawnCmd(): string[] {
+  // When running as a compiled binary, process.execPath is the binary itself.
+  // When running via bun, fall back to "bun run <source>".
+  const isBun = process.argv[0].includes("bun");
+  if (isBun) {
+    return ["bun", "run", import.meta.path];
+  }
+  return [process.execPath];
+}
+
+function spawnWorker(root: string, port: number, workerId: number): ReturnType<typeof spawn> {
+  const cmd = [...getSpawnCmd(), root, String(port), "--worker"];
+  return spawn({
+    cmd,
+    stdout: "inherit",
+    stderr: "inherit",
+    env: { ...process.env, BUN_STATIC_WORKER_ID: String(workerId) },
+  });
+}
+
 function startCluster(root: string, port: number, workerCount: number) {
   console.log(`[bun-static-serve] Cluster mode: spawning ${workerCount} workers on port ${port}`);
   console.log(`[bun-static-serve] Serving ${root}`);
@@ -250,14 +271,7 @@ function startCluster(root: string, port: number, workerCount: number) {
   let isShuttingDown = false;
 
   for (let i = 0; i < workerCount; i++) {
-    workers.push(
-      spawn({
-        cmd: ["bun", "run", import.meta.path, root, String(port), "--worker"],
-        stdout: "inherit",
-        stderr: "inherit",
-        env: { ...process.env, BUN_STATIC_WORKER_ID: String(i) },
-      })
-    );
+    workers.push(spawnWorker(root, port, i));
   }
 
   // Graceful shutdown: forward signals to all workers
@@ -282,12 +296,7 @@ function startCluster(root: string, port: number, workerCount: number) {
         // Check if worker exited
         if (w.exitCode !== null) {
           console.warn(`[bun-static-serve] Worker ${i} exited (code=${w.exitCode}), respawning...`);
-          workers[i] = spawn({
-            cmd: ["bun", "run", import.meta.path, root, String(port), "--worker"],
-            stdout: "inherit",
-            stderr: "inherit",
-            env: { ...process.env, BUN_STATIC_WORKER_ID: String(i) },
-          });
+          workers[i] = spawnWorker(root, port, i);
         }
       }
       await Bun.sleep(2000); // check every 2s
@@ -295,10 +304,9 @@ function startCluster(root: string, port: number, workerCount: number) {
   })();
 }
 
-// ─── CLI entrypoint ──────────────────────────────────────────────────────────
+// ─── CLI entrypoint (shared by direct run and `supacloud static-serve`) ─────
 
-if (import.meta.main) {
-  const args = process.argv.slice(2);
+export function runStaticServeCli(args: string[]) {
   const root = args[0] || ".";
   const port = parseInt(args[1] || "3000", 10);
   const isWorker = args.includes("--worker");
@@ -331,4 +339,8 @@ if (import.meta.main) {
     startStaticServer(root, port, false);
     console.log(`[bun-static-serve] Serving ${root} on port ${port}`);
   }
+}
+
+if (import.meta.main) {
+  runStaticServeCli(process.argv.slice(2));
 }
