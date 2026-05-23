@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.20.1](https://github.com/zuohuadong/supacloud/compare/management-api-v0.20.0...management-api-v0.20.1) (2026-05-23)
+
+
+### Bug Fixes
+
+* resolve storage project refs from routing config ([#170](https://github.com/zuohuadong/supacloud/issues/170)) ([b15ff95](https://github.com/zuohuadong/supacloud/commit/b15ff9580825665fba3e68a13827d9fffcdfceaa))
+
 ## [0.20.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.19.5...management-api-v0.20.0) (2026-05-23)
 
 
