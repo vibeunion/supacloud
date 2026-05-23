@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.20.2](https://github.com/zuohuadong/supacloud/compare/management-api-v0.20.1...management-api-v0.20.2) (2026-05-23)
+
+
+### Bug Fixes
+
+* harden static serve edge cases ([121a2f5](https://github.com/zuohuadong/supacloud/commit/121a2f5558d721e0653d7acf9317d8befeea5fc7))
+
 ## [0.20.1](https://github.com/zuohuadong/supacloud/compare/management-api-v0.20.0...management-api-v0.20.1) (2026-05-23)
 
 
