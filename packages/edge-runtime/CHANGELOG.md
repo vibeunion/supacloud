@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.1](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.6.0...edge-runtime-v0.6.1) (2026-05-23)
+
+
+### Bug Fixes
+
+* pass background auth token to edge functions ([eee1e9a](https://github.com/zuohuadong/supacloud/commit/eee1e9a9d42e7ef91c51e7a88db40c2480eaf9cb))
+
 ## [0.6.0](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.5.2...edge-runtime-v0.6.0) (2026-05-20)
 
 
