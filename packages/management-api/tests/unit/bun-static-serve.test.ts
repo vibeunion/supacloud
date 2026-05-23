@@ -57,4 +57,38 @@ describe("bun-static-serve", () => {
     expect(response.status).toBe(200);
     expect(await response.text()).toBe("index");
   });
+
+  test("rejects malformed percent-encoded paths", async () => {
+    const root = await createRoot();
+    await writeFile(join(root, "index.html"), "index");
+
+    const handler = createFetchHandler(root);
+    const response = await handler(new Request("http://localhost/%E0%A4%A"));
+
+    expect(response.status).toBe(400);
+  });
+
+  test("returns headers without a body for static file HEAD requests", async () => {
+    const root = await createRoot();
+    await writeFile(join(root, "asset.txt"), "asset");
+
+    const handler = createFetchHandler(root);
+    const response = await handler(new Request("http://localhost/asset.txt", { method: "HEAD" }));
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-length")).toBe("5");
+    expect(await response.text()).toBe("");
+  });
+
+  test("returns headers without a body for SPA fallback HEAD requests", async () => {
+    const root = await createRoot();
+    await writeFile(join(root, "index.html"), "index");
+
+    const handler = createFetchHandler(root);
+    const response = await handler(new Request("http://localhost/settings", { method: "HEAD" }));
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-length")).toBe("5");
+    expect(await response.text()).toBe("");
+  });
 });

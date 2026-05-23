@@ -111,7 +111,13 @@ function resolveStaticFile(root: string, requestPath: string, acceptEncoding: st
 export function createFetchHandler(root: string) {
   return async function fetch(req: Request): Promise<Response> {
     const url = new URL(req.url);
-    let path = decodeURIComponent(url.pathname);
+    let path: string;
+    try {
+      path = decodeURIComponent(url.pathname);
+    } catch {
+      // Malformed percent-encoding → 400 Bad Request
+      return new Response("Bad Request", { status: 400 });
+    }
 
     // Security: prevent path traversal
     if (path.includes("..")) {
@@ -194,6 +200,12 @@ export function createFetchHandler(root: string) {
         headers["Vary"] = "Accept-Encoding";
       }
 
+      // HEAD: same headers, no body
+      if (req.method === "HEAD") {
+        headers["Content-Length"] = (isRange ? end - start + 1 : file.size).toString();
+        return new Response(null, { status: isRange ? 206 : 200, headers });
+      }
+
       const body = isRange ? file.slice(start, end + 1) : file;
       return new Response(body, { 
         status: isRange ? 206 : 200, 
@@ -210,6 +222,17 @@ export function createFetchHandler(root: string) {
     const indexPath = `${root}/index.html`;
     if (fileExists(indexPath)) {
       const file = Bun.file(indexPath);
+      // HEAD for SPA fallback
+      if (req.method === "HEAD") {
+        return new Response(null, {
+          status: 200,
+          headers: {
+            "Content-Type": "text/html; charset=utf-8",
+            "Cache-Control": "no-cache",
+            "Content-Length": String(file.size),
+          },
+        });
+      }
       return new Response(file, {
         headers: {
           "Content-Type": "text/html; charset=utf-8",
@@ -250,7 +273,8 @@ function getSpawnCmd(): string[] {
   if (isBun) {
     return ["bun", "run", import.meta.path];
   }
-  return [process.execPath];
+  // Binary mode: must include "static-serve" subcommand so workers route correctly
+  return [process.execPath, "static-serve"];
 }
 
 function spawnWorker(root: string, port: number, workerId: number): ReturnType<typeof spawn> {
