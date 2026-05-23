@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.19.5](https://github.com/zuohuadong/supacloud/compare/management-api-v0.19.4...management-api-v0.19.5) (2026-05-22)
+
+
+### Bug Fixes
+
+* **config:** raise background task concurrency default to 20 ([1c3cf09](https://github.com/zuohuadong/supacloud/commit/1c3cf099e20b07f96684409451bdcadbfebacfc9))
+
 ## [0.19.4](https://github.com/zuohuadong/supacloud/compare/management-api-v0.19.3...management-api-v0.19.4) (2026-05-22)
 
 
