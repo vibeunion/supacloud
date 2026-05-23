@@ -32,6 +32,7 @@ import { StorageService } from "../services/storage.service";
 import { StorageRLS, mockObjects, normalizeStorageObjectSize } from "../services/storage-rls";
 import { logger } from "../utils/logger";
 import { config } from "../config";
+import { matchProjectRefFromHost } from "../utils/project-routing";
 
 const STORAGE_UPLOAD_MAX_BYTES = Number(process.env.STORAGE_UPLOAD_MAX_BYTES || config.maxRequestBodySize || 100 * 1024 * 1024);
 const TUS_MAX_SIZE = Number(process.env.TUS_MAX_SIZE || 100 * 1024 * 1024);
@@ -233,19 +234,20 @@ async function resolveProjectRefFromHeaderAndHost(ref: string, host: string): Pr
     try {
         const { sql } = await import('../db');
         const rows = await sql`
-            SELECT ref
+            SELECT ref, config
             FROM projects
             WHERE ref = ${ref}
               AND deleted_at IS NULL
               AND status = 'active'
-              AND (
-                config->>'api_domain' = ${host}
-                OR config->>'custom_domain' = ${host}
-                OR config->>'studio_domain' = ${host}
-              )
             LIMIT 1
         `;
-        if (rows.length > 0 && String(rows[0].ref) === ref) return ref;
+        if (
+            rows.length > 0 &&
+            String(rows[0].ref) === ref &&
+            matchProjectRefFromHost(host, ref, rows[0].config)
+        ) {
+            return ref;
+        }
     } catch (error: unknown) {
         logger.warn("[StorageCompat] Failed to validate project header host binding", {
             ref,
@@ -285,18 +287,15 @@ async function getProjectRef(headers: Record<string, string | undefined>): Promi
         try {
             const { sql } = await import('../db');
             const rows = await sql`
-                SELECT ref
+                SELECT ref, config
                 FROM projects
                 WHERE deleted_at IS NULL
                   AND status = 'active'
-                  AND (
-                    config->>'api_domain' = ${host}
-                    OR config->>'custom_domain' = ${host}
-                    OR config->>'studio_domain' = ${host}
-                  )
-                LIMIT 1
             `;
-            if (rows.length > 0 && String(rows[0].ref) !== apiKeyRef) return '';
+            const matchedProject = rows.find((row: { ref?: unknown; config?: unknown }) =>
+                matchProjectRefFromHost(host, String(row.ref || ""), row.config),
+            );
+            if (matchedProject && String(matchedProject.ref) !== apiKeyRef) return '';
         } catch (error: unknown) {
             logger.warn("[StorageCompat] Failed to validate API key host binding", {
                 apiKeyRef,

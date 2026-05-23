@@ -32,7 +32,7 @@ export function resolveProjectBaseHost(projectRef: string): string {
 }
 
 export function normalizeProjectRoutingConfig(
-  projectConfig: ProjectRoutingConfig | string | null | undefined,
+  projectConfig: unknown,
 ): ProjectRoutingConfig | undefined {
   if (!projectConfig) return undefined;
   if (typeof projectConfig === "string") {
@@ -49,7 +49,10 @@ export function normalizeProjectRoutingConfig(
     }
     return { custom_domain: projectConfig };
   }
-  return projectConfig;
+  if (typeof projectConfig === "object" && !Array.isArray(projectConfig)) {
+    return projectConfig as ProjectRoutingConfig;
+  }
+  return undefined;
 }
 
 export function resolveProjectApiHost(
@@ -111,7 +114,7 @@ export function resolveTenantPorts(
 export function matchProjectRefFromHost(
   host: string,
   projectRef: string,
-  projectConfig: ProjectRoutingConfig | string | null | undefined,
+  projectConfig: unknown,
 ): boolean {
   const normalizedConfig = normalizeProjectRoutingConfig(projectConfig);
   const normalizedHost = host.split(":")[0].trim().toLowerCase();
