@@ -2,7 +2,11 @@ import "./url-import-plugin";
 import { Elysia } from "elysia";
 import cors from "@elysiajs/cors";
 import { WorkerPool } from "./worker-pool";
-import { invalidateTenantEnvCache, loadTenantEnv } from "./tenant-env";
+import {
+  invalidateTenantEnvCache,
+  loadTenantEnv,
+  withBackgroundInternalToken,
+} from "./tenant-env";
 import { normalizeJwtJwks, verifyEdgeRuntimeJwt } from "./jwt-verifier";
 import path from "path";
 import fs from "fs/promises";
@@ -160,6 +164,7 @@ async function dispatchFunction(
     const versionSuffix = requestedVersion ? `_v${requestedVersion}` : "";
     const functionId = `${projectRef}_${functionName}${versionSuffix}`;
     const targetPool = opts?.background ? backgroundPool : pool;
+    const tenantEnv = await loadTenantEnv(projectRef);
     const runtimeLogContext = {
       functionVersion: activeVersion,
       executionId: setHeaders["x-sb-execution-id"] || null,
@@ -169,7 +174,9 @@ async function dispatchFunction(
       functionId,
       functionPath,
       projectRoot,
-      env: await loadTenantEnv(projectRef),
+      env: opts?.background
+        ? withBackgroundInternalToken(tenantEnv, INTERNAL_TOKEN)
+        : tenantEnv,
       request,
       cancelKey: opts?.cancelKey,
       onLog: (entry) => {

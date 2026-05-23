@@ -97,6 +97,17 @@ export function normalizeTenantEnv(ref: string, env: Record<string, string>): Re
   return normalized;
 }
 
+export function withBackgroundInternalToken(
+  env: Record<string, string>,
+  token: string,
+): Record<string, string> {
+  if (!token) return env;
+  return {
+    ...env,
+    SUPACLOUD_BACKGROUND_INTERNAL_TOKEN: token,
+  };
+}
+
 async function loadEnvFromFile(ref: string): Promise<Record<string, string>> {
   for (const dir of TENANTS_DIRS) {
     const envPath = `${dir}/${ref}.env`;

@@ -5,6 +5,7 @@ import {
   loadTenantEnv,
   normalizeTenantEnv,
   stripMaskedSecretValues,
+  withBackgroundInternalToken,
 } from "./tenant-env";
 
 describe("tenant env masking guard", () => {
@@ -35,6 +36,22 @@ describe("tenant env masking guard", () => {
       SUPACLOUD_INTERNAL_AUTH_URL: "http://127.0.0.1/auth/v1",
       SUPACLOUD_INTERNAL_REST_URL: "http://127.0.0.1/rest/v1",
     }));
+  });
+
+  test("adds background internal token only for background dispatch env", () => {
+    const base = normalizeTenantEnv("proj_1", {
+      SUPABASE_URL: "https://api.example.com",
+    });
+
+    expect(base.SUPACLOUD_BACKGROUND_INTERNAL_TOKEN).toBeUndefined();
+    expect(withBackgroundInternalToken(base, "")).toBe(base);
+    expect(withBackgroundInternalToken(base, "runtime-token")).toEqual(
+      expect.objectContaining({
+        SUPABASE_URL: "https://api.example.com",
+        SUPACLOUD_BACKGROUND_INTERNAL_TOKEN: "runtime-token",
+      }),
+    );
+    expect(base.SUPACLOUD_BACKGROUND_INTERNAL_TOKEN).toBeUndefined();
   });
 
   test("invalidates cached runtime env for a project", async () => {
