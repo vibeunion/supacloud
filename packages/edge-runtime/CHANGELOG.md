@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.2](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.6.1...edge-runtime-v0.6.2) (2026-05-23)
+
+
+### Bug Fixes
+
+* **edge-runtime:** preserve background invocation auth ([#174](https://github.com/zuohuadong/supacloud/issues/174)) ([da8f2b2](https://github.com/zuohuadong/supacloud/commit/da8f2b23c2d9b5cd6c5fae07d1117d44e193f89b))
+
 ## [0.6.1](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.6.0...edge-runtime-v0.6.1) (2026-05-23)
 
 
