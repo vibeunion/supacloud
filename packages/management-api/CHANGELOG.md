@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.20.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.19.5...management-api-v0.20.0) (2026-05-23)
+
+
+### Features
+
+* **management-api:** add static-serve subcommand for binary-versioned frontend hosting ([da162e8](https://github.com/zuohuadong/supacloud/commit/da162e8245e1ded15a566fdec8461b63e6bf294a))
+
 ## [0.19.5](https://github.com/zuohuadong/supacloud/compare/management-api-v0.19.4...management-api-v0.19.5) (2026-05-22)
 
 
