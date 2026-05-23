@@ -9,6 +9,7 @@ import {
   resolveProjectBaseHost,
   resolveProjectStudioHost,
   resolveProjectStudioUrl,
+  matchProjectRefFromHost,
 } from "../../src/utils/project-routing";
 
 const originalBaseDomain = config.baseDomain;
@@ -48,6 +49,14 @@ describe("project routing", () => {
   test("keeps non-JSON strings as legacy custom domains", () => {
     expect(normalizeProjectRoutingConfig("example.com")).toEqual({ custom_domain: "example.com" });
     expect(normalizeProjectRoutingConfig("{bad json")).toEqual({ custom_domain: "{bad json" });
+  });
+
+  test("matches hosts from serialized routing config strings", () => {
+    const configJson = '{"custom_domain":"api.aorist.net","studio_domain":"studio.aorist.net"}';
+
+    expect(matchProjectRefFromHost("api.aorist.net", "77az24zz7p", configJson)).toBe(true);
+    expect(matchProjectRefFromHost("studio.aorist.net", "77az24zz7p", configJson)).toBe(true);
+    expect(matchProjectRefFromHost("api.other.example", "77az24zz7p", configJson)).toBe(false);
   });
 
   test("uses ENABLE_SSL to resolve public API and Studio URL schemes", () => {

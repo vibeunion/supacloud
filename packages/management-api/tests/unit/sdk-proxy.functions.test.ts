@@ -305,10 +305,16 @@ describe("sdkProxyRoutes functions proxy", () => {
   test("functions proxy accepts Kong-injected project ref on trusted custom API host without apikey", async () => {
     await withSdkProxyTestContext(async ({ calls, trackSpy }) => {
       const sqlSpy = trackSpy(spyOn(dbModule, "sql"));
+      let sawProjectLookup = false;
       sqlSpy.mockImplementation(async (...args: unknown[]) => {
         const text = String(args[0] ?? "");
         if (text.includes("SELECT ref")) {
-          return [{ ref: "proj_1" }];
+          sawProjectLookup = true;
+          expect(text).not.toContain("config->>");
+          return [{
+            ref: "proj_1",
+            config: '{"custom_domain":"api.aorist.net"}',
+          }];
         }
         return [];
       });
@@ -324,6 +330,7 @@ describe("sdkProxyRoutes functions proxy", () => {
       expect(response.status).toBe(200);
       expect(calls).toHaveLength(1);
       expect(calls[0]?.url).toBe("http://127.0.0.1:9000/functions/v1/aorist-platform/me/identity");
+      expect(sawProjectLookup).toBe(true);
     });
   });
 

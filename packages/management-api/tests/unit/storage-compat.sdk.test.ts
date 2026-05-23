@@ -46,10 +46,16 @@ afterEach(() => {
 describe("storageCompatRoutes supabase-js compatibility", () => {
   test("allows public object reads from trusted custom-domain storage routes without apikey", async () => {
     const sqlSpy = spyOn(dbModule, "sql");
+    let sawProjectLookup = false;
     sqlSpy.mockImplementation(async (...args: unknown[]) => {
       const text = String(args[0] ?? "");
       if (text.includes("FROM projects")) {
-        return [{ ref: "proj_from_header" }];
+        sawProjectLookup = true;
+        expect(text).not.toContain("config->>");
+        return [{
+          ref: "proj_from_header",
+          config: '{"custom_domain":"api.example.com"}',
+        }];
       }
       return [];
     });
@@ -87,6 +93,7 @@ describe("storageCompatRoutes supabase-js compatibility", () => {
     expect(res.status).toBe(200);
     expect(await res.text()).toBe("ok\n");
     expect(downloadSpy).toHaveBeenCalledWith("proj_from_header", "avatars", "public.txt");
+    expect(sawProjectLookup).toBe(true);
     sqlSpy.mockRestore();
     bucketSpy.mockRestore();
     objectSpy.mockRestore();

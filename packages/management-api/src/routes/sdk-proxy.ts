@@ -9,7 +9,7 @@ import { DEFAULT_CORS_HEADERS, DEFAULT_CORS_EXPOSED } from '../services/gateway.
 import { backgroundTaskService } from "../services/background-task.service";
 import { edgeFunctionService } from "../services/edge-function.service";
 import { projectService } from "../services/project.service";
-import { resolveTenantPorts } from "../utils/project-routing";
+import { matchProjectRefFromHost, resolveTenantPorts } from "../utils/project-routing";
 import { resolveProjectRefFromApiKey } from "../utils/project-auth";
 import { verifyProjectJwtPayload } from "../utils/project-jwt";
 
@@ -283,18 +283,15 @@ async function getProjectRef(request: Request): Promise<string> {
             try {
                 const hostWithoutPort = host.split(':')[0];
                 const rows = await metaSql`
-                    SELECT ref
+                    SELECT ref, config
                     FROM projects
                     WHERE deleted_at IS NULL
                       AND status = 'active'
-                      AND (
-                        config->>'custom_domain' = ${hostWithoutPort}
-                        OR config->>'api_domain' = ${hostWithoutPort}
-                        OR config->>'custom_domain' = ${hostWithoutPort.replace(/^api\./, '')}
-                      )
-                    LIMIT 1
                 `;
-                if (rows.length > 0 && rows[0].ref !== apiKeyRef) return '';
+                const matchedProject = rows.find((row: { ref?: unknown; config?: unknown }) =>
+                    matchProjectRefFromHost(hostWithoutPort, String(row.ref || ""), row.config),
+                );
+                if (matchedProject && matchedProject.ref !== apiKeyRef) return '';
             } catch(error: unknown) {
                 logger.warn("[SDK Proxy] Failed to validate API key host binding", {
                     apiKeyRef,
@@ -336,20 +333,20 @@ async function resolveProjectRefFromHeaderAndHost(ref: string, request: Request)
 
         try {
             const rows = await metaSql`
-                SELECT ref
+                SELECT ref, config
                 FROM projects
                 WHERE ref = ${ref}
                   AND deleted_at IS NULL
                   AND status = 'active'
-                  AND (
-                    config->>'custom_domain' = ${host}
-                    OR config->>'api_domain' = ${host}
-                    OR config->>'studio_domain' = ${host}
-                    OR config->>'custom_domain' = ${host.replace(/^api\./, '')}
-                  )
                 LIMIT 1
             `;
-            if (rows.length > 0 && rows[0].ref === ref) return ref;
+            if (
+                rows.length > 0 &&
+                rows[0].ref === ref &&
+                matchProjectRefFromHost(host, ref, rows[0].config)
+            ) {
+                return ref;
+            }
         } catch (error: unknown) {
             logger.warn("[SDK Proxy] Failed to validate project header host binding", {
                 ref,
