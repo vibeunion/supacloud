@@ -8,6 +8,10 @@ import {
   withBackgroundInternalToken,
 } from "./tenant-env";
 import { normalizeJwtJwks, verifyEdgeRuntimeJwt } from "./jwt-verifier";
+import {
+  buildBackgroundForwardedRequest,
+  createBackgroundInvocationToken,
+} from "./background-forward";
 import path from "path";
 import fs from "fs/promises";
 
@@ -148,6 +152,7 @@ async function dispatchFunction(
   setHeaders: Record<string, string>,
   opts?: {
     background?: boolean;
+    backgroundInternalToken?: string;
     cancelKey?: string;
     onLog?: (entry: {
       timestamp: string;
@@ -165,6 +170,7 @@ async function dispatchFunction(
     const functionId = `${projectRef}_${functionName}${versionSuffix}`;
     const targetPool = opts?.background ? backgroundPool : pool;
     const tenantEnv = await loadTenantEnv(projectRef);
+    const backgroundInternalToken = opts?.backgroundInternalToken || INTERNAL_TOKEN;
     const runtimeLogContext = {
       functionVersion: activeVersion,
       executionId: setHeaders["x-sb-execution-id"] || null,
@@ -175,7 +181,7 @@ async function dispatchFunction(
       functionPath,
       projectRoot,
       env: opts?.background
-        ? withBackgroundInternalToken(tenantEnv, INTERNAL_TOKEN)
+        ? withBackgroundInternalToken(tenantEnv, backgroundInternalToken)
         : tenantEnv,
       request,
       cancelKey: opts?.cancelKey,
@@ -260,35 +266,6 @@ function verifyInternalAuth(request: Request): boolean {
 
 function requireInternalAuth(request: Request): Response | undefined {
   return verifyInternalAuth(request) ? undefined : unauthorized();
-}
-
-function buildBackgroundForwardedRequest(request: Request): Request {
-  const headers = new Headers(request.headers);
-  const originalAuthorization = headers.get("x-supacloud-auth-authorization");
-  const originalApikey = headers.get("x-supacloud-auth-apikey");
-
-  headers.delete("x-supacloud-internal-auth");
-  headers.delete("x-supacloud-auth-authorization");
-  headers.delete("x-supacloud-auth-apikey");
-
-  if (originalAuthorization) {
-    headers.set("authorization", originalAuthorization);
-  } else {
-    headers.delete("authorization");
-  }
-
-  if (originalApikey) {
-    headers.set("apikey", originalApikey);
-  } else {
-    headers.delete("apikey");
-  }
-
-  return new Request(request.url, {
-    method: request.method,
-    headers,
-    body: ["GET", "HEAD"].includes(request.method) ? undefined : request.body,
-    duplex: ["GET", "HEAD"].includes(request.method) ? undefined : "half",
-  } as RequestInit & { duplex?: "half" });
 }
 
 const configCache = new Map<
@@ -549,7 +526,8 @@ const app = new Elysia()
       message: string;
     }> = [];
 
-    const forwardedRequest = buildBackgroundForwardedRequest(c.request);
+    const backgroundInternalToken = createBackgroundInvocationToken();
+    const forwardedRequest = buildBackgroundForwardedRequest(c.request, backgroundInternalToken);
     const response = await dispatchFunction(
       c.params.ref,
       c.params.functionName,
@@ -557,6 +535,7 @@ const app = new Elysia()
       setHeaders,
       {
         background: true,
+        backgroundInternalToken,
         cancelKey: c.request.headers.get("x-supacloud-task-id") || undefined,
         onLog: (entry) => {
           logs.push(entry);
@@ -595,7 +574,8 @@ const app = new Elysia()
       message: string;
     }> = [];
 
-    const forwardedRequest = buildBackgroundForwardedRequest(c.request);
+    const backgroundInternalToken = createBackgroundInvocationToken();
+    const forwardedRequest = buildBackgroundForwardedRequest(c.request, backgroundInternalToken);
     const response = await dispatchFunction(
       c.params.ref,
       c.params.functionName,
@@ -603,6 +583,7 @@ const app = new Elysia()
       setHeaders,
       {
         background: true,
+        backgroundInternalToken,
         cancelKey: c.request.headers.get("x-supacloud-task-id") || undefined,
         onLog: (entry) => {
           logs.push(entry);
