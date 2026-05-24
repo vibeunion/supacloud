@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.3](https://github.com/zuohuadong/supacloud/compare/management-api-v0.21.2...management-api-v0.21.3) (2026-05-24)
+
+
+### Bug Fixes
+
+* **management-api:** use release binary for frontend static units ([#187](https://github.com/zuohuadong/supacloud/issues/187)) ([ce51480](https://github.com/zuohuadong/supacloud/commit/ce51480fedaf0a86ef62b0a55e4468ac1b1e165e))
+
 ## [0.21.2](https://github.com/zuohuadong/supacloud/compare/management-api-v0.21.1...management-api-v0.21.2) (2026-05-24)
 
 
