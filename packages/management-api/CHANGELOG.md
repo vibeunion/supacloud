@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.20.4...management-api-v0.21.0) (2026-05-24)
+
+
+### Features
+
+* wrap queue APIs in supacloud js ([5b29872](https://github.com/zuohuadong/supacloud/commit/5b298726e9d4950b9a97fe76ddba77705bea5039))
+
 ## [0.20.4](https://github.com/zuohuadong/supacloud/compare/management-api-v0.20.3...management-api-v0.20.4) (2026-05-24)
 
 
