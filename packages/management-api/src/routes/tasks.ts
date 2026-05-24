@@ -114,6 +114,9 @@ export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
                 maxAttempts?: number;
                 idempotencyKey?: string;
                 traceId?: string;
+                correlationId?: string;
+                businessTaskId?: string;
+                metadata?: Record<string, unknown>;
             };
             const recentMessages = await taskRepository.countQueueMessagesCreatedSince(
                 params.ref,
@@ -137,6 +140,9 @@ export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
                 nextRunAt: new Date(Date.now() + delayMs),
                 idempotencyKey: input.idempotencyKey || null,
                 traceId: input.traceId || null,
+                correlationId: input.correlationId || null,
+                businessTaskId: input.businessTaskId || null,
+                metadata: input.metadata || null,
             });
             return status(202, task);
         } catch (err: unknown) {
@@ -149,6 +155,9 @@ export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
             maxAttempts: t.Optional(t.Number()),
             idempotencyKey: t.Optional(t.String()),
             traceId: t.Optional(t.String()),
+            correlationId: t.Optional(t.String()),
+            businessTaskId: t.Optional(t.String()),
+            metadata: t.Optional(t.Record(t.String(), t.Unknown())),
         }),
         detail: { tags: ["tasks"], summary: "Enqueue a message to a queue" },
     })

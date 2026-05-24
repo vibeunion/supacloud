@@ -13,6 +13,9 @@ export interface CreateTaskInput {
   functionVersion?: string | null;
   idempotencyKey?: string | null;
   traceId?: string | null;
+  correlationId?: string | null;
+  businessTaskId?: string | null;
+  metadata?: Record<string, unknown> | null;
   nextRunAt?: Date | null;
 }
 
@@ -199,7 +202,10 @@ export async function createTask(inputOrRef: CreateTaskInput | string, type?: Ta
         next_run_at,
         timeout_sec,
         idempotency_key,
-        trace_id
+        trace_id,
+        correlation_id,
+        business_task_id,
+        metadata
       )
       VALUES (
         ${input.ref},
@@ -212,7 +218,10 @@ export async function createTask(inputOrRef: CreateTaskInput | string, type?: Ta
         ${input.nextRunAt || new Date()},
         ${input.timeoutSec ?? null},
         ${input.idempotencyKey || null},
-        ${input.traceId || null}
+        ${input.traceId || null},
+        ${input.correlationId || null},
+        ${input.businessTaskId || null},
+        ${JSON.stringify(input.metadata || {})}
       )
       ON CONFLICT (project_ref, idempotency_key)
       WHERE idempotency_key IS NOT NULL

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
-import { createSupaCloudClient, SupaCloudTaskSubmitError } from "./index";
+import { createSupaCloudClient, SupaCloudApiError, SupaCloudTaskSubmitError } from "./index";
 
 function createFakeSupabase() {
   const removeChannel = mock(async () => "ok");
@@ -162,25 +162,82 @@ describe("@supacloud/js", () => {
     });
     const queue = client.queue("emails");
 
-    await queue.send({ hello: "world" }, { delayMs: 1000, maxAttempts: 5, idempotencyKey: "email-1" });
+    await queue.send({ hello: "world" }, {
+      delayMs: 1000,
+      maxAttempts: 5,
+      idempotencyKey: "email-1",
+      correlationId: "corr-1",
+      businessTaskId: "biz-1",
+      metadata: { tenant: "acme" },
+    });
     await queue.receive({ visibilityTimeoutSec: 60 });
     await queue.list({ status: ["pending", "leased"], limit: 10 });
+    await queue.stats();
+    await queue.getSettings();
+    await queue.updateSettings({ max_in_flight: 20 });
     await queue.get("msg_123");
     await queue.ack("msg_123", { ok: true });
     await queue.release("msg_123", { delayMs: 5000, error: "retry later" });
     await queue.fail("msg_123", { error: "boom" });
+    await queue.retry("msg_123");
     await queue.delete("msg_123");
 
     expect(calls[0]?.url).toBe("https://admin.example.com/v1/projects/proj_1/tasks/queues/emails/messages");
     expect(calls[1]?.url).toBe("https://admin.example.com/v1/projects/proj_1/tasks/queues/emails/messages/receive");
     expect(calls[2]?.url).toBe("https://admin.example.com/v1/projects/proj_1/tasks/queues/emails/messages?status=pending%2Cleased&limit=10");
-    expect(calls[3]?.url).toBe("https://admin.example.com/v1/projects/proj_1/tasks/queues/emails/messages/msg_123");
-    expect(calls[4]?.url).toBe("https://admin.example.com/v1/projects/proj_1/tasks/queues/emails/messages/msg_123/ack");
-    expect(calls[5]?.url).toBe("https://admin.example.com/v1/projects/proj_1/tasks/queues/emails/messages/msg_123/release");
-    expect(calls[6]?.url).toBe("https://admin.example.com/v1/projects/proj_1/tasks/queues/emails/messages/msg_123/fail");
-    expect(calls[7]?.url).toBe("https://admin.example.com/v1/projects/proj_1/tasks/queues/emails/messages/msg_123");
-    expect(calls[7]?.init?.method).toBe("DELETE");
+    expect(calls[3]?.url).toBe("https://admin.example.com/v1/projects/proj_1/tasks/queues/emails/stats");
+    expect(calls[4]?.url).toBe("https://admin.example.com/v1/projects/proj_1/tasks/queues/emails/settings");
+    expect(calls[5]?.url).toBe("https://admin.example.com/v1/projects/proj_1/tasks/queues/emails/settings");
+    expect(calls[5]?.init?.method).toBe("PATCH");
+    expect(calls[6]?.url).toBe("https://admin.example.com/v1/projects/proj_1/tasks/queues/emails/messages/msg_123");
+    expect(calls[7]?.url).toBe("https://admin.example.com/v1/projects/proj_1/tasks/queues/emails/messages/msg_123/ack");
+    expect(calls[8]?.url).toBe("https://admin.example.com/v1/projects/proj_1/tasks/queues/emails/messages/msg_123/release");
+    expect(calls[9]?.url).toBe("https://admin.example.com/v1/projects/proj_1/tasks/queues/emails/messages/msg_123/fail");
+    expect(calls[10]?.url).toBe("https://admin.example.com/v1/projects/proj_1/tasks/queues/emails/messages/msg_123/retry");
+    expect(calls[11]?.url).toBe("https://admin.example.com/v1/projects/proj_1/tasks/queues/emails/messages/msg_123");
+    expect(calls[11]?.init?.method).toBe("DELETE");
     expect((calls[0]?.init?.headers as Record<string, string>)?.authorization).toBe("Bearer token-123");
+    expect(JSON.parse(String(calls[0]?.init?.body))).toMatchObject({
+      payload: { hello: "world" },
+      delayMs: 1000,
+      maxAttempts: 5,
+      idempotencyKey: "email-1",
+      correlationId: "corr-1",
+      businessTaskId: "biz-1",
+      metadata: { tenant: "acme" },
+    });
+  });
+
+  test("management-api errors preserve status, code, and response body", async () => {
+    const { supabase } = createFakeSupabase();
+    const errorBody = {
+      message: "Queue message cannot be replayed from its current state",
+      code: "409",
+    };
+
+    globalThis.fetch = mock(() => Promise.resolve(
+      new Response(JSON.stringify(errorBody), {
+        status: 409,
+        headers: { "content-type": "application/json" },
+      }),
+    )) as typeof fetch;
+
+    const client = createSupaCloudClient({
+      supabase: supabase as never,
+      managementApiUrl: "https://admin.example.com/",
+      projectRef: "proj_1",
+    });
+
+    try {
+      await client.queue("emails").retry("msg_123");
+      throw new Error("Expected retry to fail");
+    } catch (error) {
+      expect(error instanceof SupaCloudApiError).toBe(true);
+      expect((error as SupaCloudApiError).status).toBe(409);
+      expect((error as SupaCloudApiError).code).toBe("409");
+      expect((error as SupaCloudApiError).responseBody).toMatchObject(errorBody);
+      expect((error as Error).message).toBe(errorBody.message);
+    }
   });
 
   test("queue receive returns null when no message is available", async () => {
