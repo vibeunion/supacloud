@@ -485,6 +485,9 @@ export interface ProjectTask {
   trace_id: string | null;
   cancel_requested_at: Date | null;
   cancellation_reason: string | null;
+  correlation_id: string | null;
+  business_task_id: string | null;
+  metadata: Record<string, unknown> | null;
   function_slug: string | null;
   function_version: string | null;
   result: Record<string, unknown> | null;
