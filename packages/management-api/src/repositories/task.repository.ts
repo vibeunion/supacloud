@@ -702,6 +702,53 @@ export async function releaseTask(id: string, nextRunAt: Date, error?: string): 
   });
 }
 
+export async function transitionTaskToRunning(
+  id: string,
+  task: ProjectTask,
+  leaseSeconds: number,
+): Promise<{ task: ProjectTask | null; attempt: ProjectTaskAttempt | null }> {
+  return withRetry("TaskRepository.transitionTaskToRunning", async () => {
+    const [updated] = await sql`
+      UPDATE project_tasks
+      SET status = ${TaskStatuses.RUNNING},
+          lease_until = NOW() + (${leaseSeconds} * INTERVAL '1 second'),
+          updated_at = NOW()
+      WHERE id = ${id}
+      RETURNING *
+    `;
+
+    if (!updated) return { task: null, attempt: null };
+
+    const [attempt] = await sql`
+      INSERT INTO project_task_attempts (
+        task_id, project_ref, attempt_no, status, started_at
+      )
+      VALUES (
+        ${id},
+        ${task.project_ref},
+        ${task.attempt || 1},
+        'running',
+        NOW()
+      )
+      ON CONFLICT (task_id, attempt_no)
+      DO UPDATE SET
+        status = 'running',
+        started_at = NOW(),
+        completed_at = NULL,
+        duration_ms = NULL,
+        error = NULL,
+        response_status = NULL,
+        updated_at = NOW()
+      RETURNING *
+    `;
+
+    return {
+      task: mapTask(updated),
+      attempt: attempt ? mapAttempt(attempt) : null,
+    };
+  });
+}
+
 export async function extendLease(id: string, leaseSeconds: number): Promise<ProjectTask | null> {
   return withRetry("TaskRepository.extendLease", async () => {
     const [task] = await sql`
@@ -955,6 +1002,7 @@ export const taskRepository = {
   countQueueMessagesCreatedSince,
   countActiveTasksForProject,
   releaseTask,
+  transitionTaskToRunning,
   extendLease,
   requestTaskCancellation,
   startTaskAttempt,

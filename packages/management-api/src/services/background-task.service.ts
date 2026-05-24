@@ -1,4 +1,4 @@
-import { sql, type ProjectTask, TaskStatus, TaskType } from "../db";
+import { sql, type ProjectTask, TaskStatus, TaskType, getProjectDb, resolveDbName } from "../db";
 import { withRetry } from "../utils/retry";
 import { encryptSecretIfNeeded } from "../utils/secret-crypto";
 
@@ -112,8 +112,89 @@ export async function enqueueBackgroundFunctionTask(
   });
 }
 
+/**
+ * 原子 mirror insert: 在租户 DB 中创建 public.background_task_mirrors 记录,
+ * 同时校验 invoker 用户是否存在（含 deleted_at IS NULL 约束）。
+ * 成功返回 { inserted: true, userExists: true }; 用户不存在返回 { inserted: false, userExists: false };
+ * mirror 表不存在时返回 { inserted: false, userExists: true, degraded: true }。
+ */
+export async function createBackgroundTaskMirrorIfUserExists(
+  task: ProjectTask,
+): Promise<{ inserted: boolean; userExists: boolean; degraded?: boolean }> {
+  const payload = (task.payload || {}) as {
+    auth?: { invoker_user_id?: string | null };
+  };
+  const userId = payload.auth?.invoker_user_id;
+  if (!userId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(userId)) {
+    return { inserted: false, userExists: true };
+  }
+
+  try {
+    const dbName = await resolveDbName(task.project_ref);
+    const projectDb = getProjectDb(dbName);
+
+    // 检查平台专用 mirror 表是否存在
+    const [tableCheck] = await projectDb`
+      SELECT to_regclass('public.background_task_mirrors') IS NOT NULL AS exists
+    `;
+    if (!tableCheck?.exists) {
+      const { logger } = await import("../utils/logger");
+      logger.warn("[BackgroundTaskService] background_task_mirrors table not found, mirror degraded", {
+        taskId: task.id,
+        projectRef: task.project_ref,
+      });
+      return { inserted: false, userExists: true, degraded: true };
+    }
+
+    // 原子 INSERT ... SELECT ... WHERE EXISTS: 一次 roundtrip 完成校验 + mirror
+    const [result] = await projectDb`
+      INSERT INTO public.background_task_mirrors (
+        id, project_ref, task_type, function_slug, status,
+        invoker_user_id, attempt, max_attempts, trace_id, created_at
+      )
+      SELECT
+        ${task.id}::uuid,
+        ${task.project_ref},
+        ${task.task_type},
+        ${task.function_slug || null},
+        ${TaskStatus.RUNNING},
+        ${userId}::uuid,
+        ${task.attempt || 1},
+        ${task.max_attempts},
+        ${task.trace_id || null},
+        NOW()
+      WHERE EXISTS (
+        SELECT 1 FROM auth.users WHERE id = ${userId}::uuid AND deleted_at IS NULL
+      )
+      ON CONFLICT (id) DO NOTHING
+      RETURNING id
+    `;
+
+    if (result?.id) {
+      return { inserted: true, userExists: true };
+    }
+
+    // INSERT 未插入行 = 用户不存在（或 id 冲突）
+    const [userCheck] = await projectDb`
+      SELECT 1 FROM auth.users WHERE id = ${userId}::uuid AND deleted_at IS NULL LIMIT 1
+    `;
+    return { inserted: false, userExists: !!userCheck };
+  } catch (error: unknown) {
+    const { logger } = await import("../utils/logger");
+    logger.warn("[BackgroundTaskService] mirror insert failed (degraded)", {
+      taskId: task.id,
+      projectRef: task.project_ref,
+      userId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    // 容错：不因 mirror 失败阻塞任务，但标记为 degraded 供上层判断
+    return { inserted: false, userExists: true, degraded: true };
+  }
+}
+
 export const backgroundTaskService = {
   enqueueBackgroundFunctionTask,
   normalizeBackgroundTaskTimeout,
   normalizeBackgroundTaskMaxAttempts,
+  createBackgroundTaskMirrorIfUserExists,
 };

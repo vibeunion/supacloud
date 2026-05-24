@@ -8,6 +8,7 @@ interface DispatchOptions {
   env: Record<string, string>;
   request: Request;
   cancelKey?: string;
+  envLoadMs?: number;
   onLog?: (entry: {
     timestamp: string;
     stream: "stdout" | "stderr";
@@ -31,6 +32,9 @@ export class WorkerPool {
   private inFlight = new Map<string, { cancel: () => void }>();
   private totalRequests = 0;
   private totalInvalidations = 0;
+  private totalEnvLoadMs = 0;
+  private totalQueueWaitMs = 0;
+  private totalWorkerExecMs = 0;
   private activeWorkers = new Set<Worker>();
   private workerMetadata = new Map<
     Worker,
@@ -70,6 +74,8 @@ export class WorkerPool {
     }
 
     this.totalRequests++;
+    if (opts.envLoadMs) this.totalEnvLoadMs += opts.envLoadMs;
+    const queueStart = performance.now();
     return new Promise<Response>((resolve, reject) => {
       if (this.queue.length >= MAX_QUEUE_SIZE) {
         resolve(new Response(JSON.stringify({ error: "Too many concurrent requests, please retry" }), {
@@ -79,6 +85,7 @@ export class WorkerPool {
         return;
       }
 
+      (opts as any)._queueStart = queueStart;
       const worker = this.idle.pop();
       if (worker) {
         this.execute(worker, opts, resolve).catch(reject);
@@ -93,6 +100,9 @@ export class WorkerPool {
     opts: DispatchOptions,
     resolve: (r: Response) => void,
   ) {
+    const queueStart = (opts as any)._queueStart as number | undefined;
+    const queueWaitMs = queueStart ? Math.round(performance.now() - queueStart) : 0;
+    this.totalQueueWaitMs += queueWaitMs;
     const cancelGraceMs = 3_000;
     const cancelledResponse = () =>
       new Response(JSON.stringify({ error: "Task cancelled" }), {
@@ -188,6 +198,7 @@ export class WorkerPool {
       }
     }
 
+    const execStart = performance.now();
     worker.postMessage({
       functionId: opts.functionId,
       functionPath: opts.functionPath,
@@ -268,6 +279,8 @@ export class WorkerPool {
         return;
       }
 
+      const workerExecMs = Math.round(performance.now() - execStart);
+      this.totalWorkerExecMs += workerExecMs;
       clearTimeout(timeout);
       cleanupInFlight();
       clearCancellationState();
@@ -428,14 +441,10 @@ export class WorkerPool {
   }
 
   getMetrics(): string {
-    return [
-      `supacloud_edge_active_workers ${this.config.size - this.idle.length}`,
-      `supacloud_edge_idle_workers ${this.idle.length}`,
-      `supacloud_edge_queue_length ${this.queue.length}`,
-      `supacloud_edge_total_requests ${this.totalRequests}`,
-      `supacloud_edge_total_invalidations ${this.totalInvalidations}`,
-      `supacloud_edge_tainted_workers ${this.tainted.size}`,
-    ].join("\n");
+    const snapshot = this.snapshotMetrics();
+    return Object.entries(snapshot)
+      .map(([key, value]) => `${key} ${value}`)
+      .join("\n");
   }
 
   invalidateModule(functionId: string): void {
@@ -506,6 +515,13 @@ export class WorkerPool {
       [`${prefix}_total_requests`]: this.totalRequests,
       [`${prefix}_total_invalidations`]: this.totalInvalidations,
       [`${prefix}_tainted_workers`]: this.tainted.size,
+      [`${prefix}_total_env_load_ms`]: this.totalEnvLoadMs,
+      [`${prefix}_total_queue_wait_ms`]: this.totalQueueWaitMs,
+      [`${prefix}_total_worker_exec_ms`]: this.totalWorkerExecMs,
+      [`${prefix}_avg_env_load_ms`]: this.totalRequests > 0 ? Math.round(this.totalEnvLoadMs / this.totalRequests) : 0,
+      [`${prefix}_avg_queue_wait_ms`]: this.totalRequests > 0 ? Math.round(this.totalQueueWaitMs / this.totalRequests) : 0,
+      [`${prefix}_total_queued_requests`]: this.totalQueueWaitMs > 0 ? this.totalRequests : 0,
+      [`${prefix}_avg_worker_exec_ms`]: this.totalRequests > 0 ? Math.round(this.totalWorkerExecMs / this.totalRequests) : 0,
     };
   }
 
