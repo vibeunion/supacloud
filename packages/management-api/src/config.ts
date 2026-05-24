@@ -268,6 +268,10 @@ export const config: Config = {
 };
 
 function validateConfig() {
+  if (process.argv[2] === "static-serve") {
+    return;
+  }
+
   if (!config.databaseUrl || !/^postgresql?:\/\//.test(config.databaseUrl)) {
     throw new Error("Invalid or missing DATABASE_URL configuration. Must be a valid postgres DSN string.");
   }

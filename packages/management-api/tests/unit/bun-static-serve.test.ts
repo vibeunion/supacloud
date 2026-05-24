@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { spawn } from "bun";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -91,7 +92,6 @@ describe("bun-static-serve", () => {
     expect(response.headers.get("content-length")).toBe("5");
     expect(await response.text()).toBe("");
   });
-});
 
   test("/healthz returns 200 for readiness probes", async () => {
     const root = await createRoot();
@@ -114,3 +114,55 @@ describe("bun-static-serve", () => {
     expect(response.status).toBe(200);
     expect(await response.text()).toBe("ok");
   });
+
+  test("index static-serve subcommand does not require management-api production secrets", async () => {
+    const root = await createRoot();
+    await writeFile(join(root, "index.html"), "index");
+
+    const port = 41000 + Math.floor(Math.random() * 1000);
+    const indexPath = join(import.meta.dir, "../../src/index.ts");
+    const proc = spawn({
+      cmd: ["bun", indexPath, "static-serve", root, String(port), "--workers=1"],
+      stdout: "pipe",
+      stderr: "pipe",
+      env: {
+        PATH: process.env.PATH ?? "",
+        NODE_ENV: "production",
+      },
+    });
+
+    let exited = false;
+    proc.exited.then(() => {
+      exited = true;
+    });
+
+    let ready = false;
+    const deadline = Date.now() + 5_000;
+    try {
+      while (Date.now() < deadline && !exited) {
+        try {
+          const response = await fetch(`http://127.0.0.1:${port}/healthz`, {
+            signal: AbortSignal.timeout(200),
+          });
+          if (response.ok && await response.text() === "ok") {
+            ready = true;
+            break;
+          }
+        } catch {
+          await Bun.sleep(100);
+        }
+      }
+    } finally {
+      proc.kill("SIGTERM");
+      await proc.exited.catch(() => undefined);
+    }
+
+    if (!ready) {
+      const stdout = await new Response(proc.stdout).text();
+      const stderr = await new Response(proc.stderr).text();
+      throw new Error(`static-serve did not become ready\nstdout:\n${stdout}\nstderr:\n${stderr}`);
+    }
+
+    expect(ready).toBe(true);
+  }, 10_000);
+});

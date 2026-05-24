@@ -88,6 +88,18 @@ async function getEmbeddedAssets() {
   return _embeddedAssets;
 }
 
+const args = process.argv.slice(2);
+
+if (args[0] === "static-serve") {
+  const { runStaticServeCli } = await import("./utils/bun-static-serve");
+  runStaticServeCli(args.slice(1));
+  await new Promise<void>((resolve) => {
+    process.once("SIGINT", resolve);
+    process.once("SIGTERM", resolve);
+  });
+  process.exit(0);
+}
+
 // --- Gateway-style try_files static asset serving ---
 // No pre-warmed Set. Direct disk checks per request (Bun.file is near-zero-cost).
 // index.html is cached in memory with mtime-based invalidation.
@@ -680,8 +692,6 @@ export async function registerAllRoutes() {
       .use(diagnosticsRoutes)
   );
 }
-
-const args = process.argv.slice(2);
 
 function readArgValue(...names: string[]) {
   for (const name of names) {
