@@ -1,3 +1,8 @@
+/** Check whether the process was invoked as the static-serve subcommand. */
+export function isStaticServeCommand(): boolean {
+  return process.argv[2] === "static-serve";
+}
+
 import { existsSync, readFileSync } from "node:fs";
 
 const MANAGEMENT_API_ENV = "/etc/supabase/management-api.env";
@@ -268,6 +273,10 @@ export const config: Config = {
 };
 
 function validateConfig() {
+  if (isStaticServeCommand()) {
+    return;
+  }
+
   if (!config.databaseUrl || !/^postgresql?:\/\//.test(config.databaseUrl)) {
     throw new Error("Invalid or missing DATABASE_URL configuration. Must be a valid postgres DSN string.");
   }
