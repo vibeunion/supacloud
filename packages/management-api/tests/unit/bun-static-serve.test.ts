@@ -92,3 +92,25 @@ describe("bun-static-serve", () => {
     expect(await response.text()).toBe("");
   });
 });
+
+  test("/healthz returns 200 for readiness probes", async () => {
+    const root = await createRoot();
+    await writeFile(join(root, "index.html"), "index");
+
+    const handler = createFetchHandler(root);
+    const response = await handler(new Request("http://localhost/healthz"));
+
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe("ok");
+    expect(response.headers.get("content-type")).toBe("text/plain");
+  });
+
+  test("/healthz returns 200 even when no index.html exists", async () => {
+    const root = await createRoot();
+    // No index.html — /healthz should still work for process-level liveness
+    const handler = createFetchHandler(root);
+    const response = await handler(new Request("http://localhost/healthz"));
+
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe("ok");
+  });

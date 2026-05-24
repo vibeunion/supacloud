@@ -28,8 +28,21 @@ const INTERNAL_TOKEN = process.env.EDGE_RUNTIME_MASTER_KEY || process.env.MASTER
 const PROJECT_REF_PATTERN = /^[a-zA-Z0-9_-]{1,64}$/;
 const FUNCTION_SLUG_PATTERN = /^[a-zA-Z0-9_-]{1,128}$/;
 const VERSION_PATTERN = /^[a-zA-Z0-9._-]{1,128}$/;
+const AUTH_FAILURE_WINDOW_MS = Number(process.env.EDGE_AUTH_FAILURE_WINDOW_MS) || 30_000;
+const AUTH_FAILURE_LIMIT = Number(process.env.EDGE_AUTH_FAILURE_LIMIT) || 8;
+const AUTH_FAILURE_COOLDOWN_MS = Number(process.env.EDGE_AUTH_FAILURE_COOLDOWN_MS) || 60_000;
+const AUTH_FAILURE_MAX_ENTRIES = Number(process.env.EDGE_AUTH_FAILURE_MAX_ENTRIES) || 2_048;
 const FUNCTIONS_BASE_REALPATH = await fs.realpath(FUNCTIONS_BASE_DIR);
 const FUNCTIONS_DIR_REALPATH = await fs.realpath(FUNCTIONS_DIR);
+
+type AuthFailureEntry = {
+  count: number;
+  windowStart: number;
+  blockedUntil: number;
+  lastSeen: number;
+};
+
+const authFailureCache = new Map<string, AuthFailureEntry>();
 
 if (!isPathInside(FUNCTIONS_DIR_REALPATH, FUNCTIONS_BASE_REALPATH)) {
   throw new Error(`EDGE_FUNCTIONS_DIR must be inside EDGE_FUNCTIONS_BASE_DIR`);
@@ -50,6 +63,94 @@ function isSafeFunctionSlug(value: string): boolean {
 
 function isSafeVersion(value: string): boolean {
   return VERSION_PATTERN.test(value);
+}
+
+async function authFailureKey(
+  projectRef: string,
+  functionName: string,
+  authHeader: string | null | undefined,
+  apikeyHeader: string | null | undefined,
+): Promise<string> {
+  const material = `${authHeader || ""}\n${apikeyHeader || ""}` || "missing-auth";
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(material));
+  const fingerprint = Array.from(new Uint8Array(digest).slice(0, 16))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+  return `${projectRef}/${functionName}/${fingerprint}`;
+}
+
+function clearStaleAuthFailures(now = Date.now()) {
+  for (const [key, entry] of authFailureCache) {
+    if (entry.blockedUntil <= now && now - entry.lastSeen > AUTH_FAILURE_COOLDOWN_MS) {
+      authFailureCache.delete(key);
+    }
+  }
+
+  while (authFailureCache.size > AUTH_FAILURE_MAX_ENTRIES) {
+    const oldestKey = authFailureCache.keys().next().value;
+    if (!oldestKey) break;
+    authFailureCache.delete(oldestKey);
+  }
+}
+
+function authFailureLimitResponse(blockedUntil: number): Response {
+  const retryAfterSeconds = Math.max(1, Math.ceil((blockedUntil - Date.now()) / 1000));
+  return new Response(JSON.stringify({ error: "Too many authentication failures" }), {
+    status: 429,
+    headers: {
+      "Content-Type": "application/json",
+      "Retry-After": String(retryAfterSeconds),
+      "Cache-Control": "no-store",
+      "x-relay-error": "true",
+    },
+  });
+}
+
+async function authFailureBlockResponse(
+  projectRef: string,
+  functionName: string,
+  authHeader: string | null | undefined,
+  apikeyHeader: string | null | undefined,
+): Promise<Response | null> {
+  const key = await authFailureKey(projectRef, functionName, authHeader, apikeyHeader);
+  const entry = authFailureCache.get(key);
+  if (!entry || entry.blockedUntil <= Date.now()) return null;
+  return authFailureLimitResponse(entry.blockedUntil);
+}
+
+async function recordAuthFailure(
+  projectRef: string,
+  functionName: string,
+  authHeader: string | null | undefined,
+  apikeyHeader: string | null | undefined,
+): Promise<Response | null> {
+  const now = Date.now();
+  const key = await authFailureKey(projectRef, functionName, authHeader, apikeyHeader);
+  const current = authFailureCache.get(key);
+  const entry = current && now - current.windowStart <= AUTH_FAILURE_WINDOW_MS
+    ? current
+    : { count: 0, windowStart: now, blockedUntil: 0, lastSeen: now };
+
+  entry.count += 1;
+  entry.lastSeen = now;
+  if (entry.count >= AUTH_FAILURE_LIMIT) {
+    entry.blockedUntil = now + AUTH_FAILURE_COOLDOWN_MS;
+    console.warn(`[authFailureBreaker] throttling repeated 401s for ${projectRef}/${functionName}`);
+  }
+  authFailureCache.set(key, entry);
+  clearStaleAuthFailures(now);
+
+  return entry.blockedUntil > now ? authFailureLimitResponse(entry.blockedUntil) : null;
+}
+
+async function clearAuthFailure(
+  projectRef: string,
+  functionName: string,
+  authHeader: string | null | undefined,
+  apikeyHeader: string | null | undefined,
+) {
+  const key = await authFailureKey(projectRef, functionName, authHeader, apikeyHeader);
+  authFailureCache.delete(key);
 }
 
 function badRequest(message: string): Response {
@@ -421,6 +522,8 @@ async function handleFunctionRequest(
   functionName: string,
 ) {
   const projectRef = c.headers["x-project-ref"];
+  const authHeader = c.headers["authorization"] || null;
+  const apikeyHeader = c.headers["apikey"] || null;
   if (!projectRef) {
     c.set.headers["x-relay-error"] = "true";
     return badRequest("Missing x-project-ref");
@@ -429,30 +532,48 @@ async function handleFunctionRequest(
     c.set.headers["x-relay-error"] = "true";
     return badRequest("Invalid project reference or function slug");
   }
+  const blockedResponse = await authFailureBlockResponse(projectRef, functionName, authHeader, apikeyHeader);
+  if (blockedResponse) {
+    return blockedResponse;
+  }
 
   const projectRoot = await resolveProjectRoot(projectRef);
   const fnConfig = await getFunctionConfig(projectRef, functionName, projectRoot);
   if (c.request.method !== "OPTIONS" && fnConfig.verify_jwt) {
     const authorized = await verifyJwt(
       projectRef,
-      c.headers["authorization"],
-      c.headers["apikey"],
+      authHeader,
+      apikeyHeader,
     );
     if (!authorized) {
+      const rateLimitResponse = await recordAuthFailure(projectRef, functionName, authHeader, apikeyHeader);
+      if (rateLimitResponse) return rateLimitResponse;
       return new Response(JSON.stringify({ msg: "Invalid JWT" }), {
         status: 401,
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "Cache-Control": "no-store",
+        },
       });
     }
   }
 
   c.set.headers["x-sb-execution-id"] = crypto.randomUUID();
-  return dispatchFunction(
+  const response = await dispatchFunction(
     projectRef,
     functionName,
     c.request,
     c.set.headers as Record<string, string>,
   );
+
+  if (response.status === 401) {
+    const rateLimitResponse = await recordAuthFailure(projectRef, functionName, authHeader, apikeyHeader);
+    if (rateLimitResponse) return rateLimitResponse;
+  } else {
+    await clearAuthFailure(projectRef, functionName, authHeader, apikeyHeader);
+  }
+
+  return response;
 }
 
 const app = new Elysia()

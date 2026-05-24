@@ -57,6 +57,9 @@ describe("GatewayService", () => {
         expect(DEFAULT_CORS_HEADERS).toContain("x-supacloud-idempotency-key");
         expect(DEFAULT_CORS_HEADERS).toContain("x-supacloud-function-version");
         expect(DEFAULT_CORS_HEADERS).toContain("x-supacloud-trace-id");
+        expect(DEFAULT_CORS_HEADERS).toContain("x-supacloud-correlation-id");
+        expect(DEFAULT_CORS_HEADERS).toContain("x-supacloud-business-task-id");
+        expect(DEFAULT_CORS_HEADERS).toContain("x-supacloud-task-metadata");
     });
 
     test("tenant cors origins include exact api and studio custom domains", () => {

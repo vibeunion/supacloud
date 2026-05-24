@@ -38,9 +38,9 @@
 
 - [Edge Runtime Guide](./edge-runtime-guide.md) - Bun + Elysia Edge Functions runtime architecture
 - [Background Functions](./background-functions.md) - Async Edge Function tasks, retries, logs, and cancellation
-- [Background Functions With supabase-js](./background-functions-supabase-js-tutorial.md) - Tenant SDK tutorial for invoke, polling, cancel, and DLQ
+- [Background Functions With supabase-js](./background-functions-supabase-js-tutorial.md) - Tenant SDK tutorial for invoke, polling, cancel, DLQ, lifecycle webhooks, and queues
 - [Background Functions API Reference](./background-functions-api-reference.md) - Headers, task states, control-plane endpoints, and runtime semantics
-- [@supacloud/js](./supacloud-js.md) - Official platform SDK layered on top of `supabase-js`
+- [@supacloud/js](./supacloud-js.md) - Official platform SDK layered on top of `supabase-js`, including tasks, lifecycle webhooks, queues, and OAuth helpers
 
 ## Product Positioning
 

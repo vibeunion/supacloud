@@ -17,7 +17,8 @@ export const DEFAULT_CORS_HEADERS = [
     "x-upsert", "Cache-Control", "x-retry-count", "x-metadata",
     "x-supacloud-async", "x-supacloud-timeout", "x-supacloud-retries",
     "x-supacloud-idempotency-key", "x-supacloud-function-version",
-    "x-supacloud-trace-id",
+    "x-supacloud-trace-id", "x-supacloud-correlation-id",
+    "x-supacloud-business-task-id", "x-supacloud-task-metadata",
 ];
 export const DEFAULT_CORS_EXPOSED = [
     "Content-Length", "Content-Range", "X-Content-Range", "X-JSON",
