@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.1](https://github.com/zuohuadong/supacloud/compare/supacloud-js-v0.16.0...supacloud-js-v0.16.1) (2026-05-24)
+
+
+### Bug Fixes
+
+* add management-api.env to frontend systemd unit template ([93299eb](https://github.com/zuohuadong/supacloud/commit/93299eba1dbecd4c706054c29e2aa93015b5fba9))
+
 ## [0.16.0](https://github.com/zuohuadong/supacloud/compare/supacloud-js-v0.15.1...supacloud-js-v0.16.0) (2026-05-24)
 
 
