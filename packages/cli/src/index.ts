@@ -11,6 +11,7 @@ import { registerStorageTools } from "./shared/tools/storage-tools";
 import { registerAdvancedTools } from "./shared/tools/advanced-tools";
 import { registerFrontendTools } from "./shared/tools/frontend-tools";
 import { registerUserProjectCliTools } from "./shared/tools/project-cli-tools";
+import { registerQueueTools } from "./shared/tools/queue-tools";
 
 type ToolEntry = { schema: any; callback: (args: any) => Promise<any> };
 type ToolMap = Record<string, ToolEntry>;
@@ -18,7 +19,10 @@ type ToolMap = Record<string, ToolEntry>;
 const invokedCommand = path.basename(process.argv[1] || "supacloud-cli");
 const commandName = invokedCommand === "supacloud" ? "supacloud" : "supacloud-cli";
 const preferredCommand = "supacloud-cli";
-const projectActionSchema = z.enum(["get", "health", "logs", "api_keys", "settings", "tasks"]);
+const projectActionSchema = z.enum([
+    "get", "health", "logs", "api_keys", "settings",
+    "tasks", "task_detail", "task_cancel", "task_retry", "task_stats", "dlq", "background_settings",
+]);
 const genericActionSchema = z.string();
 
 function unwrapMcpSchema(schema: any): any {
@@ -79,6 +83,9 @@ EXAMPLES
   ${preferredCommand} status
   ${preferredCommand} project get
   ${preferredCommand} project logs --log_type database
+  ${preferredCommand} project task_stats
+  ${preferredCommand} queue stats --queue emails
+  ${preferredCommand} queue dlq --queue emails --limit 20
   ${preferredCommand} frontend list --ref abc123
   ${preferredCommand} database query --sql "select now()"
   ${preferredCommand} database query --ref abc123 --file ./queries/vector-search.sql
@@ -144,7 +151,7 @@ function createCliTools(): ToolMap {
                 ],
             }),
         };
-        for (const name of ["database", "auth", "storage", "edge_functions", "secrets", "frontend"]) {
+        for (const name of ["database", "auth", "storage", "edge_functions", "secrets", "frontend", "queue", "task_events", "diagnostics"]) {
             tools[name] = {
                 schema: { action: genericActionSchema },
                 callback: async () => ({
@@ -210,6 +217,9 @@ function createCliTools(): ToolMap {
     assign(captureTools((server) => registerStorageTools(server as any, http)));
     assign(captureTools((server) => registerAdvancedTools(server as any, http)));
     assign(captureTools((server) => registerFrontendTools(server as any, http)));
+    assign(captureTools((server) => registerQueueTools(server as any, http, {
+        projectRef: context.projectRef || undefined,
+    })));
 
     delete tools.platform;
     return tools;

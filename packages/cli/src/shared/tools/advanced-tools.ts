@@ -109,7 +109,7 @@ Actions: list, deploy, deploy_bundle, config, source, delete, check`,
             slug: z.string().optional().describe("[deploy/deploy_bundle/config/source/delete/check] Function name"),
             code: z.string().optional().describe("[deploy/check] Function source code (TypeScript)"),
             path: z.string().optional().describe("[deploy/check] Local file path to read code from (alternative to code)"),
-            files: z.record(z.string()).optional().describe("[deploy_bundle] File map: { 'index.ts': '...', '_shared/x.ts': '...' }"),
+            files: z.record(z.string(), z.string()).optional().describe("[deploy_bundle] File map: { 'index.ts': '...', '_shared/x.ts': '...' }"),
             entrypoint: z.string().optional().describe("[deploy_bundle] Entrypoint file (default: index.ts)"),
             minify: z.boolean().optional().describe("[deploy/deploy_bundle] Minify bundle"),
             verify_jwt: z.boolean().optional().describe("[deploy/deploy_bundle/config] Set JWT verification for this function"),
@@ -305,6 +305,108 @@ Actions: metrics, list_backups, create_backup, network, update_network, list_org
                     text = JSON.stringify((await http.get(`/v1/organizations/${slug}`)).data, null, 2);
                     break;
                 default: text = `❌ Unknown action`;
+            }
+            return { content: [{ type: "text" as const, text }] };
+        }
+    );
+
+    // ═══ Task Events (3→1) ═══
+    server.tool(
+        "task_events",
+        `Task lifecycle webhook configuration.
+Actions: register_webhook, unregister_webhook, inspect_webhook`,
+        {
+            action: z.enum(["register_webhook", "unregister_webhook", "inspect_webhook"]).describe("Action"),
+            ref: z.string().describe("Project ref"),
+            url: z.string().optional().describe("[register_webhook] HTTPS webhook URL for task lifecycle events"),
+            secret: z.string().optional().describe("[register_webhook] Optional HMAC secret for webhook verification"),
+        },
+        async (args: any) => {
+            const { action, ref, url, secret } = args;
+            let text: string;
+            switch (action) {
+                case "register_webhook": {
+                    if (!url) throw new Error("'url' is required for register_webhook");
+                    const body: Record<string, unknown> = { url };
+                    if (secret) body.secret = secret;
+                    const r = await http.post(`/v1/projects/${ref}/task-events/webhook`, body);
+                    text = r.ok
+                        ? `✅ Webhook registered for project ${ref}\n${JSON.stringify(r.data, null, 2)}`
+                        : `❌ Failed (${r.status}): ${JSON.stringify(r.data)}`;
+                    break;
+                }
+                case "unregister_webhook": {
+                    const r = await http.delete(`/v1/projects/${ref}/task-events/webhook`);
+                    text = r.ok
+                        ? `✅ Webhook unregistered for project ${ref}`
+                        : `❌ Failed (${r.status}): ${JSON.stringify(r.data)}`;
+                    break;
+                }
+                case "inspect_webhook": {
+                    const r = await http.get(`/v1/projects/${ref}/task-events/webhook`);
+                    text = r.ok
+                        ? JSON.stringify(r.data, null, 2)
+                        : `❌ Failed (${r.status}): ${JSON.stringify(r.data)}`;
+                    break;
+                }
+                default:
+                    text = `❌ Unknown action`;
+            }
+            return { content: [{ type: "text" as const, text }] };
+        }
+    );
+
+    // ═══ Diagnostics (4→1) ═══
+    server.tool(
+        "diagnostics",
+        `Platform and project diagnostics: health checks, diagnostic runs, and repair.
+Actions: list_checks, run_checks, get_run, repair`,
+        {
+            action: z.enum(["list_checks", "run_checks", "get_run", "repair"]).describe("Action"),
+            ref: z.string().optional().describe("Project ref (for project-scoped diagnostics)"),
+            run_id: z.string().optional().describe("[get_run/repair] Diagnostic run ID"),
+            check_id: z.string().optional().describe("[repair] Check result ID to repair"),
+        },
+        async (args: any) => {
+            const { action, ref, run_id, check_id } = args;
+            let text: string;
+            switch (action) {
+                case "list_checks": {
+                    const path = ref
+                        ? `/v1/projects/${ref}/diagnostics/checks`
+                        : "/v1/diagnostics/checks";
+                    text = JSON.stringify((await http.get(path)).data, null, 2);
+                    break;
+                }
+                case "run_checks": {
+                    const path = ref
+                        ? `/v1/projects/${ref}/diagnostics/runs`
+                        : "/v1/diagnostics/runs";
+                    const r = await http.post(path);
+                    text = r.ok
+                        ? `✅ Diagnostic run started\n${JSON.stringify(r.data, null, 2)}`
+                        : `❌ Failed (${r.status}): ${JSON.stringify(r.data)}`;
+                    break;
+                }
+                case "get_run": {
+                    if (!run_id) throw new Error("'run_id' is required for get_run");
+                    const path = ref
+                        ? `/v1/projects/${ref}/diagnostics/runs/${run_id}`
+                        : `/v1/diagnostics/runs/${run_id}`;
+                    text = JSON.stringify((await http.get(path)).data, null, 2);
+                    break;
+                }
+                case "repair": {
+                    if (!check_id) throw new Error("'check_id' is required for repair");
+                    const path = `/v1/diagnostics/results/${check_id}/repair`;
+                    const r = await http.post(path);
+                    text = r.ok
+                        ? `✅ Repair executed for ${check_id}\n${JSON.stringify(r.data, null, 2)}`
+                        : `❌ Failed (${r.status}): ${JSON.stringify(r.data)}`;
+                    break;
+                }
+                default:
+                    text = `❌ Unknown action`;
             }
             return { content: [{ type: "text" as const, text }] };
         }
