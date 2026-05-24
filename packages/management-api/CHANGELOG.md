@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.20.3](https://github.com/zuohuadong/supacloud/compare/management-api-v0.20.2...management-api-v0.20.3) (2026-05-24)
+
+
+### Bug Fixes
+
+* **management-api:** validate background invoker users ([63bb67f](https://github.com/zuohuadong/supacloud/commit/63bb67f11c85e6862cb76e909a9315815be9cd26))
+
 ## [0.20.2](https://github.com/zuohuadong/supacloud/compare/management-api-v0.20.1...management-api-v0.20.2) (2026-05-23)
 
 
