@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/zuohuadong/supacloud/compare/cli-v0.5.0...cli-v0.6.0) (2026-05-24)
+
+
+### Features
+
+* **cli:** add queue and task diagnostics tools ([#181](https://github.com/zuohuadong/supacloud/issues/181)) ([3493dc2](https://github.com/zuohuadong/supacloud/commit/3493dc2923024017cd6c6ca879de606a96b2c184))
+
 ## [0.5.0](https://github.com/zuohuadong/supacloud/compare/cli-v0.4.1...cli-v0.5.0) (2026-05-16)
 
 
