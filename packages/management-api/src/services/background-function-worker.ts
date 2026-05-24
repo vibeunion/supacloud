@@ -9,6 +9,7 @@ import { DEFAULT_BACKGROUND_TASK_SETTINGS } from "../config/background-task-sett
 import { projectService } from "./project.service";
 import { decryptSecretIfNeeded } from "../utils/secret-crypto";
 import { createHmac } from "node:crypto";
+import { getProjectDb, resolveDbName } from "../db";
 
 interface InvocationEnvelope {
   method?: string;
@@ -31,6 +32,43 @@ const DEFAULT_CONCURRENCY_PER_PROJECT = Number(
   process.env.BACKGROUND_TASKS_PER_PROJECT || String(DEFAULT_BACKGROUND_TASK_SETTINGS.concurrency),
 );
 const WORKER_ID = `bgw-${process.pid}`;
+
+class NonRetryableBackgroundInvocationError extends Error {
+  constructor(message: string, readonly responseStatus: number) {
+    super(message);
+    this.name = "NonRetryableBackgroundInvocationError";
+  }
+}
+
+function isUuid(value: string | null | undefined): boolean {
+  return !!value && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+function backgroundInvokerUserId(task: ProjectTask): string | null {
+  const payload = (task.payload || {}) as InvocationEnvelope;
+  const userId = payload.auth?.invoker_user_id;
+  return typeof userId === "string" && userId.trim().length > 0 ? userId.trim() : null;
+}
+
+async function assertBackgroundInvokerUserExists(task: ProjectTask): Promise<void> {
+  const userId = backgroundInvokerUserId(task);
+  if (!userId) return;
+  if (!isUuid(userId)) {
+    throw new NonRetryableBackgroundInvocationError("Background invoker user id is invalid", 400);
+  }
+
+  const dbName = await resolveDbName(task.project_ref);
+  const projectDb = getProjectDb(dbName);
+  const rows = await projectDb`
+    SELECT 1
+    FROM auth.users
+    WHERE id = ${userId}::uuid
+    LIMIT 1
+  `;
+  if (rows.length === 0) {
+    throw new NonRetryableBackgroundInvocationError("Background invoker user no longer exists", 410);
+  }
+}
 
 function computeRetryDelayMs(attempt: number): number {
   const base = 5_000;
@@ -252,6 +290,7 @@ export class BackgroundFunctionWorker {
     }> = [];
 
     try {
+      await assertBackgroundInvokerUserExists(task);
       const request = buildInvocationRequest(task);
       const { dispatchBackgroundFunction } = await importDispatcher();
       const response = await dispatchBackgroundFunction({
@@ -317,6 +356,25 @@ export class BackgroundFunctionWorker {
       const maxAttempts = task.max_attempts || 3;
       const responseStatusMatch = message.match(/HTTP (\d+)/i);
       const responseStatus = responseStatusMatch ? Number.parseInt(responseStatusMatch[1], 10) : null;
+
+      if (error instanceof NonRetryableBackgroundInvocationError) {
+        await taskRepository.completeTaskAttempt(task.id, attempt, {
+          status: "dead_lettered",
+          error: message,
+          responseStatus: error.responseStatus,
+          durationMs: Date.now() - startedAt,
+          logs,
+        });
+        await taskRepository.markTaskFailed(task.id, message, true);
+        broadcastTaskUpdate({
+          taskId: task.id,
+          projectRef: task.project_ref,
+          taskType: task.task_type,
+          status: TaskStatus.DEAD_LETTERED,
+          error: message,
+        });
+        return;
+      }
 
       if (attempt < maxAttempts) {
         await taskRepository.completeTaskAttempt(task.id, attempt, {

@@ -34,6 +34,7 @@ const { projectRepository } = await import("../../src/repositories/project.repos
 const wsModule = await import("../../src/routes/ws");
 const { projectService } = await import("../../src/services/project.service");
 const dispatcherModule = await import("../../src/services/background-runtime-dispatcher");
+const dbModule = await import("../../src/db");
 
 spyOn(taskRepository, "claimNextTask").mockImplementation(claimNextTask as typeof taskRepository.claimNextTask);
 spyOn(taskRepository, "cancelTask").mockImplementation(cancelTask as typeof taskRepository.cancelTask);
@@ -59,6 +60,12 @@ spyOn(projectService, "getBackgroundTaskSettings").mockImplementation(
 );
 const dispatchBackgroundFunction = spyOn(dispatcherModule, "dispatchBackgroundFunction").mockImplementation(
   () => Promise.resolve({ status: 200, headers: {}, bodyText: "", logs: [] }),
+);
+const resolveDbName = spyOn(dbModule, "resolveDbName").mockImplementation(
+  () => Promise.resolve("tenant_proj_1"),
+);
+const getProjectDb = spyOn(dbModule, "getProjectDb").mockImplementation(
+  () => ((async () => [{ exists: 1 }]) as any),
 );
 
 // We import the worker AFTER mocks are set up
@@ -145,6 +152,8 @@ describe("BackgroundFunctionWorker", () => {
     broadcastTaskUpdate.mockReset();
     getBackgroundTaskSettings.mockReset();
     dispatchBackgroundFunction.mockReset();
+    resolveDbName.mockReset();
+    getProjectDb.mockReset();
 
     // Defaults
     findByRef.mockResolvedValue({ ref: "proj_1", status: "active" } as any);
@@ -153,6 +162,8 @@ describe("BackgroundFunctionWorker", () => {
       ...DEFAULT_BACKGROUND_TASK_SETTINGS,
     });
     dispatchBackgroundFunction.mockResolvedValue({ status: 200, headers: {}, bodyText: "", logs: [] });
+    resolveDbName.mockResolvedValue("tenant_proj_1");
+    getProjectDb.mockImplementation(() => ((async () => [{ exists: 1 }]) as any));
     startTaskAttempt.mockResolvedValue({ id: "att_1" } as any);
     extendLease.mockResolvedValue(null);
     markTaskRunning.mockResolvedValue(null);
@@ -313,6 +324,44 @@ describe("BackgroundFunctionWorker", () => {
 
       const result = await worker.cancel("tsk_net_fail");
       expect(result).toBe(false);
+    });
+  });
+
+  describe("background invoker integrity", () => {
+    test("dead-letters without dispatching when the invoker user was deleted", async () => {
+      const worker = new BackgroundFunctionWorker();
+      const task = makeTask({
+        id: "tsk_deleted_invoker",
+        payload: {
+          method: "POST",
+          path: "/generate/pattern",
+          query: "",
+          headers: {},
+          body: "{}",
+          auth: {
+            kind: "jwt",
+            invoker_user_id: "00000000-0000-4000-8000-000000000001",
+            invoker_role: "authenticated",
+          },
+        },
+      });
+      extendLease.mockResolvedValue({} as any);
+      getProjectDb.mockImplementation(() => ((async () => []) as any));
+
+      await (worker as any).execute(task);
+
+      expect(resolveDbName).toHaveBeenCalledWith("proj_1");
+      expect(dispatchBackgroundFunction).not.toHaveBeenCalled();
+      expect(completeTaskAttempt).toHaveBeenCalledWith("tsk_deleted_invoker", 1, expect.objectContaining({
+        status: "dead_lettered",
+        error: "Background invoker user no longer exists",
+        responseStatus: 410,
+      }));
+      expect(markTaskFailed).toHaveBeenCalledWith(
+        "tsk_deleted_invoker",
+        "Background invoker user no longer exists",
+        true,
+      );
     });
   });
 
