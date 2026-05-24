@@ -134,6 +134,21 @@ function getEnv(key: string, defaultValue = ""): string {
 const DEFAULT_JWT_SECRET = "super-secret-jwt-token-with-at-least-32-characters-long";
 const DEFAULT_DASHBOARD_PASSWORDS = new Set(["supabase", "supacloud", "admin", "password", "changeme"]);
 const DEVELOPMENT_ENVS = new Set(["development", "test"]);
+const DEFAULT_SUPACLOUD_BINARY_PATH = "/opt/supacloud/supacloud";
+
+export function resolveSupacloudBinaryPath(explicitPath = process.env.SUPACLOUD_BINARY_PATH, execPath = process.execPath): string {
+  const configuredPath = explicitPath?.trim();
+  if (configuredPath) {
+    return configuredPath;
+  }
+
+  const executableName = execPath.split(/[\\/]/).pop() || "";
+  if (executableName === "bun" || executableName.startsWith("bun-")) {
+    return DEFAULT_SUPACLOUD_BINARY_PATH;
+  }
+
+  return execPath || DEFAULT_SUPACLOUD_BINARY_PATH;
+}
 
 const isGithubActions = getEnv("GITHUB_ACTIONS") === "true";
 const edgeRuntimePort = Number(getEnv("EDGE_RUNTIME_PORT", "9000"));
@@ -246,7 +261,7 @@ export const config: Config = {
     ),
   ),
   bunPath: getEnv("BUN_PATH", "bun"),
-  supacloudBinaryPath: getEnv("SUPACLOUD_BINARY_PATH", "/opt/supacloud/supacloud"),
+  supacloudBinaryPath: resolveSupacloudBinaryPath(),
   sdkProxyTimeoutMs: Number(getEnv("SDK_PROXY_TIMEOUT_MS", "30000")),
   restProxyTimeoutMs: Number(getEnv("REST_PROXY_TIMEOUT_MS", "300000")),
   secretsEncryptionKey: getEnv("SECRETS_ENCRYPTION_KEY", getEnv("MASTER_TOKEN", "")),

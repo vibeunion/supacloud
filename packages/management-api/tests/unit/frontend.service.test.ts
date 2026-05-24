@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { config } from "../../src/config";
+import { config, resolveSupacloudBinaryPath } from "../../src/config";
 import { FrontendService } from "../../src/services/frontend.service";
 
 const originalFetch = globalThis.fetch;
@@ -65,5 +65,19 @@ describe("FrontendService DNS records", () => {
     } finally {
       await rm(baseDir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("FrontendService static binary resolution", () => {
+  test("uses explicit SUPACLOUD_BINARY_PATH when provided", () => {
+    expect(resolveSupacloudBinaryPath("/custom/supacloud", "/usr/local/bin/supacloud")).toBe("/custom/supacloud");
+  });
+
+  test("uses the current release binary when not running through bun", () => {
+    expect(resolveSupacloudBinaryPath("", "/usr/local/bin/supacloud")).toBe("/usr/local/bin/supacloud");
+  });
+
+  test("keeps the legacy install path for source runs through bun", () => {
+    expect(resolveSupacloudBinaryPath("", "/root/.bun/bin/bun")).toBe("/opt/supacloud/supacloud");
   });
 });

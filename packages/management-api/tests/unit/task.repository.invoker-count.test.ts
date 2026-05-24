@@ -16,9 +16,6 @@ mock.module("../../src/db", () => ({
   },
 }));
 
-mock.module("../../src/utils/retry", () => ({
-  withRetry: async (_name: string, fn: () => Promise<unknown>) => fn(),
-}));
 
 const { countActiveTasksByInvoker } = await import(
   new URL("../../src/repositories/task.repository.ts?task-repository-invoker-count-test", import.meta.url).href
