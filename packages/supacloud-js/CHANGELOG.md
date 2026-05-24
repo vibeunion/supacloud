@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.0](https://github.com/zuohuadong/supacloud/compare/supacloud-js-v0.15.1...supacloud-js-v0.16.0) (2026-05-24)
+
+
+### Features
+
+* wrap queue APIs in supacloud js ([5b29872](https://github.com/zuohuadong/supacloud/commit/5b298726e9d4950b9a97fe76ddba77705bea5039))
+
 ## [0.15.1](https://github.com/zuohuadong/supacloud/compare/supacloud-js-v0.15.0...supacloud-js-v0.15.1) (2026-05-22)
 
 
