@@ -28,7 +28,6 @@ export { deployRoutes } from "./deploy";
 export { chatRoutes } from "./chat";
 export { platformSettingsRoutes } from "./platform-settings";
 export { projectLogsRoutes } from "./project-logs";
-export { taskEventRoutes } from "./task-events";
 export { systemRoutes } from "./system";
 export { wsRoutes } from "./ws";
 export { diagnosticsRoutes } from "./diagnostics";

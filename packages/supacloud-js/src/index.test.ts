@@ -66,9 +66,6 @@ describe("@supacloud/js", () => {
       retries: 2,
       timeoutSec: 300,
       idempotencyKey: "crop-img_1-v1",
-      correlationId: "corr-img_1",
-      businessTaskId: "biz-img_1",
-      metadata: { workflow_id: "wf_1", billing_subject: "user_1" },
     });
 
     expect(receipt.taskId).toBe("tsk_123");
@@ -77,9 +74,6 @@ describe("@supacloud/js", () => {
       body: { image_id: "img_1" },
       headers: {
         "x-supacloud-idempotency-key": "crop-img_1-v1",
-        "x-supacloud-correlation-id": "corr-img_1",
-        "x-supacloud-business-task-id": "biz-img_1",
-        "x-supacloud-task-metadata": JSON.stringify({ workflow_id: "wf_1", billing_subject: "user_1" }),
       },
     });
   });

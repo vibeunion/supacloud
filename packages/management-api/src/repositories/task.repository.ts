@@ -694,41 +694,6 @@ export async function countActiveTasksForProject(projectRef: string, taskTypes?:
   });
 }
 
-/**
- * 统计指定项目内某用户（invoker_user_id）的活跃任务数。
- * 活跃状态包括 PENDING / LEASED / RUNNING / RETRY_SCHEDULED。
- * invoker_user_id 存储在 payload->auth->invoker_user_id JSON 路径中。
- */
-export async function countActiveTasksByInvoker(
-  projectRef: string,
-  userId: string,
-): Promise<{ count: number; tasks: Array<{ id: string; task_type: string; status: string }> }> {
-  return withRetry("TaskRepository.countActiveTasksByInvoker", async () => {
-    const rows = await sql.unsafe(
-      `
-        WITH active_tasks AS (
-          SELECT id, task_type, status, created_at
-          FROM project_tasks
-          WHERE project_ref = $1
-            AND status IN ($2, $3, $4, $5)
-            AND payload->'auth'->>'invoker_user_id' = $6
-        )
-        SELECT COUNT(*) OVER()::int AS count, id, task_type, status
-        FROM active_tasks
-        ORDER BY created_at DESC
-        LIMIT 100
-      `,
-      [projectRef, TaskStatuses.PENDING, TaskStatuses.LEASED, TaskStatuses.RUNNING, TaskStatuses.RETRY_SCHEDULED, userId],
-    );
-    const tasks = (rows as Array<{ id: string; task_type: string; status: string }>).map((r) => ({
-      id: r.id,
-      task_type: r.task_type,
-      status: r.status,
-    }));
-    return { count: Number((rows[0] as { count?: number } | undefined)?.count || 0), tasks };
-  });
-}
-
 export async function releaseTask(id: string, nextRunAt: Date, error?: string): Promise<ProjectTask | null> {
   return withRetry("TaskRepository.releaseTask", async () => {
     const [task] = await sql`
@@ -1045,7 +1010,6 @@ export const taskRepository = {
   retryQueueMessage,
   countQueueMessagesCreatedSince,
   countActiveTasksForProject,
-  countActiveTasksByInvoker,
   releaseTask,
   transitionTaskToRunning,
   extendLease,

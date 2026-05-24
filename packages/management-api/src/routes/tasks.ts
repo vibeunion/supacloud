@@ -2,8 +2,6 @@ import { Elysia, status, t } from "elysia";
 import { taskRepository } from "../repositories/task.repository";
 import { TaskStatus, type ProjectTask } from "../db";
 import { backgroundFunctionWorker, projectService } from "../services";
-import { broadcastTaskUpdate, dispatchTaskLifecycleEvents } from "./ws";
-import { buildTaskLifecycleEvent } from "../types/task-events";
 import * as authMiddleware from "../middleware/auth";
 
 const QUEUE_TASK_TYPE_PREFIX = "queue:";
@@ -146,15 +144,6 @@ export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
                 businessTaskId: input.businessTaskId || null,
                 metadata: input.metadata || null,
             });
-            const lifecycleEvent = buildTaskLifecycleEvent("task.created", task);
-            broadcastTaskUpdate({
-                taskId: task.id,
-                projectRef: task.project_ref,
-                taskType: task.task_type,
-                status: lifecycleEvent.status,
-                lifecycleEvents: [lifecycleEvent],
-            });
-            void dispatchTaskLifecycleEvents([lifecycleEvent]).catch(() => undefined);
             return status(202, task);
         } catch (err: unknown) {
             return status(500, { message: "Failed to enqueue queue message", code: "500", details: (err instanceof Error ? err.message : String(err)) });
