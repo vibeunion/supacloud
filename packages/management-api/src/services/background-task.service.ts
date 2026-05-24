@@ -32,6 +32,9 @@ export interface EnqueueBackgroundFunctionTaskInput {
   maxPayloadBytes?: number;
   idempotencyKey?: string | null;
   traceId: string;
+  correlationId?: string | null;
+  businessTaskId?: string | null;
+  metadata?: Record<string, unknown> | null;
 }
 
 const DEFAULT_TIMEOUT_SEC = 300;
@@ -87,7 +90,10 @@ export async function enqueueBackgroundFunctionTask(
         next_run_at,
         timeout_sec,
         idempotency_key,
-        trace_id
+        trace_id,
+        correlation_id,
+        business_task_id,
+        metadata
       )
       VALUES (
         ${input.projectRef},
@@ -100,7 +106,10 @@ export async function enqueueBackgroundFunctionTask(
         NOW(),
         ${timeoutSec},
         ${input.idempotencyKey || null},
-        ${input.traceId}
+        ${input.traceId},
+        ${input.correlationId || null},
+        ${input.businessTaskId || null},
+        ${JSON.stringify(input.metadata || {})}
       )
       ON CONFLICT (project_ref, idempotency_key)
       WHERE idempotency_key IS NOT NULL

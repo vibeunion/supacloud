@@ -48,6 +48,9 @@ export type SupaCloudTaskDetail = {
   payload?: Record<string, unknown>;
   attempts?: SupaCloudTaskAttempt[];
   latest_logs?: SupaCloudTaskLogEntry[];
+  correlation_id?: string | null;
+  business_task_id?: string | null;
+  metadata?: Record<string, unknown> | null;
   updated_at?: string | null;
   created_at?: string | null;
   [key: string]: unknown;
@@ -84,6 +87,12 @@ export type SupaCloudTaskSubmitOptions = {
   timeoutSec?: number;
   idempotencyKey?: string;
   method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+  /** Opaque correlation ID — the platform stores it but does not interpret it */
+  correlationId?: string;
+  /** Business-layer task ID for mapping back to the caller's own task table */
+  businessTaskId?: string;
+  /** Arbitrary JSON metadata — the platform stores it but does not interpret it */
+  metadata?: Record<string, unknown>;
 };
 
 export type SupaCloudQueueSendOptions = {
@@ -91,6 +100,9 @@ export type SupaCloudQueueSendOptions = {
   maxAttempts?: number;
   idempotencyKey?: string;
   traceId?: string;
+  correlationId?: string;
+  businessTaskId?: string;
+  metadata?: Record<string, unknown>;
 };
 
 export type SupaCloudQueueReceiveOptions = {
@@ -116,6 +128,27 @@ export type SupaCloudQueueListFilters = {
 export type SupaCloudQueueMessage = SupaCloudTaskDetail & {
   payload: Record<string, unknown>;
 };
+
+export type SupaCloudQueueStats = {
+  pending: number;
+  leased: number;
+  running: number;
+  retryScheduled: number;
+  succeededLast24h: number;
+  failedLast24h: number;
+  deadLettered: number;
+  oldestPendingAgeSec: number | null;
+  inFlight: number;
+};
+
+export type SupaCloudQueueSettings = {
+  max_in_flight: number;
+  default_visibility_timeout_sec: number;
+  max_attempts: number;
+  rate_limit_per_minute: number;
+};
+
+export type SupaCloudQueueSettingsUpdate = Partial<SupaCloudQueueSettings>;
 
 export type SupaCloudTaskWaitOptions = {
   intervalMs?: number;
@@ -243,7 +276,21 @@ export class SupaCloudTaskSubmitError extends Error {
   }
 }
 
-type HttpMethod = "GET" | "POST" | "PUT" | "DELETE";
+export class SupaCloudApiError extends Error {
+  readonly status: number;
+  readonly code: string | null;
+  readonly responseBody: unknown;
+
+  constructor(message: string, status: number, responseBody: unknown) {
+    super(message);
+    this.name = "SupaCloudApiError";
+    this.status = status;
+    this.responseBody = responseBody;
+    this.code = extractErrorCode(responseBody);
+  }
+}
+
+type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
 const TERMINAL_STATUSES = new Set<string>([
   "succeeded",
@@ -288,6 +335,22 @@ function createQueueQueryString(filters: SupaCloudQueueListFilters = {}): string
 
   const query = params.toString();
   return query.length > 0 ? `?${query}` : "";
+}
+
+function extractErrorCode(body: unknown): string | null {
+  if (!body || typeof body !== "object") return null;
+  const code = (body as Record<string, unknown>).code;
+  return typeof code === "string" ? code : null;
+}
+
+async function readResponseBody(response: Response): Promise<unknown> {
+  const text = await response.text();
+  if (!text) return undefined;
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return text;
+  }
 }
 
 async function defaultAccessTokenResolver(
@@ -344,13 +407,18 @@ class SupaCloudManagementClient<TClient extends SupabaseClient = SupabaseClient>
       ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
     });
 
-    if (!response.ok) {
-      throw new Error(`SupaCloud request failed (${response.status})`);
-    }
-
     if (response.status === 204) return undefined as T;
 
-    return (await response.json()) as T;
+    const responseBody = await readResponseBody(response);
+    if (!response.ok) {
+      const message =
+        responseBody && typeof responseBody === "object" && typeof (responseBody as Record<string, unknown>).message === "string"
+          ? String((responseBody as Record<string, unknown>).message)
+          : `SupaCloud request failed (${response.status})`;
+      throw new SupaCloudApiError(message, response.status, responseBody);
+    }
+
+    return responseBody as T;
   }
 }
 
@@ -379,6 +447,9 @@ class SupaCloudTasksClient<TClient extends SupabaseClient = SupabaseClient> exte
     const invokeHeaders = {
       ...headers,
       ...(idempotencyKey ? { "x-supacloud-idempotency-key": idempotencyKey } : {}),
+      ...(options.correlationId ? { "x-supacloud-correlation-id": options.correlationId } : {}),
+      ...(options.businessTaskId ? { "x-supacloud-business-task-id": options.businessTaskId } : {}),
+      ...(options.metadata ? { "x-supacloud-task-metadata": JSON.stringify(options.metadata) } : {}),
     };
     const { data, error } = await this.options.supabase.functions.invoke(functionName, {
       body,
@@ -682,6 +753,9 @@ class SupaCloudQueueClient<TClient extends SupabaseClient = SupabaseClient> exte
         maxAttempts: options.maxAttempts,
         idempotencyKey: options.idempotencyKey,
         traceId: options.traceId,
+        correlationId: options.correlationId,
+        businessTaskId: options.businessTaskId,
+        metadata: options.metadata,
       },
     );
   }
@@ -706,6 +780,28 @@ class SupaCloudQueueClient<TClient extends SupabaseClient = SupabaseClient> exte
 
   async listFailed(limit = 100): Promise<SupaCloudQueueMessage[]> {
     return this.list({ dlq: true, limit });
+  }
+
+  async stats(): Promise<SupaCloudQueueStats> {
+    return this.request<SupaCloudQueueStats>(
+      `/v1/projects/${this.options.projectRef}/tasks/queues/${this.encodedName}/stats`,
+      "GET",
+    );
+  }
+
+  async getSettings(): Promise<SupaCloudQueueSettings> {
+    return this.request<SupaCloudQueueSettings>(
+      `/v1/projects/${this.options.projectRef}/tasks/queues/${this.encodedName}/settings`,
+      "GET",
+    );
+  }
+
+  async updateSettings(settings: SupaCloudQueueSettingsUpdate): Promise<SupaCloudQueueSettings> {
+    return this.request<SupaCloudQueueSettings>(
+      `/v1/projects/${this.options.projectRef}/tasks/queues/${this.encodedName}/settings`,
+      "PATCH",
+      settings,
+    );
   }
 
   async get(messageId: string): Promise<SupaCloudQueueMessage> {
@@ -752,6 +848,13 @@ class SupaCloudQueueClient<TClient extends SupabaseClient = SupabaseClient> exte
       `/v1/projects/${this.options.projectRef}/tasks/queues/${this.encodedName}/messages/${messageId}/fail`,
       "POST",
       options,
+    );
+  }
+
+  async retry(messageId: string): Promise<SupaCloudQueueMessage> {
+    return this.request<SupaCloudQueueMessage>(
+      `/v1/projects/${this.options.projectRef}/tasks/queues/${this.encodedName}/messages/${messageId}/retry`,
+      "POST",
     );
   }
 }

@@ -8,6 +8,7 @@ It does **not** replace [`@supabase/supabase-js`](https://www.npmjs.com/package/
 - task detail and list APIs
 - cancel / retry helpers
 - Realtime subscription with polling fallback
+- queue send / receive / ack / release / fail / retry helpers
 - project OAuth/OIDC migration and OAuth client management
 
 ## Install
@@ -59,6 +60,18 @@ The current package focuses on:
 - `tasks.retry`
 - `tasks.wait`
 - `tasks.subscribe`
+- `queue(name).send`
+- `queue(name).receive`
+- `queue(name).ack`
+- `queue(name).release`
+- `queue(name).fail`
+- `queue(name).retry`
+- `queue(name).delete`
+- `queue(name).list`
+- `queue(name).listFailed`
+- `queue(name).stats`
+- `queue(name).getSettings`
+- `queue(name).updateSettings`
 - `auth.oauthServer.getStatus`
 - `auth.oauthServer.migrateToOidc`
 - `auth.oauthServer.getDiscovery`
@@ -74,6 +87,37 @@ The current package focuses on:
 2. if Realtime is unavailable, fall back to polling the management API
 
 This lets apps degrade gracefully when websocket or channel health is transient.
+
+## Queue Helpers
+
+```ts
+const queue = supacloud.queue("emails");
+
+const message = await queue.send(
+  { to: "user@example.com", template: "welcome" },
+  {
+    idempotencyKey: "welcome-user-123",
+    correlationId: "signup-123",
+    businessTaskId: "email-job-123",
+    metadata: { source: "signup" },
+  },
+);
+
+const leased = await queue.receive({ visibilityTimeoutSec: 60 });
+if (leased) {
+  try {
+    await sendEmail(leased.payload);
+    await queue.ack(leased.id, { delivered: true });
+  } catch (error) {
+    await queue.release(leased.id, { delayMs: 30_000, error: String(error) });
+  }
+}
+
+const stats = await queue.stats();
+console.log(stats.inFlight, stats.deadLettered);
+```
+
+Queue conflicts such as replaying a non-DLQ message are surfaced as `SupaCloudApiError` with `status`, `code`, and `responseBody`, so callers do not need to parse raw `fetch` responses.
 
 ## OAuth/OIDC Helpers
 

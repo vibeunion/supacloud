@@ -588,6 +588,7 @@ export async function registerAllRoutes() {
     chatRoutes,
     platformSettingsRoutes,
     projectLogsRoutes,
+    taskEventRoutes,
     systemRoutes,
     diagnosticsRoutes,
   } = await import("./routes");
@@ -676,6 +677,7 @@ export async function registerAllRoutes() {
       .use(chatRoutes)
       .use(platformSettingsRoutes)
       .use(projectLogsRoutes)
+      .use(taskEventRoutes)
       .use(systemRoutes)
       .use(diagnosticsRoutes)
   );
