@@ -8,6 +8,9 @@ It covers:
 - task polling
 - task cancellation
 - DLQ troubleshooting
+- correlation metadata for business task mapping
+- lifecycle webhook sync for apps that keep their own `public.tasks`
+- queue producer/consumer helpers for message-based workloads
 
 ## Short Answer: Can This Be Done With `supabase-js`?
 
@@ -70,6 +73,12 @@ const task = await supacloud.tasks.submit("mockup-generator", {
   retries: 3,
   timeoutSec: 300,
   idempotencyKey: "mockup-prod_123-v1",
+  correlationId: "workflow-run-123",
+  businessTaskId: "mockup-task-123",
+  metadata: {
+    workflow_id: "workflow-123",
+    billing_subject: "user-123",
+  },
 });
 
 console.log(task.task_id);
@@ -83,6 +92,8 @@ Expected response:
   "status": "enqueued"
 }
 ```
+
+The correlation fields are stored on the task and then surface in task detail and lifecycle webhook payloads.
 
 ## Step 3: Poll Task Status
 
@@ -149,6 +160,93 @@ subscription.unsubscribe();
 2. switch to polling if the channel times out or errors
 
 This keeps task UX alive even when Realtime is degraded.
+
+## Keep Your Own Business Task Table
+
+If your app already stores business state in a table such as `public.tasks`, keep that table. Use lifecycle webhooks to mirror platform task state back into your own rows instead of trying to reuse the platform's internal mirror schema.
+
+Register a webhook from a trusted backend:
+
+```http
+POST /v1/projects/:ref/task-events/webhook
+Authorization: Bearer <management-token>
+Content-Type: application/json
+
+{
+  "url": "https://app.example.com/supacloud/task-events",
+  "secret": "shared-hmac-secret"
+}
+```
+
+The webhook receives `{ events: [...] }`, and each event includes `event_type`, `task_id`, `status`, `attempt`, `correlation_id`, `business_task_id`, and `metadata`.
+
+## Message Queue Flow
+
+Queue helpers are the right fit when the workload is message-oriented instead of function-oriented.
+
+Producer:
+
+```ts
+const queue = supacloud.queue("emails");
+
+await queue.send(
+  {
+    to: "user@example.com",
+    template: "welcome",
+  },
+  {
+    idempotencyKey: "welcome-user-123",
+    delayMs: 10_000,
+    maxAttempts: 5,
+    traceId: "trace-123",
+    correlationId: "signup-123",
+    businessTaskId: "email-job-123",
+    metadata: {
+      source: "signup",
+      billing_subject: "user-123",
+    },
+  },
+);
+```
+
+Consumer:
+
+```ts
+const message = await queue.receive({ visibilityTimeoutSec: 60 });
+
+if (message) {
+  try {
+    await sendEmail(message.payload);
+    await queue.ack(message.id, { delivered: true });
+  } catch (error) {
+    await queue.release(message.id, {
+      delayMs: 30_000,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+```
+
+Dead-letter handling:
+
+```ts
+const failed = await queue.listFailed(100);
+await queue.retry(failed[0].id);
+await queue.delete(failed[0].id);
+```
+
+Queue settings are available for operators:
+
+- `getSettings()`
+- `updateSettings()`
+- `stats()`
+
+The documented queue fields are:
+
+- `max_in_flight`
+- `default_visibility_timeout_sec`
+- `max_attempts`
+- `rate_limit_per_minute`
 
 ## Full Tutorial Flow
 

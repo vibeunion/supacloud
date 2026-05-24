@@ -34,6 +34,12 @@ const supacloud = createSupaCloudClient({
 const task = await supacloud.tasks.submit("aorist-ai/generate/crop", {
   body: { image_id: "img_123" },
   idempotencyKey: "crop-img_123-v1",
+  correlationId: "workflow-run-123",
+  businessTaskId: "aorist-task-123",
+  metadata: {
+    workflow_id: "workflow-123",
+    billing_subject: "user-123",
+  },
 });
 
 const finalState = await task.wait();
@@ -49,6 +55,8 @@ This SDK is intentionally thin:
 
 `tasks.submit()` expects the target function path to be configured in `background_routes`.
 That keeps frontend calls compatible with strict CORS deployments while preserving the same task receipt API.
+
+Use `correlationId`, `businessTaskId`, and `metadata` when the application already has its own task, workflow, or billing records. SupaCloud stores these fields but does not interpret them; lifecycle webhooks echo them back so the application can update its own tables.
 
 The current package focuses on:
 
@@ -88,6 +96,37 @@ The current package focuses on:
 
 This lets apps degrade gracefully when websocket or channel health is transient.
 
+## Task Lifecycle Webhook
+
+Applications that already own a business task table should keep it. SupaCloud emits lifecycle events so the app can sync `public.tasks`, billing, Realtime, and workflow rows without adopting platform-internal mirror tables.
+
+Register a webhook from a trusted backend:
+
+```http
+POST /v1/projects/:ref/task-events/webhook
+Authorization: Bearer <management-token>
+Content-Type: application/json
+
+{
+  "url": "https://app.example.com/supacloud/task-events",
+  "secret": "shared-hmac-secret"
+}
+```
+
+Events are delivered as `{ events: [...] }`. Each event includes `event_type`, `task_id`, `status`, `attempt`, `correlation_id`, `business_task_id`, and `metadata`.
+
+Supported lifecycle events:
+
+- `task.created`
+- `task.running`
+- `task.succeeded`
+- `task.failed`
+- `task.retry_scheduled`
+- `task.dead_lettered`
+- `task.cancelled`
+
+If `secret` is set, verify `X-SupaCloud-Signature: sha256=<hmac>` against the raw JSON body.
+
 ## Queue Helpers
 
 ```ts
@@ -97,9 +136,15 @@ const message = await queue.send(
   { to: "user@example.com", template: "welcome" },
   {
     idempotencyKey: "welcome-user-123",
+    delayMs: 10_000,
+    maxAttempts: 5,
+    traceId: "trace-123",
     correlationId: "signup-123",
     businessTaskId: "email-job-123",
-    metadata: { source: "signup" },
+    metadata: {
+      source: "signup",
+      billing_subject: "user-123",
+    },
   },
 );
 
@@ -116,6 +161,29 @@ if (leased) {
 const stats = await queue.stats();
 console.log(stats.inFlight, stats.deadLettered);
 ```
+
+Queue API surface:
+
+- `queue.send(payload, options)`: enqueue a message, optionally delayed and idempotent
+- `queue.receive({ visibilityTimeoutSec })`: lease the next message, or return `null`
+- `queue.ack(messageId, result)`: mark the leased message succeeded
+- `queue.release(messageId, { delayMs, error })`: return the message to the queue later
+- `queue.fail(messageId, { error, deadLetter })`: mark failed or dead-lettered
+- `queue.retry(messageId)`: replay a dead-lettered message
+- `queue.delete(messageId)`: cancel/delete a message
+- `queue.list(filters)`: list messages by status, DLQ flag, and limit
+- `queue.listFailed(limit)`: shortcut for DLQ messages
+- `queue.get(messageId)`: read message detail, attempts, and latest logs
+- `queue.stats()`: inspect queue depth and recent success/failure counts
+- `queue.getSettings()`: read concurrency, lease, retry, and rate-limit settings
+- `queue.updateSettings(settings)`: patch queue settings
+
+Queue settings:
+
+- `max_in_flight`: max concurrently leased/running messages for this queue
+- `default_visibility_timeout_sec`: lease timeout used by `receive()`
+- `max_attempts`: default retry budget for new messages
+- `rate_limit_per_minute`: producer enqueue limit
 
 Queue conflicts such as replaying a non-DLQ message are surfaced as `SupaCloudApiError` with `status`, `code`, and `responseBody`, so callers do not need to parse raw `fetch` responses.
 
