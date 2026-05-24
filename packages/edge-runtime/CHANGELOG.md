@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.3](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.6.2...edge-runtime-v0.6.3) (2026-05-24)
+
+
+### Bug Fixes
+
+* separate platform mirror table, invoker circuit breaker, WorkerPool NaN metrics ([#177](https://github.com/zuohuadong/supacloud/issues/177)) ([2b31821](https://github.com/zuohuadong/supacloud/commit/2b31821d83276f73af9b6267e32fcdef2c098784))
+
 ## [0.6.2](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.6.1...edge-runtime-v0.6.2) (2026-05-23)
 
 
