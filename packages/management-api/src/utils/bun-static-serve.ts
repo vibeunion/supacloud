@@ -119,6 +119,11 @@ export function createFetchHandler(root: string) {
       return new Response("Bad Request", { status: 400 });
     }
 
+    // Readiness probe for health checks (Kong / systemd ExecStartPre)
+    if (path === "/healthz") {
+      return new Response("ok", { status: 200, headers: { "Content-Type": "text/plain" } });
+    }
+
     // Security: prevent path traversal
     if (path.includes("..")) {
       return new Response("Forbidden", { status: 403 });

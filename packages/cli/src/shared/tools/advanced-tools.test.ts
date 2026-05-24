@@ -32,6 +32,21 @@ function captureSecretsTool(http: Record<string, unknown>) {
     return { schema, callback };
 }
 
+function captureTaskEventsTool(http: Record<string, unknown>) {
+    let schema: Record<string, unknown> | undefined;
+    let callback: ((args: Record<string, unknown>) => Promise<{ content: Array<{ text: string }> }>) | undefined;
+    registerAdvancedTools({
+        tool(name: string, _description: string, toolSchema: Record<string, unknown>, toolCallback: typeof callback) {
+            if (name !== "task_events") return;
+            schema = toolSchema;
+            callback = toolCallback;
+        },
+    }, http as any);
+
+    if (!schema || !callback) throw new Error("task_events tool was not registered");
+    return { schema, callback };
+}
+
 describe("edge_functions CLI tool", () => {
     test("parses background routes from CLI-friendly comma-separated input", () => {
         const { schema } = captureEdgeFunctionsTool({});
@@ -160,5 +175,33 @@ describe("secrets CLI tool", () => {
             { name: "API_KEY", value: "secret" },
             { name: "OTHER", value: "value=with=equals" },
         ]);
+    });
+});
+
+describe("task_events CLI tool", () => {
+    test("registers a task webhook through management api", async () => {
+        const calls: Array<{ method: string; path: string; body: unknown }> = [];
+        const { callback } = captureTaskEventsTool({
+            post: async (path: string, body: unknown) => {
+                calls.push({ method: "post", path, body });
+                return { ok: true, status: 200, data: { registered: true } };
+            },
+        });
+
+        const result = await callback({
+            action: "register_webhook",
+            ref: "proj",
+            url: "https://example.com/webhook",
+            secret: "secret",
+        });
+
+        expect(calls).toEqual([
+            {
+                method: "post",
+                path: "/v1/projects/proj/task-events/webhook",
+                body: { url: "https://example.com/webhook", secret: "secret" },
+            },
+        ]);
+        expect(result.content[0].text).toContain("Webhook registered");
     });
 });

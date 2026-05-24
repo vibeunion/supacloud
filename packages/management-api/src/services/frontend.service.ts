@@ -1,11 +1,15 @@
 /**
- * Frontend Service — Core deployment lifecycle
+ * Frontend Service — Core deployment lifecycle with blue-green switching
  * 
  * Delegates to:
  * - FrontendDomainService — custom domains, deploy tokens, env vars, git config
  * - FrontendRecordService — deployment records (history/audit trail)
  *
- * This file handles: CRUD, build, Kong routing, SSR process management
+ * This file handles: CRUD, build, Kong routing, process management
+ *
+ * Deployment flow (blue-green):
+ *   build → start process → wait for /healthz readiness → switch Kong route → done
+ *   If readiness fails: stop process, do NOT switch route, report failure
  */
 import { $ } from "bun";
 import { readdir } from "node:fs/promises";
@@ -15,7 +19,6 @@ import type {
   FrontendDeployment,
   FrontendDeploymentConfig,
   FrontendBuildResult,
-  DeploymentRecord,
   FrontendDnsRecord,
 } from "../types/frontend";
 import {
@@ -25,6 +28,8 @@ import { FrontendDomainService } from "./frontend-domain.service";
 import { FrontendRecordService } from "./frontend-record.service";
 
 const FRONTEND_BASE_DIR = "/var/supacloud/frontends";
+const READINESS_TIMEOUT_MS = 30_000;
+const READINESS_INTERVAL_MS = 500;
 const UNSAFE_COMMAND_PATTERN = /[\n\r;&|`$<>]/;
 const SAFE_GIT_SSH_PATTERN = /^git@[A-Za-z0-9.-]+:[A-Za-z0-9._~/-]+\.git$/;
 
@@ -89,6 +94,33 @@ export class FrontendService {
 
   private generateId(): string {
     return crypto.randomUUID().substring(0, 8);
+  }
+
+  // ── Readiness Gate ──────────────────────────────────────────────
+
+  /**
+   * Poll /healthz on the frontend process until it responds 200 or timeout.
+   * Returns true if ready, false if timed out.
+   */
+  private async waitForReadiness(port: number, timeoutMs: number = READINESS_TIMEOUT_MS): Promise<boolean> {
+    const deadline = Date.now() + timeoutMs;
+    const url = `http://127.0.0.1:${port}/healthz`;
+
+    while (Date.now() < deadline) {
+      try {
+        const res = await fetch(url, { signal: AbortSignal.timeout(2000) });
+        if (res.ok) {
+          logger.info(`[FrontendService] Readiness confirmed on port ${port}`);
+          return true;
+        }
+      } catch {
+        // Process not up yet, retry
+      }
+      await Bun.sleep(READINESS_INTERVAL_MS);
+    }
+
+    logger.error(`[FrontendService] Readiness check timed out on port ${port} after ${timeoutMs}ms`);
+    return false;
   }
 
   // ── CRUD ──────────────────────────────────────────────────────────
@@ -161,8 +193,7 @@ export class FrontendService {
       JSON.stringify(deployment, null, 2)
     );
 
-    await this.ensureDeploymentRoute(deployment);
-
+    // Do NOT route traffic yet — route is configured after build + readiness
     return deployment;
   }
 
@@ -194,7 +225,7 @@ export class FrontendService {
     try {
       const deployment = await this.getDeployment(projectRef, deploymentId);
       if (deployment) {
-        await this.stopSSRProcess(projectRef, deploymentId);
+        await this.stopProcess(projectRef, deploymentId);
         await this.removeKongRoute(deployment);
       }
       await $`rm -rf ${deploymentDir}`.quiet();
@@ -242,7 +273,7 @@ export class FrontendService {
     return records;
   }
 
-  // ── Build Pipeline ────────────────────────────────────────────────
+  // ── Build Pipeline (blue-green) ────────────────────────────────
 
   async deployFromSource(
     projectRef: string,
@@ -335,6 +366,10 @@ export class FrontendService {
     }
   }
 
+  /**
+   * Blue-green build: build → start process → readiness gate → switch Kong route
+   * If readiness fails, stop process and do NOT switch route.
+   */
   private async buildDeployment(
     projectRef: string,
     deploymentId: string,
@@ -382,8 +417,20 @@ export class FrontendService {
       const outputDir = this.joinPath(sourceDir, deployment.output_dir);
       await $`rm -rf ${buildDir} && cp -r ${outputDir} ${buildDir}`.quiet();
 
-      await this.startSSRProcess(projectRef, deploymentId, deployment, buildDir, defaults.is_ssr);
-      await this.ensureDeploymentRoute(deployment);
+      // Blue-green: start process FIRST, but do NOT route traffic yet
+      const port = await this.startProcess(projectRef, deploymentId, deployment, buildDir, defaults.is_ssr);
+
+      // Readiness gate: wait for /healthz before switching Kong route
+      const ready = await this.waitForReadiness(port);
+      if (!ready) {
+        // Rollback: stop the process, leave Kong pointing at old state (or nothing)
+        logger.error(`[FrontendService] Readiness failed for ${projectRef}/${deploymentId}, stopping process`);
+        await this.stopProcess(projectRef, deploymentId);
+        throw new Error(`Frontend process failed readiness check on port ${port} within ${READINESS_TIMEOUT_MS}ms`);
+      }
+
+      // Process is healthy — NOW switch Kong route
+      await this.configureKongRoute(deployment, buildDir, defaults.is_ssr);
 
       await this.updateDeployment(projectRef, deploymentId, {
         status: "success",
@@ -410,15 +457,6 @@ export class FrontendService {
   }
 
   // ── Kong (Web Server) Config ─────────────────────────────────────
-
-  private async ensureDeploymentRoute(deployment: FrontendDeployment): Promise<void> {
-    const defaults = FRAMEWORK_DEFAULTS[deployment.framework];
-    await this.configureKongRoute(
-      deployment,
-      this.joinPath(this.baseDir, deployment.project_ref, deployment.id, "build"),
-      defaults.is_ssr,
-    );
-  }
 
   async configureKongRoute(deployment: FrontendDeployment, buildDir: string, isSSR: boolean): Promise<void> {
     const port = 30000 + parseInt(deployment.id, 16) % 10000;
@@ -461,15 +499,20 @@ export class FrontendService {
   }
 
 
-  // ── SSR Process Management ────────────────────────────────────────
+  // ── Process Management (static vs SSR) ──────────────────────────
 
-  private async startSSRProcess(
+  /**
+   * Start the frontend process (static or SSR) and return the port.
+   * Static: supacloud static-serve (binary-backed, /healthz built-in)
+   * SSR: bun run buildDir/index.js (user must expose /healthz or rely on process start)
+   */
+  private async startProcess(
     projectRef: string,
     deploymentId: string,
     deployment: FrontendDeployment,
     buildDir: string,
     isSSR: boolean
-  ): Promise<void> {
+  ): Promise<number> {
     const port = 30000 + parseInt(deploymentId, 16) % 10000;
     const serviceName = `supacloud-frontend-${projectRef}-${deploymentId}`;
 
@@ -480,8 +523,12 @@ export class FrontendService {
     await Bun.write(envFile, envContent);
 
     const bunPath = config.bunPath;
-    const systemdService = `[Unit]
-Description=SupaCloud Frontend: ${deployment.name} (${projectRef}/${deploymentId})
+    let systemdUnit: string;
+
+    if (isSSR) {
+      // SSR: user framework handles HTTP; rely on process startup for readiness
+      systemdUnit = `[Unit]
+Description=SupaCloud Frontend SSR: ${deployment.name} (${projectRef}/${deploymentId})
 After=network.target
 
 [Service]
@@ -492,7 +539,7 @@ Environment="PORT=${port}"
 Environment="NODE_ENV=production"
 EnvironmentFile=-/etc/supabase/management-api.env
 EnvironmentFile=${envFile}
-ExecStart=${isSSR ? `${bunPath} run ${buildDir}/index.js` : `${config.supacloudBinaryPath} static-serve ${buildDir} ${port} --workers=auto`}
+ExecStart=${bunPath} run ${buildDir}/index.js
 Restart=always
 RestartSec=5
 LimitNOFILE=65536
@@ -500,16 +547,41 @@ LimitNOFILE=65536
 [Install]
 WantedBy=multi-user.target
 `;
+    } else {
+      // Static: binary-backed static-serve with built-in /healthz
+      systemdUnit = `[Unit]
+Description=SupaCloud Frontend Static: ${deployment.name} (${projectRef}/${deploymentId})
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=${buildDir}
+Environment="PORT=${port}"
+Environment="NODE_ENV=production"
+EnvironmentFile=-/etc/supabase/management-api.env
+EnvironmentFile=${envFile}
+ExecStart=${config.supacloudBinaryPath} static-serve ${buildDir} ${port} --workers=auto
+Restart=always
+RestartSec=5
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
+`;
+    }
 
     const servicePath = `/etc/systemd/system/${serviceName}.service`;
-    await Bun.write(servicePath, systemdService);
+    await Bun.write(servicePath, systemdUnit);
 
     await $`systemctl daemon-reload`.quiet();
     await $`systemctl enable ${serviceName}`.quiet();
     await $`systemctl restart ${serviceName}`.quiet();
+
+    return port;
   }
 
-  private async stopSSRProcess(projectRef: string, deploymentId: string): Promise<void> {
+  private async stopProcess(projectRef: string, deploymentId: string): Promise<void> {
     const serviceName = `supacloud-frontend-${projectRef}-${deploymentId}`;
     
     await $`systemctl stop ${serviceName}`.nothrow().quiet();
