@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.4](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.6.3...edge-runtime-v0.6.4) (2026-05-24)
+
+
+### Bug Fixes
+
+* add management-api.env to frontend systemd unit template ([93299eb](https://github.com/zuohuadong/supacloud/commit/93299eba1dbecd4c706054c29e2aa93015b5fba9))
+
 ## [0.6.3](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.6.2...edge-runtime-v0.6.3) (2026-05-24)
 
 

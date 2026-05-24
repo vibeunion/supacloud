@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.21.2](https://github.com/zuohuadong/supacloud/compare/management-api-v0.21.1...management-api-v0.21.2) (2026-05-24)
+
+
+### Bug Fixes
+
+* add management-api.env to frontend systemd unit template ([93299eb](https://github.com/zuohuadong/supacloud/commit/93299eba1dbecd4c706054c29e2aa93015b5fba9))
+* **management-api:** allow new supacloud task headers ([c31eb75](https://github.com/zuohuadong/supacloud/commit/c31eb75d15a3ffcd2942e536ea1938c056b20ac8))
+
 ## [0.21.1](https://github.com/zuohuadong/supacloud/compare/management-api-v0.21.0...management-api-v0.21.1) (2026-05-24)
 
 
