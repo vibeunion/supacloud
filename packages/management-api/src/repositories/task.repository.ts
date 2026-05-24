@@ -694,6 +694,46 @@ export async function countActiveTasksForProject(projectRef: string, taskTypes?:
   });
 }
 
+export async function countActiveTasksByInvoker(projectRef: string, userId: string): Promise<{
+  count: number;
+  tasks: Array<{ id: string; task_type: string; status: string }>;
+}> {
+  return withRetry("TaskRepository.countActiveTasksByInvoker", async () => {
+    const rows = await sql.unsafe(
+      `
+        SELECT
+          COUNT(*) OVER()::int AS count,
+          id::text AS id,
+          task_type,
+          status
+        FROM project_tasks
+        WHERE project_ref = $1
+          AND status IN ($2, $3, $4, $5)
+          AND payload->'auth'->>'invoker_user_id' = $6
+        ORDER BY created_at ASC
+        LIMIT 100
+      `,
+      [
+        projectRef,
+        TaskStatuses.PENDING,
+        TaskStatuses.LEASED,
+        TaskStatuses.RUNNING,
+        TaskStatuses.RETRY_SCHEDULED,
+        userId,
+      ],
+    );
+
+    return {
+      count: Number(rows[0]?.count || 0),
+      tasks: rows.map((row: { id: string; task_type: string; status: string }) => ({
+        id: String(row.id),
+        task_type: String(row.task_type),
+        status: String(row.status),
+      })),
+    };
+  });
+}
+
 export async function releaseTask(id: string, nextRunAt: Date, error?: string): Promise<ProjectTask | null> {
   return withRetry("TaskRepository.releaseTask", async () => {
     const [task] = await sql`
@@ -1010,6 +1050,7 @@ export const taskRepository = {
   retryQueueMessage,
   countQueueMessagesCreatedSince,
   countActiveTasksForProject,
+  countActiveTasksByInvoker,
   releaseTask,
   transitionTaskToRunning,
   extendLease,
