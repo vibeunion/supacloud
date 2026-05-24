@@ -178,7 +178,14 @@ describe("taskRoutes", () => {
     const response = await request("/v1/projects/proj_1/tasks/queues/emails/messages", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ payload: { hello: "world" }, delayMs: 1000, maxAttempts: 5 }),
+      body: JSON.stringify({
+        payload: { hello: "world" },
+        delayMs: 1000,
+        maxAttempts: 5,
+        correlationId: "corr-1",
+        businessTaskId: "biz-1",
+        metadata: { tenant: "acme" },
+      }),
     });
     const payload = await response.json();
 
@@ -189,6 +196,9 @@ describe("taskRoutes", () => {
       type: "queue:emails",
       payload: { hello: "world" },
       maxAttempts: 5,
+      correlationId: "corr-1",
+      businessTaskId: "biz-1",
+      metadata: { tenant: "acme" },
     }));
     expect(countQueueMessagesCreatedSince).toHaveBeenCalledWith(
       "proj_1",

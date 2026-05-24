@@ -8,7 +8,7 @@ It does **not** replace [`@supabase/supabase-js`](https://www.npmjs.com/package/
 - task detail and list APIs
 - cancel / retry helpers
 - Realtime subscription with polling fallback
-- queue send / receive / ack / release / fail / retry helpers
+- queue send / receive / ack / release / fail / retry / delete / list / listFailed / stats / settings helpers
 - project OAuth/OIDC migration and OAuth client management
 
 ## Install

@@ -12,8 +12,6 @@ import { projectService } from "../services/project.service";
 import { matchProjectRefFromHost, resolveTenantPorts } from "../utils/project-routing";
 import { resolveProjectRefFromApiKey } from "../utils/project-auth";
 import { verifyProjectJwtPayload } from "../utils/project-jwt";
-import { broadcastTaskUpdate, dispatchTaskLifecycleEvents } from "./ws";
-import { buildTaskLifecycleEvent } from "../types/task-events";
 
 const MAX_ASYNC_BODY_BYTES = 256 * 1024;
 let sdkProxyFetch: typeof fetch = ((input: RequestInfo | URL, init?: RequestInit) =>
@@ -189,21 +187,6 @@ async function maybeEnqueueAsyncFunction(request: Request, ref: string): Promise
 
     const traceId = request.headers.get("x-request-id") || randomUUID();
     const idempotencyKey = request.headers.get("x-supacloud-idempotency-key")?.trim() || null;
-    const correlationId = request.headers.get("x-supacloud-correlation-id")?.trim() || null;
-    const businessTaskId = request.headers.get("x-supacloud-business-task-id")?.trim() || null;
-    const metadataRaw = request.headers.get("x-supacloud-task-metadata");
-    let metadata: Record<string, unknown> | null = null;
-    if (metadataRaw) {
-        try {
-            const parsed = JSON.parse(metadataRaw);
-            metadata = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
-        } catch {
-            return new Response(JSON.stringify({ message: "Invalid x-supacloud-task-metadata header", code: "400" }), {
-                status: 400,
-                headers: { "Content-Type": "application/json" },
-            });
-        }
-    }
     const authHeaders: Record<string, string> = {};
     const authorization = request.headers.get("authorization");
     const apikey = request.headers.get("apikey");
@@ -235,9 +218,6 @@ async function maybeEnqueueAsyncFunction(request: Request, ref: string): Promise
         maxPayloadBytes,
         idempotencyKey,
         traceId,
-        correlationId,
-        businessTaskId,
-        metadata,
         envelope: {
             method: request.method,
             path: restPath.length > 0 ? `/${restPath.join("/")}` : "",
@@ -255,15 +235,6 @@ async function maybeEnqueueAsyncFunction(request: Request, ref: string): Promise
             }),
         },
     });
-    const lifecycleEvent = buildTaskLifecycleEvent("task.created", task);
-    broadcastTaskUpdate({
-        taskId: task.id,
-        projectRef: task.project_ref,
-        taskType: task.task_type,
-        status: lifecycleEvent.status,
-        lifecycleEvents: [lifecycleEvent],
-    });
-    void dispatchTaskLifecycleEvents([lifecycleEvent]).catch(() => undefined);
 
     return new Response(
         JSON.stringify({
@@ -273,8 +244,6 @@ async function maybeEnqueueAsyncFunction(request: Request, ref: string): Promise
             function_slug: task.function_slug,
             attempt: task.attempt,
             max_attempts: task.max_attempts,
-            correlation_id: task.correlation_id,
-            business_task_id: task.business_task_id,
         }),
         {
             status: 202,

@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.21.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.20.4...management-api-v0.21.0) (2026-05-24)
+
+
+### Features
+
+* wrap queue APIs in supacloud js ([5b29872](https://github.com/zuohuadong/supacloud/commit/5b298726e9d4950b9a97fe76ddba77705bea5039))
+
+## [0.20.4](https://github.com/zuohuadong/supacloud/compare/management-api-v0.20.3...management-api-v0.20.4) (2026-05-24)
+
+
+### Bug Fixes
+
+* separate platform mirror table, invoker circuit breaker, WorkerPool NaN metrics ([#177](https://github.com/zuohuadong/supacloud/issues/177)) ([2b31821](https://github.com/zuohuadong/supacloud/commit/2b31821d83276f73af9b6267e32fcdef2c098784))
+
 ## [0.20.3](https://github.com/zuohuadong/supacloud/compare/management-api-v0.20.2...management-api-v0.20.3) (2026-05-24)
 
 

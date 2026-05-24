@@ -2,8 +2,7 @@ import type { ProjectTask } from "../db";
 import { TaskStatus, TaskType } from "../db";
 import { taskRepository } from "../repositories/task.repository";
 import { projectRepository } from "../repositories/project.repository";
-import { broadcastTaskUpdate, dispatchTaskLifecycleEvents } from "../routes/ws";
-import { type TaskLifecycleEventType, buildTaskLifecycleEvent } from "../types/task-events";
+import { broadcastTaskUpdate } from "../routes/ws";
 import { logger } from "../utils/logger";
 import { config } from "../config";
 import { DEFAULT_BACKGROUND_TASK_SETTINGS } from "../config/background-task-settings";
@@ -112,29 +111,6 @@ class NonRetryableBackgroundInvocationError extends Error {
     super(message);
     this.name = "NonRetryableBackgroundInvocationError";
   }
-}
-
-function broadcastAndDispatch(
-  task: ProjectTask,
-  eventType: TaskLifecycleEventType,
-  error?: string | null,
-): void {
-  const lifecycleEvent = buildTaskLifecycleEvent(eventType, task, error);
-  broadcastTaskUpdate({
-    taskId: task.id,
-    projectRef: task.project_ref,
-    taskType: task.task_type,
-    status: lifecycleEvent.status,
-    error: error ?? task.error,
-    lifecycleEvents: [lifecycleEvent],
-  });
-  void dispatchTaskLifecycleEvents([lifecycleEvent]).catch((err: unknown) => {
-    logger.warn("[BackgroundFunctionWorker] lifecycle event dispatch failed", {
-      taskId: task.id,
-      eventType,
-      error: err instanceof Error ? err.message : String(err),
-    });
-  });
 }
 
 function isUuid(value: string | null | undefined): boolean {
@@ -428,7 +404,13 @@ export class BackgroundFunctionWorker {
     const project = await projectRepository.findByRef(task.project_ref);
     if (!project || project.status !== "active") {
       await taskRepository.cancelTask(task.id, !project ? "Project not found" : `Project is ${project.status}`);
-      broadcastAndDispatch(task, "task.cancelled", !project ? "Project not found" : `Project is ${project.status}`);
+      broadcastTaskUpdate({
+        taskId: task.id,
+        projectRef: task.project_ref,
+        taskType: task.task_type,
+        status: TaskStatus.CANCELLED,
+        error: !project ? "Project not found" : `Project is ${project.status}`,
+      });
       return;
     }
 
@@ -436,7 +418,13 @@ export class BackgroundFunctionWorker {
     const leaseSeconds = computeLeaseSeconds(task.timeout_sec);
     const lease = await taskRepository.extendLease(task.id, leaseSeconds);
     if (!lease) {
-      broadcastAndDispatch(task, "task.cancelled", task.cancellation_reason || "Cancelled before execution");
+      broadcastTaskUpdate({
+        taskId: task.id,
+        projectRef: task.project_ref,
+        taskType: task.task_type,
+        status: TaskStatus.CANCELLED,
+        error: task.cancellation_reason || "Cancelled before execution",
+      });
       return;
     }
 
@@ -447,7 +435,12 @@ export class BackgroundFunctionWorker {
       createBackgroundTaskMirrorIfUserExists(task),
     ]);
 
-    broadcastAndDispatch(task, "task.running");
+    broadcastTaskUpdate({
+      taskId: task.id,
+      projectRef: task.project_ref,
+      taskType: task.task_type,
+      status: TaskStatus.RUNNING,
+    });
 
     // invoker 校验失败 → dead-letter
     if (invokerError instanceof NonRetryableBackgroundInvocationError) {
@@ -461,7 +454,13 @@ export class BackgroundFunctionWorker {
         logs: [],
       });
       await taskRepository.markTaskFailed(task.id, invokerError.message, true);
-      broadcastAndDispatch(task, "task.dead_lettered", invokerError.message);
+      broadcastTaskUpdate({
+        taskId: task.id,
+        projectRef: task.project_ref,
+        taskType: task.task_type,
+        status: TaskStatus.DEAD_LETTERED,
+        error: invokerError.message,
+      });
       return;
     }
 
@@ -485,7 +484,13 @@ export class BackgroundFunctionWorker {
         logs: [],
       });
       await taskRepository.markTaskFailed(task.id, "Background invoker user no longer exists (atomic RPC check)", true);
-      broadcastAndDispatch(task, "task.dead_lettered", "Background invoker user no longer exists (atomic RPC check)");
+      broadcastTaskUpdate({
+        taskId: task.id,
+        projectRef: task.project_ref,
+        taskType: task.task_type,
+        status: TaskStatus.DEAD_LETTERED,
+        error: "Background invoker user no longer exists (atomic RPC check)",
+      });
       return;
     }
 
@@ -528,7 +533,13 @@ export class BackgroundFunctionWorker {
           logs,
         });
         await taskRepository.cancelTask(task.id, task.cancellation_reason || "Cancelled by user");
-        broadcastAndDispatch(task, "task.cancelled", task.cancellation_reason || "Cancelled by user");
+        broadcastTaskUpdate({
+          taskId: task.id,
+          projectRef: task.project_ref,
+          taskType: task.task_type,
+          status: TaskStatus.CANCELLED,
+          error: task.cancellation_reason || "Cancelled by user",
+        });
         return;
       }
 
@@ -541,7 +552,12 @@ export class BackgroundFunctionWorker {
           logs,
         });
         await taskRepository.markTaskSucceeded(task.id, result);
-        broadcastAndDispatch(task, "task.succeeded");
+        broadcastTaskUpdate({
+          taskId: task.id,
+          projectRef: task.project_ref,
+          taskType: task.task_type,
+          status: TaskStatus.SUCCEEDED,
+        });
         return;
       }
 
@@ -563,7 +579,13 @@ export class BackgroundFunctionWorker {
           logs,
         });
         await taskRepository.markTaskFailed(task.id, message, true);
-        broadcastAndDispatch(task, "task.dead_lettered", message);
+        broadcastTaskUpdate({
+          taskId: task.id,
+          projectRef: task.project_ref,
+          taskType: task.task_type,
+          status: TaskStatus.DEAD_LETTERED,
+          error: message,
+        });
         return;
       }
 
@@ -577,7 +599,13 @@ export class BackgroundFunctionWorker {
         });
         const nextRunAt = new Date(Date.now() + computeRetryDelayMs(attempt));
         await taskRepository.scheduleRetry(task.id, message, nextRunAt);
-        broadcastAndDispatch(task, "task.retry_scheduled", message);
+        broadcastTaskUpdate({
+          taskId: task.id,
+          projectRef: task.project_ref,
+          taskType: task.task_type,
+          status: TaskStatus.RETRY_SCHEDULED,
+          error: message,
+        });
       } else {
         await taskRepository.completeTaskAttempt(task.id, attempt, {
           status: "dead_lettered",
@@ -587,7 +615,13 @@ export class BackgroundFunctionWorker {
           logs,
         });
         await taskRepository.markTaskFailed(task.id, message, true);
-        broadcastAndDispatch(task, "task.dead_lettered", message);
+        broadcastTaskUpdate({
+          taskId: task.id,
+          projectRef: task.project_ref,
+          taskType: task.task_type,
+          status: TaskStatus.DEAD_LETTERED,
+          error: message,
+        });
       }
 
       logger.error("[BackgroundFunctionWorker] task failed", {

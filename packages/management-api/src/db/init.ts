@@ -84,6 +84,9 @@ export async function initDatabase() {
       trace_id VARCHAR(255),
       cancel_requested_at TIMESTAMPTZ,
       cancellation_reason TEXT,
+      correlation_id VARCHAR(255),
+      business_task_id VARCHAR(255),
+      metadata JSONB DEFAULT '{}'::jsonb,
       created_at TIMESTAMPTZ DEFAULT NOW(),
       updated_at TIMESTAMPTZ DEFAULT NOW()
     );

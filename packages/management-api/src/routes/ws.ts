@@ -6,10 +6,7 @@
  */
 import { Elysia, t } from "elysia";
 import { checkAuth, getAuthContext, requireAdminAuth } from "../middleware/auth";
-import { projectRepository } from "../repositories/project.repository";
-import { normalizeProjectConfig } from "../utils/project-config";
 import { logger } from "../utils/logger";
-import { type TaskLifecycleEvent } from "../types/task-events";
 
 // --- Subscriber registry ---
 interface WsClient {
@@ -26,29 +23,15 @@ const MAX_BROADCAST_SIZE = 1024 * 1024;
 const projectConnectionCounts = new Map<string, number>();
 
 /** Broadcast a task update to all connected WebSocket clients */
-export interface BroadcastTaskUpdateInput {
+export function broadcastTaskUpdate(event: {
   taskId: string;
   projectRef: string;
   taskType: string;
   status: string;
   progress?: number;
   error?: string | null;
-  /** Structured lifecycle event for business system adapters */
-  lifecycleEvents?: TaskLifecycleEvent[];
-}
-
-export function broadcastTaskUpdate(event: BroadcastTaskUpdateInput) {
-  const payload = JSON.stringify({
-    type: "task_update",
-    taskId: event.taskId,
-    projectRef: event.projectRef,
-    taskType: event.taskType,
-    status: event.status,
-    progress: event.progress,
-    error: event.error,
-    timestamp: new Date().toISOString(),
-    lifecycle_events: event.lifecycleEvents || [],
-  });
+}) {
+  const payload = JSON.stringify({ type: "task_update", ...event, timestamp: new Date().toISOString() });
 
   for (const [, client] of taskSubscribers) {
     // If client has a project filter, only send matching events
@@ -76,79 +59,6 @@ export function getWsConnectionCount(): number {
   return taskSubscribers.size;
 }
 
-interface TaskEventWebhookConfig {
-  url: string;
-  secret?: string;
-}
-
-function isTaskEventWebhookConfig(value: unknown): value is TaskEventWebhookConfig {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  return typeof (value as Record<string, unknown>).url === "string";
-}
-
-function readTaskEventWebhookConfig(projectConfig: Record<string, unknown> | null | undefined): { url: string; secret?: string } | null {
-  const config = normalizeProjectConfig(projectConfig);
-  const webhook = config.task_event_webhook;
-  if (!isTaskEventWebhookConfig(webhook)) return null;
-
-  const url = webhook.url.trim();
-  if (!url) return null;
-
-  const secret = typeof webhook.secret === "string" && webhook.secret.trim().length > 0 ? webhook.secret.trim() : undefined;
-  return { url, secret };
-}
-
-export async function dispatchTaskLifecycleEvents(events: TaskLifecycleEvent[]): Promise<void> {
-  if (events.length === 0) return;
-
-  // Group events by projectRef so we only hit each webhook once per batch
-  const byProject = new Map<string, TaskLifecycleEvent[]>();
-  for (const ev of events) {
-    const list = byProject.get(ev.project_ref) || [];
-    list.push(ev);
-    byProject.set(ev.project_ref, list);
-  }
-
-  for (const [projectRef, projectEvents] of byProject) {
-    const project = await projectRepository.findByRef(projectRef);
-    const webhook = readTaskEventWebhookConfig(project?.config);
-    if (!webhook) continue;
-
-    try {
-      const body = JSON.stringify({ events: projectEvents });
-      const headers: Record<string, string> = {
-        "Content-Type": "application/json",
-        "X-SupaCloud-Event-Type": "task_lifecycle",
-        "X-SupaCloud-Project-Ref": projectRef,
-      };
-      if (webhook.secret) {
-        const { createHmac } = await import("node:crypto");
-        const sig = createHmac("sha256", webhook.secret).update(body).digest("hex");
-        headers["X-SupaCloud-Signature"] = `sha256=${sig}`;
-      }
-
-      const response = await fetch(webhook.url, {
-        method: "POST",
-        headers,
-        body,
-        signal: AbortSignal.timeout(5000),
-      });
-      if (!response.ok) {
-        logger.warn("[WsRoutes] Task event webhook dispatch failed", {
-          projectRef,
-          url: webhook.url,
-          status: response.status,
-        });
-      }
-    } catch (err: unknown) {
-      logger.warn("[WsRoutes] Task event webhook dispatch error", {
-        projectRef,
-        url: webhook.url,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-  }
-}
 export const wsRoutes = new Elysia({ prefix: "/ws" })
   .get("/realtime/v1/health", async ({ request, set }) => {
     const authError = await requireAdminAuth(request);
