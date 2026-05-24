@@ -18,6 +18,7 @@ const completeTaskAttempt = mock(() => Promise.resolve(null));
 const countActiveTasksForProject = mock(() => Promise.resolve(0));
 const getTaskById = mock(() => Promise.resolve(null));
 const requestTaskCancellation = mock(() => Promise.resolve(null));
+const transitionTaskToRunning = mock(() => Promise.resolve({ task: {}, attempt: { id: "att_1" } }));
 
 const findByRef = mock(() =>
   Promise.resolve({ ref: "proj_1", status: "active" })
@@ -53,6 +54,9 @@ spyOn(taskRepository, "getTaskById").mockImplementation(getTaskById as typeof ta
 spyOn(taskRepository, "requestTaskCancellation").mockImplementation(
   requestTaskCancellation as typeof taskRepository.requestTaskCancellation,
 );
+spyOn(taskRepository, "transitionTaskToRunning").mockImplementation(
+  transitionTaskToRunning as typeof taskRepository.transitionTaskToRunning,
+);
 spyOn(projectRepository, "findByRef").mockImplementation(findByRef as typeof projectRepository.findByRef);
 const broadcastTaskUpdate = spyOn(wsModule, "broadcastTaskUpdate").mockImplementation(() => {});
 spyOn(projectService, "getBackgroundTaskSettings").mockImplementation(
@@ -66,6 +70,15 @@ const resolveDbName = spyOn(dbModule, "resolveDbName").mockImplementation(
 );
 const getProjectDb = spyOn(dbModule, "getProjectDb").mockImplementation(
   () => ((async () => [{ exists: 1 }]) as any),
+);
+
+// Mock createBackgroundTaskMirrorIfUserExists
+const bgTaskServiceModule = await import("../../src/services/background-task.service");
+const createBackgroundTaskMirrorIfUserExists = spyOn(
+  bgTaskServiceModule,
+  "createBackgroundTaskMirrorIfUserExists"
+).mockImplementation(
+  () => Promise.resolve({ inserted: false, userExists: true }),
 );
 
 // We import the worker AFTER mocks are set up
@@ -148,12 +161,14 @@ describe("BackgroundFunctionWorker", () => {
     countActiveTasksForProject.mockReset();
     getTaskById.mockReset();
     requestTaskCancellation.mockReset();
+    transitionTaskToRunning.mockReset();
     findByRef.mockReset();
     broadcastTaskUpdate.mockReset();
     getBackgroundTaskSettings.mockReset();
     dispatchBackgroundFunction.mockReset();
     resolveDbName.mockReset();
     getProjectDb.mockReset();
+    createBackgroundTaskMirrorIfUserExists.mockReset();
 
     // Defaults
     findByRef.mockResolvedValue({ ref: "proj_1", status: "active" } as any);
@@ -164,9 +179,11 @@ describe("BackgroundFunctionWorker", () => {
     dispatchBackgroundFunction.mockResolvedValue({ status: 200, headers: {}, bodyText: "", logs: [] });
     resolveDbName.mockResolvedValue("tenant_proj_1");
     getProjectDb.mockImplementation(() => ((async () => [{ exists: 1 }]) as any));
+    createBackgroundTaskMirrorIfUserExists.mockResolvedValue({ inserted: false, userExists: true });
     startTaskAttempt.mockResolvedValue({ id: "att_1" } as any);
     extendLease.mockResolvedValue(null);
     markTaskRunning.mockResolvedValue(null);
+    transitionTaskToRunning.mockResolvedValue({ task: {} as any, attempt: { id: "att_1" } as any });
     globalThis.fetch = originalFetch;
   });
 
@@ -365,6 +382,60 @@ describe("BackgroundFunctionWorker", () => {
     });
   });
 
+  describe("invoker existence cache", () => {
+    test("caches positive invoker existence across multiple tasks", async () => {
+      const worker = new BackgroundFunctionWorker();
+      const userId = "00000000-0000-4000-8000-000000000002";
+      const task1 = makeTask({
+        id: "tsk_cache_1",
+        payload: {
+          method: "POST", path: "/", query: "", headers: {}, body: null,
+          auth: { kind: "jwt", invoker_user_id: userId, invoker_role: "authenticated" },
+        },
+      });
+      const task2 = makeTask({
+        id: "tsk_cache_2",
+        payload: {
+          method: "POST", path: "/", query: "", headers: {}, body: null,
+          auth: { kind: "jwt", invoker_user_id: userId, invoker_role: "authenticated" },
+        },
+      });
+
+      extendLease.mockResolvedValue({} as any);
+      getProjectDb.mockImplementation(() => ((async () => [{ exists: 1 }]) as any));
+
+      await (worker as any).execute(task1);
+      const firstCallCount = resolveDbName.mock.calls.length;
+      await (worker as any).execute(task2);
+
+      // 缓存命中时 resolveDbName 不会被再次调用（invoker cache 跳过了 DB 查询）
+      expect(resolveDbName.mock.calls.length).toBe(firstCallCount);
+    });
+
+    test("dead-letters when mirror RPC confirms user does not exist", async () => {
+      const worker = new BackgroundFunctionWorker();
+      const task = makeTask({
+        id: "tsk_mirror_dead",
+        payload: {
+          method: "POST", path: "/", query: "", headers: {}, body: null,
+          auth: { kind: "jwt", invoker_user_id: "00000000-0000-4000-8000-000000000003", invoker_role: "authenticated" },
+        },
+      });
+      extendLease.mockResolvedValue({} as any);
+      getProjectDb.mockImplementation(() => ((async () => [{ exists: 1 }]) as any));
+      createBackgroundTaskMirrorIfUserExists.mockResolvedValue({ inserted: false, userExists: false });
+
+      await (worker as any).execute(task);
+
+      expect(markTaskFailed).toHaveBeenCalledWith(
+        "tsk_mirror_dead",
+        expect.stringContaining("atomic RPC check"),
+        true,
+      );
+      expect(dispatchBackgroundFunction).not.toHaveBeenCalled();
+    });
+  });
+
   describe("background invocation contract", () => {
     test("buildInvocationRequest signs trusted background invoker headers", async () => {
       const request = buildInvocationRequest(makeTask({
@@ -456,6 +527,30 @@ describe("BackgroundFunctionWorker pure helpers", () => {
     });
   });
 });
+
+  describe("invoker unknown circuit breaker", () => {
+    test("getInvokerUnknownMetrics returns structured object", async () => {
+      const { getInvokerUnknownMetrics } = await import(
+        "../../src/services/background-function-worker"
+      );
+      const metrics = getInvokerUnknownMetrics();
+      expect(metrics).toHaveProperty("unknown_window_count");
+      expect(metrics).toHaveProperty("circuit_open");
+      expect(metrics).toHaveProperty("circuit_open_until");
+      expect(typeof metrics.unknown_window_count).toBe("number");
+      expect(typeof metrics.circuit_open).toBe("boolean");
+      expect(typeof metrics.circuit_open_until).toBe("number");
+    });
+
+    test("circuit breaker starts closed", async () => {
+      const { getInvokerUnknownMetrics } = await import(
+        "../../src/services/background-function-worker"
+      );
+      const metrics = getInvokerUnknownMetrics();
+      expect(metrics.circuit_open).toBe(false);
+      expect(metrics.unknown_window_count).toBe(0);
+    });
+  });
 
 afterAll(() => {
   mock.restore();

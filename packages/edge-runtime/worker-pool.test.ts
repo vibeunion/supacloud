@@ -64,3 +64,86 @@ describe("WorkerPool EdgeRuntime.waitUntil", () => {
     }
   });
 });
+
+describe("WorkerPool metrics NaN fix", () => {
+  test("avg_queue_wait_ms is 0 (never NaN) for immediate dispatch", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-nan-"));
+    const functionPath = join(projectRoot, "fn.ts");
+    await Bun.write(functionPath, `
+      export default {
+        async fetch() {
+          return new Response("ok", { status: 200 });
+        }
+      }
+    `);
+
+    const pool = new WorkerPool({ size: 1, requestTimeout: 2_000 });
+    pools.push(pool);
+
+    try {
+      const res = await pool.dispatch({
+        functionId: "test_nan",
+        functionPath,
+        projectRoot,
+        env: {},
+        request: new Request("http://edge.local/functions/v1/test"),
+      });
+      expect(res.status).toBe(200);
+
+      const metrics = pool.snapshotMetrics("test");
+      for (const [key, value] of Object.entries(metrics)) {
+        expect(Number.isNaN(value)).toBe(false);
+      }
+      expect(metrics["test_avg_queue_wait_ms"]).toBe(0);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("queued dispatch produces non-NaN avg_queue_wait_ms", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-nan-q-"));
+    const functionPath = join(projectRoot, "fn.ts");
+    await Bun.write(functionPath, `
+      export default {
+        async fetch() {
+          await Bun.sleep(10);
+          return new Response("ok", { status: 200 });
+        }
+      }
+    `);
+
+    // Pool size 1, dispatch 2 requests to force one to queue
+    const pool = new WorkerPool({ size: 1, requestTimeout: 5_000 });
+    pools.push(pool);
+
+    try {
+      const [res1, res2] = await Promise.all([
+        pool.dispatch({
+          functionId: "test_nan_q1",
+          functionPath,
+          projectRoot,
+          env: {},
+          request: new Request("http://edge.local/functions/v1/test1"),
+        }),
+        pool.dispatch({
+          functionId: "test_nan_q2",
+          functionPath,
+          projectRoot,
+          env: {},
+          request: new Request("http://edge.local/functions/v1/test2"),
+        }),
+      ]);
+      expect(res1.status).toBe(200);
+      expect(res2.status).toBe(200);
+
+      const metrics = pool.snapshotMetrics("testq");
+      for (const [key, value] of Object.entries(metrics)) {
+        expect(Number.isNaN(value)).toBe(false);
+      }
+      // At least one request was queued, so total_queue_wait_ms > 0
+      expect(metrics["testq_total_queue_wait_ms"]).toBeGreaterThan(0);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+});
