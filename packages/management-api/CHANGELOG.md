@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.4](https://github.com/zuohuadong/supacloud/compare/management-api-v0.21.3...management-api-v0.21.4) (2026-05-24)
+
+
+### Bug Fixes
+
+* **management-api:** isolate static serve entrypoint ([#189](https://github.com/zuohuadong/supacloud/issues/189)) ([2e2cf3a](https://github.com/zuohuadong/supacloud/commit/2e2cf3a5f460d5f674bd995cb97e70da130043de))
+
 ## [0.21.3](https://github.com/zuohuadong/supacloud/compare/management-api-v0.21.2...management-api-v0.21.3) (2026-05-24)
 
 
