@@ -490,6 +490,7 @@ User=root
 WorkingDirectory=${buildDir}
 Environment="PORT=${port}"
 Environment="NODE_ENV=production"
+EnvironmentFile=-/etc/supabase/management-api.env
 EnvironmentFile=${envFile}
 ExecStart=${isSSR ? `${bunPath} run ${buildDir}/index.js` : `${config.supacloudBinaryPath} static-serve ${buildDir} ${port} --workers=auto`}
 Restart=always
