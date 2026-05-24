@@ -34,7 +34,7 @@ jobs:
       - uses: googleapis/release-please-action@v5
         id: release
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 
@@ -105,7 +105,7 @@ jobs:
 
       - name: Upload binaries to GitHub Release
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
           RELEASE_TAG: ${{ needs.release-please.outputs.management_api_tag_name }}
         run: gh release upload "$RELEASE_TAG" release-assets/* --clobber
 
