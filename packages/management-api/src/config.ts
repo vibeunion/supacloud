@@ -1,3 +1,8 @@
+/** Check whether the process was invoked as the static-serve subcommand. */
+export function isStaticServeCommand(): boolean {
+  return process.argv[2] === "static-serve";
+}
+
 import { existsSync, readFileSync } from "node:fs";
 
 const MANAGEMENT_API_ENV = "/etc/supabase/management-api.env";
@@ -268,7 +273,7 @@ export const config: Config = {
 };
 
 function validateConfig() {
-  if (process.argv[2] === "static-serve") {
+  if (isStaticServeCommand()) {
     return;
   }
 

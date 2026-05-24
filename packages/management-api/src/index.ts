@@ -1,5 +1,6 @@
 import { Elysia, t } from "elysia";
 import { logger } from "./utils/logger";
+import { isStaticServeCommand } from "./config";
 
 process.on("uncaughtException", (err: Error) => {
   logger.error("FATAL UNCAUGHT EXCEPTION:", {
@@ -90,7 +91,7 @@ async function getEmbeddedAssets() {
 
 const args = process.argv.slice(2);
 
-if (args[0] === "static-serve") {
+if (isStaticServeCommand()) {
   const { runStaticServeCli } = await import("./utils/bun-static-serve");
   runStaticServeCli(args.slice(1));
   await new Promise<void>((resolve) => {
@@ -907,7 +908,7 @@ async function bootstrap() {
         process.exit(0);
     }
     process.exit(0);
-  } else if (args[0] === "static-serve") {
+  } else if (isStaticServeCommand()) {
     const { runStaticServeCli } = await import("./utils/bun-static-serve");
     runStaticServeCli(args.slice(1));
   } else if (args.includes("--version") || args.includes("-v")) {
