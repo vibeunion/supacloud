@@ -626,8 +626,17 @@ const app = new Elysia()
     try {
       const { functionPath, projectRoot } = await resolveFunctionPath(c.params.ref, c.params.slug);
       const functionId = `${c.params.ref}_${c.params.slug}`;
-      const success = await pool.preheat(functionId, functionPath, projectRoot, await loadTenantEnv(c.params.ref));
-      return { preheated: functionId, success };
+      const tenantEnv = await loadTenantEnv(c.params.ref);
+      const [foreground, background] = await Promise.all([
+        pool.preheatIdleWorkers(functionId, functionPath, projectRoot, tenantEnv),
+        backgroundPool.preheatIdleWorkers(functionId, functionPath, projectRoot, tenantEnv),
+      ]);
+      return {
+        preheated: functionId,
+        success: foreground.succeeded > 0 || background.succeeded > 0,
+        foreground,
+        background,
+      };
     } catch (error) {
       return badRequest(error instanceof Error ? error.message : "Invalid function path");
     }

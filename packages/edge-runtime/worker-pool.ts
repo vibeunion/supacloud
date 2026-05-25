@@ -471,17 +471,16 @@ export class WorkerPool {
     }
   }
 
-  preheat(functionId: string, functionPath: string, projectRoot: string, env: Record<string, string>): Promise<boolean> {
+  private preheatWorker(
+    worker: Worker,
+    functionId: string,
+    functionPath: string,
+    projectRoot: string,
+    env: Record<string, string>,
+  ): Promise<boolean> {
     return new Promise((resolve) => {
-      const worker = this.idle.pop();
-      if (!worker) {
-        resolve(false);
-        return;
-      }
-
       const timeout = setTimeout(() => {
         worker.removeListener("message", onMsg);
-        this.idle.push(worker);
         resolve(false);
       }, 10000);
 
@@ -489,7 +488,6 @@ export class WorkerPool {
         if (msg.type === "preheat_done" && msg.functionId === functionId) {
           clearTimeout(timeout);
           worker.removeListener("message", onMsg);
-          this.idle.push(worker);
           resolve(true);
         } else if (
           msg.type === "preheat_error" &&
@@ -497,7 +495,6 @@ export class WorkerPool {
         ) {
           clearTimeout(timeout);
           worker.removeListener("message", onMsg);
-          this.idle.push(worker);
           resolve(false);
         }
       };
@@ -505,6 +502,46 @@ export class WorkerPool {
       worker.on("message", onMsg);
       worker.postMessage({ type: "preheat", functionId, functionPath, projectRoot, env });
     });
+  }
+
+  preheat(functionId: string, functionPath: string, projectRoot: string, env: Record<string, string>): Promise<boolean> {
+    const worker = this.idle.pop();
+    if (!worker) {
+      return Promise.resolve(false);
+    }
+
+    return this.preheatWorker(worker, functionId, functionPath, projectRoot, env)
+      .finally(() => {
+        if (!this.draining && this.activeWorkers.has(worker)) {
+          this.idle.push(worker);
+        }
+      });
+  }
+
+  async preheatIdleWorkers(
+    functionId: string,
+    functionPath: string,
+    projectRoot: string,
+    env: Record<string, string>,
+  ): Promise<{ attempted: number; succeeded: number }> {
+    const workers = this.idle.splice(0, this.idle.length);
+    if (workers.length === 0) {
+      return { attempted: 0, succeeded: 0 };
+    }
+
+    try {
+      const results = await Promise.all(
+        workers.map((worker) => this.preheatWorker(worker, functionId, functionPath, projectRoot, env)),
+      );
+      return {
+        attempted: workers.length,
+        succeeded: results.filter(Boolean).length,
+      };
+    } finally {
+      if (!this.draining) {
+        this.idle.push(...workers.filter((worker) => this.activeWorkers.has(worker)));
+      }
+    }
   }
 
   snapshotMetrics(prefix = "supacloud_edge"): Record<string, number> {
