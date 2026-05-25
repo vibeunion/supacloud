@@ -11,6 +11,7 @@ import { decryptSecretIfNeeded } from "../utils/secret-crypto";
 import { createHmac } from "node:crypto";
 import { getProjectDb, resolveDbName } from "../db";
 import { createBackgroundTaskMirrorIfUserExists } from "../services/background-task.service";
+import { createPgListener, type PgListenerHandle } from "../lib/pg-listen";
 
 interface InvocationEnvelope {
   method?: string;
@@ -345,23 +346,98 @@ export class BackgroundFunctionWorker {
   private isRunning = false;
   private isPolling = false;
   private intervalId?: Timer;
+  private delayedWakeupId?: Timer;
+  private listener?: PgListenerHandle;
+  private pendingPoll = false;
   private cancelledTasks = new Set<string>();
 
-  start(intervalMs = 2_000) {
+  start(intervalMs = 10_000) {
     if (this.isRunning) return;
     this.isRunning = true;
+    this.startListener();
     this.intervalId = setInterval(() => void this.poll(), intervalMs);
     void this.poll();
     logger.info("[BackgroundFunctionWorker] started", {
       workerId: WORKER_ID,
       concurrencyPerProject: DEFAULT_CONCURRENCY_PER_PROJECT,
+      pollingFallbackMs: intervalMs,
     });
   }
 
   stop() {
     this.isRunning = false;
+    this.listener?.close();
+    this.listener = undefined;
     if (this.intervalId) clearInterval(this.intervalId);
     this.intervalId = undefined;
+    if (this.delayedWakeupId) clearTimeout(this.delayedWakeupId);
+    this.delayedWakeupId = undefined;
+    this.pendingPoll = false;
+  }
+
+  private startListener() {
+    try {
+      this.listener = createPgListener({
+        url: config.databaseUrl,
+        channels: ["task_pending", "task_retry_scheduled"],
+        applicationName: "supacloud-background-function-worker",
+        onNotification: (channel, payload) => {
+          if (!this.isEdgeFunctionNotification(payload)) return;
+          if (channel === "task_retry_scheduled") {
+            this.scheduleDelayedWakeup(payload);
+            return;
+          }
+          this.wake();
+        },
+      });
+    } catch (error: unknown) {
+      logger.warn("[BackgroundFunctionWorker] failed to start pg-listen, using fallback polling", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  private isEdgeFunctionNotification(payload?: string): boolean {
+    if (!payload) return false;
+    try {
+      const parsed = JSON.parse(payload) as { task_type?: unknown };
+      return parsed.task_type === TaskType.EDGE_FUNCTION;
+    } catch {
+      return false;
+    }
+  }
+
+  private extractNextRunAt(payload?: string): Date | null {
+    if (!payload) return null;
+    try {
+      const parsed = JSON.parse(payload) as { next_run_at?: unknown };
+      if (typeof parsed.next_run_at !== "string") return null;
+      const nextRunAt = new Date(parsed.next_run_at);
+      return Number.isNaN(nextRunAt.getTime()) ? null : nextRunAt;
+    } catch {
+      return null;
+    }
+  }
+
+  private scheduleDelayedWakeup(payload?: string) {
+    if (!this.isRunning) return;
+    const nextRunAt = this.extractNextRunAt(payload);
+    if (!nextRunAt) return;
+    const delayMs = Math.max(0, nextRunAt.getTime() - Date.now());
+    if (this.delayedWakeupId) clearTimeout(this.delayedWakeupId);
+    this.delayedWakeupId = setTimeout(() => {
+      this.delayedWakeupId = undefined;
+      this.wake();
+    }, delayMs);
+  }
+
+  private wake() {
+    if (!this.isRunning) return;
+    if (this.isPolling) {
+      this.pendingPoll = true;
+      return;
+    }
+    void this.poll();
   }
 
   private async poll() {
@@ -397,6 +473,10 @@ export class BackgroundFunctionWorker {
       });
     } finally {
       this.isPolling = false;
+      if (this.pendingPoll && this.isRunning) {
+        this.pendingPoll = false;
+        queueMicrotask(() => this.wake());
+      }
     }
   }
 

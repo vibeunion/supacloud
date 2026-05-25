@@ -7,6 +7,7 @@ const getProjectDb = mock(() => {
   throw new Error("getProjectDb should be mocked per test");
 });
 const loggerWarn = mock(() => undefined);
+const loggerNoop = mock(() => undefined);
 
 mock.module("../../src/db", () => ({
   resolveDbName,
@@ -15,7 +16,10 @@ mock.module("../../src/db", () => ({
 
 mock.module("../../src/utils/logger", () => ({
   logger: {
+    info: loggerNoop,
     warn: loggerWarn,
+    error: loggerNoop,
+    debug: loggerNoop,
   },
 }));
 

@@ -2294,6 +2294,86 @@ EOF
     systemctl enable supacloud
     systemctl start supacloud || log_warn "Service start failed, please check journalctl -u supacloud"
 
+
+    # 7b. Ensure GoTrue binary and systemd template are deployed
+    local GOTRUE_BIN="${GOTRUE_BIN:-/usr/local/bin/gotrue}"
+    if [[ ! -x "$GOTRUE_BIN" ]]; then
+        local GOTRUE_VERSION="${GOTRUE_VERSION:-v2.186.0}"
+        local GOTRUE_ARCH
+        GOTRUE_ARCH=$(uname -m)
+        case "$GOTRUE_ARCH" in
+            x86_64) GOTRUE_ARCH="linux-amd64" ;;
+            aarch64) GOTRUE_ARCH="linux-arm64" ;;
+            *) log_error "Unsupported architecture for GoTrue: $GOTRUE_ARCH"; exit 1 ;;
+        esac
+        local GOTRUE_URL="https://github.com/supabase/auth/releases/download/${GOTRUE_VERSION}/auth-${GOTRUE_VERSION}-${GOTRUE_ARCH}.tar.gz"
+        log_info "Downloading GoTrue ${GOTRUE_VERSION}..."
+        local TMP_DIR
+        TMP_DIR=$(mktemp -d)
+        if curl -fsSL "https://gh-proxy.net/${GOTRUE_URL}" -o "${TMP_DIR}/gotrue.tar.gz" 2>/dev/null || \
+           curl -fsSL "${GOTRUE_URL}" -o "${TMP_DIR}/gotrue.tar.gz"; then
+            tar -xf "${TMP_DIR}/gotrue.tar.gz" -C "${TMP_DIR}"
+            if [[ -f "${TMP_DIR}/auth" ]]; then
+                mv "${TMP_DIR}/auth" "$GOTRUE_BIN"
+            elif [[ -f "${TMP_DIR}/gotrue" ]]; then
+                mv "${TMP_DIR}/gotrue" "$GOTRUE_BIN"
+            else
+                log_error "GoTrue binary not found in archive"
+                rm -rf "$TMP_DIR"
+                exit 1
+            fi
+            chmod +x "$GOTRUE_BIN"
+            log_info "GoTrue installed to $GOTRUE_BIN"
+        else
+            log_error "Failed to download GoTrue"
+            rm -rf "$TMP_DIR"
+            exit 1
+        fi
+        rm -rf "$TMP_DIR"
+    else
+        log_info "GoTrue binary already available at $GOTRUE_BIN"
+    fi
+
+    if [[ ! -f /etc/systemd/system/supacloud-gotrue@.service ]]; then
+        log_info "Installing supacloud-gotrue@.service systemd template..."
+        cat > /etc/systemd/system/supacloud-gotrue@.service << 'GOTRUE_SVC'
+[Unit]
+Description=SupaCloud GoTrue for tenant %i
+After=network.target patroni.service
+Wants=patroni.service
+
+[Service]
+Type=simple
+User=nobody
+Group=nobody
+EnvironmentFile=/etc/supabase/tenants/%i_gotrue.env
+Environment="GOMEMLIMIT=15MiB"
+Environment="GOGC=20"
+ExecStart=GOTRUE_BIN_PLACEHOLDER
+Restart=on-failure
+RestartSec=5
+StartLimitBurst=3
+
+# Security and resource sandboxing
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/etc/supabase/tenants
+MemoryMax=30M
+CPUWeight=20
+
+[Install]
+WantedBy=multi-user.target
+GOTRUE_SVC
+        sed -i "s|GOTRUE_BIN_PLACEHOLDER|${GOTRUE_BIN}|" /etc/systemd/system/supacloud-gotrue@.service
+        log_info "supacloud-gotrue@.service template installed"
+    else
+        log_info "supacloud-gotrue@.service template already exists"
+    fi
+
+    # Ensure tenant config directory exists
+    mkdir -p /etc/supabase/tenants
+
     # 8. Inject terminal environment variables
     cat > /etc/profile.d/supacloud.sh <<EOF
 export MASTER_TOKEN="${MASTER_TOKEN}"

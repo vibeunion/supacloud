@@ -15,7 +15,9 @@ const MASTER_TOKEN =
 
 function getGroundTruth(name: string) {
   const p = path.join(groundTruthDir, `${name}.json`);
-  if (!fs.existsSync(p)) return null;
+  if (!fs.existsSync(p)) {
+    throw new Error(`Missing structural snapshot ground truth: ${p}`);
+  }
   return JSON.parse(fs.readFileSync(p, "utf-8"));
 }
 
@@ -30,7 +32,6 @@ describe("API Structural Snapshot Compliance", () => {
   let projectService: ProjectService;
   let tenantRef: string;
   let anonKey: string;
-  let isBooted = false;
 
   beforeAll(async () => {
     projectService = new ProjectService();
@@ -66,10 +67,11 @@ describe("API Structural Snapshot Compliance", () => {
       if (!health.ok) {
         throw new Error(`Snapshot proxy is not ready: ${health.status}`);
       }
-      isBooted = true;
     } catch (e) {
-      console.error(
-        "Failed to boot project inside snapshot tests context. Skipping tests.",
+      throw new Error(
+        `Failed to boot project inside snapshot tests context: ${
+          e instanceof Error ? e.message : String(e)
+        }`,
       );
     }
   });
@@ -81,10 +83,7 @@ describe("API Structural Snapshot Compliance", () => {
   });
 
   test("Storage API - List Unknown Bucket Error Shape", async () => {
-    if (!isBooted) return;
-
     const gt = getGroundTruth("storage_list_error");
-    if (!gt) return;
 
     const res = await fetch(
       `${PROXY_URL}/storage/v1/object/list/unknown_bucket`,
@@ -108,10 +107,7 @@ describe("API Structural Snapshot Compliance", () => {
   });
 
   test("Auth API - Invalid Signup Error Shape", async () => {
-    if (!isBooted) return;
-
     const gt = getGroundTruth("auth_signup_error");
-    if (!gt) return;
 
     const res = await fetch(`${PROXY_URL}/auth/v1/signup`, {
       method: "POST",
@@ -133,8 +129,6 @@ describe("API Structural Snapshot Compliance", () => {
   });
 
   test("Management API - GET /v1/projects returns array", async () => {
-    if (!isBooted) return;
-
     const res = await fetch(`${PROXY_URL}/v1/projects`, {
       headers: authHeaders(),
     });
@@ -145,8 +139,6 @@ describe("API Structural Snapshot Compliance", () => {
   });
 
   test("Management API - GET /v1/projects/:ref returns project object", async () => {
-    if (!isBooted) return;
-
     const res = await fetch(`${PROXY_URL}/v1/projects/${tenantRef}`, {
       headers: authHeaders(),
     });
@@ -174,8 +166,6 @@ describe("API Structural Snapshot Compliance", () => {
   });
 
   test("Management API - GET /v1/projects/:ref/api-keys returns array", async () => {
-    if (!isBooted) return;
-
     const res = await fetch(`${PROXY_URL}/v1/projects/${tenantRef}/api-keys`, {
       headers: authHeaders(),
     });
@@ -190,8 +180,6 @@ describe("API Structural Snapshot Compliance", () => {
   });
 
   test("Management API - GET /v1/organizations returns array", async () => {
-    if (!isBooted) return;
-
     const res = await fetch(`${PROXY_URL}/v1/organizations`, {
       headers: authHeaders(),
     });
@@ -202,8 +190,6 @@ describe("API Structural Snapshot Compliance", () => {
   });
 
   test("Management API - GET /v1/projects/:ref/config/auth returns object", async () => {
-    if (!isBooted) return;
-
     const res = await fetch(
       `${PROXY_URL}/v1/projects/${tenantRef}/config/auth`,
       {
@@ -217,8 +203,6 @@ describe("API Structural Snapshot Compliance", () => {
   });
 
   test("Management API - GET /v1/projects/:ref/config/database returns object", async () => {
-    if (!isBooted) return;
-
     const res = await fetch(
       `${PROXY_URL}/v1/projects/${tenantRef}/config/database`,
       {
@@ -232,8 +216,6 @@ describe("API Structural Snapshot Compliance", () => {
   });
 
   test("Management API - POST /v1/projects/:ref/database/query executes SQL", async () => {
-    if (!isBooted) return;
-
     const res = await fetch(
       `${PROXY_URL}/v1/projects/${tenantRef}/database/query`,
       {
@@ -251,8 +233,6 @@ describe("API Structural Snapshot Compliance", () => {
   });
 
   test("Management API - GET /v1/projects/:ref/database/migrations returns array", async () => {
-    if (!isBooted) return;
-
     const res = await fetch(
       `${PROXY_URL}/v1/projects/${tenantRef}/database/migrations`,
       {
@@ -266,8 +246,6 @@ describe("API Structural Snapshot Compliance", () => {
   });
 
   test("Management API - GET /v1/projects/:ref/functions returns array", async () => {
-    if (!isBooted) return;
-
     const res = await fetch(`${PROXY_URL}/v1/projects/${tenantRef}/functions`, {
       headers: authHeaders(),
     });
@@ -278,8 +256,6 @@ describe("API Structural Snapshot Compliance", () => {
   });
 
   test("Management API - GET /v1/projects/:ref/functions/secrets returns array", async () => {
-    if (!isBooted) return;
-
     const res = await fetch(
       `${PROXY_URL}/v1/projects/${tenantRef}/functions/secrets`,
       {
@@ -293,8 +269,6 @@ describe("API Structural Snapshot Compliance", () => {
   });
 
   test("Management API - GET /v1/projects/:ref/functions/secrets returns same as secrets", async () => {
-    if (!isBooted) return;
-
     const [secretsRes, funcSecretsRes] = await Promise.all([
       fetch(`${PROXY_URL}/v1/projects/${tenantRef}/secrets`, {
         headers: authHeaders(),
@@ -317,8 +291,6 @@ describe("API Structural Snapshot Compliance", () => {
   });
 
   test("Management API - GET /v1/projects/:ref/secrets returns array", async () => {
-    if (!isBooted) return;
-
     const res = await fetch(`${PROXY_URL}/v1/projects/${tenantRef}/secrets`, {
       headers: authHeaders(),
     });
@@ -329,8 +301,6 @@ describe("API Structural Snapshot Compliance", () => {
   });
 
   test("Management API - GET /v1/projects/:ref/database/extensions returns array", async () => {
-    if (!isBooted) return;
-
     const res = await fetch(
       `${PROXY_URL}/v1/projects/${tenantRef}/database/extensions`,
       {
@@ -344,8 +314,6 @@ describe("API Structural Snapshot Compliance", () => {
   });
 
   test("Management API - GET /v1/projects/:ref/database/webhooks returns array", async () => {
-    if (!isBooted) return;
-
     const res = await fetch(
       `${PROXY_URL}/v1/projects/${tenantRef}/database/webhooks`,
       {
@@ -359,8 +327,6 @@ describe("API Structural Snapshot Compliance", () => {
   });
 
   test("Management API - GET /v1/projects/:ref/services returns array", async () => {
-    if (!isBooted) return;
-
     const res = await fetch(`${PROXY_URL}/v1/projects/${tenantRef}/services`, {
       headers: authHeaders(),
     });
@@ -380,8 +346,6 @@ describe("API Structural Snapshot Compliance", () => {
   test("Management API - Error response format uses {message} not {error}", async () => {
     // Verifies the global error handler returns { message } shape (not { error })
     // The route /v1/projects/:ref matches but the ref doesn't exist in the DB → 404
-    if (!isBooted) return;
-
     const res = await fetch(
       `${PROXY_URL}/v1/projects/nonexistent_project_ref`,
       {
@@ -396,8 +360,6 @@ describe("API Structural Snapshot Compliance", () => {
   });
 
   test("Management API - Response includes x-supabase-api-version header", async () => {
-    if (!isBooted) return;
-
     const res = await fetch(`${PROXY_URL}/v1/projects`, {
       headers: authHeaders(),
     });
@@ -406,8 +368,6 @@ describe("API Structural Snapshot Compliance", () => {
   });
 
   test("Management API - Response includes rate limit headers", async () => {
-    if (!isBooted) return;
-
     const res = await fetch(`${PROXY_URL}/v1/projects`, {
       headers: authHeaders(),
     });

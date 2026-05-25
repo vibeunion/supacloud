@@ -36,6 +36,7 @@ const wsModule = await import("../../src/routes/ws");
 const { projectService } = await import("../../src/services/project.service");
 const dispatcherModule = await import("../../src/services/background-runtime-dispatcher");
 const dbModule = await import("../../src/db");
+const pgListenModule = await import("../../src/lib/pg-listen");
 
 spyOn(taskRepository, "claimNextTask").mockImplementation(claimNextTask as typeof taskRepository.claimNextTask);
 spyOn(taskRepository, "cancelTask").mockImplementation(cancelTask as typeof taskRepository.cancelTask);
@@ -70,6 +71,10 @@ const resolveDbName = spyOn(dbModule, "resolveDbName").mockImplementation(
 );
 const getProjectDb = spyOn(dbModule, "getProjectDb").mockImplementation(
   () => ((async () => [{ exists: 1 }]) as any),
+);
+const closePgListener = mock(() => {});
+const createPgListener = spyOn(pgListenModule, "createPgListener").mockImplementation(
+  () => ({ close: closePgListener }),
 );
 
 // Mock createBackgroundTaskMirrorIfUserExists
@@ -168,6 +173,8 @@ describe("BackgroundFunctionWorker", () => {
     dispatchBackgroundFunction.mockReset();
     resolveDbName.mockReset();
     getProjectDb.mockReset();
+    closePgListener.mockReset();
+    createPgListener.mockReset();
     createBackgroundTaskMirrorIfUserExists.mockReset();
 
     // Defaults
@@ -179,6 +186,7 @@ describe("BackgroundFunctionWorker", () => {
     dispatchBackgroundFunction.mockResolvedValue({ status: 200, headers: {}, bodyText: "", logs: [] });
     resolveDbName.mockResolvedValue("tenant_proj_1");
     getProjectDb.mockImplementation(() => ((async () => [{ exists: 1 }]) as any));
+    createPgListener.mockImplementation(() => ({ close: closePgListener }));
     createBackgroundTaskMirrorIfUserExists.mockResolvedValue({ inserted: false, userExists: true });
     startTaskAttempt.mockResolvedValue({ id: "att_1" } as any);
     extendLease.mockResolvedValue(null);
@@ -197,8 +205,13 @@ describe("BackgroundFunctionWorker", () => {
       claimNextTask.mockResolvedValue(null);
       worker.start(60_000); // long interval so no double-poll
       expect((worker as any).isRunning).toBe(true);
+      expect(createPgListener).toHaveBeenCalledWith(expect.objectContaining({
+        channels: ["task_pending", "task_retry_scheduled"],
+        applicationName: "supacloud-background-function-worker",
+      }));
       worker.stop();
       expect((worker as any).isRunning).toBe(false);
+      expect(closePgListener).toHaveBeenCalledTimes(1);
     });
 
     test("calling start twice is a no-op", () => {
@@ -207,6 +220,7 @@ describe("BackgroundFunctionWorker", () => {
       worker.start(60_000);
       worker.start(60_000);
       expect((worker as any).isRunning).toBe(true);
+      expect(createPgListener).toHaveBeenCalledTimes(1);
       worker.stop();
     });
 
@@ -217,6 +231,49 @@ describe("BackgroundFunctionWorker", () => {
       expect((worker as any).intervalId).toBeDefined();
       worker.stop();
       expect((worker as any).intervalId).toBeUndefined();
+    });
+
+    test("falls back to interval polling when listener startup fails", () => {
+      const worker = new BackgroundFunctionWorker();
+      createPgListener.mockImplementationOnce(() => {
+        throw new Error("listener unavailable");
+      });
+      claimNextTask.mockResolvedValue(null);
+
+      worker.start(60_000);
+
+      expect((worker as any).isRunning).toBe(true);
+      expect((worker as any).intervalId).toBeDefined();
+      worker.stop();
+    });
+  });
+
+  describe("LISTEN/NOTIFY wakeups", () => {
+    test("ignores non-edge task notifications", () => {
+      const worker = new BackgroundFunctionWorker();
+
+      expect((worker as any).isEdgeFunctionNotification(JSON.stringify({
+        task_type: TaskType.PROVISION_DB,
+      }))).toBe(false);
+      expect((worker as any).isEdgeFunctionNotification(JSON.stringify({
+        task_type: TaskType.EDGE_FUNCTION,
+      }))).toBe(true);
+      expect((worker as any).isEdgeFunctionNotification("not json")).toBe(false);
+    });
+
+    test("schedules delayed wakeup from retry notification payload", async () => {
+      const worker = new BackgroundFunctionWorker();
+      const wakeSpy = spyOn(worker as any, "wake").mockImplementation(() => {});
+      (worker as any).isRunning = true;
+
+      (worker as any).scheduleDelayedWakeup(JSON.stringify({
+        task_type: TaskType.EDGE_FUNCTION,
+        next_run_at: new Date(Date.now() - 1).toISOString(),
+      }));
+
+      await new Promise((resolve) => setTimeout(resolve, 5));
+
+      expect(wakeSpy).toHaveBeenCalledTimes(1);
     });
   });
 
