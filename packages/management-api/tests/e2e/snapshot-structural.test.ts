@@ -50,13 +50,18 @@ describe("API Structural Snapshot Compliance", () => {
       if (process.env.TEST_FIXED_JWT_SECRET) {
         const { sql } = await import("../../src/db");
         await sql`
-                    INSERT INTO project_config (project_ref, postgrest_port, gotrue_port, realtime_port)
-                    VALUES (${tenantRef}, 3000, 9999, 4000)
-                    ON CONFLICT (project_ref) DO UPDATE
-                    SET postgrest_port = 3000, gotrue_port = 9999, realtime_port = 4000
-                `;
-        await sql`
-                    UPDATE projects SET db_name = 'postgres' WHERE ref = ${tenantRef};
+                    UPDATE projects
+                    SET
+                      db_name = 'postgres',
+                      db_user = 'supabase_admin',
+                      db_password = 'postgres',
+                      status = 'active',
+                      config = COALESCE(config, '{}'::jsonb) || jsonb_build_object(
+                        'postgrest_port', 3000,
+                        'gotrue_port', 9999,
+                        'realtime_port', 4000
+                      )
+                    WHERE ref = ${tenantRef};
                 `;
       }
 

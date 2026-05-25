@@ -82,11 +82,22 @@ ensure_pg_hba_rule() {
     if [[ -n "$patroni_config" ]] && [[ -f "$pg_hba" ]] && grep -q "overwritten by Patroni" "$pg_hba" 2>/dev/null; then
         cluster_name=$(patronictl -c "$patroni_config" list 2>/dev/null | sed -n 's/.*Cluster: \([^ ]*\).*/\1/p' | head -1)
         cluster_name="${cluster_name:-pg-meta}"
-        local tmp_before tmp_after
-        tmp_before=$(mktemp)
-        tmp_after=$(mktemp)
-        patronictl -c "$patroni_config" show-config > "$tmp_before"
-        RULE="$rule" python3 - "$tmp_before" "$tmp_after" <<'PYCODE'
+        local tmp_before="" tmp_after=""
+        tmp_before=$(mktemp) || {
+            log_warn "Failed to allocate temporary file for Patroni pg_hba update"
+            return 1
+        }
+        tmp_after=$(mktemp) || {
+            log_warn "Failed to allocate temporary file for Patroni pg_hba update"
+            rm -f "$tmp_before"
+            return 1
+        }
+        if ! patronictl -c "$patroni_config" show-config > "$tmp_before"; then
+            log_warn "Failed to read Patroni dynamic config; cannot add pg_hba rule: $rule"
+            rm -f "$tmp_before" "$tmp_after"
+            return 1
+        fi
+        if ! RULE="$rule" python3 - "$tmp_before" "$tmp_after" <<'PYCODE'
 import os
 import sys
 import yaml
@@ -102,9 +113,18 @@ if rule not in pg_hba:
 with open(dst, "w", encoding="utf-8") as fh:
     yaml.safe_dump(data, fh, sort_keys=False)
 PYCODE
+        then
+            log_warn "Failed to render Patroni pg_hba update; cannot add rule: $rule"
+            rm -f "$tmp_before" "$tmp_after"
+            return 1
+        fi
         if ! cmp -s "$tmp_before" "$tmp_after"; then
             log_info "Adding Patroni pg_hba rule: $rule"
-            patronictl -c "$patroni_config" edit-config --apply "$tmp_after" --force "$cluster_name"
+            if ! patronictl -c "$patroni_config" edit-config --apply "$tmp_after" --force "$cluster_name"; then
+                log_warn "Failed to apply Patroni pg_hba rule: $rule"
+                rm -f "$tmp_before" "$tmp_after"
+                return 1
+            fi
         else
             log_info "Patroni pg_hba rule already exists: $rule"
         fi
@@ -129,6 +149,38 @@ PYCODE
 
 configure_native_kong_systemd() {
     log_info "Configuring Kong systemd startup guardrails..."
+    mkdir -p /opt/supacloud/scripts/lib
+    cat > /opt/supacloud/scripts/lib/kong-wait-for-postgres.sh <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+pg_isready_bin="$(command -v pg_isready || true)"
+if [[ -z "$pg_isready_bin" ]]; then
+    for candidate in /usr/pgsql/bin/pg_isready /usr/bin/pg_isready /usr/local/bin/pg_isready; do
+        if [[ -x "$candidate" ]]; then
+            pg_isready_bin="$candidate"
+            break
+        fi
+    done
+fi
+
+if [[ -z "$pg_isready_bin" ]]; then
+    echo "pg_isready not found for Kong startup check" >&2
+    exit 1
+fi
+
+for _ in {1..60}; do
+    if "$pg_isready_bin" -h 127.0.0.1 -p 5432 -U kong -d kong >/dev/null 2>&1; then
+        exit 0
+    fi
+    sleep 2
+done
+
+echo "PostgreSQL not ready for Kong" >&2
+exit 1
+EOF
+    chmod 0755 /opt/supacloud/scripts/lib/kong-wait-for-postgres.sh
+
     mkdir -p /etc/systemd/system/kong.service.d
     cat > /etc/systemd/system/kong.service.d/override.conf <<'EOF'
 [Unit]
@@ -141,7 +193,7 @@ StartLimitBurst=12
 Restart=on-failure
 RestartSec=10s
 ExecStartPre=
-ExecStartPre=/usr/bin/bash -lc 'for i in {1..60}; do /usr/pgsql/bin/pg_isready -h 127.0.0.1 -p 5432 -U kong -d kong >/dev/null 2>&1 && exit 0; sleep 2; done; echo "PostgreSQL not ready for Kong" >&2; exit 1'
+ExecStartPre=/opt/supacloud/scripts/lib/kong-wait-for-postgres.sh
 ExecStartPre=/usr/local/bin/kong prepare -p /usr/local/kong
 ExecStopPost=/usr/bin/bash -lc 'rm -f /usr/local/kong/sockets/* /usr/local/kong/pids/nginx.pid 2>/dev/null || true'
 EOF
@@ -154,6 +206,14 @@ cleanup_native_kong_runtime() {
 }
 
 configure_low_memory_tcp_guardrails() {
+    case "${SUPACLOUD_ENABLE_LOW_MEMORY_TCP_GUARDRAILS:-false}" in
+        true|TRUE|1|yes|YES) ;;
+        *)
+            log_info "Skipping low-memory TCP guardrails. Set SUPACLOUD_ENABLE_LOW_MEMORY_TCP_GUARDRAILS=true to enable."
+            return 0
+            ;;
+    esac
+
     local mem_kb
     mem_kb=$(awk '/MemTotal/ {print $2}' /proc/meminfo 2>/dev/null || echo 0)
     if [[ "$mem_kb" -le 0 || "$mem_kb" -gt 3145728 ]]; then
@@ -161,9 +221,13 @@ configure_low_memory_tcp_guardrails() {
     fi
 
     log_info "Configuring low-memory TCP guardrails..."
+    sysctl -a 2>/dev/null \
+        | grep -E '^net\.ipv4\.tcp_(mem|rmem|wmem|fin_timeout|tw_reuse)' \
+        > /etc/sysctl.d/99-supacloud-lowmem-tcp.before 2>/dev/null || true
     cat > /etc/sysctl.d/99-supacloud-lowmem-tcp.conf <<'EOF'
 # SupaCloud small-host guardrails. Bound per-socket TCP buffers and raise the
 # global TCP memory ceiling to reduce transient TCP memory pressure on 2G hosts.
+# Rollback: rm -f /etc/sysctl.d/99-supacloud-lowmem-tcp.conf && sysctl --system
 net.ipv4.tcp_mem = 32768 43690 65536
 net.ipv4.tcp_rmem = 4096 87380 4194304
 net.ipv4.tcp_wmem = 4096 16384 4194304
@@ -638,7 +702,6 @@ install_base_dependencies() {
         ! command -v bc &> /dev/null && PACKAGES="$PACKAGES bc"
         ! command -v jq &> /dev/null && PACKAGES="$PACKAGES jq"
         ! command -v git &> /dev/null && PACKAGES="$PACKAGES git"
-        ! python3 -c "import yaml" &>/dev/null && PACKAGES="$PACKAGES python3-yaml"
         # Some minimal images miss procps-ng (ps, top)
         ! command -v ps &> /dev/null && PACKAGES="$PACKAGES procps-ng"
         # SSH tools (ssh-keygen, sshd) — Ansible required
@@ -672,6 +735,11 @@ install_base_dependencies() {
         elif grep -qEi "release 9|Stream 9|VERSION_ID=\"9" /etc/os-release /etc/redhat-release /etc/centos-release 2>/dev/null; then
             log_info "Detected EL9, enabling crb repository..."
             dnf config-manager --set-enabled crb 2>/dev/null || true
+        fi
+
+        if ! python3 -c "import yaml" &>/dev/null; then
+            log_info "Installing Python YAML support..."
+            dnf install -y python3-pyyaml || dnf install -y python3-yaml
         fi
         
     elif command -v apt-get &> /dev/null; then
@@ -1390,9 +1458,9 @@ install_kong_native() {
     sudo -u postgres psql -c "ALTER USER kong WITH SUPERUSER;" || true
     sudo -u postgres psql -c "CREATE DATABASE kong OWNER kong;" || true
 
-    ensure_pg_hba_rule "host    all             kong             127.0.0.1/32       scram-sha-256" /pg/data/pg_hba.conf
-    ensure_pg_hba_rule "host    all             kong             ::1/128            scram-sha-256" /pg/data/pg_hba.conf
-    ensure_pg_hba_rule "local   all             kong                                scram-sha-256" /pg/data/pg_hba.conf
+    ensure_pg_hba_rule "host    kong            kong             127.0.0.1/32       scram-sha-256" /pg/data/pg_hba.conf
+    ensure_pg_hba_rule "host    kong            kong             ::1/128            scram-sha-256" /pg/data/pg_hba.conf
+    ensure_pg_hba_rule "local   kong            kong                                scram-sha-256" /pg/data/pg_hba.conf
 
     # 4. Kong Configuration
     log_info "Configuring Native Kong..."
