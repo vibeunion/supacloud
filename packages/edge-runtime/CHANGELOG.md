@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.6.4...edge-runtime-v0.7.0) (2026-05-25)
+
+
+### Features
+
+* add LISTEN/NOTIFY wakeups to background worker and fix storage mimetype ([72f91c9](https://github.com/zuohuadong/supacloud/commit/72f91c9e778b0ea6c9d9161d282f6b71a018e45e))
+
 ## [0.6.4](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.6.3...edge-runtime-v0.6.4) (2026-05-24)
 
 

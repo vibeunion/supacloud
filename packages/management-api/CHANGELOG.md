@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.22.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.21.6...management-api-v0.22.0) (2026-05-25)
+
+
+### Features
+
+* add LISTEN/NOTIFY wakeups to background worker and fix storage mimetype ([72f91c9](https://github.com/zuohuadong/supacloud/commit/72f91c9e778b0ea6c9d9161d282f6b71a018e45e))
+
+
+### Performance Improvements
+
+* raise background task concurrency cap ([dbbfb27](https://github.com/zuohuadong/supacloud/commit/dbbfb27cb6bb18b8b99ca4fca311dbe98289bc4e))
+
 ## [0.21.6](https://github.com/zuohuadong/supacloud/compare/management-api-v0.21.5...management-api-v0.21.6) (2026-05-25)
 
 
