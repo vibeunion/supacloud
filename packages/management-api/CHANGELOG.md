@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.22.1](https://github.com/zuohuadong/supacloud/compare/management-api-v0.22.0...management-api-v0.22.1) (2026-05-25)
+
+
+### Bug Fixes
+
+* **upgrade:** tune edge runtime systemd capacity with daemon-reload ([a4fedf5](https://github.com/zuohuadong/supacloud/commit/a4fedf5d526314d5a94ed8feefa698d8bbea5fab))
+
 ## [0.22.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.21.6...management-api-v0.22.0) (2026-05-25)
 
 
