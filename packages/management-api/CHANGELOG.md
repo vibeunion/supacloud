@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.5](https://github.com/zuohuadong/supacloud/compare/management-api-v0.21.4...management-api-v0.21.5) (2026-05-25)
+
+
+### Bug Fixes
+
+* spawn static workers from release binary path ([#191](https://github.com/zuohuadong/supacloud/issues/191)) ([88a79fc](https://github.com/zuohuadong/supacloud/commit/88a79fc4675f413af22d7d3aa37b3fd7ccddd3df))
+
 ## [0.21.4](https://github.com/zuohuadong/supacloud/compare/management-api-v0.21.3...management-api-v0.21.4) (2026-05-24)
 
 
