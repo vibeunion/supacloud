@@ -568,7 +568,7 @@
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
               <label class="space-y-2">
                 <span class="text-sm font-medium text-foreground">项目后台并发</span>
-                <input type="number" min="1" max="20" bind:value={draftSettings.concurrency} class="w-full px-3 py-2 text-sm rounded-lg border bg-background" />
+                <input type="number" min="1" max="30" bind:value={draftSettings.concurrency} class="w-full px-3 py-2 text-sm rounded-lg border bg-background" />
               </label>
               <label class="space-y-2">
                 <span class="text-sm font-medium text-foreground">最大重试次数</span>
