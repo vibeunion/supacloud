@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.0](https://github.com/zuohuadong/supacloud/compare/supacloud-js-v0.16.1...supacloud-js-v0.17.0) (2026-05-25)
+
+
+### Features
+
+* **supacloud-js:** add supauth management helpers ([0234e43](https://github.com/zuohuadong/supacloud/commit/0234e43c9d46b5496107838355460ac4df5e62d9))
+
 ## [0.16.1](https://github.com/zuohuadong/supacloud/compare/supacloud-js-v0.16.0...supacloud-js-v0.16.1) (2026-05-24)
 
 
