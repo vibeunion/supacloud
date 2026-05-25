@@ -348,6 +348,7 @@ async function ensureEdgeRuntimeCapacityDropIn(env: Record<string, string | unde
     const config = resolveEdgeRuntimeCapacityConfig({ env });
     mkdirSync(EDGE_RUNTIME_DROPIN_DIR, { recursive: true });
     writeFileSync(EDGE_RUNTIME_CAPACITY_DROPIN, buildEdgeRuntimeCapacityDropIn(config), { mode: 0o644 });
+    await $`systemctl daemon-reload`.nothrow().quiet();
 }
 
 async function restartServices() {
