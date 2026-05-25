@@ -420,6 +420,34 @@ function validateUploadSize(size: number | null | undefined, maxSize = STORAGE_U
     }
     return { ok: true };
 }
+
+function normalizeContentType(value: unknown): string {
+    return String(value || "").trim();
+}
+
+function isSpecificContentType(value: string): boolean {
+    const mediaType = value.split(";")[0]?.trim().toLowerCase();
+    return Boolean(mediaType) && mediaType !== "application/octet-stream";
+}
+
+function getObjectMetadataContentType(info: Record<string, unknown> | null | undefined): string {
+    const metadata = (info?.metadata || {}) as Record<string, unknown>;
+    return normalizeContentType(info?.content_type || metadata.mimetype);
+}
+
+function resolveDownloadContentType(
+    res: Response,
+    info?: Record<string, unknown> | null,
+): string {
+    const metadataType = getObjectMetadataContentType(info);
+    if (isSpecificContentType(metadataType)) return metadataType;
+
+    const responseType = normalizeContentType(res.headers?.get('Content-Type'));
+    if (isSpecificContentType(responseType)) return responseType;
+
+    return metadataType || responseType || 'application/octet-stream';
+}
+
 async function readUploadBody(
     request: Request,
     contentType: string | undefined,
@@ -880,7 +908,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             const res = await StorageService.getDownloadResponse(ref, params.bucket, filePath);
             if (!res) return status(404, { statusCode: "404", error: 'Not Found', message: 'Object not found internally' });
 
-            set.headers['Content-Type'] = res.headers?.get('Content-Type') || 'application/octet-stream';
+            set.headers['Content-Type'] = resolveDownloadContentType(res, info);
             const rawCc = (info?.cache_control as string) || '3600';
             set.headers['Cache-Control'] = /^\d+$/.test(rawCc) ? `public, max-age=${rawCc}` : rawCc;
             set.headers['Content-Length'] = res.headers?.get('Content-Length') || '';
@@ -917,7 +945,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             if (!res) return status(404, { statusCode: "404", error: 'Not Found', message: 'Object not found internally' });
 
             const info = await StorageRLS.getObjectInfo(ref, params.bucket, filePath, undefined, true);
-            set.headers['Content-Type'] = res.headers?.get('Content-Type') || 'application/octet-stream';
+            set.headers['Content-Type'] = resolveDownloadContentType(res, info);
             set.headers['Cache-Control'] = 'private, max-age=3600';
             set.headers['Content-Length'] = res.headers?.get('Content-Length') || '';
             const etag = res.headers?.get('ETag') || (info?.id ? `"${info.id}"` : undefined);
@@ -1014,7 +1042,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             if (!res) return status(404, { statusCode: "404", error: 'Not Found', message: 'Object not found internally' });
 
             const info = await StorageRLS.getObjectInfo(ref, params.bucket, filePath, undefined, true);
-            set.headers['Content-Type'] = res.headers?.get('Content-Type') || 'application/octet-stream';
+            set.headers['Content-Type'] = resolveDownloadContentType(res, info);
             set.headers['Cache-Control'] = 'private, max-age=3600';
             set.headers['Content-Length'] = res.headers?.get('Content-Length') || '';
             const etag = res.headers?.get('ETag') || (info?.id ? `"${info.id}"` : undefined);
@@ -1272,7 +1300,8 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             const res = await StorageService.getDownloadResponse(ref, params.bucket, filePath);
             if (!res) return status(404, { statusCode: "404", error: 'Not Found', message: 'Object not found internally' });
 
-            set.headers['Content-Type'] = res.headers?.get('Content-Type') || 'application/octet-stream';
+            const info = await StorageRLS.getObjectInfo(ref, params.bucket, filePath, undefined, true);
+            set.headers['Content-Type'] = resolveDownloadContentType(res, info);
             set.headers['Cache-Control'] = 'private, no-store';
             setDownloadDisposition(query as Record<string, string | undefined>, filePath, set as { headers: Record<string, string> });
             const newRes = new Response(await res.arrayBuffer());
@@ -1906,11 +1935,12 @@ async function proxyToImaginary(
     if (!downloadRes) {
         return status(404, { message: 'Source image not found' }) as unknown as { message: string };
     }
+    const sourceInfo = await StorageRLS.getObjectInfo(ref, logicalBucket, filePath, undefined, true);
+    const sourceContentType = resolveDownloadContentType(downloadRes, sourceInfo);
 
     // Validate source file is actually an image before wasting resources on imaginary
-    const sourceContentTypeCheck = downloadRes.headers?.get('Content-Type') || '';
-    if (sourceContentTypeCheck && !sourceContentTypeCheck.startsWith('image/')) {
-        return status(400, { message: `Cannot transform non-image file (Content-Type: ${sourceContentTypeCheck})` }) as unknown as { message: string };
+    if (sourceContentType && !sourceContentType.startsWith('image/')) {
+        return status(400, { message: `Cannot transform non-image file (Content-Type: ${sourceContentType})` }) as unknown as { message: string };
     }
 
     // 2. Build imaginary query params
@@ -1977,7 +2007,6 @@ async function proxyToImaginary(
     try {
         // 3. POST the raw image body to imaginary (no URL fetch needed)
         const imageBody = await downloadRes.arrayBuffer();
-        const sourceContentType = downloadRes.headers?.get('Content-Type') || 'application/octet-stream';
 
         const res = await fetch(`${IMAGINARY_URL}/${operation}?${imaginaryParams.toString()}`, {
             method: 'POST',
