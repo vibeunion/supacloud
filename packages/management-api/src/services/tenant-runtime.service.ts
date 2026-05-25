@@ -162,6 +162,136 @@ class PostgrestRuntimeController {
     }
 }
 
+export interface GotrueRuntimeStatus {
+    component: "gotrue";
+    desired: RuntimeDesiredState;
+    actual: RuntimeStatus["status"];
+    port: number;
+    unit: string;
+    health: "healthy" | "unhealthy" | "unknown";
+    last_error: string | null;
+    updated_at: string | null;
+    last_reconciled_at: string | null;
+}
+
+class GotrueRuntimeController {
+    unit(ref: string): string {
+        return `supacloud-gotrue@${ref}`;
+    }
+
+    async isActive(ref: string): Promise<boolean> {
+        return (await $`systemctl is-active ${this.unit(ref)}`.nothrow().quiet()).exitCode === 0;
+    }
+
+    async isFailed(ref: string): Promise<boolean> {
+        return (await $`systemctl is-failed ${this.unit(ref)}`.nothrow().quiet()).exitCode === 0;
+    }
+
+    async enable(ref: string): Promise<void> {
+        await $`systemctl enable ${this.unit(ref)}`.nothrow().quiet();
+    }
+
+    async start(ref: string): Promise<void> {
+        await $`systemctl start ${this.unit(ref)}`.nothrow().quiet();
+    }
+
+    async restart(ref: string): Promise<void> {
+        await $`systemctl restart ${this.unit(ref)}`.nothrow().quiet();
+    }
+
+    async stop(ref: string): Promise<void> {
+        await $`systemctl stop ${this.unit(ref)}`.nothrow().quiet();
+    }
+
+    async disable(ref: string): Promise<void> {
+        await $`systemctl disable ${this.unit(ref)}`.nothrow().quiet();
+    }
+
+    async resetFailed(ref: string): Promise<void> {
+        await $`systemctl reset-failed ${this.unit(ref)}`.nothrow().quiet();
+    }
+
+    async observe(ref: string, port: number): Promise<Pick<GotrueRuntimeStatus, "actual" | "health" | "last_error">> {
+        if (!(await this.isActive(ref))) {
+            return { actual: "stopped", health: "unknown", last_error: null };
+        }
+
+        try {
+            const res = await fetch(`http://127.0.0.1:${port}/health`, {
+                signal: AbortSignal.timeout(3000),
+            });
+            if (res.ok) {
+                return { actual: "running", health: "healthy", last_error: null };
+            }
+            return {
+                actual: "error",
+                health: "unhealthy",
+                last_error: `GoTrue health check failed with HTTP ${res.status}`,
+            };
+        } catch (error: unknown) {
+            return {
+                actual: "error",
+                health: "unhealthy",
+                last_error: error instanceof Error ? error.message : String(error),
+            };
+        }
+    }
+
+    async startOrRepair(
+        ref: string,
+        port: number,
+        mode: "restart" | "repair",
+    ): Promise<GotrueRuntimeStatus> {
+        const active = await this.isActive(ref);
+        const shouldRestart = active && (
+            mode === "restart" ||
+            (mode === "repair" && (await this.observe(ref, port)).health !== "healthy")
+        );
+
+        if (await this.isFailed(ref)) {
+            await this.resetFailed(ref);
+        }
+
+        await this.enable(ref);
+        if (shouldRestart) {
+            await this.restart(ref);
+        } else if (!active) {
+            await this.start(ref);
+        }
+
+        return this.waitForHealthy(ref, port);
+    }
+
+    async waitForHealthy(
+        ref: string,
+        port: number,
+        attempts = 10,
+        delayMs = 500,
+    ): Promise<GotrueRuntimeStatus> {
+        let status = await this.observe(ref, port);
+        for (let tryIdx = 0; tryIdx < attempts && status.health !== "healthy"; tryIdx++) {
+            await Bun.sleep(delayMs);
+            status = await this.observe(ref, port);
+        }
+        return {
+            component: "gotrue",
+            desired: "running",
+            actual: status.actual,
+            port,
+            unit: this.unit(ref),
+            health: status.health,
+            last_error: status.last_error,
+            updated_at: null,
+            last_reconciled_at: null,
+        };
+    }
+
+    async stopAndDisable(ref: string): Promise<void> {
+        await this.stop(ref);
+        await this.disable(ref);
+    }
+}
+
 // Tenant schema migration SQL (sourced from migrate-tenant-schema.ts)
 const ALTER_TENANT_SQL = `
 -- 1. auth.users adds
@@ -859,6 +989,7 @@ class TenantRuntimeService {
     private readonly PGRST_PORT_BASE = config.pgrstPortBase;
     private readonly GOTRUE_PORT_BASE = config.gotruePortBase;
     private readonly postgrestController = new PostgrestRuntimeController();
+    private readonly gotrueController = new GotrueRuntimeController();
 
     // config.portRange is a string like "3100-3200". We just need the difference as the range size.
     private readonly PORT_RANGE = (() => {
@@ -1659,8 +1790,8 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
         await this.postgrestController.enable(ref);
         await this.postgrestController.start(ref);
 
-        await $`systemctl enable supacloud-gotrue@${ref}`.nothrow().quiet();
-        await $`systemctl start supacloud-gotrue@${ref}`.nothrow().quiet();
+        await this.gotrueController.enable(ref);
+        await this.gotrueController.start(ref);
 
         // Wait for service health checks
         logger.info(`Waiting for PostgREST(${pgrstPort}) and GoTrue(${gotruePort}) health checks...`);
@@ -1707,8 +1838,8 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
     private async stopRuntimeUnits(ref: string): Promise<void> {
         await this.postgrestController.stopAndDisable(ref);
 
-        await $`systemctl stop supacloud-gotrue@${ref}`.nothrow().quiet();
-        await $`systemctl disable supacloud-gotrue@${ref}`.nothrow().quiet();
+        await this.gotrueController.stopAndDisable(ref);
+
     }
 
     private async removeRuntimeConfig(ref: string): Promise<void> {
@@ -2134,7 +2265,7 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 
     public async restartRuntime(ref: string): Promise<RuntimeStatus> {
         const pgrstActive = await this.postgrestController.isActive(ref);
-        const gotrueActive = (await $`systemctl is-active supacloud-gotrue@${ref}`.nothrow().quiet()).exitCode === 0;
+        const gotrueActive = await this.gotrueController.isActive(ref);
 
         if (pgrstActive || gotrueActive) {
             await this.ensureBinaries();
@@ -2145,7 +2276,7 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
             await this.generateTenantConfig(ref, pgrstPort, gotruePort);
 
             await this.postgrestController.restart(ref);
-            await $`systemctl restart supacloud-gotrue@${ref}`.nothrow().quiet();
+            await this.gotrueController.restart(ref);
 
             const postgrestStatus = await this.statusPostgrest(ref);
             await this.setPostgrestDesiredState(ref, "running");
@@ -2163,7 +2294,7 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 
     public async checkStatus(ref: string): Promise<RuntimeStatus> {
         const pgrstActive = await this.postgrestController.isActive(ref);
-        const gotrueActive = (await $`systemctl is-active supacloud-gotrue@${ref}`.nothrow().quiet()).exitCode === 0;
+        const gotrueActive = await this.gotrueController.isActive(ref);
 
         const port = await this.getTenantPort(ref, "pgrst");
         const gotruePort = await this.getTenantPort(ref, "gotrue");
@@ -2240,6 +2371,8 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 
                 if (status !== "active" && status !== "creating") {
                     await this.pauseProjectRuntime(ref);
+                    // Also pause GoTrue for inactive projects
+                    await this.pauseGoTrueRuntime(ref);
                     stopped++;
                     continue;
                 }
@@ -2247,6 +2380,7 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
                 const desired = this.getPostgrestDesiredState(project);
                 const actual = await this.statusPostgrest(ref);
 
+                // --- PostgREST reconcile ---
                 if (desired === "stopped" && actual.actual !== "stopped") {
                     await this.pausePostgrest(ref);
                     stopped++;
@@ -2256,7 +2390,34 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
                 if (desired === "running" && status === "active" && actual.health !== "healthy") {
                     await this.resumePostgrest(ref);
                     started++;
-                    continue;
+                }
+
+                // --- GoTrue reconcile ---
+                const gotrueActive = await this.gotrueController.isActive(ref);
+                const gotruePort = await this.getTenantPort(ref, "gotrue");
+                const gotrueObserved = await this.gotrueController.observe(ref, gotruePort);
+
+                if (desired === "running" && status === "active") {
+                    // Active project: ensure GoTrue is running and healthy
+                    if (!gotrueActive || gotrueObserved.health !== "healthy") {
+                        // Ensure config exists before starting
+                        const gotrueEnvPath = path.join(this.TENANT_CONFIG_DIR, `${ref}_gotrue.env`);
+                        if (!(await Bun.file(gotrueEnvPath).exists())) {
+                            const pgrstPort = await this.getTenantPort(ref, "pgrst");
+                            await this.generateTenantConfig(ref, pgrstPort, gotruePort);
+                        }
+                        // Ensure systemd template is installed
+                        await this.installSystemdTemplate();
+                        await this.gotrueController.startOrRepair(ref, gotruePort, "repair");
+                        logger.info(`[TenantRuntime] GoTrue reconciled and started for ${ref}`);
+                        started++;
+                    }
+                } else if (desired === "stopped") {
+                    // Stopped project: ensure GoTrue is stopped
+                    if (gotrueActive) {
+                        await this.pauseGoTrueRuntime(ref);
+                        stopped++;
+                    }
                 }
 
                 await this.setPostgrestDesiredState(ref, desired);
@@ -2273,7 +2434,7 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
                     await this.recordPostgrestFailure(ref, error, { reconciled: true }).catch(() => {});
                 }
                 const message = error instanceof Error ? error.message : String(error);
-                logger.warn(`[TenantRuntime] Failed to reconcile PostgREST runtime ${ref}`, {
+                logger.warn(`[TenantRuntime] Failed to reconcile runtime ${ref}`, {
                     status: status || "missing",
                     error: message,
                 });
@@ -2281,6 +2442,11 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
         }
 
         return { checked: refs.size, stopped, started, updated, errors };
+    }
+
+    private async pauseGoTrueRuntime(ref: string): Promise<void> {
+        await this.gotrueController.stopAndDisable(ref);
+        logger.info(`[TenantRuntime] GoTrue paused for ${ref}`);
     }
 
     public async updateOAuthConfig(ref: string, provider: OAuthProvider, providerConfig: OAuthProviderConfig): Promise<void> {
