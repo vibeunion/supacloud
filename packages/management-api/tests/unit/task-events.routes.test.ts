@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
+import { afterAll, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { Elysia } from "elysia";
 
 const findByRef = mock(() => Promise.resolve(null));
@@ -8,9 +8,9 @@ const requireProjectOrAdminAuth = mock(() => Promise.resolve(null));
 const { projectRepository } = await import("../../src/repositories/project.repository");
 const authModule = await import("../../src/middleware/auth");
 
-spyOn(projectRepository, "findByRef").mockImplementation(findByRef as typeof projectRepository.findByRef);
-spyOn(projectRepository, "updateConfig").mockImplementation(updateConfig as typeof projectRepository.updateConfig);
-spyOn(authModule, "requireProjectOrAdminAuth").mockImplementation(
+const findByRefSpy = spyOn(projectRepository, "findByRef").mockImplementation(findByRef as typeof projectRepository.findByRef);
+const updateConfigSpy = spyOn(projectRepository, "updateConfig").mockImplementation(updateConfig as typeof projectRepository.updateConfig);
+const requireProjectOrAdminAuthSpy = spyOn(authModule, "requireProjectOrAdminAuth").mockImplementation(
   requireProjectOrAdminAuth as typeof authModule.requireProjectOrAdminAuth,
 );
 
@@ -28,6 +28,12 @@ function request(path: string, init: RequestInit = {}) {
 }
 
 describe("taskEventRoutes", () => {
+  afterAll(() => {
+    findByRefSpy.mockRestore();
+    updateConfigSpy.mockRestore();
+    requireProjectOrAdminAuthSpy.mockRestore();
+  });
+
   beforeEach(() => {
     findByRef.mockReset();
     updateConfig.mockReset();

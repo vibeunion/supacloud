@@ -100,6 +100,31 @@ describe("storageCompatRoutes supabase-js compatibility", () => {
     downloadSpy.mockRestore();
   });
 
+  test("public downloads prefer stored object mimetype when backend returns octet-stream", async () => {
+    mockObjects.set("avatars/folder/cat.png", {
+      metadata: { size: 3, mimetype: "image/png" },
+      updated: new Date().toISOString(),
+    });
+
+    const downloadSpy = spyOn(StorageService, "getDownloadResponse").mockResolvedValue(
+      new Response("png", {
+        headers: {
+          "Content-Type": "application/octet-stream",
+          "Content-Length": "3",
+        },
+      })
+    );
+
+    const res = await request("/storage/v1/object/public/avatars/folder/cat.png", {
+      headers: { apikey: "test-token" },
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("image/png");
+    expect(await res.text()).toBe("png");
+    downloadSpy.mockRestore();
+  });
+
   test("rejects mismatched project header and apikey", async () => {
     const sqlSpy = spyOn(dbModule, "sql");
     sqlSpy.mockImplementation(async (...args: unknown[]) => {
@@ -151,7 +176,7 @@ describe("storageCompatRoutes supabase-js compatibility", () => {
     const downloadSpy = spyOn(StorageService, "getDownloadResponse").mockResolvedValue(
       new Response("png", {
         headers: {
-          "Content-Type": "image/png",
+          "Content-Type": "application/octet-stream",
           "Content-Length": "3",
         },
       })
@@ -176,7 +201,43 @@ describe("storageCompatRoutes supabase-js compatibility", () => {
     });
 
     expect(fileRes.status).toBe(200);
+    expect(fileRes.headers.get("content-type")).toBe("image/png");
     expect(await fileRes.text()).toBe("png");
+    downloadSpy.mockRestore();
+  });
+
+  test("image transforms use stored mimetype when backend returns octet-stream", async () => {
+    mockObjects.set("avatars/folder/cat.png", {
+      metadata: { size: 3, mimetype: "image/png" },
+      updated: new Date().toISOString(),
+    });
+
+    const downloadSpy = spyOn(StorageService, "getDownloadResponse").mockResolvedValue(
+      new Response("png", {
+        headers: {
+          "Content-Type": "application/octet-stream",
+          "Content-Length": "3",
+        },
+      })
+    );
+    const fetchSpy = spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response("webp", {
+        headers: {
+          "Content-Type": "image/webp",
+        },
+      })
+    );
+
+    const res = await request("/storage/v1/render/image/public/avatars/folder/cat.png?width=64", {
+      headers: { apikey: "test-token" },
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("image/webp");
+    const init = fetchSpy.mock.calls[0]?.[1] as RequestInit | undefined;
+    expect(init?.headers).toEqual(expect.objectContaining({ "Content-Type": "image/png" }));
+    expect(await res.text()).toBe("webp");
+    fetchSpy.mockRestore();
     downloadSpy.mockRestore();
   });
 
