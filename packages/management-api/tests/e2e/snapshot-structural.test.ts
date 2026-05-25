@@ -28,6 +28,38 @@ function authHeaders(): Record<string, string> {
   };
 }
 
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitForAuthProxy(tenantRef: string, anonKey: string) {
+  let lastStatus = 0;
+  let lastError = "";
+
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    try {
+      const res = await fetch(`${PROXY_URL}/auth/v1/health`, {
+        headers: {
+          apikey: anonKey,
+          Authorization: `Bearer ${anonKey}`,
+          "x-project-ref": tenantRef,
+        },
+        signal: AbortSignal.timeout(1000),
+      });
+      lastStatus = res.status;
+      if (res.status < 500) return;
+      lastError = await res.text();
+    } catch (e) {
+      lastError = e instanceof Error ? e.message : String(e);
+    }
+    await sleep(500);
+  }
+
+  throw new Error(
+    `Auth proxy is not ready for snapshot tests: status=${lastStatus} error=${lastError}`,
+  );
+}
+
 describe("API Structural Snapshot Compliance", () => {
   let projectService: ProjectService;
   let tenantRef: string;
@@ -50,23 +82,29 @@ describe("API Structural Snapshot Compliance", () => {
       if (process.env.TEST_FIXED_JWT_SECRET) {
         const { sql } = await import("../../src/db");
         await sql`
-                    INSERT INTO project_config (project_ref, postgrest_port, gotrue_port, realtime_port)
-                    VALUES (${tenantRef}, 3000, 9999, 4000)
-                    ON CONFLICT (project_ref) DO UPDATE
-                    SET postgrest_port = 3000, gotrue_port = 9999, realtime_port = 4000
-                `;
-        await sql`
-                    UPDATE projects SET db_name = 'postgres' WHERE ref = ${tenantRef};
+                    UPDATE projects
+                    SET
+                      db_name = 'postgres',
+                      db_user = 'supabase_admin',
+                      db_password = 'postgres',
+                      status = 'active',
+                      config = COALESCE(config, '{}'::jsonb) || jsonb_build_object(
+                        'postgrest_port', 3000,
+                        'gotrue_port', 9999,
+                        'realtime_port', 4000
+                      )
+                    WHERE ref = ${tenantRef};
                 `;
       }
 
-      await new Promise((r) => setTimeout(r, 2000));
+      await sleep(2000);
       const health = await fetch(`${PROXY_URL}/health`, {
         signal: AbortSignal.timeout(1000),
       });
       if (!health.ok) {
         throw new Error(`Snapshot proxy is not ready: ${health.status}`);
       }
+      await waitForAuthProxy(tenantRef, anonKey);
     } catch (e) {
       throw new Error(
         `Failed to boot project inside snapshot tests context: ${
@@ -74,7 +112,7 @@ describe("API Structural Snapshot Compliance", () => {
         }`,
       );
     }
-  });
+  }, { timeout: 30_000 });
 
   afterAll(async () => {
     if (tenantRef) {

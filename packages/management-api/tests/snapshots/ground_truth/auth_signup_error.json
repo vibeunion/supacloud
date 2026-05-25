@@ -1,0 +1,14 @@
+{
+  "status": 422,
+  "payloadType": "object",
+  "schema": {
+    "code": "number",
+    "error_code": "string",
+    "msg": "string",
+    "weak_password": {
+      "reasons": [
+        "string"
+      ]
+    }
+  }
+}
