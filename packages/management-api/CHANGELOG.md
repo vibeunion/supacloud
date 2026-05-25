@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.6](https://github.com/zuohuadong/supacloud/compare/management-api-v0.21.5...management-api-v0.21.6) (2026-05-25)
+
+
+### Bug Fixes
+
+* **storage:** preserve object mimetype on downloads ([e7142da](https://github.com/zuohuadong/supacloud/commit/e7142da0636bd0689c9dbb7d6dd6ad355679f969))
+
 ## [0.21.5](https://github.com/zuohuadong/supacloud/compare/management-api-v0.21.4...management-api-v0.21.5) (2026-05-25)
 
 
