@@ -62,6 +62,8 @@ ensure_kong_running() {
             log_info "Kong service already running"
         else
             log_warn "Kong service not running, starting..."
+            rm -f /usr/local/kong/sockets/* /usr/local/kong/pids/nginx.pid 2>/dev/null || true
+            systemctl reset-failed kong 2>/dev/null || true
             systemctl start kong 2>/dev/null || true
             if systemctl is-active --quiet kong 2>/dev/null; then
                 log_info "Kong service started"

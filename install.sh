@@ -64,6 +64,115 @@ log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 log_step() { echo -e "${BLUE}[STEP]${NC} $1"; }
 
+ensure_pg_hba_rule() {
+    local rule="$1"
+    local pg_hba="${2:-/pg/data/pg_hba.conf}"
+    local patroni_config=""
+    local cluster_name=""
+
+    if command -v patronictl >/dev/null 2>&1; then
+        for candidate in /etc/patroni/patroni.yml /etc/patroni.yml /etc/patroni.yaml; do
+            if [[ -f "$candidate" ]]; then
+                patroni_config="$candidate"
+                break
+            fi
+        done
+    fi
+
+    if [[ -n "$patroni_config" ]] && [[ -f "$pg_hba" ]] && grep -q "overwritten by Patroni" "$pg_hba" 2>/dev/null; then
+        cluster_name=$(patronictl -c "$patroni_config" list 2>/dev/null | sed -n 's/.*Cluster: \([^ ]*\).*/\1/p' | head -1)
+        cluster_name="${cluster_name:-pg-meta}"
+        local tmp_before tmp_after
+        tmp_before=$(mktemp)
+        tmp_after=$(mktemp)
+        patronictl -c "$patroni_config" show-config > "$tmp_before"
+        RULE="$rule" python3 - "$tmp_before" "$tmp_after" <<'PYCODE'
+import os
+import sys
+import yaml
+
+src, dst = sys.argv[1], sys.argv[2]
+rule = os.environ["RULE"]
+with open(src, "r", encoding="utf-8") as fh:
+    data = yaml.safe_load(fh) or {}
+postgresql = data.setdefault("postgresql", {})
+pg_hba = postgresql.setdefault("pg_hba", [])
+if rule not in pg_hba:
+    pg_hba.insert(0, rule)
+with open(dst, "w", encoding="utf-8") as fh:
+    yaml.safe_dump(data, fh, sort_keys=False)
+PYCODE
+        if ! cmp -s "$tmp_before" "$tmp_after"; then
+            log_info "Adding Patroni pg_hba rule: $rule"
+            patronictl -c "$patroni_config" edit-config --apply "$tmp_after" --force "$cluster_name"
+        else
+            log_info "Patroni pg_hba rule already exists: $rule"
+        fi
+        rm -f "$tmp_before" "$tmp_after"
+        sudo -u postgres psql -c "SELECT pg_reload_conf();" 2>/dev/null || true
+        return 0
+    fi
+
+    if [[ ! -f "$pg_hba" ]]; then
+        log_warn "$pg_hba not found, cannot add pg_hba rule: $rule"
+        return 1
+    fi
+
+    if grep -qF "$rule" "$pg_hba"; then
+        log_info "pg_hba rule already exists: $rule"
+    else
+        log_info "Adding pg_hba rule: $rule"
+        cp "$pg_hba" "${pg_hba}.bak.$(date +%s)"
+        echo "$rule" >> "$pg_hba"
+    fi
+}
+
+configure_native_kong_systemd() {
+    log_info "Configuring Kong systemd startup guardrails..."
+    mkdir -p /etc/systemd/system/kong.service.d
+    cat > /etc/systemd/system/kong.service.d/override.conf <<'EOF'
+[Unit]
+After=network-online.target patroni.service pgbouncer.service
+Wants=network-online.target patroni.service
+StartLimitIntervalSec=300
+StartLimitBurst=12
+
+[Service]
+Restart=on-failure
+RestartSec=10s
+ExecStartPre=
+ExecStartPre=/usr/bin/bash -lc 'for i in {1..60}; do /usr/pgsql/bin/pg_isready -h 127.0.0.1 -p 5432 -U kong -d kong >/dev/null 2>&1 && exit 0; sleep 2; done; echo "PostgreSQL not ready for Kong" >&2; exit 1'
+ExecStartPre=/usr/local/bin/kong prepare -p /usr/local/kong
+ExecStopPost=/usr/bin/bash -lc 'rm -f /usr/local/kong/sockets/* /usr/local/kong/pids/nginx.pid 2>/dev/null || true'
+EOF
+    systemctl daemon-reload
+}
+
+cleanup_native_kong_runtime() {
+    systemctl stop kong 2>/dev/null || true
+    rm -f /usr/local/kong/sockets/* /usr/local/kong/pids/nginx.pid 2>/dev/null || true
+}
+
+configure_low_memory_tcp_guardrails() {
+    local mem_kb
+    mem_kb=$(awk '/MemTotal/ {print $2}' /proc/meminfo 2>/dev/null || echo 0)
+    if [[ "$mem_kb" -le 0 || "$mem_kb" -gt 3145728 ]]; then
+        return 0
+    fi
+
+    log_info "Configuring low-memory TCP guardrails..."
+    cat > /etc/sysctl.d/99-supacloud-lowmem-tcp.conf <<'EOF'
+# SupaCloud small-host guardrails. Bound per-socket TCP buffers and raise the
+# global TCP memory ceiling to reduce transient TCP memory pressure on 2G hosts.
+net.ipv4.tcp_mem = 32768 43690 65536
+net.ipv4.tcp_rmem = 4096 87380 4194304
+net.ipv4.tcp_wmem = 4096 16384 4194304
+net.ipv4.tcp_fin_timeout = 15
+net.ipv4.tcp_tw_reuse = 1
+EOF
+    sysctl --system >/dev/null 2>&1 || log_warn "Failed to apply sysctl guardrails; they will apply after reboot"
+}
+
 sync_runtime_config() {
     local source_file="${1:-$CONFIG_FILE}"
     mkdir -p "$(dirname "$OPT_CONFIG_FILE")"
@@ -529,6 +638,7 @@ install_base_dependencies() {
         ! command -v bc &> /dev/null && PACKAGES="$PACKAGES bc"
         ! command -v jq &> /dev/null && PACKAGES="$PACKAGES jq"
         ! command -v git &> /dev/null && PACKAGES="$PACKAGES git"
+        ! python3 -c "import yaml" &>/dev/null && PACKAGES="$PACKAGES python3-yaml"
         # Some minimal images miss procps-ng (ps, top)
         ! command -v ps &> /dev/null && PACKAGES="$PACKAGES procps-ng"
         # SSH tools (ssh-keygen, sshd) — Ansible required
@@ -575,6 +685,7 @@ install_base_dependencies() {
         ! command -v bc &> /dev/null && PACKAGES="$PACKAGES bc"
         ! command -v jq &> /dev/null && PACKAGES="$PACKAGES jq"
         ! command -v git &> /dev/null && PACKAGES="$PACKAGES git"
+        ! python3 -c "import yaml" &>/dev/null && PACKAGES="$PACKAGES python3-yaml"
         ! command -v ps &> /dev/null && PACKAGES="$PACKAGES procps"
         # SSH tools — Required for Ansible
         ! command -v ssh-keygen &> /dev/null && PACKAGES="$PACKAGES openssh-client"
@@ -1279,11 +1390,9 @@ install_kong_native() {
     sudo -u postgres psql -c "ALTER USER kong WITH SUPERUSER;" || true
     sudo -u postgres psql -c "CREATE DATABASE kong OWNER kong;" || true
 
-    if ! grep -q "kong.*kong" /pg/data/pg_hba.conf 2>/dev/null; then
-        log_info "Adding kong access to pg_hba.conf..."
-        printf 'host  kong  kong  127.0.0.1/32  scram-sha-256\nlocal  kong  kong  all  scram-sha-256\n' >> /pg/data/pg_hba.conf
-        sudo -u postgres psql -c "SELECT pg_reload_conf();" 2>/dev/null || true
-    fi
+    ensure_pg_hba_rule "host    all             kong             127.0.0.1/32       scram-sha-256" /pg/data/pg_hba.conf
+    ensure_pg_hba_rule "host    all             kong             ::1/128            scram-sha-256" /pg/data/pg_hba.conf
+    ensure_pg_hba_rule "local   all             kong                                scram-sha-256" /pg/data/pg_hba.conf
 
     # 4. Kong Configuration
     log_info "Configuring Native Kong..."
@@ -1302,9 +1411,10 @@ EOF
 
     # 5. Bootstrap Migrations & Enable
     log_info "Bootstrapping Kong Migrations..."
-    kong migrations bootstrap -c /etc/kong/kong.conf
-    
-    systemctl daemon-reload
+    kong migrations bootstrap -c /etc/kong/kong.conf || kong migrations up -c /etc/kong/kong.conf
+
+    configure_native_kong_systemd
+    cleanup_native_kong_runtime
     systemctl enable kong
     systemctl restart kong
     
@@ -2043,21 +2153,21 @@ configure_pg_hba() {
     fi
         
     # 4. Reload configuration
-        log_info "Reloading PostgreSQL configuration..."
-        if command -v pg_ctl &> /dev/null; then
-             # Execute as postgres user
-             su - postgres -c "pg_ctl reload -D $(dirname "$PG_HBA")"
-        elif systemctl is-active --quiet postgresql; then
-             systemctl reload postgresql
-        elif systemctl is-active --quiet patroni; then
-             systemctl reload patroni
-        elif pgrep -u postgres postgres > /dev/null; then
-             # Try sending SIGHUP
-             pkill -HUP -u postgres postgres
-             log_info "Sent SIGHUP signal to postgres process"
-        else
-             log_warn "Cannot automatically reload PostgreSQL, please execute reload manually"
-        fi
+    log_info "Reloading PostgreSQL configuration..."
+    if command -v pg_ctl &> /dev/null; then
+         # Execute as postgres user
+         su - postgres -c "pg_ctl reload -D $(dirname "$PG_HBA")"
+    elif systemctl is-active --quiet postgresql; then
+         systemctl reload postgresql
+    elif systemctl is-active --quiet patroni; then
+         systemctl reload patroni
+    elif pgrep -u postgres postgres > /dev/null; then
+         # Try sending SIGHUP
+         pkill -HUP -u postgres postgres
+         log_info "Sent SIGHUP signal to postgres process"
+    else
+         log_warn "Cannot automatically reload PostgreSQL, please execute reload manually"
+    fi
 }
 
 # ========== Save All Credentials ==========
@@ -2802,6 +2912,7 @@ main() {
     install_pigsty      # Pigsty nginx suppressed via nginx_enabled: false
     configure_analytics
     configure_pg_hba
+    configure_low_memory_tcp_guardrails
     
     # Kong native relies on Pigsty Postgres so it must be executed after install_pigsty.
     install_kong_native
