@@ -1,38 +1,98 @@
-﻿name: AI Review & Auto-Merge PR
+name: AI Review & Auto-Merge PR
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
+    types: [opened, synchronize, reopened, ready_for_review]
+  pull_request_review:
+    types: [submitted]
+  # 当 CI check suite 完成时触发，以便在 CI 通过后执行合并
+  check_suite:
+    types: [completed]
 
 permissions:
   contents: write
   pull-requests: write
+  checks: read
+  statuses: read
 
 jobs:
   ai-review-and-merge:
     name: AI Review & Auto-Merge
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
+    # 只在非 draft PR 上运行（check_suite 事件没有 draft 字段，默认允许）
+    if: >
+      github.event_name == 'check_suite' ||
+      github.event.pull_request.draft == false
 
     steps:
+      - name: Determine PR number
+        id: pr-info
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ] || [ "${{ github.event_name }}" = "pull_request_review" ]; then
+            echo "pr_number=${{ github.event.pull_request.number }}" >> "$GITHUB_OUTPUT"
+            echo "head_sha=${{ github.event.pull_request.head.sha }}" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event_name }}" = "check_suite" ]; then
+            HEAD_SHA="${{ github.event.check_suite.head_sha }}"
+            # 从 check_suite.pull_requests JSON 数组中提取 PR number
+            PR_JSON='${{ github.event.check_suite.pull_requests }}'
+            PR_NUMBER=$(echo "$PR_JSON" | jq -r '.[0].number // empty' 2>/dev/null || echo "")
+            # 如果数组为空，用 GitHub API 反查
+            if [ -z "$PR_NUMBER" ]; then
+              PR_NUMBER=$(curl -s -H "Authorization: Bearer $GITHUB_TOKEN" \
+                -H "Accept: application/vnd.github.v3+json" \
+                "https://api.github.com/repos/${{ github.repository }}/commits/${HEAD_SHA}/pulls" \
+                | jq -r '.[0].number // empty' 2>/dev/null || echo "")
+            fi
+            if [ -z "$PR_NUMBER" ]; then
+              echo "No PR associated with this check_suite. Skipping."
+              echo "pr_number=" >> "$GITHUB_OUTPUT"
+              echo "head_sha=" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            # 检查 PR 是否为 draft（通过 API）
+            DRAFT=$(curl -s -H "Authorization: Bearer $GITHUB_TOKEN" \
+              -H "Accept: application/vnd.github.v3+json" \
+              "https://api.github.com/repos/${{ github.repository }}/pulls/${PR_NUMBER}" \
+              | jq -r '.draft // false' 2>/dev/null)
+            if [ "$DRAFT" = "true" ]; then
+              echo "PR #${PR_NUMBER} is a draft. Skipping."
+              echo "pr_number=" >> "$GITHUB_OUTPUT"
+              echo "head_sha=" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "pr_number=${PR_NUMBER}" >> "$GITHUB_OUTPUT"
+            echo "head_sha=${HEAD_SHA}" >> "$GITHUB_OUTPUT"
+          else
+            echo "pr_number=" >> "$GITHUB_OUTPUT"
+            echo "head_sha=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
       - name: Checkout code
+        if: steps.pr-info.outputs.pr_number != ''
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
       - name: Setup Node.js
+        if: steps.pr-info.outputs.pr_number != ''
         uses: actions/setup-node@v6
         with:
           node-version: 24.x
 
       - name: AI Review & Merge
+        if: steps.pr-info.outputs.pr_number != ''
         env:
           AI_API_KEY: ${{ secrets.AI_API_KEY }}
           AI_API_BASE: ${{ secrets.AI_API_BASE }}
           AI_MODEL: ${{ secrets.AI_MODEL }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_NUMBER: ${{ steps.pr-info.outputs.pr_number }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-          GITHUB_BASE_REF: ${{ github.base_ref }}
-          GITHUB_HEAD_REF: ${{ github.head_ref }}
+          GITHUB_BASE_REF: ${{ github.event.pull_request.base.ref || '' }}
+          GITHUB_HEAD_REF: ${{ github.event.pull_request.head.ref || '' }}
+          HEAD_SHA: ${{ steps.pr-info.outputs.head_sha }}
         run: node .github/scripts/ai-review-merge.mjs
