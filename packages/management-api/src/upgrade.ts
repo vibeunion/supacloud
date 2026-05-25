@@ -14,10 +14,31 @@ const WEB_CONSOLE_ASSET = "web-console-build.tar.gz";
 const WEB_CONSOLE_ROOT = "/opt/supacloud/web-console";
 const WEB_CONSOLE_RELEASES_DIR = `${WEB_CONSOLE_ROOT}/releases`;
 const WEB_CONSOLE_CURRENT_LINK = `${WEB_CONSOLE_ROOT}/current`;
+const EDGE_RUNTIME_DROPIN_DIR = "/etc/systemd/system/supacloud-edge-runtime.service.d";
+const EDGE_RUNTIME_CAPACITY_DROPIN = `${EDGE_RUNTIME_DROPIN_DIR}/50-edge-runtime-capacity.conf`;
+const DEFAULT_EDGE_WORKER_POOL_SIZE = 20;
+const DEFAULT_EDGE_BACKGROUND_WORKER_POOL_SIZE = 20;
+const DEFAULT_EDGE_RESOURCE_RATIO = 0.6;
+const DEFAULT_EDGE_TASKS_MAX = 256;
 
 type GithubEndpoint = {
     label: string;
     proxyPrefix: string;
+};
+
+type EdgeRuntimeCapacityInput = {
+    env?: Record<string, string | undefined>;
+    cpuCount?: number;
+    totalMemoryMb?: number;
+};
+
+type EdgeRuntimeCapacityConfig = {
+    workerPoolSize: number;
+    backgroundWorkerPoolSize: number;
+    cpuQuotaPercent: number;
+    memoryHighMb: number;
+    memoryMaxMb: number;
+    tasksMax: number;
 };
 
 function resolveLinuxBinaryName() {
@@ -146,6 +167,67 @@ async function readEnvFile(filePath: string) {
     return parseEnv(await file.text());
 }
 
+function positiveInteger(value: string | number | undefined, fallback: number) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback;
+}
+
+function formatSystemdMemory(mb: number) {
+    return `${Math.max(64, Math.floor(mb))}M`;
+}
+
+export function resolveEdgeRuntimeCapacityConfig(input: EdgeRuntimeCapacityInput = {}): EdgeRuntimeCapacityConfig {
+    const env = input.env || process.env;
+    const cpuCount = positiveInteger(input.cpuCount, os.cpus().length || 1);
+    const totalMemoryMb = positiveInteger(input.totalMemoryMb, Math.floor(os.totalmem() / 1024 / 1024));
+    const workerPoolSize = positiveInteger(
+        env.SUPACLOUD_EDGE_WORKER_POOL_SIZE || env.WORKER_POOL_SIZE,
+        DEFAULT_EDGE_WORKER_POOL_SIZE,
+    );
+    const backgroundWorkerPoolSize = positiveInteger(
+        env.SUPACLOUD_EDGE_BACKGROUND_WORKER_POOL_SIZE || env.BACKGROUND_WORKER_POOL_SIZE,
+        DEFAULT_EDGE_BACKGROUND_WORKER_POOL_SIZE,
+    );
+    const cpuQuotaPercent = positiveInteger(
+        env.SUPACLOUD_EDGE_CPU_QUOTA_PERCENT,
+        Math.max(100, Math.floor(cpuCount * DEFAULT_EDGE_RESOURCE_RATIO * 100)),
+    );
+    const memoryMaxMb = positiveInteger(
+        env.SUPACLOUD_EDGE_MEMORY_MAX_MB,
+        Math.floor(totalMemoryMb * DEFAULT_EDGE_RESOURCE_RATIO),
+    );
+    const memoryHighMb = positiveInteger(
+        env.SUPACLOUD_EDGE_MEMORY_HIGH_MB,
+        Math.floor(memoryMaxMb * 0.8),
+    );
+    const tasksMax = positiveInteger(env.SUPACLOUD_EDGE_TASKS_MAX, DEFAULT_EDGE_TASKS_MAX);
+
+    return {
+        workerPoolSize,
+        backgroundWorkerPoolSize,
+        cpuQuotaPercent,
+        memoryHighMb: Math.min(memoryHighMb, memoryMaxMb),
+        memoryMaxMb,
+        tasksMax,
+    };
+}
+
+export function buildEdgeRuntimeCapacityDropIn(config: EdgeRuntimeCapacityConfig) {
+    return `[Service]
+# Managed by supacloud upgrade. These values are deliberately applied in a
+# late drop-in so stale low worker/resource limits from older installs do not
+# keep foreground Edge Function reads queued behind a small pool.
+Environment=WORKER_POOL_SIZE=${config.workerPoolSize}
+Environment=BACKGROUND_WORKER_POOL_SIZE=${config.backgroundWorkerPoolSize}
+MemoryHigh=${formatSystemdMemory(config.memoryHighMb)}
+MemoryMax=${formatSystemdMemory(config.memoryMaxMb)}
+CPUQuota=${config.cpuQuotaPercent}%
+CPUWeight=60
+TasksMax=${config.tasksMax}
+OOMPolicy=stop
+`;
+}
+
 async function installBinary(downloadUrl: string, binaryName: string, preferredEndpoint: GithubEndpoint, forceYes?: boolean) {
     const tmpBinary = path.join(os.tmpdir(), `${binaryName}-${Date.now()}`);
     const stagedBinary = `${BIN_TARGET}.new`;
@@ -258,6 +340,16 @@ async function ensureRuntimeModeForBinaryUpgrade() {
     upsertEnvFileValue(MANAGEMENT_ENV_FILE, "EDGE_RUNTIME_MODE", "external");
 }
 
+async function ensureEdgeRuntimeCapacityDropIn(env: Record<string, string | undefined>) {
+    const edgeUnit = await $`systemctl list-unit-files supacloud-edge-runtime.service --no-legend`.nothrow().quiet();
+    const edgeServiceKnown = edgeUnit.exitCode === 0 && edgeUnit.stdout.toString().includes("supacloud-edge-runtime.service");
+    if (!edgeServiceKnown) return;
+
+    const config = resolveEdgeRuntimeCapacityConfig({ env });
+    mkdirSync(EDGE_RUNTIME_DROPIN_DIR, { recursive: true });
+    writeFileSync(EDGE_RUNTIME_CAPACITY_DROPIN, buildEdgeRuntimeCapacityDropIn(config), { mode: 0o644 });
+}
+
 async function restartServices() {
     const management = await $`systemctl restart supacloud`.nothrow().quiet();
     if (management.exitCode !== 0) {
@@ -335,6 +427,7 @@ export async function runUpgrade(options: { forceYes?: boolean; targetVersion?: 
 
         s.start("Ensuring binary runtime service ownership");
         await ensureRuntimeModeForBinaryUpgrade();
+        await ensureEdgeRuntimeCapacityDropIn(env);
 
         s.start("Restarting SupaCloud services");
         await restartServices();
