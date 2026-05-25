@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.3](https://github.com/zuohuadong/supacloud/compare/web-console-v0.12.2...web-console-v0.12.3) (2026-05-25)
+
+
+### Performance Improvements
+
+* raise background task concurrency cap ([dbbfb27](https://github.com/zuohuadong/supacloud/commit/dbbfb27cb6bb18b8b99ca4fca311dbe98289bc4e))
+
 ## [0.12.2](https://github.com/zuohuadong/supacloud/compare/web-console-v0.12.1...web-console-v0.12.2) (2026-05-23)
 
 
