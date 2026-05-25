@@ -3,7 +3,7 @@ import { spawn } from "bun";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { createFetchHandler } from "../../src/utils/bun-static-serve";
+import { createFetchHandler, resolveStaticServeSpawnCmd } from "../../src/utils/bun-static-serve";
 
 import { createServer } from "node:net";
 
@@ -35,6 +35,24 @@ async function createRoot(): Promise<string> {
 }
 
 describe("bun-static-serve", () => {
+  test("spawns release binary workers from the real executable path", () => {
+    expect(resolveStaticServeSpawnCmd({
+      argv0: "bun",
+      processArgv0: "/usr/local/bin/supacloud",
+      execPath: "/$bunfs/root/supacloud-linux-amd64",
+      sourcePath: "/repo/packages/management-api/src/utils/bun-static-serve.ts",
+    })).toEqual(["/usr/local/bin/supacloud", "static-serve"]);
+  });
+
+  test("spawns script workers through bun run in development", () => {
+    expect(resolveStaticServeSpawnCmd({
+      argv0: "/home/dev/.bun/bin/bun",
+      processArgv0: "/home/dev/.bun/bin/bun",
+      execPath: "/home/dev/.bun/bin/bun",
+      sourcePath: "/repo/packages/management-api/src/utils/bun-static-serve.ts",
+    })).toEqual(["bun", "run", "/repo/packages/management-api/src/utils/bun-static-serve.ts"]);
+  });
+
   test("prefers flat route html over a directory collision", async () => {
     const root = await createRoot();
     await writeFile(join(root, "index.html"), "index");

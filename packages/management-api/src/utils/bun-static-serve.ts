@@ -271,19 +271,46 @@ export function startStaticServer(root: string, port: number, reusePort = false)
 
 // ─── Cluster Manager: spawns N workers sharing the same port ─────────────────
 
-function getSpawnCmd(): string[] {
-  // When running as a compiled binary, process.execPath is the binary itself.
-  // When running via bun, fall back to "bun run <source>".
-  const isBun = process.argv[0].includes("bun");
-  if (isBun) {
-    return ["bun", "run", import.meta.path];
+function isBunExecutable(path: string): boolean {
+  const executableName = path.split(/[\\/]/).pop() || "";
+  return executableName === "bun" || executableName.startsWith("bun-");
+}
+
+function isBundledVirtualPath(path: string): boolean {
+  return path.startsWith("/$bunfs/") || path.startsWith("\\$bunfs\\");
+}
+
+export function resolveStaticServeSpawnCmd({
+  argv0 = process.argv[0] || "",
+  processArgv0 = process.argv0 || "",
+  execPath = process.execPath,
+  sourcePath = import.meta.path,
+}: {
+  argv0?: string;
+  processArgv0?: string;
+  execPath?: string;
+  sourcePath?: string;
+} = {}): string[] {
+  // Release binaries may expose process.execPath as /$bunfs/root/<binary>, which
+  // is not spawnable from a child process. Prefer the real path used to invoke us.
+  for (const candidate of [processArgv0, execPath, argv0]) {
+    if (!candidate || isBunExecutable(candidate) || isBundledVirtualPath(candidate)) {
+      continue;
+    }
+
+    return [candidate, "static-serve"];
   }
-  // Binary mode: must include "static-serve" subcommand so workers route correctly
-  return [process.execPath, "static-serve"];
+
+  // When running via bun, fall back to "bun run <source>".
+  if (isBunExecutable(argv0) || isBunExecutable(processArgv0) || isBunExecutable(execPath)) {
+    return ["bun", "run", sourcePath];
+  }
+
+  return [execPath, "static-serve"];
 }
 
 function spawnWorker(root: string, port: number, workerId: number): ReturnType<typeof spawn> {
-  const cmd = [...getSpawnCmd(), root, String(port), "--worker"];
+  const cmd = [...resolveStaticServeSpawnCmd(), root, String(port), "--worker"];
   return spawn({
     cmd,
     stdout: "inherit",
