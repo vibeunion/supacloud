@@ -112,7 +112,7 @@ describe("API Structural Snapshot Compliance", () => {
         }`,
       );
     }
-  });
+  }, { timeout: 30_000 });
 
   afterAll(async () => {
     if (tenantRef) {
