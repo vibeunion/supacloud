@@ -24,20 +24,24 @@ RestartSec=5
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=supacloud-realtime
+LogsDirectory=supacloud
 
+Environment=REALTIME_IMAGE=public.ecr.aws/supabase/realtime:v2.76.5
+Environment=REALTIME_CONTAINER_NAME=supacloud-realtime
+Environment=REALTIME_DB_USER=supabase_admin
+Environment=PG_DATABASE=supacloud_meta
 EnvironmentFile=-/etc/supabase/management-api.env
 EnvironmentFile=-/opt/supacloud/config.env
 
-ExecStartPre=/bin/sh -c 'test -n "$REALTIME_SECRET_KEY_BASE" && test -n "$REALTIME_DB_ENC_KEY" && test "${#REALTIME_DB_ENC_KEY}" -eq 16 && test -n "$SUPACLOUD_JWT_SECRET" && test -n "$REALTIME_IMAGE" && test -n "$REALTIME_CONTAINER_NAME" && test -n "$REALTIME_DB_USER"'
+ExecStartPre=/bin/sh -c 'test -n "$$REALTIME_SECRET_KEY_BASE" && test -n "$$REALTIME_DB_ENC_KEY" && test "$${#REALTIME_DB_ENC_KEY}" -eq 16 && test -n "$$SUPACLOUD_JWT_SECRET" && test -n "$$REALTIME_IMAGE" && test -n "$$REALTIME_CONTAINER_NAME" && test -n "$$REALTIME_DB_USER"'
 ExecStartPre=-/usr/bin/podman rm -f ${REALTIME_CONTAINER_NAME}
-ExecStart=/usr/bin/podman run --name ${REALTIME_CONTAINER_NAME} --network host \
+ExecStart=/usr/bin/podman run --replace --name ${REALTIME_CONTAINER_NAME} --network host \
   -e PORT=4000 \
   -e DB_HOST=${PG_HOST} \
   -e DB_PORT=${PG_PORT} \
   -e DB_USER=${REALTIME_DB_USER} \
-  -e DB_NAME=${PG_DATABASE:-postgres} \
+  -e DB_NAME=${PG_DATABASE} \
   -e DB_PASSWORD=${PGPASSWORD} \
-  -e DB_AFTER_CONNECT_QUERY=SET\ search_path\ TO\ _realtime \
   -e SECRET_KEY_BASE=${REALTIME_SECRET_KEY_BASE} \
   -e JWT_SECRET=${SUPACLOUD_JWT_SECRET} \
   -e API_JWT_SECRET=${SUPACLOUD_JWT_SECRET} \

@@ -12,8 +12,15 @@ describe("Realtime systemd deployment", () => {
     );
 
     expect(unit).toContain("SupaCloud Realtime Service");
-    expect(unit).toContain("podman run");
+    expect(unit).toContain("podman run --replace");
+    expect(unit).toContain("LogsDirectory=supacloud");
+    expect(unit).toContain("Environment=REALTIME_IMAGE=public.ecr.aws/supabase/realtime:v2.76.5");
+    expect(unit).toContain("Environment=REALTIME_CONTAINER_NAME=supacloud-realtime");
+    expect(unit).toContain("Environment=REALTIME_DB_USER=supabase_admin");
+    expect(unit).toContain("Environment=PG_DATABASE=supacloud_meta");
+    expect(unit).toContain("$${#REALTIME_DB_ENC_KEY}");
     expect(unit).not.toContain("SystemCallFilter=");
+    expect(unit).not.toContain("DB_AFTER_CONNECT_QUERY");
   });
 
   test("installer pre-pulls and tags the Realtime image before systemd restart", () => {
