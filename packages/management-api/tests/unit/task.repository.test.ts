@@ -73,4 +73,12 @@ describe("TaskRepository query builders", () => {
     expect(sqlText).not.toContain("SELECT *");
     expect(values).toEqual(["proj_1", 25]);
   });
+
+  test("claimNextTask caps project config by the worker host concurrency limit", () => {
+    const source = repo.claimNextTask.toString();
+
+    expect(source).toContain("options.concurrencyByProject");
+    expect(source).toContain("LEAST(");
+    expect(source).toContain("p.config->'background_tasks'->>'concurrency'");
+  });
 });

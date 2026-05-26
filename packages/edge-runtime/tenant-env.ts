@@ -7,6 +7,7 @@ const TENANTS_DIRS = [
 ];
 
 const envCache = new Map<string, { env: Record<string, string>; expiresAt: number }>();
+const envInflightLoads = new Map<string, Promise<Record<string, string>>>();
 const ENV_CACHE_TTL = 5_000;
 const ENV_FALLBACK_CACHE_TTL = 30_000;
 const MASKED_SECRET_VALUE = "********";
@@ -197,7 +198,7 @@ async function loadEnvFromLegacySecretsApi(ref: string): Promise<Record<string, 
   }
 }
 
-export async function loadTenantEnv(ref: string): Promise<Record<string, string>> {
+async function loadTenantEnvUncached(ref: string): Promise<Record<string, string>> {
   const cached = envCache.get(ref);
   if (cached && cached.expiresAt > Date.now()) {
     return cached.env;
@@ -221,6 +222,27 @@ export async function loadTenantEnv(ref: string): Promise<Record<string, string>
   return merged;
 }
 
+export async function loadTenantEnv(ref: string): Promise<Record<string, string>> {
+  const cached = envCache.get(ref);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.env;
+  }
+
+  const inflight = envInflightLoads.get(ref);
+  if (inflight) {
+    return inflight;
+  }
+
+  const load = loadTenantEnvUncached(ref).finally(() => {
+    if (envInflightLoads.get(ref) === load) {
+      envInflightLoads.delete(ref);
+    }
+  });
+  envInflightLoads.set(ref, load);
+  return load;
+}
+
 export function invalidateTenantEnvCache(ref: string) {
   envCache.delete(ref);
+  envInflightLoads.delete(ref);
 }

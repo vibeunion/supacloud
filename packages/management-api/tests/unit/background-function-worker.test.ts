@@ -286,6 +286,12 @@ describe("BackgroundFunctionWorker", () => {
       await (worker as any).poll();
 
       expect(claimNextTask).toHaveBeenCalledTimes(1);
+      expect(claimNextTask).toHaveBeenCalledWith(expect.objectContaining({
+        concurrencyByProject: expect.any(Number),
+      }));
+      expect(claimNextTask.mock.calls[0][0].concurrencyByProject).toBeLessThanOrEqual(
+        DEFAULT_BACKGROUND_TASK_SETTINGS.concurrency,
+      );
       expect(markTaskRunning).not.toHaveBeenCalled();
     });
 

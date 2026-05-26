@@ -140,4 +140,34 @@ describe("tenant env masking guard", () => {
       globalThis.fetch = originalFetch;
     }
   });
+
+  test("coalesces concurrent runtime env loads for the same project", async () => {
+    const originalFetch = globalThis.fetch;
+    const ref = `proj_inflight_${Date.now()}`;
+    let calls = 0;
+    let resolveResponse!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      resolveResponse = resolve;
+    });
+
+    globalThis.fetch = mock(async () => {
+      calls++;
+      await gate;
+      return Response.json({ RESULT_S3_ENDPOINT: "http://coalesced-s3.local" });
+    }) as unknown as typeof fetch;
+
+    try {
+      const first = loadTenantEnv(ref);
+      const second = loadTenantEnv(ref);
+      resolveResponse();
+      const [firstEnv, secondEnv] = await Promise.all([first, second]);
+
+      expect(firstEnv.RESULT_S3_ENDPOINT).toBe("http://coalesced-s3.local");
+      expect(secondEnv.RESULT_S3_ENDPOINT).toBe("http://coalesced-s3.local");
+      expect(calls).toBe(1);
+    } finally {
+      invalidateTenantEnvCache(ref);
+      globalThis.fetch = originalFetch;
+    }
+  });
 });

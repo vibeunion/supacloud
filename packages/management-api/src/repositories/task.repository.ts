@@ -309,7 +309,7 @@ export async function claimNextTask(options: TaskLeaseOptions): Promise<LeasedTa
       params.push(...allowedTaskTypes);
     }
 
-    params.push(DEFAULT_BACKGROUND_TASK_SETTINGS.concurrency);
+    params.push(Math.max(1, Math.floor(options.concurrencyByProject || DEFAULT_BACKGROUND_TASK_SETTINGS.concurrency)));
     const defaultConcurrencyIdx = params.length;
     params.push(TaskStatuses.LEASED);
     const leasedStatusIdx = params.length;
@@ -332,11 +332,14 @@ export async function claimNextTask(options: TaskLeaseOptions): Promise<LeasedTa
               AND active.status IN ($1, $2)
               AND active.lease_until IS NOT NULL
               AND active.lease_until > NOW()
-          ) < GREATEST(
-            1,
-            COALESCE(
-              NULLIF((p.config->'background_tasks'->>'concurrency'), '')::int,
-              $${defaultConcurrencyIdx}
+          ) < LEAST(
+            $${defaultConcurrencyIdx},
+            GREATEST(
+              1,
+              COALESCE(
+                NULLIF((p.config->'background_tasks'->>'concurrency'), '')::int,
+                $${defaultConcurrencyIdx}
+              )
             )
           )
           ${taskTypeFilter}

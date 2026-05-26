@@ -9,6 +9,7 @@ import { DEFAULT_BACKGROUND_TASK_SETTINGS } from "../config/background-task-sett
 import { projectService } from "./project.service";
 import { decryptSecretIfNeeded } from "../utils/secret-crypto";
 import { createHmac } from "node:crypto";
+import { availableParallelism } from "node:os";
 import { getProjectDb, resolveDbName } from "../db";
 import { createBackgroundTaskMirrorIfUserExists } from "../services/background-task.service";
 import { createPgListener, type PgListenerHandle } from "../lib/pg-listen";
@@ -30,8 +31,18 @@ interface InvocationEnvelope {
   };
 }
 
-const DEFAULT_CONCURRENCY_PER_PROJECT = Number(
-  process.env.BACKGROUND_TASKS_PER_PROJECT || String(DEFAULT_BACKGROUND_TASK_SETTINGS.concurrency),
+export function resolveBackgroundConcurrencyPerProject(value?: string): number {
+  const parsed = Number.parseInt(String(value || "").trim(), 10);
+  if (Number.isFinite(parsed) && parsed > 0) {
+    return Math.min(DEFAULT_BACKGROUND_TASK_SETTINGS.concurrency, parsed);
+  }
+
+  const cpuScaledLimit = Math.max(2, availableParallelism() * 4);
+  return Math.min(DEFAULT_BACKGROUND_TASK_SETTINGS.concurrency, cpuScaledLimit);
+}
+
+const DEFAULT_CONCURRENCY_PER_PROJECT = resolveBackgroundConcurrencyPerProject(
+  process.env.BACKGROUND_TASKS_PER_PROJECT,
 );
 const WORKER_ID = `bgw-${process.pid}`;
 
@@ -450,6 +461,7 @@ export class BackgroundFunctionWorker {
           workerId: WORKER_ID,
           allowedTaskTypes: [TaskType.EDGE_FUNCTION],
           leaseSeconds: 900,
+          concurrencyByProject: DEFAULT_CONCURRENCY_PER_PROJECT,
         });
         if (!task) break;
 
