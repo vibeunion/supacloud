@@ -41,6 +41,7 @@
 - [Background Functions With supabase-js](./background-functions-supabase-js-tutorial.md) - Tenant SDK tutorial for invoke, polling, cancel, DLQ, lifecycle webhooks, and queues
 - [Background Functions API Reference](./background-functions-api-reference.md) - Headers, task states, control-plane endpoints, and runtime semantics
 - [@supacloud/js](./supacloud-js.md) - Official platform SDK layered on top of `supabase-js`, including tasks, lifecycle webhooks, queues, and OAuth helpers
+- [Queues PGMQ Migration Guide](./queues-pgmq-migration.md) - Migration notes for Supabase Queues compatibility and SupaCloud queue extensions
 
 ## Product Positioning
 

@@ -128,7 +128,7 @@ def main() -> None:
     print(f"PUBLIC_URL={args.public_url}")
     print(f"STUDIO_URL={args.studio_url}")
     print(f"BASE_DOMAIN={derive_base_domain(args.public_url)}")
-    print("PGRST_DB_SCHEMAS=public,storage,graphql_public")
+    print("PGRST_DB_SCHEMAS=public,storage,graphql_public,pgmq_public")
     print("KONG_HTTP_PORT=8000")
     print("KONG_HTTPS_PORT=8443")
     print("KONG_ADMIN_PORT=8001")

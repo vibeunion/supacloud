@@ -2,16 +2,16 @@ import { Elysia, status, t } from "elysia";
 import { taskRepository } from "../repositories/task.repository";
 import { TaskStatus, type ProjectTask } from "../db";
 import { backgroundFunctionWorker, projectService } from "../services";
+import { pgmqService } from "../services/pgmq.service";
 import * as authMiddleware from "../middleware/auth";
 
 const QUEUE_TASK_TYPE_PREFIX = "queue:";
-const DEFAULT_QUEUE_MAX_ATTEMPTS = 3;
 const DEFAULT_QUEUE_VISIBILITY_TIMEOUT_SEC = 330;
 const MAX_QUEUE_DELAY_MS = 30 * 24 * 60 * 60 * 1000;
 
 function normalizeQueueName(name: string): string | null {
     const value = name.trim();
-    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value)) return null;
+    if (!/^[a-z0-9][a-z0-9_-]{0,127}$/.test(value)) return null;
     return value;
 }
 
@@ -25,17 +25,13 @@ function normalizePositiveInteger(value: unknown, fallback: number, min: number,
     return Math.max(min, Math.min(max, Math.floor(numberValue)));
 }
 
-function buildQueueListFilters(queueName: string, query: Record<string, unknown>) {
-    const statuses = typeof query.status === "string"
-      ? query.status.split(",").map((value) => value.trim()).filter(Boolean)
-      : undefined;
-    const limit = normalizePositiveInteger(query.limit, 50, 1, 500);
-    return {
-        statuses,
-        taskTypes: [queueTaskType(queueName)],
-        onlyDeadLettered: query.dlq === "true",
-        limit,
-    };
+function normalizeNonNegativeSeconds(value: unknown, fallback: number, max: number): number {
+    return normalizePositiveInteger(value, fallback, 0, max);
+}
+
+function normalizeMessageId(value: string): number | null {
+    const parsed = Number(value);
+    return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
 function isTaskDetailRead(request: Request, projectRef: string): boolean {
@@ -97,69 +93,120 @@ export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
         const authError = await authMiddleware.requireProjectOrAdminAuth(request, params.ref);
         if (authError) return status(authError.status, authError.body);
     })
+    .get("/queues", async ({ params }) => {
+        try {
+            return await pgmqService.listQueues(params.ref);
+        } catch (err: unknown) {
+            return status(500, { message: "Failed to list queues", code: "500", details: (err instanceof Error ? err.message : String(err)) });
+        }
+    }, { detail: { tags: ["tasks"], summary: "List PGMQ queues" } })
+    .post("/queues", async ({ params, body }) => {
+        try {
+            const input = body as { queueName?: string; queue_name?: string; unlogged?: boolean };
+            const queueName = normalizeQueueName(input.queueName || input.queue_name || "");
+            if (!queueName) {
+                return status(400, { message: "Invalid queue name", code: "400" });
+            }
+            await pgmqService.createQueue(params.ref, queueName, { unlogged: input.unlogged });
+            return status(201, { queue_name: queueName, type: input.unlogged ? "unlogged" : "basic" });
+        } catch (err: unknown) {
+            return status(500, { message: "Failed to create queue", code: "500", details: (err instanceof Error ? err.message : String(err)) });
+        }
+    }, {
+        body: t.Object({
+            queueName: t.Optional(t.String()),
+            queue_name: t.Optional(t.String()),
+            unlogged: t.Optional(t.Boolean()),
+        }),
+        detail: { tags: ["tasks"], summary: "Create a PGMQ queue" },
+    })
+    .delete("/queues/:queueName", async ({ params }) => {
+        try {
+            const queueName = normalizeQueueName(params.queueName);
+            if (!queueName) {
+                return status(400, { message: "Invalid queue name", code: "400" });
+            }
+            const dropped = await pgmqService.dropQueue(params.ref, queueName);
+            return dropped ? status(204) : status(404, { message: "Queue not found", code: "404" });
+        } catch (err: unknown) {
+            return status(500, { message: "Failed to drop queue", code: "500", details: (err instanceof Error ? err.message : String(err)) });
+        }
+    }, { detail: { tags: ["tasks"], summary: "Drop a PGMQ queue" } })
     .post("/queues/:queueName/messages", async ({ params, body }) => {
         try {
             const queueName = normalizeQueueName(params.queueName);
             if (!queueName) {
                 return status(400, { message: "Invalid queue name", code: "400" });
             }
-            const queueSettings = await projectService.getQueueSettings(params.ref, queueName);
-            if (!queueSettings) {
-                return status(404, { message: "Project not found", code: "404" });
-            }
 
             const input = body as {
                 payload?: Record<string, unknown>;
+                message?: Record<string, unknown>;
                 delayMs?: number;
-                maxAttempts?: number;
-                idempotencyKey?: string;
-                traceId?: string;
-                correlationId?: string;
-                businessTaskId?: string;
-                metadata?: Record<string, unknown>;
+                sleepSeconds?: number;
+                sleep_seconds?: number;
             };
-            const recentMessages = await taskRepository.countQueueMessagesCreatedSince(
+            const sleepSeconds = input.sleepSeconds ?? input.sleep_seconds ??
+                Math.floor(normalizeNonNegativeSeconds(input.delayMs, 0, MAX_QUEUE_DELAY_MS) / 1000);
+            const msgId = await pgmqService.send(
                 params.ref,
-                queueTaskType(queueName),
-                new Date(Date.now() - 60_000),
+                queueName,
+                input.message || input.payload || {},
+                normalizeNonNegativeSeconds(sleepSeconds, 0, MAX_QUEUE_DELAY_MS / 1000),
             );
-            if (recentMessages >= queueSettings.rate_limit_per_minute) {
-                return status(429, {
-                    message: "Queue rate limit exceeded",
-                    code: "429",
-                    limit: queueSettings.rate_limit_per_minute,
-                    window_seconds: 60,
-                });
-            }
-            const delayMs = normalizePositiveInteger(input.delayMs, 0, 0, MAX_QUEUE_DELAY_MS);
-            const task = await taskRepository.createTask({
-                ref: params.ref,
-                type: queueTaskType(queueName),
-                payload: input.payload || {},
-                maxAttempts: normalizePositiveInteger(input.maxAttempts, queueSettings.max_attempts, 1, 10),
-                nextRunAt: new Date(Date.now() + delayMs),
-                idempotencyKey: input.idempotencyKey || null,
-                traceId: input.traceId || null,
-                correlationId: input.correlationId || null,
-                businessTaskId: input.businessTaskId || null,
-                metadata: input.metadata || null,
+            return status(202, {
+                id: String(msgId),
+                msg_id: msgId,
+                queue_name: queueName,
+                task_type: queueTaskType(queueName),
+                status: "pending",
             });
-            return status(202, task);
         } catch (err: unknown) {
             return status(500, { message: "Failed to enqueue queue message", code: "500", details: (err instanceof Error ? err.message : String(err)) });
         }
     }, {
         body: t.Object({
             payload: t.Optional(t.Record(t.String(), t.Unknown())),
+            message: t.Optional(t.Record(t.String(), t.Unknown())),
             delayMs: t.Optional(t.Number()),
-            maxAttempts: t.Optional(t.Number()),
-            idempotencyKey: t.Optional(t.String()),
-            traceId: t.Optional(t.String()),
-            correlationId: t.Optional(t.String()),
-            businessTaskId: t.Optional(t.String()),
-            metadata: t.Optional(t.Record(t.String(), t.Unknown())),
+            sleepSeconds: t.Optional(t.Number()),
+            sleep_seconds: t.Optional(t.Number()),
         }),
-        detail: { tags: ["tasks"], summary: "Enqueue a message to a queue" },
+        detail: { tags: ["tasks"], summary: "Enqueue a PGMQ message" },
+    })
+    .post("/queues/:queueName/messages/batch", async ({ params, body }) => {
+        try {
+            const queueName = normalizeQueueName(params.queueName);
+            if (!queueName) {
+                return status(400, { message: "Invalid queue name", code: "400" });
+            }
+            const input = body as { messages?: Record<string, unknown>[]; sleepSeconds?: number; sleep_seconds?: number; delayMs?: number };
+            const messages = Array.isArray(input.messages) ? input.messages : [];
+            const sleepSeconds = input.sleepSeconds ?? input.sleep_seconds ??
+                Math.floor(normalizeNonNegativeSeconds(input.delayMs, 0, MAX_QUEUE_DELAY_MS) / 1000);
+            const ids = await pgmqService.sendBatch(
+                params.ref,
+                queueName,
+                messages,
+                normalizeNonNegativeSeconds(sleepSeconds, 0, MAX_QUEUE_DELAY_MS / 1000),
+            );
+            return status(202, {
+                queue_name: queueName,
+                task_type: queueTaskType(queueName),
+                msg_ids: ids,
+                count: ids.length,
+            });
+        } catch (err: unknown) {
+            return status(500, { message: "Failed to enqueue queue message batch", code: "500", details: (err instanceof Error ? err.message : String(err)) });
+        }
+    }, {
+        body: t.Object({
+            messages: t.Array(t.Record(t.String(), t.Unknown())),
+            delayMs: t.Optional(t.Number()),
+            sleepSeconds: t.Optional(t.Number()),
+            sleep_seconds: t.Optional(t.Number()),
+        }),
+        detail: { tags: ["tasks"], summary: "Enqueue a PGMQ message batch" },
     })
     .post("/queues/:queueName/messages/receive", async ({ params, body }) => {
         try {
@@ -168,32 +215,35 @@ export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
                 return status(400, { message: "Invalid queue name", code: "400" });
             }
 
-            const input = body as { visibilityTimeoutSec?: number } | undefined;
+            const input = body as { visibilityTimeoutSec?: number; sleep_seconds?: number; n?: number; count?: number } | undefined;
             const queueSettings = await projectService.getQueueSettings(params.ref, queueName);
             if (!queueSettings) {
                 return status(404, { message: "Project not found", code: "404" });
             }
-            const task = await taskRepository.claimQueueMessage({
-                projectRef: params.ref,
-                queueName: queueTaskType(queueName),
-                visibilityTimeoutSec: normalizePositiveInteger(
-                    input?.visibilityTimeoutSec,
+            const messages = await pgmqService.read(
+                params.ref,
+                queueName,
+                normalizePositiveInteger(
+                    input?.sleep_seconds ?? input?.visibilityTimeoutSec,
                     queueSettings.default_visibility_timeout_sec || DEFAULT_QUEUE_VISIBILITY_TIMEOUT_SEC,
                     1,
                     1800,
                 ),
-                maxInFlight: queueSettings.max_in_flight,
-            });
-            if (!task) return status(204);
-            return task;
+                normalizePositiveInteger(input?.n ?? input?.count, 1, 1, Math.max(1, queueSettings.max_in_flight)),
+            );
+            if (messages.length === 0) return status(204);
+            return (input?.n ?? input?.count) ? messages : messages[0];
         } catch (err: unknown) {
             return status(500, { message: "Failed to receive queue message", code: "500", details: (err instanceof Error ? err.message : String(err)) });
         }
     }, {
         body: t.Optional(t.Object({
             visibilityTimeoutSec: t.Optional(t.Number()),
+            sleep_seconds: t.Optional(t.Number()),
+            n: t.Optional(t.Number()),
+            count: t.Optional(t.Number()),
         })),
-        detail: { tags: ["tasks"], summary: "Receive a message from a queue" },
+        detail: { tags: ["tasks"], summary: "Read PGMQ messages with a visibility timeout" },
     })
     .get("/queues/:queueName/messages", async ({ params, query }) => {
         try {
@@ -202,18 +252,35 @@ export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
                 return status(400, { message: "Invalid queue name", code: "400" });
             }
 
-            return await taskRepository.listTasksByProjectFiltered(params.ref, buildQueueListFilters(queueName, query));
+            return await pgmqService.listMessages(params.ref, queueName, {
+                archived: query.archived === "true" || query.dlq === "true",
+                limit: normalizePositiveInteger(query.limit, 50, 1, 500),
+            });
         } catch (err: unknown) {
             return status(500, { message: "Failed to list queue messages", code: "500", details: (err instanceof Error ? err.message : String(err)) });
         }
     }, {
         query: t.Optional(t.Object({
-            status: t.Optional(t.String()),
+            archived: t.Optional(t.String()),
             dlq: t.Optional(t.String()),
             limit: t.Optional(t.String()),
         })),
-        detail: { tags: ["tasks"], summary: "List messages in a queue" },
+        detail: { tags: ["tasks"], summary: "List PGMQ messages for operator diagnostics" },
     })
+    .post("/queues/:queueName/messages/pop", async ({ params }) => {
+        try {
+            const queueName = normalizeQueueName(params.queueName);
+            if (!queueName) {
+                return status(400, { message: "Invalid queue name", code: "400" });
+            }
+
+            const message = await pgmqService.pop(params.ref, queueName);
+            if (!message) return status(204);
+            return message;
+        } catch (err: unknown) {
+            return status(500, { message: "Failed to pop queue message", code: "500", details: (err instanceof Error ? err.message : String(err)) });
+        }
+    }, { detail: { tags: ["tasks"], summary: "Pop and delete the next PGMQ message" } })
     .get("/queues/:queueName/stats", async ({ params }) => {
         try {
             const queueName = normalizeQueueName(params.queueName);
@@ -221,11 +288,24 @@ export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
                 return status(400, { message: "Invalid queue name", code: "400" });
             }
 
-            return await taskRepository.getQueueStats(params.ref, queueTaskType(queueName));
+            const metrics = await pgmqService.metrics(params.ref, queueName);
+            return metrics || status(404, { message: "Queue not found", code: "404" });
         } catch (err: unknown) {
             return status(500, { message: "Failed to retrieve queue stats", code: "500", details: (err instanceof Error ? err.message : String(err)) });
         }
     }, { detail: { tags: ["tasks"], summary: "Get queue statistics" } })
+    .post("/queues/:queueName/purge", async ({ params }) => {
+        try {
+            const queueName = normalizeQueueName(params.queueName);
+            if (!queueName) {
+                return status(400, { message: "Invalid queue name", code: "400" });
+            }
+
+            return { queue_name: queueName, purged: await pgmqService.purge(params.ref, queueName) };
+        } catch (err: unknown) {
+            return status(500, { message: "Failed to purge queue", code: "500", details: (err instanceof Error ? err.message : String(err)) });
+        }
+    }, { detail: { tags: ["tasks"], summary: "Purge pending PGMQ messages" } })
     .get("/queues/:queueName/settings", async ({ params }) => {
         try {
             const queueName = normalizeQueueName(params.queueName);
@@ -280,38 +360,30 @@ export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
                 return status(400, { message: "Invalid queue name", code: "400" });
             }
 
-            const task = await taskRepository.getTaskByIdAndType(params.messageId, params.ref, queueTaskType(queueName));
-            if (!task) {
-                return status(404, { message: "Queue message not found", code: "404" });
-            }
-            const attempts = await taskRepository.listTaskAttempts(params.messageId);
-            const latestAttempt = attempts[0] || null;
-            return {
-                ...task,
-                attempts,
-                latest_logs: latestAttempt?.logs || [],
-            };
+            return status(410, {
+                message: "PGMQ does not expose random message lookup through the official queue API; use receive/read, stats, archive, or delete",
+                code: "410",
+            });
         } catch (err: unknown) {
             return status(500, { message: "Failed to retrieve queue message", code: "500", details: (err instanceof Error ? err.message : String(err)) });
         }
     }, { detail: { tags: ["tasks"], summary: "Get a queue message by ID" } })
-    .post("/queues/:queueName/messages/:messageId/ack", async ({ params, body }) => {
+    .post("/queues/:queueName/messages/:messageId/ack", async ({ params }) => {
         try {
             const queueName = normalizeQueueName(params.queueName);
             if (!queueName) {
                 return status(400, { message: "Invalid queue name", code: "400" });
             }
 
-            const current = await taskRepository.getTaskByIdAndType(params.messageId, params.ref, queueTaskType(queueName));
-            if (!current) {
-                return status(404, { message: "Queue message not found", code: "404" });
+            const messageId = normalizeMessageId(params.messageId);
+            if (!messageId) {
+                return status(400, { message: "Invalid queue message ID", code: "400" });
             }
-            const input = body as { result?: Record<string, unknown> } | undefined;
-            const task = await taskRepository.acknowledgeQueueMessage(params.messageId, input?.result || null);
-            if (!task) {
+            const archived = await pgmqService.archive(params.ref, queueName, messageId);
+            if (!archived) {
                 return status(409, { message: "Queue message is not currently leased", code: "409" });
             }
-            return task;
+            return { id: String(messageId), msg_id: messageId, queue_name: queueName, status: "archived" };
         } catch (err: unknown) {
             return status(500, { message: "Failed to acknowledge queue message", code: "500", details: (err instanceof Error ? err.message : String(err)) });
         }
@@ -328,13 +400,19 @@ export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
                 return status(400, { message: "Invalid queue name", code: "400" });
             }
 
-            const current = await taskRepository.getTaskByIdAndType(params.messageId, params.ref, queueTaskType(queueName));
-            if (!current) {
-                return status(404, { message: "Queue message not found", code: "404" });
+            const messageId = normalizeMessageId(params.messageId);
+            if (!messageId) {
+                return status(400, { message: "Invalid queue message ID", code: "400" });
             }
-            const input = body as { delayMs?: number; error?: string } | undefined;
-            const delayMs = normalizePositiveInteger(input?.delayMs, 0, 0, MAX_QUEUE_DELAY_MS);
-            const task = await taskRepository.releaseTask(params.messageId, new Date(Date.now() + delayMs), input?.error);
+            const input = body as { delayMs?: number; sleep_seconds?: number } | undefined;
+            const sleepSeconds = input?.sleep_seconds ??
+                Math.floor(normalizeNonNegativeSeconds(input?.delayMs, 0, MAX_QUEUE_DELAY_MS) / 1000);
+            const task = await pgmqService.setVisibilityTimeout(
+                params.ref,
+                queueName,
+                messageId,
+                normalizeNonNegativeSeconds(sleepSeconds, 0, MAX_QUEUE_DELAY_MS / 1000),
+            );
             return task || status(404, { message: "Queue message not found", code: "404" });
         } catch (err: unknown) {
             return status(500, { message: "Failed to release queue message", code: "500", details: (err instanceof Error ? err.message : String(err)) });
@@ -342,24 +420,25 @@ export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
     }, {
         body: t.Optional(t.Object({
             delayMs: t.Optional(t.Number()),
-            error: t.Optional(t.String()),
+            sleep_seconds: t.Optional(t.Number()),
         })),
         detail: { tags: ["tasks"], summary: "Release a queue message back to the queue" },
     })
-    .post("/queues/:queueName/messages/:messageId/fail", async ({ params, body }) => {
+    .post("/queues/:queueName/messages/:messageId/fail", async ({ params }) => {
         try {
             const queueName = normalizeQueueName(params.queueName);
             if (!queueName) {
                 return status(400, { message: "Invalid queue name", code: "400" });
             }
 
-            const current = await taskRepository.getTaskByIdAndType(params.messageId, params.ref, queueTaskType(queueName));
-            if (!current) {
-                return status(404, { message: "Queue message not found", code: "404" });
+            const messageId = normalizeMessageId(params.messageId);
+            if (!messageId) {
+                return status(400, { message: "Invalid queue message ID", code: "400" });
             }
-            const input = body as { error?: string; deadLetter?: boolean } | undefined;
-            const task = await taskRepository.markTaskFailed(params.messageId, input?.error || "Queue message failed", input?.deadLetter ?? true);
-            return task || status(404, { message: "Queue message not found", code: "404" });
+            const archived = await pgmqService.archive(params.ref, queueName, messageId);
+            return archived
+                ? { id: String(messageId), msg_id: messageId, queue_name: queueName, status: "archived" }
+                : status(404, { message: "Queue message not found", code: "404" });
         } catch (err: unknown) {
             return status(500, { message: "Failed to fail queue message", code: "500", details: (err instanceof Error ? err.message : String(err)) });
         }
@@ -377,11 +456,10 @@ export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
                 return status(400, { message: "Invalid queue name", code: "400" });
             }
 
-            const task = await taskRepository.retryQueueMessage(params.messageId, params.ref, queueTaskType(queueName));
-            if (!task) {
-                return status(409, { message: "Queue message cannot be replayed from its current state", code: "409" });
-            }
-            return task;
+            return status(410, {
+                message: "PGMQ archived messages are retained for replay via SQL/archive workflows; direct retry is not part of the official queue API",
+                code: "410",
+            });
         } catch (err: unknown) {
             return status(500, { message: "Failed to retry queue message", code: "500", details: (err instanceof Error ? err.message : String(err)) });
         }
@@ -393,11 +471,14 @@ export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
                 return status(400, { message: "Invalid queue name", code: "400" });
             }
 
-            const current = await taskRepository.getTaskByIdAndType(params.messageId, params.ref, queueTaskType(queueName));
-            if (!current) {
+            const messageId = normalizeMessageId(params.messageId);
+            if (!messageId) {
+                return status(400, { message: "Invalid queue message ID", code: "400" });
+            }
+            const deleted = await pgmqService.deleteMessage(params.ref, queueName, messageId);
+            if (!deleted) {
                 return status(404, { message: "Queue message not found", code: "404" });
             }
-            await taskRepository.cancelTask(params.messageId, "Deleted by queue client");
             return status(204);
         } catch (err: unknown) {
             return status(500, { message: "Failed to delete queue message", code: "500", details: (err instanceof Error ? err.message : String(err)) });

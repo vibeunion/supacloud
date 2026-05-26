@@ -37,6 +37,17 @@ const getQueueStats = mock(() => Promise.resolve({
   oldestPendingAgeSec: null,
   inFlight: 0,
 }));
+const pgmqCreateQueue = mock(() => Promise.resolve(undefined));
+const pgmqListQueues = mock(() => Promise.resolve([]));
+const pgmqListMessages = mock(() => Promise.resolve([]));
+const pgmqSend = mock(() => Promise.resolve(1));
+const pgmqSendBatch = mock(() => Promise.resolve([1, 2]));
+const pgmqRead = mock(() => Promise.resolve([]));
+const pgmqPop = mock(() => Promise.resolve(null));
+const pgmqArchive = mock(() => Promise.resolve(true));
+const pgmqDeleteMessage = mock(() => Promise.resolve(true));
+const pgmqSetVisibilityTimeout = mock(() => Promise.resolve(null));
+const pgmqMetrics = mock(() => Promise.resolve(null));
 
 const backgroundFunctionWorker = {
   cancel: mock(() => Promise.resolve(true)),
@@ -69,6 +80,7 @@ const projectService = {
 
 const { taskRepository } = await import("../../src/repositories/task.repository");
 const services = await import("../../src/services");
+const { pgmqService } = await import("../../src/services/pgmq.service");
 const authModule = await import("../../src/middleware/auth");
 
 spyOn(taskRepository, "listTasksByProjectFiltered").mockImplementation(
@@ -110,6 +122,19 @@ spyOn(services.projectService, "getQueueSettings").mockImplementation(
 spyOn(services.projectService, "updateQueueSettings").mockImplementation(
   projectService.updateQueueSettings as typeof services.projectService.updateQueueSettings,
 );
+spyOn(pgmqService, "createQueue").mockImplementation(pgmqCreateQueue as typeof pgmqService.createQueue);
+spyOn(pgmqService, "listQueues").mockImplementation(pgmqListQueues as typeof pgmqService.listQueues);
+spyOn(pgmqService, "listMessages").mockImplementation(pgmqListMessages as typeof pgmqService.listMessages);
+spyOn(pgmqService, "send").mockImplementation(pgmqSend as typeof pgmqService.send);
+spyOn(pgmqService, "sendBatch").mockImplementation(pgmqSendBatch as typeof pgmqService.sendBatch);
+spyOn(pgmqService, "read").mockImplementation(pgmqRead as typeof pgmqService.read);
+spyOn(pgmqService, "pop").mockImplementation(pgmqPop as typeof pgmqService.pop);
+spyOn(pgmqService, "archive").mockImplementation(pgmqArchive as typeof pgmqService.archive);
+spyOn(pgmqService, "deleteMessage").mockImplementation(pgmqDeleteMessage as typeof pgmqService.deleteMessage);
+spyOn(pgmqService, "setVisibilityTimeout").mockImplementation(
+  pgmqSetVisibilityTimeout as typeof pgmqService.setVisibilityTimeout,
+);
+spyOn(pgmqService, "metrics").mockImplementation(pgmqMetrics as typeof pgmqService.metrics);
 
 const verifyProjectJwt = mock(() => Promise.resolve(null));
 spyOn(authModule, "verifyProjectJwt").mockImplementation(
@@ -155,6 +180,17 @@ describe("taskRoutes", () => {
     projectService.updateBackgroundTaskSettings.mockReset();
     projectService.getQueueSettings.mockReset();
     projectService.updateQueueSettings.mockReset();
+    pgmqCreateQueue.mockReset();
+    pgmqListQueues.mockReset();
+    pgmqListMessages.mockReset();
+    pgmqSend.mockReset();
+    pgmqSendBatch.mockReset();
+    pgmqRead.mockReset();
+    pgmqPop.mockReset();
+    pgmqArchive.mockReset();
+    pgmqDeleteMessage.mockReset();
+    pgmqSetVisibilityTimeout.mockReset();
+    pgmqMetrics.mockReset();
 
     backgroundFunctionWorker.cancel.mockResolvedValue(true);
     projectService.getQueueSettings.mockResolvedValue({
@@ -170,10 +206,21 @@ describe("taskRoutes", () => {
       rate_limit_per_minute: 1200,
     });
     countQueueMessagesCreatedSince.mockResolvedValue(0);
+    pgmqCreateQueue.mockResolvedValue(undefined);
+    pgmqListQueues.mockResolvedValue([]);
+    pgmqListMessages.mockResolvedValue([]);
+    pgmqSend.mockResolvedValue(1);
+    pgmqSendBatch.mockResolvedValue([1, 2]);
+    pgmqRead.mockResolvedValue([]);
+    pgmqPop.mockResolvedValue(null);
+    pgmqArchive.mockResolvedValue(true);
+    pgmqDeleteMessage.mockResolvedValue(true);
+    pgmqSetVisibilityTimeout.mockResolvedValue(null);
+    pgmqMetrics.mockResolvedValue(null);
   });
 
   test("POST /queues/:queueName/messages enqueues a JSON message", async () => {
-    createTask.mockResolvedValueOnce({ id: "msg_1", task_type: "queue:emails", status: "pending" });
+    pgmqSend.mockResolvedValueOnce(42);
 
     const response = await request("/v1/projects/proj_1/tasks/queues/emails/messages", {
       method: "POST",
@@ -181,55 +228,52 @@ describe("taskRoutes", () => {
       body: JSON.stringify({
         payload: { hello: "world" },
         delayMs: 1000,
-        maxAttempts: 5,
-        correlationId: "corr-1",
-        businessTaskId: "biz-1",
-        metadata: { tenant: "acme" },
       }),
     });
     const payload = await response.json();
 
     expect(response.status).toBe(202);
-    expect(payload.id).toBe("msg_1");
-    expect(createTask).toHaveBeenCalledWith(expect.objectContaining({
-      ref: "proj_1",
-      type: "queue:emails",
-      payload: { hello: "world" },
-      maxAttempts: 5,
-      correlationId: "corr-1",
-      businessTaskId: "biz-1",
-      metadata: { tenant: "acme" },
-    }));
-    expect(countQueueMessagesCreatedSince).toHaveBeenCalledWith(
+    expect(payload.id).toBe("42");
+    expect(payload.task_type).toBe("queue:emails");
+    expect(pgmqSend).toHaveBeenCalledWith(
       "proj_1",
-      "queue:emails",
-      expect.any(Date),
+      "emails",
+      { hello: "world" },
+      1,
     );
   });
 
-  test("POST /queues/:queueName/messages enforces queue rate limit", async () => {
-    projectService.getQueueSettings.mockResolvedValueOnce({
-      max_in_flight: 10,
-      default_visibility_timeout_sec: 330,
-      max_attempts: 3,
-      rate_limit_per_minute: 1,
-    });
-    countQueueMessagesCreatedSince.mockResolvedValueOnce(1);
-
-    const response = await request("/v1/projects/proj_1/tasks/queues/crawl/messages", {
+  test("POST /queues creates a PGMQ queue", async () => {
+    const response = await request("/v1/projects/proj_1/tasks/queues", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ payload: { url: "https://example.com" } }),
+      body: JSON.stringify({ queue_name: "emails", unlogged: true }),
     });
     const payload = await response.json();
 
-    expect(response.status).toBe(429);
-    expect(payload.message).toBe("Queue rate limit exceeded");
-    expect(createTask).not.toHaveBeenCalled();
+    expect(response.status).toBe(201);
+    expect(payload.queue_name).toBe("emails");
+    expect(payload.type).toBe("unlogged");
+    expect(pgmqCreateQueue).toHaveBeenCalledWith("proj_1", "emails", { unlogged: true });
+  });
+
+  test("POST /queues/:queueName/messages/batch sends JSON messages through PGMQ", async () => {
+    pgmqSendBatch.mockResolvedValueOnce([7, 8]);
+
+    const response = await request("/v1/projects/proj_1/tasks/queues/crawl/messages/batch", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ messages: [{ a: 1 }, { b: 2 }], sleep_seconds: 30 }),
+    });
+    const payload = await response.json();
+
+    expect(response.status).toBe(202);
+    expect(payload.msg_ids).toEqual([7, 8]);
+    expect(pgmqSendBatch).toHaveBeenCalledWith("proj_1", "crawl", [{ a: 1 }, { b: 2 }], 30);
   });
 
   test("POST /queues/:queueName/messages/receive leases the next available message", async () => {
-    claimQueueMessage.mockResolvedValueOnce({ id: "msg_1", task_type: "queue:emails", status: "leased" });
+    pgmqRead.mockResolvedValueOnce([{ id: "11", msg_id: 11, task_type: "queue:emails", status: "leased", payload: { hello: "world" } }]);
 
     const response = await request("/v1/projects/proj_1/tasks/queues/emails/messages/receive", {
       method: "POST",
@@ -239,17 +283,12 @@ describe("taskRoutes", () => {
     const payload = await response.json();
 
     expect(response.status).toBe(200);
-    expect(payload.id).toBe("msg_1");
-    expect(claimQueueMessage).toHaveBeenCalledWith({
-      projectRef: "proj_1",
-      queueName: "queue:emails",
-      visibilityTimeoutSec: 60,
-      maxInFlight: 10,
-    });
+    expect(payload.id).toBe("11");
+    expect(pgmqRead).toHaveBeenCalledWith("proj_1", "emails", 60, 1);
   });
 
   test("POST /queues/:queueName/messages/receive returns 204 when empty", async () => {
-    claimQueueMessage.mockResolvedValueOnce(null);
+    pgmqRead.mockResolvedValueOnce([]);
 
     const response = await request("/v1/projects/proj_1/tasks/queues/emails/messages/receive", {
       method: "POST",
@@ -261,10 +300,9 @@ describe("taskRoutes", () => {
   });
 
   test("POST /queues/:queueName/messages/:messageId/ack acknowledges a leased message", async () => {
-    getTaskByIdAndType.mockResolvedValueOnce({ id: "msg_1", task_type: "queue:emails", status: "leased" });
-    acknowledgeQueueMessage.mockResolvedValueOnce({ id: "msg_1", task_type: "queue:emails", status: "succeeded" });
+    pgmqArchive.mockResolvedValueOnce(true);
 
-    const response = await request("/v1/projects/proj_1/tasks/queues/emails/messages/msg_1/ack", {
+    const response = await request("/v1/projects/proj_1/tasks/queues/emails/messages/11/ack", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ result: { ok: true } }),
@@ -272,45 +310,39 @@ describe("taskRoutes", () => {
     const payload = await response.json();
 
     expect(response.status).toBe(200);
-    expect(payload.status).toBe("succeeded");
-    expect(acknowledgeQueueMessage).toHaveBeenCalledWith("msg_1", { ok: true });
+    expect(payload.status).toBe("archived");
+    expect(pgmqArchive).toHaveBeenCalledWith("proj_1", "emails", 11);
   });
 
-  test("GET /queues/:queueName/messages lists only that queue", async () => {
-    listTasksByProjectFiltered.mockResolvedValueOnce([
-      { id: "msg_1", task_type: "queue:emails", status: "dead_lettered" },
-    ]);
+  test("POST /queues/:queueName/messages/pop deletes and returns next PGMQ message", async () => {
+    pgmqPop.mockResolvedValueOnce({ id: "12", msg_id: 12, task_type: "queue:emails", status: "deleted", payload: { ok: true } });
 
-    const response = await request("/v1/projects/proj_1/tasks/queues/emails/messages?dlq=true&limit=5");
+    const response = await request("/v1/projects/proj_1/tasks/queues/emails/messages/pop", {
+      method: "POST",
+    });
+    const payload = await response.json();
 
     expect(response.status).toBe(200);
-    expect(listTasksByProjectFiltered).toHaveBeenCalledWith("proj_1", {
-      statuses: undefined,
-      taskTypes: ["queue:emails"],
-      onlyDeadLettered: true,
-      limit: 5,
-    });
+    expect(payload.id).toBe("12");
+    expect(pgmqPop).toHaveBeenCalledWith("proj_1", "emails");
   });
 
   test("GET /queues/:queueName/stats returns queue-level metrics", async () => {
-    getQueueStats.mockResolvedValueOnce({
-      pending: 4,
-      leased: 1,
-      running: 0,
-      retryScheduled: 2,
-      succeededLast24h: 8,
-      failedLast24h: 1,
-      deadLettered: 3,
-      oldestPendingAgeSec: 42,
-      inFlight: 1,
+    pgmqMetrics.mockResolvedValueOnce({
+      queue_name: "crawl",
+      queue_length: 4,
+      newest_msg_age_sec: 3,
+      oldest_msg_age_sec: 42,
+      total_messages: 9,
+      scrape_time: "2026-05-26T00:00:00Z",
     });
 
     const response = await request("/v1/projects/proj_1/tasks/queues/crawl/stats");
     const payload = await response.json();
 
     expect(response.status).toBe(200);
-    expect(payload.pending).toBe(4);
-    expect(getQueueStats).toHaveBeenCalledWith("proj_1", "queue:crawl");
+    expect(payload.queue_length).toBe(4);
+    expect(pgmqMetrics).toHaveBeenCalledWith("proj_1", "crawl");
   });
 
   test("PATCH /queues/:queueName/settings updates queue reliability controls", async () => {
@@ -337,28 +369,24 @@ describe("taskRoutes", () => {
   });
 
   test("DELETE /queues/:queueName/messages/:messageId marks queue message deleted", async () => {
-    getTaskByIdAndType.mockResolvedValueOnce({ id: "msg_1", task_type: "queue:emails", status: "leased" });
-    cancelTask.mockResolvedValueOnce({ id: "msg_1", status: "cancelled" });
+    pgmqDeleteMessage.mockResolvedValueOnce(true);
 
-    const response = await request("/v1/projects/proj_1/tasks/queues/emails/messages/msg_1", {
+    const response = await request("/v1/projects/proj_1/tasks/queues/emails/messages/11", {
       method: "DELETE",
     });
 
     expect(response.status).toBe(204);
-    expect(cancelTask).toHaveBeenCalledWith("msg_1", "Deleted by queue client");
+    expect(pgmqDeleteMessage).toHaveBeenCalledWith("proj_1", "emails", 11);
   });
 
-  test("POST /queues/:queueName/messages/:messageId/retry replays DLQ messages", async () => {
-    retryQueueMessage.mockResolvedValueOnce({ id: "msg_1", task_type: "queue:crawl", status: "pending" });
-
-    const response = await request("/v1/projects/proj_1/tasks/queues/crawl/messages/msg_1/retry", {
+  test("POST /queues/:queueName/messages/:messageId/retry reports official PGMQ limitation", async () => {
+    const response = await request("/v1/projects/proj_1/tasks/queues/crawl/messages/11/retry", {
       method: "POST",
     });
     const payload = await response.json();
 
-    expect(response.status).toBe(200);
-    expect(payload.status).toBe("pending");
-    expect(retryQueueMessage).toHaveBeenCalledWith("msg_1", "proj_1", "queue:crawl");
+    expect(response.status).toBe(410);
+    expect(payload.message).toContain("official queue API");
   });
 
   test("GET /v1/projects/:ref/tasks forwards function_slug filter to repository", async () => {

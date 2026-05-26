@@ -96,20 +96,42 @@ export type SupaCloudTaskSubmitOptions = {
 };
 
 export type SupaCloudQueueSendOptions = {
+  /** Official Supabase Queues visibility delay, in seconds. */
+  sleepSeconds?: number;
+  /** Official Supabase Queues visibility delay, in seconds. */
+  sleep_seconds?: number;
+  /** Convenience alias converted to sleep_seconds for compatibility with older SupaCloud callers. */
   delayMs?: number;
+  /** @deprecated PGMQ does not store per-message retry budgets. Keep retry policy at the consumer layer. */
   maxAttempts?: number;
+  /** @deprecated PGMQ does not provide enqueue idempotency keys. Deduplicate in your payload or application table. */
   idempotencyKey?: string;
+  /** @deprecated PGMQ messages are plain JSON payloads. Put trace data inside message if needed. */
   traceId?: string;
+  /** @deprecated PGMQ messages are plain JSON payloads. Put correlation data inside message if needed. */
   correlationId?: string;
+  /** @deprecated PGMQ messages are plain JSON payloads. Put business IDs inside message if needed. */
   businessTaskId?: string;
+  /** @deprecated PGMQ messages are plain JSON payloads. Put metadata inside message if needed. */
   metadata?: Record<string, unknown>;
 };
 
 export type SupaCloudQueueReceiveOptions = {
+  /** Official Supabase Queues visibility timeout, in seconds. */
+  sleepSeconds?: number;
+  /** Official Supabase Queues visibility timeout, in seconds. */
+  sleep_seconds?: number;
+  /** Number of messages to read when using read(). receive() always reads one. */
+  n?: number;
+  /** Alias for n. */
+  count?: number;
+  /** Convenience alias converted to sleep_seconds for older SupaCloud callers. */
   visibilityTimeoutSec?: number;
 };
 
 export type SupaCloudQueueReleaseOptions = {
+  sleepSeconds?: number;
+  sleep_seconds?: number;
   delayMs?: number;
   error?: string;
 };
@@ -121,24 +143,61 @@ export type SupaCloudQueueFailOptions = {
 
 export type SupaCloudQueueListFilters = {
   status?: string | string[];
+  archived?: boolean;
   dlq?: boolean;
   limit?: number;
 };
 
-export type SupaCloudQueueMessage = SupaCloudTaskDetail & {
+export type SupaCloudQueueMessage = {
+  id: string;
+  msg_id: number;
+  read_ct?: number;
+  enqueued_at?: string | null;
+  vt?: string | null;
+  message?: Record<string, unknown>;
+  payload: Record<string, unknown>;
+  status?: string;
+  queue_name?: string;
+  task_type?: string;
+  [key: string]: unknown;
+};
+
+export type SupaCloudQueueSendResult = {
+  id: string;
+  msg_id: number;
+  queue_name: string;
+  status: "pending";
   payload: Record<string, unknown>;
 };
 
+export type SupaCloudQueueMutationResult = {
+  id: string;
+  msg_id: number;
+  queue_name: string;
+  status: "archived" | "deleted" | "released";
+  success: boolean;
+};
+
 export type SupaCloudQueueStats = {
-  pending: number;
-  leased: number;
-  running: number;
-  retryScheduled: number;
-  succeededLast24h: number;
-  failedLast24h: number;
-  deadLettered: number;
-  oldestPendingAgeSec: number | null;
-  inFlight: number;
+  queue_name: string;
+  queue_length: number;
+  newest_msg_age_sec: number | null;
+  oldest_msg_age_sec: number | null;
+  total_messages: number;
+  scrape_time: string;
+  [key: string]: unknown;
+};
+
+export type SupaCloudQueueInfo = {
+  queue_name: string;
+  created_at?: string | null;
+  is_partitioned?: boolean;
+  is_unlogged?: boolean;
+  type?: string;
+};
+
+export type SupaCloudQueueCreateOptions = {
+  unlogged?: boolean;
 };
 
 export type SupaCloudQueueSettings = {
@@ -411,11 +470,72 @@ function createQueueQueryString(filters: SupaCloudQueueListFilters = {}): string
   const statuses = toArray(filters.status);
 
   if (statuses?.length) params.set("status", statuses.join(","));
+  if (filters.archived) params.set("archived", "true");
   if (filters.dlq) params.set("dlq", "true");
   if (filters.limit !== undefined) params.set("limit", String(filters.limit));
 
   const query = params.toString();
   return query.length > 0 ? `?${query}` : "";
+}
+
+function normalizeSecondsFromOptions(
+  options: { sleepSeconds?: number; sleep_seconds?: number; delayMs?: number; visibilityTimeoutSec?: number } = {},
+): number {
+  if (typeof options.sleepSeconds === "number") return Math.max(0, Math.floor(options.sleepSeconds));
+  if (typeof options.sleep_seconds === "number") return Math.max(0, Math.floor(options.sleep_seconds));
+  if (typeof options.visibilityTimeoutSec === "number") return Math.max(0, Math.floor(options.visibilityTimeoutSec));
+  if (typeof options.delayMs === "number") return Math.max(0, Math.floor(options.delayMs / 1000));
+  return 0;
+}
+
+function normalizeMessageId(value: unknown): number {
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : 0;
+}
+
+function firstRpcValue(value: unknown): unknown {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+function normalizeRpcMessage(queueName: string, value: unknown, status?: string): SupaCloudQueueMessage | null {
+  const row = firstRpcValue(value);
+  if (!row || typeof row !== "object") return null;
+  const record = row as Record<string, unknown>;
+  const message = record.message && typeof record.message === "object" && !Array.isArray(record.message)
+    ? record.message as Record<string, unknown>
+    : {};
+  const msgId = normalizeMessageId(record.msg_id ?? record.id);
+  return {
+    ...record,
+    id: String(msgId),
+    msg_id: msgId,
+    message,
+    payload: message,
+    status,
+    queue_name: queueName,
+    task_type: `queue:${queueName}`,
+  };
+}
+
+function normalizeRpcMessages(queueName: string, value: unknown, status?: string): SupaCloudQueueMessage[] {
+  const rows = Array.isArray(value) ? value : value == null ? [] : [value];
+  return rows
+    .map((row) => normalizeRpcMessage(queueName, row, status))
+    .filter((row): row is SupaCloudQueueMessage => Boolean(row));
+}
+
+function normalizeRpcMessageId(value: unknown): number {
+  const row = firstRpcValue(value);
+  if (row && typeof row === "object") {
+    const record = row as Record<string, unknown>;
+    return normalizeMessageId(record.msg_id ?? record.send ?? record.send_batch ?? record.id);
+  }
+  return normalizeMessageId(row);
+}
+
+function normalizeRpcMessageIds(value: unknown): number[] {
+  const rows = Array.isArray(value) ? value : value == null ? [] : [value];
+  return rows.map((row) => normalizeRpcMessageId(row)).filter((id) => id > 0);
 }
 
 function extractErrorCode(body: unknown): string | null {
@@ -821,35 +941,80 @@ class SupaCloudQueueClient<TClient extends SupabaseClient = SupabaseClient> exte
     return encodeURIComponent(this.name);
   }
 
+  private async rpc<T>(fn: string, params: Record<string, unknown>): Promise<T> {
+    const scopedClient = (this.options.supabase as unknown as {
+      schema: (name: string) => {
+        rpc: (fn: string, params: Record<string, unknown>) => Promise<{ data: unknown; error: unknown }>;
+      };
+    }).schema("pgmq_public");
+    const { data, error } = await scopedClient.rpc(fn, params);
+    if (error) throw error;
+    return data as T;
+  }
+
   async send(
     payload: Record<string, unknown> = {},
     options: SupaCloudQueueSendOptions = {},
-  ): Promise<SupaCloudQueueMessage> {
-    return this.request<SupaCloudQueueMessage>(
-      `/v1/projects/${this.options.projectRef}/tasks/queues/${this.encodedName}/messages`,
-      "POST",
-      {
-        payload,
-        delayMs: options.delayMs,
-        maxAttempts: options.maxAttempts,
-        idempotencyKey: options.idempotencyKey,
-        traceId: options.traceId,
-        correlationId: options.correlationId,
-        businessTaskId: options.businessTaskId,
-        metadata: options.metadata,
-      },
+  ): Promise<SupaCloudQueueSendResult> {
+    const msgId = normalizeRpcMessageId(await this.rpc("send", {
+      queue_name: this.name,
+      message: payload,
+      sleep_seconds: normalizeSecondsFromOptions(options),
+    }));
+    return {
+      id: String(msgId),
+      msg_id: msgId,
+      queue_name: this.name,
+      status: "pending",
+      payload,
+    };
+  }
+
+  async sendBatch(
+    messages: Record<string, unknown>[],
+    options: SupaCloudQueueSendOptions = {},
+  ): Promise<SupaCloudQueueSendResult[]> {
+    const ids = normalizeRpcMessageIds(await this.rpc("send_batch", {
+      queue_name: this.name,
+      messages,
+      sleep_seconds: normalizeSecondsFromOptions(options),
+    }));
+    return ids.map((msgId, index) => ({
+      id: String(msgId),
+      msg_id: msgId,
+      queue_name: this.name,
+      status: "pending",
+      payload: messages[index] ?? {},
+    }));
+  }
+
+  async read(
+    options: SupaCloudQueueReceiveOptions = {},
+  ): Promise<SupaCloudQueueMessage[]> {
+    return normalizeRpcMessages(
+      this.name,
+      await this.rpc("read", {
+        queue_name: this.name,
+        sleep_seconds: normalizeSecondsFromOptions(options),
+        n: Math.max(1, Math.floor(options.n ?? options.count ?? 1)),
+      }),
+      "leased",
     );
   }
 
   async receive(
     options: SupaCloudQueueReceiveOptions = {},
   ): Promise<SupaCloudQueueMessage | null> {
-    const message = await this.request<SupaCloudQueueMessage | undefined>(
-      `/v1/projects/${this.options.projectRef}/tasks/queues/${this.encodedName}/messages/receive`,
-      "POST",
-      options,
+    const messages = await this.read({ ...options, n: 1 });
+    return messages[0] ?? null;
+  }
+
+  async pop(): Promise<SupaCloudQueueMessage | null> {
+    return normalizeRpcMessage(
+      this.name,
+      await this.rpc("pop", { queue_name: this.name }),
+      "deleted",
     );
-    return message ?? null;
   }
 
   async list(filters: SupaCloudQueueListFilters = {}): Promise<SupaCloudQueueMessage[]> {
@@ -860,7 +1025,11 @@ class SupaCloudQueueClient<TClient extends SupabaseClient = SupabaseClient> exte
   }
 
   async listFailed(limit = 100): Promise<SupaCloudQueueMessage[]> {
-    return this.list({ dlq: true, limit });
+    return this.list({ archived: true, dlq: true, limit });
+  }
+
+  async listArchived(limit = 100): Promise<SupaCloudQueueMessage[]> {
+    return this.list({ archived: true, limit });
   }
 
   async stats(): Promise<SupaCloudQueueStats> {
@@ -885,6 +1054,63 @@ class SupaCloudQueueClient<TClient extends SupabaseClient = SupabaseClient> exte
     );
   }
 
+  async archive(messageId: string | number): Promise<SupaCloudQueueMutationResult> {
+    const msgId = normalizeMessageId(messageId);
+    const success = Boolean(firstRpcValue(await this.rpc("archive", {
+      queue_name: this.name,
+      message_id: msgId,
+    })));
+    return { id: String(msgId), msg_id: msgId, queue_name: this.name, status: "archived", success };
+  }
+
+  async ack(messageId: string | number): Promise<SupaCloudQueueMutationResult> {
+    return this.archive(messageId);
+  }
+
+  async delete(messageId: string | number): Promise<SupaCloudQueueMutationResult> {
+    const msgId = normalizeMessageId(messageId);
+    const success = Boolean(firstRpcValue(await this.rpc("delete", {
+      queue_name: this.name,
+      message_id: msgId,
+    })));
+    return { id: String(msgId), msg_id: msgId, queue_name: this.name, status: "deleted", success };
+  }
+
+  async release(
+    messageId: string | number,
+    options: SupaCloudQueueReleaseOptions = {},
+  ): Promise<SupaCloudQueueMessage> {
+    return this.request<SupaCloudQueueMessage>(
+      `/v1/projects/${this.options.projectRef}/tasks/queues/${this.encodedName}/messages/${messageId}/release`,
+      "POST",
+      {
+        sleep_seconds: normalizeSecondsFromOptions(options),
+        ...(options.error ? { error: options.error } : {}),
+      },
+    );
+  }
+
+  async purge(): Promise<{ queue_name: string; purged: number }> {
+    return this.request<{ queue_name: string; purged: number }>(
+      `/v1/projects/${this.options.projectRef}/tasks/queues/${this.encodedName}/purge`,
+      "POST",
+    );
+  }
+
+  /**
+   * SupaCloud extension alias: PGMQ has archive/delete but no failed state.
+   * This archives the message, matching the management API's compatibility behavior.
+   */
+  async fail(
+    messageId: string | number,
+    _options: SupaCloudQueueFailOptions = {},
+  ): Promise<SupaCloudQueueMutationResult> {
+    return this.archive(messageId);
+  }
+
+  /**
+   * @deprecated Direct random lookup is not part of Supabase Queues' official API.
+   */
   async get(messageId: string): Promise<SupaCloudQueueMessage> {
     return this.request<SupaCloudQueueMessage>(
       `/v1/projects/${this.options.projectRef}/tasks/queues/${this.encodedName}/messages/${messageId}`,
@@ -892,50 +1118,37 @@ class SupaCloudQueueClient<TClient extends SupabaseClient = SupabaseClient> exte
     );
   }
 
-  async ack(
-    messageId: string,
-    result?: Record<string, unknown>,
-  ): Promise<SupaCloudQueueMessage> {
-    return this.request<SupaCloudQueueMessage>(
-      `/v1/projects/${this.options.projectRef}/tasks/queues/${this.encodedName}/messages/${messageId}/ack`,
-      "POST",
-      result ? { result } : {},
-    );
-  }
-
-  async delete(messageId: string): Promise<void> {
-    await this.request<void>(
-      `/v1/projects/${this.options.projectRef}/tasks/queues/${this.encodedName}/messages/${messageId}`,
-      "DELETE",
-    );
-  }
-
-  async release(
-    messageId: string,
-    options: SupaCloudQueueReleaseOptions = {},
-  ): Promise<SupaCloudQueueMessage> {
-    return this.request<SupaCloudQueueMessage>(
-      `/v1/projects/${this.options.projectRef}/tasks/queues/${this.encodedName}/messages/${messageId}/release`,
-      "POST",
-      options,
-    );
-  }
-
-  async fail(
-    messageId: string,
-    options: SupaCloudQueueFailOptions = {},
-  ): Promise<SupaCloudQueueMessage> {
-    return this.request<SupaCloudQueueMessage>(
-      `/v1/projects/${this.options.projectRef}/tasks/queues/${this.encodedName}/messages/${messageId}/fail`,
-      "POST",
-      options,
-    );
-  }
-
+  /**
+   * @deprecated PGMQ archived messages are replayed with SQL/application workflows, not an official Queue API call.
+   */
   async retry(messageId: string): Promise<SupaCloudQueueMessage> {
     return this.request<SupaCloudQueueMessage>(
       `/v1/projects/${this.options.projectRef}/tasks/queues/${this.encodedName}/messages/${messageId}/retry`,
       "POST",
+    );
+  }
+}
+
+class SupaCloudQueuesClient<TClient extends SupabaseClient = SupabaseClient> extends SupaCloudManagementClient<TClient> {
+  async list(): Promise<SupaCloudQueueInfo[]> {
+    return this.request<SupaCloudQueueInfo[]>(
+      `/v1/projects/${this.options.projectRef}/tasks/queues`,
+      "GET",
+    );
+  }
+
+  async create(queueName: string, options: SupaCloudQueueCreateOptions = {}): Promise<SupaCloudQueueInfo> {
+    return this.request<SupaCloudQueueInfo>(
+      `/v1/projects/${this.options.projectRef}/tasks/queues`,
+      "POST",
+      { queue_name: queueName, unlogged: options.unlogged },
+    );
+  }
+
+  async drop(queueName: string): Promise<void> {
+    await this.request<void>(
+      `/v1/projects/${this.options.projectRef}/tasks/queues/${encodeURIComponent(queueName)}`,
+      "DELETE",
     );
   }
 }
@@ -1096,6 +1309,7 @@ export function createSupaCloudClient<TClient extends SupabaseClient = SupabaseC
   const oauthServer = new SupaCloudOAuthServerClient(normalized);
   const oauthClients = new SupaCloudOAuthClientsClient(normalized);
   const supauth = new SupaCloudSupAuthClient(normalized);
+  const queues = new SupaCloudQueuesClient(normalized);
 
   return {
     supabase: options.supabase,
@@ -1107,6 +1321,7 @@ export function createSupaCloudClient<TClient extends SupabaseClient = SupabaseC
     },
     tasks,
     supauth,
+    queues,
     queue: (name: string) => new SupaCloudQueueClient(normalized, name),
     functions: {
       invokeBackground: (

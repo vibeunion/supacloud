@@ -59,24 +59,32 @@ Current first-class API surface:
 - `client.tasks.subscribe(...)`
 - `client.functions.invokeBackground(...)`
 - `client.queue(name).send(...)`
+- `client.queue(name).sendBatch(...)`
+- `client.queue(name).read(...)`
 - `client.queue(name).receive(...)`
+- `client.queue(name).pop(...)`
+- `client.queue(name).archive(...)`
+- `client.queue(name).ack(...)`
+- `client.queue(name).delete(...)`
+- `client.queue(name).release(...)`
 - `client.queue(name).list(...)`
+- `client.queue(name).listArchived(...)`
 - `client.queue(name).listFailed(...)`
 - `client.queue(name).get(...)`
-- `client.queue(name).ack(...)`
-- `client.queue(name).release(...)`
 - `client.queue(name).fail(...)`
 - `client.queue(name).retry(...)`
-- `client.queue(name).delete(...)`
 - `client.queue(name).stats(...)`
 - `client.queue(name).getSettings(...)`
 - `client.queue(name).updateSettings(...)`
+- `client.queues.list/create/drop(...)`
 - `client.auth.oauthServer.getStatus()`
 - `client.auth.oauthServer.migrateToOidc()`
 - `client.auth.oauthServer.getDiscovery()`
 - `client.auth.oauthServer.getJwks()`
 - `client.auth.oauthServer.buildAuthorizeUrl()`
 - `client.auth.oauthClients.list()/create()/get()/update()/delete()/regenerateSecret()`
+
+Core queue message operations follow the official Supabase Queues `pgmq_public` RPC API. `client.queues.*`, queue metrics, purge, settings, diagnostics, and `release` are SupaCloud management extensions. See [Queues PGMQ Migration Guide](./queues-pgmq-migration.md).
 
 ## Example
 
