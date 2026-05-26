@@ -119,7 +119,7 @@ export function createFetchHandler(root: string) {
       return new Response("Bad Request", { status: 400 });
     }
 
-    // Readiness probe for health checks (Kong / systemd ExecStartPre)
+    // Readiness probe for gateway/systemd cutover checks.
     if (path === "/healthz") {
       return new Response("ok", { status: 200, headers: { "Content-Type": "text/plain" } });
     }

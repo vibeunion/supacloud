@@ -68,6 +68,11 @@ export interface Config {
   storageType: string;
   storageMountPoint: string;
   imaginaryUrl: string;
+  gatewayProvider: "caddy" | "kong";
+  caddyAdminUrl: string;
+  caddyConfigPath: string;
+  caddyStateDir: string;
+  caddyBinaryPath: string;
   kongAdminUrl: string;
   kongInternal: string;
   victoriaMetricsUrl: string;
@@ -192,6 +197,21 @@ export const config: Config = {
   storageMountPoint: getEnv("STORAGE_MOUNT_POINT", "/data/storage"),
 
   imaginaryUrl: getEnv("IMAGINARY_URL", "http://127.0.0.1:9010"),
+  gatewayProvider: getEnv("GATEWAY_PROVIDER", "caddy") === "kong" ? "kong" : "caddy",
+  caddyAdminUrl: getEnv("CADDY_ADMIN_URL", "http://127.0.0.1:2019"),
+  caddyConfigPath: getEnv(
+    "CADDY_CONFIG_PATH",
+    process.env.NODE_ENV === "test" || process.env.BUN_ENV === "test"
+      ? "/tmp/supacloud-caddy-test/config.json"
+      : "/etc/supacloud/caddy/config.json",
+  ),
+  caddyStateDir: getEnv(
+    "CADDY_STATE_DIR",
+    process.env.NODE_ENV === "test" || process.env.BUN_ENV === "test"
+      ? "/tmp/supacloud-caddy-test/state"
+      : "/var/lib/supacloud/caddy",
+  ),
+  caddyBinaryPath: getEnv("CADDY_BINARY_PATH", "/usr/local/bin/supacloud-caddy"),
   kongAdminUrl: getEnv("KONG_ADMIN_URL", "http://localhost:8001"),
   kongInternal: getEnv("KONG_INTERNAL", "127.0.0.1:8000"),
   victoriaMetricsUrl: getEnv("VICTORIAMETRICS_URL", "http://127.0.0.1:8428"),

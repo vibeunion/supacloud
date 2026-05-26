@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { access, chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { config, resolveSupacloudBinaryPath } from "../../src/config";
@@ -12,8 +12,9 @@ beforeEach(() => {
   globalThis.fetch = mock(() => Promise.resolve(new Response(JSON.stringify({ data: [] })))) as unknown as typeof fetch;
 });
 
-afterEach(() => {
+afterEach(async () => {
   globalThis.fetch = originalFetch;
+  await rm("/tmp/supacloud-caddy-test", { recursive: true, force: true });
 });
 
 describe("FrontendService DNS records", () => {
@@ -83,9 +84,9 @@ describe("FrontendService static binary resolution", () => {
   });
 });
 
-describe("FrontendService Kong routing", () => {
-  test("disables buffering on frontend root routes", async () => {
-    const calls: Array<{ url: string; method: string; body: Record<string, unknown> | null }> = [];
+describe("FrontendService gateway routing", () => {
+  test("registers frontend root route through the gateway provider", async () => {
+    const calls: Array<{ url: string; method: string; body: any }> = [];
 
     globalThis.fetch = mock((input: string | URL | Request, init?: RequestInit) => {
       const url = typeof input === "string"
@@ -94,10 +95,10 @@ describe("FrontendService Kong routing", () => {
           ? input.toString()
           : input.url;
       const method = init?.method || "GET";
-      let body: Record<string, unknown> | null = null;
+      let body: any = null;
       if (typeof init?.body === "string" && init.body.length > 0) {
         try {
-          body = JSON.parse(init.body) as Record<string, unknown>;
+          body = JSON.parse(init.body);
         } catch {
           body = null;
         }
@@ -125,20 +126,66 @@ describe("FrontendService Kong routing", () => {
       deployment_url: "https://site.example.com",
     };
 
-    await service.configureKongRoute(deployment, "/tmp/build", false);
+    await service.configureGatewayRoute(deployment, "/tmp/build", false);
 
-    const routeCall = calls.find(
-      (call) => call.method === "PUT" && call.url.includes("/routes/route-frontend-proj123-0000002a")
-    );
+    const loadCall = calls.filter((call) => call.method === "POST" && call.url.endsWith("/load")).at(-1);
+    const routes = loadCall?.body?.apps?.http?.servers?.supacloud?.routes ?? [];
+    const route = routes.find((item: any) => item["@id"] === "route-frontend-proj123-0000002a");
 
-    expect(routeCall).toBeDefined();
-    expect(routeCall?.body).toMatchObject({
-      paths: ["/"],
-      hosts: ["site.example.com", "www.example.com"],
-      strip_path: false,
-      preserve_host: true,
-      request_buffering: false,
-      response_buffering: false,
-    });
+    expect(route).toBeDefined();
+    expect(route?.match?.[0]?.path).toEqual(["/*"]);
+    expect(route?.match?.[0]?.host).toEqual(["site.example.com", "www.example.com"]);
+    const subroute = route?.handle?.find((handler: any) => handler.handler === "subroute");
+    const fileServer = subroute?.routes?.at(-1)?.handle?.at(-1);
+    expect(fileServer?.handler).toBe("file_server");
+    expect(fileServer?.root).toBe("/tmp/build");
+    expect(fileServer?.precompressed_order).toEqual(["br", "zstd", "gzip"]);
+  });
+});
+
+describe("FrontendService optimizer", () => {
+  test("generates br and gzip sidecars for static text assets", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "supacloud-frontend-optimizer-test-"));
+    const service = new FrontendService(baseDir);
+    const assetPath = join(baseDir, "app.js");
+
+    try {
+      await writeFile(assetPath, "console.log('supacloud');\n".repeat(128));
+      await (service as any).precompressStaticAssets(baseDir);
+
+      await access(`${assetPath}.br`);
+      await access(`${assetPath}.gz`);
+      if ((await Bun.spawn(["which", "zstd"]).exited) === 0) {
+        await access(`${assetPath}.zst`);
+      }
+    } finally {
+      await rm(baseDir, { recursive: true, force: true });
+    }
+  });
+
+  test("generates image variant sidecars when optimizer tools are available", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "supacloud-frontend-image-optimizer-test-"));
+    const binDir = join(baseDir, "bin");
+    const imagePath = join(baseDir, "hero.jpg");
+    const originalPath = process.env.PATH || "";
+    const service = new FrontendService(baseDir);
+
+    try {
+      await mkdir(binDir);
+      await writeFile(join(binDir, "cwebp"), "#!/bin/sh\ncp \"$4\" \"$6\"\n");
+      await writeFile(join(binDir, "avifenc"), "#!/bin/sh\ncp \"$8\" \"$9\"\n");
+      await chmod(join(binDir, "cwebp"), 0o755);
+      await chmod(join(binDir, "avifenc"), 0o755);
+      process.env.PATH = `${binDir}:${originalPath}`;
+
+      await writeFile(imagePath, Buffer.alloc(2048, 1));
+      await (service as any).precompressStaticAssets(baseDir);
+
+      await access(`${imagePath}.webp`);
+      await access(`${imagePath}.avif`);
+    } finally {
+      process.env.PATH = originalPath;
+      await rm(baseDir, { recursive: true, force: true });
+    }
   });
 });

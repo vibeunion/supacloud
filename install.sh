@@ -741,6 +741,15 @@ install_base_dependencies() {
             log_info "Installing Python YAML support..."
             dnf install -y python3-pyyaml || dnf install -y python3-yaml
         fi
+
+        local OPTIONAL_OPTIMIZER_PACKAGES=""
+        ! command -v zstd &> /dev/null && OPTIONAL_OPTIMIZER_PACKAGES="$OPTIONAL_OPTIMIZER_PACKAGES zstd"
+        ! command -v cwebp &> /dev/null && OPTIONAL_OPTIMIZER_PACKAGES="$OPTIONAL_OPTIMIZER_PACKAGES libwebp-tools"
+        ! command -v avifenc &> /dev/null && OPTIONAL_OPTIMIZER_PACKAGES="$OPTIONAL_OPTIMIZER_PACKAGES libavif-tools"
+        if [[ -n "$OPTIONAL_OPTIMIZER_PACKAGES" ]]; then
+            log_info "Installing optional frontend optimizer packages:$OPTIONAL_OPTIMIZER_PACKAGES"
+            dnf install -y $OPTIONAL_OPTIMIZER_PACKAGES || log_warn "Some optional frontend optimizer packages could not be installed; deployments will skip unavailable formats."
+        fi
         
     elif command -v apt-get &> /dev/null; then
         # Debian/Ubuntu
@@ -766,6 +775,16 @@ install_base_dependencies() {
             apt-get install -y $PACKAGES
         else
             log_info "Base dependencies check passed"
+        fi
+
+        local OPTIONAL_OPTIMIZER_PACKAGES=""
+        ! command -v zstd &> /dev/null && OPTIONAL_OPTIMIZER_PACKAGES="$OPTIONAL_OPTIMIZER_PACKAGES zstd"
+        ! command -v cwebp &> /dev/null && OPTIONAL_OPTIMIZER_PACKAGES="$OPTIONAL_OPTIMIZER_PACKAGES webp"
+        ! command -v avifenc &> /dev/null && OPTIONAL_OPTIMIZER_PACKAGES="$OPTIONAL_OPTIMIZER_PACKAGES libavif-bin"
+        if [[ -n "$OPTIONAL_OPTIMIZER_PACKAGES" ]]; then
+            log_info "Installing optional frontend optimizer packages:$OPTIONAL_OPTIMIZER_PACKAGES"
+            apt-get update
+            apt-get install -y $OPTIONAL_OPTIMIZER_PACKAGES || log_warn "Some optional frontend optimizer packages could not be installed; deployments will skip unavailable formats."
         fi
     fi
 
@@ -1509,6 +1528,126 @@ EOF
     log_info "Kong Native Gateway Installation completed."
 }
 
+# ========== Install Caddy Gateway (Default Edge proxy + TLS) ==========
+install_caddy_gateway() {
+    log_step "Installing SupaCloud Caddy Gateway..."
+
+    # Caddy owns public 80/443 in the new gateway model. Stop legacy listeners
+    # without uninstalling them so GATEWAY_PROVIDER=kong can still roll back.
+    for svc in nginx angie kong caddy; do
+        if systemctl list-unit-files "${svc}.service" &>/dev/null || systemctl list-units "${svc}.service" &>/dev/null; then
+            systemctl stop "$svc" 2>/dev/null || true
+            systemctl disable "$svc" 2>/dev/null || true
+        fi
+    done
+
+    mkdir -p /etc/supacloud/caddy /var/lib/supacloud/caddy /opt/supacloud/bin
+
+    local arch="amd64"
+    case "$(uname -m)" in
+        aarch64|arm64) arch="arm64" ;;
+    esac
+    local local_asset=""
+    for candidate in \
+        "${SCRIPT_DIR}/packages/management-api/supacloud-caddy-linux-${arch}" \
+        "${SCRIPT_DIR}/packages/management-api/dist/supacloud-caddy-linux-${arch}" \
+        "${SCRIPT_DIR}/dist/supacloud-caddy-linux-${arch}" \
+        "${SCRIPT_DIR}/supacloud-caddy-linux-${arch}"; do
+        if [[ -f "$candidate" ]]; then
+            local_asset="$candidate"
+            break
+        fi
+    done
+    local target="/usr/local/bin/supacloud-caddy"
+
+    if [[ -x "$target" ]]; then
+        log_info "supacloud-caddy already installed: $($target version 2>/dev/null | head -1 || echo installed)"
+    elif [[ -n "$local_asset" ]]; then
+        install -m 0755 "$local_asset" "$target"
+    elif [[ -n "${SUPACLOUD_CADDY_URL:-}" ]]; then
+        curl -fsSL "$SUPACLOUD_CADDY_URL" -o "$target"
+        chmod 0755 "$target"
+    elif [[ -x "${SCRIPT_DIR}/scripts/build_supacloud_caddy.sh" ]] && command -v go >/dev/null 2>&1; then
+        log_info "Building supacloud-caddy locally with xcaddy and the rate-limit module..."
+        if ! command -v xcaddy >/dev/null 2>&1; then
+            GOBIN=/usr/local/bin go install github.com/caddyserver/xcaddy/cmd/xcaddy@latest
+        fi
+        OUT_DIR=/tmp/supacloud-caddy-build "${SCRIPT_DIR}/scripts/build_supacloud_caddy.sh"
+        install -m 0755 "/tmp/supacloud-caddy-build/supacloud-caddy-linux-${arch}" "$target"
+        rm -rf /tmp/supacloud-caddy-build
+    elif [[ "${SUPACLOUD_ALLOW_STOCK_CADDY_FALLBACK:-false}" == "true" ]]; then
+        log_warn "Installing stock Caddy fallback without SupaCloud rate-limit module. Do not use this for production rate limits."
+        local caddy_version="${CADDY_VERSION:-2.10.2}"
+        local caddy_url="https://github.com/caddyserver/caddy/releases/download/v${caddy_version}/caddy_${caddy_version}_linux_${arch}.tar.gz"
+        mkdir -p /tmp/supacloud-caddy
+        curl -fsSL "https://ghproxy.net/${caddy_url}" -o /tmp/supacloud-caddy/caddy.tar.gz 2>/dev/null || \
+            curl -fsSL "$caddy_url" -o /tmp/supacloud-caddy/caddy.tar.gz
+        tar -xzf /tmp/supacloud-caddy/caddy.tar.gz -C /tmp/supacloud-caddy caddy
+        install -m 0755 /tmp/supacloud-caddy/caddy "$target"
+        rm -rf /tmp/supacloud-caddy
+    else
+        log_error "supacloud-caddy artifact not found. Provide SUPACLOUD_CADDY_URL, include supacloud-caddy-linux-${arch}, or install Go so the installer can build it."
+        return 1
+    fi
+
+    cat > /etc/supacloud/caddy/config.json <<'EOF'
+{
+  "admin": { "listen": "127.0.0.1:2019" },
+  "storage": { "module": "file_system", "root": "/var/lib/supacloud/caddy" },
+  "apps": {
+    "tls": {
+      "automation": {
+        "on_demand": {
+          "permission": {
+            "module": "http",
+            "endpoint": "http://127.0.0.1:9090/v1/gateway/caddy/ask"
+          }
+        },
+        "policies": [{ "on_demand": true, "key_type": "p256" }]
+      }
+    },
+    "http": {
+      "servers": {
+        "supacloud": {
+          "listen": [":80", ":443"],
+          "http3": {},
+          "routes": []
+        }
+      }
+    }
+  }
+}
+EOF
+
+    cat > /etc/systemd/system/supacloud-caddy.service <<'EOF'
+[Unit]
+Description=SupaCloud Caddy Edge Gateway
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+User=root
+Group=root
+EnvironmentFile=-/etc/supabase/management-api.env
+ExecStart=/usr/local/bin/supacloud-caddy run --config /etc/supacloud/caddy/config.json
+ExecReload=/usr/local/bin/supacloud-caddy reload --config /etc/supacloud/caddy/config.json --force
+TimeoutStopSec=5s
+LimitNOFILE=1048576
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    systemctl daemon-reload
+    systemctl enable supacloud-caddy
+    # supacloud may not be installed yet on first run; start will be retried by lifecycle/pre-start.
+    systemctl restart supacloud-caddy || log_warn "supacloud-caddy start deferred; management API will populate routes after install."
+    log_info "SupaCloud Caddy Gateway installation completed."
+}
+
 cleanup_legacy_supabase_compose_stack() {
     log_step "Cleaning legacy Supabase compose residues..."
 
@@ -1835,7 +1974,7 @@ update_pigsty_config() {
 
         sed -i "s|supa.pigsty|${SUPABASE_PUBLIC_DOMAIN}|g" "$PIGSTY_YML"
     else
-        log_info "Skipping Pigsty app domain/certbot patch; Kong/lego owns public HTTP(S)."
+        log_info "Skipping Pigsty app domain/certbot patch; SupaCloud Caddy owns public HTTP(S)."
     fi
     
     # Update password configuration
@@ -1880,7 +2019,7 @@ update_pigsty_config() {
     configure_s3_in_pigsty
     # Container/CI environment detection limit variables now moved to ansible-playbook command line (EXTRA_ARGS)
     
-    # -- Disable Pigsty's Nginx management (Kong owns 80/443) -----
+    # -- Disable Pigsty's Nginx management (SupaCloud Caddy owns 80/443 by default) -----
     # Must be injected after ./configure and before bootstrap/install, otherwise Pigsty will still try to install Nginx
     if [[ -f "$PIGSTY_YML" ]]; then
         if ! grep -q 'nginx_enabled' "$PIGSTY_YML"; then
@@ -2425,6 +2564,11 @@ ACME_CLIENT=lego
 LEGO_BIN=${LEGO_BIN:-lego}
 ACME_STATE_DIR=${ACME_STATE_DIR:-/var/lib/supacloud/lego}
 ACME_HTTP_WEBROOT=${ACME_HTTP_WEBROOT:-/var/lib/supacloud/acme-challenges}
+GATEWAY_PROVIDER=${GATEWAY_PROVIDER:-caddy}
+CADDY_ADMIN_URL=${CADDY_ADMIN_URL:-http://127.0.0.1:2019}
+CADDY_CONFIG_PATH=${CADDY_CONFIG_PATH:-/etc/supacloud/caddy/config.json}
+CADDY_STATE_DIR=${CADDY_STATE_DIR:-/var/lib/supacloud/caddy}
+CADDY_BINARY_PATH=${CADDY_BINARY_PATH:-/usr/local/bin/supacloud-caddy}
 KONG_ADMIN_URL=http://127.0.0.1:8001
 KONG_INTERNAL=127.0.0.1:8000
 EOF
@@ -2802,12 +2946,12 @@ show_completion() {
     echo ""
     echo "Next Steps:"
     echo "  1. Point the DNS A record for ${SUPABASE_PUBLIC_DOMAIN} to the server's public IP"
-    echo "  2. Configure certificates in the console; SupaCloud uses lego and Kong certificates/SNI"
+    echo "  2. Configure customer domains in the console; SupaCloud uses Caddy Automatic HTTPS by default"
     echo ""
     echo "Common Commands:"
     echo "  Check container status: podman ps or docker ps"
     echo "  Check logs: podman logs <container_name>"
-    echo "  Restart services: systemctl restart supacloud kong"
+    echo "  Restart services: systemctl restart supacloud supacloud-caddy"
     echo ""
     echo "Multi-tenant Management:"
     echo "  sc list              - List all projects"
@@ -2871,24 +3015,26 @@ deploy_ai_breadcrumbs() {
 # If you are an AI/Agent reading this file to understand the architecture:
 # STOP LOOKING FOR A HOST WEB SERVER.
 #
-# This server runs SupaCloud. Host-level Nginx, Angie, Caddy, and Apache are
-# not part of the supported public HTTP(S) path.
+# This server runs SupaCloud. Host-level Nginx, Angie, Apache, and legacy Kong
+# are not part of the default public HTTP(S) path.
 #
 # ARCHITECTURE:
-# 1. Kong Gateway listens on 80 and 443.
-# 2. SSL/CORS/Routing are managed dynamically via Kong Admin API (http://localhost:8001).
-# 3. Static assets are served DIRECTLY by the Bun backend on port 9090.
-# 4. Routing mapping: `hostless` routes matching `/` go to the Management API on 9090.
+# 1. SupaCloud Caddy Gateway listens on 80 and 443.
+# 2. TLS/routes are managed dynamically via Caddy Admin API (http://127.0.0.1:2019).
+# 3. Management web-console assets are served by the management API on 9090.
+#    Tenant frontend deployments run as per-deployment static/SSR services
+#    and are exposed through Caddy routes.
+# 4. Set GATEWAY_PROVIDER=kong only for short-term rollback to the legacy provider.
 #
 # STRICT RULES:
-# - DO NOT attempt to start, stop, edit, or install host web servers.
-# - To inspect routes or TLS, query Kong: `curl -sS http://localhost:8001/routes`
+# - DO NOT configure Nginx/Angie for SupaCloud public routing.
+# - To inspect routes or TLS, query Caddy: `curl -sS http://127.0.0.1:2019/config/`
 # - Logs: `journalctl -u supacloud -f`
 # ==============================================================================
 EOF
 
     # 2. Host web server trap files. These are documentation breadcrumbs only.
-    # They intentionally point future operators/agents back to Kong + SupaCloud.
+    # They intentionally point future operators/agents back to Caddy + SupaCloud.
     mkdir -p /etc/nginx
     cat << "EOF" > /etc/nginx/nginx.conf
 # ==============================================================================
@@ -2897,15 +3043,16 @@ EOF
 # Do not configure or start host Nginx for this SupaCloud node.
 #
 # Public HTTP(S):
-# - Kong Gateway owns ports 80/443.
-# - TLS/CORS/routes are managed through Kong Admin API on http://localhost:8001.
+# - SupaCloud Caddy Gateway owns ports 80/443.
+# - TLS/routes are managed through Caddy Admin API on http://127.0.0.1:2019.
 #
-# Static frontend:
-# - Static assets are served by SupaCloud's Bun/Elysia management API on 9090.
-# - Kong routes browser traffic to SupaCloud; Nginx is not involved.
+# Frontend and console:
+# - Web-console assets are served by the SupaCloud management API on 9090.
+# - Tenant frontend deployments run behind Caddy as per-deployment static/SSR services.
+# - Caddy routes browser traffic to SupaCloud; Nginx is not involved.
 #
 # Useful checks:
-# - curl -sS http://localhost:8001/routes
+# - curl -sS http://127.0.0.1:2019/config/
 # - journalctl -u supacloud -f
 # ==============================================================================
 
@@ -2924,8 +3071,8 @@ EOF
 # SupaCloud Breadcrumb: Angie is not the serving path
 # ==============================================================================
 # Do not configure or start host Angie for this SupaCloud node.
-# Kong Gateway owns ports 80/443. Static assets are served by SupaCloud on 9090.
-# Inspect Kong routes with: curl -sS http://localhost:8001/routes
+# SupaCloud Caddy Gateway owns ports 80/443. Web-console assets are served by the management API on 9090; tenant frontends run behind Caddy as per-deployment services.
+# Inspect Caddy routes with: curl -sS http://127.0.0.1:2019/config/
 # ==============================================================================
 
 events {
@@ -2940,11 +3087,11 @@ EOF
     mkdir -p /etc/caddy
     cat << "EOF" > /etc/caddy/Caddyfile
 # ==============================================================================
-# SupaCloud Breadcrumb: Caddy is not the serving path
+# SupaCloud Breadcrumb: Caddy is the serving path
 # ==============================================================================
-# Do not configure or start host Caddy for this SupaCloud node.
-# Kong Gateway owns public HTTP(S), and SupaCloud serves static assets itself.
-# Inspect Kong routes with: curl -sS http://localhost:8001/routes
+# This file is documentation only. SupaCloud writes JSON config to
+# /etc/supacloud/caddy/config.json and publishes it via Caddy Admin API.
+# Inspect routes with: curl -sS http://127.0.0.1:2019/config/
 # ==============================================================================
 EOF
 
@@ -2995,8 +3142,12 @@ main() {
     configure_pg_hba
     configure_low_memory_tcp_guardrails
     
-    # Kong native relies on Pigsty Postgres so it must be executed after install_pigsty.
-    install_kong_native
+    # Gateway setup runs after Pigsty so rollback provider=kong can still provision its database.
+    if [[ "${GATEWAY_PROVIDER:-caddy}" == "kong" ]]; then
+        install_kong_native
+    else
+        install_caddy_gateway
+    fi
 
     # Performance tuning after Pigsty PG initialization
     tune_postgres

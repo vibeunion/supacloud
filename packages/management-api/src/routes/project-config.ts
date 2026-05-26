@@ -2031,7 +2031,7 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
 },
   )
 
-  // Get Kong certificate automation settings
+  // Get gateway certificate automation settings
   .get(
     "/:ref/gateway/certificate",
     async ({ params, request }) => {
@@ -2076,7 +2076,7 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
     },
   )
 
-  // Issue or renew a certificate with lego, then deploy it into Kong certificates/SNIs.
+  // Issue or renew a certificate with lego, then deploy it into gateway certificates.
   .post(
     "/:ref/gateway/certificate/issue",
     async ({ params, body, request }) => {
@@ -2099,7 +2099,7 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
         auto_renew: t.Optional(t.Boolean()),
         renew: t.Optional(t.Boolean()),
       }),
-      detail: { tags: ["projects"], summary: "Issue or renew a Kong certificate with lego" },
+      detail: { tags: ["projects"], summary: "Issue or renew a gateway certificate with lego" },
     },
   )
 
@@ -2126,11 +2126,11 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
         key: t.String(),
         domains: t.Optional(t.Array(t.String())),
       }),
-      detail: { tags: ["projects"], summary: "Deploy an existing certificate into Kong" },
+      detail: { tags: ["projects"], summary: "Deploy an existing certificate into gateway" },
     },
   )
 
-  // Rebuild ALL tenant Kong configs (propagate CORS / template changes)
+  // Rebuild ALL tenant gateway configs (propagate CORS / template changes)
   .post(
     "/:ref/gateway/rebuild-all",
     async ({ request }) => {
@@ -2146,12 +2146,12 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
       params: t.Object({ ref: t.String() }),
       detail: {
         tags: ["projects"],
-        summary: "Rebuild all tenant Kong configs",
+        summary: "Rebuild all tenant gateway configs",
       },
     },
   )
 
-  // --- Programmable Rate Limiting (Kong Admin API) ---
+  // --- Programmable Rate Limiting (gateway provider) ---
 
   // Get current rate limit config for a project
   .get(
@@ -2239,7 +2239,7 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
         });
       }
 
-      // 2. Apply to Kong
+      // 2. Apply to gateway
       const success = await gatewayService.setCustomRouteRateLimit(
         params.ref,
         body.path,
@@ -2303,7 +2303,7 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
       if (!settings)
         return status(404, { message: "Project not found", code: "404" });
 
-      // 2. Remove from Kong
+      // 2. Remove from gateway
       const success = await gatewayService.removeCustomRouteRateLimit(
         params.ref,
         body.path,

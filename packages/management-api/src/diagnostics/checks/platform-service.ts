@@ -6,20 +6,24 @@ import { $ } from "bun";
 import { hashPayload, statusForHash } from "../hash";
 import { registerCheck } from "../../services/diagnostics.registry";
 import type { DiagnosticCheckResult, DiagnosticRepairResult } from "../../services/diagnostics.types";
+import { config } from "../../config";
 
 // --- Systemd service check ---
 registerCheck({
   id: "platform-service-status",
   name: "Platform Services",
-  description: "Check critical systemd services: supacloud, kong, supacloud-edge-runtime",
+  description: "Check critical systemd services: supacloud, gateway, supacloud-edge-runtime",
   category: "service",
   scope: "platform",
   severity: "critical",
   repairable: false,
   async run(): Promise<DiagnosticCheckResult | null> {
+    const gateway = config.gatewayProvider === "kong"
+      ? { unit: "kong", label: "Kong Gateway" }
+      : { unit: "supacloud-caddy", label: "Caddy Gateway" };
     const services = [
       { unit: "supacloud", label: "Management API" },
-      { unit: "kong", label: "Kong Gateway" },
+      gateway,
       { unit: "supacloud-edge-runtime", label: "Edge Runtime" },
       { unit: "patroni", label: "Patroni (PostgreSQL HA)" },
     ];
@@ -62,7 +66,7 @@ registerCheck({
 registerCheck({
   id: "platform-port-listeners",
   name: "Port Listeners",
-  description: "Verify expected ports are listening: 9090 (API), 8000/8443 (Kong), 9000 (Edge Runtime)",
+  description: "Verify expected ports are listening: 9090 (API), 80/443 (Gateway), 9000 (Edge Runtime)",
   category: "service",
   scope: "platform",
   severity: "critical",
@@ -70,8 +74,8 @@ registerCheck({
   async run(): Promise<DiagnosticCheckResult | null> {
     const ports = [
       { port: 9090, label: "Management API" },
-      { port: 8000, label: "Kong HTTP" },
-      { port: 8443, label: "Kong HTTPS" },
+      { port: 80, label: "Gateway HTTP" },
+      { port: 443, label: "Gateway HTTPS" },
       { port: 9000, label: "Edge Runtime" },
       { port: 5432, label: "PostgreSQL" },
     ];

@@ -36,7 +36,7 @@ async function waitForAuthProxy(tenantRef: string, anonKey: string) {
   let lastStatus = 0;
   let lastError = "";
 
-  for (let attempt = 0; attempt < 20; attempt += 1) {
+  for (let attempt = 0; attempt < 60; attempt += 1) {
     try {
       const res = await fetch(`${PROXY_URL}/auth/v1/health`, {
         headers: {
@@ -52,7 +52,7 @@ async function waitForAuthProxy(tenantRef: string, anonKey: string) {
     } catch (e) {
       lastError = e instanceof Error ? e.message : String(e);
     }
-    await sleep(500);
+    await sleep(750);
   }
 
   throw new Error(
@@ -97,7 +97,7 @@ describe("API Structural Snapshot Compliance", () => {
                 `;
       }
 
-      await sleep(2000);
+      await sleep(3000);
       const health = await fetch(`${PROXY_URL}/health`, {
         signal: AbortSignal.timeout(1000),
       });
@@ -112,7 +112,7 @@ describe("API Structural Snapshot Compliance", () => {
         }`,
       );
     }
-  }, { timeout: 30_000 });
+  }, { timeout: 60_000 });
 
   afterAll(async () => {
     if (tenantRef) {

@@ -32,8 +32,25 @@ const AUTH_FAILURE_WINDOW_MS = Number(process.env.EDGE_AUTH_FAILURE_WINDOW_MS) |
 const AUTH_FAILURE_LIMIT = Number(process.env.EDGE_AUTH_FAILURE_LIMIT) || 8;
 const AUTH_FAILURE_COOLDOWN_MS = Number(process.env.EDGE_AUTH_FAILURE_COOLDOWN_MS) || 60_000;
 const AUTH_FAILURE_MAX_ENTRIES = Number(process.env.EDGE_AUTH_FAILURE_MAX_ENTRIES) || 2_048;
-const FUNCTIONS_BASE_REALPATH = await fs.realpath(FUNCTIONS_BASE_DIR);
-const FUNCTIONS_DIR_REALPATH = await fs.realpath(FUNCTIONS_DIR);
+
+// 自动创建缺失的 functions 目录，避免 CI 和空部署环境下的 ENOENT 崩溃
+async function ensureDir(dir: string): Promise<string> {
+  try {
+    return await fs.realpath(dir);
+  } catch {
+    await fs.mkdir(dir, { recursive: true });
+    return await fs.realpath(dir);
+  }
+}
+
+const FUNCTIONS_BASE_REALPATH = await ensureDir(FUNCTIONS_BASE_DIR);
+if (
+  !isPathInside(FUNCTIONS_DIR, FUNCTIONS_BASE_DIR) &&
+  !isPathInside(FUNCTIONS_DIR, FUNCTIONS_BASE_REALPATH)
+) {
+  throw new Error(`EDGE_FUNCTIONS_DIR must be inside EDGE_FUNCTIONS_BASE_DIR`);
+}
+const FUNCTIONS_DIR_REALPATH = await ensureDir(FUNCTIONS_DIR);
 
 type AuthFailureEntry = {
   count: number;
