@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.25.1](https://github.com/zuohuadong/supacloud/compare/management-api-v0.25.0...management-api-v0.25.1) (2026-05-26)
+
+
+### Bug Fixes
+
+* **edge-runtime:** tolerate missing functions directory ([ec3cbad](https://github.com/zuohuadong/supacloud/commit/ec3cbadf7080903d26c4e843f6d4f2da90ff3cd2))
+
 ## [0.25.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.24.0...management-api-v0.25.0) (2026-05-26)
 
 
