@@ -8,7 +8,7 @@ It does **not** replace [`@supabase/supabase-js`](https://www.npmjs.com/package/
 - task detail and list APIs
 - cancel / retry helpers
 - Realtime subscription with polling fallback
-- queue send / receive / ack / release / fail / retry / delete / list / listFailed / stats / settings helpers
+- Supabase Queues helpers backed by the official `pgmq_public` RPC API, plus SupaCloud management extensions for queue administration and diagnostics
 - project OAuth/OIDC migration and OAuth client management
 - SupAuth provisioning and runtime verification helpers
 
@@ -114,16 +114,22 @@ The current package focuses on:
 - `tasks.retry`
 - `tasks.wait`
 - `tasks.subscribe`
+- `queues.list`
+- `queues.create`
+- `queues.drop`
 - `queue(name).send`
+- `queue(name).sendBatch`
+- `queue(name).read`
 - `queue(name).receive`
+- `queue(name).pop`
+- `queue(name).archive`
 - `queue(name).ack`
-- `queue(name).release`
-- `queue(name).fail`
-- `queue(name).retry`
 - `queue(name).delete`
+- `queue(name).release`
 - `queue(name).list`
-- `queue(name).listFailed`
+- `queue(name).listArchived`
 - `queue(name).stats`
+- `queue(name).purge`
 - `queue(name).getSettings`
 - `queue(name).updateSettings`
 - `auth.oauthServer.getStatus`
@@ -180,22 +186,24 @@ If `secret` is set, verify `X-SupaCloud-Signature: sha256=<hmac>` against the ra
 
 ## Queue Helpers
 
+The core message operations use the official Supabase Queues API exposed through `pgmq_public`:
+
+- `pgmq_public.send(queue_name, message, sleep_seconds)`
+- `pgmq_public.send_batch(queue_name, messages, sleep_seconds)`
+- `pgmq_public.read(queue_name, sleep_seconds, n)`
+- `pgmq_public.pop(queue_name)`
+- `pgmq_public.archive(queue_name, message_id)`
+- `pgmq_public.delete(queue_name, message_id)`
+
+These calls go through your wrapped `supabase` client as `supabase.schema('pgmq_public').rpc(...)`. Queue creation/drop, queue listing, metrics, purge, settings, diagnostics, and visibility-timeout adjustment are SupaCloud management extensions because Supabase's public Queue API intentionally does not expose those as client-side RPCs.
+
 ```ts
 const queue = supacloud.queue("emails");
 
 const message = await queue.send(
   { to: "user@example.com", template: "welcome" },
   {
-    idempotencyKey: "welcome-user-123",
-    delayMs: 10_000,
-    maxAttempts: 5,
-    traceId: "trace-123",
-    correlationId: "signup-123",
-    businessTaskId: "email-job-123",
-    metadata: {
-      source: "signup",
-      billing_subject: "user-123",
-    },
+    sleepSeconds: 10,
   },
 );
 
@@ -203,40 +211,44 @@ const leased = await queue.receive({ visibilityTimeoutSec: 60 });
 if (leased) {
   try {
     await sendEmail(leased.payload);
-    await queue.ack(leased.id, { delivered: true });
+    await queue.ack(leased.msg_id);
   } catch (error) {
-    await queue.release(leased.id, { delayMs: 30_000, error: String(error) });
+    await queue.release(leased.msg_id, { delayMs: 30_000, error: String(error) });
   }
 }
 
 const stats = await queue.stats();
-console.log(stats.inFlight, stats.deadLettered);
+console.log(stats.queue_length, stats.oldest_msg_age_sec);
 ```
 
 Queue API surface:
 
-- `queue.send(payload, options)`: enqueue a message, optionally delayed and idempotent
-- `queue.receive({ visibilityTimeoutSec })`: lease the next message, or return `null`
-- `queue.ack(messageId, result)`: mark the leased message succeeded
-- `queue.release(messageId, { delayMs, error })`: return the message to the queue later
-- `queue.fail(messageId, { error, deadLetter })`: mark failed or dead-lettered
-- `queue.retry(messageId)`: replay a dead-lettered message
-- `queue.delete(messageId)`: cancel/delete a message
-- `queue.list(filters)`: list messages by status, DLQ flag, and limit
-- `queue.listFailed(limit)`: shortcut for DLQ messages
-- `queue.get(messageId)`: read message detail, attempts, and latest logs
-- `queue.stats()`: inspect queue depth and recent success/failure counts
+- `queue.send(payload, { sleepSeconds })`: enqueue one message through `pgmq_public.send`
+- `queue.sendBatch(messages, { sleepSeconds })`: enqueue messages through `pgmq_public.send_batch`
+- `queue.read({ sleepSeconds, n })`: read up to `n` messages through `pgmq_public.read`
+- `queue.receive({ visibilityTimeoutSec })`: compatibility shortcut for `read({ n: 1 })`
+- `queue.pop()`: read and delete the next message through `pgmq_public.pop`
+- `queue.archive(messageId)` / `queue.ack(messageId)`: archive a message through `pgmq_public.archive`
+- `queue.delete(messageId)`: delete a message through `pgmq_public.delete`
+- `queue.release(messageId, { sleepSeconds | delayMs })`: SupaCloud extension for `pgmq.set_vt`
+- `queue.list(filters)`: SupaCloud diagnostic extension for queue/archive table inspection
+- `queue.listArchived(limit)`: SupaCloud diagnostic shortcut for archived messages
+- `queue.stats()`: SupaCloud extension for `pgmq.metrics`
+- `queue.purge()`: SupaCloud extension for `pgmq.purge_queue`
 - `queue.getSettings()`: read concurrency, lease, retry, and rate-limit settings
 - `queue.updateSettings(settings)`: patch queue settings
+- `supacloud.queues.list()`: list queues with `pgmq.list_queues`
+- `supacloud.queues.create(name, { unlogged })`: create a basic or unlogged queue
+- `supacloud.queues.drop(name)`: drop a queue
 
 Queue settings:
 
 - `max_in_flight`: max concurrently leased/running messages for this queue
 - `default_visibility_timeout_sec`: lease timeout used by `receive()`
-- `max_attempts`: default retry budget for new messages
+- `max_attempts`: application-level retry budget for SupaCloud consumers; PGMQ itself stores plain JSON messages
 - `rate_limit_per_minute`: producer enqueue limit
 
-Queue conflicts such as replaying a non-DLQ message are surfaced as `SupaCloudApiError` with `status`, `code`, and `responseBody`, so callers do not need to parse raw `fetch` responses.
+Management extension conflicts are surfaced as `SupaCloudApiError` with `status`, `code`, and `responseBody`, so callers do not need to parse raw `fetch` responses.
 
 ## OAuth/OIDC Helpers
 

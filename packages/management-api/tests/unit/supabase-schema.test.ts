@@ -104,6 +104,44 @@ describe("supabase bootstrap schema", () => {
     }
   });
 
+  test("tenant schema exposes Supabase Queues PGMQ public RPCs", () => {
+    for (const filePath of [
+      "src/db/schemas/supabase.sql",
+      "src/services/tenant-runtime.service.ts",
+      "src/scripts/migrate-tenant-schema.ts",
+    ]) {
+      const source = readRepoFile(filePath);
+
+      expect(source).toContain("CREATE EXTENSION IF NOT EXISTS pgmq");
+      expect(source).toContain("CREATE SCHEMA IF NOT EXISTS pgmq_public");
+      expect(source).toContain("CREATE OR REPLACE FUNCTION pgmq_public.send(queue_name text, message jsonb, sleep_seconds integer DEFAULT 0)");
+      expect(source).toContain("CREATE OR REPLACE FUNCTION pgmq_public.pop(queue_name text)");
+      expect(source).toContain('CREATE OR REPLACE FUNCTION pgmq_public."delete"(queue_name text, message_id bigint)');
+      expect(source).toContain("GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA pgmq_public TO anon, authenticated, service_role");
+    }
+  });
+
+  test("PostgREST tenant config exposes pgmq_public for supabase-js schema rpc", () => {
+    for (const filePath of [
+      "src/services/tenant-runtime.service.ts",
+      "../../scripts/lib/tenant_runtime.sh",
+      "../../docker/self-host/docker-compose.yml",
+      "../../docker/self-host/.env.example",
+      "../../docker/self-host/init-env.py",
+    ]) {
+      const source = readRepoFile(filePath);
+      expect(source).toContain("pgmq_public");
+    }
+  });
+
+  test("self-host postgres image installs and bootstraps PGMQ", () => {
+    const dockerfile = readRepoFile("../../docker/self-host/postgres/Dockerfile");
+    const bootstrap = readRepoFile("../../docker/self-host/postgres/initdb/01-bootstrap-extensions.sql");
+
+    expect(dockerfile).toContain("postgresql-18-pgmq");
+    expect(bootstrap).toContain("'pgmq'");
+  });
+
   test("tenant schema migration creates realtime schema before realtime objects", () => {
     for (const filePath of [
       "src/services/tenant-runtime.service.ts",

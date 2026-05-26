@@ -17,6 +17,7 @@ BEGIN
     'pg_net',
     'pg_graphql',
     'pg_jsonschema',
+    'pgmq',
     'wrappers',
     'pgjwt',
     'pgsodium',
