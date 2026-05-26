@@ -10,6 +10,7 @@ It does **not** replace [`@supabase/supabase-js`](https://www.npmjs.com/package/
 - Realtime subscription with polling fallback
 - queue send / receive / ack / release / fail / retry / delete / list / listFailed / stats / settings helpers
 - project OAuth/OIDC migration and OAuth client management
+- SupAuth provisioning and runtime verification helpers
 
 ## Install
 
@@ -45,6 +46,51 @@ const task = await supacloud.tasks.submit("aorist-ai/generate/crop", {
 const finalState = await task.wait();
 console.log(finalState.status);
 ```
+
+## SupAuth Management
+
+`supacloud.supauth` is a management-plane helper for provisioning and verifying a SupAuth/SupaOAuth runtime on SupaCloud. It is intended for trusted server-side tools, CI jobs, or admin backends that can call the SupaCloud Management API.
+
+```ts
+const supacloud = createSupaCloudClient({
+  supabase,
+  managementApiUrl: "https://admin.example.com",
+  projectRef: "abcd1234",
+  getAccessToken: () => process.env.SUPACLOUD_MANAGEMENT_TOKEN ?? null,
+});
+
+await supacloud.supauth.provision({
+  authDomain: "auth.example.com",
+  apiDomain: "api.example.com",
+  adminMode: "sso",
+  storageBuckets: [{ id: "avatars", public: true }],
+});
+
+await supacloud.supauth.reconcile({ dryRun: false });
+
+const health = await supacloud.supauth.verify();
+if (!health.healthy) {
+  throw new Error("SupAuth runtime is not healthy");
+}
+
+const config = await supacloud.supauth.getClientConfig();
+console.log(config.authUrl);
+```
+
+The helper maps to these SupaCloud Management API routes:
+
+- `POST /v1/projects/:projectRef/supauth/provision`
+- `POST /v1/projects/:projectRef/supauth/reconcile`
+- `POST /v1/projects/:projectRef/supauth/rollback`
+- `GET /v1/projects/:projectRef/supauth/client-config`
+- `GET /v1/projects/:projectRef/supauth/verify`
+
+Boundary:
+
+- Use `@supacloud/js` for SupaCloud-owned infrastructure orchestration: GoTrue env injection, restart/reconcile, Kong route setup, runtime health checks, and public client config discovery.
+- Use `@supabase/supabase-js` for normal application runtime calls: auth session, database, storage, realtime, and edge functions.
+- Use the SupaOAuth product SDK or Management API for SupaOAuth-owned resources: applications, connectors, organizations, roles, permissions, audit logs, and webhooks.
+- Do not expose SupaCloud Management API credentials in browser code.
 
 ## Design
 
@@ -86,6 +132,11 @@ The current package focuses on:
 - `auth.oauthServer.getJwks`
 - `auth.oauthServer.buildAuthorizeUrl`
 - `auth.oauthClients.list/create/get/update/delete/regenerateSecret`
+- `supauth.provision`
+- `supauth.reconcile`
+- `supauth.rollback`
+- `supauth.getClientConfig`
+- `supauth.verify`
 
 ## Status Subscription
 

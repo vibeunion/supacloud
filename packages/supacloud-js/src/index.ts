@@ -150,6 +150,87 @@ export type SupaCloudQueueSettings = {
 
 export type SupaCloudQueueSettingsUpdate = Partial<SupaCloudQueueSettings>;
 
+export type SupaCloudSupAuthAdminMode = "sso" | "token" | "auto";
+
+export type SupaCloudSupAuthStorageBucket = {
+  id: string;
+  public?: boolean;
+  fileSizeLimit?: number;
+  allowedMimeTypes?: string[];
+};
+
+export type SupaCloudSupAuthProvisionOptions = {
+  authDomain?: string;
+  apiDomain?: string;
+  adminMode?: SupaCloudSupAuthAdminMode;
+  adminSsoClientId?: string;
+  runtimeUrl?: string;
+  supaOAuthUrl?: string;
+  storageBuckets?: SupaCloudSupAuthStorageBucket[];
+  metadata?: Record<string, unknown>;
+};
+
+export type SupaCloudSupAuthReconcileOptions = {
+  dryRun?: boolean;
+  force?: boolean;
+};
+
+export type SupaCloudSupAuthStepResult = {
+  step: string;
+  status: "pending" | "running" | "succeeded" | "failed" | "skipped" | string;
+  message?: string;
+  details?: Record<string, unknown>;
+};
+
+export type SupaCloudSupAuthProvisionResult = {
+  projectRef: string;
+  status: "pending" | "running" | "succeeded" | "failed" | string;
+  steps?: SupaCloudSupAuthStepResult[];
+  raw?: unknown;
+};
+
+export type SupaCloudSupAuthReconcileResult = {
+  projectRef: string;
+  changed: boolean;
+  dryRun?: boolean;
+  steps?: SupaCloudSupAuthStepResult[];
+  raw?: unknown;
+};
+
+export type SupaCloudSupAuthRollbackResult = {
+  projectRef: string;
+  status: "succeeded" | "failed" | string;
+  steps?: SupaCloudSupAuthStepResult[];
+  raw?: unknown;
+};
+
+export type SupaCloudSupAuthClientConfig = {
+  projectRef: string;
+  supabaseUrl: string;
+  anonKey?: string | null;
+  authUrl: string;
+  restUrl: string;
+  storageUrl: string;
+  realtimeUrl: string;
+  functionsUrl: string;
+  issuer?: string | null;
+  jwksUrl?: string | null;
+  metadata?: Record<string, unknown>;
+};
+
+export type SupaCloudSupAuthVerificationCheck = {
+  name: string;
+  status: "pass" | "fail" | "warn" | string;
+  message?: string;
+  details?: Record<string, unknown>;
+};
+
+export type SupaCloudSupAuthVerification = {
+  projectRef: string;
+  healthy: boolean;
+  checks: SupaCloudSupAuthVerificationCheck[];
+};
+
 export type SupaCloudTaskWaitOptions = {
   intervalMs?: number;
   signal?: AbortSignal;
@@ -952,6 +1033,53 @@ class SupaCloudOAuthClientsClient<TClient extends SupabaseClient = SupabaseClien
   }
 }
 
+class SupaCloudSupAuthClient<TClient extends SupabaseClient = SupabaseClient> extends SupaCloudManagementClient<TClient> {
+  private get basePath(): string {
+    return `/v1/projects/${this.options.projectRef}/supauth`;
+  }
+
+  async provision(
+    options: SupaCloudSupAuthProvisionOptions = {},
+  ): Promise<SupaCloudSupAuthProvisionResult> {
+    return this.request<SupaCloudSupAuthProvisionResult>(
+      `${this.basePath}/provision`,
+      "POST",
+      options,
+    );
+  }
+
+  async reconcile(
+    options: SupaCloudSupAuthReconcileOptions = {},
+  ): Promise<SupaCloudSupAuthReconcileResult> {
+    return this.request<SupaCloudSupAuthReconcileResult>(
+      `${this.basePath}/reconcile`,
+      "POST",
+      options,
+    );
+  }
+
+  async rollback(): Promise<SupaCloudSupAuthRollbackResult> {
+    return this.request<SupaCloudSupAuthRollbackResult>(
+      `${this.basePath}/rollback`,
+      "POST",
+    );
+  }
+
+  async getClientConfig(): Promise<SupaCloudSupAuthClientConfig> {
+    return this.request<SupaCloudSupAuthClientConfig>(
+      `${this.basePath}/client-config`,
+      "GET",
+    );
+  }
+
+  async verify(): Promise<SupaCloudSupAuthVerification> {
+    return this.request<SupaCloudSupAuthVerification>(
+      `${this.basePath}/verify`,
+      "GET",
+    );
+  }
+}
+
 export function createSupaCloudClient<TClient extends SupabaseClient = SupabaseClient>(
   options: SupaCloudClientOptions<TClient>,
 ) {
@@ -967,6 +1095,7 @@ export function createSupaCloudClient<TClient extends SupabaseClient = SupabaseC
   const tasks = new SupaCloudTasksClient(normalized);
   const oauthServer = new SupaCloudOAuthServerClient(normalized);
   const oauthClients = new SupaCloudOAuthClientsClient(normalized);
+  const supauth = new SupaCloudSupAuthClient(normalized);
 
   return {
     supabase: options.supabase,
@@ -977,6 +1106,7 @@ export function createSupaCloudClient<TClient extends SupabaseClient = SupabaseC
       oauthClients,
     },
     tasks,
+    supauth,
     queue: (name: string) => new SupaCloudQueueClient(normalized, name),
     functions: {
       invokeBackground: (

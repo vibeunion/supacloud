@@ -416,6 +416,93 @@ describe("@supacloud/js", () => {
     expect(calls.some((call) => call.url.endsWith("/auth/oauth-clients/client_1"))).toBe(true);
   });
 
+  test("supauth builds management-api provisioning requests with bearer auth", async () => {
+    const { supabase } = createFakeSupabase();
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+
+    globalThis.fetch = mock((input: string | URL | Request, init?: RequestInit) => {
+      const url =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : input.url;
+      calls.push({ url, init });
+
+      if (url.endsWith("/client-config")) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              projectRef: "proj_1",
+              supabaseUrl: "https://api.example.com",
+              authUrl: "https://api.example.com/auth/v1",
+              restUrl: "https://api.example.com/rest/v1",
+              storageUrl: "https://api.example.com/storage/v1",
+              realtimeUrl: "wss://api.example.com/realtime/v1",
+              functionsUrl: "https://api.example.com/functions/v1",
+            }),
+            { headers: { "content-type": "application/json" } },
+          ),
+        );
+      }
+
+      if (url.endsWith("/verify")) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              projectRef: "proj_1",
+              healthy: true,
+              checks: [{ name: "gotrue", status: "pass" }],
+            }),
+            { headers: { "content-type": "application/json" } },
+          ),
+        );
+      }
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({ projectRef: "proj_1", status: "succeeded", changed: true }),
+          { headers: { "content-type": "application/json" } },
+        ),
+      );
+    }) as typeof fetch;
+
+    const client = createSupaCloudClient({
+      supabase: supabase as never,
+      managementApiUrl: "https://admin.example.com/",
+      projectRef: "proj_1",
+    });
+
+    await client.supauth.provision({
+      authDomain: "auth.example.com",
+      apiDomain: "api.example.com",
+      adminMode: "sso",
+      storageBuckets: [{ id: "avatars", public: true }],
+    });
+    await client.supauth.reconcile({ dryRun: true });
+    await client.supauth.rollback();
+    await client.supauth.getClientConfig();
+    await client.supauth.verify();
+
+    expect(calls[0]?.url).toBe("https://admin.example.com/v1/projects/proj_1/supauth/provision");
+    expect(calls[0]?.init?.method).toBe("POST");
+    expect(JSON.parse(String(calls[0]?.init?.body))).toMatchObject({
+      authDomain: "auth.example.com",
+      apiDomain: "api.example.com",
+      adminMode: "sso",
+      storageBuckets: [{ id: "avatars", public: true }],
+    });
+    expect(calls[1]?.url).toBe("https://admin.example.com/v1/projects/proj_1/supauth/reconcile");
+    expect(JSON.parse(String(calls[1]?.init?.body))).toMatchObject({ dryRun: true });
+    expect(calls[2]?.url).toBe("https://admin.example.com/v1/projects/proj_1/supauth/rollback");
+    expect(calls[2]?.init?.method).toBe("POST");
+    expect(calls[2]?.init?.body).toBe(undefined);
+    expect(calls[3]?.url).toBe("https://admin.example.com/v1/projects/proj_1/supauth/client-config");
+    expect(calls[3]?.init?.method).toBe("GET");
+    expect(calls[4]?.url).toBe("https://admin.example.com/v1/projects/proj_1/supauth/verify");
+    expect(new Headers(calls[0]?.init?.headers).get("authorization")).toBe("Bearer token-123");
+  });
+
   test("wait polls until a terminal task status is reached", async () => {
     const { supabase } = createFakeSupabase();
     const client = createSupaCloudClient({
