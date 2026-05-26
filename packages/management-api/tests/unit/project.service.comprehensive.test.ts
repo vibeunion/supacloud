@@ -361,7 +361,7 @@ describe("ProjectService - Comprehensive", () => {
     expect(result).toBe(true);
   });
 
-  test("restartProject reconciles Kong routes when tenant ports are known", async () => {
+  test("restartProject reconciles gateway routes when tenant ports are known", async () => {
     projectRepositoryMock.findByRef.mockResolvedValueOnce({
       ...mockProject,
       config: {
@@ -425,7 +425,7 @@ describe("ProjectService - Comprehensive", () => {
     expect(tenantRuntimeServiceMock.restartRuntime).toHaveBeenCalledWith("test123abc");
   });
 
-  test("updateProjectSettings reconciles Kong routes for custom domain changes", async () => {
+  test("updateProjectSettings reconciles gateway routes for custom domain changes", async () => {
     projectRepositoryMock.findByRef.mockResolvedValueOnce({
       ...mockProject,
       config: {

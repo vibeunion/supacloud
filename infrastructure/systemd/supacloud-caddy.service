@@ -1,0 +1,19 @@
+[Unit]
+Description=SupaCloud Caddy Edge Gateway
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+User=root
+Group=root
+EnvironmentFile=-/etc/supabase/management-api.env
+ExecStart=/usr/local/bin/supacloud-caddy run --config /etc/supacloud/caddy/config.json
+ExecReload=/usr/local/bin/supacloud-caddy reload --config /etc/supacloud/caddy/config.json --force
+TimeoutStopSec=5s
+LimitNOFILE=1048576
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target

@@ -230,7 +230,7 @@ async function updatePigstyConfig(config: PigstyConfig, ymlPath: string) {
 
             yml = yml.replace(/supa.pigsty/g, config.publicDomain); // Generic placeholder replacement
         } else {
-            logger.info("[PigstyManager] Skipping Pigsty app domain/certbot patch; Kong/lego owns public HTTP(S).");
+            logger.info("[PigstyManager] Skipping Pigsty app domain/certbot patch; SupaCloud Caddy owns public HTTP(S).");
         }
 
         // Passwords and security certificates

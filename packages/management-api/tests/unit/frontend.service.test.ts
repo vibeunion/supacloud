@@ -12,8 +12,9 @@ beforeEach(() => {
   globalThis.fetch = mock(() => Promise.resolve(new Response(JSON.stringify({ data: [] })))) as unknown as typeof fetch;
 });
 
-afterEach(() => {
+afterEach(async () => {
   globalThis.fetch = originalFetch;
+  await rm("/tmp/supacloud-caddy-test", { recursive: true, force: true });
 });
 
 describe("FrontendService DNS records", () => {
@@ -83,9 +84,9 @@ describe("FrontendService static binary resolution", () => {
   });
 });
 
-describe("FrontendService Kong routing", () => {
-  test("disables buffering on frontend root routes", async () => {
-    const calls: Array<{ url: string; method: string; body: Record<string, unknown> | null }> = [];
+describe("FrontendService gateway routing", () => {
+  test("registers frontend root route through the gateway provider", async () => {
+    const calls: Array<{ url: string; method: string; body: any }> = [];
 
     globalThis.fetch = mock((input: string | URL | Request, init?: RequestInit) => {
       const url = typeof input === "string"
@@ -94,10 +95,10 @@ describe("FrontendService Kong routing", () => {
           ? input.toString()
           : input.url;
       const method = init?.method || "GET";
-      let body: Record<string, unknown> | null = null;
+      let body: any = null;
       if (typeof init?.body === "string" && init.body.length > 0) {
         try {
-          body = JSON.parse(init.body) as Record<string, unknown>;
+          body = JSON.parse(init.body);
         } catch {
           body = null;
         }
@@ -125,20 +126,16 @@ describe("FrontendService Kong routing", () => {
       deployment_url: "https://site.example.com",
     };
 
-    await service.configureKongRoute(deployment, "/tmp/build", false);
+    await service.configureGatewayRoute(deployment, "/tmp/build", false);
 
-    const routeCall = calls.find(
-      (call) => call.method === "PUT" && call.url.includes("/routes/route-frontend-proj123-0000002a")
-    );
+    const loadCall = calls.filter((call) => call.method === "POST" && call.url.endsWith("/load")).at(-1);
+    const routes = loadCall?.body?.apps?.http?.servers?.supacloud?.routes ?? [];
+    const route = routes.find((item: any) => item["@id"] === "route-frontend-proj123-0000002a");
 
-    expect(routeCall).toBeDefined();
-    expect(routeCall?.body).toMatchObject({
-      paths: ["/"],
-      hosts: ["site.example.com", "www.example.com"],
-      strip_path: false,
-      preserve_host: true,
-      request_buffering: false,
-      response_buffering: false,
-    });
+    expect(route).toBeDefined();
+    expect(route?.match?.[0]?.path).toEqual(["/*"]);
+    expect(route?.match?.[0]?.host).toEqual(["site.example.com", "www.example.com"]);
+    expect(route?.handle?.at(-1)?.flush_interval).toBe(-1);
+    expect(route?.handle?.at(-1)?.upstreams?.[0]?.dial).toBe("127.0.0.1:30042");
   });
 });

@@ -5,10 +5,10 @@
  * - FrontendDomainService — custom domains, deploy tokens, env vars, git config
  * - FrontendRecordService — deployment records (history/audit trail)
  *
- * This file handles: CRUD, build, Kong routing, process management
+ * This file handles: CRUD, build, gateway routing, process management
  *
  * Deployment flow (blue-green):
- *   build → start process → wait for /healthz readiness → switch Kong route → done
+ *   build → start process → wait for /healthz readiness → switch gateway route → done
  *   If readiness fails: stop process, do NOT switch route, report failure
  */
 import { $ } from "bun";
@@ -79,7 +79,7 @@ export class FrontendService {
     this.domainService = new FrontendDomainService(
       baseDir,
       this.getDeployment.bind(this),
-      this.configureKongRoute.bind(this),
+      this.configureGatewayRoute.bind(this),
     );
     this.recordService = new FrontendRecordService(baseDir);
   }
@@ -226,7 +226,7 @@ export class FrontendService {
       const deployment = await this.getDeployment(projectRef, deploymentId);
       if (deployment) {
         await this.stopProcess(projectRef, deploymentId);
-        await this.removeKongRoute(deployment);
+        await this.removeGatewayRoute(deployment);
       }
       await $`rm -rf ${deploymentDir}`.quiet();
       return true;
@@ -367,7 +367,7 @@ export class FrontendService {
   }
 
   /**
-   * Blue-green build: build → start process → readiness gate → switch Kong route
+   * Blue-green build: build → start process → readiness gate → switch gateway route
    * If readiness fails, stop process and do NOT switch route.
    */
   private async buildDeployment(
@@ -420,17 +420,17 @@ export class FrontendService {
       // Blue-green: start process FIRST, but do NOT route traffic yet
       const port = await this.startProcess(projectRef, deploymentId, deployment, buildDir, defaults.is_ssr);
 
-      // Readiness gate: wait for /healthz before switching Kong route
+      // Readiness gate: wait for /healthz before switching gateway route
       const ready = await this.waitForReadiness(port);
       if (!ready) {
-        // Rollback: stop the process, leave Kong pointing at old state (or nothing)
+        // Rollback: stop the process, leave the gateway pointing at old state (or nothing)
         logger.error(`[FrontendService] Readiness failed for ${projectRef}/${deploymentId}, stopping process`);
         await this.stopProcess(projectRef, deploymentId);
         throw new Error(`Frontend process failed readiness check on port ${port} within ${READINESS_TIMEOUT_MS}ms`);
       }
 
-      // Process is healthy — NOW switch Kong route
-      await this.configureKongRoute(deployment, buildDir, defaults.is_ssr);
+      // Process is healthy — NOW switch gateway route
+      await this.configureGatewayRoute(deployment, buildDir, defaults.is_ssr);
 
       await this.updateDeployment(projectRef, deploymentId, {
         status: "success",
@@ -456,47 +456,26 @@ export class FrontendService {
     }
   }
 
-  // ── Kong (Web Server) Config ─────────────────────────────────────
+  // ── Gateway (Web Server) Config ───────────────────────────────────
 
-  async configureKongRoute(deployment: FrontendDeployment, buildDir: string, isSSR: boolean): Promise<void> {
+  async configureGatewayRoute(deployment: FrontendDeployment, buildDir: string, isSSR: boolean): Promise<void> {
     const port = 30000 + parseInt(deployment.id, 16) % 10000;
-    
     const hosts = [deployment.domain, ...deployment.custom_domains];
-    const serviceName = `svc-frontend-${deployment.project_ref}-${deployment.id}`;
-    const routeName = `route-frontend-${deployment.project_ref}-${deployment.id}`;
 
     const { gatewayService } = await import("./gateway.service");
-    await gatewayService.addCorsOriginsForHosts(deployment.project_ref, hosts);
-
-    await gatewayService['kongRequest'](`/services/${serviceName}`, 'PUT', {
-        name: serviceName,
-        url: `http://127.0.0.1:${port}`,
-        connect_timeout: 5000,
-        read_timeout: 60000,
-        write_timeout: 60000
-    });
-
-    await gatewayService['kongRequest'](`/routes/${routeName}`, 'PUT', {
-        name: routeName,
-        service: { name: serviceName },
-        paths: ["/"],
-        hosts: hosts.length > 0 ? hosts : undefined,
-        strip_path: false,
-        preserve_host: true,
-        request_buffering: false,
-        response_buffering: false,
+    await gatewayService.configureFrontendRoute({
+      projectRef: deployment.project_ref,
+      deploymentId: deployment.id,
+      hosts,
+      port,
     });
   }
 
-  private async removeKongRoute(deployment: FrontendDeployment): Promise<void> {
-    const serviceName = `svc-frontend-${deployment.project_ref}-${deployment.id}`;
-    const routeName = `route-frontend-${deployment.project_ref}-${deployment.id}`;
-    
+  private async removeGatewayRoute(deployment: FrontendDeployment): Promise<void> {
     const { gatewayService } = await import("./gateway.service");
 
     try {
-        await gatewayService['kongRequest'](`/routes/${routeName}`, 'DELETE');
-        await gatewayService['kongRequest'](`/services/${serviceName}`, 'DELETE');
+        await gatewayService.removeFrontendRoute(deployment.project_ref, deployment.id);
     } catch (e: unknown) { logger.debug("suppressed error removing route", { error: String(e) }); }
   }
 

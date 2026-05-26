@@ -55,11 +55,10 @@ fi
 # Check Management API
 check_service "Management API (9090)" "curl -sf http://localhost:9090/health"
 
-# Check Kong API Gateway
-check_service "Kong Gateway (8000)" "curl -sf http://localhost:8000"
-
-# Check Kong Admin API
-check_service "Kong Admin API (8001)" "curl -sf http://localhost:8001/status"
+# Check Caddy Gateway
+check_service "Caddy Gateway HTTP (80)" "ss -ltn | grep -q ':80 '"
+check_service "Caddy Gateway HTTPS (443)" "ss -ltn | grep -q ':443 '"
+check_service "Caddy Admin API (2019)" "curl -sf http://127.0.0.1:2019/config/ >/dev/null"
 
 # Check SupaCloud service runtimes
 check_service "Image Service (9010)" "ss -ltn | grep -q ':9010 '"

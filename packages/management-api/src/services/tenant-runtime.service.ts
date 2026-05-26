@@ -2274,7 +2274,11 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
                 { id: "gotrue", name: "GoTrue", unit: `supacloud-gotrue@${ref}` },
                 { id: "realtime", name: "Realtime", unit: "supacloud-realtime" },
                 { id: "storage", name: "Storage", unit: "supacloud-storage" },
-                { id: "kong", name: "Kong", unit: "kong" },
+                {
+                    id: config.gatewayProvider === "kong" ? "kong" : "caddy",
+                    name: config.gatewayProvider === "kong" ? "Kong" : "Caddy",
+                    unit: config.gatewayProvider === "kong" ? "kong" : "supacloud-caddy",
+                },
             ];
 
         const [postgrest, dbHealth, storageHealth, ...otherSystemResults] = await Promise.allSettled([
@@ -2313,8 +2317,8 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 
         const postgresql = this.systemServiceEntry(ref, "postgresql", "PostgreSQL", dbStatus);
         const storage = this.systemServiceEntry(ref, "storage", "Storage", storageStatus);
-        const [gotrue, realtime, kong] = otherEntries;
-        return [postgresql, postgrestEntry, gotrue, realtime, storage, kong];
+        const [gotrue, realtime, gateway] = otherEntries;
+        return [postgresql, postgrestEntry, gotrue, realtime, storage, gateway];
     }
 
     public async restartRuntime(ref: string): Promise<RuntimeStatus> {

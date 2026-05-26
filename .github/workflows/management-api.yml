@@ -445,9 +445,15 @@ jobs:
         with:
           bun-version: latest
 
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: stable
+
       - name: Show runtime versions
         run: |
           node --version
+          go version
           bun --version
 
       - name: Install dependencies
@@ -487,6 +493,12 @@ jobs:
           bun run build:macos
           mv supacloud-edge-runtime-macos-amd64 dist/
           mv supacloud-edge-runtime-macos-arm64 dist/
+
+      - name: Install xcaddy
+        run: go install github.com/caddyserver/xcaddy/cmd/xcaddy@latest
+
+      - name: Build Caddy edge binaries
+        run: OUT_DIR=packages/management-api/dist bash scripts/build_supacloud_caddy.sh
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v7
