@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.26.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.25.1...management-api-v0.26.0) (2026-05-26)
+
+
+### Features
+
+* add caddy frontend optimization pipeline ([608c164](https://github.com/zuohuadong/supacloud/commit/608c164658f78a95f77defc5a58ccb40016afddd))
+* add caddy frontend optimization pipeline ([71c5f2f](https://github.com/zuohuadong/supacloud/commit/71c5f2f933acbbfa6347bfd815d6da280a57c5eb))
+
 ## [0.25.1](https://github.com/zuohuadong/supacloud/compare/management-api-v0.25.0...management-api-v0.25.1) (2026-05-26)
 
 

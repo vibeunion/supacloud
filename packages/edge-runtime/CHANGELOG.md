@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.0](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.7.2...edge-runtime-v0.8.0) (2026-05-26)
+
+
+### Features
+
+* add caddy frontend optimization pipeline ([71c5f2f](https://github.com/zuohuadong/supacloud/commit/71c5f2f933acbbfa6347bfd815d6da280a57c5eb))
+
 ## [0.7.2](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.7.1...edge-runtime-v0.7.2) (2026-05-26)
 
 
