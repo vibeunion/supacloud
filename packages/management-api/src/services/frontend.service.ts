@@ -482,7 +482,9 @@ export class FrontendService {
         paths: ["/"],
         hosts: hosts.length > 0 ? hosts : undefined,
         strip_path: false,
-        preserve_host: true
+        preserve_host: true,
+        request_buffering: false,
+        response_buffering: false,
     });
   }
 

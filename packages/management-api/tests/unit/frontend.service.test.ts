@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { config, resolveSupacloudBinaryPath } from "../../src/config";
 import { FrontendService } from "../../src/services/frontend.service";
+import type { FrontendDeployment } from "../../src/types/frontend";
 
 const originalFetch = globalThis.fetch;
 
@@ -79,5 +80,65 @@ describe("FrontendService static binary resolution", () => {
 
   test("keeps the legacy install path for source runs through bun", () => {
     expect(resolveSupacloudBinaryPath("", "/root/.bun/bin/bun")).toBe("/opt/supacloud/supacloud");
+  });
+});
+
+describe("FrontendService Kong routing", () => {
+  test("disables buffering on frontend root routes", async () => {
+    const calls: Array<{ url: string; method: string; body: Record<string, unknown> | null }> = [];
+
+    globalThis.fetch = mock((input: string | URL | Request, init?: RequestInit) => {
+      const url = typeof input === "string"
+        ? input
+        : input instanceof URL
+          ? input.toString()
+          : input.url;
+      const method = init?.method || "GET";
+      let body: Record<string, unknown> | null = null;
+      if (typeof init?.body === "string" && init.body.length > 0) {
+        try {
+          body = JSON.parse(init.body) as Record<string, unknown>;
+        } catch {
+          body = null;
+        }
+      }
+      calls.push({ url, method, body });
+      return Promise.resolve(new Response(JSON.stringify({ data: [] })));
+    }) as unknown as typeof fetch;
+
+    const service = new FrontendService("/tmp/supacloud-frontend-test");
+    const deployment: FrontendDeployment = {
+      id: "0000002a",
+      project_ref: "proj123",
+      name: "site",
+      framework: "static",
+      domain: "site.example.com",
+      custom_domains: ["www.example.com"],
+      build_command: "",
+      output_dir: ".",
+      install_command: "",
+      node_version: "20",
+      env_vars: {},
+      status: "pending",
+      created_at: "2026-05-26T00:00:00.000Z",
+      updated_at: "2026-05-26T00:00:00.000Z",
+      deployment_url: "https://site.example.com",
+    };
+
+    await service.configureKongRoute(deployment, "/tmp/build", false);
+
+    const routeCall = calls.find(
+      (call) => call.method === "PUT" && call.url.includes("/routes/route-frontend-proj123-0000002a")
+    );
+
+    expect(routeCall).toBeDefined();
+    expect(routeCall?.body).toMatchObject({
+      paths: ["/"],
+      hosts: ["site.example.com", "www.example.com"],
+      strip_path: false,
+      preserve_host: true,
+      request_buffering: false,
+      response_buffering: false,
+    });
   });
 });
