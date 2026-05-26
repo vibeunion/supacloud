@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.25.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.24.0...management-api-v0.25.0) (2026-05-26)
+
+
+### Features
+
+* **gateway:** replace kong default edge with caddy ([6bdcfaf](https://github.com/zuohuadong/supacloud/commit/6bdcfafc1d2784616be476c0d47d7030cc809ee7))
+
 ## [0.24.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.23.0...management-api-v0.24.0) (2026-05-26)
 
 
