@@ -175,6 +175,8 @@ docker compose up -d --build
 
 The compose stack is isolated under [`docker/self-host`](/Volumes/Data/workspace/supacloud/docker/self-host) and ships a PostgreSQL 18 image with common extensions preinstalled.
 
+For TrueNAS SCALE `Custom App` deployment of the published PostgreSQL image, see [`docker/self-host/TRUENAS.md`](./docker/self-host/TRUENAS.md).
+
 **Available CLI Options:**
 | Option | Description | Example |
 |--------|-------------|---------|

@@ -68,6 +68,10 @@ Endpoints:
 - API gateway: `${PUBLIC_URL}` (default `http://localhost:8000`)
 - Management API / Studio shell: `${STUDIO_URL}` (default `http://localhost:9090`)
 
+## TrueNAS SCALE
+
+For TrueNAS SCALE `Custom App` deployment of the published PostgreSQL image, see [`TRUENAS.md`](./TRUENAS.md).
+
 ## Optional FerretDB profile
 
 FerretDB is disabled by default. To expose the MongoDB wire protocol on top of the same PostgreSQL container and `postgres-data` volume, enable it before the first database initialization:
