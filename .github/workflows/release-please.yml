@@ -19,7 +19,6 @@ permissions:
   issues: write
   id-token: write
   actions: write
-  packages: write
 
 jobs:
   release-please:
@@ -110,16 +109,6 @@ jobs:
           RELEASE_TAG: ${{ needs.release-please.outputs.management_api_tag_name }}
         run: gh release upload "$RELEASE_TAG" release-assets/* --clobber
 
-
-  publish-docker-postgres:
-    needs: release-please
-    if: ${{ needs.release-please.outputs.management_api_released == 'true' }}
-    uses: ./.github/workflows/publish-docker-postgres.yml
-    with:
-      tag_version: ${{ needs.release-please.outputs.management_api_tag_name }}
-    permissions:
-      contents: read
-      packages: write
 
   publish-npm:
     needs: release-please

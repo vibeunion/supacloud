@@ -1,17 +1,15 @@
 name: Publish Docker Postgres
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - "docker/self-host/postgres/**"
   workflow_dispatch:
-    inputs:
-      tag_version:
-        description: "Version (e.g. 0.23.0) or full tag (e.g. management-api-v0.23.0). Leave empty to use latest release."
-        required: false
-        type: string
-  workflow_call:
-    inputs:
-      tag_version:
-        required: true
-        type: string
+
+concurrency:
+  group: publish-docker-postgres
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -24,26 +22,6 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
 
-      - name: Resolve version
-        id: version
-        run: |
-          raw="${{ inputs.tag_version }}"
-          if [[ -n "$raw" ]]; then
-            version="${raw#management-api-v}"
-          else
-            LATEST=$(gh release list --repo ${{ github.repository }} --limit 50 \
-              | grep -oP 'management-api-v\K[0-9]+\.[0-9]+\.[0-9]+' | head -1)
-            if [[ -z "$LATEST" ]]; then
-              echo "ERROR: No management-api release found" >&2
-              exit 1
-            fi
-            version="$LATEST"
-          fi
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "Building postgres image: $version"
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -54,13 +32,20 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Docker metadata
+        id: meta
+        run: |
+          SHA=$(git rev-parse --short=7 HEAD)
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "Building postgres image: sha-$SHA, latest"
+
       - name: Build and push postgres image
         uses: docker/build-push-action@v6
         with:
           context: docker/self-host/postgres
           push: true
           tags: |
-            ghcr.io/${{ github.repository }}/postgres:${{ steps.version.outputs.version }}
+            ghcr.io/${{ github.repository }}/postgres:sha-${{ steps.meta.outputs.sha }}
             ghcr.io/${{ github.repository }}/postgres:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
