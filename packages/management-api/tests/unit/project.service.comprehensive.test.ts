@@ -66,6 +66,9 @@ const tenantRuntimeServiceMock = {
   pauseProjectRuntime: mock(() => Promise.resolve()),
   resumeProjectRuntime: mock(() => Promise.resolve({ status: "running" })),
   restartRuntime: mock(() => Promise.resolve({ status: "running" })),
+  getProjectServiceStatuses: mock(() => Promise.resolve([
+    { id: "storage", name: "storage", status: "ACTIVE_HEALTHY", healthy: true },
+  ])),
 };
 
 mock.module("../../src/db", () => ({

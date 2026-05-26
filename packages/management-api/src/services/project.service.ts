@@ -186,6 +186,28 @@ export class ProjectService {
     }
   }
 
+  private async checkProjectStorageHealth(ref: string): Promise<boolean> {
+    try {
+      const { tenantRuntimeService } = await import("./tenant-runtime.service");
+      const services = await tenantRuntimeService.getProjectServiceStatuses(ref, "studio");
+      const storage = services.find((service) => service.id === "storage" || service.name.toLowerCase() === "storage");
+      if (storage?.healthy || storage?.status === "ACTIVE_HEALTHY") return true;
+    } catch {
+      // 忽略租户服务状态探测异常，继续使用本地探测兜底。
+    }
+
+    try {
+      const result = await $`systemctl is-active ${`supacloud-storage@${ref}`}`
+        .nothrow()
+        .quiet();
+      if (result.exitCode === 0) return true;
+    } catch {
+      // 忽略 systemd 探测异常，继续使用共享存储探测兜底。
+    }
+
+    return await this.checkStorageHealth();
+  }
+
   // Get all projects
   async listProjects(): Promise<ProjectResponse[]> {
     const projects = await projectRepository.findAll();
@@ -525,7 +547,7 @@ export class ProjectService {
     return {
       status: project.status,
       database: dbStatus.success ? "healthy" : "unhealthy",
-      storage: (await this.checkStorageHealth()) ? "healthy" : "unhealthy",
+      storage: (await this.checkProjectStorageHealth(ref)) ? "healthy" : "unhealthy",
     };
   }
 

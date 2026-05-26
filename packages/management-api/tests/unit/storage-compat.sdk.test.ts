@@ -44,6 +44,56 @@ afterEach(() => {
 });
 
 describe("storageCompatRoutes supabase-js compatibility", () => {
+  test("accepts project header on loopback health checks without apikey", async () => {
+    const sqlSpy = spyOn(dbModule, "sql");
+    sqlSpy.mockImplementation(async (...args: unknown[]) => {
+      const text = String(args[0] ?? "");
+      if (text.includes("FROM projects")) {
+        return [{ ref: "proj_from_header", config: {} }];
+      }
+      return [];
+    });
+
+    const bucketSpy = spyOn(StorageRLS, "getLogicalBucket").mockResolvedValue({
+      id: "avatars",
+      name: "avatars",
+      public: true,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    });
+    const objectSpy = spyOn(StorageRLS, "getObjectInfo").mockResolvedValue({
+      id: "obj_1",
+      bucket_id: "avatars",
+      name: "public.txt",
+      metadata: { size: 3, mimetype: "text/plain" },
+      cache_control: "3600",
+      updated_at: new Date().toISOString(),
+    });
+    const downloadSpy = spyOn(StorageService, "getDownloadResponse").mockResolvedValue(
+      new Response("ok\n", {
+        headers: {
+          "Content-Type": "text/plain",
+          "Content-Length": "3",
+        },
+      })
+    );
+
+    const res = await request("/storage/v1/object/public/avatars/public.txt", {
+      headers: {
+        host: "127.0.0.1:9090",
+        "x-project-ref": "proj_from_header",
+      },
+    });
+
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe("ok\n");
+    expect(downloadSpy).toHaveBeenCalledWith("proj_from_header", "avatars", "public.txt");
+    sqlSpy.mockRestore();
+    bucketSpy.mockRestore();
+    objectSpy.mockRestore();
+    downloadSpy.mockRestore();
+  });
+
   test("allows public object reads from trusted custom-domain storage routes without apikey", async () => {
     const sqlSpy = spyOn(dbModule, "sql");
     let sawProjectLookup = false;
