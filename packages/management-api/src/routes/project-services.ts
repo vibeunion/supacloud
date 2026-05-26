@@ -7,6 +7,7 @@ import { projectService } from "../services";
 import { getAuthContext, requireProjectOrAdminAuth } from "../middleware/auth";
 import { $ } from "bun";
 import { tenantRuntimeService } from "../services/tenant-runtime.service";
+import { config } from "../config";
 
 export const projectServiceRoutes = new Elysia({ prefix: "/v1/projects" })
   // Get project health status
@@ -224,7 +225,9 @@ export const projectServiceRoutes = new Elysia({ prefix: "/v1/projects" })
       const sharedUnitMap: Record<string, string> = {
         postgresql: "patroni",
         realtime: "supacloud-realtime",
+        gateway: config.gatewayProvider === "kong" ? "kong" : "supacloud-caddy",
         kong: "kong",
+        caddy: "supacloud-caddy",
       };
       const serviceMap: Record<string, string> = { ...projectUnitMap, ...sharedUnitMap };
 

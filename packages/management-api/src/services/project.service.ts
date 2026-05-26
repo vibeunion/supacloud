@@ -454,14 +454,14 @@ export class ProjectService {
       gotrueStatus,
       realtimeSystemd,
       storagePerTenant,
-      kongSystemd,
+      gatewaySystemd,
       realtimeDocker,
     ] = await Promise.all([
       checkService(`supacloud-pgrst@${ref}`),
       checkService(`supacloud-gotrue@${ref}`),
       checkService("supacloud-realtime"),
       checkService(`supacloud-storage@${ref}`),
-      checkService("kong"),
+      checkService(config.gatewayProvider === "kong" ? "kong" : "supacloud-caddy"),
       checkContainer("supacloud-realtime"),
     ]);
 
@@ -470,8 +470,8 @@ export class ProjectService {
     if (realtimeSystemd === "ACTIVE_HEALTHY") {
       realtimeStatus = "ACTIVE_HEALTHY";
     } else {
-      // Fall back to the global Realtime container, but only when native Kong is healthy.
-      if (kongSystemd === "ACTIVE_HEALTHY") {
+      // Fall back to the global Realtime container, but only when the public gateway is healthy.
+      if (gatewaySystemd === "ACTIVE_HEALTHY") {
         if (realtimeDocker === "ACTIVE_HEALTHY") {
           const { realtimeService } = await import("./realtime.service");
           const hasTenant = await realtimeService.getTenant(ref);
@@ -512,7 +512,7 @@ export class ProjectService {
         { name: "GoTrue", status: gotrueStatus },
         { name: "Realtime", status: realtimeStatus },
         { name: "Storage", status: storageStatus },
-        { name: "Kong", status: kongSystemd },
+        { name: config.gatewayProvider === "kong" ? "Kong" : "Caddy", status: gatewaySystemd },
       ],
     };
   }

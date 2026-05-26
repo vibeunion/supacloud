@@ -56,17 +56,23 @@ fix_gotrue_search_path() {
     fi
 }
 
-ensure_kong_running() {
-    if systemctl list-unit-files kong.service &>/dev/null || systemctl list-units kong.service &>/dev/null; then
-        if systemctl is-active --quiet kong 2>/dev/null; then
-            log_info "Kong service already running"
+ensure_gateway_running() {
+    local gateway_unit="${GATEWAY_UNIT:-supacloud-caddy}"
+    if [[ "${GATEWAY_PROVIDER:-caddy}" == "kong" ]]; then
+        gateway_unit="kong"
+    fi
+    if systemctl list-unit-files "${gateway_unit}.service" &>/dev/null || systemctl list-units "${gateway_unit}.service" &>/dev/null; then
+        if systemctl is-active --quiet "$gateway_unit" 2>/dev/null; then
+            log_info "$gateway_unit service already running"
         else
-            log_warn "Kong service not running, starting..."
-            rm -f /usr/local/kong/sockets/* /usr/local/kong/pids/nginx.pid 2>/dev/null || true
-            systemctl reset-failed kong 2>/dev/null || true
-            systemctl start kong 2>/dev/null || true
-            if systemctl is-active --quiet kong 2>/dev/null; then
-                log_info "Kong service started"
+            log_warn "$gateway_unit service not running, starting..."
+            if [[ "$gateway_unit" == "kong" ]]; then
+                rm -f /usr/local/kong/sockets/* /usr/local/kong/pids/nginx.pid 2>/dev/null || true
+            fi
+            systemctl reset-failed "$gateway_unit" 2>/dev/null || true
+            systemctl start "$gateway_unit" 2>/dev/null || true
+            if systemctl is-active --quiet "$gateway_unit" 2>/dev/null; then
+                log_info "$gateway_unit service started"
             fi
         fi
     fi
@@ -168,7 +174,7 @@ main() {
     fix_stale_postmaster_pid
     fix_gotrue_search_path
     kill_edge_runtime_zombies
-    ensure_kong_running
+    ensure_gateway_running
     ensure_service_containers_running
     restart_failed_tenants
     

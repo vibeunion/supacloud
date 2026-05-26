@@ -262,8 +262,8 @@ const app = new Elysia({ strictPath: false })
   // Health check (no auth required)
   .get("/health", () => ({ status: "ok", timestamp: new Date().toISOString() }))
 
-  // ACME HTTP-01 challenge files for lego --http.webroot. Kong routes
-  // /.well-known/acme-challenge for tenant hosts back to this service.
+  // Compatibility path for manual/lego HTTP-01 challenge files. The default
+  // Caddy flow uses Automatic HTTPS with the on-demand permission endpoint.
   .get("/.well-known/acme-challenge/:token", async ({ params, set }) => {
     const token = String(params.token || "");
     if (!/^[A-Za-z0-9_-]+$/.test(token)) {
@@ -369,6 +369,30 @@ const app = new Elysia({ strictPath: false })
       token: t.String(),
     }),
     detail: { tags: ["auth"], summary: "Verify session token" },
+  })
+
+  .get("/v1/gateway/caddy/ask", async ({ query }) => {
+    const domain = String((query as Record<string, unknown>).domain || (query as Record<string, unknown>).host || "")
+      .trim()
+      .toLowerCase()
+      .replace(/^https?:\/\//, "")
+      .replace(/:\d+$/, "");
+    if (!domain) {
+      return new Response("missing domain", { status: 400 });
+    }
+    if (domain === config.baseDomain || domain.endsWith(`.${config.baseDomain}`)) {
+      return new Response("ok");
+    }
+    const rows = await sql`
+      SELECT ref FROM projects
+      WHERE status != 'deleted'
+        AND deleted_at IS NULL
+        AND config::text ILIKE ${`%${domain}%`}
+      LIMIT 1
+    `;
+    return rows.length > 0 ? new Response("ok") : new Response("domain not allowed", { status: 403 });
+  }, {
+    detail: { tags: ["gateway"], summary: "Authorize Caddy On-Demand TLS domain" },
   })
 
   // WebSocket routes (no HTTP auth guard; WS uses query token)

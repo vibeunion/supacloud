@@ -31,11 +31,10 @@ export class RouterService {
       const apiDomain = domains?.apiDomain || resolveProjectApiHost(projectRef, null);
       const studioDomain = domains?.studioDomain || resolveProjectStudioHost(projectRef, null);
       
-      // We map the domain through Native Kong API using GatewayService
-      // This function now delegates domain registration to Kong
+      // Domain registration is owned by the selected gateway provider.
       await gatewayService.addProjectDomains(projectRef, [apiDomain], [studioDomain]);
 
-      logger.info(`Kong routes dynamically added for ${projectRef} (api: ${apiDomain})`);
+      logger.info(`Gateway routes dynamically added for ${projectRef} (api: ${apiDomain})`);
       return { success: true };
     } catch (error: unknown) {
       return { success: false, error: (error instanceof Error ? error.message : String(error)) };
@@ -45,7 +44,7 @@ export class RouterService {
   async removeRoute(projectRef: string): Promise<{ success: boolean; error?: string }> {
     try {
       await gatewayService.removeService(projectRef);
-      logger.info(`Kong routes explicitly removed for ${projectRef}`);
+      logger.info(`Gateway routes explicitly removed for ${projectRef}`);
       return { success: true };
     } catch (error: unknown) {
       return { success: false, error: (error instanceof Error ? error.message : String(error)) };
@@ -77,7 +76,7 @@ export class RouterService {
   async updateNetworkRestrictions(projectRef: string, allowedIps: string[]): Promise<{ success: boolean; error?: string }> {
     try {
       await gatewayService.setIpRestriction(projectRef, allowedIps);
-      logger.info(`Kong Network IP restrictions explicitly updated for ${projectRef}`);
+      logger.info(`Gateway network IP restrictions explicitly updated for ${projectRef}`);
       return { success: true };
     } catch (error: unknown) {
         return { success: false, error: (error instanceof Error ? error.message : String(error)) };

@@ -211,7 +211,7 @@ export class TaskWorker {
                         return false;
                     }
 
-                    // Register this tenant's independent upstream in Kong (declarative)
+                    // Register this tenant's independent upstream in the configured gateway
                     const upstreamRes = await databaseService.setupUpstream(project_ref, port, gotruePort);
                     if (!upstreamRes.success) {
                         logger.error(`[TaskWorker] Failed to setup Kong upstream for ${project_ref}`);
@@ -280,12 +280,12 @@ export class TaskWorker {
                         logger.info(`[TaskWorker] Running in CI mode, skipping actual gateway provision for ${project_ref}`);
                         return true;
                     }
-                    // Apply JWT credentials, CORS, and rate limiting via Kong Admin API
+                    // Apply JWT credentials, CORS, and rate limiting through the gateway provider
                     try {
                         await gatewayService.setupJwt(project_ref, project.jwt_secret);
                         await gatewayService.setCors(project_ref);
                         await gatewayService.setRateLimit(project_ref, "free");
-                        logger.info(`[TaskWorker] Kong gateway plugins configured for ${project_ref}`);
+                        logger.info(`[TaskWorker] Gateway policy configured for ${project_ref}`);
                         return true;
                     } catch (err: unknown) {
                         logger.error(`[TaskWorker] Gateway config failed for ${project_ref}`, { error: err instanceof Error ? err.message : String(err) });

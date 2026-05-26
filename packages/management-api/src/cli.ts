@@ -16,42 +16,19 @@ async function setupStudioDomain(domain: string) {
   const MANAGEMENT_API_INTERNAL = appConfig.managementApiInternal;
   const STUDIO_INTERNAL = appConfig.studioInternal;
   
-  logger.info(`Provisioning global Studio & Management API in Native Kong for domain ${domain}...`);
+  logger.info(`Provisioning global Studio & Management API through ${gatewayService.name} gateway for domain ${domain}...`);
 
   try {
-    // 1. Management API Services
-    await gatewayService['kongRequest']('/services/svc-global-management', 'PUT', {
-      name: 'svc-global-management',
-      url: `http://${MANAGEMENT_API_INTERNAL}`,
-    });
-    
-    // Management Auth & Platform Routes
-    await gatewayService['kongRequest']('/routes/route-global-management', 'PUT', {
-       name: 'route-global-management',
-       service: { name: 'svc-global-management' },
-       paths: ['/api/platform/', '/api/auth/'],
-       hosts: [domain],
-       strip_path: false,
-       preserve_host: true
+    await gatewayService.setupMasterRoutes();
+    const studioPort = Number(STUDIO_INTERNAL.split(":").pop() || "3000");
+    await gatewayService.configureFrontendRoute({
+      projectRef: "_global",
+      deploymentId: "studio",
+      hosts: [domain],
+      port: studioPort,
     });
 
-    // 2. Studio SPA frontend
-    await gatewayService['kongRequest']('/services/svc-global-studio', 'PUT', {
-      name: 'svc-global-studio',
-      url: `http://${STUDIO_INTERNAL}`,
-    });
-
-    // Studio Root path
-    await gatewayService['kongRequest']('/routes/route-global-studio', 'PUT', {
-       name: 'route-global-studio',
-       service: { name: 'svc-global-studio' },
-       paths: ['/'],
-       hosts: [domain],
-       strip_path: false,
-       preserve_host: true
-    });
-
-    logger.info(`\n\n✅ Successfully bound Global Studio to: https://${domain}`);
+    logger.info(`\n\nSuccessfully bound Global Studio to: https://${domain}`);
     logger.info(`Make sure to point your DNS A record for ${domain} to this server's IP address.\n`);
   } catch (error: unknown) {
     logger.error(`Failed to bind global domain: ${error instanceof Error ? error.message : String(error)}`);
