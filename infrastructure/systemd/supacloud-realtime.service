@@ -60,8 +60,10 @@ NoNewPrivileges=true
 ProtectSystem=full
 ReadWritePaths=/etc/supabase /opt/supacloud /tmp /var/log/supacloud
 
-SystemCallFilter=@system-service
-SystemCallFilter=~@mount @reboot @swap @privileged @raw-io @keyring
+# Do not add SystemCallFilter here. This unit runs podman, and recent podman
+# builds need mount/procfs-related syscalls such as open_tree during startup.
+# Blocking them makes systemd kill podman with status=31/SYS before the
+# multi-tenant Realtime container can be created.
 
 MemoryMax=4G
 MemoryHigh=3G

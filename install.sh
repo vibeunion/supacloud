@@ -2647,17 +2647,30 @@ deploy_service_containers() {
 
     # --- 2. Deploy Supabase Realtime (Multi-tenant WebSocket) ---
     local REALTIME_UNIT_SRC="${SCRIPT_DIR}/infrastructure/systemd/supacloud-realtime.service"
+    local REALTIME_IMAGE_VALUE="${REALTIME_IMAGE:-public.ecr.aws/supabase/realtime:v2.76.5}"
     if [[ -f "$REALTIME_UNIT_SRC" ]]; then
         log_info "Registering SupaCloud Realtime systemd unit..."
         cp "$REALTIME_UNIT_SRC" /etc/systemd/system/supacloud-realtime.service
         systemctl daemon-reload
         systemctl enable supacloud-realtime
+
+        # The systemd unit uses the canonical REALTIME_IMAGE name. Pre-pull it
+        # here so installs behind registry mirrors still work without editing
+        # the unit file. When a mirror pull succeeds, tag it back to the
+        # canonical name expected by the unit.
+        local REALTIME_IMAGE_PULL="${MIRROR_PREFIX}${REALTIME_IMAGE_VALUE}"
+        log_info "Pulling Supabase Realtime image: ${REALTIME_IMAGE_VALUE}"
+        if [[ -n "$MIRROR_PREFIX" ]] && $RUNTIME pull "$REALTIME_IMAGE_PULL" 2>/dev/null; then
+            $RUNTIME tag "$REALTIME_IMAGE_PULL" "$REALTIME_IMAGE_VALUE" 2>/dev/null || true
+        else
+            $RUNTIME pull "$REALTIME_IMAGE_VALUE"
+        fi
+
         systemctl restart supacloud-realtime || log_warn "Realtime service start failed, please check journalctl -u supacloud-realtime"
     elif $RUNTIME ps -a --format '{{.Names}}' 2>/dev/null | grep -qx "${REALTIME_CONTAINER_NAME:-supacloud-realtime}"; then
         log_info "Realtime container already exists, skipping"
     else
         log_info "Pulling and deploying Supabase Realtime (multi-tenant)..."
-        local REALTIME_IMAGE_VALUE="${REALTIME_IMAGE:-public.ecr.aws/supabase/realtime:v2.76.5}"
         $RUNTIME pull "$REALTIME_IMAGE_VALUE"
 
         if [[ -n "${POSTGRES_PASSWORD:-}" ]]; then
