@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.0](https://github.com/zuohuadong/supacloud/compare/web-console-v0.12.3...web-console-v0.13.0) (2026-05-26)
+
+
+### Features
+
+* add database scaling controls ([0ea03ae](https://github.com/zuohuadong/supacloud/commit/0ea03ae570461ddfb7f2c597ab94bb3db439895b))
+
 ## [0.12.3](https://github.com/zuohuadong/supacloud/compare/web-console-v0.12.2...web-console-v0.12.3) (2026-05-25)
 
 

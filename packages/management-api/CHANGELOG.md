@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.23.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.22.3...management-api-v0.23.0) (2026-05-26)
+
+
+### Features
+
+* add database scaling controls ([0ea03ae](https://github.com/zuohuadong/supacloud/commit/0ea03ae570461ddfb7f2c597ab94bb3db439895b))
+
 ## [0.22.3](https://github.com/zuohuadong/supacloud/compare/management-api-v0.22.2...management-api-v0.22.3) (2026-05-26)
 
 
