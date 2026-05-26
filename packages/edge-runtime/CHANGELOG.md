@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.2](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.7.1...edge-runtime-v0.7.2) (2026-05-26)
+
+
+### Bug Fixes
+
+* **edge-runtime:** tolerate missing functions directory ([ec3cbad](https://github.com/zuohuadong/supacloud/commit/ec3cbadf7080903d26c4e843f6d4f2da90ff3cd2))
+
 ## [0.7.1](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.7.0...edge-runtime-v0.7.1) (2026-05-26)
 
 
