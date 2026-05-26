@@ -121,6 +121,9 @@ describe("CaddyGatewayProvider", () => {
 
         const load = calls.filter((call) => call.method === "POST" && call.url.endsWith("/load")).at(-1);
         expect(load).toBeDefined();
+        const server = load?.body?.apps?.http?.servers?.supacloud;
+        expect(server?.http3).toEqual({});
+        expect(load?.body?.apps?.tls?.automation?.policies?.[0]?.key_type).toBe("p256");
         const routes = load?.body?.apps?.http?.servers?.supacloud?.routes ?? [];
         const rest = routes.find((route: any) => route["@id"] === "route-project-testref123-rest");
         const storage = routes.find((route: any) => route["@id"] === "route-project-testref123-storage");
@@ -160,6 +163,41 @@ describe("CaddyGatewayProvider", () => {
         expect(route?.match?.[0]?.host).toEqual(["site.example.com", "www.example.com"]);
         expect(route?.match?.[0]?.path).toEqual(["/*"]);
         expect(route?.handle?.at(-1)?.upstreams?.[0]?.dial).toBe("127.0.0.1:30042");
+
+        restore();
+    });
+
+    test("configureFrontendRoute renders Caddy static file_server route with precompression", async () => {
+        const calls: Array<{ url: string; method: string; body: any }> = [];
+        const restore = captureFetch(calls);
+        const provider = new CaddyGatewayProvider();
+
+        await provider.configureFrontendRoute({
+            projectRef: "proj123",
+            deploymentId: "0000002b",
+            hosts: ["static.example.com"],
+            root: "/var/supacloud/frontends/proj123/0000002b/build",
+            mode: "static",
+        });
+
+        const load = calls.filter((call) => call.method === "POST" && call.url.endsWith("/load")).at(-1);
+        const routes = load?.body?.apps?.http?.servers?.supacloud?.routes ?? [];
+        const route = routes.find((item: any) => item["@id"] === "route-frontend-proj123-0000002b");
+        const encode = route?.handle?.find((handler: any) => handler.handler === "encode");
+        const subroute = route?.handle?.find((handler: any) => handler.handler === "subroute");
+        const tryFiles = subroute?.routes?.find((item: any) => item.match?.[0]?.file?.try_files?.includes("/index.html"))?.match?.[0]?.file;
+        const avifRoute = subroute?.routes?.find((item: any) => item.match?.[0]?.header?.Accept?.includes("*image/avif*"));
+        const webpRoute = subroute?.routes?.find((item: any) => item.match?.[0]?.header?.Accept?.includes("*image/webp*"));
+        const fileServer = subroute?.routes?.at(-1)?.handle?.at(-1);
+
+        expect(route?.match?.[0]?.host).toEqual(["static.example.com"]);
+        expect(encode?.prefer).toEqual(["zstd", "gzip"]);
+        expect(tryFiles?.try_files).toContain("/index.html");
+        expect(avifRoute?.match?.[0]?.file?.try_files).toEqual(["{http.request.uri.path}.avif"]);
+        expect(webpRoute?.match?.[0]?.file?.try_files).toEqual(["{http.request.uri.path}.webp"]);
+        expect(fileServer?.handler).toBe("file_server");
+        expect(fileServer?.root).toBe("/var/supacloud/frontends/proj123/0000002b/build");
+        expect(fileServer?.precompressed).toEqual({ br: {}, zstd: {}, gzip: {} });
 
         restore();
     });

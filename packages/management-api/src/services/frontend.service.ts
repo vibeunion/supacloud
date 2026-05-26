@@ -7,12 +7,13 @@
  *
  * This file handles: CRUD, build, gateway routing, process management
  *
- * Deployment flow (blue-green):
- *   build → start process → wait for /healthz readiness → switch gateway route → done
- *   If readiness fails: stop process, do NOT switch route, report failure
+ * Deployment flow:
+ *   static on Caddy: build -> precompress -> switch file_server route
+ *   SSR / Kong fallback: build -> start process -> readiness -> switch proxy route
  */
 import { $ } from "bun";
-import { readdir } from "node:fs/promises";
+import { readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { brotliCompressSync, constants as zlibConstants, gzipSync } from "node:zlib";
 import { logger } from "../utils/logger";
 import { config } from "../config";
 import type {
@@ -32,6 +33,20 @@ const READINESS_TIMEOUT_MS = 30_000;
 const READINESS_INTERVAL_MS = 500;
 const UNSAFE_COMMAND_PATTERN = /[\n\r;&|`$<>]/;
 const SAFE_GIT_SSH_PATTERN = /^git@[A-Za-z0-9.-]+:[A-Za-z0-9._~/-]+\.git$/;
+const STATIC_PRECOMPRESS_MIN_BYTES = 1024;
+const STATIC_PRECOMPRESS_EXTENSIONS = new Set([
+  ".css",
+  ".html",
+  ".js",
+  ".json",
+  ".mjs",
+  ".svg",
+  ".txt",
+  ".wasm",
+  ".webmanifest",
+  ".xml",
+]);
+const STATIC_IMAGE_OPTIMIZE_EXTENSIONS = new Set([".jpg", ".jpeg", ".png"]);
 
 function assertSafeBuildCommand(command: string): void {
   if (process.env.SUPACLOUD_RESTRICT_BUILD_COMMANDS !== "true") return;
@@ -90,6 +105,24 @@ export class FrontendService {
 
   private normalizePath(path: string): string {
     return path.replace(/\/+$/, "");
+  }
+
+  private getExtension(path: string): string {
+    const basename = path.split("/").pop() || "";
+    const dot = basename.lastIndexOf(".");
+    return dot >= 0 ? basename.slice(dot).toLowerCase() : "";
+  }
+
+  private shouldPrecompressStaticFile(path: string, size: number): boolean {
+    if (size < STATIC_PRECOMPRESS_MIN_BYTES) return false;
+    if (path.endsWith(".br") || path.endsWith(".gz") || path.endsWith(".zst") || path.endsWith(".avif") || path.endsWith(".webp")) return false;
+    return STATIC_PRECOMPRESS_EXTENSIONS.has(this.getExtension(path));
+  }
+
+  private shouldOptimizeStaticImage(path: string, size: number): boolean {
+    if (size < STATIC_PRECOMPRESS_MIN_BYTES) return false;
+    if (path.endsWith(".avif") || path.endsWith(".webp")) return false;
+    return STATIC_IMAGE_OPTIMIZE_EXTENSIONS.has(this.getExtension(path));
   }
 
   private generateId(): string {
@@ -416,20 +449,26 @@ export class FrontendService {
       const defaults = FRAMEWORK_DEFAULTS[deployment.framework];
       const outputDir = this.joinPath(sourceDir, deployment.output_dir);
       await $`rm -rf ${buildDir} && cp -r ${outputDir} ${buildDir}`.quiet();
-
-      // Blue-green: start process FIRST, but do NOT route traffic yet
-      const port = await this.startProcess(projectRef, deploymentId, deployment, buildDir, defaults.is_ssr);
-
-      // Readiness gate: wait for /healthz before switching gateway route
-      const ready = await this.waitForReadiness(port);
-      if (!ready) {
-        // Rollback: stop the process, leave the gateway pointing at old state (or nothing)
-        logger.error(`[FrontendService] Readiness failed for ${projectRef}/${deploymentId}, stopping process`);
-        await this.stopProcess(projectRef, deploymentId);
-        throw new Error(`Frontend process failed readiness check on port ${port} within ${READINESS_TIMEOUT_MS}ms`);
+      if (!defaults.is_ssr) {
+        await this.precompressStaticAssets(buildDir);
       }
 
-      // Process is healthy — NOW switch gateway route
+      const needsProcess = defaults.is_ssr || config.gatewayProvider === "kong";
+      if (needsProcess) {
+        // Blue-green: start process FIRST, but do NOT route traffic yet
+        const port = await this.startProcess(projectRef, deploymentId, deployment, buildDir, defaults.is_ssr);
+
+        // Readiness gate: wait for /healthz before switching gateway route
+        const ready = await this.waitForReadiness(port);
+        if (!ready) {
+          // Rollback: stop the process, leave the gateway pointing at old state (or nothing)
+          logger.error(`[FrontendService] Readiness failed for ${projectRef}/${deploymentId}, stopping process`);
+          await this.stopProcess(projectRef, deploymentId);
+          throw new Error(`Frontend process failed readiness check on port ${port} within ${READINESS_TIMEOUT_MS}ms`);
+        }
+      }
+
+      // Static Caddy routes serve buildDir directly; process-backed routes proxy after readiness.
       await this.configureGatewayRoute(deployment, buildDir, defaults.is_ssr);
 
       await this.updateDeployment(projectRef, deploymentId, {
@@ -461,13 +500,16 @@ export class FrontendService {
   async configureGatewayRoute(deployment: FrontendDeployment, buildDir: string, isSSR: boolean): Promise<void> {
     const port = 30000 + parseInt(deployment.id, 16) % 10000;
     const hosts = [deployment.domain, ...deployment.custom_domains];
+    const useCaddyStatic = !isSSR && config.gatewayProvider === "caddy";
 
     const { gatewayService } = await import("./gateway.service");
     await gatewayService.configureFrontendRoute({
       projectRef: deployment.project_ref,
       deploymentId: deployment.id,
       hosts,
-      port,
+      port: useCaddyStatic ? undefined : port,
+      root: useCaddyStatic ? buildDir : undefined,
+      mode: useCaddyStatic ? "static" : "proxy",
     });
   }
 
@@ -483,8 +525,8 @@ export class FrontendService {
   // ── Process Management (static vs SSR) ──────────────────────────
 
   /**
-   * Start the frontend process (static or SSR) and return the port.
-   * Static: supacloud static-serve (binary-backed, /healthz built-in)
+   * Start the frontend process and return the port.
+   * Static only starts a process for the legacy Kong rollback path.
    * SSR: bun run buildDir/index.js (user must expose /healthz or rely on process start)
    */
   private async startProcess(
@@ -569,6 +611,78 @@ WantedBy=multi-user.target
     await $`systemctl disable ${serviceName}`.nothrow().quiet();
     await $`rm -f /etc/systemd/system/${serviceName}.service`.quiet();
     await $`systemctl daemon-reload`.quiet();
+  }
+
+  private async precompressStaticAssets(root: string): Promise<void> {
+    const availableCommands = new Map<string, string | null>();
+    const resolveCommand = async (command: string): Promise<string | null> => {
+      if (availableCommands.has(command)) return availableCommands.get(command) || null;
+      const result = await $`which ${command}`.nothrow().quiet();
+      const resolved = result.exitCode === 0 ? result.stdout.toString().trim().split("\n")[0] || null : null;
+      availableCommands.set(command, resolved);
+      return resolved;
+    };
+
+    const compressFile = async (filePath: string) => {
+      const fileStat = await stat(filePath);
+      if (!fileStat.isFile() || !this.shouldPrecompressStaticFile(filePath, fileStat.size)) return;
+
+      const input = await readFile(filePath);
+      await writeFile(`${filePath}.gz`, gzipSync(input, { level: 9 }));
+      await writeFile(`${filePath}.br`, brotliCompressSync(input, {
+        params: {
+          [zlibConstants.BROTLI_PARAM_QUALITY]: 11,
+        },
+      }));
+
+      const zstdPath = await resolveCommand("zstd");
+      if (zstdPath) {
+        const result = await $`${zstdPath} -q -f -19 -o ${filePath}.zst -- ${filePath}`.nothrow().quiet();
+        if (result.exitCode !== 0) {
+          logger.warn("[FrontendService] Failed to generate zstd sidecar", { path: filePath, stderr: result.stderr.toString() });
+        }
+      }
+    };
+
+    const optimizeImage = async (filePath: string) => {
+      const fileStat = await stat(filePath);
+      if (!fileStat.isFile() || !this.shouldOptimizeStaticImage(filePath, fileStat.size)) return;
+
+      const cwebpPath = await resolveCommand("cwebp");
+      if (cwebpPath) {
+        const result = await $`${cwebpPath} -quiet -q 82 ${filePath} -o ${filePath}.webp`.nothrow().quiet();
+        if (result.exitCode !== 0) {
+          logger.warn("[FrontendService] Failed to generate webp sidecar", { path: filePath, stderr: result.stderr.toString() });
+        }
+      }
+
+      const avifencPath = await resolveCommand("avifenc");
+      if (avifencPath) {
+        const result = await $`${avifencPath} --quiet --min 28 --max 38 --speed 6 ${filePath} ${filePath}.avif`.nothrow().quiet();
+        if (result.exitCode !== 0) {
+          logger.warn("[FrontendService] Failed to generate avif sidecar", { path: filePath, stderr: result.stderr.toString() });
+        }
+      }
+    };
+
+    const walk = async (dir: string): Promise<void> => {
+      const entries = await readdir(dir, { withFileTypes: true });
+      for (const entry of entries) {
+        const fullPath = this.joinPath(dir, entry.name);
+        if (entry.isDirectory()) {
+          await walk(fullPath);
+        } else if (entry.isFile()) {
+          await optimizeImage(fullPath);
+          await compressFile(fullPath);
+        }
+      }
+    };
+
+    try {
+      await walk(root);
+    } catch (error: unknown) {
+      logger.warn("[FrontendService] Failed to precompress static assets", { error });
+    }
   }
 
   // ── Misc ──────────────────────────────────────────────────────────

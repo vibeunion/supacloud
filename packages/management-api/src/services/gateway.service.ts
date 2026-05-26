@@ -97,7 +97,9 @@ export interface FrontendGatewayRoute {
     projectRef: string;
     deploymentId: string;
     hosts: string[];
-    port: number;
+    port?: number;
+    root?: string;
+    mode?: "proxy" | "static";
 }
 
 export interface GatewayProvider {
@@ -997,6 +999,9 @@ export class KongGatewayProvider implements GatewayProvider {
     }
 
     async configureFrontendRoute(route: FrontendGatewayRoute): Promise<void> {
+        if (!route.port) {
+            throw new Error("Kong frontend routes require an upstream port");
+        }
         const serviceName = `svc-frontend-${route.projectRef}-${route.deploymentId}`;
         const routeName = `route-frontend-${route.projectRef}-${route.deploymentId}`;
 
@@ -1030,13 +1035,19 @@ export class KongGatewayProvider implements GatewayProvider {
 
 type CaddyHeaderValue = string | string[];
 type CaddyRoute = Record<string, unknown>;
+type CaddyServer = {
+    listen: string[];
+    routes: CaddyRoute[];
+    http3?: Record<string, unknown>;
+};
+
 type CaddyConfig = {
     admin?: Record<string, unknown>;
     storage?: Record<string, unknown>;
     apps: {
         tls?: Record<string, unknown>;
         http: {
-            servers: Record<string, { listen: string[]; routes: CaddyRoute[] }>;
+            servers: Record<string, CaddyServer>;
         };
     };
 };
@@ -1130,7 +1141,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
                                 endpoint: `http://${config.managementApiInternal}/v1/gateway/caddy/ask`,
                             },
                         },
-                        policies: [{ on_demand: true }],
+                        policies: [{ on_demand: true, key_type: "p256" }],
                     },
                     certificates: {
                         load_files: Array.from(this.certsById.values()),
@@ -1140,6 +1151,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
                     servers: {
                         supacloud: {
                             listen: [":80", ":443"],
+                            http3: {},
                             routes,
                         },
                     },
@@ -1365,6 +1377,137 @@ export class CaddyGatewayProvider implements GatewayProvider {
                     "Vary": ["Origin, Access-Control-Request-Headers, Accept-Encoding"],
                 },
             },
+        };
+    }
+
+    private makeEncodeHandler(): Record<string, unknown> {
+        return {
+            handler: "encode",
+            encodings: {
+                zstd: {},
+                gzip: {},
+            },
+            prefer: ["zstd", "gzip"],
+            minimum_length: 1024,
+        };
+    }
+
+    private makeStaticSecurityHeaders(): Record<string, unknown> {
+        return {
+            handler: "headers",
+            response: {
+                set: {
+                    "Strict-Transport-Security": ["max-age=31536000; includeSubDomains"],
+                    "X-Content-Type-Options": ["nosniff"],
+                    "Referrer-Policy": ["strict-origin-when-cross-origin"],
+                },
+            },
+        };
+    }
+
+    private makeStaticCacheHeaders(cacheControl: string): Record<string, unknown> {
+        return {
+            handler: "headers",
+            response: {
+                set: {
+                    "Cache-Control": [cacheControl],
+                },
+            },
+        };
+    }
+
+    private makeStaticTryFilesRoute(root: string): CaddyRoute {
+        return {
+            match: [{
+                file: {
+                    root,
+                    try_files: [
+                        "{http.request.uri.path}",
+                        "{http.request.uri.path}.html",
+                        "{http.request.uri.path}/index.html",
+                        "/index.html",
+                    ],
+                },
+            }],
+            handle: [{
+                handler: "rewrite",
+                uri: "{http.matchers.file.relative}",
+            }],
+        };
+    }
+
+    private makeStaticImageVariantRoute(root: string, accept: string, suffix: ".avif" | ".webp"): CaddyRoute {
+        return {
+            match: [{
+                header: {
+                    Accept: [`*${accept}*`],
+                },
+                file: {
+                    root,
+                    try_files: [`{http.request.uri.path}${suffix}`],
+                },
+            }],
+            handle: [{
+                handler: "rewrite",
+                uri: "{http.matchers.file.relative}",
+            }],
+        };
+    }
+
+    private makeStaticFileServer(root: string): Record<string, unknown> {
+        return {
+            handler: "file_server",
+            root,
+            index_names: ["index.html"],
+            precompressed: {
+                br: {},
+                zstd: {},
+                gzip: {},
+            },
+            precompressed_order: ["br", "zstd", "gzip"],
+            hide: [".git", ".env", "deployment.json"],
+        };
+    }
+
+    private makeStaticFrontendRoute(route: FrontendGatewayRoute): CaddyRoute {
+        if (!route.root) {
+            throw new Error("Caddy static frontend routes require a root directory");
+        }
+
+        const immutableCache = "public, max-age=31536000, immutable";
+        const defaultCache = "public, max-age=3600";
+
+        return {
+            "@id": `route-frontend-${route.projectRef}-${route.deploymentId}`,
+            match: [{
+                host: uniqueStrings(route.hosts.map(normalizeCaddyHost)),
+                path: ["/*"],
+            }],
+            handle: [
+                this.makeStaticSecurityHeaders(),
+                this.makeStaticCacheHeaders(defaultCache),
+                this.makeEncodeHandler(),
+                {
+                    handler: "subroute",
+                    routes: [
+                        {
+                            match: [{ path: ["/_app/*", "/assets/*"] }],
+                            handle: [this.makeStaticCacheHeaders(immutableCache)],
+                        },
+                        {
+                            match: [{ path: ["/", "*.html"] }],
+                            handle: [this.makeStaticCacheHeaders("no-cache")],
+                        },
+                        this.makeStaticImageVariantRoute(route.root, "image/avif", ".avif"),
+                        this.makeStaticImageVariantRoute(route.root, "image/webp", ".webp"),
+                        this.makeStaticTryFilesRoute(route.root),
+                        {
+                            handle: [this.makeStaticFileServer(route.root)],
+                        },
+                    ],
+                },
+            ],
+            terminal: true,
         };
     }
 
@@ -1674,6 +1817,14 @@ export class CaddyGatewayProvider implements GatewayProvider {
     }
 
     async configureFrontendRoute(route: FrontendGatewayRoute): Promise<void> {
+        if (route.mode === "static" || route.root) {
+            await this.addCorsOriginsForHosts(route.projectRef, route.hosts);
+            await this.putRoute(this.makeStaticFrontendRoute(route));
+            return;
+        }
+        if (!route.port) {
+            throw new Error("Caddy proxy frontend routes require an upstream port");
+        }
         await this.addCorsOriginsForHosts(route.projectRef, route.hosts);
         await this.putRoute(this.makeRoute({
             id: `route-frontend-${route.projectRef}-${route.deploymentId}`,

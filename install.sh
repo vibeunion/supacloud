@@ -741,6 +741,15 @@ install_base_dependencies() {
             log_info "Installing Python YAML support..."
             dnf install -y python3-pyyaml || dnf install -y python3-yaml
         fi
+
+        local OPTIONAL_OPTIMIZER_PACKAGES=""
+        ! command -v zstd &> /dev/null && OPTIONAL_OPTIMIZER_PACKAGES="$OPTIONAL_OPTIMIZER_PACKAGES zstd"
+        ! command -v cwebp &> /dev/null && OPTIONAL_OPTIMIZER_PACKAGES="$OPTIONAL_OPTIMIZER_PACKAGES libwebp-tools"
+        ! command -v avifenc &> /dev/null && OPTIONAL_OPTIMIZER_PACKAGES="$OPTIONAL_OPTIMIZER_PACKAGES libavif-tools"
+        if [[ -n "$OPTIONAL_OPTIMIZER_PACKAGES" ]]; then
+            log_info "Installing optional frontend optimizer packages:$OPTIONAL_OPTIMIZER_PACKAGES"
+            dnf install -y $OPTIONAL_OPTIMIZER_PACKAGES || log_warn "Some optional frontend optimizer packages could not be installed; deployments will skip unavailable formats."
+        fi
         
     elif command -v apt-get &> /dev/null; then
         # Debian/Ubuntu
@@ -766,6 +775,16 @@ install_base_dependencies() {
             apt-get install -y $PACKAGES
         else
             log_info "Base dependencies check passed"
+        fi
+
+        local OPTIONAL_OPTIMIZER_PACKAGES=""
+        ! command -v zstd &> /dev/null && OPTIONAL_OPTIMIZER_PACKAGES="$OPTIONAL_OPTIMIZER_PACKAGES zstd"
+        ! command -v cwebp &> /dev/null && OPTIONAL_OPTIMIZER_PACKAGES="$OPTIONAL_OPTIMIZER_PACKAGES webp"
+        ! command -v avifenc &> /dev/null && OPTIONAL_OPTIMIZER_PACKAGES="$OPTIONAL_OPTIMIZER_PACKAGES libavif-bin"
+        if [[ -n "$OPTIONAL_OPTIMIZER_PACKAGES" ]]; then
+            log_info "Installing optional frontend optimizer packages:$OPTIONAL_OPTIMIZER_PACKAGES"
+            apt-get update
+            apt-get install -y $OPTIONAL_OPTIMIZER_PACKAGES || log_warn "Some optional frontend optimizer packages could not be installed; deployments will skip unavailable formats."
         fi
     fi
 
@@ -1584,13 +1603,14 @@ install_caddy_gateway() {
             "endpoint": "http://127.0.0.1:9090/v1/gateway/caddy/ask"
           }
         },
-        "policies": [{ "on_demand": true }]
+        "policies": [{ "on_demand": true, "key_type": "p256" }]
       }
     },
     "http": {
       "servers": {
         "supacloud": {
           "listen": [":80", ":443"],
+          "http3": {},
           "routes": []
         }
       }

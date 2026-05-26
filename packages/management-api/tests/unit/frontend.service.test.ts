@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { access, chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { config, resolveSupacloudBinaryPath } from "../../src/config";
@@ -135,7 +135,57 @@ describe("FrontendService gateway routing", () => {
     expect(route).toBeDefined();
     expect(route?.match?.[0]?.path).toEqual(["/*"]);
     expect(route?.match?.[0]?.host).toEqual(["site.example.com", "www.example.com"]);
-    expect(route?.handle?.at(-1)?.flush_interval).toBe(-1);
-    expect(route?.handle?.at(-1)?.upstreams?.[0]?.dial).toBe("127.0.0.1:30042");
+    const subroute = route?.handle?.find((handler: any) => handler.handler === "subroute");
+    const fileServer = subroute?.routes?.at(-1)?.handle?.at(-1);
+    expect(fileServer?.handler).toBe("file_server");
+    expect(fileServer?.root).toBe("/tmp/build");
+    expect(fileServer?.precompressed_order).toEqual(["br", "zstd", "gzip"]);
+  });
+});
+
+describe("FrontendService optimizer", () => {
+  test("generates br and gzip sidecars for static text assets", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "supacloud-frontend-optimizer-test-"));
+    const service = new FrontendService(baseDir);
+    const assetPath = join(baseDir, "app.js");
+
+    try {
+      await writeFile(assetPath, "console.log('supacloud');\n".repeat(128));
+      await (service as any).precompressStaticAssets(baseDir);
+
+      await access(`${assetPath}.br`);
+      await access(`${assetPath}.gz`);
+      if ((await Bun.spawn(["which", "zstd"]).exited) === 0) {
+        await access(`${assetPath}.zst`);
+      }
+    } finally {
+      await rm(baseDir, { recursive: true, force: true });
+    }
+  });
+
+  test("generates image variant sidecars when optimizer tools are available", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "supacloud-frontend-image-optimizer-test-"));
+    const binDir = join(baseDir, "bin");
+    const imagePath = join(baseDir, "hero.jpg");
+    const originalPath = process.env.PATH || "";
+    const service = new FrontendService(baseDir);
+
+    try {
+      await mkdir(binDir);
+      await writeFile(join(binDir, "cwebp"), "#!/bin/sh\ncp \"$4\" \"$6\"\n");
+      await writeFile(join(binDir, "avifenc"), "#!/bin/sh\ncp \"$8\" \"$9\"\n");
+      await chmod(join(binDir, "cwebp"), 0o755);
+      await chmod(join(binDir, "avifenc"), 0o755);
+      process.env.PATH = `${binDir}:${originalPath}`;
+
+      await writeFile(imagePath, Buffer.alloc(2048, 1));
+      await (service as any).precompressStaticAssets(baseDir);
+
+      await access(`${imagePath}.webp`);
+      await access(`${imagePath}.avif`);
+    } finally {
+      process.env.PATH = originalPath;
+      await rm(baseDir, { recursive: true, force: true });
+    }
   });
 });
