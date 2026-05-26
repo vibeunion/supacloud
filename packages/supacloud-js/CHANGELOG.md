@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.18.0](https://github.com/zuohuadong/supacloud/compare/supacloud-js-v0.17.0...supacloud-js-v0.18.0) (2026-05-26)
+
+
+### Features
+
+* PGMQ queue compatibility and postgres CI trigger ([#213](https://github.com/zuohuadong/supacloud/issues/213)) ([08ddac4](https://github.com/zuohuadong/supacloud/commit/08ddac4e0af75460734706ab4047874321d24f00))
+* PGMQ queue compatibility, postgres CI path trigger, and SDK migration ([#214](https://github.com/zuohuadong/supacloud/issues/214)) ([418ef8d](https://github.com/zuohuadong/supacloud/commit/418ef8dcd40a1aa11b312796fdc32f3219d916a8))
+
 ## [0.17.0](https://github.com/zuohuadong/supacloud/compare/supacloud-js-v0.16.1...supacloud-js-v0.17.0) (2026-05-25)
 
 
