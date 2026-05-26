@@ -1,6 +1,7 @@
 import type { Subprocess } from "bun";
 import { logger } from "../utils/logger";
 import path from "node:path";
+import { mkdirSync } from "node:fs";
 import { execSync } from "node:child_process";
 import { config } from "../config";
 
@@ -98,11 +99,15 @@ export class EdgeRuntimeManager {
     // Kill any orphan processes on the port BEFORE spawning
     this.killStaleListeners();
 
+    const edgeFunctionsDir = this.resolveFunctionsDir();
+    mkdirSync(edgeFunctionsDir, { recursive: true });
+
     this.proc = Bun.spawn(["bun", "run", runnerPath], {
       env: {
         ...process.env,
         PORT: String(this.config.port),
-        EDGE_FUNCTIONS_DIR: config.edgeFunctionsDir,
+        EDGE_FUNCTIONS_DIR: edgeFunctionsDir,
+        EDGE_FUNCTIONS_BASE_DIR: process.env.EDGE_FUNCTIONS_BASE_DIR || edgeFunctionsDir,
         EDGE_RUNTIME_MASTER_KEY: config.edgeRuntimeMasterKey,
         MASTER_TOKEN: config.masterToken,
         MANAGEMENT_API_URL: `http://127.0.0.1:${config.port || 9090}`,
@@ -142,7 +147,15 @@ export class EdgeRuntimeManager {
     this.restartDelay = 500;
   }
 
-  private async waitForReady(timeout = 5000) {
+  private resolveFunctionsDir(): string {
+    if (process.env.EDGE_FUNCTIONS_DIR) return path.resolve(process.env.EDGE_FUNCTIONS_DIR);
+    if (process.env.CI === "true" || process.env.GITHUB_ACTIONS === "true") {
+      return path.resolve(process.cwd(), ".tmp/edge-functions");
+    }
+    return config.edgeFunctionsDir;
+  }
+
+  private async waitForReady(timeout = 15_000) {
     const start = Date.now();
     while (Date.now() - start < timeout) {
       try {
