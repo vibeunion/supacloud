@@ -1,8 +1,30 @@
 import { getMetrics } from './monitor.service';
 import { logger } from "../utils/logger";
-import { addReplica } from './maintenance.service';
 import { shellService } from './shell.service';
 import { projectRepository } from '../repositories/project.repository';
+import { normalizeProjectConfig } from '../utils/project-config';
+
+export type ComputeScalingStatus = "active" | "scaling" | "failed";
+export type ReadReplicaStatus = "provisioning" | "active" | "deleting" | "deleted" | "failed";
+
+export interface ComputeState {
+    tier: string;
+    status: ComputeScalingStatus;
+    cpu: number;
+    memory: string;
+    updated_at: string;
+    last_error?: string;
+}
+
+export interface ReadReplicaRecord {
+    id: string;
+    ip: string;
+    region: string;
+    status: ReadReplicaStatus;
+    created_at: string;
+    updated_at: string;
+    last_error?: string;
+}
 
 export interface ScalingThresholds {
     cpuHigh: number;
@@ -18,7 +40,93 @@ const DEFAULT_THRESHOLDS: ScalingThresholds = {
     connectionsHigh: 100
 };
 
+const COMPUTE_TIERS: Record<string, { cpu: number; memory: string; limits: string }> = {
+    micro: { cpu: 1, memory: "2g", limits: "cpu=1,mem=2g" },
+    small: { cpu: 2, memory: "4g", limits: "cpu=2,mem=4g" },
+    pro: { cpu: 4, memory: "8g", limits: "cpu=4,mem=8g" },
+    team: { cpu: 8, memory: "16g", limits: "cpu=8,mem=16g" },
+};
+
+function nowIso(): string {
+    return new Date().toISOString();
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function normalizeComputeState(config: Record<string, unknown>): ComputeState {
+    const raw = isRecord(config.compute) ? config.compute : {};
+    const tier = typeof raw.tier === "string" && COMPUTE_TIERS[raw.tier] ? raw.tier : "micro";
+    const spec = COMPUTE_TIERS[tier];
+    return {
+        tier,
+        status: raw.status === "scaling" || raw.status === "failed" ? raw.status : "active",
+        cpu: typeof raw.cpu === "number" ? raw.cpu : spec.cpu,
+        memory: typeof raw.memory === "string" ? raw.memory : spec.memory,
+        updated_at: typeof raw.updated_at === "string" ? raw.updated_at : nowIso(),
+        ...(typeof raw.last_error === "string" ? { last_error: raw.last_error } : {}),
+    };
+}
+
+function normalizeReadReplicas(config: Record<string, unknown>): ReadReplicaRecord[] {
+    const raw = Array.isArray(config.read_replicas) ? config.read_replicas : [];
+    return raw
+        .filter(isRecord)
+        .map((replica): ReadReplicaRecord => ({
+            id: typeof replica.id === "string" ? replica.id : crypto.randomUUID(),
+            ip: typeof replica.ip === "string" ? replica.ip : "",
+            region: typeof replica.region === "string" ? replica.region : "local",
+            status: ["provisioning", "active", "deleting", "deleted", "failed"].includes(String(replica.status))
+                ? replica.status as ReadReplicaStatus
+                : "provisioning",
+            created_at: typeof replica.created_at === "string" ? replica.created_at : nowIso(),
+            updated_at: typeof replica.updated_at === "string" ? replica.updated_at : nowIso(),
+            ...(typeof replica.last_error === "string" ? { last_error: replica.last_error } : {}),
+        }))
+        .filter((replica) => replica.ip);
+}
+
+function assertKnownTier(tier: string) {
+    const spec = COMPUTE_TIERS[tier];
+    if (!spec) {
+        throw new Error(`Unknown compute tier '${tier}'. Supported tiers: ${Object.keys(COMPUTE_TIERS).join(", ")}`);
+    }
+    return spec;
+}
+
+function assertIpAddress(ip: string): string {
+    const value = ip.trim();
+    if (!/^[A-Za-z0-9.:-]+$/.test(value)) {
+        throw new Error("replica_ip must be an IP address or DNS-safe host");
+    }
+    return value;
+}
+
 export class ScalingService {
+    static listComputeTiers() {
+        return Object.entries(COMPUTE_TIERS).map(([tier, spec]) => ({ tier, cpu: spec.cpu, memory: spec.memory }));
+    }
+
+    static async getScalingState(projectRef: string): Promise<{ compute: ComputeState; read_replicas: ReadReplicaRecord[] } | null> {
+        const project = await projectRepository.findByRef(projectRef);
+        if (!project) return null;
+        const config = normalizeProjectConfig(project.config);
+        return {
+            compute: normalizeComputeState(config),
+            read_replicas: normalizeReadReplicas(config).filter((replica) => replica.status !== "deleted"),
+        };
+    }
+
+    private static async patchScalingConfig(projectRef: string, patch: Record<string, unknown>) {
+        const project = await projectRepository.findByRef(projectRef);
+        if (!project) throw new Error(`Project ${projectRef} not found`);
+        const current = normalizeProjectConfig(project.config);
+        const updated = await projectRepository.updateConfig(projectRef, { ...current, ...patch });
+        if (!updated) throw new Error(`Project ${projectRef} not found`);
+        return normalizeProjectConfig(updated.config);
+    }
+
     /**
      * Execute elastic scaling check for a single project
      */
@@ -56,23 +164,145 @@ export class ScalingService {
      */
     static async verticalScale(projectRef: string, tier: string): Promise<void> {
         logger.info(`Executing vertical scaling: ${projectRef} -> ${tier}`);
-        const limits = tier === 'pro' ? 'cpu=4,mem=8g' : 'cpu=2,mem=4g';
+        const spec = assertKnownTier(tier);
+        const scalingState: ComputeState = {
+            tier,
+            status: "scaling",
+            cpu: spec.cpu,
+            memory: spec.memory,
+            updated_at: nowIso(),
+        };
+        await this.patchScalingConfig(projectRef, { compute: scalingState });
+
         const { resolveDbName } = await import("../db");
         const dbName = await resolveDbName(projectRef);
-        await shellService.execute('ha_manager.sh', ['vertical_scale', dbName, limits]);
+        const result = await shellService.execute('ha_manager.sh', ['vertical_scale', dbName, spec.limits]);
+        if (!result.success) {
+            await this.patchScalingConfig(projectRef, {
+                compute: {
+                    ...scalingState,
+                    status: "failed",
+                    last_error: result.error || "compute scaling failed",
+                    updated_at: nowIso(),
+                },
+            });
+            throw new Error(result.error || "compute scaling failed");
+        }
+
+        await this.patchScalingConfig(projectRef, {
+            compute: {
+                ...scalingState,
+                status: "active",
+                updated_at: nowIso(),
+            },
+        });
     }
 
     /**
      * Horizontal scaling: Add read replica and register to gateway
      */
-    static async horizontalScale(projectRef: string, replicaIp: string): Promise<void> {
+    static async horizontalScale(projectRef: string, replicaIp: string, region = "local"): Promise<ReadReplicaRecord> {
         logger.info(`Executing horizontal scaling: ${projectRef} adding replica ${replicaIp}`);
+        const ip = assertIpAddress(replicaIp);
+        const project = await projectRepository.findByRef(projectRef);
+        if (!project) throw new Error(`Project ${projectRef} not found`);
+        const config = normalizeProjectConfig(project.config);
+        const replicas = normalizeReadReplicas(config).filter((replica) => replica.status !== "deleted");
+        const existing = replicas.find((replica) => replica.ip === ip);
+        if (existing && existing.status !== "failed") {
+            throw new Error(`Read replica ${ip} already exists`);
+        }
 
-        // 1. Execute replica initialization (time-consuming task)
-        await addReplica(replicaIp);
+        const timestamp = nowIso();
+        const record: ReadReplicaRecord = {
+            id: existing?.id || crypto.randomUUID(),
+            ip,
+            region,
+            status: "provisioning",
+            created_at: existing?.created_at || timestamp,
+            updated_at: timestamp,
+        };
+        const nextReplicas = existing
+            ? replicas.map((replica) => replica.id === existing.id ? record : replica)
+            : [...replicas, record];
+        await projectRepository.updateConfig(projectRef, { ...config, read_replicas: nextReplicas });
 
-        // 2. Asynchronously register to gateway load balancer (Since initialization is time-consuming, should actually wait for Job completion before registering)
-        // Demo calls directly here
-        await shellService.execute('gateway_manager.sh', ['add-upstream-target', projectRef, replicaIp]);
+        const replicaResult = await shellService.execute('ha_manager.sh', ['add_replica', ip], 10 * 60_000);
+        if (!replicaResult.success) {
+            const failed: ReadReplicaRecord = {
+                ...record,
+                status: "failed",
+                updated_at: nowIso(),
+                last_error: replicaResult.error || "replica initialization failed",
+            };
+            await projectRepository.updateConfig(projectRef, {
+                ...config,
+                read_replicas: nextReplicas.map((replica) => replica.id === record.id ? failed : replica),
+            });
+            throw new Error(replicaResult.error || "replica initialization failed");
+        }
+
+        const gatewayResult = await shellService.execute('gateway_manager.sh', ['add-upstream-target', projectRef, ip]);
+        if (!gatewayResult.success) {
+            const failed: ReadReplicaRecord = {
+                ...record,
+                status: "failed",
+                updated_at: nowIso(),
+                last_error: gatewayResult.error || "gateway registration failed",
+            };
+            await projectRepository.updateConfig(projectRef, {
+                ...config,
+                read_replicas: nextReplicas.map((replica) => replica.id === record.id ? failed : replica),
+            });
+            throw new Error(gatewayResult.error || "gateway registration failed");
+        }
+
+        const active: ReadReplicaRecord = {
+            ...record,
+            status: "active",
+            updated_at: nowIso(),
+        };
+        await projectRepository.updateConfig(projectRef, {
+            ...config,
+            read_replicas: nextReplicas.map((replica) => replica.id === record.id ? active : replica),
+        });
+        return active;
+    }
+
+    static async removeReadReplica(projectRef: string, replicaId: string): Promise<ReadReplicaRecord | null> {
+        const project = await projectRepository.findByRef(projectRef);
+        if (!project) return null;
+        const config = normalizeProjectConfig(project.config);
+        const replicas = normalizeReadReplicas(config);
+        const existing = replicas.find((replica) => replica.id === replicaId);
+        if (!existing || existing.status === "deleted") return null;
+
+        const deleting: ReadReplicaRecord = { ...existing, status: "deleting", updated_at: nowIso() };
+        await projectRepository.updateConfig(projectRef, {
+            ...config,
+            read_replicas: replicas.map((replica) => replica.id === replicaId ? deleting : replica),
+        });
+
+        const gatewayResult = await shellService.execute('gateway_manager.sh', ['remove-upstream-target', projectRef, existing.ip]);
+        if (!gatewayResult.success) {
+            const failed: ReadReplicaRecord = {
+                ...existing,
+                status: "failed",
+                updated_at: nowIso(),
+                last_error: gatewayResult.error || "gateway removal failed",
+            };
+            await projectRepository.updateConfig(projectRef, {
+                ...config,
+                read_replicas: replicas.map((replica) => replica.id === replicaId ? failed : replica),
+            });
+            throw new Error(gatewayResult.error || "gateway removal failed");
+        }
+
+        const deleted: ReadReplicaRecord = { ...existing, status: "deleted", updated_at: nowIso() };
+        await projectRepository.updateConfig(projectRef, {
+            ...config,
+            read_replicas: replicas.map((replica) => replica.id === replicaId ? deleted : replica),
+        });
+        return deleted;
     }
 }

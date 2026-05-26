@@ -9,6 +9,7 @@ import { getProjectDb, resolveDbName, resolveRoleName } from "../db";
 import { normalizeProjectConfig } from "../utils/project-config";
 import { getAuthContext, requireAdminAuth, requireProjectOrAdminAuth } from "../middleware/auth";
 import { tenantRuntimeService } from "../services/tenant-runtime.service";
+import { ScalingService } from "../services/scaling.service";
 
 // Available regions list
 const AVAILABLE_REGIONS = [
@@ -506,14 +507,17 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
     },
   )
 
-  // Read Replicas — stub endpoints (Studio compatibility)
+  // Read Replicas — Studio compatibility plus SupaCloud-managed metadata.
   .get(
     "/:ref/read-replicas",
-    async ({ params }) => {
+    async ({ params, request }) => {
+      const authError = await requireProjectOrAdminAuth(request, params.ref);
+      if (authError) return status(authError.status as 401 | 403, { message: authError.body.error, code: String(authError.status) });
       const project = await projectService.getProject(params.ref);
       if (!project)
         return status(404, { message: "Project not found", code: "404" });
-      return [];
+      const state = await ScalingService.getScalingState(params.ref);
+      return state?.read_replicas || [];
     },
     {
       params: t.Object({ ref: t.String() }),
@@ -522,29 +526,53 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
   )
   .post(
     "/:ref/read-replicas",
-    async ({ params, set }) => {
+    async ({ params, body, request }) => {
+      const authError = await requireAdminAuth(request);
+      if (authError) return status(authError.status as 401 | 403, { message: authError.body.error, code: String(authError.status) });
       const project = await projectService.getProject(params.ref);
       if (!project)
         return status(404, { message: "Project not found", code: "404" });
-      set.status = 501;
-      return {
-        message: "Read Replicas are not supported on this SupaCloud cluster",
-        code: "501",
-      };
+      try {
+        const replica = await ScalingService.horizontalScale(
+          params.ref,
+          body.replica_ip,
+          body.region || "local",
+        );
+        return replica;
+      } catch (error: unknown) {
+        return status(500, {
+          message: error instanceof Error ? error.message : String(error),
+          code: "500",
+        });
+      }
     },
     {
       params: t.Object({ ref: t.String() }),
+      body: t.Object({
+        replica_ip: t.String({ minLength: 1 }),
+        region: t.Optional(t.String()),
+      }),
       detail: { tags: ["projects"], summary: "Create read replica" },
     },
   )
   .delete(
     "/:ref/read-replicas/:id",
-    async ({ params, set }) => {
-      set.status = 501;
-      return {
-        message: "Read Replicas are not supported on this SupaCloud cluster",
-        code: "501",
-      };
+    async ({ params, request }) => {
+      const authError = await requireAdminAuth(request);
+      if (authError) return status(authError.status as 401 | 403, { message: authError.body.error, code: String(authError.status) });
+      const project = await projectService.getProject(params.ref);
+      if (!project)
+        return status(404, { message: "Project not found", code: "404" });
+      try {
+        const replica = await ScalingService.removeReadReplica(params.ref, params.id);
+        if (!replica) return status(404, { message: "Read replica not found", code: "404" });
+        return replica;
+      } catch (error: unknown) {
+        return status(500, {
+          message: error instanceof Error ? error.message : String(error),
+          code: "500",
+        });
+      }
     },
     {
       params: t.Object({ ref: t.String(), id: t.String() }),

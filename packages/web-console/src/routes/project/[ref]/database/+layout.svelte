@@ -1,7 +1,7 @@
 <script lang="ts">
   import { page } from "$app/state";
   import { t } from "svelte-i18n";
-  import { Users, Package, Zap, Braces, Hash, FolderOpen, CalendarClock, Radio, Webhook, GitCommitVertical, Tag, ShieldCheck, HardDrive, Globe, Settings } from "lucide-svelte";
+  import { Users, Package, Zap, Braces, Hash, FolderOpen, CalendarClock, Radio, Webhook, GitCommitVertical, Tag, ShieldCheck, HardDrive, Globe, Settings, Layers } from "lucide-svelte";
 
   let { children } = $props();
 
@@ -13,6 +13,7 @@
     { id: "triggers", labelKey: "Triggers.title", icon: Zap },
     { id: "functions", labelKey: "DbFunctions.title", icon: Braces },
     { id: "indexes", labelKey: "Indexes.title", icon: Hash },
+    { id: "materialized-views", labelKey: null, labelFallback: "Materialized Views", icon: Layers },
     { id: "schemas", labelKey: "Schemas.title", icon: FolderOpen },
     { id: "types", labelKey: "EnumTypes.title", icon: Tag },
     { id: "column-privileges", labelKey: "ColumnPrivileges.title", icon: ShieldCheck },

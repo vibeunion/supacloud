@@ -70,6 +70,66 @@ export function resetEnsuredMigrationTablesForTests(): void {
   ensuredMigrationTables.clear();
 }
 
+const PG_IDENTIFIER_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+export function assertPgIdentifier(value: string, label: string): string {
+  const normalized = value.trim();
+  if (!PG_IDENTIFIER_PATTERN.test(normalized)) {
+    throw new Error(`${label} must be a PostgreSQL identifier`);
+  }
+  return normalized;
+}
+
+export function quotePgIdentifier(value: string): string {
+  return `"${assertPgIdentifier(value, "identifier").replace(/"/g, '""')}"`;
+}
+
+export function normalizeMaterializedViewDefinition(definition: string): string {
+  const normalized = definition.trim().replace(/;+\s*$/, "");
+  if (!/^(select|with)\b/i.test(normalized)) {
+    throw new Error("Materialized view definition must start with SELECT or WITH");
+  }
+  if (normalized.includes(";")) {
+    throw new Error("Materialized view definition must contain a single query");
+  }
+  return normalized;
+}
+
+export function buildMaterializedViewName(schema: string | undefined, name: string): string {
+  const safeSchema = quotePgIdentifier(assertPgIdentifier(schema || "public", "schema"));
+  const safeName = quotePgIdentifier(assertPgIdentifier(name, "name"));
+  return `${safeSchema}.${safeName}`;
+}
+
+export function buildCreateMaterializedViewSql(input: {
+  schema?: string;
+  name: string;
+  definition: string;
+  withData?: boolean;
+}): string {
+  const qualifiedName = buildMaterializedViewName(input.schema, input.name);
+  const definition = normalizeMaterializedViewDefinition(input.definition);
+  return `CREATE MATERIALIZED VIEW ${qualifiedName} AS ${definition} WITH ${input.withData === false ? "NO DATA" : "DATA"}`;
+}
+
+export function buildRefreshMaterializedViewSql(input: {
+  schema?: string;
+  name: string;
+  concurrently?: boolean;
+}): string {
+  const qualifiedName = buildMaterializedViewName(input.schema, input.name);
+  return `REFRESH MATERIALIZED VIEW${input.concurrently ? " CONCURRENTLY" : ""} ${qualifiedName}`;
+}
+
+export function buildDropMaterializedViewSql(input: {
+  schema?: string;
+  name: string;
+  ifExists?: boolean;
+}): string {
+  const qualifiedName = buildMaterializedViewName(input.schema, input.name);
+  return `DROP MATERIALIZED VIEW ${input.ifExists ? "IF EXISTS " : ""}${qualifiedName}`;
+}
+
 export async function ensureMigrationTables(dbName: string, projectDb: ReturnType<typeof getProjectDb>): Promise<void> {
   if (ensuredMigrationTables.has(dbName)) return;
 
@@ -315,6 +375,184 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
                 q: t.Optional(t.String()),
             }, { additionalProperties: true }),
             detail: { tags: ["projects"], summary: "List rows in a database table" },
+        }
+    )
+    .get(
+        "/materialized-views",
+        async ({ params, set, request }) => {
+            const authError = await requireProjectOrAdminAuth(request, params.ref);
+            if (authError) return projectAuthResponse(authError, set);
+
+            const project = await projectService.getProject(params.ref);
+            if (!project) {
+                set.status = 404;
+                return { message: "Project not found", code: "404", status: 404 };
+            }
+
+            const projectDb = await getProjectSql(params.ref);
+            if (!projectDb) {
+                set.status = 404;
+                return { message: "Project database credentials not found", code: "404", status: 404 };
+            }
+
+            const rows = await projectDb`
+                SELECT
+                    schemaname,
+                    matviewname,
+                    matviewowner,
+                    tablespace,
+                    hasindexes,
+                    ispopulated,
+                    definition,
+                    pg_total_relation_size(format('%I.%I', schemaname, matviewname)::regclass)::bigint AS total_bytes
+                FROM pg_matviews
+                WHERE schemaname NOT IN ('pg_catalog', 'information_schema')
+                ORDER BY schemaname, matviewname
+            `;
+            return rows;
+        },
+        {
+            params: t.Object({ ref: t.String({ minLength: 1 }) }),
+            detail: { tags: ["projects"], summary: "List materialized views" },
+        }
+    )
+    .post(
+        "/materialized-views",
+        async ({ params, body, set, request }) => {
+            const authError = await requireProjectOrAdminAuth(request, params.ref);
+            if (authError) return projectAuthResponse(authError, set);
+
+            const project = await projectService.getProject(params.ref);
+            if (!project) {
+                set.status = 404;
+                return { message: "Project not found", code: "404", status: 404 };
+            }
+
+            const projectDb = await getProjectSql(params.ref);
+            if (!projectDb) {
+                set.status = 404;
+                return { message: "Project database credentials not found", code: "404", status: 404 };
+            }
+
+            try {
+                const sql = buildCreateMaterializedViewSql(body);
+                await projectDb.unsafe(sql);
+                set.status = 201;
+                return {
+                    schema: body.schema || "public",
+                    name: body.name,
+                    refreshed: body.withData !== false,
+                };
+            } catch (error: unknown) {
+                set.status = 400;
+                return {
+                    message: error instanceof Error ? error.message : String(error),
+                    code: "400",
+                    status: 400,
+                };
+            }
+        },
+        {
+            params: t.Object({ ref: t.String({ minLength: 1 }) }),
+            body: t.Object({
+                schema: t.Optional(t.String()),
+                name: t.String({ minLength: 1 }),
+                definition: t.String({ minLength: 1 }),
+                withData: t.Optional(t.Boolean()),
+            }),
+            detail: { tags: ["projects"], summary: "Create materialized view" },
+        }
+    )
+    .post(
+        "/materialized-views/:schema/:name/refresh",
+        async ({ params, body, set, request }) => {
+            const authError = await requireProjectOrAdminAuth(request, params.ref);
+            if (authError) return projectAuthResponse(authError, set);
+
+            const project = await projectService.getProject(params.ref);
+            if (!project) {
+                set.status = 404;
+                return { message: "Project not found", code: "404", status: 404 };
+            }
+
+            const projectDb = await getProjectSql(params.ref);
+            if (!projectDb) {
+                set.status = 404;
+                return { message: "Project database credentials not found", code: "404", status: 404 };
+            }
+
+            try {
+                await projectDb.unsafe(buildRefreshMaterializedViewSql({
+                    schema: params.schema,
+                    name: params.name,
+                    concurrently: body.concurrently,
+                }));
+                return { schema: params.schema, name: params.name, refreshed: true };
+            } catch (error: unknown) {
+                set.status = 400;
+                return {
+                    message: error instanceof Error ? error.message : String(error),
+                    code: "400",
+                    status: 400,
+                };
+            }
+        },
+        {
+            params: t.Object({
+                ref: t.String({ minLength: 1 }),
+                schema: t.String({ minLength: 1 }),
+                name: t.String({ minLength: 1 }),
+            }),
+            body: t.Object({
+                concurrently: t.Optional(t.Boolean()),
+            }),
+            detail: { tags: ["projects"], summary: "Refresh materialized view" },
+        }
+    )
+    .delete(
+        "/materialized-views/:schema/:name",
+        async ({ params, query, set, request }) => {
+            const authError = await requireProjectOrAdminAuth(request, params.ref);
+            if (authError) return projectAuthResponse(authError, set);
+
+            const project = await projectService.getProject(params.ref);
+            if (!project) {
+                set.status = 404;
+                return { message: "Project not found", code: "404", status: 404 };
+            }
+
+            const projectDb = await getProjectSql(params.ref);
+            if (!projectDb) {
+                set.status = 404;
+                return { message: "Project database credentials not found", code: "404", status: 404 };
+            }
+
+            try {
+                await projectDb.unsafe(buildDropMaterializedViewSql({
+                    schema: params.schema,
+                    name: params.name,
+                    ifExists: query.if_exists === "true" || query.if_exists === "1",
+                }));
+                return { schema: params.schema, name: params.name, deleted: true };
+            } catch (error: unknown) {
+                set.status = 400;
+                return {
+                    message: error instanceof Error ? error.message : String(error),
+                    code: "400",
+                    status: 400,
+                };
+            }
+        },
+        {
+            params: t.Object({
+                ref: t.String({ minLength: 1 }),
+                schema: t.String({ minLength: 1 }),
+                name: t.String({ minLength: 1 }),
+            }),
+            query: t.Object({
+                if_exists: t.Optional(t.String()),
+            }),
+            detail: { tags: ["projects"], summary: "Drop materialized view" },
         }
     )
     .post(

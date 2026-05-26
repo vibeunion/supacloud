@@ -4,6 +4,9 @@ import { join } from "path";
 import {
   ensureMigrationTables,
   ensureTasksRealtimePublication,
+  buildCreateMaterializedViewSql,
+  buildDropMaterializedViewSql,
+  buildRefreshMaterializedViewSql,
   resetEnsuredMigrationTablesForTests,
   resolveMigrationStatements,
   sqlRouteResponse,
@@ -99,6 +102,58 @@ describe("database route helpers", () => {
       fields: ["ok"],
       notices: [],
     });
+  });
+
+  test("builds safe materialized view SQL", () => {
+    expect(
+      buildCreateMaterializedViewSql({
+        schema: "public",
+        name: "orders_daily",
+        definition: "select date_trunc('day', created_at) as day, count(*) from orders group by 1;",
+        withData: false,
+      }),
+    ).toBe(
+      `CREATE MATERIALIZED VIEW "public"."orders_daily" AS select date_trunc('day', created_at) as day, count(*) from orders group by 1 WITH NO DATA`,
+    );
+
+    expect(
+      buildRefreshMaterializedViewSql({
+        schema: "public",
+        name: "orders_daily",
+        concurrently: true,
+      }),
+    ).toBe(`REFRESH MATERIALIZED VIEW CONCURRENTLY "public"."orders_daily"`);
+
+    expect(
+      buildDropMaterializedViewSql({
+        schema: "public",
+        name: "orders_daily",
+        ifExists: true,
+      }),
+    ).toBe(`DROP MATERIALIZED VIEW IF EXISTS "public"."orders_daily"`);
+  });
+
+  test("rejects unsafe materialized view definitions and identifiers", () => {
+    expect(() =>
+      buildCreateMaterializedViewSql({
+        name: "bad-name",
+        definition: "select 1",
+      }),
+    ).toThrow("identifier");
+
+    expect(() =>
+      buildCreateMaterializedViewSql({
+        name: "ok_name",
+        definition: "select 1; drop table users",
+      }),
+    ).toThrow("single query");
+
+    expect(() =>
+      buildCreateMaterializedViewSql({
+        name: "ok_name",
+        definition: "delete from users",
+      }),
+    ).toThrow("SELECT or WITH");
   });
 
   test("ensureTasksRealtimePublication invokes helper when available", async () => {

@@ -10,6 +10,7 @@
     { id: "services", label: "服务控制" },
     { id: "webhooks", label: "Webhooks" },
     { id: "infrastructure", label: "基础设施" },
+    { id: "scaling", label: "扩展/副本" },
     { id: "custom-domains", label: "域名" },
     { id: "network", label: "网络" },
     { id: "pooling", label: "连接池" },

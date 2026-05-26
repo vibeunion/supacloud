@@ -1,7 +1,7 @@
 <script lang="ts">
   import { page } from "$app/state";
   import { t } from "svelte-i18n";
-  import { Users, Package, Zap, Braces, Hash, FolderOpen, CalendarClock, Radio, Webhook, GitCommitVertical, Tag, ShieldCheck, HardDrive, Globe, Settings } from "lucide-svelte";
+  import { Users, Package, Zap, Braces, Hash, FolderOpen, CalendarClock, Radio, Webhook, GitCommitVertical, Tag, ShieldCheck, HardDrive, Globe, Settings, Layers } from "lucide-svelte";
 
   const projectRef = $derived(page.params.ref);
 
@@ -11,6 +11,7 @@
     { title: $t("Triggers.title"), desc: $t("Triggers.subtitle"), icon: Zap, href: `/project/${projectRef}/database/triggers` },
     { title: $t("DbFunctions.title"), desc: $t("DbFunctions.subtitle"), icon: Braces, href: `/project/${projectRef}/database/functions` },
     { title: $t("Indexes.title"), desc: $t("Indexes.subtitle"), icon: Hash, href: `/project/${projectRef}/database/indexes` },
+    { title: "物化视图", desc: "缓存复杂查询和聚合结果，按业务新鲜度手动刷新", icon: Layers, href: `/project/${projectRef}/database/materialized-views` },
     { title: $t("Schemas.title"), desc: $t("Schemas.subtitle"), icon: FolderOpen, href: `/project/${projectRef}/database/schemas` },
     { title: $t("EnumTypes.title"), desc: $t("EnumTypes.subtitle"), icon: Tag, href: `/project/${projectRef}/database/types` },
     { title: $t("ColumnPrivileges.title"), desc: $t("ColumnPrivileges.subtitle"), icon: ShieldCheck, href: `/project/${projectRef}/database/column-privileges` },
