@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.22.3](https://github.com/zuohuadong/supacloud/compare/management-api-v0.22.2...management-api-v0.22.3) (2026-05-26)
+
+
+### Bug Fixes
+
+* **realtime:** keep systemd unit upgrade-safe ([d63fa82](https://github.com/zuohuadong/supacloud/commit/d63fa829afdd473565dbf66e7b3391b69758ec28))
+
 ## [0.22.2](https://github.com/zuohuadong/supacloud/compare/management-api-v0.22.1...management-api-v0.22.2) (2026-05-26)
 
 
