@@ -244,7 +244,7 @@ async function resolveProjectRefFromHeaderAndHost(ref: string, host: string): Pr
         if (
             rows.length > 0 &&
             String(rows[0].ref) === ref &&
-            matchProjectRefFromHost(host, ref, rows[0].config)
+            (isLoopbackHost(host) || matchProjectRefFromHost(host, ref, rows[0].config))
         ) {
             return ref;
         }
