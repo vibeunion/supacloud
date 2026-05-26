@@ -58,6 +58,11 @@ def main() -> None:
         help="Postgres superuser password",
     )
     parser.add_argument(
+        "--ferretdb-password",
+        default=secrets.token_urlsafe(18),
+        help="FerretDB database user password",
+    )
+    parser.add_argument(
         "--jwt-secret",
         default=secrets.token_urlsafe(32),
         help="JWT signing secret",
@@ -109,6 +114,12 @@ def main() -> None:
     print(f"POSTGRES_PASSWORD={args.postgres_password}")
     print("POSTGRES_DB=postgres")
     print("POSTGRES_PORT=5432")
+    print("ENABLE_FERRETDB=false")
+    print("FERRETDB_IMAGE=ghcr.io/ferretdb/ferretdb:2.7.0")
+    print("FERRETDB_USER=ferretdb")
+    print(f"FERRETDB_PASSWORD={args.ferretdb_password}")
+    print("FERRETDB_DATABASE=postgres")
+    print("FERRETDB_PORT=27017")
     print(f"JWT_SECRET={args.jwt_secret}")
     print(f"ANON_KEY={anon_key}")
     print(f"SERVICE_ROLE_KEY={service_role_key}")
