@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.1](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.7.0...edge-runtime-v0.7.1) (2026-05-26)
+
+
+### Bug Fixes
+
+* cap background queue control-plane pressure ([ac1c62f](https://github.com/zuohuadong/supacloud/commit/ac1c62f3784af66bb8a1a69c4f7ddbb3c83a0097))
+
 ## [0.7.0](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.6.4...edge-runtime-v0.7.0) (2026-05-25)
 
 

@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.22.2](https://github.com/zuohuadong/supacloud/compare/management-api-v0.22.1...management-api-v0.22.2) (2026-05-26)
+
+
+### Bug Fixes
+
+* align storage health checks with tenant runtime ([#201](https://github.com/zuohuadong/supacloud/issues/201)) ([457c90a](https://github.com/zuohuadong/supacloud/commit/457c90a4f354703f21c55156aba7f0da20234930))
+* cap background queue control-plane pressure ([ac1c62f](https://github.com/zuohuadong/supacloud/commit/ac1c62f3784af66bb8a1a69c4f7ddbb3c83a0097))
+* **realtime:** harden global service startup ([9795274](https://github.com/zuohuadong/supacloud/commit/9795274550328645dd365977dea81c0623ba85e2))
+
 ## [0.22.1](https://github.com/zuohuadong/supacloud/compare/management-api-v0.22.0...management-api-v0.22.1) (2026-05-25)
 
 
