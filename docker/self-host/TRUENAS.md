@@ -127,8 +127,6 @@ This image uses init scripts to:
 
 `pgsodium` and `supabase_vault` packages are present in the image, but they are not bootstrapped by default in self-host mode. When `ENABLE_PGSODIUM=true`, the image preloads `pgsodium`, uses the bundled `pgsodium_getkey` script, and creates the extension during first initialization.
 
-`pgsodium` and `supabase_vault` packages are present in the image, but they are not bootstrapped by default in self-host mode. They need extra runtime wiring, including a valid `pgsodium_getkey` script, before enabling them safely.
-
 If TrueNAS already initialized the app data directory, changing `ENABLE_FERRETDB` later will not replay those init scripts. In that case, use a fresh data directory or apply the role and extension changes manually.
 
 ## Minimal deployment checklist
@@ -140,6 +138,18 @@ If TrueNAS already initialized the app data directory, changing `ENABLE_FERRETDB
 5. Optionally add the FerretDB variables and `27017/TCP`.
 6. Optionally add the pgsodium variables before first start.
 7. Start the app on an empty data directory.
+
+## Rolling back pgsodium
+
+If you enabled pgsodium and need to disable it on TrueNAS:
+
+1. Stop the Custom App.
+2. Back up or note the current dataset used for PostgreSQL storage.
+3. Delete the dataset contents (or point the app to a new empty dataset).
+4. Set `ENABLE_PGSODIUM=false` and `ENABLE_SUPABASE_VAULT=false` in the app environment.
+5. Start the app again.
+
+**Important**: Encrypted data and Vault secrets depend on the original pgsodium key. Starting with a new empty dataset means that data is lost. To preserve existing data, keep the same key and simply stop using the pgsodium and vault schemas.
 
 ## Verification after first start
 

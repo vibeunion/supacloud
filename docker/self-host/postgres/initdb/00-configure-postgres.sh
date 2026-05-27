@@ -1,12 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-truthy() {
-  case "${1,,}" in
-    1 | true | yes | on) return 0 ;;
-    *) return 1 ;;
-  esac
-}
+. /docker-entrypoint-initdb.d/00-common.sh
 
 bool_setting() {
   case "${1,,}" in
