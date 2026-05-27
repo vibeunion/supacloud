@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.26.4](https://github.com/zuohuadong/supacloud/compare/management-api-v0.26.3...management-api-v0.26.4) (2026-05-27)
+
+
+### Elegance & Refactoring
+
+* remove Kong gateway provider, hardcode Caddy as sole gateway ([90ae018](https://github.com/zuohuadong/supacloud/commit/90ae018316bbb80d5fdb1d89ccf672c6e4b1c16c))
+
 ## [0.26.3](https://github.com/zuohuadong/supacloud/compare/management-api-v0.26.2...management-api-v0.26.3) (2026-05-27)
 
 
