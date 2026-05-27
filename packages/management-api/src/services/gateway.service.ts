@@ -1765,6 +1765,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
 
     async setupUpstream(projectRef: string, pgrstPort: number | string, gotruePort: number | string, projectRouting?: ProjectRoutingConfig | string, opts?: GatewaySetupOptions): Promise<{ success: boolean; error?: string }> {
         try {
+            await this.hydrateFromDisk();
             const hostIp = await this.detectHostIp();
             const routingConfig = normalizeProjectRoutingConfig(projectRouting);
             const hosts = uniqueStrings([
@@ -1775,7 +1776,11 @@ export class CaddyGatewayProvider implements GatewayProvider {
                 `studio-${projectRef}.${config.baseDomain}`,
                 resolveProjectStudioHost(projectRef, routingConfig),
             ]);
-            const corsOrigins = buildTenantCorsOrigins(projectRef, routingConfig, [...hosts, ...studioHosts]);
+            const corsOrigins = buildTenantCorsOrigins(projectRef, routingConfig, [
+                ...hosts,
+                ...studioHosts,
+                ...this.hostsForProjectRoutes(projectRef),
+            ]);
 
             const routes = [
                 this.makeRoute({ id: caddyRouteId(projectRef, "rest"), hosts, path: "/rest/v1*", upstream: `${hostIp}:${pgrstPort}`, projectRef, stripPrefix: "/rest/v1", corsOrigins }),

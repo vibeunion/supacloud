@@ -212,6 +212,33 @@ describe("CaddyGatewayProvider", () => {
         restore();
     });
 
+    test("setupUpstream preserves existing frontend hosts as allowed CORS origins", async () => {
+        const calls: Array<{ url: string; method: string; body: any }> = [];
+        const restore = captureFetch(calls);
+        const provider = new CaddyGatewayProvider();
+
+        await provider.configureFrontendRoute({
+            projectRef: "proj123",
+            deploymentId: "0000002c",
+            hosts: ["app.example.com"],
+            port: 30043,
+        });
+        await provider.setupUpstream("proj123", 3000, 9999, {
+            api_domain: "api.example.com",
+            studio_domain: "studio.example.com",
+        });
+
+        const load = calls.filter((call) => call.method === "POST" && call.url.endsWith("/load")).at(-1);
+        const routes = load?.body?.apps?.http?.servers?.supacloud?.routes ?? [];
+        const functionsRoute = routes.find((item: any) => item["@id"] === "route-project-proj123-functions");
+        const corsSubroute = findCorsSubroute(functionsRoute);
+        const exactMatcher = corsSubroute?.routes?.[0]?.match?.find((matcher: any) => matcher.header?.Origin);
+        expect(exactMatcher?.header?.Origin).toContain("https://app.example.com");
+        expect(exactMatcher?.header?.Origin).toContain("https://api.example.com");
+
+        restore();
+    });
+
     test("configureFrontendRoute renders Caddy static file_server route with precompression", async () => {
         const calls: Array<{ url: string; method: string; body: any }> = [];
         const restore = captureFetch(calls);
