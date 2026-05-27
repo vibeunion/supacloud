@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.26.2](https://github.com/zuohuadong/supacloud/compare/management-api-v0.26.1...management-api-v0.26.2) (2026-05-27)
+
+
+### Bug Fixes
+
+* **gateway:** preserve frontend origins in Caddy CORS ([#225](https://github.com/zuohuadong/supacloud/issues/225)) ([5fe9905](https://github.com/zuohuadong/supacloud/commit/5fe9905f2f978399b4cdc2a1985b72935051fc0f))
+* stop bootstrapping pgsodium in self-host postgres ([#226](https://github.com/zuohuadong/supacloud/issues/226)) ([3092e1e](https://github.com/zuohuadong/supacloud/commit/3092e1efec0897e1eb32c2a20a8fc9e4bcc00588))
+
 ## [0.26.1](https://github.com/zuohuadong/supacloud/compare/management-api-v0.26.0...management-api-v0.26.1) (2026-05-27)
 
 
