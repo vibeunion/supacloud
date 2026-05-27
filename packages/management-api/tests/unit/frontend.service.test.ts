@@ -141,6 +141,72 @@ describe("FrontendService gateway routing", () => {
     expect(fileServer?.root).toBe("/tmp/build");
     expect(fileServer?.precompressed_order).toEqual(["br", "zstd", "gzip"]);
   });
+
+  test("reconciles successful static deployments back into Caddy routes", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "supacloud-frontend-reconcile-test-"));
+    const calls: Array<{ url: string; method: string; body: any }> = [];
+
+    globalThis.fetch = mock((input: string | URL | Request, init?: RequestInit) => {
+      const url = typeof input === "string"
+        ? input
+        : input instanceof URL
+          ? input.toString()
+          : input.url;
+      const method = init?.method || "GET";
+      let body: any = null;
+      if (typeof init?.body === "string" && init.body.length > 0) {
+        try {
+          body = JSON.parse(init.body);
+        } catch {
+          body = null;
+        }
+      }
+      calls.push({ url, method, body });
+      return Promise.resolve(new Response(JSON.stringify({ data: [] })));
+    }) as unknown as typeof fetch;
+
+    try {
+      const deploymentDir = join(baseDir, "proj123", "0000002c");
+      const buildDir = join(deploymentDir, "build");
+      await mkdir(buildDir, { recursive: true });
+      await writeFile(join(buildDir, "index.html"), "<!doctype html><title>site</title>");
+      await writeFile(join(deploymentDir, "deployment.json"), JSON.stringify({
+        id: "0000002c",
+        project_ref: "proj123",
+        name: "site",
+        framework: "static",
+        domain: "site.example.com",
+        custom_domains: ["www.example.com"],
+        build_command: "",
+        output_dir: ".",
+        install_command: "",
+        node_version: "20",
+        env_vars: {},
+        status: "success",
+        created_at: "2026-05-27T00:00:00.000Z",
+        updated_at: "2026-05-27T00:00:00.000Z",
+        deployment_url: "https://site.example.com",
+      }));
+
+      const service = new FrontendService(baseDir);
+      const result = await service.reconcileGatewayRoutes();
+
+      expect(result).toEqual({ total: 1, configured: 1, skipped: 0, errors: [] });
+
+      const loadCall = calls.filter((call) => call.method === "POST" && call.url.endsWith("/load")).at(-1);
+      const routes = loadCall?.body?.apps?.http?.servers?.supacloud?.routes ?? [];
+      const route = routes.find((item: any) => item["@id"] === "route-frontend-proj123-0000002c");
+      const subroute = route?.handle?.find((handler: any) => handler.handler === "subroute");
+      const fileServer = subroute?.routes?.at(-1)?.handle?.at(-1);
+
+      expect(route?.match?.[0]?.host).toEqual(["site.example.com", "www.example.com"]);
+      expect(route?.match?.[0]?.path).toEqual(["/*"]);
+      expect(fileServer?.handler).toBe("file_server");
+      expect(fileServer?.root).toBe(buildDir);
+    } finally {
+      await rm(baseDir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("FrontendService optimizer", () => {

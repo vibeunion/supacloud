@@ -2137,10 +2137,12 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
       const authError = await requireAdminAuth(request);
       if (authError) return status(authError.status, authError.body);
       const result = await gatewayService.rebuildAllTenantConfigs();
+      const { frontendService } = await import("../services/frontend.service");
+      const frontend = await frontendService.reconcileGatewayRoutes();
       if (!result.success) {
-        return { ...result, message: "Rebuild failed" };
+        return { ...result, frontend, message: "Rebuild failed" };
       }
-      return result;
+      return { ...result, frontend };
     },
     {
       params: t.Object({ ref: t.String() }),
