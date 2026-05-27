@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.26.1](https://github.com/zuohuadong/supacloud/compare/management-api-v0.26.0...management-api-v0.26.1) (2026-05-27)
+
+
+### Bug Fixes
+
+* **gateway:** authorize on-demand TLS for frontend custom domains ([6c3a954](https://github.com/zuohuadong/supacloud/commit/6c3a954708e7a18f60c1126f13379295436871ec))
+* **gateway:** authorize on-demand TLS for frontend custom domains ([#222](https://github.com/zuohuadong/supacloud/issues/222)) ([7bb18ae](https://github.com/zuohuadong/supacloud/commit/7bb18ae0b120f7e28fcd682924bc85c4d053692c))
+* restore frontend caddy routes during reconcile ([#223](https://github.com/zuohuadong/supacloud/issues/223)) ([42e5aa1](https://github.com/zuohuadong/supacloud/commit/42e5aa1f42ab1cdb37a7f621dcc854efa2e28509))
+
+
+### Elegance & Refactoring
+
+* **gateway:** move CORS enforcement from application layer to Caddy ([8cd4c7a](https://github.com/zuohuadong/supacloud/commit/8cd4c7a2dad217e5e4530d44afb0627dd565f2cf))
+
 ## [0.26.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.25.1...management-api-v0.26.0) (2026-05-26)
 
 
