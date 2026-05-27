@@ -185,6 +185,62 @@ export class FrontendService {
     return deployments;
   }
 
+  async reconcileGatewayRoutes(projectRef?: string): Promise<{ total: number; configured: number; skipped: number; errors: string[] }> {
+    const errors: string[] = [];
+    let total = 0;
+    let configured = 0;
+    let skipped = 0;
+
+    let projectRefs: string[] = [];
+    if (projectRef) {
+      projectRefs = [projectRef];
+    } else {
+      try {
+        const entries = await readdir(this.baseDir, { withFileTypes: true });
+        projectRefs = entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name);
+      } catch (error: unknown) {
+        const code = typeof error === "object" && error && "code" in error ? String((error as { code?: unknown }).code) : "";
+        if (code === "ENOENT") {
+          return { total, configured, skipped, errors };
+        }
+        return {
+          total,
+          configured,
+          skipped,
+          errors: [error instanceof Error ? error.message : String(error)],
+        };
+      }
+    }
+
+    for (const ref of projectRefs) {
+      const deployments = await this.listDeployments(ref);
+      for (const deployment of deployments) {
+        total++;
+        if (deployment.status !== "success") {
+          skipped++;
+          continue;
+        }
+
+        const buildDir = this.joinPath(this.baseDir, ref, deployment.id, "build");
+        const buildStat = await stat(buildDir).catch(() => null);
+        if (!buildStat?.isDirectory()) {
+          skipped++;
+          continue;
+        }
+
+        const defaults = FRAMEWORK_DEFAULTS[deployment.framework];
+        try {
+          await this.configureGatewayRoute(deployment, buildDir, defaults.is_ssr);
+          configured++;
+        } catch (error: unknown) {
+          errors.push(`${ref}/${deployment.id}: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+    }
+
+    return { total, configured, skipped, errors };
+  }
+
   async getDeployment(projectRef: string, deploymentId: string): Promise<FrontendDeployment | null> {
     const configPath = this.joinPath(this.baseDir, projectRef, deploymentId, "deployment.json");
     try {
