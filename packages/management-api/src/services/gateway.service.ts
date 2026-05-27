@@ -26,6 +26,14 @@ export const DEFAULT_CORS_EXPOSED = [
     "Content-Profile", "accept-profile", "Range", "Range-Unit",
     "X-Relay-Error", "link", "x-total-count",
 ];
+const UPSTREAM_CORS_RESPONSE_HEADERS = [
+    "Access-Control-Allow-Origin",
+    "Access-Control-Allow-Credentials",
+    "Access-Control-Allow-Methods",
+    "Access-Control-Allow-Headers",
+    "Access-Control-Expose-Headers",
+    "Access-Control-Max-Age",
+] as const;
 export const DEFAULT_CORS_ORIGINS = [
     "~^https?://.*\\.dbbaby\\.top$",
     "~^https?://localhost(:[0-9]+)?$",
@@ -1353,6 +1361,9 @@ export class CaddyGatewayProvider implements GatewayProvider {
             headers: {
                 request: {
                     set: Object.fromEntries(Object.entries(headers).map(([key, value]) => [key, Array.isArray(value) ? value : [value]])),
+                },
+                response: {
+                    delete: [...UPSTREAM_CORS_RESPONSE_HEADERS],
                 },
             },
             transport: {

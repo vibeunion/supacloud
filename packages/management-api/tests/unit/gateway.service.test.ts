@@ -28,6 +28,11 @@ function findCorsSubroute(route: any) {
     return route?.handle?.find((handler: any) => handler.handler === "subroute" && Array.isArray(handler.routes));
 }
 
+function findReverseProxyHandlers(routes: any[]) {
+    return routes.flatMap((route: any) => route.handle ?? [])
+        .filter((handler: any) => handler.handler === "reverse_proxy");
+}
+
 async function cleanCaddyTmp() {
     await rm("/tmp/supacloud-caddy-test", { recursive: true, force: true });
 }
@@ -137,9 +142,16 @@ describe("CaddyGatewayProvider", () => {
         expect(rest?.match?.[0]?.path).toEqual(["/rest/v1*"]);
         expect(rest?.handle?.some((handler: any) => handler.strip_path_prefix === "/rest/v1")).toBe(true);
         expect(rest?.handle?.at(-1)?.headers?.request?.set?.["X-Project-Ref"]).toEqual(["testref123"]);
-        expect(routes.flatMap((route: any) => route.handle ?? [])
-            .filter((handler: any) => handler.handler === "reverse_proxy")
-            .every((handler: any) => !handler.upstreams?.[0]?.dial?.includes("/"))).toBe(true);
+        const reverseProxyHandlers = findReverseProxyHandlers(routes);
+        expect(reverseProxyHandlers.every((handler: any) => !handler.upstreams?.[0]?.dial?.includes("/"))).toBe(true);
+        for (const handler of reverseProxyHandlers) {
+            expect(handler.headers?.response?.delete).toContain("Access-Control-Allow-Origin");
+            expect(handler.headers?.response?.delete).toContain("Access-Control-Allow-Credentials");
+            expect(handler.headers?.response?.delete).toContain("Access-Control-Allow-Methods");
+            expect(handler.headers?.response?.delete).toContain("Access-Control-Allow-Headers");
+            expect(handler.headers?.response?.delete).toContain("Access-Control-Expose-Headers");
+            expect(handler.headers?.response?.delete).toContain("Access-Control-Max-Age");
+        }
         expect(routes.find((route: any) => route["@id"] === "route-project-testref123-graphql")
             ?.handle?.some((handler: any) => handler.uri === "/rpc/graphql")).toBe(true);
         expect(storage?.match?.[0]?.path).toEqual(["/storage/v1*"]);
