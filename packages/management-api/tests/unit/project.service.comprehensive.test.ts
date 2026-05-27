@@ -3,17 +3,12 @@ import { afterAll, beforeEach, describe, expect, mock, spyOn, test } from "bun:t
 const baseMock = mock(() => Promise.resolve([]));
 (baseMock as unknown as Record<string, unknown>).unsafe = mock(() => Promise.resolve([]));
 const actualDb = await import("../../src/db");
+const { jwtService } = await import("../../src/services/jwt.service");
 
 const jwtServiceMock = {
-  generateProjectRef: mock(() => "newref1234"),
-  generateServiceRoleKey: mock(() => Promise.resolve("generated-servicekey")),
-  generateKeySet: mock(() =>
-    Promise.resolve({
-      jwtSecret: "jwtsecret",
-      anonKey: "anonkey",
-      serviceRoleKey: "servicekey",
-    }),
-  ),
+  generateProjectRef: spyOn(jwtService, "generateProjectRef"),
+  generateServiceRoleKey: spyOn(jwtService, "generateServiceRoleKey"),
+  generateKeySet: spyOn(jwtService, "generateKeySet"),
 };
 
 const databaseServiceMock = {
@@ -74,10 +69,6 @@ const tenantRuntimeServiceMock = {
 mock.module("../../src/db", () => ({
   ...actualDb,
   sql: baseMock as unknown,
-}));
-
-mock.module("../../src/services/jwt.service", () => ({
-  jwtService: jwtServiceMock,
 }));
 
 mock.module("../../src/services/database.service", () => ({
