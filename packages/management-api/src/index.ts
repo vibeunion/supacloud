@@ -16,7 +16,6 @@ process.on("unhandledRejection", (reason: unknown) => {
 });
 
 import { swagger } from "@elysiajs/swagger";
-import { cors } from "@elysiajs/cors";
 
 import { config } from "./config";
 import { checkAuth } from "./middleware/auth";
@@ -43,20 +42,6 @@ function getWebConsoleDir(): string {
   }
   return WEB_CONSOLE_LEGACY_DIR;
 }
-
-const configuredCorsOrigins = config.corsOrigins
-  .split(",")
-  .map((origin) => origin.trim())
-  .filter(Boolean);
-
-const corsOrigin = configuredCorsOrigins.length > 0
-  ? ({ headers }: { headers: Headers }) => {
-      const origin = headers.get("origin");
-      return origin ? configuredCorsOrigins.includes(origin) : false;
-    }
-  : config.nodeEnv === "production"
-    ? false
-    : true;
 
 const MIME_TYPES: Record<string, string> = {
   ".html": "text/html",
@@ -229,23 +214,6 @@ const app = new Elysia({ strictPath: false })
         },
         security: [{ bearerAuth: [] }],
       },
-    }),
-  )
-  // CORS
-  .use(
-    cors({
-      origin: corsOrigin,
-      credentials: configuredCorsOrigins.length > 0,
-      exposeHeaders: [
-        "x-total-count",
-        "link",
-        "content-range",
-        "x-supabase-api-version",
-        "x-ratelimit-limit",
-        "x-ratelimit-remaining",
-        "x-ratelimit-reset",
-      ],
-      maxAge: 86400,
     }),
   )
 

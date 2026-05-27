@@ -1035,10 +1035,10 @@ export class KongGatewayProvider implements GatewayProvider {
 
 type CaddyHeaderValue = string | string[];
 type CaddyRoute = Record<string, unknown>;
+type CaddyMatcher = Record<string, unknown>;
 type CaddyServer = {
     listen: string[];
     routes: CaddyRoute[];
-    http3?: Record<string, unknown>;
 };
 
 type CaddyConfig = {
@@ -1151,7 +1151,6 @@ export class CaddyGatewayProvider implements GatewayProvider {
                     servers: {
                         supacloud: {
                             listen: [":80", ":443"],
-                            http3: {},
                             routes,
                         },
                     },
@@ -1364,19 +1363,81 @@ export class CaddyGatewayProvider implements GatewayProvider {
         };
     }
 
-    private makeCorsHandler(origins: string[]): Record<string, unknown> {
+    private makeCorsHeaderHandler(): Record<string, unknown> {
         return {
             handler: "headers",
             response: {
                 set: {
-                    "Access-Control-Allow-Origin": origins.length === 1 ? origins : ["{http.request.header.Origin}"],
-                    "Access-Control-Allow-Methods": ["GET, POST, PUT, PATCH, DELETE, OPTIONS"],
+                    "Access-Control-Allow-Origin": ["{http.request.header.Origin}"],
+                    "Access-Control-Allow-Credentials": ["true"],
+                    "Access-Control-Allow-Methods": ["GET, POST, PUT, PATCH, DELETE, OPTIONS, HEAD"],
                     "Access-Control-Allow-Headers": [DEFAULT_CORS_HEADERS.join(", ")],
                     "Access-Control-Expose-Headers": [DEFAULT_CORS_EXPOSED.join(", ")],
                     "Access-Control-Max-Age": ["86400"],
                     "Vary": ["Origin, Access-Control-Request-Headers, Accept-Encoding"],
                 },
             },
+        };
+    }
+
+    private makeCorsOriginMatchers(origins: string[], extra: CaddyMatcher = {}): CaddyMatcher[] {
+        const exactOrigins = uniqueStrings(origins
+            .map((origin) => origin.trim())
+            .filter((origin) => origin && !origin.startsWith("~")));
+        const regexOrigins = origins
+            .map((origin) => origin.trim())
+            .filter((origin) => origin.startsWith("~"))
+            .map((origin) => origin.slice(1).trim())
+            .filter(Boolean);
+
+        const matchers: CaddyMatcher[] = [];
+        if (exactOrigins.length > 0) {
+            matchers.push({
+                ...extra,
+                header: { Origin: exactOrigins },
+            });
+        }
+        if (regexOrigins.length > 0) {
+            matchers.push({
+                ...extra,
+                header_regexp: {
+                    Origin: {
+                        name: "cors_origin",
+                        pattern: regexOrigins.map((pattern) => `(?:${pattern})`).join("|"),
+                    },
+                },
+            });
+        }
+
+        return matchers;
+    }
+
+    private makeCorsSubroute(origins: string[]): Record<string, unknown> | null {
+        const preflightMatchers = this.makeCorsOriginMatchers(origins, { method: ["OPTIONS"] });
+        const originMatchers = this.makeCorsOriginMatchers(origins);
+        if (preflightMatchers.length === 0 && originMatchers.length === 0) return null;
+
+        const routes: CaddyRoute[] = [];
+        if (preflightMatchers.length > 0) {
+            routes.push({
+                match: preflightMatchers,
+                handle: [
+                    this.makeCorsHeaderHandler(),
+                    { handler: "static_response", status_code: 204 },
+                ],
+                terminal: true,
+            });
+        }
+        if (originMatchers.length > 0) {
+            routes.push({
+                match: originMatchers,
+                handle: [this.makeCorsHeaderHandler()],
+            });
+        }
+
+        return {
+            handler: "subroute",
+            routes,
         };
     }
 
@@ -1533,7 +1594,8 @@ export class CaddyGatewayProvider implements GatewayProvider {
         }
 
         const handle: Record<string, unknown>[] = [];
-        if (opts.corsOrigins) handle.push(this.makeCorsHandler(opts.corsOrigins));
+        const corsSubroute = opts.corsOrigins ? this.makeCorsSubroute(opts.corsOrigins) : null;
+        if (corsSubroute) handle.push(corsSubroute);
         if (opts.rewriteUri) handle.push({ handler: "rewrite", uri: opts.rewriteUri });
         else if (opts.stripPrefix) handle.push({ handler: "rewrite", strip_path_prefix: opts.stripPrefix });
         handle.push(this.makeReverseProxy(opts.upstream, requestHeaders, opts.readTimeout));
@@ -1780,7 +1842,8 @@ export class CaddyGatewayProvider implements GatewayProvider {
 
     async setupMasterRoutes(): Promise<void> {
         const hostIp = await this.detectHostIp();
-        const hosts = uniqueStrings([hostIp, config.baseDomain]);
+        const hosts = uniqueStrings([hostIp, config.baseDomain, `api.${config.baseDomain}`]);
+        const corsOrigins = buildTenantCorsOrigins("_management", undefined, hosts);
         this.routesById.set("route-system-management-api", this.makeRoute({
             id: "route-system-management-api",
             hosts,
@@ -1788,7 +1851,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
             upstream: `${hostIp}:${config.port}`,
             projectRef: "_management",
             stripPrefix: "/api",
-            corsOrigins: buildTenantCorsOrigins("_management", undefined, hosts),
+            corsOrigins,
         }));
         this.routesById.set("route-system-studio-root", this.makeRoute({
             id: "route-system-studio-root",
@@ -1796,6 +1859,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
             path: "/*",
             upstream: `${hostIp}:${config.port}`,
             projectRef: "_system",
+            corsOrigins,
         }));
         await this.persistAndLoad();
     }

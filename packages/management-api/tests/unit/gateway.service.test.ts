@@ -24,6 +24,10 @@ function captureFetch(calls: Array<{ url: string; method: string; body: any }>) 
     return () => { globalThis.fetch = originalFetch; };
 }
 
+function findCorsSubroute(route: any) {
+    return route?.handle?.find((handler: any) => handler.handler === "subroute" && Array.isArray(handler.routes));
+}
+
 async function cleanCaddyTmp() {
     await rm("/tmp/supacloud-caddy-test", { recursive: true, force: true });
 }
@@ -122,7 +126,7 @@ describe("CaddyGatewayProvider", () => {
         const load = calls.filter((call) => call.method === "POST" && call.url.endsWith("/load")).at(-1);
         expect(load).toBeDefined();
         const server = load?.body?.apps?.http?.servers?.supacloud;
-        expect(server?.http3).toEqual({});
+        expect(server).not.toHaveProperty("http3");
         expect(load?.body?.apps?.tls?.automation?.policies?.[0]?.key_type).toBe("p256");
         const routes = load?.body?.apps?.http?.servers?.supacloud?.routes ?? [];
         const rest = routes.find((route: any) => route["@id"] === "route-project-testref123-rest");
@@ -141,6 +145,37 @@ describe("CaddyGatewayProvider", () => {
         expect(storage?.match?.[0]?.path).toEqual(["/storage/v1*"]);
         expect(functions?.match?.[0]?.path).toEqual(["/functions/v1*"]);
         expect(realtime?.match?.[0]?.path).toEqual(["/realtime/v1/websocket*"]);
+
+        const corsSubroute = findCorsSubroute(rest);
+        const preflight = corsSubroute?.routes?.find((route: any) =>
+            route.match?.some((matcher: any) => matcher.method?.includes("OPTIONS"))
+        );
+        const corsHeaders = preflight?.handle?.find((handler: any) => handler.handler === "headers");
+        expect(preflight?.terminal).toBe(true);
+        expect(preflight?.handle?.some((handler: any) => handler.handler === "static_response" && handler.status_code === 204)).toBe(true);
+        expect(corsHeaders?.response?.set?.["Access-Control-Allow-Origin"]).toEqual(["{http.request.header.Origin}"]);
+        expect(corsHeaders?.response?.set?.["Access-Control-Allow-Credentials"]).toEqual(["true"]);
+        expect(preflight?.match?.some((matcher: any) => matcher.header_regexp?.Origin?.pattern?.includes("localhost"))).toBe(true);
+
+        restore();
+    });
+
+    test("setupMasterRoutes applies the same Caddy CORS handling to system routes", async () => {
+        const calls: Array<{ url: string; method: string; body: any }> = [];
+        const restore = captureFetch(calls);
+        const provider = new CaddyGatewayProvider();
+
+        await provider.setupMasterRoutes();
+
+        const load = calls.filter((call) => call.method === "POST" && call.url.endsWith("/load")).at(-1);
+        const routes = load?.body?.apps?.http?.servers?.supacloud?.routes ?? [];
+        const api = routes.find((route: any) => route["@id"] === "route-system-management-api");
+        const studio = routes.find((route: any) => route["@id"] === "route-system-studio-root");
+
+        expect(api?.match?.[0]?.host).toContain(config.baseDomain);
+        expect(api?.match?.[0]?.host).toContain(`api.${config.baseDomain}`);
+        expect(findCorsSubroute(api)).toBeDefined();
+        expect(findCorsSubroute(studio)).toBeDefined();
 
         restore();
     });
