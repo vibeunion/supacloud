@@ -112,6 +112,18 @@ ENABLE_SUPABASE_VAULT=true
 
 `ENABLE_SUPABASE_VAULT=true` requires `ENABLE_PGSODIUM=true`. The key must stay stable across restarts and upgrades; rotating it without a planned migration can make encrypted data unreadable.
 
+
+## Rolling back pgsodium
+
+If you enabled pgsodium on a fresh volume and need to disable it:
+
+1. Stop the stack: `docker compose down`.
+2. Remove or rename the `postgres-data` volume to start fresh: `docker volume rm supacloud_postgres-data`.
+3. Set `ENABLE_PGSODIUM=false` and `ENABLE_SUPABASE_VAULT=false` in `.env`.
+4. Start the stack again: `docker compose up -d --build`.
+
+**Important**: Once pgsodium has been initialized, encrypted data (including Vault secrets) depends on the original key. Starting over with a new volume means that data is lost. If you need to keep existing data, do **not** remove the volume. Instead, keep the same `PGSODIUM_KEY` or `PGSODIUM_KEY_FILE` value and simply stop using the `pgsodium` and `vault` schemas. The extension stays loaded in `shared_preload_libraries` until you rebuild PostgreSQL with `ENABLE_PGSODIUM=false` on a fresh volume.
+
 ## Notes
 
 - This stack is for self-host bootstrap and small deployments. It borrows Pigsty/PGEXT packages for extension coverage, but it does not replace a full Pigsty HA production deployment.

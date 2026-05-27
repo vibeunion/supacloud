@@ -1,12 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-truthy() {
-  case "${1,,}" in
-    1 | true | yes | on) return 0 ;;
-    *) return 1 ;;
-  esac
-}
+. /docker-entrypoint-initdb.d/00-common.sh
 
 if ! truthy "${ENABLE_PGSODIUM:-false}"; then
   if truthy "${ENABLE_SUPABASE_VAULT:-false}"; then
