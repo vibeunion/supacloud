@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.1](https://github.com/zuohuadong/supacloud/compare/web-console-v0.13.0...web-console-v0.13.1) (2026-05-27)
+
+
+### Elegance & Refactoring
+
+* remove Kong gateway provider, hardcode Caddy as sole gateway ([90ae018](https://github.com/zuohuadong/supacloud/commit/90ae018316bbb80d5fdb1d89ccf672c6e4b1c16c))
+
 ## [0.13.0](https://github.com/zuohuadong/supacloud/compare/web-console-v0.12.3...web-console-v0.13.0) (2026-05-26)
 
 
