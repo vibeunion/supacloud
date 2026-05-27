@@ -45,7 +45,7 @@ Container port:
 Persistent storage mount:
 
 ```text
-/var/lib/postgresql/data
+/var/lib/postgresql
 ```
 
 Required environment variables:
@@ -91,13 +91,15 @@ This image uses init scripts to:
 - optionally create the FerretDB role
 - optionally create the `documentdb` extension
 
+`pgsodium` and `supabase_vault` packages are present in the image, but they are not bootstrapped by default in self-host mode. They need extra runtime wiring, including a valid `pgsodium_getkey` script, before enabling them safely.
+
 If TrueNAS already initialized the app data directory, changing `ENABLE_FERRETDB` later will not replay those init scripts. In that case, use a fresh data directory or apply the role and extension changes manually.
 
 ## Minimal deployment checklist
 
 1. Create a new Custom App.
 2. Set the image repository and fixed tag.
-3. Add a host path or dataset mount for `/var/lib/postgresql/data`.
+3. Add a host path or dataset mount for `/var/lib/postgresql`.
 4. Set `POSTGRES_PASSWORD`.
 5. Optionally add the FerretDB variables and `27017/TCP`.
 6. Start the app on an empty data directory.

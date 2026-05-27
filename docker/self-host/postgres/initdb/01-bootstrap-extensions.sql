@@ -19,9 +19,7 @@ BEGIN
     'pg_jsonschema',
     'pgmq',
     'wrappers',
-    'pgjwt',
-    'pgsodium',
-    'supabase_vault'
+    'pgjwt'
   ] LOOP
     IF EXISTS (
       SELECT 1
