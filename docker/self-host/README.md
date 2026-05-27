@@ -31,9 +31,7 @@ The PostgreSQL image stays on `postgres:18-bookworm` and installs PGDG, Pigsty/P
 - `wrappers`
 - `index_advisor`
 - `pg_net`
-- `supabase_vault` from the Pigsty `vault` package
 - `pgjwt`
-- `pgsodium`
 - `wal2json`
 
 It also packages these PostgreSQL libraries and optional extensions:
@@ -41,6 +39,7 @@ It also packages these PostgreSQL libraries and optional extensions:
 - `supautils`
 - `pg_plan_filter`, loaded as `plan_filter`
 - `documentdb`, created only when the FerretDB profile is enabled
+- `pgsodium` and `supabase_vault`, packaged but not bootstrapped by default
 
 It also sets:
 
@@ -87,5 +86,6 @@ If `postgres-data` already exists, Docker entrypoint init scripts will not run a
 ## Notes
 
 - This stack is for self-host bootstrap and small deployments. It borrows Pigsty/PGEXT packages for extension coverage, but it does not replace a full Pigsty HA production deployment.
+- `pgsodium` and `supabase_vault` stay installed but are not created automatically in self-host mode. They require extra runtime wiring such as a valid `pgsodium_getkey` script before they are safe to enable by default.
 - `BASE_DOMAIN` is derived from `PUBLIC_URL` by `init-env.py`. Override it manually if you need a different wildcard routing suffix.
 - Kong gzip is disabled by default to avoid the HTTP/2 proxy corruption issue already seen on API traffic.
