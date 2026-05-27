@@ -31,9 +31,7 @@ The PostgreSQL image stays on `postgres:18-bookworm` and installs PGDG, Pigsty/P
 - `wrappers`
 - `index_advisor`
 - `pg_net`
-- `supabase_vault` from the Pigsty `vault` package
 - `pgjwt`
-- `pgsodium`
 - `wal2json`
 
 It also packages these PostgreSQL libraries and optional extensions:
@@ -41,12 +39,16 @@ It also packages these PostgreSQL libraries and optional extensions:
 - `supautils`
 - `pg_plan_filter`, loaded as `plan_filter`
 - `documentdb`, created only when the FerretDB profile is enabled
+- `pgsodium`, created only when `ENABLE_PGSODIUM=true`
+- `supabase_vault`, created only when `ENABLE_SUPABASE_VAULT=true`
 
 It also sets:
 
 - `shared_preload_libraries=pg_stat_statements, pg_cron, pgaudit, pg_net, pg_stat_kcache, plan_filter, pg_documentdb, pg_documentdb_core`
 - `cron.database_name=${POSTGRES_DB}`
 - `wal_level=logical`
+
+When `ENABLE_PGSODIUM=true`, it also adds `pgsodium` to `shared_preload_libraries`, configures `pgsodium.getkey_script`, and creates the `pgsodium` extension during first database initialization.
 
 ## Quick start
 
@@ -84,8 +86,35 @@ The profile creates a separate FerretDB database user and installs `documentdb` 
 
 If `postgres-data` already exists, Docker entrypoint init scripts will not run again. Enable FerretDB on a fresh volume or create the FerretDB role/database and `documentdb` extension manually.
 
+## Optional pgsodium runtime
+
+`pgsodium` is disabled by default because it requires a stable server key before PostgreSQL starts. To enable it on a fresh database volume, set:
+
+```bash
+ENABLE_PGSODIUM=true
+PGSODIUM_KEY=<64-character-hex-key>
+PGSODIUM_ENABLE_EVENT_TRIGGER=off
+```
+
+Generate a key with:
+
+```bash
+openssl rand -hex 32
+```
+
+Prefer mounting the key as a secret file and setting `PGSODIUM_KEY_FILE` when your runtime supports it. `PGSODIUM_KEY` is provided as a simple fallback for Compose and Custom App deployments.
+
+To create Supabase Vault on top of the same runtime, also set:
+
+```bash
+ENABLE_SUPABASE_VAULT=true
+```
+
+`ENABLE_SUPABASE_VAULT=true` requires `ENABLE_PGSODIUM=true`. The key must stay stable across restarts and upgrades; rotating it without a planned migration can make encrypted data unreadable.
+
 ## Notes
 
 - This stack is for self-host bootstrap and small deployments. It borrows Pigsty/PGEXT packages for extension coverage, but it does not replace a full Pigsty HA production deployment.
+- `pgsodium` and `supabase_vault` stay installed but are not created automatically in self-host mode. Set `ENABLE_PGSODIUM=true` only after providing a stable key through `PGSODIUM_KEY_FILE` or `PGSODIUM_KEY`.
 - `BASE_DOMAIN` is derived from `PUBLIC_URL` by `init-env.py`. Override it manually if you need a different wildcard routing suffix.
 - Kong gzip is disabled by default to avoid the HTTP/2 proxy corruption issue already seen on API traffic.
