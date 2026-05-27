@@ -50,6 +50,8 @@ It also sets:
 
 When `ENABLE_PGSODIUM=true`, it also adds `pgsodium` to `shared_preload_libraries`, configures `pgsodium.getkey_script`, and creates the `pgsodium` extension during first database initialization.
 
+When `ENABLE_SUPABASE_VAULT=true`, it also adds `supabase_vault` to `shared_preload_libraries`, configures `vault.getkey_script`, and creates the `supabase_vault` extension during first database initialization.
+
 ## Quick start
 
 Generate a production-grade `.env`:
@@ -110,7 +112,21 @@ To create Supabase Vault on top of the same runtime, also set:
 ENABLE_SUPABASE_VAULT=true
 ```
 
-`ENABLE_SUPABASE_VAULT=true` requires `ENABLE_PGSODIUM=true`. The key must stay stable across restarts and upgrades; rotating it without a planned migration can make encrypted data unreadable.
+Vault can use its own root key:
+
+```bash
+VAULT_KEY=<64-character-hex-key>
+```
+
+or its own secret file:
+
+```bash
+VAULT_KEY_FILE=/run/secrets/vault_key
+```
+
+If `VAULT_KEY` and `VAULT_KEY_FILE` are both unset, Vault falls back to `PGSODIUM_KEY_FILE`, then `PGSODIUM_KEY`.
+
+`ENABLE_SUPABASE_VAULT=true` requires `ENABLE_PGSODIUM=true`. The active Vault key must stay stable across restarts and upgrades; rotating it without a planned migration can make encrypted data unreadable.
 
 
 ## Rolling back pgsodium
@@ -128,5 +144,6 @@ If you enabled pgsodium on a fresh volume and need to disable it:
 
 - This stack is for self-host bootstrap and small deployments. It borrows Pigsty/PGEXT packages for extension coverage, but it does not replace a full Pigsty HA production deployment.
 - `pgsodium` and `supabase_vault` stay installed but are not created automatically in self-host mode. Set `ENABLE_PGSODIUM=true` only after providing a stable key through `PGSODIUM_KEY_FILE` or `PGSODIUM_KEY`.
+- `supabase_vault` has its own preload-time key loader. If you enable it, either set `VAULT_KEY` / `VAULT_KEY_FILE` explicitly or let it reuse the pgsodium key sources by leaving those variables empty.
 - `BASE_DOMAIN` is derived from `PUBLIC_URL` by `init-env.py`. Override it manually if you need a different wildcard routing suffix.
 - Kong gzip is disabled by default to avoid the HTTP/2 proxy corruption issue already seen on API traffic.

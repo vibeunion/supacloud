@@ -18,6 +18,8 @@ services:
       PGSODIUM_KEY_FILE: ${PGSODIUM_KEY_FILE:-/run/secrets/pgsodium_key}
       PGSODIUM_ENABLE_EVENT_TRIGGER: ${PGSODIUM_ENABLE_EVENT_TRIGGER:-off}
       ENABLE_SUPABASE_VAULT: ${ENABLE_SUPABASE_VAULT:-false}
+      VAULT_KEY: ${VAULT_KEY:-}
+      VAULT_KEY_FILE: ${VAULT_KEY_FILE:-/run/secrets/vault_key}
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:

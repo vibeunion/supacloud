@@ -38,4 +38,7 @@ RUN set -eux; \
 
 COPY initdb /docker-entrypoint-initdb.d
 COPY pgsodium_getkey /usr/share/postgresql/18/extension/pgsodium_getkey
-RUN chmod 0755 /usr/share/postgresql/18/extension/pgsodium_getkey
+COPY vault_getkey /usr/share/postgresql/18/extension/vault_getkey
+RUN chmod 0755 \
+    /usr/share/postgresql/18/extension/pgsodium_getkey \
+    /usr/share/postgresql/18/extension/vault_getkey

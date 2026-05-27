@@ -18,14 +18,14 @@ validate_config_path() {
   case "$1" in
     /*) ;;
     *)
-      echo "PGSODIUM_KEY_FILE must be an absolute path" >&2
+      echo "$2 must be an absolute path" >&2
       exit 1
       ;;
   esac
 
   case "$1" in
     *"'"* | *$'\n'*)
-      echo "PGSODIUM_KEY_FILE must not contain quotes or newlines" >&2
+      echo "$2 must not contain quotes or newlines" >&2
       exit 1
       ;;
   esac
@@ -49,7 +49,18 @@ if truthy "${ENABLE_PGSODIUM:-false}"; then
   shared_preload_libraries="$shared_preload_libraries, pgsodium"
   pgsodium_key_file="${PGSODIUM_KEY_FILE:-/run/secrets/pgsodium_key}"
   pgsodium_event_trigger="$(bool_setting "${PGSODIUM_ENABLE_EVENT_TRIGGER:-off}" PGSODIUM_ENABLE_EVENT_TRIGGER)"
-  validate_config_path "$pgsodium_key_file"
+  validate_config_path "$pgsodium_key_file" PGSODIUM_KEY_FILE
+fi
+
+if truthy "${ENABLE_SUPABASE_VAULT:-false}"; then
+  if ! truthy "${ENABLE_PGSODIUM:-false}"; then
+    echo "ENABLE_SUPABASE_VAULT requires ENABLE_PGSODIUM=true" >&2
+    exit 1
+  fi
+
+  shared_preload_libraries="$shared_preload_libraries, supabase_vault"
+  vault_key_file="${VAULT_KEY_FILE:-/run/secrets/vault_key}"
+  validate_config_path "$vault_key_file" VAULT_KEY_FILE
 fi
 
 cat >> "$PGDATA/postgresql.conf" <<EOF
@@ -60,6 +71,12 @@ if truthy "${ENABLE_PGSODIUM:-false}"; then
   cat >> "$PGDATA/postgresql.conf" <<EOF
 pgsodium.getkey_script = '/usr/share/postgresql/18/extension/pgsodium_getkey'
 pgsodium.enable_event_trigger = '$pgsodium_event_trigger'
+EOF
+fi
+
+if truthy "${ENABLE_SUPABASE_VAULT:-false}"; then
+  cat >> "$PGDATA/postgresql.conf" <<'EOF'
+vault.getkey_script = '/usr/share/postgresql/18/extension/vault_getkey'
 EOF
 fi
 
