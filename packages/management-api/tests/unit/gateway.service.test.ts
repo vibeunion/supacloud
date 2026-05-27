@@ -185,6 +185,10 @@ describe("CaddyGatewayProvider", () => {
         const restore = captureFetch(calls);
         const provider = new CaddyGatewayProvider();
 
+        await provider.setupUpstream("proj123", 3000, 9999, {
+            api_domain: "api.example.com",
+            studio_domain: "studio.example.com",
+        });
         await provider.configureFrontendRoute({
             projectRef: "proj123",
             deploymentId: "0000002a",
@@ -198,6 +202,12 @@ describe("CaddyGatewayProvider", () => {
         expect(route?.match?.[0]?.host).toEqual(["site.example.com", "www.example.com"]);
         expect(route?.match?.[0]?.path).toEqual(["/*"]);
         expect(route?.handle?.at(-1)?.upstreams?.[0]?.dial).toBe("127.0.0.1:30042");
+        const apiRoute = routes.find((item: any) => item["@id"] === "route-project-proj123-functions");
+        const corsSubroute = findCorsSubroute(apiRoute);
+        const exactMatcher = corsSubroute?.routes?.[0]?.match?.find((matcher: any) => matcher.header?.Origin);
+        expect(exactMatcher?.header?.Origin).toContain("https://site.example.com");
+        expect(exactMatcher?.header?.Origin).toContain("https://www.example.com");
+        expect(exactMatcher?.header?.Origin).toContain("https://api.example.com");
 
         restore();
     });
