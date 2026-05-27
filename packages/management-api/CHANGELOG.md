@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.26.3](https://github.com/zuohuadong/supacloud/compare/management-api-v0.26.2...management-api-v0.26.3) (2026-05-27)
+
+
+### Bug Fixes
+
+* **gateway:** strip upstream CORS headers in Caddy routes ([#232](https://github.com/zuohuadong/supacloud/issues/232)) ([4670aca](https://github.com/zuohuadong/supacloud/commit/4670acaf08a0c843e9066242542eebf061a9fc6d))
+
 ## [0.26.2](https://github.com/zuohuadong/supacloud/compare/management-api-v0.26.1...management-api-v0.26.2) (2026-05-27)
 
 
