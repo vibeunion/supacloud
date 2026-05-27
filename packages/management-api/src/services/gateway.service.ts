@@ -1441,6 +1441,44 @@ export class CaddyGatewayProvider implements GatewayProvider {
         };
     }
 
+    private isCorsHeaderHandler(handler: Record<string, unknown>): boolean {
+        return handler.handler === "headers" &&
+            typeof (handler.response as any)?.set?.["Access-Control-Allow-Origin"] !== "undefined";
+    }
+
+    private isCorsSubroute(handler: Record<string, unknown>): boolean {
+        if (handler.handler !== "subroute" || !Array.isArray(handler.routes)) return false;
+        return handler.routes.some((route: any) =>
+            Array.isArray(route?.handle) &&
+            route.handle.some((item: any) => this.isCorsHeaderHandler(item)),
+        );
+    }
+
+    private setRouteCors(route: CaddyRoute, origins: string[]): void {
+        const corsSubroute = this.makeCorsSubroute(origins);
+        const handle = Array.isArray(route.handle) ? route.handle as Record<string, unknown>[] : [];
+        const withoutCors = handle.filter((handler) =>
+            !this.isCorsHeaderHandler(handler) && !this.isCorsSubroute(handler),
+        );
+        route.handle = corsSubroute ? [corsSubroute, ...withoutCors] : withoutCors;
+    }
+
+    private projectRouteIds(projectRef: string): string[] {
+        return Array.from(this.routesById.keys()).filter((id) =>
+            id.includes(`-${projectRef}-`) || id.endsWith(`-${projectRef}`),
+        );
+    }
+
+    private hostsForProjectRoutes(projectRef: string): string[] {
+        const hosts: string[] = [];
+        for (const id of this.projectRouteIds(projectRef)) {
+            const route = this.routesById.get(id);
+            const match = Array.isArray(route?.match) ? route.match[0] as Record<string, unknown> | undefined : undefined;
+            if (match && Array.isArray(match.host)) hosts.push(...match.host as string[]);
+        }
+        return uniqueStrings(hosts);
+    }
+
     private makeEncodeHandler(): Record<string, unknown> {
         return {
             handler: "encode",
@@ -1708,18 +1746,26 @@ export class CaddyGatewayProvider implements GatewayProvider {
         return cloned;
     }
 
-    async setCors(projectRef: string, _origins: string[] = DEFAULT_CORS_ORIGINS): Promise<boolean> {
+    async setCors(projectRef: string, origins: string[] = DEFAULT_CORS_ORIGINS): Promise<boolean> {
         logger.debug(`[CaddyGatewayProvider] CORS is rendered into route JSON for ${projectRef}`);
+        await this.hydrateFromDisk();
+        for (const id of this.projectRouteIds(projectRef)) {
+            const route = this.routesById.get(id);
+            if (route) this.setRouteCors(route, origins);
+        }
         await this.persistAndLoad();
         return true;
     }
 
     async addCorsOriginsForHosts(projectRef: string, hosts: string[]): Promise<boolean> {
-        return this.setCors(projectRef, buildTenantCorsOrigins(projectRef, undefined, hosts));
+        await this.hydrateFromDisk();
+        const allHosts = uniqueStrings([...this.hostsForProjectRoutes(projectRef), ...hosts]);
+        return this.setCors(projectRef, buildTenantCorsOrigins(projectRef, undefined, allHosts));
     }
 
     async setupUpstream(projectRef: string, pgrstPort: number | string, gotruePort: number | string, projectRouting?: ProjectRoutingConfig | string, opts?: GatewaySetupOptions): Promise<{ success: boolean; error?: string }> {
         try {
+            await this.hydrateFromDisk();
             const hostIp = await this.detectHostIp();
             const routingConfig = normalizeProjectRoutingConfig(projectRouting);
             const hosts = uniqueStrings([
@@ -1730,7 +1776,11 @@ export class CaddyGatewayProvider implements GatewayProvider {
                 `studio-${projectRef}.${config.baseDomain}`,
                 resolveProjectStudioHost(projectRef, routingConfig),
             ]);
-            const corsOrigins = buildTenantCorsOrigins(projectRef, routingConfig, [...hosts, ...studioHosts]);
+            const corsOrigins = buildTenantCorsOrigins(projectRef, routingConfig, [
+                ...hosts,
+                ...studioHosts,
+                ...this.hostsForProjectRoutes(projectRef),
+            ]);
 
             const routes = [
                 this.makeRoute({ id: caddyRouteId(projectRef, "rest"), hosts, path: "/rest/v1*", upstream: `${hostIp}:${pgrstPort}`, projectRef, stripPrefix: "/rest/v1", corsOrigins }),
