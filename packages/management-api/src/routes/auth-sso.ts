@@ -22,13 +22,11 @@ async function getGoTrueHeaders(ref: string) {
     const projectConfig = normalizeProjectConfig(rows[0]?.config);
     const routingConfig = normalizeProjectRoutingConfig(projectConfig);
     const ports = resolveTenantPorts(routingConfig);
-    if (ports?.gotruePort) {
-      apiUrl = `http://127.0.0.1:${ports.gotruePort}`;
-    } else {
-      apiUrl = config.kongInternal.startsWith("http") ? config.kongInternal : `http://${config.kongInternal}`;
-    }
+    apiUrl = ports?.gotruePort
+      ? `http://127.0.0.1:${ports.gotruePort}`
+      : `http://${config.managementApiInternal}/auth/v1`;
   } catch {
-    apiUrl = config.kongInternal.startsWith("http") ? config.kongInternal : `http://${config.kongInternal}`;
+    apiUrl = `http://${config.managementApiInternal}/auth/v1`;
   }
 
   return { apiUrl, serviceRoleKey, ref };

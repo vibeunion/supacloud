@@ -3,6 +3,7 @@ import { ScalingService } from "../../src/services/scaling.service";
 import * as MonitorService from "../../src/services/monitor.service";
 import { shellService } from "../../src/services/shell.service";
 import { projectRepository } from "../../src/repositories/project.repository";
+import { gatewayService } from "../../src/services/gateway.service";
 import type { Project } from "../../src/db";
 
 const mockProject: Partial<Project> = {
@@ -64,6 +65,7 @@ describe("ScalingService", () => {
         });
 
         const shellSpy = spyOn(shellService, "execute").mockResolvedValue({ success: true, output: "" });
+        const gatewaySpy = spyOn(gatewayService, "addUpstreamTarget").mockResolvedValue({ success: true });
         const dbSpy = spyOn(db, "resolveDbName").mockResolvedValue("supa_test-proj");
         const updateSpy = spyOn(projectRepository, "updateConfig").mockImplementation(async (_ref, config) => ({
             ...mockProject,
@@ -73,7 +75,7 @@ describe("ScalingService", () => {
         const result = await ScalingService.checkAndScale("test-proj");
 
         expect(result.action).toBe("horizontal_scale");
-        expect(shellSpy).toHaveBeenCalledWith("gateway_manager.sh", expect.arrayContaining(["add-upstream-target"]));
+        expect(gatewaySpy).toHaveBeenCalledWith("test-proj", expect.any(String));
         expect(updateSpy).toHaveBeenCalledWith("test-proj", expect.objectContaining({
             read_replicas: expect.arrayContaining([
                 expect.objectContaining({ status: "active" }),
@@ -82,6 +84,7 @@ describe("ScalingService", () => {
 
         updateSpy.mockRestore();
         dbSpy.mockRestore();
+        gatewaySpy.mockRestore();
         shellSpy.mockRestore();
         monitorSpy.mockRestore();
         projectSpy.mockRestore();
@@ -119,6 +122,7 @@ describe("ScalingService", () => {
             },
         } as Project);
         const shellSpy = spyOn(shellService, "execute").mockResolvedValue({ success: true, output: "" });
+        const gatewaySpy = spyOn(gatewayService, "removeUpstreamTarget").mockResolvedValue({ success: true });
         const updateSpy = spyOn(projectRepository, "updateConfig").mockImplementation(async (_ref, config) => ({
             ...mockProject,
             config,
@@ -127,12 +131,13 @@ describe("ScalingService", () => {
         const removed = await ScalingService.removeReadReplica("test-proj", "rr_1");
 
         expect(removed).toEqual(expect.objectContaining({ id: "rr_1", status: "deleted" }));
-        expect(shellSpy).toHaveBeenCalledWith("gateway_manager.sh", ["remove-upstream-target", "test-proj", "10.0.0.2"]);
+        expect(gatewaySpy).toHaveBeenCalledWith("test-proj", "10.0.0.2");
         expect(updateSpy).toHaveBeenCalledWith("test-proj", expect.objectContaining({
             read_replicas: [expect.objectContaining({ id: "rr_1", status: "deleted" })],
         }));
 
         updateSpy.mockRestore();
+        gatewaySpy.mockRestore();
         shellSpy.mockRestore();
         projectSpy.mockRestore();
     });

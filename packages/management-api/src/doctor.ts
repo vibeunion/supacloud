@@ -69,7 +69,7 @@ export async function runDoctor(options: { skipSmokeTest?: boolean, forceYes?: b
                 });
                 s.message(`Project injected successfully (Ref: ${project.ref}), waiting for gateway to take effect...`);
 
-                // Simulate waiting for gateway ready (Kong usually needs a few seconds to sync)
+                // Simulate waiting for gateway routes to sync.
                 await new Promise(r => setTimeout(r, 2000));
 
                 // 2. Verify details retrieval

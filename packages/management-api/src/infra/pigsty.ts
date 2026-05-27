@@ -275,7 +275,7 @@ async function updatePigstyConfig(config: PigstyConfig, ymlPath: string) {
             }
         }
 
-            // --- Nginx deactivation logic (Kong owns 80/443) ---
+            // --- Nginx deactivation logic (SupaCloud Caddy owns 80/443) ---
         if (!yml.includes("nginx_enabled: false")) {
             // Improved injection logic: append if vars: exists, otherwise create it
             if (yml.includes("  vars:")) {

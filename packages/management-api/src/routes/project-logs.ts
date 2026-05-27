@@ -37,7 +37,7 @@ export const projectLogsRoutes = new Elysia({ prefix: "/v1/projects/:ref/logs" }
 
             try {
                 const limit = query.limit || "200";
-                const result = await $`journalctl -u supacloud-gotrue@${params.ref} -u supacloud-pgrst@${params.ref} -u supacloud-postgres@${params.ref} -u supacloud-realtime -u supacloud-storage@${params.ref} -u supacloud-caddy -u kong -n ${limit} --output short-iso --no-pager`.nothrow().quiet();
+                const result = await $`journalctl -u supacloud-gotrue@${params.ref} -u supacloud-pgrst@${params.ref} -u supacloud-postgres@${params.ref} -u supacloud-realtime -u supacloud-storage@${params.ref} -u supacloud-caddy -n ${limit} --output short-iso --no-pager`.nothrow().quiet();
                 const output = result.text();
                 const lines = output.split('\n').filter(line => line.trim() !== '' && !line.startsWith('-- '));
 

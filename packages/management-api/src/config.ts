@@ -1,8 +1,3 @@
-/** Check whether the process was invoked as the static-serve subcommand. */
-export function isStaticServeCommand(): boolean {
-  return process.argv[2] === "static-serve";
-}
-
 import { existsSync, readFileSync } from "node:fs";
 
 const MANAGEMENT_API_ENV = "/etc/supabase/management-api.env";
@@ -68,13 +63,11 @@ export interface Config {
   storageType: string;
   storageMountPoint: string;
   imaginaryUrl: string;
-  gatewayProvider: "caddy" | "kong";
+  gatewayProvider: "caddy";
   caddyAdminUrl: string;
   caddyConfigPath: string;
   caddyStateDir: string;
   caddyBinaryPath: string;
-  kongAdminUrl: string;
-  kongInternal: string;
   victoriaMetricsUrl: string;
   realtimeAdminUrl: string;
   realtimeApiSecret: string;
@@ -131,7 +124,6 @@ export interface Config {
   edgeRuntimeBackgroundInternal: string;
   edgeRuntimeMasterKey: string;
   bunPath: string;
-  supacloudBinaryPath: string;
   sdkProxyTimeoutMs: number;
   restProxyTimeoutMs: number;
   secretsEncryptionKey: string;
@@ -144,22 +136,6 @@ function getEnv(key: string, defaultValue = ""): string {
 const DEFAULT_JWT_SECRET = "super-secret-jwt-token-with-at-least-32-characters-long";
 const DEFAULT_DASHBOARD_PASSWORDS = new Set(["supabase", "supacloud", "admin", "password", "changeme"]);
 const DEVELOPMENT_ENVS = new Set(["development", "test"]);
-const DEFAULT_SUPACLOUD_BINARY_PATH = "/opt/supacloud/supacloud";
-
-export function resolveSupacloudBinaryPath(explicitPath = process.env.SUPACLOUD_BINARY_PATH, execPath = process.execPath): string {
-  const configuredPath = explicitPath?.trim();
-  if (configuredPath) {
-    return configuredPath;
-  }
-
-  const executableName = execPath.split(/[\\/]/).pop() || "";
-  if (executableName === "bun" || executableName.startsWith("bun-")) {
-    return DEFAULT_SUPACLOUD_BINARY_PATH;
-  }
-
-  return execPath || DEFAULT_SUPACLOUD_BINARY_PATH;
-}
-
 const isGithubActions = getEnv("GITHUB_ACTIONS") === "true";
 const edgeRuntimePort = Number(getEnv("EDGE_RUNTIME_PORT", "9000"));
 const edgeRuntimeMode = getEnv("EDGE_RUNTIME_MODE", "embedded") === "external" ? "external" : "embedded";
@@ -197,7 +173,7 @@ export const config: Config = {
   storageMountPoint: getEnv("STORAGE_MOUNT_POINT", "/data/storage"),
 
   imaginaryUrl: getEnv("IMAGINARY_URL", "http://127.0.0.1:9010"),
-  gatewayProvider: getEnv("GATEWAY_PROVIDER", "caddy") === "kong" ? "kong" : "caddy",
+  gatewayProvider: "caddy",
   caddyAdminUrl: getEnv("CADDY_ADMIN_URL", "http://127.0.0.1:2019"),
   caddyConfigPath: getEnv(
     "CADDY_CONFIG_PATH",
@@ -212,8 +188,6 @@ export const config: Config = {
       : "/var/lib/supacloud/caddy",
   ),
   caddyBinaryPath: getEnv("CADDY_BINARY_PATH", "/usr/local/bin/supacloud-caddy"),
-  kongAdminUrl: getEnv("KONG_ADMIN_URL", "http://localhost:8001"),
-  kongInternal: getEnv("KONG_INTERNAL", "127.0.0.1:8000"),
   victoriaMetricsUrl: getEnv("VICTORIAMETRICS_URL", "http://127.0.0.1:8428"),
   realtimeAdminUrl: getEnv("REALTIME_ADMIN_URL", "http://127.0.0.1:4000"),
   realtimeApiSecret: getEnv("REALTIME_API_SECRET", ""),
@@ -286,17 +260,12 @@ export const config: Config = {
     ),
   ),
   bunPath: getEnv("BUN_PATH", "bun"),
-  supacloudBinaryPath: resolveSupacloudBinaryPath(),
   sdkProxyTimeoutMs: Number(getEnv("SDK_PROXY_TIMEOUT_MS", "30000")),
   restProxyTimeoutMs: Number(getEnv("REST_PROXY_TIMEOUT_MS", "300000")),
   secretsEncryptionKey: getEnv("SECRETS_ENCRYPTION_KEY", getEnv("MASTER_TOKEN", "")),
 };
 
 function validateConfig() {
-  if (isStaticServeCommand()) {
-    return;
-  }
-
   if (!config.databaseUrl || !/^postgresql?:\/\//.test(config.databaseUrl)) {
     throw new Error("Invalid or missing DATABASE_URL configuration. Must be a valid postgres DSN string.");
   }

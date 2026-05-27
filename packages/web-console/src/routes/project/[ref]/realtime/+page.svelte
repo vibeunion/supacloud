@@ -58,7 +58,7 @@
 
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const host = window.location.hostname;
-    // Connect through the management-api proxy (port 3000) or Kong directly (port 8000) using ?apikey
+    // Connect through the management-api proxy using ?apikey.
     // In local dev, Management API lives on port 3000 mapping to proxy.
     const wsUrl = `${protocol}//${host}:3000/realtime/v1/websocket?apikey=${anonKey}&vsn=1.0.0`;
 
@@ -297,7 +297,7 @@
             </tr>
           </thead>
           <tbody class="divide-y divide-border/10 font-mono">
-            {#each filteredMessages as msg}
+            {#each filteredMessages as msg (msg.id)}
               {@const TypeIcon = getTypeIcon(msg.type)}
               <tr class="hover:bg-muted/10 transition-colors">
                 <td class="px-3 py-1.5 text-[10px] text-muted-foreground">{msg.timestamp}</td>

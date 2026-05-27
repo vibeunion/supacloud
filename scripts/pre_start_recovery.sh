@@ -58,17 +58,11 @@ fix_gotrue_search_path() {
 
 ensure_gateway_running() {
     local gateway_unit="${GATEWAY_UNIT:-supacloud-caddy}"
-    if [[ "${GATEWAY_PROVIDER:-caddy}" == "kong" ]]; then
-        gateway_unit="kong"
-    fi
     if systemctl list-unit-files "${gateway_unit}.service" &>/dev/null || systemctl list-units "${gateway_unit}.service" &>/dev/null; then
         if systemctl is-active --quiet "$gateway_unit" 2>/dev/null; then
             log_info "$gateway_unit service already running"
         else
             log_warn "$gateway_unit service not running, starting..."
-            if [[ "$gateway_unit" == "kong" ]]; then
-                rm -f /usr/local/kong/sockets/* /usr/local/kong/pids/nginx.pid 2>/dev/null || true
-            fi
             systemctl reset-failed "$gateway_unit" 2>/dev/null || true
             systemctl start "$gateway_unit" 2>/dev/null || true
             if systemctl is-active --quiet "$gateway_unit" 2>/dev/null; then

@@ -1,6 +1,5 @@
 import { Elysia, t } from "elysia";
 import { logger } from "./utils/logger";
-import { isStaticServeCommand } from "./config";
 
 process.on("uncaughtException", (err: Error) => {
   logger.error("FATAL UNCAUGHT EXCEPTION:", {
@@ -77,16 +76,6 @@ async function getEmbeddedAssets() {
 
 const args = process.argv.slice(2);
 
-if (isStaticServeCommand()) {
-  const { runStaticServeCli } = await import("./utils/bun-static-serve");
-  runStaticServeCli(args.slice(1));
-  await new Promise<void>((resolve) => {
-    process.once("SIGINT", resolve);
-    process.once("SIGTERM", resolve);
-  });
-  process.exit(0);
-}
-
 // --- Gateway-style try_files static asset serving ---
 // No pre-warmed Set. Direct disk checks per request (Bun.file is near-zero-cost).
 // index.html is cached in memory with mtime-based invalidation.
@@ -130,7 +119,7 @@ async function getIndexHtml(): Promise<string | null> {
   }
 }
 
-// Initialize Master Routes in Kong dynamically to avoid circular / initialization reference errors
+// Initialize gateway routes dynamically before serving traffic.
 try {
   const { gatewayService } = await import("./services/gateway.service");
   await gatewayService.setupMasterRoutes();
@@ -494,7 +483,7 @@ export function registerStaticAssets() {
         set.headers["Content-Type"] =
           MIME_TYPES[ext] || "application/octet-stream";
 
-        // Cache policy: HTML always no-cache (prevents Kong from caching stale index.html);
+        // Cache policy: HTML always no-cache; immutable hashed assets get permanent cache.
         // immutable hashed assets get permanent cache; everything else gets short cache.
         if (ext === ".html") {
           set.headers["Cache-Control"] = "no-cache";
@@ -908,9 +897,6 @@ async function bootstrap() {
         process.exit(0);
     }
     process.exit(0);
-  } else if (isStaticServeCommand()) {
-    const { runStaticServeCli } = await import("./utils/bun-static-serve");
-    runStaticServeCli(args.slice(1));
   } else if (args.includes("--version") || args.includes("-v")) {
     const pkg = await import("../package.json");
     logger.info(`SupaCloud Version: ${pkg.version}`);

@@ -358,12 +358,10 @@ BASE_DOMAIN="${deriveBaseDomain(publicDomain)}"
 LEGO_BIN="lego"
 ACME_STATE_DIR="/var/lib/supacloud/lego"
 ACME_HTTP_WEBROOT="/var/lib/supacloud/acme-challenges"
-GATEWAY_PROVIDER="caddy"
 CADDY_ADMIN_URL="http://127.0.0.1:2019"
 CADDY_CONFIG_PATH="/etc/supacloud/caddy/config.json"
 CADDY_STATE_DIR="/var/lib/supacloud/caddy"
 CADDY_BINARY_PATH="/usr/local/bin/supacloud-caddy"
-KONG_INTERNAL="127.0.0.1:8000"
 `;
     await Bun.write(configFile, envContent.trim());
     sEnv.stop("Core configuration group persisted!");

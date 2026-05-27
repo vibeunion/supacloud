@@ -147,63 +147,6 @@ PYCODE
     fi
 }
 
-configure_native_kong_systemd() {
-    log_info "Configuring Kong systemd startup guardrails..."
-    mkdir -p /opt/supacloud/scripts/lib
-    cat > /opt/supacloud/scripts/lib/kong-wait-for-postgres.sh <<'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-
-pg_isready_bin="$(command -v pg_isready || true)"
-if [[ -z "$pg_isready_bin" ]]; then
-    for candidate in /usr/pgsql/bin/pg_isready /usr/bin/pg_isready /usr/local/bin/pg_isready; do
-        if [[ -x "$candidate" ]]; then
-            pg_isready_bin="$candidate"
-            break
-        fi
-    done
-fi
-
-if [[ -z "$pg_isready_bin" ]]; then
-    echo "pg_isready not found for Kong startup check" >&2
-    exit 1
-fi
-
-for _ in {1..60}; do
-    if "$pg_isready_bin" -h 127.0.0.1 -p 5432 -U kong -d kong >/dev/null 2>&1; then
-        exit 0
-    fi
-    sleep 2
-done
-
-echo "PostgreSQL not ready for Kong" >&2
-exit 1
-EOF
-    chmod 0755 /opt/supacloud/scripts/lib/kong-wait-for-postgres.sh
-
-    mkdir -p /etc/systemd/system/kong.service.d
-    cat > /etc/systemd/system/kong.service.d/override.conf <<'EOF'
-[Unit]
-After=network-online.target patroni.service pgbouncer.service
-Wants=network-online.target patroni.service
-StartLimitIntervalSec=300
-StartLimitBurst=12
-
-[Service]
-Restart=on-failure
-RestartSec=10s
-ExecStartPre=
-ExecStartPre=/opt/supacloud/scripts/lib/kong-wait-for-postgres.sh
-ExecStartPre=/usr/local/bin/kong prepare -p /usr/local/kong
-ExecStopPost=/usr/bin/bash -lc 'rm -f /usr/local/kong/sockets/* /usr/local/kong/pids/nginx.pid 2>/dev/null || true'
-EOF
-    systemctl daemon-reload
-}
-
-cleanup_native_kong_runtime() {
-    systemctl stop kong 2>/dev/null || true
-    rm -f /usr/local/kong/sockets/* /usr/local/kong/pids/nginx.pid 2>/dev/null || true
-}
 
 configure_low_memory_tcp_guardrails() {
     case "${SUPACLOUD_ENABLE_LOW_MEMORY_TCP_GUARDRAILS:-false}" in
@@ -1437,103 +1380,12 @@ configure_external_s3() {
 }
 
 # ========== Install Pigsty ==========
-# ========== Install Kong Native Gateway (Unified Edge proxy + TLS) ==========
-install_kong_native() {
-    log_step "Installing Kong Native Gateway (DB-Backed)..."
-
-    # 1. Disable legacy host web gateways so Kong can own 80/443
-    if command -v nginx &>/dev/null || systemctl list-unit-files nginx.service &>/dev/null 2>&1; then
-        systemctl stop nginx 2>/dev/null || true
-        systemctl disable nginx 2>/dev/null || true
-    fi
-    if command -v angie &>/dev/null || systemctl list-unit-files angie.service &>/dev/null 2>&1; then
-        systemctl stop angie 2>/dev/null || true
-        systemctl disable angie 2>/dev/null || true
-    fi
-
-    # 2. Package installation
-    if command -v kong &>/dev/null; then
-        log_info "Kong already installed: $(kong version 2>&1 | head -1)"
-    elif command -v apt-get &>/dev/null; then
-        log_info "Installing Kong via apt (Ubuntu/Debian)..."
-        local KONG_MAJOR="${KONG_MAJOR:-3.9}"
-        curl -1sLf "https://packages.konghq.com/public/gateway-${KONG_MAJOR}/setup.deb.sh" | bash
-        apt-get update -y
-        DEBIAN_FRONTEND=noninteractive apt-get install -y -o Dpkg::Options::="--force-confnew" kong
-    elif command -v dnf &>/dev/null; then
-        log_info "Installing Kong via dnf (RHEL/CentOS)..."
-        local KONG_MAJOR="${KONG_MAJOR:-3.9}"
-        curl -1sLf "https://packages.konghq.com/public/gateway-${KONG_MAJOR}/setup.rpm.sh" | bash
-        dnf install -y kong
-    else
-        log_error "No supported package manager found for Kong installation"
-        return 1
-    fi
-
-    # 3. Provision DB (Assuming Postgres is up via Pigsty at 127.0.0.1:5432)
-    log_info "Provisioning Kong database on PostgreSQL..."
-    # Local postgres user comes from PG_ADMIN_PASSWORD or default Pigsty 'postgres'
-    sudo -u postgres psql -c "CREATE USER kong WITH PASSWORD 'kong';" || true
-    sudo -u postgres psql -c "ALTER USER kong WITH SUPERUSER;" || true
-    sudo -u postgres psql -c "CREATE DATABASE kong OWNER kong;" || true
-
-    ensure_pg_hba_rule "host    kong            kong             127.0.0.1/32       scram-sha-256" /pg/data/pg_hba.conf
-    ensure_pg_hba_rule "host    kong            kong             ::1/128            scram-sha-256" /pg/data/pg_hba.conf
-    ensure_pg_hba_rule "local   kong            kong                                scram-sha-256" /pg/data/pg_hba.conf
-
-    # 4. Kong Configuration
-    log_info "Configuring Native Kong..."
-    mkdir -p /etc/kong
-    cat > /etc/kong/kong.conf << 'EOF'
-database = postgres
-pg_host = 127.0.0.1
-pg_port = 5432
-pg_user = kong
-pg_password = kong
-pg_database = kong
-proxy_listen = 0.0.0.0:80, 0.0.0.0:443 ssl
-admin_listen = 127.0.0.1:8001
-plugins = bundled, acme
-EOF
-
-    # 5. Bootstrap Migrations & Enable
-    log_info "Bootstrapping Kong Migrations..."
-    kong migrations bootstrap -c /etc/kong/kong.conf || kong migrations up -c /etc/kong/kong.conf
-
-    configure_native_kong_systemd
-    cleanup_native_kong_runtime
-    systemctl enable kong
-    systemctl restart kong
-    
-    log_info "Preparing lego ACME client for Kong certificate automation..."
-    if ! command -v lego >/dev/null 2>&1; then
-        local LEGO_VERSION="${LEGO_VERSION:-4.25.2}"
-        local LEGO_ARCH="amd64"
-        case "$(uname -m)" in
-            aarch64|arm64) LEGO_ARCH="arm64" ;;
-        esac
-        local LEGO_URL="https://github.com/go-acme/lego/releases/download/v${LEGO_VERSION}/lego_v${LEGO_VERSION}_linux_${LEGO_ARCH}.tar.gz"
-        mkdir -p /tmp/supacloud-lego
-        if curl -fsSL "https://ghproxy.net/${LEGO_URL}" -o /tmp/supacloud-lego/lego.tar.gz 2>/dev/null || \
-           curl -fsSL "$LEGO_URL" -o /tmp/supacloud-lego/lego.tar.gz; then
-            tar -xzf /tmp/supacloud-lego/lego.tar.gz -C /tmp/supacloud-lego lego
-            install -m 0755 /tmp/supacloud-lego/lego /usr/local/bin/lego
-        else
-            log_warn "lego download failed; certificate automation can still use an existing LEGO_BIN later"
-        fi
-        rm -rf /tmp/supacloud-lego
-    fi
-    mkdir -p /var/lib/supacloud/lego /var/lib/supacloud/acme-challenges
-    
-    log_info "Kong Native Gateway Installation completed."
-}
-
 # ========== Install Caddy Gateway (Default Edge proxy + TLS) ==========
 install_caddy_gateway() {
     log_step "Installing SupaCloud Caddy Gateway..."
 
-    # Caddy owns public 80/443 in the new gateway model. Stop legacy listeners
-    # without uninstalling them so GATEWAY_PROVIDER=kong can still roll back.
+    # Caddy owns public 80/443 in the gateway model. Stop legacy listeners
+    # so they cannot conflict with customer traffic.
     for svc in nginx angie kong caddy; do
         if systemctl list-unit-files "${svc}.service" &>/dev/null || systemctl list-units "${svc}.service" &>/dev/null; then
             systemctl stop "$svc" 2>/dev/null || true
@@ -2564,13 +2416,10 @@ ACME_CLIENT=lego
 LEGO_BIN=${LEGO_BIN:-lego}
 ACME_STATE_DIR=${ACME_STATE_DIR:-/var/lib/supacloud/lego}
 ACME_HTTP_WEBROOT=${ACME_HTTP_WEBROOT:-/var/lib/supacloud/acme-challenges}
-GATEWAY_PROVIDER=${GATEWAY_PROVIDER:-caddy}
 CADDY_ADMIN_URL=${CADDY_ADMIN_URL:-http://127.0.0.1:2019}
 CADDY_CONFIG_PATH=${CADDY_CONFIG_PATH:-/etc/supacloud/caddy/config.json}
 CADDY_STATE_DIR=${CADDY_STATE_DIR:-/var/lib/supacloud/caddy}
 CADDY_BINARY_PATH=${CADDY_BINARY_PATH:-/usr/local/bin/supacloud-caddy}
-KONG_ADMIN_URL=http://127.0.0.1:8001
-KONG_INTERNAL=127.0.0.1:8000
 EOF
     chmod 600 /etc/supabase/management-api.env
     sync_runtime_config /etc/supabase/management-api.env
@@ -3024,10 +2873,10 @@ deploy_ai_breadcrumbs() {
 # 3. Management web-console assets are served by the management API on 9090.
 #    Tenant frontend deployments run as per-deployment static/SSR services
 #    and are exposed through Caddy routes.
-# 4. Set GATEWAY_PROVIDER=kong only for short-term rollback to the legacy provider.
 #
 # STRICT RULES:
 # - DO NOT configure Nginx/Angie for SupaCloud public routing.
+# - DO NOT enable Kong for SupaCloud public routing.
 # - To inspect routes or TLS, query Caddy: `curl -sS http://127.0.0.1:2019/config/`
 # - Logs: `journalctl -u supacloud -f`
 # ==============================================================================
@@ -3142,12 +2991,8 @@ main() {
     configure_pg_hba
     configure_low_memory_tcp_guardrails
     
-    # Gateway setup runs after Pigsty so rollback provider=kong can still provision its database.
-    if [[ "${GATEWAY_PROVIDER:-caddy}" == "kong" ]]; then
-        install_kong_native
-    else
-        install_caddy_gateway
-    fi
+    # Gateway setup runs after Pigsty so Caddy can publish routes through its Admin API.
+    install_caddy_gateway
 
     # Performance tuning after Pigsty PG initialization
     tune_postgres

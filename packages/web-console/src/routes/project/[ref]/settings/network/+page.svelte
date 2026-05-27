@@ -53,7 +53,7 @@
       return res.json();
     },
     onSuccess: () => {
-      msg = "✅ 网络限制已保存，Kong 配置已更新";
+      msg = "✅ 网络限制已保存，Caddy 配置已更新";
       queryClient.invalidateQueries({ queryKey: ["network_restrictions", projectRef] });
       setTimeout(() => msg = null, 4000);
     },
@@ -88,7 +88,7 @@
 
   <div class="rounded-lg border bg-blue-500/5 border-blue-500/20 p-3 flex items-start gap-2">
     <Shield size={14} class="text-blue-600 mt-0.5 shrink-0" />
-    <p class="text-xs text-blue-700">网络限制通过 Kong 的 <code class="bg-blue-500/10 px-1 rounded">ip-restriction</code> 插件实现。如果列表为空，则允许所有 IP 访问。添加 IP 后，只有白名单中的 IP 才能访问 API。支持 CIDR 格式（如 <code class="bg-blue-500/10 px-1 rounded">192.168.1.0/24</code>）。</p>
+    <p class="text-xs text-blue-700">网络限制由 Caddy 网关策略执行。如果列表为空，则允许所有 IP 访问。添加 IP 后，只有白名单中的 IP 才能访问 API。支持 CIDR 格式（如 <code class="bg-blue-500/10 px-1 rounded">192.168.1.0/24</code>）。</p>
   </div>
 
   {#if isLoading}
@@ -122,7 +122,7 @@
         </div>
       {:else}
         <div class="divide-y divide-border/20">
-          {#each allowedIps as ip}
+          {#each allowedIps as ip (ip)}
             <div class="flex items-center justify-between px-5 py-3 hover:bg-muted/10 transition-colors group">
               <div class="flex items-center gap-3">
                 <div class="w-8 h-8 rounded-lg bg-brand/10 text-brand flex items-center justify-center">

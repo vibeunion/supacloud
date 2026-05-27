@@ -2275,9 +2275,9 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
                 { id: "realtime", name: "Realtime", unit: "supacloud-realtime" },
                 { id: "storage", name: "Storage", unit: "supacloud-storage" },
                 {
-                    id: config.gatewayProvider === "kong" ? "kong" : "caddy",
-                    name: config.gatewayProvider === "kong" ? "Kong" : "Caddy",
-                    unit: config.gatewayProvider === "kong" ? "kong" : "supacloud-caddy",
+                    id: "caddy",
+                    name: "Caddy",
+                    unit: "supacloud-caddy",
                 },
             ];
 

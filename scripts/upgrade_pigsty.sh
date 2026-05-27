@@ -60,7 +60,7 @@ if [ -d "$HOME/pigsty" ]; then
             sed -i '/^  vars:/a\    pgbouncer_max_client_conn: 10000\n    pgbouncer_default_pool_size: 20' "$PIGSTY_YML" || true
         fi
         if [[ "$SUPACLOUD_INSTALL_LEGACY_SUPABASE_STACK" != "true" ]]; then
-            echo "=> Keeping Pigsty nginx/certbot disabled; SupaCloud owns HTTP(S) through Kong/lego"
+            echo "=> Keeping Pigsty nginx/certbot disabled; SupaCloud owns HTTP(S) through Caddy"
         fi
         # Re-apply storage type
         STORAGE_TYPE=$(grep 'S3_STORAGE_TYPE' /etc/supabase/management-api.env 2>/dev/null | cut -d= -f2 || echo "juicefs")

@@ -6,7 +6,6 @@ import { $ } from "bun";
 import { hashPayload, statusForHash } from "../hash";
 import { registerCheck } from "../../services/diagnostics.registry";
 import type { DiagnosticCheckResult, DiagnosticRepairResult } from "../../services/diagnostics.types";
-import { config } from "../../config";
 
 // --- Systemd service check ---
 registerCheck({
@@ -18,9 +17,7 @@ registerCheck({
   severity: "critical",
   repairable: false,
   async run(): Promise<DiagnosticCheckResult | null> {
-    const gateway = config.gatewayProvider === "kong"
-      ? { unit: "kong", label: "Kong Gateway" }
-      : { unit: "supacloud-caddy", label: "Caddy Gateway" };
+    const gateway = { unit: "supacloud-caddy", label: "Caddy Gateway" };
     const services = [
       { unit: "supacloud", label: "Management API" },
       gateway,

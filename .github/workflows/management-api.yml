@@ -135,17 +135,6 @@ jobs:
           docker compose -f docker/dev/docker-compose.yml config --quiet
           docker compose -f docker/self-host/docker-compose.yml config --quiet
 
-      - name: Validate Kong declarative configs
-        run: |
-          docker run --rm \
-            -e KONG_DATABASE=off \
-            -v "$PWD/docker/dev/kong/kong.yml:/kong.yml:ro" \
-            kong:3.9 kong config parse /kong.yml
-          docker run --rm \
-            -e KONG_DATABASE=off \
-            -v "$PWD/docker/self-host/kong/kong.yml:/kong.yml:ro" \
-            kong:3.9 kong config parse /kong.yml
-
       - name: Validate shell script syntax
         run: |
           bash -n install.sh setup.sh switch.sh deploy_all.sh scripts/pre_start_recovery.sh

@@ -103,7 +103,7 @@
       return res.json();
     },
     onSuccess: () => {
-      msg = "✅ 域名已添加，Kong 路由已更新";
+      msg = "✅ 域名已添加，Caddy 路由已更新";
       showAdd = false;
       newDomain = "";
       queryClient.invalidateQueries({ queryKey: ["custom_hostname", projectRef] });
@@ -129,7 +129,7 @@
       return res.json();
     },
     onSuccess: () => {
-      msg = "✅ 域名已删除，Kong 路由已更新";
+      msg = "✅ 域名已删除，Caddy 路由已更新";
       queryClient.invalidateQueries({ queryKey: ["custom_hostname", projectRef] });
       queryClient.invalidateQueries({ queryKey: ["gateway_certificate", projectRef] });
       setTimeout(() => msg = null, 4000);
@@ -141,7 +141,7 @@
   }));
 
   function deleteDomain() {
-    if (!confirm("确定删除自定义域名？删除后将自动移除 Kong 路由绑定。")) return;
+    if (!confirm("确定删除自定义域名？删除后将自动移除 Caddy 路由绑定。")) return;
     deleteMutation.mutate();
   }
 
@@ -184,7 +184,7 @@
       return res.json();
     },
     onSuccess: () => {
-      msg = "✅ 证书已签发并部署到 Kong";
+      msg = "✅ 证书已签发并部署到 Caddy";
       queryClient.invalidateQueries({ queryKey: ["gateway_certificate", projectRef] });
       setTimeout(() => msg = null, 5000);
     },
@@ -209,7 +209,7 @@
       return res.json();
     },
     onSuccess: () => {
-      msg = "✅ 证书已部署到 Kong";
+      msg = "✅ 证书已部署到 Caddy";
       manualCert = "";
       manualKey = "";
       queryClient.invalidateQueries({ queryKey: ["gateway_certificate", projectRef] });
@@ -227,7 +227,7 @@
 <div class="h-full flex flex-col space-y-4">
   <div>
     <h1 class="text-2xl font-bold">自定义域名</h1>
-    <p class="text-sm text-muted-foreground mt-1">为项目 API 配置自定义域名和 Kong TLS 证书</p>
+    <p class="text-sm text-muted-foreground mt-1">为项目 API 配置自定义域名和 Caddy TLS 证书</p>
   </div>
 
   {#if msg}
@@ -255,7 +255,7 @@
                 <span class="font-mono font-semibold">{domain.custom_hostname}</span>
                 <div class="flex items-center gap-2 mt-0.5">
                   <span class="px-2 py-0.5 rounded-full text-[9px] font-bold bg-green-500/10 text-green-600 uppercase">{domain.status}</span>
-                  <span class="text-[10px] text-muted-foreground">TLS 由 Kong certificates/SNI 管理</span>
+                  <span class="text-[10px] text-muted-foreground">TLS 由 Caddy 管理</span>
                 </div>
               </div>
             </div>
@@ -305,7 +305,7 @@
                 <Copy size={12} />
               </button>
             </div>
-            <p>DNS 生效后可在下方使用 lego 签发证书并部署到 Kong。</p>
+            <p>DNS 生效后可在下方使用 lego 签发证书并部署到 Caddy。</p>
           </div>
         </div>
 
@@ -322,7 +322,7 @@
     <!-- Certificate Automation -->
     <div class="rounded-xl border bg-card overflow-hidden">
       <div class="border-b px-6 py-4 bg-muted/20 flex items-center justify-between gap-4">
-        <h2 class="text-lg font-semibold flex items-center gap-2"><KeyRound size={18} /> Kong 证书</h2>
+        <h2 class="text-lg font-semibold flex items-center gap-2"><KeyRound size={18} /> Caddy 证书</h2>
         {#if certSettings}
           <span class="px-2 py-0.5 rounded-full text-[9px] font-bold uppercase {certSettings.status === 'deployed' ? 'bg-green-500/10 text-green-600' : certSettings.status === 'error' ? 'bg-red-500/10 text-red-600' : 'bg-muted text-muted-foreground'}">{certSettings.status}</span>
         {/if}
@@ -408,7 +408,7 @@
             <button onclick={() => deployCertMutation.mutate()} disabled={certBusy || !manualCert.trim() || !manualKey.trim() || !certDomains.trim()}
               class="px-4 py-2 text-xs font-semibold rounded-lg bg-brand text-white hover:bg-brand/90 transition-colors disabled:opacity-50 flex items-center gap-2">
               {#if deployCertMutation.isPending}<Loader2 size={12} class="animate-spin" />{:else}<Play size={12} />{/if}
-              部署到 Kong
+              部署到 Caddy
             </button>
           {/if}
         </div>
@@ -425,7 +425,7 @@
           <div class="rounded-lg border p-3 space-y-1">
             <span class="font-semibold text-foreground text-sm">API 端点</span>
             <p class="font-mono text-[11px]">{projectRef}.api.{baseDomain}</p>
-            <p>所有 PostgREST/GoTrue/Storage/Realtime 请求经由 Kong 网关路由</p>
+            <p>所有 PostgREST/GoTrue/Storage/Realtime 请求经由 Caddy 网关路由</p>
           </div>
           <div class="rounded-lg border p-3 space-y-1">
             <span class="font-semibold text-foreground text-sm">Studio 控制台</span>
@@ -435,7 +435,7 @@
         </div>
         <div class="rounded-lg bg-blue-500/5 border border-blue-500/20 p-3 flex items-start gap-2">
           <Globe size={14} class="text-blue-600 mt-0.5 shrink-0" />
-          <p class="text-blue-700">自定义域名直接绑定到 Kong 路由。证书由 lego 签发后通过 Kong Admin API 写入 certificates 和 SNI，也可以上传已有证书手动绑定。</p>
+          <p class="text-blue-700">自定义域名直接绑定到 Caddy 路由。证书由 lego 签发后写入 Caddy 配置，也可以上传已有证书手动绑定。</p>
         </div>
       </div>
     </div>

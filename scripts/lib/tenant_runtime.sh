@@ -250,7 +250,7 @@ db-extra-search-path = "public, extensions, auth, ${ref}"
 db-anon-role = "anon"
 jwt-secret = "${jwt_secret}"
 server-port = ${pgrst_port}
-# Bug Fix: Bind to 0.0.0.0 to allow Kong container (podman/docker network) access via host bridge IP
+# Bind to 0.0.0.0 so the host gateway can reach the tenant runtime.
 server-host = "0.0.0.0"
 db-pool = 3
 db-pool-acquisition-timeout = 10
@@ -268,7 +268,7 @@ EOF
     
     cat > "${TENANT_CONFIG_DIR}/${ref}_gotrue.env" <<EOF
 # SupaCloud Tenant GoTrue Runtime: ${ref}
-# Bug Fix: Bind to 0.0.0.0 to allow Kong container access via host bridge IP
+# Bind to 0.0.0.0 so the host gateway can reach the tenant runtime.
 GOTRUE_API_HOST=0.0.0.0
 GOTRUE_API_PORT=${gotrue_port}
 # Required: external URL used for email verification links and OAuth redirects

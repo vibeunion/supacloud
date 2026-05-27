@@ -697,7 +697,7 @@ export class DatabaseService {
     }
   }
 
-  // --- Kong upstream management ---
+  // --- Gateway upstream management ---
 
   async setupUpstream(
     projectRef: string,

@@ -6,7 +6,6 @@ import {
     DEFAULT_CORS_HEADERS,
     buildTenantCorsOrigins,
     gatewayService,
-    KongGatewayProvider,
 } from "../../src/services/gateway.service";
 
 function captureFetch(calls: Array<{ url: string; method: string; body: any }>) {
@@ -138,6 +137,7 @@ describe("CaddyGatewayProvider", () => {
         const storage = routes.find((route: any) => route["@id"] === "route-project-testref123-storage");
         const functions = routes.find((route: any) => route["@id"] === "route-project-testref123-functions");
         const realtime = routes.find((route: any) => route["@id"] === "route-project-testref123-realtime");
+        const management = routes.find((route: any) => route["@id"] === "route-project-testref123-management");
 
         expect(rest?.match?.[0]?.path).toEqual(["/rest/v1*"]);
         expect(rest?.handle?.some((handler: any) => handler.strip_path_prefix === "/rest/v1")).toBe(true);
@@ -157,6 +157,9 @@ describe("CaddyGatewayProvider", () => {
         expect(storage?.match?.[0]?.path).toEqual(["/storage/v1*"]);
         expect(functions?.match?.[0]?.path).toEqual(["/functions/v1*"]);
         expect(realtime?.match?.[0]?.path).toEqual(["/realtime/v1/websocket*"]);
+        expect(management?.match?.[0]?.path).toEqual(["/v1/projects/testref123", "/v1/projects/testref123/*"]);
+        expect(management?.handle?.some((handler: any) => handler.handler === "rewrite")).toBe(false);
+        expect(management?.handle?.at(-1)?.headers?.request?.set?.["X-Project-Ref"]).toEqual(["testref123"]);
 
         const corsSubroute = findCorsSubroute(rest);
         const preflight = corsSubroute?.routes?.find((route: any) =>
@@ -369,32 +372,6 @@ describe("CaddyGatewayProvider", () => {
 
         expect(routes.some((route: any) => route["@id"] === "route-project-persistref-rest")).toBe(true);
         expect(certs.length).toBeGreaterThan(0);
-
-        restore();
-    });
-});
-
-describe("KongGatewayProvider rollback compatibility", () => {
-    test("setupUpstream preserves functions prefix and storage streaming flags", async () => {
-        const calls: Array<{ url: string; method: string; body: any }> = [];
-        const restore = captureFetch(calls);
-        const provider = new KongGatewayProvider();
-
-        const result = await provider.setupUpstream("testref123", 3000, 9999);
-        expect(result.success).toBe(true);
-
-        const functionsRoute = calls.find(
-            (c) => c.method === "PUT" && c.url.includes("/routes/route-svc-functions-testref123")
-        );
-        expect(functionsRoute?.body?.paths).toEqual(["/functions/v1"]);
-        expect(functionsRoute?.body?.strip_path).toBe(false);
-
-        const storageRoute = calls.find(
-            (c) => c.method === "PUT" && c.url.includes("/routes/route-svc-storage-testref123")
-        );
-        expect(storageRoute?.body?.paths).toEqual(["/storage/v1/"]);
-        expect(storageRoute?.body?.request_buffering).toBe(false);
-        expect(storageRoute?.body?.response_buffering).toBe(false);
 
         restore();
     });

@@ -2103,7 +2103,7 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
     },
   )
 
-  // Upload an existing certificate/key pair and bind it to Kong SNIs.
+  // Upload an existing certificate/key pair and bind it to gateway hostnames.
   .post(
     "/:ref/gateway/certificate/deploy",
     async ({ params, body, request }) => {

@@ -1,9 +1,8 @@
 import { $ } from "bun";
 import * as p from "@clack/prompts";
 import { logger } from "../utils/logger";
-import { config } from "../config";
 
-const GATEWAY_UNIT = config.gatewayProvider === "kong" ? "kong" : "supacloud-caddy";
+const GATEWAY_UNIT = "supacloud-caddy";
 const CONTROL_UNITS = ["supacloud", GATEWAY_UNIT, "supacloud-realtime"];
 
 async function unitExists(unit: string): Promise<boolean> {

@@ -461,7 +461,7 @@ export class ProjectService {
       checkService(`supacloud-gotrue@${ref}`),
       checkService("supacloud-realtime"),
       checkService(`supacloud-storage@${ref}`),
-      checkService(config.gatewayProvider === "kong" ? "kong" : "supacloud-caddy"),
+      checkService("supacloud-caddy"),
       checkContainer("supacloud-realtime"),
     ]);
 
@@ -512,7 +512,7 @@ export class ProjectService {
         { name: "GoTrue", status: gotrueStatus },
         { name: "Realtime", status: realtimeStatus },
         { name: "Storage", status: storageStatus },
-        { name: config.gatewayProvider === "kong" ? "Kong" : "Caddy", status: gatewaySystemd },
+        { name: "Caddy", status: gatewaySystemd },
       ],
     };
   }

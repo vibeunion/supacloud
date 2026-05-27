@@ -225,8 +225,7 @@ export const projectServiceRoutes = new Elysia({ prefix: "/v1/projects" })
       const sharedUnitMap: Record<string, string> = {
         postgresql: "patroni",
         realtime: "supacloud-realtime",
-        gateway: config.gatewayProvider === "kong" ? "kong" : "supacloud-caddy",
-        kong: "kong",
+        gateway: "supacloud-caddy",
         caddy: "supacloud-caddy",
       };
       const serviceMap: Record<string, string> = { ...projectUnitMap, ...sharedUnitMap };

@@ -21,7 +21,7 @@ import { TusStore, SignedStore, startStorageCleanupJob, type SignedUpload } from
  *   PUT    /storage/v1/bucket/:id                    → update bucket
  *   DELETE /storage/v1/bucket/:id                    → delete bucket
  * 
- * Kong strips the /storage/v1 prefix before forwarding to this service,
+ * The public gateway strips the /storage/v1 prefix before forwarding to this service,
  * so our routes start from /object/... and /bucket/...
  * 
  * This file is mounted as a SEPARATE Elysia instance at /storage/v1 prefix
@@ -195,7 +195,7 @@ async function verifySignedToken(ref: string, bucket: string, path: string, toke
 
 /**
  * Extract project ref from request.
- * Kong forwards the x-project-ref header; also fall back to apikey-based lookup.
+ * The public gateway forwards the x-project-ref header; also fall back to apikey-based lookup.
  */
 async function resolveProjectRefFromApiKey(key: string): Promise<string> {
     if (!key) return '';
@@ -340,7 +340,7 @@ function setDownloadDisposition(query: Record<string, string | undefined>, fileP
 }
 
 // ── Supabase SDK-Compatible Routes ────────────────────────────────
-// These are mounted DIRECTLY by Kong at /storage/v1 (Kong strips prefix)
+// These are mounted directly by the public gateway at /storage/v1.
 // So these routes see paths starting from /object/..., /bucket/..., /render/...
 
 // Auto-cleanup abandoned uploads every 10 minutes
@@ -539,8 +539,8 @@ function signedUploadMatches(upload: SignedUpload | null, ref: string, bucket: s
 export const storageCompatRoutes = new Elysia({ prefix: "" })
 
     // ── Origin Guard: reject requests without a valid project reference ──
-    // Storage compat routes rely on Kong-injected x-project-ref.
-    // If accessed directly (bypassing Kong), getProjectRef returns '' and each
+    // Storage compat routes rely on gateway-injected x-project-ref.
+    // If accessed directly (bypassing the gateway), getProjectRef returns '' and each
     // route already returns 400 "Missing tenant reference". This guard adds
     // defense-in-depth logging for monitoring direct-access attempts.
     .onBeforeHandle(async ({ headers, request }) => {

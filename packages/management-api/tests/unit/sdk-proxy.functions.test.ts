@@ -300,7 +300,7 @@ describe("sdkProxyRoutes functions proxy", () => {
     });
   });
 
-  test("functions proxy accepts Kong-injected project ref on trusted custom API host without apikey", async () => {
+  test("functions proxy accepts gateway-injected project ref on trusted custom API host without apikey", async () => {
     await withSdkProxyTestContext(async ({ calls, trackSpy }) => {
       const sqlSpy = trackSpy(spyOn(dbModule, "sql"));
       let sawProjectLookup = false;

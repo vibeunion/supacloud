@@ -214,7 +214,7 @@ export class TaskWorker {
                     // Register this tenant's independent upstream in the configured gateway
                     const upstreamRes = await databaseService.setupUpstream(project_ref, port, gotruePort);
                     if (!upstreamRes.success) {
-                        logger.error(`[TaskWorker] Failed to setup Kong upstream for ${project_ref}`);
+                        logger.error(`[TaskWorker] Failed to setup gateway upstream for ${project_ref}`);
                         return false;
                     }
 
@@ -328,7 +328,7 @@ export class TaskWorker {
                     if (process.env.TEST_FIXED_JWT_SECRET) return true;
                     // Stop tenant PostgREST + GoTrue processes and clean config files
                     await tenantRuntimeService.stopRuntime(project_ref);
-                    // Remove Kong Service/Route
+                    // Remove gateway routes.
                     try {
                         await gatewayService.removeService(project_ref);
                     } catch (e: unknown) {

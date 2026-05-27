@@ -34,7 +34,7 @@
       { name: "GoTrue", icon: Shield, status: svcArr.find((s: Record<string, unknown>) => s.name === "GoTrue")?.status || "INACTIVE", systemdUnit: `supacloud-gotrue@${projectRef}` },
       { name: "Realtime", icon: Radio, status: svcArr.find((s: Record<string, unknown>) => s.name === "Realtime")?.status || "INACTIVE", systemdUnit: `supacloud-realtime@${projectRef}` },
       { name: "Storage", icon: HardDrive, status: svcArr.find((s: Record<string, unknown>) => s.name === "Storage")?.status || "INACTIVE", systemdUnit: `supacloud-storage@${projectRef}` },
-      { name: "Kong", icon: Activity, status: svcArr.find((s: Record<string, unknown>) => s.name === "Kong")?.status || "INACTIVE", systemdUnit: "kong" },
+      { name: "Caddy", icon: Activity, status: svcArr.find((s: Record<string, unknown>) => s.name === "Caddy")?.status || "INACTIVE", systemdUnit: "supacloud-caddy" },
     ];
   });
 
@@ -157,7 +157,7 @@
       </div>
     {:else}
       <div class="divide-y divide-border/20">
-        {#each services as svc}
+        {#each services as svc (svc.name)}
           <div class="flex items-center justify-between px-6 py-4 hover:bg-muted/5 transition-colors">
             <div class="flex items-center gap-3">
               <div class="w-10 h-10 rounded-lg flex items-center justify-center {svc.status === 'ACTIVE_HEALTHY' ? 'bg-green-500/10 text-green-600' : 'bg-muted/50 text-muted-foreground'}">

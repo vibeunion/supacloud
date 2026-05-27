@@ -9,7 +9,7 @@
  *
  * Deployment flow:
  *   static on Caddy: build -> precompress -> switch file_server route
- *   SSR / Kong fallback: build -> start process -> readiness -> switch proxy route
+ *   SSR: build -> start process -> readiness -> switch proxy route
  */
 import { $ } from "bun";
 import { readdir, readFile, stat, writeFile } from "node:fs/promises";
@@ -509,8 +509,7 @@ export class FrontendService {
         await this.precompressStaticAssets(buildDir);
       }
 
-      const needsProcess = defaults.is_ssr || config.gatewayProvider === "kong";
-      if (needsProcess) {
+      if (defaults.is_ssr) {
         // Blue-green: start process FIRST, but do NOT route traffic yet
         const port = await this.startProcess(projectRef, deploymentId, deployment, buildDir, defaults.is_ssr);
 
@@ -556,16 +555,15 @@ export class FrontendService {
   async configureGatewayRoute(deployment: FrontendDeployment, buildDir: string, isSSR: boolean): Promise<void> {
     const port = 30000 + parseInt(deployment.id, 16) % 10000;
     const hosts = [deployment.domain, ...deployment.custom_domains];
-    const useCaddyStatic = !isSSR && config.gatewayProvider === "caddy";
 
     const { gatewayService } = await import("./gateway.service");
     await gatewayService.configureFrontendRoute({
       projectRef: deployment.project_ref,
       deploymentId: deployment.id,
       hosts,
-      port: useCaddyStatic ? undefined : port,
-      root: useCaddyStatic ? buildDir : undefined,
-      mode: useCaddyStatic ? "static" : "proxy",
+      port: isSSR ? port : undefined,
+      root: isSSR ? undefined : buildDir,
+      mode: isSSR ? "proxy" : "static",
     });
   }
 
@@ -578,11 +576,10 @@ export class FrontendService {
   }
 
 
-  // ── Process Management (static vs SSR) ──────────────────────────
+  // ── Process Management (SSR only) ───────────────────────────────
 
   /**
    * Start the frontend process and return the port.
-   * Static only starts a process for the legacy Kong rollback path.
    * SSR: bun run buildDir/index.js (user must expose /healthz or rely on process start)
    */
   private async startProcess(
@@ -601,12 +598,12 @@ export class FrontendService {
       .join("\n");
     await Bun.write(envFile, envContent);
 
-    const bunPath = config.bunPath;
-    let systemdUnit: string;
+    if (!isSSR) {
+      throw new Error("Static frontend deployments are served directly by Caddy");
+    }
 
-    if (isSSR) {
-      // SSR: user framework handles HTTP; rely on process startup for readiness
-      systemdUnit = `[Unit]
+    const bunPath = config.bunPath;
+    const systemdUnit = `[Unit]
 Description=SupaCloud Frontend SSR: ${deployment.name} (${projectRef}/${deploymentId})
 After=network.target
 
@@ -626,29 +623,6 @@ LimitNOFILE=65536
 [Install]
 WantedBy=multi-user.target
 `;
-    } else {
-      // Static: binary-backed static-serve with built-in /healthz
-      systemdUnit = `[Unit]
-Description=SupaCloud Frontend Static: ${deployment.name} (${projectRef}/${deploymentId})
-After=network.target
-
-[Service]
-Type=simple
-User=root
-WorkingDirectory=${buildDir}
-Environment="PORT=${port}"
-Environment="NODE_ENV=production"
-EnvironmentFile=-/etc/supabase/management-api.env
-EnvironmentFile=${envFile}
-ExecStart=${config.supacloudBinaryPath} static-serve ${buildDir} ${port} --workers=auto
-Restart=always
-RestartSec=5
-LimitNOFILE=65536
-
-[Install]
-WantedBy=multi-user.target
-`;
-    }
 
     const servicePath = `/etc/systemd/system/${serviceName}.service`;
     await Bun.write(servicePath, systemdUnit);

@@ -77,14 +77,12 @@ export const authMfaRoutes = new Elysia({ prefix: "/v1/projects" })
       if (!serviceRoleKey) {
         return status(404, { message: "Project service role key not found", code: "404" });
       }
-      const { config } = await import("../config");
-
       let apiUrl: string;
       const gotruePort = await getGotruePort(params.ref);
       if (gotruePort) {
         apiUrl = `http://127.0.0.1:${gotruePort}`;
       } else {
-        apiUrl = config.kongInternal.startsWith('http') ? config.kongInternal : `http://${config.kongInternal}`;
+        return status(503, { message: "GoTrue admin endpoint unavailable", code: "503" });
       }
 
       try {

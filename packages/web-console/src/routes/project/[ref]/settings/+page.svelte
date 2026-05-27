@@ -415,7 +415,7 @@
         {:else}
           <!-- Add domain form -->
           <div class="space-y-3">
-            <p class="text-xs text-muted-foreground">Bind a custom domain for your project API. TLS certificates are managed through Kong certificates/SNI.</p>
+            <p class="text-xs text-muted-foreground">Bind a custom domain for your project API. TLS certificates are managed through Caddy.</p>
             <div class="flex gap-2">
               <input type="text" bind:value={newDomain} placeholder="e.g. api.example.com"
                 class="flex-1 px-3 py-2 text-sm rounded-lg border bg-background focus:outline-none focus:ring-2 focus:ring-brand/50 font-mono"
@@ -441,7 +441,7 @@
             {$t("Settings.services")}
           </h2>
           <div class="grid grid-cols-2 lg:grid-cols-3 gap-3">
-            {#each ((project as Record<string, unknown>)?.services as unknown[] || []) as service}
+            {#each ((project as Record<string, unknown>)?.services as unknown[] || []) as service ((service as Record<string, unknown>).name)}
               <div class="flex items-center justify-between p-3 rounded-lg border bg-background">
                 <div class="flex items-center gap-2">
                   <Activity size={14} class={(service as Record<string, unknown>).status === 'ACTIVE_HEALTHY' ? 'text-green-500' : 'text-muted-foreground'} />

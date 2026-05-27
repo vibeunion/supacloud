@@ -3,6 +3,7 @@ import { logger } from "../utils/logger";
 import { shellService } from './shell.service';
 import { projectRepository } from '../repositories/project.repository';
 import { normalizeProjectConfig } from '../utils/project-config';
+import { gatewayService } from './gateway.service';
 
 export type ComputeScalingStatus = "active" | "scaling" | "failed";
 export type ReadReplicaStatus = "provisioning" | "active" | "deleting" | "deleted" | "failed";
@@ -242,7 +243,7 @@ export class ScalingService {
             throw new Error(replicaResult.error || "replica initialization failed");
         }
 
-        const gatewayResult = await shellService.execute('gateway_manager.sh', ['add-upstream-target', projectRef, ip]);
+        const gatewayResult = await gatewayService.addUpstreamTarget(projectRef, ip);
         if (!gatewayResult.success) {
             const failed: ReadReplicaRecord = {
                 ...record,
@@ -283,7 +284,7 @@ export class ScalingService {
             read_replicas: replicas.map((replica) => replica.id === replicaId ? deleting : replica),
         });
 
-        const gatewayResult = await shellService.execute('gateway_manager.sh', ['remove-upstream-target', projectRef, existing.ip]);
+        const gatewayResult = await gatewayService.removeUpstreamTarget(projectRef, existing.ip);
         if (!gatewayResult.success) {
             const failed: ReadReplicaRecord = {
                 ...existing,
