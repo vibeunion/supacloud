@@ -125,6 +125,8 @@ def main() -> None:
     print("PGSODIUM_KEY_FILE=/run/secrets/pgsodium_key")
     print("PGSODIUM_ENABLE_EVENT_TRIGGER=off")
     print("ENABLE_SUPABASE_VAULT=false")
+    print("VAULT_KEY=")
+    print("VAULT_KEY_FILE=/run/secrets/vault_key")
     print(f"JWT_SECRET={args.jwt_secret}")
     print(f"ANON_KEY={anon_key}")
     print(f"SERVICE_ROLE_KEY={service_role_key}")

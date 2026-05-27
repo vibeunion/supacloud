@@ -111,7 +111,21 @@ To create Supabase Vault as well:
 ENABLE_SUPABASE_VAULT=true
 ```
 
-`ENABLE_SUPABASE_VAULT=true` requires `ENABLE_PGSODIUM=true`. The pgsodium key must remain stable across restarts and app upgrades; changing it without a planned migration can make encrypted values unreadable.
+Optional dedicated Vault key:
+
+```text
+VAULT_KEY=<64-character-hex-key>
+```
+
+Optional dedicated Vault key file:
+
+```text
+VAULT_KEY_FILE=/run/secrets/vault_key
+```
+
+If neither Vault variable is set, the image falls back to `PGSODIUM_KEY_FILE`, then `PGSODIUM_KEY`.
+
+`ENABLE_SUPABASE_VAULT=true` requires `ENABLE_PGSODIUM=true`. The active Vault key must remain stable across restarts and app upgrades; changing it without a planned migration can make encrypted values unreadable.
 
 ## Important initialization rule
 
@@ -125,7 +139,7 @@ This image uses init scripts to:
 - optionally preload and create `pgsodium`
 - optionally create `supabase_vault`
 
-`pgsodium` and `supabase_vault` packages are present in the image, but they are not bootstrapped by default in self-host mode. When `ENABLE_PGSODIUM=true`, the image preloads `pgsodium`, uses the bundled `pgsodium_getkey` script, and creates the extension during first initialization.
+`pgsodium` and `supabase_vault` packages are present in the image, but they are not bootstrapped by default in self-host mode. When `ENABLE_PGSODIUM=true`, the image preloads `pgsodium`, uses the bundled `pgsodium_getkey` script, and creates the extension during first initialization. When `ENABLE_SUPABASE_VAULT=true`, it also preloads `supabase_vault`, uses the bundled `vault_getkey` script, and creates the Vault extension during first initialization.
 
 If TrueNAS already initialized the app data directory, changing `ENABLE_FERRETDB` later will not replay those init scripts. In that case, use a fresh data directory or apply the role and extension changes manually.
 
