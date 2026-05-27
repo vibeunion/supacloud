@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
+import { afterAll, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 
 const baseMock = mock(() => Promise.resolve([]));
 (baseMock as unknown as Record<string, unknown>).unsafe = mock(() => Promise.resolve([]));
@@ -539,4 +539,8 @@ describe("ProjectService - Comprehensive", () => {
       "my-func",
     );
   });
+});
+
+afterAll(() => {
+  mock.restore();
 });
