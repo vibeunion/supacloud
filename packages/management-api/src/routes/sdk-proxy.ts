@@ -5,7 +5,6 @@ import { getProjectDb } from "../db";
 import { config } from "../config";
 import { sql as metaSql } from "../db";
 import { logger } from "../utils/logger";
-import { DEFAULT_CORS_HEADERS, DEFAULT_CORS_EXPOSED } from '../services/gateway.service';
 import { backgroundTaskService } from "../services/background-task.service";
 import { edgeFunctionService } from "../services/edge-function.service";
 import { projectService } from "../services/project.service";
@@ -73,46 +72,6 @@ function isLoopbackRequestHost(request: Request): boolean {
 
 function isTestTenantAuthAllowed(request: Request): boolean {
     return (process.env.BUN_ENV === 'test' || process.env.NODE_ENV === 'test') && isLoopbackRequestHost(request);
-}
-
-async function isCredentialedOriginAllowed(origin: string, ref: string | undefined): Promise<boolean> {
-    if (!ref) return false;
-    let originHost = "";
-    try {
-        const parsed = new URL(origin);
-        if (!["http:", "https:"].includes(parsed.protocol)) return false;
-        originHost = parsed.hostname.toLowerCase();
-    } catch {
-        return false;
-    }
-
-    if (originHost === "localhost" || originHost === "127.0.0.1" || originHost === "::1") return true;
-    if (hostBelongsToBaseDomain(originHost)) return true;
-
-    try {
-        const rows = await metaSql`
-            SELECT ref
-            FROM projects
-            WHERE ref = ${ref}
-              AND deleted_at IS NULL
-              AND status = 'active'
-              AND (
-                config->>'custom_domain' = ${originHost}
-                OR config->>'api_domain' = ${originHost}
-                OR config->>'studio_domain' = ${originHost}
-                OR config->>'custom_domain' = ${originHost.replace(/^api\./, '')}
-              )
-            LIMIT 1
-        `;
-        return rows.length > 0;
-    } catch (error: unknown) {
-        logger.warn("[SDK Proxy] Failed to verify credentialed CORS origin", {
-            ref,
-            originHost,
-            error: error instanceof Error ? error.message : String(error),
-        });
-        return false;
-    }
 }
 
 async function verifyJwtPayload(ref: string, token: string): Promise<Record<string, unknown> | null> {
@@ -377,24 +336,6 @@ async function getTenantPorts(ref: string): Promise<{ gotruePort: number, pgrstP
     }
 }
 
-async function applyCorsHeaders(proxyHeaders: Headers, request: Request, ref?: string) {
-    const origin = request.headers.get('origin');
-    if (!origin) return;
-
-    const hasCredentials = request.headers.get('authorization') || request.headers.get('cookie');
-    if (hasCredentials && await isCredentialedOriginAllowed(origin, ref)) {
-        proxyHeaders.set('access-control-allow-origin', origin);
-        proxyHeaders.set('access-control-allow-credentials', 'true');
-        proxyHeaders.set('vary', [proxyHeaders.get('vary'), 'origin'].filter(Boolean).join(', '));
-    } else {
-        proxyHeaders.set('access-control-allow-origin', '*');
-    }
-    proxyHeaders.set('access-control-allow-methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS, HEAD');
-    proxyHeaders.set('access-control-allow-headers', DEFAULT_CORS_HEADERS.join(', '));
-    proxyHeaders.set('access-control-expose-headers', DEFAULT_CORS_EXPOSED.join(', '));
-    proxyHeaders.set('access-control-max-age', '86400');
-}
-
 type ProxyInterceptors = {
     linkOrigin?: string;
     ref?: string;
@@ -404,6 +345,10 @@ type ProxyInterceptors = {
 
 async function executeProxy(request: Request, targetUrl: string, interceptors: ProxyInterceptors) {
     try {
+        if (request.method === 'OPTIONS') {
+             return new Response(null, { status: 204 });
+        }
+
         const body = ["GET", "HEAD"].includes(request.method) ? undefined : request.body;
         
         const reqHeaders = new Headers(request.headers);
@@ -471,12 +416,6 @@ async function executeProxy(request: Request, targetUrl: string, interceptors: P
         });
 
         proxyHeaders.set('x-supabase-api-version', new Date().toISOString().slice(0, 10).replace(/-/g, '').substring(0, 8));
-
-        await applyCorsHeaders(proxyHeaders, request, interceptors.ref);
-        
-        if (request.method === 'OPTIONS') {
-             return new Response(null, { status: 204, headers: proxyHeaders });
-        }
 
         return new Response(response.body, {
             status: response.status,

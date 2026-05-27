@@ -125,7 +125,7 @@ describe("sdkProxyRoutes functions proxy", () => {
     });
   });
 
-  test("OPTIONS /functions/v1 allows SupaCloud async browser headers", async () => {
+  test("OPTIONS /functions/v1 stops at the SDK proxy without emitting CORS headers", async () => {
     await withSdkProxyTestContext(async ({ calls }) => {
       const response = await request("/functions/v1/aorist-generation/generate/crop", {
         method: "OPTIONS",
@@ -139,11 +139,9 @@ describe("sdkProxyRoutes functions proxy", () => {
       });
 
       expect(response.status).toBe(204);
-      expect(calls).toHaveLength(1);
-      const allowedHeaders = response.headers.get("access-control-allow-headers") || "";
-      expect(allowedHeaders).toContain("x-supacloud-async");
-      expect(allowedHeaders).toContain("x-supacloud-timeout");
-      expect(allowedHeaders).toContain("x-supacloud-retries");
+      expect(calls).toHaveLength(0);
+      expect(response.headers.has("access-control-allow-origin")).toBe(false);
+      expect(response.headers.has("access-control-allow-headers")).toBe(false);
     });
   });
 
