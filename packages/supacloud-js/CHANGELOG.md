@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.18.1](https://github.com/zuohuadong/supacloud/compare/supacloud-js-v0.18.0...supacloud-js-v0.18.1) (2026-05-28)
+
+
+### Documentation
+
+* align gateway docs with caddy runtime ([bf1c24f](https://github.com/zuohuadong/supacloud/commit/bf1c24fc7faa7992c83152bbdae2eaeff23c471b))
+* align gateway docs with caddy runtime ([8588ba4](https://github.com/zuohuadong/supacloud/commit/8588ba4151e26e8816a8a42c89daaecfb6285289))
+
 ## [0.18.0](https://github.com/zuohuadong/supacloud/compare/supacloud-js-v0.17.0...supacloud-js-v0.18.0) (2026-05-26)
 
 
