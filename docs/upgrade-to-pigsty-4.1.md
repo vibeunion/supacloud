@@ -1,6 +1,6 @@
 # Upgrade to Pigsty 4.3
 
-This guide helps existing SupaCloud users upgrade the Pigsty foundation to v4.3 while preserving SupaCloud's own Kong, Edge Runtime, task, and JuiceFS-backed storage integration.
+This guide helps existing SupaCloud users upgrade the Pigsty foundation to v4.3 while preserving SupaCloud's own Caddy gateway, Edge Runtime, task, and JuiceFS-backed storage integration.
 
 ## Important Notes
 

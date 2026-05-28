@@ -1,14 +1,14 @@
 # SupaCloud Multi-Tenant Architecture
 
-> **Status**: Implemented (Option C+ with Kong Native API-Driven Gateway)  
+> **Status**: Implemented (Option C+ with Caddy Admin API-Driven Gateway)  
 > **Last Updated**: 2026-05-11
 
 ## Current Architecture
 
 ```
 ┌──────────────┐     ┌──────────────────┐     ┌───────────────┐
-│  Kong (Native │ ──► │ PostgREST(:310x) ──► │ supa_tenant_1 │
-│  OpenResty)  │     │ GoTrue(:410x)    │     └───────────────┘
+│  Caddy       │ ──► │ PostgREST(:310x) ──► │ supa_tenant_1 │
+│  Gateway     │     │ GoTrue(:410x)    │     └───────────────┘
 │  :80/:443    │     │ (per-tenant)     │     ┌───────────────┐
 │              │     └──────────────────┘ ──► │ supa_tenant_N │
 │  Plugins:    │                              └───────────────┘
@@ -27,8 +27,8 @@
                      └──────────────────┘
 ```
 
-> **Note**: SupaCloud natively relies on **Kong (DB-backed, API-driven)** running as a systemd service.
-> All tenant routing, rate limiting, CORS, and SSL are managed via Kong Admin API — no manual config file edits needed.
+> **Note**: SupaCloud natively relies on **Caddy** running as a systemd service.
+> All tenant routing, rate limiting, CORS, and TLS are managed via the Caddy Admin API — no manual config file edits needed.
 
 ### 1. PostgREST & GoTrue (Per-Tenant Processes) ⭐ Implemented
 These core REST, GraphQL, and Authentication services are extremely lightweight (20-50MB RAM). 
@@ -40,13 +40,13 @@ We spin up a unique `postgrest` AND `gotrue` process for *every* tenant dynamica
 - Desired state is stored per project in dedicated `projects.postgrest_*` metadata columns and is reconciled to actual systemd state in the runtime worker.
 - PostgREST-only lifecycle actions do not restart GoTrue, so REST-only repairs do not disturb authentication traffic.
 
-### 2. Kong API-Driven Gateway ⭐ Implemented
-Kong runs in **DB-backed mode** (PostgreSQL) as a native systemd service, fully managed via the Kong Admin API:
-- `GatewayService.ensureServiceAndRoute()` creates/updates Kong services and routes per tenant.
-- Per-route plugins (CORS, rate-limiting, JWT, request-transformer) are applied dynamically.
-- Global plugins (Gzip compression, security response headers, ACME SSL) are configured at the Kong level.
+### 2. Caddy API-Driven Gateway ⭐ Implemented
+Caddy runs as a native systemd service, fully managed via the Caddy Admin API:
+- `GatewayService.ensureServiceAndRoute()` creates/updates Caddy routes per tenant.
+- Per-route CORS, rate-limiting, auth forwarding, and websocket behavior are rendered dynamically into JSON config.
+- Global Automatic HTTPS, security response headers, and TLS issuance policy are configured at the gateway level.
 - **Programmable Rate Limiting**: Per-tenant rate limits can be set via `PUT /v1/projects/:ref/gateway/rate-limit` (supports tier presets or custom second/minute/hour values).
-- No manual YAML editing or `kong reload` — all changes take effect immediately via Admin API.
+- No manual config editing or daemon reload workflow — all changes take effect via Admin API publishing.
 
 ### 3. Storage API
 SupaCloud serves Supabase-compatible Storage through Management API storage routes. Binary data is written to the configured physical backend, while metadata is written to the tenant database with Row Level Security context applied.
@@ -75,7 +75,7 @@ Storage object listing is paginated and sorted in SQL rather than loading full o
 ### 6. Realtime API & Admin Console
 - **Realtime (Elixir)**: Very resource-intensive as it listens to PostgreSQL logical replication slots. Recommended to remain a shared premium feature or require dedicated high-tier clusters.
 - **Web Console (SVAdmin Hybrid Mount)**: The central dashboard (`web-console`) is fully multi-tenant aware via URL routing parameter `[ref]`. It acts as the Host/SuperAdmin dashboard, but internally relies on the `@svadmin/core` `DataProvider`. When standard CRUD is requested (e.g. Auth Users or DB Tables), the root `+layout.svelte` dynamically bridges SvelteKit routing into SVAdmin's resources array. 
-  - This allows the UI to render `svadmin` `<AutoTable>` and `useList` hooks seamlessly while hitting RESTful routes securely proxied to the tenant specific GoTrue / PostgREST instances via the Kong proxy.
+  - This allows the UI to render `svadmin` `<AutoTable>` and `useList` hooks seamlessly while hitting RESTful routes securely proxied to the tenant specific GoTrue / PostgREST instances via the Caddy gateway.
 
 ### 7. Edge Function Preheating ⭐ Implemented
 When a function is deployed via the Management API:

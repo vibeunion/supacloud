@@ -16,9 +16,8 @@ SupaCloud (:9090)             Edge Runtime (:9000)
                               ├── URL Import Mapping (compat imports → npm/shims)
                               └── /preheat endpoint (zero cold-start)
 
-Kong Gateway (API-driven, native OpenResty):
-  Global: ACME SSL, Gzip, Security Headers
-  Per-route: CORS, Rate Limiting, JWT
+Caddy Gateway (Admin API-driven):
+  Automatic HTTPS, security headers, route JSON publishing, CORS, rate limiting
   /api/*        → :9090 (Management API)
   /functions/*  → :9090 (Management API sdk-proxy)
   /realtime/*   → :9090 (Management API websocket proxy)
@@ -136,7 +135,7 @@ Browser websocket traffic should enter through the Management API first:
 - upstream owner: Management API websocket proxy on `:9090`
 - Realtime container remains the internal upstream
 
-Do not route browser websocket traffic straight from Kong to the Elixir Realtime container's `/socket` path. That older topology is prone to:
+Do not route browser websocket traffic straight from Caddy to the Elixir Realtime container's `/socket` path. That older topology is prone to:
 
 - tenant host/path mismatches
 - wrong upstream rewrite behavior
@@ -145,7 +144,7 @@ Do not route browser websocket traffic straight from Kong to the Elixir Realtime
 The current supported model is:
 
 ```text
-browser -> Kong -> Management API (:9090) -> Realtime upstream
+browser -> Caddy -> Management API (:9090) -> Realtime upstream
 ```
 
 ## Realtime Tenant Recovery
