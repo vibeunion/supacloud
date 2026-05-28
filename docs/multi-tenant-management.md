@@ -6,7 +6,7 @@ This document details the technical solution design for multi-project management
 
 ## 1. Architecture Overview
 
-Multiple Supabase projects are run with logical isolation by sharing infrastructure (Pigsty PostgreSQL, Kong API gateway, and object storage).
+Multiple Supabase projects are run with logical isolation by sharing infrastructure (Pigsty PostgreSQL, the SupaCloud Caddy gateway, and object storage).
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -26,7 +26,7 @@ Multiple Supabase projects are run with logical isolation by sharing infrastruct
 ├─────────────────────────────────────────────────────────────┤
 │                    Shared Infrastructure                     │
 │  ┌────────────┐  ┌────────────┐  ┌────────────┐             │
-│  │ PostgreSQL │  │   Kong     │  │ Obj Storage│             │
+│  │ PostgreSQL │  │   Caddy    │  │ Obj Storage│             │
 │  │  (Pigsty)  │  │  Gateway   │  │(JuiceFS/…) │             │
 │  └────────────┘  └────────────┘  └────────────┘             │
 └─────────────────────────────────────────────────────────────┘
@@ -86,13 +86,13 @@ CREATE INDEX idx_projects_status ON projects(status);
 
 ### 2.4 DNS and Routing Isolation
 
-Dynamic Vhost generation via Kong API-driven routing. Management API configures Kong routes programmatically.
+Dynamic Vhost generation via Caddy Admin API-driven routing. Management API publishes Caddy routes programmatically.
 
 | Domain Pattern | Routing Target |
 |----------------|----------------|
-| `api.example.com` | Shared Kong Gateway |
+| `api.example.com` | Shared Caddy Gateway |
 | `studio.example.com` | Shared Studio Console |
-| `<project>.api.example.com` | Kong + Tenant Header |
+| `<project>.api.example.com` | Caddy + Tenant Header |
 
 ---
 
@@ -121,9 +121,9 @@ Migration is project-scoped and writes ES256 `JWT_KEYS` / `JWT_JWKS` material in
 
 Existing `anon` and `service_role` API keys remain project-scoped and verifiable during migration. They are not shared across projects or accounts.
 
-### 3.4 Kong Integration
+### 3.4 Caddy Gateway Integration
 
-Kong dynamically validates JWT keys for different projects based on `Host` Header.
+Caddy dynamically routes requests for different projects based on `Host` header and the route JSON published by Management API.
 
 ---
 
@@ -222,7 +222,7 @@ Kong dynamically validates JWT keys for different projects based on `Host` Heade
 /opt/supacloud/scripts/lib/
 ├── db_manager.sh      # Database management
 ├── storage_manager.sh # Storage management (JuiceFS/S3)
-├── gateway_manager.sh # Kong routing management
+├── gateway service    # Caddy routing is managed in the Management API gateway provider
 └── jwt_manager.sh     # JWT key management
 ```
 
@@ -254,18 +254,9 @@ storage_manager.sh delete <project_ref>
 storage_manager.sh credentials <project_ref>
 ```
 
-#### gateway_manager.sh
+#### Gateway routing
 
-```bash
-# Provision Kong consumer/JWT settings for a project
-gateway_manager.sh setup-project <project_ref> <jwt_secret>
-
-# Update rate limiting profile
-gateway_manager.sh set-rate-limit <project_ref> <free|pro|enterprise>
-
-# Configure CORS origins
-gateway_manager.sh set-cors <project_ref> <origins>
-```
+Caddy routing is no longer managed through a standalone shell helper. The Management API publishes tenant routes, rate limiting, CORS, and TLS state directly to the Caddy Admin API.
 
 #### jwt_manager.sh
 
@@ -348,7 +339,7 @@ supacloud_project_storage_bytes{project_ref="abc123"}
 3. Create database → Rollback on failure
 4. Create storage bucket → Rollback database on failure
 5. Generate JWT keys
-6. Configure Kong routing
+6. Configure Caddy routing
 7. Update status: active
 ```
 
@@ -366,7 +357,7 @@ supacloud_project_storage_bytes{project_ref="abc123"}
 |-------|------|--------|
 | 1 | Basic API + Database layer | Runnable CRUD API |
 | 2 | Shell script integration | Complete project creation flow |
-| 3 | Kong dynamic routing | Multi-tenant domain support |
+| 3 | Caddy dynamic routing | Multi-tenant domain support |
 | 4 | Monitoring integration | Grafana multi-project dashboard |
 | 5 | CLI segmentation | Separate operator and project-user workflows |
 

@@ -87,7 +87,7 @@ The helper maps to these SupaCloud Management API routes:
 
 Boundary:
 
-- Use `@supacloud/js` for SupaCloud-owned infrastructure orchestration: GoTrue env injection, restart/reconcile, Kong route setup, runtime health checks, and public client config discovery.
+- Use `@supacloud/js` for SupaCloud-owned infrastructure orchestration: GoTrue env injection, restart/reconcile, Caddy route setup, runtime health checks, and public client config discovery.
 - Use `@supabase/supabase-js` for normal application runtime calls: auth session, database, storage, realtime, and edge functions.
 - Use the SupaOAuth product SDK or Management API for SupaOAuth-owned resources: applications, connectors, organizations, roles, permissions, audit logs, and webhooks.
 - Do not expose SupaCloud Management API credentials in browser code.

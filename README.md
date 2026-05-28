@@ -20,7 +20,7 @@
 - **Pigsty Powered**: Enterprise-grade PostgreSQL with built-in monitoring (Grafana)
 - **One-Click Installation**: Fully automated setup via `install.sh`
 - **JuiceFS Storage**: Powered by PostgreSQL Large Objects (LO) for ultra-thin metadata
-- **Caddy Gateway**: Dynamic API Router, native ACME SSL, Gzip, Security Headers, Programmable Rate Limiting, and CORS
+- **Caddy Gateway**: Automatic HTTPS, Admin API-driven route publishing, programmable rate limiting, security headers, and CORS
 - **Auto-scaling Engine**: Rule-based vertical and horizontal scaling based on real-time metrics
 - **Bun Edge Runtime**: Bun.js + Elysia Worker Pool for Edge Functions, with built-in Deno compatibility shim for legacy user code
 - **SSE Real-time Logs**: Server-Sent Events streaming for live log tailing via `journalctl --follow`
@@ -324,7 +324,7 @@ Function management read endpoints under `/v1/projects/:ref/functions*` require 
 | Deploy | `/v1/deploy/*` | Edge Function deployment |
 | Tasks | `/v1/projects/:ref/tasks/*` | Background task monitoring, including lightweight `summary=true` list mode |
 | **Logs SSE** | `GET /v1/projects/:ref/logs/stream` | **Real-time log streaming via Server-Sent Events** |
-| **Rate Limit** | `GET/PUT /v1/projects/:ref/gateway/rate-limit` | **Programmable per-project rate limiting (Caddy Admin API)** |
+| **Rate Limit** | `GET/PUT /v1/projects/:ref/gateway/rate-limit` | **Programmable per-project rate limiting (Caddy route policy)** |
 | **WebSocket** | `ws://host/ws/tasks` | **Real-time task progress notifications** |
 
 #### Runtime Switching
@@ -352,9 +352,8 @@ SupaCloud (:9090)          Edge Runtime (:9000)
 └── Static Assets (ETag)   ├── URL Import Plugin
                            └── /preheat (zero cold-start)
 
-Caddy Gateway (API-driven, native JSON config):
-  Global: ACME SSL, Gzip, Security Headers, Access Logs
-  Per-route: CORS, Rate Limiting, JWT, IP Restriction
+Caddy Gateway (Admin API-driven):
+  Automatic HTTPS, route JSON publishing, security headers, rate limiting, CORS
   /api/*        → :9090
   /functions/*  → :9090 (sdk-proxy, async enqueue + sync relay)
 ```
@@ -489,7 +488,7 @@ supacloud/
 ├── scripts/
 │   └── lib/                    # Shell script modules
 │       ├── db_manager.sh       # Database lifecycle
-│       ├── gateway_manager.sh  # Caddy gateway configuration
+│       ├── gateway provider    # Caddy route publishing is managed in management-api
 │       ├── tenant_runtime.sh   # Tenant PostgREST & GoTrue runtime
 │       ├── function_manager.sh # Edge Functions management
 │       ├── s3_manager.sh       # Storage backend management
@@ -555,7 +554,7 @@ Key settings in `config.env`:
 - **Pigsty 驱动**: 企业级 PostgreSQL，内置 Grafana 监控
 - **一键部署**: 通过 `install.sh` 全自动安装
 - **JuiceFS 存储**: 基于 PostgreSQL Large Objects (LO) 后端，极致轻量
-- **Caddy 深度集成**: 原生动态路由，全程 Caddy Admin API 驱动，原生 ACME SSL、Gzip 压缩、安全响应头、编程式限流
+- **Caddy 网关**: Automatic HTTPS、Admin API 驱动的动态路由发布、安全响应头与编程式限流
 - **自动扩缩容**: 基于负载指标的垂直提升与水平副本扩展
 - **Bun Edge Runtime**: 基于 Bun.js + Elysia Worker Pool，内置 Deno 兼容层以兼容旧函数代码
 - **SSE 实时日志**: 基于 Server-Sent Events 的实时日志流，`journalctl --follow` 推送
@@ -843,7 +842,7 @@ curl http://localhost:9090/v1/projects/<ref>/api-keys \
 | 部署 | `/v1/deploy/*` | Edge Function 部署 |
 | 任务 | `/v1/projects/:ref/tasks/*` | 后台 AI/通用异步任务生命周期观测与监控，支持 `summary=true` 轻量列表 |
 | **日志 SSE** | `GET /v1/projects/:ref/logs/stream` | **实时日志流（Server-Sent Events）** |
-| **限流** | `GET/PUT /v1/projects/:ref/gateway/rate-limit` 及 `custom-rate-limits` | **编程式架构与客户端路由自定限流（Caddy Admin API 驱动）** |
+| **限流** | `GET/PUT /v1/projects/:ref/gateway/rate-limit` 及 `custom-rate-limits` | **编程式架构与客户端路由自定限流（Caddy 路由策略）** |
 | **WebSocket** | `ws://host/ws/tasks` | **实时任务进度推送** |
 
 #### 运行时切换
@@ -871,9 +870,8 @@ SupaCloud (:9090)          Edge Runtime (:9000)
 └── 静态资源 (ETag/304)    ├── URL Import 插件
                            └── /preheat (零冷启动预热)
 
-Caddy 网关 (API 驱动，原生 JSON 配置):
-  全局插件: ACME SSL, Gzip 压缩, 安全响应头, 访问日志
-  路由级插件: CORS, 限流, JWT, IP 限制
+Caddy 网关 (Admin API 驱动):
+  Automatic HTTPS、动态路由 JSON 发布、安全响应头、限流、CORS
   /api/*        → :9090 (管理 API)
   /functions/*  → :9090 (sdk-proxy，异步入队 + 同步转发)
 ```
@@ -970,7 +968,7 @@ supacloud/
 ├── scripts/
 │   └── lib/                    # Shell 脚本模块
 │       ├── db_manager.sh       # 数据库生命周期
-│       ├── gateway_manager.sh  # Caddy 网关配置
+│       ├── gateway provider    # Caddy 路由发布由 management-api 内部管理
 │       ├── tenant_runtime.sh   # 租户 PostgREST & GoTrue 运行时
 │       ├── function_manager.sh # 云函数管理
 │       ├── s3_manager.sh       # 存储后端管理

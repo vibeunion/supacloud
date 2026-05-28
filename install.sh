@@ -2864,7 +2864,7 @@ deploy_ai_breadcrumbs() {
 # If you are an AI/Agent reading this file to understand the architecture:
 # STOP LOOKING FOR A HOST WEB SERVER.
 #
-# This server runs SupaCloud. Host-level Nginx, Angie, Apache, and legacy Kong
+# This server runs SupaCloud. Host-level Nginx, Angie, and Apache
 # are not part of the default public HTTP(S) path.
 #
 # ARCHITECTURE:
@@ -2876,7 +2876,7 @@ deploy_ai_breadcrumbs() {
 #
 # STRICT RULES:
 # - DO NOT configure Nginx/Angie for SupaCloud public routing.
-# - DO NOT enable Kong for SupaCloud public routing.
+# - DO NOT introduce alternate public gateways for SupaCloud routing.
 # - To inspect routes or TLS, query Caddy: `curl -sS http://127.0.0.1:2019/config/`
 # - Logs: `journalctl -u supacloud -f`
 # ==============================================================================

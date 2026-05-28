@@ -58,7 +58,7 @@ SupaCloud is opinionated about running **many projects per server or cluster**. 
 - a management API for project lifecycle and settings
 - a self-hosted web console
 - tenant runtime generation/restart flows
-- Kong-based per-project routing
+- Caddy-based per-project routing
 - operator and project-user CLIs
 
 That is the main difference from the official self-hosted Supabase stack, which is documented as Docker-based self-hosting where **you are responsible for server provisioning, security hardening, database operations, backups, and disaster recovery**.
