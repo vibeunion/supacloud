@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.27.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.26.4...management-api-v0.27.0) (2026-05-28)
+
+
+### Features
+
+* **auth:** orchestrate dedicated auth domains with Caddy ([d5357ff](https://github.com/zuohuadong/supacloud/commit/d5357ffbbfd4aa3d98d815e8ca1efcf3d87c6544))
+* **auth:** orchestrate dedicated auth domains with Caddy ([8b38b29](https://github.com/zuohuadong/supacloud/commit/8b38b29ff76dbd5fecbe0a4e75d619919437e142))
+* **tenant-runtime:** persist allocated ports to DB and reuse on restart ([e612962](https://github.com/zuohuadong/supacloud/commit/e6129620ec3bd906a2fc7f15daef0858e420f7f9))
+
+
+### Bug Fixes
+
+* **auth:** address auth domain review feedback ([0b71e4a](https://github.com/zuohuadong/supacloud/commit/0b71e4afa7ef6dec853d354cb8bb170f6b636294))
+* **auth:** address auth domain review feedback ([3dab280](https://github.com/zuohuadong/supacloud/commit/3dab280a62cbbc5ac05e9096d0adf1f17e2eaaa3))
+
 ## [0.26.4](https://github.com/zuohuadong/supacloud/compare/management-api-v0.26.3...management-api-v0.26.4) (2026-05-27)
 
 
