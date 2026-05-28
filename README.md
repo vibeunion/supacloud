@@ -20,7 +20,7 @@
 - **Pigsty Powered**: Enterprise-grade PostgreSQL with built-in monitoring (Grafana)
 - **One-Click Installation**: Fully automated setup via `install.sh`
 - **JuiceFS Storage**: Powered by PostgreSQL Large Objects (LO) for ultra-thin metadata
-- **Kong API Gateway**: DB-backed Dynamic API Router, native ACME SSL, Gzip, Security Headers, Programmable Rate Limiting, and CORS
+- **Caddy Gateway**: Dynamic API Router, native ACME SSL, Gzip, Security Headers, Programmable Rate Limiting, and CORS
 - **Auto-scaling Engine**: Rule-based vertical and horizontal scaling based on real-time metrics
 - **Bun Edge Runtime**: Bun.js + Elysia Worker Pool for Edge Functions, with built-in Deno compatibility shim for legacy user code
 - **SSE Real-time Logs**: Server-Sent Events streaming for live log tailing via `journalctl --follow`
@@ -69,7 +69,7 @@ Detailed feature comparison:
 ├─────────────────────────────────────────────────────────────┤
 │                   Shared Infrastructure                      │
 │  ┌────────────┐  ┌────────────┐  ┌────────────┐            │
-│  │ PostgreSQL │  │   Kong     │  │  JuiceFS   │            │
+│  │ PostgreSQL │  │   Caddy    │  │  JuiceFS   │            │
 │  │  (Pigsty)  │  │  Gateway   │  │  (PG-LO)   │            │
 │  └────────────┘  └────────────┘  └────────────┘            │
 │                  ┌────────────┐                             │
@@ -324,7 +324,7 @@ Function management read endpoints under `/v1/projects/:ref/functions*` require 
 | Deploy | `/v1/deploy/*` | Edge Function deployment |
 | Tasks | `/v1/projects/:ref/tasks/*` | Background task monitoring, including lightweight `summary=true` list mode |
 | **Logs SSE** | `GET /v1/projects/:ref/logs/stream` | **Real-time log streaming via Server-Sent Events** |
-| **Rate Limit** | `GET/PUT /v1/projects/:ref/gateway/rate-limit` | **Programmable per-project rate limiting (Kong Admin API)** |
+| **Rate Limit** | `GET/PUT /v1/projects/:ref/gateway/rate-limit` | **Programmable per-project rate limiting (Caddy Admin API)** |
 | **WebSocket** | `ws://host/ws/tasks` | **Real-time task progress notifications** |
 
 #### Runtime Switching
@@ -352,9 +352,9 @@ SupaCloud (:9090)          Edge Runtime (:9000)
 └── Static Assets (ETag)   ├── URL Import Plugin
                            └── /preheat (zero cold-start)
 
-Kong Gateway (API-driven, native OpenResty):
-  Global plugins: ACME SSL, Gzip, Security Headers, Access Logs
-  Per-route plugins: CORS, Rate Limiting, JWT, IP Restriction
+Caddy Gateway (API-driven, native JSON config):
+  Global: ACME SSL, Gzip, Security Headers, Access Logs
+  Per-route: CORS, Rate Limiting, JWT, IP Restriction
   /api/*        → :9090
   /functions/*  → :9090 (sdk-proxy, async enqueue + sync relay)
 ```
@@ -401,7 +401,7 @@ Realtime traffic also enters through the Management API first:
 
 - `/realtime/v1/websocket` is routed to `:9090`
 - the Management API owns the websocket upgrade and proxies upstream Realtime traffic
-- Kong should not point browser websocket traffic directly at the Elixir Realtime container
+- Caddy should not point browser websocket traffic directly at the Elixir Realtime container
 
 This avoids tenant/path mismatches such as:
 
@@ -489,7 +489,7 @@ supacloud/
 ├── scripts/
 │   └── lib/                    # Shell script modules
 │       ├── db_manager.sh       # Database lifecycle
-│       ├── gateway_manager.sh  # Kong gateway configuration
+│       ├── gateway_manager.sh  # Caddy gateway configuration
 │       ├── tenant_runtime.sh   # Tenant PostgREST & GoTrue runtime
 │       ├── function_manager.sh # Edge Functions management
 │       ├── s3_manager.sh       # Storage backend management
@@ -555,7 +555,7 @@ Key settings in `config.env`:
 - **Pigsty 驱动**: 企业级 PostgreSQL，内置 Grafana 监控
 - **一键部署**: 通过 `install.sh` 全自动安装
 - **JuiceFS 存储**: 基于 PostgreSQL Large Objects (LO) 后端，极致轻量
-- **Kong 深度集成**: DB-backed 原生动态路由，全程 API 驱动，原生 ACME SSL、Gzip 压缩、安全响应头、编程式限流
+- **Caddy 深度集成**: 原生动态路由，全程 Caddy Admin API 驱动，原生 ACME SSL、Gzip 压缩、安全响应头、编程式限流
 - **自动扩缩容**: 基于负载指标的垂直提升与水平副本扩展
 - **Bun Edge Runtime**: 基于 Bun.js + Elysia Worker Pool，内置 Deno 兼容层以兼容旧函数代码
 - **SSE 实时日志**: 基于 Server-Sent Events 的实时日志流，`journalctl --follow` 推送
@@ -604,7 +604,7 @@ SupaCloud 更准确的定位是：**面向自托管场景的多租户 Supabase �
 ├─────────────────────────────────────────────────────────────┤
 │                       共享基础设施                            │
 │  ┌────────────┐  ┌────────────┐  ┌────────────┐            │
-│  │ PostgreSQL │  │    Kong    │  │  JuiceFS   │            │
+│  │ PostgreSQL │  │   Caddy    │  │  JuiceFS   │            │
 │  │  (Pigsty)  │  │    网关    │  │  (PG-LO)   │            │
 │  └────────────┘  └────────────┘  └────────────┘            │
 │                  ┌────────────┐                             │
@@ -843,7 +843,7 @@ curl http://localhost:9090/v1/projects/<ref>/api-keys \
 | 部署 | `/v1/deploy/*` | Edge Function 部署 |
 | 任务 | `/v1/projects/:ref/tasks/*` | 后台 AI/通用异步任务生命周期观测与监控，支持 `summary=true` 轻量列表 |
 | **日志 SSE** | `GET /v1/projects/:ref/logs/stream` | **实时日志流（Server-Sent Events）** |
-| **限流** | `GET/PUT /v1/projects/:ref/gateway/rate-limit` 及 `custom-rate-limits` | **编程式架构与客户端路由自定限流（Kong Admin API 驱动）** |
+| **限流** | `GET/PUT /v1/projects/:ref/gateway/rate-limit` 及 `custom-rate-limits` | **编程式架构与客户端路由自定限流（Caddy Admin API 驱动）** |
 | **WebSocket** | `ws://host/ws/tasks` | **实时任务进度推送** |
 
 #### 运行时切换
@@ -871,7 +871,7 @@ SupaCloud (:9090)          Edge Runtime (:9000)
 └── 静态资源 (ETag/304)    ├── URL Import 插件
                            └── /preheat (零冷启动预热)
 
-Kong 网关 (API 驱动，原生 OpenResty):
+Caddy 网关 (API 驱动，原生 JSON 配置):
   全局插件: ACME SSL, Gzip 压缩, 安全响应头, 访问日志
   路由级插件: CORS, 限流, JWT, IP 限制
   /api/*        → :9090 (管理 API)
@@ -905,7 +905,7 @@ Realtime 流量也先进入 Management API：
 
 - `/realtime/v1/websocket` 路由到 `:9090`
 - Management API 负责 websocket upgrade 并代理到上游 Realtime
-- Kong 不应把浏览器 websocket 流量直接指向 Elixir Realtime 容器
+- Caddy 不应把浏览器 websocket 流量直接指向 Elixir Realtime 容器
 
 安装或迁移后如果 Realtime 订阅异常，可以运行：
 
@@ -970,7 +970,7 @@ supacloud/
 ├── scripts/
 │   └── lib/                    # Shell 脚本模块
 │       ├── db_manager.sh       # 数据库生命周期
-│       ├── gateway_manager.sh  # Kong 网关配置
+│       ├── gateway_manager.sh  # Caddy 网关配置
 │       ├── tenant_runtime.sh   # 租户 PostgREST & GoTrue 运行时
 │       ├── function_manager.sh # 云函数管理
 │       ├── s3_manager.sh       # 存储后端管理
