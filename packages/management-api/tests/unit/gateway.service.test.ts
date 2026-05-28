@@ -106,10 +106,12 @@ describe("GatewayService provider selection", () => {
     test("tenant cors origins include exact api and studio custom domains", () => {
         const origins = buildTenantCorsOrigins("dbbabyref", {
             api_domain: "sapi.dbbaby.top",
+            auth_domain: "auth.dbbaby.top",
             studio_domain: "sadmin.dbbaby.top",
         });
 
         expect(origins).toContain("https://sapi.dbbaby.top");
+        expect(origins).toContain("https://auth.dbbaby.top");
         expect(origins).toContain("https://sadmin.dbbaby.top");
     });
 });
@@ -131,6 +133,7 @@ describe("CaddyGatewayProvider", () => {
         expect(load).toBeDefined();
         const server = load?.body?.apps?.http?.servers?.supacloud;
         expect(server).not.toHaveProperty("http3");
+        expect(server?.tls_connection_policies).toEqual([{}]);
         expect(load?.body?.apps?.tls?.automation?.policies?.[0]?.key_type).toBe("p256");
         const routes = load?.body?.apps?.http?.servers?.supacloud?.routes ?? [];
         const rest = routes.find((route: any) => route["@id"] === "route-project-testref123-rest");
@@ -171,6 +174,34 @@ describe("CaddyGatewayProvider", () => {
         expect(corsHeaders?.response?.set?.["Access-Control-Allow-Origin"]).toEqual(["{http.request.header.Origin}"]);
         expect(corsHeaders?.response?.set?.["Access-Control-Allow-Credentials"]).toEqual(["true"]);
         expect(preflight?.match?.some((matcher: any) => matcher.header_regexp?.Origin?.pattern?.includes("localhost"))).toBe(true);
+
+        restore();
+    });
+
+    test("setupUpstream renders auth-only routes for a dedicated auth domain", async () => {
+        const calls: Array<{ url: string; method: string; body: any }> = [];
+        const restore = captureFetch(calls);
+        const provider = new CaddyGatewayProvider();
+
+        const result = await provider.setupUpstream("proj123", 3000, 9999, {
+            api_domain: "api.example.com",
+            auth_domain: "auth.example.com",
+            studio_domain: "studio.example.com",
+        });
+        expect(result.success).toBe(true);
+
+        const load = calls.filter((call) => call.method === "POST" && call.url.endsWith("/load")).at(-1);
+        const routes = load?.body?.apps?.http?.servers?.supacloud?.routes ?? [];
+        const rest = routes.find((route: any) => route["@id"] === "route-project-proj123-rest");
+        const auth = routes.find((route: any) => route["@id"] === "route-project-proj123-auth-domain-auth");
+        const wellKnown = routes.find((route: any) => route["@id"] === "route-project-proj123-auth-domain-gotrue-well-known");
+
+        expect(rest?.match?.[0]?.host).not.toContain("auth.example.com");
+        expect(auth?.match?.[0]?.host).toEqual(["auth.example.com"]);
+        expect(auth?.match?.[0]?.path).toEqual(["/auth/v1*"]);
+        expect(auth?.handle?.some((handler: any) => handler.strip_path_prefix === "/auth/v1")).toBe(true);
+        expect(wellKnown?.match?.[0]?.host).toEqual(["auth.example.com"]);
+        expect(wellKnown?.match?.[0]?.path).toEqual(["/.well-known/oauth-authorization-server/auth/v1*"]);
 
         restore();
     });

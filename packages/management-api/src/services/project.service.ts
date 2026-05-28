@@ -32,6 +32,7 @@ export interface CreateProjectRequest {
   organization_id?: string;
   domain?: string; // Base custom domain (e.g., "aorist.cn") — auto generates api.X / studio.X
   api_domain?: string; // Explicit API domain (e.g., "xg-api.aizhuliren.cn")
+  auth_domain?: string; // Explicit Auth/OIDC domain (e.g., "auth.example.com")
   studio_domain?: string; // Explicit Studio domain (e.g., "xg-studio.aizhuliren.cn")
 }
 
@@ -244,6 +245,9 @@ export class ProjectService {
     // Support explicit api_domain / studio_domain (takes precedence over base domain)
     if (request.api_domain) {
       initialConfig.api_domain = request.api_domain;
+    }
+    if (request.auth_domain) {
+      initialConfig.auth_domain = request.auth_domain;
     }
     if (request.studio_domain) {
       initialConfig.studio_domain = request.studio_domain;
@@ -598,6 +602,7 @@ export class ProjectService {
     const routingKeys: Array<keyof typeof config> = [
       "custom_domain",
       "api_domain",
+      "auth_domain",
       "studio_domain",
       "site_url",
       "siteUrl",

@@ -7,6 +7,7 @@ import { resolveProjectServiceRoleKey } from "../utils/service-role";
 import { sql as metaSql } from "../db";
 import {
   normalizeProjectRoutingConfig,
+  resolveProjectAuthUrl,
   resolveProjectApiUrl,
   resolveTenantPorts,
 } from "../utils/project-routing";
@@ -72,6 +73,7 @@ async function loadProjectContext(ref: string) {
   const rawConfig = normalizeProjectConfig(rows[0]?.config);
   const routingConfig = normalizeProjectRoutingConfig(rawConfig);
   const apiUrl = resolveProjectApiUrl(ref, routingConfig).replace(/\/+$/, "");
+  const authUrl = resolveProjectAuthUrl(ref, routingConfig).replace(/\/+$/, "");
   const serviceRoleKey = await resolveProjectServiceRoleKey(ref);
   const ports = resolveTenantPorts(routingConfig);
   const gotrueUrl = ports?.gotruePort
@@ -85,7 +87,8 @@ async function loadProjectContext(ref: string) {
     organizationId: rows[0]?.organization_id || project.organization_id || "default",
     jwtSecret: String(rows[0]?.jwt_secret || ""),
     apiUrl,
-    issuer: oauthServer.issuer || `${apiUrl}/auth/v1`,
+    authUrl,
+    issuer: oauthServer.issuer || `${authUrl}/auth/v1`,
     gotrueUrl,
     serviceRoleKey,
     oauthServer,
@@ -94,7 +97,7 @@ async function loadProjectContext(ref: string) {
 
 function buildOAuthServerStatus(ctx: NonNullable<Awaited<ReturnType<typeof loadProjectContext>>>) {
   const issuer = ctx.issuer.replace(/\/+$/, "");
-  const apiUrl = ctx.apiUrl.replace(/\/+$/, "");
+  const authUrl = ctx.authUrl.replace(/\/+$/, "");
   const jwtKeys = normalizeProjectJwtKeys(ctx.oauthServer.jwt_keys);
   const jwtJwks = normalizeProjectJwtJwks(ctx.oauthServer.jwt_jwks);
   const migrated = Boolean(jwtKeys && jwtJwks);
@@ -106,7 +109,7 @@ function buildOAuthServerStatus(ctx: NonNullable<Awaited<ReturnType<typeof loadP
     allow_dynamic_registration: ctx.oauthServer.allow_dynamic_registration === true,
     issuer,
     discovery_url: `${issuer}/.well-known/openid-configuration`,
-    oauth_authorization_server_metadata_url: `${apiUrl}/.well-known/oauth-authorization-server/auth/v1`,
+    oauth_authorization_server_metadata_url: `${authUrl}/.well-known/oauth-authorization-server/auth/v1`,
     jwks_url: `${issuer}/.well-known/jwks.json`,
     authorization_endpoint: `${issuer}/oauth/authorize`,
     token_endpoint: `${issuer}/oauth/token`,
