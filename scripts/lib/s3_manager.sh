@@ -40,6 +40,12 @@ load_credentials() {
             S3_ACCESS_KEY="${MINIO_ACCESS_KEY:-minioadmin}"
             S3_SECRET_KEY="${MINIO_SECRET_KEY:-minioadmin}"
             ;;
+        external)
+            S3_ENDPOINT="${EXTERNAL_S3_ENDPOINT:-$S3_ENDPOINT}"
+            S3_ACCESS_KEY="${EXTERNAL_S3_ACCESS_KEY:-$S3_ACCESS_KEY}"
+            S3_SECRET_KEY="${EXTERNAL_S3_SECRET_KEY:-$S3_SECRET_KEY}"
+            BUCKET_NAME="${EXTERNAL_S3_BUCKET:-$BUCKET_NAME}"
+            ;;
     esac
 }
 
