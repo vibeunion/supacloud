@@ -6,6 +6,8 @@ import {
   resolveTenantPorts,
   resolveProjectApiHost,
   resolveProjectApiUrl,
+  resolveProjectAuthHost,
+  resolveProjectAuthUrl,
   resolveProjectBaseHost,
   resolveProjectStudioHost,
   resolveProjectStudioUrl,
@@ -59,15 +61,29 @@ describe("project routing", () => {
     expect(matchProjectRefFromHost("api.other.example", "77az24zz7p", configJson)).toBe(false);
   });
 
+  test("resolves dedicated auth domains without changing the API host", () => {
+    const projectConfig = {
+      api_domain: "api.example.com",
+      auth_domain: "auth.example.com",
+      studio_domain: "studio.example.com",
+    };
+
+    expect(resolveProjectApiHost("77az24zz7p", projectConfig)).toBe("api.example.com");
+    expect(resolveProjectAuthHost("77az24zz7p", projectConfig)).toBe("auth.example.com");
+    expect(matchProjectRefFromHost("auth.example.com", "77az24zz7p", projectConfig)).toBe(true);
+  });
+
   test("uses ENABLE_SSL to resolve public API and Studio URL schemes", () => {
     config.baseDomain = "192.168.1.168.sslip.io";
 
     config.enableSsl = true;
     expect(resolveProjectApiUrl("dglewlzugrtygzysqrce", null)).toBe("https://dglewlzugrtygzysqrce.api.192.168.1.168.sslip.io");
+    expect(resolveProjectAuthUrl("dglewlzugrtygzysqrce", null)).toBe("https://dglewlzugrtygzysqrce.api.192.168.1.168.sslip.io");
     expect(resolveProjectStudioUrl("dglewlzugrtygzysqrce", null)).toBe("https://studio-dglewlzugrtygzysqrce.192.168.1.168.sslip.io");
 
     config.enableSsl = false;
     expect(resolveProjectApiUrl("dglewlzugrtygzysqrce", null)).toBe("http://dglewlzugrtygzysqrce.api.192.168.1.168.sslip.io");
+    expect(resolveProjectAuthUrl("dglewlzugrtygzysqrce", null)).toBe("http://dglewlzugrtygzysqrce.api.192.168.1.168.sslip.io");
     expect(resolveProjectStudioUrl("dglewlzugrtygzysqrce", null)).toBe("http://studio-dglewlzugrtygzysqrce.192.168.1.168.sslip.io");
   });
 });

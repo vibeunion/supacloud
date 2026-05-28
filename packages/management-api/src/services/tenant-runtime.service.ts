@@ -8,8 +8,9 @@ import type { OAuthProvider, OAuthProviderConfig } from "../types/oauth";
 import { OAUTH_ENV_MAPPINGS } from "../types/oauth";
 import { tenantOAuthService } from "./tenant-oauth.service";
 import { resolveProjectApiUrl, resolveProjectAuthUrl, resolveProjectStudioUrl } from "../utils/project-routing";
-import { normalizeProjectConfig } from "../utils/project-config";
+import { normalizeOAuthServerConfig, normalizeProjectConfig } from "../utils/project-config";
 import { normalizeProjectJwtJwks, normalizeProjectJwtKeys } from "../utils/project-jwt";
+import { uniqueStrings } from "../utils/strings";
 
 function stringifyJsonConfig(value: unknown): string | null {
     if (!value) return null;
@@ -18,10 +19,6 @@ function stringifyJsonConfig(value: unknown): string | null {
 
 function quoteSystemdEnvValue(value: string): string {
     return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
-}
-
-function uniqueStrings(values: Array<string | undefined | null>): string[] {
-    return Array.from(new Set(values.map((value) => String(value || "").trim()).filter(Boolean)));
 }
 
 export interface RuntimeStatus {
@@ -1070,7 +1067,7 @@ class TenantRuntimeService {
 
         const projectConfig = normalizeProjectConfig(project.config);
         const authConfig = (projectConfig.auth as Record<string, unknown>) || {};
-        const oauthServerConfig = (authConfig.oauth_server || {}) as Record<string, unknown>;
+        const oauthServerConfig = normalizeOAuthServerConfig(authConfig.oauth_server);
         const jwtKeys = stringifyJsonConfig(normalizeProjectJwtKeys(oauthServerConfig.jwt_keys));
         const jwtJwks = stringifyJsonConfig(normalizeProjectJwtJwks(oauthServerConfig.jwt_jwks));
         return {
@@ -1189,6 +1186,8 @@ db-channel = "${resolvePgrstChannel(ref)}"
         const apiExternalUrl = hasDedicatedAuthUrl ? creds.authUrl : creds.apiUrl;
         const siteExternalUrl = hasDedicatedAuthUrl ? creds.authUrl : creds.siteUrl;
         const siteHost = siteExternalUrl.replace('https://', '').replace('http://', '').split('/')[0].split(':')[0];
+        const webAuthnOrigins = uniqueStrings([siteExternalUrl, creds.apiUrl, creds.siteUrl]
+            .map((value) => this.toWebAuthnOrigin(value)));
         const redirectOrigins = uniqueStrings([
             creds.uriAllowList,
             creds.siteUrl,
@@ -1218,7 +1217,7 @@ GOTRUE_EXTERNAL_EMAIL_ENABLED=true
 GOTRUE_EXTERNAL_PHONE_ENABLED=true
 GOTRUE_WEBAUTHN_ENABLED=true
 GOTRUE_WEBAUTHN_RP_ID=${siteHost}
-GOTRUE_WEBAUTHN_RP_ORIGINS=${uniqueStrings([siteExternalUrl, creds.apiUrl, creds.siteUrl]).join(",")}
+GOTRUE_WEBAUTHN_RP_ORIGINS=${webAuthnOrigins.join(",")}
 GOTRUE_PASSWORD_MIN_LENGTH=8
 GOTRUE_SECURITY_REFRESH_TOKEN_ROTATION_ENABLED=true
 GOTRUE_SECURITY_REFRESH_TOKEN_ROTATION_REUSE_INTERVAL=10
@@ -1230,11 +1229,11 @@ GOTRUE_MAILER_URLPATHS_EMAIL_CHANGE=/auth/v1/verify
 GOTRUE_OPERATOR_TOKEN=${config.masterToken || creds.serviceRoleKey}
 `.trim();
 
-        const oauthServerConfig = (creds.authConfig.oauth_server || {}) as Record<string, unknown>;
+        const oauthServerConfig = normalizeOAuthServerConfig(creds.authConfig.oauth_server);
         if (oauthServerConfig.enabled === true) {
             const authorizationPath = typeof oauthServerConfig.authorization_path === "string"
                 ? oauthServerConfig.authorization_path
-                : (typeof oauthServerConfig.authorizationPath === "string" ? oauthServerConfig.authorizationPath : "");
+                : "";
             gotrueEnv += `
 
 # OAuth 2.1 / OIDC Provider Configuration
@@ -1268,6 +1267,22 @@ GOTRUE_MAILER_AUTOCONFIRM=true
         await Bun.write(path.join(this.TENANT_CONFIG_DIR, `${ref}_gotrue.env`), gotrueEnv);
 
         logger.info(`Config generated for ${ref} (pgrst_port=${pgrstPort}, gotrue_port=${gotruePort})`);
+    }
+
+    private toWebAuthnOrigin(value: string | undefined | null): string | null {
+        const raw = String(value || "").trim();
+        if (!raw) return null;
+
+        try {
+            const parsed = new URL(raw.includes("://") ? raw : `https://${raw}`);
+            const hostname = parsed.hostname.toLowerCase();
+            const protocol = hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1" || hostname === "[::1]"
+                ? parsed.protocol
+                : "https:";
+            return `${protocol}//${parsed.host}`;
+        } catch {
+            return null;
+        }
     }
 
     private async installSystemdTemplate() {

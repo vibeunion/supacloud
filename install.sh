@@ -1442,6 +1442,8 @@ install_caddy_gateway() {
         return 1
     fi
 
+    # The empty TLS connection policy is intentional: without it Caddy can keep
+    # :443 as a plain HTTP listener when loading JSON with both :80 and :443.
     cat > /etc/supacloud/caddy/config.json <<'EOF'
 {
   "admin": { "listen": "127.0.0.1:2019" },

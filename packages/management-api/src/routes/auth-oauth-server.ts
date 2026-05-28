@@ -11,7 +11,7 @@ import {
   resolveProjectApiUrl,
   resolveTenantPorts,
 } from "../utils/project-routing";
-import { normalizeProjectConfig } from "../utils/project-config";
+import { normalizeOAuthServerConfig, normalizeProjectConfig } from "../utils/project-config";
 import {
   generateOidcJwtKeyMaterial,
   normalizeProjectJwtJwks,
@@ -52,6 +52,7 @@ type OAuthServerSettings = {
   migrated_at?: string;
   signing_alg?: string;
   key_id?: string;
+  authorization_path?: string;
   jwt_keys?: unknown;
   jwt_jwks?: unknown;
 };
@@ -80,7 +81,7 @@ async function loadProjectContext(ref: string) {
     ? `http://127.0.0.1:${ports.gotruePort}`
     : apiUrl.replace(/\/+$/, "").replace(/\/auth\/v1$/, "");
   const authConfig = (rawConfig.auth || {}) as Record<string, unknown>;
-  const oauthServer = (authConfig.oauth_server || {}) as OAuthServerSettings;
+  const oauthServer = normalizeOAuthServerConfig(authConfig.oauth_server) as OAuthServerSettings;
 
   return {
     project,
@@ -184,7 +185,7 @@ async function migrateProjectToOidc(
   if (!settings) return status(404, { message: "Project not found", code: "404" });
 
   const currentAuth = (settings.auth || {}) as Record<string, unknown>;
-  const currentOauthServer = (currentAuth.oauth_server || {}) as OAuthServerSettings;
+  const currentOauthServer = normalizeOAuthServerConfig(currentAuth.oauth_server) as OAuthServerSettings;
   const existingJwtKeys = normalizeProjectJwtKeys(currentOauthServer.jwt_keys);
   const existingJwtJwks = normalizeProjectJwtJwks(currentOauthServer.jwt_jwks);
   const keyMaterial = existingJwtKeys && existingJwtJwks && typeof currentOauthServer.key_id === "string"

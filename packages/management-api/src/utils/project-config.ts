@@ -28,6 +28,15 @@ export function mergeProjectConfig(
   };
 }
 
+export function normalizeOAuthServerConfig(value: unknown): Record<string, unknown> {
+  const config = isRecord(value) ? { ...value } : {};
+  if (typeof config.authorizationPath === "string" && typeof config.authorization_path !== "string") {
+    config.authorization_path = config.authorizationPath;
+  }
+  delete config.authorizationPath;
+  return config;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
