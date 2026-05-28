@@ -165,12 +165,12 @@ ensure_gotrue() {
     local arch
     arch=$(uname -m)
     case "$arch" in
-        x86_64) arch="linux-amd64" ;;
-        aarch64) arch="linux-arm64" ;;
+        x86_64) arch="x86" ;;
+        aarch64) arch="arm64" ;;
         *) echo "ERROR: Unsupported architecture: $arch" >&2; exit 1 ;;
     esac
 
-    local version="v2.164.0"
+    local version="v2.189.0"
     local url="https://github.com/supabase/auth/releases/download/${version}/auth-${version}-${arch}.tar.gz"
     echo "Downloading GoTrue ${version}..."
 
