@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.27.1](https://github.com/zuohuadong/supacloud/compare/management-api-v0.27.0...management-api-v0.27.1) (2026-05-28)
+
+
+### Bug Fixes
+
+* **auth:** remove legacy HS256 from jwt_keys to fix GoTrue signing key selection ([eb6675d](https://github.com/zuohuadong/supacloud/commit/eb6675dba15c32bcc31ab0df4f6677b7c7930a2b))
+
 ## [0.27.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.26.4...management-api-v0.27.0) (2026-05-28)
 
 
