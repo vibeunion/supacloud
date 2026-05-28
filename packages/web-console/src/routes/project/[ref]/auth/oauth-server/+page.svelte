@@ -288,7 +288,7 @@
           </div>
           <div class="flex items-start gap-2">
             <CheckCircle2 size={15} class="mt-0.5 text-green-600" />
-            <span>Legacy HS256、anon key、service_role key 仍保留兼容路径。</span>
+            <span>GoTrue admin proxy 使用 ES256 临时 service_role token；旧 HS256 登录态如失效，请用户重新输入密码登录。</span>
           </div>
           <div class="flex items-start gap-2">
             <AlertTriangle size={15} class="mt-0.5 text-amber-600" />

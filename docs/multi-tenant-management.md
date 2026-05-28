@@ -117,7 +117,7 @@ Projects can be migrated to the Supabase-compatible OAuth 2.1 / OIDC Provider mo
 POST /v1/projects/:ref/auth/oauth-server/migrate
 ```
 
-Migration is project-scoped and writes ES256 `JWT_KEYS` / `JWT_JWKS` material into the project's Auth config. GoTrue signs new OIDC tokens with `GOTRUE_JWT_KEYS`; PostgREST, Storage, Realtime, SDK proxy, and Management API validators verify through the project JWKS.
+Migration is project-scoped and writes ES256 `JWT_KEYS` / `JWT_JWKS` material into the project's Auth config. GoTrue signs new OIDC tokens with `GOTRUE_JWT_KEYS`, and SupaCloud admin proxy calls use short-lived ES256 `service_role` tokens instead of requiring HS256 in `JWT_KEYS`; PostgREST, Storage, Realtime, SDK proxy, and Management API validators verify through the project JWKS.
 
 Existing `anon` and `service_role` API keys remain project-scoped and verifiable during migration. They are not shared across projects or accounts.
 

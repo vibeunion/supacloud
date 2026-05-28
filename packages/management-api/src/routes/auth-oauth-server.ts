@@ -3,7 +3,6 @@ import { projectService } from "../services";
 import { tenantRuntimeService } from "../services/tenant-runtime.service";
 import { requireProjectOrAdminAuth } from "../middleware/auth";
 import { logger } from "../utils/logger";
-import { resolveProjectServiceRoleKey } from "../utils/service-role";
 import { sql as metaSql } from "../db";
 import {
   normalizeProjectRoutingConfig,
@@ -16,6 +15,7 @@ import {
   generateOidcJwtKeyMaterial,
   normalizeProjectJwtJwks,
   normalizeProjectJwtKeys,
+  signOidcServiceRoleJwt,
 } from "../utils/project-jwt";
 
 const OAUTH_CLIENT_BODY = t.Object({
@@ -75,7 +75,6 @@ async function loadProjectContext(ref: string) {
   const routingConfig = normalizeProjectRoutingConfig(rawConfig);
   const apiUrl = resolveProjectApiUrl(ref, routingConfig).replace(/\/+$/, "");
   const authUrl = resolveProjectAuthUrl(ref, routingConfig).replace(/\/+$/, "");
-  const serviceRoleKey = await resolveProjectServiceRoleKey(ref);
   const ports = resolveTenantPorts(routingConfig);
   const gotrueUrl = ports?.gotruePort
     ? `http://127.0.0.1:${ports.gotruePort}`
@@ -91,7 +90,6 @@ async function loadProjectContext(ref: string) {
     authUrl,
     issuer: oauthServer.issuer || `${authUrl}/auth/v1`,
     gotrueUrl,
-    serviceRoleKey,
     oauthServer,
   };
 }
@@ -131,16 +129,20 @@ async function proxyGoTrueAdmin(
   path: string,
   init: RequestInit = {},
 ) {
-  if (!ctx.serviceRoleKey) {
-    return new Response(JSON.stringify({ message: "Project service role key not available", code: "500" }), {
-      status: 500,
+  const adminToken = await signOidcServiceRoleJwt(ctx.oauthServer.jwt_keys, ctx.issuer);
+  if (!adminToken) {
+    return new Response(JSON.stringify({
+      message: "Project OAuth ES256 signing key not available. Re-apply OAuth server migration before managing OAuth clients.",
+      code: "409",
+    }), {
+      status: 409,
       headers: { "content-type": "application/json" },
     });
   }
 
   const headers = new Headers(init.headers);
-  headers.set("apikey", ctx.serviceRoleKey);
-  headers.set("authorization", `Bearer ${ctx.serviceRoleKey}`);
+  headers.set("apikey", adminToken);
+  headers.set("authorization", `Bearer ${adminToken}`);
   headers.set("x-project-ref", ctx.project.ref);
   if (init.body !== undefined && !headers.has("content-type")) {
     headers.set("content-type", "application/json");

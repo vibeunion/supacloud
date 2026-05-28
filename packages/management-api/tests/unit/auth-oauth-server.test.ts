@@ -3,8 +3,8 @@ import { Elysia } from "elysia";
 import { authOAuthServerRoutes } from "../../src/routes/auth-oauth-server";
 import { projectService } from "../../src/services";
 import * as dbModule from "../../src/db";
-import * as serviceRole from "../../src/utils/service-role";
 import { tenantRuntimeService } from "../../src/services/tenant-runtime.service";
+import { generateOidcJwtKeyMaterial } from "../../src/utils/project-jwt";
 
 const migratedJwtKeys = [{
   kty: "EC",
@@ -157,7 +157,6 @@ describe("authOAuthServerRoutes", () => {
       },
     } as never);
     const restartSpy = spyOn(tenantRuntimeService, "restartRuntime").mockResolvedValue(undefined);
-    const serviceRoleSpy = spyOn(serviceRole, "resolveProjectServiceRoleKey").mockResolvedValue("service");
     const sqlSpy = spyOn(dbModule, "sql");
     sqlSpy.mockImplementation(async (...args: unknown[]) => {
       const text = String(args[0] ?? "");
@@ -198,15 +197,27 @@ describe("authOAuthServerRoutes", () => {
     expect(typeof updatePayload.auth?.oauth_server?.migrated_at).toBe("string");
     expect(restartSpy).toHaveBeenCalledWith("proj_1");
 
+    const jwtKeys = updatePayload.auth?.oauth_server?.jwt_keys as Array<Record<string, unknown>>;
+    const signingKey = jwtKeys.find((key) => key.alg === "ES256");
+    const legacyKey = jwtKeys.find((key) => key.kid === "legacy-hs256");
+    expect(jwtKeys).toHaveLength(1);
+    expect(signingKey).toMatchObject({
+      kty: "EC",
+      alg: "ES256",
+      use: "sig",
+      key_ops: ["sign"],
+    });
+    expect(legacyKey).toBeUndefined();
+
     projectSpy.mockRestore();
     settingsSpy.mockRestore();
     updateSpy.mockRestore();
     restartSpy.mockRestore();
-    serviceRoleSpy.mockRestore();
     sqlSpy.mockRestore();
   });
 
   test("GET /oauth-clients proxies to GoTrue admin client listing", async () => {
+    const keyMaterial = await generateOidcJwtKeyMaterial("jwt");
     const projectSpy = spyOn(projectService, "getProject").mockResolvedValue({
       id: "proj_id",
       ref: "proj_1",
@@ -243,7 +254,6 @@ describe("authOAuthServerRoutes", () => {
         },
       },
     } as never);
-    const serviceRoleSpy = spyOn(serviceRole, "resolveProjectServiceRoleKey").mockResolvedValue("service");
     const sqlSpy = spyOn(dbModule, "sql");
     sqlSpy.mockImplementation(async (...args: unknown[]) => {
       const text = String(args[0] ?? "");
@@ -255,6 +265,8 @@ describe("authOAuthServerRoutes", () => {
                 enabled: true,
                 allow_dynamic_registration: true,
                 issuer: "https://api.example.com/auth/v1",
+                jwt_keys: keyMaterial.jwt_keys,
+                jwt_jwks: keyMaterial.jwt_jwks,
               },
             },
             postgrest_port: 3100,
@@ -284,11 +296,17 @@ describe("authOAuthServerRoutes", () => {
 
       expect(response.status).toBe(200);
       expect(calls[0]?.url).toBe("http://127.0.0.1:3200/admin/oauth/clients");
-      expect(new Headers(calls[0]?.init?.headers).get("x-project-ref")).toBe("proj_1");
+      const headers = new Headers(calls[0]?.init?.headers);
+      const authorization = headers.get("authorization") ?? "";
+      const adminToken = authorization.replace(/^Bearer\s+/i, "");
+      const jwtHeader = JSON.parse(Buffer.from(adminToken.split(".")[0] ?? "", "base64url").toString("utf8"));
+      expect(headers.get("x-project-ref")).toBe("proj_1");
+      expect(headers.get("apikey")).toBe(adminToken);
+      expect(adminToken).not.toBe("service");
+      expect(jwtHeader).toMatchObject({ alg: "ES256", kid: keyMaterial.key_id });
     } finally {
       projectSpy.mockRestore();
       settingsSpy.mockRestore();
-      serviceRoleSpy.mockRestore();
       sqlSpy.mockRestore();
       globalThis.fetch = originalFetch;
     }
