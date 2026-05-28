@@ -21,6 +21,12 @@ function quoteSystemdEnvValue(value: string): string {
     return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 }
 
+function pickPositivePort(value: unknown): number | null {
+    const port = Number(value);
+    if (!Number.isFinite(port) || port <= 0) return null;
+    return Math.trunc(port);
+}
+
 export interface RuntimeStatus {
     status: "running" | "stopped" | "starting" | "error";
     port: number;
@@ -1009,41 +1015,92 @@ class TenantRuntimeService {
         return resolveProjectAuthUrl(ref, projectConfig);
     }
 
+    private async readPersistedTenantPort(ref: string, type: "pgrst" | "gotrue"): Promise<number | null> {
+        const [project] = await metaSql`
+          SELECT config
+          FROM projects
+          WHERE ref=${ref} AND deleted_at IS NULL
+        `;
+        const projectConfig = normalizeProjectConfig(project?.config);
+        const key = type === "pgrst" ? "postgrest_port" : "gotrue_port";
+        return pickPositivePort(projectConfig[key]);
+    }
+
+    private async findTenantPortConflict(ref: string, type: "pgrst" | "gotrue", port: number): Promise<string | null> {
+        await fs.mkdir(this.TENANT_CONFIG_DIR, { recursive: true });
+        const files = await fs.readdir(this.TENANT_CONFIG_DIR);
+
+        for (const file of files) {
+            let existingRef = "";
+            let content = "";
+            let matches = false;
+
+            if (type === "gotrue" && file.endsWith("_gotrue.env")) {
+                existingRef = file.replace(/_gotrue\.env$/, "");
+                content = await Bun.file(path.join(this.TENANT_CONFIG_DIR, file)).text();
+                matches = content.includes(`GOTRUE_API_PORT=${port}`);
+            } else if (type === "pgrst" && file.endsWith(".conf")) {
+                existingRef = file.replace(/\.conf$/, "");
+                content = await Bun.file(path.join(this.TENANT_CONFIG_DIR, file)).text();
+                matches = new RegExp(`(^|\\n)\\s*server-port\\s*=\\s*${port}\\s*(\\n|$)`).test(content);
+            } else if (type === "pgrst" && file.endsWith(".env") && !file.endsWith("_gotrue.env")) {
+                existingRef = file.replace(/\.env$/, "");
+                content = await Bun.file(path.join(this.TENANT_CONFIG_DIR, file)).text();
+                matches = content.includes(`PGRST_SERVER_PORT=${port}`);
+            }
+
+            if (existingRef && existingRef !== ref && matches) return existingRef;
+        }
+
+        return null;
+    }
+
+    private async persistTenantPortConfig(ref: string, pgrstPort: number, gotruePort: number): Promise<void> {
+        const [project] = await metaSql`
+          SELECT config
+          FROM projects
+          WHERE ref=${ref} AND deleted_at IS NULL
+        `;
+        if (!project) return;
+
+        const current = normalizeProjectConfig(project.config);
+        if (current.postgrest_port === pgrstPort && current.gotrue_port === gotruePort) return;
+
+        const next = {
+            ...current,
+            postgrest_port: pgrstPort,
+            gotrue_port: gotruePort,
+        };
+        await metaSql`
+          UPDATE projects
+          SET config=${JSON.stringify(next)}::jsonb, updated_at=NOW()
+          WHERE ref=${ref} AND deleted_at IS NULL
+        `;
+        logger.info(`Persisted tenant runtime ports for ${ref} (pgrst_port=${pgrstPort}, gotrue_port=${gotruePort})`);
+    }
+
     /**
-     * Deterministic port allocation based on hashing
-     * Aligned with original bash awk behavior using native Bun logic
+     * 优先使用已持久化端口，让网关路由和 systemd env 保持一致。
+     * 端口缺失或已被其他租户占用时，再回退到 hash 分配。
      */
     private async getTenantPort(ref: string, type: "pgrst" | "gotrue"): Promise<number> {
         const basePort = type === "pgrst" ? this.PGRST_PORT_BASE : this.GOTRUE_PORT_BASE;
+        const persistedPort = await this.readPersistedTenantPort(ref, type);
+        if (persistedPort) {
+            const conflictingRef = await this.findTenantPortConflict(ref, type, persistedPort);
+            if (!conflictingRef) return persistedPort;
+            logger.warn(`[TenantRuntime] Ignoring persisted ${type} port ${persistedPort} for ${ref}; already used by ${conflictingRef}`);
+        }
 
-        // Use bun:hash for performance
+        // 使用 bun:hash 保持原有确定性分配逻辑。
         const hash = Bun.hash(ref);
-        // BigInt modulo for safe large number arithmetic
+        // BigInt modulo 避免大整数取模溢出。
         let port = basePort + Number(BigInt(hash) % BigInt(this.PORT_RANGE));
 
-        // Port collision detection logic
+        // 继续沿用最多 100 次的线性探测碰撞处理。
         const maxTries = 100;
-        await fs.mkdir(this.TENANT_CONFIG_DIR, { recursive: true });
         for (let tryIdx = 0; tryIdx < maxTries; tryIdx++) {
-            let conflict = false;
-            const files = await fs.readdir(this.TENANT_CONFIG_DIR);
-
-            for (const file of files) {
-                if (!file.endsWith(".env")) continue;
-
-                const existingRef = file.replace(/\.env$/, "").replace(/_gotrue$/, "");
-                if (existingRef === ref) continue; // Same tenant
-
-                const content = await Bun.file(path.join(this.TENANT_CONFIG_DIR, file)).text();
-                const searchStr = type === "gotrue" ? `GOTRUE_API_PORT=${port}` : `PGRST_SERVER_PORT=${port}`;
-
-                if (content.includes(searchStr)) {
-                    conflict = true;
-                    break;
-                }
-            }
-
-            if (!conflict) return port;
+            if (!(await this.findTenantPortConflict(ref, type, port))) return port;
             port++;
         }
 
@@ -1265,6 +1322,7 @@ GOTRUE_MAILER_AUTOCONFIRM=true
 `;
         }
         await Bun.write(path.join(this.TENANT_CONFIG_DIR, `${ref}_gotrue.env`), gotrueEnv);
+        await this.persistTenantPortConfig(ref, pgrstPort, gotruePort);
 
         logger.info(`Config generated for ${ref} (pgrst_port=${pgrstPort}, gotrue_port=${gotruePort})`);
     }
