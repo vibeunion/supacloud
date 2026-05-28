@@ -57,14 +57,14 @@ export async function generateOidcJwtKeyMaterial(jwtSecret: string): Promise<Oid
     use: "sig",
   };
 
-  // Supabase-compatible migration: new tokens sign with ES256, while legacy
-  // HS256 anon/service_role API keys remain verifiable through the same JWKS.
+  // jwt_keys (signing): only ES256 private key — GoTrue uses this to sign new tokens.
+  // Legacy HS256 is kept in jwt_jwks (verification) so old tokens still validate.
   const legacyJwk = buildLegacyHs256Jwk(jwtSecret);
 
   return {
     key_id: keyId,
     signing_alg: "ES256",
-    jwt_keys: [privateSigningJwk, legacyJwk],
+    jwt_keys: [privateSigningJwk],
     jwt_jwks: { keys: [publicSigningJwk, legacyJwk] },
   };
 }
@@ -84,7 +84,12 @@ export function normalizeProjectJwtKeys(value: unknown): JWK[] | null {
     ? JSON.parse(value)
     : value;
   if (!Array.isArray(parsed) || parsed.length === 0) return null;
-  return parsed as JWK[];
+  // Only return signing-suitable keys (ES256 asymmetric). Filter out legacy
+  // HS256 symmetric keys that would cause GoTrue to fail key selection.
+  const signingKeys = (parsed as JWK[]).filter(
+    (k) => k.alg === "ES256" && k.kty === "EC",
+  );
+  return signingKeys.length > 0 ? signingKeys : (parsed as JWK[]);
 }
 
 function extractJwtJwksFromConfig(config: unknown): { keys: JWK[] } | null {
