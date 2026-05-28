@@ -110,17 +110,21 @@ export async function signOidcServiceRoleJwt(
   );
   if (!signingJwk) return null;
 
-  const privateKey = await importJWK(signingJwk, "ES256");
-  const now = Math.floor(Date.now() / 1000);
-  const header: { alg: "ES256"; typ: "JWT"; kid?: string } = { alg: "ES256", typ: "JWT" };
-  if (typeof signingJwk.kid === "string") header.kid = signingJwk.kid;
+  try {
+    const privateKey = await importJWK(signingJwk, "ES256");
+    const now = Math.floor(Date.now() / 1000);
+    const header: { alg: "ES256"; typ: "JWT"; kid?: string } = { alg: "ES256", typ: "JWT" };
+    if (typeof signingJwk.kid === "string") header.kid = signingJwk.kid;
 
-  return new SignJWT({ role: "service_role" })
-    .setProtectedHeader(header)
-    .setIssuer(issuer)
-    .setIssuedAt(now)
-    .setExpirationTime(now + ttlSeconds)
-    .sign(privateKey);
+    return new SignJWT({ role: "service_role" })
+      .setProtectedHeader(header)
+      .setIssuer(issuer)
+      .setIssuedAt(now)
+      .setExpirationTime(now + ttlSeconds)
+      .sign(privateKey);
+  } catch {
+    return null;
+  }
 }
 
 function extractJwtJwksFromConfig(config: unknown): { keys: JWK[] } | null {
