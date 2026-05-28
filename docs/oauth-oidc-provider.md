@@ -61,13 +61,15 @@ After migration, tenant runtime generation injects:
 | Edge/runtime env | `JWT_KEYS`, `JWT_JWKS`, existing `JWT_SECRET` for compatibility |
 | SupaCloud internal validators | Project JWKS first, legacy HS256 fallback when needed |
 
-`JWT_KEYS` contains private signing material for Auth. `JWT_JWKS` contains public verification material for API components.
+`JWT_KEYS` contains only ES256 private signing material for Auth. `JWT_JWKS` contains public verification material for API components. The GoTrue admin proxy signs short-lived ES256 `service_role` tokens from `JWT_KEYS`; it does not require HS256 in `JWT_KEYS`.
 
 ## Legacy API Key Compatibility
 
 Migration keeps existing `anon` and `service_role` API keys usable.
 
 The project JWKS includes legacy HS256 verification material so PostgREST, Storage, Realtime, SDK proxy, and Management API project-token checks can continue to verify existing API keys during and after migration.
+
+Legacy HS256 user sessions are not a migration blocker. If an old session is rejected by Auth after ES256 migration, the user should re-enter their password to obtain a fresh ES256 token.
 
 This is not a shared-auth model:
 

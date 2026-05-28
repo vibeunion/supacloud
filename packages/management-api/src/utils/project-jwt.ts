@@ -3,7 +3,9 @@ import {
   createLocalJWKSet,
   exportJWK,
   generateKeyPair,
+  importJWK,
   jwtVerify,
+  SignJWT,
   type JWK,
   type JWTHeaderParameters,
   type JWTPayload,
@@ -58,14 +60,14 @@ export async function generateOidcJwtKeyMaterial(jwtSecret: string): Promise<Oid
     key_ops: ["sign"],
   };
 
-  // GoTrue uses key_ops:["sign"] to choose the single signing key. Keep the
-  // legacy HS256 key in jwt_keys so existing anon/service_role keys remain valid.
+  // GoTrue uses key_ops:["sign"] to choose the single signing key. Do not add
+  // legacy HS256 here; old user sessions should re-authenticate for ES256 tokens.
   const legacyJwk = buildLegacyHs256Jwk(jwtSecret);
 
   return {
     key_id: keyId,
     signing_alg: "ES256",
-    jwt_keys: [privateSigningJwk, legacyJwk],
+    jwt_keys: [privateSigningJwk],
     jwt_jwks: { keys: [publicSigningJwk, legacyJwk] },
   };
 }
@@ -85,7 +87,40 @@ export function normalizeProjectJwtKeys(value: unknown): JWK[] | null {
     ? JSON.parse(value)
     : value;
   if (!Array.isArray(parsed) || parsed.length === 0) return null;
-  return parsed as JWK[];
+  const signingKeys = (parsed as JWK[]).filter(
+    (k) => k.alg === "ES256" && k.kty === "EC",
+  );
+  return signingKeys.length > 0 ? signingKeys : (parsed as JWK[]);
+}
+
+export async function signOidcServiceRoleJwt(
+  jwtKeysValue: unknown,
+  issuer: string,
+  ttlSeconds = 300,
+): Promise<string | null> {
+  let jwtKeys: JWK[] | null = null;
+  try {
+    jwtKeys = normalizeProjectJwtKeys(jwtKeysValue);
+  } catch {
+    return null;
+  }
+
+  const signingJwk = jwtKeys?.find(
+    (key) => key.alg === "ES256" && key.kty === "EC" && typeof key.d === "string",
+  );
+  if (!signingJwk) return null;
+
+  const privateKey = await importJWK(signingJwk, "ES256");
+  const now = Math.floor(Date.now() / 1000);
+  const header: { alg: "ES256"; typ: "JWT"; kid?: string } = { alg: "ES256", typ: "JWT" };
+  if (typeof signingJwk.kid === "string") header.kid = signingJwk.kid;
+
+  return new SignJWT({ role: "service_role" })
+    .setProtectedHeader(header)
+    .setIssuer(issuer)
+    .setIssuedAt(now)
+    .setExpirationTime(now + ttlSeconds)
+    .sign(privateKey);
 }
 
 function extractJwtJwksFromConfig(config: unknown): { keys: JWK[] } | null {

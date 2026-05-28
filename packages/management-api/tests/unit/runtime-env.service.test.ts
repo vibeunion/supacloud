@@ -24,10 +24,7 @@ describe("runtimeEnvService", () => {
       config: {
         auth: {
           oauth_server: {
-            jwt_keys: [
-              { kty: "EC", kid: "kid_1", alg: "ES256", key_ops: ["sign"] },
-              { kty: "oct", kid: "legacy-hs256", alg: "HS256" },
-            ],
+            jwt_keys: [{ kty: "EC", kid: "kid_1", alg: "ES256", key_ops: ["sign"] }],
             jwt_jwks: { keys: [{ kty: "EC", kid: "kid_1", alg: "ES256" }] },
           },
         },
@@ -44,7 +41,7 @@ describe("runtimeEnvService", () => {
 
       expect(env?.JWT_SECRET).toBe("legacy-secret");
       expect(env?.JWT_KEYS).toContain("kid_1");
-      expect(env?.JWT_KEYS).toContain("legacy-hs256");
+      expect(env?.JWT_KEYS).not.toContain("legacy-hs256");
       expect(env?.JWT_JWKS).toContain("kid_1");
       expect(env?.SUPABASE_SERVICE_ROLE_KEY).toBe("service.header.signature");
     } finally {
