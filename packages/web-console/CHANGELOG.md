@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.2](https://github.com/zuohuadong/supacloud/compare/web-console-v0.13.1...web-console-v0.13.2) (2026-05-28)
+
+
+### Bug Fixes
+
+* **auth:** use ES256 for GoTrue admin proxy ([728eed2](https://github.com/zuohuadong/supacloud/commit/728eed28f242e4861138921a11b4f2702890434b))
+
 ## [0.13.1](https://github.com/zuohuadong/supacloud/compare/web-console-v0.13.0...web-console-v0.13.1) (2026-05-27)
 
 

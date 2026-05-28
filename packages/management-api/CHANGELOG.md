@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.27.2](https://github.com/zuohuadong/supacloud/compare/management-api-v0.27.1...management-api-v0.27.2) (2026-05-28)
+
+
+### Bug Fixes
+
+* **auth:** use ES256 for GoTrue admin proxy ([728eed2](https://github.com/zuohuadong/supacloud/commit/728eed28f242e4861138921a11b4f2702890434b))
+
 ## [0.27.1](https://github.com/zuohuadong/supacloud/compare/management-api-v0.27.0...management-api-v0.27.1) (2026-05-28)
 
 
