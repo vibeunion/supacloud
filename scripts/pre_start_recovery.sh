@@ -139,6 +139,13 @@ ensure_service_containers_running() {
 # only the newly started runtime claims the port.
 kill_edge_runtime_zombies() {
     local EDGE_PORT="${EDGE_RUNTIME_PORT:-9000}"
+    local EDGE_MODE="${EDGE_RUNTIME_MODE:-embedded}"
+
+    if [[ "$EDGE_MODE" == "external" ]]; then
+        log_info "EDGE_RUNTIME_MODE=external, skipping stale Edge Runtime cleanup on port ${EDGE_PORT}"
+        return
+    fi
+
     log_info "Checking for stale Edge Runtime processes on port ${EDGE_PORT}..."
     
     local stale_pids
