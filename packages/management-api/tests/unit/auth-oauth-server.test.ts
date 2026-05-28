@@ -198,6 +198,23 @@ describe("authOAuthServerRoutes", () => {
     expect(typeof updatePayload.auth?.oauth_server?.migrated_at).toBe("string");
     expect(restartSpy).toHaveBeenCalledWith("proj_1");
 
+    const jwtKeys = updatePayload.auth?.oauth_server?.jwt_keys as Array<Record<string, unknown>>;
+    const signingKey = jwtKeys.find((key) => key.alg === "ES256");
+    const legacyKey = jwtKeys.find((key) => key.kid === "legacy-hs256");
+    expect(jwtKeys).toHaveLength(2);
+    expect(signingKey).toMatchObject({
+      kty: "EC",
+      alg: "ES256",
+      use: "sig",
+      key_ops: ["sign"],
+    });
+    expect(legacyKey).toMatchObject({
+      kty: "oct",
+      alg: "HS256",
+      use: "sig",
+    });
+    expect(legacyKey).not.toHaveProperty("key_ops");
+
     projectSpy.mockRestore();
     settingsSpy.mockRestore();
     updateSpy.mockRestore();
