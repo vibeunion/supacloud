@@ -6,6 +6,7 @@ import {
     type ProjectRoutingConfig,
     normalizeProjectRoutingConfig,
     resolveProjectApiHost,
+    resolveProjectAuthHost,
     resolveProjectStudioHost,
 } from "../utils/project-routing";
 import { normalizeProjectConfig } from "../utils/project-config";
@@ -66,6 +67,7 @@ export function buildTenantCorsOrigins(
     const hosts = [
         `${projectRef}.api.${config.baseDomain}`,
         resolveProjectApiHost(projectRef, routingConfig),
+        resolveProjectAuthHost(projectRef, routingConfig),
         `studio-${projectRef}.${config.baseDomain}`,
         resolveProjectStudioHost(projectRef, routingConfig),
         ...extraHosts,
@@ -151,6 +153,7 @@ type CaddyRoute = Record<string, unknown>;
 type CaddyMatcher = Record<string, unknown>;
 type CaddyServer = {
     listen: string[];
+    tls_connection_policies?: Array<Record<string, unknown>>;
     routes: CaddyRoute[];
 };
 
@@ -199,6 +202,8 @@ function sanitizeCaddyId(value: string): string {
 const CADDY_PROJECT_ROUTE_KINDS = [
     "rest",
     "graphql",
+    "auth-domain-auth",
+    "auth-domain-gotrue-well-known",
     "auth",
     "gotrue-well-known",
     "functions",
@@ -265,6 +270,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
                     servers: {
                         supacloud: {
                             listen: [":80", ":443"],
+                            tls_connection_policies: [{}],
                             routes,
                         },
                     },
@@ -889,12 +895,16 @@ export class CaddyGatewayProvider implements GatewayProvider {
                 `${projectRef}.api.${config.baseDomain}`,
                 resolveProjectApiHost(projectRef, routingConfig),
             ]);
+            const hostSet = new Set(hosts.map(normalizeCaddyHost));
+            const authHosts = uniqueStrings([resolveProjectAuthHost(projectRef, routingConfig)])
+                .filter((host) => !hostSet.has(normalizeCaddyHost(host)));
             const studioHosts = uniqueStrings([
                 `studio-${projectRef}.${config.baseDomain}`,
                 resolveProjectStudioHost(projectRef, routingConfig),
             ]);
             const corsOrigins = buildTenantCorsOrigins(projectRef, routingConfig, [
                 ...hosts,
+                ...authHosts,
                 ...studioHosts,
                 ...this.hostsForProjectRoutes(projectRef),
             ]);
@@ -914,6 +924,28 @@ export class CaddyGatewayProvider implements GatewayProvider {
             ];
 
             for (const route of routes) this.routesById.set(String(route["@id"]), route);
+            if (authHosts.length > 0) {
+                this.routesById.set(caddyRouteId(projectRef, "auth-domain-auth"), this.makeRoute({
+                    id: caddyRouteId(projectRef, "auth-domain-auth"),
+                    hosts: authHosts,
+                    path: "/auth/v1*",
+                    upstream: `${hostIp}:${gotruePort}`,
+                    projectRef,
+                    stripPrefix: "/auth/v1",
+                    corsOrigins,
+                }));
+                this.routesById.set(caddyRouteId(projectRef, "auth-domain-gotrue-well-known"), this.makeRoute({
+                    id: caddyRouteId(projectRef, "auth-domain-gotrue-well-known"),
+                    hosts: authHosts,
+                    path: "/.well-known/oauth-authorization-server/auth/v1*",
+                    upstream: `${hostIp}:${gotruePort}`,
+                    projectRef,
+                    corsOrigins,
+                }));
+            } else {
+                this.routesById.delete(caddyRouteId(projectRef, "auth-domain-auth"));
+                this.routesById.delete(caddyRouteId(projectRef, "auth-domain-gotrue-well-known"));
+            }
             await this.persistAndLoad();
             logger.info(`[CaddyGatewayProvider] Routes registered for ${projectRef}`);
             return { success: true };

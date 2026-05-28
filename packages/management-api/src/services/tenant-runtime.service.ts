@@ -7,7 +7,7 @@ import * as path from "node:path";
 import type { OAuthProvider, OAuthProviderConfig } from "../types/oauth";
 import { OAUTH_ENV_MAPPINGS } from "../types/oauth";
 import { tenantOAuthService } from "./tenant-oauth.service";
-import { resolveProjectApiUrl, resolveProjectStudioUrl } from "../utils/project-routing";
+import { resolveProjectApiUrl, resolveProjectAuthUrl, resolveProjectStudioUrl } from "../utils/project-routing";
 import { normalizeProjectConfig } from "../utils/project-config";
 import { normalizeProjectJwtJwks, normalizeProjectJwtKeys } from "../utils/project-jwt";
 
@@ -18,6 +18,10 @@ function stringifyJsonConfig(value: unknown): string | null {
 
 function quoteSystemdEnvValue(value: string): string {
     return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+}
+
+function uniqueStrings(values: Array<string | undefined | null>): string[] {
+    return Array.from(new Set(values.map((value) => String(value || "").trim()).filter(Boolean)));
 }
 
 export interface RuntimeStatus {
@@ -1004,6 +1008,10 @@ class TenantRuntimeService {
         return resolveProjectApiUrl(ref, projectConfig);
     }
 
+    private deriveAuthUrl(ref: string, projectConfig: Record<string, unknown> | null | undefined): string {
+        return resolveProjectAuthUrl(ref, projectConfig);
+    }
+
     /**
      * Deterministic port allocation based on hashing
      * Aligned with original bash awk behavior using native Bun logic
@@ -1072,6 +1080,7 @@ class TenantRuntimeService {
             jwtJwks,
             dbName: await resolveDbName(ref),
             apiUrl: this.deriveApiUrl(ref, projectConfig),
+            authUrl: this.deriveAuthUrl(ref, projectConfig),
             anonKey: project.anonKey || project.anon_key,
             serviceRoleKey: project.serviceRoleKey || project.service_role_key,
             siteUrl: typeof projectConfig.site_url === "string"
@@ -1176,7 +1185,16 @@ db-channel = "${resolvePgrstChannel(ref)}"
         await Bun.write(path.join(this.TENANT_CONFIG_DIR, `${ref}.conf`), pgrstConf);
 
         // Generate GoTrue .env configuration
-        const apiExternalUrl = creds.apiUrl;
+        const hasDedicatedAuthUrl = Boolean(creds.authUrl && creds.authUrl !== creds.apiUrl);
+        const apiExternalUrl = hasDedicatedAuthUrl ? creds.authUrl : creds.apiUrl;
+        const siteExternalUrl = hasDedicatedAuthUrl ? creds.authUrl : creds.siteUrl;
+        const siteHost = siteExternalUrl.replace('https://', '').replace('http://', '').split('/')[0].split(':')[0];
+        const redirectOrigins = uniqueStrings([
+            creds.uriAllowList,
+            creds.siteUrl,
+            creds.apiUrl,
+            creds.authUrl,
+        ].flatMap((value) => String(value || "").split(",")));
         const gotrueSender = config.gotrueSmtpAdminEmail || `noreply@${apiExternalUrl.replace('https://', '').replace('http://', '')}`;
 
         let gotrueEnv = `
@@ -1184,8 +1202,8 @@ db-channel = "${resolvePgrstChannel(ref)}"
 GOTRUE_API_HOST=0.0.0.0
 GOTRUE_API_PORT=${gotruePort}
 API_EXTERNAL_URL=${apiExternalUrl}
-GOTRUE_SITE_URL=${creds.siteUrl}
-GOTRUE_URI_ALLOW_LIST=${creds.uriAllowList || creds.siteUrl}
+GOTRUE_SITE_URL=${siteExternalUrl}
+GOTRUE_URI_ALLOW_LIST=${redirectOrigins.join(",")}
 GOTRUE_DB_DRIVER=postgres
 GOTRUE_DB_DATABASE_URL=postgres://supabase_auth_admin:${config.pgPassword}@${this.PG_HOST}:${this.PG_PORT}/${creds.dbName}
 GOTRUE_JWT_SECRET=${creds.jwtSecret}
@@ -1199,8 +1217,8 @@ GOTRUE_EXTERNAL_ANONYMOUS_USERS_ENABLED=true
 GOTRUE_EXTERNAL_EMAIL_ENABLED=true
 GOTRUE_EXTERNAL_PHONE_ENABLED=true
 GOTRUE_WEBAUTHN_ENABLED=true
-GOTRUE_WEBAUTHN_RP_ID=${creds.siteUrl.replace('https://', '').replace('http://', '').split('/')[0].split(':')[0]}
-GOTRUE_WEBAUTHN_RP_ORIGINS=https://${creds.siteUrl.replace('https://', '').replace('http://', '').split('/')[0].split(':')[0]},${apiExternalUrl}
+GOTRUE_WEBAUTHN_RP_ID=${siteHost}
+GOTRUE_WEBAUTHN_RP_ORIGINS=${uniqueStrings([siteExternalUrl, creds.apiUrl, creds.siteUrl]).join(",")}
 GOTRUE_PASSWORD_MIN_LENGTH=8
 GOTRUE_SECURITY_REFRESH_TOKEN_ROTATION_ENABLED=true
 GOTRUE_SECURITY_REFRESH_TOKEN_ROTATION_REUSE_INTERVAL=10
@@ -1214,13 +1232,16 @@ GOTRUE_OPERATOR_TOKEN=${config.masterToken || creds.serviceRoleKey}
 
         const oauthServerConfig = (creds.authConfig.oauth_server || {}) as Record<string, unknown>;
         if (oauthServerConfig.enabled === true) {
+            const authorizationPath = typeof oauthServerConfig.authorization_path === "string"
+                ? oauthServerConfig.authorization_path
+                : (typeof oauthServerConfig.authorizationPath === "string" ? oauthServerConfig.authorizationPath : "");
             gotrueEnv += `
 
 # OAuth 2.1 / OIDC Provider Configuration
 GOTRUE_OAUTH_SERVER_ENABLED=true
 GOTRUE_OAUTH_SERVER_ALLOW_DYNAMIC_REGISTRATION=${oauthServerConfig.allow_dynamic_registration === true ? "true" : "false"}
 GOTRUE_JWT_ISSUER=${oauthServerConfig.issuer || `${apiExternalUrl}/auth/v1`}
-${creds.jwtKeys ? `GOTRUE_JWT_KEYS=${quoteSystemdEnvValue(creds.jwtKeys)}\nJWT_KEYS=${quoteSystemdEnvValue(creds.jwtKeys)}` : ""}
+${authorizationPath ? `GOTRUE_OAUTH_SERVER_AUTHORIZATION_PATH=${authorizationPath}\n` : ""}${creds.jwtKeys ? `GOTRUE_JWT_KEYS=${quoteSystemdEnvValue(creds.jwtKeys)}\nJWT_KEYS=${quoteSystemdEnvValue(creds.jwtKeys)}` : ""}
 `;
         }
 

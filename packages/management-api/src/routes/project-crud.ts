@@ -314,6 +314,11 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
             description: "Explicit API domain (e.g., 'xg-api.example.com')",
           }),
         ),
+        auth_domain: t.Optional(
+          t.String({
+            description: "Explicit Auth/OIDC domain (e.g., 'auth.example.com')",
+          }),
+        ),
         studio_domain: t.Optional(
           t.String({
             description:

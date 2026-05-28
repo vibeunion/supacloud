@@ -1462,6 +1462,7 @@ install_caddy_gateway() {
       "servers": {
         "supacloud": {
           "listen": [":80", ":443"],
+          "tls_connection_policies": [{}],
           "http3": {},
           "routes": []
         }
