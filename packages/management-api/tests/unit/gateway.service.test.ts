@@ -206,6 +206,32 @@ describe("CaddyGatewayProvider", () => {
         restore();
     });
 
+    test("setupUpstream does not render duplicate auth-domain routes without a dedicated auth domain", async () => {
+        const calls: Array<{ url: string; method: string; body: any }> = [];
+        const restore = captureFetch(calls);
+        const provider = new CaddyGatewayProvider();
+
+        await provider.setupUpstream("proj-no-auth", 3000, 9999, {
+            api_domain: "api.example.com",
+            studio_domain: "studio.example.com",
+        });
+        await provider.setupUpstream("proj-same-auth", 3001, 9998, {
+            api_domain: "api2.example.com",
+            auth_domain: "api2.example.com",
+            studio_domain: "studio2.example.com",
+        });
+
+        const load = calls.filter((call) => call.method === "POST" && call.url.endsWith("/load")).at(-1);
+        const routes = load?.body?.apps?.http?.servers?.supacloud?.routes ?? [];
+
+        expect(routes.some((route: any) => route["@id"] === "route-project-proj-no-auth-auth-domain-auth")).toBe(false);
+        expect(routes.some((route: any) => route["@id"] === "route-project-proj-no-auth-auth-domain-gotrue-well-known")).toBe(false);
+        expect(routes.some((route: any) => route["@id"] === "route-project-proj-same-auth-auth-domain-auth")).toBe(false);
+        expect(routes.some((route: any) => route["@id"] === "route-project-proj-same-auth-auth-domain-gotrue-well-known")).toBe(false);
+
+        restore();
+    });
+
     test("setupMasterRoutes applies the same Caddy CORS handling to system routes", async () => {
         const calls: Array<{ url: string; method: string; body: any }> = [];
         const restore = captureFetch(calls);

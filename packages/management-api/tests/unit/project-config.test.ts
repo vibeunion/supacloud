@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   mergeProjectConfig,
+  normalizeOAuthServerConfig,
   normalizeProjectConfig,
 } from "../../src/utils/project-config";
 
@@ -28,6 +29,18 @@ describe("project-config utils", () => {
     ).toEqual({
       postgrest_port: 3234,
       gotrue_port: 3334,
+    });
+  });
+
+  test("normalizes OAuth server camelCase authorization path to snake_case", () => {
+    expect(
+      normalizeOAuthServerConfig({
+        enabled: true,
+        authorizationPath: "/authorize.html",
+      }),
+    ).toEqual({
+      enabled: true,
+      authorization_path: "/authorize.html",
     });
   });
 });

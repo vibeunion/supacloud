@@ -10,6 +10,7 @@ import {
     resolveProjectStudioHost,
 } from "../utils/project-routing";
 import { normalizeProjectConfig } from "../utils/project-config";
+import { uniqueStrings } from "../utils/strings";
 
 export const DEFAULT_CORS_HEADERS = [
     "Accept", "Accept-Language", "Authorization", "Content-Language", "Content-Type",
@@ -168,10 +169,6 @@ type CaddyConfig = {
     };
 };
 
-function uniqueStrings(values: Array<string | undefined | null>): string[] {
-    return Array.from(new Set(values.map((v) => String(v || "").trim()).filter(Boolean)));
-}
-
 function caddyRouteId(projectRef: string, kind: string): string {
     return `route-project-${projectRef}-${kind}`;
 }
@@ -270,6 +267,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
                     servers: {
                         supacloud: {
                             listen: [":80", ":443"],
+                            // Caddy JSON requires an explicit TLS policy to keep :443 in TLS mode after file reloads.
                             tls_connection_policies: [{}],
                             routes,
                         },
