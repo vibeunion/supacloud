@@ -1,19 +1,17 @@
 version: '3.8'
 
 services:
-  kong:
-    image: kong:2.8.1
+  caddy:
+    image: caddy:2.10.2
     restart: always
-    environment:
-      KONG_DATABASE: "off"
-      KONG_DECLARATIVE_CONFIG: /var/lib/kong/kong.yml
-      KONG_PROXY_ACCESS_LOG: /dev/stdout
-      KONG_PROXY_ERROR_LOG: /dev/stderr
+    command: ["caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]
     ports:
-      - "${KONG_HTTP_PORT:-8000}:8000"
-      - "${KONG_HTTPS_PORT:-8443}:8443"
+      - "${CADDY_HTTP_PORT:-8000}:80"
+      - "${CADDY_HTTPS_PORT:-8443}:443"
     volumes:
-      - ./kong/kong.yml:/var/lib/kong/kong.yml
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
     depends_on:
       - postgres
       - gotrue
@@ -39,12 +37,12 @@ services:
     image: supabase/gotrue:v2.105.1
     restart: always
     environment:
-      GOTRUE_SITE_URL: http://localhost:${KONG_HTTP_PORT:-8000}
+      GOTRUE_SITE_URL: http://localhost:${CADDY_HTTP_PORT:-8000}
       GOTRUE_JWT_SECRET: ${JWT_SECRET}
       GOTRUE_JWT_AUD: authenticated
       GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
       GOTRUE_JWT_EXP: 3600
-      API_EXTERNAL_URL: http://localhost:${KONG_HTTP_PORT:-8000}
+      API_EXTERNAL_URL: http://localhost:${CADDY_HTTP_PORT:-8000}
       GOTRUE_OPERATOR_TOKEN: ${MASTER_TOKEN:-${JWT_SECRET}}
       GOTRUE_DB_DRIVER: postgres
       GOTRUE_DB_DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/postgres
@@ -72,6 +70,12 @@ services:
     environment:
       - PORT=9090
       - SUPACLOUD_POSTGRES_URL=postgres://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/postgres
+      - CADDY_ADMIN_URL=http://caddy:2019
+      - CADDY_CONFIG_PATH=/tmp/supacloud-caddy/config.json
+      - CADDY_STATE_DIR=/data
+      # The development management-api image does not bundle supacloud-caddy.
+      # Caddy validates and applies config through the Admin API in the caddy container.
+      - CADDY_BINARY_PATH=/bin/true
     ports:
       - "${API_PORT:-9090}:9090"
     networks:
@@ -97,6 +101,8 @@ services:
 
 volumes:
   pgdata:
+  caddy-data:
+  caddy-config:
 
 networks:
   supacloud-dev:

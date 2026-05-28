@@ -1,0 +1,33 @@
+{
+	admin 0.0.0.0:2019
+	auto_https off
+}
+
+(supacloud_dev_routes) {
+	handle_path /functions/v1* {
+		reverse_proxy edge-runtime:9000
+	}
+
+	handle_path /platform/v1* {
+		reverse_proxy management-api:9090
+	}
+
+	handle_path /auth/v1* {
+		reverse_proxy gotrue:9999
+	}
+
+	handle_path /rest/v1* {
+		reverse_proxy postgrest:3000
+	}
+
+	respond "SupaCloud Caddy development gateway" 200
+}
+
+:80 {
+	import supacloud_dev_routes
+}
+
+:443 {
+	tls internal
+	import supacloud_dev_routes
+}
