@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.1](https://github.com/zuohuadong/supacloud/compare/cli-v0.6.0...cli-v0.6.1) (2026-05-29)
+
+
+### Miscellaneous Chores
+
+* **deps:** mark setup-buildx-action v4 PR merged ([e0cadc5](https://github.com/zuohuadong/supacloud/commit/e0cadc5fa00711c15b4d37a8ccf16ea7a7adbe24))
+
 ## [0.6.0](https://github.com/zuohuadong/supacloud/compare/cli-v0.5.0...cli-v0.6.0) (2026-05-24)
 
 

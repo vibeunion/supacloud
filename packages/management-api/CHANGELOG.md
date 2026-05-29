@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.27.3](https://github.com/zuohuadong/supacloud/compare/management-api-v0.27.2...management-api-v0.27.3) (2026-05-29)
+
+
+### Miscellaneous Chores
+
+* **deps:** mark setup-buildx-action v4 PR merged ([e0cadc5](https://github.com/zuohuadong/supacloud/commit/e0cadc5fa00711c15b4d37a8ccf16ea7a7adbe24))
+
 ## [0.27.2](https://github.com/zuohuadong/supacloud/compare/management-api-v0.27.1...management-api-v0.27.2) (2026-05-28)
 
 

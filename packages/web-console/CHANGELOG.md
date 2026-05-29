@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.3](https://github.com/zuohuadong/supacloud/compare/web-console-v0.13.2...web-console-v0.13.3) (2026-05-29)
+
+
+### Miscellaneous Chores
+
+* **deps:** mark setup-buildx-action v4 PR merged ([e0cadc5](https://github.com/zuohuadong/supacloud/commit/e0cadc5fa00711c15b4d37a8ccf16ea7a7adbe24))
+
 ## [0.13.2](https://github.com/zuohuadong/supacloud/compare/web-console-v0.13.1...web-console-v0.13.2) (2026-05-28)
 
 
