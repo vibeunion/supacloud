@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.11](https://github.com/zuohuadong/supacloud/compare/admin-v0.1.10...admin-v0.1.11) (2026-05-29)
+
+
+### Miscellaneous Chores
+
+* **deps:** mark setup-buildx-action v4 PR merged ([e0cadc5](https://github.com/zuohuadong/supacloud/commit/e0cadc5fa00711c15b4d37a8ccf16ea7a7adbe24))
+
 ## [0.1.10](https://github.com/zuohuadong/supacloud/compare/admin-v0.1.9...admin-v0.1.10) (2026-05-16)
 
 
