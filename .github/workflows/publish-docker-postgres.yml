@@ -40,7 +40,7 @@ jobs:
           echo "Building postgres image: sha-$SHA, latest"
 
       - name: Build and push postgres image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: docker/self-host/postgres
           push: true
