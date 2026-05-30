@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.27.4](https://github.com/zuohuadong/supacloud/compare/management-api-v0.27.3...management-api-v0.27.4) (2026-05-30)
+
+
+### Bug Fixes
+
+* **storage:** add CORS headers to Storage API responses ([ca7b50b](https://github.com/zuohuadong/supacloud/commit/ca7b50b8e652892659e507957446825e911d3c68))
+
 ## [0.27.3](https://github.com/zuohuadong/supacloud/compare/management-api-v0.27.2...management-api-v0.27.3) (2026-05-29)
 
 
