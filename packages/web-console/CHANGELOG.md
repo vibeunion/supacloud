@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.0](https://github.com/zuohuadong/supacloud/compare/web-console-v0.13.3...web-console-v0.14.0) (2026-05-30)
+
+
+### Features
+
+* **web-console:** redesign login page style with Supabase aesthetics ([0822014](https://github.com/zuohuadong/supacloud/commit/0822014d56bbf80852ee06db8ee35362a413ffd0))
+
 ## [0.13.3](https://github.com/zuohuadong/supacloud/compare/web-console-v0.13.2...web-console-v0.13.3) (2026-05-29)
 
 
