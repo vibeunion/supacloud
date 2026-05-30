@@ -32,6 +32,15 @@ function findReverseProxyHandlers(routes: any[]) {
         .filter((handler: any) => handler.handler === "reverse_proxy");
 }
 
+function findRouteIdForHandler(routes: any[], targetHandler: any): string | undefined {
+    for (const route of routes) {
+        if (Array.isArray(route.handle) && route.handle.includes(targetHandler)) {
+            return route["@id"];
+        }
+    }
+    return undefined;
+}
+
 async function cleanCaddyTmp() {
     await rm("/tmp/supacloud-caddy-test", { recursive: true, force: true });
 }
@@ -148,12 +157,18 @@ describe("CaddyGatewayProvider", () => {
         const reverseProxyHandlers = findReverseProxyHandlers(routes);
         expect(reverseProxyHandlers.every((handler: any) => !handler.upstreams?.[0]?.dial?.includes("/"))).toBe(true);
         for (const handler of reverseProxyHandlers) {
-            expect(handler.headers?.response?.delete).toContain("Access-Control-Allow-Origin");
-            expect(handler.headers?.response?.delete).toContain("Access-Control-Allow-Credentials");
-            expect(handler.headers?.response?.delete).toContain("Access-Control-Allow-Methods");
-            expect(handler.headers?.response?.delete).toContain("Access-Control-Allow-Headers");
-            expect(handler.headers?.response?.delete).toContain("Access-Control-Expose-Headers");
-            expect(handler.headers?.response?.delete).toContain("Access-Control-Max-Age");
+            const routeId = findRouteIdForHandler(routes, handler);
+            const isStorageRoute = routeId?.endsWith("-storage");
+            if (isStorageRoute) {
+                expect(handler.headers?.response?.delete).toBeUndefined();
+            } else {
+                expect(handler.headers?.response?.delete).toContain("Access-Control-Allow-Origin");
+                expect(handler.headers?.response?.delete).toContain("Access-Control-Allow-Credentials");
+                expect(handler.headers?.response?.delete).toContain("Access-Control-Allow-Methods");
+                expect(handler.headers?.response?.delete).toContain("Access-Control-Allow-Headers");
+                expect(handler.headers?.response?.delete).toContain("Access-Control-Expose-Headers");
+                expect(handler.headers?.response?.delete).toContain("Access-Control-Max-Age");
+            }
         }
         expect(routes.find((route: any) => route["@id"] === "route-project-testref123-graphql")
             ?.handle?.some((handler: any) => handler.uri === "/rpc/graphql")).toBe(true);

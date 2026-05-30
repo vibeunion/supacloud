@@ -536,7 +536,56 @@ function signedUploadMatches(upload: SignedUpload | null, ref: string, bucket: s
     return !!upload && upload.ref === ref && upload.bucket === bucket && upload.objectName === objectName;
 }
 
+const STORAGE_CORS_ALLOW_HEADERS = [
+    "Accept", "Accept-Language", "Authorization", "Content-Language", "Content-Type",
+    "apikey", "x-client-info", "x-project-ref", "X-Api-Version", "x-supabase-api-version",
+    "Prefer", "Content-Profile", "accept-profile", "Range", "Range-Unit",
+    "x-upsert", "Cache-Control", "x-retry-count", "x-metadata",
+    "upload-length", "upload-offset", "upload-metadata", "tus-resumable",
+    "x-supacloud-async", "x-supacloud-timeout", "x-supacloud-retries",
+    "x-supacloud-idempotency-key", "x-supacloud-function-version",
+    "x-supacloud-trace-id", "x-supacloud-correlation-id",
+].join(", ");
+
+const STORAGE_CORS_EXPOSE_HEADERS = [
+    "Content-Length", "Content-Range", "X-Content-Range", "X-JSON",
+    "x-supabase-api-version", "X-Client-Info", "Prefer",
+    "Content-Profile", "accept-profile", "Range", "Range-Unit",
+    "X-Relay-Error", "link", "x-total-count",
+    "Tus-Resumable", "Upload-Offset", "Upload-Length", "Location",
+].join(", ");
+
 export const storageCompatRoutes = new Elysia({ prefix: "" })
+
+    // ── CORS: Storage API 必须自行设置 CORS 响应头 ──
+    // Caddy 网关对 storage 路由启用了 preserveUpstreamCors，不再删除上游 CORS 头。
+    // 这里为所有 Storage API 响应设置 CORS 头，确保跨域访问（特别是 public bucket 的图片加载）正常工作。
+    .options('/*', ({ headers, set }) => {
+        const origin = headers['origin'] || headers['Origin'] || '';
+        if (origin) {
+            set.headers['Access-Control-Allow-Origin'] = origin;
+            set.headers['Access-Control-Allow-Credentials'] = 'true';
+            set.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, PATCH, DELETE, OPTIONS, HEAD';
+            set.headers['Access-Control-Allow-Headers'] = STORAGE_CORS_ALLOW_HEADERS;
+            set.headers['Access-Control-Expose-Headers'] = STORAGE_CORS_EXPOSE_HEADERS;
+            set.headers['Access-Control-Max-Age'] = '86400';
+            set.headers['Vary'] = 'Origin, Access-Control-Request-Headers, Accept-Encoding';
+        }
+        set.status = 204;
+        return '';
+    })
+    .onAfterHandle(({ headers, set }) => {
+        const origin = headers['origin'] || headers['Origin'] || '';
+        if (origin && !set.headers['Access-Control-Allow-Origin']) {
+            set.headers['Access-Control-Allow-Origin'] = origin;
+            set.headers['Access-Control-Allow-Credentials'] = 'true';
+            set.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, PATCH, DELETE, OPTIONS, HEAD';
+            set.headers['Access-Control-Allow-Headers'] = STORAGE_CORS_ALLOW_HEADERS;
+            set.headers['Access-Control-Expose-Headers'] = STORAGE_CORS_EXPOSE_HEADERS;
+            set.headers['Access-Control-Max-Age'] = '86400';
+            set.headers['Vary'] = 'Origin, Access-Control-Request-Headers, Accept-Encoding';
+        }
+    })
 
     // ── Origin Guard: reject requests without a valid project reference ──
     // Storage compat routes rely on gateway-injected x-project-ref.
