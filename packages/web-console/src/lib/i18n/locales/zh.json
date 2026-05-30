@@ -573,7 +573,18 @@
     "restore_sent": "PITR ???????"
   },
   "Login": {
-    "redirecting": "??????????"
+    "title": "登录以访问管理控制台",
+    "subtitle": "请输入您的用户名和密码进行登录",
+    "username": "用户名",
+    "password": "密码",
+    "username_placeholder": "请输入您的用户名...",
+    "password_placeholder": "请输入您的密码...",
+    "login_btn": "登录",
+    "logging_in": "正在登录...",
+    "error_empty": "请输入用户名和密码",
+    "default_credentials": "默认凭据",
+    "env_modify_hint": "可通过环境变量 STUDIO_USERNAME / STUDIO_PASSWORD 修改",
+    "redirecting": "正在重定向..."
   },
   "PlatformExtensions": {
     "vector_database_extension_for_aiml": "向量数据库扩展，AI/ML 嵌入搜索",

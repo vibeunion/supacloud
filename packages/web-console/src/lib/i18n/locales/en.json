@@ -573,7 +573,18 @@
     "restore_sent": "PITR restore command sent"
   },
   "Login": {
-    "redirecting": "Redirecting to login..."
+    "title": "Sign in to Studio",
+    "subtitle": "Enter your username and password to continue",
+    "username": "Username",
+    "password": "Password",
+    "username_placeholder": "Enter your username...",
+    "password_placeholder": "Enter your password...",
+    "login_btn": "Sign In",
+    "logging_in": "Signing in...",
+    "error_empty": "Please enter username and password",
+    "default_credentials": "Default Credentials",
+    "env_modify_hint": "Can be modified via STUDIO_USERNAME / STUDIO_PASSWORD env variables",
+    "redirecting": "Redirecting..."
   },
   "PlatformExtensions": {
     "vector_database_extension_for_aiml": "Vector database extension for AI/ML embedding search",
