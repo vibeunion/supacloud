@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.27.5](https://github.com/zuohuadong/supacloud/compare/management-api-v0.27.4...management-api-v0.27.5) (2026-06-01)
+
+
+### Bug Fixes
+
+* **auth:** normalize public oauth client secrets ([#252](https://github.com/zuohuadong/supacloud/issues/252)) ([1f65f1f](https://github.com/zuohuadong/supacloud/commit/1f65f1f4d4ecf3f486f8367057bd5e3b14f3296e))
+
 ## [0.27.4](https://github.com/zuohuadong/supacloud/compare/management-api-v0.27.3...management-api-v0.27.4) (2026-05-30)
 
 
