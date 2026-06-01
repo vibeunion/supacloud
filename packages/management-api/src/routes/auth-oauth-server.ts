@@ -45,6 +45,26 @@ const OAUTH_CLIENT_UPDATE_BODY = t.Object({
   logo_uri: t.Optional(t.String()),
 });
 
+function normalizeOAuthClientPayload(input: unknown): unknown {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return input;
+
+  const payload = { ...(input as Record<string, unknown>) };
+  const clientType = typeof payload.client_type === "string" ? payload.client_type : "";
+  const authMethod = typeof payload.token_endpoint_auth_method === "string"
+    ? payload.token_endpoint_auth_method
+    : "";
+  const isPublicClient = clientType === "public" || authMethod === "none";
+
+  if (clientType === "public" && !authMethod) {
+    payload.token_endpoint_auth_method = "none";
+  }
+  if (isPublicClient && (payload.client_secret === undefined || payload.client_secret === null)) {
+    payload.client_secret = "";
+  }
+
+  return payload;
+}
+
 type OAuthServerSettings = {
   enabled?: boolean;
   allow_dynamic_registration?: boolean;
@@ -279,7 +299,7 @@ export const authOAuthServerRoutes = new Elysia({ prefix: "/v1/projects/:ref/aut
       if (!ctx) return status(404, { message: "Project not found", code: "404" });
       return proxyGoTrueAdmin(ctx, "/admin/oauth/clients", {
         method: "POST",
-        body: JSON.stringify(body),
+        body: JSON.stringify(normalizeOAuthClientPayload(body)),
       });
     },
     { params: t.Object({ ref: t.String() }), body: OAUTH_CLIENT_BODY, detail: { tags: ["auth"], summary: "Create OAuth client" } },
@@ -304,7 +324,7 @@ export const authOAuthServerRoutes = new Elysia({ prefix: "/v1/projects/:ref/aut
       if (!ctx) return status(404, { message: "Project not found", code: "404" });
       return proxyGoTrueAdmin(ctx, `/admin/oauth/clients/${encodeURIComponent(params.clientId)}`, {
         method: "PUT",
-        body: JSON.stringify(body),
+        body: JSON.stringify(normalizeOAuthClientPayload(body)),
       });
     },
     { params: t.Object({ ref: t.String(), clientId: t.String() }), body: OAUTH_CLIENT_UPDATE_BODY, detail: { tags: ["auth"], summary: "Update OAuth client" } },

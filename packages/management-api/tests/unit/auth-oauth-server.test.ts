@@ -311,4 +311,97 @@ describe("authOAuthServerRoutes", () => {
       globalThis.fetch = originalFetch;
     }
   });
+
+  test("POST /oauth-clients sends empty secret for public GoTrue clients", async () => {
+    const keyMaterial = await generateOidcJwtKeyMaterial("jwt");
+    const projectSpy = spyOn(projectService, "getProject").mockResolvedValue({
+      id: "proj_id",
+      ref: "proj_1",
+      organization_id: "org_1",
+      name: "Project 1",
+      db_name: "supa_proj_1",
+      db_user: "role_proj_1",
+      db_password: "pw",
+      jwt_secret: "jwt",
+      anon_key: "anon",
+      service_role_key: "service",
+      s3_bucket: "bucket",
+      s3_access_key: null,
+      s3_secret_key: null,
+      region: "local",
+      status: "active",
+      config: {
+        auth: {
+          oauth_server: {
+            enabled: true,
+            allow_dynamic_registration: true,
+          },
+        },
+      },
+      created_at: new Date(),
+      updated_at: new Date(),
+      deleted_at: null,
+    } as never);
+    const sqlSpy = spyOn(dbModule, "sql");
+    sqlSpy.mockImplementation(async (...args: unknown[]) => {
+      const text = String(args[0] ?? "");
+      if (text.includes("SELECT config, organization_id")) {
+        return [{
+          config: {
+            auth: {
+              oauth_server: {
+                enabled: true,
+                allow_dynamic_registration: true,
+                issuer: "https://api.example.com/auth/v1",
+                jwt_keys: keyMaterial.jwt_keys,
+                jwt_jwks: keyMaterial.jwt_jwks,
+              },
+            },
+            postgrest_port: 3100,
+            gotrue_port: 3200,
+          },
+          organization_id: "org_1",
+          jwt_secret: "jwt",
+        }];
+      }
+      return [];
+    });
+
+    const originalFetch = globalThis.fetch;
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    globalThis.fetch = mock((input: string | URL | Request, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      calls.push({ url, init });
+      return Promise.resolve(new Response(JSON.stringify({ client_id: "client_1" }), {
+        headers: { "content-type": "application/json" },
+      }));
+    }) as typeof fetch;
+
+    try {
+      const response = await request("/v1/projects/proj_1/auth/oauth-clients", {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer dev-master-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          client_type: "public",
+          redirect_uris: ["https://app.example.com/callback"],
+          grant_types: ["authorization_code", "refresh_token"],
+          client_name: "Public app",
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(calls[0]?.url).toBe("http://127.0.0.1:3200/admin/oauth/clients");
+      const forwarded = JSON.parse(String(calls[0]?.init?.body ?? "{}"));
+      expect(forwarded.client_type).toBe("public");
+      expect(forwarded.token_endpoint_auth_method).toBe("none");
+      expect(forwarded.client_secret).toBe("");
+    } finally {
+      projectSpy.mockRestore();
+      sqlSpy.mockRestore();
+      globalThis.fetch = originalFetch;
+    }
+  });
 });
