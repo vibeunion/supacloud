@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.27.7](https://github.com/zuohuadong/supacloud/compare/management-api-v0.27.6...management-api-v0.27.7) (2026-06-02)
+
+
+### Bug Fixes
+
+* **gateway:** authorize Caddy route domains for TLS ask ([19439d0](https://github.com/zuohuadong/supacloud/commit/19439d0d835e86ad22e59bc75213709ec1b17a84))
+
 ## [0.27.6](https://github.com/zuohuadong/supacloud/compare/management-api-v0.27.5...management-api-v0.27.6) (2026-06-02)
 
 
