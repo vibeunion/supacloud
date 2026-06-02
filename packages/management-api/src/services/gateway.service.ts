@@ -916,7 +916,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
                 this.makeRoute({ id: caddyRouteId(projectRef, "auth"), hosts, path: "/auth/v1*", upstream: `${hostIp}:${gotruePort}`, projectRef, stripPrefix: "/auth/v1", corsOrigins }),
                 this.makeRoute({ id: caddyRouteId(projectRef, "gotrue-well-known"), hosts, path: "/.well-known/oauth-authorization-server/auth/v1*", upstream: `${hostIp}:${gotruePort}`, projectRef, corsOrigins }),
                 this.makeRoute({ id: caddyRouteId(projectRef, "functions"), hosts, path: "/functions/v1*", upstream: `${hostIp}:${config.port}`, projectRef, readTimeout: 500_000, corsOrigins }),
-                this.makeRoute({ id: caddyRouteId(projectRef, "storage"), hosts, path: "/storage/v1*", upstream: `${hostIp}:${opts?.storagePort || config.port}`, projectRef, corsOrigins, preserveUpstreamCors: true }),
+                this.makeRoute({ id: caddyRouteId(projectRef, "storage"), hosts, path: "/storage/v1*", upstream: `${hostIp}:${opts?.storagePort || config.port}`, projectRef, stripPrefix: "/storage/v1", corsOrigins, preserveUpstreamCors: true }),
                 this.makeRoute({ id: caddyRouteId(projectRef, "realtime-api"), hosts, path: "/realtime/v1/api*", upstream: `${hostIp}:${config.port}`, projectRef, readTimeout: 60_000, corsOrigins }),
                 this.makeRoute({ id: caddyRouteId(projectRef, "realtime"), hosts, path: "/realtime/v1/websocket*", upstream: `${hostIp}:${config.port}`, projectRef, readTimeout: 86_400_000, corsOrigins }),
                 this.makeRoute({ id: caddyRouteId(projectRef, "management"), hosts, path: [`/v1/projects/${projectRef}`, `/v1/projects/${projectRef}/*`], upstream: `${hostIp}:${config.port}`, projectRef, corsOrigins }),
