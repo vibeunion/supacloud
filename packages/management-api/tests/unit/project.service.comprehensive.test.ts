@@ -485,6 +485,35 @@ describe("ProjectService - Comprehensive", () => {
     expect(result).toBe(false);
   });
 
+  test("upsertSecrets returns true only after written names are readable", async () => {
+    projectRepositoryMock.findByRef.mockResolvedValueOnce(mockProject);
+    databaseServiceMock.upsertSecret.mockResolvedValueOnce(true).mockResolvedValueOnce(true);
+    databaseServiceMock.getSecrets.mockResolvedValueOnce([
+      { name: "KEY1", value: "val1" },
+      { name: "KEY2", value: "val2" },
+    ]);
+
+    const result = await service.upsertSecrets("test123abc", [
+      { name: "KEY1", value: "val1" },
+      { name: "KEY2", value: "val2" },
+    ]);
+
+    expect(result).toBe(true);
+    expect(databaseServiceMock.getSecrets).toHaveBeenCalledWith("test123abc");
+  });
+
+  test("upsertSecrets returns false when write reports success but secrets remain invisible", async () => {
+    projectRepositoryMock.findByRef.mockResolvedValueOnce(mockProject);
+    databaseServiceMock.upsertSecret.mockResolvedValueOnce(true);
+    databaseServiceMock.getSecrets.mockResolvedValueOnce([]);
+
+    const result = await service.upsertSecrets("test123abc", [
+      { name: "DATA_ORGANIZATION_API_TOKEN", value: "token" },
+    ]);
+
+    expect(result).toBe(false);
+  });
+
   test("deleteSecret delegates to database service", async () => {
     projectRepositoryMock.findByRef.mockResolvedValueOnce(mockProject);
     expect(await service.deleteSecret("test123abc", "KEY")).toBe(true);
