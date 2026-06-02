@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.27.8](https://github.com/zuohuadong/supacloud/compare/management-api-v0.27.7...management-api-v0.27.8) (2026-06-02)
+
+
+### Bug Fixes
+
+* **gateway:** allow forwarded CORS headers ([e86239b](https://github.com/zuohuadong/supacloud/commit/e86239b35e4721848504ec416ecf6683ae5daa69))
+* **gateway:** allow forwarded CORS headers ([2912d50](https://github.com/zuohuadong/supacloud/commit/2912d50b68400d9b877a5d8402f0424986ca6284))
+* **management-api:** verify project secret upserts ([87c9260](https://github.com/zuohuadong/supacloud/commit/87c9260682f3031b85cb97a47fdc62c53f35a003))
+
 ## [0.27.7](https://github.com/zuohuadong/supacloud/compare/management-api-v0.27.6...management-api-v0.27.7) (2026-06-02)
 
 
