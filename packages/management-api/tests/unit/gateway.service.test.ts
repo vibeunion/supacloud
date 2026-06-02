@@ -110,6 +110,10 @@ describe("GatewayService provider selection", () => {
         expect(DEFAULT_CORS_HEADERS).toContain("x-supacloud-correlation-id");
         expect(DEFAULT_CORS_HEADERS).toContain("x-supacloud-business-task-id");
         expect(DEFAULT_CORS_HEADERS).toContain("x-supacloud-task-metadata");
+        expect(DEFAULT_CORS_HEADERS).toContain("x-forwarded-for");
+        expect(DEFAULT_CORS_HEADERS).toContain("x-forwarded-host");
+        expect(DEFAULT_CORS_HEADERS).toContain("x-forwarded-proto");
+        expect(DEFAULT_CORS_HEADERS).toContain("x-real-ip");
     });
 
     test("tenant cors origins include exact api and studio custom domains", () => {
