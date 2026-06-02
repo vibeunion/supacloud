@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
-import { rm } from "node:fs/promises";
+import { readFile, rm } from "node:fs/promises";
 import { config } from "../../src/config";
 import {
     CaddyGatewayProvider,
@@ -147,7 +147,13 @@ describe("CaddyGatewayProvider", () => {
         const server = load?.body?.apps?.http?.servers?.supacloud;
         expect(server).not.toHaveProperty("http3");
         expect(server?.tls_connection_policies).toEqual([{}]);
+        const noticeLog = load?.body?.logging?.logs?.supacloud_notice_do_not_edit_caddy_config_json_use_supacloud_cli_management_api_or_web_console;
+        expect(noticeLog?.writer?.output).toBe("discard");
+        expect(noticeLog?.level).toBe("INFO");
         expect(load?.body?.apps?.tls?.automation?.policies?.[0]?.key_type).toBe("p256");
+        const notice = await readFile("/tmp/supacloud-caddy-test/DO-NOT-EDIT.txt", "utf8");
+        expect(notice).toContain("Do not edit /tmp/supacloud-caddy-test/config.json by hand.");
+        expect(notice).toContain("Change via: supacloud CLI, SupaCloud management API, SupaCloud web console.");
         const routes = load?.body?.apps?.http?.servers?.supacloud?.routes ?? [];
         const rest = routes.find((route: any) => route["@id"] === "route-project-testref123-rest");
         const storage = routes.find((route: any) => route["@id"] === "route-project-testref123-storage");
@@ -346,6 +352,9 @@ describe("CaddyGatewayProvider", () => {
         const load = calls.filter((call) => call.method === "POST" && call.url.endsWith("/load")).at(-1);
         const routes = load?.body?.apps?.http?.servers?.supacloud?.routes ?? [];
         const route = routes.find((item: any) => item["@id"] === "route-frontend-proj123-0000002b");
+        const securityHeaders = route?.handle?.find((handler: any) =>
+            handler.handler === "headers" && handler.response?.set?.["X-Content-Type-Options"],
+        );
         const encode = route?.handle?.find((handler: any) => handler.handler === "encode");
         const subroute = route?.handle?.find((handler: any) => handler.handler === "subroute");
         const tryFiles = subroute?.routes?.find((item: any) => item.match?.[0]?.file?.try_files?.includes("/index.html"))?.match?.[0]?.file;
@@ -354,6 +363,9 @@ describe("CaddyGatewayProvider", () => {
         const fileServer = subroute?.routes?.at(-1)?.handle?.at(-1);
 
         expect(route?.match?.[0]?.host).toEqual(["static.example.com"]);
+        expect(securityHeaders?.response?.set?.["Strict-Transport-Security"]).toBeUndefined();
+        expect(securityHeaders?.response?.set?.["X-Content-Type-Options"]).toEqual(["nosniff"]);
+        expect(securityHeaders?.response?.set?.["Referrer-Policy"]).toEqual(["strict-origin-when-cross-origin"]);
         expect(encode?.prefer).toEqual(["zstd", "gzip"]);
         expect(tryFiles?.try_files).toContain("/index.html");
         expect(avifRoute?.match?.[0]?.file?.try_files).toEqual(["{http.request.uri.path}.avif"]);

@@ -161,6 +161,7 @@ type CaddyServer = {
 
 type CaddyConfig = {
     admin?: Record<string, unknown>;
+    logging?: Record<string, unknown>;
     storage?: Record<string, unknown>;
     apps: {
         tls?: Record<string, unknown>;
@@ -169,6 +170,27 @@ type CaddyConfig = {
         };
     };
 };
+
+const CADDY_GENERATED_CONFIG_NOTICE_LOG =
+    "supacloud_notice_do_not_edit_caddy_config_json_use_supacloud_cli_management_api_or_web_console";
+
+function caddyGeneratedConfigNoticeLog(): Record<string, unknown> {
+    return {
+        writer: { output: "discard" },
+        level: "INFO",
+    };
+}
+
+function caddyGeneratedConfigNotice(configPath = config.caddyConfigPath): string {
+    return [
+        "SupaCloud generated Caddy configuration",
+        "",
+        `Do not edit ${configPath} by hand.`,
+        "SupaCloud regenerates this Caddy JSON during route, domain, certificate, rate-limit, and frontend deployment reconciliation.",
+        "Change via: supacloud CLI, SupaCloud management API, SupaCloud web console.",
+        "",
+    ].join("\n");
+}
 
 function caddyRouteId(projectRef: string, kind: string): string {
     return `route-project-${projectRef}-${kind}`;
@@ -248,6 +270,11 @@ export class CaddyGatewayProvider implements GatewayProvider {
 
         return {
             admin: { listen: caddyAdminListen() },
+            logging: {
+                logs: {
+                    [CADDY_GENERATED_CONFIG_NOTICE_LOG]: caddyGeneratedConfigNoticeLog(),
+                },
+            },
             storage: { module: "file_system", root: config.caddyStateDir },
             apps: {
                 tls: {
@@ -458,6 +485,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
                 throw new Error(`Caddy /load failed with ${res.status}: ${text}`);
             }
             await fs.rename(tmpPath, config.caddyConfigPath);
+            await fs.writeFile(path.join(path.dirname(config.caddyConfigPath), "DO-NOT-EDIT.txt"), caddyGeneratedConfigNotice());
         } catch (error) {
             await fs.unlink(tmpPath).catch(() => undefined);
             throw error;
@@ -620,7 +648,6 @@ export class CaddyGatewayProvider implements GatewayProvider {
             handler: "headers",
             response: {
                 set: {
-                    "Strict-Transport-Security": ["max-age=31536000; includeSubDomains"],
                     "X-Content-Type-Options": ["nosniff"],
                     "Referrer-Policy": ["strict-origin-when-cross-origin"],
                 },

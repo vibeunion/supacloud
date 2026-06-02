@@ -1447,6 +1447,14 @@ install_caddy_gateway() {
     cat > /etc/supacloud/caddy/config.json <<'EOF'
 {
   "admin": { "listen": "127.0.0.1:2019" },
+  "logging": {
+    "logs": {
+      "supacloud_notice_do_not_edit_caddy_config_json_use_supacloud_cli_management_api_or_web_console": {
+        "writer": { "output": "discard" },
+        "level": "INFO"
+      }
+    }
+  },
   "storage": { "module": "file_system", "root": "/var/lib/supacloud/caddy" },
   "apps": {
     "tls": {
@@ -1473,6 +1481,14 @@ install_caddy_gateway() {
   }
 }
 EOF
+    cat > /etc/supacloud/caddy/DO-NOT-EDIT.txt <<'EOF'
+SupaCloud generated Caddy configuration
+
+Do not edit /etc/supacloud/caddy/config.json by hand.
+SupaCloud regenerates this Caddy JSON during route, domain, certificate, rate-limit, and frontend deployment reconciliation.
+Change via: supacloud CLI, SupaCloud management API, SupaCloud web console.
+EOF
+    chmod 644 /etc/supacloud/caddy/DO-NOT-EDIT.txt
 
     cat > /etc/systemd/system/supacloud-caddy.service <<'EOF'
 [Unit]
