@@ -26,6 +26,7 @@ import { migrateLegacyVersionArtifacts } from "./services/edge-function.service"
 import { resolveRealtimeTenantHost } from "./utils/sdk-parity";
 import { resolveProjectRefFromApiKey } from "./utils/project-auth";
 import { isFrontendDomain } from "./utils/frontend-domains";
+import { isCaddyRouteDomain } from "./utils/caddy-domains";
 
 const WEB_CONSOLE_CURRENT_DIR = "/opt/supacloud/web-console/current";
 const WEB_CONSOLE_LEGACY_DIR = "/opt/supacloud/packages/web-console/build";
@@ -355,6 +356,7 @@ const app = new Elysia({ strictPath: false })
     `;
     if (rows.length > 0) return new Response("ok");
     if (await isFrontendDomain(domain)) return new Response("ok");
+    if (await isCaddyRouteDomain(domain)) return new Response("ok");
     return new Response("domain not allowed", { status: 403 });
   }, {
     detail: { tags: ["gateway"], summary: "Authorize Caddy On-Demand TLS domain" },
