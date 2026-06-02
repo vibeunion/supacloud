@@ -758,8 +758,9 @@ export class ProjectService {
       if (!success) return false;
     }
 
-    // After update, can trigger Runtime restart logic
-    return true;
+    const persistedSecrets = await databaseService.getSecrets(ref);
+    const persistedNames = new Set(persistedSecrets.map((secret) => secret.name));
+    return secrets.every((secret) => persistedNames.has(secret.name));
   }
 
   async deleteSecret(ref: string, name: string): Promise<boolean> {
