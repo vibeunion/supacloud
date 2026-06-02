@@ -15,6 +15,7 @@ import { uniqueStrings } from "../utils/strings";
 export const DEFAULT_CORS_HEADERS = [
     "Accept", "Accept-Language", "Authorization", "Content-Language", "Content-Type",
     "apikey", "x-client-info", "x-project-ref", "X-Api-Version", "x-supabase-api-version",
+    "x-forwarded-for", "x-forwarded-host", "x-forwarded-proto", "x-real-ip",
     "Prefer", "Content-Profile", "accept-profile", "Range", "Range-Unit",
     "x-upsert", "Cache-Control", "x-retry-count", "x-metadata",
     "x-supacloud-async", "x-supacloud-timeout", "x-supacloud-retries",
