@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.28.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.27.8...management-api-v0.28.0) (2026-06-02)
+
+
+### Features
+
+* **gateway:** add Caddy config notice log and DO-NOT-EDIT marker ([9613d43](https://github.com/zuohuadong/supacloud/commit/9613d43d386cdead400508b2442b19c305a13750))
+
 ## [0.27.8](https://github.com/zuohuadong/supacloud/compare/management-api-v0.27.7...management-api-v0.27.8) (2026-06-02)
 
 
