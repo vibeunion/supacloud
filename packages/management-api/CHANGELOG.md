@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.27.6](https://github.com/zuohuadong/supacloud/compare/management-api-v0.27.5...management-api-v0.27.6) (2026-06-02)
+
+
+### Bug Fixes
+
+* **gateway:** strip storage prefix in Caddy routes ([29987fc](https://github.com/zuohuadong/supacloud/commit/29987fc8af61de250337b921ac9ea03f9f308c24))
+
 ## [0.27.5](https://github.com/zuohuadong/supacloud/compare/management-api-v0.27.4...management-api-v0.27.5) (2026-06-01)
 
 
