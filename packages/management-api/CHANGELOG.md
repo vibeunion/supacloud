@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.29.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.28.2...management-api-v0.29.0) (2026-06-03)
+
+
+### Features
+
+* **gateway:** add SupAuth hosted login page routes ([bcc1d9a](https://github.com/zuohuadong/supacloud/commit/bcc1d9a3d2d062039d0654440d367b8e3f383e49))
+
 ## [0.28.2](https://github.com/zuohuadong/supacloud/compare/management-api-v0.28.1...management-api-v0.28.2) (2026-06-03)
 
 
