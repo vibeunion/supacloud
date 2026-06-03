@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.3](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.8.2...edge-runtime-v0.8.3) (2026-06-03)
+
+
+### Bug Fixes
+
+* **edge-runtime:** pass TLS policy into smol workers ([b9ce395](https://github.com/zuohuadong/supacloud/commit/b9ce39556e9f881537274bd39a14de7df644706a))
+
 ## [0.8.2](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.8.1...edge-runtime-v0.8.2) (2026-06-03)
 
 
