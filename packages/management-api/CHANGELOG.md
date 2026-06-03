@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.28.2](https://github.com/zuohuadong/supacloud/compare/management-api-v0.28.1...management-api-v0.28.2) (2026-06-03)
+
+
+### Bug Fixes
+
+* **gateway:** disable streaming on Caddy proxy for storage compat routes ([#264](https://github.com/zuohuadong/supacloud/issues/264)) ([ed67e4f](https://github.com/zuohuadong/supacloud/commit/ed67e4f73af7f607045021b99deb69a6ffb862bd))
+
 ## [0.28.1](https://github.com/zuohuadong/supacloud/compare/management-api-v0.28.0...management-api-v0.28.1) (2026-06-03)
 
 
