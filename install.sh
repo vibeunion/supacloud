@@ -2364,6 +2364,7 @@ install_management_api() {
         cp -rf "${SCRIPT_DIR}/scripts/lib/"* "$SCRIPTS_INSTALL_DIR/"
         chmod +x "$SCRIPTS_INSTALL_DIR"/*.sh
         log_info "Underlying script link ready: $SCRIPTS_INSTALL_DIR"
+    fi
 
     # 2c. Copy database schema files (required for project provisioning)
     local SCHEMA_SRC="${SCRIPT_DIR}/packages/management-api/src/db/schemas"
@@ -2374,7 +2375,6 @@ install_management_api() {
         log_info "Database schema files deployed to $SCHEMA_DST"
     else
         log_warn "Schema source directory not found: $SCHEMA_SRC"
-    fi
     fi
 
     # 3. Generate management credentials

@@ -27,7 +27,7 @@ function pickPositivePort(value: unknown): number | null {
 const DEFAULT_POSTGREST_SCHEMAS = ["public", "storage", "graphql_public"] as const;
 
 export function renderPostgrestDbSchemas(includePgmqPublic = false): string {
-    const schemas = [...DEFAULT_POSTGREST_SCHEMAS];
+    const schemas: string[] = [...DEFAULT_POSTGREST_SCHEMAS];
     if (includePgmqPublic) schemas.push("pgmq_public");
     return schemas.join(", ");
 }

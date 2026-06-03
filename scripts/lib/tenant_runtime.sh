@@ -215,6 +215,19 @@ generate_tenant_config() {
         exit 1
     fi
 
+    local pgrst_db_schemas="public,storage,graphql_public"
+    local pgrst_db_schemas_conf="public, storage, graphql_public"
+    local pgmq_public_exists=""
+    if command -v psql >/dev/null 2>&1; then
+        pgmq_public_exists=$(psql "postgres://authenticator_${ref}:${db_password}@${PG_HOST}:${PG_PORT}/${db_name}" \
+            -Atqc "SELECT CASE WHEN EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = 'pgmq_public') THEN 1 ELSE 0 END;" \
+            2>/dev/null || true)
+    fi
+    if [ "$pgmq_public_exists" = "1" ]; then
+        pgrst_db_schemas="${pgrst_db_schemas},pgmq_public"
+        pgrst_db_schemas_conf="${pgrst_db_schemas_conf}, pgmq_public"
+    fi
+
     # Query tenant's API external access URL (for GoTrue API_EXTERNAL_URL)
     # Priority: environment variable override > supacloud_meta.projects.api_url > default placeholder
     local api_external_url="${GOTRUE_API_EXTERNAL_URL:-}"
@@ -230,7 +243,7 @@ generate_tenant_config() {
     cat > "${TENANT_CONFIG_DIR}/${ref}.env" <<EOF
 # SupaCloud Tenant PostgREST Runtime: ${ref}
 PGRST_DB_URI=postgres://authenticator_${ref}:${db_password}@${PG_HOST}:${PG_PORT}/${db_name}
-PGRST_DB_SCHEMAS=public,storage,graphql_public,pgmq_public
+PGRST_DB_SCHEMAS=${pgrst_db_schemas}
 PGRST_DB_EXTRA_SEARCH_PATH=public
 PGRST_DB_ANON_ROLE=anon
 PGRST_JWT_SECRET=${jwt_secret}
@@ -244,7 +257,7 @@ EOF
     cat > "${TENANT_CONFIG_DIR}/${ref}.conf" <<EOF
 # PostgREST config for tenant: ${ref}
 db-uri = "postgres://authenticator_${ref}:${db_password}@${PG_HOST}:${PG_PORT}/${db_name}"
-db-schemas = "public, storage, graphql_public, pgmq_public"
+db-schemas = "${pgrst_db_schemas_conf}"
 # Bug Fix: Multi-tenant isolation - extra search path should include tenant-specific schema
 db-extra-search-path = "public, extensions, auth, ${ref}"
 db-anon-role = "anon"
