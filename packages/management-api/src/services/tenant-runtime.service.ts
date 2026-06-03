@@ -24,6 +24,14 @@ function pickPositivePort(value: unknown): number | null {
     return Math.trunc(port);
 }
 
+const DEFAULT_POSTGREST_SCHEMAS = ["public", "storage", "graphql_public"] as const;
+
+export function renderPostgrestDbSchemas(includePgmqPublic = false): string {
+    const schemas: string[] = [...DEFAULT_POSTGREST_SCHEMAS];
+    if (includePgmqPublic) schemas.push("pgmq_public");
+    return schemas.join(", ");
+}
+
 export interface RuntimeStatus {
     status: "running" | "stopped" | "starting" | "error";
     port: number;
@@ -1177,10 +1185,26 @@ class TenantRuntimeService {
         await this.ensureGotrueBinary();
     }
 
+    private async hasPgmqPublicSchema(ref: string, dbName: string, dbPassword: string): Promise<boolean> {
+        const dbUrl = `postgres://${resolveAuthenticatorName(ref)}:${dbPassword}@${this.PG_HOST}:${this.PG_PORT}/${dbName}`;
+        const query = "SELECT CASE WHEN EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = 'pgmq_public') THEN 1 ELSE 0 END;";
+        const result = await $`psql ${dbUrl} -Atqc ${query}`.nothrow().quiet();
+        if (result.exitCode !== 0) {
+            const stderr = result.stderr.toString().trim();
+            logger.warn(`[tenant-runtime] Failed to detect pgmq_public schema for ${ref}; falling back to base PostgREST schemas`, {
+                error: stderr || `psql exited with code ${result.exitCode}`,
+            });
+            return false;
+        }
+        return result.stdout.toString().trim() === "1";
+    }
+
     private async generateTenantConfig(ref: string, pgrstPort: number, gotruePort: number) {
         await fs.mkdir(this.TENANT_CONFIG_DIR, { recursive: true });
 
         const creds = await this.getTenantCredentials(ref);
+        const includePgmqPublic = await this.hasPgmqPublicSchema(ref, creds.dbName, creds.dbPassword);
+        const dbSchemas = renderPostgrestDbSchemas(includePgmqPublic);
 
         const jwtVerifierSecret = creds.jwtJwks || creds.jwtSecret;
         const jwtJwksEnv = creds.jwtJwks ? `\nJWT_JWKS=${quoteSystemdEnvValue(creds.jwtJwks)}` : "";
@@ -1207,7 +1231,7 @@ ${jwtJwksEnv}${jwtKeysEnv}
         const pgrstConf = `
 # PostgREST config for tenant: ${ref}
 db-uri = "postgres://${resolveAuthenticatorName(ref)}:${creds.dbPassword}@${this.PG_HOST}:${this.PG_PORT}/${creds.dbName}"
-db-schemas = "public, storage, graphql_public, pgmq_public"
+db-schemas = "${dbSchemas}"
 db-extra-search-path = "public, extensions, auth"
 db-anon-role = "anon"
 jwt-secret = ${JSON.stringify(jwtVerifierSecret)}

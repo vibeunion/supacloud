@@ -135,7 +135,7 @@ def main() -> None:
     print(f"PUBLIC_URL={args.public_url}")
     print(f"STUDIO_URL={args.studio_url}")
     print(f"BASE_DOMAIN={derive_base_domain(args.public_url)}")
-    print("PGRST_DB_SCHEMAS=public,storage,graphql_public,pgmq_public")
+    print("PGRST_DB_SCHEMAS=public,storage,graphql_public")
     print("CADDY_HTTP_PORT=8000")
     print("CADDY_HTTPS_PORT=8443")
     print("# CADDY_ADMIN_PORT=2019 (internal only)")

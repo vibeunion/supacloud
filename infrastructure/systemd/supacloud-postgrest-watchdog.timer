@@ -1,0 +1,13 @@
+[Unit]
+Description=Run SupaCloud PostgREST tenant watchdog every minute
+Documentation=https://github.com/zuohuadong/supacloud
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1min
+AccuracySec=15s
+Persistent=true
+Unit=supacloud-postgrest-watchdog.service
+
+[Install]
+WantedBy=timers.target

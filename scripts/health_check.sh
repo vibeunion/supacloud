@@ -9,6 +9,65 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
+check_postgrest_tenant_runtimes() {
+    local tenant_dir="/etc/supabase/tenants"
+    local checked=0
+    local unhealthy=0
+
+    if [[ ! -d "$tenant_dir" ]]; then
+        echo -e "${YELLOW}?${NC} Tenant PostgREST (config dir missing: $tenant_dir)"
+        return 0
+    fi
+
+    shopt -s nullglob
+    for conf in "$tenant_dir"/*.conf; do
+        [[ "$conf" == *.bak* ]] && continue
+
+        local tenant="${conf##*/}"
+        tenant="${tenant%.conf}"
+
+        local port
+        port=$(sed -n 's/^server-port = \([0-9][0-9]*\)$/\1/p' "$conf" | head -n 1)
+        checked=$((checked + 1))
+
+        if [[ -z "$port" ]]; then
+            echo -e "${RED}✗${NC} Tenant PostgREST ${tenant} (missing server-port)"
+            unhealthy=$((unhealthy + 1))
+            continue
+        fi
+
+        if curl -fsS --max-time 3 "http://127.0.0.1:${port}/" >/dev/null 2>&1; then
+            echo -e "${GREEN}✓${NC} Tenant PostgREST ${tenant} (${port})"
+            continue
+        fi
+
+        unhealthy=$((unhealthy + 1))
+        local detail
+        detail=$(journalctl -u "supacloud-pgrst@${tenant}" -n 20 --no-pager 2>/dev/null \
+            | grep -E 'PGRST002|Failed to load the schema cache|schema "pgmq_public" does not exist' \
+            | tail -n 1 || true)
+        if [[ -n "$detail" ]]; then
+            echo -e "${RED}✗${NC} Tenant PostgREST ${tenant} (${port}) ${detail}"
+        else
+            echo -e "${RED}✗${NC} Tenant PostgREST ${tenant} (${port})"
+        fi
+    done
+    shopt -u nullglob
+
+    if [[ "$checked" -eq 0 ]]; then
+        echo -e "${YELLOW}?${NC} Tenant PostgREST (no tenant configs found)"
+        return 0
+    fi
+
+    if [[ "$unhealthy" -gt 0 ]]; then
+        echo -e "${RED}✗${NC} Tenant PostgREST summary (${unhealthy}/${checked} unhealthy)"
+        return 1
+    fi
+
+    echo -e "${GREEN}✓${NC} Tenant PostgREST summary (${checked} healthy)"
+    return 0
+}
+
 check_service() {
     local name="$1"
     local check_cmd="$2"
@@ -72,6 +131,8 @@ if [[ "$active_tenants" -gt 0 ]]; then
 else
     echo -e "${YELLOW}?${NC} No active tenant runtimes"
 fi
+
+check_postgrest_tenant_runtimes
 
 # Check S3 Storage
 if systemctl is-active --quiet juicefs-s3 2>/dev/null; then

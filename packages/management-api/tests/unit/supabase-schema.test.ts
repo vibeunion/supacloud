@@ -121,13 +121,23 @@ describe("supabase bootstrap schema", () => {
     }
   });
 
-  test("PostgREST tenant config exposes pgmq_public for supabase-js schema rpc", () => {
+  test("PostgREST tenant config keeps pgmq_public out of safe defaults", () => {
     for (const filePath of [
-      "src/services/tenant-runtime.service.ts",
-      "../../scripts/lib/tenant_runtime.sh",
+      "../../docker/dev/docker-compose.yml",
       "../../docker/self-host/docker-compose.yml",
       "../../docker/self-host/.env.example",
       "../../docker/self-host/init-env.py",
+    ]) {
+      const source = readRepoFile(filePath);
+      expect(source).toContain("public,storage,graphql_public");
+      expect(source).not.toContain("public,storage,graphql_public,pgmq_public");
+    }
+  });
+
+  test("tenant runtime only exposes pgmq_public after detecting wrapper schema", () => {
+    for (const filePath of [
+      "src/services/tenant-runtime.service.ts",
+      "../../scripts/lib/tenant_runtime.sh",
     ]) {
       const source = readRepoFile(filePath);
       expect(source).toContain("pgmq_public");
