@@ -1,6 +1,7 @@
 import { parentPort, workerData } from "worker_threads";
 import path from "path";
 import { getCapturedServeHandler, clearCapturedServeHandler, setTenantRef, setProjectRoot, setInjectedEnv, envWriteLog } from "./deno-compat";
+import { installEdgeFetchTlsPolicy, resolveEdgeFetchTlsPolicy } from "./fetch-tls-policy";
 
 export function getInjectedEnv(): Record<string, string> {
   return currentInjectedEnv;
@@ -203,7 +204,14 @@ parentPort.on("message", async (msg: any) => {
       setProjectRoot(msg.projectRoot || path.dirname(msg.functionPath));
       injectEnv(env);
       setInjectedEnv(env);
-      await loadModule(msg.functionPath);
+      const restoreFetchTlsPolicy = installEdgeFetchTlsPolicy(
+        await resolveEdgeFetchTlsPolicy(currentInjectedEnv, originalProcessEnv),
+      );
+      try {
+        await loadModule(msg.functionPath);
+      } finally {
+        restoreFetchTlsPolicy();
+      }
       parentPort!.postMessage({
         type: "preheat_done",
         functionId: msg.functionId,
@@ -238,6 +246,9 @@ parentPort.on("message", async (msg: any) => {
   setInjectedEnv(env);
   setupConsoleCapture(functionId);
   setupEdgeRuntimeCompat();
+  const restoreFetchTlsPolicy = installEdgeFetchTlsPolicy(
+    await resolveEdgeFetchTlsPolicy(currentInjectedEnv, originalProcessEnv),
+  );
 
   try {
     const handler = await loadModule(functionPath);
@@ -329,6 +340,7 @@ parentPort.on("message", async (msg: any) => {
       ).buffer,
     });
   } finally {
+    restoreFetchTlsPolicy();
     currentAbortController = null;
     clearEdgeRuntimeCompat();
     restoreEnv();

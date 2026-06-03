@@ -72,6 +72,33 @@ The Bun entrypoint is `packages/edge-runtime/server.ts`, and the checked-in stan
 - `https://deno.land/std/...` — Mapped to local shims for compatibility ✅
 - Other npm imports — Auto-scanned and installed ✅
 
+## Outbound HTTPS Trust
+
+Edge Runtime release assets are native `supacloud-edge-runtime` binaries, not
+Node.js processes. `NODE_TLS_REJECT_UNAUTHORIZED=0` is therefore not the
+supported control surface for user function `fetch()` calls.
+
+For private/self-signed services, prefer adding the issuing CA:
+
+```bash
+# Host-level CA bundle, read by supacloud-edge-runtime.service through config.env
+SUPACLOUD_EDGE_TLS_CA_FILE=/etc/supacloud/edge-runtime/ca.pem
+
+# Or project/function-level inline PEM through Edge Function secrets
+SUPACLOUD_EDGE_TLS_CA='-----BEGIN CERTIFICATE-----...'
+```
+
+If compatibility requires fully bypassing certificate verification, set the
+explicit dangerous switch:
+
+```bash
+SUPACLOUD_EDGE_TLS_INSECURE_SKIP_VERIFY=true
+```
+
+The bypass is scoped to HTTPS `fetch()` calls inside Edge Function workers. It
+does not disable TLS verification for the Management API, Caddy, tenant
+PostgREST/GoTrue services, or other host processes.
+
 ## Function Examples
 
 ```typescript

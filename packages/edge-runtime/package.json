@@ -12,7 +12,7 @@
     "build:macos-amd64": "bun build server.ts --compile --target=bun-macos-x64 --outfile=supacloud-edge-runtime-macos-amd64",
     "build:macos-arm64": "bun build server.ts --compile --target=bun-macos-arm64 --outfile=supacloud-edge-runtime-macos-arm64",
     "build:macos": "bun run build:macos-amd64 && bun run build:macos-arm64",
-    "typecheck": "bun x tsc --noEmit --skipLibCheck --allowImportingTsExtensions --moduleResolution bundler --module esnext --target esnext --types bun --strict server.ts worker-executor.ts worker-pool.ts auto-deps.ts deno-compat.ts url-import-plugin.ts shims/*.ts"
+    "typecheck": "bun x tsc --noEmit --skipLibCheck --allowImportingTsExtensions --moduleResolution bundler --module esnext --target esnext --types bun --strict server.ts worker-executor.ts worker-pool.ts auto-deps.ts deno-compat.ts fetch-tls-policy.ts url-import-plugin.ts shims/*.ts"
   },
   "dependencies": {
     "@elysiajs/cors": "^1.4.0",
