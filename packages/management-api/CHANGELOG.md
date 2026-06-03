@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.29.2](https://github.com/zuohuadong/supacloud/compare/management-api-v0.29.1...management-api-v0.29.2) (2026-06-03)
+
+
+### Bug Fixes
+
+* **gateway:** block configured Caddy TLS domains ([2ad13da](https://github.com/zuohuadong/supacloud/commit/2ad13daedd3aef4675fe5ea4ba0030db57655de7))
+* **management-api:** inject key_ops sign for legacy ES256 signing keys ([74dcc11](https://github.com/zuohuadong/supacloud/commit/74dcc112f9a210a7b50cf555c9f95f1f81fb9cce))
+
 ## [0.29.1](https://github.com/zuohuadong/supacloud/compare/management-api-v0.29.0...management-api-v0.29.1) (2026-06-03)
 
 
