@@ -1,5 +1,7 @@
 import { Worker, MessagePort } from "worker_threads";
 import path from "path";
+import { resolveEdgeFetchTlsPolicy } from "./fetch-tls-policy";
+import type { EdgeFetchTlsPolicy } from "./fetch-tls-policy";
 
 interface DispatchOptions {
   functionId: string;
@@ -63,6 +65,12 @@ export class WorkerPool {
     this.workers.push(w);
     this.workerMetadata.set(w, {});
     return w;
+  }
+
+  private resolveTlsPolicy(env: Record<string, string>): Promise<EdgeFetchTlsPolicy> {
+    // Bun smol workers do not reliably inherit the parent process env. Resolve
+    // host-controlled TLS policy in the main process and pass it as message data.
+    return resolveEdgeFetchTlsPolicy(env, process.env);
   }
 
   async dispatch(opts: DispatchOptions): Promise<Response> {
@@ -199,11 +207,13 @@ export class WorkerPool {
     }
 
     const execStart = performance.now();
+    const tlsPolicy = await this.resolveTlsPolicy(opts.env);
     worker.postMessage({
       functionId: opts.functionId,
       functionPath: opts.functionPath,
       projectRoot: opts.projectRoot,
       env: opts.env,
+      tlsPolicy,
       url: opts.request.url,
       method: opts.request.method,
       headers,
@@ -471,13 +481,14 @@ export class WorkerPool {
     }
   }
 
-  private preheatWorker(
+  private async preheatWorker(
     worker: Worker,
     functionId: string,
     functionPath: string,
     projectRoot: string,
     env: Record<string, string>,
   ): Promise<boolean> {
+    const tlsPolicy = await this.resolveTlsPolicy(env);
     return new Promise((resolve) => {
       const timeout = setTimeout(() => {
         worker.removeListener("message", onMsg);
@@ -500,7 +511,7 @@ export class WorkerPool {
       };
 
       worker.on("message", onMsg);
-      worker.postMessage({ type: "preheat", functionId, functionPath, projectRoot, env });
+      worker.postMessage({ type: "preheat", functionId, functionPath, projectRoot, env, tlsPolicy });
     });
   }
 
