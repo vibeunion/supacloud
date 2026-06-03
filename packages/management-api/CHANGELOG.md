@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.29.3](https://github.com/zuohuadong/supacloud/compare/management-api-v0.29.2...management-api-v0.29.3) (2026-06-03)
+
+
+### Bug Fixes
+
+* harden PostGREST tenant schema defaults and watchdog alerts ([9637aad](https://github.com/zuohuadong/supacloud/commit/9637aad2a168cb9043d2afdece050a912637e9e7))
+
 ## [0.29.2](https://github.com/zuohuadong/supacloud/compare/management-api-v0.29.1...management-api-v0.29.2) (2026-06-03)
 
 
