@@ -87,9 +87,17 @@ export function normalizeProjectJwtKeys(value: unknown): JWK[] | null {
     ? JSON.parse(value)
     : value;
   if (!Array.isArray(parsed) || parsed.length === 0) return null;
-  const signingKeys = (parsed as JWK[]).filter(
-    (k) => k.alg === "ES256" && k.kty === "EC",
-  );
+  const signingKeys = (parsed as JWK[])
+    .filter((k) => k.alg === "ES256" && k.kty === "EC")
+    .map((k) => {
+      if (!k.key_ops) {
+        return { ...k, key_ops: ["sign"] };
+      }
+      if (Array.isArray(k.key_ops) && !k.key_ops.includes("sign")) {
+        return { ...k, key_ops: [...k.key_ops, "sign"] };
+      }
+      return k;
+    });
   return signingKeys.length > 0 ? signingKeys : (parsed as JWK[]);
 }
 
