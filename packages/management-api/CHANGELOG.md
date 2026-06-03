@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.29.1](https://github.com/zuohuadong/supacloud/compare/management-api-v0.29.0...management-api-v0.29.1) (2026-06-03)
+
+
+### Bug Fixes
+
+* **management-api:** quote JSON values correctly for systemd EnvironmentFile ([522240e](https://github.com/zuohuadong/supacloud/commit/522240ea766cc52a358f3098a11d12ab39bbf5af))
+
+
+### Elegance & Refactoring
+
+* **gateway:** generalize SupAuth hosted login to hosted auth page routes ([14a2b07](https://github.com/zuohuadong/supacloud/commit/14a2b07bf392f1af22fb435921ac817ea1f402f0))
+
 ## [0.29.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.28.2...management-api-v0.29.0) (2026-06-03)
 
 
