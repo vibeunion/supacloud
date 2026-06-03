@@ -546,6 +546,7 @@ async function main() {
 
   // 跳过 draft PR
   const prDetails = await getPRDetails();
+  const identity = isTrustedSubmitter(prDetails);
   if (prDetails.draft) {
     console.log('PR is a draft. Skipping.');
     return;
