@@ -39,7 +39,7 @@ Actions: list_providers, get_provider, configure_provider, update_provider, disa
             url: z.string().optional().describe("[configure] Custom OAuth URL"),
             app_id: z.string().optional().describe("[wechat_*] WeChat App ID"),
             app_secret: z.string().optional().describe("[wechat_*] WeChat App Secret"),
-            config: z.record(z.unknown()).optional().describe("[update_settings/update_config] Config fields"),
+            config: z.record(z.string(), z.unknown()).optional().describe("[update_settings/update_config] Config fields"),
         },
         async (args: any) => {
             const { action, ref, provider, client_id, client_secret, redirect_uri, url, app_id, app_secret, config } = args;

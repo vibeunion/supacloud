@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { config } from "../../src/config";
 import {
+  deriveStudioHostFromApiHost,
   normalizeProjectRoutingConfig,
   normalizeBaseDomain,
   resolveTenantPorts,
@@ -71,6 +72,35 @@ describe("project routing", () => {
     expect(resolveProjectApiHost("77az24zz7p", projectConfig)).toBe("api.example.com");
     expect(resolveProjectAuthHost("77az24zz7p", projectConfig)).toBe("auth.example.com");
     expect(matchProjectRefFromHost("auth.example.com", "77az24zz7p", projectConfig)).toBe(true);
+  });
+
+  test("derives Studio host from an api-prefixed API domain when Studio domain is not explicit", () => {
+    const projectConfig = {
+      api_domain: "api.ai.xigu.team",
+    };
+
+    expect(deriveStudioHostFromApiHost(projectConfig.api_domain)).toBe("studio.ai.xigu.team");
+    expect(resolveProjectStudioHost("77az24zz7p", projectConfig)).toBe("studio.ai.xigu.team");
+    expect(matchProjectRefFromHost("studio.ai.xigu.team", "77az24zz7p", projectConfig)).toBe(true);
+  });
+
+  test("does not derive Studio host from non-api API domains", () => {
+    config.baseDomain = "82.157.196.165.sslip.io";
+    const projectConfig = {
+      api_domain: "xgapi.aizhuliren.cn",
+    };
+
+    expect(deriveStudioHostFromApiHost(projectConfig.api_domain)).toBeUndefined();
+    expect(resolveProjectStudioHost("77az24zz7p", projectConfig)).toBe("studio-77az24zz7p.82.157.196.165.sslip.io");
+  });
+
+  test("keeps explicit Studio domain above the API-domain fallback", () => {
+    const projectConfig = {
+      api_domain: "api.ai.xigu.team",
+      studio_domain: "studio.custom.example.com",
+    };
+
+    expect(resolveProjectStudioHost("77az24zz7p", projectConfig)).toBe("studio.custom.example.com");
   });
 
   test("uses ENABLE_SSL to resolve public API and Studio URL schemes", () => {

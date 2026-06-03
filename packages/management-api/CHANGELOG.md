@@ -1,5 +1,43 @@
 # Changelog
 
+## [0.29.1](https://github.com/zuohuadong/supacloud/compare/management-api-v0.29.0...management-api-v0.29.1) (2026-06-03)
+
+
+### Bug Fixes
+
+* **management-api:** quote JSON values correctly for systemd EnvironmentFile ([522240e](https://github.com/zuohuadong/supacloud/commit/522240ea766cc52a358f3098a11d12ab39bbf5af))
+
+
+### Elegance & Refactoring
+
+* **gateway:** generalize SupAuth hosted login to hosted auth page routes ([14a2b07](https://github.com/zuohuadong/supacloud/commit/14a2b07bf392f1af22fb435921ac817ea1f402f0))
+
+## [0.29.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.28.2...management-api-v0.29.0) (2026-06-03)
+
+
+### Features
+
+* **gateway:** add SupAuth hosted login page routes ([bcc1d9a](https://github.com/zuohuadong/supacloud/commit/bcc1d9a3d2d062039d0654440d367b8e3f383e49))
+
+## [0.28.2](https://github.com/zuohuadong/supacloud/compare/management-api-v0.28.1...management-api-v0.28.2) (2026-06-03)
+
+
+### Bug Fixes
+
+* **gateway:** disable streaming on Caddy proxy for storage compat routes ([#264](https://github.com/zuohuadong/supacloud/issues/264)) ([ed67e4f](https://github.com/zuohuadong/supacloud/commit/ed67e4f73af7f607045021b99deb69a6ffb862bd))
+
+## [0.28.1](https://github.com/zuohuadong/supacloud/compare/management-api-v0.28.0...management-api-v0.28.1) (2026-06-03)
+
+
+### Bug Fixes
+
+* **management-api:** derive studio host from api domain ([e6935d7](https://github.com/zuohuadong/supacloud/commit/e6935d7e2cbf2991a652ec04cd0f350beafce242))
+
+
+### Miscellaneous Chores
+
+* upgrade all dependencies to latest minor ([e9719d9](https://github.com/zuohuadong/supacloud/commit/e9719d983c9303c783ddcd3d772c7e7c56e985b9))
+
 ## [0.28.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.27.8...management-api-v0.28.0) (2026-06-02)
 
 

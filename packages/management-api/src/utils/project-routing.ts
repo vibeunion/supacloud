@@ -28,6 +28,16 @@ export function normalizeBaseDomain(baseDomain: string): string {
   return baseDomain.trim().replace(/^(?:api|studio)\./i, "");
 }
 
+export function deriveStudioHostFromApiHost(apiHost: unknown): string | undefined {
+  const normalizedApiHost = pickString(apiHost);
+  if (!normalizedApiHost || !normalizedApiHost.toLowerCase().startsWith("api.")) {
+    return undefined;
+  }
+
+  const baseHost = normalizedApiHost.slice("api.".length);
+  return baseHost.length > 0 ? `studio.${baseHost}` : undefined;
+}
+
 export function resolveProjectBaseHost(projectRef: string): string {
   return `${projectRef}.${normalizeBaseDomain(config.baseDomain)}`;
 }
@@ -95,6 +105,9 @@ export function resolveProjectStudioHost(
   if (customDomain) {
     return customDomain.startsWith("studio.") ? customDomain : `studio.${customDomain}`;
   }
+
+  const derivedStudioDomain = deriveStudioHostFromApiHost(normalizedConfig?.api_domain);
+  if (derivedStudioDomain) return derivedStudioDomain;
 
   return `studio-${projectRef}.${normalizeBaseDomain(config.baseDomain)}`;
 }

@@ -11,14 +11,11 @@ import { resolveProjectApiUrl, resolveProjectAuthUrl, resolveProjectStudioUrl } 
 import { normalizeOAuthServerConfig, normalizeProjectConfig } from "../utils/project-config";
 import { normalizeProjectJwtJwks, normalizeProjectJwtKeys } from "../utils/project-jwt";
 import { uniqueStrings } from "../utils/strings";
+import { quoteSystemdEnvValue } from "../utils/systemd-env";
 
 function stringifyJsonConfig(value: unknown): string | null {
     if (!value) return null;
     return typeof value === "string" ? value : JSON.stringify(value);
-}
-
-function quoteSystemdEnvValue(value: string): string {
-    return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 }
 
 function pickPositivePort(value: unknown): number | null {

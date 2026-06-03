@@ -27,6 +27,8 @@ jobs:
       releases_created: ${{ steps.release.outputs.releases_created }}
       management_api_released: ${{ steps.release.outputs['packages/management-api--release_created'] }}
       management_api_tag_name: ${{ steps.release.outputs['packages/management-api--tag_name'] }}
+      edge_runtime_released: ${{ steps.release.outputs['packages/edge-runtime--release_created'] }}
+      edge_runtime_tag_name: ${{ steps.release.outputs['packages/edge-runtime--tag_name'] }}
       supacloud_js_released: ${{ steps.release.outputs['packages/supacloud-js--release_created'] }}
       cli_released: ${{ steps.release.outputs['packages/cli--release_created'] }}
       admin_released: ${{ steps.release.outputs['packages/admin--release_created'] }}
@@ -64,10 +66,6 @@ jobs:
         working-directory: packages/management-api
         run: bun install
 
-      - name: Install edge-runtime dependencies
-        working-directory: packages/edge-runtime
-        run: bun install
-
       - name: Build web console static artifact
         run: |
           cd packages/web-console
@@ -88,7 +86,48 @@ jobs:
           mv supacloud-macos-arm64 dist/
           chmod 0755 dist/supacloud-*
 
-      - name: Build edge-runtime release binaries
+      - name: Install xcaddy
+        run: go install github.com/caddyserver/xcaddy/cmd/xcaddy@latest
+
+      - name: Build Caddy edge binaries
+        run: OUT_DIR=packages/management-api/dist bash scripts/build_supacloud_caddy.sh
+
+      - name: Generate SHA256SUMS
+        run: |
+          mkdir -p release-assets
+          cp packages/management-api/dist/* release-assets/
+          cd release-assets
+          sha256sum * > SHA256SUMS
+
+      - name: Upload binaries to GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
+          RELEASE_TAG: ${{ needs.release-please.outputs.management_api_tag_name }}
+        run: gh release upload "$RELEASE_TAG" release-assets/* --clobber
+
+
+  publish-edge-runtime-binaries:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.edge_runtime_released == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.release-please.outputs.edge_runtime_tag_name }}
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        working-directory: packages/edge-runtime
+        run: bun install
+
+      - name: Build release binaries
         working-directory: packages/edge-runtime
         run: |
           mkdir -p dist
@@ -100,25 +139,15 @@ jobs:
           mv supacloud-edge-runtime-macos-arm64 dist/
           chmod 0755 dist/supacloud-edge-runtime-*
 
-      - name: Install xcaddy
-        run: go install github.com/caddyserver/xcaddy/cmd/xcaddy@latest
-
-      - name: Build Caddy edge binaries
-        run: OUT_DIR=packages/management-api/dist bash scripts/build_supacloud_caddy.sh
-
       - name: Generate SHA256SUMS
-        run: |
-          mkdir -p release-assets
-          cp packages/management-api/dist/* release-assets/
-          cp packages/edge-runtime/dist/* release-assets/
-          cd release-assets
-          sha256sum * > SHA256SUMS
+        working-directory: packages/edge-runtime/dist
+        run: sha256sum * > SHA256SUMS
 
       - name: Upload binaries to GitHub Release
         env:
           GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
-          RELEASE_TAG: ${{ needs.release-please.outputs.management_api_tag_name }}
-        run: gh release upload "$RELEASE_TAG" release-assets/* --clobber
+          RELEASE_TAG: ${{ needs.release-please.outputs.edge_runtime_tag_name }}
+        run: gh release upload "$RELEASE_TAG" packages/edge-runtime/dist/* --clobber
 
 
   publish-npm:

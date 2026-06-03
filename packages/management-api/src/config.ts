@@ -128,6 +128,9 @@ export interface Config {
   restProxyTimeoutMs: number;
   secretsEncryptionKey: string;
   caddyTlsBlockedDomains: string[];
+  hostedAuthPageEnabled: boolean;
+  hostedAuthPageHost: string;
+  hostedAuthPageRoot: string;
 }
 
 function getEnv(key: string, defaultValue = ""): string {
@@ -264,7 +267,11 @@ export const config: Config = {
   sdkProxyTimeoutMs: Number(getEnv("SDK_PROXY_TIMEOUT_MS", "30000")),
   restProxyTimeoutMs: Number(getEnv("REST_PROXY_TIMEOUT_MS", "300000")),
   secretsEncryptionKey: getEnv("SECRETS_ENCRYPTION_KEY", getEnv("MASTER_TOKEN", "")),
-  caddyTlsBlockedDomains: getEnv("CADDY_TLS_BLOCKED_DOMAINS").split(",").map((s: string) => s.trim().toLowerCase()).filter(Boolean),
+  caddyTlsBlockedDomains: getEnv("CADDY_TLS_BLOCKED_DOMAINS").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean),
+
+  hostedAuthPageEnabled: getEnv("HOSTED_AUTH_PAGE_ENABLED", getEnv("SUPAUTH_HOSTED_LOGIN_ENABLED", "false")) === "true",
+  hostedAuthPageHost: getEnv("HOSTED_AUTH_PAGE_HOST", getEnv("SUPAUTH_HOSTED_LOGIN_HOST", "")),
+  hostedAuthPageRoot: getEnv("HOSTED_AUTH_PAGE_ROOT", getEnv("SUPAUTH_HOSTED_LOGIN_PAGE_ROOT", "")),
 };
 
 function validateConfig() {

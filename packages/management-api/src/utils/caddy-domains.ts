@@ -16,15 +16,25 @@ type CaddyRoute = {
   }>;
 };
 
-function normalizeHost(host: string): string {
-  return host.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/:\d+$/, "");
+export function normalizeCaddyHost(host: string): string {
+  return host.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\.$/, "").replace(/:\d+$/, "");
+}
+
+export function isCaddyTlsBlockedDomain(domain: string, blockedDomains = config.caddyTlsBlockedDomains): boolean {
+  const normalizedDomain = normalizeCaddyHost(domain);
+  if (!normalizedDomain) return false;
+
+  return blockedDomains.some((blockedDomain) => {
+    const blocked = normalizeCaddyHost(blockedDomain);
+    return Boolean(blocked) && (normalizedDomain === blocked || normalizedDomain.endsWith(`.${blocked}`));
+  });
 }
 
 function routeMatchesHost(route: CaddyRoute, domain: string): boolean {
   const matches = Array.isArray(route.match) ? route.match : [];
   for (const matcher of matches) {
     const hosts = Array.isArray(matcher.host) ? matcher.host : [];
-    if (hosts.some((host) => typeof host === "string" && normalizeHost(host) === domain)) {
+    if (hosts.some((host) => typeof host === "string" && normalizeCaddyHost(host) === domain)) {
       return true;
     }
   }
@@ -36,7 +46,7 @@ function routeMatchesHost(route: CaddyRoute, domain: string): boolean {
 }
 
 export async function isCaddyRouteDomain(domain: string, caddyConfigPath = config.caddyConfigPath): Promise<boolean> {
-  const normalizedDomain = normalizeHost(domain);
+  const normalizedDomain = normalizeCaddyHost(domain);
   if (!normalizedDomain) return false;
 
   try {

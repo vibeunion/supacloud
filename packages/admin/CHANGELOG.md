@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.12](https://github.com/zuohuadong/supacloud/compare/admin-v0.1.11...admin-v0.1.12) (2026-06-03)
+
+
+### Miscellaneous Chores
+
+* upgrade all dependencies to latest minor ([e9719d9](https://github.com/zuohuadong/supacloud/commit/e9719d983c9303c783ddcd3d772c7e7c56e985b9))
+
 ## [0.1.11](https://github.com/zuohuadong/supacloud/compare/admin-v0.1.10...admin-v0.1.11) (2026-05-29)
 
 

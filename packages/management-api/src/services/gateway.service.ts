@@ -131,6 +131,7 @@ export interface GatewayProvider {
     upsertCertificateForSnis(opts: { projectRef: string; cert: string; key: string; snis: string[]; existingCertificateId?: string }): Promise<{ success: boolean; certificateId?: string; error?: string }>;
     configureFrontendRoute(route: FrontendGatewayRoute): Promise<void>;
     removeFrontendRoute(projectRef: string, deploymentId: string): Promise<void>;
+    setupHostedAuthRoutes(): Promise<{ success: boolean; error?: string }>;
 }
 
 function getRateLimitConfig(tier: string): RateLimitConfig {
@@ -155,7 +156,6 @@ type CaddyRoute = Record<string, unknown>;
 type CaddyMatcher = Record<string, unknown>;
 type CaddyServer = {
     listen: string[];
-    automatic_https?: Record<string, unknown>;
     tls_connection_policies?: Array<Record<string, unknown>>;
     routes: CaddyRoute[];
 };
@@ -296,9 +296,6 @@ export class CaddyGatewayProvider implements GatewayProvider {
                     servers: {
                         supacloud: {
                             listen: [":80", ":443"],
-                            automatic_https: {
-                                disable_redirects: true,
-                            },
                             // Caddy JSON requires an explicit TLS policy to keep :443 in TLS mode after file reloads.
                             tls_connection_policies: [{}],
                             routes,
@@ -391,8 +388,8 @@ export class CaddyGatewayProvider implements GatewayProvider {
     private compareRoutesForCaddy(a: CaddyRoute, b: CaddyRoute): number {
         const aid = String(a["@id"] || "");
         const bid = String(b["@id"] || "");
-        const aCustom = aid.startsWith("route-custom-");
-        const bCustom = bid.startsWith("route-custom-");
+        const aCustom = aid.startsWith("route-custom-") || aid.startsWith("route-hosted-") || aid.startsWith("route-supauth-");
+        const bCustom = bid.startsWith("route-custom-") || bid.startsWith("route-hosted-") || bid.startsWith("route-supauth-");
         if (aCustom !== bCustom) return aCustom ? -1 : 1;
 
         const aPath = Array.isArray((a.match as any)?.[0]?.path) ? String((a.match as any)[0].path[0] || "") : "";
@@ -501,10 +498,9 @@ export class CaddyGatewayProvider implements GatewayProvider {
         if (!preserveUpstreamCors) {
             responseHeaders.delete = [...UPSTREAM_CORS_RESPONSE_HEADERS];
         }
-        return {
+        const proxy: Record<string, unknown> = {
             handler: "reverse_proxy",
             upstreams: [{ dial: caddyDial(upstream) }],
-            flush_interval: streaming === false ? undefined : -1,
             headers: {
                 request: {
                     set: Object.fromEntries(Object.entries(headers).map(([key, value]) => [key, Array.isArray(value) ? value : [value]])),
@@ -517,6 +513,10 @@ export class CaddyGatewayProvider implements GatewayProvider {
                 write_timeout: "500s",
             },
         };
+        if (streaming !== false) {
+            proxy.flush_interval = -1;
+        }
+        return proxy;
     }
 
     private makeCorsHeaderHandler(): Record<string, unknown> {
@@ -1149,6 +1149,74 @@ export class CaddyGatewayProvider implements GatewayProvider {
         }
         return "127.0.0.1";
     }
+
+    /**
+     * Register Caddy file_server routes for the hosted auth page.
+     * Enabled via HOSTED_AUTH_PAGE_ENABLED=true (legacy: SUPAUTH_HOSTED_LOGIN_ENABLED).
+     * Routes created (high priority, before catch-all /*):
+     *   - route-supauth-hosted-login: /, /login.html -> authorize.html
+     *   - route-supauth-authorize-page: /oauth/authorize* -> authorize.html
+     */
+    async setupHostedAuthRoutes(): Promise<{ success: boolean; error?: string }> {
+        if (!config.hostedAuthPageEnabled) {
+            // 清除已有路由
+            await this.hydrateFromDisk();
+            let changed = false;
+            for (const id of ["route-supauth-hosted-login", "route-supauth-authorize-page"]) {
+                if (this.routesById.has(id)) {
+                    this.routesById.delete(id);
+                    changed = true;
+                }
+            }
+            if (changed) await this.persistAndLoad();
+            return { success: true };
+        }
+
+        if (!config.hostedAuthPageHost) {
+            logger.warn("[CaddyGatewayProvider] HOSTED_AUTH_PAGE_ENABLED=true but HOSTED_AUTH_PAGE_HOST is not set, skipping");
+            return { success: false, error: "HOSTED_AUTH_PAGE_HOST is required when HOSTED_AUTH_PAGE_ENABLED=true" };
+        }
+        if (!config.hostedAuthPageRoot) {
+            logger.warn("[CaddyGatewayProvider] HOSTED_AUTH_PAGE_ENABLED=true but HOSTED_AUTH_PAGE_ROOT is not set, skipping");
+            return { success: false, error: "HOSTED_AUTH_PAGE_ROOT is required when HOSTED_AUTH_PAGE_ENABLED=true" };
+        }
+
+        await this.hydrateFromDisk();
+        const host = normalizeCaddyHost(config.hostedAuthPageHost);
+        const pageRoot = config.hostedAuthPageRoot;
+
+        // hosted login page (covers / and /login.html)
+        this.routesById.set("route-supauth-hosted-login", {
+            "@id": "route-supauth-hosted-login",
+            match: [{
+                host: [host],
+                path: ["/", "/login.html"],
+            }],
+            handle: [
+                { handler: "rewrite", uri: "/authorize.html" },
+                { handler: "file_server", root: pageRoot },
+            ],
+            terminal: true,
+        });
+
+        // authorize page (covers /oauth/authorize*)
+        this.routesById.set("route-supauth-authorize-page", {
+            "@id": "route-supauth-authorize-page",
+            match: [{
+                host: [host],
+                path: ["/oauth/authorize*"],
+            }],
+            handle: [
+                { handler: "rewrite", uri: "/authorize.html" },
+                { handler: "file_server", root: pageRoot },
+            ],
+            terminal: true,
+        });
+
+        await this.persistAndLoad();
+        logger.info(`[CaddyGatewayProvider] Hosted auth page routes registered for ${host}`);
+        return { success: true };
+    }
 }
 
 export class GatewayService implements GatewayProvider {
@@ -1176,6 +1244,7 @@ export class GatewayService implements GatewayProvider {
     upsertCertificateForSnis(opts: { projectRef: string; cert: string; key: string; snis: string[]; existingCertificateId?: string }) { return this.provider.upsertCertificateForSnis(opts); }
     configureFrontendRoute(route: FrontendGatewayRoute) { return this.provider.configureFrontendRoute(route); }
     removeFrontendRoute(projectRef: string, deploymentId: string) { return this.provider.removeFrontendRoute(projectRef, deploymentId); }
+    setupHostedAuthRoutes() { return this.provider.setupHostedAuthRoutes(); }
 }
 
 export const gatewayService = new GatewayService();

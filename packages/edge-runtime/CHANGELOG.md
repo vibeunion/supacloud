@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.8.3](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.8.2...edge-runtime-v0.8.3) (2026-06-03)
+
+
+### Bug Fixes
+
+* **edge-runtime:** pass TLS policy into smol workers ([b9ce395](https://github.com/zuohuadong/supacloud/commit/b9ce39556e9f881537274bd39a14de7df644706a))
+
+## [0.8.2](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.8.1...edge-runtime-v0.8.2) (2026-06-03)
+
+
+### Bug Fixes
+
+* **edge-runtime:** support custom TLS trust for function fetch ([#262](https://github.com/zuohuadong/supacloud/issues/262)) ([8488688](https://github.com/zuohuadong/supacloud/commit/8488688c73dd475792a8c8e7409d8b8ed2653d57))
+
+
+### Miscellaneous Chores
+
+* upgrade all dependencies to latest minor ([e9719d9](https://github.com/zuohuadong/supacloud/commit/e9719d983c9303c783ddcd3d772c7e7c56e985b9))
+
 ## [0.8.1](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.8.0...edge-runtime-v0.8.1) (2026-05-29)
 
 

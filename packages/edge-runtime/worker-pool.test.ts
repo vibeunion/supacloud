@@ -65,6 +65,88 @@ describe("WorkerPool EdgeRuntime.waitUntil", () => {
   });
 });
 
+describe("WorkerPool TLS policy handoff", () => {
+  test("passes host TLS policy into smol workers for HTTPS fetch", async () => {
+    const openssl = Bun.spawnSync(["openssl", "version"], { stdout: "pipe", stderr: "pipe" });
+    if (!openssl.success) {
+      return;
+    }
+
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-tls-policy-"));
+    const keyPath = join(projectRoot, "key.pem");
+    const certPath = join(projectRoot, "cert.pem");
+    const functionPath = join(projectRoot, "fn.ts");
+    const previousSkipVerify = process.env.SUPACLOUD_EDGE_TLS_INSECURE_SKIP_VERIFY;
+    let server: ReturnType<typeof Bun.serve> | undefined;
+
+    try {
+      const cert = Bun.spawnSync([
+        "openssl",
+        "req",
+        "-x509",
+        "-newkey",
+        "rsa:2048",
+        "-nodes",
+        "-keyout",
+        keyPath,
+        "-out",
+        certPath,
+        "-subj",
+        "/CN=127.0.0.1",
+        "-addext",
+        "subjectAltName=IP:127.0.0.1",
+        "-days",
+        "1",
+      ], { stdout: "pipe", stderr: "pipe" });
+      expect(cert.success).toBe(true);
+
+      server = Bun.serve({
+        hostname: "127.0.0.1",
+        port: 0,
+        tls: {
+          key: await Bun.file(keyPath).text(),
+          cert: await Bun.file(certPath).text(),
+        },
+        fetch() {
+          return new Response("tls-ok");
+        },
+      });
+
+      await Bun.write(functionPath, `
+        export default {
+          async fetch() {
+            const res = await fetch("https://127.0.0.1:${server.port}/probe");
+            return new Response(await res.text(), { status: res.status });
+          }
+        }
+      `);
+
+      process.env.SUPACLOUD_EDGE_TLS_INSECURE_SKIP_VERIFY = "true";
+      const pool = new WorkerPool({ size: 1, requestTimeout: 5_000 });
+      pools.push(pool);
+
+      const response = await pool.dispatch({
+        functionId: "proj_tls",
+        functionPath,
+        projectRoot,
+        env: {},
+        request: new Request("http://edge.local/functions/v1/tls"),
+      });
+
+      expect(response.status).toBe(200);
+      expect(await response.text()).toBe("tls-ok");
+    } finally {
+      if (previousSkipVerify === undefined) {
+        delete process.env.SUPACLOUD_EDGE_TLS_INSECURE_SKIP_VERIFY;
+      } else {
+        process.env.SUPACLOUD_EDGE_TLS_INSECURE_SKIP_VERIFY = previousSkipVerify;
+      }
+      server?.stop(true);
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("WorkerPool metrics NaN fix", () => {
   test("avg_queue_wait_ms is 0 (never NaN) for immediate dispatch", async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-nan-"));
