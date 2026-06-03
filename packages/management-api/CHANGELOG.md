@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.28.1](https://github.com/zuohuadong/supacloud/compare/management-api-v0.28.0...management-api-v0.28.1) (2026-06-03)
+
+
+### Bug Fixes
+
+* **management-api:** derive studio host from api domain ([e6935d7](https://github.com/zuohuadong/supacloud/commit/e6935d7e2cbf2991a652ec04cd0f350beafce242))
+
+
+### Miscellaneous Chores
+
+* upgrade all dependencies to latest minor ([e9719d9](https://github.com/zuohuadong/supacloud/commit/e9719d983c9303c783ddcd3d772c7e7c56e985b9))
+
 ## [0.28.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.27.8...management-api-v0.28.0) (2026-06-02)
 
 
