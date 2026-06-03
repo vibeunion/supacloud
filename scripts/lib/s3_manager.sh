@@ -76,7 +76,7 @@ s3_request() {
     local signature
     signature=$(echo -en "$string_to_sign" | openssl dgst -sha1 -hmac "$S3_SECRET_KEY" -binary | base64)
 
-    curl -s -X "$method" \
+    curl -k -s -X "$method" \
         -H "Date: ${date}" \
         -H "Content-Type: ${content_type}" \
         -H "Authorization: AWS ${S3_ACCESS_KEY}:${signature}" \
