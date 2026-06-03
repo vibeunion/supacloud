@@ -5,12 +5,14 @@ This stack is isolated from `docker/dev` and is intended for one-command self-ho
 ## Included services
 
 - PostgreSQL 18
-- Kong 3.6
+- Caddy (API gateway, managed via Admin API)
 - GoTrue
 - PostgREST
 - SupaCloud Management API
 - SupaCloud Bun Edge Runtime
 - FerretDB MongoDB wire protocol gateway, optional through the `ferretdb` Compose profile
+
+The Caddy gateway starts with a minimal catch-all Caddyfile for bootstrap routing. The Management API can update routes dynamically via the Caddy Admin API (`http://caddy:2019`).
 
 ## Packaged PostgreSQL extensions
 
@@ -104,7 +106,7 @@ Generate a key with:
 openssl rand -hex 32
 ```
 
-Prefer mounting the key as a secret file and setting `PGSODIUM_KEY_FILE` when your runtime supports it. `PGSODIUM_KEY` is provided as a simple fallback for Compose and Custom App deployments.
+Prefer mounting the key as a secret file and setting `PGSODIUM_KEY_FILE` when your runtime supports it. `PGSODIUM` is provided as a simple fallback for Compose and Custom App deployments.
 
 To create Supabase Vault on top of the same runtime, also set:
 
@@ -146,4 +148,3 @@ If you enabled pgsodium on a fresh volume and need to disable it:
 - `pgsodium` and `supabase_vault` stay installed but are not created automatically in self-host mode. Set `ENABLE_PGSODIUM=true` only after providing a stable key through `PGSODIUM_KEY_FILE` or `PGSODIUM_KEY`.
 - `supabase_vault` has its own preload-time key loader. If you enable it, either set `VAULT_KEY` / `VAULT_KEY_FILE` explicitly or let it reuse the pgsodium key sources by leaving those variables empty.
 - `BASE_DOMAIN` is derived from `PUBLIC_URL` by `init-env.py`. Override it manually if you need a different wildcard routing suffix.
-- Kong gzip is disabled by default to avoid the HTTP/2 proxy corruption issue already seen on API traffic.

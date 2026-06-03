@@ -2,6 +2,7 @@ import { parentPort, workerData } from "worker_threads";
 import path from "path";
 import { getCapturedServeHandler, clearCapturedServeHandler, setTenantRef, setProjectRoot, setInjectedEnv, envWriteLog } from "./deno-compat";
 import { installEdgeFetchTlsPolicy, resolveEdgeFetchTlsPolicy } from "./fetch-tls-policy";
+import type { EdgeFetchTlsPolicy } from "./fetch-tls-policy";
 
 export function getInjectedEnv(): Record<string, string> {
   return currentInjectedEnv;
@@ -35,6 +36,12 @@ let envSnapshotActive = false;
 let currentAbortController: AbortController | null = null;
 let currentInjectedEnv: Record<string, string> = {};
 let currentWaitUntilTasks: Promise<unknown>[] = [];
+
+async function resolveMessageTlsPolicy(
+  tlsPolicy: EdgeFetchTlsPolicy | undefined,
+): Promise<EdgeFetchTlsPolicy> {
+  return tlsPolicy ?? await resolveEdgeFetchTlsPolicy(currentInjectedEnv, originalProcessEnv);
+}
 
 function injectEnv(env: Record<string, string>) {
   if (envSnapshotActive) restoreEnv();
@@ -205,7 +212,7 @@ parentPort.on("message", async (msg: any) => {
       injectEnv(env);
       setInjectedEnv(env);
       const restoreFetchTlsPolicy = installEdgeFetchTlsPolicy(
-        await resolveEdgeFetchTlsPolicy(currentInjectedEnv, originalProcessEnv),
+        await resolveMessageTlsPolicy(msg.tlsPolicy),
       );
       try {
         await loadModule(msg.functionPath);
@@ -237,7 +244,7 @@ parentPort.on("message", async (msg: any) => {
     return;
   }
 
-  const { functionId, functionPath, projectRoot, env, url, method, headers, body } = msg;
+  const { functionId, functionPath, projectRoot, env, tlsPolicy, url, method, headers, body } = msg;
 
   const projectRef = extractProjectRef(functionId);
   setTenantRef(projectRef);
@@ -247,7 +254,7 @@ parentPort.on("message", async (msg: any) => {
   setupConsoleCapture(functionId);
   setupEdgeRuntimeCompat();
   const restoreFetchTlsPolicy = installEdgeFetchTlsPolicy(
-    await resolveEdgeFetchTlsPolicy(currentInjectedEnv, originalProcessEnv),
+    await resolveMessageTlsPolicy(tlsPolicy),
   );
 
   try {
