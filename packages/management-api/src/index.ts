@@ -26,7 +26,7 @@ import { migrateLegacyVersionArtifacts } from "./services/edge-function.service"
 import { resolveRealtimeTenantHost } from "./utils/sdk-parity";
 import { resolveProjectRefFromApiKey } from "./utils/project-auth";
 import { isFrontendDomain } from "./utils/frontend-domains";
-import { isCaddyRouteDomain } from "./utils/caddy-domains";
+import { isCaddyRouteDomain, isCaddyTlsBlockedDomain, normalizeCaddyHost } from "./utils/caddy-domains";
 
 const WEB_CONSOLE_CURRENT_DIR = "/opt/supacloud/web-console/current";
 const WEB_CONSOLE_LEGACY_DIR = "/opt/supacloud/packages/web-console/build";
@@ -337,13 +337,12 @@ const app = new Elysia({ strictPath: false })
   })
 
   .get("/v1/gateway/caddy/ask", async ({ query }) => {
-    const domain = String((query as Record<string, unknown>).domain || (query as Record<string, unknown>).host || "")
-      .trim()
-      .toLowerCase()
-      .replace(/^https?:\/\//, "")
-      .replace(/:\d+$/, "");
+    const domain = normalizeCaddyHost(String((query as Record<string, unknown>).domain || (query as Record<string, unknown>).host || ""));
     if (!domain) {
       return new Response("missing domain", { status: 400 });
+    }
+    if (isCaddyTlsBlockedDomain(domain)) {
+      return new Response("domain blocked for auto TLS", { status: 403 });
     }
     if (domain === config.baseDomain || domain.endsWith(`.${config.baseDomain}`)) {
       return new Response("ok");

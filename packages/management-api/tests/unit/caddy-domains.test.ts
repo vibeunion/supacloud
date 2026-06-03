@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
-import { isCaddyRouteDomain } from "../../src/utils/caddy-domains";
+import { isCaddyRouteDomain, isCaddyTlsBlockedDomain, normalizeCaddyHost } from "../../src/utils/caddy-domains";
 
 const fixturePath = "/tmp/supacloud-caddy-test/caddy-domains/config.json";
 
@@ -64,5 +64,28 @@ describe("isCaddyRouteDomain", () => {
 
   test("rejects missing or unregistered domains", async () => {
     await expect(isCaddyRouteDomain("unknown.ai.xigu.org", fixturePath)).resolves.toBe(false);
+  });
+});
+
+describe("isCaddyTlsBlockedDomain", () => {
+  test("normalizes ask endpoint host values", () => {
+    expect(normalizeCaddyHost(" HTTPS://WWW.Example.COM:443. ")).toBe("www.example.com");
+  });
+
+  test("blocks exact denylisted domains and their subdomains", () => {
+    const blocked = ["blocked.example.com", "root.test"];
+
+    expect(isCaddyTlsBlockedDomain("blocked.example.com", blocked)).toBe(true);
+    expect(isCaddyTlsBlockedDomain("api.blocked.example.com", blocked)).toBe(true);
+    expect(isCaddyTlsBlockedDomain("root.test", blocked)).toBe(true);
+    expect(isCaddyTlsBlockedDomain("www.root.test", blocked)).toBe(true);
+  });
+
+  test("does not block lookalike suffixes", () => {
+    const blocked = ["example.com"];
+
+    expect(isCaddyTlsBlockedDomain("badexample.com", blocked)).toBe(false);
+    expect(isCaddyTlsBlockedDomain("example.com.evil.test", blocked)).toBe(false);
+    expect(isCaddyTlsBlockedDomain("allowed.test", blocked)).toBe(false);
   });
 });
