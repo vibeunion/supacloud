@@ -107,7 +107,7 @@ export function registerAdminProjectCliTools(server: ToolServer, http: HttpTrans
             name: z.string().optional().describe("[create] Project name"),
             region: z.string().optional().describe("[create] Region (default: local)"),
             organization_id: z.string().optional().describe("[create] Organization ID"),
-            settings: z.record(z.unknown()).optional().describe("[update_settings] Config fields to update"),
+            settings: z.record(z.string(), z.unknown()).optional().describe("[update_settings] Config fields to update"),
             log_type: z.enum(["all", "auth", "database", "api"]).optional().describe("[logs] Filter by service"),
         },
         async ({ action, ref, name, region, organization_id, settings, log_type }) => {

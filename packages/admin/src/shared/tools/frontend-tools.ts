@@ -27,7 +27,7 @@ Actions: list, get, create, update, delete, deploy_git, deploy_upload, redeploy,
             output_dir: z.string().optional().describe("[create/update] Output directory override"),
             install_command: z.string().optional().describe("[create/update] Install command override"),
             node_version: z.string().optional().describe("[create/update] Node.js version"),
-            env_vars: z.record(z.string()).optional().describe("[create/update/set_env] Environment variables"),
+            env_vars: z.record(z.string(), z.string()).optional().describe("[create/update/set_env] Environment variables"),
             // deploy_git params
             git_url: z.string().optional().describe("[deploy_git] Git repository URL"),
             branch: z.string().optional().describe("[deploy_git] Branch (default: main)"),
