@@ -131,7 +131,7 @@ export interface GatewayProvider {
     upsertCertificateForSnis(opts: { projectRef: string; cert: string; key: string; snis: string[]; existingCertificateId?: string }): Promise<{ success: boolean; certificateId?: string; error?: string }>;
     configureFrontendRoute(route: FrontendGatewayRoute): Promise<void>;
     removeFrontendRoute(projectRef: string, deploymentId: string): Promise<void>;
-    setupSupauthHostedLogin(): Promise<{ success: boolean; error?: string }>;
+    setupHostedAuthRoutes(): Promise<{ success: boolean; error?: string }>;
 }
 
 function getRateLimitConfig(tier: string): RateLimitConfig {
@@ -388,8 +388,8 @@ export class CaddyGatewayProvider implements GatewayProvider {
     private compareRoutesForCaddy(a: CaddyRoute, b: CaddyRoute): number {
         const aid = String(a["@id"] || "");
         const bid = String(b["@id"] || "");
-        const aCustom = aid.startsWith("route-custom-") || aid.startsWith("route-supauth-");
-        const bCustom = bid.startsWith("route-custom-") || bid.startsWith("route-supauth-");
+        const aCustom = aid.startsWith("route-custom-") || aid.startsWith("route-hosted-") || aid.startsWith("route-supauth-");
+        const bCustom = bid.startsWith("route-custom-") || bid.startsWith("route-hosted-") || bid.startsWith("route-supauth-");
         if (aCustom !== bCustom) return aCustom ? -1 : 1;
 
         const aPath = Array.isArray((a.match as any)?.[0]?.path) ? String((a.match as any)[0].path[0] || "") : "";
@@ -1151,14 +1151,14 @@ export class CaddyGatewayProvider implements GatewayProvider {
     }
 
     /**
-     * 注册 SupAuth hosted login / authorize 页面的 Caddy 路由。
-     * 当配置了 SUPAUTH_HOSTED_LOGIN_ENABLED=true 时，自动创建:
-     *   - route-supauth-hosted-login:  / 和 /login.html -> authorize.html (file_server)
-     *   - route-supauth-authorize-page: /oauth/authorize* -> authorize.html (file_server)
-     * 这些路由排在 catch-all /* 之前，确保不会被吞掉。
+     * Register Caddy file_server routes for the hosted auth page.
+     * Enabled via HOSTED_AUTH_PAGE_ENABLED=true (legacy: SUPAUTH_HOSTED_LOGIN_ENABLED).
+     * Routes created (high priority, before catch-all /*):
+     *   - route-supauth-hosted-login: /, /login.html -> authorize.html
+     *   - route-supauth-authorize-page: /oauth/authorize* -> authorize.html
      */
-    async setupSupauthHostedLogin(): Promise<{ success: boolean; error?: string }> {
-        if (!config.supauthHostedLoginEnabled) {
+    async setupHostedAuthRoutes(): Promise<{ success: boolean; error?: string }> {
+        if (!config.hostedAuthPageEnabled) {
             // 清除已有路由
             await this.hydrateFromDisk();
             let changed = false;
@@ -1172,16 +1172,18 @@ export class CaddyGatewayProvider implements GatewayProvider {
             return { success: true };
         }
 
-        if (!config.supauthHostedLoginHost) {
-            return { success: false, error: "SUPAUTH_HOSTED_LOGIN_HOST is required when SUPAUTH_HOSTED_LOGIN_ENABLED=true" };
+        if (!config.hostedAuthPageHost) {
+            logger.warn("[CaddyGatewayProvider] HOSTED_AUTH_PAGE_ENABLED=true but HOSTED_AUTH_PAGE_HOST is not set, skipping");
+            return { success: false, error: "HOSTED_AUTH_PAGE_HOST is required when HOSTED_AUTH_PAGE_ENABLED=true" };
         }
-        if (!config.supauthHostedLoginPageRoot) {
-            return { success: false, error: "SUPAUTH_HOSTED_LOGIN_PAGE_ROOT is required when SUPAUTH_HOSTED_LOGIN_ENABLED=true" };
+        if (!config.hostedAuthPageRoot) {
+            logger.warn("[CaddyGatewayProvider] HOSTED_AUTH_PAGE_ENABLED=true but HOSTED_AUTH_PAGE_ROOT is not set, skipping");
+            return { success: false, error: "HOSTED_AUTH_PAGE_ROOT is required when HOSTED_AUTH_PAGE_ENABLED=true" };
         }
 
         await this.hydrateFromDisk();
-        const host = normalizeCaddyHost(config.supauthHostedLoginHost);
-        const pageRoot = config.supauthHostedLoginPageRoot;
+        const host = normalizeCaddyHost(config.hostedAuthPageHost);
+        const pageRoot = config.hostedAuthPageRoot;
 
         // hosted login page (covers / and /login.html)
         this.routesById.set("route-supauth-hosted-login", {
@@ -1212,7 +1214,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
         });
 
         await this.persistAndLoad();
-        logger.info(`[CaddyGatewayProvider] SupAuth hosted login page routes registered for ${host}`);
+        logger.info(`[CaddyGatewayProvider] Hosted auth page routes registered for ${host}`);
         return { success: true };
     }
 }
@@ -1242,7 +1244,7 @@ export class GatewayService implements GatewayProvider {
     upsertCertificateForSnis(opts: { projectRef: string; cert: string; key: string; snis: string[]; existingCertificateId?: string }) { return this.provider.upsertCertificateForSnis(opts); }
     configureFrontendRoute(route: FrontendGatewayRoute) { return this.provider.configureFrontendRoute(route); }
     removeFrontendRoute(projectRef: string, deploymentId: string) { return this.provider.removeFrontendRoute(projectRef, deploymentId); }
-    setupSupauthHostedLogin() { return this.provider.setupSupauthHostedLogin(); }
+    setupHostedAuthRoutes() { return this.provider.setupHostedAuthRoutes(); }
 }
 
 export const gatewayService = new GatewayService();
