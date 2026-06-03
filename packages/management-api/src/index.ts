@@ -124,6 +124,7 @@ async function getIndexHtml(): Promise<string | null> {
 try {
   const { gatewayService } = await import("./services/gateway.service");
   await gatewayService.setupMasterRoutes();
+  await gatewayService.setupSupauthHostedLogin();
   const { frontendService } = await import("./services/frontend.service");
   const result = await frontendService.reconcileGatewayRoutes();
   if (result.configured > 0 || result.errors.length > 0) {

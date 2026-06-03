@@ -127,6 +127,9 @@ export interface Config {
   sdkProxyTimeoutMs: number;
   restProxyTimeoutMs: number;
   secretsEncryptionKey: string;
+  supauthHostedLoginEnabled: boolean;
+  supauthHostedLoginHost: string;
+  supauthHostedLoginPageRoot: string;
 }
 
 function getEnv(key: string, defaultValue = ""): string {
@@ -263,6 +266,10 @@ export const config: Config = {
   sdkProxyTimeoutMs: Number(getEnv("SDK_PROXY_TIMEOUT_MS", "30000")),
   restProxyTimeoutMs: Number(getEnv("REST_PROXY_TIMEOUT_MS", "300000")),
   secretsEncryptionKey: getEnv("SECRETS_ENCRYPTION_KEY", getEnv("MASTER_TOKEN", "")),
+
+  supauthHostedLoginEnabled: getEnv("SUPAUTH_HOSTED_LOGIN_ENABLED", "false") === "true",
+  supauthHostedLoginHost: getEnv("SUPAUTH_HOSTED_LOGIN_HOST", ""),
+  supauthHostedLoginPageRoot: getEnv("SUPAUTH_HOSTED_LOGIN_PAGE_ROOT", ""),
 };
 
 function validateConfig() {
