@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.2](https://github.com/zuohuadong/supacloud/compare/cli-v0.6.1...cli-v0.6.2) (2026-06-03)
+
+
+### Miscellaneous Chores
+
+* upgrade all dependencies to latest minor ([e9719d9](https://github.com/zuohuadong/supacloud/commit/e9719d983c9303c783ddcd3d772c7e7c56e985b9))
+
 ## [0.6.1](https://github.com/zuohuadong/supacloud/compare/cli-v0.6.0...cli-v0.6.1) (2026-05-29)
 
 

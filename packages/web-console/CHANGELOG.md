@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.1](https://github.com/zuohuadong/supacloud/compare/web-console-v0.14.0...web-console-v0.14.1) (2026-06-03)
+
+
+### Miscellaneous Chores
+
+* upgrade all dependencies to latest minor ([e9719d9](https://github.com/zuohuadong/supacloud/commit/e9719d983c9303c783ddcd3d772c7e7c56e985b9))
+
 ## [0.14.0](https://github.com/zuohuadong/supacloud/compare/web-console-v0.13.3...web-console-v0.14.0) (2026-05-30)
 
 
