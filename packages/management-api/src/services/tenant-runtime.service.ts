@@ -17,7 +17,29 @@ function stringifyJsonConfig(value: unknown): string | null {
     return typeof value === "string" ? value : JSON.stringify(value);
 }
 
+/**
+ * Quote a value for systemd EnvironmentFile.
+ *
+ * systemd uses its own quoting rules inside EnvironmentFile:
+ *   - Double-quoted values support \\, \n, \t only (NOT \")
+ *   - Single-quoted values pass content through verbatim (no escaping)
+ *   - Unquoted values cannot contain spaces, quotes, or newlines
+ *
+ * For values that contain double-quotes (e.g. JSON), we wrap in single quotes
+ * so the content is preserved exactly.  Otherwise we use double quotes with
+ * standard backslash escaping.
+ *
+ * Rejected: backslash-escaping inner double-quotes (\") — systemd does not
+ * recognise \" inside double-quoted values, so JSON like [{"k":"v"}] would
+ * be delivered as [{\"k\":\"v\"}] to the child process.
+ */
 function quoteSystemdEnvValue(value: string): string {
+    if (value.includes('"')) {
+        // Contains double-quotes (e.g. JSON) — single-quote the whole value.
+        // systemd single-quoted values cannot contain single-quotes, which is
+        // safe for JSON and JWK values.
+        return `'${value.replace(/'/g, "'\\''")}'`;
+    }
     return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 }
 
