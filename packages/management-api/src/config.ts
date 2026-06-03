@@ -127,6 +127,7 @@ export interface Config {
   sdkProxyTimeoutMs: number;
   restProxyTimeoutMs: number;
   secretsEncryptionKey: string;
+  caddyTlsBlockedDomains: string[];
 }
 
 function getEnv(key: string, defaultValue = ""): string {
@@ -263,6 +264,7 @@ export const config: Config = {
   sdkProxyTimeoutMs: Number(getEnv("SDK_PROXY_TIMEOUT_MS", "30000")),
   restProxyTimeoutMs: Number(getEnv("REST_PROXY_TIMEOUT_MS", "300000")),
   secretsEncryptionKey: getEnv("SECRETS_ENCRYPTION_KEY", getEnv("MASTER_TOKEN", "")),
+  caddyTlsBlockedDomains: getEnv("CADDY_TLS_BLOCKED_DOMAINS").split(",").map((s: string) => s.trim().toLowerCase()).filter(Boolean),
 };
 
 function validateConfig() {

@@ -155,6 +155,7 @@ type CaddyRoute = Record<string, unknown>;
 type CaddyMatcher = Record<string, unknown>;
 type CaddyServer = {
     listen: string[];
+    automatic_https?: Record<string, unknown>;
     tls_connection_policies?: Array<Record<string, unknown>>;
     routes: CaddyRoute[];
 };
@@ -295,6 +296,9 @@ export class CaddyGatewayProvider implements GatewayProvider {
                     servers: {
                         supacloud: {
                             listen: [":80", ":443"],
+                            automatic_https: {
+                                disable_redirects: true,
+                            },
                             // Caddy JSON requires an explicit TLS policy to keep :443 in TLS mode after file reloads.
                             tls_connection_policies: [{}],
                             routes,
@@ -492,7 +496,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
         }
     }
 
-    private makeReverseProxy(upstream: string, headers: Record<string, CaddyHeaderValue>, readTimeoutMs?: number, preserveUpstreamCors?: boolean): Record<string, unknown> {
+    private makeReverseProxy(upstream: string, headers: Record<string, CaddyHeaderValue>, readTimeoutMs?: number, preserveUpstreamCors?: boolean, streaming?: boolean): Record<string, unknown> {
         const responseHeaders: Record<string, unknown> = {};
         if (!preserveUpstreamCors) {
             responseHeaders.delete = [...UPSTREAM_CORS_RESPONSE_HEADERS];
@@ -500,7 +504,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
         return {
             handler: "reverse_proxy",
             upstreams: [{ dial: caddyDial(upstream) }],
-            flush_interval: -1,
+            flush_interval: streaming === false ? undefined : -1,
             headers: {
                 request: {
                     set: Object.fromEntries(Object.entries(headers).map(([key, value]) => [key, Array.isArray(value) ? value : [value]])),
@@ -773,6 +777,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
         corsOrigins?: string[];
         readTimeout?: number;
         preserveUpstreamCors?: boolean;
+        streaming?: boolean;
     }): CaddyRoute {
         const requestHeaders: Record<string, CaddyHeaderValue> = {
             "X-Project-Ref": opts.projectRef,
@@ -788,7 +793,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
         if (corsSubroute) handle.push(corsSubroute);
         if (opts.rewriteUri) handle.push({ handler: "rewrite", uri: opts.rewriteUri });
         else if (opts.stripPrefix) handle.push({ handler: "rewrite", strip_path_prefix: opts.stripPrefix });
-        handle.push(this.makeReverseProxy(opts.upstream, requestHeaders, opts.readTimeout, opts.preserveUpstreamCors));
+        handle.push(this.makeReverseProxy(opts.upstream, requestHeaders, opts.readTimeout, opts.preserveUpstreamCors, opts.streaming));
 
         return {
             "@id": opts.id,
@@ -944,7 +949,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
                 this.makeRoute({ id: caddyRouteId(projectRef, "auth"), hosts, path: "/auth/v1*", upstream: `${hostIp}:${gotruePort}`, projectRef, stripPrefix: "/auth/v1", corsOrigins }),
                 this.makeRoute({ id: caddyRouteId(projectRef, "gotrue-well-known"), hosts, path: "/.well-known/oauth-authorization-server/auth/v1*", upstream: `${hostIp}:${gotruePort}`, projectRef, corsOrigins }),
                 this.makeRoute({ id: caddyRouteId(projectRef, "functions"), hosts, path: "/functions/v1*", upstream: `${hostIp}:${config.port}`, projectRef, readTimeout: 500_000, corsOrigins }),
-                this.makeRoute({ id: caddyRouteId(projectRef, "storage"), hosts, path: "/storage/v1*", upstream: `${hostIp}:${opts?.storagePort || config.port}`, projectRef, stripPrefix: "/storage/v1", corsOrigins, preserveUpstreamCors: true }),
+                this.makeRoute({ id: caddyRouteId(projectRef, "storage"), hosts, path: "/storage/v1*", upstream: `${hostIp}:${opts?.storagePort || config.port}`, projectRef, stripPrefix: "/storage/v1", corsOrigins, preserveUpstreamCors: true, streaming: false }),
                 this.makeRoute({ id: caddyRouteId(projectRef, "realtime-api"), hosts, path: "/realtime/v1/api*", upstream: `${hostIp}:${config.port}`, projectRef, readTimeout: 60_000, corsOrigins }),
                 this.makeRoute({ id: caddyRouteId(projectRef, "realtime"), hosts, path: "/realtime/v1/websocket*", upstream: `${hostIp}:${config.port}`, projectRef, readTimeout: 86_400_000, corsOrigins }),
                 this.makeRoute({ id: caddyRouteId(projectRef, "management"), hosts, path: [`/v1/projects/${projectRef}`, `/v1/projects/${projectRef}/*`], upstream: `${hostIp}:${config.port}`, projectRef, corsOrigins }),

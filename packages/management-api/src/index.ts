@@ -344,6 +344,7 @@ const app = new Elysia({ strictPath: false })
     if (!domain) {
       return new Response("missing domain", { status: 400 });
     }
+    if (config.caddyTlsBlockedDomains.some((blocked) => domain === blocked || domain.endsWith(`.${blocked}`))) { return new Response("domain blocked for auto TLS", { status: 403 }); }
     if (domain === config.baseDomain || domain.endsWith(`.${config.baseDomain}`)) {
       return new Response("ok");
     }
