@@ -183,6 +183,10 @@ describe("CaddyGatewayProvider", () => {
         expect(routes.find((route: any) => route["@id"] === "route-project-testref123-graphql")
             ?.handle?.some((handler: any) => handler.uri === "/rpc/graphql")).toBe(true);
         expect(storage?.match?.[0]?.path).toEqual(["/storage/v1*"]);
+        const storageProxy = storage?.handle?.find((h: any) => h.handler === "reverse_proxy");
+        expect(storageProxy?.flush_interval).toBeUndefined();
+        const restProxy = rest?.handle?.find((h: any) => h.handler === "reverse_proxy");
+        expect(restProxy?.flush_interval).toBe(-1);
         expect(functions?.match?.[0]?.path).toEqual(["/functions/v1*"]);
         expect(realtime?.match?.[0]?.path).toEqual(["/realtime/v1/websocket*"]);
         expect(management?.match?.[0]?.path).toEqual(["/v1/projects/testref123", "/v1/projects/testref123/*"]);
