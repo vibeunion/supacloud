@@ -39,9 +39,15 @@ Tenant databases now install and expose the `pgmq` foundation:
 2. `CREATE SCHEMA IF NOT EXISTS pgmq_public`
 3. wrapper functions in `pgmq_public` for the official API
 4. `GRANT EXECUTE` on `pgmq_public` functions to `anon`, `authenticated`, and `service_role`
-5. PostgREST schemas include `pgmq_public`
+5. PostgREST may expose `pgmq_public`, but only after the wrapper schema actually exists
 
-For self-hosted deployments, `PGRST_DB_SCHEMAS` must include:
+For self-hosted deployments, keep the safe baseline first:
+
+```env
+PGRST_DB_SCHEMAS=public,storage,graphql_public
+```
+
+After the tenant database has the `pgmq_public` wrapper schema, you can add it back explicitly:
 
 ```env
 PGRST_DB_SCHEMAS=public,storage,graphql_public,pgmq_public

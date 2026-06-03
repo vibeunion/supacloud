@@ -1,0 +1,19 @@
+[Unit]
+Description=SupaCloud PostgREST tenant watchdog
+Documentation=https://github.com/zuohuadong/supacloud
+After=network-online.target supacloud.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/supabase/management-api.env
+ExecStart=/opt/supacloud/scripts/postgrest_watchdog.sh
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=supacloud-postgrest-watchdog
+
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/var/lib/supacloud /etc/supabase/tenants
+PrivateTmp=true

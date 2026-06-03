@@ -2316,9 +2316,11 @@ install_management_api() {
     local BIN_NAME="supacloud"
     local BIN_SOURCE="${SCRIPT_DIR}/${BIN_NAME}"
     local BIN_TARGET="/usr/local/bin/${BIN_NAME}"
-    local SCRIPTS_INSTALL_DIR="/opt/supacloud/scripts/lib"
+    local ROOT_SCRIPTS_INSTALL_DIR="/opt/supacloud/scripts"
+    local SCRIPTS_INSTALL_DIR="${ROOT_SCRIPTS_INSTALL_DIR}/lib"
     local API_DATA_DIR="/opt/supacloud/management-api"
 
+    mkdir -p "$ROOT_SCRIPTS_INSTALL_DIR"
     mkdir -p "$SCRIPTS_INSTALL_DIR"
     mkdir -p "$API_DATA_DIR"
     mkdir -p /etc/supabase
@@ -2350,13 +2352,20 @@ install_management_api() {
     fi
     chmod +x "$BIN_TARGET"
 
-    # 2. Copy management scripts (Pigsty adapter)
+    # 2. Copy management scripts
+    if [[ -d "${SCRIPT_DIR}/scripts" ]] && [[ "${SCRIPT_DIR}/scripts" != "$ROOT_SCRIPTS_INSTALL_DIR" ]]; then
+        find "${SCRIPT_DIR}/scripts" -maxdepth 1 -type f -name '*.sh' -exec cp {} "$ROOT_SCRIPTS_INSTALL_DIR/" \;
+        chmod +x "$ROOT_SCRIPTS_INSTALL_DIR"/*.sh
+        log_info "Management scripts ready: $ROOT_SCRIPTS_INSTALL_DIR"
+    fi
+
+    # 2b. Copy management script libraries (Pigsty adapter)
     if [[ -d "${SCRIPT_DIR}/scripts/lib" ]] && [[ "${SCRIPT_DIR}/scripts/lib" != "$SCRIPTS_INSTALL_DIR" ]]; then
         cp -rf "${SCRIPT_DIR}/scripts/lib/"* "$SCRIPTS_INSTALL_DIR/"
         chmod +x "$SCRIPTS_INSTALL_DIR"/*.sh
         log_info "Underlying script link ready: $SCRIPTS_INSTALL_DIR"
 
-    # 2b. Copy database schema files (required for project provisioning)
+    # 2c. Copy database schema files (required for project provisioning)
     local SCHEMA_SRC="${SCRIPT_DIR}/packages/management-api/src/db/schemas"
     local SCHEMA_DST="/opt/supacloud/packages/management-api/src/db/schemas"
     if [[ -d "$SCHEMA_SRC" ]]; then
@@ -2439,6 +2448,8 @@ CADDY_ADMIN_URL=${CADDY_ADMIN_URL:-http://127.0.0.1:2019}
 CADDY_CONFIG_PATH=${CADDY_CONFIG_PATH:-/etc/supacloud/caddy/config.json}
 CADDY_STATE_DIR=${CADDY_STATE_DIR:-/var/lib/supacloud/caddy}
 CADDY_BINARY_PATH=${CADDY_BINARY_PATH:-/usr/local/bin/supacloud-caddy}
+SUPACLOUD_ALERT_WEBHOOK_URL=${SUPACLOUD_ALERT_WEBHOOK_URL:-}
+SUPACLOUD_WATCHDOG_JOURNAL_WINDOW=${SUPACLOUD_WATCHDOG_JOURNAL_WINDOW:-5 minutes ago}
 EOF
     chmod 600 /etc/supabase/management-api.env
     sync_runtime_config /etc/supabase/management-api.env
@@ -2480,9 +2491,19 @@ LimitNOFILE=65536
 WantedBy=multi-user.target
 EOF
     fi
+    if [[ -f "${SYSTEMD_SRC}/supacloud-postgrest-watchdog.service" ]]; then
+        cp "${SYSTEMD_SRC}/supacloud-postgrest-watchdog.service" /etc/systemd/system/supacloud-postgrest-watchdog.service
+    fi
+    if [[ -f "${SYSTEMD_SRC}/supacloud-postgrest-watchdog.timer" ]]; then
+        cp "${SYSTEMD_SRC}/supacloud-postgrest-watchdog.timer" /etc/systemd/system/supacloud-postgrest-watchdog.timer
+    fi
     systemctl daemon-reload
     systemctl enable supacloud
     systemctl start supacloud || log_warn "Service start failed, please check journalctl -u supacloud"
+    if [[ -f /etc/systemd/system/supacloud-postgrest-watchdog.timer ]]; then
+        systemctl enable supacloud-postgrest-watchdog.timer
+        systemctl start supacloud-postgrest-watchdog.timer || log_warn "PostgREST watchdog timer start failed, please check journalctl -u supacloud-postgrest-watchdog.service"
+    fi
 
 
     # 7b. Ensure GoTrue binary and systemd template are deployed
