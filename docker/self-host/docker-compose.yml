@@ -100,8 +100,7 @@ services:
       MASTER_TOKEN: ${MASTER_TOKEN}
       SECRETS_ENCRYPTION_KEY: ${SECRETS_ENCRYPTION_KEY}
       BASE_DOMAIN: ${BASE_DOMAIN:-localhost}
-      KONG_ADMIN_URL: http://kong:8001
-      KONG_INTERNAL: kong:8000
+      CADDY_ADMIN_URL: http://caddy:2019
       MANAGEMENT_API_INTERNAL: management-api:9090
       EDGE_RUNTIME_MODE: external
       EDGE_RUNTIME_URL: http://edge-runtime:9000
@@ -150,32 +149,25 @@ services:
       timeout: 5s
       retries: 10
 
-  kong:
-    image: kong:3.6.1
+  caddy:
+    image: caddy:2.10.2
     restart: unless-stopped
     depends_on:
       management-api:
         condition: service_healthy
       edge-runtime:
         condition: service_healthy
-    environment:
-      KONG_DATABASE: "off"
-      KONG_DECLARATIVE_CONFIG: /var/lib/kong/kong.yml
-      KONG_PROXY_ACCESS_LOG: /dev/stdout
-      KONG_PROXY_ERROR_LOG: /dev/stderr
-      KONG_ADMIN_ACCESS_LOG: /dev/stdout
-      KONG_ADMIN_ERROR_LOG: /dev/stderr
-      KONG_ADMIN_LISTEN: 127.0.0.1:8001
-      KONG_PROXY_LISTEN: 0.0.0.0:8000, 0.0.0.0:8443 ssl
-      KONG_NGINX_PROXY_GZIP: "off"
+    command: ["caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]
     volumes:
-      - ./kong/kong.yml:/var/lib/kong/kong.yml:ro
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
     ports:
-      - "${KONG_HTTP_PORT:-8000}:8000"
-      - "${KONG_HTTPS_PORT:-8443}:8443"
-      - "127.0.0.1:${KONG_ADMIN_PORT:-8001}:8001"
+      - "${CADDY_HTTP_PORT:-8000}:8000"
 
 volumes:
   postgres-data:
   tenant-config:
   functions-data:
+  caddy-data:
+  caddy-config:

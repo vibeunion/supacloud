@@ -1384,7 +1384,7 @@ configure_external_s3() {
 install_caddy_gateway() {
     log_step "Installing SupaCloud Caddy Gateway..."
 
-    # Caddy owns public 80/443 in the gateway model. Stop legacy listeners
+    # Caddy owns public 80/443. Stop legacy listeners (kong included for historical cleanups)
     # so they cannot conflict with customer traffic.
     for svc in nginx angie kong caddy; do
         if systemctl list-unit-files "${svc}.service" &>/dev/null || systemctl list-units "${svc}.service" &>/dev/null; then

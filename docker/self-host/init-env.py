@@ -45,7 +45,7 @@ def main() -> None:
     parser.add_argument(
         "--public-url",
         default="http://localhost:8000",
-        help="External API/Kong URL",
+        help="External API gateway URL",
     )
     parser.add_argument(
         "--studio-url",
@@ -136,9 +136,9 @@ def main() -> None:
     print(f"STUDIO_URL={args.studio_url}")
     print(f"BASE_DOMAIN={derive_base_domain(args.public_url)}")
     print("PGRST_DB_SCHEMAS=public,storage,graphql_public,pgmq_public")
-    print("KONG_HTTP_PORT=8000")
-    print("KONG_HTTPS_PORT=8443")
-    print("KONG_ADMIN_PORT=8001")
+    print("CADDY_HTTP_PORT=8000")
+    print("CADDY_HTTPS_PORT=8443")
+    print("# CADDY_ADMIN_PORT=2019 (internal only)")
     print("API_PORT=9090")
     print("EDGE_RUNTIME_PORT=9000")
 
