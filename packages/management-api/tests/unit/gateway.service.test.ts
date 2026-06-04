@@ -631,8 +631,9 @@ describe("CaddyGatewayProvider route headers", () => {
         for (const route of apiRoutes) {
             const proxy = route?.handle?.find((h: any) => h.handler === "reverse_proxy");
             const requestSet = proxy?.headers?.request?.set;
-            const isStorageRoute = String(route["@id"] || "").endsWith("-storage");
-            const expectedHost = isStorageRoute ? `hdrtest.api.${config.baseDomain}` : "{http.request.host}";
+            const routeId = String(route["@id"] || "");
+            const usesProjectCanonicalHost = routeId.endsWith("-storage") || routeId.endsWith("-functions");
+            const expectedHost = usesProjectCanonicalHost ? `hdrtest.api.${config.baseDomain}` : "{http.request.host}";
             expect(requestSet?.["Host"]).toEqual([expectedHost]);
             expect(requestSet?.["X-Project-Ref"]).toEqual(["hdrtest"]);
             expect(requestSet?.["x-project-ref"]).toEqual(["hdrtest"]);

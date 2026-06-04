@@ -984,7 +984,19 @@ export class CaddyGatewayProvider implements GatewayProvider {
                 this.makeRoute({ id: caddyRouteId(projectRef, "graphql"), hosts, path: "/graphql/v1*", upstream: `${hostIp}:${pgrstPort}`, projectRef, rewriteUri: "/rpc/graphql", headers: ["Content-Profile:graphql_public", "Accept-Profile:graphql_public"], corsOrigins }),
                 this.makeRoute({ id: caddyRouteId(projectRef, "auth"), hosts, path: "/auth/v1*", upstream: `${hostIp}:${gotruePort}`, projectRef, stripPrefix: "/auth/v1", corsOrigins }),
                 this.makeRoute({ id: caddyRouteId(projectRef, "gotrue-well-known"), hosts, path: "/.well-known/oauth-authorization-server/auth/v1*", upstream: `${hostIp}:${gotruePort}`, projectRef, corsOrigins }),
-                this.makeRoute({ id: caddyRouteId(projectRef, "functions"), hosts, path: "/functions/v1*", upstream: `${hostIp}:${config.port}`, projectRef, readTimeout: 500_000, corsOrigins }),
+                this.makeRoute({
+                    id: caddyRouteId(projectRef, "functions"),
+                    hosts,
+                    path: "/functions/v1*",
+                    upstream: `${hostIp}:${config.port}`,
+                    projectRef,
+                    headers: [
+                        `Host:${projectRef}.api.${config.baseDomain}`,
+                        `X-Forwarded-Host:${projectRef}.api.${config.baseDomain}`,
+                    ],
+                    readTimeout: 500_000,
+                    corsOrigins,
+                }),
                 this.makeRoute({
                     id: caddyRouteId(projectRef, "storage"),
                     hosts,
