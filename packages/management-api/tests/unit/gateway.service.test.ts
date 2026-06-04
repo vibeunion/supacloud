@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
-import { readFile, rm } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { config } from "../../src/config";
 import {
     CaddyGatewayProvider,
@@ -671,6 +671,70 @@ describe("CaddyGatewayProvider route headers", () => {
         expect(requestSet?.["X-Forwarded-Proto"]).toEqual(["{http.request.scheme}"]);
         // Storage is non-streaming (no flush_interval)
         expect(storageProxy?.flush_interval).toBeUndefined();
+
+        restore();
+    });
+
+    test("hydrates and migrates legacy storage routes that stripped the SDK prefix", async () => {
+        await mkdir("/tmp/supacloud-caddy-test", { recursive: true });
+        await writeFile("/tmp/supacloud-caddy-test/config.json", JSON.stringify({
+            apps: {
+                http: {
+                    servers: {
+                        supacloud: {
+                            routes: [
+                                {
+                                    "@id": "route-project-legacyref-storage",
+                                    match: [{ host: ["legacyref.api.example.com", "api.custom.example.com"], path: ["/storage/v1*"] }],
+                                    handle: [
+                                        { handler: "rewrite", strip_path_prefix: "/storage/v1" },
+                                        {
+                                            handler: "reverse_proxy",
+                                            flush_interval: -1,
+                                            headers: {
+                                                request: {
+                                                    set: {
+                                                        "X-Forwarded-Host": ["{http.request.host}"],
+                                                        "X-Project-Ref": ["legacyref"],
+                                                    },
+                                                },
+                                                response: {
+                                                    delete: ["Access-Control-Allow-Origin"],
+                                                },
+                                            },
+                                            upstreams: [{ dial: "127.0.0.1:9090" }],
+                                        },
+                                    ],
+                                    terminal: true,
+                                },
+                            ],
+                        },
+                    },
+                },
+            },
+        }));
+
+        const calls: Array<{ url: string; method: string; body: any }> = [];
+        const restore = captureFetch(calls);
+        const provider = new CaddyGatewayProvider();
+
+        await provider.setCors("legacyref", ["https://app.example.com"]);
+
+        const load = calls.filter((call) => call.method === "POST" && call.url.endsWith("/load")).at(-1);
+        const routes = load?.body?.apps?.http?.servers?.supacloud?.routes ?? [];
+        const storage = routes.find((route: any) => route["@id"] === "route-project-legacyref-storage");
+        expect(storage).toBeDefined();
+        expect(storage?.handle?.some((handler: any) => handler.strip_path_prefix === "/storage/v1")).toBe(false);
+
+        const storageProxy = storage?.handle?.find((h: any) => h.handler === "reverse_proxy");
+        expect(storageProxy?.flush_interval).toBeUndefined();
+        expect(storageProxy?.headers?.response?.delete).toBeUndefined();
+        const requestSet = storageProxy?.headers?.request?.set;
+        expect(requestSet?.["Host"]).toEqual([`legacyref.api.${config.baseDomain}`]);
+        expect(requestSet?.["X-Forwarded-Host"]).toEqual([`legacyref.api.${config.baseDomain}`]);
+        expect(requestSet?.["X-Project-Ref"]).toEqual(["legacyref"]);
+        expect(requestSet?.["x-project-ref"]).toEqual(["legacyref"]);
+        expect(requestSet?.["X-Forwarded-Proto"]).toEqual(["{http.request.scheme}"]);
 
         restore();
     });
