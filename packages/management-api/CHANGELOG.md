@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.29.5](https://github.com/zuohuadong/supacloud/compare/management-api-v0.29.4...management-api-v0.29.5) (2026-06-04)
+
+
+### Bug Fixes
+
+* **storage:** accept configured api domains for sdk requests ([#277](https://github.com/zuohuadong/supacloud/issues/277)) ([3d23d1a](https://github.com/zuohuadong/supacloud/commit/3d23d1add7e8adb326f9691ecc12acebf77671e3))
+
 ## [0.29.4](https://github.com/zuohuadong/supacloud/compare/management-api-v0.29.3...management-api-v0.29.4) (2026-06-04)
 
 
