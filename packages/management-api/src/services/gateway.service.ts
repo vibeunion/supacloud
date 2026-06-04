@@ -536,7 +536,6 @@ export class CaddyGatewayProvider implements GatewayProvider {
                 request: {
                     set: Object.fromEntries(Object.entries(headers).map(([key, value]) => [key, Array.isArray(value) ? value : [value]])),
                 },
-                response: responseHeaders,
             },
             transport: {
                 protocol: "http",
@@ -544,6 +543,9 @@ export class CaddyGatewayProvider implements GatewayProvider {
                 write_timeout: "500s",
             },
         };
+        if (Object.keys(responseHeaders).length > 0) {
+            (proxy.headers as Record<string, unknown>).response = responseHeaders;
+        }
         if (streaming !== false) {
             proxy.flush_interval = -1;
         }

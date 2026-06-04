@@ -660,8 +660,9 @@ describe("CaddyGatewayProvider route headers", () => {
 
         const storageProxy = storage?.handle?.find((h: any) => h.handler === "reverse_proxy");
         expect(storage?.handle?.some((h: any) => h.strip_path_prefix === "/storage/v1")).toBe(false);
-        // Storage route should preserve upstream CORS (no response.delete)
-        expect(storageProxy?.headers?.response?.delete).toBeUndefined();
+        // Storage route should preserve upstream CORS without rendering an empty
+        // response header block, which can break Caddy proxy responses.
+        expect(storageProxy?.headers?.response).toBeUndefined();
         // Storage route must have project routing headers
         const requestSet = storageProxy?.headers?.request?.set;
         expect(requestSet?.["Host"]).toEqual([`storagetest.api.${config.baseDomain}`]);
