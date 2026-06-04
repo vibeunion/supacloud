@@ -318,7 +318,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
                 for (const route of routes) {
                     const id = typeof route?.["@id"] === "string" ? route["@id"] : "";
                     if (!id) continue;
-                    if (!this.routesById.has(id)) this.routesById.set(id, route);
+                    if (!this.routesById.has(id)) this.routesById.set(id, this.migrateHydratedRoute(id, route));
                     this.hydrateRateLimitFromRoute(id, route);
                 }
             }
@@ -339,6 +339,37 @@ export class CaddyGatewayProvider implements GatewayProvider {
                 logger.warn(`[CaddyGatewayProvider] Failed to hydrate existing Caddy config: ${error instanceof Error ? error.message : String(error)}`);
             }
         }
+    }
+
+    private migrateHydratedRoute(routeId: string, route: CaddyRoute): CaddyRoute {
+        if (!routeId.startsWith("route-project-") || !routeId.endsWith("-storage")) return route;
+
+        const projectRef = this.projectRefFromRouteId(routeId);
+        if (!projectRef) return route;
+
+        const migrated = JSON.parse(JSON.stringify(route)) as CaddyRoute;
+        const handle = Array.isArray(migrated.handle) ? migrated.handle as Record<string, unknown>[] : [];
+        const migratedHandle = handle.filter((handler) => handler.strip_path_prefix !== "/storage/v1");
+        migrated.handle = migratedHandle;
+
+        const proxy = migratedHandle.find((handler) => handler.handler === "reverse_proxy") as Record<string, any> | undefined;
+        if (!proxy) return migrated;
+
+        const canonicalHost = `${projectRef}.api.${config.baseDomain}`;
+        proxy.headers = proxy.headers && typeof proxy.headers === "object" ? proxy.headers : {};
+        proxy.headers.request = proxy.headers.request && typeof proxy.headers.request === "object" ? proxy.headers.request : {};
+        proxy.headers.request.set = proxy.headers.request.set && typeof proxy.headers.request.set === "object" ? proxy.headers.request.set : {};
+        proxy.headers.request.set.Host = [canonicalHost];
+        proxy.headers.request.set["X-Forwarded-Host"] = [canonicalHost];
+        proxy.headers.request.set["X-Project-Ref"] = [projectRef];
+        proxy.headers.request.set["x-project-ref"] = [projectRef];
+        proxy.headers.request.set["X-Forwarded-Proto"] = ["{http.request.scheme}"];
+
+        proxy.headers.response = proxy.headers.response && typeof proxy.headers.response === "object" ? proxy.headers.response : {};
+        delete proxy.headers.response.delete;
+        delete proxy.flush_interval;
+
+        return migrated;
     }
 
     private hydrateRateLimitFromRoute(routeId: string, route: CaddyRoute): void {
