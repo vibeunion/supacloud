@@ -631,10 +631,12 @@ describe("CaddyGatewayProvider route headers", () => {
         for (const route of apiRoutes) {
             const proxy = route?.handle?.find((h: any) => h.handler === "reverse_proxy");
             const requestSet = proxy?.headers?.request?.set;
-            expect(requestSet?.["Host"]).toEqual(["{http.request.host}"]);
+            const isStorageRoute = String(route["@id"] || "").endsWith("-storage");
+            const expectedHost = isStorageRoute ? `hdrtest.api.${config.baseDomain}` : "{http.request.host}";
+            expect(requestSet?.["Host"]).toEqual([expectedHost]);
             expect(requestSet?.["X-Project-Ref"]).toEqual(["hdrtest"]);
             expect(requestSet?.["x-project-ref"]).toEqual(["hdrtest"]);
-            expect(requestSet?.["X-Forwarded-Host"]).toEqual(["{http.request.host}"]);
+            expect(requestSet?.["X-Forwarded-Host"]).toEqual([expectedHost]);
             expect(requestSet?.["X-Forwarded-Proto"]).toEqual(["{http.request.scheme}"]);
         }
 
@@ -657,13 +659,15 @@ describe("CaddyGatewayProvider route headers", () => {
         expect(storage?.match?.[0]?.path).toEqual(["/storage/v1*"]);
 
         const storageProxy = storage?.handle?.find((h: any) => h.handler === "reverse_proxy");
+        expect(storage?.handle?.some((h: any) => h.strip_path_prefix === "/storage/v1")).toBe(false);
         // Storage route should preserve upstream CORS (no response.delete)
         expect(storageProxy?.headers?.response?.delete).toBeUndefined();
         // Storage route must have project routing headers
         const requestSet = storageProxy?.headers?.request?.set;
-        expect(requestSet?.["Host"]).toEqual(["{http.request.host}"]);
+        expect(requestSet?.["Host"]).toEqual([`storagetest.api.${config.baseDomain}`]);
         expect(requestSet?.["X-Project-Ref"]).toEqual(["storagetest"]);
         expect(requestSet?.["x-project-ref"]).toEqual(["storagetest"]);
+        expect(requestSet?.["X-Forwarded-Host"]).toEqual([`storagetest.api.${config.baseDomain}`]);
         expect(requestSet?.["X-Forwarded-Proto"]).toEqual(["{http.request.scheme}"]);
         // Storage is non-streaming (no flush_interval)
         expect(storageProxy?.flush_interval).toBeUndefined();
@@ -694,9 +698,11 @@ describe("CaddyGatewayProvider route headers", () => {
         // All routes with the custom domain must still have correct headers
         const storageProxy = storage?.handle?.find((h: any) => h.handler === "reverse_proxy");
         const requestSet = storageProxy?.headers?.request?.set;
-        expect(requestSet?.["Host"]).toEqual(["{http.request.host}"]);
+        expect(storage?.handle?.some((h: any) => h.strip_path_prefix === "/storage/v1")).toBe(false);
+        expect(requestSet?.["Host"]).toEqual([`domaintest.api.${config.baseDomain}`]);
         expect(requestSet?.["X-Project-Ref"]).toEqual(["domaintest"]);
         expect(requestSet?.["x-project-ref"]).toEqual(["domaintest"]);
+        expect(requestSet?.["X-Forwarded-Host"]).toEqual([`domaintest.api.${config.baseDomain}`]);
         expect(requestSet?.["X-Forwarded-Proto"]).toEqual(["{http.request.scheme}"]);
 
         restore();

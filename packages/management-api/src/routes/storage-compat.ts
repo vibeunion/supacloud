@@ -21,11 +21,11 @@ import { TusStore, SignedStore, startStorageCleanupJob, type SignedUpload } from
  *   PUT    /storage/v1/bucket/:id                    → update bucket
  *   DELETE /storage/v1/bucket/:id                    → delete bucket
  * 
- * The public gateway strips the /storage/v1 prefix before forwarding to this service,
- * so our routes start from /object/... and /bucket/...
- * 
+ * The public gateway preserves the /storage/v1 prefix before forwarding to this service.
+ *
  * This file is mounted as a SEPARATE Elysia instance at /storage/v1 prefix
- * to coexist with the existing management-level storage routes.
+ * to coexist with the existing management-level storage routes. The unprefixed
+ * registration is kept for older generated gateways that stripped /storage/v1.
  */
 import { Elysia, t, status } from "elysia";
 import { StorageService } from "../services/storage.service";
