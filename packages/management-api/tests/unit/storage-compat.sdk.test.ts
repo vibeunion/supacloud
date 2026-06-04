@@ -44,6 +44,19 @@ afterEach(() => {
 });
 
 describe("storageCompatRoutes supabase-js compatibility", () => {
+  test("TUS capabilities advertise the default 500 MiB upload limit", async () => {
+    const res = await request("/storage/v1/upload/resumable", {
+      method: "OPTIONS",
+      headers: {
+        apikey: "test-token",
+        "x-project-ref": "test_mock",
+      },
+    });
+
+    expect([200, 204]).toContain(res.status);
+    expect(res.headers.get("Tus-Max-Size")).toBe(String(500 * 1024 * 1024));
+  });
+
   test("accepts project header on loopback health checks without apikey", async () => {
     const sqlSpy = spyOn(dbModule, "sql");
     sqlSpy.mockImplementation(async (...args: unknown[]) => {
