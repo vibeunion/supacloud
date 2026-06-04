@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.30.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.29.9...management-api-v0.30.0) (2026-06-04)
+
+
+### Features
+
+* **gateway:** add controlled custom routes ([6732f0f](https://github.com/zuohuadong/supacloud/commit/6732f0f3069568b8eab0262ab122c64805448cda))
+
+
+### Bug Fixes
+
+* **gateway:** support 500MiB TUS uploads ([579b967](https://github.com/zuohuadong/supacloud/commit/579b967703e0bd06044ec25d7eee7150388d50fc))
+* **routing:** prefer HTTPS for public custom domains ([ea37d35](https://github.com/zuohuadong/supacloud/commit/ea37d359b79d10c0a3787ac2b93933680eb2ca00))
+* **runtime:** propagate signup flags to gotrue env ([c79a15a](https://github.com/zuohuadong/supacloud/commit/c79a15aafba6f14263f281a43a28b99f987677b3))
+
 ## [0.29.9](https://github.com/zuohuadong/supacloud/compare/management-api-v0.29.8...management-api-v0.29.9) (2026-06-04)
 
 
