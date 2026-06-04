@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.29.9](https://github.com/zuohuadong/supacloud/compare/management-api-v0.29.8...management-api-v0.29.9) (2026-06-04)
+
+
+### Bug Fixes
+
+* **gateway:** support additional api domains ([#286](https://github.com/zuohuadong/supacloud/issues/286)) ([5555e19](https://github.com/zuohuadong/supacloud/commit/5555e199ddc04aaa58ae6c3e4858a9d81931bb0a))
+
 ## [0.29.8](https://github.com/zuohuadong/supacloud/compare/management-api-v0.29.7...management-api-v0.29.8) (2026-06-04)
 
 
