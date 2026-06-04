@@ -136,4 +136,34 @@ describe("project routing", () => {
     expect(resolveProjectAuthUrl("dglewlzugrtygzysqrce", null)).toBe("http://dglewlzugrtygzysqrce.api.192.168.1.168.sslip.io");
     expect(resolveProjectStudioUrl("dglewlzugrtygzysqrce", null)).toBe("http://studio-dglewlzugrtygzysqrce.192.168.1.168.sslip.io");
   });
+
+  test("uses HTTPS for public custom domains even when the management API runs without SSL", () => {
+    config.baseDomain = "ai.xigu.team";
+    config.enableSsl = false;
+    const projectConfig = {
+      api_domain: "api.ai.xigu.team",
+      auth_domain: "auth.ai.xigu.team",
+      studio_domain: "studio.ai.xigu.team",
+    };
+
+    expect(resolveProjectApiUrl("dglewlzugrtygzysqrce", projectConfig)).toBe("https://api.ai.xigu.team");
+    expect(resolveProjectAuthUrl("dglewlzugrtygzysqrce", projectConfig)).toBe("https://auth.ai.xigu.team");
+    expect(resolveProjectStudioUrl("dglewlzugrtygzysqrce", projectConfig)).toBe("https://studio.ai.xigu.team");
+  });
+
+  test("allows explicit URL schemes to override public custom domain defaults", () => {
+    config.baseDomain = "ai.xigu.team";
+    config.enableSsl = false;
+
+    expect(resolveProjectAuthUrl("dglewlzugrtygzysqrce", {
+      api_domain: "api.ai.xigu.team",
+      auth_domain: "auth.ai.xigu.team",
+      auth_url_scheme: "http",
+    })).toBe("http://auth.ai.xigu.team");
+
+    expect(resolveProjectApiUrl("dglewlzugrtygzysqrce", {
+      api_domain: "api.ai.xigu.team",
+      public_url_scheme: "https",
+    })).toBe("https://api.ai.xigu.team");
+  });
 });
