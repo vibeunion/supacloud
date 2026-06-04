@@ -4,7 +4,12 @@
  */
 import { Elysia, t, status } from "elysia";
 import { projectService } from "../services";
-import { gatewayService } from "../services/gateway.service";
+import {
+  type CustomGatewayRouteConfig,
+  gatewayService,
+  normalizeCustomGatewayRoute,
+  normalizeCustomGatewayRoutes,
+} from "../services/gateway.service";
 import { certificateService } from "../services/certificate.service";
 import { logger } from "../utils/logger";
 import {
@@ -129,6 +134,37 @@ function pickFirstArray(...candidates: unknown[]): string[] {
     if (values.length > 0) return values;
   }
   return [];
+}
+
+function readCustomGatewayRoutes(settings: Record<string, unknown>): CustomGatewayRouteConfig[] {
+  return normalizeCustomGatewayRoutes(settings.gateway_routes);
+}
+
+function customGatewayRouteBody(body: Record<string, unknown>, routeId?: string): CustomGatewayRouteConfig {
+  return normalizeCustomGatewayRoute({
+    ...(body as unknown as CustomGatewayRouteConfig),
+    id: routeId || String(body.id || ""),
+  });
+}
+
+async function applyCustomGatewayRoutes(projectRef: string, settings: Record<string, unknown>, routes: CustomGatewayRouteConfig[]): Promise<
+  | { ok: true; settings: Record<string, unknown> | null }
+  | { ok: false; status: 400 | 500; body: { message: string; code: string } }
+> {
+  if (routes.length > 50) {
+    return { ok: false, status: 400, body: { message: "Maximum of 50 custom gateway routes allowed per project", code: "400" } };
+  }
+
+  const result = await gatewayService.configureCustomGatewayRoutes(projectRef, routes);
+  if (!result.success) {
+    return { ok: false, status: 500, body: { message: result.error || "Failed to update custom gateway routes", code: "500" } };
+  }
+
+  const updated = await projectService.updateProjectSettings(projectRef, {
+    ...settings,
+    gateway_routes: routes,
+  });
+  return { ok: true, settings: updated };
 }
 
 function buildNetworkRestrictionsResponse(value: unknown) {
@@ -1987,6 +2023,119 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
     
       detail: { tags: ["projects"], summary: "Generate TypeScript types" },
 },
+  )
+
+  .get(
+    "/:ref/gateway/routes",
+    async ({ params, request }) => {
+      const authError = await requireAdminAuth(request);
+      if (authError) return status(authError.status, authError.body);
+      const settings = await projectService.getProjectSettings(params.ref);
+      if (!settings)
+        return status(404, { message: "Project not found", code: "404" });
+      try {
+        return { routes: readCustomGatewayRoutes(settings) };
+      } catch (error: unknown) {
+        return status(500, { message: error instanceof Error ? error.message : String(error), code: "500" });
+      }
+    },
+    {
+      params: t.Object({ ref: t.String() }),
+      detail: { tags: ["projects"], summary: "List controlled custom gateway routes" },
+    },
+  )
+
+  .post(
+    "/:ref/gateway/routes",
+    async ({ params, body, request }) => {
+      const authError = await requireAdminAuth(request);
+      if (authError) return status(authError.status, authError.body);
+      const settings = await projectService.getProjectSettings(params.ref);
+      if (!settings)
+        return status(404, { message: "Project not found", code: "404" });
+      try {
+        const route = customGatewayRouteBody(body);
+        const current = readCustomGatewayRoutes(settings).filter((item) => item.id !== route.id);
+        const result = await applyCustomGatewayRoutes(params.ref, settings, [...current, route]);
+        if (!result.ok) return status(result.status, result.body);
+        return { success: true, route };
+      } catch (error: unknown) {
+        return status(400, { message: error instanceof Error ? error.message : String(error), code: "400" });
+      }
+    },
+    {
+      params: t.Object({ ref: t.String() }),
+      body: t.Object({
+        id: t.String(),
+        hosts: t.Array(t.String()),
+        path: t.Union([t.String(), t.Array(t.String())]),
+        upstream: t.Optional(t.String()),
+        static_root: t.Optional(t.String()),
+        headers: t.Optional(t.Record(t.String(), t.String())),
+        cors: t.Optional(t.Array(t.String())),
+        priority: t.Optional(t.Number()),
+        enabled: t.Optional(t.Boolean()),
+      }),
+      detail: { tags: ["projects"], summary: "Create or replace a controlled custom gateway route" },
+    },
+  )
+
+  .put(
+    "/:ref/gateway/routes/:routeId",
+    async ({ params, body, request }) => {
+      const authError = await requireAdminAuth(request);
+      if (authError) return status(authError.status, authError.body);
+      const settings = await projectService.getProjectSettings(params.ref);
+      if (!settings)
+        return status(404, { message: "Project not found", code: "404" });
+      try {
+        const route = customGatewayRouteBody(body, params.routeId);
+        const current = readCustomGatewayRoutes(settings).filter((item) => item.id !== route.id);
+        const result = await applyCustomGatewayRoutes(params.ref, settings, [...current, route]);
+        if (!result.ok) return status(result.status, result.body);
+        return { success: true, route };
+      } catch (error: unknown) {
+        return status(400, { message: error instanceof Error ? error.message : String(error), code: "400" });
+      }
+    },
+    {
+      params: t.Object({ ref: t.String(), routeId: t.String() }),
+      body: t.Object({
+        hosts: t.Array(t.String()),
+        path: t.Union([t.String(), t.Array(t.String())]),
+        upstream: t.Optional(t.String()),
+        static_root: t.Optional(t.String()),
+        headers: t.Optional(t.Record(t.String(), t.String())),
+        cors: t.Optional(t.Array(t.String())),
+        priority: t.Optional(t.Number()),
+        enabled: t.Optional(t.Boolean()),
+      }),
+      detail: { tags: ["projects"], summary: "Replace a controlled custom gateway route" },
+    },
+  )
+
+  .delete(
+    "/:ref/gateway/routes/:routeId",
+    async ({ params, request }) => {
+      const authError = await requireAdminAuth(request);
+      if (authError) return status(authError.status, authError.body);
+      const settings = await projectService.getProjectSettings(params.ref);
+      if (!settings)
+        return status(404, { message: "Project not found", code: "404" });
+      try {
+        const current = readCustomGatewayRoutes(settings);
+        const next = current.filter((route) => route.id !== params.routeId);
+        const result = await applyCustomGatewayRoutes(params.ref, settings, next);
+        if (!result.ok) return status(result.status, result.body);
+        return { success: true, deleted: current.length !== next.length };
+      } catch (error: unknown) {
+        return status(400, { message: error instanceof Error ? error.message : String(error), code: "400" });
+      }
+    },
+    {
+      params: t.Object({ ref: t.String(), routeId: t.String() }),
+      detail: { tags: ["projects"], summary: "Delete a controlled custom gateway route" },
+    },
   )
 
   // Update gateway config (rate limiting, CORS, JWT)

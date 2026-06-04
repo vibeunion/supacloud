@@ -363,9 +363,18 @@ describe("CaddyGatewayProvider", () => {
         );
         const encode = route?.handle?.find((handler: any) => handler.handler === "encode");
         const subroute = route?.handle?.find((handler: any) => handler.handler === "subroute");
-        const tryFiles = subroute?.routes?.find((item: any) => item.match?.[0]?.file?.try_files?.includes("/index.html"))?.match?.[0]?.file;
-        const avifRoute = subroute?.routes?.find((item: any) => item.match?.[0]?.header?.Accept?.includes("*image/avif*"));
-        const webpRoute = subroute?.routes?.find((item: any) => item.match?.[0]?.header?.Accept?.includes("*image/webp*"));
+        const subroutes = subroute?.routes ?? [];
+        const assetRouteIndex = subroutes.findIndex((item: any) => item.match?.[0]?.path?.includes("/assets/*") && item.match?.[0]?.file);
+        const missingAssetRouteIndex = subroutes.findIndex((item: any) => item.match?.[0]?.path?.includes("/assets/*") && !item.match?.[0]?.file);
+        const fallbackIndex = subroutes.findIndex((item: any) => item.match?.[0]?.file?.try_files?.includes("/index.html"));
+        const avifRouteIndex = subroutes.findIndex((item: any) => item.match?.[0]?.header?.Accept?.includes("*image/avif*"));
+        const webpRouteIndex = subroutes.findIndex((item: any) => item.match?.[0]?.header?.Accept?.includes("*image/webp*"));
+        const assetRoute = subroutes[assetRouteIndex];
+        const missingAssetRoute = subroutes[missingAssetRouteIndex];
+        const fallback = subroutes[fallbackIndex];
+        const tryFiles = subroutes.find((item: any) => item.match?.[0]?.file?.try_files?.includes("{http.request.uri.path}.html"))?.match?.[0]?.file;
+        const avifRoute = subroutes[avifRouteIndex];
+        const webpRoute = subroutes[webpRouteIndex];
         const fileServer = subroute?.routes?.at(-1)?.handle?.at(-1);
 
         expect(route?.match?.[0]?.host).toEqual(["static.example.com"]);
@@ -373,12 +382,102 @@ describe("CaddyGatewayProvider", () => {
         expect(securityHeaders?.response?.set?.["X-Content-Type-Options"]).toEqual(["nosniff"]);
         expect(securityHeaders?.response?.set?.["Referrer-Policy"]).toEqual(["strict-origin-when-cross-origin"]);
         expect(encode?.prefer).toEqual(["zstd", "gzip"]);
-        expect(tryFiles?.try_files).toContain("/index.html");
+        expect(avifRouteIndex).toBeLessThan(assetRouteIndex);
+        expect(webpRouteIndex).toBeLessThan(assetRouteIndex);
+        expect(assetRoute?.match?.[0]?.file?.try_files).toEqual(["{http.request.uri.path}"]);
+        expect(assetRoute?.handle?.[0]?.response?.set?.["Cache-Control"]).toEqual(["public, max-age=31536000, immutable"]);
+        expect(assetRoute?.handle?.at(-1)?.handler).toBe("file_server");
+        expect(assetRoute?.terminal).toBe(true);
+        expect(missingAssetRoute?.handle?.[0]?.response?.set?.["Cache-Control"]).toEqual(["no-cache"]);
+        expect(missingAssetRoute?.handle?.[1]).toEqual({ handler: "static_response", status_code: 404 });
+        expect(missingAssetRoute?.terminal).toBe(true);
+        expect(missingAssetRouteIndex).toBeGreaterThan(assetRouteIndex);
+        expect(missingAssetRouteIndex).toBeLessThan(fallbackIndex);
+        expect(tryFiles?.try_files).not.toContain("/index.html");
+        expect(fallback?.handle?.[0]?.response?.set?.["Cache-Control"]).toEqual(["no-cache"]);
+        expect(fallback?.handle?.[1]?.uri).toBe("{http.matchers.file.relative}");
         expect(avifRoute?.match?.[0]?.file?.try_files).toEqual(["{http.request.uri.path}.avif"]);
         expect(webpRoute?.match?.[0]?.file?.try_files).toEqual(["{http.request.uri.path}.webp"]);
         expect(fileServer?.handler).toBe("file_server");
         expect(fileServer?.root).toBe("/var/supacloud/frontends/proj123/0000002b/build");
         expect(fileServer?.precompressed).toEqual({ br: {}, zstd: {}, gzip: {} });
+
+        restore();
+    });
+
+    test("configureCustomGatewayRoutes renders controlled proxy and static Caddy routes", async () => {
+        const calls: Array<{ url: string; method: string; body: any }> = [];
+        const restore = captureFetch(calls);
+        const provider = new CaddyGatewayProvider();
+
+        const result = await provider.configureCustomGatewayRoutes("proj123", [
+            {
+                id: "ocr",
+                hosts: ["ocr.example.com"],
+                path: "/api/*",
+                upstream: "https://10.20.0.12:4001",
+                headers: { "X-Custom-Upstream": "ocr" },
+                cors: ["https://app.example.com"],
+                priority: 10,
+            },
+            {
+                id: "docs",
+                hosts: ["docs.example.com"],
+                path: "/*",
+                static_root: "/var/supacloud/custom-sites/docs",
+                headers: { "X-Robots-Tag": "noindex" },
+                priority: 1,
+            },
+            {
+                id: "disabled",
+                hosts: ["disabled.example.com"],
+                path: "/*",
+                static_root: "/var/supacloud/custom-sites/disabled",
+                enabled: false,
+            },
+        ]);
+
+        expect(result.success).toBe(true);
+        const load = calls.filter((call) => call.method === "POST" && call.url.endsWith("/load")).at(-1);
+        const routes = load?.body?.apps?.http?.servers?.supacloud?.routes ?? [];
+        const ocr = routes.find((item: any) => item["@id"] === "route-custom-gateway-proj123-ocr");
+        const docs = routes.find((item: any) => item["@id"] === "route-custom-gateway-proj123-docs");
+        const disabled = routes.find((item: any) => item["@id"] === "route-custom-gateway-proj123-disabled");
+        const proxy = ocr?.handle?.find((handler: any) => handler.handler === "reverse_proxy");
+        const corsSubroute = ocr?.handle?.find((handler: any) => handler.handler === "subroute");
+
+        expect(routes[0]?.["@id"]).toBe("route-custom-gateway-proj123-ocr");
+        expect(ocr?.__supacloud_priority).toBeUndefined();
+        expect(ocr?.match?.[0]?.host).toEqual(["ocr.example.com"]);
+        expect(ocr?.match?.[0]?.path).toEqual(["/api/*"]);
+        expect(corsSubroute?.routes?.[0]?.match?.[0]?.header?.Origin).toContain("https://app.example.com");
+        expect(proxy?.upstreams?.[0]?.dial).toBe("10.20.0.12:4001");
+        expect(proxy?.transport?.tls).toEqual({});
+        expect(proxy?.headers?.request?.set?.["X-Custom-Upstream"]).toEqual(["ocr"]);
+        expect(docs?.handle?.at(-1)?.handler).toBe("file_server");
+        expect(docs?.handle?.at(-1)?.root).toBe("/var/supacloud/custom-sites/docs");
+        expect(docs?.handle?.[0]?.response?.set?.["X-Robots-Tag"]).toEqual(["noindex"]);
+        expect(disabled).toBeUndefined();
+
+        restore();
+    });
+
+    test("configureCustomGatewayRoutes replaces stale custom routes for the project", async () => {
+        const calls: Array<{ url: string; method: string; body: any }> = [];
+        const restore = captureFetch(calls);
+        const provider = new CaddyGatewayProvider();
+
+        await provider.configureCustomGatewayRoutes("proj123", [{
+            id: "old",
+            hosts: ["old.example.com"],
+            path: "/*",
+            static_root: "/var/supacloud/custom-sites/old",
+        }]);
+        await provider.configureCustomGatewayRoutes("proj123", []);
+
+        const load = calls.filter((call) => call.method === "POST" && call.url.endsWith("/load")).at(-1);
+        const routes = load?.body?.apps?.http?.servers?.supacloud?.routes ?? [];
+        expect(routes.some((item: any) => item["@id"] === "route-custom-gateway-proj123-old")).toBe(false);
 
         restore();
     });
