@@ -718,7 +718,6 @@ export class CaddyGatewayProvider implements GatewayProvider {
                         "{http.request.uri.path}",
                         "{http.request.uri.path}.html",
                         "{http.request.uri.path}/index.html",
-                        "/index.html",
                     ],
                 },
             }],
@@ -726,6 +725,61 @@ export class CaddyGatewayProvider implements GatewayProvider {
                 handler: "rewrite",
                 uri: "{http.matchers.file.relative}",
             }],
+        };
+    }
+
+    private makeStaticSpaFallbackRoute(root: string): CaddyRoute {
+        return {
+            match: [{
+                file: {
+                    root,
+                    try_files: ["/index.html"],
+                },
+            }],
+            handle: [
+                this.makeStaticCacheHeaders("no-cache"),
+                {
+                    handler: "rewrite",
+                    uri: "{http.matchers.file.relative}",
+                },
+            ],
+        };
+    }
+
+    private makeStaticAssetRoute(root: string, cacheControl: string): CaddyRoute {
+        return {
+            match: [{
+                path: ["/_app/*", "/assets/*"],
+                file: {
+                    root,
+                    try_files: ["{http.request.uri.path}"],
+                },
+            }],
+            handle: [
+                this.makeStaticCacheHeaders(cacheControl),
+                {
+                    handler: "rewrite",
+                    uri: "{http.matchers.file.relative}",
+                },
+                this.makeStaticFileServer(root),
+            ],
+            terminal: true,
+        };
+    }
+
+    private makeMissingStaticAssetRoute(): CaddyRoute {
+        return {
+            match: [{
+                path: ["/_app/*", "/assets/*"],
+            }],
+            handle: [
+                this.makeStaticCacheHeaders("no-cache"),
+                {
+                    handler: "static_response",
+                    status_code: 404,
+                },
+            ],
+            terminal: true,
         };
     }
 
@@ -783,17 +837,16 @@ export class CaddyGatewayProvider implements GatewayProvider {
                 {
                     handler: "subroute",
                     routes: [
-                        {
-                            match: [{ path: ["/_app/*", "/assets/*"] }],
-                            handle: [this.makeStaticCacheHeaders(immutableCache)],
-                        },
+                        this.makeStaticImageVariantRoute(route.root, "image/avif", ".avif"),
+                        this.makeStaticImageVariantRoute(route.root, "image/webp", ".webp"),
+                        this.makeStaticAssetRoute(route.root, immutableCache),
+                        this.makeMissingStaticAssetRoute(),
                         {
                             match: [{ path: ["/", "*.html"] }],
                             handle: [this.makeStaticCacheHeaders("no-cache")],
                         },
-                        this.makeStaticImageVariantRoute(route.root, "image/avif", ".avif"),
-                        this.makeStaticImageVariantRoute(route.root, "image/webp", ".webp"),
                         this.makeStaticTryFilesRoute(route.root),
+                        this.makeStaticSpaFallbackRoute(route.root),
                         {
                             handle: [this.makeStaticFileServer(route.root)],
                         },
