@@ -509,6 +509,10 @@ $$ LANGUAGE plpgsql STABLE SECURITY DEFINER;
 -- Grant execute to API roles
 GRANT EXECUTE ON FUNCTION public.set_request_context() TO anon, authenticated, service_role;
 
+CREATE OR REPLACE FUNCTION auth.uid() RETURNS uuid AS $$
+  SELECT nullif(current_setting('request.jwt.claim.sub', true), '')::uuid;
+$$ LANGUAGE sql STABLE;
+
 -- 13. GoTrue internal tracking tables (P1-4, P2-5)
 CREATE TABLE IF NOT EXISTS auth.schema_migrations (
   version varchar(255) PRIMARY KEY

@@ -310,6 +310,10 @@ GRANT ALL ON ALL TABLES IN SCHEMA auth TO supabase_auth_admin;
 GRANT ALL ON ALL SEQUENCES IN SCHEMA auth TO supabase_auth_admin;
 GRANT SELECT ON ALL TABLES IN SCHEMA auth TO service_role;
 
+CREATE OR REPLACE FUNCTION auth.uid() RETURNS uuid AS $$
+  SELECT nullif(current_setting('request.jwt.claim.sub', true), '')::uuid;
+$$ LANGUAGE sql STABLE;
+
 -- 3. Storage Schema
 CREATE SCHEMA IF NOT EXISTS storage AUTHORIZATION supabase_storage_admin;
 GRANT USAGE ON SCHEMA storage TO anon, authenticated, service_role;

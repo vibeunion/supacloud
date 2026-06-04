@@ -221,6 +221,14 @@ describe("storage RLS policies and grants", () => {
     expect(schema).toContain("ALTER TABLE storage.s3_multipart_uploads_parts ENABLE ROW LEVEL SECURITY");
   });
 
+  test("auth.uid helper is created before storage policies reference it", () => {
+    const schema = readRepoFile("src/db/schemas/supabase.sql");
+    const helperIndex = schema.indexOf("CREATE OR REPLACE FUNCTION auth.uid()");
+    const policyIndex = schema.indexOf("Allow authenticated read on storage.objects");
+    expect(helperIndex).toBeGreaterThanOrEqual(0);
+    expect(policyIndex).toBeGreaterThan(helperIndex);
+  });
+
   test("supabase.sql creates storage.objects RLS policies for public read and authenticated CRUD", () => {
     const schema = readRepoFile("src/db/schemas/supabase.sql");
     // Public read from public buckets
