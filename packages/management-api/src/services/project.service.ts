@@ -599,9 +599,12 @@ export class ProjectService {
     );
 
     const currentConfig = normalizeProjectConfig(project.config);
-    const routingKeys: Array<keyof typeof config> = [
+    const updatedConfig = updated ? normalizeProjectConfig(updated.config) : mergeProjectConfig(project.config, config);
+    const routingKeys = [
       "custom_domain",
       "api_domain",
+      "additional_api_domains",
+      "api_domains",
       "auth_domain",
       "studio_domain",
       "site_url",
@@ -609,14 +612,16 @@ export class ProjectService {
       "additional_redirect_urls",
       "additionalRedirectUrls",
     ];
-    const shouldRestartRuntime = routingKeys.some((key) => currentConfig[key as string] !== config[key as string]);
+    const shouldRestartRuntime = routingKeys.some((key) =>
+      JSON.stringify(currentConfig[key]) !== JSON.stringify(updatedConfig[key])
+    );
 
     if (shouldRestartRuntime) {
       try {
         const { tenantRuntimeService } = await import("./tenant-runtime.service");
         await tenantRuntimeService.restartRuntime(ref);
         if (updated) {
-          await this.reconcileGatewayRoutes(ref, normalizeProjectConfig(updated.config));
+          await this.reconcileGatewayRoutes(ref, updatedConfig);
         }
       } catch (err) {
         logger.warn("[ProjectService] Failed to propagate routing settings to runtime", {

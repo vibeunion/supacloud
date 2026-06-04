@@ -119,11 +119,13 @@ describe("GatewayService provider selection", () => {
     test("tenant cors origins include exact api and studio custom domains", () => {
         const origins = buildTenantCorsOrigins("dbbabyref", {
             api_domain: "sapi.dbbaby.top",
+            additional_api_domains: ["api-alt.dbbaby.top"],
             auth_domain: "auth.dbbaby.top",
             studio_domain: "sadmin.dbbaby.top",
         });
 
         expect(origins).toContain("https://sapi.dbbaby.top");
+        expect(origins).toContain("https://api-alt.dbbaby.top");
         expect(origins).toContain("https://auth.dbbaby.top");
         expect(origins).toContain("https://sadmin.dbbaby.top");
     });
@@ -631,8 +633,9 @@ describe("CaddyGatewayProvider route headers", () => {
         for (const route of apiRoutes) {
             const proxy = route?.handle?.find((h: any) => h.handler === "reverse_proxy");
             const requestSet = proxy?.headers?.request?.set;
-            const isStorageRoute = String(route["@id"] || "").endsWith("-storage");
-            const expectedHost = isStorageRoute ? `hdrtest.api.${config.baseDomain}` : "{http.request.host}";
+            const routeId = String(route["@id"] || "");
+            const usesProjectCanonicalHost = routeId.endsWith("-storage") || routeId.endsWith("-functions");
+            const expectedHost = usesProjectCanonicalHost ? `hdrtest.api.${config.baseDomain}` : "{http.request.host}";
             expect(requestSet?.["Host"]).toEqual([expectedHost]);
             expect(requestSet?.["X-Project-Ref"]).toEqual(["hdrtest"]);
             expect(requestSet?.["x-project-ref"]).toEqual(["hdrtest"]);
@@ -740,6 +743,61 @@ describe("CaddyGatewayProvider route headers", () => {
         restore();
     });
 
+    test("hydrates and migrates legacy functions routes to canonical project host headers", async () => {
+        await mkdir("/tmp/supacloud-caddy-test", { recursive: true });
+        await writeFile("/tmp/supacloud-caddy-test/config.json", JSON.stringify({
+            apps: {
+                http: {
+                    servers: {
+                        supacloud: {
+                            routes: [
+                                {
+                                    "@id": "route-project-legacyfn-functions",
+                                    match: [{ host: ["legacyfn.api.example.com", "api.custom.example.com"], path: ["/functions/v1*"] }],
+                                    handle: [
+                                        {
+                                            handler: "reverse_proxy",
+                                            headers: {
+                                                request: {
+                                                    set: {
+                                                        "Host": ["{http.request.host}"],
+                                                        "X-Forwarded-Host": ["{http.request.host}"],
+                                                    },
+                                                },
+                                            },
+                                            upstreams: [{ dial: "127.0.0.1:9090" }],
+                                        },
+                                    ],
+                                    terminal: true,
+                                },
+                            ],
+                        },
+                    },
+                },
+            },
+        }));
+
+        const calls: Array<{ url: string; method: string; body: any }> = [];
+        const restore = captureFetch(calls);
+        const provider = new CaddyGatewayProvider();
+
+        await provider.setCors("legacyfn", ["https://app.example.com"]);
+
+        const load = calls.filter((call) => call.method === "POST" && call.url.endsWith("/load")).at(-1);
+        const routes = load?.body?.apps?.http?.servers?.supacloud?.routes ?? [];
+        const functions = routes.find((route: any) => route["@id"] === "route-project-legacyfn-functions");
+        const functionsProxy = functions?.handle?.find((h: any) => h.handler === "reverse_proxy");
+        const requestSet = functionsProxy?.headers?.request?.set;
+
+        expect(requestSet?.["Host"]).toEqual([`legacyfn.api.${config.baseDomain}`]);
+        expect(requestSet?.["X-Forwarded-Host"]).toEqual([`legacyfn.api.${config.baseDomain}`]);
+        expect(requestSet?.["X-Project-Ref"]).toEqual(["legacyfn"]);
+        expect(requestSet?.["x-project-ref"]).toEqual(["legacyfn"]);
+        expect(requestSet?.["X-Forwarded-Proto"]).toEqual(["{http.request.scheme}"]);
+
+        restore();
+    });
+
     test("addProjectDomains preserves Host and routing headers for custom API domain", async () => {
         const calls: Array<{ url: string; method: string; body: any }> = [];
         const restore = captureFetch(calls);
@@ -769,6 +827,44 @@ describe("CaddyGatewayProvider route headers", () => {
         expect(requestSet?.["x-project-ref"]).toEqual(["domaintest"]);
         expect(requestSet?.["X-Forwarded-Host"]).toEqual([`domaintest.api.${config.baseDomain}`]);
         expect(requestSet?.["X-Forwarded-Proto"]).toEqual(["{http.request.scheme}"]);
+
+        restore();
+    });
+
+    test("setupUpstream includes additional API domains on project API routes", async () => {
+        const calls: Array<{ url: string; method: string; body: any }> = [];
+        const restore = captureFetch(calls);
+        const provider = new CaddyGatewayProvider();
+
+        const result = await provider.setupUpstream("multidomain", 3000, 9999, {
+            api_domain: "api.primary.example.com",
+            additional_api_domains: ["ingest-api.example.com", "api.ingest.example.com"],
+            studio_domain: "studio.primary.example.com",
+        });
+        expect(result.success).toBe(true);
+
+        const load = calls.filter((call) => call.method === "POST" && call.url.endsWith("/load")).at(-1);
+        const routes = load?.body?.apps?.http?.servers?.supacloud?.routes ?? [];
+        const apiRoutes = routes.filter((route: any) => [
+            "route-project-multidomain-rest",
+            "route-project-multidomain-functions",
+            "route-project-multidomain-storage",
+            "route-project-multidomain-auth",
+        ].includes(route["@id"]));
+
+        expect(apiRoutes).toHaveLength(4);
+        for (const route of apiRoutes) {
+            const hosts = route?.match?.[0]?.host ?? [];
+            expect(hosts).toContain(`multidomain.api.${config.baseDomain}`);
+            expect(hosts).toContain("api.primary.example.com");
+            expect(hosts).toContain("ingest-api.example.com");
+            expect(hosts).toContain("api.ingest.example.com");
+        }
+
+        const functions = routes.find((route: any) => route["@id"] === "route-project-multidomain-functions");
+        const functionsProxy = functions?.handle?.find((h: any) => h.handler === "reverse_proxy");
+        expect(functionsProxy?.headers?.request?.set?.["Host"]).toEqual([`multidomain.api.${config.baseDomain}`]);
+        expect(functionsProxy?.headers?.request?.set?.["X-Forwarded-Host"]).toEqual([`multidomain.api.${config.baseDomain}`]);
 
         restore();
     });

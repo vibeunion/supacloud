@@ -3,6 +3,8 @@ import { config } from "../config";
 export interface ProjectRoutingConfig {
   custom_domain?: unknown;
   api_domain?: unknown;
+  additional_api_domains?: unknown;
+  api_domains?: unknown;
   auth_domain?: unknown;
   studio_domain?: unknown;
   postgrest_port?: unknown;
@@ -16,6 +18,30 @@ export interface TenantPorts {
 
 function pickString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function pickStrings(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => pickString(item))
+      .filter((item): item is string => Boolean(item));
+  }
+
+  const single = pickString(value);
+  return single ? [single] : [];
+}
+
+function uniqueHosts(hosts: Array<string | undefined>): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const host of hosts) {
+    if (!host) continue;
+    const key = host.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(host);
+  }
+  return result;
 }
 
 function pickPort(value: unknown): number | undefined {
@@ -80,6 +106,20 @@ export function resolveProjectApiHost(
   }
 
   return `${projectRef}.api.${normalizeBaseDomain(config.baseDomain)}`;
+}
+
+export function resolveProjectApiHosts(
+  projectRef: string,
+  projectConfig: ProjectRoutingConfig | string | null | undefined,
+): string[] {
+  const normalizedConfig = normalizeProjectRoutingConfig(projectConfig);
+  const canonicalHost = `${projectRef}.api.${normalizeBaseDomain(config.baseDomain)}`;
+  return uniqueHosts([
+    canonicalHost,
+    resolveProjectApiHost(projectRef, normalizedConfig),
+    ...pickStrings(normalizedConfig?.additional_api_domains),
+    ...pickStrings(normalizedConfig?.api_domains),
+  ]);
 }
 
 export function resolveProjectAuthHost(
@@ -153,16 +193,18 @@ export function matchProjectRefFromHost(
   if (!normalizedHost) return false;
 
   const baseDomain = normalizeBaseDomain(config.baseDomain).toLowerCase();
+  const knownHosts = uniqueHosts([
+    ...resolveProjectApiHosts(projectRef, normalizedConfig),
+    resolveProjectAuthHost(projectRef, normalizedConfig),
+    resolveProjectStudioHost(projectRef, normalizedConfig),
+    `${projectRef}.${baseDomain}`,
+    `${projectRef}.api.${baseDomain}`,
+    pickString(normalizedConfig?.custom_domain),
+  ]).map((item) => item.toLowerCase());
+
   if (baseDomain && normalizedHost.endsWith(baseDomain)) {
-    return normalizedHost === resolveProjectApiHost(projectRef, normalizedConfig).toLowerCase()
-      || normalizedHost === resolveProjectAuthHost(projectRef, normalizedConfig).toLowerCase()
-      || normalizedHost === resolveProjectStudioHost(projectRef, normalizedConfig).toLowerCase()
-      || normalizedHost === `${projectRef}.${baseDomain}`.toLowerCase()
-      || normalizedHost === `${projectRef}.api.${baseDomain}`.toLowerCase();
+    return knownHosts.includes(normalizedHost);
   }
 
-  return normalizedHost === resolveProjectApiHost(projectRef, normalizedConfig).toLowerCase()
-    || normalizedHost === resolveProjectAuthHost(projectRef, normalizedConfig).toLowerCase()
-    || normalizedHost === resolveProjectStudioHost(projectRef, normalizedConfig).toLowerCase()
-    || normalizedHost === pickString(normalizedConfig?.custom_domain)?.toLowerCase();
+  return knownHosts.includes(normalizedHost);
 }

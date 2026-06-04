@@ -6,6 +6,7 @@ import {
   normalizeBaseDomain,
   resolveTenantPorts,
   resolveProjectApiHost,
+  resolveProjectApiHosts,
   resolveProjectApiUrl,
   resolveProjectAuthHost,
   resolveProjectAuthUrl,
@@ -72,6 +73,25 @@ describe("project routing", () => {
     expect(resolveProjectApiHost("77az24zz7p", projectConfig)).toBe("api.example.com");
     expect(resolveProjectAuthHost("77az24zz7p", projectConfig)).toBe("auth.example.com");
     expect(matchProjectRefFromHost("auth.example.com", "77az24zz7p", projectConfig)).toBe(true);
+  });
+
+  test("supports additional API domains for routing host matching", () => {
+    config.baseDomain = "ai.xigu.team";
+    const projectConfig = {
+      api_domain: "api.xgic-ingest.192.168.1.48.sslip.io",
+      additional_api_domains: ["ingest-api.ai.xigu.team", "api.xgic-ingest.ai.xigu.team"],
+    };
+
+    expect(resolveProjectApiHost("afemibrarjkvzuuawjfi", projectConfig)).toBe("api.xgic-ingest.192.168.1.48.sslip.io");
+    expect(resolveProjectApiHosts("afemibrarjkvzuuawjfi", projectConfig)).toEqual([
+      "afemibrarjkvzuuawjfi.api.ai.xigu.team",
+      "api.xgic-ingest.192.168.1.48.sslip.io",
+      "ingest-api.ai.xigu.team",
+      "api.xgic-ingest.ai.xigu.team",
+    ]);
+    expect(matchProjectRefFromHost("ingest-api.ai.xigu.team", "afemibrarjkvzuuawjfi", projectConfig)).toBe(true);
+    expect(matchProjectRefFromHost("api.xgic-ingest.ai.xigu.team", "afemibrarjkvzuuawjfi", projectConfig)).toBe(true);
+    expect(matchProjectRefFromHost("ingest-api.other.example", "afemibrarjkvzuuawjfi", projectConfig)).toBe(false);
   });
 
   test("derives Studio host from an api-prefixed API domain when Studio domain is not explicit", () => {

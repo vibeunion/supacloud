@@ -6,7 +6,7 @@ import { logger } from "../utils/logger";
 import { mergeProjectConfig, normalizeProjectConfig } from "../utils/project-config";
 import {
   normalizeProjectRoutingConfig,
-  resolveProjectApiHost,
+  resolveProjectApiHosts,
   resolveProjectStudioHost,
 } from "../utils/project-routing";
 import { gatewayService } from "./gateway.service";
@@ -134,7 +134,7 @@ export class CertificateService {
   private fallbackDomains(ref: string, projectConfig: Record<string, unknown>): string[] {
     const routing = normalizeProjectRoutingConfig(projectConfig);
     return Array.from(new Set([
-      resolveProjectApiHost(ref, routing),
+      ...resolveProjectApiHosts(ref, routing),
       resolveProjectStudioHost(ref, routing),
     ].map(normalizeDomain).filter(Boolean)));
   }

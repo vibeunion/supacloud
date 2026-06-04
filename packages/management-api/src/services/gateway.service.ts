@@ -5,7 +5,7 @@ import { sql } from "../db";
 import {
     type ProjectRoutingConfig,
     normalizeProjectRoutingConfig,
-    resolveProjectApiHost,
+    resolveProjectApiHosts,
     resolveProjectAuthHost,
     resolveProjectStudioHost,
 } from "../utils/project-routing";
@@ -67,8 +67,7 @@ export function buildTenantCorsOrigins(
 ): string[] {
     const routingConfig = normalizeProjectRoutingConfig(projectRouting);
     const hosts = [
-        `${projectRef}.api.${config.baseDomain}`,
-        resolveProjectApiHost(projectRef, routingConfig),
+        ...resolveProjectApiHosts(projectRef, routingConfig),
         resolveProjectAuthHost(projectRef, routingConfig),
         `studio-${projectRef}.${config.baseDomain}`,
         resolveProjectStudioHost(projectRef, routingConfig),
@@ -342,14 +341,19 @@ export class CaddyGatewayProvider implements GatewayProvider {
     }
 
     private migrateHydratedRoute(routeId: string, route: CaddyRoute): CaddyRoute {
-        if (!routeId.startsWith("route-project-") || !routeId.endsWith("-storage")) return route;
+        if (!routeId.startsWith("route-project-")) return route;
+        const isStorageRoute = routeId.endsWith("-storage");
+        const isFunctionsRoute = routeId.endsWith("-functions");
+        if (!isStorageRoute && !isFunctionsRoute) return route;
 
         const projectRef = this.projectRefFromRouteId(routeId);
         if (!projectRef) return route;
 
         const migrated = JSON.parse(JSON.stringify(route)) as CaddyRoute;
         const handle = Array.isArray(migrated.handle) ? migrated.handle as Record<string, unknown>[] : [];
-        const migratedHandle = handle.filter((handler) => handler.strip_path_prefix !== "/storage/v1");
+        const migratedHandle = isStorageRoute
+            ? handle.filter((handler) => handler.strip_path_prefix !== "/storage/v1")
+            : handle;
         migrated.handle = migratedHandle;
 
         const proxy = migratedHandle.find((handler) => handler.handler === "reverse_proxy") as Record<string, any> | undefined;
@@ -365,9 +369,11 @@ export class CaddyGatewayProvider implements GatewayProvider {
         proxy.headers.request.set["x-project-ref"] = [projectRef];
         proxy.headers.request.set["X-Forwarded-Proto"] = ["{http.request.scheme}"];
 
-        proxy.headers.response = proxy.headers.response && typeof proxy.headers.response === "object" ? proxy.headers.response : {};
-        delete proxy.headers.response.delete;
-        delete proxy.flush_interval;
+        if (isStorageRoute) {
+            proxy.headers.response = proxy.headers.response && typeof proxy.headers.response === "object" ? proxy.headers.response : {};
+            delete proxy.headers.response.delete;
+            delete proxy.flush_interval;
+        }
 
         return migrated;
     }
@@ -961,10 +967,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
             await this.hydrateFromDisk();
             const hostIp = await this.detectHostIp();
             const routingConfig = normalizeProjectRoutingConfig(projectRouting);
-            const hosts = uniqueStrings([
-                `${projectRef}.api.${config.baseDomain}`,
-                resolveProjectApiHost(projectRef, routingConfig),
-            ]);
+            const hosts = uniqueStrings(resolveProjectApiHosts(projectRef, routingConfig));
             const hostSet = new Set(hosts.map(normalizeCaddyHost));
             const authHosts = uniqueStrings([resolveProjectAuthHost(projectRef, routingConfig)])
                 .filter((host) => !hostSet.has(normalizeCaddyHost(host)));
@@ -984,7 +987,19 @@ export class CaddyGatewayProvider implements GatewayProvider {
                 this.makeRoute({ id: caddyRouteId(projectRef, "graphql"), hosts, path: "/graphql/v1*", upstream: `${hostIp}:${pgrstPort}`, projectRef, rewriteUri: "/rpc/graphql", headers: ["Content-Profile:graphql_public", "Accept-Profile:graphql_public"], corsOrigins }),
                 this.makeRoute({ id: caddyRouteId(projectRef, "auth"), hosts, path: "/auth/v1*", upstream: `${hostIp}:${gotruePort}`, projectRef, stripPrefix: "/auth/v1", corsOrigins }),
                 this.makeRoute({ id: caddyRouteId(projectRef, "gotrue-well-known"), hosts, path: "/.well-known/oauth-authorization-server/auth/v1*", upstream: `${hostIp}:${gotruePort}`, projectRef, corsOrigins }),
-                this.makeRoute({ id: caddyRouteId(projectRef, "functions"), hosts, path: "/functions/v1*", upstream: `${hostIp}:${config.port}`, projectRef, readTimeout: 500_000, corsOrigins }),
+                this.makeRoute({
+                    id: caddyRouteId(projectRef, "functions"),
+                    hosts,
+                    path: "/functions/v1*",
+                    upstream: `${hostIp}:${config.port}`,
+                    projectRef,
+                    headers: [
+                        `Host:${projectRef}.api.${config.baseDomain}`,
+                        `X-Forwarded-Host:${projectRef}.api.${config.baseDomain}`,
+                    ],
+                    readTimeout: 500_000,
+                    corsOrigins,
+                }),
                 this.makeRoute({
                     id: caddyRouteId(projectRef, "storage"),
                     hosts,
@@ -1101,7 +1116,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
         try {
             const projects = await sql`
                 SELECT ref, config FROM projects
-                WHERE status != 'deleted' AND deleted_at IS NULL
+                WHERE status = 'active' AND deleted_at IS NULL
             `;
             for (const project of projects) {
                 const ref = project.ref as string;

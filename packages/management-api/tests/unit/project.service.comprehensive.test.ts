@@ -463,6 +463,61 @@ describe("ProjectService - Comprehensive", () => {
     );
   });
 
+  test("updateProjectSettings reconciles gateway routes for additional API domain changes", async () => {
+    projectRepositoryMock.findByRef.mockResolvedValueOnce({
+      ...mockProject,
+      config: {
+        postgrest_port: 3260,
+        gotrue_port: 3360,
+        api_domain: "api.xgic-ingest.192.168.1.48.sslip.io",
+      },
+    });
+    projectRepositoryMock.updateConfig.mockResolvedValueOnce({
+      ...mockProject,
+      config: {
+        postgrest_port: 3260,
+        gotrue_port: 3360,
+        api_domain: "api.xgic-ingest.192.168.1.48.sslip.io",
+        additional_api_domains: [
+          "ingest-api.ai.xigu.team",
+          "api.xgic-ingest.ai.xigu.team",
+        ],
+      },
+    });
+
+    const result = await service.updateProjectSettings("test123abc", {
+      additional_api_domains: [
+        "ingest-api.ai.xigu.team",
+        "api.xgic-ingest.ai.xigu.team",
+      ],
+    });
+
+    expect(result).toEqual({
+      postgrest_port: 3260,
+      gotrue_port: 3360,
+      api_domain: "api.xgic-ingest.192.168.1.48.sslip.io",
+      additional_api_domains: [
+        "ingest-api.ai.xigu.team",
+        "api.xgic-ingest.ai.xigu.team",
+      ],
+    });
+    expect(tenantRuntimeServiceMock.restartRuntime).toHaveBeenCalledWith("test123abc");
+    expect(gatewayServiceMock.setupUpstream).toHaveBeenCalledWith(
+      "test123abc",
+      3260,
+      3360,
+      {
+        postgrest_port: 3260,
+        gotrue_port: 3360,
+        api_domain: "api.xgic-ingest.192.168.1.48.sslip.io",
+        additional_api_domains: [
+          "ingest-api.ai.xigu.team",
+          "api.xgic-ingest.ai.xigu.team",
+        ],
+      },
+    );
+  });
+
   test("getApiKeys returns api keys", async () => {
     projectRepositoryMock.findByRef.mockResolvedValueOnce(mockProject);
     const result = await service.getApiKeys("test123abc");
