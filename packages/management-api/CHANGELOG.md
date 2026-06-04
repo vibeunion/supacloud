@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.29.6](https://github.com/zuohuadong/supacloud/compare/management-api-v0.29.5...management-api-v0.29.6) (2026-06-04)
+
+
+### Bug Fixes
+
+* **gateway:** preserve storage SDK route prefix ([fb80b09](https://github.com/zuohuadong/supacloud/commit/fb80b09c05a7885d3e53391c74dcb09de99d1b65))
+
 ## [0.29.5](https://github.com/zuohuadong/supacloud/compare/management-api-v0.29.4...management-api-v0.29.5) (2026-06-04)
 
 
