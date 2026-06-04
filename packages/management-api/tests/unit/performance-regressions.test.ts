@@ -62,4 +62,12 @@ describe("performance regressions", () => {
     expect(gatewayInitCall).toBeGreaterThan(serverBranch);
     expect(gatewayInitCall).toBeLessThan(serveCall);
   });
+
+  test("gateway rebuild-all skips inactive projects", async () => {
+    const gatewaySource = await read("../../src/services/gateway.service.ts");
+
+    expect(gatewaySource).toContain("async rebuildAllTenantConfigs()");
+    expect(gatewaySource).toContain("WHERE status = 'active' AND deleted_at IS NULL");
+    expect(gatewaySource).not.toContain("WHERE status != 'deleted' AND deleted_at IS NULL");
+  });
 });

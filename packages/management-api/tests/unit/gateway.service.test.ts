@@ -119,11 +119,13 @@ describe("GatewayService provider selection", () => {
     test("tenant cors origins include exact api and studio custom domains", () => {
         const origins = buildTenantCorsOrigins("dbbabyref", {
             api_domain: "sapi.dbbaby.top",
+            additional_api_domains: ["api-alt.dbbaby.top"],
             auth_domain: "auth.dbbaby.top",
             studio_domain: "sadmin.dbbaby.top",
         });
 
         expect(origins).toContain("https://sapi.dbbaby.top");
+        expect(origins).toContain("https://api-alt.dbbaby.top");
         expect(origins).toContain("https://auth.dbbaby.top");
         expect(origins).toContain("https://sadmin.dbbaby.top");
     });
@@ -770,6 +772,44 @@ describe("CaddyGatewayProvider route headers", () => {
         expect(requestSet?.["x-project-ref"]).toEqual(["domaintest"]);
         expect(requestSet?.["X-Forwarded-Host"]).toEqual([`domaintest.api.${config.baseDomain}`]);
         expect(requestSet?.["X-Forwarded-Proto"]).toEqual(["{http.request.scheme}"]);
+
+        restore();
+    });
+
+    test("setupUpstream includes additional API domains on project API routes", async () => {
+        const calls: Array<{ url: string; method: string; body: any }> = [];
+        const restore = captureFetch(calls);
+        const provider = new CaddyGatewayProvider();
+
+        const result = await provider.setupUpstream("multidomain", 3000, 9999, {
+            api_domain: "api.primary.example.com",
+            additional_api_domains: ["ingest-api.example.com", "api.ingest.example.com"],
+            studio_domain: "studio.primary.example.com",
+        });
+        expect(result.success).toBe(true);
+
+        const load = calls.filter((call) => call.method === "POST" && call.url.endsWith("/load")).at(-1);
+        const routes = load?.body?.apps?.http?.servers?.supacloud?.routes ?? [];
+        const apiRoutes = routes.filter((route: any) => [
+            "route-project-multidomain-rest",
+            "route-project-multidomain-functions",
+            "route-project-multidomain-storage",
+            "route-project-multidomain-auth",
+        ].includes(route["@id"]));
+
+        expect(apiRoutes).toHaveLength(4);
+        for (const route of apiRoutes) {
+            const hosts = route?.match?.[0]?.host ?? [];
+            expect(hosts).toContain(`multidomain.api.${config.baseDomain}`);
+            expect(hosts).toContain("api.primary.example.com");
+            expect(hosts).toContain("ingest-api.example.com");
+            expect(hosts).toContain("api.ingest.example.com");
+        }
+
+        const functions = routes.find((route: any) => route["@id"] === "route-project-multidomain-functions");
+        const functionsProxy = functions?.handle?.find((h: any) => h.handler === "reverse_proxy");
+        expect(functionsProxy?.headers?.request?.set?.["Host"]).toEqual([`multidomain.api.${config.baseDomain}`]);
+        expect(functionsProxy?.headers?.request?.set?.["X-Forwarded-Host"]).toEqual([`multidomain.api.${config.baseDomain}`]);
 
         restore();
     });

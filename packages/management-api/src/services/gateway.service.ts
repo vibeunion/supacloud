@@ -5,7 +5,7 @@ import { sql } from "../db";
 import {
     type ProjectRoutingConfig,
     normalizeProjectRoutingConfig,
-    resolveProjectApiHost,
+    resolveProjectApiHosts,
     resolveProjectAuthHost,
     resolveProjectStudioHost,
 } from "../utils/project-routing";
@@ -67,8 +67,7 @@ export function buildTenantCorsOrigins(
 ): string[] {
     const routingConfig = normalizeProjectRoutingConfig(projectRouting);
     const hosts = [
-        `${projectRef}.api.${config.baseDomain}`,
-        resolveProjectApiHost(projectRef, routingConfig),
+        ...resolveProjectApiHosts(projectRef, routingConfig),
         resolveProjectAuthHost(projectRef, routingConfig),
         `studio-${projectRef}.${config.baseDomain}`,
         resolveProjectStudioHost(projectRef, routingConfig),
@@ -961,10 +960,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
             await this.hydrateFromDisk();
             const hostIp = await this.detectHostIp();
             const routingConfig = normalizeProjectRoutingConfig(projectRouting);
-            const hosts = uniqueStrings([
-                `${projectRef}.api.${config.baseDomain}`,
-                resolveProjectApiHost(projectRef, routingConfig),
-            ]);
+            const hosts = uniqueStrings(resolveProjectApiHosts(projectRef, routingConfig));
             const hostSet = new Set(hosts.map(normalizeCaddyHost));
             const authHosts = uniqueStrings([resolveProjectAuthHost(projectRef, routingConfig)])
                 .filter((host) => !hostSet.has(normalizeCaddyHost(host)));
@@ -1113,7 +1109,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
         try {
             const projects = await sql`
                 SELECT ref, config FROM projects
-                WHERE status != 'deleted' AND deleted_at IS NULL
+                WHERE status = 'active' AND deleted_at IS NULL
             `;
             for (const project of projects) {
                 const ref = project.ref as string;
