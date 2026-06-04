@@ -150,6 +150,62 @@ describe("storageCompatRoutes supabase-js compatibility", () => {
     downloadSpy.mockRestore();
   });
 
+  test("allows API-key storage requests on configured api_domain under the base domain", async () => {
+    const sqlSpy = spyOn(dbModule, "sql");
+    sqlSpy.mockImplementation(async (...args: unknown[]) => {
+      const text = String(args[0] ?? "");
+      if (text.includes("anon_key")) {
+        return [{ ref: "proj_from_key" }];
+      }
+      if (text.includes("FROM projects")) {
+        return [{
+          ref: "proj_from_key",
+          config: { api_domain: "api.example.com", custom_domain: "www.example.com" },
+        }];
+      }
+      return [];
+    });
+    const bucketSpy = spyOn(StorageRLS, "getLogicalBucket").mockResolvedValue({
+      id: "avatars",
+      name: "avatars",
+      public: true,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    });
+    const objectSpy = spyOn(StorageRLS, "getObjectInfo").mockResolvedValue({
+      id: "obj_1",
+      bucket_id: "avatars",
+      name: "public.txt",
+      metadata: { size: 3, mimetype: "text/plain" },
+      cache_control: "3600",
+      updated_at: new Date().toISOString(),
+    });
+    const downloadSpy = spyOn(StorageService, "getDownloadResponse").mockResolvedValue(
+      new Response("ok\n", {
+        headers: {
+          "Content-Type": "text/plain",
+          "Content-Length": "3",
+        },
+      })
+    );
+
+    const res = await request("/storage/v1/object/public/avatars/public.txt", {
+      headers: {
+        apikey: "anon-for-proj-from-key",
+        host: "api.example.com",
+        "x-project-ref": "proj_from_key",
+      },
+    });
+
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe("ok\n");
+    expect(downloadSpy).toHaveBeenCalledWith("proj_from_key", "avatars", "public.txt");
+    sqlSpy.mockRestore();
+    bucketSpy.mockRestore();
+    objectSpy.mockRestore();
+    downloadSpy.mockRestore();
+  });
+
   test("public downloads prefer stored object mimetype when backend returns octet-stream", async () => {
     mockObjects.set("avatars/folder/cat.png", {
       metadata: { size: 3, mimetype: "image/png" },

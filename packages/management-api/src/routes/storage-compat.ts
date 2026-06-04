@@ -295,7 +295,9 @@ async function getProjectRef(headers: Record<string, string | undefined>): Promi
             const matchedProject = rows.find((row: { ref?: unknown; config?: unknown }) =>
                 matchProjectRefFromHost(host, String(row.ref || ""), row.config),
             );
-            if (matchedProject && String(matchedProject.ref) !== apiKeyRef) return '';
+            if (matchedProject) {
+                return String(matchedProject.ref) === apiKeyRef ? apiKeyRef : '';
+            }
         } catch (error: unknown) {
             logger.warn("[StorageCompat] Failed to validate API key host binding", {
                 apiKeyRef,
