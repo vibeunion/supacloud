@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.29.4](https://github.com/zuohuadong/supacloud/compare/management-api-v0.29.3...management-api-v0.29.4) (2026-06-04)
+
+
+### Bug Fixes
+
+* **gateway,storage:** inject Host/X-Forwarded-Proto headers and bootstrap storage RLS policies ([#275](https://github.com/zuohuadong/supacloud/issues/275)) ([b2c56a7](https://github.com/zuohuadong/supacloud/commit/b2c56a7160289845d654973dedc26ea625f96e96))
+
 ## [0.29.3](https://github.com/zuohuadong/supacloud/compare/management-api-v0.29.2...management-api-v0.29.3) (2026-06-03)
 
 

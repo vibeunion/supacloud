@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.2](https://github.com/zuohuadong/supacloud/compare/web-console-v0.14.1...web-console-v0.14.2) (2026-06-04)
+
+
+### Bug Fixes
+
+* **gateway,storage:** inject Host/X-Forwarded-Proto headers and bootstrap storage RLS policies ([#275](https://github.com/zuohuadong/supacloud/issues/275)) ([b2c56a7](https://github.com/zuohuadong/supacloud/commit/b2c56a7160289845d654973dedc26ea625f96e96))
+
 ## [0.14.1](https://github.com/zuohuadong/supacloud/compare/web-console-v0.14.0...web-console-v0.14.1) (2026-06-03)
 
 
