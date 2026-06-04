@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.29.8](https://github.com/zuohuadong/supacloud/compare/management-api-v0.29.7...management-api-v0.29.8) (2026-06-04)
+
+
+### Bug Fixes
+
+* **gateway:** omit empty Caddy response headers ([aa58937](https://github.com/zuohuadong/supacloud/commit/aa58937c09fa2dece951df712dd63c06700eae4a))
+
 ## [0.29.7](https://github.com/zuohuadong/supacloud/compare/management-api-v0.29.6...management-api-v0.29.7) (2026-06-04)
 
 
