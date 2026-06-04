@@ -803,6 +803,70 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
+-- Storage RLS policies and grants migration
+-- Enable RLS on multipart upload tables
+ALTER TABLE storage.s3_multipart_uploads ENABLE ROW LEVEL SECURITY;
+ALTER TABLE storage.s3_multipart_uploads_parts ENABLE ROW LEVEL SECURITY;
+
+-- Tighten anon grants: anon should only SELECT, not INSERT/UPDATE/DELETE
+-- (Re-granting is idempotent; revoking excess is safe because RLS blocks writes anyway)
+REVOKE ALL ON ALL TABLES IN SCHEMA storage FROM anon;
+GRANT SELECT ON ALL TABLES IN SCHEMA storage TO anon;
+GRANT USAGE ON ALL SEQUENCES IN SCHEMA storage TO anon;
+
+-- Ensure service_role and authenticated have full DML (constrained by RLS for authenticated)
+GRANT ALL ON ALL TABLES IN SCHEMA storage TO service_role;
+GRANT ALL ON ALL SEQUENCES IN SCHEMA storage TO service_role;
+GRANT ALL ON ALL TABLES IN SCHEMA storage TO authenticated;
+GRANT ALL ON ALL SEQUENCES IN SCHEMA storage TO authenticated;
+
+-- storage.buckets policies
+DO $$ BEGIN
+  CREATE POLICY "Public buckets are viewable by everyone." ON storage.buckets FOR SELECT USING (true);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  CREATE POLICY "Authenticated users can view all buckets." ON storage.buckets FOR SELECT TO authenticated USING (true);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- storage.objects policies
+DO $$ BEGIN
+  CREATE POLICY "Allow public read on storage.objects" ON storage.objects
+    FOR SELECT USING (bucket_id IN (SELECT id FROM storage.buckets WHERE public = true));
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  CREATE POLICY "Allow authenticated read on storage.objects" ON storage.objects
+    FOR SELECT TO authenticated USING (true);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  CREATE POLICY "Allow authenticated insert on storage.objects" ON storage.objects
+    FOR INSERT TO authenticated WITH CHECK (bucket_id IN (SELECT id FROM storage.buckets));
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  CREATE POLICY "Allow authenticated update on storage.objects" ON storage.objects
+    FOR UPDATE TO authenticated USING (auth.uid() = owner) WITH CHECK (auth.uid() = owner);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  CREATE POLICY "Allow authenticated delete on storage.objects" ON storage.objects
+    FOR DELETE TO authenticated USING (auth.uid() = owner);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- storage.s3_multipart_uploads policies
+DO $$ BEGIN
+  CREATE POLICY "Allow authenticated multipart uploads" ON storage.s3_multipart_uploads
+    FOR ALL TO authenticated USING (true) WITH CHECK (true);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- storage.s3_multipart_uploads_parts policies
+DO $$ BEGIN
+  CREATE POLICY "Allow authenticated multipart upload parts" ON storage.s3_multipart_uploads_parts
+    FOR ALL TO authenticated USING (true) WITH CHECK (true);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
 `;
 
 

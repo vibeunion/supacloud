@@ -399,15 +399,50 @@ CREATE INDEX IF NOT EXISTS idx_multipart_uploads_list ON storage.s3_multipart_up
 -- 授权
 GRANT ALL ON ALL TABLES IN SCHEMA storage TO supabase_storage_admin;
 GRANT ALL ON ALL SEQUENCES IN SCHEMA storage TO supabase_storage_admin;
-GRANT ALL ON ALL TABLES IN SCHEMA storage TO anon, authenticated, service_role;
-GRANT ALL ON ALL SEQUENCES IN SCHEMA storage TO anon, authenticated, service_role;
+-- service_role has BYPASSRLS and needs full DML for runtime uploads/deletes
+GRANT ALL ON ALL TABLES IN SCHEMA storage TO service_role;
+GRANT ALL ON ALL SEQUENCES IN SCHEMA storage TO service_role;
+-- authenticated needs DML grants but is constrained by RLS policies
+GRANT ALL ON ALL TABLES IN SCHEMA storage TO authenticated;
+GRANT ALL ON ALL SEQUENCES IN SCHEMA storage TO authenticated;
+-- anon only needs SELECT; writes are gated by RLS which has no anon INSERT/UPDATE/DELETE policies
+GRANT SELECT ON ALL TABLES IN SCHEMA storage TO anon;
+GRANT USAGE ON ALL SEQUENCES IN SCHEMA storage TO anon;
 
 -- 启用 RLS
 ALTER TABLE storage.buckets ENABLE ROW LEVEL SECURITY;
 ALTER TABLE storage.objects ENABLE ROW LEVEL SECURITY;
+ALTER TABLE storage.s3_multipart_uploads ENABLE ROW LEVEL SECURITY;
+ALTER TABLE storage.s3_multipart_uploads_parts ENABLE ROW LEVEL SECURITY;
 
--- 插入默认 Policy 避免白板被阻击
+-- ── storage.buckets policies ──
 CREATE POLICY "Public buckets are viewable by everyone." ON storage.buckets FOR SELECT USING (true);
+CREATE POLICY "Authenticated users can view all buckets." ON storage.buckets FOR SELECT TO authenticated USING (true);
+
+-- ── storage.objects policies ──
+-- Public objects: anyone can SELECT from public buckets
+CREATE POLICY "Allow public read on storage.objects" ON storage.objects
+    FOR SELECT USING (bucket_id IN (SELECT id FROM storage.buckets WHERE public = true));
+-- Authenticated users can SELECT objects in any bucket they can see
+CREATE POLICY "Allow authenticated read on storage.objects" ON storage.objects
+    FOR SELECT TO authenticated USING (true);
+-- Authenticated users can INSERT objects they own
+CREATE POLICY "Allow authenticated insert on storage.objects" ON storage.objects
+    FOR INSERT TO authenticated WITH CHECK (bucket_id IN (SELECT id FROM storage.buckets));
+-- Authenticated users can UPDATE objects they own
+CREATE POLICY "Allow authenticated update on storage.objects" ON storage.objects
+    FOR UPDATE TO authenticated USING (auth.uid() = owner) WITH CHECK (auth.uid() = owner);
+-- Authenticated users can DELETE objects they own
+CREATE POLICY "Allow authenticated delete on storage.objects" ON storage.objects
+    FOR DELETE TO authenticated USING (auth.uid() = owner);
+
+-- ── storage.s3_multipart_uploads policies ──
+CREATE POLICY "Allow authenticated multipart uploads" ON storage.s3_multipart_uploads
+    FOR ALL TO authenticated USING (true) WITH CHECK (true);
+
+-- ── storage.s3_multipart_uploads_parts policies ──
+CREATE POLICY "Allow authenticated multipart upload parts" ON storage.s3_multipart_uploads_parts
+    FOR ALL TO authenticated USING (true) WITH CHECK (true);
 
 -- 4. Realtime Schema
 CREATE SCHEMA IF NOT EXISTS realtime;

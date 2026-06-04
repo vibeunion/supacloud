@@ -604,3 +604,126 @@ describe("CaddyGatewayProvider", () => {
         restore();
     });
 });
+
+describe("CaddyGatewayProvider route headers", () => {
+    afterEach(async () => {
+        await cleanCaddyTmp();
+    });
+
+    test("all project routes inject Host, X-Project-Ref, x-project-ref, X-Forwarded-Host, X-Forwarded-Proto headers", async () => {
+        const calls: Array<{ url: string; method: string; body: any }> = [];
+        const restore = captureFetch(calls);
+        const provider = new CaddyGatewayProvider();
+
+        const result = await provider.setupUpstream("hdrtest", 3000, 9999);
+        expect(result.success).toBe(true);
+
+        const load = calls.filter((call) => call.method === "POST" && call.url.endsWith("/load")).at(-1);
+        const routes = load?.body?.apps?.http?.servers?.supacloud?.routes ?? [];
+
+        const apiRoutes = routes.filter((route: any) => {
+            const id = String(route["@id"] || "");
+            return id.startsWith("route-project-hdrtest-") && !id.endsWith("-acme") && !id.endsWith("-studio");
+        });
+
+        expect(apiRoutes.length).toBeGreaterThan(0);
+
+        for (const route of apiRoutes) {
+            const proxy = route?.handle?.find((h: any) => h.handler === "reverse_proxy");
+            const requestSet = proxy?.headers?.request?.set;
+            expect(requestSet?.["Host"]).toEqual(["{http.request.host}"]);
+            expect(requestSet?.["X-Project-Ref"]).toEqual(["hdrtest"]);
+            expect(requestSet?.["x-project-ref"]).toEqual(["hdrtest"]);
+            expect(requestSet?.["X-Forwarded-Host"]).toEqual(["{http.request.host}"]);
+            expect(requestSet?.["X-Forwarded-Proto"]).toEqual(["{http.request.scheme}"]);
+        }
+
+        restore();
+    });
+
+    test("storage route preserves upstream CORS and has correct headers", async () => {
+        const calls: Array<{ url: string; method: string; body: any }> = [];
+        const restore = captureFetch(calls);
+        const provider = new CaddyGatewayProvider();
+
+        const result = await provider.setupUpstream("storagetest", 3000, 9999);
+        expect(result.success).toBe(true);
+
+        const load = calls.filter((call) => call.method === "POST" && call.url.endsWith("/load")).at(-1);
+        const routes = load?.body?.apps?.http?.servers?.supacloud?.routes ?? [];
+
+        const storage = routes.find((route: any) => route["@id"] === "route-project-storagetest-storage");
+        expect(storage).toBeDefined();
+        expect(storage?.match?.[0]?.path).toEqual(["/storage/v1*"]);
+
+        const storageProxy = storage?.handle?.find((h: any) => h.handler === "reverse_proxy");
+        // Storage route should preserve upstream CORS (no response.delete)
+        expect(storageProxy?.headers?.response?.delete).toBeUndefined();
+        // Storage route must have project routing headers
+        const requestSet = storageProxy?.headers?.request?.set;
+        expect(requestSet?.["Host"]).toEqual(["{http.request.host}"]);
+        expect(requestSet?.["X-Project-Ref"]).toEqual(["storagetest"]);
+        expect(requestSet?.["x-project-ref"]).toEqual(["storagetest"]);
+        expect(requestSet?.["X-Forwarded-Proto"]).toEqual(["{http.request.scheme}"]);
+        // Storage is non-streaming (no flush_interval)
+        expect(storageProxy?.flush_interval).toBeUndefined();
+
+        restore();
+    });
+
+    test("addProjectDomains preserves Host and routing headers for custom API domain", async () => {
+        const calls: Array<{ url: string; method: string; body: any }> = [];
+        const restore = captureFetch(calls);
+        const provider = new CaddyGatewayProvider();
+
+        // First setup the routes
+        await provider.setupUpstream("domaintest", 3000, 9999);
+        // Now add a custom API domain
+        const added = await provider.addProjectDomains("domaintest", ["api.custom.example.com"], ["studio.custom.example.com"]);
+        expect(added).toBe(true);
+
+        const load = calls.filter((call) => call.method === "POST" && call.url.endsWith("/load")).at(-1);
+        const routes = load?.body?.apps?.http?.servers?.supacloud?.routes ?? [];
+
+        const storage = routes.find((route: any) => route["@id"] === "route-project-domaintest-storage");
+        expect(storage).toBeDefined();
+        // Custom API domain should appear in the storage route hosts
+        const hosts = storage?.match?.[0]?.host ?? [];
+        expect(hosts).toContain("api.custom.example.com");
+
+        // All routes with the custom domain must still have correct headers
+        const storageProxy = storage?.handle?.find((h: any) => h.handler === "reverse_proxy");
+        const requestSet = storageProxy?.headers?.request?.set;
+        expect(requestSet?.["Host"]).toEqual(["{http.request.host}"]);
+        expect(requestSet?.["X-Project-Ref"]).toEqual(["domaintest"]);
+        expect(requestSet?.["x-project-ref"]).toEqual(["domaintest"]);
+        expect(requestSet?.["X-Forwarded-Proto"]).toEqual(["{http.request.scheme}"]);
+
+        restore();
+    });
+
+    test("storage route sorts before catch-all /* routes", async () => {
+        const calls: Array<{ url: string; method: string; body: any }> = [];
+        const restore = captureFetch(calls);
+        const provider = new CaddyGatewayProvider();
+
+        await provider.setupUpstream("sorttest", 3000, 9999);
+
+        const load = calls.filter((call) => call.method === "POST" && call.url.endsWith("/load")).at(-1);
+        const routes = load?.body?.apps?.http?.servers?.supacloud?.routes ?? [];
+
+        const storageIdx = routes.findIndex((route: any) => route["@id"] === "route-project-sorttest-storage");
+        const catchAllIdx = routes.findIndex((route: any) => {
+            const p = route?.match?.[0]?.path?.[0];
+            return p === "/*" || p === "*";
+        });
+
+        expect(storageIdx).toBeGreaterThanOrEqual(0);
+        // If there is a catch-all, storage must come before it
+        if (catchAllIdx >= 0) {
+            expect(storageIdx).toBeLessThan(catchAllIdx);
+        }
+
+        restore();
+    });
+});

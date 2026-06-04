@@ -190,3 +190,100 @@ describe("supabase bootstrap schema", () => {
     }
   });
 });
+
+describe("storage RLS policies and grants", () => {
+  test("supabase.sql grants restrict anon to SELECT on storage tables", () => {
+    const schema = readRepoFile("src/db/schemas/supabase.sql");
+    // anon should only have SELECT on storage tables, not ALL (INSERT/UPDATE/DELETE)
+    const anonStorageGrantMatch = schema.match(/GRANT\s+(\w+(?:\s*,\s*\w+)*)\s+ON\s+ALL\s+TABLES\s+IN\s+SCHEMA\s+storage\s+TO\s+anon/i);
+    expect(anonStorageGrantMatch).not.toBeNull();
+    const grantedActions = anonStorageGrantMatch![1].toUpperCase().replace(/\s+/g, "");
+    expect(grantedActions).toBe("SELECT");
+  });
+
+  test("supabase.sql grants service_role full DML on storage tables", () => {
+    const schema = readRepoFile("src/db/schemas/supabase.sql");
+    const serviceRoleGrantMatch = schema.match(/GRANT\s+ALL\s+ON\s+ALL\s+TABLES\s+IN\s+SCHEMA\s+storage\s+TO\s+service_role/i);
+    expect(serviceRoleGrantMatch).not.toBeNull();
+  });
+
+  test("supabase.sql grants authenticated full DML on storage tables (constrained by RLS)", () => {
+    const schema = readRepoFile("src/db/schemas/supabase.sql");
+    const authGrantMatch = schema.match(/GRANT\s+ALL\s+ON\s+ALL\s+TABLES\s+IN\s+SCHEMA\s+storage\s+TO\s+authenticated/i);
+    expect(authGrantMatch).not.toBeNull();
+  });
+
+  test("supabase.sql enables RLS on storage.objects and multipart uploads", () => {
+    const schema = readRepoFile("src/db/schemas/supabase.sql");
+    expect(schema).toContain("ALTER TABLE storage.buckets ENABLE ROW LEVEL SECURITY");
+    expect(schema).toContain("ALTER TABLE storage.objects ENABLE ROW LEVEL SECURITY");
+    expect(schema).toContain("ALTER TABLE storage.s3_multipart_uploads ENABLE ROW LEVEL SECURITY");
+    expect(schema).toContain("ALTER TABLE storage.s3_multipart_uploads_parts ENABLE ROW LEVEL SECURITY");
+  });
+
+  test("supabase.sql creates storage.objects RLS policies for public read and authenticated CRUD", () => {
+    const schema = readRepoFile("src/db/schemas/supabase.sql");
+    // Public read from public buckets
+    expect(schema).toContain("Allow public read on storage.objects");
+    expect(schema).toContain("bucket_id IN (SELECT id FROM storage.buckets WHERE public = true)");
+    // Authenticated read all
+    expect(schema).toContain("Allow authenticated read on storage.objects");
+    expect(schema).toContain("FOR SELECT TO authenticated USING (true)");
+    // Authenticated insert
+    expect(schema).toContain("Allow authenticated insert on storage.objects");
+    // Authenticated update (owner check)
+    expect(schema).toContain("Allow authenticated update on storage.objects");
+    expect(schema).toContain("auth.uid() = owner");
+    // Authenticated delete (owner check)
+    expect(schema).toContain("Allow authenticated delete on storage.objects");
+  });
+
+  test("supabase.sql does not grant anon ALL on storage tables (tightened)", () => {
+    const schema = readRepoFile("src/db/schemas/supabase.sql");
+    // This pattern should NOT appear anymore — anon gets only SELECT
+    expect(schema).not.toMatch(/GRANT\s+ALL\s+ON\s+ALL\s+TABLES\s+IN\s+SCHEMA\s+storage\s+TO\s+anon/i);
+  });
+});
+
+describe("storage RLS migration for existing tenants", () => {
+  test("migrate-tenant-schema creates storage.objects RLS policies with idempotent DO $$ blocks", () => {
+    const source = readRepoFile("src/scripts/migrate-tenant-schema.ts");
+    // Each policy should be wrapped in DO $$ ... EXCEPTION WHEN duplicate_object
+    const policyNames = [
+      "Public buckets are viewable by everyone.",
+      "Authenticated users can view all buckets.",
+      "Allow public read on storage.objects",
+      "Allow authenticated read on storage.objects",
+      "Allow authenticated insert on storage.objects",
+      "Allow authenticated update on storage.objects",
+      "Allow authenticated delete on storage.objects",
+      "Allow authenticated multipart uploads",
+      "Allow authenticated multipart upload parts",
+    ];
+    for (const policyName of policyNames) {
+      expect(source).toContain(policyName);
+      // Verify the EXCEPTION WHEN duplicate_object guard exists for this policy
+      const policyIdx = source.indexOf(`"${policyName}"`);
+      const exceptionIdx = source.indexOf("EXCEPTION WHEN duplicate_object THEN NULL; END $$;", policyIdx);
+      expect(exceptionIdx).toBeGreaterThan(policyIdx);
+    }
+  });
+
+  test("migrate-tenant-schema tightens anon storage grants to SELECT only", () => {
+    const source = readRepoFile("src/scripts/migrate-tenant-schema.ts");
+    expect(source).toContain("REVOKE ALL ON ALL TABLES IN SCHEMA storage FROM anon");
+    expect(source).toContain("GRANT SELECT ON ALL TABLES IN SCHEMA storage TO anon");
+  });
+
+  test("migrate-tenant-schema ensures service_role and authenticated have full DML on storage", () => {
+    const source = readRepoFile("src/scripts/migrate-tenant-schema.ts");
+    expect(source).toContain("GRANT ALL ON ALL TABLES IN SCHEMA storage TO service_role");
+    expect(source).toContain("GRANT ALL ON ALL TABLES IN SCHEMA storage TO authenticated");
+  });
+
+  test("migrate-tenant-schema enables RLS on multipart upload tables", () => {
+    const source = readRepoFile("src/scripts/migrate-tenant-schema.ts");
+    expect(source).toContain("ALTER TABLE storage.s3_multipart_uploads ENABLE ROW LEVEL SECURITY");
+    expect(source).toContain("ALTER TABLE storage.s3_multipart_uploads_parts ENABLE ROW LEVEL SECURITY");
+  });
+});
