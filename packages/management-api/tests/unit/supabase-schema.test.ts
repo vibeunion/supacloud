@@ -226,16 +226,22 @@ describe("storage RLS policies and grants", () => {
     // Public read from public buckets
     expect(schema).toContain("Allow public read on storage.objects");
     expect(schema).toContain("bucket_id IN (SELECT id FROM storage.buckets WHERE public = true)");
-    // Authenticated read all
+    // Authenticated users can read and write only their own private objects by default
     expect(schema).toContain("Allow authenticated read on storage.objects");
-    expect(schema).toContain("FOR SELECT TO authenticated USING (true)");
+    expect(schema).toContain("FOR SELECT TO authenticated USING (auth.uid() = owner)");
     // Authenticated insert
     expect(schema).toContain("Allow authenticated insert on storage.objects");
+    expect(schema).toContain("FOR INSERT TO authenticated WITH CHECK (bucket_id IN (SELECT id FROM storage.buckets) AND auth.uid() = owner)");
     // Authenticated update (owner check)
     expect(schema).toContain("Allow authenticated update on storage.objects");
     expect(schema).toContain("auth.uid() = owner");
     // Authenticated delete (owner check)
     expect(schema).toContain("Allow authenticated delete on storage.objects");
+  });
+
+  test("supabase.sql scopes multipart upload policies to the authenticated owner", () => {
+    const schema = readRepoFile("src/db/schemas/supabase.sql");
+    expect(schema).toContain("FOR ALL TO authenticated USING (owner_id = auth.uid()::text) WITH CHECK (owner_id = auth.uid()::text)");
   });
 
   test("supabase.sql does not grant anon ALL on storage tables (tightened)", () => {

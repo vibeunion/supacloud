@@ -837,12 +837,12 @@ EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 DO $$ BEGIN
   CREATE POLICY "Allow authenticated read on storage.objects" ON storage.objects
-    FOR SELECT TO authenticated USING (true);
+    FOR SELECT TO authenticated USING (auth.uid() = owner);
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 DO $$ BEGIN
   CREATE POLICY "Allow authenticated insert on storage.objects" ON storage.objects
-    FOR INSERT TO authenticated WITH CHECK (bucket_id IN (SELECT id FROM storage.buckets));
+    FOR INSERT TO authenticated WITH CHECK (bucket_id IN (SELECT id FROM storage.buckets) AND auth.uid() = owner);
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 DO $$ BEGIN
@@ -858,13 +858,13 @@ EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 -- storage.s3_multipart_uploads policies
 DO $$ BEGIN
   CREATE POLICY "Allow authenticated multipart uploads" ON storage.s3_multipart_uploads
-    FOR ALL TO authenticated USING (true) WITH CHECK (true);
+    FOR ALL TO authenticated USING (owner_id = auth.uid()::text) WITH CHECK (owner_id = auth.uid()::text);
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 -- storage.s3_multipart_uploads_parts policies
 DO $$ BEGIN
   CREATE POLICY "Allow authenticated multipart upload parts" ON storage.s3_multipart_uploads_parts
-    FOR ALL TO authenticated USING (true) WITH CHECK (true);
+    FOR ALL TO authenticated USING (owner_id = auth.uid()::text) WITH CHECK (owner_id = auth.uid()::text);
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 `;
