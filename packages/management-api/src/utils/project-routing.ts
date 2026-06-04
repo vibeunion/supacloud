@@ -7,6 +7,12 @@ export interface ProjectRoutingConfig {
   api_domains?: unknown;
   auth_domain?: unknown;
   studio_domain?: unknown;
+  external_url_scheme?: unknown;
+  public_url_scheme?: unknown;
+  url_scheme?: unknown;
+  api_url_scheme?: unknown;
+  auth_url_scheme?: unknown;
+  studio_url_scheme?: unknown;
   postgrest_port?: unknown;
   gotrue_port?: unknown;
 }
@@ -48,6 +54,73 @@ function pickPort(value: unknown): number | undefined {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed <= 0) return undefined;
   return Math.trunc(parsed);
+}
+
+function pickUrlScheme(value: unknown): "http" | "https" | undefined {
+  if (value !== "http" && value !== "https") return undefined;
+  return value;
+}
+
+function splitHost(host: string): string {
+  return host.trim().replace(/^\[|\]$/g, "").split(":")[0].toLowerCase();
+}
+
+function isLocalHttpHost(host: string): boolean {
+  const normalizedHost = splitHost(host);
+  if (!normalizedHost) return true;
+  if (
+    normalizedHost === "localhost" ||
+    normalizedHost.endsWith(".localhost") ||
+    normalizedHost.endsWith(".local") ||
+    normalizedHost.endsWith(".lan") ||
+    normalizedHost.endsWith(".sslip.io") ||
+    normalizedHost.endsWith(".nip.io")
+  ) {
+    return true;
+  }
+
+  if (/^\d{1,3}(?:\.\d{1,3}){3}$/.test(normalizedHost)) return true;
+  if (normalizedHost.includes(":")) return true;
+
+  return false;
+}
+
+function hasExplicitPublicHost(
+  kind: "api" | "auth" | "studio",
+  projectConfig: ProjectRoutingConfig | undefined,
+): boolean {
+  if (!projectConfig) return false;
+  if (kind === "api") {
+    return Boolean(pickString(projectConfig.api_domain) || pickString(projectConfig.custom_domain));
+  }
+  if (kind === "auth") {
+    return Boolean(
+      pickString(projectConfig.auth_domain) ||
+      pickString(projectConfig.api_domain) ||
+      pickString(projectConfig.custom_domain),
+    );
+  }
+  return Boolean(
+    pickString(projectConfig.studio_domain) ||
+    pickString(projectConfig.custom_domain) ||
+    deriveStudioHostFromApiHost(projectConfig.api_domain),
+  );
+}
+
+function resolveProjectUrlScheme(
+  kind: "api" | "auth" | "studio",
+  host: string,
+  projectConfig: ProjectRoutingConfig | undefined,
+): "http" | "https" {
+  const explicit =
+    pickUrlScheme(projectConfig?.[`${kind}_url_scheme` as keyof ProjectRoutingConfig]) ||
+    pickUrlScheme(projectConfig?.public_url_scheme) ||
+    pickUrlScheme(projectConfig?.external_url_scheme) ||
+    pickUrlScheme(projectConfig?.url_scheme);
+  if (explicit) return explicit;
+  if (config.enableSsl) return "https";
+  if (hasExplicitPublicHost(kind, projectConfig) && !isLocalHttpHost(host)) return "https";
+  return "http";
 }
 
 export function normalizeBaseDomain(baseDomain: string): string {
@@ -156,21 +229,27 @@ export function resolveProjectApiUrl(
   projectRef: string,
   projectConfig: ProjectRoutingConfig | string | null | undefined,
 ): string {
-  return `${config.enableSsl ? "https" : "http"}://${resolveProjectApiHost(projectRef, projectConfig)}`;
+  const normalizedConfig = normalizeProjectRoutingConfig(projectConfig);
+  const host = resolveProjectApiHost(projectRef, normalizedConfig);
+  return `${resolveProjectUrlScheme("api", host, normalizedConfig)}://${host}`;
 }
 
 export function resolveProjectAuthUrl(
   projectRef: string,
   projectConfig: ProjectRoutingConfig | string | null | undefined,
 ): string {
-  return `${config.enableSsl ? "https" : "http"}://${resolveProjectAuthHost(projectRef, projectConfig)}`;
+  const normalizedConfig = normalizeProjectRoutingConfig(projectConfig);
+  const host = resolveProjectAuthHost(projectRef, normalizedConfig);
+  return `${resolveProjectUrlScheme("auth", host, normalizedConfig)}://${host}`;
 }
 
 export function resolveProjectStudioUrl(
   projectRef: string,
   projectConfig: ProjectRoutingConfig | string | null | undefined,
 ): string {
-  return `${config.enableSsl ? "https" : "http"}://${resolveProjectStudioHost(projectRef, projectConfig)}`;
+  const normalizedConfig = normalizeProjectRoutingConfig(projectConfig);
+  const host = resolveProjectStudioHost(projectRef, normalizedConfig);
+  return `${resolveProjectUrlScheme("studio", host, normalizedConfig)}://${host}`;
 }
 
 export function resolveTenantPorts(
