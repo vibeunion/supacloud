@@ -107,6 +107,18 @@ export interface FrontendGatewayRoute {
     mode?: "proxy" | "static";
 }
 
+export interface CustomGatewayRouteConfig {
+    id: string;
+    hosts: string[];
+    path: string | string[];
+    upstream?: string;
+    static_root?: string;
+    headers?: Record<string, string>;
+    cors?: string[];
+    priority?: number;
+    enabled?: boolean;
+}
+
 export interface GatewayProvider {
     readonly name: "caddy";
     setupJwt(projectRef: string, jwtSecret: string): Promise<boolean>;
@@ -126,6 +138,7 @@ export interface GatewayProvider {
     removeUpstreamTarget(projectRef: string, replicaIp: string): Promise<{ success: boolean; error?: string }>;
     applyConfig(projectRef: string, gatewayConfig: GatewayConfig): Promise<{ success: boolean; message: string }>;
     rebuildAllTenantConfigs(): Promise<{ success: boolean; updated: number; errors: string[] }>;
+    configureCustomGatewayRoutes(projectRef: string, routes: CustomGatewayRouteConfig[]): Promise<{ success: boolean; error?: string }>;
     setupMasterRoutes(): Promise<void>;
     upsertCertificateForSnis(opts: { projectRef: string; cert: string; key: string; snis: string[]; existingCertificateId?: string }): Promise<{ success: boolean; certificateId?: string; error?: string }>;
     configureFrontendRoute(route: FrontendGatewayRoute): Promise<void>;
@@ -217,6 +230,92 @@ function caddyDial(upstream: string): string {
 
 function sanitizeCaddyId(value: string): string {
     return value.replace(/[^a-zA-Z0-9_-]/g, "_");
+}
+
+function customGatewayRouteId(projectRef: string, routeId: string): string {
+    return `route-custom-gateway-${projectRef}-${sanitizeCaddyId(routeId)}`;
+}
+
+function isCustomGatewayRouteId(projectRef: string, routeId: string): boolean {
+    return routeId.startsWith(`route-custom-gateway-${projectRef}-`);
+}
+
+function normalizeCustomPath(pathValue: string): string {
+    const value = String(pathValue || "").trim();
+    if (!value.startsWith("/") || value.includes("://") || /[\r\n\t]/.test(value)) {
+        throw new Error("Custom route path must start with / and must not contain a URL or control characters");
+    }
+    return value;
+}
+
+function normalizeCustomStaticRoot(root: string): string {
+    const value = String(root || "").trim();
+    if (!value.startsWith("/") || value.includes("\0") || value.split("/").includes("..")) {
+        throw new Error("Custom route static_root must be an absolute path without traversal segments");
+    }
+    return value.replace(/\/+$/, "") || "/";
+}
+
+function normalizeCustomUpstream(upstream: string): { dial: string; tls: boolean } {
+    const value = String(upstream || "").trim();
+    if (!value || /[\r\n\t]/.test(value)) throw new Error("Custom route upstream is invalid");
+    if (/^https?:\/\//i.test(value)) {
+        const parsed = new URL(value);
+        if (parsed.pathname !== "/" || parsed.search || parsed.hash) {
+            throw new Error("Custom route upstream URL must not include path, query, or hash");
+        }
+        const tls = parsed.protocol === "https:";
+        return { dial: `${parsed.hostname}:${parsed.port || (tls ? "443" : "80")}`, tls };
+    }
+    if (value.includes("/") || !/^[^:]+:\d+$/.test(value)) {
+        throw new Error("Custom route upstream must be host:port or an http(s)://host[:port] URL");
+    }
+    return { dial: value, tls: false };
+}
+
+function normalizeCustomHeaders(headers: Record<string, string> | undefined): Record<string, string> | undefined {
+    if (!headers) return undefined;
+    const normalized: Record<string, string> = {};
+    for (const [key, value] of Object.entries(headers)) {
+        const header = key.trim();
+        if (!/^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/.test(header)) throw new Error(`Invalid custom route header name: ${key}`);
+        if (/[\r\n]/.test(String(value))) throw new Error(`Invalid custom route header value for ${key}`);
+        normalized[header] = String(value);
+    }
+    return Object.keys(normalized).length > 0 ? normalized : undefined;
+}
+
+export function normalizeCustomGatewayRoute(input: CustomGatewayRouteConfig): CustomGatewayRouteConfig {
+    const id = String(input.id || "").trim();
+    if (!/^[A-Za-z0-9_-]{1,64}$/.test(id)) {
+        throw new Error("Custom route id must be 1-64 characters of letters, numbers, _ or -");
+    }
+    const hosts = uniqueStrings((input.hosts || []).map(normalizeCaddyHost).filter(Boolean));
+    if (hosts.length === 0 || hosts.length > 20) throw new Error("Custom route requires 1-20 hosts");
+    const paths = Array.isArray(input.path) ? input.path : [input.path];
+    const normalizedPaths = uniqueStrings(paths.map(normalizeCustomPath));
+    if (normalizedPaths.length === 0 || normalizedPaths.length > 20) throw new Error("Custom route requires 1-20 paths");
+
+    const hasUpstream = typeof input.upstream === "string" && input.upstream.trim().length > 0;
+    const hasStaticRoot = typeof input.static_root === "string" && input.static_root.trim().length > 0;
+    if (hasUpstream === hasStaticRoot) throw new Error("Custom route must set exactly one of upstream or static_root");
+
+    return {
+        id,
+        hosts,
+        path: Array.isArray(input.path) ? normalizedPaths : normalizedPaths[0],
+        upstream: hasUpstream ? input.upstream!.trim() : undefined,
+        static_root: hasStaticRoot ? normalizeCustomStaticRoot(input.static_root!) : undefined,
+        headers: normalizeCustomHeaders(input.headers),
+        cors: input.cors ? uniqueStrings(input.cors.map((origin) => origin.trim()).filter(Boolean)).slice(0, 50) : undefined,
+        priority: Number.isFinite(input.priority) ? Math.trunc(input.priority || 0) : 0,
+        enabled: input.enabled ?? true,
+    };
+}
+
+export function normalizeCustomGatewayRoutes(value: unknown): CustomGatewayRouteConfig[] {
+    if (!Array.isArray(value)) return [];
+    return value.map((route) => normalizeCustomGatewayRoute(route as CustomGatewayRouteConfig));
 }
 
 const CADDY_PROJECT_ROUTE_KINDS = [
@@ -429,6 +528,10 @@ export class CaddyGatewayProvider implements GatewayProvider {
         const bCustom = bid.startsWith("route-custom-") || bid.startsWith("route-hosted-") || bid.startsWith("route-supauth-");
         if (aCustom !== bCustom) return aCustom ? -1 : 1;
 
+        const aPriority = typeof a.__supacloud_priority === "number" ? a.__supacloud_priority : 0;
+        const bPriority = typeof b.__supacloud_priority === "number" ? b.__supacloud_priority : 0;
+        if (aPriority !== bPriority) return bPriority - aPriority;
+
         const aPath = Array.isArray((a.match as any)?.[0]?.path) ? String((a.match as any)[0].path[0] || "") : "";
         const bPath = Array.isArray((b.match as any)?.[0]?.path) ? String((b.match as any)[0].path[0] || "") : "";
         if (aPath.length !== bPath.length) return bPath.length - aPath.length;
@@ -467,6 +570,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
 
     private renderRouteForCaddy(route: CaddyRoute): CaddyRoute {
         const rendered = JSON.parse(JSON.stringify(route)) as CaddyRoute;
+        delete rendered.__supacloud_priority;
         const id = String(rendered["@id"] || "");
         const handle = Array.isArray(rendered.handle) ? rendered.handle as Record<string, unknown>[] : [];
         const withoutRateLimit = handle.filter((handler) => handler.handler !== "rate_limit");
@@ -530,7 +634,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
         }
     }
 
-    private makeReverseProxy(upstream: string, headers: Record<string, CaddyHeaderValue>, readTimeoutMs?: number, preserveUpstreamCors?: boolean, streaming?: boolean): Record<string, unknown> {
+    private makeReverseProxy(upstream: string, headers: Record<string, CaddyHeaderValue>, readTimeoutMs?: number, preserveUpstreamCors?: boolean, streaming?: boolean, upstreamTls?: boolean): Record<string, unknown> {
         const responseHeaders: Record<string, unknown> = {};
         if (!preserveUpstreamCors) {
             responseHeaders.delete = [...UPSTREAM_CORS_RESPONSE_HEADERS];
@@ -549,6 +653,9 @@ export class CaddyGatewayProvider implements GatewayProvider {
                 write_timeout: "500s",
             },
         };
+        if (upstreamTls) {
+            (proxy.transport as Record<string, unknown>).tls = {};
+        }
         if (Object.keys(responseHeaders).length > 0) {
             (proxy.headers as Record<string, unknown>).response = responseHeaders;
         }
@@ -901,6 +1008,51 @@ export class CaddyGatewayProvider implements GatewayProvider {
         };
     }
 
+    private makeCustomGatewayRoute(projectRef: string, input: CustomGatewayRouteConfig): CaddyRoute | null {
+        const route = normalizeCustomGatewayRoute(input);
+        if (route.enabled === false) return null;
+
+        const handle: Record<string, unknown>[] = [];
+        const corsSubroute = route.cors ? this.makeCorsSubroute(route.cors) : null;
+        if (corsSubroute) handle.push(corsSubroute);
+
+        if (route.upstream) {
+            const upstream = normalizeCustomUpstream(route.upstream);
+            const headers: Record<string, CaddyHeaderValue> = {
+                "Host": "{http.request.host}",
+                "X-Project-Ref": projectRef,
+                "x-project-ref": projectRef,
+                "X-Forwarded-Host": "{http.request.host}",
+                "X-Forwarded-Proto": "{http.request.scheme}",
+            };
+            for (const [key, value] of Object.entries(route.headers || {})) headers[key] = value;
+            handle.push(this.makeReverseProxy(upstream.dial, headers, 500_000, false, true, upstream.tls));
+        } else if (route.static_root) {
+            if (route.headers && Object.keys(route.headers).length > 0) {
+                handle.push({
+                    handler: "headers",
+                    response: {
+                        set: Object.fromEntries(Object.entries(route.headers).map(([key, value]) => [key, [value]])),
+                    },
+                });
+            }
+            handle.push(this.makeStaticFileServer(route.static_root));
+        } else {
+            return null;
+        }
+
+        return {
+            "@id": customGatewayRouteId(projectRef, route.id),
+            __supacloud_priority: route.priority || 0,
+            match: [{
+                host: route.hosts,
+                path: Array.isArray(route.path) ? route.path : [route.path],
+            }],
+            handle,
+            terminal: true,
+        };
+    }
+
     private async putRoute(route: CaddyRoute): Promise<void> {
         const id = String(route["@id"]);
         this.routesById.set(id, route);
@@ -971,6 +1123,23 @@ export class CaddyGatewayProvider implements GatewayProvider {
         this.routesById.delete(routeId);
         await this.persistAndLoad();
         return true;
+    }
+
+    async configureCustomGatewayRoutes(projectRef: string, routes: CustomGatewayRouteConfig[]): Promise<{ success: boolean; error?: string }> {
+        try {
+            await this.hydrateFromDisk();
+            for (const id of Array.from(this.routesById.keys())) {
+                if (isCustomGatewayRouteId(projectRef, id)) this.routesById.delete(id);
+            }
+            for (const route of routes) {
+                const rendered = this.makeCustomGatewayRoute(projectRef, route);
+                if (rendered) this.routesById.set(String(rendered["@id"]), rendered);
+            }
+            await this.persistAndLoad();
+            return { success: true };
+        } catch (error: unknown) {
+            return { success: false, error: error instanceof Error ? error.message : String(error) };
+        }
     }
 
     private cloneRouteForCustomLimit(projectRef: string, basePath: string, routeId: string): CaddyRoute | null {
@@ -1181,8 +1350,13 @@ export class CaddyGatewayProvider implements GatewayProvider {
                     continue;
                 }
                 const result = await this.setupUpstream(ref, pgrstPort, gotruePort, cfg);
-                if (result.success) updated++;
-                else errors.push(`${ref}: ${result.error || "unknown error"}`);
+                if (!result.success) {
+                    errors.push(`${ref}: ${result.error || "unknown error"}`);
+                    continue;
+                }
+                const customResult = await this.configureCustomGatewayRoutes(ref, normalizeCustomGatewayRoutes(cfg.gateway_routes));
+                if (customResult.success) updated++;
+                else errors.push(`${ref}: ${customResult.error || "custom route reconcile failed"}`);
             }
             return { success: errors.length === 0, updated, errors };
         } catch (error: unknown) {
@@ -1357,6 +1531,7 @@ export class GatewayService implements GatewayProvider {
     removeUpstreamTarget(projectRef: string, replicaIp: string) { return this.provider.removeUpstreamTarget(projectRef, replicaIp); }
     applyConfig(projectRef: string, gatewayConfig: GatewayConfig) { return this.provider.applyConfig(projectRef, gatewayConfig); }
     rebuildAllTenantConfigs() { return this.provider.rebuildAllTenantConfigs(); }
+    configureCustomGatewayRoutes(projectRef: string, routes: CustomGatewayRouteConfig[]) { return this.provider.configureCustomGatewayRoutes(projectRef, routes); }
     setupMasterRoutes() { return this.provider.setupMasterRoutes(); }
     upsertCertificateForSnis(opts: { projectRef: string; cert: string; key: string; snis: string[]; existingCertificateId?: string }) { return this.provider.upsertCertificateForSnis(opts); }
     configureFrontendRoute(route: FrontendGatewayRoute) { return this.provider.configureFrontendRoute(route); }

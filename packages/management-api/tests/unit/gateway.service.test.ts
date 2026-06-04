@@ -405,6 +405,83 @@ describe("CaddyGatewayProvider", () => {
         restore();
     });
 
+    test("configureCustomGatewayRoutes renders controlled proxy and static Caddy routes", async () => {
+        const calls: Array<{ url: string; method: string; body: any }> = [];
+        const restore = captureFetch(calls);
+        const provider = new CaddyGatewayProvider();
+
+        const result = await provider.configureCustomGatewayRoutes("proj123", [
+            {
+                id: "ocr",
+                hosts: ["ocr.example.com"],
+                path: "/api/*",
+                upstream: "https://10.20.0.12:4001",
+                headers: { "X-Custom-Upstream": "ocr" },
+                cors: ["https://app.example.com"],
+                priority: 10,
+            },
+            {
+                id: "docs",
+                hosts: ["docs.example.com"],
+                path: "/*",
+                static_root: "/var/supacloud/custom-sites/docs",
+                headers: { "X-Robots-Tag": "noindex" },
+                priority: 1,
+            },
+            {
+                id: "disabled",
+                hosts: ["disabled.example.com"],
+                path: "/*",
+                static_root: "/var/supacloud/custom-sites/disabled",
+                enabled: false,
+            },
+        ]);
+
+        expect(result.success).toBe(true);
+        const load = calls.filter((call) => call.method === "POST" && call.url.endsWith("/load")).at(-1);
+        const routes = load?.body?.apps?.http?.servers?.supacloud?.routes ?? [];
+        const ocr = routes.find((item: any) => item["@id"] === "route-custom-gateway-proj123-ocr");
+        const docs = routes.find((item: any) => item["@id"] === "route-custom-gateway-proj123-docs");
+        const disabled = routes.find((item: any) => item["@id"] === "route-custom-gateway-proj123-disabled");
+        const proxy = ocr?.handle?.find((handler: any) => handler.handler === "reverse_proxy");
+        const corsSubroute = ocr?.handle?.find((handler: any) => handler.handler === "subroute");
+
+        expect(routes[0]?.["@id"]).toBe("route-custom-gateway-proj123-ocr");
+        expect(ocr?.__supacloud_priority).toBeUndefined();
+        expect(ocr?.match?.[0]?.host).toEqual(["ocr.example.com"]);
+        expect(ocr?.match?.[0]?.path).toEqual(["/api/*"]);
+        expect(corsSubroute?.routes?.[0]?.match?.[0]?.header?.Origin).toContain("https://app.example.com");
+        expect(proxy?.upstreams?.[0]?.dial).toBe("10.20.0.12:4001");
+        expect(proxy?.transport?.tls).toEqual({});
+        expect(proxy?.headers?.request?.set?.["X-Custom-Upstream"]).toEqual(["ocr"]);
+        expect(docs?.handle?.at(-1)?.handler).toBe("file_server");
+        expect(docs?.handle?.at(-1)?.root).toBe("/var/supacloud/custom-sites/docs");
+        expect(docs?.handle?.[0]?.response?.set?.["X-Robots-Tag"]).toEqual(["noindex"]);
+        expect(disabled).toBeUndefined();
+
+        restore();
+    });
+
+    test("configureCustomGatewayRoutes replaces stale custom routes for the project", async () => {
+        const calls: Array<{ url: string; method: string; body: any }> = [];
+        const restore = captureFetch(calls);
+        const provider = new CaddyGatewayProvider();
+
+        await provider.configureCustomGatewayRoutes("proj123", [{
+            id: "old",
+            hosts: ["old.example.com"],
+            path: "/*",
+            static_root: "/var/supacloud/custom-sites/old",
+        }]);
+        await provider.configureCustomGatewayRoutes("proj123", []);
+
+        const load = calls.filter((call) => call.method === "POST" && call.url.endsWith("/load")).at(-1);
+        const routes = load?.body?.apps?.http?.servers?.supacloud?.routes ?? [];
+        expect(routes.some((item: any) => item["@id"] === "route-custom-gateway-proj123-old")).toBe(false);
+
+        restore();
+    });
+
     test("upsertCertificateForSnis stores manual certificate paths in Caddy JSON", async () => {
         const calls: Array<{ url: string; method: string; body: any }> = [];
         const restore = captureFetch(calls);
