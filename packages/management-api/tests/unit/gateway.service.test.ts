@@ -170,7 +170,7 @@ describe("CaddyGatewayProvider", () => {
         expect(reverseProxyHandlers.every((handler: any) => !handler.upstreams?.[0]?.dial?.includes("/"))).toBe(true);
         for (const handler of reverseProxyHandlers) {
             const routeId = findRouteIdForHandler(routes, handler);
-            const isStorageRoute = routeId?.endsWith("-storage");
+            const isStorageRoute = routeId?.endsWith("-storage") || routeId?.endsWith("-storage-resumable");
             if (isStorageRoute) {
                 expect(handler.headers?.response?.delete).toBeUndefined();
             } else {
@@ -733,7 +733,7 @@ describe("CaddyGatewayProvider route headers", () => {
             const proxy = route?.handle?.find((h: any) => h.handler === "reverse_proxy");
             const requestSet = proxy?.headers?.request?.set;
             const routeId = String(route["@id"] || "");
-            const usesProjectCanonicalHost = routeId.endsWith("-storage") || routeId.endsWith("-functions");
+            const usesProjectCanonicalHost = routeId.endsWith("-storage") || routeId.endsWith("-storage-resumable") || routeId.endsWith("-functions");
             const expectedHost = usesProjectCanonicalHost ? `hdrtest.api.${config.baseDomain}` : "{http.request.host}";
             expect(requestSet?.["Host"]).toEqual([expectedHost]);
             expect(requestSet?.["X-Project-Ref"]).toEqual(["hdrtest"]);
@@ -757,14 +757,21 @@ describe("CaddyGatewayProvider route headers", () => {
         const routes = load?.body?.apps?.http?.servers?.supacloud?.routes ?? [];
 
         const storage = routes.find((route: any) => route["@id"] === "route-project-storagetest-storage");
+        const resumable = routes.find((route: any) => route["@id"] === "route-project-storagetest-storage-resumable");
         expect(storage).toBeDefined();
+        expect(resumable).toBeDefined();
+        expect(routes.indexOf(resumable)).toBeLessThan(routes.indexOf(storage));
+        expect(resumable?.match?.[0]?.path).toEqual(["/storage/v1/upload/resumable*"]);
         expect(storage?.match?.[0]?.path).toEqual(["/storage/v1*"]);
 
         const storageProxy = storage?.handle?.find((h: any) => h.handler === "reverse_proxy");
+        const resumableProxy = resumable?.handle?.find((h: any) => h.handler === "reverse_proxy");
         expect(storage?.handle?.some((h: any) => h.strip_path_prefix === "/storage/v1")).toBe(false);
+        expect(resumable?.handle?.some((h: any) => h.strip_path_prefix === "/storage/v1")).toBe(false);
         // Storage route should preserve upstream CORS without rendering an empty
         // response header block, which can break Caddy proxy responses.
         expect(storageProxy?.headers?.response).toBeUndefined();
+        expect(resumableProxy?.headers?.response).toBeUndefined();
         // Storage route must have project routing headers
         const requestSet = storageProxy?.headers?.request?.set;
         expect(requestSet?.["Host"]).toEqual([`storagetest.api.${config.baseDomain}`]);
@@ -774,6 +781,11 @@ describe("CaddyGatewayProvider route headers", () => {
         expect(requestSet?.["X-Forwarded-Proto"]).toEqual(["{http.request.scheme}"]);
         // Storage is non-streaming (no flush_interval)
         expect(storageProxy?.flush_interval).toBeUndefined();
+        const resumableRequestSet = resumableProxy?.headers?.request?.set;
+        expect(resumableRequestSet?.["Host"]).toEqual([`storagetest.api.${config.baseDomain}`]);
+        expect(resumableRequestSet?.["X-Forwarded-Host"]).toEqual([`storagetest.api.${config.baseDomain}`]);
+        expect(resumableProxy?.transport?.read_timeout).toBe("900s");
+        expect(resumableProxy?.flush_interval).toBeUndefined();
 
         restore();
     });

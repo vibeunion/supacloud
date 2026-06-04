@@ -34,8 +34,9 @@ import { logger } from "../utils/logger";
 import { config } from "../config";
 import { matchProjectRefFromHost } from "../utils/project-routing";
 
+const DEFAULT_TUS_MAX_SIZE_BYTES = 500 * 1024 * 1024;
 const STORAGE_UPLOAD_MAX_BYTES = Number(process.env.STORAGE_UPLOAD_MAX_BYTES || config.maxRequestBodySize || 100 * 1024 * 1024);
-const TUS_MAX_SIZE = Number(process.env.TUS_MAX_SIZE || 100 * 1024 * 1024);
+const TUS_MAX_SIZE = Number(process.env.TUS_MAX_SIZE || DEFAULT_TUS_MAX_SIZE_BYTES);
 const TUS_MAX_CHUNK_SIZE = Number(process.env.TUS_MAX_CHUNK_SIZE || Math.min(TUS_MAX_SIZE, 16 * 1024 * 1024));
 const STORAGE_BATCH_CONCURRENCY = Math.max(1, Number(process.env.STORAGE_BATCH_CONCURRENCY || 12));
 

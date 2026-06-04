@@ -521,6 +521,8 @@ Key settings in `config.env`:
 | `SUPABASE_PUBLIC_DOMAIN` | Global API gateway domain | Production required; installer can auto-generate |
 | `SUPABASE_STUDIO_DOMAIN` | Global console domain | Auto-derived from API domain if empty |
 | `S3_STORAGE_TYPE` | Storage backend | `juicefs` |
+| `TUS_MAX_SIZE` | Resumable upload maximum size | `524288000` (500 MiB) |
+| `TUS_MAX_CHUNK_SIZE` | Resumable upload chunk maximum size | `16777216` (16 MiB) |
 | `EDGE_RUNTIME` | Functions runtime | `bun` |
 | `PG_VERSION` | PostgreSQL version | `18` |
 | `PIGSTY_VERSION` | Pigsty version | `latest` |
@@ -1001,6 +1003,8 @@ supacloud/
 | `SUPABASE_PUBLIC_DOMAIN` | 全局 API 网关域名 | 生产必填；安装器可自动生成 |
 | `SUPABASE_STUDIO_DOMAIN` | 全局控制台域名 | 可留空，默认从 API 域名派生 |
 | `S3_STORAGE_TYPE` | 存储后端 | `juicefs` |
+| `TUS_MAX_SIZE` | 断点续传上传最大大小 | `524288000` (500 MiB) |
+| `TUS_MAX_CHUNK_SIZE` | 断点续传分片最大大小 | `16777216` (16 MiB) |
 | `EDGE_RUNTIME` | 云函数运行时 | `bun` |
 | `PG_VERSION` | PostgreSQL 版本 | `18` |
 | `PIGSTY_VERSION` | Pigsty 版本 | `latest` |
