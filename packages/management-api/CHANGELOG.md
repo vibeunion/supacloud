@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.29.7](https://github.com/zuohuadong/supacloud/compare/management-api-v0.29.6...management-api-v0.29.7) (2026-06-04)
+
+
+### Bug Fixes
+
+* **cli:** avoid gateway init for one-shot commands ([#281](https://github.com/zuohuadong/supacloud/issues/281)) ([69be7a8](https://github.com/zuohuadong/supacloud/commit/69be7a8d3bbcb046a7394a6110b0a10fe1775ef6))
+* **gateway:** migrate hydrated storage routes ([#283](https://github.com/zuohuadong/supacloud/issues/283)) ([8d4a7f1](https://github.com/zuohuadong/supacloud/commit/8d4a7f1cb478ecbe718ad91408bf9f529b0b593e))
+
 ## [0.29.6](https://github.com/zuohuadong/supacloud/compare/management-api-v0.29.5...management-api-v0.29.6) (2026-06-04)
 
 
