@@ -341,14 +341,19 @@ export class CaddyGatewayProvider implements GatewayProvider {
     }
 
     private migrateHydratedRoute(routeId: string, route: CaddyRoute): CaddyRoute {
-        if (!routeId.startsWith("route-project-") || !routeId.endsWith("-storage")) return route;
+        if (!routeId.startsWith("route-project-")) return route;
+        const isStorageRoute = routeId.endsWith("-storage");
+        const isFunctionsRoute = routeId.endsWith("-functions");
+        if (!isStorageRoute && !isFunctionsRoute) return route;
 
         const projectRef = this.projectRefFromRouteId(routeId);
         if (!projectRef) return route;
 
         const migrated = JSON.parse(JSON.stringify(route)) as CaddyRoute;
         const handle = Array.isArray(migrated.handle) ? migrated.handle as Record<string, unknown>[] : [];
-        const migratedHandle = handle.filter((handler) => handler.strip_path_prefix !== "/storage/v1");
+        const migratedHandle = isStorageRoute
+            ? handle.filter((handler) => handler.strip_path_prefix !== "/storage/v1")
+            : handle;
         migrated.handle = migratedHandle;
 
         const proxy = migratedHandle.find((handler) => handler.handler === "reverse_proxy") as Record<string, any> | undefined;
@@ -364,9 +369,11 @@ export class CaddyGatewayProvider implements GatewayProvider {
         proxy.headers.request.set["x-project-ref"] = [projectRef];
         proxy.headers.request.set["X-Forwarded-Proto"] = ["{http.request.scheme}"];
 
-        proxy.headers.response = proxy.headers.response && typeof proxy.headers.response === "object" ? proxy.headers.response : {};
-        delete proxy.headers.response.delete;
-        delete proxy.flush_interval;
+        if (isStorageRoute) {
+            proxy.headers.response = proxy.headers.response && typeof proxy.headers.response === "object" ? proxy.headers.response : {};
+            delete proxy.headers.response.delete;
+            delete proxy.flush_interval;
+        }
 
         return migrated;
     }

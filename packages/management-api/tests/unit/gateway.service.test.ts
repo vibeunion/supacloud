@@ -743,6 +743,61 @@ describe("CaddyGatewayProvider route headers", () => {
         restore();
     });
 
+    test("hydrates and migrates legacy functions routes to canonical project host headers", async () => {
+        await mkdir("/tmp/supacloud-caddy-test", { recursive: true });
+        await writeFile("/tmp/supacloud-caddy-test/config.json", JSON.stringify({
+            apps: {
+                http: {
+                    servers: {
+                        supacloud: {
+                            routes: [
+                                {
+                                    "@id": "route-project-legacyfn-functions",
+                                    match: [{ host: ["legacyfn.api.example.com", "api.custom.example.com"], path: ["/functions/v1*"] }],
+                                    handle: [
+                                        {
+                                            handler: "reverse_proxy",
+                                            headers: {
+                                                request: {
+                                                    set: {
+                                                        "Host": ["{http.request.host}"],
+                                                        "X-Forwarded-Host": ["{http.request.host}"],
+                                                    },
+                                                },
+                                            },
+                                            upstreams: [{ dial: "127.0.0.1:9090" }],
+                                        },
+                                    ],
+                                    terminal: true,
+                                },
+                            ],
+                        },
+                    },
+                },
+            },
+        }));
+
+        const calls: Array<{ url: string; method: string; body: any }> = [];
+        const restore = captureFetch(calls);
+        const provider = new CaddyGatewayProvider();
+
+        await provider.setCors("legacyfn", ["https://app.example.com"]);
+
+        const load = calls.filter((call) => call.method === "POST" && call.url.endsWith("/load")).at(-1);
+        const routes = load?.body?.apps?.http?.servers?.supacloud?.routes ?? [];
+        const functions = routes.find((route: any) => route["@id"] === "route-project-legacyfn-functions");
+        const functionsProxy = functions?.handle?.find((h: any) => h.handler === "reverse_proxy");
+        const requestSet = functionsProxy?.headers?.request?.set;
+
+        expect(requestSet?.["Host"]).toEqual([`legacyfn.api.${config.baseDomain}`]);
+        expect(requestSet?.["X-Forwarded-Host"]).toEqual([`legacyfn.api.${config.baseDomain}`]);
+        expect(requestSet?.["X-Project-Ref"]).toEqual(["legacyfn"]);
+        expect(requestSet?.["x-project-ref"]).toEqual(["legacyfn"]);
+        expect(requestSet?.["X-Forwarded-Proto"]).toEqual(["{http.request.scheme}"]);
+
+        restore();
+    });
+
     test("addProjectDomains preserves Host and routing headers for custom API domain", async () => {
         const calls: Array<{ url: string; method: string; body: any }> = [];
         const restore = captureFetch(calls);
