@@ -780,8 +780,11 @@ export class CaddyGatewayProvider implements GatewayProvider {
         streaming?: boolean;
     }): CaddyRoute {
         const requestHeaders: Record<string, CaddyHeaderValue> = {
+            "Host": "{http.request.host}",
             "X-Project-Ref": opts.projectRef,
+            "x-project-ref": opts.projectRef,
             "X-Forwarded-Host": "{http.request.host}",
+            "X-Forwarded-Proto": "{http.request.scheme}",
         };
         for (const header of opts.headers || []) {
             const [key, ...rest] = header.split(":");
