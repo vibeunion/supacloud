@@ -32,6 +32,30 @@ export function renderPostgrestDbSchemas(includePgmqPublic = false): string {
     return schemas.join(", ");
 }
 
+function readBooleanSetting(
+    authConfig: Record<string, unknown>,
+    key: string,
+    defaultValue: boolean,
+): boolean {
+    const value = authConfig[key];
+    return typeof value === "boolean" ? value : defaultValue;
+}
+
+export function renderGoTrueAuthEnv(authConfig: Record<string, unknown>): string {
+    const disableSignup = readBooleanSetting(authConfig, "disable_signup", false)
+        || readBooleanSetting(authConfig, "enable_signup", true) === false;
+    const externalAnonymousUsersEnabled = readBooleanSetting(authConfig, "external_anonymous_users_enabled", true);
+    const externalEmailEnabled = readBooleanSetting(authConfig, "external_email_enabled", true);
+    const externalPhoneEnabled = readBooleanSetting(authConfig, "external_phone_enabled", true);
+
+    return `
+GOTRUE_DISABLE_SIGNUP=${disableSignup ? "true" : "false"}
+GOTRUE_EXTERNAL_ANONYMOUS_USERS_ENABLED=${externalAnonymousUsersEnabled ? "true" : "false"}
+GOTRUE_EXTERNAL_EMAIL_ENABLED=${externalEmailEnabled ? "true" : "false"}
+GOTRUE_EXTERNAL_PHONE_ENABLED=${externalPhoneEnabled ? "true" : "false"}
+`.trim();
+}
+
 export interface RuntimeStatus {
     status: "running" | "stopped" | "starting" | "error";
     port: number;
@@ -1290,9 +1314,7 @@ GOTRUE_JWT_DEFAULT_GROUP_NAME=authenticated
 GOTRUE_LOG_LEVEL=info
 GOTRUE_SERVER_READ_TIMEOUT=20
 GOTRUE_SECURITY_UPDATE_PASSWORD_REQUIRE_REAUTHENTICATION=true
-GOTRUE_EXTERNAL_ANONYMOUS_USERS_ENABLED=true
-GOTRUE_EXTERNAL_EMAIL_ENABLED=true
-GOTRUE_EXTERNAL_PHONE_ENABLED=true
+${renderGoTrueAuthEnv(creds.authConfig)}
 GOTRUE_WEBAUTHN_ENABLED=true
 GOTRUE_WEBAUTHN_RP_ID=${siteHost}
 GOTRUE_WEBAUTHN_RP_ORIGINS=${webAuthnOrigins.join(",")}
