@@ -120,21 +120,22 @@ async function getIndexHtml(): Promise<string | null> {
   }
 }
 
-// Initialize gateway routes dynamically before serving traffic.
-try {
-  const { gatewayService } = await import("./services/gateway.service");
-  await gatewayService.setupMasterRoutes();
-  await gatewayService.setupHostedAuthRoutes();
-  const { frontendService } = await import("./services/frontend.service");
-  const result = await frontendService.reconcileGatewayRoutes();
-  if (result.configured > 0 || result.errors.length > 0) {
-    logger.info("[FrontendService] Reconciled gateway routes", result);
+async function initializeGatewayRoutes() {
+  try {
+    const { gatewayService } = await import("./services/gateway.service");
+    await gatewayService.setupMasterRoutes();
+    await gatewayService.setupHostedAuthRoutes();
+    const { frontendService } = await import("./services/frontend.service");
+    const result = await frontendService.reconcileGatewayRoutes();
+    if (result.configured > 0 || result.errors.length > 0) {
+      logger.info("[FrontendService] Reconciled gateway routes", result);
+    }
+  } catch (e) {
+    logger.error(
+      "Failed to setup master routes",
+      e instanceof Error ? e.message : String(e),
+    );
   }
-} catch (e) {
-  logger.error(
-    "Failed to setup master routes",
-    e instanceof Error ? e.message : String(e),
-  );
 }
 
 const app = new Elysia({ strictPath: false })
@@ -906,6 +907,8 @@ async function bootstrap() {
   } else if (args.includes("--help") || args.includes("-h")) {
     process.exit(0);
   } else if (args.length === 0 || args.includes("--server")) {
+    await initializeGatewayRoutes();
+
     try {
       const { moved } = await migrateLegacyVersionArtifacts();
       if (moved > 0) {

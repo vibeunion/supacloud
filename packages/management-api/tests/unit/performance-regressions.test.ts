@@ -51,4 +51,15 @@ describe("performance regressions", () => {
     expect(databaseSource).toContain("function normalizePagination");
     expect(databaseSource).toContain("Number.isFinite(parsed)");
   });
+
+  test("one-shot CLI commands do not initialize Caddy gateway routes", async () => {
+    const indexSource = await read("../../src/index.ts");
+    const serverBranch = indexSource.indexOf('args.length === 0 || args.includes("--server")');
+    const gatewayInitCall = indexSource.indexOf("await initializeGatewayRoutes();");
+    const serveCall = indexSource.indexOf("Bun.serve({");
+
+    expect(serverBranch).toBeGreaterThan(0);
+    expect(gatewayInitCall).toBeGreaterThan(serverBranch);
+    expect(gatewayInitCall).toBeLessThan(serveCall);
+  });
 });
