@@ -3,6 +3,7 @@ name: Release Please
 env:
   LANG: C.UTF-8
   LC_ALL: C.UTF-8
+  BUN_VERSION: "1.3.14"
 
 on:
   push:
@@ -55,7 +56,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: ${{ env.BUN_VERSION }}
 
       - name: Setup Go
         uses: actions/setup-go@v6
@@ -121,7 +122,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: ${{ env.BUN_VERSION }}
 
       - name: Install dependencies
         working-directory: packages/edge-runtime
@@ -171,7 +172,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: ${{ env.BUN_VERSION }}
 
       - name: Publish supacloud-js to NPM
         if: ${{ needs.release-please.outputs.supacloud_js_released == 'true' }}

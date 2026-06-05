@@ -24,6 +24,7 @@ export DEBIAN_FRONTEND=noninteractive
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONFIG_FILE="${SCRIPT_DIR}/config.env"
 OPT_CONFIG_FILE="/opt/supacloud/config.env"
+BUN_VERSION="${BUN_VERSION:-1.3.14}"
 
 # -- Command Line Argument Parsing --------------------------------------------
 # Parse arguments first so they can override configuration file values
@@ -63,6 +64,52 @@ log_info() { echo -e "${GREEN}[INFO]${NC} $1"; }
 log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 log_step() { echo -e "${BLUE}[STEP]${NC} $1"; }
+
+ensure_bun_version() {
+    local required_version="${BUN_VERSION:-1.3.14}"
+    local current_version=""
+
+    if command -v bun &> /dev/null; then
+        current_version="$(bun --version 2>/dev/null || true)"
+    fi
+
+    if [[ "$current_version" == "$required_version" ]]; then
+        log_info "Bun already installed: $current_version"
+        return 0
+    fi
+
+    if [[ -n "$current_version" ]]; then
+        log_info "Updating Bun from $current_version to $required_version..."
+    else
+        log_info "Installing Bun $required_version..."
+    fi
+
+    if ! command -v unzip &> /dev/null; then
+        log_info "Installing unzip (required by Bun installer)..."
+        if command -v apt-get &>/dev/null; then
+            apt-get install -y unzip
+        elif command -v dnf &>/dev/null; then
+            dnf install -y unzip
+        fi
+    fi
+
+    local install_url="https://bun.sh/install"
+    if [[ "${USE_CHINA_MIRROR:-false}" == "true" ]] || [[ "${CN:-false}" == "true" ]]; then
+        install_url="https://bunjs.cn/install"
+    fi
+
+    curl -fsSL "$install_url" | bash -s "bun-v${required_version}"
+    export PATH="$HOME/.bun/bin:$PATH"
+    ln -sf ~/.bun/bin/bun /usr/local/bin/bun 2>/dev/null || true
+    ln -sf ~/.bun/bin/bunx /usr/local/bin/bunx 2>/dev/null || true
+
+    current_version="$(bun --version 2>/dev/null || true)"
+    if [[ "$current_version" == "$required_version" ]]; then
+        log_info "Bun installed: $current_version"
+    else
+        log_warn "Bun installer completed, but expected $required_version and found ${current_version:-unknown}"
+    fi
+}
 
 ensure_pg_hba_rule() {
     local rule="$1"
@@ -1239,31 +1286,13 @@ install_edge_runtime() {
 
         if [[ "$USE_COMPILED_BINARY" == "false" ]]; then
             if [[ "$EDGE_RUNTIME_MODE" == "external" ]]; then
-                if ! command -v bun &> /dev/null; then
-                    log_info "External Edge Runtime mode requires Bun, installing..."
-                    if ! command -v unzip &> /dev/null; then
-                        log_info "Installing unzip (required by Bun installer)..."
-                        if command -v apt-get &>/dev/null; then
-                            apt-get install -y unzip
-                        elif command -v dnf &>/dev/null; then
-                            dnf install -y unzip
-                        fi
-                    fi
-                    if [[ "${USE_CHINA_MIRROR:-false}" == "true" ]] || [[ "${CN:-false}" == "true" ]]; then
-                        curl -fsSL https://bunjs.cn/install | bash
-                    else
-                        curl -fsSL https://bun.sh/install | bash
-                    fi
-                    ln -sf ~/.bun/bin/bun /usr/local/bin/bun 2>/dev/null || true
-                    ln -sf ~/.bun/bin/bunx /usr/local/bin/bunx 2>/dev/null || true
-                    command -v bun &> /dev/null && log_info "Bun installed: $(bun --version)" || log_warn "Bun installed at ~/.bun/bin/bun"
-                else
-                    log_info "Bun already installed: $(bun --version)"
-                fi
+                log_info "External Edge Runtime mode requires Bun $BUN_VERSION"
+                ensure_bun_version
                 cd /opt/supacloud/edge-runtime && bun install --frozen-lockfile 2>/dev/null || bun install
                 touch /etc/supabase/.bun_installed
             else
                 if command -v bun &> /dev/null; then
+                    ensure_bun_version
                     cd /opt/supacloud/edge-runtime && bun install --frozen-lockfile 2>/dev/null || bun install
                     log_info "Edge Runtime dependencies installed (Bun available)"
                 else
