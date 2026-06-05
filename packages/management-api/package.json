@@ -32,7 +32,7 @@
     "@elysiajs/cors": "^1.4.2",
     "@elysiajs/swagger": "^1.3.1",
     "@sinclair/typebox": "^0.34.49",
-    "@svadmin/core": "^0.25.5",
+    "@svadmin/core": "^0.27.1",
     "@svadmin/elysia": "^0.10.6",
     "ajv": "^8.20.0",
     "ajv-formats": "^3.0.1",
