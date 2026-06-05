@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.4](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.8.3...edge-runtime-v0.8.4) (2026-06-05)
+
+
+### Bug Fixes
+
+* **ci:** pin Bun runtime to 1.3.14 ([03304e8](https://github.com/zuohuadong/supacloud/commit/03304e821eeab32849004c623af34b3c96bee0ce))
+
 ## [0.8.3](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.8.2...edge-runtime-v0.8.3) (2026-06-03)
 
 

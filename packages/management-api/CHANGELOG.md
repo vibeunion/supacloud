@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.30.1](https://github.com/zuohuadong/supacloud/compare/management-api-v0.30.0...management-api-v0.30.1) (2026-06-05)
+
+
+### Bug Fixes
+
+* **ci:** pin Bun runtime to 1.3.14 ([03304e8](https://github.com/zuohuadong/supacloud/commit/03304e821eeab32849004c623af34b3c96bee0ce))
+
 ## [0.30.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.29.9...management-api-v0.30.0) (2026-06-04)
 
 
