@@ -17,7 +17,7 @@ function isSafeZipEntryName(name: string): boolean {
 }
 
 async function validateZipArchive(zipPath: string): Promise<{ ok: true } | { ok: false; message: string }> {
-  const namesResult = await Bun.$`unzip -Z -1 ${zipPath}`.quiet();
+  const namesResult = await Bun.$`unzip -Z -1 ${zipPath}`.quiet().nothrow();
   if (namesResult.exitCode !== 0) {
     return { ok: false, message: "Invalid zip archive" };
   }
@@ -33,7 +33,7 @@ async function validateZipArchive(zipPath: string): Promise<{ ok: true } | { ok:
     }
   }
 
-  const listResult = await Bun.$`unzip -Z -l ${zipPath}`.quiet();
+  const listResult = await Bun.$`unzip -Z -l ${zipPath}`.quiet().nothrow();
   if (listResult.exitCode !== 0) {
     return { ok: false, message: "Invalid zip archive" };
   }
@@ -58,27 +58,60 @@ async function validateZipArchive(zipPath: string): Promise<{ ok: true } | { ok:
 }
 
 async function readUploadedZip(request: Request, body: unknown): Promise<Uint8Array> {
-  if (body instanceof File || body instanceof Blob) {
-    return new Uint8Array(await body.arrayBuffer());
+  // 1. 如果 body 本身就是 File / Blob，或具有 arrayBuffer 方法
+  if (body && typeof body === "object" && typeof (body as any).arrayBuffer === "function") {
+    try {
+      return new Uint8Array(await (body as any).arrayBuffer());
+    } catch {
+      // ignore
+    }
   }
 
+  // 2. 如果 body 是一个对象，检测其属性（例如 file 字段，或其他任意包含 arrayBuffer 的字段）
   if (body && typeof body === "object") {
     const directFile = (body as Record<string, unknown>).file;
-    if (directFile instanceof File || directFile instanceof Blob) {
-      return new Uint8Array(await directFile.arrayBuffer());
+    if (directFile && typeof directFile === "object" && typeof (directFile as any).arrayBuffer === "function") {
+      try {
+        return new Uint8Array(await (directFile as any).arrayBuffer());
+      } catch {
+        // ignore
+      }
+    }
+
+    // 遍历所有键，兼容不同客户端的自定义字段名
+    for (const val of Object.values(body)) {
+      if (val && typeof val === "object" && typeof (val as any).arrayBuffer === "function") {
+        try {
+          return new Uint8Array(await (val as any).arrayBuffer());
+        } catch {
+          // ignore
+        }
+      }
     }
   }
 
+  // 3. 若流未被 Elysia 消费，直接从 request 读取，添加异常保护，移除 clone
   const contentType = request.headers.get("content-type") || "";
   if (contentType.includes("multipart/form-data")) {
-    const form = await request.clone().formData();
-    const file = form.get("file");
-    if (file instanceof File) {
-      return new Uint8Array(await file.arrayBuffer());
+    try {
+      const form = await request.formData();
+      const file = form.get("file");
+      if (file && typeof file === "object" && typeof (file as any).arrayBuffer === "function") {
+        return new Uint8Array(await (file as any).arrayBuffer());
+      }
+    } catch {
+      // ignore
     }
   }
 
-  return new Uint8Array(await request.clone().arrayBuffer());
+  // 4. 最后回退：尝试直接读取 request 二进制，添加异常保护
+  try {
+    return new Uint8Array(await request.arrayBuffer());
+  } catch {
+    // ignore
+  }
+
+  return new Uint8Array(0);
 }
 
 export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" })
