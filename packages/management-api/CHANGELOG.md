@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.30.3](https://github.com/zuohuadong/supacloud/compare/management-api-v0.30.2...management-api-v0.30.3) (2026-06-06)
+
+
+### Bug Fixes
+
+* **management-api:** prevent empty_stream connection reset during frontend zip upload ([#298](https://github.com/zuohuadong/supacloud/issues/298)) ([3687228](https://github.com/zuohuadong/supacloud/commit/36872281590f66fd92ff6cd76891c2e1bfa085a9))
+
 ## [0.30.2](https://github.com/zuohuadong/supacloud/compare/management-api-v0.30.1...management-api-v0.30.2) (2026-06-06)
 
 
