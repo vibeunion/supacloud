@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.3](https://github.com/zuohuadong/supacloud/compare/web-console-v0.14.2...web-console-v0.14.3) (2026-06-06)
+
+
+### Miscellaneous Chores
+
+* **deps:** bump @svadmin/core in /packages/web-console ([#295](https://github.com/zuohuadong/supacloud/issues/295)) ([29f6385](https://github.com/zuohuadong/supacloud/commit/29f6385487693e5a719a11b7e2de06f46f37d9c0))
+
 ## [0.14.2](https://github.com/zuohuadong/supacloud/compare/web-console-v0.14.1...web-console-v0.14.2) (2026-06-04)
 
 

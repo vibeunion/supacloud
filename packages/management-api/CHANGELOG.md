@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.30.2](https://github.com/zuohuadong/supacloud/compare/management-api-v0.30.1...management-api-v0.30.2) (2026-06-06)
+
+
+### Miscellaneous Chores
+
+* **deps:** bump @svadmin/core in /packages/management-api ([#296](https://github.com/zuohuadong/supacloud/issues/296)) ([345aeb5](https://github.com/zuohuadong/supacloud/commit/345aeb508e206a8052bc6ec15c2eb602dce3b238))
+
 ## [0.30.1](https://github.com/zuohuadong/supacloud/compare/management-api-v0.30.0...management-api-v0.30.1) (2026-06-05)
 
 
