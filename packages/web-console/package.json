@@ -43,7 +43,7 @@
     "zod": "^4.4.3"
   },
   "dependencies": {
-    "@svadmin/core": "^0.25.5",
+    "@svadmin/core": "^0.27.1",
     "@svadmin/elysia": "^0.10.6",
     "@svadmin/sveltekit": "^0.9.3",
     "@svadmin/ui": "^0.34.9",
