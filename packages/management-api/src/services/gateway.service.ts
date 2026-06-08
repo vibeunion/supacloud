@@ -832,7 +832,8 @@ export class CaddyGatewayProvider implements GatewayProvider {
             handle: [{
                 handler: "rewrite",
                 uri: "{http.matchers.file.relative}",
-            }],
+            }, this.makeStaticFileServer(root)],
+            terminal: true,
         };
     }
 
@@ -905,7 +906,8 @@ export class CaddyGatewayProvider implements GatewayProvider {
             handle: [{
                 handler: "rewrite",
                 uri: "{http.matchers.file.relative}",
-            }],
+            }, this.makeStaticFileServer(root)],
+            terminal: true,
         };
     }
 

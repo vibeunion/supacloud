@@ -372,7 +372,8 @@ describe("CaddyGatewayProvider", () => {
         const assetRoute = subroutes[assetRouteIndex];
         const missingAssetRoute = subroutes[missingAssetRouteIndex];
         const fallback = subroutes[fallbackIndex];
-        const tryFiles = subroutes.find((item: any) => item.match?.[0]?.file?.try_files?.includes("{http.request.uri.path}.html"))?.match?.[0]?.file;
+        const tryFilesRoute = subroutes.find((item: any) => item.match?.[0]?.file?.try_files?.includes("{http.request.uri.path}.html"));
+        const tryFiles = tryFilesRoute?.match?.[0]?.file;
         const avifRoute = subroutes[avifRouteIndex];
         const webpRoute = subroutes[webpRouteIndex];
         const fileServer = subroute?.routes?.at(-1)?.handle?.at(-1);
@@ -394,10 +395,16 @@ describe("CaddyGatewayProvider", () => {
         expect(missingAssetRouteIndex).toBeGreaterThan(assetRouteIndex);
         expect(missingAssetRouteIndex).toBeLessThan(fallbackIndex);
         expect(tryFiles?.try_files).not.toContain("/index.html");
+        expect(tryFilesRoute?.handle?.at(-1)?.handler).toBe("file_server");
+        expect(tryFilesRoute?.terminal).toBe(true);
         expect(fallback?.handle?.[0]?.response?.set?.["Cache-Control"]).toEqual(["no-cache"]);
         expect(fallback?.handle?.[1]?.uri).toBe("{http.matchers.file.relative}");
         expect(avifRoute?.match?.[0]?.file?.try_files).toEqual(["{http.request.uri.path}.avif"]);
         expect(webpRoute?.match?.[0]?.file?.try_files).toEqual(["{http.request.uri.path}.webp"]);
+        expect(avifRoute?.handle?.at(-1)?.handler).toBe("file_server");
+        expect(avifRoute?.terminal).toBe(true);
+        expect(webpRoute?.handle?.at(-1)?.handler).toBe("file_server");
+        expect(webpRoute?.terminal).toBe(true);
         expect(fileServer?.handler).toBe("file_server");
         expect(fileServer?.root).toBe("/var/supacloud/frontends/proj123/0000002b/build");
         expect(fileServer?.precompressed).toEqual({ br: {}, zstd: {}, gzip: {} });
