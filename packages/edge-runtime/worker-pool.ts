@@ -19,7 +19,16 @@ interface DispatchOptions {
   }) => void;
 }
 
-const MAX_BODY_SIZE = 10 * 1024 * 1024;
+const DEFAULT_MAX_BODY_SIZE_MB = 30;
+function resolveMaxBodySizeBytes(value = process.env.EDGE_MAX_BODY_SIZE_MB): number {
+  const configuredMb = Number(value);
+  const maxBodySizeMb = Number.isFinite(configuredMb) && configuredMb > 0
+    ? configuredMb
+    : DEFAULT_MAX_BODY_SIZE_MB;
+  return maxBodySizeMb * 1024 * 1024;
+}
+
+const MAX_BODY_SIZE = resolveMaxBodySizeBytes();
 const MAX_QUEUE_SIZE = Number(process.env.MAX_QUEUE_SIZE) || 200;
 const WORKER_SMOL = process.env.WORKER_SMOL !== "false";
 const WAIT_UNTIL_TIMEOUT_MS = Number(process.env.EDGE_WAIT_UNTIL_TIMEOUT_MS) || 300_000;

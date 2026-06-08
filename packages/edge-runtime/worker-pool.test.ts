@@ -229,3 +229,173 @@ describe("WorkerPool metrics NaN fix", () => {
     }
   });
 });
+
+describe("WorkerPool body size limit", () => {
+  test("rejects request with content-length exceeding default limit (30MB)", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-body-limit-"));
+    const functionPath = join(projectRoot, "fn.ts");
+    await Bun.write(functionPath, `
+      export default {
+        async fetch() {
+          return new Response("should not reach", { status: 200 });
+        }
+      }
+    `);
+
+    const pool = new WorkerPool({ size: 1, requestTimeout: 2_000 });
+    pools.push(pool);
+
+    try {
+      const oversizedLength = 31 * 1024 * 1024;
+      const req = new Request("http://edge.local/functions/v1/test", {
+        method: "POST",
+        headers: { "content-length": String(oversizedLength) },
+        body: "x".repeat(100),
+      });
+
+      const res = await pool.dispatch({
+        functionId: "test_body_limit",
+        functionPath,
+        projectRoot,
+        env: {},
+        request: req,
+      });
+
+      expect(res.status).toBe(413);
+      const body = await res.json();
+      expect(body.error).toContain("Request body too large");
+      expect(body.error).toContain("30MB");
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("rejects request when actual body exceeds default limit", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-body-actual-"));
+    const functionPath = join(projectRoot, "fn.ts");
+    await Bun.write(functionPath, `
+      export default {
+        async fetch() {
+          return new Response("should not reach", { status: 200 });
+        }
+      }
+    `);
+
+    const pool = new WorkerPool({ size: 1, requestTimeout: 5_000 });
+    pools.push(pool);
+
+    try {
+      const oversizedBody = "x".repeat(31 * 1024 * 1024);
+      const req = new Request("http://edge.local/functions/v1/test", {
+        method: "POST",
+        body: oversizedBody,
+      });
+
+      const res = await pool.dispatch({
+        functionId: "test_body_actual",
+        functionPath,
+        projectRoot,
+        env: {},
+        request: req,
+      });
+
+      expect(res.status).toBe(413);
+      const body = await res.json();
+      expect(body.error).toContain("Request body too large");
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("respects EDGE_MAX_BODY_SIZE_MB environment variable", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-body-env-"));
+    const functionPath = join(projectRoot, "fn.ts");
+    await Bun.write(functionPath, `
+      export default {
+        async fetch() {
+          return new Response("ok", { status: 200 });
+        }
+      }
+    `);
+
+    const previousLimit = process.env.EDGE_MAX_BODY_SIZE_MB;
+    process.env.EDGE_MAX_BODY_SIZE_MB = "1";
+
+    const { WorkerPool: FreshPool } = await import("./worker-pool?" + Date.now());
+    const pool = new FreshPool({ size: 1, requestTimeout: 2_000 });
+    pools.push(pool);
+
+    try {
+      const req = new Request("http://edge.local/functions/v1/test", {
+        method: "POST",
+        headers: { "content-length": String(2 * 1024 * 1024) },
+        body: "x".repeat(100),
+      });
+
+      const res = await pool.dispatch({
+        functionId: "test_body_env",
+        functionPath,
+        projectRoot,
+        env: {},
+        request: req,
+      });
+
+      expect(res.status).toBe(413);
+      const body = await res.json();
+      expect(body.error).toContain("1MB");
+    } finally {
+      if (previousLimit === undefined) {
+        delete process.env.EDGE_MAX_BODY_SIZE_MB;
+      } else {
+        process.env.EDGE_MAX_BODY_SIZE_MB = previousLimit;
+      }
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("falls back to default limit for invalid EDGE_MAX_BODY_SIZE_MB", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-body-invalid-env-"));
+    const functionPath = join(projectRoot, "fn.ts");
+    await Bun.write(functionPath, `
+      export default {
+        async fetch() {
+          return new Response("should not reach", { status: 200 });
+        }
+      }
+    `);
+
+    const previousLimit = process.env.EDGE_MAX_BODY_SIZE_MB;
+    process.env.EDGE_MAX_BODY_SIZE_MB = "Infinity";
+
+    const { WorkerPool: FreshPool } = await import("./worker-pool?" + Date.now());
+    const pool = new FreshPool({ size: 1, requestTimeout: 2_000 });
+    pools.push(pool);
+
+    try {
+      const req = new Request("http://edge.local/functions/v1/test", {
+        method: "POST",
+        headers: { "content-length": String(31 * 1024 * 1024) },
+        body: "x".repeat(100),
+      });
+
+      const res = await pool.dispatch({
+        functionId: "test_body_invalid_env",
+        functionPath,
+        projectRoot,
+        env: {},
+        request: req,
+      });
+
+      expect(res.status).toBe(413);
+      const body = await res.json();
+      expect(body.error).toContain("30MB");
+    } finally {
+      if (previousLimit === undefined) {
+        delete process.env.EDGE_MAX_BODY_SIZE_MB;
+      } else {
+        process.env.EDGE_MAX_BODY_SIZE_MB = previousLimit;
+      }
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+});
