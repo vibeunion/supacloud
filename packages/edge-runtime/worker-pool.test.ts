@@ -24,6 +24,81 @@ async function waitForFile(path: string, timeoutMs = 2_000): Promise<string> {
   throw new Error(`Timed out waiting for ${path}`);
 }
 
+describe("WorkerPool request body size limit", () => {
+  const maxBodySize = 30 * 1024 * 1024;
+
+  test("rejects declared request bodies above 30MB", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-body-limit-header-"));
+    const functionPath = join(projectRoot, "fn.ts");
+    await Bun.write(functionPath, `
+      export default {
+        async fetch() {
+          return new Response("should-not-run", { status: 200 });
+        }
+      }
+    `);
+
+    const pool = new WorkerPool({ size: 1, requestTimeout: 2_000 });
+    pools.push(pool);
+
+    try {
+      const response = await pool.dispatch({
+        functionId: "test_body_limit_header",
+        functionPath,
+        projectRoot,
+        env: {},
+        request: new Request("http://edge.local/functions/v1/test", {
+          method: "POST",
+          headers: { "content-length": String(maxBodySize + 1) },
+          body: new Uint8Array([1]),
+        }),
+      });
+
+      expect(response.status).toBe(413);
+      expect(await response.json()).toEqual({
+        error: "Request body too large (max 30MB)",
+      });
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("rejects actual request bodies above 30MB", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-body-limit-actual-"));
+    const functionPath = join(projectRoot, "fn.ts");
+    await Bun.write(functionPath, `
+      export default {
+        async fetch() {
+          return new Response("should-not-run", { status: 200 });
+        }
+      }
+    `);
+
+    const pool = new WorkerPool({ size: 1, requestTimeout: 2_000 });
+    pools.push(pool);
+
+    try {
+      const response = await pool.dispatch({
+        functionId: "test_body_limit_actual",
+        functionPath,
+        projectRoot,
+        env: {},
+        request: new Request("http://edge.local/functions/v1/test", {
+          method: "POST",
+          body: new Uint8Array(maxBodySize + 1),
+        }),
+      });
+
+      expect(response.status).toBe(413);
+      expect(await response.json()).toEqual({
+        error: "Request body too large (max 30MB)",
+      });
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("WorkerPool EdgeRuntime.waitUntil", () => {
   test("keeps tenant env available after the HTTP response is returned", async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-waituntil-"));

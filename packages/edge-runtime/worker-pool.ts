@@ -19,7 +19,7 @@ interface DispatchOptions {
   }) => void;
 }
 
-const MAX_BODY_SIZE = 10 * 1024 * 1024;
+const MAX_BODY_SIZE = 30 * 1024 * 1024;
 const MAX_QUEUE_SIZE = Number(process.env.MAX_QUEUE_SIZE) || 200;
 const WORKER_SMOL = process.env.WORKER_SMOL !== "false";
 const WAIT_UNTIL_TIMEOUT_MS = Number(process.env.EDGE_WAIT_UNTIL_TIMEOUT_MS) || 300_000;
