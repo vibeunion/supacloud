@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.30.4](https://github.com/zuohuadong/supacloud/compare/management-api-v0.30.3...management-api-v0.30.4) (2026-06-08)
+
+
+### Bug Fixes
+
+* **gateway:** stop static frontend fallback leaks ([48aaaa3](https://github.com/zuohuadong/supacloud/commit/48aaaa3c35d7cb4538d3f20a613579b480e23eba))
+
 ## [0.30.3](https://github.com/zuohuadong/supacloud/compare/management-api-v0.30.2...management-api-v0.30.3) (2026-06-06)
 
 
