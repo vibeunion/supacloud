@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.5](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.8.4...edge-runtime-v0.8.5) (2026-06-08)
+
+
+### Bug Fixes
+
+* **edge-runtime:** make request body limit configurable ([3d08370](https://github.com/zuohuadong/supacloud/commit/3d08370ada5188d9c11b639b973ed3736ea04a02))
+
 ## [0.8.4](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.8.3...edge-runtime-v0.8.4) (2026-06-05)
 
 
