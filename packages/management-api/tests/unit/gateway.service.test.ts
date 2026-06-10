@@ -423,6 +423,8 @@ describe("CaddyGatewayProvider", () => {
                 hosts: ["ocr.example.com"],
                 path: "/api/*",
                 upstream: "https://10.20.0.12:4001",
+                upstream_tls_insecure_skip_verify: true,
+                rewrite_uri: "/functions/v1/supauth{http.request.uri.path}",
                 headers: { "X-Custom-Upstream": "ocr" },
                 cors: ["https://app.example.com"],
                 priority: 10,
@@ -451,6 +453,7 @@ describe("CaddyGatewayProvider", () => {
         const docs = routes.find((item: any) => item["@id"] === "route-custom-gateway-proj123-docs");
         const disabled = routes.find((item: any) => item["@id"] === "route-custom-gateway-proj123-disabled");
         const proxy = ocr?.handle?.find((handler: any) => handler.handler === "reverse_proxy");
+        const rewrite = ocr?.handle?.find((handler: any) => handler.handler === "rewrite");
         const corsSubroute = ocr?.handle?.find((handler: any) => handler.handler === "subroute");
 
         expect(routes[0]?.["@id"]).toBe("route-custom-gateway-proj123-ocr");
@@ -458,8 +461,9 @@ describe("CaddyGatewayProvider", () => {
         expect(ocr?.match?.[0]?.host).toEqual(["ocr.example.com"]);
         expect(ocr?.match?.[0]?.path).toEqual(["/api/*"]);
         expect(corsSubroute?.routes?.[0]?.match?.[0]?.header?.Origin).toContain("https://app.example.com");
+        expect(rewrite?.uri).toBe("/functions/v1/supauth{http.request.uri.path}");
         expect(proxy?.upstreams?.[0]?.dial).toBe("10.20.0.12:4001");
-        expect(proxy?.transport?.tls).toEqual({});
+        expect(proxy?.transport?.tls).toEqual({ insecure_skip_verify: true });
         expect(proxy?.headers?.request?.set?.["X-Custom-Upstream"]).toEqual(["ocr"]);
         expect(docs?.handle?.at(-1)?.handler).toBe("file_server");
         expect(docs?.handle?.at(-1)?.root).toBe("/var/supacloud/custom-sites/docs");

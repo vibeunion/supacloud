@@ -35,6 +35,8 @@ describe("controlled custom gateway routes API", () => {
           hosts: ["OCR.EXAMPLE.COM"],
           path: "/api/*",
           upstream: "https://10.20.0.12:4001",
+          upstream_tls_insecure_skip_verify: true,
+          rewrite_uri: "/functions/v1/supauth{http.request.uri.path}",
           headers: { "X-Upstream": "ocr" },
           cors: ["https://app.example.com"],
           priority: 5,
@@ -49,6 +51,8 @@ describe("controlled custom gateway routes API", () => {
           hosts: ["ocr.example.com"],
           path: "/api/*",
           upstream: "https://10.20.0.12:4001",
+          upstream_tls_insecure_skip_verify: true,
+          rewrite_uri: "/functions/v1/supauth{http.request.uri.path}",
           priority: 5,
           enabled: true,
         }),
@@ -58,7 +62,12 @@ describe("controlled custom gateway routes API", () => {
       ]);
       expect(updateSettings).toHaveBeenCalledWith("proj123", {
         gateway_routes: [
-          expect.objectContaining({ id: "ocr", hosts: ["ocr.example.com"] }),
+          expect.objectContaining({
+            id: "ocr",
+            hosts: ["ocr.example.com"],
+            upstream_tls_insecure_skip_verify: true,
+            rewrite_uri: "/functions/v1/supauth{http.request.uri.path}",
+          }),
         ],
       });
       expect(getSettings).toHaveBeenCalledWith("proj123");
