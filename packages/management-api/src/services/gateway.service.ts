@@ -112,7 +112,10 @@ export interface CustomGatewayRouteConfig {
     hosts: string[];
     path: string | string[];
     upstream?: string;
+    upstream_tls_insecure_skip_verify?: boolean;
     static_root?: string;
+    rewrite_uri?: string;
+    strip_prefix?: string;
     headers?: Record<string, string>;
     cors?: string[];
     priority?: number;
@@ -256,6 +259,22 @@ function normalizeCustomStaticRoot(root: string): string {
     return value.replace(/\/+$/, "") || "/";
 }
 
+function normalizeCustomRewriteUri(value: string | undefined): string | undefined {
+    if (value === undefined) return undefined;
+    const normalized = String(value || "").trim();
+    if (!normalized) return undefined;
+    if (!normalized.startsWith("/") || /[\r\n\t]/.test(normalized) || normalized.includes("://")) {
+        throw new Error("Custom route rewrite_uri must start with / and must not contain a URL or control characters");
+    }
+    return normalized;
+}
+
+function normalizeCustomStripPrefix(value: string | undefined): string | undefined {
+    if (value === undefined) return undefined;
+    const normalized = normalizeCustomPath(value).replace(/\/+$/, "");
+    return normalized || "/";
+}
+
 function normalizeCustomUpstream(upstream: string): { dial: string; tls: boolean } {
     const value = String(upstream || "").trim();
     if (!value || /[\r\n\t]/.test(value)) throw new Error("Custom route upstream is invalid");
@@ -299,13 +318,20 @@ export function normalizeCustomGatewayRoute(input: CustomGatewayRouteConfig): Cu
     const hasUpstream = typeof input.upstream === "string" && input.upstream.trim().length > 0;
     const hasStaticRoot = typeof input.static_root === "string" && input.static_root.trim().length > 0;
     if (hasUpstream === hasStaticRoot) throw new Error("Custom route must set exactly one of upstream or static_root");
+    const rewriteUri = normalizeCustomRewriteUri(input.rewrite_uri);
+    const stripPrefix = normalizeCustomStripPrefix(input.strip_prefix);
+    if (rewriteUri && stripPrefix) throw new Error("Custom route must not set both rewrite_uri and strip_prefix");
+    if ((rewriteUri || stripPrefix) && !hasUpstream) throw new Error("Custom route rewrite_uri or strip_prefix requires an upstream route");
 
     return {
         id,
         hosts,
         path: Array.isArray(input.path) ? normalizedPaths : normalizedPaths[0],
         upstream: hasUpstream ? input.upstream!.trim() : undefined,
+        upstream_tls_insecure_skip_verify: input.upstream_tls_insecure_skip_verify === true,
         static_root: hasStaticRoot ? normalizeCustomStaticRoot(input.static_root!) : undefined,
+        rewrite_uri: rewriteUri,
+        strip_prefix: stripPrefix,
         headers: normalizeCustomHeaders(input.headers),
         cors: input.cors ? uniqueStrings(input.cors.map((origin) => origin.trim()).filter(Boolean)).slice(0, 50) : undefined,
         priority: Number.isFinite(input.priority) ? Math.trunc(input.priority || 0) : 0,
@@ -635,7 +661,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
         }
     }
 
-    private makeReverseProxy(upstream: string, headers: Record<string, CaddyHeaderValue>, readTimeoutMs?: number, preserveUpstreamCors?: boolean, streaming?: boolean, upstreamTls?: boolean): Record<string, unknown> {
+    private makeReverseProxy(upstream: string, headers: Record<string, CaddyHeaderValue>, readTimeoutMs?: number, preserveUpstreamCors?: boolean, streaming?: boolean, upstreamTls?: boolean, upstreamTlsInsecureSkipVerify?: boolean): Record<string, unknown> {
         const responseHeaders: Record<string, unknown> = {};
         if (!preserveUpstreamCors) {
             responseHeaders.delete = [...UPSTREAM_CORS_RESPONSE_HEADERS];
@@ -655,7 +681,9 @@ export class CaddyGatewayProvider implements GatewayProvider {
             },
         };
         if (upstreamTls) {
-            (proxy.transport as Record<string, unknown>).tls = {};
+            (proxy.transport as Record<string, unknown>).tls = upstreamTlsInsecureSkipVerify
+                ? { insecure_skip_verify: true }
+                : {};
         }
         if (Object.keys(responseHeaders).length > 0) {
             (proxy.headers as Record<string, unknown>).response = responseHeaders;
@@ -1029,7 +1057,9 @@ export class CaddyGatewayProvider implements GatewayProvider {
                 "X-Forwarded-Proto": "{http.request.scheme}",
             };
             for (const [key, value] of Object.entries(route.headers || {})) headers[key] = value;
-            handle.push(this.makeReverseProxy(upstream.dial, headers, 500_000, false, true, upstream.tls));
+            if (route.rewrite_uri) handle.push({ handler: "rewrite", uri: route.rewrite_uri });
+            else if (route.strip_prefix) handle.push({ handler: "rewrite", strip_path_prefix: route.strip_prefix });
+            handle.push(this.makeReverseProxy(upstream.dial, headers, 500_000, false, true, upstream.tls, route.upstream_tls_insecure_skip_verify));
         } else if (route.static_root) {
             if (route.headers && Object.keys(route.headers).length > 0) {
                 handle.push({
