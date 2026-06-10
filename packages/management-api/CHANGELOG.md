@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.31.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.30.4...management-api-v0.31.0) (2026-06-10)
+
+
+### Features
+
+* support rewrite custom gateway routes ([4e257ed](https://github.com/zuohuadong/supacloud/commit/4e257ed7d19eb9a824f37c89c4cd716944ec75b3))
+
 ## [0.30.4](https://github.com/zuohuadong/supacloud/compare/management-api-v0.30.3...management-api-v0.30.4) (2026-06-08)
 
 
