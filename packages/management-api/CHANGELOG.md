@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.31.1](https://github.com/zuohuadong/supacloud/compare/management-api-v0.31.0...management-api-v0.31.1) (2026-06-11)
+
+
+### Bug Fixes
+
+* **auth:** sign GoTrue admin tokens with project JWKS ([1b4f7a4](https://github.com/zuohuadong/supacloud/commit/1b4f7a47907e3ff8740c629fd5f3616ae548618e))
+
 ## [0.31.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.30.4...management-api-v0.31.0) (2026-06-10)
 
 
