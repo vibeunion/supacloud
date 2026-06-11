@@ -174,7 +174,11 @@ jobs:
         run: |
           bun test tests/unit/sdk-proxy.functions.test.ts
           bun test tests/unit/gateway.service.test.ts
-          bun test $(find tests/unit -name "*.test.ts" ! -name "sdk-proxy.functions.test.ts" ! -name "gateway.service.test.ts" | sort)
+          find tests/unit -name "*.test.ts" ! -name "sdk-proxy.functions.test.ts" ! -name "gateway.service.test.ts" | sort | while read -r test_file; do
+            echo "::group::$test_file"
+            bun test "$test_file"
+            echo "::endgroup::"
+          done
 
   integration-test:
     name: Integration & Compliance Tests
