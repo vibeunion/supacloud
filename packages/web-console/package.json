@@ -46,7 +46,7 @@
     "@svadmin/core": "^0.27.1",
     "@svadmin/elysia": "^0.10.6",
     "@svadmin/sveltekit": "^0.9.3",
-    "@svadmin/ui": "^0.34.9",
+    "@svadmin/ui": "^0.36.0",
     "@tanstack/svelte-query": "^6.1.34",
     "highlight.js": "^11.11.1",
     "isomorphic-dompurify": "^3.15.0",
