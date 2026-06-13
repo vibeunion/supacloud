@@ -311,7 +311,7 @@ Deno.serve(async (req) => {
     // Refetch the user to bundle the completed identity payload within the first session
     const { data: finalUser } = await supabaseAdmin.auth.admin.getUserById(sessionData.user.id)
     const finalSession = finalUser?.user ? { ...sessionData.session, user: finalUser.user } : sessionData.session
-    const responseUser = finalUser?.user ?? sessionData.user ?? null
+    const responseUser = finalSession.user ?? null
     // Embed native OAuth provider tokens to complete the session payload matching Official Supabase
     if (session_key) (finalSession as any).provider_token = session_key;
 
@@ -432,7 +432,7 @@ Deno.serve(async (req) => {
     // Refetch the user to bundle the completed identity payload within the first session
     const { data: finalUser } = await supabaseAdmin.auth.admin.getUserById(sessionData.user.id)
     const finalSession = finalUser?.user ? { ...sessionData.session, user: finalUser.user } : sessionData.session
-    const responseUser = finalUser?.user ?? sessionData.user ?? null
+    const responseUser = finalSession.user ?? null
     // Embed native OAuth provider tokens to complete the session payload matching Official Supabase
     if (tokenData.access_token) (finalSession as any).provider_token = tokenData.access_token;
     if (tokenData.refresh_token) (finalSession as any).provider_refresh_token = tokenData.refresh_token;
@@ -445,3 +445,8 @@ Deno.serve(async (req) => {
   }
 })`;
 }
+
+export const wechatAuthInternals = {
+  generateWeChatMiniProgramLoginFunction,
+  generateWeChatMPLoginFunction,
+};
