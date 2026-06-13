@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.31.2](https://github.com/zuohuadong/supacloud/compare/management-api-v0.31.1...management-api-v0.31.2) (2026-06-13)
+
+
+### Bug Fixes
+
+* **auth-wechat:** align login response with supabase-mp-js ([d957a52](https://github.com/zuohuadong/supacloud/commit/d957a5287fa25425934e4e2d82fd77803c8542b2))
+
 ## [0.31.1](https://github.com/zuohuadong/supacloud/compare/management-api-v0.31.0...management-api-v0.31.1) (2026-06-11)
 
 
