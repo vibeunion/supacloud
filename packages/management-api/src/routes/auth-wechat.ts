@@ -311,10 +311,13 @@ Deno.serve(async (req) => {
     // Refetch the user to bundle the completed identity payload within the first session
     const { data: finalUser } = await supabaseAdmin.auth.admin.getUserById(sessionData.user.id)
     const finalSession = finalUser?.user ? { ...sessionData.session, user: finalUser.user } : sessionData.session
+    const responseUser = finalSession.user ?? null
     // Embed native OAuth provider tokens to complete the session payload matching Official Supabase
     if (session_key) (finalSession as any).provider_token = session_key;
 
-    return new Response(JSON.stringify(finalSession), { headers: { ...corsHeaders, ...corsOriginHeader(req), "Content-Type": "application/json" } })
+    // 包裹在 { data: { session, user } } 中，符合 supabase-mp-js 的 signInWithWechat 契约
+    // signInWithWechat 从 responseData.data.session 和 responseData.data.user 解构 session/user
+    return new Response(JSON.stringify({ data: { session: finalSession, user: responseUser } }), { headers: { ...corsHeaders, ...corsOriginHeader(req), "Content-Type": "application/json" } })
   } catch (error: unknown) {
     console.error("WeChat MiniProgram Login Error:", error instanceof Error ? error.message : String(error))
     return new Response(JSON.stringify({ data: { session: null, user: null }, error: (error instanceof Error ? error.message : String(error)) }), { headers: { ...corsHeaders, ...corsOriginHeader(req), "Content-Type": "application/json" }, status: 400 })
@@ -429,14 +432,21 @@ Deno.serve(async (req) => {
     // Refetch the user to bundle the completed identity payload within the first session
     const { data: finalUser } = await supabaseAdmin.auth.admin.getUserById(sessionData.user.id)
     const finalSession = finalUser?.user ? { ...sessionData.session, user: finalUser.user } : sessionData.session
+    const responseUser = finalSession.user ?? null
     // Embed native OAuth provider tokens to complete the session payload matching Official Supabase
     if (tokenData.access_token) (finalSession as any).provider_token = tokenData.access_token;
     if (tokenData.refresh_token) (finalSession as any).provider_refresh_token = tokenData.refresh_token;
 
-    return new Response(JSON.stringify(finalSession), { headers: { ...corsHeaders, ...corsOriginHeader(req), "Content-Type": "application/json" } })
+    // 包裹在 { data: { session, user } } 中，符合 supabase-mp-js 的 signInWithWechat 契约
+    return new Response(JSON.stringify({ data: { session: finalSession, user: responseUser } }), { headers: { ...corsHeaders, ...corsOriginHeader(req), "Content-Type": "application/json" } })
   } catch (error: unknown) {
     console.error("WeChat MP Login Error:", error instanceof Error ? error.message : String(error))
     return new Response(JSON.stringify({ data: { session: null, user: null }, error: (error instanceof Error ? error.message : String(error)) }), { headers: { ...corsHeaders, ...corsOriginHeader(req), "Content-Type": "application/json" }, status: 400 })
   }
 })`;
 }
+
+export const wechatAuthInternals = {
+  generateWeChatMiniProgramLoginFunction,
+  generateWeChatMPLoginFunction,
+};
