@@ -43,9 +43,13 @@ Legend:
 | Git webhook deploy pipeline for hosted frontends | **Built-in** | External / manual | External / manual |
 | Built-in China-focused OAuth integrations (WeChat / Alipay / DingTalk) | **Built-in** | Partial via generic auth providers, no equivalent China-focused operator surface documented as built-in | Partial / manual |
 | Runtime log streaming in the self-host control plane | **Built-in** | **Built-in** in hosted dashboard/log explorer | External / manual |
+| Configurable log drains (forward to webhook / Datadog / Loki / Elasticsearch) | **Built-in** | **Built-in** | External / manual |
+| S3-compatible storage API with SigV4 (ListBuckets / PutObject / GetObject / DeleteObject / HeadObject) | **Built-in** (SigV4 + Bearer) | Partial (via extensions) | External / manual |
+| Scheduled Edge Functions (cron-based triggers) | **Built-in** | **Built-in** (pg_cron + pg_net) | Manual (pg_cron) |
+| pg-meta typed metadata API (tables / columns / indexes / roles / policies / etc.) | **Built-in** | **Built-in** | External tool |
 | Built-in platform backups / restore surface | **Built-in** | **Built-in** | Operator responsibility |
 | Built-in PITR-style restore API surface | **Built-in** (platform-managed in control plane) | **Built-in** | Operator responsibility |
-| Managed branching / preview environments | External / manual today | **Built-in** | Cloud only |
+| Managed branching / preview environments | **Built-in** (API + UI + Git auto-branch) | **Built-in** | Cloud only |
 | Shared-infra multi-tenancy to improve self-host density | **Built-in** | N/A to end users | External / manual |
 | Official Docker self-host quickstart | **Built-in** (`docker/self-host`) | N/A | **Built-in** |
 
@@ -99,18 +103,22 @@ Supabase Cloud has the clear advantage whenever the requirement is:
 - managed infrastructure
 - managed backups and PITR
 - managed logs explorer
-- hosted branching / preview environments
+- fully managed Git-based branching with deeper CI integration
 - hosted SLA/operational ownership
 
 SupaCloud does not try to replace Supabase Cloud on those hosted platform dimensions. Its value is in **self-hosted control plane + multi-tenant operations**.
 
 ### 2. Branching
 
-Supabase Cloud provides branch environments and preview branches as a documented product capability. SupaCloud does not currently ship an equivalent built-in branching product.
+Supabase Cloud provides branch environments and preview branches as a fully managed product. SupaCloud now ships full branching support:
+- Branching API (`/v1/projects/:ref/branches`) with create/promote/delete via `pg_dump | psql` DB clone
+- Web console UI for branch management (create, delete, promote with confirmation)
+- Git auto-branching: configure auto-branch rules per project, and Git push events automatically create preview branches for non-base branches
+- Auto-branching config API (`/v1/projects/:ref/auto-branching`) with exclude patterns and branch prefix support
 
 ### 3. Hosted observability ergonomics
 
-Supabase Cloud documents a Logs Explorer and product-specific logs surfaces in the hosted dashboard. SupaCloud provides logs and streaming in its own control plane, but it is not equivalent to Supabase Cloud’s fully hosted observability stack.
+Supabase Cloud documents a Logs Explorer and product-specific logs surfaces in the hosted dashboard. SupaCloud provides logs and streaming in its own control plane, plus a persistent log-drains API for forwarding events to external sinks (webhook, Datadog, Grafana Loki, Elasticsearch). It is not, however, equivalent to Supabase Cloud
 
 ## Where Supabase Self-Hosted is still the right answer
 
@@ -136,7 +144,8 @@ In that model, adding your own project control plane, routing model, logs UI, te
 ### Choose Supabase Cloud when
 
 - you want minimal infrastructure ownership
-- you need managed branching and managed observability
+- you need fully managed Git-based branching and auto-deploy previews
+- you need managed observability with hosted log explorer
 - you are fine with vendor-hosted control plane and pricing
 - you want the shortest path to production with the fewest ops responsibilities
 

@@ -9,6 +9,7 @@ import { shellService } from "./shell.service";
 import { logger } from "../utils/logger";
 import { $ } from "bun";
 import type { LogEntryResponse } from "./project.service";
+import { forwardLogEvent } from "../routes/log-drains";
 
 export class ProjectLogService {
   async queryLogs(ref: string, type: string = "all"): Promise<LogEntryResponse[]> {
@@ -107,7 +108,30 @@ export class ProjectLogService {
       }
 
       parsedLogs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-      return parsedLogs.slice(0, limit);
+      const sliced = parsedLogs.slice(0, limit);
+
+      // Best-effort forward error/warning events to configured log drains.
+      // Fire-and-forget: never block log queries on drain delivery.
+      const forwardable = sliced.filter((entry) => {
+        const metaItems = (entry.metadata?.items as Record<string, unknown>[] | undefined) || [];
+        const sev = metaItems[0]?.severity;
+        return sev === "error" || sev === "warning";
+      });
+      if (forwardable.length > 0) {
+        for (const entry of forwardable) {
+          const items = (entry.metadata?.items as Record<string, unknown>[] | undefined) || [];
+          const item = items[0] || {};
+          void forwardLogEvent(ref, {
+            timestamp: entry.timestamp,
+            source: String(item.source || "system"),
+            severity: String(item.severity || "info"),
+            message: entry.event_message,
+            metadata: { id: entry.id },
+          });
+        }
+      }
+
+      return sliced;
     } catch (e: unknown) {
       logger.error(`Failed to get real logs for ${ref}`, { error: e instanceof Error ? e.message : String(e) });
       return [];

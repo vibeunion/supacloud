@@ -595,6 +595,13 @@ export async function registerAllRoutes() {
     projectLogsRoutes,
     systemRoutes,
     diagnosticsRoutes,
+    taskEventRoutes,
+    logDrainRoutes,
+    scheduledFunctionRoutes,
+    branchRoutes,
+    pgMetaRoutes,
+    storageS3Routes,
+    autoBranchingRoutes,
   } = await import("./routes");
 
   return (
@@ -683,6 +690,13 @@ export async function registerAllRoutes() {
       .use(projectLogsRoutes)
       .use(systemRoutes)
       .use(diagnosticsRoutes)
+      .use(taskEventRoutes)
+      .use(logDrainRoutes)
+      .use(scheduledFunctionRoutes)
+      .use(branchRoutes)
+      .use(pgMetaRoutes)
+      .use(storageS3Routes)
+      .use(autoBranchingRoutes)
   );
 }
 
@@ -1098,6 +1112,12 @@ async function bootstrap() {
       await import("./workers/runtime-reconcile.worker");
     startRuntimeReconcileWorker();
 
+    const { scheduledFunctionWorker } = await import("./workers/scheduled-function.worker");
+    scheduledFunctionWorker.start();
+
+    const { startLogDrainForwarder } = await import("./workers/log-drain-forwarder.worker");
+    startLogDrainForwarder();
+
     if (config.edgeRuntimeMode === "embedded") {
       const { edgeRuntimeManager } =
         await import("./plugins/edge-runtime-manager");
@@ -1155,6 +1175,12 @@ if (import.meta.main) {
       const { stopRuntimeReconcileWorker } =
         await import("./workers/runtime-reconcile.worker");
       stopRuntimeReconcileWorker();
+
+    const { scheduledFunctionWorker } =
+      await import("./workers/scheduled-function.worker");
+    scheduledFunctionWorker.stop();
+    const { stopLogDrainForwarder } = await import("./workers/log-drain-forwarder.worker");
+    stopLogDrainForwarder();
     } catch (e: unknown) {
       logger.debug("[index] suppressed error", {
         error: e instanceof Error ? e.message : String(e),

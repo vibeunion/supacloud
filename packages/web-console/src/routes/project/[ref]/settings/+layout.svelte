@@ -9,6 +9,7 @@
     { id: "api", label: "API" },
     { id: "services", label: "服务控制" },
     { id: "webhooks", label: "Webhooks" },
+    { id: "branches", label: "Branches" },
     { id: "infrastructure", label: "基础设施" },
     { id: "scaling", label: "扩展/副本" },
     { id: "custom-domains", label: "域名" },

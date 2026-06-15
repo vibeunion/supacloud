@@ -3,6 +3,7 @@ import { logger } from "../utils/logger";
 import { frontendService } from "../services/frontend.service";
 import type { FrontendDeployment } from "../types/frontend";
 import { timingSafeEqual } from "crypto";
+import { processAutoBranchingFromPush } from "../services/auto-branching.service";
 
 function safeTokenEqual(a: string, b: string): boolean {
   const bufA = Buffer.from(a, "utf8");
@@ -139,6 +140,16 @@ export const webhookRoutes = new Elysia({ prefix: "/v1/webhooks" })
       const repoFullName = payload.repository.full_name;
       const gitUrl = payload.repository.clone_url;
 
+      // Auto-branching: create preview branches for non-base branch pushes.
+      let autoBranchResults: unknown = null;
+      try {
+        autoBranchResults = await processAutoBranchingFromPush(gitUrl, branch, commitSha);
+      } catch (e: unknown) {
+        logger.debug("[webhook/github] auto-branching check failed", {
+          error: e instanceof Error ? e.message : String(e),
+        });
+      }
+
       const deployments = await findDeploymentsByGitUrl(gitUrl, branch);
 
       if (deployments.length === 0) {
@@ -228,6 +239,7 @@ export const webhookRoutes = new Elysia({ prefix: "/v1/webhooks" })
         branch,
         commit: commitSha,
         deployments: results,
+        auto_branching: autoBranchResults,
       };
     },
     {
