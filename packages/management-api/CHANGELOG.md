@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.32.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.31.2...management-api-v0.32.0) (2026-06-15)
+
+
+### Features
+
+* **management-api:** close Supabase parity gaps ([df085a9](https://github.com/zuohuadong/supacloud/commit/df085a997bfa6e78f8ec92da467b6855fc22795e))
+
+
+### Miscellaneous Chores
+
+* **deps:** bump @svadmin/core in /packages/management-api ([#310](https://github.com/zuohuadong/supacloud/issues/310)) ([68b6273](https://github.com/zuohuadong/supacloud/commit/68b6273f56b34815eaf3a3ed2fb01cddb5dc203b))
+
 ## [0.31.2](https://github.com/zuohuadong/supacloud/compare/management-api-v0.31.1...management-api-v0.31.2) (2026-06-13)
 
 
