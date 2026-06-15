@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.0](https://github.com/zuohuadong/supacloud/compare/web-console-v0.14.3...web-console-v0.15.0) (2026-06-15)
+
+
+### Features
+
+* **management-api:** close Supabase parity gaps ([df085a9](https://github.com/zuohuadong/supacloud/commit/df085a997bfa6e78f8ec92da467b6855fc22795e))
+
 ## [0.14.3](https://github.com/zuohuadong/supacloud/compare/web-console-v0.14.2...web-console-v0.14.3) (2026-06-06)
 
 
