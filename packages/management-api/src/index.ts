@@ -602,6 +602,7 @@ export async function registerAllRoutes() {
     pgMetaRoutes,
     storageS3Routes,
     autoBranchingRoutes,
+    projectRbacRoutes,
   } = await import("./routes");
 
   return (
@@ -697,6 +698,7 @@ export async function registerAllRoutes() {
       .use(pgMetaRoutes)
       .use(storageS3Routes)
       .use(autoBranchingRoutes)
+      .use(projectRbacRoutes)
   );
 }
 

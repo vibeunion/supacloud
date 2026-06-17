@@ -38,3 +38,4 @@ export { branchRoutes } from "./branches";
 export { pgMetaRoutes } from "./pg-meta";
 export { storageS3Routes } from "./storage-s3";
 export { autoBranchingRoutes } from "./auto-branching";
+export { projectRbacRoutes } from "./project-rbac";
