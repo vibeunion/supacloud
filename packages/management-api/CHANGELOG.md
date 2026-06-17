@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.33.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.32.0...management-api-v0.33.0) (2026-06-17)
+
+
+### Features
+
+* **management-api:** add project rbac facade ([#316](https://github.com/zuohuadong/supacloud/issues/316)) ([787ba9d](https://github.com/zuohuadong/supacloud/commit/787ba9d0a0bf020837c26c7bdef2329cc208b7db))
+
 ## [0.32.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.31.2...management-api-v0.32.0) (2026-06-15)
 
 
