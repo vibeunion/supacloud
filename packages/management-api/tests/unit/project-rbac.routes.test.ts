@@ -84,7 +84,9 @@ function request(path: string, init: RequestInit = {}) {
 
 describe("projectRbacRoutes", () => {
   let storedConfig: Record<string, unknown>;
-  const patchBodies: Array<Record<string, unknown>> = [];
+  let putUserUpdateReturns405 = false;
+  const userUpdateMethods: string[] = [];
+  const userUpdateBodies: Array<Record<string, unknown>> = [];
 
   afterAll(() => {
     findByRefSpy.mockRestore();
@@ -95,7 +97,9 @@ describe("projectRbacRoutes", () => {
 
   beforeEach(() => {
     storedConfig = {};
-    patchBodies.length = 0;
+    putUserUpdateReturns405 = false;
+    userUpdateMethods.length = 0;
+    userUpdateBodies.length = 0;
     findByRef.mockReset();
     updateConfig.mockReset();
     requireProjectOrAdminAuth.mockReset();
@@ -108,9 +112,13 @@ describe("projectRbacRoutes", () => {
     });
     globalThis.fetch = mock(async (input: string | URL | Request, init?: RequestInit) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
-      if (url.endsWith("/admin/users/user-one") && init?.method === "PATCH") {
+      if (url.endsWith("/admin/users/user-one") && (init?.method === "PUT" || init?.method === "PATCH")) {
+        userUpdateMethods.push(init.method);
         if (typeof init.body === "string") {
-          patchBodies.push(JSON.parse(init.body) as Record<string, unknown>);
+          userUpdateBodies.push(JSON.parse(init.body) as Record<string, unknown>);
+        }
+        if (init.method === "PUT" && putUserUpdateReturns405) {
+          return Response.json({ message: "method not allowed" }, { status: 405 });
         }
         return Response.json({ id: "user-one" });
       }
@@ -244,7 +252,8 @@ describe("projectRbacRoutes", () => {
       organization_id: "org-one",
     });
 
-    const projection = patchBodies.at(-1)?.app_metadata as Record<string, unknown>;
+    expect(userUpdateMethods.at(-1)).toBe("PUT");
+    const projection = userUpdateBodies.at(-1)?.app_metadata as Record<string, unknown>;
     expect(projection.provider).toBe("email");
     expect(projection.supaoauth).toMatchObject({
       profile: { role: "管理员" },
@@ -270,7 +279,8 @@ describe("projectRbacRoutes", () => {
       method: "DELETE",
     });
     expect(revoke.status).toBe(200);
-    const revokedProjection = patchBodies.at(-1)?.app_metadata as Record<string, unknown>;
+    expect(userUpdateMethods.at(-1)).toBe("PUT");
+    const revokedProjection = userUpdateBodies.at(-1)?.app_metadata as Record<string, unknown>;
     const revokedSupauth = revokedProjection.supaoauth as Record<string, unknown>;
     expect(revokedProjection.supaoauth).toMatchObject({
       roles: [],
@@ -279,5 +289,27 @@ describe("projectRbacRoutes", () => {
       organization_ids: [],
     });
     expect("current_org_id" in revokedSupauth).toBe(false);
+  });
+
+  test("falls back to PATCH when GoTrue rejects PUT user updates", async () => {
+    putUserUpdateReturns405 = true;
+    const role = await (await request("/v1/projects/proj_1/rbac/roles", {
+      method: "POST",
+      body: JSON.stringify({ name: "admin" }),
+    })).json() as { id: string };
+
+    const assign = await request(`/v1/projects/proj_1/rbac/roles/${role.id}/assign`, {
+      method: "POST",
+      body: JSON.stringify({ userId: "user-one" }),
+    });
+
+    expect(assign.status).toBe(200);
+    expect(userUpdateMethods).toEqual(["PUT", "PATCH"]);
+    const projection = userUpdateBodies.at(-1)?.app_metadata as Record<string, unknown>;
+    expect(projection.supaoauth).toMatchObject({
+      roles: ["admin"],
+      permissions: [],
+      scopes: [],
+    });
   });
 });

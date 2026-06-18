@@ -248,6 +248,28 @@ async function gotrueFetch(url: string, init?: RequestInit): Promise<Response> {
   }
 }
 
+async function updateGoTrueUserMetadata(
+  apiUrl: string,
+  userId: string,
+  headers: Record<string, string>,
+  body: Record<string, unknown>,
+): Promise<Response> {
+  const url = `${apiUrl}/admin/users/${encodeURIComponent(userId)}`;
+  const init = (method: "PUT" | "PATCH"): RequestInit => ({
+    method,
+    headers: {
+      ...headers,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  const putRes = await gotrueFetch(url, init("PUT"));
+  if (putRes.status !== 405) return putRes;
+
+  return gotrueFetch(url, init("PATCH"));
+}
+
 async function syncUserMetadata(ref: string, userId: string, rbac: ProjectRbacConfig): Promise<void> {
   const ctx = await getGoTrueAdminContext(ref);
   if (!ctx) throw Object.assign(new Error("Project service role key not found"), { statusCode: 404 });
@@ -276,30 +298,23 @@ async function syncUserMetadata(ref: string, userId: string, rbac: ProjectRbacCo
     ? existingCurrentOrgId
     : orgIds.length === 1 ? orgIds[0] : undefined;
 
-  const patchRes = await gotrueFetch(`${ctx.apiUrl}/admin/users/${encodeURIComponent(userId)}`, {
-    method: "PATCH",
-    headers: {
-      ...headers,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      app_metadata: {
-        ...appMetadata,
-        supaoauth: {
-          ...existingSupauth,
-          roles: resolved.roles,
-          permissions: resolved.permissions,
-          scopes: resolved.scopes,
-          organization_ids: orgIds,
-          current_org_id: currentOrgId,
-          rbac_version: rbac.version,
-          rbac_synced_at: nowIso(),
-        },
+  const updateRes = await updateGoTrueUserMetadata(ctx.apiUrl, userId, headers, {
+    app_metadata: {
+      ...appMetadata,
+      supaoauth: {
+        ...existingSupauth,
+        roles: resolved.roles,
+        permissions: resolved.permissions,
+        scopes: resolved.scopes,
+        organization_ids: orgIds,
+        current_org_id: currentOrgId,
+        rbac_version: rbac.version,
+        rbac_synced_at: nowIso(),
       },
-    }),
+    },
   });
-  if (!patchRes.ok) {
-    throw Object.assign(new Error("Failed to sync RBAC metadata to user"), { statusCode: patchRes.status });
+  if (!updateRes.ok) {
+    throw Object.assign(new Error("Failed to sync RBAC metadata to user"), { statusCode: updateRes.status });
   }
 }
 
