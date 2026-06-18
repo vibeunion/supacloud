@@ -3,31 +3,15 @@
 	auto_https off
 }
 
-(supacloud_dev_routes) {
-	handle_path /functions/v1* {
-		reverse_proxy edge-runtime:9000
-	}
-
-	handle_path /platform/v1* {
-		reverse_proxy management-api:9090
-	}
-
-	handle_path /auth/v1* {
-		reverse_proxy gotrue:9999
-	}
-
-	handle_path /rest/v1* {
-		reverse_proxy postgrest:3000
-	}
-
-	respond "SupaCloud Caddy development gateway" 200
-}
-
+# Bootstrap-only configuration (dev stack).
+# The Management API publishes the real routing config as JSON via the Caddy
+# Admin API (POST /load on :2019) once it starts. These routes only exist so
+# the gateway has a sane listener before the JSON config is injected.
 :80 {
-	import supacloud_dev_routes
+	respond "SupaCloud dev gateway awaiting Management API JSON config" 503
 }
 
 :443 {
 	tls internal
-	import supacloud_dev_routes
+	respond "SupaCloud dev gateway awaiting Management API JSON config" 503
 }
