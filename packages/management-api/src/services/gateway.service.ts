@@ -147,6 +147,8 @@ export interface GatewayProvider {
     configureFrontendRoute(route: FrontendGatewayRoute): Promise<void>;
     removeFrontendRoute(projectRef: string, deploymentId: string): Promise<void>;
     setupHostedAuthRoutes(): Promise<{ success: boolean; error?: string }>;
+    ensureGatewayReady(opts?: { maxAttempts?: number; intervalMs?: number }): Promise<{ ready: boolean; error?: string }>;
+    checkCaddyConnectivity(): Promise<boolean>;
 }
 
 function getRateLimitConfig(tier: string): RateLimitConfig {
@@ -387,6 +389,34 @@ export class CaddyGatewayProvider implements GatewayProvider {
             logger.warn(`[CaddyGatewayProvider] Caddy Admin API is not reachable: ${error instanceof Error ? error.message : String(error)}`);
             return false;
         }
+    }
+
+    // 带（指数）退避的 Caddy 就绪探测：caddy 容器在 docker 模式下晚于 management-api 启动，
+    // 首次 persistAndLoad 的 POST /load 往往因 caddy 尚未监听而失败。该方法轮询 Admin API
+    // 直到可达，再补一次 persistAndLoad 让 JSON 路由真正接管 bootstrap Caddyfile。
+    async ensureGatewayReady(opts?: { maxAttempts?: number; intervalMs?: number }): Promise<{ ready: boolean; error?: string }> {
+        const maxAttempts = Math.max(1, Math.trunc(opts?.maxAttempts ?? 30));
+        const intervalMs = Math.max(1, Math.trunc(opts?.intervalMs ?? 1000));
+        for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+            const reachable = await this.checkCaddyConnectivity();
+            if (reachable) {
+                try {
+                    await this.persistAndLoad();
+                    logger.info(`[CaddyGatewayProvider] Gateway ready after ${attempt} attempt(s); JSON config applied`);
+                    return { ready: true };
+                } catch (error: unknown) {
+                    const message = error instanceof Error ? error.message : String(error);
+                    logger.warn(`[CaddyGatewayProvider] Caddy reachable but config apply failed on attempt ${attempt}: ${message}`);
+                    // caddy 可达但 /load 被拒（通常是配置校验失败），退避后重试可能仍失败；
+                    // 为避免无限重试无效配置，在剩余尝试内继续，但错误会向上透传。
+                    if (attempt >= maxAttempts) return { ready: false, error: message };
+                }
+            } else {
+                logger.debug(`[CaddyGatewayProvider] Waiting for Caddy Admin API (attempt ${attempt}/${maxAttempts})`);
+            }
+            if (attempt < maxAttempts) await new Promise((resolve) => setTimeout(resolve, intervalMs));
+        }
+        return { ready: false, error: `Caddy Admin API not reachable after ${maxAttempts} attempts` };
     }
 
     private baseConfig(): CaddyConfig {
@@ -1585,6 +1615,8 @@ export class GatewayService implements GatewayProvider {
     configureFrontendRoute(route: FrontendGatewayRoute) { return this.provider.configureFrontendRoute(route); }
     removeFrontendRoute(projectRef: string, deploymentId: string) { return this.provider.removeFrontendRoute(projectRef, deploymentId); }
     setupHostedAuthRoutes() { return this.provider.setupHostedAuthRoutes(); }
+    ensureGatewayReady(opts?: { maxAttempts?: number; intervalMs?: number }) { return this.provider.ensureGatewayReady(opts); }
+    checkCaddyConnectivity() { return this.provider.checkCaddyConnectivity(); }
 }
 
 export const gatewayService = new GatewayService();

@@ -12,7 +12,7 @@ This stack is isolated from `docker/dev` and is intended for one-command self-ho
 - SupaCloud Bun Edge Runtime
 - FerretDB MongoDB wire protocol gateway, optional through the `ferretdb` Compose profile
 
-The Caddy gateway starts with a minimal catch-all Caddyfile for bootstrap routing. The Management API can update routes dynamically via the Caddy Admin API (`http://caddy:2019`).
+The Caddy gateway starts with a bootstrap-only Caddyfile that returns `503` until the real routing config is published. Because the `caddy` service depends on `management-api` being healthy, the Management API begins listening on `:9090` first; it then publishes the full route config as JSON via the Caddy Admin API (`POST /load` on `http://caddy:2019`), with a backoff retry loop until Caddy is reachable. Tenant routes (`/rest/v1`, `/auth/v1`, `/functions/v1`, `/platform/v1`) are owned entirely by that injected JSON, not by the Caddyfile.
 
 ## Packaged PostgreSQL extensions
 

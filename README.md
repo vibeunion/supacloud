@@ -325,6 +325,7 @@ Function management read endpoints under `/v1/projects/:ref/functions*` require 
 | Tasks | `/v1/projects/:ref/tasks/*` | Background task monitoring, including lightweight `summary=true` list mode |
 | **Logs SSE** | `GET /v1/projects/:ref/logs/stream` | **Real-time log streaming via Server-Sent Events** |
 | **Rate Limit** | `GET/PUT /v1/projects/:ref/gateway/rate-limit` | **Programmable per-project rate limiting (Caddy route policy)** |
+| **Gateway Routes** | `GET/POST/PUT/DELETE /v1/projects/:ref/gateway/routes[/:routeId]` | **Controlled custom Caddy routes (hosts, path, upstream, headers, CORS, priority)** |
 | **WebSocket** | `ws://host/ws/tasks` | **Real-time task progress notifications** |
 
 #### Runtime Switching
@@ -357,6 +358,20 @@ Caddy Gateway (Admin API-driven):
   /api/*        → :9090
   /functions/*  → :9090 (sdk-proxy, async enqueue + sync relay)
 ```
+
+SupaCloud never hand-edits a Caddyfile in production. The Management API keeps the full Caddy config as JSON in memory (`GatewayService`), and on every route / rate-limit / cert change it:
+1. renders the complete Caddy JSON config,
+2. validates it with `caddy validate --config <tmp>`,
+3. hot-loads it via `POST /load` on the Caddy Admin API (`CADDY_ADMIN_URL`, default `http://127.0.0.1:2019`),
+4. atomically persists the applied JSON to `CADDY_CONFIG_PATH` for reboot-time hydration, and drops a `DO-NOT-EDIT.txt` next to it.
+
+The packaged Caddyfile only enables the Admin API listener and a minimal catch-all for bootstrap; tenant routing, TLS, CORS and rate limiting are all owned by the injected JSON. `GET/POST/PUT/DELETE /v1/projects/:ref/gateway/routes[/:routeId]` and `POST /v1/projects/:ref/gateway/config` are the user-facing surface that drives these JSON updates.
+
+Startup source differs by deployment mode: systemd installs run `supacloud-caddy run --config /etc/supacloud/caddy/config.json` (JSON only, no Caddyfile, with an initial JSON seeded by `install.sh`); the docker `self-host` and `dev` stacks boot the official `caddy` image with a bootstrap-only Caddyfile (`admin 0.0.0.0:2019` + `auto_https off` + a `503` placeholder), then the Management API publishes the full JSON config via `POST /load` once it is healthy, retrying with backoff until Caddy is reachable. Either way the live routing config is the JSON injected through the Admin API.
+
+Additionally, the Management API runs a periodic `gateway-health.worker` that polls the Caddy Admin API; when it detects a transition from unreachable back to reachable (e.g. Caddy restarted under systemd or the container restarted under docker), it triggers `rebuildAllTenantConfigs()` to re-publish the full route JSON so the live config stays consistent with the in-memory state, giving both deployment modes self-healing.
+
+See [docs/gateway-customization.md](docs/gateway-customization.md) for the full field reference, curl examples (reverse proxy, static hosting, HTTPS upstream), rate-limit tiers, custom path rate limits, and how custom routes compose with tenant CORS.
 
 Default installs use `EDGE_RUNTIME_MODE=embedded`, meaning `supacloud.service` starts the Bun Edge Runtime child process itself. A separate `supacloud-edge-runtime.service` is available for `EDGE_RUNTIME_MODE=external`, but you should not run both modes at the same time.
 
@@ -845,6 +860,7 @@ curl http://localhost:9090/v1/projects/<ref>/api-keys \
 | 任务 | `/v1/projects/:ref/tasks/*` | 后台 AI/通用异步任务生命周期观测与监控，支持 `summary=true` 轻量列表 |
 | **日志 SSE** | `GET /v1/projects/:ref/logs/stream` | **实时日志流（Server-Sent Events）** |
 | **限流** | `GET/PUT /v1/projects/:ref/gateway/rate-limit` 及 `custom-rate-limits` | **编程式架构与客户端路由自定限流（Caddy 路由策略）** |
+| **网关路由** | `GET/POST/PUT/DELETE /v1/projects/:ref/gateway/routes[/:routeId]` | **受控自定义 Caddy 路由（域名、路径、上游、请求头、CORS、优先级）** |
 | **WebSocket** | `ws://host/ws/tasks` | **实时任务进度推送** |
 
 #### 运行时切换
@@ -877,6 +893,20 @@ Caddy 网关 (Admin API 驱动):
   /api/*        → :9090 (管理 API)
   /functions/*  → :9090 (sdk-proxy，异步入队 + 同步转发)
 ```
+
+生产环境从不手改 Caddyfile。Management API 将完整的 Caddy 配置以 JSON 形式保存在内存中（`GatewayService`），每次路由 / 限流 / 证书变更都会：
+1. 渲染出完整的 Caddy JSON 配置；
+2. 用 `caddy validate --config <tmp>` 校验；
+3. 通过 Caddy Admin API 的 `POST /load`（`CADDY_ADMIN_URL`，默认 `http://127.0.0.1:2019`）热加载；
+4. 将已应用的 JSON 原子写入 `CADDY_CONFIG_PATH`，用于重启后 hydrate 恢复，并在同目录写入 `DO-NOT-EDIT.txt`。
+
+打包的 Caddyfile 只负责开启 Admin API 监听和最小 catch-all 引导；租户路由、TLS、CORS 与限流全部由注入的 JSON 接管。`GET/POST/PUT/DELETE /v1/projects/:ref/gateway/routes[/:routeId]` 和 `POST /v1/projects/:ref/gateway/config` 就是驱动这些 JSON 更新的用户侧接口。
+
+启动来源因部署模式而异：systemd 安装用 `supacloud-caddy run --config /etc/supacloud/caddy/config.json`（纯 JSON，无 Caddyfile，初始 JSON 由 `install.sh` 预置）；docker 的 `self-host` 和 `dev` 栈以官方 `caddy` 镜像 + 纯引导 Caddyfile（`admin 0.0.0.0:2019` + `auto_https off` + `503` 占位）启动，Management API 健康（监听 `:9090`）后通过 `POST /load` 发布完整 JSON 配置，并带退避重试直到 Caddy 可达。无论哪种模式，真正生效的路由配置都是经 Admin API 注入的 JSON。
+
+此外，Management API 运行周期性 `gateway-health.worker` 轮询 Caddy Admin API；一旦检测到"从不可达恢复可达"（如 systemd 下 caddy 重启或 docker 下容器重启），即触发 `rebuildAllTenantConfigs()` 重新发布完整路由 JSON，保持生效配置与内存态一致，两种部署模式都具备自愈能力。
+
+完整字段说明、curl 示例（反代、静态托管、HTTPS 上游）、限流 tier、单路径自定义限流，以及自定义路由与租户 CORS 的组合行为，见 [docs/gateway-customization.md](docs/gateway-customization.md)。
 
 默认安装使用 `EDGE_RUNTIME_MODE=embedded`，也就是由 `supacloud.service` 直接拉起 Bun Edge Runtime 子进程。`EDGE_RUNTIME_MODE=external` 时可以改用独立的 `supacloud-edge-runtime.service`，但两种模式不能同时运行，否则会争抢 `9000` 端口。
 

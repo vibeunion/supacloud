@@ -1016,3 +1016,149 @@ describe("CaddyGatewayProvider route headers", () => {
         restore();
     });
 });
+
+describe("CaddyGatewayProvider ensureGatewayReady", () => {
+    afterEach(async () => {
+        await cleanCaddyTmp();
+    });
+
+    test("retries until Caddy Admin API becomes reachable, then persists the JSON config", async () => {
+        const calls: Array<{ url: string; method: string; body: any }> = [];
+        // 前 2 次连接拒绝（模拟 caddy 尚未启动），第 3 次起返回 ok
+        let configAttempts = 0;
+        const originalFetch = globalThis.fetch;
+        globalThis.fetch = mock((input: string | URL | Request, init?: RequestInit) => {
+            const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+            const method = init?.method || "GET";
+            let body: any = null;
+            if (typeof init?.body === "string" && init.body.length > 0) {
+                try { body = JSON.parse(init.body); } catch { body = init.body; }
+            }
+            calls.push({ url, method, body });
+            if (url.endsWith("/config/")) {
+                configAttempts += 1;
+                if (configAttempts <= 2) return Promise.resolve(new Response("connection refused", { status: 502 }));
+                return Promise.resolve(new Response(JSON.stringify({ id: "root", data: [] })));
+            }
+            return Promise.resolve(new Response(JSON.stringify({ id: "load", data: [] })));
+        }) as unknown as typeof fetch;
+        const restore = () => { globalThis.fetch = originalFetch; };
+
+        const provider = new CaddyGatewayProvider();
+        await provider.setupMasterRoutes().catch(() => undefined);
+
+        const result = await provider.ensureGatewayReady({
+            maxAttempts: 10,
+            intervalMs: 1,
+        });
+
+        expect(result.ready).toBe(true);
+        const load = calls.filter((call) => call.method === "POST" && call.url.endsWith("/load")).at(-1);
+        expect(load).toBeDefined();
+        const routes = load?.body?.apps?.http?.servers?.supacloud?.routes ?? [];
+        expect(routes.find((route: any) => route["@id"] === "route-system-management-api")).toBeDefined();
+
+        restore();
+    });
+
+    test("returns ready=false after exhausting retries when Caddy never comes up", async () => {
+        const originalFetch = globalThis.fetch;
+        globalThis.fetch = mock(() => Promise.reject(new Error("ECONNREFUSED"))) as unknown as typeof fetch;
+        const restore = () => { globalThis.fetch = originalFetch; };
+
+        const provider = new CaddyGatewayProvider();
+        const result = await provider.ensureGatewayReady({
+            maxAttempts: 3,
+            intervalMs: 1,
+        });
+
+        expect(result.ready).toBe(false);
+
+        restore();
+    });
+
+    test("persists config immediately when Caddy is already reachable", async () => {
+        const calls: Array<{ url: string; method: string; body: any }> = [];
+        const restore = captureFetch(calls);
+        const provider = new CaddyGatewayProvider();
+        await provider.setupMasterRoutes().catch(() => undefined);
+
+        const result = await provider.ensureGatewayReady({
+            maxAttempts: 5,
+            intervalMs: 1,
+        });
+
+        expect(result.ready).toBe(true);
+        const loads = calls.filter((call) => call.method === "POST" && call.url.endsWith("/load"));
+        expect(loads.length).toBeGreaterThanOrEqual(1);
+
+        restore();
+    });
+});
+
+describe("gateway-health worker", () => {
+    afterEach(async () => {
+        await cleanCaddyTmp();
+    });
+
+    test("does not rebuild when Caddy stays reachable", async () => {
+        const calls: Array<{ url: string; method: string; body: any }> = [];
+        const restore = captureFetch(calls);
+        const { runGatewayHealthCheck, resetGatewayHealthState } = await import("../../src/workers/gateway-health.worker");
+        resetGatewayHealthState();
+
+        // 初始状态：未观测过可达 -> 首次探测可达应标记已就绪，但不触发重建
+        await runGatewayHealthCheck({ rebuildAll: async () => ({ success: true, updated: 0, errors: [] }) });
+        // 第二次：仍然可达，状态无变化，不应触发重建
+        const rebuilt = await runGatewayHealthCheck({ rebuildAll: async () => ({ success: true, updated: 0, errors: [] }) });
+
+        expect(rebuilt).toBe(false);
+
+        restore();
+    });
+
+    test("rebuilds after Caddy recovers from unreachable state", async () => {
+        let reachable = false;
+        const originalFetch = globalThis.fetch;
+        globalThis.fetch = mock((input: string | URL | Request) => {
+            const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+            if (url.endsWith("/config/")) {
+                return Promise.resolve(reachable
+                    ? new Response("{}", { status: 200 })
+                    : Promise.reject(new Error("ECONNREFUSED")));
+            }
+            return Promise.resolve(new Response("{}", { status: 200 }));
+        }) as unknown as typeof fetch;
+        const restore = () => { globalThis.fetch = originalFetch; };
+
+        const { runGatewayHealthCheck, resetGatewayHealthState } = await import("../../src/workers/gateway-health.worker");
+        resetGatewayHealthState();
+
+        // 第一次：不可达
+        await runGatewayHealthCheck({ rebuildAll: async () => ({ success: true, updated: 3, errors: [] }) });
+        // 模拟 caddy 重启后恢复
+        reachable = true;
+        const rebuilt = await runGatewayHealthCheck({ rebuildAll: async () => ({ success: true, updated: 3, errors: [] }) });
+
+        expect(rebuilt).toBe(true);
+
+        restore();
+    });
+
+    test("does not rebuild while Caddy stays unreachable", async () => {
+        const originalFetch = globalThis.fetch;
+        globalThis.fetch = mock(() => Promise.reject(new Error("ECONNREFUSED"))) as unknown as typeof fetch;
+        const restore = () => { globalThis.fetch = originalFetch; };
+
+        const { runGatewayHealthCheck, resetGatewayHealthState } = await import("../../src/workers/gateway-health.worker");
+        resetGatewayHealthState();
+
+        const r1 = await runGatewayHealthCheck({ rebuildAll: async () => ({ success: true, updated: 1, errors: [] }) });
+        const r2 = await runGatewayHealthCheck({ rebuildAll: async () => ({ success: true, updated: 1, errors: [] }) });
+
+        expect(r1).toBe(false);
+        expect(r2).toBe(false);
+
+        restore();
+    });
+});
