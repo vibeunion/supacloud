@@ -67,7 +67,10 @@ export class WorkerPool {
   }
 
   private createWorker(): Worker {
-    const workerEntry = path.resolve(process.cwd(), "worker-executor.ts");
+    // worker-executor.ts 与本文件同目录。使用 import.meta.dir 解析，避免依赖 process.cwd()
+    // （management-api 以 embedded 模式启动时 cwd 是 management-api 目录，会导致找不到入口）。
+    const workerEntry = process.env.EDGE_RUNTIME_WORKER_PATH
+      || path.resolve(import.meta.dir, "worker-executor.ts");
     const w = new Worker(workerEntry, {
       ...(WORKER_SMOL ? { smol: true } : {}),
     } as any);
