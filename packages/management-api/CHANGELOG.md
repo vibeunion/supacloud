@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.33.1](https://github.com/zuohuadong/supacloud/compare/management-api-v0.33.0...management-api-v0.33.1) (2026-06-18)
+
+
+### Bug Fixes
+
+* **gateway:** ensure Caddy JSON config self-heals on cold start and restart ([#319](https://github.com/zuohuadong/supacloud/issues/319)) ([8d30be3](https://github.com/zuohuadong/supacloud/commit/8d30be3f4899f0a9e1db466559571940cadc5371))
+* **management-api:** sync project rbac metadata with gotrue put ([#318](https://github.com/zuohuadong/supacloud/issues/318)) ([771d172](https://github.com/zuohuadong/supacloud/commit/771d1722f06565b55be2de380b14a34adc00ab9b))
+
 ## [0.33.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.32.0...management-api-v0.33.0) (2026-06-17)
 
 
