@@ -229,7 +229,7 @@ jobs:
           API_EXTERNAL_URL: http://127.0.0.1:9090
           GOTRUE_OPERATOR_TOKEN: super-secret-jwt-token-with-at-least-32-characters-long
       realtime:
-        image: supabase/realtime:latest
+        image: public.ecr.aws/supabase/realtime:v2.109.1
         ports:
           - 4000:4000
         env:
@@ -308,6 +308,11 @@ jobs:
             echo "  Attempt $i/30: Realtime not ready, waiting 2s..."
             sleep 2
           done
+          if [ "${realtime_ready}" != "true" ]; then
+            echo "::error title=Realtime service not ready::Realtime did not become reachable on :4000"
+            docker ps -a --filter "ancestor=public.ecr.aws/supabase/realtime:v2.109.1" || true
+            exit 1
+          fi
           echo "Waiting for MinIO container to be ready..."
           for i in $(seq 1 15); do
             if curl -sf http://127.0.0.1:9001/minio/health/live > /dev/null 2>&1; then
@@ -342,7 +347,7 @@ jobs:
         run: |
           echo "Restarting Auth and Realtime Containers..."
           docker start $(docker ps -a -q --filter "ancestor=supabase/gotrue:v2.188.1") || true
-          docker start $(docker ps -a -q --filter "ancestor=supabase/realtime:latest") || true
+          docker start $(docker ps -a -q --filter "ancestor=public.ecr.aws/supabase/realtime:v2.109.1") || true
           sleep 4
 
       - name: Launch API & Execute Full Defenses
