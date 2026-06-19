@@ -502,6 +502,34 @@ jobs:
           mv supacloud-edge-runtime-linux-amd64 dist/
           mv supacloud-edge-runtime-linux-arm64 dist/
 
+      - name: Smoke edge-runtime Linux amd64 binary
+        working-directory: packages/edge-runtime
+        run: |
+          tmp_functions="$(mktemp -d)"
+          EDGE_RUNTIME_HOST=127.0.0.1 PORT=19090 \
+            EDGE_FUNCTIONS_DIR="$tmp_functions" \
+            EDGE_FUNCTIONS_BASE_DIR="$tmp_functions" \
+            ./dist/supacloud-edge-runtime-linux-amd64 > /tmp/supacloud-edge-runtime-smoke.log 2>&1 &
+          pid=$!
+          cleanup() {
+            kill "$pid" 2>/dev/null || true
+            rm -rf "$tmp_functions"
+          }
+          trap cleanup EXIT
+          for _ in $(seq 1 40); do
+            if curl -fsS http://127.0.0.1:19090/health >/tmp/supacloud-edge-runtime-health.json; then
+              cat /tmp/supacloud-edge-runtime-health.json
+              exit 0
+            fi
+            if ! kill -0 "$pid" 2>/dev/null; then
+              cat /tmp/supacloud-edge-runtime-smoke.log
+              exit 1
+            fi
+            sleep 0.5
+          done
+          cat /tmp/supacloud-edge-runtime-smoke.log
+          exit 1
+
       - name: Build edge-runtime macOS binaries
         working-directory: packages/edge-runtime
         run: |
