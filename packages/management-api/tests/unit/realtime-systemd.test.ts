@@ -19,6 +19,9 @@ describe("Realtime systemd deployment", () => {
     expect(unit).toContain("Environment=REALTIME_DB_USER=supabase_admin");
     expect(unit).toContain("Environment=PG_DATABASE=supacloud_meta");
     expect(unit).toContain("$${#REALTIME_DB_ENC_KEY}");
+    expect(unit).toContain("test -n \"$$PGPASSWORD\"");
+    expect(unit).toContain("-e DB_USER_REALTIME=${REALTIME_DB_USER}");
+    expect(unit).toContain("-e DB_PASS_REALTIME=${PGPASSWORD}");
     expect(unit).toContain("-e RUN_JANITOR=false");
     expect(unit).not.toContain("SystemCallFilter=");
     expect(unit).not.toContain("DB_AFTER_CONNECT_QUERY");
@@ -34,6 +37,8 @@ describe("Realtime systemd deployment", () => {
     expect(realtimeSection).toContain("REALTIME_IMAGE_PULL");
     expect(realtimeSection).toContain("$RUNTIME pull \"$REALTIME_IMAGE_PULL\"");
     expect(realtimeSection).toContain("$RUNTIME tag \"$REALTIME_IMAGE_PULL\" \"$REALTIME_IMAGE_VALUE\"");
+    expect(realtimeSection).toContain("-e DB_USER_REALTIME=\"${REALTIME_DB_USER:-supabase_admin}\"");
+    expect(realtimeSection).toContain("-e DB_PASS_REALTIME=\"${POSTGRES_PASSWORD}\"");
     expect(realtimeSection).toContain("-e RUN_JANITOR=false");
     expect(realtimeSection.indexOf("$RUNTIME pull")).toBeLessThan(
       realtimeSection.indexOf("systemctl restart supacloud-realtime"),

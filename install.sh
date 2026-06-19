@@ -2755,6 +2755,8 @@ deploy_service_containers() {
             -e DB_PORT=5432 \
             -e DB_USER="${REALTIME_DB_USER:-supabase_admin}" \
             -e DB_PASSWORD="${POSTGRES_PASSWORD}" \
+            -e DB_USER_REALTIME="${REALTIME_DB_USER:-supabase_admin}" \
+            -e DB_PASS_REALTIME="${POSTGRES_PASSWORD}" \
             -e DB_NAME=postgres \
             -e "DB_AFTER_CONNECT_QUERY=SET search_path TO _realtime" \
             -e DB_ENC_KEY="${REALTIME_DB_ENC_KEY}" \

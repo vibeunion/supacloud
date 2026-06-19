@@ -239,6 +239,8 @@ jobs:
           DB_NAME: postgres
           DB_USER: supabase_admin
           DB_PASSWORD: postgres
+          DB_USER_REALTIME: supabase_admin
+          DB_PASS_REALTIME: postgres
           DB_SSL: "false"
           DB_ENC_KEY: supabaserealtime
           JWT_SECRET: super-secret-jwt-token-with-at-least-32-characters-long
