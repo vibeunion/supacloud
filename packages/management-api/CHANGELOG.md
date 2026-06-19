@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.36.1](https://github.com/zuohuadong/supacloud/compare/management-api-v0.36.0...management-api-v0.36.1) (2026-06-19)
+
+
+### Bug Fixes
+
+* **management-api:** prefer bun auth provider templates ([#343](https://github.com/zuohuadong/supacloud/issues/343)) ([6f7d858](https://github.com/zuohuadong/supacloud/commit/6f7d858291051f5205f9e2781ea004844d4ba23f))
+
 ## [0.36.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.35.1...management-api-v0.36.0) (2026-06-19)
 
 
