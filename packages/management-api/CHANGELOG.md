@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.34.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.33.1...management-api-v0.34.0) (2026-06-19)
+
+
+### Features
+
+* **gotrue:** enable tenant config hot reload ([#325](https://github.com/zuohuadong/supacloud/issues/325)) ([5c68823](https://github.com/zuohuadong/supacloud/commit/5c6882359b86937d78c9eb57e9baf9dc0b4507ba))
+* **management-api:** add SupAuth webhook audit facade ([#321](https://github.com/zuohuadong/supacloud/issues/321)) ([3526370](https://github.com/zuohuadong/supacloud/commit/35263708e5a6d0c4cf623f36c668fcae2b57688d))
+
+
+### Bug Fixes
+
+* **realtime:** configure v2.109 internal credentials ([26a900f](https://github.com/zuohuadong/supacloud/commit/26a900fb6ab2d5a9af6b1279137f2bc60ff7f831))
+* **realtime:** retry tenant registration while container is starting ([d6b320a](https://github.com/zuohuadong/supacloud/commit/d6b320a6c72167fc4d6060f728ba07f770bb2386))
+* **realtime:** support v2.109 service startup ([900ccf8](https://github.com/zuohuadong/supacloud/commit/900ccf83978d5c0a996aa009785a9ce5e2b1e5cf))
+
+
+### Miscellaneous Chores
+
+* **realtime:** bump image to v2.109.1 ([2764a13](https://github.com/zuohuadong/supacloud/commit/2764a130c76ccd0a40c6bf3fb0a9c6d5e906b801))
+
 ## [0.33.1](https://github.com/zuohuadong/supacloud/compare/management-api-v0.33.0...management-api-v0.33.1) (2026-06-18)
 
 
