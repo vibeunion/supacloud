@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.7](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.8.6...edge-runtime-v0.8.7) (2026-06-19)
+
+
+### Bug Fixes
+
+* **edge-runtime:** embed worker executor in compiled binary ([#337](https://github.com/zuohuadong/supacloud/issues/337)) ([cfe9e86](https://github.com/zuohuadong/supacloud/commit/cfe9e8628bdf0d5981eb2f33b119dce130b18872))
+
 ## [0.8.6](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.8.5...edge-runtime-v0.8.6) (2026-06-19)
 
 
