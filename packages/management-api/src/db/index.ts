@@ -404,8 +404,22 @@ export interface Organization {
   id: string;
   name: string;
   slug: string;
+  plan?: string | null;
+  owner_id?: string | null;
   created_at: Date;
   updated_at: Date;
+}
+
+export interface OrganizationMember {
+  id: string;
+  organization_id: string;
+  email: string;
+  role: string;
+  user_id: string | null;
+  invited_at: Date | string | null;
+  joined_at: Date | string | null;
+  created_at: Date | string;
+  updated_at: Date | string;
 }
 
 export interface Project {

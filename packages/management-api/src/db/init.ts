@@ -30,9 +30,28 @@ export async function initDatabase() {
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       name VARCHAR(100) NOT NULL,
       slug VARCHAR(100) UNIQUE NOT NULL,
+      plan VARCHAR(50) NOT NULL DEFAULT 'free',
+      owner_id TEXT,
       created_at TIMESTAMPTZ DEFAULT NOW(),
       updated_at TIMESTAMPTZ DEFAULT NOW()
     );
+
+    CREATE TABLE IF NOT EXISTS organization_members (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+      email VARCHAR(320) NOT NULL,
+      role VARCHAR(50) NOT NULL DEFAULT 'member',
+      user_id TEXT,
+      invited_at TIMESTAMPTZ DEFAULT NOW(),
+      joined_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_organization_members_org_email
+      ON organization_members (organization_id, lower(email));
+    CREATE INDEX IF NOT EXISTS idx_organization_members_org
+      ON organization_members (organization_id, created_at DESC);
 
     CREATE TABLE IF NOT EXISTS projects (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -230,13 +249,13 @@ export async function initDatabase() {
 
     const result = await sql`
       SELECT COUNT(*) as count FROM information_schema.tables
-      WHERE table_schema = 'public' AND table_name IN ('organizations', 'projects', 'project_tasks', 'platform_settings', 'project_secrets', 'deployment_history', 'system_tus_uploads', 'system_tus_chunks', 'system_signed_uploads', 'audit_logs')
+      WHERE table_schema = 'public' AND table_name IN ('organizations', 'organization_members', 'projects', 'project_tasks', 'platform_settings', 'project_secrets', 'deployment_history', 'system_tus_uploads', 'system_tus_chunks', 'system_signed_uploads', 'audit_logs')
     `;
 
     const tableCount = Number(result[0]?.count || 0);
     logger.info(`Found ${tableCount} tables in database`);
 
-    if (tableCount < 9) {
+    if (tableCount < 11) {
       logger.info("Executing DDL statements...");
       await sql.unsafe(ddlQuery);
       logger.info("DDL executed successfully.");
@@ -258,6 +277,38 @@ export async function initDatabase() {
 
     // Always apply migrations to ensure schema is up-to-date
     const migrationStatements: Array<{ statement: string; description: string; swallowError?: boolean }> = [
+      { statement: "ALTER TABLE organizations ADD COLUMN IF NOT EXISTS plan VARCHAR(50) NOT NULL DEFAULT 'free'", description: "organizations.plan" },
+      { statement: "ALTER TABLE organizations ADD COLUMN IF NOT EXISTS owner_id TEXT", description: "organizations.owner_id" },
+      {
+        statement: `
+          CREATE TABLE IF NOT EXISTS organization_members (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+            email VARCHAR(320) NOT NULL,
+            role VARCHAR(50) NOT NULL DEFAULT 'member',
+            user_id TEXT,
+            invited_at TIMESTAMPTZ DEFAULT NOW(),
+            joined_at TIMESTAMPTZ,
+            created_at TIMESTAMPTZ DEFAULT NOW(),
+            updated_at TIMESTAMPTZ DEFAULT NOW()
+          )
+        `,
+        description: "organization_members table",
+      },
+      {
+        statement: `
+          CREATE UNIQUE INDEX IF NOT EXISTS idx_organization_members_org_email
+          ON organization_members (organization_id, lower(email))
+        `,
+        description: "idx_organization_members_org_email",
+      },
+      {
+        statement: `
+          CREATE INDEX IF NOT EXISTS idx_organization_members_org
+          ON organization_members (organization_id, created_at DESC)
+        `,
+        description: "idx_organization_members_org",
+      },
       { statement: 'ALTER TABLE system_tus_uploads ADD COLUMN IF NOT EXISTS auth_token TEXT', description: "system_tus_uploads.auth_token" },
       { statement: 'ALTER TABLE system_signed_uploads ADD COLUMN IF NOT EXISTS auth_token TEXT', description: "system_signed_uploads.auth_token" },
       { statement: 'ALTER TABLE project_secrets ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()', description: "project_secrets.updated_at" },
@@ -526,12 +577,12 @@ export async function initDatabase() {
 
     const [verify] = await sql`
       SELECT COUNT(*) as count FROM information_schema.tables
-      WHERE table_schema = 'public' AND table_name IN ('organizations', 'projects', 'project_tasks', 'platform_settings', 'project_secrets', 'deployment_history', 'system_tus_uploads', 'system_tus_chunks', 'system_signed_uploads', 'audit_logs')
+      WHERE table_schema = 'public' AND table_name IN ('organizations', 'organization_members', 'projects', 'project_tasks', 'platform_settings', 'project_secrets', 'deployment_history', 'system_tus_uploads', 'system_tus_chunks', 'system_signed_uploads', 'audit_logs')
     `;
 
     const finalPublicCount = Number(verify?.count || 0);
     logger.info(
-      `Database initialized successfully! Public tables verified: ${finalPublicCount}/10`,
+      `Database initialized successfully! Public tables verified: ${finalPublicCount}/11`,
     );
 
     // In CI mode where tests rewrite db_name to 'postgres', we must create Storage relations
@@ -605,9 +656,9 @@ export async function initDatabase() {
       }
     }
 
-    if (finalPublicCount < 10) {
+    if (finalPublicCount < 11) {
       throw new Error(
-        `Table creation verified but failed. Expected 10 public tables, got ${finalPublicCount}`,
+        `Table creation verified but failed. Expected 11 public tables, got ${finalPublicCount}`,
       );
     }
 
