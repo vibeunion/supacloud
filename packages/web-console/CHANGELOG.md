@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.0](https://github.com/zuohuadong/supacloud/compare/web-console-v0.15.0...web-console-v0.16.0) (2026-06-19)
+
+
+### Features
+
+* **management-api:** configure auth email templates ([#335](https://github.com/zuohuadong/supacloud/issues/335)) ([10bee5f](https://github.com/zuohuadong/supacloud/commit/10bee5f9a88082f64090f0879838708a5a674628))
+
 ## [0.15.0](https://github.com/zuohuadong/supacloud/compare/web-console-v0.14.3...web-console-v0.15.0) (2026-06-15)
 
 
