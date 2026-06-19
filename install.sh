@@ -12,6 +12,8 @@
 #   --studio <domain>      Specify Studio domain (SUPABASE_STUDIO_DOMAIN)
 #   --s3 <type>            Specify storage type (minio|juicefs)
 #   --password <pass>      Specify database/dashboard password (unified setting)
+#   --migrate-legacy-supabase-compose
+#                          Explicitly clean old Pigsty Supabase compose residues
 #   --help                 Show help information
 #
 # Supported OS: CentOS 9, Ubuntu 22.04/24.04, Debian 12
@@ -39,6 +41,10 @@ while [[ $# -gt 0 ]]; do
             DASHBOARD_PASSWORD="$2"; 
             GRAFANA_PASSWORD="$2"; 
             shift 2 ;;
+        --migrate-legacy-supabase-compose)
+            SUPACLOUD_MIGRATE_LEGACY_SUPABASE_COMPOSE="true"
+            shift
+            ;;
         --help)
             echo "Usage: sudo bash install.sh [options]"
             echo "Options:"
@@ -47,6 +53,8 @@ while [[ $# -gt 0 ]]; do
             echo "  --studio <domain>  Specify Supabase Studio domain"
             echo "  --s3 <type>        Specify storage type (minio | juicefs)"
             echo "  --password <pass>  Set unified password for DB and dashboard"
+            echo "  --migrate-legacy-supabase-compose"
+            echo "                      Clean old Pigsty Supabase compose residues explicitly"
             exit 0
             ;;
         *) shift ;;
@@ -302,6 +310,7 @@ GRAFANA_PASSWORD=${GRAFANA_PASSWORD:-pigsty}
 S3_STORAGE_TYPE=${S3_STORAGE_TYPE:-juicefs}
 PIGSTY_CONFIG_TEMPLATE=${PIGSTY_CONFIG_TEMPLATE:-supabase}
 SUPACLOUD_INSTALL_LEGACY_SUPABASE_STACK=${SUPACLOUD_INSTALL_LEGACY_SUPABASE_STACK:-false}
+SUPACLOUD_MIGRATE_LEGACY_SUPABASE_COMPOSE=${SUPACLOUD_MIGRATE_LEGACY_SUPABASE_COMPOSE:-false}
 IMAGINARY_IMAGE=${IMAGINARY_IMAGE:-h2non/imaginary:1.2.4}
 # Edge Runtime: Bun (built-in, no configuration needed)
 EOF
@@ -1617,6 +1626,15 @@ cleanup_legacy_supabase_compose_stack() {
     fi
 }
 
+run_legacy_supabase_compose_migration_if_requested() {
+    if [[ "${SUPACLOUD_MIGRATE_LEGACY_SUPABASE_COMPOSE:-false}" != "true" ]]; then
+        log_info "Skipping legacy Supabase compose migration; set SUPACLOUD_MIGRATE_LEGACY_SUPABASE_COMPOSE=true or pass --migrate-legacy-supabase-compose to clean old Pigsty compose residues."
+        return
+    fi
+
+    cleanup_legacy_supabase_compose_stack
+}
+
 
 
 
@@ -1828,7 +1846,7 @@ install_pigsty() {
         fi
     else
         log_info "Skipping Pigsty legacy Supabase compose stack; SupaCloud uses multi-project runtime services."
-        cleanup_legacy_supabase_compose_stack
+        run_legacy_supabase_compose_migration_if_requested
     fi
 }
 
@@ -3087,7 +3105,7 @@ main() {
 
     # Deploy Imaginary + Realtime containers
     deploy_service_containers
-    cleanup_legacy_supabase_compose_stack
+    run_legacy_supabase_compose_migration_if_requested
 
     # Save all credentials
     save_all_credentials
