@@ -12,6 +12,11 @@ import { sql, resolveSlotName, resolveRoleName } from "../db";
  */
 import { logger } from "../utils/logger";
 
+// 判断是否为容器未就绪导致的连接级错误（可重试），区别于逻辑错误。
+function isConnectionError(msg: string): boolean {
+    return /Unable to connect|ECONNREFUSED|ECONNRESET|ETIMEDOUT|ENOTFOUND|fetch failed|other side closed/i.test(msg);
+}
+
 const REALTIME_ADMIN_URL = config.realtimeAdminUrl;
 const REALTIME_API_SECRET = config.realtimeApiSecret || config.jwtSecret;
 if (!REALTIME_API_SECRET) {
@@ -83,53 +88,70 @@ export class RealtimeService {
     /**
      * Register a new tenant with the Realtime server.
      * Called during project provisioning.
+     *
+     * Realtime 容器（尤其 CI 冷启动）就绪较慢，provision_realtime 可能先于容器
+     * 就绪执行。对连接级失败（fetch 抛错）做有限重试，等容器拉起；对 HTTP
+     * 响应级错误（4xx/5xx，不含 409）不重试，那是逻辑错误需立即暴露。
      */
     async registerTenant(config: RealtimeTenantConfig): Promise<boolean> {
         const globalConfig = (await import("../config")).config;
         const adminDbUser = "supabase_admin";
         const adminDbPassword = globalConfig.pgPassword || config.dbPassword || "postgres";
-        try {
-            const res = await fetch(`${this.adminUrl}/api/tenants`, {
-                method: "POST",
-                headers: await this.authHeaders(),
-                body: JSON.stringify({
-                    tenant: {
-                        external_id: config.projectRef,
-                        name: `Project ${config.projectRef}`,
-                        jwt_secret: config.jwtSecret,
-                        extensions: [{
-                            type: "postgres_cdc_rls",
-                            settings: {
-                                db_host: PG_HOST,
-                                db_port: PG_PORT,
-                                db_name: config.dbName,
-                                db_user: adminDbUser,
-                                db_password: adminDbPassword,
-                                ssl_enforced: false,
-                                region: "us-east-1",
-                                poll_interval_ms: 100,
-                                poll_max_changes: 100,
-                                poll_max_record_bytes: 1048576,
-                                slot_name: resolveSlotName(config.projectRef),
-                            },
-                        }],
-                    },
-                }),
-            });
+        // CI 冷启动 Realtime 容器常需 ~20-40s 才接受连接；给足重试窗口。
+        const MAX_ATTEMPTS = Number(process.env.REALTIME_REGISTER_MAX_ATTEMPTS || 12);
+        const BACKOFF_MS = Number(process.env.REALTIME_REGISTER_BACKOFF_MS || 3000);
+        for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+            try {
+                const res = await fetch(`${this.adminUrl}/api/tenants`, {
+                    method: "POST",
+                    headers: await this.authHeaders(),
+                    body: JSON.stringify({
+                        tenant: {
+                            external_id: config.projectRef,
+                            name: `Project ${config.projectRef}`,
+                            jwt_secret: config.jwtSecret,
+                            extensions: [{
+                                type: "postgres_cdc_rls",
+                                settings: {
+                                    db_host: PG_HOST,
+                                    db_port: PG_PORT,
+                                    db_name: config.dbName,
+                                    db_user: adminDbUser,
+                                    db_password: adminDbPassword,
+                                    ssl_enforced: false,
+                                    region: "us-east-1",
+                                    poll_interval_ms: 100,
+                                    poll_max_changes: 100,
+                                    poll_max_record_bytes: 1048576,
+                                    slot_name: resolveSlotName(config.projectRef),
+                                },
+                            }],
+                        },
+                    }),
+                });
 
-            if (res.ok || res.status === 409) {
-                // 409 = tenant already exists, that's fine
-                logger.info(`[Realtime] Tenant registered: ${config.projectRef}`);
-                return true;
+                if (res.ok || res.status === 409) {
+                    // 409 = tenant already exists, that's fine
+                    logger.info(`[Realtime] Tenant registered: ${config.projectRef}`);
+                    return true;
+                }
+
+                const errText = await res.text();
+                logger.error(`[Realtime] Failed to register tenant ${config.projectRef}:`, { status: res.status, error: errText });
+                return false;
+            } catch (err: unknown) {
+                const msg = err instanceof Error ? err.message : String(err);
+                // 连接级失败（容器未就绪）：重试而非立即放弃，避免 CI 时序竞态。
+                if (attempt < MAX_ATTEMPTS && isConnectionError(msg)) {
+                    logger.warn(`[Realtime] Registration deferred for ${config.projectRef} (container not ready, attempt ${attempt}/${MAX_ATTEMPTS}):`, { error: msg });
+                    await new Promise((r) => setTimeout(r, BACKOFF_MS));
+                    continue;
+                }
+                logger.error(`[Realtime] Registration error for ${config.projectRef}:`, { error: msg });
+                return false;
             }
-
-            const errText = await res.text();
-            logger.error(`[Realtime] Failed to register tenant ${config.projectRef}:`, { status: res.status, error: errText });
-            return false;
-        } catch (err: unknown) {
-            logger.error(`[Realtime] Registration error for ${config.projectRef}:`, { error: err instanceof Error ? err.message : String(err) });
-            return false;
         }
+        return false;
     }
 
     /**
