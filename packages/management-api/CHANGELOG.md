@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.35.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.34.1...management-api-v0.35.0) (2026-06-19)
+
+
+### Features
+
+* **management-api:** implement organization member management ([#328](https://github.com/zuohuadong/supacloud/issues/328)) ([76578d7](https://github.com/zuohuadong/supacloud/commit/76578d750f9d3d175cec32db7b12dc4e2caa1eb2))
+
 ## [0.34.1](https://github.com/zuohuadong/supacloud/compare/management-api-v0.34.0...management-api-v0.34.1) (2026-06-19)
 
 
