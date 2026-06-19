@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.35.1](https://github.com/zuohuadong/supacloud/compare/management-api-v0.35.0...management-api-v0.35.1) (2026-06-19)
+
+
+### Bug Fixes
+
+* **management-api:** expose platform capability status ([#332](https://github.com/zuohuadong/supacloud/issues/332)) ([28cb6fb](https://github.com/zuohuadong/supacloud/commit/28cb6fb222b17f9f662d16ebaa3c2c762b18f7e8))
+
 ## [0.35.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.34.1...management-api-v0.35.0) (2026-06-19)
 
 
