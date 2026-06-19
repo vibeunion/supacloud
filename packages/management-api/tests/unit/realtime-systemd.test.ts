@@ -45,3 +45,25 @@ describe("Realtime systemd deployment", () => {
     );
   });
 });
+
+describe("Management API CI Realtime readiness probe", () => {
+  test("signs an admin JWT and uses the v2.109 healthcheck route", () => {
+    const workflow = readFileSync(join(repoRoot, ".github/workflows/management-api.yml"), "utf8");
+    const waitStep = workflow.slice(
+      workflow.indexOf("Waiting for Realtime container to be ready"),
+      workflow.indexOf('echo "Waiting for MinIO container to be ready..."'),
+    );
+
+    // v2.109 requires a signed HS256 JWT, not the raw JWT_SECRET string.
+    expect(waitStep).toContain("REALTIME_ADMIN_TOKEN");
+    expect(waitStep).toContain("createHmac(\"sha256\",s)");
+    expect(waitStep).toContain("Authorization: Bearer ${REALTIME_ADMIN_TOKEN}");
+
+    // /health returns 404 on v2.109; the basic health fallback uses /healthcheck.
+    expect(waitStep).toContain("http://127.0.0.1:4000/healthcheck");
+
+    // Guard against regressing to the raw-secret probe that returns 403.
+    expect(waitStep).not.toContain("Authorization: Bearer ${JWT_SECRET}");
+    expect(waitStep).not.toContain("http://127.0.0.1:4000/health\"");
+  });
+});

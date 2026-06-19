@@ -105,7 +105,7 @@ export function validateLogDrainUrl(urlValue: string): { ok: true; url: string }
   return { ok: true, url: parsed.toString() };
 }
 
-async function isLogDrainUrlSafeForFetch(urlValue: string): Promise<boolean> {
+export async function isLogDrainUrlSafeForFetch(urlValue: string): Promise<boolean> {
   const validated = validateLogDrainUrl(urlValue);
   if (!validated.ok) return false;
 

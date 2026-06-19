@@ -1,4 +1,5 @@
 import { Elysia, t } from "elysia";
+import type { AnyElysia } from "elysia";
 import { logger } from "./utils/logger";
 
 process.on("uncaughtException", (err: Error) => {
@@ -595,7 +596,7 @@ export function registerStaticAssets() {
 /**
  * Register all route modules
  */
-export async function registerAllRoutes() {
+export async function registerAllRoutes(): Promise<AnyElysia> {
   const {
     projectRoutes,
     projectDashboardRoutes: registeredProjectDashboardRoutes,
@@ -639,6 +640,8 @@ export async function registerAllRoutes() {
     storageS3Routes,
     autoBranchingRoutes,
     projectRbacRoutes,
+    projectWebhookRoutes,
+    projectAuditRoutes,
   } = await import("./routes");
 
   return (
@@ -735,7 +738,9 @@ export async function registerAllRoutes() {
       .use(storageS3Routes)
       .use(autoBranchingRoutes)
       .use(projectRbacRoutes)
-  );
+      .use(projectWebhookRoutes)
+      .use(projectAuditRoutes)
+  ) as AnyElysia;
 }
 
 function readArgValue(...names: string[]) {

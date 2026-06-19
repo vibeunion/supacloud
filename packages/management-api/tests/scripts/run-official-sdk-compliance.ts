@@ -74,7 +74,7 @@ async function bootstrap() {
       const realtimeService = new RealtimeService();
       await realtimeService.ensureSupabaseAdminReplication();
       let registered = false;
-      for (let attempt = 1; attempt <= 5; attempt++) {
+      for (let attempt = 1; attempt <= 30; attempt++) {
         registered = await realtimeService.registerTenant({
           projectRef: project.ref,
           dbName: "postgres",
@@ -83,13 +83,13 @@ async function bootstrap() {
           jwtSecret: OFFICIAL_JWT_SECRET,
         });
         if (registered) break;
-        console.warn(`[SDK Compliance] Realtime registration attempt ${attempt}/5 failed, retrying in 2s...`);
+        console.warn(`[SDK Compliance] Realtime registration attempt ${attempt}/30 failed, retrying in 2s...`);
         await new Promise((r) => setTimeout(r, 2000));
       }
       if (registered) {
         console.log(`✅ Realtime tenant registered for [${project.ref}]`);
       } else {
-        console.warn(`⚠️ Realtime tenant registration failed for [${project.ref}] after 5 attempts`);
+        throw new Error(`Realtime tenant registration failed for [${project.ref}] after 30 attempts`);
       }
     } catch (e: any) {
       console.warn("⚠️ Realtime tenant registration error:", e.message?.substring(0, 80));

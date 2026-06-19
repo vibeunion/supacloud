@@ -299,21 +299,34 @@ jobs:
         run: |
           echo "Waiting for Realtime container to be ready..."
           JWT_SECRET="super-secret-jwt-token-with-at-least-32-characters-long"
-          for i in $(seq 1 30); do
+          # Realtime v2.109 validates Bearer tokens as HS256 JWTs signed with API_JWT_SECRET;
+          # passing the raw secret returns 403. Sign an admin JWT for the health probe.
+          REALTIME_ADMIN_TOKEN="$(JWT_SECRET="${JWT_SECRET}" node -e 'const crypto=require("node:crypto");const s=process.env.JWT_SECRET;const n=Math.floor(Date.now()/1000);const e=v=>Buffer.from(JSON.stringify(v)).toString("base64url");const h=e({alg:"HS256",typ:"JWT"});const p=e({iss:"supabase",role:"supabase_admin",iat:n,exp:n+3600});const sig=crypto.createHmac("sha256",s).update(`${h}.${p}`).digest("base64url");console.log(`${h}.${p}.${sig}`);')"
+          realtime_ready=false
+          for i in $(seq 1 60); do
             # Check the health endpoint for the self-seeded tenant
-            if curl -sf -H "Authorization: Bearer ${JWT_SECRET}" "http://127.0.0.1:4000/api/tenants/realtime-dev/health" > /dev/null 2>&1; then
+            if curl -sf -H "Authorization: Bearer ${REALTIME_ADMIN_TOKEN}" "http://127.0.0.1:4000/api/tenants/realtime-dev/health" > /dev/null 2>&1; then
               echo "✅ Realtime self-hosted tenant is ready"
+              realtime_ready=true
               break
-            elif curl -sf "http://127.0.0.1:4000/health" > /dev/null 2>&1; then
+            elif curl -sf "http://127.0.0.1:4000/healthcheck" > /dev/null 2>&1; then
               echo "✅ Realtime container is ready (basic health)"
+              realtime_ready=true
               break
             fi
-            echo "  Attempt $i/30: Realtime not ready, waiting 2s..."
+            echo "  Attempt $i/60: Realtime not ready, waiting 2s..."
             sleep 2
           done
           if [ "${realtime_ready}" != "true" ]; then
             echo "::error title=Realtime service not ready::Realtime did not become reachable on :4000"
             docker ps -a --filter "ancestor=public.ecr.aws/supabase/realtime:v2.109.1" || true
+            realtime_container_id="$(docker ps -a -q --filter "ancestor=public.ecr.aws/supabase/realtime:v2.109.1" | head -n1)"
+            if [ -n "${realtime_container_id}" ]; then
+              echo "--- Realtime container status ---"
+              docker inspect --format='{{.State.Status}} exit={{.State.ExitCode}} err={{.State.Error}} oom={{.State.OOMKilled}} restart={{.RestartCount}}' "${realtime_container_id}" || true
+              echo "--- Realtime container logs (last 200 lines) ---"
+              docker logs --tail 200 "${realtime_container_id}" || true
+            fi
             exit 1
           fi
           echo "Waiting for MinIO container to be ready..."
