@@ -21,10 +21,12 @@ describe("TenantRuntimeService port synchronization", () => {
   test("persists generated runtime ports after tenant config is written", () => {
     const source = sourceFile("src/services/tenant-runtime.service.ts");
 
-    const gotrueEnvWrite = source.indexOf("await Bun.write(path.join(this.TENANT_CONFIG_DIR, `${ref}_gotrue.env`), gotrueEnv);");
+    const gotrueConfigDirWrite = source.indexOf('await Bun.write(path.join(gotrueConfigDir, "runtime.env"), gotrueEnv);');
+    const gotrueEnvWrite = source.indexOf("await Bun.write(gotrueEnvPath, gotrueEnv);");
     const persistPorts = source.indexOf("await this.persistTenantPortConfig(ref, pgrstPort, gotruePort);");
 
-    expect(gotrueEnvWrite).toBeGreaterThan(0);
+    expect(gotrueConfigDirWrite).toBeGreaterThan(0);
+    expect(gotrueEnvWrite).toBeGreaterThan(gotrueConfigDirWrite);
     expect(persistPorts).toBeGreaterThan(gotrueEnvWrite);
   });
 
@@ -35,5 +37,26 @@ describe("TenantRuntimeService port synchronization", () => {
     expect(source).toContain("GOTRUE_API_PORT=${port}");
     expect(source).toContain('file.endsWith(".conf")');
     expect(source).toContain("server-port\\\\s*=\\\\s*${port}");
+  });
+
+  test("starts GoTrue with a watched config directory for hot reload", () => {
+    const source = sourceFile("src/services/tenant-runtime.service.ts");
+
+    expect(source).toContain("GOTRUE_RELOADING_SIGNAL_ENABLED=true");
+    expect(source).toContain("GOTRUE_RELOADING_POLLER_ENABLED=true");
+    expect(source).toContain("ExecStart=${this.GOTRUE_BIN} --config-dir ${this.TENANT_CONFIG_DIR}/%i_gotrue.d");
+    expect(source).toContain("ExecReload=/bin/kill -USR1 $MAINPID");
+    expect(source).toContain('!currentGotrueUnit.includes("--config-dir")');
+  });
+
+  test("OAuth edits reload GoTrue and keep runtime config dir in sync", () => {
+    const source = sourceFile("src/services/tenant-oauth.service.ts");
+
+    expect(source).toContain("return path.join(this.gotrueConfigDir(ref), \"runtime.env\");");
+    expect(source).toContain("await Bun.write(this.gotrueRuntimeEnvPath(ref), content);");
+    expect(source).toContain("await Bun.write(this.gotrueLegacyEnvPath(ref), content);");
+    expect(source).toContain("systemctl reload supacloud-gotrue@${ref}");
+    expect(source).toContain("systemctl restart supacloud-gotrue@${ref}");
+    expect(source).toContain("updatedLines.push(`${enabledKey}=false`);");
   });
 });

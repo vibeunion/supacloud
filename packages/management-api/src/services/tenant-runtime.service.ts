@@ -1313,6 +1313,8 @@ GOTRUE_JWT_AUD=authenticated
 GOTRUE_JWT_DEFAULT_GROUP_NAME=authenticated
 GOTRUE_LOG_LEVEL=info
 GOTRUE_SERVER_READ_TIMEOUT=20
+GOTRUE_RELOADING_SIGNAL_ENABLED=true
+GOTRUE_RELOADING_POLLER_ENABLED=true
 GOTRUE_SECURITY_UPDATE_PASSWORD_REQUIRE_REAUTHENTICATION=true
 ${renderGoTrueAuthEnv(creds.authConfig)}
 GOTRUE_WEBAUTHN_ENABLED=true
@@ -1364,7 +1366,12 @@ GOTRUE_SMTP_SENDER_NAME=SupaCloud
 GOTRUE_MAILER_AUTOCONFIRM=true
 `;
         }
-        await Bun.write(path.join(this.TENANT_CONFIG_DIR, `${ref}_gotrue.env`), gotrueEnv);
+        const gotrueEnvPath = path.join(this.TENANT_CONFIG_DIR, `${ref}_gotrue.env`);
+        const gotrueConfigDir = path.join(this.TENANT_CONFIG_DIR, `${ref}_gotrue.d`);
+        await fs.mkdir(gotrueConfigDir, { recursive: true });
+        await Bun.write(path.join(gotrueConfigDir, "runtime.env"), gotrueEnv);
+        // Keep the legacy flat env file for older units and diagnostics.
+        await Bun.write(gotrueEnvPath, gotrueEnv);
         await this.persistTenantPortConfig(ref, pgrstPort, gotruePort);
 
         logger.info(`Config generated for ${ref} (pgrst_port=${pgrstPort}, gotrue_port=${gotruePort})`);
@@ -1427,7 +1434,13 @@ WantedBy=multi-user.target
         }
 
         const gotrueExists = await Bun.file(gotrueUnitPath).exists();
-        if (!gotrueExists) {
+        const currentGotrueUnit = gotrueExists
+            ? await Bun.file(gotrueUnitPath).text().catch(() => "")
+            : "";
+        const shouldWriteGotrueUnit = !gotrueExists
+            || !currentGotrueUnit.includes("--config-dir")
+            || !currentGotrueUnit.includes("ExecReload=/bin/kill -USR1 $MAINPID");
+        if (shouldWriteGotrueUnit) {
             const gotrueUnit = `
 [Unit]
 Description=SupaCloud GoTrue for tenant %i
@@ -1442,7 +1455,8 @@ Group=nogroup
 EnvironmentFile=${this.TENANT_CONFIG_DIR}/%i_gotrue.env
 Environment="GOMEMLIMIT=15MiB"
 Environment="GOGC=20"
-ExecStart=${this.GOTRUE_BIN}
+ExecStart=${this.GOTRUE_BIN} --config-dir ${this.TENANT_CONFIG_DIR}/%i_gotrue.d
+ExecReload=/bin/kill -USR1 $MAINPID
 Restart=on-failure
 RestartSec=5
 StartLimitBurst=3
@@ -1461,7 +1475,7 @@ WantedBy=multi-user.target
             await Bun.write(gotrueUnitPath, gotrueUnit);
         }
 
-        if (shouldWritePgrstUnit || !gotrueExists) {
+        if (shouldWritePgrstUnit || shouldWriteGotrueUnit) {
             await $`systemctl daemon-reload`.nothrow().quiet();
             logger.info("systemd template units installed");
         }
@@ -2037,10 +2051,12 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
         const pgrstEnvFile = Bun.file(path.join(this.TENANT_CONFIG_DIR, `${ref}.env`));
         const pgrstConfFile = Bun.file(path.join(this.TENANT_CONFIG_DIR, `${ref}.conf`));
         const gotrueEnvFile = Bun.file(path.join(this.TENANT_CONFIG_DIR, `${ref}_gotrue.env`));
+        const gotrueConfigDir = path.join(this.TENANT_CONFIG_DIR, `${ref}_gotrue.d`);
 
         if (await pgrstEnvFile.exists()) await fs.unlink(pgrstEnvFile.name!);
         if (await pgrstConfFile.exists()) await fs.unlink(pgrstConfFile.name!);
         if (await gotrueEnvFile.exists()) await fs.unlink(gotrueEnvFile.name!);
+        await fs.rm(gotrueConfigDir, { recursive: true, force: true });
     }
 
     private getPostgrestDesiredState(project: { status?: unknown; postgrest_desired?: unknown }): RuntimeDesiredState {
