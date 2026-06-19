@@ -39,7 +39,10 @@
     return backupTypes.find((item) => item.v === value)?.label || value;
   }
 
-
+  function buildPitrTargetIso() {
+    const value = new Date(`${pitrDate}T${pitrTime}`);
+    return Number.isNaN(value.getTime()) ? null : value.toISOString();
+  }
 
   async function createBackup() {
     isCreating = true;
@@ -68,16 +71,21 @@
       actionMsg = `❌ ${$t("PlatformBackups.choose_datetime") || "Please choose a date and time"}`;
       return;
     }
-    const target = `${pitrDate} ${pitrTime}`;
-    if (!confirm(`⚠️ ${$t("PlatformBackups.restore_confirm", { values: { target } }) || `Restore database to ${target}?`}\n\n${$t("PlatformBackups.restore_warning") || "This will stop the database and roll back all later data. Continue?"}`)) return;
+    const target = buildPitrTargetIso();
+    if (!target) {
+      actionMsg = `❌ ${$t("PlatformBackups.choose_datetime") || "Please choose a date and time"}`;
+      return;
+    }
+    const displayTarget = `${pitrDate} ${pitrTime}`;
+    if (!confirm(`⚠️ ${$t("PlatformBackups.restore_confirm", { values: { target: displayTarget } }) || `Restore database to ${displayTarget}?`}\n\n${$t("PlatformBackups.restore_warning") || "This will stop the database and roll back all later data. Continue?"}`)) return;
 
     isRestoring = true;
     actionMsg = null;
     try {
-      const res = await apiClient("/v1/projects/default/database/backups/logical/restore", {
+      const res = await apiClient("/v1/projects/default/database/backups/restore", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ target_time: target })
+        body: JSON.stringify({ target })
       });
       const data = await res.json();
       actionMsg = data.success !== false
@@ -127,7 +135,7 @@
       <div class="flex-1">
         <label for="a11y-routes-platform-backups--page-svelte-120" class="text-xs font-semibold text-muted-foreground block mb-1.5">{$t("PlatformBackups.backup_type") || "Backup Type"}</label>
         <div class="flex gap-1 bg-muted/30 rounded-lg p-0.5 w-fit">
-          {#each backupTypes as opt}
+          {#each backupTypes as opt (opt.v)}
             <button
               class="px-3 py-1.5 text-xs font-semibold rounded-md transition-colors {backupType === opt.v ? 'bg-brand text-white' : 'text-muted-foreground hover:text-foreground'}"
               onclick={() => backupType = opt.v}
@@ -209,7 +217,7 @@
             </tr>
           </thead>
           <tbody class="divide-y divide-border/20">
-            {#each backups as b}
+            {#each backups as b (b.id)}
               <tr class="hover:bg-muted/10 transition-colors">
                 <td class="px-4 py-2.5 font-mono font-medium">{b.label || b.id}</td>
                 <td class="px-3 py-2.5 font-mono">{b.type}</td>
