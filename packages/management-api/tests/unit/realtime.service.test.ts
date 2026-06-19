@@ -27,6 +27,10 @@ describe("RealtimeService tenant payloads", () => {
     const body = JSON.parse(String(calls[0]?.init?.body ?? "{}"));
     const settings = body.tenant.extensions[0].settings;
     expect(settings.ssl_enforced).toBe(false);
+    expect(settings.db_user).toBe("supabase_admin");
+    expect(settings.db_password).toBe("postgres");
+    expect(settings.db_user_realtime).toBe("supabase_realtime_admin");
+    expect(settings.db_pass_realtime).toBe("postgres");
   });
 });
 

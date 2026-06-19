@@ -2,6 +2,10 @@ import { config } from "../config";
 import { logger } from "../utils/logger";
 import { SQL } from "bun";
 
+function sqlStringLiteral(value: string): string {
+  return `'${value.replace(/'/g, "''")}'`;
+}
+
 export async function initDatabase() {
   logger.info("Initializing database...");
   logger.info(
@@ -239,6 +243,18 @@ export async function initDatabase() {
     } else {
       logger.info("Tables already exist, skipping table creation.");
     }
+
+    await sql.unsafe(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'supabase_realtime_admin') THEN
+          CREATE ROLE supabase_realtime_admin LOGIN NOINHERIT CREATEROLE REPLICATION PASSWORD ${sqlStringLiteral(password)};
+        ELSE
+          ALTER ROLE supabase_realtime_admin LOGIN NOINHERIT CREATEROLE REPLICATION PASSWORD ${sqlStringLiteral(password)};
+        END IF;
+      END
+      $$;
+    `);
 
     // Always apply migrations to ensure schema is up-to-date
     const migrationStatements: Array<{ statement: string; description: string; swallowError?: boolean }> = [

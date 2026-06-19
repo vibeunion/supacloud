@@ -309,6 +309,12 @@ export class DatabaseService {
           ELSE
             ALTER ROLE supabase_admin LOGIN PASSWORD ${pgEscapePassword(this.PG_PASSWORD)};
           END IF;
+
+          IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'supabase_realtime_admin') THEN
+            CREATE ROLE supabase_realtime_admin LOGIN NOINHERIT CREATEROLE REPLICATION PASSWORD ${pgEscapePassword(this.PG_PASSWORD)};
+          ELSE
+            ALTER ROLE supabase_realtime_admin LOGIN NOINHERIT CREATEROLE REPLICATION PASSWORD ${pgEscapePassword(this.PG_PASSWORD)};
+          END IF;
         END
         $$;
       `);

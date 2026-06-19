@@ -2738,8 +2738,10 @@ deploy_service_containers() {
         $RUNTIME pull "$REALTIME_IMAGE_VALUE"
 
         if [[ -n "${POSTGRES_PASSWORD:-}" ]]; then
-            PGPASSWORD="${POSTGRES_PASSWORD}" psql -h "${INTERNAL_IP}" -U supabase_admin -d postgres \
-                -c "CREATE SCHEMA IF NOT EXISTS _realtime;" 2>/dev/null || true
+            PGPASSWORD="${POSTGRES_PASSWORD}" psql -h "${INTERNAL_IP}" -U supabase_admin -d postgres -v realtime_password="${POSTGRES_PASSWORD}" \
+                -c "CREATE SCHEMA IF NOT EXISTS _realtime;" \
+                -c "DO \$\$ BEGIN IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'supabase_realtime_admin') THEN CREATE ROLE supabase_realtime_admin NOLOGIN NOINHERIT NOREPLICATION; END IF; END \$\$;" \
+                -c "ALTER ROLE supabase_realtime_admin LOGIN NOINHERIT CREATEROLE REPLICATION PASSWORD :'realtime_password';" 2>/dev/null || true
         fi
 
         $RUNTIME rm -f "${REALTIME_CONTAINER_NAME:-supacloud-realtime}" >/dev/null 2>&1 || true
@@ -2766,7 +2768,7 @@ deploy_service_containers() {
             -e RLIMIT_NOFILE=10000 \
             -e APP_NAME=realtime \
             -e SEED_SELF_HOST=true \
-            -e RUN_JANITOR=true \
+            -e RUN_JANITOR=false \
             -e SECURE_CHANNELS=false \
             -e DISABLE_HEALTHCHECK_LOGGING=true \
             "$REALTIME_IMAGE_VALUE"

@@ -251,6 +251,7 @@ jobs:
           DNS_NODES: "''"
           APP_NAME: realtime
           SEED_SELF_HOST: "true"
+          RUN_JANITOR: "false"
           RLIMIT_NOFILE: "10000"
       minio:
         image: minio/minio:latest
