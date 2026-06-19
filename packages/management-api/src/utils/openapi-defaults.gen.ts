@@ -298,7 +298,9 @@ export const OPENAPI_STORAGE_CONFIG_RESPONSE_TEMPLATE = {
   },
   "capabilities": {
     "list_v2": false,
-    "iceberg_catalog": false
+    "iceberg_catalog": false,
+    "storage_iceberg": false,
+    "storage_vectors": false
   },
   "external": {
     "upstreamTarget": "main"
@@ -320,4 +322,3 @@ export const OPENAPI_REALTIME_CONFIG_RESPONSE_TEMPLATE = {
   "suspend": null,
   "presence_enabled": false
 } as const;
-
