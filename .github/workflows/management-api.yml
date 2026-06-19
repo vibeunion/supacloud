@@ -299,21 +299,31 @@ jobs:
         run: |
           echo "Waiting for Realtime container to be ready..."
           JWT_SECRET="super-secret-jwt-token-with-at-least-32-characters-long"
-          for i in $(seq 1 30); do
+          realtime_ready=false
+          for i in $(seq 1 60); do
             # Check the health endpoint for the self-seeded tenant
             if curl -sf -H "Authorization: Bearer ${JWT_SECRET}" "http://127.0.0.1:4000/api/tenants/realtime-dev/health" > /dev/null 2>&1; then
               echo "✅ Realtime self-hosted tenant is ready"
+              realtime_ready=true
               break
             elif curl -sf "http://127.0.0.1:4000/health" > /dev/null 2>&1; then
               echo "✅ Realtime container is ready (basic health)"
+              realtime_ready=true
               break
             fi
-            echo "  Attempt $i/30: Realtime not ready, waiting 2s..."
+            echo "  Attempt $i/60: Realtime not ready, waiting 2s..."
             sleep 2
           done
           if [ "${realtime_ready}" != "true" ]; then
             echo "::error title=Realtime service not ready::Realtime did not become reachable on :4000"
             docker ps -a --filter "ancestor=public.ecr.aws/supabase/realtime:v2.109.1" || true
+            realtime_container_id="$(docker ps -a -q --filter "ancestor=public.ecr.aws/supabase/realtime:v2.109.1" | head -n1)"
+            if [ -n "${realtime_container_id}" ]; then
+              echo "--- Realtime container status ---"
+              docker inspect --format='{{.State.Status}} exit={{.State.ExitCode}} err={{.State.Error}} oom={{.State.OOMKilled}} restart={{.RestartCount}}' "${realtime_container_id}" || true
+              echo "--- Realtime container logs (last 200 lines) ---"
+              docker logs --tail 200 "${realtime_container_id}" || true
+            fi
             exit 1
           fi
           echo "Waiting for MinIO container to be ready..."
