@@ -480,38 +480,6 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
     },
   )
 
-  // Preview Branches — stub endpoints (Studio compatibility)
-  .get(
-    "/:ref/branches",
-    async ({ params }) => {
-      const project = await projectService.getProject(params.ref);
-      if (!project)
-        return status(404, { message: "Project not found", code: "404" });
-      return [];
-    },
-    {
-      params: t.Object({ ref: t.String() }),
-      detail: { tags: ["projects"], summary: "List preview branches" },
-    },
-  )
-  .post(
-    "/:ref/branches",
-    async ({ params, set }) => {
-      const project = await projectService.getProject(params.ref);
-      if (!project)
-        return status(404, { message: "Project not found", code: "404" });
-      set.status = 501;
-      return {
-        message: "Preview Branches are not supported on this SupaCloud cluster",
-        code: "501",
-      };
-    },
-    {
-      params: t.Object({ ref: t.String() }),
-      detail: { tags: ["projects"], summary: "Create preview branch" },
-    },
-  )
-
   // Read Replicas — Studio compatibility plus SupaCloud-managed metadata.
   .get(
     "/:ref/read-replicas",

@@ -32,10 +32,21 @@ const promoteBranchSpy = spyOn(branchServiceModule.branchService, "promoteBranch
 );
 
 const { branchRoutes } = await import("../../src/routes/branches");
+const { projectRoutes } = await import("../../src/routes/projects");
 const app = new Elysia().use(branchRoutes);
+const composedApp = new Elysia().use(projectRoutes).use(branchRoutes);
 
 function request(path: string, init: RequestInit = {}) {
   return app.handle(
+    new Request(`http://localhost${path}`, {
+      ...init,
+      headers: { "content-type": "application/json", ...(init.headers || {}) },
+    }),
+  );
+}
+
+function composedRequest(path: string, init: RequestInit = {}) {
+  return composedApp.handle(
     new Request(`http://localhost${path}`, {
       ...init,
       headers: { "content-type": "application/json", ...(init.headers || {}) },
@@ -71,6 +82,20 @@ describe("branchRoutes", () => {
     const res = await request("/v1/projects/parent/branches");
     expect(res.status).toBe(200);
     expect((await res.json()).branches).toEqual([]);
+  });
+
+  test("composed project routes use real branch routes instead of legacy stubs", async () => {
+    findByRef.mockResolvedValue({ ref: "parent", config: {} } as never);
+
+    const listRes = await composedRequest("/v1/projects/parent/branches");
+    expect(listRes.status).toBe(200);
+    expect(await listRes.json()).toEqual({ project_ref: "parent", branches: [] });
+
+    const createRes = await composedRequest("/v1/projects/parent/branches", {
+      method: "POST",
+      body: JSON.stringify({ name: "bad name!" }),
+    });
+    expect(createRes.status).toBe(400);
   });
 
   test("POST creates branch record and kicks off provisioning", async () => {
