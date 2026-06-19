@@ -73,7 +73,7 @@ jobs:
 
       - name: Checkout code
         if: steps.pr-info.outputs.pr_number != ''
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
