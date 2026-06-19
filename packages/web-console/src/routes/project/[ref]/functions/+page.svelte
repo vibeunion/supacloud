@@ -113,17 +113,17 @@
   let runtimeLogLimit = $state(20);
   let expandedTaskId = $state<string | null>(null);
   let newSlug = $state("");
-  let newCode = $state(`Deno.serve(async (req) => {
-  const { name } = await req.json()
+  let newCode = $state(`export default async function handler(req: Request) {
+  const { name } = await req.json();
   const data = {
     message: \`Hello \${name}!\`,
-  }
+  };
 
   return new Response(
     JSON.stringify(data),
     { headers: { "Content-Type": "application/json" } },
-  )
-})`);
+  );
+}`);
   let deploying = $state(false);
   let deployMsg = $state<string | null>(null);
 
@@ -253,12 +253,12 @@ export async function waitForTask(
   }
 }`;
 
-  const cancellationAwareFunctionCode = `Deno.serve(async (req) => {
+  const cancellationAwareFunctionCode = `export default async function handler(req: Request) {
   const payload = await req.json();
   req.signal.throwIfAborted?.();
 
-  const taskId = Deno.env.get("SUPACLOUD_BACKGROUND_TASK_ID");
-  const attempt = Deno.env.get("SUPACLOUD_BACKGROUND_ATTEMPT") || "1";
+  const taskId = process.env.SUPACLOUD_BACKGROUND_TASK_ID;
+  const attempt = process.env.SUPACLOUD_BACKGROUND_ATTEMPT || "1";
 
   const abortController = new AbortController();
   const onAbort = () => abortController.abort("supacloud task cancelled");
@@ -288,7 +288,7 @@ export async function waitForTask(
   } finally {
     req.signal.removeEventListener("abort", onAbort);
   }
-});`;
+}`;
 
   async function copySnippet(content: string, label: string) {
     try {
@@ -722,7 +722,7 @@ export async function waitForTask(
           class="w-full mt-1 px-3 py-2 text-xs font-mono rounded-lg border bg-background focus:outline-none focus:ring-1 focus:ring-brand" />
       </div>
       <div>
-        <span class="text-[10px] font-semibold text-muted-foreground uppercase">函数代码 (TypeScript / Deno)</span>
+        <span class="text-[10px] font-semibold text-muted-foreground uppercase">函数代码 (TypeScript / Bun)</span>
         <textarea bind:value={newCode} rows={12}
           class="w-full mt-1 px-3 py-2 text-xs font-mono rounded-lg border bg-background focus:outline-none focus:ring-1 focus:ring-brand resize-y leading-5"
           spellcheck="false"></textarea>
