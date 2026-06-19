@@ -250,10 +250,12 @@ function buildStorageConfigResponse(raw: Record<string, unknown>) {
     icebergCatalog: {
       ...((response.features as Record<string, any>).icebergCatalog || {}),
       ...((features.icebergCatalog as Record<string, unknown>) || {}),
+      enabled: false,
     },
     vectorBuckets: {
       ...((response.features as Record<string, any>).vectorBuckets || {}),
       ...((features.vectorBuckets as Record<string, unknown>) || {}),
+      enabled: false,
     },
   };
   response.capabilities = {
@@ -262,6 +264,9 @@ function buildStorageConfigResponse(raw: Record<string, unknown>) {
       string,
       unknown
     >),
+    iceberg_catalog: false,
+    storage_iceberg: false,
+    storage_vectors: false,
   };
   response.external = {
     ...(response.external as Record<string, unknown>),
@@ -1440,13 +1445,7 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
           string,
           unknown
         >) || {};
-      return {
-        fileSizeLimit: raw.fileSizeLimit || raw.file_size_limit || 52428800,
-        features: raw.features || {
-          imageTransformation: { enabled: true, maxTransformations: 100 },
-        },
-        ...raw,
-      };
+      return buildStorageConfigResponse(raw);
     },
     {
       params: t.Object({ ref: t.String() }),
