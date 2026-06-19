@@ -1935,19 +1935,35 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
     })
 
     // ════════════════════════════════════════════════════════
-    // ENTERPRISE STUBS (Vectors / Analytics)
-    // Prevents @supabase/storage-js from hard crashing when accessing
-    // supabase.storage.vectors or supabase.storage.analytics
+    // Optional enterprise surfaces are explicit capabilities, not hidden product promises.
     // ════════════════════════════════════════════════════════
     .all('/vector/*', async ({ set }) => {
         set.status = 501;
-        return { statusCode: "501", error: 'Not Implemented', message: 'Storage vectors (Similarity Search) are not supported on this SupaCloud cluster configuration.' };
+        return {
+            statusCode: "501",
+            error: 'Not Implemented',
+            feature: 'storage_vectors',
+            capability: false,
+            available: false,
+            status: 'unsupported',
+            reason: 'storage_vectors_not_enabled',
+            message: 'Storage vectors are not available on this SupaCloud cluster.',
+        };
     }, {
         detail: { tags: ["storage"], summary: "Vector search stub" },
     })
     .all('/iceberg/*', async ({ set }) => {
         set.status = 501;
-        return { statusCode: "501", error: 'Not Implemented', message: 'Storage analytics (Iceberg tables) are not supported on this SupaCloud cluster configuration.' };
+        return {
+            statusCode: "501",
+            error: 'Not Implemented',
+            feature: 'storage_iceberg',
+            capability: false,
+            available: false,
+            status: 'unsupported',
+            reason: 'storage_iceberg_not_enabled',
+            message: 'Storage analytics backed by Iceberg tables are not available on this SupaCloud cluster.',
+        };
     }, {
         detail: { tags: ["storage"], summary: "Iceberg analytics stub" },
     });

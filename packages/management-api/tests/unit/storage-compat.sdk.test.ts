@@ -44,6 +44,32 @@ afterEach(() => {
 });
 
 describe("storageCompatRoutes supabase-js compatibility", () => {
+  test("vector and iceberg surfaces expose explicit unavailable capabilities", async () => {
+    const vectorRes = await request("/storage/v1/vector/indexes", {
+      headers: { "x-project-ref": "test_mock", apikey: "test-token" },
+    });
+    expect(vectorRes.status).toBe(501);
+    expect(await vectorRes.json()).toMatchObject({
+      feature: "storage_vectors",
+      capability: false,
+      available: false,
+      status: "unsupported",
+      reason: "storage_vectors_not_enabled",
+    });
+
+    const icebergRes = await request("/storage/v1/iceberg/tables", {
+      headers: { "x-project-ref": "test_mock", apikey: "test-token" },
+    });
+    expect(icebergRes.status).toBe(501);
+    expect(await icebergRes.json()).toMatchObject({
+      feature: "storage_iceberg",
+      capability: false,
+      available: false,
+      status: "unsupported",
+      reason: "storage_iceberg_not_enabled",
+    });
+  });
+
   test("TUS capabilities advertise the default 500 MiB upload limit", async () => {
     const res = await request("/storage/v1/upload/resumable", {
       method: "OPTIONS",
