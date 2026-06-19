@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.6](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.8.5...edge-runtime-v0.8.6) (2026-06-19)
+
+
+### Miscellaneous Chores
+
+* **deps-dev:** bump @types/node in /packages/edge-runtime ([#331](https://github.com/zuohuadong/supacloud/issues/331)) ([72e3193](https://github.com/zuohuadong/supacloud/commit/72e3193ce6aea452e504a7d26f8b40ddd260c981))
+
 ## [0.8.5](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.8.4...edge-runtime-v0.8.5) (2026-06-08)
 
 
