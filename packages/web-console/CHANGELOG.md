@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.1](https://github.com/zuohuadong/supacloud/compare/web-console-v0.16.0...web-console-v0.16.1) (2026-06-19)
+
+
+### Bug Fixes
+
+* **web-console:** enforce SPA-only API access ([c2317a1](https://github.com/zuohuadong/supacloud/commit/c2317a18d5eb223637773a0d187c473f4184a3ed))
+
 ## [0.16.0](https://github.com/zuohuadong/supacloud/compare/web-console-v0.15.0...web-console-v0.16.0) (2026-06-19)
 
 
