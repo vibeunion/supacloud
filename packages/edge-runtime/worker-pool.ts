@@ -1,7 +1,10 @@
 import { Worker, MessagePort } from "worker_threads";
+import { existsSync, mkdirSync, writeFileSync } from "fs";
+import { tmpdir } from "os";
 import path from "path";
 import { resolveEdgeFetchTlsPolicy } from "./fetch-tls-policy";
 import type { EdgeFetchTlsPolicy } from "./fetch-tls-policy";
+import { EMBEDDED_WORKER_HASH, EMBEDDED_WORKER_SOURCE } from "./generated/embedded-worker";
 
 interface DispatchOptions {
   functionId: string;
@@ -32,6 +35,29 @@ const MAX_BODY_SIZE = resolveMaxBodySizeBytes();
 const MAX_QUEUE_SIZE = Number(process.env.MAX_QUEUE_SIZE) || 200;
 const WORKER_SMOL = process.env.WORKER_SMOL !== "false";
 const WAIT_UNTIL_TIMEOUT_MS = Number(process.env.EDGE_WAIT_UNTIL_TIMEOUT_MS) || 300_000;
+
+function resolveWorkerEntry(): string | URL {
+  if (process.env.EDGE_RUNTIME_WORKER_PATH) {
+    return path.resolve(process.env.EDGE_RUNTIME_WORKER_PATH);
+  }
+
+  const sourceEntry = path.resolve(import.meta.dir, "worker-executor.ts");
+  if (existsSync(sourceEntry)) {
+    return sourceEntry;
+  }
+
+  if (!EMBEDDED_WORKER_SOURCE || !EMBEDDED_WORKER_HASH) {
+    return new URL("./worker-executor.ts", import.meta.url);
+  }
+
+  const cacheDir = path.join(tmpdir(), "supacloud-edge-runtime");
+  const embeddedEntry = path.join(cacheDir, `worker-executor-${EMBEDDED_WORKER_HASH}.mjs`);
+  if (!existsSync(embeddedEntry)) {
+    mkdirSync(cacheDir, { recursive: true });
+    writeFileSync(embeddedEntry, EMBEDDED_WORKER_SOURCE, { mode: 0o600 });
+  }
+  return embeddedEntry;
+}
 
 export class WorkerPool {
   private workers: Worker[] = [];
@@ -67,10 +93,7 @@ export class WorkerPool {
   }
 
   private createWorker(): Worker {
-    // worker-executor.ts 与本文件同目录。使用 import.meta.dir 解析，避免依赖 process.cwd()
-    // （management-api 以 embedded 模式启动时 cwd 是 management-api 目录，会导致找不到入口）。
-    const workerEntry = process.env.EDGE_RUNTIME_WORKER_PATH
-      || path.resolve(import.meta.dir, "worker-executor.ts");
+    const workerEntry = resolveWorkerEntry();
     const w = new Worker(workerEntry, {
       ...(WORKER_SMOL ? { smol: true } : {}),
     } as any);
