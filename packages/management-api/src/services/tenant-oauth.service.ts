@@ -7,6 +7,7 @@
 import { $ } from "bun";
 import { logger } from "../utils/logger";
 import { config } from "../config";
+import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import type { OAuthProvider, OAuthProviderConfig } from "../types/oauth";
 import { OAUTH_ENV_MAPPINGS } from "../types/oauth";
@@ -14,8 +15,44 @@ import { OAUTH_ENV_MAPPINGS } from "../types/oauth";
 export class TenantOAuthService {
     private readonly TENANT_CONFIG_DIR = config.tenantConfigDir;
 
-    private async restartAndPollGoTrue(ref: string, message: string): Promise<void> {
-        await $`systemctl restart supacloud-gotrue@${ref}`.nothrow().quiet();
+    private gotrueConfigDir(ref: string): string {
+        return path.join(this.TENANT_CONFIG_DIR, `${ref}_gotrue.d`);
+    }
+
+    private gotrueRuntimeEnvPath(ref: string): string {
+        return path.join(this.gotrueConfigDir(ref), "runtime.env");
+    }
+
+    private gotrueLegacyEnvPath(ref: string): string {
+        return path.join(this.TENANT_CONFIG_DIR, `${ref}_gotrue.env`);
+    }
+
+    private async readGoTrueEnv(ref: string): Promise<string> {
+        const runtimeEnvPath = this.gotrueRuntimeEnvPath(ref);
+        if (await Bun.file(runtimeEnvPath).exists()) {
+            return Bun.file(runtimeEnvPath).text();
+        }
+
+        const legacyEnvPath = this.gotrueLegacyEnvPath(ref);
+        if (await Bun.file(legacyEnvPath).exists()) {
+            return Bun.file(legacyEnvPath).text();
+        }
+
+        throw new Error(`GoTrue config file not found for project ${ref}`);
+    }
+
+    private async writeGoTrueEnv(ref: string, content: string): Promise<void> {
+        await fs.mkdir(this.gotrueConfigDir(ref), { recursive: true });
+        await Bun.write(this.gotrueRuntimeEnvPath(ref), content);
+        // Keep the legacy flat env file in sync for older units and diagnostics.
+        await Bun.write(this.gotrueLegacyEnvPath(ref), content);
+    }
+
+    private async reloadAndPollGoTrue(ref: string, message: string): Promise<void> {
+        const reloadResult = await $`systemctl reload supacloud-gotrue@${ref}`.nothrow().quiet();
+        if (reloadResult.exitCode !== 0) {
+            await $`systemctl restart supacloud-gotrue@${ref}`.nothrow().quiet();
+        }
         logger.info(message);
 
         try {
@@ -36,14 +73,7 @@ export class TenantOAuthService {
     }
 
     async updateOAuthConfig(ref: string, provider: OAuthProvider, providerConfig: OAuthProviderConfig): Promise<void> {
-        const gotrueEnvPath = path.join(this.TENANT_CONFIG_DIR, `${ref}_gotrue.env`);
-
-        const exists = await Bun.file(gotrueEnvPath).exists();
-        if (!exists) {
-            throw new Error(`GoTrue config file not found for project ${ref}`);
-        }
-
-        const envContent = await Bun.file(gotrueEnvPath).text();
+        const envContent = await this.readGoTrueEnv(ref);
 
         const mapping = OAUTH_ENV_MAPPINGS[provider];
         if (!mapping) {
@@ -114,17 +144,17 @@ export class TenantOAuthService {
             updatedLines.push(...newLines);
         }
 
-        await Bun.write(gotrueEnvPath, updatedLines.join("\n"));
-        await this.restartAndPollGoTrue(ref, `OAuth config updated for ${provider} in project ${ref}`);
+        await this.writeGoTrueEnv(ref, updatedLines.join("\n"));
+        await this.reloadAndPollGoTrue(ref, `OAuth config updated for ${provider} in project ${ref}`);
     }
 
     async removeOAuthConfig(ref: string, provider: OAuthProvider): Promise<void> {
-        const gotrueEnvPath = path.join(this.TENANT_CONFIG_DIR, `${ref}_gotrue.env`);
-
-        const exists = await Bun.file(gotrueEnvPath).exists();
-        if (!exists) return;
-
-        const envContent = await Bun.file(gotrueEnvPath).text();
+        let envContent: string;
+        try {
+            envContent = await this.readGoTrueEnv(ref);
+        } catch {
+            return;
+        }
 
         const mapping = OAUTH_ENV_MAPPINGS[provider];
         if (!mapping) {
@@ -138,6 +168,7 @@ export class TenantOAuthService {
 
         const lines = envContent.split("\n");
         const updatedLines: string[] = [];
+        let wroteDisabledFlag = false;
 
         for (const line of lines) {
             const trimmed = line.trim();
@@ -147,12 +178,23 @@ export class TenantOAuthService {
             }
             const [key] = trimmed.split("=");
             const keyTrimmed = key?.trim();
+            if (keyTrimmed === enabledKey) {
+                updatedLines.push(`${enabledKey}=false`);
+                wroteDisabledFlag = true;
+                continue;
+            }
             if (keyTrimmed && keysToRemove.has(keyTrimmed)) continue;
             updatedLines.push(line);
         }
 
-        await Bun.write(gotrueEnvPath, updatedLines.join("\n"));
-        await this.restartAndPollGoTrue(ref, `OAuth config removed for ${provider} in project ${ref}`);
+        if (!wroteDisabledFlag) {
+            updatedLines.push("");
+            updatedLines.push(`# OAuth Provider: ${provider}`);
+            updatedLines.push(`${enabledKey}=false`);
+        }
+
+        await this.writeGoTrueEnv(ref, updatedLines.join("\n"));
+        await this.reloadAndPollGoTrue(ref, `OAuth config removed for ${provider} in project ${ref}`);
     }
 
     async updateGoTrueCustomOAuth(ref: string, oauthConfig: {
@@ -165,14 +207,7 @@ export class TenantOAuthService {
         user_url: string;
         auth_scheme?: string;
     }): Promise<void> {
-        const gotrueEnvPath = path.join(this.TENANT_CONFIG_DIR, `${ref}_gotrue.env`);
-
-        const exists = await Bun.file(gotrueEnvPath).exists();
-        if (!exists) {
-            throw new Error(`GoTrue config file not found for project ${ref}`);
-        }
-
-        const envContent = await Bun.file(gotrueEnvPath).text();
+        const envContent = await this.readGoTrueEnv(ref);
 
         const prefix = `GOTRUE_EXTERNAL_${oauthConfig.name.toUpperCase()}`;
         const customOAuthEnv = `
@@ -228,8 +263,8 @@ ${oauthConfig.auth_scheme ? `${prefix}_AUTH_SCHEME=${oauthConfig.auth_scheme}` :
             }
         }
 
-        await Bun.write(gotrueEnvPath, updatedLines.join("\n"));
-        await this.restartAndPollGoTrue(ref, `Custom OAuth config updated for ${oauthConfig.name} in project ${ref}`);
+        await this.writeGoTrueEnv(ref, updatedLines.join("\n"));
+        await this.reloadAndPollGoTrue(ref, `Custom OAuth config updated for ${oauthConfig.name} in project ${ref}`);
     }
 }
 

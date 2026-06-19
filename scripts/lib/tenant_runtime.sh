@@ -279,6 +279,9 @@ EOF
     local smtp_user="${GOTRUE_SMTP_USER:-}"
     local smtp_pass="${GOTRUE_SMTP_PASS:-}"
     
+    local gotrue_config_dir="${TENANT_CONFIG_DIR}/${ref}_gotrue.d"
+    mkdir -p "$gotrue_config_dir"
+
     cat > "${TENANT_CONFIG_DIR}/${ref}_gotrue.env" <<EOF
 # SupaCloud Tenant GoTrue Runtime: ${ref}
 # Bind to 0.0.0.0 so the host gateway can reach the tenant runtime.
@@ -299,6 +302,8 @@ GOTRUE_JWT_DEFAULT_GROUP_NAME=authenticated
 GOTRUE_JWT_AUD=authenticated
 GOTRUE_LOG_LEVEL=info
 GOTRUE_SERVER_READ_TIMEOUT=20
+GOTRUE_RELOADING_SIGNAL_ENABLED=true
+GOTRUE_RELOADING_POLLER_ENABLED=true
 GOTRUE_SECURITY_UPDATE_PASSWORD_REQUIRE_REAUTHENTICATION=true
 EOF
 
@@ -314,7 +319,9 @@ GOTRUE_SMTP_PASS=${smtp_pass}
 GOTRUE_SMTP_SENDER_NAME=SupaCloud
 EOF
     fi
+    cp "${TENANT_CONFIG_DIR}/${ref}_gotrue.env" "${gotrue_config_dir}/runtime.env"
     chmod 644 "${TENANT_CONFIG_DIR}/${ref}_gotrue.env"
+    chmod 644 "${gotrue_config_dir}/runtime.env"
 
     echo "Config generated for ${ref} (pgrst_port=${pgrst_port}, gotrue_port=${gotrue_port})"
 }
@@ -357,7 +364,7 @@ EOF
     fi
 
     local gotrue_unit="/etc/systemd/system/supacloud-gotrue@.service"
-    if [ ! -f "$gotrue_unit" ]; then
+    if [ ! -f "$gotrue_unit" ] || ! grep -q -- '--config-dir /etc/supabase/tenants/%i_gotrue.d' "$gotrue_unit"; then
         cat > "$gotrue_unit" <<EOF
 [Unit]
 Description=SupaCloud GoTrue for tenant %i
@@ -373,7 +380,8 @@ EnvironmentFile=/etc/supabase/tenants/%i_gotrue.env
 # Extreme squeeze: Go native memory wall 15MB and trigger GC immediately at 20% growth
 Environment="GOMEMLIMIT=15MiB"
 Environment="GOGC=20"
-ExecStart=${GOTRUE_BIN}
+ExecStart=${GOTRUE_BIN} --config-dir /etc/supabase/tenants/%i_gotrue.d
+ExecReload=/bin/kill -USR1 \$MAINPID
 Restart=on-failure
 RestartSec=5
 StartLimitBurst=3
@@ -462,7 +470,7 @@ stop_runtime() {
     systemctl disable "supacloud-gotrue@${ref}" 2>/dev/null || true
 
     # Clean up config files
-    rm -f "${TENANT_CONFIG_DIR}/${ref}.env" "${TENANT_CONFIG_DIR}/${ref}.conf" "${TENANT_CONFIG_DIR}/${ref}_gotrue.env"
+    rm -rf "${TENANT_CONFIG_DIR}/${ref}.env" "${TENANT_CONFIG_DIR}/${ref}.conf" "${TENANT_CONFIG_DIR}/${ref}_gotrue.env" "${TENANT_CONFIG_DIR}/${ref}_gotrue.d"
 
     echo "Runtime stopped for ${ref}"
 }

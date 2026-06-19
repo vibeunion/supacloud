@@ -2576,7 +2576,8 @@ EOF
         log_info "GoTrue binary already available at $GOTRUE_BIN"
     fi
 
-    if [[ ! -f /etc/systemd/system/supacloud-gotrue@.service ]]; then
+    if [[ ! -f /etc/systemd/system/supacloud-gotrue@.service ]] || \
+       ! grep -q -- '--config-dir /etc/supabase/tenants/%i_gotrue.d' /etc/systemd/system/supacloud-gotrue@.service; then
         log_info "Installing supacloud-gotrue@.service systemd template..."
         cat > /etc/systemd/system/supacloud-gotrue@.service << 'GOTRUE_SVC'
 [Unit]
@@ -2591,7 +2592,8 @@ Group=nobody
 EnvironmentFile=/etc/supabase/tenants/%i_gotrue.env
 Environment="GOMEMLIMIT=15MiB"
 Environment="GOGC=20"
-ExecStart=GOTRUE_BIN_PLACEHOLDER
+ExecStart=GOTRUE_BIN_PLACEHOLDER --config-dir /etc/supabase/tenants/%i_gotrue.d
+ExecReload=/bin/kill -USR1 $MAINPID
 Restart=on-failure
 RestartSec=5
 StartLimitBurst=3
