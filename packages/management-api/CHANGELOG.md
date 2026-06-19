@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.36.3](https://github.com/zuohuadong/supacloud/compare/management-api-v0.36.2...management-api-v0.36.3) (2026-06-19)
+
+
+### Bug Fixes
+
+* **installer:** gate legacy supabase compose cleanup ([#347](https://github.com/zuohuadong/supacloud/issues/347)) ([d721e4d](https://github.com/zuohuadong/supacloud/commit/d721e4da9163c9e9d683f04ddf0087e9fc57789f))
+
 ## [0.36.2](https://github.com/zuohuadong/supacloud/compare/management-api-v0.36.1...management-api-v0.36.2) (2026-06-19)
 
 
