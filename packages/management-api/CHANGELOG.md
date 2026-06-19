@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.34.1](https://github.com/zuohuadong/supacloud/compare/management-api-v0.34.0...management-api-v0.34.1) (2026-06-19)
+
+
+### Bug Fixes
+
+* **management-api:** route project branches to real handlers ([#326](https://github.com/zuohuadong/supacloud/issues/326)) ([da14c88](https://github.com/zuohuadong/supacloud/commit/da14c88ed263b995b11af953430d9a630d2daf3e))
+
 ## [0.34.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.33.1...management-api-v0.34.0) (2026-06-19)
 
 
