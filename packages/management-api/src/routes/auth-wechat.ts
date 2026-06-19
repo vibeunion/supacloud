@@ -234,7 +234,7 @@ function corsOriginHeader(req: Request): Record<string, string> {
   return { "Access-Control-Allow-Origin": origin, "Vary": "Origin" };
 }
 
-Deno.serve(async (req) => {
+export default async function handler(req: Request) {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders })
   try {
     const { code } = await req.json()
@@ -322,7 +322,7 @@ Deno.serve(async (req) => {
     console.error("WeChat MiniProgram Login Error:", error instanceof Error ? error.message : String(error))
     return new Response(JSON.stringify({ data: { session: null, user: null }, error: (error instanceof Error ? error.message : String(error)) }), { headers: { ...corsHeaders, ...corsOriginHeader(req), "Content-Type": "application/json" }, status: 400 })
   }
-})`;
+}`;
 }
 
 function generateWeChatMPLoginFunction(appId: string, appSecret: string, redirectUri?: string): string {
@@ -343,7 +343,7 @@ function corsOriginHeader(req: Request): Record<string, string> {
 const WECHAT_MP_APP_ID = "${appId}"
 const WECHAT_MP_APP_SECRET = "${appSecret}"
 
-Deno.serve(async (req) => {
+export default async function handler(req: Request) {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders })
 
   const url = new URL(req.url)
@@ -443,7 +443,7 @@ Deno.serve(async (req) => {
     console.error("WeChat MP Login Error:", error instanceof Error ? error.message : String(error))
     return new Response(JSON.stringify({ data: { session: null, user: null }, error: (error instanceof Error ? error.message : String(error)) }), { headers: { ...corsHeaders, ...corsOriginHeader(req), "Content-Type": "application/json" }, status: 400 })
   }
-})`;
+}`;
 }
 
 export const wechatAuthInternals = {

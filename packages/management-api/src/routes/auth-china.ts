@@ -147,7 +147,7 @@ const ${providerUpper}_APP_ID = "${appId}"
 const ${providerUpper}_APP_SECRET = "${appSecret}"
 const REDIRECT_URI = "${redirectUri || ''}"
 
-Deno.serve(async (req) => {
+export default async function handler(req: Request) {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders })
 
   const url = new URL(req.url)
@@ -242,5 +242,9 @@ Deno.serve(async (req) => {
     console.error("${providerInfo.name} Login Error:", error instanceof Error ? error.message : String(error))
     return new Response(JSON.stringify({ data: { session: null, user: null }, error: (error instanceof Error ? error.message : String(error)) }), { headers: { ...corsHeaders, ...corsOriginHeader(req), "Content-Type": "application/json" }, status: 400 })
   }
-})`;
+}`;
 }
+
+export const chinaAuthInternals = {
+  generateChinaOAuthFunction,
+};
