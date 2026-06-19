@@ -12,6 +12,7 @@ import { normalizeOAuthServerConfig, normalizeProjectConfig } from "../utils/pro
 import { normalizeProjectJwtJwks, normalizeProjectJwtKeys } from "../utils/project-jwt";
 import { uniqueStrings } from "../utils/strings";
 import { quoteSystemdEnvValue } from "../utils/systemd-env";
+import { renderGoTrueEmailTemplateEnv } from "../utils/auth-email-templates";
 
 function stringifyJsonConfig(value: unknown): string | null {
     if (!value) return null;
@@ -48,12 +49,15 @@ export function renderGoTrueAuthEnv(authConfig: Record<string, unknown>): string
     const externalEmailEnabled = readBooleanSetting(authConfig, "external_email_enabled", true);
     const externalPhoneEnabled = readBooleanSetting(authConfig, "external_phone_enabled", true);
 
-    return `
+    return [
+`
 GOTRUE_DISABLE_SIGNUP=${disableSignup ? "true" : "false"}
 GOTRUE_EXTERNAL_ANONYMOUS_USERS_ENABLED=${externalAnonymousUsersEnabled ? "true" : "false"}
 GOTRUE_EXTERNAL_EMAIL_ENABLED=${externalEmailEnabled ? "true" : "false"}
 GOTRUE_EXTERNAL_PHONE_ENABLED=${externalPhoneEnabled ? "true" : "false"}
-`.trim();
+`.trim(),
+        renderGoTrueEmailTemplateEnv(authConfig),
+    ].filter(Boolean).join("\n");
 }
 
 export interface RuntimeStatus {

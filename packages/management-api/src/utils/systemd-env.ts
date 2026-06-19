@@ -2,7 +2,7 @@
  * Quote a value for systemd EnvironmentFile.
  *
  * systemd uses its own quoting rules inside EnvironmentFile:
- *   - Double-quoted values support \\, \n, \t only, not \"
+ *   - Double-quoted values support backslash escaping
  *   - Single-quoted values pass content through verbatim
  *   - Unquoted values cannot contain spaces, quotes, or newlines
  *
@@ -11,10 +11,13 @@
  */
 export function quoteSystemdEnvValue(value: string): string {
     if (value.includes('"')) {
-        if (value.includes("'")) {
-            throw new Error("systemd EnvironmentFile values containing both single and double quotes are not supported");
+        if (!value.includes("'")) {
+            return `'${value}'`;
         }
-        return `'${value}'`;
     }
-    return `"${value.replace(/\\/g, "\\\\").replace(/\n/g, "\\n").replace(/\t/g, "\\t")}"`;
+    return `"${value
+        .replace(/\\/g, "\\\\")
+        .replace(/"/g, '\\"')
+        .replace(/\n/g, "\\n")
+        .replace(/\t/g, "\\t")}"`;
 }

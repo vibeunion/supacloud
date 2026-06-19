@@ -11,8 +11,8 @@ describe("TenantRuntimeService systemd env quoting", () => {
     expect(quoteSystemdEnvValue("line1\nline2\tC:\\keys")).toBe('"line1\\nline2\\tC:\\\\keys"');
   });
 
-  test("rejects values that cannot be represented safely in EnvironmentFile", () => {
-    expect(() => quoteSystemdEnvValue(`{"name":"can't"}`)).toThrow("both single and double quotes");
+  test("double-quotes and escapes values containing both single and double quotes", () => {
+    expect(quoteSystemdEnvValue(`{"name":"can't"}`)).toBe(`"{\\"name\\":\\"can't\\"}"`);
   });
 });
 
@@ -54,5 +54,18 @@ describe("TenantRuntimeService GoTrue auth env rendering", () => {
     expect(renderGoTrueAuthEnv({
       enable_signup: false,
     })).toContain("GOTRUE_DISABLE_SIGNUP=true");
+  });
+
+  test("maps auth email templates into quoted GoTrue mailer env values", () => {
+    expect(renderGoTrueAuthEnv({
+      mailer_subjects_confirmation: "欢迎确认",
+      mailer_templates_confirmation_content: `<p>Hi {{ .Email }}</p>\n<a href="{{ .ConfirmationURL }}">Confirm</a>`,
+      MAILER_SUBJECTS_RECOVERY: "Reset your password",
+    })).toContain([
+      "GOTRUE_MAILER_SUBJECTS_CONFIRMATION=\"欢迎确认\"",
+      "GOTRUE_MAILER_TEMPLATES_CONFIRMATION_CONTENT='<p>Hi {{ .Email }}</p>",
+      "<a href=\"{{ .ConfirmationURL }}\">Confirm</a>'",
+      "GOTRUE_MAILER_SUBJECTS_RECOVERY=\"Reset your password\"",
+    ].join("\n"));
   });
 });
