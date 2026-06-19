@@ -107,7 +107,7 @@ export function buildFunctionTasksPath(
     query.set("function_version", version);
   }
 
-  return `/api/query?path=/v1/projects/${projectRef}/tasks?${query.toString()}`;
+  return `/v1/projects/${projectRef}/tasks?${query.toString()}`;
 }
 
 export function buildFunctionTaskConsolePath(

@@ -31,7 +31,7 @@ describe("function snippets", () => {
 
   test("buildFunctionTasksPath scopes by function_slug and limit", () => {
     expect(buildFunctionTasksPath("proj_123", "hello/world", 5)).toBe(
-      "/api/query?path=/v1/projects/proj_123/tasks?function_slug=hello%2Fworld&limit=5",
+      "/v1/projects/proj_123/tasks?function_slug=hello%2Fworld&limit=5",
     );
   });
 

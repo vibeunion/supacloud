@@ -303,7 +303,7 @@ export async function waitForTask(
     tasksLoading = true;
     tasksError = null;
     try {
-      const res = await fetch(
+      const res = await apiClient(
         buildFunctionTasksPath(String(projectRef), slug, 8, version),
       );
       const payload = await res.json().catch(() => []);
