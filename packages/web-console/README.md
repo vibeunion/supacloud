@@ -31,7 +31,7 @@ The production build outputs to `build/` directory. In production, the Managemen
 
 ## Tech Stack
 
-- [SvelteKit](https://kit.svelte.dev/) - Full-stack web framework
+- [SvelteKit](https://kit.svelte.dev/) - SPA application framework used with `adapter-static`
 - [TailwindCSS](https://tailwindcss.com/) - Utility-first CSS
 - [TypeScript](https://www.typescriptlang.org/) - Type-safe JavaScript
 
