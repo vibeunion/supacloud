@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.36.2](https://github.com/zuohuadong/supacloud/compare/management-api-v0.36.1...management-api-v0.36.2) (2026-06-19)
+
+
+### Bug Fixes
+
+* **management-api:** mark storage enterprise capabilities unavailable ([#345](https://github.com/zuohuadong/supacloud/issues/345)) ([7b273b5](https://github.com/zuohuadong/supacloud/commit/7b273b5ad5f57badab204f10e3463145c0287d8b))
+
 ## [0.36.1](https://github.com/zuohuadong/supacloud/compare/management-api-v0.36.0...management-api-v0.36.1) (2026-06-19)
 
 
