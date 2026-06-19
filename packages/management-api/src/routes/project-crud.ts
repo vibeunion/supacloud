@@ -12,6 +12,13 @@ import { tenantRuntimeService } from "../services/tenant-runtime.service";
 import { ScalingService } from "../services/scaling.service";
 import { listBackups } from "../services/backup.service";
 import type { BackupInfo } from "../types/backup";
+import {
+  applyAuthEmailTemplatePatch,
+  buildLegacyAuthEmailTemplateResponse,
+  clearAuthEmailTemplates,
+  getAuthEmailTemplates,
+  parseAuthEmailTemplatePatch,
+} from "../utils/auth-email-templates";
 
 // Available regions list
 const AVAILABLE_REGIONS = [
@@ -804,19 +811,22 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
     },
   )
 
-  // Auth Email Templates — stub endpoint (Studio compatibility)
+  // Auth Email Templates
   .get(
     "/:ref/auth/template",
-    async ({ params }) => {
-      const project = await projectService.getProject(params.ref);
-      if (!project)
+    async ({ params, request }) => {
+      const authError = await requireProjectOrAdminAuth(request, params.ref);
+      if (authError) return status(authError.status as 401 | 403, { message: authError.body.error, code: String(authError.status) });
+
+      const settings = await projectService.getProjectSettings(params.ref);
+      if (!settings)
         return status(404, { message: "Project not found", code: "404" });
+      const templates = getAuthEmailTemplates((settings.auth as Record<string, unknown>) || {});
       return {
-        confirmation_mail: { subject: "Confirm your signup", content: "" },
-        invitation_mail: { subject: "You have been invited", content: "" },
-        recovery_mail: { subject: "Reset your password", content: "" },
-        email_change: { subject: "Confirm email change", content: "" },
-        magic_link: { subject: "Your magic link", content: "" },
+        capability: true,
+        templates,
+        variables: [".ConfirmationURL", ".Token", ".SiteURL", ".Email"],
+        ...buildLegacyAuthEmailTemplateResponse(templates),
       };
     },
     {
@@ -826,21 +836,86 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
   )
   .put(
     "/:ref/auth/template",
-    async ({ params, body, set }) => {
-      const project = await projectService.getProject(params.ref);
-      if (!project)
+    async ({ params, body, request }) => {
+      const authError = await requireProjectOrAdminAuth(request, params.ref);
+      if (authError) return status(authError.status as 401 | 403, { message: authError.body.error, code: String(authError.status) });
+
+      const settings = await projectService.getProjectSettings(params.ref);
+      if (!settings)
         return status(404, { message: "Project not found", code: "404" });
-      set.status = 501;
+      const patch = parseAuthEmailTemplatePatch(body);
+      if (Object.keys(patch).length === 0) {
+        return status(400, { message: "No email templates provided", code: "400" });
+      }
+
+      const currentAuth = (settings.auth as Record<string, unknown>) || {};
+      const nextAuth = applyAuthEmailTemplatePatch(currentAuth, patch);
+      await projectService.updateProjectSettings(params.ref, {
+        ...settings,
+        auth: nextAuth,
+      });
+
+      let warning: string | null = null;
+      try {
+        await tenantRuntimeService.restartRuntime(params.ref);
+      } catch (err) {
+        warning = "Saved templates, but failed to restart GoTrue runtime. The templates will apply on the next runtime restart.";
+        logger.warn("[project-crud] Failed to restart runtime after auth template update", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+
+      const templates = getAuthEmailTemplates(nextAuth);
       return {
-        message:
-          "Auth email templates are not configurable on this SupaCloud cluster",
-        code: "501",
+        saved: true,
+        templates,
+        ...(warning ? { warning } : {}),
+        ...buildLegacyAuthEmailTemplateResponse(templates),
       };
     },
     {
       params: t.Object({ ref: t.String() }),
       body: t.Record(t.String(), t.Unknown()),
       detail: { tags: ["projects"], summary: "Update auth email templates" },
+    },
+  )
+  .delete(
+    "/:ref/auth/template",
+    async ({ params, request }) => {
+      const authError = await requireProjectOrAdminAuth(request, params.ref);
+      if (authError) return status(authError.status as 401 | 403, { message: authError.body.error, code: String(authError.status) });
+
+      const settings = await projectService.getProjectSettings(params.ref);
+      if (!settings)
+        return status(404, { message: "Project not found", code: "404" });
+      const currentAuth = (settings.auth as Record<string, unknown>) || {};
+      const nextAuth = clearAuthEmailTemplates(currentAuth);
+      await projectService.updateProjectSettings(params.ref, {
+        ...settings,
+        auth: nextAuth,
+      });
+
+      let warning: string | null = null;
+      try {
+        await tenantRuntimeService.restartRuntime(params.ref);
+      } catch (err) {
+        warning = "Cleared templates, but failed to restart GoTrue runtime. The defaults will apply on the next runtime restart.";
+        logger.warn("[project-crud] Failed to restart runtime after auth template reset", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+
+      const templates = getAuthEmailTemplates(nextAuth);
+      return {
+        reset: true,
+        templates,
+        ...(warning ? { warning } : {}),
+        ...buildLegacyAuthEmailTemplateResponse(templates),
+      };
+    },
+    {
+      params: t.Object({ ref: t.String() }),
+      detail: { tags: ["projects"], summary: "Reset auth email templates" },
     },
   )
 
