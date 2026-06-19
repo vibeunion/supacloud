@@ -10,6 +10,8 @@ import { normalizeProjectConfig } from "../utils/project-config";
 import { getAuthContext, requireAdminAuth, requireProjectOrAdminAuth } from "../middleware/auth";
 import { tenantRuntimeService } from "../services/tenant-runtime.service";
 import { ScalingService } from "../services/scaling.service";
+import { listBackups } from "../services/backup.service";
+import type { BackupInfo } from "../types/backup";
 
 // Available regions list
 const AVAILABLE_REGIONS = [
@@ -127,6 +129,76 @@ function mapStatus(rawStatus: string | undefined): string {
   if (s === "creating") return "COMING_UP";
   if (s === "deleted") return "INACTIVE";
   return rawStatus.toUpperCase();
+}
+
+function buildPostgresUpgradeStatus(currentVersion: string | null = null) {
+  return {
+    upgrade_status: "unsupported",
+    status: "unsupported",
+    capability: false,
+    available: false,
+    current_version: currentVersion,
+    target_version: null,
+    reason: "postgres_major_upgrade_not_supported",
+    message:
+      "Automated Postgres major version upgrades are not supported on this SupaCloud cluster. Use a planned backup/restore maintenance workflow instead.",
+  };
+}
+
+function getProjectDatabaseVersion(project: unknown): string | null {
+  const database = (project as { database?: Record<string, unknown> } | null)?.database;
+  return typeof database?.version === "string" ? database.version : null;
+}
+
+function normalizeBackupTimestamp(value: unknown): string | null {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    return null;
+  }
+  const millis = value < 10_000_000_000 ? value * 1000 : value;
+  return new Date(millis).toISOString();
+}
+
+function buildPitrStatus(ref: string, dbName: string, backups: BackupInfo[]) {
+  const dates = backups
+    .flatMap((backup) => [
+      normalizeBackupTimestamp(backup.timestamp?.start),
+      normalizeBackupTimestamp(backup.timestamp?.stop),
+    ])
+    .filter((value): value is string => Boolean(value))
+    .sort();
+  const pitrEnabled =
+    process.env.SUPACLOUD_PITR_ENABLED === "true" ||
+    process.env.PITR_ENABLED === "true";
+  const hasPhysicalBackups = dates.length > 0;
+  const available = pitrEnabled && hasPhysicalBackups;
+
+  return {
+    available,
+    capability: pitrEnabled,
+    status: available
+      ? "available"
+      : pitrEnabled
+        ? "no_physical_backups"
+        : "unsupported",
+    reason: available
+      ? null
+      : pitrEnabled
+        ? "no_physical_backups"
+        : "pitr_not_enabled",
+    earliest_physical_backup_date: dates[0] ?? null,
+    latest_physical_backup_date: dates.at(-1) ?? null,
+    backups: {
+      count: backups.length,
+      stanza: dbName,
+    },
+    restore: {
+      supported: available,
+      method: "POST",
+      endpoint: `/v1/projects/${ref}/database/backups/restore`,
+      requires_admin: true,
+      request_body: { target: "ISO-8601 timestamp" },
+    },
+  };
 }
 
 async function buildProjectResponse(
@@ -698,15 +770,17 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
     },
   )
 
-  // Postgres Upgrade — stub endpoints (Studio compatibility)
+  // Postgres Upgrade — explicit capability endpoint
   .post(
     "/:ref/upgrade",
-    async ({ params, set }) => {
-      set.status = 501;
-      return {
-        message: "Postgres upgrade is not supported on this SupaCloud cluster",
-        code: "501",
-      };
+    async ({ params, request }) => {
+      const authError = await requireAdminAuth(request);
+      if (authError) return status(authError.status as 401 | 403, { message: authError.body.error, code: String(authError.status) });
+
+      const project = await projectService.getProject(params.ref);
+      if (!project)
+        return status(404, { message: "Project not found", code: "404" });
+      return status(409, buildPostgresUpgradeStatus(getProjectDatabaseVersion(project)));
     },
     {
       params: t.Object({ ref: t.String() }),
@@ -715,8 +789,14 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
   )
   .get(
     "/:ref/upgrade-status",
-    async ({ params }) => {
-      return { upgrade_status: "none" };
+    async ({ params, request }) => {
+      const authError = await requireProjectOrAdminAuth(request, params.ref);
+      if (authError) return status(authError.status as 401 | 403, { message: authError.body.error, code: String(authError.status) });
+
+      const project = await projectService.getProject(params.ref);
+      if (!project)
+        return status(404, { message: "Project not found", code: "404" });
+      return buildPostgresUpgradeStatus(getProjectDatabaseVersion(project));
     },
     {
       params: t.Object({ ref: t.String() }),
@@ -806,18 +886,19 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
     },
   )
 
-  // PITR — stub endpoint (Studio compatibility)
+  // PITR — capability/status endpoint backed by physical backup inventory
   .get(
     "/:ref/database/backups/pitr",
-    async ({ params }) => {
+    async ({ params, request }) => {
+      const authError = await requireProjectOrAdminAuth(request, params.ref);
+      if (authError) return status(authError.status as 401 | 403, { message: authError.body.error, code: String(authError.status) });
+
       const project = await projectService.getProject(params.ref);
       if (!project)
         return status(404, { message: "Project not found", code: "404" });
-      return {
-        available: false,
-        earliest_physical_backup_date: null,
-        latest_physical_backup_date: null,
-      };
+      const dbName = await resolveDbName(params.ref);
+      const backups = await listBackups(dbName);
+      return buildPitrStatus(params.ref, dbName, backups);
     },
     {
       params: t.Object({ ref: t.String() }),
