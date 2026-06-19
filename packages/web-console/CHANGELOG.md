@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.2](https://github.com/zuohuadong/supacloud/compare/web-console-v0.16.1...web-console-v0.16.2) (2026-06-19)
+
+
+### Bug Fixes
+
+* **web-console:** prefer Bun function templates ([4725f61](https://github.com/zuohuadong/supacloud/commit/4725f61bf48173faea510df052bb870a52b9a3c6))
+
 ## [0.16.1](https://github.com/zuohuadong/supacloud/compare/web-console-v0.16.0...web-console-v0.16.1) (2026-06-19)
 
 
