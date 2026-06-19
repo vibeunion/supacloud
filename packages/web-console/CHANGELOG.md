@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.3](https://github.com/zuohuadong/supacloud/compare/web-console-v0.16.2...web-console-v0.16.3) (2026-06-19)
+
+
+### Bug Fixes
+
+* **web-console:** call physical PITR restore endpoint ([#349](https://github.com/zuohuadong/supacloud/issues/349)) ([3db0075](https://github.com/zuohuadong/supacloud/commit/3db007552f467930e9d3fe7c723665a4ed952808))
+
 ## [0.16.2](https://github.com/zuohuadong/supacloud/compare/web-console-v0.16.1...web-console-v0.16.2) (2026-06-19)
 
 
