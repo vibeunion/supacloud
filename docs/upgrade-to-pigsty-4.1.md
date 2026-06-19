@@ -19,8 +19,10 @@ bash scripts/upgrade_pigsty.sh
 
 This script will automatically:
 1. Download the Pigsty v4.3 release codebase in your current user's home directory (`$HOME/pigsty`).
-2. Automatically run `./configure -c app/supa`, preserving SupaCloud's own gateway/runtime/storage components. Operators may explicitly set `PIGSTY_CONFIG_TEMPLATE=supabase` to test Pigsty's full upstream Supabase template.
+2. Run `./configure -c supabase` for the Pigsty foundation while keeping SupaCloud's Caddy gateway, multi-tenant runtime, storage, and Edge Function orchestration as the product-owned path.
 3. Execute `ansible-playbook` to redeploy updates for each component, completing in-place upgrade.
+
+Legacy Pigsty Supabase compose cleanup is not part of the default install or upgrade path. Operators migrating an old compose-based node must run the cleanup explicitly with `SUPACLOUD_MIGRATE_LEGACY_SUPABASE_COMPOSE=true` or `sudo bash install.sh --migrate-legacy-supabase-compose` after verifying the per-project `supacloud-pgrst@*` and `supacloud-gotrue@*` services are healthy.
 
 ## Upgrade Method 2: Manual Upgrade (Follow Official Guide)
 
@@ -33,7 +35,7 @@ If you maintain a large number of custom host configuration items, or wish to ex
    ```
 2. **Apply reconfiguration**:
    ```bash
-   ./configure -c app/supa
+   ./configure -c supabase
    ```
 3. **Step-by-step playbook upgrade**:
    Run playbooks individually according to the parts you need to update. For full system-wide application:
