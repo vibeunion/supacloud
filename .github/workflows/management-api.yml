@@ -16,6 +16,7 @@ on:
       - ".github/scripts/**"
       - ".github/workflows/ai-review-merge.yml"
       - ".github/workflows/management-api.yml"
+      - ".github/workflows/release-please.yml"
   pull_request:
     branches: ["main", "dev"]
     paths:
@@ -31,6 +32,7 @@ on:
       - ".github/scripts/**"
       - ".github/workflows/ai-review-merge.yml"
       - ".github/workflows/management-api.yml"
+      - ".github/workflows/release-please.yml"
   workflow_dispatch:
 
 # Demo JWT signed with the Supabase public demo key (not a real credential).
@@ -109,8 +111,9 @@ jobs:
       - name: Check web console
         working-directory: packages/web-console
         run: |
-          bun install
+          bun install --frozen-lockfile
           bun run check
+          bun run build
 
       - name: Check SupaCloud JS SDK
         working-directory: packages/supacloud-js

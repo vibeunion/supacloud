@@ -112,6 +112,7 @@ templates/base/volumes/db/data/
 
 # Bun lockfile
 bun.lock
+!packages/web-console/bun.lock
 config.env.deploy
 
 # SupaCloud build artifacts

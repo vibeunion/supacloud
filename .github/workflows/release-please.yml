@@ -70,7 +70,7 @@ jobs:
       - name: Build web console static artifact
         run: |
           cd packages/web-console
-          bun install
+          bun install --frozen-lockfile
           bun run build
           mkdir -p ../management-api/dist
           tar -czf ../management-api/dist/web-console-build.tar.gz -C build .
