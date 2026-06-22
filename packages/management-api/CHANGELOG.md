@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.36.4](https://github.com/zuohuadong/supacloud/compare/management-api-v0.36.3...management-api-v0.36.4) (2026-06-22)
+
+
+### Bug Fixes
+
+* **management-api:** expose content disposition in gateway cors ([#351](https://github.com/zuohuadong/supacloud/issues/351)) ([638d2de](https://github.com/zuohuadong/supacloud/commit/638d2de455103d46da6358ce019d29493d96bf5a))
+
 ## [0.36.3](https://github.com/zuohuadong/supacloud/compare/management-api-v0.36.2...management-api-v0.36.3) (2026-06-19)
 
 
