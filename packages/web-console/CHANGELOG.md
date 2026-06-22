@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.4](https://github.com/zuohuadong/supacloud/compare/web-console-v0.16.3...web-console-v0.16.4) (2026-06-22)
+
+
+### Bug Fixes
+
+* **ci:** gate web console release build ([4b80c62](https://github.com/zuohuadong/supacloud/commit/4b80c62a64d8fae915162b717c906dfd6353961c))
+
 ## [0.16.3](https://github.com/zuohuadong/supacloud/compare/web-console-v0.16.2...web-console-v0.16.3) (2026-06-19)
 
 
