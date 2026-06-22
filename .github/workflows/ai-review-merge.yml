@@ -83,6 +83,12 @@ jobs:
         with:
           node-version: 24.x
 
+      - name: Validate AI review script
+        if: steps.pr-info.outputs.pr_number != ''
+        run: |
+          node --check .github/scripts/ai-review-merge.mjs
+          node --test .github/scripts/ai-review-merge.test.mjs
+
       - name: AI Review & Merge
         if: steps.pr-info.outputs.pr_number != ''
         env:

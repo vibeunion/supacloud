@@ -30,6 +30,8 @@
  */
 
 import { readFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 const API_KEY  = process.env.AI_API_KEY;
 const API_BASE = process.env.AI_API_BASE;
@@ -44,6 +46,71 @@ const HEAD_SHA = process.env.HEAD_SHA;
 const GH_API = `https://api.github.com/repos/${REPO}`;
 const MAX_DIFF_CHARS = 100_000;
 const MAX_CONTEXT_FILE_CHARS = 8_000;
+const AI_UNAVAILABLE_COMMENT_PREFIX = '## AI Review Unavailable';
+const MAX_ERROR_SUMMARY_CHARS = 500;
+
+// --- AI provider failure handling ---------------------------------------
+
+export class AiApiError extends Error {
+  constructor(status, body) {
+    super(`AI API ${status}: ${sanitizeErrorText(body)}`);
+    this.name = 'AiApiError';
+    this.status = status;
+    this.body = body;
+  }
+}
+
+function sanitizeErrorText(value) {
+  const text = String(value || '').replace(/\s+/g, ' ').trim();
+  return text
+    .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer [redacted]')
+    .replace(/(api[_-]?key["':=]\s*)[^"',\s}]+/gi, '$1[redacted]')
+    .slice(0, MAX_ERROR_SUMMARY_CHARS);
+}
+
+function errorText(error) {
+  if (!error) return '';
+  const pieces = [
+    error.name,
+    error.message,
+    error.body,
+    error.cause?.message,
+  ];
+  return pieces.filter(Boolean).map(String).join(' ');
+}
+
+export function summarizeAiProviderError(error) {
+  if (error instanceof AiApiError) {
+    return sanitizeErrorText(`HTTP ${error.status}: ${error.body}`);
+  }
+  return sanitizeErrorText(errorText(error) || 'unknown provider error');
+}
+
+export function isAiProviderUnavailableError(error) {
+  const status = error instanceof AiApiError ? error.status : undefined;
+  if (status && ([401, 403, 408, 409, 425, 429].includes(status) || status >= 500)) {
+    return true;
+  }
+
+  const text = errorText(error);
+  return /AppIdNoAuthError|NoAuth|Unauthorized|Forbidden|permission|quota|rate limit|temporar(?:y|ily)|timeout|timed out|ECONNRESET|ECONNREFUSED|ETIMEDOUT|ENOTFOUND|fetch failed|network/i.test(text);
+}
+
+export function formatAiUnavailableComment({ model, sha, error, ciStatus }) {
+  const shortSha = sha?.slice(0, 7) || 'unknown';
+  const ciLine = ciStatus?.allCompleted && ciStatus?.allPassed
+    ? '当前业务 CI 已完成并通过；本次不会自动合并。'
+    : '当前业务 CI 尚未全部完成或通过；本次不会自动合并。';
+  return [
+    `${AI_UNAVAILABLE_COMMENT_PREFIX} (${model}) — ${shortSha}`,
+    '',
+    'AI 审查模型暂不可用，本次已跳过 AI 审查并关闭自动合并。',
+    '',
+    `- 原因摘要：\`${summarizeAiProviderError(error)}\``,
+    `- CI 状态：${ciLine}`,
+    '- 安全策略：merge-bypass、自修改、CI、提交者身份等硬门禁未放宽；需要维护者人工审查或等待 AI provider 恢复后重新运行 workflow。',
+  ].join('\n');
+}
 
 // --- Merge-bypass detection patterns (Layer 1 hard block) ---------------
 
@@ -418,6 +485,13 @@ async function hasExistingAIReview() {
   );
 }
 
+async function hasExistingAIUnavailableNotice() {
+  const comments = await getPRComments();
+  return comments.some((c) =>
+    c.body && c.body.startsWith(AI_UNAVAILABLE_COMMENT_PREFIX) && c.body.includes(HEAD_SHA)
+  );
+}
+
 // --- AI review (Layer 2 — prompt guardrails) ---------------------------
 
 async function aiReview(diff, changedFiles, projectContext, ciStatus) {
@@ -507,7 +581,7 @@ async function aiReview(diff, changedFiles, projectContext, ciStatus) {
 
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(`AI API ${res.status}: ${text}`);
+    throw new AiApiError(res.status, text);
   }
 
   const data = await res.json();
@@ -633,7 +707,25 @@ async function main() {
   console.log(`Diff size: ${diff.length} chars`);
 
   console.log(`Calling AI model: ${MODEL}...`);
-  const review = await aiReview(diff, changedFiles, projectContext, ciStatus);
+  let review;
+  try {
+    review = await aiReview(diff, changedFiles, projectContext, ciStatus);
+  } catch (err) {
+    if (!isAiProviderUnavailableError(err)) {
+      throw err;
+    }
+
+    const summary = summarizeAiProviderError(err);
+    console.warn(`AI review provider unavailable: ${summary}`);
+    if (await hasExistingAIUnavailableNotice()) {
+      console.log('AI unavailable notice already exists for this commit SHA. Skipping duplicate comment.');
+    } else {
+      await postComment(formatAiUnavailableComment({ model: MODEL, sha, error: err, ciStatus }));
+      console.log('AI unavailable notice posted.');
+    }
+    console.log('AI review unavailable. Auto-merge disabled for this run.');
+    return;
+  }
   console.log('Review completed.');
 
   const comment = `## AI Code Review (${MODEL}) — ${sha?.slice(0, 7) || 'unknown'}\n\n${review}`;
@@ -671,7 +763,13 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  console.error('Fatal error:', err.message);
-  process.exit(1);
-});
+function isDirectRun() {
+  return Boolean(process.argv[1]) && import.meta.url === pathToFileURL(resolve(process.argv[1])).href;
+}
+
+if (isDirectRun()) {
+  main().catch((err) => {
+    console.error('Fatal error:', err.message);
+    process.exit(1);
+  });
+}

@@ -13,6 +13,8 @@ on:
       - "install.sh"
       - "setup.sh"
       - "switch.sh"
+      - ".github/scripts/**"
+      - ".github/workflows/ai-review-merge.yml"
       - ".github/workflows/management-api.yml"
   pull_request:
     branches: ["main", "dev"]
@@ -26,6 +28,8 @@ on:
       - "install.sh"
       - "setup.sh"
       - "switch.sh"
+      - ".github/scripts/**"
+      - ".github/workflows/ai-review-merge.yml"
       - ".github/workflows/management-api.yml"
   workflow_dispatch:
 
@@ -140,6 +144,11 @@ jobs:
         run: |
           bash -n install.sh setup.sh switch.sh deploy_all.sh scripts/pre_start_recovery.sh
           find scripts -name "*.sh" -print0 | xargs -0 -n1 bash -n
+
+      - name: Validate AI review script
+        run: |
+          node --check .github/scripts/ai-review-merge.mjs
+          node --test .github/scripts/ai-review-merge.test.mjs
 
   unit-test:
     name: Unit Tests
