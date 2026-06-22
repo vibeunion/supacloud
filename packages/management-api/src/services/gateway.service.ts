@@ -27,7 +27,7 @@ export const DEFAULT_CORS_EXPOSED = [
     "Content-Length", "Content-Range", "X-Content-Range", "X-JSON",
     "x-supabase-api-version", "X-Client-Info", "Prefer",
     "Content-Profile", "accept-profile", "Range", "Range-Unit",
-    "X-Relay-Error", "link", "x-total-count",
+    "X-Relay-Error", "link", "x-total-count", "Content-Disposition",
 ];
 const UPSTREAM_CORS_RESPONSE_HEADERS = [
     "Access-Control-Allow-Origin",

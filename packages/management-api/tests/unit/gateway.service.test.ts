@@ -3,6 +3,7 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { config } from "../../src/config";
 import {
     CaddyGatewayProvider,
+    DEFAULT_CORS_EXPOSED,
     DEFAULT_CORS_HEADERS,
     buildTenantCorsOrigins,
     gatewayService,
@@ -114,6 +115,10 @@ describe("GatewayService provider selection", () => {
         expect(DEFAULT_CORS_HEADERS).toContain("x-forwarded-host");
         expect(DEFAULT_CORS_HEADERS).toContain("x-forwarded-proto");
         expect(DEFAULT_CORS_HEADERS).toContain("x-real-ip");
+    });
+
+    test("default cors exposed headers allow browsers to read download filenames", () => {
+        expect(DEFAULT_CORS_EXPOSED).toContain("Content-Disposition");
     });
 
     test("tenant cors origins include exact api and studio custom domains", () => {
