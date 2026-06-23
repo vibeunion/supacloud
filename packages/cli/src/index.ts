@@ -12,6 +12,7 @@ import { registerAdvancedTools } from "./shared/tools/advanced-tools";
 import { registerFrontendTools } from "./shared/tools/frontend-tools";
 import { registerUserProjectCliTools } from "./shared/tools/project-cli-tools";
 import { registerQueueTools } from "./shared/tools/queue-tools";
+import { registerGatewayTools } from "./shared/tools/gateway-tools";
 
 type ToolEntry = { schema: any; callback: (args: any) => Promise<any> };
 type ToolMap = Record<string, ToolEntry>;
@@ -92,6 +93,10 @@ EXAMPLES
   ${preferredCommand} database push_migrations --ref abc123 --dir supabase/migrations --dry_run
   ${preferredCommand} edge_functions deploy --ref abc123 --slug hello --path ./supabase/functions/hello
   ${preferredCommand} edge_functions config --ref abc123 --slug hello --verify_jwt false --background_routes "/queue/*,/render/*"
+  ${preferredCommand} gateway routes --ref abc123
+  ${preferredCommand} gateway upsert_route --ref abc123 --route_id webhook --hosts "api.example.com" --paths "/webhook/*" --upstream 10.0.0.5:8080
+  ${preferredCommand} gateway config --ref abc123 --rate_limit_tier pro
+  ${preferredCommand} gateway rebuild --ref abc123 --clean
 
 SEPARATE ADMIN CLI
 
@@ -151,7 +156,7 @@ function createCliTools(): ToolMap {
                 ],
             }),
         };
-        for (const name of ["database", "auth", "storage", "edge_functions", "secrets", "frontend", "queue", "task_events", "diagnostics"]) {
+        for (const name of ["database", "auth", "storage", "edge_functions", "secrets", "frontend", "queue", "task_events", "diagnostics", "gateway"]) {
             tools[name] = {
                 schema: { action: genericActionSchema },
                 callback: async () => ({
@@ -217,6 +222,9 @@ function createCliTools(): ToolMap {
     assign(captureTools((server) => registerStorageTools(server as any, http)));
     assign(captureTools((server) => registerAdvancedTools(server as any, http)));
     assign(captureTools((server) => registerFrontendTools(server as any, http)));
+    assign(captureTools((server) => registerGatewayTools(server as any, http, {
+        projectRef: context.projectRef || undefined,
+    })));
     assign(captureTools((server) => registerQueueTools(server as any, http, {
         projectRef: context.projectRef || undefined,
     })));

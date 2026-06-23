@@ -96,4 +96,29 @@ Task event commands:
 - `task_events unregister_webhook`
 - `task_events inspect_webhook`
 
+Gateway / Caddy commands (require admin privileges; config is injected via the Caddy JSON Admin API):
+
+- `gateway routes` — list custom gateway routes (reverse_proxy / static sites)
+- `gateway upsert_route` — create or replace a route
+- `gateway update_route` — replace a route by id
+- `gateway delete_route` — remove a route by id
+- `gateway config` — update rate-limit tier, CORS origins, or JWT settings
+- `gateway get_certificate` — read certificate automation settings
+- `gateway update_certificate` — save certificate automation settings
+- `gateway issue_certificate` — issue or renew a certificate with lego
+- `gateway deploy_certificate` — deploy an existing PEM cert/key pair
+- `gateway rebuild` — rebuild all tenant gateway configs (`--clean` for a full rebuild)
+- `gateway custom_hostname` — read the bound custom hostname
+- `gateway set_custom_hostname` — bind a custom hostname
+- `gateway delete_custom_hostname` — remove the custom hostname
+- `gateway verify_custom_hostname` — verify a custom hostname
+
+```bash
+supacloud-cli gateway routes --ref abc123
+supacloud-cli gateway upsert_route --ref abc123 --route_id webhook \
+  --hosts "api.example.com" --paths "/webhook/*" --upstream 10.0.0.5:8080
+supacloud-cli gateway config --ref abc123 --rate_limit_tier pro
+supacloud-cli gateway rebuild --ref abc123 --clean
+```
+
 For server installation, SSH diagnostics, and tenant administration, use `@supacloud/admin`.

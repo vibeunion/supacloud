@@ -8,6 +8,7 @@ import { SshTransport } from "./shared/transports/ssh";
 import { registerSshTools } from "./shared/tools/ssh-tools";
 import { registerAdvancedTools } from "./shared/tools/advanced-tools";
 import { registerAdminProjectCliTools } from "./shared/tools/project-cli-tools";
+import { registerGatewayTools } from "./shared/tools/gateway-tools";
 
 type ToolEntry = { schema: any; callback: (args: any) => Promise<any> };
 type ToolMap = Record<string, ToolEntry>;
@@ -75,6 +76,10 @@ EXAMPLES
   supacloud-admin project create --name my-app
   supacloud-admin project list
   supacloud-admin platform metrics
+  supacloud-admin gateway routes --ref abc123
+  supacloud-admin gateway upsert_route --ref abc123 --route_id webhook --hosts "api.example.com" --paths "/webhook/*" --upstream 10.0.0.5:8080
+  supacloud-admin gateway config --ref abc123 --rate_limit_tier pro
+  supacloud-admin gateway rebuild --ref abc123 --clean
 `);
 }
 
@@ -139,6 +144,17 @@ function createAdminTools(): ToolMap {
                 ],
             }),
         };
+        tools.gateway = {
+            schema: { action: z.string() },
+            callback: async () => ({
+                content: [
+                    {
+                        type: "text" as const,
+                        text: "⚠️ Gateway / Caddy commands require SUPACLOUD_API_URL and SUPACLOUD_API_TOKEN (admin privileges).",
+                    },
+                ],
+            }),
+        };
     };
 
     registerAdminHelp();
@@ -161,6 +177,7 @@ function createAdminTools(): ToolMap {
         });
 
         Object.assign(tools, captureTools((server) => registerAdminProjectCliTools(server as any, http)));
+        Object.assign(tools, captureTools((server) => registerGatewayTools(server as any, http)));
 
         const advancedTools = captureTools((server) => registerAdvancedTools(server as any, http));
         if (advancedTools.platform) {
