@@ -1,12 +1,36 @@
 {
   "bump-minor-pre-major": true,
   "changelog-sections": [
-    {"type": "feat", "section": "Features", "hidden": false},
-    {"type": "fix", "section": "Bug Fixes", "hidden": false},
-    {"type": "refactor", "section": "Elegance & Refactoring", "hidden": false},
-    {"type": "perf", "section": "Performance Improvements", "hidden": false},
-    {"type": "docs", "section": "Documentation", "hidden": false},
-    {"type": "chore", "section": "Miscellaneous Chores", "hidden": false}
+    {
+      "type": "feat",
+      "section": "Features",
+      "hidden": false
+    },
+    {
+      "type": "fix",
+      "section": "Bug Fixes",
+      "hidden": false
+    },
+    {
+      "type": "refactor",
+      "section": "Elegance & Refactoring",
+      "hidden": false
+    },
+    {
+      "type": "perf",
+      "section": "Performance Improvements",
+      "hidden": false
+    },
+    {
+      "type": "docs",
+      "section": "Documentation",
+      "hidden": false
+    },
+    {
+      "type": "chore",
+      "section": "Miscellaneous Chores",
+      "hidden": false
+    }
   ],
   "packages": {
     "packages/management-api": {
@@ -37,6 +61,11 @@
     "packages/admin": {
       "release-type": "node",
       "component": "admin",
+      "changelog-path": "CHANGELOG.md"
+    },
+    "packages/supacloud": {
+      "release-type": "node",
+      "component": "supacloud",
       "changelog-path": "CHANGELOG.md"
     }
   },

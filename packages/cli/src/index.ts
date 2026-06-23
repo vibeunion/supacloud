@@ -62,7 +62,7 @@ function printHelp(context = resolveSupaCloudContext()) {
 ║  Project CLI for SupaCloud users                         ║
 ╚═══════════════════════════════════════════════════════════╝
 
-${commandName === "supacloud" ? "NOTE\n\n  `supacloud` is kept as a compatibility alias. Prefer `supacloud-cli`\n  to avoid confusion with the server binary at /usr/local/bin/supacloud.\n" : ""}
+${commandName === "supacloud" ? "NOTE\n\n  `supacloud` is now the unified entrypoint package (`npm i -g supacloud`).\n  Use `supacloud cli ...` to reach this CLI, or keep using `supacloud-cli` directly.\n" : ""}
 
 USAGE
 
