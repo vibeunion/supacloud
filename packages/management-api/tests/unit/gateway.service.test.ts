@@ -588,6 +588,179 @@ describe("CaddyGatewayProvider", () => {
         restore();
     });
 
+    test("setRateLimit does not rehydrate stale disk routes after project routes are rebuilt", async () => {
+        const calls: Array<{ url: string; method: string; body: any }> = [];
+        const restore = captureFetch(calls);
+        const provider = new CaddyGatewayProvider();
+
+        await provider.setupUpstream("freshref", 3000, 9999);
+        await writeFile("/tmp/supacloud-caddy-test/config.json", JSON.stringify({
+            apps: {
+                http: {
+                    servers: {
+                        supacloud: {
+                            routes: [
+                                {
+                                    "@id": "route-project-freshref-storage",
+                                    match: [{ host: ["freshref.api.example.com"], path: ["/storage/v1*"] }],
+                                    handle: [
+                                        { handler: "rewrite", strip_path_prefix: "/storage/v1" },
+                                        { handler: "reverse_proxy", upstreams: [{ dial: "127.0.0.1:9090" }] },
+                                    ],
+                                    terminal: true,
+                                },
+                            ],
+                        },
+                    },
+                },
+            },
+        }));
+
+        await provider.setRateLimit("freshref", { second: 7, minute: 70, hour: 700 });
+
+        const load = calls.filter((call) => call.method === "POST" && call.url.endsWith("/load")).at(-1);
+        const routes = load?.body?.apps?.http?.servers?.supacloud?.routes ?? [];
+        const storage = routes.find((route: any) => route["@id"] === "route-project-freshref-storage");
+        const storageProxy = storage?.handle?.find((handler: any) => handler.handler === "reverse_proxy");
+
+        expect(storage?.handle?.some((handler: any) => handler.strip_path_prefix === "/storage/v1")).toBe(false);
+        expect(storageProxy?.headers?.request?.set?.["Host"]).toEqual([`freshref.api.${config.baseDomain}`]);
+        expect(storageProxy?.flush_interval).toBeUndefined();
+
+        restore();
+    });
+
+
+    test("guarded method does not rehydrate stale disk after removeService empties state", async () => {
+        const calls: Array<{ url: string; method: string; body: any }> = [];
+        const restore = captureFetch(calls);
+        const provider = new CaddyGatewayProvider();
+
+        await mkdir("/tmp/supacloud-caddy-test", { recursive: true });
+
+        // Initialize provider via setupUpstream (hydrated stays false, no disk read).
+        await provider.setupUpstream("emptyref", 3000, 9999);
+        // removeService empties in-memory maps while hydrated is still false.
+        await provider.removeService("emptyref");
+
+        // Overwrite disk config with a stale route AFTER persistAndLoad wrote clean state.
+        await writeFile("/tmp/supacloud-caddy-test/config.json", JSON.stringify({
+            apps: {
+                http: {
+                    servers: {
+                        supacloud: {
+                            routes: [
+                                {
+                                    "@id": "route-project-staleproj-storage",
+                                    match: [{ host: ["staleproj.api.example.com"], path: ["/storage/v1*"] }],
+                                    handle: [
+                                        { handler: "rewrite", strip_path_prefix: "/storage/v1" },
+                                        { handler: "reverse_proxy", upstreams: [{ dial: "127.0.0.1:9090" }] },
+                                    ],
+                                    terminal: true,
+                                },
+                            ],
+                        },
+                    },
+                },
+            },
+        }));
+
+        // A guarded method must NOT trigger disk hydration when maps are empty.
+        await provider.setRateLimit("staleproj", { second: 5 });
+
+        const load = calls.filter((call) => call.method === "POST" && call.url.endsWith("/load")).at(-1);
+        const routes = load?.body?.apps?.http?.servers?.supacloud?.routes ?? [];
+
+        // The stale disk route must NOT appear in the published config.
+        expect(routes.some((route: any) => route["@id"] === "route-project-staleproj-storage")).toBe(false);
+        expect(routes.some((route: any) => route["@id"]?.includes("emptyref"))).toBe(false);
+
+        restore();
+    });
+
+    test("clean rebuild publishes once and drops stale disk routes while preserving certificates", async () => {
+        const calls: Array<{ url: string; method: string; body: any }> = [];
+        const restore = captureFetch(calls);
+        const provider = new CaddyGatewayProvider();
+
+        await mkdir("/tmp/supacloud-caddy-test", { recursive: true });
+        await writeFile("/tmp/supacloud-caddy-test/config.json", JSON.stringify({
+            apps: {
+                tls: {
+                    certificates: {
+                        load_files: [
+                            { certificate: "/etc/supacloud/certs/manual.crt", key: "/etc/supacloud/certs/manual.key" },
+                        ],
+                    },
+                },
+                http: {
+                    servers: {
+                        supacloud: {
+                            routes: [
+                                {
+                                    "@id": "route-project-stale-storage",
+                                    match: [{ host: ["stale.api.example.com"], path: ["/storage/v1*"] }],
+                                    handle: [
+                                        { handler: "rewrite", strip_path_prefix: "/storage/v1" },
+                                        { handler: "reverse_proxy", upstreams: [{ dial: "127.0.0.1:9090" }] },
+                                    ],
+                                    terminal: true,
+                                },
+                            ],
+                        },
+                    },
+                },
+            },
+        }));
+
+        await provider.withDeferredPersist(async () => {
+            await provider.prepareCleanRebuild();
+            await provider.setupMasterRoutes();
+            await provider.setupUpstream("cleanref", 3000, 9999);
+            await provider.configureFrontendRoute({
+                projectRef: "cleanref",
+                deploymentId: "abcdef01",
+                hosts: ["app.clean.example.com"],
+                root: "/tmp/supacloud-caddy-test/frontend",
+                mode: "static",
+            });
+        });
+
+        const loads = calls.filter((call) => call.method === "POST" && call.url.endsWith("/load"));
+        expect(loads).toHaveLength(1);
+
+        const routes = loads[0]?.body?.apps?.http?.servers?.supacloud?.routes ?? [];
+        const certs = loads[0]?.body?.apps?.tls?.certificates?.load_files ?? [];
+
+        expect(routes.some((route: any) => route["@id"] === "route-project-stale-storage")).toBe(false);
+        expect(routes.some((route: any) => route["@id"] === "route-system-management-api")).toBe(true);
+        expect(routes.some((route: any) => route["@id"] === "route-project-cleanref-rest")).toBe(true);
+        expect(routes.some((route: any) => route["@id"] === "route-frontend-cleanref-abcdef01")).toBe(true);
+        expect(certs).toEqual([
+            { certificate: "/etc/supacloud/certs/manual.crt", key: "/etc/supacloud/certs/manual.key" },
+        ]);
+
+        restore();
+    });
+
+    test("deferred persist can skip publish when clean rebuild validation fails", async () => {
+        const calls: Array<{ url: string; method: string; body: any }> = [];
+        const restore = captureFetch(calls);
+        const provider = new CaddyGatewayProvider();
+
+        const result = await provider.withDeferredPersist(async () => {
+            await provider.prepareCleanRebuild();
+            await provider.setupMasterRoutes();
+            return { success: false };
+        }, (value) => value.success);
+
+        expect(result.success).toBe(false);
+        expect(calls.filter((call) => call.method === "POST" && call.url.endsWith("/load"))).toHaveLength(0);
+
+        restore();
+    });
+
     test("setCustomRouteRateLimit creates a stable custom route before parent routes", async () => {
         const calls: Array<{ url: string; method: string; body: any }> = [];
         const restore = captureFetch(calls);

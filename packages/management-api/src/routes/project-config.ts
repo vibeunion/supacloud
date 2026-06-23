@@ -2287,19 +2287,32 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
   // Rebuild ALL tenant gateway configs (propagate CORS / template changes)
   .post(
     "/:ref/gateway/rebuild-all",
-    async ({ request }) => {
+    async ({ request, query }) => {
       const authError = await requireAdminAuth(request);
       if (authError) return status(authError.status, authError.body);
-      const result = await gatewayService.rebuildAllTenantConfigs();
       const { frontendService } = await import("../services/frontend.service");
-      const frontend = await frontendService.reconcileGatewayRoutes();
+      const clean = query.clean === "true" || query.clean === "1";
+      const { result, frontend } = clean
+        ? await gatewayService.withDeferredPersist(async () => {
+            await gatewayService.prepareCleanRebuild();
+            await gatewayService.setupMasterRoutes();
+            const result = await gatewayService.rebuildAllTenantConfigs();
+            const frontend = await frontendService.reconcileGatewayRoutes();
+            const hostedAuth = await gatewayService.setupHostedAuthRoutes();
+            return { result, frontend, hostedAuth };
+          }, ({ result, frontend, hostedAuth }) => result.success && frontend.errors.length === 0 && hostedAuth.success)
+        : {
+            result: await gatewayService.rebuildAllTenantConfigs(),
+            frontend: await frontendService.reconcileGatewayRoutes(),
+          };
       if (!result.success) {
-        return { ...result, frontend, message: "Rebuild failed" };
+        return { ...result, frontend, clean, message: "Rebuild failed" };
       }
-      return { ...result, frontend };
+      return { ...result, frontend, clean };
     },
     {
       params: t.Object({ ref: t.String() }),
+      query: t.Object({ clean: t.Optional(t.String()) }),
       detail: {
         tags: ["projects"],
         summary: "Rebuild all tenant gateway configs",

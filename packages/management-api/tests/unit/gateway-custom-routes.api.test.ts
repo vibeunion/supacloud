@@ -1,6 +1,7 @@
 import { describe, expect, spyOn, test } from "bun:test";
 import { Elysia } from "elysia";
 import { projectConfigRoutes } from "../../src/routes/project-config";
+import { frontendService } from "../../src/services/frontend.service";
 import { gatewayService } from "../../src/services/gateway.service";
 import { projectService } from "../../src/services/project.service";
 
@@ -110,6 +111,106 @@ describe("controlled custom gateway routes API", () => {
       getSettings.mockRestore();
       updateSettings.mockRestore();
       configureRoutes.mockRestore();
+    }
+  });
+
+  test("rebuild-all clean mode defers publishing until full gateway state is generated", async () => {
+    const events: string[] = [];
+    const prepareCleanRebuild = spyOn(gatewayService, "prepareCleanRebuild").mockImplementation(async () => { events.push("prepare"); });
+    const setupMasterRoutes = spyOn(gatewayService, "setupMasterRoutes").mockImplementation(async () => { events.push("master"); });
+    const rebuildAllTenantConfigs = spyOn(gatewayService, "rebuildAllTenantConfigs").mockImplementation(async () => {
+      events.push("tenants");
+      return { success: true, updated: 2, errors: [] };
+    });
+    const reconcileGatewayRoutes = spyOn(frontendService, "reconcileGatewayRoutes").mockImplementation(async () => {
+      events.push("frontend");
+      return { total: 1, configured: 1, skipped: 0, errors: [] };
+    });
+    const setupHostedAuthRoutes = spyOn(gatewayService, "setupHostedAuthRoutes").mockImplementation(async () => {
+      events.push("hosted-auth");
+      return { success: true };
+    });
+    const withDeferredPersist = spyOn(gatewayService, "withDeferredPersist").mockImplementation(async (fn, shouldFlush) => {
+      events.push("defer:start");
+      const result = await fn();
+      if (!shouldFlush || shouldFlush(result)) events.push("defer:flush");
+      return result;
+    });
+
+    try {
+      const response = await request("/v1/projects/proj123/gateway/rebuild-all?clean=true", {
+        method: "POST",
+        headers: masterHeaders,
+      });
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({
+        success: true,
+        updated: 2,
+        errors: [],
+        frontend: { total: 1, configured: 1, skipped: 0, errors: [] },
+        clean: true,
+      });
+      expect(events).toEqual(["defer:start", "prepare", "master", "tenants", "frontend", "hosted-auth", "defer:flush"]);
+      expect(withDeferredPersist).toHaveBeenCalledTimes(1);
+      expect(prepareCleanRebuild).toHaveBeenCalledTimes(1);
+    } finally {
+      prepareCleanRebuild.mockRestore();
+      setupMasterRoutes.mockRestore();
+      rebuildAllTenantConfigs.mockRestore();
+      reconcileGatewayRoutes.mockRestore();
+      setupHostedAuthRoutes.mockRestore();
+      withDeferredPersist.mockRestore();
+    }
+  });
+
+  test("rebuild-all clean mode does not flush when tenant rebuild fails", async () => {
+    const events: string[] = [];
+    const prepareCleanRebuild = spyOn(gatewayService, "prepareCleanRebuild").mockImplementation(async () => { events.push("prepare"); });
+    const setupMasterRoutes = spyOn(gatewayService, "setupMasterRoutes").mockImplementation(async () => { events.push("master"); });
+    const rebuildAllTenantConfigs = spyOn(gatewayService, "rebuildAllTenantConfigs").mockImplementation(async () => {
+      events.push("tenants");
+      return { success: false, updated: 0, errors: ["brokenref: missing port config"] };
+    });
+    const reconcileGatewayRoutes = spyOn(frontendService, "reconcileGatewayRoutes").mockImplementation(async () => {
+      events.push("frontend");
+      return { total: 0, configured: 0, skipped: 0, errors: [] };
+    });
+    const setupHostedAuthRoutes = spyOn(gatewayService, "setupHostedAuthRoutes").mockImplementation(async () => {
+      events.push("hosted-auth");
+      return { success: true };
+    });
+    const withDeferredPersist = spyOn(gatewayService, "withDeferredPersist").mockImplementation(async (fn, shouldFlush) => {
+      events.push("defer:start");
+      const result = await fn();
+      if (!shouldFlush || shouldFlush(result)) events.push("defer:flush");
+      else events.push("defer:skip-flush");
+      return result;
+    });
+
+    try {
+      const response = await request("/v1/projects/proj123/gateway/rebuild-all?clean=true", {
+        method: "POST",
+        headers: masterHeaders,
+      });
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({
+        success: false,
+        updated: 0,
+        errors: ["brokenref: missing port config"],
+        frontend: { total: 0, configured: 0, skipped: 0, errors: [] },
+        clean: true,
+        message: "Rebuild failed",
+      });
+      expect(events).toEqual(["defer:start", "prepare", "master", "tenants", "frontend", "hosted-auth", "defer:skip-flush"]);
+    } finally {
+      prepareCleanRebuild.mockRestore();
+      setupMasterRoutes.mockRestore();
+      rebuildAllTenantConfigs.mockRestore();
+      reconcileGatewayRoutes.mockRestore();
+      setupHostedAuthRoutes.mockRestore();
+      withDeferredPersist.mockRestore();
     }
   });
 });
