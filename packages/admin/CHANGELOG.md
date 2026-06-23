@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.0](https://github.com/zuohuadong/supacloud/compare/admin-v0.1.12...admin-v0.2.0) (2026-06-23)
+
+
+### Features
+
+* **cli:** add gateway/caddy config tools to cli and admin ([4f5df4f](https://github.com/zuohuadong/supacloud/commit/4f5df4f2ea3f3aca94f95fe47ebc72bc9821e20f))
+
 ## [0.1.12](https://github.com/zuohuadong/supacloud/compare/admin-v0.1.11...admin-v0.1.12) (2026-06-03)
 
 
