@@ -323,7 +323,6 @@ export function normalizeCustomGatewayRoute(input: CustomGatewayRouteConfig): Cu
     const rewriteUri = normalizeCustomRewriteUri(input.rewrite_uri);
     const stripPrefix = normalizeCustomStripPrefix(input.strip_prefix);
     if (rewriteUri && stripPrefix) throw new Error("Custom route must not set both rewrite_uri and strip_prefix");
-    if ((rewriteUri || stripPrefix) && !hasUpstream) throw new Error("Custom route rewrite_uri or strip_prefix requires an upstream route");
 
     return {
         id,
@@ -1099,6 +1098,8 @@ export class CaddyGatewayProvider implements GatewayProvider {
                     },
                 });
             }
+            if (route.rewrite_uri) handle.push({ handler: "rewrite", uri: route.rewrite_uri });
+            else if (route.strip_prefix) handle.push({ handler: "rewrite", strip_path_prefix: route.strip_prefix });
             handle.push(this.makeStaticFileServer(route.static_root));
         } else {
             return null;
