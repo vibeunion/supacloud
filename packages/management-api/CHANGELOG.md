@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.36.5](https://github.com/zuohuadong/supacloud/compare/management-api-v0.36.4...management-api-v0.36.5) (2026-06-23)
+
+
+### Bug Fixes
+
+* **gateway:** support mounted static custom routes ([#356](https://github.com/zuohuadong/supacloud/issues/356)) ([f6ced08](https://github.com/zuohuadong/supacloud/commit/f6ced083f2f94b041fc8168a4ac4eb14d21080dd))
+
 ## [0.36.4](https://github.com/zuohuadong/supacloud/compare/management-api-v0.36.3...management-api-v0.36.4) (2026-06-22)
 
 
