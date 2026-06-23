@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.36.6](https://github.com/zuohuadong/supacloud/compare/management-api-v0.36.5...management-api-v0.36.6) (2026-06-23)
+
+
+### Bug Fixes
+
+* **gateway:** support clean caddy reconcile ([a848dc6](https://github.com/zuohuadong/supacloud/commit/a848dc695e738e213cc6ecebe0b697c6f2bf9f7a))
+
 ## [0.36.5](https://github.com/zuohuadong/supacloud/compare/management-api-v0.36.4...management-api-v0.36.5) (2026-06-23)
 
 
