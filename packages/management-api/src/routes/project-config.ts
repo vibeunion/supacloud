@@ -389,6 +389,13 @@ function buildAuthConfigResponse(settings: Record<string, unknown>) {
     external_phone_enabled: authConfig.external_phone_enabled ?? null,
     saml_enabled: authConfig.saml_enabled ?? null,
     saml_external_url: authConfig.saml_external_url ?? null,
+    saml_private_key_next_configured:
+      Boolean((authConfig.saml as Record<string, unknown> | undefined)?.private_key_next) ||
+      Boolean(authConfig.saml_private_key_next),
+    passkey_enabled:
+      (authConfig.passkey as Record<string, unknown> | undefined)?.enabled ??
+      authConfig.passkey_enabled ??
+      false,
     security_captcha_enabled: authConfig.security_captcha_enabled ?? null,
     security_captcha_provider: authConfig.security_captcha_provider ?? "hcaptcha",
     security_captcha_secret: authConfig.security_captcha_secret
@@ -1008,7 +1015,11 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
             saml_api_base: "api_base",
             saml_metadata_url: "metadata_url",
             saml_metadata_xml: "metadata_xml",
+            saml_private_key: "private_key",
+            saml_private_key_next: "private_key_next",
             saml_allow_encrypted_assertions: "allow_encrypted_assertions",
+            saml_relay_state_validity_period: "relay_state_validity_period",
+            saml_rate_limit_assertion: "rate_limit_assertion",
           };
           const samlField = samlKeyMap[key];
           if (samlField) {
@@ -1017,6 +1028,55 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
             otherUpdates.saml = {
               ...((otherUpdates.saml as Record<string, unknown>) || {}),
               [samlField]: val,
+            };
+          }
+        } else if (key.startsWith("passkey_")) {
+          const passkeyKeyMap: Record<string, string> = {
+            passkey_enabled: "enabled",
+            passkey_max_passkeys_per_user: "max_passkeys_per_user",
+          };
+          const passkeyField = passkeyKeyMap[key];
+          if (passkeyField) {
+            const currentPasskey =
+              (currentAuth.passkey as Record<string, unknown>) || {};
+            otherUpdates.passkey = {
+              ...((otherUpdates.passkey as Record<string, unknown>) || currentPasskey),
+              [passkeyField]: val,
+            };
+          }
+        } else if (key.startsWith("webauthn_")) {
+          const webAuthnKeyMap: Record<string, string> = {
+            webauthn_rp_id: "rp_id",
+            webauthn_rp_display_name: "rp_display_name",
+            webauthn_rp_origins: "rp_origins",
+            webauthn_challenge_expiry_duration: "challenge_expiry_duration",
+          };
+          const webAuthnField = webAuthnKeyMap[key];
+          if (webAuthnField) {
+            const currentWebAuthn =
+              (currentAuth.webauthn as Record<string, unknown>) || {};
+            otherUpdates.webauthn = {
+              ...((otherUpdates.webauthn as Record<string, unknown>) || currentWebAuthn),
+              [webAuthnField]: val,
+            };
+          }
+        } else if (key.startsWith("mfa_webauthn_")) {
+          const mfaWebAuthnKeyMap: Record<string, string> = {
+            mfa_webauthn_enroll_enabled: "enroll_enabled",
+            mfa_webauthn_verify_enabled: "verify_enabled",
+          };
+          const mfaWebAuthnField = mfaWebAuthnKeyMap[key];
+          if (mfaWebAuthnField) {
+            const currentMfa = (currentAuth.mfa as Record<string, unknown>) || {};
+            const currentWebAuthn = (currentMfa.webauthn as Record<string, unknown>) || {};
+            const nextMfa = ((otherUpdates.mfa as Record<string, unknown>) || currentMfa);
+            otherUpdates.mfa = {
+              ...nextMfa,
+              webauthn: {
+                ...currentWebAuthn,
+                ...((nextMfa.webauthn as Record<string, unknown>) || {}),
+                [mfaWebAuthnField]: val,
+              },
             };
           }
         } else if (key !== "external_providers") {
@@ -1072,6 +1132,11 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
         mergedAuth.smtp = {
           ...((currentAuth.smtp as Record<string, unknown>) || {}),
           ...(otherUpdates.smtp as Record<string, unknown>),
+        };
+      if (otherUpdates.saml)
+        mergedAuth.saml = {
+          ...((currentAuth.saml as Record<string, unknown>) || {}),
+          ...(otherUpdates.saml as Record<string, unknown>),
         };
 
       const updated = await projectService.updateProjectSettings(params.ref, {

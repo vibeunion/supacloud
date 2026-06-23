@@ -15,9 +15,13 @@ import { normalizeProjectConfig } from "./project-config";
 
 export type OidcJwtKeyMaterial = {
   key_id: string;
-  signing_alg: "ES256";
+  signing_alg: "ES256" | "RS256";
   jwt_keys: JWK[];
   jwt_jwks: { keys: JWK[] };
+};
+
+type AwsKmsSigningJwk = JWK & {
+  "aws:kms:arn": string;
 };
 
 export type ProjectJwtVerification = {
@@ -72,6 +76,48 @@ export async function generateOidcJwtKeyMaterial(jwtSecret: string): Promise<Oid
   };
 }
 
+export async function buildAwsKmsRs256JwtKeyMaterial(input: {
+  aws_kms_arn: string;
+  public_jwk: JWK;
+  key_id?: string;
+}): Promise<OidcJwtKeyMaterial> {
+  const arn = input.aws_kms_arn.trim();
+  if (!/^arn:[^:]+:kms:[^:]+:[^:]+:key\/.+/.test(arn)) {
+    throw new Error("Invalid AWS KMS key ARN");
+  }
+
+  const publicJwk = input.public_jwk;
+  if (publicJwk.kty !== "RSA" || typeof publicJwk.n !== "string" || typeof publicJwk.e !== "string") {
+    throw new Error("RS256 KMS public_jwk must be an RSA public JWK with n and e");
+  }
+
+  const keyId = input.key_id?.trim() || await calculateJwkThumbprint(publicJwk);
+  const publicSigningJwk: JWK = {
+    ...publicJwk,
+    kid: keyId,
+    alg: "RS256",
+    use: "sig",
+    key_ops: ["verify"],
+  };
+  delete (publicSigningJwk as Record<string, unknown>)["aws:kms:arn"];
+
+  const kmsSigningJwk: AwsKmsSigningJwk = {
+    ...publicJwk,
+    kid: keyId,
+    alg: "RS256",
+    use: "sig",
+    key_ops: ["sign"],
+    "aws:kms:arn": arn,
+  };
+
+  return {
+    key_id: keyId,
+    signing_alg: "RS256",
+    jwt_keys: [kmsSigningJwk],
+    jwt_jwks: { keys: [publicSigningJwk] },
+  };
+}
+
 export function normalizeProjectJwtJwks(value: unknown): { keys: JWK[] } | null {
   const parsed = typeof value === "string" && value.trim().startsWith("{")
     ? JSON.parse(value)
@@ -88,7 +134,7 @@ export function normalizeProjectJwtKeys(value: unknown): JWK[] | null {
     : value;
   if (!Array.isArray(parsed) || parsed.length === 0) return null;
   const signingKeys = (parsed as JWK[])
-    .filter((k) => k.alg === "ES256" && k.kty === "EC")
+    .filter((k) => (k.alg === "ES256" && k.kty === "EC") || (k.alg === "RS256" && k.kty === "RSA"))
     .map((k) => {
       if (!k.key_ops) {
         return { ...k, key_ops: ["sign"] };

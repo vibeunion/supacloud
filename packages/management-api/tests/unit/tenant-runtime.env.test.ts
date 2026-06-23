@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { quoteSystemdEnvValue } from "../../src/utils/systemd-env";
-import { renderGoTrueAuthEnv, renderPostgrestDbSchemas } from "../../src/services/tenant-runtime.service";
+import {
+  renderGoTrueAuthEnv,
+  renderGoTruePasskeyEnv,
+  renderGoTrueSamlEnv,
+  renderPostgrestDbSchemas,
+} from "../../src/services/tenant-runtime.service";
 
 describe("TenantRuntimeService systemd env quoting", () => {
   test("single-quotes JSON values so systemd preserves double quotes", () => {
@@ -66,6 +71,59 @@ describe("TenantRuntimeService GoTrue auth env rendering", () => {
       "GOTRUE_MAILER_TEMPLATES_CONFIRMATION_CONTENT='<p>Hi {{ .Email }}</p>",
       "<a href=\"{{ .ConfirmationURL }}\">Confirm</a>'",
       "GOTRUE_MAILER_SUBJECTS_RECOVERY=\"Reset your password\"",
+    ].join("\n"));
+  });
+
+  test("maps passkey and WebAuthn config into GoTrue env values only when enabled", () => {
+    expect(renderGoTruePasskeyEnv({}, {
+      rpId: "example.com",
+      rpDisplayName: "SupaCloud",
+      rpOrigins: ["https://example.com"],
+    })).toBe("");
+
+    expect(renderGoTruePasskeyEnv({
+      passkey: { enabled: true, max_passkeys_per_user: 7 },
+      webauthn: {
+        rp_id: "login.example.com",
+        rp_display_name: "Example Login",
+        rp_origins: ["https://login.example.com", "https://app.example.com"],
+      },
+      mfa: { webauthn: { enroll_enabled: true, verify_enabled: true } },
+    }, {
+      rpId: "example.com",
+      rpDisplayName: "SupaCloud",
+      rpOrigins: ["https://example.com"],
+    })).toBe([
+      "GOTRUE_PASSKEY_ENABLED=true",
+      "GOTRUE_PASSKEY_MAX_PASSKEYS_PER_USER=7",
+      "GOTRUE_MFA_WEBAUTHN_ENROLL_ENABLED=true",
+      "GOTRUE_MFA_WEBAUTHN_VERIFY_ENABLED=true",
+      "GOTRUE_WEBAUTHN_RP_ID=login.example.com",
+      'GOTRUE_WEBAUTHN_RP_DISPLAY_NAME="Example Login"',
+      "GOTRUE_WEBAUTHN_RP_ORIGINS=https://login.example.com,https://app.example.com",
+      "GOTRUE_WEBAUTHN_CHALLENGE_EXPIRY_DURATION=5m",
+    ].join("\n"));
+  });
+
+  test("maps SAML SP key rotation config into GoTrue env values", () => {
+    expect(renderGoTrueSamlEnv({
+      saml: {
+        enabled: true,
+        private_key: "current-key",
+        private_key_next: "next-key",
+        external_url: "https://login.example.com/auth/v1",
+        allow_encrypted_assertions: true,
+        relay_state_validity_period: "5m",
+        rate_limit_assertion: 20,
+      },
+    })).toBe([
+      "GOTRUE_SAML_ENABLED=true",
+      'GOTRUE_SAML_PRIVATE_KEY="current-key"',
+      'GOTRUE_SAML_PRIVATE_KEY_NEXT="next-key"',
+      "GOTRUE_SAML_EXTERNAL_URL=https://login.example.com/auth/v1",
+      "GOTRUE_SAML_ALLOW_ENCRYPTED_ASSERTIONS=true",
+      "GOTRUE_SAML_RELAY_STATE_VALIDITY_PERIOD=5m",
+      "GOTRUE_SAML_RATE_LIMIT_ASSERTION=20",
     ].join("\n"));
   });
 });

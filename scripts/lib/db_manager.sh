@@ -318,9 +318,8 @@ GRANT USAGE ON SCHEMA realtime TO anon, authenticated, service_role;
 
 -- 5. Public Schema permissions
 GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;
-ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO anon;
-ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO authenticated;
-ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO service_role;
+-- New public tables are not exposed through the Data API by default.
+-- Tenants must add explicit GRANT statements for each table they want to expose.
 
 -- 6. Grant authenticator ability to switch to API roles
 GRANT anon, authenticated, service_role TO authenticator_${PROJECT_REF};

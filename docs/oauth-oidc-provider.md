@@ -63,6 +63,59 @@ After migration, tenant runtime generation injects:
 
 `JWT_KEYS` contains only ES256 private signing material for Auth. `JWT_JWKS` contains public verification material for API components. The GoTrue admin proxy signs short-lived ES256 `service_role` tokens from `JWT_KEYS`; it does not require HS256 in `JWT_KEYS`.
 
+## RS256 AWS KMS Signing
+
+GoTrue v2.191.0 supports RS256 signing through AWS KMS-backed JWKs. SupaCloud stores the KMS signing JWK in the project-scoped `auth.oauth_server.jwt_keys` config and exposes only the public RSA JWK through `jwt_jwks`.
+
+```http
+POST /v1/projects/:ref/auth/oauth-server/kms-rs256
+```
+
+```json
+{
+  "aws_kms_arn": "arn:aws:kms:us-east-1:123456789012:key/...",
+  "key_id": "kms-key-1",
+  "public_jwk": {
+    "kty": "RSA",
+    "n": "...",
+    "e": "AQAB"
+  },
+  "allow_dynamic_registration": false
+}
+```
+
+The GoTrue host must have AWS credentials that can call `kms:Sign` for the configured key. KMS-only projects cannot use the local Management API OAuth admin proxy until a matching KMS signer is configured for the management process; client registration and token issuance still run through GoTrue.
+
+## Passkeys and SAML Rotation
+
+Passkeys are enabled per project through Auth config:
+
+```json
+{
+  "passkey": { "enabled": true, "max_passkeys_per_user": 10 },
+  "webauthn": {
+    "rp_id": "login.example.com",
+    "rp_display_name": "Example",
+    "rp_origins": ["https://login.example.com"]
+  }
+}
+```
+
+SAML SP key rotation uses GoTrue's dual-key window:
+
+```json
+{
+  "saml": {
+    "enabled": true,
+    "private_key": "<current PKCS#1 DER base64>",
+    "private_key_next": "<next PKCS#1 DER base64>",
+    "allow_encrypted_assertions": true
+  }
+}
+```
+
+Deploy the next key first, wait for IdP metadata caches to refresh, then promote it into `private_key` and clear `private_key_next`.
+
 ## Legacy API Key Compatibility
 
 Migration keeps existing `anon` and `service_role` API keys usable.

@@ -12,6 +12,7 @@ import {
 } from "../utils/project-routing";
 import { normalizeOAuthServerConfig, normalizeProjectConfig } from "../utils/project-config";
 import {
+  buildAwsKmsRs256JwtKeyMaterial,
   generateOidcJwtKeyMaterial,
   normalizeProjectJwtJwks,
   normalizeProjectJwtKeys,
@@ -81,6 +82,13 @@ type MigrateOAuthServerInput = {
   allow_dynamic_registration?: boolean;
 };
 
+type KmsRs256Input = {
+  aws_kms_arn: string;
+  public_jwk: Record<string, unknown>;
+  key_id?: string;
+  allow_dynamic_registration?: boolean;
+};
+
 async function loadProjectContext(ref: string) {
   const project = await projectService.getProject(ref);
   if (!project) return null;
@@ -120,6 +128,9 @@ function buildOAuthServerStatus(ctx: NonNullable<Awaited<ReturnType<typeof loadP
   const jwtKeys = normalizeProjectJwtKeys(ctx.oauthServer.jwt_keys);
   const jwtJwks = normalizeProjectJwtJwks(ctx.oauthServer.jwt_jwks);
   const migrated = Boolean(jwtKeys && jwtJwks);
+  const signingAlg = migrated
+    ? String(ctx.oauthServer.signing_alg || jwtKeys?.[0]?.alg || "unknown")
+    : "not_migrated";
   return {
     project_ref: ctx.project.ref,
     organization_id: ctx.organizationId,
@@ -134,14 +145,78 @@ function buildOAuthServerStatus(ctx: NonNullable<Awaited<ReturnType<typeof loadP
     token_endpoint: `${issuer}/oauth/token`,
     userinfo_endpoint: `${issuer}/oauth/userinfo`,
     registration_endpoint: `${issuer}/oauth/clients/register`,
-    signing_alg: migrated ? "ES256" : "not_migrated",
+    signing_alg: signingAlg,
     key_id: migrated ? ctx.oauthServer.key_id : undefined,
     oidc_id_token_ready: migrated,
-    migration_status: migrated ? "oidc_es256_migrated" : "not_migrated",
+    migration_status: migrated ? `oidc_${String(signingAlg).toLowerCase()}_migrated` : "not_migrated",
     warnings: migrated ? [] : [
       "Project is not migrated to project-scoped OIDC signing keys. Run POST /oauth-server/migrate.",
     ],
   };
+}
+
+async function configureKmsRs256Signing(
+  ref: string,
+  request: Request,
+  input: KmsRs256Input,
+) {
+  const authError = await requireProjectOrAdminAuth(request, ref);
+  if (authError) return status(authError.status, authError.body);
+  const ctx = await loadProjectContext(ref);
+  if (!ctx) return status(404, { message: "Project not found", code: "404" });
+
+  const settings = await projectService.getProjectSettings(ref);
+  if (!settings) return status(404, { message: "Project not found", code: "404" });
+
+  let keyMaterial: Awaited<ReturnType<typeof buildAwsKmsRs256JwtKeyMaterial>>;
+  try {
+    keyMaterial = await buildAwsKmsRs256JwtKeyMaterial({
+      aws_kms_arn: input.aws_kms_arn,
+      public_jwk: input.public_jwk,
+      key_id: input.key_id,
+    });
+  } catch (error: unknown) {
+    return status(400, {
+      message: error instanceof Error ? error.message : "Invalid AWS KMS RS256 signing key",
+      code: "400",
+    });
+  }
+
+  const currentAuth = (settings.auth || {}) as Record<string, unknown>;
+  const currentOauthServer = normalizeOAuthServerConfig(currentAuth.oauth_server) as OAuthServerSettings;
+  const oauthServer: OAuthServerSettings = {
+    ...currentOauthServer,
+    enabled: true,
+    allow_dynamic_registration: input.allow_dynamic_registration === true,
+    issuer: ctx.issuer,
+    migrated_at: new Date().toISOString(),
+    signing_alg: keyMaterial.signing_alg,
+    key_id: keyMaterial.key_id,
+    jwt_keys: keyMaterial.jwt_keys,
+    jwt_jwks: keyMaterial.jwt_jwks,
+  };
+
+  await projectService.updateProjectSettings(ref, {
+    ...settings,
+    auth: {
+      ...currentAuth,
+      oauth_server: oauthServer,
+    },
+  });
+
+  try {
+    await tenantRuntimeService.restartRuntime(ref);
+  } catch (error: unknown) {
+    logger.warn("[auth-oauth-server] Failed to restart runtime after RS256 KMS signing config", {
+      ref,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+
+  return buildOAuthServerStatus({
+    ...ctx,
+    oauthServer,
+  });
 }
 
 async function proxyGoTrueAdmin(
@@ -151,8 +226,14 @@ async function proxyGoTrueAdmin(
 ) {
   const adminToken = await signOidcServiceRoleJwt(ctx.oauthServer.jwt_keys, ctx.issuer);
   if (!adminToken) {
+    const signingAlg = String(
+      ctx.oauthServer.signing_alg || normalizeProjectJwtKeys(ctx.oauthServer.jwt_keys)?.[0]?.alg || "unknown",
+    );
+    const message = signingAlg === "RS256"
+      ? "Project OAuth admin proxy cannot locally sign RS256/KMS tokens yet. Manage OAuth clients through GoTrue, or configure an ES256 local signing key for the Management API proxy."
+      : "Project OAuth ES256 signing key not available. Re-apply OAuth server migration before managing OAuth clients.";
     return new Response(JSON.stringify({
-      message: "Project OAuth ES256 signing key not available. Re-apply OAuth server migration before managing OAuth clients.",
+      message,
       code: "409",
     }), {
       status: 409,
@@ -277,6 +358,23 @@ export const authOAuthServerRoutes = new Elysia({ prefix: "/v1/projects/:ref/aut
       params: t.Object({ ref: t.String() }),
       body: t.Object({ allow_dynamic_registration: t.Optional(t.Boolean()) }),
       detail: { tags: ["auth"], summary: "Migrate project auth to OIDC signing keys" },
+    },
+  )
+
+  .post(
+    "/oauth-server/kms-rs256",
+    async ({ params, body, request }) => {
+      return configureKmsRs256Signing(params.ref, request, body as KmsRs256Input);
+    },
+    {
+      params: t.Object({ ref: t.String() }),
+      body: t.Object({
+        aws_kms_arn: t.String(),
+        public_jwk: t.Record(t.String(), t.Unknown()),
+        key_id: t.Optional(t.String()),
+        allow_dynamic_registration: t.Optional(t.Boolean()),
+      }),
+      detail: { tags: ["auth"], summary: "Configure RS256 JWT signing backed by AWS KMS" },
     },
   )
   .get(

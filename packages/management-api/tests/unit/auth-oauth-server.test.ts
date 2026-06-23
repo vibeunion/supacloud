@@ -4,7 +4,7 @@ import { authOAuthServerRoutes } from "../../src/routes/auth-oauth-server";
 import { projectService } from "../../src/services";
 import * as dbModule from "../../src/db";
 import { tenantRuntimeService } from "../../src/services/tenant-runtime.service";
-import { generateOidcJwtKeyMaterial } from "../../src/utils/project-jwt";
+import { buildAwsKmsRs256JwtKeyMaterial, generateOidcJwtKeyMaterial } from "../../src/utils/project-jwt";
 
 const migratedJwtKeys = [{
   kty: "EC",
@@ -216,6 +216,107 @@ describe("authOAuthServerRoutes", () => {
     sqlSpy.mockRestore();
   });
 
+  test("POST /oauth-server/kms-rs256 stores AWS KMS backed RS256 signing config", async () => {
+    const projectSpy = spyOn(projectService, "getProject").mockResolvedValue({
+      id: "proj_id",
+      ref: "proj_1",
+      organization_id: "org_1",
+      name: "Project 1",
+      db_name: "supa_proj_1",
+      db_user: "role_proj_1",
+      db_password: "pw",
+      jwt_secret: "jwt",
+      anon_key: "anon",
+      service_role_key: "service",
+      s3_bucket: "bucket",
+      s3_access_key: null,
+      s3_secret_key: null,
+      region: "local",
+      status: "active",
+      config: { auth: {} },
+      created_at: new Date(),
+      updated_at: new Date(),
+      deleted_at: null,
+    } as never);
+    const settingsSpy = spyOn(projectService, "getProjectSettings").mockResolvedValue({
+      auth: {},
+    } as never);
+    const updateSpy = spyOn(projectService, "updateProjectSettings").mockResolvedValue({
+      auth: {},
+    } as never);
+    const restartSpy = spyOn(tenantRuntimeService, "restartRuntime").mockResolvedValue(undefined);
+    const sqlSpy = spyOn(dbModule, "sql");
+    sqlSpy.mockImplementation(async (...args: unknown[]) => {
+      const text = String(args[0] ?? "");
+      if (text.includes("SELECT config, organization_id")) {
+        return [{
+          config: {
+            auth: {},
+            api_url: "https://api.example.com",
+            gotrue_port: 3200,
+          },
+          organization_id: "org_1",
+          jwt_secret: "jwt",
+        }];
+      }
+      return [];
+    });
+
+    const response = await request("/v1/projects/proj_1/auth/oauth-server/kms-rs256", {
+      method: "POST",
+      headers: {
+        Authorization: "Bearer dev-master-token",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        aws_kms_arn: "arn:aws:kms:us-east-1:123456789012:key/00000000-0000-0000-0000-000000000000",
+        key_id: "kms-key-1",
+        public_jwk: {
+          kty: "RSA",
+          n: "sXch7w",
+          e: "AQAB",
+        },
+        allow_dynamic_registration: true,
+      }),
+    });
+
+    const payload = await response.json();
+    const updatePayload = updateSpy.mock.calls[0]?.[1] as { auth?: { oauth_server?: Record<string, unknown> } };
+    const jwtKeys = updatePayload.auth?.oauth_server?.jwt_keys as Array<Record<string, unknown>>;
+    const jwtJwks = updatePayload.auth?.oauth_server?.jwt_jwks as { keys: Array<Record<string, unknown>> };
+
+    expect(response.status).toBe(200);
+    expect(payload.signing_alg).toBe("RS256");
+    expect(payload.migration_status).toBe("oidc_rs256_migrated");
+    expect(updatePayload.auth?.oauth_server).toMatchObject({
+      enabled: true,
+      signing_alg: "RS256",
+      key_id: "kms-key-1",
+      allow_dynamic_registration: true,
+    });
+    expect(jwtKeys[0]).toMatchObject({
+      kty: "RSA",
+      alg: "RS256",
+      kid: "kms-key-1",
+      key_ops: ["sign"],
+      "aws:kms:arn": "arn:aws:kms:us-east-1:123456789012:key/00000000-0000-0000-0000-000000000000",
+    });
+    expect(jwtJwks.keys[0]).toMatchObject({
+      kty: "RSA",
+      alg: "RS256",
+      kid: "kms-key-1",
+      key_ops: ["verify"],
+    });
+    expect(jwtJwks.keys[0]["aws:kms:arn"]).toBeUndefined();
+    expect(restartSpy).toHaveBeenCalledWith("proj_1");
+
+    projectSpy.mockRestore();
+    settingsSpy.mockRestore();
+    updateSpy.mockRestore();
+    restartSpy.mockRestore();
+    sqlSpy.mockRestore();
+  });
+
   test("GET /oauth-clients proxies to GoTrue admin client listing", async () => {
     const keyMaterial = await generateOidcJwtKeyMaterial("jwt");
     const projectSpy = spyOn(projectService, "getProject").mockResolvedValue({
@@ -307,6 +408,80 @@ describe("authOAuthServerRoutes", () => {
     } finally {
       projectSpy.mockRestore();
       settingsSpy.mockRestore();
+      sqlSpy.mockRestore();
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test("GET /oauth-clients explains KMS-only projects cannot use the local admin proxy", async () => {
+    const keyMaterial = await buildAwsKmsRs256JwtKeyMaterial({
+      aws_kms_arn: "arn:aws:kms:us-east-1:123456789012:key/00000000-0000-0000-0000-000000000000",
+      key_id: "kms-key-1",
+      public_jwk: {
+        kty: "RSA",
+        n: "sXch7w",
+        e: "AQAB",
+      },
+    });
+    const projectSpy = spyOn(projectService, "getProject").mockResolvedValue({
+      id: "proj_id",
+      ref: "proj_1",
+      organization_id: "org_1",
+      name: "Project 1",
+      db_name: "supa_proj_1",
+      db_user: "role_proj_1",
+      db_password: "pw",
+      jwt_secret: "jwt",
+      anon_key: "anon",
+      service_role_key: "service",
+      s3_bucket: "bucket",
+      s3_access_key: null,
+      s3_secret_key: null,
+      region: "local",
+      status: "active",
+      config: { auth: { oauth_server: { enabled: true } } },
+      created_at: new Date(),
+      updated_at: new Date(),
+      deleted_at: null,
+    } as never);
+    const sqlSpy = spyOn(dbModule, "sql");
+    sqlSpy.mockImplementation(async (...args: unknown[]) => {
+      const text = String(args[0] ?? "");
+      if (text.includes("SELECT config, organization_id")) {
+        return [{
+          config: {
+            auth: {
+              oauth_server: {
+                enabled: true,
+                issuer: "https://api.example.com/auth/v1",
+                signing_alg: "RS256",
+                jwt_keys: keyMaterial.jwt_keys,
+                jwt_jwks: keyMaterial.jwt_jwks,
+              },
+            },
+            gotrue_port: 3200,
+          },
+          organization_id: "org_1",
+          jwt_secret: "jwt",
+        }];
+      }
+      return [];
+    });
+    const originalFetch = globalThis.fetch;
+    const fetchMock = mock(() => Promise.resolve(new Response("{}"))) as unknown as typeof fetch;
+    globalThis.fetch = fetchMock;
+
+    try {
+      const response = await request("/v1/projects/proj_1/auth/oauth-clients", {
+        headers: { Authorization: "Bearer dev-master-token" },
+      });
+      const payload = await response.json();
+
+      expect(response.status).toBe(409);
+      expect(payload.message).toContain("cannot locally sign RS256/KMS tokens yet");
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      projectSpy.mockRestore();
       sqlSpy.mockRestore();
       globalThis.fetch = originalFetch;
     }

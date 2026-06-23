@@ -109,6 +109,38 @@ CREATE TABLE IF NOT EXISTS auth.saml_relay_states (
 );
 CREATE INDEX IF NOT EXISTS saml_relay_states_sso_provider_id_idx ON auth.saml_relay_states (sso_provider_id);
 
+CREATE TABLE IF NOT EXISTS auth.webauthn_credentials (
+    id UUID NOT NULL DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES auth.users (id) ON DELETE CASCADE,
+    credential_id BYTEA NOT NULL,
+    public_key BYTEA NOT NULL,
+    attestation_type TEXT NOT NULL DEFAULT '',
+    aaguid UUID,
+    sign_count BIGINT NOT NULL DEFAULT 0,
+    transports JSONB NOT NULL DEFAULT '[]'::jsonb,
+    backup_eligible BOOLEAN NOT NULL DEFAULT false,
+    backed_up BOOLEAN NOT NULL DEFAULT false,
+    friendly_name TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    last_used_at TIMESTAMPTZ,
+    CONSTRAINT webauthn_credentials_pkey PRIMARY KEY (id)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS webauthn_credentials_credential_id_key ON auth.webauthn_credentials (credential_id);
+CREATE INDEX IF NOT EXISTS webauthn_credentials_user_id_idx ON auth.webauthn_credentials (user_id);
+
+CREATE TABLE IF NOT EXISTS auth.webauthn_challenges (
+    id UUID NOT NULL DEFAULT gen_random_uuid(),
+    user_id UUID REFERENCES auth.users (id) ON DELETE CASCADE,
+    challenge_type TEXT NOT NULL CHECK (challenge_type IN ('signup', 'registration', 'authentication')),
+    session_data JSONB NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    expires_at TIMESTAMPTZ NOT NULL,
+    CONSTRAINT webauthn_challenges_pkey PRIMARY KEY (id)
+);
+CREATE INDEX IF NOT EXISTS webauthn_challenges_user_id_idx ON auth.webauthn_challenges (user_id);
+CREATE INDEX IF NOT EXISTS webauthn_challenges_expires_at_idx ON auth.webauthn_challenges (expires_at);
+
 CREATE TABLE IF NOT EXISTS auth.sso_sessions (
 	id UUID NOT NULL,
 	session_id UUID NOT NULL,
@@ -176,6 +208,7 @@ DO $$ BEGIN ALTER TABLE auth.mfa_factors ADD COLUMN IF NOT EXISTS phone TEXT; EX
 DO $$ BEGIN ALTER TABLE auth.mfa_factors ADD COLUMN IF NOT EXISTS last_challenged_at TIMESTAMPTZ; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
 DO $$ BEGIN ALTER TABLE auth.mfa_factors ADD COLUMN IF NOT EXISTS web_authn_credential JSONB; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
 DO $$ BEGIN ALTER TABLE auth.mfa_factors ADD COLUMN IF NOT EXISTS web_authn_aaguid UUID; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+DO $$ BEGIN ALTER TABLE auth.mfa_factors ADD COLUMN IF NOT EXISTS last_webauthn_challenge_data JSONB; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
 
 -- auth.mfa_amr_claims: add id and factor_id columns (old schema only had session_id + authentication_method composite PK)
 DO $$

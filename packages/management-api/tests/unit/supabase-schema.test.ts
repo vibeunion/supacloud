@@ -121,6 +121,33 @@ describe("supabase bootstrap schema", () => {
     }
   });
 
+  test("tenant auth schema includes passkey WebAuthn tables and challenge state", () => {
+    for (const filePath of [
+      "src/db/schemas/supabase.sql",
+      "src/services/tenant-runtime.service.ts",
+      "src/scripts/migrate-tenant-schema.ts",
+    ]) {
+      const source = readRepoFile(filePath);
+
+      expect(source).toContain("CREATE TABLE IF NOT EXISTS auth.webauthn_credentials");
+      expect(source).toContain("CREATE TABLE IF NOT EXISTS auth.webauthn_challenges");
+      expect(source).toContain("webauthn_credentials_credential_id_key");
+      expect(source).toContain("last_webauthn_challenge_data");
+    }
+  });
+
+  test("new public tables are not exposed to the Data API by default", () => {
+    const schema = readRepoFile("src/db/schemas/supabase.sql");
+    const databaseService = readRepoFile("src/services/database.service.ts");
+
+    for (const source of [schema, databaseService]) {
+      expect(source).not.toMatch(/ALTER DEFAULT PRIVILEGES(?: FOR ROLE postgres)? IN SCHEMA public GRANT .* TO .*anon/i);
+      expect(source).not.toMatch(/ALTER DEFAULT PRIVILEGES(?: FOR ROLE postgres)? IN SCHEMA public GRANT .* TO .*authenticated/i);
+      expect(source).not.toMatch(/ALTER DEFAULT PRIVILEGES(?: FOR ROLE postgres)? IN SCHEMA public GRANT .* TO .*service_role/i);
+    }
+    expect(schema).toContain("Tenants must grant anon/authenticated/service_role privileges explicitly in migrations.");
+  });
+
   test("PostgREST tenant config keeps pgmq_public out of safe defaults", () => {
     for (const filePath of [
       "../../docker/dev/docker-compose.yml",

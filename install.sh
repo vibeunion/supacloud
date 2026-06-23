@@ -2478,7 +2478,7 @@ SUPACLOUD_JWT_SECRET=${JWT_SECRET}
 REALTIME_SECRET_KEY_BASE=${REALTIME_SECRET_KEY_BASE}
 REALTIME_DB_ENC_KEY=${REALTIME_DB_ENC_KEY}
 REALTIME_API_SECRET=${JWT_SECRET}
-REALTIME_IMAGE=${REALTIME_IMAGE:-public.ecr.aws/supabase/realtime:v2.109.1}
+REALTIME_IMAGE=${REALTIME_IMAGE:-public.ecr.aws/supabase/realtime:v2.111.4}
 REALTIME_CONTAINER_NAME=${REALTIME_CONTAINER_NAME:-supacloud-realtime}
 REALTIME_DB_USER=supabase_admin
 # Database connection environment variables (required for script execution)
@@ -2558,7 +2558,7 @@ EOF
     # 7b. Ensure GoTrue binary and systemd template are deployed
     local GOTRUE_BIN="${GOTRUE_BIN:-/usr/local/bin/gotrue}"
     if [[ ! -x "$GOTRUE_BIN" ]]; then
-        local GOTRUE_VERSION="${GOTRUE_VERSION:-v2.186.0}"
+        local GOTRUE_VERSION="${GOTRUE_VERSION:-v2.191.0}"
         local GOTRUE_ARCH
         GOTRUE_ARCH=$(uname -m)
         case "$GOTRUE_ARCH" in
@@ -2731,7 +2731,7 @@ deploy_service_containers() {
 
     # --- 2. Deploy Supabase Realtime (Multi-tenant WebSocket) ---
     local REALTIME_UNIT_SRC="${SCRIPT_DIR}/infrastructure/systemd/supacloud-realtime.service"
-    local REALTIME_IMAGE_VALUE="${REALTIME_IMAGE:-public.ecr.aws/supabase/realtime:v2.109.1}"
+    local REALTIME_IMAGE_VALUE="${REALTIME_IMAGE:-public.ecr.aws/supabase/realtime:v2.111.4}"
     if [[ -f "$REALTIME_UNIT_SRC" ]]; then
         log_info "Registering SupaCloud Realtime systemd unit..."
         cp "$REALTIME_UNIT_SRC" /etc/systemd/system/supacloud-realtime.service
