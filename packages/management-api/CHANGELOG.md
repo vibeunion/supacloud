@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.37.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.36.7...management-api-v0.37.0) (2026-06-23)
+
+
+### Features
+
+* **auth:** support Supabase June auth updates ([7caa595](https://github.com/zuohuadong/supacloud/commit/7caa595b3b6c9920cf97eca98eeacf8c362fc959))
+
 ## [0.36.7](https://github.com/zuohuadong/supacloud/compare/management-api-v0.36.6...management-api-v0.36.7) (2026-06-23)
 
 
