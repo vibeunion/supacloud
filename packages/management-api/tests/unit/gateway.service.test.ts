@@ -242,6 +242,60 @@ describe("CaddyGatewayProvider", () => {
         restore();
     });
 
+    test("setupUpstream splits business auth routes to an external IdP upstream", async () => {
+        const calls: Array<{ url: string; method: string; body: any }> = [];
+        const restore = captureFetch(calls);
+        const provider = new CaddyGatewayProvider();
+
+        const result = await provider.setupUpstream("bizproj", 3000, 3372, {
+            api_domain: "api.biz.example.com",
+            auth_domain: "auth.biz.example.com",
+            studio_domain: "studio.biz.example.com",
+            auth: {
+                third_party_auth: {
+                    enabled: true,
+                    issuer: "https://auth.example.com/auth/v1",
+                    jwks_url: "https://auth.example.com/auth/v1/.well-known/jwks.json",
+                    audience: "authenticated",
+                    client_id: "client_1",
+                    auth_endpoint_mode: "external",
+                    auth_upstream: "127.0.0.1:3367",
+                    auth_host_header: "auth.example.com",
+                    claim_mapping: {
+                        sub: "sub",
+                        role: "role",
+                        email: "email",
+                    },
+                },
+            },
+        });
+        expect(result.success).toBe(true);
+
+        const load = calls.filter((call) => call.method === "POST" && call.url.endsWith("/load")).at(-1);
+        const routes = load?.body?.apps?.http?.servers?.supacloud?.routes ?? [];
+        const rest = routes.find((route: any) => route["@id"] === "route-project-bizproj-rest");
+        const functions = routes.find((route: any) => route["@id"] === "route-project-bizproj-functions");
+        const auth = routes.find((route: any) => route["@id"] === "route-project-bizproj-auth");
+        const wellKnown = routes.find((route: any) => route["@id"] === "route-project-bizproj-gotrue-well-known");
+        const authDomain = routes.find((route: any) => route["@id"] === "route-project-bizproj-auth-domain-auth");
+
+        const restProxy = rest?.handle?.find((handler: any) => handler.handler === "reverse_proxy");
+        const functionsProxy = functions?.handle?.find((handler: any) => handler.handler === "reverse_proxy");
+        const authProxy = auth?.handle?.find((handler: any) => handler.handler === "reverse_proxy");
+        const wellKnownProxy = wellKnown?.handle?.find((handler: any) => handler.handler === "reverse_proxy");
+        const authDomainProxy = authDomain?.handle?.find((handler: any) => handler.handler === "reverse_proxy");
+
+        expect(restProxy?.upstreams?.[0]?.dial).toBe("127.0.0.1:3000");
+        expect(functionsProxy?.upstreams?.[0]?.dial).not.toBe("127.0.0.1:3367");
+        expect(authProxy?.upstreams?.[0]?.dial).toBe("127.0.0.1:3367");
+        expect(wellKnownProxy?.upstreams?.[0]?.dial).toBe("127.0.0.1:3367");
+        expect(authDomainProxy?.upstreams?.[0]?.dial).toBe("127.0.0.1:3367");
+        expect(authProxy?.headers?.request?.set?.Host).toEqual(["auth.example.com"]);
+        expect(authProxy?.headers?.request?.set?.["X-Forwarded-Host"]).toEqual(["auth.example.com"]);
+
+        restore();
+    });
+
     test("setupUpstream does not render duplicate auth-domain routes without a dedicated auth domain", async () => {
         const calls: Array<{ url: string; method: string; body: any }> = [];
         const restore = captureFetch(calls);

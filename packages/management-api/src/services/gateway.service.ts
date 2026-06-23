@@ -9,7 +9,7 @@ import {
     resolveProjectAuthHost,
     resolveProjectStudioHost,
 } from "../utils/project-routing";
-import { normalizeProjectConfig } from "../utils/project-config";
+import { normalizeProjectConfig, normalizeThirdPartyAuthConfig } from "../utils/project-config";
 import { uniqueStrings } from "../utils/strings";
 
 export const DEFAULT_CORS_HEADERS = [
@@ -1095,6 +1095,8 @@ export class CaddyGatewayProvider implements GatewayProvider {
         readTimeout?: number;
         preserveUpstreamCors?: boolean;
         streaming?: boolean;
+        upstreamTls?: boolean;
+        upstreamTlsInsecureSkipVerify?: boolean;
     }): CaddyRoute {
         const requestHeaders: Record<string, CaddyHeaderValue> = {
             "Host": "{http.request.host}",
@@ -1113,7 +1115,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
         if (corsSubroute) handle.push(corsSubroute);
         if (opts.rewriteUri) handle.push({ handler: "rewrite", uri: opts.rewriteUri });
         else if (opts.stripPrefix) handle.push({ handler: "rewrite", strip_path_prefix: opts.stripPrefix });
-        handle.push(this.makeReverseProxy(opts.upstream, requestHeaders, opts.readTimeout, opts.preserveUpstreamCors, opts.streaming));
+        handle.push(this.makeReverseProxy(opts.upstream, requestHeaders, opts.readTimeout, opts.preserveUpstreamCors, opts.streaming, opts.upstreamTls, opts.upstreamTlsInsecureSkipVerify));
 
         return {
             "@id": opts.id,
@@ -1310,7 +1312,19 @@ export class CaddyGatewayProvider implements GatewayProvider {
     async setupUpstream(projectRef: string, pgrstPort: number | string, gotruePort: number | string, projectRouting?: ProjectRoutingConfig | string, opts?: GatewaySetupOptions): Promise<{ success: boolean; error?: string }> {
         try {
             const hostIp = await this.detectHostIp();
+            const projectConfig = normalizeProjectConfig(projectRouting);
             const routingConfig = normalizeProjectRoutingConfig(projectRouting);
+            const authConfig = projectConfig.auth && typeof projectConfig.auth === "object" && !Array.isArray(projectConfig.auth)
+                ? projectConfig.auth as Record<string, unknown>
+                : {};
+            const thirdPartyAuth = normalizeThirdPartyAuthConfig(authConfig.third_party_auth);
+            const externalAuthUpstream = thirdPartyAuth.enabled && thirdPartyAuth.auth_endpoint_mode === "external" && thirdPartyAuth.auth_upstream
+                ? normalizeCustomUpstream(thirdPartyAuth.auth_upstream)
+                : null;
+            const authUpstream = externalAuthUpstream?.dial || `${hostIp}:${gotruePort}`;
+            const authHeaders = externalAuthUpstream && thirdPartyAuth.auth_host_header
+                ? [`Host:${thirdPartyAuth.auth_host_header}`, `X-Forwarded-Host:${thirdPartyAuth.auth_host_header}`]
+                : undefined;
             const hosts = uniqueStrings(resolveProjectApiHosts(projectRef, routingConfig));
             const hostSet = new Set(hosts.map(normalizeCaddyHost));
             const authHosts = uniqueStrings([resolveProjectAuthHost(projectRef, routingConfig)])
@@ -1329,8 +1343,29 @@ export class CaddyGatewayProvider implements GatewayProvider {
             const routes = [
                 this.makeRoute({ id: caddyRouteId(projectRef, "rest"), hosts, path: "/rest/v1*", upstream: `${hostIp}:${pgrstPort}`, projectRef, stripPrefix: "/rest/v1", corsOrigins }),
                 this.makeRoute({ id: caddyRouteId(projectRef, "graphql"), hosts, path: "/graphql/v1*", upstream: `${hostIp}:${pgrstPort}`, projectRef, rewriteUri: "/rpc/graphql", headers: ["Content-Profile:graphql_public", "Accept-Profile:graphql_public"], corsOrigins }),
-                this.makeRoute({ id: caddyRouteId(projectRef, "auth"), hosts, path: "/auth/v1*", upstream: `${hostIp}:${gotruePort}`, projectRef, stripPrefix: "/auth/v1", corsOrigins }),
-                this.makeRoute({ id: caddyRouteId(projectRef, "gotrue-well-known"), hosts, path: "/.well-known/oauth-authorization-server/auth/v1*", upstream: `${hostIp}:${gotruePort}`, projectRef, corsOrigins }),
+                this.makeRoute({
+                    id: caddyRouteId(projectRef, "auth"),
+                    hosts,
+                    path: "/auth/v1*",
+                    upstream: authUpstream,
+                    projectRef,
+                    stripPrefix: "/auth/v1",
+                    headers: authHeaders,
+                    corsOrigins,
+                    upstreamTls: externalAuthUpstream?.tls,
+                    upstreamTlsInsecureSkipVerify: thirdPartyAuth.auth_upstream_tls_insecure_skip_verify,
+                }),
+                this.makeRoute({
+                    id: caddyRouteId(projectRef, "gotrue-well-known"),
+                    hosts,
+                    path: "/.well-known/oauth-authorization-server/auth/v1*",
+                    upstream: authUpstream,
+                    projectRef,
+                    headers: authHeaders,
+                    corsOrigins,
+                    upstreamTls: externalAuthUpstream?.tls,
+                    upstreamTlsInsecureSkipVerify: thirdPartyAuth.auth_upstream_tls_insecure_skip_verify,
+                }),
                 this.makeRoute({
                     id: caddyRouteId(projectRef, "functions"),
                     hosts,
@@ -1386,18 +1421,24 @@ export class CaddyGatewayProvider implements GatewayProvider {
                     id: caddyRouteId(projectRef, "auth-domain-auth"),
                     hosts: authHosts,
                     path: "/auth/v1*",
-                    upstream: `${hostIp}:${gotruePort}`,
+                    upstream: authUpstream,
                     projectRef,
                     stripPrefix: "/auth/v1",
+                    headers: authHeaders,
                     corsOrigins,
+                    upstreamTls: externalAuthUpstream?.tls,
+                    upstreamTlsInsecureSkipVerify: thirdPartyAuth.auth_upstream_tls_insecure_skip_verify,
                 }));
                 this.routesById.set(caddyRouteId(projectRef, "auth-domain-gotrue-well-known"), this.makeRoute({
                     id: caddyRouteId(projectRef, "auth-domain-gotrue-well-known"),
                     hosts: authHosts,
                     path: "/.well-known/oauth-authorization-server/auth/v1*",
-                    upstream: `${hostIp}:${gotruePort}`,
+                    upstream: authUpstream,
                     projectRef,
+                    headers: authHeaders,
                     corsOrigins,
+                    upstreamTls: externalAuthUpstream?.tls,
+                    upstreamTlsInsecureSkipVerify: thirdPartyAuth.auth_upstream_tls_insecure_skip_verify,
                 }));
             } else {
                 this.routesById.delete(caddyRouteId(projectRef, "auth-domain-auth"));
