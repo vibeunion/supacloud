@@ -478,6 +478,54 @@ describe("CaddyGatewayProvider", () => {
         restore();
     });
 
+    test("configureCustomGatewayRoutes supports mounted static SPA rewrites", async () => {
+        const calls: Array<{ url: string; method: string; body: any }> = [];
+        const restore = captureFetch(calls);
+        const provider = new CaddyGatewayProvider();
+        const staticRoot = "/opt/supauth/packages/admin-console/build";
+
+        const result = await provider.configureCustomGatewayRoutes("proj123", [
+            {
+                id: "admin-assets",
+                hosts: ["auth.example.com"],
+                path: ["/admin/_app/*", "/admin/assets/*"],
+                static_root: staticRoot,
+                strip_prefix: "/admin",
+                priority: 20,
+            },
+            {
+                id: "admin-spa",
+                hosts: ["auth.example.com"],
+                path: ["/admin", "/admin/*"],
+                static_root: staticRoot,
+                rewrite_uri: "/index.html",
+                headers: { "Cache-Control": "no-cache" },
+                priority: 19,
+            },
+        ]);
+
+        expect(result.success).toBe(true);
+        const load = calls.filter((call) => call.method === "POST" && call.url.endsWith("/load")).at(-1);
+        const routes = load?.body?.apps?.http?.servers?.supacloud?.routes ?? [];
+        const assets = routes.find((item: any) => item["@id"] === "route-custom-gateway-proj123-admin-assets");
+        const spa = routes.find((item: any) => item["@id"] === "route-custom-gateway-proj123-admin-spa");
+
+        expect(assets?.match?.[0]?.host).toEqual(["auth.example.com"]);
+        expect(assets?.match?.[0]?.path).toEqual(["/admin/_app/*", "/admin/assets/*"]);
+        expect(assets?.handle?.[0]).toEqual({ handler: "rewrite", strip_path_prefix: "/admin" });
+        expect(assets?.handle?.[1]?.handler).toBe("file_server");
+        expect(assets?.handle?.[1]?.root).toBe(staticRoot);
+
+        expect(spa?.match?.[0]?.path).toEqual(["/admin", "/admin/*"]);
+        expect(spa?.handle?.[0]?.response?.set?.["Cache-Control"]).toEqual(["no-cache"]);
+        expect(spa?.handle?.[1]).toEqual({ handler: "rewrite", uri: "/index.html" });
+        expect(spa?.handle?.[2]?.handler).toBe("file_server");
+        expect(spa?.handle?.[2]?.root).toBe(staticRoot);
+        expect(routes.indexOf(assets)).toBeLessThan(routes.indexOf(spa));
+
+        restore();
+    });
+
     test("configureCustomGatewayRoutes replaces stale custom routes for the project", async () => {
         const calls: Array<{ url: string; method: string; body: any }> = [];
         const restore = captureFetch(calls);
