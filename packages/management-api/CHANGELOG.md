@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.36.7](https://github.com/zuohuadong/supacloud/compare/management-api-v0.36.6...management-api-v0.36.7) (2026-06-23)
+
+
+### Bug Fixes
+
+* **gateway:** preserve external auth upstream on rebuild ([2a178d3](https://github.com/zuohuadong/supacloud/commit/2a178d34b68efeb06429a0c0f8bf0c70df11e7c9))
+
 ## [0.36.6](https://github.com/zuohuadong/supacloud/compare/management-api-v0.36.5...management-api-v0.36.6) (2026-06-23)
 
 
