@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.5](https://github.com/zuohuadong/supacloud/compare/web-console-v0.16.4...web-console-v0.16.5) (2026-06-24)
+
+
+### Bug Fixes
+
+* restore studio compatibility routes ([3aacf63](https://github.com/zuohuadong/supacloud/commit/3aacf63caf25da68e5ea791e3467943bdc7b343e))
+
 ## [0.16.4](https://github.com/zuohuadong/supacloud/compare/web-console-v0.16.3...web-console-v0.16.4) (2026-06-22)
 
 
