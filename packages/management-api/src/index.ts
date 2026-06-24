@@ -76,6 +76,135 @@ async function getEmbeddedAssets() {
   return _embeddedAssets;
 }
 
+const STUDIO_COMPAT_NOT_FOUND = { message: "Route not found", code: "404" };
+
+function isStudioCompatibilityRequest(request: Request): boolean {
+  if (request.headers.get("x-supacloud-ui-host") === "studio") {
+    return true;
+  }
+
+  const host = (request.headers.get("host") || "").toLowerCase();
+  return host.startsWith("studio.") || host.startsWith("studio-");
+}
+
+async function rejectStudioCompatibilityRequest(request: Request, set: any) {
+  if (!isStudioCompatibilityRequest(request)) {
+    set.status = 404;
+    return STUDIO_COMPAT_NOT_FOUND;
+  }
+
+  const rateLimit = checkRateLimit(request);
+  set.headers ??= {};
+  for (const [key, value] of Object.entries(rateLimit.headers)) {
+    set.headers[key] = value;
+  }
+  if (!rateLimit.allowed) {
+    set.status = rateLimit.status;
+    return rateLimit.body;
+  }
+
+  const authError = await checkAuth(request);
+  if (authError) {
+    set.status = authError.status;
+    return { message: authError.body.error, code: String(authError.status) };
+  }
+
+  return undefined;
+}
+
+async function listStudioCompatibilityProjects() {
+  const { projectService } = await import("./services");
+  const projects = await projectService.listProjects();
+
+  return projects.map((project: any) => ({
+    id: project.id,
+    ref: project.ref,
+    name: project.name,
+    status: project.status?.toUpperCase() || "ACTIVE_HEALTHY",
+    region: project.region || "local",
+    organization_id: "default",
+    cloud_provider: project.cloud_provider || "localhost",
+    inserted_at: project.created_at,
+    updated_at: project.updated_at ?? null,
+    database: {
+      host: project.database?.host || "localhost",
+      name: project.database?.name || `supa_${project.ref}`,
+      user: project.database?.user || `role_${project.ref}`,
+      port: project.database?.port || 5432,
+      pool_size: project.database?.pool_size || 20,
+    },
+    api: {
+      url: project.api?.url || "",
+    },
+    studio: {
+      url: project.studio?.url || "",
+    },
+    services: project.services || [],
+    rest: project.rest || {},
+    realtime: project.realtime || false,
+  }));
+}
+
+async function getStudioCompatibilityProject(ref: string) {
+  const { projectService } = await import("./services");
+  let project: Record<string, any> | null = await projectService.getProject(ref) as Record<string, any> | null;
+
+  if (!project && ref === "default") {
+    const projects = await projectService.listProjects();
+    project = (projects[0] as Record<string, any> | undefined) ?? null;
+  }
+
+  if (!project) return null;
+
+  return {
+    id: project.id,
+    ref: project.ref,
+    name: project.name,
+    status: project.status?.toUpperCase() || "ACTIVE_HEALTHY",
+    region: project.region || "local",
+    organization_id: "default",
+    cloud_provider: project.cloud_provider || "localhost",
+    inserted_at: project.created_at,
+    connectionString: project.connectionString || "",
+    created_at: project.created_at,
+    updated_at: project.updated_at ?? null,
+    database: {
+      host: project.database?.host || "localhost",
+      name: project.database?.name || `supa_${project.ref}`,
+      user: project.database?.user || `role_${project.ref}`,
+      port: project.database?.port || 5432,
+      pool_size: project.database?.pool_size || 20,
+    },
+    api: {
+      url: project.api?.url || "",
+    },
+    studio: {
+      url: project.studio?.url || "",
+    },
+    services: project.services || [],
+    rest: project.rest || {},
+    realtime: project.realtime || false,
+  };
+}
+
+async function buildStudioCompatibilityProfile() {
+  const projects = await listStudioCompatibilityProjects();
+
+  return {
+    id: 1,
+    primary_email: "admin@supacloud.local",
+    username: "admin",
+    first_name: "Admin",
+    last_name: "User",
+    organizations: [{
+      id: 1,
+      name: "SupaCloud",
+      slug: "supacloud",
+      projects,
+    }],
+  };
+}
+
 const args = process.argv.slice(2);
 
 // --- Gateway-style try_files static asset serving ---
@@ -264,6 +393,67 @@ const app = new Elysia({ strictPath: false })
 
   // Health check (no auth required)
   .get("/health", () => ({ status: "ok", timestamp: new Date().toISOString() }))
+
+  .get("/platform/projects", async ({ request, set }) => {
+    const rejected = await rejectStudioCompatibilityRequest(request, set);
+    if (rejected) return rejected;
+
+    return listStudioCompatibilityProjects();
+  })
+  .get("/platform/projects/:ref", async ({ request, params, set }) => {
+    const rejected = await rejectStudioCompatibilityRequest(request, set);
+    if (rejected) return rejected;
+
+    const project = await getStudioCompatibilityProject(params.ref);
+    if (!project) {
+      set.status = 404;
+      return { message: "Project not found", code: "404" };
+    }
+
+    return project;
+  })
+  .get("/platform/organizations", async ({ request, set }) => {
+    const rejected = await rejectStudioCompatibilityRequest(request, set);
+    if (rejected) return rejected;
+
+    return [{ id: 1, name: "SupaCloud", slug: "supacloud" }];
+  })
+  .get("/platform/profile", async ({ request, set }) => {
+    const rejected = await rejectStudioCompatibilityRequest(request, set);
+    if (rejected) return rejected;
+
+    return buildStudioCompatibilityProfile();
+  })
+  .get("/api/platform/projects", async ({ request, set }) => {
+    const rejected = await rejectStudioCompatibilityRequest(request, set);
+    if (rejected) return rejected;
+
+    return listStudioCompatibilityProjects();
+  })
+  .get("/api/platform/projects/:ref", async ({ request, params, set }) => {
+    const rejected = await rejectStudioCompatibilityRequest(request, set);
+    if (rejected) return rejected;
+
+    const project = await getStudioCompatibilityProject(params.ref);
+    if (!project) {
+      set.status = 404;
+      return { message: "Project not found", code: "404" };
+    }
+
+    return project;
+  })
+  .get("/api/platform/organizations", async ({ request, set }) => {
+    const rejected = await rejectStudioCompatibilityRequest(request, set);
+    if (rejected) return rejected;
+
+    return [{ id: 1, name: "SupaCloud", slug: "supacloud" }];
+  })
+  .get("/api/platform/profile", async ({ request, set }) => {
+    const rejected = await rejectStudioCompatibilityRequest(request, set);
+    if (rejected) return rejected;
+
+    return buildStudioCompatibilityProfile();
+  })
 
   // Compatibility path for manual/lego HTTP-01 challenge files. The default
   // Caddy flow uses Automatic HTTPS with the on-demand permission endpoint.

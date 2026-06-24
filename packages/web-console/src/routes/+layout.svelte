@@ -38,7 +38,7 @@
   import { QueryClient, QueryClientProvider } from "@tanstack/svelte-query";
   import { dataProvider, chatProvider } from "$lib/admin/provider";
   import { authProvider } from "$lib/admin/auth";
-  import { resources as defaultResources, getTenantResources } from "$lib/admin/resources";
+  import { buildResourceRegistry } from "$lib/admin/resources";
   
   import zhLocales from "$lib/i18n/locales/zh.json";
   import enLocales from "$lib/i18n/locales/en.json";
@@ -113,13 +113,15 @@
   
   let lastResourcesKey = "";
 
-  // Keep SVAdmin resources in sync with the current tenant route without mutating
-  // global provider state from inside a derived computation.
+  const getResourceKey = (resources: { identifier?: string; name: string }[]) =>
+    resources.map((resource) => resource.identifier ?? resource.name).join("|");
+
   $effect(() => {
-    const freshResources = refFromUrl
-      ? [...defaultResources, ...getTenantResources(refFromUrl)]
-      : defaultResources;
-    const nextKey = freshResources.map((resource) => resource.identifier ?? resource.name).join("|");
+    const projectRefs = projects
+      .map((project) => String((project as Record<string, unknown>).ref ?? ""))
+      .filter(Boolean);
+    const freshResources = buildResourceRegistry(projectRefs);
+    const nextKey = getResourceKey(freshResources);
 
     if (nextKey === lastResourcesKey) {
       return;
@@ -200,7 +202,15 @@
       try {
         const response = await apiClient('/v1/projects');
         if (response.ok) {
-          projects = await response.json();
+          const nextProjects = await response.json();
+          const projectRefs = nextProjects
+            .map((project: Record<string, unknown>) => String(project.ref ?? ""))
+            .filter(Boolean);
+          const nextResources = buildResourceRegistry(projectRefs);
+
+          projects = nextProjects;
+          lastResourcesKey = getResourceKey(nextResources);
+          setResources(nextResources);
         }
       } catch (err: unknown) {
         toast.error($t("Common.network_error") || "Network error");

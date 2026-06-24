@@ -82,6 +82,58 @@ describe("Management API Integration Tests", () => {
         });
     });
 
+    describe("Studio compatibility", () => {
+        it("returns Studio profile aliases only for Studio-hosted requests", async () => {
+            const studioResponse = await app.handle(
+                new Request(`${baseUrl}/api/platform/profile`, {
+                    headers: {
+                        "x-supacloud-ui-host": "studio",
+                        Authorization: `Bearer ${masterToken}`,
+                    },
+                }),
+            );
+
+            expect(studioResponse.status).toBe(200);
+            const studioData = await studioResponse.json();
+            expect(studioData).toHaveProperty("organizations");
+
+            const apiResponse = await app.handle(
+                new Request(`${baseUrl}/api/platform/profile`, {
+                    headers: {
+                        Authorization: `Bearer ${masterToken}`,
+                    },
+                }),
+            );
+
+            expect(apiResponse.status).toBe(404);
+
+            const unauthenticatedStudioResponse = await app.handle(
+                new Request(`${baseUrl}/api/platform/profile`, {
+                    headers: {
+                        "x-supacloud-ui-host": "studio",
+                    },
+                }),
+            );
+
+            expect(unauthenticatedStudioResponse.status).toBe(401);
+        });
+
+        it("lists Studio projects through the platform alias", async () => {
+            const response = await app.handle(
+                new Request(`${baseUrl}/platform/projects`, {
+                    headers: {
+                        "x-supacloud-ui-host": "studio",
+                        Authorization: `Bearer ${masterToken}`,
+                    },
+                }),
+            );
+
+            expect(response.status).toBe(200);
+            const data = await response.json();
+            expect(Array.isArray(data)).toBe(true);
+        });
+    });
+
     describe("Projects", () => {
         it("should list projects", async () => {
             const response = await app.handle(

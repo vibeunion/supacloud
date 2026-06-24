@@ -60,3 +60,12 @@ export const getTenantResources = (ref: string): ResourceDefinition[] => [
     ]
   }
 ];
+
+export function buildResourceRegistry(projectRefs: string[]): ResourceDefinition[] {
+  const uniqueRefs = [...new Set(projectRefs.filter(Boolean))];
+
+  return [
+    ...resources,
+    ...uniqueRefs.flatMap((ref) => getTenantResources(ref)),
+  ];
+}
