@@ -28,6 +28,8 @@ import { resolveRealtimeTenantHost } from "./utils/sdk-parity";
 import { resolveProjectRefFromApiKey } from "./utils/project-auth";
 import { isFrontendDomain } from "./utils/frontend-domains";
 import { isCaddyRouteDomain, isCaddyTlsBlockedDomain, normalizeCaddyHost } from "./utils/caddy-domains";
+import { grafanaProxyRoutes } from "./routes/grafana";
+import { closeTaskWebSocket, messageTaskWebSocket, openTaskWebSocket } from "./routes/ws";
 
 const WEB_CONSOLE_CURRENT_DIR = "/opt/supacloud/web-console/current";
 const WEB_CONSOLE_LEGACY_DIR = "/opt/supacloud/packages/web-console/build";
@@ -598,6 +600,7 @@ const app = new Elysia({ strictPath: false })
   .group("/storage/v1", (app) => app.use(storageCompatRoutes))
   .use((await import("./routes/sdk-proxy")).sdkProxyRoutes)
   .use(await registerAllRoutes())
+  .use(grafanaProxyRoutes)
 
   // Dashboard & SPA Assets (catch-all for everything else)
   .use(registerStaticAssets())
@@ -1175,11 +1178,16 @@ async function bootstrap() {
       websocket: {
         open(ws) {
           const data = ws.data as unknown as {
+            kind?: "tasks" | "realtimeProxy";
             upstreamUrl: string;
             requestHeaders: Record<string, string>;
             upstream?: WebSocket;
             __buffer?: string[];
           };
+          if (data.kind === "tasks") {
+            void openTaskWebSocket(ws as never);
+            return;
+          }
           const { upstreamUrl, requestHeaders } = data;
           const upstream = new (WebSocket as any)(upstreamUrl, {
             headers: requestHeaders,
@@ -1223,9 +1231,14 @@ async function bootstrap() {
         },
         message(ws, message) {
           const data = ws.data as unknown as {
+            kind?: "tasks" | "realtimeProxy";
             upstream?: WebSocket;
             __buffer?: string[];
           };
+          if (data.kind === "tasks") {
+            void messageTaskWebSocket(ws as never, message);
+            return;
+          }
           const upstream = data.upstream;
           if (!upstream) return;
 
@@ -1243,6 +1256,11 @@ async function bootstrap() {
           }
         },
         close(ws, code, reason) {
+          const data = ws.data as unknown as { kind?: "tasks" | "realtimeProxy" };
+          if (data.kind === "tasks") {
+            closeTaskWebSocket(ws as never);
+            return;
+          }
           const upstream = (ws.data as unknown as { upstream?: WebSocket })
             ?.upstream;
           if (upstream && upstream.readyState !== WebSocket.CLOSED) {
@@ -1259,6 +1277,17 @@ async function bootstrap() {
 
         // ── Realtime WebSocket proxy ──────────────────────────────
         // Intercept WebSocket upgrade requests for /realtime/v1 before Elysia
+        if (
+          url.pathname === "/ws/tasks" &&
+          request.headers.get("upgrade")?.toLowerCase() === "websocket"
+        ) {
+          const upgraded = server.upgrade(request, {
+            data: { kind: "tasks", request },
+          });
+          if (upgraded) return undefined;
+          return new Response("WebSocket upgrade failed", { status: 500 });
+        }
+
         if (
           url.pathname.startsWith("/realtime/v1") &&
           request.headers.get("upgrade")?.toLowerCase() === "websocket"
@@ -1318,7 +1347,7 @@ async function bootstrap() {
             request.headers.get("x-forwarded-for") || "127.0.0.1";
 
           const upgraded = server.upgrade(request, {
-            data: { upstreamUrl, requestHeaders, projectRef },
+            data: { kind: "realtimeProxy", upstreamUrl, requestHeaders, projectRef },
           });
           if (upgraded) return undefined; // Bun will handle the WebSocket
           return new Response("WebSocket upgrade failed", { status: 500 });

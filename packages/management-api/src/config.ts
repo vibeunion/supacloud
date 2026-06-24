@@ -68,6 +68,7 @@ export interface Config {
   caddyConfigPath: string;
   caddyStateDir: string;
   caddyBinaryPath: string;
+  grafanaUrl: string;
   victoriaMetricsUrl: string;
   realtimeAdminUrl: string;
   realtimeApiSecret: string;
@@ -192,6 +193,7 @@ export const config: Config = {
       : "/var/lib/supacloud/caddy",
   ),
   caddyBinaryPath: getEnv("CADDY_BINARY_PATH", "/usr/local/bin/supacloud-caddy"),
+  grafanaUrl: getEnv("GRAFANA_URL", "http://127.0.0.1:3000"),
   victoriaMetricsUrl: getEnv("VICTORIAMETRICS_URL", "http://127.0.0.1:8428"),
   realtimeAdminUrl: getEnv("REALTIME_ADMIN_URL", "http://127.0.0.1:4000"),
   realtimeApiSecret: getEnv("REALTIME_API_SECRET", ""),

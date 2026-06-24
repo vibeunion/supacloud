@@ -182,14 +182,14 @@
       </button>
     </div>
 
-    <!-- 极度低调内敛的凭据贴片 -->
+    <!-- 极度低调内敛的登录提示 -->
     <div class="w-full mt-7 bg-zinc-100/50 dark:bg-zinc-900/40 border border-dashed border-zinc-200 dark:border-zinc-800/80 rounded-2xl p-4 text-[11px] text-zinc-500 dark:text-zinc-400 flex items-start gap-3 text-left">
       <div class="mt-0.5 text-zinc-400 dark:text-zinc-500 shrink-0">
         <Info size={14} />
       </div>
       <div class="space-y-1 leading-relaxed">
-        <p class="font-bold text-zinc-600 dark:text-zinc-400">{$t("Login.default_credentials") || "默认凭据"}: <span class="bg-zinc-200 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 font-mono px-1.5 py-0.5 rounded ml-1 font-normal">admin</span> / <span class="bg-zinc-200 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 font-mono px-1.5 py-0.5 rounded font-normal">supacloud</span></p>
-        <p class="text-[10px] text-zinc-400 dark:text-zinc-550 opacity-90">{$t("Login.env_modify_hint") || "可通过环境变量 STUDIO_USERNAME / STUDIO_PASSWORD 修改"}</p>
+        <p class="font-bold text-zinc-600 dark:text-zinc-400">{$t("Login.credentials_hint_title") || "使用安装时配置的 Dashboard 凭据"}</p>
+        <p class="text-[10px] text-zinc-400 dark:text-zinc-550 opacity-90">{$t("Login.env_modify_hint") || "可通过环境变量 DASHBOARD_USERNAME / DASHBOARD_PASSWORD 或 STUDIO_USERNAME / STUDIO_PASSWORD 修改"}</p>
       </div>
     </div>
     
