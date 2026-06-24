@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.37.1](https://github.com/zuohuadong/supacloud/compare/management-api-v0.37.0...management-api-v0.37.1) (2026-06-24)
+
+
+### Bug Fixes
+
+* restore studio compatibility routes ([3aacf63](https://github.com/zuohuadong/supacloud/commit/3aacf63caf25da68e5ea791e3467943bdc7b343e))
+
 ## [0.37.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.36.7...management-api-v0.37.0) (2026-06-23)
 
 
