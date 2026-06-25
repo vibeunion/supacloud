@@ -424,7 +424,7 @@
     "operations_console": "Operations Console",
     "diagnostics": "Diagnostics Center",
     "settings": "AI Service Settings",
-    "subtitle": "Global control panel for Pigsty infrastructure."
+    "subtitle": "Global control panel for database infrastructure and SupaCloud services."
   },
   "Sidebar": {
     "platform_admin": "Platform Admin",
@@ -660,6 +660,7 @@
     "memory_status": "Memory Status",
     "supacloud_management_api": "SupaCloud Management API",
     "pigsty_infrastructure": "Pigsty Infrastructure",
+    "database_infrastructure": "Database Infrastructure",
     "database_postgresql": "Database (PostgreSQL)",
     "cloudnative_storage": "Cloud-native Storage",
     "cloudnative_storage_juicefs": "Cloud-native Storage (JuiceFS)",
@@ -667,7 +668,7 @@
     "database_cluster_ha": "Database Cluster (HA)",
     "pigsty_engine": "Pigsty Engine",
     "operations": "Operations",
-    "curated_pigsty_patroni_operations_executed": "Curated Pigsty / Patroni operations executed through a safe ticket-style UI",
+    "curated_pigsty_patroni_operations_executed": "Curated database operations for Pigsty, Patroni, and generic PostgreSQL profiles",
     "cluster_health_check": "Cluster health check",
     "run_check": "Run Check",
     "health_check_in_progress": "Health check in progress...",

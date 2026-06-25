@@ -2112,9 +2112,18 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 `.trim();
         const tmpFile = `/tmp/pgrst-prerequest-${ref}.sql`;
         await Bun.write(tmpFile, fnSql);
-        await $`psql ${dbUrl} -f ${tmpFile}`.nothrow().quiet();
-        await $`rm -f ${tmpFile}`.nothrow().quiet();
-        logger.info(`[tenant-runtime] Ensured public.set_request_context() for ${ref}`);
+        try {
+            const result = await $`psql ${dbUrl} -v ON_ERROR_STOP=1 -f ${tmpFile}`.nothrow();
+            if (result.exitCode !== 0) {
+                const stderr = result.stderr.toString().trim();
+                const stdout = result.stdout.toString().trim();
+                const detail = stderr || stdout || "psql exited without output";
+                throw new Error(`psql exited with code ${result.exitCode}: ${detail}`);
+            }
+            logger.info(`[tenant-runtime] Ensured public.set_request_context() for ${ref}`);
+        } finally {
+            await $`rm -f ${tmpFile}`.nothrow().quiet();
+        }
     }
 
     public async startRuntime(ref: string): Promise<RuntimeStatus> {
@@ -2309,6 +2318,8 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
     private async preparePostgrestRuntime(ref: string): Promise<void> {
         await this.ensurePostgrestBinary();
         await this.installSystemdTemplate();
+        await this.ensureTenantSchemaMigrations(ref);
+        await this.ensurePostgrestPrerequest(ref);
 
         const pgrstPort = await this.getTenantPort(ref, "pgrst");
         const gotruePort = await this.getTenantPort(ref, "gotrue");
@@ -2504,6 +2515,17 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
         }
     }
 
+    private async checkContainerService(containerName: string): Promise<string> {
+        try {
+            const result = await $`docker inspect -f '{{.State.Status}}' ${containerName} 2>/dev/null || podman inspect -f '{{.State.Status}}' ${containerName} 2>/dev/null`
+                .nothrow()
+                .quiet();
+            return result.text().trim() === "running" ? "ACTIVE_HEALTHY" : "INACTIVE";
+        } catch {
+            return "INACTIVE";
+        }
+    }
+
     /** Check DB health: try systemd first, then SQL probe as fallback */
     private async checkDbHealth(ref: string): Promise<string> {
         const systemdResult = await this.checkSystemService("patroni");
@@ -2558,13 +2580,13 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
             ? [
                 { id: "db", name: "db", unit: "patroni" },
                 { id: "auth", name: "auth", unit: `supacloud-gotrue@${ref}` },
-                { id: "realtime", name: "realtime", unit: "supacloud-realtime" },
+                { id: "realtime", name: "realtime", unit: "supacloud-realtime", container: "supacloud-realtime" },
                 { id: "storage", name: "storage", unit: "supacloud-storage" },
             ]
             : [
                 { id: "postgresql", name: "PostgreSQL", unit: "patroni" },
                 { id: "gotrue", name: "GoTrue", unit: `supacloud-gotrue@${ref}` },
-                { id: "realtime", name: "Realtime", unit: "supacloud-realtime" },
+                { id: "realtime", name: "Realtime", unit: "supacloud-realtime", container: "supacloud-realtime" },
                 { id: "storage", name: "Storage", unit: "supacloud-storage" },
                 {
                     id: "caddy",
@@ -2578,7 +2600,14 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
             this.checkDbHealth(ref),
             this.checkStorageHealth(),
             ...serviceDefs.filter(s => s.id !== "db" && s.id !== "storage" && s.id !== "postgresql")
-                .map((service) => this.checkSystemService(service.unit)),
+                .map(async (service) => {
+                    const systemdStatus = await this.checkSystemService(service.unit);
+                    const containerName = "container" in service ? service.container : undefined;
+                    if (systemdStatus === "ACTIVE_HEALTHY" || typeof containerName !== "string") {
+                        return systemdStatus;
+                    }
+                    return this.checkContainerService(containerName);
+                }),
         ]);
 
         const restId = mode === "studio" ? "rest" : "postgrest";

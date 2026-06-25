@@ -122,20 +122,12 @@ export class HealthChecker {
 
     private static async checkPostgresHealth(): Promise<HealthReport> {
         try {
-            // 1. Basic connectivity
-            const isReady = (await $`pg_isready -h localhost`.nothrow()).exitCode === 0;
-            if (!isReady) {
-                return {
-                    component: "Database (PostgreSQL)",
-                    status: "ERROR",
-                    message: "Database not accepting connections",
-                    recommendation: "Check if port 5432 is blocked by firewall, or query 'systemctl status postgres'."
-                };
-            }
-
-            // 2. Get version
-            const pgVersionRaw = await $`sudo -u postgres psql -At -c "SHOW server_version;"`.nothrow().text();
-            const pgVersion = pgVersionRaw.split(/\r?\n/)[0];
+            // Use the configured Management API database connection. SupaCloud can run
+            // against Pigsty, Patroni, a custom Postgres container, or an external DB.
+            const { sql } = await import("../db");
+            await sql`SELECT 1`;
+            const [versionRow] = await sql`SHOW server_version`;
+            const pgVersion = String(versionRow?.server_version || "unknown");
 
             // 3. Cluster HA detection (Patroni)
             const { ClusterManager } = await import("./cluster");
@@ -171,26 +163,46 @@ export class HealthChecker {
                 };
             }
 
-            // 4. Fallback: Detect primary-replica sync (try simple query on management DB)
-            const syncStatus = await $`sudo -u postgres psql -At -c "SELECT count(*) FROM pg_stat_replication;"`.nothrow();
-            if (syncStatus.exitCode === 0) {
-                const replicas = parseInt(syncStatus.stdout.toString().trim());
+            // 4. Fallback: Detect primary-replica sync using the configured DB.
+            try {
+                const [syncRow] = await sql`SELECT count(*)::int AS replicas FROM pg_stat_replication`;
+                const replicas = Number(syncRow?.replicas || 0);
                 return {
                     component: "Database Connection",
                     status: "OK",
                     message: `PostgreSQL ${pgVersion.trim()} ready (Active replicas: ${replicas})`
                 };
+            } catch (err: unknown) {
+                logger.debug("[HealthChecker] pg_stat_replication unavailable", {
+                    error: err instanceof Error ? err.message : String(err),
+                });
             }
 
             return { component: "Database (PostgreSQL)", status: "OK", message: `PG ${pgVersion.trim()} running in single-node mode` };
         } catch (err: unknown) {
-          logger.warn("[HealthChecker] PostgreSQL health check failed", { error: err });
-            return { component: "Database", status: "WARN", message: "Cannot detect detailed database metrics" };
+            const message = err instanceof Error ? err.message : String(err);
+            logger.warn("[HealthChecker] PostgreSQL health check failed", { error: message });
+            return {
+                component: "Database (PostgreSQL)",
+                status: "ERROR",
+                message: "Database not accepting connections",
+                recommendation: "Check DATABASE_URL or PG_* connection settings for the active database provider."
+            };
         }
     }
 
     private static async checkPigstyStatus(): Promise<HealthReport> {
         try {
+            const hasPig = (await $`command -v pig`.nothrow().quiet()).exitCode === 0;
+            if (!hasPig) {
+                return {
+                    component: "Database Infrastructure",
+                    status: "OK",
+                    message: "Generic PostgreSQL profile active; Pigsty not configured",
+                    recommendation: "This is expected when SupaCloud uses a custom or external PostgreSQL provider."
+                };
+            }
+
             const version = await $`pig version`.nothrow().text();
             if (version.trim()) {
                 return {
