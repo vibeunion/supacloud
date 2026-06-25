@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.6](https://github.com/zuohuadong/supacloud/compare/web-console-v0.16.5...web-console-v0.16.6) (2026-06-25)
+
+
+### Bug Fixes
+
+* **management-api:** support generic postgres health ([51e23a1](https://github.com/zuohuadong/supacloud/commit/51e23a15c0e2291380cf5bbe19207787d3aa5092))
+
 ## [0.16.5](https://github.com/zuohuadong/supacloud/compare/web-console-v0.16.4...web-console-v0.16.5) (2026-06-24)
 
 
