@@ -86,6 +86,35 @@ describe("supabase bootstrap schema", () => {
     expect(migrationBody).toContain("throw new Error(`psql exited with code");
   });
 
+  test("PostgREST repair path reapplies pre-request function", () => {
+    const source = readRepoFile("src/services/tenant-runtime.service.ts");
+    const prerequestStart = source.indexOf("private async ensurePostgrestPrerequest");
+    const prerequestEnd = source.indexOf("public async startRuntime", prerequestStart);
+    const prepareStart = source.indexOf("private async preparePostgrestRuntime");
+    const prepareEnd = source.indexOf("private async persistPostgrestObservation", prepareStart);
+
+    expect(prerequestStart).toBeGreaterThanOrEqual(0);
+    expect(prerequestEnd).toBeGreaterThan(prerequestStart);
+    expect(prepareStart).toBeGreaterThanOrEqual(0);
+    expect(prepareEnd).toBeGreaterThan(prepareStart);
+
+    const prerequestBody = source.slice(prerequestStart, prerequestEnd);
+    const prepareBody = source.slice(prepareStart, prepareEnd);
+    expect(prerequestBody).toContain("-v ON_ERROR_STOP=1");
+    expect(prerequestBody).toContain("throw new Error(`psql exited with code");
+    expect(prepareBody).toContain("await this.ensureTenantSchemaMigrations(ref);");
+    expect(prepareBody).toContain("await this.ensurePostgrestPrerequest(ref);");
+  });
+
+  test("project service status accepts the deployed Realtime container fallback", () => {
+    const source = readRepoFile("src/services/tenant-runtime.service.ts");
+
+    expect(source).toContain("private async checkContainerService");
+    expect(source).toContain('container: "supacloud-realtime"');
+    expect(source).toContain('typeof containerName !== "string"');
+    expect(source).toContain("return this.checkContainerService(containerName);");
+  });
+
   test("graphql fallback does not replace an existing pg_graphql RPC", () => {
     for (const filePath of [
       "src/db/schemas/supabase.sql",

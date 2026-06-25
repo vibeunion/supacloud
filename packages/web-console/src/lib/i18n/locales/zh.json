@@ -424,7 +424,7 @@
     "operations_console": "运维控制",
     "diagnostics": "自检中心",
     "settings": "AI 服务配置",
-    "subtitle": "Pigsty ????????????"
+    "subtitle": "数据库基础设施与 SupaCloud 服务的全局控制台"
   },
   "Sidebar": {
     "platform_admin": "平台管理",
@@ -660,14 +660,15 @@
     "memory_status": "系统内存",
     "supacloud_management_api": "SupaCloud 管理接口",
     "pigsty_infrastructure": "Pigsty 基础设施",
-    "database_postgresql": "Database (PostgreSQL)",
+    "database_infrastructure": "数据库基础设施",
+    "database_postgresql": "PostgreSQL 数据库",
     "cloudnative_storage": "云原生存储",
     "cloudnative_storage_juicefs": "云原生存储 (JuiceFS)",
     "database_connection": "数据库连接",
     "database_cluster_ha": "数据库集群 (HA高可用)",
     "pigsty_engine": "Pigsty 引擎",
     "operations": "运维操作",
-    "curated_pigsty_patroni_operations_executed": "精选的 Pigsty / Patroni 运维操作，以安全的工单式 UI 执行",
+    "curated_pigsty_patroni_operations_executed": "适配 Pigsty、Patroni 与通用 PostgreSQL 的安全运维操作",
     "cluster_health_check": "集群健康检查",
     "run_check": "执行检查",
     "health_check_in_progress": "正在进行健康检查...",

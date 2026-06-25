@@ -7,6 +7,20 @@ import { hashPayload, statusForHash } from "../hash";
 import { registerCheck } from "../../services/diagnostics.registry";
 import type { DiagnosticCheckResult, DiagnosticRepairResult } from "../../services/diagnostics.types";
 
+async function isSystemdUnitInstalled(unit: string): Promise<boolean> {
+  try {
+    const serviceUnit = unit.endsWith(".service") ? unit : `${unit}.service`;
+    const result = await $`systemctl cat ${serviceUnit}`.nothrow().quiet();
+    return result.exitCode === 0;
+  } catch {
+    return false;
+  }
+}
+
+function isLocalHost(hostname: string): boolean {
+  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1" || hostname === "0.0.0.0";
+}
+
 // --- Systemd service check ---
 registerCheck({
   id: "platform-service-status",
@@ -22,8 +36,14 @@ registerCheck({
       { unit: "supacloud", label: "Management API" },
       gateway,
       { unit: "supacloud-edge-runtime", label: "Edge Runtime" },
-      { unit: "patroni", label: "Patroni (PostgreSQL HA)" },
     ];
+    const optionalSkipped: string[] = [];
+
+    if (await isSystemdUnitInstalled("patroni")) {
+      services.push({ unit: "patroni", label: "Patroni (PostgreSQL HA)" });
+    } else {
+      optionalSkipped.push("Patroni (PostgreSQL HA)");
+    }
 
     const failed: string[] = [];
     const ok: string[] = [];
@@ -47,14 +67,15 @@ registerCheck({
         status: "degraded",
         message: `Services down: ${failed.join(", ")}`,
         detail: `Running: ${ok.join(", ") || "none"}`,
-        metadata: { failed, ok },
+        metadata: { failed, ok, optionalSkipped },
       };
     }
 
     return {
       checkId: "platform-service-status",
       status: "pass",
-      message: `All ${services.length} critical services running`,
+      message: `All ${services.length} required platform services running`,
+      metadata: { ok, optionalSkipped },
     };
   },
 });
@@ -69,13 +90,20 @@ registerCheck({
   severity: "critical",
   repairable: false,
   async run(): Promise<DiagnosticCheckResult | null> {
+    const { dbConfig } = await import("../../db");
     const ports = [
       { port: 9090, label: "Management API" },
       { port: 80, label: "Gateway HTTP" },
       { port: 443, label: "Gateway HTTPS" },
       { port: 9000, label: "Edge Runtime" },
-      { port: 5432, label: "PostgreSQL" },
     ];
+    const skipped: string[] = [];
+
+    if (isLocalHost(dbConfig.hostname)) {
+      ports.push({ port: dbConfig.port, label: "PostgreSQL" });
+    } else {
+      skipped.push(`PostgreSQL(${dbConfig.hostname}:${dbConfig.port})`);
+    }
 
     const notListening: string[] = [];
     const listening: string[] = [];
@@ -99,14 +127,15 @@ registerCheck({
         status: "degraded",
         message: `Ports not listening: ${notListening.join(", ")}`,
         detail: `Listening: ${listening.join(", ") || "none"}`,
-        metadata: { notListening, listening },
+        metadata: { notListening, listening, skipped },
       };
     }
 
     return {
       checkId: "platform-port-listeners",
       status: "pass",
-      message: `All ${ports.length} expected ports are listening`,
+      message: `All ${ports.length} expected local ports are listening`,
+      metadata: { listening, skipped },
     };
   },
 });
