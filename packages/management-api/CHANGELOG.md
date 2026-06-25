@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.37.2](https://github.com/zuohuadong/supacloud/compare/management-api-v0.37.1...management-api-v0.37.2) (2026-06-25)
+
+
+### Bug Fixes
+
+* **management-api:** support generic postgres health ([51e23a1](https://github.com/zuohuadong/supacloud/commit/51e23a15c0e2291380cf5bbe19207787d3aa5092))
+
 ## [0.37.1](https://github.com/zuohuadong/supacloud/compare/management-api-v0.37.0...management-api-v0.37.1) (2026-06-24)
 
 
