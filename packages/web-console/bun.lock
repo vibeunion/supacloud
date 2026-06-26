@@ -5,7 +5,7 @@
     "": {
       "name": "web-console",
       "dependencies": {
-        "@svadmin/core": "^0.30.0",
+        "@svadmin/core": "^0.31.0",
         "@svadmin/elysia": "^0.10.7",
         "@svadmin/sveltekit": "^0.9.4",
         "@svadmin/ui": "^0.37.0",
@@ -219,7 +219,7 @@
 
     "@standard-schema/spec": ["@standard-schema/spec@1.1.0", "", {}, "sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w=="],
 
-    "@svadmin/core": ["@svadmin/core@0.30.0", "", { "peerDependencies": { "@tanstack/svelte-query": "^6.1.29", "svelte": "^5.0.0" }, "optionalPeers": ["@tanstack/svelte-query", "svelte"] }, "sha512-Qt7NrhcV0zfG15ajXMfwih9NWf2t9R2MYXu44XDgPZFLh9zXNoy84EStq7w8cDQoaZPaoNsx2gl5GD66pUjEUg=="],
+    "@svadmin/core": ["@svadmin/core@0.31.0", "", { "peerDependencies": { "@tanstack/svelte-query": "^6.1.29", "svelte": "^5.0.0" }, "optionalPeers": ["@tanstack/svelte-query", "svelte"] }, "sha512-bd0k0GayYfUdAo1+z0DB1N2WqoyCtq1ELIe2BnWiaSyy/gPmjUVX2f8OwzBEhEUu/JWeHhu3cg+nxqDBt/+fkw=="],
 
     "@svadmin/elysia": ["@svadmin/elysia@0.10.7", "", { "peerDependencies": { "@elysiajs/eden": ">=1.0.0", "@svadmin/core": "^0.27.1", "elysia": ">=1.0.0" }, "optionalPeers": ["@elysiajs/eden", "@svadmin/core", "elysia"] }, "sha512-vVpEdofjj+9zbbo7eUmyhi5aC1W4LYIDmjFdLOFWl++V8iVhr10Vx7eafMnIkFbSV06CkFdegKyhheMF4FQQCg=="],
 
