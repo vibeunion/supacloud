@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach, mock, spyOn } from "bun:test";
-import { DatabaseService } from "../../src/services/database.service";
+import { DatabaseService, renderAuthSchemaOwnershipSql } from "../../src/services/database.service";
 import { shellService } from "../../src/services/shell.service";
 
 /** Typed mock for SQL connection used in DatabaseService */
@@ -20,6 +20,7 @@ function createMockSql(): MockSql {
 describe("DatabaseService", () => {
   let databaseService: DatabaseService;
   let mockSql: MockSql;
+  let applySupabaseSchemaSpy: { mockRestore: () => void };
 
   beforeEach(() => {
     databaseService = new DatabaseService();
@@ -34,7 +35,8 @@ describe("DatabaseService", () => {
     spyOn(DatabaseService.prototype as unknown as Record<string, unknown>, "checkDiskSpace").mockResolvedValue(undefined);
 
     // Mock applySupabaseSchema to avoid complex nested DB calls in simple tests
-    spyOn(DatabaseService.prototype as unknown as Record<string, unknown>, "applySupabaseSchema").mockResolvedValue(undefined);
+    applySupabaseSchemaSpy = spyOn(DatabaseService.prototype as unknown as Record<string, unknown>, "applySupabaseSchema")
+      .mockResolvedValue(undefined);
   });
 
   describe("generatePassword", () => {
@@ -64,6 +66,39 @@ describe("DatabaseService", () => {
       expect(mockSql.unsafe).toHaveBeenCalledWith(expect.stringContaining(
         'GRANT CONNECT, TEMPORARY ON DATABASE "supa_testref123" TO "authenticator_testref123"',
       ));
+    });
+  });
+
+  describe("renderAuthSchemaOwnershipSql", () => {
+    test("transfers auth schema objects to the GoTrue runtime role", () => {
+      const sql = renderAuthSchemaOwnershipSql();
+
+      expect(sql).toContain('ALTER SCHEMA auth OWNER TO "supabase_auth_admin"');
+      expect(sql).toContain("ALTER %s %I.%I OWNER TO \"supabase_auth_admin\"");
+      expect(sql).toContain("ALTER FUNCTION %I.%I(%s) OWNER TO \"supabase_auth_admin\"");
+      expect(sql).toContain("ALTER TYPE %I.%I OWNER TO \"supabase_auth_admin\"");
+      expect(sql).toContain("c.relkind IN ('r', 'p', 'S', 'v', 'm', 'f')");
+      expect(sql).toContain("FROM pg_depend d");
+      expect(sql).toContain("d.deptype = 'a'");
+      expect(sql).toContain("t.typtype IN ('d', 'e')");
+    });
+
+    test("rejects unsafe owner identifiers before building DDL", () => {
+      expect(() => renderAuthSchemaOwnershipSql("bad-role;DROP SCHEMA auth")).toThrow();
+    });
+
+    test("applySupabaseSchema runs ownership repair after loading tenant schema", async () => {
+      applySupabaseSchemaSpy.mockRestore();
+      const service = new DatabaseService();
+      const tenantSql = createMockSql();
+      spyOn(DatabaseService.prototype as any, "getTenantDb").mockReturnValue(tenantSql);
+      spyOn(DatabaseService.prototype as any, "loadSupabaseSchema").mockResolvedValue("SELECT 'tenant schema loaded';");
+
+      await (service as unknown as { applySupabaseSchema(dbName: string, projectRef: string, password: string): Promise<void> })
+        .applySupabaseSchema("supa_testref123", "testref123", "testpass");
+
+      expect(tenantSql.unsafe).toHaveBeenCalledWith("SELECT 'tenant schema loaded';");
+      expect(tenantSql.unsafe).toHaveBeenCalledWith(expect.stringContaining('ALTER SCHEMA auth OWNER TO "supabase_auth_admin"'));
     });
   });
 
