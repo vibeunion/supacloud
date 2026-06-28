@@ -13,6 +13,7 @@ import { resolveProjectRefFromApiKey } from "../utils/project-auth";
 import { verifyProjectJwtPayload } from "../utils/project-jwt";
 
 const MAX_ASYNC_BODY_BYTES = 256 * 1024;
+const SDK_PROXY_PROJECT_STATUSES = ["active", "creating"];
 let sdkProxyFetch: typeof fetch = ((input: RequestInfo | URL, init?: RequestInit) =>
     globalThis.fetch(input, init)) as typeof fetch;
 
@@ -224,7 +225,7 @@ async function getProjectRef(request: Request): Promise<string> {
     const auth = request.headers.get('authorization') || '';
     const key = request.headers.get('apikey') || '';
     const refHeader = request.headers.get("x-project-ref") || request.headers.get("x-supabase-project") || "";
-    const apiKeyRef = await sdkProxyInternals.resolveProjectRefFromApiKey(key) || '';
+    const apiKeyRef = await sdkProxyInternals.resolveProjectRefFromApiKey(key, { includeProvisioning: true }) || '';
 
     if (apiKeyRef) {
         if (refHeader && refHeader !== apiKeyRef) return '';
@@ -245,7 +246,7 @@ async function getProjectRef(request: Request): Promise<string> {
                     SELECT ref, config
                     FROM projects
                     WHERE deleted_at IS NULL
-                      AND status = 'active'
+                      AND lower(status) = ANY(${SDK_PROXY_PROJECT_STATUSES})
                 `;
                 const matchedProject = rows.find((row: { ref?: unknown; config?: unknown }) =>
                     matchProjectRefFromHost(hostWithoutPort, String(row.ref || ""), row.config),
@@ -296,7 +297,7 @@ async function resolveProjectRefFromHeaderAndHost(ref: string, request: Request)
                 FROM projects
                 WHERE ref = ${ref}
                   AND deleted_at IS NULL
-                  AND status = 'active'
+                  AND lower(status) = ANY(${SDK_PROXY_PROJECT_STATUSES})
                 LIMIT 1
             `;
             if (

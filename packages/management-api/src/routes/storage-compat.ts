@@ -39,6 +39,7 @@ const STORAGE_UPLOAD_MAX_BYTES = Number(process.env.STORAGE_UPLOAD_MAX_BYTES || 
 const TUS_MAX_SIZE = Number(process.env.TUS_MAX_SIZE || DEFAULT_TUS_MAX_SIZE_BYTES);
 const TUS_MAX_CHUNK_SIZE = Number(process.env.TUS_MAX_CHUNK_SIZE || Math.min(TUS_MAX_SIZE, 16 * 1024 * 1024));
 const STORAGE_BATCH_CONCURRENCY = Math.max(1, Number(process.env.STORAGE_BATCH_CONCURRENCY || 12));
+const STORAGE_PROJECT_STATUSES = ["active", "creating"];
 
 // ── Imaginary Config ──────────────────────────────────────────────
 const IMAGINARY_URL = config.imaginaryUrl;
@@ -239,7 +240,7 @@ async function resolveProjectRefFromHeaderAndHost(ref: string, host: string): Pr
             FROM projects
             WHERE ref = ${ref}
               AND deleted_at IS NULL
-              AND status = 'active'
+              AND lower(status) = ANY(${STORAGE_PROJECT_STATUSES})
             LIMIT 1
         `;
         if (
@@ -291,7 +292,7 @@ async function getProjectRef(headers: Record<string, string | undefined>): Promi
                 SELECT ref, config
                 FROM projects
                 WHERE deleted_at IS NULL
-                  AND status = 'active'
+                  AND lower(status) = ANY(${STORAGE_PROJECT_STATUSES})
             `;
             const matchedProject = rows.find((row: { ref?: unknown; config?: unknown }) =>
                 matchProjectRefFromHost(host, String(row.ref || ""), row.config),

@@ -264,6 +264,7 @@ describe("sdkProxyRoutes functions proxy", () => {
       expect(response.status).toBe(200);
       expect(calls).toHaveLength(1);
       expect(calls[0]?.url).toBe("http://127.0.0.1:8361/health");
+      expect(sdkProxyInternals.resolveProjectRefFromApiKey).toHaveBeenCalledWith("anon", { includeProvisioning: true });
     });
   });
 
