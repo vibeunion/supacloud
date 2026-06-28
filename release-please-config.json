@@ -36,7 +36,7 @@
       "extra-files": [
         {
           "type": "json",
-          "path": "packages/supacloud/package.json",
+          "path": "/packages/supacloud/package.json",
           "jsonpath": "$.dependencies['@supacloud/cli']"
         }
       ]
@@ -48,7 +48,7 @@
       "extra-files": [
         {
           "type": "json",
-          "path": "packages/supacloud/package.json",
+          "path": "/packages/supacloud/package.json",
           "jsonpath": "$.dependencies['@supacloud/admin']"
         }
       ]

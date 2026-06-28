@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.37.6](https://github.com/zuohuadong/supacloud/compare/management-api-v0.37.5...management-api-v0.37.6) (2026-06-28)
+
+
+### Bug Fixes
+
+* **auth:** repair tenant auth schema ownership ([e4e18c0](https://github.com/zuohuadong/supacloud/commit/e4e18c0fd4eb30b2a14e6a4a2c6b9bd86b5ec119))
+
 ## [0.37.5](https://github.com/zuohuadong/supacloud/compare/management-api-v0.37.4...management-api-v0.37.5) (2026-06-28)
 
 
