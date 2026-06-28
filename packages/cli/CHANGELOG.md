@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.0](https://github.com/zuohuadong/supacloud/compare/cli-v0.7.0...cli-v0.8.0) (2026-06-28)
+
+
+### Features
+
+* **supacloud:** add unified entrypoint package ([3364a9d](https://github.com/zuohuadong/supacloud/commit/3364a9de44fad1ae9ddb3959f5416995e94dcf74))
+
 ## [0.7.0](https://github.com/zuohuadong/supacloud/compare/cli-v0.6.2...cli-v0.7.0) (2026-06-23)
 
 
