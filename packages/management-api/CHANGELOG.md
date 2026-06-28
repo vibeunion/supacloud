@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.37.4](https://github.com/zuohuadong/supacloud/compare/management-api-v0.37.3...management-api-v0.37.4) (2026-06-28)
+
+
+### Bug Fixes
+
+* **storage:** prioritize S3 compatibility routes ([e3b57d3](https://github.com/zuohuadong/supacloud/commit/e3b57d3d6a8576477e733ad979595d1feccac5d3))
+
 ## [0.37.3](https://github.com/zuohuadong/supacloud/compare/management-api-v0.37.2...management-api-v0.37.3) (2026-06-28)
 
 
