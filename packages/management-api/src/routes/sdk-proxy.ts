@@ -303,7 +303,7 @@ async function resolveProjectRefFromHeaderAndHost(ref: string, request: Request)
             if (
                 rows.length > 0 &&
                 rows[0].ref === ref &&
-                matchProjectRefFromHost(host, ref, rows[0].config)
+                (isLoopbackRequestHost(request) || matchProjectRefFromHost(host, ref, rows[0].config))
             ) {
                 return ref;
             }
