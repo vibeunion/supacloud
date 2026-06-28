@@ -311,6 +311,7 @@ describe("sdkProxyRoutes functions proxy", () => {
       sqlSpy.mockImplementation(async (...args: unknown[]) => {
         const text = String(args[0] ?? "");
         if (text.includes("SELECT ref")) {
+          expect(text).not.toContain("ANY(");
           return [{ ref: "proj_from_header", config: {} }];
         }
         if (text.includes("SELECT config")) {

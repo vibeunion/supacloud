@@ -198,17 +198,23 @@ export async function verifyProjectJwtPayload(
   options: { includeProvisioning?: boolean } = {},
 ): Promise<ProjectJwtVerification | null> {
   const cleanToken = token.replace(/^Bearer\s+/i, "");
-  const allowedStatuses = options.includeProvisioning
-    ? ["active", "creating"]
-    : ["active"];
-  const [project] = await metaSql`
-    SELECT jwt_secret, service_role_key, config
-    FROM projects
-    WHERE ref = ${ref}
-      AND deleted_at IS NULL
-      AND lower(status) = ANY(${allowedStatuses})
-    LIMIT 1
-  `;
+  const [project] = options.includeProvisioning
+    ? await metaSql`
+      SELECT jwt_secret, service_role_key, config
+      FROM projects
+      WHERE ref = ${ref}
+        AND deleted_at IS NULL
+        AND lower(status) IN ('active', 'creating')
+      LIMIT 1
+    `
+    : await metaSql`
+      SELECT jwt_secret, service_role_key, config
+      FROM projects
+      WHERE ref = ${ref}
+        AND deleted_at IS NULL
+        AND lower(status) = 'active'
+      LIMIT 1
+    `;
 
   if (!project?.jwt_secret) return null;
   const jwtJwks = extractJwtJwksFromConfig(project.config);

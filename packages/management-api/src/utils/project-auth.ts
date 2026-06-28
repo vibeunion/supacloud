@@ -6,16 +6,21 @@ export async function resolveProjectRefFromApiKey(
 ): Promise<string | null> {
   if (!key) return null;
   try {
-    const allowedStatuses = options.includeProvisioning
-      ? ["active", "creating"]
-      : ["active"];
-    const rows = await metaSql`
-      SELECT ref FROM projects
-      WHERE (anon_key = ${key} OR service_role_key = ${key})
-        AND deleted_at IS NULL
-        AND lower(status) = ANY(${allowedStatuses})
-      LIMIT 1
-    `;
+    const rows = options.includeProvisioning
+      ? await metaSql`
+        SELECT ref FROM projects
+        WHERE (anon_key = ${key} OR service_role_key = ${key})
+          AND deleted_at IS NULL
+          AND lower(status) IN ('active', 'creating')
+        LIMIT 1
+      `
+      : await metaSql`
+        SELECT ref FROM projects
+        WHERE (anon_key = ${key} OR service_role_key = ${key})
+          AND deleted_at IS NULL
+          AND lower(status) = 'active'
+        LIMIT 1
+      `;
     if (rows.length > 0) return String(rows[0].ref);
   } catch {}
   return null;

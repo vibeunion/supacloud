@@ -251,7 +251,7 @@ describe("storageCompatRoutes supabase-js compatibility", () => {
     sqlSpy.mockImplementation(async (...args: unknown[]) => {
       const text = String(args[0] ?? "");
       if (text.includes("anon_key") || text.includes("service_role_key")) {
-        sawProvisioningStatuses = args.some((arg) => Array.isArray(arg) && arg.includes("creating"));
+        sawProvisioningStatuses = text.includes("lower(status) IN ('active', 'creating')");
         return [{ ref: "provisioning_ref" }];
       }
       return [];
@@ -281,7 +281,7 @@ describe("storageCompatRoutes supabase-js compatibility", () => {
     sqlSpy.mockImplementation(async (...args: unknown[]) => {
       const text = String(args[0] ?? "");
       if (text.includes("FROM projects")) {
-        sawProvisioningStatuses = args.some((arg) => Array.isArray(arg) && arg.includes("creating"));
+        sawProvisioningStatuses = text.includes("lower(status) IN ('active', 'creating')");
         return [{ ref: "provisioning_header_ref", config: {} }];
       }
       return [];

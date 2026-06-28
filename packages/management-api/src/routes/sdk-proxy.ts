@@ -13,7 +13,6 @@ import { resolveProjectRefFromApiKey } from "../utils/project-auth";
 import { verifyProjectJwtPayload } from "../utils/project-jwt";
 
 const MAX_ASYNC_BODY_BYTES = 256 * 1024;
-const SDK_PROXY_PROJECT_STATUSES = ["active", "creating"];
 let sdkProxyFetch: typeof fetch = ((input: RequestInfo | URL, init?: RequestInit) =>
     globalThis.fetch(input, init)) as typeof fetch;
 
@@ -278,7 +277,7 @@ async function getProjectRef(request: Request): Promise<string> {
                     SELECT ref, config
                     FROM projects
                     WHERE deleted_at IS NULL
-                      AND lower(status) = ANY(${SDK_PROXY_PROJECT_STATUSES})
+                      AND lower(status) IN ('active', 'creating')
                 `;
                 const matchedProject = rows.find((row: { ref?: unknown; config?: unknown }) =>
                     matchProjectRefFromHost(host, String(row.ref || ""), row.config),
@@ -328,7 +327,7 @@ async function resolveProjectRefFromHeaderAndHost(ref: string, request: Request)
                 FROM projects
                 WHERE ref = ${ref}
                   AND deleted_at IS NULL
-                  AND lower(status) = ANY(${SDK_PROXY_PROJECT_STATUSES})
+                  AND lower(status) IN ('active', 'creating')
                 LIMIT 1
             `;
             if (
