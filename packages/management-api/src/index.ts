@@ -28,6 +28,7 @@ import { resolveRealtimeTenantHost } from "./utils/sdk-parity";
 import { resolveProjectRefFromApiKey } from "./utils/project-auth";
 import { isFrontendDomain } from "./utils/frontend-domains";
 import { isCaddyRouteDomain, isCaddyTlsBlockedDomain, normalizeCaddyHost } from "./utils/caddy-domains";
+import { isS3DataPlaneRequest } from "./utils/storage-s3-paths";
 
 const WEB_CONSOLE_CURRENT_DIR = "/opt/supacloud/web-console/current";
 const WEB_CONSOLE_LEGACY_DIR = "/opt/supacloud/packages/web-console/build";
@@ -850,13 +851,15 @@ export async function registerAllRoutes(): Promise<AnyElysia> {
           return rateLimit.body;
         }
 
-        const result = await checkAuth(request);
-        if (result) {
-          set.status = result.status;
-          if (shouldAuditRequest(request)) {
-            await logAuditEvent({ request, status: result.status, action: "auth_denied" });
+        if (!isS3DataPlaneRequest(request)) {
+          const result = await checkAuth(request);
+          if (result) {
+            set.status = result.status;
+            if (shouldAuditRequest(request)) {
+              await logAuditEvent({ request, status: result.status, action: "auth_denied" });
+            }
+            return { message: result.body.error, code: String(result.status) };
           }
-          return { message: result.body.error, code: String(result.status) };
         }
       })
       .onAfterHandle(async ({ request, set }) => {
