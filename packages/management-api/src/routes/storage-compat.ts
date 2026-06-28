@@ -202,7 +202,7 @@ async function resolveProjectRefFromApiKey(key: string): Promise<string> {
     if (!key) return '';
     try {
         const { resolveProjectRefFromApiKey: resolveActiveProjectRefFromApiKey } = await import('../utils/project-auth');
-        return (await resolveActiveProjectRefFromApiKey(key)) || '';
+        return (await resolveActiveProjectRefFromApiKey(key, { includeProvisioning: true })) || '';
     } catch {}
     return '';
 }

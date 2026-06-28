@@ -242,7 +242,7 @@ export class StorageRLS {
 
   static async verifyToken(ref: string, token: string) {
     const cleanToken = token.replace('Bearer ', '');
-    const verification = await verifyProjectJwtPayload(ref, cleanToken);
+    const verification = await verifyProjectJwtPayload(ref, cleanToken, { includeProvisioning: true });
     if (!verification) throw new Error("tenant not found");
     return {
       ...verification.payload,

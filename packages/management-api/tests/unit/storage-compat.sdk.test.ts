@@ -245,6 +245,36 @@ describe("storageCompatRoutes supabase-js compatibility", () => {
     downloadSpy.mockRestore();
   });
 
+  test("allows project-scoped storage requests while a new project is provisioning", async () => {
+    const sqlSpy = spyOn(dbModule, "sql");
+    let sawProvisioningStatuses = false;
+    sqlSpy.mockImplementation(async (...args: unknown[]) => {
+      const text = String(args[0] ?? "");
+      if (text.includes("anon_key") || text.includes("service_role_key")) {
+        sawProvisioningStatuses = args.some((arg) => Array.isArray(arg) && arg.includes("creating"));
+        return [{ ref: "provisioning_ref" }];
+      }
+      return [];
+    });
+
+    const bucketSpy = spyOn(StorageRLS, "listLogicalBuckets").mockResolvedValue([]);
+
+    const res = await request("/storage/v1/bucket", {
+      headers: {
+        apikey: "service-role-key-for-provisioning-project",
+        authorization: "Bearer service-role-key-for-provisioning-project",
+        "x-project-ref": "provisioning_ref",
+      },
+    });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual([]);
+    expect(sawProvisioningStatuses).toBe(true);
+    expect(bucketSpy).toHaveBeenCalledWith("provisioning_ref", "Bearer service-role-key-for-provisioning-project", expect.any(Object));
+    sqlSpy.mockRestore();
+    bucketSpy.mockRestore();
+  });
+
   test("public downloads prefer stored object mimetype when backend returns octet-stream", async () => {
     mockObjects.set("avatars/folder/cat.png", {
       metadata: { size: 3, mimetype: "image/png" },
