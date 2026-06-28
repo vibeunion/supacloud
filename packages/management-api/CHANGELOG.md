@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.37.3](https://github.com/zuohuadong/supacloud/compare/management-api-v0.37.2...management-api-v0.37.3) (2026-06-28)
+
+
+### Bug Fixes
+
+* **storage:** allow provisioning projects to bootstrap objects ([6275415](https://github.com/zuohuadong/supacloud/commit/62754158d6612e7ccd53f97faa253e88fcba7afb))
+
 ## [0.37.2](https://github.com/zuohuadong/supacloud/compare/management-api-v0.37.1...management-api-v0.37.2) (2026-06-25)
 
 
