@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.37.5](https://github.com/zuohuadong/supacloud/compare/management-api-v0.37.4...management-api-v0.37.5) (2026-06-28)
+
+
+### Bug Fixes
+
+* **storage:** let S3 SigV4 bypass API bearer guard ([f2a5c7c](https://github.com/zuohuadong/supacloud/commit/f2a5c7c1979d6c9ba668842cd0d7fbe2f555e59f))
+
 ## [0.37.4](https://github.com/zuohuadong/supacloud/compare/management-api-v0.37.3...management-api-v0.37.4) (2026-06-28)
 
 
