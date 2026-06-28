@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 
-import path from "node:path";
 import { z } from "zod";
 import { runCli } from "./shared/cli";
 import { resolveSupaCloudContext } from "./shared/context";
@@ -17,9 +16,8 @@ import { registerGatewayTools } from "./shared/tools/gateway-tools";
 type ToolEntry = { schema: any; callback: (args: any) => Promise<any> };
 type ToolMap = Record<string, ToolEntry>;
 
-const invokedCommand = path.basename(process.argv[1] || "supacloud-cli");
-const commandName = invokedCommand === "supacloud" ? "supacloud" : "supacloud-cli";
-const preferredCommand = "supacloud-cli";
+const commandName = "supacloud-cli";
+const preferredCommand = commandName;
 const projectActionSchema = z.enum([
     "get", "health", "logs", "api_keys", "settings",
     "tasks", "task_detail", "task_cancel", "task_retry", "task_stats", "dlq", "background_settings",
@@ -61,8 +59,6 @@ function printHelp(context = resolveSupaCloudContext()) {
 ║  supacloud-cli                                           ║
 ║  Project CLI for SupaCloud users                         ║
 ╚═══════════════════════════════════════════════════════════╝
-
-${commandName === "supacloud" ? "NOTE\n\n  `supacloud` is kept as a compatibility alias. Prefer `supacloud-cli`\n  to avoid confusion with the server binary at /usr/local/bin/supacloud.\n" : ""}
 
 USAGE
 
