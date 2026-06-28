@@ -70,7 +70,7 @@ cli 与 admin 的全部能力；二者也可单独安装为 @supacloud/cli /
 `;
 }
 
-function run(args: string[]): never {
+function run(args: string[]): void {
     const sub = args[0];
 
     if (!sub || sub === "--help" || sub === "-h" || sub === "help") {
@@ -101,8 +101,6 @@ function run(args: string[]): never {
         console.error(`❌ 启动 ${target.pkg} 失败: ${err.message}`);
         process.exit(1);
     });
-
-    return undefined as never;
 }
 
 // 仅在作为脚本直接运行时执行分发，避免被 import（如测试）时的副作用退出
