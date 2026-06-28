@@ -32,6 +32,16 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+async function expectSnapshotStatus(res: Response, expectedStatus: number, label: string): Promise<unknown> {
+  const text = await res.text();
+  if (res.status !== expectedStatus) {
+    throw new Error(
+      `${label} status mismatch: expected ${expectedStatus}, received ${res.status}, body=${text.slice(0, 500)}`,
+    );
+  }
+  return JSON.parse(text);
+}
+
 async function waitForAuthProxy(tenantRef: string, anonKey: string) {
   let lastStatus = 0;
   let lastError = "";
@@ -136,9 +146,7 @@ describe("API Structural Snapshot Compliance", () => {
       },
     );
 
-    expect(res.status).toBe(gt.status);
-
-    const data = await res.json();
+    const data = await expectSnapshotStatus(res, gt.status, "storage_list_error");
     const schema = buildSchemaObject(data);
 
     expect(schema).toEqual(gt.schema);
@@ -158,9 +166,7 @@ describe("API Structural Snapshot Compliance", () => {
       body: JSON.stringify({ email: "invalid", password: "1" }),
     });
 
-    expect(res.status).toBe(gt.status);
-
-    const data = await res.json();
+    const data = await expectSnapshotStatus(res, gt.status, "auth_signup_error");
     const schema = buildSchemaObject(data);
 
     expect(schema).toEqual(gt.schema);

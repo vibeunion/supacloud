@@ -202,7 +202,7 @@ async function resolveProjectRefFromApiKey(key: string): Promise<string> {
     if (!key) return '';
     try {
         const { resolveProjectRefFromApiKey: resolveActiveProjectRefFromApiKey } = await import('../utils/project-auth');
-        return (await resolveActiveProjectRefFromApiKey(key)) || '';
+        return (await resolveActiveProjectRefFromApiKey(key, { includeProvisioning: true })) || '';
     } catch {}
     return '';
 }
@@ -239,7 +239,7 @@ async function resolveProjectRefFromHeaderAndHost(ref: string, host: string): Pr
             FROM projects
             WHERE ref = ${ref}
               AND deleted_at IS NULL
-              AND status = 'active'
+              AND lower(status) IN ('active', 'creating')
             LIMIT 1
         `;
         if (
@@ -291,7 +291,7 @@ async function getProjectRef(headers: Record<string, string | undefined>): Promi
                 SELECT ref, config
                 FROM projects
                 WHERE deleted_at IS NULL
-                  AND status = 'active'
+                  AND lower(status) IN ('active', 'creating')
             `;
             const matchedProject = rows.find((row: { ref?: unknown; config?: unknown }) =>
                 matchProjectRefFromHost(host, String(row.ref || ""), row.config),

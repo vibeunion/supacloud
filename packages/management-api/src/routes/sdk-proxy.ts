@@ -8,7 +8,7 @@ import { logger } from "../utils/logger";
 import { backgroundTaskService } from "../services/background-task.service";
 import { edgeFunctionService } from "../services/edge-function.service";
 import { projectService } from "../services/project.service";
-import { matchProjectRefFromHost, resolveTenantPorts } from "../utils/project-routing";
+import { matchProjectRefFromHost, resolveProjectApiHost, resolveTenantPorts } from "../utils/project-routing";
 import { resolveProjectRefFromApiKey } from "../utils/project-auth";
 import { verifyProjectJwtPayload } from "../utils/project-jwt";
 
@@ -52,10 +52,43 @@ function buildEncryptedBackgroundAuth(input: {
     };
 }
 
+function hostFromRequestUrl(request: Request): string {
+    try {
+        return new URL(request.url).host;
+    } catch {
+        return "";
+    }
+}
+
+function hostNameFromHeaderValue(rawHost: string): string {
+    const host = rawHost.split(",")[0].trim();
+    if (!host) return "";
+    try {
+        return new URL(`http://${host}`).hostname.replace(/^\[|\]$/g, "").toLowerCase();
+    } catch {
+        return host.replace(/^\[|\]$/g, "").split(":")[0].toLowerCase();
+    }
+}
+
+function requestHostCandidates(request: Request): string[] {
+    const seen = new Set<string>();
+    const result: string[] = [];
+    for (const rawHost of [
+        request.headers.get('x-forwarded-host'),
+        request.headers.get('host'),
+        hostFromRequestUrl(request),
+    ]) {
+        const host = rawHost?.trim();
+        if (!host || seen.has(host)) continue;
+        seen.add(host);
+        result.push(host);
+    }
+    return result;
+}
+
 function firstForwardedHost(request: Request): string {
-    const forwardedHost = request.headers.get('x-forwarded-host');
-    const rawHost = (forwardedHost || request.headers.get('host') || "").split(",")[0].trim();
-    return rawHost.split(":")[0].toLowerCase();
+    const [rawHost] = requestHostCandidates(request);
+    return rawHost ? hostNameFromHeaderValue(rawHost) : "";
 }
 
 function hostBelongsToBaseDomain(host: string): boolean {
@@ -224,31 +257,30 @@ async function getProjectRef(request: Request): Promise<string> {
     const auth = request.headers.get('authorization') || '';
     const key = request.headers.get('apikey') || '';
     const refHeader = request.headers.get("x-project-ref") || request.headers.get("x-supabase-project") || "";
-    const apiKeyRef = await sdkProxyInternals.resolveProjectRefFromApiKey(key) || '';
+    const apiKeyRef = await sdkProxyInternals.resolveProjectRefFromApiKey(key, { includeProvisioning: true }) || '';
 
     if (apiKeyRef) {
         if (refHeader && refHeader !== apiKeyRef) return '';
+        if (isLoopbackRequestHost(request)) return apiKeyRef;
 
-        const forwardedHost = request.headers.get('x-forwarded-host');
-        const rawHosts = [forwardedHost, request.headers.get('host')].filter(Boolean) as string[];
+        const rawHosts = requestHostCandidates(request);
         for (const rawHost of rawHosts) {
-            const host = rawHost.split(',')[0].trim();
+            const host = hostNameFromHeaderValue(rawHost);
             if (!host) continue;
 
-            if (hostBelongsToBaseDomain(host.split(':')[0].toLowerCase())) {
+            if (hostBelongsToBaseDomain(host)) {
                 const hostRef = host.split('.')[0];
                 if (hostRef && hostRef !== apiKeyRef) return '';
             }
             try {
-                const hostWithoutPort = host.split(':')[0];
                 const rows = await metaSql`
                     SELECT ref, config
                     FROM projects
                     WHERE deleted_at IS NULL
-                      AND status = 'active'
+                      AND lower(status) IN ('active', 'creating')
                 `;
                 const matchedProject = rows.find((row: { ref?: unknown; config?: unknown }) =>
-                    matchProjectRefFromHost(hostWithoutPort, String(row.ref || ""), row.config),
+                    matchProjectRefFromHost(host, String(row.ref || ""), row.config),
                 );
                 if (matchedProject && matchedProject.ref !== apiKeyRef) return '';
             } catch(error: unknown) {
@@ -257,7 +289,7 @@ async function getProjectRef(request: Request): Promise<string> {
                     host,
                     error: error instanceof Error ? error.message : String(error),
                 });
-                if (!hostBelongsToBaseDomain(host.split(':')[0].toLowerCase())) return '';
+                if (!hostBelongsToBaseDomain(host)) return '';
             }
         }
 
@@ -279,11 +311,10 @@ async function getProjectRef(request: Request): Promise<string> {
 }
 
 async function resolveProjectRefFromHeaderAndHost(ref: string, request: Request): Promise<string> {
-    const forwardedHost = request.headers.get('x-forwarded-host');
-    const rawHosts = [forwardedHost, request.headers.get('host')].filter(Boolean) as string[];
+    const rawHosts = requestHostCandidates(request);
 
     for (const rawHost of rawHosts) {
-        const host = rawHost.split(',')[0].trim().split(':')[0];
+        const host = hostNameFromHeaderValue(rawHost);
         if (!host) continue;
 
         if (config.baseDomain && host === `${ref}.api.${config.baseDomain}`) {
@@ -296,13 +327,13 @@ async function resolveProjectRefFromHeaderAndHost(ref: string, request: Request)
                 FROM projects
                 WHERE ref = ${ref}
                   AND deleted_at IS NULL
-                  AND status = 'active'
+                  AND lower(status) IN ('active', 'creating')
                 LIMIT 1
             `;
             if (
                 rows.length > 0 &&
                 rows[0].ref === ref &&
-                matchProjectRefFromHost(host, ref, rows[0].config)
+                (isLoopbackRequestHost(request) || matchProjectRefFromHost(host, ref, rows[0].config))
             ) {
                 return ref;
             }
@@ -339,6 +370,7 @@ async function getTenantPorts(ref: string): Promise<{ gotruePort: number, pgrstP
 type ProxyInterceptors = {
     linkOrigin?: string;
     ref?: string;
+    host?: string;
     extraHeaders?: Record<string, string>;
     timeoutMs?: number;
 };
@@ -359,7 +391,11 @@ async function executeProxy(request: Request, targetUrl: string, interceptors: P
         reqHeaders.delete('x-real-ip');
         
         const url = new URL(request.url);
-        reqHeaders.set('x-forwarded-host', url.host);
+        const upstreamHost = interceptors.host || url.host;
+        if (interceptors.host) {
+            reqHeaders.set('host', upstreamHost);
+        }
+        reqHeaders.set('x-forwarded-host', upstreamHost);
         reqHeaders.set('x-forwarded-proto', url.protocol.replace(':', ''));
         reqHeaders.set('x-forwarded-for', '127.0.0.1');
         
@@ -451,7 +487,7 @@ const sdkProxyRoutesBase = new Elysia({ prefix: "" })
             
             const url = new URL(request.url);
             const targetUrl = `http://127.0.0.1:${ports.gotruePort}${url.pathname.replace(/^\/auth\/v1/, '')}${url.search}`;
-            return executeProxy(request, targetUrl, { linkOrigin: url.origin });
+            return executeProxy(request, targetUrl, { linkOrigin: url.origin, ref, host: resolveProjectApiHost(ref, undefined) });
         };
         return app.get("/*", handler, { detail: { tags: ["sdk-proxy"], summary: "Proxy Auth request" } }).post("/*", handler, { detail: { tags: ["sdk-proxy"], summary: "Proxy Auth request" } }).put("/*", handler, { detail: { tags: ["sdk-proxy"], summary: "Proxy Auth request" } }).patch("/*", handler, { detail: { tags: ["sdk-proxy"], summary: "Proxy Auth request" } }).delete("/*", handler, { detail: { tags: ["sdk-proxy"], summary: "Proxy Auth request" } }).options("/*", handler)
                   .get("", handler, { detail: { tags: ["sdk-proxy"], summary: "Proxy Auth request" } }).post("", handler, { detail: { tags: ["sdk-proxy"], summary: "Proxy Auth request" } }).put("", handler, { detail: { tags: ["sdk-proxy"], summary: "Proxy Auth request" } }).patch("", handler, { detail: { tags: ["sdk-proxy"], summary: "Proxy Auth request" } }).delete("", handler, { detail: { tags: ["sdk-proxy"], summary: "Proxy Auth request" } }).options("", handler);
@@ -468,7 +504,7 @@ const sdkProxyRoutesBase = new Elysia({ prefix: "" })
             if (!targetPath || targetPath === '') targetPath = '/';
             const targetUrl = `http://127.0.0.1:${ports.pgrstPort}${targetPath}${url.search}`;
             const linkOrigin = `${url.protocol}//${url.host}/rest/v1`;
-            return executeProxy(request, targetUrl, { linkOrigin, timeoutMs: config.restProxyTimeoutMs });
+            return executeProxy(request, targetUrl, { linkOrigin, ref, host: resolveProjectApiHost(ref, undefined), timeoutMs: config.restProxyTimeoutMs });
         };
         return app.get("/*", handler, { detail: { tags: ["sdk-proxy"], summary: "Proxy REST request" } }).post("/*", handler, { detail: { tags: ["sdk-proxy"], summary: "Proxy REST request" } }).put("/*", handler, { detail: { tags: ["sdk-proxy"], summary: "Proxy REST request" } }).patch("/*", handler, { detail: { tags: ["sdk-proxy"], summary: "Proxy REST request" } }).delete("/*", handler, { detail: { tags: ["sdk-proxy"], summary: "Proxy REST request" } }).options("/*", handler)
                   .get("", handler, { detail: { tags: ["sdk-proxy"], summary: "Proxy REST request" } }).post("", handler, { detail: { tags: ["sdk-proxy"], summary: "Proxy REST request" } }).put("", handler, { detail: { tags: ["sdk-proxy"], summary: "Proxy REST request" } }).patch("", handler, { detail: { tags: ["sdk-proxy"], summary: "Proxy REST request" } }).delete("", handler, { detail: { tags: ["sdk-proxy"], summary: "Proxy REST request" } }).options("", handler);

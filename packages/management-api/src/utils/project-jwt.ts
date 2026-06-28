@@ -195,14 +195,26 @@ function extractJwtJwksFromConfig(config: unknown): { keys: JWK[] } | null {
 export async function verifyProjectJwtPayload(
   ref: string,
   token: string,
+  options: { includeProvisioning?: boolean } = {},
 ): Promise<ProjectJwtVerification | null> {
   const cleanToken = token.replace(/^Bearer\s+/i, "");
-  const [project] = await metaSql`
-    SELECT jwt_secret, service_role_key, config
-    FROM projects
-    WHERE ref = ${ref} AND deleted_at IS NULL AND lower(status) = 'active'
-    LIMIT 1
-  `;
+  const [project] = options.includeProvisioning
+    ? await metaSql`
+      SELECT jwt_secret, service_role_key, config
+      FROM projects
+      WHERE ref = ${ref}
+        AND deleted_at IS NULL
+        AND lower(status) IN ('active', 'creating')
+      LIMIT 1
+    `
+    : await metaSql`
+      SELECT jwt_secret, service_role_key, config
+      FROM projects
+      WHERE ref = ${ref}
+        AND deleted_at IS NULL
+        AND lower(status) = 'active'
+      LIMIT 1
+    `;
 
   if (!project?.jwt_secret) return null;
   const jwtJwks = extractJwtJwksFromConfig(project.config);
