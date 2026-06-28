@@ -264,6 +264,10 @@ describe("sdkProxyRoutes functions proxy", () => {
       expect(response.status).toBe(200);
       expect(calls).toHaveLength(1);
       expect(calls[0]?.url).toBe("http://127.0.0.1:8361/health");
+      const headers = new Headers(calls[0]?.init?.headers);
+      expect(headers.get("host")).toBe(`proj_1.api.${config.baseDomain}`);
+      expect(headers.get("x-forwarded-host")).toBe(`proj_1.api.${config.baseDomain}`);
+      expect(headers.get("x-project-ref")).toBe("proj_1");
       expect(sdkProxyInternals.resolveProjectRefFromApiKey).toHaveBeenCalledWith("anon", { includeProvisioning: true });
     });
   });
@@ -331,6 +335,44 @@ describe("sdkProxyRoutes functions proxy", () => {
       expect(response.status).toBe(200);
       expect(calls).toHaveLength(1);
       expect(calls[0]?.url).toBe("http://127.0.0.1:8361/health");
+    });
+  });
+
+  test("auth proxy accepts gateway-injected project ref from loopback request URL when apikey lookup misses", async () => {
+    await withSdkProxyTestContext(async ({ calls, trackSpy }) => {
+      trackSpy(
+        spyOn(sdkProxyInternals, "resolveProjectRefFromApiKey").mockResolvedValueOnce(null),
+      );
+      const sqlSpy = trackSpy(spyOn(dbModule, "sql"));
+      sqlSpy.mockImplementation(async (...args: unknown[]) => {
+        const text = String(args[0] ?? "");
+        if (text.includes("SELECT ref")) {
+          return [{ ref: "proj_from_header", config: {} }];
+        }
+        if (text.includes("SELECT config")) {
+          return [{ config: { gotrue_port: 8361, postgrest_port: 7361 } }];
+        }
+        return [];
+      });
+
+      const response = await request("/auth/v1/signup", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          apikey: "unindexed-bootstrap-anon-key",
+          authorization: "Bearer unindexed-bootstrap-anon-key",
+          "x-project-ref": "proj_from_header",
+        },
+        body: JSON.stringify({ email: "invalid", password: "1" }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(calls).toHaveLength(1);
+      expect(calls[0]?.url).toBe("http://127.0.0.1:8361/signup");
+      const headers = new Headers(calls[0]?.init?.headers);
+      expect(headers.get("host")).toBe(`proj_from_header.api.${config.baseDomain}`);
+      expect(headers.get("x-forwarded-host")).toBe(`proj_from_header.api.${config.baseDomain}`);
+      expect(headers.get("x-project-ref")).toBe("proj_from_header");
     });
   });
 
@@ -421,7 +463,8 @@ describe("sdkProxyRoutes functions proxy", () => {
       expect(response.status).toBe(200);
       expect(calls).toHaveLength(1);
       const headers = new Headers(calls[0]?.init?.headers);
-      expect(headers.get("x-forwarded-host")).toBe("localhost");
+      expect(headers.get("host")).toBe(`proj_1.api.${config.baseDomain}`);
+      expect(headers.get("x-forwarded-host")).toBe(`proj_1.api.${config.baseDomain}`);
       expect(headers.get("x-forwarded-proto")).toBe("http");
       expect(headers.get("x-forwarded-for")).toBe("127.0.0.1");
       expect(headers.get("x-real-ip")).toBeNull();
