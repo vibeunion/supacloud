@@ -899,6 +899,10 @@ export async function registerAllRoutes(): Promise<AnyElysia> {
       .use(databaseExtensionRoutes)
       .use(systemExtensionRoutes)
       .use(securityRoutes)
+      // Register the S3-compatible surface before the generic storage API.
+      // Otherwise `/v1/storage/:ref/buckets...` style routes can capture
+      // `/v1/storage/:ref/s3/...` requests first.
+      .use(storageS3Routes)
       .use(storageRoutes)
       .use(projectStorageRoutes)
       .use(scalingRoutes)
@@ -925,7 +929,6 @@ export async function registerAllRoutes(): Promise<AnyElysia> {
       .use(scheduledFunctionRoutes)
       .use(branchRoutes)
       .use(pgMetaRoutes)
-      .use(storageS3Routes)
       .use(autoBranchingRoutes)
       .use(projectRbacRoutes)
       .use(projectWebhookRoutes)

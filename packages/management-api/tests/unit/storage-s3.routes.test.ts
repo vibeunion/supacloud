@@ -36,7 +36,9 @@ const findByRefSpy = spyOn(projectRepository, "findByRef").mockImplementation(mo
 const updateConfigSpy = spyOn(projectRepository, "updateConfig").mockImplementation(mockUpdateConfig as never);
 
 const { storageS3Routes } = await import("../../src/routes/storage-s3");
+const { storageRoutes } = await import("../../src/routes/storage");
 const app = new Elysia().use(storageS3Routes);
+const combinedStorageApp = new Elysia().use(storageS3Routes).use(storageRoutes);
 
 // Helper: build an authenticated request.
 function authedRequest(path: string, init: RequestInit = {}): Promise<Response> {
@@ -211,6 +213,29 @@ describe("storageS3Routes", () => {
     });
     expect(res.status).toBe(200);
     expect(res.headers.get("etag")).toBeTruthy();
+    expect(mockUploadFile).toHaveBeenCalledWith(
+      "testproj",
+      "mybucket",
+      "path/to/file.txt",
+      expect.anything(),
+      "text/plain",
+    );
+  });
+
+  test("S3 routes take precedence when generic storage routes are registered too", async () => {
+    mockUploadFile.mockResolvedValue(true);
+    const res = await combinedStorageApp.handle(
+      new Request("http://localhost/v1/storage/testproj/s3/mybucket/path/to/file.txt", {
+        method: "PUT",
+        body: "hello world",
+        headers: {
+          authorization: "Bearer test-service-key",
+          "content-type": "text/plain",
+        },
+      }),
+    );
+
+    expect(res.status).toBe(200);
     expect(mockUploadFile).toHaveBeenCalledWith(
       "testproj",
       "mybucket",
