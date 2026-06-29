@@ -7,6 +7,10 @@ import { hashPayload, statusForHash } from "../hash";
 import { registerCheck } from "../../services/diagnostics.registry";
 import type { DiagnosticCheckResult, DiagnosticRepairResult } from "../../services/diagnostics.types";
 
+function quotedStringList(values: string[]): string {
+  return values.map((value) => `'${value.replace(/'/g, "''")}'`).join(", ");
+}
+
 // --- Required schema existence ---
 registerCheck({
   id: "project-required-schemas",
@@ -23,10 +27,10 @@ registerCheck({
       const db = getProjectDb(dbName);
 
       const requiredSchemas = ["public", "auth", "storage", "supabase_functions", "supabase_migrations"];
-      const rows = await db`
+      const rows = await db.unsafe(`
         SELECT schema_name FROM information_schema.schemata
-        WHERE schema_name = ANY(${requiredSchemas})
-      `;
+        WHERE schema_name IN (${quotedStringList(requiredSchemas)})
+      `);
       const found = new Set((rows as any[]).map((r) => r.schema_name));
       const missing = requiredSchemas.filter((s) => !found.has(s));
 
@@ -229,10 +233,10 @@ registerCheck({
       const db = getProjectDb(dbName);
 
       const requiredTables = ["users", "sessions", "refresh_tokens", "identities"];
-      const rows = await db`
+      const rows = await db.unsafe(`
         SELECT table_name FROM information_schema.tables
-        WHERE table_schema = 'auth' AND table_name = ANY(${requiredTables})
-      `;
+        WHERE table_schema = 'auth' AND table_name IN (${quotedStringList(requiredTables)})
+      `);
       const found = new Set((rows as any[]).map((r) => r.table_name));
       const missing = requiredTables.filter((t) => !found.has(t));
 

@@ -123,39 +123,47 @@
     </a>
   </nav>
 
-  <div class="p-4 border-t border-border/50 space-y-2 relative overflow-hidden">
+  <div class="p-3 border-t border-border/50 space-y-2 relative overflow-hidden">
     <!-- Subtle glow background at bottom -->
     <div class="absolute -bottom-10 -left-10 w-32 h-32 bg-brand/5 rounded-full blur-3xl pointer-events-none"></div>
 
-    <a
-      href="/platform"
-      class="group flex w-full items-center gap-3 px-3 py-2.5 text-sm font-medium rounded-xl text-brand bg-brand/5 hover:bg-brand/10 transition-all duration-300 hover:shadow-sm"
-    >
-      <Shield fill="currentColor" strokeWidth={1.5} class="w-4 h-4 group-hover:scale-110 transition-transform" />
-      <span>{$t("Sidebar.platform_admin")}</span>
-    </a>
-    <button
-      onclick={(e) => { e.preventDefault(); toggleMode(); }}
-      class="flex w-full items-center gap-3 px-3 py-2.5 text-sm font-medium rounded-xl text-muted-foreground hover:bg-secondary/50 hover:text-foreground transition-all duration-300"
-    >
-      <SunMoon class="w-4 h-4" />
-      <span>{themeToggleLabel}</span>
-    </button>
-    <button
-      onclick={(e) => { e.preventDefault(); toggleLanguage(); }}
-      class="flex w-full items-center gap-3 px-3 py-2.5 text-sm font-medium rounded-xl text-muted-foreground hover:bg-secondary/50 hover:text-foreground transition-all duration-300"
-    >
-      <Languages class="w-4 h-4" />
-      <span>{isZhLocale($locale) ? "English" : ($t("Common.chinese") || "中文")}</span>
-    </button>
+    <div class="grid grid-cols-[1fr_40px_40px] gap-1.5">
+      <a
+        href="/platform"
+        class="group flex min-w-0 items-center gap-2 rounded-lg bg-brand/5 px-2.5 py-2 text-xs font-semibold text-brand transition-colors hover:bg-brand/10"
+        title={$t("Sidebar.platform_admin")}
+        aria-label={$t("Sidebar.platform_admin")}
+      >
+        <Shield fill="currentColor" strokeWidth={1.5} class="h-4 w-4 shrink-0 transition-transform group-hover:scale-105" />
+        <span class="truncate">{$t("Sidebar.platform_admin")}</span>
+      </a>
+      <button
+        type="button"
+        onclick={(e) => { e.preventDefault(); toggleMode(); }}
+        class="flex h-9 w-10 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground"
+        title={themeToggleLabel}
+        aria-label={themeToggleLabel}
+      >
+        <SunMoon class="h-4 w-4" />
+      </button>
+      <button
+        type="button"
+        onclick={(e) => { e.preventDefault(); toggleLanguage(); }}
+        class="flex h-9 w-10 items-center justify-center rounded-lg text-xs font-bold text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground"
+        title={isZhLocale($locale) ? "English" : ($t("Common.chinese") || "中文")}
+        aria-label={isZhLocale($locale) ? "English" : ($t("Common.chinese") || "中文")}
+      >
+        {isZhLocale($locale) ? "EN" : "中"}
+      </button>
+    </div>
 
-    <div class="flex items-center gap-3 px-3 py-3 mt-1 bg-secondary/30 rounded-xl border border-border/30">
-      <div class="w-8 h-8 rounded-full bg-gradient-to-tr from-brand to-emerald-400 flex items-center justify-center text-white font-bold text-xs shadow-inner">
+    <div class="flex items-center gap-2 px-2.5 py-2 bg-secondary/30 rounded-lg border border-border/30">
+      <div class="w-7 h-7 shrink-0 rounded-full bg-gradient-to-tr from-brand to-emerald-400 flex items-center justify-center text-white font-bold text-[11px] shadow-inner">
         SC
       </div>
       <div class="flex flex-col flex-1 min-w-0">
-        <span class="text-sm font-semibold truncate text-foreground">Admin User</span>
-        <span class="text-[10px] text-muted-foreground truncate opacity-80">admin@supacloud.local</span>
+        <span class="text-xs font-semibold truncate text-foreground">Admin User</span>
+        <span class="text-[10px] leading-tight text-muted-foreground truncate opacity-80">admin@supacloud.local</span>
       </div>
     </div>
   </div>

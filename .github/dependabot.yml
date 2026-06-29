@@ -47,3 +47,21 @@ updates:
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
+
+  - package-ecosystem: "docker"
+    directories:
+      - "/docker/self-host"
+      - "/docker/self-host/postgres"
+      - "/packages/edge-runtime"
+      - "/packages/management-api"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: "docker-compose"
+    directories:
+      - "/docker/dev"
+      - "/docker/self-host"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
