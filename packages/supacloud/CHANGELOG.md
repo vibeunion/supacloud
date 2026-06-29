@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.0](https://github.com/zuohuadong/supacloud/compare/supacloud-v0.2.0...supacloud-v0.3.0) (2026-06-29)
+
+
+### Features
+
+* **supacloud:** auto-update cli dispatcher ([f73e15c](https://github.com/zuohuadong/supacloud/commit/f73e15ca7bbb477f0070d967f2beb06a54e46777))
+* **supacloud:** auto-update cli dispatcher ([89f98ea](https://github.com/zuohuadong/supacloud/commit/89f98ea33c7eae6940d9b0770c6019927a0bd4cb))
+
 ## [0.2.0](https://github.com/zuohuadong/supacloud/compare/supacloud-v0.1.0...supacloud-v0.2.0) (2026-06-28)
 
 

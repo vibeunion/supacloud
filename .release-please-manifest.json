@@ -5,5 +5,5 @@
   "packages/supacloud-js": "0.18.3",
   "packages/cli": "0.8.0",
   "packages/admin": "0.2.0",
-  "packages/supacloud": "0.2.0"
+  "packages/supacloud": "0.3.0"
 }
