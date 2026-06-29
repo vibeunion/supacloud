@@ -460,6 +460,11 @@
     "subtitle": "Manage realtime channels and connections.",
     "loading": "Loading realtime channels..."
   },
+  "ProjectLogs": {
+    "subtitle": "View recent project service logs from Auth, PostgREST, Realtime, Storage, and database units.",
+    "loading": "Loading logs...",
+    "empty": "No logs found for the selected service."
+  },
   "Common": {
     "save": "Save",
     "cancel": "Cancel",
@@ -583,7 +588,8 @@
     "logging_in": "Signing in...",
     "error_empty": "Please enter username and password",
     "default_credentials": "Default Credentials",
-    "env_modify_hint": "Can be modified via STUDIO_USERNAME / STUDIO_PASSWORD env variables",
+    "credentials_hint_title": "Use the Dashboard credentials configured during installation",
+    "env_modify_hint": "Can be modified via DASHBOARD_USERNAME / DASHBOARD_PASSWORD or STUDIO_USERNAME / STUDIO_PASSWORD env variables",
     "redirecting": "Redirecting..."
   },
   "PlatformExtensions": {

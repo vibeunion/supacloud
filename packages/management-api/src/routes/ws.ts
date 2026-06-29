@@ -22,6 +22,19 @@ const MAX_CONNECTIONS_PER_PROJECT = 200;
 const MAX_BROADCAST_SIZE = 1024 * 1024;
 const projectConnectionCounts = new Map<string, number>();
 
+type TaskSocketData = {
+  request?: Request;
+  __clientId?: string;
+  __authToken?: string;
+  __isAdmin?: boolean;
+};
+
+type TaskSocket = {
+  data: TaskSocketData;
+  send: (data: string) => unknown;
+  close: (code?: number, reason?: string) => unknown;
+};
+
 /** Broadcast a task update to all connected WebSocket clients */
 export function broadcastTaskUpdate(event: {
   taskId: string;
@@ -57,6 +70,102 @@ export function broadcastSystemEvent(event: { type: string; message: string; dat
 /** Get count of active WebSocket connections */
 export function getWsConnectionCount(): number {
   return taskSubscribers.size;
+}
+
+function parseTaskSocketMessage(message: unknown): Record<string, unknown> | null {
+  if (typeof message === "string") {
+    try {
+      const parsed = JSON.parse(message);
+      return parsed && typeof parsed === "object" ? parsed as Record<string, unknown> : null;
+    } catch {
+      return null;
+    }
+  }
+  return message && typeof message === "object" ? message as Record<string, unknown> : null;
+}
+
+export async function openTaskWebSocket(ws: TaskSocket) {
+  const id = `ws-${++clientIdCounter}`;
+  const url = new URL(ws.data.request?.url || "http://localhost", "http://localhost");
+  const projectFilter = url.searchParams.get("project") || undefined;
+  const token = url.searchParams.get("token") || "";
+
+  if (!token) {
+    ws.close(1008, "Authentication token required");
+    return;
+  }
+
+  const authUrl = new URL(url.toString());
+  if (projectFilter) {
+    authUrl.pathname = `/v1/projects/${projectFilter}`;
+  }
+  const authRequest = new Request(authUrl.toString(), {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const auth = await getAuthContext(authRequest);
+  if ("status" in auth) {
+    ws.close(auth.status === 403 ? 1008 : 1002, auth.body.error);
+    return;
+  }
+
+  const isAdmin = auth.role === "master" || auth.role === "admin";
+  if (!projectFilter && !isAdmin) {
+    ws.close(1008, "Project filter required for non-admin websocket sessions");
+    return;
+  }
+
+  ws.data.__clientId = id;
+  ws.data.__authToken = token;
+  ws.data.__isAdmin = isAdmin;
+
+  taskSubscribers.set(id, {
+    id,
+    projectFilter,
+    send: (data: string) => ws.send(data),
+  });
+
+  ws.send(JSON.stringify({
+    type: "connected",
+    clientId: id,
+    projectFilter: projectFilter || "all",
+    timestamp: new Date().toISOString(),
+  }));
+
+  logger.info(`[WS] Client ${id} connected (filter: ${projectFilter || "all"}, total: ${taskSubscribers.size})`);
+}
+
+export async function messageTaskWebSocket(ws: TaskSocket, message: unknown) {
+  const msg = parseTaskSocketMessage(message);
+  if (!msg || msg.type !== "subscribe" || typeof msg.projectRef !== "string") return;
+
+  const clientId = ws.data.__clientId;
+  const client = clientId ? taskSubscribers.get(clientId) : undefined;
+  if (!client) return;
+
+  const isAdmin = ws.data.__isAdmin === true;
+  if (!isAdmin) {
+    const token = ws.data.__authToken || "";
+    const authUrl = new URL(`http://localhost/v1/projects/${msg.projectRef}`);
+    const authRequest = new Request(authUrl.toString(), {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const authError = await checkAuth(authRequest);
+    if (authError) {
+      ws.send(JSON.stringify({ type: "error", message: `No access to project ${msg.projectRef}` }));
+      return;
+    }
+  }
+
+  client.projectFilter = msg.projectRef;
+  ws.send(JSON.stringify({ type: "subscribed", projectRef: msg.projectRef }));
+}
+
+export function closeTaskWebSocket(ws: TaskSocket) {
+  const clientId = ws.data.__clientId;
+  if (clientId) {
+    taskSubscribers.delete(clientId);
+    logger.info(`[WS] Client ${clientId} disconnected (total: ${taskSubscribers.size})`);
+  }
 }
 
 export const wsRoutes = new Elysia({ prefix: "/ws" })
@@ -106,92 +215,15 @@ export const wsRoutes = new Elysia({ prefix: "/ws" })
       projectRef: t.Optional(t.String()),
     })),
     async open(ws) {
-      const id = `ws-${++clientIdCounter}`;
-      const url = new URL(ws.data.request?.url || "http://localhost", "http://localhost");
-      const projectFilter = url.searchParams.get("project") || undefined;
-      const token = url.searchParams.get("token") || "";
-
-      if (!token) {
-        ws.close(1008, "Authentication token required");
-        return;
-      }
-
-      const authUrl = new URL(url.toString());
-      if (projectFilter) {
-        authUrl.pathname = `/v1/projects/${projectFilter}`;
-      }
-      const authRequest = new Request(authUrl.toString(), {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const auth = await getAuthContext(authRequest);
-      if ("status" in auth) {
-        ws.close(auth.status === 403 ? 1008 : 1002, auth.body.error);
-        return;
-      }
-
-      const isAdmin = auth.role === "master" || auth.role === "admin";
-      if (!projectFilter && !isAdmin) {
-        ws.close(1008, "Project filter required for non-admin websocket sessions");
-        return;
-      }
-
-      (ws.data as Record<string, unknown>).__clientId = id;
-      (ws.data as Record<string, unknown>).__authToken = token;
-      (ws.data as Record<string, unknown>).__isAdmin = isAdmin;
-
-      taskSubscribers.set(id, {
-        id,
-        projectFilter,
-        send: (data: string) => ws.send(data),
-      });
-
-      ws.send(JSON.stringify({
-        type: "connected",
-        clientId: id,
-        projectFilter: projectFilter || "all",
-        timestamp: new Date().toISOString(),
-      }));
-
-      logger.info(`[WS] Client ${id} connected (filter: ${projectFilter || "all"}, total: ${taskSubscribers.size})`);
+      await openTaskWebSocket(ws as unknown as TaskSocket);
     },
 
-    message(ws, message) {
-      if (typeof message === "object" && message !== null) {
-        const msg = message as Record<string, unknown>;
-        if (msg.type === "subscribe" && typeof msg.projectRef === "string") {
-          const clientId = (ws.data as Record<string, unknown>).__clientId as string;
-          const client = clientId ? taskSubscribers.get(clientId) : undefined;
-          if (client) {
-            const isAdmin = (ws.data as Record<string, unknown>).__isAdmin as boolean;
-            if (!isAdmin) {
-              const token = (ws.data as Record<string, unknown>).__authToken as string;
-              const authUrl = new URL(`http://localhost/v1/projects/${msg.projectRef}`);
-              const authRequest = new Request(authUrl.toString(), {
-                headers: { Authorization: `Bearer ${token}` },
-              });
-              checkAuth(authRequest).then((authError) => {
-                if (authError) {
-                  ws.send(JSON.stringify({ type: "error", message: `No access to project ${msg.projectRef}` }));
-                } else {
-                  client.projectFilter = msg.projectRef as string;
-                  ws.send(JSON.stringify({ type: "subscribed", projectRef: msg.projectRef }));
-                }
-              });
-              return;
-            }
-            client.projectFilter = msg.projectRef as string;
-            ws.send(JSON.stringify({ type: "subscribed", projectRef: msg.projectRef }));
-          }
-        }
-      }
+    async message(ws, message) {
+      await messageTaskWebSocket(ws as unknown as TaskSocket, message);
     },
 
     close(ws) {
-      const clientId = (ws.data as Record<string, unknown>).__clientId as string;
-      if (clientId) {
-        taskSubscribers.delete(clientId);
-        logger.info(`[WS] Client ${clientId} disconnected (total: ${taskSubscribers.size})`);
-      }
+      closeTaskWebSocket(ws as unknown as TaskSocket);
     },
   })
   

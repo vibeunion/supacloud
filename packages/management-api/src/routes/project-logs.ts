@@ -1,6 +1,5 @@
 import { Elysia, t, status } from "elysia";
 import { projectService } from "../services";
-import { $ } from "bun";
 import { logger } from "../utils/logger";
 
 const activeStreams = new Map<string, number>();
@@ -10,8 +9,10 @@ function getUnits(ref: string, service?: string): string[] {
     const all = [
         `supacloud-gotrue@${ref}`,
         `supacloud-pgrst@${ref}`,
+        `supacloud-postgres@${ref}`,
         "supacloud-realtime",
         `supacloud-storage@${ref}`,
+        "supacloud-caddy",
     ];
     if (!service || service === "all") return all;
     const map: Record<string, string> = {
@@ -19,8 +20,11 @@ function getUnits(ref: string, service?: string): string[] {
         gotrue: `supacloud-gotrue@${ref}`,
         api: `supacloud-pgrst@${ref}`,
         postgrest: `supacloud-pgrst@${ref}`,
+        database: `supacloud-postgres@${ref}`,
+        db: `supacloud-postgres@${ref}`,
         realtime: "supacloud-realtime",
         storage: `supacloud-storage@${ref}`,
+        caddy: "supacloud-caddy",
     };
     const unit = map[service];
     return unit ? [unit] : all;
@@ -36,9 +40,15 @@ export const projectLogsRoutes = new Elysia({ prefix: "/v1/projects/:ref/logs" }
             }
 
             try {
-                const limit = query.limit || "200";
-                const result = await $`journalctl -u supacloud-gotrue@${params.ref} -u supacloud-pgrst@${params.ref} -u supacloud-postgres@${params.ref} -u supacloud-realtime -u supacloud-storage@${params.ref} -u supacloud-caddy -n ${limit} --output short-iso --no-pager`.nothrow().quiet();
-                const output = result.text();
+                const limit = Math.max(1, Math.min(1000, Number.parseInt(query.limit || "200", 10) || 200));
+                const units = getUnits(params.ref, query.service);
+                const unitArgs = units.flatMap(u => ["-u", u]);
+                const proc = Bun.spawn(
+                    ["journalctl", ...unitArgs, "-n", String(limit), "--output", "short-iso", "--no-pager"],
+                    { stdout: "pipe", stderr: "ignore" },
+                );
+                const output = await new Response(proc.stdout).text();
+                await proc.exited;
                 const lines = output.split('\n').filter(line => line.trim() !== '' && !line.startsWith('-- '));
 
                 const parsedLogs = lines.map((line, idx) => {
@@ -65,7 +75,7 @@ export const projectLogsRoutes = new Elysia({ prefix: "/v1/projects/:ref/logs" }
                     result: parsedLogs,
                     pagination: {
                         offset: 0,
-                        limit: parseInt(limit) || 200,
+                        limit,
                         total: parsedLogs.length,
                     },
                 };

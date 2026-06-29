@@ -233,7 +233,7 @@ class PostgrestRuntimeController {
 
         try {
             const res = await fetch(`http://127.0.0.1:${port}/`);
-            if (res.ok) {
+            if (res.status < 500) {
                 return { actual: "running", health: "healthy", last_error: null };
             }
             return {
@@ -2561,6 +2561,20 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
         return "INACTIVE";
     }
 
+    /** Check Realtime health: prefer systemd, then container HTTP healthcheck fallback */
+    private async checkRealtimeHealth(): Promise<string> {
+        const systemdResult = await this.checkSystemService("supacloud-realtime");
+        if (systemdResult === "ACTIVE_HEALTHY") return "ACTIVE_HEALTHY";
+
+        try {
+            const healthUrl = new URL("/healthcheck", config.realtimeAdminUrl);
+            const res = await fetch(healthUrl, { signal: AbortSignal.timeout(3000) });
+            if (res.status < 500) return "ACTIVE_HEALTHY";
+        } catch { /* ignore */ }
+
+        return "INACTIVE";
+    }
+
     private systemServiceEntry(ref: string, id: string, name: string, status: string): ProjectServiceStatus {
         const normalized = status === "ACTIVE_HEALTHY" ? "ACTIVE_HEALTHY" : status === "COMING_UP" ? "COMING_UP" : "UNHEALTHY";
         return {
@@ -2602,6 +2616,10 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
             ...serviceDefs.filter(s => s.id !== "db" && s.id !== "storage" && s.id !== "postgresql")
                 .map(async (service) => {
                     const systemdStatus = await this.checkSystemService(service.unit);
+                    if (service.id === "realtime") {
+                        const realtimeStatus = await this.checkRealtimeHealth();
+                        if (realtimeStatus === "ACTIVE_HEALTHY") return realtimeStatus;
+                    }
                     const containerName = "container" in service ? service.container : undefined;
                     if (systemdStatus === "ACTIVE_HEALTHY" || typeof containerName !== "string") {
                         return systemdStatus;

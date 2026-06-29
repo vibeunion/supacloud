@@ -13,60 +13,81 @@
     table_name: string;
     detail: string;
     fix_sql: string;
+    column_name?: string;
   }
+
+  type RawLintIssue = Omit<LintIssue, "fix_sql">;
 
   const projectRef = $derived(page.params.ref);
 
   const LINT_SQL = `
-    -- 1. Tables without primary key
-    SELECT 
+    SELECT
       'no_primary_key' as type, 'danger' as severity,
       t.table_schema, t.table_name,
-      'Table has no primary key' as detail,
-      'ALTER TABLE ' || t.table_schema || '.' || t.table_name || ' ADD COLUMN id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY;' as fix_sql
+      null::text as column_name,
+      'Table has no primary key' as detail
     FROM information_schema.tables t
-    LEFT JOIN information_schema.table_constraints tc 
+    LEFT JOIN information_schema.table_constraints tc
       ON tc.table_schema = t.table_schema AND tc.table_name = t.table_name AND tc.constraint_type = 'PRIMARY KEY'
     WHERE t.table_schema = 'public' AND t.table_type = 'BASE TABLE' AND tc.constraint_name IS NULL
 
     UNION ALL
 
-    -- 2. Tables without RLS enabled
-    SELECT 
+    SELECT
       'no_rls' as type, 'warning' as severity,
       schemaname as table_schema, tablename as table_name,
-      'Row Level Security is not enabled' as detail,
-      'ALTER TABLE ' || schemaname || '.' || tablename || ' ENABLE ROW LEVEL SECURITY;' as fix_sql
+      null::text as column_name,
+      'Row Level Security is not enabled' as detail
     FROM pg_tables
     WHERE schemaname = 'public'
       AND NOT EXISTS (
-        SELECT 1 FROM pg_class c 
-        JOIN pg_namespace n ON n.oid = c.relnamespace 
-        WHERE n.nspname = pg_tables.schemaname 
-          AND c.relname = pg_tables.tablename 
+        SELECT 1 FROM pg_class c
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = pg_tables.schemaname
+          AND c.relname = pg_tables.tablename
           AND c.relrowsecurity = true
       )
 
     UNION ALL
 
-    -- 3. Foreign keys without indexes
-    SELECT 
+    SELECT
       'no_index_on_fk' as type, 'info' as severity,
       tc.table_schema, tc.table_name,
-      'Foreign key column "' || kcu.column_name || '" has no index' as detail,
-      'CREATE INDEX ON ' || tc.table_schema || '.' || tc.table_name || ' (' || kcu.column_name || ');' as fix_sql
+      kcu.column_name,
+      'Foreign key column "' || kcu.column_name || '" has no index' as detail
     FROM information_schema.table_constraints tc
-    JOIN information_schema.key_column_usage kcu 
+    JOIN information_schema.key_column_usage kcu
       ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema
     WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_schema = 'public'
       AND NOT EXISTS (
-        SELECT 1 FROM pg_indexes pi 
-        WHERE pi.schemaname = tc.table_schema 
-          AND pi.tablename = tc.table_name 
+        SELECT 1 FROM pg_indexes pi
+        WHERE pi.schemaname = tc.table_schema
+          AND pi.tablename = tc.table_name
           AND pi.indexdef LIKE '%' || kcu.column_name || '%'
       )
     ORDER BY severity, type, table_name;
   `;
+
+  function quoteIdent(identifier: string): string {
+    return `"${identifier.replaceAll('"', '""')}"`;
+  }
+
+  function qualifiedTable(issue: RawLintIssue): string {
+    return `${quoteIdent(issue.table_schema)}.${quoteIdent(issue.table_name)}`;
+  }
+
+  function buildFixSql(issue: RawLintIssue): string {
+    if (issue.type === "no_primary_key") {
+      return `ALTER TABLE ${qualifiedTable(issue)} ADD COLUMN id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY;`;
+    }
+    if (issue.type === "no_rls") {
+      return `ALTER TABLE ${qualifiedTable(issue)} ENABLE ROW LEVEL SECURITY;`;
+    }
+    if (issue.type === "no_index_on_fk" && issue.column_name) {
+      return `CREATE INDEX ON ${qualifiedTable(issue)} (${quoteIdent(issue.column_name)});`;
+    }
+    return "";
+  }
 
   const lintQuery = createQuery(() => ({
     queryKey: ["database-lint", projectRef],
@@ -77,8 +98,11 @@
         body: JSON.stringify({ sql: LINT_SQL })
       });
       const data = await res.json();
-      if (data.error) throw new Error(data.message || data.error);
-      return (data.rows || []) as LintIssue[];
+      if (!res.ok || data.error) throw new Error(data.message || data.error || "Database linter query failed");
+      return ((data.rows || []) as RawLintIssue[]).map((issue) => ({
+        ...issue,
+        fix_sql: buildFixSql(issue)
+      }));
     }
   }));
 
@@ -140,7 +164,7 @@
         <p class="text-sm font-medium">{$t("DatabaseLinter.no_issues")}</p>
       </div>
     {:else}
-      {#each issues as issue}
+      {#each issues as issue (`${issue.type}-${issue.table_schema}-${issue.table_name}-${issue.column_name || ""}`)}
         <div class="rounded-lg border {getSeverityColor(issue.severity)} p-4 transition-all hover:shadow-sm">
           <div class="flex items-start justify-between gap-4">
             <div class="flex items-start gap-3 flex-1">
