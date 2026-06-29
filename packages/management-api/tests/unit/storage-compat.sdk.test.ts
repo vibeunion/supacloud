@@ -245,6 +245,65 @@ describe("storageCompatRoutes supabase-js compatibility", () => {
     downloadSpy.mockRestore();
   });
 
+  test("allows project-scoped storage requests while a new project is provisioning", async () => {
+    const sqlSpy = spyOn(dbModule, "sql");
+    let sawProvisioningStatuses = false;
+    sqlSpy.mockImplementation(async (...args: unknown[]) => {
+      const text = String(args[0] ?? "");
+      if (text.includes("anon_key") || text.includes("service_role_key")) {
+        sawProvisioningStatuses = text.includes("lower(status) IN ('active', 'creating')");
+        return [{ ref: "provisioning_ref" }];
+      }
+      return [];
+    });
+
+    const bucketSpy = spyOn(StorageRLS, "listLogicalBuckets").mockResolvedValue([]);
+
+    const res = await request("/storage/v1/bucket", {
+      headers: {
+        apikey: "service-role-key-for-provisioning-project",
+        authorization: "Bearer service-role-key-for-provisioning-project",
+        "x-project-ref": "provisioning_ref",
+      },
+    });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual([]);
+    expect(sawProvisioningStatuses).toBe(true);
+    expect(bucketSpy).toHaveBeenCalledWith("provisioning_ref", "Bearer service-role-key-for-provisioning-project", expect.any(Object));
+    sqlSpy.mockRestore();
+    bucketSpy.mockRestore();
+  });
+
+  test("allows provisioning project refs from trusted loopback storage headers", async () => {
+    const sqlSpy = spyOn(dbModule, "sql");
+    let sawProvisioningStatuses = false;
+    sqlSpy.mockImplementation(async (...args: unknown[]) => {
+      const text = String(args[0] ?? "");
+      if (text.includes("FROM projects")) {
+        sawProvisioningStatuses = text.includes("lower(status) IN ('active', 'creating')");
+        return [{ ref: "provisioning_header_ref", config: {} }];
+      }
+      return [];
+    });
+
+    const bucketSpy = spyOn(StorageRLS, "listLogicalBuckets").mockResolvedValue([]);
+
+    const res = await request("/storage/v1/bucket", {
+      headers: {
+        host: "127.0.0.1:9090",
+        "x-project-ref": "provisioning_header_ref",
+      },
+    });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual([]);
+    expect(sawProvisioningStatuses).toBe(true);
+    expect(bucketSpy).toHaveBeenCalledWith("provisioning_header_ref", undefined, expect.any(Object));
+    sqlSpy.mockRestore();
+    bucketSpy.mockRestore();
+  });
+
   test("public downloads prefer stored object mimetype when backend returns octet-stream", async () => {
     mockObjects.set("avatars/folder/cat.png", {
       metadata: { size: 3, mimetype: "image/png" },

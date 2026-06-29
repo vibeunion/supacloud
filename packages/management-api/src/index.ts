@@ -30,6 +30,7 @@ import { isFrontendDomain } from "./utils/frontend-domains";
 import { isCaddyRouteDomain, isCaddyTlsBlockedDomain, normalizeCaddyHost } from "./utils/caddy-domains";
 import { grafanaProxyRoutes } from "./routes/grafana";
 import { closeTaskWebSocket, messageTaskWebSocket, openTaskWebSocket } from "./routes/ws";
+import { isS3DataPlaneRequest } from "./utils/storage-s3-paths";
 
 const WEB_CONSOLE_CURRENT_DIR = "/opt/supacloud/web-console/current";
 const WEB_CONSOLE_LEGACY_DIR = "/opt/supacloud/packages/web-console/build";
@@ -853,13 +854,15 @@ export async function registerAllRoutes(): Promise<AnyElysia> {
           return rateLimit.body;
         }
 
-        const result = await checkAuth(request);
-        if (result) {
-          set.status = result.status;
-          if (shouldAuditRequest(request)) {
-            await logAuditEvent({ request, status: result.status, action: "auth_denied" });
+        if (!isS3DataPlaneRequest(request)) {
+          const result = await checkAuth(request);
+          if (result) {
+            set.status = result.status;
+            if (shouldAuditRequest(request)) {
+              await logAuditEvent({ request, status: result.status, action: "auth_denied" });
+            }
+            return { message: result.body.error, code: String(result.status) };
           }
-          return { message: result.body.error, code: String(result.status) };
         }
       })
       .onAfterHandle(async ({ request, set }) => {
@@ -902,6 +905,10 @@ export async function registerAllRoutes(): Promise<AnyElysia> {
       .use(databaseExtensionRoutes)
       .use(systemExtensionRoutes)
       .use(securityRoutes)
+      // Register the S3-compatible surface before the generic storage API.
+      // Otherwise `/v1/storage/:ref/buckets...` style routes can capture
+      // `/v1/storage/:ref/s3/...` requests first.
+      .use(storageS3Routes)
       .use(storageRoutes)
       .use(projectStorageRoutes)
       .use(scalingRoutes)
@@ -928,7 +935,6 @@ export async function registerAllRoutes(): Promise<AnyElysia> {
       .use(scheduledFunctionRoutes)
       .use(branchRoutes)
       .use(pgMetaRoutes)
-      .use(storageS3Routes)
       .use(autoBranchingRoutes)
       .use(projectRbacRoutes)
       .use(projectWebhookRoutes)

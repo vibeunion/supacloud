@@ -1,5 +1,54 @@
 # Changelog
 
+## [0.37.8](https://github.com/zuohuadong/supacloud/compare/management-api-v0.37.7...management-api-v0.37.8) (2026-06-29)
+
+
+### Bug Fixes
+
+* **runtime:** update companion binary download versions ([d88232f](https://github.com/zuohuadong/supacloud/commit/d88232f2fd244d510b20006f0094e5367d4c79b2))
+
+## [0.37.7](https://github.com/zuohuadong/supacloud/compare/management-api-v0.37.6...management-api-v0.37.7) (2026-06-28)
+
+
+### Miscellaneous Chores
+
+* **deps:** bump @svadmin/core from 0.30.0 to 0.31.0 in /packages/management-api ([ce0fb94](https://github.com/zuohuadong/supacloud/commit/ce0fb94ada57fda8b99b7baa131e0d3ac5d05227))
+
+## [0.37.6](https://github.com/zuohuadong/supacloud/compare/management-api-v0.37.5...management-api-v0.37.6) (2026-06-28)
+
+
+### Bug Fixes
+
+* **auth:** repair tenant auth schema ownership ([e4e18c0](https://github.com/zuohuadong/supacloud/commit/e4e18c0fd4eb30b2a14e6a4a2c6b9bd86b5ec119))
+
+## [0.37.5](https://github.com/zuohuadong/supacloud/compare/management-api-v0.37.4...management-api-v0.37.5) (2026-06-28)
+
+
+### Bug Fixes
+
+* **storage:** let S3 SigV4 bypass API bearer guard ([f2a5c7c](https://github.com/zuohuadong/supacloud/commit/f2a5c7c1979d6c9ba668842cd0d7fbe2f555e59f))
+
+## [0.37.4](https://github.com/zuohuadong/supacloud/compare/management-api-v0.37.3...management-api-v0.37.4) (2026-06-28)
+
+
+### Bug Fixes
+
+* **storage:** prioritize S3 compatibility routes ([e3b57d3](https://github.com/zuohuadong/supacloud/commit/e3b57d3d6a8576477e733ad979595d1feccac5d3))
+
+## [0.37.3](https://github.com/zuohuadong/supacloud/compare/management-api-v0.37.2...management-api-v0.37.3) (2026-06-28)
+
+
+### Bug Fixes
+
+* **storage:** allow provisioning projects to bootstrap objects ([6275415](https://github.com/zuohuadong/supacloud/commit/62754158d6612e7ccd53f97faa253e88fcba7afb))
+
+## [0.37.2](https://github.com/zuohuadong/supacloud/compare/management-api-v0.37.1...management-api-v0.37.2) (2026-06-25)
+
+
+### Bug Fixes
+
+* **management-api:** support generic postgres health ([51e23a1](https://github.com/zuohuadong/supacloud/commit/51e23a15c0e2291380cf5bbe19207787d3aa5092))
+
 ## [0.37.1](https://github.com/zuohuadong/supacloud/compare/management-api-v0.37.0...management-api-v0.37.1) (2026-06-24)
 
 

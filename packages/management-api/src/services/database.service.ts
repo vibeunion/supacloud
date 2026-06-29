@@ -24,6 +24,76 @@ function pgEscapePassword(password: string): string {
   return `$${tag}$${password}$${tag}$`;
 }
 
+export function renderAuthSchemaOwnershipSql(authOwner = "supabase_auth_admin"): string {
+  assertValidIdentifier("authOwner", authOwner);
+  const owner = `"${authOwner}"`;
+  return `
+ALTER SCHEMA auth OWNER TO ${owner};
+
+DO $$
+DECLARE
+  auth_object RECORD;
+  alter_kind TEXT;
+BEGIN
+  FOR auth_object IN
+    SELECT c.relkind, n.nspname, c.relname
+    FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = 'auth'
+      AND c.relkind IN ('r', 'p', 'S', 'v', 'm', 'f')
+      AND NOT (
+        c.relkind = 'S'
+        AND EXISTS (
+          SELECT 1
+          FROM pg_depend d
+          WHERE d.classid = 'pg_class'::regclass
+            AND d.objid = c.oid
+            AND d.deptype = 'a'
+        )
+      )
+  LOOP
+    alter_kind := CASE auth_object.relkind
+      WHEN 'S' THEN 'SEQUENCE'
+      WHEN 'v' THEN 'VIEW'
+      WHEN 'm' THEN 'MATERIALIZED VIEW'
+      WHEN 'f' THEN 'FOREIGN TABLE'
+      ELSE 'TABLE'
+    END;
+    EXECUTE format('ALTER %s %I.%I OWNER TO ${owner}', alter_kind, auth_object.nspname, auth_object.relname);
+  END LOOP;
+END $$;
+
+DO $$
+DECLARE
+  auth_function RECORD;
+BEGIN
+  FOR auth_function IN
+    SELECT n.nspname, p.proname, pg_get_function_identity_arguments(p.oid) AS args
+    FROM pg_proc p
+    JOIN pg_namespace n ON n.oid = p.pronamespace
+    WHERE n.nspname = 'auth'
+  LOOP
+    EXECUTE format('ALTER FUNCTION %I.%I(%s) OWNER TO ${owner}', auth_function.nspname, auth_function.proname, auth_function.args);
+  END LOOP;
+END $$;
+
+DO $$
+DECLARE
+  auth_type RECORD;
+BEGIN
+  FOR auth_type IN
+    SELECT n.nspname, t.typname
+    FROM pg_type t
+    JOIN pg_namespace n ON n.oid = t.typnamespace
+    WHERE n.nspname = 'auth'
+      AND t.typtype IN ('d', 'e')
+  LOOP
+    EXECUTE format('ALTER TYPE %I.%I OWNER TO ${owner}', auth_type.nspname, auth_type.typname);
+  END LOOP;
+END $$;
+`;
+}
+
 export class DatabaseService {
   private readonly PG_HOST = config.pgHost;
   private readonly PG_PORT = config.pgPort;
@@ -323,6 +393,7 @@ export class DatabaseService {
       try {
         const schemaSql = await this.loadSupabaseSchema();
         await tenantDb.unsafe(schemaSql);
+        await tenantDb.unsafe(renderAuthSchemaOwnershipSql());
         logger.info(
           `[services/database.service] Successfully applied supabase.sql to tenant ${dbName}`,
         );

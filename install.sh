@@ -2560,19 +2560,20 @@ EOF
     if [[ ! -x "$GOTRUE_BIN" ]]; then
         local GOTRUE_VERSION="${GOTRUE_VERSION:-v2.191.0}"
         local GOTRUE_ARCH
+        local GOTRUE_EXT="tar.xz"
         GOTRUE_ARCH=$(uname -m)
         case "$GOTRUE_ARCH" in
-            x86_64) GOTRUE_ARCH="linux-amd64" ;;
-            aarch64) GOTRUE_ARCH="linux-arm64" ;;
+            x86_64) GOTRUE_ARCH="amd64" ;;
+            aarch64) GOTRUE_ARCH="arm64" ;;
             *) log_error "Unsupported architecture for GoTrue: $GOTRUE_ARCH"; exit 1 ;;
         esac
-        local GOTRUE_URL="https://github.com/supabase/auth/releases/download/${GOTRUE_VERSION}/auth-${GOTRUE_VERSION}-${GOTRUE_ARCH}.tar.gz"
+        local GOTRUE_URL="https://github.com/supabase/auth/releases/download/${GOTRUE_VERSION}/auth-${GOTRUE_VERSION}-${GOTRUE_ARCH}.${GOTRUE_EXT}"
         log_info "Downloading GoTrue ${GOTRUE_VERSION}..."
         local TMP_DIR
         TMP_DIR=$(mktemp -d)
-        if curl -fsSL "https://gh-proxy.net/${GOTRUE_URL}" -o "${TMP_DIR}/gotrue.tar.gz" 2>/dev/null || \
-           curl -fsSL "${GOTRUE_URL}" -o "${TMP_DIR}/gotrue.tar.gz"; then
-            tar -xf "${TMP_DIR}/gotrue.tar.gz" -C "${TMP_DIR}"
+        if curl -fsSL "https://gh-proxy.net/${GOTRUE_URL}" -o "${TMP_DIR}/gotrue.${GOTRUE_EXT}" 2>/dev/null || \
+           curl -fsSL "${GOTRUE_URL}" -o "${TMP_DIR}/gotrue.${GOTRUE_EXT}"; then
+            tar -xf "${TMP_DIR}/gotrue.${GOTRUE_EXT}" -C "${TMP_DIR}"
             if [[ -f "${TMP_DIR}/auth" ]]; then
                 mv "${TMP_DIR}/auth" "$GOTRUE_BIN"
             elif [[ -f "${TMP_DIR}/gotrue" ]]; then

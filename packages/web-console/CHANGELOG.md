@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.16.7](https://github.com/zuohuadong/supacloud/compare/web-console-v0.16.6...web-console-v0.16.7) (2026-06-28)
+
+
+### Miscellaneous Chores
+
+* **deps-dev:** bump svelte from 5.56.3 to 5.56.4 in /packages/web-console ([501751d](https://github.com/zuohuadong/supacloud/commit/501751d3b27c9ed25545710b11786f78136d568d))
+* **deps-dev:** bump vite from 8.0.16 to 8.1.0 in /packages/web-console ([02daea6](https://github.com/zuohuadong/supacloud/commit/02daea61743d78cd0e129b7f3cbd8c1b528e597d))
+* **deps:** bump @svadmin/core from 0.30.0 to 0.31.0 in /packages/web-console ([9dbaa89](https://github.com/zuohuadong/supacloud/commit/9dbaa897196a6bacace4b568394fd8e7bf86f5bb))
+* **deps:** bump @svadmin/ui from 0.37.0 to 0.38.1 in /packages/web-console ([5b946c8](https://github.com/zuohuadong/supacloud/commit/5b946c8f0ed0e1bb2adab308fb19f60b555911cb))
+* **deps:** bump isomorphic-dompurify from 3.17.0 to 3.18.0 in /packages/web-console ([1a1a796](https://github.com/zuohuadong/supacloud/commit/1a1a796a7d350c8acc70582fd1540658d80f521e))
+
+## [0.16.6](https://github.com/zuohuadong/supacloud/compare/web-console-v0.16.5...web-console-v0.16.6) (2026-06-25)
+
+
+### Bug Fixes
+
+* **management-api:** support generic postgres health ([51e23a1](https://github.com/zuohuadong/supacloud/commit/51e23a15c0e2291380cf5bbe19207787d3aa5092))
+
 ## [0.16.5](https://github.com/zuohuadong/supacloud/compare/web-console-v0.16.4...web-console-v0.16.5) (2026-06-24)
 
 

@@ -133,6 +133,7 @@
       "Memory Status": $t("PlatformOperations.memory_status"),
       "Management API": $t("PlatformOperations.supacloud_management_api"),
       "Pigsty Infrastructure": $t("PlatformOperations.pigsty_infrastructure"),
+      "Database Infrastructure": $t("PlatformOperations.database_infrastructure"),
       "Database (PostgreSQL)": $t("PlatformOperations.database_postgresql"),
       "Cloud-native Storage": $t("PlatformOperations.cloudnative_storage"),
       "Cloud-native Storage (JuiceFS)": $t("PlatformOperations.cloudnative_storage_juicefs"),
@@ -149,6 +150,7 @@
     if (msg === "Running") return "正在运行";
     if (msg === "Service stopped") return "服务已停止";
     if (msg === "System not booted by Systemd") return "非 Systemd 启动环境，服务状态未知";
+    if (msg === "Generic PostgreSQL profile active; Pigsty not configured") return "当前使用通用 PostgreSQL 配置，未启用 Pigsty";
     if (msg === "Cloud-native storage backend not mounted") return "云原生存储后端未挂载或未配置";
     if (msg === "Cannot detect storage mount status") return "无法检测存储挂载状态";
     if (msg === "Cannot get disk info") return "无法获取系统磁盘信息";
@@ -191,7 +193,7 @@
         <p class="text-xs text-muted-foreground">{$t("PlatformOperations.health_check_in_progress")}</p>
       {:else}
         <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
-          {#each (healthStatus as any[]) as report}
+          {#each (healthStatus as any[]) as report (report.component)}
             <div class="rounded-lg border p-3 flex flex-col justify-between">
               <div class="text-[10px] font-bold uppercase text-muted-foreground mb-1">{translateComponent(report.component)}</div>
               <div class="mt-1">
@@ -211,7 +213,7 @@
 
   <!-- Operations Cards -->
   <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
-    {#each OPERATIONS as op}
+    {#each OPERATIONS as op (op.id)}
       {@const Icon = op.icon}
       <div class="rounded-xl border bg-card overflow-hidden {activeOp === op.id ? 'ring-2 ring-brand' : ''}">
         <button
@@ -236,7 +238,7 @@
 
         {#if activeOp === op.id}
           <div class="p-4 space-y-3">
-            {#each op.fields as field}
+            {#each op.fields as field (field.key)}
               <div>
                 <label for="op-{op.id}-{field.key}" class="text-xs font-semibold text-muted-foreground block mb-1">
                   {field.label} {#if field.required}<span class="text-red-500">*</span>{/if}
@@ -285,7 +287,7 @@
             </tr>
           </thead>
           <tbody class="divide-y divide-border/20 font-mono">
-            {#each logs as log}
+            {#each logs as log (`${log.time}-${log.op}-${log.result}-${log.success}`)}
               <tr class="hover:bg-muted/10">
                 <td class="px-4 py-2 text-muted-foreground">{log.time}</td>
                 <td class="px-3 py-2 font-medium">{log.op}</td>

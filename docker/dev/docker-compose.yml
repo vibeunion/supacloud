@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   caddy:
-    image: caddy:2.10.2
+    image: caddy:2.11.4
     restart: always
     command: ["caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]
     ports:
@@ -22,7 +22,7 @@ services:
       - supacloud-dev
 
   postgres:
-    image: supabase/postgres:15.1.0.147
+    image: supabase/postgres:17.6.1.139
     restart: always
     environment:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
