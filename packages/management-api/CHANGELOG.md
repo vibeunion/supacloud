@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.37.8](https://github.com/zuohuadong/supacloud/compare/management-api-v0.37.7...management-api-v0.37.8) (2026-06-29)
+
+
+### Bug Fixes
+
+* **runtime:** update companion binary download versions ([d88232f](https://github.com/zuohuadong/supacloud/commit/d88232f2fd244d510b20006f0094e5367d4c79b2))
+
 ## [0.37.7](https://github.com/zuohuadong/supacloud/compare/management-api-v0.37.6...management-api-v0.37.7) (2026-06-28)
 
 
