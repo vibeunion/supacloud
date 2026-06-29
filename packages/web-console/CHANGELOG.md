@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.8](https://github.com/zuohuadong/supacloud/compare/web-console-v0.16.7...web-console-v0.16.8) (2026-06-29)
+
+
+### Bug Fixes
+
+* **web-console:** repair studio health surfaces ([0822a80](https://github.com/zuohuadong/supacloud/commit/0822a80678baf1053efedb400c73a2db9bcdf3d3))
+
 ## [0.16.7](https://github.com/zuohuadong/supacloud/compare/web-console-v0.16.6...web-console-v0.16.7) (2026-06-28)
 
 
