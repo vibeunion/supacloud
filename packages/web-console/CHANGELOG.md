@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.9](https://github.com/zuohuadong/supacloud/compare/web-console-v0.16.8...web-console-v0.16.9) (2026-06-29)
+
+
+### Bug Fixes
+
+* **management-api:** harden diagnostics health checks ([a69b21f](https://github.com/zuohuadong/supacloud/commit/a69b21fd4decaebe603d78eacec436226f5a5a40))
+
 ## [0.16.8](https://github.com/zuohuadong/supacloud/compare/web-console-v0.16.7...web-console-v0.16.8) (2026-06-29)
 
 
