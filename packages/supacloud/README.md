@@ -25,6 +25,23 @@ npx supacloud admin status
 it gives you the full toolset. You can still install either CLI on its own
 (`@supacloud/cli` exposes `supacloud-cli`, `@supacloud/admin` exposes `supacloud-admin`).
 
+## 自动更新
+
+`supacloud cli ...` and `supacloud admin ...` check the npm `latest` dist-tag before dispatch.
+When a newer `@supacloud/cli` or `@supacloud/admin` version exists, the dispatcher runs it with
+`npm exec --package <pkg>@<latest> -- <bin> ...args`. If the registry is unavailable, it falls
+back to the dependency version bundled with the installed `supacloud` package.
+
+Disable the latest check when you need a pinned local version:
+
+```bash
+SUPACLOUD_NO_AUTO_UPDATE=1 supacloud cli status
+# or
+SUPACLOUD_AUTO_UPDATE=0 supacloud admin status
+```
+
+Use `SUPACLOUD_NPM_REGISTRY` or `npm_config_registry` to point the check at a registry mirror.
+
 ## 用法
 
 ```bash
