@@ -461,8 +461,10 @@ The desired state is stored in dedicated project metadata columns (`postgrest_de
 For human operators, the CLI split is now:
 
 - `@supacloud/cli` / `supacloud-cli`: project-scoped user CLI with `.env` auto-link defaults
-- Preferred command: `supacloud-cli`. The bare `supacloud` name is only a backward-compatible alias because `/usr/local/bin/supacloud` is the server binary.
+- `supacloud cli ...`: unified local entrypoint. It checks the npm `latest` dist-tag and runs a newer `@supacloud/cli` automatically; set `SUPACLOUD_NO_AUTO_UPDATE=1` to force the bundled version.
 - `@supacloud/admin` / `supacloud-admin`: server and platform administration CLI
+- `supacloud admin ...`: unified local entrypoint with the same latest-check behavior for `@supacloud/admin`.
+- On installed servers, `/usr/local/bin/supacloud` remains the compiled server binary; server upgrades still use `sudo supacloud upgrade --yes`.
 
 
 ### Project Structure
@@ -958,8 +960,11 @@ desired state 保存在项目专用元数据列里（`postgrest_desired`、`post
 
 面向真人操作者的命令行现已拆分为：
 
-- `@supacloud/cli` / `supacloud-cli`：项目使用者 CLI，默认从当前目录 `.env` 自动绑定项目；裸 `supacloud` 仅为兼容别名
+- `@supacloud/cli` / `supacloud-cli`：项目使用者 CLI，默认从当前目录 `.env` 自动绑定项目
+- `supacloud cli ...`：统一本地入口，执行前检查 npm `latest`，发现新版 `@supacloud/cli` 会自动运行最新版；设置 `SUPACLOUD_NO_AUTO_UPDATE=1` 可强制使用随包安装的版本
 - `@supacloud/admin` / `supacloud-admin`：服务器管理员 CLI，处理 SSH、安装、升级、租户运维
+- `supacloud admin ...`：统一本地入口，对 `@supacloud/admin` 使用同样的 latest 检查
+- 已安装服务器上的 `/usr/local/bin/supacloud` 仍是编译后的服务端二进制，服务端升级继续使用 `sudo supacloud upgrade --yes`
 
 
 ### 项目结构
