@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.37.10](https://github.com/zuohuadong/supacloud/compare/management-api-v0.37.9...management-api-v0.37.10) (2026-06-29)
+
+
+### Bug Fixes
+
+* **management-api:** harden diagnostics health checks ([a69b21f](https://github.com/zuohuadong/supacloud/commit/a69b21fd4decaebe603d78eacec436226f5a5a40))
+
 ## [0.37.9](https://github.com/zuohuadong/supacloud/compare/management-api-v0.37.8...management-api-v0.37.9) (2026-06-29)
 
 
