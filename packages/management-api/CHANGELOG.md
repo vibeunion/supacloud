@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.37.9](https://github.com/zuohuadong/supacloud/compare/management-api-v0.37.8...management-api-v0.37.9) (2026-06-29)
+
+
+### Bug Fixes
+
+* **web-console:** repair studio health surfaces ([0822a80](https://github.com/zuohuadong/supacloud/commit/0822a80678baf1053efedb400c73a2db9bcdf3d3))
+
 ## [0.37.8](https://github.com/zuohuadong/supacloud/compare/management-api-v0.37.7...management-api-v0.37.8) (2026-06-29)
 
 
