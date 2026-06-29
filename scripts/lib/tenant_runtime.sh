@@ -123,12 +123,12 @@ ensure_postgrest() {
     local arch
     arch=$(uname -m)
     case "$arch" in
-        x86_64) arch="linux-static-x64" ;;
-        aarch64) arch="linux-static-aarch64" ;;
+        x86_64) arch="linux-static-x86-64" ;;
+        aarch64) arch="ubuntu-aarch64" ;;
         *) echo "ERROR: Unsupported architecture: $arch" >&2; exit 1 ;;
     esac
 
-    local version="v12.2.3"
+    local version="${POSTGREST_VERSION:-v14.13}"
     local url="https://github.com/PostgREST/postgrest/releases/download/${version}/postgrest-${version}-${arch}.tar.xz"
     echo "Downloading PostgREST ${version}..."
 
@@ -165,20 +165,21 @@ ensure_gotrue() {
     local arch
     arch=$(uname -m)
     case "$arch" in
-        x86_64) arch="x86" ;;
+        x86_64) arch="amd64" ;;
         aarch64) arch="arm64" ;;
         *) echo "ERROR: Unsupported architecture: $arch" >&2; exit 1 ;;
     esac
 
-    local version="v2.189.0"
-    local url="https://github.com/supabase/auth/releases/download/${version}/auth-${version}-${arch}.tar.gz"
+    local version="${GOTRUE_VERSION:-v2.191.0}"
+    local archive_ext="tar.xz"
+    local url="https://github.com/supabase/auth/releases/download/${version}/auth-${version}-${arch}.${archive_ext}"
     echo "Downloading GoTrue ${version}..."
 
     local tmp_dir
     tmp_dir=$(mktemp -d)
-    if curl -fsSL "https://gh-proxy.net/${url}" -o "${tmp_dir}/gotrue.tar.gz" 2>/dev/null || \
-       curl -fsSL "${url}" -o "${tmp_dir}/gotrue.tar.gz"; then
-        tar -xf "${tmp_dir}/gotrue.tar.gz" -C "${tmp_dir}"
+    if curl -fsSL "https://gh-proxy.net/${url}" -o "${tmp_dir}/gotrue.${archive_ext}" 2>/dev/null || \
+       curl -fsSL "${url}" -o "${tmp_dir}/gotrue.${archive_ext}"; then
+        tar -xf "${tmp_dir}/gotrue.${archive_ext}" -C "${tmp_dir}"
         # The binary may be named 'auth' or 'gotrue' depending on the release
         if [ -f "${tmp_dir}/auth" ]; then
             mv "${tmp_dir}/auth" "$GOTRUE_BIN"
