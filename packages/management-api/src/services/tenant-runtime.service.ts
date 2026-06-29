@@ -197,6 +197,32 @@ export interface ProjectServiceStatus {
     last_reconciled_at?: string | null;
 }
 
+const POSTGREST_HEALTH_PATHS = ["/live", "/ready", "/"] as const;
+
+export async function probePostgrestHealth(
+    port: number,
+    fetcher: typeof fetch = fetch,
+): Promise<{ healthy: boolean; last_error: string | null }> {
+    const failures: string[] = [];
+
+    for (const path of POSTGREST_HEALTH_PATHS) {
+        try {
+            const res = await fetcher(`http://127.0.0.1:${port}${path}`);
+            if (res.status < 500) {
+                return { healthy: true, last_error: null };
+            }
+            failures.push(`${path} HTTP ${res.status}`);
+        } catch (error: unknown) {
+            failures.push(`${path} ${error instanceof Error ? error.message : String(error)}`);
+        }
+    }
+
+    return {
+        healthy: false,
+        last_error: `PostgREST health checks failed: ${failures.join("; ")}`,
+    };
+}
+
 class PostgrestRuntimeController {
     unit(ref: string): string {
         return `supacloud-pgrst@${ref}`;
@@ -231,23 +257,16 @@ class PostgrestRuntimeController {
             return { actual: "stopped", health: "unknown", last_error: null };
         }
 
-        try {
-            const res = await fetch(`http://127.0.0.1:${port}/`);
-            if (res.status < 500) {
-                return { actual: "running", health: "healthy", last_error: null };
-            }
-            return {
-                actual: "error",
-                health: "unhealthy",
-                last_error: `PostgREST health check failed with HTTP ${res.status}`,
-            };
-        } catch (error: unknown) {
-            return {
-                actual: "error",
-                health: "unhealthy",
-                last_error: error instanceof Error ? error.message : String(error),
-            };
+        const probe = await probePostgrestHealth(port);
+        if (probe.healthy) {
+            return { actual: "running", health: "healthy", last_error: null };
         }
+
+        return {
+            actual: "error",
+            health: "unhealthy",
+            last_error: probe.last_error,
+        };
     }
 
     async startOrRepair(

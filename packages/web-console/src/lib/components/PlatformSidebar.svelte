@@ -11,7 +11,6 @@
     Languages,
     Home,
     SunMoon,
-    ChevronDown,
     ShieldCheck
   } from "lucide-svelte";
   import { page } from "$app/stores";
@@ -45,11 +44,6 @@
     { titleKey: "Platform.diagnostics", icon: ShieldCheck, href: "/platform/diagnostics" },
   ]);
 
-  const isPlatformSettingsActive = $derived(
-    $page.url.pathname === "/platform/settings" || $page.url.pathname.startsWith("/platform/settings/")
-  );
-  let isDisplaySettingsOpen = $state(false);
-
   function isActive(href: string) {
     return $page.url.pathname === href || $page.url.pathname.startsWith(href);
   }
@@ -77,70 +71,58 @@
     {/each}
   </nav>
 
-  <div class="p-4 border-t space-y-2">
-    <a
-      href="/"
-      class="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm font-medium text-brand bg-brand/5 hover:bg-brand/10 transition-colors cursor-pointer"
-    >
-      <Home size={18} />
-      <span>{$t("Sidebar.back_to_projects") || "Back to projects"}</span>
-    </a>
-
-    {#if isDisplaySettingsOpen || isPlatformSettingsActive}
-      <div class="space-y-1 rounded-md border bg-muted/20 p-2">
-        <a
-          href="/platform/settings"
-          class={cn(
-            "flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors cursor-pointer",
-            isActive("/platform/settings")
-              ? "bg-accent text-accent-foreground"
-              : "text-muted-foreground hover:bg-muted hover:text-foreground"
-          )}
-        >
-          <Settings2 size={16} />
-          <span>{$t("Platform.settings") || "Settings"}</span>
-        </a>
-        <button
-          type="button"
-          onclick={toggleMode}
-          class="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition-colors cursor-pointer"
-        >
-          <SunMoon size={16} />
-          <span>{themeToggleLabel}</span>
-        </button>
-        <button
-          type="button"
-          onclick={toggleLanguage}
-          class="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition-colors cursor-pointer"
-        >
-          <Languages size={16} />
-          <span>{isZhLocale($locale) ? "English" : ($t("Common.chinese") || "中文")}</span>
-        </button>
-      </div>
-    {/if}
-
-    <button
-      type="button"
-      onclick={() => { isDisplaySettingsOpen = !isDisplaySettingsOpen; }}
-      class="flex w-full items-center justify-between gap-2 rounded-md border bg-muted/20 px-3 py-2 hover:bg-muted/40 transition-colors cursor-pointer"
-      aria-expanded={isDisplaySettingsOpen || isPlatformSettingsActive}
-    >
-      <span class="flex items-center gap-3 min-w-0">
-        <span class="w-8 h-8 shrink-0 rounded-full bg-gradient-to-tr from-brand to-emerald-400 flex items-center justify-center text-white font-bold text-xs">
-          SC
-        </span>
-        <span class="flex flex-col min-w-0 text-left">
-          <span class="text-sm font-semibold truncate text-foreground">Platform Admin</span>
-          <span class="text-[10px] text-muted-foreground truncate">admin@supacloud.local</span>
-        </span>
-      </span>
-      <ChevronDown
-        size={16}
+  <div class="p-3 border-t space-y-2">
+    <div class="grid grid-cols-[1fr_36px_36px_36px] gap-1.5">
+      <a
+        href="/"
+        class="flex min-w-0 items-center gap-2 rounded-md bg-brand/5 px-2.5 py-2 text-xs font-semibold text-brand transition-colors hover:bg-brand/10"
+        title={$t("Sidebar.back_to_projects") || "Back to projects"}
+        aria-label={$t("Sidebar.back_to_projects") || "Back to projects"}
+      >
+        <Home size={16} class="shrink-0" />
+        <span class="truncate">{$t("Sidebar.back_to_projects") || "Back"}</span>
+      </a>
+      <a
+        href="/platform/settings"
         class={cn(
-          "shrink-0 text-muted-foreground transition-transform",
-          (isDisplaySettingsOpen || isPlatformSettingsActive) ? "rotate-180" : ""
+          "flex h-9 w-9 items-center justify-center rounded-md transition-colors",
+          isActive("/platform/settings")
+            ? "bg-accent text-accent-foreground"
+            : "text-muted-foreground hover:bg-muted hover:text-foreground"
         )}
-      />
-    </button>
+        title={$t("Platform.settings") || "Settings"}
+        aria-label={$t("Platform.settings") || "Settings"}
+      >
+        <Settings2 size={16} />
+      </a>
+      <button
+        type="button"
+        onclick={toggleMode}
+        class="flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+        title={themeToggleLabel}
+        aria-label={themeToggleLabel}
+      >
+        <SunMoon size={16} />
+      </button>
+      <button
+        type="button"
+        onclick={toggleLanguage}
+        class="flex h-9 w-9 items-center justify-center rounded-md text-xs font-bold text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+        title={isZhLocale($locale) ? "English" : ($t("Common.chinese") || "中文")}
+        aria-label={isZhLocale($locale) ? "English" : ($t("Common.chinese") || "中文")}
+      >
+        {isZhLocale($locale) ? "EN" : "中"}
+      </button>
+    </div>
+
+    <div class="flex w-full items-center gap-2 rounded-md border bg-muted/20 px-2.5 py-2">
+      <span class="w-7 h-7 shrink-0 rounded-full bg-gradient-to-tr from-brand to-emerald-400 flex items-center justify-center text-white font-bold text-[11px]">
+        SC
+      </span>
+      <span class="flex flex-col min-w-0 text-left">
+        <span class="text-xs font-semibold truncate text-foreground">Platform Admin</span>
+        <span class="text-[10px] leading-tight text-muted-foreground truncate">admin@supacloud.local</span>
+      </span>
+    </div>
   </div>
 </aside>
