@@ -1,4 +1,8 @@
 import { describe, expect, test } from "bun:test";
+import { closeSync, mkdtempSync, openSync, symlinkSync, writeSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import {
     SUBCOMMANDS,
     buildHelp,
@@ -6,6 +10,7 @@ import {
     createLaunchPlan,
     fetchLatestVersion,
     isAutoUpdateDisabled,
+    isMainModule,
     resolveSubpackageEntry,
 } from "./index";
 
@@ -36,6 +41,18 @@ describe("supacloud dispatcher", () => {
     test("resolveSubpackageEntry returns null for a missing package", () => {
         const entry = resolveSubpackageEntry("@supacloud/__definitely_not_a_pkg__");
         expect(entry).toBeNull();
+    });
+
+    test("isMainModule treats npm bin symlinks as the main script", () => {
+        const dir = mkdtempSync(join(tmpdir(), "supacloud-main-module-"));
+        const target = join(dir, "dist-index.js");
+        const link = join(dir, "supacloud");
+        const fd = openSync(target, "w");
+        writeSync(fd, "#!/usr/bin/env node\n");
+        closeSync(fd);
+        symlinkSync(target, link);
+
+        expect(isMainModule(pathToFileURL(target).href, link)).toBe(true);
     });
 
     test("buildLatestMetadataUrl encodes scoped package names", () => {
