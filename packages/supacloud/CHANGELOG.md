@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/zuohuadong/supacloud/compare/supacloud-v0.3.0...supacloud-v0.3.1) (2026-06-29)
+
+
+### Bug Fixes
+
+* **supacloud:** run dispatcher when launched through npm bin symlink
+
 ## [0.3.0](https://github.com/zuohuadong/supacloud/compare/supacloud-v0.2.0...supacloud-v0.3.0) (2026-06-29)
 
 

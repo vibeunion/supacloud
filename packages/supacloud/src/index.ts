@@ -10,7 +10,7 @@
  * 离线、registry 不可达或显式禁用自动更新时，回退到随包安装的本地依赖。
  */
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join, parse } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -302,15 +302,17 @@ async function run(args: string[]): Promise<void> {
     });
 }
 
-// 仅在作为脚本直接运行时执行分发，避免被 import（如测试）时的副作用退出
-const isMainEntry = (() => {
+export function isMainModule(moduleUrl: string, argvEntry = process.argv[1]): boolean {
+    if (!argvEntry) return false;
     try {
-        return fileURLToPath(import.meta.url) === process.argv[1];
+        return realpathSync(fileURLToPath(moduleUrl)) === realpathSync(argvEntry);
     } catch {
         return false;
     }
-})();
-if (isMainEntry) {
+}
+
+// 仅在作为脚本直接运行时执行分发，避免被 import（如测试）时的副作用退出
+if (isMainModule(import.meta.url)) {
     run(process.argv.slice(2)).catch((err: unknown) => {
         const message = err instanceof Error ? err.message : String(err);
         console.error(`❌ supacloud 启动失败: ${message}`);
