@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.37.11](https://github.com/zuohuadong/supacloud/compare/management-api-v0.37.10...management-api-v0.37.11) (2026-06-30)
+
+
+### Bug Fixes
+
+* **edge-runtime:** inject tenant-local PostgREST REST URL ([#397](https://github.com/zuohuadong/supacloud/issues/397)) ([e1ad57e](https://github.com/zuohuadong/supacloud/commit/e1ad57e78038a028c268f0a79d9784daac574b08))
+
 ## [0.37.10](https://github.com/zuohuadong/supacloud/compare/management-api-v0.37.9...management-api-v0.37.10) (2026-06-29)
 
 

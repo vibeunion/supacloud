@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.8](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.8.7...edge-runtime-v0.8.8) (2026-06-30)
+
+
+### Bug Fixes
+
+* **edge-runtime:** inject tenant-local PostgREST REST URL ([#397](https://github.com/zuohuadong/supacloud/issues/397)) ([e1ad57e](https://github.com/zuohuadong/supacloud/commit/e1ad57e78038a028c268f0a79d9784daac574b08))
+
 ## [0.8.7](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.8.6...edge-runtime-v0.8.7) (2026-06-19)
 
 
