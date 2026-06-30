@@ -6,6 +6,7 @@ import {
   normalizeProjectRoutingConfig,
   resolveProjectApiHost,
   resolveProjectApiUrl,
+  resolveTenantPorts,
 } from "../utils/project-routing";
 import { decryptSecretIfNeeded } from "../utils/secret-crypto";
 import { logger } from "../utils/logger";
@@ -16,6 +17,22 @@ import {
 
 function isJwtLike(value: string | null | undefined): value is string {
   return typeof value === "string" && value.split(".").length === 3;
+}
+
+function stripTrailingSlash(value: string): string {
+  return value.replace(/\/+$/, "");
+}
+
+function internalSupabaseBaseUrl(): string {
+  return stripTrailingSlash(
+    process.env.SUPACLOUD_INTERNAL_SUPABASE_URL ||
+    process.env.INTERNAL_SUPABASE_URL ||
+    "http://127.0.0.1",
+  );
+}
+
+function localServiceBaseUrl(port: number): string {
+  return `http://127.0.0.1:${port}`;
 }
 
 export async function buildProjectRuntimeEnv(projectRef: string): Promise<Record<string, string> | null> {
@@ -32,11 +49,18 @@ export async function buildProjectRuntimeEnv(projectRef: string): Promise<Record
   const jwtJwks = normalizeProjectJwtJwks(oauthServerConfig.jwt_jwks);
   const supabaseUrl = resolveProjectApiUrl(projectRef, routingConfig);
   const projectApiHost = resolveProjectApiHost(projectRef, routingConfig);
-  const internalSupabaseUrl = (
-    process.env.SUPACLOUD_INTERNAL_SUPABASE_URL ||
-    process.env.INTERNAL_SUPABASE_URL ||
-    "http://127.0.0.1"
-  ).replace(/\/+$/, "");
+  const tenantPorts = resolveTenantPorts(routingConfig);
+  const internalSupabaseUrl = internalSupabaseBaseUrl();
+  const internalRestUrl = stripTrailingSlash(
+    process.env.SUPACLOUD_INTERNAL_REST_URL ||
+    process.env.INTERNAL_REST_URL ||
+    (tenantPorts ? localServiceBaseUrl(tenantPorts.pgrstPort) : `${internalSupabaseUrl}/rest/v1`),
+  );
+  const internalAuthUrl = stripTrailingSlash(
+    process.env.SUPACLOUD_INTERNAL_AUTH_URL ||
+    process.env.INTERNAL_AUTH_URL ||
+    `${internalSupabaseUrl}/auth/v1`,
+  );
 
   let serviceRoleKey = project.service_role_key;
   const encryptedServiceRoleKey = (project as unknown as { service_role_key_encrypted?: string | null }).service_role_key_encrypted;
@@ -75,8 +99,12 @@ export async function buildProjectRuntimeEnv(projectRef: string): Promise<Record
     ...(jwtKeys ? { JWT_KEYS: JSON.stringify(jwtKeys) } : {}),
     ...(jwtJwks ? { JWT_JWKS: JSON.stringify(jwtJwks) } : {}),
     SUPACLOUD_INTERNAL_SUPABASE_URL: internalSupabaseUrl,
-    SUPACLOUD_INTERNAL_AUTH_URL: `${internalSupabaseUrl}/auth/v1`,
-    SUPACLOUD_INTERNAL_REST_URL: `${internalSupabaseUrl}/rest/v1`,
+    SUPACLOUD_INTERNAL_AUTH_URL: internalAuthUrl,
+    SUPACLOUD_INTERNAL_REST_URL: internalRestUrl,
+    ...(tenantPorts ? {
+      SUPACLOUD_INTERNAL_POSTGREST_PORT: String(tenantPorts.pgrstPort),
+      SUPACLOUD_INTERNAL_GOTRUE_PORT: String(tenantPorts.gotruePort),
+    } : {}),
     SUPACLOUD_PROJECT_REF: projectRef,
     SUPACLOUD_PROJECT_API_HOST: projectApiHost,
     X_PROJECT_REF: projectRef,

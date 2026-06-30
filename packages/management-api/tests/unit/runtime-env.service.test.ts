@@ -49,4 +49,53 @@ describe("runtimeEnvService", () => {
       secretsSpy.mockRestore();
     }
   });
+
+  test("uses tenant-local PostgREST port for internal REST URL", async () => {
+    const previousRestUrl = process.env.SUPACLOUD_INTERNAL_REST_URL;
+    const previousInternalRestUrl = process.env.INTERNAL_REST_URL;
+    delete process.env.SUPACLOUD_INTERNAL_REST_URL;
+    delete process.env.INTERNAL_REST_URL;
+
+    const findByRefSpy = spyOn(projectRepository, "findByRef").mockResolvedValue({
+      id: "proj_id",
+      ref: "proj_1",
+      name: "Project 1",
+      db_name: "supa_proj_1",
+      db_user: "role_proj_1",
+      db_password: "pw",
+      jwt_secret: "legacy-secret",
+      anon_key: "anon.header.signature",
+      service_role_key: "service.header.signature",
+      s3_bucket: "bucket",
+      s3_access_key: null,
+      s3_secret_key: null,
+      region: "local",
+      status: "active",
+      organization_id: "org_1",
+      config: {
+        api_url: "https://api.example.com",
+        postgrest_port: 3272,
+        gotrue_port: 4272,
+      },
+      created_at: new Date(),
+      updated_at: new Date(),
+      deleted_at: null,
+    } as never);
+    const secretsSpy = spyOn(databaseService, "getSecrets").mockResolvedValue([]);
+
+    try {
+      const env = await runtimeEnvService.buildProjectRuntimeEnv("proj_1");
+
+      expect(env?.SUPACLOUD_INTERNAL_REST_URL).toBe("http://127.0.0.1:3272");
+      expect(env?.SUPACLOUD_INTERNAL_POSTGREST_PORT).toBe("3272");
+      expect(env?.SUPACLOUD_INTERNAL_GOTRUE_PORT).toBe("4272");
+    } finally {
+      if (previousRestUrl === undefined) delete process.env.SUPACLOUD_INTERNAL_REST_URL;
+      else process.env.SUPACLOUD_INTERNAL_REST_URL = previousRestUrl;
+      if (previousInternalRestUrl === undefined) delete process.env.INTERNAL_REST_URL;
+      else process.env.INTERNAL_REST_URL = previousInternalRestUrl;
+      findByRefSpy.mockRestore();
+      secretsSpy.mockRestore();
+    }
+  });
 });

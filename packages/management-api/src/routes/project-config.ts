@@ -247,6 +247,10 @@ function buildStorageConfigResponse(raw: Record<string, unknown>) {
       ...((response.features as Record<string, any>).s3Protocol || {}),
       ...((features.s3Protocol as Record<string, unknown>) || {}),
     },
+    purgeCache: {
+      ...((response.features as Record<string, any>).purgeCache || {}),
+      ...((features.purgeCache as Record<string, unknown>) || {}),
+    },
     icebergCatalog: {
       ...((response.features as Record<string, any>).icebergCatalog || {}),
       ...((features.icebergCatalog as Record<string, unknown>) || {}),

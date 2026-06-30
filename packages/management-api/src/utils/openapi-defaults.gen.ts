@@ -284,6 +284,9 @@ export const OPENAPI_STORAGE_CONFIG_RESPONSE_TEMPLATE = {
     "s3Protocol": {
       "enabled": false
     },
+    "purgeCache": {
+      "enabled": false
+    },
     "icebergCatalog": {
       "enabled": false,
       "maxNamespaces": 0,

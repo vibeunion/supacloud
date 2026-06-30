@@ -33,6 +33,14 @@ export function renderPostgrestDbSchemas(includePgmqPublic = false): string {
     return schemas.join(", ");
 }
 
+export function renderTenantInternalRuntimeEnv(pgrstPort: number, gotruePort: number): string {
+    return [
+        `SUPACLOUD_INTERNAL_POSTGREST_PORT=${pgrstPort}`,
+        `SUPACLOUD_INTERNAL_GOTRUE_PORT=${gotruePort}`,
+        `SUPACLOUD_INTERNAL_REST_URL=http://127.0.0.1:${pgrstPort}`,
+    ].join("\n");
+}
+
 function readBooleanSetting(
     authConfig: Record<string, unknown>,
     key: string,
@@ -1402,6 +1410,7 @@ SUPABASE_ANON_KEY=${creds.anonKey}
 SUPABASE_SERVICE_ROLE_KEY=${creds.serviceRoleKey}
 SUPABASE_DB_URL=postgresql://${resolveAuthenticatorName(ref)}:${creds.dbPassword}@${this.PG_HOST}:${this.PG_PORT}/${creds.dbName}
 JWT_SECRET=${creds.jwtSecret}
+${renderTenantInternalRuntimeEnv(pgrstPort, gotruePort)}
 ${jwtJwksEnv}${jwtKeysEnv}
 `.trim();
         await Bun.write(path.join(this.TENANT_CONFIG_DIR, `${ref}.env`), pgrstEnv);

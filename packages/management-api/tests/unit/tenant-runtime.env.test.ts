@@ -5,6 +5,7 @@ import {
   renderGoTruePasskeyEnv,
   renderGoTrueSamlEnv,
   renderPostgrestDbSchemas,
+  renderTenantInternalRuntimeEnv,
 } from "../../src/services/tenant-runtime.service";
 
 describe("TenantRuntimeService systemd env quoting", () => {
@@ -28,6 +29,14 @@ describe("TenantRuntimeService PostgREST schema rendering", () => {
 
   test("exposes pgmq_public only when the wrapper schema exists", () => {
     expect(renderPostgrestDbSchemas(true)).toBe("public, storage, graphql_public, pgmq_public");
+  });
+
+  test("renders tenant-local internal runtime env for Edge Functions", () => {
+    expect(renderTenantInternalRuntimeEnv(3272, 4272)).toBe([
+      "SUPACLOUD_INTERNAL_POSTGREST_PORT=3272",
+      "SUPACLOUD_INTERNAL_GOTRUE_PORT=4272",
+      "SUPACLOUD_INTERNAL_REST_URL=http://127.0.0.1:3272",
+    ].join("\n"));
   });
 });
 
