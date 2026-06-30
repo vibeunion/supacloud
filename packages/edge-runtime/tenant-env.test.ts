@@ -38,6 +38,16 @@ describe("tenant env masking guard", () => {
     }));
   });
 
+  test("prefers tenant-local PostgREST port for internal REST fallback", () => {
+    expect(normalizeTenantEnv("proj_1", {
+      SUPABASE_URL: "https://api.example.com",
+      SUPACLOUD_INTERNAL_POSTGREST_PORT: "3272",
+    })).toEqual(expect.objectContaining({
+      SUPACLOUD_INTERNAL_REST_URL: "http://127.0.0.1:3272",
+      SUPACLOUD_INTERNAL_POSTGREST_PORT: "3272",
+    }));
+  });
+
   test("adds background internal token only for background dispatch env", () => {
     const base = normalizeTenantEnv("proj_1", {
       SUPABASE_URL: "https://api.example.com",

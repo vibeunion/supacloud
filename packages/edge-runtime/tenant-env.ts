@@ -61,6 +61,12 @@ function stripTrailingSlash(value: string): string {
   return value.replace(/\/+$/, "");
 }
 
+function pickPort(value: string | undefined): number | undefined {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return undefined;
+  return Math.trunc(parsed);
+}
+
 function hostFromUrl(value: string | undefined): string {
   if (!value) return "";
   try {
@@ -78,6 +84,15 @@ function defaultInternalSupabaseUrl(): string {
   );
 }
 
+function tenantLocalPostgrestUrl(env: Record<string, string>): string | undefined {
+  const port = pickPort(
+    env.SUPACLOUD_INTERNAL_POSTGREST_PORT ||
+      env.POSTGREST_PORT ||
+      env.PGRST_PORT,
+  );
+  return port ? `http://127.0.0.1:${port}` : undefined;
+}
+
 export function normalizeTenantEnv(ref: string, env: Record<string, string>): Record<string, string> {
   const normalized = { ...env };
   const internalSupabaseUrl = stripTrailingSlash(
@@ -92,7 +107,7 @@ export function normalizeTenantEnv(ref: string, env: Record<string, string>): Re
   normalized.X_PROJECT_REF ||= ref;
   normalized.SUPACLOUD_INTERNAL_SUPABASE_URL = internalSupabaseUrl;
   normalized.SUPACLOUD_INTERNAL_AUTH_URL ||= `${internalSupabaseUrl}/auth/v1`;
-  normalized.SUPACLOUD_INTERNAL_REST_URL ||= `${internalSupabaseUrl}/rest/v1`;
+  normalized.SUPACLOUD_INTERNAL_REST_URL ||= tenantLocalPostgrestUrl(normalized) || `${internalSupabaseUrl}/rest/v1`;
   if (apiHost) normalized.SUPACLOUD_PROJECT_API_HOST = apiHost;
 
   return normalized;
