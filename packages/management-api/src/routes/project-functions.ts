@@ -184,6 +184,11 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         entrypoint_path: entrypoint,
         import_map: result.import_map != null || !!metadata.import_map_path,
         import_map_path: result.import_map ?? metadata.import_map_path ?? null,
+        bundle_hash: result.bundle_hash ?? null,
+        bundle_size_bytes: result.bundle_size_bytes ?? null,
+        import_count: result.import_count ?? null,
+        external_packages: result.external_packages ?? [],
+        preheat: result.preheat ?? null,
         created_at: now,
         updated_at: now,
       };
@@ -227,19 +232,22 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
       if (!slug) {
         return status(400, { message: "slug is required", code: "400" });
       }
+      let deployResult:
+        | Awaited<ReturnType<typeof projectService.deployFunctionDetailed>>
+        | null = null;
       // Allow empty code for metadata-only creation
       if (code) {
-        const result = await projectService.deployFunctionDetailed(
+        deployResult = await projectService.deployFunctionDetailed(
           params.ref,
           slug,
           code,
           false,
         );
-        if (!result.success) {
+        if (!deployResult.success) {
           return status(500, {
-            message: result.error || "Failed to deploy function",
+            message: deployResult.error || "Failed to deploy function",
             code: "500",
-            details: result,
+            details: deployResult,
           });
         }
       }
@@ -268,6 +276,11 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
           (query as Record<string, string>).entrypoint_path || "index.ts",
         import_map: false,
         import_map_path: null,
+        bundle_hash: deployResult?.bundle_hash ?? null,
+        bundle_size_bytes: deployResult?.bundle_size_bytes ?? null,
+        import_count: deployResult?.import_count ?? null,
+        external_packages: deployResult?.external_packages ?? [],
+        preheat: deployResult?.preheat ?? null,
       };
     },
     {
@@ -584,19 +597,29 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
       const authError = await requireProjectOrAdminAuth(request, params.ref);
       if (authError) return status(authError.status, authError.body);
       const code = body.code || body.body || "";
-      const success = await projectService.deployFunction(
+      const result = await projectService.deployFunctionDetailed(
         params.ref,
         params.slug,
         code,
         body.minify ?? false,
       );
-      if (!success) {
+      if (!result.success) {
         return status(500, {
-          message: "Failed to deploy function",
+          message: result.error || "Failed to deploy function",
           code: "500",
+          details: result,
         });
       }
-      return { success: true, bundled: true };
+      return {
+        success: true,
+        bundled: result.bundled ?? true,
+        version: result.version ?? null,
+        bundle_hash: result.bundle_hash ?? null,
+        bundle_size_bytes: result.bundle_size_bytes ?? null,
+        import_count: result.import_count ?? null,
+        external_packages: result.external_packages ?? [],
+        preheat: result.preheat ?? null,
+      };
     },
     {
       params: t.Object({ ref: t.String(), slug: t.String() }),
@@ -619,17 +642,21 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
 
       // Update code if provided
       const code = body.code || body.body;
+      let deployResult:
+        | Awaited<ReturnType<typeof projectService.deployFunctionDetailed>>
+        | null = null;
       if (code) {
-        const success = await projectService.deployFunction(
+        deployResult = await projectService.deployFunctionDetailed(
           params.ref,
           params.slug,
           code,
           false,
         );
-        if (!success) {
+        if (!deployResult.success) {
           return status(500, {
-            message: "Failed to deploy function",
+            message: deployResult.error || "Failed to deploy function",
             code: "500",
+            details: deployResult,
           });
         }
       }
@@ -665,6 +692,11 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         status: "ACTIVE",
         verify_jwt: funcConfig.verify_jwt,
         background_routes: funcConfig.background_routes || [],
+        bundle_hash: deployResult?.bundle_hash ?? null,
+        bundle_size_bytes: deployResult?.bundle_size_bytes ?? null,
+        import_count: deployResult?.import_count ?? null,
+        external_packages: deployResult?.external_packages ?? [],
+        preheat: deployResult?.preheat ?? null,
         created_at: now,
         updated_at: now,
       };
@@ -707,6 +739,11 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         files: result.files ?? Object.keys(body.files).length,
         version: result.version ?? null,
         import_map: result.import_map ?? null,
+        bundle_hash: result.bundle_hash ?? null,
+        bundle_size_bytes: result.bundle_size_bytes ?? null,
+        import_count: result.import_count ?? null,
+        external_packages: result.external_packages ?? [],
+        preheat: result.preheat ?? null,
       };
     },
     {

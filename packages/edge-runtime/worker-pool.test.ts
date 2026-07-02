@@ -148,6 +148,15 @@ describe("WorkerPool TLS policy handoff", () => {
 });
 
 describe("WorkerPool metrics NaN fix", () => {
+  test("reports per-pool smol worker mode in metrics", async () => {
+    const foreground = new WorkerPool({ size: 1, requestTimeout: 2_000, smol: false });
+    const background = new WorkerPool({ size: 1, requestTimeout: 2_000, smol: true });
+    pools.push(foreground, background);
+
+    expect(foreground.snapshotMetrics("fg")["fg_worker_smol"]).toBe(0);
+    expect(background.snapshotMetrics("bg")["bg_worker_smol"]).toBe(1);
+  });
+
   test("avg_queue_wait_ms is 0 (never NaN) for immediate dispatch", async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-nan-"));
     const functionPath = join(projectRoot, "fn.ts");
@@ -224,6 +233,253 @@ describe("WorkerPool metrics NaN fix", () => {
       }
       // At least one request was queued, so total_queue_wait_ms > 0
       expect(metrics["testq_total_queue_wait_ms"]).toBeGreaterThan(0);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("WorkerPool module cache", () => {
+  function moduleLoadCounterSource(counterPath: string): string {
+    return `
+      const counterPath = ${JSON.stringify(counterPath)};
+      let previous = "0";
+      try {
+        previous = await Bun.file(counterPath).text();
+      } catch {}
+      const loadCount = Number(previous || "0") + 1;
+      await Bun.write(counterPath, String(loadCount));
+
+      export default {
+        async fetch() {
+          return new Response(String(loadCount), { status: 200 });
+        }
+      }
+    `;
+  }
+
+  test("reuses stable module versions and reloads when moduleVersion changes", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-module-cache-"));
+    const counterPath = join(projectRoot, "counter.txt");
+    const functionPath = join(projectRoot, "fn.ts");
+    await Bun.write(functionPath, moduleLoadCounterSource(counterPath));
+
+    const pool = new WorkerPool({ size: 1, requestTimeout: 2_000 });
+    pools.push(pool);
+
+    try {
+      const dispatch = (moduleVersion: string) =>
+        pool.dispatch({
+          functionId: "proj_cache_fn",
+          functionPath,
+          projectRoot,
+          projectRef: "proj_cache",
+          moduleVersion,
+          env: {},
+          request: new Request("http://edge.local/functions/v1/fn"),
+        });
+
+      const first = await dispatch("v1");
+      expect(first.status).toBe(200);
+      expect(await first.text()).toBe("1");
+
+      const second = await dispatch("v1");
+      expect(second.status).toBe(200);
+      expect(await second.text()).toBe("1");
+      expect(await Bun.file(counterPath).text()).toBe("1");
+
+      const third = await dispatch("v2");
+      expect(third.status).toBe(200);
+      expect(await third.text()).toBe("2");
+      expect(await Bun.file(counterPath).text()).toBe("2");
+
+      const metrics = pool.snapshotMetrics("cache");
+      expect(metrics["cache_total_module_cache_hits"]).toBe(1);
+      expect(metrics["cache_total_module_cache_misses"]).toBe(2);
+      expect(metrics["cache_total_worker_replacements"]).toBe(0);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("invalidates only the target function cache entry", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-module-invalidate-"));
+    const functionAPath = join(projectRoot, "a.ts");
+    const functionBPath = join(projectRoot, "b.ts");
+    const counterAPath = join(projectRoot, "counter-a.txt");
+    const counterBPath = join(projectRoot, "counter-b.txt");
+    await Bun.write(functionAPath, moduleLoadCounterSource(counterAPath));
+    await Bun.write(functionBPath, moduleLoadCounterSource(counterBPath));
+
+    const pool = new WorkerPool({ size: 1, requestTimeout: 2_000 });
+    pools.push(pool);
+
+    const dispatch = (functionId: string, functionPath: string, moduleVersion: string) =>
+      pool.dispatch({
+        functionId,
+        functionPath,
+        projectRoot,
+        projectRef: "proj_precise",
+        moduleVersion,
+        env: {},
+        request: new Request(`http://edge.local/functions/v1/${functionId}`),
+      });
+
+    try {
+      expect(await (await dispatch("proj_precise_a", functionAPath, "v1")).text()).toBe("1");
+      expect(await (await dispatch("proj_precise_b", functionBPath, "v1")).text()).toBe("1");
+
+      const result = await pool.invalidateModule("proj_precise_a");
+      expect(result.attempted).toBe(1);
+      expect(result.succeeded).toBe(1);
+      expect(result.invalidated).toBe(1);
+
+      expect(await (await dispatch("proj_precise_b", functionBPath, "v1")).text()).toBe("1");
+      expect(await Bun.file(counterBPath).text()).toBe("1");
+
+      expect(await (await dispatch("proj_precise_a", functionAPath, "v2")).text()).toBe("2");
+      expect(await Bun.file(counterAPath).text()).toBe("2");
+
+      const metrics = pool.snapshotMetrics("precise");
+      expect(metrics["precise_total_module_cache_invalidated"]).toBe(1);
+      expect(metrics["precise_total_worker_replacements"]).toBe(0);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("project invalidation does not evict another project's module cache", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-project-invalidate-"));
+    const functionAPath = join(projectRoot, "project-a.ts");
+    const functionBPath = join(projectRoot, "project-b.ts");
+    const counterAPath = join(projectRoot, "counter-project-a.txt");
+    const counterBPath = join(projectRoot, "counter-project-b.txt");
+    await Bun.write(functionAPath, moduleLoadCounterSource(counterAPath));
+    await Bun.write(functionBPath, moduleLoadCounterSource(counterBPath));
+
+    const pool = new WorkerPool({ size: 1, requestTimeout: 2_000 });
+    pools.push(pool);
+
+    const dispatch = (
+      functionId: string,
+      functionPath: string,
+      projectRef: string,
+      moduleVersion: string,
+    ) =>
+      pool.dispatch({
+        functionId,
+        functionPath,
+        projectRoot,
+        projectRef,
+        moduleVersion,
+        env: {},
+        request: new Request(`http://edge.local/functions/v1/${functionId}`),
+      });
+
+    try {
+      expect(await (await dispatch("proj_env_a_fn", functionAPath, "proj_env_a", "v1")).text()).toBe("1");
+      expect(await (await dispatch("proj_env_b_fn", functionBPath, "proj_env_b", "v1")).text()).toBe("1");
+
+      const result = await pool.invalidateProject("proj_env_a");
+      expect(result.attempted).toBe(1);
+      expect(result.succeeded).toBe(1);
+      expect(result.invalidated).toBe(1);
+
+      expect(await (await dispatch("proj_env_b_fn", functionBPath, "proj_env_b", "v1")).text()).toBe("1");
+      expect(await Bun.file(counterBPath).text()).toBe("1");
+
+      expect(await (await dispatch("proj_env_a_fn", functionAPath, "proj_env_a", "v2")).text()).toBe("2");
+      expect(await Bun.file(counterAPath).text()).toBe("2");
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("project env epoch can force reload even when function file metadata is unchanged", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-env-epoch-"));
+    const functionPath = join(projectRoot, "env.ts");
+    await Bun.write(functionPath, `
+      const loadedSecret = process.env.RUNTIME_SECRET || "missing";
+      export default {
+        async fetch() {
+          return new Response(loadedSecret, { status: 200 });
+        }
+      }
+    `);
+
+    const pool = new WorkerPool({ size: 1, requestTimeout: 2_000 });
+    pools.push(pool);
+
+    const dispatch = (moduleVersion: string, secret: string) =>
+      pool.dispatch({
+        functionId: "proj_env_epoch_fn",
+        functionPath,
+        projectRoot,
+        projectRef: "proj_env_epoch",
+        moduleVersion,
+        env: { RUNTIME_SECRET: secret },
+        request: new Request("http://edge.local/functions/v1/env"),
+      });
+
+    try {
+      expect(await (await dispatch("env:0:stat:same", "old")).text()).toBe("old");
+      expect(await (await dispatch("env:0:stat:same", "new-but-same-version")).text()).toBe("old");
+
+      const result = await pool.invalidateProject("proj_env_epoch");
+      expect(result.attempted).toBe(1);
+      expect(result.succeeded).toBe(1);
+      expect(result.invalidated).toBe(1);
+
+      expect(await (await dispatch("env:1:stat:same", "new")).text()).toBe("new");
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("preheats all idle workers by default and can limit attempted workers", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "supacloud-preheat-"));
+    const functionPath = join(projectRoot, "preheat.ts");
+    await Bun.write(functionPath, `
+      export default {
+        async fetch() {
+          return new Response("preheated", { status: 200 });
+        }
+      }
+    `);
+
+    const pool = new WorkerPool({ size: 2, requestTimeout: 2_000 });
+    pools.push(pool);
+
+    try {
+      const first = await pool.preheatIdleWorkers(
+        "proj_preheat_fn",
+        functionPath,
+        projectRoot,
+        {},
+        { projectRef: "proj_preheat", moduleVersion: "v1" },
+      );
+      expect(first.attempted).toBe(2);
+      expect(first.succeeded).toBe(2);
+      expect(first.cacheHits).toBe(0);
+      expect(first.cacheMisses).toBe(2);
+      expect(first.durationMs).toBeGreaterThanOrEqual(0);
+
+      const second = await pool.preheatIdleWorkers(
+        "proj_preheat_fn",
+        functionPath,
+        projectRoot,
+        {},
+        { projectRef: "proj_preheat", moduleVersion: "v1", maxWorkers: 1 },
+      );
+      expect(second.attempted).toBe(1);
+      expect(second.succeeded).toBe(1);
+      expect(second.cacheHits).toBe(1);
+      expect(second.cacheMisses).toBe(0);
+
+      const metrics = pool.snapshotMetrics("preheat");
+      expect(metrics["preheat_total_preheat_attempts"]).toBe(3);
+      expect(metrics["preheat_total_preheat_succeeded"]).toBe(3);
+      expect(metrics["preheat_total_preheat_ms"]).toBeGreaterThanOrEqual(0);
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }

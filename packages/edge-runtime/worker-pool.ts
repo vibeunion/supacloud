@@ -10,6 +10,8 @@ interface DispatchOptions {
   functionId: string;
   functionPath: string;
   projectRoot: string;
+  projectRef?: string;
+  moduleVersion?: string;
   env: Record<string, string>;
   request: Request;
   cancelKey?: string;
@@ -33,8 +35,50 @@ function resolveMaxBodySizeBytes(value = process.env.EDGE_MAX_BODY_SIZE_MB): num
 
 const MAX_BODY_SIZE = resolveMaxBodySizeBytes();
 const MAX_QUEUE_SIZE = Number(process.env.MAX_QUEUE_SIZE) || 200;
-const WORKER_SMOL = process.env.WORKER_SMOL !== "false";
 const WAIT_UNTIL_TIMEOUT_MS = Number(process.env.EDGE_WAIT_UNTIL_TIMEOUT_MS) || 300_000;
+const CONTROL_MESSAGE_TIMEOUT_MS = Number(process.env.EDGE_CONTROL_MESSAGE_TIMEOUT_MS) || 1_000;
+
+type WorkerControlMessage =
+  | { type: "invalidate_module"; functionId: string }
+  | { type: "invalidate_project"; projectRef: string };
+
+type WorkerPoolControlResult = {
+  attempted: number;
+  succeeded: number;
+  invalidated: number;
+};
+
+type WorkerControlAck = {
+  acked: boolean;
+  invalidated: number;
+  moduleCacheSize: number;
+};
+
+type PreheatOptions = {
+  projectRef?: string;
+  moduleVersion?: string;
+  maxWorkers?: number;
+};
+
+type WorkerPreheatResult = {
+  success: boolean;
+  cacheHit: boolean | null;
+  moduleCacheSize: number;
+};
+
+export type WorkerPoolPreheatResult = {
+  attempted: number;
+  succeeded: number;
+  cacheHits: number;
+  cacheMisses: number;
+  durationMs: number;
+};
+
+function extractProjectRef(functionId: string): string | null {
+  const idx = functionId.indexOf("_");
+  if (idx === -1) return null;
+  return functionId.substring(0, idx);
+}
 
 function resolveWorkerEntry(): string | URL {
   if (process.env.EDGE_RUNTIME_WORKER_PATH) {
@@ -72,6 +116,14 @@ export class WorkerPool {
   private totalEnvLoadMs = 0;
   private totalQueueWaitMs = 0;
   private totalWorkerExecMs = 0;
+  private totalModuleCacheHits = 0;
+  private totalModuleCacheMisses = 0;
+  private totalModuleCacheInvalidated = 0;
+  private lastModuleCacheEntries = 0;
+  private totalWorkerReplacements = 0;
+  private totalPreheatAttempts = 0;
+  private totalPreheatSucceeded = 0;
+  private totalPreheatMs = 0;
   private activeWorkers = new Set<Worker>();
   private workerMetadata = new Map<
     Worker,
@@ -84,7 +136,7 @@ export class WorkerPool {
   private tainted = new Set<Worker>();
   private draining = false;
 
-  constructor(private config: { size: number; requestTimeout: number }) {
+  constructor(private config: { size: number; requestTimeout: number; smol?: boolean }) {
     for (let i = 0; i < config.size; i++) {
       const w = this.createWorker();
       this.idle.push(w);
@@ -95,7 +147,7 @@ export class WorkerPool {
   private createWorker(): Worker {
     const workerEntry = resolveWorkerEntry();
     const w = new Worker(workerEntry, {
-      ...(WORKER_SMOL ? { smol: true } : {}),
+      ...(this.config.smol ? { smol: true } : {}),
     } as any);
     this.workers.push(w);
     this.workerMetadata.set(w, {});
@@ -247,6 +299,8 @@ export class WorkerPool {
       functionId: opts.functionId,
       functionPath: opts.functionPath,
       projectRoot: opts.projectRoot,
+      projectRef: opts.projectRef,
+      moduleVersion: opts.moduleVersion,
       env: opts.env,
       tlsPolicy,
       url: opts.request.url,
@@ -293,6 +347,8 @@ export class WorkerPool {
       level?: string;
       message?: string;
       waitUntilPending?: boolean;
+      moduleCacheHit?: boolean;
+      moduleCacheSize?: number;
     }) => {
       if (msg.type === "log" && opts.onLog && msg.timestamp && msg.stream && msg.level && msg.message) {
         opts.onLog({
@@ -326,6 +382,7 @@ export class WorkerPool {
 
       const workerExecMs = Math.round(performance.now() - execStart);
       this.totalWorkerExecMs += workerExecMs;
+      this.recordModuleCacheStats(msg);
       clearTimeout(timeout);
       cleanupInFlight();
       clearCancellationState();
@@ -470,9 +527,12 @@ export class WorkerPool {
   }
 
   private replaceWorker(dead: Worker) {
+    this.totalWorkerReplacements++;
     const metadata = this.workerMetadata.get(dead);
     if (metadata?.replacementTimer) clearTimeout(metadata.replacementTimer);
     this.workerMetadata.delete(dead);
+    const idleIdx = this.idle.indexOf(dead);
+    if (idleIdx !== -1) this.idle.splice(idleIdx, 1);
     const idx = this.workers.indexOf(dead);
     if (idx !== -1) this.workers.splice(idx, 1);
     this.activeWorkers.delete(dead);
@@ -492,28 +552,95 @@ export class WorkerPool {
       .join("\n");
   }
 
-  invalidateModule(functionId: string): void {
-    this.totalInvalidations++;
-    console.log(`[Pool] Invalidating module: ${functionId} — replacing all workers`);
-
-    const freshIdle: Worker[] = [];
-    for (const w of this.idle) {
-      this.activeWorkers.delete(w);
-      const idx = this.workers.indexOf(w);
-      if (idx !== -1) this.workers.splice(idx, 1);
-      try { w.terminate(); } catch { }
-
-      const fresh = this.createWorker();
-      this.activeWorkers.add(fresh);
-      freshIdle.push(fresh);
+  private recordModuleCacheStats(msg: { moduleCacheHit?: boolean; moduleCacheSize?: number }) {
+    if (msg.moduleCacheHit === true) {
+      this.totalModuleCacheHits++;
+    } else if (msg.moduleCacheHit === false) {
+      this.totalModuleCacheMisses++;
     }
-    this.idle = freshIdle;
+    if (typeof msg.moduleCacheSize === "number") {
+      this.lastModuleCacheEntries = msg.moduleCacheSize;
+    }
+  }
 
-    for (const w of this.activeWorkers) {
-      if (!this.idle.includes(w)) {
-        this.tainted.add(w);
+  private sendControlMessage(
+    worker: Worker,
+    message: WorkerControlMessage,
+  ): Promise<WorkerControlAck> {
+    return new Promise((resolve) => {
+      const timeout = setTimeout(() => {
+        worker.removeListener("message", onMsg);
+        resolve({ acked: false, invalidated: 0, moduleCacheSize: this.lastModuleCacheEntries });
+      }, CONTROL_MESSAGE_TIMEOUT_MS);
+
+      const onMsg = (msg: {
+        type?: string;
+        functionId?: string;
+        projectRef?: string;
+        invalidated?: number;
+        moduleCacheSize?: number;
+      }) => {
+        if (msg.type !== "invalidate_done") return;
+        if (message.type === "invalidate_module" && msg.functionId !== message.functionId) return;
+        if (message.type === "invalidate_project" && msg.projectRef !== message.projectRef) return;
+        clearTimeout(timeout);
+        worker.removeListener("message", onMsg);
+        resolve({
+          acked: true,
+          invalidated: typeof msg.invalidated === "number" ? msg.invalidated : 0,
+          moduleCacheSize: typeof msg.moduleCacheSize === "number" ? msg.moduleCacheSize : this.lastModuleCacheEntries,
+        });
+      };
+
+      worker.on("message", onMsg);
+      try {
+        worker.postMessage(message);
+      } catch {
+        clearTimeout(timeout);
+        worker.removeListener("message", onMsg);
+        resolve({ acked: false, invalidated: 0, moduleCacheSize: this.lastModuleCacheEntries });
+      }
+    });
+  }
+
+  private async invalidateWorkers(message: WorkerControlMessage): Promise<WorkerPoolControlResult> {
+    this.totalInvalidations++;
+    const workers = [...this.activeWorkers];
+    const results = await Promise.all(
+      workers.map(async (worker) => ({
+        worker,
+        result: await this.sendControlMessage(worker, message),
+      })),
+    );
+    for (const { worker, result } of results) {
+      if (result.acked) continue;
+      if (this.idle.includes(worker)) {
+        this.replaceWorker(worker);
+      } else {
+        this.tainted.add(worker);
       }
     }
+    const invalidated = results.reduce((sum, item) => sum + item.result.invalidated, 0);
+    const latestSize = results.at(-1)?.result.moduleCacheSize;
+    if (typeof latestSize === "number") {
+      this.lastModuleCacheEntries = latestSize;
+    }
+    this.totalModuleCacheInvalidated += invalidated;
+    return {
+      attempted: workers.length,
+      succeeded: results.filter((item) => item.result.acked).length,
+      invalidated,
+    };
+  }
+
+  invalidateModule(functionId: string): Promise<WorkerPoolControlResult> {
+    console.log(`[Pool] Invalidating module: ${functionId}`);
+    return this.invalidateWorkers({ type: "invalidate_module", functionId });
+  }
+
+  invalidateProject(projectRef: string): Promise<WorkerPoolControlResult> {
+    console.log(`[Pool] Invalidating project modules: ${projectRef}`);
+    return this.invalidateWorkers({ type: "invalidate_project", projectRef });
   }
 
   private async preheatWorker(
@@ -522,41 +649,69 @@ export class WorkerPool {
     functionPath: string,
     projectRoot: string,
     env: Record<string, string>,
-  ): Promise<boolean> {
+    options: PreheatOptions = {},
+  ): Promise<WorkerPreheatResult> {
     const tlsPolicy = await this.resolveTlsPolicy(env);
+    const projectRef = options.projectRef ?? extractProjectRef(functionId);
     return new Promise((resolve) => {
       const timeout = setTimeout(() => {
         worker.removeListener("message", onMsg);
-        resolve(false);
+        resolve({ success: false, cacheHit: null, moduleCacheSize: this.lastModuleCacheEntries });
       }, 10000);
 
-      const onMsg = (msg: { type?: string; functionId?: string }) => {
+      const onMsg = (msg: {
+        type?: string;
+        functionId?: string;
+        moduleCacheHit?: boolean;
+        moduleCacheSize?: number;
+      }) => {
         if (msg.type === "preheat_done" && msg.functionId === functionId) {
           clearTimeout(timeout);
           worker.removeListener("message", onMsg);
-          resolve(true);
+          this.recordModuleCacheStats(msg);
+          resolve({
+            success: true,
+            cacheHit: typeof msg.moduleCacheHit === "boolean" ? msg.moduleCacheHit : null,
+            moduleCacheSize: typeof msg.moduleCacheSize === "number" ? msg.moduleCacheSize : this.lastModuleCacheEntries,
+          });
         } else if (
           msg.type === "preheat_error" &&
           msg.functionId === functionId
         ) {
           clearTimeout(timeout);
           worker.removeListener("message", onMsg);
-          resolve(false);
+          resolve({ success: false, cacheHit: null, moduleCacheSize: this.lastModuleCacheEntries });
         }
       };
 
       worker.on("message", onMsg);
-      worker.postMessage({ type: "preheat", functionId, functionPath, projectRoot, env, tlsPolicy });
+      worker.postMessage({
+        type: "preheat",
+        functionId,
+        functionPath,
+        projectRoot,
+        projectRef,
+        moduleVersion: options.moduleVersion,
+        env,
+        tlsPolicy,
+      });
     });
   }
 
-  preheat(functionId: string, functionPath: string, projectRoot: string, env: Record<string, string>): Promise<boolean> {
+  preheat(
+    functionId: string,
+    functionPath: string,
+    projectRoot: string,
+    env: Record<string, string>,
+    options: PreheatOptions = {},
+  ): Promise<boolean> {
     const worker = this.idle.pop();
     if (!worker) {
       return Promise.resolve(false);
     }
 
-    return this.preheatWorker(worker, functionId, functionPath, projectRoot, env)
+    return this.preheatWorker(worker, functionId, functionPath, projectRoot, env, options)
+      .then((result) => result.success)
       .finally(() => {
         if (!this.draining && this.activeWorkers.has(worker)) {
           this.idle.push(worker);
@@ -569,19 +724,31 @@ export class WorkerPool {
     functionPath: string,
     projectRoot: string,
     env: Record<string, string>,
-  ): Promise<{ attempted: number; succeeded: number }> {
-    const workers = this.idle.splice(0, this.idle.length);
+    options: PreheatOptions = {},
+  ): Promise<WorkerPoolPreheatResult> {
+    const start = performance.now();
+    const requested = options.maxWorkers && options.maxWorkers > 0
+      ? Math.min(options.maxWorkers, this.idle.length)
+      : this.idle.length;
+    const workers = this.idle.splice(0, requested);
     if (workers.length === 0) {
-      return { attempted: 0, succeeded: 0 };
+      return { attempted: 0, succeeded: 0, cacheHits: 0, cacheMisses: 0, durationMs: 0 };
     }
 
     try {
       const results = await Promise.all(
-        workers.map((worker) => this.preheatWorker(worker, functionId, functionPath, projectRoot, env)),
+        workers.map((worker) => this.preheatWorker(worker, functionId, functionPath, projectRoot, env, options)),
       );
+      const durationMs = Math.round(performance.now() - start);
+      this.totalPreheatAttempts += workers.length;
+      this.totalPreheatSucceeded += results.filter((result) => result.success).length;
+      this.totalPreheatMs += durationMs;
       return {
         attempted: workers.length,
-        succeeded: results.filter(Boolean).length,
+        succeeded: results.filter((result) => result.success).length,
+        cacheHits: results.filter((result) => result.cacheHit === true).length,
+        cacheMisses: results.filter((result) => result.cacheHit === false).length,
+        durationMs,
       };
     } finally {
       if (!this.draining) {
@@ -594,6 +761,7 @@ export class WorkerPool {
     return {
       [`${prefix}_active_workers`]: this.config.size - this.idle.length,
       [`${prefix}_idle_workers`]: this.idle.length,
+      [`${prefix}_worker_smol`]: this.config.smol ? 1 : 0,
       [`${prefix}_queue_length`]: this.queue.length,
       [`${prefix}_total_requests`]: this.totalRequests,
       [`${prefix}_total_invalidations`]: this.totalInvalidations,
@@ -601,6 +769,14 @@ export class WorkerPool {
       [`${prefix}_total_env_load_ms`]: this.totalEnvLoadMs,
       [`${prefix}_total_queue_wait_ms`]: this.totalQueueWaitMs,
       [`${prefix}_total_worker_exec_ms`]: this.totalWorkerExecMs,
+      [`${prefix}_total_module_cache_hits`]: this.totalModuleCacheHits,
+      [`${prefix}_total_module_cache_misses`]: this.totalModuleCacheMisses,
+      [`${prefix}_total_module_cache_invalidated`]: this.totalModuleCacheInvalidated,
+      [`${prefix}_module_cache_entries_last_worker`]: this.lastModuleCacheEntries,
+      [`${prefix}_total_worker_replacements`]: this.totalWorkerReplacements,
+      [`${prefix}_total_preheat_attempts`]: this.totalPreheatAttempts,
+      [`${prefix}_total_preheat_succeeded`]: this.totalPreheatSucceeded,
+      [`${prefix}_total_preheat_ms`]: this.totalPreheatMs,
       [`${prefix}_avg_env_load_ms`]: this.totalRequests > 0 ? Math.round(this.totalEnvLoadMs / this.totalRequests) : 0,
       [`${prefix}_avg_queue_wait_ms`]: this.totalRequests > 0 ? Math.round(this.totalQueueWaitMs / this.totalRequests) : 0,
       [`${prefix}_total_queued_requests`]: this.totalQueueWaitMs > 0 ? this.totalRequests : 0,

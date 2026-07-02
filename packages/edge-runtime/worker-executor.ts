@@ -1,4 +1,4 @@
-import { parentPort, workerData } from "worker_threads";
+import { parentPort } from "worker_threads";
 import path from "path";
 import { getCapturedServeHandler, clearCapturedServeHandler, setTenantRef, setProjectRoot, setInjectedEnv, envWriteLog } from "./deno-compat";
 import { installEdgeFetchTlsPolicy, resolveEdgeFetchTlsPolicy } from "./fetch-tls-policy";
@@ -12,21 +12,56 @@ if (!parentPort) throw new Error("This file must be run as a Worker");
 
 const MAX_MODULE_CACHE = 20;
 
-const moduleCache = new Map<string, { module: any; lastUsed: number }>();
+type ModuleCacheEntry = {
+  module: any;
+  functionId: string;
+  projectRef: string | null;
+  lastUsed: number;
+};
+
+type LoadModuleResult = {
+  handler: any;
+  cacheHit: boolean;
+  moduleCacheSize: number;
+};
+
+const moduleCache = new Map<string, ModuleCacheEntry>();
 
 function evictOldestModule() {
-  if (moduleCache.size <= MAX_MODULE_CACHE) return;
-  let oldestKey = "";
-  let oldestTime = Infinity;
-  for (const [key, entry] of moduleCache) {
-    if (entry.lastUsed < oldestTime) {
-      oldestTime = entry.lastUsed;
-      oldestKey = key;
+  while (moduleCache.size >= MAX_MODULE_CACHE) {
+    let oldestKey = "";
+    let oldestTime = Infinity;
+    for (const [key, entry] of moduleCache) {
+      if (entry.lastUsed < oldestTime) {
+        oldestTime = entry.lastUsed;
+        oldestKey = key;
+      }
+    }
+    if (oldestKey) {
+      moduleCache.delete(oldestKey);
+    } else {
+      break;
     }
   }
-  if (oldestKey) {
-    moduleCache.delete(oldestKey);
+}
+
+function buildModuleCacheKey(functionId: string, functionPath: string, moduleVersion: string): string {
+  return `${functionId}\n${functionPath}\n${moduleVersion}`;
+}
+
+function buildModuleImportUrl(functionPath: string, moduleVersion: string): string {
+  return `${functionPath}?v=${encodeURIComponent(moduleVersion)}`;
+}
+
+function invalidateCachedModules(predicate: (entry: ModuleCacheEntry) => boolean): number {
+  let invalidated = 0;
+  for (const [key, entry] of moduleCache) {
+    if (predicate(entry)) {
+      moduleCache.delete(key);
+      invalidated++;
+    }
   }
+  return invalidated;
 }
 
 const originalProcessEnv = process.env;
@@ -140,19 +175,31 @@ function clearEdgeRuntimeCompat() {
   delete (globalThis as any).EdgeRuntime;
 }
 
-async function loadModule(functionPath: string): Promise<any> {
-  const cached = moduleCache.get(functionPath);
+async function loadModule(input: {
+  functionId: string;
+  functionPath: string;
+  moduleVersion?: string;
+  projectRef?: string | null;
+}): Promise<LoadModuleResult> {
+  const moduleVersion = input.moduleVersion || "unversioned";
+  const cacheKey = buildModuleCacheKey(input.functionId, input.functionPath, moduleVersion);
+  const cached = moduleCache.get(cacheKey);
   if (cached) {
     cached.lastUsed = Date.now();
-    return cached.module;
+    return { handler: cached.module, cacheHit: true, moduleCacheSize: moduleCache.size };
   }
 
   evictOldestModule();
 
-  const mod = await import(functionPath + "?t=" + Date.now());
+  const mod = await import(buildModuleImportUrl(input.functionPath, moduleVersion));
   const handler = mod.default || mod.handler || mod;
-  moduleCache.set(functionPath, { module: handler, lastUsed: Date.now() });
-  return handler;
+  moduleCache.set(cacheKey, {
+    module: handler,
+    functionId: input.functionId,
+    projectRef: input.projectRef || null,
+    lastUsed: Date.now(),
+  });
+  return { handler, cacheHit: false, moduleCacheSize: moduleCache.size };
 }
 
 async function executeFunction(handler: any, request: Request): Promise<Response> {
@@ -203,9 +250,31 @@ function extractProjectRef(functionId: string): string | null {
 }
 
 parentPort.on("message", async (msg: any) => {
+  if (msg.type === "invalidate_module") {
+    const invalidated = invalidateCachedModules((entry) => entry.functionId === msg.functionId);
+    parentPort!.postMessage({
+      type: "invalidate_done",
+      functionId: msg.functionId,
+      invalidated,
+      moduleCacheSize: moduleCache.size,
+    });
+    return;
+  }
+
+  if (msg.type === "invalidate_project") {
+    const invalidated = invalidateCachedModules((entry) => entry.projectRef === msg.projectRef);
+    parentPort!.postMessage({
+      type: "invalidate_done",
+      projectRef: msg.projectRef,
+      invalidated,
+      moduleCacheSize: moduleCache.size,
+    });
+    return;
+  }
+
   if (msg.type === "preheat") {
     try {
-      const ref = extractProjectRef(msg.functionId);
+      const ref = msg.projectRef || extractProjectRef(msg.functionId);
       const env = msg.env || {};
       setTenantRef(ref);
       setProjectRoot(msg.projectRoot || path.dirname(msg.functionPath));
@@ -215,14 +284,21 @@ parentPort.on("message", async (msg: any) => {
         await resolveMessageTlsPolicy(msg.tlsPolicy),
       );
       try {
-        await loadModule(msg.functionPath);
+        const moduleLoad = await loadModule({
+          functionId: msg.functionId,
+          functionPath: msg.functionPath,
+          moduleVersion: msg.moduleVersion,
+          projectRef: ref,
+        });
+        parentPort!.postMessage({
+          type: "preheat_done",
+          functionId: msg.functionId,
+          moduleCacheHit: moduleLoad.cacheHit,
+          moduleCacheSize: moduleLoad.moduleCacheSize,
+        });
       } finally {
         restoreFetchTlsPolicy();
       }
-      parentPort!.postMessage({
-        type: "preheat_done",
-        functionId: msg.functionId,
-      });
     } catch (err: any) {
       parentPort!.postMessage({
         type: "preheat_error",
@@ -246,7 +322,7 @@ parentPort.on("message", async (msg: any) => {
 
   const { functionId, functionPath, projectRoot, env, tlsPolicy, url, method, headers, body } = msg;
 
-  const projectRef = extractProjectRef(functionId);
+  const projectRef = msg.projectRef || extractProjectRef(functionId);
   setTenantRef(projectRef);
   setProjectRoot(projectRoot || path.dirname(functionPath));
   injectEnv(env);
@@ -258,7 +334,13 @@ parentPort.on("message", async (msg: any) => {
   );
 
   try {
-    const handler = await loadModule(functionPath);
+    const moduleLoad = await loadModule({
+      functionId,
+      functionPath,
+      moduleVersion: msg.moduleVersion,
+      projectRef,
+    });
+    const handler = moduleLoad.handler;
     currentAbortController = new AbortController();
 
     const req = new Request(url, {
@@ -280,6 +362,8 @@ parentPort.on("message", async (msg: any) => {
         streamId,
         status: response.status,
         headers: Object.fromEntries(response.headers.entries()),
+        moduleCacheHit: moduleLoad.cacheHit,
+        moduleCacheSize: moduleLoad.moduleCacheSize,
       });
 
       try {
@@ -334,6 +418,8 @@ parentPort.on("message", async (msg: any) => {
       headers: resHeaders,
       body: resBody,
       waitUntilPending: currentWaitUntilTasks.length > 0,
+      moduleCacheHit: moduleLoad.cacheHit,
+      moduleCacheSize: moduleLoad.moduleCacheSize,
     });
     await flushWaitUntilTasks(functionId);
   } catch (err: any) {

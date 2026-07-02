@@ -35,7 +35,48 @@ export interface EdgeFunctionDeployResult {
   bundled?: boolean;
   files?: number;
   import_map?: string | null;
+  bundle_hash?: string;
+  bundle_size_bytes?: number;
+  import_count?: number;
+  content_path?: string | null;
+  external_packages?: string[];
+  preheat?: EdgeFunctionPreheatResult;
   error?: string;
+}
+
+export interface EdgeFunctionPreheatPoolResult {
+  attempted: number;
+  succeeded: number;
+  cacheHits: number;
+  cacheMisses: number;
+  durationMs: number;
+}
+
+export interface EdgeFunctionPreheatResult {
+  ok: boolean;
+  status?: number;
+  duration_ms: number;
+  attempted: number;
+  succeeded: number;
+  cache_hits: number;
+  cache_misses: number;
+  foreground?: EdgeFunctionPreheatPoolResult;
+  background?: EdgeFunctionPreheatPoolResult;
+  error?: string;
+}
+
+export interface EdgeFunctionDeployMetrics {
+  total_deploys: number;
+  total_bundle_size_bytes: number;
+  last_bundle_size_bytes: number;
+  total_import_count: number;
+  last_import_count: number;
+  total_preheat_duration_ms: number;
+  last_preheat_duration_ms: number;
+  total_preheat_attempted: number;
+  total_preheat_succeeded: number;
+  total_preheat_cache_hits: number;
+  total_preheat_cache_misses: number;
 }
 
 const DEFAULT_FUNCTION_CONFIG: EdgeFunctionConfig = {
@@ -60,6 +101,53 @@ const FUNCTIONS_ROOT = path.resolve(config.edgeFunctionsDir);
 const VERSIONED_DIR = ".versions";
 const SAFE_REF_REGEX = /^[a-zA-Z0-9_-]{1,64}$/;
 const SAFE_SLUG_REGEX = /^[a-zA-Z0-9_-]{1,128}$/;
+const EXTERNAL_PACKAGE_REGEX = /^(?:@[a-zA-Z0-9._-]+\/)?[a-zA-Z0-9._-]+$/;
+const deployMetrics: EdgeFunctionDeployMetrics = {
+  total_deploys: 0,
+  total_bundle_size_bytes: 0,
+  last_bundle_size_bytes: 0,
+  total_import_count: 0,
+  last_import_count: 0,
+  total_preheat_duration_ms: 0,
+  last_preheat_duration_ms: 0,
+  total_preheat_attempted: 0,
+  total_preheat_succeeded: 0,
+  total_preheat_cache_hits: 0,
+  total_preheat_cache_misses: 0,
+};
+
+type BuildMetafileImport = {
+  path?: string;
+  original?: string;
+  kind?: string;
+  external?: boolean;
+};
+
+type BuildMetafile = {
+  inputs?: Record<string, {
+    bytes?: number;
+    imports?: BuildMetafileImport[];
+  }>;
+  outputs?: Record<string, {
+    bytes?: number;
+    imports?: BuildMetafileImport[];
+  }>;
+};
+
+type BundleFunctionResult = {
+  code: string;
+  sizeBytes: number;
+  importCount: number;
+  bunArtifactHash: string | null;
+  metafile: BuildMetafile | null;
+};
+
+function resolveExternalPackages(): string[] {
+  return (process.env.EDGE_FUNCTION_EXTERNAL_PACKAGES || "")
+    .split(",")
+    .map((pkg) => pkg.trim())
+    .filter((pkg) => pkg.length > 0 && EXTERNAL_PACKAGE_REGEX.test(pkg));
+}
 
 function validateRef(ref: string): string {
   if (!SAFE_REF_REGEX.test(ref)) {
@@ -103,6 +191,10 @@ function getFuncPath(ref: string, slug: string): string {
 
 function getVersionedFuncPath(ref: string, slug: string, version: string): string {
   return assertInside(getFuncDir(ref), path.join(getFuncDir(ref), VERSIONED_DIR, validateSlug(slug), version, "index.js"));
+}
+
+function getVersionedContentFuncPath(ref: string, slug: string, version: string, hash: string): string {
+  return assertInside(getFuncDir(ref), path.join(getFuncDir(ref), VERSIONED_DIR, validateSlug(slug), version, `index.${hash}.js`));
 }
 
 function getSrcPath(ref: string, slug: string): string {
@@ -154,15 +246,19 @@ async function bundleFunction(
   outName: string,
   minify: boolean = false,
   importMapPath?: string,
-): Promise<string | null> {
+): Promise<BundleFunctionResult | null> {
   try {
-    const buildOptions: any = {
+    const buildOptions: Parameters<typeof Bun.build>[0] & {
+      importMap?: string;
+      metafile?: boolean;
+    } = {
       entrypoints: [entrypoint],
       outdir,
       naming: `${outName}.[ext]`,
       target: "bun",
       minify,
-      external: [],
+      external: resolveExternalPackages(),
+      metafile: true,
     };
     if (importMapPath) {
       buildOptions.importMap = importMapPath;
@@ -177,12 +273,178 @@ async function bundleFunction(
       return null;
     }
 
-    // Read the output
-    const outPath = path.join(outdir, `${outName}.js`);
-    return await Bun.file(outPath).text();
+    const artifact = result.outputs.find((output) => output.kind === "entry-point") ?? result.outputs[0];
+    if (!artifact) {
+      logger.error(`[EdgeFunction] Bun.build() produced no output`, { entrypoint });
+      return null;
+    }
+
+    const code = await artifact.text();
+    const metafile = normalizeBuildMetafile((result as { metafile?: unknown }).metafile);
+    return {
+      code,
+      sizeBytes: typeof artifact.size === "number" ? artifact.size : bundleSizeBytes(code),
+      importCount: countMetafileImports(metafile) ?? countImports(code),
+      bunArtifactHash: typeof artifact.hash === "string" ? artifact.hash : null,
+      metafile,
+    };
   } catch (err) {
     logger.error(`[EdgeFunction] Bundle error`, { error: err });
     return null;
+  }
+}
+
+async function sha256Hex(content: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(content));
+  return Array.from(new Uint8Array(digest))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+function bundleSizeBytes(content: string): number {
+  return new TextEncoder().encode(content).byteLength;
+}
+
+function normalizeBuildMetafile(value: unknown): BuildMetafile | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as BuildMetafile;
+  return {
+    inputs: record.inputs && typeof record.inputs === "object" ? record.inputs : undefined,
+    outputs: record.outputs && typeof record.outputs === "object" ? record.outputs : undefined,
+  };
+}
+
+function countMetafileImports(metafile: BuildMetafile | null): number | null {
+  if (!metafile?.inputs) return null;
+  const specs = new Set<string>();
+  for (const input of Object.values(metafile.inputs)) {
+    for (const importEntry of input.imports || []) {
+      const specifier = importEntry.original || importEntry.path;
+      if (specifier) specs.add(specifier);
+    }
+  }
+  return specs.size;
+}
+
+function recordDeployMetrics(sizeBytes: number, importCount: number, preheat: EdgeFunctionPreheatResult): void {
+  deployMetrics.total_deploys++;
+  deployMetrics.total_bundle_size_bytes += sizeBytes;
+  deployMetrics.last_bundle_size_bytes = sizeBytes;
+  deployMetrics.total_import_count += importCount;
+  deployMetrics.last_import_count = importCount;
+  deployMetrics.total_preheat_duration_ms += preheat.duration_ms;
+  deployMetrics.last_preheat_duration_ms = preheat.duration_ms;
+  deployMetrics.total_preheat_attempted += preheat.attempted;
+  deployMetrics.total_preheat_succeeded += preheat.succeeded;
+  deployMetrics.total_preheat_cache_hits += preheat.cache_hits;
+  deployMetrics.total_preheat_cache_misses += preheat.cache_misses;
+}
+
+function snapshotDeployMetrics(): EdgeFunctionDeployMetrics {
+  return { ...deployMetrics };
+}
+
+function countImports(code: string): number {
+  const specs = new Set<string>();
+  for (const match of code.matchAll(/\bimport\s+(?:[^"'()]*?\s+from\s+)?["']([^"']+)["']/g)) {
+    specs.add(match[1]);
+  }
+  for (const match of code.matchAll(/\bimport\s*\(\s*["']([^"']+)["']\s*\)/g)) {
+    specs.add(match[1]);
+  }
+  for (const match of code.matchAll(/\bexport\s+[^"'()]*?\s+from\s+["']([^"']+)["']/g)) {
+    specs.add(match[1]);
+  }
+  return specs.size;
+}
+
+function countFileImports(files: Record<string, string>): number {
+  const specs = new Set<string>();
+  for (const code of Object.values(files)) {
+    for (const match of code.matchAll(/\bimport\s+(?:[^"'()]*?\s+from\s+)?["']([^"']+)["']/g)) {
+      specs.add(match[1]);
+    }
+    for (const match of code.matchAll(/\bimport\s*\(\s*["']([^"']+)["']\s*\)/g)) {
+      specs.add(match[1]);
+    }
+    for (const match of code.matchAll(/\bexport\s+[^"'()]*?\s+from\s+["']([^"']+)["']/g)) {
+      specs.add(match[1]);
+    }
+  }
+  return specs.size;
+}
+
+async function writeVersionedBundleArtifacts(
+  ref: string,
+  slug: string,
+  version: string,
+  code: string,
+  artifactSizeBytes?: number,
+): Promise<{ hash: string; sizeBytes: number; contentPath: string }> {
+  const hash = (await sha256Hex(code)).slice(0, 16);
+  const sizeBytes = typeof artifactSizeBytes === "number" ? artifactSizeBytes : bundleSizeBytes(code);
+  const indexPath = getVersionedFuncPath(ref, slug, version);
+  const contentPath = getVersionedContentFuncPath(ref, slug, version, hash);
+  await fs.mkdir(path.dirname(indexPath), { recursive: true });
+  await Bun.write(indexPath, code);
+  await Bun.write(contentPath, code);
+  return { hash, sizeBytes, contentPath };
+}
+
+function normalizePreheatPool(value: unknown): EdgeFunctionPreheatPoolResult {
+  if (!value || typeof value !== "object") {
+    return { attempted: 0, succeeded: 0, cacheHits: 0, cacheMisses: 0, durationMs: 0 };
+  }
+  const record = value as Record<string, unknown>;
+  return {
+    attempted: Number(record.attempted) || 0,
+    succeeded: Number(record.succeeded) || 0,
+    cacheHits: Number(record.cacheHits) || 0,
+    cacheMisses: Number(record.cacheMisses) || 0,
+    durationMs: Number(record.durationMs) || 0,
+  };
+}
+
+async function preheatRuntimeFunction(ref: string, slug: string): Promise<EdgeFunctionPreheatResult> {
+  const start = performance.now();
+  try {
+    const runtimeUrl = `http://${config.edgeRuntimeInternal}`;
+    const preheatRes = await fetch(`${runtimeUrl}/preheat/${ref}/${slug}`, {
+      method: "POST",
+      headers: runtimeInternalHeaders(),
+      signal: AbortSignal.timeout(10_000),
+    });
+    const durationMs = Math.round(performance.now() - start);
+    let body: unknown = null;
+    try {
+      body = await preheatRes.json();
+    } catch {
+      body = await preheatRes.text();
+    }
+    const bodyRecord = body && typeof body === "object" ? body as Record<string, unknown> : {};
+    const foreground = normalizePreheatPool(bodyRecord.foreground);
+    const background = normalizePreheatPool(bodyRecord.background);
+    return {
+      ok: preheatRes.ok && Boolean(bodyRecord.success ?? true),
+      status: preheatRes.status,
+      duration_ms: durationMs,
+      attempted: foreground.attempted + background.attempted,
+      succeeded: foreground.succeeded + background.succeeded,
+      cache_hits: foreground.cacheHits + background.cacheHits,
+      cache_misses: foreground.cacheMisses + background.cacheMisses,
+      foreground,
+      background,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      duration_ms: Math.round(performance.now() - start),
+      attempted: 0,
+      succeeded: 0,
+      cache_hits: 0,
+      cache_misses: 0,
+      error: error instanceof Error ? error.message : String(error),
+    };
   }
 }
 
@@ -233,7 +495,8 @@ async function computeNextFunctionVersion(ref: string, slug: string): Promise<st
 }
 
 async function readVersionedFunctionCode(ref: string, slug: string, version: string): Promise<string | null> {
-  const candidate = getVersionedFuncPath(ref, slug, version);
+  const candidate = await getVersionedArtifactPath(ref, slug, version);
+  if (!candidate) return null;
   if (!(await fileExists(candidate))) return null;
   return await Bun.file(candidate).text();
 }
@@ -249,6 +512,17 @@ export async function getVersionedArtifactPath(
   slug: string,
   version: string,
 ): Promise<string | null> {
+  const dir = assertInside(getFuncDir(ref), path.join(getFuncDir(ref), VERSIONED_DIR, validateSlug(slug), version));
+  try {
+    const entries = await fs.readdir(dir);
+    const contentAddressed = entries
+      .filter((entry) => /^index\.[a-f0-9]{16}\.js$/.test(entry))
+      .sort()
+      .at(0);
+    if (contentAddressed) return assertInside(dir, path.join(dir, contentAddressed));
+  } catch {
+    // Fall back to the compatibility index.js artifact below.
+  }
   const modern = getVersionedFuncPath(ref, slug, version);
   if (await fileExists(modern)) return modern;
   return null;
@@ -417,8 +691,9 @@ export const edgeFunctionService = {
       await Bun.write(getVersionedSrcPath(ref, safeSlug, version), code);
 
       // 2. Bundle with Bun.build()
-      const bundled = await bundleFunction(srcPath, dir, safeSlug, minify);
-      if (!bundled) {
+      const bundle = await bundleFunction(srcPath, dir, safeSlug, minify);
+      const deployedCode = bundle?.code || code;
+      if (!bundle) {
         // Fallback: if bundling fails (e.g., missing relative imports),
         // write the raw code directly as .js so at least simple functions work
         logger.warn(
@@ -426,40 +701,38 @@ export const edgeFunctionService = {
           { ref, slug },
         );
         await Bun.write(getFuncPath(ref, safeSlug), code);
-        await Bun.write(getVersionedFuncPath(ref, safeSlug, version), code);
       } else {
-        await Bun.write(getFuncPath(ref, safeSlug), bundled);
-        await Bun.write(getVersionedFuncPath(ref, safeSlug, version), bundled);
+        await Bun.write(getFuncPath(ref, safeSlug), bundle.code);
       }
+      const bundleMeta = await writeVersionedBundleArtifacts(ref, safeSlug, version, deployedCode, bundle?.sizeBytes);
+      const importCount = bundle?.importCount ?? countImports(code);
 
       // 3. Invalidate runtime caches
       await invalidateCache(ref, slug);
 
       // 4. Pre-heat the function in the worker pool (zero cold-start)
-      try {
-        const runtimeUrl = `http://${config.edgeRuntimeInternal}`;
-        const preheatRes = await fetch(`${runtimeUrl}/preheat/${ref}/${slug}`, {
-          method: "POST",
-          headers: runtimeInternalHeaders(),
-          signal: AbortSignal.timeout(10000),
-        });
-        if (!preheatRes.ok) {
-          logger.warn(`[EdgeFunction] Runtime preheat failed`, { ref, slug, status: preheatRes.status });
-        }
-      } catch {
-        // Non-fatal: function will be loaded on first real request
-        logger.debug(`[EdgeFunction] Preheat skipped (runtime unavailable)`, {
-          ref,
-          slug,
-        });
+      const preheat = await preheatRuntimeFunction(ref, slug);
+      if (!preheat.ok) {
+        logger.warn(`[EdgeFunction] Runtime preheat failed`, { ref, slug, status: preheat.status, error: preheat.error });
       }
+      recordDeployMetrics(bundleMeta.sizeBytes, importCount, preheat);
 
       await this.updateConfig(ref, safeSlug, { version });
 
       logger.info(
-        `[EdgeFunction] Deployed ${slug} for ${ref} (bundled=${!!bundled}, minify=${minify}, version=${version})`,
+        `[EdgeFunction] Deployed ${slug} for ${ref} (bundled=${!!bundle}, minify=${minify}, version=${version}, size=${bundleMeta.sizeBytes}, imports=${importCount}, bun_hash=${bundle?.bunArtifactHash || "none"}, externals=${resolveExternalPackages().join(",") || "none"}, preheat_ms=${preheat.duration_ms}, preheat=${preheat.succeeded}/${preheat.attempted})`,
       );
-      return { success: true, bundled: !!bundled, version };
+      return {
+        success: true,
+        bundled: !!bundle,
+        version,
+        bundle_hash: bundleMeta.hash,
+        bundle_size_bytes: bundleMeta.sizeBytes,
+        import_count: importCount,
+        content_path: bundleMeta.contentPath,
+        external_packages: resolveExternalPackages(),
+        preheat,
+      };
     } catch (err) {
       logger.error(`[EdgeFunction] Deploy failed`, { ref, slug, error: err });
       return {
@@ -557,7 +830,7 @@ export const edgeFunctionService = {
 
       // 3. Bundle from entrypoint
       const entrypointPath = resolveInside(stageDir, entrypoint);
-      const bundled = await bundleFunction(
+      const bundle = await bundleFunction(
         entrypointPath,
         dir,
         slug,
@@ -565,7 +838,7 @@ export const edgeFunctionService = {
         importMapPath,
       );
 
-      if (!bundled) {
+      if (!bundle) {
         // Cleanup staging on failure
         await fs.rm(stageDir, { recursive: true, force: true });
         logger.error(`[EdgeFunction] Bundle deploy failed`, { ref, slug });
@@ -589,11 +862,18 @@ export const edgeFunctionService = {
       await fs.cp(srcDir, versionedSrcDir, {
         recursive: true,
       });
-      await Bun.write(getFuncPath(ref, slug), bundled);
-      await Bun.write(getVersionedFuncPath(ref, slug, version), bundled);
+      await Bun.write(getFuncPath(ref, slug), bundle.code);
+      const bundleMeta = await writeVersionedBundleArtifacts(ref, slug, version, bundle.code, bundle.sizeBytes);
+      const importCount = bundle.importCount ?? countFileImports(files);
 
       // 4. Invalidate runtime caches
       await invalidateCache(ref, slug);
+
+      const preheat = await preheatRuntimeFunction(ref, slug);
+      if (!preheat.ok) {
+        logger.warn(`[EdgeFunction] Runtime preheat failed`, { ref, slug, status: preheat.status, error: preheat.error });
+      }
+      recordDeployMetrics(bundleMeta.sizeBytes, importCount, preheat);
 
       await this.updateConfig(ref, slug, {
         version,
@@ -601,7 +881,7 @@ export const edgeFunctionService = {
       });
 
       logger.info(
-        `[EdgeFunction] Bundle deployed ${slug} for ${ref} (${Object.keys(files).length} files, minify=${minify}, version=${version})`,
+        `[EdgeFunction] Bundle deployed ${slug} for ${ref} (${Object.keys(files).length} files, minify=${minify}, version=${version}, size=${bundleMeta.sizeBytes}, imports=${importCount}, bun_hash=${bundle.bunArtifactHash || "none"}, externals=${resolveExternalPackages().join(",") || "none"}, preheat_ms=${preheat.duration_ms}, preheat=${preheat.succeeded}/${preheat.attempted})`,
       );
       return {
         success: true,
@@ -609,6 +889,12 @@ export const edgeFunctionService = {
         version,
         files: Object.keys(files).length,
         import_map: importMapPath ? path.basename(importMapPath) : null,
+        bundle_hash: bundleMeta.hash,
+        bundle_size_bytes: bundleMeta.sizeBytes,
+        import_count: importCount,
+        content_path: bundleMeta.contentPath,
+        external_packages: resolveExternalPackages(),
+        preheat,
       };
     } catch (err) {
       logger.error(`[EdgeFunction] Bundle deploy failed`, {
@@ -635,6 +921,7 @@ export const edgeFunctionService = {
     preheat_ok: boolean;
     preheat_status?: number;
     preheat_body?: unknown;
+    deploy_metrics: EdgeFunctionDeployMetrics;
     error?: string;
   }> {
     const runtimeUrl = `http://${config.edgeRuntimeInternal}`;
@@ -684,6 +971,7 @@ export const edgeFunctionService = {
             : preheatRes.ok,
         preheat_status: preheatRes.status,
         preheat_body: preheatBody,
+        deploy_metrics: snapshotDeployMetrics(),
       };
     } catch (err) {
       return {
@@ -693,9 +981,14 @@ export const edgeFunctionService = {
         artifact_exists: artifactExists,
         runtime_healthy: runtimeHealthy,
         preheat_ok: false,
+        deploy_metrics: snapshotDeployMetrics(),
         error: err instanceof Error ? err.message : String(err),
       };
     }
+  },
+
+  deployMetrics(): EdgeFunctionDeployMetrics {
+    return snapshotDeployMetrics();
   },
 
   /** Read function bundled code (runtime version) */
@@ -739,11 +1032,11 @@ export const edgeFunctionService = {
 
     const records = await Promise.all(
       versions.map(async (version) => {
-        const bundlePath = getVersionedFuncPath(ref, slug, version);
+        const bundlePath = await getVersionedArtifactPath(ref, slug, version);
         const sourcePath = getVersionedSrcPath(ref, slug, version);
         const sourceDirPath = assertInside(getFuncDir(ref), path.join(getFuncDir(ref), VERSIONED_DIR, validateSlug(slug), version, "src"));
         const [hasBundle, hasSource, hasSourceDir] = await Promise.all([
-          fileExists(bundlePath),
+          bundlePath ? fileExists(bundlePath) : Promise.resolve(false),
           fileExists(sourcePath),
           fileExists(sourceDirPath),
         ]);

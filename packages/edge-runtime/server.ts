@@ -18,6 +18,15 @@ const PORT = Number(process.env.EDGE_RUNTIME_PORT) || Number(process.env.PORT) |
 const HOST = process.env.EDGE_RUNTIME_HOST || process.env.HOST || "127.0.0.1";
 const POOL_SIZE = Number(process.env.WORKER_POOL_SIZE) || 4;
 const BACKGROUND_POOL_SIZE = Number(process.env.BACKGROUND_WORKER_POOL_SIZE) || Math.max(1, Math.min(POOL_SIZE, 2));
+const BACKGROUND_PREHEAT_MODE = process.env.EDGE_BACKGROUND_PREHEAT_MODE || "one";
+const FOREGROUND_WORKER_SMOL = resolveBooleanEnv(
+  process.env.EDGE_FOREGROUND_WORKER_SMOL ?? process.env.WORKER_SMOL,
+  false,
+);
+const BACKGROUND_WORKER_SMOL = resolveBooleanEnv(
+  process.env.EDGE_BACKGROUND_WORKER_SMOL ?? process.env.WORKER_SMOL,
+  true,
+);
 const FUNCTIONS_DIR = path.resolve(process.env.EDGE_FUNCTIONS_DIR || "./functions");
 const FUNCTIONS_BASE_DIR = path.resolve(process.env.EDGE_FUNCTIONS_BASE_DIR || FUNCTIONS_DIR);
 const MGMT_API = process.env.MANAGEMENT_API_URL || "http://127.0.0.1:9090";
@@ -60,6 +69,16 @@ type AuthFailureEntry = {
 };
 
 const authFailureCache = new Map<string, AuthFailureEntry>();
+const projectModuleEpoch = new Map<string, number>();
+
+function resolveBooleanEnv(value: string | undefined, fallback: boolean): boolean {
+  if (value === undefined) return fallback;
+  return !["0", "false", "no", "off"].includes(value.trim().toLowerCase());
+}
+
+function resolveBackgroundPreheatWorkers(): number | undefined {
+  return BACKGROUND_PREHEAT_MODE === "all" ? undefined : 1;
+}
 
 if (!isPathInside(FUNCTIONS_DIR_REALPATH, FUNCTIONS_BASE_REALPATH)) {
   throw new Error(`EDGE_FUNCTIONS_DIR must be inside EDGE_FUNCTIONS_BASE_DIR`);
@@ -80,6 +99,16 @@ function isSafeFunctionSlug(value: string): boolean {
 
 function isSafeVersion(value: string): boolean {
   return VERSION_PATTERN.test(value);
+}
+
+function getProjectModuleEpoch(projectRef: string): number {
+  return projectModuleEpoch.get(projectRef) ?? 0;
+}
+
+function bumpProjectModuleEpoch(projectRef: string): number {
+  const next = getProjectModuleEpoch(projectRef) + 1;
+  projectModuleEpoch.set(projectRef, next);
+  return next;
 }
 
 async function authFailureKey(
@@ -199,11 +228,13 @@ if (!process.env.EDGE_RUNTIME_VERSION) {
 const pool = new WorkerPool({
   size: POOL_SIZE,
   requestTimeout: FUNCTION_REQUEST_TIMEOUT_MS,
+  smol: FOREGROUND_WORKER_SMOL,
 });
 
 const backgroundPool = new WorkerPool({
   size: BACKGROUND_POOL_SIZE,
   requestTimeout: BACKGROUND_FUNCTION_TIMEOUT_MS,
+  smol: BACKGROUND_WORKER_SMOL,
 });
 
 async function resolveProjectRoot(projectRef: string): Promise<string> {
@@ -224,7 +255,16 @@ async function resolveProjectRoot(projectRef: string): Promise<string> {
   return realProjectRoot;
 }
 
-async function resolveFunctionPath(projectRef: string, functionName: string, requestedVersion?: string | null): Promise<{ functionPath: string; projectRoot: string; activeVersion: string | null }> {
+async function resolveFunctionPath(
+  projectRef: string,
+  functionName: string,
+  requestedVersion?: string | null,
+): Promise<{
+  functionPath: string;
+  projectRoot: string;
+  activeVersion: string | null;
+  moduleVersion: string;
+}> {
   if (!isSafeFunctionSlug(functionName)) {
     throw new Error("Invalid function slug");
   }
@@ -253,7 +293,17 @@ async function resolveFunctionPath(projectRef: string, functionName: string, req
       if (!stat.isFile()) {
         continue;
       }
-      return { functionPath: realCandidate, projectRoot, activeVersion };
+      return {
+        functionPath: realCandidate,
+        projectRoot,
+        activeVersion,
+        moduleVersion: [
+          `env:${getProjectModuleEpoch(projectRef)}`,
+          `mtime:${stat.mtimeMs}`,
+          `ctime:${stat.ctimeMs}`,
+          `size:${stat.size}`,
+        ].join(":"),
+      };
     } catch (error) {
       if (error instanceof Error && error.message.includes("escapes")) throw error;
     }
@@ -283,7 +333,7 @@ async function dispatchFunction(
   const requestedVersion = request.headers.get("x-supacloud-function-version") || null;
 
   try {
-    const { functionPath, projectRoot, activeVersion } = await resolveFunctionPath(projectRef, functionName, requestedVersion);
+    const { functionPath, projectRoot, activeVersion, moduleVersion } = await resolveFunctionPath(projectRef, functionName, requestedVersion);
     const versionSuffix = requestedVersion ? `_v${requestedVersion}` : "";
     const functionId = `${projectRef}_${functionName}${versionSuffix}`;
     const targetPool = opts?.background ? backgroundPool : pool;
@@ -298,6 +348,8 @@ async function dispatchFunction(
       functionId,
       functionPath,
       projectRoot,
+      projectRef,
+      moduleVersion,
       env: opts?.background
         ? withBackgroundInternalToken(tenantEnv, backgroundInternalToken)
         : tenantEnv,
@@ -609,7 +661,7 @@ const app = new Elysia()
       .join("\n");
   })
 
-  .post("/invalidate/:ref/:slug", (c) => {
+  .post("/invalidate/:ref/:slug", async (c) => {
     const authError = requireInternalAuth(c.request);
     if (authError) return authError;
     if (!isSafeProjectRef(c.params.ref) || !isSafeFunctionSlug(c.params.slug)) {
@@ -618,12 +670,14 @@ const app = new Elysia()
 
     const functionId = `${c.params.ref}_${c.params.slug}`;
     invalidateTenantEnvCache(c.params.ref);
-    pool.invalidateModule(functionId);
-    backgroundPool.invalidateModule(functionId);
-    return { invalidated: functionId };
+    const [foreground, background] = await Promise.all([
+      pool.invalidateModule(functionId),
+      backgroundPool.invalidateModule(functionId),
+    ]);
+    return { invalidated: functionId, foreground, background };
   })
 
-  .post("/invalidate-env/:ref", (c) => {
+  .post("/invalidate-env/:ref", async (c) => {
     const authError = requireInternalAuth(c.request);
     if (authError) return authError;
     if (!isSafeProjectRef(c.params.ref)) {
@@ -631,9 +685,12 @@ const app = new Elysia()
     }
 
     invalidateTenantEnvCache(c.params.ref);
-    pool.invalidateModule(`${c.params.ref}_env`);
-    backgroundPool.invalidateModule(`${c.params.ref}_env`);
-    return { invalidated: c.params.ref };
+    const moduleEpoch = bumpProjectModuleEpoch(c.params.ref);
+    const [foreground, background] = await Promise.all([
+      pool.invalidateProject(c.params.ref),
+      backgroundPool.invalidateProject(c.params.ref),
+    ]);
+    return { invalidated: c.params.ref, moduleEpoch, foreground, background };
   })
 
   .post("/preheat/:ref/:slug", async (c) => {
@@ -641,12 +698,19 @@ const app = new Elysia()
     if (authError) return authError;
 
     try {
-      const { functionPath, projectRoot } = await resolveFunctionPath(c.params.ref, c.params.slug);
+      const { functionPath, projectRoot, moduleVersion } = await resolveFunctionPath(c.params.ref, c.params.slug);
       const functionId = `${c.params.ref}_${c.params.slug}`;
       const tenantEnv = await loadTenantEnv(c.params.ref);
       const [foreground, background] = await Promise.all([
-        pool.preheatIdleWorkers(functionId, functionPath, projectRoot, tenantEnv),
-        backgroundPool.preheatIdleWorkers(functionId, functionPath, projectRoot, tenantEnv),
+        pool.preheatIdleWorkers(functionId, functionPath, projectRoot, tenantEnv, {
+          projectRef: c.params.ref,
+          moduleVersion,
+        }),
+        backgroundPool.preheatIdleWorkers(functionId, functionPath, projectRoot, tenantEnv, {
+          projectRef: c.params.ref,
+          moduleVersion,
+          maxWorkers: resolveBackgroundPreheatWorkers(),
+        }),
       ]);
       return {
         preheated: functionId,

@@ -97,6 +97,61 @@ describe("final security regressions", () => {
     }
   });
 
+  test("function deploy response exposes bundle and preheat metadata", async () => {
+    const deploySpy = spyOn(projectService, "deployFunctionDetailed").mockResolvedValue({
+      success: true,
+      version: "3",
+      bundled: true,
+      bundle_hash: "0123456789abcdef",
+      bundle_size_bytes: 4096,
+      import_count: 2,
+      external_packages: ["left-pad"],
+      preheat: {
+        ok: true,
+        duration_ms: 15,
+        attempted: 3,
+        succeeded: 3,
+        cache_hits: 1,
+        cache_misses: 2,
+      },
+    } as Awaited<ReturnType<typeof projectService.deployFunctionDetailed>>);
+    const request = appWith(projectFunctionsRoutes);
+
+    try {
+      const response = await request("/v1/projects/proj_1/functions/hello", {
+        method: "POST",
+        headers: { ...masterHeaders, "Content-Type": "application/json" },
+        body: JSON.stringify({ code: "export default { fetch() { return new Response('ok') } }" }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({
+        success: true,
+        bundled: true,
+        version: "3",
+        bundle_hash: "0123456789abcdef",
+        bundle_size_bytes: 4096,
+        import_count: 2,
+        external_packages: ["left-pad"],
+        preheat: {
+          ok: true,
+          attempted: 3,
+          succeeded: 3,
+          cache_hits: 1,
+          cache_misses: 2,
+        },
+      });
+      expect(deploySpy).toHaveBeenCalledWith(
+        "proj_1",
+        "hello",
+        "export default { fetch() { return new Response('ok') } }",
+        false,
+      );
+    } finally {
+      deploySpy.mockRestore();
+    }
+  });
+
   test("internal runtime env endpoint requires master auth and returns unmasked values", async () => {
     const runtimeEnvSpy = spyOn(runtimeEnvService, "buildProjectRuntimeEnv").mockResolvedValue({
       SUPACLOUD_PROJECT_REF: "proj_1",
