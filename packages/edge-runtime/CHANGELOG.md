@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.0](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.8.8...edge-runtime-v0.9.0) (2026-07-02)
+
+
+### Features
+
+* **edge-runtime:** optimize function preheat and bundle metadata ([eb4f305](https://github.com/zuohuadong/supacloud/commit/eb4f305ce77041e21f4e71c1166b4ddd33f6d81b))
+
 ## [0.8.8](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.8.7...edge-runtime-v0.8.8) (2026-06-30)
 
 

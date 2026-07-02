@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.38.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.37.11...management-api-v0.38.0) (2026-07-02)
+
+
+### Features
+
+* **edge-runtime:** optimize function preheat and bundle metadata ([eb4f305](https://github.com/zuohuadong/supacloud/commit/eb4f305ce77041e21f4e71c1166b4ddd33f6d81b))
+
 ## [0.37.11](https://github.com/zuohuadong/supacloud/compare/management-api-v0.37.10...management-api-v0.37.11) (2026-06-30)
 
 
