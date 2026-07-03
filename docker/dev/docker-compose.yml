@@ -22,7 +22,7 @@ services:
       - supacloud-dev
 
   postgres:
-    image: supabase/postgres:17.6.1.139
+    image: supabase/postgres:17.6.1.142
     restart: always
     environment:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
