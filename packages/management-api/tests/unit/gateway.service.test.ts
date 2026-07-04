@@ -541,6 +541,32 @@ describe("CaddyGatewayProvider", () => {
         }
     });
 
+    test("appends a terminal 404 route for unmatched hosts", async () => {
+        const calls: Array<{ url: string; method: string; body: any }> = [];
+        const restore = captureFetch(calls);
+        const provider = new CaddyGatewayProvider();
+
+        await provider.configureFrontendRoute({
+            projectRef: "proj123",
+            deploymentId: "0000002d",
+            hosts: ["static.example.com"],
+            root: "/var/supacloud/frontends/proj123/0000002d/build",
+            mode: "static",
+        });
+
+        const load = calls.filter((call) => call.method === "POST" && call.url.endsWith("/load")).at(-1);
+        const routes = load?.body?.apps?.http?.servers?.supacloud?.routes ?? [];
+        const fallback = routes.at(-1);
+
+        expect(routes.find((item: any) => item["@id"] === "route-frontend-proj123-0000002d")).toBeDefined();
+        expect(fallback?.["@id"]).toBe("route-system-unmatched-host-404");
+        expect(fallback?.match).toBeUndefined();
+        expect(fallback?.handle).toEqual([{ handler: "static_response", status_code: 404 }]);
+        expect(fallback?.terminal).toBe(true);
+
+        restore();
+    });
+
     test("configureCustomGatewayRoutes renders controlled proxy and static Caddy routes", async () => {
         const calls: Array<{ url: string; method: string; body: any }> = [];
         const restore = captureFetch(calls);
