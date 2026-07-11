@@ -1,10 +1,71 @@
 /**
  * Global API Client for SupaCloud Studio
- * Automatically attaches the master token for managed backend requests
- * and handles common error scenarios (e.g. 401 Unauthorized -> redirect to login).
+ * Uses the HttpOnly Studio session cookie for managed backend requests and
+ * handles common error scenarios (e.g. 401 Unauthorized -> redirect to login).
  */
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 15000;
+
+export type StudioLoginResult =
+  | { success: true; username?: string }
+  | { success: false; error: string };
+
+export interface StudioSessionState {
+  authenticated: boolean;
+  username?: string;
+}
+
+async function readJsonObject(response: Response): Promise<Record<string, unknown>> {
+  const value: unknown = await response.json().catch(() => ({}));
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+export async function loginStudio(username: string, password: string): Promise<StudioLoginResult> {
+  const response = await fetch("/auth/login", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json", "Accept": "application/json" },
+    body: JSON.stringify({ username, password }),
+  });
+  const data = await readJsonObject(response);
+  if (response.ok && data.success === true) {
+    return {
+      success: true,
+      ...(typeof data.username === "string" ? { username: data.username } : {}),
+    };
+  }
+  const message = typeof data.error === "string"
+    ? data.error
+    : typeof data.message === "string"
+      ? data.message
+      : "Login failed";
+  return { success: false, error: message };
+}
+
+export async function getStudioSession(): Promise<StudioSessionState> {
+  const response = await fetch("/auth/session", {
+    method: "GET",
+    credentials: "include",
+    headers: { "Accept": "application/json" },
+  });
+  const data = await readJsonObject(response);
+  const authenticated = response.ok && (data.valid === true || data.authenticated === true);
+  return {
+    authenticated,
+    ...(authenticated && typeof data.username === "string" ? { username: data.username } : {}),
+  };
+}
+
+export async function logoutStudio(): Promise<boolean> {
+  const response = await fetch("/auth/logout", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Accept": "application/json" },
+  });
+  return response.ok;
+}
 
 function mergeAbortSignals(signals: Array<AbortSignal | null | undefined>): AbortSignal | undefined {
   const validSignals = signals.filter(Boolean) as AbortSignal[];
@@ -47,14 +108,7 @@ async function normalizeErrorResponse(response: Response): Promise<Response> {
 }
 
 export async function apiClient(url: string, options: RequestInit = {}): Promise<Response> {
-  const token = typeof localStorage !== 'undefined' ? localStorage.getItem("supacloud_session") : null;
-  
   const headers = new Headers(options.headers || {});
-  
-  // Only inject Authorization if not already provided and if we have a token
-  if (token && !headers.has("Authorization")) {
-    headers.set("Authorization", `Bearer ${token}`);
-  }
   
   // Set default Content-Type for JSON requests if body is stringified JSON
   if (options.body && typeof options.body === 'string' && options.body.startsWith('{') && !headers.has("Content-Type")) {
@@ -67,7 +121,12 @@ export async function apiClient(url: string, options: RequestInit = {}): Promise
 
   let response: Response;
   try {
-    response = await fetch(url, { ...options, headers, signal });
+    response = await fetch(url, {
+      ...options,
+      headers,
+      signal,
+      credentials: options.credentials ?? "include",
+    });
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") {
       if (options.signal?.aborted && !timeoutController.signal.aborted) {
@@ -88,32 +147,16 @@ export async function apiClient(url: string, options: RequestInit = {}): Promise
 
   response = await normalizeErrorResponse(response);
   
-  // Handle 401 Unauthorized globally by redirecting to login page (with Race-Condition Pre-Flight check)
+  // Recheck the cookie-backed session before redirecting on a transient 401.
   if (response.status === 401 && typeof window !== 'undefined' && window.location.pathname !== '/login') {
-    if (token) {
-      try {
-        // Pre-flight validation to see if the token is ACTUALLY gone 
-        // (prevents kicks when another tab/process just refreshed it or temporary network hiccup)
-        const verifyRes = await fetch('/auth/verify', {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ token })
-        });
-        const verifyText = await verifyRes.text();
-        const verifyData = verifyText ? JSON.parse(verifyText) : { valid: false };
-        
-        if (verifyData.valid) {
-          // Token is actually still valid! Swallow the 401 logout to prevent false disconnect
-          return response;
-        }
-      } catch (e) {
-        // Fall through to logout
+    try {
+      const session = await getStudioSession();
+      if (session.authenticated) {
+        return response;
       }
+    } catch {
+      // Fall through to the login redirect.
     }
-    
-    // Truly expired
-    localStorage.removeItem("supacloud_session");
-    localStorage.removeItem("supacloud_master_token");
     window.location.href = "/login";
   }
   

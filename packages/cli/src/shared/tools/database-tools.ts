@@ -117,6 +117,8 @@ Actions: ${allActions.join(", ")}${readOnly ? " (read-only mode)" : ""}`,
             name: z.string().optional().describe("[apply_migration] Migration name"),
             // create_table_rls
             columns: z.string().optional().describe("[create_table_rls] Column definitions"),
+            policy_mode: z.enum(["deny_all", "owner"]).optional().describe("[create_table_rls] RLS policy mode (default: deny_all)"),
+            owner_column: z.string().optional().describe("[create_table_rls owner] UUID owner column matched to auth.uid()"),
         },
         async (args: any) => {
             const { action } = args;
@@ -405,9 +407,16 @@ Actions: ${allActions.join(", ")}${readOnly ? " (read-only mode)" : ""}`,
                 }
                 case "create_table_rls": {
                     if (!args.table || !args.columns) throw new Error("'table' and 'columns' required");
-                    const sql = `BEGIN; CREATE TABLE IF NOT EXISTS "${schema}"."${args.table}" (${args.columns}); ALTER TABLE "${schema}"."${args.table}" ENABLE ROW LEVEL SECURITY; CREATE POLICY "Enable ALL for authenticated" ON "${schema}"."${args.table}" FOR ALL TO authenticated USING (true) WITH CHECK (true); COMMIT;`;
+                    const qualifiedTable = `${quoteIdentifier(schema, "schema")}.${quoteIdentifier(args.table, "table")}`;
+                    const columns = validateColumnDefinitions(args.columns);
+                    const policyMode = args.policy_mode || "deny_all";
+                    if (policyMode !== "deny_all" && policyMode !== "owner") throw new Error("Invalid RLS policy mode");
+                    const policySql = buildRlsPolicySql(qualifiedTable, policyMode, args.owner_column);
+                    const sql = `BEGIN; CREATE TABLE IF NOT EXISTS ${qualifiedTable} (${columns}); ALTER TABLE ${qualifiedTable} ENABLE ROW LEVEL SECURITY; ${policySql} COMMIT;`;
                     const r = await execSql(sql);
-                    text = r.ok ? `✅ Table '${schema}.${args.table}' created with RLS` : `❌ Failed (${r.status}): ${JSON.stringify(r.data)}`;
+                    text = r.ok
+                        ? `✅ Table '${schema}.${args.table}' created with RLS (${policyMode === "owner" ? "auth.uid() owner policy" : "deny-all by default"})`
+                        : `❌ Failed (${r.status}): ${JSON.stringify(r.data)}`;
                     break;
                 }
                 default: text = `❌ Unknown action: ${action}`;
@@ -415,6 +424,53 @@ Actions: ${allActions.join(", ")}${readOnly ? " (read-only mode)" : ""}`,
             return { content: [{ type: "text" as const, text }] };
         }
     );
+}
+
+function quoteIdentifier(value: unknown, label: string): string {
+    if (typeof value !== "string" || !/^[A-Za-z_][A-Za-z0-9_]{0,62}$/.test(value)) {
+        throw new Error(`Invalid ${label} identifier`);
+    }
+    return `"${value}"`;
+}
+
+function validateColumnDefinitions(value: unknown): string {
+    if (typeof value !== "string") throw new Error("Invalid column definitions");
+    const columns = value.trim();
+    if (!columns || columns.length > 16_384) throw new Error("Invalid column definitions");
+    if (
+        /[;\0]/.test(columns)
+        || /--|\/\*|\*\//.test(columns)
+        || /\b(?:ALTER|CREATE|DROP|GRANT|REVOKE|TRUNCATE|COPY|CALL|DO)\b/i.test(columns)
+    ) {
+        throw new Error("Unsafe column definitions");
+    }
+    return columns;
+}
+
+function buildRlsPolicySql(
+    qualifiedTable: string,
+    policyMode: "deny_all" | "owner",
+    ownerColumnValue: unknown,
+): string {
+    const policyNames = [
+        "Enable ALL for authenticated",
+        "SupaCloud owner select",
+        "SupaCloud owner insert",
+        "SupaCloud owner update",
+        "SupaCloud owner delete",
+    ];
+    const dropPolicies = policyNames
+        .map((name) => `DROP POLICY IF EXISTS "${name}" ON ${qualifiedTable};`)
+        .join(" ");
+    if (policyMode === "deny_all") return dropPolicies;
+
+    const ownerColumn = quoteIdentifier(ownerColumnValue, "owner column");
+    const predicate = `auth.uid() IS NOT NULL AND auth.uid() = ${ownerColumn}`;
+    return `${dropPolicies}
+      CREATE POLICY "SupaCloud owner select" ON ${qualifiedTable} FOR SELECT TO authenticated USING (${predicate});
+      CREATE POLICY "SupaCloud owner insert" ON ${qualifiedTable} FOR INSERT TO authenticated WITH CHECK (${predicate});
+      CREATE POLICY "SupaCloud owner update" ON ${qualifiedTable} FOR UPDATE TO authenticated USING (${predicate}) WITH CHECK (${predicate});
+      CREATE POLICY "SupaCloud owner delete" ON ${qualifiedTable} FOR DELETE TO authenticated USING (${predicate});`;
 }
 
 function sqlString(value: string): string {

@@ -3,7 +3,7 @@
 # Pigsty Supabase One-click Installation Script
 # 
 # Usage:
-#   1. Edit config.env configuration file
+#   1. Provide environment/CLI values or edit /etc/supabase/install.env
 #   2. Run: sudo bash install.sh [options]
 #
 # Options:
@@ -24,9 +24,37 @@ set -e
 export DEBIAN_FRONTEND=noninteractive
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CONFIG_FILE="${SCRIPT_DIR}/config.env"
-OPT_CONFIG_FILE="/opt/supacloud/config.env"
+TEMPLATE_CONFIG_FILE="${SUPACLOUD_TEMPLATE_CONFIG_FILE:-${SCRIPT_DIR}/config.env}"
+INSTALL_INPUT_FILE="${SUPACLOUD_INSTALL_CONFIG_FILE:-/etc/supabase/install.env}"
+JWT_KEYS_FILE="${SUPACLOUD_JWT_KEYS_FILE:-/etc/supabase/jwt-keys.env}"
+MANAGEMENT_ENV_FILE="${SUPACLOUD_MANAGEMENT_ENV_FILE:-/etc/supabase/management-api.env}"
+CREDENTIALS_FILE="${SUPACLOUD_CREDENTIALS_FILE:-/etc/supabase/supacloud-credentials.env}"
+MASTER_TOKEN_FILE="${SUPACLOUD_MASTER_TOKEN_FILE:-/etc/supabase/master-token.env}"
 BUN_VERSION="${BUN_VERSION:-1.3.14}"
+XCADDY_VERSION="${XCADDY_VERSION:-v0.4.5}"
+
+# shellcheck source=scripts/lib/install_config.sh
+source "${SCRIPT_DIR}/scripts/lib/install_config.sh"
+# shellcheck source=scripts/lib/release_assets.sh
+source "${SCRIPT_DIR}/scripts/lib/release_assets.sh"
+
+# Installation values are layered deterministically:
+# explicit environment/CLI > persisted root-only input > legacy root state >
+# tracked template. Indexed arrays keep this compatible with Bash 3.2.
+SUPACLOUD_INSTALL_KEYS=(
+    INTERNAL_IP SUPABASE_PUBLIC_DOMAIN SUPABASE_STUDIO_DOMAIN SUPABASE_DOMAIN
+    DASHBOARD_USERNAME DASHBOARD_PASSWORD POSTGRES_PASSWORD GRAFANA_PASSWORD
+    JWT_SECRET ANON_KEY SERVICE_ROLE_KEY SWAP_SIZE_GB PG_VERSION PIGSTY_VERSION
+    TIMEZONE PIGSTY_CONFIG_TEMPLATE SUPACLOUD_INSTALL_LEGACY_SUPABASE_STACK
+    SUPACLOUD_MIGRATE_LEGACY_SUPABASE_COMPOSE S3_STORAGE_TYPE JUICEFS_BACKEND
+    S3_ENDPOINT S3_PROTOCOL S3_REGION S3_BUCKET S3_ACCESS_KEY S3_SECRET_KEY
+    S3_FORCE_PATH_STYLE
+    EXTERNAL_S3_ENDPOINT EXTERNAL_S3_REGION EXTERNAL_S3_BUCKET
+    EXTERNAL_S3_ACCESS_KEY EXTERNAL_S3_SECRET_KEY IMAGINARY_IMAGE EDGE_RUNTIME
+    ENABLE_ANALYTICS ANALYTICS_BACKEND LOGFLARE_ERL_FLAGS
+)
+SUPACLOUD_EXPLICIT_INSTALL_KEYS=()
+SUPACLOUD_EXPLICIT_INSTALL_VALUES=()
 
 # -- Command Line Argument Parsing --------------------------------------------
 # Parse arguments first so they can override configuration file values
@@ -61,6 +89,14 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+for SUPACLOUD_CONFIG_KEY in "${SUPACLOUD_INSTALL_KEYS[@]}"; do
+    if declare -p "$SUPACLOUD_CONFIG_KEY" >/dev/null 2>&1; then
+        SUPACLOUD_EXPLICIT_INSTALL_KEYS+=("$SUPACLOUD_CONFIG_KEY")
+        SUPACLOUD_EXPLICIT_INSTALL_VALUES+=("${!SUPACLOUD_CONFIG_KEY}")
+    fi
+done
+unset SUPACLOUD_CONFIG_KEY
+
 # Color definitions
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -72,6 +108,46 @@ log_info() { echo -e "${GREEN}[INFO]${NC} $1"; }
 log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 log_step() { echo -e "${BLUE}[STEP]${NC} $1"; }
+
+# Resolve artifact trust once through a single policy contract. Direct
+# install.sh execution defaults to fail-closed release mode; setup.sh passes
+# release explicitly, while the server CLI passes local explicitly.
+supacloud_resolve_artifact_policy() {
+    local requested_mode="${SUPACLOUD_SETUP_ARTIFACT_MODE-}"
+    local requested_force="${SUPACLOUD_FORCE_VERIFIED_RELEASE_ASSETS-}"
+
+    case "$requested_force" in
+        ""|true|false) ;;
+        *)
+            log_error "SUPACLOUD_FORCE_VERIFIED_RELEASE_ASSETS must be true or false"
+            return 1
+            ;;
+    esac
+
+    [[ -n "$requested_mode" ]] || requested_mode="release"
+    case "$requested_mode" in
+        release)
+            requested_force="true"
+            ;;
+        local)
+            if [[ "$requested_force" == "true" ]]; then
+                log_error "Local artifact mode cannot be combined with forced verified release assets"
+                return 1
+            fi
+            requested_force="false"
+            ;;
+        *)
+            log_error "SUPACLOUD_SETUP_ARTIFACT_MODE must be release or local"
+            return 1
+            ;;
+    esac
+
+    SUPACLOUD_RESOLVED_ARTIFACT_MODE="$requested_mode"
+    SUPACLOUD_SETUP_ARTIFACT_MODE="$requested_mode"
+    SUPACLOUD_FORCE_VERIFIED_RELEASE_ASSETS="$requested_force"
+    export SUPACLOUD_RESOLVED_ARTIFACT_MODE SUPACLOUD_SETUP_ARTIFACT_MODE \
+        SUPACLOUD_FORCE_VERIFIED_RELEASE_ASSETS
+}
 
 ensure_bun_version() {
     local required_version="${BUN_VERSION:-1.3.14}"
@@ -119,11 +195,14 @@ ensure_bun_version() {
     fi
 }
 
-ensure_pg_hba_rule() {
+ensure_pg_hba_rule() (
     local rule="$1"
     local pg_hba="${2:-/pg/data/pg_hba.conf}"
     local patroni_config=""
     local cluster_name=""
+    local tmp_before="" tmp_after=""
+    umask 077
+    trap 'rm -f "${tmp_before:-}" "${tmp_after:-}"' EXIT HUP INT TERM
 
     if command -v patronictl >/dev/null 2>&1; then
         for candidate in /etc/patroni/patroni.yml /etc/patroni.yml /etc/patroni.yaml; do
@@ -137,7 +216,6 @@ ensure_pg_hba_rule() {
     if [[ -n "$patroni_config" ]] && [[ -f "$pg_hba" ]] && grep -q "overwritten by Patroni" "$pg_hba" 2>/dev/null; then
         cluster_name=$(patronictl -c "$patroni_config" list 2>/dev/null | sed -n 's/.*Cluster: \([^ ]*\).*/\1/p' | head -1)
         cluster_name="${cluster_name:-pg-meta}"
-        local tmp_before="" tmp_after=""
         tmp_before=$(mktemp) || {
             log_warn "Failed to allocate temporary file for Patroni pg_hba update"
             return 1
@@ -200,7 +278,7 @@ PYCODE
         cp "$pg_hba" "${pg_hba}.bak.$(date +%s)"
         echo "$rule" >> "$pg_hba"
     fi
-}
+)
 
 
 configure_low_memory_tcp_guardrails() {
@@ -233,17 +311,6 @@ net.ipv4.tcp_fin_timeout = 15
 net.ipv4.tcp_tw_reuse = 1
 EOF
     sysctl --system >/dev/null 2>&1 || log_warn "Failed to apply sysctl guardrails; they will apply after reboot"
-}
-
-sync_runtime_config() {
-    local source_file="${1:-$CONFIG_FILE}"
-    mkdir -p "$(dirname "$OPT_CONFIG_FILE")"
-    if [[ -f "$source_file" ]]; then
-        cp "$source_file" "$OPT_CONFIG_FILE"
-    else
-        : > "$OPT_CONFIG_FILE"
-    fi
-    chmod 600 "$OPT_CONFIG_FILE"
 }
 
 append_or_replace_env() {
@@ -286,62 +353,170 @@ derive_studio_domain() {
     printf 'studio.%s' "$(derive_base_domain "$api_domain")"
 }
 
+supacloud_is_valid_ipv4() {
+    local value="$1"
+    local first second third fourth octet
+    local LC_ALL=C
+    [[ "$value" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] || return 1
+    IFS='.' read -r first second third fourth <<< "$value"
+    for octet in "$first" "$second" "$third" "$fourth"; do
+        [[ "$octet" == "0" || "$octet" =~ ^[1-9][0-9]{0,2}$ ]] || return 1
+        (( 10#$octet <= 255 )) || return 1
+    done
+}
+
+supacloud_is_valid_dns_hostname() {
+    local hostname="$1"
+    local label
+    local labels=()
+    local LC_ALL=C
+    [[ -n "$hostname" && ${#hostname} -le 253 ]] || return 1
+    [[ "$hostname" == *.* ]] || return 1
+    [[ "$hostname" =~ ^[A-Za-z0-9.-]+$ ]] || return 1
+    [[ "$hostname" != .* && "$hostname" != *. && "$hostname" != *..* ]] || return 1
+    [[ ! "$hostname" =~ ^[0-9.]+$ ]] || return 1
+    IFS='.' read -r -a labels <<< "$hostname"
+    (( ${#labels[@]} >= 2 )) || return 1
+    for label in "${labels[@]}"; do
+        [[ ${#label} -le 63 ]] || return 1
+        [[ "$label" =~ ^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?$ ]] || return 1
+    done
+}
+
+validate_install_network_inputs() {
+    if [[ -n "${INTERNAL_IP:-}" ]] && ! supacloud_is_valid_ipv4 "$INTERNAL_IP"; then
+        log_error "INTERNAL_IP must be a canonical IPv4 address"
+        return 1
+    fi
+    if [[ -n "${SUPABASE_DOMAIN:-}" ]] && ! supacloud_is_valid_dns_hostname "$SUPABASE_DOMAIN"; then
+        log_error "SUPABASE_DOMAIN must be a DNS hostname without a scheme, port, path, whitespace, or metacharacters"
+        return 1
+    fi
+    if [[ -n "${SUPABASE_PUBLIC_DOMAIN:-}" ]] && ! supacloud_is_valid_dns_hostname "$SUPABASE_PUBLIC_DOMAIN"; then
+        log_error "SUPABASE_PUBLIC_DOMAIN must be a DNS hostname without a scheme, port, path, whitespace, or metacharacters"
+        return 1
+    fi
+    if [[ -n "${SUPABASE_STUDIO_DOMAIN:-}" ]] && ! supacloud_is_valid_dns_hostname "$SUPABASE_STUDIO_DOMAIN"; then
+        log_error "SUPABASE_STUDIO_DOMAIN must be a DNS hostname without a scheme, port, path, whitespace, or metacharacters"
+        return 1
+    fi
+}
+
+validate_logflare_erl_flags() {
+    local flags="${LOGFLARE_ERL_FLAGS:-}"
+    local LC_ALL=C
+    [[ -z "$flags" ]] && return 0
+    if [[ ${#flags} -gt 512 ]] \
+        || [[ ! "$flags" =~ ^[+A-Za-z0-9_.:=,-]+(\ +[+A-Za-z0-9_.:=,-]+)*$ ]]; then
+        log_error "LOGFLARE_ERL_FLAGS contains unsupported BEAM flag syntax"
+        return 1
+    fi
+}
+
+persist_resolved_install_config() {
+    local key
+    local desired_pairs=()
+    mkdir -p "$(dirname "$INSTALL_INPUT_FILE")"
+    for key in "${SUPACLOUD_INSTALL_KEYS[@]}"; do
+        if declare -p "$key" >/dev/null 2>&1; then
+            desired_pairs+=("$key" "${!key}")
+        fi
+    done
+    supacloud_write_shell_env_pairs "$INSTALL_INPUT_FILE" "${desired_pairs[@]}"
+    supacloud_atomic_remove_env_key "$INSTALL_INPUT_FILE" \
+        PORT MANAGEMENT_API_URL DATABASE_URL MASTER_TOKEN SCRIPTS_PATH PIGSTY_PATH BASE_DOMAIN \
+        SUPACLOUD_JWT_SECRET REALTIME_SECRET_KEY_BASE REALTIME_DB_ENC_KEY REALTIME_API_SECRET \
+        PG_HOST PG_PORT PG_USER PG_DATABASE PGPASSWORD SECRETS_ENCRYPTION_KEY SUPABASE_SCHEMA_PATH \
+        IMAGINARY_URL REALTIME_ADMIN_URL
+    unset PORT MANAGEMENT_API_URL DATABASE_URL MASTER_TOKEN SCRIPTS_PATH PIGSTY_PATH BASE_DOMAIN \
+        SUPACLOUD_JWT_SECRET REALTIME_SECRET_KEY_BASE REALTIME_DB_ENC_KEY REALTIME_API_SECRET \
+        PG_HOST PG_PORT PG_USER PG_DATABASE PGPASSWORD SECRETS_ENCRYPTION_KEY SUPABASE_SCHEMA_PATH \
+        IMAGINARY_URL REALTIME_ADMIN_URL
+}
+
+apply_recovered_env_value() {
+    local target_key="$1"
+    local source_file="$2"
+    local source_key="${3:-$target_key}"
+    local recovered_value
+    recovered_value=$(supacloud_env_value "$source_file" "$source_key")
+    [[ -z "$recovered_value" ]] || printf -v "$target_key" '%s' "$recovered_value"
+}
+
+recover_legacy_install_config() {
+    # The legacy runtime file is a last-resort recovery source. The unified
+    # credentials file below has precedence when both contain the same value.
+    apply_recovered_env_value POSTGRES_PASSWORD "$MANAGEMENT_ENV_FILE" PGPASSWORD
+    apply_recovered_env_value JWT_SECRET "$MANAGEMENT_ENV_FILE" JWT_SECRET
+    apply_recovered_env_value S3_STORAGE_TYPE "$MANAGEMENT_ENV_FILE" S3_STORAGE_TYPE
+    apply_recovered_env_value IMAGINARY_IMAGE "$MANAGEMENT_ENV_FILE" IMAGINARY_IMAGE
+    local recovered_base_domain
+    recovered_base_domain=$(supacloud_env_value "$MANAGEMENT_ENV_FILE" BASE_DOMAIN)
+    [[ -z "$recovered_base_domain" ]] || SUPABASE_PUBLIC_DOMAIN="api.${recovered_base_domain}"
+
+    if [[ -f "$CREDENTIALS_FILE" ]]; then
+        apply_recovered_env_value INTERNAL_IP "$CREDENTIALS_FILE"
+        apply_recovered_env_value SUPABASE_PUBLIC_DOMAIN "$CREDENTIALS_FILE" PUBLIC_DOMAIN
+        apply_recovered_env_value SUPABASE_STUDIO_DOMAIN "$CREDENTIALS_FILE" STUDIO_DOMAIN
+        local key
+        for key in \
+            POSTGRES_PASSWORD DASHBOARD_USERNAME DASHBOARD_PASSWORD GRAFANA_PASSWORD \
+            JWT_SECRET ANON_KEY SERVICE_ROLE_KEY PG_VERSION PIGSTY_VERSION \
+            S3_STORAGE_TYPE JUICEFS_BACKEND S3_ENDPOINT S3_PROTOCOL S3_REGION S3_BUCKET \
+            S3_ACCESS_KEY S3_SECRET_KEY S3_FORCE_PATH_STYLE \
+            EXTERNAL_S3_ENDPOINT EXTERNAL_S3_REGION EXTERNAL_S3_BUCKET \
+            EXTERNAL_S3_ACCESS_KEY EXTERNAL_S3_SECRET_KEY; do
+            apply_recovered_env_value "$key" "$CREDENTIALS_FILE"
+        done
+    fi
+}
+
+load_install_config_layers() {
+    local key index parsed_install_input encoded_value decoded_value
+
+    for key in "${SUPACLOUD_INSTALL_KEYS[@]}"; do
+        unset "$key"
+    done
+
+    if [[ -f "$TEMPLATE_CONFIG_FILE" ]]; then
+        # The repository file supplies defaults only and is never written.
+        source "$TEMPLATE_CONFIG_FILE"
+    fi
+
+    recover_legacy_install_config
+
+    if [[ -f "$INSTALL_INPUT_FILE" ]]; then
+        parsed_install_input=$(supacloud_parse_install_input \
+            "$INSTALL_INPUT_FILE" "${SUPACLOUD_INSTALL_KEYS[@]}") || return 1
+        while IFS=$'\t' read -r key encoded_value; do
+            [[ -n "$key" ]] || continue
+            decoded_value=$({
+                printf '%s' "$encoded_value" | python3 -c '
+import base64
+import sys
+sys.stdout.buffer.write(base64.b64decode(sys.stdin.buffer.read(), validate=True))
+'
+                printf '\034'
+            })
+            decoded_value=${decoded_value%$'\034'}
+            printf -v "$key" '%s' "$decoded_value"
+        done <<< "$parsed_install_input"
+    fi
+
+    index=0
+    while [[ $index -lt ${#SUPACLOUD_EXPLICIT_INSTALL_KEYS[@]} ]]; do
+        key="${SUPACLOUD_EXPLICIT_INSTALL_KEYS[$index]}"
+        printf -v "$key" '%s' "${SUPACLOUD_EXPLICIT_INSTALL_VALUES[$index]}"
+        index=$((index + 1))
+    done
+}
+
 # ========== Check Configuration ==========
 check_config() {
     log_step "Checking configuration..."
-    
-    if [[ ! -f "$CONFIG_FILE" ]]; then
-        # Enhanced logic: auto-generate config.env if critical env vars exist
-        if [[ -n "$INTERNAL_IP" || -n "$SUPABASE_PUBLIC_DOMAIN" ]]; then
-             GENERATED_STUDIO_DOMAIN="${SUPABASE_STUDIO_DOMAIN:-$(derive_studio_domain "${SUPABASE_PUBLIC_DOMAIN:-api.${INTERNAL_IP}.nip.io}" "${INTERNAL_IP:-}")}"
-             log_info "Environment variables detected, generating configuration file..."
-             cat > "$CONFIG_FILE" << EOF
-# Auto-generated configuration - $(date)
-INTERNAL_IP=${INTERNAL_IP}
-SUPABASE_PUBLIC_DOMAIN=${SUPABASE_PUBLIC_DOMAIN}
-SUPABASE_STUDIO_DOMAIN=${GENERATED_STUDIO_DOMAIN}
-DB_PASSWORD=${DB_PASSWORD:-DBUser.Supa}
-JWT_SECRET=${JWT_SECRET}
-ANON_KEY=${ANON_KEY}
-SERVICE_ROLE_KEY=${SERVICE_ROLE_KEY}
-DASHBOARD_USERNAME=${DASHBOARD_USERNAME:-admin}
-DASHBOARD_PASSWORD=${DASHBOARD_PASSWORD:-pigsty}
-GRAFANA_PASSWORD=${GRAFANA_PASSWORD:-pigsty}
-S3_STORAGE_TYPE=${S3_STORAGE_TYPE:-juicefs}
-PIGSTY_CONFIG_TEMPLATE=${PIGSTY_CONFIG_TEMPLATE:-supabase}
-SUPACLOUD_INSTALL_LEGACY_SUPABASE_STACK=${SUPACLOUD_INSTALL_LEGACY_SUPABASE_STACK:-false}
-SUPACLOUD_MIGRATE_LEGACY_SUPABASE_COMPOSE=${SUPACLOUD_MIGRATE_LEGACY_SUPABASE_COMPOSE:-false}
-IMAGINARY_IMAGE=${IMAGINARY_IMAGE:-h2non/imaginary:1.2.4}
-# Edge Runtime: Bun (built-in, no configuration needed)
-EOF
-             log_info "Configuration file generated: $CONFIG_FILE"
-        else
-            log_error "Configuration file not found: $CONFIG_FILE"
-            log_info "Please copy and edit the config file: cp config.env.example config.env"
-        fi
-    fi
-    # Load configuration file (if exists)
-    if [[ -f "$CONFIG_FILE" ]]; then
-        # Backup command line variables to prevent being overwritten by source
-        [[ -n "$INTERNAL_IP" ]] && local CMD_IP="$INTERNAL_IP"
-        [[ -n "$SUPABASE_PUBLIC_DOMAIN" ]] && local CMD_DOMAIN="$SUPABASE_PUBLIC_DOMAIN"
-        [[ -n "$SUPABASE_STUDIO_DOMAIN" ]] && local CMD_STUDIO="$SUPABASE_STUDIO_DOMAIN"
-        [[ -n "$S3_STORAGE_TYPE" ]] && local CMD_S3="$S3_STORAGE_TYPE"
-        [[ -n "$POSTGRES_PASSWORD" ]] && local CMD_PG_PASS="$POSTGRES_PASSWORD"
-        
-        source "$CONFIG_FILE"
-
-        # Restore command line variables (highest priority)
-        [[ -n "$CMD_IP" ]] && INTERNAL_IP="$CMD_IP"
-        [[ -n "$CMD_DOMAIN" ]] && SUPABASE_PUBLIC_DOMAIN="$CMD_DOMAIN"
-        [[ -n "$CMD_STUDIO" ]] && SUPABASE_STUDIO_DOMAIN="$CMD_STUDIO"
-        [[ -n "$CMD_S3" ]] && S3_STORAGE_TYPE="$CMD_S3"
-        [[ -n "$CMD_PG_PASS" ]] && {
-            POSTGRES_PASSWORD="$CMD_PG_PASS"
-            DASHBOARD_PASSWORD="$CMD_PG_PASS"
-            GRAFANA_PASSWORD="$CMD_PG_PASS"
-        }
-    fi
+    load_install_config_layers
+    validate_install_network_inputs
+    validate_logflare_erl_flags
     
     # 1. Validate/Get INTERNAL_IP
     if [[ -z "$INTERNAL_IP" || "$INTERNAL_IP" == "10.6.0.9" ]]; then
@@ -391,10 +566,12 @@ EOF
                 done
             fi
         fi
-        log_info "Internal IP set: $INTERNAL_IP"
-    else
-        log_info "Using configured internal IP: $INTERNAL_IP"
     fi
+    if ! supacloud_is_valid_ipv4 "$INTERNAL_IP"; then
+        log_error "INTERNAL_IP must be a canonical IPv4 address"
+        return 1
+    fi
+    log_info "Internal IP set: $INTERNAL_IP"
     
     # 2. Validate/Get domain configuration
     # Compatibility with legacy configuration
@@ -419,6 +596,10 @@ EOF
             log_warn "Non-interactive environment detected, using default API domain: $SUPABASE_PUBLIC_DOMAIN"
         fi
     fi
+    if ! supacloud_is_valid_dns_hostname "$SUPABASE_PUBLIC_DOMAIN"; then
+        log_error "SUPABASE_PUBLIC_DOMAIN must be a DNS hostname without a scheme, port, path, whitespace, or metacharacters"
+        return 1
+    fi
     log_info "API Domain: $SUPABASE_PUBLIC_DOMAIN"
 
     # Get Studio Domain
@@ -438,6 +619,10 @@ EOF
             SUPABASE_STUDIO_DOMAIN="$DEFAULT_STUDIO_DOMAIN"
             log_warn "Non-interactive environment detected, using default Studio domain: $SUPABASE_STUDIO_DOMAIN"
         fi
+    fi
+    if ! supacloud_is_valid_dns_hostname "$SUPABASE_STUDIO_DOMAIN"; then
+        log_error "SUPABASE_STUDIO_DOMAIN must be a DNS hostname without a scheme, port, path, whitespace, or metacharacters"
+        return 1
     fi
     log_info "Studio Domain: $SUPABASE_STUDIO_DOMAIN"
 
@@ -460,6 +645,7 @@ EOF
         log_info "Grafana password generated"
     fi
     generate_jwt_keys
+    persist_resolved_install_config
     
     log_info "Configuration verification passed"
     log_info "  Internal IP: $INTERNAL_IP"
@@ -470,6 +656,16 @@ EOF
 # ========== Generate JWT Keys ==========
 generate_jwt_keys() {
     log_step "Checking JWT configuration..."
+
+    if [[ -z "${JWT_SECRET:-}" ]]; then
+        JWT_SECRET=$(supacloud_shell_env_value "$JWT_KEYS_FILE" JWT_SECRET)
+    fi
+    if [[ -z "${ANON_KEY:-}" ]]; then
+        ANON_KEY=$(supacloud_shell_env_value "$JWT_KEYS_FILE" ANON_KEY)
+    fi
+    if [[ -z "${SERVICE_ROLE_KEY:-}" ]]; then
+        SERVICE_ROLE_KEY=$(supacloud_shell_env_value "$JWT_KEYS_FILE" SERVICE_ROLE_KEY)
+    fi
     
     # Auto-generate JWT_SECRET if not set or empty
     if [[ -z "$JWT_SECRET" ]]; then
@@ -485,7 +681,7 @@ generate_jwt_keys() {
         # Generate JWT for anon role
         ANON_PAYLOAD=$(echo -n '{"role":"anon","iss":"supabase","iat":'"$(date +%s)"',"exp":'"$(($(date +%s) + 157680000))"'}' | base64 -w 0 | tr '+/' '-_' | tr -d '=')
         ANON_HEADER=$(echo -n '{"alg":"HS256","typ":"JWT"}' | base64 -w 0 | tr '+/' '-_' | tr -d '=')
-        ANON_SIGNATURE=$(echo -n "${ANON_HEADER}.${ANON_PAYLOAD}" | openssl dgst -sha256 -hmac "$JWT_SECRET" -binary | base64 -w 0 | tr '+/' '-_' | tr -d '=')
+        ANON_SIGNATURE=$(supacloud_hs256_signature "$JWT_SECRET" "${ANON_HEADER}.${ANON_PAYLOAD}")
         ANON_KEY="${ANON_HEADER}.${ANON_PAYLOAD}.${ANON_SIGNATURE}"
     else
         log_info "Using custom ANON_KEY"
@@ -497,25 +693,21 @@ generate_jwt_keys() {
         # Generate JWT for service_role role
         SERVICE_PAYLOAD=$(echo -n '{"role":"service_role","iss":"supabase","iat":'"$(date +%s)"',"exp":'"$(($(date +%s) + 157680000))"'}' | base64 -w 0 | tr '+/' '-_' | tr -d '=')
         SERVICE_HEADER=$(echo -n '{"alg":"HS256","typ":"JWT"}' | base64 -w 0 | tr '+/' '-_' | tr -d '=')
-        SERVICE_SIGNATURE=$(echo -n "${SERVICE_HEADER}.${SERVICE_PAYLOAD}" | openssl dgst -sha256 -hmac "$JWT_SECRET" -binary | base64 -w 0 | tr '+/' '-_' | tr -d '=')
+        SERVICE_SIGNATURE=$(supacloud_hs256_signature "$JWT_SECRET" "${SERVICE_HEADER}.${SERVICE_PAYLOAD}")
         SERVICE_ROLE_KEY="${SERVICE_HEADER}.${SERVICE_PAYLOAD}.${SERVICE_SIGNATURE}"
     else
         log_info "Using custom SERVICE_ROLE_KEY"
     fi
     
-    # Save generated keys to file
-    mkdir -p /etc/supabase
-    cat > /etc/supabase/jwt-keys.env << EOF
-# Supabase JWT Keys - Auto-generated on $(date)
-# Please keep this file safe!
-
-JWT_SECRET="${JWT_SECRET}"
-ANON_KEY="${ANON_KEY}"
-SERVICE_ROLE_KEY="${SERVICE_ROLE_KEY}"
-EOF
-    chmod 600 /etc/supabase/jwt-keys.env
+    # Save generated keys to a Bash-sourced root-only file using shell-safe
+    # serialization. User-provided values must never become executable syntax.
+    mkdir -p "$(dirname "$JWT_KEYS_FILE")"
+    supacloud_write_shell_env_pairs "$JWT_KEYS_FILE" \
+        JWT_SECRET "$JWT_SECRET" \
+        ANON_KEY "$ANON_KEY" \
+        SERVICE_ROLE_KEY "$SERVICE_ROLE_KEY"
     
-    log_info "JWT keys saved to: /etc/supabase/jwt-keys.env"
+    log_info "JWT keys saved to: $JWT_KEYS_FILE"
 }
 
 # ========== Check OS Compatibility ==========
@@ -575,107 +767,22 @@ check_system() {
     log_info "System architecture: $ARCH"
 }
 
-# ========== Setup local SSH (Required for Ansible) ==========
-setup_local_ssh() {
-    log_step "Configuring local SSH passwordless login..."
-    
-    # OpenCloudOS compatibility check
-    if grep -qi "opencloudos" /etc/os-release 2>/dev/null; then
-        log_warn "OpenCloudOS detected, skipping sshd config modification to avoid connection interruption"
-        SKIP_SSHD_RESTART=true
-    fi
-    
-    # Ensure .ssh directory exists
-    mkdir -p ~/.ssh
-    chmod 700 ~/.ssh
-    
-    # Generate keypair if not exists (use ed25519 to bypass RHEL 9 strict RSA policy)
-    if [[ ! -f ~/.ssh/id_ed25519 && ! -f ~/.ssh/id_rsa ]]; then
-        log_info "Generating SSH keypair (ed25519)..."
-        ssh-keygen -t ed25519 -N "" -f ~/.ssh/id_ed25519
-    fi
-    
-    # Attempt to read public key (prefer ed25519, fall back to rsa)
-    local PUB_KEY=""
-    [[ -f ~/.ssh/id_ed25519.pub ]] && PUB_KEY=$(cat ~/.ssh/id_ed25519.pub)
-    [[ -z "$PUB_KEY" && -f ~/.ssh/id_rsa.pub ]] && PUB_KEY=$(cat ~/.ssh/id_rsa.pub)
-    
-    # Add public key to authorized_keys
-    if [[ -n "$PUB_KEY" ]] && ! grep -q "$PUB_KEY" ~/.ssh/authorized_keys 2>/dev/null; then
-        log_info "Adding public key to authorized_keys..."
-        echo "$PUB_KEY" >> ~/.ssh/authorized_keys
-        chmod 600 ~/.ssh/authorized_keys
-    fi
-    
-    # Add to known_hosts (avoid yes/no prompt), including all local IPs
-    local ALL_LOCAL_IPS
-    ALL_LOCAL_IPS=$(hostname -I 2>/dev/null || echo "")
-    ssh-keyscan -H localhost 127.0.0.1 ::1 $ALL_LOCAL_IPS >> ~/.ssh/known_hosts 2>/dev/null || true
-    
-    # Ensure sshd base environment is ready (keys + relaxed config)
-    # Ensure correct configuration even if sshd is already running
-    mkdir -p /run/sshd /var/run/sshd /var/empty/sshd /etc/ssh /etc/ssh/sshd_config.d
-    chmod 755 /var/empty/sshd
-    
-    # Generate host keys (often missing in Docker containers)
-    ssh-keygen -A 2>/dev/null || true
-    if [[ ! -f /etc/ssh/ssh_host_rsa_key ]]; then
-        ssh-keygen -t rsa -f /etc/ssh/ssh_host_rsa_key -N "" -q 2>/dev/null || true
-    fi
-    if [[ ! -f /etc/ssh/ssh_host_ed25519_key ]]; then
-        ssh-keygen -t ed25519 -f /etc/ssh/ssh_host_ed25519_key -N "" -q 2>/dev/null || true
-    fi
-    if [[ ! -f /etc/ssh/ssh_host_ecdsa_key ]]; then
-        ssh-keygen -t ecdsa -f /etc/ssh/ssh_host_ecdsa_key -N "" -q 2>/dev/null || true
-    fi
-    
-    # Override sshd config: allow root login, use PAM, relaxed mode
-    # RHEL 9 Include /etc/ssh/sshd_config.d/*.conf by default, 00 prefix for priority
-    # CAUTION: OpenCloudOS skips this to avoid SSH interruption
-    if [[ "${SKIP_SSHD_RESTART:-false}" != "true" ]]; then
-        cat > /etc/ssh/sshd_config.d/00-supacloud-test.conf << 'EOF'
-UsePAM yes
-PermitRootLogin yes
-StrictModes no
-PubkeyAuthentication yes
-PasswordAuthentication yes
-EOF
-    
-        # Start/Restart sshd to apply new configuration
-        if command -v systemctl &>/dev/null && systemctl is-system-running &>/dev/null; then
-            # systemd environment: restart sshd
-            systemctl restart sshd 2>/dev/null || systemctl start sshd 2>/dev/null || true
-        else
-            # Non-systemd environment (or systemd not ready): start directly
-            if pgrep -x sshd >/dev/null; then
-                # sshd already running, restart to apply new configuration
-                pkill -x sshd 2>/dev/null || true
-                sleep 1
-            fi
-            /usr/sbin/sshd -E /var/log/sshd.log 2>/dev/null || log_warn "Direct sshd start failed, Ansible deployment might fail"
+# ========== Configure local Ansible execution ==========
+configure_local_ansible() {
+    log_step "Configuring Ansible local connection..."
+    if [[ -f /etc/ssh/sshd_config.d/00-supacloud-test.conf ]]; then
+        log_warn "Removing the legacy SupaCloud SSH policy override"
+        rm -f /etc/ssh/sshd_config.d/00-supacloud-test.conf
+        if command -v systemctl >/dev/null 2>&1; then
+            systemctl reload sshd 2>/dev/null || systemctl reload ssh 2>/dev/null || true
+        elif pgrep -x sshd >/dev/null 2>&1; then
+            pkill -HUP -x sshd 2>/dev/null || true
         fi
-        sleep 1
-    else
-        log_info "OpenCloudOS compatibility mode: skipping sshd config modification"
     fi
-    
-    # Rescan host keys (sshd might have restarted, keys might have changed)
-    ssh-keyscan -H localhost 127.0.0.1 ::1 > ~/.ssh/known_hosts 2>/dev/null || true
-    
-    # Final handshake test, log details on failure
-    if ! ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no root@127.0.0.1 "echo SSH_OK" &>/dev/null; then
-        log_warn "Local SSH connectivity test failed! This might cause Ansible deployment to crash."
-        log_warn "---------- SSHD Config Check (-T) ----------"
-        /usr/sbin/sshd -T 2>/dev/null | grep -E "permitrootlogin|strictmodes|usepam|pubkey" || true
-        log_warn "---------- SSHD Startup Error Logs ----------"
-        cat /var/log/sshd.log 2>/dev/null || true
-        log_warn "---------- ~/.ssh Directory Permissions ----------"
-        ls -la ~/.ssh 2>/dev/null || true
-    else
-        log_info "Local SSH Loopback test successful."
-    fi
-    
-    log_info "Local SSH passwordless configuration complete"
+    export ANSIBLE_CONNECTION=local
+    export ANSIBLE_HOST_KEY_CHECKING=false
+    supacloud_write_cli_profile "${SUPACLOUD_PROFILE_FILE:-/etc/profile.d/supacloud.sh}"
+    log_info "Ansible will execute locally without changing the host SSH policy"
 }
 
 # ========== Install Base Dependencies (for minimal installations) ==========
@@ -689,7 +796,7 @@ install_base_dependencies() {
     # Detect package manager
     if command -v dnf &> /dev/null; then
         # RHEL/Alma/Rocky/OpenCloudOS/CentOS
-        # Base image might miss: sudo, openssl, jq, bc, procps-ng, ssh
+        # Base image might miss: sudo, openssl, jq, bc, procps-ng
         log_info "Using dnf to check for extra utilities..."
 
         # Check and add missing packages
@@ -703,9 +810,6 @@ install_base_dependencies() {
         ! command -v git &> /dev/null && PACKAGES="$PACKAGES git"
         # Some minimal images miss procps-ng (ps, top)
         ! command -v ps &> /dev/null && PACKAGES="$PACKAGES procps-ng"
-        # SSH tools (ssh-keygen, sshd) — Ansible required
-        ! command -v ssh-keygen &> /dev/null && PACKAGES="$PACKAGES openssh-clients"
-        ! command -v sshd &> /dev/null && PACKAGES="$PACKAGES openssh-server"
         ! command -v unzip &> /dev/null && PACKAGES="$PACKAGES unzip"
 
         if [[ -n "$PACKAGES" ]]; then
@@ -763,9 +867,6 @@ install_base_dependencies() {
         ! command -v git &> /dev/null && PACKAGES="$PACKAGES git"
         ! python3 -c "import yaml" &>/dev/null && PACKAGES="$PACKAGES python3-yaml"
         ! command -v ps &> /dev/null && PACKAGES="$PACKAGES procps"
-        # SSH tools — Required for Ansible
-        ! command -v ssh-keygen &> /dev/null && PACKAGES="$PACKAGES openssh-client"
-        ! command -v sshd &> /dev/null && PACKAGES="$PACKAGES openssh-server"
         ! command -v unzip &> /dev/null && PACKAGES="$PACKAGES unzip"
 
         if [[ -n "$PACKAGES" ]]; then
@@ -799,14 +900,6 @@ install_base_dependencies() {
                 log_info "Container environment: adjusting sudo PAM config to avoid Authentication service error..."
                 sed -i 's/^account.*include.*system-auth/account  sufficient pam_permit.so/' /etc/pam.d/sudo 2>/dev/null || true
                 sed -i 's/^session.*include.*system-auth/session  sufficient pam_permit.so/' /etc/pam.d/sudo 2>/dev/null || true
-            fi
-            
-            if [[ -f /etc/pam.d/sshd ]]; then
-                log_info "Container environment: adjusting sshd PAM config to bypass strict checks..."
-                sed -i 's/^account.*include.*password-auth/account  sufficient pam_permit.so/' /etc/pam.d/sshd 2>/dev/null || true
-                sed -i 's/^session.*include.*password-auth/session  sufficient pam_permit.so/' /etc/pam.d/sshd 2>/dev/null || true
-                sed -i 's/^account.*include.*system-auth/account  sufficient pam_permit.so/' /etc/pam.d/sshd 2>/dev/null || true
-                sed -i 's/^session.*include.*system-auth/session  sufficient pam_permit.so/' /etc/pam.d/sshd 2>/dev/null || true
             fi
         fi
     fi
@@ -1090,12 +1183,9 @@ install_juicefs() {
             *) log_error "Unsupported architecture: ${ARCH}"; return 1 ;;
         esac
 
-        if ! curl -fsSL --progress-bar "https://ghproxy.net/${JFS_URL}" -o /tmp/juicefs.tar.gz; then
-            log_warn "Proxy download failed, trying direct download..."
-            curl -fsSL --progress-bar "${JFS_URL}" -o /tmp/juicefs.tar.gz || {
-                log_error "JuiceFS download failed"; return 1
-            }
-        fi
+        supacloud_download_url "$JFS_URL" /tmp/juicefs.tar.gz || {
+            log_error "JuiceFS download failed"; return 1
+        }
 
         tar -xzf /tmp/juicefs.tar.gz -C /tmp
         install -m 755 /tmp/juicefs /usr/local/bin/juicefs
@@ -1117,6 +1207,8 @@ init_juicefs_s3_gateway() {
     local JFS_DATA_DIR="/var/lib/juicefs"
     local JFS_CACHE_DIR="/data/juicefs"
     local JFS_META_DB="juicefs"
+    local JUICEFS_PGPASS_FILE="${SUPACLOUD_JUICEFS_PGPASS_FILE:-/etc/supabase/juicefs.pgpass}"
+    local JUICEFS_S3_ENV_FILE="${SUPACLOUD_JUICEFS_S3_ENV_FILE:-/etc/supabase/juicefs-s3.env}"
     
     mkdir -p "${JFS_DATA_DIR}" "${JFS_CACHE_DIR}"
     
@@ -1124,11 +1216,12 @@ init_juicefs_s3_gateway() {
     su - postgres -c "psql -c \"CREATE DATABASE ${JFS_META_DB};\"" 2>/dev/null || true
     su - postgres -c "psql -c \"GRANT ALL PRIVILEGES ON DATABASE ${JFS_META_DB} TO supabase_admin;\"" 2>/dev/null || true
     
-    local META_URL="postgres://supabase_admin:${POSTGRES_PASSWORD}@${INTERNAL_IP}:5432/${JFS_META_DB}?sslmode=disable"
+    supacloud_write_pgpass "$JUICEFS_PGPASS_FILE" "$INTERNAL_IP" 5432 "$JFS_META_DB" supabase_admin "$POSTGRES_PASSWORD"
+    local META_URL="postgres://supabase_admin@${INTERNAL_IP}:5432/${JFS_META_DB}?sslmode=disable"
     
-    if ! juicefs status "${META_URL}" &>/dev/null; then
+    if ! PGPASSFILE="$JUICEFS_PGPASS_FILE" juicefs status "$META_URL" &>/dev/null; then
         log_info "Formatting JuiceFS filesystem..."
-        juicefs format --storage file --bucket "${JFS_DATA_DIR}" "${META_URL}" supadata || {
+        PGPASSFILE="$JUICEFS_PGPASS_FILE" juicefs format --storage file --bucket "${JFS_DATA_DIR}" "$META_URL" supadata || {
             log_error "JuiceFS format failed"; return 1
         }
     fi
@@ -1137,6 +1230,9 @@ init_juicefs_s3_gateway() {
     mkdir -p "${JFS_DATA_DIR}/supadata/data"
     
     log_info "Creating systemd service..."
+    supacloud_write_service_env_pairs "$JUICEFS_S3_ENV_FILE" \
+        MINIO_ROOT_USER "${S3_ACCESS_KEY:-s3user_data}" \
+        MINIO_ROOT_PASSWORD "${S3_SECRET_KEY:-S3User.Data}"
     cat > /etc/systemd/system/juicefs-s3.service << EOF
 [Unit]
 Description=JuiceFS S3 Gateway for Supabase
@@ -1145,8 +1241,8 @@ Wants=postgresql.service
 
 [Service]
 Type=simple
-Environment="MINIO_ROOT_USER=${S3_ACCESS_KEY:-s3user_data}"
-Environment="MINIO_ROOT_PASSWORD=${S3_SECRET_KEY:-S3User.Data}"
+Environment=PGPASSFILE=${JUICEFS_PGPASS_FILE}
+EnvironmentFile=${JUICEFS_S3_ENV_FILE}
 ExecStart=/usr/local/bin/juicefs gateway --multi-buckets --cache-dir /dev/shm/juicefs_cache --cache-size 100 "${META_URL}" 0.0.0.0:9000
 Restart=always
 RestartSec=5
@@ -1239,20 +1335,137 @@ EOF
     log_info "Installing standalone docker-compose ${COMPOSE_VERSION}..."
     COMPOSE_URL="https://github.com/docker/compose/releases/download/${COMPOSE_VERSION}/docker-compose-$(uname -s)-$(uname -m)"
     
-    if curl -fsSL --progress-bar "https://ghproxy.net/${COMPOSE_URL}" -o /usr/local/bin/docker-compose 2>/dev/null; then
-        log_info "Proxy download successful"
-    else
-        log_warn "Proxy download failed, trying direct download..."
-        curl -fsSL --progress-bar "${COMPOSE_URL}" -o /usr/local/bin/docker-compose
-    fi
+    supacloud_download_url "$COMPOSE_URL" /usr/local/bin/docker-compose
     
     chmod +x /usr/local/bin/docker-compose
     log_info "Docker Compose installation complete: $(/usr/local/bin/docker-compose --version)"
 }
 
+supacloud_atomic_install_binary() (
+    local source_file="$1"
+    local asset_name="$2"
+    local target_file="$3"
+    local staged_file=""
+    supacloud_validate_binary "$source_file" "$asset_name" || return 1
+    mkdir -p "$(dirname "$target_file")"
+    staged_file=$(mktemp "${target_file}.tmp.XXXXXX")
+    trap 'rm -f "${staged_file:-}"' EXIT HUP INT TERM
+    install -m 0755 "$source_file" "$staged_file"
+    mv -f "$staged_file" "$target_file"
+    staged_file=""
+)
+
+supacloud_select_binary_source() {
+    local asset_name="$1"
+    shift
+    local candidate
+    supacloud_resolve_artifact_policy || return 1
+    if [[ "$SUPACLOUD_RESOLVED_ARTIFACT_MODE" == "release" ]]; then
+        candidate="${SCRIPT_DIR}/dist/${asset_name}"
+        [[ -f "$candidate" ]] && supacloud_validate_binary "$candidate" "$asset_name" || {
+            log_error "Release artifact policy requires a valid dist/${asset_name}"
+            return 1
+        }
+        printf '%s\n' "$candidate"
+        return 0
+    fi
+    for candidate in "${SCRIPT_DIR}/dist/${asset_name}" "$@"; do
+        if [[ -f "$candidate" ]] && supacloud_validate_binary "$candidate" "$asset_name"; then
+            printf '%s\n' "$candidate"
+            return 0
+        fi
+    done
+    return 1
+}
+
+select_management_binary_source() {
+    local asset_name="$1"
+    supacloud_select_binary_source "$asset_name" \
+        "${SCRIPT_DIR}/packages/management-api/dist/${asset_name}" \
+        "${SCRIPT_DIR}/packages/management-api/${asset_name}" \
+        "${SCRIPT_DIR}/${asset_name}" \
+        "${SCRIPT_DIR}/supacloud"
+}
+
+select_edge_runtime_binary_source() {
+    local asset_name="$1"
+    supacloud_select_binary_source "$asset_name" \
+        "${SCRIPT_DIR}/packages/edge-runtime/dist/${asset_name}" \
+        "${SCRIPT_DIR}/packages/edge-runtime/${asset_name}"
+}
+
+select_caddy_binary_source() {
+    local asset_name="$1"
+    supacloud_select_binary_source "$asset_name" \
+        "${SCRIPT_DIR}/packages/management-api/${asset_name}" \
+        "${SCRIPT_DIR}/packages/management-api/dist/${asset_name}" \
+        "${SCRIPT_DIR}/${asset_name}"
+}
+
+select_web_console_source() {
+    local web_console_tar="${SCRIPT_DIR}/dist/web-console-build.tar.gz"
+    local web_console_src="${SCRIPT_DIR}/packages/web-console/build"
+    supacloud_resolve_artifact_policy || return 1
+    if [[ "$SUPACLOUD_RESOLVED_ARTIFACT_MODE" == "release" ]]; then
+        [[ -f "$web_console_tar" ]] && supacloud_validate_tar "$web_console_tar" || {
+            log_error "Release artifact policy requires dist/web-console-build.tar.gz"
+            return 1
+        }
+        printf '%s\n' "$web_console_tar"
+        return 0
+    fi
+    if [[ -d "$web_console_src" && -f "$web_console_src/index.html" ]]; then
+        printf '%s\n' "$web_console_src"
+    elif [[ -f "$web_console_tar" ]] && supacloud_validate_tar "$web_console_tar"; then
+        printf '%s\n' "$web_console_tar"
+    else
+        printf '%s\n' "download"
+    fi
+}
+
+render_edge_runtime_systemd_unit() {
+    local source_file="$1"
+    local target_file="$2"
+    local exec_start="$3"
+    python3 - "$source_file" "$target_file" "$exec_start" <<'PY'
+import os
+import sys
+import tempfile
+from pathlib import Path
+
+source = Path(sys.argv[1])
+target = Path(sys.argv[2])
+exec_start = sys.argv[3]
+lines = source.read_text().splitlines()
+rendered = []
+replaced = False
+for line in lines:
+    if line.startswith("ExecStart="):
+        rendered.append(f"ExecStart={exec_start}")
+        replaced = True
+    elif "/opt/supacloud/config.env" not in line:
+        rendered.append(line)
+if not replaced:
+    raise SystemExit("Edge Runtime unit is missing ExecStart")
+target.parent.mkdir(parents=True, exist_ok=True)
+fd, temporary_name = tempfile.mkstemp(prefix=f".{target.name}.", dir=target.parent)
+try:
+    os.fchmod(fd, 0o644)
+    with os.fdopen(fd, "w") as temporary:
+        temporary.write("\n".join(rendered) + "\n")
+        temporary.flush()
+        os.fsync(temporary.fileno())
+    os.replace(temporary_name, target)
+finally:
+    if os.path.exists(temporary_name):
+        os.unlink(temporary_name)
+PY
+}
+
 # ========== Edge Functions Runtime Configuration ==========
 install_edge_runtime() {
     log_step "Installing Edge Runtime..."
+    supacloud_resolve_artifact_policy || return 1
     local EDGE_RUNTIME_MODE="${EDGE_RUNTIME_MODE:-embedded}"
     local EDGE_RT_BIN_NAME=""
     local EDGE_RT_BIN_SOURCE=""
@@ -1269,23 +1482,31 @@ install_edge_runtime() {
     # 1. Create directories
     mkdir -p /var/supacloud/frontends /opt/supacloud/edge-runtime /opt/supacloud/functions /etc/supabase
 
-    # 2. Try to find compiled edge-runtime binary
+    # 2. Select the compiled artifact. Forced release mode is fail-closed and
+    # accepts only the verified dist/${arch asset} downloaded by setup.sh.
+    if [[ -z "$EDGE_RT_BIN_NAME" && "$SUPACLOUD_RESOLVED_ARTIFACT_MODE" == "release" ]]; then
+        log_error "Forced release mode does not support architecture: $ARCH"
+        return 1
+    fi
     if [[ -n "$EDGE_RT_BIN_NAME" ]]; then
-        if [[ -f "${SCRIPT_DIR}/dist/${EDGE_RT_BIN_NAME}" ]]; then
-            EDGE_RT_BIN_SOURCE="${SCRIPT_DIR}/dist/${EDGE_RT_BIN_NAME}"
-        elif [[ -f "${SCRIPT_DIR}/packages/edge-runtime/dist/${EDGE_RT_BIN_NAME}" ]]; then
-            EDGE_RT_BIN_SOURCE="${SCRIPT_DIR}/packages/edge-runtime/dist/${EDGE_RT_BIN_NAME}"
-        elif [[ -f "${SCRIPT_DIR}/packages/edge-runtime/${EDGE_RT_BIN_NAME}" ]]; then
-            EDGE_RT_BIN_SOURCE="${SCRIPT_DIR}/packages/edge-runtime/${EDGE_RT_BIN_NAME}"
+        if [[ "$SUPACLOUD_RESOLVED_ARTIFACT_MODE" == "release" ]]; then
+            EDGE_RT_BIN_SOURCE=$(select_edge_runtime_binary_source "$EDGE_RT_BIN_NAME") || return 1
+        else
+            EDGE_RT_BIN_SOURCE=$(select_edge_runtime_binary_source "$EDGE_RT_BIN_NAME" || true)
         fi
     fi
 
-    if [[ -n "$EDGE_RT_BIN_SOURCE" ]] && file "$EDGE_RT_BIN_SOURCE" | grep -q "ELF"; then
+    if [[ -n "$EDGE_RT_BIN_SOURCE" ]]; then
         log_info "Found compiled Edge Runtime binary ($EDGE_RT_BIN_NAME), installing..."
-        cp "$EDGE_RT_BIN_SOURCE" "$EDGE_RT_BIN_TARGET"
-        chmod +x "$EDGE_RT_BIN_TARGET"
+        supacloud_atomic_install_binary "$EDGE_RT_BIN_SOURCE" "$EDGE_RT_BIN_NAME" "$EDGE_RT_BIN_TARGET" || return 1
         USE_COMPILED_BINARY=true
         log_info "Compiled Edge Runtime binary installed to $EDGE_RT_BIN_TARGET"
+    fi
+
+    if [[ "$USE_COMPILED_BINARY" == "false" \
+        && "$SUPACLOUD_RESOLVED_ARTIFACT_MODE" != "local" ]]; then
+        log_error "Bun Edge Runtime source mode requires explicit SUPACLOUD_SETUP_ARTIFACT_MODE=local"
+        return 1
     fi
 
     # 3. Deploy Edge Runtime source (fallback for non-compiled mode)
@@ -1330,8 +1551,11 @@ install_edge_runtime() {
     # 5. Register systemd service
     local SYSTEMD_SRC="${SCRIPT_DIR}/infrastructure/systemd"
     if [[ -f "${SYSTEMD_SRC}/supacloud-edge-runtime.service" ]]; then
-        cp "${SYSTEMD_SRC}/supacloud-edge-runtime.service" /etc/systemd/system/supacloud-edge-runtime.service
-        log_info "Using checked-in supacloud-edge-runtime.service"
+        render_edge_runtime_systemd_unit \
+            "${SYSTEMD_SRC}/supacloud-edge-runtime.service" \
+            /etc/systemd/system/supacloud-edge-runtime.service \
+            "$EXEC_START_CMD"
+        log_info "Rendered checked-in supacloud-edge-runtime.service with $EXEC_START_CMD"
     else
         cat > /etc/systemd/system/supacloud-edge-runtime.service <<SVCEOF
 [Unit]
@@ -1438,29 +1662,30 @@ install_caddy_gateway() {
         aarch64|arm64) arch="arm64" ;;
     esac
     local local_asset=""
-    for candidate in \
-        "${SCRIPT_DIR}/packages/management-api/supacloud-caddy-linux-${arch}" \
-        "${SCRIPT_DIR}/packages/management-api/dist/supacloud-caddy-linux-${arch}" \
-        "${SCRIPT_DIR}/dist/supacloud-caddy-linux-${arch}" \
-        "${SCRIPT_DIR}/supacloud-caddy-linux-${arch}"; do
-        if [[ -f "$candidate" ]]; then
-            local_asset="$candidate"
-            break
-        fi
-    done
+    local caddy_asset_name="supacloud-caddy-linux-${arch}"
+    supacloud_resolve_artifact_policy || return 1
+    if [[ "$SUPACLOUD_RESOLVED_ARTIFACT_MODE" == "release" ]]; then
+        local_asset=$(select_caddy_binary_source "$caddy_asset_name") || return 1
+    else
+        local_asset=$(select_caddy_binary_source "$caddy_asset_name" || true)
+    fi
     local target="/usr/local/bin/supacloud-caddy"
 
-    if [[ -x "$target" ]]; then
+    if [[ -n "$local_asset" ]]; then
+        # setup.sh places an attested release artifact in dist/. Always install
+        # it, even when an older target already exists, so reruns cannot retain
+        # an unverified or stale gateway binary.
+        supacloud_atomic_install_binary "$local_asset" "$caddy_asset_name" "$target" || return 1
+        log_info "Installed validated supacloud-caddy artifact from $local_asset"
+    elif [[ -x "$target" ]]; then
         log_info "supacloud-caddy already installed: $($target version 2>/dev/null | head -1 || echo installed)"
-    elif [[ -n "$local_asset" ]]; then
-        install -m 0755 "$local_asset" "$target"
     elif [[ -n "${SUPACLOUD_CADDY_URL:-}" ]]; then
         curl -fsSL "$SUPACLOUD_CADDY_URL" -o "$target"
         chmod 0755 "$target"
     elif [[ -x "${SCRIPT_DIR}/scripts/build_supacloud_caddy.sh" ]] && command -v go >/dev/null 2>&1; then
         log_info "Building supacloud-caddy locally with xcaddy and the rate-limit module..."
         if ! command -v xcaddy >/dev/null 2>&1; then
-            GOBIN=/usr/local/bin go install github.com/caddyserver/xcaddy/cmd/xcaddy@latest
+            GOBIN=/usr/local/bin go install "github.com/caddyserver/xcaddy/cmd/xcaddy@${XCADDY_VERSION}"
         fi
         OUT_DIR=/tmp/supacloud-caddy-build "${SCRIPT_DIR}/scripts/build_supacloud_caddy.sh"
         install -m 0755 "/tmp/supacloud-caddy-build/supacloud-caddy-linux-${arch}" "$target"
@@ -1470,8 +1695,7 @@ install_caddy_gateway() {
         local caddy_version="${CADDY_VERSION:-2.10.2}"
         local caddy_url="https://github.com/caddyserver/caddy/releases/download/v${caddy_version}/caddy_${caddy_version}_linux_${arch}.tar.gz"
         mkdir -p /tmp/supacloud-caddy
-        curl -fsSL "https://ghproxy.net/${caddy_url}" -o /tmp/supacloud-caddy/caddy.tar.gz 2>/dev/null || \
-            curl -fsSL "$caddy_url" -o /tmp/supacloud-caddy/caddy.tar.gz
+        supacloud_download_url "$caddy_url" /tmp/supacloud-caddy/caddy.tar.gz
         tar -xzf /tmp/supacloud-caddy/caddy.tar.gz -C /tmp/supacloud-caddy caddy
         install -m 0755 /tmp/supacloud-caddy/caddy "$target"
         rm -rf /tmp/supacloud-caddy
@@ -1779,6 +2003,7 @@ install_pigsty() {
     
     log_info "Installing Pigsty (this may take 10-20 minutes)..."
     PIGSTY_ENTRYPOINT=""
+    local EXTRA_ARGS="--connection=local"
     if [[ -f "deploy.yml" ]]; then
         PIGSTY_ENTRYPOINT="deploy.yml"
     elif [[ -f "install.yml" ]]; then
@@ -1787,9 +2012,8 @@ install_pigsty() {
 
     if [[ -n "$PIGSTY_ENTRYPOINT" ]]; then
         if command -v ansible-playbook &> /dev/null; then
-            local EXTRA_ARGS=""
             if [[ -f /.dockerenv ]] || grep -q "docker\|lxc\|containerd" /proc/1/cgroup 2>/dev/null; then
-                EXTRA_ARGS="-vvv"
+                EXTRA_ARGS="$EXTRA_ARGS -vvv"
                 # Inject container-specific variables via command line to avoid duplicate keys in pigsty.yml and prevent /etc/hosts conflicts
                 local PYTHON_PATH
                 PYTHON_PATH=$(command -v python3 2>/dev/null || echo "/usr/bin/python3")
@@ -1818,10 +2042,10 @@ install_pigsty() {
         log_info "Detected Podman runtime, skipping docker.yml (avoiding conflict with podman-docker)"
     else
         log_info "Configuring Docker..."
-        if [[ -x "./docker.yml" ]]; then
-            ./docker.yml || true
-        elif [[ -f "docker.yml" ]] && command -v ansible-playbook &> /dev/null; then
+        if [[ -f "docker.yml" ]] && command -v ansible-playbook &> /dev/null; then
             ansible-playbook docker.yml $EXTRA_ARGS || true
+        elif [[ -x "./docker.yml" ]]; then
+            ./docker.yml || true
         else
             log_warn "docker.yml not found, skipping Docker configuration"
         fi
@@ -1830,13 +2054,13 @@ install_pigsty() {
     if [[ "${SUPACLOUD_INSTALL_LEGACY_SUPABASE_STACK:-false}" == "true" ]]; then
         log_warn "Starting Pigsty's legacy Supabase compose stack because SUPACLOUD_INSTALL_LEGACY_SUPABASE_STACK=true"
         install_docker_compose
-        if [[ -x "./app.yml" ]]; then
-            ./app.yml || {
+        if [[ -f "app.yml" ]] && command -v ansible-playbook &> /dev/null; then
+            ansible-playbook app.yml $EXTRA_ARGS || {
                 log_warn "app.yml failed, trying manual start..."
                 manual_start_supabase
             }
-        elif [[ -f "app.yml" ]] && command -v ansible-playbook &> /dev/null; then
-            ansible-playbook app.yml $EXTRA_ARGS || {
+        elif [[ -x "./app.yml" ]]; then
+            ./app.yml || {
                 log_warn "app.yml failed, trying manual start..."
                 manual_start_supabase
             }
@@ -1895,35 +2119,18 @@ update_pigsty_config() {
         log_info "Skipping Pigsty app domain/certbot patch; SupaCloud Caddy owns public HTTP(S)."
     fi
     
-    # Update password configuration
-    if [[ -n "$DASHBOARD_PASSWORD" && "$DASHBOARD_PASSWORD" != "your-strong-password" ]]; then
-        sed -i "s|DASHBOARD_PASSWORD: pigsty|DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD}|g" "$PIGSTY_YML"
-    fi
-    
-    if [[ -n "$POSTGRES_PASSWORD" && "$POSTGRES_PASSWORD" != "DBUser.Supa" ]]; then
-        sed -i "s|POSTGRES_PASSWORD: DBUser.Supa|POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}|g" "$PIGSTY_YML"
-        # Also update hardcoded passwords in pg_users (supabase_admin, authenticator, supabase_auth_admin etc.)
-        sed -i "s|password: 'DBUser.Supa'|password: '${POSTGRES_PASSWORD}'|g" "$PIGSTY_YML"
-    fi
-    
-    if [[ -n "$GRAFANA_PASSWORD" && "$GRAFANA_PASSWORD" != "pigsty" ]]; then
-        sed -i "s|grafana_admin_password: pigsty|grafana_admin_password: ${GRAFANA_PASSWORD}|g" "$PIGSTY_YML"
-    fi
-    
-    # Update JWT configuration (using auto-generated or custom values)
-    if [[ -n "$JWT_SECRET" ]]; then
-        sed -i "s|JWT_SECRET: your-super-secret-jwt-token-with-at-least-32-characters-long|JWT_SECRET: ${JWT_SECRET}|g" "$PIGSTY_YML"
-    fi
-    
-    if [[ -n "$ANON_KEY" ]]; then
-        # Update ANON_KEY
-        sed -i "s|ANON_KEY: .*|ANON_KEY: ${ANON_KEY}|g" "$PIGSTY_YML"
-    fi
-    
-    if [[ -n "$SERVICE_ROLE_KEY" ]]; then
-        # Update SERVICE_ROLE_KEY
-        sed -i "s|SERVICE_ROLE_KEY: .*|SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY}|g" "$PIGSTY_YML"
-    fi
+    # Patch secret YAML scalars from a protected temporary input. Secret values
+    # never become sed/Python process arguments and are JSON-quoted as valid YAML.
+    local pigsty_dashboard_secret="" pigsty_postgres_secret="" pigsty_grafana_secret=""
+    [[ -z "$DASHBOARD_PASSWORD" || "$DASHBOARD_PASSWORD" == "your-strong-password" ]] \
+        || pigsty_dashboard_secret="$DASHBOARD_PASSWORD"
+    [[ -z "$POSTGRES_PASSWORD" || "$POSTGRES_PASSWORD" == "DBUser.Supa" ]] \
+        || pigsty_postgres_secret="$POSTGRES_PASSWORD"
+    [[ -z "$GRAFANA_PASSWORD" || "$GRAFANA_PASSWORD" == "pigsty" ]] \
+        || pigsty_grafana_secret="$GRAFANA_PASSWORD"
+    supacloud_patch_pigsty_secrets "$PIGSTY_YML" \
+        "$pigsty_dashboard_secret" "$pigsty_postgres_secret" "$pigsty_grafana_secret" \
+        "${JWT_SECRET:-}" "${ANON_KEY:-}" "${SERVICE_ROLE_KEY:-}"
     
     # Configure PostgreSQL WAL log limit (max_wal_size = 2GB)
     # Fix issue with log filling up disk
@@ -2020,27 +2227,12 @@ configure_s3_in_pigsty() {
     # Update Pigsty's legacy Supabase compose .env only when explicitly enabled.
     if [[ "${SUPACLOUD_INSTALL_LEGACY_SUPABASE_STACK:-false}" == "true" && -f "$SUPABASE_ENV" ]]; then
         log_info "Updating Supabase S3 configuration..."
-        
-        # Update S3 endpoint
-        sed -i "s|S3_ENDPOINT=.*|S3_ENDPOINT=${S3_ENDPOINT}|g" "$SUPABASE_ENV"
-        
-        # Update Access Key
-        if [[ -n "$S3_ACCESS_KEY" ]]; then
-            sed -i "s|S3_ACCESS_KEY=.*|S3_ACCESS_KEY=${S3_ACCESS_KEY}|g" "$SUPABASE_ENV"
-        fi
-        
-        if [[ -n "$S3_SECRET_KEY" ]]; then
-            sed -i "s|S3_SECRET_KEY=.*|S3_SECRET_KEY=${S3_SECRET_KEY}|g" "$SUPABASE_ENV"
-        fi
-        
-        if [[ -n "$S3_REGION" ]]; then
-            sed -i "s|S3_REGION=.*|S3_REGION=${S3_REGION}|g" "$SUPABASE_ENV"
-        fi
-
-        # MinIO must enable Path Style
-        if [[ "$S3_STORAGE_TYPE" == "minio" ]]; then
-            sed -i "s|S3_FORCE_PATH_STYLE=.*|S3_FORCE_PATH_STYLE=true|g" "$SUPABASE_ENV"
-        fi
+        local desired_s3_pairs=(S3_ENDPOINT "$S3_ENDPOINT")
+        [[ -z "$S3_ACCESS_KEY" ]] || desired_s3_pairs+=(S3_ACCESS_KEY "$S3_ACCESS_KEY")
+        [[ -z "$S3_SECRET_KEY" ]] || desired_s3_pairs+=(S3_SECRET_KEY "$S3_SECRET_KEY")
+        [[ -z "$S3_REGION" ]] || desired_s3_pairs+=(S3_REGION "$S3_REGION")
+        [[ "$S3_STORAGE_TYPE" != "minio" ]] || desired_s3_pairs+=(S3_FORCE_PATH_STYLE true)
+        supacloud_write_raw_env_pairs "$SUPABASE_ENV" "${desired_s3_pairs[@]}"
     else
         log_info "Skipping Pigsty Supabase .env S3 patch; legacy compose stack is disabled."
     fi
@@ -2079,7 +2271,8 @@ configure_analytics() {
         # Expected memory usage: 400-600MB (default 2GB+)
         if [[ -n "${LOGFLARE_ERL_FLAGS:-}" ]]; then
             log_info "Configuring Logflare BEAM VM memory optimization..."
-            sed -i "s|ERL_AFLAGS=.*|ERL_AFLAGS=${LOGFLARE_ERL_FLAGS}|g" "$SUPABASE_ENV" 2>/dev/null || echo "ERL_AFLAGS=${LOGFLARE_ERL_FLAGS}" >> "$SUPABASE_ENV"
+            supacloud_write_raw_env_pairs "$SUPABASE_ENV" \
+                ERL_AFLAGS "$LOGFLARE_ERL_FLAGS"
             log_info "  ERL_AFLAGS: ${LOGFLARE_ERL_FLAGS}"
         fi
         
@@ -2093,14 +2286,11 @@ configure_analytics() {
             # Logflare requires DB connection string
             # Use Pigsty's DBUser.Supa default password or generated password
             # Note: If POSTGRES_PASSWORD is the default 'DBUser.Supa', ensure it is set correctly
-            LOGFLARE_DB_URL="postgresql://postgres:${POSTGRES_PASSWORD}@${INTERNAL_IP}:5432/postgres"
-            
-            if ! grep -q "LOGFLARE_DATABASE_URL" "$SUPABASE_ENV"; then
-                 echo "LOGFLARE_DATABASE_URL=${LOGFLARE_DB_URL}" >> "$SUPABASE_ENV"
-            else
-                 # Use | as delimiter to avoid conflicts with / in URL
-                 sed -i "s|LOGFLARE_DATABASE_URL=.*|LOGFLARE_DATABASE_URL=${LOGFLARE_DB_URL}|g" "$SUPABASE_ENV"
-            fi
+            local encoded_logflare_password
+            encoded_logflare_password=$(printf '%s' "$POSTGRES_PASSWORD" | supacloud_urlencode_stdin)
+            LOGFLARE_DB_URL="postgresql://postgres:${encoded_logflare_password}@${INTERNAL_IP}:5432/postgres"
+            supacloud_write_raw_env_pairs "$SUPABASE_ENV" \
+                LOGFLARE_DATABASE_URL "$LOGFLARE_DB_URL"
             
         elif [[ "${ANALYTICS_BACKEND}" == "bigquery" ]]; then
             log_info "Configuring Analytics backend to BigQuery..."
@@ -2298,70 +2488,126 @@ configure_pg_hba() {
 # ========== Save All Credentials ==========
 save_all_credentials() {
     log_step "Saving unified credentials file..."
-    
-    CREDENTIALS_FILE="/etc/supabase/supacloud-credentials.env"
-    mkdir -p /etc/supabase
-    
-    cat > "$CREDENTIALS_FILE" << EOF
-# SupaCloud Unified Credentials
-# Generated at $(date)
 
-# ========== Network ==========
-INTERNAL_IP=${INTERNAL_IP}
-PUBLIC_DOMAIN=${SUPABASE_PUBLIC_DOMAIN}
-STUDIO_DOMAIN=${SUPABASE_STUDIO_DOMAIN}
-
-# ========== Pigsty ==========
-PIGSTY_VERSION=${PIGSTY_VERSION:-latest}
-
-# ========== Supabase Dashboard ==========
-DASHBOARD_USERNAME=${DASHBOARD_USERNAME:-supabase}
-DASHBOARD_PASSWORD=${DASHBOARD_PASSWORD:-pigsty}
-
-# ========== Database ==========
-POSTGRES_HOST=${INTERNAL_IP}
-POSTGRES_PORT=5432
-POSTGRES_DB=postgres
-POSTGRES_USER=postgres
-POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
-
-# ========== Grafana ==========
-GRAFANA_URL=http://${INTERNAL_IP}:3000
-GRAFANA_USER=admin
-GRAFANA_PASSWORD=${GRAFANA_PASSWORD:-pigsty}
-
-# ========== JWT Keys ==========
-JWT_SECRET=${JWT_SECRET}
-ANON_KEY=${ANON_KEY}
-SERVICE_ROLE_KEY=${SERVICE_ROLE_KEY}
-
-# ========== Analytics ==========
-ENABLE_ANALYTICS=${ENABLE_ANALYTICS:-true}
-ANALYTICS_BACKEND=${ANALYTICS_BACKEND:-postgres}
-
-# ========== S3 Storage ==========
-S3_STORAGE_TYPE=${S3_STORAGE_TYPE}
-S3_ENDPOINT=${S3_ENDPOINT}
-S3_REGION=${S3_REGION}
-S3_ACCESS_KEY=${S3_ACCESS_KEY}
-S3_SECRET_KEY=${S3_SECRET_KEY}
-
-# ========== Management API ==========
-MANAGEMENT_API_URL=http://${INTERNAL_IP}:9090
-MANAGEMENT_API_TOKEN=${MASTER_TOKEN:-}
-
-EOF
-
-    chmod 600 "$CREDENTIALS_FILE"
+    mkdir -p "$(dirname "$CREDENTIALS_FILE")"
+    supacloud_write_service_env_pairs "$CREDENTIALS_FILE" \
+        INTERNAL_IP "$INTERNAL_IP" \
+        PUBLIC_DOMAIN "$SUPABASE_PUBLIC_DOMAIN" \
+        STUDIO_DOMAIN "$SUPABASE_STUDIO_DOMAIN" \
+        PIGSTY_VERSION "${PIGSTY_VERSION:-latest}" \
+        PG_VERSION "${PG_VERSION:-18}" \
+        DASHBOARD_USERNAME "${DASHBOARD_USERNAME:-supabase}" \
+        DASHBOARD_PASSWORD "${DASHBOARD_PASSWORD:-pigsty}" \
+        POSTGRES_HOST "$INTERNAL_IP" \
+        POSTGRES_PORT 5432 \
+        POSTGRES_DB postgres \
+        POSTGRES_USER postgres \
+        POSTGRES_PASSWORD "$POSTGRES_PASSWORD" \
+        GRAFANA_URL "http://${INTERNAL_IP}:3000" \
+        GRAFANA_USER admin \
+        GRAFANA_PASSWORD "${GRAFANA_PASSWORD:-pigsty}" \
+        JWT_SECRET "$JWT_SECRET" \
+        ANON_KEY "$ANON_KEY" \
+        SERVICE_ROLE_KEY "$SERVICE_ROLE_KEY" \
+        ENABLE_ANALYTICS "${ENABLE_ANALYTICS:-true}" \
+        ANALYTICS_BACKEND "${ANALYTICS_BACKEND:-postgres}" \
+        S3_STORAGE_TYPE "$S3_STORAGE_TYPE" \
+        JUICEFS_BACKEND "${JUICEFS_BACKEND:-}" \
+        S3_ENDPOINT "${S3_ENDPOINT:-}" \
+        S3_PROTOCOL "${S3_PROTOCOL:-}" \
+        S3_REGION "${S3_REGION:-}" \
+        S3_ACCESS_KEY "${S3_ACCESS_KEY:-}" \
+        S3_SECRET_KEY "${S3_SECRET_KEY:-}" \
+        S3_BUCKET "${S3_BUCKET:-}" \
+        S3_FORCE_PATH_STYLE "${S3_FORCE_PATH_STYLE:-}" \
+        EXTERNAL_S3_ENDPOINT "${EXTERNAL_S3_ENDPOINT:-}" \
+        EXTERNAL_S3_REGION "${EXTERNAL_S3_REGION:-}" \
+        EXTERNAL_S3_BUCKET "${EXTERNAL_S3_BUCKET:-}" \
+        EXTERNAL_S3_ACCESS_KEY "${EXTERNAL_S3_ACCESS_KEY:-}" \
+        EXTERNAL_S3_SECRET_KEY "${EXTERNAL_S3_SECRET_KEY:-}" \
+        MANAGEMENT_API_URL "http://${INTERNAL_IP}:9090" \
+        MANAGEMENT_API_TOKEN "${MASTER_TOKEN:-}"
     log_info "All credentials saved to: $CREDENTIALS_FILE"
 }
 
 # ========== Install Management API (Binary Deployment) ==========
+set_postgres_role_password() {
+    local password="${1:-}"
+    local verifier
+    if [[ -z "$password" ]]; then
+        log_error "PostgreSQL password cannot be empty"
+        return 1
+    fi
+    if [[ "$password" == *$'\n'* || "$password" == *$'\r'* ]]; then
+        log_error "PostgreSQL password cannot contain a newline"
+        return 1
+    fi
+
+    verifier=$(printf '%s' "$password" | supacloud_postgres_scram_verifier)
+    # Keep the plaintext secret out of `su -c`, argv, SQL, and server logs.
+    # PostgreSQL accepts the client-generated SCRAM verifier directly.
+    {
+        printf '\\prompt postgres_verifier\n'
+        printf '%s\n' "$verifier"
+        cat <<'SQL'
+SELECT format('ALTER ROLE postgres PASSWORD %L', :'postgres_verifier') \gexec
+SQL
+    } | sudo -u postgres psql -X -q -v ON_ERROR_STOP=1 -d postgres -f -
+}
+
+ensure_realtime_database_role() {
+    local password="${1:-}"
+    local verifier
+    [[ -n "$password" && "$password" != *$'\n'* && "$password" != *$'\r'* ]] || {
+        log_error "Realtime database password is empty or contains a newline"
+        return 1
+    }
+    verifier=$(printf '%s' "$password" | supacloud_postgres_scram_verifier)
+    {
+        printf '\\prompt realtime_verifier\n'
+        printf '%s\n' "$verifier"
+        cat <<'SQL'
+CREATE SCHEMA IF NOT EXISTS _realtime;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'supabase_realtime_admin') THEN
+    CREATE ROLE supabase_realtime_admin NOLOGIN NOINHERIT NOREPLICATION;
+  END IF;
+END $$;
+ALTER ROLE supabase_realtime_admin LOGIN NOINHERIT CREATEROLE REPLICATION PASSWORD :'realtime_verifier';
+SQL
+    } | PGPASSWORD="$password" psql -X -q -v ON_ERROR_STOP=1 \
+        -h "${INTERNAL_IP}" -U supabase_admin -d postgres -f -
+}
+
+ensure_project_database_role() {
+    local role_name="${1:-}"
+    local password="${2:-}"
+    local verifier
+    [[ -n "$role_name" && -n "$password" && "$role_name" != *$'\n'* \
+        && "$password" != *$'\n'* && "$password" != *$'\r'* ]] || {
+        log_error "Project database role or password is invalid"
+        return 1
+    }
+    verifier=$(printf '%s' "$password" | supacloud_postgres_scram_verifier)
+    {
+        printf '\\prompt project_role\n%s\n' "$role_name"
+        printf '\\prompt project_verifier\n%s\n' "$verifier"
+        cat <<'SQL'
+SELECT format(
+  'CREATE ROLE %I LOGIN CONNECTION LIMIT 20 PASSWORD %L',
+  :'project_role', :'project_verifier'
+)
+WHERE NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = :'project_role')
+\gexec
+SELECT format('ALTER ROLE %I PASSWORD %L', :'project_role', :'project_verifier') \gexec
+SQL
+    } | sudo -u postgres psql -X -q -v ON_ERROR_STOP=1 -d postgres -f -
+}
+
 install_management_api() {
     log_step "Preparing to deploy SupaCloud Control Plane binary..."
 
     local BIN_NAME="supacloud"
-    local BIN_SOURCE="${SCRIPT_DIR}/${BIN_NAME}"
     local BIN_TARGET="/usr/local/bin/${BIN_NAME}"
     local ROOT_SCRIPTS_INSTALL_DIR="/opt/supacloud/scripts"
     local SCRIPTS_INSTALL_DIR="${ROOT_SCRIPTS_INSTALL_DIR}/lib"
@@ -2375,8 +2621,8 @@ install_management_api() {
     # 1. 部署二进制文件
     # 支持本地 supacloud 或 CI 产出的 supacloud-linux-amd64/arm64
     local ARCH=$(uname -m)
-    local OS_TYPE=$(uname -s | tr '[:upper:]' '[:lower:]')
     local CI_BIN=""
+    local SELECTED_BIN_SOURCE=""
 
     if [[ "$ARCH" == "x86_64" ]]; then
         CI_BIN="supacloud-linux-amd64"
@@ -2384,20 +2630,16 @@ install_management_api() {
         CI_BIN="supacloud-linux-arm64"
     fi
 
-    if [[ -n "$CI_BIN" ]] && [[ -f "${SCRIPT_DIR}/dist/${CI_BIN}" ]]; then
-        log_info "Found CI build artifact (dist/${CI_BIN}), installing..."
-        cp "${SCRIPT_DIR}/dist/${CI_BIN}" "$BIN_TARGET"
-    elif [[ -n "$CI_BIN" ]] && [[ -f "${SCRIPT_DIR}/${CI_BIN}" ]]; then
-        log_info "Found platform binary in root (${CI_BIN}), installing..."
-        cp "${SCRIPT_DIR}/${CI_BIN}" "$BIN_TARGET"
-    elif [[ -f "$BIN_SOURCE" ]] && file "$BIN_SOURCE" | grep -q "ELF"; then
-        log_info "Found local ELF binary ($BIN_SOURCE), installing..."
-        cp "$BIN_SOURCE" "$BIN_TARGET"
-    else
-        log_error "Could not find core binary file. Please ensure: 1. Locally ran bun run build or 2. Downloaded CI artifacts to dist directory."
-        exit 1
+    if [[ -z "$CI_BIN" ]]; then
+        log_error "Unsupported architecture for Management API: $ARCH"
+        return 1
     fi
-    chmod +x "$BIN_TARGET"
+    SELECTED_BIN_SOURCE=$(select_management_binary_source "$CI_BIN") || {
+        log_error "Could not find core binary file. Please ensure: 1. Locally ran bun run build or 2. Downloaded CI artifacts to dist directory."
+        return 1
+    }
+    log_info "Installing validated Management API binary from $SELECTED_BIN_SOURCE"
+    supacloud_atomic_install_binary "$SELECTED_BIN_SOURCE" "$CI_BIN" "$BIN_TARGET" || return 1
 
     # 2. Copy management scripts
     if [[ -d "${SCRIPT_DIR}/scripts" ]] && [[ "${SCRIPT_DIR}/scripts" != "$ROOT_SCRIPTS_INSTALL_DIR" ]]; then
@@ -2425,16 +2667,8 @@ install_management_api() {
     fi
 
     # 3. Generate management credentials
-    if [[ ! -f /etc/supabase/master-token.env ]]; then
-        MASTER_TOKEN=$(openssl rand -hex 32)
-        cat > /etc/supabase/master-token.env <<EOF
-# SupaCloud Master Token
-MASTER_TOKEN=${MASTER_TOKEN}
-EOF
-        chmod 600 /etc/supabase/master-token.env
-    else
-        source /etc/supabase/master-token.env
-    fi
+    MASTER_TOKEN=$(supacloud_stable_secret "$MASTER_TOKEN_FILE" MASTER_TOKEN "$(openssl rand -hex 32)")
+    supacloud_write_service_env_pairs "$MASTER_TOKEN_FILE" MASTER_TOKEN "$MASTER_TOKEN"
 
     # 4. Initialize Management API database (via native psql)
     log_info "Executing database pre-check..."
@@ -2443,69 +2677,75 @@ EOF
         || psql -h 127.0.0.1 -U postgres -c "CREATE DATABASE supacloud_meta" 2>/dev/null \
         || log_warn "Could not create supacloud_meta database, management API will attempt auto-init"
     if [[ -n "${POSTGRES_PASSWORD:-}" ]]; then
-        su - postgres -c "psql -c \"ALTER USER postgres PASSWORD '${POSTGRES_PASSWORD}'\"" 2>/dev/null || true
+        set_postgres_role_password "$POSTGRES_PASSWORD" 2>/dev/null \
+            || log_warn "Unable to update the postgres role password"
     fi
 
     # 5. Generate API service environment file
-    local REALTIME_SECRET_KEY_BASE
-    local REALTIME_DB_ENC_KEY
     local BASE_DOMAIN_VALUE="${BASE_DOMAIN:-$SUPABASE_PUBLIC_DOMAIN}"
-    REALTIME_SECRET_KEY_BASE=$(openssl rand -base64 48 | tr -d '\n')
     BASE_DOMAIN_VALUE="$(derive_base_domain "$BASE_DOMAIN_VALUE")"
-    # Realtime tenant encryption uses AES-128 and expects a 16-byte key.
-    local SECRETS_ENCRYPTION_KEY
-    SECRETS_ENCRYPTION_KEY=$(openssl rand -base64 48 | tr -d "\n" | cut -c1-64)
+
+    REALTIME_SECRET_KEY_BASE="${REALTIME_SECRET_KEY_BASE:-$(supacloud_stable_secret "$MANAGEMENT_ENV_FILE" REALTIME_SECRET_KEY_BASE "$(openssl rand -base64 48 | tr -d '\n')")}"
+    SECRETS_ENCRYPTION_KEY="${SECRETS_ENCRYPTION_KEY:-$(supacloud_stable_secret "$MANAGEMENT_ENV_FILE" SECRETS_ENCRYPTION_KEY "$(openssl rand -base64 48 | tr -d "\n" | cut -c1-64)")}"
     # `openssl rand -hex 16` returns 32 ASCII chars, which crashes tenant
     # registration with "Bad key size". Generate a literal 16-char secret instead.
-    REALTIME_DB_ENC_KEY=$(openssl rand -base64 18 | tr -d '\n=+/ ' | cut -c1-16)
+    REALTIME_DB_ENC_KEY="${REALTIME_DB_ENC_KEY:-$(supacloud_stable_secret "$MANAGEMENT_ENV_FILE" REALTIME_DB_ENC_KEY "$(openssl rand -base64 18 | tr -d '\n=+/ ' | cut -c1-16)")}"
 
-    cat > /etc/supabase/management-api.env <<EOF
-# SupaCloud Management API Configuration
-PORT=9090
-MANAGEMENT_API_URL=http://127.0.0.1:9090
-DATABASE_URL=postgresql://postgres:${POSTGRES_PASSWORD}@127.0.0.1:5432/supacloud_meta
-EDGE_RUNTIME_MODE=${EDGE_RUNTIME_MODE:-embedded}
-MASTER_TOKEN=${MASTER_TOKEN}
-SCRIPTS_PATH=${SCRIPTS_INSTALL_DIR}
-PIGSTY_PATH=${HOME}/pigsty
-BASE_DOMAIN=${BASE_DOMAIN_VALUE}
-S3_STORAGE_TYPE=${S3_STORAGE_TYPE:-juicefs}
-TUS_MAX_SIZE=${TUS_MAX_SIZE:-524288000}
-TUS_MAX_CHUNK_SIZE=${TUS_MAX_CHUNK_SIZE:-16777216}
-IMAGINARY_IMAGE=${IMAGINARY_IMAGE:-h2non/imaginary:1.2.4}
-JWT_SECRET=${JWT_SECRET}
-SUPACLOUD_JWT_SECRET=${JWT_SECRET}
-REALTIME_SECRET_KEY_BASE=${REALTIME_SECRET_KEY_BASE}
-REALTIME_DB_ENC_KEY=${REALTIME_DB_ENC_KEY}
-REALTIME_API_SECRET=${JWT_SECRET}
-REALTIME_IMAGE=${REALTIME_IMAGE:-public.ecr.aws/supabase/realtime:v2.111.4}
-REALTIME_CONTAINER_NAME=${REALTIME_CONTAINER_NAME:-supacloud-realtime}
-REALTIME_DB_USER=supabase_admin
-# Database connection environment variables (required for script execution)
-PG_HOST=127.0.0.1
-PG_PORT=5432
-PG_USER=postgres
-PG_DATABASE=postgres
-PGPASSWORD=${POSTGRES_PASSWORD}
-SECRETS_ENCRYPTION_KEY=${SECRETS_ENCRYPTION_KEY}
-SUPABASE_SCHEMA_PATH=/opt/supacloud/packages/management-api/src/db/schemas/supabase.sql
-ACME_CLIENT=lego
-LEGO_BIN=${LEGO_BIN:-lego}
-ACME_STATE_DIR=${ACME_STATE_DIR:-/var/lib/supacloud/lego}
-ACME_HTTP_WEBROOT=${ACME_HTTP_WEBROOT:-/var/lib/supacloud/acme-challenges}
-CADDY_ADMIN_URL=${CADDY_ADMIN_URL:-http://127.0.0.1:2019}
-CADDY_CONFIG_PATH=${CADDY_CONFIG_PATH:-/etc/supacloud/caddy/config.json}
-CADDY_STATE_DIR=${CADDY_STATE_DIR:-/var/lib/supacloud/caddy}
-CADDY_BINARY_PATH=${CADDY_BINARY_PATH:-/usr/local/bin/supacloud-caddy}
-SUPACLOUD_ALERT_WEBHOOK_URL=${SUPACLOUD_ALERT_WEBHOOK_URL:-}
-SUPACLOUD_WATCHDOG_JOURNAL_WINDOW=${SUPACLOUD_WATCHDOG_JOURNAL_WINDOW:-5 minutes ago}
-EOF
-    chmod 600 /etc/supabase/management-api.env
-    sync_runtime_config /etc/supabase/management-api.env
+    local encoded_postgres_password
+    encoded_postgres_password=$(printf '%s' "$POSTGRES_PASSWORD" | supacloud_urlencode_stdin)
+    supacloud_write_service_env_pairs "$MANAGEMENT_ENV_FILE" \
+        PORT 9090 \
+        MANAGEMENT_API_URL http://127.0.0.1:9090 \
+        DATABASE_URL "postgresql://postgres:${encoded_postgres_password}@127.0.0.1:5432/supacloud_meta" \
+        EDGE_RUNTIME_MODE "${EDGE_RUNTIME_MODE:-embedded}" \
+        MASTER_TOKEN "$MASTER_TOKEN" \
+        SCRIPTS_PATH "$SCRIPTS_INSTALL_DIR" \
+        PIGSTY_PATH "${HOME}/pigsty" \
+        BASE_DOMAIN "$BASE_DOMAIN_VALUE" \
+        INTERNAL_IP "$INTERNAL_IP" \
+        DOCKER_HOST_IP "${DOCKER_HOST_IP:-$INTERNAL_IP}" \
+        DASHBOARD_USERNAME "${DASHBOARD_USERNAME:-supabase}" \
+        DASHBOARD_PASSWORD "$DASHBOARD_PASSWORD" \
+        S3_STORAGE_TYPE "${S3_STORAGE_TYPE:-juicefs}" \
+        S3_ENDPOINT "${S3_ENDPOINT:-}" \
+        S3_PROTOCOL "${S3_PROTOCOL:-}" \
+        S3_REGION "${S3_REGION:-us-east-1}" \
+        S3_BUCKET "${S3_BUCKET:-}" \
+        S3_ACCESS_KEY "${S3_ACCESS_KEY:-}" \
+        S3_SECRET_KEY "${S3_SECRET_KEY:-}" \
+        S3_FORCE_PATH_STYLE "${S3_FORCE_PATH_STYLE:-}" \
+        TUS_MAX_SIZE "${TUS_MAX_SIZE:-524288000}" \
+        TUS_MAX_CHUNK_SIZE "${TUS_MAX_CHUNK_SIZE:-16777216}" \
+        IMAGINARY_IMAGE "${IMAGINARY_IMAGE:-h2non/imaginary:1.2.4}" \
+        JWT_SECRET "$JWT_SECRET" \
+        SUPACLOUD_JWT_SECRET "$JWT_SECRET" \
+        REALTIME_SECRET_KEY_BASE "$REALTIME_SECRET_KEY_BASE" \
+        REALTIME_DB_ENC_KEY "$REALTIME_DB_ENC_KEY" \
+        REALTIME_API_SECRET "$JWT_SECRET" \
+        REALTIME_IMAGE "${REALTIME_IMAGE:-public.ecr.aws/supabase/realtime:v2.111.4}" \
+        REALTIME_CONTAINER_NAME "${REALTIME_CONTAINER_NAME:-supacloud-realtime}" \
+        REALTIME_DB_USER supabase_admin \
+        PG_HOST 127.0.0.1 \
+        PG_PORT 5432 \
+        PG_USER postgres \
+        PG_DATABASE postgres \
+        PGPASSWORD "$POSTGRES_PASSWORD" \
+        SECRETS_ENCRYPTION_KEY "$SECRETS_ENCRYPTION_KEY" \
+        SUPABASE_SCHEMA_PATH /opt/supacloud/packages/management-api/src/db/schemas/supabase.sql \
+        ACME_CLIENT lego \
+        LEGO_BIN "${LEGO_BIN:-lego}" \
+        ACME_STATE_DIR "${ACME_STATE_DIR:-/var/lib/supacloud/lego}" \
+        ACME_HTTP_WEBROOT "${ACME_HTTP_WEBROOT:-/var/lib/supacloud/acme-challenges}" \
+        CADDY_ADMIN_URL "${CADDY_ADMIN_URL:-http://127.0.0.1:2019}" \
+        CADDY_CONFIG_PATH "${CADDY_CONFIG_PATH:-/etc/supacloud/caddy/config.json}" \
+        CADDY_STATE_DIR "${CADDY_STATE_DIR:-/var/lib/supacloud/caddy}" \
+        CADDY_BINARY_PATH "${CADDY_BINARY_PATH:-/usr/local/bin/supacloud-caddy}" \
+        SUPACLOUD_ALERT_WEBHOOK_URL "${SUPACLOUD_ALERT_WEBHOOK_URL:-}" \
+        SUPACLOUD_WATCHDOG_JOURNAL_WINDOW "${SUPACLOUD_WATCHDOG_JOURNAL_WINDOW:-5 minutes ago}"
 
     # 6. Execute database migration via supacloud binary itself
     log_info "Initializing metadata database schema..."
-    export DATABASE_URL="postgresql://postgres:${POSTGRES_PASSWORD}@127.0.0.1:5432/supacloud_meta"
+    export DATABASE_URL="postgresql://postgres:${encoded_postgres_password}@127.0.0.1:5432/supacloud_meta"
     $BIN_TARGET --init-db 2>/dev/null || log_warn "Database initialization failed, please execute manually: supacloud --init-db"
     unset DATABASE_URL
     
@@ -2559,34 +2799,38 @@ EOF
     local GOTRUE_BIN="${GOTRUE_BIN:-/usr/local/bin/gotrue}"
     if [[ ! -x "$GOTRUE_BIN" ]]; then
         local GOTRUE_VERSION="${GOTRUE_VERSION:-v2.191.0}"
-        local GOTRUE_ARCH
+        local GOTRUE_ARCH GOTRUE_SHA256_VALUE
         local GOTRUE_EXT="tar.xz"
         GOTRUE_ARCH=$(uname -m)
         case "$GOTRUE_ARCH" in
-            x86_64) GOTRUE_ARCH="amd64" ;;
-            aarch64) GOTRUE_ARCH="arm64" ;;
+            x86_64)
+                GOTRUE_ARCH="amd64"
+                [[ "$GOTRUE_VERSION" != "v2.191.0" ]] || \
+                    GOTRUE_SHA256_VALUE="32da8473b79de594ea4c2b6023f3d34901b99e846dc1fce71dfd8fd3a65e0b72"
+                ;;
+            aarch64)
+                GOTRUE_ARCH="arm64"
+                [[ "$GOTRUE_VERSION" != "v2.191.0" ]] || \
+                    GOTRUE_SHA256_VALUE="f24d79edc35ec33b78f1c9ee02909a002a2ac49ac071a82b51fb80eae1bdfb42"
+                ;;
             *) log_error "Unsupported architecture for GoTrue: $GOTRUE_ARCH"; exit 1 ;;
         esac
-        local GOTRUE_URL="https://github.com/supabase/auth/releases/download/${GOTRUE_VERSION}/auth-${GOTRUE_VERSION}-${GOTRUE_ARCH}.${GOTRUE_EXT}"
+        GOTRUE_SHA256_VALUE="${GOTRUE_SHA256:-$GOTRUE_SHA256_VALUE}"
+        if [[ ! "$GOTRUE_SHA256_VALUE" =~ ^[0-9a-fA-F]{64}$ ]]; then
+            log_error "GOTRUE_SHA256 is required for unpinned GoTrue version ${GOTRUE_VERSION}"
+            exit 1
+        fi
+        local GOTRUE_ASSET="auth-${GOTRUE_VERSION}-${GOTRUE_ARCH}.${GOTRUE_EXT}"
+        local GOTRUE_URL="https://github.com/supabase/auth/releases/download/${GOTRUE_VERSION}/${GOTRUE_ASSET}"
         log_info "Downloading GoTrue ${GOTRUE_VERSION}..."
         local TMP_DIR
         TMP_DIR=$(mktemp -d)
-        if curl -fsSL "https://gh-proxy.net/${GOTRUE_URL}" -o "${TMP_DIR}/gotrue.${GOTRUE_EXT}" 2>/dev/null || \
-           curl -fsSL "${GOTRUE_URL}" -o "${TMP_DIR}/gotrue.${GOTRUE_EXT}"; then
-            tar -xf "${TMP_DIR}/gotrue.${GOTRUE_EXT}" -C "${TMP_DIR}"
-            if [[ -f "${TMP_DIR}/auth" ]]; then
-                mv "${TMP_DIR}/auth" "$GOTRUE_BIN"
-            elif [[ -f "${TMP_DIR}/gotrue" ]]; then
-                mv "${TMP_DIR}/gotrue" "$GOTRUE_BIN"
-            else
-                log_error "GoTrue binary not found in archive"
-                rm -rf "$TMP_DIR"
-                exit 1
-            fi
-            chmod +x "$GOTRUE_BIN"
+        if supacloud_download_url "$GOTRUE_URL" "${TMP_DIR}/${GOTRUE_ASSET}" \
+            && supacloud_install_pinned_tar_xz_binary \
+                "${TMP_DIR}/${GOTRUE_ASSET}" auth "$GOTRUE_SHA256_VALUE" "$GOTRUE_ARCH" "$GOTRUE_BIN"; then
             log_info "GoTrue installed to $GOTRUE_BIN"
         else
-            log_error "Failed to download GoTrue"
+            log_error "GoTrue download or verification failed"
             rm -rf "$TMP_DIR"
             exit 1
         fi
@@ -2637,16 +2881,37 @@ GOTRUE_SVC
     # Ensure tenant config directory exists
     mkdir -p /etc/supabase/tenants
 
-    # 8. Inject terminal environment variables
-    cat > /etc/profile.d/supacloud.sh <<EOF
-export MASTER_TOKEN="${MASTER_TOKEN}"
-export MANAGEMENT_API_URL="http://localhost:9090"
-alias sc='supacloud'
-EOF
-    chmod 644 /etc/profile.d/supacloud.sh
+    # 8. Configure non-secret CLI conveniences without overwriting DOCKER_HOST.
+    supacloud_write_cli_profile "${SUPACLOUD_PROFILE_FILE:-/etc/profile.d/supacloud.sh}"
     
     log_info "SupaCloud Control Plane deployed successfully!"
 }
+
+deploy_web_console_tar_atomic() (
+    local archive="$1"
+    local target_dir="$2"
+    local staging_dir backup_dir
+    supacloud_validate_tar "$archive" || return 1
+    mkdir -p "$(dirname "$target_dir")"
+    staging_dir=$(mktemp -d "${target_dir}.staging.XXXXXX")
+    backup_dir="${target_dir}.backup.$$"
+    trap 'rm -rf "${staging_dir:-}" "${backup_dir:-}"' EXIT HUP INT TERM
+    tar --no-same-owner --no-same-permissions -xzf "$archive" -C "$staging_dir"
+    [[ -f "$staging_dir/index.html" ]] || {
+        log_error "Verified Web Console archive did not produce index.html"
+        return 1
+    }
+    if [[ -e "$target_dir" ]]; then
+        mv "$target_dir" "$backup_dir"
+    fi
+    if ! mv "$staging_dir" "$target_dir"; then
+        [[ ! -e "$backup_dir" ]] || mv "$backup_dir" "$target_dir"
+        return 1
+    fi
+    staging_dir=""
+    rm -rf "$backup_dir"
+    backup_dir=""
+)
 
 # ========== Install Web Console (Studio UI) ==========
 install_web_console() {
@@ -2655,42 +2920,45 @@ install_web_console() {
     local WEB_CONSOLE_DIR="/opt/supacloud/web-console/current"
     local WEB_CONSOLE_SRC="${SCRIPT_DIR}/packages/web-console/build"
     local WEB_CONSOLE_TAR="${SCRIPT_DIR}/dist/web-console-build.tar.gz"
-    local GH_PROXY="${GH_PROXY:-https://ghproxy.net}"
+    local SELECTED_WEB_CONSOLE_SOURCE=""
+    supacloud_resolve_artifact_policy || return 1
 
-    mkdir -p "$WEB_CONSOLE_DIR"
-
-    if [[ -f "$WEB_CONSOLE_DIR/index.html" ]]; then
+    if [[ -f "$WEB_CONSOLE_DIR/index.html" && "$SUPACLOUD_RESOLVED_ARTIFACT_MODE" == "local" ]]; then
         log_info "Web Console already deployed at $WEB_CONSOLE_DIR, skipping"
         return 0
     fi
 
-    if [[ -d "$WEB_CONSOLE_SRC" ]] && [[ -f "$WEB_CONSOLE_SRC/index.html" ]]; then
+    SELECTED_WEB_CONSOLE_SOURCE=$(select_web_console_source) || return 1
+    if [[ "$SELECTED_WEB_CONSOLE_SOURCE" == "$WEB_CONSOLE_TAR" ]]; then
+        deploy_web_console_tar_atomic "$SELECTED_WEB_CONSOLE_SOURCE" "$WEB_CONSOLE_DIR"
+        log_info "Web Console atomically deployed from the verified release archive"
+    elif [[ "$SELECTED_WEB_CONSOLE_SOURCE" == "$WEB_CONSOLE_SRC" ]]; then
+        mkdir -p "$WEB_CONSOLE_DIR"
         cp -rf "$WEB_CONSOLE_SRC"/* "$WEB_CONSOLE_DIR/"
         log_info "Web Console deployed from local source build"
-    elif [[ -f "$WEB_CONSOLE_TAR" ]]; then
-        tar -xzf "$WEB_CONSOLE_TAR" -C "$WEB_CONSOLE_DIR/"
-        log_info "Web Console deployed from local tarball"
     else
-        log_info "Downloading Web Console from GitHub Releases..."
-        local DOWNLOAD_URL="${GH_PROXY}/https://github.com/zuohuadong/supacloud/releases/latest/download/web-console-build.tar.gz"
-        local TMP_TAR="/tmp/web-console-build.tar.gz"
-        curl -fSL -o "$TMP_TAR" "$DOWNLOAD_URL" 2>/dev/null || {
-            DOWNLOAD_URL="https://github.com/zuohuadong/supacloud/releases/latest/download/web-console-build.tar.gz"
-            curl -fSL -o "$TMP_TAR" "$DOWNLOAD_URL" || {
-                log_warn "Web Console download failed, Studio UI will not be available"
-                log_warn "You can manually build and deploy: bun run build (in packages/web-console) then copy to $WEB_CONSOLE_DIR"
-                return 1
-            }
+        log_info "Resolving the Management API component release for Web Console..."
+        local MANAGEMENT_BIN_NAME=""
+        case "$(uname -m)" in
+            x86_64) MANAGEMENT_BIN_NAME="supacloud-linux-amd64" ;;
+            aarch64) MANAGEMENT_BIN_NAME="supacloud-linux-arm64" ;;
+            *) log_warn "Unsupported architecture for Web Console release resolution"; return 1 ;;
+        esac
+        local MANAGEMENT_RELEASE
+        MANAGEMENT_RELEASE=$(supacloud_fetch_component_release management-api "${SUPACLOUD_MANAGEMENT_VERSION:-latest}" "$MANAGEMENT_BIN_NAME" web-console-build.tar.gz) || {
+            log_warn "Unable to resolve a verified Management API release for Web Console"
+            return 1
         }
-        if file "$TMP_TAR" | grep -q "gzip"; then
-            tar -xzf "$TMP_TAR" -C "$WEB_CONSOLE_DIR/"
+        local TMP_TAR
+        TMP_TAR=$(mktemp)
+        if ! supacloud_download_release_asset "$MANAGEMENT_RELEASE" web-console-build.tar.gz "$TMP_TAR" tar; then
             rm -f "$TMP_TAR"
-            log_info "Web Console deployed from GitHub Release"
-        else
-            rm -f "$TMP_TAR"
-            log_warn "Downloaded file is not a valid gzip archive, skipping Web Console deployment"
+            log_warn "Verified Web Console download failed, Studio UI will not be available"
             return 1
         fi
+        deploy_web_console_tar_atomic "$TMP_TAR" "$WEB_CONSOLE_DIR"
+        rm -f "$TMP_TAR"
+        log_info "Web Console deployed from verified Management API release"
     fi
 
     if [[ -f "$WEB_CONSOLE_DIR/index.html" ]]; then
@@ -2698,6 +2966,104 @@ install_web_console() {
     else
         log_warn "Web Console deployment incomplete - index.html not found"
     fi
+}
+
+persist_service_container_runtime_env() {
+    if [[ -z "${JWT_SECRET:-}" ]]; then
+        log_error "JWT_SECRET is required before service container endpoints can be persisted"
+        return 1
+    fi
+
+    supacloud_write_service_env_pairs "$MANAGEMENT_ENV_FILE" \
+        IMAGINARY_URL http://127.0.0.1:9010 \
+        REALTIME_ADMIN_URL http://127.0.0.1:4000 \
+        REALTIME_API_SECRET "$JWT_SECRET"
+}
+
+write_realtime_container_env() {
+    local target_file="$1"
+    local secret
+    for secret in "${POSTGRES_PASSWORD:-}" "${JWT_SECRET:-}" \
+        "${REALTIME_DB_ENC_KEY:-}" "${REALTIME_SECRET_KEY_BASE:-}"; do
+        if [[ -z "$secret" || "$secret" == *$'\n'* || "$secret" == *$'\r'* ]]; then
+            log_error "Realtime container secrets must be non-empty single-line values"
+            return 1
+        fi
+    done
+    supacloud_write_raw_env_pairs "$target_file" \
+        PORT 4000 \
+        DB_HOST "${INTERNAL_IP:-127.0.0.1}" \
+        DB_PORT 5432 \
+        DB_USER "${REALTIME_DB_USER:-supabase_admin}" \
+        DB_PASSWORD "$POSTGRES_PASSWORD" \
+        DB_USER_REALTIME "${REALTIME_DB_USER:-supabase_admin}" \
+        DB_PASS_REALTIME "$POSTGRES_PASSWORD" \
+        DB_NAME postgres \
+        DB_AFTER_CONNECT_QUERY "SET search_path TO _realtime" \
+        DB_ENC_KEY "$REALTIME_DB_ENC_KEY" \
+        DB_SSL false \
+        API_JWT_SECRET "$JWT_SECRET" \
+        JWT_SECRET "$JWT_SECRET" \
+        SECRET_KEY_BASE "$REALTIME_SECRET_KEY_BASE" \
+        METRICS_JWT_SECRET "$JWT_SECRET" \
+        ERL_AFLAGS "-proto_dist inet_tcp" \
+        DNS_NODES "" \
+        RLIMIT_NOFILE 10000 \
+        APP_NAME realtime \
+        SEED_SELF_HOST true \
+        RUN_JANITOR false \
+        SECURE_CHANNELS false \
+        DISABLE_HEALTHCHECK_LOGGING true
+}
+
+render_realtime_systemd_unit() {
+    local source_file="$1"
+    local target_file="$2"
+    local env_file="$3"
+    python3 - "$source_file" "$target_file" "$env_file" <<'PY'
+from pathlib import Path
+import sys
+
+source, target, env_file = map(Path, sys.argv[1:])
+lines = source.read_text().splitlines()
+result = []
+skipping = False
+for line in lines:
+    if line.startswith("ExecStart=/usr/bin/podman run"):
+        result.append(
+            "ExecStart=/usr/bin/podman run --replace "
+            "--name ${REALTIME_CONTAINER_NAME} --network host "
+            f"--env-file {env_file} ${{REALTIME_IMAGE}}"
+        )
+        skipping = True
+        continue
+    if skipping:
+        if line.strip() == "${REALTIME_IMAGE}":
+            skipping = False
+        continue
+    result.append(line)
+target.write_text("\n".join(result) + "\n")
+PY
+}
+
+start_realtime_container() {
+    local runtime="$1"
+    local image="$2"
+    local container_name="$3"
+    (
+        local realtime_env_file
+        umask 077
+        realtime_env_file=$(mktemp)
+        trap 'rm -f "$realtime_env_file"' EXIT HUP INT TERM
+        write_realtime_container_env "$realtime_env_file"
+        "$runtime" run -d \
+            --name "$container_name" \
+            --restart=always \
+            --privileged \
+            -p 127.0.0.1:4000:4000 \
+            --env-file "$realtime_env_file" \
+            "$image"
+    )
 }
 
 # ========== Deploy Service Containers (Imaginary + Realtime) ==========
@@ -2733,9 +3099,11 @@ deploy_service_containers() {
     # --- 2. Deploy Supabase Realtime (Multi-tenant WebSocket) ---
     local REALTIME_UNIT_SRC="${SCRIPT_DIR}/infrastructure/systemd/supacloud-realtime.service"
     local REALTIME_IMAGE_VALUE="${REALTIME_IMAGE:-public.ecr.aws/supabase/realtime:v2.111.4}"
+    local REALTIME_CONTAINER_ENV_FILE="${SUPACLOUD_REALTIME_CONTAINER_ENV_FILE:-/etc/supabase/realtime-container.env}"
     if [[ -f "$REALTIME_UNIT_SRC" ]]; then
         log_info "Registering SupaCloud Realtime systemd unit..."
-        cp "$REALTIME_UNIT_SRC" /etc/systemd/system/supacloud-realtime.service
+        write_realtime_container_env "$REALTIME_CONTAINER_ENV_FILE"
+        render_realtime_systemd_unit "$REALTIME_UNIT_SRC" /etc/systemd/system/supacloud-realtime.service "$REALTIME_CONTAINER_ENV_FILE"
         systemctl daemon-reload
         systemctl enable supacloud-realtime
 
@@ -2759,57 +3127,20 @@ deploy_service_containers() {
         $RUNTIME pull "$REALTIME_IMAGE_VALUE"
 
         if [[ -n "${POSTGRES_PASSWORD:-}" ]]; then
-            PGPASSWORD="${POSTGRES_PASSWORD}" psql -h "${INTERNAL_IP}" -U supabase_admin -d postgres -v realtime_password="${POSTGRES_PASSWORD}" \
-                -c "CREATE SCHEMA IF NOT EXISTS _realtime;" \
-                -c "DO \$\$ BEGIN IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'supabase_realtime_admin') THEN CREATE ROLE supabase_realtime_admin NOLOGIN NOINHERIT NOREPLICATION; END IF; END \$\$;" \
-                -c "ALTER ROLE supabase_realtime_admin LOGIN NOINHERIT CREATEROLE REPLICATION PASSWORD :'realtime_password';" 2>/dev/null || true
+            ensure_realtime_database_role "$POSTGRES_PASSWORD" 2>/dev/null \
+                || log_warn "Unable to initialize the Realtime database role"
         fi
 
         $RUNTIME rm -f "${REALTIME_CONTAINER_NAME:-supacloud-realtime}" >/dev/null 2>&1 || true
-        $RUNTIME run -d \
-            --name "${REALTIME_CONTAINER_NAME:-supacloud-realtime}" \
-            --restart=always \
-            --privileged \
-            -p 127.0.0.1:4000:4000 \
-            -e PORT=4000 \
-            -e DB_HOST="${INTERNAL_IP}" \
-            -e DB_PORT=5432 \
-            -e DB_USER="${REALTIME_DB_USER:-supabase_admin}" \
-            -e DB_PASSWORD="${POSTGRES_PASSWORD}" \
-            -e DB_USER_REALTIME="${REALTIME_DB_USER:-supabase_admin}" \
-            -e DB_PASS_REALTIME="${POSTGRES_PASSWORD}" \
-            -e DB_NAME=postgres \
-            -e "DB_AFTER_CONNECT_QUERY=SET search_path TO _realtime" \
-            -e DB_ENC_KEY="${REALTIME_DB_ENC_KEY}" \
-            -e DB_SSL=false \
-            -e API_JWT_SECRET="${JWT_SECRET}" \
-            -e JWT_SECRET="${JWT_SECRET}" \
-            -e SECRET_KEY_BASE="${REALTIME_SECRET_KEY_BASE}" \
-            -e METRICS_JWT_SECRET="${JWT_SECRET}" \
-            -e ERL_AFLAGS="-proto_dist inet_tcp" \
-            -e "DNS_NODES=''" \
-            -e RLIMIT_NOFILE=10000 \
-            -e APP_NAME=realtime \
-            -e SEED_SELF_HOST=true \
-            -e RUN_JANITOR=false \
-            -e SECURE_CHANNELS=false \
-            -e DISABLE_HEALTHCHECK_LOGGING=true \
-            "$REALTIME_IMAGE_VALUE"
+        start_realtime_container "$RUNTIME" "$REALTIME_IMAGE_VALUE" \
+            "${REALTIME_CONTAINER_NAME:-supacloud-realtime}"
 
         log_info "Realtime deployed on port 4000 (multi-tenant mode)"
     fi
 
-    # --- 3. Update management API env with container references ---
-    if ! grep -q "IMAGINARY_URL" /etc/supabase/management-api.env 2>/dev/null; then
-        cat >> /etc/supabase/management-api.env <<EOF
-
-# Service container endpoints
-IMAGINARY_URL=http://127.0.0.1:9010
-REALTIME_ADMIN_URL=http://127.0.0.1:4000
-REALTIME_API_SECRET=${JWT_SECRET:-super-secret-jwt-token}
-EOF
-        log_info "Container endpoints appended to management-api.env"
-    fi
+    # --- 3. Atomically merge management API container references ---
+    persist_service_container_runtime_env
+    log_info "Container endpoints merged into $MANAGEMENT_ENV_FILE"
 
     log_info "Service containers deployed successfully!"
 }
@@ -2830,7 +3161,6 @@ repair_stale_projects() {
         REF=$(echo "$REF" | tr -d ' ')
         DB_NAME=$(echo "$DB_NAME" | tr -d ' ')
         DB_USER=$(echo "$DB_USER" | tr -d ' ')
-        DB_PASS=$(echo "$DB_PASS" | tr -d ' ')
         PSTATUS=$(echo "$PSTATUS" | tr -d ' ')
 
         if [[ -z "$REF" || -z "$DB_NAME" ]]; then
@@ -2842,7 +3172,7 @@ repair_stale_projects() {
         if [[ "$DB_EXISTS" != "1" ]]; then
             log_info "Provisioning database $DB_NAME for project $REF (status: $PSTATUS)..."
             sudo -u postgres psql -d postgres -c "CREATE DATABASE \"$DB_NAME\";" 2>/dev/null
-            sudo -u postgres psql -d postgres -c "CREATE ROLE \"$DB_USER\" LOGIN CONNECTION LIMIT 20 PASSWORD '$DB_PASS';" 2>/dev/null || true
+            ensure_project_database_role "$DB_USER" "$DB_PASS" 2>/dev/null
             sudo -u postgres psql -d postgres -c "GRANT ALL PRIVILEGES ON DATABASE \"$DB_NAME\" TO \"$DB_USER\";" 2>/dev/null
             sudo -u postgres psql -d "$DB_NAME" -c "GRANT ALL ON SCHEMA public TO \"$DB_USER\";" 2>/dev/null
             sudo -u postgres psql -d "$DB_NAME" -c "CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\";" 2>/dev/null
@@ -2881,13 +3211,9 @@ show_completion() {
     echo ""
     echo "Please keep this file secure!"
     echo ""
-    echo "Management API Master Token:"
-    if [[ -f /etc/supabase/master-token.env ]]; then
-        source /etc/supabase/master-token.env 2>/dev/null || true
-        echo -e "  ${YELLOW}MASTER_TOKEN=${MASTER_TOKEN}${NC}"
-    fi
-    echo "  Take effect now: source /etc/profile.d/supacloud.sh"
-    echo "  Take effect automatically after next login (written to /etc/profile.d/supacloud.sh)"
+    echo "Management API Master Token is stored in the root-only file:"
+    echo -e "${YELLOW}  ${MASTER_TOKEN_FILE}${NC}"
+    echo "CLI conveniences are available after: source /etc/profile.d/supacloud.sh"
     echo ""
     echo "Next Steps:"
     echo "  1. Point the DNS A record for ${SUPABASE_PUBLIC_DOMAIN} to the server's public IP"
@@ -3062,6 +3388,7 @@ EOF
 
 # ========== Main Function ==========
 main() {
+    supacloud_resolve_artifact_policy
     echo ""
     echo "============================================================"
     echo "  Pigsty Supabase One-Click Installation Script"
@@ -3069,12 +3396,11 @@ main() {
     echo "============================================================"
     echo ""
     
-    check_config
-    generate_jwt_keys
     check_os_compatibility
     check_system
-    install_base_dependencies  # Ensure base tools like sudo, tar, ssh exist
-    setup_local_ssh            # Ensure local SSH passwordless (required by Ansible)
+    install_base_dependencies
+    configure_local_ansible
+    check_config
     setup_swap
     enable_ksm_optimization     # Kernel stack memory deduplication
     

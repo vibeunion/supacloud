@@ -11,161 +11,31 @@ import { resolveProjectApiUrl, resolveProjectAuthUrl, resolveProjectStudioUrl } 
 import { normalizeOAuthServerConfig, normalizeProjectConfig } from "../utils/project-config";
 import { normalizeProjectJwtJwks, normalizeProjectJwtKeys } from "../utils/project-jwt";
 import { uniqueStrings } from "../utils/strings";
-import { quoteSystemdEnvValue } from "../utils/systemd-env";
-import { renderGoTrueEmailTemplateEnv } from "../utils/auth-email-templates";
+import { ALTER_TENANT_SQL } from "./tenant-runtime-migration";
+import {
+    assertSafeConfigValue,
+    buildPostgresUri,
+    buildTenantPsqlInvocation,
+    pickPositivePort,
+    quoteTomlBasicString,
+    renderGoTrueAuthEnv,
+    renderGoTruePasskeyEnv,
+    renderGoTrueSamlEnv,
+    renderPostgrestDbSchemas,
+    renderSystemdEnvLine,
+    renderTenantInternalRuntimeEnv,
+    stringifyJsonConfig,
+} from "./tenant-runtime-config";
+import type { PostgresConnectionConfig } from "./tenant-runtime-config";
 
-function stringifyJsonConfig(value: unknown): string | null {
-    if (!value) return null;
-    return typeof value === "string" ? value : JSON.stringify(value);
-}
-
-function pickPositivePort(value: unknown): number | null {
-    const port = Number(value);
-    if (!Number.isFinite(port) || port <= 0) return null;
-    return Math.trunc(port);
-}
-
-const DEFAULT_POSTGREST_SCHEMAS = ["public", "storage", "graphql_public"] as const;
-
-export function renderPostgrestDbSchemas(includePgmqPublic = false): string {
-    const schemas: string[] = [...DEFAULT_POSTGREST_SCHEMAS];
-    if (includePgmqPublic) schemas.push("pgmq_public");
-    return schemas.join(", ");
-}
-
-export function renderTenantInternalRuntimeEnv(pgrstPort: number, gotruePort: number): string {
-    return [
-        `SUPACLOUD_INTERNAL_POSTGREST_PORT=${pgrstPort}`,
-        `SUPACLOUD_INTERNAL_GOTRUE_PORT=${gotruePort}`,
-        `SUPACLOUD_INTERNAL_REST_URL=http://127.0.0.1:${pgrstPort}`,
-    ].join("\n");
-}
-
-function readBooleanSetting(
-    authConfig: Record<string, unknown>,
-    key: string,
-    defaultValue: boolean,
-): boolean {
-    const value = authConfig[key];
-    return typeof value === "boolean" ? value : defaultValue;
-}
-
-function readRecordSetting(value: unknown): Record<string, unknown> {
-    return value && typeof value === "object" && !Array.isArray(value)
-        ? value as Record<string, unknown>
-        : {};
-}
-
-function readStringSetting(
-    authConfig: Record<string, unknown>,
-    key: string,
-    defaultValue = "",
-): string {
-    const value = authConfig[key];
-    return typeof value === "string" && value.trim() ? value.trim() : defaultValue;
-}
-
-function readPositiveIntegerSetting(
-    authConfig: Record<string, unknown>,
-    key: string,
-    defaultValue: number,
-): number {
-    const value = Number(authConfig[key]);
-    return Number.isFinite(value) && value > 0 ? Math.trunc(value) : defaultValue;
-}
-
-function readStringListSetting(value: unknown, defaultValue: string[]): string[] {
-    if (Array.isArray(value)) {
-        const entries = value
-            .map((entry) => typeof entry === "string" ? entry.trim() : "")
-            .filter(Boolean);
-        return entries.length > 0 ? entries : defaultValue;
-    }
-    if (typeof value === "string" && value.trim()) {
-        const entries = value.split(",").map((entry) => entry.trim()).filter(Boolean);
-        return entries.length > 0 ? entries : defaultValue;
-    }
-    return defaultValue;
-}
-
-export function renderGoTrueAuthEnv(authConfig: Record<string, unknown>): string {
-    const disableSignup = readBooleanSetting(authConfig, "disable_signup", false)
-        || readBooleanSetting(authConfig, "enable_signup", true) === false;
-    const externalAnonymousUsersEnabled = readBooleanSetting(authConfig, "external_anonymous_users_enabled", true);
-    const externalEmailEnabled = readBooleanSetting(authConfig, "external_email_enabled", true);
-    const externalPhoneEnabled = readBooleanSetting(authConfig, "external_phone_enabled", true);
-
-    return [
-`
-GOTRUE_DISABLE_SIGNUP=${disableSignup ? "true" : "false"}
-GOTRUE_EXTERNAL_ANONYMOUS_USERS_ENABLED=${externalAnonymousUsersEnabled ? "true" : "false"}
-GOTRUE_EXTERNAL_EMAIL_ENABLED=${externalEmailEnabled ? "true" : "false"}
-GOTRUE_EXTERNAL_PHONE_ENABLED=${externalPhoneEnabled ? "true" : "false"}
-`.trim(),
-        renderGoTrueEmailTemplateEnv(authConfig),
-    ].filter(Boolean).join("\n");
-}
-
-export type GoTrueWebAuthnDefaults = {
-    rpId: string;
-    rpDisplayName: string;
-    rpOrigins: string[];
-};
-
-export function renderGoTruePasskeyEnv(
-    authConfig: Record<string, unknown>,
-    defaults: GoTrueWebAuthnDefaults,
-): string {
-    const passkey = readRecordSetting(authConfig.passkey);
-    const webAuthn = readRecordSetting(authConfig.webauthn);
-    const mfa = readRecordSetting(authConfig.mfa ?? authConfig.MFA);
-    const mfaWebAuthn = readRecordSetting(mfa.webauthn ?? mfa.WebAuthn);
-    const passkeyEnabled = readBooleanSetting(passkey, "enabled", readBooleanSetting(authConfig, "passkey_enabled", false));
-    const mfaEnrollEnabled = readBooleanSetting(mfaWebAuthn, "enroll_enabled", readBooleanSetting(authConfig, "mfa_webauthn_enroll_enabled", false));
-    const mfaVerifyEnabled = readBooleanSetting(mfaWebAuthn, "verify_enabled", readBooleanSetting(authConfig, "mfa_webauthn_verify_enabled", false));
-
-    if (!passkeyEnabled && !mfaEnrollEnabled && !mfaVerifyEnabled) return "";
-
-    const rpId = readStringSetting(webAuthn, "rp_id", defaults.rpId);
-    const rpDisplayName = readStringSetting(webAuthn, "rp_display_name", defaults.rpDisplayName);
-    const rpOrigins = readStringListSetting(webAuthn.rp_origins, defaults.rpOrigins);
-    const challengeExpiry = readStringSetting(webAuthn, "challenge_expiry_duration", "5m");
-    const maxPasskeysPerUser = readPositiveIntegerSetting(passkey, "max_passkeys_per_user", 10);
-
-    return [
-        `GOTRUE_PASSKEY_ENABLED=${passkeyEnabled ? "true" : "false"}`,
-        `GOTRUE_PASSKEY_MAX_PASSKEYS_PER_USER=${maxPasskeysPerUser}`,
-        `GOTRUE_MFA_WEBAUTHN_ENROLL_ENABLED=${mfaEnrollEnabled ? "true" : "false"}`,
-        `GOTRUE_MFA_WEBAUTHN_VERIFY_ENABLED=${mfaVerifyEnabled ? "true" : "false"}`,
-        `GOTRUE_WEBAUTHN_RP_ID=${rpId}`,
-        `GOTRUE_WEBAUTHN_RP_DISPLAY_NAME=${quoteSystemdEnvValue(rpDisplayName)}`,
-        `GOTRUE_WEBAUTHN_RP_ORIGINS=${rpOrigins.join(",")}`,
-        `GOTRUE_WEBAUTHN_CHALLENGE_EXPIRY_DURATION=${challengeExpiry}`,
-    ].join("\n");
-}
-
-export function renderGoTrueSamlEnv(authConfig: Record<string, unknown>): string {
-    const saml = readRecordSetting(authConfig.saml);
-    const enabled = readBooleanSetting(saml, "enabled", readBooleanSetting(authConfig, "saml_enabled", false));
-    if (!enabled) return "";
-
-    const privateKey = readStringSetting(saml, "private_key", readStringSetting(authConfig, "saml_private_key"));
-    const privateKeyNext = readStringSetting(saml, "private_key_next", readStringSetting(authConfig, "saml_private_key_next"));
-    const externalUrl = readStringSetting(saml, "external_url", readStringSetting(authConfig, "saml_external_url"));
-    const relayStateValidity = readStringSetting(saml, "relay_state_validity_period", "2m");
-    const allowEncryptedAssertions = readBooleanSetting(saml, "allow_encrypted_assertions", readBooleanSetting(authConfig, "saml_allow_encrypted_assertions", false));
-    const rateLimitAssertion = readPositiveIntegerSetting(saml, "rate_limit_assertion", 15);
-
-    return [
-        "GOTRUE_SAML_ENABLED=true",
-        privateKey ? `GOTRUE_SAML_PRIVATE_KEY=${quoteSystemdEnvValue(privateKey)}` : "",
-        privateKeyNext ? `GOTRUE_SAML_PRIVATE_KEY_NEXT=${quoteSystemdEnvValue(privateKeyNext)}` : "",
-        externalUrl ? `GOTRUE_SAML_EXTERNAL_URL=${externalUrl}` : "",
-        `GOTRUE_SAML_ALLOW_ENCRYPTED_ASSERTIONS=${allowEncryptedAssertions ? "true" : "false"}`,
-        `GOTRUE_SAML_RELAY_STATE_VALIDITY_PERIOD=${relayStateValidity}`,
-        `GOTRUE_SAML_RATE_LIMIT_ASSERTION=${rateLimitAssertion}`,
-    ].filter(Boolean).join("\n");
-}
+export {
+    renderGoTrueAuthEnv,
+    renderGoTruePasskeyEnv,
+    renderGoTrueSamlEnv,
+    renderPostgrestDbSchemas,
+    renderTenantInternalRuntimeEnv,
+} from "./tenant-runtime-config";
+export type { GoTrueWebAuthnDefaults } from "./tenant-runtime-config";
 
 export interface RuntimeStatus {
     status: "running" | "stopped" | "starting" | "error";
@@ -458,722 +328,6 @@ class GotrueRuntimeController {
     }
 }
 
-// Tenant schema migration SQL (sourced from migrate-tenant-schema.ts)
-const ALTER_TENANT_SQL = `
--- 1. auth.users adds
-DO $$ BEGIN ALTER TABLE auth.users ADD COLUMN is_anonymous BOOLEAN NOT NULL DEFAULT false; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
-
--- 2. auth.sessions adds
-DO $$ BEGIN ALTER TABLE auth.sessions ADD COLUMN tag VARCHAR(255); EXCEPTION WHEN duplicate_column THEN NULL; END $$;
-DO $$ BEGIN ALTER TABLE auth.sessions ADD COLUMN refreshed_at TIMESTAMPTZ; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
-DO $$ BEGIN ALTER TABLE auth.sessions ADD COLUMN user_agent TEXT; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
-DO $$ BEGIN ALTER TABLE auth.sessions ADD COLUMN ip TEXT; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
-
--- 3. storage.objects adds
-DO $$ BEGIN ALTER TABLE storage.objects ADD COLUMN user_metadata JSONB; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
-DO $$ BEGIN ALTER TABLE storage.objects ADD COLUMN version UUID NOT NULL DEFAULT gen_random_uuid(); EXCEPTION WHEN duplicate_column THEN NULL; END $$;
-
--- 4. MFA schemas
-DO $$ BEGIN CREATE TYPE auth.factor_type AS ENUM('totp', 'webauthn'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-DO $$ BEGIN CREATE TYPE auth.factor_status AS ENUM('unverified', 'verified'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-DO $$ BEGIN CREATE TYPE auth.aal_level AS ENUM('aal1', 'aal2', 'aal3'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-
-CREATE TABLE IF NOT EXISTS auth.mfa_factors(
-       id UUID NOT NULL,
-       user_id UUID NOT NULL,
-       friendly_name TEXT NULL,
-       factor_type auth.factor_type NOT NULL,
-       status auth.factor_status NOT NULL,
-       created_at TIMESTAMPTZ NOT NULL,
-       updated_at TIMESTAMPTZ NOT NULL,
-       secret TEXT NULL,
-       CONSTRAINT mfa_factors_pkey PRIMARY KEY(id),
-       CONSTRAINT mfa_factors_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE
-);
-CREATE UNIQUE INDEX IF NOT EXISTS mfa_factors_user_friendly_name_unique ON auth.mfa_factors (friendly_name, user_id) WHERE trim(friendly_name) <> '';
-CREATE INDEX IF NOT EXISTS mfa_factors_user_id_idx ON auth.mfa_factors (user_id);
-
-CREATE TABLE IF NOT EXISTS auth.mfa_challenges(
-       id UUID NOT NULL,
-       factor_id UUID NOT NULL,
-       created_at TIMESTAMPTZ NOT NULL,
-       verified_at TIMESTAMPTZ NULL,
-       ip_address INET NOT NULL,
-       CONSTRAINT mfa_challenges_pkey PRIMARY KEY (id),
-       CONSTRAINT mfa_challenges_auth_factor_id_fkey FOREIGN KEY (factor_id) REFERENCES auth.mfa_factors(id) ON DELETE CASCADE
-);
-
-CREATE TABLE IF NOT EXISTS auth.mfa_amr_claims(
-    session_id UUID NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL,
-    updated_at TIMESTAMPTZ NOT NULL,
-    authentication_method TEXT NOT NULL,
-    CONSTRAINT mfa_amr_claims_session_id_authentication_method_pkey UNIQUE(session_id, authentication_method),
-    CONSTRAINT mfa_amr_claims_session_id_fkey FOREIGN KEY(session_id) REFERENCES auth.sessions(id) ON DELETE CASCADE
-);
-
--- 5. SSO schemas
-CREATE TABLE IF NOT EXISTS auth.sso_providers (
-	id UUID NOT NULL,
-	resource_id TEXT NULL,
-	created_at TIMESTAMPTZ NULL,
-	updated_at TIMESTAMPTZ NULL,
-	PRIMARY KEY (id),
-	CONSTRAINT "resource_id not empty" CHECK (resource_id IS NULL OR char_length(resource_id) > 0)
-);
-
-CREATE TABLE IF NOT EXISTS auth.sso_domains (
-	id UUID NOT NULL,
-	sso_provider_id UUID NOT NULL,
-	domain TEXT NOT NULL,
-	created_at TIMESTAMPTZ NULL,
-	updated_at TIMESTAMPTZ NULL,
-	PRIMARY KEY (id),
-	FOREIGN KEY (sso_provider_id) REFERENCES auth.sso_providers (id) ON DELETE CASCADE,
-	CONSTRAINT "domain not empty" CHECK (char_length(domain) > 0)
-);
-CREATE INDEX IF NOT EXISTS sso_domains_sso_provider_id_idx ON auth.sso_domains (sso_provider_id);
-
-CREATE TABLE IF NOT EXISTS auth.saml_providers (
-	id UUID NOT NULL,
-	sso_provider_id UUID NOT NULL,
-	entity_id TEXT NOT NULL UNIQUE,
-	metadata_xml TEXT NOT NULL,
-	metadata_url TEXT NULL,
-	attribute_mapping JSONB NULL,
-	created_at TIMESTAMPTZ NULL,
-	updated_at TIMESTAMPTZ NULL,
-	PRIMARY KEY (id),
-	FOREIGN KEY (sso_provider_id) REFERENCES auth.sso_providers (id) ON DELETE CASCADE,
-	CONSTRAINT "metadata_xml not empty" CHECK (char_length(metadata_xml) > 0),
-	CONSTRAINT "metadata_url not empty" CHECK (metadata_url IS NULL OR char_length(metadata_url) > 0),
-	CONSTRAINT "entity_id not empty" CHECK (char_length(entity_id) > 0)
-);
-CREATE INDEX IF NOT EXISTS saml_providers_sso_provider_id_idx ON auth.saml_providers (sso_provider_id);
-
-CREATE TABLE IF NOT EXISTS auth.saml_relay_states (
-	id UUID NOT NULL,
-	sso_provider_id UUID NOT NULL,
-	request_id TEXT NOT NULL,
-	for_email TEXT NULL,
-	redirect_to TEXT NULL,
-	from_ip_address INET NULL,
-	created_at TIMESTAMPTZ NULL,
-	updated_at TIMESTAMPTZ NULL,
-	PRIMARY KEY (id),
-	FOREIGN KEY (sso_provider_id) REFERENCES auth.sso_providers (id) ON DELETE CASCADE,
-	CONSTRAINT "request_id not empty" CHECK(char_length(request_id) > 0)
-);
-CREATE INDEX IF NOT EXISTS saml_relay_states_sso_provider_id_idx ON auth.saml_relay_states (sso_provider_id);
-
-CREATE TABLE IF NOT EXISTS auth.webauthn_credentials (
-    id UUID NOT NULL DEFAULT gen_random_uuid(),
-    user_id UUID NOT NULL REFERENCES auth.users (id) ON DELETE CASCADE,
-    credential_id BYTEA NOT NULL,
-    public_key BYTEA NOT NULL,
-    attestation_type TEXT NOT NULL DEFAULT '',
-    aaguid UUID,
-    sign_count BIGINT NOT NULL DEFAULT 0,
-    transports JSONB NOT NULL DEFAULT '[]'::jsonb,
-    backup_eligible BOOLEAN NOT NULL DEFAULT false,
-    backed_up BOOLEAN NOT NULL DEFAULT false,
-    friendly_name TEXT NOT NULL DEFAULT '',
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    last_used_at TIMESTAMPTZ,
-    CONSTRAINT webauthn_credentials_pkey PRIMARY KEY (id)
-);
-CREATE UNIQUE INDEX IF NOT EXISTS webauthn_credentials_credential_id_key ON auth.webauthn_credentials (credential_id);
-CREATE INDEX IF NOT EXISTS webauthn_credentials_user_id_idx ON auth.webauthn_credentials (user_id);
-
-CREATE TABLE IF NOT EXISTS auth.webauthn_challenges (
-    id UUID NOT NULL DEFAULT gen_random_uuid(),
-    user_id UUID REFERENCES auth.users (id) ON DELETE CASCADE,
-    challenge_type TEXT NOT NULL CHECK (challenge_type IN ('signup', 'registration', 'authentication')),
-    session_data JSONB NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    expires_at TIMESTAMPTZ NOT NULL,
-    CONSTRAINT webauthn_challenges_pkey PRIMARY KEY (id)
-);
-CREATE INDEX IF NOT EXISTS webauthn_challenges_user_id_idx ON auth.webauthn_challenges (user_id);
-CREATE INDEX IF NOT EXISTS webauthn_challenges_expires_at_idx ON auth.webauthn_challenges (expires_at);
-
-CREATE TABLE IF NOT EXISTS auth.sso_sessions (
-	id UUID NOT NULL,
-	session_id UUID NOT NULL,
-	sso_provider_id UUID NULL,
-	not_before TIMESTAMPTZ NULL,
-	not_after TIMESTAMPTZ NULL,
-	idp_initiated BOOLEAN DEFAULT false,
-	created_at TIMESTAMPTZ NULL,
-	updated_at TIMESTAMPTZ NULL,
-	PRIMARY KEY (id),
-	FOREIGN KEY (session_id) REFERENCES auth.sessions (id) ON DELETE CASCADE,
-	FOREIGN KEY (sso_provider_id) REFERENCES auth.sso_providers (id) ON DELETE CASCADE
-);
-
--- 6. Flow state
-DO $$ BEGIN
-    CREATE TYPE auth.code_challenge_method AS ENUM('s256', 'plain');
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-
-CREATE TABLE IF NOT EXISTS auth.flow_state(
-       id UUID PRIMARY KEY,
-       user_id UUID NULL,
-       auth_code TEXT NOT NULL,
-       code_challenge_method auth.code_challenge_method NOT NULL,
-       code_challenge TEXT NOT NULL,
-       provider_type TEXT NOT NULL,
-       provider_access_token TEXT NULL,
-       provider_refresh_token TEXT NULL,
-       created_at TIMESTAMPTZ NULL,
-       updated_at TIMESTAMPTZ NULL,
-       authentication_method TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_auth_code ON auth.flow_state(auth_code);
-
--- 7. One Time Tokens
-DO $$ BEGIN
-  CREATE TYPE auth.one_time_token_type AS ENUM (
-    'confirmation_token',
-    'reauthentication_token',
-    'recovery_token',
-    'email_change_token_new',
-    'email_change_token_current',
-    'phone_change_token'
-  );
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-
-CREATE TABLE IF NOT EXISTS auth.one_time_tokens (
-    id UUID PRIMARY KEY,
-    user_id UUID NOT NULL REFERENCES auth.users ON DELETE CASCADE,
-    token_type auth.one_time_token_type NOT NULL,
-    token_hash TEXT NOT NULL,
-    relates_to TEXT NOT NULL,
-    created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
-    CHECK (char_length(token_hash) > 0)
-);
-
-
--- Post-CREATE TABLE column additions for existing tables with missing columns
--- These handle the case where CREATE TABLE IF NOT EXISTS skips because the table
--- already exists but with an older schema that lacks new columns.
-
--- auth.mfa_factors: add columns needed by GoTrue v2.x
-DO $$ BEGIN ALTER TABLE auth.mfa_factors ADD COLUMN IF NOT EXISTS phone TEXT; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
-DO $$ BEGIN ALTER TABLE auth.mfa_factors ADD COLUMN IF NOT EXISTS last_challenged_at TIMESTAMPTZ; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
-DO $$ BEGIN ALTER TABLE auth.mfa_factors ADD COLUMN IF NOT EXISTS web_authn_credential JSONB; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
-DO $$ BEGIN ALTER TABLE auth.mfa_factors ADD COLUMN IF NOT EXISTS web_authn_aaguid UUID; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
-DO $$ BEGIN ALTER TABLE auth.mfa_factors ADD COLUMN IF NOT EXISTS last_webauthn_challenge_data JSONB; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
-
--- auth.mfa_amr_claims: add id and factor_id columns (old schema only had session_id + authentication_method composite PK)
-DO $$
-BEGIN
-  ALTER TABLE auth.mfa_amr_claims ADD COLUMN IF NOT EXISTS id UUID DEFAULT gen_random_uuid();
-  UPDATE auth.mfa_amr_claims SET id = gen_random_uuid() WHERE id IS NULL;
-  ALTER TABLE auth.mfa_amr_claims ALTER COLUMN id SET NOT NULL;
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_constraint
-    WHERE conrelid = 'auth.mfa_amr_claims'::regclass AND contype = 'p'
-  ) THEN
-    ALTER TABLE auth.mfa_amr_claims ADD CONSTRAINT mfa_amr_claims_pkey PRIMARY KEY (id);
-  END IF;
-END $$;
-
-DO $$
-BEGIN
-  ALTER TABLE auth.mfa_amr_claims ADD COLUMN IF NOT EXISTS factor_id UUID;
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_constraint
-    WHERE conrelid = 'auth.mfa_amr_claims'::regclass
-      AND conname = 'mfa_amr_claims_factor_id_fkey'
-  ) THEN
-    ALTER TABLE auth.mfa_amr_claims
-      ADD CONSTRAINT mfa_amr_claims_factor_id_fkey
-      FOREIGN KEY (factor_id) REFERENCES auth.mfa_factors(id) ON DELETE CASCADE;
-  END IF;
-END $$;
-
--- auth.sessions: add aal and not_after columns (old schema had aal_level instead of aal)
-DO $$ BEGIN ALTER TABLE auth.sessions ADD COLUMN IF NOT EXISTS aal VARCHAR(10); EXCEPTION WHEN duplicate_column THEN NULL; END $$;
-DO $$ BEGIN ALTER TABLE auth.sessions ADD COLUMN IF NOT EXISTS not_after TIMESTAMPTZ; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
-
--- auth.one_time_tokens: add user_id column (old schema may lack this)
-DO $$ BEGIN ALTER TABLE auth.one_time_tokens ADD COLUMN IF NOT EXISTS user_id UUID; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
-
-DO $$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1
-    FROM pg_constraint c
-    WHERE c.conrelid = 'auth.one_time_tokens'::regclass
-      AND c.confrelid = 'auth.users'::regclass
-      AND c.contype = 'f'
-      AND c.conkey = ARRAY[(SELECT attnum FROM pg_attribute WHERE attrelid = 'auth.one_time_tokens'::regclass AND attname = 'user_id')]
-      AND c.confkey = ARRAY[(SELECT attnum FROM pg_attribute WHERE attrelid = 'auth.users'::regclass AND attname = 'id')]
-  ) THEN
-    ALTER TABLE auth.one_time_tokens
-      ADD CONSTRAINT one_time_tokens_user_id_fkey
-      FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE;
-  END IF;
-END $$;
-
--- auth.identities: add email and phone columns (old schema may lack these)
-DO $$ BEGIN ALTER TABLE auth.identities ADD COLUMN IF NOT EXISTS email TEXT; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
-DO $$ BEGIN ALTER TABLE auth.identities ADD COLUMN IF NOT EXISTS phone TEXT; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
-
--- auth.users: add is_sso_user and deleted_at columns
-DO $$ BEGIN ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS is_sso_user BOOLEAN DEFAULT FALSE; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
-DO $$ BEGIN ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
-
--- auth.refresh_tokens: add session_id column (newer GoTrue needs this)
-DO $$ BEGIN ALTER TABLE auth.refresh_tokens ADD COLUMN IF NOT EXISTS session_id UUID REFERENCES auth.sessions(id) ON DELETE CASCADE; EXCEPTION WHEN duplicate_column THEN NULL; END $$;
-
-CREATE INDEX IF NOT EXISTS one_time_tokens_token_hash_hash_idx ON auth.one_time_tokens USING hash (token_hash);
-CREATE INDEX IF NOT EXISTS one_time_tokens_relates_to_hash_idx ON auth.one_time_tokens USING hash (relates_to);
-CREATE UNIQUE INDEX IF NOT EXISTS one_time_tokens_user_id_token_type_key ON auth.one_time_tokens (user_id, token_type);
-
--- 8. Storage
-CREATE TABLE IF NOT EXISTS storage.s3_multipart_uploads (
-    id TEXT PRIMARY KEY,
-    in_progress_size BIGINT NOT NULL DEFAULT 0,
-    upload_signature TEXT NOT NULL,
-    bucket_id TEXT NOT NULL REFERENCES storage.buckets(id),
-    key TEXT COLLATE "C" NOT NULL,
-    version TEXT NOT NULL,
-    owner_id TEXT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    user_metadata JSONB NULL
-);
-
-CREATE TABLE IF NOT EXISTS storage.s3_multipart_uploads_parts (
-     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-     upload_id TEXT NOT NULL REFERENCES storage.s3_multipart_uploads(id) ON DELETE CASCADE,
-     size BIGINT NOT NULL DEFAULT 0,
-     part_number INT NOT NULL,
-     bucket_id TEXT NOT NULL REFERENCES storage.buckets(id),
-     key TEXT COLLATE "C" NOT NULL,
-     etag TEXT NOT NULL,
-     owner_id TEXT NULL,
-     version TEXT NOT NULL,
-     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-CREATE INDEX IF NOT EXISTS idx_multipart_uploads_list ON storage.s3_multipart_uploads (bucket_id, (key COLLATE "C"), created_at ASC);
-GRANT ALL ON ALL TABLES IN SCHEMA storage TO supabase_storage_admin;
-
--- 9. Realtime
-CREATE SCHEMA IF NOT EXISTS realtime;
-CREATE TABLE IF NOT EXISTS realtime.messages (
-    id BIGSERIAL PRIMARY KEY,
-    topic TEXT NOT NULL,
-    extension TEXT NOT NULL,
-    payload JSONB NULL,
-    event TEXT NULL,
-    private BOOLEAN NULL DEFAULT false,
-    updated_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
-    inserted_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
-);
-GRANT ALL ON ALL TABLES IN SCHEMA auth TO supabase_auth_admin;
-
--- 10a. service_role must be able to administer existing application tables.
--- BYPASSRLS is not enough when PostgREST checks table privileges first.
-GRANT USAGE ON SCHEMA public TO service_role;
-GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO service_role;
-GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO service_role;
-GRANT ALL PRIVILEGES ON ALL ROUTINES IN SCHEMA public TO service_role;
-
--- 10. Functions Schema (Webhooks)
-CREATE SCHEMA IF NOT EXISTS supabase_functions;
-GRANT USAGE ON SCHEMA supabase_functions TO postgres, anon, authenticated, service_role;
-CREATE TABLE IF NOT EXISTS supabase_functions.hooks (
-    id BIGSERIAL PRIMARY KEY,
-    hook_table_id INTEGER NOT NULL,
-    hook_name TEXT NOT NULL,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    request_id BIGINT,
-    is_rls_enabled BOOLEAN DEFAULT FALSE,
-    hook_schema TEXT,
-    hook_table TEXT,
-    request_url TEXT,
-    request_headers JSONB DEFAULT '{}',
-    events TEXT[] DEFAULT '{}'
-);
-CREATE TABLE IF NOT EXISTS supabase_functions.migrations (
-    version TEXT PRIMARY KEY,
-    inserted_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- 11. Native Bun Realtime LISTEN/NOTIFY Emulation Triggers (P0-16 enrichment)
--- This function emulates WAL-level postgres_changes by serializing full OLD/NEW records
-CREATE OR REPLACE FUNCTION realtime.notify_postgres_changes() RETURNS trigger AS $fn$
-DECLARE
-  payload jsonb;
-  changed_columns text[] := '{}';
-  col text;
-  is_distinct boolean;
-BEGIN
-  -- Detect which columns changed (for UPDATE events only)
-  IF TG_OP = 'UPDATE' THEN
-    FOR col IN SELECT column_name FROM information_schema.columns 
-      WHERE table_schema = TG_TABLE_SCHEMA AND table_name = TG_TABLE_NAME
-    LOOP
-      BEGIN
-        EXECUTE format('SELECT ($1).%I IS DISTINCT FROM ($2).%I', col, col)
-          INTO STRICT is_distinct
-          USING NEW, OLD;
-        IF is_distinct THEN
-          changed_columns := array_append(changed_columns, col);
-        END IF;
-      EXCEPTION WHEN OTHERS THEN NULL;
-      END;
-    END LOOP;
-  END IF;
-
-  payload = jsonb_build_object(
-    'topic', 'realtime:' || TG_TABLE_SCHEMA,
-    'event', 'postgres_changes',
-    'payload', jsonb_build_object(
-      'type', TG_OP,
-      'schema', TG_TABLE_SCHEMA,
-      'table', TG_TABLE_NAME,
-      'commit_timestamp', now()::text,
-      'record', CASE WHEN TG_OP IN ('INSERT', 'UPDATE') THEN row_to_json(NEW)::jsonb ELSE null END,
-      'old_record', CASE WHEN TG_OP IN ('UPDATE', 'DELETE') THEN row_to_json(OLD)::jsonb ELSE null END,
-      'columns', (
-        SELECT COALESCE(jsonb_agg(jsonb_build_object('name', column_name, 'type', udt_name)), '[]'::jsonb)
-        FROM (
-          SELECT column_name, udt_name 
-          FROM information_schema.columns 
-          WHERE table_schema = TG_TABLE_SCHEMA AND table_name = TG_TABLE_NAME 
-          ORDER BY ordinal_position
-        ) cols
-      )
-    )
-  );
-  PERFORM pg_notify('realtime_changes', payload::text);
-  IF TG_OP = 'DELETE' THEN RETURN OLD; ELSE RETURN NEW; END IF;
-END;
-$fn$ LANGUAGE plpgsql SECURITY DEFINER;
-
--- Auto-attach the trigger to ALL existing public tables
-DO $$
-DECLARE
-  tbl RECORD;
-BEGIN
-  FOR tbl IN SELECT tablename FROM pg_tables WHERE schemaname = 'public'
-  LOOP
-    EXECUTE format(
-      'DROP TRIGGER IF EXISTS realtime_notify_trigger ON public.%I; '
-      'CREATE TRIGGER realtime_notify_trigger AFTER INSERT OR UPDATE OR DELETE ON public.%I '
-      'FOR EACH ROW EXECUTE FUNCTION realtime.notify_postgres_changes()',
-      tbl.tablename, tbl.tablename
-    );
-  END LOOP;
-END $$;
-
--- Ensure the tenant-facing background task table can be consumed through
--- Supabase-compatible postgres_changes channels.
-CREATE OR REPLACE FUNCTION realtime.ensure_tasks_publication() RETURNS void AS $fn$
-BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_publication WHERE pubname = 'supabase_realtime') THEN
-    CREATE PUBLICATION supabase_realtime;
-  END IF;
-
-  IF to_regclass('public.tasks') IS NOT NULL THEN
-    ALTER TABLE public.tasks REPLICA IDENTITY FULL;
-
-    IF NOT EXISTS (
-      SELECT 1
-      FROM pg_publication_tables
-      WHERE pubname = 'supabase_realtime'
-        AND schemaname = 'public'
-        AND tablename = 'tasks'
-    ) THEN
-      ALTER PUBLICATION supabase_realtime ADD TABLE public.tasks;
-    END IF;
-  END IF;
-EXCEPTION
-  WHEN duplicate_object THEN NULL;
-  WHEN insufficient_privilege THEN NULL;
-  WHEN undefined_table THEN NULL;
-  WHEN OTHERS THEN NULL;
-END;
-$fn$ LANGUAGE plpgsql SECURITY DEFINER;
-
-SELECT realtime.ensure_tasks_publication();
-
--- Event Trigger: automatically attach realtime triggers to NEW tables created in public schema
-CREATE OR REPLACE FUNCTION realtime.auto_attach_notify_trigger() RETURNS event_trigger AS $fn$
-DECLARE
-  obj RECORD;
-BEGIN
-  FOR obj IN SELECT * FROM pg_event_trigger_ddl_commands() 
-    WHERE object_type = 'table' AND schema_name = 'public'
-  LOOP
-    EXECUTE format(
-      'CREATE TRIGGER realtime_notify_trigger AFTER INSERT OR UPDATE OR DELETE ON %s '
-      'FOR EACH ROW EXECUTE FUNCTION realtime.notify_postgres_changes()',
-      obj.object_identity
-    );
-  END LOOP;
-END;
-$fn$ LANGUAGE plpgsql SECURITY DEFINER;
-
--- Event Trigger: automatically publish public.tasks when applications create it later.
-CREATE OR REPLACE FUNCTION realtime.auto_publish_tasks_table() RETURNS event_trigger AS $fn$
-BEGIN
-  PERFORM realtime.ensure_tasks_publication();
-END;
-$fn$ LANGUAGE plpgsql SECURITY DEFINER;
-
--- Register the event trigger (idempotent)
-DO $$
-BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_event_trigger WHERE evtname = 'realtime_auto_attach_trigger') THEN
-    CREATE EVENT TRIGGER realtime_auto_attach_trigger ON ddl_command_end
-      WHEN TAG IN ('CREATE TABLE')
-      EXECUTE FUNCTION realtime.auto_attach_notify_trigger();
-  END IF;
-EXCEPTION WHEN insufficient_privilege THEN
-  -- Event triggers require superuser; skip if not available
-  NULL;
-END $$;
-
-DO $$
-BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_event_trigger WHERE evtname = 'realtime_auto_publish_tasks_trigger') THEN
-    CREATE EVENT TRIGGER realtime_auto_publish_tasks_trigger ON ddl_command_end
-      WHEN TAG IN ('CREATE TABLE')
-      EXECUTE FUNCTION realtime.auto_publish_tasks_table();
-  END IF;
-EXCEPTION WHEN insufficient_privilege THEN
-  -- Event triggers require superuser; skip if not available
-  NULL;
-END $$;
-
--- 12. PostgREST db-pre-request function (P0-11)
--- Sets RLS context variables from the JWT claims passed by PostgREST
-CREATE OR REPLACE FUNCTION public.set_request_context() RETURNS void AS $$
-DECLARE
-  claims json;
-  role_claim text;
-BEGIN
-  BEGIN
-    claims := current_setting('request.jwt.claims', true)::json;
-  EXCEPTION WHEN OTHERS THEN
-    claims := '{}'::json;
-  END;
-
-  PERFORM set_config('request.jwt.claim.sub', coalesce(claims->>'sub', ''), true);
-  PERFORM set_config('request.jwt.claim.role', coalesce(claims->>'role', 'anon'), true);
-  PERFORM set_config('request.jwt.claim.email', coalesce(claims->>'email', ''), true);
-
-  role_claim := coalesce(claims->>'role', 'anon');
-  IF role_claim = 'service_role' THEN
-    SET LOCAL ROLE service_role;
-  ELSIF role_claim = 'authenticated' THEN
-    SET LOCAL ROLE authenticated;
-  ELSE
-    SET LOCAL ROLE anon;
-  END IF;
-END;
-$$ LANGUAGE plpgsql STABLE SECURITY DEFINER;
-
--- Grant execute to API roles
-GRANT EXECUTE ON FUNCTION public.set_request_context() TO anon, authenticated, service_role;
-
--- 13. GoTrue internal tracking tables (P1-4, P2-5)
-CREATE TABLE IF NOT EXISTS auth.schema_migrations (
-  version varchar(255) PRIMARY KEY
-);
-
-CREATE TABLE IF NOT EXISTS auth.audit_log_entries (
-  instance_id uuid,
-  id uuid NOT NULL PRIMARY KEY,
-  payload json,
-  created_at timestamptz,
-  ip_address varchar(64) NOT NULL DEFAULT '',
-  action text
-);
--- Ensure auth admin has access to these newly created tables
-GRANT ALL ON TABLE auth.schema_migrations TO supabase_auth_admin;
-GRANT ALL ON TABLE auth.audit_log_entries TO supabase_auth_admin;
-
--- 14. supabase_migrations schema (required by supabase CLI db push)
--- The CLI needs this table to track applied migrations
-CREATE SCHEMA IF NOT EXISTS supabase_migrations;
-GRANT USAGE ON SCHEMA supabase_migrations TO postgres, anon, authenticated, service_role;
-
-CREATE TABLE IF NOT EXISTS supabase_migrations.schema_migrations (
-  version text NOT NULL PRIMARY KEY,
-  statements text[],
-  name text
-);
-GRANT ALL ON ALL TABLES IN SCHEMA supabase_migrations TO postgres;
-
--- Backfill from legacy schema_migrations table if it exists
-DO $$
-BEGIN
-  IF EXISTS (SELECT FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'schema_migrations') THEN
-    INSERT INTO supabase_migrations.schema_migrations (version, name)
-    SELECT version, version FROM public.schema_migrations
-    ON CONFLICT DO NOTHING;
-  END IF;
-END $$;
-
--- 15. seed.sql support schema for CLI
-CREATE TABLE IF NOT EXISTS supabase_migrations.seed_files (
-    path text NOT NULL PRIMARY KEY,
-    hash text NOT NULL
-);
-GRANT ALL ON ALL TABLES IN SCHEMA supabase_migrations TO postgres;
-
--- 16. Realtime WAL logical replication support
-DO $$
-BEGIN
-  IF EXISTS (SELECT 1 FROM pg_available_extensions WHERE name = 'wal2json') THEN
-    CREATE EXTENSION IF NOT EXISTS wal2json;
-  END IF;
-EXCEPTION WHEN OTHERS THEN NULL;
-END $$;
-
--- Grant replication role to supabase_admin if it exists
-DO $$
-BEGIN
-  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'supabase_admin') THEN
-    ALTER ROLE supabase_admin WITH REPLICATION;
-  END IF;
-EXCEPTION WHEN OTHERS THEN NULL;
-END $$;
-
--- 18. Platform background task mirror table + User deletion fence
--- Mirror table stores platform background invocation state separately from
--- the business public.tasks table (which has incompatible columns/statuses).
-CREATE TABLE IF NOT EXISTS public.background_task_mirrors (
-  id               UUID PRIMARY KEY,
-  project_ref      TEXT NOT NULL,
-  task_type        TEXT NOT NULL DEFAULT 'edge_function',
-  function_slug    TEXT,
-  status           TEXT NOT NULL DEFAULT 'pending'
-                   CHECK (status IN ('pending','leased','running','retry_scheduled',
-                                     'succeeded','failed','dead_lettered','cancelled')),
-  invoker_user_id  UUID,
-  attempt          INTEGER NOT NULL DEFAULT 1,
-  max_attempts     INTEGER NOT NULL DEFAULT 3,
-  trace_id         TEXT,
-  created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-ALTER TABLE public.background_task_mirrors ENABLE ROW LEVEL SECURITY;
-GRANT SELECT, INSERT, UPDATE, DELETE ON public.background_task_mirrors
-  TO postgres, supabase_auth_admin, supabase_admin;
-
-CREATE INDEX IF NOT EXISTS idx_bg_task_mirrors_invoker_active
-  ON public.background_task_mirrors(invoker_user_id, status)
-  WHERE status IN ('pending','leased','running','retry_scheduled');
-
-CREATE INDEX IF NOT EXISTS idx_bg_task_mirrors_status
-  ON public.background_task_mirrors(status);
-
--- 辅助函数：检查用户是否有未终态的 platform background tasks
--- Returns 'active' | 'inactive' | 'unknown' (three-state to avoid silent false on errors)
-CREATE OR REPLACE FUNCTION public.has_active_background_tasks(p_user_id UUID)
-RETURNS TEXT AS $$
-DECLARE
-  v_count INTEGER;
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM information_schema.tables
-    WHERE table_schema = 'public' AND table_name = 'background_task_mirrors'
-  ) THEN
-    RAISE NOTICE 'has_active_background_tasks: background_task_mirrors table missing for user %', p_user_id;
-    RETURN 'unknown';
-  END IF;
-
-  SELECT COUNT(*) INTO v_count
-  FROM public.background_task_mirrors
-  WHERE invoker_user_id = p_user_id
-    AND status IN ('pending','leased','running','retry_scheduled');
-
-  IF v_count > 0 THEN
-    RETURN 'active';
-  END IF;
-
-  RETURN 'inactive';
-EXCEPTION WHEN OTHERS THEN
-  RAISE NOTICE 'has_active_background_tasks: exception for user % — %', p_user_id, SQLERRM;
-  RETURN 'unknown';
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER STABLE;
-
--- 辅助函数：安全软删除用户（标记 deleted_at，但不硬删）
--- 在 GoTrue DELETE 触发之前，检查是否有活跃任务
-CREATE OR REPLACE FUNCTION public.soft_delete_user_if_no_active_tasks()
-RETURNS TRIGGER AS $$
-DECLARE
-  v_task_state TEXT;
-BEGIN
-  IF OLD.deleted_at IS NOT NULL THEN
-    RETURN OLD;
-  END IF;
-
-  UPDATE auth.users SET deleted_at = NOW() WHERE id = OLD.id;
-
-  v_task_state := public.has_active_background_tasks(OLD.id);
-
-  IF v_task_state = 'active' THEN
-    RETURN NULL;
-  END IF;
-
-  IF v_task_state = 'unknown' THEN
-    RAISE NOTICE 'soft_delete_user_if_no_active_tasks: degraded/unknown for user %, blocking hard delete', OLD.id;
-    RETURN NULL;
-  END IF;
-
-  RETURN OLD;
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
-
--- 仅在 auth.users 上无此触发器时创建
-DO $$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_trigger WHERE tgname = 'auth_users_delete_fence'
-  ) THEN
-    CREATE TRIGGER auth_users_delete_fence
-      BEFORE DELETE ON auth.users
-      FOR EACH ROW
-      EXECUTE FUNCTION public.soft_delete_user_if_no_active_tasks();
-  END IF;
-EXCEPTION WHEN OTHERS THEN NULL;
-END $$;
-
--- 辅助函数：清理已无活跃任务的软删用户（定期调用）
-CREATE OR REPLACE FUNCTION public.hard_delete_soft_deleted_users()
-RETURNS INT AS $$
-DECLARE
-  deleted_count INT := 0;
-  user_record RECORD;
-  v_task_state TEXT;
-BEGIN
-  FOR user_record IN
-    SELECT id FROM auth.users
-    WHERE deleted_at IS NOT NULL
-      AND deleted_at < NOW() - INTERVAL '1 hour'
-  LOOP
-    v_task_state := public.has_active_background_tasks(user_record.id);
-    IF v_task_state = 'inactive' THEN
-      DELETE FROM auth.users WHERE id = user_record.id;
-      deleted_count := deleted_count + 1;
-    END IF;
-  END LOOP;
-  RETURN deleted_count;
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
-
-`;
-
 class TenantRuntimeService {
     private readonly TENANT_CONFIG_DIR = config.tenantConfigDir;
     private readonly POSTGREST_BIN = config.postgrestBin;
@@ -1348,9 +502,11 @@ class TenantRuntimeService {
         const hasPgrstBin = await Bun.file(this.POSTGREST_BIN).exists();
 
         if (pgrstCheck.exitCode !== 0 && !hasPgrstBin) {
+            const runtimeInstaller = path.join(config.scriptsPath, "lib", "tenant_runtime.sh");
             throw new Error(
                 `PostgREST binary not found at ${this.POSTGREST_BIN} or in PATH. ` +
-                `Install it manually: curl -L https://github.com/PostgREST/postgrest/releases/latest -o ${this.POSTGREST_BIN} && chmod +x ${this.POSTGREST_BIN}`
+                `Use the trusted SHA-pinned ensure_postgrest function in ${runtimeInstaller}; ` +
+                "do not download an unverified latest release manually."
             );
         }
     }
@@ -1360,9 +516,11 @@ class TenantRuntimeService {
         const hasGotrueBin = await Bun.file(this.GOTRUE_BIN).exists();
 
         if (gotrueCheck.exitCode !== 0 && !hasGotrueBin) {
+            const runtimeInstaller = path.join(config.scriptsPath, "lib", "tenant_runtime.sh");
             throw new Error(
                 `GoTrue binary not found at ${this.GOTRUE_BIN} or in PATH. ` +
-                `Install it manually: curl -L https://github.com/supabase/gotrue/releases/latest -o ${this.GOTRUE_BIN} && chmod +x ${this.GOTRUE_BIN}`
+                `Use the trusted SHA-pinned ensure_gotrue function in ${runtimeInstaller}; ` +
+                "do not download an unverified latest release manually."
             );
         }
     }
@@ -1372,57 +530,228 @@ class TenantRuntimeService {
         await this.ensureGotrueBinary();
     }
 
-    private async hasPgmqPublicSchema(ref: string, dbName: string, dbPassword: string): Promise<boolean> {
-        const dbUrl = `postgres://${resolveAuthenticatorName(ref)}:${dbPassword}@${this.PG_HOST}:${this.PG_PORT}/${dbName}`;
-        const query = "SELECT CASE WHEN EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = 'pgmq_public') THEN 1 ELSE 0 END;";
-        const result = await $`psql ${dbUrl} -Atqc ${query}`.nothrow().quiet();
+    private tenantRuntimeUser(ref: string): string {
+        if (!/^[a-z0-9-]{1,20}$/.test(ref)) {
+            throw new Error("Invalid tenant project ref");
+        }
+        return `supacloud-${ref}`;
+    }
+
+    private async runStructuredCommand(cmd: string[]): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+        const child = Bun.spawn({
+            cmd,
+            stdout: "pipe",
+            stderr: "pipe",
+        });
+        const [stdout, stderr, exitCode] = await Promise.all([
+            new Response(child.stdout).text(),
+            new Response(child.stderr).text(),
+            child.exited,
+        ]);
+        return { exitCode, stdout, stderr };
+    }
+
+    private async ensureTenantRuntimeUser(ref: string): Promise<string> {
+        const runtimeUser = this.tenantRuntimeUser(ref);
+        const current = await this.runStructuredCommand(["id", "-u", runtimeUser]);
+        if (current.exitCode === 0) return runtimeUser;
+
+        const created = await this.runStructuredCommand([
+            "useradd",
+            "--system",
+            "--user-group",
+            "--no-create-home",
+            "--home-dir", "/nonexistent",
+            "--shell", "/usr/sbin/nologin",
+            runtimeUser,
+        ]);
+        if (created.exitCode !== 0) {
+            // A concurrent runtime start may have created the same account.
+            const raced = await this.runStructuredCommand(["id", "-u", runtimeUser]);
+            if (raced.exitCode !== 0) {
+                throw new Error(`Failed to create tenant runtime user ${runtimeUser}: ${created.stderr.trim().slice(0, 300)}`);
+            }
+        }
+        return runtimeUser;
+    }
+
+    private async chownTenantPath(targetPath: string, runtimeUser: string): Promise<void> {
+        const result = await this.runStructuredCommand(["chown", `${runtimeUser}:${runtimeUser}`, targetPath]);
         if (result.exitCode !== 0) {
-            const stderr = result.stderr.toString().trim();
+            throw new Error(`Failed to set tenant ownership on ${path.basename(targetPath)}: ${result.stderr.trim().slice(0, 300)}`);
+        }
+    }
+
+    private async writeTenantSecretFile(targetPath: string, content: string, runtimeUser: string): Promise<void> {
+        const directory = path.dirname(targetPath);
+        const tempPath = path.join(directory, `.${path.basename(targetPath)}.${crypto.randomUUID()}.tmp`);
+        try {
+            await fs.writeFile(tempPath, `${content}\n`, { encoding: "utf8", mode: 0o600, flag: "wx" });
+            await fs.chmod(tempPath, 0o600);
+            await this.chownTenantPath(tempPath, runtimeUser);
+            await fs.rename(tempPath, targetPath);
+            await fs.chmod(targetPath, 0o600);
+        } finally {
+            await fs.rm(tempPath, { force: true }).catch(() => {});
+        }
+    }
+
+    private async writeTemporaryTenantSql(ref: string, prefix: string, content: string): Promise<{ directory: string; file: string }> {
+        this.tenantRuntimeUser(ref);
+        const directory = await fs.mkdtemp(path.join("/tmp", `${prefix}-${ref}-`));
+        await fs.chmod(directory, 0o700);
+        const file = path.join(directory, "migration.sql");
+        await fs.writeFile(file, content, { encoding: "utf8", mode: 0o600, flag: "wx" });
+        await fs.chmod(file, 0o600);
+        return { directory, file };
+    }
+
+    private async runTenantPsql(
+        connection: PostgresConnectionConfig,
+        args: readonly string[],
+    ): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+        const invocation = buildTenantPsqlInvocation(connection, args);
+        const child = Bun.spawn({
+            cmd: invocation.cmd,
+            env: { ...process.env, ...invocation.env },
+            stdout: "pipe",
+            stderr: "pipe",
+        });
+        const [stdout, stderr, exitCode] = await Promise.all([
+            new Response(child.stdout).text(),
+            new Response(child.stderr).text(),
+            child.exited,
+        ]);
+        return { exitCode, stdout, stderr };
+    }
+
+    private async runTenantPsqlOrThrow(
+        connection: PostgresConnectionConfig,
+        args: readonly string[],
+        label: string,
+    ): Promise<{ stdout: string; stderr: string }> {
+        const result = await this.runTenantPsql(connection, args);
+        if (result.exitCode !== 0) {
+            const detail = result.stderr.trim() || result.stdout.trim() || "psql exited without output";
+            throw new Error(`psql exited with code ${result.exitCode} during ${label}: ${detail.slice(0, 500)}`);
+        }
+        return result;
+    }
+
+    private adminPsqlConnection(database: string): PostgresConnectionConfig {
+        return {
+            user: "postgres",
+            password: config.pgPassword,
+            host: this.PG_HOST,
+            port: this.PG_PORT,
+            database,
+        };
+    }
+
+    private async hasPgmqPublicSchema(ref: string, dbName: string, dbPassword: string): Promise<boolean> {
+        const query = "SELECT CASE WHEN EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = 'pgmq_public') THEN 1 ELSE 0 END;";
+        const result = await this.runTenantPsql({
+            user: resolveAuthenticatorName(ref),
+            password: dbPassword,
+            host: this.PG_HOST,
+            port: this.PG_PORT,
+            database: dbName,
+        }, ["-Atqc", query]);
+        if (result.exitCode !== 0) {
+            const stderr = result.stderr.trim();
             logger.warn(`[tenant-runtime] Failed to detect pgmq_public schema for ${ref}; falling back to base PostgREST schemas`, {
                 error: stderr || `psql exited with code ${result.exitCode}`,
             });
             return false;
         }
-        return result.stdout.toString().trim() === "1";
+        return result.stdout.trim() === "1";
     }
 
     private async generateTenantConfig(ref: string, pgrstPort: number, gotruePort: number) {
-        await fs.mkdir(this.TENANT_CONFIG_DIR, { recursive: true });
+        const runtimeUser = await this.ensureTenantRuntimeUser(ref);
+        await fs.mkdir(this.TENANT_CONFIG_DIR, { recursive: true, mode: 0o711 });
+        await fs.chmod(this.TENANT_CONFIG_DIR, 0o711);
 
         const creds = await this.getTenantCredentials(ref);
+        for (const [name, value] of Object.entries({
+            dbPassword: creds.dbPassword,
+            jwtSecret: creds.jwtSecret,
+            jwtKeys: creds.jwtKeys || "",
+            jwtJwks: creds.jwtJwks || "",
+            dbName: creds.dbName,
+            apiUrl: creds.apiUrl,
+            authUrl: creds.authUrl,
+            anonKey: String(creds.anonKey || ""),
+            serviceRoleKey: String(creds.serviceRoleKey || ""),
+            siteUrl: creds.siteUrl,
+            uriAllowList: creds.uriAllowList,
+        })) {
+            assertSafeConfigValue(`tenant ${name}`, String(value));
+        }
         const includePgmqPublic = await this.hasPgmqPublicSchema(ref, creds.dbName, creds.dbPassword);
         const dbSchemas = renderPostgrestDbSchemas(includePgmqPublic);
+        const postgrestDbUri = buildPostgresUri({
+            protocol: "postgres",
+            user: resolveAuthenticatorName(ref),
+            password: creds.dbPassword,
+            host: this.PG_HOST,
+            port: this.PG_PORT,
+            database: creds.dbName,
+        });
+        const edgeDbUri = buildPostgresUri({
+            protocol: "postgresql",
+            user: resolveAuthenticatorName(ref),
+            password: creds.dbPassword,
+            host: this.PG_HOST,
+            port: this.PG_PORT,
+            database: creds.dbName,
+        });
+        const authDbUri = buildPostgresUri({
+            protocol: "postgres",
+            user: "supabase_auth_admin",
+            password: config.pgPassword,
+            host: this.PG_HOST,
+            port: this.PG_PORT,
+            database: creds.dbName,
+        });
 
         const jwtVerifierSecret = creds.jwtJwks || creds.jwtSecret;
-        const jwtJwksEnv = creds.jwtJwks ? `\nJWT_JWKS=${quoteSystemdEnvValue(creds.jwtJwks)}` : "";
-        const jwtKeysEnv = creds.jwtKeys ? `\nJWT_KEYS=${quoteSystemdEnvValue(creds.jwtKeys)}` : "";
+        const jwtJwksEnv = creds.jwtJwks ? renderSystemdEnvLine("JWT_JWKS", creds.jwtJwks) : "";
+        const jwtKeysEnv = creds.jwtKeys ? renderSystemdEnvLine("JWT_KEYS", creds.jwtKeys) : "";
 
         // Generate PostgREST .env configuration
         // Edge runtime and other services consume these env vars
-        const pgrstEnv = `
+        const pgrstEnv = [
+            `
 # SupaCloud Tenant PostgREST Runtime: ${ref}
 # PGRST_* variables have been removed to avoid duplicate configuration (P2-2)
 # PostgREST configuration is now single-sourced from the .conf file.
 
 # SupaCloud Edge Runtime Injection
-SUPABASE_URL=${creds.apiUrl}
-SUPABASE_ANON_KEY=${creds.anonKey}
-SUPABASE_SERVICE_ROLE_KEY=${creds.serviceRoleKey}
-SUPABASE_DB_URL=postgresql://${resolveAuthenticatorName(ref)}:${creds.dbPassword}@${this.PG_HOST}:${this.PG_PORT}/${creds.dbName}
-JWT_SECRET=${creds.jwtSecret}
-${renderTenantInternalRuntimeEnv(pgrstPort, gotruePort)}
-${jwtJwksEnv}${jwtKeysEnv}
-`.trim();
-        await Bun.write(path.join(this.TENANT_CONFIG_DIR, `${ref}.env`), pgrstEnv);
+`.trim(),
+            renderSystemdEnvLine("SUPABASE_URL", creds.apiUrl),
+            renderSystemdEnvLine("SUPABASE_ANON_KEY", String(creds.anonKey || "")),
+            renderSystemdEnvLine("SUPABASE_SERVICE_ROLE_KEY", String(creds.serviceRoleKey || "")),
+            renderSystemdEnvLine("SUPABASE_DB_URL", edgeDbUri),
+            renderSystemdEnvLine("JWT_SECRET", creds.jwtSecret),
+            renderTenantInternalRuntimeEnv(pgrstPort, gotruePort),
+            jwtJwksEnv,
+            jwtKeysEnv,
+        ].filter(Boolean).join("\n");
+        await this.writeTenantSecretFile(
+            path.join(this.TENANT_CONFIG_DIR, `${ref}.env`),
+            pgrstEnv,
+            runtimeUser,
+        );
 
         // Generate PostgREST .conf configuration (single source of truth for all settings)
         const pgrstConf = `
 # PostgREST config for tenant: ${ref}
-db-uri = "postgres://${resolveAuthenticatorName(ref)}:${creds.dbPassword}@${this.PG_HOST}:${this.PG_PORT}/${creds.dbName}"
-db-schemas = "${dbSchemas}"
+db-uri = ${quoteTomlBasicString(postgrestDbUri)}
+db-schemas = ${quoteTomlBasicString(dbSchemas)}
 db-extra-search-path = "public, extensions, auth"
 db-anon-role = "anon"
-jwt-secret = ${JSON.stringify(jwtVerifierSecret)}
+jwt-secret = ${quoteTomlBasicString(jwtVerifierSecret)}
 server-port = ${pgrstPort}
 server-host = "0.0.0.0"
 db-pool = ${this.POSTGREST_DB_POOL}
@@ -1431,7 +760,7 @@ log-level = "warn"
 
 # P0-10: OpenAPI spec generation (required by Studio Table Editor & API Docs)
 openapi-mode = "follow-privileges"
-openapi-server-proxy-uri = "${creds.apiUrl}/rest/v1"
+openapi-server-proxy-uri = ${quoteTomlBasicString(`${creds.apiUrl}/rest/v1`)}
 
 # P0-11: Pre-request function for RLS context injection
 db-pre-request = "public.set_request_context"
@@ -1440,12 +769,16 @@ db-pre-request = "public.set_request_context"
 db-max-rows = 1000
 
 # P2-3: Restrict CORS to the tenant's API domain
-server-cors-allowed-origins = "${creds.apiUrl}"
+server-cors-allowed-origins = ${quoteTomlBasicString(creds.apiUrl)}
 
 # P2-4: Tenant-specific listen channel for schema cache invalidation
-db-channel = "${resolvePgrstChannel(ref)}"
+db-channel = ${quoteTomlBasicString(resolvePgrstChannel(ref))}
 `.trim();
-        await Bun.write(path.join(this.TENANT_CONFIG_DIR, `${ref}.conf`), pgrstConf);
+        await this.writeTenantSecretFile(
+            path.join(this.TENANT_CONFIG_DIR, `${ref}.conf`),
+            pgrstConf,
+            runtimeUser,
+        );
 
         // Generate GoTrue .env configuration
         const hasDedicatedAuthUrl = Boolean(creds.authUrl && creds.authUrl !== creds.apiUrl);
@@ -1462,16 +795,19 @@ db-channel = "${resolvePgrstChannel(ref)}"
         ].flatMap((value) => String(value || "").split(",")));
         const gotrueSender = config.gotrueSmtpAdminEmail || `noreply@${apiExternalUrl.replace('https://', '').replace('http://', '')}`;
 
-        let gotrueEnv = `
+        const gotrueEnvLines = [
+            `
 # SupaCloud Tenant GoTrue Runtime: ${ref}
-GOTRUE_API_HOST=0.0.0.0
-GOTRUE_API_PORT=${gotruePort}
-API_EXTERNAL_URL=${apiExternalUrl}
-GOTRUE_SITE_URL=${siteExternalUrl}
-GOTRUE_URI_ALLOW_LIST=${redirectOrigins.join(",")}
-GOTRUE_DB_DRIVER=postgres
-GOTRUE_DB_DATABASE_URL=postgres://supabase_auth_admin:${config.pgPassword}@${this.PG_HOST}:${this.PG_PORT}/${creds.dbName}
-GOTRUE_JWT_SECRET=${creds.jwtSecret}
+`.trim(),
+            renderSystemdEnvLine("GOTRUE_API_HOST", "0.0.0.0"),
+            `GOTRUE_API_PORT=${gotruePort}`,
+            renderSystemdEnvLine("API_EXTERNAL_URL", apiExternalUrl),
+            renderSystemdEnvLine("GOTRUE_SITE_URL", siteExternalUrl),
+            renderSystemdEnvLine("GOTRUE_URI_ALLOW_LIST", redirectOrigins.join(",")),
+            renderSystemdEnvLine("GOTRUE_DB_DRIVER", "postgres"),
+            renderSystemdEnvLine("GOTRUE_DB_DATABASE_URL", authDbUri),
+            renderSystemdEnvLine("GOTRUE_JWT_SECRET", creds.jwtSecret),
+            `
 GOTRUE_JWT_EXP=3600
 GOTRUE_JWT_AUD=authenticated
 GOTRUE_JWT_DEFAULT_GROUP_NAME=authenticated
@@ -1480,13 +816,6 @@ GOTRUE_SERVER_READ_TIMEOUT=20
 GOTRUE_RELOADING_SIGNAL_ENABLED=true
 GOTRUE_RELOADING_POLLER_ENABLED=true
 GOTRUE_SECURITY_UPDATE_PASSWORD_REQUIRE_REAUTHENTICATION=true
-${renderGoTrueAuthEnv(creds.authConfig)}
-${renderGoTruePasskeyEnv(creds.authConfig, {
-    rpId: siteHost,
-    rpDisplayName: "SupaCloud",
-    rpOrigins: webAuthnOrigins,
-})}
-${renderGoTrueSamlEnv(creds.authConfig)}
 GOTRUE_PASSWORD_MIN_LENGTH=8
 GOTRUE_SECURITY_REFRESH_TOKEN_ROTATION_ENABLED=true
 GOTRUE_SECURITY_REFRESH_TOKEN_ROTATION_REUSE_INTERVAL=10
@@ -1494,51 +823,72 @@ GOTRUE_MAILER_URLPATHS_CONFIRMATION=/auth/v1/verify
 GOTRUE_MAILER_URLPATHS_INVITE=/auth/v1/verify
 GOTRUE_MAILER_URLPATHS_RECOVERY=/auth/v1/verify
 GOTRUE_MAILER_URLPATHS_EMAIL_CHANGE=/auth/v1/verify
-# Admin Operator Token (P0-6)
-GOTRUE_OPERATOR_TOKEN=${config.masterToken || creds.serviceRoleKey}
-`.trim();
+`.trim(),
+            renderGoTrueAuthEnv(creds.authConfig),
+            renderGoTruePasskeyEnv(creds.authConfig, {
+                rpId: siteHost,
+                rpDisplayName: "SupaCloud",
+                rpOrigins: webAuthnOrigins,
+            }),
+            renderGoTrueSamlEnv(creds.authConfig),
+            "# Admin Operator Token (P0-6)",
+            renderSystemdEnvLine("GOTRUE_OPERATOR_TOKEN", String(config.masterToken || creds.serviceRoleKey || "")),
+        ];
 
         const oauthServerConfig = normalizeOAuthServerConfig(creds.authConfig.oauth_server);
         if (oauthServerConfig.enabled === true) {
             const authorizationPath = typeof oauthServerConfig.authorization_path === "string"
                 ? oauthServerConfig.authorization_path
                 : "";
-            gotrueEnv += `
-
-# OAuth 2.1 / OIDC Provider Configuration
-GOTRUE_OAUTH_SERVER_ENABLED=true
-GOTRUE_OAUTH_SERVER_ALLOW_DYNAMIC_REGISTRATION=${oauthServerConfig.allow_dynamic_registration === true ? "true" : "false"}
-GOTRUE_JWT_ISSUER=${oauthServerConfig.issuer || `${apiExternalUrl}/auth/v1`}
-${authorizationPath ? `GOTRUE_OAUTH_SERVER_AUTHORIZATION_PATH=${authorizationPath}\n` : ""}${creds.jwtKeys ? `GOTRUE_JWT_KEYS=${quoteSystemdEnvValue(creds.jwtKeys)}\nJWT_KEYS=${quoteSystemdEnvValue(creds.jwtKeys)}` : ""}
-`;
+            const issuer = typeof oauthServerConfig.issuer === "string" && oauthServerConfig.issuer
+                ? oauthServerConfig.issuer
+                : `${apiExternalUrl}/auth/v1`;
+            gotrueEnvLines.push(
+                "# OAuth 2.1 / OIDC Provider Configuration",
+                "GOTRUE_OAUTH_SERVER_ENABLED=true",
+                `GOTRUE_OAUTH_SERVER_ALLOW_DYNAMIC_REGISTRATION=${oauthServerConfig.allow_dynamic_registration === true ? "true" : "false"}`,
+                renderSystemdEnvLine("GOTRUE_JWT_ISSUER", issuer),
+            );
+            if (authorizationPath) {
+                gotrueEnvLines.push(renderSystemdEnvLine("GOTRUE_OAUTH_SERVER_AUTHORIZATION_PATH", authorizationPath));
+            }
+            if (creds.jwtKeys) {
+                gotrueEnvLines.push(
+                    renderSystemdEnvLine("GOTRUE_JWT_KEYS", creds.jwtKeys),
+                    renderSystemdEnvLine("JWT_KEYS", creds.jwtKeys),
+                );
+            }
         }
 
         if (config.gotrueSmtpHost) {
-            gotrueEnv += `
-# SMTP Configuration
-GOTRUE_SMTP_ADMIN_EMAIL=${gotrueSender}
-GOTRUE_SMTP_HOST=${config.gotrueSmtpHost}
-GOTRUE_SMTP_PORT=587
-GOTRUE_SMTP_USER=${config.gotrueSmtpUser}
-GOTRUE_SMTP_PASS=${config.gotrueSmtpPass}
-GOTRUE_SMTP_SENDER_NAME=SupaCloud
-`;
+            gotrueEnvLines.push(
+                "# SMTP Configuration",
+                renderSystemdEnvLine("GOTRUE_SMTP_ADMIN_EMAIL", gotrueSender),
+                renderSystemdEnvLine("GOTRUE_SMTP_HOST", config.gotrueSmtpHost),
+                "GOTRUE_SMTP_PORT=587",
+                renderSystemdEnvLine("GOTRUE_SMTP_USER", config.gotrueSmtpUser),
+                renderSystemdEnvLine("GOTRUE_SMTP_PASS", config.gotrueSmtpPass),
+                renderSystemdEnvLine("GOTRUE_SMTP_SENDER_NAME", "SupaCloud"),
+            );
             if (creds.authConfig.mailer_autoconfirm) {
-                gotrueEnv += `GOTRUE_MAILER_AUTOCONFIRM=true\n`;
+                gotrueEnvLines.push("GOTRUE_MAILER_AUTOCONFIRM=true");
             }
         } else {
             // P1-1: Enable auto-confirm if no SMTP is configured so users can register
-            gotrueEnv += `
-# Local Dev / No-SMTP Configuration
-GOTRUE_MAILER_AUTOCONFIRM=true
-`;
+            gotrueEnvLines.push(
+                "# Local Dev / No-SMTP Configuration",
+                "GOTRUE_MAILER_AUTOCONFIRM=true",
+            );
         }
+        const gotrueEnv = gotrueEnvLines.filter(Boolean).join("\n");
         const gotrueEnvPath = path.join(this.TENANT_CONFIG_DIR, `${ref}_gotrue.env`);
         const gotrueConfigDir = path.join(this.TENANT_CONFIG_DIR, `${ref}_gotrue.d`);
-        await fs.mkdir(gotrueConfigDir, { recursive: true });
-        await Bun.write(path.join(gotrueConfigDir, "runtime.env"), gotrueEnv);
+        await fs.mkdir(gotrueConfigDir, { recursive: true, mode: 0o700 });
+        await fs.chmod(gotrueConfigDir, 0o700);
+        await this.chownTenantPath(gotrueConfigDir, runtimeUser);
+        await this.writeTenantSecretFile(path.join(gotrueConfigDir, "runtime.env"), gotrueEnv, runtimeUser);
         // Keep the legacy flat env file for older units and diagnostics.
-        await Bun.write(gotrueEnvPath, gotrueEnv);
+        await this.writeTenantSecretFile(gotrueEnvPath, gotrueEnv, runtimeUser);
         await this.persistTenantPortConfig(ref, pgrstPort, gotruePort);
 
         logger.info(`Config generated for ${ref} (pgrst_port=${pgrstPort}, gotrue_port=${gotruePort})`);
@@ -1566,7 +916,13 @@ GOTRUE_MAILER_AUTOCONFIRM=true
 
         // Avoid redundant disk IO unless upgrading the old 30 MB PostgREST unit.
         const pgrstExists = await Bun.file(pgrstUnitPath).exists();
-        const shouldWritePgrstUnit = !pgrstExists || await unitHasLegacyPostgrestMemoryLimit(pgrstUnitPath);
+        const currentPgrstUnit = pgrstExists
+            ? await Bun.file(pgrstUnitPath).text().catch(() => "")
+            : "";
+        const shouldWritePgrstUnit = !pgrstExists
+            || await unitHasLegacyPostgrestMemoryLimit(pgrstUnitPath)
+            || !currentPgrstUnit.includes("User=supacloud-%i")
+            || !currentPgrstUnit.includes("Group=supacloud-%i");
         if (shouldWritePgrstUnit) {
             const pgrstUnit = `
 [Unit]
@@ -1577,8 +933,8 @@ Wants=patroni.service
 
 [Service]
 Type=simple
-User=nobody
-Group=nogroup
+User=supacloud-%i
+Group=supacloud-%i
 EnvironmentFile=${this.TENANT_CONFIG_DIR}/%i.env
 Environment="GHCRTS=${this.POSTGREST_RTS}"
 ExecStart=${this.POSTGREST_BIN} ${this.TENANT_CONFIG_DIR}/%i.conf +RTS ${this.POSTGREST_RTS} -RTS
@@ -1606,7 +962,9 @@ WantedBy=multi-user.target
             : "";
         const shouldWriteGotrueUnit = !gotrueExists
             || !currentGotrueUnit.includes("--config-dir")
-            || !currentGotrueUnit.includes("ExecReload=/bin/kill -USR1 $MAINPID");
+            || !currentGotrueUnit.includes("ExecReload=/bin/kill -USR1 $MAINPID")
+            || !currentGotrueUnit.includes("User=supacloud-%i")
+            || !currentGotrueUnit.includes("Group=supacloud-%i");
         if (shouldWriteGotrueUnit) {
             const gotrueUnit = `
 [Unit]
@@ -1617,8 +975,8 @@ Wants=patroni.service
 
 [Service]
 Type=simple
-User=nobody
-Group=nogroup
+User=supacloud-%i
+Group=supacloud-%i
 EnvironmentFile=${this.TENANT_CONFIG_DIR}/%i_gotrue.env
 Environment="GOMEMLIMIT=15MiB"
 Environment="GOGC=20"
@@ -1650,22 +1008,34 @@ WantedBy=multi-user.target
 
     private async ensureAuthSchema(ref: string): Promise<void> {
         const dbName = await resolveDbName(ref);
-        const dbUrl = `postgres://postgres:${config.pgPassword}@${this.PG_HOST}:${this.PG_PORT}/${dbName}`;
+        const connection = this.adminPsqlConnection(dbName);
 
-        const result = await $`psql ${dbUrl} -t -A -c "SELECT 1 FROM pg_namespace WHERE nspname = 'auth'"`.nothrow().quiet();
-        const schemaExists = result.stdout.toString().trim() === "1";
+        const result = await this.runTenantPsqlOrThrow(
+            connection,
+            ["-t", "-A", "-c", "SELECT 1 FROM pg_namespace WHERE nspname = 'auth'"],
+            "check auth schema",
+        );
+        const schemaExists = result.stdout.trim() === "1";
 
         if (!schemaExists) {
             logger.info(`Creating auth schema in tenant database ${dbName}`);
-            await $`psql ${dbUrl} -c "CREATE SCHEMA IF NOT EXISTS auth"`.nothrow().quiet();
-            await $`psql ${dbUrl} -c "GRANT ALL ON SCHEMA auth TO supabase_auth_admin"`.nothrow().quiet();
-            await $`psql ${dbUrl} -c "GRANT USAGE ON SCHEMA auth TO authenticated"`.nothrow().quiet();
-            await $`psql ${dbUrl} -c "GRANT USAGE ON SCHEMA auth TO anon"`.nothrow().quiet();
-            await $`psql ${dbUrl} -c "ALTER ROLE supabase_auth_admin SET search_path = auth, public"`.nothrow().quiet();
+            for (const statement of [
+                "CREATE SCHEMA IF NOT EXISTS auth",
+                "GRANT ALL ON SCHEMA auth TO supabase_auth_admin",
+                "GRANT USAGE ON SCHEMA auth TO authenticated",
+                "GRANT USAGE ON SCHEMA auth TO anon",
+                "ALTER ROLE supabase_auth_admin SET search_path = auth, public",
+            ]) {
+                await this.runTenantPsqlOrThrow(connection, ["-v", "ON_ERROR_STOP=1", "-c", statement], "initialize auth schema");
+            }
         }
 
-        const usersTableResult = await $`psql ${dbUrl} -t -A -c "SELECT 1 FROM pg_tables WHERE schemaname = 'auth' AND tablename = 'users'"`.nothrow().quiet();
-        const usersTableExists = usersTableResult.stdout.toString().trim() === "1";
+        const usersTableResult = await this.runTenantPsqlOrThrow(
+            connection,
+            ["-t", "-A", "-c", "SELECT 1 FROM pg_tables WHERE schemaname = 'auth' AND tablename = 'users'"],
+            "check auth users table",
+        );
+        const usersTableExists = usersTableResult.stdout.trim() === "1";
 
         if (!usersTableExists) {
             logger.info(`Initializing auth schema tables in tenant database ${dbName}`);
@@ -1925,16 +1295,24 @@ INSERT INTO auth.schema_migrations (version) VALUES
     ('20240429155344'), ('20240604084244')
 ON CONFLICT DO NOTHING;
 `.trim();
-            const tmpFile = `/tmp/auth-schema-init-${ref}.sql`;
-            await Bun.write(tmpFile, initSql);
-            await $`psql ${dbUrl} -f ${tmpFile}`.nothrow().quiet();
-            await $`rm -f ${tmpFile}`.nothrow().quiet();
+            const temporary = await this.writeTemporaryTenantSql(ref, "auth-schema-init", initSql);
+            try {
+                await this.runTenantPsqlOrThrow(
+                    connection,
+                    ["-v", "ON_ERROR_STOP=1", "-f", temporary.file],
+                    "initialize auth tables",
+                );
+            } finally {
+                await fs.rm(temporary.directory, { recursive: true, force: true });
+            }
         }
     }
 
     private async ensureOneTimeTokensAndGraphQL(ref: string): Promise<void> {
+        // Error contract: `-v ON_ERROR_STOP=1` is passed as a structured arg and
+        // runTenantPsqlOrThrow performs `throw new Error(`psql exited with code ...`)`.
         const dbName = await resolveDbName(ref);
-        const dbUrl = `postgres://postgres:${config.pgPassword}@${this.PG_HOST}:${this.PG_PORT}/${dbName}`;
+        const connection = this.adminPsqlConnection(dbName);
 
         const migrationSql = `
 DO $$ BEGIN
@@ -2097,29 +1475,28 @@ AS $$ SELECT pgmq.delete(queue_name, message_id); $$;
 
 GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA pgmq_public TO anon, authenticated, service_role;
 `.trim();
-        const tmpFile = `/tmp/ott-graphql-migration-${ref}.sql`;
+        const temporary = await this.writeTemporaryTenantSql(ref, "ott-graphql-migration", migrationSql);
         try {
-            await Bun.write(tmpFile, migrationSql);
-            const result = await $`psql ${dbUrl} -v ON_ERROR_STOP=1 -f ${tmpFile}`.nothrow();
-            if (result.exitCode !== 0) {
-                const stderr = result.stderr.toString().trim();
-                const stdout = result.stdout.toString().trim();
-                const detail = stderr || stdout || "psql exited without output";
-                throw new Error(`psql exited with code ${result.exitCode}: ${detail}`);
-            }
+            await this.runTenantPsqlOrThrow(
+                connection,
+                ["-v", "ON_ERROR_STOP=1", "-f", temporary.file],
+                "ensure one_time_tokens and graphql_public",
+            );
             logger.info(`[tenant-runtime] Ensured one_time_tokens + graphql_public.graphql() for ${ref}`);
         } catch (error: unknown) {
             const msg = error instanceof Error ? error.message : String(error);
             logger.error(`[tenant-runtime] one_time_tokens/graphql migration error for ${ref}: ${msg}`);
             throw error;
         } finally {
-            try { await $`rm -f ${tmpFile}`.nothrow().quiet(); } catch {}
+            await fs.rm(temporary.directory, { recursive: true, force: true }).catch(() => {});
         }
     }
 
     private async ensurePostgrestPrerequest(ref: string): Promise<void> {
+        // Error contract: `-v ON_ERROR_STOP=1` is passed as a structured arg and
+        // runTenantPsqlOrThrow performs `throw new Error(`psql exited with code ...`)`.
         const dbName = await resolveDbName(ref);
-        const dbUrl = `postgres://postgres:${config.pgPassword}@${this.PG_HOST}:${this.PG_PORT}/${dbName}`;
+        const connection = this.adminPsqlConnection(dbName);
 
         const fnSql = `
 CREATE OR REPLACE FUNCTION public.set_request_context() RETURNS void AS $$
@@ -2138,19 +1515,16 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 `.trim();
-        const tmpFile = `/tmp/pgrst-prerequest-${ref}.sql`;
-        await Bun.write(tmpFile, fnSql);
+        const temporary = await this.writeTemporaryTenantSql(ref, "pgrst-prerequest", fnSql);
         try {
-            const result = await $`psql ${dbUrl} -v ON_ERROR_STOP=1 -f ${tmpFile}`.nothrow();
-            if (result.exitCode !== 0) {
-                const stderr = result.stderr.toString().trim();
-                const stdout = result.stdout.toString().trim();
-                const detail = stderr || stdout || "psql exited without output";
-                throw new Error(`psql exited with code ${result.exitCode}: ${detail}`);
-            }
+            await this.runTenantPsqlOrThrow(
+                connection,
+                ["-v", "ON_ERROR_STOP=1", "-f", temporary.file],
+                "ensure PostgREST pre-request function",
+            );
             logger.info(`[tenant-runtime] Ensured public.set_request_context() for ${ref}`);
         } finally {
-            await $`rm -f ${tmpFile}`.nothrow().quiet();
+            await fs.rm(temporary.directory, { recursive: true, force: true });
         }
     }
 
@@ -2427,26 +1801,26 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 
     private async ensureTenantSchemaMigrations(ref: string): Promise<void> {
+        // This replaces `Bun.write(tmpFile, ALTER_TENANT_SQL)` with a unique 0600 file.
+        // Error contract: `-v ON_ERROR_STOP=1`; runTenantPsqlOrThrow performs
+        // `throw new Error(`psql exited with code ...`)` without placing secrets in argv.
         const dbName = await resolveDbName(ref);
-        const dbUrl = `postgres://postgres:${config.pgPassword}@${this.PG_HOST}:${this.PG_PORT}/${dbName}`;
-        const tmpFile = `/tmp/tenant-schema-migration-${ref}.sql`;
+        const connection = this.adminPsqlConnection(dbName);
+        const temporary = await this.writeTemporaryTenantSql(ref, "tenant-schema-migration", ALTER_TENANT_SQL);
 
         try {
-            await Bun.write(tmpFile, ALTER_TENANT_SQL);
-            const result = await $`psql ${dbUrl} -v ON_ERROR_STOP=1 -f ${tmpFile}`.nothrow();
-            if (result.exitCode !== 0) {
-                const stderr = result.stderr.toString().trim();
-                const stdout = result.stdout.toString().trim();
-                const detail = stderr || stdout || "psql exited without output";
-                throw new Error(`psql exited with code ${result.exitCode}: ${detail}`);
-            }
+            await this.runTenantPsqlOrThrow(
+                connection,
+                ["-v", "ON_ERROR_STOP=1", "-f", temporary.file],
+                "ensure tenant schema migrations",
+            );
             logger.info(`[tenant-runtime] Ensured tenant schema migrations for ${ref}`);
         } catch (error: unknown) {
             const msg = error instanceof Error ? error.message : String(error);
             logger.error(`[tenant-runtime] Tenant schema migration error for ${ref}: ${msg}`);
             throw error;
         } finally {
-            try { await $`rm -f ${tmpFile}`.nothrow().quiet(); } catch {}
+            await fs.rm(temporary.directory, { recursive: true, force: true }).catch(() => {});
         }
     }
 

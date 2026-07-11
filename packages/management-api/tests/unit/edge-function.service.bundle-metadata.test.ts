@@ -1,4 +1,4 @@
-import { afterAll, afterEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, describe, expect, mock, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
@@ -10,6 +10,7 @@ const originalRuntimeInternal = process.env.EDGE_RUNTIME_INTERNAL;
 const originalExternalPackages = process.env.EDGE_FUNCTION_EXTERNAL_PACKAGES;
 const originalFetch = globalThis.fetch;
 
+mock.restore();
 process.env.EDGE_FUNCTIONS_DIR = functionsRoot;
 process.env.EDGE_RUNTIME_INTERNAL = "127.0.0.1:65535";
 
@@ -44,6 +45,7 @@ afterAll(async () => {
 
 describe("edgeFunctionService bundle metadata", () => {
   test("writes content-addressed version artifacts and returns deploy preheat metadata", async () => {
+    const metricsBefore = edgeFunctionService.deployMetrics();
     const fetchCalls: string[] = [];
     globalThis.fetch = ((input: string | URL | Request) => {
       const url = String(input);
@@ -114,15 +116,19 @@ describe("edgeFunctionService bundle metadata", () => {
     expect(detail?.has_bundle).toBe(true);
     expect(detail?.bundle_code).toContain("hello");
 
-    expect(edgeFunctionService.deployMetrics()).toMatchObject({
-      total_deploys: 1,
+    const metricsAfter = edgeFunctionService.deployMetrics();
+    expect(metricsAfter).toMatchObject({
+      total_deploys: metricsBefore.total_deploys + 1,
+      total_bundle_size_bytes: metricsBefore.total_bundle_size_bytes + result.bundle_size_bytes!,
       last_bundle_size_bytes: result.bundle_size_bytes,
+      total_import_count: metricsBefore.total_import_count + 2,
       last_import_count: 2,
+      total_preheat_duration_ms: metricsBefore.total_preheat_duration_ms + result.preheat!.duration_ms,
       last_preheat_duration_ms: result.preheat?.duration_ms,
-      total_preheat_attempted: 3,
-      total_preheat_succeeded: 3,
-      total_preheat_cache_hits: 1,
-      total_preheat_cache_misses: 2,
+      total_preheat_attempted: metricsBefore.total_preheat_attempted + 3,
+      total_preheat_succeeded: metricsBefore.total_preheat_succeeded + 3,
+      total_preheat_cache_hits: metricsBefore.total_preheat_cache_hits + 1,
+      total_preheat_cache_misses: metricsBefore.total_preheat_cache_misses + 2,
     });
 
     expect(fetchCalls.some((url) => url.includes("/invalidate/proj_meta/hello"))).toBe(true);

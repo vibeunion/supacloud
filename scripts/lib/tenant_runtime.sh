@@ -4,6 +4,7 @@
 # Usage: tenant_runtime.sh <start|stop|restart|status|port> <project_ref>
 
 set -euo pipefail
+umask 077
 
 ACTION="${1:-}"
 PROJECT_REF="${2:-}"
@@ -21,6 +22,12 @@ SUPACLOUD_META_DB="${SUPACLOUD_META_DB:-supacloud_meta}"
 POSTGREST_RTS="${POSTGREST_RTS:--N1 -M256m -I0.5 -A4m}"
 POSTGREST_MEMORY_MAX="${POSTGREST_MEMORY_MAX:-384M}"
 POSTGREST_CPU_WEIGHT="${POSTGREST_CPU_WEIGHT:-40}"
+POSTGREST_DEFAULT_VERSION="v14.13"
+POSTGREST_X86_64_SHA256="2a0537411cd79c7180f8669a6488d5813b89f93fa7e486915512aca96f1a9bcf"
+POSTGREST_ARM64_SHA256="d100eec50ec02f3811679847b2c90d08e178b2123c1f079eadddb8a920bcde2a"
+GOTRUE_DEFAULT_VERSION="v2.191.0"
+GOTRUE_AMD64_SHA256="32da8473b79de594ea4c2b6023f3d34901b99e846dc1fce71dfd8fd3a65e0b72"
+GOTRUE_ARM64_SHA256="f24d79edc35ec33b78f1c9ee02909a002a2ac49ac071a82b51fb80eae1bdfb42"
 
 # Validate parameters
 validate_params() {
@@ -29,6 +36,26 @@ validate_params() {
         echo "Usage: $0 <start|stop|restart|status|port> <project_ref>" >&2
         exit 1
     fi
+    if [[ ! "$PROJECT_REF" =~ ^[a-z0-9-]{1,20}$ ]]; then
+        echo "ERROR: Invalid project_ref" >&2
+        exit 1
+    fi
+}
+
+tenant_runtime_user() {
+    printf 'supacloud-%s' "$1"
+}
+
+ensure_tenant_runtime_user() {
+    local ref="$1"
+    local runtime_user
+    runtime_user=$(tenant_runtime_user "$ref")
+    if ! id -u "$runtime_user" >/dev/null 2>&1; then
+        local nologin_shell
+        nologin_shell=$(command -v nologin 2>/dev/null || printf '/sbin/nologin')
+        useradd --system --user-group --no-create-home --home-dir /nonexistent --shell "$nologin_shell" "$runtime_user"
+    fi
+    printf '%s' "$runtime_user"
 }
 
 # ========== Port allocation (deterministic hash, avoid conflicts) ==========
@@ -89,6 +116,19 @@ get_tenant_port() {
 get_tenant_credentials() {
     local ref="$1"
     local field="$2"
+    local output_name="${3:-}"
+
+    case "$field" in
+        db_password|jwt_secret|api_url) ;;
+        *)
+            echo "ERROR: Unsupported tenant credential field: ${field}" >&2
+            return 1
+            ;;
+    esac
+    if [ -z "$output_name" ] || [[ ! "$output_name" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]]; then
+        echo "ERROR: Invalid tenant credential output variable" >&2
+        return 1
+    fi
 
     # Use database connection info from environment variables
     # Prefer PG_USER and PGPASSWORD, otherwise fallback to supabase_admin
@@ -100,11 +140,280 @@ get_tenant_credentials() {
         exit 1
     fi
     
-    PGPASSWORD="$db_pass" psql \
-        -h "$PG_HOST" -p "$PG_PORT" -U "$db_user" \
+    local encoded_value
+    encoded_value=$(PGPASSWORD="$db_pass" psql \
+        -X -q -h "$PG_HOST" -p "$PG_PORT" -U "$db_user" \
         -d "$SUPACLOUD_META_DB" \
-        -t -A -c "SELECT ${field} FROM projects WHERE ref='${ref}'" 2>/dev/null | grep -v '^Time:' | head -n 1
+        -t -A -v ON_ERROR_STOP=1 \
+        -c "SELECT encode(convert_to(COALESCE(${field}, ''), 'UTF8'), 'hex') FROM projects WHERE ref='${ref}'" \
+        2>/dev/null) || return 1
+    if [[ "$encoded_value" == *$'\n'* || "$encoded_value" == *$'\r'* ]] ||
+       [ $(( ${#encoded_value} % 2 )) -ne 0 ] ||
+       printf '%s' "$encoded_value" | LC_ALL=C grep -q '[^0-9a-fA-F]'; then
+        echo "ERROR: Invalid encoded tenant credential" >&2
+        return 1
+    fi
+
+    local decoded_escape="" pair index=0
+    while [ "$index" -lt "${#encoded_value}" ]; do
+        pair="${encoded_value:$index:2}"
+        if [ "$pair" = "00" ]; then
+            echo "ERROR: Tenant credential contains a forbidden NUL byte" >&2
+            return 1
+        fi
+        decoded_escape="${decoded_escape}\\x${pair}"
+        index=$((index + 2))
+    done
+    printf -v "$output_name" '%b' "$decoded_escape"
 }
+
+assert_safe_config_value() {
+    local name="${1:-value}"
+    local value="${2-}"
+    case "$value" in
+        *$'\n'*|*$'\r'*)
+            echo "ERROR: ${name} contains a forbidden control character" >&2
+            return 1
+            ;;
+    esac
+    if printf '%s' "$value" | LC_ALL=C grep -q '[[:cntrl:]]'; then
+        echo "ERROR: ${name} contains a forbidden control character" >&2
+        return 1
+    fi
+}
+
+uri_percent_encode() {
+    local value="${1-}"
+    assert_safe_config_value "URI component" "$value" || return 1
+
+    local LC_ALL=C
+    local encoded=""
+    local char hex index
+    index=0
+    while [ "$index" -lt "${#value}" ]; do
+        char="${value:$index:1}"
+        case "$char" in
+            [a-zA-Z0-9.~_-]) encoded="${encoded}${char}" ;;
+            *)
+                printf -v hex '%%%02X' "'$char"
+                encoded="${encoded}${hex}"
+                ;;
+        esac
+        index=$((index + 1))
+    done
+    printf '%s' "$encoded"
+}
+
+systemd_env_quote() {
+    local value="${1-}"
+    assert_safe_config_value "EnvironmentFile value" "$value" || return 1
+    value=${value//\\/\\\\}
+    value=${value//\"/\\\"}
+    printf '"%s"' "$value"
+}
+
+toml_basic_string() {
+    local value="${1-}"
+    assert_safe_config_value "TOML value" "$value" || return 1
+    value=${value//\\/\\\\}
+    value=${value//\"/\\\"}
+    printf '"%s"' "$value"
+}
+
+write_tenant_secret_file() (
+    set -e
+    local target="$1"
+    local runtime_user="$2"
+    local content="$3"
+    local target_dir tmp_file=""
+    target_dir=$(dirname "$target") || return 1
+    mkdir -p "$target_dir" || return 1
+    tmp_file=$(mktemp "${target}.tmp.XXXXXX") || return 1
+    trap 'if [ -n "${tmp_file:-}" ]; then rm -f -- "$tmp_file"; fi' EXIT HUP INT TERM
+    printf '%s\n' "$content" > "$tmp_file" || return 1
+    chown "$runtime_user:$runtime_user" "$tmp_file" || return 1
+    chmod 600 "$tmp_file" || return 1
+    mv -f "$tmp_file" "$target" || return 1
+    tmp_file=""
+    chown "$runtime_user:$runtime_user" "$target" || return 1
+    chmod 600 "$target" || return 1
+)
+
+resolve_release_sha256() {
+    local component="$1"
+    local version="$2"
+    local default_version="$3"
+    local default_sha256="$4"
+    local explicit_sha256="${5:-}"
+    local resolved
+
+    if [ "$version" != "$default_version" ] && [ -z "$explicit_sha256" ]; then
+        echo "ERROR: ${component} ${version} requires an explicit SHA256 override" >&2
+        return 1
+    fi
+    resolved="${explicit_sha256:-$default_sha256}"
+    if [ "${#resolved}" -ne 64 ] || printf '%s' "$resolved" | LC_ALL=C grep -q '[^0-9a-fA-F]'; then
+        echo "ERROR: Invalid SHA256 for ${component} ${version}" >&2
+        return 1
+    fi
+    printf '%s' "$resolved" | tr '[:upper:]' '[:lower:]'
+}
+
+sha256_file() {
+    local file_path="$1"
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$file_path" | awk '{print $1}'
+    elif command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 "$file_path" | awk '{print $1}'
+    else
+        echo "ERROR: sha256sum or shasum is required" >&2
+        return 1
+    fi
+}
+
+download_release_asset() {
+    local url="$1"
+    local output_path="$2"
+    assert_safe_config_value "release URL" "$url" || return 1
+    case "$url" in
+        https://github.com/*) ;;
+        *)
+            echo "ERROR: Release assets must use the official GitHub origin" >&2
+            return 1
+            ;;
+    esac
+
+    if curl --proto '=https' --proto-redir '=https' --tlsv1.2 -fL --retry 3 --connect-timeout 15 "$url" -o "$output_path"; then
+        return 0
+    fi
+    rm -f -- "$output_path"
+
+    local proxy="${SUPACLOUD_GITHUB_PROXY:-}"
+    if [ -z "$proxy" ]; then
+        return 1
+    fi
+    assert_safe_config_value "SUPACLOUD_GITHUB_PROXY" "$proxy" || return 1
+    case "$proxy" in
+        https://*) ;;
+        *)
+            echo "ERROR: SUPACLOUD_GITHUB_PROXY must use https://" >&2
+            return 1
+            ;;
+    esac
+    curl --proto '=https' --proto-redir '=https' --tlsv1.2 -fL --retry 3 --connect-timeout 15 "${proxy%/}/${url}" -o "$output_path"
+}
+
+validate_release_tar() (
+    set -e
+    local archive_path="$1"
+    shift
+    local listing_file verbose_file candidate_file member expected regular_count candidate_count
+    listing_file=$(mktemp) || return 1
+    verbose_file=$(mktemp) || return 1
+    candidate_file=$(mktemp) || return 1
+    trap 'rm -f -- "$listing_file" "$verbose_file" "$candidate_file"' EXIT HUP INT TERM
+
+    tar -tf "$archive_path" > "$listing_file" || return 1
+    tar -tvf "$archive_path" > "$verbose_file" || return 1
+
+    if printf '%s' "$(cat "$listing_file")" | LC_ALL=C grep -q '[[:cntrl:]]'; then
+        echo "ERROR: Release archive contains control characters in member names" >&2
+        return 1
+    fi
+    while IFS= read -r member; do
+        case "$member" in
+            /*|..|../*|*/..|*/../*)
+                echo "ERROR: Unsafe release archive member: ${member}" >&2
+                return 1
+                ;;
+        esac
+        for expected in "$@"; do
+            if [ "$member" = "$expected" ] || [ "$member" = "./${expected}" ]; then
+                printf '%s\n' "$member" >> "$candidate_file"
+            fi
+        done
+    done < "$listing_file"
+
+    if ! awk 'substr($0, 1, 1) != "-" && substr($0, 1, 1) != "d" { exit 1 }' "$verbose_file"; then
+        echo "ERROR: Release archive contains links or special files" >&2
+        return 1
+    fi
+    regular_count=$(awk 'substr($0, 1, 1) == "-" { count++ } END { print count + 0 }' "$verbose_file") || return 1
+    candidate_count=$(wc -l < "$candidate_file" | tr -d ' ') || return 1
+    if [ "$regular_count" -ne 1 ] || [ "$candidate_count" -ne 1 ]; then
+        echo "ERROR: Release archive must contain exactly one expected binary" >&2
+        return 1
+    fi
+    sed -n '1p' "$candidate_file" || return 1
+)
+
+validate_elf_binary() {
+    local binary_path="$1"
+    local machine="$2"
+    local description
+    description=$(file -b "$binary_path")
+    case "$machine" in
+        x86_64)
+            case "$description" in *ELF*64-bit*x86-64*) ;; *)
+                echo "ERROR: Binary is not an x86_64 ELF executable" >&2
+                return 1
+                ;;
+            esac
+            ;;
+        aarch64)
+            case "$description" in *ELF*64-bit*ARM*aarch64*|*ELF*64-bit*aarch64*) ;; *)
+                echo "ERROR: Binary is not an arm64 ELF executable" >&2
+                return 1
+                ;;
+            esac
+            ;;
+        *)
+            echo "ERROR: Unsupported ELF architecture: ${machine}" >&2
+            return 1
+            ;;
+    esac
+}
+
+smoke_check_binary() {
+    local binary_path="$1"
+    if command -v timeout >/dev/null 2>&1; then
+        timeout 10 "$binary_path" --version >/dev/null 2>&1 ||
+            timeout 10 "$binary_path" --help >/dev/null 2>&1
+    else
+        "$binary_path" --version >/dev/null 2>&1 || "$binary_path" --help >/dev/null 2>&1
+    fi
+}
+
+install_verified_tar_binary() (
+    set -e
+    local archive_path="$1"
+    local expected_sha256="$2"
+    local target_path="$3"
+    local machine="$4"
+    shift 4
+    local actual_sha256 member work_dir="" install_tmp=""
+
+    actual_sha256=$(sha256_file "$archive_path" | tr '[:upper:]' '[:lower:]') || return 1
+    if [ "$actual_sha256" != "$expected_sha256" ]; then
+        echo "ERROR: Release asset SHA256 mismatch" >&2
+        return 1
+    fi
+    member=$(validate_release_tar "$archive_path" "$@") || return 1
+
+    work_dir=$(mktemp -d) || return 1
+    trap 'rm -rf -- "${work_dir:-}"; if [ -n "${install_tmp:-}" ]; then rm -f -- "$install_tmp"; fi' EXIT HUP INT TERM
+    tar -xOf "$archive_path" "$member" > "${work_dir}/binary" || return 1
+    [ -s "${work_dir}/binary" ] || return 1
+    validate_elf_binary "${work_dir}/binary" "$machine" || return 1
+
+    mkdir -p "$(dirname "$target_path")" || return 1
+    install_tmp=$(mktemp "$(dirname "$target_path")/.$(basename "$target_path").XXXXXX") || return 1
+    install -m 0755 "${work_dir}/binary" "$install_tmp" || return 1
+    validate_elf_binary "$install_tmp" "$machine" || return 1
+    smoke_check_binary "$install_tmp" || return 1
+    mv -f "$install_tmp" "$target_path" || return 1
+    install_tmp=""
+)
 
 # ========== Ensure PostgREST binary is available ==========
 ensure_postgrest() {
@@ -119,33 +428,31 @@ ensure_postgrest() {
 
     echo "PostgREST binary not found. Installing..."
 
-    # Direct download
-    local arch
-    arch=$(uname -m)
-    case "$arch" in
-        x86_64) arch="linux-static-x86-64" ;;
-        aarch64) arch="ubuntu-aarch64" ;;
-        *) echo "ERROR: Unsupported architecture: $arch" >&2; exit 1 ;;
+    local machine arch default_sha256
+    machine=$(uname -m)
+    case "$machine" in
+        x86_64) arch="linux-static-x86-64"; default_sha256="$POSTGREST_X86_64_SHA256" ;;
+        aarch64) arch="ubuntu-aarch64"; default_sha256="$POSTGREST_ARM64_SHA256" ;;
+        *) echo "ERROR: Unsupported architecture: $machine" >&2; exit 1 ;;
     esac
 
     local version="${POSTGREST_VERSION:-v14.13}"
+    local expected_sha256
+    assert_safe_config_value "POSTGREST_VERSION" "$version" || exit 1
+    case "$version" in *[!A-Za-z0-9._-]*|"") echo "ERROR: Invalid POSTGREST_VERSION" >&2; exit 1 ;; esac
+    expected_sha256=$(resolve_release_sha256 "PostgREST" "$version" "$POSTGREST_DEFAULT_VERSION" "$default_sha256" "${POSTGREST_SHA256:-}") || exit 1
     local url="https://github.com/PostgREST/postgrest/releases/download/${version}/postgrest-${version}-${arch}.tar.xz"
     echo "Downloading PostgREST ${version}..."
 
-    local tmp_dir
-    tmp_dir=$(mktemp -d)
-    if curl -fsSL "https://gh-proxy.net/${url}" -o "${tmp_dir}/postgrest.tar.xz" 2>/dev/null || \
-       curl -fsSL "${url}" -o "${tmp_dir}/postgrest.tar.xz"; then
-        tar -xf "${tmp_dir}/postgrest.tar.xz" -C "${tmp_dir}"
-        mv "${tmp_dir}/postgrest" "$POSTGREST_BIN"
-        chmod +x "$POSTGREST_BIN"
-        echo "PostgREST installed to $POSTGREST_BIN"
-    else
-        echo "ERROR: Failed to download PostgREST" >&2
-        rm -rf "$tmp_dir"
-        exit 1
-    fi
-    rm -rf "$tmp_dir"
+    (
+        set -e
+        local tmp_dir
+        tmp_dir=$(mktemp -d) || exit 1
+        trap 'rm -rf -- "$tmp_dir"' EXIT HUP INT TERM
+        download_release_asset "$url" "${tmp_dir}/postgrest.tar.xz" || exit 1
+        install_verified_tar_binary "${tmp_dir}/postgrest.tar.xz" "$expected_sha256" "$POSTGREST_BIN" "$machine" postgrest || exit 1
+    ) || { echo "ERROR: Failed to install PostgREST" >&2; exit 1; }
+    echo "PostgREST installed to $POSTGREST_BIN"
 }
 
 # ========== Ensure GoTrue binary is available ==========
@@ -161,39 +468,32 @@ ensure_gotrue() {
 
     echo "GoTrue binary not found. Installing..."
 
-    # Direct download from GitHub
-    local arch
-    arch=$(uname -m)
-    case "$arch" in
-        x86_64) arch="amd64" ;;
-        aarch64) arch="arm64" ;;
-        *) echo "ERROR: Unsupported architecture: $arch" >&2; exit 1 ;;
+    local machine arch default_sha256
+    machine=$(uname -m)
+    case "$machine" in
+        x86_64) arch="amd64"; default_sha256="$GOTRUE_AMD64_SHA256" ;;
+        aarch64) arch="arm64"; default_sha256="$GOTRUE_ARM64_SHA256" ;;
+        *) echo "ERROR: Unsupported architecture: $machine" >&2; exit 1 ;;
     esac
 
     local version="${GOTRUE_VERSION:-v2.191.0}"
     local archive_ext="tar.xz"
+    local expected_sha256
+    assert_safe_config_value "GOTRUE_VERSION" "$version" || exit 1
+    case "$version" in *[!A-Za-z0-9._-]*|"") echo "ERROR: Invalid GOTRUE_VERSION" >&2; exit 1 ;; esac
+    expected_sha256=$(resolve_release_sha256 "GoTrue" "$version" "$GOTRUE_DEFAULT_VERSION" "$default_sha256" "${GOTRUE_SHA256:-}") || exit 1
     local url="https://github.com/supabase/auth/releases/download/${version}/auth-${version}-${arch}.${archive_ext}"
     echo "Downloading GoTrue ${version}..."
 
-    local tmp_dir
-    tmp_dir=$(mktemp -d)
-    if curl -fsSL "https://gh-proxy.net/${url}" -o "${tmp_dir}/gotrue.${archive_ext}" 2>/dev/null || \
-       curl -fsSL "${url}" -o "${tmp_dir}/gotrue.${archive_ext}"; then
-        tar -xf "${tmp_dir}/gotrue.${archive_ext}" -C "${tmp_dir}"
-        # The binary may be named 'auth' or 'gotrue' depending on the release
-        if [ -f "${tmp_dir}/auth" ]; then
-            mv "${tmp_dir}/auth" "$GOTRUE_BIN"
-        elif [ -f "${tmp_dir}/gotrue" ]; then
-            mv "${tmp_dir}/gotrue" "$GOTRUE_BIN"
-        fi
-        chmod +x "$GOTRUE_BIN"
-        echo "GoTrue installed to $GOTRUE_BIN"
-    else
-        echo "ERROR: Failed to download GoTrue. Please manually place the binary at $GOTRUE_BIN" >&2
-        rm -rf "$tmp_dir"
-        exit 1
-    fi
-    rm -rf "$tmp_dir"
+    (
+        set -e
+        local tmp_dir
+        tmp_dir=$(mktemp -d) || exit 1
+        trap 'rm -rf -- "$tmp_dir"' EXIT HUP INT TERM
+        download_release_asset "$url" "${tmp_dir}/gotrue.tar.xz" || exit 1
+        install_verified_tar_binary "${tmp_dir}/gotrue.tar.xz" "$expected_sha256" "$GOTRUE_BIN" "$machine" auth gotrue || exit 1
+    ) || { echo "ERROR: Failed to install GoTrue. Please manually place the binary at $GOTRUE_BIN" >&2; exit 1; }
+    echo "GoTrue installed to $GOTRUE_BIN"
 }
 
 # ========== Generate tenant configuration files ==========
@@ -202,25 +502,46 @@ generate_tenant_config() {
     local pgrst_port="$2"
     local gotrue_port="$3"
 
-    mkdir -p "$TENANT_CONFIG_DIR"
+    case "$ref" in
+        *[!a-z0-9-]*|"")
+            echo "ERROR: Invalid project_ref" >&2
+            return 1
+            ;;
+    esac
+    if [[ ! "$pgrst_port" =~ ^[0-9]+$ || ! "$gotrue_port" =~ ^[0-9]+$ ]] ||
+       [ "$pgrst_port" -lt 1 ] || [ "$pgrst_port" -gt 65535 ] ||
+       [ "$gotrue_port" -lt 1 ] || [ "$gotrue_port" -gt 65535 ]; then
+        echo "ERROR: Invalid tenant runtime port" >&2
+        return 1
+    fi
+
+    local runtime_user
+    runtime_user=$(ensure_tenant_runtime_user "$ref") || return 1
+    mkdir -p "$TENANT_CONFIG_DIR" || return 1
+    chmod 711 "$TENANT_CONFIG_DIR" || return 1
 
     # Query tenant credentials
     local db_name="supa_${ref}"
     local db_password
-    db_password=$(get_tenant_credentials "$ref" "db_password")
+    get_tenant_credentials "$ref" "db_password" db_password || return 1
     local jwt_secret
-    jwt_secret=$(get_tenant_credentials "$ref" "jwt_secret")
+    get_tenant_credentials "$ref" "jwt_secret" jwt_secret || return 1
 
     if [ -z "$db_password" ] || [ -z "$jwt_secret" ]; then
         echo "ERROR: Cannot find credentials for project ${ref} in supacloud_meta" >&2
         exit 1
     fi
+    assert_safe_config_value "tenant database password" "$db_password" || return 1
+    assert_safe_config_value "tenant JWT secret" "$jwt_secret" || return 1
+    assert_safe_config_value "PostgreSQL host" "$PG_HOST" || return 1
+    assert_safe_config_value "PostgreSQL port" "$PG_PORT" || return 1
 
     local pgrst_db_schemas="public,storage,graphql_public"
     local pgrst_db_schemas_conf="public, storage, graphql_public"
     local pgmq_public_exists=""
     if command -v psql >/dev/null 2>&1; then
-        pgmq_public_exists=$(psql "postgres://authenticator_${ref}:${db_password}@${PG_HOST}:${PG_PORT}/${db_name}" \
+        pgmq_public_exists=$(PGPASSWORD="$db_password" psql \
+            -h "$PG_HOST" -p "$PG_PORT" -U "authenticator_${ref}" -d "$db_name" \
             -Atqc "SELECT CASE WHEN EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = 'pgmq_public') THEN 1 ELSE 0 END;" \
             2>/dev/null || true)
     fi
@@ -233,45 +554,65 @@ generate_tenant_config() {
     # Priority: environment variable override > supacloud_meta.projects.api_url > default placeholder
     local api_external_url="${GOTRUE_API_EXTERNAL_URL:-}"
     if [ -z "$api_external_url" ]; then
-        api_external_url=$(get_tenant_credentials "$ref" "api_url" 2>/dev/null || true)
+        get_tenant_credentials "$ref" "api_url" api_external_url 2>/dev/null || api_external_url=""
     fi
     if [ -z "$api_external_url" ]; then
         api_external_url="https://your-supacloud-domain.com"
         echo "WARNING: API_EXTERNAL_URL not set. Set GOTRUE_API_EXTERNAL_URL env var or add api_url to supacloud_meta.projects" >&2
     fi
+    assert_safe_config_value "GoTrue external URL" "$api_external_url" || return 1
+
+    local authenticator_user="authenticator_${ref}"
+    local encoded_authenticator_user encoded_db_password encoded_admin_user encoded_admin_password encoded_db_name
+    encoded_authenticator_user=$(uri_percent_encode "$authenticator_user") || return 1
+    encoded_db_password=$(uri_percent_encode "$db_password") || return 1
+    encoded_admin_user=$(uri_percent_encode "supabase_auth_admin") || return 1
+    local admin_db_password="${PGPASSWORD:-${POSTGRES_PASSWORD:-}}"
+    if [ -z "$admin_db_password" ]; then
+        echo "ERROR: PGPASSWORD or POSTGRES_PASSWORD not set" >&2
+        return 1
+    fi
+    encoded_admin_password=$(uri_percent_encode "$admin_db_password") || return 1
+    encoded_db_name=$(uri_percent_encode "$db_name") || return 1
+    local tenant_db_uri="postgres://${encoded_authenticator_user}:${encoded_db_password}@${PG_HOST}:${PG_PORT}/${encoded_db_name}"
+    local auth_db_uri="postgres://${encoded_admin_user}:${encoded_admin_password}@${PG_HOST}:${PG_PORT}/${encoded_db_name}"
 
     # 1. Generate PostgREST .env and .conf
-    cat > "${TENANT_CONFIG_DIR}/${ref}.env" <<EOF
+    local pgrst_env
+    pgrst_env=$(cat <<EOF
 # SupaCloud Tenant PostgREST Runtime: ${ref}
-PGRST_DB_URI=postgres://authenticator_${ref}:${db_password}@${PG_HOST}:${PG_PORT}/${db_name}
-PGRST_DB_SCHEMAS=${pgrst_db_schemas}
-PGRST_DB_EXTRA_SEARCH_PATH=public
-PGRST_DB_ANON_ROLE=anon
-PGRST_JWT_SECRET=${jwt_secret}
+PGRST_DB_URI=$(systemd_env_quote "$tenant_db_uri")
+PGRST_DB_SCHEMAS=$(systemd_env_quote "$pgrst_db_schemas")
+PGRST_DB_EXTRA_SEARCH_PATH="public"
+PGRST_DB_ANON_ROLE="anon"
+PGRST_JWT_SECRET=$(systemd_env_quote "$jwt_secret")
 PGRST_SERVER_PORT=${pgrst_port}
 PGRST_DB_POOL=3
 PGRST_DB_POOL_ACQUISITION_TIMEOUT=10
-PGRST_LOG_LEVEL=warn
+PGRST_LOG_LEVEL="warn"
 EOF
-    chmod 644 "${TENANT_CONFIG_DIR}/${ref}.env"
+)
+    write_tenant_secret_file "${TENANT_CONFIG_DIR}/${ref}.env" "$runtime_user" "$pgrst_env" || return 1
 
-    cat > "${TENANT_CONFIG_DIR}/${ref}.conf" <<EOF
+    local pgrst_conf
+    pgrst_conf=$(cat <<EOF
 # PostgREST config for tenant: ${ref}
-db-uri = "postgres://authenticator_${ref}:${db_password}@${PG_HOST}:${PG_PORT}/${db_name}"
-db-schemas = "${pgrst_db_schemas_conf}"
+db-uri = $(toml_basic_string "$tenant_db_uri")
+db-schemas = $(toml_basic_string "$pgrst_db_schemas_conf")
 # Bug Fix: Multi-tenant isolation - extra search path should include tenant-specific schema
-db-extra-search-path = "public, extensions, auth, ${ref}"
+db-extra-search-path = $(toml_basic_string "public, extensions, auth, ${ref}")
 db-anon-role = "anon"
-jwt-secret = "${jwt_secret}"
+jwt-secret = $(toml_basic_string "$jwt_secret")
 server-port = ${pgrst_port}
 # Bind to 0.0.0.0 so the host gateway can reach the tenant runtime.
 server-host = "0.0.0.0"
 db-pool = 3
 db-pool-acquisition-timeout = 10
 log-level = "warn"
-db-channel = "pgrst_${ref}"
+db-channel = $(toml_basic_string "pgrst_${ref}")
 EOF
-    chmod 644 "${TENANT_CONFIG_DIR}/${ref}.conf"
+)
+    write_tenant_secret_file "${TENANT_CONFIG_DIR}/${ref}.conf" "$runtime_user" "$pgrst_conf" || return 1
 
     # 2. Generate GoTrue .env
     # Get tenant configured email sender (if any)
@@ -279,50 +620,56 @@ EOF
     local smtp_host="${GOTRUE_SMTP_HOST:-}"
     local smtp_user="${GOTRUE_SMTP_USER:-}"
     local smtp_pass="${GOTRUE_SMTP_PASS:-}"
+    assert_safe_config_value "GoTrue SMTP sender" "$gotrue_sender" || return 1
+    assert_safe_config_value "GoTrue SMTP host" "$smtp_host" || return 1
+    assert_safe_config_value "GoTrue SMTP user" "$smtp_user" || return 1
+    assert_safe_config_value "GoTrue SMTP password" "$smtp_pass" || return 1
     
     local gotrue_config_dir="${TENANT_CONFIG_DIR}/${ref}_gotrue.d"
-    mkdir -p "$gotrue_config_dir"
+    mkdir -p "$gotrue_config_dir" || return 1
+    chown "$runtime_user:$runtime_user" "$gotrue_config_dir" || return 1
+    chmod 700 "$gotrue_config_dir" || return 1
 
-    cat > "${TENANT_CONFIG_DIR}/${ref}_gotrue.env" <<EOF
+    local gotrue_env
+    gotrue_env=$(cat <<EOF
 # SupaCloud Tenant GoTrue Runtime: ${ref}
 # Bind to 0.0.0.0 so the host gateway can reach the tenant runtime.
-GOTRUE_API_HOST=0.0.0.0
+GOTRUE_API_HOST="0.0.0.0"
 GOTRUE_API_PORT=${gotrue_port}
 # Required: external URL used for email verification links and OAuth redirects
-API_EXTERNAL_URL=${api_external_url}
+API_EXTERNAL_URL=$(systemd_env_quote "$api_external_url")
 # Bug Fix: SITE_URL should be the actually accessible URL
-GOTRUE_SITE_URL=${api_external_url}
-GOTRUE_DB_DRIVER=postgres
-GOTRUE_DB_DATABASE_URL=postgres://supabase_auth_admin:${PGPASSWORD:-${POSTGRES_PASSWORD:-postgres}}@${PG_HOST}:${PG_PORT}/${db_name}
+GOTRUE_SITE_URL=$(systemd_env_quote "$api_external_url")
+GOTRUE_DB_DRIVER="postgres"
+GOTRUE_DB_DATABASE_URL=$(systemd_env_quote "$auth_db_uri")
 
-GOTRUE_JWT_SECRET=${jwt_secret}
+GOTRUE_JWT_SECRET=$(systemd_env_quote "$jwt_secret")
 GOTRUE_JWT_EXP=3600
-GOTRUE_JWT_AUD=authenticated
-GOTRUE_JWT_DEFAULT_GROUP_NAME=authenticated
+GOTRUE_JWT_AUD="authenticated"
+GOTRUE_JWT_DEFAULT_GROUP_NAME="authenticated"
 # Bug Fix: Must set JWT_AUD, otherwise user queries will be filtered out due to empty aud
-GOTRUE_JWT_AUD=authenticated
-GOTRUE_LOG_LEVEL=info
+GOTRUE_JWT_AUD="authenticated"
+GOTRUE_LOG_LEVEL="info"
 GOTRUE_SERVER_READ_TIMEOUT=20
-GOTRUE_RELOADING_SIGNAL_ENABLED=true
-GOTRUE_RELOADING_POLLER_ENABLED=true
-GOTRUE_SECURITY_UPDATE_PASSWORD_REQUIRE_REAUTHENTICATION=true
+GOTRUE_RELOADING_SIGNAL_ENABLED="true"
+GOTRUE_RELOADING_POLLER_ENABLED="true"
+GOTRUE_SECURITY_UPDATE_PASSWORD_REQUIRE_REAUTHENTICATION="true"
 EOF
+)
 
     # If SMTP is configured, add to GoTrue config
     if [ -n "$smtp_host" ]; then
-        cat >> "${TENANT_CONFIG_DIR}/${ref}_gotrue.env" <<EOF
+        gotrue_env="${gotrue_env}
 # SMTP Configuration
-GOTRUE_SMTP_ADMIN_EMAIL=${gotrue_sender}
-GOTRUE_SMTP_HOST=${smtp_host}
+GOTRUE_SMTP_ADMIN_EMAIL=$(systemd_env_quote "$gotrue_sender")
+GOTRUE_SMTP_HOST=$(systemd_env_quote "$smtp_host")
 GOTRUE_SMTP_PORT=587
-GOTRUE_SMTP_USER=${smtp_user}
-GOTRUE_SMTP_PASS=${smtp_pass}
-GOTRUE_SMTP_SENDER_NAME=SupaCloud
-EOF
+GOTRUE_SMTP_USER=$(systemd_env_quote "$smtp_user")
+GOTRUE_SMTP_PASS=$(systemd_env_quote "$smtp_pass")
+GOTRUE_SMTP_SENDER_NAME=$(systemd_env_quote "SupaCloud")"
     fi
-    cp "${TENANT_CONFIG_DIR}/${ref}_gotrue.env" "${gotrue_config_dir}/runtime.env"
-    chmod 644 "${TENANT_CONFIG_DIR}/${ref}_gotrue.env"
-    chmod 644 "${gotrue_config_dir}/runtime.env"
+    write_tenant_secret_file "${TENANT_CONFIG_DIR}/${ref}_gotrue.env" "$runtime_user" "$gotrue_env" || return 1
+    write_tenant_secret_file "${gotrue_config_dir}/runtime.env" "$runtime_user" "$gotrue_env" || return 1
 
     echo "Config generated for ${ref} (pgrst_port=${pgrst_port}, gotrue_port=${gotrue_port})"
 }
@@ -330,7 +677,7 @@ EOF
 # ========== Install systemd template unit ==========
 install_systemd_template() {
     local pgrst_unit="/etc/systemd/system/supacloud-pgrst@.service"
-    if [ ! -f "$pgrst_unit" ] || grep -Eq -- '-M30m|MemoryMax=45M' "$pgrst_unit"; then
+    if [ ! -f "$pgrst_unit" ] || grep -Eq -- '-M30m|MemoryMax=45M|^User=nobody$' "$pgrst_unit"; then
         cat > "$pgrst_unit" <<EOF
 [Unit]
 Description=SupaCloud PostgREST for tenant %i
@@ -340,8 +687,8 @@ Wants=patroni.service
 
 [Service]
 Type=simple
-User=nobody
-Group=nobody
+User=supacloud-%i
+Group=supacloud-%i
 EnvironmentFile=/etc/supabase/tenants/%i.env
 # Keep PostgREST bounded without starving large REST reads/upserts.
 Environment="GHCRTS=${POSTGREST_RTS}"
@@ -365,7 +712,7 @@ EOF
     fi
 
     local gotrue_unit="/etc/systemd/system/supacloud-gotrue@.service"
-    if [ ! -f "$gotrue_unit" ] || ! grep -q -- '--config-dir /etc/supabase/tenants/%i_gotrue.d' "$gotrue_unit"; then
+    if [ ! -f "$gotrue_unit" ] || ! grep -q -- '--config-dir /etc/supabase/tenants/%i_gotrue.d' "$gotrue_unit" || grep -q '^User=nobody$' "$gotrue_unit"; then
         cat > "$gotrue_unit" <<EOF
 [Unit]
 Description=SupaCloud GoTrue for tenant %i
@@ -375,8 +722,8 @@ Wants=patroni.service
 
 [Service]
 Type=simple
-User=nobody
-Group=nobody
+User=supacloud-%i
+Group=supacloud-%i
 EnvironmentFile=/etc/supabase/tenants/%i_gotrue.env
 # Extreme squeeze: Go native memory wall 15MB and trigger GC immediately at 20% growth
 Environment="GOMEMLIMIT=15MiB"
@@ -463,6 +810,8 @@ start_runtime() {
 # ========== Stop tenant runtime ==========
 stop_runtime() {
     local ref="$1"
+    local runtime_user
+    runtime_user=$(tenant_runtime_user "$ref")
 
     systemctl stop "supacloud-pgrst@${ref}" 2>/dev/null || true
     systemctl disable "supacloud-pgrst@${ref}" 2>/dev/null || true
@@ -472,6 +821,7 @@ stop_runtime() {
 
     # Clean up config files
     rm -rf "${TENANT_CONFIG_DIR}/${ref}.env" "${TENANT_CONFIG_DIR}/${ref}.conf" "${TENANT_CONFIG_DIR}/${ref}_gotrue.env" "${TENANT_CONFIG_DIR}/${ref}_gotrue.d"
+    userdel "$runtime_user" 2>/dev/null || true
 
     echo "Runtime stopped for ${ref}"
 }
@@ -546,27 +896,32 @@ get_port() {
     echo "GOTRUE_PORT=${gotrue_port}"
 }
 
-# Main logic
-validate_params
+tenant_runtime_main() {
+    validate_params
 
-case "$ACTION" in
-    start)
-        start_runtime "$PROJECT_REF"
-        ;;
-    stop)
-        stop_runtime "$PROJECT_REF"
-        ;;
-    restart)
-        restart_runtime "$PROJECT_REF"
-        ;;
-    status)
-        check_status "$PROJECT_REF"
-        ;;
-    port)
-        get_port "$PROJECT_REF"
-        ;;
-    *)
-        echo "ERROR: Unknown action '${ACTION}'. Use: start, stop, restart, status, port" >&2
-        exit 1
-        ;;
-esac
+    case "$ACTION" in
+        start)
+            start_runtime "$PROJECT_REF"
+            ;;
+        stop)
+            stop_runtime "$PROJECT_REF"
+            ;;
+        restart)
+            restart_runtime "$PROJECT_REF"
+            ;;
+        status)
+            check_status "$PROJECT_REF"
+            ;;
+        port)
+            get_port "$PROJECT_REF"
+            ;;
+        *)
+            echo "ERROR: Unknown action '${ACTION}'. Use: start, stop, restart, status, port" >&2
+            exit 1
+            ;;
+    esac
+}
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    tenant_runtime_main
+fi

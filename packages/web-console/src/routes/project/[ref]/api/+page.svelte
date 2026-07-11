@@ -1,5 +1,6 @@
 <script lang="ts">
   import { apiClient } from "$lib/api";
+  import { getProjectApiUrl } from "$lib/project-api-url";
 
   import { page } from "$app/state";
   import { t } from "svelte-i18n";
@@ -17,8 +18,6 @@
   let activeTab = $state<"introduction" | "endpoints">("introduction");
 
   const projectRef = $derived(page.params.ref);
-  const hostname = $derived(page.url?.hostname || "localhost");
-  const apiUrl = $derived(`http://${hostname}:8000`);
 
   const projectQuery = createQuery(() => ({
     queryKey: ["v1/projects", "getOne", projectRef],
@@ -62,6 +61,7 @@
   }));
 
   const project = $derived(projectQuery.data?.data || projectQuery.data || null);
+  const apiUrl = $derived(getProjectApiUrl(project));
   const endpoints = $derived(endpointsQuery.data || []);
   const isLoading = $derived(projectQuery.isPending);
   const loadingEndpoints = $derived(endpointsQuery.isPending);
@@ -202,7 +202,7 @@ const supabase = createClient(
           {#if loadingEndpoints}
             <div class="flex items-center justify-center py-8"><Loader2 size={14} class="animate-spin text-brand opacity-50" /></div>
           {:else}
-            {#each endpoints as ep}
+            {#each endpoints as ep (ep.table_name)}
               <button onclick={() => selectedEndpoint = ep}
                 class="w-full text-left px-3 py-2 rounded-md text-xs transition-colors {selectedEndpoint?.table_name === ep.table_name ? 'bg-brand/10 text-brand font-semibold' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}">
                 <Database size={10} class="inline mr-1.5 opacity-60" />{ep.table_name}
@@ -230,7 +230,7 @@ const supabase = createClient(
             <div class="space-y-2">
               <h3 class="text-xs font-semibold text-muted-foreground uppercase">可用方法</h3>
               <div class="flex flex-wrap gap-2">
-                {#each ["GET", "POST", "PATCH", "DELETE"] as method}
+                {#each ["GET", "POST", "PATCH", "DELETE"] as method (method)}
                   <div class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-mono">
                     <span class="font-bold {method === 'GET' ? 'text-green-600' : method === 'POST' ? 'text-blue-600' : method === 'PATCH' ? 'text-amber-600' : 'text-red-600'}">{method}</span>
                     <span class="text-muted-foreground">/rest/v1/{selectedEndpoint.table_name}</span>
@@ -253,7 +253,7 @@ const supabase = createClient(
                     </tr>
                   </thead>
                   <tbody class="divide-y divide-border/20 font-mono">
-                    {#each selectedEndpoint.columns as col}
+                    {#each selectedEndpoint.columns as col (col.name)}
                       <tr class="hover:bg-muted/10">
                         <td class="px-3 py-1.5 font-semibold">{col.name}</td>
                         <td class="px-3 py-1.5 text-brand">{col.type}</td>

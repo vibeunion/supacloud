@@ -1,13 +1,12 @@
 #!/usr/bin/env node
 /**
- * supacloud — 统一入口（umbrella dispatcher）。
+ * supacloudctl — 统一入口（umbrella dispatcher）。
  *
- * 单一 `supacloud` 命令把子命令路由到对应的工作区包：
- *   supacloud cli   <args...>   → @supacloud/cli   （项目级开发工具）
- *   supacloud admin <args...>   → @supacloud/admin （平台运维工具）
+ * 单一 `supacloudctl` 命令把子命令路由到对应的工作区包：
+ *   supacloudctl cli   <args...>   → @supacloud/cli   （项目级开发工具）
+ *   supacloudctl admin <args...>   → @supacloud/admin （平台运维工具）
  *
- * 默认先检查 npm latest dist-tag；发现新版本时通过 npm exec 运行最新版。
- * 离线、registry 不可达或显式禁用自动更新时，回退到随包安装的本地依赖。
+ * 默认只检查 npm latest dist-tag 并提示更新；始终执行随包安装的固定版本。
  */
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
@@ -24,8 +23,8 @@ interface Subcommand {
 }
 
 export const SUBCOMMANDS: Record<string, Subcommand> = {
-    cli: { pkg: "@supacloud/cli", bin: "supacloud-cli", desc: "项目级 CLI（开发者工具）" },
-    admin: { pkg: "@supacloud/admin", bin: "supacloud-admin", desc: "平台运维 CLI（安装/SSH/租户管理）" },
+    cli: { pkg: "@supacloud/cli", bin: "supacloud-cli", desc: "@supacloud/cli 项目级开发工具" },
+    admin: { pkg: "@supacloud/admin", bin: "supacloud-admin", desc: "@supacloud/admin 平台运维工具" },
 };
 
 interface InstalledPackage {
@@ -34,10 +33,11 @@ interface InstalledPackage {
 }
 
 interface LaunchPlan {
-    mode: "latest" | "local";
+    mode: "local";
     command: string;
     args: string[];
     shell: boolean;
+    updateNotice?: string;
 }
 
 interface LaunchPlanOptions {
@@ -45,8 +45,6 @@ interface LaunchPlanOptions {
     fetchLatest?: (pkgName: string, env?: Record<string, string | undefined>) => Promise<string | null>;
     resolveInstalled?: (pkgName: string) => InstalledPackage | null;
     nodePath?: string;
-    npmCommand?: string;
-    platform?: NodeJS.Platform;
 }
 
 type FetchLike = (input: string, init?: RequestInit) => Promise<Pick<Response, "ok" | "status" | "json">>;
@@ -60,7 +58,7 @@ export function resolveSubpackageEntry(pkgName: string): string | null {
     }
 }
 
-const COMMAND = "supacloud";
+const COMMAND = "supacloudctl";
 const DEFAULT_NPM_REGISTRY = "https://registry.npmjs.org/";
 const AUTO_UPDATE_TIMEOUT_MS = 2_000;
 
@@ -73,7 +71,7 @@ function readPackageVersion(packageJsonPath: string): string | null {
         const parsed: unknown = JSON.parse(readFileSync(packageJsonPath, "utf8"));
         if (isRecord(parsed) && typeof parsed.version === "string") return parsed.version;
     } catch {
-        // ignore malformed package metadata and fall back to latest execution
+        // 元数据无效时保留未知版本；仍只执行本地已安装入口。
     }
     return null;
 }
@@ -213,21 +211,19 @@ export async function createLaunchPlan(
     const resolveInstalled = options.resolveInstalled ?? resolveInstalledPackage;
     const fetchLatest = options.fetchLatest ?? fetchLatestVersion;
     const installed = resolveInstalled(target.pkg);
+    let updateNotice: string | undefined;
 
     if (!isAutoUpdateDisabled(env)) {
         const latestVersion = await fetchLatest(target.pkg, env);
         if (latestVersion && isNewerVersion(latestVersion, installed?.version ?? null)) {
-            return {
-                mode: "latest",
-                command: options.npmCommand ?? "npm",
-                args: ["exec", "--yes", "--package", `${target.pkg}@${latestVersion}`, "--", target.bin, ...forwardedArgs],
-                shell: (options.platform ?? process.platform) === "win32",
-            };
+            updateNotice = installed?.version
+                ? `${target.pkg} ${latestVersion} 可用；当前固定使用已安装版本 ${installed.version}。请显式运行包管理器更新。`
+                : `${target.pkg} ${latestVersion} 可用；请先通过包管理器显式安装。`;
         }
     }
 
     if (!installed) {
-        throw new Error(`${target.pkg} 未安装，且无法从 npm registry 获取最新版。`);
+        throw new Error(`${target.pkg} 未安装。请先通过包管理器显式安装固定版本。`);
     }
 
     return {
@@ -235,6 +231,7 @@ export async function createLaunchPlan(
         command: options.nodePath ?? process.execPath,
         args: [installed.entry, ...forwardedArgs],
         shell: false,
+        ...(updateNotice ? { updateNotice } : {}),
     };
 }
 
@@ -244,7 +241,7 @@ export function buildHelp(): string {
         .join("\n");
     return `
 ╔═══════════════════════════════════════════════════════════╗
-║  supacloud                                               ║
+║  supacloudctl                                            ║
 ║  统一入口 · 路由到项目级 CLI 与平台运维 CLI              ║
 ╚═══════════════════════════════════════════════════════════╝
 
@@ -266,9 +263,8 @@ ${subs}
   ${COMMAND} admin project list
   ${COMMAND} admin ssh ping
 
-每次执行子命令时默认检查 npm latest；发现 @supacloud/cli 或
-@supacloud/admin 有新版本时会自动通过 npm exec 运行最新版。
-离线时回退到本地依赖。设置 SUPACLOUD_NO_AUTO_UPDATE=1 可禁用。
+每次执行子命令时默认检查 npm latest；发现新版本时只输出更新提示，
+始终运行已安装的固定版本。设置 SUPACLOUD_NO_AUTO_UPDATE=1 可禁用检查。
 `;
 }
 
@@ -288,6 +284,9 @@ async function run(args: string[]): Promise<void> {
     }
 
     const plan = await createLaunchPlan(target, args.slice(1));
+    if (plan.updateNotice) {
+        console.error(`ℹ️ ${plan.updateNotice}`);
+    }
 
     // 把子命令之后的参数原样透传给子包入口
     const child = spawn(plan.command, plan.args, {
@@ -315,7 +314,7 @@ export function isMainModule(moduleUrl: string, argvEntry = process.argv[1]): bo
 if (isMainModule(import.meta.url)) {
     run(process.argv.slice(2)).catch((err: unknown) => {
         const message = err instanceof Error ? err.message : String(err);
-        console.error(`❌ supacloud 启动失败: ${message}`);
+        console.error(`❌ supacloudctl 启动失败: ${message}`);
         process.exit(1);
     });
 }

@@ -21,8 +21,8 @@ describe("TenantRuntimeService port synchronization", () => {
   test("persists generated runtime ports after tenant config is written", () => {
     const source = sourceFile("src/services/tenant-runtime.service.ts");
 
-    const gotrueConfigDirWrite = source.indexOf('await Bun.write(path.join(gotrueConfigDir, "runtime.env"), gotrueEnv);');
-    const gotrueEnvWrite = source.indexOf("await Bun.write(gotrueEnvPath, gotrueEnv);");
+    const gotrueConfigDirWrite = source.indexOf('await this.writeTenantSecretFile(path.join(gotrueConfigDir, "runtime.env"), gotrueEnv, runtimeUser);');
+    const gotrueEnvWrite = source.indexOf("await this.writeTenantSecretFile(gotrueEnvPath, gotrueEnv, runtimeUser);");
     const persistPorts = source.indexOf("await this.persistTenantPortConfig(ref, pgrstPort, gotruePort);");
 
     expect(gotrueConfigDirWrite).toBeGreaterThan(0);
@@ -53,8 +53,11 @@ describe("TenantRuntimeService port synchronization", () => {
     const source = sourceFile("src/services/tenant-oauth.service.ts");
 
     expect(source).toContain("return path.join(this.gotrueConfigDir(ref), \"runtime.env\");");
-    expect(source).toContain("await Bun.write(this.gotrueRuntimeEnvPath(ref), content);");
-    expect(source).toContain("await Bun.write(this.gotrueLegacyEnvPath(ref), content);");
+    expect(source).toContain("stageTenantEnvFile(runtimePath, durableContent, runtimeUser)");
+    expect(source).toContain("stageTenantEnvFile(legacyPath, durableContent, runtimeUser)");
+    expect(source).toContain("await fs.rename(runtimeTemporaryPath, runtimePath);");
+    expect(source).toContain("await fs.rename(legacyTemporaryPath, legacyPath);");
+    expect(source).toContain("await this.chownPath(runtimeDirectory, runtimeUser);");
     expect(source).toContain("systemctl reload supacloud-gotrue@${ref}");
     expect(source).toContain("systemctl restart supacloud-gotrue@${ref}");
     expect(source).toContain("updatedLines.push(`${enabledKey}=false`);");

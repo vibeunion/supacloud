@@ -1,13 +1,23 @@
 # SupaCloud CLI Guide
 
-SupaCloud now exposes two human-facing CLIs with strict ownership boundaries:
+SupaCloud exposes three explicit local command surfaces with strict ownership boundaries:
 
 - `@supacloud/cli` / `supacloud-cli`
 - `@supacloud/admin` / `supacloud-admin`
+- the optional `supacloud` npm package / `supacloudctl`, which dispatches to the two installed CLIs without downloading or executing `latest`
 
-Avoid using the bare `supacloud` name for project workflows. SupaCloud also ships
-a server binary named `supacloud`, usually installed at `/usr/local/bin/supacloud`,
-so the explicit project command is `supacloud-cli`.
+The bare `supacloud` command is not a local CLI compatibility alias. It is the
+compiled server binary installed at `/usr/local/bin/supacloud`; use it only for
+server lifecycle commands such as `sudo supacloud upgrade --yes`. Project work
+uses `supacloud-cli`, platform administration uses `supacloud-admin`, and the
+optional local umbrella command is `supacloudctl`.
+
+```text
+supacloud-cli        project-scoped user/developer CLI
+supacloud-admin      server and platform administration CLI
+supacloudctl         local dispatcher for the two installed CLIs
+/usr/local/bin/supacloud  compiled server binary (not a CLI alias)
+```
 
 ## `supacloud-cli`
 
@@ -134,6 +144,16 @@ npx @supacloud/admin ssh install --public_domain api.example.com --studio_domain
 npx @supacloud/admin project list
 npx @supacloud/admin project create --name my-app
 ```
+
+SSH actions additionally require a pinned server host key:
+
+```bash
+export SUPACLOUD_SSH_HOST_FINGERPRINT='SHA256:...'
+```
+
+Verify that fingerprint through a trusted out-of-band channel before setting
+it. Without it, `supacloud-admin` keeps HTTP administration available but leaves
+all executable SSH actions disabled.
 
 ### Owned command areas
 

@@ -1,3 +1,5 @@
+import { resolveProxyClientIp } from "../utils/client-ip";
+
 type Bucket = {
   count: number;
   resetAt: number;
@@ -18,8 +20,7 @@ setInterval(() => {
 function clientIdentity(request: Request): string {
   const auth = request.headers.get("authorization") || "";
   if (auth.startsWith("Bearer ")) return `token:${auth.slice(7, 31)}`;
-  const forwardedFor = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
-  return `ip:${forwardedFor || request.headers.get("x-real-ip") || "unknown"}`;
+  return `ip:${resolveProxyClientIp(request)}`;
 }
 
 function routeClass(url: URL, method: string): string {

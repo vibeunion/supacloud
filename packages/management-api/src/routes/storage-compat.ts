@@ -1,4 +1,4 @@
-import { TusStore, SignedStore, startStorageCleanupJob, type SignedUpload } from "../services/storage-store";
+import { TusStore, SignedStore, startStorageCleanupJob } from "../services/storage-store";
 /**
  * Supabase-JS SDK Compatible Storage Routes
  * 
@@ -33,6 +33,26 @@ import { StorageRLS, mockObjects, normalizeStorageObjectSize } from "../services
 import { logger } from "../utils/logger";
 import { config } from "../config";
 import { matchProjectRefFromHost } from "../utils/project-routing";
+import {
+    buildSignedPath,
+    getRequestOrigin,
+    getUploadMetadata,
+    hasTransformQuery,
+    isLoopbackHost,
+    isMimeAllowed,
+    isMultipartContentType,
+    isTransformQueryKey,
+    normalizeListInteger,
+    parseAllowedMimeTypes,
+    parseContentLength,
+    parseFileSizeLimit,
+    readUploadBody,
+    resolveDownloadContentType,
+    setDownloadDisposition,
+    signedUploadMatches,
+    signedUrlPayload,
+    verifyLegacySignedToken,
+} from "./storage-compat.helpers";
 
 const DEFAULT_TUS_MAX_SIZE_BYTES = 500 * 1024 * 1024;
 const STORAGE_UPLOAD_MAX_BYTES = Number(process.env.STORAGE_UPLOAD_MAX_BYTES || config.maxRequestBodySize || 100 * 1024 * 1024);
@@ -81,14 +101,7 @@ async function getSigningSecretForTenant(ref: string): Promise<string | null> {
     return null;
 }
 
-/**
- * Generate HMAC-SHA256 signed token for a storage path + expiry.
- */
 import { jwtVerify } from "jose";
-
-function signedUrlPayload(ref: string, bucket: string, path: string, expiresAt: number): string {
-    return `${ref}:${bucket}/${path}:${expiresAt}`;
-}
 
 async function generateSignedToken(ref: string, bucket: string, path: string, expiresAt: number): Promise<string> {
     const secret = await getSigningSecretForTenant(ref);
@@ -100,73 +113,6 @@ async function generateSignedToken(ref: string, bucket: string, path: string, ex
 }
 
 /**
- * Extract a file chunk from a raw multipart/form-data buffer, skipping standard Parsers
- * to bypass Bun's name="" dropping bug.
- */
-function extractMultipartFileFast(buffer: Buffer, boundary: string): { fileBuffer: Buffer, mimeType: string, metadata?: Record<string, unknown> } | null {
-    const boundaryBuffer = Buffer.from(`--${boundary}`);
-    let searchPos = 0;
-    let bestFile: { fileBuffer: Buffer, mimeType: string } | null = null;
-    let metadataStr: string | null = null;
-    let cacheControlStr: string | null = null;
-
-    while (searchPos < buffer.length) {
-        const partStart = buffer.indexOf(boundaryBuffer, searchPos);
-        if (partStart === -1) break;
-
-        const contentStart = partStart + boundaryBuffer.length;
-        const nextBoundaryPos = buffer.indexOf(boundaryBuffer, contentStart);
-        if (nextBoundaryPos === -1) break;
-
-        const headerEnd = buffer.indexOf(Buffer.from('\r\n\r\n'), contentStart);
-        if (headerEnd !== -1 && headerEnd < nextBoundaryPos) {
-            const headersRow = buffer.subarray(contentStart, headerEnd).toString('utf-8');
-            
-            let fileStart = headerEnd + 4;
-            let fileEnd = nextBoundaryPos - 2;
-
-            // Check for metadata field (name="metadata")
-            if (headersRow.includes('name="metadata"') && fileEnd >= fileStart) {
-                metadataStr = buffer.subarray(fileStart, fileEnd).toString('utf-8');
-            }
-            // Skip known text fields (cacheControl, etc)
-            else if (headersRow.includes('name="cacheControl"') && fileEnd >= fileStart) {
-                cacheControlStr = buffer.subarray(fileStart, fileEnd).toString('utf-8');
-            }
-            // If it has filename= or Content-Type: header, it's the file
-            else if (headersRow.includes('filename=') || headersRow.includes('Content-Type:')) {
-                let mimeType = 'application/octet-stream';
-                const typeMatch = headersRow.match(/Content-Type:\s*([^\r\n]+)/i);
-                if (typeMatch) mimeType = typeMatch[1].trim();
-
-                if (fileEnd >= fileStart) {
-                    bestFile = { fileBuffer: buffer.subarray(fileStart, fileEnd), mimeType };
-                }
-            }
-            // Fallback: any binary-looking part that's large enough (FormData.append('file', buffer))
-            else if (fileEnd > fileStart && (fileEnd - fileStart) > 100) {
-                if (!bestFile || (fileEnd - fileStart) > bestFile.fileBuffer.length) {
-                    bestFile = { fileBuffer: buffer.subarray(fileStart, fileEnd), mimeType: 'application/octet-stream' };
-                }
-            }
-        }
-        searchPos = nextBoundaryPos;
-    }
-
-    if (bestFile) {
-        let parsedMetadata: Record<string, unknown> = {};
-        if (metadataStr) {
-            try { parsedMetadata = JSON.parse(metadataStr); } catch {}
-        }
-        if (cacheControlStr) {
-            parsedMetadata.cacheControl = cacheControlStr;
-        }
-        return { ...bestFile, metadata: Object.keys(parsedMetadata).length > 0 ? parsedMetadata : undefined };
-    }
-    return null;
-}
-
-/**
  * Verify a signed token against path + expiry.
  */
 async function verifySignedToken(ref: string, bucket: string, path: string, token: string, expiresAt?: number): Promise<boolean> {
@@ -174,18 +120,8 @@ async function verifySignedToken(ref: string, bucket: string, path: string, toke
         const secret = await getSigningSecretForTenant(ref);
         if (!secret) return false;
 
-        if (expiresAt && expiresAt < Math.floor(Date.now() / 1000)) {
-            return false;
-        }
-        if (expiresAt) {
-            const payload = signedUrlPayload(ref, bucket, path, expiresAt);
-            const hmac = createHmac('sha256', secret);
-            hmac.update(payload);
-            const expected = hmac.digest('hex');
-            const tokenBuffer = Buffer.from(token, 'hex');
-            const expectedBuffer = Buffer.from(expected, 'hex');
-            if (tokenBuffer.length === expectedBuffer.length && crypto.timingSafeEqual(tokenBuffer, expectedBuffer)) return true;
-        }
+        if (expiresAt && expiresAt < Math.floor(Date.now() / 1000)) return false;
+        if (verifyLegacySignedToken(secret, ref, bucket, path, token, expiresAt)) return true;
 
         const { payload } = await jwtVerify(token, new TextEncoder().encode(secret));
         return payload.url === `${bucket}/${path}` && payload.ref === ref;
@@ -211,23 +147,6 @@ function hostBelongsToBaseDomain(host: string): boolean {
     const baseDomain = config.baseDomain?.toLowerCase();
     if (!baseDomain || !host) return false;
     return host === baseDomain || host.endsWith(`.${baseDomain}`);
-}
-
-function isLoopbackHost(host: string): boolean {
-    if (!host) return true;
-    return host === "localhost" || host === "127.0.0.1" || host === "::1";
-}
-
-function normalizeListInteger(value: unknown, fallback: number, min: number, max: number): number {
-    const parsed =
-        typeof value === 'number'
-            ? value
-            : typeof value === 'string' && value.trim() !== ''
-                ? Number(value)
-                : fallback;
-
-    if (!Number.isFinite(parsed)) return fallback;
-    return Math.min(Math.max(Math.floor(parsed), min), max);
 }
 
 async function resolveProjectRefFromHeaderAndHost(ref: string, host: string): Promise<string> {
@@ -317,228 +236,12 @@ async function getProjectRef(headers: Record<string, string | undefined>): Promi
     return apiKeyRef;
 }
 
-function isMimeAllowed(allowedMimes: string[], actualMime: string): boolean {
-    if (!actualMime) return false;
-    const [type] = actualMime.split('/');
-    return allowedMimes.some(allowed => {
-        if (allowed === actualMime) return true;
-        const [aType, aSubtype] = allowed.split('/');
-        return (aSubtype === '*' && aType === type);
-    });
-}
-
-function setDownloadDisposition(query: Record<string, string | undefined>, filePath: string, set: { headers: Record<string, string> }): void {
-    const download = query.download;
-    if (download !== undefined) {
-        let filename = 'download';
-        if (typeof download === 'string' && download !== 'true' && download !== '') {
-            filename = download;
-        } else {
-            filename = filePath.split('/').pop() || 'download';
-        }
-        set.headers['Content-Disposition'] = `attachment; filename="${encodeURIComponent(filename)}"`;
-    } else {
-        set.headers['Content-Disposition'] = 'inline';
-    }
-}
-
 // ── Supabase SDK-Compatible Routes ────────────────────────────────
 // These are mounted directly by the public gateway at /storage/v1.
 // So these routes see paths starting from /object/..., /bucket/..., /render/...
 
 // Auto-cleanup abandoned uploads every 10 minutes
 startStorageCleanupJob();
-const TRANSFORM_QUERY_KEYS = new Set([
-    "width", "height", "resize", "format", "quality", "smartcrop", "blur", "sigma", "watermark",
-    "text", "font", "opacity", "image", "gravity", "wm", "wm_text", "wm_image", "wm_opacity",
-    "wm_gravity", "wm_dx", "wm_dy",
-]);
-
-function buildSignedPath(pathname: string, expiresAt: number, token: string, transform?: Record<string, unknown>, download?: boolean | string): string {
-    const search = new URLSearchParams({ token });
-    search.set("expiresAt", String(expiresAt));
-
-    if (download) {
-        if (typeof download === 'string') search.set('download', download);
-        else search.set('download', '');
-    }
-
-    if (transform) {
-        for (const [key, value] of Object.entries(transform)) {
-            if (value === undefined || value === null) continue;
-            if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
-                search.set(key, String(value));
-            }
-        }
-    }
-
-    return `${pathname}?${search.toString()}`;
-}
-
-function getRequestOrigin(request: Request): string {
-    const proto = request.headers?.get("x-forwarded-proto") || new URL(request.url).protocol.replace(":", "");
-    const host = request.headers?.get("x-forwarded-host") || new URL(request.url).host;
-    return `${proto}://${host}/storage/v1`;
-}
-
-function hasTransformQuery(query: Record<string, unknown>): boolean {
-    return Object.entries(query).some(([key, value]) => value !== undefined && value !== null && TRANSFORM_QUERY_KEYS.has(key));
-}
-
-function getUploadMetadata(headers: Record<string, string | undefined>): Record<string, unknown> {
-    const raw = headers["x-metadata"] || headers["X-Metadata"];
-    let parsed: Record<string, unknown> = {};
-
-    if (raw) {
-        try {
-            const decoded = Buffer.from(raw, "base64").toString("utf-8");
-            parsed = JSON.parse(decoded);
-        } catch (e) {
-            // Ignore parse errors
-        }
-    }
-
-    const cc = headers["cache-control"] || headers["Cache-Control"];
-    if (cc && !parsed.cacheControl) {
-        parsed.cacheControl = cc;
-    }
-
-    return parsed;
-}
-
-function parseContentLength(value: string | null | undefined): number | null {
-    if (!value) return null;
-    const parsed = Number(value);
-    if (!Number.isFinite(parsed) || parsed < 0) return null;
-    return Math.floor(parsed);
-}
-
-function isMultipartContentType(contentType: string | undefined): boolean {
-    return (contentType || "").toLowerCase().includes("multipart/form-data");
-}
-
-function validateUploadSize(size: number | null | undefined, maxSize = STORAGE_UPLOAD_MAX_BYTES): { ok: true } | { ok: false; response: Response } {
-    if (size !== null && size !== undefined && size > maxSize) {
-        return { ok: false, response: status(413, { statusCode: "413", error: 'Payload too large', message: `Upload is limited to ${maxSize} bytes` }) as unknown as Response };
-    }
-    return { ok: true };
-}
-
-function normalizeContentType(value: unknown): string {
-    return String(value || "").trim();
-}
-
-function isSpecificContentType(value: string): boolean {
-    const mediaType = value.split(";")[0]?.trim().toLowerCase();
-    return Boolean(mediaType) && mediaType !== "application/octet-stream";
-}
-
-function getObjectMetadataContentType(info: Record<string, unknown> | null | undefined): string {
-    const metadata = (info?.metadata || {}) as Record<string, unknown>;
-    return normalizeContentType(info?.content_type || metadata.mimetype);
-}
-
-function resolveDownloadContentType(
-    res: Response,
-    info?: Record<string, unknown> | null,
-): string {
-    const metadataType = getObjectMetadataContentType(info);
-    if (isSpecificContentType(metadataType)) return metadataType;
-
-    const responseType = normalizeContentType(res.headers?.get('Content-Type'));
-    if (isSpecificContentType(responseType)) return responseType;
-
-    return metadataType || responseType || 'application/octet-stream';
-}
-
-async function readUploadBody(
-    request: Request,
-    contentType: string | undefined,
-    contentLengthHeader?: string | undefined,
-): Promise<{ fileData: Buffer | ReadableStream; fileMimeType: string; size: number; customMetadata?: Record<string, unknown> }> {
-    const normalizedMime = contentType?.split(";")[0]?.trim() || "application/octet-stream";
-    const declaredLength = parseContentLength(contentLengthHeader || request.headers.get("content-length"));
-    if (declaredLength !== null && declaredLength > STORAGE_UPLOAD_MAX_BYTES) {
-        throw new Error("UPLOAD_TOO_LARGE");
-    }
-
-    // For direct SDK/raw uploads, stream the body through instead of materializing the
-    // entire payload in memory. Multipart requests still need full parsing.
-    if (!isMultipartContentType(contentType) && request.body) {
-        if (declaredLength !== null) {
-            return {
-                fileData: request.body,
-                fileMimeType: normalizedMime,
-                size: declaredLength,
-            };
-        }
-    }
-
-    let fileBuffer = Buffer.from(await request.arrayBuffer());
-    if (fileBuffer.byteLength > STORAGE_UPLOAD_MAX_BYTES) {
-        throw new Error("UPLOAD_TOO_LARGE");
-    }
-    let fileMimeType = normalizedMime;
-    let customMetadata: Record<string, unknown> | undefined;
-
-    const isActuallyMultipart = fileBuffer.length > 20
-        && fileBuffer.subarray(0, 2).toString("utf-8") === "--"
-        && fileBuffer.indexOf(Buffer.from("Content-Disposition: form-data;")) !== -1;
-
-    if (isMultipartContentType(contentType) || isActuallyMultipart) {
-        const boundaryMatch = (contentType || "").match(/boundary=(?:"([^"]+)"|([^;]+))/i);
-        let boundary = boundaryMatch ? (boundaryMatch[1] || boundaryMatch[2]) : "";
-
-        if (!boundary && isActuallyMultipart) {
-            const firstLineEnd = fileBuffer.indexOf(Buffer.from("\r\n"));
-            if (firstLineEnd !== -1) boundary = fileBuffer.subarray(2, firstLineEnd).toString("utf-8");
-        }
-
-        if (!boundary) {
-            throw new Error("Missing multipart boundary");
-        }
-
-        const extracted = extractMultipartFileFast(fileBuffer, boundary);
-        if (!extracted) {
-            throw new Error("No file found in multipart data");
-        }
-
-        fileBuffer = Buffer.from(extracted.fileBuffer);
-        if (!fileMimeType || fileMimeType === "application/octet-stream" || (contentType || "").includes("multipart")) {
-            fileMimeType = extracted.mimeType;
-        }
-        customMetadata = extracted.metadata;
-    }
-
-    return { fileData: fileBuffer, fileMimeType, size: fileBuffer.byteLength, customMetadata };
-}
-
-function parseFileSizeLimit(value: unknown): number | null {
-    if (value === null || value === undefined || value === "") return null;
-    if (typeof value === "number" && Number.isFinite(value)) return Math.floor(value);
-    if (typeof value !== "string") return null;
-
-    const sizeStr = value.toLowerCase();
-    const match = sizeStr.match(/^(\d+(?:\.\d+)?)\s*(kb|mb|gb|bytes?)?$/i);
-    if (!match) return null;
-
-    const num = parseFloat(match[1]);
-    const unit = (match[2] || "bytes").toLowerCase();
-    if (unit === "kb") return Math.floor(num * 1024);
-    if (unit === "mb") return Math.floor(num * 1024 * 1024);
-    if (unit === "gb") return Math.floor(num * 1024 * 1024 * 1024);
-    return Math.floor(num);
-}
-
-function parseAllowedMimeTypes(value: unknown): string[] | null {
-    if (!Array.isArray(value)) return null;
-    return value.filter((entry): entry is string => typeof entry === "string");
-}
-
-function signedUploadMatches(upload: SignedUpload | null, ref: string, bucket: string, objectName: string): upload is SignedUpload {
-    return !!upload && upload.ref === ref && upload.bucket === bucket && upload.objectName === objectName;
-}
-
 const STORAGE_CORS_ALLOW_HEADERS = [
     "Accept", "Accept-Language", "Authorization", "Content-Language", "Content-Type",
     "apikey", "x-client-info", "x-project-ref", "X-Api-Version", "x-supabase-api-version",
@@ -831,7 +534,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
 
         try {
             const contentType = headers['content-type'];
-            const { fileData, fileMimeType, size, customMetadata } = await readUploadBody(request, contentType, headers["content-length"]);
+            const { fileData, fileMimeType, size, customMetadata } = await readUploadBody(request, contentType, headers["content-length"], STORAGE_UPLOAD_MAX_BYTES);
             const headerMetadata = getUploadMetadata(headers as Record<string, string | undefined>);
             const userMetadata: Record<string, unknown> = { ...headerMetadata, ...(customMetadata || {}) };
             const upsert = headers['x-upsert'] === 'true';
@@ -902,7 +605,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         if (!filePath) return status(400, { statusCode: "400", error: 'Bad Request', message: 'Missing file path' });
 
         try {
-            const { fileData, fileMimeType, size, customMetadata } = await readUploadBody(request, headers['content-type'], headers["content-length"]);
+            const { fileData, fileMimeType, size, customMetadata } = await readUploadBody(request, headers['content-type'], headers["content-length"], STORAGE_UPLOAD_MAX_BYTES);
             const headerMetadata = getUploadMetadata(headers as Record<string, string | undefined>);
             const userMetadata: Record<string, unknown> = { ...headerMetadata, ...(customMetadata || {}) };
 
@@ -1280,7 +983,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         }
 
         try {
-            const { fileData, fileMimeType, size, customMetadata } = await readUploadBody(request, headers['content-type'], headers["content-length"]);
+            const { fileData, fileMimeType, size, customMetadata } = await readUploadBody(request, headers['content-type'], headers["content-length"], STORAGE_UPLOAD_MAX_BYTES);
 
             // Bypass external headers — token already validates authorization
             const headerMetadata = getUploadMetadata(headers as Record<string, string | undefined>);
@@ -2063,7 +1766,7 @@ async function proxyToImaginary(
     };
     for (const [rawKey, rawValue] of Object.entries(query)) {
         if (rawValue === undefined || rawValue === null) continue;
-        if (!TRANSFORM_QUERY_KEYS.has(rawKey)) continue;
+        if (!isTransformQueryKey(rawKey)) continue;
         if (rawKey === "smartcrop") continue;
 
         const mappedKey = queryKeyMap[rawKey] || rawKey;

@@ -1,12 +1,88 @@
-
 import { $ } from "bun";
 import os from "node:os";
 import path from "node:path";
-import { existsSync } from "node:fs";
+import {
+    chmodSync,
+    closeSync,
+    existsSync,
+    fsyncSync,
+    mkdirSync,
+    openSync,
+    renameSync,
+    rmSync,
+    writeFileSync,
+} from "node:fs";
 import * as p from "@clack/prompts";
-import { config as appConfig } from "./config";
+import { config as appConfig, loadedConfigFileEnvKeys } from "./config";
+import type { PigstyConfig } from "./infra/pigsty";
 
 const INSTALL_BASE_DIR = "/opt/supacloud";
+
+export const INSTALL_INPUT_KEYS = [
+    "INTERNAL_IP",
+    "SUPABASE_PUBLIC_DOMAIN",
+    "SUPABASE_STUDIO_DOMAIN",
+    "SUPABASE_DOMAIN",
+    "DASHBOARD_USERNAME",
+    "DASHBOARD_PASSWORD",
+    "POSTGRES_PASSWORD",
+    "GRAFANA_PASSWORD",
+    "JWT_SECRET",
+    "ANON_KEY",
+    "SERVICE_ROLE_KEY",
+    "SWAP_SIZE_GB",
+    "PG_VERSION",
+    "PIGSTY_VERSION",
+    "TIMEZONE",
+    "PIGSTY_CONFIG_TEMPLATE",
+    "SUPACLOUD_INSTALL_LEGACY_SUPABASE_STACK",
+    "SUPACLOUD_MIGRATE_LEGACY_SUPABASE_COMPOSE",
+    "S3_STORAGE_TYPE",
+    "JUICEFS_BACKEND",
+    "S3_ENDPOINT",
+    "S3_PROTOCOL",
+    "S3_REGION",
+    "S3_BUCKET",
+    "S3_ACCESS_KEY",
+    "S3_SECRET_KEY",
+    "S3_FORCE_PATH_STYLE",
+    "EXTERNAL_S3_ENDPOINT",
+    "EXTERNAL_S3_REGION",
+    "EXTERNAL_S3_BUCKET",
+    "EXTERNAL_S3_ACCESS_KEY",
+    "EXTERNAL_S3_SECRET_KEY",
+    "IMAGINARY_IMAGE",
+    "EDGE_RUNTIME",
+    "ENABLE_ANALYTICS",
+    "ANALYTICS_BACKEND",
+    "LOGFLARE_ERL_FLAGS",
+] as const;
+
+export type InstallInputKey = typeof INSTALL_INPUT_KEYS[number];
+export type InstallInputValues = Partial<Record<InstallInputKey, string>>;
+export type InstallArtifactPolicy = {
+    mode: "local" | "release";
+    forceVerified: boolean;
+};
+
+export function resolveInstallArtifactPolicy(
+    env: Record<string, string | undefined> = process.env,
+): InstallArtifactPolicy {
+    const requestedMode = env.SUPACLOUD_SETUP_ARTIFACT_MODE || undefined;
+    if (requestedMode !== undefined && requestedMode !== "local" && requestedMode !== "release") {
+        throw new Error("SUPACLOUD_SETUP_ARTIFACT_MODE must be local or release");
+    }
+    const requestedForce = env.SUPACLOUD_FORCE_VERIFIED_RELEASE_ASSETS;
+    if (requestedForce !== undefined && requestedForce !== "" && requestedForce !== "true" && requestedForce !== "false") {
+        throw new Error("SUPACLOUD_FORCE_VERIFIED_RELEASE_ASSETS must be true or false");
+    }
+    const forced = requestedForce === "true";
+    if (forced && requestedMode === "local") {
+        throw new Error("Forced verified release assets cannot be combined with local artifact mode");
+    }
+    const mode = forced ? "release" : requestedMode || "local";
+    return { mode, forceVerified: mode === "release" };
+}
 
 function resolveInstallerPath() {
     const candidates = [
@@ -16,8 +92,135 @@ function resolveInstallerPath() {
     return candidates.find(candidate => existsSync(candidate)) || null;
 }
 
-function getConfigFilePath(installerPath: string) {
-    return path.join(path.dirname(installerPath), "config.env");
+export function getConfigFilePath(
+    _installerPath: string,
+    env: Record<string, string | undefined> = process.env,
+) {
+    return env.SUPACLOUD_INSTALL_CONFIG_FILE || "/etc/supabase/install.env";
+}
+
+function resolveInstallConfigHelper(installerPath: string): string | null {
+    const installerDir = path.dirname(installerPath);
+    const candidates = [
+        path.join(installerDir, "scripts/lib/install_config.sh"),
+        "/opt/supacloud/scripts/lib/install_config.sh",
+        path.join(process.cwd(), "scripts/lib/install_config.sh"),
+    ];
+    return candidates.find(candidate => existsSync(candidate)) || null;
+}
+
+export function readInstallInputValues(configFile: string, installerPath: string): InstallInputValues {
+    if (!existsSync(configFile)) return {};
+    const helper = resolveInstallConfigHelper(installerPath);
+    if (!helper) {
+        throw new Error("scripts/lib/install_config.sh is required to safely parse existing install input");
+    }
+    const command = 'source "$1"; shift; supacloud_parse_install_input "$1" "$@"';
+    const result = Bun.spawnSync([
+        "bash",
+        "-c",
+        command,
+        "_",
+        helper,
+        configFile,
+        ...INSTALL_INPUT_KEYS,
+    ], { stdout: "pipe", stderr: "pipe" });
+    if (result.exitCode !== 0) {
+        throw new Error(`Invalid install input: ${Buffer.from(result.stderr).toString("utf8").trim()}`);
+    }
+    const parsed: InstallInputValues = {};
+    for (const line of Buffer.from(result.stdout).toString("utf8").split("\n")) {
+        if (!line) continue;
+        const separator = line.indexOf("\t");
+        if (separator <= 0) continue;
+        const key = line.slice(0, separator) as InstallInputKey;
+        if (!INSTALL_INPUT_KEYS.includes(key)) continue;
+        parsed[key] = Buffer.from(line.slice(separator + 1), "base64").toString("utf8");
+    }
+    return parsed;
+}
+
+export function mergeInstallInputValues(
+    existing: InstallInputValues,
+    explicit: InstallInputValues,
+    generatedDefaults: InstallInputValues,
+): InstallInputValues {
+    const merged: InstallInputValues = {};
+    for (const key of INSTALL_INPUT_KEYS) {
+        const value = explicit[key] ?? existing[key] ?? generatedDefaults[key];
+        if (value !== undefined) merged[key] = value;
+    }
+    return merged;
+}
+
+function quoteInstallInputValue(value: string): string {
+    if (value.includes("\0") || value.includes("\r") || value.includes("\n")) {
+        throw new Error("Install input values must be single-line strings");
+    }
+    return `"${value
+        .replaceAll("\\", "\\\\")
+        .replaceAll('"', '\\"')
+        .replaceAll("$", "\\$")
+        .replaceAll("`", "\\`")}"`;
+}
+
+export function writeInstallInputAtomic(configFile: string, values: InstallInputValues): void {
+    mkdirSync(path.dirname(configFile), { recursive: true });
+    const temporaryFile = `${configFile}.tmp-${process.pid}-${crypto.randomUUID()}`;
+    let descriptor: number | undefined;
+    let directoryDescriptor: number | undefined;
+    try {
+        descriptor = openSync(temporaryFile, "wx", 0o600);
+        const payload = INSTALL_INPUT_KEYS
+            .filter(key => values[key] !== undefined)
+            .map(key => `${key}=${quoteInstallInputValue(values[key]!)}`)
+            .join("\n") + "\n";
+        writeFileSync(descriptor, payload, "utf8");
+        fsyncSync(descriptor);
+        closeSync(descriptor);
+        descriptor = undefined;
+        renameSync(temporaryFile, configFile);
+        chmodSync(configFile, 0o600);
+        directoryDescriptor = openSync(path.dirname(configFile), "r");
+        fsyncSync(directoryDescriptor);
+        closeSync(directoryDescriptor);
+        directoryDescriptor = undefined;
+    } finally {
+        if (descriptor !== undefined) closeSync(descriptor);
+        if (directoryDescriptor !== undefined) closeSync(directoryDescriptor);
+        rmSync(temporaryFile, { force: true });
+    }
+}
+
+function collectExplicitInstallInput(args: string[]): InstallInputValues {
+    const explicit: InstallInputValues = {};
+    for (const key of INSTALL_INPUT_KEYS) {
+        if (loadedConfigFileEnvKeys.has(key)) continue;
+        const value = process.env[key];
+        if (value !== undefined) explicit[key] = value;
+    }
+
+    const getArg = (name: string): string | undefined => {
+        const index = args.indexOf(name);
+        return index !== -1 && index + 1 < args.length ? args[index + 1] : undefined;
+    };
+    const cliMappings = [
+        ["--ip", "INTERNAL_IP"],
+        ["--domain", "SUPABASE_PUBLIC_DOMAIN"],
+        ["--studio", "SUPABASE_STUDIO_DOMAIN"],
+        ["--s3", "S3_STORAGE_TYPE"],
+    ] as const;
+    for (const [flag, key] of cliMappings) {
+        const value = getArg(flag);
+        if (value !== undefined) explicit[key] = value;
+    }
+    const password = getArg("--password");
+    if (password !== undefined) {
+        explicit.POSTGRES_PASSWORD = password;
+        explicit.DASHBOARD_PASSWORD = password;
+        explicit.GRAFANA_PASSWORD = password;
+    }
+    return explicit;
 }
 
 /**
@@ -85,40 +288,54 @@ export async function runInstall(options: { forceYes?: boolean } = {}) {
             throw new Error("install.sh not found. Please run from the repository root or install to /opt/supacloud first.");
         }
 
-        await ensureInstallerAvailable(installerPath);
+        if (!isDryRun) {
+            await ensureInstallerAvailable(installerPath);
+        }
         await performPreFlightChecks(options.forceYes);
-        const config = await runInteractiveConfig(installerPath, options.forceYes);
+        const config = await runInteractiveConfig(installerPath, options.forceYes, {
+            persist: !isDryRun,
+        });
 
         if (isDryRun) {
             p.log.warn("[Dry Run] install.sh will not be executed.");
-            p.log.info(`Prepared config at ${getConfigFilePath(installerPath)}`);
+            p.log.info(`Install input would be written to ${getConfigFilePath(installerPath)} during a real install.`);
             return;
         }
 
-        p.log.step(`>>> Running canonical installer: ${installerPath}`);
-        const args = ["--ip", config.internalIp, "--domain", config.publicDomain, "--studio", config.studioDomain, "--s3", config.storageType, "--password", config.postgresPass];
-        const proc = Bun.spawn(["bash", installerPath, ...args], {
-            cwd: path.dirname(installerPath),
-            stdout: "inherit",
-            stderr: "inherit",
-            stdin: "inherit",
-            env: {
-                ...process.env,
-                EDGE_RUNTIME: "bun",
-                EDGE_RUNTIME_MODE: process.env.EDGE_RUNTIME_MODE || "embedded",
-                S3_STORAGE_TYPE: config.storageType,
-                INTERNAL_IP: config.internalIp,
-                SUPABASE_PUBLIC_DOMAIN: config.publicDomain,
-                SUPABASE_STUDIO_DOMAIN: config.studioDomain,
-                POSTGRES_PASSWORD: config.postgresPass,
-                DASHBOARD_PASSWORD: config.dashboardPass,
-                GRAFANA_PASSWORD: config.grafanaPass,
-                JWT_SECRET: config.jwtSecret,
-            },
-        });
-        const exitCode = await proc.exited;
-        if (exitCode !== 0) {
-            throw new Error(`install.sh exited with code ${exitCode}`);
+        if (!isDryRun) {
+            p.log.step(`>>> Running canonical installer: ${installerPath}`);
+            const artifactPolicy = resolveInstallArtifactPolicy();
+            const args = [
+                "--ip", config.internalIp,
+                "--domain", config.publicDomain,
+                "--studio", config.studioDomain,
+                "--s3", config.storageType,
+            ];
+            const proc = Bun.spawn(["bash", installerPath, ...args], {
+                cwd: path.dirname(installerPath),
+                stdout: "inherit",
+                stderr: "inherit",
+                stdin: "inherit",
+                env: {
+                    ...process.env,
+                    SUPACLOUD_SETUP_ARTIFACT_MODE: artifactPolicy.mode,
+                    SUPACLOUD_FORCE_VERIFIED_RELEASE_ASSETS:
+                        artifactPolicy.forceVerified ? "true" : "false",
+                    EDGE_RUNTIME_MODE: process.env.EDGE_RUNTIME_MODE || "embedded",
+                    S3_STORAGE_TYPE: config.storageType,
+                    INTERNAL_IP: config.internalIp,
+                    SUPABASE_PUBLIC_DOMAIN: config.publicDomain,
+                    SUPABASE_STUDIO_DOMAIN: config.studioDomain,
+                    POSTGRES_PASSWORD: config.postgresPass,
+                    DASHBOARD_PASSWORD: config.dashboardPass,
+                    GRAFANA_PASSWORD: config.grafanaPass,
+                    JWT_SECRET: config.jwtSecret,
+                },
+            });
+            const exitCode = await proc.exited;
+            if (exitCode !== 0) {
+                throw new Error(`install.sh exited with code ${exitCode}`);
+            }
         }
 
         p.log.success(`🎉 SupaCloud installation complete via canonical install.sh`);
@@ -127,8 +344,6 @@ export async function runInstall(options: { forceYes?: boolean } = {}) {
         process.exit(1);
     }
 }
-
-import type { PigstyConfig } from "./infra/pigsty";
 
 async function performPreFlightChecks(forceYes = false) {
     const s = getSpinner();
@@ -179,22 +394,17 @@ async function performPreFlightChecks(forceYes = false) {
     }
 }
 
-async function runInteractiveConfig(installerPath: string, forceYes = false): Promise<PigstyConfig> {
+async function runInteractiveConfig(
+    installerPath: string,
+    forceYes = false,
+    options: { persist?: boolean } = {},
+): Promise<PigstyConfig> {
     const s = getSpinner();
     const configFile = getConfigFilePath(installerPath);
-
-    // ── Command line argument parsing ──────────────────────────────────────────────────────────
     const args = process.argv.slice(2);
-    const getArg = (name: string) => {
-        const index = args.indexOf(name);
-        return (index !== -1 && index + 1 < args.length) ? args[index + 1] : null;
-    };
-
-    const argIp = getArg("--ip");
-    const argDomain = getArg("--domain");
-    const argStudio = getArg("--studio");
-    const argS3 = getArg("--s3");
-    const argPassword = getArg("--password");
+    const persisted = readInstallInputValues(configFile, installerPath);
+    const explicit = collectExplicitInstallInput(args);
+    const configured = mergeInstallInputValues(persisted, explicit, {});
 
     // Basic IP and domain collection
     s.start("Detecting system network environment");
@@ -210,13 +420,13 @@ async function runInteractiveConfig(installerPath: string, forceYes = false): Pr
     const primaryIp = detectedIps[0] || "127.0.0.1";
     s.stop(`Detected ${detectedIps.length} available internal IPs`);
 
-    let internalIp = argIp || "";
-    let publicDomain = argDomain || "";
-    let storageType = argS3 || "";
+    let internalIp = configured.INTERNAL_IP || "";
+    let publicDomain = configured.SUPABASE_PUBLIC_DOMAIN || configured.SUPABASE_DOMAIN || "";
+    let storageType = configured.S3_STORAGE_TYPE || "";
     let enableSsl = true;
     let acmeClient = "le";
 
-    if (!forceYes && (!internalIp || !argDomain || !argS3)) {
+    if (!forceYes && (!internalIp || !publicDomain || !storageType)) {
         // IP selection logic
         const ipSelection = await p.select({
             message: 'Select or enter server internal IP',
@@ -252,7 +462,8 @@ async function runInteractiveConfig(installerPath: string, forceYes = false): Pr
                 initialValue: storageType as string || 'juicefs',
                 options: [
                     { value: 'juicefs', label: 'JuiceFS (Recommended: High-performance distributed block storage)' },
-                    { value: 'minio', label: 'Minio (Standard S3)' }
+                    { value: 'minio', label: 'Minio (Standard S3)' },
+                    { value: 'external', label: 'External S3-compatible storage' }
                 ]
             }),
             enableSsl: () => p.confirm({
@@ -288,22 +499,26 @@ async function runInteractiveConfig(installerPath: string, forceYes = false): Pr
     }
 
     const defaultStudio = deriveStudioDomain(publicDomain, internalIp);
-    let studioDomain = argStudio || defaultStudio;
+    let studioDomain = configured.SUPABASE_STUDIO_DOMAIN || "";
 
-    if (!forceYes && !argStudio) {
+    if (!forceYes && !studioDomain) {
         const studioResult = await p.text({
             message: 'Enter global console (Studio) domain',
-            initialValue: studioDomain,
-            placeholder: studioDomain
+            initialValue: defaultStudio,
+            placeholder: defaultStudio
         });
         if (p.isCancel(studioResult)) process.exit(0);
         studioDomain = studioResult;
     }
+    studioDomain = studioDomain || defaultStudio;
 
-    let dbPass = argPassword || "";
-    let studioPass = argPassword || "";
+    let dbPass = configured.POSTGRES_PASSWORD || "";
+    let studioPass = configured.DASHBOARD_PASSWORD || "";
 
-    if (!forceYes || !argPassword) {
+    if (forceYes) {
+        dbPass = dbPass || generateSecurePassword(24);
+        studioPass = studioPass || generateSecurePassword(24);
+    } else if (!dbPass || !studioPass) {
         const useAutoPasswords = await p.confirm({
             message: "Randomly generate strong database and dashboard passwords? (Highly recommended)",
             initialValue: true
@@ -311,65 +526,69 @@ async function runInteractiveConfig(installerPath: string, forceYes = false): Pr
         if (p.isCancel(useAutoPasswords)) process.exit(0);
 
         if (useAutoPasswords) {
-            dbPass = generateSecurePassword(24);
-            studioPass = generateSecurePassword(24);
+            dbPass = dbPass || generateSecurePassword(24);
+            studioPass = studioPass || generateSecurePassword(24);
         } else {
-            const customPass = await p.group({
-                db: () => p.password({ message: "Enter database master password (for Postgres/Pigsty)" }),
-                studio: () => p.password({ message: "Enter Studio dashboard super admin password" })
-            });
-            if (p.isCancel(customPass)) process.exit(0);
-            dbPass = customPass.db;
-            studioPass = customPass.studio;
+            if (!dbPass) {
+                const customDatabasePassword = await p.password({
+                    message: "Enter database master password (for Postgres/Pigsty)",
+                });
+                if (p.isCancel(customDatabasePassword)) process.exit(0);
+                dbPass = customDatabasePassword;
+            }
+            if (!studioPass) {
+                const customStudioPassword = await p.password({
+                    message: "Enter Studio dashboard super admin password",
+                });
+                if (p.isCancel(customStudioPassword)) process.exit(0);
+                studioPass = customStudioPassword;
+            }
         }
-    } else {
-        p.log.info(`Using provided unified password for configuration.`);
     }
 
     const sEnv = getSpinner();
-    sEnv.start("Encrypting and generating final configuration structure");
-    const jwtSecret = generateSecurePassword(40);
-    const envContent = `
-# SupaCloud Unified Configuration
-INTERNAL_IP="${internalIp}"
-SUPABASE_PUBLIC_DOMAIN="${publicDomain}"
-SUPABASE_STUDIO_DOMAIN="${studioDomain}"
+    sEnv.start("Resolving installation input");
+    const jwtSecret = configured.JWT_SECRET || generateSecurePassword(40);
+    const interactiveValues: InstallInputValues = {
+        INTERNAL_IP: internalIp,
+        SUPABASE_PUBLIC_DOMAIN: publicDomain,
+        SUPABASE_STUDIO_DOMAIN: studioDomain,
+        DASHBOARD_USERNAME: configured.DASHBOARD_USERNAME || "admin",
+        DASHBOARD_PASSWORD: studioPass,
+        POSTGRES_PASSWORD: dbPass,
+        GRAFANA_PASSWORD: configured.GRAFANA_PASSWORD || dbPass,
+        JWT_SECRET: jwtSecret,
+        SWAP_SIZE_GB: configured.SWAP_SIZE_GB || "4",
+        PG_VERSION: configured.PG_VERSION || "18",
+        PIGSTY_VERSION: configured.PIGSTY_VERSION || "latest",
+        TIMEZONE: configured.TIMEZONE || "Asia/Shanghai",
+        PIGSTY_CONFIG_TEMPLATE: configured.PIGSTY_CONFIG_TEMPLATE || "supabase",
+        SUPACLOUD_INSTALL_LEGACY_SUPABASE_STACK:
+            configured.SUPACLOUD_INSTALL_LEGACY_SUPABASE_STACK || "false",
+        SUPACLOUD_MIGRATE_LEGACY_SUPABASE_COMPOSE:
+            configured.SUPACLOUD_MIGRATE_LEGACY_SUPABASE_COMPOSE || "false",
+        S3_STORAGE_TYPE: storageType,
+        JUICEFS_BACKEND: configured.JUICEFS_BACKEND || "postgres",
+        IMAGINARY_IMAGE: configured.IMAGINARY_IMAGE || "h2non/imaginary:1.2.4",
+        ENABLE_ANALYTICS: configured.ENABLE_ANALYTICS || "true",
+        ANALYTICS_BACKEND: configured.ANALYTICS_BACKEND || "postgres",
+        LOGFLARE_ERL_FLAGS: configured.LOGFLARE_ERL_FLAGS || "+P 32768 +Q 4096 +S 2:2 +hms 64 +hmbs 64 +e 128 +L",
+    };
+    const resolvedInput = mergeInstallInputValues(persisted, {
+        ...explicit,
+        ...interactiveValues,
+    }, {});
+    if (options.persist !== false) {
+        writeInstallInputAtomic(configFile, resolvedInput);
+        sEnv.stop("Installation input persisted securely");
+    } else {
+        sEnv.stop("Installation input resolved without writing files");
+    }
 
-DASHBOARD_USERNAME="admin"
-DASHBOARD_PASSWORD="${studioPass}"
-POSTGRES_PASSWORD="${dbPass}"
-GRAFANA_PASSWORD="${dbPass}"
-
-SWAP_SIZE_GB="4"
-PG_VERSION="18"
-S3_STORAGE_TYPE="${storageType}"
-TUS_MAX_SIZE="524288000"
-TUS_MAX_CHUNK_SIZE="16777216"
-PIGSTY_CONFIG_TEMPLATE="supabase"
-SUPACLOUD_INSTALL_LEGACY_SUPABASE_STACK="false"
-SUPACLOUD_MIGRATE_LEGACY_SUPABASE_COMPOSE="false"
-IMAGINARY_IMAGE="h2non/imaginary:1.2.4"
-# Edge Runtime: Bun (built-in)
-ENABLE_ANALYTICS="true"
-ANALYTICS_BACKEND="postgres"
-JWT_SECRET="${jwtSecret}"
-
-# SSL & ACME Sync
-ENABLE_SSL="${enableSsl}"
-ACME_CLIENT="${acmeClient}"
-BASE_DOMAIN="${deriveBaseDomain(publicDomain)}"
-LEGO_BIN="lego"
-ACME_STATE_DIR="/var/lib/supacloud/lego"
-ACME_HTTP_WEBROOT="/var/lib/supacloud/acme-challenges"
-CADDY_ADMIN_URL="http://127.0.0.1:2019"
-CADDY_CONFIG_PATH="/etc/supacloud/caddy/config.json"
-CADDY_STATE_DIR="/var/lib/supacloud/caddy"
-CADDY_BINARY_PATH="/usr/local/bin/supacloud-caddy"
-`;
-    await Bun.write(configFile, envContent.trim());
-    sEnv.stop("Core configuration group persisted!");
-
-    p.note(`API Domain: ${publicDomain}\nConsole: ${studioDomain}\nDashboard Password: ${studioPass}\nDatabase Password: ${dbPass}`, "⚠️ Key Credentials (Please screenshot to save)");
+    p.note(
+        `API Domain: ${publicDomain}\nConsole: ${studioDomain}\nInstall input: ${configFile}`,
+        "Installation configuration",
+    );
 
     return {
         internalIp: internalIp,
@@ -377,7 +596,7 @@ CADDY_BINARY_PATH="/usr/local/bin/supacloud-caddy"
         studioDomain: studioDomain,
         dashboardPass: studioPass,
         postgresPass: dbPass,
-        grafanaPass: dbPass,
+        grafanaPass: resolvedInput.GRAFANA_PASSWORD || dbPass,
         jwtSecret: jwtSecret,
         storageType: storageType,
     };

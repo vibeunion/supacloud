@@ -4,6 +4,7 @@
 
   import { page } from "$app/state";
   import { apiClient } from "$lib/api";
+  import { getProjectApiUrl } from "$lib/project-api-url";
   import { Loader2, Copy, Eye, EyeOff, Tag, Link2, ShieldAlert, Trash2, Plus } from "lucide-svelte";
   import { toast } from "svelte-sonner";
   import { getContext } from "svelte";
@@ -20,8 +21,6 @@
   let isSubmittingLimit = $state(false);
 
   const projectRef = $derived(page.params.ref);
-  const hostname = $derived(page.url?.hostname || "localhost");
-  const apiUrl = $derived(`http://${hostname}:8000`);
 
   const query = useShow({
     get resource() { return "v1/projects"; },
@@ -29,6 +28,7 @@
   });
 
   const project = $derived(query.data?.data || {});
+  const apiUrl = $derived(getProjectApiUrl(project));
   const isLoading = $derived(query.isLoading);
 
   async function copyToClipboard(text: string) {
@@ -219,7 +219,7 @@
                   </tr>
                 </thead>
                 <tbody class="divide-y">
-                  {#each Object.entries(project.rate_limits || {}) as [path, limits]}
+                  {#each Object.entries(project.rate_limits || {}) as [path, limits] (path)}
                     <tr class="hover:bg-muted/20">
                       <td class="px-4 py-3 font-mono text-xs">{path}</td>
                       <td class="px-4 py-3">{(limits as any).second || "-"}</td>

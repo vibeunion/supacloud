@@ -1,12 +1,25 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { ALTER_TENANT_SQL } from "../../src/services/tenant-runtime-migration";
 
 function readRepoFile(relativePath: string): string {
   return readFileSync(resolve(import.meta.dir, "../..", relativePath), "utf8");
 }
 
 describe("supabase bootstrap schema", () => {
+  test("exports the extracted tenant runtime migration used by the service", () => {
+    const service = readRepoFile("src/services/tenant-runtime.service.ts");
+
+    expect(service).toContain('import { ALTER_TENANT_SQL } from "./tenant-runtime-migration"');
+    expect(service).toContain("Bun.write(tmpFile, ALTER_TENANT_SQL)");
+    expect(ALTER_TENANT_SQL.length).toBeGreaterThan(25_000);
+    expect(ALTER_TENANT_SQL).toContain("CREATE TABLE IF NOT EXISTS auth.webauthn_credentials");
+    expect(ALTER_TENANT_SQL).toContain("CREATE OR REPLACE FUNCTION realtime.notify_postgres_changes()");
+    expect(ALTER_TENANT_SQL).toContain("CREATE TABLE IF NOT EXISTS public.background_task_mirrors");
+    expect(ALTER_TENANT_SQL).toContain("CREATE TRIGGER auth_users_delete_fence");
+  });
+
   test("does not switch SQL role inside set_request_context", () => {
     const schema = readRepoFile("src/db/schemas/supabase.sql");
     const start = schema.indexOf(
@@ -26,7 +39,7 @@ describe("supabase bootstrap schema", () => {
 
   test("tenant schema migration adds columns before dependent indexes", () => {
     for (const filePath of [
-      "src/services/tenant-runtime.service.ts",
+      "src/services/tenant-runtime-migration.ts",
       "src/scripts/migrate-tenant-schema.ts",
     ]) {
       const source = readRepoFile(filePath);
@@ -45,7 +58,7 @@ describe("supabase bootstrap schema", () => {
 
   test("one_time_tokens user_id migration adds the foreign key separately", () => {
     for (const filePath of [
-      "src/services/tenant-runtime.service.ts",
+      "src/services/tenant-runtime-migration.ts",
       "src/scripts/migrate-tenant-schema.ts",
     ]) {
       const source = readRepoFile(filePath);
@@ -153,7 +166,7 @@ describe("supabase bootstrap schema", () => {
   test("tenant auth schema includes passkey WebAuthn tables and challenge state", () => {
     for (const filePath of [
       "src/db/schemas/supabase.sql",
-      "src/services/tenant-runtime.service.ts",
+      "src/services/tenant-runtime-migration.ts",
       "src/scripts/migrate-tenant-schema.ts",
     ]) {
       const source = readRepoFile(filePath);
@@ -210,7 +223,7 @@ describe("supabase bootstrap schema", () => {
 
   test("tenant schema migration creates realtime schema before realtime objects", () => {
     for (const filePath of [
-      "src/services/tenant-runtime.service.ts",
+      "src/services/tenant-runtime-migration.ts",
       "src/scripts/migrate-tenant-schema.ts",
     ]) {
       const source = readRepoFile(filePath);

@@ -1,87 +1,47 @@
-import { describe, test, expect, beforeEach, afterEach } from "bun:test";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { afterEach, describe, expect, test } from "bun:test";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { isFrontendDomain } from "../../src/utils/frontend-domains";
 
-// Override FRONTEND_BASE_DIR by importing with a mock — since the module
-// hardcodes the path, we test by creating the expected directory structure
-// under /var/supacloud/frontends (the test env may not have this; we handle
-// both cases).
+const fixtureDirs: string[] = [];
 
-// We test the function indirectly by creating a temp fixture directory and
-// verifying the logic manually. For a real integration test, the function
-// would need to accept a baseDir parameter. For now we do a unit test of
-// the core matching logic.
+async function deploymentFixture(config: Record<string, unknown>): Promise<string> {
+  const root = await mkdtemp(join(tmpdir(), "supacloud-frontends-"));
+  fixtureDirs.push(root);
+  const deploymentDir = join(root, "project-a", "deployment-a");
+  await mkdir(deploymentDir, { recursive: true });
+  await writeFile(join(deploymentDir, "deployment.json"), JSON.stringify(config));
+  return root;
+}
 
-describe("isFrontendDomain matching logic", () => {
-  test("domain matches deployment.domain", () => {
-    const deployments = [
-      { domain: "myapp.example.com", custom_domains: [], status: "success" },
-    ];
-    const domain = "myapp.example.com";
-    const match = deployments.some(
-      (d) =>
-        d.status !== "deleted" &&
-        (d.domain === domain ||
-          (Array.isArray(d.custom_domains) && d.custom_domains.includes(domain))),
-    );
-    expect(match).toBe(true);
+afterEach(async () => {
+  await Promise.all(fixtureDirs.splice(0).map((dir) =>
+    rm(dir, { recursive: true, force: true })
+  ));
+});
+
+describe("isFrontendDomain", () => {
+  test("matches registered domains exactly after DNS normalization", async () => {
+    const root = await deploymentFixture({
+      domain: "MyApp.Example.COM.",
+      custom_domains: ["WWW.Example.com"],
+      status: "success",
+    });
+
+    await expect(isFrontendDomain("myapp.example.com", root)).resolves.toBe(true);
+    await expect(isFrontendDomain("www.example.com.", root)).resolves.toBe(true);
+    await expect(isFrontendDomain("other.example.com", root)).resolves.toBe(false);
   });
 
-  test("domain matches deployment.custom_domains entry", () => {
-    const deployments = [
-      {
-        domain: "abc123.app",
-        custom_domains: ["www.example.com", "example.com"],
-        status: "success",
-      },
-    ];
-    const domain = "www.example.com";
-    const match = deployments.some(
-      (d) =>
-        d.status !== "deleted" &&
-        (d.domain === domain ||
-          (Array.isArray(d.custom_domains) && d.custom_domains.includes(domain))),
-    );
-    expect(match).toBe(true);
-  });
+  test("does not authorize deleted frontend deployments", async () => {
+    const root = await deploymentFixture({
+      domain: "deleted.example.com",
+      custom_domains: ["alias.example.com"],
+      status: "deleted",
+    });
 
-  test("skips deleted deployments", () => {
-    const deployments = [
-      { domain: "deleted.app", custom_domains: ["skip.example.com"], status: "deleted" },
-    ];
-    const domain = "skip.example.com";
-    const match = deployments.some(
-      (d) =>
-        d.status !== "deleted" &&
-        (d.domain === domain ||
-          (Array.isArray(d.custom_domains) && d.custom_domains.includes(domain))),
-    );
-    expect(match).toBe(false);
-  });
-
-  test("no match returns false", () => {
-    const deployments = [
-      { domain: "other.app", custom_domains: ["other.example.com"], status: "success" },
-    ];
-    const domain = "unknown.example.com";
-    const match = deployments.some(
-      (d) =>
-        d.status !== "deleted" &&
-        (d.domain === domain ||
-          (Array.isArray(d.custom_domains) && d.custom_domains.includes(domain))),
-    );
-    expect(match).toBe(false);
-  });
-
-  test("empty deployments array returns false", () => {
-    const deployments: any[] = [];
-    const domain = "anything.example.com";
-    const match = deployments.some(
-      (d) =>
-        d.status !== "deleted" &&
-        (d.domain === domain ||
-          (Array.isArray(d.custom_domains) && d.custom_domains.includes(domain))),
-    );
-    expect(match).toBe(false);
+    await expect(isFrontendDomain("deleted.example.com", root)).resolves.toBe(false);
+    await expect(isFrontendDomain("alias.example.com", root)).resolves.toBe(false);
   });
 });

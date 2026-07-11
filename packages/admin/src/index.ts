@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 
 import { z } from "zod";
+import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { runCli } from "./shared/cli";
-import { resolveSupaCloudContext } from "./shared/context";
+import { resolveSupaCloudContext, type ResolvedContext } from "./shared/context";
 import { HttpTransport } from "./shared/transports/http";
 import { SshTransport } from "./shared/transports/ssh";
 import { registerSshTools } from "./shared/tools/ssh-tools";
@@ -62,6 +64,7 @@ EXPECTED CONTEXT
   Platform commands typically rely on:
     SUPACLOUD_HOST
     SUPACLOUD_SSH_KEY / SUPACLOUD_SSH_PASS
+    SUPACLOUD_SSH_HOST_FINGERPRINT=SHA256:...
     SUPACLOUD_API_URL
     SUPACLOUD_API_TOKEN
 
@@ -83,8 +86,7 @@ EXAMPLES
 `);
 }
 
-function createAdminTools(): ToolMap {
-    const context = resolveSupaCloudContext();
+export function createAdminTools(context: ResolvedContext = resolveSupaCloudContext()): ToolMap {
     const tools: ToolMap = {
         status: {
             schema: {},
@@ -99,6 +101,7 @@ function createAdminTools(): ToolMap {
                                 apiUrl: context.apiUrl || null,
                                 hasApiToken: Boolean(context.apiToken),
                                 hasSshKey: Boolean(context.sshKey),
+                                hasSshHostFingerprint: Boolean(context.sshHostFingerprint),
                                 source: context.source,
                             },
                             null,
@@ -139,7 +142,7 @@ function createAdminTools(): ToolMap {
                 content: [
                     {
                         type: "text" as const,
-                        text: "⚠️ SSH commands require SUPACLOUD_HOST plus SSH credentials.",
+                        text: "⚠️ SSH commands require SUPACLOUD_HOST, SSH credentials, and SUPACLOUD_SSH_HOST_FINGERPRINT.",
                     },
                 ],
             }),
@@ -159,15 +162,43 @@ function createAdminTools(): ToolMap {
 
     registerAdminHelp();
 
-    if (context.host) {
-        const ssh = new SshTransport({
-            host: context.host,
-            port: context.sshPort,
-            username: context.sshUser,
-            privateKeyPath: context.sshKey || undefined,
-            password: context.sshPass || undefined,
-        });
-        Object.assign(tools, captureTools((server) => registerSshTools(server as any, ssh)));
+    if (context.host && context.sshHostFingerprint) {
+        try {
+            const ssh = new SshTransport({
+                host: context.host,
+                port: context.sshPort,
+                username: context.sshUser,
+                privateKeyPath: context.sshKey || undefined,
+                password: context.sshPass || undefined,
+                hostFingerprint: context.sshHostFingerprint,
+            });
+            Object.assign(tools, captureTools((server) => registerSshTools(server as any, ssh)));
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            tools.ssh = {
+                schema: { action: sshActionSchema },
+                callback: async () => ({
+                    content: [{
+                        type: "text" as const,
+                        text: `⚠️ SSH host fingerprint is invalid; SSH actions remain disabled. ${message}`,
+                    }],
+                }),
+            };
+        }
+    } else if (context.host) {
+        tools.ssh = {
+            schema: { action: sshActionSchema },
+            callback: async () => ({
+                content: [{
+                    type: "text" as const,
+                    text: [
+                        "⚠️ SSH actions are disabled because host-key verification is not configured.",
+                        "Set SUPACLOUD_SSH_HOST_FINGERPRINT to the server's OpenSSH SHA256 fingerprint.",
+                        `Verify it out-of-band first, for example: ssh-keyscan -p ${context.sshPort} ${context.host} | ssh-keygen -lf -`,
+                    ].join("\n"),
+                }],
+            }),
+        };
     }
 
     if (context.apiUrl && context.apiToken) {
@@ -196,7 +227,7 @@ function createAdminTools(): ToolMap {
                             "⚠️ No admin context configured.",
                             "",
                             "Provide one or both of:",
-                            "  SUPACLOUD_HOST + SSH credentials",
+                            "  SUPACLOUD_HOST + SSH credentials + SUPACLOUD_SSH_HOST_FINGERPRINT",
                             "  SUPACLOUD_API_URL + SUPACLOUD_API_TOKEN",
                             "",
                             "This CLI is intended for server installation, diagnostics, and",
@@ -235,7 +266,13 @@ async function main() {
     await runCli(cliTools, args, { commandName: "supacloud-admin" });
 }
 
-main().catch((error) => {
-    console.error("supacloud-admin failed:", error);
-    process.exit(1);
-});
+function isDirectRun(): boolean {
+    return Boolean(process.argv[1]) && import.meta.url === pathToFileURL(resolve(process.argv[1])).href;
+}
+
+if (isDirectRun()) {
+    main().catch((error) => {
+        console.error("supacloud-admin failed:", error);
+        process.exit(1);
+    });
+}

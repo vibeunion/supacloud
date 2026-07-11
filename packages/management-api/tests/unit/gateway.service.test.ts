@@ -111,10 +111,10 @@ describe("GatewayService provider selection", () => {
         expect(DEFAULT_CORS_HEADERS).toContain("x-supacloud-correlation-id");
         expect(DEFAULT_CORS_HEADERS).toContain("x-supacloud-business-task-id");
         expect(DEFAULT_CORS_HEADERS).toContain("x-supacloud-task-metadata");
-        expect(DEFAULT_CORS_HEADERS).toContain("x-forwarded-for");
-        expect(DEFAULT_CORS_HEADERS).toContain("x-forwarded-host");
-        expect(DEFAULT_CORS_HEADERS).toContain("x-forwarded-proto");
-        expect(DEFAULT_CORS_HEADERS).toContain("x-real-ip");
+        expect(DEFAULT_CORS_HEADERS).not.toContain("x-forwarded-for");
+        expect(DEFAULT_CORS_HEADERS).not.toContain("x-forwarded-host");
+        expect(DEFAULT_CORS_HEADERS).not.toContain("x-forwarded-proto");
+        expect(DEFAULT_CORS_HEADERS).not.toContain("x-real-ip");
     });
 
     test("default cors exposed headers allow browsers to read download filenames", () => {

@@ -15,12 +15,12 @@ import { logger } from "../utils/logger";
 import {
   OPENAPI_AUTH_CONFIG_RESPONSE_TEMPLATE,
   OPENAPI_CUSTOM_HOSTNAME_RESPONSE_TEMPLATE,
-  OPENAPI_NETWORK_RESTRICTIONS_RESPONSE_TEMPLATE,
   OPENAPI_REALTIME_CONFIG_RESPONSE_TEMPLATE,
   OPENAPI_STORAGE_CONFIG_RESPONSE_TEMPLATE,
 } from "../utils/openapi-defaults.gen";
 import { resolveRoleName, resolveDbName as resolveDbNameTopLevel } from "../db";
 import { requireAdminAuth, requireProjectOrAdminAuth } from "../middleware/auth";
+import { projectNetworkRestrictionRoutes } from "./project-network-restrictions";
 
 /** Map PostgreSQL column types to TypeScript types */
 function pgTypeToTs(udtName: string, dataType: string): string {
@@ -123,19 +123,6 @@ function cloneTemplate<T>(template: T): T {
   return structuredClone(template);
 }
 
-function toStringArray(value: unknown): string[] {
-  if (!Array.isArray(value)) return [];
-  return value.filter((entry): entry is string => typeof entry === "string");
-}
-
-function pickFirstArray(...candidates: unknown[]): string[] {
-  for (const candidate of candidates) {
-    const values = toStringArray(candidate);
-    if (values.length > 0) return values;
-  }
-  return [];
-}
-
 function readCustomGatewayRoutes(settings: Record<string, unknown>): CustomGatewayRouteConfig[] {
   return normalizeCustomGatewayRoutes(settings.gateway_routes);
 }
@@ -165,32 +152,6 @@ async function applyCustomGatewayRoutes(projectRef: string, settings: Record<str
     gateway_routes: routes,
   });
   return { ok: true, settings: updated };
-}
-
-function buildNetworkRestrictionsResponse(value: unknown) {
-  const response = cloneTemplate(
-    OPENAPI_NETWORK_RESTRICTIONS_RESPONSE_TEMPLATE,
-  ) as Record<string, any>;
-  const raw = (value as Record<string, unknown>) || {};
-  const config = (raw.config as Record<string, unknown>) || raw;
-  const dbAllowedCidrs = pickFirstArray(
-    raw.allowed_address_ranges,
-    config.dbAllowedCidrs,
-    raw.dbAllowedCidrs,
-  );
-  const dbAllowedCidrsV6 = pickFirstArray(
-    config.dbAllowedCidrsV6,
-    raw.dbAllowedCidrsV6,
-  );
-
-  response.config = {
-    ...(response.config as Record<string, unknown>),
-    dbAllowedCidrs,
-    dbAllowedCidrsV6,
-  };
-  response.status = "applied";
-  response.entitlement = dbAllowedCidrs.length > 0 ? "allowed" : "disallowed";
-  return response;
 }
 
 function buildCustomHostnameResponse(domainInfo: unknown) {
@@ -639,120 +600,7 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
 },
   )
 
-  // Get network restrictions
-  .get(
-    "/:ref/network-restrictions",
-    async ({ params, request }) => {
-      const authError = await requireProjectOrAdminAuth(request, params.ref);
-      if (authError) return status(authError.status, authError.body);
-      const settings = await projectService.getProjectSettings(params.ref);
-      if (!settings) {
-        return status(404, { message: "Project not found" });
-      }
-      const nr =
-        ((settings as Record<string, unknown>).network_restrictions as Record<
-          string,
-          unknown
-        >) || {};
-      return buildNetworkRestrictionsResponse(nr);
-    },
-    {
-      params: t.Object({ ref: t.String() }),
-    
-      detail: { tags: ["projects"], summary: "Get network restrictions" },
-},
-  )
-
-  // Update network restrictions
-  .post(
-    "/:ref/network-restrictions",
-    async ({ params, body, request }) => {
-      const authError = await requireAdminAuth(request);
-      if (authError) return status(authError.status, authError.body);
-      const success = await projectService.updateNetworkRestrictions(
-        params.ref,
-        body.allowed_address_ranges,
-      );
-      if (!success) {
-        return status(500, {
-          message: "Failed to update network restrictions",
-          code: "500",
-        });
-      }
-      return {
-        config: { dbAllowedCidrs: body.allowed_address_ranges },
-        status: "applied",
-        entitlement: "allowed",
-      };
-    },
-    {
-      params: t.Object({
-        ref: t.String(),
-      }),
-      body: t.Object({
-        allowed_address_ranges: t.Array(t.String()),
-      }),
-    
-      detail: { tags: ["projects"], summary: "Update network restrictions" },
-},
-  )
-  .patch(
-    "/:ref/network-restrictions",
-    async ({ params, body, request }) => {
-      const authError = await requireAdminAuth(request);
-      if (authError) return status(authError.status, authError.body);
-      const success = await projectService.updateNetworkRestrictions(
-        params.ref,
-        body.allowed_address_ranges,
-      );
-      if (!success) {
-        return status(500, {
-          message: "Failed to update network restrictions",
-          code: "500",
-        });
-      }
-      return {
-        config: { dbAllowedCidrs: body.allowed_address_ranges },
-        status: "applied",
-        entitlement: "allowed",
-      };
-    },
-    {
-      params: t.Object({ ref: t.String() }),
-      body: t.Object({ allowed_address_ranges: t.Array(t.String()) }),
-    
-      detail: { tags: ["projects"], summary: "Patch network restrictions" },
-},
-  )
-  .delete(
-    "/:ref/network-restrictions",
-    async ({ params, request }) => {
-      const authError = await requireAdminAuth(request);
-      if (authError) return status(authError.status, authError.body);
-      const success = await projectService.updateNetworkRestrictions(
-        params.ref,
-        [],
-      );
-      if (!success) {
-        return status(500, {
-          message: "Failed to remove network restrictions",
-          code: "500",
-        });
-      }
-      return {
-        config: { dbAllowedCidrs: [] },
-        status: "applied",
-        entitlement: "allowed",
-      };
-    },
-    {
-
-      params: t.Object({ ref: t.String() }),
-
-      detail: { tags: ["projects"], summary: "Remove network restrictions" },
-
-    },
-  )
+  .use(projectNetworkRestrictionRoutes)
 
   // Get custom domain
   .get(
@@ -1691,27 +1539,6 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
       params: t.Object({ ref: t.String() }),
 
       detail: { tags: ["projects"], summary: "Get pooler config" },
-
-    },
-  )
-
-  // Get Network Restrictions — required by CLI `supabase link` (V1GetNetworkRestrictions)
-  .get(
-    "/:ref/network-restrictions",
-    async ({ params }) => {
-      const settings = await projectService.getProjectSettings(params.ref);
-      if (!settings)
-        return status(404, { message: "Project not found", code: "404" });
-
-      return buildNetworkRestrictionsResponse(
-        (settings as Record<string, unknown>).network_restrictions,
-      );
-    },
-    {
-
-      params: t.Object({ ref: t.String() }),
-
-      detail: { tags: ["projects"], summary: "Get network restrictions" },
 
     },
   )

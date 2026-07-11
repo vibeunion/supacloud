@@ -8,6 +8,9 @@ on:
       - "packages/web-console/**"
       - "packages/supacloud-js/**"
       - "packages/edge-runtime/**"
+      - "packages/admin/**"
+      - "packages/cli/**"
+      - "packages/supacloud/**"
       - "docker/**"
       - "scripts/**"
       - "install.sh"
@@ -24,6 +27,9 @@ on:
       - "packages/web-console/**"
       - "packages/supacloud-js/**"
       - "packages/edge-runtime/**"
+      - "packages/admin/**"
+      - "packages/cli/**"
+      - "packages/supacloud/**"
       - "docker/**"
       - "scripts/**"
       - "install.sh"
@@ -35,12 +41,16 @@ on:
       - ".github/workflows/release-please.yml"
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 # Demo JWT signed with the Supabase public demo key (not a real credential).
 # Source: https://supabase.com/docs/guides/self-hosting/docker#generate-api-keys
 # gitleaks:allow
 env:
   NODE_VERSION: "24.x"
   BUN_VERSION: "1.3.14"
+  XCADDY_VERSION: "v0.4.5"
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
   # noqa: hardcoded-jwt — these are the Supabase public demo keys used for local/CI testing only
   # Source: https://supabase.com/docs/guides/self-hosting/docker#generate-api-keys
@@ -74,11 +84,15 @@ jobs:
 
       - name: Install dependencies
         working-directory: packages/management-api
-        run: bun install
+        run: bun install --frozen-lockfile
 
       - name: Type check
         working-directory: packages/management-api
         run: bun run tsc --noEmit
+
+      - name: Audit Management API dependencies
+        working-directory: packages/management-api
+        run: bun audit --audit-level high
 
       - name: Check Swagger route coverage
         working-directory: packages/management-api
@@ -87,7 +101,7 @@ jobs:
   package-checks:
     name: Package Checks
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
 
     steps:
       - name: Checkout code
@@ -112,22 +126,61 @@ jobs:
         working-directory: packages/web-console
         run: |
           bun install --frozen-lockfile
+          bun test src
           bun run check
           bun run build
+          bun audit --audit-level high
 
       - name: Check SupaCloud JS SDK
         working-directory: packages/supacloud-js
         run: |
-          bun install
+          bun install --frozen-lockfile
           bun run typecheck
           bun run typecheck:test
           bun test src/index.test.ts
+          bun audit --audit-level high
 
       - name: Check edge runtime
         working-directory: packages/edge-runtime
         run: |
-          bun install
+          bun install --frozen-lockfile
           bun run typecheck
+          bun audit --audit-level high
+
+      - name: Check project CLI
+        working-directory: packages/cli
+        run: |
+          bun install --frozen-lockfile
+          bun run typecheck
+          bun test src
+          bun run build
+          bun audit --audit-level high
+
+      - name: Check admin CLI
+        working-directory: packages/admin
+        run: |
+          bun install --frozen-lockfile
+          bun run typecheck
+          bun test src
+          bun run build
+          bun audit --audit-level high
+
+      - name: Check unified supacloudctl CLI
+        working-directory: packages/supacloud
+        run: |
+          bun install --frozen-lockfile
+          bun run typecheck
+          bun test src/index.test.ts
+          bun run build
+          bun audit --audit-level high
+
+      - name: Generate CycloneDX SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          path: .
+          format: cyclonedx-json
+          output-file: supacloud-sbom.cdx.json
+          upload-artifact: true
 
   docker-and-scripts-checks:
     name: Docker & Scripts Checks
@@ -147,6 +200,7 @@ jobs:
         run: |
           bash -n install.sh setup.sh switch.sh deploy_all.sh scripts/pre_start_recovery.sh
           find scripts -name "*.sh" -print0 | xargs -0 -n1 bash -n
+          bash scripts/lib/tenant_runtime.test.sh
 
       - name: Validate AI review script
         run: |
@@ -179,18 +233,11 @@ jobs:
 
       - name: Install dependencies
         working-directory: packages/management-api
-        run: bun install
+        run: bun install --frozen-lockfile
 
       - name: Run unit tests
         working-directory: packages/management-api
-        run: |
-          bun test tests/unit/sdk-proxy.functions.test.ts
-          bun test tests/unit/gateway.service.test.ts
-          find tests/unit -name "*.test.ts" ! -name "sdk-proxy.functions.test.ts" ! -name "gateway.service.test.ts" | sort | while read -r test_file; do
-            echo "::group::$test_file"
-            bun test "$test_file"
-            echo "::endgroup::"
-          done
+        run: bun test tests/unit src/api.test.ts
 
   integration-test:
     name: Integration & Compliance Tests
@@ -267,15 +314,6 @@ jobs:
           SEED_SELF_HOST: "true"
           RUN_JANITOR: "false"
           RLIMIT_NOFILE: "10000"
-      minio:
-        image: minio/minio:latest
-        ports:
-          - 9001:9000
-        env:
-          MINIO_ROOT_USER: minioadmin
-          MINIO_ROOT_PASSWORD: minioadmin
-        command: server /data
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -290,6 +328,15 @@ jobs:
         with:
           bun-version: ${{ env.BUN_VERSION }}
 
+      - name: Start MinIO fixture
+        run: |
+          docker run --detach --rm \
+            --name supacloud-ci-minio \
+            --publish 9001:9000 \
+            --env MINIO_ROOT_USER=minioadmin \
+            --env MINIO_ROOT_PASSWORD=minioadmin \
+            minio/minio:latest server /data
+
       - name: Show runtime versions
         run: |
           node --version
@@ -298,8 +345,8 @@ jobs:
       - name: Install dependencies
         working-directory: packages/management-api
         run: |
-          bun install
-          cd ../edge-runtime && bun install
+          bun install --frozen-lockfile
+          cd ../edge-runtime && bun install --frozen-lockfile
 
       - name: Initialize Database
         working-directory: packages/management-api
@@ -342,14 +389,21 @@ jobs:
             exit 1
           fi
           echo "Waiting for MinIO container to be ready..."
+          minio_ready=false
           for i in $(seq 1 15); do
             if curl -sf http://127.0.0.1:9001/minio/health/live > /dev/null 2>&1; then
               echo "✅ MinIO is ready"
+              minio_ready=true
               break
             fi
             echo "  Attempt $i/15: MinIO not ready, waiting 2s..."
             sleep 2
           done
+          if [ "${minio_ready}" != "true" ]; then
+            echo "::error title=MinIO service not ready::MinIO did not become reachable on :9001"
+            docker logs --tail 200 supacloud-ci-minio || true
+            exit 1
+          fi
 
       - name: Setup CI Tenant Bridge
         working-directory: packages/management-api
@@ -485,11 +539,11 @@ jobs:
 
       - name: Install dependencies
         working-directory: packages/management-api
-        run: bun install
+        run: bun install --frozen-lockfile
 
       - name: Install edge-runtime dependencies
         working-directory: packages/edge-runtime
-        run: bun install
+        run: bun install --frozen-lockfile
 
       - name: Build Linux primary binaries
         working-directory: packages/management-api
@@ -550,7 +604,7 @@ jobs:
           mv supacloud-edge-runtime-macos-arm64 dist/
 
       - name: Install xcaddy
-        run: go install github.com/caddyserver/xcaddy/cmd/xcaddy@latest
+        run: go install github.com/caddyserver/xcaddy/cmd/xcaddy@${XCADDY_VERSION}
 
       - name: Build Caddy edge binaries
         run: OUT_DIR=packages/management-api/dist bash scripts/build_supacloud_caddy.sh

@@ -9,15 +9,7 @@ const getApiUrl = () => {
 // ... DataProvider logic ...
 export const dataProvider = createElysiaDataProvider({
     apiUrl: getApiUrl(),
-    headers: (): Record<string, string> => {
-        const token = typeof localStorage !== 'undefined' ? localStorage.getItem("supacloud_session") : null;
-        if (token) {
-            return {
-                Authorization: `Bearer ${token}`
-            };
-        }
-        return {};
-    },
+    withCredentials: true,
     parseListResponse: (json: any, resource: string) => {
         if (json && (json.error || json.message)) {
             const msg = typeof json.error === "string" ? json.error : json.message;
@@ -34,22 +26,21 @@ export const dataProvider = createElysiaDataProvider({
 // Implementation of ChatProvider using Fetch API + SSE for streaming
 export const chatProvider: ChatProvider = {
   async *sendMessage(messages: ChatMessage[], options?: { signal?: AbortSignal }): AsyncGenerator<string, void, unknown> {
-    const token = typeof localStorage !== 'undefined' ? localStorage.getItem("supacloud_session") : null;
     try {
       // Direct integration with an OpenAI-compatible /v1/chat/completions endpoint
       // You can point this to your actual locally run proxy/LLM backend
       const res = await fetch(`${getApiUrl()}/v1/chat/completions`, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({
           model: 'gpt-4o-mini', // Update dynamically if needed
           messages: messages.map(m => ({ role: m.role, content: m.content })),
           stream: true
         }),
-        signal: options?.signal
+        signal: options?.signal,
+        credentials: 'include'
       });
 
       if (!res.ok) throw new Error('Chat API returned an error: ' + res.statusText);

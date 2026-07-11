@@ -1,10 +1,25 @@
 import { sql } from "../db";
 import { extractProjectRefFromPath } from "../utils/project-auth";
 import { logger } from "../utils/logger";
+import { resolveProxyClientIp } from "../utils/client-ip";
 
 const WRITE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
-const AUDIT_FLUSH_INTERVAL_MS = Number(process.env.AUDIT_FLUSH_INTERVAL_MS || 100);
-const AUDIT_BATCH_SIZE = Math.max(1, Number(process.env.AUDIT_BATCH_SIZE || 25));
+
+function positiveInteger(value: string | undefined, fallback: number): number {
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+const AUDIT_FLUSH_INTERVAL_MS = positiveInteger(process.env.AUDIT_FLUSH_INTERVAL_MS, 100);
+const AUDIT_BATCH_SIZE = positiveInteger(process.env.AUDIT_BATCH_SIZE, 25);
+const AUDIT_QUEUE_MAX_SIZE = Math.max(
+  AUDIT_BATCH_SIZE,
+  positiveInteger(process.env.AUDIT_QUEUE_MAX_SIZE, 256),
+);
+const AUDIT_DROP_WARN_INTERVAL_MS = positiveInteger(
+  process.env.AUDIT_DROP_WARN_INTERVAL_MS,
+  60_000,
+);
 
 type AuditInput = {
   request: Request;
@@ -16,17 +31,42 @@ type AuditInput = {
 const auditQueue: AuditInput[] = [];
 let auditFlushTimer: ReturnType<typeof setTimeout> | null = null;
 let auditFlushInFlight = false;
+let droppedAuditEvents = 0;
+let lastAuditDropWarningAt = 0;
+
+export function enqueueBoundedAuditEvent<T>(
+  queue: T[],
+  input: T,
+  maxSize: number,
+  onDrop: () => void = () => undefined,
+): boolean {
+  if (!Number.isSafeInteger(maxSize) || maxSize < 1) {
+    throw new Error("Audit queue max size must be a positive integer");
+  }
+  if (queue.length >= maxSize) {
+    onDrop();
+    return false;
+  }
+  queue.push(input);
+  return true;
+}
+
+function reportDroppedAuditEvent(): void {
+  droppedAuditEvents += 1;
+  const timestamp = Date.now();
+  if (timestamp - lastAuditDropWarningAt < AUDIT_DROP_WARN_INTERVAL_MS) return;
+  logger.warn("Audit queue is full; dropping new audit events", {
+    droppedEvents: droppedAuditEvents,
+    queueLimit: AUDIT_QUEUE_MAX_SIZE,
+  });
+  droppedAuditEvents = 0;
+  lastAuditDropWarningAt = timestamp;
+}
 
 function actorFromRequest(request: Request): string {
   const auth = request.headers.get("authorization") || "";
   if (auth.startsWith("Bearer ")) return `bearer:${auth.slice(7, 19)}`;
   return "anonymous";
-}
-
-function ipFromRequest(request: Request): string {
-  return request.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
-    || request.headers.get("x-real-ip")
-    || "unknown";
 }
 
 export function shouldAuditRequest(request: Request): boolean {
@@ -57,7 +97,7 @@ async function writeAuditEvent(input: AuditInput) {
         ${input.request.method.toUpperCase()},
         ${url.pathname},
         ${input.status || null},
-        ${ipFromRequest(input.request)},
+        ${resolveProxyClientIp(input.request)},
         ${input.request.headers.get("user-agent") || ""},
         ${input.request.headers.get("x-request-id") || crypto.randomUUID()},
         ${JSON.stringify(input.metadata || {})}
@@ -89,7 +129,12 @@ async function flushAuditEvents(): Promise<void> {
 }
 
 export async function logAuditEvent(input: AuditInput) {
-  auditQueue.push(input);
+  if (!enqueueBoundedAuditEvent(
+    auditQueue,
+    input,
+    AUDIT_QUEUE_MAX_SIZE,
+    reportDroppedAuditEvent,
+  )) return;
   if (auditQueue.length >= AUDIT_BATCH_SIZE) {
     void flushAuditEvents();
   } else {

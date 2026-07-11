@@ -1,12 +1,74 @@
 import { describe, expect, test } from "bun:test";
 import { quoteSystemdEnvValue } from "../../src/utils/systemd-env";
 import {
+  buildPostgresUri,
+  buildTenantPsqlInvocation,
+  quoteTomlBasicString,
+  renderSystemdEnvLine,
   renderGoTrueAuthEnv,
   renderGoTruePasskeyEnv,
   renderGoTrueSamlEnv,
   renderPostgrestDbSchemas,
   renderTenantInternalRuntimeEnv,
-} from "../../src/services/tenant-runtime.service";
+} from "../../src/services/tenant-runtime-config";
+
+describe("TenantRuntimeService safe config serialization", () => {
+  const special = `p@:/#?% space '\"\\`;
+
+  test("percent-encodes database credentials without changing the secret passed to psql", () => {
+    expect(buildPostgresUri({
+      protocol: "postgresql",
+      user: special,
+      password: special,
+      host: "127.0.0.1",
+      port: "6432",
+      database: "supa test",
+    })).toBe(
+      "postgresql://p%40%3A%2F%23%3F%25%20space%20%27%22%5C:p%40%3A%2F%23%3F%25%20space%20%27%22%5C@127.0.0.1:6432/supa%20test",
+    );
+
+    const invocation = buildTenantPsqlInvocation({
+      user: "postgres",
+      password: special,
+      host: "127.0.0.1",
+      port: "6432",
+      database: "supa test",
+    }, ["-Atqc", "SELECT 1"]);
+    expect(invocation.cmd).toEqual([
+      "psql", "-h", "127.0.0.1", "-p", "6432", "-U", "postgres", "-d", "supa test", "-Atqc", "SELECT 1",
+    ]);
+    expect(invocation.cmd.join(" ")).not.toContain(special);
+    expect(invocation.env).toEqual({ PGPASSWORD: special });
+  });
+
+  test("quotes EnvironmentFile and TOML values without assignment injection", () => {
+    expect(renderSystemdEnvLine("SECRET", special)).toBe(`SECRET="p@:/#?% space '\\\"\\\\"`);
+    expect(quoteTomlBasicString(special)).toBe(`"p@:/#?% space '\\\"\\\\"`);
+  });
+
+  test.each(["bad\nINJECTED=value", "bad\rINJECTED=value", "bad\0INJECTED=value"])(
+    "rejects CR, LF, and NUL in every config serializer (%j)",
+    (value) => {
+      expect(() => renderSystemdEnvLine("SECRET", value)).toThrow(/control character/i);
+      expect(() => quoteTomlBasicString(value)).toThrow(/control character/i);
+      expect(() => buildPostgresUri({
+        protocol: "postgres",
+        user: "postgres",
+        password: value,
+        host: "127.0.0.1",
+        port: "6432",
+        database: "postgres",
+      })).toThrow(/control character/i);
+      expect(() => buildTenantPsqlInvocation({
+        user: "postgres",
+        password: value,
+        host: "127.0.0.1",
+        port: "6432",
+        database: "postgres",
+      }, [])).toThrow(/control character/i);
+    },
+  );
+});
 
 describe("TenantRuntimeService systemd env quoting", () => {
   test("single-quotes JSON values so systemd preserves double quotes", () => {
@@ -73,14 +135,30 @@ describe("TenantRuntimeService GoTrue auth env rendering", () => {
   test("maps auth email templates into quoted GoTrue mailer env values", () => {
     expect(renderGoTrueAuthEnv({
       mailer_subjects_confirmation: "欢迎确认",
-      mailer_templates_confirmation_content: `<p>Hi {{ .Email }}</p>\n<a href="{{ .ConfirmationURL }}">Confirm</a>`,
+      mailer_templates_confirmation_content: `<p>Hi {{ .Email }}</p><a href="{{ .ConfirmationURL }}">Confirm</a>`,
       MAILER_SUBJECTS_RECOVERY: "Reset your password",
     })).toContain([
       "GOTRUE_MAILER_SUBJECTS_CONFIRMATION=\"欢迎确认\"",
-      "GOTRUE_MAILER_TEMPLATES_CONFIRMATION_CONTENT='<p>Hi {{ .Email }}</p>",
-      "<a href=\"{{ .ConfirmationURL }}\">Confirm</a>'",
+      "GOTRUE_MAILER_TEMPLATES_CONFIRMATION_CONTENT=\"<p>Hi {{ .Email }}</p><a href=\\\"{{ .ConfirmationURL }}\\\">Confirm</a>\"",
       "GOTRUE_MAILER_SUBJECTS_RECOVERY=\"Reset your password\"",
     ].join("\n"));
+  });
+
+  test("rejects newline injection through email, passkey, and SAML settings", () => {
+    expect(() => renderGoTrueAuthEnv({
+      mailer_subjects_confirmation: "safe\nGOTRUE_OPERATOR_TOKEN=stolen",
+    })).toThrow(/control character/i);
+    expect(() => renderGoTruePasskeyEnv({
+      passkey: { enabled: true },
+      webauthn: { rp_id: "safe\rINJECTED=value" },
+    }, {
+      rpId: "example.com",
+      rpDisplayName: "SupaCloud",
+      rpOrigins: ["https://example.com"],
+    })).toThrow(/control character/i);
+    expect(() => renderGoTrueSamlEnv({
+      saml: { enabled: true, private_key: "safe\0INJECTED=value" },
+    })).toThrow(/control character/i);
   });
 
   test("maps passkey and WebAuthn config into GoTrue env values only when enabled", () => {
@@ -107,10 +185,10 @@ describe("TenantRuntimeService GoTrue auth env rendering", () => {
       "GOTRUE_PASSKEY_MAX_PASSKEYS_PER_USER=7",
       "GOTRUE_MFA_WEBAUTHN_ENROLL_ENABLED=true",
       "GOTRUE_MFA_WEBAUTHN_VERIFY_ENABLED=true",
-      "GOTRUE_WEBAUTHN_RP_ID=login.example.com",
+      'GOTRUE_WEBAUTHN_RP_ID="login.example.com"',
       'GOTRUE_WEBAUTHN_RP_DISPLAY_NAME="Example Login"',
-      "GOTRUE_WEBAUTHN_RP_ORIGINS=https://login.example.com,https://app.example.com",
-      "GOTRUE_WEBAUTHN_CHALLENGE_EXPIRY_DURATION=5m",
+      'GOTRUE_WEBAUTHN_RP_ORIGINS="https://login.example.com,https://app.example.com"',
+      'GOTRUE_WEBAUTHN_CHALLENGE_EXPIRY_DURATION="5m"',
     ].join("\n"));
   });
 
@@ -129,9 +207,9 @@ describe("TenantRuntimeService GoTrue auth env rendering", () => {
       "GOTRUE_SAML_ENABLED=true",
       'GOTRUE_SAML_PRIVATE_KEY="current-key"',
       'GOTRUE_SAML_PRIVATE_KEY_NEXT="next-key"',
-      "GOTRUE_SAML_EXTERNAL_URL=https://login.example.com/auth/v1",
+      'GOTRUE_SAML_EXTERNAL_URL="https://login.example.com/auth/v1"',
       "GOTRUE_SAML_ALLOW_ENCRYPTED_ASSERTIONS=true",
-      "GOTRUE_SAML_RELAY_STATE_VALIDITY_PERIOD=5m",
+      'GOTRUE_SAML_RELAY_STATE_VALIDITY_PERIOD="5m"',
       "GOTRUE_SAML_RATE_LIMIT_ASSERTION=20",
     ].join("\n"));
   });

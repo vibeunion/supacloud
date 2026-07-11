@@ -9,12 +9,13 @@
 </script>
 
 <script lang="ts">
-  import { apiClient } from "$lib/api";
+  import { apiClient, getStudioSession, logoutStudio } from "$lib/api";
 
   import "../app.css";
   import "$lib/i18n";
   import { onMount, type Snippet, untrack } from "svelte";
   import { goto } from "$app/navigation";
+  import { resolve } from "$app/paths";
   import { page } from "$app/stores";
   import { isLoading, t, waitLocale, locale } from 'svelte-i18n';
   import Sidebar from "$lib/components/Sidebar.svelte";
@@ -69,7 +70,7 @@
   let isAuthenticated = $state(false);
   let i18nLoadGuardExpired = $state(false);
   
-  let isCoreLoading = $derived(projectsLoading);
+  let isCoreLoading = $derived(projectsLoading || ($isLoading && !i18nLoadGuardExpired));
 
   // Route Detection
   let isRawPage = $derived(($page.url.pathname as string) === "/login" || ($page.url.pathname as string) === "/register");
@@ -115,6 +116,14 @@
 
   const getResourceKey = (resources: { identifier?: string; name: string }[]) =>
     resources.map((resource) => resource.identifier ?? resource.name).join("|");
+
+  async function handleLogout() {
+    try {
+      await logoutStudio();
+    } finally {
+      window.location.href = "/login";
+    }
+  }
 
   $effect(() => {
     const projectRefs = projects
@@ -164,25 +173,9 @@
         return;
       }
 
-      const token = localStorage.getItem("supacloud_session");
-      if (!token) {
-        projectsLoading = false;
-        window.location.href = "/login";
-        clearGuardTimer();
-        cleanupLocale();
-        return;
-      }
-
       try {
-        const res = await apiClient("/auth/verify", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ token })
-        });
-        const data = await res.json();
-        if (!data.valid) {
-          localStorage.removeItem("supacloud_session");
-          localStorage.removeItem("supacloud_master_token");
+        const session = await getStudioSession();
+        if (!session.authenticated) {
           projectsLoading = false;
           window.location.href = "/login";
           clearGuardTimer();
@@ -220,7 +213,7 @@
       }
 
       if (!projectsLoading && !projects.length && window.location.pathname.includes('/project/')) {
-         goto('/');
+         goto(resolve('/'));
       }
     })();
 
@@ -267,7 +260,7 @@
             </div>
           </div>
           <button
-            onclick={() => { localStorage.removeItem('supacloud_session'); localStorage.removeItem('supacloud_master_token'); window.location.href = '/login'; }}
+            onclick={handleLogout}
             class="px-3 py-1.5 text-xs font-medium rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
           >
             {$t("Auth.signOut") || "Logout"}

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { closeSync, mkdtempSync, openSync, symlinkSync, writeSync } from "node:fs";
+import { closeSync, mkdtempSync, openSync, readFileSync, symlinkSync, writeSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -15,6 +15,12 @@ import {
 } from "./index";
 
 describe("supacloud dispatcher", () => {
+    test("publishes only the collision-free supacloudctl executable", () => {
+        const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+        expect(packageJson.bin).toEqual({ supacloudctl: "dist/index.js" });
+        expect(packageJson.bin.supacloud).toBeUndefined();
+    });
+
     test("exposes cli and admin subcommands", () => {
         expect(Object.keys(SUBCOMMANDS).sort()).toEqual(["admin", "cli"]);
         expect(SUBCOMMANDS.cli.pkg).toBe("@supacloud/cli");
@@ -25,7 +31,8 @@ describe("supacloud dispatcher", () => {
 
     test("help lists both subcommands and usage", () => {
         const help = buildHelp();
-        expect(help).toContain("supacloud <子命令>");
+        expect(help).toContain("supacloudctl <子命令>");
+        expect(help).not.toContain("supacloud <子命令>");
         expect(help).toContain("cli");
         expect(help).toContain("admin");
         expect(help).toContain("@supacloud/cli");
@@ -46,7 +53,7 @@ describe("supacloud dispatcher", () => {
     test("isMainModule treats npm bin symlinks as the main script", () => {
         const dir = mkdtempSync(join(tmpdir(), "supacloud-main-module-"));
         const target = join(dir, "dist-index.js");
-        const link = join(dir, "supacloud");
+        const link = join(dir, "supacloudctl");
         const fd = openSync(target, "w");
         writeSync(fd, "#!/usr/bin/env node\n");
         closeSync(fd);
@@ -86,20 +93,20 @@ describe("supacloud dispatcher", () => {
         expect(isAutoUpdateDisabled({ SUPACLOUD_AUTO_UPDATE: "0" })).toBe(true);
     });
 
-    test("createLaunchPlan runs the latest package when registry version is newer", async () => {
+    test("createLaunchPlan only reports a newer package and still runs the installed version", async () => {
         const plan = await createLaunchPlan(SUBCOMMANDS.cli, ["status"], {
             env: {},
             fetchLatest: async () => "0.8.0",
             resolveInstalled: () => ({ entry: "/local/cli.js", version: "0.7.0" }),
-            npmCommand: "npm",
-            platform: "linux",
+            nodePath: "/usr/bin/node",
         });
 
         expect(plan).toEqual({
-            mode: "latest",
-            command: "npm",
-            args: ["exec", "--yes", "--package", "@supacloud/cli@0.8.0", "--", "supacloud-cli", "status"],
+            mode: "local",
+            command: "/usr/bin/node",
+            args: ["/local/cli.js", "status"],
             shell: false,
+            updateNotice: "@supacloud/cli 0.8.0 可用；当前固定使用已安装版本 0.7.0。请显式运行包管理器更新。",
         });
     });
 
@@ -109,7 +116,6 @@ describe("supacloud dispatcher", () => {
             fetchLatest: async () => "0.2.0",
             resolveInstalled: () => ({ entry: "/local/admin.js", version: "0.2.0" }),
             nodePath: "/usr/bin/node",
-            platform: "linux",
         });
 
         expect(plan).toEqual({
@@ -126,7 +132,6 @@ describe("supacloud dispatcher", () => {
             fetchLatest: async () => null,
             resolveInstalled: () => ({ entry: "/local/cli.js", version: "0.7.0" }),
             nodePath: "/usr/bin/node",
-            platform: "linux",
         });
 
         expect(plan.mode).toBe("local");
@@ -143,7 +148,6 @@ describe("supacloud dispatcher", () => {
             },
             resolveInstalled: () => ({ entry: "/local/cli.js", version: "0.7.0" }),
             nodePath: "/usr/bin/node",
-            platform: "linux",
         });
 
         expect(fetchCalls).toBe(0);

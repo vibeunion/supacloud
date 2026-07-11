@@ -112,7 +112,10 @@ templates/base/volumes/db/data/
 
 # Bun lockfile
 bun.lock
-!packages/web-console/bun.lock
+!packages/*/bun.lock
+!packages/edge-runtime/
+packages/edge-runtime/supacloud-edge-runtime-*
+!packages/edge-runtime/bun.lock
 config.env.deploy
 
 # SupaCloud build artifacts
@@ -166,3 +169,4 @@ OPENCODE.md
 .goosehints
 .zed/CONVENTIONS.md
 .agents/goal-forge/runs/
+CODEBUDDY.md

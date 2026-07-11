@@ -2,6 +2,7 @@
  * SSH — Compound tool (13→1)
  * Install, upgrade, diagnose, exec, tenant mgmt — all via SSH
  */
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { SshTransport } from "../transports/ssh";
 
@@ -9,28 +10,49 @@ const SAFE_CONTAINER_NAME = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/;
 const SAFE_PROJECT_REF = /^[a-z0-9-]{1,20}$/;
 const SAFE_RELEASE_TAG = /^[a-zA-Z0-9._-]{1,80}$/;
 const SAFE_TIMEOUT_SECONDS = 300;
-const ALLOWED_EXEC_PREFIXES = [
-    "systemctl ",
-    "journalctl ",
-    "docker ps",
-    "docker logs ",
-    "podman ps",
-    "podman logs ",
-    "ps ",
-    "ss ",
-    "df ",
-    "free ",
-    "uname ",
-    "cat /etc/os-release",
-    "tail ",
-    "ls ",
-    "du ",
-    "pg_isready",
-    "curl ",
-    "grep ",
-    "find ",
-    "hostname",
-];
+const SAFE_HOSTNAME = /^(?=.{1,253}$)(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)(?:\.(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?))*$/;
+const SAFE_SYSTEMD_UNIT = /^[a-zA-Z0-9][a-zA-Z0-9_.@:-]{0,127}$/;
+const SAFE_DB_IDENTIFIER = /^[a-zA-Z_][a-zA-Z0-9_-]{0,62}$/;
+
+function hostnameSchema(fieldName: string) {
+    return z.string()
+        .trim()
+        .min(1)
+        .max(253)
+        .refine(value => SAFE_HOSTNAME.test(value), { message: `Invalid ${fieldName}` })
+        .transform(value => value.toLowerCase());
+}
+
+function secretSchema(fieldName: string) {
+    return z.string()
+        .min(12, `${fieldName} must contain at least 12 characters`)
+        .max(256, `${fieldName} must contain at most 256 characters`)
+        .refine(value => value === value.trim() && !/[\u0000-\u001f\u007f]/.test(value), {
+            message: `Invalid ${fieldName}`,
+        });
+}
+
+function quoteEnvValue(value: string): string {
+    return `'${value.split("'").join("'\\''")}'`;
+}
+
+const REMOTE_ENV_REDACTION_AWK = "awk -F= 'BEGIN { IGNORECASE=1 } /^[A-Za-z_][A-Za-z0-9_]*=/ { key=$1; if (key ~ /(PASSWORD|PASS|SECRET|TOKEN|KEY|CREDENTIAL|DB_URI|DATABASE_URL|DSN)/) print key \"=[REDACTED]\"; else print; next } { print }'";
+
+function redactTenantConfig(value: string): string {
+    const redactedLines = value.split(/\r?\n/).map((line) => {
+        const match = line.match(/^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/);
+        if (!match) return line;
+        const key = match[1];
+        if (!/(?:PASSWORD|PASS|SECRET|TOKEN|KEY|CREDENTIAL|DB_URI|DATABASE_URL|DSN)/i.test(key)) {
+            return line;
+        }
+        return `${key}=[REDACTED]`;
+    }).join("\n");
+
+    return redactedLines
+        .replace(/\b([A-Za-z_][A-Za-z0-9_]*(?:PASSWORD|PASS|SECRET|TOKEN|KEY|CREDENTIAL|DB_URI|DATABASE_URL|DSN)[A-Za-z0-9_]*)=(?:"[^"]*"|'[^']*'|\S+)/gi, "$1=[REDACTED]")
+        .replace(/\b(postgres(?:ql)?:\/\/[^:\s/@]+:)[^@\s]+@/gi, "$1[REDACTED]@");
+}
 
 function assertSafeProjectRef(value: string, fieldName: string): string {
     if (!SAFE_PROJECT_REF.test(value)) {
@@ -55,7 +77,7 @@ function assertSafeReleaseTag(value: string): string {
 
 function assertSafeGithubProxy(value: string): string {
     const trimmed = value.trim();
-    if (/[\s\n\r;&|`$<>]/.test(trimmed)) {
+    if (/[\s\n\r;&|`$<>{}\[\]()*!?\\'\"]/.test(trimmed)) {
         throw new Error("Invalid github_proxy");
     }
     if (trimmed.toLowerCase() === "direct" || trimmed.toLowerCase() === "none") {
@@ -63,14 +85,13 @@ function assertSafeGithubProxy(value: string): string {
     }
 
     const parsed = new URL(trimmed);
-    if (!["http:", "https:"].includes(parsed.protocol)) {
-        throw new Error("Invalid github_proxy protocol");
+    if (parsed.protocol !== "https:") {
+        throw new Error("Invalid github_proxy protocol: HTTPS is required");
+    }
+    if (parsed.username || parsed.password || parsed.search || parsed.hash) {
+        throw new Error("Invalid github_proxy: credentials, query strings, and fragments are not allowed");
     }
     return parsed.toString();
-}
-
-function deriveStudioDomain(publicDomain: string): string {
-    return `studio.${publicDomain.trim().replace(/^(?:api|studio)\./i, "")}`;
 }
 
 function getExecTimeoutMs(timeoutSeconds?: number): number {
@@ -86,13 +107,100 @@ function assertSafeExecCommand(command: string): string {
     if (!trimmed) {
         throw new Error("'command' required");
     }
-    if (/[\n\r;&|`$<>]/.test(trimmed)) {
-        throw new Error("Unsafe shell metacharacters are not allowed in exec command");
+    const reject = (): never => {
+        throw new Error("Command is outside the allowed read-only diagnostic grammar");
+    };
+    if (!/^[\x20-\x7e]+$/.test(trimmed) || /[\n\r;&|`$<>\\'\"()[\]{}*?!~#]/.test(trimmed)) reject();
+
+    const tokens = trimmed.split(/\s+/);
+    const commandName = tokens[0];
+
+    if (commandName === "systemctl") {
+        const action = tokens[1];
+        if (["list-units", "list-unit-files"].includes(action)) {
+            if (tokens.length === 2 || (tokens.length === 3 && tokens[2] === "--no-pager")) return trimmed;
+            reject();
+        }
+        if (["status", "is-active", "is-enabled"].includes(action) && SAFE_SYSTEMD_UNIT.test(tokens[2] || "")) {
+            if (tokens.length === 3 || (tokens.length === 4 && tokens[3] === "--no-pager")) return trimmed;
+        }
+        reject();
     }
-    if (!ALLOWED_EXEC_PREFIXES.some(prefix => trimmed === prefix.trimEnd() || trimmed.startsWith(prefix))) {
-        throw new Error("Command is outside the allowed diagnostic command set");
+
+    if (commandName === "journalctl") {
+        let unit = "";
+        let tailCount = "";
+        let noPager = false;
+        for (let index = 1; index < tokens.length; index += 1) {
+            const token = tokens[index];
+            if (token === "-u" && !unit) {
+                unit = tokens[++index] || "";
+                if (!SAFE_SYSTEMD_UNIT.test(unit)) reject();
+            } else if (token === "-n" && !tailCount) {
+                tailCount = tokens[++index] || "";
+                const count = Number(tailCount);
+                if (!/^\d+$/.test(tailCount) || count < 1 || count > 1000) reject();
+            } else if (token === "--no-pager" && !noPager) {
+                noPager = true;
+            } else {
+                reject();
+            }
+        }
+        if (unit && tailCount && noPager) return trimmed;
+        reject();
     }
-    return trimmed;
+
+    if (commandName === "docker" || commandName === "podman") {
+        const action = tokens[1];
+        if (action === "ps") {
+            const flags = tokens.slice(2);
+            if (flags.every((flag, index) => ["-a", "--no-trunc"].includes(flag) && flags.indexOf(flag) === index)) {
+                return trimmed;
+            }
+            reject();
+        }
+        if (action === "logs") {
+            let index = 2;
+            if (tokens[index] !== "--tail") reject();
+            const countToken = tokens[index + 1] || "";
+            const count = Number(countToken);
+            if (!/^\d+$/.test(countToken) || count < 1 || count > 1000) reject();
+            index += 2;
+            if (index === tokens.length - 1 && SAFE_CONTAINER_NAME.test(tokens[index] || "")) return trimmed;
+            reject();
+        }
+        reject();
+    }
+
+    if (commandName === "ps" && trimmed === "ps -eo pid,user,comm") return trimmed;
+    if (commandName === "ss" && ["ss -s", "ss -tlnp", "ss -lntp"].includes(trimmed)) return trimmed;
+    if (commandName === "df" && (trimmed === "df -h" || /^df -h (?:\/|\/var|\/tmp)$/.test(trimmed))) return trimmed;
+    if (commandName === "free" && ["free", "free -h", "free -m"].includes(trimmed)) return trimmed;
+    if (commandName === "uname" && ["uname", "uname -a", "uname -r", "uname -m"].includes(trimmed)) return trimmed;
+    if (trimmed === "cat /etc/os-release") return trimmed;
+    if (commandName === "hostname" && ["hostname", "hostname -f"].includes(trimmed)) return trimmed;
+
+    if (commandName === "pg_isready") {
+        const seen = new Set<string>();
+        for (let index = 1; index < tokens.length; index += 2) {
+            const option = tokens[index];
+            const optionValue = tokens[index + 1];
+            if (!optionValue || seen.has(option)) reject();
+            seen.add(option);
+            if (option === "-h" && !["localhost", "127.0.0.1", "::1"].includes(optionValue)) reject();
+            else if (option === "-p") {
+                const port = Number(optionValue);
+                if (!/^\d+$/.test(optionValue) || port < 1 || port > 65535) reject();
+            } else if (["-U", "-d"].includes(option)) {
+                if (!SAFE_DB_IDENTIFIER.test(optionValue)) reject();
+            } else if (option !== "-h") {
+                reject();
+            }
+        }
+        return trimmed;
+    }
+
+    return reject();
 }
 
 export function registerSshTools(server: { tool: (...args: any[]) => void }, ssh: SshTransport): void {
@@ -108,14 +216,14 @@ Actions: ping, setup, install, upgrade, diagnose, exec, troubleshoot, container_
             ]).describe("Action to perform"),
             command: z.string().optional().describe("[exec] Restricted shell command to execute"),
             timeout_seconds: z.number().optional().describe("[exec] Timeout in seconds (default: 60)"),
-            public_domain: z.string().optional().describe("[install] API domain, e.g. api.example.com"),
-            studio_domain: z.string().optional().describe("[install] Studio domain"),
-            postgres_password: z.string().optional().describe("[install] DB password (auto-generated if empty)"),
-            dashboard_password: z.string().optional().describe("[install] Console password"),
+            public_domain: hostnameSchema("public_domain").optional().describe("[install] API domain, e.g. api.example.com"),
+            studio_domain: hostnameSchema("studio_domain").optional().describe("[install] Studio domain"),
+            postgres_password: secretSchema("postgres_password").optional().describe("[install] DB password (auto-generated if empty)"),
+            dashboard_password: secretSchema("dashboard_password").optional().describe("[install] Console password"),
             edge_runtime: z.enum(["bun"]).optional().describe("[install] Runtime (default: bun)"),
-            storage_type: z.enum(["juicefs", "garage", "rustfs", "minio", "external"]).optional().describe("[install] Storage backend"),
+            storage_type: z.enum(["juicefs", "minio"]).optional().describe("[install] Storage backend configurable through Admin"),
             version: z.string().optional().describe("[upgrade] Specific version"),
-            github_proxy: z.string().optional().describe("[upgrade] GitHub proxy prefix, e.g. https://ghproxy.net/ or direct"),
+            github_proxy: z.string().optional().describe("[install/upgrade] Explicit GitHub proxy prefix, or direct/none"),
             focus: z.enum(["all", "containers", "database", "network", "disk", "logs"]).optional().describe("[troubleshoot] Focus area"),
             container: z.string().optional().describe("[container_logs] Container name"),
             lines: z.number().optional().describe("[container_logs] Number of log lines (default: 100)"),
@@ -147,52 +255,134 @@ Actions: ping, setup, install, upgrade, diagnose, exec, troubleshoot, container_
                         "elif command -v yum &>/dev/null; then yum install -y compat-openssl11 libatomic 2>/dev/null; fi; " +
                         "ldconfig 2>/dev/null; git --version; openssl version"
                     );
-                    const sshSetup = await ssh.exec(
-                        "mkdir -p ~/.ssh && chmod 700 ~/.ssh && " +
-                        "if [ ! -f ~/.ssh/id_ed25519 ]; then ssh-keygen -t ed25519 -N '' -f ~/.ssh/id_ed25519; fi && " +
-                        "cat ~/.ssh/id_ed25519.pub >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys && " +
-                        "sed -i 's/^#\\?PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config && " +
-                        "sed -i 's/^#\\?PubkeyAuthentication.*/PubkeyAuthentication yes/' /etc/ssh/sshd_config && " +
-                        "grep -q '^PermitRootLogin' /etc/ssh/sshd_config || echo 'PermitRootLogin yes' >> /etc/ssh/sshd_config && " +
-                        "systemctl restart sshd || service ssh restart"
-                    );
-                    await ssh.exec("sleep 2");
-                    await ssh.exec("IP=$(hostname -I | cut -d' ' -f1) && ssh-keyscan -H localhost 127.0.0.1 $IP >> ~/.ssh/known_hosts 2>/dev/null && chmod 600 ~/.ssh/known_hosts");
-                    const verify = await ssh.exec("ssh -o StrictHostKeyChecking=no root@localhost 'echo SSH_SELF_OK'");
-                    const ok = verify.stdout.includes("SSH_SELF_OK");
-                    text = [ok ? "✅ SSH configured" : "❌ SSH verification failed",
-                        `Tools: ${baseTools.stdout.trim()}`, `SSH: exit ${sshSetup.code}`,
+                    const verify = await ssh.exec("echo SSH_SESSION_OK");
+                    const ok = verify.success && verify.stdout.includes("SSH_SESSION_OK");
+                    text = [ok ? "✅ SSH session verified" : "❌ SSH session verification failed",
+                        `Tools: ${baseTools.stdout.trim()}`,
                         `Verify: ${verify.stdout.trim() || verify.stderr.trim()}`].join("\n");
                     break;
                 }
                 case "install": {
                     if (!args.public_domain) throw new Error("'public_domain' required");
-                    const DIR = "/opt/supacloud", LOG = "/tmp/supacloud-install.log";
+                    const installId = randomUUID();
+                    const DIR = "/opt/supacloud";
+                    const LOG = `/var/log/supacloud/install-${installId}.log`;
+                    const STATUS = `/var/log/supacloud/install-${installId}.status`;
+                    const CONFIG = "/etc/supabase/install.env";
+                    const INPUT = `/etc/supabase/.install-input-${installId}.env`;
+                    const BOOTSTRAP = `/opt/.supacloud-bootstrap-${installId}`;
                     const REPO = "https://github.com/zuohuadong/supacloud.git";
+                    const configuredProxy = args.github_proxy ? assertSafeGithubProxy(args.github_proxy) : "direct";
+                    const proxyDisabled = ["direct", "none"].includes(configuredProxy.toLowerCase());
+                    const proxyPrefix = proxyDisabled ? "" : (configuredProxy.endsWith("/") ? configuredProxy : `${configuredProxy}/`);
+                    const bootstrapClone = `git clone --depth 1 --branch main ${quoteEnvValue(REPO)} ${quoteEnvValue(BOOTSTRAP)}`;
+                    const bootstrapDeps = await ssh.exec(
+                        `set -e; ` +
+                        `if ! command -v git >/dev/null 2>&1 || ! command -v curl >/dev/null 2>&1; then ` +
+                            `if command -v apt-get >/dev/null 2>&1; then ` +
+                                `apt-get update; DEBIAN_FRONTEND=noninteractive apt-get install -y git curl ca-certificates; ` +
+                            `elif command -v dnf >/dev/null 2>&1; then ` +
+                                `dnf install -y git curl ca-certificates; ` +
+                            `elif command -v yum >/dev/null 2>&1; then ` +
+                                `yum install -y git curl ca-certificates; ` +
+                            `else echo 'No supported package manager can install git and curl' >&2; exit 127; fi; ` +
+                        `fi; ` +
+                        `command -v git >/dev/null 2>&1; command -v curl >/dev/null 2>&1; ` +
+                        `echo BOOTSTRAP_DEPS_OK`,
+                        180_000,
+                    );
+                    if (!bootstrapDeps.success || !bootstrapDeps.stdout.includes("BOOTSTRAP_DEPS_OK")) {
+                        text = `❌ Bootstrap dependency preparation failed\n${bootstrapDeps.stderr.slice(-500)}`;
+                        break;
+                    }
                     const osCheck = await ssh.exec("cat /etc/os-release | grep -E 'NAME|VERSION_ID' | head -4");
                     const clone = await ssh.exec(
-                        `if [ -d "${DIR}/.git" ]; then git -C ${DIR} pull --ff-only; else git clone https://ghproxy.net/${REPO} ${DIR} 2>/dev/null || git clone ${REPO} ${DIR}; fi; echo CLONE_OK`, 120_000
+                        `set -e; umask 077; rm -rf ${quoteEnvValue(BOOTSTRAP)}; ` +
+                        `${bootstrapClone}; ` +
+                        `git -C ${quoteEnvValue(BOOTSTRAP)} remote set-url origin ${quoteEnvValue(REPO)}; ` +
+                        `test "$(git -C ${quoteEnvValue(BOOTSTRAP)} remote get-url origin)" = ${quoteEnvValue(REPO)}; ` +
+                        `test "$(git -C ${quoteEnvValue(BOOTSTRAP)} symbolic-ref --short HEAD)" = main; ` +
+                        `test -z "$(git -C ${quoteEnvValue(BOOTSTRAP)} status --porcelain --untracked-files=no)"; ` +
+                        `git -C ${quoteEnvValue(BOOTSTRAP)} ls-files --error-unmatch setup.sh scripts/lib/install_config.sh scripts/lib/release_assets.sh >/dev/null; ` +
+                        `test -f ${quoteEnvValue(`${BOOTSTRAP}/setup.sh`)}; echo BOOTSTRAP_OK`,
+                        120_000,
                     );
-                    if (!clone.stdout.includes("CLONE_OK")) { text = `❌ Clone failed\n${clone.stderr.slice(-500)}`; break; }
+                    if (!clone.stdout.includes("BOOTSTRAP_OK")) {
+                        await ssh.exec(`rm -rf ${quoteEnvValue(BOOTSTRAP)}`);
+                        text = `❌ Trusted bootstrap clone failed\n${clone.stderr.slice(-500)}`;
+                        break;
+                    }
+                    const prepareProtectedPaths = await ssh.exec(
+                        `umask 077; install -d -m 700 /etc/supabase /var/log/supacloud; ` +
+                        `: > ${quoteEnvValue(LOG)}; : > ${quoteEnvValue(STATUS)}; ` +
+                        `chmod 600 ${quoteEnvValue(LOG)} ${quoteEnvValue(STATUS)}`,
+                    );
+                    if (!prepareProtectedPaths.success) {
+                        await ssh.exec(`rm -rf ${quoteEnvValue(BOOTSTRAP)}`);
+                        text = `❌ Unable to prepare protected install input and log paths\n${prepareProtectedPaths.stderr.slice(-500)}`;
+                        break;
+                    }
                     const envLines = [
-                        `SUPABASE_PUBLIC_DOMAIN=${args.public_domain}`,
-                        `SUPABASE_STUDIO_DOMAIN=${args.studio_domain ?? deriveStudioDomain(args.public_domain)}`,
-                        `EDGE_RUNTIME=${args.edge_runtime || "bun"}`,
-                        `S3_STORAGE_TYPE=${args.storage_type || "juicefs"}`,
-                        args.postgres_password ? `POSTGRES_PASSWORD=${args.postgres_password}` : "",
-                        args.dashboard_password ? `DASHBOARD_PASSWORD=${args.dashboard_password}` : "",
+                        `SUPABASE_PUBLIC_DOMAIN=${quoteEnvValue(args.public_domain)}`,
+                        args.studio_domain ? `SUPABASE_STUDIO_DOMAIN=${quoteEnvValue(args.studio_domain)}` : "",
+                        args.edge_runtime ? `EDGE_RUNTIME=${quoteEnvValue(args.edge_runtime)}` : "",
+                        args.storage_type ? `S3_STORAGE_TYPE=${quoteEnvValue(args.storage_type)}` : "",
+                        args.postgres_password ? `POSTGRES_PASSWORD=${quoteEnvValue(args.postgres_password)}` : "",
+                        args.dashboard_password ? `DASHBOARD_PASSWORD=${quoteEnvValue(args.dashboard_password)}` : "",
                     ].filter(Boolean).join("\n");
-                    await ssh.exec(`cat > ${DIR}/config.env << 'ENVEOF'\n${envLines}\nENVEOF`);
-                    const result = await ssh.exec(`chmod +x ${DIR}/install.sh && nohup bash ${DIR}/install.sh > ${LOG} 2>&1 & && INSTALL_PID=$! && sleep 3 && kill -0 $INSTALL_PID 2>/dev/null && echo "INSTALL_STARTED pid=$INSTALL_PID" || echo 'INSTALL_FAILED'`, 30_000);
-                    text = result.stdout.includes("INSTALL_STARTED")
-                        ? `✅ Installation started\nOS: ${osCheck.stdout.trim()}\n${result.stdout.trim()}\nLog: ${LOG}\n⏱ ~15-30 min`
-                        : `❌ Start failed\n${result.stderr.slice(-500)}`;
+                    try {
+                        await ssh.uploadText(INPUT, `${envLines}\n`, 0o600);
+                    } catch (error) {
+                        await ssh.exec(`rm -f ${quoteEnvValue(INPUT)}; rm -rf ${quoteEnvValue(BOOTSTRAP)}`);
+                        throw error;
+                    }
+                    const setupEnv = [
+                        `SUPACLOUD_INSTALL_DIR=${quoteEnvValue(DIR)}`,
+                        "SUPACLOUD_SETUP_ARTIFACT_MODE=release",
+                        "SUPACLOUD_FORCE_VERIFIED_RELEASE_ASSETS=true",
+                        `SUPACLOUD_SETUP_INPUT_FILE=${quoteEnvValue(INPUT)}`,
+                        `SUPACLOUD_INSTALL_CONFIG_FILE=${quoteEnvValue(CONFIG)}`,
+                        proxyPrefix ? `SUPACLOUD_GITHUB_PROXY=${quoteEnvValue(configuredProxy)}` : "",
+                    ].filter(Boolean).join(" ");
+                    const statusNext = `${STATUS}.next`;
+                    const backgroundScript = [
+                        "set +e",
+                        `trap "rm -f ${quoteEnvValue(INPUT)}; rm -rf ${quoteEnvValue(BOOTSTRAP)}" EXIT`,
+                        `printf 'RUNNING\\n' > ${quoteEnvValue(statusNext)}`,
+                        `chmod 600 ${quoteEnvValue(statusNext)}`,
+                        `mv -f ${quoteEnvValue(statusNext)} ${quoteEnvValue(STATUS)}`,
+                        `env ${setupEnv} bash ${quoteEnvValue(`${BOOTSTRAP}/setup.sh`)}`,
+                        "INSTALL_CODE=$?",
+                        `if [ "$INSTALL_CODE" -eq 0 ]; then printf 'SUCCEEDED\\n' > ${quoteEnvValue(statusNext)}; ` +
+                            `else printf 'FAILED:%s\\n' "$INSTALL_CODE" > ${quoteEnvValue(statusNext)}; fi`,
+                        `chmod 600 ${quoteEnvValue(statusNext)}`,
+                        `mv -f ${quoteEnvValue(statusNext)} ${quoteEnvValue(STATUS)}`,
+                        "exit \"$INSTALL_CODE\"",
+                    ].join("; ");
+                    const result = await ssh.exec(
+                        `umask 077; nohup bash -c ${quoteEnvValue(backgroundScript)} > ${quoteEnvValue(LOG)} 2>&1 </dev/null & ` +
+                        `INSTALL_PID=$!; sleep 5; ` +
+                        `INSTALL_STATE=$(sed -n '1p' ${quoteEnvValue(STATUS)} 2>/dev/null || true); ` +
+                        `case "$INSTALL_STATE" in ` +
+                        `RUNNING) if kill -0 "$INSTALL_PID" 2>/dev/null; then echo "INSTALL_STARTED pid=$INSTALL_PID"; ` +
+                            `else wait "$INSTALL_PID" 2>/dev/null; INSTALL_CODE=$?; ` +
+                            `echo "INSTALL_FAILED code=$INSTALL_CODE state=$INSTALL_STATE"; exit 1; fi ;; ` +
+                        `SUCCEEDED) echo "INSTALL_COMPLETED pid=$INSTALL_PID" ;; ` +
+                        `FAILED:*) INSTALL_CODE=$(printf '%s' "$INSTALL_STATE" | cut -d: -f2); ` +
+                            `echo "INSTALL_FAILED code=$INSTALL_CODE"; exit 1 ;; ` +
+                        `*) echo "INSTALL_FAILED code=unknown state=$INSTALL_STATE"; exit 1 ;; esac`,
+                        30_000,
+                    );
+                    const installAccepted = result.stdout.includes("INSTALL_STARTED") || result.stdout.includes("INSTALL_COMPLETED");
+                    text = installAccepted
+                        ? `✅ Installation started\nOS: ${osCheck.stdout.trim()}\n${result.stdout.trim()}\nLog: ${LOG}\nStatus: ${STATUS}\n⏱ ~15-30 min`
+                        : `❌ Start failed\n${result.stdout.slice(-500)}\n${result.stderr.slice(-500)}`;
                     break;
                 }
                 case "upgrade": {
                     const envParts = [
                         args.version ? `SUPACLOUD_UPGRADE_TAG=${assertSafeReleaseTag(args.version)}` : "",
-                        args.github_proxy ? `SUPACLOUD_GITHUB_PROXY=${assertSafeGithubProxy(args.github_proxy)}` : "",
+                        args.github_proxy ? `SUPACLOUD_GITHUB_PROXY=${quoteEnvValue(assertSafeGithubProxy(args.github_proxy))}` : "",
                     ].filter(Boolean);
                     const envPrefix = envParts.length > 0 ? `${envParts.join(" ")} ` : "";
                     const cmd = "if [ ! -x /usr/local/bin/supacloud ]; then " +
@@ -209,7 +399,7 @@ Actions: ping, setup, install, upgrade, diagnose, exec, troubleshoot, container_
                         "echo '=== Disk ===' && df -h /",
                         "echo '=== Docker ===' && (docker ps --format 'table {{.Names}}\t{{.Status}}' 2>/dev/null || echo 'Not found')",
                         "echo '=== PostgreSQL ===' && (pg_isready 2>/dev/null && echo 'Running' || echo 'Not detected')",
-                        "echo '=== Management API ===' && (curl -sf http://localhost:9090/v1/projects > /dev/null && echo 'Running' || echo 'Not running')",
+                        "echo '=== Management API ===' && (curl -sf http://localhost:9090/health > /dev/null && echo 'Running' || echo 'Not running')",
                     ];
                     const r = await ssh.exec(cmds.join(" && "));
                     text = r.stdout || r.stderr;
@@ -241,7 +431,7 @@ Actions: ping, setup, install, upgrade, diagnose, exec, troubleshoot, container_
                     );
                     if (f === "all" || f === "logs") checks.push(
                         "echo '══════ Install Log ══════'",
-                        "(tail -50 /var/log/supacloud-install.log 2>/dev/null || tail -50 /tmp/supacloud-install.log 2>/dev/null || echo 'Not found')",
+                        "(latest_log=$(find /var/log/supacloud -maxdepth 1 -type f -name 'install-*.log' -printf '%T@ %p\\n' 2>/dev/null | sort -nr | head -1 | cut -d' ' -f2-); [ -n \"$latest_log\" ] && tail -50 \"$latest_log\" || echo 'Not found')",
                     );
                     if (f === "all" || f === "disk") checks.push(
                         "echo '══════ Large Dirs ══════'",
@@ -287,14 +477,27 @@ Actions: ping, setup, install, upgrade, diagnose, exec, troubleshoot, container_
                 case "tenant_inspect": {
                     if (!args.project_ref) throw new Error("'project_ref' required");
                     const projectRef = assertSafeProjectRef(args.project_ref, "project_ref");
-                    const r = await ssh.exec(`cat /etc/supabase/tenants/${projectRef}.env 2>/dev/null || echo 'Not found'`, 10_000);
-                    text = `📄 ${projectRef} tenant config:\n\n${r.stdout || r.stderr}`;
+                    const r = await ssh.exec([
+                        "set -eu",
+                        "found=0",
+                        `for file in /etc/supabase/tenants/${projectRef}.env /etc/supabase/tenants/${projectRef}_gotrue.env; do`,
+                        "  [ -f \"$file\" ] || continue",
+                        "  found=1",
+                        "  printf '\n# %s\n' \"$(basename \"$file\")\"",
+                        `  ${REMOTE_ENV_REDACTION_AWK} "$file"`,
+                        "done",
+                        "[ \"$found\" -eq 1 ] || { echo 'Tenant config not found' >&2; exit 1; }",
+                    ].join("\n"), 10_000);
+                    const output = redactTenantConfig(r.stdout || r.stderr);
+                    text = r.success
+                        ? `📄 ${projectRef} tenant config (sensitive values redacted):\n${output}`
+                        : `❌ Unable to inspect ${projectRef}:\n${output}`;
                     break;
                 }
                 case "tenant_diagnose": {
                     const checks = [
                         "echo '══════ Multi-tenant Diagnostic ══════'",
-                        "ps aux | grep -E 'postgrest|gotrue' | grep -v grep || echo 'No processes'",
+                        "ps -eo pid=,user=,comm= | grep -E 'postgrest|gotrue' | grep -v grep || echo 'No processes'",
                         "systemctl list-units 'supacloud-pgrst@*' 'supacloud-gotrue@*' --no-pager 2>/dev/null || echo 'N/A'",
                         "ls -l /etc/supabase/tenants/*.env 2>/dev/null || echo 'No config'",
                     ];
@@ -302,29 +505,39 @@ Actions: ping, setup, install, upgrade, diagnose, exec, troubleshoot, container_
                         const projectRef = assertSafeProjectRef(args.project_ref, "project_ref");
                         checks.push(
                             `systemctl status supacloud-pgrst@${projectRef} --no-pager 2>/dev/null || echo 'Not found'`,
-                            `cat /etc/supabase/tenants/${projectRef}.env 2>/dev/null | grep -v PASSWORD | grep -v SECRET || echo 'N/A'`,
+                            `for file in /etc/supabase/tenants/${projectRef}.env /etc/supabase/tenants/${projectRef}_gotrue.env; do [ -f "$file" ] && ${REMOTE_ENV_REDACTION_AWK} "$file"; done`,
                         );
                     }
                     const r = await ssh.exec(checks.join("\n"), 30_000);
-                    text = r.stdout || r.stderr;
+                    text = redactTenantConfig(r.stdout || r.stderr);
                     break;
                 }
                 case "tenant_migrate": {
                     if (!args.source_ref || !args.target_ref) throw new Error("'source_ref' and 'target_ref' required");
                     const sourceRef = assertSafeProjectRef(args.source_ref, "source_ref");
                     const targetRef = assertSafeProjectRef(args.target_ref, "target_ref");
+                    if (sourceRef === targetRef) throw new Error("source_ref and target_ref must be different");
                     const s = args.schemas || "public,auth,storage";
                     if (!/^[a-z_,\s]+$/.test(s)) throw new Error("Invalid schemas");
-                    const schemaArgs = s.split(",").map((x: string) => x.trim()).filter(Boolean).map((x: string) => `-n ${x}`).join(" ");
+                    const schemas = s.split(",").map((x: string) => x.trim()).filter(Boolean);
+                    if (schemas.length === 0) throw new Error("At least one schema is required");
+                    const schemaArgs = schemas.map((schema: string) => `-n ${schema}`).join(" ");
                     const df = args.data_only ? "--data-only" : "";
                     const cmd = [
+                        "set -euo pipefail",
+                        "umask 077",
+                        "tmp_dir=\"$(mktemp -d /tmp/supacloud-migrate.XXXXXX)\"",
+                        "dump_file=\"$tmp_dir/tenant.dump\"",
+                        "trap 'rm -rf \"$tmp_dir\"' EXIT HUP INT TERM",
                         `echo 'Migrating: supa_${sourceRef} → supa_${targetRef}'`,
-                        `pg_dump -h localhost -U postgres -d supa_${sourceRef} ${schemaArgs} ${df} -Fc -f /tmp/migrate.dump 2>&1`,
-                        `pg_restore -h localhost -U postgres -d supa_${targetRef} --no-owner --no-acl /tmp/migrate.dump 2>&1 || true`,
-                        `rm -f /tmp/migrate.dump && echo '✅ Done'`,
+                        `pg_dump -h localhost -U postgres -d supa_${sourceRef} ${schemaArgs} ${df} -Fc -f "$dump_file"`,
+                        `pg_restore -h localhost -U postgres -d supa_${targetRef} --no-owner --no-acl --exit-on-error "$dump_file"`,
+                        "echo 'Migration complete'",
                     ].join("\n");
                     const r = await ssh.exec(cmd, 600_000);
-                    text = r.success ? `✅ Migration done\n${r.stdout}` : `❌ Errors\n${r.stdout}\n${r.stderr.slice(-1000)}`;
+                    text = r.success
+                        ? `✅ Migration done\n${r.stdout}`
+                        : `❌ Migration failed (exit ${r.code})\n${r.stdout}\n${r.stderr.slice(-1000)}`;
                     break;
                 }
                 default:

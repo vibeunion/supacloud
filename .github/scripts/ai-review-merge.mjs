@@ -48,6 +48,7 @@ const MAX_DIFF_CHARS = 100_000;
 const MAX_CONTEXT_FILE_CHARS = 8_000;
 const AI_UNAVAILABLE_COMMENT_PREFIX = '## AI Review Unavailable';
 const MAX_ERROR_SUMMARY_CHARS = 500;
+const ALLOWED_MERGE_BASE_REFS = new Set(['main', 'dev']);
 
 // --- AI provider failure handling ---------------------------------------
 
@@ -145,9 +146,11 @@ const BYPASS_PATTERNS = [
 
 // 自修改检测：PR 改动了审查机制自身的文件
 const SELF_MODIFY_PATHS = [
-  '.github/scripts/ai-review-merge.mjs',
-  '.github/workflows/ai-review-merge.yml',
   '.github/ai-review-context.md',
+];
+const SELF_MODIFY_PREFIXES = [
+  '.github/scripts/',
+  '.github/workflows/',
 ];
 
 
@@ -282,6 +285,40 @@ async function getPRDetails() {
   return ghFetch(`/pulls/${PR_NUM}`);
 }
 
+export function validatePullRequestForMerge(prDetails, {
+  expectedHeadSha,
+  expectedHeadRef,
+  expectedBaseRef,
+}) {
+  if (!prDetails || prDetails.state !== 'open') {
+    throw new Error('Pull request is not open.');
+  }
+  if (prDetails.draft) {
+    throw new Error('Pull request is still a draft.');
+  }
+
+  const headSha = prDetails.head?.sha;
+  const headRef = prDetails.head?.ref;
+  const baseRef = prDetails.base?.ref;
+  if (!headSha || !headRef || !baseRef) {
+    throw new Error('Pull request metadata is incomplete.');
+  }
+  if (!expectedHeadSha || headSha !== expectedHeadSha) {
+    throw new Error(`Pull request head SHA changed (expected ${expectedHeadSha || 'missing'}, current ${headSha}).`);
+  }
+  if (!ALLOWED_MERGE_BASE_REFS.has(baseRef)) {
+    throw new Error(`Pull request base branch ${baseRef} is not eligible for auto-merge.`);
+  }
+  if (!expectedBaseRef || baseRef !== expectedBaseRef) {
+    throw new Error(`Pull request base ref changed (expected ${expectedBaseRef || 'missing'}, current ${baseRef}).`);
+  }
+  if (!expectedHeadRef || headRef !== expectedHeadRef) {
+    throw new Error(`Pull request head ref changed (expected ${expectedHeadRef || 'missing'}, current ${headRef}).`);
+  }
+
+  return { headSha, headRef, baseRef };
+}
+
 async function getPRComments() {
   const comments = [];
   for (let page = 1; page <= 5; page += 1) {
@@ -314,40 +351,56 @@ async function getCommitMessages() {
 
 // --- CI Status Check ---------------------------------------------------
 
-async function checkCIStatus(sha) {
-  const checkSuites = await ghFetch(`/commits/${sha}/check-suites?per_page=100`);
-  const suites = checkSuites.check_suites || [];
+const IGNORED_REVIEW_CHECK_NAMES = new Set([
+  'AI Review & Auto-Merge',
+]);
+
+export function summarizeCIStatus({ checkRuns = [], statuses = [] }) {
+  const businessRuns = checkRuns.filter((run) => !IGNORED_REVIEW_CHECK_NAMES.has(run.name || ''));
+  if (businessRuns.length === 0 && statuses.length === 0) {
+    return {
+      allCompleted: false,
+      allPassed: false,
+      results: ['- No business CI checks found (fail-closed)'],
+    };
+  }
 
   const results = [];
   let allCompleted = true;
   let allPassed = true;
+  const passingConclusions = new Set(['success', 'neutral', 'skipped']);
 
-  for (const suite of suites) {
-    if (suite.status !== 'completed') {
+  for (const run of businessRuns) {
+    if (run.status !== 'completed') {
       allCompleted = false;
-      results.push(`- ${suite.app?.name || 'unknown'}: ${suite.status} (pending)`);
+      allPassed = false;
+      results.push(`- ${run.name || 'unknown'}: ${run.status || 'unknown'} (pending)`);
       continue;
     }
-    const conclusion = suite.conclusion;
-    if (conclusion !== 'success' && conclusion !== 'neutral') {
-      allPassed = false;
-    }
-    results.push(`- ${suite.app?.name || 'unknown'}: ${conclusion}`);
+    const conclusion = run.conclusion || 'missing';
+    if (!passingConclusions.has(conclusion)) allPassed = false;
+    results.push(`- ${run.name || 'unknown'}: ${conclusion}`);
   }
 
-  const statuses = await ghFetch(`/commits/${sha}/status?per_page=100`);
-  const statusList = statuses.statuses || [];
-  for (const s of statusList) {
-    if (s.state !== 'success' && s.state !== 'neutral') {
-      allPassed = false;
-    }
-    if (s.state === 'pending') {
-      allCompleted = false;
-    }
-    results.push(`- [status] ${s.context}: ${s.state}`);
+  for (const status of statuses) {
+    const state = status.state || 'missing';
+    if (state === 'pending') allCompleted = false;
+    if (state !== 'success' && state !== 'neutral') allPassed = false;
+    results.push(`- [status] ${status.context || 'unknown'}: ${state}`);
   }
 
   return { allCompleted, allPassed, results };
+}
+
+async function checkCIStatus(sha) {
+  const [checkRunsResponse, statusesResponse] = await Promise.all([
+    ghFetch(`/commits/${sha}/check-runs?per_page=100`),
+    ghFetch(`/commits/${sha}/status?per_page=100`),
+  ]);
+  return summarizeCIStatus({
+    checkRuns: checkRunsResponse.check_runs || [],
+    statuses: statusesResponse.statuses || [],
+  });
 }
 
 // --- Layer 1: Hard block — merge-bypass detection -----------------------
@@ -380,11 +433,14 @@ function detectBypassAttempts({ prBody, comments, reviewComments, commitMessages
 /**
  * 检测 PR 是否修改了审查机制自身的文件（Layer 4 — self-modification block）
  */
-function detectSelfModification(changedFiles) {
+export function detectSelfModification(changedFiles) {
   const modified = [];
   for (const file of changedFiles) {
     const name = file.filename || '';
-    if (SELF_MODIFY_PATHS.includes(name)) {
+    if (
+      SELF_MODIFY_PATHS.includes(name)
+      || SELF_MODIFY_PREFIXES.some((prefix) => name.startsWith(prefix))
+    ) {
       modified.push(name);
     }
   }
@@ -399,19 +455,25 @@ function detectSelfModification(changedFiles) {
  * 判断 PR 提交者是否为可信身份（项目成员或已知 bot）。
  * 可信身份才有资格自动合并；外部贡献者只做审查不合并。
  */
-function isTrustedSubmitter(prDetails) {
+export function isTrustedSubmitter(prDetails) {
   const authorAssoc = prDetails.author_association || "";
   const userLogin = prDetails.user?.login || "";
   const userType = prDetails.user?.type || "";
 
+  // Bot identity must be explicitly allowlisted. A third-party GitHub App or
+  // bot must not become merge-eligible merely because GitHub reports type=Bot
+  // or a broad repository association.
+  const isBotIdentity = userType === "Bot" || userLogin.endsWith("[bot]");
+  if (isBotIdentity) {
+    if (KNOWN_BOTS.has(userLogin)) {
+      return { trusted: true, reason: `allowlisted bot: ${userLogin}` };
+    }
+    return { trusted: false, reason: `untrusted bot: ${userLogin} (type=${userType})` };
+  }
+
   // 项目成员
   if (TRUSTED_ASSOCIATIONS.has(authorAssoc)) {
     return { trusted: true, reason: `author_association=${authorAssoc}` };
-  }
-
-  // 已知 bot（如 Dependabot, release-please）
-  if (userType === "Bot" || KNOWN_BOTS.has(userLogin)) {
-    return { trusted: true, reason: `bot: ${userLogin} (type=${userType})` };
   }
 
   return { trusted: false, reason: `author_association=${authorAssoc}, user=${userLogin}, type=${userType}` };
@@ -597,14 +659,31 @@ async function postComment(body) {
   });
 }
 
-async function mergePR() {
+export function buildMergeRequestBody({ prNumber, headRef, expectedHeadSha }) {
+  return {
+    commit_title: `Merge pull request #${prNumber} from ${headRef}`,
+    merge_method: 'squash',
+    sha: expectedHeadSha,
+  };
+}
+
+async function mergePR({ expectedHeadSha, expectedHeadRef, expectedBaseRef }) {
+  // Re-read immediately before the write so a force-push, close, or retarget
+  // between review and merge fails closed.
+  const currentPullRequest = await getPRDetails();
+  const current = validatePullRequestForMerge(currentPullRequest, {
+    expectedHeadSha,
+    expectedHeadRef,
+    expectedBaseRef,
+  });
   await ghFetch(`/pulls/${PR_NUM}/merge`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      commit_title: `Merge pull request #${PR_NUM} from ${HEAD_REF}`,
-      merge_method: 'squash',
-    }),
+    body: JSON.stringify(buildMergeRequestBody({
+      prNumber: PR_NUM,
+      headRef: current.headRef,
+      expectedHeadSha,
+    })),
   });
 }
 
@@ -752,7 +831,11 @@ async function main() {
     }
     console.log('AI approved and CI passed. Auto-merging...');
     try {
-      await mergePR();
+      await mergePR({
+        expectedHeadSha: sha,
+        expectedHeadRef: effectiveHeadRef,
+        expectedBaseRef: effectiveBaseRef,
+      });
       console.log('PR merged successfully.');
     } catch (err) {
       console.error('Merge failed:', err.message);

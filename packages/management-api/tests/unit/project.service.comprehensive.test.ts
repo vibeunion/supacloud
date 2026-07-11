@@ -4,6 +4,7 @@ const baseMock = mock(() => Promise.resolve([]));
 (baseMock as unknown as Record<string, unknown>).unsafe = mock(() => Promise.resolve([]));
 const actualDb = await import("../../src/db");
 const { jwtService } = await import("../../src/services/jwt.service");
+const { edgeFunctionService } = await import("../../src/services/edge-function.service");
 
 const jwtServiceMock = {
   generateProjectRef: spyOn(jwtService, "generateProjectRef"),
@@ -30,31 +31,12 @@ const routerServiceMock = {
 };
 
 const edgeFunctionServiceMock = {
-  read: mock(() => Promise.resolve("function code here")),
-  deploy: mock(() => Promise.resolve(true)),
-  deployDetailed: mock(() =>
-    Promise.resolve({ success: true, version: "1", bundled: true }),
-  ),
-  deployBundle: mock(() => Promise.resolve(true)),
-  deployBundleDetailed: mock(() =>
-    Promise.resolve({
-      success: true,
-      version: "2",
-      bundled: true,
-      files: 2,
-      import_map: null,
-    }),
-  ),
-  runtimeCheck: mock(() =>
-    Promise.resolve({
-      runtime_url: "http://127.0.0.1:9000",
-      active_version: "2",
-      active_artifact_path: "/tmp/index.js",
-      artifact_exists: true,
-      runtime_healthy: true,
-      preheat_ok: true,
-    }),
-  ),
+  read: spyOn(edgeFunctionService, "read"),
+  deploy: spyOn(edgeFunctionService, "deploy"),
+  deployDetailed: spyOn(edgeFunctionService, "deployDetailed"),
+  deployBundle: spyOn(edgeFunctionService, "deployBundle"),
+  deployBundleDetailed: spyOn(edgeFunctionService, "deployBundleDetailed"),
+  runtimeCheck: spyOn(edgeFunctionService, "runtimeCheck"),
 };
 
 const tenantRuntimeServiceMock = {
@@ -77,11 +59,6 @@ mock.module("../../src/services/database.service", () => ({
 
 mock.module("../../src/services/router.service", () => ({
   routerService: routerServiceMock,
-}));
-
-mock.module("../../src/services/edge-function.service", () => ({
-  edgeFunctionService: edgeFunctionServiceMock,
-  getVersionedArtifactPath: mock(() => Promise.resolve(null)),
 }));
 
 mock.module("../../src/services/tenant-runtime.service", () => ({

@@ -21,16 +21,17 @@ import { config } from "./config";
 import { checkAuth } from "./middleware/auth";
 import { checkRateLimit } from "./middleware/rate-limit";
 import { logAuditEvent, shouldAuditRequest } from "./services/audit.service";
-import { closeDb, sql } from "./db";
+import { closeDb } from "./db";
 import { authRoutes, deployRoutes, storageCompatRoutes } from "./routes";
 import { migrateLegacyVersionArtifacts } from "./services/edge-function.service";
 import { resolveRealtimeTenantHost } from "./utils/sdk-parity";
 import { resolveProjectRefFromApiKey } from "./utils/project-auth";
-import { isFrontendDomain } from "./utils/frontend-domains";
-import { isCaddyRouteDomain, isCaddyTlsBlockedDomain, normalizeCaddyHost } from "./utils/caddy-domains";
+import { recordRequestPeerAddress } from "./utils/client-ip";
 import { grafanaProxyRoutes } from "./routes/grafana";
 import { closeTaskWebSocket, messageTaskWebSocket, openTaskWebSocket } from "./routes/ws";
 import { isS3DataPlaneRequest } from "./utils/storage-s3-paths";
+import { studioAuthRoutes } from "./routes/studio-auth";
+import { caddyAskRoutes } from "./routes/caddy-ask";
 
 const WEB_CONSOLE_CURRENT_DIR = "/opt/supacloud/web-console/current";
 const WEB_CONSOLE_LEGACY_DIR = "/opt/supacloud/packages/web-console/build";
@@ -386,9 +387,9 @@ const app = new Elysia({ strictPath: false })
   // Rate limit headers + API version (Studio compatibility)
   .onAfterHandle(({ set }) => {
     set.headers ??= {};
-    set.headers["x-ratelimit-limit"] = "1000";
-    set.headers["x-ratelimit-remaining"] = "999";
-    set.headers["x-ratelimit-reset"] = String(
+    set.headers["x-ratelimit-limit"] ??= "1000";
+    set.headers["x-ratelimit-remaining"] ??= "999";
+    set.headers["x-ratelimit-reset"] ??= String(
       Math.ceil(Date.now() / 60000) * 60,
     );
     set.headers["x-supabase-api-version"] = "2024-01-01";
@@ -396,6 +397,7 @@ const app = new Elysia({ strictPath: false })
 
   // Health check (no auth required)
   .get("/health", () => ({ status: "ok", timestamp: new Date().toISOString() }))
+  .use(studioAuthRoutes)
 
   .get("/platform/projects", async ({ request, set }) => {
     const rejected = await rejectStudioCompatibilityRequest(request, set);
@@ -480,120 +482,9 @@ const app = new Elysia({ strictPath: false })
     }
   })
 
-  // ─── Studio Login (no auth required) ──────────────────────────────────
-  .post("/auth/login", async ({ body, set }) => {
-    const { username, password } = body as {
-      username: string;
-      password: string;
-    };
-    if (
-      username === config.studioUsername &&
-      password === config.studioPassword
-    ) {
-      // Generate a simple HMAC-based session token (valid for 24h)
-      const payload = JSON.stringify({
-        user: username,
-        exp: Date.now() + 86400000,
-      });
-      const encoder = new TextEncoder();
-      const key = await crypto.subtle.importKey(
-        "raw",
-        encoder.encode(config.masterToken),
-        { name: "HMAC", hash: "SHA-256" },
-        false,
-        ["sign"],
-      );
-      const sig = await crypto.subtle.sign(
-        "HMAC",
-        key,
-        encoder.encode(payload),
-      );
-      const token =
-        btoa(payload) +
-        "." +
-        Array.from(new Uint8Array(sig))
-          .map((b) => b.toString(16).padStart(2, "0"))
-          .join("");
-      return { success: true, token };
-    }
-    set.status = 401;
-    return { success: false, message: "Invalid username or password", code: "401" };
-  }, {
-    body: t.Object({
-      username: t.String(),
-      password: t.String(),
-    }),
-    detail: { tags: ["auth"], summary: "Studio login" },
-  })
-  .post("/auth/verify", async ({ body }) => {
-    const { token } = body as { token: string };
-    try {
-      const [payloadB64, sigHex] = token.split(".");
-      const payload = JSON.parse(atob(payloadB64));
-      if (payload.exp < Date.now()) return { valid: false, error: "expired" };
-      const encoder = new TextEncoder();
-      const key = await crypto.subtle.importKey(
-        "raw",
-        encoder.encode(config.masterToken),
-        { name: "HMAC", hash: "SHA-256" },
-        false,
-        ["sign"],
-      );
-      const sig = await crypto.subtle.sign(
-        "HMAC",
-        key,
-        encoder.encode(JSON.stringify(payload)),
-      );
-      const expected = Array.from(new Uint8Array(sig))
-        .map((b) => b.toString(16).padStart(2, "0"))
-        .join("");
-      // Use timing-safe comparison to prevent timing attacks
-      const sigBuf = Buffer.from(sigHex, "hex");
-      const expBuf = Buffer.from(expected, "hex");
-      const valid =
-        sigBuf.length === expBuf.length &&
-        crypto.timingSafeEqual(sigBuf, expBuf);
-      return { valid };
-    } catch (err: unknown) {
-      logger.warn("[Auth] Failed to verify session token signature", {
-        error: err,
-      });
-      return { valid: false };
-    }
-  }, {
-    body: t.Object({
-      token: t.String(),
-    }),
-    detail: { tags: ["auth"], summary: "Verify session token" },
-  })
+  .use(caddyAskRoutes)
 
-  .get("/v1/gateway/caddy/ask", async ({ query }) => {
-    const domain = normalizeCaddyHost(String((query as Record<string, unknown>).domain || (query as Record<string, unknown>).host || ""));
-    if (!domain) {
-      return new Response("missing domain", { status: 400 });
-    }
-    if (isCaddyTlsBlockedDomain(domain)) {
-      return new Response("domain blocked for auto TLS", { status: 403 });
-    }
-    if (domain === config.baseDomain || domain.endsWith(`.${config.baseDomain}`)) {
-      return new Response("ok");
-    }
-    const rows = await sql`
-      SELECT ref FROM projects
-      WHERE status != 'deleted'
-        AND deleted_at IS NULL
-        AND config::text ILIKE ${`%${domain}%`}
-      LIMIT 1
-    `;
-    if (rows.length > 0) return new Response("ok");
-    if (await isFrontendDomain(domain)) return new Response("ok");
-    if (await isCaddyRouteDomain(domain)) return new Response("ok");
-    return new Response("domain not allowed", { status: 403 });
-  }, {
-    detail: { tags: ["gateway"], summary: "Authorize Caddy On-Demand TLS domain" },
-  })
-
-  // WebSocket routes (no HTTP auth guard; WS uses query token)
+  // WebSocket routes perform their own cookie/project-token authentication.
   .use((await import("./routes/ws")).wsRoutes)
 
   // Main API Routes
@@ -1279,6 +1170,7 @@ async function bootstrap() {
         },
       },
       async fetch(request: Request, server: any) {
+        recordRequestPeerAddress(request, server.requestIP(request)?.address);
         const url = new URL(request.url);
 
         // ── Realtime WebSocket proxy ──────────────────────────────

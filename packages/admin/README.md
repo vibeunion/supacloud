@@ -8,8 +8,19 @@ Typical environment variables:
 
 - `SUPACLOUD_HOST`
 - `SUPACLOUD_SSH_KEY` or `SUPACLOUD_SSH_PASS`
+- `SUPACLOUD_SSH_HOST_FINGERPRINT` — required for SSH actions, in OpenSSH `SHA256:<base64>` form
 - `SUPACLOUD_API_URL`
 - `SUPACLOUD_API_TOKEN`
+
+SSH host keys are fail-closed: setting `SUPACLOUD_HOST` and credentials is not
+enough to enable SSH actions. Obtain the fingerprint through a trusted channel,
+compare it out of band, then set it explicitly. For example, the discovery
+command below is useful only after independently authenticating its result:
+
+```bash
+ssh-keyscan -p 22 server.example.com | ssh-keygen -lf -
+export SUPACLOUD_SSH_HOST_FINGERPRINT='SHA256:...'
+```
 
 Examples:
 

@@ -16,11 +16,167 @@ import { generateDbName, resolveRoleName, resolveBucketName, resolveAuthenticato
 import { tenantRuntimeService } from "./tenant-runtime.service";
 import { logger } from "../utils/logger";
 import { mergeProjectConfig, normalizeProjectConfig } from "../utils/project-config";
-import { $ } from "bun";
+import { createHash, createHmac, pbkdf2Sync, randomBytes } from "node:crypto";
+
+interface ParsedPostgresConnection {
+  username: string;
+  password: string;
+  hostname: string;
+  port: string;
+  database: string;
+  environment: Record<string, string | undefined>;
+}
+
+const POSTGRES_CONTROL_CHARACTER = /[\u0000-\u001f\u007f]/;
+const MAX_POSTGRES_DIAGNOSTIC_BYTES = 4_096;
+const MAX_POSTGRES_SECRET_BYTES = 1_024;
+const REDACTED_MARKER = "[REDACTED]";
+const OUTPUT_TRUNCATED_MARKER = "[output truncated]";
+const UTF8_ENCODER = new TextEncoder();
+const UTF8_DECODER = new TextDecoder();
+const POSTGRES_SSL_MODES = new Set(["disable", "allow", "prefer", "require", "verify-ca", "verify-full"]);
+
+function buildPostgresProcessEnvironment(connection: ParsedPostgresConnection): Record<string, string | undefined> {
+  const environment: Record<string, string | undefined> = { ...process.env };
+  for (const key of Object.keys(environment)) {
+    if (key === "DATABASE_URL" || key.startsWith("PG")) delete environment[key];
+  }
+  environment.PGPASSWORD = connection.password;
+  if (connection.environment.PGSSLMODE) {
+    environment.PGSSLMODE = connection.environment.PGSSLMODE;
+  }
+  return environment;
+}
+
+function appendBytes(left: Uint8Array, right: Uint8Array): Uint8Array {
+  if (left.byteLength === 0) return right.slice();
+  if (right.byteLength === 0) return left;
+  const combined = new Uint8Array(left.byteLength + right.byteLength);
+  combined.set(left);
+  combined.set(right, left.byteLength);
+  return combined;
+}
+
+function bytePatternMatches(source: Uint8Array, offset: number, pattern: Uint8Array): boolean {
+  if (offset + pattern.byteLength > source.byteLength) return false;
+  for (let index = 0; index < pattern.byteLength; index += 1) {
+    if (source[offset + index] !== pattern[index]) return false;
+  }
+  return true;
+}
+
+function diagnosticSecretPatterns(secrets: readonly string[]): Uint8Array[] {
+  const candidates = new Set<string>();
+  for (const secret of secrets) {
+    if (!secret) continue;
+    if (UTF8_ENCODER.encode(secret).byteLength > MAX_POSTGRES_SECRET_BYTES) {
+      throw new Error(`PostgreSQL diagnostic secret exceeds ${MAX_POSTGRES_SECRET_BYTES} UTF-8 bytes`);
+    }
+    candidates.add(secret);
+    try {
+      const encoded = encodeURIComponent(secret);
+      candidates.add(encoded);
+      candidates.add(encoded.replace(/%[0-9A-F]{2}/g, (match) => match.toLowerCase()));
+    } catch {
+      // The raw UTF-8 form is still redacted if the value cannot be URI-encoded.
+    }
+  }
+  return [...candidates]
+    .map((candidate) => UTF8_ENCODER.encode(candidate))
+    .filter((candidate) => candidate.byteLength > 0)
+    .sort((left, right) => right.byteLength - left.byteLength);
+}
+
+function boundedUtf8Text(text: string, maxBytes = MAX_POSTGRES_DIAGNOSTIC_BYTES): string {
+  if (UTF8_ENCODER.encode(text).byteLength <= maxBytes) return text;
+
+  const marker = `\n${OUTPUT_TRUNCATED_MARKER}`;
+  const prefixLimit = maxBytes - UTF8_ENCODER.encode(marker).byteLength;
+  let prefix = "";
+  let prefixBytes = 0;
+  for (const character of text) {
+    const characterBytes = UTF8_ENCODER.encode(character).byteLength;
+    if (prefixBytes + characterBytes > prefixLimit) break;
+    prefix += character;
+    prefixBytes += characterBytes;
+  }
+  return `${prefix}${marker}`;
+}
+
+async function readRedactedBoundedText(
+  stream: ReadableStream<Uint8Array>,
+  secrets: readonly string[],
+  maxBytes = MAX_POSTGRES_DIAGNOSTIC_BYTES,
+): Promise<string> {
+  const patterns = diagnosticSecretPatterns(secrets);
+  const longestPattern = patterns[0]?.byteLength ?? 1;
+  const replacement = UTF8_ENCODER.encode(REDACTED_MARKER);
+  const reader = stream.getReader();
+  const outputChunks: Uint8Array[] = [];
+  let outputBytes = 0;
+  let pending: Uint8Array<ArrayBufferLike> = new Uint8Array();
+
+  const appendOutput = (value: Uint8Array): boolean => {
+    const remainingCapture = Math.max(0, maxBytes + 1 - outputBytes);
+    if (remainingCapture > 0) {
+      outputChunks.push(value.subarray(0, remainingCapture).slice());
+    }
+    outputBytes += value.byteLength;
+    return outputBytes > maxBytes;
+  };
+  const finishTruncated = async (): Promise<string> => {
+    while (true) {
+      const { done } = await reader.read();
+      if (done) break;
+    }
+    const captured = outputChunks.reduce(appendBytes, new Uint8Array());
+    return boundedUtf8Text(UTF8_DECODER.decode(captured), maxBytes);
+  };
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (value) pending = appendBytes(pending, value);
+    const processLimit = done
+      ? pending.byteLength
+      : Math.max(0, pending.byteLength - longestPattern + 1);
+    let offset = 0;
+
+    while (offset < processLimit) {
+      const matchedPattern = patterns.find((pattern) => bytePatternMatches(pending, offset, pattern));
+      if (matchedPattern) {
+        if (appendOutput(replacement)) {
+          return finishTruncated();
+        }
+        offset += matchedPattern.byteLength;
+      } else {
+        if (appendOutput(pending.subarray(offset, offset + 1))) {
+          return finishTruncated();
+        }
+        offset += 1;
+      }
+    }
+
+    pending = pending.slice(offset);
+    if (done) break;
+  }
+
+  const captured = outputChunks.reduce(appendBytes, new Uint8Array());
+  return boundedUtf8Text(UTF8_DECODER.decode(captured), maxBytes);
+}
 
 function pgDollarQuote(value: string): string {
   const tag = `pw${Bun.hash(value).toString(36).slice(0, 6)}${crypto.randomUUID().slice(0, 8)}`;
   return `$${tag}$${value}$${tag}$`;
+}
+
+function createPostgresScramVerifier(password: string): string {
+  const iterations = 4_096;
+  const salt = randomBytes(16);
+  const saltedPassword = pbkdf2Sync(password, salt, iterations, 32, "sha256");
+  const clientKey = createHmac("sha256", saltedPassword).update("Client Key").digest();
+  const storedKey = createHash("sha256").update(clientKey).digest("base64");
+  const serverKey = createHmac("sha256", saltedPassword).update("Server Key").digest("base64");
+  return `SCRAM-SHA-256$${iterations}:${salt.toString("base64")}$${storedKey}:${serverKey}`;
 }
 
 export interface CreateBranchInput {
@@ -86,12 +242,12 @@ class BranchService {
     const dbUser = resolveRoleName(projectRef);
     const authenticatorRole = resolveAuthenticatorName(projectRef);
 
-    const [existing] = await sql`SELECT 1 FROM pg_database WHERE datname = ${dbName} LIMIT 1`;
-    if (existing) {
+    if (await this.databaseExists(dbName)) {
       throw new Error(`Database ${dbName} already exists; refusing to restore into a non-empty target`);
     }
+    const passwordVerifier = createPostgresScramVerifier(password);
 
-    await sql.unsafe(`
+    await this.executeUnsafeSql(`
       DO $$
       BEGIN
         IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'anon') THEN
@@ -104,67 +260,147 @@ class BranchService {
           CREATE ROLE service_role NOLOGIN NOINHERIT BYPASSRLS;
         END IF;
         IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = '${this.literalQuote(dbUser)}') THEN
-          CREATE ROLE ${this.identQuote(dbUser)} LOGIN CONNECTION LIMIT 20 PASSWORD ${pgDollarQuote(password)};
+          CREATE ROLE ${this.identQuote(dbUser)} LOGIN CONNECTION LIMIT 20 PASSWORD ${pgDollarQuote(passwordVerifier)};
         ELSE
-          ALTER ROLE ${this.identQuote(dbUser)} LOGIN CONNECTION LIMIT 20 PASSWORD ${pgDollarQuote(password)};
+          ALTER ROLE ${this.identQuote(dbUser)} LOGIN CONNECTION LIMIT 20 PASSWORD ${pgDollarQuote(passwordVerifier)};
         END IF;
         IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = '${this.literalQuote(authenticatorRole)}') THEN
-          CREATE ROLE ${this.identQuote(authenticatorRole)} CONNECTION LIMIT 30 NOINHERIT LOGIN PASSWORD ${pgDollarQuote(password)};
+          CREATE ROLE ${this.identQuote(authenticatorRole)} CONNECTION LIMIT 30 NOINHERIT LOGIN PASSWORD ${pgDollarQuote(passwordVerifier)};
         ELSE
-          ALTER ROLE ${this.identQuote(authenticatorRole)} CONNECTION LIMIT 30 NOINHERIT LOGIN PASSWORD ${pgDollarQuote(password)};
+          ALTER ROLE ${this.identQuote(authenticatorRole)} CONNECTION LIMIT 30 NOINHERIT LOGIN PASSWORD ${pgDollarQuote(passwordVerifier)};
         END IF;
       END
       $$;
     `);
 
-    await sql.unsafe(`CREATE DATABASE ${this.identQuote(dbName)} OWNER ${this.identQuote(dbUser)}`);
-    await sql.unsafe(`
+    await this.executeUnsafeSql(`CREATE DATABASE ${this.identQuote(dbName)} OWNER ${this.identQuote(dbUser)}`);
+    await this.executeUnsafeSql(`
       GRANT CONNECT, TEMPORARY ON DATABASE ${this.identQuote(dbName)} TO ${this.identQuote(dbUser)};
       GRANT CONNECT, TEMPORARY ON DATABASE ${this.identQuote(dbName)} TO ${this.identQuote(authenticatorRole)};
       GRANT anon, authenticated, service_role TO ${this.identQuote(authenticatorRole)};
     `);
   }
 
+  private async databaseExists(dbName: string): Promise<boolean> {
+    const [existing] = await sql`SELECT 1 FROM pg_database WHERE datname = ${dbName} LIMIT 1`;
+    return Boolean(existing);
+  }
+
+  private async executeUnsafeSql(statement: string): Promise<void> {
+    await sql.unsafe(statement);
+  }
+
   private async cloneDatabase(sourceDb: string, targetDb: string): Promise<void> {
     // The platform admin DB credentials are used for both sides of the dump/restore.
     const adminDbUrl = process.env.DATABASE_URL;
     if (!adminDbUrl) throw new Error("DATABASE_URL is not set; cannot clone branch database");
+    const connection = this.parsePostgresConnection(adminDbUrl);
+    const processEnvironment = buildPostgresProcessEnvironment(connection);
 
-    // Build source and target connection strings by swapping the db name.
-    const sourceUrl = this.swapDbName(adminDbUrl, sourceDb);
-    const targetUrl = this.swapDbName(adminDbUrl, targetDb);
+    // --no-owner --no-privileges avoids role mismatch errors on restore. Both
+    // processes receive discrete argv so credentials never cross a shell or argv.
+    const dump = Bun.spawn({
+      cmd: [
+        "pg_dump",
+        "--no-owner",
+        "--no-privileges",
+        "--host", connection.hostname,
+        "--port", connection.port,
+        "--username", connection.username,
+        "--dbname", sourceDb,
+      ],
+      env: processEnvironment,
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const restore = Bun.spawn({
+      cmd: [
+        "psql",
+        "--host", connection.hostname,
+        "--port", connection.port,
+        "--username", connection.username,
+        "--dbname", targetDb,
+        "--set", "ON_ERROR_STOP=on",
+        "--quiet",
+      ],
+      env: processEnvironment,
+      stdin: dump.stdout,
+      stdout: "ignore",
+      stderr: "pipe",
+    });
 
-    // Pipe pg_dump | psql to copy schema + data.
-    // --no-owner --no-privileges avoids role mismatch errors on restore.
-    const dumpCmd = `pg_dump --no-owner --no-privileges --dbname=${this.shellQuote(sourceUrl)}`;
-    const restoreCmd = `psql --dbname=${this.shellQuote(targetUrl)} --set ON_ERROR_STOP=on -q`;
-
-    // Use a shell pipeline via Bun.$ so stdout of pg_dump feeds psql stdin.
-    const result = await $`${{ raw: `${dumpCmd} | ${restoreCmd}` }}`.nothrow().quiet();
-    if (result.exitCode !== 0) {
-      const stderr = result.stderr.toString();
-      throw new Error(`Database clone failed: ${stderr.slice(0, 500)}`);
+    const [dumpExitCode, restoreExitCode, dumpStderr, restoreStderr] = await Promise.all([
+      dump.exited,
+      restore.exited,
+      readRedactedBoundedText(dump.stderr, [connection.password]),
+      readRedactedBoundedText(restore.stderr, [connection.password]),
+    ]);
+    if (dumpExitCode !== 0 || restoreExitCode !== 0) {
+      const failures: string[] = [];
+      if (dumpExitCode !== 0) {
+        failures.push(`pg_dump exited with code ${dumpExitCode}: ${dumpStderr.trim() || "no stderr output"}`);
+      }
+      if (restoreExitCode !== 0) {
+        failures.push(`psql exited with code ${restoreExitCode}: ${restoreStderr.trim() || "no stderr output"}`);
+      }
+      throw new Error(boundedUtf8Text(`Database clone failed: ${failures.join("\n")}`));
     }
   }
 
-  private swapDbName(url: string, newDb: string): string {
+  private parsePostgresConnection(value: string): ParsedPostgresConnection {
+    if (POSTGRES_CONTROL_CHARACTER.test(value)) {
+      throw new Error("DATABASE_URL contains a forbidden control character");
+    }
+
+    let parsed: URL;
     try {
-      const parsed = new URL(url);
-      parsed.pathname = `/${newDb}`;
-      return parsed.toString();
+      parsed = new URL(value);
     } catch {
-      // postgresql://user:pass@host:port/dbname?sslmode=...
-      const slashIdx = url.lastIndexOf("/");
-      if (slashIdx === -1) return url;
-      const queryIdx = url.indexOf("?", slashIdx);
-      const base = url.slice(0, slashIdx + 1);
-      const query = queryIdx === -1 ? "" : url.slice(queryIdx);
-      return `${base}${newDb}${query}`;
+      throw new Error("DATABASE_URL must be a valid PostgreSQL URL");
     }
-  }
 
-  private shellQuote(value: string): string {
-    return `'${value.replace(/'/g, "'\\''")}'`;
+    if (parsed.protocol !== "postgres:" && parsed.protocol !== "postgresql:") {
+      throw new Error("DATABASE_URL must use the postgres or postgresql scheme");
+    }
+    if (parsed.hash) {
+      throw new Error("DATABASE_URL must not contain a fragment");
+    }
+
+    let username: string;
+    let password: string;
+    let database: string;
+    try {
+      username = decodeURIComponent(parsed.username);
+      password = decodeURIComponent(parsed.password);
+      database = decodeURIComponent(parsed.pathname.slice(1));
+    } catch {
+      throw new Error("DATABASE_URL contains invalid percent encoding");
+    }
+
+    const hostname = parsed.hostname.replace(/^\[(.*)\]$/, "$1");
+    const port = parsed.port || "5432";
+    if (!username || !password || !hostname || !database) {
+      throw new Error("DATABASE_URL must include username, password, hostname, and database");
+    }
+    if (UTF8_ENCODER.encode(password).byteLength > MAX_POSTGRES_SECRET_BYTES) {
+      throw new Error(`DATABASE_URL password exceeds ${MAX_POSTGRES_SECRET_BYTES} UTF-8 bytes`);
+    }
+    if (database.includes("/") || !/^\d{1,5}$/.test(port) || Number(port) < 1 || Number(port) > 65_535) {
+      throw new Error("DATABASE_URL contains an invalid database name or port");
+    }
+    for (const [name, component] of Object.entries({ username, password, hostname, database })) {
+      if (POSTGRES_CONTROL_CHARACTER.test(component)) {
+        throw new Error(`DATABASE_URL ${name} contains a forbidden control character`);
+      }
+    }
+
+    const environment: Record<string, string | undefined> = {};
+    const sslModes = parsed.searchParams.getAll("sslmode");
+    if (sslModes.length > 1 || (sslModes[0] && !POSTGRES_SSL_MODES.has(sslModes[0]))) {
+      throw new Error("DATABASE_URL contains an invalid sslmode");
+    }
+    if (sslModes[0]) environment.PGSSLMODE = sslModes[0];
+    return { username, password, hostname, port, database, environment };
   }
 
   async deleteBranch(branchRef: string): Promise<void> {
@@ -258,15 +494,11 @@ class BranchService {
   }
 
   private async applyRuntimeGrants(dbName: string, projectRef: string, password: string): Promise<void> {
-    const adminDbUrl = process.env.DATABASE_URL;
-    if (!adminDbUrl) throw new Error("DATABASE_URL is not set");
-
     const dbUser = resolveRoleName(projectRef);
     const authenticatorRole = resolveAuthenticatorName(projectRef);
-    const dbUrl = this.swapDbName(adminDbUrl, dbName);
+    const connection = this.adminPostgresConnection(dbName);
     const grantSql = `
       GRANT anon, authenticated, service_role TO ${this.identQuote(authenticatorRole)};
-      ALTER ROLE ${this.identQuote(authenticatorRole)} LOGIN PASSWORD ${pgDollarQuote(password)};
       GRANT CONNECT, TEMPORARY ON DATABASE ${this.identQuote(dbName)} TO ${this.identQuote(dbUser)};
       GRANT CONNECT, TEMPORARY ON DATABASE ${this.identQuote(dbName)} TO ${this.identQuote(authenticatorRole)};
       GRANT USAGE, CREATE ON SCHEMA public TO ${this.identQuote(dbUser)};
@@ -300,13 +532,11 @@ class BranchService {
       $$;
     `;
 
-    await this.runPsql(dbUrl, grantSql, "apply runtime grants");
+    await this.runPsql(connection, grantSql, "apply runtime grants", [password]);
   }
 
   private async validateRestoredDatabase(dbName: string): Promise<void> {
-    const adminDbUrl = process.env.DATABASE_URL;
-    if (!adminDbUrl) throw new Error("DATABASE_URL is not set");
-    const dbUrl = this.swapDbName(adminDbUrl, dbName);
+    const connection = this.adminPostgresConnection(dbName);
     const validationSql = `
       DO $$
       DECLARE
@@ -320,15 +550,46 @@ class BranchService {
       END
       $$;
     `;
-    await this.runPsql(dbUrl, validationSql, "validate restored database");
+    await this.runPsql(connection, validationSql, "validate restored database");
   }
 
-  private async runPsql(dbUrl: string, sqlText: string, label: string): Promise<void> {
-    const cmd = `psql --dbname=${this.shellQuote(dbUrl)} --set ON_ERROR_STOP=on -q --command=${this.shellQuote(sqlText)}`;
-    const result = await $`${{ raw: cmd }}`.nothrow().quiet();
-    if (result.exitCode !== 0) {
-      const stderr = result.stderr.toString();
-      throw new Error(`${label} failed: ${stderr.slice(0, 500)}`);
+  private adminPostgresConnection(database: string): ParsedPostgresConnection {
+    const adminDbUrl = process.env.DATABASE_URL;
+    if (!adminDbUrl) throw new Error("DATABASE_URL is not set");
+    return { ...this.parsePostgresConnection(adminDbUrl), database };
+  }
+
+  private async runPsql(
+    connection: ParsedPostgresConnection,
+    sqlText: string,
+    label: string,
+    additionalSecrets: readonly string[] = [],
+  ): Promise<void> {
+    const diagnosticSecrets = [connection.password, ...additionalSecrets];
+    diagnosticSecretPatterns(diagnosticSecrets);
+    const processEnvironment = buildPostgresProcessEnvironment(connection);
+    const child = Bun.spawn({
+      cmd: [
+        "psql",
+        "--host", connection.hostname,
+        "--port", connection.port,
+        "--username", connection.username,
+        "--dbname", connection.database,
+        "--set", "ON_ERROR_STOP=on",
+        "--quiet",
+      ],
+      env: processEnvironment,
+      stdin: new Blob([sqlText], { type: "text/plain;charset=utf-8" }),
+      stdout: "ignore",
+      stderr: "pipe",
+    });
+    const [exitCode, stderr] = await Promise.all([
+      child.exited,
+      readRedactedBoundedText(child.stderr, diagnosticSecrets),
+    ]);
+    if (exitCode !== 0) {
+      const diagnostic = stderr.trim() || "no stderr output";
+      throw new Error(boundedUtf8Text(`${label} failed: psql exited with code ${exitCode}: ${diagnostic}`));
     }
   }
 

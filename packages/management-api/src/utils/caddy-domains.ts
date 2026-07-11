@@ -20,6 +20,18 @@ export function normalizeCaddyHost(host: string): string {
   return host.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\.$/, "").replace(/:\d+$/, "");
 }
 
+export function isValidCaddyDomain(domain: string): boolean {
+  const normalized = normalizeCaddyHost(domain);
+  if (!normalized || normalized.length > 253 || normalized.includes("*")) return false;
+  const labels = normalized.split(".");
+  if (labels.length < 2) return false;
+  return labels.every((label) =>
+    label.length > 0
+    && label.length <= 63
+    && /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(label)
+  );
+}
+
 export function isCaddyTlsBlockedDomain(domain: string, blockedDomains = config.caddyTlsBlockedDomains): boolean {
   const normalizedDomain = normalizeCaddyHost(domain);
   if (!normalizedDomain) return false;

@@ -18,7 +18,7 @@
     "test:e2e": "bun test tests/e2e",
     "test:sdk": "bun test tests/integration/sdk.automation.test.ts",
     "test:compat": "bun test tests/integration/sdk-parity.test.ts && bun run tests/scripts/run-official-sdk-compliance.ts && bun run tests/scripts/run-official-cli-compliance.ts && bun run tests/scripts/run-openapi-compliance.ts",
-    "prebuild": "bun run scripts/patch-dependencies.ts && cd ../web-console && bun install && bun run build",
+    "prebuild": "bun run scripts/patch-dependencies.ts && cd ../web-console && bun install --frozen-lockfile && bun run build",
     "build:amd64": "bun build src/index.ts --compile --target=bun-linux-x64 --outfile=supacloud-linux-amd64",
     "build:arm64": "bun build src/index.ts --compile --target=bun-linux-arm64 --outfile=supacloud-linux-arm64",
     "build:linux": "bun run build:amd64 && bun run build:arm64",
@@ -34,8 +34,6 @@
     "@sinclair/typebox": "^0.34.49",
     "@svadmin/core": "^0.31.0",
     "@svadmin/elysia": "^0.10.7",
-    "ajv": "^8.20.0",
-    "ajv-formats": "^3.0.1",
     "aws4fetch": "^1.0.20",
     "elysia": "^1.4.29",
     "jose": "^6.2.3",
@@ -45,9 +43,12 @@
   "devDependencies": {
     "@supabase/supabase-js": "^2.108.2",
     "@types/bun": "^1.3.14",
+    "ajv": "^8.20.0",
+    "ajv-formats": "^3.0.1",
     "typescript": "^6.0.3"
   },
   "overrides": {
+    "fast-uri": "3.1.3",
     "hono": "^4.12.26",
     "@hono/node-server": "^2.0.5",
     "path-to-regexp": "^8.4.2"

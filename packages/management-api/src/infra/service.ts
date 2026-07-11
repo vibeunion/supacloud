@@ -52,7 +52,7 @@ After=network.target
 ExecStart=${execPath} ${args.join(' ')}
 Restart=always
 User=root
-EnvironmentFile=/opt/supacloud/config.env
+EnvironmentFile=-/etc/supabase/management-api.env
 
 [Install]
 WantedBy=multi-user.target

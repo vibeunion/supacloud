@@ -31,7 +31,6 @@ Environment=REALTIME_CONTAINER_NAME=supacloud-realtime
 Environment=REALTIME_DB_USER=supabase_admin
 Environment=PG_DATABASE=supacloud_meta
 EnvironmentFile=-/etc/supabase/management-api.env
-EnvironmentFile=-/opt/supacloud/config.env
 
 ExecStartPre=/bin/sh -c 'test -n "$$REALTIME_SECRET_KEY_BASE" && test -n "$$REALTIME_DB_ENC_KEY" && test "$${#REALTIME_DB_ENC_KEY}" -eq 16 && test -n "$$SUPACLOUD_JWT_SECRET" && test -n "$$REALTIME_IMAGE" && test -n "$$REALTIME_CONTAINER_NAME" && test -n "$$REALTIME_DB_USER" && test -n "$$PGPASSWORD"'
 ExecStartPre=-/usr/bin/podman rm -f ${REALTIME_CONTAINER_NAME}

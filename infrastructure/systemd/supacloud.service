@@ -23,7 +23,6 @@ Wants=patroni.service
 [Service]
 Type=simple
 EnvironmentFile=-/etc/supabase/management-api.env
-EnvironmentFile=-/opt/supacloud/config.env
 
 ExecStartPre=/opt/supacloud/scripts/pre_start_recovery.sh
 ExecStart=/usr/local/bin/supacloud

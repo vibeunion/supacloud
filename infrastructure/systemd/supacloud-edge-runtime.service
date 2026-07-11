@@ -9,7 +9,7 @@ Type=simple
 User=root
 WorkingDirectory=/opt/supacloud/edge-runtime
 ExecStartPre=/bin/bash -c 'for pid in $(lsof -iTCP:9000 -sTCP:LISTEN -t 2>/dev/null); do echo "[EdgeRT] Killing stale pid=$pid"; kill -9 $pid 2>/dev/null || true; done; sleep 0.3; true'
-ExecStart=/usr/local/bin/bun server.ts
+ExecStart=/usr/local/bin/supacloud-edge-runtime
 ExecStopPost=/bin/bash -c 'for pid in $(lsof -iTCP:9000 -sTCP:LISTEN -t 2>/dev/null); do kill -9 $pid 2>/dev/null || true; done; true'
 Restart=on-failure
 RestartSec=5
@@ -23,7 +23,6 @@ Environment=EDGE_FUNCTIONS_DIR=/opt/supacloud/functions
 Environment=EDGE_FUNCTIONS_BASE_DIR=/opt/supacloud/functions
 Environment=MANAGEMENT_API_URL=http://127.0.0.1:9090
 EnvironmentFile=-/etc/supabase/management-api.env
-EnvironmentFile=-/opt/supacloud/config.env
 
 NoNewPrivileges=true
 ProtectSystem=full

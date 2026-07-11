@@ -64,7 +64,7 @@ Deploy flow:
 
 **Edge Runtime dependencies** (Elysia etc.) are declared in `packages/edge-runtime/package.json`.
 
-The Bun entrypoint is `packages/edge-runtime/server.ts`, and the checked-in standalone unit runs `bun run server.ts` from `/opt/supacloud/edge-runtime`.
+The Bun entrypoint is `packages/edge-runtime/server.ts`. Production Release installs render the standalone unit with `/usr/local/bin/supacloud-edge-runtime`; Bun source mode is available only when local installation is explicitly selected with `SUPACLOUD_SETUP_ARTIFACT_MODE=local`.
 
 **User function dependencies** are auto-scanned during deployment:
 - `npm:xxx` — Bun native support ✅
@@ -81,7 +81,7 @@ supported control surface for user function `fetch()` calls.
 For private/self-signed services, prefer adding the issuing CA:
 
 ```bash
-# Host-level CA bundle, read by supacloud-edge-runtime.service through config.env
+# Host-level CA bundle, read by supacloud-edge-runtime.service through /etc/supabase/management-api.env
 SUPACLOUD_EDGE_TLS_CA_FILE=/etc/supacloud/edge-runtime/ca.pem
 
 # Or project/function-level inline PEM through Edge Function secrets

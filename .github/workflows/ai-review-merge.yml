@@ -1,13 +1,15 @@
 name: AI Review & Auto-Merge PR
 
 on:
-  pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
-  pull_request_review:
-    types: [submitted]
-  # 当 CI check suite 完成时触发，以便在 CI 通过后执行合并
-  check_suite:
+  workflow_run:
+    workflows: ["Management API CI"]
     types: [completed]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: "Pull request number to review"
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -15,67 +17,112 @@ permissions:
   checks: read
   statuses: read
 
+concurrency:
+  group: ai-review-merge-${{ github.event.workflow_run.pull_requests[0].number || inputs.pr_number || github.event.workflow_run.head_sha || github.run_id }}
+  cancel-in-progress: true
+
 jobs:
   ai-review-and-merge:
     name: AI Review & Auto-Merge
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    # 只在非 draft PR 上运行（check_suite 事件没有 draft 字段，默认允许）
-    if: >
-      github.event_name == 'check_suite' ||
-      github.event.pull_request.draft == false
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
 
     steps:
-      - name: Determine PR number
+      - name: Determine PR metadata
         id: pr-info
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+          MANUAL_PR_NUMBER: ${{ inputs.pr_number || '' }}
         run: |
-          if [ "${{ github.event_name }}" = "pull_request" ] || [ "${{ github.event_name }}" = "pull_request_review" ]; then
-            echo "pr_number=${{ github.event.pull_request.number }}" >> "$GITHUB_OUTPUT"
-            echo "head_sha=${{ github.event.pull_request.head.sha }}" >> "$GITHUB_OUTPUT"
-          elif [ "${{ github.event_name }}" = "check_suite" ]; then
-            HEAD_SHA="${{ github.event.check_suite.head_sha }}"
-            # 从 check_suite.pull_requests JSON 数组中提取 PR number
-            PR_JSON='${{ github.event.check_suite.pull_requests }}'
-            PR_NUMBER=$(echo "$PR_JSON" | jq -r '.[0].number // empty' 2>/dev/null || echo "")
-            # 如果数组为空，用 GitHub API 反查
-            if [ -z "$PR_NUMBER" ]; then
-              PR_NUMBER=$(curl -s -H "Authorization: Bearer $GITHUB_TOKEN" \
-                -H "Accept: application/vnd.github.v3+json" \
-                "https://api.github.com/repos/${{ github.repository }}/commits/${HEAD_SHA}/pulls" \
-                | jq -r '.[0].number // empty' 2>/dev/null || echo "")
-            fi
-            if [ -z "$PR_NUMBER" ]; then
-              echo "No PR associated with this check_suite. Skipping."
-              echo "pr_number=" >> "$GITHUB_OUTPUT"
-              echo "head_sha=" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
-            # 检查 PR 是否为 draft（通过 API）
-            DRAFT=$(curl -s -H "Authorization: Bearer $GITHUB_TOKEN" \
-              -H "Accept: application/vnd.github.v3+json" \
-              "https://api.github.com/repos/${{ github.repository }}/pulls/${PR_NUMBER}" \
-              | jq -r '.draft // false' 2>/dev/null)
-            if [ "$DRAFT" = "true" ]; then
-              echo "PR #${PR_NUMBER} is a draft. Skipping."
-              echo "pr_number=" >> "$GITHUB_OUTPUT"
-              echo "head_sha=" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
-            echo "pr_number=${PR_NUMBER}" >> "$GITHUB_OUTPUT"
-            echo "head_sha=${HEAD_SHA}" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            PR_NUMBER="$MANUAL_PR_NUMBER"
+            HEAD_SHA=""
+            RUN_BASE_REF=""
+            RUN_HEAD_REF=""
           else
+            PR_NUMBER=$(jq -r '.workflow_run.pull_requests[0].number // empty' "$GITHUB_EVENT_PATH")
+            HEAD_SHA=$(jq -r '.workflow_run.head_sha // empty' "$GITHUB_EVENT_PATH")
+            RUN_BASE_REF=$(jq -r '.workflow_run.pull_requests[0].base.ref // empty' "$GITHUB_EVENT_PATH")
+            RUN_HEAD_REF=$(jq -r '.workflow_run.pull_requests[0].head.ref // empty' "$GITHUB_EVENT_PATH")
+            if [ -z "$PR_NUMBER" ] || [ -z "$HEAD_SHA" ] || [ -z "$RUN_BASE_REF" ] || [ -z "$RUN_HEAD_REF" ]; then
+              echo "Trusted workflow run is missing immutable PR origin metadata. Skipping."
+              echo "pr_number=" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
+
+          if ! [[ "$PR_NUMBER" =~ ^[0-9]+$ ]]; then
+            echo "No pull request is associated with this trusted workflow run."
             echo "pr_number=" >> "$GITHUB_OUTPUT"
-            echo "head_sha=" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
-      - name: Checkout code
+          PR_JSON=$(curl -fsS \
+            -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${REPOSITORY}/pulls/${PR_NUMBER}")
+          STATE=$(jq -r '.state // empty' <<<"$PR_JSON")
+          DRAFT=$(jq -r '.draft // false' <<<"$PR_JSON")
+          BASE_REF=$(jq -r '.base.ref // empty' <<<"$PR_JSON")
+          PR_HEAD_REF=$(jq -r '.head.ref // empty' <<<"$PR_JSON")
+          if [ "$STATE" != "open" ]; then
+            echo "PR #${PR_NUMBER} is not open. Skipping."
+            echo "pr_number=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$DRAFT" = "true" ]; then
+            echo "PR #${PR_NUMBER} is a draft. Skipping."
+            echo "pr_number=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          case "$BASE_REF" in
+            main|dev) ;;
+            *)
+              echo "PR #${PR_NUMBER} targets ineligible base ${BASE_REF}. Skipping."
+              echo "pr_number=" >> "$GITHUB_OUTPUT"
+              exit 0
+              ;;
+          esac
+
+          if [ "$EVENT_NAME" != "workflow_dispatch" ]; then
+            if [ "$BASE_REF" != "$RUN_BASE_REF" ]; then
+              echo "Workflow base ${RUN_BASE_REF} no longer matches PR base ${BASE_REF}. Skipping."
+              echo "pr_number=" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            if [ "$PR_HEAD_REF" != "$RUN_HEAD_REF" ]; then
+              echo "Workflow head ${RUN_HEAD_REF} no longer matches PR head ${PR_HEAD_REF}. Skipping."
+              echo "pr_number=" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
+
+          PR_HEAD_SHA=$(jq -r '.head.sha' <<<"$PR_JSON")
+          if [ -n "$HEAD_SHA" ] && [ "$HEAD_SHA" != "$PR_HEAD_SHA" ]; then
+            echo "Workflow SHA ${HEAD_SHA} is stale; current PR head is ${PR_HEAD_SHA}. Skipping."
+            echo "pr_number=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "pr_number=${PR_NUMBER}" >> "$GITHUB_OUTPUT"
+          echo "head_sha=${PR_HEAD_SHA}" >> "$GITHUB_OUTPUT"
+          echo "base_ref=${BASE_REF}" >> "$GITHUB_OUTPUT"
+          echo "head_ref=${PR_HEAD_REF}" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout trusted default-branch control code
         if: steps.pr-info.outputs.pr_number != ''
         uses: actions/checkout@v7
         with:
-          fetch-depth: 0
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 1
+          persist-credentials: false
 
       - name: Setup Node.js
         if: steps.pr-info.outputs.pr_number != ''
@@ -83,7 +130,7 @@ jobs:
         with:
           node-version: 24.x
 
-      - name: Validate AI review script
+      - name: Validate trusted AI review script
         if: steps.pr-info.outputs.pr_number != ''
         run: |
           node --check .github/scripts/ai-review-merge.mjs
@@ -95,10 +142,10 @@ jobs:
           AI_API_KEY: ${{ secrets.AI_API_KEY }}
           AI_API_BASE: ${{ secrets.AI_API_BASE }}
           AI_MODEL: ${{ secrets.AI_MODEL }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ steps.pr-info.outputs.pr_number }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-          GITHUB_BASE_REF: ${{ github.event.pull_request.base.ref || '' }}
-          GITHUB_HEAD_REF: ${{ github.event.pull_request.head.ref || '' }}
+          GITHUB_BASE_REF: ${{ steps.pr-info.outputs.base_ref }}
+          GITHUB_HEAD_REF: ${{ steps.pr-info.outputs.head_ref }}
           HEAD_SHA: ${{ steps.pr-info.outputs.head_sha }}
         run: node .github/scripts/ai-review-merge.mjs

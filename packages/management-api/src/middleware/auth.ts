@@ -7,6 +7,48 @@ import {
   extractProjectRefFromPath,
 } from "../utils/project-auth";
 import { verifyProjectJwtPayload } from "../utils/project-jwt";
+import {
+  studioSessionService,
+  type StudioSessionService,
+} from "../services/studio-session.service";
+
+export const STUDIO_SESSION_COOKIE = "__Host-supacloud_session";
+
+export function readStudioSessionToken(request: Request): string | null {
+  const cookie = request.headers.get("cookie") || "";
+  for (const pair of cookie.split(";")) {
+    const [rawName, ...rawValue] = pair.trim().split("=");
+    if (rawName !== STUDIO_SESSION_COOKIE) continue;
+    const value = rawValue.join("=");
+    if (!value) return null;
+    try {
+      return decodeURIComponent(value);
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+export function isSameOriginStudioRequest(request: Request): boolean {
+  const origin = request.headers.get("origin");
+  if (!origin) return false;
+  try {
+    const requestUrl = new URL(request.url);
+    // Host is browser-controlled only through the target URL. Do not trust
+    // X-Forwarded-Host here: a direct client can forge it and bypass CSRF checks.
+    const expectedHost = request.headers.get("host")
+      || requestUrl.host;
+    const expectedProtocol = (request.headers.get("x-forwarded-proto") || requestUrl.protocol)
+      .replace(/:$/, "")
+      .toLowerCase();
+    const originUrl = new URL(origin);
+    return originUrl.host.toLowerCase() === expectedHost.toLowerCase()
+      && originUrl.protocol.replace(/:$/, "").toLowerCase() === expectedProtocol;
+  } catch {
+    return false;
+  }
+}
 
 export interface ProjectJwtContext {
   role: string;
@@ -54,27 +96,47 @@ export async function verifyProjectJwt(
 
 export type AuthContext =
   | { role: "master" }
-  | { role: "admin" }
+  | { role: "admin"; source: "bearer" | "cookie" }
   | { role: "project"; ref: string };
 
-export async function getAuthContext(request: Request): Promise<AuthContext | { status: number; body: { error: string } }> {
-  const authorization = request.headers.get("authorization");
+type AuthResolverDependencies = {
+  studioSessions?: Pick<StudioSessionService, "verify">;
+};
 
-  if (!authorization) {
-    return { status: 401, body: { error: "Missing Authorization header" } };
-  }
+export function createAuthResolver(dependencies: AuthResolverDependencies = {}) {
+  const studioSessions = dependencies.studioSessions ?? studioSessionService;
 
-  if (!authorization.startsWith("Bearer ")) {
-    return { status: 401, body: { error: "Invalid Authorization format" } };
-  }
+  return async function resolveAuthContext(
+    request: Request,
+  ): Promise<AuthContext | { status: number; body: { error: string } }> {
+    const authorization = request.headers.get("authorization");
 
-  const token = authorization.slice(7).trim();
-  const url = new URL(request.url);
-  const scopedRef = extractProjectRefFromPath(url.pathname);
+    if (!authorization) {
+      const sessionToken = readStudioSessionToken(request);
+      const session = sessionToken ? await studioSessions.verify(sessionToken) : null;
+      if (!session) {
+        return { status: 401, body: { error: "Missing Authorization header" } };
+      }
+      if (
+        !["GET", "HEAD", "OPTIONS"].includes(request.method.toUpperCase())
+        && !isSameOriginStudioRequest(request)
+      ) {
+        return { status: 403, body: { error: "Cross-origin session request denied" } };
+      }
+      return { role: "admin", source: "cookie" };
+    }
 
-  if (!token) {
-    return { status: 401, body: { error: "Invalid token" } };
-  }
+    if (!authorization.startsWith("Bearer ")) {
+      return { status: 401, body: { error: "Invalid Authorization format" } };
+    }
+
+    const token = authorization.slice(7).trim();
+    const url = new URL(request.url);
+    const scopedRef = extractProjectRefFromPath(url.pathname);
+
+    if (!token) {
+      return { status: 401, body: { error: "Invalid token" } };
+    }
 
   if (config.masterToken) {
     const tokenBuf = Buffer.from(token, "utf8");
@@ -84,33 +146,11 @@ export async function getAuthContext(request: Request): Promise<AuthContext | { 
     }
   }
 
-  try {
-    const parts = token.split(".");
-    if (parts.length === 2) {
-      const [payloadB64, sigHex] = parts;
-      const payload = JSON.parse(atob(payloadB64));
-      const expMs = typeof payload.exp === "number" && payload.exp < 10_000_000_000
-        ? payload.exp * 1000
-        : payload.exp;
-      if (config.masterToken && typeof expMs === "number" && expMs > Date.now()) {
-        const encoder = new TextEncoder();
-        const key = await crypto.subtle.importKey("raw", encoder.encode(config.masterToken), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
-        const sig = await crypto.subtle.sign("HMAC", key, encoder.encode(JSON.stringify(payload)));
-        const expected = Array.from(new Uint8Array(sig)).map(b => b.toString(16).padStart(2, "0")).join("");
-        const sigBuf = Buffer.from(sigHex, 'hex');
-        const expBuf = Buffer.from(expected, 'hex');
-        if (sigBuf.length === expBuf.length && crypto.timingSafeEqual(sigBuf, expBuf)) {
-           return { role: "admin" };
-        }
-      }
-    }
-  } catch { }
-
   const mcpPayload = await verifyMcpToken(token);
   let role = mcpPayload?.role;
   let ref = mcpPayload?.ref;
 
-  if (!mcpPayload && token.includes(".")) {
+  if (!mcpPayload && token.split(".").length === 3) {
     const [project] = scopedRef
       ? await metaSql`
           SELECT ref FROM projects
@@ -140,7 +180,7 @@ export async function getAuthContext(request: Request): Promise<AuthContext | { 
   }
 
   if (role === "admin") {
-    return { role: "admin" };
+    return { role: "admin", source: "bearer" };
   }
 
   if (role === "project" && ref) {
@@ -151,8 +191,11 @@ export async function getAuthContext(request: Request): Promise<AuthContext | { 
     return { role: "project", ref };
   }
 
-  return { status: 401, body: { error: "Invalid token" } };
+    return { status: 401, body: { error: "Invalid token" } };
+  };
 }
+
+export const getAuthContext = createAuthResolver();
 
 export async function checkAuth(request: Request): Promise<{ status: number; body: { error: string } } | undefined> {
   const auth = await getAuthContext(request);

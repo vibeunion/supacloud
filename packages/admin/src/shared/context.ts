@@ -8,6 +8,7 @@ export interface ResolvedContext {
     sshPort: number;
     sshKey: string;
     sshPass: string;
+    sshHostFingerprint: string;
     apiUrl: string;
     apiToken: string;
     projectRef: string;
@@ -132,6 +133,7 @@ export function resolveSupaCloudContext(
         sshPort: parseInt(env.SUPACLOUD_SSH_PORT ?? "22", 10),
         sshKey: env.SUPACLOUD_SSH_KEY ?? resolve(homedir(), ".ssh", "id_rsa"),
         sshPass: env.SUPACLOUD_SSH_PASS ?? "",
+        sshHostFingerprint: env.SUPACLOUD_SSH_HOST_FINGERPRINT ?? "",
         apiUrl,
         apiToken: env.SUPACLOUD_API_TOKEN ?? inferredToken.value,
         projectRef,

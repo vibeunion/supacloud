@@ -5,6 +5,7 @@
  */
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
+import { normalizeCaddyHost } from "./caddy-domains";
 
 const FRONTEND_BASE_DIR = "/var/supacloud/frontends";
 
@@ -18,22 +19,32 @@ interface DeploymentJson {
  * Returns true if the given domain appears as a `domain` or `custom_domains`
  * entry in any active frontend deployment on disk.
  */
-export async function isFrontendDomain(domain: string): Promise<boolean> {
+export async function isFrontendDomain(
+  domain: string,
+  baseDir = FRONTEND_BASE_DIR,
+): Promise<boolean> {
+  const normalizedDomain = normalizeCaddyHost(domain);
+  if (!normalizedDomain) return false;
   try {
-    const projectDirs = await readdir(FRONTEND_BASE_DIR, { withFileTypes: true });
+    const projectDirs = await readdir(baseDir, { withFileTypes: true });
     for (const entry of projectDirs) {
       if (!entry.isDirectory()) continue;
       try {
-        const deployDirs = await readdir(join(FRONTEND_BASE_DIR, entry.name), { withFileTypes: true });
+        const deployDirs = await readdir(join(baseDir, entry.name), { withFileTypes: true });
         for (const deploy of deployDirs) {
           if (!deploy.isDirectory()) continue;
           try {
             const cfg: DeploymentJson = await Bun.file(
-              join(FRONTEND_BASE_DIR, entry.name, deploy.name, "deployment.json"),
+              join(baseDir, entry.name, deploy.name, "deployment.json"),
             ).json();
             if (cfg.status === "deleted") continue;
-            if (cfg.domain === domain) return true;
-            if (Array.isArray(cfg.custom_domains) && cfg.custom_domains.includes(domain)) return true;
+            if (normalizeCaddyHost(cfg.domain || "") === normalizedDomain) return true;
+            if (
+              Array.isArray(cfg.custom_domains)
+              && cfg.custom_domains.some((candidate) =>
+                normalizeCaddyHost(candidate) === normalizedDomain
+              )
+            ) return true;
           } catch {
             continue;
           }

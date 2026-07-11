@@ -2,10 +2,18 @@
  * WebSocket Routes — Real-time task progress notifications
  *
  * Uses Elysia's native WebSocket support (powered by Bun's uWebSockets).
- * Auth: query parameter ?token=<session_token> (WebSocket can't send custom headers)
+ * Auth: same-origin Studio cookies for the console, or an explicit project
+ * token for non-browser/project-scoped clients.
  */
 import { Elysia, t } from "elysia";
-import { checkAuth, getAuthContext, requireAdminAuth } from "../middleware/auth";
+import {
+  checkAuth,
+  getAuthContext,
+  isSameOriginStudioRequest,
+  readStudioSessionToken,
+  requireAdminAuth,
+  type AuthContext,
+} from "../middleware/auth";
 import { logger } from "../utils/logger";
 
 // --- Subscriber registry ---
@@ -84,25 +92,33 @@ function parseTaskSocketMessage(message: unknown): Record<string, unknown> | nul
   return message && typeof message === "object" ? message as Record<string, unknown> : null;
 }
 
-export async function openTaskWebSocket(ws: TaskSocket) {
+type TaskSocketAuthResolver = (
+  request: Request,
+) => Promise<AuthContext | { status: number; body: { error: string } }>;
+
+export async function openTaskWebSocket(
+  ws: TaskSocket,
+  resolveAuth: TaskSocketAuthResolver = getAuthContext,
+) {
   const id = `ws-${++clientIdCounter}`;
   const url = new URL(ws.data.request?.url || "http://localhost", "http://localhost");
   const projectFilter = url.searchParams.get("project") || undefined;
   const token = url.searchParams.get("token") || "";
 
-  if (!token) {
-    ws.close(1008, "Authentication token required");
-    return;
-  }
-
   const authUrl = new URL(url.toString());
   if (projectFilter) {
     authUrl.pathname = `/v1/projects/${projectFilter}`;
   }
+  const headers = new Headers(ws.data.request?.headers);
+  if (token) headers.set("authorization", `Bearer ${token}`);
   const authRequest = new Request(authUrl.toString(), {
-    headers: { Authorization: `Bearer ${token}` },
+    headers,
   });
-  const auth = await getAuthContext(authRequest);
+  if (!token && readStudioSessionToken(authRequest) && !isSameOriginStudioRequest(authRequest)) {
+    ws.close(1008, "Cross-origin session request denied");
+    return;
+  }
+  const auth = await resolveAuth(authRequest);
   if ("status" in auth) {
     ws.close(auth.status === 403 ? 1008 : 1002, auth.body.error);
     return;

@@ -35,7 +35,7 @@ Legend:
 | Multi-project control plane on one cluster/server | **Built-in** | **Built-in** | **External / manual** |
 | Project lifecycle API (create/pause/restore/restart/settings) | **Built-in** | **Built-in** via Management API | **External / manual** |
 | Self-host operator web console | **Built-in** | N/A as self-host control plane | **External / manual** |
-| Project-user CLI + operator CLI split | **Built-in** (`supacloud`, `supacloud-admin`) | Partial (`supabase` CLI + hosted dashboard) | Partial (`supabase` CLI + manual ops) |
+| Project-user CLI + operator CLI split | **Built-in** (`supacloud-cli`, `supacloud-admin`; optional `supacloudctl` dispatcher) | Partial (`supabase` CLI + hosted dashboard) | Partial (`supabase` CLI + manual ops) |
 | Built-in tenant routing and per-project domains | **Built-in** | **Built-in** | **External / manual** |
 | Built-in multi-tenant task queue / background function receipts | **Built-in** | External pattern recommended for long jobs | External / manual |
 | Task monitoring UI and task control APIs | **Built-in** | External / manual | External / manual |

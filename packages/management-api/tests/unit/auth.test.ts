@@ -4,6 +4,7 @@ import {
   extractProjectRefCandidates,
   extractProjectRefFromPath,
 } from "../../src/utils/project-auth";
+import { createAuthResolver, isSameOriginStudioRequest } from "../../src/middleware/auth";
 
 describe("Auth Middleware Logic", () => {
   const masterToken = config.masterToken;
@@ -60,5 +61,65 @@ describe("Auth Middleware Logic", () => {
         role: "service_role",
       }),
     ).toEqual(["urocrsxqvrudgdgndiny"]);
+  });
+
+  test("accepts a valid Studio cookie but rejects cross-origin cookie writes", async () => {
+    const resolver = createAuthResolver({
+      studioSessions: {
+        verify: async (token: string) => token === "valid-session"
+          ? { id: "session-1", username: "admin", expiresAt: new Date(Date.now() + 60_000) }
+          : null,
+      },
+    });
+
+    const read = await resolver(new Request("https://console.example.com/v1/profile", {
+      headers: { cookie: "__Host-supacloud_session=valid-session" },
+    }));
+    expect(read).toMatchObject({ role: "admin", source: "cookie" });
+
+    const write = await resolver(new Request("https://console.example.com/v1/projects", {
+      method: "POST",
+      headers: {
+        cookie: "__Host-supacloud_session=valid-session",
+        origin: "https://evil.example.net",
+      },
+    }));
+    expect(write).toEqual({ status: 403, body: { error: "Cross-origin session request denied" } });
+  });
+
+  test("does not accept the removed two-part Studio HMAC bearer token", async () => {
+    const payload = JSON.stringify({ user: "admin", exp: Date.now() + 60_000 });
+    const encoder = new TextEncoder();
+    const key = await crypto.subtle.importKey(
+      "raw",
+      encoder.encode(config.masterToken),
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["sign"],
+    );
+    const signature = await crypto.subtle.sign("HMAC", key, encoder.encode(payload));
+    const sigHex = Array.from(new Uint8Array(signature))
+      .map((byte) => byte.toString(16).padStart(2, "0"))
+      .join("");
+    const legacyToken = `${btoa(payload)}.${sigHex}`;
+
+    const resolver = createAuthResolver({ studioSessions: { verify: async () => null } });
+    const result = await resolver(new Request("https://console.example.com/v1/profile", {
+      headers: { authorization: `Bearer ${legacyToken}` },
+    }));
+
+    expect(result).toEqual({ status: 401, body: { error: "Invalid token" } });
+  });
+
+  test("same-origin checks ignore a forged forwarded host", () => {
+    const request = new Request("https://console.example.com/v1/projects", {
+      method: "POST",
+      headers: {
+        origin: "https://attacker.example.net",
+        "x-forwarded-host": "attacker.example.net",
+        "x-forwarded-proto": "https",
+      },
+    });
+    expect(isSameOriginStudioRequest(request)).toBe(false);
   });
 });

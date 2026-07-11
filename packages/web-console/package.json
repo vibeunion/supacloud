@@ -29,7 +29,7 @@
     "svelte": "^5.56.4",
     "svelte-check": "^4.6.0",
     "svelte-sonner": "^1.1.1",
-    "sveltekit-superforms": "^2.30.1",
+    "sveltekit-superforms": "^2.30.2",
     "tailwind-animate": "^0.2.10",
     "tailwind-merge": "^3.6.0",
     "tailwind-variants": "^3.2.2",
@@ -52,5 +52,12 @@
     "marked-highlight": "^2.2.4",
     "monaco-editor": "^0.55.1",
     "svelte-i18n": "^4.0.1"
+  },
+  "overrides": {
+    "cookie": "0.7.2",
+    "dompurify": "3.4.11",
+    "esbuild": "0.28.1",
+    "joi": "17.13.4",
+    "undici": "7.28.0"
   }
 }

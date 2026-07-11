@@ -12,10 +12,28 @@ SupaCloud 部署系统提供配置驱动的自动化部署能力，支持：
 
 如果你是通过命令行操作 SupaCloud，建议优先区分两个入口：
 
-- `@supacloud/cli` / `supacloud`：项目使用者
+- `@supacloud/cli` / `supacloud-cli`：项目使用者
 - `@supacloud/admin` / `supacloud-admin`：服务器管理员
 
 本篇文档更偏部署流程本身；CLI 边界请参考 [CLI Guide](./cli-guide.md)。
+
+### 服务器安装配置与 Release 信任边界
+
+- 仓库中的 `config.env` 只提供受 Git 跟踪的只读默认值。
+- 安装输入由安装器原子持久化到 `/etc/supabase/install.env`，域名、数据库密码、PG 版本和存储选择在重复运行时保持稳定。
+- Management API 的运行时配置独立保存在 `/etc/supabase/management-api.env`，不得复制或覆盖安装输入文件。
+- root bootstrap 与安装源码只允许从官方 GitHub HTTPS 地址直连获取；直连失败时安装会关闭失败，不会通过代理克隆、拉取或执行源码。不要用第三方代理 URL 包裹并直接执行 root `setup.sh`。
+- `SUPACLOUD_GITHUB_PROXY` 只作为后续 GitHub Release/API 下载的显式 fallback，且 Release 产物仍必须通过 SHA256 与 provenance attestation；Admin 入口仅接受 HTTPS 代理。
+- 网络 Release 产物必须通过同一 Release 的 SHA256 校验和 GitHub build provenance attestation。`SUPACLOUD_ALLOW_UNVERIFIED_RELEASE=true` 仅是紧急 break-glass，仍保留 SHA256 校验。
+
+```bash
+# 官方 root bootstrap
+curl -fsSL https://raw.githubusercontent.com/zuohuadong/supacloud/main/setup.sh | sudo bash
+
+# 仅为后续 GitHub Release/API 下载配置显式 fallback
+curl -fsSL https://raw.githubusercontent.com/zuohuadong/supacloud/main/setup.sh \
+  | sudo env SUPACLOUD_GITHUB_PROXY=https://your-trusted-proxy.example bash
+```
 
 ### 1. 创建配置文件
 

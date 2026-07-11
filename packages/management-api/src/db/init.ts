@@ -214,6 +214,23 @@ export async function initDatabase() {
 
     CREATE INDEX IF NOT EXISTS idx_audit_logs_project_created ON audit_logs(project_ref, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_audit_logs_action_created ON audit_logs(action, created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS studio_sessions (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      username VARCHAR(320) NOT NULL,
+      token_hash TEXT UNIQUE NOT NULL,
+      expires_at TIMESTAMPTZ NOT NULL,
+      revoked_at TIMESTAMPTZ,
+      ip_hash TEXT NOT NULL,
+      user_agent TEXT NOT NULL DEFAULT '',
+      last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_studio_sessions_expires_at
+      ON studio_sessions(expires_at);
+    CREATE INDEX IF NOT EXISTS idx_studio_sessions_active
+      ON studio_sessions(expires_at) WHERE revoked_at IS NULL;
   `;
 
   // Use explicit config instead of URL to ensure correct database name
@@ -249,13 +266,13 @@ export async function initDatabase() {
 
     const result = await sql`
       SELECT COUNT(*) as count FROM information_schema.tables
-      WHERE table_schema = 'public' AND table_name IN ('organizations', 'organization_members', 'projects', 'project_tasks', 'platform_settings', 'project_secrets', 'deployment_history', 'system_tus_uploads', 'system_tus_chunks', 'system_signed_uploads', 'audit_logs')
+      WHERE table_schema = 'public' AND table_name IN ('organizations', 'organization_members', 'projects', 'project_tasks', 'platform_settings', 'project_secrets', 'deployment_history', 'system_tus_uploads', 'system_tus_chunks', 'system_signed_uploads', 'audit_logs', 'studio_sessions')
     `;
 
     const tableCount = Number(result[0]?.count || 0);
     logger.info(`Found ${tableCount} tables in database`);
 
-    if (tableCount < 11) {
+    if (tableCount < 12) {
       logger.info("Executing DDL statements...");
       await sql.unsafe(ddlQuery);
       logger.info("DDL executed successfully.");
@@ -344,6 +361,24 @@ export async function initDatabase() {
       },
       { statement: 'CREATE INDEX IF NOT EXISTS idx_audit_logs_project_created ON audit_logs(project_ref, created_at DESC)', description: "idx_audit_logs_project_created" },
       { statement: 'CREATE INDEX IF NOT EXISTS idx_audit_logs_action_created ON audit_logs(action, created_at DESC)', description: "idx_audit_logs_action_created" },
+      {
+        statement: `
+          CREATE TABLE IF NOT EXISTS studio_sessions (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            username VARCHAR(320) NOT NULL,
+            token_hash TEXT UNIQUE NOT NULL,
+            expires_at TIMESTAMPTZ NOT NULL,
+            revoked_at TIMESTAMPTZ,
+            ip_hash TEXT NOT NULL,
+            user_agent TEXT NOT NULL DEFAULT '',
+            last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+          )
+        `,
+        description: "studio_sessions table",
+      },
+      { statement: 'CREATE INDEX IF NOT EXISTS idx_studio_sessions_expires_at ON studio_sessions(expires_at)', description: "idx_studio_sessions_expires_at" },
+      { statement: 'CREATE INDEX IF NOT EXISTS idx_studio_sessions_active ON studio_sessions(expires_at) WHERE revoked_at IS NULL', description: "idx_studio_sessions_active" },
       { statement: 'ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS function_slug VARCHAR(255)', description: "project_tasks.function_slug" },
       { statement: 'ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS function_version VARCHAR(128)', description: "project_tasks.function_version" },
       { statement: 'ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS payload JSONB DEFAULT \'{}\'::jsonb', description: "project_tasks.payload" },
@@ -577,12 +612,12 @@ export async function initDatabase() {
 
     const [verify] = await sql`
       SELECT COUNT(*) as count FROM information_schema.tables
-      WHERE table_schema = 'public' AND table_name IN ('organizations', 'organization_members', 'projects', 'project_tasks', 'platform_settings', 'project_secrets', 'deployment_history', 'system_tus_uploads', 'system_tus_chunks', 'system_signed_uploads', 'audit_logs')
+      WHERE table_schema = 'public' AND table_name IN ('organizations', 'organization_members', 'projects', 'project_tasks', 'platform_settings', 'project_secrets', 'deployment_history', 'system_tus_uploads', 'system_tus_chunks', 'system_signed_uploads', 'audit_logs', 'studio_sessions')
     `;
 
     const finalPublicCount = Number(verify?.count || 0);
     logger.info(
-      `Database initialized successfully! Public tables verified: ${finalPublicCount}/11`,
+      `Database initialized successfully! Public tables verified: ${finalPublicCount}/12`,
     );
 
     // In CI mode where tests rewrite db_name to 'postgres', we must create Storage relations
@@ -656,9 +691,9 @@ export async function initDatabase() {
       }
     }
 
-    if (finalPublicCount < 11) {
+    if (finalPublicCount < 12) {
       throw new Error(
-        `Table creation verified but failed. Expected 11 public tables, got ${finalPublicCount}`,
+        `Table creation verified but failed. Expected 12 public tables, got ${finalPublicCount}`,
       );
     }
 

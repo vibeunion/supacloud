@@ -124,7 +124,7 @@ describe("database migration helpers", () => {
         }
     });
 
-    test("baselines missing migrations through migration-mode SQL", async () => {
+  test("baselines missing migrations through migration-mode SQL", async () => {
         const dir = mkdtempSync(join(tmpdir(), "supacloud-migrations-"));
         const posts: Array<{ path: string; body: any }> = [];
         try {
@@ -162,5 +162,79 @@ describe("database migration helpers", () => {
         } finally {
             rmSync(dir, { recursive: true, force: true });
         }
+  });
+
+  test("create_table_rls defaults to deny-all and removes the legacy permissive policy", async () => {
+    const posts: Array<{ path: string; body: { sql?: string } }> = [];
+    const callback = captureDatabaseTool({
+      post: async (path: string, body: { sql?: string }) => {
+        posts.push({ path, body });
+        return { ok: true, status: 200, data: { rows: [] } };
+      },
     });
+
+    const result = await callback({
+      action: "create_table_rls",
+      ref: "proj",
+      schema: "public",
+      table: "todos",
+      columns: "id uuid primary key, owner_id uuid not null",
+    });
+
+    expect(result.content[0]?.text).toContain("deny-all");
+    expect(posts).toHaveLength(1);
+    const sql = posts[0]?.body.sql || "";
+    expect(sql).toContain("ENABLE ROW LEVEL SECURITY");
+    expect(sql).toContain('DROP POLICY IF EXISTS "Enable ALL for authenticated"');
+    expect(sql).not.toContain("USING (true)");
+    expect(sql).not.toContain("WITH CHECK (true)");
+  });
+
+  test("create_table_rls owner mode creates idempotent auth.uid policies", async () => {
+    const posts: Array<{ body: { sql?: string } }> = [];
+    const callback = captureDatabaseTool({
+      post: async (_path: string, body: { sql?: string }) => {
+        posts.push({ body });
+        return { ok: true, status: 200, data: { rows: [] } };
+      },
+    });
+
+    const result = await callback({
+      action: "create_table_rls",
+      ref: "proj",
+      schema: "public",
+      table: "todos",
+      columns: "id uuid primary key, owner_id uuid not null",
+      policy_mode: "owner",
+      owner_column: "owner_id",
+    });
+
+    expect(result.content[0]?.text).toContain("owner policy");
+    const sql = posts[0]?.body.sql || "";
+    expect(sql).toContain('DROP POLICY IF EXISTS "SupaCloud owner select"');
+    expect(sql).toContain('FOR SELECT TO authenticated USING (auth.uid() IS NOT NULL AND auth.uid() = "owner_id")');
+    expect(sql).toContain('FOR INSERT TO authenticated WITH CHECK (auth.uid() IS NOT NULL AND auth.uid() = "owner_id")');
+    expect(sql).toContain('FOR UPDATE TO authenticated USING (auth.uid() IS NOT NULL AND auth.uid() = "owner_id") WITH CHECK (auth.uid() IS NOT NULL AND auth.uid() = "owner_id")');
+    expect(sql).toContain('FOR DELETE TO authenticated USING (auth.uid() IS NOT NULL AND auth.uid() = "owner_id")');
+  });
+
+  test("create_table_rls rejects unsafe identifiers and multi-statement column definitions", async () => {
+    const callback = captureDatabaseTool({
+      post: async () => ({ ok: true, status: 200, data: { rows: [] } }),
+    });
+
+    await expect(callback({
+      action: "create_table_rls",
+      ref: "proj",
+      table: 'todos";drop',
+      columns: "id uuid",
+    })).rejects.toThrow("Invalid table identifier");
+
+    await expect(callback({
+      action: "create_table_rls",
+      ref: "proj",
+      table: "todos",
+      columns: "id uuid); DROP TABLE secrets; --",
+    })).rejects.toThrow("Unsafe column definitions");
+  });
 });

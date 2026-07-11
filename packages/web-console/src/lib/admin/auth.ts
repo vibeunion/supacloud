@@ -1,17 +1,10 @@
 import type { AuthProvider } from '@svadmin/core';
+import { getStudioSession, loginStudio, logoutStudio } from '$lib/api';
 
 export const authProvider: AuthProvider = {
   login: async ({ username, password }) => {
-    const res = await fetch('/auth/login', {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username, password })
-    });
-    
-    const data = await res.json();
-    if (data.success && data.token) {
-      localStorage.setItem("supacloud_session", data.token);
-      
+    const result = await loginStudio(String(username ?? ''), String(password ?? ''));
+    if (result.success) {
       return {
         success: true,
         redirectTo: '/'
@@ -20,12 +13,12 @@ export const authProvider: AuthProvider = {
     
     return {
       success: false,
-      error: new Error(data.error || "Login failed")
+      error: new Error(result.error)
     };
   },
   
   logout: async () => {
-    localStorage.removeItem("supacloud_session");
+    await logoutStudio();
     return {
       success: true,
       redirectTo: '/login'
@@ -33,20 +26,9 @@ export const authProvider: AuthProvider = {
   },
   
   check: async () => {
-    const token = typeof localStorage !== 'undefined' ? localStorage.getItem("supacloud_session") : null;
-    if (!token) {
-      return { authenticated: false, redirectTo: '/login' };
-    }
-    
     try {
-      const res = await fetch('/auth/verify', {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token })
-      });
-      const data = await res.json();
-      if (!data.valid) {
-        localStorage.removeItem("supacloud_session");
+      const session = await getStudioSession();
+      if (!session.authenticated) {
         return { authenticated: false, redirectTo: '/login' };
       }
       return { authenticated: true };
@@ -56,15 +38,12 @@ export const authProvider: AuthProvider = {
   },
   
   getIdentity: async () => {
-    const token = typeof localStorage !== 'undefined' ? localStorage.getItem("supacloud_session") : null;
-    if (!token) return null;
-    
     try {
-      const [payloadB64] = token.split(".");
-      const payload = JSON.parse(atob(payloadB64));
+      const session = await getStudioSession();
+      if (!session.authenticated) return null;
       return {
-        id: payload.user || 'admin',
-        fullName: 'Super Admin',
+        id: session.username || 'admin',
+        fullName: session.username || 'Super Admin',
         avatar: ''
       };
     } catch {

@@ -15,7 +15,7 @@
 - **Management API**: Full REST API (60+ endpoints) for complete project lifecycle management
 - **Web Console**: Modern SvelteKit management dashboard with authentication
 - **CLI Compatibility**: Native support for the official `supabase` CLI (login, gen types, edge functions)
-- **CLI Tools**: `supacloud` for project users, `supacloud-admin` for server operators
+- **CLI Tools**: `supacloud-cli` for project users, `supacloud-admin` for server operators, and optional `supacloudctl` as the local unified dispatcher
 - **SupaCloud Pages**: Frontend static site hosting with GitHub webhook auto-deploy
 - **Pigsty Powered**: Enterprise-grade PostgreSQL with built-in monitoring (Grafana)
 - **One-Click Installation**: Fully automated setup via `install.sh`
@@ -104,7 +104,7 @@ supacloud-cli frontend list --ref <project-ref>
 ```
 
 `supacloud-cli` defaults to project context and auto-links from the current workspace `.env` when available.
-The old `supacloud` command name remains a compatibility alias, but avoid it because the server binary is also named `/usr/local/bin/supacloud`.
+There is no project-CLI compatibility alias named `supacloud`: that name is reserved for the compiled server binary at `/usr/local/bin/supacloud`. Use `supacloudctl` only for the optional local unified dispatcher.
 
 - `SUPABASE_URL` or `SUPACLOUD_API_URL`
 - `SUPABASE_SERVICE_ROLE_KEY` or `SUPACLOUD_API_TOKEN`
@@ -125,23 +125,41 @@ Use `supacloud-admin` for installation, upgrades, tenant runtime operations, and
 **One-Click Installation (Recommended)**
 
 ```bash
-# China users (accelerated via gh-proxy.net)
-curl -fsSL https://gh-proxy.net/https://raw.githubusercontent.com/zuohuadong/supacloud/main/setup.sh | sudo bash
-
-# International users
 curl -fsSL https://raw.githubusercontent.com/zuohuadong/supacloud/main/setup.sh | sudo bash
 ```
 
-**Standard Installation**
+The root bootstrap itself is always fetched from the official repository. Release/API downloads try GitHub directly first and use `SUPACLOUD_GITHUB_PROXY` only as an explicit fallback:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/zuohuadong/supacloud/main/setup.sh \
+  | sudo env SUPACLOUD_GITHUB_PROXY=https://your-trusted-proxy.example bash
+```
+
+**Source/Development Installation (local artifacts only)**
+
+Production hosts should use the verified one-click `setup.sh` flow above. A source checkout has no Release artifacts, so build every required component first and opt into local artifact mode explicitly:
+
 ```bash
 # 1. Clone repository
 git clone https://github.com/zuohuadong/supacloud.git
 cd supacloud
 
-# 2. Configure & Install
-sudo bash install.sh --ip 1.2.3.4 --domain api.example.com --s3 juicefs
+# 2. Build Management API, Edge Runtime, Caddy, and Web Console artifacts
+bun --cwd packages/management-api install
+bun --cwd packages/management-api run build:linux
+bun --cwd packages/edge-runtime install
+bun --cwd packages/edge-runtime run build:linux
+bun --cwd packages/web-console install --frozen-lockfile
+bun --cwd packages/web-console run build
+mkdir -p .local/bin dist
+GOBIN="$PWD/.local/bin" go install github.com/caddyserver/xcaddy/cmd/xcaddy@v0.4.5
+PATH="$PWD/.local/bin:$PATH" OUT_DIR="$PWD/dist" bash scripts/build_supacloud_caddy.sh
 
-# 3. Enable CLI
+# 3. Configure and install from the validated local build outputs
+sudo env SUPACLOUD_SETUP_ARTIFACT_MODE=local \
+  bash install.sh --ip 1.2.3.4 --domain api.example.com --s3 juicefs
+
+# 4. Enable CLI
 source /etc/profile.d/supacloud.sh
 ```
 
@@ -153,12 +171,13 @@ Production servers upgrade by replacing the released Linux binary at `/usr/local
 sudo supacloud upgrade --yes
 ```
 
-The upgrade command tries `https://ghproxy.net/` before direct GitHub access, which is the recommended path for mainland China servers. Override it when needed:
+Install and upgrade downloads are direct-first. Configure a trusted proxy only when an explicit fallback is required:
 
 ```bash
-sudo SUPACLOUD_GITHUB_PROXY=https://ghproxy.net/ supacloud upgrade --yes
-sudo SUPACLOUD_GITHUB_PROXY=direct supacloud upgrade --yes
+sudo SUPACLOUD_GITHUB_PROXY=https://your-trusted-proxy.example supacloud upgrade --yes
 ```
+
+Release artifacts require same-release SHA256 verification and GitHub build provenance attestation. `SUPACLOUD_ALLOW_UNVERIFIED_RELEASE=true` is an emergency break-glass mode that retains SHA256 verification but must not be a normal installation setting.
 
 Published release assets:
 
@@ -238,7 +257,7 @@ ORDER BY embedding <=> '[0.1,0.2,0.3]'::vector
 LIMIT 5;
 ```
 
-`supacloud` intentionally does **not** own platform installation, upgrades, SSH diagnostics, tenant runtime management, or destructive project lifecycle commands.
+`supacloud-cli` intentionally does **not** own platform installation, upgrades, SSH diagnostics, tenant runtime management, or destructive project lifecycle commands.
 
 #### Admin CLI: `supacloud-admin`
 
@@ -461,9 +480,9 @@ The desired state is stored in dedicated project metadata columns (`postgrest_de
 For human operators, the CLI split is now:
 
 - `@supacloud/cli` / `supacloud-cli`: project-scoped user CLI with `.env` auto-link defaults
-- `supacloud cli ...`: unified local entrypoint. It checks the npm `latest` dist-tag and runs a newer `@supacloud/cli` automatically; set `SUPACLOUD_NO_AUTO_UPDATE=1` to force the bundled version.
+- `supacloudctl cli ...`: unified local entrypoint. It checks the npm `latest` dist-tag only to print an update notice and always runs the installed `@supacloud/cli` version.
 - `@supacloud/admin` / `supacloud-admin`: server and platform administration CLI
-- `supacloud admin ...`: unified local entrypoint with the same latest-check behavior for `@supacloud/admin`.
+- `supacloudctl admin ...`: unified local entrypoint with the same notify-only latest check for `@supacloud/admin`.
 - On installed servers, `/usr/local/bin/supacloud` remains the compiled server binary; server upgrades still use `sudo supacloud upgrade --yes`.
 
 
@@ -475,7 +494,7 @@ supacloud/
 ├── setup.sh                    # Remote setup bootstrap
 ├── switch.sh                   # Runtime/storage switching tool
 ├── supacloud                   # CLI management tool (shell wrapper)
-├── config.env                  # Global configuration
+├── config.env                  # Read-only tracked defaults template
 ├── packages/
 │   ├── management-api/         # REST API server (Bun + Elysia)
 │   │   ├── src/
@@ -531,7 +550,9 @@ supacloud/
 
 ### Configuration
 
-Key settings in `config.env`:
+`config.env` is a read-only tracked defaults template. Installer-owned input is persisted at `/etc/supabase/install.env`; Management API runtime state is kept separately at `/etc/supabase/management-api.env`. Do not copy runtime state over the installation input.
+
+Key installation settings:
 
 | Variable | Description | Default |
 |----------|-------------|---------|
@@ -568,7 +589,7 @@ Key settings in `config.env`:
 - **Management API**: 完整的 REST API（60+ 个端点）管理项目及周边配置生命周期
 - **Web 管理面板**: 现代 SvelteKit 管理面板，内置登录认证
 - **CLI 生态兼容**: 完全兼容 Supabase 官方命令行体系（登录鉴权、数据库类型推导、云函数发布）
-- **CLI 工具**: `supacloud` 面向项目使用者，`supacloud-admin` 面向服务器管理员
+- **CLI 工具**: `supacloud-cli` 面向项目使用者，`supacloud-admin` 面向服务器管理员；可选用 `supacloudctl` 作为本地统一分发入口
 - **SupaCloud Pages**: 前端静态站点托管，支持 GitHub Webhook 自动部署
 - **Pigsty 驱动**: 企业级 PostgreSQL，内置 Grafana 监控
 - **一键部署**: 通过 `install.sh` 全自动安装
@@ -657,7 +678,7 @@ supacloud-cli frontend list --ref <project-ref>
 ```
 
 `supacloud-cli` 默认是项目级 CLI，会优先从当前目录 `.env` 自动绑定项目。
-旧的 `supacloud` 命令名仅作为兼容别名保留；生产服务器上的 `/usr/local/bin/supacloud` 是服务端二进制，文档和客户操作应避免使用裸 `supacloud` 指代项目 CLI。
+项目 CLI 不再提供名为 `supacloud` 的兼容别名：该名称只保留给 `/usr/local/bin/supacloud` 服务端二进制。本地统一分发入口必须明确使用 `supacloudctl`。
 
 - `SUPABASE_URL` 或 `SUPACLOUD_API_URL`
 - `SUPABASE_SERVICE_ROLE_KEY` 或 `SUPACLOUD_API_TOKEN`
@@ -678,23 +699,41 @@ npx @supacloud/admin project create --name my-app
 **一键安装（推荐）**
 
 ```bash
-# 中国用户 (使用 gh-proxy.net 加速)
-curl -fsSL https://gh-proxy.net/https://raw.githubusercontent.com/zuohuadong/supacloud/main/setup.sh | sudo bash
-
-# 国际用户
 curl -fsSL https://raw.githubusercontent.com/zuohuadong/supacloud/main/setup.sh | sudo bash
 ```
 
-**手动安装**
+Root 引导脚本始终从官方仓库获取。Release/API 下载默认先直连 GitHub，仅在明确配置时回退到可信代理：
+
 ```bash
-# 1. 下载代码 (中国用户使用加速)
-git clone https://gh-proxy.net/https://github.com/zuohuadong/supacloud.git
+curl -fsSL https://raw.githubusercontent.com/zuohuadong/supacloud/main/setup.sh \
+  | sudo env SUPACLOUD_GITHUB_PROXY=https://your-trusted-proxy.example bash
+```
+
+**源码/开发环境手动安装（仅本地产物）**
+
+生产服务器应使用上方经过校验的 `setup.sh` 一键安装链路。源码仓库不包含 Release 产物，因此必须先构建全部组件，并显式启用本地产物模式：
+
+```bash
+# 1. 从官方仓库下载代码
+git clone https://github.com/zuohuadong/supacloud.git
 cd supacloud
 
-# 2. 环境初始化 (支持命令行参数或读取 config.env)
-sudo bash install.sh --ip 1.2.3.4 --domain api.example.com --s3 juicefs
+# 2. 构建 Management API、Edge Runtime、Caddy 与 Web Console
+bun --cwd packages/management-api install
+bun --cwd packages/management-api run build:linux
+bun --cwd packages/edge-runtime install
+bun --cwd packages/edge-runtime run build:linux
+bun --cwd packages/web-console install --frozen-lockfile
+bun --cwd packages/web-console run build
+mkdir -p .local/bin dist
+GOBIN="$PWD/.local/bin" go install github.com/caddyserver/xcaddy/cmd/xcaddy@v0.4.5
+PATH="$PWD/.local/bin:$PATH" OUT_DIR="$PWD/dist" bash scripts/build_supacloud_caddy.sh
 
-# 3. 启用命令行工具
+# 3. 显式使用本地产物安装（参数会持久化到 /etc/supabase/install.env）
+sudo env SUPACLOUD_SETUP_ARTIFACT_MODE=local \
+  bash install.sh --ip 1.2.3.4 --domain api.example.com --s3 juicefs
+
+# 4. 启用命令行工具
 source /etc/profile.d/supacloud.sh
 ```
 
@@ -706,12 +745,13 @@ source /etc/profile.d/supacloud.sh
 sudo supacloud upgrade --yes
 ```
 
-升级命令会优先尝试 `https://ghproxy.net/`，然后再尝试直连 GitHub，适合国内服务器。代理失效时可以指定其它代理或强制直连：
+安装和升级下载默认先直连 GitHub。只有需要明确回退时才配置可信代理：
 
 ```bash
-sudo SUPACLOUD_GITHUB_PROXY=https://ghproxy.net/ supacloud upgrade --yes
-sudo SUPACLOUD_GITHUB_PROXY=direct supacloud upgrade --yes
+sudo SUPACLOUD_GITHUB_PROXY=https://your-trusted-proxy.example supacloud upgrade --yes
 ```
+
+Release 产物必须同时通过同一 Release 的 SHA256 和 GitHub build provenance attestation。`SUPACLOUD_ALLOW_UNVERIFIED_RELEASE=true` 仅用于紧急 break-glass，仍会校验 SHA256，不应作为常规安装配置。
 
 发布产物约定：
 
@@ -779,7 +819,7 @@ ORDER BY embedding <=> '[0.1,0.2,0.3]'::vector
 LIMIT 5;
 ```
 
-`supacloud` 有意不承载平台安装、升级、SSH 诊断、tenant runtime 管理，以及项目创建/删除/暂停这类平台级命令。
+`supacloud-cli` 有意不承载平台安装、升级、SSH 诊断、tenant runtime 管理，以及项目创建/删除/暂停这类平台级命令。
 
 #### 管理员 CLI：`supacloud-admin`
 
@@ -961,9 +1001,9 @@ desired state 保存在项目专用元数据列里（`postgrest_desired`、`post
 面向真人操作者的命令行现已拆分为：
 
 - `@supacloud/cli` / `supacloud-cli`：项目使用者 CLI，默认从当前目录 `.env` 自动绑定项目
-- `supacloud cli ...`：统一本地入口，执行前检查 npm `latest`，发现新版 `@supacloud/cli` 会自动运行最新版；设置 `SUPACLOUD_NO_AUTO_UPDATE=1` 可强制使用随包安装的版本
+- `supacloudctl cli ...`：统一本地入口，执行前只检查 npm `latest` 并提示更新，始终运行已安装的 `@supacloud/cli` 版本
 - `@supacloud/admin` / `supacloud-admin`：服务器管理员 CLI，处理 SSH、安装、升级、租户运维
-- `supacloud admin ...`：统一本地入口，对 `@supacloud/admin` 使用同样的 latest 检查
+- `supacloudctl admin ...`：统一本地入口，对 `@supacloud/admin` 使用相同的仅提示更新策略
 - 已安装服务器上的 `/usr/local/bin/supacloud` 仍是编译后的服务端二进制，服务端升级继续使用 `sudo supacloud upgrade --yes`
 
 
@@ -975,7 +1015,7 @@ supacloud/
 ├── setup.sh                    # 远程安装引导
 ├── switch.sh                   # 运行时/存储切换工具
 ├── supacloud                   # CLI 管理工具 (Shell 入口)
-├── config.env                  # 全局配置文件
+├── config.env                  # 只读、受 Git 跟踪的默认模板
 ├── packages/
 │   ├── management-api/         # REST API 服务 (Bun + Elysia)
 │   │   ├── src/
@@ -1031,7 +1071,9 @@ supacloud/
 
 ### 配置说明
 
-`config.env` 关键配置项：
+`config.env` 仅是只读默认模板。安装输入持久化在 `/etc/supabase/install.env`，Management API 运行时配置独立保存在 `/etc/supabase/management-api.env`；禁止用运行时配置覆盖安装输入。
+
+关键安装配置项：
 
 | 变量 | 说明 | 默认值 |
 |------|------|--------|

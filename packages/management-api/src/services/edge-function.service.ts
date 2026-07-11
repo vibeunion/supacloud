@@ -97,7 +97,6 @@ const DEFAULT_FUNCTION_CONFIG: EdgeFunctionConfig = {
  *   - Optional minification
  */
 
-const FUNCTIONS_ROOT = path.resolve(config.edgeFunctionsDir);
 const VERSIONED_DIR = ".versions";
 const SAFE_REF_REGEX = /^[a-zA-Z0-9_-]{1,64}$/;
 const SAFE_SLUG_REGEX = /^[a-zA-Z0-9_-]{1,128}$/;
@@ -163,6 +162,10 @@ function validateSlug(slug: string): string {
   return slug;
 }
 
+function getFunctionsRoot(): string {
+  return path.resolve(process.env.EDGE_FUNCTIONS_DIR || config.edgeFunctionsDir);
+}
+
 function assertInside(base: string, target: string): string {
   const resolvedBase = path.resolve(base);
   const resolvedTarget = path.resolve(target);
@@ -182,7 +185,8 @@ function resolveInside(base: string, relPath: string): string {
 }
 
 function getFuncDir(ref: string): string {
-  return assertInside(FUNCTIONS_ROOT, path.join(FUNCTIONS_ROOT, validateRef(ref)));
+  const functionsRoot = getFunctionsRoot();
+  return assertInside(functionsRoot, path.join(functionsRoot, validateRef(ref)));
 }
 
 function getFuncPath(ref: string, slug: string): string {
@@ -457,7 +461,7 @@ function runtimeInternalHeaders(): Record<string, string> {
 
 async function invalidateCache(ref: string, slug: string): Promise<void> {
   // 1. Clear the transform file cache
-  const cacheDir = path.join(FUNCTIONS_ROOT, ".cache", ref);
+  const cacheDir = path.join(getFunctionsRoot(), ".cache", ref);
   for (const ext of [".ts", ".js"]) {
     try {
       await fs.unlink(path.join(cacheDir, `${slug}${ext}`));
@@ -573,7 +577,7 @@ function parseLegacyVersionedSourceDir(entry: string): { slug: string; version: 
 
 export async function migrateLegacyVersionArtifacts(): Promise<{ moved: number }> {
   let moved = 0;
-  const projectDirs = await fs.readdir(FUNCTIONS_ROOT, { withFileTypes: true }).catch(() => []);
+  const projectDirs = await fs.readdir(getFunctionsRoot(), { withFileTypes: true }).catch(() => []);
 
   for (const projectDir of projectDirs) {
     if (!projectDir.isDirectory() || projectDir.name === ".cache") continue;
@@ -1249,7 +1253,7 @@ export const edgeFunctionService = {
     }>
   > {
     try {
-      const logDir = path.join(FUNCTIONS_ROOT, ref, ".logs");
+      const logDir = path.join(getFunctionsRoot(), ref, ".logs");
       await fs.mkdir(logDir, { recursive: true }).catch(() => {});
       const logFile = path.join(logDir, `${slug}.log`);
       const content = await Bun.file(logFile)

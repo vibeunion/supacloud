@@ -1,5 +1,6 @@
 <script lang="ts">
   import { page } from "$app/state";
+  import { resolve } from "$app/paths";
   import { apiClient } from "$lib/api";
   import { onMount } from "svelte";
   import { untrack } from "svelte";
@@ -239,13 +240,8 @@
     }
 
     liveStatus = isReconnect ? "reconnecting" : "connecting";
-    const token = localStorage.getItem("supacloud_session");
-    if (!token) {
-      liveStatus = "disconnected";
-      return;
-    }
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const params = new URLSearchParams({ project: projectRef ?? "", token });
+    const params = new URLSearchParams({ project: projectRef ?? "" });
     ws = new WebSocket(`${protocol}//${window.location.host}/ws/tasks?${params.toString()}`);
 
     ws.onopen = () => {
@@ -633,7 +629,7 @@
               </tr>
             </thead>
             <tbody class="divide-y divide-border/50">
-              {#each filteredTasks as task}
+              {#each filteredTasks as task (task.id)}
                 {@const Icon = getStatusIcon(task.status)}
                 <tr
                   class={`hover:bg-muted/20 transition-colors cursor-pointer ${selectedTask?.id === task.id ? "bg-brand/5" : ""}`}
@@ -753,9 +749,9 @@
               <Download size={15} />
               下载日志
             </button>
-            {#if selectedTask?.function_slug}
+            {#if selectedTask?.function_slug && projectRef}
               <a
-                href={`/project/${projectRef}/functions`}
+                href={resolve('/project/[ref]/functions', { ref: projectRef })}
                 class="inline-flex items-center gap-2 px-3 py-2 rounded-lg border bg-background hover:bg-muted/50 text-sm font-medium"
               >
                 <ExternalLink size={15} />
@@ -789,7 +785,7 @@
 
             {#if selectedTask.attempts && selectedTask.attempts.length > 0}
               <div class="space-y-3">
-                {#each selectedTask.attempts as attempt}
+                {#each selectedTask.attempts as attempt (attempt.attempt_no)}
                   <div class="rounded-xl border border-border/60 bg-background p-4 space-y-3">
                     <div class="flex items-center justify-between gap-3">
                       <div class="flex items-center gap-2">
@@ -837,7 +833,7 @@
                           class="max-h-56 overflow-auto bg-zinc-950 text-zinc-100 text-[11px] font-mono divide-y divide-white/5"
                           bind:this={activeLogContainer}
                         >
-                          {#each getFilteredLogs(attempt) as log}
+                          {#each getFilteredLogs(attempt) as log (`${log.timestamp}-${log.stream}-${log.message}`)}
                             <div class="px-3 py-2">
                               <div class="flex items-center gap-2 text-[10px] uppercase tracking-wider text-zinc-400">
                                 <span>{log.stream}</span>

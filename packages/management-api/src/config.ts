@@ -1,8 +1,14 @@
 import { existsSync, readFileSync } from "node:fs";
 
-const MANAGEMENT_API_ENV = "/etc/supabase/management-api.env";
-const LOCAL_ENV = ".env";
-const CONFIG_ENV = "/opt/supacloud/config.env";
+const MANAGEMENT_API_ENV = process.env.SUPACLOUD_MANAGEMENT_ENV_FILE
+  ?? "/etc/supabase/management-api.env";
+const LOCAL_ENV = process.env.SUPACLOUD_LOCAL_ENV_FILE ?? ".env";
+const LEGACY_CONFIG_ENV = process.env.SUPACLOUD_LEGACY_CONFIG_ENV_FILE
+  ?? "/opt/supacloud/config.env";
+
+// Tracks values injected by config files so install.ts can distinguish an
+// operator's explicit process environment from runtime values loaded here.
+export const loadedConfigFileEnvKeys = new Set<string>();
 
 function loadEnvFile(filePath: string): void {
   if (!existsSync(filePath)) {
@@ -35,12 +41,27 @@ function loadEnvFile(filePath: string): void {
     }
 
     process.env[key] = value;
+    loadedConfigFileEnvKeys.add(key);
   }
 }
 
+const hasManagementRuntimeEnv = existsSync(MANAGEMENT_API_ENV);
 loadEnvFile(MANAGEMENT_API_ENV);
-loadEnvFile(CONFIG_ENV);
-loadEnvFile(LOCAL_ENV);
+
+// The tracked repository config.env is never a production runtime source by
+// default. Legacy loading is explicit and cannot overwrite management env or
+// process-level values because loadEnvFile only fills undefined keys.
+if (process.env.SUPACLOUD_LOAD_LEGACY_CONFIG_ENV === "true") {
+  loadEnvFile(LEGACY_CONFIG_ENV);
+}
+
+const runtimeNodeEnv = process.env.NODE_ENV
+  ?? process.env.BUN_ENV
+  ?? (hasManagementRuntimeEnv ? "production" : "development");
+process.env.NODE_ENV ??= runtimeNodeEnv;
+if (runtimeNodeEnv === "development" || runtimeNodeEnv === "test") {
+  loadEnvFile(LOCAL_ENV);
+}
 
 export interface Config {
   port: number;
@@ -158,7 +179,7 @@ export const config: Config = {
   port,
   maxRequestBodySize: Number(getEnv("MANAGEMENT_API_MAX_REQUEST_BODY_SIZE", String(1024 * 1024 * 1024))),
   databaseUrl: getEnv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/postgres"),
-  nodeEnv: getEnv("NODE_ENV", "development"),
+  nodeEnv: getEnv("NODE_ENV", runtimeNodeEnv),
   isGithubActions,
 
   jwtSecret: getEnv("JWT_SECRET", getEnv("SUPACLOUD_JWT_SECRET", DEFAULT_JWT_SECRET)),

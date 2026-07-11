@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { apiClient } from "$lib/api";
+  import { loginStudio } from "$lib/api";
   import { mode, toggleMode } from "mode-watcher";
   import { t, locale } from "svelte-i18n";
   import { Loader2, Lock, Eye, EyeOff, User, Globe, Sun, Moon, Info } from "lucide-svelte";
@@ -29,17 +29,11 @@
     isLoading = true;
     error = null;
     try {
-      const res = await apiClient("/auth/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username: username.trim(), password: password.trim() })
-      });
-      const data = await res.json();
-      if (data.success && data.token) {
-        localStorage.setItem("supacloud_session", data.token);
+      const result = await loginStudio(username.trim(), password);
+      if (result.success) {
         window.location.href = "/";
       } else {
-        error = data.error || "登录失败";
+        error = result.error || "登录失败";
         triggerShake();
       }
     } catch (err: unknown) {
