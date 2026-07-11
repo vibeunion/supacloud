@@ -134,6 +134,7 @@ type CaddyConfig = {
 
 const CADDY_GENERATED_CONFIG_NOTICE_LOG =
     "supacloud_notice_do_not_edit_caddy_config_json_use_supacloud_cli_management_api_or_web_console";
+const CADDY_UNMATCHED_HOST_ROUTE_ID = "route-system-unmatched-host-404";
 
 function caddyGeneratedConfigNoticeLog(): Record<string, unknown> {
     return {
@@ -248,6 +249,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
         const routes = Array.from(this.routesById.values())
             .sort((a, b) => this.compareRoutesForCaddy(a, b))
             .map((route) => this.renderRouteForCaddy(route));
+        routes.push(this.makeUnmatchedHostRoute());
 
         return {
             admin: { listen: caddyAdminListen() },
@@ -511,6 +513,14 @@ export class CaddyGatewayProvider implements GatewayProvider {
         }
 
         return rendered;
+    }
+
+    private makeUnmatchedHostRoute(): CaddyRoute {
+        return {
+            "@id": CADDY_UNMATCHED_HOST_ROUTE_ID,
+            handle: [{ handler: "static_response", status_code: 404 }],
+            terminal: true,
+        };
     }
 
     private async validateCandidateConfig(candidatePath: string): Promise<void> {
