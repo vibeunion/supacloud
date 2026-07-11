@@ -46,6 +46,35 @@ async function gotrueFetch(url: string, init?: RequestInit): Promise<Response> {
   }
 }
 
+async function readGoTrueError(res: Response, fallbackMessage: string) {
+  const text = await res.text().catch(() => "");
+  let parsed: unknown;
+  if (text.trim().length > 0) {
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      parsed = undefined;
+    }
+  }
+
+  if (parsed !== null && typeof parsed === "object") {
+    const body = parsed as Record<string, unknown>;
+    return {
+      message: readOptionalString(body.msg) ?? readOptionalString(body.message) ?? fallbackMessage,
+      code: readOptionalString(body.code) ?? String(res.status)
+    };
+  }
+
+  return {
+    message: text.trim().length > 0 && text.trim() !== "null" ? text.trim() : fallbackMessage,
+    code: String(res.status)
+  };
+}
+
+function readOptionalString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+}
+
 /**
  * User Management routes — Admin API proxy to GoTrue
  */
@@ -80,8 +109,7 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
 
       if (!res.ok) {
         set.status = res.status;
-        const err = await res.json().catch(() => ({}));
-        return { message: err.msg || err.message || "Failed to fetch users", code: err.code || "500" };
+        return readGoTrueError(res, "Failed to fetch users");
       }
 
       const linkHeader = res.headers.get("link");
@@ -166,8 +194,7 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
 
       if (!res.ok) {
         set.status = res.status;
-        const err = await res.json().catch(() => ({}));
-        return { message: err.msg || err.message || "Failed to create user", code: err.code || "500" };
+        return readGoTrueError(res, "Failed to create user");
       }
 
       return res.json();
@@ -222,8 +249,7 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
 
       if (!res.ok) {
         set.status = res.status;
-        const err = await res.json().catch(() => ({}));
-        return { message: err.msg || err.message || "Failed to invite user", code: err.code || "500" };
+        return readGoTrueError(res, "Failed to invite user");
       }
 
       return res.json();
@@ -261,8 +287,7 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
 
       if (!res.ok) {
         set.status = res.status;
-        const err = await res.json().catch(() => ({}));
-        return { message: err.msg || err.message || "User not found", code: err.code || "500" };
+        return readGoTrueError(res, "User not found");
       }
 
       return res.json();
@@ -300,8 +325,7 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
 
       if (!res.ok) {
         set.status = res.status;
-        const err = await res.json().catch(() => ({}));
-        return { message: err.msg || err.message || "Failed to update user", code: err.code || "500" };
+        return readGoTrueError(res, "Failed to update user");
       }
 
       return res.json();
@@ -338,7 +362,7 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
       const { apiUrl, serviceRoleKey } = ctx;
 
       const res = await gotrueFetch(`${apiUrl}/admin/users/${params.id}`, {
-        method: "PATCH",
+        method: "PUT",
         headers: {
           "Content-Type": "application/json",
           "apikey": serviceRoleKey,
@@ -349,8 +373,8 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
       });
 
       if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        return { message: err.msg || err.message || "Failed to update user", code: err.code || "500" };
+        set.status = res.status;
+        return readGoTrueError(res, "Failed to update user");
       }
 
       return res.json();
@@ -398,8 +422,7 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
 
       if (!res.ok) {
         set.status = res.status;
-        const err = await res.json().catch(() => ({}));
-        return { message: err.msg || err.message || "Failed to delete user", code: err.code || "500" };
+        return readGoTrueError(res, "Failed to delete user");
       }
 
       return res.json();
@@ -435,8 +458,7 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
 
       if (!res.ok) {
         set.status = res.status;
-        const err = await res.json().catch(() => ({}));
-        return { message: err.msg || err.message || "Failed to list factors", code: err.code || "500" };
+        return readGoTrueError(res, "Failed to list factors");
       }
 
       return res.json();
@@ -474,8 +496,7 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
 
       if (!res.ok) {
         set.status = res.status;
-        const err = await res.json().catch(() => ({}));
-        return { message: err.msg || err.message || "Failed to generate link", code: err.code || "500" };
+        return readGoTrueError(res, "Failed to generate link");
       }
 
       return res.json();
