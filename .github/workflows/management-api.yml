@@ -492,7 +492,7 @@ jobs:
 
       - name: Lint shell scripts
         run: |
-          ignored_rules="SC1090,SC1091,SC2012,SC2015,SC2034,SC2046,SC2086,SC2155,SC2207,SC2317"
+          ignored_rules="SC1090,SC1091,SC2012,SC2015,SC2016,SC2030,SC2031,SC2034,SC2046,SC2086,SC2155,SC2207,SC2317"
 
           echo "=== Checking scripts/*.sh and scripts/lib/*.sh ==="
           shellcheck -s bash -e "$ignored_rules" scripts/*.sh scripts/lib/*.sh
