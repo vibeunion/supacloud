@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.19.0](https://github.com/zuohuadong/supacloud/compare/supacloud-js-v0.18.3...supacloud-js-v0.19.0) (2026-07-11)
+
+
+### Features
+
+* security hardening, idempotent install, and CI reliability fixes ([eb15db0](https://github.com/zuohuadong/supacloud/commit/eb15db0e58b8b2a2d19e4e99d92360a33da116a4))
+
 ## [0.18.3](https://github.com/zuohuadong/supacloud/compare/supacloud-js-v0.18.2...supacloud-js-v0.18.3) (2026-06-03)
 
 

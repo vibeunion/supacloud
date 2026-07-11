@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.39.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.38.0...management-api-v0.39.0) (2026-07-11)
+
+
+### Features
+
+* security hardening, idempotent install, and CI reliability fixes ([eb15db0](https://github.com/zuohuadong/supacloud/commit/eb15db0e58b8b2a2d19e4e99d92360a33da116a4))
+
+
+### Bug Fixes
+
+* **management-api:** replace process-global mock.module with spyOn in auth-users test ([e7b5d61](https://github.com/zuohuadong/supacloud/commit/e7b5d61e675ea78fec67263bd75cc13d2dd1eb39))
+* **management-api:** return 404 for unmatched gateway hosts ([#411](https://github.com/zuohuadong/supacloud/issues/411)) ([efb2590](https://github.com/zuohuadong/supacloud/commit/efb2590dfa973a0cc41f5d977801309884286f12))
+* **management-api:** serialize caddy config publishes ([#399](https://github.com/zuohuadong/supacloud/issues/399)) ([20eb4c9](https://github.com/zuohuadong/supacloud/commit/20eb4c990e59299e9dde04d5850482e7a220884e))
+* **management-api:** stabilize auth user update proxy ([#410](https://github.com/zuohuadong/supacloud/issues/410)) ([b954e71](https://github.com/zuohuadong/supacloud/commit/b954e7165d146f57436cb7b371f34e0c2ebbd9e1))
+
 ## [0.38.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.37.11...management-api-v0.38.0) (2026-07-02)
 
 

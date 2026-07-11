@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.0](https://github.com/zuohuadong/supacloud/compare/web-console-v0.16.9...web-console-v0.17.0) (2026-07-11)
+
+
+### Features
+
+* security hardening, idempotent install, and CI reliability fixes ([eb15db0](https://github.com/zuohuadong/supacloud/commit/eb15db0e58b8b2a2d19e4e99d92360a33da116a4))
+
 ## [0.16.9](https://github.com/zuohuadong/supacloud/compare/web-console-v0.16.8...web-console-v0.16.9) (2026-06-29)
 
 
