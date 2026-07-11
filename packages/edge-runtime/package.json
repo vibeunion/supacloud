@@ -16,7 +16,7 @@
   },
   "dependencies": {
     "@elysiajs/cors": "^1.4.2",
-    "@sinclair/typebox": "^0.34.49",
+    "@sinclair/typebox": "^0.34.51",
     "@supabase/supabase-js": "^2.108.2",
     "elysia": "^1.4.29",
     "jose": "^6.2.3"
