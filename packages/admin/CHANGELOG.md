@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/zuohuadong/supacloud/compare/admin-v0.2.0...admin-v0.3.0) (2026-07-11)
+
+
+### Features
+
+* security hardening, idempotent install, and CI reliability fixes ([eb15db0](https://github.com/zuohuadong/supacloud/commit/eb15db0e58b8b2a2d19e4e99d92360a33da116a4))
+
 ## [0.2.0](https://github.com/zuohuadong/supacloud/compare/admin-v0.1.12...admin-v0.2.0) (2026-06-23)
 
 

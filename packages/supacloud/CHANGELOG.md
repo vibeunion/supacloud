@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/zuohuadong/supacloud/compare/supacloud-v0.4.0...supacloud-v0.5.0) (2026-07-11)
+
+
+### Features
+
+* security hardening, idempotent install, and CI reliability fixes ([eb15db0](https://github.com/zuohuadong/supacloud/commit/eb15db0e58b8b2a2d19e4e99d92360a33da116a4))
+
 ## [0.4.0](https://github.com/zuohuadong/supacloud/compare/supacloud-v0.3.1...supacloud-v0.4.0) (2026-06-30)
 
 

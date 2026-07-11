@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.0](https://github.com/zuohuadong/supacloud/compare/cli-v0.8.0...cli-v0.9.0) (2026-07-11)
+
+
+### Features
+
+* security hardening, idempotent install, and CI reliability fixes ([eb15db0](https://github.com/zuohuadong/supacloud/commit/eb15db0e58b8b2a2d19e4e99d92360a33da116a4))
+
 ## [0.8.0](https://github.com/zuohuadong/supacloud/compare/cli-v0.7.0...cli-v0.8.0) (2026-06-28)
 
 

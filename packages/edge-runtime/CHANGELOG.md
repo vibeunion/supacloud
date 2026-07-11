@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.0](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.9.0...edge-runtime-v0.10.0) (2026-07-11)
+
+
+### Features
+
+* security hardening, idempotent install, and CI reliability fixes ([eb15db0](https://github.com/zuohuadong/supacloud/commit/eb15db0e58b8b2a2d19e4e99d92360a33da116a4))
+
 ## [0.9.0](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.8.8...edge-runtime-v0.9.0) (2026-07-02)
 
 
