@@ -52,7 +52,7 @@ services:
       GOTRUE_SECURITY_UPDATE_PASSWORD_REQUIRE_REAUTHENTICATION: "true"
 
   postgrest:
-    image: postgrest/postgrest:v14.13
+    image: postgrest/postgrest:v14.14
     restart: unless-stopped
     depends_on:
       postgres:
