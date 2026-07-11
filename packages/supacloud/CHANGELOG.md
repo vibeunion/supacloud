@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.2](https://github.com/zuohuadong/supacloud/compare/supacloud-v0.5.1...supacloud-v0.5.2) (2026-07-11)
+
+
+### Bug Fixes
+
+* **supacloud:** refresh bun.lock for @supacloud/admin@0.3.1 ([566829a](https://github.com/zuohuadong/supacloud/commit/566829a861cfd8975c5c024e3b504b3ba3cb8621))
+
 ## [0.5.1](https://github.com/zuohuadong/supacloud/compare/supacloud-v0.5.0...supacloud-v0.5.1) (2026-07-11)
 
 
