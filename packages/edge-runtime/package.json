@@ -26,6 +26,6 @@
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^26.0.0",
     "jsonwebtoken": "^9.0.3",
-    "typescript": "^6.0.3"
+    "typescript": "^7.0.2"
   }
 }
