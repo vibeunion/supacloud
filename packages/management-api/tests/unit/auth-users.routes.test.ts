@@ -1,15 +1,29 @@
-import { afterAll, beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterAll, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { Elysia } from "elysia";
 
 const requireProjectOrAdminAuth = mock(() => Promise.resolve(null));
 const getProject = mock(() => Promise.resolve({ ref: "proj_1", config: {} }));
 const resolveProjectServiceRoleKey = mock(() => Promise.resolve("service-role-key"));
-const sqlMock = mock(() => Promise.resolve([{ config: {} }]));
 
-mock.module("../../src/db", () => ({ sql: sqlMock }));
-mock.module("../../src/middleware/auth", () => ({ requireProjectOrAdminAuth }));
-mock.module("../../src/services", () => ({ projectService: { getProject } }));
-mock.module("../../src/utils/service-role", () => ({ resolveProjectServiceRoleKey }));
+const authModule = await import("../../src/middleware/auth");
+const servicesModule = await import("../../src/services");
+const serviceRoleModule = await import("../../src/utils/service-role");
+
+const requireProjectOrAdminAuthSpy = spyOn(
+  authModule,
+  "requireProjectOrAdminAuth",
+).mockImplementation(
+  requireProjectOrAdminAuth as typeof authModule.requireProjectOrAdminAuth,
+);
+const getProjectSpy = spyOn(servicesModule.projectService, "getProject").mockImplementation(
+  getProject as typeof servicesModule.projectService.getProject,
+);
+const resolveProjectServiceRoleKeySpy = spyOn(
+  serviceRoleModule,
+  "resolveProjectServiceRoleKey",
+).mockImplementation(
+  resolveProjectServiceRoleKey as typeof serviceRoleModule.resolveProjectServiceRoleKey,
+);
 
 const { userManagementRoutes } = await import("../../src/routes/auth-users");
 const app = new Elysia().use(userManagementRoutes);
@@ -43,8 +57,6 @@ describe("userManagementRoutes", () => {
     getProject.mockResolvedValue({ ref: "proj_1", config: {} } as never);
     resolveProjectServiceRoleKey.mockReset();
     resolveProjectServiceRoleKey.mockResolvedValue("service-role-key" as never);
-    sqlMock.mockReset();
-    sqlMock.mockResolvedValue([{ config: {} }] as never);
     userUpdateMethods.length = 0;
     userUpdateBodies.length = 0;
   });
