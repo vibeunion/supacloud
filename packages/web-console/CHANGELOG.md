@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.17.1](https://github.com/zuohuadong/supacloud/compare/web-console-v0.17.0...web-console-v0.17.1) (2026-07-11)
+
+
+### Miscellaneous Chores
+
+* **deps-dev:** bump autoprefixer in /packages/web-console ([#407](https://github.com/zuohuadong/supacloud/issues/407)) ([669988d](https://github.com/zuohuadong/supacloud/commit/669988df76b01e0c2a27665cba2a9176be910b94))
+* **deps-dev:** bump tailwindcss in /packages/web-console ([#408](https://github.com/zuohuadong/supacloud/issues/408)) ([796a363](https://github.com/zuohuadong/supacloud/commit/796a363bc41ade1cfaf8de8a8a2c4c3c589b6fdc))
+* **deps-dev:** bump vite from 8.1.0 to 8.1.4 in /packages/web-console ([#427](https://github.com/zuohuadong/supacloud/issues/427)) ([cd0d242](https://github.com/zuohuadong/supacloud/commit/cd0d242d607962146bc74728f331b44988494d16))
+* **deps:** bump @supabase/supabase-js to 2.110.2 and @tanstack/svelte-query to 6.1.36 ([71c4509](https://github.com/zuohuadong/supacloud/commit/71c4509aaee739bf8a395ab1a9d71d477245f9ec))
+* **deps:** bump @svadmin/ui in /packages/web-console ([#409](https://github.com/zuohuadong/supacloud/issues/409)) ([be1fe8c](https://github.com/zuohuadong/supacloud/commit/be1fe8c19548808db425203a67ded7e76e48bb90))
+
 ## [0.17.0](https://github.com/zuohuadong/supacloud/compare/web-console-v0.16.9...web-console-v0.17.0) (2026-07-11)
 
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.1](https://github.com/zuohuadong/supacloud/compare/cli-v0.9.0...cli-v0.9.1) (2026-07-11)
+
+
+### Miscellaneous Chores
+
+* **deps-dev:** bump typescript from 6.0.3 to 7.0.2 in /packages/cli ([#416](https://github.com/zuohuadong/supacloud/issues/416)) ([46065d1](https://github.com/zuohuadong/supacloud/commit/46065d178735719b480621608ff755a385f4ebdc))
+
 ## [0.9.0](https://github.com/zuohuadong/supacloud/compare/cli-v0.8.0...cli-v0.9.0) (2026-07-11)
 
 
