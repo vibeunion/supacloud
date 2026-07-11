@@ -193,6 +193,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
     private readonly customRateLimits = new Map<string, { second: number; minute: number; hour: number }>();
     private deferredPersistDepth = 0;
     private deferredPersistPending = false;
+    private persistAndLoadTail: Promise<void> = Promise.resolve();
     private hydrated = false;
 
     private async caddyRequest(pathname: string, method = "GET", body?: unknown): Promise<Response> {
@@ -526,11 +527,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
         }
     }
 
-    private async persistAndLoad(): Promise<void> {
-        if (this.deferredPersistDepth > 0) {
-            this.deferredPersistPending = true;
-            return;
-        }
+    private async writeAndLoadCurrentConfig(): Promise<void> {
         const next = this.baseConfig();
         await fs.mkdir(path.dirname(config.caddyConfigPath), { recursive: true });
         const tmpPath = `${config.caddyConfigPath}.tmp-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -549,6 +546,18 @@ export class CaddyGatewayProvider implements GatewayProvider {
             await fs.unlink(tmpPath).catch(() => undefined);
             throw error;
         }
+    }
+
+    private async persistAndLoad(): Promise<void> {
+        if (this.deferredPersistDepth > 0) {
+            this.deferredPersistPending = true;
+            return;
+        }
+
+        const previous = this.persistAndLoadTail.catch(() => undefined);
+        const current = previous.then(() => this.writeAndLoadCurrentConfig());
+        this.persistAndLoadTail = current.catch(() => undefined);
+        await current;
     }
 
     async withDeferredPersist<T>(fn: () => Promise<T>, shouldFlush: (result: T) => boolean = () => true): Promise<T> {

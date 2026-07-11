@@ -471,6 +471,76 @@ describe("CaddyGatewayProvider", () => {
         restore();
     });
 
+    test("serializes Caddy load publishes so concurrent frontend routes cannot finish with stale config", async () => {
+        const originalFetch = globalThis.fetch;
+        const appliedLoads: any[] = [];
+        let delayedSingleRouteLoad = false;
+        let releaseSingleRouteLoad: (() => void) | null = null;
+        let resolveSingleRouteStarted: (() => void) | null = null;
+        const singleRouteStarted = new Promise<void>((resolve) => {
+            resolveSingleRouteStarted = resolve;
+        });
+
+        globalThis.fetch = mock((input: string | URL | Request, init?: RequestInit) => {
+            const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+            const method = init?.method || "GET";
+            let body: any = null;
+            if (typeof init?.body === "string" && init.body.length > 0) {
+                try { body = JSON.parse(init.body); } catch { body = init.body; }
+            }
+
+            if (method === "POST" && url.endsWith("/load")) {
+                const routeIds = (body?.apps?.http?.servers?.supacloud?.routes ?? []).map((route: any) => route["@id"]);
+                const hasAdmin = routeIds.includes("route-frontend-proj123-admin0001");
+                const hasMobile = routeIds.includes("route-frontend-proj123-mobile001");
+                if (hasAdmin && !hasMobile && !delayedSingleRouteLoad) {
+                    delayedSingleRouteLoad = true;
+                    resolveSingleRouteStarted?.();
+                    return new Promise<Response>((resolve) => {
+                        releaseSingleRouteLoad = () => {
+                            appliedLoads.push(body);
+                            resolve(new Response(JSON.stringify({ ok: true })));
+                        };
+                    });
+                }
+                appliedLoads.push(body);
+            }
+
+            return Promise.resolve(new Response(JSON.stringify({ ok: true })));
+        }) as unknown as typeof fetch;
+
+        try {
+            const provider = new CaddyGatewayProvider();
+            const adminRoute = provider.configureFrontendRoute({
+                projectRef: "proj123",
+                deploymentId: "admin0001",
+                hosts: ["admin.example.com"],
+                root: "/var/supacloud/frontends/proj123/admin0001/build",
+                mode: "static",
+            });
+
+            await singleRouteStarted;
+
+            const mobileRoute = provider.configureFrontendRoute({
+                projectRef: "proj123",
+                deploymentId: "mobile001",
+                hosts: ["m.example.com"],
+                root: "/var/supacloud/frontends/proj123/mobile001/build",
+                mode: "static",
+            });
+
+            await Promise.race([mobileRoute.catch(() => undefined), Bun.sleep(25)]);
+            releaseSingleRouteLoad?.();
+            await Promise.all([adminRoute, mobileRoute]);
+
+            const finalRouteIds = (appliedLoads.at(-1)?.apps?.http?.servers?.supacloud?.routes ?? []).map((route: any) => route["@id"]);
+            expect(finalRouteIds).toContain("route-frontend-proj123-admin0001");
+            expect(finalRouteIds).toContain("route-frontend-proj123-mobile001");
+        } finally {
+            globalThis.fetch = originalFetch;
+        }
+    });
+
     test("configureCustomGatewayRoutes renders controlled proxy and static Caddy routes", async () => {
         const calls: Array<{ url: string; method: string; body: any }> = [];
         const restore = captureFetch(calls);
