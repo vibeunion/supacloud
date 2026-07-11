@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/zuohuadong/supacloud/compare/admin-v0.3.0...admin-v0.3.1) (2026-07-11)
+
+
+### Miscellaneous Chores
+
+* **deps-dev:** bump typescript from 6.0.3 to 7.0.2 in /packages/admin ([#414](https://github.com/zuohuadong/supacloud/issues/414)) ([3a235eb](https://github.com/zuohuadong/supacloud/commit/3a235eb8e04c8306719d24aec89d6c8eac69ce8f))
+
 ## [0.3.0](https://github.com/zuohuadong/supacloud/compare/admin-v0.2.0...admin-v0.3.0) (2026-07-11)
 
 

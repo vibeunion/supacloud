@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.10.1](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.10.0...edge-runtime-v0.10.1) (2026-07-11)
+
+
+### Miscellaneous Chores
+
+* **deps-dev:** bump typescript in /packages/edge-runtime ([#415](https://github.com/zuohuadong/supacloud/issues/415)) ([8865cd8](https://github.com/zuohuadong/supacloud/commit/8865cd8726f5d9c33fb50e233e4e914292013d64))
+* **deps:** bump @sinclair/typebox in /packages/edge-runtime ([#426](https://github.com/zuohuadong/supacloud/issues/426)) ([5a92b48](https://github.com/zuohuadong/supacloud/commit/5a92b48dad07a31aa72d48ba2430c036d172325a))
+* **deps:** bump @supabase/supabase-js to 2.110.2 and @tanstack/svelte-query to 6.1.36 ([71c4509](https://github.com/zuohuadong/supacloud/commit/71c4509aaee739bf8a395ab1a9d71d477245f9ec))
+
 ## [0.10.0](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.9.0...edge-runtime-v0.10.0) (2026-07-11)
 
 

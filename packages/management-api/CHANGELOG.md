@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.39.1](https://github.com/zuohuadong/supacloud/compare/management-api-v0.39.0...management-api-v0.39.1) (2026-07-11)
+
+
+### Miscellaneous Chores
+
+* **deps-dev:** bump @supabase/supabase-js in /packages/management-api ([#422](https://github.com/zuohuadong/supacloud/issues/422)) ([d0f81d7](https://github.com/zuohuadong/supacloud/commit/d0f81d759b50564dda428408d8526ef7d627d9c7))
+* **deps-dev:** bump typescript in /packages/management-api ([#413](https://github.com/zuohuadong/supacloud/issues/413)) ([834df74](https://github.com/zuohuadong/supacloud/commit/834df7462c5c3b2f03ada9cd43772b8c591f19c2))
+* **deps:** bump @clack/prompts in /packages/management-api ([#425](https://github.com/zuohuadong/supacloud/issues/425)) ([a946a30](https://github.com/zuohuadong/supacloud/commit/a946a308e53218c65f6097ea836bd916a1ea0382))
+* **deps:** bump @sinclair/typebox in /packages/management-api ([#424](https://github.com/zuohuadong/supacloud/issues/424)) ([4c585d9](https://github.com/zuohuadong/supacloud/commit/4c585d93d2dba825e6941abe3b5573e9832ed80f))
+* **deps:** bump nanoid in /packages/management-api ([#418](https://github.com/zuohuadong/supacloud/issues/418)) ([13b5890](https://github.com/zuohuadong/supacloud/commit/13b5890d5b49588aa2ae278c67cb613a88813d1e))
+
 ## [0.39.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.38.0...management-api-v0.39.0) (2026-07-11)
 
 

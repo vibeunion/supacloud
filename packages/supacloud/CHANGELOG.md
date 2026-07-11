@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.1](https://github.com/zuohuadong/supacloud/compare/supacloud-v0.5.0...supacloud-v0.5.1) (2026-07-11)
+
+
+### Miscellaneous Chores
+
+* **deps-dev:** bump typescript in /packages/supacloud ([#420](https://github.com/zuohuadong/supacloud/issues/420)) ([a4fdf64](https://github.com/zuohuadong/supacloud/commit/a4fdf64be66f803de5ceace39d89dbfce8fb49e2))
+
 ## [0.5.0](https://github.com/zuohuadong/supacloud/compare/supacloud-v0.4.0...supacloud-v0.5.0) (2026-07-11)
 
 
