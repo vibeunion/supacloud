@@ -15,6 +15,8 @@ export interface PigstyConfig {
     force?: boolean;
     anonKey?: string;
     serviceRoleKey?: string;
+    publishableKey?: string;
+    secretKey?: string;
 }
 
 export const PigstyStatus = {
@@ -241,6 +243,14 @@ async function updatePigstyConfig(config: PigstyConfig, ymlPath: string) {
         yml = yml.replace(/JWT_SECRET: your-super-secret-jwt-token-with-at-least-32-characters-long/g, `JWT_SECRET: ${config.jwtSecret}`);
 
         if (config.serviceRoleKey) yml = yml.replace(/SERVICE_ROLE_KEY: .*/g, `SERVICE_ROLE_KEY: ${config.serviceRoleKey}`);
+        const publishableKey = config.publishableKey || process.env.SUPABASE_PUBLISHABLE_KEY;
+        const secretKey = config.secretKey || process.env.SUPABASE_SECRET_KEY;
+        if (publishableKey) {
+            yml = yml.replace(/SUPABASE_PUBLISHABLE_KEY: .*/g, `SUPABASE_PUBLISHABLE_KEY: ${JSON.stringify(publishableKey)}`);
+        }
+        if (secretKey) {
+            yml = yml.replace(/SUPABASE_SECRET_KEY: .*/g, `SUPABASE_SECRET_KEY: ${JSON.stringify(secretKey)}`);
+        }
 
         // Cloud-native storage integration (JuiceFS)
         const storageType = appConfig.storageType;

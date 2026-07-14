@@ -29,6 +29,7 @@
 
   const project = $derived(query.data?.data || {});
   const apiUrl = $derived(getProjectApiUrl(project));
+  const publishableKey = $derived(String((project as Record<string, unknown>)?.publishable_key || ""));
   const isLoading = $derived(query.isLoading);
 
   async function copyToClipboard(text: string) {
@@ -136,11 +137,39 @@
         </div>
 
         <div class="divide-y divide-border/50">
+          <!-- publishable opaque key -->
+          <div class="p-6 space-y-3">
+            <div class="flex items-center gap-2">
+              <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-emerald-500/10 text-emerald-600">publishable</span>
+              <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-blue-500/10 text-blue-600">recommended</span>
+            </div>
+            <p class="text-xs text-muted-foreground">推荐用于浏览器和移动客户端。网关会将其映射为 anon 权限，RLS 策略仍然生效。</p>
+            <div class="flex items-start gap-2">
+              <textarea readonly rows="2"
+                class="w-full flex-1 px-3 py-2 text-xs font-mono rounded-lg border bg-muted/30 text-foreground resize-none focus:outline-none"
+              >{publishableKey || "项目升级后将自动生成 sb_publishable_..."}</textarea>
+              <button onclick={() => copyToClipboard(publishableKey)} disabled={!publishableKey}
+                class="px-3 py-2 text-xs rounded-lg border hover:bg-muted/50 transition-colors disabled:opacity-40" title="复制">
+                <Copy size={14} />
+              </button>
+            </div>
+          </div>
+
+          <!-- secret opaque key -->
+          <div class="p-6 space-y-3">
+            <div class="flex items-center gap-2">
+              <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-red-500/10 text-red-600">secret</span>
+              <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-amber-500/10 text-amber-600">server only</span>
+            </div>
+            <p class="text-xs text-muted-foreground">Secret Key 映射为 service_role 权限，只在项目创建或密钥轮换响应中返回明文，请保存到服务端密钥管理系统。</p>
+            <div class="px-3 py-2 text-xs font-mono rounded-lg border bg-muted/30 text-muted-foreground">sb_secret_••••••••••••••••••••••••</div>
+          </div>
+
           <!-- anon public -->
           <div class="p-6 space-y-3">
             <div class="flex items-center gap-2">
               <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-green-500/10 text-green-600">anon</span>
-              <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-blue-500/10 text-blue-600">public</span>
+              <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-blue-500/10 text-blue-600">legacy</span>
             </div>
             <p class="text-xs text-muted-foreground">此密钥可安全用于浏览器端，前提是你已为所有表启用了行级安全 (RLS) 并配置了策略。</p>
             <div class="flex items-start gap-2">
@@ -168,7 +197,7 @@
           <div class="p-6 space-y-3">
             <div class="flex items-center gap-2">
               <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-amber-500/10 text-amber-600">service_role</span>
-              <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-red-500/10 text-red-600">secret</span>
+              <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-red-500/10 text-red-600">legacy secret</span>
             </div>
             <p class="text-xs text-muted-foreground">此密钥可绕过行级安全策略，请勿公开分享。</p>
             <div class="flex items-start gap-2">

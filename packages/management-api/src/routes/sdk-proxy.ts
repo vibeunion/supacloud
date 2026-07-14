@@ -9,7 +9,11 @@ import { backgroundTaskService } from "../services/background-task.service";
 import { edgeFunctionService } from "../services/edge-function.service";
 import { projectService } from "../services/project.service";
 import { matchProjectRefFromHost, resolveProjectApiHost, resolveTenantPorts } from "../utils/project-routing";
-import { resolveProjectRefFromApiKey } from "../utils/project-auth";
+import {
+    resolveProjectApiKey,
+    resolveProjectRefFromApiKey,
+} from "../utils/project-auth";
+import { isOpaqueApiKey } from "../utils/api-keys";
 import { verifyProjectJwtPayload } from "../utils/project-jwt";
 
 const MAX_ASYNC_BODY_BYTES = 256 * 1024;
@@ -194,9 +198,9 @@ async function maybeEnqueueAsyncFunction(request: Request, ref: string): Promise
             ? "apikey"
             : "none";
     const apikeyKind = apikey
-        ? apikey === projectKeys?.anon_key
+        ? apikey === projectKeys?.anon_key || apikey === projectKeys?.publishable_key
             ? "anon"
-            : apikey === projectKeys?.service_role_key
+            : apikey === projectKeys?.service_role_key || apikey === projectKeys?.secret_key
                 ? "service_role"
                 : "unknown"
         : null;
@@ -249,9 +253,35 @@ async function maybeEnqueueAsyncFunction(request: Request, ref: string): Promise
 
 export const sdkProxyInternals = {
     resolveProjectRefFromApiKey,
+    resolveProjectApiKey,
     maybeEnqueueAsyncFunction,
     buildEncryptedBackgroundAuth,
 };
+
+async function translateOpaqueApiKeyHeaders(headers: Headers, ref: string): Promise<boolean> {
+    const apikey = headers.get("apikey")?.trim() || "";
+    const authorization = headers.get("authorization")?.trim() || "";
+    const bearerToken = authorization.replace(/^Bearer\s+/i, "");
+    const candidate = isOpaqueApiKey(apikey)
+        ? apikey
+        : isOpaqueApiKey(bearerToken)
+            ? bearerToken
+            : "";
+    if (!candidate) return true;
+
+    const resolved = await sdkProxyInternals.resolveProjectApiKey(candidate, { includeProvisioning: true });
+    if (!resolved || resolved.ref !== ref || !resolved.upstreamKey) return false;
+
+    if (apikey === candidate) {
+        headers.set("apikey", resolved.upstreamKey);
+    }
+    if (bearerToken === candidate) {
+        headers.set("authorization", `Bearer ${resolved.upstreamKey}`);
+    } else if (apikey === candidate && !authorization) {
+        headers.set("authorization", `Bearer ${resolved.upstreamKey}`);
+    }
+    return true;
+}
 
 async function getProjectRef(request: Request): Promise<string> {
     const auth = request.headers.get('authorization') || '';
@@ -384,6 +414,12 @@ async function executeProxy(request: Request, targetUrl: string, interceptors: P
         const body = ["GET", "HEAD"].includes(request.method) ? undefined : request.body;
         
         const reqHeaders = new Headers(request.headers);
+        if (!(await translateOpaqueApiKeyHeaders(reqHeaders, interceptors.ref || ""))) {
+            return new Response(JSON.stringify({ message: "Invalid API key" }), {
+                status: 401,
+                headers: { "Content-Type": "application/json" },
+            });
+        }
         reqHeaders.delete('host');
         reqHeaders.delete('x-forwarded-host');
         reqHeaders.delete('x-forwarded-proto');
@@ -520,6 +556,9 @@ const graphqlHandler = async ({ request }: any) => {
     const targetUrl = `http://127.0.0.1:${ports.pgrstPort}/rpc/graphql${url.search}`;
     
     return executeProxy(request, targetUrl, {
+        ref,
+        host: resolveProjectApiHost(ref, undefined),
+        timeoutMs: config.restProxyTimeoutMs,
         extraHeaders: {
             'Accept-Profile': 'graphql_public',
             'Content-Profile': 'graphql_public'

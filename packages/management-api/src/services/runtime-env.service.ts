@@ -95,6 +95,10 @@ export async function buildProjectRuntimeEnv(projectRef: string): Promise<Record
     SUPABASE_URL: supabaseUrl,
     SUPABASE_ANON_KEY: project.anon_key,
     SUPABASE_SERVICE_ROLE_KEY: serviceRoleKey,
+    ...(project.publishable_key ? { SUPABASE_PUBLISHABLE_KEY: project.publishable_key } : {}),
+    ...(project.secret_key_encrypted ? {
+      SUPABASE_SECRET_KEY: decryptSecretIfNeeded(project.secret_key_encrypted),
+    } : {}),
     JWT_SECRET: project.jwt_secret,
     ...(jwtKeys ? { JWT_KEYS: JSON.stringify(jwtKeys) } : {}),
     ...(jwtJwks ? { JWT_JWKS: JSON.stringify(jwtJwks) } : {}),

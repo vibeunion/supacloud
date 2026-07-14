@@ -89,6 +89,38 @@ async function withSdkProxyTestContext(
 }
 
 describe("sdkProxyRoutes functions proxy", () => {
+  test("resolves an opaque Secret Key through its hash without storing plaintext", async () => {
+    await withSdkProxyTestContext(async ({ trackSpy }) => {
+      const unsafeSpy = trackSpy(
+        spyOn(
+          dbModule.sql as unknown as { unsafe: (...args: unknown[]) => Promise<unknown[]> },
+          "unsafe",
+        ).mockResolvedValue([{
+          ref: "proj_1",
+          anon_key: "legacy-anon-jwt",
+          service_role_key: "legacy-service-jwt",
+          publishable_key: "sb_publishable_client_key",
+          secret_key_hash: "2d1de1eeb6dac1bf5040d556aa9412c70d9079294c6e35b2b760663de526fe7f",
+        }]),
+      );
+
+      const resolved = await sdkProxyInternals.resolveProjectApiKey("sb_secret_server_key", {
+        includeProvisioning: true,
+      });
+
+      expect(resolved).toEqual({
+        ref: "proj_1",
+        kind: "secret",
+        role: "service_role",
+        upstreamKey: "legacy-service-jwt",
+      });
+      const params = unsafeSpy.mock.calls[0]?.[1] as string[];
+      expect(params[0]).toBe("sb_secret_server_key");
+      expect(params[1]).not.toContain("sb_secret_server_key");
+      expect(params[1]).toHaveLength(64);
+    });
+  });
+
   test("POST /functions/v1 forwards request bodies with duplex=half", async () => {
     await withSdkProxyTestContext(async ({ calls }) => {
       const response = await request("/functions/v1/hello", {
@@ -269,6 +301,140 @@ describe("sdkProxyRoutes functions proxy", () => {
       expect(headers.get("x-forwarded-host")).toBe(`proj_1.api.${config.baseDomain}`);
       expect(headers.get("x-project-ref")).toBe("proj_1");
       expect(sdkProxyInternals.resolveProjectRefFromApiKey).toHaveBeenCalledWith("anon", { includeProvisioning: true });
+    });
+  });
+
+  test("REST proxy translates a publishable key to the legacy anon JWT", async () => {
+    await withSdkProxyTestContext(async ({ calls, trackSpy }) => {
+      trackSpy(
+        spyOn(sdkProxyInternals, "resolveProjectApiKey").mockResolvedValue({
+          ref: "proj_1",
+          kind: "publishable",
+          role: "anon",
+          upstreamKey: "legacy-anon-jwt",
+        }),
+      );
+      const sqlSpy = trackSpy(spyOn(dbModule, "sql"));
+      sqlSpy.mockImplementation(async (...args: unknown[]) => {
+        const text = String(args[0] ?? "");
+        if (text.includes("SELECT config")) {
+          return [{ config: { postgrest_port: 7361, gotrue_port: 8361 } }];
+        }
+        return [];
+      });
+
+      const response = await request("/rest/v1/widgets", {
+        headers: {
+          apikey: "sb_publishable_client_key",
+          authorization: "Bearer sb_publishable_client_key",
+        },
+      });
+
+      expect(response.status).toBe(200);
+      const headers = new Headers(calls[0]?.init?.headers);
+      expect(headers.get("apikey")).toBe("legacy-anon-jwt");
+      expect(headers.get("authorization")).toBe("Bearer legacy-anon-jwt");
+    });
+  });
+
+  test("REST proxy supplies the upstream JWT for an apikey-only opaque request", async () => {
+    await withSdkProxyTestContext(async ({ calls, trackSpy }) => {
+      trackSpy(
+        spyOn(sdkProxyInternals, "resolveProjectApiKey").mockResolvedValue({
+          ref: "proj_1",
+          kind: "secret",
+          role: "service_role",
+          upstreamKey: "legacy-service-jwt",
+        }),
+      );
+      const sqlSpy = trackSpy(spyOn(dbModule, "sql"));
+      sqlSpy.mockImplementation(async (...args: unknown[]) => {
+        const text = String(args[0] ?? "");
+        if (text.includes("SELECT config")) {
+          return [{ config: { postgrest_port: 7361, gotrue_port: 8361 } }];
+        }
+        return [];
+      });
+
+      const response = await request("/rest/v1/widgets", {
+        headers: { apikey: "sb_secret_client_key" },
+      });
+
+      expect(response.status).toBe(200);
+      const headers = new Headers(calls[0]?.init?.headers);
+      expect(headers.get("apikey")).toBe("legacy-service-jwt");
+      expect(headers.get("authorization")).toBe("Bearer legacy-service-jwt");
+    });
+  });
+
+  test("REST proxy preserves a user JWT while translating the publishable apikey", async () => {
+    await withSdkProxyTestContext(async ({ calls, trackSpy }) => {
+      trackSpy(
+        spyOn(sdkProxyInternals, "resolveProjectApiKey").mockResolvedValue({
+          ref: "proj_1",
+          kind: "publishable",
+          role: "anon",
+          upstreamKey: "legacy-anon-jwt",
+        }),
+      );
+      const sqlSpy = trackSpy(spyOn(dbModule, "sql"));
+      sqlSpy.mockImplementation(async (...args: unknown[]) => {
+        const text = String(args[0] ?? "");
+        if (text.includes("SELECT config")) {
+          return [{ config: { postgrest_port: 7361, gotrue_port: 8361 } }];
+        }
+        return [];
+      });
+
+      const response = await request("/rest/v1/widgets", {
+        headers: {
+          apikey: "sb_publishable_client_key",
+          authorization: "Bearer user.session.jwt",
+        },
+      });
+
+      expect(response.status).toBe(200);
+      const headers = new Headers(calls[0]?.init?.headers);
+      expect(headers.get("apikey")).toBe("legacy-anon-jwt");
+      expect(headers.get("authorization")).toBe("Bearer user.session.jwt");
+    });
+  });
+
+  test("GraphQL proxy translates an opaque key and preserves the user JWT", async () => {
+    await withSdkProxyTestContext(async ({ calls, trackSpy }) => {
+      trackSpy(
+        spyOn(sdkProxyInternals, "resolveProjectApiKey").mockResolvedValue({
+          ref: "proj_1",
+          kind: "publishable",
+          role: "anon",
+          upstreamKey: "legacy-anon-jwt",
+        }),
+      );
+      const sqlSpy = trackSpy(spyOn(dbModule, "sql"));
+      sqlSpy.mockImplementation(async (...args: unknown[]) => {
+        const text = String(args[0] ?? "");
+        if (text.includes("SELECT config")) {
+          return [{ config: { postgrest_port: 7361, gotrue_port: 8361 } }];
+        }
+        return [];
+      });
+
+      const response = await request("/graphql/v1", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          apikey: "sb_publishable_client_key",
+          authorization: "Bearer user.session.jwt",
+        },
+        body: JSON.stringify({ query: "query { __typename }" }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(calls[0]?.url).toBe("http://127.0.0.1:7361/rpc/graphql");
+      const headers = new Headers(calls[0]?.init?.headers);
+      expect(headers.get("apikey")).toBe("legacy-anon-jwt");
+      expect(headers.get("authorization")).toBe("Bearer user.session.jwt");
+      expect(headers.get("accept-profile")).toBe("graphql_public");
     });
   });
 

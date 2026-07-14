@@ -1,4 +1,8 @@
 import { customAlphabet, nanoid as originalNanoid } from "nanoid";
+import {
+  generatePublishableApiKey,
+  generateSecretApiKey,
+} from "../utils/api-keys";
 
 // Supabase OpenAPI requires a 20-character lowercase project ref (`^[a-z]+$`).
 const generateProjectRefId = customAlphabet("abcdefghijklmnopqrstuvwxyz", 20);
@@ -75,18 +79,35 @@ export class JwtService {
     return generateJwt(payload, jwtSecret);
   }
 
+  generateOpaqueKeySet(): {
+    publishableKey: string;
+    secretKey: string;
+  } {
+    return {
+      publishableKey: generatePublishableApiKey(),
+      secretKey: generateSecretApiKey(),
+    };
+  }
+
   // Generate complete JWT key set
   async generateKeySet(): Promise<{
     jwtSecret: string;
     anonKey: string;
     serviceRoleKey: string;
+    publishableKey: string;
+    secretKey: string;
   }> {
     const jwtSecret = this.generateSecret();
     const [anonKey, serviceRoleKey] = await Promise.all([
       this.generateAnonKey(jwtSecret),
       this.generateServiceRoleKey(jwtSecret),
     ]);
-    return { jwtSecret, anonKey, serviceRoleKey };
+    return {
+      jwtSecret,
+      anonKey,
+      serviceRoleKey,
+      ...this.generateOpaqueKeySet(),
+    };
   }
 }
 

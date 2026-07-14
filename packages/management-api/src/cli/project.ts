@@ -108,7 +108,14 @@ export async function handleProjectCreate(args: string[]) {
         p.log.info(`API URL: ${result.api.url}`);
         p.log.info(`Studio URL: ${result.studio.url}`);
 
-        p.outro("✅ Project creation initiated. Use 'supacloud project list' to check status.");
+        console.log("\n  API credentials (shown once):");
+        console.log(`  Publishable key: ${result.publishable_key}`);
+        console.log(`  Secret key: ${result.secret_key}`);
+        console.log(`  Legacy anon key: ${result.anon_key}`);
+        console.log(`  Legacy service_role key: ${result.service_role_key}`);
+        console.log("");
+
+        p.outro("✅ Project creation initiated. Store the secret credentials now; they will be masked later.");
     } catch (error: unknown) {
         s.stop("Failed to create project");
         p.log.error((error instanceof Error ? error.message : String(error)));
@@ -269,12 +276,19 @@ export async function handleProjectKeys(ref: string) {
     s.start("Fetching API keys...");
 
     try {
-        const result = await apiRequest("GET", `/v1/projects/${ref}/api-keys`);
+        const result = await apiRequest("GET", `/v1/projects/${ref}/api-keys`) as Array<{
+            name: string;
+            api_key: string;
+        }>;
         s.stop("API keys retrieved");
 
+        const keys = Object.fromEntries(result.map((item) => [item.name, item.api_key]));
+
         console.log("\n");
-        console.log(`  anon key: ${result.anon_key}`);
-        console.log(`  service_role key: ${result.service_role_key}`);
+        console.log(`  publishable key: ${keys.publishable || ""}`);
+        console.log(`  secret key: ${keys.secret || "********"}`);
+        console.log(`  legacy anon key: ${keys.anon || ""}`);
+        console.log(`  legacy service_role key: ${keys.service_role || "********"}`);
         console.log("");
 
         p.outro("⚠️ Keep these keys secure!");
@@ -314,9 +328,41 @@ export async function handleProjectRotateKeys(ref: string, args: string[]) {
         console.log(`  New service_role key: ${result.service_role_key || "********"}`);
         console.log("");
 
-        p.outro("✅ API keys have been rotated. Existing keys are revoked; retrieve the service_role key securely from the server if needed.");
+        p.outro("✅ Legacy JWT API keys have been rotated. Existing user sessions and legacy keys are revoked.");
     } catch (error: unknown) {
         s.stop("Failed to rotate API keys");
+        p.log.error((error instanceof Error ? error.message : String(error)));
+        process.exit(1);
+    }
+}
+
+export async function handleProjectRotateOpaqueKeys(ref: string, args: string[]) {
+    p.intro(`🔄 Rotating opaque API keys for project: ${ref}`);
+
+    const skipConfirm = args.includes("--yes") || args.includes("-y");
+    if (!skipConfirm) {
+        const confirm = await p.confirm({
+            message: `Rotate the Publishable and Secret keys for ${ref}? Legacy JWT sessions will remain valid.`,
+            initialValue: false,
+        });
+        if (p.isCancel(confirm) || !confirm) {
+            p.cancel("Operation cancelled");
+            process.exit(0);
+        }
+    }
+
+    const s = p.spinner();
+    s.start("Rotating opaque API keys...");
+    try {
+        const result = await apiRequest("POST", `/v1/projects/${ref}/api-keys/rotate-opaque`);
+        s.stop("Opaque API keys rotated");
+        console.log("\n");
+        console.log(`  New publishable key: ${result.publishable_key}`);
+        console.log(`  New secret key (shown once): ${result.secret_key}`);
+        console.log("");
+        p.outro("✅ Opaque API keys rotated without changing JWT_SECRET or legacy JWT keys.");
+    } catch (error: unknown) {
+        s.stop("Failed to rotate opaque API keys");
         p.log.error((error instanceof Error ? error.message : String(error)));
         process.exit(1);
     }
@@ -336,7 +382,9 @@ export function printProjectHelp() {
       supacloud project restore <ref> Restore a paused project
       supacloud project restart <ref> Restart a project
       supacloud project keys <ref>   Get API keys
-      supacloud project rotate-keys <ref> [--yes] Rotate API keys
+      supacloud project rotate-keys <ref> [--yes] Rotate legacy JWT API keys
+      supacloud project rotate-opaque-keys <ref> [--yes]
+                              Rotate Publishable/Secret keys only
     
     Options:
       --name <name>     Project name

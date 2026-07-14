@@ -496,6 +496,8 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
         return status(404, { message: "Project not found", code: "404" });
       }
       return [
+        { name: "publishable", api_key: keys.publishable_key || "" },
+        { name: "secret", api_key: keys.secret_key ? "********" : "" },
         { name: "anon", api_key: keys.anon_key },
         { name: "service_role", api_key: keys.service_role_key ? "********" : "" },
       ];
@@ -529,7 +531,28 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
         ref: t.String(),
       }),
     
-      detail: { tags: ["projects"], summary: "Rotate API keys" },
+      detail: { tags: ["projects"], summary: "Rotate legacy JWT API keys" },
+},
+  )
+
+  // Rotate opaque Publishable/Secret keys without invalidating user JWT sessions.
+  .post(
+    "/:ref/api-keys/rotate-opaque",
+    async ({ params, request }) => {
+      const authError = await requireAdminAuth(request);
+      if (authError) return status(authError.status, authError.body);
+      const keys = await projectService.rotateOpaqueApiKeys(params.ref);
+      if (!keys) {
+        return status(404, { message: "Project not found", code: "404" });
+      }
+      return keys;
+    },
+    {
+      params: t.Object({
+        ref: t.String(),
+      }),
+
+      detail: { tags: ["projects"], summary: "Rotate opaque Publishable and Secret keys" },
 },
   )
 

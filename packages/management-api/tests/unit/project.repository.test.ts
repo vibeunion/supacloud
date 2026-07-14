@@ -28,6 +28,10 @@ const mockProject = {
 // Mock the SQL module
 const mockSql: unknown = mock(() => Promise.resolve([]));
 (mockSql as Record<string, unknown>).unsafe = mock(() => Promise.resolve([]));
+const mockTransactionSql = mock(() => Promise.resolve([]));
+(mockSql as Record<string, unknown>).begin = mock(
+  (callback: (tx: typeof mockTransactionSql) => Promise<unknown>) => callback(mockTransactionSql),
+);
 
 mock.module("../../src/db", () => ({
   sql: mockSql,
@@ -43,6 +47,8 @@ describe("ProjectRepository", () => {
   beforeEach(() => {
     (mockSql as ReturnType<typeof mock>).mockClear();
     ((mockSql as Record<string, unknown>).unsafe as ReturnType<typeof mock>).mockClear();
+    ((mockSql as Record<string, unknown>).begin as ReturnType<typeof mock>).mockClear();
+    mockTransactionSql.mockClear();
   });
 
   describe("findAll", () => {
@@ -186,6 +192,24 @@ describe("ProjectRepository", () => {
       (mockSql as ReturnType<typeof mock>).mockResolvedValueOnce([]);
       const project = await projectRepository.softDelete("nonexistent");
       expect(project).toBeNull();
+    });
+  });
+
+  describe("updateOpaqueApiKeys", () => {
+    test("atomically updates metadata and runtime secrets", async () => {
+      mockTransactionSql
+        .mockResolvedValueOnce([mockProject])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([]);
+
+      const project = await projectRepository.updateOpaqueApiKeys("test123", {
+        publishable_key: "sb_publishable_new",
+        secret_key: "sb_secret_new",
+      });
+
+      expect(project).toEqual(mockProject);
+      expect((mockSql as Record<string, unknown>).begin).toHaveBeenCalledTimes(1);
+      expect(mockTransactionSql).toHaveBeenCalledTimes(3);
     });
   });
 

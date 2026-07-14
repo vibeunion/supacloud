@@ -313,13 +313,14 @@ supacloud_consume_protected_install_input() (
     local allowed_keys=(
         INTERNAL_IP SUPABASE_PUBLIC_DOMAIN SUPABASE_STUDIO_DOMAIN SUPABASE_DOMAIN
         DASHBOARD_USERNAME DASHBOARD_PASSWORD POSTGRES_PASSWORD GRAFANA_PASSWORD
-        JWT_SECRET ANON_KEY SERVICE_ROLE_KEY SWAP_SIZE_GB PG_VERSION PIGSTY_VERSION
+        JWT_SECRET ANON_KEY SERVICE_ROLE_KEY SUPABASE_PUBLISHABLE_KEY SUPABASE_SECRET_KEY
+        SWAP_SIZE_GB PG_VERSION PIGSTY_VERSION
         TIMEZONE PIGSTY_CONFIG_TEMPLATE SUPACLOUD_INSTALL_LEGACY_SUPABASE_STACK
         SUPACLOUD_MIGRATE_LEGACY_SUPABASE_COMPOSE S3_STORAGE_TYPE JUICEFS_BACKEND
         S3_ENDPOINT S3_PROTOCOL S3_REGION S3_BUCKET S3_ACCESS_KEY S3_SECRET_KEY
         S3_FORCE_PATH_STYLE EXTERNAL_S3_ENDPOINT EXTERNAL_S3_REGION EXTERNAL_S3_BUCKET
         EXTERNAL_S3_ACCESS_KEY EXTERNAL_S3_SECRET_KEY IMAGINARY_IMAGE EDGE_RUNTIME
-        ENABLE_ANALYTICS ANALYTICS_BACKEND LOGFLARE_ERL_FLAGS
+        ENABLE_ANALYTICS ANALYTICS_BACKEND LOGFLARE_DB LOGFLARE_SCHEMA LOGFLARE_ERL_FLAGS
     )
 
     [[ -f "$source_file" && ! -L "$source_file" ]] || {
@@ -481,8 +482,9 @@ from pathlib import Path
 target = Path(sys.argv[1])
 secret_file = Path(sys.argv[2])
 raw = secret_file.read_bytes().split(b"\0")
-values = [value.decode("utf-8") for value in raw[:6]]
-dashboard, postgres, grafana, jwt_secret, anon_key, service_role_key = values
+values = [value.decode("utf-8") for value in raw[:8]]
+values.extend([""] * (8 - len(values)))
+dashboard, postgres, grafana, jwt_secret, anon_key, service_role_key, publishable_key, secret_key = values
 text = target.read_text()
 
 def replace_scalar(pattern: str, value: str, source: str) -> str:
@@ -504,6 +506,8 @@ text = replace_scalar(r"^(\s*grafana_admin_password:\s*).*$", grafana, text)
 text = replace_scalar(r"^(\s*JWT_SECRET:\s*).*$", jwt_secret, text)
 text = replace_scalar(r"^(\s*ANON_KEY:\s*).*$", anon_key, text)
 text = replace_scalar(r"^(\s*SERVICE_ROLE_KEY:\s*).*$", service_role_key, text)
+text = replace_scalar(r"^(\s*SUPABASE_PUBLISHABLE_KEY:\s*).*$", publishable_key, text)
+text = replace_scalar(r"^(\s*SUPABASE_SECRET_KEY:\s*).*$", secret_key, text)
 
 mode = target.stat().st_mode & 0o777
 fd, temporary_name = tempfile.mkstemp(prefix=f".{target.name}.", dir=target.parent)
@@ -558,6 +562,8 @@ supacloud_write_install_input_config() (
         printf '%s=%q\n' EDGE_RUNTIME "${EDGE_RUNTIME:-bun}"
         printf '%s=%q\n' ENABLE_ANALYTICS "${ENABLE_ANALYTICS:-true}"
         printf '%s=%q\n' ANALYTICS_BACKEND "${ANALYTICS_BACKEND:-postgres}"
+        printf '%s=%q\n' LOGFLARE_DB "${LOGFLARE_DB:-_supabase}"
+        printf '%s=%q\n' LOGFLARE_SCHEMA "${LOGFLARE_SCHEMA:-_analytics}"
     } > "$desired_file"
     supacloud_atomic_merge_env "$target_file" "$desired_file"
 )

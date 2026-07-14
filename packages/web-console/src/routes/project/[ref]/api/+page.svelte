@@ -151,7 +151,26 @@ const { error: delErr } = await supabase
         <div class="space-y-3">
           <div>
             <div class="flex items-center gap-2 mb-1">
-              <span class="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase bg-green-500/10 text-green-600">anon</span>
+              <span class="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase bg-emerald-500/10 text-emerald-600">publishable</span>
+              <span class="text-[10px] text-muted-foreground">推荐用于客户端，映射为 anon 权限</span>
+            </div>
+            <div class="flex items-center gap-2">
+              <code class="flex-1 p-2 rounded-lg bg-muted text-[10px] font-mono break-all max-h-16 overflow-hidden">{project?.publishable_key || "N/A"}</code>
+              <button onclick={() => copyToClipboard(String(project?.publishable_key || ''), 'publishable')} class="px-2 py-1.5 rounded border hover:bg-muted/50">
+                {#if copiedField === 'publishable'}<Check size={12} class="text-green-600" />{:else}<Copy size={12} />{/if}
+              </button>
+            </div>
+          </div>
+          <div>
+            <div class="flex items-center gap-2 mb-1">
+              <span class="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase bg-red-500/10 text-red-600">secret</span>
+              <span class="text-[10px] text-muted-foreground">服务端专用，仅在创建或轮换时返回明文</span>
+            </div>
+            <code class="block p-2 rounded-lg bg-muted text-[10px] font-mono text-muted-foreground">sb_secret_••••••••••••••••••••••••</code>
+          </div>
+          <div>
+            <div class="flex items-center gap-2 mb-1">
+              <span class="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase bg-green-500/10 text-green-600">anon legacy</span>
               <span class="text-[10px] text-muted-foreground">可安全用于浏览器端（需配合 RLS）</span>
             </div>
             <div class="flex items-center gap-2">
@@ -163,7 +182,7 @@ const { error: delErr } = await supabase
           </div>
           <div>
             <div class="flex items-center gap-2 mb-1">
-              <span class="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase bg-red-500/10 text-red-600">service_role</span>
+              <span class="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase bg-red-500/10 text-red-600">service_role legacy</span>
               <span class="text-[10px] text-muted-foreground">服务端专用，绕过 RLS，切勿公开</span>
             </div>
             <div class="flex items-center gap-2">
@@ -187,7 +206,7 @@ const { error: delErr } = await supabase
 
 const supabase = createClient(
   '${apiUrl}',
-  'YOUR_ANON_KEY'
+  'YOUR_PUBLISHABLE_KEY'
 )`}</code></pre>
         </div>
       </div>

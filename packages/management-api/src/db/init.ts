@@ -1,9 +1,55 @@
 import { config } from "../config";
 import { logger } from "../utils/logger";
 import { SQL } from "bun";
+import {
+  generatePublishableApiKey,
+  generateSecretApiKey,
+  hashSecretApiKey,
+} from "../utils/api-keys";
+import {
+  decryptSecretIfNeeded,
+  encryptSecretIfNeeded,
+} from "../utils/secret-crypto";
 
 function sqlStringLiteral(value: string): string {
   return `'${value.replace(/'/g, "''")}'`;
+}
+
+async function backfillOpaqueApiKeys(sql: SQL): Promise<number> {
+  const rows = await sql`
+    SELECT ref, publishable_key, secret_key_hash, secret_key_encrypted
+    FROM projects
+    WHERE publishable_key IS NULL
+       OR secret_key_hash IS NULL
+       OR secret_key_encrypted IS NULL
+  `;
+
+  let updated = 0;
+  for (const row of rows as Array<Record<string, unknown>>) {
+    const publishableKey = typeof row.publishable_key === "string" && row.publishable_key
+      ? row.publishable_key
+      : generatePublishableApiKey();
+    let secretKey: string | null = null;
+    if (typeof row.secret_key_encrypted === "string" && row.secret_key_encrypted) {
+      try {
+        secretKey = decryptSecretIfNeeded(row.secret_key_encrypted);
+      } catch {
+        secretKey = null;
+      }
+    }
+    secretKey ||= generateSecretApiKey();
+
+    await sql`
+      UPDATE projects
+      SET publishable_key = ${publishableKey},
+          secret_key_hash = ${hashSecretApiKey(secretKey)},
+          secret_key_encrypted = ${encryptSecretIfNeeded(secretKey)},
+          updated_at = NOW()
+      WHERE ref = ${String(row.ref)}
+    `;
+    updated += 1;
+  }
+  return updated;
 }
 
 export async function initDatabase() {
@@ -64,6 +110,9 @@ export async function initDatabase() {
       jwt_secret VARCHAR(100) NOT NULL,
       anon_key TEXT NOT NULL,
       service_role_key TEXT NOT NULL,
+      publishable_key TEXT,
+      secret_key_hash VARCHAR(64),
+      secret_key_encrypted TEXT,
       s3_bucket VARCHAR(63) NOT NULL,
       s3_access_key VARCHAR(100),
       s3_secret_key VARCHAR(100),
@@ -332,6 +381,11 @@ export async function initDatabase() {
       { statement: 'ALTER TABLE projects ADD COLUMN IF NOT EXISTS db_password_encrypted TEXT', description: "projects.db_password_encrypted" },
       { statement: 'ALTER TABLE projects ADD COLUMN IF NOT EXISTS jwt_secret_encrypted TEXT', description: "projects.jwt_secret_encrypted" },
       { statement: 'ALTER TABLE projects ADD COLUMN IF NOT EXISTS service_role_key_encrypted TEXT', description: "projects.service_role_key_encrypted" },
+      { statement: 'ALTER TABLE projects ADD COLUMN IF NOT EXISTS publishable_key TEXT', description: "projects.publishable_key" },
+      { statement: 'ALTER TABLE projects ADD COLUMN IF NOT EXISTS secret_key_hash VARCHAR(64)', description: "projects.secret_key_hash" },
+      { statement: 'ALTER TABLE projects ADD COLUMN IF NOT EXISTS secret_key_encrypted TEXT', description: "projects.secret_key_encrypted" },
+      { statement: 'CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_publishable_key ON projects(publishable_key) WHERE publishable_key IS NOT NULL', description: "idx_projects_publishable_key" },
+      { statement: 'CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_secret_key_hash ON projects(secret_key_hash) WHERE secret_key_hash IS NOT NULL', description: "idx_projects_secret_key_hash" },
       { statement: 'ALTER TABLE projects ADD COLUMN IF NOT EXISTS s3_secret_key_encrypted TEXT', description: "projects.s3_secret_key_encrypted" },
       { statement: 'ALTER TABLE projects ADD COLUMN IF NOT EXISTS postgrest_desired VARCHAR(20)', description: "projects.postgrest_desired" },
       { statement: 'ALTER TABLE projects ADD COLUMN IF NOT EXISTS postgrest_actual VARCHAR(20)', description: "projects.postgrest_actual" },
@@ -584,6 +638,11 @@ export async function initDatabase() {
       });
     }
     logger.info("Schema migrations applied.");
+
+    const opaqueKeyBackfillCount = await backfillOpaqueApiKeys(sql);
+    if (opaqueKeyBackfillCount > 0) {
+      logger.info(`Opaque API keys backfilled for ${opaqueKeyBackfillCount} project(s).`);
+    }
 
     // Always apply trigger (idempotent: CREATE OR REPLACE + DROP IF EXISTS)
     const notifyTriggerDDL = `

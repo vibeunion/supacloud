@@ -5,7 +5,9 @@ import { timingSafeEqual } from "crypto";
 import {
   extractProjectRefCandidates,
   extractProjectRefFromPath,
+  resolveProjectApiKey,
 } from "../utils/project-auth";
+import { isOpaqueApiKey } from "../utils/api-keys";
 import { verifyProjectJwtPayload } from "../utils/project-jwt";
 import {
   studioSessionService,
@@ -149,6 +151,14 @@ export function createAuthResolver(dependencies: AuthResolverDependencies = {}) 
   const mcpPayload = await verifyMcpToken(token);
   let role = mcpPayload?.role;
   let ref = mcpPayload?.ref;
+
+  if (!mcpPayload && isOpaqueApiKey(token)) {
+    const apiKey = await resolveProjectApiKey(token);
+    if (apiKey?.role === "service_role") {
+      role = "project";
+      ref = apiKey.ref;
+    }
+  }
 
   if (!mcpPayload && token.split(".").length === 3) {
     const [project] = scopedRef

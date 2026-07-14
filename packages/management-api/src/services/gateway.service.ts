@@ -170,6 +170,10 @@ function caddyAdminListen(): string {
 }
 
 const CADDY_PROJECT_ROUTE_KINDS = [
+    "opaque-rest",
+    "opaque-graphql",
+    "opaque-auth-domain",
+    "opaque-auth",
     "rest",
     "graphql",
     "auth-domain-auth",
@@ -820,6 +824,44 @@ export class CaddyGatewayProvider implements GatewayProvider {
         };
     }
 
+    private makeOpaqueApiKeyProxyRoute(opts: {
+        id: string;
+        hosts: string[];
+        path: string | string[];
+        upstream: string;
+        projectRef: string;
+        corsOrigins?: string[];
+        readTimeout?: number;
+    }): CaddyRoute {
+        const route = this.makeRoute(opts);
+        const baseMatch = Array.isArray(route.match)
+            ? route.match[0] as Record<string, unknown>
+            : {};
+        const matcherName = sanitizeCaddyId(opts.id);
+        route.match = [
+            {
+                ...baseMatch,
+                header_regexp: {
+                    apikey: {
+                        name: `${matcherName}_apikey`,
+                        pattern: "^sb_(publishable|secret)_[A-Za-z0-9_-]+$",
+                    },
+                },
+            },
+            {
+                ...baseMatch,
+                header_regexp: {
+                    Authorization: {
+                        name: `${matcherName}_authorization`,
+                        pattern: "(?i)^Bearer\\s+sb_(publishable|secret)_[A-Za-z0-9_-]+$",
+                    },
+                },
+            },
+        ];
+        route.__supacloud_priority = 100;
+        return route;
+    }
+
     private async putRoute(route: CaddyRoute): Promise<void> {
         const id = String(route["@id"]);
         this.routesById.set(id, route);
@@ -983,7 +1025,37 @@ export class CaddyGatewayProvider implements GatewayProvider {
                 ...this.hostsForProjectRoutes(projectRef),
             ]);
 
+            const opaqueRoutes = [
+                this.makeOpaqueApiKeyProxyRoute({
+                    id: caddyRouteId(projectRef, "opaque-rest"),
+                    hosts,
+                    path: "/rest/v1*",
+                    upstream: `${hostIp}:${config.port}`,
+                    projectRef,
+                    corsOrigins,
+                    readTimeout: config.restProxyTimeoutMs,
+                }),
+                this.makeOpaqueApiKeyProxyRoute({
+                    id: caddyRouteId(projectRef, "opaque-graphql"),
+                    hosts,
+                    path: "/graphql/v1*",
+                    upstream: `${hostIp}:${config.port}`,
+                    projectRef,
+                    corsOrigins,
+                    readTimeout: config.restProxyTimeoutMs,
+                }),
+                ...(!externalAuthUpstream ? [this.makeOpaqueApiKeyProxyRoute({
+                    id: caddyRouteId(projectRef, "opaque-auth"),
+                    hosts,
+                    path: "/auth/v1*",
+                    upstream: `${hostIp}:${config.port}`,
+                    projectRef,
+                    corsOrigins,
+                })] : []),
+            ];
+
             const routes = [
+                ...opaqueRoutes,
                 this.makeRoute({ id: caddyRouteId(projectRef, "rest"), hosts, path: "/rest/v1*", upstream: `${hostIp}:${pgrstPort}`, projectRef, stripPrefix: "/rest/v1", corsOrigins }),
                 this.makeRoute({ id: caddyRouteId(projectRef, "graphql"), hosts, path: "/graphql/v1*", upstream: `${hostIp}:${pgrstPort}`, projectRef, rewriteUri: "/rpc/graphql", headers: ["Content-Profile:graphql_public", "Accept-Profile:graphql_public"], corsOrigins }),
                 this.makeRoute({
@@ -1059,7 +1131,22 @@ export class CaddyGatewayProvider implements GatewayProvider {
             ];
 
             for (const route of routes) this.routesById.set(String(route["@id"]), route);
+            if (externalAuthUpstream) {
+                this.routesById.delete(caddyRouteId(projectRef, "opaque-auth"));
+            }
             if (authHosts.length > 0) {
+                if (!externalAuthUpstream) {
+                    this.routesById.set(caddyRouteId(projectRef, "opaque-auth-domain"), this.makeOpaqueApiKeyProxyRoute({
+                        id: caddyRouteId(projectRef, "opaque-auth-domain"),
+                        hosts: authHosts,
+                        path: "/auth/v1*",
+                        upstream: `${hostIp}:${config.port}`,
+                        projectRef,
+                        corsOrigins,
+                    }));
+                } else {
+                    this.routesById.delete(caddyRouteId(projectRef, "opaque-auth-domain"));
+                }
                 this.routesById.set(caddyRouteId(projectRef, "auth-domain-auth"), this.makeRoute({
                     id: caddyRouteId(projectRef, "auth-domain-auth"),
                     hosts: authHosts,
@@ -1084,6 +1171,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
                     upstreamTlsInsecureSkipVerify: thirdPartyAuth.auth_upstream_tls_insecure_skip_verify,
                 }));
             } else {
+                this.routesById.delete(caddyRouteId(projectRef, "opaque-auth-domain"));
                 this.routesById.delete(caddyRouteId(projectRef, "auth-domain-auth"));
                 this.routesById.delete(caddyRouteId(projectRef, "auth-domain-gotrue-well-known"));
             }
@@ -1099,11 +1187,13 @@ export class CaddyGatewayProvider implements GatewayProvider {
 
     async addProjectDomains(projectRef: string, apiDomains: string[], studioDomains: string[]): Promise<boolean> {
         await this.hydrateFromDiskIfUninitialized();
-        const existingKinds = ["rest", "graphql", "auth", "gotrue-well-known", "functions", "storage", "realtime-api", "realtime", "management", "acme"];
+        const existingKinds = ["opaque-rest", "opaque-graphql", "opaque-auth", "rest", "graphql", "auth", "gotrue-well-known", "functions", "storage", "realtime-api", "realtime", "management", "acme"];
         for (const kind of existingKinds) {
             const route = this.routesById.get(caddyRouteId(projectRef, kind));
-            const match = Array.isArray(route?.match) ? route.match[0] as Record<string, unknown> | undefined : undefined;
-            if (match) match.host = uniqueStrings([...(Array.isArray(match.host) ? match.host as string[] : []), ...apiDomains]);
+            const matches = Array.isArray(route?.match) ? route.match as Record<string, unknown>[] : [];
+            for (const match of matches) {
+                match.host = uniqueStrings([...(Array.isArray(match.host) ? match.host as string[] : []), ...apiDomains]);
+            }
         }
         const studio = this.routesById.get(caddyRouteId(projectRef, "studio"));
         const studioMatch = Array.isArray(studio?.match) ? studio.match[0] as Record<string, unknown> | undefined : undefined;
@@ -1118,9 +1208,11 @@ export class CaddyGatewayProvider implements GatewayProvider {
         for (const route of this.routesById.values()) {
             const id = String(route["@id"] || "");
             if (!id.includes(`-${projectRef}-`)) continue;
-            const match = Array.isArray(route.match) ? route.match[0] as Record<string, unknown> | undefined : undefined;
-            if (match && Array.isArray(match.host)) {
-                match.host = (match.host as string[]).filter((host) => !remove.has(normalizeCaddyHost(host)));
+            const matches = Array.isArray(route.match) ? route.match as Record<string, unknown>[] : [];
+            for (const match of matches) {
+                if (Array.isArray(match.host)) {
+                    match.host = (match.host as string[]).filter((host) => !remove.has(normalizeCaddyHost(host)));
+                }
             }
         }
         await this.persistAndLoad();

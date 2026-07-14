@@ -1,6 +1,7 @@
 import { sql, type Project, type CreateProjectInput, type ProjectStatus } from "../db";
 import { withRetry } from "../utils/retry";
 import { encryptSecretIfNeeded } from "../utils/secret-crypto";
+import { hashSecretApiKey } from "../utils/api-keys";
 
 export async function findAll(): Promise<Project[]> {
   return withRetry("ProjectRepository.findAll", async () => {
@@ -42,7 +43,7 @@ export async function create(input: CreateProjectInput): Promise<Project> {
   const [project] = await sql`
     INSERT INTO projects (
       ref, name, db_name, db_user, db_password,
-      jwt_secret, anon_key, service_role_key,
+      jwt_secret, anon_key, service_role_key, publishable_key, secret_key_hash, secret_key_encrypted,
       s3_bucket, s3_access_key, s3_secret_key,
       region, config,
       db_password_encrypted, jwt_secret_encrypted, service_role_key_encrypted, s3_secret_key_encrypted
@@ -55,6 +56,9 @@ export async function create(input: CreateProjectInput): Promise<Project> {
       ${input.jwt_secret},
       ${input.anon_key},
       ${input.service_role_key},
+      ${input.publishable_key || null},
+      ${input.secret_key ? hashSecretApiKey(input.secret_key) : null},
+      ${input.secret_key ? encryptSecretIfNeeded(input.secret_key) : null},
       ${input.s3_bucket},
       ${input.s3_access_key || null},
       ${input.s3_secret_key || null},
@@ -98,7 +102,11 @@ export async function updateConfig(ref: string, config: Record<string, unknown>)
   }
 
   // Update API keys
-export async function updateApiKeys(ref: string, keys: { jwt_secret: string, anon_key: string, service_role_key: string }): Promise<Project | null> {
+export async function updateApiKeys(ref: string, keys: {
+  jwt_secret: string;
+  anon_key: string;
+  service_role_key: string;
+}): Promise<Project | null> {
   return withRetry("ProjectRepository.updateApiKeys", async () => {
   const [project] = await sql`
     UPDATE projects
@@ -113,6 +121,43 @@ export async function updateApiKeys(ref: string, keys: { jwt_secret: string, ano
     RETURNING *
   `;
   return project || null;
+  });
+  }
+
+export async function updateOpaqueApiKeys(ref: string, keys: {
+  publishable_key: string;
+  secret_key: string;
+}): Promise<Project | null> {
+  return withRetry("ProjectRepository.updateOpaqueApiKeys", async () => {
+  const encryptedPublishableKey = encryptSecretIfNeeded(keys.publishable_key);
+  const encryptedSecretKey = encryptSecretIfNeeded(keys.secret_key);
+  return sql.begin(async (tx) => {
+    const [project] = await tx`
+      UPDATE projects
+      SET
+        publishable_key = ${keys.publishable_key},
+        secret_key_hash = ${hashSecretApiKey(keys.secret_key)},
+        secret_key_encrypted = ${encryptedSecretKey},
+        updated_at = NOW()
+      WHERE ref = ${ref} AND deleted_at IS NULL
+      RETURNING *
+    `;
+    if (!project) return null;
+
+    await tx`
+      INSERT INTO project_secrets (project_ref, name, value)
+      VALUES (${ref}, 'SUPABASE_PUBLISHABLE_KEY', ${encryptedPublishableKey})
+      ON CONFLICT (project_ref, name)
+      DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
+    `;
+    await tx`
+      INSERT INTO project_secrets (project_ref, name, value)
+      VALUES (${ref}, 'SUPABASE_SECRET_KEY', ${encryptedSecretKey})
+      ON CONFLICT (project_ref, name)
+      DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
+    `;
+    return project;
+  });
   });
   }
 
@@ -147,6 +192,7 @@ export const projectRepository = {
   updateStatus,
   updateConfig,
   updateApiKeys,
+  updateOpaqueApiKeys,
   softDelete,
   existsByRef,
 };

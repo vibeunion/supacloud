@@ -313,7 +313,8 @@ curl http://localhost:9090/v1/projects/<ref>/api-keys \
 | GET | `/v1/projects/:ref/settings` | Get settings |
 | PUT | `/v1/projects/:ref/settings` | Update settings |
 | GET | `/v1/projects/:ref/api-keys` | Get API keys |
-| POST | `/v1/projects/:ref/rotate-keys` | Rotate API keys |
+| POST | `/v1/projects/:ref/api-keys/rotate` | Rotate legacy JWT API keys |
+| POST | `/v1/projects/:ref/api-keys/rotate-opaque` | Rotate Publishable/Secret keys without changing JWT sessions |
 | GET | `/v1/projects/:ref/auth/oauth-server` | Get project OAuth/OIDC status |
 | POST | `/v1/projects/:ref/auth/oauth-server/migrate` | Migrate project to OIDC signing keys |
 | GET/POST/PUT/DELETE | `/v1/projects/:ref/auth/oauth-clients*` | OAuth client CRUD for the project runtime |
@@ -873,7 +874,8 @@ curl http://localhost:9090/v1/projects/<ref>/api-keys \
 | GET | `/v1/projects/:ref/settings` | 获取配置 |
 | PUT | `/v1/projects/:ref/settings` | 更新配置 |
 | GET | `/v1/projects/:ref/api-keys` | 获取 API 密钥 |
-| POST | `/v1/projects/:ref/rotate-keys` | 轮换 API 密钥 |
+| POST | `/v1/projects/:ref/api-keys/rotate` | 轮换旧版 JWT API 密钥 |
+| POST | `/v1/projects/:ref/api-keys/rotate-opaque` | 独立轮换 Publishable/Secret Key，不影响 JWT 会话 |
 | GET | `/v1/projects/:ref/auth/oauth-server` | 获取项目 OAuth/OIDC 状态 |
 | POST | `/v1/projects/:ref/auth/oauth-server/migrate` | 将项目迁移到 OIDC 签名密钥 |
 | GET/POST/PUT/DELETE | `/v1/projects/:ref/auth/oauth-clients*` | 项目运行时的 OAuth 客户端管理 |

@@ -8,7 +8,10 @@ const { edgeFunctionService } = await import("../../src/services/edge-function.s
 
 const jwtServiceMock = {
   generateProjectRef: spyOn(jwtService, "generateProjectRef"),
+  generateSecret: spyOn(jwtService, "generateSecret"),
+  generateAnonKey: spyOn(jwtService, "generateAnonKey"),
   generateServiceRoleKey: spyOn(jwtService, "generateServiceRoleKey"),
+  generateOpaqueKeySet: spyOn(jwtService, "generateOpaqueKeySet"),
   generateKeySet: spyOn(jwtService, "generateKeySet"),
 };
 
@@ -48,6 +51,10 @@ const tenantRuntimeServiceMock = {
   ])),
 };
 
+const realtimeServiceMock = {
+  updateTenant: mock(() => Promise.resolve()),
+};
+
 mock.module("../../src/db", () => ({
   ...actualDb,
   sql: baseMock as unknown,
@@ -65,6 +72,10 @@ mock.module("../../src/services/tenant-runtime.service", () => ({
   tenantRuntimeService: tenantRuntimeServiceMock,
 }));
 
+mock.module("../../src/services/realtime.service", () => ({
+  realtimeService: realtimeServiceMock,
+}));
+
 const { projectRepository } = await import("../../src/repositories/project.repository");
 const { taskRepository } = await import("../../src/repositories/task.repository");
 const { gatewayService } = await import("../../src/services/gateway.service");
@@ -75,6 +86,8 @@ const projectRepositoryMock = {
   create: spyOn(projectRepository, "create"),
   updateStatus: spyOn(projectRepository, "updateStatus"),
   updateConfig: spyOn(projectRepository, "updateConfig"),
+  updateApiKeys: spyOn(projectRepository, "updateApiKeys"),
+  updateOpaqueApiKeys: spyOn(projectRepository, "updateOpaqueApiKeys"),
   softDelete: spyOn(projectRepository, "softDelete"),
 };
 
@@ -84,6 +97,7 @@ const taskRepositoryMock = {
 
 const gatewayServiceMock = {
   setupUpstream: spyOn(gatewayService, "setupUpstream"),
+  setupJwt: spyOn(gatewayService, "setupJwt"),
 };
 
 const { ProjectService } = await import("../../src/services/project.service");
@@ -102,6 +116,8 @@ describe("ProjectService - Comprehensive", () => {
     jwt_secret: "secret123",
     anon_key: "anon.key.test",
     service_role_key: "service.key.test",
+    publishable_key: "sb_publishable_previous",
+    secret_key_encrypted: "sb_secret_previous",
     s3_bucket: "supa-test123abc",
     s3_access_key: "access123",
     s3_secret_key: "secret123",
@@ -121,10 +137,17 @@ describe("ProjectService - Comprehensive", () => {
     projectRepositoryMock.create.mockReset();
     projectRepositoryMock.updateStatus.mockReset();
     projectRepositoryMock.updateConfig.mockReset();
+    projectRepositoryMock.updateApiKeys.mockReset();
+    projectRepositoryMock.updateOpaqueApiKeys.mockReset();
     projectRepositoryMock.softDelete.mockReset();
     taskRepositoryMock.createTask.mockReset();
     gatewayServiceMock.setupUpstream.mockReset();
+    gatewayServiceMock.setupJwt.mockReset();
     jwtServiceMock.generateProjectRef.mockReset();
+    jwtServiceMock.generateSecret.mockReset();
+    jwtServiceMock.generateAnonKey.mockReset();
+    jwtServiceMock.generateServiceRoleKey.mockReset();
+    jwtServiceMock.generateOpaqueKeySet.mockReset();
     jwtServiceMock.generateKeySet.mockReset();
     databaseServiceMock.generatePassword.mockReset();
     databaseServiceMock.checkDatabaseExists.mockReset();
@@ -147,16 +170,27 @@ describe("ProjectService - Comprehensive", () => {
     tenantRuntimeServiceMock.pauseProjectRuntime.mockReset();
     tenantRuntimeServiceMock.resumeProjectRuntime.mockReset();
     tenantRuntimeServiceMock.restartRuntime.mockReset();
+    realtimeServiceMock.updateTenant.mockReset();
 
     projectRepositoryMock.findAll.mockResolvedValue([]);
     projectRepositoryMock.findByRef.mockResolvedValue(null);
     projectRepositoryMock.create.mockResolvedValue(mockProject);
     projectRepositoryMock.updateStatus.mockResolvedValue(mockProject);
     projectRepositoryMock.updateConfig.mockResolvedValue(mockProject);
+    projectRepositoryMock.updateApiKeys.mockResolvedValue(mockProject);
+    projectRepositoryMock.updateOpaqueApiKeys.mockResolvedValue(mockProject);
     projectRepositoryMock.softDelete.mockResolvedValue(mockProject);
     taskRepositoryMock.createTask.mockResolvedValue({ id: "tsk_1" });
     gatewayServiceMock.setupUpstream.mockResolvedValue({ success: true });
+    gatewayServiceMock.setupJwt.mockResolvedValue({ success: true });
     jwtServiceMock.generateProjectRef.mockReturnValue("newref1234");
+    jwtServiceMock.generateSecret.mockReturnValue("rotated-jwt-secret");
+    jwtServiceMock.generateAnonKey.mockResolvedValue("rotated-anon-key");
+    jwtServiceMock.generateServiceRoleKey.mockResolvedValue("rotated-service-key");
+    jwtServiceMock.generateOpaqueKeySet.mockReturnValue({
+      publishableKey: "sb_publishable_rotated",
+      secretKey: "sb_secret_rotated",
+    });
     jwtServiceMock.generateKeySet.mockResolvedValue({
       jwtSecret: "jwtsecret",
       anonKey: "anonkey",
@@ -200,6 +234,7 @@ describe("ProjectService - Comprehensive", () => {
     tenantRuntimeServiceMock.pauseProjectRuntime.mockResolvedValue(undefined);
     tenantRuntimeServiceMock.resumeProjectRuntime.mockResolvedValue({ status: "running" });
     tenantRuntimeServiceMock.restartRuntime.mockResolvedValue({ status: "running" });
+    realtimeServiceMock.updateTenant.mockResolvedValue(undefined);
   });
 
   test("listProjects returns empty array when no projects", async () => {
@@ -501,6 +536,45 @@ describe("ProjectService - Comprehensive", () => {
     expect(result?.anon_key).toBe("anon.key.test");
     expect(result?.service_role_key).toBe("service.key.test");
   });
+
+  test("rotateApiKeys preserves opaque keys and rotates legacy JWT state", async () => {
+    projectRepositoryMock.findByRef.mockResolvedValueOnce(mockProject);
+
+    const result = await service.rotateApiKeys("test123abc");
+
+    expect(result).toEqual({
+      anon_key: "rotated-anon-key",
+      service_role_key: "rotated-service-key",
+    });
+    expect(projectRepositoryMock.updateApiKeys).toHaveBeenCalledWith("test123abc", {
+      jwt_secret: "rotated-jwt-secret",
+      anon_key: "rotated-anon-key",
+      service_role_key: "rotated-service-key",
+    });
+    expect(projectRepositoryMock.updateOpaqueApiKeys).not.toHaveBeenCalled();
+    expect(jwtServiceMock.generateOpaqueKeySet).not.toHaveBeenCalled();
+    expect(tenantRuntimeServiceMock.restartRuntime).toHaveBeenCalledWith("test123abc");
+  });
+
+  test("rotateOpaqueApiKeys does not invalidate legacy JWT sessions", async () => {
+    projectRepositoryMock.findByRef.mockResolvedValueOnce(mockProject);
+
+    const result = await service.rotateOpaqueApiKeys("test123abc");
+
+    expect(result).toEqual({
+      publishable_key: "sb_publishable_rotated",
+      secret_key: "sb_secret_rotated",
+    });
+    expect(projectRepositoryMock.updateOpaqueApiKeys).toHaveBeenCalledWith("test123abc", {
+      publishable_key: "sb_publishable_rotated",
+      secret_key: "sb_secret_rotated",
+    });
+    expect(projectRepositoryMock.updateApiKeys).not.toHaveBeenCalled();
+    expect(gatewayServiceMock.setupJwt).not.toHaveBeenCalled();
+    expect(realtimeServiceMock.updateTenant).not.toHaveBeenCalled();
+    expect(tenantRuntimeServiceMock.restartRuntime).not.toHaveBeenCalled();
+  });
+
 
   test("getSecrets delegates to database service", async () => {
     projectRepositoryMock.findByRef.mockResolvedValueOnce(mockProject);

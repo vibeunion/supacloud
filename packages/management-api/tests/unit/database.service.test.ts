@@ -1,5 +1,9 @@
 import { describe, test, expect, beforeEach, mock, spyOn } from "bun:test";
-import { DatabaseService, renderAuthSchemaOwnershipSql } from "../../src/services/database.service";
+import {
+  DatabaseService,
+  renderAuthSchemaOwnershipSql,
+  renderPgStatStatementsCompatibilitySql,
+} from "../../src/services/database.service";
 import { shellService } from "../../src/services/shell.service";
 
 /** Typed mock for SQL connection used in DatabaseService */
@@ -99,6 +103,18 @@ describe("DatabaseService", () => {
 
       expect(tenantSql.unsafe).toHaveBeenCalledWith("SELECT 'tenant schema loaded';");
       expect(tenantSql.unsafe).toHaveBeenCalledWith(expect.stringContaining('ALTER SCHEMA auth OWNER TO "supabase_auth_admin"'));
+    });
+  });
+
+  describe("renderPgStatStatementsCompatibilitySql", () => {
+    test("creates Studio compatibility wrappers without moving the extension", () => {
+      const sql = renderPgStatStatementsCompatibilitySql();
+
+      expect(sql).toContain("extensions.pg_stat_statements");
+      expect(sql).toContain("extensions.pg_stat_statements_info");
+      expect(sql).toContain("pg_stat_statements(showtext boolean)");
+      expect(sql).toContain("pg_extension");
+      expect(sql).toContain("extnamespace");
     });
   });
 

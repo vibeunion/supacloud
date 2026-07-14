@@ -5,10 +5,50 @@
 
 set -e
 
+SUPACLOUD_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
 echo "=========================================================="
-PIGSTY_VERSION="${PIGSTY_VERSION:-v4.3.0}"
+PIGSTY_VERSION="${PIGSTY_VERSION:-v4.4.0}"
 PIGSTY_CONFIG_TEMPLATE="${PIGSTY_CONFIG_TEMPLATE:-supabase}"
 SUPACLOUD_INSTALL_LEGACY_SUPABASE_STACK="${SUPACLOUD_INSTALL_LEGACY_SUPABASE_STACK:-false}"
+ANALYTICS_WAS_RUNNING=false
+ANALYTICS_PREPARE_STARTED=false
+ANALYTICS_PREPARE_COMPLETED=false
+UPGRADE_COMPLETED=false
+ANALYTICS_COMPOSE_DIR="${PIGSTY_SUPABASE_DIR:-${HOME}/pigsty/app/supabase}"
+ANALYTICS_COMPOSE_CMD=()
+
+detect_legacy_analytics() {
+    [[ -f "${ANALYTICS_COMPOSE_DIR}/docker-compose.yml" ]] || return 0
+    if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
+        ANALYTICS_COMPOSE_CMD=(docker compose)
+    elif command -v docker-compose >/dev/null 2>&1; then
+        ANALYTICS_COMPOSE_CMD=(docker-compose)
+    elif command -v podman >/dev/null 2>&1 && podman compose version >/dev/null 2>&1; then
+        ANALYTICS_COMPOSE_CMD=(podman compose)
+    else
+        return 0
+    fi
+    local container_id=""
+    container_id="$(cd "$ANALYTICS_COMPOSE_DIR" && "${ANALYTICS_COMPOSE_CMD[@]}" ps -q analytics 2>/dev/null || true)"
+    [[ -z "$container_id" ]] || ANALYTICS_WAS_RUNNING=true
+}
+
+restore_legacy_analytics_on_failure() {
+    local exit_status=$?
+    if [[ "$exit_status" -ne 0 && "$ANALYTICS_PREPARE_STARTED" == "true" && "$ANALYTICS_PREPARE_COMPLETED" != "true" ]]; then
+        # The compatibility script owns failure recovery while prepare is running.
+        return "$exit_status"
+    fi
+    if [[ "$exit_status" -ne 0 && "$UPGRADE_COMPLETED" != "true" && "$ANALYTICS_PREPARE_COMPLETED" == "true" && "$ANALYTICS_WAS_RUNNING" == "true" && ${#ANALYTICS_COMPOSE_CMD[@]} -gt 0 ]]; then
+        echo "=> Upgrade failed; recreating Analytics with the current environment..." >&2
+        (cd "$ANALYTICS_COMPOSE_DIR" && "${ANALYTICS_COMPOSE_CMD[@]}" up -d --force-recreate analytics) || true
+    fi
+    return "$exit_status"
+}
+
+detect_legacy_analytics
+trap restore_legacy_analytics_on_failure EXIT
 
 echo "          SupaCloud - Pigsty Upgrade Tool                "
 echo "=========================================================="
@@ -20,6 +60,13 @@ read -r -p "Have you confirmed backup and are ready to upgrade? [y/N] " confirm
 if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
     echo "Upgrade cancelled."
     exit 0
+fi
+
+if [[ -f "${SUPACLOUD_ROOT}/scripts/upgrade_pigsty_4_4_compat.sh" ]]; then
+    echo "=> Preparing Analytics migration before Pigsty 4.4 services can initialize the destination schema..."
+    ANALYTICS_PREPARE_STARTED=true
+    bash "${SUPACLOUD_ROOT}/scripts/upgrade_pigsty_4_4_compat.sh" --prepare-analytics
+    ANALYTICS_PREPARE_COMPLETED=true
 fi
 
 echo "=> Starting to download latest Pigsty source code..."
@@ -80,10 +127,16 @@ if [ -d "$HOME/pigsty" ]; then
     else
         make install
     fi
+
+    if [[ -f "${SUPACLOUD_ROOT}/scripts/upgrade_pigsty_4_4_compat.sh" ]]; then
+        echo "=> Applying Pigsty 4.4 Supabase compatibility migrations..."
+        bash "${SUPACLOUD_ROOT}/scripts/upgrade_pigsty_4_4_compat.sh" --apply
+    fi
     
     echo "=========================================================="
     echo "   Upgrade complete! Please verify your database and monitoring service status."
     echo "=========================================================="
+    UPGRADE_COMPLETED=true
 else
     echo "Error: Cannot find downloaded Pigsty directory ($HOME/pigsty)."
     exit 1

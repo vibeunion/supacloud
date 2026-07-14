@@ -433,6 +433,9 @@ export interface Project {
   jwt_secret: string;
   anon_key: string;
   service_role_key: string;
+  publishable_key?: string | null;
+  secret_key_hash?: string | null;
+  secret_key_encrypted?: string | null;
   s3_bucket: string;
   s3_access_key: string | null;
   s3_secret_key: string | null;
@@ -539,6 +542,8 @@ export interface CreateProjectInput {
   jwt_secret: string;
   anon_key: string;
   service_role_key: string;
+  publishable_key?: string;
+  secret_key?: string;
   s3_bucket: string;
   s3_access_key?: string;
   s3_secret_key?: string;

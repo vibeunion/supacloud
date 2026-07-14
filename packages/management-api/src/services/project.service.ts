@@ -25,6 +25,7 @@ import {
   BACKGROUND_TASK_SETTING_LIMITS,
   DEFAULT_BACKGROUND_TASK_SETTINGS,
 } from "../config/background-task-settings";
+import { decryptSecretIfNeeded } from "../utils/secret-crypto";
 
 export interface CreateProjectRequest {
   name: string;
@@ -79,6 +80,8 @@ export interface ProjectCreateResponse extends ProjectResponse {
   db_user: string;
   anon_key: string;
   service_role_key: string;
+  publishable_key: string;
+  secret_key: string;
   jwt_secret: string;
   db_password: string;
 }
@@ -88,6 +91,7 @@ export interface ProjectDetailResponse extends ProjectResponse {
   updated_at: Date;
   // API Keys for Studio compatibility
   anon_key?: string;
+  publishable_key?: string;
 }
 
 export interface BackupResponse {
@@ -230,7 +234,7 @@ export class ProjectService {
 
     // Generate all necessary credentials
     const dbPassword = databaseService.generatePassword();
-    const { jwtSecret, anonKey, serviceRoleKey } =
+    const { jwtSecret, anonKey, serviceRoleKey, publishableKey, secretKey } =
       await jwtService.generateKeySet();
 
     const dbName = generateDbName(projectRef);
@@ -263,6 +267,8 @@ export class ProjectService {
       jwt_secret: jwtSecret,
       anon_key: anonKey,
       service_role_key: serviceRoleKey,
+      publishable_key: publishableKey,
+      secret_key: secretKey,
       s3_bucket: s3Bucket,
       region: request.region || "local",
       config: initialConfig,
@@ -302,6 +308,8 @@ export class ProjectService {
       db_user: dbUser,
       anon_key: anonKey,
       service_role_key: serviceRoleKey,
+      publishable_key: publishableKey,
+      secret_key: secretKey,
       jwt_secret: jwtSecret,
       db_password: dbPassword,
       database: {
@@ -729,13 +737,22 @@ export class ProjectService {
   // Get project API keys
   async getApiKeys(
     ref: string,
-  ): Promise<{ anon_key: string; service_role_key: string } | null> {
+  ): Promise<{
+    anon_key: string;
+    service_role_key: string;
+    publishable_key: string | null;
+    secret_key: string | null;
+  } | null> {
     const project = await projectRepository.findByRef(ref);
     if (!project) return null;
 
     return {
       anon_key: project.anon_key,
       service_role_key: project.service_role_key,
+      publishable_key: project.publishable_key || null,
+      secret_key: project.secret_key_encrypted
+        ? decryptSecretIfNeeded(project.secret_key_encrypted)
+        : null,
     };
   }
 
@@ -941,6 +958,7 @@ export class ProjectService {
       updated_at: project.updated_at,
       // API Keys for Studio compatibility
       anon_key: project.anon_key,
+      publishable_key: project.publishable_key || undefined,
     };
   }
 
@@ -957,12 +975,18 @@ export class ProjectService {
 
   async rotateApiKeys(
     ref: string,
-  ): Promise<{ anon_key: string; service_role_key: string } | null> {
+  ): Promise<{
+    anon_key: string;
+    service_role_key: string;
+  } | null> {
     const project = await projectRepository.findByRef(ref);
     if (!project) return null;
 
-    const { jwtSecret, anonKey, serviceRoleKey } =
-      await jwtService.generateKeySet();
+    const jwtSecret = jwtService.generateSecret();
+    const [anonKey, serviceRoleKey] = await Promise.all([
+      jwtService.generateAnonKey(jwtSecret),
+      jwtService.generateServiceRoleKey(jwtSecret),
+    ]);
 
     // 1. Update keys in master database
     await projectRepository.updateApiKeys(ref, {
@@ -1001,7 +1025,35 @@ export class ProjectService {
       `[ProjectService] Rotated API keys, synchronized secrets, and reloaded runtimes for ${ref}`,
     );
 
-    return { anon_key: anonKey, service_role_key: serviceRoleKey };
+    return {
+      anon_key: anonKey,
+      service_role_key: serviceRoleKey,
+    };
+  }
+
+  async rotateOpaqueApiKeys(
+    ref: string,
+  ): Promise<{
+    publishable_key: string;
+    secret_key: string;
+  } | null> {
+    const project = await projectRepository.findByRef(ref);
+    if (!project) return null;
+
+    const { publishableKey, secretKey } = jwtService.generateOpaqueKeySet();
+    const updated = await projectRepository.updateOpaqueApiKeys(ref, {
+      publishable_key: publishableKey,
+      secret_key: secretKey,
+    });
+    if (!updated) {
+      return null;
+    }
+
+    logger.info(`[ProjectService] Rotated opaque API keys for ${ref}`);
+    return {
+      publishable_key: publishableKey,
+      secret_key: secretKey,
+    };
   }
 
   // --- Operations (delegated) ---

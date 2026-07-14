@@ -94,6 +94,60 @@ END $$;
 `;
 }
 
+export function renderPgStatStatementsCompatibilitySql(): string {
+  return `
+CREATE SCHEMA IF NOT EXISTS extensions;
+
+DO $compat$
+DECLARE
+  source_schema TEXT;
+BEGIN
+  SELECT n.nspname
+  INTO source_schema
+  FROM pg_extension e
+  JOIN pg_namespace n ON n.oid = e.extnamespace
+  WHERE e.extname = 'pg_stat_statements';
+
+  IF source_schema IS NOT NULL AND source_schema <> 'extensions' THEN
+    IF to_regclass(format('%I.pg_stat_statements', source_schema)) IS NOT NULL THEN
+      EXECUTE format(
+        'CREATE OR REPLACE VIEW extensions.pg_stat_statements AS SELECT * FROM %I.pg_stat_statements',
+        source_schema
+      );
+    END IF;
+
+    IF to_regclass(format('%I.pg_stat_statements_info', source_schema)) IS NOT NULL THEN
+      EXECUTE format(
+        'CREATE OR REPLACE VIEW extensions.pg_stat_statements_info AS SELECT * FROM %I.pg_stat_statements_info',
+        source_schema
+      );
+    END IF;
+
+    IF to_regprocedure(format('%I.pg_stat_statements(boolean)', source_schema)) IS NOT NULL THEN
+      EXECUTE format(
+        'CREATE OR REPLACE FUNCTION extensions.pg_stat_statements(showtext boolean) RETURNS SETOF %I.pg_stat_statements LANGUAGE sql STABLE AS $function$ SELECT * FROM %I.pg_stat_statements(showtext); $function$',
+        source_schema,
+        source_schema
+      );
+    END IF;
+
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'supabase_admin') THEN
+      IF to_regclass('extensions.pg_stat_statements') IS NOT NULL THEN
+        ALTER VIEW extensions.pg_stat_statements OWNER TO supabase_admin;
+      END IF;
+      IF to_regclass('extensions.pg_stat_statements_info') IS NOT NULL THEN
+        ALTER VIEW extensions.pg_stat_statements_info OWNER TO supabase_admin;
+      END IF;
+      IF to_regprocedure('extensions.pg_stat_statements(boolean)') IS NOT NULL THEN
+        ALTER FUNCTION extensions.pg_stat_statements(boolean) OWNER TO supabase_admin;
+      END IF;
+    END IF;
+  END IF;
+END
+$compat$;
+`;
+}
+
 export class DatabaseService {
   private readonly PG_HOST = config.pgHost;
   private readonly PG_PORT = config.pgPort;
@@ -394,6 +448,7 @@ export class DatabaseService {
         const schemaSql = await this.loadSupabaseSchema();
         await tenantDb.unsafe(schemaSql);
         await tenantDb.unsafe(renderAuthSchemaOwnershipSql());
+        await tenantDb.unsafe(renderPgStatStatementsCompatibilitySql());
         logger.info(
           `[services/database.service] Successfully applied supabase.sql to tenant ${dbName}`,
         );

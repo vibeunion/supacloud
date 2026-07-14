@@ -25,7 +25,8 @@ import { closeDb } from "./db";
 import { authRoutes, deployRoutes, storageCompatRoutes } from "./routes";
 import { migrateLegacyVersionArtifacts } from "./services/edge-function.service";
 import { resolveRealtimeTenantHost } from "./utils/sdk-parity";
-import { resolveProjectRefFromApiKey } from "./utils/project-auth";
+import { resolveProjectApiKey } from "./utils/project-auth";
+import { translateRealtimeProxyCredentials } from "./utils/realtime-proxy-auth";
 import { recordRequestPeerAddress } from "./utils/client-ip";
 import { grafanaProxyRoutes } from "./routes/grafana";
 import { closeTaskWebSocket, messageTaskWebSocket, openTaskWebSocket } from "./routes/ws";
@@ -972,6 +973,7 @@ async function bootstrap() {
       handleProjectRestart,
       handleProjectKeys,
       handleProjectRotateKeys,
+      handleProjectRotateOpaqueKeys,
       printProjectHelp,
     } = await import("./cli/project");
     const subCommand = args[1];
@@ -1039,6 +1041,14 @@ async function bootstrap() {
           process.exit(1);
         }
         await handleProjectRotateKeys(args[2], args.slice(3));
+        break;
+      case "rotate-opaque-keys":
+        if (!args[2]) {
+          logger.error("Error: project ref required");
+          printProjectHelp();
+          process.exit(1);
+        }
+        await handleProjectRotateOpaqueKeys(args[2], args.slice(3));
         break;
       case "--help":
       case "-h":
@@ -1195,9 +1205,10 @@ async function bootstrap() {
             return new Response("Missing apikey", { status: 401 });
           }
 
-          const projectRef = await resolveProjectRefFromApiKey(apikey) || "";
+          const resolvedApiKey = await resolveProjectApiKey(apikey);
+          const projectRef = resolvedApiKey?.ref || "";
 
-          if (!projectRef) {
+          if (!resolvedApiKey || !projectRef) {
             return new Response("Invalid apikey", { status: 401 });
           }
 
@@ -1216,18 +1227,15 @@ async function bootstrap() {
             .replace(/^https:/, "wss:");
           // Supabase Realtime container expects /websocket, not /realtime/v1/websocket
           const wsPath = url.pathname.replace(/^\/realtime\/v1/, "/socket");
-          const upstreamUrl = `${wsBase}${wsPath}${url.search}`;
+          const translatedCredentials = translateRealtimeProxyCredentials({
+            url,
+            requestHeaders: request.headers,
+            candidateKey: apikey,
+            resolved: resolvedApiKey,
+          });
+          const upstreamUrl = `${wsBase}${wsPath}${translatedCredentials.search}`;
           // Forward relevant request headers and align websocket proxy headers with HTTP sdk-proxy.
-          const requestHeaders: Record<string, string> = {};
-          const forwardHeaders = [
-            "apikey",
-            "authorization",
-            "sec-websocket-protocol",
-          ];
-          for (const h of forwardHeaders) {
-            const val = request.headers.get(h);
-            if (val) requestHeaders[h] = val;
-          }
+          const requestHeaders = translatedCredentials.forwardHeaders;
           // Supabase Realtime identifies tenants by extracting the first subdomain
           // from the Host header and matching it against registered external_id
           // (which is the project ref). Custom domains like "sapi.aorist.net" would

@@ -255,9 +255,10 @@ export const wsRoutes = new Elysia({ prefix: "/ws" })
                 return;
             }
 
-            const { resolveProjectRefFromApiKey } = await import("../utils/project-auth");
-            const ref = await resolveProjectRefFromApiKey(apikey);
-            if (!ref) {
+            const { resolveProjectApiKey } = await import("../utils/project-auth");
+            const resolvedApiKey = await resolveProjectApiKey(apikey);
+            const ref = resolvedApiKey?.ref || "";
+            if (!resolvedApiKey || !ref) {
                 ws.close(1008, "Invalid apikey");
                 return;
             }
@@ -267,7 +268,7 @@ export const wsRoutes = new Elysia({ prefix: "/ws" })
                 return;
             }
             (ws.data as any).projectRef = ref;
-            (ws.data as any).apikey = apikey;
+            (ws.data as any).apikey = resolvedApiKey.upstreamKey;
 
             const currentConns = projectConnectionCounts.get(ref) || 0;
             if (currentConns >= MAX_CONNECTIONS_PER_PROJECT) {
@@ -285,7 +286,7 @@ export const wsRoutes = new Elysia({ prefix: "/ws" })
             // would extract the wrong subdomain and break tenant resolution.
             const tenantHost = `${ref}.api.${config.baseDomain}`;
             
-            const targetUrl = `ws://${hostIp}:4000/socket/websocket?apikey=${apikey}&vsn=${vsn}`;
+            const targetUrl = `ws://${hostIp}:4000/socket/websocket?apikey=${encodeURIComponent(resolvedApiKey.upstreamKey)}&vsn=${encodeURIComponent(vsn)}`;
             
             const upstream = new WebSocket(targetUrl, {
                 headers: {

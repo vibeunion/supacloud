@@ -1,29 +1,97 @@
 import { sql as metaSql } from "../db";
+import { hashSecretApiKey } from "./api-keys";
+
+export type ProjectApiKeyKind = "anon" | "service_role" | "publishable" | "secret";
+
+export type ResolvedProjectApiKey = {
+  ref: string;
+  kind: ProjectApiKeyKind;
+  role: "anon" | "service_role";
+  upstreamKey: string;
+};
+
+export async function resolveProjectApiKey(
+  key: string,
+  options: { includeProvisioning?: boolean } = {},
+): Promise<ResolvedProjectApiKey | null> {
+  if (!key) return null;
+
+  const statusSql = options.includeProvisioning
+    ? "lower(status) IN ('active', 'creating')"
+    : "lower(status) = 'active'";
+  const secretHash = hashSecretApiKey(key);
+
+  try {
+    const rows = await metaSql.unsafe(`
+      SELECT ref, anon_key, service_role_key, publishable_key, secret_key_hash
+      FROM projects
+      WHERE deleted_at IS NULL
+        AND ${statusSql}
+        AND (
+          anon_key = $1
+          OR service_role_key = $1
+          OR publishable_key = $1
+          OR secret_key_hash = $2
+        )
+      LIMIT 1
+    `, [key, secretHash]);
+    const row = rows[0] as Record<string, unknown> | undefined;
+    if (!row) return null;
+
+    const ref = String(row.ref);
+    const anonKey = String(row.anon_key || "");
+    const serviceRoleKey = String(row.service_role_key || "");
+    if (key === row.publishable_key) {
+      return { ref, kind: "publishable", role: "anon", upstreamKey: anonKey };
+    }
+    if (secretHash === row.secret_key_hash) {
+      return { ref, kind: "secret", role: "service_role", upstreamKey: serviceRoleKey };
+    }
+    if (key === anonKey) {
+      return { ref, kind: "anon", role: "anon", upstreamKey: anonKey };
+    }
+    if (key === serviceRoleKey) {
+      return { ref, kind: "service_role", role: "service_role", upstreamKey: serviceRoleKey };
+    }
+  } catch {
+    // Rolling upgrades may briefly run before the additive opaque-key columns
+    // exist. Preserve legacy key lookup until initDatabase finishes.
+    try {
+      const rows = options.includeProvisioning
+        ? await metaSql`
+          SELECT ref, anon_key, service_role_key FROM projects
+          WHERE (anon_key = ${key} OR service_role_key = ${key})
+            AND deleted_at IS NULL
+            AND lower(status) IN ('active', 'creating')
+          LIMIT 1
+        `
+        : await metaSql`
+          SELECT ref, anon_key, service_role_key FROM projects
+          WHERE (anon_key = ${key} OR service_role_key = ${key})
+            AND deleted_at IS NULL
+            AND lower(status) = 'active'
+          LIMIT 1
+        `;
+      const row = rows[0] as Record<string, unknown> | undefined;
+      if (!row) return null;
+      const ref = String(row.ref);
+      if (key === row.anon_key) {
+        return { ref, kind: "anon", role: "anon", upstreamKey: key };
+      }
+      return { ref, kind: "service_role", role: "service_role", upstreamKey: key };
+    } catch {
+      return null;
+    }
+  }
+
+  return null;
+}
 
 export async function resolveProjectRefFromApiKey(
   key: string,
   options: { includeProvisioning?: boolean } = {},
 ): Promise<string | null> {
-  if (!key) return null;
-  try {
-    const rows = options.includeProvisioning
-      ? await metaSql`
-        SELECT ref FROM projects
-        WHERE (anon_key = ${key} OR service_role_key = ${key})
-          AND deleted_at IS NULL
-          AND lower(status) IN ('active', 'creating')
-        LIMIT 1
-      `
-      : await metaSql`
-        SELECT ref FROM projects
-        WHERE (anon_key = ${key} OR service_role_key = ${key})
-          AND deleted_at IS NULL
-          AND lower(status) = 'active'
-        LIMIT 1
-      `;
-    if (rows.length > 0) return String(rows[0].ref);
-  } catch {}
-  return null;
+  return (await resolveProjectApiKey(key, options))?.ref || null;
 }
 
 export function extractProjectRefFromPath(pathname: string): string | null {

@@ -30,6 +30,8 @@ export const INSTALL_INPUT_KEYS = [
     "JWT_SECRET",
     "ANON_KEY",
     "SERVICE_ROLE_KEY",
+    "SUPABASE_PUBLISHABLE_KEY",
+    "SUPABASE_SECRET_KEY",
     "SWAP_SIZE_GB",
     "PG_VERSION",
     "PIGSTY_VERSION",
@@ -55,6 +57,8 @@ export const INSTALL_INPUT_KEYS = [
     "EDGE_RUNTIME",
     "ENABLE_ANALYTICS",
     "ANALYTICS_BACKEND",
+    "LOGFLARE_DB",
+    "LOGFLARE_SCHEMA",
     "LOGFLARE_ERL_FLAGS",
 ] as const;
 
@@ -572,6 +576,8 @@ async function runInteractiveConfig(
         IMAGINARY_IMAGE: configured.IMAGINARY_IMAGE || "h2non/imaginary:1.2.4",
         ENABLE_ANALYTICS: configured.ENABLE_ANALYTICS || "true",
         ANALYTICS_BACKEND: configured.ANALYTICS_BACKEND || "postgres",
+        LOGFLARE_DB: configured.LOGFLARE_DB || "_supabase",
+        LOGFLARE_SCHEMA: configured.LOGFLARE_SCHEMA || "_analytics",
         LOGFLARE_ERL_FLAGS: configured.LOGFLARE_ERL_FLAGS || "+P 32768 +Q 4096 +S 2:2 +hms 64 +hmbs 64 +e 128 +L",
     };
     const resolvedInput = mergeInstallInputValues(persisted, {

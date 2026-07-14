@@ -207,6 +207,8 @@ describe("final security regressions", () => {
     const getApiKeysSpy = spyOn(projectService, "getApiKeys").mockResolvedValue({
       anon_key: "anon-key",
       service_role_key: "service-key",
+      publishable_key: "sb_publishable_example",
+      secret_key: "sb_secret_example",
     });
     const request = appWith(projectConfigRoutes);
 
@@ -217,6 +219,8 @@ describe("final security regressions", () => {
       const authenticated = await request("/v1/projects/proj_1/api-keys", { headers: masterHeaders });
       expect(authenticated.status).toBe(200);
       expect(await authenticated.json()).toEqual([
+        { name: "publishable", api_key: "sb_publishable_example" },
+        { name: "secret", api_key: "********" },
         { name: "anon", api_key: "anon-key" },
         { name: "service_role", api_key: "********" },
       ]);

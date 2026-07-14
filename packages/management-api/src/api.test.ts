@@ -229,6 +229,22 @@ describe("Management API Integration Tests", () => {
             }
         });
 
+        it("should rotate opaque api keys independently", async () => {
+            const response = await app.handle(
+                new Request(`${baseUrl}/v1/projects/default/api-keys/rotate-opaque`, {
+                    method: "POST",
+                    headers: { Authorization: `Bearer ${masterToken}` },
+                })
+            );
+            expect([200, 404, 500]).toContain(response.status);
+            if (response.status === 200) {
+                const data = await response.json();
+                expect(data.publishable_key).toMatch(/^sb_publishable_/);
+                expect(data.secret_key).toMatch(/^sb_secret_/);
+                expect(data).not.toHaveProperty("anon_key");
+            }
+        });
+
         it("should list database backups", async () => {
             const response = await app.handle(
                 new Request(`${baseUrl}/v1/projects/default/database/backups`, {

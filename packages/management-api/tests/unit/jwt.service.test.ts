@@ -129,12 +129,14 @@ describe("JwtService", () => {
   });
 
   describe("generateKeySet", () => {
-    test("should return all three keys", async () => {
+    test("should return legacy and opaque API keys", async () => {
       const keySet = await jwtService.generateKeySet();
 
       expect(keySet.jwtSecret).toBeDefined();
       expect(keySet.anonKey).toBeDefined();
       expect(keySet.serviceRoleKey).toBeDefined();
+      expect(keySet.publishableKey).toMatch(/^sb_publishable_[A-Za-z0-9_-]+$/);
+      expect(keySet.secretKey).toMatch(/^sb_secret_[A-Za-z0-9_-]+$/);
     });
 
     test("should have correct secret length", async () => {
@@ -155,6 +157,8 @@ describe("JwtService", () => {
       expect(keySet1.jwtSecret).not.toBe(keySet2.jwtSecret);
       expect(keySet1.anonKey).not.toBe(keySet2.anonKey);
       expect(keySet1.serviceRoleKey).not.toBe(keySet2.serviceRoleKey);
+      expect(keySet1.publishableKey).not.toBe(keySet2.publishableKey);
+      expect(keySet1.secretKey).not.toBe(keySet2.secretKey);
     });
 
     test("keys should be generated with the same secret", async () => {
@@ -166,6 +170,15 @@ describe("JwtService", () => {
 
       // Header should be the same
       expect(anonParts[0]).toBe(serviceParts[0]);
+    });
+  });
+
+  describe("generateOpaqueKeySet", () => {
+    test("should rotate opaque keys without generating a JWT secret", () => {
+      const keySet = jwtService.generateOpaqueKeySet();
+      expect(keySet.publishableKey).toMatch(/^sb_publishable_[A-Za-z0-9_-]+$/);
+      expect(keySet.secretKey).toMatch(/^sb_secret_[A-Za-z0-9_-]+$/);
+      expect(keySet).not.toHaveProperty("jwtSecret");
     });
   });
 });

@@ -44,14 +44,15 @@ source "${SCRIPT_DIR}/scripts/lib/release_assets.sh"
 SUPACLOUD_INSTALL_KEYS=(
     INTERNAL_IP SUPABASE_PUBLIC_DOMAIN SUPABASE_STUDIO_DOMAIN SUPABASE_DOMAIN
     DASHBOARD_USERNAME DASHBOARD_PASSWORD POSTGRES_PASSWORD GRAFANA_PASSWORD
-    JWT_SECRET ANON_KEY SERVICE_ROLE_KEY SWAP_SIZE_GB PG_VERSION PIGSTY_VERSION
+    JWT_SECRET ANON_KEY SERVICE_ROLE_KEY SUPABASE_PUBLISHABLE_KEY SUPABASE_SECRET_KEY
+    SWAP_SIZE_GB PG_VERSION PIGSTY_VERSION
     TIMEZONE PIGSTY_CONFIG_TEMPLATE SUPACLOUD_INSTALL_LEGACY_SUPABASE_STACK
     SUPACLOUD_MIGRATE_LEGACY_SUPABASE_COMPOSE S3_STORAGE_TYPE JUICEFS_BACKEND
     S3_ENDPOINT S3_PROTOCOL S3_REGION S3_BUCKET S3_ACCESS_KEY S3_SECRET_KEY
     S3_FORCE_PATH_STYLE
     EXTERNAL_S3_ENDPOINT EXTERNAL_S3_REGION EXTERNAL_S3_BUCKET
     EXTERNAL_S3_ACCESS_KEY EXTERNAL_S3_SECRET_KEY IMAGINARY_IMAGE EDGE_RUNTIME
-    ENABLE_ANALYTICS ANALYTICS_BACKEND LOGFLARE_ERL_FLAGS
+    ENABLE_ANALYTICS ANALYTICS_BACKEND LOGFLARE_DB LOGFLARE_SCHEMA LOGFLARE_ERL_FLAGS
 )
 SUPACLOUD_EXPLICIT_INSTALL_KEYS=()
 SUPACLOUD_EXPLICIT_INSTALL_VALUES=()
@@ -461,7 +462,8 @@ recover_legacy_install_config() {
         local key
         for key in \
             POSTGRES_PASSWORD DASHBOARD_USERNAME DASHBOARD_PASSWORD GRAFANA_PASSWORD \
-            JWT_SECRET ANON_KEY SERVICE_ROLE_KEY PG_VERSION PIGSTY_VERSION \
+            JWT_SECRET ANON_KEY SERVICE_ROLE_KEY SUPABASE_PUBLISHABLE_KEY SUPABASE_SECRET_KEY \
+            PG_VERSION PIGSTY_VERSION \
             S3_STORAGE_TYPE JUICEFS_BACKEND S3_ENDPOINT S3_PROTOCOL S3_REGION S3_BUCKET \
             S3_ACCESS_KEY S3_SECRET_KEY S3_FORCE_PATH_STYLE \
             EXTERNAL_S3_ENDPOINT EXTERNAL_S3_REGION EXTERNAL_S3_BUCKET \
@@ -666,6 +668,12 @@ generate_jwt_keys() {
     if [[ -z "${SERVICE_ROLE_KEY:-}" ]]; then
         SERVICE_ROLE_KEY=$(supacloud_shell_env_value "$JWT_KEYS_FILE" SERVICE_ROLE_KEY)
     fi
+    if [[ -z "${SUPABASE_PUBLISHABLE_KEY:-}" ]]; then
+        SUPABASE_PUBLISHABLE_KEY=$(supacloud_shell_env_value "$JWT_KEYS_FILE" SUPABASE_PUBLISHABLE_KEY)
+    fi
+    if [[ -z "${SUPABASE_SECRET_KEY:-}" ]]; then
+        SUPABASE_SECRET_KEY=$(supacloud_shell_env_value "$JWT_KEYS_FILE" SUPABASE_SECRET_KEY)
+    fi
     
     # Auto-generate JWT_SECRET if not set or empty
     if [[ -z "$JWT_SECRET" ]]; then
@@ -698,6 +706,20 @@ generate_jwt_keys() {
     else
         log_info "Using custom SERVICE_ROLE_KEY"
     fi
+
+    if [[ -z "$SUPABASE_PUBLISHABLE_KEY" ]]; then
+        log_info "Auto-generating SUPABASE_PUBLISHABLE_KEY..."
+        SUPABASE_PUBLISHABLE_KEY="sb_publishable_$(openssl rand -base64 24 | tr '+/' '-_' | tr -d '=\n')"
+    else
+        log_info "Using custom SUPABASE_PUBLISHABLE_KEY"
+    fi
+
+    if [[ -z "$SUPABASE_SECRET_KEY" ]]; then
+        log_info "Auto-generating SUPABASE_SECRET_KEY..."
+        SUPABASE_SECRET_KEY="sb_secret_$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=\n')"
+    else
+        log_info "Using custom SUPABASE_SECRET_KEY"
+    fi
     
     # Save generated keys to a Bash-sourced root-only file using shell-safe
     # serialization. User-provided values must never become executable syntax.
@@ -705,7 +727,9 @@ generate_jwt_keys() {
     supacloud_write_shell_env_pairs "$JWT_KEYS_FILE" \
         JWT_SECRET "$JWT_SECRET" \
         ANON_KEY "$ANON_KEY" \
-        SERVICE_ROLE_KEY "$SERVICE_ROLE_KEY"
+        SERVICE_ROLE_KEY "$SERVICE_ROLE_KEY" \
+        SUPABASE_PUBLISHABLE_KEY "$SUPABASE_PUBLISHABLE_KEY" \
+        SUPABASE_SECRET_KEY "$SUPABASE_SECRET_KEY"
     
     log_info "JWT keys saved to: $JWT_KEYS_FILE"
 }
@@ -2130,7 +2154,8 @@ update_pigsty_config() {
         || pigsty_grafana_secret="$GRAFANA_PASSWORD"
     supacloud_patch_pigsty_secrets "$PIGSTY_YML" \
         "$pigsty_dashboard_secret" "$pigsty_postgres_secret" "$pigsty_grafana_secret" \
-        "${JWT_SECRET:-}" "${ANON_KEY:-}" "${SERVICE_ROLE_KEY:-}"
+        "${JWT_SECRET:-}" "${ANON_KEY:-}" "${SERVICE_ROLE_KEY:-}" \
+        "${SUPABASE_PUBLISHABLE_KEY:-}" "${SUPABASE_SECRET_KEY:-}"
     
     # Configure PostgreSQL WAL log limit (max_wal_size = 2GB)
     # Fix issue with log filling up disk
@@ -2288,8 +2313,12 @@ configure_analytics() {
             # Note: If POSTGRES_PASSWORD is the default 'DBUser.Supa', ensure it is set correctly
             local encoded_logflare_password
             encoded_logflare_password=$(printf '%s' "$POSTGRES_PASSWORD" | supacloud_urlencode_stdin)
-            LOGFLARE_DB_URL="postgresql://postgres:${encoded_logflare_password}@${INTERNAL_IP}:5432/postgres"
+            LOGFLARE_DB="${LOGFLARE_DB:-_supabase}"
+            LOGFLARE_SCHEMA="${LOGFLARE_SCHEMA:-_analytics}"
+            LOGFLARE_DB_URL="postgresql://postgres:${encoded_logflare_password}@${INTERNAL_IP}:5432/${LOGFLARE_DB}"
             supacloud_write_raw_env_pairs "$SUPABASE_ENV" \
+                LOGFLARE_DB "$LOGFLARE_DB" \
+                LOGFLARE_SCHEMA "$LOGFLARE_SCHEMA" \
                 LOGFLARE_DATABASE_URL "$LOGFLARE_DB_URL"
             
         elif [[ "${ANALYTICS_BACKEND}" == "bigquery" ]]; then
@@ -2509,8 +2538,12 @@ save_all_credentials() {
         JWT_SECRET "$JWT_SECRET" \
         ANON_KEY "$ANON_KEY" \
         SERVICE_ROLE_KEY "$SERVICE_ROLE_KEY" \
+        SUPABASE_PUBLISHABLE_KEY "$SUPABASE_PUBLISHABLE_KEY" \
+        SUPABASE_SECRET_KEY "$SUPABASE_SECRET_KEY" \
         ENABLE_ANALYTICS "${ENABLE_ANALYTICS:-true}" \
         ANALYTICS_BACKEND "${ANALYTICS_BACKEND:-postgres}" \
+        LOGFLARE_DB "${LOGFLARE_DB:-_supabase}" \
+        LOGFLARE_SCHEMA "${LOGFLARE_SCHEMA:-_analytics}" \
         S3_STORAGE_TYPE "$S3_STORAGE_TYPE" \
         JUICEFS_BACKEND "${JUICEFS_BACKEND:-}" \
         S3_ENDPOINT "${S3_ENDPOINT:-}" \
@@ -2719,6 +2752,8 @@ install_management_api() {
         IMAGINARY_IMAGE "${IMAGINARY_IMAGE:-h2non/imaginary:1.2.4}" \
         JWT_SECRET "$JWT_SECRET" \
         SUPACLOUD_JWT_SECRET "$JWT_SECRET" \
+        SUPABASE_PUBLISHABLE_KEY "$SUPABASE_PUBLISHABLE_KEY" \
+        SUPABASE_SECRET_KEY "$SUPABASE_SECRET_KEY" \
         REALTIME_SECRET_KEY_BASE "$REALTIME_SECRET_KEY_BASE" \
         REALTIME_DB_ENC_KEY "$REALTIME_DB_ENC_KEY" \
         REALTIME_API_SECRET "$JWT_SECRET" \
@@ -3428,6 +3463,11 @@ main() {
 
     # Install Management API
     install_management_api
+    if [[ -f "${SCRIPT_DIR}/scripts/upgrade_pigsty_4_4_compat.sh" ]]; then
+        PGHOST="${PGHOST:-}" PGPORT="${PGPORT:-5432}" PGUSER="${PGUSER:-postgres}" \
+            PGPASSWORD="${PGPASSWORD:-$POSTGRES_PASSWORD}" \
+            bash "${SCRIPT_DIR}/scripts/upgrade_pigsty_4_4_compat.sh" --apply
+    fi
     install_web_console
 
     # Deploy Imaginary + Realtime containers

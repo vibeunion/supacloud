@@ -472,11 +472,13 @@ describe("installer configuration persistence", () => {
       "JWT_SECRET: your-super-secret-jwt-token-with-at-least-32-characters-long",
       "ANON_KEY: old-anon",
       "SERVICE_ROLE_KEY: old-service",
+      "SUPABASE_PUBLISHABLE_KEY: old-publishable",
+      "SUPABASE_SECRET_KEY: old-secret",
       "",
     ].join("\n"));
 
     const result = runBash(
-      'source scripts/lib/install_config.sh; supacloud_patch_pigsty_secrets "$CONFIG" "$DASH" "$POSTGRES" "$GRAFANA" "$JWT" "$ANON" "$SERVICE"',
+      'source scripts/lib/install_config.sh; supacloud_patch_pigsty_secrets "$CONFIG" "$DASH" "$POSTGRES" "$GRAFANA" "$JWT" "$ANON" "$SERVICE" "$PUBLISHABLE" "$SECRET"',
       {
         CONFIG: config,
         DASH: "dash'|secret",
@@ -485,6 +487,8 @@ describe("installer configuration persistence", () => {
         JWT: "jwt'|secret",
         ANON: "anon'|secret",
         SERVICE: "service'|secret",
+        PUBLISHABLE: "sb_publishable_test-value",
+        SECRET: "sb_secret_test-value",
       },
     );
     expect(result.status, result.stderr).toBe(0);
@@ -493,6 +497,8 @@ describe("installer configuration persistence", () => {
     expect(patched).toContain('POSTGRES_PASSWORD: "db\'|secret"');
     expect(patched).toContain('password: "db\'|secret"');
     expect(patched).toContain('JWT_SECRET: "jwt\'|secret"');
+    expect(patched).toContain('SUPABASE_PUBLISHABLE_KEY: "sb_publishable_test-value"');
+    expect(patched).toContain('SUPABASE_SECRET_KEY: "sb_secret_test-value"');
   });
 
   test("JuiceFS uses a root-only pgpass file and a password-free metadata URL", () => {

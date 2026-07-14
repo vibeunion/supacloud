@@ -1,6 +1,8 @@
 import { getProjectDb, sql as metaSql, resolveDbName } from "../db";
 import { logger } from "../utils/logger";
 import { verifyProjectJwtPayload } from "../utils/project-jwt";
+import { isOpaqueApiKey } from "../utils/api-keys";
+import { resolveProjectApiKey } from "../utils/project-auth";
 
 
 // ── TEST MOCK STATE ──
@@ -241,7 +243,12 @@ export class StorageRLS {
   }
 
   static async verifyToken(ref: string, token: string) {
-    const cleanToken = token.replace('Bearer ', '');
+    let cleanToken = token.replace(/^Bearer\s+/i, '');
+    if (isOpaqueApiKey(cleanToken)) {
+      const apiKey = await resolveProjectApiKey(cleanToken, { includeProvisioning: true });
+      if (!apiKey || apiKey.ref !== ref) throw new Error("tenant not found");
+      cleanToken = apiKey.upstreamKey;
+    }
     const verification = await verifyProjectJwtPayload(ref, cleanToken, { includeProvisioning: true });
     if (!verification) throw new Error("tenant not found");
     return {

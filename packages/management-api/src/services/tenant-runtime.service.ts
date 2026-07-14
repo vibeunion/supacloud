@@ -27,6 +27,7 @@ import {
     stringifyJsonConfig,
 } from "./tenant-runtime-config";
 import type { PostgresConnectionConfig } from "./tenant-runtime-config";
+import { decryptSecretIfNeeded } from "../utils/secret-crypto";
 
 export {
     renderGoTrueAuthEnv,
@@ -459,7 +460,8 @@ class TenantRuntimeService {
      */
     private async getTenantCredentials(ref: string) {
         const [project] = await metaSql`
-          SELECT db_password, jwt_secret, config, db_name, anon_key, service_role_key
+          SELECT db_password, jwt_secret, config, db_name, anon_key, service_role_key,
+                 publishable_key, secret_key_encrypted
           FROM projects
           WHERE ref=${ref}
         `;
@@ -483,6 +485,10 @@ class TenantRuntimeService {
             authUrl: this.deriveAuthUrl(ref, projectConfig),
             anonKey: project.anonKey || project.anon_key,
             serviceRoleKey: project.serviceRoleKey || project.service_role_key,
+            publishableKey: project.publishable_key || "",
+            secretKey: project.secret_key_encrypted
+                ? decryptSecretIfNeeded(String(project.secret_key_encrypted))
+                : "",
             siteUrl: typeof projectConfig.site_url === "string"
                 ? projectConfig.site_url
                 : (typeof projectConfig.siteUrl === "string"
@@ -732,6 +738,8 @@ class TenantRuntimeService {
             renderSystemdEnvLine("SUPABASE_URL", creds.apiUrl),
             renderSystemdEnvLine("SUPABASE_ANON_KEY", String(creds.anonKey || "")),
             renderSystemdEnvLine("SUPABASE_SERVICE_ROLE_KEY", String(creds.serviceRoleKey || "")),
+            renderSystemdEnvLine("SUPABASE_PUBLISHABLE_KEY", String(creds.publishableKey || "")),
+            renderSystemdEnvLine("SUPABASE_SECRET_KEY", String(creds.secretKey || "")),
             renderSystemdEnvLine("SUPABASE_DB_URL", edgeDbUri),
             renderSystemdEnvLine("JWT_SECRET", creds.jwtSecret),
             renderTenantInternalRuntimeEnv(pgrstPort, gotruePort),

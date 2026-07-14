@@ -163,6 +163,7 @@ describe("CaddyGatewayProvider", () => {
         expect(notice).toContain("Change via: supacloud CLI, SupaCloud management API, SupaCloud web console.");
         const routes = load?.body?.apps?.http?.servers?.supacloud?.routes ?? [];
         const rest = routes.find((route: any) => route["@id"] === "route-project-testref123-rest");
+        const opaqueRest = routes.find((route: any) => route["@id"] === "route-project-testref123-opaque-rest");
         const storage = routes.find((route: any) => route["@id"] === "route-project-testref123-storage");
         const functions = routes.find((route: any) => route["@id"] === "route-project-testref123-functions");
         const realtime = routes.find((route: any) => route["@id"] === "route-project-testref123-realtime");
@@ -171,6 +172,11 @@ describe("CaddyGatewayProvider", () => {
         expect(rest?.match?.[0]?.path).toEqual(["/rest/v1*"]);
         expect(rest?.handle?.some((handler: any) => handler.strip_path_prefix === "/rest/v1")).toBe(true);
         expect(rest?.handle?.at(-1)?.headers?.request?.set?.["X-Project-Ref"]).toEqual(["testref123"]);
+        expect(opaqueRest?.__supacloud_priority).toBeUndefined();
+        expect(opaqueRest?.match).toHaveLength(2);
+        expect(opaqueRest?.match?.[0]?.header_regexp?.apikey?.pattern).toContain("sb_(publishable|secret)_");
+        expect(opaqueRest?.match?.[1]?.header_regexp?.Authorization?.pattern).toContain("Bearer");
+        expect(opaqueRest?.handle?.at(-1)?.upstreams?.[0]?.dial).toBe("127.0.0.1:9090");
         const reverseProxyHandlers = findReverseProxyHandlers(routes);
         expect(reverseProxyHandlers.every((handler: any) => !handler.upstreams?.[0]?.dial?.includes("/"))).toBe(true);
         for (const handler of reverseProxyHandlers) {
@@ -1311,10 +1317,13 @@ describe("CaddyGatewayProvider route headers", () => {
         const routes = load?.body?.apps?.http?.servers?.supacloud?.routes ?? [];
 
         const storage = routes.find((route: any) => route["@id"] === "route-project-domaintest-storage");
+        const opaqueRest = routes.find((route: any) => route["@id"] === "route-project-domaintest-opaque-rest");
         expect(storage).toBeDefined();
         // Custom API domain should appear in the storage route hosts
         const hosts = storage?.match?.[0]?.host ?? [];
         expect(hosts).toContain("api.custom.example.com");
+        expect(opaqueRest?.match).toHaveLength(2);
+        expect(opaqueRest?.match?.every((matcher: any) => matcher.host?.includes("api.custom.example.com"))).toBe(true);
 
         // All routes with the custom domain must still have correct headers
         const storageProxy = storage?.handle?.find((h: any) => h.handler === "reverse_proxy");
