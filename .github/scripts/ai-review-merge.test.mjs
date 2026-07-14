@@ -127,15 +127,20 @@ describe('trusted review workflow', () => {
   test('secretless CI covers every published CLI, full unit isolation, audit, and SBOM', () => {
     const workflow = readFileSync(new URL('../workflows/management-api.yml', import.meta.url), 'utf8');
     const releaseWorkflow = readFileSync(new URL('../workflows/release-please.yml', import.meta.url), 'utf8');
+    const managementPackage = readFileSync(new URL('../../packages/management-api/package.json', import.meta.url), 'utf8');
+    const unitRunner = readFileSync(new URL('../../packages/management-api/scripts/run-unit-tests.ts', import.meta.url), 'utf8');
     for (const packagePath of ['packages/admin/**', 'packages/cli/**', 'packages/supacloud/**']) {
       assert.match(workflow, new RegExp(packagePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
     }
     assert.match(workflow, /working-directory: packages\/admin[\s\S]*?bun run typecheck[\s\S]*?bun test/);
     assert.match(workflow, /working-directory: packages\/cli[\s\S]*?bun run typecheck[\s\S]*?bun test/);
     assert.match(workflow, /working-directory: packages\/supacloud[\s\S]*?bun run typecheck[\s\S]*?bun test[\s\S]*?bun run build/);
-    const isolatedUnitCommands = /run:\s*\|\r?\n[ \t]+bun test tests\/unit[ \t]*\r?\n[ \t]+bun test src\/api\.test\.ts[ \t]*(?:\r?\n|$)/;
-    assert.match(workflow, isolatedUnitCommands);
-    assert.doesNotMatch('run: |\n  bun test tests/unit bun test src/api.test.ts\n', isolatedUnitCommands);
+    assert.match(workflow, /working-directory: packages\/management-api[\s\S]*?run: bun run test:unit/);
+    assert.match(managementPackage, /"test:unit": "bun run scripts\/run-unit-tests\.ts"/);
+    assert.match(unitRunner, /mock\\\.module/);
+    assert.match(unitRunner, /await runTestBatch\(sharedFiles/);
+    assert.match(unitRunner, /await runTestBatch\(\[file\]/);
+    assert.match(unitRunner, /await runTestBatch\(\[apiTest\]/);
     assert.match(workflow, /bun audit --audit-level high/);
     assert.match(workflow, /anchore\/sbom-action@/);
     assert.match(workflow, /XCADDY_VERSION:\s*["']v0\.4\.5["']/);
