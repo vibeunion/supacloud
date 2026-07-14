@@ -1,12 +1,17 @@
 import { describe, expect, spyOn, test } from "bun:test";
 import { Elysia } from "elysia";
-import { sdkProxyInternals, sdkProxyRoutes, setSdkProxyFetchForTests } from "../../src/routes/sdk-proxy";
-import * as dbModule from "../../src/db";
+import {
+  sdkProxyInternals,
+  sdkProxyRoutes,
+  setSdkProxyFetchForTests,
+  setSdkProxySqlForTests,
+} from "../../src/routes/sdk-proxy";
 import { projectService } from "../../src/services/project.service";
 import { edgeFunctionService } from "../../src/services/edge-function.service";
 import { backgroundTaskService } from "../../src/services/background-task.service";
 import { config } from "../../src/config";
 import { DEFAULT_BACKGROUND_TASK_SETTINGS } from "../../src/config/background-task-settings";
+import { projectAuthInternals } from "../../src/utils/project-auth";
 
 type FetchCall = {
   url: string;
@@ -81,6 +86,7 @@ async function withSdkProxyTestContext(
       });
     } finally {
       setSdkProxyFetchForTests();
+      setSdkProxySqlForTests();
       while (restoredSpies.length > 0) {
         restoredSpies.pop()?.mockRestore();
       }
@@ -90,35 +96,30 @@ async function withSdkProxyTestContext(
 
 describe("sdkProxyRoutes functions proxy", () => {
   test("resolves an opaque Secret Key through its hash without storing plaintext", async () => {
-    await withSdkProxyTestContext(async ({ trackSpy }) => {
-      const unsafeSpy = trackSpy(
-        spyOn(
-          dbModule.sql as unknown as { unsafe: (...args: unknown[]) => Promise<unknown[]> },
-          "unsafe",
-        ).mockResolvedValue([{
-          ref: "proj_1",
-          anon_key: "legacy-anon-jwt",
-          service_role_key: "legacy-service-jwt",
-          publishable_key: "sb_publishable_client_key",
-          secret_key_hash: "2d1de1eeb6dac1bf5040d556aa9412c70d9079294c6e35b2b760663de526fe7f",
-        }]),
-      );
-
-      const resolved = await sdkProxyInternals.resolveProjectApiKey("sb_secret_server_key", {
-        includeProvisioning: true,
-      });
-
-      expect(resolved).toEqual({
-        ref: "proj_1",
-        kind: "secret",
-        role: "service_role",
-        upstreamKey: "legacy-service-jwt",
-      });
-      const params = unsafeSpy.mock.calls[0]?.[1] as string[];
-      expect(params[0]).toBe("sb_secret_server_key");
-      expect(params[1]).not.toContain("sb_secret_server_key");
-      expect(params[1]).toHaveLength(64);
+    const lookup = projectAuthInternals.buildApiKeyLookup("sb_secret_server_key", {
+      includeProvisioning: true,
     });
+    const resolved = projectAuthInternals.resolveApiKeyRow(
+      "sb_secret_server_key",
+      lookup.secretHash,
+      {
+        ref: "proj_1",
+        anon_key: "legacy-anon-jwt",
+        service_role_key: "legacy-service-jwt",
+        publishable_key: "sb_publishable_client_key",
+        secret_key_hash: "2d1de1eeb6dac1bf5040d556aa9412c70d9079294c6e35b2b760663de526fe7f",
+      },
+    );
+
+    expect(resolved).toEqual({
+      ref: "proj_1",
+      kind: "secret",
+      role: "service_role",
+      upstreamKey: "legacy-service-jwt",
+    });
+    expect(lookup.params[0]).toBe("sb_secret_server_key");
+    expect(lookup.params[1]).not.toContain("sb_secret_server_key");
+    expect(lookup.params[1]).toHaveLength(64);
   });
 
   test("POST /functions/v1 forwards request bodies with duplex=half", async () => {
@@ -271,8 +272,7 @@ describe("sdkProxyRoutes functions proxy", () => {
 
   test("auth proxy resolves tenant ports from projects.config", async () => {
     await withSdkProxyTestContext(async ({ calls, trackSpy }) => {
-      const sqlSpy = trackSpy(spyOn(dbModule, "sql"));
-      sqlSpy.mockImplementation(async (...args: unknown[]) => {
+      setSdkProxySqlForTests(async (...args: unknown[]) => {
         const text = String(args[0] ?? "");
         if (text.includes("FROM projects")) {
           return [{
@@ -314,8 +314,7 @@ describe("sdkProxyRoutes functions proxy", () => {
           upstreamKey: "legacy-anon-jwt",
         }),
       );
-      const sqlSpy = trackSpy(spyOn(dbModule, "sql"));
-      sqlSpy.mockImplementation(async (...args: unknown[]) => {
+      setSdkProxySqlForTests(async (...args: unknown[]) => {
         const text = String(args[0] ?? "");
         if (text.includes("SELECT config")) {
           return [{ config: { postgrest_port: 7361, gotrue_port: 8361 } }];
@@ -347,8 +346,7 @@ describe("sdkProxyRoutes functions proxy", () => {
           upstreamKey: "legacy-service-jwt",
         }),
       );
-      const sqlSpy = trackSpy(spyOn(dbModule, "sql"));
-      sqlSpy.mockImplementation(async (...args: unknown[]) => {
+      setSdkProxySqlForTests(async (...args: unknown[]) => {
         const text = String(args[0] ?? "");
         if (text.includes("SELECT config")) {
           return [{ config: { postgrest_port: 7361, gotrue_port: 8361 } }];
@@ -377,8 +375,7 @@ describe("sdkProxyRoutes functions proxy", () => {
           upstreamKey: "legacy-anon-jwt",
         }),
       );
-      const sqlSpy = trackSpy(spyOn(dbModule, "sql"));
-      sqlSpy.mockImplementation(async (...args: unknown[]) => {
+      setSdkProxySqlForTests(async (...args: unknown[]) => {
         const text = String(args[0] ?? "");
         if (text.includes("SELECT config")) {
           return [{ config: { postgrest_port: 7361, gotrue_port: 8361 } }];
@@ -410,8 +407,7 @@ describe("sdkProxyRoutes functions proxy", () => {
           upstreamKey: "legacy-anon-jwt",
         }),
       );
-      const sqlSpy = trackSpy(spyOn(dbModule, "sql"));
-      sqlSpy.mockImplementation(async (...args: unknown[]) => {
+      setSdkProxySqlForTests(async (...args: unknown[]) => {
         const text = String(args[0] ?? "");
         if (text.includes("SELECT config")) {
           return [{ config: { postgrest_port: 7361, gotrue_port: 8361 } }];
@@ -440,8 +436,7 @@ describe("sdkProxyRoutes functions proxy", () => {
 
   test("auth proxy resolves project ref from forwarded custom API host", async () => {
     await withSdkProxyTestContext(async ({ calls, trackSpy }) => {
-      const sqlSpy = trackSpy(spyOn(dbModule, "sql"));
-      sqlSpy.mockImplementation(async (...args: unknown[]) => {
+      setSdkProxySqlForTests(async (...args: unknown[]) => {
         const text = String(args[0] ?? "");
         if (text.includes("SELECT ref")) {
           return [{ ref: "proj_1" }];
@@ -473,8 +468,7 @@ describe("sdkProxyRoutes functions proxy", () => {
 
   test("auth proxy accepts gateway-injected project ref on loopback without apikey", async () => {
     await withSdkProxyTestContext(async ({ calls, trackSpy }) => {
-      const sqlSpy = trackSpy(spyOn(dbModule, "sql"));
-      sqlSpy.mockImplementation(async (...args: unknown[]) => {
+      setSdkProxySqlForTests(async (...args: unknown[]) => {
         const text = String(args[0] ?? "");
         if (text.includes("SELECT ref")) {
           expect(text).not.toContain("ANY(");
@@ -510,8 +504,7 @@ describe("sdkProxyRoutes functions proxy", () => {
       trackSpy(
         spyOn(sdkProxyInternals, "resolveProjectRefFromApiKey").mockResolvedValueOnce(null),
       );
-      const sqlSpy = trackSpy(spyOn(dbModule, "sql"));
-      sqlSpy.mockImplementation(async (...args: unknown[]) => {
+      setSdkProxySqlForTests(async (...args: unknown[]) => {
         const text = String(args[0] ?? "");
         if (text.includes("SELECT ref")) {
           return [{ ref: "proj_from_header", config: {} }];
@@ -545,9 +538,8 @@ describe("sdkProxyRoutes functions proxy", () => {
 
   test("functions proxy accepts gateway-injected project ref on trusted custom API host without apikey", async () => {
     await withSdkProxyTestContext(async ({ calls, trackSpy }) => {
-      const sqlSpy = trackSpy(spyOn(dbModule, "sql"));
       let sawProjectLookup = false;
-      sqlSpy.mockImplementation(async (...args: unknown[]) => {
+      setSdkProxySqlForTests(async (...args: unknown[]) => {
         const text = String(args[0] ?? "");
         if (text.includes("SELECT ref")) {
           sawProjectLookup = true;
@@ -577,8 +569,7 @@ describe("sdkProxyRoutes functions proxy", () => {
 
   test("proxy rejects mismatched project header and apikey", async () => {
     await withSdkProxyTestContext(async ({ calls, trackSpy }) => {
-      const sqlSpy = trackSpy(spyOn(dbModule, "sql"));
-      sqlSpy.mockImplementation(async (...args: unknown[]) => {
+      setSdkProxySqlForTests(async (...args: unknown[]) => {
         const text = String(args[0] ?? "");
         if (text.includes("anon_key")) {
           return [{ ref: "proj_from_key" }];
@@ -601,8 +592,7 @@ describe("sdkProxyRoutes functions proxy", () => {
 
   test("proxy replaces client supplied forwarding headers", async () => {
     await withSdkProxyTestContext(async ({ calls, trackSpy }) => {
-      const sqlSpy = trackSpy(spyOn(dbModule, "sql"));
-      sqlSpy.mockImplementation(async (...args: unknown[]) => {
+      setSdkProxySqlForTests(async (...args: unknown[]) => {
         const text = String(args[0] ?? "");
         if (text.includes("SELECT config")) {
           return [{
@@ -643,8 +633,7 @@ describe("sdkProxyRoutes functions proxy", () => {
       const originalRestTimeout = config.restProxyTimeoutMs;
       config.restProxyTimeoutMs = 1;
 
-      const sqlSpy = trackSpy(spyOn(dbModule, "sql"));
-      sqlSpy.mockImplementation(async (...args: unknown[]) => {
+      setSdkProxySqlForTests(async (...args: unknown[]) => {
         const text = String(args[0] ?? "");
         if (text.includes("SELECT config")) {
           return [{

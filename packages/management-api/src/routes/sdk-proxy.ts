@@ -17,8 +17,19 @@ import { isOpaqueApiKey } from "../utils/api-keys";
 import { verifyProjectJwtPayload } from "../utils/project-jwt";
 
 const MAX_ASYNC_BODY_BYTES = 256 * 1024;
+type SdkProxySql = (
+    strings: TemplateStringsArray,
+    ...values: unknown[]
+) => Promise<Array<Record<string, unknown>>>;
+
+const defaultSdkProxySql = metaSql as unknown as SdkProxySql;
+let sdkProxySql = defaultSdkProxySql;
 let sdkProxyFetch: typeof fetch = ((input: RequestInfo | URL, init?: RequestInit) =>
     globalThis.fetch(input, init)) as typeof fetch;
+
+export function setSdkProxySqlForTests(sqlImpl?: SdkProxySql): void {
+    sdkProxySql = sqlImpl || defaultSdkProxySql;
+}
 
 export function setSdkProxyFetchForTests(fetchImpl?: typeof fetch): void {
     sdkProxyFetch = fetchImpl || (((input: RequestInfo | URL, init?: RequestInit) =>
@@ -303,7 +314,7 @@ async function getProjectRef(request: Request): Promise<string> {
                 if (hostRef && hostRef !== apiKeyRef) return '';
             }
             try {
-                const rows = await metaSql`
+                const rows = await sdkProxySql`
                     SELECT ref, config
                     FROM projects
                     WHERE deleted_at IS NULL
@@ -352,7 +363,7 @@ async function resolveProjectRefFromHeaderAndHost(ref: string, request: Request)
         }
 
         try {
-            const rows = await metaSql`
+            const rows = await sdkProxySql`
                 SELECT ref, config
                 FROM projects
                 WHERE ref = ${ref}
@@ -384,7 +395,7 @@ async function getTenantPorts(ref: string): Promise<{ gotruePort: number, pgrstP
     if (ref === 'test_mock') return { gotruePort: 9999, pgrstPort: 3000 };
     
     try {
-        const projectRows = await metaSql`
+        const projectRows = await sdkProxySql`
             SELECT config
             FROM projects
             WHERE ref = ${ref} AND deleted_at IS NULL

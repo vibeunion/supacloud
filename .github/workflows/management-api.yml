@@ -237,7 +237,9 @@ jobs:
 
       - name: Run unit tests
         working-directory: packages/management-api
-        run: bun test tests/unit src/api.test.ts
+        run: |
+          bun test tests/unit
+          bun test src/api.test.ts
 
   integration-test:
     name: Integration & Compliance Tests
