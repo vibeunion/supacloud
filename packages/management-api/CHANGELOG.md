@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.40.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.39.1...management-api-v0.40.0) (2026-07-14)
+
+
+### Features
+
+* add Pigsty 4.4 compatibility ([809ef2e](https://github.com/zuohuadong/supacloud/commit/809ef2e50446d07793814b1e20eca012198fc4fd))
+
+
+### Bug Fixes
+
+* **ci:** isolate process-global Bun module mocks ([76eadac](https://github.com/zuohuadong/supacloud/commit/76eadac4a2f8b881930ddbda5d78cae9fd274e87))
+* **management-api:** isolate API test database mocks ([4efc282](https://github.com/zuohuadong/supacloud/commit/4efc2827edfff63d558d6274ae199f91f68f60ca))
+* **management-api:** isolate storage auth tests ([a913cef](https://github.com/zuohuadong/supacloud/commit/a913ceffe42de2cc0871fb5b409b830feac8e1e6))
+
 ## [0.39.1](https://github.com/zuohuadong/supacloud/compare/management-api-v0.39.0...management-api-v0.39.1) (2026-07-11)
 
 

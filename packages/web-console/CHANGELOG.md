@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.0](https://github.com/zuohuadong/supacloud/compare/web-console-v0.17.1...web-console-v0.18.0) (2026-07-14)
+
+
+### Features
+
+* add Pigsty 4.4 compatibility ([809ef2e](https://github.com/zuohuadong/supacloud/commit/809ef2e50446d07793814b1e20eca012198fc4fd))
+
 ## [0.17.1](https://github.com/zuohuadong/supacloud/compare/web-console-v0.17.0...web-console-v0.17.1) (2026-07-11)
 
 
