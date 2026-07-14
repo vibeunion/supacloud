@@ -143,6 +143,10 @@ async function resolveProjectRefFromApiKey(key: string): Promise<string> {
     return '';
 }
 
+export const storageCompatInternals = {
+    resolveProjectRefFromApiKey,
+};
+
 function hostBelongsToBaseDomain(host: string): boolean {
     const baseDomain = config.baseDomain?.toLowerCase();
     if (!baseDomain || !host) return false;
@@ -196,7 +200,7 @@ async function getProjectRef(headers: Record<string, string | undefined>): Promi
         }
     }
 
-    const apiKeyRef = await resolveProjectRefFromApiKey(key);
+    const apiKeyRef = await storageCompatInternals.resolveProjectRefFromApiKey(key);
     if (!apiKeyRef) {
         return await resolveProjectRefFromHeaderAndHost(headerRef, host);
     }

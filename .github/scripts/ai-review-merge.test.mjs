@@ -133,7 +133,9 @@ describe('trusted review workflow', () => {
     assert.match(workflow, /working-directory: packages\/admin[\s\S]*?bun run typecheck[\s\S]*?bun test/);
     assert.match(workflow, /working-directory: packages\/cli[\s\S]*?bun run typecheck[\s\S]*?bun test/);
     assert.match(workflow, /working-directory: packages\/supacloud[\s\S]*?bun run typecheck[\s\S]*?bun test[\s\S]*?bun run build/);
-    assert.match(workflow, /bun test tests\/unit src\/api\.test\.ts/);
+    const isolatedUnitCommands = /run:\s*\|\r?\n[ \t]+bun test tests\/unit[ \t]*\r?\n[ \t]+bun test src\/api\.test\.ts[ \t]*(?:\r?\n|$)/;
+    assert.match(workflow, isolatedUnitCommands);
+    assert.doesNotMatch('run: |\n  bun test tests/unit bun test src/api.test.ts\n', isolatedUnitCommands);
     assert.match(workflow, /bun audit --audit-level high/);
     assert.match(workflow, /anchore\/sbom-action@/);
     assert.match(workflow, /XCADDY_VERSION:\s*["']v0\.4\.5["']/);

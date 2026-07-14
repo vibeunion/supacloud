@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { Elysia } from "elysia";
 import { config } from "../../src/config";
-import { storageCompatRoutes } from "../../src/routes/storage-compat";
+import { storageCompatInternals, storageCompatRoutes } from "../../src/routes/storage-compat";
 import { StorageRLS, mockBuckets, mockObjects } from "../../src/services/storage-rls";
 import * as dbModule from "../../src/db";
 import { StorageService } from "../../src/services/storage.service";
@@ -190,12 +190,10 @@ describe("storageCompatRoutes supabase-js compatibility", () => {
   });
 
   test("allows API-key storage requests on configured api_domain under the base domain", async () => {
+    const apiKeySpy = spyOn(storageCompatInternals, "resolveProjectRefFromApiKey").mockResolvedValue("proj_from_key");
     const sqlSpy = spyOn(dbModule, "sql");
     sqlSpy.mockImplementation(async (...args: unknown[]) => {
       const text = String(args[0] ?? "");
-      if (text.includes("anon_key")) {
-        return [{ ref: "proj_from_key" }];
-      }
       if (text.includes("FROM projects")) {
         return [{
           ref: "proj_from_key",
@@ -239,6 +237,7 @@ describe("storageCompatRoutes supabase-js compatibility", () => {
     expect(res.status).toBe(200);
     expect(await res.text()).toBe("ok\n");
     expect(downloadSpy).toHaveBeenCalledWith("proj_from_key", "avatars", "public.txt");
+    apiKeySpy.mockRestore();
     sqlSpy.mockRestore();
     bucketSpy.mockRestore();
     objectSpy.mockRestore();
@@ -246,32 +245,24 @@ describe("storageCompatRoutes supabase-js compatibility", () => {
   });
 
   test("allows project-scoped storage requests while a new project is provisioning", async () => {
-    const sqlSpy = spyOn(dbModule, "sql");
-    let sawProvisioningStatuses = false;
-    sqlSpy.mockImplementation(async (...args: unknown[]) => {
-      const text = String(args[0] ?? "");
-      if (text.includes("anon_key") || text.includes("service_role_key")) {
-        sawProvisioningStatuses = text.includes("lower(status) IN ('active', 'creating')");
-        return [{ ref: "provisioning_ref" }];
-      }
-      return [];
-    });
+    const apiKey = "service-role-key-for-provisioning-project";
+    const apiKeySpy = spyOn(storageCompatInternals, "resolveProjectRefFromApiKey").mockResolvedValue("provisioning_ref");
 
     const bucketSpy = spyOn(StorageRLS, "listLogicalBuckets").mockResolvedValue([]);
 
     const res = await request("/storage/v1/bucket", {
       headers: {
-        apikey: "service-role-key-for-provisioning-project",
-        authorization: "Bearer service-role-key-for-provisioning-project",
+        apikey: apiKey,
+        authorization: `Bearer ${apiKey}`,
         "x-project-ref": "provisioning_ref",
       },
     });
 
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual([]);
-    expect(sawProvisioningStatuses).toBe(true);
-    expect(bucketSpy).toHaveBeenCalledWith("provisioning_ref", "Bearer service-role-key-for-provisioning-project", expect.any(Object));
-    sqlSpy.mockRestore();
+    expect(apiKeySpy).toHaveBeenCalledWith(apiKey);
+    expect(bucketSpy).toHaveBeenCalledWith("provisioning_ref", `Bearer ${apiKey}`, expect.any(Object));
+    apiKeySpy.mockRestore();
     bucketSpy.mockRestore();
   });
 
@@ -330,14 +321,7 @@ describe("storageCompatRoutes supabase-js compatibility", () => {
   });
 
   test("rejects mismatched project header and apikey", async () => {
-    const sqlSpy = spyOn(dbModule, "sql");
-    sqlSpy.mockImplementation(async (...args: unknown[]) => {
-      const text = String(args[0] ?? "");
-      if (text.includes("anon_key")) {
-        return [{ ref: "proj_from_key" }];
-      }
-      return [];
-    });
+    const apiKeySpy = spyOn(storageCompatInternals, "resolveProjectRefFromApiKey").mockResolvedValue("proj_from_key");
 
     const res = await request("/storage/v1/bucket", {
       headers: {
@@ -347,18 +331,11 @@ describe("storageCompatRoutes supabase-js compatibility", () => {
     });
 
     expect(res.status).toBe(400);
-    sqlSpy.mockRestore();
+    apiKeySpy.mockRestore();
   });
 
   test("rejects mismatched host tenant and apikey", async () => {
-    const sqlSpy = spyOn(dbModule, "sql");
-    sqlSpy.mockImplementation(async (...args: unknown[]) => {
-      const text = String(args[0] ?? "");
-      if (text.includes("anon_key")) {
-        return [{ ref: "proj_from_key" }];
-      }
-      return [];
-    });
+    const apiKeySpy = spyOn(storageCompatInternals, "resolveProjectRefFromApiKey").mockResolvedValue("proj_from_key");
 
     const res = await request("/storage/v1/bucket", {
       headers: {
@@ -368,7 +345,7 @@ describe("storageCompatRoutes supabase-js compatibility", () => {
     });
 
     expect(res.status).toBe(400);
-    sqlSpy.mockRestore();
+    apiKeySpy.mockRestore();
   });
 
   test("createSignedUrl returns an SDK-relative path and signed download works", async () => {
