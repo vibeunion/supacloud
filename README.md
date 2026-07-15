@@ -194,6 +194,8 @@ docker compose up -d --build
 
 The compose stack is isolated under [`docker/self-host`](/Volumes/Data/workspace/supacloud/docker/self-host) and ships a PostgreSQL 18 image with common extensions preinstalled.
 
+For the Docker-specific Pigsty 4.4/Supabase compatibility check and backup-first upgrade path, see [`docs/upgrade-postgres-docker-4.4.md`](./docs/upgrade-postgres-docker-4.4.md). Do not run the native Pigsty upgrade script against a Docker data volume.
+
 For TrueNAS SCALE `Custom App` deployment of the published PostgreSQL image, see [`docker/self-host/TRUENAS.md`](./docker/self-host/TRUENAS.md).
 
 **Available CLI Options:**
@@ -564,7 +566,7 @@ Key installation settings:
 | `TUS_MAX_CHUNK_SIZE` | Resumable upload chunk maximum size | `16777216` (16 MiB) |
 | `EDGE_RUNTIME` | Functions runtime | `bun` |
 | `PG_VERSION` | PostgreSQL version | `18` |
-| `PIGSTY_VERSION` | Pigsty version | `latest` |
+| `PIGSTY_VERSION` | Pigsty version | `v4.4.0` |
 | `ENABLE_ANALYTICS` | Logflare analytics | `true` |
 
 ### Documentation
@@ -1086,7 +1088,7 @@ supacloud/
 | `TUS_MAX_CHUNK_SIZE` | 断点续传分片最大大小 | `16777216` (16 MiB) |
 | `EDGE_RUNTIME` | 云函数运行时 | `bun` |
 | `PG_VERSION` | PostgreSQL 版本 | `18` |
-| `PIGSTY_VERSION` | Pigsty 版本 | `latest` |
+| `PIGSTY_VERSION` | Pigsty 版本 | `v4.4.0` |
 | `ENABLE_ANALYTICS` | Logflare 分析 | `true` |
 
 ### 参考文档

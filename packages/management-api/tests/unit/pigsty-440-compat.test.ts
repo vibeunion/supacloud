@@ -99,6 +99,110 @@ describe("Pigsty 4.4 compatibility upgrade", () => {
     expect(upgrade).toContain('ANALYTICS_PREPARE_COMPLETED" == "true"');
   });
 
+  test("keeps Docker PostgreSQL compatibility separate and backup-first", () => {
+    const core = readRepoFile("scripts/upgrade_pigsty_4_4_compat.sh");
+    const dockerUpgrade = readRepoFile("scripts/upgrade_postgres_docker_4_4_compat.sh");
+    const devCompose = readRepoFile("docker/dev/docker-compose.yml");
+    const workflow = readRepoFile(".github/workflows/management-api.yml");
+    const config = readRepoFile("config.env");
+
+    expect(core).toContain('COMPAT_PROFILE="${SUPACLOUD_COMPAT_PROFILE:-pigsty}"');
+    expect(core).toContain("Docker profile skips Pigsty environment, PgBouncer, and monitor-role checks");
+    expect(core).toContain("decode_base64()");
+    expect(core).toContain("base64 -D");
+    expect(core).not.toContain('| base64 --decode');
+    expect(dockerUpgrade).toContain("pg_dumpall");
+    expect(dockerUpgrade).toContain("--expected-pg-major");
+    expect(dockerUpgrade).toContain("--assume-analytics-stopped");
+    expect(dockerUpgrade).toContain("SUPACLOUD_COMPAT_PROFILE=docker");
+    expect(dockerUpgrade).toContain("never runs `docker compose down -v`");
+    expect(
+      dockerUpgrade.split("\n").some((line) =>
+        /^\s*(docker\s+compose|"?\$\{COMPOSE\[@\]\}"?)\s+down\b.*(?:-v|--volumes)/.test(line),
+      ),
+    ).toBe(false);
+
+    expect(devCompose).toContain("context: ../self-host/postgres");
+    expect(devCompose).toContain("pgdata18:/var/lib/postgresql");
+    expect(devCompose).not.toContain("pgdata:/var/lib/postgresql");
+    expect(devCompose).not.toContain("supabase/postgres:17.6.1.143");
+    expect(workflow).toContain("postgres-18-compatibility:");
+    expect(workflow).toContain("image: supabase/postgres:17.6.1.107");
+    expect(workflow).toContain("Wait for SupaCloud PostgreSQL 18");
+    expect(workflow).toContain("upgrade_postgres_docker_4_4_compat.sh --apply");
+    expect(config).toContain('PIGSTY_VERSION="v4.4.0"');
+  });
+
+  test("Docker wrapper fails before writes on unsafe prerequisites", () => {
+    const tempDir = mkdtempSync(resolve(tmpdir(), "docker-pg-440-safety-"));
+    const fakeDocker = resolve(tempDir, "docker");
+    const logFile = resolve(tempDir, "docker.log");
+    const backupDir = resolve(tempDir, "backups");
+    writeFileSync(
+      fakeDocker,
+      `#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\\n' "$*" >> "$FAKE_DOCKER_LOG"
+args="$*"
+if [[ "$args" == "compose version" ]]; then
+  exit 0
+elif [[ "$args" == *"config --services"* ]]; then
+  printf 'postgres\\nmanagement-api\\n'
+elif [[ "$args" == *"ps -q postgres"* ]]; then
+  printf 'fake-postgres-container\\n'
+elif [[ "$args" == *"exec -T postgres sh -lc"* ]]; then
+  printf 'postgres'
+elif [[ "$args" == *"SHOW server_version_num"* ]]; then
+  printf '%s\\n' "\${FAKE_PG_VERSION_NUM:-180000}"
+elif [[ "$args" == *"exec -T postgres pg_dumpall"* ]]; then
+  if [[ "\${FAKE_DOCKER_MODE:-ok}" == "backup-fail" ]]; then
+    exit 9
+  fi
+  printf '%s\\n' '-- fake non-empty logical backup'
+fi
+`,
+    );
+    chmodSync(fakeDocker, 0o700);
+
+    const run = (args: string[], extraEnv: Record<string, string>) => Bun.spawnSync({
+      cmd: ["bash", resolve(repoRoot, "scripts/upgrade_postgres_docker_4_4_compat.sh"), ...args],
+      cwd: repoRoot,
+      env: {
+        ...process.env,
+        PATH: `${tempDir}:${process.env.PATH || ""}`,
+        FAKE_DOCKER_LOG: logFile,
+        SUPACLOUD_DOCKER_SKIP_MANAGEMENT_INIT: "true",
+        SUPACLOUD_DOCKER_BACKUP_DIR: backupDir,
+        ...extraEnv,
+      },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+
+    try {
+      const mismatch = run(["--apply"], { FAKE_PG_VERSION_NUM: "170000" });
+      expect(mismatch.exitCode).not.toBe(0);
+      expect(readFileSync(logFile, "utf8")).not.toContain("pg_dumpall");
+
+      writeFileSync(logFile, "");
+      const backupFailure = run(["--apply"], {
+        FAKE_PG_VERSION_NUM: "180000",
+        FAKE_DOCKER_MODE: "backup-fail",
+      });
+      expect(backupFailure.exitCode).not.toBe(0);
+      const backupFailureLog = readFileSync(logFile, "utf8");
+      expect(backupFailureLog).toContain("pg_dumpall");
+      expect(backupFailureLog).not.toContain("--init-db");
+
+      writeFileSync(logFile, "");
+      const analyticsWithoutStop = run(["--prepare-analytics"], { FAKE_PG_VERSION_NUM: "180000" });
+      expect(analyticsWithoutStop.exitCode).not.toBe(0);
+      expect(readFileSync(logFile, "utf8")).not.toContain("pg_dumpall");
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
   test("dry-run discovers active tenant databases with the configured psql client", () => {
     const tempDir = mkdtempSync(resolve(tmpdir(), "pigsty-440-dry-run-"));
     const fakePsql = resolve(tempDir, "psql");
@@ -115,6 +219,8 @@ if [[ "$args" == *"SELECT 1 FROM pg_database"* ]]; then
   if [[ "$args" == *"supacloud_meta"* || "$args" == *"tenant_alpha"* || "$args" == *"tenant_beta"* ]]; then
     printf '1\\n'
   fi
+elif [[ "$args" == *"to_regclass('public.projects') IS NOT NULL"* ]]; then
+  printf 't\\n'
 elif [[ "$args" == *"SELECT DISTINCT db_name FROM projects"* ]]; then
   printf 'tenant_alpha\\ntenant_beta\\n'
 fi
@@ -159,6 +265,8 @@ printf '%s\\n' "$*" >> "$FAKE_PSQL_ARGS_FILE"
 args="$*"
 if [[ "$args" == *"SELECT 1 FROM pg_database"* ]]; then
   printf '1\\n'
+elif [[ "$args" == *"to_regclass('public.projects') IS NOT NULL"* ]]; then
+  printf 't\\n'
 elif [[ "$args" == *"SELECT DISTINCT db_name FROM projects"* ]]; then
   printf '\n'
 fi
@@ -201,6 +309,8 @@ set -euo pipefail
 args="$*"
 if [[ "$args" == *"SELECT 1 FROM pg_database"* ]]; then
   printf '1\\n'
+elif [[ "$args" == *"to_regclass('public.projects') IS NOT NULL"* ]]; then
+  printf 't\\n'
 elif [[ "$args" == *"SELECT DISTINCT db_name FROM projects"* ]]; then
   printf 'simulated project enumeration failure\\n' >&2
   exit 42
@@ -230,6 +340,45 @@ fi
     }
   });
 
+  test("dry-run fails closed when the metadata table cannot be inspected", () => {
+    const tempDir = mkdtempSync(resolve(tmpdir(), "pigsty-440-metadata-inspection-failure-"));
+    const fakePsql = resolve(tempDir, "psql");
+    writeFileSync(
+      fakePsql,
+      `#!/usr/bin/env bash
+set -euo pipefail
+args="$*"
+if [[ "$args" == *"SELECT 1 FROM pg_database"* ]]; then
+  printf '1\\n'
+elif [[ "$args" == *"to_regclass('public.projects') IS NOT NULL"* ]]; then
+  printf 'simulated metadata inspection failure\\n' >&2
+  exit 57
+fi
+`,
+    );
+    chmodSync(fakePsql, 0o700);
+
+    try {
+      const result = Bun.spawnSync({
+        cmd: ["bash", resolve(repoRoot, "scripts/upgrade_pigsty_4_4_compat.sh"), "--dry-run"],
+        env: {
+          ...process.env,
+          PSQL_BIN: fakePsql,
+          PG_DUMP_BIN: "/usr/bin/true",
+          SUPACLOUD_MANAGEMENT_ENV_FILE: resolve(tempDir, "missing-management.env"),
+          PIGSTY_SUPABASE_ENV: resolve(tempDir, "missing-pigsty.env"),
+        },
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+
+      expect(result.exitCode).not.toBe(0);
+      expect(result.stderr.toString()).toContain("Failed to inspect metadata table public.projects");
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
   test("dry-run excludes non-active tenant databases", () => {
     const tempDir = mkdtempSync(resolve(tmpdir(), "pigsty-440-active-only-"));
     const fakePsql = resolve(tempDir, "psql");
@@ -240,6 +389,8 @@ set -euo pipefail
 args="$*"
 if [[ "$args" == *"SELECT 1 FROM pg_database"* ]]; then
   printf '1\n'
+elif [[ "$args" == *"to_regclass('public.projects') IS NOT NULL"* ]]; then
+  printf 't\n'
 elif [[ "$args" == *"SELECT DISTINCT db_name FROM projects"* ]]; then
   if [[ "$args" == *"lower(status) = 'active'"* ]]; then
     printf 'tenant_active\n'
