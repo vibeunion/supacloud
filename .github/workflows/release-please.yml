@@ -249,6 +249,18 @@ jobs:
         if: ${{ needs.release-please.outputs.supacloud_released == 'true' }}
         working-directory: packages/supacloud
         run: |
-          bun install --frozen-lockfile
+          # CLI/Admin 在同一 job 中先发布，但 registry 索引可能尚未完成传播；旧锁文件也不能解析新版本。
+          # 使用同一 release commit 中的 sibling 包构建，发布时 package.json 仍保留正常的 registry 依赖。
+          bun -e '
+            const pkg = await Bun.file("package.json").json();
+            const cli = await Bun.file("../cli/package.json").json();
+            const admin = await Bun.file("../admin/package.json").json();
+            if (pkg.dependencies["@supacloud/cli"] !== `^${cli.version}` ||
+                pkg.dependencies["@supacloud/admin"] !== `^${admin.version}`) {
+              throw new Error("supacloud dependency versions do not match local release candidates");
+            }
+          '
+          bun add --no-save '@supacloud/cli@file:../cli' '@supacloud/admin@file:../admin'
+          git diff --exit-code -- package.json bun.lock
           bun run build
           npm publish --provenance --access public

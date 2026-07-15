@@ -167,8 +167,25 @@ jobs:
 
       - name: Check unified supacloudctl CLI
         working-directory: packages/supacloud
+        env:
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
         run: |
-          bun install --frozen-lockfile
+          if [[ "$PR_AUTHOR" == "github-actions[bot]" && "${GITHUB_HEAD_REF:-}" == release-please--branches--* ]]; then
+            # Release Please 会在同一个 PR 中先提升依赖包版本；合并发布前 registry 中还不存在这些版本。
+            # 使用同一发布候选中的本地包验证统一 CLI，同时保留普通 PR 的 frozen lockfile 门禁。
+            bun -e '
+              const pkg = await Bun.file("package.json").json();
+              const cli = await Bun.file("../cli/package.json").json();
+              const admin = await Bun.file("../admin/package.json").json();
+              if (pkg.dependencies["@supacloud/cli"] !== `^${cli.version}` ||
+                  pkg.dependencies["@supacloud/admin"] !== `^${admin.version}`) {
+                throw new Error("supacloud dependency versions do not match local release candidates");
+              }
+            '
+            bun add --no-save '@supacloud/cli@file:../cli' '@supacloud/admin@file:../admin'
+          else
+            bun install --frozen-lockfile
+          fi
           bun run typecheck
           bun test src/index.test.ts
           bun run build

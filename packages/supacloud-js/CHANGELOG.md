@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.19.2](https://github.com/zuohuadong/supacloud/compare/supacloud-js-v0.19.1...supacloud-js-v0.19.2) (2026-07-15)
+
+
+### Bug Fixes
+
+* **management-api:** support Pigsty 4.4 production compatibility ([d8f6959](https://github.com/zuohuadong/supacloud/commit/d8f6959623e6f09e0e665e3353d56fd7fdbab6de))
+
 ## [0.19.1](https://github.com/zuohuadong/supacloud/compare/supacloud-js-v0.19.0...supacloud-js-v0.19.1) (2026-07-11)
 
 
