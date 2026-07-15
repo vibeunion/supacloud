@@ -1,6 +1,6 @@
 {
   "name": "@supacloud/management-api",
-  "version": "0.40.1",
+  "version": "0.40.2",
   "description": "SupaCloud Multi-tenant Management API",
   "type": "module",
   "scripts": {
