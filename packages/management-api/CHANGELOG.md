@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.40.2](https://github.com/zuohuadong/supacloud/compare/management-api-v0.40.1...management-api-v0.40.2) (2026-07-15)
+
+
+### Bug Fixes
+
+* **postgres:** add Docker Pigsty 4.4 compatibility ([1a65158](https://github.com/zuohuadong/supacloud/commit/1a65158e0199c1a52aeed4614094d034a3d3341c))
+
 ## [0.40.1](https://github.com/zuohuadong/supacloud/compare/management-api-v0.40.0...management-api-v0.40.1) (2026-07-15)
 
 
