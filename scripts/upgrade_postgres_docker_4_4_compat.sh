@@ -172,9 +172,11 @@ trap cleanup EXIT
 
 write_compose_array() {
   local target="$1"
-  printf 'compose=(' >> "$target"
-  printf ' %q' "${COMPOSE[@]}" >> "$target"
-  printf ' )\n' >> "$target"
+  {
+    printf 'compose=('
+    printf ' %q' "${COMPOSE[@]}"
+    printf ' )\n'
+  } >> "$target"
 }
 
 create_postgres_proxy() {
