@@ -171,12 +171,9 @@ cleanup() {
 trap cleanup EXIT
 
 write_compose_array() {
-  local target="$1"
-  {
-    printf 'compose=('
-    printf ' %q' "${COMPOSE[@]}"
-    printf ' )\n'
-  } >> "$target"
+  printf 'compose=('
+  printf ' %q' "${COMPOSE[@]}"
+  printf ' )\n'
 }
 
 create_postgres_proxy() {
@@ -184,7 +181,7 @@ create_postgres_proxy() {
   local tool="$2"
   {
     printf '#!/usr/bin/env bash\nset -euo pipefail\n'
-    write_compose_array /dev/stdout
+    write_compose_array
     printf 'if [[ -n "${PGPASSWORD:-}" && -n "${ROLE_PASSWORD:-}" ]]; then\n'
     printf '  exec "${compose[@]}" exec -T -e PGPASSWORD -e ROLE_PASSWORD %q %q "$@"\n' "$POSTGRES_SERVICE" "$tool"
     printf 'elif [[ -n "${PGPASSWORD:-}" ]]; then\n'
@@ -207,7 +204,7 @@ create_management_proxy() {
       printf 'printf "[WARN] Docker management init was explicitly skipped or the service is unavailable.\\n" >&2\n'
       printf 'exit 0\n'
     else
-      write_compose_array /dev/stdout
+      write_compose_array
       management_container="$("${COMPOSE[@]}" ps -q "$MANAGEMENT_SERVICE")"
       if [[ -n "$management_container" ]]; then
         printf 'exec "${compose[@]}" exec -T %q bun run src/index.ts "$@"\n' "$MANAGEMENT_SERVICE"
