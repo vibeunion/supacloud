@@ -1,4 +1,5 @@
 import { describe, test, expect } from "bun:test";
+import { resolve } from "node:path";
 import { config } from "../../src/config";
 
 describe("Config", () => {
@@ -47,5 +48,53 @@ describe("Config", () => {
     expect(config.postgrestMemoryMax).toBe("384M");
     expect(config.postgrestCpuWeight).toBeGreaterThanOrEqual(40);
     expect(config.postgrestDbPool).toBe(10);
+  });
+
+  test("empty PGPASSWORD falls back to PG_PASSWORD", () => {
+    const configModule = resolve(import.meta.dir, "../../src/config.ts");
+    const result = Bun.spawnSync({
+      cmd: [
+        process.execPath,
+        "-e",
+        `import { config } from ${JSON.stringify(configModule)}; process.stdout.write(config.pgPassword);`,
+      ],
+      env: {
+        ...process.env,
+        NODE_ENV: "test",
+        SUPACLOUD_MANAGEMENT_ENV_FILE: "/nonexistent-management-env",
+        SUPACLOUD_LOCAL_ENV_FILE: "/nonexistent-local-env",
+        PGPASSWORD: "",
+        PG_PASSWORD: "fallback-password",
+      },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout.toString()).toBe("fallback-password");
+  });
+
+  test("non-empty PGPASSWORD preserves leading and trailing whitespace", () => {
+    const configModule = resolve(import.meta.dir, "../../src/config.ts");
+    const result = Bun.spawnSync({
+      cmd: [
+        process.execPath,
+        "-e",
+        `import { config } from ${JSON.stringify(configModule)}; process.stdout.write(config.pgPassword);`,
+      ],
+      env: {
+        ...process.env,
+        NODE_ENV: "test",
+        SUPACLOUD_MANAGEMENT_ENV_FILE: "/nonexistent-management-env",
+        SUPACLOUD_LOCAL_ENV_FILE: "/nonexistent-local-env",
+        PGPASSWORD: "  padded password  ",
+        PG_PASSWORD: "fallback-password",
+      },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout.toString()).toBe("  padded password  ");
   });
 });

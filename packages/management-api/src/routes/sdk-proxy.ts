@@ -309,10 +309,6 @@ async function getProjectRef(request: Request): Promise<string> {
             const host = hostNameFromHeaderValue(rawHost);
             if (!host) continue;
 
-            if (hostBelongsToBaseDomain(host)) {
-                const hostRef = host.split('.')[0];
-                if (hostRef && hostRef !== apiKeyRef) return '';
-            }
             try {
                 const rows = await sdkProxySql`
                     SELECT ref, config
@@ -324,6 +320,7 @@ async function getProjectRef(request: Request): Promise<string> {
                     matchProjectRefFromHost(host, String(row.ref || ""), row.config),
                 );
                 if (matchedProject && matchedProject.ref !== apiKeyRef) return '';
+                if (matchedProject) continue;
             } catch(error: unknown) {
                 logger.warn("[SDK Proxy] Failed to validate API key host binding", {
                     apiKeyRef,
@@ -331,6 +328,14 @@ async function getProjectRef(request: Request): Promise<string> {
                     error: error instanceof Error ? error.message : String(error),
                 });
                 if (!hostBelongsToBaseDomain(host)) return '';
+            }
+
+            // A configured alias may intentionally live below the platform
+            // base domain (for example sapi.example.com). Only infer the first
+            // label as a project ref after no configured host matched.
+            if (hostBelongsToBaseDomain(host)) {
+                const hostRef = host.split('.')[0];
+                if (hostRef && hostRef !== apiKeyRef) return '';
             }
         }
 

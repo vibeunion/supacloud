@@ -21,20 +21,55 @@ describe("supabase bootstrap schema", () => {
   });
 
   test("does not switch SQL role inside set_request_context", () => {
-    const schema = readRepoFile("src/db/schemas/supabase.sql");
-    const start = schema.indexOf(
-      "CREATE OR REPLACE FUNCTION public.set_request_context()",
-    );
-    const end = schema.indexOf("$$ LANGUAGE plpgsql SECURITY DEFINER;", start);
+    for (const filePath of [
+      "src/db/schemas/supabase.sql",
+      "src/services/tenant-runtime-migration.ts",
+      "src/services/tenant-runtime.service.ts",
+      "src/scripts/migrate-tenant-schema.ts",
+    ]) {
+      const schema = readRepoFile(filePath);
+      const start = schema.indexOf(
+        "CREATE OR REPLACE FUNCTION public.set_request_context()",
+      );
+      const end = schema.indexOf("$$ LANGUAGE plpgsql SECURITY DEFINER;", start);
 
-    expect(start).toBeGreaterThanOrEqual(0);
-    expect(end).toBeGreaterThan(start);
+      expect(start).toBeGreaterThanOrEqual(0);
+      expect(end).toBeGreaterThan(start);
 
-    const fnBody = schema.slice(start, end);
-    expect(fnBody).toContain(
-      "PERFORM set_config('request.jwt.claim.role', role_claim, true);",
-    );
-    expect(fnBody).not.toContain("SET LOCAL ROLE");
+      const fnBody = schema.slice(start, end);
+      expect(fnBody).toContain(
+        "PERFORM set_config('request.jwt.claim.sub', coalesce(claims ->> 'sub', ''), true);",
+      );
+      expect(fnBody).toContain(
+        "PERFORM set_config('request.jwt.claim.email', coalesce(claims ->> 'email', ''), true);",
+      );
+      expect(fnBody).toContain(
+        "PERFORM set_config('request.jwt.claim.role', role_claim, true);",
+      );
+      expect(fnBody).not.toContain("SET LOCAL ROLE");
+      expect(fnBody).not.toContain("LANGUAGE plpgsql STABLE SECURITY DEFINER");
+    }
+  });
+
+  test("auth helpers preserve claims-only user identity for modern PostgREST", () => {
+    for (const filePath of [
+      "src/db/schemas/supabase.sql",
+      "src/services/tenant-runtime-migration.ts",
+      "src/scripts/migrate-tenant-schema.ts",
+    ]) {
+      const schema = readRepoFile(filePath);
+      const helperStart = schema.lastIndexOf("CREATE OR REPLACE FUNCTION auth.uid()");
+      const helperEnd = schema.indexOf("$$ LANGUAGE plpgsql STABLE;", helperStart);
+      const helperBody = schema.slice(helperStart, helperEnd);
+
+      expect(helperStart).toBeGreaterThanOrEqual(0);
+      expect(helperEnd).toBeGreaterThan(helperStart);
+      expect(helperBody).toContain("current_setting('request.jwt.claim.sub', true)");
+      expect(helperBody).toContain("current_setting('request.jwt.claims', true)");
+      expect(helperBody).toContain("->> 'sub'");
+      expect(schema).toContain("CREATE OR REPLACE FUNCTION auth.jwt()");
+      expect(schema).toContain("CREATE OR REPLACE FUNCTION auth.role()");
+    }
   });
 
   test("tenant schema migration adds columns before dependent indexes", () => {
@@ -54,6 +89,54 @@ describe("supabase bootstrap schema", () => {
       expect(userIdIndex).toBeGreaterThanOrEqual(0);
       expect(userIdAlter).toBeLessThan(userIdIndex);
     }
+  });
+
+  test("auth user delete fence mutates the row only when hard deletion is blocked", () => {
+    for (const filePath of [
+      "src/services/tenant-runtime-migration.ts",
+      "src/scripts/migrate-tenant-schema.ts",
+      "../../scripts/004_background_task_mirror_migration.sql",
+    ]) {
+      const source = readRepoFile(filePath);
+      const start = source.indexOf(
+        "CREATE OR REPLACE FUNCTION public.soft_delete_user_if_no_active_tasks()",
+      );
+      const end = source.indexOf("$$ LANGUAGE plpgsql SECURITY DEFINER;", start);
+      const functionBody = source.slice(start, end);
+      const taskState = functionBody.indexOf(
+        "v_task_state := public.has_active_background_tasks(OLD.id);",
+      );
+      const allowHardDelete = functionBody.indexOf("IF v_task_state = 'inactive' THEN");
+      const softDelete = functionBody.indexOf(
+        "UPDATE auth.users SET deleted_at = NOW() WHERE id = OLD.id;",
+      );
+      const allowHardDeleteReturn = functionBody.indexOf("RETURN OLD;", allowHardDelete);
+      const allowHardDeleteEnd = functionBody.indexOf("END IF;", allowHardDelete);
+
+      expect(start).toBeGreaterThanOrEqual(0);
+      expect(end).toBeGreaterThan(start);
+      expect(taskState).toBeGreaterThanOrEqual(0);
+      expect(allowHardDelete).toBeGreaterThan(taskState);
+      expect(allowHardDeleteReturn).toBeGreaterThan(allowHardDelete);
+      expect(allowHardDeleteEnd).toBeGreaterThan(allowHardDeleteReturn);
+      expect(softDelete).toBeGreaterThan(allowHardDelete);
+      expect(softDelete).toBeGreaterThan(allowHardDeleteEnd);
+      expect(functionBody).toContain("RETURN NULL;");
+    }
+
+    const migration = readRepoFile("../../scripts/004_background_task_mirror_migration.sql");
+    const rollbackStart = migration.lastIndexOf(
+      "CREATE OR REPLACE FUNCTION public.soft_delete_user_if_no_active_tasks()",
+    );
+    const rollbackEnd = migration.indexOf(
+      "$$ LANGUAGE plpgsql SECURITY DEFINER;",
+      rollbackStart,
+    );
+    const rollbackBody = migration.slice(rollbackStart, rollbackEnd);
+    expect(rollbackBody.indexOf("IF NOT public.has_active_background_tasks(OLD.id) THEN"))
+      .toBeGreaterThanOrEqual(0);
+    expect(rollbackBody.indexOf("UPDATE auth.users SET deleted_at = NOW() WHERE id = OLD.id;"))
+      .toBeGreaterThan(rollbackBody.indexOf("IF NOT public.has_active_background_tasks(OLD.id) THEN"));
   });
 
   test("one_time_tokens user_id migration adds the foreign key separately", () => {

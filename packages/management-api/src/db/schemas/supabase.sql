@@ -344,8 +344,16 @@ GRANT ALL ON ALL SEQUENCES IN SCHEMA auth TO supabase_auth_admin;
 GRANT SELECT ON ALL TABLES IN SCHEMA auth TO service_role;
 
 CREATE OR REPLACE FUNCTION auth.uid() RETURNS uuid AS $$
-  SELECT nullif(current_setting('request.jwt.claim.sub', true), '')::uuid;
-$$ LANGUAGE sql STABLE;
+BEGIN
+  RETURN COALESCE(
+    nullif(current_setting('request.jwt.claim.sub', true), ''),
+    (nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'sub')
+  )::uuid;
+EXCEPTION
+  WHEN invalid_text_representation THEN
+    RETURN NULL;
+END
+$$ LANGUAGE plpgsql STABLE;
 
 -- 3. Storage Schema
 CREATE SCHEMA IF NOT EXISTS storage AUTHORIZATION supabase_storage_admin;
@@ -4046,15 +4054,25 @@ $$ LANGUAGE SQL STABLE;
 -- PostgREST pre-request function: sets JWT claims for RLS context
 CREATE OR REPLACE FUNCTION public.set_request_context() RETURNS void AS $$
 DECLARE
+  claims jsonb;
   role_claim text;
 BEGIN
-  IF current_setting('request.jwt.claims', true) = '' THEN
-    PERFORM set_config('request.jwt.claims', '{}', true);
-  END IF;
-  
+  BEGIN
+    claims := COALESCE(
+      nullif(current_setting('request.jwt.claims', true), '')::jsonb,
+      '{}'::jsonb
+    );
+  EXCEPTION WHEN invalid_text_representation THEN
+    claims := '{}'::jsonb;
+  END;
+
+  PERFORM set_config('request.jwt.claims', claims::text, true);
+  PERFORM set_config('request.jwt.claim.sub', coalesce(claims ->> 'sub', ''), true);
+  PERFORM set_config('request.jwt.claim.email', coalesce(claims ->> 'email', ''), true);
+
   role_claim := COALESCE(
     nullif(current_setting('request.jwt.claim.role', true), ''),
-    (nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'role'),
+    claims ->> 'role',
     'anon'
   );
 

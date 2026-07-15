@@ -466,6 +466,75 @@ describe("sdkProxyRoutes functions proxy", () => {
     });
   });
 
+  test("REST proxy accepts an opaque key on a configured API alias inside the platform base domain", async () => {
+    await withSdkProxyTestContext(async ({ calls, trackSpy }) => {
+      trackSpy(
+        spyOn(sdkProxyInternals, "resolveProjectApiKey").mockResolvedValue({
+          ref: "proj_1",
+          kind: "publishable",
+          role: "anon",
+          upstreamKey: "legacy-anon-jwt",
+        }),
+      );
+      setSdkProxySqlForTests(async (...args: unknown[]) => {
+        const text = String(args[0] ?? "");
+        if (text.includes("SELECT ref, config")) {
+          return [{
+            ref: "proj_1",
+            config: {
+              api_domain: `sapi.${config.baseDomain}`,
+              postgrest_port: 7361,
+              gotrue_port: 8361,
+            },
+          }];
+        }
+        if (text.includes("SELECT config")) {
+          return [{ config: { postgrest_port: 7361, gotrue_port: 8361 } }];
+        }
+        return [];
+      });
+
+      const response = await request("/rest/v1/widgets", {
+        headers: {
+          "x-forwarded-host": `sapi.${config.baseDomain}`,
+          "x-project-ref": "proj_1",
+          apikey: "sb_publishable_client_key",
+        },
+      });
+
+      expect(response.status).toBe(200);
+      expect(calls).toHaveLength(1);
+      const headers = new Headers(calls[0]?.init?.headers);
+      expect(headers.get("apikey")).toBe("legacy-anon-jwt");
+    });
+  });
+
+  test("REST proxy rejects another project's opaque key on a configured API alias", async () => {
+    await withSdkProxyTestContext(async ({ calls }) => {
+      setSdkProxySqlForTests(async (...args: unknown[]) => {
+        const text = String(args[0] ?? "");
+        if (text.includes("SELECT ref, config")) {
+          return [{
+            ref: "proj_2",
+            config: { api_domain: `sapi.${config.baseDomain}` },
+          }];
+        }
+        return [];
+      });
+
+      const response = await request("/rest/v1/widgets", {
+        headers: {
+          "x-forwarded-host": `sapi.${config.baseDomain}`,
+          "x-project-ref": "proj_2",
+          apikey: "sb_publishable_project_1_key",
+        },
+      });
+
+      expect(response.status).toBe(400);
+      expect(calls).toHaveLength(0);
+    });
+  });
+
   test("auth proxy accepts gateway-injected project ref on loopback without apikey", async () => {
     await withSdkProxyTestContext(async ({ calls, trackSpy }) => {
       setSdkProxySqlForTests(async (...args: unknown[]) => {

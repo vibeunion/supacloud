@@ -515,36 +515,56 @@ END $$;
 -- Sets RLS context variables from the JWT claims passed by PostgREST
 CREATE OR REPLACE FUNCTION public.set_request_context() RETURNS void AS $$
 DECLARE
-  claims json;
+  claims jsonb;
   role_claim text;
 BEGIN
   BEGIN
-    claims := current_setting('request.jwt.claims', true)::json;
-  EXCEPTION WHEN OTHERS THEN
-    claims := '{}'::json;
+    claims := COALESCE(
+      nullif(current_setting('request.jwt.claims', true), '')::jsonb,
+      '{}'::jsonb
+    );
+  EXCEPTION WHEN invalid_text_representation THEN
+    claims := '{}'::jsonb;
   END;
 
-  PERFORM set_config('request.jwt.claim.sub', coalesce(claims->>'sub', ''), true);
-  PERFORM set_config('request.jwt.claim.role', coalesce(claims->>'role', 'anon'), true);
-  PERFORM set_config('request.jwt.claim.email', coalesce(claims->>'email', ''), true);
+  PERFORM set_config('request.jwt.claims', claims::text, true);
+  PERFORM set_config('request.jwt.claim.sub', coalesce(claims ->> 'sub', ''), true);
+  PERFORM set_config('request.jwt.claim.email', coalesce(claims ->> 'email', ''), true);
 
-  role_claim := coalesce(claims->>'role', 'anon');
-  IF role_claim = 'service_role' THEN
-    SET LOCAL ROLE service_role;
-  ELSIF role_claim = 'authenticated' THEN
-    SET LOCAL ROLE authenticated;
-  ELSE
-    SET LOCAL ROLE anon;
-  END IF;
+  role_claim := COALESCE(
+    nullif(current_setting('request.jwt.claim.role', true), ''),
+    claims ->> 'role',
+    'anon'
+  );
+  PERFORM set_config('request.jwt.claim.role', role_claim, true);
 END;
-$$ LANGUAGE plpgsql STABLE SECURITY DEFINER;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- Grant execute to API roles
 GRANT EXECUTE ON FUNCTION public.set_request_context() TO anon, authenticated, service_role;
 
 CREATE OR REPLACE FUNCTION auth.uid() RETURNS uuid AS $$
-  SELECT nullif(current_setting('request.jwt.claim.sub', true), '')::uuid;
-$$ LANGUAGE sql STABLE;
+BEGIN
+  RETURN COALESCE(
+    nullif(current_setting('request.jwt.claim.sub', true), ''),
+    (nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'sub')
+  )::uuid;
+EXCEPTION
+  WHEN invalid_text_representation THEN
+    RETURN NULL;
+END
+$$ LANGUAGE plpgsql STABLE;
+
+CREATE OR REPLACE FUNCTION auth.jwt() RETURNS jsonb AS $$
+  SELECT nullif(current_setting('request.jwt.claims', true), '')::jsonb;
+$$ LANGUAGE SQL STABLE;
+
+CREATE OR REPLACE FUNCTION auth.role() RETURNS text AS $$
+  SELECT COALESCE(
+    nullif(current_setting('request.jwt.claim.role', true), ''),
+    (nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'role')
+  )::text;
+$$ LANGUAGE SQL STABLE;
 
 -- 13. GoTrue internal tracking tables (P1-4, P2-5)
 CREATE TABLE IF NOT EXISTS auth.schema_migrations (
@@ -786,20 +806,20 @@ BEGIN
     RETURN OLD;
   END IF;
 
-  UPDATE auth.users SET deleted_at = NOW() WHERE id = OLD.id;
-
   v_task_state := public.has_active_background_tasks(OLD.id);
 
-  IF v_task_state = 'active' THEN
-    RETURN NULL;
+  IF v_task_state = 'inactive' THEN
+    RETURN OLD;
   END IF;
+
+  UPDATE auth.users SET deleted_at = NOW() WHERE id = OLD.id;
 
   IF v_task_state = 'unknown' THEN
     RAISE NOTICE 'soft_delete_user_if_no_active_tasks: degraded/unknown for user %, blocking hard delete', OLD.id;
     RETURN NULL;
   END IF;
 
-  RETURN OLD;
+  RETURN NULL;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 

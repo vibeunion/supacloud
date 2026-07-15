@@ -93,14 +93,15 @@ BEGIN
     RETURN OLD;
   END IF;
 
-  UPDATE auth.users SET deleted_at = NOW() WHERE id = OLD.id;
-
   v_task_state := public.has_active_background_tasks(OLD.id);
 
-  IF v_task_state = 'active' THEN
-    -- Active background tasks exist — block hard deletion
-    RETURN NULL;
+  IF v_task_state = 'inactive' THEN
+    -- No active tasks: allow the original DELETE without touching the row first.
+    RETURN OLD;
   END IF;
+
+  -- Active or unknown state: soft-delete and cancel the original hard DELETE.
+  UPDATE auth.users SET deleted_at = NOW() WHERE id = OLD.id;
 
   IF v_task_state = 'unknown' THEN
     -- Degraded state: DB error or mirror table missing. Conservative choice: block hard deletion
@@ -109,8 +110,7 @@ BEGIN
     RETURN NULL;
   END IF;
 
-  -- v_task_state = 'inactive' — no active tasks, allow hard deletion
-  RETURN OLD;
+  RETURN NULL;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
@@ -184,13 +184,12 @@ BEGIN
     RETURN OLD;
   END IF;
 
-  UPDATE auth.users SET deleted_at = NOW() WHERE id = OLD.id;
-
-  IF public.has_active_background_tasks(OLD.id) THEN
-    RETURN NULL;
+  IF NOT public.has_active_background_tasks(OLD.id) THEN
+    RETURN OLD;
   END IF;
 
-  RETURN OLD;
+  UPDATE auth.users SET deleted_at = NOW() WHERE id = OLD.id;
+  RETURN NULL;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 

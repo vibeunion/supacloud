@@ -171,7 +171,8 @@ const port = Number(getEnv("PORT", "9090"));
 const pgHost = getEnv("PG_HOST", "127.0.0.1");
 const pgPort = Number(getEnv("PG_PORT", "5432"));
 const pgUser = getEnv("PG_USER", "postgres");
-const pgPassword = getEnv("PGPASSWORD", getEnv("PG_PASSWORD", "postgres"));
+const rawPgPassword = getEnv("PGPASSWORD");
+const pgPassword = rawPgPassword === "" ? getEnv("PG_PASSWORD", "postgres") : rawPgPassword;
 const pgDatabase = getEnv("PG_DATABASE", "postgres");
 const edgeRuntimeInternal = getEnv("EDGE_RUNTIME_INTERNAL", `127.0.0.1:${edgeRuntimePort}`);
 
