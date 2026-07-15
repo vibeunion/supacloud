@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.40.1](https://github.com/zuohuadong/supacloud/compare/management-api-v0.40.0...management-api-v0.40.1) (2026-07-15)
+
+
+### Bug Fixes
+
+* **management-api:** support Pigsty 4.4 production compatibility ([d8f6959](https://github.com/zuohuadong/supacloud/commit/d8f6959623e6f09e0e665e3353d56fd7fdbab6de))
+
 ## [0.40.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.39.1...management-api-v0.40.0) (2026-07-14)
 
 
