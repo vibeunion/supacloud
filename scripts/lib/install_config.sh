@@ -540,7 +540,7 @@ supacloud_write_install_input_config() (
         printf '%s=%q\n' GRAFANA_PASSWORD "${GRAFANA_PASSWORD:-}"
         printf '%s=%q\n' SWAP_SIZE_GB "${SWAP_SIZE_GB:-4}"
         printf '%s=%q\n' PG_VERSION "${PG_VERSION:-18}"
-        printf '%s=%q\n' PIGSTY_VERSION "${PIGSTY_VERSION:-latest}"
+        printf '%s=%q\n' PIGSTY_VERSION "${PIGSTY_VERSION:-v4.4.0}"
         printf '%s=%q\n' TIMEZONE "${TIMEZONE:-Asia/Shanghai}"
         printf '%s=%q\n' PIGSTY_CONFIG_TEMPLATE "${PIGSTY_CONFIG_TEMPLATE:-supabase}"
         printf '%s=%q\n' SUPACLOUD_INSTALL_LEGACY_SUPABASE_STACK "${SUPACLOUD_INSTALL_LEGACY_SUPABASE_STACK:-false}"

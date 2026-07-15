@@ -256,6 +256,76 @@ jobs:
         working-directory: packages/management-api
         run: bun run test:unit
 
+  postgres-18-compatibility:
+    name: SupaCloud PostgreSQL 18 Compatibility
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      POSTGRES_PASSWORD: postgres
+      JWT_SECRET: ci-jwt-secret-with-at-least-32-characters
+      MASTER_TOKEN: ci-master-token-with-at-least-32-characters
+      SECRETS_ENCRYPTION_KEY: ci-encryption-key-with-at-least-32-characters
+      DASHBOARD_PASSWORD: ci-dashboard-password
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Build and start SupaCloud PostgreSQL 18
+        run: docker compose -f docker/self-host/docker-compose.yml up -d --build postgres
+
+      - name: Wait for SupaCloud PostgreSQL 18
+        run: |
+          ready=false
+          container="$(docker compose -f docker/self-host/docker-compose.yml ps -q postgres)"
+          test -n "$container"
+          for _ in $(seq 1 60); do
+            if [ "$(docker inspect --format '{{.State.Health.Status}}' "$container")" = "healthy" ]; then
+              ready=true
+              break
+            fi
+            sleep 1
+          done
+          test "$ready" = "true"
+
+      - name: Install Management API dependencies
+        working-directory: packages/management-api
+        run: bun install --frozen-lockfile
+
+      - name: Initialize Docker metadata database
+        working-directory: packages/management-api
+        env:
+          NODE_ENV: development
+          DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres
+        # This job validates the metadata/compatibility path, not the separate
+        # E2E Storage fixture that init.ts enables when CI variables are set.
+        run: env -u CI -u GITHUB_ACTIONS bun src/db/init.ts
+
+      - name: Apply and verify Docker PostgreSQL compatibility
+        env:
+          SUPACLOUD_META_DB: postgres
+          LOGFLARE_DB_OWNER: postgres
+          SUPACLOUD_DOCKER_SKIP_MANAGEMENT_INIT: "true"
+          SUPACLOUD_DOCKER_BACKUP_DIR: /tmp/supacloud-postgres-backups
+        run: |
+          bash scripts/upgrade_postgres_docker_4_4_compat.sh --dry-run
+          bash scripts/upgrade_postgres_docker_4_4_compat.sh --apply
+          bash scripts/upgrade_postgres_docker_4_4_compat.sh --check
+          test -n "$(find /tmp/supacloud-postgres-backups -type f -name '*.sql' -size +0c -print -quit)"
+
+      - name: Show PostgreSQL logs on failure
+        if: failure()
+        run: docker compose -f docker/self-host/docker-compose.yml logs --no-color postgres
+
+      - name: Stop PostgreSQL 18 fixture
+        if: always()
+        run: docker compose -f docker/self-host/docker-compose.yml down
+
   integration-test:
     name: Integration & Compliance Tests
     runs-on: ubuntu-latest

@@ -32,6 +32,7 @@
 - [CLI Guide](./cli-guide.md) - `@supacloud/cli` and `@supacloud/admin`
 - [PostgREST Runtime Lifecycle](./postgrest-runtime-lifecycle.md) - Component-level PostgREST desired state, pause/resume/status, and reconciliation
 - [Upgrade to Pigsty 4.4](./upgrade-to-pigsty-4.4.md) - Pigsty and Supabase compatibility upgrade guide
+- [Docker PostgreSQL 4.4 Upgrade](./upgrade-postgres-docker-4.4.md) - Docker-specific compatibility, backup, and major-version safety guide
 - [Troubleshooting Podman DNS](./troubleshooting-podman-dns.md) - Podman DNS troubleshooting
 
 ## Development

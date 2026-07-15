@@ -4,6 +4,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MODE="check"
+COMPAT_PROFILE="${SUPACLOUD_COMPAT_PROFILE:-pigsty}"
 MANAGEMENT_ENV_FILE="${SUPACLOUD_MANAGEMENT_ENV_FILE:-/etc/supabase/management-api.env}"
 COMPAT_PG_ENV_FILE="${SUPACLOUD_COMPAT_PG_ENV_FILE:-$MANAGEMENT_ENV_FILE}"
 PIGSTY_ENV_FILE="${PIGSTY_SUPABASE_ENV:-${HOME}/pigsty/app/supabase/.env}"
@@ -21,6 +22,18 @@ ANALYTICS_SERVICE_PRESENT=false
 ANALYTICS_RECREATE_AFTER_PREPARE=false
 ANALYTICS_COMPOSE_CMD=()
 
+case "$COMPAT_PROFILE" in
+  pigsty|docker) ;;
+  *)
+    printf 'Unsupported compatibility profile: %s (expected pigsty or docker)\n' "$COMPAT_PROFILE" >&2
+    exit 2
+    ;;
+esac
+
+is_pigsty_profile() {
+  [[ "$COMPAT_PROFILE" == "pigsty" ]]
+}
+
 usage() {
   cat <<'EOF'
 Usage: bash scripts/upgrade_pigsty_4_4_compat.sh [--check|--apply|--prepare-analytics|--dry-run|--rollback-plan]
@@ -36,6 +49,8 @@ Run --apply after installing the matching SupaCloud management binary so
 `supacloud --init-db` can encrypt and backfill opaque Secret Keys.
 Use SUPACLOUD_COMPAT_PG_ENV_FILE for maintenance-only PostgreSQL connection
 settings while keeping SUPACLOUD_MANAGEMENT_ENV_FILE on the real runtime env.
+Set SUPACLOUD_COMPAT_PROFILE=docker only through the Docker wrapper; this skips
+Pigsty environment, PgBouncer, monitor-role, and systemd-specific operations.
 EOF
 }
 
@@ -153,6 +168,19 @@ query_scalar() {
   run_psql "$database" -Atqc "$sql"
 }
 
+decode_base64() {
+  if base64 --decode </dev/null >/dev/null 2>&1; then
+    base64 --decode
+  elif base64 -D </dev/null >/dev/null 2>&1; then
+    base64 -D
+  elif base64 -d </dev/null >/dev/null 2>&1; then
+    base64 -d
+  else
+    printf 'No compatible base64 decoder was found.\n' >&2
+    return 1
+  fi
+}
+
 run_pg_dump() {
   local database="$1"
   shift
@@ -176,9 +204,19 @@ database_exists() {
   [[ "$result" == "1" ]]
 }
 
+metadata_projects_table_exists() {
+  database_exists "$META_DB" || return $?
+  local result
+  if ! result="$(query_scalar "$META_DB" "SELECT to_regclass('public.projects') IS NOT NULL")"; then
+    printf '[FAIL] Failed to inspect metadata table public.projects in %s.\n' "$META_DB" >&2
+    return 2
+  fi
+  [[ "$result" == "t" ]]
+}
+
 list_target_databases() {
   printf '%s\n' postgres
-  if database_exists "$META_DB"; then
+  if metadata_projects_table_exists; then
     local databases
     if ! databases="$(query_scalar "$META_DB" "SELECT DISTINCT db_name FROM projects WHERE deleted_at IS NULL AND lower(status) = 'active' AND db_name IS NOT NULL ORDER BY db_name")"; then
       printf '[FAIL] Failed to enumerate active project databases from %s.\n' "$META_DB" >&2
@@ -204,7 +242,7 @@ list_target_databases() {
 }
 
 list_active_tenant_credentials() {
-  if database_exists "$META_DB"; then
+  if metadata_projects_table_exists; then
     query_scalar "$META_DB" "
       SELECT ref || chr(9) || db_name || chr(9)
         || coalesce(encode(convert_to(db_password, 'UTF8'), 'base64'), '')
@@ -246,7 +284,7 @@ apply_tenant_authenticator_compat() {
     fi
 
     local database_password authenticator_role
-    if ! database_password="$(printf '%s' "$password_base64" | base64 --decode)"; then
+    if ! database_password="$(printf '%s' "$password_base64" | decode_base64)"; then
       printf '[FAIL] Active tenant database password is not valid base64: %s\n' "$ref" >&2
       return 1
     fi
@@ -331,7 +369,7 @@ SQL
     return 0
   fi
   if [[ -z "$password_base64" ]] \
-    || ! database_password="$(printf '%s' "$password_base64" | base64 --decode)"; then
+    || ! database_password="$(printf '%s' "$password_base64" | decode_base64)"; then
     printf 'missing-password'
     return 0
   fi
@@ -1017,11 +1055,14 @@ patch_pigsty_env() {
 }
 
 apply_metadata_columns() {
-  if database_exists "$META_DB"; then
+  if metadata_projects_table_exists; then
     :
   else
     local meta_status=$?
-    [[ "$meta_status" -eq 1 ]] && return 0
+    if [[ "$meta_status" -eq 1 ]]; then
+      printf '[FAIL] Metadata table public.projects is missing in %s; run the matching management --init-db first.\n' "$META_DB" >&2
+      return 1
+    fi
     return "$meta_status"
   fi
   run_psql "$META_DB" <<'SQL'
@@ -1123,7 +1164,7 @@ check_all() {
     done <<< "$tenant_records"
   fi
 
-  if database_exists "$META_DB"; then
+  if metadata_projects_table_exists; then
     local missing_columns
     missing_columns="$(query_scalar "$META_DB" "
       SELECT 3 - count(*)
@@ -1153,13 +1194,13 @@ check_all() {
   else
     local meta_status=$?
     if [[ "$meta_status" -eq 1 ]]; then
-      printf '[FAIL] Metadata database missing: %s\n' "$META_DB"
+      printf '[FAIL] Metadata table public.projects is missing in database: %s\n' "$META_DB"
     fi
     failed=1
   fi
 
   local compose_file="${PIGSTY_SUPABASE_DIR}/docker-compose.yml"
-  if [[ -f "$compose_file" ]]; then
+  if is_pigsty_profile && [[ -f "$compose_file" ]]; then
     if [[ ! -f "$PIGSTY_ENV_FILE" ]]; then
       printf '[FAIL] Pigsty Supabase environment is missing: %s\n' "$PIGSTY_ENV_FILE"
       failed=1
@@ -1181,36 +1222,40 @@ check_all() {
     fi
   fi
 
-  local management_pgpassword_result
-  management_pgpassword_result="$(check_management_pgpassword_alias)"
-  if [[ "$management_pgpassword_result" == "compatible" ]]; then
-    printf '[PASS] Management PGPASSWORD alias is compatible\n'
-  elif [[ "$management_pgpassword_result" == "empty-alias" ]]; then
-    printf '[FAIL] Management PGPASSWORD is empty while PG_PASSWORD is configured\n'
-    failed=1
-  elif [[ -n "$management_pgpassword_result" ]]; then
-    printf '[FAIL] Management PGPASSWORD alias check failed: %s\n' "$management_pgpassword_result"
-    failed=1
-  fi
+  if is_pigsty_profile; then
+    local management_pgpassword_result
+    management_pgpassword_result="$(check_management_pgpassword_alias)"
+    if [[ "$management_pgpassword_result" == "compatible" ]]; then
+      printf '[PASS] Management PGPASSWORD alias is compatible\n'
+    elif [[ "$management_pgpassword_result" == "empty-alias" ]]; then
+      printf '[FAIL] Management PGPASSWORD is empty while PG_PASSWORD is configured\n'
+      failed=1
+    elif [[ -n "$management_pgpassword_result" ]]; then
+      printf '[FAIL] Management PGPASSWORD alias check failed: %s\n' "$management_pgpassword_result"
+      failed=1
+    fi
 
-  local pgbouncer_auth_result
-  pgbouncer_auth_result="$(check_pgbouncer_auth_file)"
-  if [[ "$pgbouncer_auth_result" == "compatible" ]]; then
-    printf '[PASS] PgBouncer auth file is structurally compatible\n'
-  elif [[ "$pgbouncer_auth_result" == "not-present" ]]; then
-    printf '[PASS] PgBouncer auth file is not present on this node\n'
-  else
-    printf '[FAIL] PgBouncer auth file is structurally broken\n'
-    failed=1
-  fi
+    local pgbouncer_auth_result
+    pgbouncer_auth_result="$(check_pgbouncer_auth_file)"
+    if [[ "$pgbouncer_auth_result" == "compatible" ]]; then
+      printf '[PASS] PgBouncer auth file is structurally compatible\n'
+    elif [[ "$pgbouncer_auth_result" == "not-present" ]]; then
+      printf '[PASS] PgBouncer auth file is not present on this node\n'
+    else
+      printf '[FAIL] PgBouncer auth file is structurally broken\n'
+      failed=1
+    fi
 
-  local monitor_connect_result
-  monitor_connect_result="$(check_monitor_connect_compat)"
-  if [[ "$monitor_connect_result" == "not-present" || "$monitor_connect_result" == "0" ]]; then
-    printf '[PASS] Pigsty monitor database CONNECT compatibility\n'
+    local monitor_connect_result
+    monitor_connect_result="$(check_monitor_connect_compat)"
+    if [[ "$monitor_connect_result" == "not-present" || "$monitor_connect_result" == "0" ]]; then
+      printf '[PASS] Pigsty monitor database CONNECT compatibility\n'
+    else
+      printf '[FAIL] Pigsty monitor lacks CONNECT on %s database(s)\n' "$monitor_connect_result"
+      failed=1
+    fi
   else
-    printf '[FAIL] Pigsty monitor lacks CONNECT on %s database(s)\n' "$monitor_connect_result"
-    failed=1
+    printf '[PASS] Docker profile skips Pigsty environment, PgBouncer, and monitor-role checks\n'
   fi
   return "$failed"
 }
@@ -1219,17 +1264,23 @@ if [[ "$MODE" == "dry-run" ]]; then
   target_databases="$(list_target_databases | awk '!seen[$0]++')"
   printf 'Would ensure Analytics database/schema: %s.%s (owner %s)\n' "$ANALYTICS_DB" "$ANALYTICS_SCHEMA" "$ANALYTICS_OWNER"
   printf 'Would copy a non-empty legacy postgres.%s schema only when the destination is empty.\n' "$ANALYTICS_SCHEMA"
-  printf 'Would stop the legacy Analytics container before copying data.\n'
-  printf 'Would patch Pigsty environment: %s\n' "$PIGSTY_ENV_FILE"
+  if is_pigsty_profile; then
+    printf 'Would stop the legacy Analytics container before copying data.\n'
+    printf 'Would patch Pigsty environment: %s\n' "$PIGSTY_ENV_FILE"
+  else
+    printf 'Would require explicit confirmation that any external Analytics writer is stopped before copying legacy data.\n'
+  fi
   printf 'Would ensure Studio compatibility in databases:\n'
   printf '%s\n' "$target_databases" | sed 's/^/  - /'
   printf 'Would repair PostgREST pre-request compatibility in active tenant databases.\n'
   printf 'Would repair auth.uid/auth.jwt/auth.role for claims-only modern Session JWTs.\n'
   printf 'Would repair the Auth user delete fence without mutating rows before an allowed hard DELETE.\n'
   printf 'Would reconcile active tenant authenticator roles and their canonical passwords.\n'
-  printf 'Would reconcile an empty PGPASSWORD alias from PG_PASSWORD without printing either value.\n'
-  printf 'Would repair known Pigsty timing noise in the PgBouncer auth file and reject unknown corruption.\n'
-  printf 'Would grant dbuser_monitor CONNECT on every connectable non-template database.\n'
+  if is_pigsty_profile; then
+    printf 'Would reconcile an empty PGPASSWORD alias from PG_PASSWORD without printing either value.\n'
+    printf 'Would repair known Pigsty timing noise in the PgBouncer auth file and reject unknown corruption.\n'
+    printf 'Would grant dbuser_monitor CONNECT on every connectable non-template database.\n'
+  fi
   printf 'Would add opaque API key metadata columns in %s and run supacloud --init-db when available.\n' "$META_DB"
   exit 0
 fi
@@ -1237,27 +1288,37 @@ fi
 if [[ "$MODE" == "prepare-analytics" ]]; then
   trap restore_analytics_after_prepare_failure EXIT
   apply_analytics_database
-  migration_required=false
-  env_was_target=false
-  analytics_migration_required && migration_required=true
-  pigsty_env_targets_analytics && env_was_target=true
-  if [[ "$migration_required" == "true" || "$env_was_target" != "true" ]]; then
-    stop_legacy_analytics
-    if [[ "$ANALYTICS_WAS_RUNNING" == "true" ]]; then
-      ANALYTICS_RECREATE_AFTER_PREPARE=true
-    elif analytics_migration_marked && [[ "$env_was_target" != "true" && "$ANALYTICS_SERVICE_PRESENT" == "true" ]]; then
-      # Recover a stopped managed container left by a prior marker-after-write failure.
-      ANALYTICS_RECREATE_AFTER_PREPARE=true
+  if is_pigsty_profile; then
+    migration_required=false
+    env_was_target=false
+    analytics_migration_required && migration_required=true
+    pigsty_env_targets_analytics && env_was_target=true
+    if [[ "$migration_required" == "true" || "$env_was_target" != "true" ]]; then
+      stop_legacy_analytics
+      if [[ "$ANALYTICS_WAS_RUNNING" == "true" ]]; then
+        ANALYTICS_RECREATE_AFTER_PREPARE=true
+      elif analytics_migration_marked && [[ "$env_was_target" != "true" && "$ANALYTICS_SERVICE_PRESENT" == "true" ]]; then
+        # Recover a stopped managed container left by a prior marker-after-write failure.
+        ANALYTICS_RECREATE_AFTER_PREPARE=true
+      fi
+    else
+      recover_stopped_prepared_analytics
     fi
   else
-    recover_stopped_prepared_analytics
+    if analytics_migration_required && [[ "${SUPACLOUD_ASSUME_ANALYTICS_STOPPED:-false}" != "true" ]]; then
+      printf '[FAIL] Docker/external Analytics migration requires the writer to be stopped first.\n' >&2
+      printf '       Verify the writer is stopped, then rerun with SUPACLOUD_ASSUME_ANALYTICS_STOPPED=true.\n' >&2
+      exit 1
+    fi
   fi
   migrate_legacy_analytics
   grant_analytics_owner_privileges
-  patch_pigsty_env
-  start_prepared_analytics
+  if is_pigsty_profile; then
+    patch_pigsty_env
+    start_prepared_analytics
+  fi
   ANALYTICS_PREPARE_COMPLETED=true
-  printf '[PASS] Analytics is prepared for the Pigsty 4.4 Logflare stack.\n'
+  printf '[PASS] Analytics is prepared for the %s compatibility profile.\n' "$COMPAT_PROFILE"
   exit 0
 fi
 
@@ -1270,11 +1331,13 @@ if [[ "$MODE" == "apply" ]]; then
   fi
   migrate_legacy_analytics
   grant_analytics_owner_privileges
-  patch_pigsty_env
+  is_pigsty_profile && patch_pigsty_env
   apply_metadata_columns
-  reconcile_management_pgpassword_alias
-  repair_pgbouncer_auth_file
-  apply_monitor_connect_compat
+  if is_pigsty_profile; then
+    reconcile_management_pgpassword_alias
+    repair_pgbouncer_auth_file
+    apply_monitor_connect_compat
+  fi
   apply_tenant_authenticator_compat
   target_databases="$(list_target_databases | awk '!seen[$0]++')"
   while IFS= read -r database; do
