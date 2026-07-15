@@ -167,12 +167,22 @@ jobs:
 
       - name: Check unified supacloudctl CLI
         working-directory: packages/supacloud
-        env:
-          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
         run: |
-          if [[ "$PR_AUTHOR" == "github-actions[bot]" && "${GITHUB_HEAD_REF:-}" == release-please--branches--* ]]; then
-            # Release Please 会在同一个 PR 中先提升依赖包版本；合并发布前 registry 中还不存在这些版本。
-            # 使用同一发布候选中的本地包验证统一 CLI，同时保留普通 PR 的 frozen lockfile 门禁。
+          install_mode="$(bun -e '
+            const pkg = await Bun.file("package.json").json();
+            const cli = await Bun.file("../cli/package.json").json();
+            const admin = await Bun.file("../admin/package.json").json();
+            const lock = await Bun.file("bun.lock").text();
+            const dependenciesMatchCandidates =
+              pkg.dependencies["@supacloud/cli"] === `^${cli.version}` &&
+              pkg.dependencies["@supacloud/admin"] === `^${admin.version}`;
+            const lockHasCandidates =
+              lock.includes(`@supacloud/cli@${cli.version}`) &&
+              lock.includes(`@supacloud/admin@${admin.version}`);
+            console.log(dependenciesMatchCandidates && !lockHasCandidates ? "local" : "frozen");
+          ')"
+          if [[ "$install_mode" == "local" ]]; then
+            # Release 提升 sibling 包版本时，锁文件会暂时落后；使用同一提交中的候选包验证。
             bun -e '
               const pkg = await Bun.file("package.json").json();
               const cli = await Bun.file("../cli/package.json").json();
@@ -183,6 +193,7 @@ jobs:
               }
             '
             bun add --no-save '@supacloud/cli@file:../cli' '@supacloud/admin@file:../admin'
+            git diff --exit-code -- package.json bun.lock
           else
             bun install --frozen-lockfile
           fi
