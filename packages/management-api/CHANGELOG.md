@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.40.4](https://github.com/zuohuadong/supacloud/compare/management-api-v0.40.3...management-api-v0.40.4) (2026-07-16)
+
+
+### Bug Fixes
+
+* **management-api:** harden runtime compatibility ([42c936c](https://github.com/zuohuadong/supacloud/commit/42c936cdebeff3e42260b44eea105d302159de7e))
+
 ## [0.40.3](https://github.com/zuohuadong/supacloud/compare/management-api-v0.40.2...management-api-v0.40.3) (2026-07-16)
 
 
