@@ -34,6 +34,7 @@ describe("wechat auth edge function generators", () => {
     expectWechatLoginResponseContract(functionCode);
     expect(functionCode).not.toContain("@supabase/supabase-js");
     expect(functionCode).toContain("SUPACLOUD_INTERNAL_AUTH_URL");
+    expect(functionCode).toContain('req?.headers?.get("x-project-ref")');
     expect(functionCode).toContain("WECHAT_MINIPROGRAM_APP_SECRET");
   });
 
@@ -57,8 +58,10 @@ describe("wechat auth edge function generators", () => {
       "WECHAT_MINIPROGRAM_APP_ID",
       "WECHAT_MINIPROGRAM_APP_SECRET",
       "SUPACLOUD_INTERNAL_AUTH_URL",
+      "SUPABASE_URL",
       "SUPABASE_SERVICE_ROLE_KEY",
       "X_PROJECT_REF",
+      "SUPACLOUD_PROJECT_REF",
       "SUPABASE_DB_URL",
     ] as const;
     const originalEnv = Object.fromEntries(envNames.map((name) => [name, Bun.env[name]]));
@@ -73,8 +76,10 @@ describe("wechat auth edge function generators", () => {
       Bun.env.WECHAT_MINIPROGRAM_APP_ID = "test-app-id";
       Bun.env.WECHAT_MINIPROGRAM_APP_SECRET = "test-app-secret";
       Bun.env.SUPACLOUD_INTERNAL_AUTH_URL = "http://auth.internal/auth/v1";
+      delete Bun.env.SUPABASE_URL;
       Bun.env.SUPABASE_SERVICE_ROLE_KEY = "test-service-role";
-      Bun.env.X_PROJECT_REF = "test-project";
+      delete Bun.env.X_PROJECT_REF;
+      delete Bun.env.SUPACLOUD_PROJECT_REF;
       delete Bun.env.SUPABASE_DB_URL;
 
       globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -106,7 +111,7 @@ describe("wechat auth edge function generators", () => {
       const loginFunction = (await import(moduleUrl)).default as (request: Request) => Promise<Response>;
       const response = await loginFunction(new Request("http://localhost/functions/v1/wechat-login", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "x-project-ref": "request-project" },
         body: JSON.stringify({ code: "wx-code" }),
       }));
       const payload = await response.json();
@@ -127,8 +132,80 @@ describe("wechat auth edge function generators", () => {
       ]);
       for (const request of authRequests) {
         expect(request.headers.get("authorization")).toBe("Bearer test-service-role");
-        expect(request.headers.get("x-project-ref")).toBe("test-project");
+        expect(request.headers.get("x-project-ref")).toBe("request-project");
       }
+    } finally {
+      globalThis.fetch = originalFetch;
+      for (const name of envNames) {
+        const value = originalEnv[name];
+        if (value === undefined) delete Bun.env[name];
+        else Bun.env[name] = value;
+      }
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("mini program function falls back to the external auth URL when no project ref is available", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "supacloud-wechat-function-fallback-"));
+    const originalFetch = globalThis.fetch;
+    const envNames = [
+      "WECHAT_MINIPROGRAM_APP_ID",
+      "WECHAT_MINIPROGRAM_APP_SECRET",
+      "SUPACLOUD_INTERNAL_AUTH_URL",
+      "SUPABASE_URL",
+      "SUPABASE_SERVICE_ROLE_KEY",
+      "X_PROJECT_REF",
+      "SUPACLOUD_PROJECT_REF",
+      "SUPABASE_DB_URL",
+    ] as const;
+    const originalEnv = Object.fromEntries(envNames.map((name) => [name, Bun.env[name]]));
+    const authUrls: string[] = [];
+    const user = {
+      id: "22222222-2222-2222-2222-222222222222",
+      user_metadata: {},
+      app_metadata: {},
+    };
+
+    try {
+      Bun.env.WECHAT_MINIPROGRAM_APP_ID = "test-app-id";
+      Bun.env.WECHAT_MINIPROGRAM_APP_SECRET = "test-app-secret";
+      Bun.env.SUPACLOUD_INTERNAL_AUTH_URL = "http://auth.internal/auth/v1";
+      Bun.env.SUPABASE_URL = "https://project.example";
+      Bun.env.SUPABASE_SERVICE_ROLE_KEY = "test-service-role";
+      delete Bun.env.X_PROJECT_REF;
+      delete Bun.env.SUPACLOUD_PROJECT_REF;
+      delete Bun.env.SUPABASE_DB_URL;
+
+      globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+        const url = String(input);
+        if (url.startsWith("https://api.weixin.qq.com/sns/jscode2session")) {
+          return Response.json({ openid: "openid", session_key: "provider-token" });
+        }
+        authUrls.push(url);
+        const method = init?.method || "GET";
+        if (url.endsWith("/admin/users") && method === "POST") return Response.json(user, { status: 201 });
+        if (url.endsWith("/admin/generate_link")) return Response.json({ ...user, hashed_token: "hashed-token" });
+        if (url.endsWith("/verify")) {
+          return Response.json({ access_token: "access-token", refresh_token: "refresh-token", expires_in: 3600, user });
+        }
+        if (url.endsWith(`/admin/users/${user.id}`)) return Response.json(user);
+        return Response.json({ message: "unexpected request" }, { status: 500 });
+      }) as typeof fetch;
+
+      const entrypoint = join(directory, "index.ts");
+      await Bun.write(entrypoint, wechatAuthInternals.generateWeChatMiniProgramLoginFunction());
+      const moduleUrl = `${pathToFileURL(entrypoint).href}?test=${Date.now()}`;
+      const loginFunction = (await import(moduleUrl)).default as (request: Request) => Promise<Response>;
+      const response = await loginFunction(new Request("http://localhost/functions/v1/wechat-login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: "wx-code" }),
+      }));
+
+      expect(response.status).toBe(200);
+      expect(authUrls).toHaveLength(5);
+      expect(authUrls.every((url) => url.startsWith("https://project.example/auth/v1/"))).toBe(true);
+      expect(authUrls.some((url) => url.startsWith("http://auth.internal/"))).toBe(false);
     } finally {
       globalThis.fetch = originalFetch;
       for (const name of envNames) {

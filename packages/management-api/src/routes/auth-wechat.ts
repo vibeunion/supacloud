@@ -258,14 +258,31 @@ function runtimeEnv(name) {
   return typeof value === "string" ? value.trim() : ""
 }
 
-function resolveAuthUrl() {
-  const configured = runtimeEnv("SUPACLOUD_INTERNAL_AUTH_URL") || runtimeEnv("SUPABASE_URL")
-  if (!configured) throw new Error("Supabase URL is not configured")
-  const base = configured.replace(/\\/+$/, "")
+function normalizeAuthUrl(value) {
+  if (!value) return ""
+  const base = value.replace(/\\/+$/, "")
   return base.endsWith("/auth/v1") ? base : base + "/auth/v1"
 }
 
-function authHeaders() {
+function requestProjectRef(req) {
+  const requestRef = req?.headers?.get("x-project-ref") || ""
+  return requestRef.trim() || runtimeEnv("X_PROJECT_REF") || runtimeEnv("SUPACLOUD_PROJECT_REF")
+}
+
+function resolveAuthUrls(projectRef) {
+  const internalUrl = normalizeAuthUrl(runtimeEnv("SUPACLOUD_INTERNAL_AUTH_URL"))
+  const externalUrl = normalizeAuthUrl(runtimeEnv("SUPABASE_URL"))
+  const urls = []
+  // The shared internal auth gateway requires x-project-ref. If the runtime
+  // did not inject one, go directly to the tenant's external API URL.
+  if (internalUrl && projectRef) urls.push(internalUrl)
+  if (externalUrl && !urls.includes(externalUrl)) urls.push(externalUrl)
+  if (internalUrl && urls.length === 0) urls.push(internalUrl)
+  if (urls.length === 0) throw new Error("Supabase URL is not configured")
+  return urls
+}
+
+function authHeaders(projectRef) {
   const serviceRoleKey = runtimeEnv("SUPABASE_SERVICE_ROLE_KEY")
   if (!serviceRoleKey) throw new Error("Supabase service role key is not configured")
   const headers = {
@@ -273,36 +290,53 @@ function authHeaders() {
     "Authorization": "Bearer " + serviceRoleKey,
     "Accept": "application/json",
   }
-  const projectRef = runtimeEnv("X_PROJECT_REF") || runtimeEnv("SUPACLOUD_PROJECT_REF")
   if (projectRef) headers["x-project-ref"] = projectRef
   return headers
 }
 
-async function authRequest(path, options = {}) {
-  const headers = { ...authHeaders(), ...(options.headers || {}) }
+async function authRequest(req, path, options = {}) {
+  const projectRef = requestProjectRef(req)
+  const authUrls = resolveAuthUrls(projectRef)
+  const headers = { ...authHeaders(projectRef), ...(options.headers || {}) }
   if (options.body !== undefined) headers["Content-Type"] = "application/json"
-  const response = await fetch(resolveAuthUrl() + "/" + String(path).replace(/^\\/+/, ""), {
-    method: options.method || "POST",
-    headers,
-    body: options.body === undefined ? undefined : JSON.stringify(options.body),
-  })
-  const text = await response.text()
-  let payload = null
-  if (text.trim()) {
-    try { payload = JSON.parse(text) } catch { payload = text }
-  }
-  if (!response.ok) {
+  const requestPath = "/" + String(path).replace(/^\\/+/, "")
+  let lastError = null
+
+  for (let index = 0; index < authUrls.length; index++) {
+    let response
+    try {
+      response = await fetch(authUrls[index] + requestPath, {
+        method: options.method || "POST",
+        headers,
+        body: options.body === undefined ? undefined : JSON.stringify(options.body),
+      })
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error))
+      if (index + 1 < authUrls.length) continue
+      throw lastError
+    }
+
+    const text = await response.text()
+    let payload = null
+    if (text.trim()) {
+      try { payload = JSON.parse(text) } catch { payload = text }
+    }
+    if (response.ok) return payload
+
     const detail = payload && typeof payload === "object"
       ? payload.msg || payload.message || payload.error_description || payload.error || payload.code
       : payload
-    throw new Error("GoTrue request failed (" + response.status + "): " + (detail || response.statusText || "unknown error"))
+    lastError = new Error("GoTrue request failed (" + response.status + "): " + (detail || response.statusText || "unknown error"))
+    if (/missing tenant reference/i.test(String(detail || "")) && index + 1 < authUrls.length) continue
+    throw lastError
   }
-  return payload
+
+  throw lastError || new Error("GoTrue request failed")
 }
 
-async function createWechatSession(email, userMetadata, provider) {
+async function createWechatSession(req, email, userMetadata, provider) {
   try {
-    await authRequest("admin/users", { body: {
+    await authRequest(req, "admin/users", { body: {
       email,
       email_confirm: true,
       user_metadata: { ...userMetadata, provider },
@@ -314,14 +348,14 @@ async function createWechatSession(email, userMetadata, provider) {
     }
   }
 
-  const rawLinkData = await authRequest("admin/generate_link", {
+  const rawLinkData = await authRequest(req, "admin/generate_link", {
     body: { type: "magiclink", email },
   })
   const linkData = rawLinkData?.data?.properties ? rawLinkData.data : rawLinkData
   const hashedToken = linkData?.properties?.hashed_token || linkData?.hashed_token
   if (!hashedToken) throw new Error("Failed to generate magic link")
 
-  const rawSessionData = await authRequest("verify", {
+  const rawSessionData = await authRequest(req, "verify", {
     body: { type: "magiclink", token_hash: hashedToken, gotrue_meta_security: {} },
   })
   const sessionData = rawSessionData?.data?.session
@@ -333,7 +367,7 @@ async function createWechatSession(email, userMetadata, provider) {
   const user = sessionData?.user || null
   if (!session || !user?.id) throw new Error("Failed to verify GoTrue session")
 
-  await authRequest("admin/users/" + encodeURIComponent(user.id), { method: "PUT", body: {
+  await authRequest(req, "admin/users/" + encodeURIComponent(user.id), { method: "PUT", body: {
     user_metadata: { ...(user.user_metadata || {}), ...userMetadata, provider },
     app_metadata: { ...(user.app_metadata || {}), provider, providers: [provider] },
   }})
@@ -341,8 +375,8 @@ async function createWechatSession(email, userMetadata, provider) {
   return { session, user }
 }
 
-async function getAuthUser(userId) {
-  const payload = await authRequest("admin/users/" + encodeURIComponent(userId), { method: "GET" })
+async function getAuthUser(req, userId) {
+  const payload = await authRequest(req, "admin/users/" + encodeURIComponent(userId), { method: "GET" })
   return payload?.user || payload
 }
 `;
@@ -388,6 +422,7 @@ export default async function handler(req: Request) {
     const email = \`\${openid.toLowerCase()}@wechat.com\`
 
     const { session, user: sessionUser } = await createWechatSession(
+      req,
       email,
       { openid, unionid },
       "wechat_miniprogram",
@@ -412,7 +447,7 @@ export default async function handler(req: Request) {
     }
 
     // Refetch the user to bundle the completed identity payload within the first session
-    const finalUser = await getAuthUser(sessionUser.id)
+    const finalUser = await getAuthUser(req, sessionUser.id)
     const finalSession = { ...session, user: finalUser || sessionUser }
     const responseUser = finalSession.user ?? null
     // Embed native OAuth provider tokens to complete the session payload matching Official Supabase
@@ -480,6 +515,7 @@ export default async function handler(req: Request) {
     const email = \`\${openid.toLowerCase()}@wechat-mp.com\`
 
     const { session, user: sessionUser } = await createWechatSession(
+      req,
       email,
       { openid, unionid, nickname: userData.nickname, headimgurl: userData.headimgurl },
       "wechat_mp",
@@ -504,7 +540,7 @@ export default async function handler(req: Request) {
     }
 
     // Refetch the user to bundle the completed identity payload within the first session
-    const finalUser = await getAuthUser(sessionUser.id)
+    const finalUser = await getAuthUser(req, sessionUser.id)
     const finalSession = { ...session, user: finalUser || sessionUser }
     const responseUser = finalSession.user ?? null
     // Embed native OAuth provider tokens to complete the session payload matching Official Supabase
