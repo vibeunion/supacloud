@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,15 +11,34 @@ import {
     executeUpgradeTransaction,
     normalizeManagementReleaseTag,
     resolveArtifactVerificationMode,
-    resolveUpgradeEnvironment,
-    resolveGithubEndpointPrefixes,
     resolveEdgeRuntimeCapacityConfig,
-    restoreFileState,
+    resolveGithubEndpointPrefixes,
+    resolveUpgradeEnvironment,
     restoreCurrentBinary,
+    restoreFileState,
     selectManagementRelease,
+    upsertManagementWebConsoleDir,
     validateWebConsoleArchiveEntries,
     verifyArtifactChecksum,
+    waitForManagementHealth,
 } from "../../src/upgrade";
+
+const originalFetch = globalThis.fetch;
+
+const originalUpgradeHealthAttempts = process.env.SUPACLOUD_UPGRADE_HEALTH_ATTEMPTS;
+
+const ensureHealthTimeout = () => {
+  process.env.SUPACLOUD_UPGRADE_HEALTH_ATTEMPTS = "1";
+};
+
+afterEach(() => {
+  globalThis.fetch = originalFetch;
+  if (originalUpgradeHealthAttempts === undefined) {
+    delete process.env.SUPACLOUD_UPGRADE_HEALTH_ATTEMPTS;
+  } else {
+    process.env.SUPACLOUD_UPGRADE_HEALTH_ATTEMPTS = originalUpgradeHealthAttempts;
+  }
+});
 
 describe("upgrade release selection", () => {
   test("upgrade init-db ignores tracked legacy config unless explicitly opted in", async () => {
@@ -229,6 +248,60 @@ describe("upgrade release selection", () => {
       expect(existsSync(state.backupPath)).toBe(false);
     } finally {
       rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("post-upgrade health check validates web console root HTML", async () => {
+    const calls: string[] = [];
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      calls.push(String(input));
+      if (String(input).endsWith("/health")) {
+        return new Response("ok", { status: 200, headers: { "content-type": "application/json" } });
+      }
+      return new Response("<!DOCTYPE html><html><body>console</body></html>", {
+        status: 200,
+        headers: { "content-type": "text/html; charset=utf-8" },
+      });
+    }) as typeof fetch;
+
+    ensureHealthTimeout();
+    await expect(waitForManagementHealth()).resolves.toBeUndefined();
+    expect(calls).toEqual([
+      "http://127.0.0.1:9090/health",
+      "http://127.0.0.1:9090/",
+    ]);
+  });
+
+  test("post-upgrade health check fails when web console root is not HTML", async () => {
+    const calls: string[] = [];
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      calls.push(String(input));
+      if (String(input).endsWith("/health")) {
+        return new Response("ok", { status: 200, headers: { "content-type": "application/json" } });
+      }
+      return new Response("Asset Not Found.", {
+        status: 404,
+        headers: { "content-type": "text/plain" },
+      });
+    }) as typeof fetch;
+
+    ensureHealthTimeout();
+    await expect(waitForManagementHealth()).rejects.toThrow("web console root check");
+    expect(calls).toEqual([
+      "http://127.0.0.1:9090/health",
+      "http://127.0.0.1:9090/",
+    ]);
+  });
+
+  test("normalizes management env WEB_CONSOLE_DIR to runtime link", () => {
+    const envDir = mkdtempSync(join(tmpdir(), "supacloud-upgrade-web-console-env-"));
+    const managementEnv = join(envDir, "management-api.env");
+    try {
+      writeFileSync(managementEnv, "SUPACLOUD_LOG_LEVEL=debug\n");
+      upsertManagementWebConsoleDir(managementEnv);
+      expect(readFileSync(managementEnv, "utf8")).toContain("WEB_CONSOLE_DIR=/opt/supacloud/web-console/current\n");
+    } finally {
+      rmSync(envDir, { recursive: true, force: true });
     }
   });
 });

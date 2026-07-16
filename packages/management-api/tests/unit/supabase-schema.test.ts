@@ -91,6 +91,31 @@ describe("supabase bootstrap schema", () => {
     }
   });
 
+  test("normalizes the MFA AMR primary key name expected by GoTrue migrations", () => {
+    for (const filePath of [
+      "src/services/tenant-runtime-migration.ts",
+      "src/scripts/migrate-tenant-schema.ts",
+    ]) {
+      const source = readRepoFile(filePath);
+      const start = source.indexOf(
+        "-- auth.mfa_amr_claims: add id and factor_id columns",
+      );
+      const end = source.indexOf("-- auth.sessions:", start);
+      const migration = source.slice(start, end);
+
+      expect(start).toBeGreaterThanOrEqual(0);
+      expect(end).toBeGreaterThan(start);
+      expect(migration).toContain(
+        "ADD CONSTRAINT amr_id_pk PRIMARY KEY (id)",
+      );
+      expect(migration).toContain("RENAME CONSTRAINT %I TO amr_id_pk");
+      expect(migration).toContain("contype = 'p'");
+      expect(migration).not.toContain(
+        "ADD CONSTRAINT mfa_amr_claims_pkey PRIMARY KEY (id)",
+      );
+    }
+  });
+
   test("auth user delete fence mutates the row only when hard deletion is blocked", () => {
     for (const filePath of [
       "src/services/tenant-runtime-migration.ts",

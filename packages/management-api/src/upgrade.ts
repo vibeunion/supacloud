@@ -5,6 +5,7 @@ import path from "node:path";
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
 import { logger } from "./utils/logger";
+import { WEB_CONSOLE_CURRENT_DIR } from "./utils/web-console-path";
 
 const RELEASES_API = "https://api.github.com/repos/zuohuadong/supacloud/releases";
 const RELEASE_REPOSITORY = "zuohuadong/supacloud";
@@ -16,12 +17,13 @@ const DEFAULT_GITHUB_PROXY = "https://ghproxy.net/";
 const WEB_CONSOLE_ASSET = "web-console-build.tar.gz";
 const WEB_CONSOLE_ROOT = "/opt/supacloud/web-console";
 const WEB_CONSOLE_RELEASES_DIR = `${WEB_CONSOLE_ROOT}/releases`;
-const WEB_CONSOLE_CURRENT_LINK = `${WEB_CONSOLE_ROOT}/current`;
+const WEB_CONSOLE_CURRENT_LINK = WEB_CONSOLE_CURRENT_DIR;
 const DEFAULT_EDGE_RUNTIME_CAPACITY_DROPIN = "/etc/systemd/system/supacloud-edge-runtime.service.d/50-edge-runtime-capacity.conf";
 const DEFAULT_EDGE_WORKER_POOL_SIZE = 20;
 const DEFAULT_EDGE_BACKGROUND_WORKER_POOL_SIZE = 20;
 const DEFAULT_EDGE_RESOURCE_RATIO = 0.6;
 const DEFAULT_EDGE_TASKS_MAX = 256;
+const WEB_CONSOLE_DIR_ENV_KEY = "WEB_CONSOLE_DIR";
 
 type GithubEndpoint = {
     label: string;
@@ -643,6 +645,10 @@ function upsertEnvFileValue(filePath: string, key: string, value: string) {
     }
 }
 
+export function upsertManagementWebConsoleDir(managementEnvPath: string = managementEnvFile()) {
+    upsertEnvFileValue(managementEnvPath, WEB_CONSOLE_DIR_ENV_KEY, WEB_CONSOLE_CURRENT_LINK);
+}
+
 function managementEnvFile() {
     return process.env.SUPACLOUD_MANAGEMENT_ENV_FILE || DEFAULT_MANAGEMENT_ENV_FILE;
 }
@@ -693,20 +699,49 @@ async function restartServices() {
     await $`systemctl try-restart supacloud-edge-runtime`.nothrow().quiet();
 }
 
-async function waitForManagementHealth() {
+export async function waitForManagementHealth() {
     const attempts = positiveInteger(process.env.SUPACLOUD_UPGRADE_HEALTH_ATTEMPTS, 30);
+    let lastError: string | null = null;
     for (let attempt = 1; attempt <= attempts; attempt += 1) {
         try {
-            const response = await fetch("http://127.0.0.1:9090/health", {
+            const healthResponse = await fetch("http://127.0.0.1:9090/health", {
                 signal: AbortSignal.timeout(2_000),
             });
-            if (response.ok) return;
-        } catch {
+            if (!healthResponse.ok) {
+                lastError = `health endpoint returned HTTP ${healthResponse.status}`;
+                throw new Error(lastError);
+            }
+
+            const rootResponse = await fetch("http://127.0.0.1:9090/", {
+                signal: AbortSignal.timeout(2_000),
+            });
+            if (!rootResponse.ok) {
+                lastError = `web console root check failed: returned HTTP ${rootResponse.status}`;
+                throw new Error(lastError);
+            }
+
+            const contentType = rootResponse.headers.get("content-type")?.toLowerCase() ?? "";
+            if (!contentType.includes("text/html")) {
+                const body = (await rootResponse.text()).toLowerCase();
+                if (!body.includes("<!doctype html") && !body.includes("<html")) {
+                    lastError = "web console root check failed: response does not contain HTML";
+                    throw new Error(lastError);
+                }
+            }
+
+            return;
+        } catch (error: unknown) {
+            lastError = error instanceof Error ? error.message : String(error);
+            logger.debug("Management health check attempt failed", {
+                attempt,
+                lastError,
+            });
+
             // Service may still be starting; retry within the bounded window.
         }
         await Bun.sleep(1_000);
     }
-    throw new Error("SupaCloud failed the post-upgrade /health check");
+    throw new Error(`SupaCloud failed the post-upgrade health checks: ${lastError ?? "timeout"}`);
 }
 
 type UpgradeActivationState = {
@@ -838,6 +873,7 @@ export async function runUpgrade(options: { forceYes?: boolean; targetVersion?: 
                 activationState.edgeRuntimeDropInState = captureFileState(edgeRuntimeCapacityDropIn());
                 await ensureRuntimeModeForBinaryUpgrade();
                 await ensureEdgeRuntimeCapacityDropIn(env);
+                upsertManagementWebConsoleDir(managementEnvFile());
                 await restartServices();
             },
             healthCheck: async () => {

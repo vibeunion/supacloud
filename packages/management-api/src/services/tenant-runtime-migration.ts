@@ -209,15 +209,24 @@ DO $$ BEGIN ALTER TABLE auth.mfa_factors ADD COLUMN IF NOT EXISTS last_webauthn_
 
 -- auth.mfa_amr_claims: add id and factor_id columns (old schema only had session_id + authentication_method composite PK)
 DO $$
+DECLARE
+  primary_key_name TEXT;
 BEGIN
   ALTER TABLE auth.mfa_amr_claims ADD COLUMN IF NOT EXISTS id UUID DEFAULT gen_random_uuid();
   UPDATE auth.mfa_amr_claims SET id = gen_random_uuid() WHERE id IS NULL;
   ALTER TABLE auth.mfa_amr_claims ALTER COLUMN id SET NOT NULL;
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_constraint
-    WHERE conrelid = 'auth.mfa_amr_claims'::regclass AND contype = 'p'
-  ) THEN
-    ALTER TABLE auth.mfa_amr_claims ADD CONSTRAINT mfa_amr_claims_pkey PRIMARY KEY (id);
+  SELECT conname INTO primary_key_name
+  FROM pg_constraint
+  WHERE conrelid = 'auth.mfa_amr_claims'::regclass AND contype = 'p'
+  LIMIT 1;
+
+  IF primary_key_name IS NULL THEN
+    ALTER TABLE auth.mfa_amr_claims ADD CONSTRAINT amr_id_pk PRIMARY KEY (id);
+  ELSIF primary_key_name <> 'amr_id_pk' THEN
+    EXECUTE format(
+      'ALTER TABLE auth.mfa_amr_claims RENAME CONSTRAINT %I TO amr_id_pk',
+      primary_key_name
+    );
   END IF;
 END $$;
 

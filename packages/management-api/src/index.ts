@@ -28,25 +28,15 @@ import { resolveRealtimeTenantHost } from "./utils/sdk-parity";
 import { resolveProjectApiKey } from "./utils/project-auth";
 import { translateRealtimeProxyCredentials } from "./utils/realtime-proxy-auth";
 import { recordRequestPeerAddress } from "./utils/client-ip";
+import { resolveWebConsoleDir } from "./utils/web-console-path";
 import { grafanaProxyRoutes } from "./routes/grafana";
 import { closeTaskWebSocket, messageTaskWebSocket, openTaskWebSocket } from "./routes/ws";
 import { isS3DataPlaneRequest } from "./utils/storage-s3-paths";
 import { studioAuthRoutes } from "./routes/studio-auth";
 import { caddyAskRoutes } from "./routes/caddy-ask";
 
-const WEB_CONSOLE_CURRENT_DIR = "/opt/supacloud/web-console/current";
-const WEB_CONSOLE_LEGACY_DIR = "/opt/supacloud/packages/web-console/build";
-
 function getWebConsoleDir(): string {
-  if (process.env.WEB_CONSOLE_DIR) return process.env.WEB_CONSOLE_DIR;
-  try {
-    if (Bun.file(`${WEB_CONSOLE_CURRENT_DIR}/index.html`).size > 0) {
-      return WEB_CONSOLE_CURRENT_DIR;
-    }
-  } catch {
-    // Fall back to the legacy source-tree build path for pre-binary installs.
-  }
-  return WEB_CONSOLE_LEGACY_DIR;
+  return resolveWebConsoleDir();
 }
 
 const MIME_TYPES: Record<string, string> = {
@@ -977,6 +967,10 @@ async function bootstrap() {
       printProjectHelp,
     } = await import("./cli/project");
     const subCommand = args[1];
+    if (args.slice(2).some((arg) => arg === "--help" || arg === "-h")) {
+      printProjectHelp();
+      process.exit(0);
+    }
     switch (subCommand) {
       case "create":
         await handleProjectCreate(args.slice(2));
