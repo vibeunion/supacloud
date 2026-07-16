@@ -105,6 +105,7 @@ describe("GatewayService provider selection", () => {
         expect(DEFAULT_CORS_HEADERS).toContain("x-supacloud-async");
         expect(DEFAULT_CORS_HEADERS).toContain("x-supacloud-retries");
         expect(DEFAULT_CORS_HEADERS).toContain("x-supacloud-timeout");
+        expect(DEFAULT_CORS_HEADERS).toContain("Idempotency-Key");
         expect(DEFAULT_CORS_HEADERS).toContain("x-supacloud-idempotency-key");
         expect(DEFAULT_CORS_HEADERS).toContain("x-supacloud-function-version");
         expect(DEFAULT_CORS_HEADERS).toContain("x-supacloud-trace-id");
@@ -215,6 +216,7 @@ describe("CaddyGatewayProvider", () => {
         expect(preflight?.handle?.some((handler: any) => handler.handler === "static_response" && handler.status_code === 204)).toBe(true);
         expect(corsHeaders?.response?.set?.["Access-Control-Allow-Origin"]).toEqual(["{http.request.header.Origin}"]);
         expect(corsHeaders?.response?.set?.["Access-Control-Allow-Credentials"]).toEqual(["true"]);
+        expect(corsHeaders?.response?.set?.["Access-Control-Allow-Headers"]?.[0]).toContain("Idempotency-Key");
         expect(preflight?.match?.some((matcher: any) => matcher.header_regexp?.Origin?.pattern?.includes("localhost"))).toBe(true);
 
         restore();

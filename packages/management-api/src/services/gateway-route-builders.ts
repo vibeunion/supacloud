@@ -33,7 +33,7 @@ export const DEFAULT_CORS_HEADERS = [
     "Prefer", "Content-Profile", "accept-profile", "Range", "Range-Unit",
     "x-upsert", "Cache-Control", "x-retry-count", "x-metadata",
     "x-supacloud-async", "x-supacloud-timeout", "x-supacloud-retries",
-    "x-supacloud-idempotency-key", "x-supacloud-function-version",
+    "Idempotency-Key", "x-supacloud-idempotency-key", "x-supacloud-function-version",
     "x-supacloud-trace-id", "x-supacloud-correlation-id",
     "x-supacloud-business-task-id", "x-supacloud-task-metadata",
 ];
