@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.40.3](https://github.com/zuohuadong/supacloud/compare/management-api-v0.40.2...management-api-v0.40.3) (2026-07-16)
+
+
+### Bug Fixes
+
+* make generated WeChat functions self-contained ([#436](https://github.com/zuohuadong/supacloud/issues/436)) ([219a1df](https://github.com/zuohuadong/supacloud/commit/219a1df9aea1ae5238517f56e76e5d853a07221e))
+* **management-api:** allow standard idempotency header in CORS ([#435](https://github.com/zuohuadong/supacloud/issues/435)) ([a13614b](https://github.com/zuohuadong/supacloud/commit/a13614be173f1911a9e792eae4fa16c6fd3a9869))
+
 ## [0.40.2](https://github.com/zuohuadong/supacloud/compare/management-api-v0.40.1...management-api-v0.40.2) (2026-07-15)
 
 
