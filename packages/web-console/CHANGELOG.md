@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.19.0](https://github.com/zuohuadong/supacloud/compare/web-console-v0.18.2...web-console-v0.19.0) (2026-07-17)
+
+
+### Features
+
+* **auth:** enforce SupAuth shared runtime boundaries ([aca9d67](https://github.com/zuohuadong/supacloud/commit/aca9d6756a550d43b06b9c1c0b3ec9a3e1cdd324))
+* **auth:** enforce SupAuth shared runtime boundaries ([285a9f5](https://github.com/zuohuadong/supacloud/commit/285a9f5053125e8ad774c12824c829863b450dc4))
+
 ## [0.18.2](https://github.com/zuohuadong/supacloud/compare/web-console-v0.18.1...web-console-v0.18.2) (2026-07-17)
 
 

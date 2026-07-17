@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.19.4](https://github.com/zuohuadong/supacloud/compare/supacloud-js-v0.19.3...supacloud-js-v0.19.4) (2026-07-17)
+
+
+### Bug Fixes
+
+* **supacloud-js:** support SupAuth OAuth refresh ([#474](https://github.com/zuohuadong/supacloud/issues/474)) ([15dc978](https://github.com/zuohuadong/supacloud/commit/15dc97824bdbde845b1f9a000858cebe7446fec9))
+
 ## [0.19.3](https://github.com/zuohuadong/supacloud/compare/supacloud-js-v0.19.2...supacloud-js-v0.19.3) (2026-07-17)
 
 

@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.12.0](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.11.1...edge-runtime-v0.12.0) (2026-07-17)
+
+
+### Features
+
+* **auth:** enforce SupAuth shared runtime boundaries ([aca9d67](https://github.com/zuohuadong/supacloud/commit/aca9d6756a550d43b06b9c1c0b3ec9a3e1cdd324))
+* **auth:** enforce SupAuth shared runtime boundaries ([285a9f5](https://github.com/zuohuadong/supacloud/commit/285a9f5053125e8ad774c12824c829863b450dc4))
+
 ## [0.11.1](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.11.0...edge-runtime-v0.11.1) (2026-07-17)
 
 
