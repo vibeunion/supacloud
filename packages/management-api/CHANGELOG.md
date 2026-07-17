@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.41.4](https://github.com/zuohuadong/supacloud/compare/management-api-v0.41.3...management-api-v0.41.4) (2026-07-17)
+
+
+### Bug Fixes
+
+* **gateway:** reconcile managed route drift ([ddaf522](https://github.com/zuohuadong/supacloud/commit/ddaf5229f3a65bbf0127eb344539b1347f617f8c))
+
+## [0.41.3](https://github.com/zuohuadong/supacloud/compare/management-api-v0.41.2...management-api-v0.41.3) (2026-07-17)
+
+
+### Miscellaneous Chores
+
+* **deps-dev:** bump @supabase/supabase-js in /packages/management-api ([d1693bf](https://github.com/zuohuadong/supacloud/commit/d1693bf96eba309eb8aba718163ec745e2bfcd5c))
+* **deps:** bump @sinclair/typebox in /packages/management-api ([a97b9d4](https://github.com/zuohuadong/supacloud/commit/a97b9d4e57912148e313e5d71f291c3ab590d0f8))
+* **deps:** bump nanoid from 5.1.16 to 6.0.0 in /packages/management-api ([9a03ac7](https://github.com/zuohuadong/supacloud/commit/9a03ac780cf6a1b8d7a042d0bcfc9c6275ecbdd3))
+* **deps:** bump nanoid in /packages/management-api ([78f88aa](https://github.com/zuohuadong/supacloud/commit/78f88aaf182e8c4ddf18a75aa0856d13cb35d04c))
+
+## [0.41.2](https://github.com/zuohuadong/supacloud/compare/management-api-v0.41.1...management-api-v0.41.2) (2026-07-17)
+
+
+### Bug Fixes
+
+* **gateway:** allow tus preflight headers ([fbeac27](https://github.com/zuohuadong/supacloud/commit/fbeac27094e1f965eef2a72cfd0a9f7b59a0ffce))
+* **gateway:** preserve TUS CORS and capabilities ([60e48c4](https://github.com/zuohuadong/supacloud/commit/60e48c4da58d878103a0fce1b7cbccc2d0343e0a))
+* **storage:** expose TUS capability headers ([bbffc44](https://github.com/zuohuadong/supacloud/commit/bbffc44c85effaa7006ed12d708e0a5379fc6a81))
+* **storage:** preserve TUS capability responses ([0339ed6](https://github.com/zuohuadong/supacloud/commit/0339ed63091a7ca19f2f8f51a38f9301ea13d002))
+
 ## [0.41.1](https://github.com/zuohuadong/supacloud/compare/management-api-v0.41.0...management-api-v0.41.1) (2026-07-17)
 
 

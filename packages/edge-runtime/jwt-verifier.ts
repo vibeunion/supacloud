@@ -1,4 +1,18 @@
-import { createLocalJWKSet, jwtVerify, type JWK } from "jose";
+import { createLocalJWKSet, jwtVerify, type JWK, type JWTPayload } from "jose";
+
+export const VERIFIED_JWT_SUB_HEADER = "x-supacloud-jwt-sub";
+
+export type EdgeRuntimeJwtVerificationResult =
+  | { verified: false; source: "none" }
+  | {
+    verified: true;
+    source: "anon_key" | "service_role_key";
+  }
+  | {
+    verified: true;
+    source: "jwt";
+    payload: JWTPayload;
+  };
 
 export type EdgeRuntimeProjectSecrets = {
   anonKey?: string;
@@ -88,32 +102,41 @@ function isExternalKey(key: JWK, policy: EdgeRuntimeThirdPartyJwtPolicy | null):
     external.kid === key.kid && external.alg === key.alg));
 }
 
-export async function verifyEdgeRuntimeJwt(
+export async function verifyEdgeRuntimeJwtContext(
   secrets: EdgeRuntimeProjectSecrets,
   authHeader: string | null | undefined,
   apikeyHeader?: string | null,
-): Promise<boolean> {
+): Promise<EdgeRuntimeJwtVerificationResult> {
   const anonKey = secrets.anonKey || "";
   const serviceRoleKey = secrets.serviceRoleKey || "";
 
   if (!authHeader) {
-    return Boolean(
-      apikeyHeader &&
-      (apikeyHeader === anonKey || apikeyHeader === serviceRoleKey),
-    );
+    if (apikeyHeader && apikeyHeader === anonKey) {
+      return { verified: true, source: "anon_key" };
+    }
+    if (apikeyHeader && apikeyHeader === serviceRoleKey) {
+      return { verified: true, source: "service_role_key" };
+    }
+    return { verified: false, source: "none" };
   }
-  const token = authHeader.replace(/^Bearer\s+/i, "");
-  if (!token) return false;
+
+  const token = authHeader.replace(/^Bearer\s+/i, "").trim();
+  if (!token) return { verified: false, source: "none" };
 
   if (token === anonKey || token === serviceRoleKey) {
-    return true;
+    return {
+      verified: true,
+      source: token === anonKey ? "anon_key" : "service_role_key",
+    };
   }
 
   const parts = token.split(".");
-  if (parts.length !== 3) return false;
+  if (parts.length !== 3) return { verified: false, source: "none" };
   const header = decodeJwtPart(parts[0]);
   const payload = decodeJwtPart(parts[1]);
-  if (!header || !payload || typeof header.alg !== "string") return false;
+  if (!header || !payload || typeof header.alg !== "string") {
+    return { verified: false, source: "none" };
+  }
 
   if (secrets.thirdParty && isThirdPartyCandidate(header, payload, secrets.thirdParty)) {
     try {
@@ -122,10 +145,15 @@ export async function verifyEdgeRuntimeJwt(
         issuer: secrets.thirdParty.issuer,
         audience: secrets.thirdParty.audience,
       });
-      return verified.payload.client_id === secrets.thirdParty.clientId
-        && verified.payload.role === "authenticated";
+      if (
+        verified.payload.client_id === secrets.thirdParty.clientId &&
+        verified.payload.role === "authenticated"
+      ) {
+        return { verified: true, source: "jwt", payload: verified.payload };
+      }
+      return { verified: false, source: "none" };
     } catch {
-      return false;
+      return { verified: false, source: "none" };
     }
   }
 
@@ -133,24 +161,57 @@ export async function verifyEdgeRuntimeJwt(
     try {
       const localKeys = secrets.jwtJwks.keys.filter((key) => !isExternalKey(key, secrets.thirdParty ?? null));
       if (localKeys.length > 0) {
-        await jwtVerify(token, createLocalJWKSet({ keys: localKeys }), {
+        const verified = await jwtVerify(token, createLocalJWKSet({ keys: localKeys }), {
           algorithms: ["ES256", "RS256"],
         });
-        return true;
+        return { verified: true, source: "jwt", payload: verified.payload };
       }
     } catch {
       // Fall through to legacy HS256 verification for old tokens without kid.
     }
   }
 
-  if (!secrets.jwtSecret) return false;
-  if (header.alg !== "HS256" || (header.kid !== undefined && header.kid !== "legacy-hs256")) return false;
+  if (!secrets.jwtSecret) return { verified: false, source: "none" };
+  if (header.alg !== "HS256" || (header.kid !== undefined && header.kid !== "legacy-hs256")) {
+    return { verified: false, source: "none" };
+  }
   try {
-    await jwtVerify(token, new TextEncoder().encode(secrets.jwtSecret), {
+    const verified = await jwtVerify(token, new TextEncoder().encode(secrets.jwtSecret), {
       algorithms: ["HS256"],
     });
-    return true;
+    return { verified: true, source: "jwt", payload: verified.payload };
   } catch {
-    return false;
+    return { verified: false, source: "none" };
   }
+}
+
+export async function verifyEdgeRuntimeJwt(
+  secrets: EdgeRuntimeProjectSecrets,
+  authHeader: string | null | undefined,
+  apikeyHeader?: string | null,
+): Promise<boolean> {
+  return (await verifyEdgeRuntimeJwtContext(
+    secrets,
+    authHeader,
+    apikeyHeader,
+  )).verified;
+}
+
+/**
+ * Only the Edge Runtime may set this header. Incoming values are always removed,
+ * then replaced with the subject from the JWT payload verified by the gateway.
+ */
+export function withVerifiedJwtContext(
+  request: Request,
+  payload?: Pick<JWTPayload, "sub">,
+): Request {
+  const headers = new Headers(request.headers);
+  headers.delete(VERIFIED_JWT_SUB_HEADER);
+
+  const subject = typeof payload?.sub === "string" ? payload.sub.trim() : "";
+  if (subject) {
+    headers.set(VERIFIED_JWT_SUB_HEADER, subject);
+  }
+
+  return new Request(request, { headers });
 }

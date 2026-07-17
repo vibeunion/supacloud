@@ -106,6 +106,10 @@ describe("GatewayService provider selection", () => {
         expect(DEFAULT_CORS_HEADERS).toContain("x-supacloud-async");
         expect(DEFAULT_CORS_HEADERS).toContain("x-supacloud-retries");
         expect(DEFAULT_CORS_HEADERS).toContain("x-supacloud-timeout");
+        expect(DEFAULT_CORS_HEADERS).toContain("tus-resumable");
+        expect(DEFAULT_CORS_HEADERS).toContain("upload-length");
+        expect(DEFAULT_CORS_HEADERS).toContain("upload-offset");
+        expect(DEFAULT_CORS_HEADERS).toContain("upload-metadata");
         expect(DEFAULT_CORS_HEADERS).toContain("Idempotency-Key");
         expect(DEFAULT_CORS_HEADERS).toContain("x-supacloud-idempotency-key");
         expect(DEFAULT_CORS_HEADERS).toContain("x-supacloud-function-version");
@@ -199,6 +203,7 @@ describe("CaddyGatewayProvider", () => {
         const rest = routes.find((route: any) => route["@id"] === "route-project-testref123-rest");
         const opaqueRest = routes.find((route: any) => route["@id"] === "route-project-testref123-opaque-rest");
         const storage = routes.find((route: any) => route["@id"] === "route-project-testref123-storage");
+        const storageResumable = routes.find((route: any) => route["@id"] === "route-project-testref123-storage-resumable");
         const functions = routes.find((route: any) => route["@id"] === "route-project-testref123-functions");
         const realtime = routes.find((route: any) => route["@id"] === "route-project-testref123-realtime");
         const management = routes.find((route: any) => route["@id"] === "route-project-testref123-management");
@@ -230,6 +235,8 @@ describe("CaddyGatewayProvider", () => {
         expect(routes.find((route: any) => route["@id"] === "route-project-testref123-graphql")
             ?.handle?.some((handler: any) => handler.uri === "/rpc/graphql")).toBe(true);
         expect(storage?.match?.[0]?.path).toEqual(["/storage/v1*"]);
+        expect(findCorsSubroute(storage)).toBeUndefined();
+        expect(findCorsSubroute(storageResumable)).toBeUndefined();
         const storageProxy = storage?.handle?.find((h: any) => h.handler === "reverse_proxy");
         expect(storageProxy?.flush_interval).toBeUndefined();
         const restProxy = rest?.handle?.find((h: any) => h.handler === "reverse_proxy");
@@ -250,6 +257,8 @@ describe("CaddyGatewayProvider", () => {
         expect(corsHeaders?.response?.set?.["Access-Control-Allow-Origin"]).toEqual(["{http.request.header.Origin}"]);
         expect(corsHeaders?.response?.set?.["Access-Control-Allow-Credentials"]).toEqual(["true"]);
         expect(corsHeaders?.response?.set?.["Access-Control-Allow-Headers"]?.[0]).toContain("Idempotency-Key");
+        expect(corsHeaders?.response?.set?.["Access-Control-Allow-Headers"]?.[0]).toContain("tus-resumable");
+        expect(corsHeaders?.response?.set?.["Access-Control-Allow-Headers"]?.[0]).toContain("upload-metadata");
         expect(preflight?.match?.some((matcher: any) => matcher.header_regexp?.Origin?.pattern?.includes("localhost"))).toBe(true);
 
         restore();
@@ -1361,6 +1370,8 @@ describe("CaddyGatewayProvider route headers", () => {
         const resumableProxy = resumable?.handle?.find((h: any) => h.handler === "reverse_proxy");
         expect(storage?.handle?.some((h: any) => h.strip_path_prefix === "/storage/v1")).toBe(false);
         expect(resumable?.handle?.some((h: any) => h.strip_path_prefix === "/storage/v1")).toBe(false);
+        expect(findCorsSubroute(storage)).toBeUndefined();
+        expect(findCorsSubroute(resumable)).toBeUndefined();
         // Storage route should preserve upstream CORS without rendering an empty
         // response header block, which can break Caddy proxy responses.
         expect(storageProxy?.headers?.response).toBeUndefined();
@@ -1692,12 +1703,36 @@ describe("gateway-health worker", () => {
         const { runGatewayHealthCheck, resetGatewayHealthState } = await import("../../src/workers/gateway-health.worker");
         resetGatewayHealthState();
 
-        // 初始状态：未观测过可达 -> 首次探测可达应标记已就绪，但不触发重建
+        // 初始状态：未观测过可达 -> 首次探测可达会执行恢复重建。
         await runGatewayHealthCheck({ rebuildAll: async () => ({ success: true, updated: 0, errors: [] }) });
-        // 第二次：仍然可达，状态无变化，不应触发重建
+        // 第二次：仍然可达且未达到周期阈值，不应重复重建。
         const rebuilt = await runGatewayHealthCheck({ rebuildAll: async () => ({ success: true, updated: 0, errors: [] }) });
 
         expect(rebuilt).toBe(false);
+
+        restore();
+    });
+
+    test("periodically rebuilds managed routes while Caddy stays reachable", async () => {
+        const originalFetch = globalThis.fetch;
+        globalThis.fetch = mock(() => Promise.resolve(new Response("{}", { status: 200 }))) as unknown as typeof fetch;
+        const restore = () => { globalThis.fetch = originalFetch; };
+        const { runGatewayHealthCheck, resetGatewayHealthState } = await import("../../src/workers/gateway-health.worker");
+        resetGatewayHealthState();
+
+        let now = 1_000;
+        let rebuildCount = 0;
+        const rebuildAll = async () => {
+            rebuildCount += 1;
+            return { success: true, updated: 1, errors: [] };
+        };
+
+        await runGatewayHealthCheck({ rebuildAll, now: () => now, reconcileIntervalMs: 5_000 });
+        now += 4_999;
+        expect(await runGatewayHealthCheck({ rebuildAll, now: () => now, reconcileIntervalMs: 5_000 })).toBe(false);
+        now += 1;
+        expect(await runGatewayHealthCheck({ rebuildAll, now: () => now, reconcileIntervalMs: 5_000 })).toBe(true);
+        expect(rebuildCount).toBe(2);
 
         restore();
     });

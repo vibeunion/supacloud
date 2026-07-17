@@ -262,7 +262,8 @@ const STORAGE_CORS_EXPOSE_HEADERS = [
     "x-supabase-api-version", "X-Client-Info", "Prefer",
     "Content-Profile", "accept-profile", "Range", "Range-Unit",
     "X-Relay-Error", "link", "x-total-count",
-    "Tus-Resumable", "Upload-Offset", "Upload-Length", "Location",
+    "Tus-Resumable", "Tus-Version", "Tus-Extension", "Tus-Max-Size",
+    "Upload-Offset", "Upload-Length", "Location",
 ].join(", ");
 
 export const storageCompatRoutes = new Elysia({ prefix: "" })

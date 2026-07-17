@@ -1,4 +1,5 @@
 import { withBackgroundInternalToken } from "./tenant-env";
+import { VERIFIED_JWT_SUB_HEADER } from "./jwt-verifier";
 
 export interface BackgroundForwardDispatch {
   forwardedRequest: Request;
@@ -22,6 +23,7 @@ export function buildBackgroundForwardedRequest(
   headers.delete("x-supacloud-internal-token");
   headers.delete("x-supacloud-auth-authorization");
   headers.delete("x-supacloud-auth-apikey");
+  headers.delete(VERIFIED_JWT_SUB_HEADER);
 
   if (backgroundInternalToken) {
     headers.set("x-supacloud-internal-auth", `Bearer ${backgroundInternalToken}`);

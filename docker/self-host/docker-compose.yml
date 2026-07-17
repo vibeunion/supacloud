@@ -31,7 +31,7 @@ services:
       retries: 10
 
   gotrue:
-    image: supabase/gotrue:v2.192.0
+    image: supabase/gotrue:v2.193.0
     restart: unless-stopped
     depends_on:
       postgres:
@@ -52,7 +52,7 @@ services:
       GOTRUE_SECURITY_UPDATE_PASSWORD_REQUIRE_REAUTHENTICATION: "true"
 
   postgrest:
-    image: postgrest/postgrest:v14.14
+    image: postgrest/postgrest:v14.15
     restart: unless-stopped
     depends_on:
       postgres:

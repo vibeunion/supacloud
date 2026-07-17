@@ -10,7 +10,9 @@ import {
 import {
   normalizeJwtJwks,
   normalizeThirdPartyJwtPolicy,
-  verifyEdgeRuntimeJwt,
+  verifyEdgeRuntimeJwtContext,
+  withVerifiedJwtContext,
+  type EdgeRuntimeJwtVerificationResult,
 } from "./jwt-verifier";
 import {
   buildBackgroundForwardDispatch,
@@ -585,15 +587,19 @@ async function verifyJwt(
   projectRef: string,
   authHeader: string | null | undefined,
   apikeyHeader?: string | null,
-): Promise<boolean> {
+): Promise<EdgeRuntimeJwtVerificationResult> {
   const secrets = await getProjectSecrets(projectRef);
-  if (!secrets) return false;
+  if (!secrets) return { verified: false, source: "none" };
 
-  const verified = await verifyEdgeRuntimeJwt(secrets, authHeader, apikeyHeader);
-  if (!verified) {
+  const result = await verifyEdgeRuntimeJwtContext(
+    secrets,
+    authHeader,
+    apikeyHeader,
+  );
+  if (!result.verified) {
     console.warn(`[verifyJwt] JWT verification failed for ${projectRef}`);
   }
-  return verified;
+  return result;
 }
 
 async function handleFunctionRequest(
@@ -618,13 +624,14 @@ async function handleFunctionRequest(
 
   const projectRoot = await resolveProjectRoot(projectRef);
   const fnConfig = await getFunctionConfig(projectRef, functionName, projectRoot);
+  let functionRequest = withVerifiedJwtContext(c.request);
   if (c.request.method !== "OPTIONS" && fnConfig.verify_jwt) {
-    const authorized = await verifyJwt(
+    const verification = await verifyJwt(
       projectRef,
       authHeader,
       apikeyHeader,
     );
-    if (!authorized) {
+    if (!verification.verified) {
       const rateLimitResponse = await recordAuthFailure(projectRef, functionName, authHeader, apikeyHeader);
       if (rateLimitResponse) return rateLimitResponse;
       return new Response(JSON.stringify({ msg: "Invalid JWT" }), {
@@ -635,13 +642,17 @@ async function handleFunctionRequest(
         },
       });
     }
+    functionRequest = withVerifiedJwtContext(
+      c.request,
+      verification.source === "jwt" ? verification.payload : undefined,
+    );
   }
 
   c.set.headers["x-sb-execution-id"] = crypto.randomUUID();
   const response = await dispatchFunction(
     projectRef,
     functionName,
-    c.request,
+    functionRequest,
     c.set.headers as Record<string, string>,
   );
 

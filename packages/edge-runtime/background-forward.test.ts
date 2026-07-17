@@ -16,6 +16,7 @@ describe("background forwarded request", () => {
         "x-supacloud-internal-token": "legacy-management-master-token",
         "x-supacloud-auth-authorization": "Bearer user-token",
         "x-supacloud-auth-apikey": "anon-key",
+        "x-supacloud-jwt-sub": "attacker-controlled",
       },
       body: JSON.stringify({ ok: true }),
     });
@@ -28,6 +29,7 @@ describe("background forwarded request", () => {
     expect(forwarded.headers.get("apikey")).toBe("anon-key");
     expect(forwarded.headers.get("x-supacloud-auth-authorization")).toBeNull();
     expect(forwarded.headers.get("x-supacloud-auth-apikey")).toBeNull();
+    expect(forwarded.headers.get("x-supacloud-jwt-sub")).toBeNull();
     expect(await forwarded.text()).toBe(JSON.stringify({ ok: true }));
   });
 

@@ -22,7 +22,7 @@ SupaCloud 的 HTTP 网关基于 **Caddy**，但生产环境从不手改 Caddyfil
 **冷启动就绪（`ensureGatewayReady`）**：docker 模式下 caddy 容器晚于 management-api 启动，Management API 在 `Bun.serve` 监听 `:9090` 之前构建网关内存态路由（首次 `POST /load` 因此可能失败），HTTP server 就绪后异步触发 `ensureGatewayReady`：带退避轮询 Admin API，可达后补一次 `persistAndLoad` 让 JSON 路由接管 bootstrap Caddyfile。退避参数可由环境变量 `GATEWAY_READY_MAX_ATTEMPTS`（默认 60）和 `GATEWAY_READY_INTERVAL_MS`（默认 1000ms）调整。在那之前，caddy 的 bootstrap Caddyfile 对所有请求返回 `503`，作为明确的安全网信号而非"假路由"。
 
 
-**稳态自愈（`gateway-health.worker`）**：除了冷启动注入，Management API 还运行一个周期健康 worker（默认每 60s，`GATEWAY_HEALTH_CHECK_INTERVAL_MS` 可配，首探延迟 `GATEWAY_HEALTH_CHECK_INITIAL_DELAY_MS` 默认 30s）。它轮询 Caddy Admin API 可达性，一旦检测到"从不可达恢复可达"（systemd 下 caddy 重启、docker 下 caddy 容器重启的信号），即调用 `rebuildAllTenantConfigs()` 从 DB 全量重建所有 active 租户路由并 `persistAndLoad`，确保 caddy 加载的最新 config.json 与 management-api 内存态一致。这样 systemd 模式下 caddy 重启不再仅依赖磁盘快照，docker 模式也有持续自愈。worker 在 management-api 启动时自动注册、关闭时优雅停止。
+**稳态自愈（`gateway-health.worker`）**：除了冷启动注入，Management API 还运行一个周期健康 worker（默认每 60s，`GATEWAY_HEALTH_CHECK_INTERVAL_MS` 可配，首探延迟 `GATEWAY_HEALTH_CHECK_INITIAL_DELAY_MS` 默认 30s）。它轮询 Caddy Admin API 可达性，一旦检测到"从不可达恢复可达"（systemd 下 caddy 重启、docker 下 caddy 容器重启的信号），即调用 `rebuildAllTenantConfigs()` 从 DB 全量重建所有 active 租户路由并 `persistAndLoad`。Caddy 持续可达时，worker 也会默认每 5 分钟重新应用一次受管路由（`GATEWAY_ROUTE_RECONCILE_INTERVAL_MS` 可配），自动修复进程外修改或启动钩子造成的 upstream、请求头与路由顺序漂移。这样 systemd 模式下 caddy 重启不再仅依赖磁盘快照，docker 模式与持续运行实例也有稳态自愈。worker 在 management-api 启动时自动注册、关闭时优雅停止。
 
 因此自定义路由的最终形态是一份 Caddy JSON route，而不是 Caddyfile 片段。下表里每个字段都会在 JSON 里对应到 Caddy 的 `match` / `handle` 结构。
 

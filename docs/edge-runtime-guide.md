@@ -124,6 +124,49 @@ const { data, error } = await supabase.functions.invoke('my-function', {
 });
 ```
 
+### Verified JWT Context
+
+When a request enters the public `/functions/v1/*` path for a function with
+`verify_jwt: true`, the Edge Runtime verifies the bearer JWT before dispatch and
+exposes its verified subject through
+`x-supacloud-jwt-sub`. Any client-supplied value for this header is removed and
+replaced by the runtime, so functions may use it as the authenticated user ID
+without calling GoTrue `getUser()` again.
+
+The original `Authorization` header is preserved. Use that user JWT with a
+user-scoped Supabase client so PostgREST applies RLS when loading the local
+membership/profile record:
+
+```typescript
+const authorization = req.headers.get("authorization");
+const userId = req.headers.get("x-supacloud-jwt-sub");
+
+if (!authorization || !userId) {
+  return new Response("Unauthorized", { status: 401 });
+}
+
+const userClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  global: { headers: { Authorization: authorization } },
+  auth: { autoRefreshToken: false, persistSession: false },
+});
+
+const { data: membership, error } = await userClient
+  .from("profiles")
+  .select("id, username, role")
+  .eq("id", userId)
+  .maybeSingle();
+```
+
+API-key-only requests and raw anon/service-role key bypasses do not receive a
+verified subject header. Authorization roles should come from the RLS-protected
+membership lookup, not from an unverified client header.
+
+Background dispatch also strips client-supplied values for this header. It does
+not currently inject a subject because queued execution may outlive the original
+JWT validity window; background jobs should persist an already-authorized user
+identifier in their trusted task payload instead of treating request headers as
+durable identity.
+
 Background invocation uses the same API surface. SupaCloud supports two activation modes:
 
 - server-side per-function `background_routes`

@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.11.0](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.10.3...edge-runtime-v0.11.0) (2026-07-17)
+
+
+### Features
+
+* **edge-runtime:** expose verified JWT subject ([0ba132b](https://github.com/zuohuadong/supacloud/commit/0ba132b99b057a1e682a3a551188cfc45dc25dcb))
+* **edge-runtime:** expose verified JWT subject ([a8ed1ec](https://github.com/zuohuadong/supacloud/commit/a8ed1ecdb10def651f632f6d38a917e7b565fc61))
+
+## [0.10.3](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.10.2...edge-runtime-v0.10.3) (2026-07-17)
+
+
+### Miscellaneous Chores
+
+* **deps:** bump @sinclair/typebox in /packages/edge-runtime ([97abb11](https://github.com/zuohuadong/supacloud/commit/97abb113ea083ec02c89afb71e2fb797577f36b9))
+* **deps:** bump @supabase/supabase-js in /packages/edge-runtime ([fe46650](https://github.com/zuohuadong/supacloud/commit/fe46650b83f05a074abbf8f1c6ff395ac8715e0b))
+
 ## [0.10.2](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.10.1...edge-runtime-v0.10.2) (2026-07-15)
 
 
