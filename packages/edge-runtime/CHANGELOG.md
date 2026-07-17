@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.1](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.12.0...edge-runtime-v0.12.1) (2026-07-17)
+
+
+### Bug Fixes
+
+* **auth:** close SupAuth shared runtime boundary gaps ([#477](https://github.com/zuohuadong/supacloud/issues/477)) ([14d1d64](https://github.com/zuohuadong/supacloud/commit/14d1d64b1ae05fd9c9c8390d318d9d3a97c6ced6))
+
 ## [0.12.0](https://github.com/zuohuadong/supacloud/compare/edge-runtime-v0.11.1...edge-runtime-v0.12.0) (2026-07-17)
 
 
