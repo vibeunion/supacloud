@@ -106,6 +106,10 @@ describe("GatewayService provider selection", () => {
         expect(DEFAULT_CORS_HEADERS).toContain("x-supacloud-async");
         expect(DEFAULT_CORS_HEADERS).toContain("x-supacloud-retries");
         expect(DEFAULT_CORS_HEADERS).toContain("x-supacloud-timeout");
+        expect(DEFAULT_CORS_HEADERS).toContain("tus-resumable");
+        expect(DEFAULT_CORS_HEADERS).toContain("upload-length");
+        expect(DEFAULT_CORS_HEADERS).toContain("upload-offset");
+        expect(DEFAULT_CORS_HEADERS).toContain("upload-metadata");
         expect(DEFAULT_CORS_HEADERS).toContain("Idempotency-Key");
         expect(DEFAULT_CORS_HEADERS).toContain("x-supacloud-idempotency-key");
         expect(DEFAULT_CORS_HEADERS).toContain("x-supacloud-function-version");
@@ -250,6 +254,8 @@ describe("CaddyGatewayProvider", () => {
         expect(corsHeaders?.response?.set?.["Access-Control-Allow-Origin"]).toEqual(["{http.request.header.Origin}"]);
         expect(corsHeaders?.response?.set?.["Access-Control-Allow-Credentials"]).toEqual(["true"]);
         expect(corsHeaders?.response?.set?.["Access-Control-Allow-Headers"]?.[0]).toContain("Idempotency-Key");
+        expect(corsHeaders?.response?.set?.["Access-Control-Allow-Headers"]?.[0]).toContain("tus-resumable");
+        expect(corsHeaders?.response?.set?.["Access-Control-Allow-Headers"]?.[0]).toContain("upload-metadata");
         expect(preflight?.match?.some((matcher: any) => matcher.header_regexp?.Origin?.pattern?.includes("localhost"))).toBe(true);
 
         restore();
