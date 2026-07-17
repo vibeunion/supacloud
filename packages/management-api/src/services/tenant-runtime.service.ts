@@ -9,7 +9,11 @@ import { OAUTH_ENV_MAPPINGS } from "../types/oauth";
 import { tenantOAuthService } from "./tenant-oauth.service";
 import { resolveProjectApiUrl, resolveProjectAuthUrl, resolveProjectStudioUrl } from "../utils/project-routing";
 import { normalizeOAuthServerConfig, normalizeProjectConfig } from "../utils/project-config";
-import { normalizeProjectJwtJwks, normalizeProjectJwtKeys } from "../utils/project-jwt";
+import {
+    normalizeProjectJwtKeys,
+    resolveProjectJwtVerificationMaterial,
+    type ThirdPartyJwtPolicy,
+} from "../utils/project-jwt";
 import { uniqueStrings } from "../utils/strings";
 import { ALTER_TENANT_SQL } from "./tenant-runtime-migration";
 import {
@@ -46,6 +50,11 @@ export interface RuntimeStatus {
 }
 
 export type RuntimeDesiredState = "running" | "stopped";
+
+function quoteSqlLiteral(value: string): string {
+    assertSafeConfigValue("PostgreSQL literal", value);
+    return `'${value.replace(/'/g, "''")}'`;
+}
 
 export interface PostgrestRuntimeStatus {
     component: "postgrest";
@@ -474,12 +483,18 @@ class TenantRuntimeService {
         const authConfig = (projectConfig.auth as Record<string, unknown>) || {};
         const oauthServerConfig = normalizeOAuthServerConfig(authConfig.oauth_server);
         const jwtKeys = stringifyJsonConfig(normalizeProjectJwtKeys(oauthServerConfig.jwt_keys));
-        const jwtJwks = stringifyJsonConfig(normalizeProjectJwtJwks(oauthServerConfig.jwt_jwks));
+        const jwtMaterial = resolveProjectJwtVerificationMaterial(projectConfig, project.jwt_secret);
+        const jwtJwks = stringifyJsonConfig(jwtMaterial.jwtJwks);
+        const localJwtIssuer = typeof oauthServerConfig.issuer === "string" && oauthServerConfig.issuer.trim()
+            ? oauthServerConfig.issuer.trim().replace(/\/+$/, "")
+            : null;
         return {
             dbPassword: project.db_password,
             jwtSecret: project.jwt_secret,
             jwtKeys,
             jwtJwks,
+            thirdPartyJwtPolicy: jwtMaterial.thirdParty,
+            localJwtIssuer,
             dbName: await resolveDbName(ref),
             apiUrl: this.deriveApiUrl(ref, projectConfig),
             authUrl: this.deriveAuthUrl(ref, projectConfig),
@@ -684,6 +699,8 @@ class TenantRuntimeService {
             jwtSecret: creds.jwtSecret,
             jwtKeys: creds.jwtKeys || "",
             jwtJwks: creds.jwtJwks || "",
+            thirdPartyJwtPolicy: creds.thirdPartyJwtPolicy ? JSON.stringify(creds.thirdPartyJwtPolicy) : "",
+            localJwtIssuer: creds.localJwtIssuer || "",
             dbName: creds.dbName,
             apiUrl: creds.apiUrl,
             authUrl: creds.authUrl,
@@ -724,6 +741,13 @@ class TenantRuntimeService {
         const jwtVerifierSecret = creds.jwtJwks || creds.jwtSecret;
         const jwtJwksEnv = creds.jwtJwks ? renderSystemdEnvLine("JWT_JWKS", creds.jwtJwks) : "";
         const jwtKeysEnv = creds.jwtKeys ? renderSystemdEnvLine("JWT_KEYS", creds.jwtKeys) : "";
+        const thirdPartyJwtPolicyEnv = creds.thirdPartyJwtPolicy
+            ? renderSystemdEnvLine("SUPACLOUD_THIRD_PARTY_JWT_POLICY", JSON.stringify(creds.thirdPartyJwtPolicy))
+            : "";
+        const postgrestJwtAudience = creds.thirdPartyJwtPolicy?.audience[0] || "";
+        const postgrestJwtAudienceConfig = postgrestJwtAudience
+            ? `jwt-aud = ${quoteTomlBasicString(postgrestJwtAudience)}`
+            : "";
 
         // Generate PostgREST .env configuration
         // Edge runtime and other services consume these env vars
@@ -745,6 +769,7 @@ class TenantRuntimeService {
             renderTenantInternalRuntimeEnv(pgrstPort, gotruePort),
             jwtJwksEnv,
             jwtKeysEnv,
+            thirdPartyJwtPolicyEnv,
         ].filter(Boolean).join("\n");
         await this.writeTenantSecretFile(
             path.join(this.TENANT_CONFIG_DIR, `${ref}.env`),
@@ -760,6 +785,7 @@ db-schemas = ${quoteTomlBasicString(dbSchemas)}
 db-extra-search-path = "public, extensions, auth"
 db-anon-role = "anon"
 jwt-secret = ${quoteTomlBasicString(jwtVerifierSecret)}
+${postgrestJwtAudienceConfig}
 server-port = ${pgrstPort}
 server-host = "0.0.0.0"
 db-pool = ${this.POSTGREST_DB_POOL}
@@ -1500,17 +1526,54 @@ GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA pgmq_public TO anon, authenticated, ser
         }
     }
 
-    private async ensurePostgrestPrerequest(ref: string): Promise<void> {
+    private async ensurePostgrestPrerequest(
+        ref: string,
+        thirdPartyPolicy: ThirdPartyJwtPolicy | null,
+        localJwtIssuer: string | null,
+    ): Promise<void> {
         // Error contract: `-v ON_ERROR_STOP=1` is passed as a structured arg and
         // runTenantPsqlOrThrow performs `throw new Error(`psql exited with code ...`)`.
         const dbName = await resolveDbName(ref);
         const connection = this.adminPsqlConnection(dbName);
 
+        const thirdPartyGate = thirdPartyPolicy
+            ? `
+  issuer_claim := claims ->> 'iss';
+  client_id_claim := claims ->> 'client_id';
+  audience_matches := CASE
+    WHEN jsonb_typeof(claims -> 'aud') = 'string'
+      THEN claims ->> 'aud' = ${quoteSqlLiteral(thirdPartyPolicy.audience[0])}
+    WHEN jsonb_typeof(claims -> 'aud') = 'array'
+      THEN (claims -> 'aud') ? ${quoteSqlLiteral(thirdPartyPolicy.audience[0])}
+    ELSE false
+  END;
+
+  IF issuer_claim = ${quoteSqlLiteral(thirdPartyPolicy.issuer)}
+     OR (
+       client_id_claim IS NOT NULL
+       AND ${localJwtIssuer
+           ? `issuer_claim IS DISTINCT FROM ${quoteSqlLiteral(localJwtIssuer)}`
+           : "true"}
+     ) THEN
+    IF issuer_claim IS DISTINCT FROM ${quoteSqlLiteral(thirdPartyPolicy.issuer)}
+       OR client_id_claim IS DISTINCT FROM ${quoteSqlLiteral(thirdPartyPolicy.clientId)}
+       OR role_claim IS DISTINCT FROM 'authenticated'
+       OR NOT audience_matches THEN
+      RAISE EXCEPTION USING
+        ERRCODE = '28000',
+        MESSAGE = 'third-party JWT claims rejected';
+    END IF;
+  END IF;
+`.trimEnd()
+            : "";
         const fnSql = `
 CREATE OR REPLACE FUNCTION public.set_request_context() RETURNS void AS $$
 DECLARE
   claims jsonb;
   role_claim text;
+  issuer_claim text;
+  client_id_claim text;
+  audience_matches boolean := false;
 BEGIN
   BEGIN
     claims := COALESCE(
@@ -1521,18 +1584,20 @@ BEGIN
     claims := '{}'::jsonb;
   END;
 
-  PERFORM set_config('request.jwt.claims', claims::text, true);
-  PERFORM set_config('request.jwt.claim.sub', coalesce(claims ->> 'sub', ''), true);
-  PERFORM set_config('request.jwt.claim.email', coalesce(claims ->> 'email', ''), true);
-
   role_claim := COALESCE(
     nullif(current_setting('request.jwt.claim.role', true), ''),
     claims ->> 'role',
     'anon'
   );
+
+${thirdPartyGate}
+
+  PERFORM set_config('request.jwt.claims', claims::text, true);
+  PERFORM set_config('request.jwt.claim.sub', coalesce(claims ->> 'sub', ''), true);
+  PERFORM set_config('request.jwt.claim.email', coalesce(claims ->> 'email', ''), true);
   PERFORM set_config('request.jwt.claim.role', role_claim, true);
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;
 `.trim();
         const temporary = await this.writeTemporaryTenantSql(ref, "pgrst-prerequest", fnSql);
         try {
@@ -1553,7 +1618,12 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
         await this.ensureAuthSchema(ref);
         await this.ensureOneTimeTokensAndGraphQL(ref);
         await this.ensureTenantSchemaMigrations(ref);
-        await this.ensurePostgrestPrerequest(ref);
+        const jwtPolicy = await this.getTenantCredentials(ref);
+        await this.ensurePostgrestPrerequest(
+            ref,
+            jwtPolicy.thirdPartyJwtPolicy,
+            jwtPolicy.localJwtIssuer,
+        );
 
         const pgrstPort = await this.getTenantPort(ref, "pgrst");
         const gotruePort = await this.getTenantPort(ref, "gotrue");
@@ -1740,7 +1810,12 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
         await this.ensurePostgrestBinary();
         await this.installSystemdTemplate();
         await this.ensureTenantSchemaMigrations(ref);
-        await this.ensurePostgrestPrerequest(ref);
+        const jwtPolicy = await this.getTenantCredentials(ref);
+        await this.ensurePostgrestPrerequest(
+            ref,
+            jwtPolicy.thirdPartyJwtPolicy,
+            jwtPolicy.localJwtIssuer,
+        );
 
         const pgrstPort = await this.getTenantPort(ref, "pgrst");
         const gotruePort = await this.getTenantPort(ref, "gotrue");

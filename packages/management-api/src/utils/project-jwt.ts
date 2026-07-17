@@ -11,7 +11,7 @@ import {
   type JWTPayload,
 } from "jose";
 import { sql as metaSql } from "../db";
-import { normalizeProjectConfig } from "./project-config";
+import { normalizeProjectConfig, normalizeThirdPartyAuthConfig } from "./project-config";
 
 export type OidcJwtKeyMaterial = {
   key_id: string;
@@ -30,11 +30,24 @@ export type ProjectJwtVerification = {
   isServiceRole: boolean;
 };
 
+export type ThirdPartyJwtPolicy = {
+  issuer: string;
+  audience: string[];
+  clientId: string;
+  jwtJwks: { keys: JWK[] };
+};
+
+export type ProjectJwtVerificationMaterial = {
+  jwtJwks: { keys: JWK[] } | null;
+  localJwks: { keys: JWK[] } | null;
+  thirdParty: ThirdPartyJwtPolicy | null;
+};
+
 function base64UrlEncode(input: string): string {
   return Buffer.from(input, "utf8").toString("base64url");
 }
 
-function buildLegacyHs256Jwk(jwtSecret: string): JWK {
+export function buildLegacyHs256Jwk(jwtSecret: string): JWK {
   return {
     kty: "oct",
     k: base64UrlEncode(jwtSecret),
@@ -128,6 +141,172 @@ export function normalizeProjectJwtJwks(value: unknown): { keys: JWK[] } | null 
   return { keys: keys as JWK[] };
 }
 
+function jwkIdentity(key: JWK): string {
+  const kid = typeof key.kid === "string" ? key.kid : "";
+  const kty = typeof key.kty === "string" ? key.kty : "";
+  const alg = typeof key.alg === "string" ? key.alg : "";
+  return `${kid}|${kty}|${alg}`;
+}
+
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map((entry) => stableJson(entry)).join(",")}]`;
+  }
+  if (value && typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .filter(([, entry]) => entry !== undefined)
+      .sort(([left], [right]) => left.localeCompare(right));
+    return `{${entries.map(([key, entry]) => `${JSON.stringify(key)}:${stableJson(entry)}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function assertThirdPartyPublicJwk(key: JWK, index: number): JWK {
+  const prefix = `third_party_auth.jwt_jwks.keys[${index}]`;
+  const kid = typeof key.kid === "string" ? key.kid.trim() : "";
+  if (!kid) throw new Error(`${prefix}.kid is required`);
+  if (kid === "legacy-hs256") throw new Error(`${prefix}.kid is reserved`);
+
+  const record = key as Record<string, unknown>;
+  for (const privateField of ["k", "d", "p", "q", "dp", "dq", "qi", "oth"]) {
+    if (record[privateField] !== undefined) {
+      throw new Error(`${prefix} must not contain private key material`);
+    }
+  }
+  if (key.use !== undefined && key.use !== "sig") {
+    throw new Error(`${prefix}.use must be sig`);
+  }
+  if (Array.isArray(key.key_ops) && (key.key_ops.includes("sign") || !key.key_ops.includes("verify"))) {
+    throw new Error(`${prefix}.key_ops must only permit verification`);
+  }
+
+  if (key.kty === "EC" && key.alg === "ES256") {
+    if (key.crv !== "P-256" || typeof key.x !== "string" || !key.x || typeof key.y !== "string" || !key.y) {
+      throw new Error(`${prefix} must be a complete P-256 public key`);
+    }
+    return { ...key, kid };
+  }
+  if (key.kty === "RSA" && key.alg === "RS256") {
+    if (typeof key.n !== "string" || !key.n || typeof key.e !== "string" || !key.e) {
+      throw new Error(`${prefix} must be a complete RSA public key`);
+    }
+    return { ...key, kid };
+  }
+  throw new Error(`${prefix} must use EC/ES256 or RSA/RS256`);
+}
+
+export function resolveThirdPartyJwtPolicy(config: unknown): ThirdPartyJwtPolicy | null {
+  const projectConfig = normalizeProjectConfig(config);
+  const auth = (projectConfig.auth || {}) as Record<string, unknown>;
+  const thirdParty = normalizeThirdPartyAuthConfig(auth.third_party_auth);
+  if (!thirdParty.enabled) return null;
+
+  if (!thirdParty.issuer) throw new Error("third_party_auth.issuer is required");
+  let issuerUrl: URL;
+  try {
+    issuerUrl = new URL(thirdParty.issuer);
+  } catch {
+    throw new Error("third_party_auth.issuer must be a valid HTTPS URL");
+  }
+  if (
+    issuerUrl.protocol !== "https:"
+    || issuerUrl.username
+    || issuerUrl.password
+    || issuerUrl.search
+    || issuerUrl.hash
+  ) {
+    throw new Error("third_party_auth.issuer must be a valid HTTPS URL");
+  }
+  const issuer = thirdParty.issuer.replace(/\/+$/, "");
+
+  const audience = Array.isArray(thirdParty.audience)
+    ? thirdParty.audience
+    : (thirdParty.audience ? [thirdParty.audience] : []);
+  if (audience.length !== 1 || !audience[0]) {
+    throw new Error("third_party_auth.audience must contain exactly one audience");
+  }
+  if (!thirdParty.client_id) throw new Error("third_party_auth.client_id is required");
+
+  const rawJwks = normalizeProjectJwtJwks(thirdParty.jwt_jwks);
+  if (!rawJwks) throw new Error("third_party_auth.jwt_jwks is required");
+  const keys = rawJwks.keys.map(assertThirdPartyPublicJwk);
+  const seen = new Map<string, string>();
+  for (const key of keys) {
+    const identity = jwkIdentity(key);
+    const material = stableJson(key);
+    const existing = seen.get(identity);
+    if (existing && existing !== material) {
+      throw new Error(`third_party_auth.jwt_jwks contains conflicting key ${String(key.kid)}`);
+    }
+    if (existing) throw new Error(`third_party_auth.jwt_jwks contains duplicate key ${String(key.kid)}`);
+    seen.set(identity, material);
+  }
+
+  return {
+    issuer,
+    audience: [...audience],
+    clientId: thirdParty.client_id,
+    jwtJwks: { keys },
+  };
+}
+
+function mergeVerificationJwks(groups: JWK[][]): { keys: JWK[] } | null {
+  const keys: JWK[] = [];
+  const seen = new Map<string, string>();
+  for (const key of groups.flat()) {
+    const identity = jwkIdentity(key);
+    const material = stableJson(key);
+    const existing = seen.get(identity);
+    if (existing && existing !== material) {
+      throw new Error(`JWT verification key conflict for ${identity}`);
+    }
+    if (existing) continue;
+    seen.set(identity, material);
+    keys.push(key);
+  }
+  return keys.length > 0 ? { keys } : null;
+}
+
+export function resolveProjectJwtVerificationMaterial(
+  config: unknown,
+  jwtSecret: string,
+): ProjectJwtVerificationMaterial {
+  const projectConfig = normalizeProjectConfig(config);
+  const auth = (projectConfig.auth || {}) as Record<string, unknown>;
+  const oauthServer = (auth.oauth_server || {}) as Record<string, unknown>;
+  const localJwks = normalizeProjectJwtJwks(oauthServer.jwt_jwks);
+  const thirdParty = resolveThirdPartyJwtPolicy(projectConfig);
+
+  if (!localJwks && !thirdParty) {
+    return { jwtJwks: null, localJwks: null, thirdParty: null };
+  }
+
+  return {
+    jwtJwks: mergeVerificationJwks([
+      localJwks?.keys || [],
+      thirdParty?.jwtJwks.keys || [],
+      [buildLegacyHs256Jwk(jwtSecret)],
+    ]),
+    localJwks,
+    thirdParty,
+  };
+}
+
+/**
+ * Resolve every public key accepted by a project's runtime JWT consumers.
+ *
+ * A project configured with third_party_auth receives user tokens from an
+ * external GoTrue/OIDC issuer, while legacy anon/service-role keys remain
+ * signed with the project's HS256 secret. PostgREST, Storage and the Bun
+ * runtime must therefore verify against the union of both key sets.
+ */
+export function resolveProjectVerificationJwks(
+  config: unknown,
+  jwtSecret: string,
+): { keys: JWK[] } | null {
+  return resolveProjectJwtVerificationMaterial(config, jwtSecret).jwtJwks;
+}
+
 export function normalizeProjectJwtKeys(value: unknown): JWK[] | null {
   const parsed = typeof value === "string" && value.trim().startsWith("[")
     ? JSON.parse(value)
@@ -181,12 +360,75 @@ export async function signOidcServiceRoleJwt(
   }
 }
 
-function extractJwtJwksFromConfig(config: unknown): { keys: JWK[] } | null {
-  const projectConfig = normalizeProjectConfig(config);
-  const auth = (projectConfig.auth || {}) as Record<string, unknown>;
-  const oauthServer = (auth.oauth_server || {}) as Record<string, unknown>;
+function decodeJwtPart(value: string): Record<string, unknown> | null {
   try {
-    return normalizeProjectJwtJwks(oauthServer.jwt_jwks);
+    const parsed = JSON.parse(Buffer.from(value, "base64url").toString("utf8"));
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function isThirdPartyTokenCandidate(
+  header: Record<string, unknown>,
+  payload: Record<string, unknown>,
+  policy: ThirdPartyJwtPolicy,
+): boolean {
+  const kid = typeof header.kid === "string" ? header.kid : "";
+  const alg = typeof header.alg === "string" ? header.alg : "";
+  if (policy.jwtJwks.keys.some((key) => key.kid === kid && key.alg === alg)) return true;
+  if (payload.iss === policy.issuer) return true;
+  return payload.client_id === policy.clientId;
+}
+
+async function verifyThirdPartyJwt(
+  token: string,
+  policy: ThirdPartyJwtPolicy,
+): Promise<{ payload: JWTPayload; protectedHeader: JWTHeaderParameters } | null> {
+  try {
+    const result = await jwtVerify(token, createLocalJWKSet(policy.jwtJwks), {
+      algorithms: ["ES256", "RS256"],
+      issuer: policy.issuer,
+      audience: policy.audience,
+    });
+    if (result.payload.client_id !== policy.clientId) return null;
+    if (result.payload.role !== "authenticated") return null;
+    return result;
+  } catch {
+    return null;
+  }
+}
+
+async function verifyLocalAsymmetricJwt(
+  token: string,
+  localJwks: { keys: JWK[] } | null,
+): Promise<{ payload: JWTPayload; protectedHeader: JWTHeaderParameters } | null> {
+  const publicKeys = (localJwks?.keys || []).filter(
+    (key) => (key.kty === "EC" && key.alg === "ES256") || (key.kty === "RSA" && key.alg === "RS256"),
+  );
+  if (publicKeys.length === 0) return null;
+  try {
+    return await jwtVerify(token, createLocalJWKSet({ keys: publicKeys }), {
+      algorithms: ["ES256", "RS256"],
+    });
+  } catch {
+    return null;
+  }
+}
+
+async function verifyLegacyHs256Jwt(
+  token: string,
+  jwtSecret: string,
+  header: Record<string, unknown>,
+): Promise<{ payload: JWTPayload; protectedHeader: JWTHeaderParameters } | null> {
+  if (header.alg !== "HS256") return null;
+  if (header.kid !== undefined && header.kid !== "legacy-hs256") return null;
+  try {
+    return await jwtVerify(token, new TextEncoder().encode(jwtSecret), {
+      algorithms: ["HS256"],
+    });
   } catch {
     return null;
   }
@@ -217,29 +459,33 @@ export async function verifyProjectJwtPayload(
     `;
 
   if (!project?.jwt_secret) return null;
-  const jwtJwks = extractJwtJwksFromConfig(project.config);
+  const parts = cleanToken.split(".");
+  if (parts.length !== 3) return null;
+  const header = decodeJwtPart(parts[0]);
+  const payload = decodeJwtPart(parts[1]);
+  if (!header || !payload || typeof header.alg !== "string") return null;
 
-  if (jwtJwks) {
-    try {
-      const result = await jwtVerify(cleanToken, createLocalJWKSet(jwtJwks));
-      return {
-        payload: result.payload,
-        protectedHeader: result.protectedHeader,
-        isServiceRole: cleanToken === project.service_role_key,
-      };
-    } catch {
-      // Fall back to direct HS256 verification for legacy tokens without a kid.
-    }
-  }
-
+  let material: ProjectJwtVerificationMaterial;
   try {
-    const result = await jwtVerify(cleanToken, new TextEncoder().encode(String(project.jwt_secret)));
-    return {
-      payload: result.payload,
-      protectedHeader: result.protectedHeader,
-      isServiceRole: cleanToken === project.service_role_key,
-    };
+    material = resolveProjectJwtVerificationMaterial(project.config, String(project.jwt_secret));
   } catch {
     return null;
   }
+
+  let result: { payload: JWTPayload; protectedHeader: JWTHeaderParameters } | null = null;
+  if (material.thirdParty && isThirdPartyTokenCandidate(header, payload, material.thirdParty)) {
+    result = await verifyThirdPartyJwt(cleanToken, material.thirdParty);
+  } else {
+    result = await verifyLocalAsymmetricJwt(cleanToken, material.localJwks);
+    if (!result) {
+      result = await verifyLegacyHs256Jwt(cleanToken, String(project.jwt_secret), header);
+    }
+  }
+  if (!result) return null;
+
+  return {
+    payload: result.payload,
+    protectedHeader: result.protectedHeader,
+    isServiceRole: cleanToken === project.service_role_key,
+  };
 }
