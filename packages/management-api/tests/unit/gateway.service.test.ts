@@ -1703,12 +1703,36 @@ describe("gateway-health worker", () => {
         const { runGatewayHealthCheck, resetGatewayHealthState } = await import("../../src/workers/gateway-health.worker");
         resetGatewayHealthState();
 
-        // 初始状态：未观测过可达 -> 首次探测可达应标记已就绪，但不触发重建
+        // 初始状态：未观测过可达 -> 首次探测可达会执行恢复重建。
         await runGatewayHealthCheck({ rebuildAll: async () => ({ success: true, updated: 0, errors: [] }) });
-        // 第二次：仍然可达，状态无变化，不应触发重建
+        // 第二次：仍然可达且未达到周期阈值，不应重复重建。
         const rebuilt = await runGatewayHealthCheck({ rebuildAll: async () => ({ success: true, updated: 0, errors: [] }) });
 
         expect(rebuilt).toBe(false);
+
+        restore();
+    });
+
+    test("periodically rebuilds managed routes while Caddy stays reachable", async () => {
+        const originalFetch = globalThis.fetch;
+        globalThis.fetch = mock(() => Promise.resolve(new Response("{}", { status: 200 }))) as unknown as typeof fetch;
+        const restore = () => { globalThis.fetch = originalFetch; };
+        const { runGatewayHealthCheck, resetGatewayHealthState } = await import("../../src/workers/gateway-health.worker");
+        resetGatewayHealthState();
+
+        let now = 1_000;
+        let rebuildCount = 0;
+        const rebuildAll = async () => {
+            rebuildCount += 1;
+            return { success: true, updated: 1, errors: [] };
+        };
+
+        await runGatewayHealthCheck({ rebuildAll, now: () => now, reconcileIntervalMs: 5_000 });
+        now += 4_999;
+        expect(await runGatewayHealthCheck({ rebuildAll, now: () => now, reconcileIntervalMs: 5_000 })).toBe(false);
+        now += 1;
+        expect(await runGatewayHealthCheck({ rebuildAll, now: () => now, reconcileIntervalMs: 5_000 })).toBe(true);
+        expect(rebuildCount).toBe(2);
 
         restore();
     });
