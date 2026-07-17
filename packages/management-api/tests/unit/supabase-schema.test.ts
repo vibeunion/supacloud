@@ -31,7 +31,13 @@ describe("supabase bootstrap schema", () => {
       const start = schema.indexOf(
         "CREATE OR REPLACE FUNCTION public.set_request_context()",
       );
-      const end = schema.indexOf("$$ LANGUAGE plpgsql SECURITY DEFINER;", start);
+      const end = [
+        "$$ LANGUAGE plpgsql SECURITY DEFINER;",
+        "$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;",
+      ]
+        .map((marker) => schema.indexOf(marker, start))
+        .filter((index) => index >= 0)
+        .sort((a, b) => a - b)[0] ?? -1;
 
       expect(start).toBeGreaterThanOrEqual(0);
       expect(end).toBeGreaterThan(start);
@@ -224,7 +230,9 @@ describe("supabase bootstrap schema", () => {
     expect(prerequestBody).toContain("-v ON_ERROR_STOP=1");
     expect(prerequestBody).toContain("throw new Error(`psql exited with code");
     expect(prepareBody).toContain("await this.ensureTenantSchemaMigrations(ref);");
-    expect(prepareBody).toContain("await this.ensurePostgrestPrerequest(ref);");
+    expect(prepareBody).toContain("await this.ensurePostgrestPrerequest(");
+    expect(prepareBody).toContain("jwtPolicy.thirdPartyJwtPolicy");
+    expect(prepareBody).toContain("jwtPolicy.localJwtIssuer");
   });
 
   test("project service status accepts the deployed Realtime container fallback", () => {

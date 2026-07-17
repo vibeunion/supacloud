@@ -96,11 +96,12 @@ export async function verifyEdgeRuntimeJwt(
   const anonKey = secrets.anonKey || "";
   const serviceRoleKey = secrets.serviceRoleKey || "";
 
-  if (apikeyHeader && (apikeyHeader === anonKey || apikeyHeader === serviceRoleKey)) {
-    return true;
+  if (!authHeader) {
+    return Boolean(
+      apikeyHeader &&
+      (apikeyHeader === anonKey || apikeyHeader === serviceRoleKey),
+    );
   }
-
-  if (!authHeader) return false;
   const token = authHeader.replace(/^Bearer\s+/i, "");
   if (!token) return false;
 

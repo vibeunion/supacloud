@@ -40,6 +40,27 @@ describe("verifyEdgeRuntimeJwt", () => {
     }, "Bearer service-role-key")).toBe(true);
   });
 
+  test("does not let a valid anon apikey mask an invalid bearer JWT", async () => {
+    expect(await verifyEdgeRuntimeJwt({
+      anonKey: "anon-key",
+      jwtSecret: "legacy-secret-with-at-least-32-characters",
+    }, "Bearer forged-user-token", "anon-key")).toBe(false);
+  });
+
+  test("verifies a bearer JWT when supabase-js also sends the anon apikey", async () => {
+    const jwtSecret = "legacy-secret-with-at-least-32-characters";
+    const token = await new SignJWT({ role: "authenticated", sub: "user_1" })
+      .setProtectedHeader({ alg: "HS256" })
+      .setIssuedAt()
+      .setExpirationTime("5m")
+      .sign(new TextEncoder().encode(jwtSecret));
+
+    expect(await verifyEdgeRuntimeJwt({
+      anonKey: "anon-key",
+      jwtSecret,
+    }, `Bearer ${token}`, "anon-key")).toBe(true);
+  });
+
   test("normalizes JWKS JSON from runtime env", () => {
     expect(normalizeJwtJwks(JSON.stringify({
       keys: [{ kty: "EC", kid: "kid_1", alg: "ES256" }],
