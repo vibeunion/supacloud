@@ -459,6 +459,21 @@ function buildAuthConfigResponse(settings: Record<string, unknown>) {
   return response;
 }
 
+function buildSharedSettingsResponse(
+  settings: Record<string, unknown>,
+  authorityProjectRef: unknown,
+) {
+  const { auth: _auth, ...safeSettings } = settings;
+  return {
+    ...safeSettings,
+    auth_runtime: {
+      mode: "shared",
+      authority_project_ref: authorityProjectRef,
+      configuration_management: "owner_only",
+    },
+  };
+}
+
 export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
   // Get project settings
   .get(
@@ -472,15 +487,10 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
       }
       const managedError = getAuthRuntimeManagedError(params.ref, "configuration");
       if (managedError) {
-        const { auth: _auth, ...safeSettings } = settings;
-        return {
-          ...safeSettings,
-          auth_runtime: {
-            mode: "shared",
-            authority_project_ref: managedError.authority_project_ref,
-            configuration_management: "owner_only",
-          },
-        };
+        return buildSharedSettingsResponse(
+          settings,
+          managedError.authority_project_ref,
+        );
       }
       return settings;
     },
@@ -509,6 +519,12 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
       );
       if (settings === null) {
         return status(404, { message: "Project not found", code: "404" });
+      }
+      if (managedError) {
+        return buildSharedSettingsResponse(
+          settings,
+          managedError.authority_project_ref,
+        );
       }
       return settings;
     },

@@ -80,7 +80,10 @@ describe("SupAuth auth config boundary", () => {
     let updateCalls = 0;
     projectService.updateProjectSettings = async () => {
       updateCalls += 1;
-      return {};
+      return {
+        auth: { smtp: { pass: "dependent-secret" } },
+        api_domain: "updated.api.example.com",
+      } as never;
     };
 
     const getResponse = await request("/v1/projects/tenant-a/settings");
@@ -100,5 +103,20 @@ describe("SupAuth auth config boundary", () => {
     });
     expect(putResponse.status).toBe(409);
     expect(updateCalls).toBe(0);
+
+    const safePutResponse = await request("/v1/projects/tenant-a/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ api_domain: "updated.api.example.com" }),
+    });
+    const safePutBody = await safePutResponse.json();
+    expect(safePutResponse.status).toBe(200);
+    expect(safePutBody.auth).toBeUndefined();
+    expect(safePutBody.auth_runtime).toEqual({
+      mode: "shared",
+      authority_project_ref: "auth-owner",
+      configuration_management: "owner_only",
+    });
+    expect(updateCalls).toBe(1);
   });
 });
