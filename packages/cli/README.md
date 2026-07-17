@@ -98,7 +98,7 @@ Task event commands:
 
 Gateway / Caddy commands (require admin privileges; config is injected via the Caddy JSON Admin API):
 
-- `gateway routes` — list custom gateway routes (reverse_proxy / static sites)
+- `gateway routes` — list custom gateway routes (reverse_proxy / static sites / redirects)
 - `gateway upsert_route` — create or replace a route
 - `gateway update_route` — replace a route by id
 - `gateway delete_route` — remove a route by id
@@ -117,6 +117,9 @@ Gateway / Caddy commands (require admin privileges; config is injected via the C
 supacloud-cli gateway routes --ref abc123
 supacloud-cli gateway upsert_route --ref abc123 --route_id webhook \
   --hosts "api.example.com" --paths "/webhook/*" --upstream 10.0.0.5:8080
+supacloud-cli gateway upsert_route --ref abc123 --route_id canonical-https \
+  --hosts "www.example.com" --paths "/*" --protocol http \
+  --redirect_to 'https://www.example.com{http.request.uri}' --redirect_status 308
 supacloud-cli gateway config --ref abc123 --rate_limit_tier pro
 supacloud-cli gateway rebuild --ref abc123 --clean
 ```

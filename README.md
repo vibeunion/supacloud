@@ -347,7 +347,7 @@ Function management read endpoints under `/v1/projects/:ref/functions*` require 
 | Tasks | `/v1/projects/:ref/tasks/*` | Background task monitoring, including lightweight `summary=true` list mode |
 | **Logs SSE** | `GET /v1/projects/:ref/logs/stream` | **Real-time log streaming via Server-Sent Events** |
 | **Rate Limit** | `GET/PUT /v1/projects/:ref/gateway/rate-limit` | **Programmable per-project rate limiting (Caddy route policy)** |
-| **Gateway Routes** | `GET/POST/PUT/DELETE /v1/projects/:ref/gateway/routes[/:routeId]` | **Controlled custom Caddy routes (hosts, path, upstream, headers, CORS, priority)** |
+| **Gateway Routes** | `GET/POST/PUT/DELETE /v1/projects/:ref/gateway/routes[/:routeId]` | **Controlled custom Caddy routes (proxy, static, redirect, headers, CORS, priority)** |
 | **WebSocket** | `ws://host/ws/tasks` | **Real-time task progress notifications** |
 
 #### Runtime Switching
@@ -906,7 +906,7 @@ curl http://localhost:9090/v1/projects/<ref>/api-keys \
 | 任务 | `/v1/projects/:ref/tasks/*` | 后台 AI/通用异步任务生命周期观测与监控，支持 `summary=true` 轻量列表 |
 | **日志 SSE** | `GET /v1/projects/:ref/logs/stream` | **实时日志流（Server-Sent Events）** |
 | **限流** | `GET/PUT /v1/projects/:ref/gateway/rate-limit` 及 `custom-rate-limits` | **编程式架构与客户端路由自定限流（Caddy 路由策略）** |
-| **网关路由** | `GET/POST/PUT/DELETE /v1/projects/:ref/gateway/routes[/:routeId]` | **受控自定义 Caddy 路由（域名、路径、上游、请求头、CORS、优先级）** |
+| **网关路由** | `GET/POST/PUT/DELETE /v1/projects/:ref/gateway/routes[/:routeId]` | **受控自定义 Caddy 路由（反代、静态、重定向、请求头、CORS、优先级）** |
 | **WebSocket** | `ws://host/ws/tasks` | **实时任务进度推送** |
 
 #### 运行时切换

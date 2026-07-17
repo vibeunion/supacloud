@@ -482,6 +482,10 @@ export class CaddyGatewayProvider implements GatewayProvider {
         const aPath = Array.isArray((a.match as any)?.[0]?.path) ? String((a.match as any)[0].path[0] || "") : "";
         const bPath = Array.isArray((b.match as any)?.[0]?.path) ? String((b.match as any)[0].path[0] || "") : "";
         if (aPath.length !== bPath.length) return bPath.length - aPath.length;
+
+        const aProtocol = typeof (a.match as any)?.[0]?.protocol === "string";
+        const bProtocol = typeof (b.match as any)?.[0]?.protocol === "string";
+        if (aProtocol !== bProtocol) return aProtocol ? -1 : 1;
         return aid.localeCompare(bid);
     }
 
@@ -962,8 +966,12 @@ export class CaddyGatewayProvider implements GatewayProvider {
     }
 
     async configureCustomGatewayRoutes(projectRef: string, routes: CustomGatewayRouteConfig[]): Promise<{ success: boolean; error?: string }> {
+        const previousRoutes: Array<[string, CaddyRoute]> = [];
         try {
             await this.hydrateFromDiskIfUninitialized();
+            for (const entry of this.routesById.entries()) {
+                if (isCustomGatewayRouteId(projectRef, entry[0])) previousRoutes.push(entry);
+            }
             for (const id of Array.from(this.routesById.keys())) {
                 if (isCustomGatewayRouteId(projectRef, id)) this.routesById.delete(id);
             }
@@ -974,6 +982,10 @@ export class CaddyGatewayProvider implements GatewayProvider {
             await this.persistAndLoad();
             return { success: true };
         } catch (error: unknown) {
+            for (const id of Array.from(this.routesById.keys())) {
+                if (isCustomGatewayRouteId(projectRef, id)) this.routesById.delete(id);
+            }
+            for (const [id, route] of previousRoutes) this.routesById.set(id, route);
             return { success: false, error: error instanceof Error ? error.message : String(error) };
         }
     }

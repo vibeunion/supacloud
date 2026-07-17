@@ -62,6 +62,36 @@ describe("admin gateway CLI tool", () => {
         expect(body.upstream).toBe("10.0.0.5:8080");
     });
 
+    test("upsert_route forwards protocol-scoped redirect fields", async () => {
+        const calls: Array<{ body: unknown }> = [];
+        const { callback } = captureGatewayTool({
+            post: async (_path: string, body?: unknown) => {
+                calls.push({ body });
+                return { ok: true, status: 200, data: { success: true } };
+            },
+        });
+
+        await callback({
+            action: "upsert_route",
+            ref: "tenant-a",
+            route_id: "canonical-https",
+            hosts: ["www.example.com"],
+            paths: ["/*"],
+            protocol: "http",
+            redirect_to: "https://www.example.com{http.request.uri}",
+            redirect_status: 308,
+        });
+
+        expect(calls[0].body).toEqual({
+            id: "canonical-https",
+            hosts: ["www.example.com"],
+            path: "/*",
+            protocol: "http",
+            redirect_to: "https://www.example.com{http.request.uri}",
+            redirect_status: 308,
+        });
+    });
+
     test("rebuild clean appends query flag", async () => {
         const calls: string[] = [];
         const { callback } = captureGatewayTool({

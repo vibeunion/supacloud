@@ -119,6 +119,35 @@ describe("gateway CLI tool — actions", () => {
         expect((calls[0].body as Record<string, unknown>).path).toEqual(["/a/*", "/b/*"]);
     });
 
+    test("upsert_route forwards protocol-scoped redirect fields", async () => {
+        const calls: Array<{ body: unknown }> = [];
+        const { callback } = captureGatewayTool({
+            post: async (_path: string, body?: unknown) => {
+                calls.push({ body });
+                return { ok: true, status: 200, data: { success: true } };
+            },
+        });
+
+        await callback({
+            action: "upsert_route",
+            route_id: "canonical-https",
+            hosts: ["www.example.com"],
+            paths: ["/*"],
+            protocol: "http",
+            redirect_to: "https://www.example.com{http.request.uri}",
+            redirect_status: 308,
+        });
+
+        expect(calls[0].body).toEqual({
+            id: "canonical-https",
+            hosts: ["www.example.com"],
+            path: "/*",
+            protocol: "http",
+            redirect_to: "https://www.example.com{http.request.uri}",
+            redirect_status: 308,
+        });
+    });
+
     test("update_route uses PUT with routeId path param and omits id from body", async () => {
         const calls: Array<{ path: string; body: unknown }> = [];
         const { callback } = captureGatewayTool({

@@ -18,6 +18,39 @@ describe("controlled custom gateway routes API", () => {
     expect(response.status).toBe(401);
   });
 
+  test("GET returns persisted redirect routes with normalized defaults", async () => {
+    const getSettings = spyOn(projectService, "getProjectSettings").mockResolvedValue({
+      gateway_routes: [
+        {
+          id: "canonical-https",
+          hosts: ["WWW.EXAMPLE.COM"],
+          path: "/*",
+          protocol: "http",
+          redirect_to: "https://www.example.com{http.request.uri}",
+        },
+      ],
+    } as any);
+
+    try {
+      const response = await request("/v1/projects/proj123/gateway/routes", {
+        headers: masterHeaders,
+      });
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({
+        routes: [expect.objectContaining({
+          id: "canonical-https",
+          hosts: ["www.example.com"],
+          protocol: "http",
+          redirect_to: "https://www.example.com{http.request.uri}",
+          redirect_status: 308,
+        })],
+      });
+    } finally {
+      getSettings.mockRestore();
+    }
+  });
+
   test("POST stores normalized routes and reconciles the gateway", async () => {
     const getSettings = spyOn(projectService, "getProjectSettings").mockResolvedValue({
       gateway_routes: [],
@@ -72,6 +105,113 @@ describe("controlled custom gateway routes API", () => {
         ],
       });
       expect(getSettings).toHaveBeenCalledWith("proj123");
+    } finally {
+      getSettings.mockRestore();
+      updateSettings.mockRestore();
+      configureRoutes.mockRestore();
+    }
+  });
+
+  test("PUT persists a protocol-scoped redirect route", async () => {
+    const getSettings = spyOn(projectService, "getProjectSettings").mockResolvedValue({
+      gateway_routes: [
+        {
+          id: "canonical-https",
+          hosts: ["www.example.com"],
+          path: "/*",
+          protocol: "http",
+          redirect_to: "https://www.example.com{http.request.uri}",
+          redirect_status: 308,
+        },
+      ],
+    } as any);
+    const updateSettings = spyOn(projectService, "updateProjectSettings").mockResolvedValue({} as any);
+    const configureRoutes = spyOn(gatewayService, "configureCustomGatewayRoutes").mockResolvedValue({ success: true });
+
+    try {
+      const response = await request("/v1/projects/proj123/gateway/routes/canonical-https", {
+        method: "PUT",
+        headers: masterHeaders,
+        body: JSON.stringify({
+          hosts: ["WWW.EXAMPLE.COM"],
+          path: "/*",
+          protocol: "http",
+          redirect_to: "https://www.example.com{http.request.uri}",
+          redirect_status: 307,
+          headers: { "Cache-Control": "no-store" },
+          priority: 1000,
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({
+        success: true,
+        route: expect.objectContaining({
+          id: "canonical-https",
+          hosts: ["www.example.com"],
+          path: "/*",
+          protocol: "http",
+          redirect_to: "https://www.example.com{http.request.uri}",
+          redirect_status: 307,
+          priority: 1000,
+          enabled: true,
+        }),
+      });
+      expect(configureRoutes).toHaveBeenCalledWith("proj123", [
+        expect.objectContaining({ id: "canonical-https", redirect_status: 307 }),
+      ]);
+      expect(updateSettings).toHaveBeenCalledWith("proj123", {
+        gateway_routes: [
+          expect.objectContaining({
+            id: "canonical-https",
+            protocol: "http",
+            redirect_to: "https://www.example.com{http.request.uri}",
+            redirect_status: 307,
+          }),
+        ],
+      });
+    } finally {
+      getSettings.mockRestore();
+      updateSettings.mockRestore();
+      configureRoutes.mockRestore();
+    }
+  });
+
+  test("rolls Caddy back to persisted routes when the project config write fails", async () => {
+    const existingRoutes = [
+      { id: "docs", hosts: ["docs.example.com"], path: "/*", static_root: "/var/supacloud/custom-sites/docs" },
+    ];
+    const getSettings = spyOn(projectService, "getProjectSettings").mockResolvedValue({
+      gateway_routes: existingRoutes,
+    } as any);
+    const updateSettings = spyOn(projectService, "updateProjectSettings").mockRejectedValue(new Error("simulated DB write failure"));
+    const configureRoutes = spyOn(gatewayService, "configureCustomGatewayRoutes")
+      .mockResolvedValueOnce({ success: true })
+      .mockResolvedValueOnce({ success: true });
+
+    try {
+      const response = await request("/v1/projects/proj123/gateway/routes", {
+        method: "POST",
+        headers: masterHeaders,
+        body: JSON.stringify({
+          id: "canonical-https",
+          hosts: ["www.example.com"],
+          path: "/*",
+          protocol: "http",
+          redirect_to: "https://www.example.com{http.request.uri}",
+        }),
+      });
+
+      expect(response.status).toBe(500);
+      expect(await response.json()).toMatchObject({ code: "500", message: expect.stringContaining("simulated DB write failure") });
+      expect(configureRoutes).toHaveBeenCalledTimes(2);
+      expect(configureRoutes.mock.calls[0]?.[1]).toEqual([
+        expect.objectContaining({ id: "docs" }),
+        expect.objectContaining({ id: "canonical-https" }),
+      ]);
+      expect(configureRoutes.mock.calls[1]?.[1]).toEqual([
+        expect.objectContaining({ id: "docs" }),
+      ]);
     } finally {
       getSettings.mockRestore();
       updateSettings.mockRestore();
