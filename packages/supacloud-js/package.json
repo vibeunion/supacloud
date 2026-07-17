@@ -23,6 +23,7 @@
     "build:types": "tsc -p tsconfig.json --emitDeclarationOnly",
     "clean": "rm -rf dist",
     "prepublishOnly": "bun run build",
+    "typecheck:consumer": "tsc -p tsconfig.consumer.json --noEmit",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "typecheck:test": "tsc -p tsconfig.test.json --noEmit"
   },

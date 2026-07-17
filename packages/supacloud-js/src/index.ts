@@ -6,7 +6,7 @@ import type {
 export {
   createSupaCloudOAuthFetch,
   type SupaCloudOAuthFetchOptions,
-} from "./auth-fetch";
+} from "./auth-fetch.js";
 
 export type SupaCloudTaskStatus =
   | "pending"

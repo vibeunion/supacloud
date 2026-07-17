@@ -2,6 +2,16 @@ import { describe, expect, test } from "bun:test";
 import { createClient } from "@supabase/supabase-js";
 import { createSupaCloudOAuthFetch } from "./auth-fetch";
 
+declare const Bun: {
+  serve(options: {
+    port: number;
+    fetch(request: Request): Response | Promise<Response>;
+  }): {
+    port: number;
+    stop(closeActiveConnections?: boolean): void | Promise<void>;
+  };
+};
+
 describe("createSupaCloudOAuthFetch", () => {
   test("passes non-refresh requests through unchanged", async () => {
     const calls: Array<{ input: RequestInfo | URL; init?: RequestInit }> = [];
@@ -108,6 +118,45 @@ describe("createSupaCloudOAuthFetch", () => {
       message = error instanceof Error ? error.message : String(error);
     }
     expect(message).toContain("must use the Supabase Auth origin");
+  });
+
+  test("does not follow redirects from the OAuth token endpoint", async () => {
+    const redirectedBodies: string[] = [];
+    const redirected = Bun.serve({
+      port: 0,
+      async fetch(request: Request) {
+        redirectedBodies.push(await request.text());
+        return new Response("unexpected redirect target");
+      },
+    });
+    const redirectedUrl = `http://127.0.0.1:${redirected.port}/capture`;
+    const auth = Bun.serve({
+      port: 0,
+      fetch() {
+        return Response.redirect(redirectedUrl, 307);
+      },
+    });
+
+    try {
+      const origin = `http://127.0.0.1:${auth.port}`;
+      const transport = createSupaCloudOAuthFetch({ clientId: "client_1" });
+      let message = "";
+      try {
+        await transport(`${origin}/auth/v1/token?grant_type=refresh_token`, {
+          method: "POST",
+          body: JSON.stringify({ refresh_token: "refresh_secret" }),
+          headers: { "content-type": "application/json" },
+        });
+      } catch (error) {
+        message = error instanceof Error ? error.message : String(error);
+      }
+
+      expect(message === "").toBe(false);
+      expect(redirectedBodies.length).toBe(0);
+    } finally {
+      await auth.stop(true);
+      await redirected.stop(true);
+    }
   });
 
   test("is a transparent pass-through for a single-project Supabase app", async () => {

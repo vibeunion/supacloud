@@ -63,7 +63,7 @@ function replacementRequest(
     integrity: request.integrity,
     keepalive: request.keepalive,
     mode: request.mode,
-    redirect: request.redirect,
+    redirect: "error",
     referrer: request.referrer,
     referrerPolicy: request.referrerPolicy,
     signal: request.signal,

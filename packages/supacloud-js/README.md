@@ -76,9 +76,10 @@ environment configuration without maintaining a second session implementation.
 The adapter only transforms `POST /auth/v1/token?grant_type=refresh_token`:
 it sends the same refresh token as an OAuth form request, moves
 `grant_type=refresh_token` into the form body, and adds `client_id` when the
-request does not already contain one. All other Supabase Auth,
-Database, Storage, Realtime, and Functions requests pass through unchanged.
-Never pass a client secret to browser code.
+request does not already contain one. Rewritten refresh requests reject HTTP
+redirects instead of forwarding the refresh token to a second endpoint. All
+other Supabase Auth, Database, Storage, Realtime, and Functions requests pass
+through unchanged. Never pass a client secret to browser code.
 
 ## SupAuth Management
 
