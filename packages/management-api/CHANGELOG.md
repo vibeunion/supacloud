@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.41.1](https://github.com/zuohuadong/supacloud/compare/management-api-v0.41.0...management-api-v0.41.1) (2026-07-17)
+
+
+### Bug Fixes
+
+* **gateway:** bound rate-limit memory ([7fc8b26](https://github.com/zuohuadong/supacloud/commit/7fc8b265cd1a5f2a9b414ed3569c99cfd4f3c262))
+* **gateway:** raise default API rate limits ([e01c5c1](https://github.com/zuohuadong/supacloud/commit/e01c5c18f2bcd6a09bf55efe8de51575650f39fc))
+
 ## [0.41.0](https://github.com/zuohuadong/supacloud/compare/management-api-v0.40.6...management-api-v0.41.0) (2026-07-17)
 
 

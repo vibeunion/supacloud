@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.5.4](https://github.com/zuohuadong/supacloud/compare/supacloud-v0.5.3...supacloud-v0.5.4) (2026-07-17)
+
+
+### Bug Fixes
+
+* **gateway:** raise default API rate limits ([e01c5c1](https://github.com/zuohuadong/supacloud/commit/e01c5c18f2bcd6a09bf55efe8de51575650f39fc))
+* **release:** refresh supacloud dependency lock ([3819743](https://github.com/zuohuadong/supacloud/commit/381974321abe215c8865071b21bd942833629b52))
+
+
+### Miscellaneous Chores
+
+* release main ([484a32a](https://github.com/zuohuadong/supacloud/commit/484a32ae8870f4c4bb6f81d40b429e265c97bb43))
+* release main ([6499e78](https://github.com/zuohuadong/supacloud/commit/6499e78e21cd196a72995d6f62b66aba3a9dcbf7))
+
 ## [0.5.3](https://github.com/zuohuadong/supacloud/compare/supacloud-v0.5.2...supacloud-v0.5.3) (2026-07-15)
 
 
