@@ -396,6 +396,65 @@ describe("sdkProxyRoutes functions proxy", () => {
     }
   });
 
+  test("shared auth proxy rejects a dependent legacy service-role bearer paired with an anon apikey", async () => {
+    const originalOwnerRef = config.authRuntimeOwnerRef;
+    const originalGetApiKeys = projectService.getApiKeys;
+    config.authRuntimeOwnerRef = "auth-owner";
+    projectService.getApiKeys = async (ref: string) => ref === "auth-owner"
+      ? {
+        anon_key: "owner-anon-jwt",
+        service_role_key: "owner-service-jwt",
+        publishable_key: "owner-publishable",
+        secret_key: "owner-secret",
+      }
+      : null;
+
+    try {
+      await withSdkProxyTestContext(async ({ calls, trackSpy }) => {
+        trackSpy(
+          spyOn(sdkProxyInternals, "resolveProjectApiKey").mockImplementation(async (candidate: string) => {
+            if (candidate === "sb_publishable_client_key") {
+              return {
+                ref: "proj_1",
+                kind: "publishable",
+                role: "anon",
+                upstreamKey: "dependent-anon-jwt",
+              };
+            }
+            if (candidate === "dependent-service-jwt") {
+              return {
+                ref: "proj_1",
+                kind: "service_role",
+                role: "service_role",
+                upstreamKey: "dependent-service-jwt",
+              };
+            }
+            return null;
+          }),
+        );
+        setSdkProxySqlForTests(async (...args: unknown[]) => {
+          const text = String(args[0] ?? "");
+          if (text.includes("SELECT config")) return [{ config: { gotrue_port: 9361, postgrest_port: 7361 } }];
+          return [];
+        });
+
+        const response = await request("/auth/v1/admin/users", {
+          headers: {
+            apikey: "sb_publishable_client_key",
+            authorization: "Bearer dependent-service-jwt",
+          },
+        });
+
+        expect(response.status).toBe(401);
+        expect(await response.json()).toEqual({ message: "Invalid API key" });
+        expect(calls).toHaveLength(0);
+      });
+    } finally {
+      config.authRuntimeOwnerRef = originalOwnerRef;
+      projectService.getApiKeys = originalGetApiKeys;
+    }
+  });
+
   test("REST proxy translates a publishable key to the legacy anon JWT", async () => {
     await withSdkProxyTestContext(async ({ calls, trackSpy }) => {
       trackSpy(
