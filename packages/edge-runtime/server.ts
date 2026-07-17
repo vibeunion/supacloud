@@ -7,7 +7,11 @@ import {
   loadTenantEnv,
   withBackgroundInternalToken,
 } from "./tenant-env";
-import { normalizeJwtJwks, verifyEdgeRuntimeJwt } from "./jwt-verifier";
+import {
+  normalizeJwtJwks,
+  normalizeThirdPartyJwtPolicy,
+  verifyEdgeRuntimeJwt,
+} from "./jwt-verifier";
 import {
   buildBackgroundForwardDispatch,
 } from "./background-forward";
@@ -493,6 +497,7 @@ interface ProjectSecrets {
   serviceRoleKey: string;
   jwtSecret: string;
   jwtJwks: ReturnType<typeof normalizeJwtJwks>;
+  thirdParty: ReturnType<typeof normalizeThirdPartyJwtPolicy>;
   expiresAt: number;
 }
 const secretsCache = new Map<string, ProjectSecrets>();
@@ -517,6 +522,7 @@ async function getProjectSecrets(
         serviceRoleKey: runtimeEnv.SUPABASE_SERVICE_ROLE_KEY || "",
         jwtSecret: runtimeEnv.JWT_SECRET || "",
         jwtJwks: normalizeJwtJwks(runtimeEnv.JWT_JWKS),
+        thirdParty: normalizeThirdPartyJwtPolicy(runtimeEnv.SUPACLOUD_THIRD_PARTY_JWT_POLICY),
         expiresAt: Date.now() + SECRETS_CACHE_TTL,
       };
       secretsCache.set(projectRef, secrets);
@@ -548,7 +554,10 @@ async function getProjectSecrets(
     }[];
     const detail = (await detailRes.json()) as {
       jwt_secret?: string;
-      config?: { auth?: { oauth_server?: { jwt_jwks?: unknown } } };
+      config?: { auth?: {
+        oauth_server?: { jwt_jwks?: unknown };
+        third_party_auth?: unknown;
+      } };
     };
 
     const secrets: ProjectSecrets = {
@@ -557,6 +566,7 @@ async function getProjectSecrets(
         keysArray?.find?.((k) => k.name === "service_role")?.api_key || "",
       jwtSecret: detail.jwt_secret || "",
       jwtJwks: normalizeJwtJwks(detail.config?.auth?.oauth_server?.jwt_jwks),
+      thirdParty: normalizeThirdPartyJwtPolicy(detail.config?.auth?.third_party_auth),
       expiresAt: Date.now() + SECRETS_CACHE_TTL,
     };
     secretsCache.set(projectRef, secrets);

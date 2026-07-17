@@ -98,4 +98,57 @@ describe("runtimeEnvService", () => {
       secretsSpy.mockRestore();
     }
   });
+
+  test("merges enabled third-party issuer JWKS with the legacy project verifier key", async () => {
+    const findByRefSpy = spyOn(projectRepository, "findByRef").mockResolvedValue({
+      id: "proj_id",
+      ref: "proj_1",
+      name: "Project 1",
+      db_name: "supa_proj_1",
+      db_user: "role_proj_1",
+      db_password: "pw",
+      jwt_secret: "legacy-secret",
+      anon_key: "anon.header.signature",
+      service_role_key: "service.header.signature",
+      s3_bucket: "bucket",
+      s3_access_key: null,
+      s3_secret_key: null,
+      region: "local",
+      status: "active",
+      organization_id: "org_1",
+      config: {
+        auth: {
+          third_party_auth: {
+            enabled: true,
+            issuer: "https://auth.example.com/auth/v1",
+            audience: "authenticated",
+            client_id: "business-client",
+            jwt_jwks: { keys: [{ kty: "EC", kid: "central-kid", alg: "ES256", crv: "P-256", x: "x", y: "y" }] },
+          },
+        },
+        api_url: "https://api.example.com",
+      },
+      created_at: new Date(),
+      updated_at: new Date(),
+      deleted_at: null,
+    } as never);
+    const secretsSpy = spyOn(databaseService, "getSecrets").mockResolvedValue([]);
+
+    try {
+      const env = await runtimeEnvService.buildProjectRuntimeEnv("proj_1");
+      const jwks = JSON.parse(String(env?.JWT_JWKS));
+      expect(jwks.keys.map((key: { kid?: string }) => key.kid)).toEqual([
+        "central-kid",
+        "legacy-hs256",
+      ]);
+      expect(JSON.parse(String(env?.SUPACLOUD_THIRD_PARTY_JWT_POLICY))).toMatchObject({
+        issuer: "https://auth.example.com/auth/v1",
+        audience: ["authenticated"],
+        clientId: "business-client",
+      });
+    } finally {
+      findByRefSpy.mockRestore();
+      secretsSpy.mockRestore();
+    }
+  });
 });

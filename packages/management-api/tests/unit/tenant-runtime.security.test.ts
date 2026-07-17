@@ -29,4 +29,11 @@ describe("TenantRuntimeService secret handling", () => {
     expect(source).toContain("ensure_postgrest");
     expect(source).toContain("ensure_gotrue");
   });
+
+  test("injects third-party issuer keys into the tenant PostgREST verifier", () => {
+    expect(source).toContain("resolveProjectJwtVerificationMaterial(projectConfig, project.jwt_secret)");
+    expect(source).toContain("jwt-aud =");
+    expect(source).toContain("client_id_claim");
+    expect(source).toContain("third-party JWT claims rejected");
+  });
 });

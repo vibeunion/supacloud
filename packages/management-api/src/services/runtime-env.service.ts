@@ -11,8 +11,8 @@ import {
 import { decryptSecretIfNeeded } from "../utils/secret-crypto";
 import { logger } from "../utils/logger";
 import {
-  normalizeProjectJwtJwks,
   normalizeProjectJwtKeys,
+  resolveProjectJwtVerificationMaterial,
 } from "../utils/project-jwt";
 
 function isJwtLike(value: string | null | undefined): value is string {
@@ -46,7 +46,8 @@ export async function buildProjectRuntimeEnv(projectRef: string): Promise<Record
   const authConfig = (projectConfig.auth || {}) as Record<string, unknown>;
   const oauthServerConfig = (authConfig.oauth_server || {}) as Record<string, unknown>;
   const jwtKeys = normalizeProjectJwtKeys(oauthServerConfig.jwt_keys);
-  const jwtJwks = normalizeProjectJwtJwks(oauthServerConfig.jwt_jwks);
+  const jwtMaterial = resolveProjectJwtVerificationMaterial(projectConfig, project.jwt_secret);
+  const jwtJwks = jwtMaterial.jwtJwks;
   const supabaseUrl = resolveProjectApiUrl(projectRef, routingConfig);
   const projectApiHost = resolveProjectApiHost(projectRef, routingConfig);
   const tenantPorts = resolveTenantPorts(routingConfig);
@@ -102,6 +103,9 @@ export async function buildProjectRuntimeEnv(projectRef: string): Promise<Record
     JWT_SECRET: project.jwt_secret,
     ...(jwtKeys ? { JWT_KEYS: JSON.stringify(jwtKeys) } : {}),
     ...(jwtJwks ? { JWT_JWKS: JSON.stringify(jwtJwks) } : {}),
+    ...(jwtMaterial.thirdParty ? {
+      SUPACLOUD_THIRD_PARTY_JWT_POLICY: JSON.stringify(jwtMaterial.thirdParty),
+    } : {}),
     SUPACLOUD_INTERNAL_SUPABASE_URL: internalSupabaseUrl,
     SUPACLOUD_INTERNAL_AUTH_URL: internalAuthUrl,
     SUPACLOUD_INTERNAL_REST_URL: internalRestUrl,
