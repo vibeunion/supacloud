@@ -8,6 +8,7 @@ const app = new Elysia().use(projectConfigRoutes);
 const authHeaders = { Authorization: "Bearer dev-master-token" };
 const originalOwnerRef = config.authRuntimeOwnerRef;
 const originalGetProjectSettings = projectService.getProjectSettings;
+const originalUpdateProjectSettings = projectService.updateProjectSettings;
 
 function request(path: string, init: RequestInit = {}) {
   return app.handle(new Request(`http://localhost${path}`, {
@@ -19,6 +20,7 @@ function request(path: string, init: RequestInit = {}) {
 afterEach(() => {
   config.authRuntimeOwnerRef = originalOwnerRef;
   projectService.getProjectSettings = originalGetProjectSettings;
+  projectService.updateProjectSettings = originalUpdateProjectSettings;
 });
 
 describe("SupAuth auth config boundary", () => {
@@ -67,5 +69,36 @@ describe("SupAuth auth config boundary", () => {
     expect(body.saml).toBeUndefined();
     expect(body.hook_custom_access_token_secrets).toBe("********");
     expect(body.smtp_pass).toBe("********");
+  });
+
+  test("shared settings alias hides auth config and rejects auth writes", async () => {
+    config.authRuntimeOwnerRef = "auth-owner";
+    projectService.getProjectSettings = async () => ({
+      auth: { jwt_secret: "dependent-secret" },
+      api_domain: "tenant-a.api.example.com",
+    });
+    let updateCalls = 0;
+    projectService.updateProjectSettings = async () => {
+      updateCalls += 1;
+      return {};
+    };
+
+    const getResponse = await request("/v1/projects/tenant-a/settings");
+    const body = await getResponse.json();
+    expect(getResponse.status).toBe(200);
+    expect(body.auth).toBeUndefined();
+    expect(body.auth_runtime).toEqual({
+      mode: "shared",
+      authority_project_ref: "auth-owner",
+      configuration_management: "owner_only",
+    });
+
+    const putResponse = await request("/v1/projects/tenant-a/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ auth: { enable_signup: false } }),
+    });
+    expect(putResponse.status).toBe(409);
+    expect(updateCalls).toBe(0);
   });
 });

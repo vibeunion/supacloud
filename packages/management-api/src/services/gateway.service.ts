@@ -1095,17 +1095,22 @@ export class CaddyGatewayProvider implements GatewayProvider {
                 }
                 sharedAuthPort = port;
             }
-            const sharedAuthProxy = sharedAuthPort !== null && !externalAuthUpstream;
-            const directAuthUpstream = externalAuthUpstream?.dial || `${hostIp}:${sharedAuthPort ?? gotruePort}`;
+            const sharedAuthProxy = sharedAuthPort !== null;
+            const directAuthUpstream = sharedAuthPort !== null
+                ? `${hostIp}:${sharedAuthPort}`
+                : externalAuthUpstream?.dial || `${hostIp}:${gotruePort}`;
             const authUpstream = sharedAuthProxy
                 ? `${hostIp}:${config.port}`
                 : directAuthUpstream;
-            const authHeaders = externalAuthUpstream && thirdPartyAuth.auth_host_header
-                ? [`Host:${thirdPartyAuth.auth_host_header}`, `X-Forwarded-Host:${thirdPartyAuth.auth_host_header}`]
-                : sharedAuthPort !== null
+            const authHeaders = sharedAuthPort !== null
                     ? [`X-Project-Ref:${config.authRuntimeOwnerRef}`, `x-project-ref:${config.authRuntimeOwnerRef}`]
+                    : externalAuthUpstream && thirdPartyAuth.auth_host_header
+                        ? [`Host:${thirdPartyAuth.auth_host_header}`, `X-Forwarded-Host:${thirdPartyAuth.auth_host_header}`]
                     : undefined;
             const authProxyHeaders = sharedAuthProxy ? undefined : authHeaders;
+            const authUpstreamTls = sharedAuthPort === null ? externalAuthUpstream?.tls : false;
+            const authUpstreamTlsInsecureSkipVerify = sharedAuthPort === null
+                && thirdPartyAuth.auth_upstream_tls_insecure_skip_verify;
             const hosts = uniqueStrings(resolveProjectApiHosts(projectRef, routingConfig));
             const hostSet = new Set(hosts.map(normalizeCaddyHost));
             const authHosts = uniqueStrings([resolveProjectAuthHost(projectRef, routingConfig)])
@@ -1140,7 +1145,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
                     corsOrigins,
                     readTimeout: config.restProxyTimeoutMs,
                 }),
-                ...(!externalAuthUpstream ? [this.makeOpaqueApiKeyProxyRoute({
+                ...(!externalAuthUpstream || sharedAuthProxy ? [this.makeOpaqueApiKeyProxyRoute({
                     id: caddyRouteId(projectRef, "opaque-auth"),
                     hosts,
                     path: "/auth/v1*",
@@ -1163,8 +1168,8 @@ export class CaddyGatewayProvider implements GatewayProvider {
                     stripPrefix: sharedAuthProxy ? undefined : "/auth/v1",
                     headers: authProxyHeaders,
                     corsOrigins,
-                    upstreamTls: externalAuthUpstream?.tls,
-                    upstreamTlsInsecureSkipVerify: thirdPartyAuth.auth_upstream_tls_insecure_skip_verify,
+                    upstreamTls: authUpstreamTls,
+                    upstreamTlsInsecureSkipVerify: authUpstreamTlsInsecureSkipVerify,
                 }),
                 this.makeRoute({
                     id: caddyRouteId(projectRef, "gotrue-well-known"),
@@ -1174,8 +1179,8 @@ export class CaddyGatewayProvider implements GatewayProvider {
                     projectRef,
                     headers: authHeaders,
                     corsOrigins,
-                    upstreamTls: externalAuthUpstream?.tls,
-                    upstreamTlsInsecureSkipVerify: thirdPartyAuth.auth_upstream_tls_insecure_skip_verify,
+                    upstreamTls: authUpstreamTls,
+                    upstreamTlsInsecureSkipVerify: authUpstreamTlsInsecureSkipVerify,
                 }),
                 this.makeRoute({
                     id: caddyRouteId(projectRef, "functions"),
@@ -1252,8 +1257,8 @@ export class CaddyGatewayProvider implements GatewayProvider {
                     stripPrefix: sharedAuthProxy ? undefined : "/auth/v1",
                     headers: authProxyHeaders,
                     corsOrigins,
-                    upstreamTls: externalAuthUpstream?.tls,
-                    upstreamTlsInsecureSkipVerify: thirdPartyAuth.auth_upstream_tls_insecure_skip_verify,
+                    upstreamTls: authUpstreamTls,
+                    upstreamTlsInsecureSkipVerify: authUpstreamTlsInsecureSkipVerify,
                 }));
                 this.routesById.set(caddyRouteId(projectRef, "auth-domain-gotrue-well-known"), this.makeRoute({
                     id: caddyRouteId(projectRef, "auth-domain-gotrue-well-known"),
@@ -1263,8 +1268,8 @@ export class CaddyGatewayProvider implements GatewayProvider {
                     projectRef,
                     headers: authHeaders,
                     corsOrigins,
-                    upstreamTls: externalAuthUpstream?.tls,
-                    upstreamTlsInsecureSkipVerify: thirdPartyAuth.auth_upstream_tls_insecure_skip_verify,
+                    upstreamTls: authUpstreamTls,
+                    upstreamTlsInsecureSkipVerify: authUpstreamTlsInsecureSkipVerify,
                 }));
             } else {
                 this.routesById.delete(caddyRouteId(projectRef, "opaque-auth-domain"));

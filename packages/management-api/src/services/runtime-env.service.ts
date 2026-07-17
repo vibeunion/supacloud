@@ -13,6 +13,7 @@ import { logger } from "../utils/logger";
 import {
   buildSharedProjectJwtVerificationMaterial,
   normalizeProjectJwtKeys,
+  resolveSharedAuthIssuer,
   resolveProjectJwtVerificationMaterial,
 } from "../utils/project-jwt";
 import { getAuthRuntimeDescriptor } from "./auth-runtime.service";
@@ -50,6 +51,7 @@ export async function buildProjectRuntimeEnv(projectRef: string): Promise<Record
   const jwtKeys = normalizeProjectJwtKeys(oauthServerConfig.jwt_keys);
   let jwtMaterial = resolveProjectJwtVerificationMaterial(projectConfig, project.jwt_secret);
   let authRoutingConfig = routingConfig;
+  let sharedAuthIssuer: string | null = null;
   const authRuntime = getAuthRuntimeDescriptor(projectRef);
   if (authRuntime.mode === "shared") {
     const owner = await projectRepository.findByRef(authRuntime.authority_project_ref);
@@ -61,6 +63,7 @@ export async function buildProjectRuntimeEnv(projectRef: string): Promise<Record
       projectConfig: project.config,
       ownerConfig: owner.config,
     });
+    sharedAuthIssuer = resolveSharedAuthIssuer(authRuntime.authority_project_ref, owner.config);
     authRoutingConfig = normalizeProjectRoutingConfig(normalizeProjectConfig(owner.config));
   }
   const jwtJwks = jwtMaterial.jwtJwks;
@@ -125,6 +128,7 @@ export async function buildProjectRuntimeEnv(projectRef: string): Promise<Record
     } : {}),
     SUPACLOUD_AUTH_RUNTIME_MODE: authRuntime.mode,
     SUPACLOUD_AUTH_AUTHORITY_REF: authRuntime.authority_project_ref,
+    ...(sharedAuthIssuer ? { SUPACLOUD_AUTH_ISSUER: sharedAuthIssuer } : {}),
     SUPACLOUD_INTERNAL_SUPABASE_URL: internalSupabaseUrl,
     SUPACLOUD_INTERNAL_AUTH_URL: internalAuthUrl,
     SUPACLOUD_INTERNAL_REST_URL: internalRestUrl,

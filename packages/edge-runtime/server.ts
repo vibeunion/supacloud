@@ -501,6 +501,7 @@ interface ProjectSecrets {
   jwtJwks: ReturnType<typeof normalizeJwtJwks>;
   thirdParty: ReturnType<typeof normalizeThirdPartyJwtPolicy>;
   authRuntimeMode: "local" | "owner" | "shared";
+  authIssuer: string;
   expiresAt: number;
 }
 const secretsCache = new Map<string, ProjectSecrets>();
@@ -531,6 +532,7 @@ async function getProjectSecrets(
           : runtimeEnv.SUPACLOUD_AUTH_RUNTIME_MODE === "owner"
             ? "owner"
             : "local",
+        authIssuer: runtimeEnv.SUPACLOUD_AUTH_ISSUER || "",
         expiresAt: Date.now() + SECRETS_CACHE_TTL,
       };
       secretsCache.set(projectRef, secrets);
@@ -587,6 +589,7 @@ async function getProjectSecrets(
       jwtJwks: normalizeJwtJwks(detail.config?.auth?.oauth_server?.jwt_jwks),
       thirdParty: normalizeThirdPartyJwtPolicy(detail.config?.auth?.third_party_auth),
       authRuntimeMode: authRuntime.mode === "owner" ? "owner" : "local",
+      authIssuer: "",
       expiresAt: Date.now() + SECRETS_CACHE_TTL,
     };
     secretsCache.set(projectRef, secrets);

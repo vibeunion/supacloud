@@ -5,7 +5,7 @@ const source = readFileSync(new URL("../../src/services/gateway.service.ts", imp
 
 describe("SupAuth gateway routing", () => {
   test("routes every shared auth request through the owner-aware SDK proxy", () => {
-    expect(source).toContain("const sharedAuthProxy = sharedAuthPort !== null && !externalAuthUpstream");
+    expect(source).toContain("const sharedAuthProxy = sharedAuthPort !== null");
     expect(source).toContain("? `${hostIp}:${config.port}`");
     expect(source).toContain('id: caddyRouteId(projectRef, "auth")');
     expect(source).toContain("upstream: authUpstream");
@@ -13,8 +13,15 @@ describe("SupAuth gateway routing", () => {
   });
 
   test("keeps well-known metadata on the direct owner runtime", () => {
-    expect(source).toContain("const directAuthUpstream = externalAuthUpstream?.dial");
+    expect(source).toContain("const directAuthUpstream = sharedAuthPort !== null");
     expect(source).toContain('id: caddyRouteId(projectRef, "gotrue-well-known")');
     expect(source).toContain("upstream: directAuthUpstream");
+  });
+
+  test("shared auth always overrides a dependent external auth upstream", () => {
+    expect(source).toContain("!externalAuthUpstream || sharedAuthProxy");
+    expect(source).toContain("sharedAuthPort !== null");
+    expect(source).toContain("X-Project-Ref:${config.authRuntimeOwnerRef}");
+    expect(source).toContain("const authUpstreamTls = sharedAuthPort === null");
   });
 });

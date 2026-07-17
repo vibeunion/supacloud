@@ -163,18 +163,35 @@ describe("verifyEdgeRuntimeJwt", () => {
     const userToken = await new SignJWT({ role: "authenticated" })
       .setProtectedHeader({ alg: "ES256", kid })
       .setSubject("user_1")
+      .setIssuer("https://auth-owner.example.com/auth/v1")
       .setExpirationTime("5m")
       .sign(signingKey);
     const serviceToken = await new SignJWT({ role: "service_role" })
       .setProtectedHeader({ alg: "ES256", kid })
+      .setIssuer("https://auth-owner.example.com/auth/v1")
       .setExpirationTime("5m")
       .sign(signingKey);
     const secrets = {
       authRuntimeMode: "shared" as const,
+      authIssuer: "https://auth-owner.example.com/auth/v1",
       jwtJwks: { keys: [{ ...publicJwk, kid, alg: "ES256", use: "sig" }] },
     };
 
     expect(await verifyEdgeRuntimeJwt(secrets, `Bearer ${userToken}`)).toBe(true);
     expect(await verifyEdgeRuntimeJwt(secrets, `Bearer ${serviceToken}`)).toBe(false);
+
+    const wrongIssuerToken = await new SignJWT({ role: "authenticated" })
+      .setProtectedHeader({ alg: "ES256", kid })
+      .setIssuer("https://attacker.example.com/auth/v1")
+      .setExpirationTime("5m")
+      .sign(signingKey);
+    expect(await verifyEdgeRuntimeJwt(secrets, `Bearer ${wrongIssuerToken}`)).toBe(false);
+
+    const missingIssuerToken = await new SignJWT({ role: "authenticated" })
+      .setProtectedHeader({ alg: "ES256", kid })
+      .setExpirationTime("5m")
+      .sign(signingKey);
+    expect(await verifyEdgeRuntimeJwt(secrets, `Bearer ${missingIssuerToken}`)).toBe(false);
+    expect(await verifyEdgeRuntimeJwt({ ...secrets, authIssuer: "" }, `Bearer ${userToken}`)).toBe(false);
   });
 });

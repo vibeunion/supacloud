@@ -470,6 +470,18 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
       if (settings === null) {
         return status(404, { message: "Project not found", code: "404" });
       }
+      const managedError = getAuthRuntimeManagedError(params.ref, "configuration");
+      if (managedError) {
+        const { auth: _auth, ...safeSettings } = settings;
+        return {
+          ...safeSettings,
+          auth_runtime: {
+            mode: "shared",
+            authority_project_ref: managedError.authority_project_ref,
+            configuration_management: "owner_only",
+          },
+        };
+      }
       return settings;
     },
     {
@@ -487,6 +499,10 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ params, body, request }) => {
       const authError = await requireProjectOrAdminAuth(request, params.ref);
       if (authError) return status(authError.status, authError.body);
+      const managedError = getAuthRuntimeManagedError(params.ref, "configuration");
+      if (managedError && Object.prototype.hasOwnProperty.call(body, "auth")) {
+        return status(409, managedError);
+      }
       const settings = await projectService.updateProjectSettings(
         params.ref,
         body,

@@ -840,6 +840,9 @@ class TenantRuntimeService {
             sharedAuthRuntime ? "" : renderSystemdEnvLine("JWT_SECRET", creds.jwtSecret),
             renderSystemdEnvLine("SUPACLOUD_AUTH_RUNTIME_MODE", sharedAuthRuntime ? "shared" : "local"),
             renderSystemdEnvLine("SUPACLOUD_AUTH_AUTHORITY_REF", getAuthRuntimeDescriptor(ref).authority_project_ref),
+            sharedAuthRuntime && creds.localJwtIssuer
+                ? renderSystemdEnvLine("SUPACLOUD_AUTH_ISSUER", creds.localJwtIssuer)
+                : "",
             renderTenantInternalRuntimeEnv(pgrstPort, runtimeGoTruePort),
             jwtJwksEnv,
             sharedAuthRuntime ? "" : jwtKeysEnv,
