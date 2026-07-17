@@ -76,10 +76,18 @@ describe("storageCompatRoutes supabase-js compatibility", () => {
       headers: {
         apikey: "test-token",
         "x-project-ref": "test_mock",
+        origin: "https://app.example.com",
       },
     });
 
     expect([200, 204]).toContain(res.status);
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBe("https://app.example.com");
+    expect(res.headers.get("Access-Control-Expose-Headers")).toContain("Tus-Version");
+    expect(res.headers.get("Access-Control-Expose-Headers")).toContain("Tus-Extension");
+    expect(res.headers.get("Access-Control-Expose-Headers")).toContain("Tus-Max-Size");
+    expect(res.headers.get("Tus-Resumable")).toBe("1.0.0");
+    expect(res.headers.get("Tus-Version")).toBe("1.0.0");
+    expect(res.headers.get("Tus-Extension")).toBe("creation,termination");
     expect(res.headers.get("Tus-Max-Size")).toBe(String(500 * 1024 * 1024));
   });
 
