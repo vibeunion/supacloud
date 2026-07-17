@@ -147,4 +147,34 @@ describe("verifyEdgeRuntimeJwt", () => {
       keys: [{ kty: "EC", kid: "kid_1", alg: "ES256" }],
     });
   });
+
+  test("shared mode accepts owner user tokens but rejects owner service-role tokens", async () => {
+    const { publicKey, privateKey } = await generateKeyPair("ES256", { extractable: true });
+    const publicJwk = await exportJWK(publicKey);
+    const privateJwk = await exportJWK(privateKey);
+    const kid = "supauth-owner";
+    const signingKey = await crypto.subtle.importKey(
+      "jwk",
+      { ...privateJwk, kid, alg: "ES256", use: "sig" },
+      { name: "ECDSA", namedCurve: "P-256" },
+      false,
+      ["sign"],
+    );
+    const userToken = await new SignJWT({ role: "authenticated" })
+      .setProtectedHeader({ alg: "ES256", kid })
+      .setSubject("user_1")
+      .setExpirationTime("5m")
+      .sign(signingKey);
+    const serviceToken = await new SignJWT({ role: "service_role" })
+      .setProtectedHeader({ alg: "ES256", kid })
+      .setExpirationTime("5m")
+      .sign(signingKey);
+    const secrets = {
+      authRuntimeMode: "shared" as const,
+      jwtJwks: { keys: [{ ...publicJwk, kid, alg: "ES256", use: "sig" }] },
+    };
+
+    expect(await verifyEdgeRuntimeJwt(secrets, `Bearer ${userToken}`)).toBe(true);
+    expect(await verifyEdgeRuntimeJwt(secrets, `Bearer ${serviceToken}`)).toBe(false);
+  });
 });

@@ -500,6 +500,7 @@ interface ProjectSecrets {
   jwtSecret: string;
   jwtJwks: ReturnType<typeof normalizeJwtJwks>;
   thirdParty: ReturnType<typeof normalizeThirdPartyJwtPolicy>;
+  authRuntimeMode: "local" | "owner" | "shared";
   expiresAt: number;
 }
 const secretsCache = new Map<string, ProjectSecrets>();
@@ -525,13 +526,18 @@ async function getProjectSecrets(
         jwtSecret: runtimeEnv.JWT_SECRET || "",
         jwtJwks: normalizeJwtJwks(runtimeEnv.JWT_JWKS),
         thirdParty: normalizeThirdPartyJwtPolicy(runtimeEnv.SUPACLOUD_THIRD_PARTY_JWT_POLICY),
+        authRuntimeMode: runtimeEnv.SUPACLOUD_AUTH_RUNTIME_MODE === "shared"
+          ? "shared"
+          : runtimeEnv.SUPACLOUD_AUTH_RUNTIME_MODE === "owner"
+            ? "owner"
+            : "local",
         expiresAt: Date.now() + SECRETS_CACHE_TTL,
       };
       secretsCache.set(projectRef, secrets);
       return secrets;
     }
 
-    const [keysRes, detailRes] = await Promise.all([
+    const [keysRes, detailRes, authRuntimeRes] = await Promise.all([
       fetch(`${MGMT_API}/v1/projects/${projectRef}/api-keys`, {
         headers: { Authorization: `Bearer ${MASTER_TOKEN}` },
         signal: AbortSignal.timeout(5000),
@@ -540,11 +546,15 @@ async function getProjectSecrets(
         headers: { Authorization: `Bearer ${MASTER_TOKEN}` },
         signal: AbortSignal.timeout(5000),
       }),
+      fetch(`${MGMT_API}/v1/projects/${projectRef}/auth/runtime`, {
+        headers: { Authorization: `Bearer ${MASTER_TOKEN}` },
+        signal: AbortSignal.timeout(5000),
+      }),
     ]);
 
-    if (!keysRes.ok || !detailRes.ok) {
+    if (!keysRes.ok || !detailRes.ok || !authRuntimeRes.ok) {
       console.warn(
-        `[verifyJwt] Failed to fetch secrets for ${projectRef}: keys=${keysRes.status} detail=${detailRes.status}`,
+        `[verifyJwt] Failed to fetch secrets for ${projectRef}: keys=${keysRes.status} detail=${detailRes.status} authRuntime=${authRuntimeRes.status}`,
       );
       if (cached) return cached;
       return null;
@@ -561,6 +571,13 @@ async function getProjectSecrets(
         third_party_auth?: unknown;
       } };
     };
+    const authRuntime = (await authRuntimeRes.json()) as {
+      mode?: "local" | "owner" | "shared";
+    };
+    if (authRuntime.mode === "shared") {
+      console.warn(`[verifyJwt] Refusing local fallback secrets for SupAuth dependent ${projectRef}`);
+      return null;
+    }
 
     const secrets: ProjectSecrets = {
       anonKey: keysArray?.find?.((k) => k.name === "anon")?.api_key || "",
@@ -569,6 +586,7 @@ async function getProjectSecrets(
       jwtSecret: detail.jwt_secret || "",
       jwtJwks: normalizeJwtJwks(detail.config?.auth?.oauth_server?.jwt_jwks),
       thirdParty: normalizeThirdPartyJwtPolicy(detail.config?.auth?.third_party_auth),
+      authRuntimeMode: authRuntime.mode === "owner" ? "owner" : "local",
       expiresAt: Date.now() + SECRETS_CACHE_TTL,
     };
     secretsCache.set(projectRef, secrets);
@@ -691,6 +709,7 @@ const app = new Elysia()
 
     const functionId = `${c.params.ref}_${c.params.slug}`;
     invalidateTenantEnvCache(c.params.ref);
+    secretsCache.delete(c.params.ref);
     const [foreground, background] = await Promise.all([
       pool.invalidateModule(functionId),
       backgroundPool.invalidateModule(functionId),
@@ -706,6 +725,7 @@ const app = new Elysia()
     }
 
     invalidateTenantEnvCache(c.params.ref);
+    secretsCache.delete(c.params.ref);
     const moduleEpoch = bumpProjectModuleEpoch(c.params.ref);
     const [foreground, background] = await Promise.all([
       pool.invalidateProject(c.params.ref),

@@ -2,6 +2,7 @@
   import { apiClient } from "$lib/api";
 
   import { onMount } from "svelte";
+  import { resolve } from "$app/paths";
   import { page } from "$app/state";
   import { t } from "svelte-i18n";
   import {
@@ -20,6 +21,7 @@
   let connections = $state(0);
   let maxConnections = $state(100);
   let totalUsers = $state(0);
+  let authManagedByRef = $state<string | null>(null);
   let functionsCount = $state(0);
   let storageSize = $state("-");
   let cacheHitRatio = $state(0);
@@ -40,7 +42,7 @@
   } | null>(null);
   let autoRefreshTimer: ReturnType<typeof setInterval> | null = null;
 
-  const projectRef = $derived(page.params.ref);
+  const projectRef = $derived(page.params.ref ?? "");
 
   type DashboardSummary = {
     database?: {
@@ -52,8 +54,10 @@
       index_count?: number;
     };
     auth?: {
-      total_users?: number;
+      total_users?: number | null;
       recent_users?: Record<string, unknown>[];
+      source?: "local" | "supauth";
+      managed_by_ref?: string | null;
     };
     storage?: {
       size?: string;
@@ -88,12 +92,13 @@
     cacheHitRatio = Number(database.cache_hit_ratio || 0);
     connections = Number(database.connections || 0);
     maxConnections = Number(database.max_connections || 100);
-    totalUsers = Number(auth.total_users || 0);
+    authManagedByRef = auth.source === "supauth" ? auth.managed_by_ref || null : null;
+    totalUsers = authManagedByRef ? 0 : Number(auth.total_users || 0);
     tableCount = Number(database.table_count || 0);
     indexCount = Number(database.index_count || 0);
     storageSize = String(storage.size || "0 bytes");
     functionsCount = Number(functions.count || 0);
-    recentUsers = auth.recent_users || [];
+    recentUsers = authManagedByRef ? [] : auth.recent_users || [];
     activeQueries = summary.active_queries || [];
     taskStats = summary.tasks || null;
   }
@@ -109,16 +114,37 @@
     }
   }
 
-  async function fetchDashboardLegacy() {
+  async function refreshAuthRuntimeOwner(): Promise<boolean> {
+    try {
+      const response = await apiClient(`/v1/projects/${projectRef}/auth/runtime`);
+      if (!response.ok) return false;
+      const runtime = await response.json() as {
+        mode?: "local" | "owner" | "shared";
+        authority_project_ref?: string;
+      };
+      authManagedByRef = runtime.mode === "shared" && runtime.authority_project_ref
+        ? runtime.authority_project_ref
+        : null;
+      return true;
+    } catch {
+      // Dashboard summary remains the primary source; this is only a safe fallback.
+      return false;
+    }
+  }
+
+  async function fetchDashboardLegacy(authRuntimeKnown: boolean) {
+    const canReadLocalAuth = authRuntimeKnown && !authManagedByRef;
     const [dbInfo, connInfo, userInfo, tableInfo, indexInfo, storageInfo, recentUserInfo, activeInfo] = await Promise.all([
       runSql(`SELECT pg_size_pretty(pg_database_size(current_database())) as size,
               (SELECT round(100.0 * blks_hit / NULLIF(blks_hit + blks_read, 0), 1) FROM pg_stat_database WHERE datname = current_database()) as cache_ratio;`),
       runSql(`SELECT count(*) as active FROM pg_stat_activity WHERE backend_type = 'client backend';`),
-      runSql(`SELECT count(*) as total FROM auth.users;`),
+      canReadLocalAuth ? runSql(`SELECT count(*) as total FROM auth.users;`) : Promise.resolve([]),
       runSql(`SELECT count(*) as cnt FROM pg_stat_user_tables;`),
       runSql(`SELECT count(*) as cnt FROM pg_stat_user_indexes;`),
       runSql(`SELECT pg_size_pretty(coalesce(sum((metadata->>'size')::bigint), 0)) as size FROM storage.objects;`),
-      runSql(`SELECT email, created_at::text FROM auth.users ORDER BY created_at DESC LIMIT 5;`),
+      canReadLocalAuth
+        ? runSql(`SELECT email, created_at::text FROM auth.users ORDER BY created_at DESC LIMIT 5;`)
+        : Promise.resolve([]),
       runSql(`SELECT pid, usename, state, left(query, 80) as query FROM pg_stat_activity WHERE backend_type = 'client backend' AND state = 'active' LIMIT 5;`),
     ]);
 
@@ -127,11 +153,11 @@
       cacheHitRatio = parseFloat(String(dbInfo[0].cache_ratio || "0"));
     }
     if (connInfo[0]) connections = parseInt(String(connInfo[0].active || "0"));
-    if (userInfo[0]) totalUsers = parseInt(String(userInfo[0].total || "0"));
+    if (!authManagedByRef && userInfo[0]) totalUsers = parseInt(String(userInfo[0].total || "0"));
     if (tableInfo[0]) tableCount = parseInt(String(tableInfo[0].cnt || "0"));
     if (indexInfo[0]) indexCount = parseInt(String(indexInfo[0].cnt || "0"));
     if (storageInfo[0]) storageSize = String(storageInfo[0].size || "0 bytes");
-    recentUsers = recentUserInfo;
+    recentUsers = authManagedByRef ? [] : recentUserInfo;
     activeQueries = activeInfo;
     functionsCount = await fetchFunctionsCountLegacy();
     await fetchTaskStats();
@@ -144,7 +170,8 @@
       if (!res.ok) throw new Error("summary unavailable");
       applyDashboardSummary(await res.json());
     } catch {
-      await fetchDashboardLegacy();
+      const authRuntimeKnown = await refreshAuthRuntimeOwner();
+      await fetchDashboardLegacy(authRuntimeKnown);
     } finally {
       isLoading = false;
     }
@@ -192,15 +219,15 @@
     };
   });
 
-  const QUICK_LINKS = $derived(projectRef ? [
-    { name: $t("Navigation.sql_editor"), href: "sql", icon: Terminal, color: "text-blue-600 bg-blue-500/10 border-blue-500/20" },
-    { name: $t("Navigation.table_editor"), href: "tables", icon: Database, color: "text-violet-600 bg-violet-500/10 border-violet-500/20" },
-    { name: $t("Navigation.auth"), href: "auth", icon: Users, color: "text-emerald-600 bg-emerald-500/10 border-emerald-500/20" },
-    { name: $t("Navigation.storage"), href: "storage", icon: Folder, color: "text-teal-600 bg-teal-500/10 border-teal-500/20" },
-    { name: $t("Navigation.edge_functions"), href: "functions", icon: Zap, color: "text-amber-600 bg-amber-500/10 border-amber-500/20" },
-    { name: $t("Navigation.logs"), href: "logs", icon: ScrollText, color: "text-pink-600 bg-pink-500/10 border-pink-500/20" },
-    { name: $t("Navigation.settings"), href: "settings", icon: Server, color: "text-slate-600 bg-slate-500/10 border-slate-500/20" },
-  ] : []);
+  const QUICK_LINKS = $derived(projectRef ? ([
+    { name: $t("Navigation.sql_editor"), route: "/project/[ref]/sql", icon: Terminal, color: "text-blue-600 bg-blue-500/10 border-blue-500/20" },
+    { name: $t("Navigation.table_editor"), route: "/project/[ref]/tables", icon: Database, color: "text-violet-600 bg-violet-500/10 border-violet-500/20" },
+    { name: $t("Navigation.auth"), route: "/project/[ref]/auth", icon: Users, color: "text-emerald-600 bg-emerald-500/10 border-emerald-500/20" },
+    { name: $t("Navigation.storage"), route: "/project/[ref]/storage", icon: Folder, color: "text-teal-600 bg-teal-500/10 border-teal-500/20" },
+    { name: $t("Navigation.edge_functions"), route: "/project/[ref]/functions", icon: Zap, color: "text-amber-600 bg-amber-500/10 border-amber-500/20" },
+    { name: $t("Navigation.logs"), route: "/project/[ref]/logs", icon: ScrollText, color: "text-pink-600 bg-pink-500/10 border-pink-500/20" },
+    { name: $t("Navigation.settings"), route: "/project/[ref]/settings", icon: Server, color: "text-slate-600 bg-slate-500/10 border-slate-500/20" },
+  ] as const) : []);
 
   function getStatusColor(status: string): string {
     if (status === "RUNNING" || status === "running" || status === "active" || status === "ACTIVE_HEALTHY") return "text-green-600";
@@ -249,9 +276,9 @@
   {:else}
     <!-- Quick Access Cards -->
     <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
-      {#each QUICK_LINKS as link}
+      {#each QUICK_LINKS as link (link.route)}
         {@const Icon = link.icon}
-        <a href={`/project/${projectRef}/${link.href}`} class="group flex flex-col items-center justify-center gap-3 p-4 rounded-xl border bg-card hover:border-brand/40 hover:shadow-sm transition-all text-center">
+        <a href={resolve(link.route, { ref: projectRef })} class="group flex flex-col items-center justify-center gap-3 p-4 rounded-xl border bg-card hover:border-brand/40 hover:shadow-sm transition-all text-center">
           <div class={`w-10 h-10 rounded-xl flex items-center justify-center border transition-transform group-hover:scale-110 ${link.color}`}>
             <Icon size={18} />
           </div>
@@ -290,8 +317,19 @@
           <Users size={14} />
           <span class="text-[10px] font-semibold uppercase">{$t("Dashboard.auth_users")}</span>
         </div>
-        <div class="mt-2 text-2xl font-bold">{totalUsers.toLocaleString()}</div>
-        <div class="mt-1 text-[10px] text-muted-foreground">{$t("Auth.users_count")}</div>
+        {#if authManagedByRef}
+          <div class="mt-2 text-lg font-bold">SupAuth</div>
+          <div class="mt-1 text-[10px] text-muted-foreground">
+            用户由
+            <a class="font-mono text-brand hover:underline" href={resolve("/project/[ref]/auth", { ref: authManagedByRef })}>
+              {authManagedByRef}
+            </a>
+            统一管理
+          </div>
+        {:else}
+          <div class="mt-2 text-2xl font-bold">{totalUsers.toLocaleString()}</div>
+          <div class="mt-1 text-[10px] text-muted-foreground">{$t("Auth.users_count")}</div>
+        {/if}
       </div>
 
       <div class="rounded-xl border bg-card p-5 shadow-sm hover:shadow-md transition-shadow">
@@ -319,7 +357,7 @@
           <h2 class="text-sm font-semibold flex items-center gap-2"><Activity size={14} /> {$t("DashboardTasks.title")}</h2>
           <p class="text-[11px] text-muted-foreground mt-1">{$t("DashboardTasks.subtitle")}</p>
         </div>
-        <a href={`/project/${projectRef}/tasks`} class="text-[10px] text-brand hover:underline flex items-center gap-1">{$t("DashboardTasks.open_panel")} <ArrowRight size={10} /></a>
+        <a href={resolve("/project/[ref]/tasks", { ref: projectRef })} class="text-[10px] text-brand hover:underline flex items-center gap-1">{$t("DashboardTasks.open_panel")} <ArrowRight size={10} /></a>
       </div>
 
       <div class="p-5 space-y-5">
@@ -371,7 +409,7 @@
               </svg>
 
               <div class="space-y-2">
-                {#each taskStats.failedTrend as point}
+                {#each taskStats.failedTrend as point (point.bucket)}
                   <div class="grid grid-cols-[88px_1fr_32px] items-center gap-3">
                     <div class="text-[11px] font-mono text-muted-foreground">{point.bucket}</div>
                     <div class="h-2 rounded-full bg-muted overflow-hidden">
@@ -399,7 +437,7 @@
             </div>
           {:else}
             <div class="space-y-2">
-              {#each taskStats.topFailures as item}
+              {#each taskStats.topFailures as item (`${item.message}:${item.count}`)}
                 <div class="rounded-lg border border-border/60 px-3 py-2">
                   <div class="text-xs text-foreground break-all">{item.message}</div>
                   <div class="mt-1 text-[11px] text-muted-foreground font-mono">{$t("DashboardTasks.occurrences", { default: `出现 ${item.count} 次` })}</div>
@@ -416,7 +454,7 @@
       <div class="rounded-xl border bg-card overflow-hidden">
         <div class="border-b px-5 py-3 bg-muted/20 flex items-center justify-between">
           <h2 class="text-sm font-semibold flex items-center gap-2"><Server size={14} /> {$t("DashboardServices.title")} </h2>
-          <a href={`/project/${projectRef}/settings/services`} class="text-[10px] text-brand hover:underline flex items-center gap-1">{$t("DashboardServices.manage")} <ArrowRight size={10} /></a>
+          <a href={resolve("/project/[ref]/settings/services", { ref: projectRef })} class="text-[10px] text-brand hover:underline flex items-center gap-1">{$t("DashboardServices.manage")} <ArrowRight size={10} /></a>
         </div>
         <div class="divide-y divide-border/20">
           {#if servicesLoading}
@@ -426,7 +464,7 @@
           {:else if services.length === 0}
             <div class="p-4 text-xs text-muted-foreground text-center">{$t("DashboardServices.unavailable")}</div>
           {:else}
-            {#each services as svc}
+            {#each services as svc (svc.name)}
               {@const StatusIcon = getStatusIcon(svc.status)}
               <div class="flex items-center justify-between px-5 py-2.5">
                 <div class="flex items-center gap-2">
@@ -444,16 +482,21 @@
       <div class="rounded-xl border bg-card overflow-hidden">
         <div class="border-b px-5 py-3 bg-muted/20 flex items-center justify-between">
           <h2 class="text-sm font-semibold flex items-center gap-2"><Users size={14} /> {$t("DashboardRecentUsers.title")} </h2>
-          <a href={`/project/${projectRef}/auth`} class="text-[10px] text-brand hover:underline flex items-center gap-1">{$t("DashboardRecentUsers.view_all")} <ArrowRight size={10} /></a>
+          <a href={resolve("/project/[ref]/auth", { ref: authManagedByRef || projectRef })} class="text-[10px] text-brand hover:underline flex items-center gap-1">{$t("DashboardRecentUsers.view_all")} <ArrowRight size={10} /></a>
         </div>
-        {#if recentUsers.length === 0}
+        {#if authManagedByRef}
+          <div class="flex flex-col items-center justify-center py-10 text-muted-foreground gap-2">
+            <Shield size={24} strokeWidth={1} />
+            <p class="text-xs">共享用户目录仅在 SupAuth 权威项目中展示</p>
+          </div>
+        {:else if recentUsers.length === 0}
           <div class="flex flex-col items-center justify-center py-10 text-muted-foreground gap-2 opacity-40">
             <Users size={24} strokeWidth={1} />
             <p class="text-xs">{$t("DashboardRecentUsers.no_users")}</p>
           </div>
         {:else}
           <div class="divide-y divide-border/20">
-            {#each recentUsers as user}
+            {#each recentUsers as user (`${String(user.email)}:${String(user.created_at)}`)}
               <div class="px-5 py-2.5 flex items-center justify-between">
                 <div class="flex items-center gap-2">
                   <div class="w-6 h-6 rounded-full bg-brand/10 text-brand flex items-center justify-center text-[10px] font-bold">
@@ -472,7 +515,7 @@
       <div class="rounded-xl border bg-card overflow-hidden">
         <div class="border-b px-5 py-3 bg-muted/20 flex items-center justify-between">
           <h2 class="text-sm font-semibold flex items-center gap-2"><Code2 size={14} /> {$t("DashboardActiveQueries.title")} </h2>
-          <a href={`/project/${projectRef}/reports/api-overview`} class="text-[10px] text-brand hover:underline flex items-center gap-1">{$t("DashboardActiveQueries.details")} <ArrowRight size={10} /></a>
+          <a href={resolve("/project/[ref]/reports/api-overview", { ref: projectRef })} class="text-[10px] text-brand hover:underline flex items-center gap-1">{$t("DashboardActiveQueries.details")} <ArrowRight size={10} /></a>
         </div>
         {#if activeQueries.length === 0}
           <div class="flex flex-col items-center justify-center py-10 text-muted-foreground gap-2 opacity-40">
@@ -481,7 +524,7 @@
           </div>
         {:else}
           <div class="divide-y divide-border/20">
-            {#each activeQueries as q}
+            {#each activeQueries as q (String(q.pid))}
               <div class="px-5 py-2.5">
                 <div class="flex items-center gap-2 mb-1">
                   <span class="text-[10px] font-mono text-muted-foreground">PID {q.pid}</span>
@@ -499,8 +542,8 @@
     <div>
       <h2 class="text-sm font-semibold mb-3 flex items-center gap-2"><ArrowRight size={14} /> {$t("DashboardQuickAccess.title")} </h2>
       <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
-        {#each QUICK_LINKS as link}
-          <a href={`/project/${projectRef}/${link.href}`}
+        {#each QUICK_LINKS as link (link.route)}
+          <a href={resolve(link.route, { ref: projectRef })}
             class="flex items-center gap-3 rounded-xl border bg-card p-4 hover:border-brand/40 hover:shadow-md transition-all group">
             <div class="w-9 h-9 rounded-lg {link.color} flex items-center justify-center group-hover:scale-110 transition-transform">
               <link.icon size={18} />

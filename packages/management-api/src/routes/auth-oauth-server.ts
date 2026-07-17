@@ -11,6 +11,7 @@ import {
   resolveTenantPorts,
 } from "../utils/project-routing";
 import { normalizeOAuthServerConfig, normalizeProjectConfig } from "../utils/project-config";
+import { requireAuthRuntimeManagement } from "./auth-runtime";
 import {
   buildAwsKmsRs256JwtKeyMaterial,
   generateOidcJwtKeyMaterial,
@@ -211,6 +212,10 @@ async function configureKmsRs256Signing(
       ref,
       error: error instanceof Error ? error.message : String(error),
     });
+    return status(503, {
+      code: "SUPAUTH_DEPENDENT_REFRESH_FAILED",
+      message: "JWT signing configuration was saved, but one or more SupAuth runtimes failed to refresh",
+    });
   }
 
   return buildOAuthServerStatus({
@@ -266,6 +271,10 @@ async function proxyGoTrueAdmin(
       ref: ctx.project.ref,
       path,
       error: error instanceof Error ? error.message : String(error),
+    });
+    return status(503, {
+      code: "SUPAUTH_DEPENDENT_REFRESH_FAILED",
+      message: "OIDC signing configuration was saved, but one or more SupAuth runtimes failed to refresh",
     });
     return new Response(JSON.stringify({ message: "GoTrue OAuth admin endpoint unavailable", code: "502" }), {
       status: 502,
@@ -334,6 +343,7 @@ async function migrateProjectToOidc(
 }
 
 export const authOAuthServerRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
+  .onBeforeHandle(requireAuthRuntimeManagement("oauth"))
   .get(
     "/oauth-server",
     async ({ params, request }) => {

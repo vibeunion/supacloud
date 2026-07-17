@@ -16,6 +16,8 @@ import {
   WECHAT_PROVIDER_INFO,
   CHINA_OAUTH_PROVIDER_INFO,
 } from "../types/oauth";
+import { requireAuthRuntimeManagement } from "./auth-runtime";
+import { getAuthRuntimeDescriptor } from "../services/auth-runtime.service";
 
 function generateGoTrueOAuthEnv(provider: OAuthProvider, config: OAuthProviderConfig): string {
   const mapping = OAUTH_ENV_MAPPINGS[provider];
@@ -56,6 +58,7 @@ function maskSecret(value: string): string {
  *   - ./auth-users.ts
  */
 export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
+  .onBeforeHandle(requireAuthRuntimeManagement("configuration"))
   .get(
     "/providers",
     async ({ params, set }) => {
@@ -407,6 +410,12 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
         await tenantRuntimeService.restartRuntime(params.ref);
       } catch (error: unknown) {
         logger.error("Failed to restart GoTrue after config update:", { error: error instanceof Error ? error.message : String(error) });
+        if (getAuthRuntimeDescriptor(params.ref).mode === "owner") {
+          return status(503, {
+            code: "SUPAUTH_DEPENDENT_REFRESH_FAILED",
+            message: "Auth configuration was saved, but one or more SupAuth dependents failed to refresh",
+          });
+        }
       }
 
       return updated?.auth || {};

@@ -36,4 +36,13 @@ describe("TenantRuntimeService secret handling", () => {
     expect(source).toContain("client_id_claim");
     expect(source).toContain("third-party JWT claims rejected");
   });
+
+  test("shared auth keeps owner private signing material out and rejects non-user owner roles", () => {
+    expect(source).toContain("buildSharedProjectJwtVerificationMaterial");
+    expect(source).toContain('sharedAuthRuntime ? "" : renderSystemdEnvLine("JWT_SECRET"');
+    expect(source).toContain('sharedAuthRuntime ? "" : jwtKeysEnv');
+    expect(source).toContain("const postgrestJwtAudience = sharedAuthRuntime");
+    expect(source).toContain("SupAuth owner tokens may only use the authenticated role");
+    expect(source).toContain("Dependent legacy user sessions are disabled while SupAuth is active");
+  });
 });
