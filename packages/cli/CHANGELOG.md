@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.10.0](https://github.com/zuohuadong/supacloud/compare/cli-v0.9.2...cli-v0.10.0) (2026-07-17)
+
+
+### Features
+
+* **gateway:** support protocol-scoped redirects ([62d02b7](https://github.com/zuohuadong/supacloud/commit/62d02b7eea7eb182462db7a36a3424f379923d87))
+* **gateway:** support protocol-scoped redirects ([8a81652](https://github.com/zuohuadong/supacloud/commit/8a81652d463fea3b5265b44de0e74970c4604e27))
+
+
+### Bug Fixes
+
+* **gateway:** harden redirect route updates ([278c177](https://github.com/zuohuadong/supacloud/commit/278c1776742ed4530bdab0c8c234b2e59cea34b6))
+
 ## [0.9.2](https://github.com/zuohuadong/supacloud/compare/cli-v0.9.1...cli-v0.9.2) (2026-07-15)
 
 
