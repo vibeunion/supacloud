@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.18.2](https://github.com/zuohuadong/supacloud/compare/web-console-v0.18.1...web-console-v0.18.2) (2026-07-17)
+
+
+### Miscellaneous Chores
+
+* **deps-dev:** bump @sveltejs/vite-plugin-svelte ([ff3e55a](https://github.com/zuohuadong/supacloud/commit/ff3e55a1fb332c5fd58290b82dc56ea6725c5020))
+* **deps-dev:** bump @tailwindcss/vite in /packages/web-console ([4408090](https://github.com/zuohuadong/supacloud/commit/440809005fab57caeb73a50ce605fa9ddc80b1cb))
+* **deps-dev:** bump tailwindcss in /packages/web-console ([9fe2e7a](https://github.com/zuohuadong/supacloud/commit/9fe2e7a4221bd3d661526dd0ff1fba3af7c858dd))
+* **deps-dev:** bump vite from 8.1.4 to 8.1.5 in /packages/web-console ([bca3bcc](https://github.com/zuohuadong/supacloud/commit/bca3bcc9124e4d7faba03c3303fc96b7069d2285))
+
 ## [0.18.1](https://github.com/zuohuadong/supacloud/compare/web-console-v0.18.0...web-console-v0.18.1) (2026-07-15)
 
 

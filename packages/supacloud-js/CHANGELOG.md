@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.19.3](https://github.com/zuohuadong/supacloud/compare/supacloud-js-v0.19.2...supacloud-js-v0.19.3) (2026-07-17)
+
+
+### Miscellaneous Chores
+
+* **deps-dev:** bump @supabase/supabase-js in /packages/supacloud-js ([a8da9f6](https://github.com/zuohuadong/supacloud/commit/a8da9f6569005cc5aee114ce749b78ade63b8bff))
+
 ## [0.19.2](https://github.com/zuohuadong/supacloud/compare/supacloud-js-v0.19.1...supacloud-js-v0.19.2) (2026-07-15)
 
 

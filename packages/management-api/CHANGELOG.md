@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.41.3](https://github.com/zuohuadong/supacloud/compare/management-api-v0.41.2...management-api-v0.41.3) (2026-07-17)
+
+
+### Miscellaneous Chores
+
+* **deps-dev:** bump @supabase/supabase-js in /packages/management-api ([d1693bf](https://github.com/zuohuadong/supacloud/commit/d1693bf96eba309eb8aba718163ec745e2bfcd5c))
+* **deps:** bump @sinclair/typebox in /packages/management-api ([a97b9d4](https://github.com/zuohuadong/supacloud/commit/a97b9d4e57912148e313e5d71f291c3ab590d0f8))
+* **deps:** bump nanoid from 5.1.16 to 6.0.0 in /packages/management-api ([9a03ac7](https://github.com/zuohuadong/supacloud/commit/9a03ac780cf6a1b8d7a042d0bcfc9c6275ecbdd3))
+* **deps:** bump nanoid in /packages/management-api ([78f88aa](https://github.com/zuohuadong/supacloud/commit/78f88aaf182e8c4ddf18a75aa0856d13cb35d04c))
+
 ## [0.41.2](https://github.com/zuohuadong/supacloud/compare/management-api-v0.41.1...management-api-v0.41.2) (2026-07-17)
 
 
