@@ -3,6 +3,11 @@ import type {
   SupabaseClient,
 } from "@supabase/supabase-js";
 
+export {
+  createSupaCloudOAuthFetch,
+  type SupaCloudOAuthFetchOptions,
+} from "./auth-fetch";
+
 export type SupaCloudTaskStatus =
   | "pending"
   | "leased"
